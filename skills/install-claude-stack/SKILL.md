@@ -17,7 +17,7 @@ Plugin-based Claude Code optimal stack installation.
 | **superpowers** | `claude-plugins-official` | TDD/workflow, brainstorming, writing-plans |
 | **oh-my-claudecode** | `omc` | HUD, 32 agents, autopilot/ralph/ultrawork |
 | **context7** | `claude-plugins-official` | Up-to-date library documentation |
-| **serena** | `claude-plugins-official` | Semantic code analysis |
+| **serena** (optional) | `claude-plugins-official` | Semantic code analysis (requires LSP setup) |
 
 ## Usage
 
@@ -94,7 +94,7 @@ Install only missing plugins:
 /plugin install context7@claude-plugins-official
 ```
 
-**Serena:**
+**Serena (optional — skip if LSP not needed):**
 ```
 /plugin install serena@claude-plugins-official
 ```
