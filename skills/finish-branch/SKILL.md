@@ -141,6 +141,30 @@ gh pr diff <pr-number> --name-only
 - Do NOT create separate documentation files
 - For deeper context, reference the PR: `gh pr view #N`
 
+### Step 4.5: Learning Capture
+
+Review this work cycle and capture any reusable lessons:
+
+1. **Check for patterns worth remembering:**
+   - Did you discover a non-obvious workaround?
+   - Did a tool/approach work better than expected?
+   - Was there a gotcha that wasted time?
+   - Did the user give feedback that should persist?
+
+2. **If lessons found**, update project memory:
+   ```bash
+   # Check existing memories
+   ls ~/.claude/projects/*/memory/*.md 2>/dev/null
+   ```
+   - Update existing memory file if the lesson extends a known pattern
+   - Create new memory file if it's a novel insight
+   - Skip if nothing new was learned (don't create noise)
+
+3. **If no lessons**, skip this step. Not every PR teaches something new.
+
+> **Rule:** Only capture insights that will prevent future mistakes or save future time.
+> Do NOT create memory entries for routine, well-understood work.
+
 ### Step 5: Verify Cleanup
 
 ```bash
