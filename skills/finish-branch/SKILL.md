@@ -1,30 +1,29 @@
 ---
 name: finish-branch
-description: Complete a development branch lifecycle — verify merge status, clean up worktree and branch, then compound context via inline PR comments. Triggers on "cleanup", "worktree cleanup", "finish branch", "branch cleanup".
+description: Complete a development branch lifecycle — compound context, merge PR, clean up worktree and branch. Triggers on "cleanup", "worktree cleanup", "finish branch", "branch cleanup".
 ---
 
 # Finish Branch
 
 ## Overview
 
-Handles the full branch completion lifecycle in one pass: verify → options → cleanup → compound.
+Handles the full branch completion lifecycle in one pass: verify → compound → merge → cleanup.
 
-**Core principle:** Merge, cleanup, and compounding are one cycle. Never split them.
+**Core principle:** Compounding, merge, and cleanup are one cycle. Never split them.
 
 **Replaces:** `superpowers:finishing-a-development-branch`, `worktree-cleanup`
 
 ## The Iron Law
 
 ```
-NO CLEANUP WITHOUT MERGE. NO COMPLETION WITHOUT COMPOUNDING.
+NO MERGE WITHOUT COMPOUNDING. NO COMPLETION WITHOUT CLEANUP.
 ```
 
 ## When to Use
 
-- After a PR has been merged
-- After a local merge is complete
+- After a PR has been created and is ready to merge
 - When the user requests cleanup ("cleanup", "worktree cleanup", etc.)
-- After `create-hub-pr` flow completes and PR is merged
+- After `create-hub-pr` flow completes
 
 ## Process
 
@@ -34,101 +33,37 @@ NO CLEANUP WITHOUT MERGE. NO COMPLETION WITHOUT COMPOUNDING.
 CURRENT_BRANCH=$(git branch --show-current)
 git worktree list
 git status -sb
-gh pr list --head "$CURRENT_BRANCH" --state all --json number,title,state,mergedAt
+gh pr list --head "$CURRENT_BRANCH" --state open --json number,title,state,url
 ```
 
 **Pre-conditions (ALL must be true):**
 - [ ] All changes committed and pushed
-- [ ] PR is merged (or local merge is complete)
-- [ ] Working directory is OUTSIDE the worktree being removed
+- [ ] PR exists (open state)
+- [ ] CI checks passed (if applicable)
 
-**If PR is NOT merged → STOP.** Complete the merge first.
+**If no PR exists → STOP.** Create a PR first via `create-hub-pr`.
 **If uncommitted changes exist → STOP.** Commit first.
+**If PR is already merged → Skip to Step 4** (cleanup only).
 
-### Step 2: Present Options
-
-```
-Branch work is complete. How would you like to proceed?
-
-1. Clean up worktree + branch (recommended)
-2. Clean up worktree only (keep branch)
-3. Keep everything as-is (handle later)
-4. Discard this work (delete unmerged branch)
-
-Which option?
-```
-
-### Step 3: Execute Choice
-
-#### Option 1: Full Cleanup (recommended)
-
-```bash
-cd <main-repo-path>
-
-git worktree remove <worktree-path>
-git branch -d <branch-name>
-
-DEFAULT_BRANCH=$(git remote show origin 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}')
-git checkout "$DEFAULT_BRANCH"
-git pull origin "$DEFAULT_BRANCH"
-
-git worktree prune
-```
-
-→ Proceed to Step 4 (Compounding).
-
-#### Option 2: Worktree Only
-
-```bash
-cd <main-repo-path>
-git worktree remove <worktree-path>
-git worktree prune
-```
-
-→ Proceed to Step 4 (Compounding).
-
-#### Option 3: Keep As-Is
-
-Report: "Keeping branch `<name>`. Worktree at `<path>`."
-
-**Do NOT cleanup. Do NOT compound. End here.**
-
-#### Option 4: Discard
-
-**Require explicit confirmation:**
-
-```
-⚠️ This will permanently delete:
-- Branch: <branch-name>
-- Commits: <commit-list>
-- Worktree: <worktree-path>
-
-Type 'discard' to confirm.
-```
-
-Execute ONLY after 'discard' is typed:
-
-```bash
-cd <main-repo-path>
-git worktree remove --force <worktree-path>
-git branch -D <branch-name>
-git worktree prune
-```
-
-→ Skip compounding (no PR to reference).
-
-### Step 4: Compounding (Required for Options 1 and 2)
+### Step 2: Compounding (Before Merge)
 
 Embed context at key decision points in the codebase so future sessions pick it up naturally.
+The PR number is known from Step 1 — use it for inline references.
 
-1. Identify the merged PR and its key changes:
+1. Identify the PR and its key changes:
 
 ```bash
-gh pr view <pr-number> --json title,body,files
-gh pr diff <pr-number> --name-only
+PR_NUMBER=<from Step 1>
+gh pr view $PR_NUMBER --json title,body,files
+gh pr diff $PR_NUMBER --name-only
 ```
 
-2. Add inline comments at key decision points:
+2. Analyze changes and identify key decision points:
+   - Architectural choices (why this approach over alternatives)
+   - Non-obvious logic (gotchas, workarounds, constraints)
+   - Configuration changes with rationale
+
+3. Add inline comments at those decision points:
 
 ```python
 # [PR #42] Switched from batch INSERT to MERGE to handle duplicate keys.
@@ -140,8 +75,79 @@ gh pr diff <pr-number> --name-only
 - Explain "why this approach" — not "what the code does"
 - Do NOT create separate documentation files
 - For deeper context, reference the PR: `gh pr view #N`
+- Skip compounding if the change is purely mechanical (rename, version bump, typo fix)
 
-### Step 4.5: Learning Capture
+4. Commit and push compounding changes:
+
+```bash
+git add -A
+git commit -m "chore: add compounding context for PR #<number>
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+git push
+```
+
+> **If no decision points worth documenting**, skip the commit and proceed to Step 3.
+
+### Step 3: Merge (Squash)
+
+Merge the PR using squash merge to keep history clean.
+
+```bash
+gh pr merge $PR_NUMBER --squash --delete-branch
+```
+
+**Verify merge succeeded:**
+
+```bash
+gh pr view $PR_NUMBER --json state,mergedAt
+```
+
+**If merge fails:**
+- CI check failure → fix and retry
+- Merge conflicts → resolve, push, retry
+- Requires approval → notify user and STOP
+
+### Step 4: Cleanup
+
+Present options to the user:
+
+```
+PR #<number> merged successfully. How would you like to proceed?
+
+1. Clean up worktree + branch (recommended)
+2. Clean up worktree only (keep branch)
+3. Keep everything as-is (handle later)
+```
+
+#### Option 1: Full Cleanup (recommended)
+
+```bash
+cd <main-repo-path>
+
+git worktree remove <worktree-path>
+git branch -d <branch-name> 2>/dev/null  # may already be deleted by --delete-branch
+
+DEFAULT_BRANCH=$(git remote show origin 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}')
+git checkout "$DEFAULT_BRANCH"
+git pull origin "$DEFAULT_BRANCH"
+
+git worktree prune
+```
+
+#### Option 2: Worktree Only
+
+```bash
+cd <main-repo-path>
+git worktree remove <worktree-path>
+git worktree prune
+```
+
+#### Option 3: Keep As-Is
+
+Report: "Keeping branch `<name>`. Worktree at `<path>`."
+
+### Step 5: Learning Capture
 
 Review this work cycle and capture any reusable lessons:
 
@@ -165,7 +171,7 @@ Review this work cycle and capture any reusable lessons:
 > **Rule:** Only capture insights that will prevent future mistakes or save future time.
 > Do NOT create memory entries for routine, well-understood work.
 
-### Step 5: Verify Cleanup
+### Step 6: Verify Cleanup
 
 ```bash
 git worktree list
@@ -196,20 +202,24 @@ hubctl status 2>/dev/null  # clean up hubctl env if exists
 | "Compounding can be skipped this time" | Next session loses "why was this done?" context. |
 | "One leftover branch is fine" | Stale branches pollute `git branch` output. |
 | "Simple change, no compounding needed" | Even simple changes have a "why". Leave the PR number at minimum. |
+| "I'll compound after merge" | After merge, worktree is gone — can't add code comments on the feature branch. |
 
 ## Red Flags — STOP
 
 - Attempting cleanup with uncommitted changes
-- Deleting a branch whose PR is not yet merged
+- Merging without compounding first
 - Running `git worktree remove` from inside the target worktree
-- Claiming "cleanup complete" without compounding
+- Claiming "cleanup complete" without verifying merge
 
 ## Integration
 
 **Workflow position:**
 ```
-[create-hub-pr] → [PR merged] → [finish-branch] → [done]
+[create-hub-pr] → [finish-branch] → [done]
+                   ├─ compound (on feature branch)
+                   ├─ merge (squash)
+                   └─ cleanup (worktree + branch)
 ```
 
-**Previous step:** `create-hub-pr` (PR creation and merge)
+**Previous step:** `create-hub-pr` (PR creation)
 **Next step:** None (lifecycle ends)
