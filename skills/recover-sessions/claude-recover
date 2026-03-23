@@ -376,12 +376,21 @@ echo ""
 # ── Phase 4: 복구 방법 안내 또는 자동 실행 ──
 
 if [[ "$MODE" == "windows" ]]; then
-  echo "Ghostty 윈도우 열기..."
+  # Check macOS tab preference (needs Ghostty restart after setting)
+  TAB_MODE=$(defaults read -g AppleWindowTabbingMode 2>/dev/null)
+  if [[ "$TAB_MODE" != "always" ]]; then
+    echo "⚠️  macOS 탭 설정이 'always'가 아닙니다. 새 윈도우로 열립니다."
+    echo "   탭으로 합치려면: defaults write -g AppleWindowTabbingMode -string always"
+    echo "   설정 후 Ghostty 재시작 필요"
+    echo ""
+  fi
+
+  echo "Ghostty 탭 열기..."
   for n in $(seq 1 "$tab_num"); do
     open -na Ghostty.app --args -e tmux attach -t "cr-${n}"
     sleep 0.5
   done
-  echo "✅ ${tab_num}개 윈도우 열림"
+  echo "✅ ${tab_num}개 Ghostty 탭 열림"
 
 elif [[ "$MODE" == "attach" ]]; then
   echo "첫 번째 세션에 attach합니다. 나머지는 새 Ghostty 탭(Cmd+T)에서:"
