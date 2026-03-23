@@ -215,14 +215,16 @@ for base, home_label in config_homes.items():
                     except Exception:
                         pass
 
-            # Detect intentional exit (/exit, /quit) in tail
+            # Detect intentional exit in tail
+            # Check for /exit command or known goodbye messages
             for obj in tail_buf:
                 if obj.get("type") == "user":
                     msg = obj.get("message", {})
                     raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
                     if isinstance(raw, str):
-                        if "/exit" in raw or "/quit" in raw or "Bye!" in raw:
+                        if "/exit" in raw or "/quit" in raw:
                             was_exited = True
+                            break
 
             # ── Filtering ──
             if is_teammate:
