@@ -1,0 +1,332 @@
+#!/bin/bash
+# claude-recover: Claude Code 세션 일괄 복구 스크립트
+#
+# 워크플로우:
+#   1. 최근 세션을 스캔하여 tmux 세션 생성 (세로 2분할, 세션 2개씩 배치)
+#   2. Ghostty에서 탭마다 tmux attach 실행
+#
+# 사용법:
+#   claude-recover                                # 최근 1일 내 수동 세션 복구
+#   claude-recover --days 3                       # 최근 3일
+#   claude-recover --from 03-18 --to 03-20        # 날짜 범위
+#   claude-recover --list                         # 복구 대상만 조회
+#   claude-recover --attach                       # tmux 생성 후 첫 번째에 attach
+#   claude-recover --windows                      # ghostty +new-window로 자동 열기
+
+set -euo pipefail
+
+DAYS_AGO=""
+FROM_DATE=""
+TO_DATE=""
+MODE="create"  # create | list | attach | windows
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --days)    DAYS_AGO="$2"; shift 2 ;;
+    --from)    FROM_DATE="$2"; shift 2 ;;
+    --to)      TO_DATE="$2"; shift 2 ;;
+    --list)    MODE="list"; shift ;;
+    --attach)  MODE="attach"; shift ;;
+    --windows) MODE="windows"; shift ;;
+    -h|--help)
+      cat << 'HELP'
+Usage: claude-recover [--days N | --from DATE --to DATE] [--list|--attach|--windows]
+
+Options:
+  --days N        최근 N일 내 세션 스캔 (기본: 1)
+  --from DATE     시작일 (YYYY-MM-DD or MM-DD)
+  --to DATE       종료일 (YYYY-MM-DD or MM-DD, 기본: 어제)
+  --list          복구 대상만 조회 (tmux 생성 안함)
+  --attach        tmux 생성 후 첫 번째 세션에 자동 attach
+  --windows       ghostty +new-window로 모든 세션 자동 열기
+
+Examples:
+  claude-recover --list --days 3                    # 최근 3일
+  claude-recover --list --from 03-18 --to 03-20    # 3/18~3/20
+  claude-recover --list --from 2026-03-20           # 3/20~어제
+
+복구 후 각 Ghostty 탭에서:
+  tmux attach -t cr-1
+  tmux attach -t cr-2
+  ...
+HELP
+      exit 0
+      ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
+  esac
+done
+
+# Default: --days 1 if no date range specified
+if [[ -z "$DAYS_AGO" && -z "$FROM_DATE" ]]; then
+  DAYS_AGO=1
+fi
+
+# ── Phase 1: 세션 스캔 (Python으로 통합 처리) ──
+
+SCAN_OUTPUT=$(python3 - "${DAYS_AGO:-}" "${FROM_DATE:-}" "${TO_DATE:-}" << 'PYSCAN'
+import json, os, sys, datetime
+
+days_ago_str = sys.argv[1]
+from_date_str = sys.argv[2]
+to_date_str = sys.argv[3]
+
+def parse_date(s):
+    if not s:
+        return None
+    if len(s) <= 5:
+        s = f"{datetime.datetime.now().year}-{s}"
+    return datetime.datetime.strptime(s, "%Y-%m-%d")
+
+if from_date_str:
+    cutoff = parse_date(from_date_str)
+    if to_date_str:
+        cutoff_end = parse_date(to_date_str) + datetime.timedelta(days=1)
+    else:
+        cutoff_end = datetime.datetime.now().replace(hour=0, minute=0, second=0)
+else:
+    cutoff = datetime.datetime.now() - datetime.timedelta(days=int(days_ago_str))
+    cutoff_end = None
+
+base = os.path.expanduser("~/.claude/projects")
+
+SCHEDULE_PREFIXES = [
+    "You are an SLA",
+    "Collect today",
+    "Scan local repos",
+    "Create a weekly planning seed",
+    "Create a morning briefing",
+    "Run an end-of-day",
+    "Collect unanswered PR review",
+]
+
+SCHEDULE_KEYWORDS = [
+    "stale branches and worktrees",
+    "SLA deep analysis agent",
+]
+
+MIN_USER_MSGS = 4
+TAIL_SIZE = 15
+
+results = []
+
+for project_dir_name in os.listdir(base):
+    full_dir = os.path.join(base, project_dir_name)
+    if not os.path.isdir(full_dir):
+        continue
+    for fname in os.listdir(full_dir):
+        if not fname.endswith(".jsonl"):
+            continue
+        fpath = os.path.join(full_dir, fname)
+
+        if "/subagents/" in fpath:
+            continue
+
+        mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath))
+        if mtime < cutoff:
+            continue
+        if cutoff_end and mtime >= cutoff_end:
+            continue
+
+        size = os.path.getsize(fpath)
+        if size < 10240:
+            continue
+
+        size_h = f"{size/1048576:.1f}M" if size > 1048576 else f"{size//1024}K"
+        mod_time = mtime.strftime("%m/%d %H:%M")
+
+        session_id = fname[:-6]
+        cwd = ""
+        user_count = 0
+        first_real_msg = ""
+        is_teammate = False
+        is_command = False
+        is_schedule = False
+        tail_buf = []
+        was_exited = False
+
+        with open(fpath) as f:
+            for line in f:
+                try:
+                    obj = json.loads(line.strip())
+
+                    tail_buf.append(obj)
+                    if len(tail_buf) > TAIL_SIZE:
+                        tail_buf.pop(0)
+
+                    if not cwd and obj.get("cwd"):
+                        cwd = obj["cwd"]
+
+                    if obj.get("type") == "user" and not obj.get("isSidechain"):
+                        user_count += 1
+                        msg = obj.get("message", {})
+                        raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+                        if not isinstance(raw, str):
+                            continue
+                        c = raw.strip()
+
+                        if user_count <= 5:
+                            if c.startswith("<teammate-message"):
+                                is_teammate = True
+                            if "oh-my-claudecode:team" in c or "omc-teams" in c:
+                                is_command = True
+                                is_teammate = True
+                            if user_count == 1:
+                                if c.startswith("<command-name>") or c.startswith("<command-message>"):
+                                    is_command = True
+
+                        if not first_real_msg:
+                            if not (c.startswith("<") or len(c) <= 5):
+                                first_real_msg = c.replace("\n", " ")[:80]
+
+                except Exception:
+                    pass
+
+        # Detect intentional exit (/exit, /quit) in tail
+        for obj in tail_buf:
+            if obj.get("type") == "user":
+                msg = obj.get("message", {})
+                raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+                if isinstance(raw, str):
+                    if "/exit" in raw or "/quit" in raw or "Bye!" in raw:
+                        was_exited = True
+
+        # ── Filtering ──
+        if is_teammate:
+            continue
+        if is_command and user_count <= 5:
+            continue
+        if user_count < MIN_USER_MSGS:
+            continue
+
+        if first_real_msg:
+            for prefix in SCHEDULE_PREFIXES:
+                if first_real_msg.startswith(prefix):
+                    is_schedule = True
+                    break
+            if not is_schedule:
+                for kw in SCHEDULE_KEYWORDS:
+                    if kw in first_real_msg:
+                        is_schedule = True
+                        break
+        if is_schedule:
+            continue
+        if was_exited:
+            continue
+        if not first_real_msg:
+            continue
+
+        cwd = cwd or "/tmp"
+        results.append((mod_time, size_h, session_id, cwd, first_real_msg))
+
+results.sort(key=lambda x: x[0], reverse=True)
+
+for mod_time, size_h, sid, cwd, msg in results:
+    print(f"{mod_time}|{size_h}|{sid}|{cwd}|{msg}")
+PYSCAN
+)
+
+declare -a SESSIONS=()
+while IFS='|' read -r mod_time size session_id project_dir first_msg; do
+  [[ -z "$mod_time" ]] && continue
+  SESSIONS+=("${mod_time}|${size}|${session_id}|${project_dir}|${first_msg}")
+done <<< "$SCAN_OUTPUT"
+
+if [[ ${#SESSIONS[@]} -eq 0 ]]; then
+  echo "복구할 세션이 없습니다."
+  if [[ -n "$FROM_DATE" ]]; then
+    echo "범위: ${FROM_DATE} ~ ${TO_DATE:-어제}"
+  else
+    echo "범위: 최근 ${DAYS_AGO}일"
+  fi
+  echo "더 넓은 범위: claude-recover --days 3"
+  exit 0
+fi
+
+# ── Phase 2: 세션 목록 출력 ──
+
+echo ""
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║  Claude Code Session Recovery — ${#SESSIONS[@]}개 세션 발견"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo ""
+
+printf "%-4s %-12s %-5s %-40s %s\n" "#" "TIME" "SIZE" "PROJECT" "FIRST MESSAGE"
+printf "%-4s %-12s %-5s %-40s %s\n" "---" "----------" "----" "-------" "-------------"
+
+for i in "${!SESSIONS[@]}"; do
+  IFS='|' read -r mod_time size session_id project_dir first_msg <<< "${SESSIONS[$i]}"
+  idx=$((i + 1))
+  short_project=$(echo "$project_dir" | sed 's|/Users/nathan.song/projects/||' | cut -c1-38)
+  short_msg=$(echo "$first_msg" | cut -c1-50)
+  printf "%-4s %-12s %-5s %-40s %s\n" "$idx" "$mod_time" "$size" "$short_project" "$short_msg"
+done
+
+echo ""
+
+[[ "$MODE" == "list" ]] && exit 0
+
+# ── Phase 3: tmux 세션 생성 (2개씩 페어링) ──
+
+echo "tmux 세션 생성 중..."
+
+for old in $(tmux ls -F '#{session_name}' 2>/dev/null | grep '^cr-'); do
+  tmux kill-session -t "$old" 2>/dev/null || true
+done
+
+tab_num=0
+i=0
+
+while [[ $i -lt ${#SESSIONS[@]} ]]; do
+  tab_num=$((tab_num + 1))
+  tmux_name="cr-${tab_num}"
+
+  IFS='|' read -r _ _ sid1 dir1 msg1 <<< "${SESSIONS[$i]}"
+  tmux new-session -d -s "$tmux_name" -c "$dir1"
+  tmux send-keys -t "${tmux_name}:0.0" "claude --resume ${sid1}" Enter
+
+  i=$((i + 1))
+  if [[ $i -lt ${#SESSIONS[@]} ]]; then
+    IFS='|' read -r _ _ sid2 dir2 msg2 <<< "${SESSIONS[$i]}"
+    tmux split-window -v -t "${tmux_name}:0" -c "$dir2"
+    tmux send-keys -t "${tmux_name}:0.1" "claude --resume ${sid2}" Enter
+    i=$((i + 1))
+  fi
+
+  echo "  ✓ ${tmux_name} 생성 완료"
+done
+
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo " 총 ${tab_num}개 tmux 세션 생성 완료"
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+
+# ── Phase 4: 복구 방법 안내 또는 자동 실행 ──
+
+if [[ "$MODE" == "windows" ]]; then
+  echo "Ghostty 윈도우 열기..."
+  for n in $(seq 1 "$tab_num"); do
+    ghostty +new-window -e tmux attach -t "cr-${n}" 2>/dev/null &
+    sleep 0.5
+  done
+  echo "✅ ${tab_num}개 윈도우 열림"
+
+elif [[ "$MODE" == "attach" ]]; then
+  echo "첫 번째 세션에 attach합니다. 나머지는 새 Ghostty 탭(Cmd+T)에서:"
+  echo ""
+  for n in $(seq 2 "$tab_num"); do
+    echo "  tmux a -t cr-${n}"
+  done
+  echo ""
+  exec tmux attach -t "cr-1"
+
+else
+  echo "각 Ghostty 탭(Cmd+T)에서 다음을 실행하세요:"
+  echo ""
+  for n in $(seq 1 "$tab_num"); do
+    echo "  tmux a -t cr-${n}"
+  done
+  echo ""
+  echo "또는 한 번에 윈도우로 열기: claude-recover --windows"
+  echo "또는 첫 번째에 바로 attach: claude-recover --attach"
+fi
