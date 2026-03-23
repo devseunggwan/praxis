@@ -97,7 +97,28 @@ else:
     cutoff = datetime.datetime.now() - datetime.timedelta(days=int(days_ago_str))
     cutoff_end = None
 
-base = os.path.expanduser("~/.claude/projects")
+# Discover all Claude config homes (~/.claude, ~/.claude-5x, etc.)
+# Deduplicate by realpath to avoid scanning symlinked projects/ twice
+import glob
+home_dir = os.path.expanduser("~")
+config_homes = {}  # base_path -> label
+seen_realpaths = set()
+all_labels = []  # track all config homes for display
+# Sort: non-symlinks first so canonical paths win dedup
+candidates = sorted(glob.glob(os.path.join(home_dir, ".claude*/projects")),
+                    key=lambda p: (os.path.islink(p), len(p)))
+for d in candidates:
+    config_dir = os.path.basename(os.path.dirname(d))  # ".claude" or ".claude-5x"
+    if config_dir == ".claude":
+        label = "claude"
+    else:
+        label = config_dir.replace(".claude-", "")  # "5x"
+    all_labels.append(label)
+    real = os.path.realpath(d)
+    if real in seen_realpaths:
+        continue  # symlink to already-scanned directory
+    seen_realpaths.add(real)
+    config_homes[d] = label
 
 SCHEDULE_PREFIXES = [
     "You are an SLA",
@@ -119,126 +140,129 @@ TAIL_SIZE = 15
 
 results = []
 
-for project_dir_name in os.listdir(base):
-    full_dir = os.path.join(base, project_dir_name)
-    if not os.path.isdir(full_dir):
+for base, home_label in config_homes.items():
+    if not os.path.isdir(base):
         continue
-    for fname in os.listdir(full_dir):
-        if not fname.endswith(".jsonl"):
+    for project_dir_name in os.listdir(base):
+        full_dir = os.path.join(base, project_dir_name)
+        if not os.path.isdir(full_dir):
             continue
-        fpath = os.path.join(full_dir, fname)
+        for fname in os.listdir(full_dir):
+            if not fname.endswith(".jsonl"):
+                continue
+            fpath = os.path.join(full_dir, fname)
 
-        if "/subagents/" in fpath:
-            continue
+            if "/subagents/" in fpath:
+                continue
 
-        mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath))
-        if mtime < cutoff:
-            continue
-        if cutoff_end and mtime >= cutoff_end:
-            continue
+            mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath))
+            if mtime < cutoff:
+                continue
+            if cutoff_end and mtime >= cutoff_end:
+                continue
 
-        size = os.path.getsize(fpath)
-        if size < 10240:
-            continue
+            size = os.path.getsize(fpath)
+            if size < 10240:
+                continue
 
-        size_h = f"{size/1048576:.1f}M" if size > 1048576 else f"{size//1024}K"
-        mod_time = mtime.strftime("%m/%d %H:%M")
+            size_h = f"{size/1048576:.1f}M" if size > 1048576 else f"{size//1024}K"
+            mod_time = mtime.strftime("%m/%d %H:%M")
 
-        session_id = fname[:-6]
-        cwd = ""
-        user_count = 0
-        first_real_msg = ""
-        is_teammate = False
-        is_command = False
-        is_schedule = False
-        tail_buf = []
-        was_exited = False
+            session_id = fname[:-6]
+            cwd = ""
+            user_count = 0
+            first_real_msg = ""
+            is_teammate = False
+            is_command = False
+            is_schedule = False
+            tail_buf = []
+            was_exited = False
 
-        with open(fpath) as f:
-            for line in f:
-                try:
-                    obj = json.loads(line.strip())
+            with open(fpath) as f:
+                for line in f:
+                    try:
+                        obj = json.loads(line.strip())
 
-                    tail_buf.append(obj)
-                    if len(tail_buf) > TAIL_SIZE:
-                        tail_buf.pop(0)
+                        tail_buf.append(obj)
+                        if len(tail_buf) > TAIL_SIZE:
+                            tail_buf.pop(0)
 
-                    if not cwd and obj.get("cwd"):
-                        cwd = obj["cwd"]
+                        if not cwd and obj.get("cwd"):
+                            cwd = obj["cwd"]
 
-                    if obj.get("type") == "user" and not obj.get("isSidechain"):
-                        user_count += 1
-                        msg = obj.get("message", {})
-                        raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
-                        if not isinstance(raw, str):
-                            continue
-                        c = raw.strip()
+                        if obj.get("type") == "user" and not obj.get("isSidechain"):
+                            user_count += 1
+                            msg = obj.get("message", {})
+                            raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+                            if not isinstance(raw, str):
+                                continue
+                            c = raw.strip()
 
-                        if user_count <= 5:
-                            if c.startswith("<teammate-message"):
-                                is_teammate = True
-                            if "oh-my-claudecode:team" in c or "omc-teams" in c:
-                                is_command = True
-                                is_teammate = True
-                            if user_count == 1:
-                                if c.startswith("<command-name>") or c.startswith("<command-message>"):
+                            if user_count <= 5:
+                                if c.startswith("<teammate-message"):
+                                    is_teammate = True
+                                if "oh-my-claudecode:team" in c or "omc-teams" in c:
                                     is_command = True
+                                    is_teammate = True
+                                if user_count == 1:
+                                    if c.startswith("<command-name>") or c.startswith("<command-message>"):
+                                        is_command = True
 
-                        if not first_real_msg:
-                            if not (c.startswith("<") or len(c) <= 5):
-                                first_real_msg = c.replace("\n", " ")[:80]
+                            if not first_real_msg:
+                                if not (c.startswith("<") or len(c) <= 5):
+                                    first_real_msg = c.replace("\n", " ")[:80]
 
-                except Exception:
-                    pass
+                    except Exception:
+                        pass
 
-        # Detect intentional exit (/exit, /quit) in tail
-        for obj in tail_buf:
-            if obj.get("type") == "user":
-                msg = obj.get("message", {})
-                raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
-                if isinstance(raw, str):
-                    if "/exit" in raw or "/quit" in raw or "Bye!" in raw:
-                        was_exited = True
+            # Detect intentional exit (/exit, /quit) in tail
+            for obj in tail_buf:
+                if obj.get("type") == "user":
+                    msg = obj.get("message", {})
+                    raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+                    if isinstance(raw, str):
+                        if "/exit" in raw or "/quit" in raw or "Bye!" in raw:
+                            was_exited = True
 
-        # ── Filtering ──
-        if is_teammate:
-            continue
-        if is_command and user_count <= 5:
-            continue
-        if user_count < MIN_USER_MSGS:
-            continue
+            # ── Filtering ──
+            if is_teammate:
+                continue
+            if is_command and user_count <= 5:
+                continue
+            if user_count < MIN_USER_MSGS:
+                continue
 
-        if first_real_msg:
-            for prefix in SCHEDULE_PREFIXES:
-                if first_real_msg.startswith(prefix):
-                    is_schedule = True
-                    break
-            if not is_schedule:
-                for kw in SCHEDULE_KEYWORDS:
-                    if kw in first_real_msg:
+            if first_real_msg:
+                for prefix in SCHEDULE_PREFIXES:
+                    if first_real_msg.startswith(prefix):
                         is_schedule = True
                         break
-        if is_schedule:
-            continue
-        if was_exited:
-            continue
-        if not first_real_msg:
-            continue
+                if not is_schedule:
+                    for kw in SCHEDULE_KEYWORDS:
+                        if kw in first_real_msg:
+                            is_schedule = True
+                            break
+            if is_schedule:
+                continue
+            if was_exited:
+                continue
+            if not first_real_msg:
+                continue
 
-        cwd = cwd or "/tmp"
-        results.append((mod_time, size_h, session_id, cwd, first_real_msg))
+            cwd = cwd or "/tmp"
+            results.append((mod_time, size_h, session_id, cwd, first_real_msg, home_label))
 
 results.sort(key=lambda x: x[0], reverse=True)
 
-for mod_time, size_h, sid, cwd, msg in results:
-    print(f"{mod_time}|{size_h}|{sid}|{cwd}|{msg}")
+for mod_time, size_h, sid, cwd, msg, hlabel in results:
+    print(f"{mod_time}|{size_h}|{sid}|{cwd}|{msg}|{hlabel}")
 PYSCAN
 )
 
 declare -a SESSIONS=()
-while IFS='|' read -r mod_time size session_id project_dir first_msg; do
+while IFS='|' read -r mod_time size session_id project_dir first_msg home_label; do
   [[ -z "$mod_time" ]] && continue
-  SESSIONS+=("${mod_time}|${size}|${session_id}|${project_dir}|${first_msg}")
+  SESSIONS+=("${mod_time}|${size}|${session_id}|${project_dir}|${first_msg}|${home_label}")
 done <<< "$SCAN_OUTPUT"
 
 if [[ ${#SESSIONS[@]} -eq 0 ]]; then
@@ -260,15 +284,15 @@ echo "║  Claude Code Session Recovery — ${#SESSIONS[@]}개 세션 발견"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 
-printf "%-4s %-12s %-5s %-40s %s\n" "#" "TIME" "SIZE" "PROJECT" "FIRST MESSAGE"
-printf "%-4s %-12s %-5s %-40s %s\n" "---" "----------" "----" "-------" "-------------"
+printf "%-4s %-12s %-5s %-8s %-34s %s\n" "#" "TIME" "SIZE" "HOME" "PROJECT" "FIRST MESSAGE"
+printf "%-4s %-12s %-5s %-8s %-34s %s\n" "---" "----------" "----" "------" "-------" "-------------"
 
 for i in "${!SESSIONS[@]}"; do
-  IFS='|' read -r mod_time size session_id project_dir first_msg <<< "${SESSIONS[$i]}"
+  IFS='|' read -r mod_time size session_id project_dir first_msg home_label <<< "${SESSIONS[$i]}"
   idx=$((i + 1))
-  short_project=$(echo "$project_dir" | sed 's|/Users/nathan.song/projects/||' | cut -c1-38)
-  short_msg=$(echo "$first_msg" | cut -c1-50)
-  printf "%-4s %-12s %-5s %-40s %s\n" "$idx" "$mod_time" "$size" "$short_project" "$short_msg"
+  short_project=$(echo "$project_dir" | sed 's|/Users/nathan.song/projects/||' | cut -c1-32)
+  short_msg=$(echo "$first_msg" | cut -c1-45)
+  printf "%-4s %-12s %-5s %-8s %-34s %s\n" "$idx" "$mod_time" "$size" "$home_label" "$short_project" "$short_msg"
 done
 
 echo ""
@@ -296,15 +320,26 @@ while [[ $i -lt ${#SESSIONS[@]} ]]; do
   tmux_name="cr-${tab_num}"
 
   # First pane: create session
-  IFS='|' read -r _ _ sid1 dir1 _ <<< "${SESSIONS[$i]}"
+  IFS='|' read -r _ _ sid1 dir1 _ home1 <<< "${SESSIONS[$i]}"
+  # Build resume command based on config home
+  if [[ "$home1" == "claude" ]]; then
+    resume_cmd1="claude --resume ${sid1}"
+  else
+    resume_cmd1="claude-${home1} --resume ${sid1}"
+  fi
   tmux new-session -d -s "$tmux_name" -c "$dir1"
-  tmux send-keys -t "${tmux_name}:0.0" "claude --resume ${sid1}" Enter
+  tmux send-keys -t "${tmux_name}:0.0" "$resume_cmd1" Enter
   i=$((i + 1))
 
   # Create remaining panes for this tab
   pane_idx=1
   while [[ $pane_idx -lt $PANES_PER_TAB && $i -lt ${#SESSIONS[@]} ]]; do
-    IFS='|' read -r _ _ sid dir _ <<< "${SESSIONS[$i]}"
+    IFS='|' read -r _ _ sid dir _ home_lbl <<< "${SESSIONS[$i]}"
+    if [[ "$home_lbl" == "claude" ]]; then
+      resume_cmd="claude --resume ${sid}"
+    else
+      resume_cmd="claude-${home_lbl} --resume ${sid}"
+    fi
 
     # Determine split direction based on grid position
     # Strategy: first create ROWS by splitting vertically,
@@ -321,7 +356,7 @@ while [[ $i -lt ${#SESSIONS[@]} ]]; do
       tmux split-window -h -t "${tmux_name}:0.$((pane_idx - 1))" -c "$dir"
     fi
 
-    tmux send-keys -t "${tmux_name}:0.${pane_idx}" "claude --resume ${sid}" Enter
+    tmux send-keys -t "${tmux_name}:0.${pane_idx}" "$resume_cmd" Enter
     pane_idx=$((pane_idx + 1))
     i=$((i + 1))
   done
