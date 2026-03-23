@@ -11,7 +11,7 @@
 #   claude-recover --from 03-18 --to 03-20        # 날짜 범위
 #   claude-recover --list                         # 복구 대상만 조회
 #   claude-recover --attach                       # tmux 생성 후 첫 번째에 attach
-#   claude-recover --windows                      # ghostty +new-window로 자동 열기
+#   claude-recover --windows                      # Ghostty 윈도우로 자동 열기 (macOS: open -na)
 
 set -euo pipefail
 
@@ -378,7 +378,7 @@ echo ""
 if [[ "$MODE" == "windows" ]]; then
   echo "Ghostty 윈도우 열기..."
   for n in $(seq 1 "$tab_num"); do
-    ghostty +new-window -e tmux attach -t "cr-${n}" 2>/dev/null &
+    open -na Ghostty.app --args -e tmux attach -t "cr-${n}"
     sleep 0.5
   done
   echo "✅ ${tab_num}개 윈도우 열림"
