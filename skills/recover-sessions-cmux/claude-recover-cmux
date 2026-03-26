@@ -307,6 +307,11 @@ build_resume_cmd() {
   fi
 }
 
+# Helper: extract ref from cmux output ("OK workspace:48" → "workspace:48")
+parse_cmux_ref() {
+  echo "$1" | sed 's/^OK //'
+}
+
 if [[ "$MODE" == "tabs" ]]; then
   # ── Tabs mode: 1 workspace per session ──
 
@@ -318,7 +323,8 @@ if [[ "$MODE" == "tabs" ]]; then
     IFS='|' read -r mod_time size session_id project_dir first_msg home_label <<< "${SESSIONS[$i]}"
     resume_cmd=$(build_resume_cmd "$session_id" "$home_label")
 
-    ws_ref=$(cmux new-workspace --cwd "$project_dir" --command "$resume_cmd" 2>/dev/null)
+    raw_out=$(cmux new-workspace --cwd "$project_dir" --command "$resume_cmd" 2>/dev/null)
+    ws_ref=$(parse_cmux_ref "$raw_out")
     if [[ $? -eq 0 && -n "$ws_ref" ]]; then
       if [[ "$RENAME" == true ]]; then
         short_name=$(echo "$first_msg" | cut -c1-30)
@@ -354,8 +360,9 @@ elif [[ "$MODE" == "split" ]]; then
     IFS='|' read -r _ _ sid1 dir1 msg1 home1 <<< "${SESSIONS[$i]}"
     resume_cmd1=$(build_resume_cmd "$sid1" "$home1")
 
-    ws_ref=$(cmux new-workspace --cwd "$dir1" --command "$resume_cmd1" 2>/dev/null)
-    if [[ $? -ne 0 || -z "$ws_ref" ]]; then
+    raw_out=$(cmux new-workspace --cwd "$dir1" --command "$resume_cmd1" 2>/dev/null)
+    ws_ref=$(parse_cmux_ref "$raw_out")
+    if [[ -z "$ws_ref" ]]; then
       echo "  ✗ workspace ${ws_num}: failed to create"
       i=$((i + 1))
       continue
