@@ -1,0 +1,416 @@
+#!/bin/bash
+# claude-recover-cmux: Bulk recover Claude Code sessions into cmux workspaces
+#
+# Workflow:
+#   1. Scan recent sessions (shared logic with claude-recover)
+#   2. Create cmux workspaces (tabs or splits)
+#
+# Usage:
+#   claude-recover-cmux                                # Last 1 day, tabs mode
+#   claude-recover-cmux --days 3                       # Last 3 days
+#   claude-recover-cmux --from 03-18 --to 03-20        # Date range
+#   claude-recover-cmux --list                         # List only
+#   claude-recover-cmux --split 1x2                    # 2 sessions per workspace
+#   claude-recover-cmux --rename                       # Auto-rename workspaces
+
+set -euo pipefail
+
+DAYS_AGO=""
+FROM_DATE=""
+TO_DATE=""
+MODE="tabs"       # tabs | list | split
+SPLIT_LAYOUT=""   # CxR for split mode
+RENAME=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --days)    DAYS_AGO="$2"; shift 2 ;;
+    --from)    FROM_DATE="$2"; shift 2 ;;
+    --to)      TO_DATE="$2"; shift 2 ;;
+    --tabs)    MODE="tabs"; shift ;;
+    --split)   MODE="split"; SPLIT_LAYOUT="$2"; shift 2 ;;
+    --list)    MODE="list"; shift ;;
+    --rename)  RENAME=true; shift ;;
+    -h|--help)
+      cat << 'HELP'
+Usage: claude-recover-cmux [--days N | --from DATE --to DATE] [--tabs|--split CxR] [--list] [--rename]
+
+Options:
+  --days N        Scan last N days (default: 1)
+  --from DATE     Start date (YYYY-MM-DD or MM-DD)
+  --to DATE       End date (YYYY-MM-DD or MM-DD, default: yesterday)
+  --tabs          1 session per workspace tab (default)
+  --split CxR     CxR grid per workspace (e.g., 1x2, 2x2)
+  --list          List recovery targets only
+  --rename        Auto-rename workspaces with session info
+
+Examples:
+  claude-recover-cmux --list --days 3
+  claude-recover-cmux --from 03-23 --to 03-25
+  claude-recover-cmux --from 03-25 --split 1x2
+  claude-recover-cmux --from 03-25 --tabs --rename
+HELP
+      exit 0
+      ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
+  esac
+done
+
+# Default: --days 1 if no date range specified
+if [[ -z "$DAYS_AGO" && -z "$FROM_DATE" ]]; then
+  DAYS_AGO=1
+fi
+
+# ── Pre-flight: verify cmux is reachable ──
+
+if [[ "$MODE" != "list" ]]; then
+  if ! cmux ping >/dev/null 2>&1; then
+    echo "❌ cmux is not reachable. Start cmux app first."
+    echo "   Run: open -a cmux"
+    exit 1
+  fi
+fi
+
+# ── Phase 1: Scan sessions (Python — shared logic with claude-recover) ──
+
+SCAN_OUTPUT=$(python3 - "${DAYS_AGO:-}" "${FROM_DATE:-}" "${TO_DATE:-}" << 'PYSCAN'
+import json, os, sys, datetime
+
+days_ago_str = sys.argv[1]
+from_date_str = sys.argv[2]
+to_date_str = sys.argv[3]
+
+def parse_date(s):
+    if not s:
+        return None
+    if len(s) <= 5:
+        s = f"{datetime.datetime.now().year}-{s}"
+    return datetime.datetime.strptime(s, "%Y-%m-%d")
+
+if from_date_str:
+    cutoff = parse_date(from_date_str)
+    if to_date_str:
+        cutoff_end = parse_date(to_date_str) + datetime.timedelta(days=1)
+    else:
+        cutoff_end = datetime.datetime.now().replace(hour=0, minute=0, second=0)
+else:
+    cutoff = datetime.datetime.now() - datetime.timedelta(days=int(days_ago_str))
+    cutoff_end = None
+
+import glob
+home_dir = os.path.expanduser("~")
+config_homes = {}
+seen_realpaths = set()
+all_labels = []
+candidates = sorted(glob.glob(os.path.join(home_dir, ".claude*/projects")),
+                    key=lambda p: (os.path.islink(p), len(p)))
+for d in candidates:
+    config_dir = os.path.basename(os.path.dirname(d))
+    if config_dir == ".claude":
+        label = "claude"
+    else:
+        label = config_dir.replace(".claude-", "")
+    all_labels.append(label)
+    real = os.path.realpath(d)
+    if real in seen_realpaths:
+        continue
+    seen_realpaths.add(real)
+    config_homes[d] = label
+
+SCHEDULE_PREFIXES = [
+    "You are an SLA",
+    "Collect today",
+    "Scan local repos",
+    "Create a weekly planning seed",
+    "Create a morning briefing",
+    "Run an end-of-day",
+    "Collect unanswered PR review",
+]
+
+SCHEDULE_KEYWORDS = [
+    "stale branches and worktrees",
+    "SLA deep analysis agent",
+]
+
+MIN_USER_MSGS = 4
+TAIL_SIZE = 15
+
+results = []
+
+for base, home_label in config_homes.items():
+    if not os.path.isdir(base):
+        continue
+    for project_dir_name in os.listdir(base):
+        full_dir = os.path.join(base, project_dir_name)
+        if not os.path.isdir(full_dir):
+            continue
+        for fname in os.listdir(full_dir):
+            if not fname.endswith(".jsonl"):
+                continue
+            fpath = os.path.join(full_dir, fname)
+
+            if "/subagents/" in fpath:
+                continue
+
+            mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath))
+            if mtime < cutoff:
+                continue
+            if cutoff_end and mtime >= cutoff_end:
+                continue
+
+            size = os.path.getsize(fpath)
+            if size < 10240:
+                continue
+
+            size_h = f"{size/1048576:.1f}M" if size > 1048576 else f"{size//1024}K"
+            mod_time = mtime.strftime("%m/%d %H:%M")
+
+            session_id = fname[:-6]
+            cwd = ""
+            user_count = 0
+            first_real_msg = ""
+            is_teammate = False
+            is_command = False
+            is_schedule = False
+            tail_buf = []
+            was_exited = False
+
+            with open(fpath) as f:
+                for line in f:
+                    try:
+                        obj = json.loads(line.strip())
+
+                        tail_buf.append(obj)
+                        if len(tail_buf) > TAIL_SIZE:
+                            tail_buf.pop(0)
+
+                        if not cwd and obj.get("cwd"):
+                            cwd = obj["cwd"]
+
+                        if obj.get("type") == "user" and not obj.get("isSidechain"):
+                            user_count += 1
+                            msg = obj.get("message", {})
+                            raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+                            if not isinstance(raw, str):
+                                continue
+                            c = raw.strip()
+
+                            if user_count <= 5:
+                                if c.startswith("<teammate-message"):
+                                    is_teammate = True
+                                if "oh-my-claudecode:team" in c or "omc-teams" in c:
+                                    is_command = True
+                                    is_teammate = True
+                                if user_count == 1:
+                                    if c.startswith("<command-name>") or c.startswith("<command-message>"):
+                                        is_command = True
+
+                            if not first_real_msg:
+                                if not (c.startswith("<") or len(c) <= 5):
+                                    first_real_msg = c.replace("\n", " ")[:80]
+
+                    except Exception:
+                        pass
+
+            for obj in tail_buf:
+                if obj.get("type") == "user":
+                    msg = obj.get("message", {})
+                    raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+                    if isinstance(raw, str):
+                        if "/exit" in raw or "/quit" in raw:
+                            was_exited = True
+                            break
+
+            if is_teammate:
+                continue
+            if is_command and user_count <= 5:
+                continue
+            if user_count < MIN_USER_MSGS:
+                continue
+
+            if first_real_msg:
+                for prefix in SCHEDULE_PREFIXES:
+                    if first_real_msg.startswith(prefix):
+                        is_schedule = True
+                        break
+                if not is_schedule:
+                    for kw in SCHEDULE_KEYWORDS:
+                        if kw in first_real_msg:
+                            is_schedule = True
+                            break
+            if is_schedule:
+                continue
+            if was_exited:
+                continue
+            if not first_real_msg:
+                continue
+
+            cwd = cwd or "/tmp"
+            results.append((mod_time, size_h, session_id, cwd, first_real_msg, home_label))
+
+results.sort(key=lambda x: x[0], reverse=True)
+
+for mod_time, size_h, sid, cwd, msg, hlabel in results:
+    print(f"{mod_time}|{size_h}|{sid}|{cwd}|{msg}|{hlabel}")
+PYSCAN
+)
+
+declare -a SESSIONS=()
+while IFS='|' read -r mod_time size session_id project_dir first_msg home_label; do
+  [[ -z "$mod_time" ]] && continue
+  SESSIONS+=("${mod_time}|${size}|${session_id}|${project_dir}|${first_msg}|${home_label}")
+done <<< "$SCAN_OUTPUT"
+
+if [[ ${#SESSIONS[@]} -eq 0 ]]; then
+  echo "No sessions to recover."
+  if [[ -n "$FROM_DATE" ]]; then
+    echo "Range: ${FROM_DATE} ~ ${TO_DATE:-yesterday}"
+  else
+    echo "Range: last ${DAYS_AGO} day(s)"
+  fi
+  echo "Try wider range: claude-recover-cmux --days 3"
+  exit 0
+fi
+
+# ── Phase 2: Display session list ──
+
+echo ""
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║  Claude Code Session Recovery (cmux) — ${#SESSIONS[@]} sessions found"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo ""
+
+printf "%-4s %-12s %-5s %-8s %-34s %s\n" "#" "TIME" "SIZE" "HOME" "PROJECT" "FIRST MESSAGE"
+printf "%-4s %-12s %-5s %-8s %-34s %s\n" "---" "----------" "----" "------" "-------" "-------------"
+
+for i in "${!SESSIONS[@]}"; do
+  IFS='|' read -r mod_time size session_id project_dir first_msg home_label <<< "${SESSIONS[$i]}"
+  idx=$((i + 1))
+  short_project=$(echo "$project_dir" | sed "s|$HOME/projects/||; s|$HOME/||" | cut -c1-32)
+  short_msg=$(echo "$first_msg" | cut -c1-45)
+  printf "%-4s %-12s %-5s %-8s %-34s %s\n" "$idx" "$mod_time" "$size" "$home_label" "$short_project" "$short_msg"
+done
+
+echo ""
+
+[[ "$MODE" == "list" ]] && exit 0
+
+# ── Phase 3: Create cmux workspaces ──
+
+# Helper: build resume command based on config home
+build_resume_cmd() {
+  local sid="$1" home="$2"
+  if [[ "$home" == "claude" ]]; then
+    echo "claude --resume ${sid}"
+  else
+    echo "CLAUDE_CONFIG_DIR=\$HOME/.claude-${home} claude --resume ${sid}"
+  fi
+}
+
+# Helper: extract ref from cmux output ("OK workspace:48" → "workspace:48")
+parse_cmux_ref() {
+  echo "$1" | sed 's/^OK //'
+}
+
+if [[ "$MODE" == "tabs" ]]; then
+  # ── Tabs mode: 1 workspace per session ──
+
+  echo "Creating cmux workspaces (1 per session)..."
+  echo ""
+
+  created=0
+  for i in "${!SESSIONS[@]}"; do
+    IFS='|' read -r mod_time size session_id project_dir first_msg home_label <<< "${SESSIONS[$i]}"
+    resume_cmd=$(build_resume_cmd "$session_id" "$home_label")
+
+    raw_out=$(cmux new-workspace --cwd "$project_dir" --command "$resume_cmd" 2>/dev/null)
+    ws_ref=$(parse_cmux_ref "$raw_out")
+    if [[ $? -eq 0 && -n "$ws_ref" ]]; then
+      if [[ "$RENAME" == true ]]; then
+        short_name=$(echo "$first_msg" | cut -c1-30)
+        cmux rename-workspace --workspace "$ws_ref" "$short_name" 2>/dev/null || true
+      fi
+      created=$((created + 1))
+      echo "  ✓ workspace $((i + 1)): ${first_msg:0:50}"
+    else
+      echo "  ✗ workspace $((i + 1)): failed to create"
+    fi
+  done
+
+  echo ""
+  echo "═══════════════════════════════════════════════════════════════"
+  echo " ${created} workspaces created in cmux"
+  echo "═══════════════════════════════════════════════════════════════"
+
+elif [[ "$MODE" == "split" ]]; then
+  # ── Split mode: N sessions per workspace ──
+
+  COLS=${SPLIT_LAYOUT%%x*}
+  ROWS=${SPLIT_LAYOUT##*x}
+  PANES_PER_WS=$((COLS * ROWS))
+
+  echo "Creating cmux workspaces (${COLS}x${ROWS} = ${PANES_PER_WS} sessions/workspace)..."
+  echo ""
+
+  ws_num=0
+  i=0
+
+  while [[ $i -lt ${#SESSIONS[@]} ]]; do
+    # First session in workspace: create workspace
+    IFS='|' read -r _ _ sid1 dir1 msg1 home1 <<< "${SESSIONS[$i]}"
+    resume_cmd1=$(build_resume_cmd "$sid1" "$home1")
+
+    raw_out=$(cmux new-workspace --cwd "$dir1" --command "$resume_cmd1" 2>/dev/null)
+    ws_ref=$(parse_cmux_ref "$raw_out")
+    if [[ -z "$ws_ref" ]]; then
+      echo "  ✗ workspace ${ws_num}: failed to create"
+      i=$((i + 1))
+      continue
+    fi
+
+    if [[ "$RENAME" == true ]]; then
+      cmux rename-workspace --workspace "$ws_ref" "recover-${ws_num}" 2>/dev/null || true
+    fi
+
+    i=$((i + 1))
+    pane_idx=1
+
+    # Create remaining panes via splits
+    while [[ $pane_idx -lt $PANES_PER_WS && $i -lt ${#SESSIONS[@]} ]]; do
+      IFS='|' read -r _ _ sid dir _ home_lbl <<< "${SESSIONS[$i]}"
+      resume_cmd=$(build_resume_cmd "$sid" "$home_lbl")
+
+      col=$((pane_idx % COLS))
+
+      if [[ $col -eq 0 ]]; then
+        # New row: split down
+        cmux new-split down --workspace "$ws_ref" 2>/dev/null
+      else
+        # Same row: split right
+        cmux new-split right --workspace "$ws_ref" 2>/dev/null
+      fi
+
+      # Send resume command to the newly created (focused) surface
+      sleep 0.3
+      cmux send --workspace "$ws_ref" "$resume_cmd" 2>/dev/null
+      cmux send-key --workspace "$ws_ref" Enter 2>/dev/null
+
+      pane_idx=$((pane_idx + 1))
+      i=$((i + 1))
+    done
+
+    echo "  ✓ workspace ${ws_num} created (${pane_idx} panes)"
+    ws_num=$((ws_num + 1))
+  done
+
+  echo ""
+  echo "═══════════════════════════════════════════════════════════════"
+  echo " ${ws_num} workspaces created in cmux (${SPLIT_LAYOUT} layout)"
+  echo "═══════════════════════════════════════════════════════════════"
+fi
+
+echo ""
+echo "Navigate workspaces:"
+echo "  Cmd+1-9              jump by number"
+echo "  Cmd+Shift+]          next workspace"
+echo "  Cmd+Shift+[          previous workspace"
