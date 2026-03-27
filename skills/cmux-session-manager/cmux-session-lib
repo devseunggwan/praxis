@@ -1,0 +1,275 @@
+#!/bin/bash
+# cmux-session-lib — Shared library for cmux session management (bash 3.2 compatible)
+# NOTE: This library MUST be sourced from a script with set -euo pipefail
+# Data stored as pipe-delimited strings in indexed arrays.
+# Pipe characters in values are sanitized to dashes at ingestion.
+# Format: ref|name|window|claude_code|branch|pr|state|category
+
+# --- Globals ---
+WS_DATA=()        # Workspace data array (pipe-delimited)
+WS_COUNT=0
+ORPHAN_DATA=()    # Orphan data: session_name|type|pane_commands
+ORPHAN_COUNT=0
+CURRENT_WS="${CMUX_WORKSPACE_ID:-}"
+SCAN_DONE=false
+EXCLUDE_SESSIONS="${CMUX_EXCLUDE_SESSIONS:-}"  # Space-separated tmux session names to never auto-kill
+
+# Field indices for WS_DATA
+_REF=1; _NAME=2; _WINDOW=3; _CC=4; _BRANCH=5; _PR=6; _STATE=7; _CAT=8
+
+# --- Sanitize pipe characters from values ---
+sanitize_pipe() {
+  printf '%s' "$1" | tr '|' '-'
+}
+
+# --- JSON-safe string escaping via jq ---
+json_str() {
+  printf '%s' "$1" | jq -Rs '.'
+}
+
+# --- Field getter: ws_get <index> <field_num> ---
+ws_get() {
+  echo "${WS_DATA[$1]}" | cut -d'|' -f"$2"
+}
+
+# --- Field setter: ws_set <index> <field_num> <value> ---
+ws_set() {
+  local idx=$1 field=$2 val=$3
+  local old="${WS_DATA[$idx]}"
+  local IFS='|'
+  local parts=()
+  read -ra parts <<< "$old"
+  parts[$((field - 1))]="$val"
+  WS_DATA[$idx]=$(IFS='|'; echo "${parts[*]}")
+}
+
+# --- Pre-flight ---
+preflight_check() {
+  cmux ping >/dev/null 2>&1 || { echo "ERROR: cmux is not running. Launch cmux first." >&2; return 1; }
+  command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required. Install with: brew install jq" >&2; return 1; }
+  command -v tmux >/dev/null 2>&1 || { echo "ERROR: tmux is required." >&2; return 1; }
+
+  if [[ -z "$CURRENT_WS" ]]; then
+    CURRENT_WS=$(cmux identify --no-caller 2>/dev/null | grep 'workspace=' | head -1 | sed 's/.*workspace=//' | cut -d' ' -f1) || true
+  fi
+}
+
+# --- Check if session is in exclusion list ---
+is_excluded_session() {
+  local name="$1"
+  for excluded in $EXCLUDE_SESSIONS; do
+    [[ "$name" == "$excluded" ]] && return 0
+  done
+  return 1
+}
+
+# --- Scan Workspaces (Global via tree --all) ---
+scan_workspaces() {
+  [[ "$SCAN_DONE" == "true" ]] && return 0
+  WS_DATA=()
+  WS_COUNT=0
+
+  local current_window=""
+  while IFS= read -r line; do
+    if echo "$line" | grep -q '^window '; then
+      current_window=$(echo "$line" | sed 's/^window \(window:[0-9]*\).*/\1/')
+    fi
+    if echo "$line" | grep -q 'workspace workspace:'; then
+      local ref name
+      ref=$(echo "$line" | sed 's/.*\(workspace:[0-9]*\).*/\1/')
+      name=$(echo "$line" | sed 's/.*workspace:[0-9]* "\(.*\)".*/\1/' | sed 's/^[✳⠐⠂★● ]*//')
+      name=$(sanitize_pipe "$name")
+
+      WS_DATA[$WS_COUNT]="${ref}|${name}|${current_window}||||UNKNOWN|[TMP]"
+      WS_COUNT=$((WS_COUNT + 1))
+    fi
+  done < <(cmux tree --all 2>/dev/null)
+
+  local i=0
+  while [[ $i -lt $WS_COUNT ]]; do
+    local ref
+    ref=$(ws_get $i $_REF)
+    local sidebar
+    sidebar=$(cmux sidebar-state --workspace "$ref" 2>/dev/null) || { i=$((i + 1)); continue; }
+
+    local branch pr cc
+    branch=$(echo "$sidebar" | grep '^git_branch=' | cut -d= -f2 | sed 's/ .*//' || true)
+    pr=$(echo "$sidebar" | grep '^pr=' | cut -d= -f2 || true)
+    cc=$(echo "$sidebar" | grep 'claude_code=' | sed 's/^[[:space:]]*claude_code=//' | sed 's/ icon=.*//' || true)
+
+    branch=$(sanitize_pipe "${branch:-main}")
+    pr=$(sanitize_pipe "${pr:-none}")
+
+    ws_set $i $_BRANCH "$branch"
+    ws_set $i $_PR "$pr"
+    ws_set $i $_CC "${cc:-}"
+
+    i=$((i + 1))
+  done
+
+  SCAN_DONE=true
+}
+
+# --- Detect State ---
+detect_state() {
+  local idx=$1
+  local cc
+  cc=$(ws_get "$idx" $_CC)
+
+  case "$cc" in
+    Running)
+      echo "ACTIVE" ;;
+    "Needs input")
+      echo "WAITING" ;;
+    Idle)
+      local ref screen
+      ref=$(ws_get "$idx" $_REF)
+      screen=$(cmux read-screen --workspace "$ref" --lines 8 2>/dev/null) || { echo "IDLE"; return; }
+      if echo "$screen" | grep -qiE 'bun\.report|segfault|panic|SIGSEGV|Segmentation.fault'; then
+        echo "CRASHED"
+      else
+        echo "IDLE"
+      fi
+      ;;
+    "")
+      echo "UNKNOWN" ;;
+    *)
+      echo "UNKNOWN" ;;
+  esac
+}
+
+# --- Classify Category ---
+classify_category() {
+  local name="$1"
+  local branch="${2:-main}"
+
+  if echo "$branch" | grep -qE '^hub-[0-9]+-(feat|refactor|docs|test|chore|fix|perf|ci|build)-'; then
+    echo "[DEV]"; return
+  fi
+  if echo "$branch" | grep -qE '^issue-[0-9]+-(feat|refactor|fix)-'; then
+    echo "[DEV]"; return
+  fi
+
+  local name_lower
+  name_lower=$(echo "$name" | tr '[:upper:]' '[:lower:]')
+  if echo "$name_lower" | grep -qE '(failure|debug|error|fix[^e]|incident|alert|hotfix|monitor|on-?call)'; then
+    echo "[OPS]"; return
+  fi
+
+  if echo "$name_lower" | grep -qE '(analy[sz]e|investigate|compare|check|research|review|cross-check|evaluate|cost|coupling|performance)'; then
+    echo "[RES]"; return
+  fi
+
+  echo "[TMP]"
+}
+
+# --- Find Orphan tmux Sessions ---
+find_orphans() {
+  ORPHAN_DATA=()
+  ORPHAN_COUNT=0
+
+  local cmux_nums=""
+  local i=0
+  while [[ $i -lt $WS_COUNT ]]; do
+    local ref
+    ref=$(ws_get $i $_REF)
+    local num="${ref#workspace:}"
+    cmux_nums="${cmux_nums} ${num} "
+    i=$((i + 1))
+  done
+
+  while IFS= read -r session_name; do
+    [[ -z "$session_name" ]] && continue
+
+    # Check exclusion list
+    if is_excluded_session "$session_name"; then
+      continue
+    fi
+
+    if echo "$session_name" | grep -qE '^[0-9]+$'; then
+      if echo "$cmux_nums" | grep -q " ${session_name} "; then
+        continue
+      fi
+    fi
+
+    local pane_cmds
+    pane_cmds=$(tmux list-panes -t "$session_name" -F '#{pane_current_command}' 2>/dev/null) || continue
+
+    local is_shell_only=true
+    while IFS= read -r cmd; do
+      case "$cmd" in
+        zsh|bash|fish|sh|login) ;;
+        *) is_shell_only=false ;;
+      esac
+    done <<< "$pane_cmds"
+
+    local orphan_type
+    if echo "$session_name" | grep -qE '^[0-9]+$'; then
+      if [[ "$is_shell_only" == "true" ]]; then
+        orphan_type="safe_numeric"
+      else
+        orphan_type="unsafe_numeric"
+      fi
+    else
+      if [[ "$is_shell_only" == "true" ]]; then
+        orphan_type="safe_named"
+      else
+        orphan_type="unsafe_named"
+      fi
+    fi
+
+    local cmds_flat
+    cmds_flat=$(echo "$pane_cmds" | tr '\n' ',' | sed 's/,$//')
+    cmds_flat=$(sanitize_pipe "$cmds_flat")
+    ORPHAN_DATA[$ORPHAN_COUNT]="${session_name}|${orphan_type}|${cmds_flat}"
+    ORPHAN_COUNT=$((ORPHAN_COUNT + 1))
+  done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null)
+}
+
+# --- Get or Create Category Window ---
+get_or_create_window() {
+  local target_category="$1"
+
+  local i=0
+  while [[ $i -lt $WS_COUNT ]]; do
+    local ws_cat
+    ws_cat=$(ws_get $i $_CAT)
+    if [[ "$ws_cat" == "$target_category" ]]; then
+      ws_get $i $_WINDOW
+      return
+    fi
+    i=$((i + 1))
+  done
+
+  local new_window
+  new_window=$(cmux new-window 2>/dev/null | sed 's/^OK //')
+  echo "$new_window"
+}
+
+
+# --- Detect and classify all workspaces (DRY helper) ---
+detect_and_classify_all() {
+  local i=0
+  while [[ $i -lt $WS_COUNT ]]; do
+    local state name branch ws_cat
+    state=$(detect_state $i)
+    ws_set $i $_STATE "$state"
+    name=$(ws_get $i $_NAME)
+    branch=$(ws_get $i $_BRANCH)
+    ws_cat=$(classify_category "$name" "$branch")
+    ws_set $i $_CAT "$ws_cat"
+    i=$((i + 1))
+  done
+}
+
+# --- State Icon ---
+state_icon() {
+  case "$1" in
+    ACTIVE)  printf "●active " ;;
+    WAITING) printf "⏳wait  " ;;
+    IDLE)    printf "○idle   " ;;
+    CRASHED) printf "⚠crash  " ;;
+    UNKNOWN) printf "?unknwn " ;;
+    *)       printf "?       " ;;
+  esac
+}
