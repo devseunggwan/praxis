@@ -1,5 +1,5 @@
 ---
-name: recover-sessions-cmux
+name: cmux-recover-sessions
 description: Bulk recover Claude Code sessions after crash or power loss into cmux workspaces. Interactive interview to determine recovery scope and layout. Triggers on "recover cmux", "cmux session recovery", "cmux restore sessions".
 ---
 
@@ -21,7 +21,7 @@ cmux variant of `recover-sessions` — replaces tmux backend with cmux workspace
 
 ## Prerequisites
 
-- `claude-recover-cmux` script in `skills/recover-sessions-cmux/claude-recover-cmux` (symlinked to `~/.local/bin/`)
+- `cmux-recover-sessions` script in `skills/cmux-recover-sessions/cmux-recover-sessions` (symlinked to `~/.local/bin/`)
 - cmux running (`cmux ping` should succeed)
 
 ## Process
@@ -29,13 +29,13 @@ cmux variant of `recover-sessions` — replaces tmux backend with cmux workspace
 ### Step 1: Verify Script Installation
 
 ```bash
-which claude-recover-cmux || echo "NOT INSTALLED"
+which cmux-recover-sessions || echo "NOT INSTALLED"
 ```
 
 If missing, create symlink:
 
 ```bash
-ln -sf ~/projects/my-skills/skills/recover-sessions-cmux/claude-recover-cmux ~/.local/bin/claude-recover-cmux
+ln -sf ~/projects/my-skills/skills/cmux-recover-sessions/cmux-recover-sessions ~/.local/bin/cmux-recover-sessions
 ```
 
 Also verify cmux is running:
@@ -68,7 +68,7 @@ When did the crash occur?
 Run the scan with determined date range:
 
 ```bash
-claude-recover-cmux --list --from <start> --to <end>
+cmux-recover-sessions --list --from <start> --to <end>
 ```
 
 Present the results to the user. If 0 sessions found, suggest widening the range.
@@ -120,7 +120,7 @@ Present the recovery plan summary and ask for **explicit approval** before execu
  Workspaces:  12
 
  Command to execute:
-   claude-recover-cmux --from 03-23 --to 03-25 --tabs
+   cmux-recover-sessions --from 03-23 --to 03-25 --tabs
 
 ═══════════════════════════════════════════════
 
@@ -135,7 +135,7 @@ Proceed with recovery?
 Run the approved command:
 
 ```bash
-claude-recover-cmux --from <start> --to <end> [--tabs|--split CxR]
+cmux-recover-sessions --from <start> --to <end> [--tabs|--split CxR]
 ```
 
 ### Step 8: Verify and Guide
@@ -240,5 +240,5 @@ Named sessions recover instantly: `claude --resume "hub-700"` (fuzzy match).
 **Workflow position:** System recovery (runs before any other skill)
 
 ```
-[Crash / Reboot] → [recover-sessions-cmux] → [Resume daily work]
+[Crash / Reboot] → [cmux-recover-sessions] → [Resume daily work]
 ```
