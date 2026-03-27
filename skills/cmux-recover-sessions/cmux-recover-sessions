@@ -1,17 +1,17 @@
 #!/bin/bash
-# claude-recover-cmux: Bulk recover Claude Code sessions into cmux workspaces
+# cmux-recover-sessions: Bulk recover Claude Code sessions into cmux workspaces
 #
 # Workflow:
 #   1. Scan recent sessions (shared logic with claude-recover)
 #   2. Create cmux workspaces (tabs or splits)
 #
 # Usage:
-#   claude-recover-cmux                                # Last 1 day, tabs mode
-#   claude-recover-cmux --days 3                       # Last 3 days
-#   claude-recover-cmux --from 03-18 --to 03-20        # Date range
-#   claude-recover-cmux --list                         # List only
-#   claude-recover-cmux --split 1x2                    # 2 sessions per workspace
-#   claude-recover-cmux --rename                       # Auto-rename workspaces
+#   cmux-recover-sessions                                # Last 1 day, tabs mode
+#   cmux-recover-sessions --days 3                       # Last 3 days
+#   cmux-recover-sessions --from 03-18 --to 03-20        # Date range
+#   cmux-recover-sessions --list                         # List only
+#   cmux-recover-sessions --split 1x2                    # 2 sessions per workspace
+#   cmux-recover-sessions --rename                       # Auto-rename workspaces
 
 set -euo pipefail
 
@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
     --rename)  RENAME=true; shift ;;
     -h|--help)
       cat << 'HELP'
-Usage: claude-recover-cmux [--days N | --from DATE --to DATE] [--tabs|--split CxR] [--list] [--rename]
+Usage: cmux-recover-sessions [--days N | --from DATE --to DATE] [--tabs|--split CxR] [--list] [--rename]
 
 Options:
   --days N        Scan last N days (default: 1)
@@ -45,10 +45,10 @@ Options:
   --rename        Auto-rename workspaces with session info
 
 Examples:
-  claude-recover-cmux --list --days 3
-  claude-recover-cmux --from 03-23 --to 03-25
-  claude-recover-cmux --from 03-25 --split 1x2
-  claude-recover-cmux --from 03-25 --tabs --rename
+  cmux-recover-sessions --list --days 3
+  cmux-recover-sessions --from 03-23 --to 03-25
+  cmux-recover-sessions --from 03-25 --split 1x2
+  cmux-recover-sessions --from 03-25 --tabs --rename
 HELP
       exit 0
       ;;
@@ -92,7 +92,7 @@ if [[ ${#SESSIONS[@]} -eq 0 ]]; then
   else
     echo "Range: last ${DAYS_AGO} day(s)"
   fi
-  echo "Try wider range: claude-recover-cmux --days 3"
+  echo "Try wider range: cmux-recover-sessions --days 3"
   exit 0
 fi
 
