@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-claude-recover-scan: Shared session scanner for recover-sessions and recover-sessions-cmux.
+claude-recover-scan: Shared session scanner for recover-sessions and cmux-recover-sessions.
 
 Usage:
   claude-recover-scan <days_ago> <from_date> <to_date>
