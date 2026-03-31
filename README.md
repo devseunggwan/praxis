@@ -21,6 +21,7 @@ Personal collection of Claude Code skills for development workflow automation.
 |-------|-------------|
 | `debug` | Systematic 4-phase debugging — root cause investigation before any fix attempt |
 | `brainstorm` | Diamond Model brainstorming — diverge ideas, then converge with quantified evaluation |
+| `retrospect` | Session retrospect — scan conversation against CLAUDE.md, find friction root causes, propose and execute improvements |
 
 ### Session Management
 
