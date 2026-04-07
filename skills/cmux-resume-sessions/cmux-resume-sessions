@@ -1,0 +1,120 @@
+#!/bin/bash
+# cmux-resume-sessions — Resume sessions from a saved JSON snapshot (bash 3.2 compatible)
+set -euo pipefail
+
+# Parse flags
+NO_CLAUDE=false
+POSITIONAL=()
+for arg in "$@"; do
+  case "$arg" in
+    --no-claude) NO_CLAUDE=true ;;
+    *) POSITIONAL+=("$arg") ;;
+  esac
+done
+
+# Config
+SAVE_DIR="$HOME/.cmux/sessions"
+SNAPSHOT="${POSITIONAL[0]:-latest}"
+
+# Preflight
+cmux ping >/dev/null 2>&1 || { echo "ERROR: cmux is not running. Launch cmux first." >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required. Install with: brew install jq" >&2; exit 1; }
+
+# Resolve snapshot file
+if [[ "$SNAPSHOT" == "latest" ]]; then
+  SNAPSHOT_FILE=$(ls -t "$SAVE_DIR"/sessions-*.json 2>/dev/null | head -1)
+  [[ -z "$SNAPSHOT_FILE" ]] && { echo "ERROR: No snapshots found in $SAVE_DIR" >&2; exit 1; }
+elif [[ -f "$SNAPSHOT" ]]; then
+  SNAPSHOT_FILE="$SNAPSHOT"
+elif [[ -f "$SAVE_DIR/$SNAPSHOT" ]]; then
+  SNAPSHOT_FILE="$SAVE_DIR/$SNAPSHOT"
+else
+  echo "ERROR: Snapshot not found: $SNAPSHOT" >&2
+  exit 1
+fi
+
+# Read snapshot metadata
+total=$(jq -r '.total' "$SNAPSHOT_FILE")
+saved_at=$(jq -r '.saved_at' "$SNAPSHOT_FILE")
+hostname_saved=$(jq -r '.hostname' "$SNAPSHOT_FILE")
+
+echo "Resuming from: $(basename "$SNAPSHOT_FILE")"
+echo "  Saved at: $saved_at | Host: $hostname_saved | Sessions: $total"
+echo ""
+
+# Helper: extract workspace ref from cmux output ("OK workspace:48" → "workspace:48")
+parse_ws_ref() {
+  echo "$1" | grep -o 'workspace:[0-9]*'
+}
+
+# Create workspaces
+created=0
+skipped=0
+failed=0
+
+i=0
+while [[ $i -lt $total ]]; do
+  name=$(jq -r ".sessions[$i].name" "$SNAPSHOT_FILE")
+  cwd=$(jq -r ".sessions[$i].cwd" "$SNAPSHOT_FILE")
+  session_id=$(jq -r ".sessions[$i].session_id // empty" "$SNAPSHOT_FILE")
+
+  # Skip if cwd doesn't exist
+  if [[ "$cwd" == "unknown" ]] || [[ ! -d "$cwd" ]]; then
+    echo "  ⚠ SKIP: $name (cwd not found: $cwd)"
+    skipped=$((skipped + 1))
+    i=$((i + 1))
+    continue
+  fi
+
+  # Build command: claude --resume <session-id> if available, else claude
+  local_cmd=""
+  if [[ "$NO_CLAUDE" == "false" ]]; then
+    if [[ -n "$session_id" ]]; then
+      local_cmd="claude --resume $session_id"
+    else
+      local_cmd="claude"
+    fi
+  fi
+
+  # Create workspace with cwd (and optional command)
+  if [[ -n "$local_cmd" ]]; then
+    raw_out=$(cmux new-workspace --cwd "$cwd" --command "$local_cmd" 2>/dev/null) || {
+      echo "  ✗ FAIL: $name"
+      failed=$((failed + 1))
+      i=$((i + 1))
+      continue
+    }
+  else
+    raw_out=$(cmux new-workspace --cwd "$cwd" 2>/dev/null) || {
+      echo "  ✗ FAIL: $name"
+      failed=$((failed + 1))
+      i=$((i + 1))
+      continue
+    }
+  fi
+
+  ws_ref=$(parse_ws_ref "$raw_out")
+  if [[ -z "$ws_ref" ]]; then
+    echo "  ✗ FAIL: $name (no ref returned)"
+    failed=$((failed + 1))
+    i=$((i + 1))
+    continue
+  fi
+
+  # Rename workspace
+  sleep 0.2
+  cmux rename-workspace --workspace "$ws_ref" "$name" 2>/dev/null || true
+
+  # Auto-confirm "Resume from summary" prompt if it appears
+  if [[ "$NO_CLAUDE" == "false" ]]; then
+    sleep 2
+    cmux send-key --workspace "$ws_ref" Enter 2>/dev/null || true
+  fi
+
+  echo "  ✓ $name → $ws_ref ($cwd)"
+  created=$((created + 1))
+  i=$((i + 1))
+done
+
+echo ""
+echo "Done. Created: $created | Skipped: $skipped | Failed: $failed"

@@ -1,0 +1,158 @@
+#!/bin/bash
+# cmux-save-sessions — Save current cmux session list to JSON snapshot (bash 3.2 compatible)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/../cmux-session-manager/cmux-session-lib"
+
+# Parse flags
+INCLUDE_SELF=false
+for arg in "$@"; do
+  case "$arg" in
+    --include-self) INCLUDE_SELF=true ;;
+  esac
+done
+
+# Config
+SAVE_DIR="$HOME/.cmux/sessions"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+SAVE_FILE="$SAVE_DIR/sessions-$TIMESTAMP.json"
+
+# Preflight
+preflight_check || exit 1
+
+# Resolve CURRENT_WS to workspace:NNN format (CMUX_WORKSPACE_ID may be UUID)
+if [[ -n "$CURRENT_WS" ]] && ! echo "$CURRENT_WS" | grep -q '^workspace:'; then
+  CURRENT_WS=$(cmux identify 2>/dev/null | jq -r '.caller.workspace_ref // empty') || true
+fi
+
+# Scan and classify
+scan_workspaces
+detect_and_classify_all
+
+# Collect cwd and session-id for each workspace (not tracked by session-lib)
+CWD_DATA=()
+SESSION_ID_DATA=()
+i=0
+while [[ $i -lt $WS_COUNT ]]; do
+  ref=$(ws_get $i $_REF)
+  ws_num="${ref#workspace:}"
+
+  # cwd from sidebar-state
+  sidebar=$(cmux sidebar-state --workspace "$ref" 2>/dev/null) || { CWD_DATA[$i]="unknown"; SESSION_ID_DATA[$i]=""; i=$((i + 1)); continue; }
+  cwd=$(echo "$sidebar" | grep '^cwd=' | cut -d= -f2 || true)
+  CWD_DATA[$i]="${cwd:-unknown}"
+
+  # session-id from Claude process in workspace's tmux pane
+  session_id=""
+  pane_pid=$(tmux list-panes -t "$ws_num" -F '#{pane_pid}' 2>/dev/null | head -1 || true)
+  if [[ -n "$pane_pid" ]]; then
+    for child_pid in $(pgrep -P "$pane_pid" 2>/dev/null || true); do
+      sid=$(ps -o args= -p "$child_pid" 2>/dev/null | grep -o '\--session-id [^ ]*' | head -1 | awk '{print $2}' || true)
+      if [[ -n "$sid" ]]; then
+        session_id="$sid"
+        break
+      fi
+    done
+  fi
+  SESSION_ID_DATA[$i]="${session_id:-}"
+
+  i=$((i + 1))
+done
+
+# Helper: check if workspace index is the current session
+is_current_ws() {
+  local ref
+  ref=$(ws_get "$1" $_REF)
+  local ws_num="${ref#workspace:}"
+  [[ "$ws_num" == "$CURRENT_WS" ]] || [[ "$ref" == "$CURRENT_WS" ]]
+}
+
+# Count states (skip current session unless --include-self)
+count_active=0; count_waiting=0; count_idle=0; count_crashed=0; count_unknown=0
+saved_count=0
+skipped_self=""
+i=0
+while [[ $i -lt $WS_COUNT ]]; do
+  if [[ "$INCLUDE_SELF" == "false" ]] && is_current_ws $i; then
+    skipped_self=$(ws_get $i $_NAME)
+    i=$((i + 1))
+    continue
+  fi
+  case "$(ws_get $i $_STATE)" in
+    ACTIVE)  count_active=$((count_active + 1)) ;;
+    WAITING) count_waiting=$((count_waiting + 1)) ;;
+    IDLE)    count_idle=$((count_idle + 1)) ;;
+    CRASHED) count_crashed=$((count_crashed + 1)) ;;
+    *)       count_unknown=$((count_unknown + 1)) ;;
+  esac
+  saved_count=$((saved_count + 1))
+  i=$((i + 1))
+done
+
+# Build sessions JSON array (skip current session unless --include-self)
+sessions_json="[]"
+i=0
+while [[ $i -lt $WS_COUNT ]]; do
+  if [[ "$INCLUDE_SELF" == "false" ]] && is_current_ws $i; then
+    i=$((i + 1))
+    continue
+  fi
+
+  ref=$(ws_get $i $_REF)
+  name=$(ws_get $i $_NAME)
+  state=$(ws_get $i $_STATE)
+  branch=$(ws_get $i $_BRANCH)
+  pr=$(ws_get $i $_PR)
+  cat=$(ws_get $i $_CAT)
+  cwd="${CWD_DATA[$i]:-unknown}"
+  session_id="${SESSION_ID_DATA[$i]:-}"
+
+  sessions_json=$(echo "$sessions_json" | jq \
+    --arg ref "$ref" \
+    --arg name "$name" \
+    --arg state "$state" \
+    --arg branch "$branch" \
+    --arg pr "$pr" \
+    --arg cat "$cat" \
+    --arg cwd "$cwd" \
+    --arg session_id "$session_id" \
+    '. + [{"ref": $ref, "name": $name, "state": $state, "branch": $branch, "pr": $pr, "category": $cat, "cwd": $cwd, "session_id": $session_id}]')
+
+  i=$((i + 1))
+done
+
+# Build full JSON and save
+mkdir -p "$SAVE_DIR"
+
+jq -n \
+  --arg saved_at "$(date +%Y-%m-%dT%H:%M:%S%z)" \
+  --arg hostname "$(hostname)" \
+  --argjson total "$saved_count" \
+  --argjson active "$count_active" \
+  --argjson waiting "$count_waiting" \
+  --argjson idle "$count_idle" \
+  --argjson crashed "$count_crashed" \
+  --argjson unknown "$count_unknown" \
+  --argjson sessions "$sessions_json" \
+  '{
+    saved_at: $saved_at,
+    hostname: $hostname,
+    total: $total,
+    summary: {
+      active: $active,
+      waiting: $waiting,
+      idle: $idle,
+      crashed: $crashed,
+      unknown: $unknown
+    },
+    sessions: $sessions
+  }' > "$SAVE_FILE"
+
+# Output summary
+echo "Saved $saved_count sessions to $SAVE_FILE"
+printf "  Active: %d | Waiting: %d | Idle: %d | Crashed: %d\n" \
+  "$count_active" "$count_waiting" "$count_idle" "$count_crashed"
+if [[ -n "$skipped_self" ]]; then
+  echo "  (Excluded current session: $skipped_self)"
+fi
