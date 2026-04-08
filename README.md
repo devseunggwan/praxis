@@ -1,4 +1,4 @@
-# Claude Code Skills
+# Praxis
 
 Personal collection of Claude Code skills for development workflow automation.
 
@@ -37,7 +37,7 @@ Personal collection of Claude Code skills for development workflow automation.
 ## Installation
 
 ```bash
-git clone https://github.com/devseunggwan/my-skills.git ~/projects/my-skills
+git clone https://github.com/devseunggwan/praxis.git ~/projects/praxis
 ```
 
 Register as a Claude Code skill directory:
