@@ -1,23 +1,26 @@
 ---
 name: turbo-deliver
-description: Compound delivery — verify + review + PR + merge + cleanup + compounding in one step. Triggers on "deliver", "turbo-deliver", "finish up".
+description: >
+  Compound delivery — verify + review + PR + merge + cleanup + compounding in one step.
+  Auto-detects PR state to choose full pipeline or merge-only mode.
+  Triggers on "deliver", "turbo-deliver", "finish up", "cleanup", "finish branch", "branch cleanup".
 ---
 
 # Turbo Deliver
 
 ## Overview
 
-Compresses workflow steps 9-14 (verify → review → PR → merge → cleanup → compounding) into a single automated pass.
+Compresses the full delivery lifecycle into a single automated pass.
+Auto-detects whether a PR exists to choose the right mode.
 
 **Core principle:** Delivery is a pipeline, not a checklist. Each stage gates the next.
 
 **Chains from:** `turbo-setup` (auto-detects issue/branch from git state)
-**Delegates to:** `verify-completion`, `code-review`, `create-hub-pr`, `finish-branch`
+**Delegates to:** `verify-completion`, `code-review`, `create-hub-pr`
 
 ## The Iron Law
 
 ```
-VERIFY → REVIEW → PR → MERGE → COMPOUND → CLEANUP
 EACH STAGE MUST PASS BEFORE THE NEXT BEGINS.
 NO SKIPPING. NO REORDERING.
 ```
@@ -25,8 +28,32 @@ NO SKIPPING. NO REORDERING.
 ## When to Use
 
 - After implementation is complete
-- Triggers: "deliver", "turbo-deliver", "finish up"
+- When a PR is ready to merge (merge-only mode)
+- Triggers: "deliver", "turbo-deliver", "finish up", "cleanup", "finish branch", "branch cleanup"
 - No input required — auto-detects everything from current git state
+
+## Mode Detection (Step 0)
+
+On start, detect the current state and choose mode automatically:
+
+```bash
+BRANCH=$(git branch --show-current)
+PR_JSON=$(gh pr list --head "$BRANCH" --state open --json number,title,url --jq '.[0]')
+```
+
+| Condition | Mode | Pipeline |
+|-----------|------|----------|
+| No open PR for current branch | **Full** | verify → review → PR → merge → compound → cleanup |
+| Open PR exists | **Merge-only** | compound → merge → cleanup |
+
+Present the detected mode and ask for confirmation:
+
+```
+Detected: PR #<N> exists for branch <branch>.
+1. Merge-only — compound + merge + cleanup
+2. Full pipeline — re-run verify + review before merge
+3. Cancel
+```
 
 ## Inputs (Auto-Detected)
 
@@ -47,23 +74,7 @@ MAIN_REPO=$(git worktree list | head -1 | awk '{print $1}')
 - [ ] Changes are committed (no dirty state)
 - [ ] Branch is pushed to remote
 
-## Outputs
-
-```
-═══════════════════════════════════════════════
- ✅ Turbo Deliver Complete
-═══════════════════════════════════════════════
-
- PR:        #<number> (<title>) — MERGED
- Issue:     #<issue> — CLOSED
- Worktree:  <path> — REMOVED
- Branch:    <name> — DELETED
-
- Pipeline:  verify ✅ → review ✅ → PR ✅ → merge ✅ → compound ✅ → cleanup ✅
-═══════════════════════════════════════════════
-```
-
-## Process
+## Full Pipeline
 
 ### Stage 1: Verify (delegates to `verify-completion`)
 
@@ -77,10 +88,6 @@ fi
 if [ -f "package.json" ]; then
   npm test 2>/dev/null
   npm run lint 2>/dev/null
-fi
-if [ -f "go.mod" ]; then
-  go test ./...
-  golangci-lint run 2>/dev/null
 fi
 if command -v ruff &>/dev/null; then
   ruff check . && ruff format --check .
@@ -97,12 +104,7 @@ fi
 Invoke `laplace-dev-hub:code-review` logic:
 
 1. Review diff against base branch
-2. Check for:
-   - Security vulnerabilities
-   - Logic defects
-   - SOLID principle violations
-   - Python 3.8 compatibility (Airflow containers)
-   - Atomic commit compliance
+2. Check for security vulnerabilities, logic defects, SOLID violations
 
 **Severity gates:**
 | Severity | Action |
@@ -115,14 +117,6 @@ Invoke `laplace-dev-hub:code-review` logic:
 ### Stage 3: Create PR (delegates to `create-hub-pr`)
 
 ```bash
-# Find distributed issue in target repo (if Hub issue)
-DISTRIBUTED_ISSUE=$(gh issue list --repo "laplacetec/${TARGET_REPO}" \
-  --search "hub-${ISSUE_NUMBER}" --json number --jq '.[0].number' 2>/dev/null)
-
-# Determine labels
-LABELS=$(gh label list --repo "laplacetec/${TARGET_REPO}" --json name --jq '.[].name' | head -20)
-PR_LABEL=$(select_label "$LABELS" "$TYPE")
-
 gh pr create \
   --repo "laplacetec/${TARGET_REPO}" \
   --title "${TITLE}" \
@@ -131,20 +125,55 @@ gh pr create \
   --body "$(generate_pr_body)"
 ```
 
-**PR body includes:**
-- Summary (from commit messages)
-- `Closes #<distributed_issue>` (if exists)
-- Test plan
-- Review checklist items from Stage 2
-
 **Capture:** `PR_NUMBER`, `PR_URL`
 
-### Stage 4: Merge (delegates to `finish-branch`)
+## Merge-Only Pipeline
+
+Starts here when an open PR is detected. Also reached after Stage 3 in full pipeline.
+
+### Stage 4: Compound (inline context)
+
+Embed context at key decision points before merge.
+
+```bash
+PR_NUMBER=<detected or created>
+gh pr view $PR_NUMBER --json title,body,files
+gh pr diff $PR_NUMBER --name-only
+```
+
+1. Identify key decision points:
+   - Architectural choices (why this approach over alternatives)
+   - Non-obvious logic (gotchas, workarounds, constraints)
+   - Configuration changes with rationale
+
+2. Add inline comments:
+
+```python
+# [PR #42] Switched from batch INSERT to MERGE to handle duplicate keys.
+# See PR for migration context and rollback plan.
+```
+
+**Compounding rules:**
+- Brief summary + PR number as inline comment at the relevant code location
+- Explain "why this approach" — not "what the code does"
+- Do NOT create separate documentation files
+- Skip compounding if the change is purely mechanical (rename, version bump, typo fix)
+
+3. Commit and push compounding changes (if any):
+
+```bash
+git add -A
+git commit -m "chore: add compounding context for PR #<number>
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+git push
+```
+
+### Stage 5: Merge (squash)
 
 Wait for CI, then squash merge:
 
 ```bash
-# Wait for CI (poll with timeout)
 MAX_WAIT=300  # 5 minutes
 ELAPSED=0
 while [ $ELAPSED -lt $MAX_WAIT ]; do
@@ -153,33 +182,27 @@ while [ $ELAPSED -lt $MAX_WAIT ]; do
     break
   elif echo "$STATUS" | grep -q "fail"; then
     echo "CI failed. Analyzing..."
-    # Auto-fix attempt
     break
   fi
   sleep 10
   ELAPSED=$((ELAPSED + 10))
 done
-```
 
-### Stage 5: Compound (inline context)
-
-Before merge, add compounding comments:
-
-```bash
-# Analyze key decision points in the diff
-gh pr diff "$PR_NUMBER" --repo "laplacetec/${TARGET_REPO}"
-
-# Add inline comments at decision points
-# Format: # [PR #N] <why this approach>
-```
-
-Then merge:
-
-```bash
 gh pr merge "$PR_NUMBER" --repo "laplacetec/${TARGET_REPO}" --squash --delete-branch
 ```
 
 ### Stage 6: Cleanup
+
+Present options to the user:
+
+```
+PR #<number> merged. How to proceed?
+1. Full cleanup — remove worktree + branch (recommended)
+2. Worktree only — keep branch
+3. Keep as-is — handle later
+```
+
+#### Option 1: Full Cleanup (recommended)
 
 ```bash
 cd "$MAIN_REPO"
@@ -190,6 +213,50 @@ git pull origin "$DEFAULT_BRANCH"
 git worktree prune
 ```
 
+#### Option 2: Worktree Only
+
+```bash
+cd "$MAIN_REPO"
+git worktree remove "$WORKTREE_PATH"
+git worktree prune
+```
+
+#### Option 3: Keep As-Is
+
+Report: "Keeping branch `<name>`. Worktree at `<path>`."
+
+### Stage 7: Learning Capture
+
+Review this work cycle and capture reusable lessons:
+
+1. **Check for patterns worth remembering:**
+   - Non-obvious workaround discovered?
+   - Tool/approach that worked better than expected?
+   - Gotcha that wasted time?
+   - User feedback that should persist?
+
+2. **If lessons found**, update project memory
+3. **If no lessons**, skip. Not every PR teaches something new.
+
+> **Rule:** Only capture insights that prevent future mistakes or save future time.
+
+## Outputs
+
+```
+═══════════════════════════════════════════════
+ ✅ Turbo Deliver Complete
+═══════════════════════════════════════════════
+
+ PR:        #<number> (<title>) — MERGED
+ Issue:     #<issue> — CLOSED
+ Worktree:  <path> — REMOVED
+ Branch:    <name> — DELETED
+ Mode:      full | merge-only
+
+ Pipeline:  verify ✅ → review ✅ → PR ✅ → merge ✅ → compound ✅ → cleanup ✅
+═══════════════════════════════════════════════
+```
+
 ## Error Handling
 
 | Stage | Failure | Action |
@@ -198,7 +265,6 @@ git worktree prune
 | Verify | Lint failure | Auto-format, re-check |
 | Review | Critical finding | **STOP** — report to user |
 | PR creation | Label missing | Query available labels, select closest |
-| PR creation | Body validation | Auto-fix format |
 | CI | Check failure | Analyze logs, auto-fix (1x), then STOP |
 | Merge | Conflict | **STOP** — report to user |
 | Merge | Approval required | **STOP** — report to user |
@@ -209,46 +275,52 @@ git worktree prune
 Auto-fix attempt (silent) → 2nd attempt (silent) → STOP + report to user
 ```
 
-Never silently swallow errors. Never proceed past a failed gate.
-
 ## Pipeline Visualization
 
 ```
-┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌──────────┐    ┌─────────┐
-│ VERIFY  │───▶│ REVIEW  │───▶│   PR    │───▶│  MERGE  │───▶│COMPOUND  │───▶│ CLEANUP │
-│         │    │         │    │         │    │         │    │          │    │         │
-│ test    │    │ diff    │    │ create  │    │ CI wait │    │ inline   │    │worktree │
-│ lint    │    │ security│    │ labels  │    │ squash  │    │ comments │    │ branch  │
-│ build   │    │ quality │    │ body    │    │ delete  │    │ PR refs  │    │ prune   │
-└────┬────┘    └────┬────┘    └────┬────┘    └────┬────┘    └────┬─────┘    └────┬────┘
-     │              │              │              │              │              │
-   FAIL→fix      CRIT→STOP     FAIL→fix       FAIL→STOP     skip if         FAIL→
-   2x→STOP                     format          conflict      mechanical      report
+Step 0: MODE DETECTION
+  ├─ No PR → Full Pipeline (Stages 1-3, then 4-7)
+  └─ PR exists → Merge-Only (Stages 4-7)
+
+┌─────────┐    ┌─────────┐    ┌─────────┐    ┌──────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐
+│ VERIFY  │───▶│ REVIEW  │───▶│   PR    │───▶│COMPOUND  │───▶│  MERGE  │───▶│ CLEANUP │───▶│ LEARN   │
+│ (1)     │    │ (2)     │    │ (3)     │    │ (4)      │    │ (5)     │    │ (6)     │    │ (7)     │
+└─────────┘    └─────────┘    └─────────┘    └──────────┘    └─────────┘    └─────────┘    └─────────┘
+ full only      full only      full only      both modes      both modes     both modes     both modes
 ```
 
-## Chaining Interface
+## Per-Repo Default Branch Reference
 
-**From turbo-setup:**
-```
-turbo-setup outputs → git state (branch, worktree, issue#)
-turbo-deliver reads → git state (auto-detect, no explicit handoff)
-```
+| Repository | Default Branch |
+|------------|---------------|
+| `laplace-dev-hub` | `main` |
+| `laplace-web-v2` | `main` |
+| `laplace-data-platform-mcp` | `main` |
+| `laplace-airflow-dags` | `dev` |
+| `laplace-airflow-dags-v3` | `dev` |
+| `laplace-etl` | `dev` |
+| `laplace-analytics-backend` | `dev` |
+| `analytics-frontend` | `dev` |
+| `laplace-gitops` | `dev` |
+| `laplace-ai-agent` | `dev` |
 
-**To cmux-orchestrator:**
-```
-orchestrator dispatches: "turbo-setup $task && implement && turbo-deliver"
-turbo-deliver signals completion via exit code + result file
-```
+## Rationalization Prevention
+
+| Excuse | Reality |
+|--------|---------|
+| "I'll clean up later" | Later never comes. Zombie worktrees accumulate. |
+| "Compounding can be skipped this time" | Next session loses "why was this done?" context. |
+| "Simple change, no compounding needed" | Even simple changes have a "why". Leave the PR number at minimum. |
+| "I'll compound after merge" | After merge, worktree is gone — can't add code comments on the feature branch. |
 
 ## Integration
 
 **Workflow position:**
 ```
 [turbo-setup] → [EXECUTE] → [turbo-deliver] → [done]
-                               ├─ verify-completion
-                               ├─ code-review
-                               ├─ create-hub-pr
-                               └─ finish-branch
+                               ├─ Step 0: mode detection
+                               ├─ Full: verify → review → PR
+                               └─ Both: compound → merge → cleanup → learn
 ```
 
 **Previous step:** Implementation (manual or via `ralph`/`executor`)

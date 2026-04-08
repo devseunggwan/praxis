@@ -11,8 +11,7 @@ Development workflow skills for Claude Code — disciplined, fast, resilient.
 | Skill | Description |
 |-------|-------------|
 | `turbo-setup` | Compound setup — issue + plan + branch + worktree + deps in one step |
-| `turbo-deliver` | Compound delivery — verify + review + PR + merge + cleanup + compounding in one step |
-| `finish-branch` | Complete a development branch lifecycle — merge PR, clean up worktree and branch |
+| `turbo-deliver` | Compound delivery — auto-detects PR state for full pipeline or merge-only mode |
 | `verify-completion` | Enforce verification evidence before any completion claim |
 
 ### Development
