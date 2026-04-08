@@ -29,6 +29,8 @@ Personal collection of Claude Code skills for development workflow automation.
 |-------|-------------|
 | `recover-sessions` | Bulk recover Claude Code sessions after power loss (tmux backend) |
 | `cmux-recover-sessions` | Bulk recover Claude Code sessions after crash or power loss (cmux backend) |
+| `cmux-save-sessions` | Save cmux session list as a JSON snapshot for later restore |
+| `cmux-resume-sessions` | Restore cmux workspaces from a saved JSON snapshot |
 | `cmux-session-manager` | cmux session lifecycle automation — status, cleanup, init, report |
 | `cmux-orchestrator` | Dispatch and supervise multiple Claude Code workers in cmux workspaces |
 
