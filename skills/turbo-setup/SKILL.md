@@ -27,6 +27,20 @@ If any step fails, roll back completed steps and report.
 - Triggers: "setup", "turbo-setup", "quick start"
 - User provides: task description (title or URL)
 
+## Pluggable Steps — Fallback Defaults
+
+When a project's `CLAUDE.md` does not provide routing, these built-in defaults are used:
+
+| Step | Pluggable Via | Fallback Default |
+|------|--------------|------------------|
+| Issue creation | Project CLAUDE.md issue-creation skill routing | `gh issue create` in the current repo |
+| Planning | Project CLAUDE.md planning skill routing | Skip (no built-in planner) |
+| Branch creation | — (built-in) | `issue-<N>-<type>-<desc>` on base branch |
+| Worktree creation | — (built-in) | `git worktree add ../<branch> -b <branch>` |
+| Dependency install | — (built-in auto-detect) | `npm install` / `pip install -r requirements.txt` / `go mod download` / `pip install -e .` |
+
+Projects override these by declaring routing in their `CLAUDE.md`.
+
 ## Inputs
 
 The user provides ONE of:
@@ -44,7 +58,7 @@ After successful setup, report these values (used by `turbo-deliver`):
 ═══════════════════════════════════════════════
 
  Issue:     #<number> (<title>)
- Branch:    hub-<N>-<type>-<desc>
+ Branch:    issue-<N>-<type>-<desc>
  Worktree:  <path>
  Repo:      <target-repo>
  Deps:      <installed|skipped>
@@ -103,8 +117,9 @@ gh issue create \
 ### Step 3: Create Branch
 
 ```bash
-BRANCH="hub-${ISSUE_NUMBER}-${TYPE}-${SHORT_DESC}"
-# Example: hub-700-feat-chart-filtering
+BRANCH="issue-${ISSUE_NUMBER}-${TYPE}-${SHORT_DESC}"
+# Example: issue-42-feat-chart-filtering
+# Legacy prefix `hub-` is still recognized by turbo-implement/turbo-deliver for backward compatibility.
 ```
 
 **Branch base rules (from CLAUDE.md):**
@@ -184,6 +199,16 @@ worktree → git worktree remove
 branch → git branch -D
 issue → gh issue close (with /cancel comment)
 ```
+
+## Rationalization Prevention
+
+| Excuse | Reality |
+|--------|---------|
+| "I'll just create the branch, skip the issue" | No issue = no audit trail. turbo-deliver relies on issue number to close the loop. |
+| "Worktree is overhead, I'll branch in-place" | In-place branching blocks other work in the main checkout. Worktrees are free. |
+| "Deps will install later when I need them" | First `npm test` fails and you lose 2 minutes debugging. Install once, upfront. |
+| "Skip the rollback on failure, I'll clean up manually" | Manual cleanup gets forgotten. Partial state confuses future sessions. |
+| "I know the scope, no need to ask the clarifying question" | 1 question costs 1 round-trip. Wrong scope costs an entire re-do. |
 
 ## Chaining Interface
 

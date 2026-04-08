@@ -12,6 +12,25 @@ Covers the full session lifecycle: creation, management, and cleanup.
 
 > **Role separation**: This skill is for "daily management". For post-crash/power-loss session recovery, use the `cmux-recover-sessions` skill.
 
+## The Iron Law
+
+```
+READ BEFORE CLOSE. USER CONFIRMATION REQUIRED FOR NON-AUTO CLEANUP.
+```
+
+Phase 1 `auto_cleanup` (safe orphans, crashed sessions) runs without prompting.
+Phase 2 `idle_cleanup` and Phase 3 `reorganize` MUST be confirmed by the user before executing —
+never close or rename sessions without explicit approval, because a still-running task may look idle.
+
+## When to Use
+
+- End-of-day session hygiene (status dashboard, cleanup, reorganize)
+- Too many orphaned or idle sessions accumulated in cmux
+- Before starting new work — verify no stale workspaces are consuming resources
+- Triggers: "cmux session", "session management", "session cleanup", "cmux status", "cmux cleanup", "cmux tidy"
+
+> **Not for crash recovery** — use `cmux-recover-sessions` after a power loss or cmux crash.
+
 ## Commands
 
 ### `status` — Session Dashboard
@@ -116,7 +135,7 @@ Idle workspaces are further checked via `read-screen` for crash signatures (`bun
 ## Category Classification
 
 Priority (highest first):
-1. **[DEV]**: Branch matches `hub-N-feat-*`, `hub-N-refactor-*`, etc.
+1. **[DEV]**: Branch matches `issue-N-<type>-*` or legacy `hub-N-<type>-*` (feat, refactor, docs, test, chore, fix, perf, ci, build)
 2. **[OPS]**: Name contains `failure`, `debug`, `error`, `fix`, `incident`, etc.
 3. **[RES]**: Name contains `analyze`, `investigate`, `compare`, `check`, `research`, etc.
 4. **[TMP]**: None of the above
@@ -155,3 +174,30 @@ The report includes status output + PR status from `sidebar-state`'s `pr=` field
 | "jq is required" | jq not installed | `brew install jq` |
 | Session state UNKNOWN | No claude_code in sidebar-state | Session may not be Claude Code |
 | 0 orphans | All tmux sessions owned by cmux | Normal — nothing to clean |
+
+## Rationalization Prevention
+
+| Excuse | Reality |
+|--------|---------|
+| "I'll approve the cleanup without looking, it's probably fine" | An IDLE session may be a long-running task paused on input. Read the category/branch first. |
+| "Skip the dry-run, just execute" | Dry-run takes 2 seconds and prevents closing a session you actually wanted to keep. |
+| "The session looks crashed, auto-close it" | Only `auto_cleanup` (Phase 1) kills sessions automatically. Anything in Phase 2 needs your eyes. |
+| "Reorganize everything into one window" | Category windows make parallel work scannable. One-window mode is a regression. |
+
+## Integration
+
+**Workflow position:** Daily session lifecycle management — runs in between work sessions.
+
+```
+[morning: status] → [work: many sessions] → [evening: cleanup] → [snapshot if needed]
+```
+
+**Related skills:**
+- **cmux-save-sessions**: Capture current state before running cleanup (recovery point)
+- **cmux-resume-sessions**: Restore a saved layout if cleanup removes too much
+- **cmux-recover-sessions**: Post-crash recovery (different scope — not for daily use)
+- **cmux-orchestrator**: Worker workspaces get category-tagged automatically via the init hook
+
+**Automation:**
+- Init hook: auto-classify on `session-start` (see "Init Hook" section)
+- Report schedule: daily status via `/schedule` (see "Report Schedule" section)

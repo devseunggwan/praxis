@@ -11,7 +11,6 @@ Random fixes waste time and create new bugs. Quick patches mask underlying issue
 
 **Core principle:** ALWAYS find root cause before attempting fixes. Symptom fixes are failure.
 
-**Replaces:** `superpowers:systematic-debugging`
 **Delegates to:** OMC `debugger` agent (stack trace analysis, root cause isolation)
 
 ## The Iron Law
@@ -209,6 +208,17 @@ If you catch yourself thinking:
 | **2. Pattern** | Find working examples, compare | Identify differences |
 | **3. Hypothesis** | Form theory, test minimally | Confirmed or new hypothesis |
 | **4. Implementation** | Create test, fix, verify | Bug resolved, tests pass |
+
+## Error Handling
+
+| Phase | Failure | Action |
+|-------|---------|--------|
+| Phase 1 (root cause) | Cannot reproduce the bug locally | Gather more evidence (logs, env diffs) before hypothesizing |
+| Phase 1 (root cause) | Stack trace missing or unclear | Add logging and re-run — never guess from incomplete traces |
+| Phase 2 (pattern) | No working reference found | Widen the search (sibling modules, git history, related projects) |
+| Phase 3 (hypothesis) | Minimal test fails to distinguish hypotheses | Split the test further; one test per hypothesis |
+| Phase 4 (implementation) | Fix passes test but breaks another | Back out, return to Phase 1 — root cause is broader than thought |
+| Any phase | 3+ fix attempts failed | STOP — escalate to Phase 4.5 (architecture review) |
 
 ## Integration
 

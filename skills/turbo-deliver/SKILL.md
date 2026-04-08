@@ -32,6 +32,21 @@ NO SKIPPING. NO REORDERING.
 - Triggers: "deliver", "turbo-deliver", "finish up", "cleanup", "finish branch", "branch cleanup"
 - No input required — auto-detects everything from current git state
 
+## Pluggable Steps — Fallback Defaults
+
+When a project's `CLAUDE.md` does not provide routing, these built-in defaults are used:
+
+| Stage | Pluggable Via | Fallback Default |
+|-------|--------------|------------------|
+| Verify | — (built-in) | Auto-detect: `pytest`, `npm test`, `ruff check`, etc. |
+| Code review | Project CLAUDE.md review skill routing | `oh-my-claudecode:code-reviewer` agent |
+| PR creation | Project CLAUDE.md PR-creation skill routing | `gh pr create` with auto-detected repo |
+| Merge | — (built-in) | `gh pr merge --squash --delete-branch` |
+| Compound | — (built-in) | Inline code comments with PR reference |
+| Cleanup | — (built-in) | `git worktree remove` + `git branch -d` |
+
+Projects override these by declaring routing in their `CLAUDE.md`.
+
 ## Mode Detection (Step 0)
 
 On start, detect the current state and choose mode automatically:
@@ -61,7 +76,7 @@ All inputs are derived from the current working directory:
 
 ```bash
 BRANCH=$(git branch --show-current)
-ISSUE_NUMBER=$(echo "$BRANCH" | grep -oP '(?<=hub-)\d+|(?<=issue-)\d+')
+ISSUE_NUMBER=$(echo "$BRANCH" | grep -oP '(?<=issue-)\d+|(?<=hub-)\d+')
 WORKTREE_PATH=$(pwd)
 TARGET_REPO=$(basename $(git remote get-url origin) .git)
 DEFAULT_BRANCH=$(git remote show origin 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}')

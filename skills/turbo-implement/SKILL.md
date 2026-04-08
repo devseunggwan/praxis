@@ -36,7 +36,7 @@ All inputs are derived from the current working directory (same as turbo-deliver
 
 ```bash
 BRANCH=$(git branch --show-current)
-ISSUE_NUMBER=$(echo "$BRANCH" | grep -oP '(?<=hub-)\d+|(?<=issue-)\d+')
+ISSUE_NUMBER=$(echo "$BRANCH" | grep -oP '(?<=issue-)\d+|(?<=hub-)\d+')
 WORKTREE_PATH=$(pwd)
 TARGET_REPO=$(basename $(git remote get-url origin) .git)
 ```
@@ -164,6 +164,16 @@ If "Not yet": show `git diff --stat` and wait.
 | Ralph/autopilot not available | Fall back to Guided mode |
 | Implementation fails mid-way | Save progress, report status, suggest `/debug` |
 | Tests fail after implementation | Invoke `debug` skill for root cause analysis |
+
+## Rationalization Prevention
+
+| Excuse | Reality |
+|--------|---------|
+| "Skip mode selection, just start coding" | Mode mismatch wastes time — ralph on simple tasks loops forever, manual on complex tasks stalls. |
+| "Ralph is always better, pick it by default" | Ralph without acceptance criteria loops without progress. Use it only when criteria exist. |
+| "I'll chain to turbo-deliver later" | Later never comes. Chain immediately or the worktree accumulates stale changes. |
+| "Autopilot on a no-spec task" | Autopilot without a spec invents scope. Pick Guided or write a spec first. |
+| "Skip verification, tests will run in CI" | CI finds the failure 10 minutes later, across a PR review cycle. Run locally first. |
 
 ## Pipeline Visualization
 

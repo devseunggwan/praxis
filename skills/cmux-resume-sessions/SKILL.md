@@ -26,6 +26,15 @@ RESUME RESTORES STRUCTURE AND CONTINUES CONVERSATIONS.
 Resume restores workspace structure (name, cwd) and runs `claude --continue` to pick up the most recent conversation in each directory.
 It does NOT restore runtime state of previously running commands or sessions.
 
+## When to Use
+
+- Restore a workspace layout from a `cmux-save-sessions` snapshot
+- Rehydrate yesterday's working set at the start of a new day
+- Move a session layout to another machine (snapshot → transfer → resume)
+- Triggers: "resume sessions", "session restore", "session resume", "cmux resume", "restore sessions"
+
+> **Not for crash recovery** — after a power loss, use `cmux-recover-sessions` (scans `.jsonl` files directly).
+
 ## Commands
 
 ### `resume [snapshot]` — Restore sessions from snapshot
@@ -84,3 +93,12 @@ Done. Created: 2 | Skipped: 1 | Failed: 1
 | "cwd not found" | Directory was deleted since save | Session is auto-skipped |
 | "No snapshots" | No saved snapshots exist | Save first with `cmux-save-sessions` |
 | Duplicate sessions created | Overlap with already-open sessions | Check existing sessions before restore |
+
+## Rationalization Prevention
+
+| Excuse | Reality |
+|--------|---------|
+| "Restore every snapshot at once" | Old snapshots point to cwd paths that no longer exist. Restore the most recent that's still valid. |
+| "Skip `--no-claude`, always auto-start Claude" | If the target cwd's recent conversation is stale, auto-continue lands in the wrong context. Use `--no-claude` when in doubt. |
+| "Ignore duplicate warnings" | Duplicate workspaces are noise at best, collision at worst. Inspect existing sessions first. |
+| "Restore before verifying the snapshot's host" | Cross-machine restore may succeed with stale paths. Check `hostname` in the JSON before restoring on a new host. |

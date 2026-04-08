@@ -14,6 +14,17 @@ Each worker is a separate process — master crash does NOT kill workers.
 
 **Chains:** `turbo-setup` → execute → `turbo-deliver` as a full pipeline per worker.
 
+## The Iron Law
+
+```
+WORKERS ARE INDEPENDENT. MASTER CRASH MUST NOT KILL WORKERS.
+RESULT COLLECTION IS FILE-BASED — NEVER IN-MEMORY.
+```
+
+Every worker runs as its own cmux workspace process.
+State lives on disk (`/tmp/cmux-orchestrator-*/`) so the orchestrator can be restarted and re-attach to in-flight workers.
+Never pipe worker output directly into the orchestrator process — the master crash would lose everything.
+
 ## Architecture
 
 ```
@@ -292,6 +303,16 @@ full_pipeline_cmd() {
     --max-budget-usd ${budget}"
 }
 ```
+
+## Rationalization Prevention
+
+| Excuse | Reality |
+|--------|---------|
+| "Just run workers in-process, it's simpler" | Master crash = all workers lost. File-based state is the only safe path. |
+| "Skip model routing, use opus for all workers" | Wastes 80% of budget on tasks haiku can do. Route by complexity. |
+| "Don't need a poll loop, workers will notify on done" | Notifications get lost on crash. Polling is boring and reliable. |
+| "Skip result collection, I'll read logs manually" | Results scattered across N log files. Collect into `results/` for downstream use. |
+| "Kill stuck workers immediately" | A worker may be waiting on user input ("Do you want to proceed"). Send-key first, kill only if truly stuck. |
 
 ## Integration
 

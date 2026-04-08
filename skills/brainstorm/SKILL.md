@@ -183,6 +183,17 @@ If you catch yourself:
 
 **ALL of these mean: STOP. Return to the current phase's rules.**
 
+## Error Handling
+
+| Phase | Failure | Action |
+|-------|---------|--------|
+| Phase 0 (context) | Codebase has no relevant prior art | Proceed with empty context — note it in the report |
+| Phase 1 (diverge) | A lens agent fails to produce ideas | Retry once with a different frame; drop if still empty |
+| Phase 1 (diverge) | All lenses converge on one idea | Add more lenses (devil's advocate, first principles, cross-domain) |
+| Phase 2 (cluster) | Ideas don't cluster cleanly | Keep as individual items — forcing clusters hides distinct options |
+| Phase 3 (evaluate) | Scoring matrix incomplete | STOP — a partial matrix produces biased selection |
+| Any phase | User interrupts mid-pipeline | Save current state to `.omc/plans/brainstorm-*.md` for resume |
+
 ## Integration
 
 **Pipeline position:**
