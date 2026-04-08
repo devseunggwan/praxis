@@ -35,7 +35,7 @@ which claude-recover || echo "NOT INSTALLED"
 If missing, create symlink:
 
 ```bash
-ln -sf ~/projects/my-skills/skills/recover-sessions/claude-recover ~/.local/bin/claude-recover
+ln -sf ~/projects/praxis/skills/recover-sessions/claude-recover ~/.local/bin/claude-recover
 ```
 
 ### Step 2: Interview — Recovery Scope

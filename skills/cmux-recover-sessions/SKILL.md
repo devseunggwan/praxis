@@ -35,7 +35,7 @@ which cmux-recover-sessions || echo "NOT INSTALLED"
 If missing, create symlink:
 
 ```bash
-ln -sf ~/projects/my-skills/skills/cmux-recover-sessions/cmux-recover-sessions ~/.local/bin/cmux-recover-sessions
+ln -sf ~/projects/praxis/skills/cmux-recover-sessions/cmux-recover-sessions ~/.local/bin/cmux-recover-sessions
 ```
 
 Also verify cmux is running:
