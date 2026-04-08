@@ -12,6 +12,17 @@ cmux variant of `recover-sessions` — replaces tmux backend with cmux workspace
 
 **Core principle:** Claude Code conversations are safely persisted to disk as `.jsonl` files. Recovery = find saved sessions and open them in cmux workspaces.
 
+## The Iron Law
+
+```
+RECOVERY IS NEVER DESTRUCTIVE. LIVE WORKSPACES MUST NOT BE TOUCHED.
+```
+
+Recovery reads `.jsonl` files and re-opens them in new cmux workspaces. It must never:
+- Close or replace any currently running cmux workspace
+- Overwrite or delete saved conversation files
+- Modify working directories — `cwd` is informational only
+
 ## When to Use
 
 - After a Bun segfault crash that killed a Claude Code session
@@ -35,7 +46,9 @@ which cmux-recover-sessions || echo "NOT INSTALLED"
 If missing, create symlink:
 
 ```bash
-ln -sf ~/projects/praxis/skills/cmux-recover-sessions/cmux-recover-sessions ~/.local/bin/cmux-recover-sessions
+# Replace PRAXIS_REPO with your local praxis clone path (e.g., ~/projects/praxis)
+PRAXIS_REPO=~/projects/praxis
+ln -sf "$PRAXIS_REPO/skills/cmux-recover-sessions/cmux-recover-sessions" ~/.local/bin/cmux-recover-sessions
 ```
 
 Also verify cmux is running:
@@ -236,10 +249,10 @@ Scans all `~/.claude*/projects/` directories automatically. For non-default conf
 Prevention beats recovery. Always name sessions at startup:
 
 ```bash
-claude --name "hub-700-feat-xyz"
+claude --name "issue-42-feat-xyz"
 ```
 
-Named sessions recover instantly: `claude --resume "hub-700"` (fuzzy match).
+Named sessions recover instantly: `claude --resume "issue-42"` (fuzzy match).
 
 ## Troubleshooting
 
@@ -249,6 +262,15 @@ Named sessions recover instantly: `claude --resume "hub-700"` (fuzzy match).
 | "cmux not reachable" | cmux not running | Start cmux app first |
 | Workspace creation fails | Socket auth issue | Check `CMUX_SOCKET_PASSWORD` |
 | Wrong directory | cwd extraction failed | Check progress.cwd in jsonl |
+
+## Rationalization Prevention
+
+| Excuse | Reality |
+|--------|---------|
+| "Ignore the Bun segfault, re-run directly" | The crash may be deterministic. Recover first, then diagnose the crash log. |
+| "Widen the scan to all time" | Massive scans surface months-old throwaway sessions. Use a reasonable `--from`/`--to` window. |
+| "Skip naming sessions, I'll remember which is which" | Unnamed sessions recover as "session_<id>". After 10 recoveries they're indistinguishable. Always `claude --name`. |
+| "Re-run recovery if it fails partway" | Re-running changes mtimes and can hide already-recovered sessions. Diagnose the failure first. |
 
 ## Integration
 

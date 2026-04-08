@@ -143,10 +143,7 @@ classify_category() {
   local name="$1"
   local branch="${2:-main}"
 
-  if echo "$branch" | grep -qE '^hub-[0-9]+-(feat|refactor|docs|test|chore|fix|perf|ci|build)-'; then
-    echo "[DEV]"; return
-  fi
-  if echo "$branch" | grep -qE '^issue-[0-9]+-(feat|refactor|fix)-'; then
+  if echo "$branch" | grep -qE '^(issue|hub)-[0-9]+-(feat|refactor|docs|test|chore|fix|perf|ci|build)-'; then
     echo "[DEV]"; return
   fi
 

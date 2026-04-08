@@ -28,6 +28,16 @@ SAVE CAPTURES TRUTH. CURRENT SESSION IS EXCLUDED BY DEFAULT.
 Save records the exact state at the current moment.
 The session running this script (the manager session) is excluded by default — only work sessions are saved.
 
+## When to Use
+
+- Capture the current workspace layout before a system reboot or cleanup
+- Create a shareable snapshot of a multi-workspace setup for another machine
+- Record daily work state for later `cmux-resume-sessions` restore
+- Feed input data to other skills that need a session list
+- Triggers: "save sessions", "session save", "session snapshot", "cmux save", "list snapshots", "snapshot list"
+
+> **Not for crash recovery** — after a power loss, use `cmux-recover-sessions` (reads `.jsonl` files directly).
+
 ## Commands
 
 ### `save` — Save session snapshot
@@ -124,3 +134,12 @@ done
 | "cmux is not running" | cmux app not running | Start cmux app |
 | "jq is required" | jq not installed | `brew install jq` |
 | 0 sessions saved | Only current session exists | Use `--include-self` flag |
+
+## Rationalization Prevention
+
+| Excuse | Reality |
+|--------|---------|
+| "Include the current session too" | The manager session would be in the snapshot, and `--include-self` can accidentally close the session you are in. |
+| "Skip saving, I'll remember the layout" | You won't. Multi-workspace layouts vanish on reboot. Save is cheap. |
+| "Overwrite the previous snapshot" | Timestamped files are the history. Overwriting discards recovery points. |
+| "Close all sessions after save" | Read the list first. An ACTIVE session may still be doing meaningful work. |

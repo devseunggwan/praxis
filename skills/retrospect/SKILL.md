@@ -56,7 +56,7 @@ You MUST complete each stage before proceeding to the next.
 **Before scanning the conversation:**
 
 1. **Read CLAUDE.md** — load all rules, behavioral guidelines, and workflow requirements
-   - Global: `~/.claude-5x/CLAUDE.md`
+   - Global: `$CLAUDE_CONFIG_DIR/CLAUDE.md`
    - Project: `CLAUDE.md` in cwd (if exists)
    - Key sections: Mandatory Rules, Behavioral Rules, Workflow rules
 
@@ -144,17 +144,17 @@ Do NOT execute any action until user approves.
 
 For each approved action:
 
-1. **MEMORY.md feedback** → Write to `~/.claude-5x/projects/.../memory/` with proper frontmatter
+1. **MEMORY.md feedback** → Write to `$CLAUDE_CONFIG_DIR/projects/.../memory/` with proper frontmatter
    - Type: `feedback`
    - Include: rule, why, how to apply
    - Update `MEMORY.md` index
 
 2. **GitHub issue** → Use project's issue creation skill or `gh issue create`
-   - Title: Conventional Commits format, English
-   - Body: Korean, with background + task list
+   - Title: Conventional Commits format (per project convention)
+   - Body: per project convention, with background + task list
 
 3. **CLAUDE.md draft** → Write proposed rule addition as a markdown block
-   - ⚠️ `~/.claude-5x/CLAUDE.md` is **global scope** — changes affect every project
+   - ⚠️ `$CLAUDE_CONFIG_DIR/CLAUDE.md` is **global scope** — changes affect every project
    - Present the draft to user for review BEFORE any edit
    - Apply only with explicit approval ("yes, add this rule")
 
@@ -196,7 +196,7 @@ If you catch yourself:
 - Adding a MEMORY.md entry that just repeats the CLAUDE.md rule verbatim (no new insight)
 - Creating a GitHub issue for every minor friction (low-ROI noise)
 - Skipping the approval step and executing actions directly
-- Editing `~/.claude-5x/CLAUDE.md` without presenting the draft first — this is global config, affects every project
+- Editing `$CLAUDE_CONFIG_DIR/CLAUDE.md` without presenting the draft first — this is global config, affects every project
 
 **ALL of these mean: STOP. Return to Stage 2.**
 
@@ -208,6 +208,17 @@ If you catch yourself:
 | **2. Analyze** | Scan conversation, map to rules, find root cause | Root cause (not symptom) for each pattern |
 | **3. Report** | Present table, collect approval per item | User approved at least 1 item (or confirmed 0 findings) |
 | **4. Execute** | Run approved actions, show evidence | Completion report with links/paths |
+
+## Error Handling
+
+| Stage | Failure | Action |
+|-------|---------|--------|
+| Stage 1 (load) | CLAUDE.md not found (project or global) | Proceed with global defaults; flag the missing file in the report |
+| Stage 2 (analyze) | Session history not accessible | Fall back to the user's verbal summary as input to steps 2-4 |
+| Stage 2 (analyze) | No friction events found | Exit with "No patterns found. ✅" — do not fabricate findings |
+| Stage 3 (report) | User rejects all findings | Capture the rejection itself as a feedback signal for future retrospects |
+| Stage 4 (execute) | MEMORY.md write fails | Report the path error; never silently drop the feedback |
+| Stage 4 (execute) | GitHub issue creation fails | Fall back to saving a note in `.omc/plans/` for later manual creation |
 
 ## Integration
 

@@ -11,7 +11,6 @@ Claiming work is complete without verification is dishonesty, not efficiency.
 
 **Core principle:** Evidence before claims, always.
 
-**Replaces:** `superpowers:verification-before-completion`
 **Delegates to:** OMC `ultraqa` (test → verify → fix → repeat cycle)
 
 ## The Iron Law
@@ -86,8 +85,9 @@ ruff check . && ruff format --check .
 # 3. Build (if applicable)
 npm run build
 
-# 4. Functional test (if applicable)
-hubctl exec <env> airflow dags trigger <dag_id>
+# 4. Functional test (if applicable — project-specific)
+# e.g., hit real API endpoint, run real CLI, trigger pipeline run
+# Examples: curl http://localhost:8000/health | jq, cargo run -- <args>, <your-cli> trigger <job>
 ```
 
 ### Step 3: Report Evidence

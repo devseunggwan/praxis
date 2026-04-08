@@ -11,6 +11,17 @@ Bulk recover Claude Code sessions after power loss or tmux server crash.
 
 **Core principle:** Claude Code conversations are safely persisted to disk as `.jsonl` files. Recovery = find saved sessions and arrange them in tmux panes.
 
+## The Iron Law
+
+```
+RECOVERY IS NEVER DESTRUCTIVE. LIVE SESSIONS MUST NOT BE TOUCHED.
+```
+
+Recovery reads `.jsonl` files and re-opens them in new tmux panes. It must never:
+- Kill or replace any currently running tmux session
+- Overwrite or delete saved conversation files
+- Modify working directories — `cwd` is informational only
+
 ## When to Use
 
 - After a Mac power loss when all tmux sessions are gone
@@ -35,7 +46,9 @@ which claude-recover || echo "NOT INSTALLED"
 If missing, create symlink:
 
 ```bash
-ln -sf ~/projects/praxis/skills/recover-sessions/claude-recover ~/.local/bin/claude-recover
+# Replace PRAXIS_REPO with your local praxis clone path (e.g., ~/projects/praxis)
+PRAXIS_REPO=~/projects/praxis
+ln -sf "$PRAXIS_REPO/skills/recover-sessions/claude-recover" ~/.local/bin/claude-recover
 ```
 
 ### Step 2: Interview — Recovery Scope
@@ -240,10 +253,10 @@ Layout selection:
 Prevention beats recovery. Always name sessions at startup:
 
 ```bash
-claude --name "hub-700-feat-xyz"
+claude --name "issue-42-feat-xyz"
 ```
 
-Named sessions recover instantly: `claude --resume "hub-700"` (fuzzy match).
+Named sessions recover instantly: `claude --resume "issue-42"` (fuzzy match).
 
 ## Troubleshooting
 
@@ -254,6 +267,15 @@ Named sessions recover instantly: `claude --resume "hub-700"` (fuzzy match).
 | tmux creation fails | tmux not installed | `brew install tmux` |
 | Wrong directory | cwd extraction failed | Check progress.cwd in jsonl |
 | Terminal window doesn't open | Terminal app not detected | Use `--attach` or manual mode instead |
+
+## Rationalization Prevention
+
+| Excuse | Reality |
+|--------|---------|
+| "Widen the scan to all time, it'll be fine" | Massive scans surface months-old throwaway sessions. Use a reasonable `--from`/`--to` window. |
+| "Skip naming sessions, I'll remember which is which" | Unnamed sessions recover as "session_<id>". After 10 recoveries they're indistinguishable. Always `claude --name`. |
+| "Re-run recovery if it fails partway" | Re-running changes mtimes and can hide already-recovered sessions. Diagnose the failure first. |
+| "Kill the old tmux session to recover cleanly" | The old session may still hold useful state. Recovery is additive — never destructive. |
 
 ## Integration
 
