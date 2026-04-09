@@ -47,7 +47,7 @@ description: Delegate a task to an independent Claude Code session in a new cmux
 args = parse("{{ARGUMENTS}}")
 model = args.model || "sonnet"
 cwd = args.cwd || $(pwd)
-budget = args.budget || ""
+budget = args["max-budget-usd"] || ""
 task = args.task (remaining text after flags)
 short_task = task[:30], sanitized to [a-zA-Z0-9가-힣 -] only (for cmux workspace name)
 timestamp = epoch seconds + PID (e.g., 1744163800-12345) to avoid collision
@@ -66,7 +66,8 @@ COMMITS=$(git log --oneline -5 2>/dev/null || echo "no git history")
 DIFF_STAT=$(git diff --stat HEAD 2>/dev/null || echo "no changes")
 
 # 2. 변경 파일 목록 (base branch 대비)
-BASE_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo "main")
+BASE_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+BASE_BRANCH=${BASE_BRANCH:-main}
 CHANGED_FILES=$(git diff --name-only $(git merge-base HEAD "origin/$BASE_BRANCH" 2>/dev/null || echo HEAD~5)..HEAD 2>/dev/null || echo "unknown")
 
 # 3. PR 정보 (있으면)
@@ -146,7 +147,7 @@ cmux notify --title "cmux-delegate" --body "Task completed: {short_task}" 2>/dev
 ```bash
 WS_RAW=$(cmux new-workspace \
   --name "[delegate] {short_task}" \
-  --cwd {cwd} \
+  --cwd "{cwd}" \
   --command "bash /tmp/cmux-delegate-{timestamp}.sh")
 
 # Validate workspace creation
