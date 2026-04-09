@@ -78,7 +78,9 @@ You MUST complete each stage before proceeding to the next.
 
 **Pre-scan: Quick friction event identification** — scan the conversation for up to 5 friction events (user corrections, retries, skipped steps, stalls) BEFORE calling agents. This provides the input for agent calls.
 
-**MANDATORY AGENT CALLS — after pre-scan, MUST call sequentially (analyst depends on tracer output):**
+**Early exit**: If pre-scan finds 0 friction events, skip agent calls and exit with "No patterns found. ✅" — do not call agents with empty input.
+
+**MANDATORY AGENT CALLS — when pre-scan finds 1+ friction events, MUST call sequentially (analyst depends on tracer output):**
 
 1. **tracer agent** (causal chain analysis) — call FIRST:
    `Agent(subagent_type="oh-my-claudecode:tracer", model="sonnet")`
