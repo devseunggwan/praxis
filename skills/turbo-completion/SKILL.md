@@ -63,11 +63,13 @@ PR_JSON=$(gh pr list --head "$BRANCH" --state open --json number,title,url --jq 
 VERIFY_ONLY=false  # set true if --verify-only flag or "verify"/"done check" trigger
 ```
 
-| Condition | Mode | Pipeline |
-|-----------|------|----------|
-| `--verify-only` flag or verify trigger | **Verify-only** | verify (Stage 1 only) |
-| No open PR for current branch | **Full** | verify → review → PR → merge → compound → cleanup |
-| Open PR exists | **Merge-only** | compound → merge → cleanup |
+| Priority | Condition | Mode | Pipeline |
+|----------|-----------|------|----------|
+| 1st | `--verify-only` flag or verify trigger | **Verify-only** | verify (Stage 1 only) |
+| 2nd | No open PR for current branch | **Full** | verify → review → PR → merge → compound → cleanup |
+| 3rd | Open PR exists | **Merge-only** | compound → merge → cleanup |
+
+> Conditions are evaluated top-to-bottom; first match wins.
 
 Present the detected mode and ask for confirmation:
 
@@ -162,6 +164,14 @@ Verification results:
 | Bug fixed | Test original symptom: passes | "Code changed, assumed fixed" |
 | Requirements met | Line-by-line checklist verified | "Tests pass" alone |
 | API works | Response body content verified | HTTP 200 status code alone |
+
+**OMC ultraqa delegation** — when available, delegate to `ultraqa` for the fix→retry cycle:
+
+```
+ultraqa cycle: test → verify → fix (on failure) → repeat (until pass)
+```
+
+If `ultraqa` is unavailable, run the manual retry:
 
 **On failure:**
 1. Auto-fix attempt (ruff format, eslint --fix)
