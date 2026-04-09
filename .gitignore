@@ -16,5 +16,8 @@ research_notes.md
 *.log
 tmp/
 
+# OMC (oh-my-claudecode local state)
+.omc/
+
 # Documentation (local only)
 docs/
