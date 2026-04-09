@@ -78,30 +78,30 @@ You MUST complete each stage before proceeding to the next.
 
 **Pre-scan: Quick friction event identification** — scan the conversation for up to 5 friction events (user corrections, retries, skipped steps, stalls) BEFORE calling agents. This provides the input for agent calls.
 
-**MANDATORY AGENT CALLS — after pre-scan, MUST call both:**
+**MANDATORY AGENT CALLS — after pre-scan, MUST call sequentially (analyst depends on tracer output):**
 
-1. **tracer agent** (causal chain analysis):
+1. **tracer agent** (causal chain analysis) — call FIRST:
    `Agent(subagent_type="oh-my-claudecode:tracer", model="sonnet")`
-   - Input: friction events identified from conversation scan
+   - Input: friction events identified from pre-scan
    - Output: causal chains with confidence scores
    - Do NOT skip this call. "I can analyze this myself" is a Red Flag.
 
-2. **analyst agent** (pattern clustering):
+2. **analyst agent** (pattern clustering) — call AFTER tracer completes:
    `Agent(subagent_type="oh-my-claudecode:analyst", model="sonnet")`
-   - Input: friction events + tracer causal chains
+   - Input: friction events + tracer causal chains (from step 1)
    - Output: clustered patterns with root causes
 
-**Then scan the current session's conversation history:**
+**Then refine using agent outputs:**
 
 > **Scope:** Scan the most recent 50 turns, or back to the last session boundary.
-> Stop after identifying 5 distinct friction events — clustering (step 4) handles de-duplication.
+> Stop after identifying 5 distinct friction events — clustering (step 6) handles de-duplication.
 > If session history is not accessible, use the user's verbal summary as input to steps 3–8.
 
-3. **Identify friction events** — moments where:
-   - User corrected Claude's direction
-   - Tool calls were retried unnecessarily
-   - A workflow step was skipped or out of order
-   - The session stalled, looped, or backtracked
+3. **Refine friction events with agent outputs** — merge pre-scan events with tracer/analyst results:
+   - Add any new friction events the agents identified that pre-scan missed
+   - Update causal chains using tracer confidence scores
+   - Drop false positives that agents ruled out
+   - Final list: up to 5 distinct friction events with causal chains attached
 
 4. **Map each event to a CLAUDE.md rule** (or gap):
    - Which rule was applicable?
@@ -137,17 +137,22 @@ You MUST complete each stage before proceeding to the next.
 
    | Condition | Action Type | Rationale |
    |-----------|-------------|-----------|
-   | New pattern (not in MEMORY.md) | memory | First occurrence — capture for future reference |
-   | Repeat (in MEMORY.md, 1-2회) | GitHub issue | Memory alone failed — need systemic fix |
-   | Repeat (3회+) | hook or skill | Multiple memory entries = enforcement gap |
+   | New pattern (structural root cause, likely to recur) | memory | First occurrence — capture for future reference |
+   | Repeat (in MEMORY.md, 1-2x) | GitHub issue | Memory alone failed — need systemic fix |
+   | Repeat (3x+) | hook or skill | Multiple memory entries = enforcement gap |
    | Missing rule (new) | CLAUDE.md draft | No rule exists for this pattern |
-   | Missing rule + Repeat | CLAUDE.md draft + GitHub issue | 규칙 부재로 인한 반복 — 규칙 추가 + 이행 이슈 동시 생성 |
+   | Missing rule + Repeat | CLAUDE.md draft + GitHub issue | Missing rule caused repeat — add rule + compliance issue |
    | Tool friction | GitHub issue | Tool improvement needed |
-   | One-off mistake | note only | No persistent action needed |
+   | One-off mistake (situational cause, unlikely to recur) | note only | No persistent action needed |
+
+   **Distinguishing "New pattern" vs "One-off mistake":**
+   - **New pattern**: root cause is structural (missing rule, absent skill, unclear workflow) → likely to recur in future sessions
+   - **One-off mistake**: root cause is situational (context loss, typo, unusual edge case) → unlikely to recur under normal conditions
+   - When uncertain, default to `memory` (safer to capture than to miss)
 
    ⚠️ **BLOCKED unless justified**: If `repeat=true`, the action type CANNOT be `memory`.
 
-   **Escape hatch**: If `repeat=true` AND `resolved=true` (해당 feedback에 이미 issue/hook 해결 조치가 존재), `note only`로 처리 가능. 이 경우 기존 해결 조치가 여전히 유효한지 확인하는 문장을 report에 포함할 것.
+   **Escape hatch**: If `repeat=true` AND `resolved=true` (existing issue/hook resolution already exists for this feedback), `note only` is allowed. In this case, include a sentence in the report confirming that the existing resolution is still effective.
 
 ### Stage 3: Report + Approval
 
@@ -190,6 +195,8 @@ For each finding, user selects:
 Do NOT execute any action until user approves.
 
 ### Stage 4: Execute
+
+**"note only" items require no execution** — they appear in the completion report as acknowledged but need no persistent artifact.
 
 For each approved action:
 
@@ -286,7 +293,7 @@ If you catch yourself:
 | Stage | Failure | Action |
 |-------|---------|--------|
 | Stage 1 (load) | CLAUDE.md not found (project or global) | Proceed with global defaults; flag the missing file in the report |
-| Stage 2 (analyze) | Session history not accessible | Fall back to the user's verbal summary as input to steps 2-4 |
+| Stage 2 (analyze) | Session history not accessible | Fall back to the user's verbal summary as input to steps 3–8 |
 | Stage 2 (analyze) | No friction events found | Exit with "No patterns found. ✅" — do not fabricate findings |
 | Stage 2 (analyze) | MEMORY.md 스캔 실패 (파일 접근 불가) | 모든 finding을 신규 패턴으로 처리 (repeat=false). 스캔 실패를 report에 명시 |
 | Stage 2 (analyze) | MEMORY.md 비어있음 | 정상 처리 — 모든 finding이 신규 패턴 |
