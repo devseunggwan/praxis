@@ -223,7 +223,7 @@ If you catch yourself thinking:
 ## Integration
 
 **Entry point:** Triggered by any bug, test failure, or unexpected behavior during work
-**Exit point:** Fix verified → continue with `verify-completion`
+**Exit point:** Fix verified → continue with `turbo-completion`
 
 **OMC delegation:**
 - `debugger` agent: root cause analysis, stack trace analysis

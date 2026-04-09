@@ -11,7 +11,7 @@ Compresses workflow steps 1-6 (issue → plan → branch → worktree → cd →
 
 **Core principle:** Ceremony is overhead. Setup should take 3 minutes, not 12.
 
-**Chains to:** `turbo-deliver` (after execution phase completes)
+**Chains to:** `turbo-completion` (after execution phase completes)
 
 ## The Iron Law
 
@@ -50,7 +50,7 @@ The user provides ONE of:
 
 ## Outputs (for chaining)
 
-After successful setup, report these values (used by `turbo-deliver`):
+After successful setup, report these values (used by `turbo-completion`):
 
 ```
 ═══════════════════════════════════════════════
@@ -63,7 +63,7 @@ After successful setup, report these values (used by `turbo-deliver`):
  Repo:      <target-repo>
  Deps:      <installed|skipped>
 
- Next: Implement the feature, then run /turbo-deliver
+ Next: Implement the feature, then run /turbo-completion
 ═══════════════════════════════════════════════
 ```
 
@@ -119,7 +119,7 @@ gh issue create \
 ```bash
 BRANCH="issue-${ISSUE_NUMBER}-${TYPE}-${SHORT_DESC}"
 # Example: issue-42-feat-chart-filtering
-# Legacy prefix `hub-` is still recognized by turbo-implement/turbo-deliver for backward compatibility.
+# Legacy prefix `hub-` is still recognized by turbo-implement/turbo-completion for backward compatibility.
 ```
 
 **Branch base rules (from CLAUDE.md):**
@@ -204,7 +204,7 @@ issue → gh issue close (with /cancel comment)
 
 | Excuse | Reality |
 |--------|---------|
-| "I'll just create the branch, skip the issue" | No issue = no audit trail. turbo-deliver relies on issue number to close the loop. |
+| "I'll just create the branch, skip the issue" | No issue = no audit trail. turbo-completion relies on issue number to close the loop. |
 | "Worktree is overhead, I'll branch in-place" | In-place branching blocks other work in the main checkout. Worktrees are free. |
 | "Deps will install later when I need them" | First `npm test` fails and you lose 2 minutes debugging. Install once, upfront. |
 | "Skip the rollback on failure, I'll clean up manually" | Manual cleanup gets forgotten. Partial state confuses future sessions. |
@@ -213,20 +213,20 @@ issue → gh issue close (with /cancel comment)
 ## Chaining Interface
 
 ```
-turbo-setup → [user implements] → turbo-deliver
+turbo-setup → [user implements] → turbo-completion
                                    ↓ receives:
                                    - ISSUE_NUMBER (from git branch name)
                                    - WORKTREE_PATH (from cwd)
                                    - TARGET_REPO (from git remote)
 ```
 
-`turbo-deliver` auto-detects these from the current git state — no explicit handoff needed.
+`turbo-completion` auto-detects these from the current git state — no explicit handoff needed.
 
 ## Integration
 
 **Workflow position:**
 ```
-[user request] → [turbo-setup] → [EXECUTE] → [turbo-deliver] → [done]
+[user request] → [turbo-setup] → [EXECUTE] → [turbo-completion] → [done]
 ```
 
 **Previous step:** User request (task description or URL)
