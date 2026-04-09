@@ -32,6 +32,26 @@ Development workflow skills for Claude Code — disciplined, fast, resilient.
 | `cmux-session-manager` | cmux session lifecycle automation — status, cleanup, init, report |
 | `cmux-orchestrator` | Dispatch and supervise multiple Claude Code workers in cmux workspaces |
 
+## Prerequisites
+
+Most skills delegate to external agents or session managers. Install the dependencies that match your usage tier.
+
+| Dependency | Required for | Install |
+|------------|-------------|---------|
+| **oh-my-claudecode** | Agent delegation (tracer, analyst, ultraqa, code-reviewer) | `omc install` |
+| **cmux** | Session management skills (cmux-*) | `npm i -g @anthropic/cmux` |
+| **gh CLI** | Issue/PR operations (turbo-*) | `brew install gh` |
+
+### Compatibility Tiers
+
+| Tier | What works | What you need |
+|------|-----------|---------------|
+| **Standalone** | turbo-setup, recover-sessions | `gh` CLI only |
+| **Enhanced** | + turbo-implement, turbo-completion, debug, retrospect | + oh-my-claudecode |
+| **Full** | + all cmux-* skills | + cmux |
+
+> Skills in higher tiers fall back to manual/built-in alternatives when their dependencies are missing, but with reduced functionality.
+
 ## Installation
 
 ### Plugin (recommended)

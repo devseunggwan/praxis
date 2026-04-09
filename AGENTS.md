@@ -4,6 +4,14 @@ Development workflow skills for Claude Code — disciplined, fast, resilient.
 
 Each skill is an orchestrator with pluggable steps. External integrations (issue tracker, PR tool, code review) are routed via the project's CLAUDE.md — no hardcoded dependencies.
 
+## Prerequisites
+
+| Tier | What works | Dependencies |
+|------|-----------|--------------|
+| **Standalone** | turbo-setup, recover-sessions | `gh` CLI |
+| **Enhanced** | + turbo-implement, turbo-completion, debug, retrospect | + oh-my-claudecode |
+| **Full** | + all cmux-* skills | + cmux |
+
 ## Skills (12)
 
 ### Workflow Lifecycle
