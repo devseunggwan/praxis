@@ -71,6 +71,7 @@ SCHEDULE_KEYWORDS = [
 
 MIN_USER_MSGS = 4
 TAIL_SIZE = 15
+USER_TAIL_SIZE = 20
 
 results = []
 
@@ -110,6 +111,7 @@ for base, home_label in config_homes.items():
             is_command = False
             is_schedule = False
             tail_buf = []
+            user_tail_buf = []
             was_exited = False
 
             with open(fpath) as f:
@@ -126,6 +128,9 @@ for base, home_label in config_homes.items():
 
                         if obj.get("type") == "user" and not obj.get("isSidechain"):
                             user_count += 1
+                            user_tail_buf.append(obj)
+                            if len(user_tail_buf) > USER_TAIL_SIZE:
+                                user_tail_buf.pop(0)
                             msg = obj.get("message", {})
                             raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
                             if not isinstance(raw, str):
@@ -149,16 +154,18 @@ for base, home_label in config_homes.items():
                     except Exception:
                         pass
 
-            # Detect intentional exit in tail
-            # Check for /exit command or known goodbye messages
-            for obj in tail_buf:
-                if obj.get("type") == "user":
-                    msg = obj.get("message", {})
-                    raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
-                    if isinstance(raw, str):
-                        if "/exit" in raw or "/quit" in raw:
-                            was_exited = True
-                            break
+            # Detect intentional exit by scanning the last N user messages.
+            # /exit/quit appear as <command-name>/exit</command-name> in a user message.
+            # Tracking user messages separately keeps detection reliable regardless of
+            # how many tool_result / attachment / file-history-snapshot events were
+            # appended after /exit.
+            for obj in user_tail_buf:
+                msg = obj.get("message", {})
+                raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+                if isinstance(raw, str):
+                    if "/exit" in raw or "/quit" in raw:
+                        was_exited = True
+                        break
 
             # ── Filtering ──
             if is_teammate:
