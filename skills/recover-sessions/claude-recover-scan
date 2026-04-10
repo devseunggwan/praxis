@@ -71,6 +71,7 @@ SCHEDULE_KEYWORDS = [
 
 MIN_USER_MSGS = 4
 TAIL_SIZE = 15
+STRICT_TIMESTAMP = os.environ.get("STRICT_TIMESTAMP") == "1"
 
 results = []
 
@@ -90,10 +91,11 @@ for base, home_label in config_homes.items():
                 continue
 
             mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath))
-            if mtime < cutoff:
-                continue
-            if cutoff_end and mtime >= cutoff_end:
-                continue
+            if not STRICT_TIMESTAMP:
+                if mtime < cutoff:
+                    continue
+                if cutoff_end and mtime >= cutoff_end:
+                    continue
 
             size = os.path.getsize(fpath)
             if size < 10240:
@@ -111,6 +113,7 @@ for base, home_label in config_homes.items():
             is_schedule = False
             tail_buf = []
             was_exited = False
+            last_internal_ts = None
 
             with open(fpath) as f:
                 for line in f:
@@ -120,6 +123,10 @@ for base, home_label in config_homes.items():
                         tail_buf.append(obj)
                         if len(tail_buf) > TAIL_SIZE:
                             tail_buf.pop(0)
+
+                        ts_str = obj.get("timestamp")
+                        if ts_str:
+                            last_internal_ts = ts_str
 
                         if not cwd and obj.get("cwd"):
                             cwd = obj["cwd"]
@@ -159,6 +166,23 @@ for base, home_label in config_homes.items():
                         if "/exit" in raw or "/quit" in raw:
                             was_exited = True
                             break
+
+            # Re-evaluate freshness using internal timestamp (fallback to mtime).
+            # File mtime can be touched by crash recovery / metadata flush even when
+            # the actual conversation ended earlier; the internal `timestamp` field
+            # on the last logged event reflects real activity.
+            if last_internal_ts:
+                try:
+                    ts_local = datetime.datetime.fromisoformat(
+                        last_internal_ts.replace("Z", "+00:00")
+                    ).astimezone().replace(tzinfo=None)
+                    if ts_local < cutoff:
+                        continue
+                    if cutoff_end and ts_local >= cutoff_end:
+                        continue
+                    mod_time = ts_local.strftime("%m/%d %H:%M")
+                except Exception:
+                    pass
 
             # ── Filtering ──
             if is_teammate:
