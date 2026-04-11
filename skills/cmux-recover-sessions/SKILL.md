@@ -167,6 +167,19 @@ cmux workspaces are now open. Navigate with:
   Cmd+1-9         jump to workspace by number
   Cmd+Shift+]     next workspace
   Cmd+Shift+[     previous workspace
+
+⚠️ Note: Claude Code re-renders a resumed conversation from the first
+   message, so the visible viewport looks like the session "reverted to
+   its earliest state".
+   
+   Recovery always launches each workspace with `claude --resume <uuid>`,
+   pointing at the exact .jsonl discovered on disk. In most cases that
+   loads the intended transcript, but it is not a guarantee — a bad or
+   stale session id, a partial flush at crash time, or a truncated tail
+   can all surface as "wrong" context. Always confirm the state in each
+   restored workspace before trusting it:
+     - scroll the viewport to the bottom, or
+     - ask the model directly: "what was the last thing we worked on?"
 ```
 
 ## Script Reference

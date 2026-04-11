@@ -64,6 +64,26 @@ bash "$(dirname "$0")/cmux-resume-sessions" [snapshot-file]
 - Previously running commands
 - Session runtime state (git status, open editors, etc.)
 
+> ⚠️ **Resumed sessions render from the first message.** Claude Code re-renders
+> a resumed conversation starting at the oldest message, so a workspace will
+> *look* like it reverted to its earliest state.
+>
+> Which command fires for each workspace depends on what the snapshot
+> captured:
+> - `claude --resume <session-id>` — used when the snapshot carries a
+>   concrete session id. This *usually* reopens that exact transcript,
+>   but it is not a guarantee (stale session id, partial flush at save
+>   time, or a truncated tail can all surface as unexpected context).
+> - `claude --continue` — the fallback when the snapshot omitted a
+>   session id. This attaches to the cwd's most recent conversation for
+>   that working directory, which may be a completely different chain
+>   from the one you saved. See the *Rationalization Prevention* section
+>   at the bottom for the exact failure mode.
+>
+> Always verify each restored workspace before trusting it:
+> - scroll the viewport to the bottom, or
+> - ask the model directly: *"what was the last thing we worked on?"*
+
 ## Output Example
 
 ```

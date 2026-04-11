@@ -321,4 +321,12 @@ if [[ "$MODE" != "plain" ]]; then
   echo "  Cmd+1-9              jump by number"
   echo "  Cmd+Shift+]          next workspace"
   echo "  Cmd+Shift+[          previous workspace"
+  echo ""
+  echo "Tip: Claude Code renders resumed sessions from the first message,"
+  echo "     so a workspace will look 'reverted' on open."
+  echo "     Each workspace was launched with 'claude --resume <uuid>';"
+  echo "     in most cases that loads the intended transcript, but it is"
+  echo "     not a guarantee (bad session id, partial flush, stale file)."
+  echo "     Confirm each workspace before trusting it: scroll to the"
+  echo "     bottom, or ask 'what was the last thing we worked on?'"
 fi
