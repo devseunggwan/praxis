@@ -73,8 +73,28 @@ MIN_USER_MSGS = 4
 TAIL_SIZE = 15
 USER_TAIL_SIZE = 20
 STRICT_TIMESTAMP = os.environ.get("STRICT_TIMESTAMP") == "1"
+# Namespaced env var so this cannot accidentally trip on a generic
+# VERBOSE setting that another tool in the shell might be using. The
+# legacy name is still honored for a release or two.
+VERBOSE = (
+    os.environ.get("PRAXIS_RECOVER_VERBOSE") == "1"
+    or os.environ.get("VERBOSE") == "1"
+)
 
 results = []
+filter_counts = {
+    "subagent": 0,
+    "mtime": 0,
+    "tiny": 0,
+    "exited": 0,
+    "short": 0,
+    "no_msg": 0,
+    "schedule": 0,
+    "teammate": 0,
+    "command": 0,
+}
+total_discovered = 0
+total_scanned = 0
 
 for base, home_label in config_homes.items():
     if not os.path.isdir(base):
@@ -87,8 +107,10 @@ for base, home_label in config_homes.items():
             if not fname.endswith(".jsonl"):
                 continue
             fpath = os.path.join(full_dir, fname)
+            total_discovered += 1
 
             if "/subagents/" in fpath:
+                filter_counts["subagent"] += 1
                 continue
 
             mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath))
@@ -96,8 +118,10 @@ for base, home_label in config_homes.items():
                 # Normal mode: mtime prefilter excludes obviously old files
                 # before we pay the cost of reading them.
                 if mtime < cutoff:
+                    filter_counts["mtime"] += 1
                     continue
                 if cutoff_end and mtime >= cutoff_end:
+                    filter_counts["mtime"] += 1
                     continue
             # STRICT_TIMESTAMP mode intentionally skips the mtime prefilter
             # (so files touched by crash recovery metadata flush still get
@@ -108,8 +132,10 @@ for base, home_label in config_homes.items():
 
             size = os.path.getsize(fpath)
             if size < 10240:
+                filter_counts["tiny"] += 1
                 continue
 
+            total_scanned += 1
             size_h = f"{size/1048576:.1f}M" if size > 1048576 else f"{size//1024}K"
             mod_time = mtime.strftime("%m/%d %H:%M")
 
@@ -232,10 +258,13 @@ for base, home_label in config_homes.items():
 
             # ── Filtering ──
             if is_teammate:
+                filter_counts["teammate"] += 1
                 continue
             if is_command and user_count <= 5:
+                filter_counts["command"] += 1
                 continue
             if user_count < MIN_USER_MSGS:
+                filter_counts["short"] += 1
                 continue
 
             if first_real_msg:
@@ -249,16 +278,35 @@ for base, home_label in config_homes.items():
                             is_schedule = True
                             break
             if is_schedule:
+                filter_counts["schedule"] += 1
                 continue
             if was_exited:
+                filter_counts["exited"] += 1
                 continue
             if not first_real_msg:
+                filter_counts["no_msg"] += 1
                 continue
 
             cwd = cwd or "/tmp"
             results.append((mod_time, size_h, session_id, cwd, first_real_msg, home_label))
 
 results.sort(key=lambda x: x[0], reverse=True)
+
+if VERBOSE:
+    import sys as _sys
+    total_filtered = sum(filter_counts.values())
+    surviving = len(results)
+    print("", file=_sys.stderr)
+    print(f"Discovered: {total_discovered} files", file=_sys.stderr)
+    print(f"Scanned:    {total_scanned} files (after prefilter)", file=_sys.stderr)
+    print(f"Filtered:   {total_filtered}", file=_sys.stderr)
+    # Pre-scan filters (size, subagent, mtime) run before the body loop.
+    for k in ("subagent", "mtime", "tiny"):
+        print(f"  {k:<10} {filter_counts[k]}", file=_sys.stderr)
+    # Body-scan filters run after the file has been read fully.
+    for k in ("exited", "short", "no_msg", "schedule", "teammate", "command"):
+        print(f"  {k:<10} {filter_counts[k]}", file=_sys.stderr)
+    print(f"Surviving:  {surviving}", file=_sys.stderr)
 
 for mod_time, size_h, sid, cwd, msg, hlabel in results:
     print(f"{mod_time}|{size_h}|{sid}|{cwd}|{msg}|{hlabel}")
