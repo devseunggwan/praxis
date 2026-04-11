@@ -292,6 +292,33 @@ for base, home_label in config_homes.items():
 
 results.sort(key=lambda x: x[0], reverse=True)
 
+# Dedupe conversation chains: same (home, cwd, normalized first message) →
+# keep newest only. Claude Code creates a new .jsonl with a fresh UUID on
+# every --resume/--continue, so one logical conversation surfaces as many
+# files. Without dedupe the user gets several workspaces all pointing at
+# the same chain (older snapshots render from an earlier point and look
+# "reverted").
+#
+# The chain key is deliberately scoped to `home_label` so that two
+# different Claude config homes (e.g. ~/.claude and ~/.claude-2) cannot
+# be folded into each other even if they share a cwd and prompt — they
+# are separate trust boundaries with separate credentials.
+#
+# Set NO_DEDUPE=1 to preserve every snapshot (useful when the same prompt
+# was used to start independent conversations).
+NO_DEDUPE = os.environ.get("NO_DEDUPE") == "1"
+if not NO_DEDUPE:
+    seen_chain_keys = set()
+    deduped = []
+    for entry in results:
+        _, _, _, cwd, msg, home_label = entry
+        chain_key = (home_label, cwd, msg[:60].strip().lower())
+        if chain_key in seen_chain_keys:
+            continue
+        seen_chain_keys.add(chain_key)
+        deduped.append(entry)
+    results = deduped
+
 if VERBOSE:
     import sys as _sys
     total_filtered = sum(filter_counts.values())
@@ -306,7 +333,7 @@ if VERBOSE:
     # Body-scan filters run after the file has been read fully.
     for k in ("exited", "short", "no_msg", "schedule", "teammate", "command"):
         print(f"  {k:<10} {filter_counts[k]}", file=_sys.stderr)
-    print(f"Surviving:  {surviving}", file=_sys.stderr)
+    print(f"Surviving:  {surviving} (after dedupe)", file=_sys.stderr)
 
 for mod_time, size_h, sid, cwd, msg, hlabel in results:
     print(f"{mod_time}|{size_h}|{sid}|{cwd}|{msg}|{hlabel}")
