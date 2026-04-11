@@ -190,5 +190,25 @@ for base, home_label in config_homes.items():
 
 results.sort(key=lambda x: x[0], reverse=True)
 
+# Dedupe conversation chains: same (cwd, normalized first message) → keep newest only.
+# Claude Code creates a new .jsonl with a fresh UUID on every --resume/--continue,
+# so a single logical conversation appears as multiple files. Without dedupe the
+# user gets several workspaces all pointing at the same chain (older snapshots
+# render the conversation from an earlier point and look "reverted").
+# Set NO_DEDUPE=1 to preserve every snapshot (e.g. when the same prompt was used
+# to start independent conversations and you want to inspect both).
+NO_DEDUPE = os.environ.get("NO_DEDUPE") == "1"
+if not NO_DEDUPE:
+    seen_chain_keys = set()
+    deduped = []
+    for entry in results:
+        _, _, _, cwd, msg, _ = entry
+        chain_key = (cwd, msg[:60].strip().lower())
+        if chain_key in seen_chain_keys:
+            continue
+        seen_chain_keys.add(chain_key)
+        deduped.append(entry)
+    results = deduped
+
 for mod_time, size_h, sid, cwd, msg, hlabel in results:
     print(f"{mod_time}|{size_h}|{sid}|{cwd}|{msg}|{hlabel}")
