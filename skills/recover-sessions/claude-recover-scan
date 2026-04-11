@@ -71,8 +71,30 @@ SCHEDULE_KEYWORDS = [
 
 MIN_USER_MSGS = 4
 TAIL_SIZE = 15
+USER_TAIL_SIZE = 20
+STRICT_TIMESTAMP = os.environ.get("STRICT_TIMESTAMP") == "1"
+# Namespaced env var so this cannot accidentally trip on a generic
+# VERBOSE setting that another tool in the shell might be using. The
+# legacy name is still honored for a release or two.
+VERBOSE = (
+    os.environ.get("PRAXIS_RECOVER_VERBOSE") == "1"
+    or os.environ.get("VERBOSE") == "1"
+)
 
 results = []
+filter_counts = {
+    "subagent": 0,
+    "mtime": 0,
+    "tiny": 0,
+    "exited": 0,
+    "short": 0,
+    "no_msg": 0,
+    "schedule": 0,
+    "teammate": 0,
+    "command": 0,
+}
+total_discovered = 0
+total_scanned = 0
 
 for base, home_label in config_homes.items():
     if not os.path.isdir(base):
@@ -85,20 +107,35 @@ for base, home_label in config_homes.items():
             if not fname.endswith(".jsonl"):
                 continue
             fpath = os.path.join(full_dir, fname)
+            total_discovered += 1
 
             if "/subagents/" in fpath:
+                filter_counts["subagent"] += 1
                 continue
 
             mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath))
-            if mtime < cutoff:
-                continue
-            if cutoff_end and mtime >= cutoff_end:
-                continue
+            if not STRICT_TIMESTAMP:
+                # Normal mode: mtime prefilter excludes obviously old files
+                # before we pay the cost of reading them.
+                if mtime < cutoff:
+                    filter_counts["mtime"] += 1
+                    continue
+                if cutoff_end and mtime >= cutoff_end:
+                    filter_counts["mtime"] += 1
+                    continue
+            # STRICT_TIMESTAMP mode intentionally skips the mtime prefilter
+            # (so files touched by crash recovery metadata flush still get
+            # evaluated against their real internal timestamp). The
+            # fail-closed enforcement happens below once last_internal_ts
+            # is known — files with no usable internal timestamp are
+            # dropped there, never silently let through.
 
             size = os.path.getsize(fpath)
             if size < 10240:
+                filter_counts["tiny"] += 1
                 continue
 
+            total_scanned += 1
             size_h = f"{size/1048576:.1f}M" if size > 1048576 else f"{size//1024}K"
             mod_time = mtime.strftime("%m/%d %H:%M")
 
@@ -110,7 +147,9 @@ for base, home_label in config_homes.items():
             is_command = False
             is_schedule = False
             tail_buf = []
+            user_tail_buf = []
             was_exited = False
+            last_internal_ts = None
 
             with open(fpath) as f:
                 for line in f:
@@ -121,11 +160,18 @@ for base, home_label in config_homes.items():
                         if len(tail_buf) > TAIL_SIZE:
                             tail_buf.pop(0)
 
+                        ts_str = obj.get("timestamp")
+                        if ts_str:
+                            last_internal_ts = ts_str
+
                         if not cwd and obj.get("cwd"):
                             cwd = obj["cwd"]
 
                         if obj.get("type") == "user" and not obj.get("isSidechain"):
                             user_count += 1
+                            user_tail_buf.append(obj)
+                            if len(user_tail_buf) > USER_TAIL_SIZE:
+                                user_tail_buf.pop(0)
                             msg = obj.get("message", {})
                             raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
                             if not isinstance(raw, str):
@@ -149,23 +195,76 @@ for base, home_label in config_homes.items():
                     except Exception:
                         pass
 
-            # Detect intentional exit in tail
-            # Check for /exit command or known goodbye messages
-            for obj in tail_buf:
-                if obj.get("type") == "user":
-                    msg = obj.get("message", {})
-                    raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
-                    if isinstance(raw, str):
-                        if "/exit" in raw or "/quit" in raw:
-                            was_exited = True
-                            break
+            # Detect intentional exit by inspecting ONLY the most recent real
+            # user turn. Earlier /exit hits in the tail (e.g. a session that
+            # was resumed after an explicit exit) must not bubble up, or we
+            # risk dropping live sessions whose tail still carries the stale
+            # /exit command. Wrappers like <local-command-stdout> and
+            # <local-command-caveat> are skipped because Claude Code emits
+            # those as additional user-type events after executing /exit.
+            for obj in reversed(user_tail_buf):
+                msg = obj.get("message", {})
+                raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+                if not isinstance(raw, str):
+                    continue
+                c = raw.strip()
+                if c.startswith("<local-command-stdout>") or c.startswith("<local-command-caveat>"):
+                    continue
+                # First real user turn we hit (scanning from newest back).
+                # Require the explicit <command-name>/exit</command-name>
+                # token so that a literal "/exit" in chat prose does not
+                # trigger the filter.
+                if ("<command-name>/exit</command-name>" in c
+                        or "<command-name>/quit</command-name>" in c):
+                    was_exited = True
+                break
+
+            # Re-evaluate freshness using the internal `timestamp` field on
+            # the last logged event. File mtime can be touched by crash
+            # recovery / metadata flush even when the conversation ended
+            # earlier, so the internal timestamp is the more reliable
+            # signal when we have it.
+            #
+            # STRICT_TIMESTAMP mode enforces this as the *only* source of
+            # truth: files whose internal timestamp is missing or
+            # unparseable are dropped instead of silently accepted
+            # (fail-closed, not fail-open). This matches the stated intent
+            # of the flag — "trust the internal timestamp" — and prevents
+            # a corrupt tail from bypassing the cutoff entirely.
+            ts_local = None
+            if last_internal_ts:
+                try:
+                    ts_local = datetime.datetime.fromisoformat(
+                        last_internal_ts.replace("Z", "+00:00")
+                    ).astimezone().replace(tzinfo=None)
+                except Exception:
+                    ts_local = None
+
+            if STRICT_TIMESTAMP:
+                if ts_local is None:
+                    # No usable internal timestamp → fail-closed.
+                    continue
+                if ts_local < cutoff:
+                    continue
+                if cutoff_end and ts_local >= cutoff_end:
+                    continue
+                mod_time = ts_local.strftime("%m/%d %H:%M")
+            elif ts_local is not None:
+                if ts_local < cutoff:
+                    continue
+                if cutoff_end and ts_local >= cutoff_end:
+                    continue
+                mod_time = ts_local.strftime("%m/%d %H:%M")
 
             # ── Filtering ──
             if is_teammate:
+                filter_counts["teammate"] += 1
                 continue
             if is_command and user_count <= 5:
+                filter_counts["command"] += 1
                 continue
             if user_count < MIN_USER_MSGS:
+                filter_counts["short"] += 1
                 continue
 
             if first_real_msg:
@@ -179,10 +278,13 @@ for base, home_label in config_homes.items():
                             is_schedule = True
                             break
             if is_schedule:
+                filter_counts["schedule"] += 1
                 continue
             if was_exited:
+                filter_counts["exited"] += 1
                 continue
             if not first_real_msg:
+                filter_counts["no_msg"] += 1
                 continue
 
             cwd = cwd or "/tmp"
@@ -216,6 +318,22 @@ if not NO_DEDUPE:
         seen_chain_keys.add(chain_key)
         deduped.append(entry)
     results = deduped
+
+if VERBOSE:
+    import sys as _sys
+    total_filtered = sum(filter_counts.values())
+    surviving = len(results)
+    print("", file=_sys.stderr)
+    print(f"Discovered: {total_discovered} files", file=_sys.stderr)
+    print(f"Scanned:    {total_scanned} files (after prefilter)", file=_sys.stderr)
+    print(f"Filtered:   {total_filtered}", file=_sys.stderr)
+    # Pre-scan filters (size, subagent, mtime) run before the body loop.
+    for k in ("subagent", "mtime", "tiny"):
+        print(f"  {k:<10} {filter_counts[k]}", file=_sys.stderr)
+    # Body-scan filters run after the file has been read fully.
+    for k in ("exited", "short", "no_msg", "schedule", "teammate", "command"):
+        print(f"  {k:<10} {filter_counts[k]}", file=_sys.stderr)
+    print(f"Surviving:  {surviving} (after dedupe)", file=_sys.stderr)
 
 for mod_time, size_h, sid, cwd, msg, hlabel in results:
     print(f"{mod_time}|{size_h}|{sid}|{cwd}|{msg}|{hlabel}")

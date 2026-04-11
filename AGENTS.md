@@ -75,3 +75,33 @@ Project CLAUDE.md (routing config)
 - **CLAUDE.md is the interface**: no config files — project instructions define routing
 - **SRP per skill**: each skill has one responsibility, chaining connects them
 - **Discipline over convenience**: Iron Laws gate each phase, no skipping
+
+## Local Development
+
+### Canonical clone path
+
+This repository should live at **`~/projects/praxis`**. The CLI tools shipped
+by skills (e.g. `cmux-recover-sessions`, `claude-recover`, `cmux-save-sessions`)
+are symlinked from `~/.local/bin` into this clone, so patches you commit here
+land in the version that actually runs at the shell. Keeping a second clone
+under a legacy name risks `~/.local/bin` symlinks pointing at stale code —
+a real failure mode previously hit during recover-sessions debugging.
+
+### Install / refresh CLI symlinks
+
+```bash
+# From inside this clone:
+./scripts/install.sh
+```
+
+Idempotent. Existing valid links are left alone; missing or drifted ones
+are corrected. Re-run after pulls or after adding a new CLI script.
+
+### Verify symlinks point at this clone
+
+```bash
+./scripts/verify-symlinks.sh
+```
+
+Exits non-zero on drift, so it can be wired into CI or a SessionStart hook
+to catch "patch landed in the wrong clone" before it bites a future session.

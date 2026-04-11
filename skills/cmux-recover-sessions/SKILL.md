@@ -1,9 +1,25 @@
 ---
 name: cmux-recover-sessions
-description: Bulk recover Claude Code sessions after crash or power loss into cmux workspaces. Interactive interview to determine recovery scope and layout. Triggers on "recover cmux", "cmux session recovery", "cmux restore sessions".
+description: >
+  Bulk recover Claude Code sessions after a crash, power loss, OOM kill, or reboot
+  by scanning the .jsonl files Claude Code persists automatically. Interactive
+  interview chooses recovery scope and layout. Use this when sessions died and
+  you need them back, NOT for restoring an intentionally saved layout.
+  Priority: crash context wins. If the request mentions a crash/power loss/OOM,
+  prefer this skill even when the user also mentions a snapshot — the snapshot
+  may be stale, and .jsonl scan reflects the real final state.
+  Only defer to cmux-resume-sessions when there is NO crash context and the user
+  explicitly wants to rehydrate a saved snapshot.
+  Triggers on "터졌다", "크래시 복구", "크래시 복원", "전원 꺼짐 복구", "OOM 복구", "세션 살려야", "recover cmux", "crash recovery", "power loss recovery", "cmux session recovery".
 ---
 
 # Recover Sessions (cmux)
+
+> ⚠️ **Wrong skill?** If you have a JSON snapshot you previously saved with
+> `cmux-save-sessions` and just want to rehydrate that exact layout, use
+> **`cmux-resume-sessions`** instead. Recover scans the on-disk `.jsonl` files
+> Claude Code persists automatically — useful precisely *because* you never
+> got a chance to save anything before the crash.
 
 ## Overview
 
@@ -167,6 +183,19 @@ cmux workspaces are now open. Navigate with:
   Cmd+1-9         jump to workspace by number
   Cmd+Shift+]     next workspace
   Cmd+Shift+[     previous workspace
+
+⚠️ Note: Claude Code re-renders a resumed conversation from the first
+   message, so the visible viewport looks like the session "reverted to
+   its earliest state".
+   
+   Recovery always launches each workspace with `claude --resume <uuid>`,
+   pointing at the exact .jsonl discovered on disk. In most cases that
+   loads the intended transcript, but it is not a guarantee — a bad or
+   stale session id, a partial flush at crash time, or a truncated tail
+   can all surface as "wrong" context. Always confirm the state in each
+   restored workspace before trusting it:
+     - scroll the viewport to the bottom, or
+     - ask the model directly: "what was the last thing we worked on?"
 ```
 
 ## Script Reference
