@@ -71,6 +71,7 @@ SCHEDULE_KEYWORDS = [
 
 MIN_USER_MSGS = 4
 TAIL_SIZE = 15
+USER_TAIL_SIZE = 20
 
 results = []
 
@@ -110,6 +111,7 @@ for base, home_label in config_homes.items():
             is_command = False
             is_schedule = False
             tail_buf = []
+            user_tail_buf = []
             was_exited = False
 
             with open(fpath) as f:
@@ -126,6 +128,9 @@ for base, home_label in config_homes.items():
 
                         if obj.get("type") == "user" and not obj.get("isSidechain"):
                             user_count += 1
+                            user_tail_buf.append(obj)
+                            if len(user_tail_buf) > USER_TAIL_SIZE:
+                                user_tail_buf.pop(0)
                             msg = obj.get("message", {})
                             raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
                             if not isinstance(raw, str):
@@ -149,16 +154,29 @@ for base, home_label in config_homes.items():
                     except Exception:
                         pass
 
-            # Detect intentional exit in tail
-            # Check for /exit command or known goodbye messages
-            for obj in tail_buf:
-                if obj.get("type") == "user":
-                    msg = obj.get("message", {})
-                    raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
-                    if isinstance(raw, str):
-                        if "/exit" in raw or "/quit" in raw:
-                            was_exited = True
-                            break
+            # Detect intentional exit by inspecting ONLY the most recent real
+            # user turn. Earlier /exit hits in the tail (e.g. a session that
+            # was resumed after an explicit exit) must not bubble up, or we
+            # risk dropping live sessions whose tail still carries the stale
+            # /exit command. Wrappers like <local-command-stdout> and
+            # <local-command-caveat> are skipped because Claude Code emits
+            # those as additional user-type events after executing /exit.
+            for obj in reversed(user_tail_buf):
+                msg = obj.get("message", {})
+                raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+                if not isinstance(raw, str):
+                    continue
+                c = raw.strip()
+                if c.startswith("<local-command-stdout>") or c.startswith("<local-command-caveat>"):
+                    continue
+                # First real user turn we hit (scanning from newest back).
+                # Require the explicit <command-name>/exit</command-name>
+                # token so that a literal "/exit" in chat prose does not
+                # trigger the filter.
+                if ("<command-name>/exit</command-name>" in c
+                        or "<command-name>/quit</command-name>" in c):
+                    was_exited = True
+                break
 
             # ── Filtering ──
             if is_teammate:
