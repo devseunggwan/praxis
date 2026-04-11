@@ -22,20 +22,24 @@ TO_DATE=""
 MODE="tabs"       # tabs | list | split | plain
 SPLIT_LAYOUT=""   # CxR for split mode
 RENAME=false
+SHOW_UUID=false   # opt-in: adds a UUID column to the default table output
+FULL_UUID=false   # opt-in: widens UUID column to full 36 chars (implies --show-uuid)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --days)    DAYS_AGO="$2"; shift 2 ;;
-    --from)    FROM_DATE="$2"; shift 2 ;;
-    --to)      TO_DATE="$2"; shift 2 ;;
-    --tabs)    MODE="tabs"; shift ;;
-    --split)   MODE="split"; SPLIT_LAYOUT="$2"; shift 2 ;;
-    --plain)   MODE="plain"; shift ;;
-    --list)    MODE="list"; shift ;;
-    --rename)  RENAME=true; shift ;;
+    --days)       DAYS_AGO="$2"; shift 2 ;;
+    --from)       FROM_DATE="$2"; shift 2 ;;
+    --to)         TO_DATE="$2"; shift 2 ;;
+    --tabs)       MODE="tabs"; shift ;;
+    --split)      MODE="split"; SPLIT_LAYOUT="$2"; shift 2 ;;
+    --plain)      MODE="plain"; shift ;;
+    --list)       MODE="list"; shift ;;
+    --rename)     RENAME=true; shift ;;
+    --show-uuid)  SHOW_UUID=true; shift ;;
+    --full-uuid)  SHOW_UUID=true; FULL_UUID=true; shift ;;
     -h|--help)
       cat << 'HELP'
-Usage: cmux-recover-sessions [--days N | --from DATE --to DATE] [--tabs|--split CxR|--plain] [--list] [--rename]
+Usage: cmux-recover-sessions [--days N | --from DATE --to DATE] [--tabs|--split CxR|--plain] [--list] [--rename] [--show-uuid|--full-uuid]
 
 Options:
   --days N        Scan last N days (default: 1)
@@ -46,6 +50,8 @@ Options:
   --plain         Output resume commands only (no workspace creation)
   --list          List recovery targets only
   --rename        Auto-rename workspaces with session info
+  --show-uuid     Add a UUID column (8-char prefix) to the table output
+  --full-uuid     Same as --show-uuid but widens the column to the full 36 chars
 
 Examples:
   cmux-recover-sessions --list --days 3
@@ -112,15 +118,42 @@ echo "║  Claude Code Session Recovery (cmux) — ${#SESSIONS[@]} sessions foun
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 
-printf "%-4s %-12s %-5s %-8s %-34s %s\n" "#" "TIME" "SIZE" "HOME" "PROJECT" "FIRST MESSAGE"
-printf "%-4s %-12s %-5s %-8s %-34s %s\n" "---" "----------" "----" "------" "-------" "-------------"
+# Default output preserves the legacy 6-column schema so existing parsers
+# (awk / cut / grep -o) don't silently shift. UUID column is opt-in.
+if $FULL_UUID; then
+  fmt="%-4s %-12s %-5s %-37s %-8s %-30s %s\n"
+elif $SHOW_UUID; then
+  fmt="%-4s %-12s %-5s %-9s %-8s %-30s %s\n"
+else
+  fmt="%-4s %-12s %-5s %-8s %-34s %s\n"
+fi
+
+# shellcheck disable=SC2059
+if $SHOW_UUID; then
+  printf "$fmt" "#" "TIME" "SIZE" "UUID" "HOME" "PROJECT" "FIRST MESSAGE"
+  printf "$fmt" "---" "----------" "----" "----" "------" "-------" "-------------"
+else
+  printf "$fmt" "#" "TIME" "SIZE" "HOME" "PROJECT" "FIRST MESSAGE"
+  printf "$fmt" "---" "----------" "----" "------" "-------" "-------------"
+fi
 
 for i in "${!SESSIONS[@]}"; do
   IFS='|' read -r mod_time size session_id project_dir first_msg home_label <<< "${SESSIONS[$i]}"
   idx=$((i + 1))
-  short_project=$(echo "$project_dir" | sed "s|$HOME/projects/||; s|$HOME/||" | cut -c1-32)
+  if $SHOW_UUID; then
+    short_project=$(echo "$project_dir" | sed "s|$HOME/projects/||; s|$HOME/||" | cut -c1-30)
+  else
+    short_project=$(echo "$project_dir" | sed "s|$HOME/projects/||; s|$HOME/||" | cut -c1-32)
+  fi
   short_msg=$(echo "$first_msg" | cut -c1-45)
-  printf "%-4s %-12s %-5s %-8s %-34s %s\n" "$idx" "$mod_time" "$size" "$home_label" "$short_project" "$short_msg"
+  # shellcheck disable=SC2059
+  if $FULL_UUID; then
+    printf "$fmt" "$idx" "$mod_time" "$size" "$session_id" "$home_label" "$short_project" "$short_msg"
+  elif $SHOW_UUID; then
+    printf "$fmt" "$idx" "$mod_time" "$size" "${session_id:0:8}" "$home_label" "$short_project" "$short_msg"
+  else
+    printf "$fmt" "$idx" "$mod_time" "$size" "$home_label" "$short_project" "$short_msg"
+  fi
 done
 
 echo ""
@@ -288,4 +321,12 @@ if [[ "$MODE" != "plain" ]]; then
   echo "  Cmd+1-9              jump by number"
   echo "  Cmd+Shift+]          next workspace"
   echo "  Cmd+Shift+[          previous workspace"
+  echo ""
+  echo "Tip: Claude Code renders resumed sessions from the first message,"
+  echo "     so a workspace will look 'reverted' on open."
+  echo "     Each workspace was launched with 'claude --resume <uuid>';"
+  echo "     in most cases that loads the intended transcript, but it is"
+  echo "     not a guarantee (bad session id, partial flush, stale file)."
+  echo "     Confirm each workspace before trusting it: scroll to the"
+  echo "     bottom, or ask 'what was the last thing we worked on?'"
 fi
