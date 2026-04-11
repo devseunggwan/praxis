@@ -1,12 +1,20 @@
 ---
 name: cmux-resume-sessions
 description: >
-  Restore cmux workspaces from a JSON snapshot.
-  Uses snapshots saved by cmux-save-sessions as input.
-  Triggers on "resume sessions", "session restore", "session resume", "cmux resume", "restore sessions".
+  Restore cmux workspaces from a JSON snapshot saved by cmux-save-sessions.
+  Use this when you want to rehydrate an intentionally saved layout with NO crash context.
+  Crash routing override: if the request mentions a crash, power loss, OOM, or "살려야",
+  route to cmux-recover-sessions instead — even when the user also mentions a snapshot,
+  because the snapshot may be stale and .jsonl scanning reflects the real latest state.
+  Triggers on "resume sessions", "session resume", "session restore", "restore sessions", "cmux resume", "restore from snapshot", "rehydrate sessions", "세션 복원", "스냅샷 복구", "스냅샷 복원".
 ---
 
 # cmux Resume Sessions
+
+> ⚠️ **Wrong skill?** If your sessions died from a crash / power loss / OOM kill,
+> use **`cmux-recover-sessions`** instead. That skill scans `.jsonl` files on
+> disk and finds sessions you never explicitly saved. Resume only works on a
+> JSON snapshot you produced earlier with `cmux-save-sessions`.
 
 ## Overview
 
@@ -14,8 +22,8 @@ Restores cmux workspaces from a JSON snapshot saved by `cmux-save-sessions`.
 Restores workspace structure (name, cwd) and continues Claude Code conversations automatically.
 
 > **Role separation**:
-> - `cmux-resume-sessions`: Intentional restore from JSON snapshot (file-based)
-> - `cmux-recover-sessions`: Post-crash/power-loss recovery from tmux sessions (process-based)
+> - `cmux-resume-sessions` (this skill): Intentional restore from a JSON snapshot you saved on purpose (file-based)
+> - `cmux-recover-sessions`: Post-crash/power-loss recovery from `.jsonl` files Claude Code persists automatically (process-based)
 
 ## The Iron Law
 
@@ -63,6 +71,26 @@ bash "$(dirname "$0")/cmux-resume-sessions" [snapshot-file]
 **What is NOT restored:**
 - Previously running commands
 - Session runtime state (git status, open editors, etc.)
+
+> ⚠️ **Resumed sessions render from the first message.** Claude Code re-renders
+> a resumed conversation starting at the oldest message, so a workspace will
+> *look* like it reverted to its earliest state.
+>
+> Which command fires for each workspace depends on what the snapshot
+> captured:
+> - `claude --resume <session-id>` — used when the snapshot carries a
+>   concrete session id. This *usually* reopens that exact transcript,
+>   but it is not a guarantee (stale session id, partial flush at save
+>   time, or a truncated tail can all surface as unexpected context).
+> - `claude --continue` — the fallback when the snapshot omitted a
+>   session id. This attaches to the cwd's most recent conversation for
+>   that working directory, which may be a completely different chain
+>   from the one you saved. See the *Rationalization Prevention* section
+>   at the bottom for the exact failure mode.
+>
+> Always verify each restored workspace before trusting it:
+> - scroll the viewport to the bottom, or
+> - ask the model directly: *"what was the last thing we worked on?"*
 
 ## Output Example
 
