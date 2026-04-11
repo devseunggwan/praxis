@@ -72,6 +72,7 @@ SCHEDULE_KEYWORDS = [
 MIN_USER_MSGS = 4
 TAIL_SIZE = 15
 USER_TAIL_SIZE = 20
+STRICT_TIMESTAMP = os.environ.get("STRICT_TIMESTAMP") == "1"
 
 results = []
 
@@ -91,10 +92,19 @@ for base, home_label in config_homes.items():
                 continue
 
             mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath))
-            if mtime < cutoff:
-                continue
-            if cutoff_end and mtime >= cutoff_end:
-                continue
+            if not STRICT_TIMESTAMP:
+                # Normal mode: mtime prefilter excludes obviously old files
+                # before we pay the cost of reading them.
+                if mtime < cutoff:
+                    continue
+                if cutoff_end and mtime >= cutoff_end:
+                    continue
+            # STRICT_TIMESTAMP mode intentionally skips the mtime prefilter
+            # (so files touched by crash recovery metadata flush still get
+            # evaluated against their real internal timestamp). The
+            # fail-closed enforcement happens below once last_internal_ts
+            # is known — files with no usable internal timestamp are
+            # dropped there, never silently let through.
 
             size = os.path.getsize(fpath)
             if size < 10240:
@@ -113,6 +123,7 @@ for base, home_label in config_homes.items():
             tail_buf = []
             user_tail_buf = []
             was_exited = False
+            last_internal_ts = None
 
             with open(fpath) as f:
                 for line in f:
@@ -122,6 +133,10 @@ for base, home_label in config_homes.items():
                         tail_buf.append(obj)
                         if len(tail_buf) > TAIL_SIZE:
                             tail_buf.pop(0)
+
+                        ts_str = obj.get("timestamp")
+                        if ts_str:
+                            last_internal_ts = ts_str
 
                         if not cwd and obj.get("cwd"):
                             cwd = obj["cwd"]
@@ -177,6 +192,43 @@ for base, home_label in config_homes.items():
                         or "<command-name>/quit</command-name>" in c):
                     was_exited = True
                 break
+
+            # Re-evaluate freshness using the internal `timestamp` field on
+            # the last logged event. File mtime can be touched by crash
+            # recovery / metadata flush even when the conversation ended
+            # earlier, so the internal timestamp is the more reliable
+            # signal when we have it.
+            #
+            # STRICT_TIMESTAMP mode enforces this as the *only* source of
+            # truth: files whose internal timestamp is missing or
+            # unparseable are dropped instead of silently accepted
+            # (fail-closed, not fail-open). This matches the stated intent
+            # of the flag — "trust the internal timestamp" — and prevents
+            # a corrupt tail from bypassing the cutoff entirely.
+            ts_local = None
+            if last_internal_ts:
+                try:
+                    ts_local = datetime.datetime.fromisoformat(
+                        last_internal_ts.replace("Z", "+00:00")
+                    ).astimezone().replace(tzinfo=None)
+                except Exception:
+                    ts_local = None
+
+            if STRICT_TIMESTAMP:
+                if ts_local is None:
+                    # No usable internal timestamp → fail-closed.
+                    continue
+                if ts_local < cutoff:
+                    continue
+                if cutoff_end and ts_local >= cutoff_end:
+                    continue
+                mod_time = ts_local.strftime("%m/%d %H:%M")
+            elif ts_local is not None:
+                if ts_local < cutoff:
+                    continue
+                if cutoff_end and ts_local >= cutoff_end:
+                    continue
+                mod_time = ts_local.strftime("%m/%d %H:%M")
 
             # ── Filtering ──
             if is_teammate:
