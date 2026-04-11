@@ -22,20 +22,22 @@ TO_DATE=""
 MODE="tabs"       # tabs | list | split | plain
 SPLIT_LAYOUT=""   # CxR for split mode
 RENAME=false
+FULL_UUID=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --days)    DAYS_AGO="$2"; shift 2 ;;
-    --from)    FROM_DATE="$2"; shift 2 ;;
-    --to)      TO_DATE="$2"; shift 2 ;;
-    --tabs)    MODE="tabs"; shift ;;
-    --split)   MODE="split"; SPLIT_LAYOUT="$2"; shift 2 ;;
-    --plain)   MODE="plain"; shift ;;
-    --list)    MODE="list"; shift ;;
-    --rename)  RENAME=true; shift ;;
+    --days)       DAYS_AGO="$2"; shift 2 ;;
+    --from)       FROM_DATE="$2"; shift 2 ;;
+    --to)         TO_DATE="$2"; shift 2 ;;
+    --tabs)       MODE="tabs"; shift ;;
+    --split)      MODE="split"; SPLIT_LAYOUT="$2"; shift 2 ;;
+    --plain)      MODE="plain"; shift ;;
+    --list)       MODE="list"; shift ;;
+    --rename)     RENAME=true; shift ;;
+    --full-uuid)  FULL_UUID=true; shift ;;
     -h|--help)
       cat << 'HELP'
-Usage: cmux-recover-sessions [--days N | --from DATE --to DATE] [--tabs|--split CxR|--plain] [--list] [--rename]
+Usage: cmux-recover-sessions [--days N | --from DATE --to DATE] [--tabs|--split CxR|--plain] [--list] [--rename] [--full-uuid]
 
 Options:
   --days N        Scan last N days (default: 1)
@@ -46,6 +48,7 @@ Options:
   --plain         Output resume commands only (no workspace creation)
   --list          List recovery targets only
   --rename        Auto-rename workspaces with session info
+  --full-uuid     Show the full session UUID instead of the first 8 chars
 
 Examples:
   cmux-recover-sessions --list --days 3
@@ -112,15 +115,29 @@ echo "║  Claude Code Session Recovery (cmux) — ${#SESSIONS[@]} sessions foun
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 
-printf "%-4s %-12s %-5s %-8s %-34s %s\n" "#" "TIME" "SIZE" "HOME" "PROJECT" "FIRST MESSAGE"
-printf "%-4s %-12s %-5s %-8s %-34s %s\n" "---" "----------" "----" "------" "-------" "-------------"
+if $FULL_UUID; then
+  fmt="%-4s %-12s %-5s %-37s %-8s %-32s %s\n"
+else
+  fmt="%-4s %-12s %-5s %-9s %-8s %-32s %s\n"
+fi
+
+# shellcheck disable=SC2059
+printf "$fmt" "#" "TIME" "SIZE" "UUID" "HOME" "PROJECT" "FIRST MESSAGE"
+# shellcheck disable=SC2059
+printf "$fmt" "---" "----------" "----" "----" "------" "-------" "-------------"
 
 for i in "${!SESSIONS[@]}"; do
   IFS='|' read -r mod_time size session_id project_dir first_msg home_label <<< "${SESSIONS[$i]}"
   idx=$((i + 1))
-  short_project=$(echo "$project_dir" | sed "s|$HOME/projects/||; s|$HOME/||" | cut -c1-32)
+  short_project=$(echo "$project_dir" | sed "s|$HOME/projects/||; s|$HOME/||" | cut -c1-30)
   short_msg=$(echo "$first_msg" | cut -c1-45)
-  printf "%-4s %-12s %-5s %-8s %-34s %s\n" "$idx" "$mod_time" "$size" "$home_label" "$short_project" "$short_msg"
+  if $FULL_UUID; then
+    uuid_display="$session_id"
+  else
+    uuid_display="${session_id:0:8}"
+  fi
+  # shellcheck disable=SC2059
+  printf "$fmt" "$idx" "$mod_time" "$size" "$uuid_display" "$home_label" "$short_project" "$short_msg"
 done
 
 echo ""
