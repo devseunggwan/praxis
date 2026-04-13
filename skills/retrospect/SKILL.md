@@ -208,10 +208,13 @@ For each approved action:
    - Update `MEMORY.md` index
 
    **⚠️ MANDATORY: Duplicate check before creating any memory file:**
-   a. Reuse Stage 2 Step 7's repeat scan results — if a finding was matched to an existing memory file, that file is the merge target
+
+   **Precondition:** This check applies ONLY when the finding's action type is `memory` (new pattern). If Stage 2 already marked `repeat=true` and escalated to issue/hook/CLAUDE.md, skip this check — the escalation ladder takes precedence over merge.
+
+   a. Reuse Stage 2 Step 7's repeat scan results — if a finding matched an existing memory but was NOT escalated (i.e., it's a genuinely new sub-pattern), that file is the merge target
    b. If no Stage 2 match: scan MEMORY.md index for entries with overlapping root cause or topic (concept-level, not keyword)
    c. For each candidate, read the existing memory file and compare:
-      - Same root cause / principle → **merge**: append new context (사례, How to apply 항목) to the existing file
+      - Same root cause / principle → **merge**: append new context (사례, How to apply 항목) to the existing file. If merge makes this the 2nd+ occurrence, re-evaluate whether action type should escalate per Stage 2 Step 8
       - Related but distinct principle → **create new file** (genuinely different insight)
    d. **Never create a new file when the insight is a specific instance of an existing general rule** — add it as a numbered sub-item instead
    e. After merge or create, update MEMORY.md index (update description if merged, add new line if created)
