@@ -37,7 +37,7 @@ description: Delegate a task to an independent Claude Code session in a new cmux
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `<task>` | (required) | 위임할 작업 설명 |
-| `--model` | `sonnet` | Provider:model notation. `opus`/`sonnet`/`haiku` = claude. `codex`, `codex:o3`, `gemini`, `gemini:flash` 지원. See CLAUDE.md Provider Routing. |
+| `--model` | `sonnet` | Provider:model notation. `opus`/`sonnet`/`haiku` = claude. Also supports `codex`, `codex:o3`, `gemini`, `gemini:flash`. See CLAUDE.md Provider Routing. |
 | `--cwd` | current dir | 새 세션의 작업 디렉토리 |
 | `--max-budget-usd` | (none) | 최대 예산 한도 |
 | `--account` | (기본 계정) | Claude 계정 프로필 (예: `claude-2` → `CLAUDE_CONFIG_DIR=~/.claude-2`) |
@@ -191,11 +191,11 @@ Report results in Korean.
 1. 프롬프트를 섹션별로 분리 → 각각 개별 .md 파일 생성
 2. Context 섹션은 모든 분할 파일에 공통 포함
 3. 각 파일에 대해 개별 래퍼 .sh 생성
-4. 라우팅: `--model`이 명시적이면 전체 동일, 없으면 작업 유형 기반 자동 배정 (CLAUDE.md Task-Type Routing 참조)
-   - 코드 구현/수정 → `codex` (CLI 존재 시) 또는 `claude:sonnet`
-   - 검색/분석/대용량 컨텍스트 → `gemini` (CLI 존재 시) 또는 `claude:sonnet`
-   - 설계/보안/리뷰 → `claude:opus`
-   - 데이터 조회/상태 확인 → `claude:haiku`
+4. Routing: If `--model` is explicit, apply uniformly. Otherwise, auto-assign by task type (see CLAUDE.md Task-Type Routing):
+   - Code implementation/fix → `codex` (if CLI available) or `claude:sonnet`
+   - Search/analysis/large context → `gemini` (if CLI available) or `claude:sonnet`
+   - Design/security/review → `claude:opus`
+   - Data lookup/status check → `claude:haiku`
 
 ### Step 4: Generate Wrapper Script
 
@@ -232,9 +232,9 @@ esac
 cmux notify --title "cmux-delegate" --body "Task completed: {short_task}" 2>/dev/null || true
 ```
 
-`{provider}`와 `{sub_model}`은 Step 1의 provider resolution 결과에서 치환합니다.
-`{claude_env}`는 account가 지정된 경우 `CLAUDE_CONFIG_DIR=~/.{account}`로 치환합니다 (claude provider만 해당).
-`{budget_flag}`는 budget이 지정된 경우에만 `--max-budget-usd {budget}`로 치환합니다 (claude provider만 해당, codex/gemini는 budget 미지원).
+`{provider}` and `{sub_model}` are substituted from the provider resolution result in Step 1.
+`{claude_env}` is substituted with `CLAUDE_CONFIG_DIR=~/.{account}` when account is specified (claude provider only).
+`{budget_flag}` is substituted with `--max-budget-usd {budget}` when budget is specified (claude provider only — codex/gemini do not support budget limits).
 
 **이 파일도 `Write` 도구로 생성합니다.** 단, 파일 내용 자체에 shell 변수(`$PROMPT_FILE` 등)가 포함되므로 이는 의도된 것입니다 — 중요한 것은 사용자 프롬프트가 이 스크립트를 거치지 않는다는 점입니다.
 
@@ -338,7 +338,7 @@ cmux에서 {session_name} 탭을 확인하세요.
 ### 단일 세션 (기본)
 
 ```
-사용자: /cmux-delegate "전체 검수" --model claude:opus --account claude-2
+user: /cmux-delegate "full code review" --model claude:opus --account claude-2
   │
   ├── Step 1.6: Account Resolution
   │     └── CLAUDE_CONFIG_DIR=~/.claude-2
