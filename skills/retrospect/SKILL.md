@@ -173,7 +173,9 @@ No patterns found: "This session followed all CLAUDE.md rules. ✅"
 
 **Action type baseline comes from Stage 2 escalation ladder**, but Stage 3 MUST explicitly evaluate all five action types per finding and select 1–2 composite actions.
 
-**For each finding, evaluate ALL five action types before selecting:**
+> **Exception — one-off mistakes**: If Stage 2 classified the finding as `note only` (situational root cause, unlikely to recur), skip the evaluation below entirely. No persistent action is created; the finding appears in the report as acknowledged only.
+
+**For each finding (except one-off), evaluate ALL five action types before selecting:**
 
 | Action Type | When to Choose | Skip If |
 |-------------|---------------|---------|
@@ -190,6 +192,8 @@ No patterns found: "This session followed all CLAUDE.md rules. ✅"
 | **Repeat count** | 0× → `memory` (first occurrence); 1–2× → `issue` (memory blocked — repeat=true); 3×+ → `skill` or `hook` (enforcement gap) |
 | **Scope** | Cross-project impact → `CLAUDE.md draft`; single-project → `MEMORY.md` |
 | **Gap type** | Rule violated → `memory` (reinforce); rule absent → `CLAUDE.md draft` (fill gap); no enforcement → `skill idea` |
+
+> **Axis precedence: Repeat-count is the highest-priority axis.** When `repeat=true`, the Scope and Gap type axes cannot override to `memory` — the repeat-count constraint (issue / skill / hook) always wins. Apply Scope and Gap type only to determine additional actions alongside the repeat-count result.
 
 **Compound action is the default for HIGH-priority findings.** A single `memory` action is acceptable only when the rationale for skipping all other types is explicitly stated in the `Rationale` column.
 
