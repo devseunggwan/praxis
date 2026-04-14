@@ -171,7 +171,7 @@ You MUST complete each stage before proceeding to the next.
 No patterns found: "This session followed all CLAUDE.md rules. ✅"
 ```
 
-**Action type baseline comes from Stage 2 escalation ladder**, but Stage 3 MUST explicitly evaluate all four action types per finding and select 1–2 composite actions.
+**Action type baseline comes from Stage 2 escalation ladder**, but Stage 3 MUST explicitly evaluate all five action types per finding and select 1–2 composite actions.
 
 **For each finding, evaluate ALL five action types before selecting:**
 
@@ -265,7 +265,7 @@ For each approved action:
    a. Write hook script to `.claude/hooks/` or appropriate location
    b. Present the hook code to user for review
    c. Explain how to register in `.claude/settings.json` (show the exact JSON entry)
-   d. Use AskUserQuestion: "Register this hook in settings.json?" (✅ Register / ⏭ Keep file only / 🕐 Later)
+   d. Use AskUserQuestion: "Hook을 settings.json에 등록할까요?" (✅ 등록 / ⏭ 파일만 유지 / 🕐 나중에)
    e. If approved: Edit `.claude/settings.json` to register the hook
    f. If skipped/deferred: leave the hook file in place and provide manual registration instructions
 
