@@ -38,6 +38,7 @@ When a project's `CLAUDE.md` does not provide routing, these built-in defaults a
 | Branch creation | — (built-in) | `issue-<N>-<type>-<desc>` on base branch |
 | Worktree creation | — (built-in) | `git worktree add ../<branch> -b <branch>` |
 | Dependency install | — (built-in auto-detect) | `npm install` / `pip install -r requirements.txt` / `go mod download` / `pip install -e .` |
+| cmux workspace open | — (built-in, auto-skip if cmux absent) | `cmux <worktree-path>` — opens a cmux workspace so the sidebar shows the new branch with git metadata |
 
 Projects override these by declaring routing in their `CLAUDE.md`.
 
@@ -129,7 +130,7 @@ BRANCH="issue-${ISSUE_NUMBER}-${TYPE}-${SHORT_DESC}"
 | Feature / Refactor / Docs | `dev` (or `main` if no `dev`) |
 | Hotfix | `prod` (or `main`) |
 
-### Step 4: Create Worktree
+### Step 4: Create Worktree (+ optional cmux workspace)
 
 ```bash
 # Determine target repo path
@@ -139,6 +140,12 @@ cd "$TARGET_REPO"
 git fetch origin
 git worktree add "../${BRANCH}" -b "$BRANCH" "origin/${BASE_BRANCH}"
 WORKTREE_PATH=$(realpath "../${BRANCH}")
+
+# Open cmux workspace (optional — skipped gracefully if cmux is not installed).
+# Rationale: if the user runs cmux (macOS), the new worktree appears as a
+# sidebar workspace immediately, so branch/PR metadata and agent notifications
+# are visible without a manual "File > Open" step.
+command -v cmux >/dev/null 2>&1 && cmux "$WORKTREE_PATH" || true
 ```
 
 ### Step 5: Install Dependencies
@@ -179,6 +186,12 @@ echo "Issue: $(gh issue view $ISSUE_NUMBER --json number,title --jq '.number')"
 echo "Branch: $(git branch --show-current)"
 echo "Worktree: $(pwd)"
 echo "Deps: $(ls node_modules 2>/dev/null && echo 'npm' || ls .venv 2>/dev/null && echo 'pip' || echo 'none')"
+# cmux workspace status (only meaningful on macOS with cmux installed)
+if command -v cmux >/dev/null 2>&1; then
+  echo "cmux: workspace opened at $WORKTREE_PATH"
+else
+  echo "cmux: skipped (not installed)"
+fi
 ```
 
 ## Error Handling

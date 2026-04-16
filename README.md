@@ -48,7 +48,7 @@ Most skills delegate to external agents or session managers. Install the depende
 |------|-----------|---------------|
 | **Standalone** | turbo-setup, recover-sessions | `gh` CLI only |
 | **Enhanced** | + turbo-implement, turbo-completion, debug, retrospect | + oh-my-claudecode |
-| **Full** | + all cmux-* skills | + cmux |
+| **Full** | + all cmux-* skills, + turbo-setup auto-opens cmux workspace after worktree creation | + cmux |
 
 > Skills in higher tiers fall back to manual/built-in alternatives when their dependencies are missing, but with reduced functionality.
 
