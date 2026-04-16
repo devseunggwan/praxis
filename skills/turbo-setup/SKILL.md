@@ -63,7 +63,10 @@ After successful setup, report these values (used by `turbo-completion`):
  Repo:      <target-repo>
  Deps:      <installed|skipped>
 
- Next: Implement the feature, then run /turbo-completion
+ Next steps (choose one):
+ • Same session:  implement inline → /turbo-completion
+ • Auto mode:     /turbo-implement (ralph/autopilot)
+ • New session:   /cmux-delegate --cwd <worktree> --model <provider>
 ═══════════════════════════════════════════════
 ```
 
@@ -213,21 +216,31 @@ issue → gh issue close (with /cancel comment)
 ## Chaining Interface
 
 ```
-turbo-setup → [user implements] → turbo-completion
-                                   ↓ receives:
-                                   - ISSUE_NUMBER (from git branch name)
-                                   - WORKTREE_PATH (from cwd)
-                                   - TARGET_REPO (from git remote)
+turbo-setup → [choose execution path]
+               │
+               ├─ same session  → implement inline → turbo-completion
+               ├─ auto mode     → turbo-implement  → turbo-completion
+               └─ new session   → cmux-delegate --cwd <worktree> --model <provider>
+                                    ↓ receives:
+                                    - ISSUE_NUMBER (from git branch name)
+                                    - WORKTREE_PATH (from cwd)
+                                    - TARGET_REPO (from git remote)
 ```
 
 `turbo-completion` auto-detects these from the current git state — no explicit handoff needed.
+`cmux-delegate` spawns an independent session in the worktree; handoff is via `--cwd` flag.
 
 ## Integration
 
 **Workflow position:**
 ```
-[user request] → [turbo-setup] → [EXECUTE] → [turbo-completion] → [done]
+[user request] → [turbo-setup] → [choose path] ─┬─ inline impl    → [turbo-completion] → [done]
+                                                  ├─ turbo-implement → [turbo-completion] → [done]
+                                                  └─ cmux-delegate  → [new session]       → [done]
 ```
 
 **Previous step:** User request (task description or URL)
-**Next step:** Implementation (manual or via `ralph`/`executor`)
+**Next step (options):**
+- Inline: implement in same session, then `/turbo-completion`
+- Auto: `/turbo-implement` (selects ralph or autopilot)
+- Delegated: `/cmux-delegate --cwd <worktree> --model <provider>`
