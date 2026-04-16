@@ -422,6 +422,19 @@ If you catch yourself about to:
 
 **ALL of these mean: STOP. Run the Gate Function (Stage 1).**
 
+### Stop Hook Recovery Path
+
+`hooks/completion-verify.sh` (praxis Stop hook)이 완료 선언을 차단한 경우:
+
+1. 직전 AI 응답에 "완료" / "done" / "finished" 등의 완료 키워드는 있지만, 검증 증거(`tests passed`, `PASS`, `exit code 0`, `✅` 등)가 같은 턴에 없었다는 뜻이다.
+2. 차단 해제 정규 복구 경로: **`turbo-completion --verify-only` 를 즉시 호출하고 출력(테스트/lint/build 결과)을 같은 턴에 붙인 뒤 완료를 다시 선언**한다.
+   - hook은 증거 패턴이 같은 턴에 존재하면 통과한다 — 완료 재선언이 재차단되지 않는다.
+3. `turbo-completion --verify-only` 결과가 실패이면 완료 선언을 철회하고 실패 원인을 먼저 수정한다.
+4. Stop hook 차단 로그: `~/.claude/scope-confirm/stop-triggered.log` (주당 5건 이상이면 hook의 감지 패턴 튜닝 필요 — `CLAIM_PATTERNS` / `EVIDENCE_PATTERNS` 참고).
+
+> 이는 완료 주장 → 증거 제시 사이의 race 를 막는 post-execution enforcement layer다.
+> hook 활성화: praxis 플러그인 설치 후 `~/.claude/settings.json` Stop hooks에 `hooks/completion-verify.sh` 등록 필요.
+
 ## Integration
 
 **Workflow position:**
