@@ -1,0 +1,16 @@
+{
+  "description": "praxis Stop hook: block completion claims without verification evidence",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/completion-verify.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
