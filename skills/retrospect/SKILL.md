@@ -110,6 +110,40 @@ You MUST complete each stage before proceeding to the next.
    - Was it followed, violated, or simply absent?
    - Quote or paraphrase the specific moment
 
+4b. **Tool Friction Pass** — independently analyze tool/feature-level friction:
+
+   This pass runs SEPARATELY from step 4. A friction event may match a rule violation (step 4) AND a tool defect (step 4b) — both are recorded.
+
+   **Tool layers to scan (all 4):**
+
+   | Layer | Examples | Friction signals |
+   |-------|----------|-----------------|
+   | `mcp` | laplace-airflow, laplace-trino, signoz, slack MCP | Slow response, missing field, schema mismatch, timeout |
+   | `cli` | gh, kubectl, hubctl, omc, codex, gemini | Missing flag/option, undocumented behavior, workaround needed |
+   | `builtin` | Read/Edit/Bash/Grep/Glob, Agent, hooks | Environmental constraint, permission issue, output truncation |
+   | `skill` | OMC/laplace-dev-hub/praxis skills, subagents | Stage boundary unclear, trigger mismatch, prompt defect, wrong routing |
+
+   **For each tool friction event, record:**
+   - `tool_name`: specific tool (e.g., "gh CLI", "laplace-airflow MCP", "turbo-setup skill")
+   - `layer`: mcp / cli / builtin / skill
+   - `friction_type`: missing feature, design defect, documentation gap, performance issue, integration mismatch
+   - `evidence`: the specific moment (quote or paraphrase)
+   - `expected_behavior`: what should have happened
+   - `proposed_fix_direction`: brief suggestion for upstream improvement
+
+   **Representative friction examples (for calibration):**
+   1. "gh CLI의 `--state all` 플래그가 없어서 open/closed를 각각 호출해야 했다" → layer: `cli`, friction_type: missing feature
+   2. "MCP 응답 지연으로 3회 재시도 후 fallback 전략을 수동 구성했다" → layer: `mcp`, friction_type: performance issue
+   3. "skill의 Stage 경계가 불명확해서 step을 건너뛰고 다음 stage로 넘어갔다" → layer: `skill`, friction_type: design defect
+   4. "codex exec의 permission mode가 달라 파일 쓰기에 실패했다" → layer: `cli`, friction_type: integration mismatch
+   5. "Read 도구의 출력 truncation으로 파일 끝부분을 놓쳤다" → layer: `builtin`, friction_type: design defect
+
+   **Dedup rule (step 4 vs step 4b):**
+   - If a friction event has BOTH a rule violation (step 4) AND a tool defect (step 4b), record it in BOTH places
+   - Step 4 finding addresses the behavioral correction (what Claude should have done differently)
+   - Step 4b finding addresses the tool improvement (what the tool should do differently)
+   - The two findings may have different action types (e.g., step 4 → memory, step 4b → upstream feedback)
+
 5. **Find root cause** for each pattern:
 
    ```
@@ -144,7 +178,7 @@ You MUST complete each stage before proceeding to the next.
    | Repeat (3x+) | hook or skill | Multiple memory entries = enforcement gap |
    | Missing rule (new) | CLAUDE.md draft | No rule exists for this pattern |
    | Missing rule + Repeat | CLAUDE.md draft + GitHub issue | Missing rule caused repeat — add rule + compliance issue |
-   | Tool friction | GitHub issue | Tool improvement needed |
+   | Tool friction (step 4b finding) | upstream feedback | Tool improvement needed — praxis repo issue with `tool-friction:{layer}` label |
    | One-off mistake (situational cause, unlikely to recur) | note only | No persistent action needed |
 
    **Distinguishing "New pattern" vs "One-off mistake":**
@@ -169,13 +203,22 @@ You MUST complete each stage before proceeding to the next.
 ...
 
 No patterns found: "This session followed all CLAUDE.md rules. ✅"
+
+### Tool/Feature Findings (from step 4b)
+
+| # | Affected Tool | Tool Layer | Friction Type | Evidence | Proposed Upstream Action | Priority |
+|---|---------------|------------|---------------|----------|--------------------------|----------|
+| T1 | {tool_name} | {mcp/cli/builtin/skill} | {friction_type} | {evidence} | {upstream feedback / note only} | HIGH/MED/LOW |
+...
+
+No tool friction found: "No tool/feature friction detected. ✅"
 ```
 
-**Action type baseline comes from Stage 2 escalation ladder**, but Stage 3 MUST explicitly evaluate all five action types per finding and select 1–2 composite actions.
+**Action type baseline comes from Stage 2 escalation ladder**, but Stage 3 MUST explicitly evaluate all six action types per finding and select 1–2 composite actions.
 
 > **Exception — one-off mistakes**: If Stage 2 classified the finding as `note only` (situational root cause, unlikely to recur), skip the evaluation below entirely. No persistent action is created; the finding appears in the report as acknowledged only.
 
-**For each finding (except one-off), evaluate ALL five action types before selecting:**
+**For each finding (except one-off), evaluate ALL six action types before selecting:**
 
 | Action Type | When to Choose | Skip If |
 |-------------|---------------|---------|
@@ -184,6 +227,7 @@ No patterns found: "This session followed all CLAUDE.md rules. ✅"
 | **CLAUDE.md draft** | Explicit rule gap exists, cross-project scope needed | Existing rule already covers this pattern |
 | **Skill idea note** | Repeat pattern needs enforcement mechanism, manual recall is insufficient | Single memo is sufficient, no recurring trigger |
 | **Hook code** | Repeat (3x+) requiring automated enforcement; manual recall has repeatedly failed | Fewer than 3 repeats; skill idea or rule is sufficient |
+| **Upstream feedback** | Tool/feature-level defect identified in step 4b; improvement needed in the tool itself, not in Claude's behavior | Finding is purely a rule violation with no tool-level root cause |
 
 **Selection matrix — three axes to determine compound vs. single action:**
 
@@ -261,11 +305,23 @@ For each approved action:
    - Present the draft to user for review BEFORE any edit
    - Apply only with explicit approval ("yes, add this rule")
 
-4. **Skill idea note** → Write to `{current_project}/.omc/plans/retrospect-skill-idea-{slug}.md`
+4. **Upstream feedback** → Create a labeled issue in `devseunggwan/praxis` for tool-level improvement:
+   - Title: `{type}({tool_layer}): {friction description}` (Conventional Commits format)
+   - Label: map tool layer to label:
+     - `mcp` → `tool-friction:mcp`
+     - `cli` → `tool-friction:cli`
+     - `builtin` → `tool-friction:builtin`
+     - `skill` → `tool-friction:skill`
+   - Body: include evidence, expected behavior, proposed fix direction from step 4b finding
+   - Command: `gh issue create --repo devseunggwan/praxis --title "$TITLE" --label "$LABEL" --body "$BODY"`
+   - If required labels don't exist yet: create them first with `gh label create "tool-friction:{layer}" --repo devseunggwan/praxis`
+   - **Verification (mandatory):** issue URL is returned and `gh issue view {url}` succeeds
+
+5. **Skill idea note** → Write to `{current_project}/.omc/plans/retrospect-skill-idea-{slug}.md`
    - `{current_project}` = `$CLAUDE_PROJECT_DIR` or `git rev-parse --show-toplevel`
    - Include: problem, proposed skill trigger, pipeline sketch
 
-5. **Hook code** → For enforcement-level actions (repeat 3x+):
+6. **Hook code** → For enforcement-level actions (repeat 3x+):
    a. Write hook script to `.claude/hooks/` or appropriate location
    b. Present the hook code to user for review
    c. Explain how to register in `.claude/settings.json` (show the exact JSON entry)
@@ -273,20 +329,21 @@ For each approved action:
    e. If approved: Edit `.claude/settings.json` to register the hook
    f. If skipped/deferred: leave the hook file in place and provide manual registration instructions
 
-6. **Verification** — For each executed action, verify the artifact:
+7. **Verification** — For each executed action, verify the artifact:
 
    | Artifact | Verification |
    |----------|-------------|
    | MEMORY.md feedback (new) | File exists + MEMORY.md index updated |
    | MEMORY.md feedback (merged) | Existing file updated (diff shown) + MEMORY.md index description updated if needed |
    | GitHub issue | `gh issue view {url}` returns valid data |
+   | Upstream feedback | `gh issue view {url}` returns valid data + correct `tool-friction:{layer}` label attached |
    | Hook code | Script file exists + settings.json registration confirmed (dry-run varies by hook type — no generic check) |
    | CLAUDE.md draft | Diff shown to user + explicit approval received |
    | Skill idea note | File exists in `.omc/plans/` |
 
    Report verification results in the completion table.
 
-7. **Completion report:**
+8. **Completion report:**
 
 ```
 ## Actions Executed
@@ -310,6 +367,8 @@ Session learnings captured. Next session will benefit from these improvements.
 | "The session was mostly fine, nothing to retrospect" | Even 1 friction event is worth 2 minutes to capture. |
 | "I'll do this later" | Later never comes. Do it at session end while context is fresh. |
 | "This is a tool issue, not a Claude issue" | Tool + Claude interaction is within scope. Both can be improved. |
+| "Tool issue라서 이번 retrospect scope 밖이다" | Scope 안이다. Step 4b에서 분석하고 `upstream feedback`으로 `devseunggwan/praxis`에 이슈 + `tool-friction:{layer}` 라벨까지 남겨야 한다. |
+| "도구 결함이지 내 행동 문제가 아니다" | 둘 다일 수 있다. Step 4 (행동 교정)와 step 4b (도구 개선)에 각각 기록하라. 하나만 선택하지 마라. |
 
 ## Red Flags — STOP
 
@@ -327,6 +386,8 @@ If you catch yourself:
 - Creating a new memory file without checking existing entries for overlap (MUST merge into existing when root cause matches)
 - **Proposing MEMORY.md feedback as the only action when the same rule was violated 3+ times** — this ignores memo's proven limits; enforcement mechanisms (skill, hook, rule) MUST be evaluated alongside memory
 - **Proposing MEMORY.md feedback as the only action when the finding is a rule gap (rule absent)** — gaps are not filled by memos; CLAUDE.md draft or skill idea MUST be considered
+- **Forcing tool friction into only a rule-violation frame** — tool-layer defects from step 4b MUST be reported in the separate Tool/Feature Findings table and evaluated for `upstream feedback`, not collapsed into rule-violation findings
+- **Skipping step 4b entirely** ("no tool issues this session") — step 4b is mandatory. If no tool friction is found, record "No tool/feature friction detected. ✅" explicitly
 
 **ALL of these mean: STOP. Return to Stage 2.**
 
@@ -352,6 +413,8 @@ If you catch yourself:
 | Stage 3 (report) | User rejects all findings | Capture the rejection itself as a feedback signal for future retrospects |
 | Stage 4 (execute) | MEMORY.md write fails | Report the path error; never silently drop the feedback |
 | Stage 4 (execute) | GitHub issue creation fails | Fall back to saving a note in `.omc/plans/` for later manual creation |
+| Stage 4 (execute) | Upstream feedback issue creation fails | Fall back to saving a note in `.omc/plans/tool-friction-{slug}.md` with intended `tool-friction:{layer}` label and issue draft |
+| Stage 4 (execute) | `tool-friction:*` label doesn't exist | Auto-create with `gh label create "tool-friction:{layer}" --repo devseunggwan/praxis` and retry |
 
 ## Integration
 
