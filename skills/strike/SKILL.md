@@ -1,6 +1,6 @@
 ---
 name: strike
-description: Declare a rule violation in the current Claude Code session. Use when the user says "/strike", "strike <reason>", "삼진", "strike 1", or wants to record that Claude just violated a rule. Escalates — 1st=warning, 2nd=forced review, 3rd=response block.
+description: Declare a rule violation in the current Claude Code session. Use ONLY when the user says "/strike", "/praxis:strike", "strike 1/2/3", "삼진", or explicitly asks to record a rule violation. Do NOT activate on colloquial uses like "strike a balance" or "strike that". Escalates — 1진 warning, 2진 forced review, 3진 response block.
 ---
 
 # Praxis Strike

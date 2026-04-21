@@ -14,11 +14,16 @@
 #   status         Slash: echo current count + reason list
 #   reset          Slash: clear state for current session
 
+# Fail-safe posture: we never want this script to break a Claude Code session.
+# Instead of relying on `trap ... ERR` (which is a no-op under `set +e`), we
+# keep `errexit` off and guard every external call with `|| true` /
+# `2>/dev/null` / conditional checks. The script only returns a non-zero exit
+# intentionally — and never from the hook modes (which stay at exit 0 always,
+# using JSON `decision` to signal block).
 set +e
-trap 'exit 0' ERR
 
 MODE="${1:-}"
-shift 2>/dev/null || true
+shift || true
 
 # jq guard — Claude Code session must keep booting even without jq
 if ! command -v jq >/dev/null 2>&1; then
@@ -79,6 +84,9 @@ STATE_FILE="$STATE_DIR/${SID}.json"
 
 # ---- helpers ---------------------------------------------------------------
 load_count() {
+  # 2>/dev/null suppresses jq's own error line so a corrupt state file
+  # does not turn into "0\n<error>" — the `[` test downstream only tolerates
+  # a single integer.
   if [ -f "$STATE_FILE" ]; then
     jq -r '.count // 0' "$STATE_FILE" 2>/dev/null || echo 0
   else
@@ -96,7 +104,17 @@ load_reasons_plain() {
 case "$MODE" in
 
   session-start)
-    # Write latch file so slash commands can resolve session_id
+    # Primary: export CLAUDE_SESSION_ID via $CLAUDE_ENV_FILE. Claude Code
+    # sources this file into every subsequent Bash tool invocation, so
+    # slash commands receive the authoritative session_id directly from
+    # the environment. This avoids cross-session latch contamination when
+    # multiple Claude sessions share the same $CLAUDE_PLUGIN_DATA.
+    if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+      printf 'export CLAUDE_SESSION_ID=%q\n' "$SID" >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
+    fi
+    # Backstop: latch file for environments where $CLAUDE_ENV_FILE is
+    # unavailable. Only consulted when the env var is truly absent, so
+    # concurrent session overwrites are harmless under normal operation.
     echo "$SID" > "$LATCH"
     COUNT=$(load_count)
     if [ "$COUNT" -gt 0 ] 2>/dev/null; then
@@ -162,7 +180,9 @@ Ask the user to run /praxis:reset-strikes and acknowledge the retrospective befo
     if [ ! -f "$STATE_FILE" ]; then
       echo '{"count":0,"reasons":[]}' > "$STATE_FILE"
     fi
-    tmp=$(mktemp)
+    # Keep the temp file on the same filesystem as STATE_FILE so `mv`
+    # always resolves to rename(2) (atomic) rather than copy+delete.
+    tmp=$(mktemp "$STATE_DIR/.tmp.XXXXXX")
     jq --arg r "$REASON" '.count = (.count + 1) | .reasons = (.reasons + [$r])' \
       "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
     COUNT=$(load_count)

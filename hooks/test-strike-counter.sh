@@ -226,6 +226,27 @@ test_ac13_hooks_json_valid() {
   jq . "$SCRIPT_DIR/hooks.json" >/dev/null 2>&1
 }
 
+# ---- AC14: session-start exports session_id via $CLAUDE_ENV_FILE -----------
+test_ac14_env_file_export() {
+  fresh_env
+  local envfile
+  envfile=$(mktemp)
+  local json_in
+  json_in=$(printf '{"session_id":"%s"}' "$CLAUDE_SESSION_ID")
+  local expected_sid="$CLAUDE_SESSION_ID"
+
+  # Simulate Claude Code's SessionStart hook environment
+  CLAUDE_ENV_FILE="$envfile" bash -c \
+    "echo '$json_in' | \"$STRIKE\" session-start >/dev/null"
+
+  local ok=1
+  grep -q "export CLAUDE_SESSION_ID=" "$envfile" || ok=0
+  grep -q "$expected_sid" "$envfile" || ok=0
+  rm -f "$envfile"
+  cleanup_env
+  [ "$ok" -eq 1 ]
+}
+
 # ---------- runner ----------------------------------------------------------
 echo "strike-counter.sh tests"
 echo "------------------------"
@@ -242,6 +263,7 @@ run "AC10 slash command uses latch when env var unset" test_ac10_latch_fallback
 run "AC11 missing session_id → silent fail-safe exit 0" test_ac11_missing_session_id
 run "AC12 status prints Strikes: N/3" test_ac12_status_header
 run "AC13 hooks.json is valid JSON" test_ac13_hooks_json_valid
+run "AC14 session-start exports CLAUDE_SESSION_ID via \$CLAUDE_ENV_FILE" test_ac14_env_file_export
 
 echo "------------------------"
 echo "Passed: $PASS  Failed: $FAIL"
