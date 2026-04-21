@@ -1,6 +1,28 @@
 {
-  "description": "praxis Stop hook: block completion claims without verification evidence",
+  "description": "praxis hooks: Stop gate for completion-without-evidence + session-scoped three-strike discipline",
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/strike-counter.sh session-start",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/strike-counter.sh preprompt",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -8,6 +30,11 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/completion-verify.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/strike-counter.sh stop",
+            "timeout": 5
           }
         ]
       }
