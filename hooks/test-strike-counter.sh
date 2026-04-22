@@ -7,6 +7,11 @@
 # Usage: bash hooks/test-strike-counter.sh
 # Exit:  0 = all pass; 1 = at least one fail (per-test output shown)
 
+# shellcheck disable=SC2329
+# All test_* and helper functions are invoked indirectly via `run "<name>" test_fn`
+# at the bottom of this file. Shellcheck can't trace indirect dispatch, so its
+# "never invoked" warning is a false positive for this test harness.
+
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STRIKE="$SCRIPT_DIR/strike-counter.sh"
@@ -40,27 +45,29 @@ cleanup_env() {
   unset CLAUDE_PLUGIN_DATA CLAUDE_SESSION_ID
 }
 
-# ---- AC1: /strike prints 1진 on first call ---------------------------------
+# ---- AC1: /strike prints strike 1 warning on first call --------------------
 test_ac1_first_strike_warning() {
   fresh_env
   local out
   out=$("$STRIKE" strike "worktree bypass" 2>&1)
   local code=$?
   cleanup_env
-  [ "$code" -eq 0 ] && echo "$out" | grep -q "1진 경고"
+  [ "$code" -eq 0 ] && echo "$out" | grep -q "Strike 1 warning"
 }
 
-# ---- AC2: second strike triggers 2진 회고 ----------------------------------
+# ---- AC2: second strike triggers strike 2 review ---------------------------
 test_ac2_second_strike_review() {
   fresh_env
   "$STRIKE" strike "one" >/dev/null
   local out code
   out=$("$STRIKE" strike "two" 2>&1); code=$?
   cleanup_env
-  [ "$code" -eq 0 ] && echo "$out" | grep -q "2진 회고" && echo "$out" | grep -q "CLAUDE.md"
+  [ "$code" -eq 0 ] \
+    && echo "$out" | grep -q "Strike 2 — review required" \
+    && echo "$out" | grep -q "CLAUDE.md"
 }
 
-# ---- AC3: third strike marks 3진 block state -------------------------------
+# ---- AC3: third strike marks strike 3 blocked state ------------------------
 test_ac3_third_strike_block_state() {
   fresh_env
   "$STRIKE" strike "one" >/dev/null
@@ -71,7 +78,7 @@ test_ac3_third_strike_block_state() {
   status_out=$("$STRIKE" status 2>&1)
   cleanup_env
   [ "$code" -eq 0 ] \
-    && echo "$out" | grep -q "3진 block" \
+    && echo "$out" | grep -q "Strike 3 — blocked" \
     && echo "$status_out" | grep -q "Strikes: 3/3" \
     && echo "$status_out" | grep -q "one" \
     && echo "$status_out" | grep -q "two" \
@@ -194,7 +201,7 @@ test_ac10_latch_fallback() {
   local out code
   out=$("$STRIKE" strike "via latch" 2>&1); code=$?
   cleanup_env
-  [ "$code" -eq 0 ] && echo "$out" | grep -q "1진 경고"
+  [ "$code" -eq 0 ] && echo "$out" | grep -q "Strike 1 warning"
 }
 
 # ---- AC11: missing session_id fails cleanly --------------------------------
@@ -274,7 +281,7 @@ test_ac16_skill_files_exist() {
   [ "$ok" -eq 1 ]
 }
 
-# ---- AC18 (codex P2): corrupt state file → error branch, not false 3진 ----
+# ---- AC18 (codex P2): corrupt state → error branch, not false block --------
 test_ac18_corrupt_state_not_false_block() {
   fresh_env
   mkdir -p "$CLAUDE_PLUGIN_DATA/strikes"
@@ -288,7 +295,7 @@ test_ac18_corrupt_state_not_false_block() {
   rm -f /tmp/err.$$
 
   # Confirm stop hook does NOT block (count<3), confirming the UX/enforcement
-  # asymmetry is fixed — error message on stderr, not false 3진 on stdout
+  # asymmetry is fixed — error message on stderr, not a false block on stdout
   local stop_out
   local json_in
   json_in=$(printf '{"session_id":"%s","stop_hook_active":false}' "$CLAUDE_SESSION_ID")
@@ -296,9 +303,113 @@ test_ac18_corrupt_state_not_false_block() {
   cleanup_env
 
   [ "$code" -eq 0 ] \
-    && [ -z "$(echo "$out" | grep '3진 block')" ] \
-    && echo "$err" | grep -q "Strike 상태 이상" \
+    && ! echo "$out" | grep -q 'Strike 3 — blocked' \
+    && echo "$err" | grep -q "Strike state error" \
     && [ -z "$stop_out" ]
+}
+
+# ---- AC19: reset at count>=3 refused when reflection missing ---------------
+test_ac19_reset_blocked_without_reflection() {
+  fresh_env
+  "$STRIKE" strike "one" >/dev/null
+  "$STRIKE" strike "two" >/dev/null
+  "$STRIKE" strike "three" >/dev/null
+  local out code
+  out=$("$STRIKE" reset 2>&1); code=$?
+  # State must still exist (reset was refused)
+  local state_file="$CLAUDE_PLUGIN_DATA/strikes/${CLAUDE_SESSION_ID}.json"
+  local state_kept=0
+  [ -f "$state_file" ] && state_kept=1
+  cleanup_env
+  [ "$code" -eq 0 ] \
+    && echo "$out" | grep -q "Reset refused" \
+    && echo "$out" | grep -q "reflection.md" \
+    && [ "$state_kept" -eq 1 ]
+}
+
+# ---- AC20: reset at count>=3 refused when reflection file is empty ---------
+test_ac20_reset_blocked_when_reflection_empty() {
+  fresh_env
+  "$STRIKE" strike "one" >/dev/null
+  "$STRIKE" strike "two" >/dev/null
+  "$STRIKE" strike "three" >/dev/null
+  local reflection="$CLAUDE_PLUGIN_DATA/strikes/${CLAUDE_SESSION_ID}.reflection.md"
+  : > "$reflection"  # zero-byte file
+  local out code
+  out=$("$STRIKE" reset 2>&1); code=$?
+  cleanup_env
+  [ "$code" -eq 0 ] && echo "$out" | grep -q "Reset refused"
+}
+
+# ---- AC21: reset at count>=3 succeeds when reflection is non-empty ---------
+test_ac21_reset_succeeds_with_reflection() {
+  fresh_env
+  "$STRIKE" strike "one" >/dev/null
+  "$STRIKE" strike "two" >/dev/null
+  "$STRIKE" strike "three" >/dev/null
+  local reflection="$CLAUDE_PLUGIN_DATA/strikes/${CLAUDE_SESSION_ID}.reflection.md"
+  local state_file="$CLAUDE_PLUGIN_DATA/strikes/${CLAUDE_SESSION_ID}.json"
+  printf '# Reflection\n\nRoot causes and prevention checklist.\n' > "$reflection"
+  local out code
+  out=$("$STRIKE" reset 2>&1); code=$?
+  # Both state and reflection must be removed after a successful gated reset
+  local state_gone=1
+  [ -f "$state_file" ] && state_gone=0
+  local reflection_gone=1
+  [ -f "$reflection" ] && reflection_gone=0
+  cleanup_env
+  [ "$code" -eq 0 ] \
+    && echo "$out" | grep -q "Strikes reset" \
+    && [ "$state_gone" -eq 1 ] \
+    && [ "$reflection_gone" -eq 1 ]
+}
+
+# ---- AC22: reset at count<3 is NOT gated (no reflection required) ----------
+test_ac22_reset_not_gated_under_3() {
+  fresh_env
+  "$STRIKE" strike "one" >/dev/null
+  local out code
+  out=$("$STRIKE" reset 2>&1); code=$?
+  cleanup_env
+  [ "$code" -eq 0 ] && echo "$out" | grep -q "Strikes reset"
+}
+
+# ---- AC23: stop hook block message includes reflection instructions --------
+test_ac23_stop_block_has_reflection_instructions() {
+  fresh_env
+  "$STRIKE" strike "one" >/dev/null
+  "$STRIKE" strike "two" >/dev/null
+  "$STRIKE" strike "three" >/dev/null
+  local json_in
+  json_in=$(printf '{"session_id":"%s","stop_hook_active":false}' "$CLAUDE_SESSION_ID")
+  local out
+  out=$(echo "$json_in" | "$STRIKE" stop 2>&1)
+  local reason
+  reason=$(echo "$out" | jq -r '.reason // empty' 2>/dev/null)
+  cleanup_env
+  echo "$reason" | grep -q "reflection" \
+    && echo "$reason" | grep -q "reflection.md" \
+    && echo "$reason" | grep -q "Root cause"
+}
+
+# ---- AC24: block message includes persuasion step instructions -------------
+test_ac24_block_message_has_persuasion_step() {
+  fresh_env
+  "$STRIKE" strike "one" >/dev/null
+  "$STRIKE" strike "two" >/dev/null
+  local strike_out
+  strike_out=$("$STRIKE" strike "three" 2>&1)
+  local json_in
+  json_in=$(printf '{"session_id":"%s","stop_hook_active":false}' "$CLAUDE_SESSION_ID")
+  local stop_out
+  stop_out=$(echo "$json_in" | "$STRIKE" stop 2>&1)
+  local stop_reason
+  stop_reason=$(echo "$stop_out" | jq -r '.reason // empty' 2>/dev/null)
+  cleanup_env
+  # Both the strike-time and stop-hook messages must name the persuasion step
+  # so Claude cannot skip the user-facing appeal after writing the reflection.
+  echo "$strike_out" | grep -qi "persuade\|trust\|appeal" \
+    && echo "$stop_reason" | grep -qi "persuade\|trust\|appeal"
 }
 
 # ---- AC17 (plan Step 1.5): TTL cleanup removes stale state files -----------
@@ -337,14 +448,14 @@ test_ac17_ttl_cleanup() {
 # ---------- runner ----------------------------------------------------------
 echo "strike-counter.sh tests"
 echo "------------------------"
-run "AC1  first strike → 1진 warning" test_ac1_first_strike_warning
-run "AC2  second strike → 2진 review + CLAUDE.md" test_ac2_second_strike_review
-run "AC3  third strike → 3진 block state + status" test_ac3_third_strike_block_state
+run "AC1  first strike → strike 1 warning" test_ac1_first_strike_warning
+run "AC2  second strike → strike 2 review + CLAUDE.md" test_ac2_second_strike_review
+run "AC3  third strike → strike 3 blocked state + status" test_ac3_third_strike_block_state
 run "AC4  stop hook blocks at count≥3 (JSON decision + log)" test_ac4_stop_hook_blocks_at_3
 run "AC5  stop hook silent at count<3" test_ac5_stop_hook_silent_under_3
 run "AC6  stop_hook_active=true short-circuits" test_ac6_stop_active_short_circuit
 run "AC7  reset clears state" test_ac7_reset_clears
-run "AC8  preprompt emits 1/2진 additionalContext" test_ac8_preprompt_contexts
+run "AC8  preprompt emits strike 1/2 additionalContext" test_ac8_preprompt_contexts
 run "AC9  session-start writes latch + emits context" test_ac9_session_start_latch
 run "AC10 slash command uses latch when env var unset" test_ac10_latch_fallback
 run "AC11 missing session_id → silent fail-safe exit 0" test_ac11_missing_session_id
@@ -354,7 +465,13 @@ run "AC14 session-start exports CLAUDE_SESSION_ID via \$CLAUDE_ENV_FILE" test_ac
 run "AC15 jq missing → stdout+stderr guidance + exit 0" test_ac15_jq_missing_guidance
 run "AC16 skill files exist + reference strike-counter.sh" test_ac16_skill_files_exist
 run "AC17 TTL cleanup removes stale state files" test_ac17_ttl_cleanup
-run "AC18 corrupt state → error branch, not false 3진 (codex P2)" test_ac18_corrupt_state_not_false_block
+run "AC18 corrupt state → error branch, not false block (codex P2)" test_ac18_corrupt_state_not_false_block
+run "AC19 reset at 3/3 refused without reflection file" test_ac19_reset_blocked_without_reflection
+run "AC20 reset at 3/3 refused when reflection file is empty" test_ac20_reset_blocked_when_reflection_empty
+run "AC21 reset at 3/3 succeeds with reflection + clears both files" test_ac21_reset_succeeds_with_reflection
+run "AC22 reset at count<3 not gated by reflection" test_ac22_reset_not_gated_under_3
+run "AC23 stop hook block message includes reflection instructions" test_ac23_stop_block_has_reflection_instructions
+run "AC24 block message includes persuasion step instructions" test_ac24_block_message_has_persuasion_step
 
 echo "------------------------"
 echo "Passed: $PASS  Failed: $FAIL"

@@ -12,7 +12,9 @@
 #   stop           Hook: if count>=3, emit {"decision":"block"} JSON
 #   strike <rsn>   Slash: increment count, echo level-specific message
 #   status         Slash: echo current count + reason list
-#   reset          Slash: clear state for current session
+#   reset          Slash: clear state for current session; at count>=3,
+#                  requires a non-empty reflection file at
+#                  $STATE_DIR/${SID}.reflection.md before clearing.
 
 # Fail-safe posture: we never want this script to break a Claude Code session.
 # Instead of relying on `trap ... ERR` (which is a no-op under `set +e`), we
@@ -38,8 +40,10 @@ mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 LATCH="$STATE_DIR/.current-session"
 BLOCK_LOG="$STATE_DIR/last-block.log"
 
-# TTL cleanup — drop sessions older than 7 days (best-effort)
-find "$STATE_DIR" -maxdepth 1 -name '*.json' -mtime +7 -delete 2>/dev/null || true
+# TTL cleanup — drop sessions older than 7 days (best-effort).
+# Covers both state JSON and any orphan reflection markdown so stale
+# reflections from abandoned cycles cannot linger indefinitely.
+find "$STATE_DIR" -maxdepth 1 \( -name '*.json' -o -name '*.reflection.md' \) -mtime +7 -delete 2>/dev/null || true
 
 # ---- session_id resolution -------------------------------------------------
 # Hook modes consume stdin once (into $INPUT) so downstream code can reuse it.
@@ -81,6 +85,7 @@ if [ -z "$SID" ]; then
 fi
 
 STATE_FILE="$STATE_DIR/${SID}.json"
+REFLECTION_FILE="$STATE_DIR/${SID}.reflection.md"
 
 # ---- helpers ---------------------------------------------------------------
 load_count() {
@@ -98,6 +103,35 @@ load_reasons_plain() {
   if [ -f "$STATE_FILE" ]; then
     jq -r '.reasons // [] | to_entries | map("  \(.key + 1). \(.value)") | join("\n")' "$STATE_FILE" 2>/dev/null
   fi
+}
+
+# Reflection gating helpers. A reflection is valid only if the file exists
+# AND is non-empty — empty markers would let the user bypass the gate by
+# just `touch`ing the path. `[ -s file ]` covers both conditions atomically.
+reflection_valid() {
+  [ -s "$REFLECTION_FILE" ]
+}
+
+reflection_requirement_msg() {
+  cat <<MSG
+Recovery is a two-step trust process — write, then persuade.
+
+Step 1 — Write a reflection document at the path below.
+Path: $REFLECTION_FILE
+
+Reflection must cover:
+1. Summary of the three recorded violations this session
+2. Root cause of each violation (which CLAUDE.md rule/section was breached)
+3. Concrete behavioral changes to prevent recurrence (checklist form)
+
+Step 2 — Present the reflection to the user and make an explicit appeal:
+- Quote or summarize the reflection in-chat (do not just point at the file)
+- Acknowledge the specific harm each violation caused
+- Commit to the preventive checklist in concrete terms
+- Explicitly ask the user to run /praxis:reset-strikes as a trust decision
+
+/praxis:reset-strikes will be refused if the reflection file is missing or empty, and should only be invoked by the user after your appeal — never implicitly.
+MSG
 }
 
 # ---- mode handlers ---------------------------------------------------------
@@ -167,9 +201,11 @@ Before your next action, re-read the relevant sections of ~/.claude/CLAUDE.md an
       REASONS=$(load_reasons_plain)
       ts=$(date -u +%FT%TZ)
       echo "[$ts] session=$SID count=$COUNT block" >> "$BLOCK_LOG" 2>/dev/null || true
+      REQUIREMENT=$(reflection_requirement_msg)
       REASON_MSG="🔴 Praxis strike 3/3 — response blocked. Violations this session:
 $REASONS
-Ask the user to run /praxis:reset-strikes and acknowledge the retrospective before continuing."
+
+$REQUIREMENT"
       jq -n --arg r "$REASON_MSG" '{decision: "block", reason: $r}'
     fi
     exit 0
@@ -189,23 +225,25 @@ Ask the user to run /praxis:reset-strikes and acknowledge the retrospective befo
     # Distinguish expected counts (1/2/>=3) from unexpected values (0,
     # non-numeric, empty). COUNT=0 after a strike usually means the write
     # failed silently (jq parse error on corrupt state, mv failure, etc.);
-    # announcing "3진 block" in that case is a lie since the Stop hook
-    # only blocks when count>=3. Route unexpected values through a distinct
-    # error branch so UX matches actual enforcement state.
+    # announcing "strike 3 — blocked" in that case is a lie since the Stop
+    # hook only blocks when count>=3. Route unexpected values through a
+    # distinct error branch so UX matches actual enforcement state.
     if ! [[ "$COUNT" =~ ^[0-9]+$ ]] || [ "$COUNT" -eq 0 ] 2>/dev/null; then
-      echo "⚠️ Strike 상태 이상: count='$COUNT' — state 파일 손상 또는 쓰기 실패 가능." >&2
-      echo "복구: /praxis:reset-strikes 후 재시도 권장." >&2
+      echo "⚠️ Strike state error: count='$COUNT' — state file corrupt or write failed." >&2
+      echo "Recovery: run /praxis:reset-strikes and retry." >&2
     elif [ "$COUNT" -eq 1 ] 2>/dev/null; then
-      echo "⚠️ 1진 경고: $REASON (다음 응답부터 주의 강화)"
+      echo "⚠️ Strike 1 warning: $REASON (tighten rule adherence from next response)"
     elif [ "$COUNT" -eq 2 ] 2>/dev/null; then
-      echo "🔶 2진 회고 필요: $REASON. 누적 목록:"
+      echo "🔶 Strike 2 — review required: $REASON. Cumulative list:"
       load_reasons_plain
-      echo "관련 CLAUDE.md 섹션 재독 후 응답."
+      echo "Re-read the relevant CLAUDE.md section before replying."
     else
       # COUNT >= 3
-      echo "🔴 3진 block 상태: $REASON. 누적 목록:"
+      echo "🔴 Strike 3 — blocked: $REASON. Cumulative list:"
       load_reasons_plain
-      echo "다음 응답은 Stop hook으로 차단됩니다. /praxis:reset-strikes 로 해제."
+      echo "The next response will be blocked by the Stop hook."
+      echo ""
+      reflection_requirement_msg
     fi
     exit 0
     ;;
@@ -221,12 +259,27 @@ Ask the user to run /praxis:reset-strikes and acknowledge the retrospective befo
     ;;
 
   reset)
-    if [ -f "$STATE_FILE" ]; then
-      rm -f "$STATE_FILE"
-      echo "Strikes reset (session=$SID)."
-    else
+    if [ ! -f "$STATE_FILE" ]; then
       echo "No active strikes to reset."
+      exit 0
     fi
+    # Reflection gate applies only at count>=3 (the block threshold).
+    # At lower counts the user may want to clear accidental or exploratory
+    # strikes without ceremony, so we keep reset free in that range.
+    COUNT=$(load_count)
+    if [ "$COUNT" -ge 3 ] 2>/dev/null; then
+      if ! reflection_valid; then
+        echo "❌ Reset refused — reflection missing or empty."
+        echo ""
+        reflection_requirement_msg
+        exit 0
+      fi
+      # On successful gated reset, remove the reflection too so the next
+      # next strike-3 cycle starts from a clean slate and cannot reuse a stale doc.
+      rm -f "$REFLECTION_FILE"
+    fi
+    rm -f "$STATE_FILE"
+    echo "Strikes reset (session=$SID)."
     exit 0
     ;;
 
