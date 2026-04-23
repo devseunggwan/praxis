@@ -193,7 +193,7 @@ dispatch_worker() {
 
   # Get surface ref for monitoring
   local surface=$(cmux list-pane-surfaces --workspace "$ws" 2>/dev/null \
-    | grep -oP 'surface:\d+' | head -1)
+    | sed -n 's/.*surface:\([0-9]*\).*/\1/p' | head -1)
 
   # Register worker (provider field for result parsing and crash recovery)
   echo "{\"id\":\"${task_id}\",\"ws\":\"${ws}\",\"surface\":\"${surface}\",\"provider\":\"${provider}\",\"model\":\"${model}\",\"status\":\"running\",\"log\":\"${log_file}\"}"
@@ -355,8 +355,8 @@ recover_orchestrator() {
   # Provider is encoded in workspace name: [w{id}:{provider}]
   # If workers.json survives, provider is also recoverable from disk
   cmux list-workspaces 2>/dev/null | grep '\[w' | while read line; do
-    local ws=$(echo "$line" | grep -oP 'workspace:\d+')
-    local provider=$(echo "$line" | grep -oP '(?<=:)(claude|codex|gemini)' || echo "claude")
+    local ws=$(echo "$line" | sed -n 's/.*workspace:\([^ ]*\).*/\1/p')
+    local provider=$(echo "$line" | grep -oE 'claude|codex|gemini' | head -1 || echo "claude")
     local screen=$(cmux read-screen --workspace "$ws" --lines 3 2>/dev/null)
 
     if echo "$screen" | grep -q "===WORKER_DONE==="; then
