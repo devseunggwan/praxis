@@ -12,7 +12,11 @@ USER_MESSAGE="${1:-}"
 check_guard() {
   local msg="$1"
 
-  if [ "$(echo "$msg" | wc -w | tr -d ' ')" -le 15 ]; then
+  if echo "$msg" | grep -qiE '(just kidding|Just kidding|kidding,)' 2>/dev/null; then
+    return 1
+  fi
+
+  if [ "$(echo "$msg" | wc -w | tr -d ' ')" -le 8 ]; then
     return 0
   fi
 
