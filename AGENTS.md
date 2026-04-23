@@ -85,6 +85,22 @@ Project CLAUDE.md (routing config)
 - **SRP per skill**: each skill has one responsibility, chaining connects them
 - **Discipline over convenience**: Iron Laws gate each phase, no skipping
 
+## External API Verification Gate
+
+Before writing any third-party API call code, **Context7 resolve-library-id or WebFetch** verification is mandatory.
+
+**Trigger patterns:**
+- `requests.{get,post,put,delete,patch}`
+- `fetch(`
+- `axios.{get,post,put,delete,patch}`
+- `urllib`
+- `curl`
+- Any URL string construction with path parameters (`/api/v1/...`)
+
+**Why:**
+- Guessing REST paths leads to HTTP 404 errors (documented in issue #107)
+- Context7 provides exact API signatures with verified paths
+
 ## Provider Routing
 
 Skills that dispatch external CLI workers (`cmux-orchestrator`, `cmux-delegate`, `turbo-implement`) can route tasks to multiple AI providers. When only `claude` is installed, the system behaves exactly as before — no errors, no degradation.
