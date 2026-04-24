@@ -150,10 +150,10 @@ def has_prod_scope(tokens: list[str]) -> bool:
 
 
 def build_reason(categories: list[str], prod: bool) -> str:
-    parts = [f"[{c}] {CATEGORIES[c]['reason']}" for c in categories]
-    msg = "; ".join(parts)
+    parts = [f"[{c}] {CATEGORIES[c]['reason']}." for c in categories]
+    msg = " ".join(parts)
     if prod:
-        msg = "⚠️  PROD scope 감지 — " + msg + ". 배포/운영 영향 재확인 필수."
+        msg = "⚠️  PROD scope 감지 — " + msg + " 배포/운영 영향 재확인 필수."
     msg += (
         " 의도한 실행이면 command 에 '# side-effect:ack' 주석을 포함해 재호출하세요."
     )
