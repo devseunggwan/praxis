@@ -82,7 +82,7 @@ WRAPPER_OPTS_WITH_ARG = {
     },
     "nice": {"-n", "--adjustment"},
     "stdbuf": {"-i", "-o", "-e", "--input", "--output", "--error"},
-    "time": set(),
+    "time": {"-f", "--format", "-o", "--output"},
     "ionice": {
         "-c", "--class", "-n", "--classdata",
         "-p", "--pid", "-P", "--pgid", "-u", "--uid",
@@ -95,20 +95,35 @@ def has_opt_out(raw: str) -> bool:
 
 
 def safe_tokenize(command: str) -> list[str]:
-    """Tokenize with shell operators always split into their own tokens.
+    """Tokenize with shell operators and line breaks split into tokens.
 
     Uses shlex.shlex(punctuation_chars=';|&') so that `git push&&echo` and
     `git push;echo` split into `['git', 'push', '&&', 'echo']` etc. Plain
     shlex.split keeps operators glued to adjacent words, which would let a
     whitespace-free one-liner bypass detection entirely.
+
+    Newlines are a command separator in Bash but shlex's whitespace_split
+    consumes them as generic whitespace, flattening multi-line scripts into
+    one token stream. We pre-split the raw command on `\\n` and insert a
+    synthetic `;` between line tokens so iter_command_starts sees the break.
+    Lines that fail to parse (unmatched quote, runaway heredoc, etc.) are
+    skipped — better a silent pass than a crashed hook.
     """
-    try:
-        lex = shlex.shlex(command, posix=True, punctuation_chars=";|&")
-        lex.whitespace_split = True
-        lex.commenters = ""  # raw `#` is not a comment here; opt-out marker
-        return list(lex)
-    except ValueError:
+    lines = [ln for ln in command.split("\n") if ln.strip()]
+    if not lines:
         return []
+    tokens: list[str] = []
+    for idx, line in enumerate(lines):
+        if idx > 0:
+            tokens.append(";")
+        try:
+            lex = shlex.shlex(line, posix=True, punctuation_chars=";|&")
+            lex.whitespace_split = True
+            lex.commenters = ""  # raw `#` is not a comment here; opt-out marker
+            tokens.extend(list(lex))
+        except ValueError:
+            continue
+    return tokens
 
 
 def strip_prefix(argv: list[str]) -> list[str]:

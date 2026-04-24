@@ -148,6 +148,16 @@ run_case "while-do-commit"          ask  "while true; do git commit -am x; done"
 run_case "if-direct-git-push"       ask  "if git push origin main; then echo ok; fi"
 run_case "elif branch"              ask  "if false; then echo x; elif true; then gh pr merge 1; fi"
 
+# --- newline-separated multi-line commands (Codex P1 round 3) --------------
+run_case "newline sep git push"     ask  $'echo prep\ngit push origin main'
+run_case "newline multi-command"    ask  $'git log\ngit commit -am x\ngit push'
+run_case "newline no-sep benign"    pass $'echo hello\necho world'
+
+# --- GNU time wrapper with arg flag (Codex P2 round 3) --------------------
+run_case "time -f %E git push"      ask  "time -f %E git push origin main"
+run_case "time -o FILE kubectl"     ask  "time -o /tmp/t.log kubectl apply -f x.yaml"
+run_case "time --format= git push"  ask  "time --format=%E git push"
+
 # --- non-Bash tool passthrough ---------------------------------------------
 non_bash_out=$(echo '{"tool_name":"Read","tool_input":{"file_path":"/tmp/x"}}' | "$HOOK" 2>/dev/null)
 if [ -z "$non_bash_out" ]; then
