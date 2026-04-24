@@ -37,7 +37,7 @@ description: Delegate a task to an independent Claude Code session in a new cmux
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `<task>` | (required) | 위임할 작업 설명 |
-| `--model` | `sonnet` | Provider:model notation. `opus`/`sonnet`/`haiku` = claude. Also supports `codex`, `codex:o3`, `gemini`, `gemini:flash`. See CLAUDE.md Provider Routing. |
+| `--model` | `sonnet` | Provider:model notation. `opus`/`sonnet`/`haiku` = claude. Also supports `claude`, `claude:opus`, `codex`, `codex:o3`, `gemini`, `gemini:flash`. See CLAUDE.md Provider Routing. |
 | `--cwd` | current dir | 새 세션의 작업 디렉토리 |
 | `--max-budget-usd` | (none) | 최대 예산 한도 |
 | `--account` | (기본 계정) | Claude 계정 프로필 (예: `claude-2` → `CLAUDE_CONFIG_DIR=~/.claude-2`) |
@@ -71,9 +71,9 @@ if model matches /^(codex|gemini)(?::(.+))?$/:
 elif model in ["opus", "sonnet", "haiku"]:
   provider = "claude"
   sub_model = model
-elif model matches /^claude:.+$/:
+elif model matches /^claude(?::(.+))?$/:
   provider = "claude"
-  sub_model = split(":")[1]
+  sub_model = match[1] || ""
 else:
   provider = "claude"
   sub_model = model

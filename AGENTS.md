@@ -106,6 +106,7 @@ Unified `--model` flag across all skills: `<provider>:<model>` or bare model nam
 | Notation | Resolves to | CLI command |
 |----------|-------------|-------------|
 | `opus`, `sonnet`, `haiku` | `claude:{name}` | `claude --model {name}` |
+| `claude` | Claude default model | `claude` |
 | `claude:opus` | Claude Opus | `claude --model opus` |
 | `codex` | Codex default model | `codex exec` |
 | `codex:o3` | Codex with o3 | `codex exec -m o3` |
@@ -157,9 +158,9 @@ if input matches /^(codex|gemini)(?::(.+))?$/:
 elif input in ["opus", "sonnet", "haiku"]:
   provider = "claude"
   sub_model = input
-elif input matches /^claude:.+$/:
+elif input matches /^claude(?::(.+))?$/:
   provider = "claude"
-  sub_model = split(":")[1]
+  sub_model = match[1] || ""
 else:
   provider = "claude"
   sub_model = input
