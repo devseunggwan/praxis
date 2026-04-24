@@ -1,11 +1,12 @@
 {
   "name": "praxis",
   "description": "Development workflow skills for Claude Code — disciplined, fast, resilient",
-  "version": "2.6.0",
   "author": {
     "name": "devseunggwan"
   },
   "repository": "https://github.com/devseunggwan/praxis",
+  "homepage": "https://github.com/devseunggwan/praxis",
+  "category": "productivity",
   "keywords": [
     "workflow",
     "discipline",
@@ -13,7 +14,5 @@
     "debugging",
     "session-management",
     "cleanup"
-  ],
-  "skills": "./skills/",
-  "hooks": "./hooks/hooks.json"
+  ]
 }

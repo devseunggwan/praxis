@@ -259,6 +259,37 @@ the hook:
 ./tests/test_side_effect_scan.sh
 ```
 
+## Multi-Platform Packaging
+
+Runtime source (`skills/`, `hooks/`, `scripts/`) is shared. Platform-specific
+packaging is *generated* from canonical metadata, not hand-edited:
+
+- `manifests/plugin.base.json` — shared metadata (name, description, author,
+  repository, homepage, category, keywords). `VERSION` is the authoritative
+  version string.
+- `manifests/platforms/{claude,codex}.json` — per-platform output list.
+- `scripts/build-plugin-manifests.py` — regenerate every artifact. Idempotent.
+- `scripts/check-plugin-manifests.py` — CI drift gate. Verifies generated
+  files match the source and that the Codex adapter shell's symlinks
+  (`plugins/praxis/{skills,hooks,scripts}`) point at the repo root.
+
+Generated (committed) outputs:
+
+| Path | Consumer |
+|------|----------|
+| `.claude-plugin/plugin.json` | Claude plugin root |
+| `.claude-plugin/marketplace.json` | Claude marketplace catalog |
+| `.agents/plugins/marketplace.json` | Codex marketplace root |
+| `plugins/praxis/.codex-plugin/plugin.json` | Codex plugin root |
+| `plugins/praxis/{skills,hooks,scripts}` | Symlinks into repo-root runtime |
+
+**Do not edit generated files directly.** Change `manifests/*.json` (or
+`VERSION`) and re-run the build script. Run `./scripts/check-plugin-manifests.py`
+before committing if you touched any packaging surface.
+
+Adding a new platform = one file at `manifests/platforms/<name>.json` + one
+build run. No skill, hook, or existing-platform changes required.
+
 ## Local Development
 
 ### Canonical clone path

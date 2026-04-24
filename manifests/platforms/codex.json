@@ -1,0 +1,18 @@
+{
+  "platform": "codex",
+  "outputs": [
+    {
+      "kind": "plugin",
+      "path": "plugins/praxis/.codex-plugin/plugin.json",
+      "plugin_overrides": {
+        "skills": "./skills/",
+        "hooks": "./hooks/hooks.json"
+      }
+    },
+    {
+      "kind": "marketplace",
+      "path": ".agents/plugins/marketplace.json",
+      "plugin_source": "./plugins/praxis"
+    }
+  ]
+}

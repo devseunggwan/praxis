@@ -1,5 +1,4 @@
 {
-  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "praxis",
   "description": "Development workflow skills for Claude Code — disciplined, fast, resilient",
   "owner": {
@@ -14,7 +13,7 @@
       "author": {
         "name": "devseunggwan"
       },
-      "source": "./",
+      "source": "./plugins/praxis",
       "category": "productivity",
       "homepage": "https://github.com/devseunggwan/praxis",
       "tags": [

@@ -54,19 +54,67 @@ Most skills delegate to external agents or session managers. Install the depende
 
 ## Installation
 
-### Plugin (recommended)
+Praxis ships a single runtime (`skills/`, `hooks/`, `scripts/`) with
+platform-specific packaging adapters generated from a canonical source in
+`manifests/`. Three install surfaces are supported.
+
+### Claude Code — plugin (recommended)
 
 ```bash
 /plugin marketplace add https://github.com/devseunggwan/praxis
 /plugin install praxis
 ```
 
-### Manual
+Claude Code reads `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`
+directly from the repo root.
+
+### Codex — marketplace + plugin
+
+```bash
+# Register the local marketplace (points at this repo's .agents/plugins/marketplace.json)
+codex marketplace add https://github.com/devseunggwan/praxis
+codex plugin install praxis
+```
+
+Codex reads `.agents/plugins/marketplace.json` as the marketplace root and
+`plugins/praxis/.codex-plugin/plugin.json` as the plugin root. The `skills/`,
+`hooks/`, and `scripts/` directories inside `plugins/praxis/` are symlinks
+into the repo-root runtime — there is no source duplication.
+
+### Direct skill install (fallback)
+
+When the plugin surface isn't available:
 
 ```bash
 git clone https://github.com/devseunggwan/praxis.git ~/projects/praxis
 claude skill add ~/projects/praxis/skills/<skill-name>
 ```
+
+## Packaging internals
+
+Platform manifests are generated, not hand-edited. The canonical source is
+`manifests/plugin.base.json` (common metadata) plus one file per platform
+under `manifests/platforms/`.
+
+```bash
+# Regenerate every platform manifest + adapter shell symlinks
+./scripts/build-plugin-manifests.py
+
+# Verify committed manifests match the canonical source (CI / pre-merge)
+./scripts/check-plugin-manifests.py
+```
+
+Generated artifacts are committed:
+
+- `.claude-plugin/plugin.json`
+- `.claude-plugin/marketplace.json`
+- `.agents/plugins/marketplace.json`
+- `plugins/praxis/.codex-plugin/plugin.json`
+- `plugins/praxis/{skills,hooks,scripts}` (symlinks into repo root)
+
+To add a new platform, drop a `manifests/platforms/<name>.json` file listing
+its outputs and run the build script — no changes to skills, hooks, or
+existing platforms required.
 
 ## License
 

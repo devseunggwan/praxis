@@ -1,0 +1,21 @@
+{
+  "platform": "claude",
+  "outputs": [
+    {
+      "kind": "plugin",
+      "path": ".claude-plugin/plugin.json",
+      "plugin_overrides": {
+        "skills": "./skills/",
+        "hooks": "./hooks/hooks.json"
+      }
+    },
+    {
+      "kind": "marketplace",
+      "path": ".claude-plugin/marketplace.json",
+      "marketplace_overrides": {
+        "$schema": "https://anthropic.com/claude-code/marketplace.schema.json"
+      },
+      "plugin_source": "./"
+    }
+  ]
+}
