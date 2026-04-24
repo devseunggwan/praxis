@@ -1,5 +1,5 @@
 {
-  "description": "praxis hooks: Stop gate for completion-without-evidence + session-scoped three-strike discipline",
+  "description": "praxis hooks: Stop gate for completion-without-evidence, session-scoped three-strike discipline, PreToolUse(Bash) side-effect scan",
   "hooks": {
     "SessionStart": [
       {
@@ -18,6 +18,18 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/strike-counter.sh preprompt",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/side-effect-scan.sh",
             "timeout": 5
           }
         ]
