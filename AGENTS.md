@@ -94,7 +94,7 @@ Skills that dispatch external CLI workers (`cmux-orchestrator`, `cmux-delegate`,
 | Provider | Non-interactive command | Output format | Stdin prompt | Write access |
 |----------|----------------------|---------------|-------------|-------------|
 | `claude` | `cat $F \| claude --model {m} --output-format stream-json --permission-mode auto` | stream-json (JSONL) | `cat file \| claude` | Full |
-| `codex` | `cat $F \| codex exec {m:+-m m}` | stdout text / `--json` JSONL | `cat file \| codex exec` | Sandbox-restricted — explicit fallback required |
+| `codex` | `cat $F \| codex exec {m:+-m m} -o $RESULT_FILE` | stdout verbose logs + last message isolated in `$RESULT_FILE` (preferred); `--json` JSONL also supported | `cat file \| codex exec` | Sandbox-restricted — explicit fallback required |
 | `gemini` | `gemini -p "$(cat $F)" --approval-mode yolo {m:+-m m}` | stream-json (`-o stream-json`) | via `-p` flag | Full |
 
 All providers share the same completion sentinel: `; echo '===WORKER_DONE===' >> $LOG` appended after the CLI exits.

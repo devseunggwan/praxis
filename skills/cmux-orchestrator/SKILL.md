@@ -172,8 +172,12 @@ dispatch_worker() {
         echo '===WORKER_DONE===' >> ${log_file}"
       ;;
     codex)
+      # `-o` writes only the final agent message to a separate file, bypassing
+      # verbose stdout logs. `collect_result()` prefers this file over log parsing.
+      local codex_result_file="$ORCH_DIR/results/${task_id}.codex.last.txt"
       cmd="cat '${prompt_file}' | codex exec \
         ${model:+-m ${model}} \
+        -o '${codex_result_file}' \
         2>&1 | tee ${log_file}; \
         echo '===WORKER_DONE===' >> ${log_file}"
       ;;
@@ -286,16 +290,29 @@ if provider == 'claude':
             except: pass
 
 elif provider == 'codex':
-    # Codex: parse JSONL for last content, or read plain text output
-    with open(log_file) as f:
-        for line in f:
-            try:
-                obj = json.loads(line)
-                if 'content' in obj:
-                    result = obj['content']
-            except:
-                if line.strip() and '===WORKER_DONE===' not in line:
-                    result = line.strip()
+    # Codex: prefer dedicated --output-last-message file (only the final agent
+    # message, no verbose logs). Fall back to log scan only if the file is
+    # missing or empty — in that case accept JSONL 'content' but never overwrite
+    # a previously parsed JSON result with a stray plain text log line.
+    import os
+    codex_last = log_file.replace('/logs/', '/results/').replace('.jsonl', '.codex.last.txt')
+    if os.path.exists(codex_last):
+        with open(codex_last) as f:
+            text = f.read().strip()
+        if text:
+            result = text
+    if result is None:
+        parsed_json = False
+        with open(log_file) as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                    if 'content' in obj:
+                        result = obj['content']
+                        parsed_json = True
+                except:
+                    if not parsed_json and line.strip() and '===WORKER_DONE===' not in line:
+                        result = line.strip()
 
 elif provider == 'gemini':
     with open(log_file) as f:
