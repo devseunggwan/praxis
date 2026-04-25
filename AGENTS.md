@@ -166,6 +166,44 @@ else:
   sub_model = input
 ```
 
+## PreToolUse gh search --state all Block
+
+`hooks/block-gh-state-all.sh` intercepts every Bash tool call and hard-blocks
+the invalid flag combination `gh search <subcmd> ... --state all`.
+
+### Why this exists
+
+`gh issue list` and `gh pr list` accept `--state all`, but `gh search issues`
+/ `gh search prs` only accept `--state {open|closed}`. Conflating these
+produces `invalid argument "all" for "--state" flag` at runtime. A feedback
+memo (`feedback_verify_cli_flags.md`) was tried first but produced 5+
+recurrences — structural enforcement replaced the memo.
+
+### What is blocked
+
+| Command | Action |
+|---------|--------|
+| `gh search issues "q" --state all` | **BLOCKED** (exit 2) |
+| `gh search prs "q" --state=all` | **BLOCKED** (exit 2) |
+| `gh search repos foo --limit 1 --state all` | **BLOCKED** (exit 2) |
+| `gh issue list --state all` | **PASS** (legitimate usage) |
+| `gh pr list --state all` | **PASS** (legitimate usage) |
+| `gh search issues "q" --state open` | **PASS** |
+| `gh search issues "q"` (no --state) | **PASS** |
+
+### Workarounds when --state all is needed
+
+- Omit `--state` entirely — `gh search` returns results regardless of state by default.
+- Run two calls: `--state open` then `--state closed`, then merge results.
+
+### Tests
+
+```bash
+bash hooks/test-block-gh-state-all.sh
+```
+
+Covers 14 cases: 4 block paths, 7 pass paths, non-Bash tool passthrough, and malformed stdin fail-open.
+
 ## PreToolUse Side-Effect Scan
 
 `hooks/side-effect-scan.sh` intercepts every Bash tool call and flags commands
