@@ -13,7 +13,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | **Full** | + all cmux-* skills | + cmux |
 | **Multi-provider** | + codex/gemini routing in cmux-*, turbo-implement | + codex-cli, gemini-cli |
 
-## Skills (15)
+## Skills (16)
 
 ### Workflow Lifecycle
 
@@ -29,6 +29,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 |-------|---------|
 | `debug` | Systematic 4-phase debugging — root cause investigation before any fix |
 | `retrospect` | Session retrospect — find friction root causes, propose improvements |
+| `cmux-browser` | CLI wrapper for `cmux browser` — adds `--selector` usage hints to `get html/text/value/attr/count/box/styles` errors |
 
 ### Discipline
 

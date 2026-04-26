@@ -1,0 +1,46 @@
+#!/bin/bash
+# cmux-browser: thin pass-through for `cmux browser` with enhanced error messages
+#
+# When `cmux browser get <type>` is called without --selector, the stock error
+# is "Error: browser get html requires a selector" — no usage hint.  This wrapper
+# intercepts that specific error and appends a usage block with examples.
+#
+# Usage (identical to cmux browser):
+#   cmux-browser [--surface <id>] <subcommand> [args]
+#
+# Install: scripts/install.sh symlinks this into ~/.local/bin/cmux-browser
+
+set -euo pipefail
+
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
+
+# stdout goes straight to the terminal; only stderr is captured for inspection.
+# This keeps large outputs (full-page HTML, etc.) streaming without buffering.
+#
+# NOTE: do NOT use `if cmux ...; then ...; fi; exit_code=$?` here.
+# In bash, `if <false-condition>; then ...; fi` exits 0 when no else branch
+# exists, so $? after the if block would be 0 regardless of cmux's exit code.
+exit_code=0
+cmux browser "$@" 2>"$TMPFILE" || exit_code=$?
+[ "$exit_code" -eq 0 ] && exit 0
+
+if grep -q "requires a selector" "$TMPFILE"; then
+  get_type=$(grep -oE 'get [a-z]+' "$TMPFILE" | head -1 | awk '{print $2}')
+  get_type="${get_type:-<type>}"
+
+  printf 'Error: cmux browser get %s requires --selector\n\n' "$get_type" >&2
+  printf 'Usage:\n' >&2
+  printf '  cmux browser <surface> get %s --selector <css>        # first match\n' "$get_type" >&2
+  printf '  cmux browser <surface> get %s --selector <css> --all  # all matches\n\n' "$get_type" >&2
+  printf 'Examples:\n' >&2
+  printf "  cmux browser surface:1 get %s --selector 'h1.title'\n" "$get_type" >&2
+  printf "  cmux browser surface:1 get %s --selector 'a[href]' --all\n\n" "$get_type" >&2
+  printf 'Note: selector can also be passed positionally:\n' >&2
+  printf "  cmux browser surface:1 get %s 'h1.title'\n\n" "$get_type" >&2
+  printf 'See `cmux browser --help` for all options.\n' >&2
+else
+  cat "$TMPFILE" >&2
+fi
+
+exit "$exit_code"
