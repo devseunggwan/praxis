@@ -113,9 +113,11 @@ After snapshot, enforce hydration completeness with a conditional check:
 ```bash
 NODE_COUNT=$(cmux browser --surface "$SURFACE" eval 'document.querySelectorAll("a[href],h1,h2,h3,button,nav,article").length' | tr -d ' \n')
 if [ "${NODE_COUNT:-0}" -lt 10 ]; then
-  echo "Snapshot validation: only $NODE_COUNT elements — retrying with Step 3B" >&2
-  cmux browser --surface "$SURFACE" wait --selector "main,article,nav,[role='main']" --timeout 15 || \
-    { echo "Error: Step 3B retry timed out — provide a specific selector and retry" >&2; exit 1; }
+  echo "Snapshot validation: only $NODE_COUNT elements — retrying with content-density wait" >&2
+  # Use content-density check, NOT a bare structural selector —
+  # main/article/nav exist in pre-hydration shell and would pass immediately
+  cmux browser --surface "$SURFACE" wait --function 'document.body.innerText.length>200 && document.querySelectorAll("a[href],h1,h2,h3,button").length>8' --timeout 15 || \
+    { echo "Error: content-density retry timed out — provide a specific selector via Step 3B and retry" >&2; exit 1; }
   cmux browser --surface "$SURFACE" snapshot --interactive
 fi
 ```
@@ -336,7 +338,8 @@ cmux browser --surface "$SURFACE" eval "1+1"
 cmux browser --surface "$SURFACE" navigate https://example.com/login
 # Re-apply hydration wait after every navigate — destination page may still be hydrating
 cmux browser --surface "$SURFACE" wait --load-state complete --timeout 15
-cmux browser --surface "$SURFACE" wait --function 'document.body.innerText.length>50 && document.querySelectorAll("a[href],button,input").length>2' --timeout 10 || true
+cmux browser --surface "$SURFACE" wait --function 'document.body.innerText.length>50 && document.querySelectorAll("a[href],button,input").length>2' --timeout 10 || \
+  { echo "Error: login page hydration timed out — provide explicit selector and retry" >&2; exit 1; }
 cmux browser --surface "$SURFACE" wait --selector "#email"
 cmux browser --surface "$SURFACE" fill "#email" "test@example.com"
 cmux browser --surface "$SURFACE" fill "#password" "password123"
@@ -344,7 +347,8 @@ cmux browser --surface "$SURFACE" click "button[type='submit']"
 # After submit, destination route also needs hydration wait before snapshot
 cmux browser --surface "$SURFACE" wait --url-contains "/dashboard"
 cmux browser --surface "$SURFACE" wait --load-state complete --timeout 15
-cmux browser --surface "$SURFACE" wait --function 'document.body.innerText.length>100 && document.querySelectorAll("a[href],button").length>3' --timeout 10 || true
+cmux browser --surface "$SURFACE" wait --function 'document.body.innerText.length>100 && document.querySelectorAll("a[href],button").length>3' --timeout 10 || \
+  { echo "Error: dashboard hydration timed out — provide explicit selector and retry" >&2; exit 1; }
 cmux browser --surface "$SURFACE" snapshot --interactive
 ```
 
