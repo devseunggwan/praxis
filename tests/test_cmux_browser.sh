@@ -74,6 +74,28 @@ if [[ "${1:-}" == "browser" ]]; then
         echo "mock-output-for-${get_type}"
         exit 0
         ;;
+      find)
+        shift  # consume "find"
+        find_type="${1:-}"; shift  # consume the find sub-type (nth, first, …)
+        # find nth: needs both --index and --selector; simulate selector-missing error
+        # when --selector/-s is absent.
+        # Pure integers are treated as positional --index values, NOT selectors.
+        has_selector=false
+        skip_next=false
+        for arg in "$@"; do
+          if $skip_next; then skip_next=false; continue; fi
+          case "$arg" in
+            --selector|-s) has_selector=true; skip_next=true ;;
+            --index|--name) skip_next=true ;;
+            --*) ;;
+            [0-9]*) ;;          # bare integer = positional index, not a selector
+            *) has_selector=true ;;
+          esac
+        done
+        if ! $has_selector; then
+          echo "Error: browser find ${find_type} requires a selector" >&2; exit 1
+        fi
+        echo "mock-output-for-find-${find_type}"; exit 0 ;;
       click|hover|focus|dblclick|check|uncheck|scroll-into-view|highlight|type|fill|select)
         subcmd="$1"; shift
         # These cmux subcommands require --selector (or a positional CSS value).
@@ -234,6 +256,14 @@ run_wrapper surface:1 get attr
 assert_exit     "exit-code:get-attr-missing-selector"  1  "$_ec"
 assert_contains "hint:--selector:get-attr"  "\-\-selector"  "$_stderr"
 assert_contains "hint:--attr:get-attr"      "\-\-attr"      "$_stderr"
+
+# 5f. find nth (index given, selector missing): hint must include both --index and --selector
+# Mock: find nth with an index token but no --selector still reports "requires a selector"
+run_wrapper surface:1 find nth 2
+
+assert_exit     "exit-code:find-nth-missing-selector"  1  "$_ec"
+assert_contains "hint:--selector:find-nth"  "\-\-selector"  "$_stderr"
+assert_contains "hint:--index:find-nth"     "\-\-index"     "$_stderr"
 
 # 5e. Payload-without-selector: --text/--value must NOT suppress the selector hint
 # (mock bug would treat these as selectors and return success — this verifies the fix)

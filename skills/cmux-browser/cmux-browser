@@ -16,7 +16,9 @@
 
 set -euo pipefail
 
-TMPFILE=$(mktemp)
+# If mktemp fails (read-only sandbox, restricted /tmp), fall back to running
+# cmux directly without any wrapping — preserves the original CLI behavior.
+TMPFILE=$(mktemp 2>/dev/null) || exec cmux browser "$@"
 trap 'rm -f "$TMPFILE"' EXIT
 
 # stdout goes straight to the terminal; only stderr is captured for inspection.
@@ -46,11 +48,12 @@ if grep -q "requires a selector" "$TMPFILE"; then
   # Usage branches per subcommand interface (verified against `cmux browser --help`):
   #   get attr   — selector + --attr <name> (both required)
   #   get <rest> — selector only; no --all flag in get (--all is cookies-only)
+  #   find nth   — selector + --index <n> (both required)
   #   type       — selector + --text <text> (binary errors without text too)
   #   fill       — selector only (text is optional; binary does not enforce it)
   #   select     — selector + --value <value>
-  #   others     — selector only (click, hover, focus, frame sub-errors not
-  #                intercepted here — those produce different error strings)
+  #   others     — selector only (click, hover, focus; frame/find non-nth errors
+  #                produce different strings, not intercepted here)
   if [ "$subcmd" = "get attr" ]; then
     printf '  cmux browser surface:1 get attr --selector <css> --attr <name>\n' >&2
     printf '  cmux browser surface:1 get attr <css> <name>   # positional shorthand\n\n' >&2
@@ -63,6 +66,12 @@ if grep -q "requires a selector" "$TMPFILE"; then
     printf 'Examples:\n' >&2
     printf "  cmux browser surface:1 %s --selector 'h1.title'\n" "$subcmd" >&2
     printf "  cmux browser surface:1 %s 'h1.title'\n\n" "$subcmd" >&2
+  elif [ "$subcmd" = "find nth" ]; then
+    printf '  cmux browser surface:1 find nth --index <n> --selector <css>\n' >&2
+    printf '  cmux browser surface:1 find nth <n> <css>    # positional shorthand\n\n' >&2
+    printf 'Examples:\n' >&2
+    printf "  cmux browser surface:1 find nth --index 2 --selector 'li.item'\n" >&2
+    printf "  cmux browser surface:1 find nth 2 'li.item'\n\n" >&2
   elif [ "$subcmd" = "type" ]; then
     # `type` requires both selector and text; the binary errors on missing text too.
     printf '  cmux browser surface:1 type --selector <css> --text <text>\n' >&2
