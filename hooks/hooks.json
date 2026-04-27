@@ -1,5 +1,5 @@
 {
-  "description": "praxis hooks: Stop gate for completion-without-evidence, session-scoped three-strike discipline, PreToolUse(Bash) side-effect scan and gh search --state all block",
+  "description": "praxis hooks: Stop gate for completion-without-evidence, session-scoped three-strike discipline, PreToolUse(Bash) side-effect scan and gh search --state all block, PostToolUse correction for built-in task management tools",
   "hooks": {
     "SessionStart": [
       {
@@ -36,6 +36,18 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-gh-state-all.sh",
             "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "TaskCreate|TaskUpdate|TaskGet|TaskList|TaskStop|TaskOutput",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/builtin-task-postuse.sh",
+            "timeout": 3
           }
         ]
       }
