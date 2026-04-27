@@ -53,7 +53,7 @@ All commands after `open` require `--surface "$SURFACE"` — capture it once and
 [ -n "$CMUX_WORKSPACE_ID" ] || { echo "Error: not inside a cmux workspace — set CMUX_WORKSPACE_ID or pass --workspace" >&2; exit 1; }
 
 # Capture surface handle at open time — only open/open-split/new/identify work without it
-SURFACE=$(cmux browser open <target-url>)
+SURFACE=$(cmux browser open <target-url> | grep -oE 'surface:[0-9]+')
 cmux browser --surface "$SURFACE" wait --load-state complete --timeout 15
 ```
 
@@ -268,7 +268,7 @@ curl -sL <target-url> | grep -i 'content-security-policy'
 
 # 3. Quick eval probe — the most reliable live gate once the page is open
 #    Open here and reuse $SURFACE in Phase 1 — do NOT open the same URL again
-SURFACE=$(cmux browser open <target-url>)
+SURFACE=$(cmux browser open <target-url> | grep -oE 'surface:[0-9]+')
 cmux browser --surface "$SURFACE" wait --load-state complete --timeout 10
 cmux browser --surface "$SURFACE" eval "1+1"
 # "2" → eval works, proceed. Any error → CSP blocked → switch to Playwright
@@ -318,9 +318,10 @@ cmux browser --surface "$SURFACE" snapshot --interactive
 # pre-hydration shell was captured; retry Step 3B before continuing
 NODE_COUNT=$(cmux browser --surface "$SURFACE" eval 'document.querySelectorAll("a[href],h1,h2,h3,button,nav,article").length' | tr -d ' \n')
 if [ "${NODE_COUNT:-0}" -lt 10 ]; then
-  echo "Snapshot validation: only $NODE_COUNT meaningful elements found — retrying with Step 3B" >&2
-  cmux browser --surface "$SURFACE" wait --selector "main,article,nav,[role='main']" --timeout 15 || \
-    { echo "Error: Step 3B retry also timed out — provide a more specific selector and retry" >&2; exit 1; }
+  echo "Snapshot validation: only $NODE_COUNT elements — retrying with content-density wait" >&2
+  # Content-density check, NOT a structural selector — main/nav/article exist pre-hydration
+  cmux browser --surface "$SURFACE" wait --function 'document.body.innerText.length>200 && document.querySelectorAll("a[href],h1,h2,h3,button").length>8' --timeout 15 || \
+    { echo "Error: content-density retry timed out — provide a specific selector via Step 3B and retry" >&2; exit 1; }
   cmux browser --surface "$SURFACE" snapshot --interactive
 fi
 
@@ -437,5 +438,5 @@ cmux browser --surface "$SURFACE" eval "Array.from(document.querySelectorAll('a[
 4. **Validate snapshot results** — run `eval` count check; retry with Step 3B if < 10
 5. **Debug on failure** — immediately collect `snapshot --interactive` + `console list` + `errors list`
 6. **Screenshot evidence** — save `screenshot --out /tmp/step-N.png` at key checkpoints
-7. **Always thread the surface** — `cmux browser open` returns the surface handle; capture it with `SURFACE=$(cmux browser open <url>)` and pass `--surface "$SURFACE"` to every subsequent command (only `open`/`open-split`/`new`/`identify` work without it)
+7. **Always thread the surface** — `cmux browser open` outputs `OK surface:N workspace:M`; extract the ref with `SURFACE=$(cmux browser open <url> | grep -oE 'surface:[0-9]+')` and pass `--surface "$SURFACE"` to every subsequent command (only `open`/`open-split`/`new`/`identify` work without it)
 8. **Never swallow SPA hydration timeouts** — `|| true` after a hydration wait silently proceeds with a pre-hydration DOM; instead fall back to Step 3B (`wait --selector`) or emit a warning before continuing
