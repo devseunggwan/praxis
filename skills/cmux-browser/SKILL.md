@@ -49,14 +49,13 @@ All commands after `open` require `--surface "$SURFACE"` — capture it once and
 ### Step 1 — Open and Load State Wait
 
 ```bash
-# Preflight: warn when outside cmux — user must supply --workspace <id> to open
-if [ -z "$CMUX_WORKSPACE_ID" ]; then
-  echo "Warning: CMUX_WORKSPACE_ID not set — pass --workspace <id> to cmux browser open" >&2
-  # Outside cmux: SURFACE=$(cmux browser open <target-url> --workspace <id> | grep -oE 'surface:[0-9]+')
-fi
-
-# Capture surface handle at open time — only open/open-split/new/identify work without it
+# Inside cmux ($CMUX_WORKSPACE_ID set automatically):
 SURFACE=$(cmux browser open <target-url> | grep -oE 'surface:[0-9]+')
+
+# Outside cmux (standalone shell / CI — supply workspace ID explicitly):
+# WORKSPACE_ID=<id>  # get from: cmux list-workspaces
+# SURFACE=$(cmux browser open <target-url> --workspace "$WORKSPACE_ID" | grep -oE 'surface:[0-9]+')
+
 cmux browser --surface "$SURFACE" wait --load-state complete --timeout 15
 ```
 
@@ -121,18 +120,17 @@ After snapshot, enforce hydration completeness with a conditional check:
 
 ```bash
 NODE_COUNT=$(cmux browser --surface "$SURFACE" eval 'document.querySelectorAll("a[href],h1,h2,h3,button,nav,article").length' | tr -d ' \n')
-if [ "${NODE_COUNT:-0}" -lt 10 ]; then
-  echo "Snapshot validation: only $NODE_COUNT elements — retrying with content-density wait" >&2
-  # Use content-density check, NOT a bare structural selector —
-  # main/article/nav exist in pre-hydration shell and would pass immediately
-  cmux browser --surface "$SURFACE" wait --function 'document.body.innerText.length>200 && document.querySelectorAll("a[href],h1,h2,h3,button").length>8' --timeout 15 || \
-    { echo "Error: content-density retry timed out — provide a specific selector via Step 3B and retry" >&2; exit 1; }
+if [ "${NODE_COUNT:-0}" -lt 3 ]; then
+  echo "Snapshot validation: only $NODE_COUNT elements — likely pre-hydration shell, retrying" >&2
+  # Content-density retry — NOT a bare structural selector (main/nav exist pre-hydration)
+  cmux browser --surface "$SURFACE" wait --function 'document.readyState==="complete" && !document.querySelector("[aria-busy=true],[data-loading=true]") && document.body.innerText.length>30' --timeout 15 || \
+    { echo "Error: hydration retry timed out — provide a specific selector via Step 3B and retry" >&2; exit 1; }
   cmux browser --surface "$SURFACE" snapshot --interactive
 fi
 ```
 
-- **< 10** → pre-hydration shell detected → Step 3B retry then re-snapshot (exit 1 if retry also fails)
-- **≥ 10** → hydration complete, proceed
+- **< 3** → truly empty shell (2-node skeleton) → retry with content-density wait
+- **≥ 3** → hydration complete, proceed (covers sparse pages: login/OTP/confirmation have ≥ 3 elements)
 
 **Empty-tree signals:** result contains only 2–5 nodes ("Jump to Content", "Welcome") with no nav/article/h2
 → retry with Step 3B or longer timeout.
@@ -321,14 +319,15 @@ fi
 # 3. Snapshot
 cmux browser --surface "$SURFACE" snapshot --interactive
 
-# Validation: enforce hydration completeness — < 10 meaningful elements means
-# pre-hydration shell was captured; retry Step 3B before continuing
+# Validation: < 3 elements means truly empty shell (2-node skeleton); retry
+# Threshold is 3, not 10 — sparse pages (login/OTP/confirmation) are fully hydrated
+# with only 3-8 elements and must not be treated as failures
 NODE_COUNT=$(cmux browser --surface "$SURFACE" eval 'document.querySelectorAll("a[href],h1,h2,h3,button,nav,article").length' | tr -d ' \n')
-if [ "${NODE_COUNT:-0}" -lt 10 ]; then
-  echo "Snapshot validation: only $NODE_COUNT elements — retrying with content-density wait" >&2
-  # Content-density check, NOT a structural selector — main/nav/article exist pre-hydration
-  cmux browser --surface "$SURFACE" wait --function 'document.body.innerText.length>200 && document.querySelectorAll("a[href],h1,h2,h3,button").length>8' --timeout 15 || \
-    { echo "Error: content-density retry timed out — provide a specific selector via Step 3B and retry" >&2; exit 1; }
+if [ "${NODE_COUNT:-0}" -lt 3 ]; then
+  echo "Snapshot validation: only $NODE_COUNT elements — likely empty shell, retrying" >&2
+  # Content-density check — NOT a structural selector (main/nav exist pre-hydration)
+  cmux browser --surface "$SURFACE" wait --function 'document.readyState==="complete" && !document.querySelector("[aria-busy=true],[data-loading=true]") && document.body.innerText.length>30' --timeout 15 || \
+    { echo "Error: hydration retry timed out — provide a specific selector via Step 3B and retry" >&2; exit 1; }
   cmux browser --surface "$SURFACE" snapshot --interactive
 fi
 
