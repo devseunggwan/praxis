@@ -43,14 +43,17 @@ Run this sequence **before every snapshot** (and before the first DOM-dependent 
 All commands after `open` require `--surface "$SURFACE"` — capture it once and thread it through every step.
 
 > **Prerequisite:** `cmux browser` requires an active cmux workspace.
-> Verify before running: `[ -n "$CMUX_WORKSPACE_ID" ] || { echo "Error: not inside a cmux workspace" >&2; exit 1; }`
-> If running outside cmux, pass `--workspace <id>` explicitly to `cmux browser open`.
+> Inside cmux: `$CMUX_WORKSPACE_ID` is set automatically.
+> Outside cmux (CI, standalone shell): pass `--workspace <id>` to `cmux browser open` explicitly.
 
 ### Step 1 — Open and Load State Wait
 
 ```bash
-# Preflight: confirm cmux workspace is active
-[ -n "$CMUX_WORKSPACE_ID" ] || { echo "Error: not inside a cmux workspace — set CMUX_WORKSPACE_ID or pass --workspace" >&2; exit 1; }
+# Preflight: warn when outside cmux — user must supply --workspace <id> to open
+if [ -z "$CMUX_WORKSPACE_ID" ]; then
+  echo "Warning: CMUX_WORKSPACE_ID not set — pass --workspace <id> to cmux browser open" >&2
+  # Outside cmux: SURFACE=$(cmux browser open <target-url> --workspace <id> | grep -oE 'surface:[0-9]+')
+fi
 
 # Capture surface handle at open time — only open/open-split/new/identify work without it
 SURFACE=$(cmux browser open <target-url> | grep -oE 'surface:[0-9]+')
@@ -75,13 +78,19 @@ Wait until real content is rendered into the DOM:
 
 ```bash
 # Single-quote JS string — no shell escaping issues with inner double-quotes
-cmux browser --surface "$SURFACE" wait --function 'document.readyState==="complete" && document.body.innerText.length>200 && document.querySelectorAll("a[href],button").length>5 && !document.querySelector("[aria-busy=true],[data-loading=true]")' --timeout 10
+# Primary: no loading state + some content (works for dense AND sparse pages)
+cmux browser --surface "$SURFACE" wait --function 'document.readyState==="complete" && !document.querySelector("[aria-busy=true],[data-loading=true]") && document.body.innerText.length>30' --timeout 10
 ```
 
-- `innerText.length > 200` — actual text content rendered (DOM node count is unreliable; loading skeletons can produce 50–100+ nodes before hydration)
-- `a[href],button > 5` — interactive elements rendered (nav/sidebar signal)
+- `innerText.length > 30` — minimal content threshold; covers login/OTP/confirmation pages
+  (high-density threshold of >200 would time out on sparse but fully-hydrated pages)
 - `aria-busy`, `data-loading` — loading state resolved
 - Unquoted attribute selectors (`[aria-busy=true]`) are valid per CSS spec
+
+For **content-rich pages** (docs, dashboards) where you want stricter validation, upgrade to:
+```bash
+cmux browser --surface "$SURFACE" wait --function 'document.readyState==="complete" && document.body.innerText.length>200 && document.querySelectorAll("a[href],button").length>5 && !document.querySelector("[aria-busy=true],[data-loading=true]")' --timeout 10
+```
 
 ### Step 3B — Explicit Selector Wait (precision control)
 
@@ -296,17 +305,15 @@ IS_SPA=$(cmux browser --surface "$SURFACE" eval '!!(window.__NEXT_DATA__||window
 # On timeout, fall back to selector-based wait (Step 3B) rather than silently continuing —
 # proceeding after a failed hydration wait captures the pre-hydration shell
 if [ "$IS_SPA" = "true" ]; then
-  # Primary: content-density check (innerText + interactive elements)
-  cmux browser --surface "$SURFACE" wait --function 'document.readyState==="complete" && document.body.innerText.length>200 && document.querySelectorAll("a[href],button").length>5 && !document.querySelector("[aria-busy=true],[data-loading=true]")' --timeout 10 || \
-    # Fallback: lower-threshold content check — NOT a bare structural selector
-    # (main/article/nav exist in pre-hydration shell; we need filled content)
-    cmux browser --surface "$SURFACE" wait --function 'document.body.innerText.length>100 && document.querySelectorAll("a[href]").length>3' --timeout 10 || \
+  # Primary: minimal content threshold — works for both sparse (login) and dense (docs) pages
+  # loading-state check ensures we wait past skeleton; innerText>30 avoids passing on true empty shell
+  cmux browser --surface "$SURFACE" wait --function 'document.readyState==="complete" && !document.querySelector("[aria-busy=true],[data-loading=true]") && document.body.innerText.length>30' --timeout 10 || \
+    # Fallback: bare content presence — NOT a structural selector (main/nav exist pre-hydration)
+    cmux browser --surface "$SURFACE" wait --function 'document.body.innerText.length>30' --timeout 10 || \
     { echo "Error: hydration wait timed out on a detected SPA — provide an explicit selector via Step 3B and retry" >&2; exit 1; }
 else
-  # SPA not detected; lightweight content check as safety net for undetected SPAs
-  # (custom React/Vite apps may have no framework markers but still hydrate late)
-  # NOT a bare structural selector — main/nav exist even before hydration
-  cmux browser --surface "$SURFACE" wait --function 'document.body.innerText.length>50 && document.querySelectorAll("a[href],button").length>2' --timeout 5 || \
+  # SPA not detected; same minimal check as safety net for undetected SPAs
+  cmux browser --surface "$SURFACE" wait --function 'document.readyState==="complete" && !document.querySelector("[aria-busy=true],[data-loading=true]") && document.body.innerText.length>30' --timeout 5 || \
     cmux browser --surface "$SURFACE" wait --function 'document.body.innerText.length>30' --timeout 5 || \
     { echo "Error: hydration wait timed out — page may be an undetected SPA; provide an explicit selector via Step 3B and retry" >&2; exit 1; }
 fi
