@@ -35,7 +35,12 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
-STATE_DIR="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/state/praxis}/strikes"
+# [#126] Use a praxis-owned path. $CLAUDE_PLUGIN_DATA is set by Claude Code
+# to whichever plugin's data dir matched first in the current scope, so on
+# multi-plugin installs (codex/omc/laplace-dev-hub) it can resolve to a
+# sibling plugin's directory and our state would leak there — silently
+# vulnerable to that plugin's cleanup/uninstall.
+STATE_DIR="${PRAXIS_STATE_DIR:-$HOME/.claude/state/praxis}/strikes"
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 LATCH="$STATE_DIR/.current-session"
 BLOCK_LOG="$STATE_DIR/last-block.log"
@@ -143,7 +148,7 @@ case "$MODE" in
     # sources this file into every subsequent Bash tool invocation, so
     # slash commands receive the authoritative session_id directly from
     # the environment. This avoids cross-session latch contamination when
-    # multiple Claude sessions share the same $CLAUDE_PLUGIN_DATA.
+    # multiple Claude sessions share the same $STATE_DIR.
     if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
       printf 'export CLAUDE_SESSION_ID=%q\n' "$SID" >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
     fi

@@ -1,7 +1,7 @@
 #!/bin/bash
 # test-strike-counter.sh — unit + integration tests for strike-counter.sh
 #
-# Each test runs against an isolated CLAUDE_PLUGIN_DATA dir so concurrent
+# Each test runs against an isolated PRAXIS_STATE_DIR so concurrent
 # runs do not collide and there is no leakage into the real user state.
 #
 # Usage: bash hooks/test-strike-counter.sh
@@ -36,13 +36,13 @@ run() {
 fresh_env() {
   local dir
   dir=$(mktemp -d)
-  export CLAUDE_PLUGIN_DATA="$dir"
+  export PRAXIS_STATE_DIR="$dir"
   export CLAUDE_SESSION_ID="test-$$-${RANDOM}"
 }
 
 cleanup_env() {
-  rm -rf "${CLAUDE_PLUGIN_DATA:-/tmp/nonexistent-$$}"
-  unset CLAUDE_PLUGIN_DATA CLAUDE_SESSION_ID
+  rm -rf "${PRAXIS_STATE_DIR:-/tmp/nonexistent-$$}"
+  unset PRAXIS_STATE_DIR CLAUDE_SESSION_ID
 }
 
 # ---- AC1: /strike prints strike 1 warning on first call --------------------
@@ -99,7 +99,7 @@ test_ac4_stop_hook_blocks_at_3() {
   local decision
   decision=$(echo "$out" | jq -r '.decision // empty' 2>/dev/null)
   local block_log
-  block_log=$(cat "$CLAUDE_PLUGIN_DATA/strikes/last-block.log" 2>/dev/null)
+  block_log=$(cat "$PRAXIS_STATE_DIR/strikes/last-block.log" 2>/dev/null)
   cleanup_env
   [ "$code" -eq 0 ] \
     && [ "$decision" = "block" ] \
@@ -172,7 +172,7 @@ test_ac9_session_start_latch() {
   local out code
   out=$(echo "$json_in" | "$STRIKE" session-start 2>&1); code=$?
   local latch_has_sid
-  latch_has_sid=$(cat "$CLAUDE_PLUGIN_DATA/strikes/.current-session" 2>/dev/null)
+  latch_has_sid=$(cat "$PRAXIS_STATE_DIR/strikes/.current-session" 2>/dev/null)
 
   # Add a strike then rerun session-start — should emit context
   "$STRIKE" strike "existing" >/dev/null
@@ -208,7 +208,7 @@ test_ac10_latch_fallback() {
 test_ac11_missing_session_id() {
   local dir
   dir=$(mktemp -d)
-  CLAUDE_PLUGIN_DATA="$dir" env -u CLAUDE_SESSION_ID "$STRIKE" strike "x" >/tmp/out.$$ 2>/tmp/err.$$
+  PRAXIS_STATE_DIR="$dir" env -u CLAUDE_SESSION_ID "$STRIKE" strike "x" >/tmp/out.$$ 2>/tmp/err.$$
   local code=$?
   local out err
   out=$(cat /tmp/out.$$)
@@ -284,9 +284,9 @@ test_ac16_skill_files_exist() {
 # ---- AC18 (codex P2): corrupt state → error branch, not false block --------
 test_ac18_corrupt_state_not_false_block() {
   fresh_env
-  mkdir -p "$CLAUDE_PLUGIN_DATA/strikes"
+  mkdir -p "$PRAXIS_STATE_DIR/strikes"
   # Seed a non-JSON state file so jq parse fails and COUNT stays 0
-  echo "not-valid-json" > "$CLAUDE_PLUGIN_DATA/strikes/${CLAUDE_SESSION_ID}.json"
+  echo "not-valid-json" > "$PRAXIS_STATE_DIR/strikes/${CLAUDE_SESSION_ID}.json"
 
   local out err
   out=$("$STRIKE" strike "after-corrupt" 2>/tmp/err.$$)
@@ -317,7 +317,7 @@ test_ac19_reset_blocked_without_reflection() {
   local out code
   out=$("$STRIKE" reset 2>&1); code=$?
   # State must still exist (reset was refused)
-  local state_file="$CLAUDE_PLUGIN_DATA/strikes/${CLAUDE_SESSION_ID}.json"
+  local state_file="$PRAXIS_STATE_DIR/strikes/${CLAUDE_SESSION_ID}.json"
   local state_kept=0
   [ -f "$state_file" ] && state_kept=1
   cleanup_env
@@ -333,7 +333,7 @@ test_ac20_reset_blocked_when_reflection_empty() {
   "$STRIKE" strike "one" >/dev/null
   "$STRIKE" strike "two" >/dev/null
   "$STRIKE" strike "three" >/dev/null
-  local reflection="$CLAUDE_PLUGIN_DATA/strikes/${CLAUDE_SESSION_ID}.reflection.md"
+  local reflection="$PRAXIS_STATE_DIR/strikes/${CLAUDE_SESSION_ID}.reflection.md"
   : > "$reflection"  # zero-byte file
   local out code
   out=$("$STRIKE" reset 2>&1); code=$?
@@ -347,8 +347,8 @@ test_ac21_reset_succeeds_with_reflection() {
   "$STRIKE" strike "one" >/dev/null
   "$STRIKE" strike "two" >/dev/null
   "$STRIKE" strike "three" >/dev/null
-  local reflection="$CLAUDE_PLUGIN_DATA/strikes/${CLAUDE_SESSION_ID}.reflection.md"
-  local state_file="$CLAUDE_PLUGIN_DATA/strikes/${CLAUDE_SESSION_ID}.json"
+  local reflection="$PRAXIS_STATE_DIR/strikes/${CLAUDE_SESSION_ID}.reflection.md"
+  local state_file="$PRAXIS_STATE_DIR/strikes/${CLAUDE_SESSION_ID}.json"
   printf '# Reflection\n\nRoot causes and prevention checklist.\n' > "$reflection"
   local out code
   out=$("$STRIKE" reset 2>&1); code=$?
@@ -417,11 +417,11 @@ test_ac17_ttl_cleanup() {
   fresh_env
   # Ensure strikes/ dir exists first, then drop a stale state file plus a
   # fresh one. session-start should sweep stale but leave fresh.
-  mkdir -p "$CLAUDE_PLUGIN_DATA/strikes"
+  mkdir -p "$PRAXIS_STATE_DIR/strikes"
   local stale_sid="ttl-stale-$$"
-  local stale_file="$CLAUDE_PLUGIN_DATA/strikes/${stale_sid}.json"
+  local stale_file="$PRAXIS_STATE_DIR/strikes/${stale_sid}.json"
   local fresh_sid="ttl-fresh-$$"
-  local fresh_file="$CLAUDE_PLUGIN_DATA/strikes/${fresh_sid}.json"
+  local fresh_file="$PRAXIS_STATE_DIR/strikes/${fresh_sid}.json"
   echo '{"count":0,"reasons":[]}' > "$stale_file"
   echo '{"count":0,"reasons":[]}' > "$fresh_file"
   # Backdate only the stale one (-v for macOS BSD, -d for GNU)
@@ -443,6 +443,35 @@ test_ac17_ttl_cleanup() {
   [ -f "$fresh_file" ] || fresh_kept=0
   cleanup_env
   [ "$precheck_ok" -eq 1 ] && [ "$stale_gone" -eq 1 ] && [ "$fresh_kept" -eq 1 ]
+}
+
+# ---- AC25 (issue #126): state never lands inside $CLAUDE_PLUGIN_DATA -------
+# Regression guard. Before the fix, $STATE_DIR resolved to
+# "${CLAUDE_PLUGIN_DATA:-...}/strikes" so on multi-plugin installs praxis
+# strike state could land inside a sibling plugin's data dir (codex/omc/…).
+# After the fix, the resolution honors $PRAXIS_STATE_DIR exclusively, so
+# pointing $CLAUDE_PLUGIN_DATA at a sibling dir must NOT cause writes there.
+test_ac25_state_isolated_from_claude_plugin_data() {
+  local praxis_dir sibling_dir
+  praxis_dir=$(mktemp -d)
+  sibling_dir=$(mktemp -d)
+  export PRAXIS_STATE_DIR="$praxis_dir"
+  export CLAUDE_PLUGIN_DATA="$sibling_dir"
+  export CLAUDE_SESSION_ID="ac25-$$-${RANDOM}"
+
+  local json_in
+  json_in=$(printf '{"session_id":"%s"}' "$CLAUDE_SESSION_ID")
+  echo "$json_in" | "$STRIKE" session-start >/dev/null
+  "$STRIKE" strike "isolation check" >/dev/null
+
+  local praxis_has_state=0 sibling_has_state=0
+  [ -f "$praxis_dir/strikes/.current-session" ] && praxis_has_state=1
+  [ -d "$sibling_dir/strikes" ] && sibling_has_state=1
+  [ -f "$sibling_dir/strikes/.current-session" ] && sibling_has_state=2
+
+  rm -rf "$praxis_dir" "$sibling_dir"
+  unset PRAXIS_STATE_DIR CLAUDE_PLUGIN_DATA CLAUDE_SESSION_ID
+  [ "$praxis_has_state" -eq 1 ] && [ "$sibling_has_state" -eq 0 ]
 }
 
 # ---------- runner ----------------------------------------------------------
@@ -472,6 +501,7 @@ run "AC21 reset at 3/3 succeeds with reflection + clears both files" test_ac21_r
 run "AC22 reset at count<3 not gated by reflection" test_ac22_reset_not_gated_under_3
 run "AC23 stop hook block message includes reflection instructions" test_ac23_stop_block_has_reflection_instructions
 run "AC24 block message includes persuasion step instructions" test_ac24_block_message_has_persuasion_step
+run "AC25 state isolated from \$CLAUDE_PLUGIN_DATA (issue #126)" test_ac25_state_isolated_from_claude_plugin_data
 
 echo "------------------------"
 echo "Passed: $PASS  Failed: $FAIL"
