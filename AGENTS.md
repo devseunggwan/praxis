@@ -13,7 +13,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | **Full** | + all cmux-* skills | + cmux |
 | **Multi-provider** | + codex/gemini routing in cmux-*, turbo-implement | + codex-cli, gemini-cli |
 
-## Skills (15)
+## Skills (16)
 
 ### Workflow Lifecycle
 
@@ -49,6 +49,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | `cmux-session-manager` | Daily session lifecycle — status dashboard, cleanup, reorganize |
 | `cmux-delegate` | Delegate a task to an independent session with auto-collected context |
 | `cmux-orchestrator` | Dispatch and supervise parallel Claude Code workers in cmux |
+| `cmux-browser` | Browser automation E2E testing via cmux browser CLI — SPA hydration wait included |
 
 ## Architecture
 
