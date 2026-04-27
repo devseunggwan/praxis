@@ -101,13 +101,19 @@ cmux browser --surface "$SURFACE" snapshot --interactive
 
 ### Snapshot Result Validation (required)
 
-After snapshot, quantitatively verify hydration is complete:
+After snapshot, enforce hydration completeness with a conditional check:
 
 ```bash
-cmux browser --surface "$SURFACE" eval 'document.querySelectorAll("a[href],h1,h2,h3,button,nav,article").length'
+NODE_COUNT=$(cmux browser --surface "$SURFACE" eval 'document.querySelectorAll("a[href],h1,h2,h3,button,nav,article").length' | tr -d ' \n')
+if [ "${NODE_COUNT:-0}" -lt 10 ]; then
+  echo "Snapshot validation: only $NODE_COUNT elements — retrying with Step 3B" >&2
+  cmux browser --surface "$SURFACE" wait --selector "main,article,nav,[role='main']" --timeout 15 || \
+    { echo "Error: Step 3B retry timed out — provide a specific selector and retry" >&2; exit 1; }
+  cmux browser --surface "$SURFACE" snapshot --interactive
+fi
 ```
 
-- **< 10** → likely pre-hydration capture → retry with Step 3B or increase timeout
+- **< 10** → pre-hydration shell detected → Step 3B retry then re-snapshot (exit 1 if retry also fails)
 - **≥ 10** → hydration complete, proceed
 
 **Empty-tree signals:** result contains only 2–5 nodes ("Jump to Content", "Welcome") with no nav/article/h2
@@ -143,57 +149,61 @@ cmux browser --surface "$SURFACE" eval 'document.querySelectorAll("a[href],h1,h2
 | `reload` | Reload page | `cmux browser reload` |
 | `url` | Get current URL | `cmux browser url` |
 
+> **Note:** All commands below (except `open`/`open-split`/`new`/`identify`) require a surface handle.
+> Always use `--surface "$SURFACE"` in real scripts. Examples below use the shorthand for readability;
+> replace `cmux browser` with `cmux browser --surface "$SURFACE"` in practice.
+
 ### DOM Interaction
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `click <selector>` | Click element | `cmux browser click "button[type='submit']"` |
-| `dblclick <selector>` | Double-click | `cmux browser dblclick ".editable-cell"` |
-| `hover <selector>` | Mouse hover | `cmux browser hover ".tooltip-trigger"` |
-| `focus <selector>` | Focus element | `cmux browser focus "#email"` |
-| `check <selector>` | Check checkbox | `cmux browser check "#agree"` |
-| `uncheck <selector>` | Uncheck checkbox | `cmux browser uncheck "#newsletter"` |
+| `click <selector>` | Click element | `cmux browser --surface "$SURFACE" click "button[type='submit']"` |
+| `dblclick <selector>` | Double-click | `cmux browser --surface "$SURFACE" dblclick ".editable-cell"` |
+| `hover <selector>` | Mouse hover | `cmux browser --surface "$SURFACE" hover ".tooltip-trigger"` |
+| `focus <selector>` | Focus element | `cmux browser --surface "$SURFACE" focus "#email"` |
+| `check <selector>` | Check checkbox | `cmux browser --surface "$SURFACE" check "#agree"` |
+| `uncheck <selector>` | Uncheck checkbox | `cmux browser --surface "$SURFACE" uncheck "#newsletter"` |
 
 ### Text Input
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `type <selector> <text>` | Simulate keystrokes | `cmux browser type "#search" "query"` |
-| `fill <selector> <value>` | Set field value (replaces existing) | `cmux browser fill "#email" "test@example.com"` |
-| `press <key>` | Press keyboard key | `cmux browser press Enter` |
-| `scroll` | Scroll page | `cmux browser scroll --dy 300` |
+| `type <selector> <text>` | Simulate keystrokes | `cmux browser --surface "$SURFACE" type "#search" "query"` |
+| `fill <selector> <value>` | Set field value (replaces existing) | `cmux browser --surface "$SURFACE" fill "#email" "test@example.com"` |
+| `press <key>` | Press keyboard key | `cmux browser --surface "$SURFACE" press Enter` |
+| `scroll` | Scroll page | `cmux browser --surface "$SURFACE" scroll --dy 300` |
 
 ### Page Inspection
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `snapshot [--interactive\|-i]` | Capture accessibility tree | `cmux browser snapshot --interactive` |
-| `screenshot [--out <path>]` | Save screenshot | `cmux browser screenshot --out /tmp/test.png` |
-| `get <prop> [--selector <css>]` | Get element property | `cmux browser get text --selector "#status"` |
-| `is <state> [--selector <css>]` | Check element state | `cmux browser is visible --selector "#modal"` |
-| `find <role\|text\|...>` | Find element | `cmux browser find role button` / `cmux browser find text "Submit"` / `cmux browser find nth --index 2 --selector "li"` |
-| `highlight [--selector <css>]` | Highlight element | `cmux browser highlight ".error"` |
+| `snapshot [--interactive\|-i]` | Capture accessibility tree | `cmux browser --surface "$SURFACE" snapshot --interactive` |
+| `screenshot [--out <path>]` | Save screenshot | `cmux browser --surface "$SURFACE" screenshot --out /tmp/test.png` |
+| `get <prop> [--selector <css>]` | Get element property | `cmux browser --surface "$SURFACE" get text --selector "#status"` |
+| `is <state> [--selector <css>]` | Check element state | `cmux browser --surface "$SURFACE" is visible --selector "#modal"` |
+| `find <role\|text\|...>` | Find element | `cmux browser --surface "$SURFACE" find role button` |
+| `highlight [--selector <css>]` | Highlight element | `cmux browser --surface "$SURFACE" highlight ".error"` |
 
 ### Wait
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `wait --selector <css>` | Wait for selector to appear | `cmux browser wait --selector ".loaded"` |
-| `wait --text <text>` | Wait for text to appear | `cmux browser wait --text "Done"` |
-| `wait --url <exact-url>` | Wait for exact URL match | `cmux browser wait --url "https://example.com/dashboard"` |
-| `wait --url-contains <text>` | Wait for URL to contain substring | `cmux browser wait --url-contains "/dashboard"` |
-| `wait --load-state complete` | Wait for document.readyState complete | `cmux browser wait --load-state complete` |
-| `wait --load-state interactive` | Wait for DOM parsed | `cmux browser wait --load-state interactive` |
-| `wait --function <js>` | Wait for JS condition | `cmux browser wait --function '!!window.__APP_READY__'` |
-| `wait --timeout <sec>` | Set max wait time | `cmux browser wait --selector ".btn" --timeout 20` |
+| `wait --selector <css>` | Wait for selector to appear | `cmux browser --surface "$SURFACE" wait --selector ".loaded"` |
+| `wait --text <text>` | Wait for text to appear | `cmux browser --surface "$SURFACE" wait --text "Done"` |
+| `wait --url <exact-url>` | Wait for exact URL match | `cmux browser --surface "$SURFACE" wait --url "https://example.com/dashboard"` |
+| `wait --url-contains <text>` | Wait for URL to contain substring | `cmux browser --surface "$SURFACE" wait --url-contains "/dashboard"` |
+| `wait --load-state complete` | Wait for document.readyState complete | `cmux browser --surface "$SURFACE" wait --load-state complete` |
+| `wait --load-state interactive` | Wait for DOM parsed | `cmux browser --surface "$SURFACE" wait --load-state interactive` |
+| `wait --function <js>` | Wait for JS condition | `cmux browser --surface "$SURFACE" wait --function '!!window.__APP_READY__'` |
+| `wait --timeout <sec>` | Set max wait time | `cmux browser --surface "$SURFACE" wait --selector ".btn" --timeout 20` |
 
 ### JavaScript
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `eval <js>` | Execute JS | `cmux browser eval "document.title"` |
-| `addscript <js>` | Inject JS string | `cmux browser addscript 'console.log("injected")'` |
-| `addstyle <css>` | Inject CSS | `cmux browser addstyle "body { outline: 1px solid red; }"` |
+| `eval <js>` | Execute JS | `cmux browser --surface "$SURFACE" eval "document.title"` |
+| `addscript <js>` | Inject JS string | `cmux browser --surface "$SURFACE" addscript 'console.log("injected")'` |
+| `addstyle <css>` | Inject CSS | `cmux browser --surface "$SURFACE" addstyle "body { outline: 1px solid red; }"` |
 
 ### Tab Management
 
@@ -279,20 +289,27 @@ IS_SPA=$(cmux browser --surface "$SURFACE" eval '!!(window.__NEXT_DATA__||window
 if [ "$IS_SPA" = "true" ]; then
   cmux browser --surface "$SURFACE" wait --function 'document.readyState==="complete" && document.body.innerText.length>200 && document.querySelectorAll("a[href],button").length>5 && !document.querySelector("[aria-busy=true],[data-loading=true]")' --timeout 10 || \
     cmux browser --surface "$SURFACE" wait --selector "main,article,nav,[role='main']" --timeout 10 || \
-    echo "Warning: hydration wait timed out — snapshot may reflect pre-hydration state; consider Step 3B with a known selector"
+    { echo "Error: hydration wait timed out on a detected SPA — provide an explicit selector via Step 3B and retry" >&2; exit 1; }
 else
   # SPA not detected; lightweight check as safety net for undetected SPAs
   # (custom React/Vite apps may have no framework markers but still hydrate late)
   cmux browser --surface "$SURFACE" wait --function 'document.body.innerText.length>50 && document.querySelectorAll("a[href],button").length>2' --timeout 5 || \
     cmux browser --surface "$SURFACE" wait --selector "main,article,nav,[role='main']" --timeout 5 || \
-    echo "Warning: hydration wait timed out — snapshot may reflect pre-hydration state; consider Step 3B with a known selector"
+    { echo "Error: hydration wait timed out — page may be an undetected SPA; provide an explicit selector via Step 3B and retry" >&2; exit 1; }
 fi
 
 # 3. Snapshot
 cmux browser --surface "$SURFACE" snapshot --interactive
 
-# Validation: count interactive elements (< 10 → retry with Step 3B)
-cmux browser --surface "$SURFACE" eval 'document.querySelectorAll("a[href],h1,h2,h3,button,nav,article").length'
+# Validation: enforce hydration completeness — < 10 meaningful elements means
+# pre-hydration shell was captured; retry Step 3B before continuing
+NODE_COUNT=$(cmux browser --surface "$SURFACE" eval 'document.querySelectorAll("a[href],h1,h2,h3,button,nav,article").length' | tr -d ' \n')
+if [ "${NODE_COUNT:-0}" -lt 10 ]; then
+  echo "Snapshot validation: only $NODE_COUNT meaningful elements found — retrying with Step 3B" >&2
+  cmux browser --surface "$SURFACE" wait --selector "main,article,nav,[role='main']" --timeout 15 || \
+    { echo "Error: Step 3B retry also timed out — provide a more specific selector and retry" >&2; exit 1; }
+  cmux browser --surface "$SURFACE" snapshot --interactive
+fi
 
 # 4. Verify eval works (CSP check)
 cmux browser --surface "$SURFACE" eval "1+1"
