@@ -49,11 +49,13 @@ if grep -q "requires a selector" "$TMPFILE"; then
   #   get attr   — selector + --attr <name> (both required)
   #   get <rest> — selector only; no --all flag in get (--all is cookies-only)
   #   find nth   — selector + --index <n> (both required)
+  #   frame      — binary has TWO error strings; one ("requires a selector or 'main'")
+  #                is intercepted here; needs <main|selector> mode in the hint
   #   type       — selector + --text <text> (binary errors without text too)
   #   fill       — selector only (text is optional; binary does not enforce it)
   #   select     — selector + --value <value>
-  #   others     — selector only (click, hover, focus; frame/find non-nth errors
-  #                produce different strings, not intercepted here)
+  #   others     — selector only (click, hover, focus; non-intercepted frame variant
+  #                "requires <selector|main>" passes through unchanged)
   if [ "$subcmd" = "get attr" ]; then
     printf '  cmux browser surface:1 get attr --selector <css> --attr <name>\n' >&2
     printf '  cmux browser surface:1 get attr <css> <name>   # positional shorthand\n\n' >&2
@@ -66,6 +68,12 @@ if grep -q "requires a selector" "$TMPFILE"; then
     printf 'Examples:\n' >&2
     printf "  cmux browser surface:1 %s --selector 'h1.title'\n" "$subcmd" >&2
     printf "  cmux browser surface:1 %s 'h1.title'\n\n" "$subcmd" >&2
+  elif [ "$subcmd" = "frame" ]; then
+    # frame takes a required mode before an optional --selector.
+    printf '  cmux browser surface:1 frame <main|selector> [--selector <css>]\n\n' >&2
+    printf 'Examples:\n' >&2
+    printf "  cmux browser surface:1 frame main\n" >&2
+    printf "  cmux browser surface:1 frame selector --selector 'iframe.content'\n\n" >&2
   elif [ "$subcmd" = "find nth" ]; then
     printf '  cmux browser surface:1 find nth --index <n> --selector <css>\n' >&2
     printf '  cmux browser surface:1 find nth <n> <css>    # positional shorthand\n\n' >&2

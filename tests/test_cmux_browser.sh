@@ -74,6 +74,12 @@ if [[ "${1:-}" == "browser" ]]; then
         echo "mock-output-for-${get_type}"
         exit 0
         ;;
+      frame)
+        shift  # consume "frame"
+        # Simulate the "requires a selector" variant of the frame error.
+        # (The binary has two strings; the one intercepted by the wrapper is
+        #  "requires a selector or 'main'", not "requires <selector|main>".)
+        echo "Error: browser frame requires a selector or 'main'" >&2; exit 1 ;;
       find)
         shift  # consume "find"
         find_type="${1:-}"; shift  # consume the find sub-type (nth, first, …)
@@ -257,7 +263,21 @@ assert_exit     "exit-code:get-attr-missing-selector"  1  "$_ec"
 assert_contains "hint:--selector:get-attr"  "\-\-selector"  "$_stderr"
 assert_contains "hint:--attr:get-attr"      "\-\-attr"      "$_stderr"
 
-# 5f. find nth (index given, selector missing): hint must include both --index and --selector
+# 5f. frame: binary has "requires a selector or 'main'" variant that IS intercepted;
+#     hint must show <main|selector> mode, NOT just --selector <css>
+# Simulate: "Error: browser frame requires a selector or 'main'"
+_fake_tmpfile=$(mktemp)
+echo "Error: browser frame requires a selector or 'main'" > "$_fake_tmpfile"
+_frame_subcmd=$(sed -n 's/.*browser \(.*\) requires a selector.*/\1/p' "$_fake_tmpfile" | head -1)
+rm -f "$_fake_tmpfile"
+assert_contains "frame-subcmd-extraction"  "^frame$"  "$_frame_subcmd"
+
+run_wrapper surface:1 frame   # triggers "requires a selector" variant
+assert_exit     "exit-code:frame-missing-mode"   1  "$_ec"
+assert_contains "hint:frame-has-main"     "main"        "$_stderr"
+assert_contains "hint:frame-has-selector" "selector"    "$_stderr"
+
+# 5g. find nth (index given, selector missing): hint must include both --index and --selector
 # Mock: find nth with an index token but no --selector still reports "requires a selector"
 run_wrapper surface:1 find nth 2
 
