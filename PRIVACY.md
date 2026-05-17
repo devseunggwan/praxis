@@ -59,6 +59,20 @@ the hook's in-process execution. Third-party CLI privacy policies apply.
 
 ## No Telemetry
 
-Praxis does not include any analytics, telemetry, error reporting, or
-network calls of its own. There is no phone-home, no usage tracking, and
-no data ever leaves the local machine via praxis code.
+Praxis itself does not include analytics, telemetry, or error reporting.
+There is no phone-home and no usage tracking embedded in praxis code.
+
+However, praxis hooks and skills DO invoke external CLIs (`git`, `gh`,
+`cmux`, `claude`, `codex`, `gemini`) with the user's own credentials.
+Some of those invocations make network calls — most notably:
+
+- `hooks/pre-gh-pr-create-dedup-gate.py` runs `gh pr list` against the
+  target repo's PR search API to detect duplicate PRs.
+- `skills/cmux-delegate` forwards prompt files to `claude` / `codex` /
+  `gemini` CLIs, each of which sends the prompt to its respective
+  provider's API.
+
+These egress paths are visible in the hook/skill source (see SECURITY.md
+"Hook External-Command Allowlist") and run under the user's environment.
+Praxis does not intercept, store, or transmit additional data via its
+own code paths beyond what the invoked CLI requires.
