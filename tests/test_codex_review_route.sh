@@ -2,12 +2,15 @@
 # test_codex_review_route.sh — coverage for hooks/codex-review-route.sh
 #
 # Synthesizes Claude Code UserPromptSubmit hook payloads and asserts:
-#   warn   → exit 0 + stdout contains JSON additionalContext substring
-#   silent → exit 0 + stdout empty
+#   warn          → exit 0 + stdout contains JSON additionalContext with codex-review-wrap
+#   pr_state_warn → exit 0 + stdout contains JSON additionalContext with CLOSED or MERGED
+#   silent        → exit 0 + stdout empty
 #
 # Multi-worktree state is simulated by running the hook from inside a
 # temporary repo with N synthesized worktrees, NOT against the real
 # praxis tree (test isolation).
+#
+# PR state is simulated via mock `gh` binaries injected into PATH.
 #
 # Usage: bash tests/test_codex_review_route.sh
 # Exit:  0 = all pass; 1 = at least one fail
@@ -78,8 +81,35 @@ make_bare_plus_linked_repo() {
   ( cd "$base/bare" && git worktree add -q "$base/linked" main 2>/dev/null )
 }
 
+# --- mock gh fixtures -------------------------------------------------------
+# Each mock gh binary unconditionally returns a fixed PR state, making tests
+# independent of the real `gh` CLI or any live GitHub state.
+
+make_mock_gh_state() {
+  local dir="$1" state="$2"
+  mkdir -p "$dir"
+  cat > "$dir/gh" <<EOF
+#!/bin/bash
+echo "$state"
+exit 0
+EOF
+  chmod +x "$dir/gh"
+}
+
+make_mock_gh_no_pr() {
+  local dir="$1"
+  mkdir -p "$dir"
+  cat > "$dir/gh" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+  chmod +x "$dir/gh"
+}
+
+# --- test runner -------------------------------------------------------------
+# Optional 5th argument: path to prepend to PATH (for mock gh injection).
 run_case() {
-  local name="$1" expectation="$2" cwd="$3" prompt="$4"
+  local name="$1" expectation="$2" cwd="$3" prompt="$4" mock_path="${5:-}"
 
   local payload
   payload=$(python3 -c '
@@ -88,7 +118,11 @@ print(json.dumps({"prompt": sys.argv[1], "session_id": "test-sid"}))' "$prompt")
 
   local out_file
   out_file=$(mktemp)
-  ( cd "$cwd" && echo "$payload" | "$HOOK" ) > "$out_file" 2>/dev/null
+  if [ -n "$mock_path" ]; then
+    ( cd "$cwd" && export PATH="$mock_path:$PATH" && echo "$payload" | "$HOOK" ) > "$out_file" 2>/dev/null
+  else
+    ( cd "$cwd" && echo "$payload" | "$HOOK" ) > "$out_file" 2>/dev/null
+  fi
   local rc=$?
   local out
   out=$(cat "$out_file")
@@ -105,6 +139,14 @@ print(json.dumps({"prompt": sys.argv[1], "session_id": "test-sid"}))' "$prompt")
       case "$out" in
         *"codex-review-wrap"*"additionalContext"*) ;;
         *"additionalContext"*"codex-review-wrap"*) ;;
+        *) ok=0 ;;
+      esac
+      ;;
+    pr_state_warn)
+      [ "$rc" -eq 0 ] || ok=0
+      case "$out" in
+        *"CLOSED"*"additionalContext"*|*"additionalContext"*"CLOSED"*) ;;
+        *"MERGED"*"additionalContext"*|*"additionalContext"*"MERGED"*) ;;
         *) ok=0 ;;
       esac
       ;;
@@ -132,6 +174,17 @@ BARE_LINKED="$TMPROOT/bare-plus-linked"
 make_multi_wt_repo "$MULTI"
 make_single_wt_repo "$SINGLE"
 make_bare_plus_linked_repo "$BARE_LINKED"
+
+# mock gh dirs (inside TMPROOT so they're cleaned up together)
+MOCK_GH_OPEN="$TMPROOT/mock-gh-open"
+MOCK_GH_CLOSED="$TMPROOT/mock-gh-closed"
+MOCK_GH_MERGED="$TMPROOT/mock-gh-merged"
+MOCK_GH_NO_PR="$TMPROOT/mock-gh-no-pr"
+
+make_mock_gh_state "$MOCK_GH_OPEN"   "OPEN"
+make_mock_gh_state "$MOCK_GH_CLOSED" "CLOSED"
+make_mock_gh_state "$MOCK_GH_MERGED" "MERGED"
+make_mock_gh_no_pr "$MOCK_GH_NO_PR"
 
 # Sanity check: verify raw worktree-line counts (NOT the hook's filtered count)
 multi_count=$(cd "$MULTI" && git worktree list --porcelain 2>/dev/null | awk '/^worktree /' | wc -l | tr -d ' ')
@@ -202,6 +255,19 @@ print(json.dumps({"prompt": "/codex:review", "session_id": "test-sid"}))')
   fi
 }
 not_in_repo_test
+
+# --- PR-state guard tests ---------------------------------------------------
+# Uses mock gh binaries to control the returned PR state without requiring a
+# real GitHub remote. Tests run against the single-worktree repo so worktree
+# count does not interfere with the PR-state advisory.
+
+run_case "14 silent: /codex:review, OPEN PR → no PR-state advisory"          silent        "$SINGLE" "/codex:review"              "$MOCK_GH_OPEN"
+run_case "15 pr_state_warn: /codex:review, CLOSED PR → advisory"             pr_state_warn "$SINGLE" "/codex:review"              "$MOCK_GH_CLOSED"
+run_case "16 pr_state_warn: /codex:review, MERGED PR → advisory"             pr_state_warn "$SINGLE" "/codex:review"              "$MOCK_GH_MERGED"
+run_case "17 silent: /codex:review, no PR → no advisory (regression)"        silent        "$SINGLE" "/codex:review"              "$MOCK_GH_NO_PR"
+run_case "18 pr_state_warn: codex-review-wrap, CLOSED PR → advisory"         pr_state_warn "$SINGLE" "/praxis:codex-review-wrap"  "$MOCK_GH_CLOSED"
+run_case "19 silent: codex-review-wrap, OPEN PR → no advisory"               silent        "$SINGLE" "/praxis:codex-review-wrap"  "$MOCK_GH_OPEN"
+run_case "20 silent: mention-only codex-review-wrap mid-sentence → no advisory" silent    "$SINGLE" "use codex-review-wrap later" "$MOCK_GH_CLOSED"
 
 # --- cleanup ---------------------------------------------------------------
 rm -rf "$TMPROOT"
