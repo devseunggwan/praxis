@@ -72,9 +72,14 @@ Some of those invocations make network calls — most notably:
 
 - `hooks/pre-gh-pr-create-dedup-gate.py` runs `gh pr list` against the
   target repo's PR search API to detect duplicate PRs.
-- `skills/cmux-delegate` forwards prompt files to `claude` / `codex` /
-  `gemini` CLIs, each of which sends the prompt to its respective
-  provider's API.
+- `skills/cmux-delegate` performs two distinct egress steps when run
+  in a GitHub-backed repo:
+  1. **Context collection** — calls `gh pr list --head <branch>` and
+     `gh api repos/<owner>/<repo>/pulls/<num>/comments` to enrich the
+     delegated prompt with current PR metadata.
+  2. **Prompt forwarding** — pipes the resulting prompt file to
+     `claude` / `codex` / `gemini` CLIs, each of which sends the
+     prompt to its respective provider's API.
 
 These egress paths are visible in the hook/skill source (see SECURITY.md
 "Hook External-Command Allowlist") and run under the user's environment.
