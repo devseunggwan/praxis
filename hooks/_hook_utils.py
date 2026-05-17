@@ -424,7 +424,13 @@ def _resolve_subcommand(
         if tok == "--":
             return (command, command)
         if "$(" in tok:
-            return (command, command)
+            # Only bare `$(...)` (not embedded in `--flag=$(...)`)
+            # terminates subcommand parsing. Flag-embedded substitution
+            # fills the flag's value slot and shouldn't prevent
+            # subcommand detection (e.g., `git --git-dir=$(pwd)/.git
+            # merge-tree ...` must still resolve `git merge-tree`).
+            if not (tok.startswith("-") and "=" in tok.split("$(", 1)[0]):
+                return (command, command)
         if not tok.startswith("-"):
             return (command, f"{command} {tok}")
         # Token is a flag. Skip its value if applicable.
@@ -549,8 +555,15 @@ def tokenize_with_roles(
 
             # SEPARATOR_DD — the literal `--` argv separator. We require
             # the literal exact match; `--name-only` and `--=` do not
-            # qualify.
+            # qualify. A `--` before command_idx is the wrapper option
+            # terminator form (`env -- cmd`, `sudo -- cmd`) — strip_prefix
+            # has already consumed it from `stripped`, so within the
+            # wrapper region it is POSITIONAL, not the argv separator.
             if tok == "--":
+                if i < command_idx:
+                    seg_tokens.append(Token(text=tok, role=TokenRole.POSITIONAL))
+                    i += 1
+                    continue
                 seg_tokens.append(Token(text=tok, role=TokenRole.SEPARATOR_DD))
                 post_dd = True
                 i += 1

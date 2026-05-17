@@ -312,6 +312,24 @@ run_roles "R3: -- boundary stops flag scan in kubectl exec" \
   "seg0:separator_dd:--:|seg0:post_dd:--use-protocol-buffers:" \
   "kubectl exec pod -- bash -c '--use-protocol-buffers'"
 
+# --- Codex review #284 regressions ---
+
+run_roles "wrapper -- (env): kubectl still resolves as COMMAND after env --" \
+  "seg0:command:kubectl:|seg0:flag:--use-protocol-buffers:" \
+  "env -- kubectl --use-protocol-buffers"
+
+run_roles_negative "wrapper -- (env): kubectl must NOT be POST_DD" \
+  "seg0:post_dd:kubectl:" \
+  "env -- kubectl --use-protocol-buffers"
+
+run_roles "wrapper -- (sudo): git merge-tree resolves through sudo -- prefix" \
+  "seg0:command:git:|seg0:flag_value:A:--merge-base" \
+  "sudo -- git merge-tree --merge-base A --name-only HEAD origin/main"
+
+run_roles "flag=value with \$(): --git-dir=\$() does not block subcommand resolution" \
+  "seg0:command:git:|seg0:flag_value:A:--merge-base" \
+  'git --git-dir=$(pwd)/.git merge-tree --merge-base A --name-only HEAD origin/main'
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
