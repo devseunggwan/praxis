@@ -6,6 +6,13 @@ class of drift bugs that have cost the most debugging time.
 
 ## Adding or modifying a skill
 
+### Template
+
+A starter template lives at [`skills/SKILL.md.tmpl`](skills/SKILL.md.tmpl).
+Copy it into `skills/<skill-name>/SKILL.md`, fill in the placeholders, and
+follow the step-by-step guide at
+[`skills/writing-praxis-skill/SKILL.md`](skills/writing-praxis-skill/SKILL.md).
+
 ### Directory structure
 
 ```
