@@ -168,6 +168,16 @@ run_case "cross-repo with -c name=value global flag" \
   ask \
   "git -c user.name=foo worktree remove $OTHER_OWNED_WT"
 
+# Regression: unquoted $() command substitution as a -c value used to be
+# split by safe_tokenize across tokens, and only the first piece ('$(echo')
+# was consumed as the -c value. The remaining piece ('k=v)') then sat in
+# the subcommand slot and the hook returned silently — bypass. Codex
+# review round 2 sibling finding (mirror of #248 F1). _coalesce_subst_runs
+# coalesces the multi-token run into a single value before parsing.
+run_case "cross-repo with -c \$(...) (unquoted multi-token subst)" \
+  ask \
+  "git -c \$(echo k=v) worktree remove $OTHER_OWNED_WT"
+
 # === PASS paths (cwd repo owns target / opt-out / non-target) ==============
 
 run_case "cwd-repo abs path owned" \

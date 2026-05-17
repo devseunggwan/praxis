@@ -105,15 +105,56 @@ def _has_repo_override(argv: list[str]) -> bool:
     return False
 
 
+def _coalesce_subst_runs(tokens: list[str]) -> list[str]:
+    """Collapse unquoted `$(...)` command-substitution runs into single tokens.
+
+    `safe_tokenize` uses shlex with whitespace_split=True, which is unaware
+    of POSIX command substitution. An unquoted `$(echo k=v)` therefore
+    splits into `['$(echo', 'k=v)']`, and any flag-value-skip logic only
+    consumes the first token. The remaining token (`k=v)`) then sits where
+    a subcommand or positional is expected and breaks parsing.
+
+    This helper walks the token list and merges any run that starts with a
+    token containing `$(` and ends with a token containing the matching `)`
+    into a single logical token. Quoted substitutions (e.g. `"$(...)"`)
+    are already a single token at this layer and need no special handling.
+
+    Mirror of `_coalesce_subst_runs` in `cli-flag-incompat-advisory.py`
+    (codex review round 2 sibling fix). The helper will move into
+    `_hook_utils.py` at the third consumer per the project DRY-3 rule.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(tokens)
+    while i < n:
+        tok = tokens[i]
+        if "$(" in tok and ")" not in tok[tok.index("$(") + 2:]:
+            j = i + 1
+            parts = [tok]
+            while j < n:
+                parts.append(tokens[j])
+                if ")" in tokens[j]:
+                    break
+                j += 1
+            out.append(" ".join(parts))
+            i = j + 1
+        else:
+            out.append(tok)
+            i += 1
+    return out
+
+
 def _extract_worktree_remove_path(argv: list[str]) -> str | None:
     """Return the path argument of `git worktree remove <path>`, else None.
 
     Walks past git global flags, locates the `worktree` `remove` subcommand
     pair, skips any `-f` / `--force` style flags, and returns the first
     positional argument (the path). Returns None when the command is not a
-    `git worktree remove` call or the path is missing.
+    `git worktree remove` call or the path is missing. Unquoted `$(...)`
+    runs are coalesced before walking so a flag-with-arg value that
+    contains a multi-token substitution is counted as exactly one token.
     """
-    argv = strip_prefix(argv)
+    argv = _coalesce_subst_runs(strip_prefix(argv))
     if not argv or argv[0] != "git":
         return None
 
