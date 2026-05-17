@@ -58,6 +58,8 @@ Known deprecations:
 |---------|--------|
 | `kubectl --use-protocol-buffers get pods` | **ADVISORY** |
 | `kubectl --use-protocol-buffers=true get pods` | **ADVISORY** (`=value` form) |
+| `kubectl --use-protocol-buffers exec pod -- mytool` | **ADVISORY** — flag is kubectl-side, before `--` |
+| `kubectl exec pod -- mytool --use-protocol-buffers` | **SILENT** — flag is the in-container command's arg, after `--` |
 | `kubectl get pods -n default` | **SILENT** |
 
 ### Response format
@@ -111,8 +113,10 @@ walks every command segment, runs every check, and emits the first hit.
 bash hooks/test-cli-flag-incompat-advisory.sh
 ```
 
-24 cases: 6 advisory (4 git merge-tree variants, 2 kubectl), 16 silent
-(correct merge-tree usage including space-form `--merge-base`, `-X`,
-`--strategy-option`, unquoted `$(...)` command substitution, equals-form
-`--merge-base=$(...)`, quoted `"$(...)"`, unrelated commands, comment),
-2 infrastructure (non-Bash passthrough, malformed JSON fail-open).
+26 cases: 7 advisory (4 git merge-tree variants, 3 kubectl including
+flag-before-`--`), 17 silent (correct merge-tree usage including
+space-form `--merge-base`, `-X`, `--strategy-option`, unquoted `$(...)`
+command substitution, equals-form `--merge-base=$(...)`, quoted
+`"$(...)"`, `kubectl exec -- mytool --flag` remote-arg shadowing,
+unrelated commands, comment), 2 infrastructure (non-Bash passthrough,
+malformed JSON fail-open).

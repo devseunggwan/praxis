@@ -167,6 +167,18 @@ run_case "kubectl get pods (no deprecated flag)" \
   silent \
   "kubectl get pods -n default"
 
+# Regression — codex review round 3 F1: tokens after `--` are passed to
+# the in-container command, not to kubectl. Advisory must not fire on
+# remote-command flag shadowing.
+run_case "kubectl exec pod -- mytool --use-protocol-buffers (remote arg)" \
+  silent \
+  "kubectl exec pod -- mytool --use-protocol-buffers"
+
+# Counter-case: the same deprecated flag BEFORE -- still triggers advisory.
+run_case "kubectl --use-protocol-buffers exec pod -- mytool (kubectl-side)" \
+  advisory \
+  "kubectl --use-protocol-buffers exec pod -- mytool"
+
 run_case "non-git non-kubectl command" \
   silent \
   "echo merge-tree --name-only A B C"

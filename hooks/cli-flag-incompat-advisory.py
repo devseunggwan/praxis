@@ -239,8 +239,15 @@ def _check_kubectl(argv: list[str]) -> Optional[str]:
     argv = strip_prefix(argv)
     if not argv or argv[0] != "kubectl":
         return None
+    # `kubectl exec pod -- mytool --use-protocol-buffers` passes
+    # `--use-protocol-buffers` to the in-container command, not to kubectl
+    # itself. Per POSIX convention, every token after `--` is positional —
+    # stop scanning when we hit it so remote-command arg shadowing does
+    # not trigger a kubectl-targeted advisory.
     hits: list[str] = []
     for tok in argv[1:]:
+        if tok == "--":
+            break
         bare = tok.split("=", 1)[0]
         if bare in _KUBECTL_DEPRECATED:
             hits.append(f"  {bare}: {_KUBECTL_DEPRECATED[bare]}")
