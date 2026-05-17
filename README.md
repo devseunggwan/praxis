@@ -166,6 +166,11 @@ you commit here land in the version that actually runs at the shell.
 See [AGENTS.md → Local Development](AGENTS.md#local-development) for the full
 list of shipped CLI wrappers and drift-recovery rationale.
 
+## Security & Privacy
+
+- [SECURITY.md](SECURITY.md) — vulnerability reporting and supported versions
+- [PRIVACY.md](PRIVACY.md) — what praxis reads, executes, and never transmits
+
 ## License
 
 MIT License
