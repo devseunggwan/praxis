@@ -11,8 +11,9 @@ in [`ARCHITECTURE.md`](ARCHITECTURE.md); per-hook specs live under
 
 Every hook ships with full spec in `docs/hook/<name>.md` — design rationale,
 matrix of blocked vs. passed commands, response JSON, parsing
-guarantees, fail-safe paths, and test summary. CLAUDE.md only carries the
-index; consult the per-hook file before editing.
+guarantees, fail-safe paths, and test summary. The hook index lives in
+[`ARCHITECTURE.md → Hook index`](ARCHITECTURE.md#hook-index); consult the
+per-hook file before editing.
 
 Design mechanisms shared by all hooks:
 
