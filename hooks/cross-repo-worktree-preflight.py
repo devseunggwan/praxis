@@ -22,8 +22,11 @@ Sibling hooks that cover adjacent scenarios:
   pre-merge-approval-gate.sh   → gh pr merge per-PR approval
 
 Skips (no-op pass-through):
-  • `git -C <dir>` / `--git-dir=` / `--work-tree=` override present (the
-    operator explicitly named the repo to target — trust the override)
+  • `git -C <dir>` or `git --git-dir=<path>` override present (the operator
+    explicitly repinned git's view of the repo — trust the override).
+    `--work-tree` ALONE is NOT a repo override — it only relocates the
+    worktree pointer while git still resolves `.git` from cwd, so the
+    cross-repo registry mismatch still happens and the hook still fires.
   • a preceding `cd <path>` segment in the same compound command has
     already moved the effective cwd into the worktree's owning repo
     (the post-cd cwd's worktree list contains the target)
@@ -64,10 +67,17 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 
 OPT_OUT_MARKER = "# worktree-chain:ack"
 
-# git global flags that take a separate-token argument and bind git to a
-# specific repo / working tree. Their presence means the operator is already
-# explicit about which repo to operate on, so the hook should not second-guess.
-GIT_REPO_OVERRIDE_FLAGS_WITH_ARG = frozenset({"-C", "--git-dir", "--work-tree"})
+# git global flags whose presence means git is pinned to a different repo's
+# gitdir / working-cwd than the hook process — the operator has already
+# named the target repo so the cross-repo guard should yield.
+#
+# `--work-tree` is intentionally NOT in this set. Without a paired
+# `--git-dir`, `--work-tree` only relocates the worktree pointer; git still
+# resolves `.git` from the hook process cwd, so a `worktree remove` call
+# with bare `--work-tree=/other-repo` still consults the cwd repo's
+# worktree registry and fails with `not a working tree` — exactly the
+# scenario this hook is built to surface.
+GIT_REPO_OVERRIDE_FLAGS_WITH_ARG = frozenset({"-C", "--git-dir"})
 
 # Every git global flag that consumes a separate-token argument. Used when
 # walking past the global-flag block to reach the subcommand — we must skip

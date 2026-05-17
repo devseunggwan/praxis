@@ -237,9 +237,20 @@ run_case "--git-dir override" \
   pass \
   "git --git-dir=$OTHER_REPO/.git worktree remove $OTHER_OWNED_WT"
 
-run_case "--work-tree override" \
-  pass \
+# Regression (codex round 4 F1): `--work-tree` ALONE does not switch git
+# to the other repo's gitdir — git still uses cwd repo's .git/worktrees
+# registry and fails with `not a working tree`. The hook must keep firing
+# the ask. Previously this case was incorrectly classified as pass.
+# Verified against real git: `cd /repo-a && git --work-tree=/repo-b
+# worktree remove /repo-b-wt` -> fatal: '<path>' is not a working tree.
+run_case "--work-tree alone is NOT an override (still cross-repo)" \
+  ask \
   "git --work-tree=$OTHER_REPO worktree remove $OTHER_OWNED_WT"
+
+# But --work-tree paired with --git-dir IS a real override.
+run_case "--git-dir + --work-tree pair is an override" \
+  pass \
+  "git --git-dir=$OTHER_REPO/.git --work-tree=$OTHER_REPO worktree remove $OTHER_OWNED_WT"
 
 run_case "non-remove worktree subcommand — list" \
   pass \

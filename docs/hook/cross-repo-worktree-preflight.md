@@ -39,7 +39,8 @@ pass-throughs.
 | `cd $VAR && git worktree remove /cross-repo-wt` | **ASK** — unresolvable `cd` does not update effective cwd |
 | `git -C /other-repo worktree remove /abs/path` | **PASS** — explicit `-C` override |
 | `git --git-dir=/other/.git worktree remove /abs/path` | **PASS** — explicit override |
-| `git --work-tree=/other worktree remove /abs/path` | **PASS** — explicit override |
+| `git --work-tree=/other worktree remove /abs/path` | **ASK** — `--work-tree` alone does NOT switch gitdir; cwd repo's registry still consulted |
+| `git --git-dir=/other/.git --work-tree=/other worktree remove /abs/path` | **PASS** — paired form is a real override |
 | `git worktree list` / `git worktree add ...` | **PASS** — non-remove subcommand |
 | `git status` / non-git command | **PASS** — different command |
 | `git worktree remove /abs/path  # worktree-chain:ack` | **PASS** — opt-out |
@@ -113,11 +114,13 @@ error so it never breaks a Claude Code session:
 bash hooks/test-cross-repo-worktree-preflight.sh
 ```
 
-27 cases: 9 ask paths (cross-repo abs, `-f`, `--force`, trailing slash,
+28 cases: 10 ask paths (cross-repo abs, `-f`, `--force`, trailing slash,
 chained, `-c name=value` global flag, `-c $(...)` unquoted command
-substitution, relative `../` resolving cross-repo, `cd $VAR` unresolvable),
-13 pass paths (cwd-owned abs, cwd-owned relative `../`, opt-out, three
-repo-override forms, `cd /owning && remove abs`, `cd /owning && remove
-relative`, non-remove subcommand variants, non-git command, empty,
-comment-only), 2 worktree non-remove pass-throughs, 3 infrastructure
-(non-Bash passthrough, malformed JSON fail-open, non-git cwd fail-open).
+substitution, relative `../` resolving cross-repo, `cd $VAR` unresolvable,
+bare `--work-tree` (not a real override)), 13 pass paths (cwd-owned abs,
+cwd-owned relative `../`, opt-out, two real-override forms (`-C`,
+`--git-dir`), paired `--git-dir`+`--work-tree`, `cd /owning && remove
+abs`, `cd /owning && remove relative`, non-remove subcommand variants,
+non-git command, empty, comment-only), 2 worktree non-remove pass-throughs,
+3 infrastructure (non-Bash passthrough, malformed JSON fail-open, non-git
+cwd fail-open).
