@@ -1,7 +1,11 @@
 # Privacy Policy
 
-Praxis is a local-only Claude Code plugin. It does not collect, transmit, or
-store data on any external server. All state lives in the user's own filesystem.
+Praxis is a local-only Claude Code plugin. Praxis code itself stores state
+only on the user's filesystem and does not transmit data on its own. However,
+praxis invokes external CLIs (`git`, `gh`, `cmux`, `claude`, `codex`,
+`gemini`) on the user's behalf, and some of those CLIs make network calls —
+see the [No Telemetry](#no-telemetry) section below for the enumerated egress
+paths.
 
 ## Transcript Reading
 
