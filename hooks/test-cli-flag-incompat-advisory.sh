@@ -116,9 +116,25 @@ run_case "merge-tree with no modern flag (legacy 3-arg form)" \
   silent \
   "git merge-tree abc123 HEAD origin/main"
 
-run_case "merge-tree --name-only with --merge-base + 2 positionals" \
+run_case "merge-tree --name-only with --merge-base=A (equals form)" \
   silent \
   "git merge-tree --merge-base=A --name-only HEAD origin/main"
+
+# Regression — codex review round 1 F1: --merge-base in space-separated form
+# (`--merge-base A`) was counting `A` as a 3rd positional and falsely
+# tripping the advisory. The merge-tree flag-with-arg set must include
+# --merge-base / -X / --strategy-option.
+run_case "merge-tree --name-only with --merge-base A (space form)" \
+  silent \
+  "git merge-tree --merge-base A --name-only HEAD origin/main"
+
+run_case "merge-tree --name-only with -X strategy-opt + 2 positionals" \
+  silent \
+  "git merge-tree -X ours --name-only HEAD origin/main"
+
+run_case "merge-tree --name-only with --strategy-option (space) + 2 positionals" \
+  silent \
+  "git merge-tree --strategy-option ours --name-only HEAD origin/main"
 
 # === SILENT paths (unrelated commands) =====================================
 

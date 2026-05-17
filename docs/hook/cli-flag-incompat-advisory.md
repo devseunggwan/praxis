@@ -39,7 +39,9 @@ though the operator never wrote `--trivial-merge`.
 | `git merge-tree --name-only $(git merge-base HEAD origin/main) HEAD origin/main` | **ADVISORY** (3 positionals expanded) |
 | `git -C /tmp merge-tree --name-only A B C` | **ADVISORY** — `-C` is git global |
 | `git merge-tree --name-only HEAD origin/main` | **SILENT** — 2 positionals, modern OK |
-| `git merge-tree --merge-base=A --name-only HEAD origin/main` | **SILENT** — explicit merge-base |
+| `git merge-tree --merge-base=A --name-only HEAD origin/main` | **SILENT** — explicit merge-base (equals form) |
+| `git merge-tree --merge-base A --name-only HEAD origin/main` | **SILENT** — explicit merge-base (space form) |
+| `git merge-tree -X ours --name-only HEAD origin/main` | **SILENT** — `-X` consumes one value token |
 | `git merge-tree abc HEAD origin/main` | **SILENT** — no modern flag (legacy form) |
 
 #### `kubectl` deprecated flag
@@ -107,6 +109,7 @@ walks every command segment, runs every check, and emits the first hit.
 bash hooks/test-cli-flag-incompat-advisory.sh
 ```
 
-18 cases: 6 advisory (4 git merge-tree variants, 2 kubectl), 10 silent
-(correct merge-tree usage, unrelated commands, comment), 2 infrastructure
+21 cases: 6 advisory (4 git merge-tree variants, 2 kubectl), 13 silent
+(correct merge-tree usage including space-form `--merge-base`, `-X`,
+`--strategy-option`, unrelated commands, comment), 2 infrastructure
 (non-Bash passthrough, malformed JSON fail-open).

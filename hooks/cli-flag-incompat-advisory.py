@@ -78,7 +78,20 @@ _MERGE_TREE_MODERN_FLAGS = frozenset({"--name-only", "--write-tree"})
 # git options that consume the following token as a value; needed so the
 # positional-argument count is not inflated by `-C <dir>` / similar.
 _GIT_GLOBAL_FLAGS_WITH_ARG = frozenset({
-    "-C", "--git-dir", "--work-tree", "--namespace",
+    "-C", "-c", "--git-dir", "--work-tree", "--namespace",
+})
+
+# `git merge-tree` subcommand-level flags that consume the next token as
+# their value. Without this set, `--merge-base A --name-only HEAD origin/main`
+# (the canonical correct modern usage) counts `A` as a 3rd positional and
+# trips the advisory. Source: `git merge-tree -h` —
+#   --[no-]merge-base <tree-ish>
+#   -X, --[no-]strategy-option <option=value>
+# Negation forms (`--no-merge-base`) are valueless suppression markers and
+# are intentionally NOT in this set.
+_MERGE_TREE_FLAGS_WITH_ARG = frozenset({
+    "--merge-base",
+    "-X", "--strategy-option",
 })
 
 
@@ -118,6 +131,14 @@ def _count_merge_tree_positionals(argv: list[str]) -> int:
             break
         if not tok.startswith("-"):
             positionals += 1
+            i += 1
+            continue
+        # Token is a flag. If it consumes a separate value token (and the
+        # value is not already embedded via `=value` form), skip the next
+        # token so the value is not miscounted as a positional argument.
+        if "=" not in tok and tok in _MERGE_TREE_FLAGS_WITH_ARG and i + 1 < n:
+            i += 2
+            continue
         i += 1
     return positionals
 
@@ -144,7 +165,9 @@ def _check_git(argv: list[str]) -> Optional[str]:
                 "\n"
                 "  Fix: pass 1 or 2 branches (modern mode), e.g.\n"
                 "    git merge-tree --name-only HEAD origin/main\n"
-                "  or pass --merge-base explicitly:\n"
+                "  or pass --merge-base explicitly (either form works):\n"
+                "    git merge-tree --merge-base $(git merge-base HEAD origin/main) "
+                "--name-only HEAD origin/main\n"
                 "    git merge-tree --merge-base=$(git merge-base HEAD origin/main) "
                 "--name-only HEAD origin/main\n"
                 "\n"
