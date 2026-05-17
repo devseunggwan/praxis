@@ -46,10 +46,20 @@ subcommand and let the `-n` through (#194 Codex review P2).
 
 ### Allow conditions
 
-- `PRAXIS_SKIP_COMMIT_FLAG_CHECK=1` env var. Use sparingly — the bypass
+The only allow path the hook actually recognizes is the env-var bypass:
+
+- `PRAXIS_SKIP_COMMIT_FLAG_CHECK=1` — exported in the operator's
+  environment before invoking `git commit`. Use sparingly; the bypass
   must be justified in the commit message body or PR description.
-- The operator verifies the environment with the commands surfaced in
-  the deny reason (see Response) and re-runs.
+
+The deny message also lists "verification commands" (e.g.,
+`git config --get commit.gpgsign`, `gpg --list-secret-keys`). Running
+those does **not** unblock subsequent invocations — the hook does not
+persist a "verification done" state. The commands exist so the operator
+can decide whether the override is appropriate; the operator then sets
+the env var (or removes the override flag) before re-running. Running
+the commands without setting the env var leaves the same `git commit`
+invocation still blocked.
 
 ### Response
 
