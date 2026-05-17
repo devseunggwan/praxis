@@ -1,0 +1,8 @@
+{
+  "expected_decision": "block",
+  "must_contain": [
+    "not-others: repeat=0",
+    "gate_2_verdict: FAIL"
+  ],
+  "must_not_contain": []
+}
