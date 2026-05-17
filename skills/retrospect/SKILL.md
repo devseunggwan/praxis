@@ -309,7 +309,27 @@ User-supplied resolution is logged but bypasses the gate(s) for that single find
 
 User confirmation required to proceed; if user confirms, log the keyword set found.
 
-**Output (on pass)** — Stage 2.5 emits the distribution card per the Output Schema Contract defined in Stage 3, plus per-finding Gate-1, Gate-2, and Gate-3 verdicts:
+**Gate-4 (External-Repo Authorization Pre-check)** — For each finding whose `Proposed Actions` includes `upstream_feedback`, classify the `backing_repo` owner against the own-org allowlist and mark external findings before Stage 3 renders them.
+
+**Step 1 — Extract owner.** Parse `backing_repo: <owner/repo>` from the finding's Rationale cell. If the declaration is absent → Gate-4 skips this finding (Stage 4 Action 4 step 0's missing-declaration abort is the downstream enforcement).
+
+**Step 2 — Resolve own-org allowlist** (in priority order):
+1. Env var `PRAXIS_OWN_ORGS` (comma-separated handles) — e.g., `PRAXIS_OWN_ORGS="devseunggwan,laplace-tech-team"`
+2. Fallback: `gh api user --jq .login` → treat the single returned handle as the only own org
+3. Both absent → treat all `backing_repo` owners as external (conservative default — all `upstream_feedback` rows require per-action approval at Stage 4)
+
+**Step 3 — Classify.** Extract `owner` from `backing_repo: <owner/repo>` (case-insensitive comparison). If `owner` ∉ resolved allowlist → mark the finding `external=true`.
+
+**Step 4 — Mark external findings.** For each `external=true` finding, prepend `⚠ EXTERNAL: per-action approval required at Stage 4` to the Rationale cell (separated from existing text by `<br>`). This prefix is load-bearing: Stage 4 Action 4 step 0a scans the Rationale cell for this exact string to trigger its per-action approval gate.
+
+**Gate-4 verdict:**
+- Zero `external=true` findings → `gate_4_verdict: PASS`
+- ≥1 `external=true` finding → `gate_4_verdict: WARN` (the action is still permitted; per-action approval at Stage 4 Action 4 step 0a is the enforcement control)
+- No `upstream_feedback` findings at all → `gate_4_verdict: NA`
+
+`gate_4_verdict` is informational (parallel to `gate_3_verdict`). The Stop hook silently ignores it; enforcement is procedural inside Stage 4 Action 4 step 0a.
+
+**Output (on pass)** — Stage 2.5 emits the distribution card per the Output Schema Contract defined in Stage 3, plus per-finding Gate-1, Gate-2, Gate-3, and Gate-4 verdicts:
 
 ```
 <!-- retrospect:distribution begin -->
@@ -322,6 +342,7 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 - gate_1_verdict: {PASS|FAIL|NA}
 - gate_2_verdict: {PASS|FAIL|NA}
 - gate_3_verdict: {PASS|FAIL|NA}
+- gate_4_verdict: {PASS|WARN|NA}
 <!-- retrospect:distribution end -->
 ```
 
@@ -329,8 +350,9 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 - `gate_1_verdict: NA` — zero `tool`/`workflow`/`spec-gap` labeled findings exist
 - `gate_2_verdict: NA` — zero memory-only findings exist
 - `gate_3_verdict: NA` — zero findings have `Proposed Actions` count = 2 (every finding is single-action)
+- `gate_4_verdict: NA` — zero `upstream_feedback` findings exist
 
-The Stop hook `retrospect-mix-check.sh` currently parses `gate_1_verdict` and `gate_2_verdict`; `gate_3_verdict` is emitted for visibility and audit-trail purposes (the hook silently ignores unknown keys). Gate-3 is enforced procedurally inside Stage 2.5; structural Stop-hook enforcement is reserved for a follow-up tightening if procedural compliance proves insufficient.
+The Stop hook `retrospect-mix-check.sh` currently parses `gate_1_verdict` and `gate_2_verdict`; `gate_3_verdict` is emitted for visibility and audit-trail purposes (the hook silently ignores unknown keys). Gate-3 is enforced procedurally inside Stage 2.5; structural Stop-hook enforcement is reserved for a follow-up tightening if procedural compliance proves insufficient. `gate_4_verdict` is similarly informational — emitted for audit-trail purposes; the hook silently ignores it. Gate-4 enforcement is procedural inside Stage 4 Action 4 step 0a.
 
 This card and verdict block become Stage 3's input header.
 
@@ -345,7 +367,8 @@ Stage 3 output MUST emit, in this order:
 
    ```markdown
    <!-- AUTHORITATIVE_SCHEMA — Stop hook depends on this. Co-update hooks/retrospect-mix-check.sh + tests/test_retrospect_mix_check.sh + tests/fixtures/retrospect-synth-*.expected.json on any change to: (1) the fence markers themselves, (2) the action key set (memory/issue/claude_md_draft/skill_idea/hook_code/upstream_feedback), or (3) gate_1_verdict / gate_2_verdict keys.
-        Gate-3 carve-out: gate_3_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract. The hook's awk parser keys on gate_1_verdict/gate_2_verdict literals only and silently ignores all other lines (regression-tested by tests T8–T17 + the 4 fixture files which still pass without gate_3_verdict). Adding/removing/renaming gate_3_verdict alone does NOT require hook or test changes. -->
+        Gate-3 carve-out: gate_3_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract. The hook's awk parser keys on gate_1_verdict/gate_2_verdict literals only and silently ignores all other lines (regression-tested by tests T8–T17 + the 4 fixture files which still pass without gate_3_verdict). Adding/removing/renaming gate_3_verdict alone does NOT require hook or test changes.
+        Gate-4 carve-out: gate_4_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract (parallel to gate_3_verdict). The hook silently ignores gate_4_verdict. Adding/removing/renaming gate_4_verdict alone does NOT require hook or test changes. -->
    <!-- retrospect:distribution begin -->
    - memory: 1
    - issue: 0
@@ -356,6 +379,7 @@ Stage 3 output MUST emit, in this order:
    - gate_1_verdict: PASS
    - gate_2_verdict: PASS
    - gate_3_verdict: PASS
+   - gate_4_verdict: PASS
    <!-- retrospect:distribution end -->
    ```
 
@@ -368,7 +392,7 @@ Stage 3 output MUST emit, in this order:
    Column semantics:
    - `Category`: comma-separated subset of `behavioral`, `tool`, `workflow`, `spec-gap` (≥1, see Stage 2 pre-scan categorization)
    - `Tool Layer`: one of `mcp`, `cli`, `builtin`, `skill`, or `—` (mandatory non-`—` when `tool` ∈ Category, optional `skill` for `workflow` / `spec-gap`, `—` for `behavioral`)
-   - `Proposed Actions (1~2)`: comma-separated subset of `memory`, `issue`, `claude_md_draft`, `skill_idea`, `hook_code`, `upstream_feedback`
+   - `Proposed Actions (1~2)`: comma-separated subset of `memory`, `issue`, `claude_md_draft`, `skill_idea`, `hook_code`, `upstream_feedback`; for findings marked `external=true` by Stage 2.5 Gate-4, append ` (external)` suffix to `upstream_feedback` (e.g., `memory, upstream_feedback (external)`)
    - `Rationale`: free-form one-line for compound or non-memory rows; for **memory-only** rows (single `memory`, not compound), the cell MUST contain exactly 5 lines matching `^not (issue|claude_md_draft|skill_idea|hook_code|upstream_feedback): .+$`, one line per non-memory action type. Generic single-sentence rationales are NOT acceptable for memory-only findings. **For rows whose actions include `upstream_feedback`** (single or compound), the cell MUST also contain a literal line `backing_repo: <owner>/<repo>` (embedded via `<br>` for single-line markdown form) — Stage 4 Action 4 step 0 reads this as the routing decision. **Compound case `memory, upstream_feedback`**: the row is NOT memory-only (contains a non-memory action), so the 5-line schema does NOT apply — instead use free-form prose for the human rationale + the `backing_repo:` line. Compound combinations are *additive*: each action-specific Rationale convention applies independently to the row, joined with `<br>`.
 
 The Stop hook parses the distribution-card fence (deterministic) and the table (anchored on these literal column headers). Drift in this contract requires synchronized edits to `hooks/retrospect-mix-check.sh`, `tests/test_retrospect_mix_check.sh`, and `tests/fixtures/retrospect-synth-*.expected.json`.
@@ -392,6 +416,7 @@ The Stop hook parses the distribution-card fence (deterministic) and the table (
 - gate_1_verdict: {PASS|FAIL|NA}
 - gate_2_verdict: {PASS|FAIL|NA}
 - gate_3_verdict: {PASS|FAIL|NA}
+- gate_4_verdict: {PASS|WARN|NA}
 <!-- retrospect:distribution end -->
 
 | # | Category | Tool Layer | Pattern | Root Cause | Rule / Gap | Repeat? | Proposed Actions (1~2) | Rationale | Priority |
@@ -671,6 +696,36 @@ For each approved action:
 
    If the active project's CLAUDE.md provides a feature-to-repo mapping, consult it before deciding a repo.
 
+   ### Step 0a — External-repo authorization gate (MUST run before `gh issue create` for external findings)
+
+   This gate fires for every `upstream_feedback` row where the finding's Rationale cell contains `⚠ EXTERNAL: per-action approval required at Stage 4` (set by Stage 2.5 Gate-4). It fires **even when** the user selected "✅ Execute now" in Stage 3 — Stage 3 approval authorizes the action category, not the specific external-org write.
+
+   **Detection:** scan the Rationale cell (already verified in step 0) for the literal prefix `⚠ EXTERNAL: per-action approval required at Stage 4`. If present → this gate fires. If absent → skip to "Then create the issue."
+
+   **Mandatory `AskUserQuestion` prompt (do NOT proceed without explicit `[a]` pick):**
+
+   ```
+   ⚠ External-repo write authorization required — Finding #N
+
+   Proposed: create GitHub issue in {backing_repo} (classified external by Stage 2.5 Gate-4)
+   Title: {proposed_issue_title}
+   Evidence: {one-line friction event summary}
+
+   Per CLAUDE.md "External / third-party repo content isolation (MUST)", this requires
+   explicit per-action approval. Stage 3 "Execute now" does not satisfy this gate.
+   Auto-mode override, batch approval, and "prior selection ratifies this" inferences
+   are all invalid — only an explicit [a] pick here allows proceeding.
+
+   어느 쪽으로 진행할까요?
+   [a] 승인 — {backing_repo}에 이슈 생성 진행
+   [b] Skip — upstream_feedback 액션 제거 (이 finding의 action set에서 제외)
+   [c] Issue draft를 먼저 검토한 뒤 결정 (draft를 보여준 뒤 재질문)
+   ```
+
+   - If `[b]` → remove `upstream_feedback` from this finding's action set; log reason in Actions Executed report
+   - If `[c]` → show the draft issue body (title, labels, full body text) and re-issue this AskUserQuestion
+   - Only `[a]` → proceed to `gh issue create`
+
    **Then create the issue (using the verified backing_repo from step 0):**
    - Title: `{type}({tool_layer}): {friction description}` (Conventional Commits format)
    - Label: `tool-friction:{layer}` is praxis's own convention. Apply it ONLY when the verified backing repo is the praxis distribution itself. For any other backing repo, use that repo's existing label conventions (e.g., `bug`, `enhancement`); do NOT auto-create praxis-style labels in unrelated repos.
@@ -764,6 +819,9 @@ If you catch yourself:
 - **Surfacing an option as `(Recommended)` or default without running a disconfirming test on the recommendation's own premise** — premise verification at HIGH-confidence lock is mandatory. The user's push-back is a trailing signal; pre-emptive self-falsification is the correct path. (Pairs with the upstream `Falsify Before Fix` global rule.)
 - **Emitting `AskUserQuestion` with a `(Recommended)` label or confidence-anchoring framing (`safer` / `natural fit` / `안전한` / `자연스러운`) without an accompanying `Falsification:` trace line in the per-finding plan** — Stage 3 Pre-Output Falsification Gate violation. The label asserts ranking confidence that wasn't earned; downstream readers (user, hooks, retrospect parsers) cannot tell whether the premise was tested. If the gate didn't run, drop the label and surface the option unranked.
 - **Stage 3 ranking that contradicts Stage 2 caveats** — e.g., `(Recommended)` applied to an action whose Stage 2 row carries `tracer confidence: LOW`, `single observation` alone, or `alternative root cause not ruled out`. Stage 2's caveat is the leading signal; Stage 3 must carry it forward (`Stage 2 caveats:` line) and either discharge it via falsification or suppress the recommendation.
+- **`upstream_feedback` 행의 `backing_repo` owner가 own-org 밖인데 Stage 2.5 Gate-4 마킹(`⚠ EXTERNAL: per-action approval required at Stage 4` prefix) 없이 Stage 3 진입** — Gate-4 가 실행되지 않은 것. Stage 2.5로 돌아가 Gate-4 재실행.
+- **external-marked finding 의 Stage 4 `upstream_feedback` 실행에서 AskUserQuestion per-action 승인(step 0a) 없이 `gh issue create` 직행** — CLAUDE.md zero-exception 룰 위반. STOP, step 0a AskUserQuestion 실행 먼저.
+- **Stage 3 "Execute now" 선택을 external-repo write 의 per-action 승인으로 ratify** — Stage 3 승인은 action 카테고리 선택이지, 외부 repo 개별 write 승인이 아님. Stage 4 step 0a 게이트를 반드시 별도로 실행.
 - **Omitting the `Stage 2 caveats:` line on a finding that has any of: tracer confidence below HIGH, single observation, alternative root cause not ruled out, Gate-3 downgrade, analyst cluster overlap, escape-hatch state** — carry-forward is mandatory whenever ANY of these holds. Silent omission lets Stage 3 rank as if Stage 2 returned clean HIGH-confidence evidence.
 - **조사 도구 결과를 completeness 검증 없이 결론에 사용 (premise unverified)** — 다음 두 패턴 모두 "premise falsified" (반증 테스트를 설계한 뒤 통과 → 진행 가능)가 아니라 "premise unverified" (도구 출력 자체의 한계를 검증하지 않은 채 결론에 사용 → STOP) 에 해당한다: (a) `find ... | head -N` 결과로 "파일/모듈 없음" 단정 — **`head` 를 제거한 원 명령 `find ... | wc -l` 을 별도로 실행**해 총 라인 수를 확인하고, cap 초과 시 cap 제거 또는 `grep -rn <token>` narrowing 필요 (`head -N` 파이프 뒤에 `| wc -l` 을 붙이면 cap 으로 잘린 뒤의 라인 수만 세므로 정확히 N개와 cap 초과를 구분할 수 없어 검증이 실패한다); (b) `find <path>` 빈 결과로 "경로/모듈 없음" 단정 — `ls <parent>` 로 path coverage 를 확인하거나 상위 경로로 재시도, 또는 `grep -rn <token>` cross-check 필요.
 
@@ -775,7 +833,7 @@ If you catch yourself:
 |-------|-------------|-----------------|
 | **1. Load** | Read CLAUDE.md, form scan questions | Rule categories identified |
 | **2. Analyze** | Scan conversation, map to rules, find root cause | Root cause (not symptom) for each pattern; every event has `category[]` |
-| **2.5 Audit** | Run Gate-1 (categorical) + Gate-2 (5-line rationale schema) + Gate-3 (evidence robustness for 2-action findings) | All applicable gates PASS or per-finding cap reached and surfaced to user |
+| **2.5 Audit** | Run Gate-1 (categorical) + Gate-2 (5-line rationale schema) + Gate-3 (evidence robustness for 2-action findings) + Gate-4 (external-repo authorization pre-check for upstream_feedback) | All applicable gates PASS/WARN or per-finding cap reached and surfaced to user |
 | **3. Report** | Present unified table + distribution card, carry Stage 2 caveats forward, run Pre-Output Falsification Gate before each `AskUserQuestion`, collect approval per item | User approved at least 1 item (or confirmed 0 findings); every `(Recommended)` label has a `Falsification:` trace |
 | **4. Execute** | Run approved actions, verify artifacts | Completion report with links/paths + verification results |
 
@@ -795,6 +853,8 @@ If you catch yourself:
 | Stage 2.5 (audit) | Gate-3 violation persists after 2 per-finding re-entries | Surface to user with 3-way override prompt (`[a] rationale 직접 입력 / [b] action 직접 지정 / [c] note only 강등`); log selection |
 | Stage 2.5 (audit) | Gate-3 (c) downgrade collapses action set to memory-only on a tool/workflow/spec-gap finding | Re-trigger Gate-1; counts toward the per-finding loop cap of 2 |
 | Stage 2.5 (audit) | Behavioral-only safeguard triggered (tool keywords detected in pre-scan signals) | Surface to user; require explicit confirmation before proceeding to Stage 3 |
+| Stage 2.5 (audit) | Gate-4 — `backing_repo` declaration absent (cannot extract owner) | Skip this finding in Gate-4; Stage 4 Action 4 step 0's missing-declaration abort handles it downstream |
+| Stage 2.5 (audit) | Gate-4 — `gh api user --jq .login` fails and `PRAXIS_OWN_ORGS` is unset | Conservative default: treat all `upstream_feedback` findings as external; emit `gate_4_verdict: WARN` |
 | Stage 3 (report) | Pre-Output Falsification Gate triggered but premise cannot be falsified or survives only ambiguously | Drop `(Recommended)` label; surface option unranked; emit explicit premise-confirmation line in `AskUserQuestion` per the gate's "Falsification step not run" row |
 | Stage 3 (report) | Finding lacks Stage 2 caveats line despite tracer confidence below HIGH or single-observation flag | Block Stage 3 emission for that finding; return to Stage 2 step 5 (root cause refinement) or Stage 2.5 Gate-3 (c) (single-observation downgrade) and re-derive |
 | Stage 3 (report) | User rejects all findings | Capture the rejection itself as a feedback signal for future retrospects |
@@ -804,6 +864,8 @@ If you catch yourself:
 | Stage 4 (execute) | `tool-friction:*` label doesn't exist (and the verified backing repo is the praxis distribution) | Auto-create with `gh label create "tool-friction:{layer}" --repo <verified-praxis-repo>` and retry |
 | Stage 4 (execute) | Action 4 step 0 — `backing_repo` declaration missing from finding row | ABORT this action; return finding to Stage 2 step 8 with prompt to emit declaration; do NOT fall back to project repo |
 | Stage 4 (execute) | Action 4 step 0 — declared vs re-resolved `backing_repo` divergence | ABORT this action; surface `AskUserQuestion` per step 0.4 prompt variants (3-way `[a] declared / [b] re-resolved / [c] skip-upstream_feedback-action`, or 2-way for AMBIGUOUS cases); do NOT auto-pick |
+| Stage 4 (execute) | Action 4 step 0a — external authorization `AskUserQuestion` declined (`[b]` picked) | Remove `upstream_feedback` from finding's action set; log in Actions Executed as skipped with reason |
+| Stage 4 (execute) | Action 4 step 0a — external authorization gate skipped without `AskUserQuestion` | STOP; return to step 0a; never auto-proceed on external-repo writes |
 
 ## Integration
 
