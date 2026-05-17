@@ -330,6 +330,14 @@ run_roles "flag=value with \$(): --git-dir=\$() does not block subcommand resolu
   "seg0:command:git:|seg0:flag_value:A:--merge-base" \
   'git --git-dir=$(pwd)/.git merge-tree --merge-base A --name-only HEAD origin/main'
 
+run_roles "post-DD \$(): \$() after -- becomes POST_DD (not SUBST_RUN)" \
+  "seg0:separator_dd:--:|seg0:post_dd:\$(echo --flag):" \
+  'kubectl exec pod -- $(echo --flag)'
+
+run_roles_negative "post-DD \$(): \$() after -- must NOT be SUBST_RUN" \
+  "seg0:subst_run:\$(echo --flag):" \
+  'kubectl exec pod -- $(echo --flag)'
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

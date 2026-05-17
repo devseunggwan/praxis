@@ -528,6 +528,16 @@ def tokenize_with_roles(
         while i < n:
             tok = argv[i]
 
+            # POST_DD — once we passed `--`, everything is post-dd. The
+            # API contract guarantees no SUBST_RUN / FLAG / FLAG_VALUE
+            # roles after SEPARATOR_DD, so this check runs BEFORE the
+            # $() branch below — `kubectl exec pod -- $(echo --flag)`
+            # must classify the substitution as POST_DD, not SUBST_RUN.
+            if post_dd:
+                seg_tokens.append(Token(text=tok, role=TokenRole.POST_DD))
+                i += 1
+                continue
+
             # SUBST_RUN vs FLAG with embedded $() — when a coalesced token
             # starts with `-` and contains `=` (i.e. equals-form flag with
             # an embedded command substitution like `--merge-base=$(...)`),
@@ -544,12 +554,6 @@ def tokenize_with_roles(
                     i += 1
                     continue
                 seg_tokens.append(Token(text=tok, role=TokenRole.SUBST_RUN))
-                i += 1
-                continue
-
-            # POST_DD — once we passed `--`, everything is post-dd.
-            if post_dd:
-                seg_tokens.append(Token(text=tok, role=TokenRole.POST_DD))
                 i += 1
                 continue
 
