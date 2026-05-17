@@ -3,8 +3,9 @@ name: writing-praxis-skill
 description: >
   Guide for authoring a new praxis SKILL.md — template usage, SRP, trigger
   keyword design, frontmatter conventions, and Claude/Codex host differences.
-  Triggers on "new skill", "write skill", "add skill", "skill template",
-  "skill spec", "스킬 작성", "새 스킬".
+  Triggers on "new praxis skill", "write praxis skill", "add praxis skill",
+  "skill template", "praxis skill spec", "스킬 작성", "새 스킬".
+  Do NOT activate on "add skill section", "skill up", "skill set".
 ---
 
 # writing-praxis-skill
@@ -24,7 +25,7 @@ trigger phrase to describe a second job, split it into two skills.
 - Creating a new praxis skill from scratch
 - Reviewing an existing SKILL.md for structural compliance
 - Onboarding a contributor who will add a skill
-- Triggers: "new skill", "write skill", "add skill", "skill template", "skill spec", "스킬 작성", "새 스킬"
+- Triggers: "new praxis skill", "write praxis skill", "add praxis skill", "skill template", "praxis skill spec", "스킬 작성", "새 스킬"
 
 ## Process
 
@@ -34,10 +35,10 @@ trigger phrase to describe a second job, split it into two skills.
 cp skills/SKILL.md.tmpl skills/<skill-name>/SKILL.md
 ```
 
-Open the new file and replace every `<...>` placeholder. Do not leave any
-placeholder text in the committed file.
-
 ### Step 2: Fill in the Frontmatter
+
+Replace every `<...>` placeholder. Do not leave any placeholder text in the
+committed file.
 
 ```yaml
 ---
@@ -50,7 +51,7 @@ description: >
 
 **Rules:**
 - `name` must exactly match the directory name under `skills/`.
-- `description` must fit within 500 characters — the runtime truncates beyond that.
+- `description` should be concise — keep it short enough to scan at a glance.
 - Always end `description` with a `Triggers on "..."` clause so the routing
   table in CLAUDE.md can reference exact keywords.
 - Use multi-line `>` block for descriptions that include trigger keywords; use
@@ -110,15 +111,15 @@ Codex plugin (Codex host). The two hosts differ in how they expose the skill:
 |--------|-------------|------------|
 | Invocation | `Skill("praxis:<name>")` or `/praxis:<name>` | `Skill("praxis:<name>")` |
 | `{{ARGUMENTS}}` | Populated from the slash command argument string | Populated from Skill args |
-| `Skill(...)` delegation | Supported for most skills | `disable-model-invocation: true` skills fail — use the underlying binary directly |
+| `Skill(...)` delegation | Supported for most skills | Supported for most skills |
 | `AskUserQuestion` | Supported, max 4 options | Supported, max 4 options |
 | `Bash` cwd | Resets between separate Bash calls | Same behavior |
 | File `Write` | Supported | Sandbox-restricted; verify with `git status` after |
 
-**Critical Codex constraint:** never call `Skill("codex:review")` from inside
-a skill — it declares `disable-model-invocation: true` and always fails with
-an error. Invoke the codex CLI binary directly via `Bash` instead, mirroring
-the `codex-review-wrap` skill's Step 4 pattern.
+**Critical cross-host constraint:** never call `Skill("codex:review")` from
+inside any skill on either host — it declares `disable-model-invocation: true`
+and always fails. Invoke the codex CLI binary directly via `Bash` instead,
+mirroring the `codex-review-wrap` skill's Step 4 pattern.
 
 **`Bash` cwd reset trap:** a `Bash` call does not persist `cd` across calls.
 To change directory and run a command, chain them: `cd <path> && <command>`,
@@ -145,10 +146,12 @@ Any skill that wraps an external CLI, calls `AskUserQuestion`, or delegates via
 2. Confirm the trigger keywords route correctly.
 3. Confirm `AskUserQuestion` renders with the expected options.
 4. Add `verified-against-runtime: true` + `runtime-verified-at` to frontmatter.
-5. Include a `verified:` line in the commit body (see CONTRIBUTING.md).
+5. Include a `verified:` line in the commit body (see CONTRIBUTING.md) —
+   required for any commit that introduces or significantly revises a skill spec.
 
-Skills that are pure documentation (no CLI calls, no tool calls) may skip the
-live round-trip, but must still have a reviewer read-through.
+Skills that do not match any of the three conditions in CONTRIBUTING.md
+"Rule: verify before publishing" may skip the live round-trip, but must still
+have a reviewer read-through.
 
 ### Step 8: Register the Skill
 
@@ -162,7 +165,7 @@ live round-trip, but must still have a reviewer read-through.
 
 Follow the standard praxis PR workflow:
 - Title: `feat(skill): <what the skill does>` (≤ 50 chars)
-- Body in Korean; `Closes #<issue-number>`
+- Body in Korean (praxis repo convention; verify the target repo's CONTRIBUTING.md for cross-repo work); `Closes #<issue-number>`
 - Include the `verified:` line in the commit body if Step 7 applies
 
 ## Failure Modes
@@ -170,9 +173,8 @@ Follow the standard praxis PR workflow:
 | Failure | Cause | Fix |
 |---------|-------|-----|
 | Skill not invoked by routing | Trigger keywords missing from CLAUDE.md routing table | Add keywords to the routing table |
-| Description truncated by runtime | `description` > 500 chars | Shorten; move detail into the body |
-| `Skill(...)` call fails silently | Target skill uses `disable-model-invocation: true` | Call the underlying binary directly |
-| `AskUserQuestion` renders only 2 options | Options array > 4 items | Truncate to 3 + "취소" |
+| `Skill(...)` call fails silently | Target skill uses `disable-model-invocation: true` (both hosts) | Call the underlying binary directly |
+| `AskUserQuestion` call rejected before tool runs | Options array > 4 items — JSON schema rejects the call | Truncate to 3 + "취소" |
 | Codex worker produces empty `git diff` | Sandbox write restriction | Add `git status` check + claude fallback re-dispatch |
 | Trigger collides with unrelated skill | Keyword too generic | Make the keyword more specific; add exclusion note |
 
