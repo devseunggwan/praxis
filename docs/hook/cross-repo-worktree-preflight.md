@@ -109,8 +109,9 @@ error so it never breaks a Claude Code session:
 bash hooks/test-cross-repo-worktree-preflight.sh
 ```
 
-21 cases: 5 ask paths (cross-repo abs, `-f`, `--force`, trailing slash,
-chained), 11 pass paths (cwd-owned, relative, opt-out, three repo-override
-forms, non-remove subcommand variants, non-git command, empty, comment-only),
-2 worktree non-remove pass-throughs, 3 infrastructure (non-Bash passthrough,
-malformed JSON fail-open, non-git cwd fail-open).
+22 cases: 6 ask paths (cross-repo abs, `-f`, `--force`, trailing slash,
+chained, `-c name=value` global flag), 11 pass paths (cwd-owned, relative,
+opt-out, three repo-override forms, non-remove subcommand variants, non-git
+command, empty, comment-only), 2 worktree non-remove pass-throughs, 3
+infrastructure (non-Bash passthrough, malformed JSON fail-open, non-git cwd
+fail-open).

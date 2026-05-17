@@ -61,6 +61,20 @@ OPT_OUT_MARKER = "# worktree-chain:ack"
 # explicit about which repo to operate on, so the hook should not second-guess.
 GIT_REPO_OVERRIDE_FLAGS_WITH_ARG = frozenset({"-C", "--git-dir", "--work-tree"})
 
+# Every git global flag that consumes a separate-token argument. Used when
+# walking past the global-flag block to reach the subcommand — we must skip
+# the value token even for flags that do NOT bind git to a specific repo
+# (e.g. `-c name=value`). Otherwise the value token (`name=value`) is read
+# as a non-flag and we mis-conclude the subcommand is missing.
+# Source: `git --help`. `--exec-path`, `--namespace`, `--super-prefix`,
+# `--config-env` all use the `--flag=value` equals form which strip_prefix
+# handles via the `"=" in tok` branch; only `-c` and `-C` actually accept
+# a separate value token.
+GIT_GLOBAL_FLAGS_WITH_ARG = frozenset({
+    "-C", "-c",
+    "--git-dir", "--work-tree",
+})
+
 # `git worktree remove` flags that take no argument. Any flag we don't know
 # about is consumed generically (single token) — we only need to skip them
 # until we hit the path positional.
@@ -103,7 +117,10 @@ def _extract_worktree_remove_path(argv: list[str]) -> str | None:
     if not argv or argv[0] != "git":
         return None
 
-    # Skip git-level global flags to find the subcommand.
+    # Skip git-level global flags to find the subcommand. Consume value
+    # tokens for every known separated-arg global flag (not just repo-override
+    # flags), otherwise a benign `git -c name=value worktree remove <path>`
+    # bypasses detection because `name=value` is parsed as the subcommand.
     i = 1
     while i < len(argv):
         tok = argv[i]
@@ -113,7 +130,7 @@ def _extract_worktree_remove_path(argv: list[str]) -> str | None:
         if not tok.startswith("-"):
             break
         i += 1
-        if "=" not in tok and tok in GIT_REPO_OVERRIDE_FLAGS_WITH_ARG and i < len(argv):
+        if "=" not in tok and tok in GIT_GLOBAL_FLAGS_WITH_ARG and i < len(argv):
             i += 1  # consume value token for known flag-with-arg
 
     # Expect: argv[i] == "worktree", argv[i+1] == "remove"
@@ -200,7 +217,7 @@ def _build_ask_reason(target_path: str, known: list[str]) -> str:
         "\n"
         "Recommended:\n"
         "  • cd into the worktree's owning repo first, then run remove there\n"
-        "  • or use `git -C <owning-repo>/.. worktree remove <path>`\n"
+        "  • or pin git to the owning repo: `git -C <owning-repo> worktree remove <path>`\n"
         "  • or append `# worktree-chain:ack` after confirming the target\n"
     )
 

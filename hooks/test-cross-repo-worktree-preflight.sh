@@ -154,6 +154,13 @@ run_case "cross-repo chained with gh pr merge" \
   ask \
   "git worktree remove $OTHER_OWNED_WT && echo done"
 
+# Regression: -c name=value separated-arg global flag must not let the
+# subcommand-finder mistake `name=value` for the subcommand and bail out
+# silently (codex review round 1 — F1).
+run_case "cross-repo with -c name=value global flag" \
+  ask \
+  "git -c user.name=foo worktree remove $OTHER_OWNED_WT"
+
 # === PASS paths (cwd repo owns target / opt-out / non-target) ==============
 
 run_case "cwd-repo abs path owned" \
