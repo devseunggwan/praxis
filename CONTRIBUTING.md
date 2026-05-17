@@ -129,6 +129,13 @@ To regenerate after changing `manifests/*.json` or `VERSION`:
   a skill spec (see above)
 - Never commit directly to `main`; always use a branch + PR
 
+## Changelog
+
+User-visible changes go into `CHANGELOG.md` under the `## [Unreleased]` section.
+The next VERSION bump moves those entries under the new version header. Use
+[Keep a Changelog](https://keepachangelog.com/) categories: Added, Changed,
+Fixed, Removed.
+
 ## Testing
 
 ```bash
