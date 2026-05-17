@@ -543,10 +543,38 @@ For each approved action:
    - Title: Conventional Commits format (per project convention)
    - Body: per project convention, with background + task list
 
-3. **CLAUDE.md draft** → Write proposed rule addition as a markdown block
-   - ⚠️ `$CLAUDE_CONFIG_DIR/CLAUDE.md` is **global scope** — changes affect every project
-   - Present the draft to user for review BEFORE any edit
-   - Apply only with explicit approval ("yes, add this rule")
+3. **CLAUDE.md draft** → Write proposed rule addition as a markdown block, routed by target
+
+   **Step 0 — Target detection (MUST run first):**
+   Resolve the target path via `realpath` and classify:
+
+   | Target | Detection | Execution path |
+   |--------|-----------|---------------|
+   | **Project CLAUDE.md** | `realpath <path>` does NOT match `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` AND resolves inside cwd | Direct Edit (see Project path below) |
+   | **Global `~/.claude/CLAUDE.md`** | `realpath <path>` matches `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` | Staging → AskUserQuestion → apply only on explicit approval (see Global path below) |
+   | **External-repo CLAUDE.md** | `realpath <path>` resolves outside cwd AND outside `~/.claude/` | Same as external-repo gate — do NOT edit; surface to user with resolved path |
+
+   **Project path** (`realpath` does NOT match global):
+   - Present the draft diff to the user inline
+   - Apply with explicit approval ("yes, add this rule") → Direct Edit
+
+   **Global path** (`realpath` matches `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md`):
+   ⚠️ Global scope — changes affect every project. Claude Code's self-modification classifier blocks direct Edit/Write without explicit approval.
+
+   a. **Stage draft**: write the proposed rule block to `/tmp/claude-md-draft-{slug}.md` (use `.omc/plans/claude-md-draft-{slug}.md` as fallback when `/tmp/` is not writable). Present the full draft content inline before showing the prompt.
+
+   b. **AskUserQuestion — 3-option prompt**:
+      ```
+      options:
+        apply  — 승인. 지금 바로 적용합니다.
+        수정   — 변경할 내용을 free-text로 입력하면 재작성 후 다시 이 단계로 돌아옵니다.
+        보류   — 이번 세션은 적용하지 않습니다. 스테이징 파일을 남겨둡니다.
+      ```
+      - `수정` 선택 시: "무엇을 바꿀까요?" 입력 받음 → re-draft → 다시 (b) 단계로 복귀.
+        Cap: 최대 3 라운드. 3 라운드 초과 시: "3회 재작성을 초과했습니다. 수동 편집을 권장합니다: `{staging_path}`" 후 보류 처리.
+      - `보류` 선택 시: Edit 호출 없이 staging 파일 경로를 completion report에 기록하고 종료.
+
+   c. **`apply` 선택 시**: Edit on `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` to insert the approved rule at the indicated position. Show the resulting diff as verification.
 
 4. **Upstream feedback** → Resolve the tool's **backing repo first** (do NOT hardcode any specific repo), then create a labeled issue there. Hardcoding misroutes plugin defects, custom MCP defects, dotfiles defects across user environments.
 
@@ -638,7 +666,7 @@ For each approved action:
    | GitHub issue | `gh issue view {url}` returns valid data |
    | Upstream feedback | `gh issue view {url}` returns valid data + URL repo matches `verified_backing_repo` from step 0 + label convention is correct for the verified repo (`tool-friction:{layer}` ONLY when verified repo is the praxis distribution; otherwise the repo's own convention label per Action 4's label rule) |
    | Hook code | Script file exists + settings.json registration confirmed (dry-run varies by hook type — no generic check) |
-   | CLAUDE.md draft | Diff shown to user + explicit approval received |
+   | CLAUDE.md draft | **Project target**: Diff shown + explicit approval received + Edit applied. **Global target**: Staging file created at `/tmp/claude-md-draft-{slug}.md` → AskUserQuestion 3-option presented → `apply`: Edit applied + diff shown; `보류`: staging file path logged in completion report. |
    | Skill idea note | File exists in `.omc/plans/` |
 
    Report verification results in the completion table.
@@ -682,7 +710,7 @@ If you catch yourself:
 - Adding a MEMORY.md entry that just repeats the CLAUDE.md rule verbatim (no new insight)
 - Creating a GitHub issue for every minor friction (low-ROI noise)
 - Skipping the approval step and executing actions directly
-- Editing `$CLAUDE_CONFIG_DIR/CLAUDE.md` without presenting the draft first — this is global config, affects every project
+- Editing `$CLAUDE_CONFIG_DIR/CLAUDE.md` directly (without the staging → AskUserQuestion 3-option path) — global CLAUDE.md requires staging + explicit `apply` approval; direct Edit/Write is blocked by the self-modification classifier and skips user review. Use the Global path flow in Action 3 above.
 - Proposing `memory` for a pattern that already exists in MEMORY.md (MUST escalate instead)
 - Skipping tracer/analyst agent calls ("I can analyze this myself")
 - Generating artifacts without verification ("issue created" without showing URL)
