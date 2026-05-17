@@ -39,6 +39,10 @@ sibling PR or repo, Step 5d additionally cross-checks each verified finding
 against the sibling and records the result.
 See **Step 5** for the full gate.
 
+## Invocation Model
+
+**Cardinality**: This skill handles exactly **one PR per invocation**. For N PRs, invoke the skill N times sequentially. Batch for-loops are **not supported** — they collapse Step 5c per-round ledger emission across multiple PRs and break flip-detection guarantees.
+
 ## When to Use
 
 - Before calling `/codex:review` from any multi-worktree project
@@ -124,6 +128,18 @@ If the selected path differs from cwd, note it explicitly:
 ```
 
 ### Step 4: Run codex-companion against the selected worktree
+
+Before delegating to codex-companion, verify the PR is still open. Using the branch resolved in Steps 1–2:
+
+```bash
+gh pr view "{branch}" --json state --jq '.state'
+```
+
+If the returned state is not `"OPEN"` (i.e., `CLOSED` or `MERGED`), abort immediately:
+
+```
+ABORT: "PR is {state} — review aborted. Re-open or target a different PR."
+```
 
 **MUST NOT call `Skill("codex:review")`.** `/codex:review` declares
 `disable-model-invocation: true`, so the Skill tool always returns the
@@ -374,6 +390,7 @@ can pick it up. Structural and stylistic edits do not need this trailer.
 
 | Situation | Action |
 |-----------|--------|
+| PR state ≠ OPEN | ABORT: "PR is {state} — review aborted. Re-open or target a different PR." |
 | `git worktree list` fails (not a git repo) | Abort: "git worktree list 실패 — git 저장소인지 확인하세요." |
 | All worktrees are bare | Treat as Case A (single effective target) using cwd |
 | User selects "취소" | Abort silently with one-line message |
