@@ -6,6 +6,11 @@ Development workflow skills for Claude Code — disciplined, fast, resilient.
 
 ## Skills
 
+> **Invocation**: praxis entries are *skills*, not subagents. Always call them
+> via `Skill(skill="praxis:<name>")`. `Agent(subagent_type="praxis:<name>")`
+> returns `Agent type not found` — Agent and Skill resolve disjoint namespaces.
+> See [RUNTIME_CONSTRAINTS.md §3](RUNTIME_CONSTRAINTS.md) for the mapping table.
+
 ### Development
 
 | Skill | Description |

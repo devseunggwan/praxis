@@ -15,6 +15,11 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 
 ## Skills (11)
 
+> **Invocation**: praxis entries are *skills*, not subagents. Always call them
+> via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
+> returns `Agent type not found`. See [RUNTIME_CONSTRAINTS.md §3](RUNTIME_CONSTRAINTS.md)
+> for the full rationale and Agent-vs-Skill mapping table.
+
 ### Development
 
 | Skill | Purpose |
