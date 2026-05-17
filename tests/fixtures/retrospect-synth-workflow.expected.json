@@ -1,7 +1,8 @@
 {
   "expected_decision": "pass",
   "must_contain": [
-    "hook_code"
+    "hook_code",
+    "gate_3_verdict"
   ],
   "must_not_contain": [
     "decision\": \"block\""

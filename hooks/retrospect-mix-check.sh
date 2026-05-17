@@ -98,8 +98,10 @@ DIST_CARD=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk '
 # PASS would otherwise shadow a corrected FAIL).
 GATE_1=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_1_verdict:/ {v=$2} END{print v}')
 GATE_2=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_2_verdict:/ {v=$2} END{print v}')
+GATE_3=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_3_verdict:/ {v=$2} END{print v}')
 [ -z "$GATE_1" ] && GATE_1="MISSING"
 [ -z "$GATE_2" ] && GATE_2="MISSING"
+# Gate-3 MISSING is not blocked (newly added enforcement; old cards legitimately omit this key).
 
 # Independent table parse (defense-in-depth: don't trust the card alone).
 # Find the unified findings table header row and walk subsequent rows until a
@@ -230,6 +232,10 @@ if [ "$GATE_2" = "FAIL" ]; then
   should_block=true
   reason_parts+=("Gate-2 verdict in distribution card = FAIL")
 fi
+if [ "$GATE_3" = "FAIL" ]; then
+  should_block=true
+  reason_parts+=("Gate-3 verdict in distribution card = FAIL")
+fi
 if [ "$GATE_1" = "MISSING" ] || [ "$GATE_2" = "MISSING" ]; then
   should_block=true
   reason_parts+=("distribution card missing gate_1_verdict or gate_2_verdict key")
@@ -273,7 +279,7 @@ if [ "$should_block" = "true" ]; then
     fi
   done
 
-  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category; Gate-2 → supply 5-line 'not <action>: <reason>' rationale (Stage 2.5); Gate-3 → return to Stage 2 step 8 and add 'backing_repo: <owner/repo>' to Rationale cell. See skills/retrospect/SKILL.md."
+  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category; Gate-2 → supply 5-line 'not <action>: <reason>' rationale (Stage 2.5); Gate-3 verdict → return to Stage 2.5 and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to Stage 2 step 8 and add 'backing_repo: <owner/repo>' to Rationale cell. See skills/retrospect/SKILL.md."
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'
   exit 0
 fi
