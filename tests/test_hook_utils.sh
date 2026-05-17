@@ -126,6 +126,219 @@ run_hint "empty command no hint"           false ''
 run_hint "quoted heredoc-like in compound" false 'echo "<<EOF foo" && git push'
 
 # ---------------------------------------------------------------------------
+# tokenize_with_roles — role-aware token API (issue #263)
+# ---------------------------------------------------------------------------
+#
+# Each case spawns a python3 subprocess that imports tokenize_with_roles
+# and prints the (role, text, flag_name) for each token as a single line
+# per token in the form `seg<i>:<role>:<text>:<flag_name>`. The harness
+# asserts substring presence (expected lines must appear in actual output).
+
+# run_roles name "expected_substring_1|expected_substring_2|..." command
+#   Each expected substring must appear (substring match) somewhere in the
+#   actual output. Use `|` as the in-shell separator between substrings.
+run_roles() {
+  local name="$1" expected_substrings="$2" command="$3"
+  local actual
+  actual=$(python3 - "$command" <<'PYEOF'
+import sys
+from _hook_utils import tokenize_with_roles
+
+cmd = sys.argv[1]
+spec = {
+    "git": {"-C", "-c", "--git-dir", "--work-tree", "--namespace"},
+    "git merge-tree": {"--merge-base", "-X", "--strategy-option"},
+    "kubectl": set(),
+    "gh": {"--repo", "-R"},
+}
+segs = tokenize_with_roles(cmd, spec)
+for i, seg in enumerate(segs):
+    for t in seg:
+        fn = t.flag_name if t.flag_name is not None else ""
+        print(f"seg{i}:{t.role.value}:{t.text}:{fn}")
+PYEOF
+)
+  local ok=1
+  local IFS='|'
+  for sub in $expected_substrings; do
+    if ! printf '%s\n' "$actual" | grep -Fq "$sub"; then
+      ok=0
+      break
+    fi
+  done
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS [roles] $name"; PASS=$((PASS + 1))
+  else
+    echo "FAIL [roles] $name"
+    echo "  expected (each substring must appear): $expected_substrings"
+    echo "  actual:"
+    printf '%s\n' "$actual" | sed 's/^/    /'
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# run_roles_negative — asserts each substring is NOT present in output.
+run_roles_negative() {
+  local name="$1" forbidden_substrings="$2" command="$3"
+  local actual
+  actual=$(python3 - "$command" <<'PYEOF'
+import sys
+from _hook_utils import tokenize_with_roles
+
+cmd = sys.argv[1]
+spec = {
+    "git": {"-C", "-c", "--git-dir", "--work-tree", "--namespace"},
+    "git merge-tree": {"--merge-base", "-X", "--strategy-option"},
+    "kubectl": set(),
+    "gh": {"--repo", "-R"},
+}
+segs = tokenize_with_roles(cmd, spec)
+for i, seg in enumerate(segs):
+    for t in seg:
+        fn = t.flag_name if t.flag_name is not None else ""
+        print(f"seg{i}:{t.role.value}:{t.text}:{fn}")
+PYEOF
+)
+  local ok=1
+  local IFS='|'
+  for sub in $forbidden_substrings; do
+    if printf '%s\n' "$actual" | grep -Fq "$sub"; then
+      ok=0
+      break
+    fi
+  done
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS [roles!] $name"; PASS=$((PASS + 1))
+  else
+    echo "FAIL [roles!] $name (forbidden substring present)"
+    echo "  forbidden: $forbidden_substrings"
+    echo "  actual:"
+    printf '%s\n' "$actual" | sed 's/^/    /'
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# --- 1 test per role ---
+
+run_roles "COMMAND role on argv[0]" \
+  "seg0:command:git:" \
+  "git status"
+
+run_roles "FLAG role on --long" \
+  "seg0:flag:--name-only:" \
+  "git merge-tree --name-only HEAD origin/main"
+
+run_roles "FLAG_VALUE role with flag_name attribution (space form)" \
+  "seg0:flag:--merge-base:|seg0:flag_value:A:--merge-base" \
+  "git merge-tree --merge-base A --name-only HEAD origin/main"
+
+run_roles "POSITIONAL role on bare positional arg" \
+  "seg0:positional:HEAD:|seg0:positional:origin/main:" \
+  "git merge-tree --name-only HEAD origin/main"
+
+run_roles "SEPARATOR_DD role on literal --" \
+  "seg0:separator_dd:--:" \
+  "kubectl exec pod -- mytool"
+
+run_roles "POST_DD role on tokens after --" \
+  "seg0:post_dd:mytool:|seg0:post_dd:--use-protocol-buffers:" \
+  "kubectl exec pod -- mytool --use-protocol-buffers"
+
+run_roles "SUBST_RUN role on coalesced \$() (unquoted free)" \
+  "seg0:subst_run:\$(echo hi):" \
+  'echo $(echo hi)'
+
+# --- $() coalesce — multi-token unquoted ---
+
+run_roles "\$() coalesce as FLAG_VALUE (space form)" \
+  "seg0:flag_value:\$(git merge-base HEAD origin/main):--merge-base" \
+  'git merge-tree --merge-base $(git merge-base HEAD origin/main) --name-only HEAD origin/main'
+
+run_roles_negative "\$() coalesce — no spurious POSITIONAL fragments" \
+  "seg0:positional:merge-base:|seg0:positional:origin/main):" \
+  'git merge-tree --merge-base $(git merge-base HEAD origin/main) --name-only HEAD origin/main'
+
+# --- -- boundary ---
+
+run_roles "-- boundary — POSITIONAL before, POST_DD after" \
+  "seg0:positional:exec:|seg0:separator_dd:--:|seg0:post_dd:mytool:|seg0:post_dd:--use-protocol-buffers:" \
+  "kubectl exec pod -- mytool --use-protocol-buffers"
+
+run_roles_negative "-- boundary — flag after -- must NOT be FLAG" \
+  "seg0:flag:--use-protocol-buffers:" \
+  "kubectl exec pod -- mytool --use-protocol-buffers"
+
+# --- Both space-form and equals-form flag-value ---
+
+run_roles "space form --repo VALUE" \
+  "seg0:flag:--repo:|seg0:flag_value:owner/repo:--repo" \
+  "gh pr list --repo owner/repo"
+
+run_roles "equals form --repo=VALUE (single FLAG token, no FLAG_VALUE)" \
+  "seg0:flag:--repo=owner/repo:" \
+  "gh pr list --repo=owner/repo"
+
+run_roles_negative "equals form must NOT consume next token as FLAG_VALUE" \
+  ":flag_value:--state:--repo" \
+  "gh pr list --repo=owner/repo --state open"
+
+# --- Compound — `cd /B && git wt remove /B-wt` ---
+
+run_roles "compound: two segments, COMMAND on each" \
+  "seg0:command:cd:|seg1:command:git:" \
+  "cd /B && git wt remove /B-wt"
+
+run_roles "compound: && separator splits segments cleanly" \
+  "seg0:positional:/B:|seg1:positional:/B-wt:" \
+  "cd /B && git wt remove /B-wt"
+
+# --- Subcommand-aware flag-value resolution ---
+
+run_roles "subcommand-aware: git merge-tree --merge-base picked up via subcommand spec" \
+  "seg0:flag_value:A:--merge-base" \
+  "git merge-tree --merge-base A --name-only HEAD origin/main"
+
+run_roles "subcommand-aware: git -C /tmp merge-tree resolves merge-tree as subcommand" \
+  "seg0:flag_value:/tmp:-C|seg0:flag_value:A:--merge-base" \
+  "git -C /tmp merge-tree --merge-base A --name-only HEAD origin/main"
+
+# --- Regression coverage of PR #251/#252 R1-R3 patterns via the API ---
+
+run_roles "R1: -c value pair recognized (gh-style flag-value set)" \
+  "seg0:flag:--repo:|seg0:flag_value:owner/x:--repo" \
+  "gh pr list --repo owner/x"
+
+run_roles "R3: -- boundary stops flag scan in kubectl exec" \
+  "seg0:separator_dd:--:|seg0:post_dd:--use-protocol-buffers:" \
+  "kubectl exec pod -- bash -c '--use-protocol-buffers'"
+
+# --- Codex review #284 regressions ---
+
+run_roles "wrapper -- (env): kubectl still resolves as COMMAND after env --" \
+  "seg0:command:kubectl:|seg0:flag:--use-protocol-buffers:" \
+  "env -- kubectl --use-protocol-buffers"
+
+run_roles_negative "wrapper -- (env): kubectl must NOT be POST_DD" \
+  "seg0:post_dd:kubectl:" \
+  "env -- kubectl --use-protocol-buffers"
+
+run_roles "wrapper -- (sudo): git merge-tree resolves through sudo -- prefix" \
+  "seg0:command:git:|seg0:flag_value:A:--merge-base" \
+  "sudo -- git merge-tree --merge-base A --name-only HEAD origin/main"
+
+run_roles "flag=value with \$(): --git-dir=\$() does not block subcommand resolution" \
+  "seg0:command:git:|seg0:flag_value:A:--merge-base" \
+  'git --git-dir=$(pwd)/.git merge-tree --merge-base A --name-only HEAD origin/main'
+
+run_roles "post-DD \$(): \$() after -- becomes POST_DD (not SUBST_RUN)" \
+  "seg0:separator_dd:--:|seg0:post_dd:\$(echo --flag):" \
+  'kubectl exec pod -- $(echo --flag)'
+
+run_roles_negative "post-DD \$(): \$() after -- must NOT be SUBST_RUN" \
+  "seg0:subst_run:\$(echo --flag):" \
+  'kubectl exec pod -- $(echo --flag)'
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 

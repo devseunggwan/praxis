@@ -31,9 +31,15 @@ Design:
   • **Plugin-style dispatch** — each CLI gets a `_check_<cli>` function that
     returns Optional[str] (the advisory text). New CLIs are added by writing
     a new check function and registering it in CHECKS.
-  • **Sibling-pattern toolchain** — reuses `safe_tokenize`,
-    `iter_command_starts`, `strip_prefix` from `_hook_utils.py`, matching
-    `gh-flag-verify.py` / `cross-boundary-preflight.py` / `block-gh-state-all.py`.
+  • **Role-aware tokenization (issue #263)** — uses `tokenize_with_roles`
+    from `_hook_utils.py` so each check receives typed Token segments
+    (COMMAND / FLAG / FLAG_VALUE / POSITIONAL / SEPARATOR_DD / POST_DD /
+    SUBST_RUN). Previously each caller re-implemented role state which
+    leaked 7 defects across PR #251 / #252 codex review rounds. The
+    proof-migration in this file (issue #263 Phase 1) demonstrates the
+    same 4 codex-review-passed cases (R1 false positive, R2 `$()`
+    advisory, R3 `--` boundary, R3 relative path) with strictly less
+    caller-side parsing.
 
 Fail-open contract:
 
@@ -58,10 +64,35 @@ from typing import Callable, Optional
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
-    iter_command_starts,
-    safe_tokenize,
-    strip_prefix,
+    Token,
+    TokenRole,
+    filter_argv,
+    tokenize_with_roles,
 )
+
+
+# ---------------------------------------------------------------------------
+# Role-aware flag-value spec (issue #263)
+# ---------------------------------------------------------------------------
+#
+# Migrated from per-caller `_coalesce_subst_runs` + ad-hoc value-flag sets
+# to the centralized `tokenize_with_roles` API. The spec is keyed by
+# `(command, subcommand)` so `git -C /tmp merge-tree --merge-base A` is
+# resolved with both git-global and merge-tree-specific value flags.
+#
+# Source:
+#   - git globals: `git --help` — -C, -c key=val, --git-dir, --work-tree,
+#     --namespace
+#   - git merge-tree: `git merge-tree -h` —
+#       --[no-]merge-base <tree-ish>
+#       -X, --[no-]strategy-option <option=value>
+#     Negation forms (`--no-merge-base`) are valueless suppression markers
+#     and are intentionally NOT in this set.
+_FLAG_VALUE_SPEC: dict[str, set[str]] = {
+    "git": {"-C", "-c", "--git-dir", "--work-tree", "--namespace"},
+    "git merge-tree": {"--merge-base", "-X", "--strategy-option"},
+    "kubectl": set(),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -75,129 +106,82 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 # the primary cost.
 _MERGE_TREE_MODERN_FLAGS = frozenset({"--name-only", "--write-tree"})
 
-# git options that consume the following token as a value; needed so the
-# positional-argument count is not inflated by `-C <dir>` / similar.
-_GIT_GLOBAL_FLAGS_WITH_ARG = frozenset({
-    "-C", "-c", "--git-dir", "--work-tree", "--namespace",
-})
 
-# `git merge-tree` subcommand-level flags that consume the next token as
-# their value. Without this set, `--merge-base A --name-only HEAD origin/main`
-# (the canonical correct modern usage) counts `A` as a 3rd positional and
-# trips the advisory. Source: `git merge-tree -h` —
-#   --[no-]merge-base <tree-ish>
-#   -X, --[no-]strategy-option <option=value>
-# Negation forms (`--no-merge-base`) are valueless suppression markers and
-# are intentionally NOT in this set.
-_MERGE_TREE_FLAGS_WITH_ARG = frozenset({
-    "--merge-base",
-    "-X", "--strategy-option",
-})
+def _count_merge_tree_positionals(seg: list[Token]) -> int:
+    """Count positional (non-flag) arguments to `git merge-tree` from a
+    typed Token segment.
 
+    The role-aware tokenizer has already:
+      - coalesced unquoted `$(...)` runs into single tokens (SUBST_RUN
+        when free, FLAG_VALUE when consumed by a value-taking flag)
+      - classified value tokens as FLAG_VALUE (excluded from positional
+        count)
+      - marked the `--` boundary; any POST_DD tokens count as positionals
+        per merge-tree's POSIX convention
 
-def _coalesce_subst_runs(tokens: list[str]) -> list[str]:
-    """Collapse unquoted `$(...)` command-substitution runs into single tokens.
-
-    `safe_tokenize` uses shlex with whitespace_split=True, which is unaware
-    of POSIX command substitution. An unquoted `$(git merge-base HEAD x)`
-    therefore splits into `['$(git', 'merge-base', 'HEAD', 'x)']` — four
-    tokens — and any flag-value-skip logic only consumes the first token.
-    The remaining tokens then look like positional arguments and inflate
-    the count.
-
-    This helper walks the token list and merges any run that starts with a
-    token containing `$(` and ends with a token containing the matching `)`
-    into a single logical token. Quoted substitutions (e.g. `"$(...)"`)
-    are already a single token at this layer and need no special handling.
-
-    The merge is conservative — `$(` and `)` are required to be present in
-    SOME token (not necessarily at start/end) so the helper correctly
-    handles tokens like `--merge-base=$(git` ... `merge-base` ... `x)`.
-    Unbalanced runs (`$(` with no closing `)`) fall through to the end of
-    argv and are treated as a single token — the caller still sees them
-    as one element rather than several spurious positionals.
+    Returns the positional count starting from the token AFTER the
+    `merge-tree` subcommand token, or -1 if this is not a merge-tree
+    invocation.
     """
-    out: list[str] = []
-    i = 0
-    n = len(tokens)
-    while i < n:
-        tok = tokens[i]
-        if "$(" in tok and ")" not in tok[tok.index("$(") + 2:]:
-            j = i + 1
-            parts = [tok]
-            while j < n:
-                parts.append(tokens[j])
-                if ")" in tokens[j]:
-                    break
-                j += 1
-            out.append(" ".join(parts))
-            i = j + 1
-        else:
-            out.append(tok)
-            i += 1
-    return out
+    argv = filter_argv(seg)
+    if not argv or argv[0].text != "git":
+        return -1
 
-
-def _count_merge_tree_positionals(argv: list[str]) -> int:
-    """Count positional (non-flag) arguments to `git merge-tree`.
-
-    Walks argv past git-level globals, finds `merge-tree`, then counts
-    every non-flag token after the subcommand. Value tokens consumed by
-    known value-taking flags are NOT counted. Unquoted `$(...)` runs are
-    coalesced via `_coalesce_subst_runs` so they count as exactly one
-    logical argument, matching what the shell will pass to git.
-    """
-    argv = _coalesce_subst_runs(argv)
-    i = 0
-    n = len(argv)
-    # Skip past git global flags (the caller already verified argv[0]=="git"
-    # via strip_prefix; this function is only called after that check).
+    # Find the merge-tree subcommand token. Skip past command-global
+    # FLAG / FLAG_VALUE pairs (already typed correctly).
     i = 1
+    n = len(argv)
     while i < n:
         tok = argv[i]
-        if tok == "--":
+        if tok.role in (TokenRole.FLAG, TokenRole.FLAG_VALUE):
             i += 1
+            continue
+        if tok.role == TokenRole.POSITIONAL and tok.text == "merge-tree":
             break
-        if not tok.startswith("-"):
-            break
-        i += 1
-        if "=" not in tok and tok in _GIT_GLOBAL_FLAGS_WITH_ARG and i < n:
-            i += 1
+        # Some other token (SUBST_RUN, SEPARATOR_DD, unrelated POSITIONAL)
+        # — not a merge-tree invocation.
+        return -1
+    else:
+        return -1
 
-    if i >= n or argv[i] != "merge-tree":
-        return -1  # not a merge-tree call
+    # Skip the `merge-tree` token itself.
     i += 1
 
     positionals = 0
     while i < n:
         tok = argv[i]
-        if tok == "--":
-            i += 1
-            positionals += (n - i)
-            break
-        if not tok.startswith("-"):
+        if tok.role == TokenRole.POSITIONAL:
             positionals += 1
-            i += 1
-            continue
-        # Token is a flag. If it consumes a separate value token (and the
-        # value is not already embedded via `=value` form), skip the next
-        # token so the value is not miscounted as a positional argument.
-        if "=" not in tok and tok in _MERGE_TREE_FLAGS_WITH_ARG and i + 1 < n:
-            i += 2
-            continue
+        elif tok.role == TokenRole.SUBST_RUN:
+            # A free $() run that is NOT bound to a value-flag is a
+            # positional argument from the shell's perspective.
+            positionals += 1
+        elif tok.role == TokenRole.POST_DD:
+            # Tokens after `--` are positional per POSIX convention.
+            positionals += 1
+        # FLAG / FLAG_VALUE / SEPARATOR_DD / COMMAND do NOT increment
+        # the positional count.
         i += 1
     return positionals
 
 
-def _check_git(argv: list[str]) -> Optional[str]:
+def _check_git(seg: list[Token]) -> Optional[str]:
     """Return advisory text for known git mode-incompatible combos, else None."""
-    argv = strip_prefix(argv)
-    if not argv or argv[0] != "git":
+    argv = filter_argv(seg)
+    if not argv or argv[0].text != "git":
         return None
 
     # merge-tree: --name-only + 3+ positionals → legacy/modern conflict
-    if any(tok in _MERGE_TREE_MODERN_FLAGS for tok in argv):
-        positionals = _count_merge_tree_positionals(argv)
+    # We strip the `=value` suffix on FLAG tokens when checking for modern
+    # mode trip-wires so `--name-only=true` (unusual but legal) still
+    # triggers the check.
+    has_modern_flag = any(
+        tok.role == TokenRole.FLAG
+        and tok.text.split("=", 1)[0] in _MERGE_TREE_MODERN_FLAGS
+        for tok in argv
+    )
+    if has_modern_flag:
+        positionals = _count_merge_tree_positionals(seg)
         if positionals >= 3:
             return (
                 "[cli-flag-incompat-advisory] git merge-tree mode conflict\n"
@@ -235,20 +219,24 @@ _KUBECTL_DEPRECATED = {
 }
 
 
-def _check_kubectl(argv: list[str]) -> Optional[str]:
-    argv = strip_prefix(argv)
-    if not argv or argv[0] != "kubectl":
+def _check_kubectl(seg: list[Token]) -> Optional[str]:
+    """Return advisory text when a deprecated kubectl flag appears
+    BEFORE the `--` argv separator, else None.
+
+    The role-aware tokenizer already marks post-`--` tokens as POST_DD,
+    so this function simply iterates FLAG tokens and is naturally immune
+    to the `kubectl exec pod -- mytool --use-protocol-buffers` false
+    positive (R3) — the deprecated flag would be POST_DD in that case,
+    not FLAG.
+    """
+    argv = filter_argv(seg)
+    if not argv or argv[0].text != "kubectl":
         return None
-    # `kubectl exec pod -- mytool --use-protocol-buffers` passes
-    # `--use-protocol-buffers` to the in-container command, not to kubectl
-    # itself. Per POSIX convention, every token after `--` is positional —
-    # stop scanning when we hit it so remote-command arg shadowing does
-    # not trigger a kubectl-targeted advisory.
     hits: list[str] = []
     for tok in argv[1:]:
-        if tok == "--":
-            break
-        bare = tok.split("=", 1)[0]
+        if tok.role != TokenRole.FLAG:
+            continue
+        bare = tok.text.split("=", 1)[0]
         if bare in _KUBECTL_DEPRECATED:
             hits.append(f"  {bare}: {_KUBECTL_DEPRECATED[bare]}")
     if not hits:
@@ -265,7 +253,7 @@ def _check_kubectl(argv: list[str]) -> Optional[str]:
 # Registry
 # ---------------------------------------------------------------------------
 
-CHECKS: tuple[Callable[[list[str]], Optional[str]], ...] = (
+CHECKS: tuple[Callable[[list[Token]], Optional[str]], ...] = (
     _check_git,
     _check_kubectl,
 )
@@ -288,14 +276,16 @@ def _main_inner() -> int:
     if not command.strip():
         return 0
 
-    tokens = safe_tokenize(command.replace("\\\n", " "))
-    if not tokens:
+    segments = tokenize_with_roles(
+        command.replace("\\\n", " "),
+        _FLAG_VALUE_SPEC,
+    )
+    if not segments:
         return 0
 
-    for argv in iter_command_starts(tokens):
-        argv = list(argv)
+    for seg in segments:
         for check in CHECKS:
-            msg = check(argv)
+            msg = check(seg)
             if msg:
                 sys.stderr.write(msg + "\n")
                 return 0  # advisory — never blocks; first match suffices
