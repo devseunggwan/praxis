@@ -129,13 +129,14 @@ If the selected path differs from cwd, note it explicitly:
 
 ### Step 4: Run codex-companion against the selected worktree
 
-Before delegating to codex-companion, verify the PR is still open. Using the branch resolved in Steps 1–2:
+Before delegating to codex-companion, verify the PR is not already closed. Using the branch resolved in Steps 1–2:
 
 ```bash
-gh pr view "{branch}" --json state --jq '.state'
+gh pr view "{branch}" --json state --jq '.state' 2>/dev/null
 ```
 
-If the returned state is not `"OPEN"` (i.e., `CLOSED` or `MERGED`), abort immediately:
+- If the command exits non-zero or returns empty (no PR exists yet): continue — pre-PR review is a valid use case.
+- If the returned state is `"CLOSED"` or `"MERGED"`: abort immediately:
 
 ```
 ABORT: "PR is {state} — review aborted. Re-open or target a different PR."
