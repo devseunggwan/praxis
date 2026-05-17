@@ -22,12 +22,20 @@ Sibling hooks that cover adjacent scenarios:
   pre-merge-approval-gate.sh   → gh pr merge per-PR approval
 
 Skips (no-op pass-through):
-  • path is relative (resolves against cwd — cannot be cross-repo)
   • `git -C <dir>` / `--git-dir=` / `--work-tree=` override present (the
     operator explicitly named the repo to target — trust the override)
-  • cwd is not a git repo (fail-open)
+  • a preceding `cd <path>` segment in the same compound command has
+    already moved the effective cwd into the worktree's owning repo
+    (the post-cd cwd's worktree list contains the target)
+  • effective cwd is not a git repo (fail-open)
   • `git worktree list` invocation fails or times out (fail-open)
   • payload is malformed or tool is not Bash (fail-open)
+
+Relative remove targets (`../sibling-wt`, `wt/`) are NO LONGER skipped
+unconditionally. They are normalized against the effective cwd before
+the worktree-list comparison so that `cd somewhere && git worktree
+remove ../sibling-wt` is correctly classified by where it actually
+lands on disk.
 
 Opt-out: embed `# worktree-chain:ack` anywhere in the shell command portion
 after manually confirming the target path. Marker placement inside heredoc
@@ -103,6 +111,38 @@ def _has_repo_override(argv: list[str]) -> bool:
         if tok.startswith("-C") and len(tok) > 2:
             return True
     return False
+
+
+def _interpret_cd(argv: list[str], current_cwd: str) -> str | None:
+    """Return the new cwd after `cd <path>` in this segment, else None.
+
+    Used to thread an `effective_cwd` across compound segments so that
+    `cd /owning-repo && git worktree remove /owning-repo-wt` is treated
+    as a same-cwd operation (the shell actually runs `cd` first, then
+    `worktree remove` against the post-cd cwd). Without this, the hook
+    falsely asks because it compares the target against the worktree
+    list of the *original* process cwd.
+
+    Resolution rules:
+      • argv is not a bare `cd` (after strip_prefix) → None
+      • argv is `cd` with no argument → None (cd-to-home; we do not try
+        to resolve `$HOME` so we leave effective_cwd as the caller had it)
+      • target is `-` or starts with `$` → None (cd-to-prev / variable
+        expansion is unresolvable statically — caller retains current cwd)
+      • absolute target → normalized path
+      • relative target → normalized join against `current_cwd`
+    """
+    argv = strip_prefix(argv)
+    if not argv or argv[0] != "cd":
+        return None
+    if len(argv) < 2:
+        return None
+    target = argv[1]
+    if target == "-" or target.startswith("$"):
+        return None
+    if target.startswith("/"):
+        return os.path.normpath(target)
+    return os.path.normpath(os.path.join(current_cwd, target))
 
 
 def _coalesce_subst_runs(tokens: list[str]) -> list[str]:
@@ -301,12 +341,25 @@ def main() -> int:
     if not tokens:
         return 0
 
-    cwd = os.getcwd()
+    # `effective_cwd` is updated by each preceding `cd <path>` segment so
+    # that a compound command like `cd /B && git worktree remove /B-wt`
+    # is evaluated against /B's worktree list, not the hook process's
+    # original cwd. Relative remove targets are also resolved against
+    # this effective_cwd (matching the shell's behavior at the time `git
+    # worktree remove` actually runs).
+    effective_cwd = os.getcwd()
 
-    known: list[str] | None = None  # lazy-init on first relevant segment
+    known: list[str] | None = None
+    known_for_cwd: str | None = None
 
     for argv in iter_command_starts(tokens):
         argv = list(argv)
+
+        new_cwd = _interpret_cd(argv, effective_cwd)
+        if new_cwd is not None:
+            effective_cwd = new_cwd
+            continue
+
         target = _extract_worktree_remove_path(argv)
         if target is None:
             continue
@@ -315,21 +368,25 @@ def main() -> int:
         if _has_repo_override(argv):
             continue
 
-        # Skip relative paths — they resolve against cwd, never cross-repo
-        # in the sense this hook guards against.
+        # Resolve relative remove targets against effective_cwd. git
+        # itself does this before consulting its worktree registry, so
+        # `git worktree remove ../sibling-wt` from repo A's worktree
+        # can absolutely be cross-repo and must NOT be skipped silently.
         if not target.startswith("/"):
-            continue
+            target = os.path.normpath(os.path.join(effective_cwd, target))
 
         target_norm = _normalize_path(target)
 
-        # Lazy enumerate the cwd repo's worktrees.
-        if known is None:
-            known = _list_cwd_worktrees(cwd)
+        # Lazy enumerate; re-enumerate when effective_cwd changes between
+        # segments so we always compare against the same-cwd repo's list.
+        if known is None or known_for_cwd != effective_cwd:
+            known = _list_cwd_worktrees(effective_cwd)
+            known_for_cwd = effective_cwd
             if known is None:
-                return 0  # fail-open: cwd not a git repo / git failed
+                return 0  # fail-open: effective cwd not a git repo / git failed
 
         if target_norm in known:
-            continue  # target is owned by cwd repo — safe pass-through
+            continue  # target is owned by effective-cwd repo — safe pass-through
 
         reason = _build_ask_reason(target_norm, known) + compound_cascade_hint(command)
         _emit_ask(reason)

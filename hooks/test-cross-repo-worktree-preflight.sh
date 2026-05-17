@@ -188,9 +188,42 @@ run_case "cwd-repo main worktree" \
   pass \
   "git worktree remove $CWD_REPO"
 
-run_case "relative path — never cross-repo" \
+# Regression (codex round 3 F1): relative paths used to be skipped
+# unconditionally — bypassing the cross-repo check whenever the operator
+# wrote `../sibling-wt` from inside repo A's worktree. Now relative
+# targets are resolved against effective_cwd before lookup; if the
+# resolved path is not in cwd repo's list, ask must fire.
+# Setup: from CWD_REPO, relative path `../other-repo-wt` resolves to
+# TMPROOT/other-repo-wt = OTHER_OWNED_WT — owned by OTHER_REPO.
+run_case "cross-repo via relative path (../)" \
+  ask \
+  "git worktree remove ../other-repo-wt"
+
+# But a relative path that resolves into cwd repo's own worktree must pass.
+run_case "cwd-repo relative path (../cwd-repo-wt)" \
   pass \
-  "git worktree remove ../some-wt"
+  "git worktree remove ../cwd-repo-wt"
+
+# Regression (codex round 3 F2): `cd /owning-repo && git worktree remove
+# /owning-repo-wt` used to false-ask because the hook used the process
+# cwd (CWD_REPO) instead of the post-cd cwd (OTHER_REPO). After tracking
+# cd across segments, the lookup runs against OTHER_REPO's list and
+# OTHER_OWNED_WT is recognized as owned by it.
+run_case "cd to owning repo then remove its worktree" \
+  pass \
+  "cd $OTHER_REPO && git worktree remove $OTHER_OWNED_WT"
+
+# Compound cd with relative target — both axes combined.
+run_case "cd to owning repo then remove via relative" \
+  pass \
+  "cd $OTHER_REPO && git worktree remove ../other-repo-wt"
+
+# cd target that we cannot statically resolve must NOT update
+# effective_cwd; the hook then falls back to the original process cwd
+# and the cross-repo target still triggers ask.
+run_case "cd \$VAR (unresolvable) then cross-repo remove" \
+  ask \
+  "cd \$SOME_REPO && git worktree remove $OTHER_OWNED_WT"
 
 run_case "opt-out marker present" \
   pass \

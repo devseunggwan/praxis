@@ -31,8 +31,12 @@ pass-throughs.
 | `git worktree remove --force /abs/path/owned/by/other-repo` | **ASK** |
 | `git worktree remove /abs/path/owned/by/other-repo/` | **ASK** (trailing slash normalized) |
 | `git worktree remove /abs/path && gh pr merge ...` | **ASK** (chained — applies to the first segment) |
+| `git worktree remove ../sibling-wt` from repo A (resolves into repo B) | **ASK** — relative resolved against effective cwd |
 | `git worktree remove /abs/path/owned/by/cwd-repo` | **PASS** — target in cwd repo's list |
-| `git worktree remove ../relative/path` | **PASS** — relative path is cwd-anchored |
+| `git worktree remove ../cwd-repo-wt` (relative, resolves into cwd repo) | **PASS** — resolved path in cwd repo's list |
+| `cd /owning-repo && git worktree remove /owning-repo-wt` | **PASS** — `cd` updates effective cwd before lookup |
+| `cd /owning-repo && git worktree remove ../owning-repo-wt` | **PASS** — `cd` + relative both honored |
+| `cd $VAR && git worktree remove /cross-repo-wt` | **ASK** — unresolvable `cd` does not update effective cwd |
 | `git -C /other-repo worktree remove /abs/path` | **PASS** — explicit `-C` override |
 | `git --git-dir=/other/.git worktree remove /abs/path` | **PASS** — explicit override |
 | `git --work-tree=/other worktree remove /abs/path` | **PASS** — explicit override |
@@ -109,9 +113,11 @@ error so it never breaks a Claude Code session:
 bash hooks/test-cross-repo-worktree-preflight.sh
 ```
 
-23 cases: 7 ask paths (cross-repo abs, `-f`, `--force`, trailing slash,
+27 cases: 9 ask paths (cross-repo abs, `-f`, `--force`, trailing slash,
 chained, `-c name=value` global flag, `-c $(...)` unquoted command
-substitution), 11 pass paths (cwd-owned, relative, opt-out, three
-repo-override forms, non-remove subcommand variants, non-git command,
-empty, comment-only), 2 worktree non-remove pass-throughs, 3 infrastructure
+substitution, relative `../` resolving cross-repo, `cd $VAR` unresolvable),
+13 pass paths (cwd-owned abs, cwd-owned relative `../`, opt-out, three
+repo-override forms, `cd /owning && remove abs`, `cd /owning && remove
+relative`, non-remove subcommand variants, non-git command, empty,
+comment-only), 2 worktree non-remove pass-throughs, 3 infrastructure
 (non-Bash passthrough, malformed JSON fail-open, non-git cwd fail-open).
