@@ -13,36 +13,37 @@ Development workflow skills for Claude Code — disciplined, fast, resilient.
 
 ### Discovery
 
-| Skill | Description |
-|-------|-------------|
-| `using-praxis` | First-time orientation — skill categories, common scenarios, hook system overview |
+| Skill | Trigger keywords | When to use | Example invocation |
+|-------|-----------------|-------------|-------------------|
+| `using-praxis` | `praxis 처음`, `praxis 사용법`, `어떤 skill 부터`, `praxis intro`, `praxis getting started` | 처음 praxis를 접하거나 상황에 맞는 skill을 모를 때 | `/praxis:using-praxis` |
+| `writing-praxis-skill` | `new skill`, `write skill`, `add skill`, `skill template`, `skill spec`, `스킬 작성`, `새 스킬` | 새 SKILL.md를 작성하거나 skill 구조 가이드가 필요할 때 | `/praxis:writing-praxis-skill` |
 
 ### Development
 
-| Skill | Description |
-|-------|-------------|
-| `retrospect` | Session retrospect — scan conversation against CLAUDE.md, find friction root causes, propose and execute improvements |
-| `codex-review-wrap` | Worktree-aware wrapper for `/codex:review`; forces explicit target selection, premise-verification gate, and flip detection across review rounds |
+| Skill | Trigger keywords | When to use | Example invocation |
+|-------|-----------------|-------------|-------------------|
+| `retrospect` | `retrospect`, `what went wrong`, `session review`, `session improvement`, `improve` | 세션 마무리 후 마찰 패턴·근본 원인을 분석하고 개선안을 실행할 때 | `/praxis:retrospect` |
+| `codex-review-wrap` | `codex review`, `review codex`, `safe review`, `premise verification`, `flip detection`, `sibling cross-check` | 다중 worktree 환경에서 `/codex:review`를 전제 검증·flip 탐지와 함께 안전하게 실행할 때 | `/praxis:codex-review-wrap` |
 
 ### Discipline
 
-| Skill | Description |
-|-------|-------------|
-| `strike` | Declare a rule violation — session-scoped counter, escalating signal (1진 warning → 2진 review → 3진 Stop-hook block) |
-| `strikes` | Show current strike count + recorded violation reasons for the active session |
-| `reset-strikes` | Reset the session strike counter to 0 after a 3진 block (required to unblock responses) |
+| Skill | Trigger keywords | When to use | Example invocation |
+|-------|-----------------|-------------|-------------------|
+| `strike` | `/strike`, `/praxis:strike`, `strike 1/2/3`, `삼진` | 규칙 위반 발생 시 명시적으로 기록할 때 (colloquial "strike a balance" 등은 제외) | `/praxis:strike <위반 이유>` |
+| `strikes` | `/strikes`, `strike status`, `몇 진`, `check strikes` | 현재 세션의 strike 횟수와 위반 내역을 확인할 때 | `/praxis:strikes` |
+| `reset-strikes` | `/reset-strikes`, `strike 초기화`, `clear strikes` | 3진 블록 후 카운터를 초기화해 응답을 재개할 때 | `/praxis:reset-strikes` |
 
 ### Session Management
 
-| Skill | Description |
-|-------|-------------|
-| `recover-sessions` | Bulk recover Claude Code sessions after power loss (tmux backend) |
-| `cmux-recover-sessions` | Bulk recover Claude Code sessions after crash or power loss (cmux backend) |
-| `cmux-save-sessions` | Save cmux session list as a JSON snapshot for later restore |
-| `cmux-resume-sessions` | Restore cmux workspaces from a saved JSON snapshot |
-| `cmux-session-manager` | Daily session lifecycle — status dashboard, cleanup, reorganize |
-| `cmux-delegate` | Delegate a task to an independent session with auto-collected context (supports multi-provider routing) |
-| `cmux-browser` | Browser automation E2E testing via `cmux browser` CLI — SPA hydration wait included |
+| Skill | Trigger keywords | When to use | Example invocation |
+|-------|-----------------|-------------|-------------------|
+| `recover-sessions` | `recover`, `session recovery`, `restore sessions`, `power recovery` | 전원 차단·tmux 크래시 후 세션을 복구할 때 (tmux 백엔드) | `/praxis:recover-sessions` |
+| `cmux-recover-sessions` | `터졌다`, `크래시 복구`, `OOM 복구`, `세션 살려야`, `crash recovery`, `power loss recovery`, `cmux session recovery` | crash·power loss·OOM 후 cmux 세션 다수를 긴급 복구할 때 (`.jsonl` 스캔 기반) | `/praxis:cmux-recover-sessions` |
+| `cmux-save-sessions` | `save sessions`, `session save`, `session snapshot`, `cmux save`, `snapshot list` | 현재 cmux 세션 목록을 JSON으로 저장해 나중에 복원할 때 | `/praxis:cmux-save-sessions` |
+| `cmux-resume-sessions` | `resume sessions`, `restore from snapshot`, `rehydrate sessions`, `세션 복원`, `스냅샷 복원` | 이전에 저장한 스냅샷으로 워크스페이스를 복원할 때 (크래시 복구는 `cmux-recover-sessions`) | `/praxis:cmux-resume-sessions` |
+| `cmux-session-manager` | `cmux session`, `session management`, `session cleanup`, `cmux status`, `cmux tidy` | 일상적인 세션 정리·상태 대시보드가 필요할 때 | `/praxis:cmux-session-manager` |
+| `cmux-delegate` | `delegate`, `cmux delegate`, `new session` | 현재 작업의 맥락을 보존한 채 독립 세션에 위임할 때 (리뷰·디버깅·구현 분리) | `/praxis:cmux-delegate` |
+| `cmux-browser` | `cmux browser`, `cmux 브라우저` | cmux browser CLI로 SPA hydration 대기 포함 E2E 테스트를 실행할 때 | `/praxis:cmux-browser` |
 
 ## Hooks
 
