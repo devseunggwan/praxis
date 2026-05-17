@@ -183,6 +183,27 @@ You MUST complete each stage before proceeding to the next.
 6. **Cluster patterns** — are multiple events the same root cause?
    If 3+ events share a root cause → HIGH priority
 
+6b. **Cluster fold-back** — propagate cluster-level repeat signal to member events.
+
+   Execute this pass AFTER step 7 completes (step 7 sets `event.repeat_count`; this step then computes `event.effective_repeat`):
+
+   ```
+   for each cluster (from step 6):
+     cluster_event_count  = number of events in this cluster
+     cluster_repeat_count = max(event.repeat_count for event in cluster) + (cluster_event_count - 1)
+     # max MEMORY.md hit across cluster members + extra in-session occurrences beyond the first
+   for each event in cluster:
+     event.effective_repeat = max(event.repeat_count, cluster_repeat_count)
+   ```
+
+   For events that belong to no cluster (singleton): `event.effective_repeat = event.repeat_count`.
+
+   **Why this matters**: step 7's MEMORY.md scan is event-level and independent per event. An event with no direct MEMORY.md match (repeat_count=0) that is clustered with repeat events inherits the cluster's accumulated signal — ensuring that all members of the same root-cause family receive a consistent action tier in step 8.
+
+   **Example** (from the session that motivated this step): Cluster with 3 events; 2 have repeat_count=1, 1 has repeat_count=0.
+   - `cluster_repeat_count = max(1, 1, 0) + (3-1) = 3`
+   - Event with repeat_count=0 → `effective_repeat = max(0, 3) = 3` → escalates to "hook or skill", not "memory"
+
 7. **Scan MEMORY.md for repeat patterns** (2-hop deterministic scan):
    a. Read MEMORY.md index (single file read) — extract all feedback entry titles and file paths
    b. For each finding's root cause, identify candidate matches from index titles (concept-level, not keyword)
@@ -193,7 +214,7 @@ You MUST complete each stage before proceeding to the next.
    e. `repeat_count` = number of distinct feedback files with matching root cause
    f. If match found with existing resolution action (issue/hook already created): mark as `resolved=true`
 
-8. **Auto-assign action type** based on escalation ladder. Apply Repeat-based rows first; then apply Category-default rows below to override or compound when the event's `category[]` (from pre-scan, step 4) makes memory-only inappropriate even on first occurrence:
+8. **Auto-assign action type** based on escalation ladder. Use `event.effective_repeat` (from step 6b; equals `event.repeat_count` for singleton events) as the repeat signal for the Repeat-based rows below. Apply Repeat-based rows first; then apply Category-default rows below to override or compound when the event's `category[]` (from pre-scan, step 4) makes memory-only inappropriate even on first occurrence:
 
    | Condition | Action Type | Rationale |
    |-----------|-------------|-----------|

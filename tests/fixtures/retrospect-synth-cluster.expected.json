@@ -1,0 +1,12 @@
+{
+  "expected_decision": "pass",
+  "must_contain": [
+    "cluster_repeat_count",
+    "effective_repeat",
+    "hook_code",
+    "cluster fold-back"
+  ],
+  "must_not_contain": [
+    "decision\": \"block\""
+  ]
+}
