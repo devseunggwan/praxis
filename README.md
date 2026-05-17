@@ -11,6 +11,12 @@ Development workflow skills for Claude Code — disciplined, fast, resilient.
 > returns `Agent type not found` — Agent and Skill resolve disjoint namespaces.
 > See [RUNTIME_CONSTRAINTS.md §3](RUNTIME_CONSTRAINTS.md) for the mapping table.
 
+### Discovery
+
+| Skill | Description |
+|-------|-------------|
+| `using-praxis` | First-time orientation — skill categories, common scenarios, hook system overview |
+
 ### Development
 
 | Skill | Description |
