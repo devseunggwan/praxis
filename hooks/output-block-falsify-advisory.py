@@ -63,46 +63,6 @@ RECOMMENDED_MARKERS_EN = ("(Recommended)",)
 RECOMMENDED_MARKERS_KO = ("(추천)",)
 
 
-def _collect_option_labels(tool_input: dict) -> list[str]:
-    """Walk questions[].options[].label and return all label strings.
-
-    Tolerant of partial schemas — any missing field returns an empty list.
-    Hook must never crash on malformed payloads.
-    """
-    labels: list[str] = []
-    questions = tool_input.get("questions") or []
-    if not isinstance(questions, list):
-        return labels
-    for q in questions:
-        if not isinstance(q, dict):
-            continue
-        options = q.get("options") or []
-        if not isinstance(options, list):
-            continue
-        for o in options:
-            if not isinstance(o, dict):
-                continue
-            label = o.get("label")
-            if isinstance(label, str):
-                labels.append(label)
-    return labels
-
-
-def _collect_question_texts(tool_input: dict) -> list[str]:
-    """Collect questions[].question text strings from all question objects."""
-    texts: list[str] = []
-    questions = tool_input.get("questions") or []
-    if not isinstance(questions, list):
-        return texts
-    for q in questions:
-        if not isinstance(q, dict):
-            continue
-        text = q.get("question")
-        if isinstance(text, str):
-            texts.append(text)
-    return texts
-
-
 def _has_exact_recommended_marker(labels: list[str]) -> bool:
     """True if any label contains exact (Recommended) or (추천) (case-sensitive)."""
     if not labels:
@@ -225,14 +185,36 @@ def _main_inner() -> int:
         return 0
 
     if tool_name == "AskUserQuestion":
-        labels = _collect_option_labels(tool_input)
-        if _has_exact_recommended_marker(labels):
-            # Ask-escalation path: check for Falsified: evidence in question body.
-            texts = _collect_question_texts(tool_input)
-            if not _has_falsified_line(texts):
-                _emit_ask(ASK_MSG)
-        elif _has_recommended_marker(labels):
-            # Fallback advisory: case-insensitive match (e.g. lowercase "(recommended)").
+        questions = tool_input.get("questions") or []
+        if not isinstance(questions, list):
+            questions = []
+        ask_needed = False
+        advisory_needed = False
+        for q in questions:
+            if not isinstance(q, dict):
+                continue
+            options = q.get("options") or []
+            if not isinstance(options, list):
+                continue
+            q_labels: list[str] = []
+            for o in options:
+                if isinstance(o, dict):
+                    label = o.get("label")
+                    if isinstance(label, str):
+                        q_labels.append(label)
+            if _has_exact_recommended_marker(q_labels):
+                # Per-question check: only this question's text counts.
+                q_text = q.get("question")
+                q_texts = [q_text] if isinstance(q_text, str) else []
+                if not _has_falsified_line(q_texts):
+                    ask_needed = True
+                    break  # one missing question is enough to escalate
+            elif _has_recommended_marker(q_labels):
+                advisory_needed = True
+
+        if ask_needed:
+            _emit_ask(ASK_MSG)
+        elif advisory_needed:
             sys.stderr.write(ADVISORY_MSG + "\n")
 
     elif tool_name == "Bash":

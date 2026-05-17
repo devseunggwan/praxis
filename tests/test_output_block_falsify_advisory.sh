@@ -146,6 +146,32 @@ print(json.dumps(payload))
 " "$1" "$2"
 }
 
+make_ask_payload_multi_question_bypass() {
+  # Q1 has (Recommended) + no Falsified:; Q2 has Falsified: in its question text.
+  # A per-question check must still escalate to ask for Q1.
+  python3 - <<'PYEOF'
+import json
+payload = {
+    "session_id": "test-session",
+    "tool_name": "AskUserQuestion",
+    "tool_input": {
+        "questions": [
+            {
+                "question": "Which approach?",
+                "options": [{"label": "Option A (Recommended)"}, {"label": "Option B"}],
+            },
+            {
+                "question": "Falsified: no existing PR found.\nAnother question?",
+                "options": [{"label": "Yes"}, {"label": "No"}],
+            },
+        ]
+    },
+    "cwd": "/tmp",
+}
+print(json.dumps(payload))
+PYEOF
+}
+
 make_ask_payload_description_only() {
   # Payload where (Recommended) appears in options[].description, NOT in label.
   python3 -c "
@@ -325,6 +351,12 @@ run_case "AskUserQuestion: (추천) Korean label + no Falsified: → ask" \
 run_case "AskUserQuestion: non-recommended option labels — silent pass" \
   pass \
   "$(make_ask_payload '["Option A", "Option B", "Option C"]')"
+
+# Case 6 (regression for P2 fix): multi-question payload where Q1 has (Recommended)
+# but no Falsified:, and Q2 has Falsified: in its own question text — must still ask.
+run_case "AskUserQuestion: multi-question — Falsified: in Q2 does not cover Q1 (Recommended) → ask" \
+  "ask:Falsified:" \
+  "$(make_ask_payload_multi_question_bypass)"
 
 # ---------------------------------------------------------------------------
 # Summary
