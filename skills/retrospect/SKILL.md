@@ -76,7 +76,13 @@ You MUST complete each stage before proceeding to the next.
 
 ### Stage 2: Analyze Conversation
 
-**Pre-scan: Quick friction event identification** — scan the conversation for up to 5 friction events (user corrections, retries, skipped steps, stalls) BEFORE calling agents. This provides the input for agent calls.
+**Pre-scan: Symmetric scan (friction + successful patterns)** — scan the conversation BEFORE calling agents. Produces two lanes:
+
+- **friction_events**: up to 5 friction events (user corrections, retries, skipped steps, stalls). This provides the input for agent calls.
+- **successful_patterns**: up to 3 patterns that worked well this session. Each entry MUST include:
+  - `pattern`: one line (e.g., "deep-dive 3-lane trace identified cross-lane contradiction via direct grep")
+  - `evidence`: specific turn or artifact citation (mandatory — abstract reinforcement like "was helpful" or "responded fast" is FORBIDDEN)
+  - `reinforce_action`: `memory` (capture as feedback entry) or `visualize_only` (display in Stage 3 report, no persistent action)
 
 **Pre-scan Categorization (Mandatory)** — every friction event identified in pre-scan MUST be tagged with `category[]: string[]` containing ≥1 of these enumerated values. Stage 2 progression to step 3 is BLOCKED until every event has at least one category label.
 
@@ -385,6 +391,13 @@ when <observation predicate>$`.
 If no Gate-3 (b) demotions occurred, omit this section entirely (do not emit "None.").
 
 No patterns found: emit the distribution card with all counts = 0 and verdicts = NA, plus literal "This session followed all CLAUDE.md rules. ✅"
+
+### Reinforced Patterns (this session)
+
+(Emitted only when pre-scan found ≥1 successful_patterns. Omit this section entirely if none — do not emit "None.")
+
+- {pattern_1} (evidence: {turn or artifact})
+- {pattern_2} ...
 ```
 
 The unified table folds the previous dual-table layout (Pattern + Tool/Feature Findings) into one. Tool-layer information that previously lived in a separate "Tool/Feature Findings" table is now carried in the `Tool Layer` column of every row tagged with `tool` in `Category`. Reviewers see all findings in priority order without cross-referencing two tables.
