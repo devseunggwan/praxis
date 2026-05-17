@@ -40,12 +40,19 @@ cleanup() {
 trap cleanup EXIT
 
 setup_repos() {
+  # Pin identity via `-c` rather than relying on the caller's global
+  # ~/.gitconfig — clean CI runners and fresh containers commonly have no
+  # user.name / user.email set, and `git commit` aborts with
+  # "Author identity unknown". Errors are NOT redirected to /dev/null —
+  # if setup fails, the test must surface the cause loudly, not cascade
+  # into opaque worktree-add failures downstream.
+  local git_id=(-c "user.name=praxis-test" -c "user.email=praxis-test@example.invalid")
   for repo in "$CWD_REPO" "$OTHER_REPO"; do
-    git init -q "$repo" >/dev/null 2>&1
-    (cd "$repo" && git commit --allow-empty -q -m init 2>/dev/null)
+    git init -q "$repo"
+    git "${git_id[@]}" -C "$repo" commit --allow-empty -q -m init
   done
-  git -C "$CWD_REPO" worktree add -q "$ONE_OWNED_WT" -b feature-a >/dev/null 2>&1
-  git -C "$OTHER_REPO" worktree add -q "$OTHER_OWNED_WT" -b feature-b >/dev/null 2>&1
+  git -C "$CWD_REPO" worktree add -q "$ONE_OWNED_WT" -b feature-a
+  git -C "$OTHER_REPO" worktree add -q "$OTHER_OWNED_WT" -b feature-b
 }
 
 setup_repos
