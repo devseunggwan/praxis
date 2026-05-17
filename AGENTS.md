@@ -172,6 +172,7 @@ Design contract shared by all hooks:
 |------|-------|---------|------|
 | `block-gh-state-all` | PreToolUse | Hard-block invalid `gh search ... --state all` flag combo | [docs/hook/block-gh-state-all.md](docs/hook/block-gh-state-all.md) |
 | `gh-flag-verify` | PreToolUse | Block `gh <subcmd>` calls with flags not in the subcommand's accepted set | [docs/hook/gh-flag-verify.md](docs/hook/gh-flag-verify.md) |
+| `cli-flag-incompat-advisory` | PreToolUse | Advisory nudge for known mode-incompatible flag combos in other CLIs (`git merge-tree --name-only` 3-arg form, `kubectl --use-protocol-buffers`) — issue #248 | [docs/hook/cli-flag-incompat-advisory.md](docs/hook/cli-flag-incompat-advisory.md) |
 | `side-effect-scan` | PreToolUse | Ask before commands with collateral side effects (`git commit/push`, `gh pr merge/create`, `kubectl apply`) | [docs/hook/side-effect-scan.md](docs/hook/side-effect-scan.md) |
 | `memory-hint` | PreToolUse | Surface hookable memory entries by keyword at decision-construction time (advisory, never blocks) | [docs/hook/memory-hint.md](docs/hook/memory-hint.md) |
 | `codex-review-route` | UserPromptSubmit | Warn when `/codex:review` runs in a multi-worktree repo (cwd mismatch risk) | [docs/hook/codex-review-route.md](docs/hook/codex-review-route.md) |
