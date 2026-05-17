@@ -88,6 +88,8 @@ else:
 
 ## Hook index
 
+> See [docs/hook/INDEX.md](docs/hook/INDEX.md) for the categorized index (preflight-gate / advisory-nudge / postuse-correction / completion-verify).
+
 | Hook | Event | Purpose | Spec |
 |------|-------|---------|------|
 | `block-gh-state-all` | PreToolUse | Hard-block invalid `gh search ... --state all` flag combo | [docs/hook/block-gh-state-all.md](docs/hook/block-gh-state-all.md) |
