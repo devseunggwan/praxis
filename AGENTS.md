@@ -268,6 +268,8 @@ you commit here land in the version that actually runs at the shell. Keeping a
 second clone under a legacy name risks `~/.local/bin` symlinks pointing at stale
 code — a real failure mode previously hit during recover-sessions debugging.
 
+After every `git pull` or worktree operation, run `./scripts/verify-symlinks.sh` to confirm all `~/.local/bin` entries still resolve to this clone.
+
 ### CLI tools (not skills)
 
 These are shell wrappers installed via `scripts/install.sh` into `~/.local/bin`.

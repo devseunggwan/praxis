@@ -111,6 +111,16 @@ for script in "${CLI_SCRIPTS[@]}"; do
       continue
     fi
 
+    # Log a REBIND message when the existing symlink points at a different
+    # clone (stale worktree path, legacy clone name, etc.) so operators can
+    # confirm which path is being repointed. readlink works even for dangling
+    # links so this is safe regardless of whether the old target still exists.
+    old_target="(not a symlink)"
+    if [[ -L "$dst" ]]; then
+      old_target=$(readlink "$dst")
+      echo "REBIND   $name: $old_target -> $src"
+    fi
+
     # Backup FIRST so we never lose the old binary even if the new
     # symlink write fails later. For symlinks we preserve the link
     # itself (not its target) so recovery keeps its original semantics.
