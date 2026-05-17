@@ -35,10 +35,15 @@ def main() -> int:
 
     for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
         platform = json.loads(platform_file.read_text())
+        excluded_hooks = platform.get("excluded_hooks", [])
         for output in platform["outputs"]:
             out_path = REPO_ROOT / output["path"]
             expected = (
-                json.dumps(_build.render_output(base, output), indent=2, ensure_ascii=False)
+                json.dumps(
+                    _build.render_output(base, output, excluded_hooks),
+                    indent=2,
+                    ensure_ascii=False,
+                )
                 + "\n"
             )
             actual = out_path.read_text() if out_path.exists() else ""
@@ -62,21 +67,21 @@ def main() -> int:
                 f"expected '../../{name}'"
             )
 
-    # Version consistency: every generated artifact must carry the same version.
+    # Version consistency: collect versioned plugin artifacts from platform manifests.
+    versioned_kinds = {"plugin", "gemini-extension"}
     seen: dict[str, str] = {}
-    for artifact in (
-        ".claude-plugin/plugin.json",
-        ".claude-plugin/marketplace.json",
-        ".agents/plugins/marketplace.json",
-        "plugins/praxis/.codex-plugin/plugin.json",
-    ):
-        p = REPO_ROOT / artifact
-        if not p.exists():
-            continue
-        data = json.loads(p.read_text())
-        v = data.get("version") or (data.get("plugins") or [{}])[0].get("version")
-        if v:
-            seen[artifact] = v
+    for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
+        platform = json.loads(platform_file.read_text())
+        for output in platform["outputs"]:
+            if output["kind"] not in versioned_kinds:
+                continue
+            p = REPO_ROOT / output["path"]
+            if not p.exists():
+                continue
+            data = json.loads(p.read_text())
+            v = data.get("version") or (data.get("plugins") or [{}])[0].get("version")
+            if v:
+                seen[output["path"]] = v
     unique = set(seen.values())
     if len(unique) > 1:
         drifts.append(
