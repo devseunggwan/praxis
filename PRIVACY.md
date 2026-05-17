@@ -1,7 +1,11 @@
 # Privacy Policy
 
-Praxis is a local-only Claude Code plugin. It does not collect, transmit, or
-store data on any external server. All state lives in the user's own filesystem.
+Praxis is a local-only Claude Code plugin. Praxis code itself stores state
+only on the user's filesystem and does not transmit data on its own. However,
+praxis invokes external CLIs (`git`, `gh`, `cmux`, `claude`, `codex`,
+`gemini`) on the user's behalf, and some of those CLIs make network calls —
+see the [No Telemetry](#no-telemetry) section below for the enumerated egress
+paths.
 
 ## Transcript Reading
 
@@ -59,6 +63,25 @@ the hook's in-process execution. Third-party CLI privacy policies apply.
 
 ## No Telemetry
 
-Praxis does not include any analytics, telemetry, error reporting, or
-network calls of its own. There is no phone-home, no usage tracking, and
-no data ever leaves the local machine via praxis code.
+Praxis itself does not include analytics, telemetry, or error reporting.
+There is no phone-home and no usage tracking embedded in praxis code.
+
+However, praxis hooks and skills DO invoke external CLIs (`git`, `gh`,
+`cmux`, `claude`, `codex`, `gemini`) with the user's own credentials.
+Some of those invocations make network calls — most notably:
+
+- `hooks/pre-gh-pr-create-dedup-gate.py` runs `gh pr list` against the
+  target repo's PR search API to detect duplicate PRs.
+- `skills/cmux-delegate` performs two distinct egress steps when run
+  in a GitHub-backed repo:
+  1. **Context collection** — calls `gh pr list --head <branch>` and
+     `gh api repos/<owner>/<repo>/pulls/<num>/comments` to enrich the
+     delegated prompt with current PR metadata.
+  2. **Prompt forwarding** — pipes the resulting prompt file to
+     `claude` / `codex` / `gemini` CLIs, each of which sends the
+     prompt to its respective provider's API.
+
+These egress paths are visible in the hook/skill source (see SECURITY.md
+"Hook External-Command Allowlist") and run under the user's environment.
+Praxis does not intercept, store, or transmit additional data via its
+own code paths beyond what the invoked CLI requires.
