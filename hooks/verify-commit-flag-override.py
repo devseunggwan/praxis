@@ -183,29 +183,27 @@ def detect_overrides(argv: list[str]) -> list[str]:
 # Output
 # ---------------------------------------------------------------------------
 
-DENY_TEMPLATE = """BLOCKED: Commit-flag override(s) failed environment verification.
+DENY_TEMPLATE = """BLOCKED: Commit-flag override(s) detected.
 
 Detected override(s): {overrides}
 
 Environment issues:
 {env_issues}
 
-Required verification before this command:
+Required investigation before this command:
   1. git config --get commit.gpgsign            (repo default)
-  2. gpg --list-secret-keys                     (key availability, for signing)
-  3. git log --pretty=format:%G? -1             (recent commit signing status)
-  4. git config --get core.hooksPath            (hook path default, for hooks.path override)
+  2. gpg --list-secret-keys                     (key availability)
+  3. git log --pretty=format:%G? -1             (recent commit signing)
+  4. git config --get core.hooksPath            (hook path default)
 
-Why this is blocked:
-  - Global rule: 'Never skip hooks (--no-verify) or bypass signing
-    (--no-gpg-sign, -c commit.gpgsign=false) unless the user has explicitly
-    asked for it.'
+These checks help you decide whether the override is appropriate. The
+hook does NOT recognize their completion — re-running the same git
+commit invocation will be blocked again.
 
-Allow conditions:
-  - Verify each override matches your environment using the commands above,
-    then re-run with confidence.
-  - Set env PRAXIS_SKIP_COMMIT_FLAG_CHECK=1 (justify the bypass in the
-    commit message body).
+To proceed:
+  - Set PRAXIS_SKIP_COMMIT_FLAG_CHECK=1 in the environment (justify the
+    bypass in the commit message body).
+  - Or remove the override flag(s) that triggered the block.
 """
 
 
