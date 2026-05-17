@@ -2,7 +2,8 @@
   "expected_decision": "pass",
   "must_contain": [
     "upstream_feedback",
-    "memory"
+    "memory",
+    "gate_3_verdict"
   ],
   "must_not_contain": [
     "decision\": \"block\""

@@ -622,6 +622,47 @@ T29_ROW="| 1 | spec-gap | — | rule absent | missing rule | gap | No | claude_m
 run_case "T29_pass_non_routed_action_no_backing_repo_needed" "pass" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T29_CARD" "$T29_ROW")")"
 
+# Gate-3 verdict (distribution card) cases ------------------------------------
+
+# T30: block — gate_3_verdict: FAIL in distribution card.
+# Scenario: Stage 2.5 found a 2-action compound whose evidence was insufficient
+# (e.g., both actions derived from a single observation with no independent
+# citation for the second action). Stage 2.5 emits FAIL; hook must block.
+T30_CARD=$(cat <<EOF
+- memory: 1
+- issue: 1
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 0
+- gate_1_verdict: NA
+- gate_2_verdict: NA
+- gate_3_verdict: FAIL
+EOF
+)
+T30_ROW="| 1 | behavioral | — | repeat judgment error | structural | rule absent | Yes | memory, issue | compound action flagged: issue action lacks independent observation<br>backing_repo: devseunggwan/praxis | HIGH |"
+run_case "T30_block_gate3_verdict_fail_in_card" "block" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T30_CARD" "$T30_ROW")")"
+
+# T31: pass — gate_3_verdict: PASS in distribution card.
+# Scenario: Stage 2.5 verified a 2-action compound; both actions each backed
+# by an independent friction-event observation, not decision-coupled.
+T31_CARD=$(cat <<EOF
+- memory: 0
+- issue: 0
+- claude_md_draft: 1
+- skill_idea: 1
+- hook_code: 0
+- upstream_feedback: 0
+- gate_1_verdict: NA
+- gate_2_verdict: NA
+- gate_3_verdict: PASS
+EOF
+)
+T31_ROW="| 1 | behavioral | — | judgment misstep | structural | rule absent | No | claude_md_draft, skill_idea | compound verified: each action backed by independent observation; not decision-coupled | MED |"
+run_case "T31_pass_gate3_verdict_pass_in_card" "pass" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T31_CARD" "$T31_ROW")")"
+
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
 #   {expected_decision: "pass"|"block", must_contain: [...], must_not_contain: [...]}

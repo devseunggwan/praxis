@@ -37,6 +37,7 @@ of the following hold:
 |---------|------------|
 | `gate_1_verdict: FAIL` in the distribution card | Stage 2.5 Gate-1 (categorical) was violated |
 | `gate_2_verdict: FAIL` in the distribution card | Stage 2.5 Gate-2 (procedural rationale) was violated |
+| `gate_3_verdict: FAIL` in the distribution card | Stage 2.5 Gate-3 (evidence robustness) was violated — a 2-action compound finding lacked independent evidence per action, or had decision-coupled actions |
 | `gate_1_verdict` or `gate_2_verdict` key missing | Distribution card is malformed or Stage 2.5 was skipped |
 | Any row with `Category` ∈ {tool, workflow, spec-gap} AND `Proposed Actions = memory` (single) | Gate-1 violation detected via independent table parse |
 | Any row with `Proposed Actions = memory` (single) whose `Rationale` lacks exactly 5 lines `^not (issue\|claude_md_draft\|skill_idea\|hook_code\|upstream_feedback): .+$` | Gate-2 violation detected via independent table parse |
@@ -103,8 +104,8 @@ git -C ~/.claude/plugins/.../praxis apply --reverse <patch>
 
 ### Tests
 
-`tests/test_retrospect_mix_check.sh` covers 29 cases plus 4 synthetic
-regression fixtures (AC-R1~R4):
+`tests/test_retrospect_mix_check.sh` covers 31 cases plus 5 synthetic
+regression fixtures:
 
 - 4 pass scenarios (behavior-only with rationale, escalated tool, escalated
   workflow, compound action)
@@ -118,13 +119,16 @@ regression fixtures (AC-R1~R4):
 - 5 hardening (T22 escaped pipe in cell, T23 short row schema violation,
   T24 degenerate `memory, memory`, T25 dual-card last-wins, T26 retrospect
   inside fenced code block)
-- 3 Gate-3 (T27 upstream_feedback with backing_repo → pass, T28 issue
-  row missing backing_repo → block, T29 non-routed action no backing_repo
-  needed → pass)
+- 3 Gate-3 backing_repo (T27 upstream_feedback with backing_repo → pass,
+  T28 issue row missing backing_repo → block, T29 non-routed action no
+  backing_repo needed → pass)
+- 2 Gate-3 verdict (T30 gate_3_verdict: FAIL in card → block, T31
+  gate_3_verdict: PASS in card → pass)
 
 Fixtures live in `tests/fixtures/retrospect-synth-{tool,workflow,behavior,
-mixed}.jsonl` with `.expected.json` sidecars (`{expected_decision,
-must_contain, must_not_contain}`).
+mixed,gate3-fail}.jsonl` with `.expected.json` sidecars (`{expected_decision,
+must_contain, must_not_contain}`). All pass fixtures include `gate_3_verdict`
+in `must_contain` to verify the key is present in the distribution card.
 
 ```bash
 ./tests/test_retrospect_mix_check.sh
