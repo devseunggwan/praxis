@@ -31,17 +31,20 @@ FAILED_NAMES=()
 # run_case name expectation payload
 #   expectation:
 #     "advisory:<substring>" — exit 0 + stderr contains <substring>
+#     "ask:<substring>"       — exit 0 + stdout JSON has permissionDecision:ask + substring
 #     "pass"                  — exit 0 + stderr empty
 run_case() {
   local name="$1" expectation="$2" payload="$3"
 
-  local err_file
+  local out_file err_file
+  out_file=$(mktemp)
   err_file=$(mktemp)
-  printf '%s' "$payload" | "$HOOK" >/dev/null 2>"$err_file"
+  printf '%s' "$payload" | "$HOOK" >"$out_file" 2>"$err_file"
   local rc=$?
-  local err
+  local out err
+  out=$(cat "$out_file")
   err=$(cat "$err_file")
-  rm -f "$err_file"
+  rm -f "$out_file" "$err_file"
 
   local ok=1
   case "$expectation" in
@@ -49,6 +52,25 @@ run_case() {
       local needle="${expectation#advisory:}"
       [ "$rc" -eq 0 ] || ok=0
       case "$err" in
+        *"$needle"*) ;;
+        *) ok=0 ;;
+      esac
+      ;;
+    ask:*)
+      local needle="${expectation#ask:}"
+      [ "$rc" -eq 0 ] || ok=0
+      local decision
+      decision=$(python3 -c "
+import json, sys
+try:
+    d = json.loads(sys.argv[1])
+    h = d.get('hookSpecificOutput', {})
+    print(h.get('permissionDecision', ''))
+except Exception:
+    print('')
+" "$out" 2>/dev/null)
+      [ "$decision" = "ask" ] || ok=0
+      case "$out" in
         *"$needle"*) ;;
         *) ok=0 ;;
       esac
@@ -99,6 +121,81 @@ print(json.dumps(payload))
 " "$1"
 }
 
+make_ask_payload_with_question() {
+  # $1 = JSON array of option label strings (already JSON-encoded)
+  # $2 = question text (plain string)
+  python3 -c "
+import json, sys
+labels = json.loads(sys.argv[1])
+question_text = sys.argv[2]
+options = [{'label': l} for l in labels]
+payload = {
+    'session_id': 'test-session',
+    'tool_name': 'AskUserQuestion',
+    'tool_input': {
+        'questions': [
+            {
+                'question': question_text,
+                'options': options,
+            }
+        ]
+    },
+    'cwd': '/tmp',
+}
+print(json.dumps(payload))
+" "$1" "$2"
+}
+
+make_ask_payload_multi_question_bypass() {
+  # Q1 has (Recommended) + no Falsified:; Q2 has Falsified: in its question text.
+  # A per-question check must still escalate to ask for Q1.
+  python3 - <<'PYEOF'
+import json
+payload = {
+    "session_id": "test-session",
+    "tool_name": "AskUserQuestion",
+    "tool_input": {
+        "questions": [
+            {
+                "question": "Which approach?",
+                "options": [{"label": "Option A (Recommended)"}, {"label": "Option B"}],
+            },
+            {
+                "question": "Falsified: no existing PR found.\nAnother question?",
+                "options": [{"label": "Yes"}, {"label": "No"}],
+            },
+        ]
+    },
+    "cwd": "/tmp",
+}
+print(json.dumps(payload))
+PYEOF
+}
+
+make_ask_payload_description_only() {
+  # Payload where (Recommended) appears in options[].description, NOT in label.
+  python3 -c "
+import json
+payload = {
+    'session_id': 'test-session',
+    'tool_name': 'AskUserQuestion',
+    'tool_input': {
+        'questions': [
+            {
+                'question': 'Which approach?',
+                'options': [
+                    {'label': 'Option A', 'description': 'This is the (Recommended) path.'},
+                    {'label': 'Option B', 'description': 'Alternative'},
+                ],
+            }
+        ]
+    },
+    'cwd': '/tmp',
+}
+print(json.dumps(payload))
+"
+}
+
 make_bash_payload() {
   # $1 = command string
   python3 -c "
@@ -119,12 +216,12 @@ print(json.dumps(payload))
 # AskUserQuestion positive cases
 # ---------------------------------------------------------------------------
 
-run_case "AskUserQuestion: (Recommended) English marker fires" \
-  "advisory:output-block-falsify-advisory" \
+run_case "AskUserQuestion: (Recommended) English — no Falsified: — escalates to ask" \
+  "ask:Falsified:" \
   "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
 
-run_case "AskUserQuestion: (추천) Korean marker fires" \
-  "advisory:output-block-falsify-advisory" \
+run_case "AskUserQuestion: (추천) Korean — no Falsified: — escalates to ask" \
+  "ask:Falsified:" \
   "$(make_ask_payload '["옵션 A (추천)", "옵션 B"]')"
 
 run_case "AskUserQuestion: (recommended) lowercase also fires" \
@@ -222,6 +319,44 @@ run_case "Edge: non-string command (int) — fail-open silent pass" \
 run_case "Edge: non-string command (null) — fail-open silent pass" \
   pass \
   '{"tool_name":"Bash","tool_input":{"command":null}}'
+
+# ---------------------------------------------------------------------------
+# (Recommended) escalation cases — issue #290
+# ---------------------------------------------------------------------------
+
+# Case 1: (Recommended) label + Falsified: line present → PASS (silent)
+run_case "AskUserQuestion: (Recommended) + Falsified: line in question body → pass" \
+  pass \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B"]' \
+      "Falsified: checked no existing PR for this — none found.
+What should we do?")"
+
+# Case 2: (Recommended) label + no Falsified: → ASK
+run_case "AskUserQuestion: (Recommended) + no Falsified: → ask" \
+  "ask:Falsified:" \
+  "$(make_ask_payload '["Best option (Recommended)", "Alternative"]')"
+
+# Case 3: (Recommended) appears only in options[].description, not in label → PASS
+run_case "AskUserQuestion: (Recommended) in description only — false positive — silent pass" \
+  pass \
+  "$(make_ask_payload_description_only)"
+
+# Case 4: (추천) Korean label + no Falsified: → ASK
+run_case "AskUserQuestion: (추천) Korean label + no Falsified: → ask" \
+  "ask:Falsified:" \
+  "$(make_ask_payload '["권장 방법 (추천)", "대안"]')"
+
+# Case 5: Non-recommended option — no (Recommended) label — silent pass (no advisory)
+run_case "AskUserQuestion: non-recommended option labels — silent pass" \
+  pass \
+  "$(make_ask_payload '["Option A", "Option B", "Option C"]')"
+
+# Case 6 (regression for P2 fix): multi-question payload where Q1 has (Recommended)
+# but no Falsified:, and Q2 has Falsified: in its own question text — must still ask.
+run_case "AskUserQuestion: multi-question — Falsified: in Q2 does not cover Q1 (Recommended) → ask" \
+  "ask:Falsified:" \
+  "$(make_ask_payload_multi_question_bypass)"
 
 # ---------------------------------------------------------------------------
 # Summary
