@@ -13,7 +13,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | **Full** | + all cmux-* skills | + cmux |
 | **Multi-provider** | + codex/gemini routing in cmux-* | + codex-cli, gemini-cli |
 
-## Skills (11)
+## Skills (12)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Always call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
@@ -25,6 +25,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | Skill | Purpose |
 |-------|---------|
 | `retrospect` | Session retrospect — find friction root causes, propose improvements |
+| `codex-review-wrap` | Worktree-aware wrapper for `/codex:review` — forces explicit target selection, premise-verification gate, flip detection across rounds |
 
 ### Discipline
 
@@ -178,6 +179,7 @@ Design contract shared by all hooks:
 | `block-gh-state-all` | PreToolUse | Hard-block invalid `gh search ... --state all` flag combo | [docs/hook/block-gh-state-all.md](docs/hook/block-gh-state-all.md) |
 | `gh-flag-verify` | PreToolUse | Block `gh <subcmd>` calls with flags not in the subcommand's accepted set | [docs/hook/gh-flag-verify.md](docs/hook/gh-flag-verify.md) |
 | `cli-flag-incompat-advisory` | PreToolUse | Advisory nudge for known mode-incompatible flag combos in other CLIs (`git merge-tree --name-only` 3-arg form, `kubectl --use-protocol-buffers`) — issue #248 | [docs/hook/cli-flag-incompat-advisory.md](docs/hook/cli-flag-incompat-advisory.md) |
+| `block-ask-end-option` | PreToolUse | Block `AskUserQuestion` options carrying end-option markers when the most recent user message has no stop signal (strict default; advisory opt-out via `PRAXIS_ASK_END_ADVISORY=1`) | [docs/hook/block-ask-end-option.md](docs/hook/block-ask-end-option.md) |
 | `side-effect-scan` | PreToolUse | Ask before commands with collateral side effects (`git commit/push`, `gh pr merge/create`, `kubectl apply`) | [docs/hook/side-effect-scan.md](docs/hook/side-effect-scan.md) |
 | `memory-hint` | PreToolUse | Surface hookable memory entries by keyword at decision-construction time (advisory, never blocks) | [docs/hook/memory-hint.md](docs/hook/memory-hint.md) |
 | `codex-review-route` | UserPromptSubmit | Warn when `/codex:review` runs in a multi-worktree repo (cwd mismatch risk) | [docs/hook/codex-review-route.md](docs/hook/codex-review-route.md) |
