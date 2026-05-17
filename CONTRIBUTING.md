@@ -102,7 +102,7 @@ current gate.
    your spec. See the **Convention Survey Before Design** rule in `CLAUDE.md`.
 2. Write the hook + tests, register in `hooks/hooks.json`.
 3. Create `docs/hook/<name>.md` (use an existing spec as a template).
-4. Add a row to the hook index table in `CLAUDE.md`.
+4. Add a row to the hook index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
 5. Run `./scripts/check-plugin-manifests.py` to confirm packaging is clean.
 
 ## Packaging
