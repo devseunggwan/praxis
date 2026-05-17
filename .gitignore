@@ -23,6 +23,3 @@ __pycache__/
 # OMC (oh-my-claudecode local state)
 .omc/
 .omx/
-
-# Documentation (local only)
-docs/
