@@ -117,8 +117,8 @@ Codex plugin (Codex host). The two hosts differ in how they expose the skill:
 
 **Critical Codex constraint:** never call `Skill("codex:review")` from inside
 a skill — it declares `disable-model-invocation: true` and always fails with
-an error. Call the underlying `codex-companion.mjs` script directly instead.
-See `codex-review-wrap/SKILL.md` Step 4 for the pattern.
+an error. Invoke the codex CLI binary directly via `Bash` instead, mirroring
+the `codex-review-wrap` skill's Step 4 pattern.
 
 **`Bash` cwd reset trap:** a `Bash` call does not persist `cd` across calls.
 To change directory and run a command, chain them: `cd <path> && <command>`,
