@@ -391,7 +391,7 @@ can pick it up. Structural and stylistic edits do not need this trailer.
 
 | Situation | Action |
 |-----------|--------|
-| PR state ≠ OPEN | ABORT: "PR is {state} — review aborted. Re-open or target a different PR." |
+| PR state is CLOSED or MERGED | ABORT: "PR is {state} — review aborted. Re-open or target a different PR." |
 | `git worktree list` fails (not a git repo) | Abort: "git worktree list 실패 — git 저장소인지 확인하세요." |
 | All worktrees are bare | Treat as Case A (single effective target) using cwd |
 | User selects "취소" | Abort silently with one-line message |

@@ -267,6 +267,7 @@ run_case "16 pr_state_warn: /codex:review, MERGED PR → advisory"             p
 run_case "17 silent: /codex:review, no PR → no advisory (regression)"        silent        "$SINGLE" "/codex:review"              "$MOCK_GH_NO_PR"
 run_case "18 pr_state_warn: codex-review-wrap, CLOSED PR → advisory"         pr_state_warn "$SINGLE" "/praxis:codex-review-wrap"  "$MOCK_GH_CLOSED"
 run_case "19 silent: codex-review-wrap, OPEN PR → no advisory"               silent        "$SINGLE" "/praxis:codex-review-wrap"  "$MOCK_GH_OPEN"
+run_case "20 silent: mention-only codex-review-wrap mid-sentence → no advisory" silent    "$SINGLE" "use codex-review-wrap later" "$MOCK_GH_CLOSED"
 
 # --- cleanup ---------------------------------------------------------------
 rm -rf "$TMPROOT"

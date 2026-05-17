@@ -36,7 +36,7 @@ IS_CODEX_REVIEW_WRAP=0
 if [[ "$PROMPT" =~ ^/codex(:|-)review([[:space:]]|$) ]]; then
   IS_BARE_CODEX_REVIEW=1
 fi
-if [[ "$PROMPT" == *"codex-review-wrap"* ]]; then
+if [[ "$PROMPT" =~ ^(/praxis:)?codex-review-wrap([[:space:]]|$) ]]; then
   IS_CODEX_REVIEW_WRAP=1
 fi
 

@@ -84,12 +84,12 @@ denies).
 bash tests/test_codex_review_route.sh
 ```
 
-Covers 20 cases: 4 warn paths (bare, with flag, with `--model`,
+Covers 21 cases: 4 warn paths (bare, with flag, with `--model`,
 hyphenated form), 8 silent paths (single-worktree, plain text, different
 slash command, false-positive trailing chars, empty prompt, hyphenated
 suffix, mid-sentence mention, bare-repo + 1 linked worktree), 2 fail-safe
-paths (malformed JSON, non-git cwd), 6 PR-state guard paths (OPEN/CLOSED/MERGED/no-PR
-for `/codex:review`, plus `codex-review-wrap` CLOSED and OPEN). Worktree state
-is fixtured via temporary `git init` (and `git init --bare` for the bare-repo
-case); PR state is fixtured via mock `gh` binaries injected into PATH — no
-real GitHub remote required.
+paths (malformed JSON, non-git cwd), 7 PR-state guard paths (OPEN/CLOSED/MERGED/no-PR
+for `/codex:review`, `codex-review-wrap` CLOSED and OPEN, plus mention-only
+mid-sentence regression). Worktree state is fixtured via temporary `git init`
+(and `git init --bare` for the bare-repo case); PR state is fixtured via mock
+`gh` binaries injected into PATH — no real GitHub remote required.
