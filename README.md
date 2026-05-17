@@ -38,6 +38,13 @@ Development workflow skills for Claude Code — disciplined, fast, resilient.
 | `cmux-delegate` | Delegate a task to an independent session with auto-collected context (supports multi-provider routing) |
 | `cmux-browser` | Browser automation E2E testing via `cmux browser` CLI — SPA hydration wait included |
 
+## Design Principles
+
+- **CLAUDE.md is the interface**: no config files — project instructions define routing
+- **SRP per skill**: each skill has one responsibility
+- **Discipline over convenience**: Iron Laws gate each phase, no skipping
+- For agent vs skill rationale, see [docs/agent-vs-skill-analysis.md](docs/agent-vs-skill-analysis.md)
+
 ## Hooks
 
 Praxis ships a set of PreToolUse / PostToolUse / Stop / UserPromptSubmit hooks

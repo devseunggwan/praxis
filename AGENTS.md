@@ -52,6 +52,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 - **CLAUDE.md is the interface**: no config files — project instructions define routing
 - **SRP per skill**: each skill has one responsibility
 - **Discipline over convenience**: Iron Laws gate each phase, no skipping
+- For agent vs skill rationale, see [docs/agent-vs-skill-analysis.md](docs/agent-vs-skill-analysis.md)
 
 ## Provider Routing
 
