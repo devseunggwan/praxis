@@ -1,0 +1,10 @@
+{
+  "expected_decision": "pass",
+  "must_contain": [
+    "not-others: repeat=0",
+    "gate_2_verdict: PASS"
+  ],
+  "must_not_contain": [
+    "decision\": \"block\""
+  ]
+}

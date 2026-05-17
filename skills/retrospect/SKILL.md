@@ -255,7 +255,10 @@ After Stage 2 completes (all findings have `category[]` labels and provisional `
 
 If `memory` is the *only* action for such a finding → return that finding to Stage 2 step 4 (re-evaluate label correctness — Gate-1 violations are most often *mislabeling*: the event was actually behavioral but got tagged tool/workflow/spec-gap, or vice versa) AND step 8 (re-derive action with category-default rows applied).
 
-**Gate-2 (Procedural)** — for each finding with `Proposed Actions = memory` (single, not compound, regardless of category), verify the `Rationale` cell contains EXACTLY 5 lines, each matching the regex `^not (issue|claude_md_draft|skill_idea|hook_code|upstream_feedback): .+$`. The 5 lines MUST cover the 5 non-memory action types (no duplicates, no missing keys).
+**Gate-2 (Procedural)** — for each finding with `Proposed Actions = memory` (single, not compound, regardless of category), verify the `Rationale` cell matches **one** of the two accepted schemas (mixing is not allowed):
+
+- **Schema A** (verbose): EXACTLY 5 lines, each matching `^not (issue|claude_md_draft|skill_idea|hook_code|upstream_feedback): .+$`. The 5 lines MUST cover all 5 non-memory action types (no duplicates, no missing keys).
+- **Schema B** (dimension-tag, issue #285): 1–2 lines, each matching `^not-others: .+$`. The line(s) MUST encode why all non-memory actions were skipped via dimension tags (e.g., `not-others: repeat=0, rule_exists=yes, gateable=no, tool_defect=no`). No Schema A lines may appear alongside Schema B lines.
 
 If absent or incomplete → return that finding to Stage 2 step 8 (re-evaluate with explicit per-action rationale enforcement).
 
@@ -393,7 +396,7 @@ Stage 3 output MUST emit, in this order:
    - `Category`: comma-separated subset of `behavioral`, `tool`, `workflow`, `spec-gap` (≥1, see Stage 2 pre-scan categorization)
    - `Tool Layer`: one of `mcp`, `cli`, `builtin`, `skill`, or `—` (mandatory non-`—` when `tool` ∈ Category, optional `skill` for `workflow` / `spec-gap`, `—` for `behavioral`)
    - `Proposed Actions (1~2)`: comma-separated subset of `memory`, `issue`, `claude_md_draft`, `skill_idea`, `hook_code`, `upstream_feedback`; for findings marked `external=true` by Stage 2.5 Gate-4, append ` (external)` suffix to `upstream_feedback` (e.g., `memory, upstream_feedback (external)`)
-   - `Rationale`: free-form one-line for compound or non-memory rows; for **memory-only** rows (single `memory`, not compound), the cell MUST contain exactly 5 lines matching `^not (issue|claude_md_draft|skill_idea|hook_code|upstream_feedback): .+$`, one line per non-memory action type. Generic single-sentence rationales are NOT acceptable for memory-only findings. **For rows whose actions include `upstream_feedback`** (single or compound), the cell MUST also contain a literal line `backing_repo: <owner>/<repo>` (embedded via `<br>` for single-line markdown form) — Stage 4 Action 4 step 0 reads this as the routing decision. **Compound case `memory, upstream_feedback`**: the row is NOT memory-only (contains a non-memory action), so the 5-line schema does NOT apply — instead use free-form prose for the human rationale + the `backing_repo:` line. Compound combinations are *additive*: each action-specific Rationale convention applies independently to the row, joined with `<br>`.
+   - `Rationale`: free-form one-line for compound or non-memory rows; for **memory-only** rows (single `memory`, not compound), the cell MUST match Schema A or Schema B (see Gate-2 in Stage 2.5): Schema A — exactly 5 lines `^not (issue|claude_md_draft|skill_idea|hook_code|upstream_feedback): .+$`, one per non-memory action type; Schema B — 1-2 lines `^not-others: .+$` with dimension tags (e.g., `not-others: repeat=0, rule_exists=yes, gateable=no, tool_defect=no`). Generic single-sentence rationales are NOT acceptable for memory-only findings. **For rows whose actions include `upstream_feedback`** (single or compound), the cell MUST also contain a literal line `backing_repo: <owner>/<repo>` (embedded via `<br>` for single-line markdown form) — Stage 4 Action 4 step 0 reads this as the routing decision. **Compound case `memory, upstream_feedback`**: the row is NOT memory-only (contains a non-memory action), so the Schema A/B requirement does NOT apply — instead use free-form prose for the human rationale + the `backing_repo:` line. Compound combinations are *additive*: each action-specific Rationale convention applies independently to the row, joined with `<br>`.
 
 The Stop hook parses the distribution-card fence (deterministic) and the table (anchored on these literal column headers). Drift in this contract requires synchronized edits to `hooks/retrospect-mix-check.sh`, `tests/test_retrospect_mix_check.sh`, and `tests/fixtures/retrospect-synth-*.expected.json`.
 
@@ -809,7 +812,7 @@ If you catch yourself:
 - **Forcing tool friction into only a rule-violation frame** — tool-layer defects from step 4b MUST be carried in the unified findings table with `Tool Layer` set to a non-`—` value and evaluated for `upstream feedback`, not collapsed into rule-violation-only findings
 - **Skipping step 4b entirely** ("no tool issues this session") — step 4b is mandatory. If no tool friction is found, the distribution card MUST emit `upstream_feedback: 0` and the report MUST state "No tool/feature friction detected. ✅" explicitly
 - **Pre-scan에서 friction event에 `category[]` 라벨링을 누락한 채 Stage 2 step 3 이상 진행** — Layer E 강제. 누락은 Stage 2 진입 전 차단되어야 한다.
-- **Memory-only finding의 `Rationale`이 5줄 `not <action>: <reason>` 형식이 아니거나 5 action type 미만 커버** — Gate-2 위반. 일반 한 줄 진술은 memory-only 근거로 부적격.
+- **Memory-only finding의 `Rationale`이 Gate-2 schema 를 만족하지 않음** — Gate-2 위반. 허용 schema: (a) 5줄 `not <action>: <reason>` 형식 (Schema A) 또는 (b) 1-2줄 `not-others: <dim-tags>` 형식 (Schema B). 일반 한 줄 진술, 3-line `not-others:`, Schema A/B 혼용은 모두 부적격.
 - **Stage 2.5 분포 감사를 명시적으로 건너뛰고 Stage 3로 직행** — distribution card와 Gate-1/Gate-2/Gate-3 verdict 출력은 Stage 3 입력의 mandatory 전제.
 - **`tool` 라벨 finding의 `Tool Layer` 컬럼이 `—`로 비어 있음** — Layer E ↔ step 4b composition matrix 위반. tool 카테고리는 4b layer 중 하나(mcp/cli/builtin/skill)를 반드시 가져야 한다.
 - **`upstream_feedback` 행에 `backing_repo: <owner/repo>` 선언이 없음** — Stage 2 step 8 위반. 선언은 Stage 4 Action 4 step 0의 라우팅 결정 입력이며, 누락 시 Stage 4가 abort 한다.
@@ -833,7 +836,7 @@ If you catch yourself:
 |-------|-------------|-----------------|
 | **1. Load** | Read CLAUDE.md, form scan questions | Rule categories identified |
 | **2. Analyze** | Scan conversation, map to rules, find root cause | Root cause (not symptom) for each pattern; every event has `category[]` |
-| **2.5 Audit** | Run Gate-1 (categorical) + Gate-2 (5-line rationale schema) + Gate-3 (evidence robustness for 2-action findings) + Gate-4 (external-repo authorization pre-check for upstream_feedback) | All applicable gates PASS/WARN or per-finding cap reached and surfaced to user |
+| **2.5 Audit** | Run Gate-1 (categorical) + Gate-2 (Schema A 5-line or Schema B dimension-tag rationale) + Gate-3 (evidence robustness for 2-action findings) + Gate-4 (external-repo authorization pre-check for upstream_feedback) | All applicable gates PASS/WARN or per-finding cap reached and surfaced to user |
 | **3. Report** | Present unified table + distribution card, carry Stage 2 caveats forward, run Pre-Output Falsification Gate before each `AskUserQuestion`, collect approval per item | User approved at least 1 item (or confirmed 0 findings); every `(Recommended)` label has a `Falsification:` trace |
 | **4. Execute** | Run approved actions, verify artifacts | Completion report with links/paths + verification results |
 

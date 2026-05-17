@@ -5,9 +5,11 @@
 # T3 double gate (issue #146):
 #   Gate-1 (Categorical): findings tagged tool/workflow/spec-gap may not have
 #     Proposed Actions = memory (single, not compound).
-#   Gate-2 (Procedural): every memory-only row's Rationale must contain exactly
-#     5 lines matching '^not (issue|claude_md_draft|skill_idea|hook_code|
-#     upstream_feedback): .+$' covering the 5 non-memory action types.
+#   Gate-2 (Procedural): every memory-only row's Rationale must match one of:
+#     Schema A — exactly 5 lines matching '^not (issue|claude_md_draft|
+#       skill_idea|hook_code|upstream_feedback): .+$' (one per non-memory type).
+#     Schema B — 1-2 lines matching '^not-others: .+$' (dimension-tag form;
+#       issue #285). No mixing of Schema A and B lines.
 #
 # Trigger: last assistant message contains a line starting with '## Retrospect
 #   Report' AND the distribution-card fence '<!-- retrospect:distribution
@@ -190,16 +192,22 @@ while IFS= read -r row; do
     GATE1_VIOLATIONS+=("finding #${finding_num} (category=${category}): tool/workflow/spec-gap labeled but Proposed Actions = memory only")
   fi
 
-  # Gate-2: memory-only row Rationale must contain exactly 5 lines matching the
-  # action enum regex (one per non-memory action type).
+  # Gate-2: memory-only row Rationale must match Schema A or Schema B.
+  #   Schema A: exactly 5 'not <action>: ...' lines (one per non-memory type).
+  #   Schema B: 1-2 'not-others: ...' dimension-tag lines, no Schema A lines.
   if [ "$is_memory_only" = "true" ]; then
-    # The Rationale cell embeds line breaks via '<br>' in markdown OR is a
-    # multi-line cell when the table allows it. Normalize both: replace '<br>'
-    # with newline, then count lines matching the regex.
+    # Normalize '<br>' line-break markup to actual newlines.
     normalized=$(printf '%s' "$rationale" | sed 's/<br *\/*>/\n/g')
-    matches=$(printf '%s\n' "$normalized" | grep -cE '^[[:space:]]*not (issue|claude_md_draft|skill_idea|hook_code|upstream_feedback): .+')
-    if [ "$matches" -ne 5 ]; then
-      GATE2_VIOLATIONS+=("finding #${finding_num}: memory-only row but Rationale has ${matches}/5 'not <action>: <reason>' lines")
+    matches_a=$(printf '%s\n' "$normalized" | grep -cE '^[[:space:]]*not (issue|claude_md_draft|skill_idea|hook_code|upstream_feedback): .+')
+    matches_b=$(printf '%s\n' "$normalized" | grep -cE '^[[:space:]]*not-others: .+')
+    schema_a_pass=false
+    schema_b_pass=false
+    [ "$matches_a" -eq 5 ] && schema_a_pass=true
+    if [ "$matches_b" -ge 1 ] && [ "$matches_b" -le 2 ] && [ "$matches_a" -eq 0 ]; then
+      schema_b_pass=true
+    fi
+    if [ "$schema_a_pass" = "false" ] && [ "$schema_b_pass" = "false" ]; then
+      GATE2_VIOLATIONS+=("finding #${finding_num}: memory-only row Rationale matches neither schema A (5 'not <action>: ...' lines, found ${matches_a}/5) nor schema B (1-2 'not-others: ...' lines, found ${matches_b})")
     fi
   fi
 
@@ -279,7 +287,7 @@ if [ "$should_block" = "true" ]; then
     fi
   done
 
-  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category; Gate-2 → supply 5-line 'not <action>: <reason>' rationale (Stage 2.5); Gate-3 verdict → return to Stage 2.5 and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to Stage 2 step 8 and add 'backing_repo: <owner/repo>' to Rationale cell. See skills/retrospect/SKILL.md."
+  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to Stage 2.5 and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to Stage 2 step 8 and add 'backing_repo: <owner/repo>' to Rationale cell. See skills/retrospect/SKILL.md."
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'
   exit 0
 fi

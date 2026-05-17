@@ -663,6 +663,76 @@ T31_ROW="| 1 | behavioral | — | judgment misstep | structural | rule absent | 
 run_case "T31_pass_gate3_verdict_pass_in_card" "pass" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T31_CARD" "$T31_ROW")")"
 
+# Dimension-tag schema (Schema B) cases — issue #285 --------------------------
+
+# T32: pass — memory-only, 1-line Schema B (dimension-tag)
+T32_CARD=$(cat <<EOF
+- memory: 1
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 0
+- gate_1_verdict: NA
+- gate_2_verdict: PASS
+EOF
+)
+RATIONALE_DIM1='not-others: repeat=0, rule_exists=yes, gateable=no, tool_defect=no'
+T32_ROW="| 1 | behavioral | — | hasty conclusion | did not verify | rule absent | No | memory | ${RATIONALE_DIM1} | MED |"
+run_case "T32_pass_schema_b_1line_dim_tag" "pass" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T32_CARD" "$T32_ROW")")"
+
+# T33: pass — memory-only, 2-line Schema B (dimension-tag)
+T33_CARD=$(cat <<EOF
+- memory: 1
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 0
+- gate_1_verdict: NA
+- gate_2_verdict: PASS
+EOF
+)
+RATIONALE_DIM2='not-others: behavioral / first-occurrence / no-gate-surface<br>not-others: enforcement_surface=high-cost'
+T33_ROW="| 1 | behavioral | — | misjudged action | structural | rule absent | No | memory | ${RATIONALE_DIM2} | LOW |"
+run_case "T33_pass_schema_b_2line_dim_tag" "pass" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T33_CARD" "$T33_ROW")")"
+
+# T34: block — memory-only, 3-line Schema B (exceeds 1-2 line limit)
+T34_CARD=$(cat <<EOF
+- memory: 1
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 0
+- gate_1_verdict: NA
+- gate_2_verdict: FAIL
+EOF
+)
+RATIONALE_DIM3='not-others: repeat=0<br>not-others: rule_exists=yes<br>not-others: gateable=no'
+T34_ROW="| 1 | behavioral | — | misjudged action | structural | rule absent | No | memory | ${RATIONALE_DIM3} | LOW |"
+run_case "T34_block_schema_b_3line_exceeds_limit" "block" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T34_CARD" "$T34_ROW")")"
+
+# T35: block — memory-only, Schema A and B mixed (not allowed)
+T35_CARD=$(cat <<EOF
+- memory: 1
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 0
+- gate_1_verdict: NA
+- gate_2_verdict: FAIL
+EOF
+)
+RATIONALE_MIXED='not issue: first occurrence<br>not-others: rule_exists=yes, gateable=no, tool_defect=no'
+T35_ROW="| 1 | behavioral | — | misjudged action | structural | rule absent | No | memory | ${RATIONALE_MIXED} | LOW |"
+run_case "T35_block_schema_a_and_b_mixed" "block" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T35_CARD" "$T35_ROW")")"
+
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
 #   {expected_decision: "pass"|"block", must_contain: [...], must_not_contain: [...]}
