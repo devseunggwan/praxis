@@ -34,8 +34,14 @@ are excluded to avoid noise on internal source-code literals.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
+
+# Resolve sibling `_hook_utils.py` regardless of cwd at invocation time.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from _hook_utils import safe_tokenize  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Pattern definitions
@@ -230,6 +236,12 @@ def extract_scan_target(tool_name: str, tool_input: dict) -> str | None:
     value = tool_input.get(field)
     if not isinstance(value, str):
         return None
+    # Bash commands are shell syntax: tokenize first so that quoted argument
+    # values are unquoted and shell operators (;|&) are stripped as separators.
+    # Rejoin preserves the sequential ordering that SQL context detection needs.
+    if tool_name == "Bash":
+        tokens = safe_tokenize(value)
+        return " ".join(tokens) if tokens else value
     return value
 
 
