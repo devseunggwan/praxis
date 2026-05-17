@@ -1,9 +1,9 @@
-# PreToolUse Output-Block Falsification Advisory
+# PreToolUse Output-Block Falsification Advisory + Ask-Escalation
 
 `hooks/output-block-falsify-advisory.py` fires on every `PreToolUse` event
 for `AskUserQuestion` and `Bash` tool calls. It detects two surfaces where
 a self-authored proposal block is about to be surfaced without a falsification
-check and emits an advisory reminder.
+check and either asks for confirmation or emits an advisory reminder.
 
 ### Why this exists
 
@@ -13,37 +13,50 @@ The global CLAUDE.md rule **"Output-Block-Level Falsification Gate"** instructs:
 > an explicit falsification test on its premise. If a concrete invalidating
 > link/artifact exists — STOP. Do not surface the proposal.
 
-Despite this rule being loaded into context (4+ memory entries accumulated
+And **"Self-Falsify Before Recommendation Lock"** adds:
+
+> When labeling an option as `(Recommended)`, design and execute a disconfirming
+> test of the recommendation's own premise BEFORE surfacing. State explicitly
+> 'if this recommendation is wrong, what observation should be missing?' and
+> confirm that observation is in fact missing.
+
+Despite these rules being loaded into context (4+ memory entries accumulated
 2026-05-03 through 2026-05-13), the retrieval trigger does not fire at the
-specific moment the proposal block is authored. The pattern is consistent:
-same-session repeats where a wrong-framing issue cancelled at T+0 recurs
-with an identical anti-pattern at T+1h.
+specific moment the proposal block is authored. A 2026-05-17 retrospect session
+confirmed 4/4 `(Recommended)` surfaces lacked verifiable Falsified: evidence.
 
 Text rules and MEMORY.md entries alone have proven insufficient to prevent
 recurrence. A structural hook moves the gate to the tool-call use-site.
 
-Reference: issue [#221](https://github.com/devseunggwan/praxis/issues/221).
-
-**Escalation criteria:** After ~1 month of advisory operation (target: ~2026-06-15),
-evaluate recurrence rate. If advisory is repeatedly bypassed without falsification,
-escalate to blocking (`exit 2`) for the `AskUserQuestion` `(Recommended)` surface.
+References: issue [#221](https://github.com/devseunggwan/praxis/issues/221) (advisory),
+[#290](https://github.com/devseunggwan/praxis/issues/290) (ask escalation).
 
 ### What is detected
 
-| Tool | Trigger condition | Advisory emitted |
-|------|-----------------|-----------------|
-| `AskUserQuestion` | Any option `label` contains `(Recommended)` or `(추천)` (case-insensitive for English form) | Yes |
-| `Bash` | Command matches a bulk-action mutation keyword (see table below) | Yes |
+| Tool | Trigger condition | Decision |
+|------|-----------------|----------|
+| `AskUserQuestion` | Option `label` contains exact `(Recommended)` or `(추천)` AND question body has no `Falsified:` line | `permissionDecision: ask` |
+| `AskUserQuestion` | Option `label` contains exact `(Recommended)` or `(추천)` AND question body has `Falsified:` line | Silent pass |
+| `AskUserQuestion` | Option `label` contains `(recommended)` (case-insensitive, not exact) | Advisory stderr |
+| `Bash` | Command matches a bulk-action mutation keyword (see table below) | Advisory stderr |
 | Any other tool | — | Silent pass-through |
 | Malformed payload / missing field | — | Silent fail-open |
 
-**This hook never blocks.** Advisory mode only — exit 0 in all cases.
-
-#### AskUserQuestion: (Recommended) marker
+#### AskUserQuestion: (Recommended) marker and Falsified: gate
 
 `(Recommended)` and `(추천)` in option labels are the canonical signal for a
-self-authored proposal block about to be surfaced. The CLAUDE.md rule names
-`(Recommended)` as a primary trigger for the falsification gate.
+self-authored proposal block about to be surfaced. When these exact tokens
+(case-sensitive, including parentheses) are detected, the hook checks the
+`question` field of each question object for a line that starts with `Falsified:`
+(exact prefix at line start, as in `Falsified: checked no existing PR — none found`).
+
+- **`Falsified:` present** → silent pass. The model has provided verifiable
+  evidence of a disconfirming test.
+- **`Falsified:` absent** → `permissionDecision: ask`. The model must add the
+  falsification line and retry.
+
+Only `options[].label` is scanned for the marker — `options[].description` text
+that incidentally contains `(Recommended)` does not trigger the gate.
 
 #### Bash: bulk-action mutation keywords
 
@@ -59,6 +72,24 @@ matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
 
 ### Response shape
 
+#### Ask-escalation (AskUserQuestion with exact `(Recommended)` / `(추천)`, no `Falsified:`)
+
+**JSON to stdout:**
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "ask",
+    "permissionDecisionReason": "(Recommended) 라벨이 있으나 question body 에 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Self-Falsify Before Recommendation Lock 룰. 추가 후 재시도."
+  }
+}
+```
+
+**Exit code:** `0`.
+
+#### Advisory (Bash bulk-action, or case-insensitive `(recommended)` only)
+
 **Advisory message** (emitted to stderr, never stdout):
 
 ```
@@ -69,11 +100,7 @@ proposal in this session? If yes — STOP and cite the invalidating link
 instead of surfacing the proposal.
 ```
 
-**Exit code:** always `0` (never blocks).
-
-**JSON response:** none — the hook communicates via stderr only
-(`additionalContext` in Claude Code's terminology). Claude Code reads stderr
-from advisory PreToolUse hooks and includes it in the model's context.
+**Exit code:** `0`.
 
 ### Parsing guarantees
 
@@ -95,24 +122,33 @@ All parsing is done with the Python standard library only.
 bash tests/test_output_block_falsify_advisory.sh
 ```
 
-Covers 10 cases:
+Covers 26 cases:
 
-**Positive (AskUserQuestion):**
-- Option label `(Recommended)` → advisory emitted
-- Option label `(추천)` → advisory emitted
+**Ask-escalation (AskUserQuestion, issue #290):**
+- Option label `(Recommended)` + no `Falsified:` in question body → `permissionDecision: ask`
+- Option label `(추천)` + no `Falsified:` → `permissionDecision: ask`
+- Option label `(Recommended)` + `Falsified:` line present → silent pass
+- `(Recommended)` appears in `options[].description` only (not label) → silent pass (false positive guard)
+- Non-recommended option labels → silent pass
 
-**Negative (AskUserQuestion):**
-- Option labels without marker → silent pass
+**Advisory (AskUserQuestion, case-insensitive fallback):**
+- Option label `(recommended)` lowercase only → advisory emitted
 
-**Positive (Bash):**
-- `gh pr merge --all` with "merge all" phrasing → advisory emitted
-- `gh issue close --all` with "close all" phrasing → advisory emitted
-- Korean: `모두 삭제` → advisory emitted
+**Pass (AskUserQuestion):**
+- Option labels without any marker → silent pass
+- Empty options → silent pass
 
-**Negative (Bash):**
-- `git status` → silent pass
-- `gh pr list --all` (read-only, no mutation verb) → silent pass
+**Advisory (Bash):**
+- `merge all`, `close all`, `delete all` (English) → advisory emitted
+- Korean: `모두 삭제`, `전부 머지`, `다 머지` → advisory emitted
+
+**Pass (Bash):**
+- `git status`, `gh pr list --state open` (read-only) → silent pass
+- `git log --all` (--all flag, no mutation verb) → silent pass
+- `disclose all`, `enclose all` (word-boundary regression) → silent pass
 
 **Edge:**
 - Malformed JSON stdin → exit 0, silent pass
 - Empty payload → exit 0, silent pass
+- Unknown tool name → exit 0, silent pass
+- Non-string command (int / null) → exit 0, silent pass

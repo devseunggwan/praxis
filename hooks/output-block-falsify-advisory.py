@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
-"""PreToolUse advisory: nudge output-block falsification gate.
+"""PreToolUse advisory + ask-escalation: output-block falsification gate.
 
-Issue #221. Recurring failure mode: the "Output-Block-Level Falsification Gate"
-rule in CLAUDE.md (4+ memory entries accumulated 2026-05-03 through 2026-05-13)
-fails to fire at output time because rule retrieval is not structural — the rule
-is loaded but not re-triggered at the moment the proposal block is authored.
+Issue #221 (advisory), #290 (ask escalation). Recurring failure mode: the
+"Output-Block-Level Falsification Gate" rule in CLAUDE.md (4+ memory entries
+accumulated 2026-05-03 through 2026-05-13) fails to fire at output time because
+rule retrieval is not structural — the rule is loaded but not re-triggered at
+the moment the proposal block is authored.
 
 This hook adds a structural enforcement point at two surfaces:
 
-  1. AskUserQuestion — option labels containing "(Recommended)" or "(추천)"
-     These markers are the canonical signal for a self-authored proposal block
-     about to be surfaced to the user.
+  1. AskUserQuestion — option labels containing "(Recommended)" or "(추천)":
+     - Exact case-sensitive match ("(Recommended)" / "(추천)"):
+       Escalate to `permissionDecision: ask` if the question body lacks a
+       `Falsified:` line (exact prefix at line start). If `Falsified:` IS
+       present, silent pass.
+     - Case-insensitive match only (e.g. "(recommended)" lowercase):
+       Advisory stderr reminder (original behavior).
 
   2. Bash — bulk-action commands containing patterns like "close all",
-     "delete all", "merge all" (+ Korean equivalents), which may reflect a
-     consequence of a proposal block whose premise was not falsified.
-
-When detected, an advisory stderr reminder is emitted asking whether the
-output-block falsification gate has been run. The hook NEVER blocks (exit 0
-always). Advisory mode is the only mode; escalation to blocking will be
-evaluated after ~1 month of advisory operation.
+     "delete all", "merge all" (+ Korean equivalents). Advisory only.
 
 Fail-open contract (project hook design):
   - Malformed / missing stdin JSON → exit 0
@@ -34,7 +33,7 @@ import re
 import sys
 
 # ---------------------------------------------------------------------------
-# Advisory message
+# Messages
 # ---------------------------------------------------------------------------
 
 ADVISORY_MSG = (
@@ -45,11 +44,21 @@ ADVISORY_MSG = (
     "instead of surfacing the proposal."
 )
 
+ASK_MSG = (
+    "(Recommended) 라벨이 있으나 question body 에 "
+    "'Falsified: <disconfirming test 결과>' 가 없음. "
+    "CLAUDE.md Self-Falsify Before Recommendation Lock 룰. 추가 후 재시도."
+)
+
 # ---------------------------------------------------------------------------
 # AskUserQuestion: (Recommended) / (추천) marker detection
 # ---------------------------------------------------------------------------
 
-# Substrings to search for in option labels (case-insensitive for English form).
+# Exact tokens for ask-escalation (case-sensitive, includes parentheses).
+RECOMMENDED_MARKERS_EXACT_EN = ("(Recommended)",)
+RECOMMENDED_MARKERS_EXACT_KO = ("(추천)",)
+
+# Substrings for fallback advisory (case-insensitive for English form).
 RECOMMENDED_MARKERS_EN = ("(Recommended)",)
 RECOMMENDED_MARKERS_KO = ("(추천)",)
 
@@ -79,6 +88,44 @@ def _collect_option_labels(tool_input: dict) -> list[str]:
     return labels
 
 
+def _collect_question_texts(tool_input: dict) -> list[str]:
+    """Collect questions[].question text strings from all question objects."""
+    texts: list[str] = []
+    questions = tool_input.get("questions") or []
+    if not isinstance(questions, list):
+        return texts
+    for q in questions:
+        if not isinstance(q, dict):
+            continue
+        text = q.get("question")
+        if isinstance(text, str):
+            texts.append(text)
+    return texts
+
+
+def _has_exact_recommended_marker(labels: list[str]) -> bool:
+    """True if any label contains exact (Recommended) or (추천) (case-sensitive)."""
+    if not labels:
+        return False
+    for label in labels:
+        for marker in RECOMMENDED_MARKERS_EXACT_EN:
+            if marker in label:
+                return True
+        for marker in RECOMMENDED_MARKERS_EXACT_KO:
+            if marker in label:
+                return True
+    return False
+
+
+def _has_falsified_line(texts: list[str]) -> bool:
+    """True if any question text has a line beginning with 'Falsified:' (exact prefix)."""
+    for text in texts:
+        for line in text.splitlines():
+            if line.startswith("Falsified:"):
+                return True
+    return False
+
+
 def _has_recommended_marker(labels: list[str]) -> bool:
     """True if any option label contains a (Recommended) / (추천) marker."""
     if not labels:
@@ -92,6 +139,21 @@ def _has_recommended_marker(labels: list[str]) -> bool:
             if marker in label:
                 return True
     return False
+
+
+def _emit_ask(message: str) -> None:
+    """Output permissionDecision: ask JSON to stdout."""
+    json.dump(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "ask",
+                "permissionDecisionReason": message,
+            }
+        },
+        sys.stdout,
+    )
+    sys.stdout.write("\n")
 
 
 # ---------------------------------------------------------------------------
@@ -162,20 +224,21 @@ def _main_inner() -> int:
     if not isinstance(tool_input, dict):
         return 0
 
-    fire = False
-
     if tool_name == "AskUserQuestion":
         labels = _collect_option_labels(tool_input)
-        if _has_recommended_marker(labels):
-            fire = True
+        if _has_exact_recommended_marker(labels):
+            # Ask-escalation path: check for Falsified: evidence in question body.
+            texts = _collect_question_texts(tool_input)
+            if not _has_falsified_line(texts):
+                _emit_ask(ASK_MSG)
+        elif _has_recommended_marker(labels):
+            # Fallback advisory: case-insensitive match (e.g. lowercase "(recommended)").
+            sys.stderr.write(ADVISORY_MSG + "\n")
 
     elif tool_name == "Bash":
         command = tool_input.get("command")
         if isinstance(command, str) and _is_bulk_action_command(command):
-            fire = True
-
-    if fire:
-        sys.stderr.write(ADVISORY_MSG + "\n")
+            sys.stderr.write(ADVISORY_MSG + "\n")
 
     return 0
 
