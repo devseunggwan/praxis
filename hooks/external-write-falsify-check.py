@@ -11,6 +11,9 @@ This hook detects:
     flag (`--body`, `-b`, `--body-file`, `-F`)
   - MCP tool calls writing to chat / docs surfaces (slack send/post,
     notion create_page / update_page)
+  - Write tool calls to staging paths (/tmp/*-issue-*.md, /tmp/*-pr-*.md,
+    .omc/plans/*.md) when cluster-approval language is found in recent user
+    messages (issue #276)
 
 When the body contains hypothesis markers (might / could / potentially / appears
 to / is failing / 가설 / 추정), it emits a stderr advisory reminding the user
@@ -24,7 +27,8 @@ it emits a separate advisory (issue #183).
 Exits 0 by default — this is an advisory, not a block. Set
 `PRAXIS_EXTERNAL_WRITE_STRICT=1` to convert hypothesis-marker detection into a
 hard block (exit 2). Set `PRAXIS_AUTHOR_EXEMPT_STRICT=1` to convert author-exempt
-detection into a hard block (exit 2).
+detection into a hard block (exit 2). Set `PRAXIS_CLUSTER_APPROVAL_STRICT=1` to
+convert cluster-approval staging detection into a hard block (exit 2).
 
 Uses shlex tokenization (same approach as block-gh-state-all.py / side-effect-scan.py)
 so that pattern references inside quoted strings, echo arguments, or comments
@@ -413,6 +417,113 @@ AUTHOR_EXEMPT_ADVISORY = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Cluster-approval language detection (issue #276)
+# ---------------------------------------------------------------------------
+# Detects the pattern: user approves a cluster of tasks in bulk ("all 4 together",
+# "1+3 같이"), then the agent writes directly to a staging path without
+# per-action surfacing. CLAUDE.md rule: "No Approval Transfer Across Companion PRs".
+
+_USER_MSG_SCAN_COUNT = 5
+
+# Patterns that indicate a cluster/bulk approval by the user.
+CLUSTER_APPROVAL_PATTERNS = (
+    # English — exact phrases from the issue spec
+    re.compile(r"\b\d+\s+buckets?\s+together\b", re.IGNORECASE),
+    re.compile(r"\ball\s+\d+\s+as\s+separate\b", re.IGNORECASE),
+    re.compile(r"\bas\s+approved\s+above\b", re.IGNORECASE),
+    re.compile(r"\bcluster\s+(?:i|we)\s+approved\b", re.IGNORECASE),
+    # "all N ... approv*" within 50 chars (e.g. "all 4 approved", "all 4 go ahead")
+    re.compile(r"\ball\s+\d+\b.{0,50}\bapprov\w*", re.IGNORECASE),
+    # Korean — from issue spec
+    re.compile(r"\d+개\s*모두"),
+    re.compile(r"\d+\s*\+\s*\d+\s*같이"),
+    re.compile(r"모두\s*승인"),
+)
+
+# Staging paths: intermediate draft files, not final external-surface targets.
+STAGING_PATH_PATTERNS = (
+    re.compile(r"/tmp/[^/\s]*-issue-[^/\s]*\.md$"),
+    re.compile(r"/tmp/[^/\s]*-pr-[^/\s]*\.md$"),
+    re.compile(r"\.omc/plans/[^/\s]*\.md$"),
+)
+
+CLUSTER_APPROVAL_ADVISORY = (
+    "REMINDER (External-Surface Write / Cluster-Approval): cluster-approval "
+    "language detected in a recent user message.\n"
+    "Cluster approvals (\"all N together\", \"1+3 같이\", \"as approved above\") "
+    "do NOT auto-transfer to per-action staging writes.\n"
+    "Each child mutation (issue draft, PR body) requires its own explicit "
+    "per-action surfacing via AskUserQuestion.\n"
+    "Surface a dedicated AskUserQuestion for this specific action before "
+    "writing to a staging path.\n"
+    "Set PRAXIS_CLUSTER_APPROVAL_STRICT=1 to convert this advisory into a "
+    "hard block (exit 2).\n"
+)
+
+
+def _recent_user_messages(transcript_path: str, count: int) -> list[str]:
+    """Return text from the last `count` user messages in the transcript.
+
+    Scans the last _TRANSCRIPT_SCAN_LINES JSONL entries in reverse so that
+    the most-recent user messages are returned first (index 0 = most recent).
+    """
+    if not transcript_path or not os.path.isfile(transcript_path):
+        return []
+    try:
+        with open(transcript_path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return []
+
+    msgs: list[str] = []
+    for line in reversed(lines[-_TRANSCRIPT_SCAN_LINES:]):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(entry, dict):
+            continue
+        msg = entry.get("message") or {}
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content") or ""
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+            text = "\n".join(parts)
+        else:
+            continue
+        if text.strip():
+            msgs.append(text)
+        if len(msgs) >= count:
+            break
+    return msgs
+
+
+def _has_cluster_approval(user_messages: list[str]) -> bool:
+    """Return True if any recent user message contains cluster-approval language."""
+    for msg in user_messages:
+        for pat in CLUSTER_APPROVAL_PATTERNS:
+            if pat.search(msg):
+                return True
+    return False
+
+
+def _is_staging_path(file_path: str) -> bool:
+    """Return True if file_path matches a recognized staging path pattern."""
+    if not file_path:
+        return False
+    return any(pat.search(file_path) for pat in STAGING_PATH_PATTERNS)
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -443,6 +554,16 @@ def main() -> int:
         mcp_body = _extract_mcp_body(tool_input)
         if mcp_body:
             all_bodies.append(mcp_body)
+    elif tool_name == "Write":
+        # --- Check 3: cluster-approval + staging path (issue #276) ---
+        file_path = tool_input.get("file_path", "") or ""
+        if _is_staging_path(file_path):
+            user_msgs = _recent_user_messages(transcript_path, _USER_MSG_SCAN_COUNT)
+            if _has_cluster_approval(user_msgs):
+                sys.stderr.write(CLUSTER_APPROVAL_ADVISORY)
+                if os.environ.get("PRAXIS_CLUSTER_APPROVAL_STRICT") == "1":
+                    return 2
+        return 0
     else:
         return 0
 

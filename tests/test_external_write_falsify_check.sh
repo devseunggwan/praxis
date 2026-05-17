@@ -36,8 +36,10 @@ run_case() {
   err_file=$(mktemp)
   if [ "$strict" = "strict" ]; then
     echo "$payload" | PRAXIS_EXTERNAL_WRITE_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
+  elif [ "$strict" = "cluster_strict" ]; then
+    echo "$payload" | PRAXIS_CLUSTER_APPROVAL_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
   else
-    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT python3 "$HOOK" >/dev/null 2>"$err_file"
+    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_CLUSTER_APPROVAL_STRICT python3 "$HOOK" >/dev/null 2>"$err_file"
   fi
   local rc=$?
   local err
@@ -215,6 +217,63 @@ run_case "author-exempt: bash code block column name (warn)" \
   "warn" "advisory" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr create --body-file $AE_BODY_FILE\"}}"
 rm -f "$AE_BODY_FILE"
+
+# --- cluster-approval: staging path detection (issue #276) ---
+
+# Cluster approval in transcript + staging path Write → advisory fires.
+CA_TRANSCRIPT=$(mktemp)
+printf '%s\n' \
+  '{"message":{"role":"user","content":[{"type":"text","text":"all 4 as separate issues, go ahead and approve them all"}]}}' \
+  > "$CA_TRANSCRIPT"
+run_case "cluster-approval: EN pattern + staging /tmp/-issue-.md Write (warn)" \
+  "warn" "advisory" \
+  "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"/tmp/praxis-issue-b2.md\",\"content\":\"draft\"},\"transcript_path\":\"$CA_TRANSCRIPT\"}"
+rm -f "$CA_TRANSCRIPT"
+
+# Korean cluster approval ("1+3 같이") + staging path → advisory fires.
+CA_TRANSCRIPT_KO=$(mktemp)
+printf '%s\n' \
+  '{"message":{"role":"user","content":[{"type":"text","text":"1+3 같이 진행해줘"}]}}' \
+  > "$CA_TRANSCRIPT_KO"
+run_case "cluster-approval: KO pattern + staging .omc/plans/ Write (warn)" \
+  "warn" "advisory" \
+  "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"/Users/dev/repo/.omc/plans/batch-issue.md\",\"content\":\"draft\"},\"transcript_path\":\"$CA_TRANSCRIPT_KO\"}"
+rm -f "$CA_TRANSCRIPT_KO"
+
+# Cluster approval in transcript but Write to non-staging path → no advisory.
+CA_TRANSCRIPT2=$(mktemp)
+printf '%s\n' \
+  '{"message":{"role":"user","content":[{"type":"text","text":"all 4 together approved"}]}}' \
+  > "$CA_TRANSCRIPT2"
+run_case "cluster-approval: EN pattern + non-staging path (silent)" \
+  "silent" "advisory" \
+  "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"/Users/dev/repo/README.md\",\"content\":\"docs\"},\"transcript_path\":\"$CA_TRANSCRIPT2\"}"
+rm -f "$CA_TRANSCRIPT2"
+
+# Staging path but no cluster-approval language in recent user messages → no advisory.
+EMPTY_TRANSCRIPT=$(mktemp)
+printf '%s\n' \
+  '{"message":{"role":"user","content":[{"type":"text","text":"please write the draft for issue 42"}]}}' \
+  > "$EMPTY_TRANSCRIPT"
+run_case "cluster-approval: staging path but no cluster-approval language (silent)" \
+  "silent" "advisory" \
+  "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"/tmp/task-issue-42.md\",\"content\":\"draft\"},\"transcript_path\":\"$EMPTY_TRANSCRIPT\"}"
+rm -f "$EMPTY_TRANSCRIPT"
+
+# Write tool, staging path, cluster approval, strict mode → block.
+CA_TRANSCRIPT_STRICT=$(mktemp)
+printf '%s\n' \
+  '{"message":{"role":"user","content":[{"type":"text","text":"4 buckets together, all approved"}]}}' \
+  > "$CA_TRANSCRIPT_STRICT"
+run_case "cluster-approval: strict mode + staging path (block)" \
+  "block" "cluster_strict" \
+  "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"/tmp/praxis-pr-fix.md\",\"content\":\"draft\"},\"transcript_path\":\"$CA_TRANSCRIPT_STRICT\"}"
+rm -f "$CA_TRANSCRIPT_STRICT"
+
+# Write tool with no transcript_path → fail-open (no advisory).
+run_case "cluster-approval: Write + staging path + no transcript (silent)" \
+  "silent" "advisory" \
+  '{"tool_name":"Write","tool_input":{"file_path":"/tmp/praxis-issue-x.md","content":"draft"}}'
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
