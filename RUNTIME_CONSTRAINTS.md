@@ -67,7 +67,39 @@ delegation was confirmed non-viable.
 
 ---
 
-## 3. `Bash` tool — cwd resets between invocations
+## 3. `Agent(subagent_type=...)` cannot invoke a skill — `Skill(...)` is the only path
+
+**Constraint**: The `Agent` and `Skill` tools address disjoint namespaces.
+`Agent(subagent_type="praxis:<name>")` resolves only against registered
+subagent types (`general-purpose`, `Explore`, `Plan`, OMC `executor`, etc.).
+Every praxis entry under `skills/*/SKILL.md` is a *skill*, not a subagent,
+and is reachable only via `Skill(skill="praxis:<name>")`.
+
+**Why it bites skills**: Skill names look like subagent IDs (slug-style,
+plugin-prefixed), so it is natural to try `Agent(subagent_type="praxis:retrospect")`.
+The call fails with `Agent type not found: praxis:retrospect`, which gives
+no signal about the correct `Skill(...)` form. Documentation that mixes
+"agent" and "skill" interchangeably amplifies the confusion.
+
+**Workaround**: Always invoke praxis entries via `Skill(skill="praxis:<name>")`.
+This is true regardless of whether the underlying skill declares
+`disable-model-invocation: true` — that flag governs Skill→Skill nesting
+(see entry #2), not the Agent-vs-Skill distinction.
+
+| Wrong | Right |
+|-------|-------|
+| `Agent(subagent_type="praxis:codex-review-wrap")` | `Skill(skill="praxis:codex-review-wrap")` |
+| `Agent(subagent_type="praxis:retrospect")` | `Skill(skill="praxis:retrospect")` |
+| `Agent(subagent_type="praxis:cmux-delegate")` | `Skill(skill="praxis:cmux-delegate")` |
+
+**Verified**: 2026-05-17 / Claude Code (Opus 4.7) / Issue #249 — `Agent()`
+returns `Agent type not found` for every praxis skill name. Any praxis
+skill listed in the README or AGENTS.md table is reachable only through
+the `Skill(...)` tool.
+
+---
+
+## 4. `Bash` tool — cwd resets between invocations
 
 **Constraint**: Each `Bash` tool call starts with the session's original cwd.
 A `cd /some/path` in one `Bash` call does **not** persist to the next call.
