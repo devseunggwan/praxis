@@ -136,6 +136,23 @@ run_case "merge-tree --name-only with --strategy-option (space) + 2 positionals"
   silent \
   "git merge-tree --strategy-option ours --name-only HEAD origin/main"
 
+# Regression — codex review round 2 F1: unquoted command substitution
+# `$(...)` was previously split by safe_tokenize across multiple tokens,
+# so --merge-base only consumed `$(git` as its value and the remaining
+# tokens (`merge-base`, `HEAD`, `origin/main)`) were counted as positionals.
+# Coalesce + skip must treat the whole $(...) run as one logical value.
+run_case "merge-tree --merge-base \$(...) (unquoted) + 2 positionals" \
+  silent \
+  "git merge-tree --merge-base \$(git merge-base HEAD origin/main) --name-only HEAD origin/main"
+
+run_case "merge-tree --merge-base=\$(...) (equals form, unquoted)" \
+  silent \
+  "git merge-tree --merge-base=\$(git merge-base HEAD origin/main) --name-only HEAD origin/main"
+
+run_case "merge-tree --merge-base \"\$(...)\" (quoted)" \
+  silent \
+  "git merge-tree --merge-base \"\$(git merge-base HEAD origin/main)\" --name-only HEAD origin/main"
+
 # === SILENT paths (unrelated commands) =====================================
 
 run_case "git status (different subcommand)" \

@@ -95,13 +95,59 @@ _MERGE_TREE_FLAGS_WITH_ARG = frozenset({
 })
 
 
+def _coalesce_subst_runs(tokens: list[str]) -> list[str]:
+    """Collapse unquoted `$(...)` command-substitution runs into single tokens.
+
+    `safe_tokenize` uses shlex with whitespace_split=True, which is unaware
+    of POSIX command substitution. An unquoted `$(git merge-base HEAD x)`
+    therefore splits into `['$(git', 'merge-base', 'HEAD', 'x)']` — four
+    tokens — and any flag-value-skip logic only consumes the first token.
+    The remaining tokens then look like positional arguments and inflate
+    the count.
+
+    This helper walks the token list and merges any run that starts with a
+    token containing `$(` and ends with a token containing the matching `)`
+    into a single logical token. Quoted substitutions (e.g. `"$(...)"`)
+    are already a single token at this layer and need no special handling.
+
+    The merge is conservative — `$(` and `)` are required to be present in
+    SOME token (not necessarily at start/end) so the helper correctly
+    handles tokens like `--merge-base=$(git` ... `merge-base` ... `x)`.
+    Unbalanced runs (`$(` with no closing `)`) fall through to the end of
+    argv and are treated as a single token — the caller still sees them
+    as one element rather than several spurious positionals.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(tokens)
+    while i < n:
+        tok = tokens[i]
+        if "$(" in tok and ")" not in tok[tok.index("$(") + 2:]:
+            j = i + 1
+            parts = [tok]
+            while j < n:
+                parts.append(tokens[j])
+                if ")" in tokens[j]:
+                    break
+                j += 1
+            out.append(" ".join(parts))
+            i = j + 1
+        else:
+            out.append(tok)
+            i += 1
+    return out
+
+
 def _count_merge_tree_positionals(argv: list[str]) -> int:
     """Count positional (non-flag) arguments to `git merge-tree`.
 
     Walks argv past git-level globals, finds `merge-tree`, then counts
     every non-flag token after the subcommand. Value tokens consumed by
-    known value-taking flags are NOT counted.
+    known value-taking flags are NOT counted. Unquoted `$(...)` runs are
+    coalesced via `_coalesce_subst_runs` so they count as exactly one
+    logical argument, matching what the shell will pass to git.
     """
+    argv = _coalesce_subst_runs(argv)
     i = 0
     n = len(argv)
     # Skip past git global flags (the caller already verified argv[0]=="git"
@@ -165,10 +211,11 @@ def _check_git(argv: list[str]) -> Optional[str]:
                 "\n"
                 "  Fix: pass 1 or 2 branches (modern mode), e.g.\n"
                 "    git merge-tree --name-only HEAD origin/main\n"
-                "  or pass --merge-base explicitly (either form works):\n"
-                "    git merge-tree --merge-base $(git merge-base HEAD origin/main) "
+                "  or pass --merge-base explicitly — quote any command\n"
+                "  substitution so the shell does not word-split the value:\n"
+                "    git merge-tree --merge-base \"$(git merge-base HEAD origin/main)\" "
                 "--name-only HEAD origin/main\n"
-                "    git merge-tree --merge-base=$(git merge-base HEAD origin/main) "
+                "    git merge-tree --merge-base=\"$(git merge-base HEAD origin/main)\" "
                 "--name-only HEAD origin/main\n"
                 "\n"
                 "  Verify with: git merge-tree --help"
