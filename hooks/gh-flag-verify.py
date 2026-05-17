@@ -30,6 +30,11 @@ Design notes:
   Value tokens after value-taking flags are consumed and never re-interpreted
   as flag identifiers. This correctly handles positional query strings that
   start with '-' (e.g. `gh search issues "-label:bug"`).
+- Role-aware tokenization (issue #263): `tokenize_with_roles` does the
+  value-skip centrally based on the derived `_FLAG_VALUE_SPEC`. Each FLAG
+  identifier the caller sees is already separated from its value, and the
+  `--` argv separator is honored automatically via SEPARATOR_DD / POST_DD
+  roles. The caller's only job is whitelist-match against COMPAT.
 """
 from __future__ import annotations
 
@@ -41,9 +46,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
-    iter_command_starts,
-    safe_tokenize,
-    strip_prefix,
+    Token,
+    TokenRole,
+    filter_argv,
+    tokenize_with_roles,
 )
 
 # ---------------------------------------------------------------------------
@@ -327,167 +333,161 @@ COMPAT: dict[tuple[str, str], dict[str, bool]] = {
     },
 }
 
+
+# ---------------------------------------------------------------------------
+# Role-aware flag-value spec derivation (issue #263).
+#
+# The role-aware tokenizer needs to know which flags consume a separate-token
+# value so that the value lands as FLAG_VALUE (not POSITIONAL). Since
+# `_resolve_subcommand` is single-level, we derive the per-(command,verb)
+# spec from COMPAT and aggregate at the "<command> <verb>" key. Globals
+# include every value-taking flag that appears anywhere in COMPAT, so a
+# misplaced subcommand flag at the global position (e.g. `gh --base main
+# issue list`) still consumes its value cleanly — and the caller then denies
+# on the flag name itself (it is not in GH_GLOBAL_FLAGS).
+# ---------------------------------------------------------------------------
+
+
+def _build_flag_value_spec() -> dict[str, set[str]]:
+    """Derive `tokenize_with_roles` spec from COMPAT + GH_GLOBAL_FLAGS_WITH_ARG."""
+    spec: dict[str, set[str]] = {"gh": set(GH_GLOBAL_FLAGS_WITH_ARG)}
+    for (obj, _), flags in COMPAT.items():
+        sub_key = f"gh {obj}"
+        spec.setdefault(sub_key, set())
+        for flag_name, takes_value in flags.items():
+            if takes_value:
+                spec[sub_key].add(flag_name)
+                # Also accept the same flag at the gh-level position so that
+                # erroneous placements before the subcommand still consume
+                # their value — the caller denies on the name.
+                spec["gh"].add(flag_name)
+    return spec
+
+
+_FLAG_VALUE_SPEC: dict[str, set[str]] = _build_flag_value_spec()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _skip_gh_global_flags(argv: list[str], start: int) -> tuple[int, str | None]:
-    """Walk past gh global flags from index `start` to find the subcommand.
-
-    Consumes tokens for flags that take a separate argument value
-    (e.g. `-R owner/repo`). Returns (index, bad_flag) where:
-    - index is the position of the first non-flag token (the subcommand).
-    - bad_flag is None when all pre-subcommand flags are in GH_GLOBAL_FLAGS;
-      when a `-*` token is NOT a recognized global flag, bad_flag is set to
-      that token and the caller should deny.
-    """
-    i = start
-    while i < len(argv):
-        tok = argv[i]
-        if tok == "--":
-            i += 1
-            break
-        if not tok.startswith("-"):
-            break
-        # Strip `=value` suffix to get the bare flag name for lookup.
-        bare = tok.split("=", 1)[0]
-        if bare not in GH_GLOBAL_FLAGS:
-            return i, tok  # unknown pre-subcommand flag — signal denial
-        i += 1
-        if "=" not in tok and tok in GH_GLOBAL_FLAGS_WITH_ARG and i < len(argv):
-            i += 1  # consume the value token
-    return i, None
-
-
-def _collect_flags(
-    argv: list[str],
-    flags_start: int,
-    subcommand_flags: dict[str, bool],
-) -> list[str]:
-    """Collect flag identifiers from argv[flags_start:], skipping value tokens.
-
-    Only collects tokens that have valid flag form:
-      - Long flags: start with '--' (e.g. --label, --state)
-      - Short flags: '-' followed by exactly one character (e.g. -R, -L, -w)
+def _is_valid_flag_form(text: str) -> bool:
+    """True iff text has the form of a real CLI flag (--long or -x).
 
     Tokens like '-label:bug' (single dash + multiple chars) are GitHub
-    advanced-search exclusion qualifiers used as positional arguments — they
-    are NOT flag identifiers and are silently ignored. This handles cases such
-    as `gh search issues "-label:bug"` where shlex strips the quotes and
-    delivers '-label:bug' as a plain token.
-
-    For value-taking flags (subcommand_flags[flag] is True or flag is in
-    GH_GLOBAL_FLAGS_WITH_ARG), advances past the following token so that
-    values starting with '-' are never re-interpreted as flag identifiers.
-    Handles both `--flag value` and `--flag=value` forms; the latter yields
-    `--flag` as the identifier (the `=value` part is stripped).
+    advanced-search exclusion qualifiers used as positional arguments.
+    They tokenize with a leading '-' and are tagged FLAG by the role API,
+    but they are NOT real flag identifiers and should be skipped.
     """
-    flags: list[str] = []
-    i = flags_start
-    while i < len(argv):
-        tok = argv[i]
-        if tok == "--":
-            break  # end of options
-        if tok.startswith("-"):
-            # Determine whether this token has valid flag form.
-            # Long flag: starts with '--'
-            # Short flag: '-' + exactly one character
-            # Anything else (e.g. '-label:bug') is a positional — skip it.
-            is_long_flag = tok.startswith("--")
-            is_short_flag = len(tok) == 2 and tok[0] == "-" and tok[1] != "-"
-            if not is_long_flag and not is_short_flag:
-                i += 1  # positional that looks like a search qualifier — ignore
-                continue
-            if "=" in tok:
-                # --flag=value form — value is embedded; no next-token skip needed
-                flag_name = tok.split("=", 1)[0]
-                flags.append(flag_name)
-                i += 1
-            else:
-                flags.append(tok)
-                i += 1
-                # Consume the value token when this is a value-taking flag
-                # so it is never interpreted as a flag identifier.
-                takes_value = subcommand_flags.get(tok) or tok in GH_GLOBAL_FLAGS_WITH_ARG
-                if takes_value and i < len(argv) and argv[i] != "--":
-                    i += 1  # skip the value token
-        else:
-            i += 1  # positional argument — skip
-    return flags
+    if text.startswith("--"):
+        return True
+    if len(text) == 2 and text[0] == "-" and text[1] != "-":
+        return True
+    return False
 
 
-def check_gh_flags(argv: list[str]) -> tuple[bool, str]:
+def check_gh_flags(seg: list[Token]) -> tuple[bool, str]:
     """Check a single command segment for gh flag compatibility.
 
-    Returns (is_invalid, reason_message).
-    is_invalid=True means the command should be blocked.
+    Returns (is_invalid, reason_message). is_invalid=True means deny.
+
+    Walk strategy (typed Token):
+      1. argv[0] must be COMMAND `gh`.
+      2. Pre-subcommand pass: every FLAG before the first POSITIONAL must
+         be in GH_GLOBAL_FLAGS (whitelist). FLAG_VALUE tokens are skipped
+         (already consumed by the role API).
+      3. First POSITIONAL → subcommand verb. Skip subsequent FLAG / FLAG_VALUE
+         tokens to find the second POSITIONAL → sub-subcommand verb.
+      4. Lookup `(subcommand, sub_subcommand)` in COMPAT — fail-open (silent
+         pass-through) if not present.
+      5. Post-subcommand pass: every FLAG after the sub-subcommand must be
+         in COMPAT[key] ∪ GH_GLOBAL_FLAGS. SEPARATOR_DD / POST_DD ends the
+         flag region.
     """
-    argv = strip_prefix(argv)
-    if not argv or argv[0] != "gh":
+    argv = filter_argv(seg)
+    if not argv or argv[0].text != "gh":
         return False, ""
 
-    # Walk past any gh global flags to find the subcommand word.
-    sub_start, bad_global = _skip_gh_global_flags(argv, 1)
-    if bad_global is not None:
-        bare_bad = bad_global.split("=", 1)[0]
-        allowed_list = ", ".join(sorted(GH_GLOBAL_FLAGS))
-        reason = (
-            f"Global flag '{bare_bad}' is not a recognized gh inherited flag. "
-            f"Allowed: {allowed_list}. "
-            f"Note: --hostname and --color are not accepted by gh subcommands."
-        )
-        return True, reason
-    if sub_start >= len(argv):
+    n = len(argv)
+    i = 1
+
+    # Step 2: Validate pre-subcommand flags against GH_GLOBAL_FLAGS.
+    while i < n:
+        tok = argv[i]
+        if tok.role == TokenRole.POSITIONAL:
+            break  # found subcommand verb
+        if tok.role == TokenRole.FLAG:
+            if not _is_valid_flag_form(tok.text.split("=", 1)[0]):
+                i += 1
+                continue
+            bare = tok.text.split("=", 1)[0]
+            if bare not in GH_GLOBAL_FLAGS:
+                allowed_list = ", ".join(sorted(GH_GLOBAL_FLAGS))
+                reason = (
+                    f"Global flag '{bare}' is not a recognized gh inherited flag. "
+                    f"Allowed: {allowed_list}. "
+                    f"Note: --hostname and --color are not accepted by gh subcommands."
+                )
+                return True, reason
+        # FLAG_VALUE / SUBST_RUN / etc. — skip.
+        i += 1
+
+    if i >= n:
         return False, ""  # no subcommand present
 
-    subcommand = argv[sub_start]
-    if subcommand.startswith("-"):
-        return False, ""  # flag where subcommand expected — malformed, skip
+    subcommand = argv[i].text
+    i += 1
 
-    # Determine whether this subcommand has a sub-subcommand (e.g. "search issues").
-    subsubcommand = ""
-    flags_start = sub_start + 1
-    key: tuple[str, str]
+    # Step 3: find sub-subcommand POSITIONAL. Skip intervening flag tokens.
+    sub_subcommand = ""
+    sub_idx: int | None = None
+    j = i
+    while j < n:
+        tok = argv[j]
+        if tok.role in (TokenRole.SEPARATOR_DD, TokenRole.POST_DD):
+            break
+        if tok.role == TokenRole.POSITIONAL:
+            sub_subcommand = tok.text
+            sub_idx = j
+            break
+        j += 1
 
-    # Check two-word form first (e.g. search issues, search prs).
-    if flags_start < len(argv) and not argv[flags_start].startswith("-"):
-        candidate_subsub = argv[flags_start]
-        two_word_key = (subcommand, candidate_subsub)
-        if two_word_key in COMPAT:
-            subsubcommand = candidate_subsub
-            flags_start += 1
-            key = two_word_key
-        else:
-            # Try single-word key (e.g. issue list, pr create).
-            one_word_key = (subcommand, argv[flags_start])
-            if one_word_key in COMPAT:
-                subsubcommand = argv[flags_start]
-                flags_start += 1
-                key = one_word_key
-            else:
-                return False, ""  # unknown subcommand — pass through
-    else:
-        key = (subcommand, "")
-        if key not in COMPAT:
-            return False, ""  # unknown subcommand — pass through
+    if sub_idx is None:
+        return False, ""  # unknown subcommand shape — pass through
 
-    subcommand_flags: dict[str, bool] = COMPAT[key]
-    # Build the allowed set: subcommand flag names + global flag names.
+    key = (subcommand, sub_subcommand)
+    if key not in COMPAT:
+        return False, ""  # unknown subcommand — pass through
+
+    subcommand_flags = COMPAT[key]
     allowed: frozenset[str] = frozenset(subcommand_flags) | GH_GLOBAL_FLAGS
 
-    flags_in_command = _collect_flags(argv, flags_start, subcommand_flags)
-    for flag in flags_in_command:
-        if flag not in allowed:
+    # Step 5: validate every FLAG after the sub-subcommand against allowed set.
+    # Also re-check any FLAGs that appeared BETWEEN the subcommand and the
+    # sub-subcommand — those belong to the same allowed set (cf. test T08
+    # and `gh issue --repo X create` form).
+    for k in range(i, n):
+        if k == sub_idx:
+            continue  # the sub-sub POSITIONAL itself
+        tok = argv[k]
+        if tok.role in (TokenRole.SEPARATOR_DD, TokenRole.POST_DD):
+            break
+        if tok.role != TokenRole.FLAG:
+            continue
+        bare = tok.text.split("=", 1)[0]
+        if not _is_valid_flag_form(bare):
+            continue  # positional that looks like a search qualifier — ignore
+        if bare not in allowed:
             subcmd_display = (
-                f"gh {subcommand} {subsubcommand}".strip()
-                if subsubcommand
+                f"gh {subcommand} {sub_subcommand}".strip()
+                if sub_subcommand
                 else f"gh {subcommand}"
             )
             reason = (
-                f"Flag '{flag}' is not valid for '{subcmd_display}'. "
+                f"Flag '{bare}' is not valid for '{subcmd_display}'. "
                 f"Run 'gh {subcommand}"
-                + (f" {subsubcommand}" if subsubcommand else "")
+                + (f" {sub_subcommand}" if sub_subcommand else "")
                 + " --help' to see accepted flags."
             )
             return True, reason
@@ -536,12 +536,12 @@ def main() -> int:
     # as a single command segment (same pre-processing as sibling hooks).
     command = command.replace("\\\n", " ")
 
-    tokens = safe_tokenize(command)
-    if not tokens:
+    segments = tokenize_with_roles(command, _FLAG_VALUE_SPEC)
+    if not segments:
         return 0
 
-    for argv in iter_command_starts(tokens):
-        is_invalid, reason = check_gh_flags(argv)
+    for seg in segments:
+        is_invalid, reason = check_gh_flags(seg)
         if is_invalid:
             _emit_deny(reason)
             return 2  # deny exit code
