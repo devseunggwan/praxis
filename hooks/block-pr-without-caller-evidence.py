@@ -202,7 +202,13 @@ def _is_pr_create(argv: list[str]) -> bool:
 
 
 def _has_repo_flag(argv: list[str]) -> bool:
-    """True if --repo/-R is explicitly set (cross-project PR)."""
+    """True if --repo/-R is present (any value).
+
+    NOTE: Does NOT compare the value against the current repo. Passing
+    --repo with the current repo's owner/name also satisfies this gate.
+    Treat the flag's presence as an explicit operator assertion that
+    the caller-chain step was done out-of-band.
+    """
     for i, t in enumerate(argv):
         if t in ("-R", "--repo") and i + 1 < len(argv):
             return True
