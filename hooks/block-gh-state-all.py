@@ -6,9 +6,11 @@
 Conflating these causes `invalid argument "all" for "--state" flag` — a
 recurring mistake caught by structural enforcement rather than a memo.
 
-Uses shlex tokenization (same approach as side-effect-scan.py) so that
-pattern references inside quoted strings, echo arguments, or comments are not
-mistakenly blocked.
+Uses the role-aware token API (issue #263) so flag-value attribution is
+handled centrally. The check reduces to: COMMAND is `gh`, subcommand
+positional is `search`, an object positional follows, and somewhere after
+that a FLAG `--state` is followed by FLAG_VALUE `all` (or a single FLAG
+token `--state=all`).
 
 Exits 2 (PreToolUse blocking code) when the command is a live `gh search`
 call with `--state all`. Exits 0 otherwise (transparent pass-through).
@@ -23,61 +25,76 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    Token,
+    TokenRole,
     compound_cascade_hint,
-    iter_command_starts,
-    safe_tokenize,
-    strip_prefix,
+    filter_argv,
+    tokenize_with_roles,
 )
 
-# gh global flags that take a separate-token argument
-GH_GLOBAL_FLAGS_WITH_ARG = frozenset({
-    "-R", "--repo",
-    "--hostname",
-    "--color",
-})
+# flag_value_spec for the role-aware tokenizer.
+#   gh global flags: -R / --repo take a separate-token value
+#   gh search subcommand: --state takes a value (so `all` lands as FLAG_VALUE)
+_FLAG_VALUE_SPEC: dict[str, set[str]] = {
+    "gh": {"-R", "--repo"},
+    "gh search": {"--state"},
+}
 
 
 # ---------------------------------------------------------------------------
 # Detection
 # ---------------------------------------------------------------------------
 
-def is_blocked_gh_search(argv: list[str]) -> bool:
-    """Return True iff argv is a live `gh search <subcmd> ... --state all` call."""
-    argv = strip_prefix(argv)
-    if not argv or argv[0] != "gh":
+def is_blocked_gh_search(seg: list[Token]) -> bool:
+    """Return True iff seg is a live `gh search <subcmd> ... --state all` call.
+
+    Walks the typed Token list:
+      1. argv[0] must be COMMAND "gh".
+      2. Skip leading FLAG / FLAG_VALUE tokens (gh-level globals like
+         `--no-pager`, `-R owner/repo`).
+      3. The next POSITIONAL must be exactly `search`.
+      4. Skip more FLAG / FLAG_VALUE tokens.
+      5. The next POSITIONAL is the search object word (issues / prs /
+         repos / commits / code — gh itself validates the name).
+      6. After the object word, scan for `--state all` (FLAG + FLAG_VALUE)
+         or `--state=all` (single FLAG token).
+    """
+    argv = filter_argv(seg)
+    if not argv or argv[0].text != "gh":
         return False
 
-    # Skip gh global flags to reach the subcommand.
-    # For flags that take a separate value (e.g. -R owner/repo), consume both.
     i = 1
-    while i < len(argv):
-        tok = argv[i]
-        if tok == "--":
-            i += 1
-            break
-        if not tok.startswith("-"):
-            break  # reached the subcommand
+    n = len(argv)
+
+    # Skip pre-search FLAG / FLAG_VALUE tokens.
+    while i < n and argv[i].role in (TokenRole.FLAG, TokenRole.FLAG_VALUE):
         i += 1
-        if "=" not in tok and tok in GH_GLOBAL_FLAGS_WITH_ARG and i < len(argv):
-            i += 1  # consume separate value token
 
-    if i >= len(argv) or argv[i] != "search":
+    if i >= n or argv[i].role != TokenRole.POSITIONAL or argv[i].text != "search":
         return False
-    i += 1  # skip "search"
-
-    # Skip the search object (issues, prs, repos, commits, code)
-    if i >= len(argv) or argv[i].startswith("-"):
-        return False  # no object word present — not a valid gh search invocation
     i += 1
 
-    # Scan remaining tokens for --state all or --state=all
-    while i < len(argv):
+    # Skip FLAG / FLAG_VALUE tokens between `search` and the object word.
+    while i < n and argv[i].role in (TokenRole.FLAG, TokenRole.FLAG_VALUE):
+        i += 1
+
+    if i >= n or argv[i].role != TokenRole.POSITIONAL:
+        return False  # no object word — not a valid gh search invocation
+    i += 1
+
+    # Scan remaining tokens for --state all. SEPARATOR_DD / POST_DD end the
+    # flag region — `gh` does not accept POSIX `--` but we honor it defensively.
+    while i < n:
         tok = argv[i]
-        if tok.startswith("--state="):
-            if tok.split("=", 1)[1] == "all":
+        if tok.role in (TokenRole.SEPARATOR_DD, TokenRole.POST_DD):
+            break
+        if tok.role == TokenRole.FLAG:
+            if tok.text == "--state=all":
                 return True
-        elif tok == "--state" and i + 1 < len(argv) and argv[i + 1] == "all":
-            return True
+            if tok.text == "--state" and i + 1 < n:
+                nxt = argv[i + 1]
+                if nxt.role == TokenRole.FLAG_VALUE and nxt.text == "all":
+                    return True
         i += 1
 
     return False
@@ -108,12 +125,12 @@ def main() -> int:
     # Backslash line continuation → single space so tokenizer sees one line
     command = command.replace("\\\n", " ")
 
-    tokens = safe_tokenize(command)
-    if not tokens:
+    segments = tokenize_with_roles(command, _FLAG_VALUE_SPEC)
+    if not segments:
         return 0
 
-    for argv in iter_command_starts(tokens):
-        if is_blocked_gh_search(argv):
+    for seg in segments:
+        if is_blocked_gh_search(seg):
             sys.stderr.write(STDERR_MESSAGE + compound_cascade_hint(command))
             return 2
 

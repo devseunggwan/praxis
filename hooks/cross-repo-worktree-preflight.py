@@ -40,6 +40,12 @@ the worktree-list comparison so that `cd somewhere && git worktree
 remove ../sibling-wt` is correctly classified by where it actually
 lands on disk.
 
+Role-aware tokenization (issue #263): the local `_coalesce_subst_runs`
+mirror was removed; `tokenize_with_roles` now handles `$()` coalesce,
+flag-value attribution (`-c $(echo k=v)`), and the `--` argv boundary
+centrally. The caller iterates typed Token segments and only needs to
+recognize `worktree remove` structure and `-C` / `--git-dir` overrides.
+
 Opt-out: embed `# worktree-chain:ack` anywhere in the shell command portion
 after manually confirming the target path. Marker placement inside heredoc
 bodies is irrelevant here — `git worktree remove` does not accept heredoc
@@ -55,10 +61,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    Token,
+    TokenRole,
     compound_cascade_hint,
-    iter_command_starts,
-    safe_tokenize,
-    strip_prefix,
+    filter_argv,
+    tokenize_with_roles,
 )
 
 # ---------------------------------------------------------------------------
@@ -79,51 +86,54 @@ OPT_OUT_MARKER = "# worktree-chain:ack"
 # scenario this hook is built to surface.
 GIT_REPO_OVERRIDE_FLAGS_WITH_ARG = frozenset({"-C", "--git-dir"})
 
-# Every git global flag that consumes a separate-token argument. Used when
-# walking past the global-flag block to reach the subcommand — we must skip
-# the value token even for flags that do NOT bind git to a specific repo
-# (e.g. `-c name=value`). Otherwise the value token (`name=value`) is read
-# as a non-flag and we mis-conclude the subcommand is missing.
+# Role-aware tokenizer spec. Every git-level value-taking global flag is
+# included so the role API attributes their value tokens as FLAG_VALUE
+# (otherwise the next token slips into the subcommand slot and the walker
+# bails). Subcommand level for `git worktree` has no separate-value flags
+# we care about — `-f` / `--force` are valueless and fall through generically.
 # Source: `git --help`. `--exec-path`, `--namespace`, `--super-prefix`,
-# `--config-env` all use the `--flag=value` equals form which strip_prefix
-# handles via the `"=" in tok` branch; only `-c` and `-C` actually accept
-# a separate value token.
-GIT_GLOBAL_FLAGS_WITH_ARG = frozenset({
-    "-C", "-c",
-    "--git-dir", "--work-tree",
-})
-
-# `git worktree remove` flags that take no argument. Any flag we don't know
-# about is consumed generically (single token) — we only need to skip them
-# until we hit the path positional.
-WORKTREE_REMOVE_FLAGS = frozenset({"-f", "--force"})
+# `--config-env` all use the `--flag=value` equals form which is a single
+# token; only `-c` / `-C` / `--git-dir` / `--work-tree` / `--namespace`
+# accept a separate value token.
+_FLAG_VALUE_SPEC: dict[str, set[str]] = {
+    "git": {"-C", "-c", "--git-dir", "--work-tree", "--namespace"},
+    "git worktree": set(),
+}
 
 
 # ---------------------------------------------------------------------------
 # Detection helpers
 # ---------------------------------------------------------------------------
 
-def _has_repo_override(argv: list[str]) -> bool:
-    """Return True if argv contains a git-level `-C` / `--git-dir` / `--work-tree`.
+def _has_repo_override(seg: list[Token]) -> bool:
+    """Return True if seg contains a git-level `-C` / `--git-dir` override.
 
     Three forms covered:
       • separated:  `git -C /other worktree remove X`
       • equals:     `git --git-dir=/other/.git worktree remove X`
       • shorthand:  `git -C/other worktree remove X` (rare but legal)
+
+    `--work-tree` alone does NOT qualify (see GIT_REPO_OVERRIDE_FLAGS_WITH_ARG
+    docstring). The role API has already split FLAG / FLAG_VALUE for the
+    separated form; we iterate FLAG tokens and inspect their text.
     """
+    argv = filter_argv(seg)
     for tok in argv:
-        if tok in GIT_REPO_OVERRIDE_FLAGS_WITH_ARG:
+        if tok.role != TokenRole.FLAG:
+            continue
+        text = tok.text
+        if text in GIT_REPO_OVERRIDE_FLAGS_WITH_ARG:
             return True
         for prefix in GIT_REPO_OVERRIDE_FLAGS_WITH_ARG:
-            if tok.startswith(prefix + "="):
+            if text.startswith(prefix + "="):
                 return True
         # `-C/other` shorthand (only -C supports this; --long= form handled above)
-        if tok.startswith("-C") and len(tok) > 2:
+        if text.startswith("-C") and len(text) > 2:
             return True
     return False
 
 
-def _interpret_cd(argv: list[str], current_cwd: str) -> str | None:
+def _interpret_cd(seg: list[Token], current_cwd: str) -> str | None:
     """Return the new cwd after `cd <path>` in this segment, else None.
 
     Used to thread an `effective_cwd` across compound segments so that
@@ -134,20 +144,26 @@ def _interpret_cd(argv: list[str], current_cwd: str) -> str | None:
     list of the *original* process cwd.
 
     Resolution rules:
-      • argv is not a bare `cd` (after strip_prefix) → None
-      • argv is `cd` with no argument → None (cd-to-home; we do not try
+      • COMMAND is not `cd` → None
+      • no positional argument → None (cd-to-home; we do not try
         to resolve `$HOME` so we leave effective_cwd as the caller had it)
       • target is `-` or starts with `$` → None (cd-to-prev / variable
         expansion is unresolvable statically — caller retains current cwd)
       • absolute target → normalized path
       • relative target → normalized join against `current_cwd`
     """
-    argv = strip_prefix(argv)
-    if not argv or argv[0] != "cd":
+    argv = filter_argv(seg)
+    if not argv or argv[0].text != "cd":
         return None
-    if len(argv) < 2:
+    # Find the first positional / subst_run / post-DD token after COMMAND.
+    target: str | None = None
+    for tok in argv[1:]:
+        if tok.role in (TokenRole.FLAG, TokenRole.FLAG_VALUE, TokenRole.SEPARATOR_DD):
+            continue
+        target = tok.text
+        break
+    if not target:
         return None
-    target = argv[1]
     if target == "-" or target.startswith("$"):
         return None
     if target.startswith("/"):
@@ -155,95 +171,70 @@ def _interpret_cd(argv: list[str], current_cwd: str) -> str | None:
     return os.path.normpath(os.path.join(current_cwd, target))
 
 
-def _coalesce_subst_runs(tokens: list[str]) -> list[str]:
-    """Collapse unquoted `$(...)` command-substitution runs into single tokens.
-
-    `safe_tokenize` uses shlex with whitespace_split=True, which is unaware
-    of POSIX command substitution. An unquoted `$(echo k=v)` therefore
-    splits into `['$(echo', 'k=v)']`, and any flag-value-skip logic only
-    consumes the first token. The remaining token (`k=v)`) then sits where
-    a subcommand or positional is expected and breaks parsing.
-
-    This helper walks the token list and merges any run that starts with a
-    token containing `$(` and ends with a token containing the matching `)`
-    into a single logical token. Quoted substitutions (e.g. `"$(...)"`)
-    are already a single token at this layer and need no special handling.
-
-    Mirror of `_coalesce_subst_runs` in `cli-flag-incompat-advisory.py`
-    (codex review round 2 sibling fix). The helper will move into
-    `_hook_utils.py` at the third consumer per the project DRY-3 rule.
-    """
-    out: list[str] = []
-    i = 0
-    n = len(tokens)
-    while i < n:
-        tok = tokens[i]
-        if "$(" in tok and ")" not in tok[tok.index("$(") + 2:]:
-            j = i + 1
-            parts = [tok]
-            while j < n:
-                parts.append(tokens[j])
-                if ")" in tokens[j]:
-                    break
-                j += 1
-            out.append(" ".join(parts))
-            i = j + 1
-        else:
-            out.append(tok)
-            i += 1
-    return out
-
-
-def _extract_worktree_remove_path(argv: list[str]) -> str | None:
+def _extract_worktree_remove_path(seg: list[Token]) -> str | None:
     """Return the path argument of `git worktree remove <path>`, else None.
 
-    Walks past git global flags, locates the `worktree` `remove` subcommand
-    pair, skips any `-f` / `--force` style flags, and returns the first
-    positional argument (the path). Returns None when the command is not a
-    `git worktree remove` call or the path is missing. Unquoted `$(...)`
-    runs are coalesced before walking so a flag-with-arg value that
-    contains a multi-token substitution is counted as exactly one token.
+    Walks the typed Token list:
+      1. argv[0] must be COMMAND `git`.
+      2. Skip FLAG / FLAG_VALUE tokens (git globals — value tokens have
+         already been attributed via _FLAG_VALUE_SPEC).
+      3. The next POSITIONAL must be `worktree`.
+      4. Skip more FLAG / FLAG_VALUE tokens.
+      5. The next POSITIONAL must be `remove`.
+      6. Skip remove-level FLAG / FLAG_VALUE tokens (`-f`, `--force`).
+      7. The next POSITIONAL / SUBST_RUN / POST_DD text is the path.
+
+    Returns None for any other shape (non-git, non-worktree-remove).
     """
-    argv = _coalesce_subst_runs(strip_prefix(argv))
-    if not argv or argv[0] != "git":
+    argv = filter_argv(seg)
+    if not argv or argv[0].text != "git":
         return None
 
-    # Skip git-level global flags to find the subcommand. Consume value
-    # tokens for every known separated-arg global flag (not just repo-override
-    # flags), otherwise a benign `git -c name=value worktree remove <path>`
-    # bypasses detection because `name=value` is parsed as the subcommand.
+    n = len(argv)
     i = 1
-    while i < len(argv):
+
+    # Step 2-3: find `worktree`.
+    while i < n:
         tok = argv[i]
-        if tok == "--":
-            i += 1
-            break
-        if not tok.startswith("-"):
-            break
+        if tok.role == TokenRole.POSITIONAL:
+            if tok.text == "worktree":
+                break
+            return None  # different git subcommand
+        if tok.role in (TokenRole.SEPARATOR_DD, TokenRole.POST_DD, TokenRole.SUBST_RUN):
+            return None
+        # FLAG / FLAG_VALUE — skip
         i += 1
-        if "=" not in tok and tok in GIT_GLOBAL_FLAGS_WITH_ARG and i < len(argv):
-            i += 1  # consume value token for known flag-with-arg
-
-    # Expect: argv[i] == "worktree", argv[i+1] == "remove"
-    if i + 1 >= len(argv):
+    if i >= n:
         return None
-    if argv[i] != "worktree" or argv[i + 1] != "remove":
-        return None
-    i += 2
+    i += 1  # past 'worktree'
 
-    # Skip remove-level flags to reach the path positional.
-    while i < len(argv):
+    # Step 4-5: find `remove`.
+    while i < n:
         tok = argv[i]
-        if tok == "--":
-            i += 1
-            break
-        if not tok.startswith("-"):
-            break
+        if tok.role == TokenRole.POSITIONAL:
+            if tok.text == "remove":
+                break
+            return None  # different worktree subcommand
+        if tok.role in (TokenRole.SEPARATOR_DD, TokenRole.POST_DD, TokenRole.SUBST_RUN):
+            return None
         i += 1
-
-    if i >= len(argv):
+    if i >= n:
         return None
-    return argv[i]
+    i += 1  # past 'remove'
+
+    # Step 6-7: find the path positional.
+    while i < n:
+        tok = argv[i]
+        if tok.role == TokenRole.SEPARATOR_DD:
+            i += 1
+            continue
+        if tok.role in (TokenRole.FLAG, TokenRole.FLAG_VALUE):
+            i += 1
+            continue
+        if tok.role in (TokenRole.POSITIONAL, TokenRole.SUBST_RUN, TokenRole.POST_DD):
+            return tok.text
+        i += 1
+    return None
 
 
 def _normalize_path(path: str) -> str:
@@ -347,8 +338,8 @@ def main() -> int:
     if OPT_OUT_MARKER in command:
         return 0
 
-    tokens = safe_tokenize(command.replace("\\\n", " "))
-    if not tokens:
+    segments = tokenize_with_roles(command.replace("\\\n", " "), _FLAG_VALUE_SPEC)
+    if not segments:
         return 0
 
     # `effective_cwd` is updated by each preceding `cd <path>` segment so
@@ -362,20 +353,18 @@ def main() -> int:
     known: list[str] | None = None
     known_for_cwd: str | None = None
 
-    for argv in iter_command_starts(tokens):
-        argv = list(argv)
-
-        new_cwd = _interpret_cd(argv, effective_cwd)
+    for seg in segments:
+        new_cwd = _interpret_cd(seg, effective_cwd)
         if new_cwd is not None:
             effective_cwd = new_cwd
             continue
 
-        target = _extract_worktree_remove_path(argv)
+        target = _extract_worktree_remove_path(seg)
         if target is None:
             continue
 
         # Skip when the operator already pinned a repo via `-C` / `--git-dir`.
-        if _has_repo_override(argv):
+        if _has_repo_override(seg):
             continue
 
         # Resolve relative remove targets against effective_cwd. git

@@ -15,6 +15,13 @@ Related hooks that cover adjacent scenarios:
   block-pr-without-caller-evidence → gh pr create without Caller chain verified:
   pre-merge-approval-gate.sh       → gh pr merge without per-PR approval
 
+Role-aware tokenization (issue #263): subcommand detection and --repo
+value extraction use the typed `Token` API from `_hook_utils`. Heredoc
+detection still inspects raw token text for `<<` since the role API does
+not classify the redirect operator itself — but the quoted-string guard
+(tokens with internal whitespace cannot be unquoted shell words) keeps
+literal `<<` inside `--body` values from triggering a false block.
+
 Opt-out: embed `# cross-boundary:ack` in the shell command portion of the
 invocation (e.g., as a trailing comment on the `gh` line or after the heredoc
 terminator), NOT inside the heredoc body. The heredoc body becomes the
@@ -32,17 +39,53 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    Token,
+    TokenRole,
     compound_cascade_hint,
-    iter_command_starts,
-    safe_tokenize,
-    strip_prefix,
+    filter_argv,
+    tokenize_with_roles,
 )
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-GH_GLOBAL_FLAGS_WITH_ARG = frozenset({"-R", "--repo", "--hostname", "--color"})
+# Role-aware tokenizer spec. Globals consume separate-token values; per-object
+# entries list the value-taking flags that appear after the subcommand verb
+# (`--title VALUE`, `--body-file PATH`, etc.) so the role API attributes
+# them as FLAG_VALUE rather than POSITIONAL.
+#
+# `gh issue` and `gh pr` aggregate value flags across `create / new / edit /
+# comment` since `_resolve_subcommand` is single-level — the verb after
+# `gh issue` is a POSITIONAL in the segment. Whitelist breadth here only
+# affects role attribution; the checklist gate cares about (object, verb)
+# membership, not which flags appeared.
+_FLAG_VALUE_SPEC: dict[str, set[str]] = {
+    "gh": {"-R", "--repo"},
+    "gh issue": {
+        "-R", "--repo",
+        "-t", "--title",
+        "-b", "--body",
+        "-F", "--body-file",
+        "-a", "--assignee",
+        "-l", "--label",
+        "-m", "--milestone",
+        "-p", "--project",
+    },
+    "gh pr": {
+        "-R", "--repo",
+        "-t", "--title",
+        "-b", "--body",
+        "-F", "--body-file",
+        "-a", "--assignee",
+        "-B", "--base",
+        "-H", "--head",
+        "-l", "--label",
+        "-m", "--milestone",
+        "-p", "--project",
+        "-r", "--reviewer",
+    },
+}
 
 # gh subcommand pairs that write to a repo
 GH_WRITE_SUBCOMMANDS = frozenset({
@@ -104,58 +147,77 @@ Correct pattern:
 # Detection helpers
 # ---------------------------------------------------------------------------
 
-def _skip_flags(argv: list[str], i: int) -> int:
-    """Advance i past any flags (and their values) in argv, return new i."""
-    while i < len(argv):
-        tok = argv[i]
-        if tok == "--":
-            return i + 1
-        if not tok.startswith("-"):
-            break
-        i += 1
-        if "=" not in tok and tok in GH_GLOBAL_FLAGS_WITH_ARG and i < len(argv):
-            i += 1  # consume value token for known flag-with-arg
-    return i
+def _gh_write_subcommand(seg: list[Token]) -> tuple[str, str] | None:
+    """Return (object, verb) if seg is a gh write subcommand, else None.
 
-
-def _gh_write_subcommand(argv: list[str]) -> tuple[str, str] | None:
-    """Return (object, verb) if argv is a gh write subcommand, else None.
-
-    Handles flags between object and verb, e.g.:
-      gh issue --repo owner/repo create   → ('issue', 'create')
-      gh --repo X issue --flag create     → ('issue', 'create')
+    Walks the typed Token list after the COMMAND token, skipping FLAG and
+    FLAG_VALUE tokens between the object and verb POSITIONALs. Handles
+    `gh issue --repo X create` (flags between object and verb) and the
+    common `gh --repo X issue create` (flags before object).
     """
-    argv = strip_prefix(argv)
-    if not argv or argv[0] != "gh":
+    argv = filter_argv(seg)
+    if not argv or argv[0].text != "gh":
         return None
-    # Skip gh-level global flags to find the object word (e.g., 'issue', 'pr').
-    i = _skip_flags(argv, 1)
-    if i >= len(argv):
+
+    n = len(argv)
+    i = 1
+
+    # Skip pre-object FLAG / FLAG_VALUE tokens to find the object word.
+    while i < n:
+        tok = argv[i]
+        if tok.role == TokenRole.POSITIONAL:
+            break
+        if tok.role in (TokenRole.SEPARATOR_DD, TokenRole.POST_DD):
+            return None
+        i += 1
+
+    if i >= n or argv[i].role != TokenRole.POSITIONAL:
         return None
-    obj = argv[i]
-    # Skip flags between object and verb (e.g., `gh issue --repo X create`).
-    i = _skip_flags(argv, i + 1)
-    if i >= len(argv):
+    obj = argv[i].text
+    i += 1
+
+    # Skip FLAG / FLAG_VALUE tokens between object and verb.
+    while i < n:
+        tok = argv[i]
+        if tok.role == TokenRole.POSITIONAL:
+            break
+        if tok.role in (TokenRole.SEPARATOR_DD, TokenRole.POST_DD):
+            return None
+        i += 1
+
+    if i >= n or argv[i].role != TokenRole.POSITIONAL:
         return None
-    verb = argv[i]
+    verb = argv[i].text
+
     pair = (obj, verb)
     return pair if pair in GH_WRITE_SUBCOMMANDS else None
 
 
-def _has_repo_flag(argv: list[str]) -> tuple[bool, str]:
-    """Return (True, repo_value) if --repo/-R flag is present, else (False, '')."""
+def _has_repo_flag(seg: list[Token]) -> tuple[bool, str]:
+    """Return (True, repo_value) if --repo / -R flag is present, else (False, '').
+
+    The role API has already attributed the value as FLAG_VALUE for the
+    space form. The equals form (`--repo=value`) appears as a single FLAG
+    token with the value embedded; the `-Rvalue` shorthand likewise stays
+    as a single FLAG token whose text starts with `-R`.
+    """
+    argv = filter_argv(seg)
+    n = len(argv)
     for i, tok in enumerate(argv):
-        if tok in ("-R", "--repo") and i + 1 < len(argv):
-            return True, argv[i + 1]
-        if tok.startswith("--repo="):
-            return True, tok.split("=", 1)[1]
-        if tok.startswith("-R") and len(tok) > 2:
-            return True, tok[2:]
+        if tok.role != TokenRole.FLAG:
+            continue
+        text = tok.text
+        if text in ("-R", "--repo") and i + 1 < n and argv[i + 1].role == TokenRole.FLAG_VALUE:
+            return True, argv[i + 1].text
+        if text.startswith("--repo="):
+            return True, text.split("=", 1)[1]
+        if text.startswith("-R") and len(text) > 2:
+            return True, text[2:]
     return False, ""
 
 
-def _has_heredoc(argv: list[str]) -> bool:
-    """Return True if argv contains a << heredoc redirect operator.
+def _has_heredoc(seg: list[Token]) -> bool:
+    """Return True if seg contains a `<<` heredoc redirect operator.
 
     Two tokenization forms handled (both invalid in gh write commands):
 
@@ -175,21 +237,21 @@ def _has_heredoc(argv: list[str]) -> bool:
     has the heredoc on a different newline, which safe_tokenize separates
     into a different segment with a synthetic ';'. The heredoc token does
     NOT appear in the gh write argv slice.
+
+    Role agnostic — we iterate every typed Token's text since `<<` does
+    not survive the role API's `-` prefix check and may appear in FLAG /
+    FLAG_VALUE / POSITIONAL / SUBST_RUN texts depending on attachment.
     """
-    for tok in argv:
-        if "<<" not in tok:
+    for tok in seg:
+        text = tok.text
+        if "<<" not in text:
             continue
         # Quoted-string guard: shlex strips quotes but preserves internal
         # spaces. A token containing a space cannot be an unquoted shell
         # word, so `<<` inside it is a literal (e.g. `--body "code: a<<b"`
         # tokenizes as `code: a<<b`). Skip such tokens entirely.
-        if " " in tok:
+        if " " in text or "\t" in text:
             continue
-        # Case 1: token starts with '<<' (space-separated redirect)
-        if tok.startswith("<<"):
-            return True
-        # Case 2: '<<' embedded in token without surrounding spaces
-        # (attached redirect like 'foo<<EOF').
         return True
     return False
 
@@ -270,18 +332,17 @@ def main() -> int:
     # (marker-in-shell-portion) and (no-marker) the same way for heredocs.
     opt_out_present = OPT_OUT_MARKER in _strip_heredoc_bodies(command)
 
-    tokens = safe_tokenize(command.replace("\\\n", " "))
-    if not tokens:
+    segments = tokenize_with_roles(command.replace("\\\n", " "), _FLAG_VALUE_SPEC)
+    if not segments:
         return 0
 
-    for argv in iter_command_starts(tokens):
-        argv = list(argv)
-        subcommand = _gh_write_subcommand(argv)
+    for seg in segments:
+        subcommand = _gh_write_subcommand(seg)
         if subcommand is None:
             continue
 
         # Check 1: heredoc in same segment → hard block (marker-independent)
-        if _has_heredoc(argv):
+        if _has_heredoc(seg):
             sys.stderr.write(HEREDOC_BLOCK_MSG + compound_cascade_hint(command))
             return 2
 
@@ -289,7 +350,7 @@ def main() -> int:
         # (opt-out marker, if any, skips the checklist here only)
         if opt_out_present:
             return 0
-        has_repo, repo_val = _has_repo_flag(argv)
+        has_repo, repo_val = _has_repo_flag(seg)
         if has_repo:
             _emit_ask(_build_checklist(subcommand, repo_val) + compound_cascade_hint(command))
             return 0
