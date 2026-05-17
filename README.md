@@ -52,8 +52,10 @@ acknowledgment, completion-evidence requirement, protected-branch edit guard,
 manufactured action-menu detection). Hooks fail-open on infrastructure errors
 and never break Claude Code — they only nudge or block specific patterns.
 
-See [AGENTS.md → Hooks](AGENTS.md#hooks) for the full index and per-hook
-spec links under [`docs/hook/`](docs/hook/).
+See [ARCHITECTURE.md → Hook index](ARCHITECTURE.md#hook-index) for the full
+list and per-hook spec links under [`docs/hook/`](docs/hook/), and
+[DESIGN.md → Hook Design Contracts](DESIGN.md#hook-design-contracts) for the
+shared design contracts every hook follows.
 
 ## Prerequisites
 
@@ -87,8 +89,8 @@ to multiple AI providers via a unified `--model` flag using
 Claude — full backward compatibility. When only `claude` is installed,
 the system behaves exactly as before — no errors, no degradation.
 
-See [AGENTS.md → Provider Routing](AGENTS.md#provider-routing) for the full
-task-type / complexity routing matrix and fallback policy.
+See [ARCHITECTURE.md → Provider Routing](ARCHITECTURE.md#provider-routing) for
+the full task-type / complexity routing matrix and fallback policy.
 
 ## Installation
 
