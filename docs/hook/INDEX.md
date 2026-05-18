@@ -46,6 +46,7 @@ so the agent can self-correct. Fail-open on infrastructure errors by design.
 | [output-block-falsify-advisory](output-block-falsify-advisory.md) | PreToolUse | Advisory nudge to run output-block falsification gate before surfacing `(Recommended)` options or bulk-action commands |
 | [advisory-wrapper-signature-verify](advisory-wrapper-signature-verify.md) | PreToolUse | Advisory nudge to verify wrapped function signatures before writing wrapper/client code |
 | [codex-review-route](codex-review-route.md) | UserPromptSubmit | Warn when `/codex:review` runs in a multi-worktree repo (cwd mismatch risk) |
+| [external-write-path-existence-check](external-write-path-existence-check.md) | PreToolUse | Advisory nudge when a `gh issue/pr` body file contains markdown links to repo paths that do not exist |
 
 ---
 
