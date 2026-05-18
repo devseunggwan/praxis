@@ -118,12 +118,15 @@ _JQ_SINGLE_VALUE_FLAGS: frozenset[str] = frozenset({
     "--indent",             # indentation spaces
 })
 
-# Two-token consuming flags (name value, two following tokens)
+# Two-token consuming flags: each consumes TWO separate following tokens.
+# Parsing: when bare (no `=`), the scanner increments `i` by 3 total —
+# 1 for the flag itself plus 2 for (name, value). These are the only jq
+# flags with a two-token (name + value/file) operand shape.
 _JQ_DOUBLE_VALUE_FLAGS: frozenset[str] = frozenset({
-    "--arg",        # name value  → $name = string
-    "--argjson",    # name value  → $name = JSON
-    "--slurpfile",  # name file
-    "--rawfile",    # name file
+    "--arg",        # --arg name value  → $name = string
+    "--argjson",    # --argjson name value  → $name = JSON-decoded value
+    "--slurpfile",  # --slurpfile name file  → $name = parsed JSON array of file
+    "--rawfile",    # --rawfile name file  → $name = raw string contents of file
 })
 
 # Boolean flags that terminate further file argument scanning.
@@ -151,6 +154,26 @@ _CONFIG_PATH_IN_TEXT_RE = re.compile(
 )
 
 
+# Matches double-value flags (--arg/--argjson name value) in a substitution
+# text so their value tokens can be stripped before null-input detection.
+_SUBST_DOUBLE_VALUE_FLAG_RE = re.compile(
+    r'(?:--arg|--argjson)\s+\S+\s+\S+'
+)
+
+_SUBST_NULL_INPUT_RE = re.compile(
+    r'\bjq\b'
+    r'(?:.*?)'
+    r'(?<=\s)'                         # flag must be preceded by whitespace
+    r'(?:'
+    r'--null-input'                    # long form
+    r'|'
+    r'-[a-zA-Z]*n[a-zA-Z]*'           # short form: -n, -rn, -nr, etc.
+    r')'
+    r'(?=\s|[)\'"]|\Z)',               # flag must be followed by whitespace, closing char, or end
+    re.DOTALL,
+)
+
+
 def _scan_subst_for_config_paths(token: str) -> list[str]:
     """Extract config-matching paths from a coalesced SUBST_RUN token.
 
@@ -160,11 +183,19 @@ def _scan_subst_for_config_paths(token: str) -> list[str]:
     raw substitution text.
 
     Returns an empty list if no jq invocation or config path is detected.
+    Returns an empty list when jq is called with -n/--null-input because jq
+    does not read input files in null-input mode, so no advisory is warranted.
     """
     if "jq" not in token or "$(" not in token:
         return []
     # Only bother if there's a jq somewhere in the substitution.
     if not re.search(r'\bjq\b', token):
+        return []
+    # jq -n / --null-input reads no files — skip advisory to avoid false positive.
+    # Strip double-value flag pairs (--arg name value, --argjson name value)
+    # before checking so that `--arg myvar -n` is not misidentified as null-input.
+    scrubbed = _SUBST_DOUBLE_VALUE_FLAG_RE.sub("", token)
+    if _SUBST_NULL_INPUT_RE.search(scrubbed):
         return []
     paths = []
     for m in _CONFIG_PATH_IN_TEXT_RE.finditer(token):
@@ -191,6 +222,11 @@ def _extract_jq_config_paths(argv: list[str]) -> list[str]:
     argv must already be stripped of env/wrapper prefixes (argv[0] == 'jq').
     Returns an empty list if this is not a jq invocation or no config
     paths are found.
+
+    Multi-file support: jq accepts multiple FILE arguments after the filter
+    expression (`jq '.' a.json b.json`). All positional tokens after the
+    first (the filter) are treated as input files and each is checked
+    independently — every config-matching path in the list is returned.
     """
     if not argv or argv[0] != "jq":
         return []
@@ -234,7 +270,16 @@ def _extract_jq_config_paths(argv: list[str]) -> list[str]:
                 # value — skip one following token
                 i += 2
                 continue
-            # Boolean flag — skip just this token
+            # Boolean flag — check for null-input at option position, then skip
+            # NOTE: check here (not before the loop) so that `--arg name -n`
+            # is not misidentified: the `-n` value token is consumed by the
+            # _JQ_DOUBLE_VALUE_FLAGS branch above, never reaching this path.
+            # Combined short flags (-rn, -nr, etc.) are single-dash tokens
+            # without `=`; check for `n` inside them too.
+            if bare == "--null-input" or (
+                bare.startswith("-") and not bare.startswith("--") and "n" in bare[1:]
+            ):
+                return []
             i += 1
             continue
 
@@ -334,10 +379,23 @@ def _check_file(path: str) -> Optional[str]:
     """Return an advisory message if path is empty or invalid JSON, else None.
 
     Returns None (skip) when the file does not exist.
+
+    Broken-symlink detection: `os.path.exists()` returns False for broken
+    symlinks (dangling links where the target is missing), so they would be
+    silently skipped as "not found". We use `os.path.lexists()` — which
+    returns True for any existing path entry including dangling symlinks — to
+    distinguish and emit a distinct advisory instead of treating them as
+    missing files.
     """
     expanded = os.path.expanduser(path)
     if not os.path.exists(expanded):
-        return None  # out of scope
+        # Distinguish broken symlink from genuinely missing file.
+        if os.path.lexists(expanded):
+            return (
+                f"[config-broken-symlink] {path} is a broken symlink — "
+                "jq will fail; the symlink target does not exist"
+            )
+        return None  # genuinely absent — out of scope
     if os.path.getsize(expanded) == 0:
         return (
             f"[config-empty] {path} is empty — "

@@ -42,6 +42,7 @@ File-level outcomes:
 | File state | Action |
 |------------|--------|
 | Missing / does not exist | **SILENT** — out of scope; other hooks cover existence |
+| Broken symlink (dangling — target missing) | **ADVISORY** `[config-broken-symlink]` |
 | Empty (size 0) | **ADVISORY** `[config-empty]` |
 | Present, invalid JSON (jq parse fail) | **ADVISORY** `[config-invalid]` |
 | Present, valid JSON | **SILENT** |
@@ -61,7 +62,10 @@ Command-level examples:
 | `jq '.' ~/.codex/config.json` (valid) | **SILENT** |
 | `jq '.' /tmp/unrelated.json` (any state) | **SILENT** — path not in scope |
 | `jq '.' settings.json` (missing) | **SILENT** — existence not in scope |
-| `jq -n 'null'` | **SILENT** — no file argument |
+| `jq '.' a.json ~/.claude/settings.json` (multi-file, settings empty) | **ADVISORY** `[config-empty]` for settings.json only |
+| `jq '.' ~/.claude/settings.json` (broken symlink) | **ADVISORY** `[config-broken-symlink]` |
+| `jq -n 'null'` | **SILENT** — null input, no file read (explicit early-return) |
+| `jq --null-input '{}'` | **SILENT** — null input long form, no file read |
 | Non-Bash tool | **SILENT** |
 | Malformed JSON stdin | **SILENT** (fail-open) |
 
@@ -106,7 +110,7 @@ test invocations).
 - non-Bash tool → exit 0
 - empty / whitespace command → exit 0
 - `python3` unavailable → shell wrapper exits 0
-- `jq` binary absent → skip advisory, exit 0
+- `jq` binary absent from PATH → skip advisory, exit 0
 - jq validation timeout (>5 s) → skip advisory, exit 0
 - any uncaught exception → exit 0
 
