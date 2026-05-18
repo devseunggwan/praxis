@@ -154,16 +154,104 @@ run_case "missing path advisory works regardless of cwd context" \
   "cd $MISSING_PATH"
 
 # ---------------------------------------------------------------------------
-# === M1 spec: pushd and subshell are out of scope (silent) ===
+# === P1 (Phase 2): pushd and subshell (cd ...) detection ===
 # ---------------------------------------------------------------------------
 
-run_case "pushd non-existent path is silent (out of scope Phase 1)" \
-  "silent" \
+# pushd to non-existent path fires advisory (Phase 2 — #337 P1).
+run_case "pushd non-existent path emits worktree-missing" \
+  "advisory:[worktree-missing]" \
   "pushd $MISSING_PATH && ls"
 
-run_case "subshell cd non-existent is silent (out of scope Phase 1)" \
-  "silent" \
+# subshell (cd ...) to non-existent path fires advisory (Phase 2 — #337 P1).
+run_case "subshell cd non-existent emits worktree-missing" \
+  "advisory:[worktree-missing]" \
   "(cd $MISSING_PATH && ls)"
+
+# pushd to existing path is silent.
+run_case "pushd existing path is silent" \
+  "silent" \
+  "pushd $NON_WT_DIR && ls"
+
+# pushd cwd does not leak past popd: `pushd /tmp; popd; cd $ROOT_DIR` must
+# NOT emit a false advisory (docs is under ROOT_DIR, not /tmp).
+run_case "pushd cwd does not leak past popd into subsequent cd" \
+  "silent" \
+  "pushd $NON_WT_DIR; popd; cd $ROOT_DIR"
+
+# subshell (cd ...) to existing path is silent.
+run_case "subshell cd existing path is silent" \
+  "silent" \
+  "(cd $NON_WT_DIR && ls)"
+
+# ---------------------------------------------------------------------------
+# === Codex P2 fixes: spaced subshell form + subshell cwd isolation ===
+# ---------------------------------------------------------------------------
+
+# Spaced subshell form `( cd /path && ... )` fires advisory for missing path.
+run_case "spaced subshell cd non-existent emits worktree-missing" \
+  "advisory:[worktree-missing]" \
+  "( cd $MISSING_PATH && ls )"
+
+# Spaced subshell form to existing path is silent.
+run_case "spaced subshell cd existing path is silent" \
+  "silent" \
+  "( cd $NON_WT_DIR && ls )"
+
+# Subshell cwd does not leak: `(cd existing); cd existing2` must NOT emit a
+# false advisory for existing2 (which exists at the original cwd level, not
+# inside the subshell target).
+# Use $ROOT_DIR itself as the outer reference to guarantee it exists.
+run_case "subshell cwd does not leak into subsequent relative cd (compact form)" \
+  "silent" \
+  "(cd $NON_WT_DIR && pwd); cd $ROOT_DIR"
+
+run_case "spaced subshell cwd does not leak into subsequent relative cd" \
+  "silent" \
+  "( cd $NON_WT_DIR && pwd ); cd $ROOT_DIR"
+
+# ---------------------------------------------------------------------------
+# === Codex R4 fixes: subshell-local cwd tracking + legit )-path guard ===
+# ---------------------------------------------------------------------------
+
+# R4 P2-1: subshell-local cwd is tracked across segments inside the subshell.
+# (cd / && cd tmp) — second cd resolves relative to /, so /tmp exists.
+run_case "subshell-local cwd propagates to next segment inside subshell" \
+  "silent" \
+  "(cd / && cd tmp)"
+
+# R4 P2-1b: missing path relative to subshell-local cwd fires advisory.
+run_case "subshell second cd missing relative to subshell cwd fires advisory" \
+  "advisory:[worktree-missing]" \
+  "(cd /tmp && cd nonexistent_subdir_$$)"
+
+# R4 P2-2: path ending in ) outside a subshell — ) must not be stripped.
+run_case "outer cd to path ending in paren preserves trailing paren" \
+  "advisory:[worktree-missing]" \
+  "cd 'release)'"
+
+# ---------------------------------------------------------------------------
+# === Codex R3 fixes: trailing-) strip, command-attached heredoc, pushd +N ===
+# ---------------------------------------------------------------------------
+
+# R3 P2-1: trailing `)` fused into last token of compact subshell — existing
+# path inside the subshell must NOT produce a false advisory.
+run_case "compact subshell trailing-paren does not cause false advisory" \
+  "silent" \
+  "(cd $NON_WT_DIR && cd $ROOT_DIR)"
+
+# R3 P2-2: `cat<<EOF` (command-attached, no space) — body cd must be silent.
+run_case "command-attached fused heredoc body cd is silent (cat<<EOF)" \
+  "silent" \
+  "$(printf 'cat<<EOF\ncd /this/does/not/exist/anywhere\nEOF')"
+
+# R3 P3: pushd +N / pushd -N are directory-stack rotations, not paths.
+run_case "pushd +N stack rotation is silent" \
+  "silent" \
+  "pushd +1"
+
+run_case "pushd -N stack rotation is silent" \
+  "silent" \
+  "pushd -0"
 
 # ---------------------------------------------------------------------------
 # === M2 fix: heredoc body containing cd is skipped (no false-positive) ===
@@ -185,24 +273,35 @@ run_case "non-cd command without heredoc is silent" \
   "cat /tmp/foo.txt"
 
 # ---------------------------------------------------------------------------
-# === Known limitation: fused heredoc openers fire false-positive (#337 P6) ===
-# shlex tokenizes `<<EOF`, `<<'EOF'`, `<<-EOF` as a single POSITIONAL token,
-# so _extract_heredoc_end_marker cannot detect them. Body `cd /path` fires.
-# These cases are pinned here to document current behavior. When #337 P6 is
-# resolved, all three should be changed to "silent".
+# === P6 (Phase 2): fused heredoc openers — regression guard (#337 P6) ===
+# shlex tokenizes fused forms as single POSITIONAL tokens; _extract_heredoc_end_marker
+# now detects them by matching the `<<` prefix pattern. Body `cd /path` must
+# be silent (no false-positive advisory). These 3 cases were formerly pinned as
+# known-limitation false-positives and are now expected to be silent.
 # ---------------------------------------------------------------------------
 
-run_case "KNOWN-LIMITATION: fused <<EOF body cd fires false-positive (pin)" \
-  "advisory:[worktree-missing]" \
+run_case "fused <<EOF body cd is silent (P6 fix)" \
+  "silent" \
   "$(printf 'cat <<EOF\ncd /this/does/not/exist/anywhere\nEOF')"
 
-run_case "KNOWN-LIMITATION: fused <<'EOF' body cd fires false-positive (pin)" \
-  "advisory:[worktree-missing]" \
+run_case "fused <<'EOF' body cd is silent (P6 fix)" \
+  "silent" \
   "$(printf "cat <<'EOF'\ncd /this/does/not/exist/anywhere\nEOF")"
 
-run_case "KNOWN-LIMITATION: fused <<-EOF body cd fires false-positive (pin)" \
-  "advisory:[worktree-missing]" \
+run_case "fused <<-EOF body cd is silent (P6 fix)" \
+  "silent" \
   "$(printf 'cat <<-EOF\n\tcd /this/does/not/exist/anywhere\n\tEOF')"
+
+# fused <<"EOF" form — shlex strips quotes and produces <<EOF token (same as <<EOF).
+run_case "fused <<\"EOF\" body cd is silent (P6 fix)" \
+  "silent" \
+  "$(printf 'cat <<"EOF"\ncd /this/does/not/exist/anywhere\nEOF')"
+
+# cd AFTER a fused heredoc close still fires advisory (regression guard:
+# the post-heredoc segment is processed normally).
+run_case "cd after fused <<EOF heredoc close fires advisory" \
+  "advisory:[worktree-missing]" \
+  "$(printf 'cat <<EOF\ncd /this/does/not/exist/anywhere\nEOF\ncd /also/does/not/exist')"
 
 # ---------------------------------------------------------------------------
 # === M3 fix: dedupe keyed on (session, path, state) — state-change aware ===
