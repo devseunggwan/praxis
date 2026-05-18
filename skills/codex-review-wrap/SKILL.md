@@ -224,6 +224,26 @@ session, not just the first. Terminology used below:
 - **round** — one invocation of Codex review (Step 4 produces one round of findings)
 - **session** — the assistant's working-memory lifetime; the Step 5c ledger lives here
 
+##### Execution order
+
+Sub-sections below are numbered for cross-reference, not execution order.
+The execution order each round is:
+
+1. **5f counter update + advisory check** — increment `rounds_per_region:`
+   ledger for each region touched; emit the diminishing-returns advisory if
+   `cumulative = N + 1`.
+2. **5d-i sibling-identification question** — `AskUserQuestion` to confirm
+   whether the PR is a port / parallel hotfix / A/B implementation.
+3. **5a classify findings** — fact-modifying vs structural vs stylistic.
+4. **5b verify premises** — falsify each fact-modifying finding's premise
+   before applying.
+5. **5c flip detection during apply** — scan ledger for `applied:` /
+   `rejected:` collisions before each edit.
+6. **5d-ii / 5d-iii sibling cross-check + propose** — only when 5d-i
+   identified a sibling.
+7. **5e commit-message trailer** — `Premise-Verified:` trailer on the
+   committed edit.
+
 #### 5a. Classify each finding
 
 | Type | Examples | Premise check required |
@@ -321,7 +341,9 @@ against the sibling implementation.
 
 ##### 5d-i. Identify sibling implementations
 
-At the **start of Step 5**, before classifying findings, surface:
+At the **start of Step 5** — immediately after the `rounds_per_region:` counter
+update (5f counter, which runs first) and before classifying findings (5a) —
+surface:
 
 ```
 AskUserQuestion: "이 PR이 다른 PR/레포의 port · parallel hotfix · A/B 구현체인가요?
@@ -413,7 +435,7 @@ context in the source file:
 
 | File type | Region label |
 |-----------|-------------|
-| Markdown (`.md`, `.mdx`) | Nearest enclosing `#`/`##`/`###` heading text |
+| Markdown (`.md`, `.mdx`) | Nearest enclosing heading text at any level (`#` through `######`); H4+ headings are valid region labels because this SKILL.md itself uses `####` and `#####` for sub-steps, and excluding them would leave deeply-nested findings unlabelled |
 | Code (`.py`, `.ts`, `.sh`, `.js`, …) | Enclosing function / class / method symbol name |
 | Plain text / unknown | The file path alone (no region suffix) |
 
@@ -421,10 +443,19 @@ Region label format: `{file}:{region}` — e.g.
 `skills/codex-review-wrap/SKILL.md:Step 5` or
 `hooks/codex-review-route.sh:parse_prompt`.
 
+**Same-file collision tiebreaker**: when two distinct occurrences of the same
+symbol name appear in one file (e.g., two functions both named `parse_prompt`),
+append the 1-based occurrence index: `{file}:{region}:{occurrence}` (e.g.,
+`hooks/codex-review-route.sh:parse_prompt:1` and
+`hooks/codex-review-route.sh:parse_prompt:2`). Occurrence order follows
+top-to-bottom source order. This suffix is added only when a collision exists —
+unique names keep the plain `{file}:{region}` form.
+
 ##### Counter update (every round)
 
-At the **start of Step 5**, before classifying findings, append one
-`rounds_per_region:` entry to the session ledger for each distinct
+At the **start of Step 5** — this is the **first action**, before the sibling
+identification question (5d-i) and before classifying findings (5a) — append
+one `rounds_per_region:` entry to the session ledger for each distinct
 `{file}:{region}` pair touched by this round's findings:
 
 ```
@@ -436,11 +467,28 @@ have touched `{file}:{region}` in the current session.
 
 ##### Advisory threshold
 
-Read the threshold `N` from the environment:
+Read the threshold `N` from the environment at the **start of each round**
+(during the counter-update step above). The read mechanism follows the same
+convention as other `PRAXIS_*` env vars in this codebase — a Bash
+parameter expansion with a default:
 
+```bash
+N=${PRAXIS_DIMINISHING_RETURNS_N:-4}
 ```
-PRAXIS_DIMINISHING_RETURNS_N   (integer, default: 4)
-```
+
+In Python hook contexts, the equivalent is
+`int(os.environ.get("PRAXIS_DIMINISHING_RETURNS_N", "4"))` (consistent with
+the `os.environ.get("PRAXIS_EXTERNAL_WRITE_STRICT")` pattern at
+`hooks/external-write-falsify-check.py:579` and the
+`os.environ.get("PRAXIS_AUTHOR_EXEMPT_STRICT")` pattern at
+`hooks/external-write-falsify-check.py:592`).
+
+**Mid-session change semantics**: the env var is read fresh at each round's
+counter-update step; it is not cached at session start. If
+`PRAXIS_DIMINISHING_RETURNS_N` changes mid-session (e.g., changed from 4 to 2
+between round 3 and round 4), the new value takes effect from round 4 onward.
+Prior rounds use the value that was in effect at their own round start — there
+is no retroactive adjustment to already-recorded ledger entries.
 
 When `cumulative` reaches `N + 1` (i.e., the session is starting its
 `(N+1)`-th round on the same region), surface the following advisory
@@ -506,11 +554,16 @@ user selects: 1
 [Step 4] cd /Users/dev/project-wt/windmill-hub-1539
          → node {install_path}/scripts/codex-companion.mjs review
 
-[Step 5 — Sibling check] AskUserQuestion fired at start of Step 5:
+[Step 5 — Round 1 — counter update (5f, first action)]:
+  ledger: rounds_per_region: query.sql:filter_clause | round=1 | cumulative=1
+  ledger: rounds_per_region: cli.sh:parse_prompt      | round=1 | cumulative=1
+  (cumulative ≤ N=4 → no advisory emitted yet)
+
+[Step 5 — Round 1 — sibling check (5d-i)]: AskUserQuestion fired:
   User: "이 PR은 praxis#199 (shell 버전)의 Python port입니다."
   → sibling identified: praxis#199 on branch issue-199-hook-shell
 
-[Step 5 — Round 1] Codex returned 3 findings:
+[Step 5 — Round 1 — classify + verify (5a → 5b)] Codex returned 3 findings:
   - F1: rename `query()` → `run_query()`           [structural — apply directly]
   - F2: change WHERE col_a = 1 → col_b = 1         [fact-modifying — verify column exists]
   - F3: drop the `--state all` flag                [fact-modifying — verify CLI accepts the value]
