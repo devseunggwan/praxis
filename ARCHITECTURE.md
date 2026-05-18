@@ -120,6 +120,7 @@ else:
 | `block-pr-without-caller-evidence` | PreToolUse | Block `gh pr create` / `gh pr new` unless the effective PR body contains a `Caller chain verified:` line (closes stdin / missing-file / TOCTOU bypasses; issue #158) | [docs/hook/block-pr-without-caller-evidence.md](docs/hook/block-pr-without-caller-evidence.md) |
 | `verify-commit-flag-override` | PreToolUse | Deny `git commit` invocations that override hooks / signing / hook path / template (`--no-verify`, `--no-gpg-sign`, `-S`, `-c commit.gpgsign=`, `-c core.hooksPath=`, `-c commit.template=`) without env verification; opt-out via `PRAXIS_SKIP_COMMIT_FLAG_CHECK=1` (issue #184) | [docs/hook/verify-commit-flag-override.md](docs/hook/verify-commit-flag-override.md) |
 | `strike-counter` | SessionStart + UserPromptSubmit + Stop | Session-scoped three-strike discipline — emits 1/2-strike reminder context, hard-blocks at 3, requires non-empty reflection file before reset; state under `${PRAXIS_STATE_DIR:-$HOME/.claude/state/praxis}/strikes/` (issue #126) | [docs/hook/strike-counter.md](docs/hook/strike-counter.md) |
+| `external-write-path-existence-check` | PreToolUse | Advisory nudge when a `gh issue/pr` body file (via `--body-file`) contains markdown links referencing repo paths that do not exist on disk (phase 1: markdown links; phase 2 deferred: inline-code tokens; issue #324) | [docs/hook/external-write-path-existence-check.md](docs/hook/external-write-path-existence-check.md) |
 
 ## Multi-Platform Packaging
 

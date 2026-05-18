@@ -133,6 +133,11 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/count-assertion-verify.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/external-write-path-existence-check.sh",
+            "timeout": 5
           }
         ]
       },
