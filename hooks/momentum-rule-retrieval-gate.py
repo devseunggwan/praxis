@@ -114,15 +114,26 @@ GH_GLOBAL_FLAGS_WITH_ARG = frozenset({
     "--color",
 })
 
-# git global flags that consume one additional argument (value).
-# Verified against `git --help` global option list. When these appear between
-# `git` and the subcommand, both the flag AND its value token must be skipped
-# so the subcommand check lands at the correct argv position.
+# git global flags that consume one additional SEPARATE-TOKEN argument
+# (value). Verified against `man git` / `git -h`. When these appear between
+# `git` and the subcommand AND are NOT in fused `--flag=value` form, both the
+# flag AND its value token must be skipped so the subcommand check lands at
+# the correct argv position.
+#
+# IMPORTANT — boolean flags MUST NOT be in this set. Round-3 fix: prior
+# inclusion of `--literal-pathspecs` and `--super-prefix` (both boolean per
+# `man git` / `git -h`) caused the walker to consume the NEXT token as a
+# value, masking `push` and bypassing the force-push gate entirely. Example:
+# `git --literal-pathspecs push --force` previously slipped through.
+#
+# `--exec-path` retained: bare `--exec-path` is a QUERY form that exits
+# immediately (never reaches `push`), so treating it as value-consuming does
+# not introduce a real bypass — only over-skips in a code path that does not
+# reach runtime.
 GIT_GLOBAL_FLAGS_WITH_ARG = frozenset({
     "-c", "-C",
     "--git-dir", "--work-tree", "--namespace",
     "--exec-path", "--config-env",
-    "--super-prefix", "--literal-pathspecs",
 })
 
 

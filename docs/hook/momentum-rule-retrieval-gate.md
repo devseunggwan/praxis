@@ -95,11 +95,35 @@ prefix-matched form).
 
 ### Firing order (PreToolUse Bash chain)
 
-`hooks/hooks.json` registers `momentum-rule-retrieval-gate` as the LAST entry
-in the PreToolUse(Bash) matcher list, AFTER `pre-merge-approval-gate`. This
-ordering is intentional: when both hooks fire on `gh pr merge`, the user
-first sees the sibling's `permissionDecision: ask` dialog (hard-gate), and
-the stderr reminders from this hook accompany the prompt context. A
+`hooks/hooks.json` registers the PreToolUse(Bash) hooks in this order. Claude
+Code fires them sequentially; `momentum-rule-retrieval-gate` is registered
+LAST (19th), AFTER `pre-merge-approval-gate` (9th):
+
+| # | Hook |
+|---|------|
+| 1 | `side-effect-scan` |
+| 2 | `block-gh-state-all` |
+| 3 | `memory-hint` |
+| 4 | `cross-boundary-preflight` |
+| 5 | `cross-repo-worktree-preflight` |
+| 6 | `block-pr-without-caller-evidence` |
+| 7 | `pre-gh-pr-create-dedup-gate` |
+| 8 | `commit-title-length-check` |
+| 9 | `pre-merge-approval-gate` (surfaces `permissionDecision: ask` on `gh pr merge`) |
+| 10 | `gh-flag-verify` |
+| 11 | `cli-flag-incompat-advisory` |
+| 12 | `jq-config-empty-dict-advisory` |
+| 13 | `bash-worktree-existence-advisory` |
+| 14 | `verify-commit-flag-override` |
+| 15 | `session-intent` |
+| 16 | `output-block-falsify-advisory` |
+| 17 | `count-assertion-verify` |
+| 18 | `external-write-path-existence-check` |
+| 19 | **`momentum-rule-retrieval-gate`** (this hook — stderr rule reminders) |
+
+When both `pre-merge-approval-gate` and this hook fire on `gh pr merge`, the
+user first sees the sibling's `permissionDecision: ask` dialog (hard-gate)
+and the stderr reminders from this hook accompany the prompt context. A
 `permissionDecision: ask` from an earlier sibling does not short-circuit
 subsequent advisory hooks — both the stderr payload and the ask dialog are
 surfaced together by Claude Code.
@@ -108,6 +132,9 @@ Future hooks added to the same matcher should preserve this invariant:
 **hard-gates (deny / ask) before advisories**, so that when an upstream gate
 blocks, the downstream advisory output is still produced and visible in the
 same surface.
+
+When updating this table, regenerate it from `hooks/hooks.json` directly so
+the doc cannot drift from the source-of-truth registration order.
 
 ### Fail-open contract
 

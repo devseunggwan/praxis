@@ -224,6 +224,27 @@ run_case "git_fused_global_force_push" \
   "" \
   "git --work-tree=/tmp/repo push --force"
 
+# Round-3 MAJOR fix: boolean git global flags MUST NOT consume the next token
+# as a value. Prior over-broad GIT_GLOBAL_FLAGS_WITH_ARG inclusion of
+# --literal-pathspecs / --super-prefix caused the walker to skip `push`,
+# masking the force-push gate entirely.
+run_case "git_literal_pathspecs_force_push" \
+  "advisory:feedback_force_history_rewrite_mutation" \
+  "" \
+  "git --literal-pathspecs push --force"
+
+run_case "git_super_prefix_fused_force_push" \
+  "advisory:feedback_force_history_rewrite_mutation" \
+  "" \
+  "git --super-prefix=x push --force"
+
+# Combination: boolean + value-taking global flag together must both be
+# walked past correctly so the subcommand check still lands on `push`.
+run_case "git_literal_pathspecs_and_c_force_push" \
+  "advisory:feedback_force_history_rewrite_mutation" \
+  "" \
+  "git --literal-pathspecs -c user.name=x push -f"
+
 # --- bypass env var ------------------------------------------------------------
 
 run_case "bypass_env_gh_merge" \
