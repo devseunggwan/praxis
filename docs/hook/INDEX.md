@@ -29,6 +29,7 @@ confirmation-prompt layer.
 | [verify-commit-flag-override](verify-commit-flag-override.md) | PreToolUse | Deny `git commit` invocations that override hooks / signing without env verification |
 | [session-intent](session-intent.md) | UserPromptSubmit + PreToolUse | Gate read-intent → mutation-pivot session drift on `gh` mutating commands |
 | [trino-describe-first](trino-describe-first.md) | PreToolUse (`trino-describe-first-pre`) + PostToolUse (`trino-describe-first-post`) | Require `DESCRIBE <table>` before Trino MCP query references that table |
+| [trino-catalog-gate](trino-catalog-gate.md) | PreToolUse | Block Trino MCP queries with 3-part catalog references when `SHOW CATALOGS` has not run in this session |
 
 ---
 

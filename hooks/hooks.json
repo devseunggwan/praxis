@@ -216,6 +216,12 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/trino-describe-first-pre.sh",
             "timeout": 5,
             "hosts": ["claude", "codex"]
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/trino-catalog-gate.sh",
+            "timeout": 5,
+            "hosts": ["claude", "codex"]
           }
         ]
       }
