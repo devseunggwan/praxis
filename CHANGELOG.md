@@ -1,0 +1,353 @@
+# Changelog
+
+All notable changes to praxis are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [3.17.0] - 2026-05-16
+
+### Added
+- `pre-edit-md-escape-advisory` hook: warns on Edit of `.md` files with escape-sensitive tokens without a prior Read (#238)
+- `output-block-falsify-advisory` hook: nudges output-block falsification gate before surfacing `(Recommended)` options (#225)
+- `pre-gh-pr-create-dedup-gate` hook: runs `gh pr list --search` before `gh pr create` to surface duplicates (#240)
+- `advisory-wrapper-signature-verify` hook: warns before writing wrapper code with delegation patterns (#243)
+- `block-manufactured-action-menu` hook: warns when AskUserQuestion surfaces a proceed-menu after a command-intent signal (#244)
+- Shared compound-Bash cascade advisory across all block hooks (#244)
+- `retrospect`: falsify-before-recommended-label check (#233)
+
+### Changed
+- `pre-edit-protected-branch-guard` hook: detect PR-workflow repo before protecting write (#239)
+
+### Fixed
+- `block-ask-end-option` hook: bare Korean end-tokens in option labels (#241)
+- `codex-review-wrap`: forbid `Skill("codex:review")` probe in Step 4 (#242)
+- `block-pr-without-caller-evidence` hook: reads body-file for caller evidence (#226)
+- `builtin-task-postuse` hook: scope task-postuse counter per call (#223)
+
+## [3.16.0] - 2026-05-13
+
+### Added
+- `block-manufactured-action-menu` hook: block AskUserQuestion proceed-menus after command-intent (#215)
+- `external-api-literal-trigger` hook: advisory for ALL_CAPS enum candidates and 3-part SQL identifiers without prior retrieval (#216)
+
+## [3.15.0] - 2026-05-13
+
+### Added
+- `block-ask-end-option` hook: detects indirect session-end phrasing (#213)
+- `RUNTIME_CONSTRAINTS.md`: runtime constraints gate for skill authoring (#212)
+- `retrospect`: tool output completeness gate (#211)
+
+## [3.14.0] - 2026-05-12
+
+### Added
+- `pre-edit-protected-branch-guard` hook: block Edit/Write on protected branches when dirty or after PR-workflow commit (#204)
+
+## [3.13.0] - 2026-05-12
+
+### Added
+- `cross-boundary-preflight` hook: block heredoc in `gh pr/issue create`; checklist on cross-repo `--repo` writes (#205)
+
+## [3.12.0] - 2026-05-12
+
+### Added
+- `external-write-falsify-check` hook: author-exempt detection for unverified identifiers in mapping tables (#207)
+- `codex-review-wrap`: sibling-defect cross-check step (#203)
+
+## [3.11.0] - 2026-05-12
+
+### Added
+- `verify-commit-flag-override` hook: deny `git commit` with hook/signing override flags (#194)
+- `retrospect`: backing-repo gate and recommended-label red flag (#206)
+
+### Changed
+- Hook specs split into individual `docs/hook/*.md` files (#196)
+
+## [3.10.0] - 2026-05-11
+
+### Added
+- `trino-describe-first` hook: require `DESCRIBE <table>` before Trino MCP query references (#189)
+- `block-ask-end-option` hook: warn on mechanically surfaced end options in AskUserQuestion (#193)
+
+## [3.9.0] - 2026-05-11
+
+### Added
+- `session-intent` hook: session-scope intent-pivot gate for `gh` mutating commands (#190)
+
+## [3.8.0] - 2026-05-11
+
+### Added
+- `gh-flag-verify` hook: validate `gh` CLI flag-subcommand combinations (#191)
+
+## [3.7.0] - 2026-05-11
+
+### Added
+- `pre-merge-approval-gate` hook: surface per-PR approval prompt for `gh pr merge` in direct sessions (#187)
+
+## [3.6.0] - 2026-05-11
+
+### Added
+- `commit-title-length-check` hook: enforce 50-character commit title limit (#186)
+
+## [3.5.1] - 2026-05-11
+
+### Added
+- `external-write-falsify-check` hook: nested MCP body and positional `gh` body detection (#179)
+
+## [3.5.0] - 2026-05-11
+
+### Added
+- `external-write-falsify-check` hook: advisory opt-in hook for hypothesis-stage text before external writes (#175)
+
+## [3.4.0] - 2026-05-11
+
+### Added
+- `retrospect`: Gate-3 evidence robustness audit in Stage 2.5 (#172)
+
+## [3.3.0] - 2026-05-09
+
+### Added
+- `retrospect`: explicit backing-repo gate before Stage 4 issue creation (#171)
+
+## [3.2.0] - 2026-05-09
+
+### Added
+- `codex-review-wrap`: premise verification and flip detection across review rounds (#170)
+- `codex-review-wrap`: fallback when codex-companion is unavailable (#166)
+
+## [3.1.1] - 2026-05-08
+
+### Fixed
+- `codex-review-wrap`: use direct Node invocation instead of shell wrapper (#164)
+
+## [3.1.0] - 2026-05-07
+
+### Added
+- `block-pr-without-caller-evidence` hook: gate `gh pr create` on caller-chain evidence in PR body (#159)
+
+## [3.0.0] - 2026-05-06
+
+### Added
+- `codex-review-route` hook: warn on `/codex:review` in multi-worktree repos (#152)
+- `memory-hint` hook: surface hookable memory entries by keyword at decision time (#150)
+
+### Removed
+- `debug` skill removed (#157)
+- `turbo-complete`, `turbo-setup`, `turbo-deliver`, `cmux-orchestrator` skills removed (#155)
+
+## [2.11.0] - 2026-04-30
+
+### Added
+- `retrospect`: memory-bias gate with 4-layer reinforcement (#147)
+
+## [2.10.1] - 2026-04-29
+
+### Changed
+- `retrospect`: resolves backing repo from skill file location (#145)
+
+## [2.10.0] - 2026-04-29
+
+### Added
+- `completion-verify` hook: require same-turn Bash verification evidence before completion claims (#144)
+
+## [2.9.0] - 2026-04-28
+
+### Added
+- `codex-review-wrap` skill: worktree-aware wrapper for `/codex:review` with multi-worktree disambiguation (#141)
+
+## [2.8.1] - 2026-04-27
+
+### Added
+- `cmux-browser` skill and CLI wrapper with SPA hydration wait protocol (#133)
+
+### Fixed
+- `strike`: scope state directory to praxis-owned path (#137)
+
+## [2.8.0] - 2026-04-27
+
+### Fixed
+- `builtin-task-postuse` hook: correct false agent-spawn signal for built-in task tools (#135)
+
+## [2.7.0] - 2026-04-26
+
+### Added
+- `block-gh-state-all` hook: hard-block invalid `gh search --state all` flag combination (#132)
+
+## [2.6.1] - 2026-04-24
+
+### Fixed
+- Plugin packaging: drop `hooks` override to avoid duplicate auto-load (#125)
+
+## [2.6.0] - 2026-04-24
+
+### Added
+- Multi-platform packaging with generated manifests; build and check scripts (#123)
+
+## [2.5.0] - 2026-04-24
+
+### Added
+- `side-effect-scan` hook: pre-Bash scan for mutating commands (`git commit/push`, `gh pr merge/create`) (#122)
+
+### Fixed
+- `cmux-orchestrator`: harden codex result parsing (#121)
+
+## [2.4.1] - 2026-04-24
+
+### Added
+- `turbo-setup`: next-step branching guide (#93)
+- `strike`: gate 3/3 reset on reflection and persuasion (#105)
+
+### Changed
+- Routing: unify provider regex style across all skills (#120)
+
+### Fixed
+- `cmux-orchestrator`: replace `grep -oP` with macOS-compatible patterns (#112)
+
+## [2.4.0] - 2026-04-21
+
+### Added
+- `strike` / `strikes` / `reset-strikes` skills: session-scoped three-strike discipline with Stop hook block (#103)
+
+## [2.3.3] - 2026-04-16
+
+### Added
+- Auto-register `completion-verify` Stop hook via `plugin.json` (#101)
+
+## [2.3.2] - 2026-04-16
+
+### Added
+- `turbo-setup`: auto-open cmux workspace after worktree creation (#95)
+- `retrospect`: tool friction pass and upstream feedback action (#88)
+
+### Fixed
+- CLI: document codex exec write permissions (#94)
+
+## [2.3.1] - 2026-04-14
+
+### Added
+- Multi-provider routing: route tasks to codex, gemini, or claude by keyword (#81)
+- `cmux-delegate` v2: account, session, and distribute modes (#59)
+- `cmux-delegate`: `--permission-mode` argument (#61)
+- `recover`: show session UUID in list output (#74)
+- `recover`: surface filter reasons in output (#75)
+- `recover`: deduplicate conversation chains (#73)
+- `retrospect`: surface multi-action improvement proposals (#86)
+- CLI symlink install + verify script (#76)
+
+### Fixed
+- `recover`: prefer internal timestamp over mtime (#72)
+- `recover`: robust `/exit` detection via user-only tail (#71)
+- `retrospect`: deduplicate memory entries before creating (#80)
+
+## [2.3.0] - 2026-04-09
+
+### Added
+- `retrospect`: escalation logic and mandatory agent calls (#50)
+
+### Changed
+- Consolidated workflow into `turbo-completion` skill (#55)
+
+### Removed
+- `brainstorm` skill removed (#53)
+
+## [2.2.0] - 2026-04-09
+
+### Added
+- `cmux-delegate` skill: delegate tasks to independent cmux sessions (#48)
+
+## [2.1.0] - 2026-04-08
+
+### Added
+- `turbo-implement` skill (#44)
+
+### Changed
+- All skills made project-agnostic (#46)
+- Merged `finish-branch` into `turbo-deliver`
+
+## [2.0.0] - 2026-04-08
+
+### Changed
+- Project renamed from `my-skills` to `praxis`; all references updated (#40)
+
+## [1.4.0] - 2026-04-08
+
+### Added
+- `cmux-save-sessions` and `cmux-resume-sessions` skills (#39)
+
+## [1.3.0] - 2026-03-31
+
+### Added
+- `retrospect` skill: session retrospect with friction analysis (#37)
+
+### Fixed
+- `cmux-recover-sessions`: workspace creation and plain mode (#32)
+
+## [1.2.0] - 2026-03-27
+
+### Added
+- `cmux-session-manager` skill: daily session lifecycle management (#28)
+
+### Changed
+- `recover-sessions-cmux` renamed to `cmux-recover-sessions` (#30)
+
+## [1.1.0] - 2026-03-26
+
+### Added
+- `recover-sessions` skill: bulk session recovery after power loss (#18)
+- `cmux-recover-sessions` skill: cmux-backed session recovery (#20)
+- Unified workflow skills: turbo-setup, turbo-deliver, cmux-orchestrator (#13, #24)
+- `pr-dev-to-prod` skill: release PR from dev to prod (#3)
+- Plugin-based architecture for install-claude-stack (#7)
+
+### Changed
+- Shared scan module extracted from skills (#26)
+
+### Fixed
+- `finish-branch`: reorder compounding before merge (#16)
+
+[Unreleased]: https://github.com/devseunggwan/praxis/compare/v3.17.0...HEAD
+[3.17.0]: https://github.com/devseunggwan/praxis/compare/v3.16.0...v3.17.0
+[3.16.0]: https://github.com/devseunggwan/praxis/compare/v3.15.0...v3.16.0
+[3.15.0]: https://github.com/devseunggwan/praxis/compare/v3.14.0...v3.15.0
+[3.14.0]: https://github.com/devseunggwan/praxis/compare/v3.13.0...v3.14.0
+[3.13.0]: https://github.com/devseunggwan/praxis/compare/v3.12.0...v3.13.0
+[3.12.0]: https://github.com/devseunggwan/praxis/compare/v3.11.0...v3.12.0
+[3.11.0]: https://github.com/devseunggwan/praxis/compare/v3.10.0...v3.11.0
+[3.10.0]: https://github.com/devseunggwan/praxis/compare/v3.9.0...v3.10.0
+[3.9.0]: https://github.com/devseunggwan/praxis/compare/v3.8.0...v3.9.0
+[3.8.0]: https://github.com/devseunggwan/praxis/compare/v3.7.0...v3.8.0
+[3.7.0]: https://github.com/devseunggwan/praxis/compare/v3.6.0...v3.7.0
+[3.6.0]: https://github.com/devseunggwan/praxis/compare/v3.5.1...v3.6.0
+[3.5.1]: https://github.com/devseunggwan/praxis/compare/v3.5.0...v3.5.1
+[3.5.0]: https://github.com/devseunggwan/praxis/compare/v3.4.0...v3.5.0
+[3.4.0]: https://github.com/devseunggwan/praxis/compare/v3.3.0...v3.4.0
+[3.3.0]: https://github.com/devseunggwan/praxis/compare/v3.2.0...v3.3.0
+[3.2.0]: https://github.com/devseunggwan/praxis/compare/v3.1.1...v3.2.0
+[3.1.1]: https://github.com/devseunggwan/praxis/compare/v3.1.0...v3.1.1
+[3.1.0]: https://github.com/devseunggwan/praxis/compare/v3.0.0...v3.1.0
+[3.0.0]: https://github.com/devseunggwan/praxis/compare/v2.11.0...v3.0.0
+[2.11.0]: https://github.com/devseunggwan/praxis/compare/v2.10.1...v2.11.0
+[2.10.1]: https://github.com/devseunggwan/praxis/compare/v2.10.0...v2.10.1
+[2.10.0]: https://github.com/devseunggwan/praxis/compare/v2.9.0...v2.10.0
+[2.9.0]: https://github.com/devseunggwan/praxis/compare/v2.8.1...v2.9.0
+[2.8.1]: https://github.com/devseunggwan/praxis/compare/v2.8.0...v2.8.1
+[2.8.0]: https://github.com/devseunggwan/praxis/compare/v2.7.0...v2.8.0
+[2.7.0]: https://github.com/devseunggwan/praxis/compare/v2.6.1...v2.7.0
+[2.6.1]: https://github.com/devseunggwan/praxis/compare/v2.6.0...v2.6.1
+[2.6.0]: https://github.com/devseunggwan/praxis/compare/v2.5.0...v2.6.0
+[2.5.0]: https://github.com/devseunggwan/praxis/compare/v2.4.1...v2.5.0
+[2.4.1]: https://github.com/devseunggwan/praxis/compare/v2.4.0...v2.4.1
+[2.4.0]: https://github.com/devseunggwan/praxis/compare/v2.3.3...v2.4.0
+[2.3.3]: https://github.com/devseunggwan/praxis/compare/v2.3.2...v2.3.3
+[2.3.2]: https://github.com/devseunggwan/praxis/compare/v2.3.1...v2.3.2
+[2.3.1]: https://github.com/devseunggwan/praxis/compare/v2.3.0...v2.3.1
+[2.3.0]: https://github.com/devseunggwan/praxis/compare/v2.2.0...v2.3.0
+[2.2.0]: https://github.com/devseunggwan/praxis/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/devseunggwan/praxis/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/devseunggwan/praxis/compare/v1.4.0...v2.0.0
+[1.4.0]: https://github.com/devseunggwan/praxis/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/devseunggwan/praxis/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/devseunggwan/praxis/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/devseunggwan/praxis/releases/tag/v1.1.0
