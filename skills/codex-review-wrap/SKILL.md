@@ -321,7 +321,9 @@ against the sibling implementation.
 
 ##### 5d-i. Identify sibling implementations
 
-At the **start of Step 5**, before classifying findings, surface:
+At the **start of Step 5** — immediately after the `rounds_per_region:` counter
+update (5f counter, which runs first) and before classifying findings (5a) —
+surface:
 
 ```
 AskUserQuestion: "이 PR이 다른 PR/레포의 port · parallel hotfix · A/B 구현체인가요?
@@ -413,7 +415,7 @@ context in the source file:
 
 | File type | Region label |
 |-----------|-------------|
-| Markdown (`.md`, `.mdx`) | Nearest enclosing `#`/`##`/`###` heading text |
+| Markdown (`.md`, `.mdx`) | Nearest enclosing heading text at any level (`#` through `######`); H4+ headings are valid region labels because this SKILL.md itself uses `####` and `#####` for sub-steps, and excluding them would leave deeply-nested findings unlabelled |
 | Code (`.py`, `.ts`, `.sh`, `.js`, …) | Enclosing function / class / method symbol name |
 | Plain text / unknown | The file path alone (no region suffix) |
 
@@ -421,10 +423,19 @@ Region label format: `{file}:{region}` — e.g.
 `skills/codex-review-wrap/SKILL.md:Step 5` or
 `hooks/codex-review-route.sh:parse_prompt`.
 
+**Same-file collision tiebreaker**: when two distinct occurrences of the same
+symbol name appear in one file (e.g., two functions both named `parse_prompt`),
+append the 1-based occurrence index: `{file}:{region}:{occurrence}` (e.g.,
+`hooks/codex-review-route.sh:parse_prompt:1` and
+`hooks/codex-review-route.sh:parse_prompt:2`). Occurrence order follows
+top-to-bottom source order. This suffix is added only when a collision exists —
+unique names keep the plain `{file}:{region}` form.
+
 ##### Counter update (every round)
 
-At the **start of Step 5**, before classifying findings, append one
-`rounds_per_region:` entry to the session ledger for each distinct
+At the **start of Step 5** — this is the **first action**, before the sibling
+identification question (5d-i) and before classifying findings (5a) — append
+one `rounds_per_region:` entry to the session ledger for each distinct
 `{file}:{region}` pair touched by this round's findings:
 
 ```
@@ -436,11 +447,25 @@ have touched `{file}:{region}` in the current session.
 
 ##### Advisory threshold
 
-Read the threshold `N` from the environment:
+Read the threshold `N` from the environment at the **start of each round**
+(during the counter-update step above). The read mechanism follows the same
+convention as other `PRAXIS_*` env vars in this codebase — a Bash
+parameter expansion with a default:
 
+```bash
+N=${PRAXIS_DIMINISHING_RETURNS_N:-4}
 ```
-PRAXIS_DIMINISHING_RETURNS_N   (integer, default: 4)
-```
+
+In Python hook contexts, the equivalent is
+`int(os.environ.get("PRAXIS_DIMINISHING_RETURNS_N", "4"))` (consistent with
+how `PRAXIS_ASK_END_STRICT` and similar vars are read in `hooks/*.py`).
+
+**Mid-session change semantics**: the env var is read fresh at each round's
+counter-update step; it is not cached at session start. If
+`PRAXIS_DIMINISHING_RETURNS_N` changes mid-session (e.g., changed from 4 to 2
+between round 3 and round 4), the new value takes effect from round 4 onward.
+Prior rounds use the value that was in effect at their own round start — there
+is no retroactive adjustment to already-recorded ledger entries.
 
 When `cumulative` reaches `N + 1` (i.e., the session is starting its
 `(N+1)`-th round on the same region), surface the following advisory
