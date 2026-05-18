@@ -210,6 +210,26 @@ run_case "spaced subshell cwd does not leak into subsequent relative cd" \
   "( cd $NON_WT_DIR && pwd ); cd $ROOT_DIR"
 
 # ---------------------------------------------------------------------------
+# === Codex R4 fixes: subshell-local cwd tracking + legit )-path guard ===
+# ---------------------------------------------------------------------------
+
+# R4 P2-1: subshell-local cwd is tracked across segments inside the subshell.
+# (cd / && cd tmp) — second cd resolves relative to /, so /tmp exists.
+run_case "subshell-local cwd propagates to next segment inside subshell" \
+  "silent" \
+  "(cd / && cd tmp)"
+
+# R4 P2-1b: missing path relative to subshell-local cwd fires advisory.
+run_case "subshell second cd missing relative to subshell cwd fires advisory" \
+  "advisory:[worktree-missing]" \
+  "(cd /tmp && cd nonexistent_subdir_$$)"
+
+# R4 P2-2: path ending in ) outside a subshell — ) must not be stripped.
+run_case "outer cd to path ending in paren preserves trailing paren" \
+  "advisory:[worktree-missing]" \
+  "cd 'release)'"
+
+# ---------------------------------------------------------------------------
 # === Codex R3 fixes: trailing-) strip, command-attached heredoc, pushd +N ===
 # ---------------------------------------------------------------------------
 

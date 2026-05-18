@@ -26,6 +26,7 @@ Silent cases (no output emitted):
   - `( cd <path> && ... )` where path exists on disk (spaced subshell form)
   - `pushd +N` or `pushd -N` — directory-stack rotation, not a path
   - `cd /path` inside a `cat<<EOF` heredoc body (command-attached fused opener)
+  - subshell cd/pushd where subshell-local cwd tracking is not yet resolved
   - bare `cd` (no argument — cd to $HOME)
   - `cd $VAR` or `cd $(...)` — variable/substitution expansion, unresolvable
   - `cd -` — previous dir, unresolvable
@@ -171,11 +172,6 @@ def _extract_cd_target(seg: list[Token]) -> tuple[str | None, bool]:
         if tok.role in (TokenRole.FLAG, TokenRole.FLAG_VALUE, TokenRole.SEPARATOR_DD):
             continue
         target = tok.text
-        # Strip trailing `)` fused by shlex when the subshell closing paren is
-        # the last character of the command: `(cd /path && cd sub)` → the
-        # last token is `sub)`.  Strip one trailing `)` only (not multiple).
-        if target.endswith(")"):
-            target = target[:-1]
         if not target:
             return None, False
         # Unresolvable cases — silent skip.
@@ -325,6 +321,28 @@ def _main_inner() -> int:
     # `_heredoc_end` holds the expected end-marker word while inside a body.
     _heredoc_end: str | None = None
 
+    # Subshell tracking: compact form `(cd /a && cd b)` — shlex fuses the
+    # opening paren with the first command (`(cd`), then emits subsequent
+    # commands as independent segments, and fuses the closing `)` into the
+    # last token of the final segment.
+    #
+    # To resolve relative paths inside a subshell correctly, we track a
+    # separate `subshell_cwd` that is updated for cd/pushd segments inside
+    # the subshell. When the subshell closes (last token ends with `)`), we
+    # discard it and resume from `effective_cwd`. The outer `effective_cwd`
+    # is never updated by subshell-internal cds (they don't persist after `)`).
+    #
+    # Detection heuristics (compact form only):
+    #   open:  first token of a segment starts with `(` (e.g. `(cd` or `(`)
+    #   close: last raw token of the same or a later segment ends with `)`
+    #   strip: trailing `)` is stripped from the path token before resolution
+    #
+    # Spaced form `( cd /path )` is handled entirely by _extract_cd_target
+    # (which detects cmd == "(") and returns is_subshell=True; the `)` is a
+    # separate POSITIONAL token so no stripping is needed here.
+    in_subshell: bool = False
+    subshell_cwd: str = effective_cwd
+
     for seg in segments:
         # --- Heredoc body skip ---
         if _heredoc_end is not None:
@@ -343,18 +361,51 @@ def _main_inner() -> int:
             # The opener segment itself is not a `cd`; continue after setting.
             continue
 
-        target, is_subshell = _extract_cd_target(seg)
+        # --- Subshell open/close detection (compact form) ---
+        # Open: first raw token starts with `(` — covers `(cd` and bare `(`.
+        first_raw = seg[0].text if seg else ""
+        seg_opens_subshell = first_raw.startswith("(")
+        # Close: last raw token ends with `)` — the closing paren is fused by
+        # shlex into the final token of the last segment inside the subshell.
+        last_raw = seg[-1].text if seg else ""
+        seg_closes_subshell = last_raw.endswith(")")
+
+        if seg_opens_subshell and not in_subshell:
+            in_subshell = True
+            subshell_cwd = effective_cwd
+
+        # Choose the cwd to resolve relative paths against.
+        resolve_cwd = subshell_cwd if in_subshell else effective_cwd
+
+        # Strip one trailing `)` from the last raw token when inside a compact
+        # subshell — shlex fuses the closing paren into the last path token.
+        # Only done here (main loop), never in _extract_cd_target, so that
+        # legitimate paths ending in `)` outside a subshell are not mutated.
+        seg_for_extract = seg
+        if in_subshell and seg_closes_subshell and seg:
+            last_tok = seg[-1]
+            if last_tok.text.endswith(")"):
+                # Rebuild the segment with the last token's text stripped.
+                stripped_text = last_tok.text[:-1]
+                new_last = Token(text=stripped_text, role=last_tok.role)
+                seg_for_extract = seg[:-1] + [new_last]
+
+        target, is_subshell_flag = _extract_cd_target(seg_for_extract)
+
+        if seg_closes_subshell and in_subshell:
+            in_subshell = False  # subshell closed; revert to outer cwd next seg
+
         if target is None:
             # Not a `cd` segment — no effective_cwd update here since we do
             # not execute the segment; the next `cd` segment will still resolve
             # relative paths against the last known effective_cwd.
             continue
 
-        # Resolve target to absolute path.
+        # Resolve target to absolute path using the appropriate cwd.
         if target.startswith("/"):
             abs_target = os.path.normpath(target)
         else:
-            abs_target = os.path.normpath(os.path.join(effective_cwd, target))
+            abs_target = os.path.normpath(os.path.join(resolve_cwd, target))
 
         real_target = _normalize_path(abs_target)
 
@@ -370,10 +421,15 @@ def _main_inner() -> int:
             if session_id:
                 _record_dedupe(session_id, real_target, "missing")
         else:
-            # Path exists. skip_cwd_update (reused as is_subshell flag) is True
-            # for subshell forms and pushd — neither reliably persists the cwd
-            # change for subsequent segments. Only a bare `cd` updates it.
-            if not is_subshell:
+            # Path exists. Update the appropriate cwd tracker:
+            # - inside a subshell: always update subshell_cwd (outer not
+            #   affected regardless of is_subshell_flag; the flag only guards
+            #   the outer effective_cwd update for pushd/subshell-opener).
+            # - pushd at parent-shell level (is_subshell_flag=True): skip.
+            # - bare cd at parent-shell level: update effective_cwd.
+            if in_subshell:
+                subshell_cwd = abs_target
+            elif not is_subshell_flag:
                 effective_cwd = abs_target
             if session_id:
                 _delete_dedupe(session_id, real_target, "missing")
