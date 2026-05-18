@@ -40,6 +40,7 @@ so the agent can self-correct. Fail-open on infrastructure errors by design.
 
 | Hook | Trigger | Purpose |
 |------|---------|---------|
+| [momentum-rule-retrieval-gate](momentum-rule-retrieval-gate.md) | PreToolUse | Advisory nudge at high-momentum action points (`gh pr merge`, `cmux new-workspace`, `git push --force`) — surfaces relevant CLAUDE.md rules + memory entries to prevent "Loaded ≠ Retrieved" failures |
 | [cli-flag-incompat-advisory](cli-flag-incompat-advisory.md) | PreToolUse | Advisory nudge for known mode-incompatible flag combos (`git merge-tree --name-only` 3-arg form, `kubectl --use-protocol-buffers`) |
 | [memory-hint](memory-hint.md) | PreToolUse | Surface hookable memory entries by keyword at decision-construction time |
 | [external-write-falsify-check](external-write-falsify-check.md) | PreToolUse (opt-in) | Warn before posting hypothesis-stage text to PR / issue / Slack / Notion |
