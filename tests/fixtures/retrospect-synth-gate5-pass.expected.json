@@ -1,0 +1,13 @@
+{
+  "expected_decision": "pass",
+  "description": "Gate-5 PASS transcript fixture: finding #1 proposes action=memory and the memory_scan HTML comment block records scanned=true, candidates_reviewed (3 entries), repeat=false, repeat_count=0. gate_5_verdict: PASS in the distribution card. Gate-5 enforcement is procedural (Stop hook silently ignores gate_5_verdict). This fixture verifies the recording-location pin (HTML comment immediately after findings table) and the load-bearing field set required by Gate-5 Step 2.",
+  "must_contain": [
+    "gate_5_verdict: PASS",
+    "memory_scan finding #1",
+    "scanned: true",
+    "candidates_reviewed:"
+  ],
+  "must_not_contain": [
+    "decision\": \"block\""
+  ]
+}
