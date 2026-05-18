@@ -144,9 +144,9 @@ run_case "cd user-tilde is silent" \
   "cd ~root/foo && ls"
 
 # ---------------------------------------------------------------------------
-# === C2 fix: git -C target_dir worktree list (not hook-process cwd) ===
-# The worktree lookup now uses git -C <probe_dir>. We verify that a missing
-# path still fires correctly regardless of hook process cwd.
+# === missing path fires regardless of hook-process cwd (no git worktree lookup) ===
+# [worktree-stale] was removed (M5 option B) — the hook now only checks
+# whether the path exists on disk, not whether it is a registered worktree.
 # ---------------------------------------------------------------------------
 
 run_case "missing path advisory works regardless of cwd context" \
@@ -166,18 +166,21 @@ run_case "subshell cd non-existent is silent (out of scope Phase 1)" \
   "(cd $MISSING_PATH && ls)"
 
 # ---------------------------------------------------------------------------
-# === M2 fix: heredoc body containing cd does not fire ===
+# === M2 fix: heredoc body containing cd is skipped (no false-positive) ===
 # ---------------------------------------------------------------------------
 
-# tokenize_with_roles is heredoc-unaware so the body tokens may be parsed.
-# The hook silently skips any segment whose argv[0] is not `cd` (it would
-# be parsed as a POSITIONAL in the heredoc context). However, `cd` inside
-# a heredoc body IS parsed as a segment command — we rely on the heredoc
-# opener token `<<` being present to suppress. The current implementation
-# does NOT do heredoc-aware skip (Phase 1 scope); we confirm the existing
-# behavior: false-positive is present but out of scope. We test that the
-# OPENER command (`cat`) does not itself emit an advisory.
-run_case "heredoc opener cat does not fire advisory" \
+# `cat << EOF\ncd /missing\nEOF` — body segment `cd /missing` must be silent.
+run_case "heredoc body cd non-existent is silent" \
+  "silent" \
+  "$(printf 'cat << EOF\ncd /this/does/not/exist/anywhere\nEOF')"
+
+# cd AFTER the heredoc close still fires (not suppressed by heredoc skip).
+run_case "cd after heredoc close fires advisory" \
+  "advisory:[worktree-missing]" \
+  "$(printf 'cat << EOF\ncd /this/does/not/exist/anywhere\nEOF\ncd /also/does/not/exist')"
+
+# Non-cd opener command (cat /tmp/foo.txt) with no heredoc — still silent.
+run_case "non-cd command without heredoc is silent" \
   "silent" \
   "cat /tmp/foo.txt"
 
@@ -203,6 +206,30 @@ run_case "different session fires advisory independently" \
   "advisory:[worktree-missing]" \
   "cd $MISSING_PATH" \
   "test-dedup-other-$$"
+
+# M3 state-transition: missing → mkdir (cd existing clears marker) → rmdir → cd missing again fires.
+# Step 1: cd missing → advisory + marker written.
+TRANSITION_SID="test-transition-$$"
+TRANSITION_PATH="$NON_WT_DIR/transition-dir-$$"
+
+run_case "state-transition step1: missing fires advisory" \
+  "advisory:[worktree-missing]" \
+  "cd $TRANSITION_PATH" \
+  "$TRANSITION_SID"
+
+# Step 2: create the directory, then cd existing → marker cleared.
+mkdir -p "$TRANSITION_PATH"
+run_case "state-transition step2: existing path is silent and clears marker" \
+  "silent" \
+  "cd $TRANSITION_PATH" \
+  "$TRANSITION_SID"
+
+# Step 3: remove the directory, cd again → advisory fires (marker was cleared in step 2).
+rmdir "$TRANSITION_PATH" 2>/dev/null || true
+run_case "state-transition step3: missing again fires advisory (marker cleared)" \
+  "advisory:[worktree-missing]" \
+  "cd $TRANSITION_PATH" \
+  "$TRANSITION_SID"
 
 # ---------------------------------------------------------------------------
 # === Infrastructure / fail-open cases ===

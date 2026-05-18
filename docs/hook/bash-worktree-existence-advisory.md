@@ -33,7 +33,7 @@ blocked.
 | `cd ~` / `cd ~/foo` / `cd ~user/foo` | silent (tilde expansion; hook process `$HOME` may differ from agent effective `$HOME`) |
 | `pushd /path` | silent (out of scope Phase 1) |
 | `(cd /path && ...)` subshell | silent (out of scope Phase 1) |
-| heredoc body containing `cd /path` | silent (heredoc body not parsed as commands) |
+| `cd /path` inside a heredoc body | silent (heredoc body segments are skipped — see Heredoc handling) |
 | Opt-out marker `# worktree-advisory:ack` | silent (all advisories suppressed) |
 | Non-Bash tool name | silent (fail-open) |
 | Malformed JSON stdin | silent (fail-open) |
@@ -41,10 +41,10 @@ blocked.
 
 ### Scope (Phase 1)
 
-Only direct `cd <path>` commands are detected. `pushd`, subshell form
-`(cd /path && ...)`, and `cd` inside heredoc bodies are out of scope for
-this phase to avoid parser complexity. A follow-up issue tracks Phase 2
-expansion to cover these forms.
+Only direct `cd <path>` commands are detected. `pushd` and subshell form
+`(cd /path && ...)` are out of scope for this phase. Heredoc bodies are
+correctly skipped (see Heredoc handling). A follow-up issue tracks Phase 2
+expansion for `pushd` and subshell forms.
 
 ### Path detection
 
@@ -59,6 +59,18 @@ segment's resolved path in a compound chain). Symlinks are canonicalized via
 `os.path.realpath` so that `/tmp/foo` compares equal to `/private/tmp/foo` in
 the `git worktree list --porcelain` output on macOS.
 
+### Heredoc handling
+
+`tokenize_with_roles` is not heredoc-aware: `cat << EOF\ncd /path\nEOF` is
+parsed as three segments — the opener (`cat`), the body line (`cd /path`),
+and the end marker (`EOF`). Without special handling the body `cd /path`
+would fire a false-positive advisory.
+
+The hook detects the `<<` or `<<-` POSITIONAL token in a segment and records
+the end-marker word. All subsequent segments are skipped as heredoc body lines
+until the end-marker segment is consumed. Commands appearing after the heredoc
+close are processed normally.
+
 ### Deduplication
 
 Per-session marker files in:
@@ -66,10 +78,12 @@ Per-session marker files in:
 ${TMPDIR:-/tmp}/praxis-bash-worktree-advisory/<session_id>.<path-hash>.<state>
 ```
 suppress repeat advisories for the same (session, path, state) triple.
-The `<state>` component (`missing`) ensures that if a path is later created,
-the old marker does not suppress a fresh advisory (or silence) for the new
-state. Stale marker files are cleaned up by the OS tmp purge policy; no
-explicit cleanup is performed.
+The `<state>` suffix is `missing`. When a path is observed to **exist**
+(the `cd` target is a valid directory), the hook deletes any stale `missing`
+marker for that path so that if the directory is later removed and `cd`'d
+again, a fresh `[worktree-missing]` advisory fires rather than being
+suppressed by the old marker. Stale marker files are cleaned up by the OS
+tmp purge policy; no explicit cleanup is performed.
 
 ### Opt-out
 
@@ -107,10 +121,11 @@ The hook returns exit 0 on every infrastructure error:
 bash tests/test_bash_worktree_existence_advisory.sh
 ```
 
-21 cases covering: missing path advisory (direct and compound command),
+27 cases covering: missing path advisory (direct and compound command),
 existing path silent (including registered worktree), tilde expansion forms
-(`~`, `~/foo`, `~user/foo`), pushd/subshell out-of-scope silent,
-heredoc body silent, dedupe state-transition (first fires, second deduped,
-different session fires independently), infrastructure fail-open (non-Bash
-tool name, malformed JSON, bare cd, `$VAR`, `cd -`, opt-out marker, empty
-command).
+(`~`, `~/foo`, `~user/foo`), pushd/subshell out-of-scope silent, heredoc
+body silent (body `cd` suppressed, post-heredoc `cd` fires, non-cd no-heredoc
+silent), dedupe (first fires, second deduped, different session fires
+independently, state-transition missing→exists→missing fires again),
+infrastructure fail-open (non-Bash tool name, malformed JSON, bare cd, `$VAR`,
+`cd -`, opt-out marker, empty command).

@@ -25,7 +25,8 @@ Silent cases (no output emitted):
   - `cd ~user/...` — user-specific tilde, unresolvable
   - `pushd /path` — out of scope (Phase 1)
   - `(cd /path && ...)` — subshell, out of scope (Phase 1)
-  - heredoc body containing `cd /path` — not parsed as command
+  - `cd /path` inside a heredoc body — heredoc body segments are skipped
+    (see _extract_heredoc_end_marker for the detection mechanism)
   - opt-out marker `# worktree-advisory:ack` anywhere in command
   - non-Bash tool name
   - malformed JSON stdin
@@ -161,6 +162,45 @@ def _record_dedupe(session_id: str, path: str, state: str) -> None:
         pass
 
 
+def _delete_dedupe(session_id: str, path: str, state: str) -> None:
+    """Remove a dedupe marker when path state has changed.
+
+    Called when a path is observed to exist (missing → exists transition)
+    so that a subsequent `cd` to the same path after it was deleted again
+    will fire a fresh [worktree-missing] advisory rather than being suppressed
+    by the stale marker from when the path still existed as missing.
+    """
+    marker = _dedupe_marker(session_id, path, state)
+    try:
+        os.unlink(marker)
+    except OSError:
+        pass  # fail-open: marker may not exist
+
+
+def _extract_heredoc_end_marker(seg: list[Token]) -> str | None:
+    """Return the heredoc end-marker word if this segment opens a heredoc.
+
+    `tokenize_with_roles` parses `cat << EOF` as a segment with tokens
+    ['cat', '<<', 'EOF']. The `<<` is emitted as a POSITIONAL token because
+    shlex with punctuation_chars=';|&' does not treat `<` as punctuation.
+
+    Detection: find the literal `<<` or `<<-` token (POSITIONAL role) and
+    return the token immediately following it as the end-marker word.
+    Strip optional `-` from `<<-` (tab-stripping form of heredoc).
+
+    Returns None when no heredoc opener is present in the segment.
+    """
+    argv = filter_argv(seg)
+    for i, tok in enumerate(argv):
+        if tok.role == TokenRole.POSITIONAL and tok.text in ("<<", "<<-"):
+            if i + 1 < len(argv):
+                # End-marker may be quoted in the source (`<< 'EOF'`) but
+                # shlex in posix mode strips quotes, so the token text is
+                # always the bare word. Strip leading `-` from `<<-` form.
+                return argv[i + 1].text
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -191,7 +231,30 @@ def _main_inner() -> int:
     # are resolved correctly (matching the shell's sequential execution order).
     effective_cwd = os.getcwd()
 
+    # Heredoc tracking: when a segment opens a heredoc (`<< EOF`), the
+    # subsequent segments up to and including the matching end-marker segment
+    # are heredoc body lines — they must NOT be processed as shell commands.
+    # `_heredoc_end` holds the expected end-marker word while inside a body.
+    _heredoc_end: str | None = None
+
     for seg in segments:
+        # --- Heredoc body skip ---
+        if _heredoc_end is not None:
+            # Check if this segment IS the end-marker (e.g. a segment whose
+            # sole COMMAND token is `EOF`).
+            argv = filter_argv(seg)
+            if argv and argv[0].text == _heredoc_end:
+                _heredoc_end = None  # end marker consumed; resume normal scan
+            # Either way (body line or end marker), skip cd detection.
+            continue
+
+        # --- Check if this segment opens a heredoc ---
+        heredoc_end = _extract_heredoc_end_marker(seg)
+        if heredoc_end is not None:
+            _heredoc_end = heredoc_end
+            # The opener segment itself is not a `cd`; continue after setting.
+            continue
+
         target = _extract_cd_target(seg)
         if target is None:
             # Not a `cd` segment — no effective_cwd update here since we do
@@ -220,7 +283,11 @@ def _main_inner() -> int:
                 _record_dedupe(session_id, real_target, "missing")
         else:
             # Path exists — update effective_cwd for downstream segments.
+            # Also clear any stale `missing` marker so that if this path is
+            # later removed and cd'd again, a fresh advisory fires (M3 fix).
             effective_cwd = abs_target
+            if session_id:
+                _delete_dedupe(session_id, real_target, "missing")
 
     return 0
 
