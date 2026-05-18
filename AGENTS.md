@@ -135,3 +135,16 @@ are corrected. Re-run after pulls or after adding a new CLI script.
 
 Exits non-zero on drift, so it can be wired into CI or a SessionStart hook
 to catch "patch landed in the wrong clone" before it bites a future session.
+
+## Issue & PR Conventions
+
+- **Partial-scope PR**: When a PR addresses only a subset of an issue's body
+  (e.g., "items 1-3 implemented, P-redesign deferred to follow-up"), use
+  `Refs #N` (or `Addresses #N (items X, Y; Z deferred)`) in the PR body
+  **instead of** `Closes #N`. GitHub's `Closes` keyword auto-closes the issue
+  on merge regardless of deferred items inside the issue body, orphaning their
+  tracking thread.
+- **Full-scope PR**: `Closes #N` per global CLAUDE.md (Issue & PR Rules).
+- **Agent prompts that delegate PR authorship**: do not hardcode `Closes #N` —
+  instruct the agent to choose `Closes` vs `Refs` based on whether the PR
+  addresses the issue's full scope.
