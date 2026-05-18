@@ -114,6 +114,17 @@ GH_GLOBAL_FLAGS_WITH_ARG = frozenset({
     "--color",
 })
 
+# git global flags that consume one additional argument (value).
+# Verified against `git --help` global option list. When these appear between
+# `git` and the subcommand, both the flag AND its value token must be skipped
+# so the subcommand check lands at the correct argv position.
+GIT_GLOBAL_FLAGS_WITH_ARG = frozenset({
+    "-c", "-C",
+    "--git-dir", "--work-tree", "--namespace",
+    "--exec-path", "--config-env",
+    "--super-prefix", "--literal-pathspecs",
+})
+
 
 # ---------------------------------------------------------------------------
 # Trigger detection helpers.
@@ -141,30 +152,69 @@ def _is_gh_pr_merge(argv: list[str]) -> bool:
 
 
 def _is_cmux_dispatch(argv: list[str]) -> bool:
-    """Return True iff the argv is `cmux new-workspace ... --command "claude -p ..."`.
+    """Return True iff the argv is `cmux new-workspace ... --command "<ai> ..."`.
 
-    Detection: argv[0] == cmux AND `new-workspace` is present as a positional
-    token AND `--command` appears with a value containing `claude` (or `codex`
-    / other providers). Phase 1 keeps this simple: presence of `new-workspace`
-    subcommand is sufficient signal — the `--command` check is optional context.
+    Round-2 fix (MAJOR 1): require `--command` value to contain an AI provider
+    token (`claude` / `codex` / `gemini`) to avoid false positives on:
+      • `cmux new-workspace test-foo` (plain workspace, no command)
+      • `cmux new-workspace --command "echo hello"` (non-AI command)
+    False positives train users to ignore the surface, defeating the gate.
+
+    Detection contract:
+      1. argv[0] == "cmux"
+      2. argv contains "new-workspace" as a token
+      3. argv contains `--command <value>` OR `--command=<value>` where the
+         value contains a known AI provider name token.
     """
     argv = strip_prefix(argv)
     if not argv or argv[0] != "cmux":
         return False
-    if len(argv) < 2:
+    if "new-workspace" not in argv[1:]:
         return False
-    return argv[1] == "new-workspace"
+
+    # Scan for --command and inspect its value.
+    ai_provider_tokens = ("claude", "codex", "gemini")
+    n = len(argv)
+    for i, tok in enumerate(argv):
+        value: str | None = None
+        if tok == "--command" and i + 1 < n:
+            value = argv[i + 1]
+        elif tok.startswith("--command="):
+            value = tok.split("=", 1)[1]
+        if value is None:
+            continue
+        lowered = value.lower()
+        if any(p in lowered for p in ai_provider_tokens):
+            return True
+    return False
 
 
 def _is_force_push(argv: list[str]) -> bool:
-    """Return True iff the argv is `git push` with a force flag."""
+    """Return True iff the argv is `git push` with a force flag.
+
+    Round-2 fix (MAJOR 2): the prior bare-flag walker treated `-c key=val`
+    as `(flag)(positional)` and landed the subcommand check on `key=val`,
+    silently bypassing the gate for `git -c user.name=x push --force ...`.
+    Mirror the gh global-flags-with-arg pattern: skip both the flag and its
+    value token. `--flag=value` fused form needs only single-token skip.
+    """
     argv = strip_prefix(argv)
     if not argv or argv[0] != "git":
         return False
-    # Walk past git global flags to find the subcommand.
+    # Walk past git global flags + their value tokens to find the subcommand.
     i = 1
-    while i < len(argv) and argv[i].startswith("-"):
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--":
+            i += 1
+            break
+        if not tok.startswith("-"):
+            break
         i += 1
+        # If the flag is a known value-taker AND in bare form (not --flag=value),
+        # the next token is the value — skip it too.
+        if "=" not in tok and tok in GIT_GLOBAL_FLAGS_WITH_ARG and i < len(argv):
+            i += 1
     if i >= len(argv) or argv[i] != "push":
         return False
     # Scan remaining tokens for force flags.

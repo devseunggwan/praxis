@@ -148,6 +148,37 @@ run_case "cmux_dispatch_self_authored_labels" \
   "" \
   'cmux new-workspace --command "claude -p write code"'
 
+run_case "cmux_dispatch_codex_provider" \
+  "advisory:[praxis:momentum-gate]" \
+  "" \
+  'cmux new-workspace --command "codex exec do thing"'
+
+run_case "cmux_dispatch_gemini_provider" \
+  "advisory:[praxis:momentum-gate]" \
+  "" \
+  'cmux new-workspace --command "gemini run task"'
+
+run_case "cmux_dispatch_fused_command_flag" \
+  "advisory:[praxis:momentum-gate]" \
+  "" \
+  'cmux new-workspace --command=claude'
+
+# Round-2 MAJOR 1 fix: ensure non-dispatch cmux invocations stay silent.
+run_case "silent_cmux_new_workspace_plain" \
+  "silent" \
+  "" \
+  "cmux new-workspace test-foo"
+
+run_case "silent_cmux_new_workspace_echo" \
+  "silent" \
+  "" \
+  'cmux new-workspace --command "echo hello"'
+
+run_case "silent_cmux_new_workspace_shell" \
+  "silent" \
+  "" \
+  'cmux new-workspace dev --command "bash -i"'
+
 # --- force-push triggers -------------------------------------------------------
 
 run_case "git_push_force" \
@@ -169,6 +200,29 @@ run_case "git_push_force_with_lease_ref" \
   "advisory:[praxis:momentum-gate]" \
   "" \
   "git push --force-with-lease=origin/main origin my-branch"
+
+# Round-2 MAJOR 2 fix: git global flags with separate-token value must not
+# disguise the push subcommand from the walker.
+run_case "git_dash_c_kv_force_push" \
+  "advisory:feedback_force_history_rewrite_mutation" \
+  "" \
+  "git -c user.name=x push --force origin main"
+
+run_case "git_dash_C_path_force_push" \
+  "advisory:feedback_force_history_rewrite_mutation" \
+  "" \
+  "git -C /tmp/repo push -f origin my-branch"
+
+run_case "git_long_global_force_push" \
+  "advisory:feedback_force_history_rewrite_mutation" \
+  "" \
+  "git --git-dir=/tmp/repo/.git push --force-with-lease"
+
+# Confirm fused-form git global flags also bypass correctly.
+run_case "git_fused_global_force_push" \
+  "advisory:feedback_force_history_rewrite_mutation" \
+  "" \
+  "git --work-tree=/tmp/repo push --force"
 
 # --- bypass env var ------------------------------------------------------------
 
@@ -279,11 +333,112 @@ run_case "silent_git_push_no_flag" \
   "git push origin feature-branch --tags"
 
 # --- compound command multi-trigger ----------------------------------------
+#
+# Round-2 MINOR 2 fix: a compound command that contains BOTH `gh pr merge` and
+# `cmux new-workspace --command "claude ..."` must surface BOTH the merge AND
+# the dispatch rule blocks — not just the first trigger encountered.
 
-run_case "compound_merge_and_dispatch" \
+run_case "compound_merge_and_dispatch_merge_surface" \
   "advisory:TRIGGER: gh pr merge" \
   "" \
   'gh pr merge --squash && cmux new-workspace --command "claude -p next"'
+
+run_case "compound_merge_and_dispatch_dispatch_surface" \
+  "advisory:TRIGGER: cmux new-workspace" \
+  "" \
+  'gh pr merge --squash && cmux new-workspace --command "claude -p next"'
+
+# Dedicated multi-trigger inspector — asserts BOTH surfaces appear in the SAME
+# stderr capture, not separated by re-invocation.
+run_compound_multi_assert() {
+  local name="$1" command="$2"
+  local payload
+  payload=$(build_payload "Bash" "$command")
+  local err_file
+  err_file=$(mktemp)
+  echo "$payload" | python3 "$HOOK" >/dev/null 2>"$err_file"
+  local rc=$?
+  local err
+  err=$(cat "$err_file")
+  rm -f "$err_file"
+
+  local ok=1
+  [ "$rc" -eq 0 ] || ok=0
+  echo "$err" | grep -qF "TRIGGER: gh pr merge" || ok=0
+  echo "$err" | grep -qF "TRIGGER: cmux new-workspace" || ok=0
+
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] rc=$rc"
+    [ -n "$err" ] && echo "        stderr first lines: $(echo "$err" | head -3)"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+run_compound_multi_assert \
+  "compound_emits_both_surfaces_same_run" \
+  'gh pr merge --squash && cmux new-workspace --command "claude -p next"'
+
+run_compound_force_merge_assert() {
+  local name="$1" command="$2"
+  local payload
+  payload=$(build_payload "Bash" "$command")
+  local err_file
+  err_file=$(mktemp)
+  echo "$payload" | python3 "$HOOK" >/dev/null 2>"$err_file"
+  local rc=$?
+  local err
+  err=$(cat "$err_file")
+  rm -f "$err_file"
+
+  local ok=1
+  [ "$rc" -eq 0 ] || ok=0
+  echo "$err" | grep -qF "TRIGGER: git push --force" || ok=0
+  echo "$err" | grep -qF "TRIGGER: gh pr merge" || ok=0
+
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] rc=$rc"
+    [ -n "$err" ] && echo "        stderr: $(echo "$err" | head -3)"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+run_compound_force_merge_assert \
+  "compound_force_push_and_merge_both_surfaces" \
+  'git push --force && gh pr merge --squash'
+
+run_compound_multi_assert_force_dispatch() {
+  local name="$1" command="$2"
+  local payload
+  payload=$(build_payload "Bash" "$command")
+  local err_file
+  err_file=$(mktemp)
+  echo "$payload" | python3 "$HOOK" >/dev/null 2>"$err_file"
+  local rc=$?
+  local err
+  err=$(cat "$err_file")
+  rm -f "$err_file"
+
+  local ok=1
+  [ "$rc" -eq 0 ] || ok=0
+  echo "$err" | grep -qF "TRIGGER: git push --force" || ok=0
+  echo "$err" | grep -qF "TRIGGER: cmux new-workspace" || ok=0
+
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] rc=$rc"
+    [ -n "$err" ] && echo "        stderr: $(echo "$err" | head -3)"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+run_compound_multi_assert_force_dispatch \
+  "compound_force_and_dispatch_both_surfaces" \
+  'git push --force && cmux new-workspace --command "claude -p next"'
 
 # ===========================================================================
 # Summary

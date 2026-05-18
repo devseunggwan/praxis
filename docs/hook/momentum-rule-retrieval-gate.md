@@ -93,6 +93,22 @@ prefix-matched form).
 | `verify-commit-flag-override` | Fires on `git commit --no-verify`. Different trigger, no overlap. |
 | `memory-hint` | Surfaces `hookable: true` memory entries by keyword. The momentum gate specifically surfaces the entries most relevant to merge / dispatch / force-push momentum, as a targeted complement to the general memory-hint scan. |
 
+### Firing order (PreToolUse Bash chain)
+
+`hooks/hooks.json` registers `momentum-rule-retrieval-gate` as the LAST entry
+in the PreToolUse(Bash) matcher list, AFTER `pre-merge-approval-gate`. This
+ordering is intentional: when both hooks fire on `gh pr merge`, the user
+first sees the sibling's `permissionDecision: ask` dialog (hard-gate), and
+the stderr reminders from this hook accompany the prompt context. A
+`permissionDecision: ask` from an earlier sibling does not short-circuit
+subsequent advisory hooks — both the stderr payload and the ask dialog are
+surfaced together by Claude Code.
+
+Future hooks added to the same matcher should preserve this invariant:
+**hard-gates (deny / ask) before advisories**, so that when an upstream gate
+blocks, the downstream advisory output is still produced and visible in the
+same surface.
+
 ### Fail-open contract
 
 The hook returns exit 0 on every infrastructure error:
