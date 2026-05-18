@@ -1,5 +1,7 @@
 # PreToolUse Verify Commit-Flag Override
 
+Supported hosts: all
+
 `hooks/verify-commit-flag-override.py` fires on every PreToolUse(Bash)
 event and inspects the command for `git commit` invocations that override
 the repo's commit-policy defaults (hooks, signing, hook path, template).

@@ -1,5 +1,7 @@
 # Stop Hook Retrospect Mix Check
 
+Supported hosts: all
+
 `hooks/retrospect-mix-check.sh` fires on every `Stop` event and blocks the
 retrospect skill's Stage 3 output from defaulting to memory-only when
 findings are tagged `tool` / `workflow` / `spec-gap`, or when memory-only

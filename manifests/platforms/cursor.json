@@ -1,31 +1,6 @@
 {
   "platform": "cursor",
-  "excluded_hooks": [
-    "side-effect-scan",
-    "block-gh-state-all",
-    "memory-hint",
-    "cross-boundary-preflight",
-    "cross-repo-worktree-preflight",
-    "block-pr-without-caller-evidence",
-    "pre-gh-pr-create-dedup-gate",
-    "commit-title-length-check",
-    "pre-merge-approval-gate",
-    "gh-flag-verify",
-    "cli-flag-incompat-advisory",
-    "verify-commit-flag-override",
-    "session-intent",
-    "output-block-falsify-advisory",
-    "external-api-literal-trigger",
-    "pre-edit-protected-branch-guard",
-    "pre-edit-md-escape-advisory-pre",
-    "advisory-wrapper-signature-verify",
-    "block-ask-end-option",
-    "block-manufactured-action-menu",
-    "trino-describe-first-pre",
-    "builtin-task-postuse",
-    "pre-edit-md-escape-advisory-post",
-    "trino-describe-first-post"
-  ],
+  "host_id": "cursor",
   "outputs": [
     {
       "kind": "plugin",
@@ -36,7 +11,7 @@
       }
     },
     {
-      "kind": "filtered-hooks",
+      "kind": "hooks",
       "path": ".cursor-plugin/hooks/hooks.json"
     }
   ]

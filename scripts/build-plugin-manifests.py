@@ -7,14 +7,17 @@ Reads:
                                    keywords)
   manifests/platforms/*.json     — per-platform output declarations
   VERSION                        — authoritative version string
-  hooks/hooks.json               — canonical hook registry (used when
-                                   generating filtered-hooks outputs)
+  hooks/hooks.json               — canonical hook registry; each hook entry
+                                   may carry a `hosts` whitelist that is
+                                   filtered per platform host_id at build
 
 Writes (generated artifacts, committed to the repo):
   .claude-plugin/plugin.json
   .claude-plugin/marketplace.json
+  .claude-plugin/hooks/hooks.json
   .agents/plugins/marketplace.json
   plugins/praxis/.codex-plugin/plugin.json
+  plugins/praxis/.codex-plugin/hooks/hooks.json
   .cursor-plugin/plugin.json
   .cursor-plugin/hooks/hooks.json
   gemini-extension.json
@@ -30,23 +33,23 @@ is what `scripts/check-plugin-manifests.py` verifies in CI.
 
 Platform manifest schema:
   platform          str   — platform identifier
-  excluded_hooks    list  — hook script names (without .sh) to omit from
-                            filtered-hooks outputs; documentation for
-                            gemini-extension outputs
-  excluded_skills   list  — reserved for future per-platform skill filtering
+  host_id           str   — host token matched against each hook's `hosts`
+                            whitelist (defaults to platform when omitted)
   outputs           list  — output declarations (see output kinds below)
 
 Output kinds:
   plugin            — plugin.json with base metadata + plugin_overrides
   marketplace       — marketplace catalog JSON
-  filtered-hooks    — hooks/hooks.json with excluded_hooks entries removed
+  hooks             — hooks/hooks.json filtered to host_id via the per-hook
+                      `hosts` whitelist (entries with no `hosts` are kept
+                      for every platform)
   gemini-extension  — gemini-extension.json in Gemini CLI format
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -69,38 +72,34 @@ def load_hooks() -> dict:
     return json.loads(HOOKS_JSON_PATH.read_text())
 
 
-def _extract_hook_name(command: str) -> str:
-    """Return the hook script basename (no .sh) from a hook command string."""
-    m = re.search(r"/hooks/([^/\s]+?)\.sh", command)
-    return m.group(1) if m else ""
+def filter_hooks_for_host(hooks_data: dict, host_id: str) -> dict:
+    """Return a copy of hooks_data with each entry filtered to host_id.
 
-
-def filter_hooks(hooks_config: dict, excluded: list[str]) -> dict:
-    """Return a new hooks config with entries for excluded scripts removed.
-
-    An entry is removed when its ``command`` field references a script whose
-    basename (without .sh) appears in *excluded*.  Events and groups that
-    become empty after filtering are also removed.
+    An entry is kept iff its `hosts` field is absent (= all hosts) OR contains
+    host_id. The `hosts` field itself is stripped from the output so generated
+    files contain only the standard hook schema. Empty groups/events are
+    removed so the rendered file omits surfaces with zero hooks for the host.
     """
-    if not excluded:
-        return hooks_config
-    excluded_set = set(excluded)
-    result: dict = {"description": hooks_config.get("description", ""), "hooks": {}}
-    for event, groups in hooks_config.get("hooks", {}).items():
-        filtered_groups = []
-        for group in groups:
-            kept = [
-                entry
-                for entry in group.get("hooks", [])
-                if _extract_hook_name(entry.get("command", "")) not in excluded_set
-            ]
+    filtered = copy.deepcopy(hooks_data)
+    result_hooks: dict = {}
+    for event_name, event_groups in filtered.get("hooks", {}).items():
+        kept_groups = []
+        for group in event_groups:
+            kept = []
+            for hook in group.get("hooks", []):
+                hosts = hook.get("hosts")
+                if hosts is None or host_id in hosts:
+                    entry = {k: v for k, v in hook.items() if k != "hosts"}
+                    kept.append(entry)
             if kept:
                 new_group = {k: v for k, v in group.items() if k != "hooks"}
                 new_group["hooks"] = kept
-                filtered_groups.append(new_group)
-        if filtered_groups:
-            result["hooks"][event] = filtered_groups
-    return result
+                kept_groups.append(new_group)
+        if kept_groups:
+            result_hooks[event_name] = kept_groups
+    out = {k: v for k, v in filtered.items() if k != "hooks"}
+    out["hooks"] = result_hooks
+    return out
 
 
 def render_plugin(base: dict, overrides: dict) -> dict:
@@ -157,11 +156,7 @@ def render_gemini_extension(base: dict) -> dict:
     }
 
 
-def render_output(
-    base: dict,
-    output: dict,
-    excluded_hooks: list[str] | None = None,
-) -> dict:
+def render_output(base: dict, output: dict, hooks_source: dict, host_id: str) -> dict:
     kind = output["kind"]
     if kind == "plugin":
         return render_plugin(base, output.get("plugin_overrides", {}))
@@ -171,9 +166,8 @@ def render_output(
             plugin_source=output["plugin_source"],
             extras=output.get("marketplace_overrides"),
         )
-    if kind == "filtered-hooks":
-        hooks_config = load_hooks()
-        return filter_hooks(hooks_config, excluded_hooks or [])
+    if kind == "hooks":
+        return filter_hooks_for_host(hooks_source, host_id)
     if kind == "gemini-extension":
         return render_gemini_extension(base)
     raise ValueError(f"unknown output kind: {kind}")
@@ -208,15 +202,16 @@ def ensure_symlink(link: Path, target_relative: str) -> bool:
 
 def main() -> int:
     base = load_base()
+    hooks_source = load_hooks()
 
     changed_paths: list[str] = []
 
     for platform_file in sorted(PLATFORMS_DIR.glob("*.json")):
         platform = json.loads(platform_file.read_text())
-        excluded_hooks = platform.get("excluded_hooks", [])
+        host_id = platform.get("host_id", platform["platform"])
         for output in platform["outputs"]:
             out_path = REPO_ROOT / output["path"]
-            rendered = render_output(base, output, excluded_hooks)
+            rendered = render_output(base, output, hooks_source, host_id)
             if write_json(out_path, rendered):
                 changed_paths.append(output["path"])
 

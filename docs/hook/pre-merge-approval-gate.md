@@ -1,5 +1,7 @@
 # PreToolUse Pre-Merge Approval Gate
 
+Supported hosts: all
+
 `hooks/pre-merge-approval-gate.py` fires on every PreToolUse(Bash) event and
 intercepts `gh pr merge` invocations. In direct interactive Claude sessions the
 gate emits `permissionDecision: "ask"` so the user sees the merge attempt and

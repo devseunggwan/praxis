@@ -1,5 +1,7 @@
 # Stop Hook Completion Evidence Verification
 
+Supported hosts: all
+
 `hooks/completion-verify.sh` fires on every `Stop` event and blocks assistant
 turns that declare completion without same-turn verification evidence.
 

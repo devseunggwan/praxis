@@ -1,5 +1,7 @@
 # PreToolUse Markdown Escape-Sensitive Edit Advisory
 
+Supported hosts: all
+
 `hooks/pre-edit-md-escape-advisory.py` is a paired PreToolUse(Edit) +
 PostToolUse(Read) hook that nudges the agent to Read a markdown file
 before constructing an `old_string` containing escape-sensitive tokens.

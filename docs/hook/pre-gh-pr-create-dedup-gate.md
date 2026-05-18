@@ -1,5 +1,7 @@
 # PreToolUse `gh pr create` Duplicate-Search Gate
 
+Supported hosts: all
+
 `hooks/pre-gh-pr-create-dedup-gate.sh` intercepts every Bash tool call and,
 when it sees `gh pr create` (or `gh pr new`), runs a duplicate-PR search
 against the *target* repo and surfaces the result unconditionally to stderr

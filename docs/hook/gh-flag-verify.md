@@ -1,5 +1,7 @@
 # PreToolUse gh CLI Flag Validator
 
+Supported hosts: all
+
 `hooks/gh-flag-verify.sh` intercepts every Bash tool call and hard-blocks
 `gh <subcommand>` invocations that supply a flag not in the subcommand's
 accepted set, emitting `permissionDecision: "deny"` before the command executes.

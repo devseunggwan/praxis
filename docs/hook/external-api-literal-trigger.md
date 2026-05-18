@@ -1,5 +1,7 @@
 # PreToolUse External API Literal Use-Site Trigger
 
+Supported hosts: all
+
 `hooks/external-api-literal-trigger.py` fires on every `PreToolUse` event
 for `Write`, `Edit`, and `Bash` tool calls. It scans the content being
 written or the command being issued for external API enum / literal patterns

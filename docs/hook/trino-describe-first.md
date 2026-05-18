@@ -1,5 +1,7 @@
 # PreToolUse Trino MCP DESCRIBE-First Gate
 
+Supported hosts: all
+
 `hooks/trino-describe-first.py` is a paired PreToolUse + PostToolUse hook
 that gates Trino MCP query execution on a session-recorded `DESCRIBE`
 having run for every referenced table.

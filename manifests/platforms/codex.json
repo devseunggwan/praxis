@@ -1,5 +1,6 @@
 {
   "platform": "codex",
+  "host_id": "codex",
   "outputs": [
     {
       "kind": "plugin",
@@ -12,6 +13,10 @@
       "kind": "marketplace",
       "path": ".agents/plugins/marketplace.json",
       "plugin_source": "./plugins/praxis"
+    },
+    {
+      "kind": "hooks",
+      "path": "plugins/praxis/.codex-plugin/hooks/hooks.json"
     }
   ]
 }

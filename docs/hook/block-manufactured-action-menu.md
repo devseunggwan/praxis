@@ -1,5 +1,7 @@
 # PreToolUse AskUserQuestion Manufactured Action-Menu Gate
 
+Supported hosts: all
+
 `hooks/block-manufactured-action-menu.py` fires on every PreToolUse(AskUserQuestion)
 event and inspects `options[].label` for manufactured action-menu markers — option
 labels that re-ask "shall we proceed?" ("진행할까요", "계속할까요", "proceed",

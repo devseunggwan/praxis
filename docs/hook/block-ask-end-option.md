@@ -1,5 +1,7 @@
 # PreToolUse AskUserQuestion End-Option Gate
 
+Supported hosts: all
+
 `hooks/block-ask-end-option.py` fires on every PreToolUse(AskUserQuestion)
 event and inspects `options[].label` for end-option markers — both direct
 ("end here", "여기서 종료") and indirect ("take a break", "잠시 보류").

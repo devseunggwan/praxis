@@ -1,5 +1,7 @@
 # PreToolUse Count-Assertion Alternation Advisory
 
+Supported hosts: all
+
 `hooks/count-assertion-verify.py` fires on every `PreToolUse(Bash)` event.
 It detects `grep -c` commands whose pattern contains an alternation operator
 and emits an advisory reminder to verify each arm separately before citing
