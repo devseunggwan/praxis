@@ -271,6 +271,114 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Case 7 (P1-Phase2): inline code span — `hooks/foo.sh` style phantom path
+# triggers advisory; `docs/hook/INDEX.md` real path does not.
+# ---------------------------------------------------------------------------
+case7_body='# Inline code span test
+
+The file `hooks/pre-tool-use/nonexistent.sh` should be implemented.
+See `docs/hook/INDEX.md` for examples.
+'
+run_with_body "$case7_body" 'gh issue create --title "Inline"' "session-inline-$$" c7_err c7_rc
+
+c7_ok=1
+[ "$c7_rc" -eq 0 ] || c7_ok=0
+echo "$c7_err" | grep -q "\[phantom-path\]" || c7_ok=0
+echo "$c7_err" | grep -q "pre-tool-use/nonexistent.sh" || c7_ok=0
+# Real path in inline code must NOT appear as phantom
+echo "$c7_err" | grep -q "INDEX.md" && c7_ok=0
+if [ "$c7_ok" -eq 1 ]; then
+  echo "PASS: inline code span — phantom detected, real path not flagged"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: inline code span (rc=$c7_rc, stderr='${c7_err:0:200}')"
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("inline code span — phantom detected, real path not flagged")
+fi
+
+# ---------------------------------------------------------------------------
+# Case 8 (P1-lstrip): lstrip("./") quirk — `./../escape.md` must NOT be
+# mangled to `escape.md`.  The path starts with `./` so it is a recognized
+# prefix; after stripping the `./` prefix it becomes `../escape.md` which
+# does not exist under repo root and must trigger an advisory.
+# ---------------------------------------------------------------------------
+case8_body='# lstrip quirk test
+
+See [escape](./../escape.md) for details.
+'
+run_with_body "$case8_body" 'gh issue create --title "Lstrip"' "session-lstrip-$$" c8_err c8_rc
+
+c8_ok=1
+[ "$c8_rc" -eq 0 ] || c8_ok=0
+# The advisory must mention the path (not silently pass because `escape.md`
+# happened to not exist — we verify the correct path appears in the message).
+echo "$c8_err" | grep -q "\[phantom-path\]" || c8_ok=0
+# The stripped path should be `../escape.md`, not `escape.md`
+echo "$c8_err" | grep -q "\.\./escape\.md" || c8_ok=0
+if [ "$c8_ok" -eq 1 ]; then
+  echo "PASS: lstrip quirk — ./../escape.md -> ../escape.md (not mangled to escape.md)"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: lstrip quirk (rc=$c8_rc, stderr='${c8_err:0:200}')"
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("lstrip quirk — ./../escape.md -> ../escape.md (not mangled to escape.md)")
+fi
+
+# ---------------------------------------------------------------------------
+# Case 9 (P1-binary): binary file with NUL bytes — hook must exit 0 with no
+# advisory (NUL sniff causes early skip before link extraction).
+# Distinct from Case 6 (M3) which tests non-UTF-8 bytes without NUL.
+# ---------------------------------------------------------------------------
+bin9_body_file=$(mktemp /tmp/test-phantom-bin9-XXXXXX)
+# Write content that includes NUL bytes AND a phantom path string.
+# Without NUL detection the phantom string would trigger an advisory;
+# with detection the file should be skipped silently.
+python3 -c "
+import sys
+# Embed a phantom path in an inline-code span around NUL bytes so that
+# _extract_candidate_paths() would find it if NUL-sniffing were absent.
+# Without NUL detection the backtick span would trigger a phantom advisory;
+# with detection the file is skipped before link extraction fires.
+content = b'\`hooks/pre-tool-use/phantom.sh\`\x00binary\x00data'
+sys.stdout.buffer.write(content)
+" > "$bin9_body_file"
+
+bin9_err_file=$(mktemp /tmp/test-phantom-err9-XXXXXX)
+bin9_payload=$(python3 -c "
+import json, sys
+body_file = sys.argv[1]
+session_id = sys.argv[2]
+repo_root = sys.argv[3]
+payload = {
+    'session_id': session_id,
+    'tool_name': 'Bash',
+    'tool_input': {
+        'command': 'gh issue create --title \"Binary9\" --body-file ' + body_file,
+    },
+    'cwd': repo_root,
+}
+print(json.dumps(payload))
+" "$bin9_body_file" "session-binary9-$$" "$ROOT_DIR")
+
+env -u PRAXIS_PHANTOM_PATH_STRICT \
+  python3 "$HOOK" >/dev/null 2>"$bin9_err_file" <<< "$bin9_payload"
+bin9_rc=$?
+bin9_err=$(cat "$bin9_err_file")
+rm -f "$bin9_body_file" "$bin9_err_file"
+
+c9_ok=1
+[ "$bin9_rc" -eq 0 ] || c9_ok=0
+[ -z "$bin9_err" ] || c9_ok=0
+if [ "$c9_ok" -eq 1 ]; then
+  echo "PASS: binary NUL sniff — NUL-containing file skipped, no false-positive advisory"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: binary NUL sniff (rc=$bin9_rc, stderr='${bin9_err:0:120}')"
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("binary NUL sniff — NUL-containing file skipped, no false-positive advisory")
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 

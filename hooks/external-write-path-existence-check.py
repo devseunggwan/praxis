@@ -23,7 +23,8 @@ Phase 1 scope (issue #324):
   - Fail-open on any infrastructure error (malformed stdin, missing git,
     unreadable file, etc.).
 
-Phase 2 (deferred): inline-code path tokens (`` `hooks/foo.sh` ``).
+Phase 2: inline-code path tokens (`` `hooks/foo.sh` ``) with repo-relative
+prefix — extends extraction alongside Phase 1 markdown links.
 """
 from __future__ import annotations
 
@@ -63,6 +64,16 @@ REPO_RELATIVE_PREFIXES = (
 # Markdown link target: `](path)` — capture the path portion.
 # Non-greedy so `](a.md) and ](b.md)` yields two separate matches.
 _MD_LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
+
+# Inline code span: `hooks/foo.sh` — capture the content between backticks.
+# Only matches single-backtick spans to avoid multi-backtick fenced code
+# blocks.  The backtick cannot appear inside the span content.
+_INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+
+# Fenced code block (triple-backtick): strip before inline-code search to
+# avoid false-positive phantom-path hits on sample snippets in PR bodies.
+# Matches both labelled (```bash ... ```) and unlabelled (``` ... ```) fences.
+_FENCED_BLOCK_RE = re.compile(r"```[^\n]*\n.*?```", re.DOTALL)
 
 # gh subcommand pairs that accept --body-file and write to external surfaces.
 _GH_BODY_FILE_SUBCOMMANDS = frozenset({
@@ -166,8 +177,14 @@ def _resolve_repo_root(body_file_path: str, cwd: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _extract_candidate_paths(body: str) -> list[str]:
-    """Extract markdown link targets that look like repo-relative paths."""
+    """Extract repo-relative paths from markdown links and inline code spans.
+
+    Sources:
+    - Markdown link targets: ``](path)``
+    - Inline code spans: `` `hooks/foo.sh` `` (Phase 2 — repo-relative prefix only)
+    """
     candidates: list[str] = []
+
     for m in _MD_LINK_RE.finditer(body):
         target = m.group(1)
         # Ignore http/https/mailto/anchor-only links.
@@ -181,7 +198,33 @@ def _extract_candidate_paths(body: str) -> list[str]:
             continue
         if any(target.startswith(pfx) for pfx in REPO_RELATIVE_PREFIXES):
             # Strip leading `./` so the path is always relative-to-root.
-            candidates.append(target.lstrip("./") if target.startswith("./") else target)
+            # Use target[2:] rather than lstrip("./") to avoid mangling paths
+            # like `./../escape.md` into `escape.md` (lstrip is greedy on
+            # individual characters, not the literal prefix).
+            candidates.append(target[2:] if target.startswith("./") else target)
+
+    # Phase 2: inline code spans — `hooks/foo.sh` style references.
+    # Strip fenced blocks first so unlabelled triple-backtick fences
+    # (``` hooks/nonexistent.sh ```) don't produce phantom-path false positives.
+    # Only repo-relative prefixes are in scope; `./` prefix is also accepted
+    # and stripped consistently with the markdown-link handling above.
+    body_no_fences = _FENCED_BLOCK_RE.sub("", body)
+    for m in _INLINE_CODE_RE.finditer(body_no_fences):
+        token = m.group(1).strip()
+        # Take only the path component — stop at the first whitespace so that
+        # inline command examples like `hooks/foo.py --help` do not produce a
+        # phantom-path advisory for "hooks/foo.py --help" (which includes args
+        # and would never match a real filesystem path).
+        path_token = token.split()[0] if token else token
+        # Strip anchor fragment and query string — mirrors Phase 1 markdown-link
+        # handling so `docs/foo.md#section` and `hooks/bar.py?v=2` do not
+        # produce a phantom hit on an otherwise-existing file.
+        path_token = path_token.split("#", 1)[0].split("?", 1)[0]
+        if not path_token:
+            continue
+        if any(path_token.startswith(pfx) for pfx in REPO_RELATIVE_PREFIXES):
+            candidates.append(path_token[2:] if path_token.startswith("./") else path_token)
+
     # Dedupe while preserving order.
     seen: set[str] = set()
     result: list[str] = []
@@ -267,11 +310,22 @@ def main() -> int:
         if not os.path.isfile(body_file):
             continue
 
+        # Sniff head bytes for NUL (\x00) to detect binary files.  Binary
+        # content is not valid markdown; skip to avoid false-positive matches
+        # inside binary blobs (e.g. an accidentally passed ELF or image file).
+        try:
+            with open(body_file, "rb") as fh_bin:
+                head = fh_bin.read(512)
+            if b"\x00" in head:
+                continue  # binary file — skip silently (fail-open)
+        except OSError:
+            continue  # fail-open — unreadable file
+
         try:
             with open(body_file, encoding="utf-8", errors="replace") as fh:
                 body = fh.read()
         except (OSError, UnicodeDecodeError):
-            continue  # fail-open — binary or unreadable file
+            continue  # fail-open — unreadable file
 
         # Session-scoped dedup keyed on body content so that the same body
         # in a different temp path fires only once, and an edited body with
@@ -285,11 +339,29 @@ def main() -> int:
             continue
 
         repo_root = _resolve_repo_root(body_file, cwd)
+        real_repo_root = os.path.realpath(repo_root)
 
-        phantom: list[str] = [
-            p for p in candidates
-            if not os.path.exists(os.path.join(repo_root, p))
-        ]
+        def _is_phantom(p: str) -> bool:
+            """Return True if path p should be treated as a phantom reference.
+
+            A path is phantom when it does not exist inside the repo root.
+            Paths that escape the repo root via `../` traversal are always
+            phantom even when they happen to exist on the filesystem (e.g. a
+            sibling worktree directory), because they reference content outside
+            the repository boundary.
+            """
+            full = os.path.join(repo_root, p)
+            if not os.path.exists(full):
+                return True
+            # Resolve symlinks/`../` so a path like `../sibling-worktree` that
+            # physically exists outside the repo tree is still flagged.
+            # Use separator-aware prefix comparison to avoid false negatives
+            # when a sibling directory shares the repo root name as a prefix
+            # (e.g. /tmp/praxis-wt-copy startswith /tmp/praxis-wt → True).
+            resolved = os.path.realpath(full)
+            return not (resolved == real_repo_root or resolved.startswith(real_repo_root + os.sep))
+
+        phantom: list[str] = [p for p in candidates if _is_phantom(p)]
 
         if phantom:
             _mark_reported(dk)
