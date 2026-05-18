@@ -107,6 +107,12 @@
           },
           {
             "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/jq-config-empty-dict-advisory.sh",
+            "timeout": 5,
+            "hosts": ["claude", "codex"]
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/verify-commit-flag-override.sh",
             "timeout": 5,
             "hosts": ["claude", "codex"]
