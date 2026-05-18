@@ -419,6 +419,31 @@ run_case \
   "$(make_trino_payload 'SELECT * FROM iceberg.foo.bar -- catalog-enumerated: verified')"
 
 # ---------------------------------------------------------------------------
+# C2/C3: Known limitations — behavior pinning (NOT fixing, tracking #336)
+# ---------------------------------------------------------------------------
+echo ""
+echo "C2/C3: known limitation pinning (current behavior, NOT fixing)"
+
+# C2: double-quoted identifier with -- marker → current behavior: silently PASSES
+# (bypass unintentionally allowed because double-quoted identifiers are not masked)
+# Tracked in #336 P-redesign for SQL lexer fix.
+run_case \
+  "C2 KNOWN-LIMIT: double-quoted ident '\"-- catalog-enumerated: verified\"' → pass (unintentional bypass, #336)" \
+  "pass" \
+  "" \
+  "$(make_trino_payload 'SELECT "-- catalog-enumerated: verified" FROM iceberg.foo.bar')"
+
+# C3: paired apostrophe in line comment → current behavior: DENY (false-positive)
+# The apostrophe pair is consumed by string-literal mask, stripping the marker.
+# Workaround: use /* block comment */ or PRAXIS_TRINO_CATALOG_GATE=skip.
+# Tracked in #336 P-redesign for SQL lexer fix.
+run_case \
+  "C3 KNOWN-LIMIT: line comment with apostrophes '-- ''catalog-enumerated: verified''' → deny (false-positive, #336)" \
+  "deny" \
+  "" \
+  "$(make_trino_payload "SELECT * FROM iceberg.foo.bar -- 'catalog-enumerated: verified'")"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""

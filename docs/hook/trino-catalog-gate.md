@@ -99,9 +99,10 @@ Two bypass paths are available when the catalog is already known-good:
    comment in the query body:
    - Line comment: `SELECT ... -- catalog-enumerated: verified`
    - Block comment: `SELECT ... /* catalog-enumerated: verified */`
-   The marker must appear in comment syntax. Text inside string literals,
-   column aliases, or quoted identifiers does NOT bypass the gate
-   (`WHERE x = 'foo -- catalog-enumerated: verified'` is NOT a bypass).
+   The marker must appear in comment syntax. Single-quoted string literals
+   are masked before comment extraction, so
+   `WHERE x = 'foo -- catalog-enumerated: verified'` is NOT a bypass.
+   See "Known limitations" for double-quoted / backtick identifier edge cases.
 2. **Env bypass** — set `PRAXIS_TRINO_CATALOG_GATE=skip`. One-off session
    override; does not persist across invocations.
 
@@ -121,21 +122,37 @@ subsequent queries in the same session once the marker file exists.
 | `python3` unavailable | exit 0 (shell shim guards) |
 | Hook `.py` file missing | exit 0 (shell shim guards) |
 
-### Known limitations (Phase 2)
+### Known limitations — false negatives (gate silently passes, should block)
 
 The following SQL shapes may produce `CATALOG_NOT_FOUND` but are not yet
 detected by this hook (will silently pass through):
 
-- MERGE source `USING <catalog>.<schema>.<table>` — the USING clause target
-  does not follow a FROM/INTO keyword and is not currently detected.
-- `CREATE TABLE x (LIKE catalog.schema.t)` LIKE clause references.
+- **MERGE source `USING <catalog>.<schema>.<table>`** — the USING clause target
+  does not follow a FROM/INTO keyword and is not currently detected (tracked in #336).
+- **`CREATE TABLE x (LIKE catalog.schema.t)`** — LIKE clause references not detected (tracked in #336).
+- **Double-quoted / backtick bypass** — marker text inside a double-quoted
+  (`"-- catalog-enumerated: verified"`) or backtick
+  (`` `-- catalog-enumerated: verified` ``) identifier is NOT masked, so the
+  `--` sequence is treated as a line-comment delimiter and the gate is bypassed
+  unintentionally (tracked in #336 P-redesign).
 - Subquery `FROM` clauses where only inner queries reference 3-part catalogs
   but the outer query does not.
 - Dynamic SQL via `EXECUTE PREPARE <name> USING ...` (prepared statement
   reference, not the underlying SQL text).
 
-Detection is regex-based, not a full SQL parser. Pathological inputs fall back
-to fail-open.
+### Known limitations — false positives (gate blocks, should pass)
+
+- **Paired apostrophes in a line comment** — a line comment containing the
+  marker text wrapped in single quotes
+  (`-- 'catalog-enumerated: verified'`) causes the apostrophe pair to be
+  consumed by the string-literal mask, stripping the marker from the comment.
+  The bypass is not recognized and the gate incorrectly blocks.
+  **Workaround**: use a block comment (`/* catalog-enumerated: verified */`)
+  or the env bypass `PRAXIS_TRINO_CATALOG_GATE=skip` (tracked in #336 P-redesign).
+
+Detection is regex-based, not a full SQL lexer. A proper stateful lexer
+(tracking string / comment / identifier state in a single pass) would resolve
+all the above delimiter-interaction limitations. See #336 P-redesign.
 
 ### Tests
 

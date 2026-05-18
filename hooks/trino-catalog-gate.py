@@ -229,11 +229,24 @@ def has_bypass_marker(sql: str) -> bool:
       - Line comment:  `-- ... catalog-enumerated: verified ...`
       - Block comment: `/* ... catalog-enumerated: verified ... */`
 
-    Marker text inside string literals, column aliases, or quoted identifiers
-    does NOT bypass the gate (C1 fix: string literals are masked before the
-    comment regexes are applied, so `'foo -- catalog-enumerated: verified'`
-    is replaced with `'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'` before
-    the line-comment scan).
+    Scope of the C1 fix (single-quoted string masking):
+      Single-quoted string literals ('...') are masked before the comment
+      regexes are applied, so `'foo -- catalog-enumerated: verified'` does NOT
+      bypass the gate.
+
+    Known limitations (tracked in #336 P-redesign for full SQL lexer):
+      - Double-quoted identifiers (`"-- catalog-enumerated: verified"`) and
+        backtick identifiers (`` `-- catalog-enumerated: verified` ``) are NOT
+        masked. A `--` sequence inside them is treated as a line-comment
+        delimiter, causing the marker to be detected and the gate bypassed
+        unintentionally.
+      - A line comment containing paired apostrophes around the marker text
+        (`-- 'catalog-enumerated: verified'`) causes the apostrophe pair to be
+        consumed by the string-literal mask, stripping the marker from the
+        comment. This produces a false-positive deny when the user writes the
+        bypass inside single quotes in a line comment. Workaround: use a block
+        comment (`/* catalog-enumerated: verified */`) or the env bypass
+        `PRAXIS_TRINO_CATALOG_GATE=skip`.
     """
     # Mask string literals first so embedded `--` sequences are not treated
     # as comment starters (C1 fix).
