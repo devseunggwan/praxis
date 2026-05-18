@@ -79,7 +79,8 @@ resolution algorithm.
 ## Multi-Platform Packaging
 
 Runtime source (`skills/`, `hooks/`, `scripts/`) is shared; per-platform
-manifests (Claude, Codex) are generated from canonical metadata. See
+manifests (Claude, Codex, Cursor, Gemini, OpenCode) are generated from
+canonical metadata. See
 [`ARCHITECTURE.md → Multi-Platform Packaging`](ARCHITECTURE.md#multi-platform-packaging)
 for the source files, generated outputs, and add-a-new-platform flow.
 
