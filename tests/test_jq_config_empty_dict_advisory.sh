@@ -206,6 +206,15 @@ run_case "jq -r -n is silent" \
   "silent" \
   "jq -r -n '.foo'"
 
+# Combined short flags containing n: -rn / -nr — jq reads no files.
+run_case "jq -rn combined flag is silent" \
+  "silent" \
+  "jq -rn '{}' $EMPTY_CLAUDE_JSON"
+
+run_case "jq -nr combined flag is silent" \
+  "silent" \
+  "jq -nr '{}' $EMPTY_CLAUDE_JSON"
+
 # --arg name -n: the -n is the *value* of --arg, not the null-input flag.
 # Hook must NOT short-circuit; the config path after the filter is a real file.
 run_case "--arg name -n: -n as value operand does not suppress advisory" \
@@ -230,6 +239,11 @@ run_case "command substitution jq --null-input is silent" \
 run_case "command substitution normal jq: advisory fires" \
   "advisory:[config-empty]" \
   "x=\$(jq '.' $EMPTY_CLAUDE_JSON)"
+
+# command substitution --arg name -n: -n is value operand, advisory must fire.
+run_case "command substitution --arg name -n: advisory fires" \
+  "advisory:[config-empty]" \
+  "x=\$(jq --arg myvar -n '.' $EMPTY_CLAUDE_JSON)"
 
 # ---------------------------------------------------------------------------
 # === Item 3: multi-file (jq '.' a.json b.json) — each path checked ===

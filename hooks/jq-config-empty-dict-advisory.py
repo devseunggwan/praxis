@@ -154,6 +154,12 @@ _CONFIG_PATH_IN_TEXT_RE = re.compile(
 )
 
 
+# Matches double-value flags (--arg/--argjson name value) in a substitution
+# text so their value tokens can be stripped before null-input detection.
+_SUBST_DOUBLE_VALUE_FLAG_RE = re.compile(
+    r'(?:--arg|--argjson)\s+\S+\s+\S+'
+)
+
 _SUBST_NULL_INPUT_RE = re.compile(
     r'\bjq\b'
     r'.*?'                             # any intervening tokens
@@ -184,7 +190,10 @@ def _scan_subst_for_config_paths(token: str) -> list[str]:
     if not re.search(r'\bjq\b', token):
         return []
     # jq -n / --null-input reads no files — skip advisory to avoid false positive.
-    if _SUBST_NULL_INPUT_RE.search(token):
+    # Strip double-value flag pairs (--arg name value, --argjson name value)
+    # before checking so that `--arg myvar -n` is not misidentified as null-input.
+    scrubbed = _SUBST_DOUBLE_VALUE_FLAG_RE.sub("", token)
+    if _SUBST_NULL_INPUT_RE.search(scrubbed):
         return []
     paths = []
     for m in _CONFIG_PATH_IN_TEXT_RE.finditer(token):
@@ -263,7 +272,11 @@ def _extract_jq_config_paths(argv: list[str]) -> list[str]:
             # NOTE: check here (not before the loop) so that `--arg name -n`
             # is not misidentified: the `-n` value token is consumed by the
             # _JQ_DOUBLE_VALUE_FLAGS branch above, never reaching this path.
-            if bare in ("-n", "--null-input"):
+            # Combined short flags (-rn, -nr, etc.) are single-dash tokens
+            # without `=`; check for `n` inside them too.
+            if bare == "--null-input" or (
+                bare.startswith("-") and not bare.startswith("--") and "n" in bare[1:]
+            ):
                 return []
             i += 1
             continue
