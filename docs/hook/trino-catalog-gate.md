@@ -70,13 +70,33 @@ of these SQL context keywords:
 |-------------|--------|
 | `FROM` | `SELECT ... FROM`, `DELETE FROM` |
 | `JOIN` | all JOIN variants |
-| `INTO` | `INSERT INTO`, `MERGE INTO` |
+| `INTO` | `INSERT INTO`, `MERGE INTO` — **not** bare `SELECT col INTO dest` (SELECT-INTO is not valid Trino SQL; see "Known limitations" below) |
 | `UPDATE` | `UPDATE <ref> SET ...` |
 | `TABLE` | `CREATE TABLE`, `CREATE OR REPLACE TABLE`, `ALTER TABLE` |
 | `VIEW` | `CREATE VIEW`, `CREATE OR REPLACE VIEW` |
+| `USING` | `MERGE INTO t USING <catalog>.<schema>.<table>` — source table in MERGE statements (#336 item 7) |
+| `LIKE` | `CREATE TABLE x (LIKE <catalog>.<schema>.<table>)` — LIKE clause reference (#336 item 8) |
 
 The context keyword gate avoids false positives on Python attribute chains like
 `os.path.sep`.
+
+**`INTO` arm — SELECT-INTO exclusion**: The `INTO` arm is restricted to
+`INSERT INTO` and `MERGE INTO` contexts. `SELECT col INTO cat.s.t FROM src`
+(PostgreSQL/SQL-Server SELECT-INTO syntax) does NOT trigger the gate because
+Trino does not support SELECT-INTO; blocking it would produce a misleading
+deny message pointing to a catalog-enumeration problem rather than an
+unsupported-syntax error. A separate `MERGE_INSERT_INTO_RE` pattern captures
+only the `(INSERT|MERGE) INTO` form (#336 item 6).
+
+**`SHOW SCHEMAS FROM <catalog>` and catalog-existence verification**: A
+`SHOW SCHEMAS FROM iceberg` query does NOT count as catalog-existence
+verification for the gate. Rationale: `SHOW SCHEMAS FROM <catalog>` itself
+references the catalog name inline; if the catalog does not exist, Trino
+returns `Catalog '<name>' not found`. The gate marker is created only by
+`SHOW CATALOGS` (the query that *enumerates available catalogs*), not by
+commands that *assume* a catalog exists. Use `SHOW CATALOGS` first, then
+`SHOW SCHEMAS FROM <catalog>` to list schemas in a verified catalog (#336
+item 2).
 
 String literals are masked before comment and catalog-reference detection so
 that `--` or `/* */` sequences embedded inside string values are not treated
@@ -127,9 +147,6 @@ subsequent queries in the same session once the marker file exists.
 The following SQL shapes may produce `CATALOG_NOT_FOUND` but are not yet
 detected by this hook (will silently pass through):
 
-- **MERGE source `USING <catalog>.<schema>.<table>`** — the USING clause target
-  does not follow a FROM/INTO keyword and is not currently detected (tracked in #336).
-- **`CREATE TABLE x (LIKE catalog.schema.t)`** — LIKE clause references not detected (tracked in #336).
 - **Double-quoted / backtick bypass** — marker text inside a double-quoted
   (`"-- catalog-enumerated: verified"`) or backtick
   (`` `-- catalog-enumerated: verified` ``) identifier is NOT masked, so the
@@ -139,6 +156,11 @@ detected by this hook (will silently pass through):
   but the outer query does not.
 - Dynamic SQL via `EXECUTE PREPARE <name> USING ...` (prepared statement
   reference, not the underlying SQL text).
+
+> **Resolved in #336**: `MERGE ... USING <catalog>.<schema>.<table>` (#336 item 7)
+> and `CREATE TABLE x (LIKE <catalog>.<schema>.<table>)` (#336 item 8) are now
+> detected. `SELECT col INTO <catalog>.<schema>.<table>` (SELECT-INTO) now passes
+> correctly with a non-misleading path (#336 item 6).
 
 ### Known limitations — false positives (gate blocks, should pass)
 
@@ -160,8 +182,8 @@ all the above delimiter-interaction limitations. See #336 P-redesign.
 bash tests/test_trino_catalog_gate.sh
 ```
 
-Covers 27 cases across M1 (bypass comment-only), M2 (DML/DDL keyword set),
-M3 (multi-statement isolation), and C1 (string-literal masking):
+Covers cases across M1 (bypass comment-only), M2 (DML/DDL keyword set),
+M3 (multi-statement isolation), C1 (string-literal masking), and #336 items:
 
 - (a) `SHOW CATALOGS` passes + creates marker; subsequent 3-part query passes
 - (b) 3-part `FROM`/`JOIN` reference without marker → deny
@@ -172,3 +194,9 @@ M3 (multi-statement isolation), and C1 (string-literal masking):
 - M2: `INSERT INTO`, `MERGE INTO`, `UPDATE`, `CREATE TABLE`, `CREATE VIEW`, `DELETE FROM` → deny
 - M3: `SHOW CATALOGS; SELECT ... FROM 3-part` in one payload → deny (no prior marker)
 - C1: string literal containing `-- marker text` → deny (literal masking prevents bypass)
+- Item 1: PostToolUse `isError=true` → deletes optimistic marker; `isError=false` / missing field → preserves marker
+- Item 3: marker file created with `0o600` permissions
+- Item 6: `SELECT col INTO cat.s.t` → pass (not INSERT/MERGE INTO); INSERT/MERGE INTO regression guards
+- Item 7: `MERGE INTO t USING iceberg.foo.src` → deny; 2-part USING → pass
+- Item 8: `CREATE TABLE x (LIKE iceberg.foo.src)` → deny; 2-part LIKE → pass
+- Item 9: doc-contract test — keyword arm set in code equals keyword arm table in spec (drift = test failure)
