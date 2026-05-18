@@ -204,7 +204,10 @@ You MUST complete each stage before proceeding to the next.
    - `cluster_repeat_count = max(1, 1, 0) + (3-1) = 3`
    - Event with repeat_count=0 → `effective_repeat = max(0, 3) = 3` → escalates to "hook or skill", not "memory"
 
-7. **Scan MEMORY.md for repeat patterns** (2-hop deterministic scan):
+7. **Scan MEMORY.md for repeat patterns** (2-hop deterministic scan — MANDATORY, not skippable):
+
+   This step is required for EVERY finding. Skipping it (e.g., "probably not in MEMORY.md", "I'd remember if I saw this before") is a Red Flag. Each finding MUST record a `memory_scan` field capturing the scan evidence before the finding can advance to step 8.
+
    a. Read MEMORY.md index (single file read) — extract all feedback entry titles and file paths
    b. For each finding's root cause, identify candidate matches from index titles (concept-level, not keyword)
    c. Read each candidate feedback file to confirm semantic match (same root cause, not just similar keywords)
@@ -213,6 +216,30 @@ You MUST complete each stage before proceeding to the next.
       - Example: "commit" matching both "atomic commit" and "pre-commit hook" = NOT auto-match, read file to confirm
    e. `repeat_count` = number of distinct feedback files with matching root cause
    f. If match found with existing resolution action (issue/hook already created): mark as `resolved=true`
+   g. **Record `memory_scan` on every finding** — this field is load-bearing for Gate-5 (below).
+
+      **Recording location**: emit the `memory_scan` block as an HTML comment immediately after the unified findings table in the Stage 3 report (one comment per finding, keyed by `finding #N:`). This pin keeps the field auditable by reviewers and parseable by downstream tooling without polluting the human-readable table.
+
+      **Format**:
+
+      ```
+      <!-- memory_scan finding #1:
+        scanned: true
+        candidates_reviewed: [<file1.md>, <file2.md>, ...]   # empty list if index is empty
+        matched: [<matched_file.md>]                          # empty list if no match
+        repeat: true|false
+        repeat_count: N
+        resolved: true|false                                  # optional; omit if no resolution action found
+      -->
+      ```
+
+      **Field requirements** — Gate-5 (Stage 2.5 Step 2) verifies only the **load-bearing** fields below; the rest are documentation-only metadata for human reviewers:
+      - `scanned: true` — **Gate-5 verified** (proves step was executed, not skipped)
+      - `candidates_reviewed` — **Gate-5 verified** (presence required; empty list = index was empty or 0 candidates after concept-level filter)
+      - `repeat` and `repeat_count` — **Gate-5 verified** (presence required; values reflect step (e) results)
+      - `matched` — documentation-only; SHOULD list every file confirmed in step (d) for human review, but Gate-5 does NOT verify its presence (the `repeat`/`repeat_count` pair already encodes this signal at the type level)
+      - `resolved` — **optional** and NOT verified by Gate-5; emit only when `repeat=true` AND existing resolution action found in step (f)
+      - When proposed action ∈ {`memory_create`, `memory_update`}: `memory_scan` MUST be populated — Gate-5 (Stage 2.5) will block Stage 3 if absent
 
 8. **Auto-assign action type** based on escalation ladder. Use `event.effective_repeat` (from step 6b; equals `event.repeat_count` for singleton events) as the repeat signal for the Repeat-based rows below. Apply Repeat-based rows first; then apply Category-default rows below to override or compound when the event's `category[]` (from pre-scan, step 4) makes memory-only inappropriate even on first occurrence:
 
@@ -332,7 +359,35 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 
 `gate_4_verdict` is informational (parallel to `gate_3_verdict`). The Stop hook silently ignores it; enforcement is procedural inside Stage 4 Action 4 step 0a.
 
-**Output (on pass)** — Stage 2.5 emits the distribution card per the Output Schema Contract defined in Stage 3, plus per-finding Gate-1, Gate-2, Gate-3, and Gate-4 verdicts:
+**Gate-5 (Memory-Scan Completeness)** — For every finding whose `Proposed Actions` includes `memory` (i.e., the finding is headed toward a MEMORY.md write at Stage 4 Action 1), verify that the finding carries a populated `memory_scan` field (set by Stage 2 step 7g).
+
+> **Why Gate-5 exists**: Stage 2 step 7 was previously procedural-only and effectively skippable. Without a mandatory call site (unlike tracer/analyst agent invocations), "MEMORY.md scan" was easily elided by claiming knowledge from context. Gate-5 provides the structural enforcement — findings that propose memory writes without showing scan evidence are returned to Stage 2 step 7 to complete it.
+
+**Detection**: For each finding, check whether `memory` ∈ `Proposed Actions`. If yes → verify `memory_scan.scanned == true` is present in the finding's internal record from Stage 2 step 7g.
+
+> **Note on `memory_create` vs `memory_update`**: "memory" in the Proposed Actions column covers both creating a new file and merging into an existing one (Stage 4 Action 1's duplicate-check step distinguishes them). Gate-5 applies to both sub-cases. Findings with `memory` as a compound second action (e.g., `memory, issue`) are subject to Gate-5 equally.
+
+**Step 1 — Identify memory-action findings**: collect all findings where `memory` ∈ `unique_actions`.
+
+**Step 2 — Verify `memory_scan` field**: for each finding from step 1, check that Stage 2 step 7g recorded the load-bearing fields (per step 7g's field requirements):
+- `memory_scan.scanned == true` (proves step was executed, not skipped)
+- `candidates_reviewed` is present (even if empty list — proves index was consulted)
+- `repeat` and `repeat_count` fields are present
+
+`matched` and `resolved` are NOT verified by Gate-5 (`matched` is documentation-only; `resolved` is optional per step 7g).
+
+**Step 3 — Classify violations**: any finding from step 1 that fails step 2 → Gate-5 violation → return that finding to Stage 2 step 7 with instruction to complete the 2-hop scan and record `memory_scan` per step 7g. Cap counter applies (same 2-re-entry cap per finding, shared across all gates for that finding).
+
+**Gate-5 verdict:**
+- All memory-action findings have valid `memory_scan` → `gate_5_verdict: PASS`
+- ≥1 memory-action finding missing `memory_scan` → `gate_5_verdict: FAIL`
+- No memory-action findings exist → `gate_5_verdict: NA`
+
+`gate_5_verdict` is informational (parallel to `gate_3_verdict` and `gate_4_verdict`). The Stop hook silently ignores it; enforcement is procedural inside Stage 2.5. If Gate-5 violations persist after 2 per-finding re-entries, surface to user with 3-way override prompt:
+
+> "Finding #N의 Gate-5 (memory_scan 필드 누락)가 통과되지 않습니다. 어떻게 진행할까요? [a] MEMORY.md index를 직접 읽고 memory_scan 필드를 입력 / [b] action을 직접 지정 / [c] 이 finding은 note only로 강등."
+
+**Output (on pass)** — Stage 2.5 emits the distribution card per the Output Schema Contract defined in Stage 3, plus per-finding Gate-1, Gate-2, Gate-3, Gate-4, and Gate-5 verdicts:
 
 ```
 <!-- retrospect:distribution begin -->
@@ -346,6 +401,7 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 - gate_2_verdict: {PASS|FAIL|NA}
 - gate_3_verdict: {PASS|FAIL|NA}
 - gate_4_verdict: {PASS|WARN|NA}
+- gate_5_verdict: {PASS|FAIL|NA}
 <!-- retrospect:distribution end -->
 ```
 
@@ -356,8 +412,9 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 - `gate_2_verdict: NA` — zero memory-only findings exist
 - `gate_3_verdict: NA` — zero findings have `Proposed Actions` count = 2 (every finding is single-action)
 - `gate_4_verdict: NA` — zero `upstream_feedback` findings exist
+- `gate_5_verdict: NA` — zero `memory`-action findings exist
 
-The Stop hook `retrospect-mix-check.sh` parses `gate_1_verdict`, `gate_2_verdict`, and `gate_4_verdict`; `gate_3_verdict` is emitted for visibility and audit-trail purposes (the hook silently ignores unknown keys). Gate-3 is enforced procedurally inside Stage 2.5; structural Stop-hook enforcement is reserved for a follow-up tightening if procedural compliance proves insufficient. Gate-4 is enforced both procedurally (Stage 4 Action 4 step 0a per-action approval) and structurally by the Stop hook: a `gate_4_verdict: FAIL` in the card blocks Stage 3 output, and an absent `gate_4_verdict` combined with a `⚠ EXTERNAL:` Rationale prefix also blocks (indicating Stage 2.5 Gate-4 was partially skipped).
+The Stop hook `retrospect-mix-check.sh` parses `gate_1_verdict`, `gate_2_verdict`, and `gate_4_verdict`; `gate_3_verdict` is emitted for visibility and audit-trail purposes (the hook silently ignores unknown keys). Gate-3 is enforced procedurally inside Stage 2.5; structural Stop-hook enforcement is reserved for a follow-up tightening if procedural compliance proves insufficient. Gate-4 is enforced both procedurally (Stage 4 Action 4 step 0a per-action approval) and structurally by the Stop hook: a `gate_4_verdict: FAIL` in the card blocks Stage 3 output, and an absent `gate_4_verdict` combined with a `⚠ EXTERNAL:` Rationale prefix also blocks (indicating Stage 2.5 Gate-4 was partially skipped). `gate_5_verdict` is informational-only and INTENTIONALLY EXCLUDED from Stop hook parsing — the hook silently ignores it; Gate-5 enforcement is procedural inside Stage 2.5. (Stop hook wiring for Gate-5 is a deferred follow-up similar to Gate-4's progression in PR #340 — file a follow-up issue when procedural compliance proves insufficient.)
 
 This card and verdict block become Stage 3's input header.
 
@@ -373,7 +430,8 @@ Stage 3 output MUST emit, in this order:
    ```markdown
    <!-- AUTHORITATIVE_SCHEMA — Stop hook depends on this. Co-update hooks/retrospect-mix-check.sh + tests/test_retrospect_mix_check.sh + tests/fixtures/retrospect-synth-*.expected.json on any change to: (1) the fence markers themselves, (2) the action key set (memory/issue/claude_md_draft/skill_idea/hook_code/upstream_feedback), or (3) gate_1_verdict / gate_2_verdict keys.
         Gate-3 carve-out: gate_3_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract. The hook's awk parser keys on gate_1_verdict/gate_2_verdict literals only and silently ignores all other lines (regression-tested by tests T8–T17 + the 4 fixture files which still pass without gate_3_verdict). Adding/removing/renaming gate_3_verdict alone does NOT require hook or test changes.
-        Gate-4 enforcement note: gate_4_verdict IS structurally enforced by the Stop hook (unlike gate_3_verdict which remains informational-only). Changes to gate_4_verdict semantics or its FAIL/WARN/NA/PASS values REQUIRE synchronized edits to hooks/retrospect-mix-check.sh and tests/test_retrospect_mix_check.sh (T36/T37/T38). Adding/removing gate_4_verdict from the card alone does NOT require fence-marker or action-key changes. -->
+        Gate-4 enforcement note: gate_4_verdict IS structurally enforced by the Stop hook (unlike gate_3_verdict which remains informational-only). Changes to gate_4_verdict semantics or its FAIL/WARN/NA/PASS values REQUIRE synchronized edits to hooks/retrospect-mix-check.sh and tests/test_retrospect_mix_check.sh (T36/T37/T38). Adding/removing gate_4_verdict from the card alone does NOT require fence-marker or action-key changes.
+        Gate-5 carve-out: gate_5_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract (parallel to gate_3_verdict). The hook silently ignores gate_5_verdict. Adding/removing/renaming gate_5_verdict alone does NOT require hook or test changes. (Deferred upgrade trajectory similar to Gate-4 in PR #340 — file a follow-up issue for Stop hook wiring when procedural enforcement proves insufficient.) -->
    <!-- retrospect:distribution begin -->
    - memory: 1
    - issue: 0
@@ -385,6 +443,7 @@ Stage 3 output MUST emit, in this order:
    - gate_2_verdict: PASS
    - gate_3_verdict: PASS
    - gate_4_verdict: PASS
+   - gate_5_verdict: PASS
    <!-- retrospect:distribution end -->
    ```
 
@@ -422,6 +481,7 @@ The Stop hook parses the distribution-card fence (deterministic) and the table (
 - gate_2_verdict: {PASS|FAIL|NA}
 - gate_3_verdict: {PASS|FAIL|NA}
 - gate_4_verdict: {PASS|WARN|NA}
+- gate_5_verdict: {PASS|FAIL|NA}
 <!-- retrospect:distribution end -->
 
 | # | Category | Tool Layer | Pattern | Root Cause | Rule / Gap | Repeat? | Proposed Actions (1~2) | Rationale | Priority |
@@ -837,6 +897,7 @@ If you catch yourself:
 - **Stage 3 ranking that contradicts Stage 2 caveats** — e.g., `(Recommended)` applied to an action whose Stage 2 row carries `tracer confidence: LOW`, `single observation` alone, or `alternative root cause not ruled out`. Stage 2's caveat is the leading signal; Stage 3 must carry it forward (`Stage 2 caveats:` line) and either discharge it via falsification or suppress the recommendation.
 - **`upstream_feedback` 행의 `backing_repo` owner가 own-org 밖인데 Stage 2.5 Gate-4 마킹(`⚠ EXTERNAL: per-action approval required at Stage 4` prefix) 없이 Stage 3 진입** — Gate-4 가 실행되지 않은 것. Stage 2.5로 돌아가 Gate-4 재실행.
 - **external-marked finding 의 Stage 4 `upstream_feedback` 실행에서 AskUserQuestion per-action 승인(step 0a) 없이 `gh issue create` 직행** — global `~/.claude/CLAUDE.md` zero-exception 룰 위반. STOP, step 0a AskUserQuestion 실행 먼저.
+- **`memory` action 이 있는 finding 에서 `memory_scan` 필드 없이 Stage 2.5 Gate-5 진입** — Stage 2 step 7 스킵 증거. Stage 2 step 7로 돌아가 2-hop 스캔을 완료하고 `memory_scan` 필드를 기록하라. "MEMORY.md를 이미 알고 있어서 스캔이 필요 없다"는 Gate-5 우회 근거로 인정되지 않는다.
 - **Stage 3 "Execute now" 선택을 external-repo write 의 per-action 승인으로 ratify** — Stage 3 승인은 action 카테고리 선택이지, 외부 repo 개별 write 승인이 아님. Stage 4 step 0a 게이트를 반드시 별도로 실행.
 - **Omitting the `Stage 2 caveats:` line on a finding that has any of: tracer confidence below HIGH, single observation, alternative root cause not ruled out, Gate-3 downgrade, analyst cluster overlap, escape-hatch state** — carry-forward is mandatory whenever ANY of these holds. Silent omission lets Stage 3 rank as if Stage 2 returned clean HIGH-confidence evidence.
 - **조사 도구 결과를 completeness 검증 없이 결론에 사용 (premise unverified)** — 다음 두 패턴 모두 "premise falsified" (반증 테스트를 설계한 뒤 통과 → 진행 가능)가 아니라 "premise unverified" (도구 출력 자체의 한계를 검증하지 않은 채 결론에 사용 → STOP) 에 해당한다: (a) `find ... | head -N` 결과로 "파일/모듈 없음" 단정 — **`head` 를 제거한 원 명령 `find ... | wc -l` 을 별도로 실행**해 총 라인 수를 확인하고, cap 초과 시 cap 제거 또는 `grep -rn <token>` narrowing 필요 (`head -N` 파이프 뒤에 `| wc -l` 을 붙이면 cap 으로 잘린 뒤의 라인 수만 세므로 정확히 N개와 cap 초과를 구분할 수 없어 검증이 실패한다); (b) `find <path>` 빈 결과로 "경로/모듈 없음" 단정 — `ls <parent>` 로 path coverage 를 확인하거나 상위 경로로 재시도, 또는 `grep -rn <token>` cross-check 필요.
@@ -849,7 +910,7 @@ If you catch yourself:
 |-------|-------------|-----------------|
 | **1. Load** | Read global `~/.claude/CLAUDE.md`, form scan questions | Rule categories identified |
 | **2. Analyze** | Scan conversation, map to rules, find root cause | Root cause (not symptom) for each pattern; every event has `category[]` |
-| **2.5 Audit** | Run Gate-1 (categorical) + Gate-2 (Schema A 5-line or Schema B dimension-tag rationale) + Gate-3 (evidence robustness for 2-action findings) + Gate-4 (external-repo authorization pre-check for upstream_feedback) | All applicable gates PASS/WARN or per-finding cap reached and surfaced to user |
+| **2.5 Audit** | Run Gate-1 (categorical) + Gate-2 (Schema A 5-line or Schema B dimension-tag rationale) + Gate-3 (evidence robustness for 2-action findings) + Gate-4 (external-repo authorization pre-check for upstream_feedback) + Gate-5 (memory-scan completeness for memory-action findings) | All applicable gates PASS/WARN or per-finding cap reached and surfaced to user |
 | **3. Report** | Present unified table + distribution card, carry Stage 2 caveats forward, run Pre-Output Falsification Gate before each `AskUserQuestion`, collect approval per item | User approved at least 1 item (or confirmed 0 findings); every `(Recommended)` label has a `Falsification:` trace |
 | **4. Execute** | Run approved actions, verify artifacts | Completion report with links/paths + verification results |
 
@@ -871,6 +932,8 @@ If you catch yourself:
 | Stage 2.5 (audit) | Behavioral-only safeguard triggered (tool keywords detected in pre-scan signals) | Surface to user; require explicit confirmation before proceeding to Stage 3 |
 | Stage 2.5 (audit) | Gate-4 — `backing_repo` declaration absent (cannot extract owner) | Skip this finding in Gate-4; Stage 4 Action 4 step 0's missing-declaration abort handles it downstream |
 | Stage 2.5 (audit) | Gate-4 — `gh api user --jq .login` fails and `PRAXIS_OWN_ORGS` is unset | Conservative default: treat all `upstream_feedback` findings as external; emit `gate_4_verdict: WARN` |
+| Stage 2.5 (audit) | Gate-5 — memory-action finding missing `memory_scan` field after 2 re-entries | Surface to user with 3-way override prompt (`[a] 직접 MEMORY.md 읽고 memory_scan 입력 / [b] action 직접 지정 / [c] note only 강등`); log selection |
+| Stage 2.5 (audit) | Gate-5 — MEMORY.md index not accessible during step 7 scan | Record `memory_scan: {scanned: true, candidates_reviewed: [], error: "index not accessible"}` and treat all findings as new patterns (repeat=false) |
 | Stage 3 (report) | Pre-Output Falsification Gate triggered but premise cannot be falsified or survives only ambiguously | Drop `(Recommended)` label; surface option unranked; emit explicit premise-confirmation line in `AskUserQuestion` per the gate's "Falsification step not run" row |
 | Stage 3 (report) | Finding lacks Stage 2 caveats line despite tracer confidence below HIGH or single-observation flag | Block Stage 3 emission for that finding; return to Stage 2 step 5 (root cause refinement) or Stage 2.5 Gate-3 (c) (single-observation downgrade) and re-derive |
 | Stage 3 (report) | User rejects all findings | Capture the rejection itself as a feedback signal for future retrospects |

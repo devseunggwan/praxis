@@ -1,0 +1,10 @@
+{
+  "expected_decision": "pass",
+  "description": "Gate-5 NA transcript fixture: zero memory-action findings (single finding has skill_idea action). gate_5_verdict: NA in the distribution card because no memory action exists for the gate to evaluate. Verifies NA semantics — Gate-5 is inapplicable, not violated.",
+  "must_contain": [
+    "gate_5_verdict: NA"
+  ],
+  "must_not_contain": [
+    "decision\": \"block\""
+  ]
+}

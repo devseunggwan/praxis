@@ -1,0 +1,10 @@
+{
+  "expected_decision": "pass",
+  "description": "Gate-5 violation transcript fixture: finding #1 proposes action=memory but memory_scan field was not recorded at Stage 2 step 7g. gate_5_verdict: FAIL is emitted in the distribution card. Gate-5 enforcement is procedural (parallel to gate_3_verdict/gate_4_verdict) — the Stop hook does NOT block on gate_5_verdict:FAIL; enforcement is inside Stage 2.5. This fixture verifies the card schema and that gate_5_verdict:FAIL appears in the transcript.",
+  "must_contain": [
+    "gate_5_verdict: FAIL"
+  ],
+  "must_not_contain": [
+    "decision\": \"block\""
+  ]
+}
