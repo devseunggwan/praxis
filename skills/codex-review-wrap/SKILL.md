@@ -224,6 +224,26 @@ session, not just the first. Terminology used below:
 - **round** — one invocation of Codex review (Step 4 produces one round of findings)
 - **session** — the assistant's working-memory lifetime; the Step 5c ledger lives here
 
+##### Execution order
+
+Sub-sections below are numbered for cross-reference, not execution order.
+The execution order each round is:
+
+1. **5f counter update + advisory check** — increment `rounds_per_region:`
+   ledger for each region touched; emit the diminishing-returns advisory if
+   `cumulative = N + 1`.
+2. **5d-i sibling-identification question** — `AskUserQuestion` to confirm
+   whether the PR is a port / parallel hotfix / A/B implementation.
+3. **5a classify findings** — fact-modifying vs structural vs stylistic.
+4. **5b verify premises** — falsify each fact-modifying finding's premise
+   before applying.
+5. **5c flip detection during apply** — scan ledger for `applied:` /
+   `rejected:` collisions before each edit.
+6. **5d-ii / 5d-iii sibling cross-check + propose** — only when 5d-i
+   identified a sibling.
+7. **5e commit-message trailer** — `Premise-Verified:` trailer on the
+   committed edit.
+
 #### 5a. Classify each finding
 
 | Type | Examples | Premise check required |
@@ -458,7 +478,10 @@ N=${PRAXIS_DIMINISHING_RETURNS_N:-4}
 
 In Python hook contexts, the equivalent is
 `int(os.environ.get("PRAXIS_DIMINISHING_RETURNS_N", "4"))` (consistent with
-how `PRAXIS_ASK_END_STRICT` and similar vars are read in `hooks/*.py`).
+the `os.environ.get("PRAXIS_EXTERNAL_WRITE_STRICT")` pattern at
+`hooks/external-write-falsify-check.py:579` and the
+`os.environ.get("PRAXIS_AUTHOR_EXEMPT_STRICT")` pattern at
+`hooks/external-write-falsify-check.py:592`).
 
 **Mid-session change semantics**: the env var is read fresh at each round's
 counter-update step; it is not cached at session start. If
@@ -531,11 +554,16 @@ user selects: 1
 [Step 4] cd /Users/dev/project-wt/windmill-hub-1539
          → node {install_path}/scripts/codex-companion.mjs review
 
-[Step 5 — Sibling check] AskUserQuestion fired at start of Step 5:
+[Step 5 — Round 1 — counter update (5f, first action)]:
+  ledger: rounds_per_region: query.sql:filter_clause | round=1 | cumulative=1
+  ledger: rounds_per_region: cli.sh:parse_prompt      | round=1 | cumulative=1
+  (cumulative ≤ N=4 → no advisory emitted yet)
+
+[Step 5 — Round 1 — sibling check (5d-i)]: AskUserQuestion fired:
   User: "이 PR은 praxis#199 (shell 버전)의 Python port입니다."
   → sibling identified: praxis#199 on branch issue-199-hook-shell
 
-[Step 5 — Round 1] Codex returned 3 findings:
+[Step 5 — Round 1 — classify + verify (5a → 5b)] Codex returned 3 findings:
   - F1: rename `query()` → `run_query()`           [structural — apply directly]
   - F2: change WHERE col_a = 1 → col_b = 1         [fact-modifying — verify column exists]
   - F3: drop the `--state all` flag                [fact-modifying — verify CLI accepts the value]
