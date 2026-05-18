@@ -273,16 +273,20 @@ global CLAUDE.md "External-Surface Write Requires Falsification".
 #### 5c. Flip detection — halt A→B→A oscillation
 
 Maintain a per-session ledger across all rounds in the same session.
-The ledger has **two record shapes** — applied edits and rejected
-proposals — both must be tracked because a finding rejected in round N
-can re-appear in round N+M and would otherwise look novel:
+The ledger has **four record shapes** — `applied`/`rejected` (flip
+detection input), `sibling-applied` (Step 5d cross-check),
+`rounds_per_region` (Step 5f diminishing-returns) — all must be tracked
+because a finding rejected in round N can re-appear in round N+M and
+would otherwise look novel:
 
 ```
-applied:  {file}:{line-or-region} | round={N} | {value-before} → {value-after}
-rejected: {file}:{line-or-region} | round={N} | {value-before} → {value-after} | reason: {falsifying evidence}
+applied:          {file}:{line-or-region} | round={N} | {value-before} → {value-after}
+rejected:         {file}:{line-or-region} | round={N} | {value-before} → {value-after} | reason: {falsifying evidence}
+sibling-applied:  {sibling-repo}#{PR-or-branch} | round={N} | finding={brief-label} | result={same defect | different | does not apply}
+rounds_per_region: {file}:{region} | round={N} | cumulative={C}
 ```
 
-Before applying any new edit, scan **both** record types in the ledger.
+Before applying any new edit, scan **`applied` and `rejected` records only** in the ledger.
 A flip fires when:
 
 1. **Applied flip** — the new edit would revert a previously-applied
