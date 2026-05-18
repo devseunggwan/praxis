@@ -211,8 +211,13 @@ def _extract_candidate_paths(body: str) -> list[str]:
     body_no_fences = _FENCED_BLOCK_RE.sub("", body)
     for m in _INLINE_CODE_RE.finditer(body_no_fences):
         token = m.group(1).strip()
-        if any(token.startswith(pfx) for pfx in REPO_RELATIVE_PREFIXES):
-            candidates.append(token[2:] if token.startswith("./") else token)
+        # Take only the path component — stop at the first whitespace so that
+        # inline command examples like `hooks/foo.py --help` do not produce a
+        # phantom-path advisory for "hooks/foo.py --help" (which includes args
+        # and would never match a real filesystem path).
+        path_token = token.split()[0] if token else token
+        if any(path_token.startswith(pfx) for pfx in REPO_RELATIVE_PREFIXES):
+            candidates.append(path_token[2:] if path_token.startswith("./") else path_token)
 
     # Dedupe while preserving order.
     seen: set[str] = set()
