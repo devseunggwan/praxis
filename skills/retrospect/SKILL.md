@@ -242,7 +242,7 @@ You MUST complete each stage before proceeding to the next.
    ⚠️ **MUST — backing_repo declaration for upstream_feedback rows**: When `Proposed Actions` contains `upstream_feedback` (single or compound), the row's `Rationale` cell MUST include a `backing_repo: <owner/repo>` line resolved per Stage 4 Action 4's resolution table. The declaration is **load-bearing** — Stage 4 re-reads it as the routing decision and aborts on divergence.
 
    - Resolution source-of-truth (in priority order): plugin manifest `repository` field → MCP server git remote → dotfiles backing repo via symlink chain → project CLAUDE.md feature-to-repo mapping.
-   - Format: literal line `backing_repo: <owner>/<repo>` embedded in the Rationale cell via `<br>` separators. Example: `Rationale: tool defect in praxis distribution<br>backing_repo: devseunggwan/praxis`.
+   - Format: literal line `backing_repo: <owner>/<repo>` embedded in the Rationale cell via `<br>` separators. Example: `Rationale: tool defect in praxis distribution<br>backing_repo: <resolved-praxis-repo>`.
    - Unresolvable layer (`builtin`, or no upstream reachable per the Action 4 resolution table's `builtin` row): **remove `upstream_feedback` from the row's `Proposed Actions` set entirely**. If the row had compound actions (e.g., `memory, upstream_feedback`), retain the remaining ones (e.g., keep `memory` alone). If `upstream_feedback` was the sole action, re-derive the action via Stage 2 step 8's category-default rows (typically `skill_idea` for `tool` category, or `memory` if behavioral co-label exists). The escape-hatch state `note only` (from `repeat=true AND resolved=true`) is a separate construct and is NOT used here. Do NOT emit a placeholder `backing_repo`.
    - Ambiguous layer (resolution table's `Other / ambiguous` row): keep `upstream_feedback` but surface to user immediately at Stage 2; the user-supplied repo becomes the declared `backing_repo`. Stage 4 step 0 then re-resolves and may still divergence-prompt if the live re-resolution differs.
    - Hook-parsing safety: this is not a memory-only row, so the Stage 2.5 Gate-2 5-line schema does not apply. The `backing_repo:` line lives alongside the human rationale text without conflicting with the Gate-2 regex.
@@ -683,7 +683,7 @@ For each approved action:
 
       Do NOT proceed without an explicit pick. `[b]` (in variant i) requires updating the declared `backing_repo` line — record the corrected value in the Actions Executed report's verification trail rather than re-emitting the entire Stage 3 report (the report is append-only post-Stage-3; corrections live in step 0.5's trail). The skip path removes `upstream_feedback` from the row's action set and logs the divergence reason in the Actions Executed section.
 
-   5. **Verification trail.** Record both values + the chosen path in the Actions Executed report (e.g., `Finding #N: backing_repo verified (declared=live=devseunggwan/praxis)` or `Finding #N: divergence resolved via [b] — switched declared <X> → re-resolved <Y>`). This trail is the defense against silent misrouting in retrospective analysis.
+   5. **Verification trail.** Record both values + the chosen path in the Actions Executed report (e.g., `Finding #N: backing_repo verified (declared=live=<resolved-praxis-repo>)` or `Finding #N: divergence resolved via [b] — switched declared <X> → re-resolved <Y>`). This trail is the defense against silent misrouting in retrospective analysis.
 
    ### Backing repo resolution (used by step 0.2 and as reference)
 
