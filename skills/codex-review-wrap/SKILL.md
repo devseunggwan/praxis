@@ -8,12 +8,15 @@ description: >
   detection that halts A→B→A oscillation across rounds within the same session.
   When the PR is a port / parallel hotfix / A/B implementation, Step 5d cross-checks
   every fact-modifying finding against the sibling implementation and records results
-  in the session ledger.
+  in the session ledger. Step 5f tracks rounds-per-region and surfaces a non-blocking
+  diminishing-returns advisory when the same file:region accumulates more than N rounds
+  (default 4, configurable via PRAXIS_DIMINISHING_RETURNS_N).
   Triggers on "codex review", "review codex", "safe review", "/codex-review-wrap",
-  "premise verification", "flip detection", "sibling defect", "sibling cross-check".
+  "premise verification", "flip detection", "sibling defect", "sibling cross-check",
+  "diminishing returns".
 verified-against-runtime: true
 runtime-verified-at: 2026-05-13
-runtime-verified-note: "codex-companion 1.0.4 — ARGUMENTS rejected for non-flag string; AskUserQuestion maxItems:4 blocks worktree list >3 items; Skill() cannot delegate to disable-model-invocation skill. Step 4 hardened to a MUST NOT directive in issue #237 (2026-05-16) — directive-only change, no new runtime claim."
+runtime-verified-note: "codex-companion 1.0.4 — ARGUMENTS rejected for non-flag string; AskUserQuestion maxItems:4 blocks worktree list >3 items; Skill() cannot delegate to disable-model-invocation skill. Step 4 hardened to a MUST NOT directive in issue #237 (2026-05-16) — directive-only change, no new runtime claim. Step 5f (PR #329) adds procedural prose only (rounds_per_region ledger + advisory text); no runtime hook code changed — existing verification evidence remains valid."
 ---
 
 # codex-review-wrap
@@ -36,7 +39,10 @@ finding must pass an independent premise check before it becomes an edit, and
 the wrapper maintains a session ledger that halts same-session A→B→A flips.
 When the PR is a port / parallel hotfix / A/B implementation of logic in a
 sibling PR or repo, Step 5d additionally cross-checks each verified finding
-against the sibling and records the result.
+against the sibling and records the result. Step 5f tracks how many rounds
+have touched each `{file}:{region}` pair and emits a one-time non-blocking
+advisory when the count exceeds the configured threshold (default: 4 rounds,
+env var `PRAXIS_DIMINISHING_RETURNS_N`).
 See **Step 5** for the full gate.
 
 ## Invocation Model
@@ -267,16 +273,22 @@ global CLAUDE.md "External-Surface Write Requires Falsification".
 #### 5c. Flip detection — halt A→B→A oscillation
 
 Maintain a per-session ledger across all rounds in the same session.
-The ledger has **two record shapes** — applied edits and rejected
-proposals — both must be tracked because a finding rejected in round N
-can re-appear in round N+M and would otherwise look novel:
+The ledger has **four record shapes** — `applied`/`rejected` (flip
+detection input), `sibling-applied` (Step 5d cross-check),
+`rounds_per_region` (Step 5f diminishing-returns) — all must be tracked
+because a finding rejected in round N can re-appear in round N+M and
+would otherwise look novel:
 
 ```
-applied:  {file}:{line-or-region} | round={N} | {value-before} → {value-after}
-rejected: {file}:{line-or-region} | round={N} | {value-before} → {value-after} | reason: {falsifying evidence}
+applied:          {file}:{line-or-region} | round={N} | {value-before} → {value-after}
+rejected:         {file}:{line-or-region} | round={N} | {value-before} → {value-after} | reason: {falsifying evidence}
+sibling-applied:  {sibling-repo}#{PR-or-branch} | round={N} | finding={brief-label} | result={same defect | different | does not apply}
+rounds_per_region: {file}:{region} | round={N} | cumulative={C}
 ```
 
-Before applying any new edit, scan **both** record types in the ledger.
+Before applying any new edit, scan records whose prefix token is exactly
+**`applied:`** or **`rejected:`** (NOT `sibling-applied:` or
+`rounds_per_region:`) in the ledger.
 A flip fires when:
 
 1. **Applied flip** — the new edit would revert a previously-applied
@@ -387,6 +399,74 @@ Trailer key uses the canonical hyphen-and-capitalized form
 (`Premise-Verified:`) — not free-form text — so trailer-aware tooling
 can pick it up. Structural and stylistic edits do not need this trailer.
 
+#### 5f. Diminishing-returns advisory — rounds-per-region counter
+
+Repeated rounds on the same file region are a signal that the upstream
+surface enumeration is incomplete. This sub-step tracks how many rounds
+have touched each region and surfaces a non-blocking advisory when the
+count reaches the configured threshold.
+
+##### Region label
+
+For each finding, derive a **region label** using the nearest enclosing
+context in the source file:
+
+| File type | Region label |
+|-----------|-------------|
+| Markdown (`.md`, `.mdx`) | Nearest enclosing `#`/`##`/`###` heading text |
+| Code (`.py`, `.ts`, `.sh`, `.js`, …) | Enclosing function / class / method symbol name |
+| Plain text / unknown | The file path alone (no region suffix) |
+
+Region label format: `{file}:{region}` — e.g.
+`skills/codex-review-wrap/SKILL.md:Step 5` or
+`hooks/codex-review-route.sh:parse_prompt`.
+
+##### Counter update (every round)
+
+At the **start of Step 5**, before classifying findings, append one
+`rounds_per_region:` entry to the session ledger for each distinct
+`{file}:{region}` pair touched by this round's findings:
+
+```
+rounds_per_region: {file}:{region} | round={N} | cumulative={C}
+```
+
+`cumulative` is the total number of rounds (including this one) that
+have touched `{file}:{region}` in the current session.
+
+##### Advisory threshold
+
+Read the threshold `N` from the environment:
+
+```
+PRAXIS_DIMINISHING_RETURNS_N   (integer, default: 4)
+```
+
+When `cumulative` reaches `N + 1` (i.e., the session is starting its
+`(N+1)`-th round on the same region), surface the following advisory
+**once per `{file}:{region}` per session** — immediately after emitting
+the `rounds_per_region:` ledger entry, before proceeding to 5a
+classification:
+
+```
+Advisory: this is round {cumulative} on {file}:{region}. Findings to date suggest
+the underlying surface enumeration may be incomplete. Consider pausing
+to re-enumerate cases up-front before continuing.
+```
+
+The advisory is **informational only** — it does not block, does not
+require user confirmation, and does not prevent edits from being applied.
+Do not re-surface the advisory on subsequent rounds (round `N+2`,
+`N+3`, …) for the same region — emit it exactly once at `cumulative = N+1`.
+
+##### Interaction with flip detection (5c)
+
+The rounds-per-region counter increments independently of flip detection.
+A flip halt (5c) does not reset or suppress the counter. If a flip is
+halted mid-round, the `rounds_per_region:` entry for that round is still
+recorded (counter increments) but the advisory suppression rule still
+applies (emit only at `cumulative = N+1`, not again on later rounds).
+
 ## Error Handling
 
 | Situation | Action |
@@ -401,6 +481,8 @@ can pick it up. Structural and stylistic edits do not need this trailer.
 | Flip detected (Step 5c) | Halt; surface both rounds to the user; do not apply either side without explicit direction |
 | Sibling identified but branch/repo not accessible locally | Skip 5d for that sibling; record `sibling-applied: ... \| result=inaccessible` in ledger; warn user to check out the branch |
 | Sibling auto-detected but user confirms "not a port" | Skip 5d entirely; no ledger entry needed |
+| `PRAXIS_DIMINISHING_RETURNS_N` is set but not a positive integer | Use default (4); do not error |
+| Region label cannot be determined (binary file, empty file) | Use the file path alone as the region label |
 
 ## Example Flow
 
@@ -455,6 +537,20 @@ user selects: 1
 
 [Step 5 — Round 2 alt] Codex now suggests "--state open" → "--state all"
   Scan ledger: applied entry on cli.sh:L10 reverses → flip fires (applied flip); halt
+
+[Step 5f — Diminishing-returns example] PRAXIS_DIMINISHING_RETURNS_N=4 (default)
+  Rounds 1–4: counter increments silently
+    ledger: rounds_per_region: cli.sh:parse_prompt | round=1 | cumulative=1
+    ledger: rounds_per_region: cli.sh:parse_prompt | round=2 | cumulative=2
+    ledger: rounds_per_region: cli.sh:parse_prompt | round=3 | cumulative=3
+    ledger: rounds_per_region: cli.sh:parse_prompt | round=4 | cumulative=4
+  Round 5 (cumulative = N+1 = 5): advisory emitted once, then 5a continues normally
+    ledger: rounds_per_region: cli.sh:parse_prompt | round=5 | cumulative=5
+    Advisory: this is round 5 on cli.sh:parse_prompt. Findings to date suggest
+    the underlying surface enumeration may be incomplete. Consider pausing
+    to re-enumerate cases up-front before continuing.
+  Round 6+: counter still increments, advisory NOT re-emitted
+    ledger: rounds_per_region: cli.sh:parse_prompt | round=6 | cumulative=6
 ```
 
 ## Limitations
@@ -465,3 +561,6 @@ user selects: 1
 - Premise classification (5a) is heuristic; when in doubt, treat the finding as fact-modifying
 - Step 5d sibling cross-check requires the sibling branch to be locally accessible — remote-only PRs need a manual `git worktree add` before cross-check can run
 - Sibling auto-detection from `git worktree list` uses branch-name heuristics (shared prefix, `*-shell` / `*-python` suffixes) and may produce false positives on unrelated paired branches; user confirmation at 5d-i overrides the auto-detect signal
+- The rounds-per-region counter (5f) is per-session only — counts do not carry across session boundaries
+- Region label extraction (5f) is heuristic: the nearest enclosing heading / symbol is determined from the finding context Codex provides; findings with no file attribution use the file path alone
+- The advisory threshold `PRAXIS_DIMINISHING_RETURNS_N` applies uniformly across all regions; per-region tuning is not supported
