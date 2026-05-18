@@ -25,8 +25,11 @@ Silent cases (no output emitted):
   - `cd ~user/...` — user-specific tilde, unresolvable
   - `pushd /path` — out of scope (Phase 1)
   - `(cd /path && ...)` — subshell, out of scope (Phase 1)
-  - `cd /path` inside a heredoc body — heredoc body segments are skipped
-    (see _extract_heredoc_end_marker for the detection mechanism)
+  - `cd /path` inside a heredoc body — space-separated opener `<< EOF`:
+    heredoc body segments are skipped by _extract_heredoc_end_marker.
+    KNOWN LIMITATION: fused openers (`<<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF`)
+    are not detected — their body `cd /path` fires a false-positive advisory.
+    Tracked in follow-up #337 P6.
   - opt-out marker `# worktree-advisory:ack` anywhere in command
   - non-Bash tool name
   - malformed JSON stdin
@@ -184,11 +187,17 @@ def _extract_heredoc_end_marker(seg: list[Token]) -> str | None:
     ['cat', '<<', 'EOF']. The `<<` is emitted as a POSITIONAL token because
     shlex with punctuation_chars=';|&' does not treat `<` as punctuation.
 
-    Detection: find the literal `<<` or `<<-` token (POSITIONAL role) and
-    return the token immediately following it as the end-marker word.
-    Strip optional `-` from `<<-` (tab-stripping form of heredoc).
+    Detection: find a POSITIONAL token that is the literal `<<` or `<<-`
+    and return the next token as the end-marker word.
 
-    Returns None when no heredoc opener is present in the segment.
+    KNOWN LIMITATION: shlex with posix=True tokenizes fused heredoc openers
+    (`<<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF`) as a **single** POSITIONAL
+    token (`<<EOF` or `<<-EOF`), not as two separate tokens. This function
+    only matches the space-separated form (`<< EOF`) where `<<` appears as
+    an isolated token. Fused forms are NOT detected, and their body `cd`
+    lines fire false-positive advisories. Tracked in follow-up #337 P6.
+
+    Returns None when no space-separated heredoc opener is present.
     """
     argv = filter_argv(seg)
     for i, tok in enumerate(argv):
@@ -196,7 +205,7 @@ def _extract_heredoc_end_marker(seg: list[Token]) -> str | None:
             if i + 1 < len(argv):
                 # End-marker may be quoted in the source (`<< 'EOF'`) but
                 # shlex in posix mode strips quotes, so the token text is
-                # always the bare word. Strip leading `-` from `<<-` form.
+                # always the bare word.
                 return argv[i + 1].text
     return None
 

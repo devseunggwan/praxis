@@ -33,7 +33,8 @@ blocked.
 | `cd ~` / `cd ~/foo` / `cd ~user/foo` | silent (tilde expansion; hook process `$HOME` may differ from agent effective `$HOME`) |
 | `pushd /path` | silent (out of scope Phase 1) |
 | `(cd /path && ...)` subshell | silent (out of scope Phase 1) |
-| `cd /path` inside a heredoc body | silent (heredoc body segments are skipped — see Heredoc handling) |
+| `cd /path` inside a heredoc body — space-separated opener `cat << EOF` | silent (heredoc body segments are skipped — see Heredoc handling) |
+| `cd /path` inside a heredoc body — fused opener (`cat <<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF`) | known false-positive: body `cd /path` fires advisory (tracked in #337 P6) |
 | Opt-out marker `# worktree-advisory:ack` | silent (all advisories suppressed) |
 | Non-Bash tool name | silent (fail-open) |
 | Malformed JSON stdin | silent (fail-open) |
@@ -70,6 +71,18 @@ The hook detects the `<<` or `<<-` POSITIONAL token in a segment and records
 the end-marker word. All subsequent segments are skipped as heredoc body lines
 until the end-marker segment is consumed. Commands appearing after the heredoc
 close are processed normally.
+
+**Known limitation — fused heredoc openers (tracked in #337 P6):**
+shlex tokenizes fused forms as a **single** POSITIONAL token — `<<EOF`,
+`<<'EOF'`, `<<"EOF"`, `<<-EOF` — rather than two separate tokens (`<<` +
+`EOF`). The current detector looks for the literal token `<<` or `<<-` and
+therefore misses all four fused forms. The body `cd /path` in fused heredocs
+fires a false-positive `[worktree-missing]` advisory. The space-separated
+form (`cat << EOF`, which shlex splits into three tokens) is handled
+correctly.
+
+Workaround until #337 P6 is resolved: add `# worktree-advisory:ack` to the
+command, or use the space-separated `<< EOF` opener form.
 
 ### Deduplication
 
@@ -121,11 +134,12 @@ The hook returns exit 0 on every infrastructure error:
 bash tests/test_bash_worktree_existence_advisory.sh
 ```
 
-27 cases covering: missing path advisory (direct and compound command),
+29 cases covering: missing path advisory (direct and compound command),
 existing path silent (including registered worktree), tilde expansion forms
 (`~`, `~/foo`, `~user/foo`), pushd/subshell out-of-scope silent, heredoc
-body silent (body `cd` suppressed, post-heredoc `cd` fires, non-cd no-heredoc
-silent), dedupe (first fires, second deduped, different session fires
-independently, state-transition missing→exists→missing fires again),
-infrastructure fail-open (non-Bash tool name, malformed JSON, bare cd, `$VAR`,
-`cd -`, opt-out marker, empty command).
+body (space-separated opener silent, post-heredoc `cd` fires, non-cd silent),
+3 known-limitation pins (fused `<<EOF`/`<<'EOF'`/`<<-EOF` body fires
+false-positive — tracked in #337 P6), dedupe (first fires, second deduped,
+different session fires independently, state-transition missing→exists→missing
+fires again), infrastructure fail-open (non-Bash tool name, malformed JSON,
+bare cd, `$VAR`, `cd -`, opt-out marker, empty command).

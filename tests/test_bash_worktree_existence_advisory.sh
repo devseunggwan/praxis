@@ -185,6 +185,26 @@ run_case "non-cd command without heredoc is silent" \
   "cat /tmp/foo.txt"
 
 # ---------------------------------------------------------------------------
+# === Known limitation: fused heredoc openers fire false-positive (#337 P6) ===
+# shlex tokenizes `<<EOF`, `<<'EOF'`, `<<-EOF` as a single POSITIONAL token,
+# so _extract_heredoc_end_marker cannot detect them. Body `cd /path` fires.
+# These cases are pinned here to document current behavior. When #337 P6 is
+# resolved, all three should be changed to "silent".
+# ---------------------------------------------------------------------------
+
+run_case "KNOWN-LIMITATION: fused <<EOF body cd fires false-positive (pin)" \
+  "advisory:[worktree-missing]" \
+  "$(printf 'cat <<EOF\ncd /this/does/not/exist/anywhere\nEOF')"
+
+run_case "KNOWN-LIMITATION: fused <<'EOF' body cd fires false-positive (pin)" \
+  "advisory:[worktree-missing]" \
+  "$(printf "cat <<'EOF'\ncd /this/does/not/exist/anywhere\nEOF")"
+
+run_case "KNOWN-LIMITATION: fused <<-EOF body cd fires false-positive (pin)" \
+  "advisory:[worktree-missing]" \
+  "$(printf 'cat <<-EOF\n\tcd /this/does/not/exist/anywhere\n\tEOF')"
+
+# ---------------------------------------------------------------------------
 # === M3 fix: dedupe keyed on (session, path, state) — state-change aware ===
 # ---------------------------------------------------------------------------
 
