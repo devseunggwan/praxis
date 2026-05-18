@@ -55,12 +55,30 @@ def main() -> int:
                 )
 
     # Spec existence check: every hook entry in hooks/hooks.json must have
-    # a corresponding docs/hook/<name>.md file.
+    # a corresponding docs/hook/<name>.md file. Also validate the optional
+    # `hosts` field shape — empty list or non-list silently drops the hook
+    # from every platform, so block at CI rather than ship a footgun.
     docs_dir = REPO_ROOT / "docs" / "hook"
     for event_groups in hooks_source.get("hooks", {}).values():
         for group in event_groups:
             for hook in group.get("hooks", []):
                 cmd = hook.get("command", "")
+                hosts = hook.get("hosts")
+                if hosts is not None:
+                    if not isinstance(hosts, list):
+                        drifts.append(
+                            f"INVALID hosts in {cmd}: must be a list of strings, "
+                            f"got {type(hosts).__name__}"
+                        )
+                    elif len(hosts) == 0:
+                        drifts.append(
+                            f"INVALID hosts in {cmd}: empty list drops the hook "
+                            f"from every platform — omit the field to mean 'all hosts'"
+                        )
+                    elif not all(isinstance(h, str) for h in hosts):
+                        drifts.append(
+                            f"INVALID hosts in {cmd}: every entry must be a string"
+                        )
                 # Extract hook name: basename minus extension
                 hook_filename = Path(cmd.split("/")[-1]) if "/" in cmd else Path(cmd)
                 hook_name = hook_filename.stem
