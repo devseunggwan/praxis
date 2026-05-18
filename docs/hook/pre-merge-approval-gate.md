@@ -19,7 +19,7 @@ that mistakenly apply the same exemption. This hook removes the exemption
 ambiguity by making the environment variable (`CMUX_DELEGATE=1`) the sole
 signal for the background-agent path.
 
-The per-PR approval rule is already codified in the global `CLAUDE.md` (`No
+The per-PR approval rule is already codified in the global `~/.claude/CLAUDE.md` (`No
 Approval Transfer Across Companion PRs` and `Pre-Merge Reporting`). This hook
 adds structural enforcement so the rule fires even when memory-based feedback
 is not retrieved.

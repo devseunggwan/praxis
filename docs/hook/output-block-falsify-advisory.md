@@ -9,7 +9,7 @@ check and either asks for confirmation or emits an advisory reminder.
 
 ### Why this exists
 
-The global CLAUDE.md rule **"Output-Block-Level Falsification Gate"** instructs:
+The global `~/.claude/CLAUDE.md` rule **"Output-Block-Level Falsification Gate"** instructs:
 
 > Before surfacing a self-authored proposal as a complete output block, run
 > an explicit falsification test on its premise. If a concrete invalidating
@@ -83,7 +83,7 @@ matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "ask",
-    "permissionDecisionReason": "(Recommended) 라벨이 있으나 question body 에 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Self-Falsify Before Recommendation Lock 룰. 추가 후 재시도."
+    "permissionDecisionReason": "(Recommended) 라벨이 있으나 question body 에 'Falsified: <disconfirming test 결과>' 가 없음. global `~/.claude/CLAUDE.md` Self-Falsify Before Recommendation Lock 룰. 추가 후 재시도."
   }
 }
 ```

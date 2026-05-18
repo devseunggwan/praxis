@@ -1,7 +1,7 @@
 ---
 name: retrospect
 description: >
-  Session retrospect — analyze current Claude Code session against CLAUDE.md rules,
+  Session retrospect — analyze current Claude Code session against global `~/.claude/CLAUDE.md` rules,
   identify friction patterns and root causes, propose context-appropriate improvement
   actions, then execute after user approval.
   Triggers on "retrospect", "what went wrong", "session review",
@@ -46,7 +46,7 @@ Use at the END of a working session to extract learnings:
 **Use this ESPECIALLY when:**
 - The same mistake happened more than once in the session
 - You feel "I should have done that differently"
-- A rule in CLAUDE.md was violated — even once
+- A rule in global `~/.claude/CLAUDE.md` was violated — even once
 - A new workflow pattern emerged that isn't captured anywhere
 
 ## The Four Stages
@@ -57,9 +57,9 @@ You MUST complete each stage before proceeding to the next.
 
 **Before scanning the conversation:**
 
-1. **Read CLAUDE.md** — load all rules, behavioral guidelines, and workflow requirements
-   - Global: `$CLAUDE_CONFIG_DIR/CLAUDE.md`
-   - Project: `CLAUDE.md` in cwd (if exists)
+1. **Read global and project rule files** — load all rules, behavioral guidelines, and workflow requirements
+   - Global: `$CLAUDE_CONFIG_DIR/CLAUDE.md` (i.e., `~/.claude/CLAUDE.md`)
+   - Project: `AGENTS.md` in cwd (if exists; in praxis, `AGENTS.md` is canonical — the project symlink in cwd points to it)
    - Key sections: Mandatory Rules, Behavioral Rules, Workflow rules
 
 2. **Identify rule categories** to scan against:
@@ -91,7 +91,7 @@ You MUST complete each stage before proceeding to the next.
 | `behavioral` | "Claude가 확인 없이 결론 도출" / "한 PR에 여러 concern bundle" / "user가 동일 지적 반복" | none (Tool Layer = `—`) |
 | `tool` | "gh CLI `--state all` 부재" / "MCP 응답 지연" / "Read 출력 truncation" / "kubectl flag 부재" | **mandatory**: one of `mcp` / `cli` / `builtin` / `skill` |
 | `workflow` | "test 안 돌리고 PR" / "verify 단계 건너뜀" / "issue 안 만들고 브랜치" / "code review 생략" | optional: `skill` (when defect originates inside a skill's stage flow) |
-| `spec-gap` | "이 상황을 다루는 규칙 부재" / "SKILL.md trigger 모호" / "CLAUDE.md에 명시되지 않은 행동" | optional: `skill` (when rule gap is in a SKILL.md) |
+| `spec-gap` | "이 상황을 다루는 규칙 부재" / "SKILL.md trigger 모호" / "global `~/.claude/CLAUDE.md`에 명시되지 않은 행동" | optional: `skill` (when rule gap is in a SKILL.md) |
 
 **Layer E ↔ step 4b composition matrix** (normative — referenced by step 4b and Stage 3 unified table):
 
@@ -127,7 +127,7 @@ You MUST complete each stage before proceeding to the next.
    - Drop false positives that agents ruled out
    - Final list: up to 5 distinct friction events with causal chains attached
 
-4. **Map each event to a CLAUDE.md rule** (or gap):
+4. **Map each event to a global `~/.claude/CLAUDE.md` rule** (or gap):
    - Read the event's `category[]` from pre-scan and feed it into rule-mapping
    - Which rule was applicable?
    - Was it followed, violated, or simply absent?
@@ -221,14 +221,14 @@ You MUST complete each stage before proceeding to the next.
    | New pattern (structural root cause, likely to recur) | memory | First occurrence — capture for future reference |
    | Repeat (in MEMORY.md, 1-2x) | GitHub issue | Memory alone failed — need systemic fix |
    | Repeat (3x+) | hook or skill | Multiple memory entries = enforcement gap |
-   | Missing rule (new) | CLAUDE.md draft | No rule exists for this pattern |
-   | Missing rule + Repeat | CLAUDE.md draft + GitHub issue | Missing rule caused repeat — add rule + compliance issue |
+   | Missing rule (new) | global `~/.claude/CLAUDE.md` draft | No rule exists for this pattern |
+   | Missing rule + Repeat | global `~/.claude/CLAUDE.md` draft + GitHub issue | Missing rule caused repeat — add rule + compliance issue |
    | Tool friction (step 4b finding) | upstream feedback | Tool improvement needed — issue in the tool's **backing repo** (resolve via Stage 4 Action 4 routing table; not always praxis) |
    | One-off mistake (situational cause, unlikely to recur) | note only | No persistent action needed |
    | **Category default — `tool`** | upstream feedback (compound with memory only when behavioral co-label exists) | step 4b backing-repo resolution; tool defect is not a Claude behavior issue, memory alone insufficient |
    | **Category default — `workflow`** | hook code OR skill idea (memory-alone NOT allowed even on first occurrence) | enforcement gap detected — workflow steps that get skipped need structural enforcement, not memo |
-   | **Category default — `spec-gap`** | CLAUDE.md draft OR skill idea (memory-alone NOT allowed) | rule absent — gaps are filled with rules, not memos |
-   | **Category default — `behavioral`** | memory (default; compound with skill_idea or CLAUDE.md draft when structural) | only category where memory-alone is acceptable; still subject to Gate-2 rationale schema in Stage 2.5 |
+   | **Category default — `spec-gap`** | global `~/.claude/CLAUDE.md` draft OR skill idea (memory-alone NOT allowed) | rule absent — gaps are filled with rules, not memos |
+   | **Category default — `behavioral`** | memory (default; compound with skill_idea or global `~/.claude/CLAUDE.md` draft when structural) | only category where memory-alone is acceptable; still subject to Gate-2 rationale schema in Stage 2.5 |
 
    **Distinguishing "New pattern" vs "One-off mistake":**
    - **New pattern**: root cause is structural (missing rule, absent skill, unclear workflow) → likely to recur in future sessions
@@ -241,7 +241,7 @@ You MUST complete each stage before proceeding to the next.
 
    ⚠️ **MUST — backing_repo declaration for upstream_feedback rows**: When `Proposed Actions` contains `upstream_feedback` (single or compound), the row's `Rationale` cell MUST include a `backing_repo: <owner/repo>` line resolved per Stage 4 Action 4's resolution table. The declaration is **load-bearing** — Stage 4 re-reads it as the routing decision and aborts on divergence.
 
-   - Resolution source-of-truth (in priority order): plugin manifest `repository` field → MCP server git remote → dotfiles backing repo via symlink chain → project CLAUDE.md feature-to-repo mapping.
+   - Resolution source-of-truth (in priority order): plugin manifest `repository` field → MCP server git remote → dotfiles backing repo via symlink chain → project `AGENTS.md` feature-to-repo mapping.
    - Format: literal line `backing_repo: <owner>/<repo>` embedded in the Rationale cell via `<br>` separators. Example: `Rationale: tool defect in praxis distribution<br>backing_repo: <resolved-praxis-repo>`.
    - Unresolvable layer (`builtin`, or no upstream reachable per the Action 4 resolution table's `builtin` row): **remove `upstream_feedback` from the row's `Proposed Actions` set entirely**. If the row had compound actions (e.g., `memory, upstream_feedback`), retain the remaining ones (e.g., keep `memory` alone). If `upstream_feedback` was the sole action, re-derive the action via Stage 2 step 8's category-default rows (typically `skill_idea` for `tool` category, or `memory` if behavioral co-label exists). The escape-hatch state `note only` (from `repeat=true AND resolved=true`) is a separate construct and is NOT used here. Do NOT emit a placeholder `backing_repo`.
    - Ambiguous layer (resolution table's `Other / ambiguous` row): keep `upstream_feedback` but surface to user immediately at Stage 2; the user-supplied repo becomes the declared `backing_repo`. Stage 4 step 0 then re-resolves and may still divergence-prompt if the live re-resolution differs.
@@ -262,7 +262,7 @@ If `memory` is the *only* action for such a finding → return that finding to S
 
 If absent or incomplete → return that finding to Stage 2 step 8 (re-evaluate with explicit per-action rationale enforcement).
 
-**Gate-3 (Evidence Robustness)** — for each finding with `Proposed Actions` count = 2 (compound), verify three sub-conditions. Gate-1 and Gate-2 check whether the *form* of action assignment is correct; Gate-3 checks whether the *evidence* underneath each action is robust enough to justify it. Without this gate, category-default form-filling can produce a second action whose only purpose is to ask a question the first action already answered — pure structural redundancy that costs an upstream issue or a CLAUDE.md draft.
+**Gate-3 (Evidence Robustness)** — for each finding with `Proposed Actions` count = 2 (compound), verify three sub-conditions. Gate-1 and Gate-2 check whether the *form* of action assignment is correct; Gate-3 checks whether the *evidence* underneath each action is robust enough to justify it. Without this gate, category-default form-filling can produce a second action whose only purpose is to ask a question the first action already answered — pure structural redundancy that costs an upstream issue or a global `~/.claude/CLAUDE.md` draft.
 
 Sub-conditions (all three must hold):
 
@@ -290,7 +290,7 @@ If sub-condition (c) fires → apply the downgrade; if the resulting action set 
 | Condition on the finding | (a) per-action evidence | (b) decision-coupling | (c) single-observation downgrade |
 |--------------------------|:-----------------------:|:---------------------:|:--------------------------------:|
 | `Proposed Actions` count = 1 (single-action; includes behavioral-only defaults and `note only` rows) | SKIP (gate inapplicable — no sibling) | SKIP | SKIP |
-| Two actions affect different artifacts on different surfaces (e.g., `claude_md_draft` for project CLAUDE.md + `skill_idea` for tool-side enhancement) | apply | SKIP — not decision-coupled by construction | apply |
+| Two actions affect different artifacts on different surfaces (e.g., `claude_md_draft` for global `~/.claude/CLAUDE.md` + `skill_idea` for tool-side enhancement) | apply | SKIP — not decision-coupled by construction | apply |
 | `repeat=true` finding | apply (per-action evidence still required) | apply (coupling can still occur even with repeat history) | SKIP — repeat history is multi-observation evidence |
 
 The previous all-or-nothing "Gate-3 does NOT fire" framing produced a bypass: a `claude_md_draft + skill_idea` pair backed by a single non-repeat observation would silently skip (a) and (c) along with (b), defeating the core evidence-robustness intent. This table restores sub-condition granularity.
@@ -441,7 +441,7 @@ when <observation predicate>$`.
 
 If no Gate-3 (b) demotions occurred, omit this section entirely (do not emit "None.").
 
-No patterns found: emit the distribution card with all counts = 0 and verdicts = NA, plus literal "This session followed all CLAUDE.md rules. ✅"
+No patterns found: emit the distribution card with all counts = 0 and verdicts = NA, plus literal "This session followed all global `~/.claude/CLAUDE.md` rules. ✅"
 
 ### Reinforced Patterns (this session)
 
@@ -465,7 +465,7 @@ The unified table folds the previous dual-table layout (Pattern + Tool/Feature F
 |-------------|---------------|---------|
 | **MEMORY.md feedback** | New pattern (1st occurrence, repeat_count=0), individual learning | repeat=true (memory is BLOCKED) |
 | **GitHub issue** | Systemic fix needed (tool/skill implementation), repeat pattern (1–2×) | One-off mistake, purely local insight |
-| **CLAUDE.md draft** | Explicit rule gap exists, cross-project scope needed | Existing rule already covers this pattern |
+| **Global `~/.claude/CLAUDE.md` draft** | Explicit rule gap exists, cross-project scope needed | Existing rule already covers this pattern |
 | **Skill idea note** | Repeat pattern needs enforcement mechanism, manual recall is insufficient | Single memo is sufficient, no recurring trigger |
 | **Hook code** | Repeat (3x+) requiring automated enforcement; manual recall has repeatedly failed | Fewer than 3 repeats; skill idea or rule is sufficient |
 | **Upstream feedback** | Tool/feature-level defect identified in step 4b; improvement needed in the tool itself, not in Claude's behavior | Finding is purely a rule violation with no tool-level root cause |
@@ -475,8 +475,8 @@ The unified table folds the previous dual-table layout (Pattern + Tool/Feature F
 | Axis | Signal → Action |
 |------|----------------|
 | **Repeat count** | 0× → `memory` (first occurrence); 1–2× → `issue` (memory blocked — repeat=true); 3×+ → `skill` or `hook` (enforcement gap) |
-| **Scope** | Cross-project impact → `CLAUDE.md draft`; single-project → `MEMORY.md` |
-| **Gap type** | Rule violated → `memory` (reinforce); rule absent → `CLAUDE.md draft` (fill gap); no enforcement → `skill idea` |
+| **Scope** | Cross-project impact → global `~/.claude/CLAUDE.md` draft; single-project → `MEMORY.md` |
+| **Gap type** | Rule violated → `memory` (reinforce); rule absent → global `~/.claude/CLAUDE.md` draft (fill gap); no enforcement → `skill idea` |
 
 > **Axis precedence: Repeat-count is the highest-priority axis.** When `repeat=true`, the Scope and Gap type axes cannot override to `memory` — the repeat-count constraint (issue / skill / hook) always wins. Apply Scope and Gap type only to determine additional actions alongside the repeat-count result.
 
@@ -485,7 +485,7 @@ The unified table folds the previous dual-table layout (Pattern + Tool/Feature F
 **Before approval, explain each action's concrete plan:**
 
 For each finding, present:
-1. **What will be created** (file path, issue title, hook name, or CLAUDE.md rule text)
+1. **What will be created** (file path, issue title, hook name, or global `~/.claude/CLAUDE.md` rule text)
 2. **Why this action type** (escalation rationale — e.g., "Already recorded 3x in MEMORY.md")
 3. **How it will be verified** (what check confirms it works)
 4. **Stage 2 caveats carried forward** (MANDATORY when any of the following hold) — emit a literal `Stage 2 caveats:` line listing each item that applies to this finding. Omit the entire line only when none of the items apply.
@@ -553,14 +553,14 @@ Example (single action — repeat pattern):
 
 Example (compound action — rule gap + repeat):
 > Finding #1 (HIGH): Hasty interpretation without verification (ambiguous signal → worst-case conclusion, 3 occurrences)
-> - **Proposed Actions**: `CLAUDE.md draft` + `GitHub issue`
-> - **Rationale**: Rule absent + 3× repeat → fill the rule gap (CLAUDE.md draft) and track enforcement compliance (GitHub issue); matches Stage 2 ladder: "Missing rule + Repeat"
+> - **Proposed Actions**: global `~/.claude/CLAUDE.md` draft + `GitHub issue`
+> - **Rationale**: Rule absent + 3× repeat → fill the rule gap (global `~/.claude/CLAUDE.md` draft) and track enforcement compliance (GitHub issue); matches Stage 2 ladder: "Missing rule + Repeat"
 > - **What will be created**:
->   - CLAUDE.md draft: new rule requiring a disconfirmation check before concluding from ambiguous signals
+>   - global `~/.claude/CLAUDE.md` draft: new rule requiring a disconfirmation check before concluding from ambiguous signals
 >   - issue — `feat(retrospect): enforce falsify-first check on ambiguous signal interpretation`
-> - **Verify**: CLAUDE.md draft shown to user for approval + issue URL returned
+> - **Verify**: global `~/.claude/CLAUDE.md` draft shown to user for approval + issue URL returned
 > - **Stage 2 caveats**: analyst clustered with Finding #4 (same root cause family); evaluate combined fix scope before executing
-> - **Falsification**: premise survived for `CLAUDE.md draft` — if the rule already existed in another section, the 3× repeat would show citations to that rule rather than rule-absent rationale; Stage 2 step 4 confirmed no applicable rule (category=spec-gap)
+> - **Falsification**: premise survived for `global ~/.claude/CLAUDE.md draft` — if the rule already existed in another section, the 3× repeat would show citations to that rule rather than rule-absent rationale; Stage 2 step 4 confirmed no applicable rule (category=spec-gap)
 
 Example (gate-suppressed `(Recommended)`):
 > Finding #3 (MED): MCP timeout caused 3 retries (single occurrence in this session)
@@ -604,7 +604,7 @@ For each approved action:
 
    **⚠️ MANDATORY: Duplicate check before creating any memory file:**
 
-   **Precondition:** This check applies ONLY when the finding's action type is `memory` (new pattern). If Stage 2 already marked `repeat=true` and escalated to issue/hook/CLAUDE.md, skip this check — the escalation ladder takes precedence over merge.
+   **Precondition:** This check applies ONLY when the finding's action type is `memory` (new pattern). If Stage 2 already marked `repeat=true` and escalated to issue/hook/global `~/.claude/CLAUDE.md` draft, skip this check — the escalation ladder takes precedence over merge.
 
    a. Reuse Stage 2 Step 7's repeat scan results — if a finding matched an existing memory but was NOT escalated (i.e., it's a genuinely new sub-pattern), that file is the merge target
    b. If no Stage 2 match: scan MEMORY.md index for entries with overlapping root cause or topic (concept-level, not keyword)
@@ -618,16 +618,16 @@ For each approved action:
    - Title: Conventional Commits format (per project convention)
    - Body: per project convention, with background + task list
 
-3. **CLAUDE.md draft** → Write proposed rule addition as a markdown block, routed by target
+3. **Global `~/.claude/CLAUDE.md` draft** → Write proposed rule addition as a markdown block, routed by target
 
    **Step 0 — Target detection (MUST run first):**
    Resolve the target path via `realpath` and classify:
 
    | Target | Detection | Execution path |
    |--------|-----------|---------------|
-   | **Project CLAUDE.md** | `realpath <path>` does NOT match `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` AND resolves inside cwd | Direct Edit (see Project path below) |
+   | **Project `AGENTS.md`** | `realpath <path>` does NOT match `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` AND resolves inside cwd | Direct Edit (see Project path below) |
    | **Global `~/.claude/CLAUDE.md`** | `realpath <path>` matches `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` | Staging → AskUserQuestion → apply only on explicit approval (see Global path below) |
-   | **External-repo CLAUDE.md** | `realpath <path>` resolves outside cwd AND outside `~/.claude/` | Same as external-repo gate — do NOT edit; surface to user with resolved path |
+   | **External-repo rule file** | `realpath <path>` resolves outside cwd AND outside `~/.claude/` | Same as external-repo gate — do NOT edit; surface to user with resolved path |
 
    **Project path** (`realpath` does NOT match global):
    - Present the draft diff to the user inline
@@ -649,7 +649,7 @@ For each approved action:
         Cap: 최대 3 라운드. 3 라운드 초과 시: "3회 재작성을 초과했습니다. 수동 편집을 권장합니다: `{staging_path}`" 후 보류 처리.
       - `보류` 선택 시: Edit 호출 없이 staging 파일 경로를 completion report에 기록하고 종료.
 
-   c. **`apply` 선택 시**: Edit on `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` to insert the approved rule at the indicated position. Show the resulting diff as verification.
+   c. **`apply` 선택 시**: Edit on global `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` to insert the approved rule at the indicated position. Show the resulting diff as verification.
 
 4. **Upstream feedback** → Resolve the tool's **backing repo first** (do NOT hardcode any specific repo), then create a labeled issue there. Hardcoding misroutes plugin defects, custom MCP defects, dotfiles defects across user environments.
 
@@ -705,12 +705,12 @@ For each approved action:
    | `mcp__<plugin>__*` from a Claude Code plugin | Read `repository` field from that plugin's `.claude-plugin/plugin.json` (or equivalent manifest) |
    | `mcp__<service>-*` from a custom/team MCP server | The MCP server's source repo — `git remote -v` of the server's directory, or read its package manifest |
    | Skill within the praxis distribution itself | The praxis source repo this skill was installed from — read `repository` field in praxis's own plugin manifest |
-   | Hook in `~/.claude/hooks/` or a globally symlinked CLAUDE.md/AGENTS.md | The user's dotfiles backing repo — resolve via `ls -la` symlink chain, then `git remote -v` of the target dir |
+   | Hook in `~/.claude/hooks/` or a globally symlinked `~/.claude/CLAUDE.md`/`AGENTS.md` | The user's dotfiles backing repo — resolve via `ls -la` symlink chain, then `git remote -v` of the target dir |
    | CLI tool (e.g., `gh`, `kubectl`) | The CLI's open-source upstream if accessible; otherwise `note only` |
    | Builtin tool (Read/Edit/Bash/Grep) | Typically not actionable — `note only` |
    | Other / ambiguous | Ask the user; do NOT fall back to a hardcoded repo |
 
-   If the active project's CLAUDE.md provides a feature-to-repo mapping, consult it before deciding a repo.
+   If the active project's `AGENTS.md` provides a feature-to-repo mapping, consult it before deciding a repo.
 
    ### Step 0a — External-repo authorization gate (MUST run before `gh issue create` for external findings)
 
@@ -727,7 +727,7 @@ For each approved action:
    Title: {proposed_issue_title}
    Evidence: {one-line friction event summary}
 
-   Per CLAUDE.md "External / third-party repo content isolation (MUST)", this requires
+   Per global `~/.claude/CLAUDE.md` "External / third-party repo content isolation (MUST)", this requires
    explicit per-action approval. Stage 3 "Execute now" does not satisfy this gate.
    Auto-mode override, batch approval, and "prior selection ratifies this" inferences
    are all invalid — only an explicit [a] pick here allows proceeding.
@@ -771,7 +771,7 @@ For each approved action:
    | GitHub issue | `gh issue view {url}` returns valid data |
    | Upstream feedback | `gh issue view {url}` returns valid data + URL repo matches `verified_backing_repo` from step 0 + label convention is correct for the verified repo (`tool-friction:{layer}` ONLY when verified repo is the praxis distribution; otherwise the repo's own convention label per Action 4's label rule) |
    | Hook code | Script file exists + settings.json registration confirmed (dry-run varies by hook type — no generic check) |
-   | CLAUDE.md draft | **Project target**: Diff shown + explicit approval received + Edit applied. **Global target**: Staging file created at `/tmp/claude-md-draft-{slug}.md` → AskUserQuestion 3-option presented → `apply`: Edit applied + diff shown; `보류`: staging file path logged in completion report. |
+   | Global `~/.claude/CLAUDE.md` draft | **Project target (`AGENTS.md`)**: Diff shown + explicit approval received + Edit applied. **Global target (`~/.claude/CLAUDE.md`)**: Staging file created at `/tmp/claude-md-draft-{slug}.md` → AskUserQuestion 3-option presented → `apply`: Edit applied + diff shown; `보류`: staging file path logged in completion report. |
    | Skill idea note | File exists in `.omc/plans/` |
 
    Report verification results in the completion table.
@@ -812,16 +812,16 @@ If you catch yourself:
 
 - Proposing actions before completing Stage 2 analysis
 - Writing "root cause: Claude forgot to X" without tracing WHY the forgetting happened
-- Adding a MEMORY.md entry that just repeats the CLAUDE.md rule verbatim (no new insight)
+- Adding a MEMORY.md entry that just repeats the global `~/.claude/CLAUDE.md` rule verbatim (no new insight)
 - Creating a GitHub issue for every minor friction (low-ROI noise)
 - Skipping the approval step and executing actions directly
-- Editing `$CLAUDE_CONFIG_DIR/CLAUDE.md` directly (without the staging → AskUserQuestion 3-option path) — global CLAUDE.md requires staging + explicit `apply` approval; direct Edit/Write is blocked by the self-modification classifier and skips user review. Use the Global path flow in Action 3 above.
+- Editing `$CLAUDE_CONFIG_DIR/CLAUDE.md` directly (without the staging → AskUserQuestion 3-option path) — global `~/.claude/CLAUDE.md` requires staging + explicit `apply` approval; direct Edit/Write is blocked by the self-modification classifier and skips user review. Use the Global path flow in Action 3 above.
 - Proposing `memory` for a pattern that already exists in MEMORY.md (MUST escalate instead)
 - Skipping tracer/analyst agent calls ("I can analyze this myself")
 - Generating artifacts without verification ("issue created" without showing URL)
 - Creating a new memory file without checking existing entries for overlap (MUST merge into existing when root cause matches)
 - **Proposing MEMORY.md feedback as the only action when the same rule was violated 3+ times** — this ignores memo's proven limits; enforcement mechanisms (skill, hook, rule) MUST be evaluated alongside memory
-- **Proposing MEMORY.md feedback as the only action when the finding is a rule gap (rule absent)** — gaps are not filled by memos; CLAUDE.md draft or skill idea MUST be considered
+- **Proposing MEMORY.md feedback as the only action when the finding is a rule gap (rule absent)** — gaps are not filled by memos; global `~/.claude/CLAUDE.md` draft or skill idea MUST be considered
 - **Forcing tool friction into only a rule-violation frame** — tool-layer defects from step 4b MUST be carried in the unified findings table with `Tool Layer` set to a non-`—` value and evaluated for `upstream feedback`, not collapsed into rule-violation-only findings
 - **Skipping step 4b entirely** ("no tool issues this session") — step 4b is mandatory. If no tool friction is found, the distribution card MUST emit `upstream_feedback: 0` and the report MUST state "No tool/feature friction detected. ✅" explicitly
 - **Pre-scan에서 friction event에 `category[]` 라벨링을 누락한 채 Stage 2 step 3 이상 진행** — Layer E 강제. 누락은 Stage 2 진입 전 차단되어야 한다.
@@ -836,7 +836,7 @@ If you catch yourself:
 - **Emitting `AskUserQuestion` with a `(Recommended)` label or confidence-anchoring framing (`safer` / `natural fit` / `안전한` / `자연스러운`) without an accompanying `Falsification:` trace line in the per-finding plan** — Stage 3 Pre-Output Falsification Gate violation. The label asserts ranking confidence that wasn't earned; downstream readers (user, hooks, retrospect parsers) cannot tell whether the premise was tested. If the gate didn't run, drop the label and surface the option unranked.
 - **Stage 3 ranking that contradicts Stage 2 caveats** — e.g., `(Recommended)` applied to an action whose Stage 2 row carries `tracer confidence: LOW`, `single observation` alone, or `alternative root cause not ruled out`. Stage 2's caveat is the leading signal; Stage 3 must carry it forward (`Stage 2 caveats:` line) and either discharge it via falsification or suppress the recommendation.
 - **`upstream_feedback` 행의 `backing_repo` owner가 own-org 밖인데 Stage 2.5 Gate-4 마킹(`⚠ EXTERNAL: per-action approval required at Stage 4` prefix) 없이 Stage 3 진입** — Gate-4 가 실행되지 않은 것. Stage 2.5로 돌아가 Gate-4 재실행.
-- **external-marked finding 의 Stage 4 `upstream_feedback` 실행에서 AskUserQuestion per-action 승인(step 0a) 없이 `gh issue create` 직행** — CLAUDE.md zero-exception 룰 위반. STOP, step 0a AskUserQuestion 실행 먼저.
+- **external-marked finding 의 Stage 4 `upstream_feedback` 실행에서 AskUserQuestion per-action 승인(step 0a) 없이 `gh issue create` 직행** — global `~/.claude/CLAUDE.md` zero-exception 룰 위반. STOP, step 0a AskUserQuestion 실행 먼저.
 - **Stage 3 "Execute now" 선택을 external-repo write 의 per-action 승인으로 ratify** — Stage 3 승인은 action 카테고리 선택이지, 외부 repo 개별 write 승인이 아님. Stage 4 step 0a 게이트를 반드시 별도로 실행.
 - **Omitting the `Stage 2 caveats:` line on a finding that has any of: tracer confidence below HIGH, single observation, alternative root cause not ruled out, Gate-3 downgrade, analyst cluster overlap, escape-hatch state** — carry-forward is mandatory whenever ANY of these holds. Silent omission lets Stage 3 rank as if Stage 2 returned clean HIGH-confidence evidence.
 - **조사 도구 결과를 completeness 검증 없이 결론에 사용 (premise unverified)** — 다음 두 패턴 모두 "premise falsified" (반증 테스트를 설계한 뒤 통과 → 진행 가능)가 아니라 "premise unverified" (도구 출력 자체의 한계를 검증하지 않은 채 결론에 사용 → STOP) 에 해당한다: (a) `find ... | head -N` 결과로 "파일/모듈 없음" 단정 — **`head` 를 제거한 원 명령 `find ... | wc -l` 을 별도로 실행**해 총 라인 수를 확인하고, cap 초과 시 cap 제거 또는 `grep -rn <token>` narrowing 필요 (`head -N` 파이프 뒤에 `| wc -l` 을 붙이면 cap 으로 잘린 뒤의 라인 수만 세므로 정확히 N개와 cap 초과를 구분할 수 없어 검증이 실패한다); (b) `find <path>` 빈 결과로 "경로/모듈 없음" 단정 — `ls <parent>` 로 path coverage 를 확인하거나 상위 경로로 재시도, 또는 `grep -rn <token>` cross-check 필요.
@@ -847,7 +847,7 @@ If you catch yourself:
 
 | Stage | Key Activity | Success Criteria |
 |-------|-------------|-----------------|
-| **1. Load** | Read CLAUDE.md, form scan questions | Rule categories identified |
+| **1. Load** | Read global `~/.claude/CLAUDE.md`, form scan questions | Rule categories identified |
 | **2. Analyze** | Scan conversation, map to rules, find root cause | Root cause (not symptom) for each pattern; every event has `category[]` |
 | **2.5 Audit** | Run Gate-1 (categorical) + Gate-2 (Schema A 5-line or Schema B dimension-tag rationale) + Gate-3 (evidence robustness for 2-action findings) + Gate-4 (external-repo authorization pre-check for upstream_feedback) | All applicable gates PASS/WARN or per-finding cap reached and surfaced to user |
 | **3. Report** | Present unified table + distribution card, carry Stage 2 caveats forward, run Pre-Output Falsification Gate before each `AskUserQuestion`, collect approval per item | User approved at least 1 item (or confirmed 0 findings); every `(Recommended)` label has a `Falsification:` trace |
@@ -857,7 +857,7 @@ If you catch yourself:
 
 | Stage | Failure | Action |
 |-------|---------|--------|
-| Stage 1 (load) | CLAUDE.md not found (project or global) | Proceed with global defaults; flag the missing file in the report |
+| Stage 1 (load) | `~/.claude/CLAUDE.md` not found (global) or `AGENTS.md` not found (project) | Proceed with global defaults; flag the missing file in the report |
 | Stage 2 (analyze) | Session history not accessible | Fall back to the user's verbal summary as input to steps 3–8 |
 | Stage 2 (analyze) | No friction events found | Exit with "No patterns found. ✅" — do not fabricate findings |
 | Stage 2 (analyze) | MEMORY.md scan failed (file not accessible) | Treat all findings as new patterns (repeat=false). Flag scan failure in report |

@@ -23,7 +23,7 @@ Indirect phrasing ("take a break / prioritize other work", "pause for now",
 the option-label level. This hook detects both pattern classes so that the
 spirit of the rule survives phrasing variation.
 
-Text rules in CLAUDE.md or skill bodies alone cannot enforce this — the
+Text rules in global `~/.claude/CLAUDE.md` or skill bodies alone cannot enforce this — the
 `loaded != retrieved` limit. This hook enforces the rule at the tool
 boundary, where the check runs mechanically regardless of retrieval state.
 

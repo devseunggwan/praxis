@@ -5,7 +5,7 @@ Supported hosts: all
 `hooks/commit-title-length-check.py` intercepts every AI-authored `git commit`
 Bash call and emits `permissionDecision: "ask"` when the first line of the
 commit message exceeds the configured maximum (default 50, matching the global
-CLAUDE.md "Git Commit & Title Rules — Title: max 50 characters" rule).
+global `~/.claude/CLAUDE.md` "Git Commit & Title Rules — Title: max 50 characters" rule).
 
 ### Why a PreToolUse hook instead of a git commit-msg hook
 

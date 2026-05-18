@@ -37,7 +37,7 @@ description: Delegate a task to an independent Claude Code session in a new cmux
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `<task>` | (required) | 위임할 작업 설명 |
-| `--model` | `sonnet` | Provider:model notation. `opus`/`sonnet`/`haiku` = claude. Also supports `claude`, `claude:opus`, `codex`, `codex:o3`, `gemini`, `gemini:flash`. See CLAUDE.md Provider Routing. |
+| `--model` | `sonnet` | Provider:model notation. `opus`/`sonnet`/`haiku` = claude. Also supports `claude`, `claude:opus`, `codex`, `codex:o3`, `gemini`, `gemini:flash`. See project `ARCHITECTURE.md` Provider Routing. |
 | `--cwd` | current dir | 새 세션의 작업 디렉토리 |
 | `--max-budget-usd` | (none) | 최대 예산 한도 |
 | `--account` | (기본 계정) | Claude 계정 프로필 (예: `claude-2` → `CLAUDE_CONFIG_DIR=~/.claude-2`) |
@@ -64,7 +64,7 @@ task = args.task (remaining text after flags)
 short_task = task[:30], sanitized to [a-zA-Z0-9가-힣 -] only (for cmux workspace name)
 timestamp = epoch seconds + PID (e.g., 1744163800-12345) to avoid collision
 
-# Provider resolution (from CLAUDE.md Provider Resolution Logic)
+# Provider resolution (from project ARCHITECTURE.md Provider Resolution Logic)
 if model matches /^(codex|gemini)(?::(.+))?$/:
   provider = match[1]           # "codex" or "gemini"
   sub_model = match[2] || ""    # "" or "o3" or "flash" (colon stripped)
@@ -191,7 +191,7 @@ Report results in Korean.
 1. 프롬프트를 섹션별로 분리 → 각각 개별 .md 파일 생성
 2. Context 섹션은 모든 분할 파일에 공통 포함
 3. 각 파일에 대해 개별 래퍼 .sh 생성
-4. Routing: If `--model` is explicit, apply uniformly. Otherwise, auto-assign by task type (see CLAUDE.md Task-Type Routing):
+4. Routing: If `--model` is explicit, apply uniformly. Otherwise, auto-assign by task type (see project `ARCHITECTURE.md` Task-Type Routing):
    - Code implementation/fix → `codex` (if CLI available) or `claude:sonnet`
    - Search/analysis/large context → `gemini` (if CLI available) or `claude:sonnet`
    - Design/security/review → `claude:opus`
@@ -209,7 +209,7 @@ SCRIPT_FILE="/tmp/cmux-delegate-{timestamp}.sh"
 # Cleanup: .sh만 삭제. .md는 보존 (다른 워크스페이스가 참조할 수 있음)
 trap 'rm -f "$SCRIPT_FILE"' EXIT
 
-# Provider-specific invocation (from CLAUDE.md Provider CLI Spec)
+# Provider-specific invocation (from project ARCHITECTURE.md Provider CLI Spec)
 case "{provider}" in
   claude)
     cat "$PROMPT_FILE" | {claude_env} claude \
