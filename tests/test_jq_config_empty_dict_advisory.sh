@@ -124,6 +124,9 @@ echo '{"ok":true}' > "$VALID_CLAUDE"                 # valid JSON under .claude/
 EMPTY_CLAUDE2="$TMPDIR_TEST/.claude/settings2.json"
 touch "$EMPTY_CLAUDE2"                                # second empty config file
 
+EMPTY_CLAUDE_N="$TMPDIR_TEST/.claude/settings-n.json"
+touch "$EMPTY_CLAUDE_N"                               # config path with -n in filename
+
 # ---------------------------------------------------------------------------
 # === Baseline: existing advisory paths still work ===
 # ---------------------------------------------------------------------------
@@ -244,6 +247,11 @@ run_case "command substitution normal jq: advisory fires" \
 run_case "command substitution --arg name -n: advisory fires" \
   "advisory:[config-empty]" \
   "x=\$(jq --arg myvar -n '.' $EMPTY_CLAUDE_JSON)"
+
+# config path whose filename contains -n: must NOT be treated as null-input flag.
+run_case "command substitution: config path with -n in name fires advisory" \
+  "advisory:[config-empty]" \
+  "x=\$(jq '.' $EMPTY_CLAUDE_N)"
 
 # ---------------------------------------------------------------------------
 # === Item 3: multi-file (jq '.' a.json b.json) — each path checked ===

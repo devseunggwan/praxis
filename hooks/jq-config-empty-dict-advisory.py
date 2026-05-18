@@ -162,12 +162,14 @@ _SUBST_DOUBLE_VALUE_FLAG_RE = re.compile(
 
 _SUBST_NULL_INPUT_RE = re.compile(
     r'\bjq\b'
-    r'.*?'                             # any intervening tokens
+    r'(?:.*?)'
+    r'(?<=\s)'                         # flag must be preceded by whitespace
     r'(?:'
     r'--null-input'                    # long form
     r'|'
     r'-[a-zA-Z]*n[a-zA-Z]*'           # short form: -n, -rn, -nr, etc.
-    r')\b',
+    r')'
+    r'(?=\s|[)\'"]|\Z)',               # flag must be followed by whitespace, closing char, or end
     re.DOTALL,
 )
 
