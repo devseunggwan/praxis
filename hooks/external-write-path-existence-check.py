@@ -70,6 +70,11 @@ _MD_LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
 # blocks.  The backtick cannot appear inside the span content.
 _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
 
+# Fenced code block (triple-backtick): strip before inline-code search to
+# avoid false-positive phantom-path hits on sample snippets in PR bodies.
+# Matches both labelled (```bash ... ```) and unlabelled (``` ... ```) fences.
+_FENCED_BLOCK_RE = re.compile(r"```[^\n]*\n.*?```", re.DOTALL)
+
 # gh subcommand pairs that accept --body-file and write to external surfaces.
 _GH_BODY_FILE_SUBCOMMANDS = frozenset({
     ("issue", "create"),
@@ -199,9 +204,12 @@ def _extract_candidate_paths(body: str) -> list[str]:
             candidates.append(target[2:] if target.startswith("./") else target)
 
     # Phase 2: inline code spans — `hooks/foo.sh` style references.
+    # Strip fenced blocks first so unlabelled triple-backtick fences
+    # (``` hooks/nonexistent.sh ```) don't produce phantom-path false positives.
     # Only repo-relative prefixes are in scope; `./` prefix is also accepted
     # and stripped consistently with the markdown-link handling above.
-    for m in _INLINE_CODE_RE.finditer(body):
+    body_no_fences = _FENCED_BLOCK_RE.sub("", body)
+    for m in _INLINE_CODE_RE.finditer(body_no_fences):
         token = m.group(1).strip()
         if any(token.startswith(pfx) for pfx in REPO_RELATIVE_PREFIXES):
             candidates.append(token[2:] if token.startswith("./") else token)
@@ -320,11 +328,29 @@ def main() -> int:
             continue
 
         repo_root = _resolve_repo_root(body_file, cwd)
+        real_repo_root = os.path.realpath(repo_root)
 
-        phantom: list[str] = [
-            p for p in candidates
-            if not os.path.exists(os.path.join(repo_root, p))
-        ]
+        def _is_phantom(p: str) -> bool:
+            """Return True if path p should be treated as a phantom reference.
+
+            A path is phantom when it does not exist inside the repo root.
+            Paths that escape the repo root via `../` traversal are always
+            phantom even when they happen to exist on the filesystem (e.g. a
+            sibling worktree directory), because they reference content outside
+            the repository boundary.
+            """
+            full = os.path.join(repo_root, p)
+            if not os.path.exists(full):
+                return True
+            # Resolve symlinks/`../` so a path like `../sibling-worktree` that
+            # physically exists outside the repo tree is still flagged.
+            # Use separator-aware prefix comparison to avoid false negatives
+            # when a sibling directory shares the repo root name as a prefix
+            # (e.g. /tmp/praxis-wt-copy startswith /tmp/praxis-wt → True).
+            resolved = os.path.realpath(full)
+            return not (resolved == real_repo_root or resolved.startswith(real_repo_root + os.sep))
+
+        phantom: list[str] = [p for p in candidates if _is_phantom(p)]
 
         if phantom:
             _mark_reported(dk)
