@@ -154,6 +154,18 @@ _CONFIG_PATH_IN_TEXT_RE = re.compile(
 )
 
 
+_SUBST_NULL_INPUT_RE = re.compile(
+    r'\bjq\b'
+    r'.*?'                             # any intervening tokens
+    r'(?:'
+    r'--null-input'                    # long form
+    r'|'
+    r'-[a-zA-Z]*n[a-zA-Z]*'           # short form: -n, -rn, -nr, etc.
+    r')\b',
+    re.DOTALL,
+)
+
+
 def _scan_subst_for_config_paths(token: str) -> list[str]:
     """Extract config-matching paths from a coalesced SUBST_RUN token.
 
@@ -163,11 +175,16 @@ def _scan_subst_for_config_paths(token: str) -> list[str]:
     raw substitution text.
 
     Returns an empty list if no jq invocation or config path is detected.
+    Returns an empty list when jq is called with -n/--null-input because jq
+    does not read input files in null-input mode, so no advisory is warranted.
     """
     if "jq" not in token or "$(" not in token:
         return []
     # Only bother if there's a jq somewhere in the substitution.
     if not re.search(r'\bjq\b', token):
+        return []
+    # jq -n / --null-input reads no files — skip advisory to avoid false positive.
+    if _SUBST_NULL_INPUT_RE.search(token):
         return []
     paths = []
     for m in _CONFIG_PATH_IN_TEXT_RE.finditer(token):

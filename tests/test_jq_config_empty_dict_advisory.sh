@@ -212,6 +212,25 @@ run_case "--arg name -n: -n as value operand does not suppress advisory" \
   "advisory:[config-empty]" \
   "jq --arg myvar -n '.' $EMPTY_CLAUDE_JSON"
 
+# command substitution with jq -n: jq reads no file in null-input mode,
+# so the hook must be silent even when a config path appears in the subst text.
+run_case "command substitution jq -n is silent" \
+  "silent" \
+  "x=\$(jq -n '{}' $EMPTY_CLAUDE_JSON)"
+
+run_case "command substitution jq -rn is silent" \
+  "silent" \
+  "x=\$(jq -rn '{}' $EMPTY_CLAUDE_JSON)"
+
+run_case "command substitution jq --null-input is silent" \
+  "silent" \
+  "x=\$(jq --null-input '{}' $EMPTY_CLAUDE_JSON)"
+
+# Normal command substitution with config path: advisory should still fire.
+run_case "command substitution normal jq: advisory fires" \
+  "advisory:[config-empty]" \
+  "x=\$(jq '.' $EMPTY_CLAUDE_JSON)"
+
 # ---------------------------------------------------------------------------
 # === Item 3: multi-file (jq '.' a.json b.json) — each path checked ===
 # The filter is the first positional; every subsequent positional is a file.
