@@ -62,7 +62,7 @@ The hook exits 0 (passes) when any of:
 
 Cross-turn carry-over (verifying in turn N, claiming in turn N+1) is the
 exact pattern this hook is designed to prevent — it lets stale evidence
-silently age out. Strict same-turn enforcement matches the global CLAUDE.md
+silently age out. Strict same-turn enforcement matches the global `~/.claude/CLAUDE.md`
 "Verification Before Completion" rule that requires verification commands in
 the *immediately preceding* turn.
 

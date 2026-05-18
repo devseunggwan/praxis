@@ -54,12 +54,12 @@ Recover, save, and orchestrate Claude Code sessions.
 | Situation | Skill to call |
 |-----------|--------------|
 | "Claude Code sessions died after a crash or power-off" | `cmux-recover-sessions` (cmux) or `recover-sessions` (tmux) |
-| "I want to record that a CLAUDE.md rule was broken" | `strike` |
+| "I want to record that a global `~/.claude/CLAUDE.md` rule was broken" | `strike` |
 | "There are too many Codex review comments — where to start?" | `codex-review-wrap` |
 
 ## Hook System
 
-Praxis ships hooks that enforce CLAUDE.md rules structurally at the tool
+Praxis ships hooks that enforce global `~/.claude/CLAUDE.md` rules structurally at the tool
 level (PreToolUse / PostToolUse / Stop / UserPromptSubmit). They fail-open
 on infrastructure errors — Claude Code never breaks, but violating patterns
 are blocked or warned before they land.

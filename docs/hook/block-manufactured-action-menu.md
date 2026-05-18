@@ -98,7 +98,7 @@ Legitimate cases that survive the hook even with a command signal:
 When ANY option label contains a destructive / irreversible action token,
 the hook passes regardless of mode. The user's prior generic command does
 not absorb per-action approval for shared-state mutations — surfacing a
-confirmation menu is required by the project CLAUDE.md
+confirmation menu is required by the global `~/.claude/CLAUDE.md`
 "Pre-Merge Reporting" + "Executing actions with care" rules.
 
 Detected destructive tokens in option labels:
