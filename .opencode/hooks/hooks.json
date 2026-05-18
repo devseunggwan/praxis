@@ -1,5 +1,5 @@
 {
-  "description": "praxis hooks: Stop gate for completion-without-evidence, retrospect memory-bias gate, session-scoped three-strike discipline, PreToolUse(Bash) side-effect scan / gh search --state all block / memory-hint / caller-chain evidence gate on gh pr create / pre-merge approval gate / cross-boundary pre-flight (heredoc block + cross-repo ask), PreToolUse(AskUserQuestion) end-option mechanical-transcribe advisory + manufactured action-menu continuation guard, PostToolUse correction for built-in task management tools, UserPromptSubmit codex-review worktree disambiguation",
+  "description": "praxis hooks: Stop gate for completion-without-evidence, retrospect memory-bias gate, session-scoped three-strike discipline, PreToolUse(Bash) side-effect scan / gh search --state all block / memory-hint / caller-chain evidence gate on gh pr create / pre-merge approval gate / cross-boundary pre-flight (heredoc block + cross-repo ask) / momentum-rule-retrieval-gate (gh pr merge / cmux dispatch / force-push), PreToolUse(AskUserQuestion) end-option mechanical-transcribe advisory + manufactured action-menu continuation guard, PostToolUse correction for built-in task management tools, UserPromptSubmit codex-review worktree disambiguation",
   "hooks": {
     "SessionStart": [
       {
