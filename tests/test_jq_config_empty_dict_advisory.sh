@@ -206,6 +206,12 @@ run_case "jq -r -n is silent" \
   "silent" \
   "jq -r -n '.foo'"
 
+# --arg name -n: the -n is the *value* of --arg, not the null-input flag.
+# Hook must NOT short-circuit; the config path after the filter is a real file.
+run_case "--arg name -n: -n as value operand does not suppress advisory" \
+  "advisory:[config-empty]" \
+  "jq --arg myvar -n '.' $EMPTY_CLAUDE_JSON"
+
 # ---------------------------------------------------------------------------
 # === Item 3: multi-file (jq '.' a.json b.json) — each path checked ===
 # The filter is the first positional; every subsequent positional is a file.

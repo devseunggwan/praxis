@@ -203,12 +203,6 @@ def _extract_jq_config_paths(argv: list[str]) -> list[str]:
     if not argv or argv[0] != "jq":
         return []
 
-    # jq -n (null-input mode) reads no files by design — short-circuit early
-    # so the path-scanning loop is skipped entirely rather than relying on the
-    # loop producing no results by accident.
-    if "-n" in argv or "--null-input" in argv:
-        return []
-
     paths: list[str] = []
     filter_seen = False
     i = 1
@@ -248,7 +242,12 @@ def _extract_jq_config_paths(argv: list[str]) -> list[str]:
                 # value — skip one following token
                 i += 2
                 continue
-            # Boolean flag — skip just this token
+            # Boolean flag — check for null-input at option position, then skip
+            # NOTE: check here (not before the loop) so that `--arg name -n`
+            # is not misidentified: the `-n` value token is consumed by the
+            # _JQ_DOUBLE_VALUE_FLAGS branch above, never reaching this path.
+            if bare in ("-n", "--null-input"):
+                return []
             i += 1
             continue
 
