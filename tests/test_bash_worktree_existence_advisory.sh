@@ -154,16 +154,28 @@ run_case "missing path advisory works regardless of cwd context" \
   "cd $MISSING_PATH"
 
 # ---------------------------------------------------------------------------
-# === M1 spec: pushd and subshell are out of scope (silent) ===
+# === P1 (Phase 2): pushd and subshell (cd ...) detection ===
 # ---------------------------------------------------------------------------
 
-run_case "pushd non-existent path is silent (out of scope Phase 1)" \
-  "silent" \
+# pushd to non-existent path fires advisory (Phase 2 — #337 P1).
+run_case "pushd non-existent path emits worktree-missing" \
+  "advisory:[worktree-missing]" \
   "pushd $MISSING_PATH && ls"
 
-run_case "subshell cd non-existent is silent (out of scope Phase 1)" \
-  "silent" \
+# subshell (cd ...) to non-existent path fires advisory (Phase 2 — #337 P1).
+run_case "subshell cd non-existent emits worktree-missing" \
+  "advisory:[worktree-missing]" \
   "(cd $MISSING_PATH && ls)"
+
+# pushd to existing path is silent.
+run_case "pushd existing path is silent" \
+  "silent" \
+  "pushd $NON_WT_DIR && ls"
+
+# subshell (cd ...) to existing path is silent.
+run_case "subshell cd existing path is silent" \
+  "silent" \
+  "(cd $NON_WT_DIR && ls)"
 
 # ---------------------------------------------------------------------------
 # === M2 fix: heredoc body containing cd is skipped (no false-positive) ===
@@ -185,24 +197,35 @@ run_case "non-cd command without heredoc is silent" \
   "cat /tmp/foo.txt"
 
 # ---------------------------------------------------------------------------
-# === Known limitation: fused heredoc openers fire false-positive (#337 P6) ===
-# shlex tokenizes `<<EOF`, `<<'EOF'`, `<<-EOF` as a single POSITIONAL token,
-# so _extract_heredoc_end_marker cannot detect them. Body `cd /path` fires.
-# These cases are pinned here to document current behavior. When #337 P6 is
-# resolved, all three should be changed to "silent".
+# === P6 (Phase 2): fused heredoc openers — regression guard (#337 P6) ===
+# shlex tokenizes fused forms as single POSITIONAL tokens; _extract_heredoc_end_marker
+# now detects them by matching the `<<` prefix pattern. Body `cd /path` must
+# be silent (no false-positive advisory). These 3 cases were formerly pinned as
+# known-limitation false-positives and are now expected to be silent.
 # ---------------------------------------------------------------------------
 
-run_case "KNOWN-LIMITATION: fused <<EOF body cd fires false-positive (pin)" \
-  "advisory:[worktree-missing]" \
+run_case "fused <<EOF body cd is silent (P6 fix)" \
+  "silent" \
   "$(printf 'cat <<EOF\ncd /this/does/not/exist/anywhere\nEOF')"
 
-run_case "KNOWN-LIMITATION: fused <<'EOF' body cd fires false-positive (pin)" \
-  "advisory:[worktree-missing]" \
+run_case "fused <<'EOF' body cd is silent (P6 fix)" \
+  "silent" \
   "$(printf "cat <<'EOF'\ncd /this/does/not/exist/anywhere\nEOF")"
 
-run_case "KNOWN-LIMITATION: fused <<-EOF body cd fires false-positive (pin)" \
-  "advisory:[worktree-missing]" \
+run_case "fused <<-EOF body cd is silent (P6 fix)" \
+  "silent" \
   "$(printf 'cat <<-EOF\n\tcd /this/does/not/exist/anywhere\n\tEOF')"
+
+# fused <<"EOF" form — shlex strips quotes and produces <<EOF token (same as <<EOF).
+run_case "fused <<\"EOF\" body cd is silent (P6 fix)" \
+  "silent" \
+  "$(printf 'cat <<"EOF"\ncd /this/does/not/exist/anywhere\nEOF')"
+
+# cd AFTER a fused heredoc close still fires advisory (regression guard:
+# the post-heredoc segment is processed normally).
+run_case "cd after fused <<EOF heredoc close fires advisory" \
+  "advisory:[worktree-missing]" \
+  "$(printf 'cat <<EOF\ncd /this/does/not/exist/anywhere\nEOF\ncd /also/does/not/exist')"
 
 # ---------------------------------------------------------------------------
 # === M3 fix: dedupe keyed on (session, path, state) — state-change aware ===

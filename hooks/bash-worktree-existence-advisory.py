@@ -10,26 +10,25 @@ Advisory message (stderr only — exit 0 always):
   [worktree-missing] <path> does not exist — check 'git worktree list' before retry
     When the resolved path does not exist on disk.
 
-Scope (Phase 1):
-  Only direct `cd <path>` command is detected. `pushd`, subshell `(cd /path
-  && ...)`, heredoc bodies containing `cd` are out of scope for this phase
-  to avoid parser complexity. See follow-up issue for Phase 2 expansion.
+Scope (Phase 2 — #337 P6 + P1):
+  Direct `cd <path>` and `pushd <path>` commands are detected, as well as
+  the subshell form `(cd /path && ...)`. Heredoc bodies containing `cd` are
+  skipped for both space-separated (`<< EOF`) and fused (`<<EOF`, `<<'EOF'`,
+  `<<"EOF"`, `<<-EOF`) heredoc openers.
 
 Silent cases (no output emitted):
   - `cd <path>` where path exists on disk
+  - `pushd <path>` where path exists on disk
+  - `(cd <path> && ...)` where path exists on disk
   - bare `cd` (no argument — cd to $HOME)
   - `cd $VAR` or `cd $(...)` — variable/substitution expansion, unresolvable
   - `cd -` — previous dir, unresolvable
   - `cd ~` or `cd ~/...` — tilde expansion; hook process $HOME may differ
     from the agent's effective $HOME (e.g. sudo to different user)
   - `cd ~user/...` — user-specific tilde, unresolvable
-  - `pushd /path` — out of scope (Phase 1)
-  - `(cd /path && ...)` — subshell, out of scope (Phase 1)
-  - `cd /path` inside a heredoc body — space-separated opener `<< EOF`:
-    heredoc body segments are skipped by _extract_heredoc_end_marker.
-    KNOWN LIMITATION: fused openers (`<<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF`)
-    are not detected — their body `cd /path` fires a false-positive advisory.
-    Tracked in follow-up #337 P6.
+  - `cd /path` inside a heredoc body — both space-separated opener `<< EOF`
+    and fused openers (`<<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF`) are detected
+    by _extract_heredoc_end_marker; body segments are skipped.
   - opt-out marker `# worktree-advisory:ack` anywhere in command
   - non-Bash tool name
   - malformed JSON stdin
@@ -102,11 +101,14 @@ def _normalize_path(path: str) -> str:
 
 
 def _extract_cd_target(seg: list[Token]) -> str | None:
-    """Return the path argument of a `cd <path>` segment, else None.
+    """Return the path argument of a `cd <path>` or `pushd <path>` segment,
+    else None. Also handles the subshell form `(cd <path> && ...)` where
+    tokenize_with_roles emits the fused token `(cd` as argv[0].
 
     Silent cases (return None):
-      - argv[0] is not `cd` (including `pushd` — out of scope Phase 1)
-      - bare `cd` (no positional argument after COMMAND)
+      - argv[0] is not `cd`, `pushd`, or `(cd` (i.e. not a recognized
+        directory-change command)
+      - bare `cd` / `pushd` (no positional argument after COMMAND)
       - target starts with `$` (variable expansion, unresolvable)
       - target starts with `$(` (command substitution, unresolvable)
       - target is `-` (cd to previous dir, unresolvable)
@@ -117,7 +119,14 @@ def _extract_cd_target(seg: list[Token]) -> str | None:
     the effective_cwd by joining with os.path.join and normpath.
     """
     argv = filter_argv(seg)
-    if not argv or argv[0].text != "cd":
+    if not argv:
+        return None
+    cmd = argv[0].text
+    # Strip leading `(` for subshell form `(cd /path && ...)`.
+    # tokenize_with_roles emits `(cd` as a single COMMAND token.
+    if cmd.startswith("("):
+        cmd = cmd[1:]
+    if cmd not in ("cd", "pushd"):
         return None
     for tok in argv[1:]:
         if tok.role in (TokenRole.FLAG, TokenRole.FLAG_VALUE, TokenRole.SEPARATOR_DD):
@@ -183,30 +192,44 @@ def _delete_dedupe(session_id: str, path: str, state: str) -> None:
 def _extract_heredoc_end_marker(seg: list[Token]) -> str | None:
     """Return the heredoc end-marker word if this segment opens a heredoc.
 
-    `tokenize_with_roles` parses `cat << EOF` as a segment with tokens
-    ['cat', '<<', 'EOF']. The `<<` is emitted as a POSITIONAL token because
-    shlex with punctuation_chars=';|&' does not treat `<` as punctuation.
+    Two tokenization forms are handled (both as POSITIONAL tokens because
+    shlex with punctuation_chars=';|&' does not treat `<` as punctuation):
 
-    Detection: find a POSITIONAL token that is the literal `<<` or `<<-`
-    and return the next token as the end-marker word.
+    Space-separated form: `cat << EOF` — tokenizes as ['cat', '<<', 'EOF'].
+      Detection: find a POSITIONAL token that is exactly `<<` or `<<-` and
+      return the next token as the end-marker word.
 
-    KNOWN LIMITATION: shlex with posix=True tokenizes fused heredoc openers
-    (`<<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF`) as a **single** POSITIONAL
-    token (`<<EOF` or `<<-EOF`), not as two separate tokens. This function
-    only matches the space-separated form (`<< EOF`) where `<<` appears as
-    an isolated token. Fused forms are NOT detected, and their body `cd`
-    lines fire false-positive advisories. Tracked in follow-up #337 P6.
+    Fused form: `cat <<EOF`, `cat <<'EOF'`, `cat <<"EOF"`, `cat <<-EOF` —
+      shlex with posix=True collapses these into a single POSITIONAL token
+      (`<<EOF` or `<<-EOF`) because there is no whitespace between `<<` and
+      the marker. shlex also strips quotes in posix mode, so `<<'EOF'` and
+      `<<"EOF"` both produce the token `<<EOF`.
+      Detection: a POSITIONAL token starting with `<<` where the remainder
+      (after stripping an optional leading `-`) is non-empty is the fused
+      form; the remainder is the bare end-marker word.
 
-    Returns None when no space-separated heredoc opener is present.
+    Returns None when no heredoc opener (space-separated or fused) is present.
     """
     argv = filter_argv(seg)
     for i, tok in enumerate(argv):
-        if tok.role == TokenRole.POSITIONAL and tok.text in ("<<", "<<-"):
+        if tok.role != TokenRole.POSITIONAL:
+            continue
+        text = tok.text
+        # Space-separated form: token is exactly `<<` or `<<-`.
+        if text in ("<<", "<<-"):
             if i + 1 < len(argv):
                 # End-marker may be quoted in the source (`<< 'EOF'`) but
                 # shlex in posix mode strips quotes, so the token text is
                 # always the bare word.
                 return argv[i + 1].text
+        # Fused form: token starts with `<<` followed by the marker (with
+        # optional `-` prefix for tab-stripping heredocs: `<<-EOF`).
+        elif text.startswith("<<"):
+            remainder = text[2:]  # strip the `<<`
+            if remainder.startswith("-"):
+                remainder = remainder[1:]  # strip the optional `-`
+            if remainder:  # non-empty remainder is the end-marker word
+                return remainder
     return None
 
 
