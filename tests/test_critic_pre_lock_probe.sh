@@ -166,7 +166,7 @@ assert_present \
 
 assert_present \
   "critic prompt template negative-claim list present" \
-  '"X is fabricated"'
+  '  - "X is fabricated"'
 
 assert_present \
   "critic prompt template example probe present" \
