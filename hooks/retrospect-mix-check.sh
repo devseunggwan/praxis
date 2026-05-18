@@ -101,9 +101,11 @@ DIST_CARD=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk '
 GATE_1=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_1_verdict:/ {v=$2} END{print v}')
 GATE_2=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_2_verdict:/ {v=$2} END{print v}')
 GATE_3=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_3_verdict:/ {v=$2} END{print v}')
+GATE_4=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_4_verdict:/ {v=$2} END{print v}')
 [ -z "$GATE_1" ] && GATE_1="MISSING"
 [ -z "$GATE_2" ] && GATE_2="MISSING"
 # Gate-3 MISSING is not blocked (newly added enforcement; old cards legitimately omit this key).
+# Gate-4 MISSING is not blocked (old cards legitimately omit this key).
 
 # Independent table parse (defense-in-depth: don't trust the card alone).
 # Find the unified findings table header row and walk subsequent rows until a
@@ -244,6 +246,22 @@ if [ "$GATE_3" = "FAIL" ]; then
   should_block=true
   reason_parts+=("Gate-3 verdict in distribution card = FAIL")
 fi
+# Gate-4 (External-Repo Authorization): FAIL or missing + ⚠ EXTERNAL: prefix in Rationale → block.
+# PASS or WARN → pass (WARN means external=true but per-action approval is procedural at Stage 4).
+# NA → pass (no upstream_feedback findings).
+if [ "$GATE_4" = "FAIL" ]; then
+  should_block=true
+  reason_parts+=("Gate-4 verdict in distribution card = FAIL")
+fi
+# If gate_4_verdict is absent but the Rationale contains the ⚠ EXTERNAL: marker, block:
+# Stage 2.5 should have written gate_4_verdict: WARN for external findings; its absence
+# with an EXTERNAL marker indicates Stage 2.5 was skipped or incomplete.
+if [ -z "$GATE_4" ]; then
+  if printf '%s\n' "$MOST_RECENT_BLOCK" | grep -qF '⚠ EXTERNAL:'; then
+    should_block=true
+    reason_parts+=("gate_4_verdict key absent but ⚠ EXTERNAL: marker found in Rationale — Stage 2.5 Gate-4 may have been skipped")
+  fi
+fi
 if [ "$GATE_1" = "MISSING" ] || [ "$GATE_2" = "MISSING" ]; then
   should_block=true
   reason_parts+=("distribution card missing gate_1_verdict or gate_2_verdict key")
@@ -287,7 +305,7 @@ if [ "$should_block" = "true" ]; then
     fi
   done
 
-  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to Stage 2.5 and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to Stage 2 step 8 and add 'backing_repo: <owner/repo>' to Rationale cell. See skills/retrospect/SKILL.md."
+  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to Stage 2.5 and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to Stage 2 step 8 and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to Stage 2.5 Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card. See skills/retrospect/SKILL.md."
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'
   exit 0
 fi
