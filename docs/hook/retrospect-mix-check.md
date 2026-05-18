@@ -40,6 +40,8 @@ of the following hold:
 | `gate_1_verdict: FAIL` in the distribution card | Stage 2.5 Gate-1 (categorical) was violated |
 | `gate_2_verdict: FAIL` in the distribution card | Stage 2.5 Gate-2 (procedural rationale) was violated |
 | `gate_3_verdict: FAIL` in the distribution card | Stage 2.5 Gate-3 (evidence robustness) was violated — a 2-action compound finding lacked independent evidence per action, or had decision-coupled actions |
+| `gate_4_verdict: FAIL` in the distribution card | Stage 2.5 Gate-4 (external-repo authorization) emitted FAIL |
+| `gate_4_verdict` absent AND Rationale contains `⚠ EXTERNAL:` prefix | Gate-4 ran and marked findings external, but `gate_4_verdict` was not written to the distribution card — Stage 2.5 was partially skipped |
 | `gate_1_verdict` or `gate_2_verdict` key missing | Distribution card is malformed or Stage 2.5 was skipped |
 | Any row with `Category` ∈ {tool, workflow, spec-gap} AND `Proposed Actions = memory` (single) | Gate-1 violation detected via independent table parse |
 | Any row with `Proposed Actions = memory` (single) whose `Rationale` lacks exactly 5 lines `^not (issue\|claude_md_draft\|skill_idea\|hook_code\|upstream_feedback): .+$` | Gate-2 violation detected via independent table parse |
@@ -52,6 +54,8 @@ of the following hold:
 - `behavioral`-only findings with valid 5-line rationales — legitimately memory-only
 - Compound actions like `memory, skill_idea` — Gate-2 only checks single `memory`
 - Rows whose `Proposed Actions` contain neither `upstream_feedback` nor `issue` — Gate-3 does not apply
+- `gate_4_verdict: PASS` or `gate_4_verdict: WARN` in the distribution card — WARN means external findings exist but per-action approval is the enforcement at Stage 4 (not here)
+- `gate_4_verdict: NA` — no `upstream_feedback` findings exist; Gate-4 did not apply
 
 ### Trigger condition summary
 
@@ -106,7 +110,7 @@ git -C ~/.claude/plugins/.../praxis apply --reverse <patch>
 
 ### Tests
 
-`tests/test_retrospect_mix_check.sh` covers 31 cases plus 5 synthetic
+`tests/test_retrospect_mix_check.sh` covers 38 cases plus 8 synthetic
 regression fixtures:
 
 - 4 pass scenarios (behavior-only with rationale, escalated tool, escalated
@@ -126,6 +130,9 @@ regression fixtures:
   backing_repo needed → pass)
 - 2 Gate-3 verdict (T30 gate_3_verdict: FAIL in card → block, T31
   gate_3_verdict: PASS in card → pass)
+- 3 Gate-4 verdict (T36 gate_4_verdict: PASS → pass, T37 external marker +
+  absent gate_4_verdict → block, T38 gate_4_verdict: NA + no upstream_feedback
+  → pass)
 
 Fixtures live in `tests/fixtures/retrospect-synth-{tool,workflow,behavior,
 mixed,gate3-fail}.jsonl` with `.expected.json` sidecars (`{expected_decision,

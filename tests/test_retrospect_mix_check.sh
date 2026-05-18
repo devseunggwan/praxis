@@ -733,6 +733,68 @@ T35_ROW="| 1 | behavioral | — | misjudged action | structural | rule absent | 
 run_case "T35_block_schema_a_and_b_mixed" "block" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T35_CARD" "$T35_ROW")")"
 
+# Gate-4 (External-Repo Authorization) cases ----------------------------------
+
+# T36: pass — external=true + gate_4_verdict: PASS in card.
+# Scenario: all upstream_feedback rows are own-org; Gate-4 classified them as
+# internal and emitted PASS. Stop hook must pass.
+T36_CARD=$(cat <<EOF
+- memory: 0
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 1
+- gate_1_verdict: PASS
+- gate_2_verdict: NA
+- gate_3_verdict: NA
+- gate_4_verdict: PASS
+EOF
+)
+T36_ROW="| 1 | tool | cli | gh flag missing | tool defect | gap | No | upstream_feedback | tool defect confirmed<br>backing_repo: devseunggwan/praxis | HIGH |"
+run_case "T36_pass_gate4_verdict_pass" "pass" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T36_CARD" "$T36_ROW")")"
+
+# T37: block — external=true + gate_4_verdict absent but ⚠ EXTERNAL: prefix present.
+# Scenario: Stage 2.5 emitted the EXTERNAL marker in the Rationale cell but did
+# NOT emit gate_4_verdict in the distribution card (Stage 2.5 was partially skipped
+# or the card was hand-edited). Stop hook must block.
+T37_CARD=$(cat <<EOF
+- memory: 0
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 1
+- gate_1_verdict: PASS
+- gate_2_verdict: NA
+- gate_3_verdict: NA
+EOF
+)
+T37_ROW="| 1 | tool | cli | gh flag missing | tool defect | gap | No | upstream_feedback | ⚠ EXTERNAL: per-action approval required at Stage 4<br>tool defect in third-party CLI<br>backing_repo: third-party/tool | HIGH |"
+run_case "T37_block_external_marker_no_gate4_verdict" "block" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T37_CARD" "$T37_ROW")")"
+
+# T38: pass — external=false (no upstream_feedback) + gate_4_verdict: NA.
+# Scenario: session had no upstream_feedback findings; Gate-4 emitted NA.
+# Stop hook must pass.
+T38_CARD=$(cat <<EOF
+- memory: 1
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 0
+- gate_1_verdict: NA
+- gate_2_verdict: PASS
+- gate_3_verdict: NA
+- gate_4_verdict: NA
+EOF
+)
+T38_ROW="| 1 | behavioral | — | hasty conclusion | did not verify | rule absent | No | memory | ${RATIONALE_5LINE} | MED |"
+run_case "T38_pass_gate4_verdict_na_no_upstream_feedback" "pass" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T38_CARD" "$T38_ROW")")"
+
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
 #   {expected_decision: "pass"|"block", must_contain: [...], must_not_contain: [...]}

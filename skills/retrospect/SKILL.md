@@ -357,7 +357,7 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 - `gate_3_verdict: NA` — zero findings have `Proposed Actions` count = 2 (every finding is single-action)
 - `gate_4_verdict: NA` — zero `upstream_feedback` findings exist
 
-The Stop hook `retrospect-mix-check.sh` currently parses `gate_1_verdict` and `gate_2_verdict`; `gate_3_verdict` is emitted for visibility and audit-trail purposes (the hook silently ignores unknown keys). Gate-3 is enforced procedurally inside Stage 2.5; structural Stop-hook enforcement is reserved for a follow-up tightening if procedural compliance proves insufficient. `gate_4_verdict` is similarly informational — emitted for audit-trail purposes; the hook silently ignores it. Gate-4 enforcement is procedural inside Stage 4 Action 4 step 0a.
+The Stop hook `retrospect-mix-check.sh` parses `gate_1_verdict`, `gate_2_verdict`, and `gate_4_verdict`; `gate_3_verdict` is emitted for visibility and audit-trail purposes (the hook silently ignores unknown keys). Gate-3 is enforced procedurally inside Stage 2.5; structural Stop-hook enforcement is reserved for a follow-up tightening if procedural compliance proves insufficient. Gate-4 is enforced both procedurally (Stage 4 Action 4 step 0a per-action approval) and structurally by the Stop hook: a `gate_4_verdict: FAIL` in the card blocks Stage 3 output, and an absent `gate_4_verdict` combined with a `⚠ EXTERNAL:` Rationale prefix also blocks (indicating Stage 2.5 Gate-4 was partially skipped).
 
 This card and verdict block become Stage 3's input header.
 
@@ -373,7 +373,7 @@ Stage 3 output MUST emit, in this order:
    ```markdown
    <!-- AUTHORITATIVE_SCHEMA — Stop hook depends on this. Co-update hooks/retrospect-mix-check.sh + tests/test_retrospect_mix_check.sh + tests/fixtures/retrospect-synth-*.expected.json on any change to: (1) the fence markers themselves, (2) the action key set (memory/issue/claude_md_draft/skill_idea/hook_code/upstream_feedback), or (3) gate_1_verdict / gate_2_verdict keys.
         Gate-3 carve-out: gate_3_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract. The hook's awk parser keys on gate_1_verdict/gate_2_verdict literals only and silently ignores all other lines (regression-tested by tests T8–T17 + the 4 fixture files which still pass without gate_3_verdict). Adding/removing/renaming gate_3_verdict alone does NOT require hook or test changes.
-        Gate-4 carve-out: gate_4_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract (parallel to gate_3_verdict). The hook silently ignores gate_4_verdict. Adding/removing/renaming gate_4_verdict alone does NOT require hook or test changes. -->
+        Gate-4 enforcement note: gate_4_verdict IS structurally enforced by the Stop hook (unlike gate_3_verdict which remains informational-only). Changes to gate_4_verdict semantics or its FAIL/WARN/NA/PASS values REQUIRE synchronized edits to hooks/retrospect-mix-check.sh and tests/test_retrospect_mix_check.sh (T36/T37/T38). Adding/removing gate_4_verdict from the card alone does NOT require fence-marker or action-key changes. -->
    <!-- retrospect:distribution begin -->
    - memory: 1
    - issue: 0
