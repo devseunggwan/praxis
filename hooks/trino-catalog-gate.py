@@ -174,10 +174,8 @@ def strip_sql_comments(sql: str) -> str:
 _IDENT_SEG = r'(?:"[^"]+"|`[^`]+`|[A-Za-z_][\w$]*)'
 
 # 3-part reference: <catalog>.<schema>.<table>, optionally quoted.
-# Capturing variant used by CATALOG_REF_RE group(1).
+# Capturing variant — group(1) used by CATALOG_REF_RE and MERGE_INSERT_INTO_RE.
 _CATALOG_REF = rf"({_IDENT_SEG}\.{_IDENT_SEG}\.{_IDENT_SEG})"
-# Non-capturing variant used where the caller supplies its own outer group.
-_CATALOG_REF_NC = rf"(?:{_IDENT_SEG}\.{_IDENT_SEG}\.{_IDENT_SEG})"
 
 # Context gate: SQL keywords that can be followed by a 3-part catalog.schema.table
 # reference.
