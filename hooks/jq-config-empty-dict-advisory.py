@@ -132,20 +132,7 @@ _JQ_DOUBLE_VALUE_FLAGS: frozenset[str] = frozenset({
 # hard stop for file-path extraction.
 _JQ_STOP_FLAGS: frozenset[str] = frozenset({"--args", "--jsonargs"})
 
-# Regex to detect jq invocations inside coalesced $(…) substitution tokens.
-# Matches: jq <optional flags> <filter> <config-path>
-# Used for C1 (command substitution) detection.
-_JQ_SUBST_RE = re.compile(
-    r"""
-    (?:^|\s|=)              # start of string, whitespace, or assignment
-    \$\(                    # start of command substitution
-    [^)]*                   # any content
-    \bjq\b                  # the jq command
-    """,
-    re.VERBOSE,
-)
-
-# Simpler pattern to extract config paths from a raw coalesced SUBST_RUN token.
+# Pattern to extract config paths from a raw coalesced SUBST_RUN token.
 # Looks for any token matching the config path shape in the substitution body.
 _CONFIG_PATH_IN_TEXT_RE = re.compile(
     r"""
@@ -275,7 +262,6 @@ def _extract_config_paths_from_non_jq_segment(argv: list[str]) -> list[str]:
     paths: list[str] = []
     if not argv:
         return paths
-    cmd = argv[0]
     # Only correlate for known pipe-source commands or redirect-style patterns.
     # cat, head, tail, less, python3, etc. — any command may pipe to jq.
     # We conservatively detect config paths in any non-jq segment and let
@@ -399,7 +385,7 @@ def _collect_config_paths(command: str) -> list[str]:
     # Track config paths seen in the previous segment (for pipe correlation).
     prev_segment_config_paths: list[str] = []
 
-    for seg_idx, seg_raw in enumerate(segments):
+    for seg_raw in segments:
         seg = list(seg_raw)
 
         # --- C1: SUBST_RUN scan ---

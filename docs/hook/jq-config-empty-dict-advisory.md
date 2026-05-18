@@ -71,7 +71,9 @@ Not detected (by design):
 |---------|--------|
 | `jq '.' /tmp/other.json` | Non-config path, out of scope |
 | `jq -n '{}'` | Null input (`-n`), no file read |
-| Multi-hop pipe `cmd1 \| cmd2 \| jq`  | Only immediate prior segment correlated |
+| Multi-hop pipe `cmd1 \| cmd2 \| jq` | Only immediate prior segment correlated |
+| `` `jq -r '.foo' ~/.claude/settings.json` `` | Backtick substitution — `safe_tokenize` does not parse backtick blocks; follow-up #338 |
+| `$(jq -r .foo cfg.json && jq -r .bar cfg.json)` | Shell separator inside `$(…)` — `_coalesce_subst_runs` joins past `&&` boundary; follow-up #338 |
 
 ### Response format
 
