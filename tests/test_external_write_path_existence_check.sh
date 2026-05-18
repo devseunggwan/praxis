@@ -335,8 +335,11 @@ bin9_body_file=$(mktemp /tmp/test-phantom-bin9-XXXXXX)
 # with detection the file should be skipped silently.
 python3 -c "
 import sys
-# Embed a phantom-looking path string around NUL bytes
-content = b'hooks/pre-tool-use/phantom.sh\x00binary\x00data'
+# Embed a phantom path in an inline-code span around NUL bytes so that
+# _extract_candidate_paths() would find it if NUL-sniffing were absent.
+# Without NUL detection the backtick span would trigger a phantom advisory;
+# with detection the file is skipped before link extraction fires.
+content = b'\`hooks/pre-tool-use/phantom.sh\`\x00binary\x00data'
 sys.stdout.buffer.write(content)
 " > "$bin9_body_file"
 
