@@ -32,7 +32,7 @@ to avoid false positives on general retrospects or design docs that mention
 
 | Signal | Pattern | Example |
 |--------|---------|---------|
-| S1 — version pair | `v\d+\.\d+\s*(→\|->|to)\s*v\d+\.\d+` (case-insensitive; `v` prefix optional) | `v24.0 → v25.0`, `1.2 -> 1.3`, `v0.9 to v1.0` |
+| S1 — version pair | version pair around an arrow (`→`, `->`, `-->`, …) or `to`; **at least one side** must carry a `v`/`V` prefix; whitespace around the arrow is optional | `v24.0 → v25.0`, `v1.2-->v1.3`, `v0.9 to v1.0`, `24.0 -> v25.0` |
 | S2 — bump phrase | `bump (sdk\|api\|client\|lib\|library\|version) from ... to ...` (case-insensitive) | `Bump SDK from 3.0 to 4.0` |
 | S3 — deprecation keyword **+ S1** | any of: `deprecated`, `deprecation`, `sunset`, `eol`, `end of life`, `breaking change`, `breaking-change` **combined with** a version pair | `v1.0 -> v2.0 breaking change` |
 
@@ -85,13 +85,15 @@ wrapper commands (`sudo`, `env`), and multi-command Bash strings.
 bash tests/test_version_bump_evidence_check.sh
 ```
 
-31 cases covering:
+35 cases covering:
 
 | Case | Expected |
 |------|----------|
 | Version pair `→` / `->` / `to` | Warn |
-| No-`v` prefix numeric pair | Warn |
+| Version pair `-->` / `->` with no surrounding whitespace (M1) | Warn |
+| `v`/`V` prefix on right side only | Warn |
 | Uppercase `V` prefix pair | Warn |
+| Language-runtime mention (`Python 3.11 to 3.12`, no `v` prefix) (M2) | Pass — false-positive control |
 | `bump sdk/api/client from ... to ...` phrase | Warn |
 | Deprecation keyword + version pair | Warn |
 | Deprecation keyword **alone** (no pair) | Pass — false-positive control |

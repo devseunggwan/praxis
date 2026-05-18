@@ -38,7 +38,8 @@ print(json.dumps({
     "tool_input": {"command": sys.argv[1]},
 }))' "$command" 2>/dev/null)
   err_file=$(mktemp)
-  echo "$payload" | unset PRAXIS_VERSION_BUMP_STRICT PRAXIS_VERSION_BUMP_BYPASS; echo "$payload" | "$HOOK" >/dev/null 2>"$err_file"
+  unset PRAXIS_VERSION_BUMP_STRICT PRAXIS_VERSION_BUMP_BYPASS
+  echo "$payload" | "$HOOK" >/dev/null 2>"$err_file"
   rc=$?
   local err_content
   err_content=$(cat "$err_file"); rm -f "$err_file"
@@ -131,7 +132,8 @@ print(json.dumps({
     "tool_input": {"command": f"gh issue create --title \"bump\" --body-file {sys.argv[1]}"},
 }))' "$tmp_file" 2>/dev/null)
   err_file=$(mktemp)
-  echo "$payload" | unset PRAXIS_VERSION_BUMP_STRICT PRAXIS_VERSION_BUMP_BYPASS; echo "$payload" | "$HOOK" >/dev/null 2>"$err_file"
+  unset PRAXIS_VERSION_BUMP_STRICT PRAXIS_VERSION_BUMP_BYPASS
+  echo "$payload" | "$HOOK" >/dev/null 2>"$err_file"
   rc=$?
   local err_content
   err_content=$(cat "$err_file"); rm -f "$err_file"
@@ -165,11 +167,26 @@ run_case "version pair dash-arrow → triggers" warn \
 run_case "version pair to-word → triggers" warn \
   'gh issue create --body "upgrading v0.9 to v1.0"'
 
-run_case "version pair no v-prefix → triggers" warn \
-  'gh issue create --body "bumping 24.0 -> 25.0"'
+run_case "version pair v-prefix on right only → triggers" warn \
+  'gh issue create --body "bumping 24.0 -> v25.0"'
 
 run_case "version pair uppercase V → triggers" warn \
   'gh pr create --body "V1.2 → V1.3"'
+
+# Round-2 critic M1: agent-authored bodies often omit whitespace around `-->`.
+run_case "version pair no-space double-dash → triggers (M1)" warn \
+  'gh pr create --body "upgrading v1.2-->v1.3 today"'
+
+run_case "version pair no-space single-dash → triggers (M1)" warn \
+  'gh pr create --body "v1.2->v1.3 cleanup"'
+
+# Round-2 critic M2: language-runtime mentions without `v`/`V` prefix should
+# NOT trigger — these are common in retrospect bodies (e.g. "Python 3.11 to 3.12").
+run_case "language runtime no v-prefix → silent (M2)" pass \
+  'gh issue create --body "Retrospect: we migrated Python 3.11 to 3.12 last quarter"'
+
+run_case "java runtime no v-prefix → silent (M2)" pass \
+  'gh pr create --body "We are running Java 11 to 17 across all clusters"'
 
 # S2: bump-phrase
 run_case "bump sdk from ... to → triggers" warn \

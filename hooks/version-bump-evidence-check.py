@@ -74,11 +74,25 @@ _GH_BODY_FLAGS = frozenset({"-b", "--body", "-F", "--body-file"})
 # ---------------------------------------------------------------------------
 
 # S1: explicit version-pair with arrow / "to".
-# Matches: v24.0 → v25.0 / v1.2 -> v1.3 / v1.2 to v1.3
-# Also catches bare numeric pairs like 24.0 -> 25.0 (no "v" prefix).
+# Matches: v24.0 → v25.0 / v1.2 -> v1.3 / v1.2-->v1.3 / v1.2 to v1.3
 # Case-insensitive so "V1.2 → V1.3" matches too.
+#
+# Round-2 critic M1: arrow alternation accepts repeated dashes (`-+>`) so
+# agent-authored bodies like `v1.2-->v1.3` without surrounding whitespace
+# are caught.
+#
+# Round-2 critic M2: requires `v`/`V` prefix on at least one side to cut
+# language-runtime false positives (`Python 3.11 to 3.12`, `Java 11 to 17`
+# would otherwise trip strict-mode blocks on legit retrospect bodies).
+# Library / SDK bumps in PR bodies near-universally carry the `v` prefix.
 _VERSION_PAIR_RE = re.compile(
-    r"[Vv]?\d+\.\d+\s*(?:→|->|to)\s*[Vv]?\d+\.\d+",
+    r"(?:"
+    # left side has v/V prefix; right side optional
+    r"[Vv]\d+\.\d+\s*(?:→|-+>|to)\s*[Vv]?\d+\.\d+"
+    r"|"
+    # right side has v/V prefix; left side bare (numeric only)
+    r"\d+\.\d+\s*(?:→|-+>|to)\s*[Vv]\d+\.\d+"
+    r")",
     re.IGNORECASE,
 )
 
@@ -231,14 +245,15 @@ def _detect_bump_signal(body: str) -> tuple[bool, str]:
     """Return (triggered, description) where description names the matched signal.
 
     Rules:
-      - S1 alone → triggered
-      - S2 alone → triggered
-      - S3 + version pair (S1) → triggered (combined signal)
-      - S3 alone → NOT triggered (false-positive control)
+      - S1 alone (version pair)               → triggered
+      - S2 alone (bump phrase)                → triggered
+      - S1 + S2 combined                       → triggered
+      - S3 alone (deprecation keyword only)    → NOT triggered (false-positive control)
+      - S3 + S1 is implicitly covered by the S1 branch — the deprecation
+        keyword adds no signal beyond the version pair itself.
     """
     version_pair = _has_version_pair(body)
     bump_phrase = _has_bump_phrase(body)
-    has_deprecation = _has_deprecation_keyword(body)
 
     if version_pair and bump_phrase:
         return True, f"version pair ({version_pair.strip()}) + bump phrase"
@@ -246,11 +261,6 @@ def _detect_bump_signal(body: str) -> tuple[bool, str]:
         return True, f"version pair ({version_pair.strip()})"
     if bump_phrase:
         return True, f"bump phrase ({bump_phrase.strip()})"
-    if has_deprecation and version_pair is not None:
-        # already handled above, but guard just in case
-        return True, "deprecation keyword + version pair"
-    # S3 + version pair: only if version pair found (checked again for clarity)
-    # When we reach here, version_pair is None, so S3+S1 is not satisfied.
     return False, ""
 
 
