@@ -172,6 +172,12 @@ run_case "pushd existing path is silent" \
   "silent" \
   "pushd $NON_WT_DIR && ls"
 
+# pushd cwd does not leak past popd: `pushd /tmp; popd; cd $ROOT_DIR` must
+# NOT emit a false advisory (docs is under ROOT_DIR, not /tmp).
+run_case "pushd cwd does not leak past popd into subsequent cd" \
+  "silent" \
+  "pushd $NON_WT_DIR; popd; cd $ROOT_DIR"
+
 # subshell (cd ...) to existing path is silent.
 run_case "subshell cd existing path is silent" \
   "silent" \

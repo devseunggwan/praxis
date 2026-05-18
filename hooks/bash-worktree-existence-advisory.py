@@ -105,11 +105,17 @@ def _normalize_path(path: str) -> str:
 
 
 def _extract_cd_target(seg: list[Token]) -> tuple[str | None, bool]:
-    """Return (path, is_subshell) for a `cd`/`pushd` segment, else (None, False).
+    """Return (path, skip_cwd_update) for a `cd`/`pushd` segment, else (None, False).
 
-    `is_subshell` is True when the cd/pushd is inside a subshell group
-    `(cd <path> && ...)` — callers must NOT update effective_cwd in that case
-    because subshell directory changes do not persist after `)` in Bash.
+    `skip_cwd_update` is True when the effective_cwd must NOT be updated after
+    this command:
+      - Subshell forms `(cd /path ...)` and `( cd /path ... )`: directory
+        changes inside a subshell do not persist after `)` in Bash.
+      - `pushd`: pushd manipulates a directory stack; a subsequent `popd` would
+        restore the previous directory. The hook has no stack model, so updating
+        effective_cwd on pushd would cause false positives for relative paths
+        following a `popd`. The conservative choice is to not update effective_cwd
+        for pushd at all (advisory for the missing-path case still fires).
 
     Two subshell forms are handled:
       - Compact: `(cd /path && ...)` — tokenize_with_roles fuses `(cd` into a
@@ -153,6 +159,11 @@ def _extract_cd_target(seg: list[Token]) -> tuple[str | None, bool]:
         cmd = cmd[1:]
     if cmd not in ("cd", "pushd"):
         return None, False
+    # pushd manipulates a directory stack; popd would restore the previous dir.
+    # Without a stack model, updating effective_cwd on pushd causes false
+    # positives for relative paths following a popd. Mark as skip_cwd_update.
+    if cmd == "pushd":
+        is_subshell = True  # reuse flag: skip_cwd_update
     for tok in argv[1:]:
         if tok.role in (TokenRole.FLAG, TokenRole.FLAG_VALUE, TokenRole.SEPARATOR_DD):
             continue
@@ -339,9 +350,9 @@ def _main_inner() -> int:
             if session_id:
                 _record_dedupe(session_id, real_target, "missing")
         else:
-            # Path exists. For a subshell cd `(cd /path && ...)`, the
-            # directory change does not persist after `)` in Bash — do NOT
-            # update effective_cwd. Only update for a real parent-shell cd.
+            # Path exists. skip_cwd_update (reused as is_subshell flag) is True
+            # for subshell forms and pushd — neither reliably persists the cwd
+            # change for subsequent segments. Only a bare `cd` updates it.
             if not is_subshell:
                 effective_cwd = abs_target
             if session_id:
