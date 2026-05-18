@@ -24,6 +24,8 @@ Silent cases (no output emitted):
   - `pushd <path>` where path exists on disk
   - `(cd <path> && ...)` where path exists on disk (compact subshell form)
   - `( cd <path> && ... )` where path exists on disk (spaced subshell form)
+  - `pushd +N` or `pushd -N` — directory-stack rotation, not a path
+  - `cd /path` inside a `cat<<EOF` heredoc body (command-attached fused opener)
   - bare `cd` (no argument — cd to $HOME)
   - `cd $VAR` or `cd $(...)` — variable/substitution expansion, unresolvable
   - `cd -` — previous dir, unresolvable
@@ -71,6 +73,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -168,10 +171,18 @@ def _extract_cd_target(seg: list[Token]) -> tuple[str | None, bool]:
         if tok.role in (TokenRole.FLAG, TokenRole.FLAG_VALUE, TokenRole.SEPARATOR_DD):
             continue
         target = tok.text
+        # Strip trailing `)` fused by shlex when the subshell closing paren is
+        # the last character of the command: `(cd /path && cd sub)` → the
+        # last token is `sub)`.  Strip one trailing `)` only (not multiple).
+        if target.endswith(")"):
+            target = target[:-1]
         if not target:
             return None, False
         # Unresolvable cases — silent skip.
         if target == "-":
+            return None, False
+        # pushd +N / pushd -N: directory-stack rotation, not a path.
+        if re.fullmatch(r"[+-]\d+", target):
             return None, False
         if target.startswith("$"):
             return None, False
@@ -228,29 +239,38 @@ def _delete_dedupe(session_id: str, path: str, state: str) -> None:
 def _extract_heredoc_end_marker(seg: list[Token]) -> str | None:
     """Return the heredoc end-marker word if this segment opens a heredoc.
 
-    Two tokenization forms are handled (both as POSITIONAL tokens because
-    shlex with punctuation_chars=';|&' does not treat `<` as punctuation):
+    Three tokenization forms are handled:
 
     Space-separated form: `cat << EOF` — tokenizes as ['cat', '<<', 'EOF'].
       Detection: find a POSITIONAL token that is exactly `<<` or `<<-` and
       return the next token as the end-marker word.
 
-    Fused form: `cat <<EOF`, `cat <<'EOF'`, `cat <<"EOF"`, `cat <<-EOF` —
-      shlex with posix=True collapses these into a single POSITIONAL token
-      (`<<EOF` or `<<-EOF`) because there is no whitespace between `<<` and
-      the marker. shlex also strips quotes in posix mode, so `<<'EOF'` and
-      `<<"EOF"` both produce the token `<<EOF`.
-      Detection: a POSITIONAL token starting with `<<` where the remainder
-      (after stripping an optional leading `-`) is non-empty is the fused
-      form; the remainder is the bare end-marker word.
+    Fused redirect (POSITIONAL): `cat <<EOF`, `cat <<'EOF'`, `cat <<"EOF"`,
+      `cat <<-EOF` — shlex collapses these into a single POSITIONAL token
+      (`<<EOF` or `<<-EOF`). shlex strips quotes so `<<'EOF'` and `<<"EOF"`
+      both produce `<<EOF`. Detection: POSITIONAL starting with `<<` where
+      the remainder (after stripping an optional `-`) is non-empty.
 
-    Returns None when no heredoc opener (space-separated or fused) is present.
+    Command-attached fused form: `cat<<EOF` (no space between command and
+      redirect) — shlex emits the entire `cat<<EOF` as a single COMMAND token.
+      Detection: the COMMAND token contains `<<`; extract the heredoc marker
+      from the substring after `<<` (strip optional leading `-`).
+
+    Returns None when no heredoc opener is present.
     """
     argv = filter_argv(seg)
     for i, tok in enumerate(argv):
+        text = tok.text
+        # Command-attached fused: `cat<<EOF` emitted as a single COMMAND token.
+        if tok.role == TokenRole.COMMAND and "<<" in text:
+            after = text[text.index("<<") + 2:]  # everything after <<
+            if after.startswith("-"):
+                after = after[1:]
+            if after:
+                return after
+            continue
         if tok.role != TokenRole.POSITIONAL:
             continue
-        text = tok.text
         # Space-separated form: token is exactly `<<` or `<<-`.
         if text in ("<<", "<<-"):
             if i + 1 < len(argv):

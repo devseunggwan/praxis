@@ -210,6 +210,30 @@ run_case "spaced subshell cwd does not leak into subsequent relative cd" \
   "( cd $NON_WT_DIR && pwd ); cd $ROOT_DIR"
 
 # ---------------------------------------------------------------------------
+# === Codex R3 fixes: trailing-) strip, command-attached heredoc, pushd +N ===
+# ---------------------------------------------------------------------------
+
+# R3 P2-1: trailing `)` fused into last token of compact subshell — existing
+# path inside the subshell must NOT produce a false advisory.
+run_case "compact subshell trailing-paren does not cause false advisory" \
+  "silent" \
+  "(cd $NON_WT_DIR && cd $ROOT_DIR)"
+
+# R3 P2-2: `cat<<EOF` (command-attached, no space) — body cd must be silent.
+run_case "command-attached fused heredoc body cd is silent (cat<<EOF)" \
+  "silent" \
+  "$(printf 'cat<<EOF\ncd /this/does/not/exist/anywhere\nEOF')"
+
+# R3 P3: pushd +N / pushd -N are directory-stack rotations, not paths.
+run_case "pushd +N stack rotation is silent" \
+  "silent" \
+  "pushd +1"
+
+run_case "pushd -N stack rotation is silent" \
+  "silent" \
+  "pushd -0"
+
+# ---------------------------------------------------------------------------
 # === M2 fix: heredoc body containing cd is skipped (no false-positive) ===
 # ---------------------------------------------------------------------------
 
