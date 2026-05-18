@@ -243,6 +243,9 @@ The execution order each round is:
    identified a sibling.
 7. **5e commit-message trailer** — `Premise-Verified:` trailer on the
    committed edit.
+8. **5g critic pre-lock probe check** — before any critic finding that
+   contains a negative claim is surfaced to the user, verify the claim
+   with a live probe and cite it inline.
 
 #### 5a. Classify each finding
 
@@ -404,6 +407,144 @@ When `result=same defect`:
 Do NOT apply any sibling edit without explicit per-PR user approval. Approval for
 the current PR does not transfer to the sibling PR.
 
+#### 5g. Critic pre-lock probe check
+
+Before a critic finding that contains any of the negative-claim forms below
+is surfaced to the user, the critic **must** run an independent live probe
+at the assertion site and include the result in the same message body.
+
+##### Negative-claim trigger forms
+
+The gate fires when the critic's output (or any finding it forwards)
+contains one of the following patterns — in English or Korean:
+
+| English form | Korean form |
+|---|---|
+| "X is fabricated" | "X 는 fabricated" |
+| "X does not exist" | "X 는 존재하지 않음" / "X 는 없음" |
+| "X is unused" | "X 는 사용되지 않음" |
+| "X has no runtime effect" | "X 는 runtime effect 가 없음" |
+| "X is missing from {file/scope}" | "X 는 {file/scope} 에 없음" |
+
+The list is illustrative, not exhaustive. Any claim whose logical content
+is "X does not exist in the codebase / in this file / in this scope" falls
+within the gate — regardless of exact phrasing.
+
+##### Mandatory probe citation format
+
+Every negative claim that falls within the gate must include, in the same
+message body at the assertion site:
+
+```
+Probe: <command> → <one-line output>
+```
+
+Examples:
+
+```
+Probe: grep -n PRAXIS_ASK_END_STRICT hooks/block-ask-end-option.py → line 397: "PRAXIS_ASK_END_STRICT" found
+Probe: grep -rn "col_b" schemas/my_table.sql → (no output — col_b absent)
+Probe: grep -n "def run_query" src/client.py → (no output — symbol not defined)
+```
+
+The probe command must be the **actual command**, not a description of
+what was done. "I already read this file earlier in the session" is **not**
+a valid substitute — re-run at the negative-claim emit site.
+
+##### Absence-of-evidence vs evidence-of-absence
+
+When the probe returns non-empty output that contradicts the negative claim,
+the critic must **retract** the claim before surfacing the finding:
+
+```
+Retracted: original claim "PRAXIS_ASK_END_STRICT is fabricated"
+Probe: grep -n PRAXIS_ASK_END_STRICT hooks/block-ask-end-option.py →
+  28: if os.environ.get("PRAXIS_ASK_END_STRICT")
+  397: PRAXIS_ASK_END_STRICT is checked here
+Finding: PRAXIS_ASK_END_STRICT exists — claim withdrawn.
+```
+
+When the probe returns empty output (absence confirmed), cite the empty
+result explicitly so readers can distinguish verified absence from unchecked:
+
+```
+Probe: grep -rn "col_b" schemas/ → (no output — col_b absent in schemas/)
+```
+
+##### Worked examples
+
+**F1 — git boolean-flag fix (PR #344 round-2, author failure caught by round-3 critic)**
+
+Critic finding that needed a probe before surfacing:
+> "`--literal-pathspecs` and `--super-prefix` are boolean flags and cannot
+> take a value argument."
+
+Required probe citation:
+```
+Probe: man git | grep -A2 '\-\-literal-pathspecs' → --literal-pathspecs: Treat pathspecs literally. [no value argument]
+Probe: man git | grep -A2 '\-\-super-prefix' → --super-prefix=<path>: [takes a value — NOT a boolean flag]
+```
+
+The second probe disproves the grouped claim for `--super-prefix`. Without
+these probes, the critic's "both are boolean" claim would have been surfaced
+unchecked and the force-push bug would not have been caught in round 3.
+
+**F2 — `PRAXIS_ASK_END_STRICT` fabrication claim (PR #341 round-1, critic failure)**
+
+Critic finding that was surfaced without a probe:
+> "`PRAXIS_ASK_END_STRICT` is a fabricated precedent — it does not exist
+> in hooks/*.py."
+
+Required probe citation (missing in round-1):
+```
+Probe: grep -n PRAXIS_ASK_END_STRICT hooks/block-ask-end-option.py → 397: PRAXIS_ASK_END_STRICT
+```
+
+The probe would have immediately falsified the claim (the variable appears
+at line 397 and 5 other lines). Because the probe was skipped, the round-2
+fix agent had to discover and correct the critic's error inline — a
+preventable extra round-trip.
+
+##### Critic prompt template requirement
+
+When codex-companion or the review model emits critic output, the system
+prompt or review-invocation context **must** include the following
+requirement block so the gate is enforced at generation time, not only
+at post-processing time:
+
+---
+
+```
+CRITIC PRE-LOCK PROBE GATE (mandatory)
+
+Before surfacing any of the following negative claim forms, run an
+independent live probe at the assertion site and include the result
+inline in the same message:
+
+  - "X is fabricated"
+  - "X does not exist" / "X 는 없음" / "X 는 존재하지 않음"
+  - "X is unused" / "X 는 사용되지 않음"
+  - "X has no runtime effect" / "X 는 runtime effect 가 없음"
+  - "X is missing from {file/scope}" / "X 는 {file/scope} 에 없음"
+
+Required inline citation format:
+  Probe: <command> → <one-line output>
+
+Example:
+  Probe: grep -n PRAXIS_ASK_END_STRICT hooks/block-ask-end-option.py → line 397 found
+
+"I already read this file earlier" is NOT a valid substitute — re-run
+the probe at the negative-claim emit point. If the probe disproves the
+claim, retract the claim before surfacing the finding.
+```
+
+---
+
+The template block above must appear verbatim (or equivalent) in any
+context string passed to codex-companion's review invocation. When
+`oh-my-claudecode:code-reviewer` is used as the Step 4a fallback, surface
+this requirement block as the first item in the reviewer's context.
+
 #### 5e. Record verification in the commit message
 
 When committing a fact-modifying edit, include the verification result
@@ -531,6 +672,8 @@ applies (emit only at `cumulative = N+1`, not again on later rounds).
 | Sibling auto-detected but user confirms "not a port" | Skip 5d entirely; no ledger entry needed |
 | `PRAXIS_DIMINISHING_RETURNS_N` is set but not a positive integer | Use default (4); do not error |
 | Region label cannot be determined (binary file, empty file) | Use the file path alone as the region label |
+| Critic negative claim emitted without `Probe:` citation (5g) | Halt the finding; prompt the critic to re-run with probe citation before surfacing |
+| Probe command for 5g exits non-zero / returns unexpected output | Surface probe failure to the user; do not auto-retract the claim — let the user decide |
 
 ## Example Flow
 
@@ -604,6 +747,31 @@ user selects: 1
     to re-enumerate cases up-front before continuing.
   Round 6+: counter still increments, advisory NOT re-emitted
     ledger: rounds_per_region: cli.sh:parse_prompt | round=6 | cumulative=6
+
+[Step 5g — critic pre-lock probe check, F2 scenario]
+  Critic finding (round-1): "PRAXIS_ASK_END_STRICT is a fabricated precedent —
+    it does not exist in hooks/*.py"
+  → gate fires: negative-claim form "does not exist" detected
+  → critic required to run probe before surfacing:
+    Probe: grep -n PRAXIS_ASK_END_STRICT hooks/block-ask-end-option.py →
+      28: if os.environ.get("PRAXIS_ASK_END_STRICT")
+      397: PRAXIS_ASK_END_STRICT checked
+  → probe disproves claim → critic must retract:
+    Retracted: "PRAXIS_ASK_END_STRICT is fabricated"
+    Probe: grep -n PRAXIS_ASK_END_STRICT hooks/block-ask-end-option.py →
+      line 28, 30, 31, 363, 396, 397 found
+    Finding: variable exists — claim withdrawn.
+
+[Step 5g — critic pre-lock probe check, F1 scenario]
+  Critic finding (round-3): "both --literal-pathspecs and --super-prefix are
+    boolean flags and cannot take a value argument"
+  → gate fires: negative-claim form "cannot take a value" (has no runtime effect variant)
+  → critic required to run probe per flag before surfacing:
+    Probe: man git | grep -A2 '\-\-literal-pathspecs' → [no value argument — boolean confirmed]
+    Probe: man git | grep -A2 '\-\-super-prefix' → --super-prefix=<path> [takes a value — NOT boolean]
+  → second probe partially disproves the grouped claim
+  → critic surfaces retracted + refined finding:
+    "--literal-pathspecs is boolean (confirmed). --super-prefix takes a value (claim retracted for this flag)."
 ```
 
 ## Limitations
@@ -617,3 +785,5 @@ user selects: 1
 - The rounds-per-region counter (5f) is per-session only — counts do not carry across session boundaries
 - Region label extraction (5f) is heuristic: the nearest enclosing heading / symbol is determined from the finding context Codex provides; findings with no file attribution use the file path alone
 - The advisory threshold `PRAXIS_DIMINISHING_RETURNS_N` applies uniformly across all regions; per-region tuning is not supported
+- Step 5g negative-claim detection is pattern-based; highly paraphrased negative claims that do not match the trigger forms may slip through — when in doubt, treat a claim as negative and require a probe
+- The critic prompt template (5g) is injected into codex-companion's context at invocation time; when using the `oh-my-claudecode:code-reviewer` fallback (Step 4a), the template must be manually prepended to the reviewer's context
