@@ -118,12 +118,15 @@ _JQ_SINGLE_VALUE_FLAGS: frozenset[str] = frozenset({
     "--indent",             # indentation spaces
 })
 
-# Two-token consuming flags (name value, two following tokens)
+# Two-token consuming flags: each consumes TWO separate following tokens.
+# Parsing: when bare (no `=`), the scanner increments `i` by 3 total —
+# 1 for the flag itself plus 2 for (name, value). These are the only jq
+# flags with a two-token (name + value/file) operand shape.
 _JQ_DOUBLE_VALUE_FLAGS: frozenset[str] = frozenset({
-    "--arg",        # name value  → $name = string
-    "--argjson",    # name value  → $name = JSON
-    "--slurpfile",  # name file
-    "--rawfile",    # name file
+    "--arg",        # --arg name value  → $name = string
+    "--argjson",    # --argjson name value  → $name = JSON-decoded value
+    "--slurpfile",  # --slurpfile name file  → $name = parsed JSON array of file
+    "--rawfile",    # --rawfile name file  → $name = raw string contents of file
 })
 
 # Boolean flags that terminate further file argument scanning.
@@ -191,8 +194,19 @@ def _extract_jq_config_paths(argv: list[str]) -> list[str]:
     argv must already be stripped of env/wrapper prefixes (argv[0] == 'jq').
     Returns an empty list if this is not a jq invocation or no config
     paths are found.
+
+    Multi-file support: jq accepts multiple FILE arguments after the filter
+    expression (`jq '.' a.json b.json`). All positional tokens after the
+    first (the filter) are treated as input files and each is checked
+    independently — every config-matching path in the list is returned.
     """
     if not argv or argv[0] != "jq":
+        return []
+
+    # jq -n (null-input mode) reads no files by design — short-circuit early
+    # so the path-scanning loop is skipped entirely rather than relying on the
+    # loop producing no results by accident.
+    if "-n" in argv or "--null-input" in argv:
         return []
 
     paths: list[str] = []
@@ -334,10 +348,23 @@ def _check_file(path: str) -> Optional[str]:
     """Return an advisory message if path is empty or invalid JSON, else None.
 
     Returns None (skip) when the file does not exist.
+
+    Broken-symlink detection: `os.path.exists()` returns False for broken
+    symlinks (dangling links where the target is missing), so they would be
+    silently skipped as "not found". We use `os.path.lexists()` — which
+    returns True for any existing path entry including dangling symlinks — to
+    distinguish and emit a distinct advisory instead of treating them as
+    missing files.
     """
     expanded = os.path.expanduser(path)
     if not os.path.exists(expanded):
-        return None  # out of scope
+        # Distinguish broken symlink from genuinely missing file.
+        if os.path.lexists(expanded):
+            return (
+                f"[config-broken-symlink] {path} is a broken symlink — "
+                "jq will fail; the symlink target does not exist"
+            )
+        return None  # genuinely absent — out of scope
     if os.path.getsize(expanded) == 0:
         return (
             f"[config-empty] {path} is empty — "
