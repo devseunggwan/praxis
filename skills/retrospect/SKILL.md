@@ -82,7 +82,7 @@ You MUST complete each stage before proceeding to the next.
 - **successful_patterns**: up to 3 patterns that worked well this session. Each entry MUST include:
   - `pattern`: one line (e.g., "deep-dive 3-lane trace identified cross-lane contradiction via direct grep")
   - `evidence`: specific turn or artifact citation (mandatory — abstract reinforcement like "was helpful" or "responded fast" is FORBIDDEN)
-  - `reinforce_action`: `memory` (capture as feedback entry) or `visualize_only` (display in Stage 3 report, no persistent action)
+  - `reinforce_action`: `memory` (capture as MEMORY.md entry; counted in Stage 2.5 distribution card `memory` total — see Stage 4 Action 1 for the origin-prefix convention) or `visualize_only` (display in Stage 3 Reinforced Patterns section, no persistent action)
 
 **Pre-scan Categorization (Mandatory)** — every friction event identified in pre-scan MUST be tagged with `category[]: string[]` containing ≥1 of these enumerated values. Stage 2 progression to step 3 is BLOCKED until every event has at least one category label.
 
@@ -349,6 +349,8 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 <!-- retrospect:distribution end -->
 ```
 
+`memory` count = (friction-event findings with Proposed Actions = `memory`, single or compound) + (successful_patterns where `reinforce_action = memory`). Stage 4 Action 1 reads the same total but routes per-entry by origin tag.
+
 `NA` = no findings of the relevant type. Per-gate `NA` semantics:
 - `gate_1_verdict: NA` — zero `tool`/`workflow`/`spec-gap` labeled findings exist
 - `gate_2_verdict: NA` — zero memory-only findings exist
@@ -443,7 +445,7 @@ No patterns found: emit the distribution card with all counts = 0 and verdicts =
 
 ### Reinforced Patterns (this session)
 
-(Emitted only when pre-scan found ≥1 successful_patterns. Omit this section entirely if none — do not emit "None.")
+(Emitted only when pre-scan found ≥1 successful_patterns with `reinforce_action: visualize_only`. Omit this section entirely if none — do not emit "None." Rows with `reinforce_action: memory` are NOT listed here — they appear in Stage 4 Actions Executed report alongside friction-origin memory entries, distinguishable by the `Reinforced — ` description prefix.)
 
 - {pattern_1} (evidence: {turn or artifact})
 - {pattern_2} ...
@@ -584,10 +586,21 @@ Do NOT execute any action until user approves.
 
 For each approved action:
 
-1. **MEMORY.md feedback** → Write to `$CLAUDE_CONFIG_DIR/projects/.../memory/` with proper frontmatter
+1. **MEMORY.md feedback** → Write to `$CLAUDE_CONFIG_DIR/projects/.../memory/` with proper frontmatter. This action processes two input streams:
+
+   **Friction-event origin** (existing behavior): finding row with `memory` in Proposed Actions. Write MEMORY.md entry per existing convention (Type: `feedback`, include: rule, why, how to apply). Description uses the standard feedback format.
+
+   **Success-pattern origin** (new): `successful_patterns` row where `reinforce_action: memory`. Write MEMORY.md entry with:
    - Type: `feedback`
-   - Include: rule, why, how to apply
-   - Update `MEMORY.md` index
+   - Description MUST start with `Reinforced — <pattern>` (the `Reinforced — ` prefix distinguishes positive reinforcement entries from friction entries in future retrospect scans)
+   - Evidence: from the `successful_patterns.evidence` field
+   - How to apply: describe how to intentionally replicate the successful pattern
+
+   Per-entry workflow:
+   1. For each finding with `memory` action → write MEMORY.md entry per existing convention.
+   2. For each `successful_patterns` row with `reinforce_action: memory` → write MEMORY.md entry with description starting `Reinforced — <pattern>`, evidence link from the `successful_patterns.evidence` field.
+
+   - Update `MEMORY.md` index (for both origins)
 
    **⚠️ MANDATORY: Duplicate check before creating any memory file:**
 
