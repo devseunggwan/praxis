@@ -444,6 +444,297 @@ run_case \
   "$(make_trino_payload "SELECT * FROM iceberg.foo.bar -- 'catalog-enumerated: verified'")"
 
 # ---------------------------------------------------------------------------
+# Item 1: PostToolUse — SHOW CATALOGS 실패 시 마커 삭제
+# ---------------------------------------------------------------------------
+echo ""
+echo "Item 1: PostToolUse isError → marker deleted after failed SHOW CATALOGS"
+
+# 헬퍼: PostToolUse 페이로드 생성 (run_post 경로)
+make_post_payload_show_catalogs_error() {
+  python3 -c "
+import json, sys
+payload = {
+    'session_id': 'test-session-336-post',
+    'tool_name': 'mcp__laplace-trino__trino_query',
+    'tool_input': {'query': 'SHOW CATALOGS'},
+    'tool_response': {'isError': True, 'content': [{'text': 'Connection refused'}]},
+    'cwd': '/tmp',
+}
+print(json.dumps(payload))
+"
+}
+
+make_post_payload_show_catalogs_ok() {
+  python3 -c "
+import json, sys
+payload = {
+    'session_id': 'test-session-336-post',
+    'tool_name': 'mcp__laplace-trino__trino_query',
+    'tool_input': {'query': 'SHOW CATALOGS'},
+    'tool_response': {'isError': False, 'content': [{'text': 'catalog1\ncatalog2'}]},
+    'cwd': '/tmp',
+}
+print(json.dumps(payload))
+"
+}
+
+# 케이스: PreToolUse가 마커를 만든 뒤 PostToolUse(error)가 삭제 → 다음 3-part 쿼리 deny
+_item1_marker=$(new_marker_file)
+rm -f "$_item1_marker"
+# Step 1: PreToolUse SHOW CATALOGS → 마커 생성
+make_trino_payload 'SHOW CATALOGS' | env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
+  PRAXIS_TRINO_CATALOG_GATE_FILE="$_item1_marker" \
+  python3 "$HOOK" >/dev/null 2>&1
+# 마커가 생성됐는지 확인
+if [ ! -f "$_item1_marker" ]; then
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("Item1: marker not created by PreToolUse SHOW CATALOGS")
+  echo "  FAIL  Item1: PreToolUse SHOW CATALOGS should create marker"
+else
+  # Step 2: PostToolUse(error) → 마커 삭제
+  make_post_payload_show_catalogs_error | env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
+    PRAXIS_TRINO_CATALOG_GATE_FILE="$_item1_marker" \
+    python3 "$HOOK" post >/dev/null 2>&1
+  if [ -f "$_item1_marker" ]; then
+    FAIL=$((FAIL + 1))
+    FAILED_NAMES+=("Item1: PostToolUse(error) should delete marker")
+    echo "  FAIL  Item1: PostToolUse(isError=true) should delete marker but it still exists"
+  else
+    PASS=$((PASS + 1))
+    echo "  PASS  Item1: PostToolUse(isError=true) deletes marker after failed SHOW CATALOGS"
+  fi
+fi
+rm -f "$_item1_marker" 2>/dev/null
+
+# 케이스: PostToolUse(success) → 마커 유지
+_item1_marker2=$(new_marker_file)
+rm -f "$_item1_marker2"
+make_trino_payload 'SHOW CATALOGS' | env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
+  PRAXIS_TRINO_CATALOG_GATE_FILE="$_item1_marker2" \
+  python3 "$HOOK" >/dev/null 2>&1
+make_post_payload_show_catalogs_ok | env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
+  PRAXIS_TRINO_CATALOG_GATE_FILE="$_item1_marker2" \
+  python3 "$HOOK" post >/dev/null 2>&1
+if [ -f "$_item1_marker2" ]; then
+  PASS=$((PASS + 1))
+  echo "  PASS  Item1: PostToolUse(isError=false) preserves marker after successful SHOW CATALOGS"
+else
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("Item1: PostToolUse(success) should preserve marker")
+  echo "  FAIL  Item1: PostToolUse(isError=false) should keep marker"
+fi
+rm -f "$_item1_marker2" 2>/dev/null
+
+# 케이스: PostToolUse payload에 tool_response 없을 때 마커 유지 (fail-open back-compat)
+_item1_marker3=$(new_marker_file)
+rm -f "$_item1_marker3"
+make_trino_payload 'SHOW CATALOGS' | env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
+  PRAXIS_TRINO_CATALOG_GATE_FILE="$_item1_marker3" \
+  python3 "$HOOK" >/dev/null 2>&1
+# PostToolUse payload without tool_response field
+python3 -c "
+import json
+payload = {
+    'session_id': 'test-session-336-post',
+    'tool_name': 'mcp__laplace-trino__trino_query',
+    'tool_input': {'query': 'SHOW CATALOGS'},
+    'cwd': '/tmp',
+}
+print(json.dumps(payload))
+" | env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
+  PRAXIS_TRINO_CATALOG_GATE_FILE="$_item1_marker3" \
+  python3 "$HOOK" post >/dev/null 2>&1
+if [ -f "$_item1_marker3" ]; then
+  PASS=$((PASS + 1))
+  echo "  PASS  Item1: PostToolUse(no tool_response) preserves marker (fail-open)"
+else
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("Item1: PostToolUse(no tool_response) should preserve marker")
+  echo "  FAIL  Item1: missing tool_response should not delete marker"
+fi
+rm -f "$_item1_marker3" 2>/dev/null
+
+# ---------------------------------------------------------------------------
+# Item 3: 마커 파일 권한 0o600
+# ---------------------------------------------------------------------------
+echo ""
+echo "Item 3: marker file created with 0o600 permissions"
+
+_item3_marker=$(new_marker_file)
+rm -f "$_item3_marker"
+make_trino_payload 'SHOW CATALOGS' | env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
+  PRAXIS_TRINO_CATALOG_GATE_FILE="$_item3_marker" \
+  python3 "$HOOK" >/dev/null 2>&1
+if [ -f "$_item3_marker" ]; then
+  _perm=$(python3 -c "import os, stat; st=os.stat('$_item3_marker'); print(oct(stat.S_IMODE(st.st_mode)))")
+  if [ "$_perm" = "0o600" ]; then
+    PASS=$((PASS + 1))
+    echo "  PASS  Item3: marker file permission is 0o600"
+  else
+    FAIL=$((FAIL + 1))
+    FAILED_NAMES+=("Item3: marker file permission should be 0o600")
+    echo "  FAIL  Item3: marker file permission is $_perm (expected 0o600)"
+  fi
+else
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("Item3: marker file not created")
+  echo "  FAIL  Item3: marker file not created by SHOW CATALOGS"
+fi
+rm -f "$_item3_marker" 2>/dev/null
+
+# ---------------------------------------------------------------------------
+# Item 6: SELECT INTO — false-positive 억제 (INTO arm 분리)
+# ---------------------------------------------------------------------------
+echo ""
+echo "Item 6: SELECT...INTO cat.s.t → pass (not Trino syntax, avoid misleading deny)"
+
+# SELECT col INTO cat.s.t FROM src (PostgreSQL/SQL-Server SELECT-INTO 구문)
+# Trino에서 지원되지 않으므로 gate가 block하면 misleading → pass해야 함
+run_case \
+  "Item6: SELECT col INTO cat.s.t → pass (not INSERT/MERGE INTO)" \
+  "pass" \
+  "" \
+  "$(make_trino_payload 'SELECT col INTO iceberg.foo.dest FROM src WHERE id = 1')"
+
+# INSERT INTO는 여전히 deny
+run_case \
+  "Item6: INSERT INTO cat.s.t → deny (regression guard)" \
+  "deny" \
+  "" \
+  "$(make_trino_payload 'INSERT INTO iceberg.foo.bar VALUES (1)')"
+
+# MERGE INTO는 여전히 deny
+run_case \
+  "Item6: MERGE INTO cat.s.t → deny (regression guard)" \
+  "deny" \
+  "" \
+  "$(make_trino_payload 'MERGE INTO iceberg.foo.bar t USING src s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.v = s.v')"
+
+# ---------------------------------------------------------------------------
+# Item 7: MERGE ... USING <catalog>.<schema>.<table> 감지
+# ---------------------------------------------------------------------------
+echo ""
+echo "Item 7: MERGE USING catalog.schema.table → deny"
+
+run_case \
+  "Item7: MERGE INTO t USING iceberg.foo.src → deny" \
+  "deny" \
+  "" \
+  "$(make_trino_payload 'MERGE INTO local_tbl t USING iceberg.foo.src s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.v = s.v')"
+
+run_case \
+  "Item7: MERGE USING without catalog in target → deny (source ref caught)" \
+  "deny" \
+  "" \
+  "$(make_trino_payload 'MERGE INTO local_tbl t USING hive.warehouse.orders s ON t.id = s.id WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.v)')"
+
+# USING with 2-part ref (not 3-part) → pass
+run_case \
+  "Item7: MERGE USING schema.table (2-part) → pass" \
+  "pass" \
+  "" \
+  "$(make_trino_payload 'MERGE INTO tgt t USING src_schema.src_table s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.v = s.v')"
+
+# ---------------------------------------------------------------------------
+# Item 8: CREATE TABLE x (LIKE catalog.schema.t) LIKE 절 감지
+# ---------------------------------------------------------------------------
+echo ""
+echo "Item 8: CREATE TABLE ... (LIKE catalog.schema.t) → deny"
+
+run_case \
+  "Item8: CREATE TABLE x (LIKE iceberg.foo.src) → deny" \
+  "deny" \
+  "" \
+  "$(make_trino_payload 'CREATE TABLE local_tbl (LIKE iceberg.foo.src INCLUDING ALL)')"
+
+run_case \
+  "Item8: CREATE TABLE x (LIKE iceberg.foo.src EXCLUDING PROPERTIES) → deny" \
+  "deny" \
+  "" \
+  "$(make_trino_payload 'CREATE TABLE new_tbl (LIKE iceberg.sch.src EXCLUDING PROPERTIES)')"
+
+# LIKE with 2-part ref → pass
+run_case \
+  "Item8: CREATE TABLE x (LIKE schema.t) (2-part) → pass" \
+  "pass" \
+  "" \
+  "$(make_trino_payload 'CREATE TABLE new_tbl (LIKE myschema.src_table)')"
+
+# ---------------------------------------------------------------------------
+# Item 9: 문서-계약 테스트 — CATALOG_REF_RE keyword set ↔ spec 표 일치 확인
+# ---------------------------------------------------------------------------
+echo ""
+echo "Item 9: doc-contract test — keyword arm set matches spec table"
+
+_contract_result=$(python3 -c "
+import sys, re, ast, pathlib
+
+hook_path = '$ROOT_DIR/hooks/trino-catalog-gate.py'
+spec_path = '$ROOT_DIR/docs/hook/trino-catalog-gate.md'
+
+# 1. spec 테이블에서 keyword arm 추출
+spec_text = pathlib.Path(spec_path).read_text()
+# 표 행: '| keyword |' 형태에서 keyword arm 추출 (헤더/구분선 제외)
+spec_keywords = set()
+for line in spec_text.splitlines():
+    line = line.strip()
+    if not line.startswith('|'):
+        continue
+    parts = [p.strip() for p in line.split('|') if p.strip()]
+    if not parts or parts[0].startswith('-') or parts[0].lower() in ('keyword arm', 'keyword'):
+        continue
+    # keyword arm 컬럼은 첫 번째 셀; 코드 span (\`...\`) 제거
+    kw = parts[0].strip('\`').upper()
+    # 복합 arm (INSERT INTO → INTO) 은 실제 regex keyword
+    # spec 표에서 인식하는 arm keyword들
+    if kw in ('FROM', 'JOIN', 'INTO', 'UPDATE', 'TABLE', 'VIEW', 'USING', 'LIKE'):
+        spec_keywords.add(kw)
+
+# 2. 코드에서 CATALOG_REF_RE + MERGE_INSERT_INTO_RE 패턴 파싱
+code_text = pathlib.Path(hook_path).read_text()
+
+# CATALOG_REF_RE: \b(?:...) 에서 keyword 추출
+m1 = re.search(r'CATALOG_REF_RE\s*=\s*re\.compile\(\s*rf?\"([^\"]+)\"', code_text)
+code_kws_main = set()
+if m1:
+    # (?:FROM|JOIN|...) 패턴에서 추출
+    kw_match = re.search(r'\(\?:([A-Z|]+)\)', m1.group(1).upper())
+    if kw_match:
+        code_kws_main = set(kw_match.group(1).split('|'))
+
+# MERGE_INSERT_INTO_RE: INSERT|MERGE → 변환 INTO
+m2 = re.search(r'MERGE_INSERT_INTO_RE\s*=\s*re\.compile\(\s*rf?\"([^\"]+)\"', code_text)
+code_kws_insert = set()
+if m2:
+    pat = m2.group(1).upper()
+    if 'INSERT' in pat or 'MERGE' in pat:
+        code_kws_insert.add('INTO')
+
+code_keywords = code_kws_main | code_kws_insert
+
+if spec_keywords == code_keywords:
+    print('PASS: spec={} code={}'.format(sorted(spec_keywords), sorted(code_keywords)))
+    sys.exit(0)
+else:
+    only_spec = spec_keywords - code_keywords
+    only_code = code_keywords - spec_keywords
+    print('FAIL: spec={} code={} only_spec={} only_code={}'.format(
+        sorted(spec_keywords), sorted(code_keywords), sorted(only_spec), sorted(only_code)))
+    sys.exit(1)
+" 2>&1)
+
+if echo "$_contract_result" | grep -q "^PASS:"; then
+  PASS=$((PASS + 1))
+  echo "  PASS  Item9: doc-contract test — keyword sets match"
+  echo "        $_contract_result"
+else
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("Item9: doc-contract — keyword arm mismatch between spec and code")
+  echo "  FAIL  Item9: doc-contract test"
+  echo "        $_contract_result"
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""

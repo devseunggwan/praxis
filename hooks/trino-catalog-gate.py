@@ -174,15 +174,42 @@ def strip_sql_comments(sql: str) -> str:
 _IDENT_SEG = r'(?:"[^"]+"|`[^`]+`|[A-Za-z_][\w$]*)'
 
 # 3-part reference: <catalog>.<schema>.<table>, optionally quoted.
+# Capturing variant used by CATALOG_REF_RE group(1).
 _CATALOG_REF = rf"({_IDENT_SEG}\.{_IDENT_SEG}\.{_IDENT_SEG})"
+# Non-capturing variant used where the caller supplies its own outer group.
+_CATALOG_REF_NC = rf"(?:{_IDENT_SEG}\.{_IDENT_SEG}\.{_IDENT_SEG})"
 
 # Context gate: SQL keywords that can be followed by a 3-part catalog.schema.table
-# reference. `INTO` covers both INSERT INTO and MERGE INTO. `TABLE` covers
-# CREATE TABLE / CREATE OR REPLACE TABLE. `VIEW` covers CREATE VIEW.
-# DELETE FROM is handled by the bare `FROM` arm (DELETE FROM <ref> matches).
-# UPDATE without FROM is also covered by `UPDATE` arm.
+# reference.
+#
+# Keyword arm decisions:
+#   FROM       — SELECT...FROM, DELETE FROM (covers both).
+#   JOIN       — all JOIN variants.
+#   INTO       — restricted to INSERT/MERGE context (see MERGE_INSERT_INTO_RE
+#                below) to avoid false positives on `SELECT col INTO dest`
+#                (PostgreSQL/SQL-Server SELECT-INTO syntax). Trino does not
+#                support SELECT-INTO but a user might paste such a query; the
+#                deny message would be misleading.
+#   UPDATE     — UPDATE <ref> SET ...
+#   TABLE      — CREATE TABLE / CREATE OR REPLACE TABLE / ALTER TABLE.
+#   VIEW       — CREATE VIEW / CREATE OR REPLACE VIEW.
+#   USING      — MERGE ... USING <catalog>.<schema>.<table> (source table in
+#                MERGE statements). Previously undetected (#336 item 7).
+#   LIKE       — CREATE TABLE x (LIKE catalog.schema.t) LIKE clause reference.
+#                Previously undetected (#336 item 8).
+#
+# DELETE FROM is handled by the FROM arm (DELETE FROM <ref> matches FROM arm).
 CATALOG_REF_RE = re.compile(
-    rf"\b(?:FROM|JOIN|INTO|UPDATE|TABLE|VIEW)\s+{_CATALOG_REF}",
+    rf"\b(?:FROM|JOIN|UPDATE|TABLE|VIEW|USING|LIKE)\s+{_CATALOG_REF}",
+    re.IGNORECASE,
+)
+
+# Separate pattern for INSERT/MERGE INTO to avoid false-positive on SELECT INTO.
+# `SELECT col INTO cat.s.t FROM src` must NOT block — Trino does not support
+# SELECT-INTO, so the deny message would be incorrect and confusing (#336 item 6).
+# This pattern requires INSERT or MERGE immediately before INTO.
+MERGE_INSERT_INTO_RE = re.compile(
+    rf"\b(?:INSERT|MERGE)\s+INTO\s+{_CATALOG_REF}",
     re.IGNORECASE,
 )
 
@@ -190,21 +217,31 @@ CATALOG_REF_RE = re.compile(
 SHOW_CATALOGS_RE = re.compile(r"\bSHOW\s+CATALOGS\b", re.IGNORECASE)
 
 
+def _add_catalog_from_match(m: re.Match, found: set) -> None:
+    """Extract the catalog (first dotted segment) from a regex match and add to found."""
+    ref = m.group(1)
+    first_part = ref.split(".")[0].strip('"').strip("`").lower()
+    if first_part:
+        found.add(first_part)
+
+
 def extract_catalogs(sql: str) -> list[str]:
     """Return distinct catalog names from 3-part DML/DDL references in sql.
 
-    Detects catalog.schema.table references in FROM, JOIN, INTO (INSERT/MERGE),
-    UPDATE, TABLE (CREATE TABLE), and VIEW (CREATE VIEW) contexts.
+    Detects catalog.schema.table references in:
+      - FROM, JOIN, UPDATE, TABLE, VIEW, USING, LIKE keyword contexts
+        (CATALOG_REF_RE).
+      - INSERT INTO, MERGE INTO contexts (MERGE_INSERT_INTO_RE — separate from
+        the generic INTO arm to avoid false positives on SELECT-INTO syntax).
+
     SQL comments are stripped before matching. Returns lowercase catalog names.
     """
     cleaned = strip_sql_comments(sql)
     found: set[str] = set()
     for m in CATALOG_REF_RE.finditer(cleaned):
-        ref = m.group(1)
-        # Extract the catalog (first segment) from catalog.schema.table.
-        first_part = ref.split(".")[0].strip('"').strip("`").lower()
-        if first_part:
-            found.add(first_part)
+        _add_catalog_from_match(m, found)
+    for m in MERGE_INSERT_INTO_RE.finditer(cleaned):
+        _add_catalog_from_match(m, found)
     return sorted(found)
 
 
@@ -328,11 +365,20 @@ def marker_exists(path: str) -> bool:
 
 
 def create_marker(path: str) -> None:
-    """Create (or touch) the marker file. Silently fails on OS errors."""
+    """Create (or touch) the marker file with 0o600 permissions. Silently fails on OS errors."""
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("")
+        os.chmod(path, 0o600)
+    except OSError:
+        pass  # fail-open; never raise from a hook
+
+
+def delete_marker(path: str) -> None:
+    """Delete the marker file if it exists. Silently fails on OS errors."""
+    try:
+        os.unlink(path)
     except OSError:
         pass  # fail-open; never raise from a hook
 
@@ -431,5 +477,67 @@ def run() -> int:
     return 0
 
 
+def _tool_response_indicates_error(tool_response: object) -> bool:
+    """Return True iff tool_response clearly signals a failed MCP call.
+
+    Mirrors the same helper in trino-describe-first.py:
+      - dict with isError: True → error.
+      - any other shape (including None / missing field) → not an error (fail-open).
+    """
+    if isinstance(tool_response, dict):
+        if tool_response.get("isError") is True:
+            return True
+    return False
+
+
+def run_post() -> int:
+    """PostToolUse path: delete the session marker if SHOW CATALOGS failed.
+
+    When the PreToolUse path optimistically created the marker for a SHOW
+    CATALOGS query, but the actual Trino call returned an error, the marker
+    must be removed so the gate correctly blocks subsequent queries.
+
+    Mirrors the isError check in trino-describe-first.py run_post().
+    """
+    try:
+        payload = json.load(sys.stdin)
+    except Exception:
+        return 0  # fail-open on malformed input
+
+    tool_name = payload.get("tool_name", "") or ""
+    if not tool_matches(tool_name):
+        return 0
+
+    tool_input = payload.get("tool_input", {}) or {}
+    query = tool_input.get(get_query_arg(), "") or ""
+    if not isinstance(query, str) or not query.strip():
+        return 0
+
+    # Only act on SHOW CATALOGS queries.
+    try:
+        if not is_show_catalogs_standalone(query):
+            return 0
+    except Exception:
+        return 0  # fail-open
+
+    # If no tool_response field at all → fail-open (preserve back-compat with
+    # older event shapes that omit the response).
+    if "tool_response" not in payload:
+        return 0
+
+    if _tool_response_indicates_error(payload.get("tool_response")):
+        session_id = _extract_session_id(payload)
+        marker_path = resolve_marker_path(session_id)
+        delete_marker(marker_path)
+
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) >= 2 and argv[1] == "post":
+        return run_post()
+    return run()
+
+
 if __name__ == "__main__":
-    sys.exit(run())
+    sys.exit(main(sys.argv))
