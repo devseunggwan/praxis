@@ -33,7 +33,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 # Resolve sibling `_hook_utils.py` regardless of cwd at invocation time.
@@ -171,8 +170,14 @@ def _extract_candidate_paths(body: str) -> list[str]:
     candidates: list[str] = []
     for m in _MD_LINK_RE.finditer(body):
         target = m.group(1)
-        # Ignore http/https/mailto/anchor links.
+        # Ignore http/https/mailto/anchor-only links.
         if target.startswith(("http://", "https://", "mailto:", "#")):
+            continue
+        # Strip anchor fragment (#section) and query string (?q=1) — both are
+        # not part of the filesystem path and would produce false-positive
+        # phantom hits on otherwise-valid links like `docs/foo.md#section`.
+        target = target.split("#", 1)[0].split("?", 1)[0]
+        if not target:
             continue
         if any(target.startswith(pfx) for pfx in REPO_RELATIVE_PREFIXES):
             # Strip leading `./` so the path is always relative-to-root.
@@ -191,9 +196,16 @@ def _extract_candidate_paths(body: str) -> list[str]:
 # Session-scoped dedup
 # ---------------------------------------------------------------------------
 
-def _dedup_key(session_id: str, body_file_path: str) -> str:
-    """Return a hash key combining session_id and body file path."""
-    raw = f"{session_id}:{os.path.abspath(body_file_path)}"
+def _dedup_key(session_id: str, body_content: str) -> str:
+    """Return a hash key combining session_id and body content SHA-256.
+
+    Keyed on content rather than file path so that:
+    - the same body in different temp paths (e.g. successive `gh pr edit`)
+      only fires once, and
+    - an edited body (phantom paths removed) generates a new key so the
+      advisory fires again if new phantom paths are introduced.
+    """
+    raw = f"{session_id}:{hashlib.sha256(body_content.encode()).hexdigest()}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
@@ -255,15 +267,17 @@ def main() -> int:
         if not os.path.isfile(body_file):
             continue
 
-        # Session-scoped dedup.
-        dk = _dedup_key(session_id, body_file)
-        if _already_reported(dk):
-            continue
-
         try:
-            with open(body_file, encoding="utf-8") as fh:
+            with open(body_file, encoding="utf-8", errors="replace") as fh:
                 body = fh.read()
-        except OSError:
+        except (OSError, UnicodeDecodeError):
+            continue  # fail-open — binary or unreadable file
+
+        # Session-scoped dedup keyed on body content so that the same body
+        # in a different temp path fires only once, and an edited body with
+        # new phantom paths re-fires.
+        dk = _dedup_key(session_id, body)
+        if _already_reported(dk):
             continue
 
         candidates = _extract_candidate_paths(body)

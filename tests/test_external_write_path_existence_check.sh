@@ -178,6 +178,99 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Case 4 (M1): anchor fragment in link — should NOT produce advisory.
+# docs/hook/INDEX.md#preflight-gate references a real file; fragment must be
+# stripped before the existence check so this produces no advisory.
+# ---------------------------------------------------------------------------
+case4_body='# Anchor test
+
+See [preflight hooks](docs/hook/INDEX.md#preflight-gate) for details.
+'
+run_with_body "$case4_body" 'gh issue create --title "Anchor"' "session-anchor-$$" c4_err c4_rc
+
+c4_ok=1
+[ "$c4_rc" -eq 0 ] || c4_ok=0
+[ -z "$c4_err" ] || c4_ok=0
+if [ "$c4_ok" -eq 1 ]; then
+  echo "PASS: anchor fragment — stripped, no false-positive advisory"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: anchor fragment (rc=$c4_rc, stderr='${c4_err:0:120}')"
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("anchor fragment — stripped, no false-positive advisory")
+fi
+
+# ---------------------------------------------------------------------------
+# Case 5 (M2): same body content re-submitted — dedup suppresses second advisory.
+# ---------------------------------------------------------------------------
+dedup_body='# Phantom again
+
+See [phantom](hooks/pre-tool-use/phantom.sh) for details.
+'
+# First call — advisory expected.
+run_with_body "$dedup_body" 'gh issue create --title "Dedup1"' "session-dedup-$$" c5a_err c5a_rc
+# Second call with identical content + same session_id — dedup must suppress.
+run_with_body "$dedup_body" 'gh issue edit 1 --body-file' "session-dedup-$$" c5b_err c5b_rc
+
+c5_ok=1
+# First call: advisory fired.
+[ "$c5a_rc" -eq 0 ] || c5_ok=0
+echo "$c5a_err" | grep -q "\[phantom-path\]" || c5_ok=0
+# Second call with same content: dedup suppresses advisory.
+[ "$c5b_rc" -eq 0 ] || c5_ok=0
+[ -z "$c5b_err" ] || c5_ok=0
+if [ "$c5_ok" -eq 1 ]; then
+  echo "PASS: dedup — same body content suppresses duplicate advisory"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: dedup (c5a_rc=$c5a_rc stderr='${c5a_err:0:80}' c5b_rc=$c5b_rc stderr='${c5b_err:0:80}')"
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("dedup — same body content suppresses duplicate advisory")
+fi
+
+# ---------------------------------------------------------------------------
+# Case 6 (M3): binary body file — hook must exit 0 with no advisory.
+# ---------------------------------------------------------------------------
+bin_body_file=$(mktemp /tmp/test-phantom-bin-XXXXXX)
+# Write null bytes (binary) into the file.
+python3 -c "import sys; sys.stdout.buffer.write(b'\x00\x01\x02\xff\xfe')" > "$bin_body_file"
+
+bin_err_file=$(mktemp /tmp/test-phantom-err-XXXXXX)
+bin_payload=$(python3 -c "
+import json, sys
+body_file = sys.argv[1]
+session_id = sys.argv[2]
+repo_root = sys.argv[3]
+payload = {
+    'session_id': session_id,
+    'tool_name': 'Bash',
+    'tool_input': {
+        'command': 'gh issue create --title \"Binary\" --body-file ' + body_file,
+    },
+    'cwd': repo_root,
+}
+print(json.dumps(payload))
+" "$bin_body_file" "session-binary-$$" "$ROOT_DIR")
+
+env -u PRAXIS_PHANTOM_PATH_STRICT \
+  python3 "$HOOK" >/dev/null 2>"$bin_err_file" <<< "$bin_payload"
+bin_rc=$?
+bin_err=$(cat "$bin_err_file")
+rm -f "$bin_body_file" "$bin_err_file"
+
+c6_ok=1
+[ "$bin_rc" -eq 0 ] || c6_ok=0
+[ -z "$bin_err" ] || c6_ok=0
+if [ "$c6_ok" -eq 1 ]; then
+  echo "PASS: binary body file — fail-open, exit 0, no advisory"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: binary body file (rc=$bin_rc, stderr='${bin_err:0:120}')"
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("binary body file — fail-open, exit 0, no advisory")
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
