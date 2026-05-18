@@ -178,6 +178,32 @@ run_case "subshell cd existing path is silent" \
   "(cd $NON_WT_DIR && ls)"
 
 # ---------------------------------------------------------------------------
+# === Codex P2 fixes: spaced subshell form + subshell cwd isolation ===
+# ---------------------------------------------------------------------------
+
+# Spaced subshell form `( cd /path && ... )` fires advisory for missing path.
+run_case "spaced subshell cd non-existent emits worktree-missing" \
+  "advisory:[worktree-missing]" \
+  "( cd $MISSING_PATH && ls )"
+
+# Spaced subshell form to existing path is silent.
+run_case "spaced subshell cd existing path is silent" \
+  "silent" \
+  "( cd $NON_WT_DIR && ls )"
+
+# Subshell cwd does not leak: `(cd existing); cd existing2` must NOT emit a
+# false advisory for existing2 (which exists at the original cwd level, not
+# inside the subshell target).
+# Use $ROOT_DIR itself as the outer reference to guarantee it exists.
+run_case "subshell cwd does not leak into subsequent relative cd (compact form)" \
+  "silent" \
+  "(cd $NON_WT_DIR && pwd); cd $ROOT_DIR"
+
+run_case "spaced subshell cwd does not leak into subsequent relative cd" \
+  "silent" \
+  "( cd $NON_WT_DIR && pwd ); cd $ROOT_DIR"
+
+# ---------------------------------------------------------------------------
 # === M2 fix: heredoc body containing cd is skipped (no false-positive) ===
 # ---------------------------------------------------------------------------
 

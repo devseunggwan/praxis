@@ -12,14 +12,18 @@ Advisory message (stderr only — exit 0 always):
 
 Scope (Phase 2 — #337 P6 + P1):
   Direct `cd <path>` and `pushd <path>` commands are detected, as well as
-  the subshell form `(cd /path && ...)`. Heredoc bodies containing `cd` are
-  skipped for both space-separated (`<< EOF`) and fused (`<<EOF`, `<<'EOF'`,
+  both subshell forms: compact `(cd /path && ...)` and spaced `( cd /path && ... )`.
+  Subshell cd/pushd emits an advisory when the target is missing, but does NOT
+  update the hook's effective_cwd because subshell directory changes do not
+  persist after `)` in Bash. Heredoc bodies containing `cd` are skipped for
+  both space-separated (`<< EOF`) and fused (`<<EOF`, `<<'EOF'`,
   `<<"EOF"`, `<<-EOF`) heredoc openers.
 
 Silent cases (no output emitted):
   - `cd <path>` where path exists on disk
   - `pushd <path>` where path exists on disk
-  - `(cd <path> && ...)` where path exists on disk
+  - `(cd <path> && ...)` where path exists on disk (compact subshell form)
+  - `( cd <path> && ... )` where path exists on disk (spaced subshell form)
   - bare `cd` (no argument — cd to $HOME)
   - `cd $VAR` or `cd $(...)` — variable/substitution expansion, unresolvable
   - `cd -` — previous dir, unresolvable
@@ -100,14 +104,22 @@ def _normalize_path(path: str) -> str:
     return os.path.realpath(path.rstrip("/"))
 
 
-def _extract_cd_target(seg: list[Token]) -> str | None:
-    """Return the path argument of a `cd <path>` or `pushd <path>` segment,
-    else None. Also handles the subshell form `(cd <path> && ...)` where
-    tokenize_with_roles emits the fused token `(cd` as argv[0].
+def _extract_cd_target(seg: list[Token]) -> tuple[str | None, bool]:
+    """Return (path, is_subshell) for a `cd`/`pushd` segment, else (None, False).
 
-    Silent cases (return None):
-      - argv[0] is not `cd`, `pushd`, or `(cd` (i.e. not a recognized
-        directory-change command)
+    `is_subshell` is True when the cd/pushd is inside a subshell group
+    `(cd <path> && ...)` — callers must NOT update effective_cwd in that case
+    because subshell directory changes do not persist after `)` in Bash.
+
+    Two subshell forms are handled:
+      - Compact: `(cd /path && ...)` — tokenize_with_roles fuses `(cd` into a
+        single COMMAND token. Detected by cmd.startswith("(").
+      - Spaced: `( cd /path && ... )` — tokenize_with_roles emits `(` as the
+        COMMAND token and `cd` as the first POSITIONAL token. Detected by
+        cmd == "(" and argv[1].text in ("cd", "pushd").
+
+    Silent cases (return None, False):
+      - argv[0] is not `cd`, `pushd`, `(cd`, or `(` with `cd`/`pushd` next
       - bare `cd` / `pushd` (no positional argument after COMMAND)
       - target starts with `$` (variable expansion, unresolvable)
       - target starts with `$(` (command substitution, unresolvable)
@@ -120,30 +132,43 @@ def _extract_cd_target(seg: list[Token]) -> str | None:
     """
     argv = filter_argv(seg)
     if not argv:
-        return None
+        return None, False
     cmd = argv[0].text
-    # Strip leading `(` for subshell form `(cd /path && ...)`.
-    # tokenize_with_roles emits `(cd` as a single COMMAND token.
-    if cmd.startswith("("):
+    is_subshell = False
+    # Spaced subshell form: `( cd /path && ... )` — tokenize_with_roles emits
+    # `(` as the COMMAND token and `cd`/`pushd` as the first POSITIONAL token.
+    # Check exact `(` match first so that the fused-form branch below does not
+    # consume it (both `"(" == "("` and `"(".startswith("(")` are true).
+    if cmd == "(":
+        if len(argv) >= 2 and argv[1].text in ("cd", "pushd"):
+            is_subshell = True
+            cmd = argv[1].text
+            argv = [argv[1]] + argv[2:]  # shift so the loop below starts at the target
+        else:
+            return None, False
+    # Compact subshell form: `(cd /path && ...)` — tokenize_with_roles fuses
+    # the opening paren with the command into a single COMMAND token `(cd`.
+    elif cmd.startswith("("):
+        is_subshell = True
         cmd = cmd[1:]
     if cmd not in ("cd", "pushd"):
-        return None
+        return None, False
     for tok in argv[1:]:
         if tok.role in (TokenRole.FLAG, TokenRole.FLAG_VALUE, TokenRole.SEPARATOR_DD):
             continue
         target = tok.text
         if not target:
-            return None
+            return None, False
         # Unresolvable cases — silent skip.
         if target == "-":
-            return None
+            return None, False
         if target.startswith("$"):
-            return None
+            return None, False
         if target == "~" or target.startswith("~/") or target.startswith("~"):
             # Covers `~`, `~/foo`, `~user/foo` (any tilde prefix).
-            return None
-        return target
-    return None
+            return None, False
+        return target, is_subshell
+    return None, False
 
 
 def _dedupe_marker(session_id: str, path: str, state: str) -> str:
@@ -287,7 +312,7 @@ def _main_inner() -> int:
             # The opener segment itself is not a `cd`; continue after setting.
             continue
 
-        target = _extract_cd_target(seg)
+        target, is_subshell = _extract_cd_target(seg)
         if target is None:
             # Not a `cd` segment — no effective_cwd update here since we do
             # not execute the segment; the next `cd` segment will still resolve
@@ -314,10 +339,11 @@ def _main_inner() -> int:
             if session_id:
                 _record_dedupe(session_id, real_target, "missing")
         else:
-            # Path exists — update effective_cwd for downstream segments.
-            # Also clear any stale `missing` marker so that if this path is
-            # later removed and cd'd again, a fresh advisory fires (M3 fix).
-            effective_cwd = abs_target
+            # Path exists. For a subshell cd `(cd /path && ...)`, the
+            # directory change does not persist after `)` in Bash — do NOT
+            # update effective_cwd. Only update for a real parent-shell cd.
+            if not is_subshell:
+                effective_cwd = abs_target
             if session_id:
                 _delete_dedupe(session_id, real_target, "missing")
 
