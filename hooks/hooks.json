@@ -144,6 +144,12 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/external-write-path-existence-check.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/version-bump-evidence-check.sh",
+            "timeout": 5,
+            "hosts": ["claude", "codex"]
           }
         ]
       },
