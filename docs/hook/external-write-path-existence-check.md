@@ -36,7 +36,7 @@ Recognized repo-relative prefixes (Phase 1):
 | Absolute paths (`/usr/...`) | Out-of-scope — not repo-relative |
 | HTTP/HTTPS/mailto/anchor links | Scheme-prefixed or anchor targets |
 | Paths outside recognized prefixes | Phase 2 |
-| Same session_id + body-file already reported | Dedup prevents spam |
+| Same session_id + body content SHA-256 already reported | Dedup prevents spam |
 
 ### Response
 
@@ -62,7 +62,7 @@ outside the repo tree.
 
 ### Session-scoped dedup
 
-Advisory is emitted at most once per `(session_id, body-file-path)` pair.
+Advisory is emitted at most once per `(session_id, body content SHA-256)` pair.
 State marker written to `${PRAXIS_STATE_DIR:-~/.claude/state/praxis}/phantom-path/<hash>`.
 
 ### Parsing guarantees
@@ -109,10 +109,13 @@ Restart Claude Code after adding the entry.
 bash tests/test_external_write_path_existence_check.sh
 ```
 
-Covers 3 cases (Phase 1 scope):
+Covers 6 cases (Phase 1 scope + M1/M2/M3 regression):
 
 | Case | Input | Expected |
 |------|-------|----------|
-| Existing path | Body links to `docs/hook/` (real dir) | Pass — no advisory |
+| Existing path | Body links to `docs/hook/INDEX.md` (real file) | Pass — no advisory |
 | Missing path | Body links to `hooks/pre-tool-use/fake.sh` (phantom) | Advisory emitted |
 | Mixed paths | Body links to one real + one phantom | Advisory lists only the phantom |
+| Anchor fragment (M1) | Body links to `docs/hook/INDEX.md#preflight-gate` | Pass — fragment stripped, file exists |
+| Dedup re-emit (M2) | Same body content submitted twice in same session | Advisory fires once; second suppressed |
+| Binary body file (M3) | Body file contains non-UTF-8 bytes | Fail-open — exit 0, no advisory |
