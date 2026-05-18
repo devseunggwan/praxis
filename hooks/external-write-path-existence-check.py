@@ -216,6 +216,12 @@ def _extract_candidate_paths(body: str) -> list[str]:
         # phantom-path advisory for "hooks/foo.py --help" (which includes args
         # and would never match a real filesystem path).
         path_token = token.split()[0] if token else token
+        # Strip anchor fragment and query string — mirrors Phase 1 markdown-link
+        # handling so `docs/foo.md#section` and `hooks/bar.py?v=2` do not
+        # produce a phantom hit on an otherwise-existing file.
+        path_token = path_token.split("#", 1)[0].split("?", 1)[0]
+        if not path_token:
+            continue
         if any(path_token.startswith(pfx) for pfx in REPO_RELATIVE_PREFIXES):
             candidates.append(path_token[2:] if path_token.startswith("./") else path_token)
 
