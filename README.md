@@ -67,7 +67,7 @@ Most skills delegate to external agents or session managers. Install the depende
 | **gh CLI** | Standalone (`recover-sessions`), strike skills, PR/issue ops | `brew install gh` |
 | **jq** | Strike skills (session-scoped counter parsing) | `brew install jq` |
 | **oh-my-claudecode** | Agent delegation (tracer, analyst, ultraqa, code-reviewer) | `omc install` |
-| **cmux** | Session management skills (cmux-*) | `npm i -g @anthropic/cmux` |
+| **cmux** | Session management skills (cmux-*) | Mac app installer |
 | **codex-cli, gemini-cli** | Multi-provider routing in `cmux-delegate` | per upstream docs |
 
 ### Compatibility Tiers

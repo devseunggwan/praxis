@@ -74,4 +74,3 @@ Full hook index and per-hook specs: [`docs/hook/`](../../docs/hook/)
 | **Enhanced** | + `retrospect`, `codex-review-wrap` | + oh-my-claudecode |
 | **Full** | + all `cmux-*` skills | + cmux |
 
-Install cmux: `npm i -g @anthropic/cmux`
