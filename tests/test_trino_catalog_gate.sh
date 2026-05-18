@@ -230,15 +230,31 @@ run_case \
   "$(make_trino_payload 'SELECT a.id FROM t a JOIN hive.warehouse.orders o ON a.id = o.id')"
 
 # ---------------------------------------------------------------------------
-# Case (c): Inline bypass marker — catalog-enumerated: verified
+# Case (c): Inline bypass marker — must be in SQL comment (M1 fix)
 # ---------------------------------------------------------------------------
 echo ""
-echo "Case (c): inline bypass marker → pass"
+echo "Case (c): inline bypass marker → pass (only when in comment syntax)"
+
+# Line comment: valid bypass
 run_case \
-  "3-part reference + '-- catalog-enumerated: verified' → pass" \
+  "3-part reference + '-- catalog-enumerated: verified' line comment → pass" \
   "pass" \
   "" \
   "$(make_trino_payload 'SELECT * FROM iceberg.foo.bar -- catalog-enumerated: verified')"
+
+# Block comment: valid bypass
+run_case \
+  "3-part reference + '/* catalog-enumerated: verified */' block comment → pass" \
+  "pass" \
+  "" \
+  "$(make_trino_payload 'SELECT * FROM iceberg.foo.bar /* catalog-enumerated: verified */')"
+
+# String literal: NOT a bypass (M1 fix — was silently bypassing before)
+run_case \
+  "marker in string literal (not comment) → deny (M1 fix)" \
+  "deny" \
+  "" \
+  "$(make_trino_payload "SELECT 'catalog-enumerated: verified' AS msg FROM iceberg.foo.bar")"
 
 # ---------------------------------------------------------------------------
 # Case (d): 2-part reference (not 3-part) → passes without marker
@@ -307,6 +323,66 @@ run_case \
   "pass" \
   "" \
   "$(make_trino_payload 'SELECT 1 -- FROM iceberg.foo.bar')"
+
+# ---------------------------------------------------------------------------
+# M2: DML/DDL catalog references (INSERT, MERGE, UPDATE, CREATE TABLE/VIEW)
+# ---------------------------------------------------------------------------
+echo ""
+echo "M2: DML/DDL catalog references → deny without marker"
+run_case \
+  "INSERT INTO catalog.schema.table → deny (M2 fix)" \
+  "deny" \
+  "" \
+  "$(make_trino_payload 'INSERT INTO iceberg.foo.bar VALUES (1, 2, 3)')"
+
+run_case \
+  "MERGE INTO catalog.schema.table → deny (M2 fix)" \
+  "deny" \
+  "" \
+  "$(make_trino_payload 'MERGE INTO iceberg.foo.bar t USING src s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.v = s.v')"
+
+run_case \
+  "UPDATE catalog.schema.table → deny (M2 fix)" \
+  "deny" \
+  "" \
+  "$(make_trino_payload 'UPDATE iceberg.foo.bar SET col = 1 WHERE id = 42')"
+
+run_case \
+  "CREATE TABLE catalog.schema.table AS SELECT → deny (M2 fix)" \
+  "deny" \
+  "" \
+  "$(make_trino_payload 'CREATE TABLE iceberg.foo.new_bar AS SELECT * FROM src')"
+
+run_case \
+  "CREATE VIEW catalog.schema.view AS SELECT → deny (M2 fix)" \
+  "deny" \
+  "" \
+  "$(make_trino_payload 'CREATE VIEW iceberg.foo.my_view AS SELECT id FROM src')"
+
+# DELETE FROM: covered by existing FROM arm
+run_case \
+  "DELETE FROM catalog.schema.table → deny (M2 fix, FROM arm)" \
+  "deny" \
+  "" \
+  "$(make_trino_payload 'DELETE FROM iceberg.foo.bar WHERE id = 1')"
+
+# ---------------------------------------------------------------------------
+# M3: Multi-statement (SHOW CATALOGS + 3-part ref in same payload)
+# ---------------------------------------------------------------------------
+echo ""
+echo "M3: multi-statement — SHOW CATALOGS + 3-part ref in same payload → deny"
+run_case \
+  "SHOW CATALOGS; SELECT FROM iceberg.foo.bar → deny (M3 fix, no prior marker)" \
+  "deny" \
+  "" \
+  "$(make_trino_payload 'SHOW CATALOGS; SELECT * FROM iceberg.foo.bar')"
+
+# SHOW CATALOGS alone (no 3-part ref) still passes
+run_case \
+  "SHOW CATALOGS alone → pass (no 3-part ref)" \
+  "pass" \
+  "" \
+  "$(make_trino_payload 'SHOW CATALOGS')"
 
 # ---------------------------------------------------------------------------
 # Summary

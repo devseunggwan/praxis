@@ -14,6 +14,9 @@ This hook acts as a structural gate at MCP query construction time:
                 when the session has not run SHOW CATALOGS.
                 SHOW CATALOGS queries themselves pass through and create the
                 session marker so subsequent queries proceed.
+                Multi-statement payloads (e.g., `SHOW CATALOGS; SELECT ...`)
+                create the marker AND still check subsequent statements for
+                3-part references.
 
 Session state — design rationale
 =================================
@@ -42,18 +45,34 @@ trino-describe-first.py). Override via `PRAXIS_TRINO_TOOL_PATTERN`.
 3-part catalog reference detection
 ====================================
 
-Matches `FROM <catalog>.<schema>.<table>` and `JOIN <catalog>.<schema>.<table>`
-patterns using the same approach as the external-api-literal-trigger: context
-keyword gate avoids firing on Python attribute chains.
+Matches `FROM|JOIN|INSERT INTO|MERGE INTO|UPDATE|DELETE FROM|CREATE TABLE|
+CREATE VIEW <catalog>.<schema>.<table>` patterns using a SQL context gate to
+avoid firing on Python attribute chains.
 
-SQL comments are stripped before detection to prevent `-- catalog.schema.table`
-false positives.
+SQL comments are stripped before catalog-reference detection (so
+`-- FROM iceberg.foo.bar` does NOT trigger the gate). The inline bypass marker
+is extracted from comment text only (see below).
 
 Bypass paths
 ============
 
-  1. Inline marker: `-- catalog-enumerated: verified` anywhere in the SQL body.
+  1. Inline marker: `-- catalog-enumerated: verified` in a SQL **comment**
+     (line comment `-- ...` or block comment `/* ... */`). The marker must
+     appear in comment syntax — placing it inside a string literal or column
+     alias does NOT bypass the gate.
   2. Env bypass: `PRAXIS_TRINO_CATALOG_GATE=skip` — one-off session override.
+
+Multi-statement handling
+========================
+
+When a single query payload contains both `SHOW CATALOGS` and 3-part catalog
+references (e.g., `SHOW CATALOGS; SELECT * FROM iceberg.foo.bar`):
+
+  - If `SHOW CATALOGS` appears as a standalone leading statement (before any
+    DML/DDL keywords in the comment-stripped text) → marker is created.
+  - 3-part catalog reference check always runs after marker creation, so a
+    payload that simultaneously runs SHOW CATALOGS and references a catalog
+    passes only after the marker has been recorded.
 
 Fail-open contract
 ==================
@@ -61,6 +80,17 @@ Fail-open contract
 Any infrastructure error (missing jq, mkdir fail, file write error) falls
 through to exit 0 (pass), never exit 2 (block). The gate is a nudge layer —
 false negatives are tolerable; false positives that break the session are not.
+
+Phase 2 — NOT yet covered (will silently pass through)
+======================================================
+
+The following DML shapes produce `CATALOG_NOT_FOUND` but are not yet detected:
+
+  - Catalog references inside subquery `FROM` clauses nested more than one
+    level deep when the outer query itself has no 3-part reference.
+  - Dynamic SQL via `EXECUTE PREPARE <name> USING ...` (prepared statement
+    reference, not the underlying SQL).
+  - `ALTER TABLE <catalog>.<schema>.<table> ...` DDL.
 """
 from __future__ import annotations
 
@@ -110,9 +140,13 @@ _IDENT_SEG = r'(?:"[^"]+"|`[^`]+`|[A-Za-z_][\w$]*)'
 # 3-part reference: <catalog>.<schema>.<table>, optionally quoted.
 _CATALOG_REF = rf"({_IDENT_SEG}\.{_IDENT_SEG}\.{_IDENT_SEG})"
 
-# Requires FROM or JOIN context to avoid Python attribute chains.
+# Context gate: SQL keywords that can be followed by a 3-part catalog.schema.table
+# reference. `INTO` covers both INSERT INTO and MERGE INTO. `TABLE` covers
+# CREATE TABLE / CREATE OR REPLACE TABLE. `VIEW` covers CREATE VIEW.
+# DELETE FROM is handled by the bare `FROM` arm (DELETE FROM <ref> matches).
+# UPDATE without FROM is also covered by `UPDATE` arm.
 CATALOG_REF_RE = re.compile(
-    rf"\b(?:FROM|JOIN)\s+{_CATALOG_REF}",
+    rf"\b(?:FROM|JOIN|INTO|UPDATE|TABLE|VIEW)\s+{_CATALOG_REF}",
     re.IGNORECASE,
 )
 
@@ -121,8 +155,10 @@ SHOW_CATALOGS_RE = re.compile(r"\bSHOW\s+CATALOGS\b", re.IGNORECASE)
 
 
 def extract_catalogs(sql: str) -> list[str]:
-    """Return distinct catalog names from 3-part FROM/JOIN references in sql.
+    """Return distinct catalog names from 3-part DML/DDL references in sql.
 
+    Detects catalog.schema.table references in FROM, JOIN, INTO (INSERT/MERGE),
+    UPDATE, TABLE (CREATE TABLE), and VIEW (CREATE VIEW) contexts.
     SQL comments are stripped before matching. Returns lowercase catalog names.
     """
     cleaned = strip_sql_comments(sql)
@@ -136,10 +172,38 @@ def extract_catalogs(sql: str) -> list[str]:
     return sorted(found)
 
 
-def is_show_catalogs(sql: str) -> bool:
-    """Return True if sql contains SHOW CATALOGS (comments stripped)."""
-    cleaned = strip_sql_comments(sql)
-    return bool(SHOW_CATALOGS_RE.search(cleaned))
+def is_show_catalogs_standalone(sql: str) -> bool:
+    """Return True if the comment-stripped SQL starts with SHOW CATALOGS.
+
+    Checks the leading non-empty token sequence to avoid treating
+    `SELECT 'SHOW CATALOGS' AS msg` or a SHOW CATALOGS buried mid-statement
+    as a standalone enumeration query.
+
+    Pattern: optional whitespace / semicolons / leading comments removed,
+    then the first keyword pair must be SHOW CATALOGS.
+    """
+    cleaned = strip_sql_comments(sql).strip().lstrip(";").strip()
+    return bool(SHOW_CATALOGS_RE.match(cleaned))
+
+
+def has_bypass_marker(sql: str) -> bool:
+    """Return True if a `catalog-enumerated: verified` marker appears inside
+    a SQL comment (line or block).
+
+    The marker must be in comment syntax to be honoured. Placing it inside
+    a string literal, column alias, or bare text does NOT bypass the gate.
+    """
+    # Extract raw line-comment text (without the leading --)
+    line_comments = SQL_LINE_COMMENT_RE.findall(sql)
+    for comment in line_comments:
+        if "catalog-enumerated: verified" in comment:
+            return True
+    # Extract raw block-comment text (without the /* */ delimiters)
+    block_comments = SQL_BLOCK_COMMENT_RE.findall(sql)
+    for comment in block_comments:
+        if "catalog-enumerated: verified" in comment:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -269,21 +333,36 @@ def run() -> int:
     session_id = _extract_session_id(payload)
     marker_path = resolve_marker_path(session_id)
 
-    # SHOW CATALOGS itself: create marker + pass through.
+    # Snapshot the marker state BEFORE any marker creation this invocation.
+    # This prevents a multi-statement payload such as
+    # `SHOW CATALOGS; SELECT * FROM iceberg.foo.bar` from self-authorising:
+    # the SHOW CATALOGS branch creates the marker, but the 3-part reference
+    # check must use the pre-creation state (M3 fix).
+    marker_was_present = marker_exists(marker_path)
+
+    # SHOW CATALOGS as standalone leading statement → create marker.
+    # We do NOT return early here: the 3-part reference check below still
+    # runs using the pre-creation marker snapshot.
     try:
-        if is_show_catalogs(query):
+        if is_show_catalogs_standalone(query):
             create_marker(marker_path)
+            # A bare SHOW CATALOGS (no DML/DDL in the rest of the payload)
+            # has no 3-part references — extract_catalogs will return [] and
+            # we'll exit via the `not catalogs` branch below.
+    except Exception:
+        pass  # fail-open; marker creation failure is non-fatal
+
+    # Inline bypass: marker must appear inside SQL comment syntax (M1 fix).
+    # String literals / column aliases containing the marker text are NOT
+    # honoured — this prevents `SELECT 'catalog-enumerated: verified' AS msg
+    # FROM iceberg.foo.bar` from silently bypassing the gate.
+    try:
+        if has_bypass_marker(query):
             return 0
     except Exception:
-        return 0  # fail-open
+        pass  # fail-open
 
-    # Inline bypass marker in SQL body (checked after comment strip in
-    # extract_catalogs, but the bypass comment itself lives outside stripped
-    # region — check on raw query for reliability).
-    if "catalog-enumerated: verified" in query:
-        return 0
-
-    # Extract 3-part catalog references.
+    # Extract 3-part catalog references from the comment-stripped SQL.
     try:
         catalogs = extract_catalogs(query)
     except Exception:
@@ -292,8 +371,8 @@ def run() -> int:
     if not catalogs:
         return 0  # no 3-part references → pass through
 
-    # Marker present → session already enumerated.
-    if marker_exists(marker_path):
+    # Use the pre-invocation marker snapshot (not the post-creation state).
+    if marker_was_present:
         return 0
 
     # Block: emit deny with guidance.
