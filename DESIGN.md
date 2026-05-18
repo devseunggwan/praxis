@@ -49,7 +49,7 @@ Design mechanisms shared by all hooks:
 
 1. Survey ≥2 sibling implementations under `hooks/` for the convention
    (state-key naming, payload field access, exit-code semantics). See the
-   `Sibling Convention Survey` rule in CLAUDE.md.
+   `Convention Survey Before Design` rule in global `~/.claude/CLAUDE.md`.
 2. Write the hook + tests under `hooks/`, register in `hooks/hooks.json`.
 3. Create `docs/hook/<name>.md` using an existing spec as the template
    (`Why this exists` / `What is blocked` / `Response` / `Parsing guarantees`

@@ -99,7 +99,7 @@ current gate.
 
 1. Survey ≥ 2 sibling implementations under `hooks/` for established conventions
    (state-key naming, payload field access, exit-code semantics) before writing
-   your spec. See the **Convention Survey Before Design** rule in `CLAUDE.md`.
+   your spec. See the **Convention Survey Before Design** rule in global `~/.claude/CLAUDE.md`.
 2. Write the hook + tests, register in `hooks/hooks.json`.
 3. Create `docs/hook/<name>.md` (use an existing spec as a template).
 4. Add a row to the hook index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
