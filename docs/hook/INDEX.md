@@ -50,6 +50,7 @@ so the agent can self-correct. Fail-open on infrastructure errors by design.
 | [bash-worktree-existence-advisory](bash-worktree-existence-advisory.md) | PreToolUse | Advisory nudge when `cd <path>` targets a path that does not exist on disk |
 | [codex-review-route](codex-review-route.md) | UserPromptSubmit | Warn when `/codex:review` runs in a multi-worktree repo (cwd mismatch risk) |
 | [external-write-path-existence-check](external-write-path-existence-check.md) | PreToolUse | Advisory nudge when a `gh issue/pr` body file contains markdown links to repo paths that do not exist |
+| [version-bump-evidence-check](version-bump-evidence-check.md) | PreToolUse | Advisory nudge (opt-in strict) when `gh issue/pr` body describes an external version bump with no changelog URL, Fetched: line, or cross-reference matrix |
 
 ---
 
