@@ -18,6 +18,17 @@ Detection surface:
       - repo-root hooks.json
       - any path ending in .json under .claude/ or .codex/ (relative or absolute)
 
+Handled patterns:
+  • jq '.' ~/.claude/settings.json         — direct invocation
+  • jq -r '.foo' ~/.codex/config.json      — raw-output flag
+  • cat ~/.claude/settings.json | jq '.'   — piped; prior segment file
+  • jq '.' < ~/.claude/settings.json       — stdin redirect
+  • threshold=$(jq -r '.foo' settings.json) — command substitution
+
+Not detected (by design):
+  • jq invocations against non-config .json files (out of scope)
+  • jq -n (null input — no file arg by design)
+
 Actions:
   • file missing → skip (out of scope; other hooks cover existence checks)
   • file empty (size 0) → stderr advisory [config-empty]
@@ -25,7 +36,7 @@ Actions:
   • file present and valid JSON → silent pass
 
 Deduplicated per session_id + path so the nudge fires at most once per
-file per session. Session-state file:
+advisory-emitting invocation per session. Session-state file:
   ${TMPDIR:-/tmp}/praxis-jq-config-advisory-<session_id>.json
 
 Fail-open contract:
@@ -33,6 +44,7 @@ Fail-open contract:
   • empty command → exit 0
   • any uncaught exception in the inner logic → swallowed, exit 0
   • python3 unavailable → shell wrapper exits 0
+  • jq binary absent or timeout → skip advisory, exit 0
 """
 from __future__ import annotations
 
@@ -49,6 +61,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
     safe_tokenize,
     strip_prefix,
+    _coalesce_subst_runs,
 )
 
 
@@ -59,7 +72,6 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 # A path matches if it ends with .json AND satisfies at least one of:
 #   1. Has .claude/ or .codex/ anywhere in it (absolute or relative)
 #   2. Is literally "settings.json" or "hooks.json" (repo-root files)
-#   3. Is under ~ expansion for ~/.claude/ or ~/.codex/
 #
 # We do NOT anchor on ~/.claude exactly — relative paths like
 # .claude/settings.json are also config paths.
@@ -79,46 +91,122 @@ _CONFIG_PATH_RE = re.compile(
 
 def _is_config_path(token: str) -> bool:
     """Return True if `token` looks like a known config JSON path."""
-    # Must end with .json
     if not token.endswith(".json"):
         return False
     return bool(_CONFIG_PATH_RE.search(token))
 
 
 # ---------------------------------------------------------------------------
-# Extract jq target path from a command segment argv
+# jq flag classification (jq 1.7.1, verified via `jq --help`)
+# ---------------------------------------------------------------------------
+#
+# Only flags that consume exactly ONE separate next token are listed here.
+# Boolean flags (--sort-keys, --stream, --tab, -e, --exit-status, etc.) are
+# NOT listed — they do not consume a value token.
+#
+# Note: --arg, --argjson, --slurpfile, --rawfile each consume TWO tokens
+# (name + value). We model this as consuming 2 tokens when bare.
+# --from-file/-f and -L each consume ONE token.
+#
+# --args / --jsonargs: consume ALL remaining argv as positional strings —
+# once encountered, no further jq file arguments appear. We break on them.
+
+# Single-token consuming flags (name-only, one following token)
+_JQ_SINGLE_VALUE_FLAGS: frozenset[str] = frozenset({
+    "--from-file", "-f",    # load filter from file
+    "-L",                   # module search directory
+    "--indent",             # indentation spaces
+})
+
+# Two-token consuming flags (name value, two following tokens)
+_JQ_DOUBLE_VALUE_FLAGS: frozenset[str] = frozenset({
+    "--arg",        # name value  → $name = string
+    "--argjson",    # name value  → $name = JSON
+    "--slurpfile",  # name file
+    "--rawfile",    # name file
+})
+
+# Boolean flags that terminate further file argument scanning.
+# After --args or --jsonargs, all remaining tokens are positional string
+# values passed to the program, NOT file arguments. We treat them as a
+# hard stop for file-path extraction.
+_JQ_STOP_FLAGS: frozenset[str] = frozenset({"--args", "--jsonargs"})
+
+# Regex to detect jq invocations inside coalesced $(…) substitution tokens.
+# Matches: jq <optional flags> <filter> <config-path>
+# Used for C1 (command substitution) detection.
+_JQ_SUBST_RE = re.compile(
+    r"""
+    (?:^|\s|=)              # start of string, whitespace, or assignment
+    \$\(                    # start of command substitution
+    [^)]*                   # any content
+    \bjq\b                  # the jq command
+    """,
+    re.VERBOSE,
+)
+
+# Simpler pattern to extract config paths from a raw coalesced SUBST_RUN token.
+# Looks for any token matching the config path shape in the substitution body.
+_CONFIG_PATH_IN_TEXT_RE = re.compile(
+    r"""
+    (?:
+        (?:^|[\s(])                 # preceded by start/space/open-paren
+        (
+            ~?/[^\s)'"]*\.json      # absolute path (possibly tilde)
+          | \.claude/[^\s)'"]*\.json   # relative .claude/...
+          | \.codex/[^\s)'"]*\.json    # relative .codex/...
+          | settings\.json             # bare repo-root name
+          | hooks\.json                # bare repo-root name
+        )
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+def _scan_subst_for_config_paths(token: str) -> list[str]:
+    """Extract config-matching paths from a coalesced SUBST_RUN token.
+
+    A coalesced token like:
+      'threshold=$(jq -r .ambiguity_threshold ~/.claude/settings.json)'
+    contains a jq invocation. We extract any config-path candidates from the
+    raw substitution text.
+
+    Returns an empty list if no jq invocation or config path is detected.
+    """
+    if "jq" not in token or "$(" not in token:
+        return []
+    # Only bother if there's a jq somewhere in the substitution.
+    if not re.search(r'\bjq\b', token):
+        return []
+    paths = []
+    for m in _CONFIG_PATH_IN_TEXT_RE.finditer(token):
+        candidate = m.group(1)
+        if _is_config_path(candidate):
+            paths.append(candidate)
+    return paths
+
+
+# ---------------------------------------------------------------------------
+# Extract jq target paths from a command segment
 # ---------------------------------------------------------------------------
 #
 # jq syntax: jq [OPTIONS] FILTER [FILE...]
-# We look for any POSITIONAL argument (non-flag, non-filter) that ends in
-# .json. The filter is the first positional; subsequent positionals are
-# input files. We skip the filter and look for file arguments.
-#
-# Heuristic: skip the first positional (the filter), then collect all
-# remaining positionals that end in .json. Handles the common patterns:
-#   jq '.' settings.json
-#   jq '.hooks' ~/.claude/settings.json
-#   cat settings.json | jq '.'   ← no file arg (piped), skip
-#   jq -r '.foo' ~/.codex/config.json
+# We skip the filter (first positional) and collect subsequent .json positionals.
+# Special handling:
+#   • `<` redirect token followed by a config path
+#   • piped segments: if prev segment had a config path via cat/< , passed
+#     via caller-level cross-segment logic
 
 def _extract_jq_config_paths(argv: list[str]) -> list[str]:
-    """Return all config-matching .json positional arguments in a jq call.
+    """Return config-matching .json paths in a jq call argv.
 
-    argv must already be stripped of env/wrapper prefixes. argv[0] == 'jq'.
-    Returns an empty list if this is not a jq invocation or no config paths
-    are found.
+    argv must already be stripped of env/wrapper prefixes (argv[0] == 'jq').
+    Returns an empty list if this is not a jq invocation or no config
+    paths are found.
     """
     if not argv or argv[0] != "jq":
         return []
-
-    # Known jq flags that take a separate-token value.
-    # Source: jq --help (jq 1.6/1.7)
-    jq_value_flags: frozenset[str] = frozenset({
-        "--arg", "--argjson", "--slurpfile", "--rawfile", "--jsonargs",
-        "--args", "-e", "--exit-status", "--indent", "--tab",
-        "--from-file", "-f", "--sort-keys", "--stream",
-        "-L", "--rawfile",
-    })
 
     paths: list[str] = []
     filter_seen = False
@@ -126,28 +214,87 @@ def _extract_jq_config_paths(argv: list[str]) -> list[str]:
     n = len(argv)
     while i < n:
         tok = argv[i]
+
+        # -- terminates options; everything after is a file path
         if tok == "--":
-            # Everything after -- is a file argument
             for j in range(i + 1, n):
                 if _is_config_path(argv[j]):
                     paths.append(argv[j])
             break
+
+        # --args / --jsonargs: remaining argv are positional strings, not files
+        if tok in _JQ_STOP_FLAGS:
+            break
+
+        # stdin redirect: `< path` — the `<` token is followed by the file
+        if tok == "<":
+            if i + 1 < n and _is_config_path(argv[i + 1]):
+                paths.append(argv[i + 1])
+            i += 2
+            continue
+
         if tok.startswith("-") and len(tok) > 1:
-            # Flag — check if it consumes a value token
             bare = tok.split("=", 1)[0]
-            if "=" not in tok and bare in jq_value_flags and i + 1 < n:
+            if "=" in tok:
+                # Value is embedded (--flag=value) — skip this token only
+                i += 1
+                continue
+            if bare in _JQ_DOUBLE_VALUE_FLAGS and i + 2 < n:
+                # name value — skip two following tokens
+                i += 3
+                continue
+            if bare in _JQ_SINGLE_VALUE_FLAGS and i + 1 < n:
+                # value — skip one following token
                 i += 2
                 continue
+            # Boolean flag — skip just this token
             i += 1
             continue
+
         # Positional
         if not filter_seen:
-            # First positional is the filter expression
+            # First positional is the jq filter expression
             filter_seen = True
         else:
             # Subsequent positionals are input files
             if _is_config_path(tok):
                 paths.append(tok)
+        i += 1
+    return paths
+
+
+def _extract_config_paths_from_non_jq_segment(argv: list[str]) -> list[str]:
+    """Return config-matching .json paths from a non-jq segment.
+
+    Used for M4: `cat ~/.claude/settings.json | jq '.'` — we need to
+    detect the config path in the `cat` segment and correlate it with the
+    subsequent `jq` segment.
+
+    Scans all positional tokens (non-flags) for config paths.
+    """
+    paths: list[str] = []
+    if not argv:
+        return paths
+    cmd = argv[0]
+    # Only correlate for known pipe-source commands or redirect-style patterns.
+    # cat, head, tail, less, python3, etc. — any command may pipe to jq.
+    # We conservatively detect config paths in any non-jq segment and let
+    # the caller decide.
+    i = 1
+    n = len(argv)
+    while i < n:
+        tok = argv[i]
+        if tok == "<":
+            # redirect: the next token is the source file
+            if i + 1 < n and _is_config_path(argv[i + 1]):
+                paths.append(argv[i + 1])
+            i += 2
+            continue
+        if tok.startswith("-") and len(tok) > 1:
+            i += 1
+            continue
+        if _is_config_path(tok):
+            paths.append(tok)
         i += 1
     return paths
 
@@ -232,6 +379,63 @@ def _check_file(path: str) -> Optional[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+def _collect_config_paths(command: str) -> list[str]:
+    """Extract all config-matching jq target paths from a Bash command string.
+
+    Handles four patterns:
+      1. Direct: `jq '.' ~/.claude/settings.json`
+      2. Stdin redirect: `jq '.' < ~/.claude/settings.json`
+      3. Pipe: `cat ~/.claude/settings.json | jq '.'`
+      4. Substitution: `threshold=$(jq -r '.foo' ~/.claude/settings.json)`
+    """
+    normalized = command.replace("\\\n", " ")
+    raw_tokens = safe_tokenize(normalized)
+    if not raw_tokens:
+        return []
+
+    config_paths: list[str] = []
+    segments = list(iter_command_starts(raw_tokens))
+
+    # Track config paths seen in the previous segment (for pipe correlation).
+    prev_segment_config_paths: list[str] = []
+
+    for seg_idx, seg_raw in enumerate(segments):
+        seg = list(seg_raw)
+
+        # --- C1: SUBST_RUN scan ---
+        # Coalesce to find $(…) tokens and scan them for embedded jq calls.
+        coalesced = _coalesce_subst_runs(seg)
+        for tok in coalesced:
+            if "$(" in tok and "jq" in tok:
+                subst_paths = _scan_subst_for_config_paths(tok)
+                config_paths.extend(subst_paths)
+
+        # Standard segment analysis (stripped argv)
+        argv = strip_prefix(seg)
+        if not argv:
+            prev_segment_config_paths = []
+            continue
+
+        cmd = argv[0].rsplit("/", 1)[-1]  # basename, handle /usr/bin/jq
+
+        if cmd == "jq":
+            # Pattern 1 & 2: direct jq invocation (includes < redirect in argv)
+            direct_paths = _extract_jq_config_paths(argv)
+            config_paths.extend(direct_paths)
+
+            # Pattern 3 (M4): if previous segment contained config paths,
+            # and this is a jq segment with no file args, correlate.
+            if not direct_paths and prev_segment_config_paths:
+                config_paths.extend(prev_segment_config_paths)
+
+            prev_segment_config_paths = []
+        else:
+            # Non-jq segment: collect its config paths for pipe correlation.
+            prev_segment_config_paths = _extract_config_paths_from_non_jq_segment(argv)
+
+    return config_paths
+
+
 def _main_inner() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -245,17 +449,7 @@ def _main_inner() -> int:
     if not command.strip():
         return 0
 
-    # Find all jq invocations with config-path arguments
-    tokens = safe_tokenize(command.replace("\\\n", " "))
-    if not tokens:
-        return 0
-
-    config_paths: list[str] = []
-    for argv_raw in iter_command_starts(tokens):
-        argv = strip_prefix(list(argv_raw))
-        paths = _extract_jq_config_paths(argv)
-        config_paths.extend(paths)
-
+    config_paths = _collect_config_paths(command)
     if not config_paths:
         return 0
 
@@ -264,18 +458,18 @@ def _main_inner() -> int:
     seen = _load_seen(dedup_path)
 
     new_seen = set(seen)
-    emitted = False
 
     for path in config_paths:
-        # Canonicalize for dedup: expand user, but keep original for display
+        # Canonicalize for dedup: expand user + normalize
         key = os.path.normpath(os.path.expanduser(path))
         if key in seen:
             continue
         msg = _check_file(path)
         if msg:
             sys.stderr.write(msg + "\n")
-            emitted = True
-        new_seen.add(key)
+            # M3 fix: only record in dedup state when advisory was emitted,
+            # so a file that later becomes empty is re-checked.
+            new_seen.add(key)
 
     if new_seen != seen:
         _save_seen(dedup_path, new_seen)

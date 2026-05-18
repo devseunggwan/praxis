@@ -19,14 +19,23 @@ This hook surfaces the problem *before* the command executes (issue #323).
 
 ### What is detected
 
-Detection surface — a Bash segment is scanned when it contains `jq` followed
-by at least one positional argument matching a known config path:
+Detection surface — config paths matched:
 
 - `~/.claude/*.json`
 - `~/.codex/*.json`
 - Repo-root `settings.json` or `hooks.json` (bare filename)
 - Any `.json` file under a `.claude/` or `.codex/` directory component
   (absolute or relative)
+
+Four invocation patterns are recognized:
+
+| Pattern | Example |
+|---------|---------|
+| Direct | `jq '.' ~/.claude/settings.json` |
+| Boolean flag | `jq -e '.theme' ~/.claude/settings.json` |
+| Stdin redirect | `jq '.' < ~/.claude/settings.json` |
+| Pipe from prior segment | `cat ~/.claude/settings.json \| jq '.'` |
+| Command substitution | `threshold=$(jq -r '.foo' ~/.claude/settings.json)` |
 
 File-level outcomes:
 
@@ -41,14 +50,28 @@ Command-level examples:
 
 | Command | Action |
 |---------|--------|
-| `jq '.' ~/.claude/settings.json` (file empty) | **ADVISORY** `[config-empty]` |
-| `jq '.hooks' hooks.json` (file invalid JSON) | **ADVISORY** `[config-invalid]` |
-| `jq -r '.foo' .claude/settings.json` (file valid) | **SILENT** |
-| `jq '.' ~/.codex/config.json` (file valid) | **SILENT** |
-| `jq '.' /tmp/unrelated.json` (non-config path) | **SILENT** — path not in scope |
-| `jq '.' settings.json` (file missing) | **SILENT** — existence not in scope |
+| `jq '.' ~/.claude/settings.json` (empty) | **ADVISORY** `[config-empty]` |
+| `jq -e '.theme' ~/.claude/settings.json` (empty) | **ADVISORY** `[config-empty]` — `-e` is boolean |
+| `jq --sort-keys '.foo' ~/.claude/settings.json` (empty) | **ADVISORY** `[config-empty]` — `--sort-keys` is boolean |
+| `jq '.hooks' hooks.json` (invalid JSON) | **ADVISORY** `[config-invalid]` |
+| `cat ~/.claude/settings.json \| jq '.'` (empty) | **ADVISORY** `[config-empty]` — pipe correlation |
+| `jq '.' < ~/.claude/settings.json` (empty) | **ADVISORY** `[config-empty]` — stdin redirect |
+| `threshold=$(jq -r '.foo' ~/.claude/settings.json)` (empty) | **ADVISORY** `[config-empty]` — substitution |
+| `jq -r '.foo' .claude/settings.json` (valid) | **SILENT** |
+| `jq '.' ~/.codex/config.json` (valid) | **SILENT** |
+| `jq '.' /tmp/unrelated.json` (any state) | **SILENT** — path not in scope |
+| `jq '.' settings.json` (missing) | **SILENT** — existence not in scope |
+| `jq -n 'null'` | **SILENT** — no file argument |
 | Non-Bash tool | **SILENT** |
 | Malformed JSON stdin | **SILENT** (fail-open) |
+
+Not detected (by design):
+
+| Pattern | Reason |
+|---------|--------|
+| `jq '.' /tmp/other.json` | Non-config path, out of scope |
+| `jq -n '{}'` | Null input (`-n`), no file read |
+| Multi-hop pipe `cmd1 \| cmd2 \| jq`  | Only immediate prior segment correlated |
 
 ### Response format
 
@@ -63,9 +86,10 @@ user sees the stderr text and can inspect / repair the file before rerunning.
 
 ### Deduplication
 
-Advisories are deduplicated per `session_id` + canonical path. A given file
-triggers at most one advisory per session regardless of how many `jq` calls
-target it. State file:
+Advisories are deduplicated per `session_id` + canonical path. Only
+advisory-emitting checks are recorded — a file that is valid on first access
+and later becomes empty will re-trigger the advisory on the next call. State
+file:
 
 ```
 ${TMPDIR:-/tmp}/praxis-jq-config-advisory-<session_id>.json
@@ -98,5 +122,7 @@ test invocations).
 bash hooks/test-jq-config-empty-dict-advisory.sh
 ```
 
-3 cases: empty file (`[config-empty]` advisory), invalid JSON file
-(`[config-invalid]` advisory), valid JSON file (silent).
+10 cases: empty file, invalid JSON file, valid JSON file (original 3),
+plus C1 command substitution, C2a `-e` boolean flag, C2b `--sort-keys`
+boolean flag, M3a/M3b dedup state transition (valid→empty), M4a pipe
+correlation, M4b stdin redirect.

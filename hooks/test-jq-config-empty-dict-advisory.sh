@@ -89,12 +89,19 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 SID_EMPTY="test-empty-$$"
 SID_INVALID="test-invalid-$$"
 SID_VALID="test-valid-$$"
+SID_C1="test-c1-subst-$$"
+SID_C2A="test-c2a-eflag-$$"
+SID_C2B="test-c2b-sortkeys-$$"
+SID_M3A="test-m3a-$$"
+SID_M3B="test-m3b-$$"
+SID_M4A="test-m4a-pipe-$$"
+SID_M4B="test-m4b-redirect-$$"
+
+mkdir -p "$TMP_DIR/.claude"
 
 # --- Case 1: empty file -------------------------------------------------------
 
 EMPTY_JSON="$TMP_DIR/.claude/settings.json"
-mkdir -p "$(dirname "$EMPTY_JSON")"
-# Create a zero-byte file
 : > "$EMPTY_JSON"
 
 run_case "empty config file" \
@@ -105,7 +112,6 @@ run_case "empty config file" \
 # --- Case 2: invalid JSON file ------------------------------------------------
 
 INVALID_JSON="$TMP_DIR/.claude/hooks.json"
-mkdir -p "$(dirname "$INVALID_JSON")"
 printf '{not valid json' > "$INVALID_JSON"
 
 run_case "invalid JSON config file" \
@@ -116,13 +122,87 @@ run_case "invalid JSON config file" \
 # --- Case 3: valid JSON file --------------------------------------------------
 
 VALID_JSON="$TMP_DIR/.claude/valid.json"
-mkdir -p "$(dirname "$VALID_JSON")"
 printf '{"key": "value"}' > "$VALID_JSON"
 
 run_case "valid JSON config file" \
   "silent" \
   "jq '.key' $VALID_JSON" \
   "$SID_VALID"
+
+# --- Case 4 (C1): command substitution — threshold=$(jq -r '...' file) --------
+# Issue body originating pattern. safe_tokenize splits threshold=$(jq into one
+# token; _coalesce_subst_runs joins the $(…) run; _scan_subst_for_config_paths
+# then extracts the path from the coalesced SUBST_RUN token.
+
+C1_JSON="$TMP_DIR/.claude/c1.json"
+: > "$C1_JSON"
+
+run_case "C1 command substitution empty file" \
+  "advisory:[config-empty]" \
+  "threshold=\$(jq -r '.ambiguity_threshold // 0.2' $C1_JSON)" \
+  "$SID_C1"
+
+# --- Case 5 (C2a): jq -e flag (boolean, must not consume filter as value) -----
+
+C2A_JSON="$TMP_DIR/.claude/c2a.json"
+: > "$C2A_JSON"
+
+run_case "C2a -e flag (boolean) empty file" \
+  "advisory:[config-empty]" \
+  "jq -e '.theme' $C2A_JSON" \
+  "$SID_C2A"
+
+# --- Case 6 (C2b): jq --sort-keys flag (boolean, must not consume value) ------
+
+C2B_JSON="$TMP_DIR/.claude/c2b.json"
+: > "$C2B_JSON"
+
+run_case "C2b --sort-keys flag (boolean) empty file" \
+  "advisory:[config-empty]" \
+  "jq --sort-keys '.foo' $C2B_JSON" \
+  "$SID_C2B"
+
+# --- Case 7 (M3): dedup — advisory-emitting keys are deduplicated, ---------
+# but a file not yet advisory-emitting is NOT blocked from future checks.
+# Sub-case A: first call on valid file → silent, key NOT stored.
+# Sub-case B: same session, same file now empty → advisory must fire.
+# We simulate by sharing a session_id across A and B.
+
+M3_JSON="$TMP_DIR/.claude/m3.json"
+printf '{"ok": true}' > "$M3_JSON"
+
+run_case "M3a valid file first call (no advisory stored)" \
+  "silent" \
+  "jq '.' $M3_JSON" \
+  "$SID_M3A"
+
+# Now make the file empty and re-check with same session_id.
+: > "$M3_JSON"
+
+run_case "M3b same file now empty — advisory must fire" \
+  "advisory:[config-empty]" \
+  "jq '.' $M3_JSON" \
+  "$SID_M3A"
+
+# --- Case 8 (M4a): cat config | jq '.' — pipe correlation --------------------
+
+M4A_JSON="$TMP_DIR/.claude/m4a.json"
+: > "$M4A_JSON"
+
+run_case "M4a piped cat config | jq empty file" \
+  "advisory:[config-empty]" \
+  "cat $M4A_JSON | jq '.'" \
+  "$SID_M4A"
+
+# --- Case 9 (M4b): jq '.' < config — stdin redirect --------------------------
+
+M4B_JSON="$TMP_DIR/.claude/m4b.json"
+: > "$M4B_JSON"
+
+run_case "M4b stdin redirect jq '.' < config empty file" \
+  "advisory:[config-empty]" \
+  "jq '.' < $M4B_JSON" \
+  "$SID_M4B"
 
 # ---------------------------------------------------------------------------
 echo
