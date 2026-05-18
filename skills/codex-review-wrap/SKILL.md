@@ -673,7 +673,7 @@ applies (emit only at `cumulative = N+1`, not again on later rounds).
 | `PRAXIS_DIMINISHING_RETURNS_N` is set but not a positive integer | Use default (4); do not error |
 | Region label cannot be determined (binary file, empty file) | Use the file path alone as the region label |
 | Critic negative claim emitted without `Probe:` citation (5g) | Halt the finding; prompt the critic to re-run with probe citation before surfacing |
-| Probe command for 5g exits non-zero / returns unexpected output | Surface probe failure to the user; do not auto-retract the claim — let the user decide |
+| Probe command for 5g returns unexpected output or exits with an error code that signals a command failure (e.g. exit=2 "command not found", permission denied) — distinct from `grep` exit=1 (no match), which is the expected signal for verified absence | Surface probe failure to the user; do not auto-retract the claim — let the user decide |
 
 ## Example Flow
 
