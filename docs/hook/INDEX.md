@@ -45,6 +45,7 @@ so the agent can self-correct. Fail-open on infrastructure errors by design.
 | [external-api-literal-trigger](external-api-literal-trigger.md) | PreToolUse | Advisory nudge when ALL_CAPS enum candidates or 3-part SQL identifiers are written without prior retrieval verification |
 | [output-block-falsify-advisory](output-block-falsify-advisory.md) | PreToolUse | Advisory nudge to run output-block falsification gate before surfacing `(Recommended)` options or bulk-action commands |
 | [advisory-wrapper-signature-verify](advisory-wrapper-signature-verify.md) | PreToolUse | Advisory nudge to verify wrapped function signatures before writing wrapper/client code |
+| [jq-config-empty-dict-advisory](jq-config-empty-dict-advisory.md) | PreToolUse | Advisory nudge when `jq` reads a config file (settings.json, hooks.json, ~/.claude/*.json, ~/.codex/*.json) that is empty or invalid JSON |
 | [codex-review-route](codex-review-route.md) | UserPromptSubmit | Warn when `/codex:review` runs in a multi-worktree repo (cwd mismatch risk) |
 
 ---
