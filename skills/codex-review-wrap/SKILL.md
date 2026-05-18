@@ -16,7 +16,7 @@ description: >
   "diminishing returns".
 verified-against-runtime: true
 runtime-verified-at: 2026-05-13
-runtime-verified-note: "codex-companion 1.0.4 — ARGUMENTS rejected for non-flag string; AskUserQuestion maxItems:4 blocks worktree list >3 items; Skill() cannot delegate to disable-model-invocation skill. Step 4 hardened to a MUST NOT directive in issue #237 (2026-05-16) — directive-only change, no new runtime claim."
+runtime-verified-note: "codex-companion 1.0.4 — ARGUMENTS rejected for non-flag string; AskUserQuestion maxItems:4 blocks worktree list >3 items; Skill() cannot delegate to disable-model-invocation skill. Step 4 hardened to a MUST NOT directive in issue #237 (2026-05-16) — directive-only change, no new runtime claim. Step 5f (PR #329) adds procedural prose only (rounds_per_region ledger + advisory text); no runtime hook code changed — existing verification evidence remains valid."
 ---
 
 # codex-review-wrap
@@ -286,7 +286,9 @@ sibling-applied:  {sibling-repo}#{PR-or-branch} | round={N} | finding={brief-lab
 rounds_per_region: {file}:{region} | round={N} | cumulative={C}
 ```
 
-Before applying any new edit, scan **`applied` and `rejected` records only** in the ledger.
+Before applying any new edit, scan records whose prefix token is exactly
+**`applied:`** or **`rejected:`** (NOT `sibling-applied:` or
+`rounds_per_region:`) in the ledger.
 A flip fires when:
 
 1. **Applied flip** — the new edit would revert a previously-applied
