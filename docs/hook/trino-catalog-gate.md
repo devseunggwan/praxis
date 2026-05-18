@@ -63,13 +63,25 @@ SHOW CATALOGS enumeration marker is persisted to disk. Resolution order
 
 ### 3-part catalog reference detection
 
-The hook detects `FROM <catalog>.<schema>.<table>` and `JOIN <catalog>.<schema>.<table>`
-patterns using a regex with a SQL context gate (requires `FROM` or `JOIN`
-keyword before the identifier). This avoids false positives on Python attribute
-chains like `os.path.sep`.
+The hook detects 3-part `<catalog>.<schema>.<table>` references following any
+of these SQL context keywords:
 
-SQL comments (`-- line`, `/* block */`) are stripped before detection to prevent
-`-- catalog.schema.table` false positives.
+| Keyword arm | Covers |
+|-------------|--------|
+| `FROM` | `SELECT ... FROM`, `DELETE FROM` |
+| `JOIN` | all JOIN variants |
+| `INTO` | `INSERT INTO`, `MERGE INTO` |
+| `UPDATE` | `UPDATE <ref> SET ...` |
+| `TABLE` | `CREATE TABLE`, `CREATE OR REPLACE TABLE`, `ALTER TABLE` |
+| `VIEW` | `CREATE VIEW`, `CREATE OR REPLACE VIEW` |
+
+The context keyword gate avoids false positives on Python attribute chains like
+`os.path.sep`.
+
+String literals are masked before comment and catalog-reference detection so
+that `--` or `/* */` sequences embedded inside string values are not treated
+as SQL comment delimiters. SQL comments are then stripped so that
+`-- catalog.schema.table` does NOT trigger the gate.
 
 Quoted identifier forms are recognized:
 
@@ -83,8 +95,13 @@ Quoted identifier forms are recognized:
 
 Two bypass paths are available when the catalog is already known-good:
 
-1. **Inline marker** — append `-- catalog-enumerated: verified` anywhere in
-   the SQL body. The gate checks the raw query text before comment stripping.
+1. **Inline marker** — place `catalog-enumerated: verified` inside a SQL
+   comment in the query body:
+   - Line comment: `SELECT ... -- catalog-enumerated: verified`
+   - Block comment: `SELECT ... /* catalog-enumerated: verified */`
+   The marker must appear in comment syntax. Text inside string literals,
+   column aliases, or quoted identifiers does NOT bypass the gate
+   (`WHERE x = 'foo -- catalog-enumerated: verified'` is NOT a bypass).
 2. **Env bypass** — set `PRAXIS_TRINO_CATALOG_GATE=skip`. One-off session
    override; does not persist across invocations.
 
@@ -104,13 +121,21 @@ subsequent queries in the same session once the marker file exists.
 | `python3` unavailable | exit 0 (shell shim guards) |
 | Hook `.py` file missing | exit 0 (shell shim guards) |
 
-### Known limitations
+### Known limitations (Phase 2)
 
-- `INSERT INTO <catalog>.<schema>.<table>`, `MERGE INTO`, and `CREATE TABLE AS
-  SELECT` DML catalog references are not detected. Extension candidates for v2.
-- Detection is regex-based, not a full SQL parser. Pathological inputs
-  (mismatched parens inside string literals, quoted identifiers containing
-  `.`) fall back to fail-open.
+The following SQL shapes may produce `CATALOG_NOT_FOUND` but are not yet
+detected by this hook (will silently pass through):
+
+- MERGE source `USING <catalog>.<schema>.<table>` — the USING clause target
+  does not follow a FROM/INTO keyword and is not currently detected.
+- `CREATE TABLE x (LIKE catalog.schema.t)` LIKE clause references.
+- Subquery `FROM` clauses where only inner queries reference 3-part catalogs
+  but the outer query does not.
+- Dynamic SQL via `EXECUTE PREPARE <name> USING ...` (prepared statement
+  reference, not the underlying SQL text).
+
+Detection is regex-based, not a full SQL parser. Pathological inputs fall back
+to fail-open.
 
 ### Tests
 
@@ -118,11 +143,15 @@ subsequent queries in the same session once the marker file exists.
 bash tests/test_trino_catalog_gate.sh
 ```
 
-Covers 6 cases from the issue verification matrix:
+Covers 27 cases across M1 (bypass comment-only), M2 (DML/DDL keyword set),
+M3 (multi-statement isolation), and C1 (string-literal masking):
 
-- (a) `SHOW CATALOGS` passes + creates marker
-- (b) 3-part reference without marker → blocked with guidance
-- (c) 3-part reference + `-- catalog-enumerated: verified` inline → passes
-- (d) `SHOW SCHEMAS FROM iceberg` (2-part, not 3-part) → passes
+- (a) `SHOW CATALOGS` passes + creates marker; subsequent 3-part query passes
+- (b) 3-part `FROM`/`JOIN` reference without marker → deny
+- (c) Inline bypass: line comment and block comment → passes; string literal → deny
+- (d) 2-part references (`schema.table`) → passes
 - (e) `PRAXIS_TRINO_CATALOG_GATE=skip` → bypasses
 - (f) Non-Trino MCP tool → passthrough
+- M2: `INSERT INTO`, `MERGE INTO`, `UPDATE`, `CREATE TABLE`, `CREATE VIEW`, `DELETE FROM` → deny
+- M3: `SHOW CATALOGS; SELECT ... FROM 3-part` in one payload → deny (no prior marker)
+- C1: string literal containing `-- marker text` → deny (literal masking prevents bypass)

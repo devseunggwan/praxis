@@ -385,6 +385,40 @@ run_case \
   "$(make_trino_payload 'SHOW CATALOGS')"
 
 # ---------------------------------------------------------------------------
+# C1: String-literal -- bypass leakage (round 3 fix)
+# ---------------------------------------------------------------------------
+echo ""
+echo "C1: string-literal bypass leakage fix"
+
+# String literal containing -- marker: NOT a bypass (C1 fix)
+run_case \
+  "string literal 'foo -- catalog-enumerated: verified' → deny (C1 fix)" \
+  "deny" \
+  "" \
+  "$(make_trino_payload "SELECT name FROM iceberg.foo.bar WHERE name = 'foo -- catalog-enumerated: verified'")"
+
+# String literal containing bare --: must not be mistaken for a comment
+run_case \
+  "string literal '--' AS sep → deny, no false-pass (C1 fix)" \
+  "deny" \
+  "" \
+  "$(make_trino_payload "SELECT '--' AS sep FROM iceberg.foo.bar")"
+
+# Block comment with marker: still a valid bypass (existing behaviour preserved)
+run_case \
+  "block comment /* catalog-enumerated: verified */ → pass (bypass preserved)" \
+  "pass" \
+  "" \
+  "$(make_trino_payload 'SELECT * FROM iceberg.foo.bar /* catalog-enumerated: verified */')"
+
+# Line comment with marker: still a valid bypass (existing behaviour preserved)
+run_case \
+  "line comment -- catalog-enumerated: verified → pass (bypass preserved)" \
+  "pass" \
+  "" \
+  "$(make_trino_payload 'SELECT * FROM iceberg.foo.bar -- catalog-enumerated: verified')"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""

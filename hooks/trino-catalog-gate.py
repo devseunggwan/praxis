@@ -90,7 +90,11 @@ The following DML shapes produce `CATALOG_NOT_FOUND` but are not yet detected:
     level deep when the outer query itself has no 3-part reference.
   - Dynamic SQL via `EXECUTE PREPARE <name> USING ...` (prepared statement
     reference, not the underlying SQL).
-  - `ALTER TABLE <catalog>.<schema>.<table> ...` DDL.
+  - MERGE source `USING <catalog>.<schema>.<table>` (the USING clause target
+    is not a FROM/INTO keyword context and is not currently detected).
+  - `CREATE TABLE x (LIKE catalog.schema.t)` LIKE clause references.
+  - `ALTER TABLE <catalog>.<schema>.<table> ...` DDL is incidentally covered
+    via the TABLE keyword arm (ALTER TABLE → TABLE arm matches the ref).
 """
 from __future__ import annotations
 
@@ -116,18 +120,50 @@ BLOCK_REASON = (
 )
 
 # ---------------------------------------------------------------------------
-# Comment stripping
+# String-literal masking + comment stripping
 # ---------------------------------------------------------------------------
+
+# Single-quoted SQL string literals: '...' with '' as an escape for '.
+# DOTALL is not needed — newlines in strings are unusual but allowed.
+_SQL_STRING_LITERAL_RE = re.compile(r"'(?:[^']|'')*'", re.DOTALL)
 
 SQL_LINE_COMMENT_RE = re.compile(r"--[^\n]*")
 SQL_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 
+BYPASS_MARKER = "catalog-enumerated: verified"
+
+
+def mask_string_literals(sql: str) -> str:
+    """Replace each SQL single-quoted string literal with 'XXX...'.
+
+    Preserves character positions so regex offsets remain consistent.
+    Both the opening and closing quote are preserved; only the interior
+    content is replaced with 'X' characters of equal length.
+
+    Handles '' (escaped single-quote) inside literals correctly: the regex
+    `'(?:[^']|'')*'` treats '' as a single token inside the string.
+
+    The masking step is applied BEFORE line-comment and block-comment regex
+    so that `--` or `/* */` sequences embedded inside string literals are not
+    mistakenly identified as SQL comments (C1 fix).
+    """
+    return _SQL_STRING_LITERAL_RE.sub(
+        lambda m: "'" + "X" * (len(m.group(0)) - 2) + "'", sql
+    )
+
 
 def strip_sql_comments(sql: str) -> str:
-    """Drop `-- line comments` and `/* block comments */`."""
-    sql = SQL_BLOCK_COMMENT_RE.sub(" ", sql)
-    sql = SQL_LINE_COMMENT_RE.sub("", sql)
-    return sql
+    """Drop `-- line comments` and `/* block comments */`.
+
+    Applies string-literal masking first so that `--` or `/* */` sequences
+    inside string values are not treated as comment delimiters (C1 fix).
+    The catalog-reference search always uses the output of this function,
+    so masking is transparent to the caller.
+    """
+    masked = mask_string_literals(sql)
+    masked = SQL_BLOCK_COMMENT_RE.sub(" ", masked)
+    masked = SQL_LINE_COMMENT_RE.sub("", masked)
+    return masked
 
 
 # ---------------------------------------------------------------------------
@@ -187,23 +223,24 @@ def is_show_catalogs_standalone(sql: str) -> bool:
 
 
 def has_bypass_marker(sql: str) -> bool:
-    """Return True if a `catalog-enumerated: verified` marker appears inside
-    a SQL comment (line or block).
+    """Return True if BYPASS_MARKER appears inside a SQL comment (line or block).
 
-    The marker must be in comment syntax to be honoured. Placing it inside
-    a string literal, column alias, or bare text does NOT bypass the gate.
+    The marker must be in comment syntax to be honoured:
+      - Line comment:  `-- ... catalog-enumerated: verified ...`
+      - Block comment: `/* ... catalog-enumerated: verified ... */`
+
+    Marker text inside string literals, column aliases, or quoted identifiers
+    does NOT bypass the gate (C1 fix: string literals are masked before the
+    comment regexes are applied, so `'foo -- catalog-enumerated: verified'`
+    is replaced with `'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'` before
+    the line-comment scan).
     """
-    # Extract raw line-comment text (without the leading --)
-    line_comments = SQL_LINE_COMMENT_RE.findall(sql)
-    for comment in line_comments:
-        if "catalog-enumerated: verified" in comment:
-            return True
-    # Extract raw block-comment text (without the /* */ delimiters)
-    block_comments = SQL_BLOCK_COMMENT_RE.findall(sql)
-    for comment in block_comments:
-        if "catalog-enumerated: verified" in comment:
-            return True
-    return False
+    # Mask string literals first so embedded `--` sequences are not treated
+    # as comment starters (C1 fix).
+    masked = mask_string_literals(sql)
+    # Collect all comment text from the masked query.
+    comments = SQL_LINE_COMMENT_RE.findall(masked) + SQL_BLOCK_COMMENT_RE.findall(masked)
+    return any(BYPASS_MARKER in c for c in comments)
 
 
 # ---------------------------------------------------------------------------
