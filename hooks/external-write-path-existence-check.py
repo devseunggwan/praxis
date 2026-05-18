@@ -18,8 +18,8 @@ Phase 1 scope (issue #324):
   - Repo root: resolved via `git rev-parse --show-toplevel` from the directory
     containing the body file; falls back to `payload["cwd"]` if git is
     unavailable.
-  - Dedup: per session_id + body-file path hash so repeated calls with the
-    same file do not spam the same advisory.
+  - Dedup: per session_id + body content SHA-256 so identical body content
+    in different temp paths fires once, and an edited body re-fires.
   - Fail-open on any infrastructure error (malformed stdin, missing git,
     unreadable file, etc.).
 
