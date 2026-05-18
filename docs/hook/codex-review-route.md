@@ -1,5 +1,7 @@
 # UserPromptSubmit Codex Review Worktree Disambiguation
 
+Supported hosts: claude (excludes codex — false-positive on Codex /codex:review command)
+
 `hooks/codex-review-route.sh` fires on every `UserPromptSubmit` event and
 emits an `additionalContext` warning when the user invokes `/codex:review`
 in a multi-worktree repository.

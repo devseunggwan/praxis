@@ -1,5 +1,6 @@
 {
   "platform": "claude",
+  "host_id": "claude",
   "outputs": [
     {
       "kind": "plugin",
@@ -15,6 +16,10 @@
         "$schema": "https://anthropic.com/claude-code/marketplace.schema.json"
       },
       "plugin_source": "./"
+    },
+    {
+      "kind": "hooks",
+      "path": ".claude-plugin/hooks/hooks.json"
     }
   ]
 }

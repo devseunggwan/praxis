@@ -1,5 +1,7 @@
 # Session-Scope Read-Intent vs Mutation-Pivot Gate
 
+Supported hosts: all
+
 `hooks/session-intent.py` is a multi-event hook (`UserPromptSubmit` +
 `PreToolUse`) that detects the session-scope drift pattern described in
 issue [#178](https://github.com/devseunggwan/praxis/issues/178): a user

@@ -1,5 +1,7 @@
 # Strike Counter (SessionStart + UserPromptSubmit + Stop)
 
+Supported hosts: all
+
 `hooks/strike-counter.sh` implements praxis's session-scoped three-strike
 discipline. A single bash script dispatches across multiple modes — three
 of them are registered in `hooks/hooks.json`, the rest are exposed to the

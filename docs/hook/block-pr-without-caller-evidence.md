@@ -1,5 +1,7 @@
 # PreToolUse Block PR Without Caller-Chain Evidence
 
+Supported hosts: all
+
 `hooks/block-pr-without-caller-evidence.py` fires on every PreToolUse(Bash)
 event and inspects the command for `gh pr create` / `gh pr new` invocations.
 The hook blocks the call unless the effective PR body contains a literal

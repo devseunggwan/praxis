@@ -31,16 +31,17 @@ _spec.loader.exec_module(_build)
 
 def main() -> int:
     base = _build.load_base()
+    hooks_source = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text())
     drifts: list[str] = []
 
     for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
         platform = json.loads(platform_file.read_text())
-        excluded_hooks = platform.get("excluded_hooks", [])
+        host_id = platform.get("host_id", platform["platform"])
         for output in platform["outputs"]:
             out_path = REPO_ROOT / output["path"]
             expected = (
                 json.dumps(
-                    _build.render_output(base, output, excluded_hooks),
+                    _build.render_output(base, output, hooks_source, host_id),
                     indent=2,
                     ensure_ascii=False,
                 )
@@ -52,6 +53,48 @@ def main() -> int:
                     f"DRIFT {output['path']}: regenerate with "
                     "./scripts/build-plugin-manifests.py"
                 )
+
+    # Spec existence check: every hook entry in hooks/hooks.json must have
+    # a corresponding docs/hook/<name>.md file. Also validate the optional
+    # `hosts` field shape — empty list or non-list silently drops the hook
+    # from every platform, so block at CI rather than ship a footgun.
+    docs_dir = REPO_ROOT / "docs" / "hook"
+    for event_groups in hooks_source.get("hooks", {}).values():
+        for group in event_groups:
+            for hook in group.get("hooks", []):
+                cmd = hook.get("command", "")
+                hosts = hook.get("hosts")
+                if hosts is not None:
+                    if not isinstance(hosts, list):
+                        drifts.append(
+                            f"INVALID hosts in {cmd}: must be a list of strings, "
+                            f"got {type(hosts).__name__}"
+                        )
+                    elif len(hosts) == 0:
+                        drifts.append(
+                            f"INVALID hosts in {cmd}: empty list drops the hook "
+                            f"from every platform — omit the field to mean 'all hosts'"
+                        )
+                    elif not all(isinstance(h, str) for h in hosts):
+                        drifts.append(
+                            f"INVALID hosts in {cmd}: every entry must be a string"
+                        )
+                # Extract hook name: basename minus extension
+                hook_filename = Path(cmd.split("/")[-1]) if "/" in cmd else Path(cmd)
+                hook_name = hook_filename.stem
+                # Strip argument suffixes (e.g. "strike-counter.sh session-start" → "strike-counter")
+                hook_name = hook_name.split()[0] if " " in hook_name else hook_name
+                # Normalize -pre / -post variant scripts to their shared spec name
+                # (e.g. trino-describe-first-pre → trino-describe-first)
+                for suffix in ("-pre", "-post"):
+                    if hook_name.endswith(suffix):
+                        hook_name = hook_name[: -len(suffix)]
+                        break
+                spec = docs_dir / f"{hook_name}.md"
+                if not spec.exists():
+                    drifts.append(
+                        f"MISSING SPEC docs/hook/{hook_name}.md for hook: {cmd}"
+                    )
 
     for name in _build.FORWARDED_DIRS:
         link = _build.ADAPTER_SHELL / name

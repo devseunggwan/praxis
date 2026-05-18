@@ -1,5 +1,7 @@
 # PreToolUse External-Write Falsify Check (opt-in)
 
+Supported hosts: all
+
 `hooks/external-write-falsify-check.py` is an **opt-in** PreToolUse advisory
 that warns before posting hypothesis-stage text to external surfaces (PR
 comments, issue bodies, Slack messages, Notion pages). It enforces the

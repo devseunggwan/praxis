@@ -1,5 +1,7 @@
 # PreToolUse Wrapper Signature Verification Advisory
 
+Supported hosts: all
+
 `hooks/advisory-wrapper-signature-verify.py` fires on `PreToolUse` events for
 `Write` / `Edit` tool calls. It detects writes of wrapper/client code that
 delegate to another module's functions and emits an advisory reminder to

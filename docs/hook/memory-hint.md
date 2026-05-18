@@ -1,5 +1,7 @@
 # PreToolUse Memory Hint
 
+Supported hosts: all
+
 `hooks/memory-hint.py` fires on every Bash tool call and emits stderr lines
 referencing user-scoped memory files whose YAML frontmatter declares
 `hookable: true` plus a matching `hookKeywords: [...]` token. The signal is

@@ -1,5 +1,7 @@
 # PreToolUse Cross-Boundary Pre-Flight
 
+Supported hosts: all
+
 `hooks/cross-boundary-preflight.sh` intercepts every Bash tool call and
 fires on two cross-boundary patterns before the command executes.
 

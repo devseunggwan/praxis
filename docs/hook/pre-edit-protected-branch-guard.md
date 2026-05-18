@@ -1,5 +1,7 @@
 # PreToolUse Pre-Edit Protected-Branch Guard
 
+Supported hosts: all
+
 `hooks/pre-edit-protected-branch-guard.py` fires on every PreToolUse event
 for `Edit`, `Write`, and `NotebookEdit` tools. It has two independent deny
 paths on protected branches:

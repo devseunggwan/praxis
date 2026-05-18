@@ -1,5 +1,7 @@
 # PreToolUse gh search --state all Block
 
+Supported hosts: all
+
 `hooks/block-gh-state-all.sh` intercepts every Bash tool call and hard-blocks
 the invalid flag combination `gh search <subcmd> ... --state all`.
 

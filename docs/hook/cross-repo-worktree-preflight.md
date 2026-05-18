@@ -1,5 +1,7 @@
 # PreToolUse Cross-Repo Worktree Pre-Flight
 
+Supported hosts: all
+
 `hooks/cross-repo-worktree-preflight.sh` intercepts `git worktree remove
 <abs-path>` invocations and surfaces a `permissionDecision: "ask"` when the
 path is **not** registered in the cwd repo's worktree list.

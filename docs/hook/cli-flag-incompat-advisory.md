@@ -1,5 +1,7 @@
 # PreToolUse CLI Flag Incompatibility Advisory
 
+Supported hosts: all
+
 `hooks/cli-flag-incompat-advisory.sh` is the **advisory** counterpart to the
 deny-mode `gh-flag-verify.sh`. It nudges `<cli> <subcmd> --help` before known
 mode-incompatible flag combinations land on external CLIs whose surface area

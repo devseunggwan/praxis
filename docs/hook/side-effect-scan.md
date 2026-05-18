@@ -1,5 +1,7 @@
 # PreToolUse Side-Effect Scan
 
+Supported hosts: all
+
 `hooks/side-effect-scan.sh` intercepts every Bash tool call and flags commands
 with collateral side effects before the agent runs them. Goal: prevent the
 "primary-effect only" blind spot that has caused unintended merges, unintended

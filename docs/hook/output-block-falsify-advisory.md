@@ -1,5 +1,7 @@
 # PreToolUse Output-Block Falsification Advisory + Ask-Escalation
 
+Supported hosts: all
+
 `hooks/output-block-falsify-advisory.py` fires on every `PreToolUse` event
 for `AskUserQuestion` and `Bash` tool calls. It detects two surfaces where
 a self-authored proposal block is about to be surfaced without a falsification

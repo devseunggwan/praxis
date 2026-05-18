@@ -1,5 +1,7 @@
 # PostToolUse Built-in Task Classification
 
+Supported hosts: all
+
 `hooks/builtin-task-postuse.py` fires after any built-in task **management**
 tool executes and emits a corrective context note so Claude is not misled by
 upstream hook false positives.

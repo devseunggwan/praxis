@@ -19,11 +19,6 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/strike-counter.sh preprompt",
             "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/codex-review-route.sh",
-            "timeout": 5
           }
         ]
       }
