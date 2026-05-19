@@ -2,10 +2,12 @@
 
 Supported hosts: all
 
-`hooks/memory-hint.py` fires on every Bash tool call and emits stderr lines
+`hooks/memory-hint.py` fires on PreToolUse for `Bash`, `Edit`, `Write`,
+`NotebookEdit`, and `AskUserQuestion` tool calls and emits stderr lines
 referencing user-scoped memory files whose YAML frontmatter declares
-`hookable: true` plus a matching `hookKeywords: [...]` token. The signal is
-purely attention-shifting for the LLM's next reasoning step — the hook
+`hookable: true` plus a matching `hookKeywords: [...]` token. Memories opt
+into specific events via `hookEvents: [...]` (default `[Bash]`). The signal
+is purely attention-shifting for the LLM's next reasoning step — the hook
 **never blocks**, **never asks**, **always exits 0**.
 
 ### Why this exists
@@ -21,15 +23,16 @@ Reference: issue [#139](https://github.com/devseunggwan/praxis/issues/139).
 
 ### Frontmatter contract
 
-Memory authors opt in by adding two fields to their existing frontmatter:
+Memory authors opt in by adding fields to their existing frontmatter:
 
 ```yaml
 ---
 name: my-memory
 description: Short rule statement
 type: feedback
-hookable: true                           # NEW — opt-in switch
-hookKeywords: [kubectl, hubctl, gh]      # NEW — match tokens (whole-token)
+hookable: true                                  # opt-in switch
+hookKeywords: [kubectl, hubctl, gh]             # match tokens (whole-token)
+hookEvents: [Bash, Edit, AskUserQuestion]       # event whitelist (default [Bash])
 ---
 ```
 
@@ -37,8 +40,21 @@ hookKeywords: [kubectl, hubctl, gh]      # NEW — match tokens (whole-token)
 |-------|----------|-------|
 | `hookable` | yes | scalar; `true` / `True` / `TRUE` / `yes` / `Yes` enable. Anything else (or missing) → not indexed. |
 | `hookKeywords` | yes | flat single-line list, e.g. `[a, b, "c d"]`. Scalar form (`hookKeywords: kubectl`) is **rejected** — the memory is silently skipped. |
+| `hookEvents` | no | flat single-line list of supported tool names — any of `Bash`, `Edit`, `Write`, `NotebookEdit`, `AskUserQuestion`. Default `[Bash]`. Tool names outside that set are dropped; if every listed event is unsupported, the parser retains the default `[Bash]`. |
 | `description` | no | optional; emitted after em-dash when present. Without it, the stderr line is just `[memory:hookable] {filename}`. |
 | `type` | no | unrelated taxonomy field; the parser ignores it. `type` ≠ `hookable`. |
+
+### Per-event tokenization
+
+| Event | Payload surface | Tokenization |
+|---|---|---|
+| `Bash` | `tool_input.command` | shlex via `safe_tokenize` (quoted multi-words preserved as a single non-matching token — see AC-10) |
+| `Edit` | `file_path` + `old_string` + `new_string` | free-text regex (ASCII identifier-with-dashes OR unicode word) |
+| `Write` | `file_path` + `content` | free-text regex |
+| `NotebookEdit` | `notebook_path` + `new_source` | free-text regex |
+| `AskUserQuestion` | each question's `question` + `header` + every option's `label` + `description` | free-text regex |
+
+Whole-token equality + case-sensitive matching applies uniformly across events.
 
 ### Hook execution model
 

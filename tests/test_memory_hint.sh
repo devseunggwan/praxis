@@ -84,6 +84,53 @@ run_case "2 hit: keyword across separator"            "hit:hook_kubectl.md"     
 run_case "3 silent: keyword inside quoted string"     silent                     "$FIXTURES_MAIN" Bash 'echo "use kubectl carefully"'
 run_case "4 silent: keyword absent"                   silent                     "$FIXTURES_MAIN" Bash 'ls -la'
 
+# run_input_case name expectation memory_dir tool_name tool_input_json
+#   Like run_case but passes raw tool_input JSON for non-Bash events.
+run_input_case() {
+  local name="$1" expectation="$2" memory_dir="$3" tool_name="$4" tool_input_json="$5"
+
+  local payload
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name": sys.argv[1], "tool_input": json.loads(sys.argv[2])}))' "$tool_name" "$tool_input_json")
+
+  local err_file
+  err_file=$(mktemp)
+  echo "$payload" | env PRAXIS_MEMORY_DIR="$memory_dir" "$HOOK" >/dev/null 2>"$err_file"
+  local rc=$?
+  local err
+  err=$(cat "$err_file")
+  rm -f "$err_file"
+
+  local ok=1
+  case "$expectation" in
+    silent)
+      [ "$rc" -eq 0 ] || ok=0
+      [ -z "$err" ]   || ok=0
+      ;;
+    hit:*)
+      local needle="${expectation#hit:}"
+      [ "$rc" -eq 0 ] || ok=0
+      case "$err" in
+        *"$needle"*) ;;
+        *) ok=0 ;;
+      esac
+      ;;
+    *)
+      echo "FAIL  [$name] unknown expectation: $expectation"
+      FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+      ;;
+  esac
+
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] expectation=$expectation rc=$rc stderr=${err:-<empty>}"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
 # --- frontmatter gate paths --------------------------------------------------
 run_case "5 silent: hookable false skipped"           silent                     "$FIXTURES_MAIN" Bash 'echo __hookable_false_marker__'
 run_case "6 silent: hookable missing skipped"         silent                     "$FIXTURES_MAIN" Bash 'echo no_hookable_token'
@@ -194,6 +241,40 @@ print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "kubectl get po
   fi
 }
 undecodable_silent_test
+
+# --- AC-27..33: non-Bash events (Edit/Write/NotebookEdit/AskUserQuestion) ----
+run_input_case "27 hit: Edit event fires hookEvents=[Edit]" \
+  "hit:hook_edit_event.md" "$FIXTURES_MAIN" Edit \
+  '{"file_path": "/tmp/x.py", "old_string": "EditEventToken here", "new_string": "y"}'
+
+run_input_case "28 hit: Write event fires hookEvents=[Write]" \
+  "hit:hook_write_event.md" "$FIXTURES_MAIN" Write \
+  '{"file_path": "/tmp/y.txt", "content": "body with WriteEventToken inside"}'
+
+run_input_case "29 hit: NotebookEdit event fires hookEvents=[NotebookEdit]" \
+  "hit:hook_notebook_event.md" "$FIXTURES_MAIN" NotebookEdit \
+  '{"notebook_path": "/tmp/n.ipynb", "new_source": "cell source NotebookEditToken"}'
+
+run_input_case "30 hit: AskUserQuestion event fires hookEvents=[AskUserQuestion]" \
+  "hit:hook_ask_event.md" "$FIXTURES_MAIN" AskUserQuestion \
+  '{"questions": [{"question": "go?", "header": "x", "options": [{"label": "AskEventToken", "description": "y"}]}]}'
+
+run_input_case "31 silent: Edit event but memory has default hookEvents=[Bash]" \
+  silent "$FIXTURES_MAIN" Edit \
+  '{"file_path": "/tmp/x.py", "old_string": "kubectl get pods", "new_string": "y"}'
+
+run_input_case "32 hit: multi-event memory fires on Bash" \
+  "hit:hook_multi_event.md" "$FIXTURES_MAIN" Bash \
+  '{"command": "echo MultiEventToken"}'
+
+run_input_case "33 hit: multi-event memory fires on Edit" \
+  "hit:hook_multi_event.md" "$FIXTURES_MAIN" Edit \
+  '{"file_path": "/tmp/x.py", "old_string": "MultiEventToken in code", "new_string": "y"}'
+
+# --- AC-34: ASCII keyword adjacent to Hangul must split (mixed-text guard) ---
+run_input_case "34 hit: ASCII keyword adjacent to Hangul splits as separate token" \
+  "hit:hook_edit_event.md" "$FIXTURES_MAIN" Edit \
+  '{"file_path": "/tmp/x.py", "old_string": "EditEventToken할까요?", "new_string": "y"}'
 
 # --- summary -----------------------------------------------------------------
 echo ""
