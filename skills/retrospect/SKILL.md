@@ -662,6 +662,38 @@ For each approved action:
 
    - Update `MEMORY.md` index (for both origins)
 
+   **Frontmatter contract — `memory-hint` opt-in (mandatory consideration)**
+
+   In addition to standard fields (`name`, `description`, `type`), every new memory MUST evaluate whether to include the `memory-hint` opt-in fields — `hookable` and `hookKeywords`. The full field spec (parser semantics, matching rules, fail-open contract) lives in `docs/hook/memory-hint.md`; this section defines the authoring-time decision. Use top-level `type:` (consistent with `docs/hook/memory-hint.md` example and existing on-disk memory files); do **not** nest under `metadata:`.
+
+   ```yaml
+   ---
+   name: my-memory
+   description: Short rule statement
+   type: feedback
+   hookable: true                           # opt into PreToolUse surface
+   hookKeywords: [keyword1, keyword2]       # whole-token match (case-sensitive)
+   ---
+   ```
+
+   **Category-based default (apply unless rationale documented):**
+
+   | Category | `hookable` default | Rationale |
+   |---|---|---|
+   | behavioral retrieval-critical (silent-recurrence likely; failure mode is "Loaded ≠ Retrieved") | `true` | hook is the only structural enforcement; skill/memory alone fails retrieval at action time |
+   | success-pattern reinforcement (`Reinforced — ` prefix) where intentional replication needs same retrieval surface | `true` | same "retrieve at action time" need applies in reverse |
+   | abstract / meta / cross-cutting principle (no concrete action signal) | `false` | keyword match would be noisy across unrelated commands |
+   | author-generated rule (belongs in `~/.claude/CLAUDE.md` draft) or upstream-feedback note | `false` | not action-gateable; memory is a holding pen, not the enforcement surface |
+
+   When uncertain → default `hookable: false` (safer to omit than to add noise) AND record the uncertainty in the Actions Executed report so a future retrospect can re-evaluate.
+
+   **`hookKeywords` selection rules:**
+   - Choose tokens that appear in the *action* the memory is meant to gate — CLI subcommand (`merge`, `close`), tool name (`Edit`, `cmux-delegate`), distinctive flag (`--force`), or domain identifier (`Closes`, `Recommended`).
+   - Whole-token, case-sensitive matching only (per `docs/hook/memory-hint.md`). List multiple casings explicitly if needed (`[Edit, edit]`).
+   - 1–4 keywords typical; >5 raises false-positive risk linearly.
+   - **Avoid generic English words** (`add`, `run`, `test`, `update`) — they fire on unrelated commands and erode the hint signal.
+   - When the memory targets a non-Bash event (Edit, Write, AskUserQuestion, etc.), the current `memory-hint.py` only fires on Bash — record the intent in the description so a future event-coverage expansion can surface it.
+
    **⚠️ MANDATORY: Duplicate check before creating any memory file:**
 
    **Precondition:** This check applies ONLY when the finding's action type is `memory` (new pattern). If Stage 2 already marked `repeat=true` and escalated to issue/hook/global `~/.claude/CLAUDE.md` draft, skip this check — the escalation ladder takes precedence over merge.
@@ -826,8 +858,8 @@ For each approved action:
 
    | Artifact | Verification |
    |----------|-------------|
-   | MEMORY.md feedback (new) | File exists + MEMORY.md index updated |
-   | MEMORY.md feedback (merged) | Existing file updated (diff shown) + MEMORY.md index description updated if needed |
+   | MEMORY.md feedback (new) | File exists + MEMORY.md index updated + `hookable`/`hookKeywords` frontmatter decision recorded (true with keywords, OR false with rationale in Actions Executed report) |
+   | MEMORY.md feedback (merged) | Existing file updated (diff shown) + MEMORY.md index description updated if needed + if existing entry had `hookable: false` **or the field is missing entirely** and merged context now meets the retrieval-critical default, re-evaluate and add/update frontmatter (most pre-existing memories lack `hookable` — missing field is the dominant case, not false) |
    | GitHub issue | `gh issue view {url}` returns valid data |
    | Upstream feedback | `gh issue view {url}` returns valid data + URL repo matches `verified_backing_repo` from step 0 + label convention is correct for the verified repo (`tool-friction:{layer}` ONLY when verified repo is the praxis distribution; otherwise the repo's own convention label per Action 4's label rule) |
    | Hook code | Script file exists + settings.json registration confirmed (dry-run varies by hook type — no generic check) |
