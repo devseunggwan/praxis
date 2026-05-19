@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
-"""PreToolUse(Bash) memory hint: surface relevant memory file descriptions.
+"""PreToolUse memory hint: surface relevant memory file descriptions.
 
 Scans the user-scoped memory directory for `*.md` files whose YAML
 frontmatter declares `hookable: true` plus a `hookKeywords: [...]` list,
-tokenizes the inbound Bash command via the shared `safe_tokenize` /
-`strip_prefix` / `iter_command_starts` pipeline, and emits up to 3
+tokenizes the inbound tool payload, and emits up to 3
 `[memory:hookable] {filename} — {description}` lines to stderr per match
 (plus an `...and N more` summary line when truncated).
+
+Supported PreToolUse events (matched via `hooks.json` matcher) — Bash,
+Edit, Write, NotebookEdit, AskUserQuestion. Each memory opts into specific
+events via the optional `hookEvents: [...]` frontmatter field (default
+`[Bash]` for backward compatibility). Tokenization differs per event:
+
+  - Bash: shlex via `safe_tokenize` (whole-token, quoted multi-words
+          preserved as a single non-matching token — see AC-10)
+  - Other events: free-text regex tokenizer that preserves identifier
+          tokens (e.g. `cmux-delegate` stays as one token)
 
 Always exits 0. Never blocks. Never asks. The signal is purely
 attention-shifting for the LLM's next reasoning step. Co-firing with
@@ -24,6 +33,7 @@ Frontmatter parser is pure regex (no PyYAML dependency). Supported shapes:
   - `hookable: true|True|TRUE|yes|Yes` (other values silently skip the file)
   - `hookKeywords: [a, b, "c d"]` (flat single-line list only;
                                   multi-line / flow-mapping NOT supported)
+  - `hookEvents: [Bash, Edit, ...]` (flat single-line list; default `[Bash]`)
   - `description: anything` (optional; emitted after em-dash when present)
 Any parse error within a memory skips that memory only — never the hook.
 """
@@ -47,10 +57,19 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 HIT_LIMIT = 3
 TRUTHY_VALUES = {"true", "yes"}
 
+SUPPORTED_EVENTS = ("Bash", "Edit", "Write", "NotebookEdit", "AskUserQuestion")
+DEFAULT_EVENTS = ("Bash",)
+
 FRONTMATTER_FENCE = re.compile(r"^---\s*$", re.MULTILINE)
 HOOKABLE_RE = re.compile(r"^\s*hookable\s*:\s*(.+)$", re.MULTILINE)
 KEYWORDS_RE = re.compile(r"^\s*hookKeywords\s*:\s*(.+)$", re.MULTILINE)
+EVENTS_RE = re.compile(r"^\s*hookEvents\s*:\s*(.+)$", re.MULTILINE)
 DESCRIPTION_RE = re.compile(r"^\s*description\s*:\s*(.+)$", re.MULTILINE)
+
+# Free-text payload tokenizer: ASCII identifier-with-dashes OR any unicode
+# word. Mixed ASCII/Hangul text segments still produce separable tokens
+# because the ASCII path stops at non-`[\w-]` boundaries.
+TEXT_TOKEN_RE = re.compile(r"[A-Za-z][\w-]*|\w+", re.UNICODE)
 
 # YAML inline comment: `#` preceded by whitespace (per YAML 1.2 spec). The
 # `hookKeywords` list parser additionally tolerates anything after the first
@@ -124,7 +143,31 @@ def parse_frontmatter(raw: str) -> dict | None:
             .strip('"\'')
         )
 
-    return {"keywords": keywords, "description": description}
+    events: tuple[str, ...] = DEFAULT_EVENTS
+    events_match = EVENTS_RE.search(block)
+    if events_match:
+        events_raw = events_match.group(1).strip()
+        if events_raw.startswith("["):
+            close_idx = events_raw.find("]")
+            if close_idx != -1:
+                inner = events_raw[1:close_idx].strip()
+                if inner:
+                    parsed_events = tuple(
+                        e.strip().strip('"\'')
+                        for e in inner.split(",")
+                        if e.strip()
+                    )
+                    filtered = tuple(
+                        e for e in parsed_events if e in SUPPORTED_EVENTS
+                    )
+                    if filtered:
+                        events = filtered
+
+    return {
+        "keywords": keywords,
+        "description": description,
+        "events": events,
+    }
 
 
 def resolve_memory_dir() -> str | None:
@@ -183,17 +226,86 @@ def collect_command_tokens(command: str) -> set[str]:
     return flat
 
 
+def tokenize_text_payload(text: str) -> set[str]:
+    """Whole-token split for non-Bash payloads (file paths, content, prompts)."""
+    if not text:
+        return set()
+    return set(TEXT_TOKEN_RE.findall(text))
+
+
+def extract_event_payload(payload: dict) -> tuple[str, str]:
+    """Map (tool_name, tool_input) → (event_name, free-text blob for tokenization).
+
+    Returns ('', '') when tool is unsupported or input shape unexpected.
+    """
+    tool = payload.get("tool_name", "") or ""
+    if tool not in SUPPORTED_EVENTS:
+        return "", ""
+    tool_input = payload.get("tool_input", {}) or {}
+    if not isinstance(tool_input, dict):
+        return "", ""
+
+    if tool == "Bash":
+        return "Bash", str(tool_input.get("command", "") or "")
+
+    if tool == "Edit":
+        parts = [
+            tool_input.get("file_path", ""),
+            tool_input.get("old_string", ""),
+            tool_input.get("new_string", ""),
+        ]
+        return "Edit", "\n".join(str(p) for p in parts if p)
+
+    if tool == "Write":
+        parts = [
+            tool_input.get("file_path", ""),
+            tool_input.get("content", ""),
+        ]
+        return "Write", "\n".join(str(p) for p in parts if p)
+
+    if tool == "NotebookEdit":
+        parts = [
+            tool_input.get("notebook_path", ""),
+            tool_input.get("new_source", ""),
+        ]
+        return "NotebookEdit", "\n".join(str(p) for p in parts if p)
+
+    if tool == "AskUserQuestion":
+        questions = tool_input.get("questions", []) or []
+        chunks: list[str] = []
+        if isinstance(questions, list):
+            for q in questions:
+                if not isinstance(q, dict):
+                    continue
+                chunks.append(str(q.get("question", "") or ""))
+                chunks.append(str(q.get("header", "") or ""))
+                options = q.get("options", []) or []
+                if isinstance(options, list):
+                    for opt in options:
+                        if isinstance(opt, dict):
+                            chunks.append(str(opt.get("label", "") or ""))
+                            chunks.append(str(opt.get("description", "") or ""))
+        return "AskUserQuestion", "\n".join(c for c in chunks if c)
+
+    return "", ""
+
+
 def find_hits(
     indexed: list[tuple[str, dict, float]],
     cmd_tokens: set[str],
+    event: str,
 ) -> list[tuple[str, dict, float]]:
-    """Return memories whose hookKeywords match any command token (whole-token)."""
-    # Whole-token equality (case-sensitive). Quoted multi-word strings shlex
-    # parses as a single token (e.g. `echo "use kubectl"` → `use kubectl`),
-    # so `kubectl` keyword does NOT match — see AC-10. Substring matching
-    # would create false positives across `kubectl-prod` vs `kubectl`.
+    """Return memories whose hookKeywords match any token AND hookEvents contains `event`.
+
+    Whole-token equality (case-sensitive). Quoted multi-word strings shlex
+    parses as a single token (e.g. `echo "use kubectl"` → `use kubectl`),
+    so `kubectl` keyword does NOT match — see AC-10. Substring matching
+    would create false positives across `kubectl-prod` vs `kubectl`.
+    """
     hits: list[tuple[str, dict, float]] = []
     for name, parsed, mtime in indexed:
+        if event not in parsed.get("events", DEFAULT_EVENTS):
+            continue
         if any(keyword in cmd_tokens for keyword in parsed["keywords"]):
             hits.append((name, parsed, mtime))
     return hits
@@ -220,15 +332,13 @@ def main() -> int:
     except Exception:
         return 0  # fail-open on malformed stdin
 
-    if payload.get("tool_name") != "Bash":
+    event, text = extract_event_payload(payload)
+    if not event or not text.strip():
         return 0
 
-    command = payload.get("tool_input", {}).get("command", "") or ""
-    if not command.strip():
-        return 0
-
-    # Backslash line continuation → single space so tokenizer sees one line
-    command = command.replace("\\\n", " ")
+    if event == "Bash":
+        # Backslash line continuation → single space so tokenizer sees one line
+        text = text.replace("\\\n", " ")
 
     directory = resolve_memory_dir()
     if not directory:
@@ -238,11 +348,14 @@ def main() -> int:
     if not indexed:
         return 0
 
-    cmd_tokens = collect_command_tokens(command)
+    if event == "Bash":
+        cmd_tokens = collect_command_tokens(text)
+    else:
+        cmd_tokens = tokenize_text_payload(text)
     if not cmd_tokens:
         return 0
 
-    hits = find_hits(indexed, cmd_tokens)
+    hits = find_hits(indexed, cmd_tokens, event)
     if hits:
         emit_hits(hits)
     return 0
