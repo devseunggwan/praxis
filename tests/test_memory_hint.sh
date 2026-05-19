@@ -271,6 +271,11 @@ run_input_case "33 hit: multi-event memory fires on Edit" \
   "hit:hook_multi_event.md" "$FIXTURES_MAIN" Edit \
   '{"file_path": "/tmp/x.py", "old_string": "MultiEventToken in code", "new_string": "y"}'
 
+# --- AC-34: ASCII keyword adjacent to Hangul must split (mixed-text guard) ---
+run_input_case "34 hit: ASCII keyword adjacent to Hangul splits as separate token" \
+  "hit:hook_edit_event.md" "$FIXTURES_MAIN" Edit \
+  '{"file_path": "/tmp/x.py", "old_string": "EditEventToken할까요?", "new_string": "y"}'
+
 # --- summary -----------------------------------------------------------------
 echo ""
 echo "Passed: $PASS  Failed: $FAIL"

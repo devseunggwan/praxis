@@ -67,9 +67,11 @@ EVENTS_RE = re.compile(r"^\s*hookEvents\s*:\s*(.+)$", re.MULTILINE)
 DESCRIPTION_RE = re.compile(r"^\s*description\s*:\s*(.+)$", re.MULTILINE)
 
 # Free-text payload tokenizer: ASCII identifier-with-dashes OR any unicode
-# word. Mixed ASCII/Hangul text segments still produce separable tokens
-# because the ASCII path stops at non-`[\w-]` boundaries.
-TEXT_TOKEN_RE = re.compile(r"[A-Za-z][\w-]*|\w+", re.UNICODE)
+# word. The first alternative uses an ASCII-only character class so a token
+# like `push할까요` splits into `['push', '할까요']` (and not the unicode-`\w`
+# greedy match `['push할까요']`). The second alternative (`\w+`) is kept
+# unicode-aware so Korean-only text still yields word tokens.
+TEXT_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*|\w+", re.UNICODE)
 
 # YAML inline comment: `#` preceded by whitespace (per YAML 1.2 spec). The
 # `hookKeywords` list parser additionally tolerates anything after the first
