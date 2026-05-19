@@ -664,14 +664,13 @@ For each approved action:
 
    **Frontmatter contract — `memory-hint` opt-in (mandatory consideration)**
 
-   In addition to standard fields (`name`, `description`, `metadata.type`), every new memory MUST evaluate whether to include the `memory-hint` opt-in fields — `hookable` and `hookKeywords`. The full field spec (parser semantics, matching rules, fail-open contract) lives in `docs/hook/memory-hint.md`; this section defines the authoring-time decision.
+   In addition to standard fields (`name`, `description`, `type`), every new memory MUST evaluate whether to include the `memory-hint` opt-in fields — `hookable` and `hookKeywords`. The full field spec (parser semantics, matching rules, fail-open contract) lives in `docs/hook/memory-hint.md`; this section defines the authoring-time decision. Use top-level `type:` (consistent with `docs/hook/memory-hint.md` example and existing on-disk memory files); do **not** nest under `metadata:`.
 
    ```yaml
    ---
    name: my-memory
    description: Short rule statement
-   metadata:
-     type: feedback
+   type: feedback
    hookable: true                           # opt into PreToolUse surface
    hookKeywords: [keyword1, keyword2]       # whole-token match (case-sensitive)
    ---
@@ -860,7 +859,7 @@ For each approved action:
    | Artifact | Verification |
    |----------|-------------|
    | MEMORY.md feedback (new) | File exists + MEMORY.md index updated + `hookable`/`hookKeywords` frontmatter decision recorded (true with keywords, OR false with rationale in Actions Executed report) |
-   | MEMORY.md feedback (merged) | Existing file updated (diff shown) + MEMORY.md index description updated if needed + if existing entry had `hookable: false` but merged context now meets the retrieval-critical default, re-evaluate and update frontmatter |
+   | MEMORY.md feedback (merged) | Existing file updated (diff shown) + MEMORY.md index description updated if needed + if existing entry had `hookable: false` **or the field is missing entirely** and merged context now meets the retrieval-critical default, re-evaluate and add/update frontmatter (most pre-existing memories lack `hookable` — missing field is the dominant case, not false) |
    | GitHub issue | `gh issue view {url}` returns valid data |
    | Upstream feedback | `gh issue view {url}` returns valid data + URL repo matches `verified_backing_repo` from step 0 + label convention is correct for the verified repo (`tool-friction:{layer}` ONLY when verified repo is the praxis distribution; otherwise the repo's own convention label per Action 4's label rule) |
    | Hook code | Script file exists + settings.json registration confirmed (dry-run varies by hook type — no generic check) |
