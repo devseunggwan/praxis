@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -54,11 +55,21 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 
 PREFIX = "[praxis:momentum-gate]"
 
+# Trigger identifiers — keys for both static rule surfaces and dynamic
+# memory filtering via the `momentum:` frontmatter field.
+TRIGGER_MERGE = "merge"
+TRIGGER_DISPATCH = "dispatch"
+TRIGGER_FORCE_PUSH = "force-push"
+
+CLOSING_LINE = f"{PREFIX} ─────────────────────────────────────────────────────────────"
+
 # ---------------------------------------------------------------------------
-# Rule surfaces per trigger type.
+# Static rule surfaces per trigger — CLAUDE.md rule cites only. Memory cites
+# are loaded dynamically from the memory directory's frontmatter `momentum`
+# field (replaces the prior hardcoded `Memory: <name>` blocks).
 # ---------------------------------------------------------------------------
 
-_MERGE_RULES = """\
+_MERGE_STATIC = """\
 {p} ── TRIGGER: gh pr merge ──────────────────────────────────
 {p}
 {p} Rule: Pre-Merge Reporting (CLAUDE.md)
@@ -68,16 +79,9 @@ _MERGE_RULES = """\
 {p}
 {p} Rule: No Approval Transfer Across Companion PRs (CLAUDE.md)
 {p}   Approving "merge PR X" approves ONLY X. Companion, chore, regen, or
-{p}   hotfix-blocker PRs each need their own explicit approval.
-{p}
-{p} Memory: feedback_pre_merge_briefing_compound_imperative
-{p}   Compound imperatives ("merge and clean both PR") do NOT lower the
-{p}   Pre-Merge Reporting depth bar. Irreversible actions require 6-item
-{p}   briefing regardless of phrasing.
-{p}
-{p} ─────────────────────────────────────────────────────────────""".format(p=PREFIX)
+{p}   hotfix-blocker PRs each need their own explicit approval.""".format(p=PREFIX)
 
-_DISPATCH_RULES = """\
+_DISPATCH_STATIC = """\
 {p} ── TRIGGER: cmux new-workspace (dispatch) ───────────────────
 {p}
 {p} Rule: Pre-Implementation Surface Enumeration → Multi-PR / multi-worktree
@@ -90,19 +94,143 @@ _DISPATCH_RULES = """\
 {p} Rule: Self-Authored Labels Are Drafts, Not Ratified Scope (CLAUDE.md)
 {p}   AI-written task labels during planning = drafts. Ambiguous verbs
 {p}   (define / review / verify / clean up / 정의 / 검토 / 확인) in self-authored
-{p}   labels → surface one-time disambiguation BEFORE execution.
-{p}
-{p} ─────────────────────────────────────────────────────────────""".format(p=PREFIX)
+{p}   labels → surface one-time disambiguation BEFORE execution.""".format(p=PREFIX)
 
-_FORCE_PUSH_RULES = """\
+_FORCE_PUSH_STATIC = """\
 {p} ── TRIGGER: git push --force / --force-with-lease / -f ─────
 {p}
-{p} Memory: feedback_force_history_rewrite_mutation
-{p}   force-with-lease / reset --hard / rebase --skip (worker commit drop)
-{p}   are mutations — prior approval is NOT carried over, fixup commit is the
-{p}   safe alternative. History rewrite requires fresh per-action consent.
-{p}
-{p} ─────────────────────────────────────────────────────────────""".format(p=PREFIX)
+{p} Rule: History rewrite is a mutation — prior approval is NOT carried over
+{p}   force-with-lease / reset --hard / rebase --skip (worker commit drop) all
+{p}   require fresh per-action consent. Prefer a fixup commit when possible.""".format(p=PREFIX)
+
+_STATIC_BY_TRIGGER = {
+    TRIGGER_MERGE: _MERGE_STATIC,
+    TRIGGER_DISPATCH: _DISPATCH_STATIC,
+    TRIGGER_FORCE_PUSH: _FORCE_PUSH_STATIC,
+}
+
+# ---------------------------------------------------------------------------
+# Frontmatter parser — mirrors hooks/memory-hint.py shape; no PyYAML.
+# ---------------------------------------------------------------------------
+
+FRONTMATTER_FENCE = re.compile(r"^---\s*$", re.MULTILINE)
+MOMENTUM_RE = re.compile(r"^\s*momentum\s*:\s*(.+)$", re.MULTILINE)
+NAME_RE = re.compile(r"^\s*name\s*:\s*(.+)$", re.MULTILINE)
+DESCRIPTION_RE = re.compile(r"^\s*description\s*:\s*(.+)$", re.MULTILINE)
+INLINE_COMMENT_RE = re.compile(r"\s+#.*$")
+CONTROL_BYTES_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _strip_inline_comment(value: str) -> str:
+    return INLINE_COMMENT_RE.sub("", value)
+
+
+def _sanitize(text: str) -> str:
+    return CONTROL_BYTES_RE.sub("?", text)
+
+
+def _parse_momentum_frontmatter(raw: str) -> dict | None:
+    """Extract the `---`-fenced frontmatter. Return None if absent or no momentum list."""
+    matches = list(FRONTMATTER_FENCE.finditer(raw))
+    if len(matches) < 2:
+        return None
+    block = raw[matches[0].end():matches[1].start()]
+
+    momentum_match = MOMENTUM_RE.search(block)
+    if not momentum_match:
+        return None
+    momentum_raw = momentum_match.group(1).strip()
+    if not momentum_raw.startswith("["):
+        return None
+    close_idx = momentum_raw.find("]")
+    if close_idx == -1:
+        return None
+    inner = momentum_raw[1:close_idx].strip()
+    if not inner:
+        return None
+    triggers = [item.strip().strip('"\'') for item in inner.split(",")]
+    triggers = [t for t in triggers if t]
+    if not triggers:
+        return None
+
+    description = ""
+    description_match = DESCRIPTION_RE.search(block)
+    if description_match:
+        description = (
+            _strip_inline_comment(description_match.group(1))
+            .strip()
+            .strip('"\'')
+        )
+
+    return {"triggers": triggers, "description": description}
+
+
+def _resolve_memory_dir() -> str | None:
+    env_dir = os.environ.get("PRAXIS_MEMORY_DIR", "").strip()
+    if env_dir:
+        return env_dir if os.path.isdir(env_dir) else None
+    home = os.path.expanduser("~")
+    cwd = os.getcwd()
+    slug = cwd.replace("/", "-")
+    fallback = os.path.join(home, ".claude", "projects", slug, "memory")
+    return fallback if os.path.isdir(fallback) else None
+
+
+def _load_momentum_memories(directory: str, trigger: str) -> list[tuple[str, str, float]]:
+    """Return [(filename, description, mtime), ...] for memories matching trigger."""
+    out: list[tuple[str, str, float]] = []
+    try:
+        entries = os.listdir(directory)
+    except OSError:
+        return out
+    for name in entries:
+        if not name.endswith(".md"):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                raw = fh.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        try:
+            parsed = _parse_momentum_frontmatter(raw)
+        except Exception:
+            parsed = None
+        if not parsed or trigger not in parsed["triggers"]:
+            continue
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            mtime = 0.0
+        out.append((name, parsed["description"], mtime))
+    out.sort(key=lambda h: h[2], reverse=True)
+    return out
+
+
+def _format_memory_lines(memories: list[tuple[str, str, float]]) -> list[str]:
+    """Render memory entries as PREFIX-prefixed lines mirroring the prior hardcoded shape."""
+    lines: list[str] = []
+    for name, description, _ in memories:
+        safe_name = _sanitize(name)
+        # Strip ".md" suffix for parity with the prior hardcoded `Memory: feedback_*`
+        # text (which referenced the slug without the file extension).
+        display = safe_name[:-3] if safe_name.endswith(".md") else safe_name
+        lines.append(f"{PREFIX} Memory: {display}")
+        if description:
+            lines.append(f"{PREFIX}   {_sanitize(description)}")
+        lines.append(PREFIX)
+    return lines
+
+
+def _emit_for_trigger(trigger: str, directory: str | None) -> str:
+    """Compose the full surface for a single trigger (static rules + dynamic memories)."""
+    parts = [_STATIC_BY_TRIGGER[trigger], PREFIX]
+    if directory:
+        memories = _load_momentum_memories(directory, trigger)
+        if memories:
+            parts.extend(_format_memory_lines(memories))
+    parts.append(CLOSING_LINE)
+    return "\n".join(parts)
 
 # ---------------------------------------------------------------------------
 # GH global flags that consume one additional argument.
@@ -243,22 +371,19 @@ def _is_force_push(argv: list[str]) -> bool:
 # ---------------------------------------------------------------------------
 
 def _detect_triggers(command: str) -> list[str]:
-    """Return list of rule surfaces to emit for the given Bash command."""
+    """Return list of trigger ids (one of TRIGGER_*) for the given Bash command."""
     tokens = safe_tokenize(command)
     if not tokens:
         return []
 
     triggered: list[str] = []
     for argv in iter_command_starts(tokens):
-        if _is_gh_pr_merge(argv):
-            if _MERGE_RULES not in triggered:
-                triggered.append(_MERGE_RULES)
-        if _is_cmux_dispatch(argv):
-            if _DISPATCH_RULES not in triggered:
-                triggered.append(_DISPATCH_RULES)
-        if _is_force_push(argv):
-            if _FORCE_PUSH_RULES not in triggered:
-                triggered.append(_FORCE_PUSH_RULES)
+        if _is_gh_pr_merge(argv) and TRIGGER_MERGE not in triggered:
+            triggered.append(TRIGGER_MERGE)
+        if _is_cmux_dispatch(argv) and TRIGGER_DISPATCH not in triggered:
+            triggered.append(TRIGGER_DISPATCH)
+        if _is_force_push(argv) and TRIGGER_FORCE_PUSH not in triggered:
+            triggered.append(TRIGGER_FORCE_PUSH)
     return triggered
 
 
@@ -279,13 +404,15 @@ def _main_inner() -> int:
     if not command.strip():
         return 0
 
-    surfaces = _detect_triggers(command)
-    if not surfaces:
+    triggers = _detect_triggers(command)
+    if not triggers:
         return 0
 
-    # Emit each surface to stderr.
-    for surface in surfaces:
-        sys.stderr.write(surface + "\n")
+    directory = _resolve_memory_dir()
+
+    # Emit each surface to stderr — static rule text + dynamic memory cites.
+    for trigger in triggers:
+        sys.stderr.write(_emit_for_trigger(trigger, directory) + "\n")
 
     # Strict mode: block unless PRAXIS_MOMENTUM_ACK=1 is also present.
     if os.environ.get("PRAXIS_MOMENTUM_STRICT") == "1":

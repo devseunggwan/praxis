@@ -26,11 +26,35 @@ Phase 1 keeps the momentum signal simple: **any single matching command
 triggers the surface**. Multi-mutation detection (e.g., surfacing only when
 N merges occur in rapid succession) is deferred to Phase 2 (separate issue).
 
-| Command pattern | Triggered surface |
-|-----------------|-------------------|
-| `gh pr merge` (any flags) | Pre-Merge Reporting + No Approval Transfer + memory `feedback_pre_merge_briefing_compound_imperative` |
-| `cmux new-workspace` (dispatch via cmux) | Pre-Implementation Surface Enumeration → Multi-PR / multi-worktree shared state + Self-Authored Labels Are Drafts |
-| `git push --force` / `--force-with-lease` / `-f` | memory `feedback_force_history_rewrite_mutation` |
+| Command pattern | trigger id | Static rule cites | Dynamic memory cites |
+|-----------------|------------|-------------------|----------------------|
+| `gh pr merge` (any flags) | `merge` | Pre-Merge Reporting + No Approval Transfer | every memory with `momentum:` containing `merge` |
+| `cmux new-workspace` (dispatch via cmux) | `dispatch` | Pre-Implementation Surface Enumeration → Multi-PR / multi-worktree shared state + Self-Authored Labels Are Drafts | every memory with `momentum:` containing `dispatch` |
+| `git push --force` / `--force-with-lease` / `-f` | `force-push` | trigger header + history-rewrite mutation rule | every memory with `momentum:` containing `force-push` |
+
+### Dynamic memory loading
+
+Memory cites are no longer hardcoded — they are loaded at hook fire time
+from the same user-scoped memory directory used by `memory-hint`
+(`PRAXIS_MEMORY_DIR` env var when set, otherwise
+`~/.claude/projects/{slugified-cwd}/memory/`). A memory file participates
+by adding a flat single-line `momentum:` list to its frontmatter:
+
+```yaml
+---
+name: my-memory
+description: Short rule statement
+type: feedback
+momentum: [merge]                  # one or more of: merge, dispatch, force-push
+---
+```
+
+Multi-trigger memories: `momentum: [merge, force-push]`. When a triggered
+command matches `merge` AND `force-push` in the same Bash call, the
+memory is cited under both surfaces. Memories without a `momentum:` field
+(or with an unparseable / empty list) are ignored. The frontmatter parser
+is regex-only — multi-line YAML / flow-mapping forms are not supported
+and silently skip the memory rather than raise.
 
 ### What is emitted
 

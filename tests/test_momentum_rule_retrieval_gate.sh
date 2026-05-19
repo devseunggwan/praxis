@@ -20,6 +20,10 @@ if [ ! -x "$HOOK" ]; then
   exit 1
 fi
 
+# Pin memory directory to the test fixtures so dynamic memory loading is
+# deterministic regardless of the host's user-scoped memory directory.
+export PRAXIS_MEMORY_DIR="$SCRIPT_DIR/fixtures/momentum-memories"
+
 PASS=0
 FAIL=0
 FAILED_NAMES=()
@@ -237,6 +241,77 @@ run_case "git_super_prefix_fused_force_push" \
   "advisory:feedback_force_history_rewrite_mutation" \
   "" \
   "git --super-prefix=x push --force"
+
+# --- dynamic memory loading negative cases (issue #359) ----------------------
+# Memory with no momentum: field must NOT surface on any trigger.
+negative_no_momentum_case() {
+  local name="negative_no_momentum_marker_absent"
+  local payload
+  payload=$(build_payload "Bash" "gh pr merge --squash")
+  local err_file
+  err_file=$(mktemp)
+  echo "$payload" | python3 "$HOOK" >/dev/null 2>"$err_file"
+  local rc=$?
+  local err
+  err=$(cat "$err_file")
+  rm -f "$err_file"
+  if [ "$rc" -eq 0 ] && [[ "$err" != *"marker-uniq-no-momentum-marker"* ]]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] rc=$rc unexpectedly emitted marker-uniq-no-momentum-marker"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+negative_no_momentum_case
+
+# Empty memory dir → static rule still emitted, no Memory: line.
+empty_memory_dir_case() {
+  local name="empty_memory_dir_static_only"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  local payload
+  payload=$(build_payload "Bash" "gh pr merge --squash")
+  local err_file
+  err_file=$(mktemp)
+  echo "$payload" | env PRAXIS_MEMORY_DIR="$tmpdir" python3 "$HOOK" >/dev/null 2>"$err_file"
+  local rc=$?
+  local err
+  err=$(cat "$err_file")
+  rm -f "$err_file"; rmdir "$tmpdir"
+  if [ "$rc" -eq 0 ] && [[ "$err" == *"Pre-Merge Reporting"* ]] && [[ "$err" != *"Memory:"* ]]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] rc=$rc static-rule-emitted=$([[ \"$err\" == *\"Pre-Merge Reporting\"* ]] && echo yes || echo no) memory-cite=$([[ \"$err\" == *\"Memory:\"* ]] && echo yes || echo no)"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+empty_memory_dir_case
+
+# Codex round-1 P2 regression: force-push trigger MUST emit actionable warning
+# (history-rewrite mutation rule) even when no migrated memory exists. Prior
+# refactor left force-push as memory-cite only, so unmigrated installs got
+# only a header line on the highest-risk trigger.
+empty_memory_dir_force_push_case() {
+  local name="empty_memory_dir_force_push_actionable"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  local payload
+  payload=$(build_payload "Bash" "git push --force origin main")
+  local err_file
+  err_file=$(mktemp)
+  echo "$payload" | env PRAXIS_MEMORY_DIR="$tmpdir" python3 "$HOOK" >/dev/null 2>"$err_file"
+  local rc=$?
+  local err
+  err=$(cat "$err_file")
+  rm -f "$err_file"; rmdir "$tmpdir"
+  if [ "$rc" -eq 0 ] && [[ "$err" == *"History rewrite is a mutation"* ]] && [[ "$err" != *"Memory:"* ]]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] rc=$rc actionable-emitted=$([[ \"$err\" == *\"History rewrite is a mutation\"* ]] && echo yes || echo no) memory-cite=$([[ \"$err\" == *\"Memory:\"* ]] && echo yes || echo no)"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+empty_memory_dir_force_push_case
 
 # Combination: boolean + value-taking global flag together must both be
 # walked past correctly so the subcommand check still lands on `push`.
