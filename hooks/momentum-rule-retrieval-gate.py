@@ -97,7 +97,11 @@ _DISPATCH_STATIC = """\
 {p}   labels → surface one-time disambiguation BEFORE execution.""".format(p=PREFIX)
 
 _FORCE_PUSH_STATIC = """\
-{p} ── TRIGGER: git push --force / --force-with-lease / -f ─────""".format(p=PREFIX)
+{p} ── TRIGGER: git push --force / --force-with-lease / -f ─────
+{p}
+{p} Rule: History rewrite is a mutation — prior approval is NOT carried over
+{p}   force-with-lease / reset --hard / rebase --skip (worker commit drop) all
+{p}   require fresh per-action consent. Prefer a fixup commit when possible.""".format(p=PREFIX)
 
 _STATIC_BY_TRIGGER = {
     TRIGGER_MERGE: _MERGE_STATIC,

@@ -287,6 +287,32 @@ empty_memory_dir_case() {
 }
 empty_memory_dir_case
 
+# Codex round-1 P2 regression: force-push trigger MUST emit actionable warning
+# (history-rewrite mutation rule) even when no migrated memory exists. Prior
+# refactor left force-push as memory-cite only, so unmigrated installs got
+# only a header line on the highest-risk trigger.
+empty_memory_dir_force_push_case() {
+  local name="empty_memory_dir_force_push_actionable"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  local payload
+  payload=$(build_payload "Bash" "git push --force origin main")
+  local err_file
+  err_file=$(mktemp)
+  echo "$payload" | env PRAXIS_MEMORY_DIR="$tmpdir" python3 "$HOOK" >/dev/null 2>"$err_file"
+  local rc=$?
+  local err
+  err=$(cat "$err_file")
+  rm -f "$err_file"; rmdir "$tmpdir"
+  if [ "$rc" -eq 0 ] && [[ "$err" == *"History rewrite is a mutation"* ]] && [[ "$err" != *"Memory:"* ]]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] rc=$rc actionable-emitted=$([[ \"$err\" == *\"History rewrite is a mutation\"* ]] && echo yes || echo no) memory-cite=$([[ \"$err\" == *\"Memory:\"* ]] && echo yes || echo no)"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+empty_memory_dir_force_push_case
+
 # Combination: boolean + value-taking global flag together must both be
 # walked past correctly so the subcommand check still lands on `push`.
 run_case "git_literal_pathspecs_and_c_force_push" \

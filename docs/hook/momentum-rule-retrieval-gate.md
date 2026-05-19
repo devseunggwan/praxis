@@ -30,7 +30,7 @@ N merges occur in rapid succession) is deferred to Phase 2 (separate issue).
 |-----------------|------------|-------------------|----------------------|
 | `gh pr merge` (any flags) | `merge` | Pre-Merge Reporting + No Approval Transfer | every memory with `momentum:` containing `merge` |
 | `cmux new-workspace` (dispatch via cmux) | `dispatch` | Pre-Implementation Surface Enumeration → Multi-PR / multi-worktree shared state + Self-Authored Labels Are Drafts | every memory with `momentum:` containing `dispatch` |
-| `git push --force` / `--force-with-lease` / `-f` | `force-push` | trigger header only | every memory with `momentum:` containing `force-push` |
+| `git push --force` / `--force-with-lease` / `-f` | `force-push` | trigger header + history-rewrite mutation rule | every memory with `momentum:` containing `force-push` |
 
 ### Dynamic memory loading
 
