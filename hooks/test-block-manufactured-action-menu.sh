@@ -525,6 +525,18 @@ T_ef5=$(build_transcript "don't execute that yet")
 P_ef5=$(build_payload "$T_ef5" '["revise", "execute now"]')
 run_case "[execute-family] negated \"don't execute\" + 'execute now' → pass" pass default "$P_ef5"
 
+# False-positive guard — bare noun "run" in a non-directive status statement
+# must NOT register as command-intent. `run it` is a phrase, so "test run
+# completed" / "the run failed" do not match. Strict mode would otherwise
+# block a legitimate follow-up menu.
+T_ef6=$(build_transcript "test run completed")
+P_ef6=$(build_payload "$T_ef6" '["revise", "execute now"]')
+run_case "[execute-family] 'test run completed' (non-directive) + marker + strict → block-free pass" pass strict "$P_ef6"
+
+T_ef7=$(build_transcript "the run failed")
+P_ef7=$(build_payload "$T_ef7" '["revise", "as instructed"]')
+run_case "[execute-family] 'the run failed' (non-directive) + marker → pass" pass default "$P_ef7"
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

@@ -145,8 +145,10 @@ COMMAND_SIGNALS_EN_TOKENS = (
     # execute-family — the directives that naturally pair with the
     # affirmative-form option markers ("execute now", "as instructed").
     # Korean execute intent is already covered by `실행` in COMMAND_SIGNALS_KO.
+    # `run it` is a phrase, not the bare noun `run`: bare `run` whole-word
+    # matches non-directive statements ("the run failed", "dry run output").
     "execute",
-    "run",
+    "run it",
     "implement",
 )
 
@@ -471,7 +473,7 @@ Manufactured-menu markers detected in options[].label:
 
 Most recent user message already contains a command-intent signal
 ("진행", "실행", "go", "proceed", "continue", "merge", "commit", "push",
-"execute", "run", "implement", "머지", "커밋", "푸시").
+"execute", "run it", "implement", "머지", "커밋", "푸시").
 
 Why:
   Re-asking confirmation when the user has already given a directive is

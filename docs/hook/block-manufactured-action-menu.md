@@ -98,13 +98,15 @@ user message (skipping `tool_result`-only entries). Command-intent is detected w
 
 **English** (whole-word match, case-insensitive):
 - `go`, `go ahead`, `proceed`, `continue`, `merge`, `commit`, `push`,
-  `execute`, `run`, `implement`
+  `execute`, `run it`, `implement`
 
 English tokens use `\b` word-boundary matching to prevent false positives from
 substrings (e.g. "continuing" → "continue", "progress" does not match "go").
-The `execute` / `run` / `implement` tokens pair with the affirmative-form
+The `execute` / `run it` / `implement` tokens pair with the affirmative-form
 option markers so an `execute it` directive followed by an `execute now`
-menu option is detected. Korean execute intent is already covered by `실행`.
+menu option is detected. `run it` is a phrase, not the bare noun `run` —
+bare `run` would whole-word-match non-directive statements ("the run
+failed", "dry run output"). Korean execute intent is already covered by `실행`.
 
 ### Mode and env var behavior
 
