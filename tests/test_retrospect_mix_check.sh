@@ -795,6 +795,76 @@ T38_ROW="| 1 | behavioral | — | hasty conclusion | did not verify | rule absen
 run_case "T38_pass_gate4_verdict_na_no_upstream_feedback" "pass" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T38_CARD" "$T38_ROW")")"
 
+# T-NEW1: pass — distribution card includes memory_hygiene: N (Stage 1.5
+# category count). Stop hook silently ignores the unknown key per the
+# AUTHORITATIVE_SCHEMA carve-out for memory_hygiene/output_quality category
+# counts. Hook output must be empty (pass).
+T_NEW1_CARD=$(cat <<EOF
+- memory: 2
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 0
+- memory_hygiene: 2
+- gate_1_verdict: NA
+- gate_2_verdict: PASS
+- gate_3_verdict: NA
+- gate_4_verdict: NA
+EOF
+)
+T_NEW1_ROW="| 1 | memory_hygiene | — | merge candidate untriggered | merge-first policy not applied | n/a | No | memory | ${RATIONALE_5LINE} | MED |"
+run_case "T-NEW1_pass_memory_hygiene_category_count_ignored" "pass" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T_NEW1_CARD" "$T_NEW1_ROW")")"
+
+# T-NEW2: pass — Stage 2.7 0-trigger silent skip path emits the literal
+# `<!-- retrospect:audit_skipped: no artifacts -->` trail line above the
+# distribution card. The trail line lives outside the distribution fence
+# and must not affect hook parsing.
+T_NEW2_CARD=$(cat <<EOF
+- memory: 1
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 0
+- memory_hygiene: 0
+- output_quality: 0
+- gate_1_verdict: NA
+- gate_2_verdict: PASS
+- gate_3_verdict: NA
+- gate_4_verdict: NA
+EOF
+)
+T_NEW2_ROW="| 1 | behavioral | — | mild confusion | minor friction | n/a | No | memory | ${RATIONALE_5LINE} | LOW |"
+T_NEW2_TEXT="$(mk_retrospect_stage3 "$T_NEW2_CARD" "$T_NEW2_ROW")
+<!-- retrospect:audit_skipped: no artifacts -->"
+run_case "T-NEW2_pass_audit_skipped_trail_line_outside_fence" "pass" \
+  "$(mk_assistant "$T_NEW2_TEXT")"
+
+# T-NEW3: pass — Stage 2.7 audit fires (PR mergeability trigger detected).
+# Distribution card includes output_quality: 1. Finding row uses
+# output_quality category + Tool Layer = cli. Hook must pass (output_quality
+# is a category count line, silently ignored by parser).
+T_NEW3_CARD=$(cat <<EOF
+- memory: 1
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 0
+- memory_hygiene: 0
+- output_quality: 1
+- gate_1_verdict: NA
+- gate_2_verdict: PASS
+- gate_3_verdict: NA
+- gate_4_verdict: NA
+EOF
+)
+T_NEW3_ROW="| 1 | output_quality | cli | PR CHANGES_REQUESTED ≥2 | weak first-pass review quality | n/a | No | memory | ${RATIONALE_5LINE} | MED |"
+run_case "T-NEW3_pass_output_quality_category_with_cli_layer" "pass" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T_NEW3_CARD" "$T_NEW3_ROW")")"
+
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
 #   {expected_decision: "pass"|"block", must_contain: [...], must_not_contain: [...]}

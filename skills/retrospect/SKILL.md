@@ -74,6 +74,51 @@ You MUST complete each stage before proceeding to the next.
 3. **Set the calibration frame**: For each rule category, form a question — e.g.,
    "Did the session violate 'Planning Before Implementation'? Were there 3+ step tasks that skipped plan mode?"
 
+### Stage 1.5: MEMORY.md Hygiene Pass (Detect-only)
+
+Stage 1.5 runs unconditionally between Stage 1 (Load) and Stage 2 (Analyze). Its purpose is to surface latent defects in MEMORY.md itself — defects that the session-scoped friction scanner (Stage 2) cannot see because they accumulate across sessions. Findings produced here flow into the same downstream pipeline (Stage 2 categorization → Stage 2.5 gates → Stage 3 approval → Stage 4 execution). Stage 1.5 itself does NOT mutate MEMORY.md.
+
+**Scope:** scan MEMORY.md index + a bounded subset of `feedback_*.md` files.
+
+**Cap (mandatory):** scan up to **5 feedback files per invocation**. Persist a cursor at `.omc/state/retrospect-hygiene-cursor.json` recording (a) the timestamp of the last successful pass, (b) the list of file paths scanned, and (c) the next-batch pointer (path of the next un-scanned feedback file in sorted order). Subsequent retrospects resume from the cursor — full corpus coverage amortizes across multiple sessions. When the full corpus has been scanned once, rotate the cursor to restart from the most-recently-modified entries.
+
+**Three detection signals (each becomes a finding with `category: memory_hygiene`):**
+
+1. **Stale reference** — the entry cites an artifact that no longer matches reality:
+   - File path absent: entry references `<path>` that does not exist (verify with `test -e`)
+   - CLI flag absent: entry cites `<binary> --<flag>` but `<binary> --help` no longer documents it
+   - CLAUDE.md line shifted: entry cites `~/.claude/CLAUDE.md` line `N` whose content no longer matches the quoted excerpt (verify with `grep -n` of the cited excerpt)
+   - Skill / hook removed: entry references a skill name or hook path that no longer exists in the plugin manifest
+
+   Detection method: parse the entry's body for `\bgrep -n\b`-able tokens (file paths, CLI flag patterns `--[a-z-]+`, CLAUDE.md line citations); run the verification command; record failures as stale.
+
+2. **Contradiction** — two entries provide semantically opposed guidance under overlapping triggers:
+   - Entry A says "always X under trigger T"; Entry B says "never X under trigger T" — same T, opposite directive.
+   - Detection method: concept-level pairwise comparison restricted to entries whose `hookKeywords` (or trigger tokens) overlap. Use LLM judgment for semantic opposition (no regex shortcut). Cap pairwise comparisons to the cursor-batch's 5 files × full-index check.
+
+3. **Merge candidate** — two or more entries share a root-cause family but have not been merged:
+   - Same principle restated with different examples (the merge-first policy at Stage 4 Action 1d should have collapsed them).
+   - Detection method: read each entry's `description` field and root-cause prose; group by concept-level matching (same heuristic as Stage 4 Action 1 duplicate-check). When N ≥ 2 entries share a family AND none has been merged, emit a merge-candidate finding.
+
+**Output — emit per-defect findings into the Stage 2 friction-event lane.**
+
+Each Stage 1.5 finding has:
+- `category[]: [memory_hygiene]` — single category at Stage 1.5; downstream gates may add tool/workflow when defect originates from a tool layer (e.g., manifest staleness from a removed hook).
+- `Tool Layer: —` (default for memory_hygiene; the Stage 2 Layer E composition matrix carves out a `—` row for memory_hygiene the same way it does for behavioral).
+- `Proposed Actions` (provisional, finalized at Stage 2.5):
+  - Stale reference → `memory` (update entry inline) OR `claude_md_draft` (when the stale citation is itself a CLAUDE.md rule line that needs updating)
+  - Contradiction → `memory + issue` (surface both entries via an issue for human resolution; merge in Stage 4 only after explicit decision)
+  - Merge candidate → `memory` (route through Stage 4 Action 1 merge path; the merge IS the action)
+
+**0-friction hygiene-only retrospect path** — when Stage 2 pre-scan finds zero friction events but Stage 1.5 produced ≥1 hygiene finding, the skill does NOT take the "No patterns found ✅" early-exit (Stage 2 line). Instead, proceed to Stage 2.5 → Stage 3 with the hygiene findings as the sole input. Emit a banner in Stage 3 report: `Hygiene-only retrospect — no friction events this session.`
+
+**Stage 1.5 failure modes:**
+- MEMORY.md not accessible → skip Stage 1.5 entirely; emit `<!-- retrospect:hygiene_skipped: index not accessible -->` trail line; proceed to Stage 2.
+- Cursor file corrupt → reset cursor to most-recently-modified 5 files; log reset in completion report.
+- Per-file scan failure (one of N files unreadable) → continue with remaining files; record per-file failure in the Hygiene Scan Trail section of Stage 3 report.
+
+**Detect-only contract** — Stage 1.5 never writes to MEMORY.md, never deletes a feedback file, never edits the MEMORY.md index. All mutations route through Stage 4 (Action 1 merge path for merge candidates; Action 1 update path for stale references; Action 2 issue creation for contradictions). Inline mutation at Stage 1.5 is a Red Flag.
+
 ### Stage 2: Analyze Conversation
 
 **Pre-scan: Symmetric scan (friction + successful patterns)** — scan the conversation BEFORE calling agents. Produces two lanes:
@@ -92,6 +137,8 @@ You MUST complete each stage before proceeding to the next.
 | `tool` | "gh CLI `--state all` 부재" / "MCP 응답 지연" / "Read 출력 truncation" / "kubectl flag 부재" | **mandatory**: one of `mcp` / `cli` / `builtin` / `skill` |
 | `workflow` | "test 안 돌리고 PR" / "verify 단계 건너뜀" / "issue 안 만들고 브랜치" / "code review 생략" | optional: `skill` (when defect originates inside a skill's stage flow) |
 | `spec-gap` | "이 상황을 다루는 규칙 부재" / "SKILL.md trigger 모호" / "global `~/.claude/CLAUDE.md`에 명시되지 않은 행동" | optional: `skill` (when rule gap is in a SKILL.md) |
+| `memory_hygiene` | "stale 파일경로 / CLI flag / CLAUDE.md 라인 인용" / "두 entry가 동일 trigger 에서 contradict" / "merge candidates 미수렴" (Stage 1.5 origin) | none (Tool Layer = `—` by default; `skill` only when the stale citation references a specific skill/hook artifact) |
+| `output_quality` | "PR review-rounds ≥3" / "sub-agent stream-killed + output<100ch used downstream" / "external comment with hypothesis markers, no falsification trace" (Stage 2.7 origin) | **mandatory** when PR/external-write artifact present: `cli` (gh-related) or `skill` (sub-agent); `—` only when MCP-via-behavioral path applies |
 
 **Layer E ↔ step 4b composition matrix** (normative — referenced by step 4b and Stage 3 unified table):
 
@@ -99,8 +146,10 @@ You MUST complete each stage before proceeding to the next.
 - When `tool` ∈ `category[]`, the event MUST also be classified into one of the 4 step-4b layers (`mcp` / `cli` / `builtin` / `skill`); the `Tool Layer` cell of the unified table cannot remain `—`.
 - For `behavioral` only events, `Tool Layer` = `—`.
 - For `workflow` or `spec-gap` events without a tool root cause, `Tool Layer` = `—`; if the workflow defect or rule gap originates within a skill, `Tool Layer` MAY be set to `skill` to enable step 4b downstream routing.
+- For `memory_hygiene` events (Stage 1.5 origin), `Tool Layer` = `—` by default. When the stale citation points to a specific skill/hook artifact (e.g., a renamed hook script), `Tool Layer` MAY be set to `skill` so the finding compounds with a `skill` step-4b lane. `memory_hygiene` events do NOT require the mandatory `mcp/cli/builtin/skill` classification that `tool` events do.
+- For `output_quality` events (Stage 2.7 origin), `Tool Layer` follows the audited surface: `cli` for `gh pr|issue` audits, `skill` for sub-agent substance audits, `—` for MCP-via-behavioral path (e.g., Slack `*_send_message` audit where the surface is the action discipline, not the MCP itself). Unlike the strict `tool` category, `output_quality` does not require the layer to be `mcp/cli/builtin/skill` when the audit surface is behavioral (evidence discipline in a comment body).
 
-**Early exit**: If pre-scan finds 0 friction events, skip agent calls and exit with "No patterns found. ✅" — do not call agents with empty input.
+**Early exit**: If pre-scan finds 0 friction events, skip agent calls and exit with "No patterns found. ✅" — do not call agents with empty input. **Exception (Stage 1.5 carve-out)**: when Stage 1.5 produced ≥1 `memory_hygiene` finding, the early exit does NOT fire — proceed to Stage 2.5 → Stage 3 with the hygiene findings as the sole input, and emit the Stage 1.5 hygiene-only banner (see Stage 1.5 "0-friction hygiene-only retrospect path"). **Exception (Stage 2.7 carve-out)**: when the session transcript contains ≥1 Stage 2.7 audit trigger (PR / issue / Slack / Notion write — see Stage 2.7 trigger list), the early exit does NOT fire — Stage 2.7 must execute its post-hoc artifact audit so silent-pass quality failures (the exact case Stage 2.7 was designed to catch) are not skipped. If Stage 2.7 produces ≥1 `output_quality` finding, proceed to Stage 2.5 → Stage 3 with those findings as input; if Stage 2.7 silently skips (0 triggers detected after the carve-out check), fall through to the normal 0-friction "No patterns found" exit.
 
 **MANDATORY AGENT CALLS — when pre-scan finds 1+ friction events, MUST call sequentially (analyst depends on tracer output):**
 
@@ -274,6 +323,83 @@ You MUST complete each stage before proceeding to the next.
    - Ambiguous layer (resolution table's `Other / ambiguous` row): keep `upstream_feedback` but surface to user immediately at Stage 2; the user-supplied repo becomes the declared `backing_repo`. Stage 4 step 0 then re-resolves and may still divergence-prompt if the live re-resolution differs.
    - Hook-parsing safety: this is not a memory-only row, so the Stage 2.5 Gate-2 5-line schema does not apply. The `backing_repo:` line lives alongside the human rationale text without conflicting with the Gate-2 regex.
 
+### Stage 2.7: Adaptive Post-hoc Artifact Audit
+
+Stage 2.7 runs between Stage 2 (Analyze) and Stage 2.5 (Distribution Audit). Its purpose is to surface output-quality defects in artifacts the session produced — defects that the friction-event scanner (Stage 2) cannot see because they are *silent-pass* failures (no observable session friction).
+
+**Adaptive trigger** — Stage 2.7 fires ONLY when the session transcript contains at least one of these artifact-write signals. With zero triggers, Stage 2.7 silently skips.
+
+Trigger detection (scan the session's Bash invocations + MCP tool calls):
+- `gh pr create | edit | merge | comment` Bash invocations
+- `gh issue create | edit | comment | close | reopen` Bash invocations
+- Slack MCP `*_send_message` / `*_update_message` tool calls
+- Notion MCP `*_create_*` / `*_update_*` tool calls
+- `external-write-falsify-check.mjs` PreToolUse hook fired AND the user approved the write (i.e., the write actually proceeded)
+
+**0-trigger silent skip** — when scan finds zero triggers, Stage 2.7 emits a single trail line and exits:
+
+```
+<!-- retrospect:audit_skipped: no artifacts -->
+```
+
+The trail line is mandatory: it documents that Stage 2.7 ran and chose to skip, distinguishing "skipped intentionally" from "stage forgotten." Distribution card emits `output_quality: 0`.
+
+**≥1-trigger audit fires** — execute three sub-audits in parallel; each may produce 0–N findings.
+
+**Sub-audit 1 — PR mergeability** (Tool Layer: `cli`):
+
+For each PR touched by `gh pr {create,edit,merge,comment}` in this session:
+- Run `gh pr view <number-or-url> --json reviewRequests,reviews,state,mergeable,mergedAt`
+- Emit a finding when ANY of:
+  - `state == "CLOSED"` AND `mergedAt == null` (closed without merge — likely abandoned or rejected)
+  - `len([r for r in reviews if r.state == "CHANGES_REQUESTED"]) >= 2` (≥2 CHANGES_REQUESTED submissions — each forces a revision cycle, so ≥2 signals genuine high revision cost). The unfiltered `reviews` array counts individual submissions (APPROVED / COMMENTED / DISMISSED included), not revision rounds — three one-time approvals would meet `len(reviews) >= 3` despite zero rework. Filter on `CHANGES_REQUESTED` to measure what the heuristic intends.
+  - `mergeable == "CONFLICTING"` (stale branch left in conflict state)
+
+Finding template:
+- `category[]: [output_quality]` — single category; the `cli` surface is captured by `Tool Layer` below. Compounding with `tool` would trigger Gate-1 (Stage 2.5) which forbids `memory`-single for `tool` findings; output_quality first-occurrence is appropriately memory-single, so the `tool` co-category is omitted here. (Tool Layer still carries the surface signal.)
+- `Tool Layer: cli`
+- `Proposed Actions`: `memory` (single occurrence) or `memory, claude_md_draft` (when repeat ≥2; rule-gap on review-quality bar)
+
+**Sub-audit 2 — Sub-agent output substance** (Tool Layer: `skill`):
+
+For each sub-agent dispatch in the session (Agent tool calls):
+- Scan the parent's continuation context for stream-killed indicators (`agentId`, `internal ID`, abrupt-output truncation marker, "status=completed" without a result body)
+- Compute output length from the agent's final reported result
+- Flag when ALL of:
+  - Stream-killed indicator present OR output length < 100 characters
+  - Parent agent invoked downstream tooling that referenced the sub-agent's output (i.e., the sub-output was actually *used*, not just discarded)
+
+Finding template:
+- `category[]: [output_quality]` — single category; the `skill` surface is captured by `Tool Layer`. Same rationale as Sub-audit 1: Gate-1 would reject `memory`-single for a `tool`-co-labeled finding, but first-occurrence sub-agent substance is correctly memory-single (a downstream-reliability lesson). Tool Layer below preserves the surface signal.
+- `Tool Layer: skill`
+- `Proposed Actions`: `memory` (capture as a downstream-reliability lesson) or `memory, skill_idea` (when repeat ≥2; sketch a verifier helper)
+
+This sub-audit cross-references `feedback_agent_completion_verify_substance.md` — if a finding here matches that memory entry's family, the action MUST escalate per Stage 2.5 Gate-1 (repeat=true blocks memory-single).
+
+**Sub-audit 3 — External comment evidence** (Tool Layer: `cli`):
+
+For each external comment write — covers both create and update variants (`gh issue comment`, `gh pr comment`, Slack `*_send_message` / `*_update_message`, Notion `*_create_comment` / `*_update_*`). Update variants are included because edited comments can still introduce or retain hypothesis-language markers; auditing only creates would silently miss the same defect class in trigger sessions that only update prior content:
+- Re-use the regex from `hooks/external-write-falsify-check.mjs` to scan the comment body POST-write
+- Hypothesis-language markers without falsification trace: `might`, `could be`, `potential`, `is failing`, `아마`, `~인 듯` etc.
+- Emit a finding when the comment body contains a hypothesis marker AND lacks any of:
+  - `Falsification:` line
+  - `Probe:` line with command + output
+  - Direct evidence citation (file path + line number + quoted excerpt)
+
+Finding template:
+- `category[]: [output_quality, behavioral]` (behavioral because evidence discipline)
+- `Tool Layer: cli` (gh-related) or `—` (Slack/Notion via MCP — Layer E composition matrix's `behavioral` row applies)
+- `Proposed Actions`: `memory` (first occurrence) or `memory, hook_code` (when repeat ≥2; hook-level enforcement consideration)
+
+**Distribution card field** — Stage 3 emits `- output_quality: N` where N counts findings whose `category[]` includes `output_quality`. Like `memory_hygiene`, this is a **category count**, not an action key; the underlying actions still fall under the 6 action-type slots.
+
+**Stage 2.7 failure modes:**
+- Transcript not accessible (e.g., session-resume after compaction) → Stage 2.7 emits `<!-- retrospect:audit_skipped: transcript unreadable -->` and skips
+- `gh pr view` API failure for a specific PR → log per-PR error in Stage 3 report Audit Trail section; continue with remaining PRs
+- Hypothesis-marker regex import failure (hook file missing or unreadable) → fallback to a built-in minimal regex (`(might|could|potential|아마)`) AND log the fallback in the report
+
+**Detect-only contract** — Stage 2.7 never re-edits PRs, never deletes comments, never re-runs the offending tool. All mutations route through Stage 4 (Action 1 for memory entries, Action 2 for issues, Action 6 for hook code). Inline mutation at Stage 2.7 is a Red Flag.
+
 ### Stage 2.5: Action Distribution Audit
 
 After Stage 2 completes (all findings have `category[]` labels and provisional `Proposed Actions`) and BEFORE Stage 3 begins, run the three gate checks below. Each finding has its own per-finding gate counter, reset at Stage 2.5 entry.
@@ -397,6 +523,8 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 - skill_idea: {n}
 - hook_code: {n}
 - upstream_feedback: {n}
+- memory_hygiene: {n}
+- output_quality: {n}
 - gate_1_verdict: {PASS|FAIL|NA}
 - gate_2_verdict: {PASS|FAIL|NA}
 - gate_3_verdict: {PASS|FAIL|NA}
@@ -406,6 +534,8 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 ```
 
 `memory` count = (friction-event findings with Proposed Actions = `memory`, single or compound) + (successful_patterns where `reinforce_action = memory`). Stage 4 Action 1 reads the same total but routes per-entry by origin tag.
+
+`memory_hygiene` count = findings produced by Stage 1.5 (i.e., findings whose `category[]` includes `memory_hygiene`). This is a **category count**, not an action key — these findings still emit their underlying action under one of the existing 6 action-type slots (memory / issue / claude_md_draft / ...). The `memory_hygiene` line is informational: it surfaces how much of the report originated from Stage 1.5 vs Stage 2 friction-scan.
 
 `NA` = no findings of the relevant type. Per-gate `NA` semantics:
 - `gate_1_verdict: NA` — zero `tool`/`workflow`/`spec-gap` labeled findings exist
@@ -431,7 +561,8 @@ Stage 3 output MUST emit, in this order:
    <!-- AUTHORITATIVE_SCHEMA — Stop hook depends on this. Co-update hooks/retrospect-mix-check.sh + tests/test_retrospect_mix_check.sh + tests/fixtures/retrospect-synth-*.expected.json on any change to: (1) the fence markers themselves, (2) the action key set (memory/issue/claude_md_draft/skill_idea/hook_code/upstream_feedback), or (3) gate_1_verdict / gate_2_verdict keys.
         Gate-3 carve-out: gate_3_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract. The hook's awk parser keys on gate_1_verdict/gate_2_verdict literals only and silently ignores all other lines (regression-tested by tests T8–T17 + the 4 fixture files which still pass without gate_3_verdict). Adding/removing/renaming gate_3_verdict alone does NOT require hook or test changes.
         Gate-4 enforcement note: gate_4_verdict IS structurally enforced by the Stop hook (unlike gate_3_verdict which remains informational-only). Changes to gate_4_verdict semantics or its FAIL/WARN/NA/PASS values REQUIRE synchronized edits to hooks/retrospect-mix-check.sh and tests/test_retrospect_mix_check.sh (T36/T37/T38). Adding/removing gate_4_verdict from the card alone does NOT require fence-marker or action-key changes.
-        Gate-5 carve-out: gate_5_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract (parallel to gate_3_verdict). The hook silently ignores gate_5_verdict. Adding/removing/renaming gate_5_verdict alone does NOT require hook or test changes. (Deferred upgrade trajectory similar to Gate-4 in PR #340 — file a follow-up issue for Stop hook wiring when procedural enforcement proves insufficient.) -->
+        Gate-5 carve-out: gate_5_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract (parallel to gate_3_verdict). The hook silently ignores gate_5_verdict. Adding/removing/renaming gate_5_verdict alone does NOT require hook or test changes. (Deferred upgrade trajectory similar to Gate-4 in PR #340 — file a follow-up issue for Stop hook wiring when procedural enforcement proves insufficient.)
+        Category-count carve-out (memory_hygiene / output_quality): these are CATEGORY counts (count of findings with the respective category in category[]) — NOT action keys. They are emitted as sibling lines to the action-type counts but are informational-only and INTENTIONALLY EXCLUDED from Stop hook parsing. Adding/removing/renaming memory_hygiene OR output_quality alone does NOT require fence-marker or action-key changes; the underlying actions of Stage 1.5 / Stage 2.7 findings still fall under one of the 6 action-type keys above. The Stop hook's awk parser silently ignores both lines (same mechanism as gate_3/gate_5 verdicts). -->
    <!-- retrospect:distribution begin -->
    - memory: 1
    - issue: 0
@@ -439,6 +570,8 @@ Stage 3 output MUST emit, in this order:
    - skill_idea: 0
    - hook_code: 0
    - upstream_feedback: 0
+   - memory_hygiene: 0
+   - output_quality: 0
    - gate_1_verdict: PASS
    - gate_2_verdict: PASS
    - gate_3_verdict: PASS
@@ -454,8 +587,8 @@ Stage 3 output MUST emit, in this order:
    ```
 
    Column semantics:
-   - `Category`: comma-separated subset of `behavioral`, `tool`, `workflow`, `spec-gap` (≥1, see Stage 2 pre-scan categorization)
-   - `Tool Layer`: one of `mcp`, `cli`, `builtin`, `skill`, or `—` (mandatory non-`—` when `tool` ∈ Category, optional `skill` for `workflow` / `spec-gap`, `—` for `behavioral`)
+   - `Category`: comma-separated subset of `behavioral`, `tool`, `workflow`, `spec-gap`, `memory_hygiene`, `output_quality` (≥1, see Stage 2 pre-scan categorization; `memory_hygiene` originates from Stage 1.5, `output_quality` originates from Stage 2.7)
+   - `Tool Layer`: one of `mcp`, `cli`, `builtin`, `skill`, or `—` (mandatory non-`—` when `tool` ∈ Category, mandatory non-`—` when `output_quality` ∈ Category AND audit surface is gh-CLI or sub-agent, optional `skill` for `workflow` / `spec-gap` / `memory_hygiene`, `—` for `behavioral` / `memory_hygiene` (default) / `output_quality` (MCP-via-behavioral path))
    - `Proposed Actions (1~2)`: comma-separated subset of `memory`, `issue`, `claude_md_draft`, `skill_idea`, `hook_code`, `upstream_feedback`; for findings marked `external=true` by Stage 2.5 Gate-4, append ` (external)` suffix to `upstream_feedback` (e.g., `memory, upstream_feedback (external)`)
    - `Rationale`: free-form one-line for compound or non-memory rows; for **memory-only** rows (single `memory`, not compound), the cell MUST match Schema A or Schema B (see Gate-2 in Stage 2.5): Schema A — exactly 5 lines `^not (issue|claude_md_draft|skill_idea|hook_code|upstream_feedback): .+$`, one per non-memory action type; Schema B — 1-2 lines `^not-others: .+$` with dimension tags (e.g., `not-others: repeat=0, rule_exists=yes, gateable=no, tool_defect=no`). Generic single-sentence rationales are NOT acceptable for memory-only findings. **For rows whose actions include `upstream_feedback`** (single or compound), the cell MUST also contain a literal line `backing_repo: <owner>/<repo>` (embedded via `<br>` for single-line markdown form) — Stage 4 Action 4 step 0 reads this as the routing decision. **Compound case `memory, upstream_feedback`**: the row is NOT memory-only (contains a non-memory action), so the Schema A/B requirement does NOT apply — instead use free-form prose for the human rationale + the `backing_repo:` line. Compound combinations are *additive*: each action-specific Rationale convention applies independently to the row, joined with `<br>`.
 
@@ -477,6 +610,8 @@ The Stop hook parses the distribution-card fence (deterministic) and the table (
 - skill_idea: {n}
 - hook_code: {n}
 - upstream_feedback: {n}
+- memory_hygiene: {n}
+- output_quality: {n}
 - gate_1_verdict: {PASS|FAIL|NA}
 - gate_2_verdict: {PASS|FAIL|NA}
 - gate_3_verdict: {PASS|FAIL|NA}
@@ -933,6 +1068,8 @@ If you catch yourself:
 - **Stage 3 "Execute now" 선택을 external-repo write 의 per-action 승인으로 ratify** — Stage 3 승인은 action 카테고리 선택이지, 외부 repo 개별 write 승인이 아님. Stage 4 step 0a 게이트를 반드시 별도로 실행.
 - **Omitting the `Stage 2 caveats:` line on a finding that has any of: tracer confidence below HIGH, single observation, alternative root cause not ruled out, Gate-3 downgrade, analyst cluster overlap, escape-hatch state** — carry-forward is mandatory whenever ANY of these holds. Silent omission lets Stage 3 rank as if Stage 2 returned clean HIGH-confidence evidence.
 - **조사 도구 결과를 completeness 검증 없이 결론에 사용 (premise unverified)** — 다음 두 패턴 모두 "premise falsified" (반증 테스트를 설계한 뒤 통과 → 진행 가능)가 아니라 "premise unverified" (도구 출력 자체의 한계를 검증하지 않은 채 결론에 사용 → STOP) 에 해당한다: (a) `find ... | head -N` 결과로 "파일/모듈 없음" 단정 — **`head` 를 제거한 원 명령 `find ... | wc -l` 을 별도로 실행**해 총 라인 수를 확인하고, cap 초과 시 cap 제거 또는 `grep -rn <token>` narrowing 필요 (`head -N` 파이프 뒤에 `| wc -l` 을 붙이면 cap 으로 잘린 뒤의 라인 수만 세므로 정확히 N개와 cap 초과를 구분할 수 없어 검증이 실패한다); (b) `find <path>` 빈 결과로 "경로/모듈 없음" 단정 — `ls <parent>` 로 path coverage 를 확인하거나 상위 경로로 재시도, 또는 `grep -rn <token>` cross-check 필요.
+- **Stage 1.5 hygiene scan을 "MEMORY.md가 작아서" 또는 "이미 다 안다"는 이유로 건너뜀** — Stage 1.5는 unconditional. 코퍼스 크기와 무관하게 cap-and-cursor 메커니즘으로 비용이 amortized 된다. "내가 이미 안다" 는 author-exempt verification trap 의 변형 — Stage 1.5의 detect-only 책임을 Stage 2 friction-scanner 가 대신할 수 없다 (silent recurrence는 마찰 신호 없이 누적).
+- **Stage 2.7 audit-skip을 trail 라인 없이 silent으로 처리** — `<!-- retrospect:audit_skipped: no artifacts -->` (또는 `transcript unreadable` variant)은 mandatory. trail 라인 부재 시 "Stage 2.7이 실행되었는가" vs "스킵되었는가" vs "잊혀졌는가" 를 retrospective audit이 구분할 수 없다. 0-trigger silent skip path도 trail 라인은 emit 한다.
 
 **ALL of these mean: STOP. Return to Stage 2.**
 
@@ -941,7 +1078,9 @@ If you catch yourself:
 | Stage | Key Activity | Success Criteria |
 |-------|-------------|-----------------|
 | **1. Load** | Read global `~/.claude/CLAUDE.md`, form scan questions | Rule categories identified |
+| **1.5 Hygiene** | Detect-only MEMORY.md scan — stale references / contradictions / merge candidates (cap 5 files/invocation + cursor carryover) | Stage 1.5 findings emitted with `category: memory_hygiene` (or `hygiene_skipped` trail if MEMORY.md unreachable) |
 | **2. Analyze** | Scan conversation, map to rules, find root cause | Root cause (not symptom) for each pattern; every event has `category[]` |
+| **2.7 Audit** | Adaptive post-hoc artifact audit — fires only when session contains `gh pr|issue|comment` / Slack-Notion MCP write / approved external-write events; runs 3 sub-audits (PR mergeability, sub-agent substance, external comment evidence) | Stage 2.7 findings emitted with `category: output_quality` (or `audit_skipped` trail if 0 triggers) |
 | **2.5 Audit** | Run Gate-1 (categorical) + Gate-2 (Schema A 5-line or Schema B dimension-tag rationale) + Gate-3 (evidence robustness for 2-action findings) + Gate-4 (external-repo authorization pre-check for upstream_feedback) + Gate-5 (memory-scan completeness for memory-action findings) | All applicable gates PASS/WARN or per-finding cap reached and surfaced to user |
 | **3. Report** | Present unified table + distribution card, carry Stage 2 caveats forward, run Pre-Output Falsification Gate before each `AskUserQuestion`, collect approval per item | User approved at least 1 item (or confirmed 0 findings); every `(Recommended)` label has a `Falsification:` trace |
 | **4. Execute** | Run approved actions, verify artifacts | Completion report with links/paths + verification results |
@@ -951,7 +1090,14 @@ If you catch yourself:
 | Stage | Failure | Action |
 |-------|---------|--------|
 | Stage 1 (load) | `~/.claude/CLAUDE.md` not found (global) or `AGENTS.md` not found (project) | Proceed with global defaults; flag the missing file in the report |
+| Stage 1.5 (hygiene) | MEMORY.md index not accessible | Skip Stage 1.5 entirely; emit `<!-- retrospect:hygiene_skipped: index not accessible -->` trail line; proceed to Stage 2 |
+| Stage 1.5 (hygiene) | Cursor file (`.omc/state/retrospect-hygiene-cursor.json`) corrupt | Reset cursor to most-recently-modified 5 files; log reset in completion report |
+| Stage 1.5 (hygiene) | Per-file scan failure (one of N files unreadable) | Continue with remaining files; record per-file failure in Stage 3 report Hygiene Scan Trail section |
 | Stage 2 (analyze) | Session history not accessible | Fall back to the user's verbal summary as input to steps 3–8 |
+| Stage 2.7 (audit) | Trigger detection scan failed (e.g., transcript unreadable) | Emit `<!-- retrospect:audit_skipped: transcript unreadable -->` trail line; skip Stage 2.7; proceed to Stage 2.5 |
+| Stage 2.7 (audit) | 0 triggers detected (no PR/external-write artifacts in session) | Silent skip with mandatory trail line `<!-- retrospect:audit_skipped: no artifacts -->` AND `output_quality: 0` in distribution card |
+| Stage 2.7 (audit) | `gh pr view` API failure for a specific PR | Log per-PR error in Stage 3 report Audit Trail section; continue with remaining PRs |
+| Stage 2.7 (audit) | Mid-session artifact deletion (e.g., PR was created then closed by user before retrospect) | Treat as audit signal — closed-without-merge IS a finding (per Sub-audit 1 trigger). If artifact entirely removed (issue/PR deleted), log "artifact no longer accessible" in Audit Trail; do not emit finding for that artifact |
 | Stage 2 (analyze) | No friction events found | Exit with "No patterns found. ✅" — do not fabricate findings |
 | Stage 2 (analyze) | MEMORY.md scan failed (file not accessible) | Treat all findings as new patterns (repeat=false). Flag scan failure in report |
 | Stage 2 (analyze) | MEMORY.md is empty | Normal processing — all findings are new patterns |
