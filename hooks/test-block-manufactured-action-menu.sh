@@ -498,6 +498,34 @@ P_af10=$(build_payload "$T_af10" '["그대로 둬", "방식 변경"]')
 run_case "[affirmative-KO] 'leave as-is' label, no marker → pass" pass default "$P_af10"
 
 # ---------------------------------------------------------------------------
+# (k) Execute-family command signals — directives that naturally pair with the
+#     affirmative-form markers ("execute now", "as instructed"). Without these
+#     in COMMAND_SIGNALS_EN_TOKENS the affirmative markers stay half-wired.
+# ---------------------------------------------------------------------------
+
+T_ef1=$(build_transcript "execute it")
+P_ef1=$(build_payload "$T_ef1" '["revise", "execute now"]')
+run_case "[execute-family] 'execute it' + 'execute now' label → advisory" advisory default "$P_ef1"
+
+T_ef2=$(build_transcript "run it")
+P_ef2=$(build_payload "$T_ef2" '["alternative", "do it as instructed"]')
+run_case "[execute-family] 'run it' + 'as instructed' label → advisory" advisory default "$P_ef2"
+
+T_ef3=$(build_transcript "implement the change")
+P_ef3=$(build_payload "$T_ef3" '["방식 변경", "그대로 진행"]')
+run_case "[execute-family] 'implement' + '그대로 진행' label → advisory" advisory default "$P_ef3"
+
+# Strict mode — execute-family signal blocks like other command signals.
+T_ef4=$(build_transcript "execute it")
+P_ef4=$(build_payload "$T_ef4" '["revise", "execute now"]')
+run_case "[execute-family] strict + 'execute it' + 'execute now' → block" block strict "$P_ef4"
+
+# Negation guard — "don't execute" must not register as command-intent.
+T_ef5=$(build_transcript "don't execute that yet")
+P_ef5=$(build_payload "$T_ef5" '["revise", "execute now"]')
+run_case "[execute-family] negated \"don't execute\" + 'execute now' → pass" pass default "$P_ef5"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
