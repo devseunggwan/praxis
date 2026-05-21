@@ -861,7 +861,7 @@ T_NEW3_CARD=$(cat <<EOF
 - gate_4_verdict: NA
 EOF
 )
-T_NEW3_ROW="| 1 | output_quality, tool | cli | PR review-rounds ≥3 | weak first-pass review quality | n/a | No | memory | ${RATIONALE_5LINE} | MED |"
+T_NEW3_ROW="| 1 | output_quality | cli | PR review-rounds ≥3 | weak first-pass review quality | n/a | No | memory | ${RATIONALE_5LINE} | MED |"
 run_case "T-NEW3_pass_output_quality_category_with_cli_layer" "pass" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T_NEW3_CARD" "$T_NEW3_ROW")")"
 
