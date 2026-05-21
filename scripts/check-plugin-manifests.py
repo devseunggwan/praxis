@@ -85,7 +85,7 @@ def main() -> int:
                 # Strip argument suffixes (e.g. "strike-counter.sh session-start" → "strike-counter")
                 hook_name = hook_name.split()[0] if " " in hook_name else hook_name
                 # Normalize -pre / -post variant scripts to their shared spec name
-                # (e.g. trino-describe-first-pre → trino-describe-first)
+                # (e.g. pre-edit-md-escape-advisory-pre → pre-edit-md-escape-advisory)
                 for suffix in ("-pre", "-post"):
                     if hook_name.endswith(suffix):
                         hook_name = hook_name[: -len(suffix)]

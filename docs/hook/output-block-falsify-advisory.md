@@ -64,8 +64,7 @@ T1 scans `options[].label` ONLY — description is scanned by T2 (below).
 
 #### AskUserQuestion T2: confidence-anchoring framing (issue #369)
 
-T1's literal-marker scope leaves two bypass paths exploited in the
-2026-05-21 devseunggwan/ai-dotfiles PR #84 session:
+T1's literal-marker scope leaves two bypass paths observed in practice:
 
 1. **Confidence-anchoring framing without `(Recommended)` marker** — option
    labels/descriptions using `가장 안전한` / `safer` / `자연스러운` / `prefer this`

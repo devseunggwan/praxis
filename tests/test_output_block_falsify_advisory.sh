@@ -395,7 +395,7 @@ run_case "AskUserQuestion: multi-question — Falsified: in Q2 does not cover Q1
 # ---------------------------------------------------------------------------
 
 # In-vivo regression: description has "가장 안전한" (the exact framing that
-# bypassed T1 in the devseunggwan/ai-dotfiles PR #84 session).
+# bypassed T1 in a real session — anchoring framing placed in description).
 run_case "T2: KO '가장 안전한' in description — no Falsified → ask" \
   "ask:Falsified:" \
   "$(make_ask_payload_with_descriptions \

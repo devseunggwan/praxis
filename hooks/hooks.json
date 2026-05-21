@@ -59,12 +59,6 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/cross-repo-worktree-preflight.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
-          },
-          {
-            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-pr-without-caller-evidence.sh",
             "timeout": 5,
             "hosts": ["claude", "codex"]
@@ -230,23 +224,6 @@
             "hosts": ["claude", "codex"]
           }
         ]
-      },
-      {
-        "matcher": "mcp__.*trino.*__(trino_)?query",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/trino-describe-first-pre.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/trino-catalog-gate.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
-          }
-        ]
       }
     ],
     "PostToolUse": [
@@ -267,17 +244,6 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-md-escape-advisory-post.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__.*trino.*__(trino_)?query",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/trino-describe-first-post.sh",
             "timeout": 5,
             "hosts": ["claude", "codex"]
           }

@@ -82,7 +82,7 @@ run_case "heredoc via global --repo before subcommand" block \
 # ---------------------------------------------------------------------------
 
 run_case "gh pr create --repo" ask \
-  'gh pr create --repo devseunggwan/praxis --title "feat: x" --body-file /tmp/b.md'
+  'gh pr create --repo owner/repo --title "feat: x" --body-file /tmp/b.md'
 
 run_case "gh issue create --repo" ask \
   'gh issue create --repo owner/repo --title "bug report"'
@@ -94,10 +94,10 @@ run_case "gh issue edit --repo" ask \
   'gh issue edit 7 --repo owner/repo --title "updated"'
 
 run_case "gh pr edit --repo" ask \
-  'gh pr edit 5 --repo devseunggwan/praxis --title "updated"'
+  'gh pr edit 5 --repo owner/repo --title "updated"'
 
 run_case "gh -R shorthand" ask \
-  'gh -R devseunggwan/praxis pr create --title "fix" --body-file /tmp/b.md'
+  'gh -R owner/repo pr create --title "fix" --body-file /tmp/b.md'
 
 run_case "--repo= equals form" ask \
   'gh issue create --repo=owner/repo --title "test"'
@@ -109,7 +109,7 @@ run_case "gh pr new --repo" ask \
   'gh pr new --repo owner/repo --title "t" --body-file /tmp/b.md'
 
 run_case "chained: safe cmd && gh pr create --repo" ask \
-  'git fetch origin && gh pr create --repo devseunggwan/praxis --title "t" --body-file /tmp/b.md'
+  'git fetch origin && gh pr create --repo owner/repo --title "t" --body-file /tmp/b.md'
 
 # ---------------------------------------------------------------------------
 # ASK: checklist includes Caller chain item for pr create
@@ -169,7 +169,7 @@ run_case "gh issue --repo X create (F1 fix)" ask \
   'gh issue --repo owner/repo create --title "t"'
 
 run_case "gh pr --repo X create (F1 fix)" ask \
-  'gh pr --repo devseunggwan/praxis create --title "t" --body-file /tmp/b.md'
+  'gh pr --repo owner/repo create --title "t" --body-file /tmp/b.md'
 
 run_case "gh issue --repo X create with heredoc (F1+F2)" block \
   'gh issue --repo owner/repo create --title "t" <<EOF'
@@ -217,7 +217,7 @@ run_case "git command" pass \
   'git push origin main'
 
 run_case "opt-out marker" pass \
-  'gh pr create --repo devseunggwan/praxis --title "t" --body-file /tmp/b.md  # cross-boundary:ack'
+  'gh pr create --repo owner/repo --title "t" --body-file /tmp/b.md  # cross-boundary:ack'
 
 # Codex #224: marker placed inside heredoc body must NOT be honored as opt-out.
 # Otherwise the marker leaks into the published artifact AND the hook bypasses
@@ -243,7 +243,7 @@ body line
 # Use --repo + ask expectation so cross-boundary checklist still surfaces,
 # proving the heredoc-block path did NOT fire on this command.
 run_case "quoted body containing << literal does not block" ask \
-  'gh issue create --repo devseunggwan/praxis --title "t" --body "code: a<<b"'
+  'gh issue create --repo owner/repo --title "t" --body "code: a<<b"'
 
 # Codex round 3 — opt-out marker placed in shell command portion must NOT
 # bypass the heredoc hard-block. The marker only opts out of the cross-repo

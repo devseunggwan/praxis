@@ -129,21 +129,20 @@ LAST (19th), AFTER `pre-merge-approval-gate` (9th):
 | 2 | `block-gh-state-all` |
 | 3 | `memory-hint` |
 | 4 | `cross-boundary-preflight` |
-| 5 | `cross-repo-worktree-preflight` |
-| 6 | `block-pr-without-caller-evidence` |
-| 7 | `pre-gh-pr-create-dedup-gate` |
-| 8 | `commit-title-length-check` |
-| 9 | `pre-merge-approval-gate` (surfaces `permissionDecision: ask` on `gh pr merge`) |
-| 10 | `gh-flag-verify` |
-| 11 | `cli-flag-incompat-advisory` |
-| 12 | `jq-config-empty-dict-advisory` |
-| 13 | `bash-worktree-existence-advisory` |
-| 14 | `verify-commit-flag-override` |
-| 15 | `session-intent` |
-| 16 | `output-block-falsify-advisory` |
-| 17 | `count-assertion-verify` |
-| 18 | `external-write-path-existence-check` |
-| 19 | **`momentum-rule-retrieval-gate`** (this hook — stderr rule reminders) |
+| 5 | `block-pr-without-caller-evidence` |
+| 6 | `pre-gh-pr-create-dedup-gate` |
+| 7 | `commit-title-length-check` |
+| 8 | `pre-merge-approval-gate` (surfaces `permissionDecision: ask` on `gh pr merge`) |
+| 9 | `gh-flag-verify` |
+| 10 | `cli-flag-incompat-advisory` |
+| 11 | `jq-config-empty-dict-advisory` |
+| 12 | `bash-worktree-existence-advisory` |
+| 13 | `verify-commit-flag-override` |
+| 14 | `session-intent` |
+| 15 | `output-block-falsify-advisory` |
+| 16 | `count-assertion-verify` |
+| 17 | `external-write-path-existence-check` |
+| 18 | **`momentum-rule-retrieval-gate`** (this hook — stderr rule reminders) |
 
 When both `pre-merge-approval-gate` and this hook fire on `gh pr merge`, the
 user first sees the sibling's `permissionDecision: ask` dialog (hard-gate)

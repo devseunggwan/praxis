@@ -15,8 +15,7 @@ mistyped, the failure happens inside the Bash tool and produces a cryptic shell
 error — not the clear "you are targeting a missing worktree" message that would
 let the agent self-correct. Memory entry `worktree_context_pre_git_op` covers
 the rule, but retrieval at command-composition time keeps failing. This hook
-fires earlier than `cross-repo-worktree-preflight` (which handles the remove
-operation) by checking the `cd` step itself (praxis issue #322).
+fires on the `cd` step itself, before any git operation (praxis issue #322).
 
 ### What is emitted
 
@@ -113,7 +112,6 @@ creating a new directory that does not yet exist).
 
 | Hook | Scope | Overlap |
 |------|-------|---------|
-| `cross-repo-worktree-preflight` | `git worktree remove <path>` cross-repo mismatch | Complementary — this hook fires on the `cd` step *before* any git operation; the sibling fires on the remove step |
 | `cross-boundary-preflight` | `gh` write subcommands across `--repo` boundary | None — different command family |
 | `side-effect-scan` | collateral side effects (`git commit/push`, `gh pr merge`) | Complementary — fires on downstream mutation, not worktree navigation |
 

@@ -117,11 +117,11 @@ run_case "Read tool (no body) silent" \
 # --- MCP detection
 run_case "MCP slack send + KO marker (warn)" \
   "warn" "advisory" \
-  '{"tool_name":"mcp__laplace-slack__slack_send_message","tool_input":{"text":"이건 가설인데 prod 적재가 실패했을 가능성이 있습니다."}}'
+  '{"tool_name":"mcp__slack__slack_send_message","tool_input":{"text":"이건 가설인데 prod 적재가 실패했을 가능성이 있습니다."}}'
 
 run_case "MCP slack send + verified content (silent)" \
   "silent" "advisory" \
-  '{"tool_name":"mcp__laplace-slack__slack_send_message","tool_input":{"text":"검증 완료: 819 rows."}}'
+  '{"tool_name":"mcp__slack__slack_send_message","tool_input":{"text":"검증 완료: 819 rows."}}'
 
 run_case "MCP notion update_page + marker (warn)" \
   "warn" "advisory" \
@@ -165,11 +165,11 @@ run_case "MCP notion_append_blocks nested verified content (silent)" \
 
 run_case "MCP slack send_message blocks nested text + marker (warn)" \
   "warn" "advisory" \
-  '{"tool_name":"mcp__laplace-slack__slack_send_message","tool_input":{"channel":"C123","blocks":[{"type":"section","text":{"type":"mrkdwn","text":"이건 가설인데 prod 지연 가능성."}}]}}'
+  '{"tool_name":"mcp__slack__slack_send_message","tool_input":{"channel":"C123","blocks":[{"type":"section","text":{"type":"mrkdwn","text":"이건 가설인데 prod 지연 가능성."}}]}}'
 
 run_case "MCP slack blocks nested verified text (silent)" \
   "silent" "advisory" \
-  '{"tool_name":"mcp__laplace-slack__slack_send_message","tool_input":{"channel":"C123","blocks":[{"type":"section","text":{"type":"mrkdwn","text":"Verified 100 percent."}}]}}'
+  '{"tool_name":"mcp__slack__slack_send_message","tool_input":{"channel":"C123","blocks":[{"type":"section","text":{"type":"mrkdwn","text":"Verified 100 percent."}}]}}'
 
 run_case "MCP notion non-body top-level fields ignored (silent)" \
   "silent" "advisory" \

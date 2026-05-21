@@ -34,7 +34,6 @@ back-compat fallback.
 
 | Hook | State file | Contents |
 |------|-----------|---------|
-| `trino-describe-first.py` | `${TMPDIR:-/tmp}/praxis-describe-history-<session_id>.json` | Set of Trino table names that have been `DESCRIBE`d in this session |
 | `session-intent.py` | `${TMPDIR:-/tmp}/praxis-session-intent-<session_id>.json` | Detected session intent flag (read vs. mutation) |
 | `pre-edit-md-escape-advisory.py` | `${TMPDIR:-/tmp}/praxis-md-read-history-<session_id>.json` | Set of `.md` file paths Read in this session |
 

@@ -81,10 +81,9 @@ RECOMMENDED_MARKERS_EN = ("(Recommended)",)
 RECOMMENDED_MARKERS_KO = ("(추천)",)
 
 # Confidence-anchoring framing tokens (issue #369). Scanned on BOTH option
-# label and description, not just label, because in-vivo evidence
-# (devseunggwan/ai-dotfiles PR #84 session) showed anchoring framing
-# placed in description ("가장 안전한 1회 변경") bypassed the literal
-# marker check. Same Falsified: satisfaction as the marker tier.
+# label and description, not just label, because in-vivo evidence showed
+# anchoring framing placed in description ("가장 안전한 1회 변경") bypassed
+# the literal marker check. Same Falsified: satisfaction as the marker tier.
 #
 # EN: ASCII lookaround instead of `\b`. Python's `\b` is Unicode-aware
 # and would misfire when Korean text sits adjacent to ASCII (no

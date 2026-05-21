@@ -23,13 +23,10 @@ confirmation-prompt layer.
 | [commit-title-length-check](commit-title-length-check.md) | PreToolUse | Ask when `git commit` title exceeds 50 chars |
 | [pre-merge-approval-gate](pre-merge-approval-gate.md) | PreToolUse | Surface per-PR approval prompt for `gh pr merge` in direct sessions |
 | [cross-boundary-preflight](cross-boundary-preflight.md) | PreToolUse | Block heredoc body in `gh pr/issue create`; ask with four-point checklist on cross-repo `--repo` writes |
-| [cross-repo-worktree-preflight](cross-repo-worktree-preflight.md) | PreToolUse | Ask before `git worktree remove <abs-path>` when the path is not registered in cwd repo's worktree list |
 | [pre-edit-protected-branch-guard](pre-edit-protected-branch-guard.md) | PreToolUse | Block Edit/Write/NotebookEdit on protected branches (main/dev/prod/master) outside the expected worktree workflow |
 | [pre-gh-pr-create-dedup-gate](pre-gh-pr-create-dedup-gate.md) | PreToolUse | Run `gh pr list --search` before `gh pr create`; hard-block on duplicate or repo-resolution failure |
 | [verify-commit-flag-override](verify-commit-flag-override.md) | PreToolUse | Deny `git commit` invocations that override hooks / signing without env verification |
 | [session-intent](session-intent.md) | UserPromptSubmit + PreToolUse | Gate read-intent → mutation-pivot session drift on `gh` mutating commands |
-| [trino-describe-first](trino-describe-first.md) | PreToolUse (`trino-describe-first-pre`) + PostToolUse (`trino-describe-first-post`) | Require `DESCRIBE <table>` before Trino MCP query references that table |
-| [trino-catalog-gate](trino-catalog-gate.md) | PreToolUse | Block Trino MCP queries with 3-part catalog references when `SHOW CATALOGS` has not run in this session |
 
 ---
 

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed (BREAKING)
+- `trino-describe-first` hook + paired `-pre`/`-post` shims + spec + tests (Trino MCP-specific gate; not generic enough for upstream praxis)
+- `trino-catalog-gate` hook + paired `-post` shim + spec + tests (Trino MCP-specific catalog gate)
+- `cross-repo-worktree-preflight` hook + shim + spec + sibling test (org-specific worktree mismatch detector)
+
+### Changed
+- Repo-wide identifier sweep: `laplace-*` / `hubctl` / `windmill` / `signoz` / `channeltalk` / `airflow` / `laplacetec/` removed from hook code, docs, SKILL.md examples, and test fixtures
+- `cross-boundary-preflight` advisory text: internal-identifier example list genericized
+- `tests/test_retrospect_routing.sh`: `PRAXIS_RETROSPECT_FORBIDDEN_PATTERNS` env var lets forks extend the banned list without forking the test (#376)
+
 ## [4.1.0] - 2026-05-21
 
 5 feat + 1 refactor + 1 fix + 1 docs accumulated since 4.0.0. All additive — semver minor.

@@ -115,7 +115,7 @@ run_case "short_allcaps_under_min" "pass" \
 # --- Advisory cases: Bash with safe_tokenize path ---
 
 run_case "bash_allcaps_unquoted" "advisory:LAST_365_DAYS" \
-  "$(bash_payload 'trino -e "SELECT LAST_365_DAYS FROM t"')"
+  "$(bash_payload 'psql -c "SELECT LAST_365_DAYS FROM t"')"
 
 run_case "bash_allcaps_quoted_arg" "advisory:SHOPBY_AUTH_TOKEN" \
   "$(bash_payload 'curl -H "Authorization: Bearer SHOPBY_AUTH_TOKEN"')"
@@ -124,7 +124,7 @@ run_case "bash_compound_allcaps" "advisory:VENDOR_TOKEN_TYPE" \
   "$(bash_payload 'echo ok && gh issue create --body VENDOR_TOKEN_TYPE')"
 
 run_case "bash_sql_3part_from" "advisory:catalog.schema.table" \
-  "$(bash_payload 'trino -e "SELECT * FROM catalog.schema.table WHERE id=1"')"
+  "$(bash_payload 'psql -c "SELECT * FROM catalog.schema.table WHERE id=1"')"
 
 # --- Advisory cases: Write / Edit (raw content path) ---
 

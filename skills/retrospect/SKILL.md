@@ -507,7 +507,7 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 **Step 1 — Extract owner.** Parse `backing_repo: <owner/repo>` from the finding's Rationale cell. If the declaration is absent → Gate-4 skips this finding (Stage 4 Action 4 step 0's missing-declaration abort is the downstream enforcement).
 
 **Step 2 — Resolve own-org allowlist** (in priority order):
-1. Env var `PRAXIS_OWN_ORGS` (comma-separated handles) — e.g., `PRAXIS_OWN_ORGS="devseunggwan,laplace-tech-team"`
+1. Env var `PRAXIS_OWN_ORGS` (comma-separated handles) — e.g., `PRAXIS_OWN_ORGS="my-handle,my-team"`
 2. Fallback: `gh api user --jq .login` → treat the single returned handle as the only own org
 3. Both absent → treat all `backing_repo` owners as external (conservative default — all `upstream_feedback` rows require per-action approval at Stage 4)
 
