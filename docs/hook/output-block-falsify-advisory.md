@@ -31,20 +31,23 @@ Text rules and MEMORY.md entries alone have proven insufficient to prevent
 recurrence. A structural hook moves the gate to the tool-call use-site.
 
 References: issue [#221](https://github.com/devseunggwan/praxis/issues/221) (advisory),
-[#290](https://github.com/devseunggwan/praxis/issues/290) (ask escalation).
+[#290](https://github.com/devseunggwan/praxis/issues/290) (T1 ask escalation),
+[#369](https://github.com/devseunggwan/praxis/issues/369) (T2 confidence-anchoring extension).
 
 ### What is detected
 
 | Tool | Trigger condition | Decision |
 |------|-----------------|----------|
-| `AskUserQuestion` | Option `label` contains exact `(Recommended)` or `(추천)` AND question body has no `Falsified:` line | `permissionDecision: ask` |
-| `AskUserQuestion` | Option `label` contains exact `(Recommended)` or `(추천)` AND question body has `Falsified:` line | Silent pass |
-| `AskUserQuestion` | Option `label` contains `(recommended)` (case-insensitive, not exact) | Advisory stderr |
+| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND question body has no `Falsified:` line | `permissionDecision: ask` (ASK_MSG) |
+| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND question body has `Falsified:` line | Silent pass |
+| `AskUserQuestion` (T2, issue #369) | Option `label` OR `description` contains a confidence-anchoring framing token AND question body has no `Falsified:` line | `permissionDecision: ask` (ANCHORING_ASK_MSG) |
+| `AskUserQuestion` (T2) | Same as above + `Falsified:` present | Silent pass |
+| `AskUserQuestion` (T3) | Option `label` contains case-insensitive `(recommended)` only | Dead under new precedence — T2's bare `recommend(ed\|s)?` token catches it first as ask |
 | `Bash` | Command matches a bulk-action mutation keyword (see table below) | Advisory stderr |
 | Any other tool | — | Silent pass-through |
 | Malformed payload / missing field | — | Silent fail-open |
 
-#### AskUserQuestion: (Recommended) marker and Falsified: gate
+#### AskUserQuestion T1: (Recommended) marker and Falsified: gate
 
 `(Recommended)` and `(추천)` in option labels are the canonical signal for a
 self-authored proposal block about to be surfaced. When these exact tokens
@@ -54,11 +57,43 @@ self-authored proposal block about to be surfaced. When these exact tokens
 
 - **`Falsified:` present** → silent pass. The model has provided verifiable
   evidence of a disconfirming test.
-- **`Falsified:` absent** → `permissionDecision: ask`. The model must add the
-  falsification line and retry.
+- **`Falsified:` absent** → `permissionDecision: ask` with ASK_MSG. The model
+  must add the falsification line and retry.
 
-Only `options[].label` is scanned for the marker — `options[].description` text
-that incidentally contains `(Recommended)` does not trigger the gate.
+T1 scans `options[].label` ONLY — description is scanned by T2 (below).
+
+#### AskUserQuestion T2: confidence-anchoring framing (issue #369)
+
+T1's literal-marker scope leaves two bypass paths exploited in the
+2026-05-21 devseunggwan/ai-dotfiles PR #84 session:
+
+1. **Confidence-anchoring framing without `(Recommended)` marker** — option
+   labels/descriptions using `가장 안전한` / `safer` / `자연스러운` / `prefer this`
+   etc. carry the same ranking signal but bypass T1.
+2. **Description-field placement** — anchoring framing placed in
+   `options[].description` (not label) bypasses T1's label-only scan.
+
+T2 closes both: it scans `label` AND `description` for these tokens.
+
+**EN token set** (case-insensitive, ASCII word-boundary lookarounds —
+Python's `\b` is Unicode-aware and would misfire on Hangul-adjacent ASCII):
+
+- Single-word: `safer`, `safest`, `clearly`
+- Multi-word: `natural fit`, `natural choice`, `obvious choice`, `default to`,
+  `default choice`, `prefer this`
+- Bare marker: `recommend(?:ed|s)?`
+
+**KO substring set** (plain substring — Hangul has no ASCII boundary issue):
+
+`안전한`, `가장 안전`, `자연스러운`, `당연히`, `분명히`, `추천`, `기본값`
+
+**Satisfaction**: identical to T1 — a `Falsified:` line in question body
+silent-passes T2. The model can either remove the anchoring framing or add
+the falsification line.
+
+**Precedence**: T1 fires first when both could trigger (literal marker in
+label + anchoring in description). T2's `ANCHORING_ASK_MSG` differs from
+T1's `ASK_MSG` so downstream parsers can distinguish which tier escalated.
 
 #### Bash: bulk-action mutation keywords
 
@@ -74,23 +109,42 @@ matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
 
 ### Response shape
 
-#### Ask-escalation (AskUserQuestion with exact `(Recommended)` / `(추천)`, no `Falsified:`)
+#### T1 Ask-escalation (AskUserQuestion with exact `(Recommended)` / `(추천)`, no `Falsified:`)
 
-**JSON to stdout:**
+**JSON to stdout** (message constant: `ASK_MSG`):
 
 ```json
 {
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "ask",
-    "permissionDecisionReason": "(Recommended) 라벨이 있으나 question body 에 'Falsified: <disconfirming test 결과>' 가 없음. global `~/.claude/CLAUDE.md` Self-Falsify Before Recommendation Lock 룰. 추가 후 재시도."
+    "permissionDecisionReason": "(Recommended) 라벨이 있으나 question body 에 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Self-Falsify Before Recommendation Lock 룰. 추가 후 재시도."
+  }
+}
+```
+
+#### T2 Ask-escalation (issue #369 — confidence-anchoring framing, no `Falsified:`)
+
+**JSON to stdout** (message constant: `ANCHORING_ASK_MSG`):
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "ask",
+    "permissionDecisionReason": "옵션 라벨/설명에 confidence-anchoring framing 토큰 (safer/safest/natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/당연히/분명히/추천/기본값) 이 있으나 question body 에 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Output-Block-Level Falsification Gate. 추가 후 재시도."
   }
 }
 ```
 
 **Exit code:** `0`.
 
-#### Advisory (Bash bulk-action, or case-insensitive `(recommended)` only)
+#### Advisory (Bash bulk-action only)
+
+Note: case-insensitive `(recommended)` alone previously emitted advisory
+stderr; under issue #369 it is now caught by T2 (ask) before the
+case-insensitive fallback fires. The advisory path remains for Bash
+bulk-action keywords only.
 
 **Advisory message** (emitted to stderr, never stdout):
 
@@ -124,17 +178,27 @@ All parsing is done with the Python standard library only.
 bash tests/test_output_block_falsify_advisory.sh
 ```
 
-Covers 26 cases:
+Covers 40 cases:
 
-**Ask-escalation (AskUserQuestion, issue #290):**
-- Option label `(Recommended)` + no `Falsified:` in question body → `permissionDecision: ask`
+**T1 ask-escalation (AskUserQuestion, issue #290):**
+- Option label `(Recommended)` + no `Falsified:` in question body → `permissionDecision: ask` (ASK_MSG)
 - Option label `(추천)` + no `Falsified:` → `permissionDecision: ask`
 - Option label `(Recommended)` + `Falsified:` line present → silent pass
-- `(Recommended)` appears in `options[].description` only (not label) → silent pass (false positive guard)
 - Non-recommended option labels → silent pass
 
-**Advisory (AskUserQuestion, case-insensitive fallback):**
-- Option label `(recommended)` lowercase only → advisory emitted
+**T2 ask-escalation (AskUserQuestion, issue #369):**
+- KO `가장 안전한` in `options[].description` + no `Falsified:` → `ask` (ANCHORING_ASK_MSG) — in-vivo regression for the ai-dotfiles PR #84 session
+- EN `safer` / `safest` / `prefer this` / `obvious choice` in label or description → `ask`
+- KO `자연스러운` / `안전한` / `당연히` in description → `ask`
+- Mixed Hangul/ASCII (`prefer this 옵션`) → `ask` — word-boundary regression
+- `(Recommended)` in description-only (no marker in label) → `ask` (replaces former false-positive-guard pass)
+- T2 anchoring + `Falsified:` line → silent pass
+- T1 precedence: literal `(Recommended)` + anchoring description → ASK_MSG (T1 wins)
+
+**T2 negative cases (must not fire):**
+- `preferential treatment` (no token in set) → pass
+- Bare `safe` (only `safer`/`safest` in set) → pass
+- `unsafer` (word-boundary regression) → pass
 
 **Pass (AskUserQuestion):**
 - Option labels without any marker → silent pass
