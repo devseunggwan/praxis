@@ -13,10 +13,11 @@ CLAUDE.md "GitHub Issue Hygiene" requires `gh search issues '<keywords>'
 not filed. Memory-only enforcement of this rule recurred — the hook
 intercepts at the create checkpoint instead.
 
-Retrospect source (Hub #2242 retrospect, 2026-05-21): the agent created Hub
-#2245 ("shopby_v2 brands_lookup CTE pattern") while Hub #2243 ("products_src
-catalog gap") already covered the same root-cause scope. User redirect:
-"기존에 PR이 존재했는데 왜 또 만드나요" → `/cancel`.
+Retrospect pattern (praxis issue #374): the agent spawned a new follow-up
+issue from a fresh analysis finding without running a duplicate search;
+an existing open issue already covered the same root-cause scope (often
+surfaced earlier in the same session by a sibling sciomc Stage or a PR
+body "후속 검토" item). User redirect → `/cancel` cycle.
 
 ### What is blocked
 

@@ -21,12 +21,12 @@ Lock). Per the prompt-layer retrieval failure threshold, a 3+ generation
 recurrence requires structural enforcement rather than another memo — this
 hook enforces the gate at the commit checkpoint.
 
-Retrospect source (Hub #2242 PR #8299, 2026-05-21): the user PR body stated
-the cafe24 pattern `COALESCE(..., 'TOSS_SHOPPING')`; a sciomc Stage 5
-"sibling-deviant" finding surfaced; the agent auto-committed a flip to
-`'Unknown'` without re-reading the PR body or asking; the user redirected
-("그냥 cafe24 패턴으로 작성 부탁합니다") and the flip was reverted — costing 2
-extra commits, a 2x PR-body rewrite, and reviewer noise.
+Retrospect pattern (praxis issue #374): the user's PR body stated a
+sibling-convention literal in a SQL `COALESCE(...)` expression; a sciomc
+Stage 5 "sibling-deviant" finding surfaced; the agent auto-committed a
+flip of the literal without re-reading the PR body or asking; the user
+redirected back to the originally-stated design and the flip was reverted
+— costing extra commits, a PR-body rewrite, and reviewer-timeline noise.
 
 ### What is blocked
 

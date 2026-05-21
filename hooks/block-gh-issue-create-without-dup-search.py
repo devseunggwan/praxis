@@ -6,10 +6,11 @@ Backs CLAUDE.md "GitHub Issue Hygiene": before creating any issue, run
 `gh search issues '<keywords>' --repo <repo>` to detect duplicates. Memory-
 only enforcement has failed; this hook intercepts at the create checkpoint.
 
-Concrete retrospect source (2026-05-21, Hub #2242 retrospect):
-  AI created Hub #2245 ("shopby_v2 brands_lookup CTE pattern") while Hub
-  #2243 (products_src catalog gap) already covered the same root-cause scope.
-  User redirect: "기존에 PR이 존재했는데 왜 또 만드나요" → /cancel #2245.
+Concrete retrospect pattern (praxis issue #374):
+  AI creates a follow-up issue from a fresh analysis finding without
+  running a duplicate search first; an existing open issue already covers
+  the same root-cause scope (often surfaced by a sibling sciomc Stage or
+  PR-body "후속 검토" item). User redirects to the existing issue → /cancel.
 
 Block conditions (either triggers a block):
   (a) `gh issue create` invoked with no prior `gh search issues` / `gh issue
@@ -168,10 +169,9 @@ def _emit_no_search_block(keywords: list[str]) -> None:
                 "  Before creating any issue: gh search issues '<keywords>' --repo <repo>",
                 "  (open AND closed). Ask user if ambiguous. Never create duplicates.",
                 "",
-                "Hub #2242 retrospect (2026-05-21):",
-                "  AI created Hub #2245 (shopby_v2 brands_lookup CTE) while Hub #2243",
-                "  (products_src catalog gap) already covered the same root-cause scope.",
-                "  User redirect: '기존에 PR이 존재했는데 왜 또 만드나요' → /cancel.",
+                "Pattern (praxis issue #374):",
+                "  AI spawns a new issue from a fresh analysis finding without searching;",
+                "  an existing open issue covers the same root cause → /cancel cycle.",
                 "",
                 "Resolve by one of:",
                 "  1. Run a search FIRST:",
