@@ -168,6 +168,12 @@ For every rule category identified in Stage 1 (Pre-merge Worktree Precondition /
 - **Promoted** to a friction event (carries through Stage 2 step 3+ and Stage 2.5 gates), or
 - **Demoted** to the `dismissed_candidates` ledger (note-only, see below) with explicit rationale + spec cite. Demotion does NOT silence the audit trail — it records the dismissal reason for follow-up retrospects to surface dismissed-candidate patterns.
 
+**Mandate scope (narrow — rule violations only)** — the checklist gate's capture mandate applies to **rule violations** (workflow steps in `AGENTS.md` / `~/.claude/CLAUDE.md` / hook denials / spec-cited divergence) and NOT to general codex/review-bot findings. A refactor suggestion, style nit, or defensible alternative implementation from a review bot is NOT subject to the dismissal-to-silence ban — those may be acknowledged or ignored without a checklist entry. This narrowing exists to prevent MEMORY.md from inflating into a review-bot mirror over time.
+
+For a rule-violation candidate, the operator's only dismissal path is:
+- **Demote to `dismissed_candidates` ledger** (note-only) with explicit rationale + spec cite. Silent dismissal — refusing to record the candidate at all — is BLOCKED by the Red Flag in this skill.
+- **Escape hatch via existing resolution** — when `repeat=true AND resolved=true` (a prior session's issue/hook already resolves the same violation pattern; see Stage 2 step 7 escape hatch at the `note only` clause), demotion is permitted with a one-sentence cross-reference to the existing resolution recorded in the dismissal rationale.
+
 **`dismissed_candidates` ledger** — for every checklist candidate that was reviewed and dismissed (i.e., kept off the unified findings table), append one line to the ledger block emitted alongside the checklist:
 
 ```
@@ -1114,6 +1120,7 @@ If you catch yourself:
 - **Forcing tool friction into only a rule-violation frame** — tool-layer defects from step 4b MUST be carried in the unified findings table with `Tool Layer` set to a non-`—` value and evaluated for `upstream feedback`, not collapsed into rule-violation-only findings
 - **Skipping step 4b entirely** ("no tool issues this session") — step 4b is mandatory. If no tool friction is found, the distribution card MUST emit `upstream_feedback: 0` and the report MUST state "No tool/feature friction detected. ✅" explicitly
 - **Pre-scan에서 friction event에 `category[]` 라벨링을 누락한 채 Stage 2 step 3 이상 진행** — Layer E 강제. 누락은 Stage 2 진입 전 차단되어야 한다.
+- **Pre-scan Checklist 가 식별한 rule-violation 후보를 dismissed_candidates ledger 기록 없이 silent 으로 무시** — 운영자의 dismissal-to-silence 권한은 차단됨. 후보는 (a) friction event 로 promote 하거나 (b) dismissed_candidates 에 explicit rationale + spec cite 와 함께 demote 해야 한다. 일반 codex/review-bot finding (refactor 제안 / style nit) 은 본 mandate 적용 대상 아님 — narrow scope 는 rule violation 사실에만 적용된다 (MEMORY.md 가 review-bot mirror 로 inflate 되는 위험 방지).
 - **Memory-only finding의 `Rationale`이 Gate-2 schema 를 만족하지 않음** — Gate-2 위반. 허용 schema: (a) 5줄 `not <action>: <reason>` 형식 (Schema A) 또는 (b) 1-2줄 `not-others: <dim-tags>` 형식 (Schema B). 일반 한 줄 진술, 3-line `not-others:`, Schema A/B 혼용은 모두 부적격.
 - **Stage 2.5 분포 감사를 명시적으로 건너뛰고 Stage 3로 직행** — distribution card와 Gate-1/Gate-2/Gate-3 verdict 출력은 Stage 3 입력의 mandatory 전제.
 - **`tool` 라벨 finding의 `Tool Layer` 컬럼이 `—`로 비어 있음** — Layer E ↔ step 4b composition matrix 위반. tool 카테고리는 4b layer 중 하나(mcp/cli/builtin/skill)를 반드시 가져야 한다.
