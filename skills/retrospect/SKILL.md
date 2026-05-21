@@ -149,7 +149,7 @@ Each Stage 1.5 finding has:
 - For `memory_hygiene` events (Stage 1.5 origin), `Tool Layer` = `—` by default. When the stale citation points to a specific skill/hook artifact (e.g., a renamed hook script), `Tool Layer` MAY be set to `skill` so the finding compounds with a `skill` step-4b lane. `memory_hygiene` events do NOT require the mandatory `mcp/cli/builtin/skill` classification that `tool` events do.
 - For `output_quality` events (Stage 2.7 origin), `Tool Layer` follows the audited surface: `cli` for `gh pr|issue` audits, `skill` for sub-agent substance audits, `—` for MCP-via-behavioral path (e.g., Slack `*_send_message` audit where the surface is the action discipline, not the MCP itself). Unlike the strict `tool` category, `output_quality` does not require the layer to be `mcp/cli/builtin/skill` when the audit surface is behavioral (evidence discipline in a comment body).
 
-**Early exit**: If pre-scan finds 0 friction events, skip agent calls and exit with "No patterns found. ✅" — do not call agents with empty input.
+**Early exit**: If pre-scan finds 0 friction events, skip agent calls and exit with "No patterns found. ✅" — do not call agents with empty input. **Exception (Stage 1.5 carve-out)**: when Stage 1.5 produced ≥1 `memory_hygiene` finding, the early exit does NOT fire — proceed to Stage 2.5 → Stage 3 with the hygiene findings as the sole input, and emit the Stage 1.5 hygiene-only banner (see Stage 1.5 "0-friction hygiene-only retrospect path").
 
 **MANDATORY AGENT CALLS — when pre-scan finds 1+ friction events, MUST call sequentially (analyst depends on tracer output):**
 
@@ -349,7 +349,7 @@ The trail line is mandatory: it documents that Stage 2.7 ran and chose to skip, 
 **Sub-audit 1 — PR mergeability** (Tool Layer: `cli`):
 
 For each PR touched by `gh pr {create,edit,merge,comment}` in this session:
-- Run `gh pr view <number-or-url> --json reviewRequests,reviews,state,mergeable`
+- Run `gh pr view <number-or-url> --json reviewRequests,reviews,state,mergeable,mergedAt`
 - Emit a finding when ANY of:
   - `state == "CLOSED"` AND `mergedAt == null` (closed without merge — likely abandoned or rejected)
   - `len(reviews) >= 3` (≥3 review-rounds — high revision cost signals weak first-pass quality)
@@ -378,7 +378,7 @@ This sub-audit cross-references `feedback_agent_completion_verify_substance.md` 
 
 **Sub-audit 3 — External comment evidence** (Tool Layer: `cli`):
 
-For each external comment write (`gh issue comment`, `gh pr comment`, Slack `*_send_message`, Notion `*_create_comment`):
+For each external comment write — covers both create and update variants (`gh issue comment`, `gh pr comment`, Slack `*_send_message` / `*_update_message`, Notion `*_create_comment` / `*_update_*`). Update variants are included because edited comments can still introduce or retain hypothesis-language markers; auditing only creates would silently miss the same defect class in trigger sessions that only update prior content:
 - Re-use the regex from `hooks/external-write-falsify-check.mjs` to scan the comment body POST-write
 - Hypothesis-language markers without falsification trace: `might`, `could be`, `potential`, `is failing`, `아마`, `~인 듯` etc.
 - Emit a finding when the comment body contains a hypothesis marker AND lacks any of:
