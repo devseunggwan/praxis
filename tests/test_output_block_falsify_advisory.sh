@@ -174,6 +174,8 @@ PYEOF
 
 make_ask_payload_description_only() {
   # Payload where (Recommended) appears in options[].description, NOT in label.
+  # Issue #369: T2 (confidence-anchoring) now scans description too, so this
+  # payload triggers an ask via the bare `recommended` token in description.
   python3 -c "
 import json
 payload = {
@@ -194,6 +196,33 @@ payload = {
 }
 print(json.dumps(payload))
 "
+}
+
+make_ask_payload_with_descriptions() {
+  # $1 = JSON array of option label strings
+  # $2 = JSON array of option description strings (same length as labels)
+  # $3 = question text
+  python3 -c "
+import json, sys
+labels = json.loads(sys.argv[1])
+descs = json.loads(sys.argv[2])
+question_text = sys.argv[3]
+options = [{'label': l, 'description': d} for l, d in zip(labels, descs)]
+payload = {
+    'session_id': 'test-session',
+    'tool_name': 'AskUserQuestion',
+    'tool_input': {
+        'questions': [
+            {
+                'question': question_text,
+                'options': options,
+            }
+        ]
+    },
+    'cwd': '/tmp',
+}
+print(json.dumps(payload))
+" "$1" "$2" "$3"
 }
 
 make_bash_payload() {
@@ -224,8 +253,8 @@ run_case "AskUserQuestion: (추천) Korean — no Falsified: — escalates to as
   "ask:Falsified:" \
   "$(make_ask_payload '["옵션 A (추천)", "옵션 B"]')"
 
-run_case "AskUserQuestion: (recommended) lowercase also fires" \
-  "advisory:output-block-falsify-advisory" \
+run_case "AskUserQuestion: (recommended) lowercase — T2 escalates to ask (issue #369)" \
+  "ask:Falsified:" \
   "$(make_ask_payload '["use existing approach (recommended)"]')"
 
 # ---------------------------------------------------------------------------
@@ -337,9 +366,12 @@ run_case "AskUserQuestion: (Recommended) + no Falsified: → ask" \
   "ask:Falsified:" \
   "$(make_ask_payload '["Best option (Recommended)", "Alternative"]')"
 
-# Case 3: (Recommended) appears only in options[].description, not in label → PASS
-run_case "AskUserQuestion: (Recommended) in description only — false positive — silent pass" \
-  pass \
+# Case 3 (updated by issue #369): (Recommended) in description-only is now
+# scanned by T2 (bare `recommended` token, label OR description). Original
+# expectation `pass` upgraded to `ask` — false-positive guard was over-
+# conservative and let confidence-anchoring framing bypass the gate.
+run_case "AskUserQuestion: (Recommended) in description only — T2 escalates to ask (issue #369)" \
+  "ask:Falsified:" \
   "$(make_ask_payload_description_only)"
 
 # Case 4: (추천) Korean label + no Falsified: → ASK
@@ -357,6 +389,96 @@ run_case "AskUserQuestion: non-recommended option labels — silent pass" \
 run_case "AskUserQuestion: multi-question — Falsified: in Q2 does not cover Q1 (Recommended) → ask" \
   "ask:Falsified:" \
   "$(make_ask_payload_multi_question_bypass)"
+
+# ---------------------------------------------------------------------------
+# T2 confidence-anchoring framing cases — issue #369
+# ---------------------------------------------------------------------------
+
+# In-vivo regression: description has "가장 안전한" (the exact framing that
+# bypassed T1 in the devseunggwan/ai-dotfiles PR #84 session).
+run_case "T2: KO '가장 안전한' in description — no Falsified → ask" \
+  "ask:Falsified:" \
+  "$(make_ask_payload_with_descriptions \
+      '["S1 only", "S1+S2"]' \
+      '["가장 안전한 1회 변경", "Faster but more scope"]' \
+      'Phase 1?')"
+
+# EN single-word anchoring in label.
+run_case "T2: EN 'safer' in label — no Falsified → ask" \
+  "ask:Falsified:" \
+  "$(make_ask_payload '["A safer rollout", "B aggressive"]')"
+
+# EN single-word anchoring in label.
+run_case "T2: EN 'safest' in label — no Falsified → ask" \
+  "ask:Falsified:" \
+  "$(make_ask_payload '["Option A — safest", "Option B"]')"
+
+# KO single-word anchoring in description.
+run_case "T2: KO '자연스러운' in description → ask" \
+  "ask:Falsified:" \
+  "$(make_ask_payload_with_descriptions \
+      '["Approach A", "Approach B"]' \
+      '["자연스러운 진행", "주류 패턴"]' \
+      'Pick one?')"
+
+# EN multi-word anchoring in label.
+run_case "T2: EN 'prefer this' in label — no Falsified → ask" \
+  "ask:Falsified:" \
+  "$(make_ask_payload '["X (prefer this)", "Y"]')"
+
+# EN 'obvious choice' multi-word anchoring.
+run_case "T2: EN 'obvious choice' in description → ask" \
+  "ask:Falsified:" \
+  "$(make_ask_payload_with_descriptions \
+      '["A", "B"]' \
+      '["the obvious choice for new repos", "alt"]' \
+      'Setup?')"
+
+# Mixed Hangul/ASCII — ASCII lookaround must not match across boundary.
+run_case "T2: mixed Hangul/ASCII 'prefer this 옵션' → ask" \
+  "ask:Falsified:" \
+  "$(make_ask_payload '["prefer this 옵션을 사용", "대안"]')"
+
+# T2 satisfaction by Falsified: line — silent pass.
+run_case "T2: KO '가장 안전한' + Falsified: line → pass" \
+  pass \
+  "$(make_ask_payload_with_descriptions \
+      '["S1 only", "S1+S2"]' \
+      '["가장 안전한 1회 변경", "Faster"]' \
+      'Falsified: critic spawn check confirmed — no anchoring bypass.
+Phase 1?')"
+
+# T2 negative — token-like substring inside an unrelated word must not fire.
+# `disclosure` contains 'closur' but no anchoring tokens; ensure no spurious
+# match on words that happen to share letters with anchoring tokens.
+run_case "T2: negative — 'preferential treatment' not in token list — pass" \
+  pass \
+  "$(make_ask_payload '["preferential treatment of edge cases", "alternative"]')"
+
+# T2 negative — `safe` alone is not in the token set (only `safer`/`safest`).
+run_case "T2: negative — bare 'safe' not in token set — pass" \
+  pass \
+  "$(make_ask_payload '["safe path verified", "untested"]')"
+
+# T2 word-boundary regression — `unsafer` must not match `safer`.
+run_case "T2: word-boundary — 'unsafer' is not safer — pass" \
+  pass \
+  "$(make_ask_payload '["an unsafer path", "the other"]')"
+
+# T2 ANCHORING_ASK_MSG content (verify the new message variant is emitted).
+run_case "T2: KO '안전한' triggers ANCHORING_ASK_MSG (not ASK_MSG)" \
+  "ask:confidence-anchoring" \
+  "$(make_ask_payload '["가장 안전한 옵션", "alt"]')"
+
+# T1 precedence over T2 — when label has literal (Recommended) AND
+# description has confidence-anchoring, T1 (ASK_MSG, not ANCHORING_ASK_MSG)
+# fires first. Verify by checking T1's message marker.
+run_case "T1>T2 precedence: literal (Recommended) + anchoring desc → ASK_MSG" \
+  "ask:Self-Falsify" \
+  "$(make_ask_payload_with_descriptions \
+      '["X (Recommended)", "Y"]' \
+      '["가장 안전한 path", "alt"]' \
+      'Which?')"
 
 # ---------------------------------------------------------------------------
 # Summary

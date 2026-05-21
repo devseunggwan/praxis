@@ -1,21 +1,31 @@
 #!/usr/bin/env python3
 """PreToolUse advisory + ask-escalation: output-block falsification gate.
 
-Issue #221 (advisory), #290 (ask escalation). Recurring failure mode: the
-"Output-Block-Level Falsification Gate" rule in CLAUDE.md (4+ memory entries
-accumulated 2026-05-03 through 2026-05-13) fails to fire at output time because
-rule retrieval is not structural — the rule is loaded but not re-triggered at
-the moment the proposal block is authored.
+Issue #221 (advisory), #290 (ask escalation), #369 (confidence-anchoring
+extension). Recurring failure mode: the "Output-Block-Level Falsification
+Gate" rule in CLAUDE.md (4+ memory entries accumulated 2026-05-03 through
+2026-05-21) fails to fire at output time because rule retrieval is not
+structural — the rule is loaded but not re-triggered at the moment the
+proposal block is authored.
 
 This hook adds a structural enforcement point at two surfaces:
 
-  1. AskUserQuestion — option labels containing "(Recommended)" or "(추천)":
-     - Exact case-sensitive match ("(Recommended)" / "(추천)"):
-       Escalate to `permissionDecision: ask` if the question body lacks a
-       `Falsified:` line (exact prefix at line start). If `Falsified:` IS
-       present, silent pass.
-     - Case-insensitive match only (e.g. "(recommended)" lowercase):
-       Advisory stderr reminder (original behavior).
+  1. AskUserQuestion — escalates `permissionDecision: ask` in two tiers
+     when the question body lacks a `Falsified:` line (exact prefix at
+     line start):
+
+     T1. Label contains exact `(Recommended)` or `(추천)` (case-sensitive)
+         — original literal-marker path.
+
+     T2. Label OR description contains a confidence-anchoring framing
+         token (issue #369). EN tokens (case-insensitive, ASCII word
+         boundary): `safer`, `safest`, `clearly`, `obvious choice`,
+         `natural fit/choice`, `default to/choice`, `prefer this`,
+         bare `recommend(ed|s)?`. KO substrings: `안전한`, `가장 안전`,
+         `자연스러운`, `당연히`, `분명히`, `추천`, `기본값`.
+
+     When `Falsified:` is present in the question body, both tiers
+     silent-pass.
 
   2. Bash — bulk-action commands containing patterns like "close all",
      "delete all", "merge all" (+ Korean equivalents). Advisory only.
@@ -50,6 +60,14 @@ ASK_MSG = (
     "CLAUDE.md Self-Falsify Before Recommendation Lock 룰. 추가 후 재시도."
 )
 
+ANCHORING_ASK_MSG = (
+    "옵션 라벨/설명에 confidence-anchoring framing 토큰 (safer/safest/"
+    "natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/"
+    "당연히/분명히/추천/기본값) 이 있으나 question body 에 "
+    "'Falsified: <disconfirming test 결과>' 가 없음. "
+    "CLAUDE.md Output-Block-Level Falsification Gate. 추가 후 재시도."
+)
+
 # ---------------------------------------------------------------------------
 # AskUserQuestion: (Recommended) / (추천) marker detection
 # ---------------------------------------------------------------------------
@@ -61,6 +79,51 @@ RECOMMENDED_MARKERS_EXACT_KO = ("(추천)",)
 # Substrings for fallback advisory (case-insensitive for English form).
 RECOMMENDED_MARKERS_EN = ("(Recommended)",)
 RECOMMENDED_MARKERS_KO = ("(추천)",)
+
+# Confidence-anchoring framing tokens (issue #369). Scanned on BOTH option
+# label and description, not just label, because in-vivo evidence
+# (devseunggwan/ai-dotfiles PR #84 session) showed anchoring framing
+# placed in description ("가장 안전한 1회 변경") bypassed the literal
+# marker check. Same Falsified: satisfaction as the marker tier.
+#
+# EN: ASCII lookaround instead of `\b`. Python's `\b` is Unicode-aware
+# and would misfire when Korean text sits adjacent to ASCII (no
+# boundary between Hangul and ASCII word chars). Mirrors the
+# _BULK_PATTERN_EN strategy below.
+#
+# `recommend(?:ed|s)?` is intentionally bare (no parens) to catch
+# label/description usage without literal "(Recommended)" markers.
+# When `(Recommended)` IS present in a label, T1 (exact marker) fires
+# first and short-circuits before this pattern is consulted.
+_ANCHORING_EN_PATTERN = re.compile(
+    r"(?<![A-Za-z])"
+    r"(?:"
+    r"safer|safest|clearly|"
+    r"natural\s+(?:fit|choice)|"
+    r"obvious\s+choice|"
+    r"default\s+(?:to|choice)|"
+    r"prefer\s+this|"
+    r"recommend(?:ed|s)?"
+    r")"
+    r"(?![A-Za-z])",
+    re.IGNORECASE,
+)
+
+# KO substrings. Hangul has no ASCII word-boundary issue — these tokens
+# don't appear as substrings of unrelated words in option-label / desc
+# context. "가장 안전" is listed separately from bare "안전한" to keep
+# the recall for the in-vivo "가장 안전한 1회 변경" phrasing explicit,
+# even though "안전한" alone is sufficient — second entry is a no-op
+# under substring match but documents the canonical trigger phrase.
+_ANCHORING_KO_SUBSTRINGS = (
+    "안전한",
+    "가장 안전",
+    "자연스러운",
+    "당연히",
+    "분명히",
+    "추천",
+    "기본값",
+)
 
 
 def _has_exact_recommended_marker(labels: list[str]) -> bool:
@@ -87,7 +150,16 @@ def _has_falsified_line(texts: list[str]) -> bool:
 
 
 def _has_recommended_marker(labels: list[str]) -> bool:
-    """True if any option label contains a (Recommended) / (추천) marker."""
+    """True if any option label contains a (Recommended) / (추천) marker.
+
+    Reachable only when T1 (exact marker) and T2 (confidence-anchoring,
+    including bare ``recommend``) both miss. Since T2 matches any
+    case-insensitive `recommend(ed|s)?` form, an option whose label
+    contains `(recommended)` (lowercase) is now caught by T2 (ask)
+    before this fallback advisory runs — keep this function for
+    behavior continuity and clarity of the original three-tier intent,
+    but it is effectively dead under the new precedence.
+    """
     if not labels:
         return False
     for label in labels:
@@ -99,6 +171,44 @@ def _has_recommended_marker(labels: list[str]) -> bool:
             if marker in label:
                 return True
     return False
+
+
+def _has_confidence_anchoring(texts: list[str]) -> bool:
+    """True if any text contains a confidence-anchoring framing token.
+
+    Scans both EN regex (ASCII word-boundary lookarounds) and KO
+    substring patterns. See module docstring for token sets.
+    """
+    if not texts:
+        return False
+    for text in texts:
+        if not isinstance(text, str):
+            continue
+        if _ANCHORING_EN_PATTERN.search(text):
+            return True
+        for kw in _ANCHORING_KO_SUBSTRINGS:
+            if kw in text:
+                return True
+    return False
+
+
+def _collect_option_texts(options: list) -> list[str]:
+    """Collect option.label + option.description into a single text list.
+
+    Used by T2 (confidence-anchoring) detection only — T1 (exact marker)
+    still scans labels only via _has_exact_recommended_marker().
+    """
+    texts: list[str] = []
+    for o in options:
+        if not isinstance(o, dict):
+            continue
+        label = o.get("label")
+        if isinstance(label, str):
+            texts.append(label)
+        desc = o.get("description")
+        if isinstance(desc, str):
+            texts.append(desc)
+    return texts
 
 
 def _emit_ask(message: str) -> None:
@@ -189,6 +299,7 @@ def _main_inner() -> int:
         if not isinstance(questions, list):
             questions = []
         ask_needed = False
+        ask_msg_to_emit = ASK_MSG  # T1 default; T2 overrides
         advisory_needed = False
         for q in questions:
             if not isinstance(q, dict):
@@ -202,18 +313,30 @@ def _main_inner() -> int:
                     label = o.get("label")
                     if isinstance(label, str):
                         q_labels.append(label)
+            # Per-question check: only this question's text counts.
+            q_text = q.get("question")
+            q_texts = [q_text] if isinstance(q_text, str) else []
+            falsified_present = _has_falsified_line(q_texts)
+
             if _has_exact_recommended_marker(q_labels):
-                # Per-question check: only this question's text counts.
-                q_text = q.get("question")
-                q_texts = [q_text] if isinstance(q_text, str) else []
-                if not _has_falsified_line(q_texts):
+                # T1: literal (Recommended) / (추천) marker in label.
+                if not falsified_present:
                     ask_needed = True
+                    ask_msg_to_emit = ASK_MSG
                     break  # one missing question is enough to escalate
+            elif _has_confidence_anchoring(_collect_option_texts(options)):
+                # T2 (issue #369): confidence-anchoring framing token in
+                # label OR description. Same Falsified: satisfaction.
+                if not falsified_present:
+                    ask_needed = True
+                    ask_msg_to_emit = ANCHORING_ASK_MSG
+                    break
             elif _has_recommended_marker(q_labels):
+                # T3 (dead under new precedence — kept for clarity).
                 advisory_needed = True
 
         if ask_needed:
-            _emit_ask(ASK_MSG)
+            _emit_ask(ask_msg_to_emit)
         elif advisory_needed:
             sys.stderr.write(ADVISORY_MSG + "\n")
 
