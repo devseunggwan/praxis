@@ -31,9 +31,9 @@ independently.
 Session state — design rationale
 ================================
 
-Same approach as `trino-describe-first.py`. PreToolUse and PostToolUse
-hooks are independent processes; there is no shared in-memory state, so
-the Read-history must be persisted to disk.
+Standard praxis paired-hook approach. PreToolUse and PostToolUse hooks
+are independent processes; there is no shared in-memory state, so the
+Read-history must be persisted to disk.
 
 Resolution order:
 
@@ -47,9 +47,9 @@ Resolution order:
      (e.g., direct CLI / test invocation).
 
 State is keyed by `session_id` rather than `$CLAUDE_PROJECT_DIR` for the
-same reason as `trino-describe-first.py`: project-rooted state would
-silently satisfy a later session's gate with a Read recorded by an
-earlier session — breaking the "in this session" contract.
+standard praxis paired-hook reason: project-rooted state would silently
+satisfy a later session's gate with a Read recorded by an earlier
+session — breaking the "in this session" contract.
 
 Read failures → empty history, fail-open. Write failures → silently
 skip recording.
@@ -144,8 +144,8 @@ def _extract_session_id(payload: dict) -> str | None:
     """Return the trimmed `session_id` from the hook payload, or None.
 
     Canonical praxis hook session key — same field consumed by
-    `completion-verify.sh`, `retrospect-mix-check.sh`,
-    `strike-counter.sh`, and `trino-describe-first.py`.
+    `completion-verify.sh`, `retrospect-mix-check.sh`, and
+    `strike-counter.sh`.
     """
     sid = payload.get("session_id")
     if isinstance(sid, str) and sid.strip():

@@ -31,7 +31,7 @@ name: my-memory
 description: Short rule statement
 type: feedback
 hookable: true                                  # opt-in switch
-hookKeywords: [kubectl, hubctl, gh]             # match tokens (whole-token)
+hookKeywords: [kubectl, gh]                     # match tokens (whole-token)
 hookEvents: [Bash, Edit, AskUserQuestion]       # event whitelist (default [Bash])
 ---
 ```

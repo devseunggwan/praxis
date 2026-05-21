@@ -286,8 +286,9 @@ def _build_checklist(subcommand: tuple[str, str], repo: str) -> str:
         "     Heredoc (`<<EOF`) is blocked by the praxis hook chain.",
         "",
         "  ④ Language & content rules (CLAUDE.md §External-repo content isolation)",
-        "     English only. No internal identifiers (laplace-*, Hub #N,",
-        "     internal Slack/Notion links, hubctl). No absolute local paths.",
+        "     English only. No internal identifiers (org/team prefixes,",
+        "     internal ticket refs, internal chat/wiki links, internal CLIs).",
+        "     No absolute local paths.",
         "",
         "If all are satisfied, re-run with `# cross-boundary:ack` appended.",
     ]

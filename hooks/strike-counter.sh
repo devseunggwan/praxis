@@ -37,9 +37,9 @@ fi
 
 # [#126] Use a praxis-owned path. $CLAUDE_PLUGIN_DATA is set by Claude Code
 # to whichever plugin's data dir matched first in the current scope, so on
-# multi-plugin installs (codex/omc/laplace-dev-hub) it can resolve to a
-# sibling plugin's directory and our state would leak there — silently
-# vulnerable to that plugin's cleanup/uninstall.
+# multi-plugin installs it can resolve to a sibling plugin's directory and
+# our state would leak there — silently vulnerable to that plugin's
+# cleanup/uninstall.
 STATE_DIR="${PRAXIS_STATE_DIR:-$HOME/.claude/state/praxis}/strikes"
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 LATCH="$STATE_DIR/.current-session"

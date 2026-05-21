@@ -58,11 +58,10 @@ Opt-out: embed `# worktree-advisory:ack` anywhere in the command to suppress
 all advisories for that invocation.
 
 Relationship to sibling hooks:
-  cross-repo-worktree-preflight — fires on `git worktree remove <path>` cross-
-    repo mismatch. This hook fires earlier: on the `cd <path>` step itself
-    before any git operation, catching the case where the worktree directory
-    was removed externally and the agent does not know yet.
   cross-boundary-preflight — gh write subcommands across --repo boundary.
+    This hook fires on the `cd <path>` step itself before any git operation,
+    catching the case where the worktree directory was removed externally
+    and the agent does not know yet.
 
 Dedupe cleanup:
   Stale marker files are cleaned up by the OS tmp purge policy. No explicit

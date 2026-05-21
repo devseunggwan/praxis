@@ -72,7 +72,7 @@ recurrence is observed in production sessions.
 
 PreToolUse / PostToolUse hooks run as independent processes — no shared
 in-memory state. The Read history must be persisted to disk. Resolution
-order (same as `trino-describe-first.py`):
+order (standard praxis paired-hook pattern):
 
 1. `PRAXIS_MD_READ_HISTORY_FILE` env var (explicit override; used by
    tests).
@@ -84,9 +84,9 @@ order (same as `trino-describe-first.py`):
    (direct CLI / test invocation).
 
 State is keyed by `session_id` rather than `$CLAUDE_PROJECT_DIR` for
-the same reason as `trino-describe-first.py`: project-rooted state
-would silently satisfy a later session's gate with a Read recorded by
-an earlier session — breaking the "in this session" contract.
+the standard praxis paired-hook reason: project-rooted state would
+silently satisfy a later session's gate with a Read recorded by an
+earlier session — breaking the "in this session" contract.
 
 Read failures (missing file, malformed JSON) → empty history,
 fail-open. Write failures → silently skip recording.
@@ -169,9 +169,8 @@ fires automatically when the plugin is loaded. To re-register manually:
 
 - **Session-scope, not turn-scope.** A Read at turn 1 satisfies an Edit
   at turn 50 in the same session. Per-turn detection isn't structurally
-  cheap (no turn counter in hook payload); session-scope matches
-  `trino-describe-first` convention. Tighten if observed FP→FN drift
-  bites.
+  cheap (no turn counter in hook payload); session-scope matches the
+  praxis paired-hook convention. Tighten if observed FP→FN drift bites.
 - **File-level granularity.** Reading lines 1–10 satisfies a later Edit
   targeting line 500. v2 can scope to `(offset, limit)` overlap with the
   Edit target's line.

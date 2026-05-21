@@ -2,9 +2,9 @@
 # tests/test_retrospect_routing.sh — assert retrospect SKILL.md is repo-agnostic
 #
 # Regression test for the routing rule: user-specific GitHub org/repo names
-# (e.g., devseunggwan/foo, laplacetec/bar) MUST NOT appear in the retrospect
-# skill. The skill is distributed across users; any hardcoded name misroutes
-# tool-friction issues for users on different fork/company environments.
+# MUST NOT appear in the retrospect skill. The skill is distributed across
+# users; any hardcoded name misroutes tool-friction issues for users on
+# different fork/company environments.
 #
 # Run:  ./tests/test_retrospect_routing.sh
 # Exit: 0 on success, 1 on first failure (after summary).
@@ -23,17 +23,20 @@ PASS=0
 FAIL=0
 FAILED_NAMES=()
 
-# Forbidden patterns — any match is a regression toward user-specific hardcoding.
+# Forbidden patterns — any match is a regression toward user-specific
+# hardcoding. Extend via PRAXIS_RETROSPECT_FORBIDDEN_PATTERNS env var
+# (newline-separated) when bringing this test into a downstream fork that
+# has additional org/handle names to guard against.
 FORBIDDEN_PATTERNS=(
   "devseunggwan/"
-  "laplacetec/"
   "Yeachan-Heo/"
-  "laplace-airflow"
-  "laplace-k8s"
-  "laplace-trino"
-  "laplace-data-platform-mcp"
   "ai-dotfiles"
 )
+if [ -n "${PRAXIS_RETROSPECT_FORBIDDEN_PATTERNS:-}" ]; then
+  while IFS= read -r extra; do
+    [ -n "$extra" ] && FORBIDDEN_PATTERNS+=("$extra")
+  done <<< "$PRAXIS_RETROSPECT_FORBIDDEN_PATTERNS"
+fi
 
 run_forbidden_check() {
   local name="$1"

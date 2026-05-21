@@ -37,7 +37,6 @@ Every entry was verified against the hook source files listed.
 | Hook | Command | Purpose |
 |------|---------|---------|
 | `pre-gh-pr-create-dedup-gate.py` | `git remote get-url origin` | Resolve the repo owner/name for the dedup search |
-| `cross-repo-worktree-preflight.py` | `git -C <cwd> worktree list --porcelain` | Enumerate registered worktrees to detect cross-repo remove |
 | `pre-edit-protected-branch-guard.py` | `git rev-parse --show-toplevel` | Locate the git repo root |
 | `pre-edit-protected-branch-guard.py` | `git rev-parse --abbrev-ref HEAD` | Read the current branch name |
 | `pre-edit-protected-branch-guard.py` | `git status --porcelain` | Check for a dirty working tree |

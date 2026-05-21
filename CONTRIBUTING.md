@@ -36,7 +36,7 @@ the sixth.
 #### Rule: verify before publishing
 
 Any skill that:
-- wraps an external CLI (`codex`, `gh`, `kubectl`, `hubctl`, or any binary not
+- wraps an external CLI (`codex`, `gh`, `kubectl`, or any binary not
   shipped in this repo), **or**
 - calls `AskUserQuestion` with a dynamic option list, **or**
 - delegates to another skill via `Skill(...)`

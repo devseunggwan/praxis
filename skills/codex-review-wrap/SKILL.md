@@ -681,20 +681,20 @@ applies (emit only at `cumulative = N+1`, not again on later rounds).
 user: /codex-review-wrap
 
 [Step 1] git worktree list result:
-  0: /Users/dev/project/laplace-dev-hub       (main)
-  1: /Users/dev/project-wt/windmill-hub-1539  (issue-1539-windmill-runner)
+  0: /Users/dev/project/my-repo               (main)
+  1: /Users/dev/project-wt/my-repo-feature-1  (issue-1-feature)
 
 [Step 2] AskUserQuestion →
   "어느 worktree 를 review 할까요?"
-  0: /Users/dev/project/laplace-dev-hub (main)
-  1: /Users/dev/project-wt/windmill-hub-1539 (issue-1539-windmill-runner)
+  0: /Users/dev/project/my-repo (main)
+  1: /Users/dev/project-wt/my-repo-feature-1 (issue-1-feature)
 
 user selects: 1
 
-[Step 3] Review target: /Users/dev/project-wt/windmill-hub-1539 (branch: issue-1539-windmill-runner)
-  ⚠ cwd (/Users/dev/project/laplace-dev-hub) ≠ review target
+[Step 3] Review target: /Users/dev/project-wt/my-repo-feature-1 (branch: issue-1-feature)
+  ⚠ cwd (/Users/dev/project/my-repo) ≠ review target
 
-[Step 4] cd /Users/dev/project-wt/windmill-hub-1539
+[Step 4] cd /Users/dev/project-wt/my-repo-feature-1
          → node {install_path}/scripts/codex-companion.mjs review
 
 [Step 5 — Round 1 — counter update (5f, first action)]:
