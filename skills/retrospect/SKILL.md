@@ -849,14 +849,14 @@ For each approved action:
 
    **Step 0 — Target detection (MUST run first):**
    Classification is two-stage:
-   1. **Global check uses the input path** (the path the finding declares). A dotfiles-symlinked `~/.claude/CLAUDE.md` whose `realpath` resolves outside `~/.claude/` is still the user's own global config and must take the Global path — so `realpath` cannot be the classification input here.
+   1. **Global check uses either the input path OR `realpath` equivalence to the canonical config path**. A dotfiles-symlinked `~/.claude/CLAUDE.md` whose `realpath` resolves outside `~/.claude/` is still the user's own global config — and a finding that directly declares the resolved dotfiles backing path must still route to the Global flow.
    2. **Project vs External uses `realpath`** of the input. This correctly routes both `AGENTS.md` (regular file) and project-local symlinks such as praxis's own `CLAUDE.md → AGENTS.md` (whose `realpath` lands on a file inside cwd) to the Project path.
 
    | Target | Detection | Execution path |
    |--------|-----------|---------------|
-   | **Global `~/.claude/CLAUDE.md`** | Input path equals `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` (after `$HOME`/`~` expansion). `realpath` target is irrelevant — symlinks pointing into dotfiles backing repos still classify as Global. | Staging → AskUserQuestion → apply only on explicit approval (see Global path below) |
+   | **Global `~/.claude/CLAUDE.md`** | EITHER the input path equals `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` (after `$HOME`/`~` expansion) OR `realpath <input>` equals `realpath ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` (i.e., the finding declared the resolved dotfiles backing file path directly — still the user's own global config, must take the Global flow). | Staging → AskUserQuestion → apply only on explicit approval (see Global path below) |
    | **Project `AGENTS.md`** | Not Global AND `realpath <path>` resolves inside cwd. Covers `AGENTS.md` directly and project-local symlinks like `CLAUDE.md → AGENTS.md`. | Direct Edit (see Project path below) |
-   | **External-repo rule file** | Not Global AND `realpath <path>` resolves outside cwd AND outside `~/.claude/` AND outside the dotfiles backing repo of `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` | Same as external-repo gate — do NOT edit; surface to user with resolved path |
+   | **External-repo rule file** | Not Global AND `realpath <path>` resolves outside cwd AND outside `~/.claude/` | Same as external-repo gate — do NOT edit; surface to user with resolved path |
 
    **Project path** (input is project `AGENTS.md`):
    - Present the draft diff to the user inline
