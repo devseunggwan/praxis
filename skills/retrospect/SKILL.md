@@ -352,7 +352,7 @@ For each PR touched by `gh pr {create,edit,merge,comment}` in this session:
 - Run `gh pr view <number-or-url> --json reviewRequests,reviews,state,mergeable,mergedAt`
 - Emit a finding when ANY of:
   - `state == "CLOSED"` AND `mergedAt == null` (closed without merge — likely abandoned or rejected)
-  - `len(reviews) >= 3` (≥3 review-rounds — high revision cost signals weak first-pass quality)
+  - `len([r for r in reviews if r.state == "CHANGES_REQUESTED"]) >= 2` (≥2 CHANGES_REQUESTED submissions — each forces a revision cycle, so ≥2 signals genuine high revision cost). The unfiltered `reviews` array counts individual submissions (APPROVED / COMMENTED / DISMISSED included), not revision rounds — three one-time approvals would meet `len(reviews) >= 3` despite zero rework. Filter on `CHANGES_REQUESTED` to measure what the heuristic intends.
   - `mergeable == "CONFLICTING"` (stale branch left in conflict state)
 
 Finding template:
