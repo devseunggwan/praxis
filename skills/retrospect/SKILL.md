@@ -1068,6 +1068,8 @@ If you catch yourself:
 - **Stage 3 "Execute now" 선택을 external-repo write 의 per-action 승인으로 ratify** — Stage 3 승인은 action 카테고리 선택이지, 외부 repo 개별 write 승인이 아님. Stage 4 step 0a 게이트를 반드시 별도로 실행.
 - **Omitting the `Stage 2 caveats:` line on a finding that has any of: tracer confidence below HIGH, single observation, alternative root cause not ruled out, Gate-3 downgrade, analyst cluster overlap, escape-hatch state** — carry-forward is mandatory whenever ANY of these holds. Silent omission lets Stage 3 rank as if Stage 2 returned clean HIGH-confidence evidence.
 - **조사 도구 결과를 completeness 검증 없이 결론에 사용 (premise unverified)** — 다음 두 패턴 모두 "premise falsified" (반증 테스트를 설계한 뒤 통과 → 진행 가능)가 아니라 "premise unverified" (도구 출력 자체의 한계를 검증하지 않은 채 결론에 사용 → STOP) 에 해당한다: (a) `find ... | head -N` 결과로 "파일/모듈 없음" 단정 — **`head` 를 제거한 원 명령 `find ... | wc -l` 을 별도로 실행**해 총 라인 수를 확인하고, cap 초과 시 cap 제거 또는 `grep -rn <token>` narrowing 필요 (`head -N` 파이프 뒤에 `| wc -l` 을 붙이면 cap 으로 잘린 뒤의 라인 수만 세므로 정확히 N개와 cap 초과를 구분할 수 없어 검증이 실패한다); (b) `find <path>` 빈 결과로 "경로/모듈 없음" 단정 — `ls <parent>` 로 path coverage 를 확인하거나 상위 경로로 재시도, 또는 `grep -rn <token>` cross-check 필요.
+- **Stage 1.5 hygiene scan을 "MEMORY.md가 작아서" 또는 "이미 다 안다"는 이유로 건너뜀** — Stage 1.5는 unconditional. 코퍼스 크기와 무관하게 cap-and-cursor 메커니즘으로 비용이 amortized 된다. "내가 이미 안다" 는 author-exempt verification trap 의 변형 — Stage 1.5의 detect-only 책임을 Stage 2 friction-scanner 가 대신할 수 없다 (silent recurrence는 마찰 신호 없이 누적).
+- **Stage 2.7 audit-skip을 trail 라인 없이 silent으로 처리** — `<!-- retrospect:audit_skipped: no artifacts -->` (또는 `transcript unreadable` variant)은 mandatory. trail 라인 부재 시 "Stage 2.7이 실행되었는가" vs "스킵되었는가" vs "잊혀졌는가" 를 retrospective audit이 구분할 수 없다. 0-trigger silent skip path도 trail 라인은 emit 한다.
 
 **ALL of these mean: STOP. Return to Stage 2.**
 
@@ -1076,7 +1078,9 @@ If you catch yourself:
 | Stage | Key Activity | Success Criteria |
 |-------|-------------|-----------------|
 | **1. Load** | Read global `~/.claude/CLAUDE.md`, form scan questions | Rule categories identified |
+| **1.5 Hygiene** | Detect-only MEMORY.md scan — stale references / contradictions / merge candidates (cap 5 files/invocation + cursor carryover) | Stage 1.5 findings emitted with `category: memory_hygiene` (or `hygiene_skipped` trail if MEMORY.md unreachable) |
 | **2. Analyze** | Scan conversation, map to rules, find root cause | Root cause (not symptom) for each pattern; every event has `category[]` |
+| **2.7 Audit** | Adaptive post-hoc artifact audit — fires only when session contains `gh pr|issue|comment` / Slack-Notion MCP write / approved external-write events; runs 3 sub-audits (PR mergeability, sub-agent substance, external comment evidence) | Stage 2.7 findings emitted with `category: output_quality` (or `audit_skipped` trail if 0 triggers) |
 | **2.5 Audit** | Run Gate-1 (categorical) + Gate-2 (Schema A 5-line or Schema B dimension-tag rationale) + Gate-3 (evidence robustness for 2-action findings) + Gate-4 (external-repo authorization pre-check for upstream_feedback) + Gate-5 (memory-scan completeness for memory-action findings) | All applicable gates PASS/WARN or per-finding cap reached and surfaced to user |
 | **3. Report** | Present unified table + distribution card, carry Stage 2 caveats forward, run Pre-Output Falsification Gate before each `AskUserQuestion`, collect approval per item | User approved at least 1 item (or confirmed 0 findings); every `(Recommended)` label has a `Falsification:` trace |
 | **4. Execute** | Run approved actions, verify artifacts | Completion report with links/paths + verification results |
@@ -1086,7 +1090,14 @@ If you catch yourself:
 | Stage | Failure | Action |
 |-------|---------|--------|
 | Stage 1 (load) | `~/.claude/CLAUDE.md` not found (global) or `AGENTS.md` not found (project) | Proceed with global defaults; flag the missing file in the report |
+| Stage 1.5 (hygiene) | MEMORY.md index not accessible | Skip Stage 1.5 entirely; emit `<!-- retrospect:hygiene_skipped: index not accessible -->` trail line; proceed to Stage 2 |
+| Stage 1.5 (hygiene) | Cursor file (`.omc/state/retrospect-hygiene-cursor.json`) corrupt | Reset cursor to most-recently-modified 5 files; log reset in completion report |
+| Stage 1.5 (hygiene) | Per-file scan failure (one of N files unreadable) | Continue with remaining files; record per-file failure in Stage 3 report Hygiene Scan Trail section |
 | Stage 2 (analyze) | Session history not accessible | Fall back to the user's verbal summary as input to steps 3–8 |
+| Stage 2.7 (audit) | Trigger detection scan failed (e.g., transcript unreadable) | Emit `<!-- retrospect:audit_skipped: transcript unreadable -->` trail line; skip Stage 2.7; proceed to Stage 2.5 |
+| Stage 2.7 (audit) | 0 triggers detected (no PR/external-write artifacts in session) | Silent skip with mandatory trail line `<!-- retrospect:audit_skipped: no artifacts -->` AND `output_quality: 0` in distribution card |
+| Stage 2.7 (audit) | `gh pr view` API failure for a specific PR | Log per-PR error in Stage 3 report Audit Trail section; continue with remaining PRs |
+| Stage 2.7 (audit) | Mid-session artifact deletion (e.g., PR was created then closed by user before retrospect) | Treat as audit signal — closed-without-merge IS a finding (per Sub-audit 1 trigger). If artifact entirely removed (issue/PR deleted), log "artifact no longer accessible" in Audit Trail; do not emit finding for that artifact |
 | Stage 2 (analyze) | No friction events found | Exit with "No patterns found. ✅" — do not fabricate findings |
 | Stage 2 (analyze) | MEMORY.md scan failed (file not accessible) | Treat all findings as new patterns (repeat=false). Flag scan failure in report |
 | Stage 2 (analyze) | MEMORY.md is empty | Normal processing — all findings are new patterns |
