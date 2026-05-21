@@ -74,6 +74,51 @@ You MUST complete each stage before proceeding to the next.
 3. **Set the calibration frame**: For each rule category, form a question — e.g.,
    "Did the session violate 'Planning Before Implementation'? Were there 3+ step tasks that skipped plan mode?"
 
+### Stage 1.5: MEMORY.md Hygiene Pass (Detect-only)
+
+Stage 1.5 runs unconditionally between Stage 1 (Load) and Stage 2 (Analyze). Its purpose is to surface latent defects in MEMORY.md itself — defects that the session-scoped friction scanner (Stage 2) cannot see because they accumulate across sessions. Findings produced here flow into the same downstream pipeline (Stage 2 categorization → Stage 2.5 gates → Stage 3 approval → Stage 4 execution). Stage 1.5 itself does NOT mutate MEMORY.md.
+
+**Scope:** scan MEMORY.md index + a bounded subset of `feedback_*.md` files.
+
+**Cap (mandatory):** scan up to **5 feedback files per invocation**. Persist a cursor at `.omc/state/retrospect-hygiene-cursor.json` recording (a) the timestamp of the last successful pass, (b) the list of file paths scanned, and (c) the next-batch pointer (path of the next un-scanned feedback file in sorted order). Subsequent retrospects resume from the cursor — full corpus coverage amortizes across multiple sessions. When the full corpus has been scanned once, rotate the cursor to restart from the most-recently-modified entries.
+
+**Three detection signals (each becomes a finding with `category: memory_hygiene`):**
+
+1. **Stale reference** — the entry cites an artifact that no longer matches reality:
+   - File path absent: entry references `<path>` that does not exist (verify with `test -e`)
+   - CLI flag absent: entry cites `<binary> --<flag>` but `<binary> --help` no longer documents it
+   - CLAUDE.md line shifted: entry cites `~/.claude/CLAUDE.md` line `N` whose content no longer matches the quoted excerpt (verify with `grep -n` of the cited excerpt)
+   - Skill / hook removed: entry references a skill name or hook path that no longer exists in the plugin manifest
+
+   Detection method: parse the entry's body for `\bgrep -n\b`-able tokens (file paths, CLI flag patterns `--[a-z-]+`, CLAUDE.md line citations); run the verification command; record failures as stale.
+
+2. **Contradiction** — two entries provide semantically opposed guidance under overlapping triggers:
+   - Entry A says "always X under trigger T"; Entry B says "never X under trigger T" — same T, opposite directive.
+   - Detection method: concept-level pairwise comparison restricted to entries whose `hookKeywords` (or trigger tokens) overlap. Use LLM judgment for semantic opposition (no regex shortcut). Cap pairwise comparisons to the cursor-batch's 5 files × full-index check.
+
+3. **Merge candidate** — two or more entries share a root-cause family but have not been merged:
+   - Same principle restated with different examples (the merge-first policy at Stage 4 Action 1d should have collapsed them).
+   - Detection method: read each entry's `description` field and root-cause prose; group by concept-level matching (same heuristic as Stage 4 Action 1 duplicate-check). When N ≥ 2 entries share a family AND none has been merged, emit a merge-candidate finding.
+
+**Output — emit per-defect findings into the Stage 2 friction-event lane.**
+
+Each Stage 1.5 finding has:
+- `category[]: [memory_hygiene]` — single category at Stage 1.5; downstream gates may add tool/workflow when defect originates from a tool layer (e.g., manifest staleness from a removed hook).
+- `Tool Layer: —` (default for memory_hygiene; the Stage 2 Layer E composition matrix carves out a `—` row for memory_hygiene the same way it does for behavioral).
+- `Proposed Actions` (provisional, finalized at Stage 2.5):
+  - Stale reference → `memory` (update entry inline) OR `claude_md_draft` (when the stale citation is itself a CLAUDE.md rule line that needs updating)
+  - Contradiction → `memory + issue` (surface both entries via an issue for human resolution; merge in Stage 4 only after explicit decision)
+  - Merge candidate → `memory` (route through Stage 4 Action 1 merge path; the merge IS the action)
+
+**0-friction hygiene-only retrospect path** — when Stage 2 pre-scan finds zero friction events but Stage 1.5 produced ≥1 hygiene finding, the skill does NOT take the "No patterns found ✅" early-exit (Stage 2 line). Instead, proceed to Stage 2.5 → Stage 3 with the hygiene findings as the sole input. Emit a banner in Stage 3 report: `Hygiene-only retrospect — no friction events this session.`
+
+**Stage 1.5 failure modes:**
+- MEMORY.md not accessible → skip Stage 1.5 entirely; emit `<!-- retrospect:hygiene_skipped: index not accessible -->` trail line; proceed to Stage 2.
+- Cursor file corrupt → reset cursor to most-recently-modified 5 files; log reset in completion report.
+- Per-file scan failure (one of N files unreadable) → continue with remaining files; record per-file failure in the Hygiene Scan Trail section of Stage 3 report.
+
+**Detect-only contract** — Stage 1.5 never writes to MEMORY.md, never deletes a feedback file, never edits the MEMORY.md index. All mutations route through Stage 4 (Action 1 merge path for merge candidates; Action 1 update path for stale references; Action 2 issue creation for contradictions). Inline mutation at Stage 1.5 is a Red Flag.
+
 ### Stage 2: Analyze Conversation
 
 **Pre-scan: Symmetric scan (friction + successful patterns)** — scan the conversation BEFORE calling agents. Produces two lanes:
@@ -92,6 +137,7 @@ You MUST complete each stage before proceeding to the next.
 | `tool` | "gh CLI `--state all` 부재" / "MCP 응답 지연" / "Read 출력 truncation" / "kubectl flag 부재" | **mandatory**: one of `mcp` / `cli` / `builtin` / `skill` |
 | `workflow` | "test 안 돌리고 PR" / "verify 단계 건너뜀" / "issue 안 만들고 브랜치" / "code review 생략" | optional: `skill` (when defect originates inside a skill's stage flow) |
 | `spec-gap` | "이 상황을 다루는 규칙 부재" / "SKILL.md trigger 모호" / "global `~/.claude/CLAUDE.md`에 명시되지 않은 행동" | optional: `skill` (when rule gap is in a SKILL.md) |
+| `memory_hygiene` | "stale 파일경로 / CLI flag / CLAUDE.md 라인 인용" / "두 entry가 동일 trigger 에서 contradict" / "merge candidates 미수렴" (Stage 1.5 origin) | none (Tool Layer = `—` by default; `skill` only when the stale citation references a specific skill/hook artifact) |
 
 **Layer E ↔ step 4b composition matrix** (normative — referenced by step 4b and Stage 3 unified table):
 
@@ -99,6 +145,7 @@ You MUST complete each stage before proceeding to the next.
 - When `tool` ∈ `category[]`, the event MUST also be classified into one of the 4 step-4b layers (`mcp` / `cli` / `builtin` / `skill`); the `Tool Layer` cell of the unified table cannot remain `—`.
 - For `behavioral` only events, `Tool Layer` = `—`.
 - For `workflow` or `spec-gap` events without a tool root cause, `Tool Layer` = `—`; if the workflow defect or rule gap originates within a skill, `Tool Layer` MAY be set to `skill` to enable step 4b downstream routing.
+- For `memory_hygiene` events (Stage 1.5 origin), `Tool Layer` = `—` by default. When the stale citation points to a specific skill/hook artifact (e.g., a renamed hook script), `Tool Layer` MAY be set to `skill` so the finding compounds with a `skill` step-4b lane. `memory_hygiene` events do NOT require the mandatory `mcp/cli/builtin/skill` classification that `tool` events do.
 
 **Early exit**: If pre-scan finds 0 friction events, skip agent calls and exit with "No patterns found. ✅" — do not call agents with empty input.
 
@@ -397,6 +444,7 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 - skill_idea: {n}
 - hook_code: {n}
 - upstream_feedback: {n}
+- memory_hygiene: {n}
 - gate_1_verdict: {PASS|FAIL|NA}
 - gate_2_verdict: {PASS|FAIL|NA}
 - gate_3_verdict: {PASS|FAIL|NA}
@@ -406,6 +454,8 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 ```
 
 `memory` count = (friction-event findings with Proposed Actions = `memory`, single or compound) + (successful_patterns where `reinforce_action = memory`). Stage 4 Action 1 reads the same total but routes per-entry by origin tag.
+
+`memory_hygiene` count = findings produced by Stage 1.5 (i.e., findings whose `category[]` includes `memory_hygiene`). This is a **category count**, not an action key — these findings still emit their underlying action under one of the existing 6 action-type slots (memory / issue / claude_md_draft / ...). The `memory_hygiene` line is informational: it surfaces how much of the report originated from Stage 1.5 vs Stage 2 friction-scan.
 
 `NA` = no findings of the relevant type. Per-gate `NA` semantics:
 - `gate_1_verdict: NA` — zero `tool`/`workflow`/`spec-gap` labeled findings exist
@@ -431,7 +481,8 @@ Stage 3 output MUST emit, in this order:
    <!-- AUTHORITATIVE_SCHEMA — Stop hook depends on this. Co-update hooks/retrospect-mix-check.sh + tests/test_retrospect_mix_check.sh + tests/fixtures/retrospect-synth-*.expected.json on any change to: (1) the fence markers themselves, (2) the action key set (memory/issue/claude_md_draft/skill_idea/hook_code/upstream_feedback), or (3) gate_1_verdict / gate_2_verdict keys.
         Gate-3 carve-out: gate_3_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract. The hook's awk parser keys on gate_1_verdict/gate_2_verdict literals only and silently ignores all other lines (regression-tested by tests T8–T17 + the 4 fixture files which still pass without gate_3_verdict). Adding/removing/renaming gate_3_verdict alone does NOT require hook or test changes.
         Gate-4 enforcement note: gate_4_verdict IS structurally enforced by the Stop hook (unlike gate_3_verdict which remains informational-only). Changes to gate_4_verdict semantics or its FAIL/WARN/NA/PASS values REQUIRE synchronized edits to hooks/retrospect-mix-check.sh and tests/test_retrospect_mix_check.sh (T36/T37/T38). Adding/removing gate_4_verdict from the card alone does NOT require fence-marker or action-key changes.
-        Gate-5 carve-out: gate_5_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract (parallel to gate_3_verdict). The hook silently ignores gate_5_verdict. Adding/removing/renaming gate_5_verdict alone does NOT require hook or test changes. (Deferred upgrade trajectory similar to Gate-4 in PR #340 — file a follow-up issue for Stop hook wiring when procedural enforcement proves insufficient.) -->
+        Gate-5 carve-out: gate_5_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract (parallel to gate_3_verdict). The hook silently ignores gate_5_verdict. Adding/removing/renaming gate_5_verdict alone does NOT require hook or test changes. (Deferred upgrade trajectory similar to Gate-4 in PR #340 — file a follow-up issue for Stop hook wiring when procedural enforcement proves insufficient.)
+        Category-count carve-out (memory_hygiene): memory_hygiene is a CATEGORY count (count of findings with `memory_hygiene` ∈ category[]) — NOT an action key. It is emitted as a sibling line to the action-type counts but is informational-only and INTENTIONALLY EXCLUDED from Stop hook parsing. Adding/removing/renaming memory_hygiene alone does NOT require fence-marker or action-key changes; the underlying actions of Stage 1.5 findings still fall under one of the 6 action-type keys above. -->
    <!-- retrospect:distribution begin -->
    - memory: 1
    - issue: 0
@@ -439,6 +490,7 @@ Stage 3 output MUST emit, in this order:
    - skill_idea: 0
    - hook_code: 0
    - upstream_feedback: 0
+   - memory_hygiene: 0
    - gate_1_verdict: PASS
    - gate_2_verdict: PASS
    - gate_3_verdict: PASS
@@ -454,8 +506,8 @@ Stage 3 output MUST emit, in this order:
    ```
 
    Column semantics:
-   - `Category`: comma-separated subset of `behavioral`, `tool`, `workflow`, `spec-gap` (≥1, see Stage 2 pre-scan categorization)
-   - `Tool Layer`: one of `mcp`, `cli`, `builtin`, `skill`, or `—` (mandatory non-`—` when `tool` ∈ Category, optional `skill` for `workflow` / `spec-gap`, `—` for `behavioral`)
+   - `Category`: comma-separated subset of `behavioral`, `tool`, `workflow`, `spec-gap`, `memory_hygiene` (≥1, see Stage 2 pre-scan categorization; `memory_hygiene` originates from Stage 1.5 hygiene scan)
+   - `Tool Layer`: one of `mcp`, `cli`, `builtin`, `skill`, or `—` (mandatory non-`—` when `tool` ∈ Category, optional `skill` for `workflow` / `spec-gap` / `memory_hygiene`, `—` for `behavioral` and `memory_hygiene` by default)
    - `Proposed Actions (1~2)`: comma-separated subset of `memory`, `issue`, `claude_md_draft`, `skill_idea`, `hook_code`, `upstream_feedback`; for findings marked `external=true` by Stage 2.5 Gate-4, append ` (external)` suffix to `upstream_feedback` (e.g., `memory, upstream_feedback (external)`)
    - `Rationale`: free-form one-line for compound or non-memory rows; for **memory-only** rows (single `memory`, not compound), the cell MUST match Schema A or Schema B (see Gate-2 in Stage 2.5): Schema A — exactly 5 lines `^not (issue|claude_md_draft|skill_idea|hook_code|upstream_feedback): .+$`, one per non-memory action type; Schema B — 1-2 lines `^not-others: .+$` with dimension tags (e.g., `not-others: repeat=0, rule_exists=yes, gateable=no, tool_defect=no`). Generic single-sentence rationales are NOT acceptable for memory-only findings. **For rows whose actions include `upstream_feedback`** (single or compound), the cell MUST also contain a literal line `backing_repo: <owner>/<repo>` (embedded via `<br>` for single-line markdown form) — Stage 4 Action 4 step 0 reads this as the routing decision. **Compound case `memory, upstream_feedback`**: the row is NOT memory-only (contains a non-memory action), so the Schema A/B requirement does NOT apply — instead use free-form prose for the human rationale + the `backing_repo:` line. Compound combinations are *additive*: each action-specific Rationale convention applies independently to the row, joined with `<br>`.
 
@@ -477,6 +529,7 @@ The Stop hook parses the distribution-card fence (deterministic) and the table (
 - skill_idea: {n}
 - hook_code: {n}
 - upstream_feedback: {n}
+- memory_hygiene: {n}
 - gate_1_verdict: {PASS|FAIL|NA}
 - gate_2_verdict: {PASS|FAIL|NA}
 - gate_3_verdict: {PASS|FAIL|NA}
