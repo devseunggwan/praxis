@@ -1050,11 +1050,29 @@ For each approved action:
    - Include: problem, proposed skill trigger, pipeline sketch
 
 6. **Hook code** → For enforcement-level actions (repeat 3x+):
-   a. Write hook script to `.claude/hooks/` or appropriate location
+   a. **Write the hook script.** First resolve the target repo (the project's
+      `.claude/hooks/`, or a personal-config / dotfiles repo when the hook backs
+      `~/.claude/`) and check its current branch: `git -C <repo> branch --show-current`.
+      - **On a protected branch (`main` / `dev` / `prod` / `master`)**: an inline
+        `Write` here is blocked by `pre-edit-protected-branch-guard` (it guards
+        Edit/Write on protected branches — both the dirty-tree and the clean-tree
+        PR-workflow-signal paths). Create a dedicated worktree on a new branch and
+        write the hook inside it:
+        ```
+        git -C <repo> worktree add -b retrospect-hook-{slug} \
+            <repo-parent>/<repo-name>.retrospect-hook-{slug} <protected-branch>
+        ```
+        Surface the worktree path to the user for the commit / PR decision —
+        retrospect does NOT auto-commit or auto-PR the hook; its contract ends at
+        the file write.
+      - **Already on a feature branch**: write the hook directly to
+        `.claude/hooks/` or the appropriate location.
    b. Present the hook code to user for review
    c. Explain how to register in `.claude/settings.json` (show the exact JSON entry)
    d. Use AskUserQuestion: "Hook을 settings.json에 등록할까요?" (✅ 등록 / ⏭ 파일만 유지 / 🕐 나중에)
-   e. If approved: Edit `.claude/settings.json` to register the hook
+   e. If approved: Edit `.claude/settings.json` to register the hook (inside the
+      step-(a) worktree when one was created — `settings.json` shares the same
+      protected-branch repo as the hook file)
    f. If skipped/deferred: leave the hook file in place and provide manual registration instructions
 
 7. **Verification** — For each executed action, verify the artifact:
@@ -1065,7 +1083,7 @@ For each approved action:
    | MEMORY.md feedback (merged) | Existing file updated (diff shown) + MEMORY.md index description updated if needed + if existing entry had `hookable: false` **or the field is missing entirely** and merged context now meets the retrieval-critical default, re-evaluate and add/update frontmatter (most pre-existing memories lack `hookable` — missing field is the dominant case, not false) |
    | GitHub issue | `gh issue view {url}` returns valid data |
    | Upstream feedback | `gh issue view {url}` returns valid data + URL repo matches `verified_backing_repo` from step 0 + label convention is correct for the verified repo (`tool-friction:{layer}` ONLY when verified repo is the praxis distribution; otherwise the repo's own convention label per Action 4's label rule) |
-   | Hook code | Script file exists + settings.json registration confirmed (dry-run varies by hook type — no generic check) |
+   | Hook code | Script file exists + settings.json registration confirmed (dry-run varies by hook type — no generic check). If Action 6 step (a) created a worktree, report the worktree path and confirm the file exists there. |
    | Global `~/.claude/CLAUDE.md` draft | **Project target (`AGENTS.md`)**: Diff shown + explicit approval received + Edit applied. **Global target (`~/.claude/CLAUDE.md`)**: Staging file created at `/tmp/claude-md-draft-{slug}.md` → AskUserQuestion 3-option presented → `apply`: Edit applied + diff shown; `보류`: staging file path logged in completion report. |
    | Skill idea note | File exists in `.omc/plans/` |
 
