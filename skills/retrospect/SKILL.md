@@ -149,7 +149,44 @@ Each Stage 1.5 finding has:
 - For `memory_hygiene` events (Stage 1.5 origin), `Tool Layer` = `—` by default. When the stale citation points to a specific skill/hook artifact (e.g., a renamed hook script), `Tool Layer` MAY be set to `skill` so the finding compounds with a `skill` step-4b lane. `memory_hygiene` events do NOT require the mandatory `mcp/cli/builtin/skill` classification that `tool` events do.
 - For `output_quality` events (Stage 2.7 origin), `Tool Layer` follows the audited surface: `cli` for `gh pr|issue` audits, `skill` for sub-agent substance audits, `—` for MCP-via-behavioral path (e.g., Slack `*_send_message` audit where the surface is the action discipline, not the MCP itself). Unlike the strict `tool` category, `output_quality` does not require the layer to be `mcp/cli/builtin/skill` when the audit surface is behavioral (evidence discipline in a comment body).
 
-**Early exit**: If pre-scan finds 0 friction events, skip agent calls and exit with "No patterns found. ✅" — do not call agents with empty input. **Exception (Stage 1.5 carve-out)**: when Stage 1.5 produced ≥1 `memory_hygiene` finding, the early exit does NOT fire — proceed to Stage 2.5 → Stage 3 with the hygiene findings as the sole input, and emit the Stage 1.5 hygiene-only banner (see Stage 1.5 "0-friction hygiene-only retrospect path"). **Exception (Stage 2.7 carve-out)**: when the session transcript contains ≥1 Stage 2.7 audit trigger (PR / issue / Slack / Notion write — see Stage 2.7 trigger list), the early exit does NOT fire — Stage 2.7 must execute its post-hoc artifact audit so silent-pass quality failures (the exact case Stage 2.7 was designed to catch) are not skipped. If Stage 2.7 produces ≥1 `output_quality` finding, proceed to Stage 2.5 → Stage 3 with those findings as input; if Stage 2.7 silently skips (0 triggers detected after the carve-out check), fall through to the normal 0-friction "No patterns found" exit.
+**Pre-scan Checklist (Mandatory)** — after categorization, emit a deterministic per-category checklist that enumerates rule-violation candidates from machine-checkable sources. Pre-scan is otherwise narrative-driven (operator-interpreted), which lets rule-violation events slip through reframings like "downstream caught it, not friction". The checklist forces an explicit per-category accounting before the 0-friction early exit can fire.
+
+For every rule category identified in Stage 1 (Pre-merge Worktree Precondition / Pre-PR rebase MANDATORY / Caller chain verified / Mandatory Testing / etc.), emit ONE of:
+
+```
+- {category_name}: violations: none
+- {category_name}: violations:
+  - {one-line candidate} | spec_cite: {file:line or section name}
+```
+
+**Deterministic enumeration sources** (candidates MUST come from these — operator narrative is NOT a source):
+- Every codex/review-bot finding produced in this session transcript (Codex, BugBot, Cursor, oh-my-claudecode reviewers)
+- Every workflow step in project `AGENTS.md` / global `~/.claude/CLAUDE.md` where the session took a different path (e.g., merge-from-non-base worktree, force-push instead of fixup, omitted caller-chain line caught by a hook)
+- Every retried command in the session — same command issued ≥2 times (including diagnostic retries)
+
+**Gate behavior** — the Early exit below is valid ONLY when every category's `violations:` line resolves to `none`. A category with a non-`none` line BLOCKS the 0-friction exit; the blocked candidate MUST be either:
+- **Promoted** to a friction event (carries through Stage 2 step 3+ and Stage 2.5 gates), or
+- **Demoted** to the `dismissed_candidates` ledger (note-only, see below) with explicit rationale + spec cite. Demotion does NOT silence the audit trail — it records the dismissal reason for follow-up retrospects to surface dismissed-candidate patterns.
+
+**Mandate scope (narrow — rule violations only)** — the checklist gate's capture mandate applies to **rule violations** (workflow steps in `AGENTS.md` / `~/.claude/CLAUDE.md` / hook denials / spec-cited divergence) and NOT to general codex/review-bot findings. A refactor suggestion, style nit, or defensible alternative implementation from a review bot is NOT subject to the dismissal-to-silence ban — those may be acknowledged or ignored without a checklist entry. This narrowing exists to prevent MEMORY.md from inflating into a review-bot mirror over time.
+
+For a rule-violation candidate, the operator's only dismissal path is:
+- **Demote to `dismissed_candidates` ledger** (note-only) with explicit rationale + spec cite. Silent dismissal — refusing to record the candidate at all — is BLOCKED by the Red Flag in this skill.
+- **Escape hatch via existing resolution** — when `repeat=true AND resolved=true` (a prior session's issue/hook already resolves the same violation pattern; see Stage 2 step 7 escape hatch at the `note only` clause), demotion is permitted with a one-sentence cross-reference to the existing resolution recorded in the dismissal rationale.
+
+**`dismissed_candidates` ledger** — for every checklist candidate that was reviewed and dismissed (i.e., kept off the unified findings table), append one line to the ledger block emitted alongside the checklist:
+
+```
+<!-- retrospect:dismissed_candidates begin -->
+- {one-line candidate} | reason: {dismissal rationale} | spec_cite: {section name or file:line}
+<!-- retrospect:dismissed_candidates end -->
+```
+
+This is a pure audit log, not a gate. It exists so a follow-up retrospect can surface patterns like "the same candidate has been dismissed N times across sessions" — a leading signal that the dismissal rationale itself needs scrutiny. Empty ledger (zero dismissals) still emits the fenced block with no inner lines.
+
+Both the checklist block and the dismissed_candidates block live in Stage 3 output between the report header and the distribution card (see Stage 3 Output Schema Contract). They are informational-only — the Stop hook's awk parser silently ignores them.
+
+**Early exit**: If pre-scan finds 0 friction events AND the Pre-scan Checklist has zero unresolved violations (every category's `violations:` line is `none` OR demoted to `dismissed_candidates`), skip agent calls and route to Stage 3's "No patterns found ✅" minimal output path — which still emits the header, the `pre_scan_checklist` fence, the `dismissed_candidates` fence (with any demoted candidates from this session), and the distribution card (counts = 0, verdicts = NA). The audit-trail fences MUST be emitted in this path so demoted candidates are not silently lost. Skipping Stage 3 output entirely is a Red Flag — "exit" here means "skip agent calls + Stage 2.5 gates", not "skip Stage 3 output". **Exception (Stage 1.5 carve-out)**: when Stage 1.5 produced ≥1 `memory_hygiene` finding, the early exit does NOT fire — proceed to Stage 2.5 → Stage 3 with the hygiene findings as the sole input, and emit the Stage 1.5 hygiene-only banner (see Stage 1.5 "0-friction hygiene-only retrospect path"). **Exception (Stage 2.7 carve-out)**: when the session transcript contains ≥1 Stage 2.7 audit trigger (PR / issue / Slack / Notion write — see Stage 2.7 trigger list), the early exit does NOT fire — Stage 2.7 must execute its post-hoc artifact audit so silent-pass quality failures (the exact case Stage 2.7 was designed to catch) are not skipped. If Stage 2.7 produces ≥1 `output_quality` finding, proceed to Stage 2.5 → Stage 3 with those findings as input; if Stage 2.7 silently skips (0 triggers detected after the carve-out check), fall through to the normal 0-friction "No patterns found" exit. **Exception (Checklist carve-out)**: when the Pre-scan Checklist has ≥1 unresolved violation (a category line non-`none` AND not yet demoted to `dismissed_candidates`), the early exit does NOT fire — that candidate must be promoted to a friction event or demoted before Stage 3 can present "No patterns found".
 
 **MANDATORY AGENT CALLS — when pre-scan finds 1+ friction events, MUST call sequentially (analyst depends on tracer output):**
 
@@ -555,14 +592,33 @@ This card and verdict block become Stage 3's input header.
 Stage 3 output MUST emit, in this order:
 
 1. **Header**: a line matching `^## Retrospect Report` (em-dash or hyphen tail accepted: `## Retrospect Report — {date}` or `## Retrospect Report - {date}`).
-2. **Distribution card** between HTML comment fences. Action keys are canonical snake_case enum; verdict values are `PASS` / `FAIL` / `NA`:
+2. **Pre-scan Checklist** between HTML comment fences (Stage 2 Pre-scan Checklist origin) — emitted between header and distribution card:
+
+   ```markdown
+   <!-- retrospect:pre_scan_checklist begin -->
+   - {category_name}: violations: none
+   - {category_name}: violations:
+     - {one-line candidate} | spec_cite: {section}
+   <!-- retrospect:pre_scan_checklist end -->
+   ```
+
+3. **`dismissed_candidates` ledger** between HTML comment fences (Stage 2 Pre-scan Checklist origin) — emitted alongside the checklist block; empty body when zero candidates were dismissed:
+
+   ```markdown
+   <!-- retrospect:dismissed_candidates begin -->
+   - {one-line candidate} | reason: {rationale} | spec_cite: {section}
+   <!-- retrospect:dismissed_candidates end -->
+   ```
+
+4. **Distribution card** between HTML comment fences. Action keys are canonical snake_case enum; verdict values are `PASS` / `FAIL` / `NA`:
 
    ```markdown
    <!-- AUTHORITATIVE_SCHEMA — Stop hook depends on this. Co-update hooks/retrospect-mix-check.sh + tests/test_retrospect_mix_check.sh + tests/fixtures/retrospect-synth-*.expected.json on any change to: (1) the fence markers themselves, (2) the action key set (memory/issue/claude_md_draft/skill_idea/hook_code/upstream_feedback), or (3) gate_1_verdict / gate_2_verdict keys.
         Gate-3 carve-out: gate_3_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract. The hook's awk parser keys on gate_1_verdict/gate_2_verdict literals only and silently ignores all other lines (regression-tested by tests T8–T17 + the 4 fixture files which still pass without gate_3_verdict). Adding/removing/renaming gate_3_verdict alone does NOT require hook or test changes.
         Gate-4 enforcement note: gate_4_verdict IS structurally enforced by the Stop hook (unlike gate_3_verdict which remains informational-only). Changes to gate_4_verdict semantics or its FAIL/WARN/NA/PASS values REQUIRE synchronized edits to hooks/retrospect-mix-check.sh and tests/test_retrospect_mix_check.sh (T36/T37/T38). Adding/removing gate_4_verdict from the card alone does NOT require fence-marker or action-key changes.
         Gate-5 carve-out: gate_5_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract (parallel to gate_3_verdict). The hook silently ignores gate_5_verdict. Adding/removing/renaming gate_5_verdict alone does NOT require hook or test changes. (Deferred upgrade trajectory similar to Gate-4 in PR #340 — file a follow-up issue for Stop hook wiring when procedural enforcement proves insufficient.)
-        Category-count carve-out (memory_hygiene / output_quality): these are CATEGORY counts (count of findings with the respective category in category[]) — NOT action keys. They are emitted as sibling lines to the action-type counts but are informational-only and INTENTIONALLY EXCLUDED from Stop hook parsing. Adding/removing/renaming memory_hygiene OR output_quality alone does NOT require fence-marker or action-key changes; the underlying actions of Stage 1.5 / Stage 2.7 findings still fall under one of the 6 action-type keys above. The Stop hook's awk parser silently ignores both lines (same mechanism as gate_3/gate_5 verdicts). -->
+        Category-count carve-out (memory_hygiene / output_quality): these are CATEGORY counts (count of findings with the respective category in category[]) — NOT action keys. They are emitted as sibling lines to the action-type counts but are informational-only and INTENTIONALLY EXCLUDED from Stop hook parsing. Adding/removing/renaming memory_hygiene OR output_quality alone does NOT require fence-marker or action-key changes; the underlying actions of Stage 1.5 / Stage 2.7 findings still fall under one of the 6 action-type keys above. The Stop hook's awk parser silently ignores both lines (same mechanism as gate_3/gate_5 verdicts).
+        Pre-scan-checklist + dismissed_candidates carve-out: the `retrospect:pre_scan_checklist` and `retrospect:dismissed_candidates` fenced blocks (Stage 2 origin) are informational-only and INTENTIONALLY EXCLUDED from Stop hook parsing. They live OUTSIDE the `retrospect:distribution` fence so the awk parser keyed on `distribution begin/end` ignores them. Adding/removing/renaming the checklist OR dismissed_candidates blocks alone does NOT require hook or test changes. -->
    <!-- retrospect:distribution begin -->
    - memory: 1
    - issue: 0
@@ -580,7 +636,7 @@ Stage 3 output MUST emit, in this order:
    <!-- retrospect:distribution end -->
    ```
 
-3. **Unified findings table** with literal column headers (no abbreviation, no reordering):
+5. **Unified findings table** with literal column headers (no abbreviation, no reordering):
 
    ```
    | # | Category | Tool Layer | Pattern | Root Cause | Rule / Gap | Repeat? | Proposed Actions (1~2) | Rationale | Priority |
@@ -602,6 +658,16 @@ The Stop hook parses the distribution-card fence (deterministic) and the table (
 
 ```
 ## Retrospect Report — {session_date}
+
+<!-- retrospect:pre_scan_checklist begin -->
+- {category_name}: violations: none
+- {category_name}: violations:
+  - {one-line candidate} | spec_cite: {section}
+<!-- retrospect:pre_scan_checklist end -->
+
+<!-- retrospect:dismissed_candidates begin -->
+- {one-line candidate} | reason: {rationale} | spec_cite: {section}
+<!-- retrospect:dismissed_candidates end -->
 
 <!-- retrospect:distribution begin -->
 - memory: {n}
@@ -636,7 +702,7 @@ when <observation predicate>$`.
 
 If no Gate-3 (b) demotions occurred, omit this section entirely (do not emit "None.").
 
-No patterns found: emit the distribution card with all counts = 0 and verdicts = NA, plus literal "This session followed all global `~/.claude/CLAUDE.md` rules. ✅"
+No patterns found: emit the **header**, the **`retrospect:pre_scan_checklist` fence**, the **`retrospect:dismissed_candidates` fence** (populated with any dismissals from Stage 2's Pre-scan Checklist; empty body when zero), and the **distribution card** with all counts = 0 and verdicts = NA, plus literal "This session followed all global `~/.claude/CLAUDE.md` rules. ✅". The two new fences MUST be emitted even in the 0-friction case — otherwise the dismissed-candidate audit trail is silently lost in exactly the path it is most needed (Stage 2 early exit that resolves via demotion-only).
 
 ### Reinforced Patterns (this session)
 
@@ -1054,6 +1120,7 @@ If you catch yourself:
 - **Forcing tool friction into only a rule-violation frame** — tool-layer defects from step 4b MUST be carried in the unified findings table with `Tool Layer` set to a non-`—` value and evaluated for `upstream feedback`, not collapsed into rule-violation-only findings
 - **Skipping step 4b entirely** ("no tool issues this session") — step 4b is mandatory. If no tool friction is found, the distribution card MUST emit `upstream_feedback: 0` and the report MUST state "No tool/feature friction detected. ✅" explicitly
 - **Pre-scan에서 friction event에 `category[]` 라벨링을 누락한 채 Stage 2 step 3 이상 진행** — Layer E 강제. 누락은 Stage 2 진입 전 차단되어야 한다.
+- **Pre-scan Checklist 가 식별한 rule-violation 후보를 dismissed_candidates ledger 기록 없이 silent 으로 무시** — 운영자의 dismissal-to-silence 권한은 차단됨. 후보는 (a) friction event 로 promote 하거나 (b) dismissed_candidates 에 explicit rationale + spec cite 와 함께 demote 해야 한다. 일반 codex/review-bot finding (refactor 제안 / style nit) 은 본 mandate 적용 대상 아님 — narrow scope 는 rule violation 사실에만 적용된다 (MEMORY.md 가 review-bot mirror 로 inflate 되는 위험 방지).
 - **Memory-only finding의 `Rationale`이 Gate-2 schema 를 만족하지 않음** — Gate-2 위반. 허용 schema: (a) 5줄 `not <action>: <reason>` 형식 (Schema A) 또는 (b) 1-2줄 `not-others: <dim-tags>` 형식 (Schema B). 일반 한 줄 진술, 3-line `not-others:`, Schema A/B 혼용은 모두 부적격.
 - **Stage 2.5 분포 감사를 명시적으로 건너뛰고 Stage 3로 직행** — distribution card와 Gate-1/Gate-2/Gate-3 verdict 출력은 Stage 3 입력의 mandatory 전제.
 - **`tool` 라벨 finding의 `Tool Layer` 컬럼이 `—`로 비어 있음** — Layer E ↔ step 4b composition matrix 위반. tool 카테고리는 4b layer 중 하나(mcp/cli/builtin/skill)를 반드시 가져야 한다.
