@@ -848,19 +848,19 @@ For each approved action:
 3. **Global `~/.claude/CLAUDE.md` draft** → Write proposed rule addition as a markdown block, routed by target
 
    **Step 0 — Target detection (MUST run first):**
-   Resolve the target path via `realpath` and classify:
+   Classify by the **input path** (the path the finding declares as the target). `realpath` is used only to derive the actual Edit target after classification — not as the classification input. A dotfiles-symlinked `~/.claude/CLAUDE.md` (resolving outside `~/.claude/`) is still the user's own global config and must take the Global path.
 
-   | Target | Detection | Execution path |
-   |--------|-----------|---------------|
-   | **Project `AGENTS.md`** | `realpath <path>` does NOT match `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` AND resolves inside cwd | Direct Edit (see Project path below) |
-   | **Global `~/.claude/CLAUDE.md`** | `realpath <path>` matches `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` | Staging → AskUserQuestion → apply only on explicit approval (see Global path below) |
-   | **External-repo rule file** | `realpath <path>` resolves outside cwd AND outside `~/.claude/` | Same as external-repo gate — do NOT edit; surface to user with resolved path |
+   | Target | Detection (input path) | Execution path |
+   |--------|------------------------|---------------|
+   | **Global `~/.claude/CLAUDE.md`** | Input path equals `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` (after `$HOME`/`~` expansion). `realpath` target is irrelevant — symlinks pointing into dotfiles backing repos still classify as Global. | Staging → AskUserQuestion → apply only on explicit approval (see Global path below) |
+   | **Project `AGENTS.md`** | Input path is `AGENTS.md` (or equivalent) inside cwd AND is not the Global path above. | Direct Edit (see Project path below) |
+   | **External-repo rule file** | Neither of the above AND `realpath <path>` resolves outside cwd AND outside `~/.claude/` AND outside the dotfiles backing repo of `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` | Same as external-repo gate — do NOT edit; surface to user with resolved path |
 
-   **Project path** (`realpath` does NOT match global):
+   **Project path** (input is project `AGENTS.md`):
    - Present the draft diff to the user inline
    - Apply with explicit approval ("yes, add this rule") → Direct Edit
 
-   **Global path** (`realpath` matches `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md`):
+   **Global path** (input equals `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md`):
    ⚠️ Global scope — changes affect every project. Claude Code's self-modification classifier blocks direct Edit/Write without explicit approval.
 
    a. **Stage draft**: write the proposed rule block to `/tmp/claude-md-draft-{slug}.md` (use `.omc/plans/claude-md-draft-{slug}.md` as fallback when `/tmp/` is not writable). Present the full draft content inline before showing the prompt.
@@ -876,7 +876,7 @@ For each approved action:
         Cap: 최대 3 라운드. 3 라운드 초과 시: "3회 재작성을 초과했습니다. 수동 편집을 권장합니다: `{staging_path}`" 후 보류 처리.
       - `보류` 선택 시: Edit 호출 없이 staging 파일 경로를 completion report에 기록하고 종료.
 
-   c. **`apply` 선택 시**: Edit on global `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` to insert the approved rule at the indicated position. Show the resulting diff as verification.
+   c. **`apply` 선택 시**: Resolve the actual Edit target via `edit_target="$(realpath "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md")"` first — the builtin `Edit` tool refuses to write through a symlink, so the resolved path is the only writable target in symlinked dotfiles environments. Edit `$edit_target` to insert the approved rule at the indicated position. Show the resulting diff as verification.
 
 4. **Upstream feedback** → Resolve the tool's **backing repo first** (do NOT hardcode any specific repo), then create a labeled issue there. Hardcoding misroutes plugin defects, custom MCP defects, dotfiles defects across user environments.
 
