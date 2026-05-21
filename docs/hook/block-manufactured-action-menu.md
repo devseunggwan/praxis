@@ -3,12 +3,19 @@
 Supported hosts: all
 
 `hooks/block-manufactured-action-menu.py` fires on every PreToolUse(AskUserQuestion)
-event and inspects `options[].label` for manufactured action-menu markers — option
-labels that re-ask "shall we proceed?" ("진행할까요", "계속할까요", "proceed",
-"continue", "go ahead"). When a marker is found, the most recent user message in
-the transcript is checked for a command-intent signal. If a command-intent signal
-is present, the user has already given direction — the confirmation menu is
-manufactured friction.
+event and inspects `options[].label` for manufactured action-menu markers. Two
+marker forms are recognised:
+
+- **question-form** — the option re-asks "shall we proceed?" (`진행할까요`,
+  `계속할까요`, `proceed`, `continue`, `go ahead`).
+- **affirmative-form** — the option restates the directive as "do exactly what
+  you said" (`그대로 진행`, `execute now`, `as instructed`). Its very presence
+  proves the agent already knows the answer.
+
+When a marker is found, the most recent user message in the transcript is
+checked for a command-intent signal. If a command-intent signal is present,
+the user has already given direction — the confirmation menu is manufactured
+friction.
 
 ### Why this exists
 
@@ -17,6 +24,12 @@ an AskUserQuestion 4-option menu ("다음 액션 진행할까요?") even when th
 immediately prior message was a direct command ("진행", "go ahead", "실행"). This
 pattern fragments decisions, ignores established user intent, and adds an unnecessary
 confirmation roundtrip.
+
+2026-05-21 retrospect Gen 3: after an explicit scoped directive the agent surfaced
+clarification menus whose first option was an affirmative restatement of the
+directive (`그대로 진행`). The question-form marker set did not match those labels,
+so the hook passed silently. The affirmative-form marker set closes that gap — the
+same anti-pattern, detected from the option-label side.
 
 The existing `block-ask-end-option` hook catches *termination* menu misuse (mechanical
 "end here" boilerplate). This hook is its sibling: it catches *continuation* menu
@@ -55,7 +68,25 @@ retrieval state.
 - `continue`
 - `go ahead`
 
+#### Affirmative-form option label markers (Korean)
+
+- `그대로 진행`
+- `그대로 생성`
+- `그대로 실행`
+- `말씀하신 대로`
+- `지시대로`
+
+#### Affirmative-form option label markers (English)
+
+- `execute now`
+- `as instructed`
+- `as directed`
+- `as requested`
+
 All matches are case-insensitive substring checks against the option label.
+Affirmative-form phrases are deliberately multi-word and execute-verb-anchored
+so they do not collide with "leave as-is" labels (`그대로 둬`, `keep as-is`)
+or genuine alternative-path labels.
 
 ### Command-intent signals (user message)
 
@@ -66,10 +97,16 @@ user message (skipping `tool_result`-only entries). Command-intent is detected w
 - `진행`, `실행`, `머지`, `커밋`, `push`, `푸시`
 
 **English** (whole-word match, case-insensitive):
-- `go`, `go ahead`, `proceed`, `continue`, `merge`, `commit`, `push`
+- `go`, `go ahead`, `proceed`, `continue`, `merge`, `commit`, `push`,
+  `execute`, `run it`, `implement`
 
 English tokens use `\b` word-boundary matching to prevent false positives from
 substrings (e.g. "continuing" → "continue", "progress" does not match "go").
+The `execute` / `run it` / `implement` tokens pair with the affirmative-form
+option markers so an `execute it` directive followed by an `execute now`
+menu option is detected. `run it` is a phrase, not the bare noun `run` —
+bare `run` would whole-word-match non-directive statements ("the run
+failed", "dry run output"). Korean execute intent is already covered by `실행`.
 
 ### Mode and env var behavior
 
@@ -168,8 +205,10 @@ bash hooks/test-block-manufactured-action-menu.sh
 ```
 
 Covers: Korean manufactured markers (advisory + strict block), English markers
-(proceed, continue, go ahead), command-intent signals in prior user message,
-pass when no command signal present, pass when no manufactured marker, non-AskUserQuestion
-tool pass-through, missing transcript fail-open, malformed payload fail-open,
-tool_result-only entry skip, multi-question payload, false-positive avoidance
-(normal work options only).
+(proceed, continue, go ahead), affirmative-form markers (`그대로 진행`,
+`execute now`, `as instructed` — advisory + strict block, status-query /
+negation / destructive-exempt / `그대로 둬` no-marker cases), command-intent
+signals in prior user message, pass when no command signal present, pass when
+no manufactured marker, non-AskUserQuestion tool pass-through, missing transcript
+fail-open, malformed payload fail-open, tool_result-only entry skip,
+multi-question payload, false-positive avoidance (normal work options only).
