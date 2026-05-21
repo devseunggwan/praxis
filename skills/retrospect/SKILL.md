@@ -149,7 +149,7 @@ Each Stage 1.5 finding has:
 - For `memory_hygiene` events (Stage 1.5 origin), `Tool Layer` = `—` by default. When the stale citation points to a specific skill/hook artifact (e.g., a renamed hook script), `Tool Layer` MAY be set to `skill` so the finding compounds with a `skill` step-4b lane. `memory_hygiene` events do NOT require the mandatory `mcp/cli/builtin/skill` classification that `tool` events do.
 - For `output_quality` events (Stage 2.7 origin), `Tool Layer` follows the audited surface: `cli` for `gh pr|issue` audits, `skill` for sub-agent substance audits, `—` for MCP-via-behavioral path (e.g., Slack `*_send_message` audit where the surface is the action discipline, not the MCP itself). Unlike the strict `tool` category, `output_quality` does not require the layer to be `mcp/cli/builtin/skill` when the audit surface is behavioral (evidence discipline in a comment body).
 
-**Early exit**: If pre-scan finds 0 friction events, skip agent calls and exit with "No patterns found. ✅" — do not call agents with empty input. **Exception (Stage 1.5 carve-out)**: when Stage 1.5 produced ≥1 `memory_hygiene` finding, the early exit does NOT fire — proceed to Stage 2.5 → Stage 3 with the hygiene findings as the sole input, and emit the Stage 1.5 hygiene-only banner (see Stage 1.5 "0-friction hygiene-only retrospect path").
+**Early exit**: If pre-scan finds 0 friction events, skip agent calls and exit with "No patterns found. ✅" — do not call agents with empty input. **Exception (Stage 1.5 carve-out)**: when Stage 1.5 produced ≥1 `memory_hygiene` finding, the early exit does NOT fire — proceed to Stage 2.5 → Stage 3 with the hygiene findings as the sole input, and emit the Stage 1.5 hygiene-only banner (see Stage 1.5 "0-friction hygiene-only retrospect path"). **Exception (Stage 2.7 carve-out)**: when the session transcript contains ≥1 Stage 2.7 audit trigger (PR / issue / Slack / Notion write — see Stage 2.7 trigger list), the early exit does NOT fire — Stage 2.7 must execute its post-hoc artifact audit so silent-pass quality failures (the exact case Stage 2.7 was designed to catch) are not skipped. If Stage 2.7 produces ≥1 `output_quality` finding, proceed to Stage 2.5 → Stage 3 with those findings as input; if Stage 2.7 silently skips (0 triggers detected after the carve-out check), fall through to the normal 0-friction "No patterns found" exit.
 
 **MANDATORY AGENT CALLS — when pre-scan finds 1+ friction events, MUST call sequentially (analyst depends on tracer output):**
 
@@ -356,7 +356,7 @@ For each PR touched by `gh pr {create,edit,merge,comment}` in this session:
   - `mergeable == "CONFLICTING"` (stale branch left in conflict state)
 
 Finding template:
-- `category[]: [output_quality, tool]` (tool because cli surface)
+- `category[]: [output_quality]` — single category; the `cli` surface is captured by `Tool Layer` below. Compounding with `tool` would trigger Gate-1 (Stage 2.5) which forbids `memory`-single for `tool` findings; output_quality first-occurrence is appropriately memory-single, so the `tool` co-category is omitted here. (Tool Layer still carries the surface signal.)
 - `Tool Layer: cli`
 - `Proposed Actions`: `memory` (single occurrence) or `memory, claude_md_draft` (when repeat ≥2; rule-gap on review-quality bar)
 
@@ -370,7 +370,7 @@ For each sub-agent dispatch in the session (Agent tool calls):
   - Parent agent invoked downstream tooling that referenced the sub-agent's output (i.e., the sub-output was actually *used*, not just discarded)
 
 Finding template:
-- `category[]: [output_quality, tool]`
+- `category[]: [output_quality]` — single category; the `skill` surface is captured by `Tool Layer`. Same rationale as Sub-audit 1: Gate-1 would reject `memory`-single for a `tool`-co-labeled finding, but first-occurrence sub-agent substance is correctly memory-single (a downstream-reliability lesson). Tool Layer below preserves the surface signal.
 - `Tool Layer: skill`
 - `Proposed Actions`: `memory` (capture as a downstream-reliability lesson) or `memory, skill_idea` (when repeat ≥2; sketch a verifier helper)
 
