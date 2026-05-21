@@ -26,6 +26,8 @@ confirmation-prompt layer.
 | [pre-edit-protected-branch-guard](pre-edit-protected-branch-guard.md) | PreToolUse | Block Edit/Write/NotebookEdit on protected branches (main/dev/prod/master) outside the expected worktree workflow |
 | [pre-gh-pr-create-dedup-gate](pre-gh-pr-create-dedup-gate.md) | PreToolUse | Run `gh pr list --search` before `gh pr create`; hard-block on duplicate or repo-resolution failure |
 | [verify-commit-flag-override](verify-commit-flag-override.md) | PreToolUse | Deny `git commit` invocations that override hooks / signing without env verification |
+| [block-sciomc-finding-commit](block-sciomc-finding-commit.md) | PreToolUse | Block content `git commit` after a sciomc/reviewer finding when no user-design consensus re-fetch happened in between |
+| [block-gh-issue-create-without-dup-search](block-gh-issue-create-without-dup-search.md) | PreToolUse | Block `gh issue create` when no prior duplicate search overlaps the new issue's title keywords |
 | [session-intent](session-intent.md) | UserPromptSubmit + PreToolUse | Gate read-intent → mutation-pivot session drift on `gh` mutating commands |
 
 ---
