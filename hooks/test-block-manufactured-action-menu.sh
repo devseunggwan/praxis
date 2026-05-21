@@ -443,6 +443,61 @@ P_ks2=$(build_payload "$T_ks2" '["Plan A", "계속할까요"]')
 run_case "[KO-signal] '계속 진행' + '계속할까요' → advisory" advisory default "$P_ks2"
 
 # ---------------------------------------------------------------------------
+# (j) Affirmative-form markers — option labels that restate the directive as
+#     "do exactly what you said" ("그대로 진행", "execute now"). Same anti-
+#     pattern as question-form, detected from the option-label side.
+# ---------------------------------------------------------------------------
+
+T_af1=$(build_transcript "진행해줘")
+P_af1=$(build_payload "$T_af1" '["다른 방식", "그대로 진행"]')
+run_case "[affirmative-KO] '진행해줘' + '그대로 진행' label → advisory" advisory default "$P_af1"
+
+T_af2=$(build_transcript "실행해줘")
+P_af2=$(build_payload "$T_af2" '["방식 변경", "그대로 생성"]')
+run_case "[affirmative-KO] '실행해줘' + '그대로 생성' label → advisory" advisory default "$P_af2"
+
+T_af3=$(build_transcript "go ahead and do it")
+P_af3=$(build_payload "$T_af3" '["Revise approach", "execute now"]')
+run_case "[affirmative-EN] 'go ahead' + 'execute now' label → advisory" advisory default "$P_af3"
+
+T_af4=$(build_transcript "proceed with the plan")
+P_af4=$(build_payload "$T_af4" '["Alternative", "implement as instructed"]')
+run_case "[affirmative-EN] 'proceed' + 'as instructed' label → advisory" advisory default "$P_af4"
+
+# Strict mode — affirmative marker blocks like the question-form markers.
+T_af5=$(build_transcript "진행해줘")
+P_af5=$(build_payload "$T_af5" '["다른 방식", "그대로 진행"]')
+run_case "[affirmative-KO] strict + '진행해줘' + '그대로 진행' → block" block strict "$P_af5"
+
+# No command signal — affirmative marker alone is a legitimate menu.
+T_af6=$(build_transcript "어떤 방식이 좋을까요?")
+P_af6=$(build_payload "$T_af6" '["방식 A", "그대로 진행"]')
+run_case "[affirmative-KO] no command signal + '그대로 진행' → pass" pass default "$P_af6"
+
+# Status-query message — affirmative marker must not fire on a progress check.
+T_af7=$(build_transcript "진행 상황 알려줘")
+P_af7=$(build_payload "$T_af7" '["방식 A", "그대로 진행"]')
+run_case "[affirmative-KO] status query + '그대로 진행' → pass" pass default "$P_af7"
+
+# Negated directive — affirmative marker must not fire.
+T_af8=$(build_transcript "진행하지 마")
+P_af8=$(build_payload "$T_af8" '["방식 A", "그대로 진행"]')
+run_case "[affirmative-KO] negated '진행하지 마' + '그대로 진행' → pass" pass default "$P_af8"
+
+# Destructive affirmative label — destructive-confirmation exception applies.
+# Label carries both the affirmative marker ("그대로 진행") and a destructive
+# token ("머지"), so the marker matches AND the destructive exception fires.
+T_af9=$(build_transcript "머지해줘")
+P_af9=$(build_payload "$T_af9" '["검토 더 하기", "그대로 진행 (머지 확정)"]')
+run_case "[affirmative-KO] '그대로 진행 (머지 확정)' label (destructive) + cmd → pass" pass default "$P_af9"
+
+# False-positive avoidance — "그대로 둬" (leave as-is) is NOT an affirmative
+# marker; "그대로 진행" must not match it.
+T_af10=$(build_transcript "진행해줘")
+P_af10=$(build_payload "$T_af10" '["그대로 둬", "방식 변경"]')
+run_case "[affirmative-KO] 'leave as-is' label, no marker → pass" pass default "$P_af10"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 

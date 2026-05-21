@@ -2,11 +2,17 @@
 """PreToolUse(AskUserQuestion) guard: warn on manufactured action-menu surfacing.
 
 When AskUserQuestion is invoked with `options` whose labels match
-manufactured-menu markers (e.g. "진행할까요", "계속할까요", "proceed",
-"continue", "go ahead"), check the most recent user message in the
+manufactured-menu markers, check the most recent user message in the
 transcript for a command-intent signal. If a command-intent signal is
 present, the user has already given direction — re-asking via menu is
 redundant manufactured friction.
+
+Two marker forms are recognised:
+  - question-form ("진행할까요", "계속할까요", "proceed", "continue",
+    "go ahead") — the option re-asks for confirmation.
+  - affirmative-form ("그대로 진행", "execute now", "as instructed") — the
+    option restates the directive as "do exactly what you said". Its very
+    presence proves the agent already knows the answer.
 
 Background:
   2026-05-13 retrospect Strike 1: agent completed an action then automatically
@@ -14,6 +20,12 @@ Background:
   the user's immediately prior message was a direct command ("진행", "go ahead",
   "실행"). This pattern fragments decisions, ignores established user intent, and
   adds roundtrip latency on simple continuations.
+
+  2026-05-21 retrospect Gen 3: after an explicit scoped directive the agent
+  surfaced clarification menus whose first option was an affirmative restatement
+  of the directive ("그대로 진행"). The question-form marker set did not match
+  those labels, so the hook passed silently. The affirmative-form marker set
+  closes that gap — same anti-pattern, detected from the option-label side.
 
   The existing `block-ask-end-option` hook catches *termination* menu misuse.
   This hook is its sibling: it catches *continuation* menu misuse — surfacing
@@ -40,8 +52,14 @@ import sys
 # ---------------------------------------------------------------------------
 
 # Manufactured-menu markers in option labels. Case-insensitive.
-# These are "shall we proceed?" style option labels that are typically
-# redundant when the user has already issued a command.
+#
+# Two forms, same anti-pattern — a menu surfaced when the user already gave a
+# directive:
+#   - question-form: the option RE-ASKS for confirmation ("진행할까요?",
+#     "proceed?"). Redundant because the user already said "proceed".
+#   - affirmative-form: the option restates the directive as "do exactly what
+#     you said" ("그대로 진행", "Execute now"). Redundant because the option's
+#     very presence proves the agent already knows the answer.
 MANUFACTURED_MARKERS_KO = (
     "진행할까요",
     "계속할까요",
@@ -53,6 +71,24 @@ MANUFACTURED_MARKERS_EN = (
     "proceed",
     "continue",
     "go ahead",
+)
+
+# Affirmative-form markers — high-precision phrases only. Each must restate
+# "do exactly what the user just instructed". They must NOT collide with
+# "leave as-is" labels (`그대로 둬`, `keep as-is`) or genuine alternative-path
+# labels, so only multi-word phrases anchored on an execute verb are listed.
+AFFIRMATIVE_MARKERS_KO = (
+    "그대로 진행",
+    "그대로 생성",
+    "그대로 실행",
+    "말씀하신 대로",
+    "지시대로",
+)
+AFFIRMATIVE_MARKERS_EN = (
+    "execute now",
+    "as instructed",
+    "as directed",
+    "as requested",
 )
 
 # Command-intent signals in the most recent user message. Case-insensitive.
@@ -147,7 +183,12 @@ DESTRUCTIVE_LABEL_TOKENS_EN = (
 
 
 def _all_markers() -> tuple[str, ...]:
-    return MANUFACTURED_MARKERS_KO + MANUFACTURED_MARKERS_EN
+    return (
+        MANUFACTURED_MARKERS_KO
+        + MANUFACTURED_MARKERS_EN
+        + AFFIRMATIVE_MARKERS_KO
+        + AFFIRMATIVE_MARKERS_EN
+    )
 
 
 def _collect_option_labels(tool_input: dict) -> list[str]:
@@ -394,13 +435,16 @@ def _has_command_signal(user_message: str) -> bool:
 # ---------------------------------------------------------------------------
 
 ADVISORY_MSG = """\
-[advisory] AskUserQuestion includes a manufactured action-menu option ("진행할까요",
-"proceed", "go ahead", etc.) but the most recent user message already contains
-a command-intent signal ("진행", "실행", "go ahead", "proceed", etc.).
+[advisory] AskUserQuestion includes a manufactured action-menu option —
+question-form ("진행할까요", "proceed", "go ahead") or affirmative-form
+("그대로 진행", "execute now", "as instructed") — but the most recent user
+message already contains a command-intent signal ("진행", "실행", "go ahead",
+"proceed", etc.).
 
-Re-asking "shall we proceed?" when the user has already said "proceed" is
-manufactured friction — it fragments decisions and adds an unnecessary
-confirmation roundtrip.
+Re-asking "shall we proceed?", or offering "do exactly what you said" as a
+menu option, when the user has already given a directive is manufactured
+friction — it fragments decisions and adds an unnecessary confirmation
+roundtrip.
 
 Remove the manufactured-menu option or replace with a substantive decision
 point (multiple real alternatives with trade-offs, or a destructive/irreversible
@@ -414,8 +458,10 @@ BLOCKED: AskUserQuestion includes a manufactured action-menu option without
 a substantive decision point.
 
 Manufactured-menu markers detected in options[].label:
-  Korean: "진행할까요", "계속할까요", "다음 액션", "머지할까요", "push할까요"
-  English: "proceed", "continue", "go ahead"
+  question-form    Korean:  "진행할까요", "계속할까요", "다음 액션", "머지할까요", "push할까요"
+                   English: "proceed", "continue", "go ahead"
+  affirmative-form Korean:  "그대로 진행", "그대로 생성", "그대로 실행", "말씀하신 대로", "지시대로"
+                   English: "execute now", "as instructed", "as directed", "as requested"
 
 Most recent user message already contains a command-intent signal
 ("진행", "실행", "go", "proceed", "continue", "merge", "commit", "push",
