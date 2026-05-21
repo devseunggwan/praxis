@@ -33,18 +33,18 @@ EOF
 
 TX_OVERLAP="$TMPDIR/tx-overlap.jsonl"
 cat > "$TX_OVERLAP" <<'EOF'
-{"type":"tool_use","content":"gh search issues brands --repo laplacetec/laplace-dev-hub"}
+{"type":"tool_use","content":"gh search issues brands --repo acme/repo"}
 {"type":"assistant","message":"no dup found"}
 EOF
 
 TX_NO_OVERLAP="$TMPDIR/tx-no-overlap.jsonl"
 cat > "$TX_NO_OVERLAP" <<'EOF'
-{"type":"tool_use","content":"gh search issues authentication --repo laplacetec/laplace-dev-hub"}
+{"type":"tool_use","content":"gh search issues authentication --repo acme/repo"}
 EOF
 
 TX_ISSUE_LIST="$TMPDIR/tx-issue-list.jsonl"
 cat > "$TX_ISSUE_LIST" <<'EOF'
-{"type":"tool_use","content":"gh issue list --repo laplacetec/laplace-dev-hub --search brands"}
+{"type":"tool_use","content":"gh issue list --repo acme/repo --search brands"}
 EOF
 
 run_case() {
@@ -101,11 +101,11 @@ echo "test_block_gh_issue_create_without_dup_search"
 
 run_case "gh issue create + no prior search (block)" \
   "block" \
-  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo laplacetec/laplace-dev-hub --title 'feat(provider): add shopby brands lookup pattern'\"},\"transcript_path\":\"$TX_EMPTY\"}"
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo --title 'feat(provider): add zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_EMPTY\"}"
 
 run_case "gh issue create + prior search but no keyword overlap (block)" \
   "block" \
-  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo laplacetec/laplace-dev-hub --title 'feat(provider): add shopby brands lookup pattern'\"},\"transcript_path\":\"$TX_NO_OVERLAP\"}"
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo --title 'feat(provider): add zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_NO_OVERLAP\"}"
 
 # ---------------------------------------------------------------------------
 # SILENT cases
@@ -113,11 +113,11 @@ run_case "gh issue create + prior search but no keyword overlap (block)" \
 
 run_case "gh issue create + prior search with overlap (silent)" \
   "silent" \
-  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo laplacetec/laplace-dev-hub --title 'feat(provider): add shopby brands lookup pattern'\"},\"transcript_path\":\"$TX_OVERLAP\"}"
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo --title 'feat(provider): add zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_OVERLAP\"}"
 
 run_case "gh issue create + prior gh issue list with overlap (silent)" \
   "silent" \
-  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo laplacetec/laplace-dev-hub --title 'feat(provider): add brands lookup'\"},\"transcript_path\":\"$TX_ISSUE_LIST\"}"
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo --title 'feat(provider): add brands lookup'\"},\"transcript_path\":\"$TX_ISSUE_LIST\"}"
 
 run_case "gh issue create on personal repo (silent — devseunggwan)" \
   "silent" \
@@ -125,20 +125,20 @@ run_case "gh issue create on personal repo (silent — devseunggwan)" \
 
 run_case "gh issue create + [dup-checked] token (silent)" \
   "silent" \
-  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo laplacetec/x --title 'feat(y): brands [dup-checked]'\"},\"transcript_path\":\"$TX_EMPTY\"}"
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/foo --title 'feat(y): brands [dup-checked]'\"},\"transcript_path\":\"$TX_EMPTY\"}"
 
 run_case "gh issue create + [no-search-needed] token (silent)" \
   "silent" \
-  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo laplacetec/x --title 'feat(y): brands [no-search-needed]'\"},\"transcript_path\":\"$TX_EMPTY\"}"
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/foo --title 'feat(y): brands [no-search-needed]'\"},\"transcript_path\":\"$TX_EMPTY\"}"
 
 run_case "gh issue create + env var bypass (silent)" \
   "silent" \
-  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo laplacetec/x --title 'feat: brands'\"},\"transcript_path\":\"$TX_EMPTY\"}" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/foo --title 'feat: brands'\"},\"transcript_path\":\"$TX_EMPTY\"}" \
   "CLAUDE_HOOK_BYPASS_DUP_GATE=1"
 
 run_case "gh issue list (not create) — silent" \
   "silent" \
-  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue list --repo laplacetec/x\"},\"transcript_path\":\"$TX_EMPTY\"}"
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue list --repo acme/foo\"},\"transcript_path\":\"$TX_EMPTY\"}"
 
 run_case "gh pr create (not issue create) — silent" \
   "silent" \
@@ -150,11 +150,11 @@ run_case "non-Bash tool (silent)" \
 
 run_case "missing transcript_path (silent — cannot enforce)" \
   "silent" \
-  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo laplacetec/x --title 'feat: brands'\"}}"
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/foo --title 'feat: brands'\"}}"
 
 run_case "gh issue create with title that has no usable keywords (silent)" \
   "silent" \
-  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo laplacetec/x --title 'fix: a b c d'\"},\"transcript_path\":\"$TX_EMPTY\"}"
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/foo --title 'fix: a b c d'\"},\"transcript_path\":\"$TX_EMPTY\"}"
 
 run_case "malformed JSON (silent — fail-open)" \
   "silent" \

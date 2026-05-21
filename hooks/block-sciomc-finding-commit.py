@@ -16,14 +16,18 @@ Background:
   hook escalation, not another memo. This hook enforces the gate at the
   commit checkpoint.
 
-Concrete retrospect source (2026-05-21, Hub #2242 PR #8299):
-  1. User PR body stated cafe24 pattern: COALESCE(..., 'TOSS_SHOPPING')
-  2. sciomc Stage 5 surfaced "sibling-deviant" finding
-  3. AI auto-committed flip to 'Unknown' (commit d76eec838) without
-     re-reading user's PR body or asking for approval
-  4. User redirect: "그냥 cafe24 패턴으로 작성 부탁합니다" → revert (eb6fce280)
-  5. Cost: 2 extra commits, PR body 2x rewrite, reviewer noise, duplicate
-     Hub #2245 created+cancelled
+Concrete retrospect pattern (praxis issue #374):
+  1. User's PR body specifies a literal value or sibling-convention design
+     choice — the ratified design, written on a shared surface
+  2. A subsequent sciomc Stage N or reviewer analysis surfaces a finding
+     that the user's literal/design is "sibling-deviant" or sub-optimal
+  3. AI auto-commits a flip of the user's literal without re-reading the
+     PR body or asking for approval — treating its own analysis output
+     as a ratified directive
+  4. User redirects back to the originally-stated design → revert
+  5. Cost: extra commits, PR body rewrite, reviewer-timeline noise,
+     occasionally a duplicate follow-up issue spawned from the same
+     analysis-as-directive pipeline
 
 Block conditions (ALL must hold):
   (a) Tool is Bash with `git commit` (not amend/merge/revert/cherry-pick)
@@ -188,10 +192,10 @@ def _emit_block_message(matched_markers: list[str]) -> None:
                 "AI analysis findings (sciomc Stage N, deep-dive, review finds, scientist agent)",
                 "are DRAFTS — surface to user, never auto-flip the design via direct commit.",
                 "",
-                "Hub #2242 incident (2026-05-21):",
-                "  AI auto-flipped 'TOSS_SHOPPING' literal → 'Unknown' based on sciomc Stage 5",
-                "  finding without re-reading user's PR body. User redirect: '그냥 cafe24",
-                "  패턴으로 작성 부탁합니다' → revert + 2 extra commits + PR body 2x rewrite.",
+                "Pattern (praxis issue #374):",
+                "  AI flips a user-stated literal/design based on a sciomc/reviewer finding,",
+                "  without re-reading the PR body first. User redirects back → revert + extra",
+                "  commits + PR body rewrite + reviewer-timeline noise.",
                 "",
                 "Resolve by one of:",
                 "  1. Re-fetch the user's stated design with:",
