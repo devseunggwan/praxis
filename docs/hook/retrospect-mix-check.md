@@ -133,6 +133,33 @@ regression fixtures:
 - 3 Gate-4 verdict (T36 gate_4_verdict: PASS → pass, T37 external marker +
   absent gate_4_verdict → block, T38 gate_4_verdict: NA + no upstream_feedback
   → pass)
+- 3 Category-count carve-out (T-NEW1 memory_hygiene category count in card →
+  pass — parser ignores; T-NEW2 audit_skipped trail line outside fence → pass
+  — trail does not interfere with parsing; T-NEW3 output_quality category
+  count in card with cli Tool Layer → pass)
+
+### Category counts (memory_hygiene, output_quality)
+
+`memory_hygiene` and `output_quality` are CATEGORY counts emitted by Stage 1.5
+and Stage 2.7 respectively. They are sibling lines to the 6 action-type counts
+inside the distribution-card fence but are **informational-only**:
+
+- The Stop hook's awk parser keys on `gate_1_verdict` / `gate_2_verdict` /
+  `gate_4_verdict` only; any other line (including these category counts) is
+  silently ignored.
+- Adding/removing/renaming `memory_hygiene` or `output_quality` alone does NOT
+  require fence-marker or action-key changes in this hook or the test suite —
+  the parser is forgiving by design.
+- Stage 1.5/2.7 findings still emit their underlying action under one of the
+  6 action-type keys (`memory`, `issue`, `claude_md_draft`, `skill_idea`,
+  `hook_code`, `upstream_feedback`); the category-count lines surface how
+  much of the report originated from the new stages without changing the
+  gate-enforcement surface.
+
+`<!-- retrospect:audit_skipped: no artifacts -->` is a trail line emitted by
+Stage 2.7 on 0-trigger silent-skip. It lives OUTSIDE the distribution-card
+fence (typically before or after the fence) and is informational-only — the
+hook ignores it.
 
 Fixtures live in `tests/fixtures/retrospect-synth-{tool,workflow,behavior,
 mixed,gate3-fail}.jsonl` with `.expected.json` sidecars (`{expected_decision,
