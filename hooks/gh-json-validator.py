@@ -364,12 +364,14 @@ def main() -> int:
     if _BYPASS_COMMENT_RE.search(command):
         return 0
 
+    # Collapse backslash line continuations before any regex matching so that
+    # multiline `gh --json` invocations (e.g. `gh pr view 1 \<newline>  --json
+    # merged`) are not silently bypassed by the prefilter.
+    command = command.replace("\\\n", " ")
+
     # Fast prefilter: must contain `gh` and `--json` before full parse.
     if not _GH_JSON_RE.search(command):
         return 0
-
-    # Collapse backslash line continuations (same pre-processing as siblings).
-    command = command.replace("\\\n", " ")
 
     # Session-id keyed cache per DESIGN.md convention; PPID as back-compat
     # fallback for direct CLI / test invocation.
