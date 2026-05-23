@@ -19,10 +19,8 @@ Design notes:
   subcommand per session (session_id-keyed file under /tmp/) to amortize cost.
 - Tokenization uses `safe_tokenize` → `iter_command_starts` → `strip_prefix`
   from `_hook_utils.py`, consistent with all sibling hooks.
-- Bypass: `# CLAUDE_HOOK_BYPASS=gh-json-validator` comment in the command
-  text causes immediate pass-through, consistent with the bypass convention
-  used by block-sciomc-finding-commit and related hooks. Also supported:
-  env var CLAUDE_HOOK_BYPASS_GH_JSON=1.
+- Bypass: `# PRAXIS_GH_JSON_BYPASS=skip` comment in the command text causes
+  immediate pass-through. Also supported: env var PRAXIS_GH_JSON_BYPASS=1.
 - `gh api` subcommand is explicitly excluded (follows REST schema, different
   concern). Unknown subcommands pass through silently (fail-open).
 - On any infrastructure error (gh missing, network fail, parse error) the hook
@@ -55,7 +53,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 # ---------------------------------------------------------------------------
 
 _GH_HELP_TIMEOUT_SEC = 10
-_BYPASS_COMMENT_RE = re.compile(r"#\s*CLAUDE_HOOK_BYPASS\s*=\s*gh-json-validator")
+_BYPASS_COMMENT_RE = re.compile(r"#\s*PRAXIS_GH_JSON_BYPASS\s*=\s*skip")
 
 # Fast prefilter: must contain `gh` and `--json` before doing full parse.
 _GH_JSON_RE = re.compile(r"\bgh\b.+--json\b")
@@ -357,7 +355,7 @@ def main() -> int:
         return 0
 
     # Bypass via env var.
-    if os.environ.get("CLAUDE_HOOK_BYPASS_GH_JSON") == "1":
+    if os.environ.get("PRAXIS_GH_JSON_BYPASS") == "1":
         return 0
 
     # Bypass via inline comment marker.
