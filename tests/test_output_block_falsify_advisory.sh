@@ -32,6 +32,7 @@ FAILED_NAMES=()
 #   expectation:
 #     "advisory:<substring>" — exit 0 + stderr contains <substring>
 #     "ask:<substring>"       — exit 0 + stdout JSON has permissionDecision:ask + substring
+#     "deny:<substring>"      — exit 0 + stdout JSON has permissionDecision:deny + substring  (issue #393)
 #     "pass"                  — exit 0 + stderr empty
 run_case() {
   local name="$1" expectation="$2" payload="$3"
@@ -56,8 +57,9 @@ run_case() {
         *) ok=0 ;;
       esac
       ;;
-    ask:*)
-      local needle="${expectation#ask:}"
+    ask:*|deny:*)
+      local expected_decision="${expectation%%:*}"
+      local needle="${expectation#*:}"
       [ "$rc" -eq 0 ] || ok=0
       local decision
       decision=$(python3 -c "
@@ -69,7 +71,7 @@ try:
 except Exception:
     print('')
 " "$out" 2>/dev/null)
-      [ "$decision" = "ask" ] || ok=0
+      [ "$decision" = "$expected_decision" ] || ok=0
       case "$out" in
         *"$needle"*) ;;
         *) ok=0 ;;
@@ -245,12 +247,12 @@ print(json.dumps(payload))
 # AskUserQuestion positive cases
 # ---------------------------------------------------------------------------
 
-run_case "AskUserQuestion: (Recommended) English — no Falsified: — escalates to ask" \
-  "ask:Falsified:" \
+run_case "AskUserQuestion: (Recommended) English — no Falsified: — T1 blocks (issue #393)" \
+  "deny:Falsified:" \
   "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
 
-run_case "AskUserQuestion: (추천) Korean — no Falsified: — escalates to ask" \
-  "ask:Falsified:" \
+run_case "AskUserQuestion: (추천) Korean — no Falsified: — T1 blocks (issue #393)" \
+  "deny:Falsified:" \
   "$(make_ask_payload '["옵션 A (추천)", "옵션 B"]')"
 
 run_case "AskUserQuestion: (recommended) lowercase — T2 escalates to ask (issue #369)" \
@@ -361,9 +363,9 @@ run_case "AskUserQuestion: (Recommended) + Falsified: line in question body → 
       "Falsified: checked no existing PR for this — none found.
 What should we do?")"
 
-# Case 2: (Recommended) label + no Falsified: → ASK
-run_case "AskUserQuestion: (Recommended) + no Falsified: → ask" \
-  "ask:Falsified:" \
+# Case 2 (updated by issue #393): (Recommended) label + no Falsified: → DENY (block)
+run_case "AskUserQuestion: (Recommended) + no Falsified: → T1 deny (issue #393)" \
+  "deny:Falsified:" \
   "$(make_ask_payload '["Best option (Recommended)", "Alternative"]')"
 
 # Case 3 (updated by issue #369): (Recommended) in description-only is now
@@ -374,9 +376,9 @@ run_case "AskUserQuestion: (Recommended) in description only — T2 escalates to
   "ask:Falsified:" \
   "$(make_ask_payload_description_only)"
 
-# Case 4: (추천) Korean label + no Falsified: → ASK
-run_case "AskUserQuestion: (추천) Korean label + no Falsified: → ask" \
-  "ask:Falsified:" \
+# Case 4 (updated by issue #393): (추천) Korean label + no Falsified: → DENY (block)
+run_case "AskUserQuestion: (추천) Korean label + no Falsified: → T1 deny (issue #393)" \
+  "deny:Falsified:" \
   "$(make_ask_payload '["권장 방법 (추천)", "대안"]')"
 
 # Case 5: Non-recommended option — no (Recommended) label — silent pass (no advisory)
@@ -384,10 +386,11 @@ run_case "AskUserQuestion: non-recommended option labels — silent pass" \
   pass \
   "$(make_ask_payload '["Option A", "Option B", "Option C"]')"
 
-# Case 6 (regression for P2 fix): multi-question payload where Q1 has (Recommended)
-# but no Falsified:, and Q2 has Falsified: in its own question text — must still ask.
-run_case "AskUserQuestion: multi-question — Falsified: in Q2 does not cover Q1 (Recommended) → ask" \
-  "ask:Falsified:" \
+# Case 6 (regression for P2 fix; updated by issue #393): multi-question payload
+# where Q1 has (Recommended) but no Falsified:, and Q2 has Falsified: in its own
+# question text — Q1 still fires T1 → DENY (block).
+run_case "AskUserQuestion: multi-question — Falsified: in Q2 does not cover Q1 (Recommended) → T1 deny" \
+  "deny:Falsified:" \
   "$(make_ask_payload_multi_question_bypass)"
 
 # ---------------------------------------------------------------------------
@@ -471,10 +474,12 @@ run_case "T2: KO '안전한' triggers ANCHORING_ASK_MSG (not ASK_MSG)" \
   "$(make_ask_payload '["가장 안전한 옵션", "alt"]')"
 
 # T1 precedence over T2 — when label has literal (Recommended) AND
-# description has confidence-anchoring, T1 (ASK_MSG, not ANCHORING_ASK_MSG)
-# fires first. Verify by checking T1's message marker.
-run_case "T1>T2 precedence: literal (Recommended) + anchoring desc → ASK_MSG" \
-  "ask:Self-Falsify" \
+# description has confidence-anchoring, T1 fires first.
+# Updated by issue #393: T1 now emits deny (not ask). The T1 message
+# (ASK_MSG content, "Self-Falfify" marker) is still emitted, but the
+# decision is deny instead of ask.
+run_case "T1>T2 precedence: literal (Recommended) + anchoring desc → T1 deny (issue #393)" \
+  "deny:Self-Falsify" \
   "$(make_ask_payload_with_descriptions \
       '["X (Recommended)", "Y"]' \
       '["가장 안전한 path", "alt"]' \
