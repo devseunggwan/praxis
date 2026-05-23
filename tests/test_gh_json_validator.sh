@@ -39,7 +39,7 @@ run_case() {
   local extra_env=("$@")
 
   local sid
-  sid="test-$(date +%s)-$$"
+  sid="test-$(date +%s)-$$-$RANDOM"
   local payload
   payload=$(python3 -c '
 import json, sys
