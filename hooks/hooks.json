@@ -24,13 +24,14 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/codex-review-route.sh",
             "timeout": 5,
-            "hosts": ["claude"]
+            "hosts": [
+              "claude"
+            ]
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-intent.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           }
         ]
       }
@@ -42,98 +43,98 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/side-effect-scan.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-gh-state-all.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/cross-boundary-preflight.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-pr-without-caller-evidence.sh",
             "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "hosts": [
+              "claude",
+              "codex"
+            ]
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-gh-pr-create-dedup-gate.sh",
-            "timeout": 8,
-            "hosts": ["claude", "codex"]
+            "timeout": 8
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/commit-title-length-check.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-merge-approval-gate.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/gh-flag-verify.sh",
             "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "hosts": [
+              "claude",
+              "codex"
+            ]
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/gh-label-verify.sh",
             "timeout": 15,
-            "hosts": ["claude", "codex"]
+            "hosts": [
+              "claude",
+              "codex"
+            ]
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/gh-json-validator.sh",
             "timeout": 15,
-            "hosts": ["claude", "codex"]
+            "hosts": [
+              "claude",
+              "codex"
+            ]
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/cli-flag-incompat-advisory.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/jq-config-empty-dict-advisory.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/bash-worktree-existence-advisory.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/verify-commit-flag-override.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-intent.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/output-block-falsify-advisory.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           },
           {
             "type": "command",
@@ -149,25 +150,29 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/version-bump-evidence-check.sh",
             "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "hosts": [
+              "claude",
+              "codex"
+            ]
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/momentum-rule-retrieval-gate.sh",
             "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "hosts": [
+              "claude",
+              "codex"
+            ]
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-sciomc-finding-commit.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-gh-issue-create-without-dup-search.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           }
         ]
       },
@@ -177,8 +182,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/memory-hint.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           }
         ]
       },
@@ -188,8 +192,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/external-api-literal-trigger.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           }
         ]
       },
@@ -199,14 +202,16 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-protected-branch-guard.sh",
-            "timeout": 10,
-            "hosts": ["claude", "codex"]
+            "timeout": 10
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/path-probe-gate.sh",
             "timeout": 8,
-            "hosts": ["claude", "codex"]
+            "hosts": [
+              "claude",
+              "codex"
+            ]
           }
         ]
       },
@@ -216,8 +221,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-md-escape-advisory-pre.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           }
         ]
       },
@@ -227,8 +231,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/advisory-wrapper-signature-verify.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           }
         ]
       },
@@ -238,20 +241,17 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-ask-end-option.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-manufactured-action-menu.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/output-block-falsify-advisory.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           }
         ]
       }
@@ -263,8 +263,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/builtin-task-postuse.sh",
-            "timeout": 3,
-            "hosts": ["claude", "codex"]
+            "timeout": 3
           }
         ]
       },
@@ -274,8 +273,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-md-escape-advisory-post.sh",
-            "timeout": 5,
-            "hosts": ["claude", "codex"]
+            "timeout": 5
           }
         ]
       }
