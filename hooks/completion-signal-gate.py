@@ -94,9 +94,6 @@ def _has_completion_signal(text: str) -> bool:
 #   $ python3 -m py_compile → exit 0
 _CITED_OUTPUT_RE = re.compile(r"^\s*\$\s+\S+.*→", re.MULTILINE)
 
-# Backtick command output blocks (``` ... ```)
-_CODE_FENCE_RE = re.compile(r"```", re.DOTALL)
-
 
 def _has_evidence_block(
     last_text: str,
@@ -119,27 +116,6 @@ def _has_evidence_block(
 
 # Slash-command pattern: /word or /namespace:word
 _SLASH_CMD_RE = re.compile(r"(?<![A-Za-z0-9_/])/([A-Za-z][A-Za-z0-9_-]*(?::[A-Za-z][A-Za-z0-9_-]*)?)")
-
-# Known praxis skill slugs — derived from skills/ directory names.
-# These are the slugs that BELONG to praxis:
-_PRAXIS_SKILLS = frozenset(
-    {
-        "cmux-browser",
-        "cmux-delegate",
-        "cmux-recover-sessions",
-        "cmux-resume-sessions",
-        "cmux-save-sessions",
-        "cmux-session-manager",
-        "codex-review-wrap",
-        "recover-sessions",
-        "reset-strikes",
-        "retrospect",
-        "strike",
-        "strikes",
-        "using-praxis",
-        "writing-praxis-skill",
-    }
-)
 
 # Prefixes that indicate foreign plugin namespaces
 _FOREIGN_PREFIXES = frozenset(
@@ -205,7 +181,6 @@ def _detect_foreign_slash_commands(text: str, cwd_plugin: str | None) -> list[st
         # Namespaced command like laplace-dev-hub:release
         if ":" in cmd:
             prefix = cmd.split(":")[0]
-            slug = cmd.split(":")[1]
             # If the prefix is explicitly foreign
             if prefix in _FOREIGN_PREFIXES:
                 # If cwd is praxis and the command is from a different plugin
