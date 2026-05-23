@@ -1,0 +1,4 @@
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": "\uad6c\ud604 \uc644\ub8cc\ub410\ub098\uc694?"}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "content": [{"type": "text", "text": "pytest \uc2e4\ud589\ud569\ub2c8\ub2e4."}, {"type": "tool_use", "id": "b001", "name": "Bash", "input": {"command": "python3 -m pytest tests/ -v"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "b001", "content": "15 tests passed in 1.23s (no failures)"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "content": [{"type": "text", "text": "15 tests passed in 1.23s. \ubaa8\ub4e0 \ud14c\uc2a4\ud2b8 \ud1b5\uacfc \ud655\uc778. \uc644\ub8cc."}]}}
