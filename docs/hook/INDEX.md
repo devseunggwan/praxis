@@ -71,10 +71,12 @@ context, patch false positives, or record tracking state for paired gates.
 
 Stop hooks that gate **completion claims** before the assistant response is
 finalized. Run sequentially: `completion-verify` → `retrospect-mix-check` →
-`strike-counter stop`. Also includes session-lifecycle enforcement.
+`completion-signal-gate` → `strike-counter stop`. Also includes
+session-lifecycle enforcement.
 
 | Hook | Trigger | Purpose |
 |------|---------|---------|
 | [completion-verify](completion-verify.md) | Stop | Block "done / 완료" claims without same-turn Bash verification evidence |
 | [retrospect-mix-check](retrospect-mix-check.md) | Stop | Block retrospect Stage 3 outputs that default findings to memory-only |
+| [completion-signal-gate](completion-signal-gate.md) | Stop | Advisory nudge when completion-signal phrase appears without evidence-block; also flags cross-plugin slash commands (Event 2) |
 | [strike-counter](strike-counter.md) | SessionStart + UserPromptSubmit + Stop | Session-scoped three-strike discipline — hard-blocks at strike 3, requires reflection before reset |
