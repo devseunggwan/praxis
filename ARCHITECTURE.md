@@ -121,6 +121,7 @@ else:
 | `block-gh-issue-create-without-dup-search` | PreToolUse | Block `gh issue create` when no prior `gh search issues` / `issue list` overlaps the new issue's title keywords; escape via `[dup-checked]` token, personal-repo carve-out, or `CLAUDE_HOOK_BYPASS_DUP_GATE=1` (issue #374) | [docs/hook/block-gh-issue-create-without-dup-search.md](docs/hook/block-gh-issue-create-without-dup-search.md) |
 | `strike-counter` | SessionStart + UserPromptSubmit + Stop | Session-scoped three-strike discipline — emits 1/2-strike reminder context, hard-blocks at 3, requires non-empty reflection file before reset; state under `${PRAXIS_STATE_DIR:-$HOME/.claude/state/praxis}/strikes/` (issue #126) | [docs/hook/strike-counter.md](docs/hook/strike-counter.md) |
 | `external-write-path-existence-check` | PreToolUse | Advisory nudge when a `gh issue/pr` body file (via `--body-file`) contains markdown links referencing repo paths that do not exist on disk (phase 1: markdown links; phase 2 deferred: inline-code tokens; issue #324) | [docs/hook/external-write-path-existence-check.md](docs/hook/external-write-path-existence-check.md) |
+| `path-probe-gate` | PreToolUse | Advisory nudge (opt-in strict: deny) when Write/Edit/NotebookEdit targets a nested worktree path whose immediate parent directory has not been enumerated this session — structural enforcement of the One-Probe-Before-Action Gate rule for the Write surface (issue #386) | [docs/hook/path-probe-gate.md](docs/hook/path-probe-gate.md) |
 
 ## Multi-Platform Packaging
 
