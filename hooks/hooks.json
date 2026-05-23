@@ -95,6 +95,12 @@
           },
           {
             "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/gh-json-validator.sh",
+            "timeout": 15,
+            "hosts": ["claude", "codex"]
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/cli-flag-incompat-advisory.sh",
             "timeout": 5,
             "hosts": ["claude", "codex"]
