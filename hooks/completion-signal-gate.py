@@ -199,8 +199,8 @@ def _detect_foreign_slash_commands(text: str, cwd_plugin: str | None) -> list[st
             prefix = cmd.split(":")[0]
             # If the prefix is explicitly foreign
             if prefix in _FOREIGN_PREFIXES:
-                # If cwd is praxis and the command is from a different plugin
-                if cwd_plugin and cwd_plugin != prefix:
+                # Only fire when cwd is praxis (mirrors bare-form scope)
+                if cwd_plugin == "praxis" and cwd_plugin != prefix:
                     foreign.append(f"/{cmd}")
             continue
         # Bare /command — flag only if it is in the known-foreign skill set.
