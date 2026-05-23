@@ -246,6 +246,10 @@ The execution order each round is:
 8. **5g critic pre-lock probe check** — before any critic finding that
    contains a negative claim is surfaced to the user, verify the claim
    with a live probe and cite it inline.
+9. **5h parent-truncates-child SoT audit** — after all findings are
+   applied, scan the parent doc for inline transcriptions of sibling
+   SoT enumerations and emit synthesized findings for any truncation
+   detected.
 
 #### 5a. Classify each finding
 
@@ -656,6 +660,122 @@ halted mid-round, the `rounds_per_region:` entry for that round is still
 recorded (counter increments) but the advisory suppression rule still
 applies (emit only at `cumulative = N+1`, not again on later rounds).
 
+#### 5h. Parent-truncates-child SoT enumeration audit <!-- [#395] -->
+
+When the PR diff touches a parent document that inline-transcribes
+enumerations owned by a sibling SoT (another skill body, a test definition
+table, a routing matrix, a prerequisite list), truncation of that
+enumeration is a systematic failure mode that round-by-round external review
+catches one missing row at a time. This step collapses that N-round sequence
+into a single pre-merge sweep.
+
+Run this step **once per invocation, after all Codex findings have been
+applied (after 5g)**, before the reviewer session ends.
+
+##### Trigger — does the parent doc cite a sibling SoT?
+
+Scan the parent document for any of the following citation signals:
+
+| Citation signal | Examples |
+|---|---|
+| Another skill name referenced | `codex-review-wrap`, `cmux-delegate`, `retrospect` |
+| Enumerated test IDs | `Test 1`, `Test 7`, `Test N-M` |
+| Enumerated phase IDs | `Phase 0`, `Phase 1a`, `Phase 2` |
+| Named enum cited | `kind:`, `state:`, `result=` with a listed subset |
+| Matrix row reference | `row of <matrix-name>`, `routing matrix`, `prerequisite rows` |
+| Prerequisite claim | `after phase N`, `requires step M`, `depends on step X` |
+
+If **no** citation signal is found, skip 5h entirely — emit nothing.
+
+##### Audit procedure (per cited SoT)
+
+For each citation signal found:
+
+1. **Locate the source SoT** — find the table / enum / list / prerequisite
+   block that owns the enumeration in the sibling document. Use `Read` on
+   the sibling skill file or the referenced doc section.
+
+2. **Count source rows** — record `source_count` = the number of distinct
+   items in the sibling SoT.
+
+3. **Count parent-transcribed rows** — record `parent_count` = the number
+   of items the parent body cites at the same citation site.
+
+4. **Compare** — compute the set difference: `missing = source_items − parent_items`.
+   If `missing` is non-empty, the parent truncates or diverges from the sibling
+   SoT. Emit a synthesized finding (see format below). If `missing` is empty,
+   record match and skip to the next signal.
+   If the sibling SoT cannot be located, emit an unresolved advisory (see
+   below).
+
+   > **Why set difference, not count equality**: count equality passes when
+   > `parent` drops one source item and adds one stale/extra item simultaneously
+   > (counts match but content diverges). Set difference catches this case.
+
+##### Synthesized finding format
+
+```
+⚠ SoT truncation detected — [#395]:
+  Parent: {parent_file}:{heading_or_line}
+  Sibling SoT: {sibling_file}:{heading_or_section}
+  Source rows: {source_count}  |  Parent-cited rows: {parent_count}
+  Missing: {list of missing items, derived from set difference}
+
+Proposed resolution: extend the parent citation to include all {source_count}
+items, OR replace the inline transcription with a reference link to the
+sibling SoT so the parent can never drift again.
+```
+
+The synthesized finding is treated as a **structural** finding (not
+fact-modifying): it describes an omission in documentation, not a runtime
+predicate. Apply Step 5a classification accordingly — it does not require a
+premise check via 5b, but **does** flow through the normal apply/commit cycle
+(5c flip detection, 5e trailer if the edit is structural-significant).
+
+##### Unresolved advisory (sibling SoT not locatable)
+
+When the citation signal is present but the referenced sibling SoT cannot
+be located (skill file not found, section heading has changed, external doc
+URL):
+
+```
+Advisory — SoT reference unresolved [#395]:
+  Parent: {parent_file}:{heading_or_line}
+  Citation: "{verbatim citation text}"
+  Could not locate sibling SoT — manual check recommended before merge.
+```
+
+This advisory is non-blocking; it does not prevent the review from completing.
+
+##### Authoring guidance (prevention, not just detection)
+
+When authoring or editing a parent skill body, prefer **reference links**
+over **inline transcription** whenever the source of truth lives in a sibling
+document:
+
+- **Prefer**: `See [Test definitions in child-skill](./child/SKILL.md#test-definitions).`
+- **Avoid**: re-listing `Test 1`, `Test 2`, ..., `Test N` verbatim in the
+  parent body.
+
+Inline transcriptions are permissible only when the cited enumeration is
+stable and small (≤ 3 items). For enumerations of 4+ items, or enumerations
+expected to grow, use a reference link — each transcription site becomes a
+permanent drift risk.
+
+##### Interaction with step 5b
+
+The SoT audit is distinct from the per-finding premise verification in 5b:
+
+- **5b** fires on Codex/BugBot findings after they are surfaced and classifies
+  each finding's underlying factual claim.
+- **5h** is a proactive sweep on the parent document itself, independent of
+  whether Codex reported a SoT-related finding. It catches truncations that
+  external review has not yet surfaced — the same root cause that would have
+  produced the N+1-th round finding.
+
+The two steps are complementary: 5b prevents bad fixes; 5h prevents missed
+enumerations from reaching the next reviewer.
+
 ## Error Handling
 
 | Situation | Action |
@@ -674,6 +794,8 @@ applies (emit only at `cumulative = N+1`, not again on later rounds).
 | Region label cannot be determined (binary file, empty file) | Use the file path alone as the region label |
 | Critic negative claim emitted without `Probe:` citation (5g) | Halt the finding; prompt the critic to re-run with probe citation before surfacing |
 | Probe command for 5g returns unexpected output or exits with an error code that signals a command failure (e.g. exit=2 "command not found", permission denied) — distinct from `grep` exit=1 (no match), which is the expected signal for verified absence | Surface probe failure to the user; do not auto-retract the claim — let the user decide |
+| SoT audit (5h) — sibling document not locatable | Emit unresolved advisory; do not block review completion |
+| SoT audit (5h) — parent citation site ambiguous (multiple tables at same heading) | Use all tables at the heading as candidate SoT sources; report each comparison separately |
 
 ## Example Flow
 
@@ -772,6 +894,30 @@ user selects: 1
   → second probe partially disproves the grouped claim
   → critic surfaces retracted + refined finding:
     "--literal-pathspecs is boolean (confirmed). --super-prefix takes a value (claim retracted for this flag)."
+
+[Step 5h — SoT enumeration audit]
+  Parent doc (current PR): skills/phase-router/SKILL.md
+  Scan for citation signals:
+    - "Test 1-7" cited at heading "## Acceptance Criteria"  → citation signal: enumerated test IDs
+    - "Phase 0, Phase 1" cited at heading "## Prerequisites" → citation signal: enumerated phase IDs
+  Locate sibling SoTs:
+    - Test SoT: skills/phase-router/SKILL.md#test-definitions → Read → finds Test 1–9 (conditional Tests 8, 9)
+    - Phase SoT: skills/phase-router/SKILL.md#phase-applicability → Read → finds Phase 0, 1, 1a, 2
+  Compare:
+    - Tests: parent_count=7, source_count=9 → truncation detected (missing Test 8, Test 9)
+    - Phases: parent_count=2, source_count=4 → truncation detected (missing Phase 1a, Phase 2)
+  Emit synthesized findings:
+    ⚠ SoT truncation detected — [#395]:
+      Parent: skills/phase-router/SKILL.md:Acceptance Criteria
+      Sibling SoT: skills/phase-router/SKILL.md:Test definitions
+      Source rows: 9  |  Parent-cited rows: 7
+      Missing: Test 8 (conditional — cache miss path), Test 9 (conditional — retry path)
+    ⚠ SoT truncation detected — [#395]:
+      Parent: skills/phase-router/SKILL.md:Prerequisites
+      Sibling SoT: skills/phase-router/SKILL.md:Phase applicability matrix
+      Source rows: 4  |  Parent-cited rows: 2
+      Missing: Phase 1a, Phase 2
+  → both findings flow through 5a classification (structural), 5c flip check, then apply cycle
 ```
 
 ## Limitations
@@ -787,3 +933,6 @@ user selects: 1
 - The advisory threshold `PRAXIS_DIMINISHING_RETURNS_N` applies uniformly across all regions; per-region tuning is not supported
 - Step 5g negative-claim detection is pattern-based; highly paraphrased negative claims that do not match the trigger forms may slip through — when in doubt, treat a claim as negative and require a probe
 - The critic prompt template (5g) is injected into codex-companion's context at invocation time; when using the `oh-my-claudecode:code-reviewer` fallback (Step 4a), the template must be manually prepended to the reviewer's context
+- Step 5h SoT audit detects truncation only for inline-transcribed enumerations; reference-link citations (sibling SoT referenced but not transcribed) are inherently safe and are not audited
+- Step 5h citation-signal scanning is keyword-based; enumerations that use non-standard labels (e.g., custom matrix row identifiers) may not be detected — when authoring, prefer the standard labels listed in the trigger table
+- Step 5h requires the sibling SoT document to be locally readable; remote-only or external URLs are flagged as unresolved advisories and require manual verification
