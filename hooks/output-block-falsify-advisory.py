@@ -10,12 +10,18 @@ proposal block is authored.
 
 This hook adds a structural enforcement point at two surfaces:
 
-  1. AskUserQuestion — escalates `permissionDecision: ask` in two tiers
-     when the question body lacks a `Falsified:` line (exact prefix at
-     line start):
+  1. AskUserQuestion — escalates the question by tier when the body
+     lacks a `Falsified:` line (exact prefix at line start):
 
      T1. Label contains exact `(Recommended)` or `(추천)` (case-sensitive)
-         — original literal-marker path.
+         — original literal-marker path. **Emits `permissionDecision: deny`
+         (hard block)** — issue #393 upgrade. Rationale: the explicit
+         marker is a high-confidence false-positive-free signal; soft
+         `ask` permitted acknowledge-and-proceed and within-session
+         recurrence was observed (retrospect 2026-05-23, 3 calls in
+         a single codex-review-wrap chain). False-positive rate of
+         a literal `(Recommended)` label without `Falsified:` is low
+         enough to justify hard block.
 
      T2. Label OR description contains a confidence-anchoring framing
          token (issue #369). EN tokens (case-insensitive, ASCII word
@@ -23,6 +29,9 @@ This hook adds a structural enforcement point at two surfaces:
          `natural fit/choice`, `default to/choice`, `prefer this`,
          bare `recommend(ed|s)?`. KO substrings: `안전한`, `가장 안전`,
          `자연스러운`, `당연히`, `분명히`, `추천`, `기본값`.
+         **Emits `permissionDecision: ask` (soft gate)** — kept at ask
+         for ergonomics: framing-token detection is broader and carries
+         higher false-positive risk than the literal T1 marker.
 
      When `Falsified:` is present in the question body, both tiers
      silent-pass.
@@ -210,19 +219,33 @@ def _collect_option_texts(options: list) -> list[str]:
     return texts
 
 
-def _emit_ask(message: str) -> None:
-    """Output permissionDecision: ask JSON to stdout."""
+def _emit_decision(decision: str, message: str) -> None:
+    """Output permissionDecision JSON to stdout.
+
+    decision must be "ask" or "deny" (the two tiers used by this hook).
+    "allow" is not used — silent-pass is signaled by no JSON output.
+    """
     json.dump(
         {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
-                "permissionDecision": "ask",
+                "permissionDecision": decision,
                 "permissionDecisionReason": message,
             }
         },
         sys.stdout,
     )
     sys.stdout.write("\n")
+
+
+def _emit_ask(message: str) -> None:
+    """T2 path: soft gate."""
+    _emit_decision("ask", message)
+
+
+def _emit_deny(message: str) -> None:
+    """T1 path: hard block (issue #393 upgrade)."""
+    _emit_decision("deny", message)
 
 
 # ---------------------------------------------------------------------------
@@ -297,8 +320,9 @@ def _main_inner() -> int:
         questions = tool_input.get("questions") or []
         if not isinstance(questions, list):
             questions = []
-        ask_needed = False
-        ask_msg_to_emit = ASK_MSG  # T1 default; T2 overrides
+        # tier_decision: None | "deny" (T1) | "ask" (T2)
+        tier_decision: str | None = None
+        msg_to_emit: str = ASK_MSG
         advisory_needed = False
         for q in questions:
             if not isinstance(q, dict):
@@ -319,23 +343,27 @@ def _main_inner() -> int:
 
             if _has_exact_recommended_marker(q_labels):
                 # T1: literal (Recommended) / (추천) marker in label.
+                # Issue #393: upgraded from ask to deny (hard block).
                 if not falsified_present:
-                    ask_needed = True
-                    ask_msg_to_emit = ASK_MSG
-                    break  # one missing question is enough to escalate
+                    tier_decision = "deny"
+                    msg_to_emit = ASK_MSG
+                    break  # T1 deny is final — overrides any prior T2 ask
             elif _has_confidence_anchoring(_collect_option_texts(options)):
                 # T2 (issue #369): confidence-anchoring framing token in
-                # label OR description. Same Falsified: satisfaction.
-                if not falsified_present:
-                    ask_needed = True
-                    ask_msg_to_emit = ANCHORING_ASK_MSG
-                    break
+                # label OR description. Soft gate — false-positive risk
+                # higher than T1's literal marker. Record but keep scanning
+                # so a later T1 violation can upgrade the decision to deny.
+                if not falsified_present and tier_decision is None:
+                    tier_decision = "ask"
+                    msg_to_emit = ANCHORING_ASK_MSG
             elif _has_recommended_marker(q_labels):
                 # T3 (dead under new precedence — kept for clarity).
                 advisory_needed = True
 
-        if ask_needed:
-            _emit_ask(ask_msg_to_emit)
+        if tier_decision == "deny":
+            _emit_deny(msg_to_emit)
+        elif tier_decision == "ask":
+            _emit_ask(msg_to_emit)
         elif advisory_needed:
             sys.stderr.write(ADVISORY_MSG + "\n")
 
