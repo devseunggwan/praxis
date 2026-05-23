@@ -82,7 +82,7 @@ Stage 1.5 runs unconditionally between Stage 1 (Load) and Stage 2 (Analyze). Its
 
 **Cap (mandatory):** scan up to **5 feedback files per invocation**. Persist a cursor at `.omc/state/retrospect-hygiene-cursor.json` recording (a) the timestamp of the last successful pass, (b) the list of file paths scanned, and (c) the next-batch pointer (path of the next un-scanned feedback file in sorted order). Subsequent retrospects resume from the cursor — full corpus coverage amortizes across multiple sessions. When the full corpus has been scanned once, rotate the cursor to restart from the most-recently-modified entries.
 
-**Three detection signals (each becomes a finding with `category: memory_hygiene`):**
+**Four detection signals (each becomes a finding with `category: memory_hygiene`):**
 
 1. **Stale reference** — the entry cites an artifact that no longer matches reality:
    - File path absent: entry references `<path>` that does not exist (verify with `test -e`)
@@ -100,6 +100,30 @@ Stage 1.5 runs unconditionally between Stage 1 (Load) and Stage 2 (Analyze). Its
    - Same principle restated with different examples (the merge-first policy at Stage 4 Action 1d should have collapsed them).
    - Detection method: read each entry's `description` field and root-cause prose; group by concept-level matching (same heuristic as Stage 4 Action 1 duplicate-check). When N ≥ 2 entries share a family AND none has been merged, emit a merge-candidate finding.
 
+4. **Size threshold** — the MEMORY.md **index file itself** has grown past a configurable threshold, increasing the risk that the index is silently truncated at load time and that downstream Stage 1 compaction restoration is incomplete (the upstream structural enabler called out by praxis issue #387). Triggered when EITHER condition fires:
+   - Index line count ≥ `PRAXIS_RETROSPECT_INDEX_LINE_THRESHOLD` (default `200`)
+   - Index byte size ≥ `PRAXIS_RETROSPECT_INDEX_BYTE_THRESHOLD` (default `30720` — i.e. 30 KB)
+
+   Detection method: single `wc -l` + `stat -c %s` (or equivalent) on the index file. Signal 4 is **index-scoped (one file)** and unrelated to the per-batch `feedback_*.md` cursor — it fires on every Stage 1.5 invocation when the threshold is met, not on a cursor schedule. Threshold env vars that fail to parse as positive integers silently fall back to defaults.
+
+   **Link-detection helper (link-convention-agnostic)** — subsignals 4a and 4b both consume a single shared link scanner. The scanner recognizes a reference from index entry A to artifact B when B appears inside A's body in ANY of three forms:
+
+   - **Wikilink**: `[[B]]` or `[[path/B]]` (Obsidian-style)
+   - **Markdown link**: `[text](path)` where `path` resolves to B (relative or absolute), allowed extensions `.md` / `.txt` / `.json` / `.py` / `.sh`
+   - **Bare basename mention**: a single-token `<B>.<ext>` (≥4 chars, allowed extensions above) appearing as plain text outside code fences
+
+   This contract MUST hold for ANY user's MEMORY.md regardless of their personal link convention. A scan failure on one form falls through to the next; only when all three forms fail to match does the entry count as backlink-zero. The scanner has no user-environment assumption beyond "MEMORY.md is markdown".
+
+   **Subsignals (each routed via Stage 4):**
+
+   a. **Promoted-pointer compression** — an index entry whose body has been promoted to a parent rule file (`~/.claude/CLAUDE.md`, a SKILL.md, a hook spec) should collapse to a single-line pointer. "Promoted" is recognized when the entry body contains at least one outbound reference (via the helper above) to a file under `~/.claude/`, `<plugin_root>/skills/`, `<plugin_root>/hooks/`, or `<plugin_root>/docs/` that actually exists. Routed as `memory` (Stage 4 Action 1 update path) per matched entry; the rewrite replaces the body with a single-line link to the promotion target.
+
+   b. **Backlink-zero archive** — an index entry that NO other index entry references (via the helper above) after a grace period is a candidate for archive. Backlink counting iterates every other entry's body once per scan; entries with `incoming_refs == 0` AND `age_in_sessions ≥ PRAXIS_RETROSPECT_BACKLINK_ZERO_GRACE_SESSIONS` (default `5`) become candidates. Routed as `issue` (Stage 4 Action 2 — human-confirmed archive move; never auto-delete).
+
+   c. **New-entry length cap** — enforce ≤ `PRAXIS_RETROSPECT_INDEX_LINE_CAP` (default `150`) chars per index line at write time. Routed as a write-time guard recorded in the entry's Proposed Actions; Stage 4 Action 1 applies the cap before the write (truncation with `…` marker + detail body file is the canonical pattern).
+
+   **Self-applicability** — Signal 4 catches the retrospect skill's own monotonic-growth pattern: each retrospect adds memory entries, but without a hygiene loop the index outgrows its load-time budget. Signal 4 closes this loop by surfacing the size threshold as an actionable finding, not just an emitted warning.
+
 **Output — emit per-defect findings into the Stage 2 friction-event lane.**
 
 Each Stage 1.5 finding has:
@@ -109,15 +133,27 @@ Each Stage 1.5 finding has:
   - Stale reference → `memory` (update entry inline) OR `claude_md_draft` (when the stale citation is itself a CLAUDE.md rule line that needs updating)
   - Contradiction → `memory + issue` (surface both entries via an issue for human resolution; merge in Stage 4 only after explicit decision)
   - Merge candidate → `memory` (route through Stage 4 Action 1 merge path; the merge IS the action)
+  - Size threshold / 4a promoted-pointer compression → `memory` (Stage 4 Action 1 update path; body collapses to a single-line link to the promotion target)
+  - Size threshold / 4b backlink-zero archive → `issue` (Stage 4 Action 2 — human-confirmed archive move; never auto-delete)
+  - Size threshold / 4c length cap → `memory` (Stage 4 Action 1 with the cap as a write-time guard; truncate + spill detail body to a separate file)
 
 **0-friction hygiene-only retrospect path** — when Stage 2 pre-scan finds zero friction events but Stage 1.5 produced ≥1 hygiene finding, the skill does NOT take the "No patterns found ✅" early-exit (Stage 2 line). Instead, proceed to Stage 2.5 → Stage 3 with the hygiene findings as the sole input. Emit a banner in Stage 3 report: `Hygiene-only retrospect — no friction events this session.`
+
+**Stage 3 banner for signal 4 (size_threshold)** — when signal 4 fires (regardless of whether the 0-friction hygiene-only path is also active), emit ONE additional banner line in the Stage 3 report immediately under the section header:
+
+`Index size threshold tripped — {lines} lines / {bytes} bytes (limit: {line_threshold} / {byte_threshold}). Cleanup actions queued: {n_4a}× promoted-pointer compression, {n_4b}× backlink-zero archive, {n_4c}× length-cap write-guard.`
+
+When signal 4 does NOT fire, the line is omitted entirely (no empty banner). This banner is informational and counted under `memory_hygiene` in the distribution card — it does not introduce a new fence parser key.
 
 **Stage 1.5 failure modes:**
 - MEMORY.md not accessible → skip Stage 1.5 entirely; emit `<!-- retrospect:hygiene_skipped: index not accessible -->` trail line; proceed to Stage 2.
 - Cursor file corrupt → reset cursor to most-recently-modified 5 files; log reset in completion report.
 - Per-file scan failure (one of N files unreadable) → continue with remaining files; record per-file failure in the Hygiene Scan Trail section of Stage 3 report.
+- Index file unreadable for size measurement → skip signal 4 only (signals 1-3 proceed normally); emit `<!-- retrospect:hygiene_size_threshold_skipped: index unreadable -->` trail line in Stage 3 report.
+- Threshold / cap env var malformed (non-integer, negative) → fall back to documented default silently; no Stage 1.5 failure.
+- Promotion-target candidate paths unresolvable (plugin root not in scope, custom MEMORY.md layout) → subsignal 4a downgrades to a no-op for that entry (no finding emitted) rather than blocking signal 4.
 
-**Detect-only contract** — Stage 1.5 never writes to MEMORY.md, never deletes a feedback file, never edits the MEMORY.md index. All mutations route through Stage 4 (Action 1 merge path for merge candidates; Action 1 update path for stale references; Action 2 issue creation for contradictions). Inline mutation at Stage 1.5 is a Red Flag.
+**Detect-only contract** — Stage 1.5 never writes to MEMORY.md, never deletes a feedback file, never edits the MEMORY.md index. All mutations route through Stage 4: Action 1 merge path (merge candidates), Action 1 update path (stale references / promoted-pointer compression / length-cap rewrites), Action 2 issue creation (contradictions / backlink-zero archive proposals). Inline mutation at Stage 1.5 is a Red Flag.
 
 ### Stage 2: Analyze Conversation
 
