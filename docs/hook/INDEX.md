@@ -19,6 +19,7 @@ confirmation-prompt layer.
 | [block-ask-end-option](block-ask-end-option.md) | PreToolUse | Block `AskUserQuestion` options carrying end-option markers when no stop signal present |
 | [block-manufactured-action-menu](block-manufactured-action-menu.md) | PreToolUse | Warn or block when `AskUserQuestion` surfaces a "shall we proceed?" menu after user already issued a command-intent signal |
 | [block-pr-without-caller-evidence](block-pr-without-caller-evidence.md) | PreToolUse | Block `gh pr create` unless the PR body contains a `Caller chain verified:` line |
+| [block-pr-without-precommit-evidence](block-pr-without-precommit-evidence.md) | PreToolUse | Block `gh pr create` unless the PR body declares pre-commit state (`Pre-commit verified:` / `verified by CI` / `n/a (reason)`); `--repo` is not a bypass |
 | [side-effect-scan](side-effect-scan.md) | PreToolUse | Ask before commands with collateral side effects (`git commit/push`, `gh pr merge/create`, `kubectl apply`) |
 | [commit-title-length-check](commit-title-length-check.md) | PreToolUse | Ask when `git commit` title exceeds 50 chars |
 | [pre-merge-approval-gate](pre-merge-approval-gate.md) | PreToolUse | Surface per-PR approval prompt for `gh pr merge` in direct sessions |
