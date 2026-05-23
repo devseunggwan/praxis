@@ -42,6 +42,16 @@ cat > "$TX_NO_OVERLAP" <<'EOF'
 {"type":"tool_use","content":"gh search issues authentication --repo acme/repo"}
 EOF
 
+# Regression fixture for issue #384: the prior `--repo` value contains a
+# substring that matches one of the title keywords (`widget`). Under the
+# old substring-overlap check, `widget` ⊂ `--repo acme/widget` flipped
+# overlap=true and silently passed. With set-intersection on extracted
+# topic tokens (flag values skipped), this case must BLOCK.
+TX_NO_OVERLAP_FLAG_LEAK="$TMPDIR/tx-no-overlap-flag-leak.jsonl"
+cat > "$TX_NO_OVERLAP_FLAG_LEAK" <<'EOF'
+{"type":"tool_use","content":"gh search issues authentication --repo acme/widget"}
+EOF
+
 TX_ISSUE_LIST="$TMPDIR/tx-issue-list.jsonl"
 cat > "$TX_ISSUE_LIST" <<'EOF'
 {"type":"tool_use","content":"gh issue list --repo acme/repo --search brands"}
@@ -76,6 +86,14 @@ run_case() {
       [ "$rc" -eq 2 ] || ok=0
       echo "$err" | grep -q "^BLOCKED:" || ok=0
       ;;
+    block:no-search)
+      [ "$rc" -eq 2 ] || ok=0
+      echo "$err" | grep -q "without any prior \`gh search issues\`" || ok=0
+      ;;
+    block:no-overlap)
+      [ "$rc" -eq 2 ] || ok=0
+      echo "$err" | grep -q "prior searches exist but none overlap" || ok=0
+      ;;
     *)
       echo "  internal: unknown expectation '$expectation'" >&2
       ok=0
@@ -100,12 +118,20 @@ echo "test_block_gh_issue_create_without_dup_search"
 # ---------------------------------------------------------------------------
 
 run_case "gh issue create + no prior search (block)" \
-  "block" \
+  "block:no-search" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo --title 'feat(provider): add zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_EMPTY\"}"
 
 run_case "gh issue create + prior search but no keyword overlap (block)" \
-  "block" \
+  "block:no-overlap" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo --title 'feat(provider): add zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_NO_OVERLAP\"}"
+
+# Regression for issue #384: title keyword `widget` collides with the value
+# of a prior `--repo acme/widget` flag. With the buggy substring overlap
+# check, this silently passed; with set-intersection on extracted topic
+# tokens (flag values skipped), it must BLOCK with the no-overlap reason.
+run_case "gh issue create + prior search w/ keyword leaking from --repo value (regression #384)" \
+  "block:no-overlap" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo --title 'feat(provider): add widget brands lookup pattern'\"},\"transcript_path\":\"$TX_NO_OVERLAP_FLAG_LEAK\"}"
 
 # ---------------------------------------------------------------------------
 # SILENT cases

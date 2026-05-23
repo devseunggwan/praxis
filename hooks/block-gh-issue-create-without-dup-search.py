@@ -27,9 +27,12 @@ Allow conditions (escape hatches):
 Keyword extraction:
   Strip Conventional Commits prefix (`feat(scope):`, `fix:`), lowercase,
   split on word boundaries, drop stop words and tokens <4 chars. Match if
-  ANY remaining keyword appears literally in a prior search/list command.
-  (Single overlap is a weak gate but catches the most damaging case —
-  completely cold issue creation.)
+  the title-keyword set has non-empty intersection with the prior search
+  command's topic-token set (positionals + `--search` value), where
+  flag-arg tokens (`--repo VAL`, `--limit N`, ...) are skipped. Substring
+  match against the full command line is INCORRECT because flag values
+  (e.g. `--repo acme/widget`) leak keyword fragments into the topic
+  corpus — see issue #384.
 """
 from __future__ import annotations
 
@@ -83,10 +86,8 @@ def main() -> int:
         _emit_no_search_block(keywords)
         return 2
 
-    overlap = any(
-        any(tok in cmd for tok in keywords)
-        for cmd in search_cmds
-    )
+    kw_set = set(keywords)
+    overlap = any(kw_set & _extract_search_topic(cmd) for cmd in search_cmds)
     if overlap:
         return 0
 
@@ -126,6 +127,52 @@ _SEARCH_CMD_RE = re.compile(
     r"\bgh\s+(?:search\s+issues|issue\s+list|issue\s+view)\b[^\n]*",
 )
 
+# Value-taking flags relevant to gh search issues / gh issue list / gh issue
+# view. Each consumes the next whitespace-separated token (or `=VALUE`
+# inline). Lowercased — _SEARCH_CMD_RE input is `tail.lower()`. Lowercase
+# short-flag collisions (-l for both --limit and --label, -a for both
+# --assignee and --author, -s for both --state and --search) are all
+# value-taking for the relevant subcommands, so collision is harmless.
+_VALUE_FLAG_NAMES: frozenset[str] = frozenset({
+    "--repo", "-r",
+    "--limit", "-l",
+    "--state", "-s",
+    "--search",
+    "--label",
+    "--owner",
+    "--author", "-a",
+    "--assignee",
+    "--milestone", "-m",
+    "--mention",
+    "--language",
+    "--app",
+    "--match",
+    "--sort",
+    "--order",
+    "--visibility",
+    "--commenter",
+    "--comments",
+    "--created",
+    "--updated",
+    "--closed",
+    "--interactions",
+    "--involves",
+    "--jq", "-q",
+    "--json",
+    "--template", "-t",
+    "--project", "-p",
+    "--reactions",
+    "--team-mentions",
+})
+
+# Flags whose value is itself topic text (not metadata). Currently only the
+# `--search` family on `gh issue list` / `gh pr list`.
+_TOPIC_VALUE_FLAGS: frozenset[str] = frozenset({"--search", "-s"})
+
+# Trailing chars to strip from a token. Raw transcript text often glues JSON
+# closure chars to the last argv token (e.g. `acme/repo"}`).
+_TRAILING_STRIP = '"}],'
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -143,6 +190,65 @@ def _extract_keywords(title: str) -> list[str]:
     body = _CC_PREFIX_RE.sub("", title).lower()
     tokens = [t for t in _TOKEN_SPLIT_RE.split(body) if t]
     return [t for t in tokens if len(t) >= 4 and t not in _STOP_WORDS]
+
+
+def _topic_tokens_from(s: str) -> set[str]:
+    """Split a topic string into ≥4-char tokens minus stop words.
+
+    Mirrors `_extract_keywords` so the title-keyword and prior-search-topic
+    token domains are symmetric for set intersection.
+    """
+    tokens = [t for t in _TOKEN_SPLIT_RE.split(s.lower()) if t]
+    return {t for t in tokens if len(t) >= 4 and t not in _STOP_WORDS}
+
+
+def _extract_search_topic(cmd: str) -> set[str]:
+    """Extract the topic-token set from a prior `gh search issues|issue
+    list|issue view` command line.
+
+    Whitespace-splits the command, strips JSON-closure chars glued to the
+    last token by raw-transcript matching (`acme/repo"}`), and walks argv
+    as a small state machine:
+
+      - `--flag=value` inline: keep `value` only when flag ∈ _TOPIC_VALUE_FLAGS.
+      - `--flag value`: consume both tokens; keep `value` only when flag ∈
+        _TOPIC_VALUE_FLAGS.
+      - Bare `--bool` or `-x` (not value-taking): skip self.
+      - Positional: emit its tokens.
+
+    Returns the set of ≥4-char non-stop-word tokens — same domain as
+    `_extract_keywords`, so set intersection with title keywords is a
+    valid overlap test.
+    """
+    tokens = cmd.strip().split()
+    if len(tokens) < 3 or tokens[0] != "gh":
+        return set()
+    args = tokens[3:]
+    topic: set[str] = set()
+    i, n = 0, len(args)
+    while i < n:
+        tok = args[i].rstrip(_TRAILING_STRIP)
+        if not tok:
+            i += 1
+            continue
+        if tok.startswith("--") and "=" in tok:
+            flag, _, val = tok.partition("=")
+            if flag in _TOPIC_VALUE_FLAGS:
+                topic.update(_topic_tokens_from(val))
+            i += 1
+            continue
+        if tok in _VALUE_FLAG_NAMES:
+            if tok in _TOPIC_VALUE_FLAGS and i + 1 < n:
+                next_val = args[i + 1].rstrip(_TRAILING_STRIP)
+                topic.update(_topic_tokens_from(next_val))
+            i += 2
+            continue
+        if tok.startswith("-"):
+            i += 1
+            continue
+        topic.update(_topic_tokens_from(tok))
+        i += 1
+    return topic
 
 
 def _read_transcript_tail(path: str, max_lines: int, max_bytes: int) -> str | None:
