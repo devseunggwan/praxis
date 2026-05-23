@@ -240,11 +240,17 @@ run_case "shlex-breaking unmatched quote — fail-open silent" \
 #
 # The inline cases below construct PATH-restricted environments to prove
 # that cache state — not a live `gh` call — drives enforcement. They
-# include `dirname $(command -v python3)` in PATH so the testbed can
-# still launch the interpreter; only `gh` is selectively dropped from
-# the env to simulate a missing/failing CLI.
+# include the directory holding the real Python interpreter in PATH so
+# the testbed can still launch the interpreter; only `gh` is selectively
+# dropped from the env to simulate a missing/failing CLI.
+#
+# We resolve python3 via `sys.executable` rather than `command -v python3`
+# so wrapper-shim installations (pyenv, asdf) do not leak a `bash` runtime
+# dependency into the restricted PATH — those shims are bash scripts and
+# would otherwise fail with `env: bash: No such file or directory`.
 
-PY_DIR=$(dirname "$(command -v python3)")
+PY_BIN=$(python3 -c 'import sys; print(sys.executable)' 2>/dev/null) || PY_BIN=$(command -v python3)
+PY_DIR=$(dirname "$PY_BIN")
 GH_ABSENT_PATH="$PY_DIR"
 
 run_inline_case() {
