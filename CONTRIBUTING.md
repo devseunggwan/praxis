@@ -121,6 +121,12 @@ To regenerate after changing `manifests/*.json` or `VERSION`:
 ./scripts/check-plugin-manifests.py   # verify no drift
 ```
 
+`check-plugin-manifests.py` also verifies (a) every hook in `hooks/hooks.json`
+appears in both `docs/hook/INDEX.md` and the `ARCHITECTURE.md` hook index
+table, and (b) each hook spec's `Supported hosts:` line agrees with the
+`hosts` array in `hooks/hooks.json` (`all` = no `hosts` field; explicit list
+= exact set match).
+
 ## Commit conventions
 
 - Format: `type(scope): description` (Conventional Commits)
