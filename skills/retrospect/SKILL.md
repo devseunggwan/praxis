@@ -1201,7 +1201,7 @@ If you catch yourself:
 | Stage | Key Activity | Success Criteria |
 |-------|-------------|-----------------|
 | **1. Load** | Read global `~/.claude/CLAUDE.md`, form scan questions | Rule categories identified |
-| **1.5 Hygiene** | Detect-only MEMORY.md scan — stale references / contradictions / merge candidates (cap 5 files/invocation + cursor carryover) | Stage 1.5 findings emitted with `category: memory_hygiene` (or `hygiene_skipped` trail if MEMORY.md unreachable) |
+| **1.5 Hygiene** | Detect-only MEMORY.md scan — stale references / contradictions / merge candidates (cap 5 files/invocation + cursor carryover) + size threshold (index-scoped, every invocation; subsignals 4a/4b/4c) | Stage 1.5 findings emitted with `category: memory_hygiene` (or `hygiene_skipped` trail if MEMORY.md unreachable) |
 | **2. Analyze** | Scan conversation, map to rules, find root cause | Root cause (not symptom) for each pattern; every event has `category[]` |
 | **2.7 Audit** | Adaptive post-hoc artifact audit — fires only when session contains `gh pr|issue|comment` / Slack-Notion MCP write / approved external-write events; runs 3 sub-audits (PR mergeability, sub-agent substance, external comment evidence) | Stage 2.7 findings emitted with `category: output_quality` (or `audit_skipped` trail if 0 triggers) |
 | **2.5 Audit** | Run Gate-1 (categorical) + Gate-2 (Schema A 5-line or Schema B dimension-tag rationale) + Gate-3 (evidence robustness for 2-action findings) + Gate-4 (external-repo authorization pre-check for upstream_feedback) + Gate-5 (memory-scan completeness for memory-action findings) | All applicable gates PASS/WARN or per-finding cap reached and surfaced to user |
