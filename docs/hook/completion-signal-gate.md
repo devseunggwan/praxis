@@ -27,8 +27,15 @@ claim vocabulary.
 praxis repo, the assistant surfaced `/release` (a laplace-dev-hub skill) as
 an option. The flat `available-skills` namespace across multiple loaded
 plugins means foreign-namespace commands get suggested without repo-context
-filtering. This sub-rule emits an advisory when a namespaced `/plugin:command`
-from a known foreign namespace appears in praxis cwd output.
+filtering. This sub-rule emits an advisory when either form appears in
+praxis cwd output:
+
+1. A namespaced `/plugin:command` whose plugin prefix is a known foreign
+   namespace (`laplace-dev-hub:release`, `oh-my-claudecode:ralph`, ...).
+2. A **bare** `/command` whose slug is in the curated `_KNOWN_FOREIGN_SKILLS`
+   set — the original Event 2 trigger (`/release` with no prefix). Scope is
+   intentionally narrow to avoid false positives on `/bin`, `/usr`, and
+   unrelated nouns; only high-confidence foreign skill slugs are listed.
 
 See also: `completion-verify.sh` (hard-block Stop hook for narrower
 completion-claim patterns), `output-block-falsify-advisory.py` (PreToolUse
@@ -73,11 +80,17 @@ no evidence-block indicator is present in the same turn, an advisory is emitted.
 
 #### Rule 2 — plugin-context anchoring (Event 2)
 
-When the last assistant message contains a `/namespace:command` pattern
-where the namespace belongs to a known foreign plugin (`laplace-dev-hub`,
-`oh-my-claudecode`, `omc`, `codex`, `scheduler`, `gemini`, `laplace-wiki`)
-and the cwd's active plugin is different (detected via
-`.claude-plugin/marketplace.json` or git remote slug), an advisory is emitted.
+Fires in either of two forms when the cwd's active plugin is `praxis`
+(detected via `.claude-plugin/marketplace.json` or git remote slug):
+
+1. **Namespaced form**: `/namespace:command` where the namespace is one of the
+   known foreign plugins (`laplace-dev-hub`, `oh-my-claudecode`, `omc`,
+   `codex`, `scheduler`, `gemini`, `laplace-wiki`).
+2. **Bare form**: `/command` (no namespace) where the slug is in
+   `_KNOWN_FOREIGN_SKILLS`. Conservative curated set scoped to slugs that
+   are unambiguously foreign — `release`, `hub-bulk-release`, `hub-scan-issues`,
+   `dev-to-prod-pr`. Add to the set in `completion-signal-gate.py` when new
+   high-confidence foreign skill names emerge; do not include ambiguous words.
 
 ### Response
 

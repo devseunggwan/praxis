@@ -357,6 +357,54 @@ def test_rule2_foreign_plugin_command(tmp_path: Path) -> None:
     )
 
 
+def test_rule2_bare_foreign_skill(tmp_path: Path) -> None:
+    """Bare `/release` (no namespace) in praxis cwd → advisory (Event 2 trigger)."""
+    events = [
+        mk_user("Hub 이슈들을 일괄 정리해주세요"),
+        mk_assistant("`/release` 스킬을 사용하면 일괄 처리할 수 있습니다."),
+    ]
+    tp = write_jsonl(events, tmp_path)
+    payload = json.dumps(
+        {"transcript_path": tp, "stop_hook_active": False, "session_id": "test-rule2-bare"}
+    )
+    result = subprocess.run(
+        [sys.executable, str(HOOK_PATH)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        cwd=str(REPO_ROOT),
+    )
+    assert result.returncode == 0
+    assert "[praxis:completion-signal-gate]" in result.stderr, (
+        f"Rule 2 must fire for bare foreign skill `/release`; stderr={result.stderr!r}"
+    )
+
+
+def test_rule2_bare_unknown_command_silent(tmp_path: Path) -> None:
+    """Bare unknown word in praxis cwd → silent (false-positive guard)."""
+    events = [
+        mk_user("어디서 봤어?"),
+        mk_assistant("`/some-random-word` 는 무관한 문자열입니다."),
+    ]
+    tp = write_jsonl(events, tmp_path)
+    payload = json.dumps(
+        {"transcript_path": tp, "stop_hook_active": False, "session_id": "test-rule2-bare-unknown"}
+    )
+    result = subprocess.run(
+        [sys.executable, str(HOOK_PATH)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        cwd=str(REPO_ROOT),
+    )
+    assert result.returncode == 0
+    assert "[praxis:completion-signal-gate]" not in result.stderr, (
+        f"Rule 2 must NOT fire for unknown bare commands; stderr={result.stderr!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Fail-safe paths
 # ---------------------------------------------------------------------------

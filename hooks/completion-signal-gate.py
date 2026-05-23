@@ -130,6 +130,22 @@ _FOREIGN_PREFIXES = frozenset(
     }
 )
 
+# Bare-form skill slugs known to belong to foreign plugins. A bare `/release`
+# (without the `laplace-dev-hub:` prefix) was the original Event 2 trigger
+# (see issue #392). Conservative scope — only high-confidence foreign cases.
+# False-positive risk: a praxis-owned skill with the same bare slug would be
+# silently mis-flagged; add it to praxis's skill set first if such a name is
+# ever introduced.
+_KNOWN_FOREIGN_SKILLS = frozenset(
+    {
+        # laplace-dev-hub
+        "release",
+        "hub-bulk-release",
+        "hub-scan-issues",
+        "dev-to-prod-pr",
+    }
+)
+
 
 def _get_cwd_plugin_name() -> str | None:
     """Return plugin name for current cwd from .claude-plugin/marketplace.json."""
@@ -187,13 +203,11 @@ def _detect_foreign_slash_commands(text: str, cwd_plugin: str | None) -> list[st
                 if cwd_plugin and cwd_plugin != prefix:
                     foreign.append(f"/{cmd}")
             continue
-        # Bare /command — check if it matches a known praxis skill
-        # Only flag if it looks like a skill invocation (no file-path chars)
-        if cmd and "/" not in cmd:
-            # Flag only if the bare command clearly belongs to a foreign namespace
-            # We are conservative: only flag explicitly namespaced foreign commands
-            # to avoid false positives on common words like /bin, /usr, etc.
-            pass
+        # Bare /command — flag only if it is in the known-foreign skill set.
+        # Conservative by design: unknown bare commands pass silently to avoid
+        # false positives on paths (/bin, /usr) and unrelated nouns.
+        if cmd in _KNOWN_FOREIGN_SKILLS and cwd_plugin == "praxis":
+            foreign.append(f"/{cmd}")
 
     return foreign
 
