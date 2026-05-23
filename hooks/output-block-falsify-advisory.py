@@ -347,15 +347,15 @@ def _main_inner() -> int:
                 if not falsified_present:
                     tier_decision = "deny"
                     msg_to_emit = ASK_MSG
-                    break  # one missing question is enough to escalate
+                    break  # T1 deny is final — overrides any prior T2 ask
             elif _has_confidence_anchoring(_collect_option_texts(options)):
                 # T2 (issue #369): confidence-anchoring framing token in
                 # label OR description. Soft gate — false-positive risk
-                # higher than T1's literal marker.
-                if not falsified_present:
+                # higher than T1's literal marker. Record but keep scanning
+                # so a later T1 violation can upgrade the decision to deny.
+                if not falsified_present and tier_decision is None:
                     tier_decision = "ask"
                     msg_to_emit = ANCHORING_ASK_MSG
-                    break
             elif _has_recommended_marker(q_labels):
                 # T3 (dead under new precedence — kept for clarity).
                 advisory_needed = True

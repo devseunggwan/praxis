@@ -485,6 +485,43 @@ run_case "T1>T2 precedence: literal (Recommended) + anchoring desc → T1 deny (
       '["가장 안전한 path", "alt"]' \
       'Which?')"
 
+# Multi-question T2-then-T1 precedence — Q1 fires T2 (confidence-anchoring),
+# Q2 fires T1 (literal Recommended). Pre-fix bug: loop broke on Q1's T2 and
+# emitted ask, allowing user to bypass the T1 hard block. Post-fix: T2 records
+# but keeps scanning; Q2's T1 upgrades the decision to deny.
+make_ask_payload_t2_then_t1() {
+  python3 - <<'PYEOF'
+import json
+payload = {
+    "session_id": "test-session",
+    "tool_name": "AskUserQuestion",
+    "tool_input": {
+        "questions": [
+            {
+                "question": "Q1: which approach?",
+                "options": [
+                    {"label": "Option A (safer)", "description": "natural choice"},
+                    {"label": "Option B", "description": "alt"},
+                ],
+            },
+            {
+                "question": "Q2: which path?",
+                "options": [
+                    {"label": "Path X (Recommended)", "description": "T1 marker"},
+                    {"label": "Path Y", "description": "alt"},
+                ],
+            },
+        ]
+    },
+    "cwd": "/tmp",
+}
+print(json.dumps(payload))
+PYEOF
+}
+run_case "T2→T1 multi-question: Q1 anchoring, Q2 literal (Recommended) → deny (issue #393 fix)" \
+  "deny:Self-Falsify" \
+  "$(make_ask_payload_t2_then_t1)"
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
