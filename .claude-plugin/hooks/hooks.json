@@ -79,6 +79,11 @@
           },
           {
             "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/gh-label-verify.sh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/cli-flag-incompat-advisory.sh",
             "timeout": 5
           },
