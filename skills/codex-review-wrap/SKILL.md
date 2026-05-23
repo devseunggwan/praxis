@@ -701,11 +701,16 @@ For each citation signal found:
 3. **Count parent-transcribed rows** — record `parent_count` = the number
    of items the parent body cites at the same citation site.
 
-4. **Compare** — if `parent_count < source_count`, the parent truncates the
-   sibling SoT. Emit a synthesized finding (see format below). If
-   `parent_count == source_count`, record match and skip to the next signal.
+4. **Compare** — compute the set difference: `missing = source_items − parent_items`.
+   If `missing` is non-empty, the parent truncates or diverges from the sibling
+   SoT. Emit a synthesized finding (see format below). If `missing` is empty,
+   record match and skip to the next signal.
    If the sibling SoT cannot be located, emit an unresolved advisory (see
    below).
+
+   > **Why set difference, not count equality**: count equality passes when
+   > `parent` drops one source item and adds one stale/extra item simultaneously
+   > (counts match but content diverges). Set difference catches this case.
 
 ##### Synthesized finding format
 
