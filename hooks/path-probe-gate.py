@@ -34,9 +34,12 @@ Bypass:
   Inline marker `# path-probe:ack` anywhere in the Write `file_path` is not
   applicable (file paths don't carry comments), so bypass is via:
   - Environment: PRAXIS_PATH_PROBE_SKIP=1 (full opt-out for the session)
-  - Strict-mode escape: run `ls <parent>` or `git ls-files <parent>` first;
-    both commands are checked by this hook on Bash calls to record enumeration
-    in the session state.
+  - Strict-mode escape: unset PRAXIS_PATH_PROBE_STRICT to revert to advisory
+    mode (Write proceeds with a one-time warning on retry), then set
+    PRAXIS_PATH_PROBE_SKIP=1 if you need to bypass entirely.
+    Note: running `ls` / `git ls-files` in a Bash tool call does NOT record
+    enumeration — this hook fires only on Write/Edit/NotebookEdit and has no
+    Bash PostToolUse handler.
 
 State:
   Session-scoped enumeration markers under:
@@ -83,12 +86,16 @@ _DENY_TMPL = (
     "A session-compaction summary may have generalized a sibling-worktree "
     "path without re-probing the layout.\n"
     "\n"
-    "Required: enumerate the parent directory first:\n"
-    "  ls {parent_dir}\n"
-    "  # or: git ls-files {parent_dir}\n"
-    "\n"
-    "After enumerating, retry the Write.\n"
-    "To disable this gate: PRAXIS_PATH_PROBE_SKIP=1\n"
+    "To unblock:\n"
+    "  1. Confirm the correct path by running in a shell (outside Claude Code):\n"
+    "       ls {parent_dir}\n"
+    "       # or: git ls-files {parent_dir}\n"
+    "  2. Then either:\n"
+    "     a) Set PRAXIS_PATH_PROBE_SKIP=1 to disable the gate for this session, OR\n"
+    "     b) Unset PRAXIS_PATH_PROBE_STRICT to revert to advisory mode (Write\n"
+    "        proceeds with a one-time warning once you retry).\n"
+    "  Note: Bash tool calls do not record enumeration — only Write/Edit/\n"
+    "  NotebookEdit are monitored by this hook.\n"
 )
 
 _STATE_BASE = os.path.join(
