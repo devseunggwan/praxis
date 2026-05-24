@@ -38,7 +38,7 @@ so chained segments and env-prefixed invocations are covered uniformly.
 | `gh api repos/owner/repo --json name` | **PASS** (gh api excluded — REST schema) |
 | `gh release list` (no `--json`) | **PASS** (no --json flag) |
 | `gh <unknown-subcmd> --json foo` | **PASS** (fail-open; unknown subcommand) |
-| `gh pr view 1 --json state # CLAUDE_HOOK_BYPASS=gh-json-validator` | **PASS** (inline bypass) |
+| `gh pr view 1 --json state # PRAXIS_GH_JSON_BYPASS=skip` | **PASS** (inline bypass) |
 | Non-Bash tool | **PASS** |
 | Malformed JSON stdin | **PASS** (fail-open) |
 
@@ -84,8 +84,8 @@ Example: `merged` → suggests `mergedAt`.
 Two opt-out mechanisms:
 
 1. **Inline comment** (per-command): append
-   `# CLAUDE_HOOK_BYPASS=gh-json-validator` anywhere on the command line.
-2. **Env var** (per-session): set `CLAUDE_HOOK_BYPASS_GH_JSON=1`.
+   `# PRAXIS_GH_JSON_BYPASS=skip` anywhere on the command line.
+2. **Env var** (per-session): set `PRAXIS_GH_JSON_BYPASS=1`.
 
 ### Fail-open paths
 

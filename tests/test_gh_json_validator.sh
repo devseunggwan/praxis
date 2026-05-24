@@ -123,21 +123,21 @@ run_case "block: mixed valid+invalid --json state,merged" \
 
 # ---------------------------------------------------------------------------
 # Case 5: Bypass — inline comment marker
-# Command contains `# CLAUDE_HOOK_BYPASS=gh-json-validator`; must pass even
+# Command contains `# PRAXIS_GH_JSON_BYPASS=skip`; must pass even
 # with an invalid field.
 # ---------------------------------------------------------------------------
 run_case "bypass: inline comment marker" \
   "pass" \
-  "gh pr view 1 --json merged  # CLAUDE_HOOK_BYPASS=gh-json-validator"
+  "gh pr view 1 --json merged  # PRAXIS_GH_JSON_BYPASS=skip"
 
 # ---------------------------------------------------------------------------
-# Case 6: Bypass — env var CLAUDE_HOOK_BYPASS_GH_JSON=1
+# Case 6: Bypass — env var PRAXIS_GH_JSON_BYPASS=1
 # Must pass even with an invalid field when env var is set.
 # ---------------------------------------------------------------------------
-run_case "bypass: env var CLAUDE_HOOK_BYPASS_GH_JSON=1" \
+run_case "bypass: env var PRAXIS_GH_JSON_BYPASS=1" \
   "pass" \
   "gh api repos/owner/repo/pulls/1 --json merged" \
-  "CLAUDE_HOOK_BYPASS_GH_JSON=1"
+  "PRAXIS_GH_JSON_BYPASS=1"
 
 # ---------------------------------------------------------------------------
 # Case 7: Skip — `gh api` subcommand is out of scope
