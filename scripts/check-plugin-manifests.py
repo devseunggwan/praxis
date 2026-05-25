@@ -132,6 +132,103 @@ def main() -> int:
             + ", ".join(f"{k}={v}" for k, v in seen.items())
         )
 
+    # Rule 1 — Hook index drift
+    # For each registered hook in hooks/hooks.json, verify it appears in both
+    # docs/hook/INDEX.md and ARCHITECTURE.md Hook index table.
+    index_md = (REPO_ROOT / "docs" / "hook" / "INDEX.md").read_text()
+    arch_md = (REPO_ROOT / "ARCHITECTURE.md").read_text()
+    seen_hook_names: set[str] = set()
+    for event_groups in hooks_source.get("hooks", {}).values():
+        for group in event_groups:
+            for hook in group.get("hooks", []):
+                cmd = hook.get("command", "")
+                hook_filename = Path(cmd.split("/")[-1]) if "/" in cmd else Path(cmd)
+                hook_name = hook_filename.stem
+                hook_name = hook_name.split()[0] if " " in hook_name else hook_name
+                for suffix in ("-pre", "-post"):
+                    if hook_name.endswith(suffix):
+                        hook_name = hook_name[: -len(suffix)]
+                        break
+                if hook_name in seen_hook_names:
+                    continue
+                seen_hook_names.add(hook_name)
+                if hook_name not in index_md:
+                    drifts.append(
+                        f"MISSING INDEX docs/hook/INDEX.md: {hook_name} "
+                        f"(registered in hooks.json but not in INDEX.md)"
+                    )
+                if hook_name not in arch_md:
+                    drifts.append(
+                        f"MISSING INDEX ARCHITECTURE.md: {hook_name} "
+                        f"(registered in hooks.json but not in ARCHITECTURE.md)"
+                    )
+
+    # Rule 2 — Supported hosts ↔ hosts array cross-check
+    # For each hook spec in docs/hook/*.md, compare the "Supported hosts:" line
+    # to the actual hosts field in hooks/hooks.json.
+    # Build a lookup: hook_name → hosts value from hooks.json (None = all hosts).
+    hooks_json_hosts: dict[str, list[str] | None] = {}
+    for event_groups in hooks_source.get("hooks", {}).values():
+        for group in event_groups:
+            for hook in group.get("hooks", []):
+                cmd = hook.get("command", "")
+                hook_filename = Path(cmd.split("/")[-1]) if "/" in cmd else Path(cmd)
+                hook_name = hook_filename.stem
+                hook_name = hook_name.split()[0] if " " in hook_name else hook_name
+                for suffix in ("-pre", "-post"):
+                    if hook_name.endswith(suffix):
+                        hook_name = hook_name[: -len(suffix)]
+                        break
+                # First registration wins (multiple groups may share same hook name)
+                if hook_name not in hooks_json_hosts:
+                    hooks_json_hosts[hook_name] = hook.get("hosts")
+
+    for spec_file in sorted(docs_dir.glob("*.md")):
+        if spec_file.name == "INDEX.md":
+            continue
+        hook_name = spec_file.stem
+        # Parse "Supported hosts:" from the spec (typically line 3, but scan first 10)
+        spec_text = spec_file.read_text()
+        hosts_value: str | None = None
+        for line in spec_text.splitlines()[:10]:
+            if line.strip().lower().startswith("supported hosts:"):
+                hosts_value = line.split(":", 1)[1].strip()
+                break
+        if hosts_value is None:
+            # No Supported hosts line — skip (spec not yet annotated)
+            continue
+
+        # Hooks not registered in hooks.json are opt-in — skip hosts cross-check
+        if hook_name not in hooks_json_hosts:
+            continue
+
+        json_hosts = hooks_json_hosts[hook_name]
+
+        if hosts_value.lower() == "all":
+            # Spec says all → hooks.json must have NO hosts field
+            if json_hosts is not None:
+                drifts.append(
+                    f"FAIL hosts mismatch {hook_name}: "
+                    f"spec='all' hooks.json={json_hosts!r} "
+                    f"(remove hosts array to mean all hosts)"
+                )
+        else:
+            # Spec lists explicit hosts — parse comma-separated, compare as sets.
+            # Strip parenthetical comments from each token (e.g. "claude (excludes …)")
+            # so only the bare host identifier is retained.
+            raw_tokens = hosts_value.split(",")
+            spec_set = {
+                t.split("(")[0].strip()
+                for t in raw_tokens
+                if t.split("(")[0].strip()
+            }
+            json_set = set(json_hosts) if json_hosts is not None else set()
+            if spec_set != json_set:
+                drifts.append(
+                    f"FAIL hosts mismatch {hook_name}: "
+                    f"spec={sorted(spec_set)!r} hooks.json={sorted(json_set)!r}"
+                )
+
     if drifts:
         print("plugin-manifest check FAILED:")
         for d in drifts:
