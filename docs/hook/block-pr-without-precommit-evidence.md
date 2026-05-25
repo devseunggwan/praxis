@@ -1,6 +1,6 @@
 # PreToolUse Block PR Without Pre-commit Evidence
 
-Supported hosts: all
+Supported hosts: claude, codex
 
 `hooks/block-pr-without-precommit-evidence.py` fires on every PreToolUse(Bash)
 event and inspects the command for `gh pr create` / `gh pr new` invocations.
