@@ -1,6 +1,6 @@
 # PreToolUse gh CLI Flag Validator
 
-Supported hosts: all
+Supported hosts: claude, codex
 
 `hooks/gh-flag-verify.sh` intercepts every Bash tool call and hard-blocks
 `gh <subcommand>` invocations that supply a flag not in the subcommand's
