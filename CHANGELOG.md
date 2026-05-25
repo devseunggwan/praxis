@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-05-26
+
+18 PRs since 5.1.0 — 9 feat plus fixes, refactors, tests, and docs. All additive — semver minor.
+
+### Added
+- `block-pr-without-precommit-evidence` hook (PreToolUse(Bash)): blocks PR creation when no pre-commit verification evidence exists in the session (#414)
+- completion-signal retrieval gate hook: forces rule retrieval when a completion signal is emitted (#399)
+- `gh --json` PreToolUse validator hook + accompanying test suite (#397 #410)
+- label-existence verifier hook: confirms `gh pr`/`gh issue` label values actually exist in the target repo before the call (#388)
+- `cross-check-hook-index-and-hosts` script: cross-validates the hook index against per-hook `hosts` classification (#416)
+- `retrospect`: path-probe gate on the write path (#398); size-threshold signal added to the Stage 1.5 hygiene pass (#390)
+- `codex-review-wrap`: Source-of-Truth (SoT) audit step (#396)
+- Recommended-marker tier upgraded from `ask` to `deny` (#394)
+
+### Changed
+- `gh-json-validator`: bypass env-var naming aligned with sibling hooks (#411)
+- dup-search gate: extract the search topic before running the overlap match (#389)
+- rule 2 scope narrowed/namespaced to the praxis cwd (#409)
+
+### Fixed
+- Removed the redundant `hosts` array from all-host hooks (#408 #417)
+
+### Docs
+- Corrected `Supported hosts` to `claude, codex` for two gated hooks (#418)
+- Indexed 7 previously-missing hooks in ARCHITECTURE (#407 #415)
+
 ## [5.1.0] - 2026-05-21
 
 2 PreToolUse(Bash) blocking hooks from the Hub #2242 retrospect — additive, semver minor.
