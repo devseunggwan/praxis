@@ -16,9 +16,12 @@ confirmation-prompt layer.
 |------|---------|---------|
 | [block-gh-state-all](block-gh-state-all.md) | PreToolUse | Hard-block invalid `gh search ... --state all` flag combo |
 | [gh-flag-verify](gh-flag-verify.md) | PreToolUse | Block `gh <subcmd>` calls with flags not in the subcommand's accepted set |
+| [gh-json-validator](gh-json-validator.md) | PreToolUse | Block `gh <subcmd> --json <fields>` calls whose field names are not in the subcommand's valid JSON projection — issue #391 |
+| [gh-label-verify](gh-label-verify.md) | PreToolUse | Block `gh (issue\|pr) (create\|edit)` calls whose `--label` values are absent from the target repo's label set — issue #385 |
 | [block-ask-end-option](block-ask-end-option.md) | PreToolUse | Block `AskUserQuestion` options carrying end-option markers when no stop signal present |
 | [block-manufactured-action-menu](block-manufactured-action-menu.md) | PreToolUse | Warn or block when `AskUserQuestion` surfaces a "shall we proceed?" menu after user already issued a command-intent signal |
 | [block-pr-without-caller-evidence](block-pr-without-caller-evidence.md) | PreToolUse | Block `gh pr create` unless the PR body contains a `Caller chain verified:` line |
+| [block-pr-without-precommit-evidence](block-pr-without-precommit-evidence.md) | PreToolUse | Block `gh pr create` unless the PR body declares pre-commit state (`Pre-commit verified:` / `verified by CI` / `n/a (reason)`); `--repo` is not a bypass |
 | [side-effect-scan](side-effect-scan.md) | PreToolUse | Ask before commands with collateral side effects (`git commit/push`, `gh pr merge/create`, `kubectl apply`) |
 | [commit-title-length-check](commit-title-length-check.md) | PreToolUse | Ask when `git commit` title exceeds 50 chars |
 | [pre-merge-approval-gate](pre-merge-approval-gate.md) | PreToolUse | Surface per-PR approval prompt for `gh pr merge` in direct sessions |
@@ -52,6 +55,7 @@ so the agent can self-correct. Fail-open on infrastructure errors by design.
 | [external-write-path-existence-check](external-write-path-existence-check.md) | PreToolUse | Advisory nudge when a `gh issue/pr` body file contains markdown links to repo paths that do not exist |
 | [path-probe-gate](path-probe-gate.md) | PreToolUse | Advisory nudge (opt-in strict: deny) when Write/Edit/NotebookEdit targets a nested worktree path whose parent has not been enumerated this session |
 | [version-bump-evidence-check](version-bump-evidence-check.md) | PreToolUse | Advisory nudge (opt-in strict) when `gh issue/pr` body describes an external version bump with no changelog URL, Fetched: line, or cross-reference matrix |
+| [count-assertion-verify](count-assertion-verify.md) | PreToolUse | Advisory nudge when `grep -c` with alternation (`\|` BRE or `\|` ERE/PCRE) runs without per-arm verification; prevents citing inflated alternation counts — issue #277 |
 
 ---
 

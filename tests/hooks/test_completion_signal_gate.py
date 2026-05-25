@@ -405,6 +405,47 @@ def test_rule2_bare_unknown_command_silent(tmp_path: Path) -> None:
     )
 
 
+def test_rule2_namespaced_foreign_silent_in_non_praxis_cwd(tmp_path: Path) -> None:
+    """Namespaced foreign command in laplace-dev-hub cwd → no advisory.
+
+    Rule 2 namespaced branch fires only when cwd_plugin == 'praxis'.
+    When working inside another plugin (e.g. laplace-dev-hub), the hook
+    must remain silent even if a foreign-namespaced command appears in output.
+    """
+    # Simulate laplace-dev-hub cwd by creating a .claude-plugin/marketplace.json
+    plugin_dir = tmp_path / ".claude-plugin"
+    plugin_dir.mkdir()
+    (plugin_dir / "marketplace.json").write_text(
+        json.dumps({"name": "laplace-dev-hub"})
+    )
+    events = [
+        mk_user("다음 단계는 뭔가요?"),
+        mk_assistant(
+            "/oh-my-claudecode:ralph 스킬로 루프를 돌려보세요."
+        ),
+    ]
+    tp = write_jsonl(events, tmp_path)
+    payload = json.dumps(
+        {
+            "transcript_path": tp,
+            "stop_hook_active": False,
+            "session_id": "test-rule2-non-praxis",
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(HOOK_PATH)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        cwd=str(tmp_path),  # laplace-dev-hub cwd, NOT praxis
+    )
+    assert result.returncode == 0
+    assert "[praxis:completion-signal-gate]" not in result.stderr, (
+        f"Rule 2 must NOT fire in non-praxis cwd; stderr={result.stderr!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Fail-safe paths
 # ---------------------------------------------------------------------------
