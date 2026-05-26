@@ -14,7 +14,7 @@ skill invocation.
 
 Block conditions (ALL must hold):
   (a) Tool is Bash with a content `git commit` (not amend/merge/rebase/
-      cherry-pick/revert/--allow-empty)
+      cherry-pick/revert)
   (b) The session transcript contains NO `Skill` tool_use with
       input.skill == "praxis:codex-review-wrap" AND no
       `/praxis:codex-review-wrap` slash-command invocation
@@ -24,9 +24,14 @@ Allow conditions (escape hatches):
     (a -F file / heredoc body is not argv-visible — use the env bypass there)
   - CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1 env var
   - git commit --amend / git merge / git rebase / git cherry-pick / git revert
-  - --allow-empty
   - Missing / unreadable / oversized transcript → fail-open (cannot enforce)
   - Malformed / unparseable command (unbalanced quotes) → fail-open
+
+NOT exempt: --allow-empty / --allow-empty-message. They permit an empty commit
+or empty message but do NOT prevent staged content from being committed, so
+exempting them would let `git commit --allow-empty -m x` (with staged changes)
+bypass the gate. An intentional empty CI-trigger commit uses the skip token or
+the env bypass instead.
 
 Semantics: a whole-transcript scan means one codex-review-wrap invocation in
 the session satisfies all subsequent commits — the same coarse session-level
@@ -63,7 +68,7 @@ def main() -> int:
         return 0  # no real `git commit` invocation (or unparseable) → fail-open
 
     if _is_exempt(commit_args):
-        return 0  # --amend / --allow-empty etc.
+        return 0  # --amend (fix-up of an already-gated commit)
 
     if _has_skip_token(commit_args):
         return 0
@@ -95,7 +100,13 @@ def main() -> int:
 _SKIP_TOKEN_RE = re.compile(r"\[skip-codex-review\]", re.IGNORECASE)
 _SHELL_SEPARATORS = {";", "&", "&&", "|", "||", "\n"}
 _GLOBAL_OPTS_WITH_VALUE = {"-c", "-C", "--git-dir", "--work-tree", "--namespace"}
-_EXEMPT_FLAGS = {"--amend", "--allow-empty", "--allow-empty-message"}
+# Only `--amend` is exempt: its intent is to fix up a prior (already-gated)
+# commit. `--allow-empty` / `--allow-empty-message` are deliberately NOT exempt
+# — they only *permit* an empty commit / message and do not *prevent* staged
+# content from riding along, so exempting them would let
+# `git commit --allow-empty -m x` (with staged changes) bypass the gate.
+# Verified functionally: both flags commit staged files.
+_EXEMPT_FLAGS = {"--amend"}
 _MESSAGE_FLAGS = {"-m", "--message"}
 
 
@@ -224,7 +235,16 @@ def _scan_transcript(path: str) -> bool | None:
             continue
         if not isinstance(obj, dict):
             continue
-        if _has_skill_tool_use(obj) or _has_slash_command(obj):
+        # A `Skill` tool_use is a genuine invocation wherever it appears — only
+        # the assistant can emit one, and emitting it *is* running the skill.
+        # A slash command, by contrast, is user-initiated: an assistant message
+        # that merely prints "/praxis:codex-review-wrap" on a line is a
+        # suggestion, not an invocation. Scope slash detection to user entries
+        # (the real invocation is recorded as a user message with a
+        # <command-name> marker) so an assistant suggestion cannot satisfy it.
+        if _has_skill_tool_use(obj):
+            return True
+        if obj.get("type") == "user" and _has_slash_command(obj):
             return True
     return False
 
@@ -286,7 +306,7 @@ def _emit_block_message() -> None:
                 "  3. One-off bypass: prefix with CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1",
                 "",
                 "Fail-open: missing/unreadable transcript and non-content commits",
-                "(--amend / merge / rebase / cherry-pick / revert / --allow-empty) pass.",
+                "(--amend / merge / rebase / cherry-pick / revert) pass.",
             ]
         )
         + "\n"

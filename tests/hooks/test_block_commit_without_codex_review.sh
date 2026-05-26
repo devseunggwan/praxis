@@ -27,6 +27,11 @@ printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"ty
 TX_WITH_SLASH=$(mktemp)
 printf '%s\n' '{"type":"user","message":{"role":"user","content":"/praxis:codex-review-wrap"}}' >"$TX_WITH_SLASH"
 
+# Assistant message that merely prints the slash command on a line — a
+# suggestion, not an invocation. Must NOT satisfy the gate (Codex round-2 P2).
+TX_ASSISTANT_SLASH=$(mktemp)
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"/praxis:codex-review-wrap"}]}}' >"$TX_ASSISTANT_SLASH"
+
 TX_WITHOUT=$(mktemp)
 printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"no review here"}]}}' >"$TX_WITHOUT"
 printf '%s\n' '{"type":"user","message":{"role":"user","content":"should I run /praxis:codex-review-wrap? (prose, not invocation)"}}' >>"$TX_WITHOUT"
@@ -102,6 +107,9 @@ run_case "Skill tool_use present" pass Bash \
 run_case "slash-command invocation present" pass Bash \
   'git commit -m "feat: x"' "$TX_WITH_SLASH"
 
+run_case "assistant-suggested slash does NOT satisfy gate" block Bash \
+  'git commit -m "feat: x"' "$TX_ASSISTANT_SLASH"
+
 run_case "garbage lines + valid skill line" pass Bash \
   'git commit -m "feat: x"' "$TX_GARBAGE_PLUS_SKILL"
 
@@ -112,8 +120,18 @@ run_case "garbage lines + valid skill line" pass Bash \
 run_case "amend exempt" pass Bash \
   'git commit --amend --no-edit' "$TX_WITHOUT"
 
-run_case "allow-empty exempt" pass Bash \
+# --allow-empty / --allow-empty-message are NOT exempt: they permit an empty
+# commit/message but do not prevent staged content from riding along, so a
+# content commit must still be gated (Codex round-2 P1).
+run_case "allow-empty not exempt (staged content can ride along)" block Bash \
   'git commit --allow-empty -m "ci: trigger"' "$TX_WITHOUT"
+
+run_case "allow-empty-message not exempt, content commit blocks" block Bash \
+  'git commit --allow-empty-message -m ""' "$TX_WITHOUT"
+
+# An intentional empty CI-trigger commit uses the skip token instead.
+run_case "allow-empty empty commit passes via skip token" pass Bash \
+  'git commit --allow-empty -m "ci: trigger [skip-codex-review]"' "$TX_WITHOUT"
 
 run_case "git merge exempt" pass Bash \
   'git merge --no-ff feature' "$TX_WITHOUT"
@@ -215,7 +233,7 @@ rm -f "$_malformed_err"
 # Cleanup + summary
 # ---------------------------------------------------------------------------
 
-rm -f "$TX_WITH_SKILL" "$TX_WITH_SLASH" "$TX_WITHOUT" "$TX_WRONG_SKILL" "$TX_GARBAGE_PLUS_SKILL"
+rm -f "$TX_WITH_SKILL" "$TX_WITH_SLASH" "$TX_ASSISTANT_SLASH" "$TX_WITHOUT" "$TX_WRONG_SKILL" "$TX_GARBAGE_PLUS_SKILL"
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

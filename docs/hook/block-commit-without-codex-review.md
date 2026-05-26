@@ -24,7 +24,11 @@ that hook blocks on the **presence** of a finding marker; this one blocks on the
 Both conditions must hold for a block (exit 2):
 
 1. The Bash command is a content `git commit` — `--amend`, `git merge`,
-   `git rebase`, `git cherry-pick`, `git revert`, and `--allow-empty` are exempt.
+   `git rebase`, `git cherry-pick`, and `git revert` are exempt. `--allow-empty`
+   / `--allow-empty-message` are **not** exempt: they only permit an empty
+   commit / message and do not prevent staged content from being committed, so
+   a content commit using them is still gated (use the skip token or env bypass
+   for an intentional empty CI-trigger commit).
 2. The session transcript contains no `Skill` tool_use with
    `input.skill == "praxis:codex-review-wrap"` and no `/praxis:codex-review-wrap`
    slash-command invocation (a prose mention such as "should I run
