@@ -100,7 +100,14 @@ current gate.
 1. Survey ≥ 2 sibling implementations under `hooks/` for established conventions
    (state-key naming, payload field access, exit-code semantics) before writing
    your spec. See the **Convention Survey Before Design** rule in global `~/.claude/CLAUDE.md`.
-2. Write the hook + tests, register in `hooks/hooks.json`.
+2. Write the hook + its test, register in `hooks/hooks.json`.
+   - Hook impl: `hooks/<name>.{py,sh}` (and a thin `<name>.sh` wrapper if the
+     impl is Python — the wrapper will be auto-generated under
+     `hooks/_generated/` once Phase 2 of [ADR-0001](docs/adr/0001-hook-layout.md)
+     lands; for now it stays hand-written next to the impl).
+   - Hook test: `tests/hooks/test_<name>.{sh,py}`. New tests go here, not
+     under `hooks/test-*.sh` (which Phase 1 consolidated; the old path is
+     gone).
 3. Create `docs/hook/<name>.md` (use an existing spec as a template).
 4. Add a row to the hook index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
 5. Run `./scripts/check-plugin-manifests.py` to confirm packaging is clean.
@@ -147,8 +154,25 @@ Fixed, Removed.
 ```bash
 # Run the full test suite from the repo root
 python -m pytest tests/
+
+# Run the shell-based hook tests directly (pytest only collects .py files)
+for f in tests/hooks/test_*.sh; do bash "$f"; done
 ```
 
-New hooks must ship with tests under `tests/`. New skills do not require
-automated tests, but must satisfy the live runtime verification requirement
-described above.
+New hooks must ship with a test under `tests/hooks/`:
+
+- `tests/hooks/test_<name>.sh` for shell-driven coverage (synthesise a
+  Claude Code hook payload, pipe into the hook, assert exit code + stderr).
+- `tests/hooks/test_<name>.py` for pytest-style coverage (matches the
+  existing `test_completion_signal_gate.py` pattern).
+
+Tests reference the hook via `$ROOT_DIR/hooks/<name>.{sh,py}` where
+`ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"` — never hard-code repo paths.
+
+New skills do not require automated tests, but must satisfy the live
+runtime verification requirement described above.
+
+> Phase 2 of [ADR-0001](docs/adr/0001-hook-layout.md) will re-shard
+> `tests/hooks/` into `tests/hooks/<role>/test_<name>.{sh,py}` and update
+> the helper loops to match. Until then, the flat layout under
+> `tests/hooks/` is the source of truth.
