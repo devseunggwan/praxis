@@ -1,26 +1,38 @@
 #!/usr/bin/env python3
 """Verify generated plugin manifests are in sync with the canonical source.
 
-Runs the build logic in a dry mode: re-render every output, compare to the
-committed file, and exit non-zero on any drift. Also validates that the
-Codex adapter shell's symlinks point at the right relative targets.
+Runs the build logic in dry mode: re-render every output, compare to the
+committed file, and exit non-zero on any drift. Also validates the
+Phase 2 (ADR-0001) invariants:
+
+  1. Every hooks/<role>/<name>/ directory has ≥1 manifest entry
+     (opt-in carve-out: external-write-falsify-check).
+  2. Every manifest entry's `role` field matches the parent directory name.
+  3. The impl file (`impl.py` or the body-as-sh `impl.sh`) exists on disk.
+  4. completion-verify Stop ordering matches manifest array order.
+  5. Generated `.claude-plugin/hooks/hooks.json` (+ peers) are byte-
+     identical to what `build-plugin-manifests.py` would emit (this is
+     the runtime contract — Claude Code reads the generated file).
+  6. Generated runtime wrappers under hooks/*.sh are byte-identical to
+     the generator output (Phase 2 strict diff replaces Phase 1's exec-
+     target parity check).
+  7. INDEX.md ↔ manifest entry cross-check.
+  8. Spec `Supported hosts:` ↔ manifest `hosts` cross-check.
+  9. Version consistency across versioned artifacts.
 
 CI invokes this; developers can too, via `./scripts/check-plugin-manifests.py`.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
-
-# Reuse renderers from the build script (dynamic import — filename has a hyphen)
-import importlib.util
 
 _spec = importlib.util.spec_from_file_location(
     "build_plugin_manifests", REPO_ROOT / "scripts" / "build-plugin-manifests.py"
@@ -30,11 +42,45 @@ _build = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_build)
 
 
+# Hooks that exist on disk but are intentionally not registered in
+# manifest.json (opt-in). Listed by basename.
+OPT_IN_HOOKS = {"external-write-falsify-check"}
+
+# Valid role names — must match the four ADR-0001 categories.
+VALID_ROLES = {
+    "preflight-gate",
+    "advisory-nudge",
+    "postuse-correction",
+    "completion-verify",
+}
+
+
+def _hook_dirs() -> list[Path]:
+    """Return all per-hook directories under hooks/<role>/<name>/."""
+    dirs: list[Path] = []
+    hooks_root = _build.HOOKS_DIR
+    for role_dir in sorted(hooks_root.iterdir()):
+        if not role_dir.is_dir():
+            continue
+        if role_dir.name in {"_lib", "_generated", "__pycache__"}:
+            continue
+        if role_dir.name not in VALID_ROLES:
+            continue
+        for hook_dir in sorted(role_dir.iterdir()):
+            if hook_dir.is_dir() and not hook_dir.name.startswith("_"):
+                dirs.append(hook_dir)
+    return dirs
+
+
 def main() -> int:
     base = _build.load_base()
-    hooks_source = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text())
+    manifest = _build.load_manifest()
+    hooks_source = _build.expand_to_hooks_json(manifest)
     drifts: list[str] = []
 
+    # ------------------------------------------------------------------
+    # Drift check (rule 5) — generated artifacts byte-identical
+    # ------------------------------------------------------------------
     for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
         platform = json.loads(platform_file.read_text())
         host_id = platform.get("host_id", platform["platform"])
@@ -55,48 +101,123 @@ def main() -> int:
                     "./scripts/build-plugin-manifests.py"
                 )
 
-    # Spec existence check: every hook entry in hooks/hooks.json must have
-    # a corresponding docs/hook/<name>.md file. Also validate the optional
-    # `hosts` field shape — empty list or non-list silently drops the hook
-    # from every platform, so block at CI rather than ship a footgun.
-    docs_dir = REPO_ROOT / "docs" / "hook"
-    for event_groups in hooks_source.get("hooks", {}).values():
-        for group in event_groups:
-            for hook in group.get("hooks", []):
-                cmd = hook.get("command", "")
-                hosts = hook.get("hosts")
-                if hosts is not None:
-                    if not isinstance(hosts, list):
-                        drifts.append(
-                            f"INVALID hosts in {cmd}: must be a list of strings, "
-                            f"got {type(hosts).__name__}"
-                        )
-                    elif len(hosts) == 0:
-                        drifts.append(
-                            f"INVALID hosts in {cmd}: empty list drops the hook "
-                            f"from every platform — omit the field to mean 'all hosts'"
-                        )
-                    elif not all(isinstance(h, str) for h in hosts):
-                        drifts.append(
-                            f"INVALID hosts in {cmd}: every entry must be a string"
-                        )
-                # Extract hook name: basename minus extension
-                hook_filename = Path(cmd.split("/")[-1]) if "/" in cmd else Path(cmd)
-                hook_name = hook_filename.stem
-                # Strip argument suffixes (e.g. "strike-counter.sh session-start" → "strike-counter")
-                hook_name = hook_name.split()[0] if " " in hook_name else hook_name
-                # Normalize -pre / -post variant scripts to their shared spec name
-                # (e.g. pre-edit-md-escape-advisory-pre → pre-edit-md-escape-advisory)
-                for suffix in ("-pre", "-post"):
-                    if hook_name.endswith(suffix):
-                        hook_name = hook_name[: -len(suffix)]
-                        break
-                spec = docs_dir / f"{hook_name}.md"
-                if not spec.exists():
-                    drifts.append(
-                        f"MISSING SPEC docs/hook/{hook_name}.md for hook: {cmd}"
-                    )
+    # ------------------------------------------------------------------
+    # Rule 1 — directory ↔ manifest cross-check
+    # Rule 2 — role field matches parent directory name
+    # Rule 3 — impl file exists on disk
+    # ------------------------------------------------------------------
+    manifest_by_name: dict[str, list[dict]] = {}
+    for entry in manifest["hooks"]:
+        manifest_by_name.setdefault(entry["name"], []).append(entry)
 
+    on_disk: dict[str, Path] = {}
+    for hook_dir in _hook_dirs():
+        on_disk[hook_dir.name] = hook_dir
+        role_on_disk = hook_dir.parent.name
+        if hook_dir.name in OPT_IN_HOOKS:
+            continue  # opt-in: no manifest entry expected
+        if hook_dir.name not in manifest_by_name:
+            drifts.append(
+                f"UNREGISTERED hooks/{role_on_disk}/{hook_dir.name}: "
+                f"directory exists but no manifest.json entry"
+            )
+            continue
+        for entry in manifest_by_name[hook_dir.name]:
+            if entry["role"] != role_on_disk:
+                drifts.append(
+                    f"ROLE MISMATCH {hook_dir.name}: directory says "
+                    f"{role_on_disk!r}, manifest says {entry['role']!r}"
+                )
+            impl_file = "impl.sh" if entry.get("body") == "impl.sh" else "impl.py"
+            if not (hook_dir / impl_file).exists():
+                drifts.append(
+                    f"MISSING IMPL hooks/{role_on_disk}/{hook_dir.name}/{impl_file}"
+                )
+
+    # Reverse: every manifest entry must have a directory
+    for name in manifest_by_name:
+        if name not in on_disk:
+            drifts.append(
+                f"MANIFEST GHOST {name}: manifest.json entry has no "
+                f"hooks/<role>/{name}/ directory"
+            )
+
+    # ------------------------------------------------------------------
+    # Rule 4 — completion-verify Stop ordering
+    # ------------------------------------------------------------------
+    expected_stop = ["completion-verify", "retrospect-mix-check",
+                     "completion-signal-gate", "strike-counter"]
+    actual_stop: list[str] = []
+    for entry in manifest["hooks"]:
+        if entry["event"] == "Stop":
+            actual_stop.append(entry["name"])
+    if actual_stop != expected_stop:
+        drifts.append(
+            f"STOP ORDERING: manifest Stop order {actual_stop!r} != "
+            f"expected {expected_stop!r}"
+        )
+
+    # ------------------------------------------------------------------
+    # Rule 6 — runtime wrapper byte-identity
+    # ------------------------------------------------------------------
+    expected_wrappers: dict[str, str] = {}
+    for entry in manifest["hooks"]:
+        fname = _build._wrapper_filename(entry)
+        body = _build._wrapper_body(entry)
+        if fname in expected_wrappers and expected_wrappers[fname] != body:
+            drifts.append(
+                f"WRAPPER BODY CONFLICT {fname}: manifest yields two "
+                "different bodies for the same wrapper"
+            )
+            continue
+        expected_wrappers[fname] = body
+
+    for fname, expected_body in expected_wrappers.items():
+        wrapper_path = _build.HOOKS_DIR / fname
+        if not wrapper_path.exists():
+            drifts.append(
+                f"WRAPPER MISSING hooks/{fname}: run "
+                "./scripts/build-plugin-manifests.py"
+            )
+            continue
+        actual_body = wrapper_path.read_text()
+        if actual_body != expected_body:
+            drifts.append(
+                f"WRAPPER DRIFT hooks/{fname}: regenerate with "
+                "./scripts/build-plugin-manifests.py"
+            )
+
+    # ------------------------------------------------------------------
+    # Spec existence check + hosts shape validation
+    # ------------------------------------------------------------------
+    docs_dir = REPO_ROOT / "docs" / "hook"
+    for entry in manifest["hooks"]:
+        hosts = entry.get("hosts")
+        if hosts is not None:
+            if not isinstance(hosts, list):
+                drifts.append(
+                    f"INVALID hosts {entry['name']}: must be a list of strings, "
+                    f"got {type(hosts).__name__}"
+                )
+            elif len(hosts) == 0:
+                drifts.append(
+                    f"INVALID hosts {entry['name']}: empty list drops the hook "
+                    "from every platform — omit the field to mean 'all hosts'"
+                )
+            elif not all(isinstance(h, str) for h in hosts):
+                drifts.append(
+                    f"INVALID hosts {entry['name']}: every entry must be a string"
+                )
+        spec = docs_dir / f"{entry['name']}.md"
+        if not spec.exists():
+            drifts.append(
+                f"MISSING SPEC docs/hook/{entry['name']}.md (hook registered "
+                "in manifest.json)"
+            )
+
+    # ------------------------------------------------------------------
+    # Codex adapter symlinks
+    # ------------------------------------------------------------------
     for name in _build.FORWARDED_DIRS:
         link = _build.ADAPTER_SHELL / name
         if not link.is_symlink():
@@ -111,7 +232,75 @@ def main() -> int:
                 f"expected '../../{name}'"
             )
 
-    # Version consistency: collect versioned plugin artifacts from platform manifests.
+    # ------------------------------------------------------------------
+    # Rule 7 — INDEX.md + ARCHITECTURE.md cross-check
+    # ------------------------------------------------------------------
+    index_md = (REPO_ROOT / "docs" / "hook" / "INDEX.md").read_text()
+    arch_md = (REPO_ROOT / "ARCHITECTURE.md").read_text()
+    seen_names: set[str] = set()
+    for entry in manifest["hooks"]:
+        name = entry["name"]
+        if name in seen_names:
+            continue
+        seen_names.add(name)
+        if name not in index_md:
+            drifts.append(
+                f"MISSING INDEX docs/hook/INDEX.md: {name} "
+                "(registered in manifest.json but not in INDEX.md)"
+            )
+        if name not in arch_md:
+            drifts.append(
+                f"MISSING INDEX ARCHITECTURE.md: {name} "
+                "(registered in manifest.json but not in ARCHITECTURE.md)"
+            )
+
+    # ------------------------------------------------------------------
+    # Rule 8 — Supported hosts cross-check
+    # ------------------------------------------------------------------
+    manifest_hosts: dict[str, list[str] | None] = {}
+    for entry in manifest["hooks"]:
+        # First registration wins (multi-event entries share the same hosts)
+        if entry["name"] not in manifest_hosts:
+            manifest_hosts[entry["name"]] = entry.get("hosts")
+
+    for spec_file in sorted(docs_dir.glob("*.md")):
+        if spec_file.name == "INDEX.md":
+            continue
+        hook_name = spec_file.stem
+        if hook_name not in manifest_hosts:
+            continue
+        spec_text = spec_file.read_text()
+        hosts_value: str | None = None
+        for line in spec_text.splitlines()[:10]:
+            if line.strip().lower().startswith("supported hosts:"):
+                hosts_value = line.split(":", 1)[1].strip()
+                break
+        if hosts_value is None:
+            continue
+        json_hosts = manifest_hosts[hook_name]
+        if hosts_value.lower() == "all":
+            if json_hosts is not None:
+                drifts.append(
+                    f"FAIL hosts mismatch {hook_name}: spec='all' "
+                    f"manifest={json_hosts!r} (remove hosts to mean all)"
+                )
+        else:
+            raw_tokens = hosts_value.split(",")
+            spec_set = {
+                t.split("(")[0].strip()
+                for t in raw_tokens
+                if t.split("(")[0].strip()
+            }
+            json_set = set(json_hosts) if json_hosts is not None else set()
+            if spec_set != json_set:
+                drifts.append(
+                    f"FAIL hosts mismatch {hook_name}: spec={sorted(spec_set)!r} "
+                    f"manifest={sorted(json_set)!r}"
+                )
+
+    # ------------------------------------------------------------------
+    # Rule 9 — Version consistency
+    # ------------------------------------------------------------------
     versioned_kinds = {"plugin", "gemini-extension"}
     seen: dict[str, str] = {}
     for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
@@ -126,159 +315,11 @@ def main() -> int:
             v = data.get("version") or (data.get("plugins") or [{}])[0].get("version")
             if v:
                 seen[output["path"]] = v
-    unique = set(seen.values())
-    if len(unique) > 1:
+    if len(set(seen.values())) > 1:
         drifts.append(
             "VERSION DRIFT across artifacts: "
             + ", ".join(f"{k}={v}" for k, v in seen.items())
         )
-
-    # Rule 1 — Hook index drift
-    # For each registered hook in hooks/hooks.json, verify it appears in both
-    # docs/hook/INDEX.md and ARCHITECTURE.md Hook index table.
-    index_md = (REPO_ROOT / "docs" / "hook" / "INDEX.md").read_text()
-    arch_md = (REPO_ROOT / "ARCHITECTURE.md").read_text()
-    seen_hook_names: set[str] = set()
-    for event_groups in hooks_source.get("hooks", {}).values():
-        for group in event_groups:
-            for hook in group.get("hooks", []):
-                cmd = hook.get("command", "")
-                hook_filename = Path(cmd.split("/")[-1]) if "/" in cmd else Path(cmd)
-                hook_name = hook_filename.stem
-                hook_name = hook_name.split()[0] if " " in hook_name else hook_name
-                for suffix in ("-pre", "-post"):
-                    if hook_name.endswith(suffix):
-                        hook_name = hook_name[: -len(suffix)]
-                        break
-                if hook_name in seen_hook_names:
-                    continue
-                seen_hook_names.add(hook_name)
-                if hook_name not in index_md:
-                    drifts.append(
-                        f"MISSING INDEX docs/hook/INDEX.md: {hook_name} "
-                        f"(registered in hooks.json but not in INDEX.md)"
-                    )
-                if hook_name not in arch_md:
-                    drifts.append(
-                        f"MISSING INDEX ARCHITECTURE.md: {hook_name} "
-                        f"(registered in hooks.json but not in ARCHITECTURE.md)"
-                    )
-
-    # Rule 2 — Supported hosts ↔ hosts array cross-check
-    # For each hook spec in docs/hook/*.md, compare the "Supported hosts:" line
-    # to the actual hosts field in hooks/hooks.json.
-    # Build a lookup: hook_name → hosts value from hooks.json (None = all hosts).
-    hooks_json_hosts: dict[str, list[str] | None] = {}
-    for event_groups in hooks_source.get("hooks", {}).values():
-        for group in event_groups:
-            for hook in group.get("hooks", []):
-                cmd = hook.get("command", "")
-                hook_filename = Path(cmd.split("/")[-1]) if "/" in cmd else Path(cmd)
-                hook_name = hook_filename.stem
-                hook_name = hook_name.split()[0] if " " in hook_name else hook_name
-                for suffix in ("-pre", "-post"):
-                    if hook_name.endswith(suffix):
-                        hook_name = hook_name[: -len(suffix)]
-                        break
-                # First registration wins (multiple groups may share same hook name)
-                if hook_name not in hooks_json_hosts:
-                    hooks_json_hosts[hook_name] = hook.get("hosts")
-
-    for spec_file in sorted(docs_dir.glob("*.md")):
-        if spec_file.name == "INDEX.md":
-            continue
-        hook_name = spec_file.stem
-        # Parse "Supported hosts:" from the spec (typically line 3, but scan first 10)
-        spec_text = spec_file.read_text()
-        hosts_value: str | None = None
-        for line in spec_text.splitlines()[:10]:
-            if line.strip().lower().startswith("supported hosts:"):
-                hosts_value = line.split(":", 1)[1].strip()
-                break
-        if hosts_value is None:
-            # No Supported hosts line — skip (spec not yet annotated)
-            continue
-
-        # Hooks not registered in hooks.json are opt-in — skip hosts cross-check
-        if hook_name not in hooks_json_hosts:
-            continue
-
-        json_hosts = hooks_json_hosts[hook_name]
-
-        if hosts_value.lower() == "all":
-            # Spec says all → hooks.json must have NO hosts field
-            if json_hosts is not None:
-                drifts.append(
-                    f"FAIL hosts mismatch {hook_name}: "
-                    f"spec='all' hooks.json={json_hosts!r} "
-                    f"(remove hosts array to mean all hosts)"
-                )
-        else:
-            # Spec lists explicit hosts — parse comma-separated, compare as sets.
-            # Strip parenthetical comments from each token (e.g. "claude (excludes …)")
-            # so only the bare host identifier is retained.
-            raw_tokens = hosts_value.split(",")
-            spec_set = {
-                t.split("(")[0].strip()
-                for t in raw_tokens
-                if t.split("(")[0].strip()
-            }
-            json_set = set(json_hosts) if json_hosts is not None else set()
-            if spec_set != json_set:
-                drifts.append(
-                    f"FAIL hosts mismatch {hook_name}: "
-                    f"spec={sorted(spec_set)!r} hooks.json={sorted(json_set)!r}"
-                )
-
-    # Rule 3 — Wrapper parallel-generation parity (ADR-0001 §5.1).
-    # For each source wrapper hooks/<name>.sh that has a sibling .py impl,
-    # confirm it ends up exec-ing the same .py file that the generator's
-    # canonical template targets. ADR §5.1 calls this "byte-equivalent
-    # (modulo header comment)"; strict line-by-line diff is impractical
-    # because the 39 hand-maintained wrappers use two prelude styles
-    # (`set +e` + inline exec vs `set -euo pipefail` + `PY=…` indirection),
-    # so we compare the load-bearing detail — the .py target referenced
-    # in the script body. Phase 2 will collapse both styles into the
-    # generator output and let us tighten this to a strict diff.
-    py_re = re.compile(r"([a-z0-9][a-z0-9_-]*\.py)")
-
-    def extract_py_target(text: str) -> str | None:
-        for line in text.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            m = py_re.search(stripped)
-            if m:
-                return m.group(1)
-        return None
-
-    for name in _build.discover_wrapper_targets():
-        source = REPO_ROOT / "hooks" / f"{name}.sh"
-        if not source.exists():
-            drifts.append(f"WRAPPER MISSING hooks/{name}.sh")
-            continue
-        source_target = extract_py_target(source.read_text())
-        # Generator's expected target — discover_wrapper_targets() returns the
-        # .sh stem (incl. -pre/-post variants); render_wrapper handles the
-        # multi-event normalization to the shared .py.
-        generated_target = extract_py_target(_build.render_wrapper(name))
-        if source_target is None:
-            drifts.append(
-                f"WRAPPER PARSE hooks/{name}.sh: no .py target found in body "
-                "(parity check cannot verify)"
-            )
-            continue
-        if generated_target is None:
-            drifts.append(
-                f"WRAPPER GENERATOR template did not yield an exec target for "
-                f"{name!r} — inspect render_wrapper()"
-            )
-            continue
-        if source_target != generated_target:
-            drifts.append(
-                f"WRAPPER PARITY hooks/{name}.sh: source execs {source_target!r}, "
-                f"generated execs {generated_target!r}"
-            )
 
     if drifts:
         print("plugin-manifest check FAILED:")
