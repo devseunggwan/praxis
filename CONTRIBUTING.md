@@ -130,7 +130,7 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
    - Reference the impl as `$ROOT_DIR/hooks/<role>/<name>/impl.{py,sh}` (or
      the wrapper at `$ROOT_DIR/hooks/<name>.sh` for body-as-sh hooks where
      the wrapper IS the impl invocation surface).
-6. Create `docs/hook/<name>.md` (template: any existing spec). Include a
+6. Create `hooks/<role>/<name>/spec.md` (template: any existing spec). Include a
    `Supported hosts:` line matching the `hosts` array in `manifest.json`.
 7. Add a row to the hook index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
 8. Run `./scripts/check-plugin-manifests.py` — it verifies the

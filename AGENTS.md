@@ -64,18 +64,19 @@ that structurally enforces the rules captured in [`ETHOS.md`](ETHOS.md).
 See [`DESIGN.md`](DESIGN.md) for the shared design contracts (structural
 tokenization, fail-open, session_id keying, compound-bash cascade) and
 [`ARCHITECTURE.md → Hook index`](ARCHITECTURE.md#hook-index) for the full
-list with links to per-hook specs under [`docs/hook/`](docs/hook/).
+list. Per-hook specs live at [`hooks/<role>/<name>/spec.md`](hooks/); the
+[`docs/hook/INDEX.md`](docs/hook/INDEX.md) index links to them.
 
 Hooks support host-aware filtering via an optional `hosts` field on each hook
-entry in `hooks/hooks.json`. When `hosts` is absent the hook is included for
+entry in `hooks/manifest.json`. When `hosts` is absent the hook is included for
 all platforms (default). When present it must be an array of host identifiers
 (`"claude"`, `"codex"`, etc.) — the hook is written only to the platform whose
 `host_id` in `manifests/platforms/<name>.json` appears in that list. The build
 script (`scripts/build-plugin-manifests.py`) reads this field and writes a
 platform-specific `hooks.json` for each platform under its plugin directory.
-Each per-hook spec in `docs/hook/` carries a `Supported hosts:` line that
-documents the classification; `scripts/check-plugin-manifests.py` verifies
-that every hook entry has a corresponding spec file.
+Each per-hook `spec.md` carries a `Supported hosts:` line that documents the
+classification; `scripts/check-plugin-manifests.py` verifies that every hook
+entry has a corresponding spec file.
 
 ## Provider Routing
 

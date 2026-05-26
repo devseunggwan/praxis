@@ -64,7 +64,8 @@ level (PreToolUse / PostToolUse / Stop / UserPromptSubmit). They fail-open
 on infrastructure errors — Claude Code never breaks, but violating patterns
 are blocked or warned before they land.
 
-Full hook index and per-hook specs: [`docs/hook/`](../../docs/hook/)
+Full hook index: [`docs/hook/INDEX.md`](../../docs/hook/INDEX.md) — links
+to per-hook specs at `hooks/<role>/<name>/spec.md`.
 
 ## Prerequisites
 

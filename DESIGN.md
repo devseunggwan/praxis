@@ -4,16 +4,17 @@ How praxis hooks are built. The mechanisms below implement the [hook
 ethos](ETHOS.md#hook-ethos) — they are the concrete primitives a new hook
 must reuse so the suite behaves coherently across sessions, shells, and
 platforms. The dependency graph between hooks, skills, and manifests lives
-in [`ARCHITECTURE.md`](ARCHITECTURE.md); per-hook specs live under
-[`docs/hook/<name>.md`](docs/hook/).
+in [`ARCHITECTURE.md`](ARCHITECTURE.md); per-hook specs live at
+[`hooks/<role>/<name>/spec.md`](hooks/) (the
+[`docs/hook/INDEX.md`](docs/hook/INDEX.md) index links to them).
 
 ## Hook Design Contracts
 
-Every hook ships with full spec in `docs/hook/<name>.md` — design rationale,
-matrix of blocked vs. passed commands, response JSON, parsing
+Every hook ships with full spec at `hooks/<role>/<name>/spec.md` — design
+rationale, matrix of blocked vs. passed commands, response JSON, parsing
 guarantees, fail-safe paths, and test summary. The hook index lives in
 [`ARCHITECTURE.md → Hook index`](ARCHITECTURE.md#hook-index); consult the
-per-hook file before editing.
+per-hook spec before editing.
 
 Design mechanisms shared by all hooks:
 
@@ -64,7 +65,7 @@ Design mechanisms shared by all hooks:
    generated file alongside the manifest entry — marketplace installs
    do not run this build) and all platform `hooks.json` files.
 5. Add the test at `tests/hooks/<role>/test_<name>.{sh,py}`.
-6. Create `docs/hook/<name>.md` (template: any existing spec).
+6. Create `hooks/<role>/<name>/spec.md` (template: any existing spec).
 7. Add a row to the index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
 8. Run `./scripts/check-plugin-manifests.py` — confirms the
    directory↔manifest cross-check, role agreement, byte-identical
