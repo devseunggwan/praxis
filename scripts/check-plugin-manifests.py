@@ -19,6 +19,8 @@ Phase 2 (ADR-0001) invariants:
   7. INDEX.md ↔ manifest entry cross-check.
   8. Spec `Supported hosts:` ↔ manifest `hosts` cross-check.
   9. Version consistency across versioned artifacts.
+  10. spec.md exists at hooks/<role>/<name>/spec.md for every registered
+      hook (Phase 3, ADR-0001 §5.3 — specs collocated with impl).
 
 CI invokes this; developers can too, via `./scripts/check-plugin-manifests.py`.
 """
@@ -190,7 +192,6 @@ def main() -> int:
     # ------------------------------------------------------------------
     # Spec existence check + hosts shape validation
     # ------------------------------------------------------------------
-    docs_dir = REPO_ROOT / "docs" / "hook"
     for entry in manifest["hooks"]:
         hosts = entry.get("hosts")
         if hosts is not None:
@@ -208,11 +209,11 @@ def main() -> int:
                 drifts.append(
                     f"INVALID hosts {entry['name']}: every entry must be a string"
                 )
-        spec = docs_dir / f"{entry['name']}.md"
+        spec = REPO_ROOT / "hooks" / entry["role"] / entry["name"] / "spec.md"
         if not spec.exists():
             drifts.append(
-                f"MISSING SPEC docs/hook/{entry['name']}.md (hook registered "
-                "in manifest.json)"
+                f"MISSING SPEC hooks/{entry['role']}/{entry['name']}/spec.md "
+                "(hook registered in manifest.json)"
             )
 
     # ------------------------------------------------------------------
@@ -263,10 +264,11 @@ def main() -> int:
         if entry["name"] not in manifest_hosts:
             manifest_hosts[entry["name"]] = entry.get("hosts")
 
-    for spec_file in sorted(docs_dir.glob("*.md")):
-        if spec_file.name == "INDEX.md":
+    for hook_dir in _hook_dirs():
+        spec_file = hook_dir / "spec.md"
+        if not spec_file.exists():
             continue
-        hook_name = spec_file.stem
+        hook_name = hook_dir.name
         if hook_name not in manifest_hosts:
             continue
         spec_text = spec_file.read_text()
