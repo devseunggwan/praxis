@@ -1,0 +1,322 @@
+{
+  "$schema": "./manifest.schema.json",
+  "description": "praxis hooks: Stop gate for completion-without-evidence, completion-signal phrase advisory (no-evidence-block), retrospect memory-bias gate, session-scoped three-strike discipline, PreToolUse(Bash) side-effect scan / gh search --state all block / memory-hint / caller-chain evidence gate on gh pr create / pre-commit evidence gate on gh pr create / pre-merge approval gate / cross-boundary pre-flight (heredoc block + cross-repo ask) / momentum-rule-retrieval-gate (gh pr merge / cmux dispatch / force-push), PreToolUse(AskUserQuestion) end-option mechanical-transcribe advisory + manufactured action-menu continuation guard, PostToolUse correction for built-in task management tools, UserPromptSubmit codex-review worktree disambiguation",
+  "hooks": [
+    {
+      "name": "strike-counter",
+      "role": "completion-verify",
+      "body": "impl.sh",
+      "event": "SessionStart",
+      "args": ["session-start"],
+      "timeout": 5
+    },
+    {
+      "name": "strike-counter",
+      "role": "completion-verify",
+      "body": "impl.sh",
+      "event": "UserPromptSubmit",
+      "args": ["preprompt"],
+      "timeout": 5
+    },
+    {
+      "name": "codex-review-route",
+      "role": "advisory-nudge",
+      "body": "impl.sh",
+      "event": "UserPromptSubmit",
+      "hosts": ["claude"],
+      "timeout": 5
+    },
+    {
+      "name": "session-intent",
+      "role": "preflight-gate",
+      "event": "UserPromptSubmit",
+      "timeout": 5
+    },
+    {
+      "name": "side-effect-scan",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "block-gh-state-all",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "cross-boundary-preflight",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "block-pr-without-caller-evidence",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": ["claude", "codex"],
+      "timeout": 5
+    },
+    {
+      "name": "block-pr-without-precommit-evidence",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": ["claude", "codex"],
+      "timeout": 5
+    },
+    {
+      "name": "pre-gh-pr-create-dedup-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 8
+    },
+    {
+      "name": "commit-title-length-check",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "pre-merge-approval-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "gh-flag-verify",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": ["claude", "codex"],
+      "timeout": 5
+    },
+    {
+      "name": "gh-label-verify",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": ["claude", "codex"],
+      "timeout": 15
+    },
+    {
+      "name": "gh-json-validator",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": ["claude", "codex"],
+      "timeout": 15
+    },
+    {
+      "name": "cli-flag-incompat-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "jq-config-empty-dict-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "bash-worktree-existence-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "verify-commit-flag-override",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "session-intent",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "output-block-falsify-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "count-assertion-verify",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "external-write-path-existence-check",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "version-bump-evidence-check",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": ["claude", "codex"],
+      "timeout": 5
+    },
+    {
+      "name": "momentum-rule-retrieval-gate",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": ["claude", "codex"],
+      "timeout": 5
+    },
+    {
+      "name": "block-sciomc-finding-commit",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "block-commit-without-codex-review",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": ["claude"],
+      "timeout": 5
+    },
+    {
+      "name": "block-gh-issue-create-without-dup-search",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "memory-hint",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash|Edit|Write|NotebookEdit|AskUserQuestion",
+      "timeout": 5
+    },
+    {
+      "name": "external-api-literal-trigger",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Write|Edit|Bash",
+      "timeout": 5
+    },
+    {
+      "name": "pre-edit-protected-branch-guard",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit",
+      "timeout": 10
+    },
+    {
+      "name": "path-probe-gate",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit",
+      "hosts": ["claude", "codex"],
+      "timeout": 8
+    },
+    {
+      "name": "pre-edit-md-escape-advisory",
+      "role": "postuse-correction",
+      "event": "PreToolUse",
+      "matcher": "Edit",
+      "args": ["pre"],
+      "wrapper_suffix": "-pre",
+      "timeout": 5
+    },
+    {
+      "name": "advisory-wrapper-signature-verify",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Write|Edit",
+      "timeout": 5
+    },
+    {
+      "name": "block-ask-end-option",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "AskUserQuestion",
+      "timeout": 5
+    },
+    {
+      "name": "block-manufactured-action-menu",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "AskUserQuestion",
+      "timeout": 5
+    },
+    {
+      "name": "output-block-falsify-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "AskUserQuestion",
+      "timeout": 5
+    },
+    {
+      "name": "builtin-task-postuse",
+      "role": "postuse-correction",
+      "event": "PostToolUse",
+      "matcher": "TaskCreate|TaskUpdate|TaskGet|TaskList|TaskStop|TaskOutput",
+      "timeout": 3
+    },
+    {
+      "name": "pre-edit-md-escape-advisory",
+      "role": "postuse-correction",
+      "event": "PostToolUse",
+      "matcher": "Read",
+      "args": ["post"],
+      "wrapper_suffix": "-post",
+      "timeout": 5
+    },
+    {
+      "name": "completion-verify",
+      "role": "completion-verify",
+      "body": "impl.sh",
+      "event": "Stop",
+      "timeout": 10
+    },
+    {
+      "name": "retrospect-mix-check",
+      "role": "completion-verify",
+      "body": "impl.sh",
+      "event": "Stop",
+      "timeout": 10
+    },
+    {
+      "name": "completion-signal-gate",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10
+    },
+    {
+      "name": "strike-counter",
+      "role": "completion-verify",
+      "body": "impl.sh",
+      "event": "Stop",
+      "args": ["stop"],
+      "timeout": 5
+    }
+  ]
+}

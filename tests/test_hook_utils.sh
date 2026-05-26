@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/test_hook_utils.sh — unit coverage for the shared helpers in
-# hooks/_hook_utils.py. Currently focused on the compound-cascade advisory
+# hooks/_lib/_hook_utils.py. Currently focused on the compound-cascade advisory
 # primitives added for issue #229:
 #
 #   is_compound_command(command) -> bool
@@ -16,11 +16,11 @@
 set +e
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-HOOKS_DIR="$REPO_ROOT/hooks"
-export PYTHONPATH="$HOOKS_DIR${PYTHONPATH:+:$PYTHONPATH}"
+HOOK_LIB_DIR="$REPO_ROOT/hooks/_lib"
+export PYTHONPATH="$HOOK_LIB_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
-if [ ! -f "$HOOKS_DIR/_hook_utils.py" ]; then
-  echo "FAIL: _hook_utils.py not found at $HOOKS_DIR" >&2
+if [ ! -f "$HOOK_LIB_DIR/_hook_utils.py" ]; then
+  echo "FAIL: _hook_utils.py not found at $HOOK_LIB_DIR" >&2
   exit 1
 fi
 

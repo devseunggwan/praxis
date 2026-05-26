@@ -17,10 +17,12 @@ per-hook file before editing.
 
 Design mechanisms shared by all hooks:
 
-- **Structural tokenization, not regex.** `hooks/_hook_utils.py`
+- **Structural tokenization, not regex.** `hooks/_lib/_hook_utils.py`
   (`safe_tokenize` → `iter_command_starts` → `strip_prefix`) is the shared
-  primitive. Quoted strings, comments, env prefixes, wrapper commands, and
-  shell control-flow keywords are handled consistently across all Bash hooks.
+  primitive. Per-hook `impl.py` files add it to `sys.path` via the three-
+  line preamble documented in [`CONTRIBUTING.md → Adding or modifying a hook`](CONTRIBUTING.md#adding-or-modifying-a-hook).
+  Quoted strings, comments, env prefixes, wrapper commands, and shell
+  control-flow keywords are handled consistently across all Bash hooks.
 - **Session state via `session_id`.** Per-session memory (intent flags,
   DESCRIBE history) keys on the payload's `session_id` field. PPID is a
   back-compat fallback for direct CLI / test invocation only.
@@ -38,7 +40,8 @@ Design mechanisms shared by all hooks:
 ## Hook ordering and precedence
 
 - PreToolUse hooks run **in parallel**. Decision precedence is
-  `deny > defer > ask > allow`. Order in `hooks.json` is presentational.
+  `deny > defer > ask > allow`. Order in `hooks/manifest.json` (and the
+  generated platform `hooks.json`) is presentational.
 - Stop hooks run **sequentially in array order**:
   `completion-verify` → `retrospect-mix-check` → `strike-counter stop`.
   Each gate is independent; first `decision: block` wins, fix it and re-run.
@@ -47,12 +50,25 @@ Design mechanisms shared by all hooks:
 
 ## Adding a new hook
 
-1. Survey ≥2 sibling implementations under `hooks/` for the convention
-   (state-key naming, payload field access, exit-code semantics). See the
-   `Convention Survey Before Design` rule in global `~/.claude/CLAUDE.md`.
-2. Write the hook + tests under `hooks/`, register in `hooks/hooks.json`.
-3. Create `docs/hook/<name>.md` using an existing spec as the template
-   (`Why this exists` / `What is blocked` / `Response` / `Parsing guarantees`
-   / `Tests`).
-4. Add a row to the index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
-5. Run `./scripts/check-plugin-manifests.py` to confirm packaging is clean.
+1. Survey ≥2 sibling implementations under `hooks/<role>/` for the
+   convention (state-key naming, payload field access, exit-code
+   semantics). See the `Convention Survey Before Design` rule in global
+   `~/.claude/CLAUDE.md`.
+2. Author `hooks/<role>/<name>/impl.py` (or `impl.sh` for body-as-sh),
+   make it executable, add the `sys.path` preamble for `_hook_utils`.
+3. Register the hook in [`hooks/manifest.json`](hooks/manifest.json) per
+   ADR-0001 §2.5 schema (`name`, `role`, `event`, `matcher`, `hosts`,
+   `timeout`, `args`, `body`, `wrapper_suffix` as applicable).
+4. Run `./scripts/build-plugin-manifests.py` — the build emits the
+   runtime wrapper at `hooks/<name>{suffix}.sh` (tracked; commit the
+   generated file alongside the manifest entry — marketplace installs
+   do not run this build) and all platform `hooks.json` files.
+5. Add the test at `tests/hooks/<role>/test_<name>.{sh,py}`.
+6. Create `docs/hook/<name>.md` (template: any existing spec).
+7. Add a row to the index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
+8. Run `./scripts/check-plugin-manifests.py` — confirms the
+   directory↔manifest cross-check, role agreement, byte-identical
+   generated artifacts, plus 5+ other invariants.
+
+See also [`CONTRIBUTING.md → Adding or modifying a hook`](CONTRIBUTING.md#adding-or-modifying-a-hook)
+for the full workflow including the `sys.path` preamble template.
