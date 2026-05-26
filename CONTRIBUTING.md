@@ -97,20 +97,44 @@ current gate.
 
 ## Adding or modifying a hook
 
-1. Survey ≥ 2 sibling implementations under `hooks/` for established conventions
-   (state-key naming, payload field access, exit-code semantics) before writing
-   your spec. See the **Convention Survey Before Design** rule in global `~/.claude/CLAUDE.md`.
-2. Write the hook + its test, register in `hooks/hooks.json`.
-   - Hook impl: `hooks/<name>.{py,sh}` (and a thin `<name>.sh` wrapper if the
-     impl is Python — the wrapper will be auto-generated under
-     `hooks/_generated/` once Phase 2 of [ADR-0001](docs/adr/0001-hook-layout.md)
-     lands; for now it stays hand-written next to the impl).
-   - Hook test: `tests/hooks/test_<name>.{sh,py}`. New tests go here, not
-     under `hooks/test-*.sh` (which Phase 1 consolidated; the old path is
-     gone).
-3. Create `docs/hook/<name>.md` (use an existing spec as a template).
-4. Add a row to the hook index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
-5. Run `./scripts/check-plugin-manifests.py` to confirm packaging is clean.
+Phase 2 of [ADR-0001](docs/adr/0001-hook-layout.md) shipped the role-based
+layout. Each hook now lives in its own directory under one of four roles
+(`preflight-gate`, `advisory-nudge`, `postuse-correction`, `completion-verify`),
+and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
+
+1. Survey ≥ 2 sibling implementations under `hooks/<role>/` for established
+   conventions (state-key naming, payload field access, exit-code semantics)
+   before writing your spec. See **Convention Survey Before Design** in
+   global `~/.claude/CLAUDE.md`.
+2. Author the hook in its own per-hook directory:
+   - Impl: `hooks/<role>/<name>/impl.py` (or `impl.sh` for body-as-sh hooks).
+   - Make it executable: `chmod +x hooks/<role>/<name>/impl.py`.
+   - For shared lib access, top of `impl.py`:
+     ```python
+     import sys as _sys
+     from pathlib import Path as _Path
+     _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+     from _hook_utils import ...
+     ```
+3. Register the hook in [`hooks/manifest.json`](hooks/manifest.json) (one
+   entry per `(event, matcher)` group). The entry must include `name`, `role`,
+   `event`, and `timeout`; add `matcher`, `hosts`, `args`, `body`, and
+   `wrapper_suffix` as needed. See ADR-0001 §2.5 for the schema.
+4. Run `./scripts/build-plugin-manifests.py` — this generates the runtime
+   wrapper at `hooks/<name>{suffix}.sh` (gitignored; the build re-emits it
+   on every run) and refreshes every platform's `hooks.json`.
+5. Write the test at `tests/hooks/<role>/test_<name>.{sh,py}`:
+   - Resolve repo root via `ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"`.
+   - Reference the impl as `$ROOT_DIR/hooks/<role>/<name>/impl.{py,sh}` (or
+     the wrapper at `$ROOT_DIR/hooks/<name>.sh` for body-as-sh hooks where
+     the wrapper IS the impl invocation surface).
+6. Create `docs/hook/<name>.md` (template: any existing spec). Include a
+   `Supported hosts:` line matching the `hosts` array in `manifest.json`.
+7. Add a row to the hook index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
+8. Run `./scripts/check-plugin-manifests.py` — it verifies the
+   directory↔manifest cross-check, role↔dirname agreement, impl existence,
+   Stop ordering, byte-equivalent generated artifacts, and 5+ more
+   invariants (see the script preamble).
 
 ## Packaging
 
@@ -128,11 +152,12 @@ To regenerate after changing `manifests/*.json` or `VERSION`:
 ./scripts/check-plugin-manifests.py   # verify no drift
 ```
 
-`check-plugin-manifests.py` also verifies (a) every hook in `hooks/hooks.json`
-appears in both `docs/hook/INDEX.md` and the `ARCHITECTURE.md` hook index
-table, and (b) each hook spec's `Supported hosts:` line agrees with the
-`hosts` array in `hooks/hooks.json` (`all` = no `hosts` field; explicit list
-= exact set match).
+`check-plugin-manifests.py` also verifies (a) every hook in
+`hooks/manifest.json` appears in both `docs/hook/INDEX.md` and the
+`ARCHITECTURE.md` hook index table, and (b) each hook spec's
+`Supported hosts:` line agrees with the `hosts` array in
+`hooks/manifest.json` (`all` = no `hosts` field; explicit list = exact set
+match).
 
 ## Commit conventions
 
@@ -156,23 +181,19 @@ Fixed, Removed.
 python -m pytest tests/
 
 # Run the shell-based hook tests directly (pytest only collects .py files)
-for f in tests/hooks/test_*.sh; do bash "$f"; done
+for f in tests/hooks/*/test_*.sh; do bash "$f"; done
 ```
 
-New hooks must ship with a test under `tests/hooks/`:
+New hooks must ship with a test under `tests/hooks/<role>/`:
 
-- `tests/hooks/test_<name>.sh` for shell-driven coverage (synthesise a
-  Claude Code hook payload, pipe into the hook, assert exit code + stderr).
-- `tests/hooks/test_<name>.py` for pytest-style coverage (matches the
-  existing `test_completion_signal_gate.py` pattern).
+- `tests/hooks/<role>/test_<name>.sh` for shell-driven coverage (synthesise
+  a Claude Code hook payload, pipe into the hook, assert exit code + stderr).
+- `tests/hooks/<role>/test_<name>.py` for pytest-style coverage (matches
+  `tests/hooks/completion-verify/test_completion_signal_gate.py`).
 
-Tests reference the hook via `$ROOT_DIR/hooks/<name>.{sh,py}` where
-`ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"` — never hard-code repo paths.
+Tests reference the hook via `$ROOT_DIR/hooks/<role>/<name>/impl.{py,sh}`
+where `ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"` — never hard-code
+repo paths.
 
 New skills do not require automated tests, but must satisfy the live
 runtime verification requirement described above.
-
-> Phase 2 of [ADR-0001](docs/adr/0001-hook-layout.md) will re-shard
-> `tests/hooks/` into `tests/hooks/<role>/test_<name>.{sh,py}` and update
-> the helper loops to match. Until then, the flat layout under
-> `tests/hooks/` is the source of truth.

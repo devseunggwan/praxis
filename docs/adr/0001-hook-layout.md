@@ -572,8 +572,8 @@ After one full release cycle following Phase 3, delete the 39
 |------|----------|------------|
 | 2026-05-26 | ADR drafted, Status = Proposed | praxis maintainers |
 | 2026-05-26 | Status → Accepted | praxis maintainers |
-| TBD | Phase 1 merged | — |
-| TBD | Phase 2 merged | — |
+| 2026-05-26 | Phase 1 merged (#421 / PR #424) | praxis maintainers |
+| 2026-05-26 | Phase 2 merged (#422) — role dirs + per-hook folders + `manifest.json` + wrapper drop | praxis maintainers |
 | TBD | Phase 3 merged | — |
 | TBD | Status → Accepted (post-Phase-3 soak) | — |
 
