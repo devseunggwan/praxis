@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `block-commit-without-codex-review` hook (PreToolUse(Bash), claude-host): hard-blocks content `git commit` when `praxis:codex-review-wrap` has not been invoked this session; escape via `[skip-codex-review]` token or `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1` (#425)
+
 ## [5.2.0] - 2026-05-26
 
 18 PRs since 5.1.0 — 9 feat plus fixes, refactors, tests, and docs. All additive — semver minor.
