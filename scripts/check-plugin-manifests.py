@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -228,6 +229,56 @@ def main() -> int:
                     f"FAIL hosts mismatch {hook_name}: "
                     f"spec={sorted(spec_set)!r} hooks.json={sorted(json_set)!r}"
                 )
+
+    # Rule 3 — Wrapper parallel-generation parity (ADR-0001 §5.1).
+    # For each source wrapper hooks/<name>.sh that has a sibling .py impl,
+    # confirm it ends up exec-ing the same .py file that the generator's
+    # canonical template targets. ADR §5.1 calls this "byte-equivalent
+    # (modulo header comment)"; strict line-by-line diff is impractical
+    # because the 39 hand-maintained wrappers use two prelude styles
+    # (`set +e` + inline exec vs `set -euo pipefail` + `PY=…` indirection),
+    # so we compare the load-bearing detail — the .py target referenced
+    # in the script body. Phase 2 will collapse both styles into the
+    # generator output and let us tighten this to a strict diff.
+    py_re = re.compile(r"([a-z0-9][a-z0-9_-]*\.py)")
+
+    def extract_py_target(text: str) -> str | None:
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            m = py_re.search(stripped)
+            if m:
+                return m.group(1)
+        return None
+
+    for name in _build.discover_wrapper_targets():
+        source = REPO_ROOT / "hooks" / f"{name}.sh"
+        if not source.exists():
+            drifts.append(f"WRAPPER MISSING hooks/{name}.sh")
+            continue
+        source_target = extract_py_target(source.read_text())
+        # Generator's expected target — discover_wrapper_targets() returns the
+        # .sh stem (incl. -pre/-post variants); render_wrapper handles the
+        # multi-event normalization to the shared .py.
+        generated_target = extract_py_target(_build.render_wrapper(name))
+        if source_target is None:
+            drifts.append(
+                f"WRAPPER PARSE hooks/{name}.sh: no .py target found in body "
+                "(parity check cannot verify)"
+            )
+            continue
+        if generated_target is None:
+            drifts.append(
+                f"WRAPPER GENERATOR template did not yield an exec target for "
+                f"{name!r} — inspect render_wrapper()"
+            )
+            continue
+        if source_target != generated_target:
+            drifts.append(
+                f"WRAPPER PARITY hooks/{name}.sh: source execs {source_target!r}, "
+                f"generated execs {generated_target!r}"
+            )
 
     if drifts:
         print("plugin-manifest check FAILED:")
