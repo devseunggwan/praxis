@@ -25,7 +25,9 @@ Writes (generated artifacts, committed to the repo):
   .opencode/plugin.json
   .opencode/hooks/hooks.json
   hooks/<name>{suffix}.sh        — runtime wrapper(s), one per unique
-                                   (name, wrapper_suffix) pair; gitignored
+                                   (name, wrapper_suffix) pair; tracked
+                                   so marketplace installs (which do not
+                                   run this build) get a working tree
 
 Also creates `plugins/praxis/{skills,hooks,scripts}` as symlinks into the
 repo root so the Codex adapter shell forwards to the common runtime

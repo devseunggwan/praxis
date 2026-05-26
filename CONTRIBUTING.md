@@ -121,8 +121,10 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
    `event`, and `timeout`; add `matcher`, `hosts`, `args`, `body`, and
    `wrapper_suffix` as needed. See ADR-0001 §2.5 for the schema.
 4. Run `./scripts/build-plugin-manifests.py` — this generates the runtime
-   wrapper at `hooks/<name>{suffix}.sh` (gitignored; the build re-emits it
-   on every run) and refreshes every platform's `hooks.json`.
+   wrapper at `hooks/<name>{suffix}.sh` (tracked; the build re-emits it
+   on every run, and commits must include the new wrapper because
+   marketplace installs do not invoke the build script) and refreshes
+   every platform's `hooks.json`.
 5. Write the test at `tests/hooks/<role>/test_<name>.{sh,py}`:
    - Resolve repo root via `ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"`.
    - Reference the impl as `$ROOT_DIR/hooks/<role>/<name>/impl.{py,sh}` (or

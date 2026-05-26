@@ -60,8 +60,9 @@ Design mechanisms shared by all hooks:
    ADR-0001 §2.5 schema (`name`, `role`, `event`, `matcher`, `hosts`,
    `timeout`, `args`, `body`, `wrapper_suffix` as applicable).
 4. Run `./scripts/build-plugin-manifests.py` — the build emits the
-   runtime wrapper at `hooks/<name>{suffix}.sh` (gitignored) and all
-   platform `hooks.json` files.
+   runtime wrapper at `hooks/<name>{suffix}.sh` (tracked; commit the
+   generated file alongside the manifest entry — marketplace installs
+   do not run this build) and all platform `hooks.json` files.
 5. Add the test at `tests/hooks/<role>/test_<name>.{sh,py}`.
 6. Create `docs/hook/<name>.md` (template: any existing spec).
 7. Add a row to the index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
