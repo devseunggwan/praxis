@@ -55,7 +55,14 @@ def main() -> int:
     if tool_name not in {"Write", "Edit", "NotebookEdit"}:
         return 0
 
-    file_path = payload.get("tool_input", {}).get("file_path", "")
+    # NotebookEdit payload uses `notebook_path`, not `file_path`.
+    # Mirrors the convention in memory-hint.py:268, path-probe-gate.py:228,
+    # and pre-edit-protected-branch-guard.py:300.
+    tool_input = payload.get("tool_input", {})
+    if tool_name == "NotebookEdit":
+        file_path = tool_input.get("notebook_path", "")
+    else:
+        file_path = tool_input.get("file_path", "")
     if not isinstance(file_path, str) or not file_path:
         return 0
 

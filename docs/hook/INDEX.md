@@ -55,6 +55,7 @@ so the agent can self-correct. Fail-open on infrastructure errors by design.
 | [codex-review-route](codex-review-route.md) | UserPromptSubmit | Warn when `/codex:review` runs in a multi-worktree repo (cwd mismatch risk) |
 | [external-write-path-existence-check](external-write-path-existence-check.md) | PreToolUse | Advisory nudge when a `gh issue/pr` body file contains markdown links to repo paths that do not exist |
 | [path-probe-gate](path-probe-gate.md) | PreToolUse | Advisory nudge (opt-in strict: deny) when Write/Edit/NotebookEdit targets a nested worktree path whose parent has not been enumerated this session |
+| [bulk-write-memory-checkpoint](bulk-write-memory-checkpoint.md) | PreToolUse | Advisory nudge when Write/Edit/NotebookEdit targets an SOT-flagged path (vault, wiki, skills, AGENTS.md, CLAUDE.md) — reminds that bulk-authoring loops collapse N decisions into 1 and memory retrieval at task entry does not propagate per-file |
 | [version-bump-evidence-check](version-bump-evidence-check.md) | PreToolUse | Advisory nudge (opt-in strict) when `gh issue/pr` body describes an external version bump with no changelog URL, Fetched: line, or cross-reference matrix |
 | [count-assertion-verify](count-assertion-verify.md) | PreToolUse | Advisory nudge when `grep -c` with alternation (`\|` BRE or `\|` ERE/PCRE) runs without per-arm verification; prevents citing inflated alternation counts — issue #277 |
 

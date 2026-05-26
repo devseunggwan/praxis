@@ -191,6 +191,11 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/path-probe-gate.sh",
             "timeout": 8
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/bulk-write-memory-checkpoint.sh",
+            "timeout": 5
           }
         ]
       },
