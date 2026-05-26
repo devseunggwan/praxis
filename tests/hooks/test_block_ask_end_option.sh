@@ -16,7 +16,8 @@
 set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-HOOK="$SCRIPT_DIR/block-ask-end-option.sh"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+HOOK="$ROOT_DIR/hooks/block-ask-end-option.sh"
 
 if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook not executable: $HOOK" >&2

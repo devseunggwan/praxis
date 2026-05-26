@@ -16,8 +16,9 @@
 set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PRE_HOOK="$SCRIPT_DIR/pre-edit-md-escape-advisory-pre.sh"
-POST_HOOK="$SCRIPT_DIR/pre-edit-md-escape-advisory-post.sh"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PRE_HOOK="$ROOT_DIR/hooks/pre-edit-md-escape-advisory-pre.sh"
+POST_HOOK="$ROOT_DIR/hooks/pre-edit-md-escape-advisory-post.sh"
 
 if [ ! -x "$PRE_HOOK" ]; then
   echo "FAIL: pre-hook not executable: $PRE_HOOK" >&2

@@ -11,7 +11,8 @@
 set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-HOOK="$SCRIPT_DIR/block-pr-without-caller-evidence.sh"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+HOOK="$ROOT_DIR/hooks/block-pr-without-caller-evidence.sh"
 
 if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook not executable: $HOOK" >&2
@@ -222,7 +223,7 @@ payload = json.dumps({
     "tool_input": {"command": sys.argv[1]},
 })
 sys.stdout.write(payload)
-' "$1" | python3 "$(dirname "$0")/block-pr-without-caller-evidence.py" 2>&1 >/dev/null || true
+' "$1" | python3 "$ROOT_DIR/hooks/block-pr-without-caller-evidence.py" 2>&1 >/dev/null || true
 }
 
 # Positive: compound bash with heredoc redirect → hint appears
