@@ -14,7 +14,8 @@
 
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-STRIKE="$SCRIPT_DIR/strike-counter.sh"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+STRIKE="$ROOT_DIR/hooks/strike-counter.sh"
 
 PASS=0
 FAIL=0
@@ -230,7 +231,7 @@ test_ac12_status_header() {
 
 # ---- AC13: hooks.json is valid JSON ----------------------------------------
 test_ac13_hooks_json_valid() {
-  jq . "$SCRIPT_DIR/hooks.json" >/dev/null 2>&1
+  jq . "$ROOT_DIR/hooks/hooks.json" >/dev/null 2>&1
 }
 
 # ---- AC14: session-start exports session_id via $CLAUDE_ENV_FILE -----------
@@ -271,12 +272,10 @@ test_ac15_jq_missing_guidance() {
 
 # ---- AC16 (plan AC9): skill files exist + reference strike-counter.sh ------
 test_ac16_skill_files_exist() {
-  local root
-  root=$(cd "$SCRIPT_DIR/.." && pwd)
   local ok=1
   for s in strike strikes reset-strikes; do
-    [ -f "$root/skills/$s/SKILL.md" ] || ok=0
-    grep -q "strike-counter.sh" "$root/skills/$s/SKILL.md" 2>/dev/null || ok=0
+    [ -f "$ROOT_DIR/skills/$s/SKILL.md" ] || ok=0
+    grep -q "strike-counter.sh" "$ROOT_DIR/skills/$s/SKILL.md" 2>/dev/null || ok=0
   done
   [ "$ok" -eq 1 ]
 }

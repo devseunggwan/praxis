@@ -11,7 +11,8 @@
 set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-HOOK="$SCRIPT_DIR/pre-edit-protected-branch-guard.sh"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+HOOK="$ROOT_DIR/hooks/pre-edit-protected-branch-guard.sh"
 
 if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook not executable: $HOOK" >&2
