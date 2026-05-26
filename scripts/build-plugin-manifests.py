@@ -223,8 +223,21 @@ def _wrapper_body(entry: dict) -> str:
     return WRAPPER_PY_TEMPLATE.format(role=role, name=name, baked_args=baked_args)
 
 
+# Opt-in hooks: live on disk under hooks/<role>/<name>/ but are NOT
+# registered in manifest.json (user must add a hooks entry to their own
+# settings.json or hooks.json fragment to activate). The build still
+# emits a wrapper at hooks/<name>.sh so the documented opt-in command
+# `${CLAUDE_PLUGIN_ROOT}/hooks/<name>.sh` resolves — without this,
+# docs/hook/<name>.md guidance would break on first user attempt.
+OPT_IN_HOOKS: dict[str, str] = {
+    # name → role
+    "external-write-falsify-check": "advisory-nudge",
+}
+
+
 def emit_wrappers(manifest: dict) -> list[str]:
-    """Generate hooks/<name>{suffix}.sh wrappers from the manifest.
+    """Generate hooks/<name>{suffix}.sh wrappers from the manifest +
+    the OPT_IN_HOOKS set.
 
     Returns relative paths that were created or rewritten. Multiple
     manifest entries that share the same (name, wrapper_suffix) emit a
@@ -242,6 +255,17 @@ def emit_wrappers(manifest: dict) -> list[str]:
                     f"emitted with two different bodies"
                 )
             continue
+        emitted[fname] = body
+
+    # Opt-in hooks: not in manifest, but their documented invocation
+    # path goes through hooks/<name>.sh, so emit a wrapper anyway.
+    for opt_in_name, opt_in_role in OPT_IN_HOOKS.items():
+        fname = f"{opt_in_name}.sh"
+        if fname in emitted:
+            continue  # opt-in name collides with a manifest entry — manifest wins
+        body = WRAPPER_PY_TEMPLATE.format(
+            role=opt_in_role, name=opt_in_name, baked_args=""
+        )
         emitted[fname] = body
 
     changed: list[str] = []
