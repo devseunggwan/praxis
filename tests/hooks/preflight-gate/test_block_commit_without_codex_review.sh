@@ -12,8 +12,8 @@
 set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-HOOK="$ROOT_DIR/hooks/block-commit-without-codex-review.sh"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+HOOK="$ROOT_DIR/hooks/preflight-gate/block-commit-without-codex-review/impl.py"
 
 if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook not executable: $HOOK" >&2

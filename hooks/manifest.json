@@ -194,6 +194,14 @@
       "timeout": 5
     },
     {
+      "name": "block-commit-without-codex-review",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": ["claude"],
+      "timeout": 5
+    },
+    {
       "name": "block-gh-issue-create-without-dup-search",
       "role": "preflight-gate",
       "event": "PreToolUse",
