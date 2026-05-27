@@ -199,19 +199,20 @@ def _is_git_binary(token: str) -> bool:
     return stripped == "git" or stripped.endswith("/git")
 
 
-def _commit_invocation_args(command: str) -> list[str] | None:
-    """Return the argument tokens of the first real `git commit` invocation —
-    from the `commit` subcommand token up to the next shell separator or the
-    next `git` invocation — or None if the command contains no `git commit`.
+# Command-substitution spans. Bash executes the inner command even when the
+# substitution sits inside double quotes — where shlex keeps the whole quoted
+# string as a single token — so a content commit can hide in `echo "$(git
+# commit …)"` or `x="$(git …)"`. We extract each span and re-scan it. Non-greedy
+# inner capture is sufficient for *detection* (we only need git+commit
+# adjacency, not a perfect parse), so nested `)` truncation is harmless.
+_CMD_SUBST_RE = re.compile(r"\$\((.*?)\)|`([^`]*)`", re.DOTALL)
 
-    Token-level detection means `git commit` inside a quoted argument
-    (`echo "git commit"`, `git log --grep="git commit"`) is not a `git`+`commit`
-    adjacency and is ignored, and `git commit-tree` tokenizes as the single
-    token `commit-tree` (≠ `commit`) so plumbing subcommands do not match.
-    Non-content subcommands (`merge`, `rebase`, `cherry-pick`, `revert`) are
-    also not `commit` and return None.
-    """
-    tokens = _tokenize(command)
+
+def _scan_tokens_for_commit(tokens: list[str] | None) -> list[str] | None:
+    """Walk shlex tokens and return the arg tokens of the first real
+    `git commit` invocation (from the `commit` token up to the next shell
+    separator or next `git`), or None. `git commit-tree` (single token
+    `commit-tree` ≠ `commit`) and non-content subcommands return None."""
     if tokens is None:
         return None
     n = len(tokens)
@@ -244,6 +245,29 @@ def _commit_invocation_args(command: str) -> list[str] | None:
             i = j
             continue
         i += 1
+    return None
+
+
+def _commit_invocation_args(command: str) -> list[str] | None:
+    """Return the argument tokens of the first real `git commit` invocation, or
+    None if the command runs no `git commit`.
+
+    Hybrid detection: (1) direct shlex tokenization handles plain, grouped
+    (`(git …)`), unquoted-substitution (`$(git …)`), and separator-chained
+    forms; (2) a command-substitution span scan handles QUOTED substitution
+    (`echo "$(git commit …)"`, `x="$(git …)"`) that shlex folds into one token.
+    A plain quoted literal (`echo "git commit"`, `--grep="git commit"`) has no
+    `$(…)`/backtick span and no `git`+`commit` token adjacency, so it is
+    correctly ignored — the precision the token approach was introduced for.
+    """
+    args = _scan_tokens_for_commit(_tokenize(command))
+    if args is not None:
+        return args
+    for m in _CMD_SUBST_RE.finditer(command):
+        inner = m.group(1) if m.group(1) is not None else m.group(2)
+        args = _scan_tokens_for_commit(_tokenize(inner))
+        if args is not None:
+            return args
     return None
 
 

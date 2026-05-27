@@ -151,6 +151,22 @@ run_case "command-substitution git commit (block)" \
   "block" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo \$(git commit -m 'fix: subst')\"},\"transcript_path\":\"$TX_FINDING\"}"
 
+# QUOTED command-substitution: bash executes the inner commit even inside double
+# quotes (shlex folds it into one token) — hybrid span scan must catch it
+run_case "quoted command-substitution echo (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo \\\"\$(git commit -m subst)\\\"\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# assignment with quoted command-substitution
+run_case "assignment quoted command-substitution (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"out=\\\"\$(git commit -m subst)\\\"\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# quoted command-substitution of a NON-commit must NOT match
+run_case "quoted command-substitution git status (silent)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo \\\"\$(git status)\\\"\"},\"transcript_path\":\"$TX_FINDING\"}"
+
 # space-less shell separator: `true;git commit` must tokenize git as its own token
 run_case "no-space semicolon separator before git commit (block)" \
   "block" \
