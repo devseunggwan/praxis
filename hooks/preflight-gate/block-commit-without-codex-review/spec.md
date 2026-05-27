@@ -67,18 +67,37 @@ match `commit` via a `\b` boundary; and `echo "git commit"` /
 command. A `git commit` invocation is recognised only as a token-level
 `git` → `commit` adjacency.
 
+The tokenizer uses `shlex.shlex(punctuation_chars=True)` (ported from
+`block-sciomc-finding-commit` PR #445) which splits shell operators (`;`, `|`,
+`(`, `)`) into their own tokens even without surrounding spaces. A hybrid
+two-layer approach is used:
+
+1. **Direct tokenisation** detects plain commits, grouped commits `(git commit
+   …)`, unquoted command-substitution `$(git commit …)`, and separator-chained
+   forms `true;git commit …`.
+2. **Span scan** (`_extract_substitutions`) detects commits inside
+   double-quoted command-substitution spans `"$(git commit …)"` that `shlex`
+   folds into a single token.
+
+Single-quoted text `'$(git commit …)'` is treated as a literal string (bash
+does not execute it) — correctly ignored.
+
 ### Tests
 
 ```bash
-bash tests/hooks/test_block_commit_without_codex_review.sh
+bash tests/hooks/preflight-gate/test_block_commit_without_codex_review.sh
 ```
 
-Covers 32 cases: block paths (no invocation, wrong skill, `-F` body, prose-only
+Covers 47 cases: block paths (no invocation, wrong skill, `-F` body, prose-only
 slash mention), pass paths (Skill tool_use, slash command, garbage-line
 resilience), exemptions (amend / allow-empty / merge / revert / rebase /
 cherry-pick), escape hatches (`-m` skip token incl. joined / `--message=`
 forms, env bypass), token-level edge cases (`git commit-tree` plumbing,
 `echo "git commit"`, `git log --grep`, `--amend` inside the message, skip
-token outside the message via `;` / `&&`, commit after `&&`), out-of-scope
-(non-Bash tool, `git push` / `git status`), and fail-open (no `transcript_path`,
-nonexistent path, malformed stdin, unparseable command).
+token outside the message via `;` / `&&`, commit after `&&`),
+hardened-parser bypass forms (grouped `(git commit …)`, unquoted substitution
+`$(git commit …)`, no-space separator `true;git commit …`, nested substitution,
+quoted substitution, single-quoted literal pass, double-quoted literal pass,
+terminal options `--help`/`--version`), out-of-scope (non-Bash tool, `git push`
+/ `git status`), and fail-open (no `transcript_path`, nonexistent path,
+malformed stdin, unparseable command).
