@@ -26,26 +26,88 @@ FAILED_NAMES=()
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# Fixture: transcript with sciomc finding markers
+# Fixture: transcript with sciomc structured finding markers
 TX_FINDING="$TMPDIR/tx-finding.jsonl"
 cat > "$TX_FINDING" <<'EOF'
-{"type":"assistant","message":"Running sciomc Stage 5 analysis"}
+{"type":"assistant","message":"Running sciomc analysis"}
 {"type":"tool_use","content":"[FINDING:F1] sibling-deviant pattern detected"}
+{"type":"assistant","message":"about to commit"}
+EOF
+
+# Fixture: transcript with [CONFLICTS:] marker
+TX_CONFLICTS="$TMPDIR/tx-conflicts.jsonl"
+cat > "$TX_CONFLICTS" <<'EOF'
+{"type":"assistant","message":"sciomc output:"}
+{"type":"tool_use","content":"[CONFLICTS: design choice in PR body vs sibling convention]"}
+{"type":"assistant","message":"about to commit"}
+EOF
+
+# Fixture: [CONFLICTS:] payload that includes "user-stated design" text — must still block
+TX_CONFLICTS_USD="$TMPDIR/tx-conflicts-usd.jsonl"
+cat > "$TX_CONFLICTS_USD" <<'EOF'
+{"type":"assistant","message":"sciomc output:"}
+{"type":"tool_use","content":"[CONFLICTS: user-stated design vs sibling convention]"}
+{"type":"assistant","message":"about to commit"}
+EOF
+
+# Fixture: transcript with [STAGE_COMPLETE:N] marker
+TX_STAGE_COMPLETE="$TMPDIR/tx-stage-complete.jsonl"
+cat > "$TX_STAGE_COMPLETE" <<'EOF'
+{"type":"assistant","message":"sciomc output:"}
+{"type":"tool_use","content":"[STAGE_COMPLETE:2] stage 2 done"}
+{"type":"assistant","message":"about to commit"}
+EOF
+
+# Fixture: transcript with 의미 mismatch marker
+TX_UIMI_MISMATCH="$TMPDIR/tx-uimi-mismatch.jsonl"
+cat > "$TX_UIMI_MISMATCH" <<'EOF'
+{"type":"assistant","message":"의미 mismatch detected in sibling convention analysis"}
+{"type":"assistant","message":"about to commit"}
+EOF
+
+# Fixture: transcript with 의미 충돌 marker
+TX_UIMI_CONFLICT="$TMPDIR/tx-uimi-conflict.jsonl"
+cat > "$TX_UIMI_CONFLICT" <<'EOF'
+{"type":"assistant","message":"의미 충돌: 두 sibling 간 설계 불일치"}
+{"type":"assistant","message":"about to commit"}
+EOF
+
+# Fixture: transcript with 의미 충돌 + Hangul particle attachment (조사 결합)
+TX_UIMI_CONFLICT_PARTICLE="$TMPDIR/tx-uimi-conflict-particle.jsonl"
+cat > "$TX_UIMI_CONFLICT_PARTICLE" <<'EOF'
+{"type":"assistant","message":"의미 충돌이 감지됩니다 — sibling 간 설계 충돌"}
+{"type":"assistant","message":"about to commit"}
+EOF
+
+# Fixture: transcript with 의미 mismatch + Hangul particle attachment (조사 결합)
+TX_UIMI_MISMATCH_PARTICLE="$TMPDIR/tx-uimi-mismatch-particle.jsonl"
+cat > "$TX_UIMI_MISMATCH_PARTICLE" <<'EOF'
+{"type":"assistant","message":"의미 mismatch가 있습니다 — 정렬 필요"}
 {"type":"assistant","message":"about to commit"}
 EOF
 
 # Fixture: transcript with sciomc finding AND consensus re-fetch after
 TX_FINDING_REFETCH="$TMPDIR/tx-finding-refetch.jsonl"
 cat > "$TX_FINDING_REFETCH" <<'EOF'
-{"type":"assistant","message":"sciomc Stage 5 sibling-deviant"}
+{"type":"assistant","message":"sibling-deviant pattern detected"}
 {"type":"tool_use","content":"gh pr view 8299 --json body --jq .body"}
 {"type":"assistant","message":"compared with user design"}
 EOF
 
-# Fixture: transcript with no finding markers
+# Fixture: transcript with no finding markers (prose-only, no structured tokens)
 TX_NORMAL="$TMPDIR/tx-normal.jsonl"
 cat > "$TX_NORMAL" <<'EOF'
 {"type":"assistant","message":"normal fix work"}
+EOF
+
+# Fixture: transcript with removed-prose-only markers (FP regression)
+TX_FP_PROSE="$TMPDIR/tx-fp-prose.jsonl"
+cat > "$TX_FP_PROSE" <<'EOF'
+{"type":"assistant","message":"deep-dive 하자"}
+{"type":"assistant","message":"cross-validation 결과를 확인했다"}
+{"type":"assistant","message":"sciomc 라는 도구가 있음"}
+{"type":"assistant","message":"scientist-agent 가 실행됨"}
+{"type":"assistant","message":"Stage 2 analysis 시작"}
 EOF
 
 # run_case name expectation payload_json [env_vars...]
@@ -197,6 +259,40 @@ run_case "semicolon inside message value still blocks (no token)" \
   "block" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: a;b'\"},\"transcript_path\":\"$TX_FINDING\"}"
 
+# NEW: [CONFLICTS:] marker (Layer 2 addition — sciomc emits this for design conflicts)
+run_case "[CONFLICTS:] marker blocks commit" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: use sibling pattern'\"},\"transcript_path\":\"$TX_CONFLICTS\"}"
+
+# [CONFLICTS:] payload containing "user-stated design" must not self-satisfy re-fetch check
+run_case "[CONFLICTS: user-stated design] does not self-satisfy re-fetch (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: apply finding'\"},\"transcript_path\":\"$TX_CONFLICTS_USD\"}"
+
+# NEW: [STAGE_COMPLETE:N] marker with digit
+run_case "[STAGE_COMPLETE:2] marker blocks commit" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: stage 2 result'\"},\"transcript_path\":\"$TX_STAGE_COMPLETE\"}"
+
+# NEW: 의미 mismatch Korean praxis-unique marker
+run_case "의미 mismatch marker blocks commit" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: align'\"},\"transcript_path\":\"$TX_UIMI_MISMATCH\"}"
+
+# NEW: 의미 충돌 Korean praxis-unique marker
+run_case "의미 충돌 marker blocks commit" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: resolve'\"},\"transcript_path\":\"$TX_UIMI_CONFLICT\"}"
+
+# Korean particle attachment: 의미 충돌이 / 의미 mismatch가 must also block
+run_case "의미 충돌이 (particle attachment) blocks commit" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: resolve'\"},\"transcript_path\":\"$TX_UIMI_CONFLICT_PARTICLE\"}"
+
+run_case "의미 mismatch가 (particle attachment) blocks commit" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: align'\"},\"transcript_path\":\"$TX_UIMI_MISMATCH_PARTICLE\"}"
+
 # ---------------------------------------------------------------------------
 # SILENT cases — should not block
 # ---------------------------------------------------------------------------
@@ -293,6 +389,46 @@ run_case "missing transcript_path (silent — cannot enforce)" \
 run_case "malformed JSON (silent — fail-open)" \
   "silent" \
   "not-json"
+
+# ---------------------------------------------------------------------------
+# FP-regression cases — removed loose-prose markers must NOT block
+# ---------------------------------------------------------------------------
+
+# bare 'sciomc' prose mention — no longer a marker (was FP source)
+run_case "bare sciomc prose mention (silent — FP regression)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'chore: doc'\"},\"transcript_path\":\"$TX_FP_PROSE\"}"
+
+# 'scientist-agent' prose — no longer a marker
+run_case "scientist-agent prose (silent — FP regression)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'chore: doc'\"},\"transcript_path\":\"$TX_FP_PROSE\"}"
+
+# 'deep-dive' prose — no longer a marker
+run_case "deep-dive prose (silent — FP regression)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'chore: doc'\"},\"transcript_path\":\"$TX_FP_PROSE\"}"
+
+# 'cross-validation' prose — no longer a marker
+run_case "cross-validation prose (silent — FP regression)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'chore: doc'\"},\"transcript_path\":\"$TX_FP_PROSE\"}"
+
+# loose 'Stage 2 analysis' prose — no longer a marker
+run_case "loose Stage N analysis prose (silent — FP regression)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'chore: doc'\"},\"transcript_path\":\"$TX_FP_PROSE\"}"
+
+# [STAGE_COMPLETE: without digit (malformed/bare token) must NOT match — only
+# [STAGE_COMPLETE:<digit> is a valid sciomc output token
+TX_STAGE_COMPLETE_NO_DIGIT="$TMPDIR/tx-stage-complete-nodigit.jsonl"
+cat > "$TX_STAGE_COMPLETE_NO_DIGIT" <<'EOF'
+{"type":"assistant","message":"[STAGE_COMPLETE: some text without digit after colon]"}
+{"type":"assistant","message":"about to commit"}
+EOF
+run_case "[STAGE_COMPLETE: without digit does not block (silent)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'chore: doc'\"},\"transcript_path\":\"$TX_STAGE_COMPLETE_NO_DIGIT\"}"
 
 # ---------------------------------------------------------------------------
 # Summary
