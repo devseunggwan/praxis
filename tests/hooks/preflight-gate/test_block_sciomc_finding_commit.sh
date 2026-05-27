@@ -125,6 +125,16 @@ run_case "amend word inside message still blocks" \
   "block" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'docs: explain the --amend flag'\"},\"transcript_path\":\"$TX_FINDING\"}"
 
+# `-m --amend`: the message VALUE is exactly "--amend" — must NOT be exempted
+run_case "git commit -m --amend (value is --amend, not flag) blocks" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m --amend\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# `-am --amend`: clustered flag consumes "--amend" as the message value — must block
+run_case "git commit -am --amend (clustered, value is --amend) blocks" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -am --amend\"},\"transcript_path\":\"$TX_FINDING\"}"
+
 # ratification token outside the -m value must NOT bypass
 run_case "user-approved token outside message (semicolon) still blocks" \
   "block" \

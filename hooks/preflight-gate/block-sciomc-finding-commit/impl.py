@@ -247,50 +247,70 @@ def _commit_invocation_args(command: str) -> list[str] | None:
     return None
 
 
+def _is_separate_message_flag(arg: str) -> bool:
+    """True if `arg` is a message flag whose value is the NEXT token: `-m`,
+    `--message`, or a clustered short option ending in -m with no attached
+    value (`-am`). Inline forms (`-mMSG`, `--message=MSG`, `-ammsg`) carry the
+    value in the token itself and return False (no separate value token)."""
+    if arg in _MESSAGE_FLAGS:
+        return True
+    return (
+        arg.startswith("-")
+        and not arg.startswith("--")
+        and len(arg) > 2
+        and arg[1] != "m"                     # `-m`/`-mMSG` handled separately
+        and "m" in arg
+        and arg[1:arg.index("m")].isalpha()
+        and not arg[arg.index("m") + 1:]      # no attached value → next token is value
+    )
+
+
 def _is_exempt(commit_args: list[str]) -> bool:
-    # Exempt flags must be standalone tokens — `--amend` inside a -m message is
-    # part of the message value token, not a flag, so it does not match here.
-    return any(arg in _EXEMPT_FLAGS for arg in commit_args)
+    # Exempt flags must be standalone flag tokens. A `-m`/`--message`/`-am`
+    # VALUE that happens to equal "--amend" (`git commit -m --amend`) is the
+    # message text, not the amend flag — skip the consumed value token before
+    # matching, or it would false-exempt a content commit.
+    i = 0
+    n = len(commit_args)
+    while i < n:
+        arg = commit_args[i]
+        if _is_separate_message_flag(arg):
+            i += 2  # skip the flag and its separate value token
+            continue
+        if arg in _EXEMPT_FLAGS:
+            return True
+        i += 1
+    return False
 
 
 def _message_values(commit_args: list[str]) -> list[str]:
-    """Extract -m / --message values (separate, joined `-mMSG`, and
-    `--message=MSG` forms). -F/--file values are file paths, not the message
-    text, so they are not inspected."""
+    """Extract -m / --message values (separate, joined `-mMSG`, clustered
+    `-am`/`-ammsg`, and `--message=MSG` forms). -F/--file values are file
+    paths, not the message text, so they are not inspected."""
     values: list[str] = []
     i = 0
     n = len(commit_args)
     while i < n:
         arg = commit_args[i]
-        if arg in _MESSAGE_FLAGS:
+        if _is_separate_message_flag(arg):
             if i + 1 < n:
                 values.append(commit_args[i + 1])
             i += 2
-            continue
-        # Clustered short options ending in -m, e.g. `-am 'msg'` or `-am'msg'`
-        # (-ammsg). git requires -m last in a short cluster; its value is the
-        # attached remainder or the next token. Without this, the ratification
-        # escape-hatch silently fails for the common `git commit -am` form.
-        if (
-            arg.startswith("-")
-            and not arg.startswith("--")
-            and len(arg) > 2
-            and arg[1] != "m"            # `-m`/`-mMSG` handled separately
-            and "m" in arg
-            and arg[1:arg.index("m")].isalpha()
-        ):
-            rest = arg[arg.index("m") + 1:]
-            if rest:
-                values.append(rest)
-            elif i + 1 < n:
-                values.append(commit_args[i + 1])
-                i += 1  # consume the value token
-            i += 1
             continue
         if arg.startswith("--message="):
             values.append(arg[len("--message="):])
         elif arg.startswith("-m") and len(arg) > 2:
             values.append(arg[2:])
+        elif (
+            arg.startswith("-")
+            and not arg.startswith("--")
+            and len(arg) > 2
+            and arg[1] != "m"
+            and "m" in arg
+            and arg[1:arg.index("m")].isalpha()
+        ):
+            # inline clustered value: `-ammsg` → "msg"
+            values.append(arg[arg.index("m") + 1:])
         i += 1
     return values
 
