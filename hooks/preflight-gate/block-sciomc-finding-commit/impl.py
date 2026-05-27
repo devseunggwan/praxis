@@ -3,9 +3,9 @@
 without user-design consensus re-fetch.
 
 Backs the rule: user-stated design (PR body / issue body / direct utterance)
-is RATIFIED — AI analysis findings (sciomc Stage N, deep-dive, review finds,
-scientist agent output) are DRAFTS. Surface findings to the user, never
-auto-flip the design via direct commit.
+is RATIFIED — AI analysis findings (sciomc structured output, reviewer
+analysis) are DRAFTS. Surface findings to the user, never auto-flip the
+design via direct commit.
 
 Background:
   Four converging memory rules encode the same root cause family
@@ -32,10 +32,9 @@ Concrete retrospect pattern (praxis issue #374):
 Block conditions (ALL must hold):
   (a) Tool is Bash with a content `git commit` (not amend/merge/rebase/
       cherry-pick/revert)
-  (b) Recent transcript tail (last ~200 lines) contains a sciomc/finding
-      marker: "sibling-deviant", "Stage N finding/analysis/complete",
-      "sciomc", "[FINDING:", "[STAGE_COMPLETE:", "scientist-agent",
-      "deep-dive", "cross-validation", "의미 mismatch"
+  (b) Recent transcript tail (last ~200 lines) contains a sciomc structured
+      output marker: "[FINDING:", "[STAGE_COMPLETE:", "[CONFLICTS:",
+      "sibling-deviant", "의미 mismatch", "의미 충돌"
   (c) No `gh pr view ... --json body` OR `gh issue view ... --json body` OR
       explicit ratification token was emitted AFTER the most recent finding
       marker in the transcript tail
@@ -147,17 +146,22 @@ _RATIFICATION_TOKEN_RE = re.compile(
 )
 
 _FINDING_MARKERS = (
-    re.compile(r"\bsibling[- ]deviant\b", re.IGNORECASE),
-    re.compile(r"\bStage\s*\d\s*(?:분석|finding|analysis|결과|complete)", re.IGNORECASE),
-    re.compile(r"\bsciomc\b", re.IGNORECASE),
+    # Structured strong tokens — sciomc emits these in its output schema.
+    # `[FINDING:` / `[STAGE_COMPLETE:` / `[CONFLICTS:` are bracket-delimited
+    # tokens with a colon; only sciomc output contains them, so false-positive
+    # risk is minimal and no word-boundary guard is needed.
     re.compile(r"\[FINDING:"),
-    re.compile(r"\[STAGE_COMPLETE:"),
-    re.compile(r"\bscientist[- ]agent\b", re.IGNORECASE),
-    re.compile(r"\breview[- ]finds?\b", re.IGNORECASE),
-    re.compile(r"\bdeep[- ]dive\b", re.IGNORECASE),
-    re.compile(r"\bcross[- ]validation\b", re.IGNORECASE),
-    re.compile(r"\b의미\s*mismatch\b", re.IGNORECASE),
-    re.compile(r"\b의미\s*충돌\b"),
+    re.compile(r"\[STAGE_COMPLETE:\d"),
+    re.compile(r"\[CONFLICTS:"),
+    # Praxis-unique prose markers — these phrases appear only in sciomc
+    # sibling-convention analysis or its Korean equivalents; low FP risk.
+    re.compile(r"\bsibling[- ]deviant\b", re.IGNORECASE),
+    # Trailing \b omitted for Korean-particle attachment: Python's Unicode-aware \b
+    # does not place a boundary between a Hangul word char and a following Hangul
+    # particle (e.g. "의미 충돌이" has no \b after 충돌).  The leading \b still
+    # guards against substring matches like "무의미 충돌".
+    re.compile(r"\b의미\s*mismatch", re.IGNORECASE),
+    re.compile(r"\b의미\s*충돌"),
 )
 
 _CONSENSUS_REFETCH_MARKERS = (
@@ -165,7 +169,10 @@ _CONSENSUS_REFETCH_MARKERS = (
     re.compile(r"\bgh\s+issue\s+view\s+[^\n]*--json\s+[^\n]*body", re.IGNORECASE),
     re.compile(r"\bconsensus\s+re[- ]?fetch", re.IGNORECASE),
     re.compile(r"\bre[- ]?read\s+(?:PR|issue)\s+body", re.IGNORECASE),
-    re.compile(r"\buser-stated\s+design\b", re.IGNORECASE),
+    # "user-stated design" removed: it appears verbatim inside [CONFLICTS:] marker
+    # payloads (e.g. "[CONFLICTS: user-stated design vs sibling convention]"), which
+    # would self-satisfy the re-fetch check and silently pass the gate.  The
+    # remaining gh-view and consensus-refetch patterns cover all real re-fetch paths.
     re.compile(r"\[ratified-by-user\]", re.IGNORECASE),
     re.compile(r"\[user-approved\]", re.IGNORECASE),
 )
@@ -441,13 +448,14 @@ def _emit_block_message(matched_markers: list[str]) -> None:
     sys.stderr.write(
         "\n".join(
             [
-                "BLOCKED: `git commit` after sciomc/reviewer finding without user-design consensus re-fetch.",
+                "BLOCKED: `git commit` after sciomc finding without user-design consensus re-fetch.",
                 "",
                 f"Detected finding markers in recent transcript: {', '.join(matched_markers) or '(none)'}",
                 "",
                 "Rule: User-stated design (PR body / issue body) is RATIFIED.",
-                "AI analysis findings (sciomc Stage N, deep-dive, review finds, scientist agent)",
-                "are DRAFTS — surface to user, never auto-flip the design via direct commit.",
+                "AI analysis findings ([FINDING:...], [STAGE_COMPLETE:N], [CONFLICTS:...],",
+                "sibling-deviant, 의미 mismatch/충돌) are DRAFTS — surface to user, never",
+                "auto-flip the design via direct commit.",
                 "",
                 "Pattern (praxis issue #374):",
                 "  AI flips a user-stated literal/design based on a sciomc/reviewer finding,",

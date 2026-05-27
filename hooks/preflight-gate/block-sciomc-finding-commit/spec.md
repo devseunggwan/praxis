@@ -40,10 +40,12 @@ All three conditions must hold for a block (exit 2):
    slip through behind them. Commits wrapped in a subshell/group (`(git …)`),
    command substitution (`$(git …)` / `` `git …` ``), or chained behind a
    space-less separator (`true;git commit …`) are detected too.
-2. The recent transcript tail (last ~200 lines) contains a finding marker:
-   `sibling-deviant`, `Stage N 분석/finding/analysis/결과/complete`, `sciomc`,
-   `[FINDING:`, `[STAGE_COMPLETE:`, `scientist-agent`, `review finds`,
-   `deep-dive`, `cross-validation`, `의미 mismatch`, `의미 충돌`.
+2. The recent transcript tail (last ~200 lines) contains a sciomc structured
+   output marker: `[FINDING:`, `[STAGE_COMPLETE:<digit>]`, `[CONFLICTS:`,
+   `sibling-deviant`, `의미 mismatch`, `의미 충돌`. Loose prose terms
+   (`sciomc`, `scientist-agent`, `deep-dive`, `cross-validation`, bare
+   `Stage N analysis`) are **not** markers — they generated false-positives
+   on normal workflow discussion.
 3. No consensus re-fetch appears AFTER the most recent finding marker —
    re-fetch is `gh pr view ... --json ... body`, `gh issue view ... --json
    ... body`, `consensus re-fetch`, `re-read PR/issue body`, `user-stated
@@ -52,12 +54,18 @@ All three conditions must hold for a block (exit 2):
 | Situation | Action |
 |-----------|--------|
 | `git commit -m "..."` after a `[FINDING:` line, no re-fetch | **BLOCKED** (exit 2) |
-| `git commit` after sciomc Stage 5, then `gh pr view N --json body` | **PASS** (re-fetch after finding) |
+| `git commit -m "..."` after a `[CONFLICTS: ...]` line, no re-fetch | **BLOCKED** (exit 2) |
+| `git commit -m "..."` after a `[STAGE_COMPLETE:2]` line, no re-fetch | **BLOCKED** (exit 2) |
+| `git commit -m "..."` after `sibling-deviant` prose, no re-fetch | **BLOCKED** (exit 2) |
+| `git commit -m "..."` after `의미 mismatch` / `의미 충돌`, no re-fetch | **BLOCKED** (exit 2) |
+| `git commit` after a marker, then `gh pr view N --json body` | **PASS** (re-fetch after finding) |
 | `git commit --amend` after a finding | **PASS** (amend exempt) |
 | `git commit --allow-empty -m x` (staged content) after a finding | **BLOCKED** (allow-empty not exempt) |
 | `git revert <sha>` after a finding | **PASS** (non-content op) |
 | `git commit -m "fix [user-approved]"` after a finding | **PASS** (ratification token) |
 | `git commit` with no finding marker in transcript | **PASS** (no finding context) |
+| `git commit` after bare `sciomc` / `deep-dive` / `cross-validation` prose | **PASS** (not a marker — FP prevention) |
+| `git commit` after bare `scientist-agent` / `Stage N analysis` prose | **PASS** (not a marker — FP prevention) |
 
 ### Limitations (threat model: accidental, not adversarial)
 
@@ -86,13 +94,23 @@ scope.
 ### Tests
 
 ```bash
-bash tests/test_block_sciomc_finding_commit.sh
+bash tests/hooks/preflight-gate/test_block_sciomc_finding_commit.sh
 ```
 
-Covers 40 cases: block paths (finding + no re-fetch, `--allow-empty*` with
-staged content, grouped / command-substitution / nested / separator-chained
-commits, `-m --amend` value), silent paths (each escape hatch, amend / revert
-exemption, `commit-tree` plumbing, quoted-literal `git commit`, single-quoted
-substitution, `git --help/--version commit` terminal options, re-fetch after
-finding, no finding context), non-Bash tool passthrough, missing
-`transcript_path`, and malformed JSON fail-open.
+Covers 53 cases:
+- **Block paths** (22): finding + no re-fetch, `--allow-empty*` with staged
+  content, grouped / command-substitution / nested / separator-chained commits,
+  `-m --amend` value; new in #429: `[CONFLICTS:]`, `[STAGE_COMPLETE:2]`,
+  `sibling-deviant`, `의미 mismatch`, `의미 충돌` markers each individually;
+  also `의미 충돌이` / `의미 mismatch가` (Hangul particle attachment forms),
+  and `[CONFLICTS: user-stated design ...]` (marker payload must not
+  self-satisfy the consensus re-fetch check).
+- **Silent paths** (24): each escape hatch, amend / revert exemption,
+  `commit-tree` plumbing, quoted-literal `git commit`, single-quoted
+  substitution, `git --help/--version commit` terminal options, re-fetch after
+  finding, no finding context.
+- **FP-regression paths** (6, new in #429): bare `sciomc`, `scientist-agent`,
+  `deep-dive`, `cross-validation`, `Stage N analysis` prose, and
+  `[STAGE_COMPLETE:` without digit — none of these should block.
+- **Non-Bash tool passthrough**, missing `transcript_path`, malformed JSON
+  fail-open (1 each).
