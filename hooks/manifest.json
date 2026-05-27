@@ -84,6 +84,13 @@
       "timeout": 5
     },
     {
+      "name": "commit-title-format-check",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
       "name": "pre-merge-approval-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",
