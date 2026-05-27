@@ -36,6 +36,7 @@ confirmation-prompt layer.
 | [block-commit-without-codex-review](../../hooks/preflight-gate/block-commit-without-codex-review/spec.md) | PreToolUse | Block content `git commit` when `praxis:codex-review-wrap` has not been invoked this session |
 | [block-gh-issue-create-without-dup-search](../../hooks/preflight-gate/block-gh-issue-create-without-dup-search/spec.md) | PreToolUse | Block `gh issue create` when no prior duplicate search overlaps the new issue's title keywords |
 | [block-child-repo-issue-create](../../hooks/preflight-gate/block-child-repo-issue-create/spec.md) | PreToolUse | Block `gh issue create` on hub-mediated org child repos; redirects agent to the hub creation skill (opt-in via `PRAXIS_HUB_MEDIATED_ORGS`) |
+| [skill-gate-commands](../../hooks/preflight-gate/skill-gate-commands/spec.md) | PreToolUse | Block configured external-mutation commands (`gh pr create`, `gh pr merge`, `git push origin`) when the required skill has not been invoked this session; NO-OP by default; opt-in via `PRAXIS_SKILL_GATED_COMMANDS` (issue #438) |
 | [session-intent](../../hooks/preflight-gate/session-intent/spec.md) | UserPromptSubmit + PreToolUse | Gate read-intent → mutation-pivot session drift on `gh` mutating commands |
 
 ---

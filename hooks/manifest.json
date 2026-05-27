@@ -230,6 +230,13 @@
       "timeout": 5
     },
     {
+      "name": "skill-gate-commands",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
       "name": "memory-hint",
       "role": "advisory-nudge",
       "event": "PreToolUse",
