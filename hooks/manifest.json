@@ -326,6 +326,13 @@
       "timeout": 5
     },
     {
+      "name": "bypass-telemetry",
+      "role": "postuse-correction",
+      "event": "PostToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
       "name": "completion-verify",
       "role": "completion-verify",
       "body": "impl.sh",

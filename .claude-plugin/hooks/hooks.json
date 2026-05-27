@@ -290,6 +290,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/bypass-telemetry.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Stop": [
