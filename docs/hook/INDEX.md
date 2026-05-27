@@ -29,6 +29,7 @@ confirmation-prompt layer.
 | [pre-merge-approval-gate](../../hooks/preflight-gate/pre-merge-approval-gate/spec.md) | PreToolUse | Surface per-PR approval prompt for `gh pr merge` in direct sessions |
 | [cross-boundary-preflight](../../hooks/preflight-gate/cross-boundary-preflight/spec.md) | PreToolUse | Block heredoc body in `gh pr/issue create`; ask with four-point checklist on cross-repo `--repo` writes |
 | [pre-edit-protected-branch-guard](../../hooks/preflight-gate/pre-edit-protected-branch-guard/spec.md) | PreToolUse | Block Edit/Write/NotebookEdit on protected branches (main/dev/prod/master) outside the expected worktree workflow |
+| [worktree-edit-gate](../../hooks/preflight-gate/worktree-edit-gate/spec.md) | PreToolUse | Block Edit/Write on source files when the repo HEAD is on a base branch — opt-in via `PRAXIS_WORKTREE_ENFORCED_REPOS`; default no-op (issue #437) |
 | [pre-gh-pr-create-dedup-gate](../../hooks/preflight-gate/pre-gh-pr-create-dedup-gate/spec.md) | PreToolUse | Run `gh pr list --search` before `gh pr create`; hard-block on duplicate or repo-resolution failure |
 | [verify-commit-flag-override](../../hooks/preflight-gate/verify-commit-flag-override/spec.md) | PreToolUse | Deny `git commit` invocations that override hooks / signing without env verification |
 | [block-sciomc-finding-commit](../../hooks/preflight-gate/block-sciomc-finding-commit/spec.md) | PreToolUse | Block content `git commit` after a sciomc/reviewer finding when no user-design consensus re-fetch happened in between |
