@@ -58,9 +58,76 @@ A var is only recorded if its value is truthy (non-empty and not `"0"`).
 - `tool_response` content (stdout/stderr) is never stored — only the
   derived `"ok"` / `"error"` status.
 
-## Deferred phases
+## Phase 2 — Review CLI (`bypass-review`)
 
-- **Phase 2** — `praxis bypass-telemetry review` CLI to aggregate the local
-  JSONL log and surface top bypass patterns by session/var.
+Implemented in issue #456.  The `bypass-review` binary reads the local JSONL
+files and aggregates them for human review.
+
+### Installation
+
+```bash
+./scripts/install.sh
+```
+
+This symlinks `~/.local/bin/bypass-review` → `skills/bypass-review/bypass-review`.
+
+### Usage
+
+```
+bypass-review [OPTIONS]
+
+Options:
+  -d, --days N      Query the last N days (default: 7)
+  --dir PATH        Override the telemetry directory
+                    (default: ~/.praxis/telemetry)
+  --errors-only     Show only events where tool_result_status == "error"
+  -h, --help        Show help and exit
+```
+
+### Output
+
+The report has four sections:
+
+1. **Summary** — total events, date window, error count.
+2. **Top bypass vars** — frequency table; vars with error events are flagged
+   `⚠ bad-bypass candidate` (bypass followed by a tool failure).
+3. **Bypass by tool** — group by `tool` field.
+4. **Error events** — per-event detail for `tool_result_status == "error"`.
+
+Use `--errors-only` to print just the error-event section.
+
+### Privacy
+
+The CLI is read-only and only aggregates what is already in the JSONL.
+Bypass var **values** were never stored by the hook; they do not appear in
+any output.  `tool_input` is printed as-is (already truncated and redacted
+by the writer at ≤200 chars).
+
+### Example output
+
+```
+────────────────────────────────────────────────────────────
+bypass-review: Bypass Telemetry Report
+────────────────────────────────────────────────────────────
+  Period : 2026-05-21 → 2026-05-27 (last 7 days)
+  Source : ~/.praxis/telemetry
+  Total events : 6
+  Error events : 1
+
+────────────────────────────────────────────────────────────
+Top Bypass Vars (most bypassed rules)
+────────────────────────────────────────────────────────────
+  Var name                                            Count  Errors  Note
+  ──────────────────────────────────────────────────  ─────  ──────  ──────────────────────
+  CLAUDE_HOOK_BYPASS_SCIOMC_GATE                          4       1  ⚠ bad-bypass candidate
+  CLAUDE_HOOK_BYPASS_DUP_GATE                             1       0
+  PRAXIS_MOMENTUM_BYPASS                                  1       0
+  CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE                    1       0
+
+  Note: high count = rule may be too strict; Errors = bypass followed by tool failure.
+```
+
+## Deferred
+
 - **Phase 3** — Optional HTTP forwarding to a central collector for
   cross-session analytics.
