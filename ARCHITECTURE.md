@@ -136,6 +136,7 @@ else:
 | `bash-worktree-existence-advisory` | PreToolUse | Advisory nudge when `cd <path>` targets a path that does not exist on disk (issue #322) | [hooks/advisory-nudge/bash-worktree-existence-advisory/spec.md](hooks/advisory-nudge/bash-worktree-existence-advisory/spec.md) |
 | `version-bump-evidence-check` | PreToolUse | Advisory nudge (opt-in strict) when `gh issue/pr` body describes an external version bump with no changelog URL, Fetched: line, or cross-reference matrix (issue #327) | [hooks/advisory-nudge/version-bump-evidence-check/spec.md](hooks/advisory-nudge/version-bump-evidence-check/spec.md) |
 | `momentum-rule-retrieval-gate` | PreToolUse | Advisory nudge at high-momentum action points (`gh pr merge`, `cmux new-workspace`, `git push --force`) — surfaces relevant CLAUDE.md rules + memory entries to prevent "Loaded ≠ Retrieved" failures (issue #326) | [hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md](hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md) |
+| `bypass-telemetry` | PostToolUse(Bash) | Observe-only: log bypass-env usage (`CLAUDE_HOOK_BYPASS_*` / `PRAXIS_*BYPASS*`) to daily JSONL (`~/.praxis/telemetry/bypass-events-YYYY-MM-DD.jsonl`) — never blocks (issue #441 Phase 1; Phase 2 review CLI + Phase 3 HTTP deferred) | [hooks/postuse-correction/bypass-telemetry/spec.md](hooks/postuse-correction/bypass-telemetry/spec.md) |
 
 ## Multi-Platform Packaging
 
