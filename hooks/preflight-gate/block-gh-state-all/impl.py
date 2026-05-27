@@ -30,6 +30,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     filter_argv,
     tokenize_with_roles,
 )
+from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 
 # flag_value_spec for the role-aware tokenizer.
 #   gh global flags: -R / --repo take a separate-token value
@@ -99,12 +100,14 @@ def is_blocked_gh_search(seg: list[Token]) -> bool:
     return False
 
 
-STDERR_MESSAGE = (
-    "BLOCKED: `gh search <subcmd> ... --state all` is invalid.\n"
-    "`gh search` subcommands only accept --state {open|closed}, not 'all'.\n"
-    "Workarounds:\n"
-    "  • Omit --state entirely (returns results regardless of state)\n"
-    "  • Run two calls: --state open and --state closed\n"
+STDERR_MESSAGE = format_block(
+    rule_name="gh search --state all",
+    why="`gh search` subcommands only accept --state {open|closed}, not 'all' "
+        "(unlike `gh issue/pr list`)",
+    correct_path="omit --state entirely (returns all states), or run two calls: "
+        "--state open and --state closed",
+    bypass_env=None,  # no bypass — the flag is simply invalid for gh search
+    reference="docs/hook/block-gh-state-all.md; CLAUDE.md → GitHub CLI usage",
 )
 
 
@@ -130,7 +133,7 @@ def main() -> int:
 
     for seg in segments:
         if is_blocked_gh_search(seg):
-            sys.stderr.write(STDERR_MESSAGE + compound_cascade_hint(command))
+            sys.stderr.write(STDERR_MESSAGE + "\n" + compound_cascade_hint(command))
             return 2
 
     return 0

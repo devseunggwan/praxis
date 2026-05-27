@@ -84,15 +84,16 @@ run_case() {
       ;;
     block)
       [ "$rc" -eq 2 ] || ok=0
-      echo "$err" | grep -q "^BLOCKED:" || ok=0
+      # Standard block format (issue #439): header line "⚠️ <RULE> blocked".
+      echo "$err" | grep -q " blocked$" || ok=0
       ;;
     block:no-search)
       [ "$rc" -eq 2 ] || ok=0
-      echo "$err" | grep -q "without any prior \`gh search issues\`" || ok=0
+      echo "$err" | grep -q "no prior \`gh search issues\`" || ok=0
       ;;
     block:no-overlap)
       [ "$rc" -eq 2 ] || ok=0
-      echo "$err" | grep -q "prior searches exist but none overlap" || ok=0
+      echo "$err" | grep -q "none of their keywords overlap" || ok=0
       ;;
     *)
       echo "  internal: unknown expectation '$expectation'" >&2

@@ -44,6 +44,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
+from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 
 # gh global flags that consume one additional argument (value).
 # When these appear between `gh` and the subcommand object, they must be
@@ -55,12 +56,18 @@ GH_GLOBAL_FLAGS_WITH_ARG = frozenset({
     "--color",
 })
 
-REASON = (
-    "gh pr merge detected in a direct interactive session. "
-    "Merge is shared-state and irreversible — direct sessions require "
-    "explicit per-PR merge approval. "
-    "If you are running as a cmux-delegate background agent, set "
-    "CMUX_DELEGATE=1 in the session environment at startup."
+REASON = format_block(
+    rule_name="gh pr merge approval",
+    why="merge is shared-state and irreversible — direct interactive sessions "
+        "require explicit per-PR merge approval",
+    correct_path="confirm this merge when the dialog surfaces; approval is "
+        "per-PR and does not transfer to sibling/companion PRs",
+    # No agent-attachable bypass by design — a self-bypass would defeat the
+    # gate. The only authoritative signal is CMUX_DELEGATE=1 set in the
+    # session's shell env at startup (background cmux-delegate agents).
+    bypass_env=None,
+    reference="CLAUDE.md → Pre-Merge Reporting / No Approval Transfer Across "
+        "Companion PRs; docs/hook/pre-merge-approval-gate.md",
 )
 
 

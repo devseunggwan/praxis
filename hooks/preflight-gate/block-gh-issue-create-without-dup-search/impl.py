@@ -42,6 +42,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
+from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
+
 
 def main() -> int:
     try:
@@ -264,58 +267,45 @@ def _read_transcript_tail(path: str, max_lines: int, max_bytes: int) -> str | No
 
 
 def _emit_no_search_block(keywords: list[str]) -> None:
-    sys.stderr.write(
-        "\n".join(
-            [
-                "BLOCKED: `gh issue create` without any prior `gh search issues` / `gh issue list`.",
-                "",
-                f"Title keywords: {', '.join(keywords[:6])}",
-                "",
-                "Rule: CLAUDE.md → GitHub Issue Hygiene",
-                "  Before creating any issue: gh search issues '<keywords>' --repo <repo>",
-                "  (open AND closed). Ask user if ambiguous. Never create duplicates.",
-                "",
-                "Pattern (praxis issue #374):",
-                "  AI spawns a new issue from a fresh analysis finding without searching;",
-                "  an existing open issue covers the same root cause → /cancel cycle.",
-                "",
-                "Resolve by one of:",
-                "  1. Run a search FIRST:",
-                "       gh search issues '<keyword>' --repo <repo>",
-                "       gh issue list --repo <repo> --search '<keyword>'",
-                "  2. If duplicate verified outside this session, add token [dup-checked]",
-                "     to --title (e.g. 'feat(x): foo bar [dup-checked]').",
-                "  3. One-off bypass: prefix with CLAUDE_HOOK_BYPASS_DUP_GATE=1",
-            ]
-        )
-        + "\n"
+    emit_block(
+        rule_name="gh issue create dup-search",
+        why="no prior `gh search issues` / `gh issue list` in this session — "
+            "creating an issue without a duplicate check risks /cancel cycles",
+        correct_path=(
+            f"run a search FIRST: gh search issues '{' '.join(keywords[:2])}' "
+            "--repo <repo> (open AND closed); or add [dup-checked] to --title "
+            "if verified outside this session"
+        ),
+        bypass_env="CLAUDE_HOOK_BYPASS_DUP_GATE",
+        reference="CLAUDE.md → GitHub Issue Hygiene; docs/hook/"
+            "block-gh-issue-create-without-dup-search.md",
     )
+    sys.stderr.write(f"\nTitle keywords: {', '.join(keywords[:6])}\n")
 
 
 def _emit_no_overlap_block(keywords: list[str], recent_searches: list[str]) -> None:
-    sys.stderr.write(
-        "\n".join(
-            [
-                "BLOCKED: `gh issue create` — prior searches exist but none overlap with title keywords.",
-                "",
-                f"Title keywords: {', '.join(keywords[:6])}",
-                "Recent search commands found in transcript (no keyword overlap):",
-                *[f"  - {s[:120]}" for s in recent_searches],
-                "",
-                "Rule: CLAUDE.md → GitHub Issue Hygiene",
-                "  Searching for unrelated keywords does not satisfy the duplicate-check",
-                "  requirement. The search must use keywords semantically overlapping with",
-                "  the new issue's scope.",
-                "",
-                "Resolve by one of:",
-                "  1. Run a targeted search using your title's keywords:",
-                f"       gh search issues '{' '.join(keywords[:2])}' --repo <repo>",
-                "  2. Add [dup-checked] to --title if duplicate verified outside session.",
-                "  3. One-off bypass: prefix with CLAUDE_HOOK_BYPASS_DUP_GATE=1",
-            ]
-        )
-        + "\n"
+    emit_block(
+        rule_name="gh issue create dup-search",
+        why="prior searches exist but none of their keywords overlap with the "
+            "new issue's title — an unrelated search does not satisfy the "
+            "duplicate-check requirement",
+        correct_path=(
+            f"run a targeted search using your title's keywords: gh search "
+            f"issues '{' '.join(keywords[:2])}' --repo <repo>; or add "
+            "[dup-checked] to --title if verified outside this session"
+        ),
+        bypass_env="CLAUDE_HOOK_BYPASS_DUP_GATE",
+        reference="CLAUDE.md → GitHub Issue Hygiene; docs/hook/"
+            "block-gh-issue-create-without-dup-search.md",
     )
+    extra = [
+        "",
+        f"Title keywords: {', '.join(keywords[:6])}",
+        "Recent search commands found in transcript (no keyword overlap):",
+        *[f"  - {s[:120]}" for s in recent_searches],
+        "",
+    ]
+    sys.stderr.write("\n".join(extra) + "\n")
 
 
 if __name__ == "__main__":
