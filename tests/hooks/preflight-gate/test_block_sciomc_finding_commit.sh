@@ -167,6 +167,11 @@ run_case "quoted command-substitution git status (silent)" \
   "silent" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo \\\"\$(git status)\\\"\"},\"transcript_path\":\"$TX_FINDING\"}"
 
+# nested command-substitution containing a commit (paren-depth scan)
+run_case "nested command-substitution git commit (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo \\\"\$(echo \$(git commit -m nested))\\\"\"},\"transcript_path\":\"$TX_FINDING\"}"
+
 # space-less shell separator: `true;git commit` must tokenize git as its own token
 run_case "no-space semicolon separator before git commit (block)" \
   "block" \

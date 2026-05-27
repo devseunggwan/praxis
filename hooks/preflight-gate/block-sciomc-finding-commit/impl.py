@@ -202,10 +202,46 @@ def _is_git_binary(token: str) -> bool:
 # Command-substitution spans. Bash executes the inner command even when the
 # substitution sits inside double quotes — where shlex keeps the whole quoted
 # string as a single token — so a content commit can hide in `echo "$(git
-# commit …)"` or `x="$(git …)"`. We extract each span and re-scan it. Non-greedy
-# inner capture is sufficient for *detection* (we only need git+commit
-# adjacency, not a perfect parse), so nested `)` truncation is harmless.
-_CMD_SUBST_RE = re.compile(r"\$\((.*?)\)|`([^`]*)`", re.DOTALL)
+# commit …)"` or `x="$(git …)"`. A regex cannot delimit `$(…)` reliably: nested
+# `$(a $(b))` and escaped `\)` (a literal paren passed to the inner command, not
+# a closer) break naive `\$\(.*?\)` matching. We scan with a paren-depth counter
+# that skips backslash-escaped chars, then re-tokenize each extracted span.
+
+
+def _extract_substitutions(command: str) -> list[str]:
+    spans: list[str] = []
+    i = 0
+    n = len(command)
+    while i < n:
+        c = command[i]
+        if c == "`":  # backtick substitution — closes at the next backtick
+            j = command.find("`", i + 1)
+            if j == -1:
+                break
+            spans.append(command[i + 1:j])
+            i = j + 1
+            continue
+        if c == "$" and i + 1 < n and command[i + 1] == "(":
+            depth = 1
+            j = i + 2
+            start = j
+            while j < n and depth:
+                ch = command[j]
+                if ch == "\\":  # escaped char (e.g. `\)`) does not close the span
+                    j += 2
+                    continue
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            spans.append(command[start:j])
+            i = j + 1
+            continue
+        i += 1
+    return spans
 
 
 def _scan_tokens_for_commit(tokens: list[str] | None) -> list[str] | None:
@@ -263,8 +299,7 @@ def _commit_invocation_args(command: str) -> list[str] | None:
     args = _scan_tokens_for_commit(_tokenize(command))
     if args is not None:
         return args
-    for m in _CMD_SUBST_RE.finditer(command):
-        inner = m.group(1) if m.group(1) is not None else m.group(2)
+    for inner in _extract_substitutions(command):
         args = _scan_tokens_for_commit(_tokenize(inner))
         if args is not None:
             return args
