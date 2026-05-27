@@ -32,9 +32,14 @@ redirected back to the originally-stated design and the flip was reverted
 
 All three conditions must hold for a block (exit 2):
 
-1. The Bash command is a content `git commit` — `--amend`, `git merge`,
-   `git rebase`, `git cherry-pick`, `git revert`, and `--allow-empty` are
-   exempt.
+1. The Bash command is a content `git commit`. Only `--amend` and the
+   non-content ops (`git merge`, `git rebase`, `git cherry-pick`,
+   `git revert`) are exempt. `--allow-empty` / `--allow-empty-message` are
+   **not** exempt — they only permit an empty commit/message and do not stop
+   staged content from riding along, so a finding-gated content commit cannot
+   slip through behind them. Commits wrapped in a subshell/group (`(git …)`),
+   command substitution (`$(git …)` / `` `git …` ``), or chained behind a
+   space-less separator (`true;git commit …`) are detected too.
 2. The recent transcript tail (last ~200 lines) contains a finding marker:
    `sibling-deviant`, `Stage N 분석/finding/analysis/결과/complete`, `sciomc`,
    `[FINDING:`, `[STAGE_COMPLETE:`, `scientist-agent`, `review finds`,
@@ -49,6 +54,7 @@ All three conditions must hold for a block (exit 2):
 | `git commit -m "..."` after a `[FINDING:` line, no re-fetch | **BLOCKED** (exit 2) |
 | `git commit` after sciomc Stage 5, then `gh pr view N --json body` | **PASS** (re-fetch after finding) |
 | `git commit --amend` after a finding | **PASS** (amend exempt) |
+| `git commit --allow-empty -m x` (staged content) after a finding | **BLOCKED** (allow-empty not exempt) |
 | `git revert <sha>` after a finding | **PASS** (non-content op) |
 | `git commit -m "fix [user-approved]"` after a finding | **PASS** (ratification token) |
 | `git commit` with no finding marker in transcript | **PASS** (no finding context) |

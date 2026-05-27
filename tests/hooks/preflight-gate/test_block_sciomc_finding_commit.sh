@@ -6,7 +6,7 @@
 #   block  → rc=2, stderr non-empty (BLOCKED: prefix)
 #   silent → rc=0, stderr empty
 #
-# Usage: bash tests/test_block_sciomc_finding_commit.sh
+# Usage: bash tests/hooks/preflight-gate/test_block_sciomc_finding_commit.sh
 
 set +e
 
@@ -110,6 +110,52 @@ run_case "git commit -am + finding + no refetch (block)" \
   "block" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -am 'fix: stuff'\"},\"transcript_path\":\"$TX_FINDING\"}"
 
+# --allow-empty does NOT prevent staged content from being committed — must block
+run_case "git commit --allow-empty with staged content (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit --allow-empty -m 'trigger ci'\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# --allow-empty-message likewise does not prevent staged content — must block
+run_case "git commit --allow-empty-message with staged content (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit --allow-empty-message -m ''\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# `--amend` inside the -m message value is NOT the amend flag — must still block
+run_case "amend word inside message still blocks" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'docs: explain the --amend flag'\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# ratification token outside the -m value must NOT bypass
+run_case "user-approved token outside message (semicolon) still blocks" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: x'; echo '[user-approved]'\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# subshell-grouped commit: shlex tokenizes binary as "(git" — must still block
+# (regression guard: the prior raw-regex caught this; token parser must too)
+run_case "subshell-grouped git commit (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"(git commit -m 'fix: sub')\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# command-substitution wrapped commit: binary tokenizes as "\$(git" — must still block
+run_case "command-substitution git commit (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo \$(git commit -m 'fix: subst')\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# space-less shell separator: `true;git commit` must tokenize git as its own token
+run_case "no-space semicolon separator before git commit (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"true;git commit -m 'fix: chained'\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# space-less && separator
+run_case "no-space && separator before git commit (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git status&&git commit -m 'fix: andand'\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# a literal ';' INSIDE the quoted message must NOT be treated as a separator
+run_case "semicolon inside message value still blocks (no token)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: a;b'\"},\"transcript_path\":\"$TX_FINDING\"}"
+
 # ---------------------------------------------------------------------------
 # SILENT cases — should not block
 # ---------------------------------------------------------------------------
@@ -122,15 +168,35 @@ run_case "git commit + no finding in transcript (silent)" \
   "silent" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'chore: bump'\"},\"transcript_path\":\"$TX_NORMAL\"}"
 
-run_case "git commit + finding + [user-approved] token (silent)" \
+run_case "git commit + finding + [user-approved] in message (silent)" \
   "silent" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: change [user-approved]'\"},\"transcript_path\":\"$TX_FINDING\"}"
 
-run_case "git commit + finding + [ratified-by-user] token (silent)" \
+run_case "git commit + finding + [ratified-by-user] in message (silent)" \
   "silent" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: change [ratified-by-user]'\"},\"transcript_path\":\"$TX_FINDING\"}"
 
-run_case "git commit --amend + finding (silent — non-content)" \
+run_case "git commit + finding + [user-ratified] in message (silent)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: change [user-ratified]'\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# clustered short option `-am`: ratification token in message value must bypass
+run_case "git commit -am with [user-approved] in message (silent)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -am 'fix: change [user-approved]'\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# attached form `-am'msg'` tokenizes as -ammsg — token must still be extracted
+run_case "git commit -ammsg attached with [user-approved] (silent)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -am'done [user-approved]'\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# `-am` content commit WITHOUT a token must still block (escape-hatch is opt-in)
+run_case "git commit -am without token still blocks" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -am 'fix: real change'\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# legit --amend is still exempt (it fixes up a prior already-gated commit)
+run_case "git commit --amend + finding (silent — exempt)" \
   "silent" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit --amend --no-edit\"},\"transcript_path\":\"$TX_FINDING\"}"
 
@@ -142,9 +208,15 @@ run_case "git merge + finding (silent — non-content)" \
   "silent" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git merge origin/main\"},\"transcript_path\":\"$TX_FINDING\"}"
 
-run_case "git commit --allow-empty + finding (silent)" \
+# git commit-tree is plumbing (one token "commit-tree") — must NOT match
+run_case "git commit-tree plumbing (silent — not a git commit)" \
   "silent" \
-  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit --allow-empty -m 'trigger ci'\"},\"transcript_path\":\"$TX_FINDING\"}"
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit-tree abc123 -m 'tree'\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# echo containing "git commit" — no token-level git+commit adjacency
+run_case "echo git commit string not a commit (silent)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo 'run git commit later'\"},\"transcript_path\":\"$TX_FINDING\"}"
 
 run_case "non-Bash tool (silent)" \
   "silent" \
@@ -153,6 +225,11 @@ run_case "non-Bash tool (silent)" \
 run_case "git status (non-commit, silent)" \
   "silent" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git status\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# subshell-grouped non-commit must NOT over-match (prefix-strip is binary-only)
+run_case "subshell-grouped git status (silent — not a commit)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"(git status)\"},\"transcript_path\":\"$TX_FINDING\"}"
 
 run_case "env var bypass (silent)" \
   "silent" \
