@@ -7,8 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-05-27
+
+19 PRs since 5.2.0. The headline is the ADR-0001 hook-layout migration (phases 1–3): every hook moved into a role-dir collocation layout (`hooks/<role>/<name>/{impl,spec}`) with manifest-driven generation of the per-platform `hooks.json`. On top of that, several new always-on enforcement gates (commit-title / branch-name / codex-review-on-commit / worktree-edit / child-repo-issue) and the bypass-telemetry suite (Phase 1 hook + Phase 2 review CLI) change commit/PR/write-time behavior for all users — semver **major** for the structural reorganization and the new gating surface.
+
 ### Added
-- `block-commit-without-codex-review` hook (PreToolUse(Bash), claude-host): hard-blocks content `git commit` when `praxis:codex-review-wrap` has not been invoked this session; escape via `[skip-codex-review]` token or `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1` (#425)
+- `block-commit-without-codex-review` hook (PreToolUse(Bash), claude-host): hard-blocks content `git commit` when `praxis:codex-review-wrap` has not been invoked this session; escape via `[skip-codex-review]` token or `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1` (#425, #426)
+- `bulk-write-memory-checkpoint` advisory hook (PreToolUse(Edit|Write|NotebookEdit)): nudges a memory re-read on the 2nd write to a SoT path (vault/, wiki/, .claude/, skills/, AGENTS.md/CLAUDE.md); always exits 0, bypass via `PRAXIS_BULK_WRITE_BYPASS=1` (#443)
+- `bypass-review` telemetry review CLI (Phase 2): read-only aggregation over the bypass-telemetry JSONL — groups by tool, surfaces most-bypassed rules, highlights bypass-then-error events (#456)
+- `bypass-telemetry` PostToolUse hook (Phase 1): records bypass env-var usage to `~/.praxis/telemetry/` (names only, values redacted) (#454)
+- `skill-gate` hook for external commands (#453)
+- `worktree-edit-gate` hook (#452)
+- child-repo issue-creation block hook (#451)
+- branch-naming convention enforcement hook (#450)
+- commit-title format enforcement hook (#449)
+- autonomy-vs-convention doc template (#447)
+
+### Changed
+- ADR-0001 hook-layout migration: phase 1 test/wrapper prep (#424), phase 2 role layout + manifest (#432), phase 3 spec collocation (#435)
+- standardized hook block-message format (#444)
+- `retrospect`: 0-friction audit-trail enforcement (#446)
+
+### Fixed
+- `block-commit-without-codex-review`: harden the command parser — close grouped (`(git …)`), command-substitution (`$(git …)`), and separator-chained (`true;git …`) bypasses (#455)
+- `block-sciomc-finding-commit`: harden finding detection (#448) and close commit bypasses (#445)
+
+### Docs
+- recorded the ADR-0001 phase 3 merge in `docs/adr/0001` §7 (#442)
 
 ## [5.2.0] - 2026-05-26
 
