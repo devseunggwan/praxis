@@ -210,6 +210,69 @@ run_case "unparseable command fail-open" pass Bash \
   'git commit -m "unterminated' "$TX_WITHOUT"
 
 # ---------------------------------------------------------------------------
+# Hardened parser cases — bypass forms blocked after PR #445 port
+# (mirror of test_block_sciomc_finding_commit.sh hardened-parser section)
+# ---------------------------------------------------------------------------
+
+# grouped: `(git commit …)` — shlex.shlex punctuation_chars splits `(` into its
+# own token; `_is_git_binary` then matches the bare `git` token.
+run_case "grouped (git commit -m x) is detected" block Bash \
+  '(git commit -m "feat: grouped")' "$TX_WITHOUT"
+
+# unquoted command-substitution: `echo $(git commit …)` — punctuation_chars
+# splits `$`, `(`, `git` into separate tokens; `git` matches directly.
+run_case "unquoted command-substitution \$(git commit …) is detected" block Bash \
+  'echo $(git commit -m "feat: subst")' "$TX_WITHOUT"
+
+# space-less separator: `true;git commit …` — punctuation_chars splits `;` into
+# its own token so `git` becomes its own token after the separator.
+run_case "no-space semicolon separator true;git commit is detected" block Bash \
+  'true;git commit -m "feat: chained"' "$TX_WITHOUT"
+
+# nested command-substitution: paren-depth counter in _extract_substitutions
+# recurses into `$(true && git commit …)` inside double-quoted outer string.
+run_case "nested command-substitution \$(true && git commit …) is detected" block Bash \
+  'echo "$(true && git commit -m nested)"' "$TX_WITHOUT"
+
+# QUOTED command-substitution `echo "$(git commit …)"`:
+# shlex folds the whole double-quoted span into one token; _extract_substitutions
+# span-scan extracts `git commit …` and re-tokenizes it → detected.
+run_case "quoted command-substitution echo \"\$(git commit …)\" is detected" block Bash \
+  'echo "$(git commit -m subst)"' "$TX_WITHOUT"
+
+# SINGLE-quoted form: `echo '$(git commit …)'` is a LITERAL string in bash —
+# the inner command is NEVER executed, so it must NOT block.
+run_case "single-quoted \$(git commit) is literal — not a commit (pass)" pass Bash \
+  "echo '\$(git commit -m x)'" "$TX_WITHOUT"
+
+# Double-quoted plain string `echo "git commit"` — no `$(…)` span, no
+# token-level git+commit adjacency → must NOT block.
+run_case "double-quoted literal echo \"git commit\" is not a commit (pass)" pass Bash \
+  'echo "git commit"' "$TX_WITHOUT"
+
+# Single-quoted plain string `echo 'git commit'` — same reasoning.
+run_case "single-quoted literal echo 'git commit' is not a commit (pass)" pass Bash \
+  "echo 'git commit'" "$TX_WITHOUT"
+
+# --allow-empty is NOT an exemption (staged content can still ride along).
+# Covered in the PASS/exemptions section above; add a hardened-parser companion
+# confirming it is still detected when combined with the new tokenizer.
+run_case "allow-empty still blocked with hardened tokenizer" block Bash \
+  'git commit --allow-empty -m "ci: trigger"' "$TX_WITHOUT"
+
+# --allow-empty-message likewise not exempt.
+run_case "allow-empty-message still blocked with hardened tokenizer" block Bash \
+  'git commit --allow-empty-message -m ""' "$TX_WITHOUT"
+
+# git --help commit: terminal option → no commit runs (fail-open).
+run_case "git --help commit is terminal option (pass)" pass Bash \
+  'git --help commit' "$TX_WITHOUT"
+
+# git --version commit: terminal option → no commit runs.
+run_case "git --version commit is terminal option (pass)" pass Bash \
+  'git --version commit' "$TX_WITHOUT"
+
+# ---------------------------------------------------------------------------
 # Fail-open cases
 # ---------------------------------------------------------------------------
 
