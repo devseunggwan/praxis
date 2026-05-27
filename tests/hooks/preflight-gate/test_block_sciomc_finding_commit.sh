@@ -172,6 +172,16 @@ run_case "nested command-substitution git commit (block)" \
   "block" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo \\\"\$(echo \$(git commit -m nested))\\\"\"},\"transcript_path\":\"$TX_FINDING\"}"
 
+# SINGLE-quoted substitution is a literal — bash does NOT execute it → silent
+run_case "single-quoted substitution literal (silent)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo '\$(git commit -m x)'\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+# apostrophe inside double quotes is literal — substitution still executes → block
+run_case "apostrophe in double-quoted substitution (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo \\\"it's \$(git commit -m x)\\\"\"},\"transcript_path\":\"$TX_FINDING\"}"
+
 # space-less shell separator: `true;git commit` must tokenize git as its own token
 run_case "no-space semicolon separator before git commit (block)" \
   "block" \

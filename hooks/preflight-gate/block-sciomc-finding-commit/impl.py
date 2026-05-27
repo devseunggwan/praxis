@@ -209,14 +209,41 @@ def _is_git_binary(token: str) -> bool:
 
 
 def _extract_substitutions(command: str) -> list[str]:
+    # Quote-aware scan. Bash runs `$(…)` / backtick substitution when unquoted
+    # or inside DOUBLE quotes, but NOT inside SINGLE quotes (`echo '$(git …)'`
+    # is a literal string, not an executed commit). We track quote state so the
+    # scanner mirrors what bash actually executes — extracting from single-quoted
+    # text would false-block, scanning raw across quotes would mis-handle an
+    # apostrophe inside double quotes (`"it's $(git …)"`). A paren-depth counter
+    # that skips backslash-escaped chars handles nested `$( $( ) )` and `\)`.
     spans: list[str] = []
     i = 0
     n = len(command)
+    in_squote = False
+    in_dquote = False
     while i < n:
         c = command[i]
-        if c == "`":  # backtick substitution — closes at the next backtick
-            j = command.find("`", i + 1)
-            if j == -1:
+        if in_squote:
+            if c == "'":
+                in_squote = False
+            i += 1
+            continue
+        if c == "\\":
+            i += 2  # escaped char is literal, never opens a substitution
+            continue
+        if c == "'" and not in_dquote:
+            in_squote = True
+            i += 1
+            continue
+        if c == '"':
+            in_dquote = not in_dquote
+            i += 1
+            continue
+        if c == "`":  # backtick substitution (active unquoted and in double quotes)
+            j = i + 1
+            while j < n and command[j] != "`":
+                j += 2 if command[j] == "\\" else 1
+            if j >= n:
                 break
             spans.append(command[i + 1:j])
             i = j + 1
