@@ -2,7 +2,7 @@
 # test_gh_json_validator.sh — coverage for hooks/preflight-gate/gh-json-validator/impl.py
 #
 # 10-case suite covering the full block / pass / bypass / skip / fail-open
-# surface documented in issue #403 and docs/hook/gh-json-validator.md.
+# surface documented in issue #403 and hooks/preflight-gate/gh-json-validator/spec.md.
 #
 # Payload format: PreToolUse(Bash) JSON with tool_name, tool_input.command,
 # and session_id piped directly to hooks/preflight-gate/gh-json-validator/impl.py (Python invoked

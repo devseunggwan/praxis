@@ -54,7 +54,8 @@ manufactured action-menu detection). Hooks fail-open on infrastructure errors
 and never break Claude Code — they only nudge or block specific patterns.
 
 See [ARCHITECTURE.md → Hook index](ARCHITECTURE.md#hook-index) for the full
-list and per-hook spec links under [`docs/hook/`](docs/hook/), and
+list and per-hook spec links (specs live at `hooks/<role>/<name>/spec.md`;
+the [`docs/hook/INDEX.md`](docs/hook/INDEX.md) index links to them), and
 [DESIGN.md → Hook Design Contracts](DESIGN.md#hook-design-contracts) for the
 shared design contracts every hook follows.
 

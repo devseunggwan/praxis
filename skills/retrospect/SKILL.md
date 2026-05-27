@@ -901,7 +901,7 @@ For each approved action:
 
    **Frontmatter contract — `memory-hint` opt-in (mandatory consideration)**
 
-   In addition to standard fields (`name`, `description`, `type`), every new memory MUST evaluate whether to include the `memory-hint` opt-in fields — `hookable` and `hookKeywords`. The full field spec (parser semantics, matching rules, fail-open contract) lives in `docs/hook/memory-hint.md`; this section defines the authoring-time decision. Use top-level `type:` (consistent with `docs/hook/memory-hint.md` example and existing on-disk memory files); do **not** nest under `metadata:`.
+   In addition to standard fields (`name`, `description`, `type`), every new memory MUST evaluate whether to include the `memory-hint` opt-in fields — `hookable` and `hookKeywords`. The full field spec (parser semantics, matching rules, fail-open contract) lives in `hooks/advisory-nudge/memory-hint/spec.md`; this section defines the authoring-time decision. Use top-level `type:` (consistent with `hooks/advisory-nudge/memory-hint/spec.md` example and existing on-disk memory files); do **not** nest under `metadata:`.
 
    ```yaml
    ---
@@ -926,7 +926,7 @@ For each approved action:
 
    **`hookKeywords` selection rules:**
    - Choose tokens that appear in the *action* the memory is meant to gate — CLI subcommand (`merge`, `close`), tool name (`Edit`, `cmux-delegate`), distinctive flag (`--force`), or domain identifier (`Closes`, `Recommended`).
-   - Whole-token, case-sensitive matching only (per `docs/hook/memory-hint.md`). List multiple casings explicitly if needed (`[Edit, edit]`).
+   - Whole-token, case-sensitive matching only (per `hooks/advisory-nudge/memory-hint/spec.md`). List multiple casings explicitly if needed (`[Edit, edit]`).
    - 1–4 keywords typical; >5 raises false-positive risk linearly.
    - **Avoid generic English words** (`add`, `run`, `test`, `update`) — they fire on unrelated commands and erode the hint signal.
    - When the memory targets a non-Bash event (Edit, Write, AskUserQuestion, etc.), the current `memory-hint.py` only fires on Bash — record the intent in the description so a future event-coverage expansion can surface it.
