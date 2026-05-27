@@ -59,6 +59,11 @@
           },
           {
             "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/commit-title-format-check.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-merge-approval-gate.sh",
             "timeout": 5
           },
