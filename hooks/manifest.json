@@ -251,6 +251,13 @@
       "timeout": 10
     },
     {
+      "name": "worktree-edit-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Edit|Write",
+      "timeout": 5
+    },
+    {
       "name": "path-probe-gate",
       "role": "advisory-nudge",
       "event": "PreToolUse",
