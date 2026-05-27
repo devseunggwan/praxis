@@ -10,6 +10,19 @@ graph (`ARCHITECTURE.md`) descend from these — they do not override them.
 - **SRP per skill**: each skill has one responsibility
 - **Discipline over convenience**: Iron Laws gate each phase, no skipping
 
+## Autonomy vs Convention
+
+| Domain | AI authority | Example |
+|---|---|---|
+| **Problem exploration** | Active judgment expected | Hypothesis choice, debug direction, falsification strategy, tool selection |
+| **Convention** | Follow as defined; no autonomous override | Issue creation path, branch/worktree workflow, external-mutation tool layer, code patterns |
+
+### Key principles
+1. **Convention authority is not delegated.** Rules represent trade-offs already made by the team; the agent does NOT re-evaluate them at runtime.
+2. **Scale is not an exemption.** "Too small to follow the workflow" == "too big to follow it" — both claim authority over the rule's scope.
+3. **Disclosure is not compliance.** Telling the user about a bypass before doing it does not authorize it. Explicit per-action approval required.
+4. **Hook blocks are signals, not failures.** Follow the suggested fallback, do not invent a workaround.
+
 ## Hook Ethos
 
 Hooks exist because text rules in CLAUDE.md or memory entries alone have

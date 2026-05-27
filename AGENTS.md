@@ -8,7 +8,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 
 | File | Purpose |
 |------|---------|
-| [`ETHOS.md`](ETHOS.md) | Why praxis exists — values and principles that gate every skill, hook, and manifest |
+| [`ETHOS.md`](ETHOS.md) | Why praxis exists — values and principles that gate every skill, hook, and manifest; includes [Autonomy vs Convention](ETHOS.md#autonomy-vs-convention) boundary table |
 | [`DESIGN.md`](DESIGN.md) | How hooks are built — structural-tokenization, session_id keying, compound-bash-cascade, ordering, and add-a-new-hook flow |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Skill ↔ hook ↔ manifest dependency graph — provider routing, hook index, multi-platform packaging |
 | [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md) | Fixed Claude Code runtime limits every skill must respect |

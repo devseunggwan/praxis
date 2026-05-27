@@ -2,6 +2,8 @@
 
 Supported hosts: all
 
+Reference: [Autonomy vs Convention — ETHOS.md](../../../ETHOS.md#autonomy-vs-convention)
+
 `hooks/cross-boundary-preflight.sh` intercepts every Bash tool call and
 fires on two cross-boundary patterns before the command executes.
 

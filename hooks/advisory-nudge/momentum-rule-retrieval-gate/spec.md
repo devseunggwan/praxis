@@ -2,6 +2,8 @@
 
 Supported hosts: claude, codex
 
+Reference: [Autonomy vs Convention — ETHOS.md](../../../ETHOS.md#autonomy-vs-convention)
+
 `hooks/momentum-rule-retrieval-gate.sh` intercepts `Bash` tool calls at
 high-momentum action points and emits a **stderr advisory** (never a block
 in default mode) surfacing the relevant CLAUDE.md rules and memory entries
