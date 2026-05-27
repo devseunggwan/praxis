@@ -59,6 +59,22 @@ All three conditions must hold for a block (exit 2):
 | `git commit -m "fix [user-approved]"` after a finding | **PASS** (ratification token) |
 | `git commit` with no finding marker in transcript | **PASS** (no finding context) |
 
+### Limitations (threat model: accidental, not adversarial)
+
+The gate targets **accidental momentum commits** (`git commit -m x` after a
+review finding), not an adversary crafting a bypass. Command detection covers
+plain, grouped (`(git …)`), separator-chained (`true;git commit`), clustered
+(`-am`), and command-substitution forms — including quoted (`echo "$(git
+commit …)"`), nested (`$(… $(git commit) …)`), escaped-paren, and single-quote
+literals (correctly NOT flagged). It does **not** fully replicate bash's parser:
+a content commit hidden behind quote state *inside* a `$(…)` span
+(e.g. `echo "$(printf ')' ; git commit -m x)"`) can still slip through, because
+the substitution scanner does not track quoting within the span. This is an
+adversarial construction, not an accidental one — and a deliberate bypass is
+already a first-class feature (`[user-approved]` token / `CLAUDE_HOOK_BYPASS_SCIOMC_GATE=1`).
+Full shell-grammar parsing (e.g. a `bashlex` dependency) is intentionally out of
+scope.
+
 ### Escape hatches
 
 - Add `[user-approved]` or `[ratified-by-user]` to the commit message when
@@ -73,7 +89,10 @@ All three conditions must hold for a block (exit 2):
 bash tests/test_block_sciomc_finding_commit.sh
 ```
 
-Covers 15 cases: block paths (finding + no re-fetch), silent paths (each
-escape hatch, amend / revert exemption, re-fetch after finding, no finding
-context), non-Bash tool passthrough, missing `transcript_path`, and malformed
-JSON fail-open.
+Covers 40 cases: block paths (finding + no re-fetch, `--allow-empty*` with
+staged content, grouped / command-substitution / nested / separator-chained
+commits, `-m --amend` value), silent paths (each escape hatch, amend / revert
+exemption, `commit-tree` plumbing, quoted-literal `git commit`, single-quoted
+substitution, `git --help/--version commit` terminal options, re-fetch after
+finding, no finding context), non-Bash tool passthrough, missing
+`transcript_path`, and malformed JSON fail-open.
