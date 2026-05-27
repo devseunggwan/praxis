@@ -223,6 +223,13 @@
       "timeout": 5
     },
     {
+      "name": "block-child-repo-issue-create",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
       "name": "memory-hint",
       "role": "advisory-nudge",
       "event": "PreToolUse",
