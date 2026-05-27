@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+"""bypass-review — Review CLI for praxis bypass-telemetry events.
+
+Reads the local JSONL logs written by the bypass-telemetry PostToolUse hook
+(~/.praxis/telemetry/bypass-events-YYYY-MM-DD.jsonl) and aggregates them for
+human review.
+
+Phase 2 of issue #456 (Phase 1 = hook that writes the log; Phase 3 = HTTP
+forwarding, deferred).
+
+Usage:
+  bypass-review [OPTIONS]
+
+Options:
+  -d, --days N           Query the last N days (default: 7)
+  --dir PATH             Override the telemetry directory
+                         (default: ~/.praxis/telemetry)
+  --errors-only          Show only events where tool_result_status = "error"
+  -h, --help             Show this message and exit
+
+Output sections:
+  1. Summary — total events + date window
+  2. Top bypass vars — frequency table (which rules are bypassed most)
+  3. Bypass by hook/tool — group by tool field
+  4. Error events — events where tool_result_status == "error"
+
+Privacy contract (read-only, never re-derives omitted fields):
+  - bypass var VALUES are not in the JSONL; this CLI never prints them
+  - tool_input is already truncated/redacted in the log; printed as-is
+  - tool_response content is not in the log; this CLI never prints it
+
+Exit codes:
+  0   success (even if zero events found)
+  1   argument error
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# JSONL field names — cited verbatim from
+# hooks/postuse-correction/bypass-telemetry/impl.py lines 250-257
+# ---------------------------------------------------------------------------
+FIELD_TIMESTAMP = "timestamp"
+FIELD_SESSION_ID = "session_id"
+FIELD_TOOL = "tool"
+FIELD_BYPASS_ENV_VARS = "bypass_env_vars"
+FIELD_TOOL_INPUT = "tool_input"
+FIELD_TOOL_RESULT_STATUS = "tool_result_status"
+
+STATUS_ERROR = "error"
+
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="bypass-review",
+        description=(
+            "Aggregate praxis bypass-telemetry events for human review.\n"
+            "Reads ~/.praxis/telemetry/bypass-events-YYYY-MM-DD.jsonl files."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "-d", "--days",
+        type=int,
+        default=7,
+        metavar="N",
+        help="Query the last N days (default: 7)",
+    )
+    parser.add_argument(
+        "--dir",
+        dest="telemetry_dir",
+        default=None,
+        metavar="PATH",
+        help="Override telemetry directory (default: ~/.praxis/telemetry)",
+    )
+    parser.add_argument(
+        "--errors-only",
+        action="store_true",
+        help="Show only events where tool_result_status == 'error'",
+    )
+    return parser.parse_args(argv)
+
+
+# ---------------------------------------------------------------------------
+# JSONL loading
+# ---------------------------------------------------------------------------
+
+def date_range(days: int) -> list[str]:
+    """Return a list of UTC date strings YYYY-MM-DD for the last N days."""
+    today = datetime.now(tz=timezone.utc).date()
+    return [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days)]
+
+
+def load_events(telemetry_dir: Path, days: int) -> list[dict]:
+    """Load all valid JSONL records from the last N days of telemetry files."""
+    events: list[dict] = []
+    for date_str in date_range(days):
+        path = telemetry_dir / f"bypass-events-{date_str}.jsonl"
+        if not path.is_file():
+            continue
+        try:
+            with path.open(encoding="utf-8") as fh:
+                for lineno, raw_line in enumerate(fh, 1):
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        # Skip malformed lines — same fail-open philosophy as the hook
+                        continue
+                    if not isinstance(record, dict):
+                        continue
+                    events.append(record)
+        except OSError:
+            # Unreadable file — skip silently (consistent with hook fail-open)
+            continue
+    return events
+
+
+# ---------------------------------------------------------------------------
+# Aggregation
+# ---------------------------------------------------------------------------
+
+def aggregate(events: list[dict]) -> dict:
+    """Return aggregated statistics over the event list."""
+    bypass_var_counts: Counter[str] = Counter()
+    tool_counts: Counter[str] = Counter()
+    error_events: list[dict] = []
+    # Per-var error count for the "signal too strict?" callout
+    bypass_var_error_counts: Counter[str] = Counter()
+
+    for ev in events:
+        bypass_vars: list[str] = ev.get(FIELD_BYPASS_ENV_VARS) or []
+        tool: str = ev.get(FIELD_TOOL) or "(unknown)"
+        status: str = ev.get(FIELD_TOOL_RESULT_STATUS) or "ok"
+
+        for var in bypass_vars:
+            bypass_var_counts[var] += 1
+            if status == STATUS_ERROR:
+                bypass_var_error_counts[var] += 1
+
+        tool_counts[tool] += 1
+
+        if status == STATUS_ERROR:
+            error_events.append(ev)
+
+    return {
+        "total": len(events),
+        "bypass_var_counts": bypass_var_counts,
+        "bypass_var_error_counts": bypass_var_error_counts,
+        "tool_counts": tool_counts,
+        "error_events": error_events,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+
+_DIVIDER = "─" * 60
+
+
+def _render_header(title: str) -> str:
+    return f"\n{_DIVIDER}\n{title}\n{_DIVIDER}"
+
+
+def render_report(
+    events: list[dict],
+    agg: dict,
+    days: int,
+    telemetry_dir: Path,
+    errors_only: bool,
+) -> str:
+    lines: list[str] = []
+
+    today = datetime.now(tz=timezone.utc).date()
+    since = today - timedelta(days=days - 1)
+
+    lines.append(_render_header("bypass-review: Bypass Telemetry Report"))
+    lines.append(f"  Period : {since} → {today} (last {days} day{'s' if days != 1 else ''})")
+    lines.append(f"  Source : {telemetry_dir}")
+    lines.append(f"  Total events : {agg['total']}")
+    lines.append(f"  Error events : {len(agg['error_events'])}")
+
+    if agg["total"] == 0:
+        lines.append("\n  No bypass events found in the selected period.")
+        return "\n".join(lines)
+
+    if errors_only:
+        _render_error_events(lines, agg["error_events"])
+        return "\n".join(lines)
+
+    # ── Section 2: Top bypass vars ──
+    lines.append(_render_header("Top Bypass Vars (most bypassed rules)"))
+    if agg["bypass_var_counts"]:
+        lines.append(f"  {'Var name':<50}  {'Count':>5}  {'Errors':>6}  Note")
+        lines.append(f"  {'─' * 50}  {'─' * 5}  {'─' * 6}  {'─' * 20}")
+        for var, count in agg["bypass_var_counts"].most_common():
+            err_count = agg["bypass_var_error_counts"].get(var, 0)
+            note = "⚠ bad-bypass candidate" if err_count > 0 else ""
+            lines.append(f"  {var:<50}  {count:>5}  {err_count:>6}  {note}")
+        lines.append("")
+        lines.append(
+            "  Note: high count = rule may be too strict; "
+            "Errors = bypass followed by tool failure (bad-bypass candidate)."
+        )
+    else:
+        lines.append("  (no bypass var data)")
+
+    # ── Section 3: By tool ──
+    lines.append(_render_header("Bypass Events by Tool"))
+    if agg["tool_counts"]:
+        lines.append(f"  {'Tool':<30}  {'Count':>5}")
+        lines.append(f"  {'─' * 30}  {'─' * 5}")
+        for tool, count in agg["tool_counts"].most_common():
+            lines.append(f"  {tool:<30}  {count:>5}")
+    else:
+        lines.append("  (no tool data)")
+
+    # ── Section 4: Error events detail ──
+    _render_error_events(lines, agg["error_events"])
+
+    return "\n".join(lines)
+
+
+def _render_error_events(lines: list[str], error_events: list[dict]) -> None:
+    lines.append(_render_header(
+        f"Error Events (tool_result_status == 'error')  [{len(error_events)} total]"
+    ))
+    if not error_events:
+        lines.append("  (none — all bypasses succeeded)")
+        return
+
+    lines.append(
+        "  These events had an active bypass AND the tool call failed.\n"
+        "  They are the strongest 'bad-bypass' signal: the bypass did not\n"
+        "  prevent a failure — it may have caused or obscured one."
+    )
+    for i, ev in enumerate(error_events, 1):
+        ts = ev.get(FIELD_TIMESTAMP, "(no timestamp)")
+        session = ev.get(FIELD_SESSION_ID, "") or "(no session)"
+        tool = ev.get(FIELD_TOOL, "(unknown)")
+        bypass_vars = ev.get(FIELD_BYPASS_ENV_VARS) or []
+        tool_input = ev.get(FIELD_TOOL_INPUT, "") or ""
+        lines.append(f"\n  [{i}] {ts}")
+        lines.append(f"      session : {session}")
+        lines.append(f"      tool    : {tool}")
+        lines.append(f"      bypass  : {', '.join(bypass_vars)}")
+        if tool_input:
+            lines.append(f"      input   : {tool_input}")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+
+    if args.days < 1:
+        print("bypass-review: --days must be >= 1", file=sys.stderr)
+        return 1
+
+    if args.telemetry_dir is not None:
+        telemetry_dir = Path(args.telemetry_dir)
+    else:
+        telemetry_dir = Path.home() / ".praxis" / "telemetry"
+
+    events = load_events(telemetry_dir, args.days)
+    agg = aggregate(events)
+    report = render_report(events, agg, args.days, telemetry_dir, args.errors_only)
+    print(report)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
