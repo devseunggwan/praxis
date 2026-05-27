@@ -62,6 +62,7 @@ so the agent can self-correct. Fail-open on infrastructure errors by design.
 | [path-probe-gate](../../hooks/advisory-nudge/path-probe-gate/spec.md) | PreToolUse | Advisory nudge (opt-in strict: deny) when Write/Edit/NotebookEdit targets a nested worktree path whose parent has not been enumerated this session |
 | [version-bump-evidence-check](../../hooks/advisory-nudge/version-bump-evidence-check/spec.md) | PreToolUse | Advisory nudge (opt-in strict) when `gh issue/pr` body describes an external version bump with no changelog URL, Fetched: line, or cross-reference matrix |
 | [count-assertion-verify](../../hooks/advisory-nudge/count-assertion-verify/spec.md) | PreToolUse | Advisory nudge when `grep -c` with alternation (`\|` BRE or `\|` ERE/PCRE) runs without per-arm verification; prevents citing inflated alternation counts — issue #277 |
+| [bulk-write-memory-checkpoint](../../hooks/advisory-nudge/bulk-write-memory-checkpoint/spec.md) | PreToolUse | Advisory nudge when bulk-writing to SOT-flagged paths (vault/, wiki/, .claude/, skills/, AGENTS.md/CLAUDE.md companions) — reminds to checkpoint memory before the write loop to prevent "Loaded ≠ Retrieved" failures — issue #443 |
 
 ---
 
