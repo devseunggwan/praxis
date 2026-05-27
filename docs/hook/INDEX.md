@@ -25,6 +25,7 @@ confirmation-prompt layer.
 | [side-effect-scan](../../hooks/preflight-gate/side-effect-scan/spec.md) | PreToolUse | Ask before commands with collateral side effects (`git commit/push`, `gh pr merge/create`, `kubectl apply`) |
 | [commit-title-length-check](../../hooks/preflight-gate/commit-title-length-check/spec.md) | PreToolUse | Ask when `git commit` title exceeds 50 chars |
 | [commit-title-format-check](../../hooks/preflight-gate/commit-title-format-check/spec.md) | PreToolUse | Block `git commit`, `gh pr create`, `gh issue create` when title does not match Conventional Commits format |
+| [branch-name-check](../../hooks/preflight-gate/branch-name-check/spec.md) | PreToolUse | Block branch creation (`checkout -b`, `switch -c`, `worktree add -b`) when the new branch name does not match the configured regex |
 | [pre-merge-approval-gate](../../hooks/preflight-gate/pre-merge-approval-gate/spec.md) | PreToolUse | Surface per-PR approval prompt for `gh pr merge` in direct sessions |
 | [cross-boundary-preflight](../../hooks/preflight-gate/cross-boundary-preflight/spec.md) | PreToolUse | Block heredoc body in `gh pr/issue create`; ask with four-point checklist on cross-repo `--repo` writes |
 | [pre-edit-protected-branch-guard](../../hooks/preflight-gate/pre-edit-protected-branch-guard/spec.md) | PreToolUse | Block Edit/Write/NotebookEdit on protected branches (main/dev/prod/master) outside the expected worktree workflow |

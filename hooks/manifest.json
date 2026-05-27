@@ -91,6 +91,13 @@
       "timeout": 5
     },
     {
+      "name": "branch-name-check",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
       "name": "pre-merge-approval-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",
