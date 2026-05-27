@@ -574,7 +574,7 @@ After one full release cycle following Phase 3, delete the 39
 | 2026-05-26 | Status → Accepted | praxis maintainers |
 | 2026-05-26 | Phase 1 merged (#421 / PR #424) | praxis maintainers |
 | 2026-05-26 | Phase 2 merged (#422) — role dirs + per-hook folders + `manifest.json` + wrapper drop | praxis maintainers |
-| TBD | Phase 3 merged | — |
+| 2026-05-27 | Phase 3 merged (#423 / PR #435) — spec collocation + redirect stubs + check-manifest invariant #10 | praxis maintainers |
 | TBD | Status → Accepted (post-Phase-3 soak) | — |
 
 ---
