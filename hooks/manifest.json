@@ -289,6 +289,13 @@
       "timeout": 5
     },
     {
+      "name": "bulk-write-memory-checkpoint",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit",
+      "timeout": 5
+    },
+    {
       "name": "block-ask-end-option",
       "role": "preflight-gate",
       "event": "PreToolUse",
