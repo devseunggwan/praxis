@@ -80,7 +80,7 @@ Stage 1.5 runs unconditionally between Stage 1 (Load) and Stage 2 (Analyze). Its
 
 **Scope:** scan MEMORY.md index + a bounded subset of `feedback_*.md` files.
 
-**Cap (mandatory):** scan up to **5 feedback files per invocation**. Persist a cursor at `.omc/state/retrospect-hygiene-cursor.json` recording (a) the timestamp of the last successful pass, (b) the list of file paths scanned, and (c) the next-batch pointer (path of the next un-scanned feedback file in sorted order). Subsequent retrospects resume from the cursor — full corpus coverage amortizes across multiple sessions. When the full corpus has been scanned once, rotate the cursor to restart from the most-recently-modified entries.
+**Cap (mandatory):** scan up to **5 feedback files per invocation**. Persist a cursor at `.omc/state/retrospect-hygiene-cursor.json` recording (a) the timestamp of the last successful pass, (b) the list of file paths scanned, (c) the next-batch pointer (path of the next un-scanned feedback file in sorted order), and (d) the per-signal pairwise-check trail for the batch (`signal_2_contradiction` / `signal_3_merge_candidate`, each `checked: yes|no, matches: N`). Field (d) is the home for the zero-match proof — a clean batch emits no finding, so the negative result is recorded here in the scan trail, not in a (non-existent) per-finding block. Subsequent retrospects resume from the cursor — full corpus coverage amortizes across multiple sessions. When the full corpus has been scanned once, rotate the cursor to restart from the most-recently-modified entries.
 
 **Four detection signals (each becomes a finding with `category: memory_hygiene`):**
 
@@ -92,13 +92,24 @@ Stage 1.5 runs unconditionally between Stage 1 (Load) and Stage 2 (Analyze). Its
 
    Detection method: parse the entry's body for `\bgrep -n\b`-able tokens (file paths, CLI flag patterns `--[a-z-]+`, CLAUDE.md line citations); run the verification command; record failures as stale.
 
+   **Probe guideline — multi-path enumerate before concluding stale (MUST):** a single-path not-found result (e.g., `test -e <path>` returns false, `grep -n <excerpt> <file>` returns 0 matches) is insufficient to conclude the entry is stale — the target may have been renamed or moved rather than removed. Before recording a stale finding, try at least one additional verification path:
+   - File path absent: also try `find . -name "$(basename <path>)"` to detect **moves** (same filename, new location). This does not catch a true rename (basename changed) — for that, grep a unique symbol / quoted excerpt from the entry across the tree (`grep -rn "<unique token>" .`) before concluding stale.
+   - CLI flag absent: also try `<binary> help <subcommand>` or `man <binary>` to catch flag aliases or nested help pages that `--help` alone does not print.
+   - CLAUDE.md line shifted: also try `grep -n` with a shorter unique substring of the cited excerpt (the full excerpt may span lines that were reformatted).
+   - Skill / hook removed: also try searching the manifest's alias or `name` field, not only the file path.
+   Only when all attempted paths fail does the entry qualify as a confirmed stale finding. Record both the primary probe command and the secondary probe(s) in the finding's evidence block.
+
 2. **Contradiction** — two entries provide semantically opposed guidance under overlapping triggers:
    - Entry A says "always X under trigger T"; Entry B says "never X under trigger T" — same T, opposite directive.
    - Detection method: concept-level pairwise comparison restricted to entries whose `hookKeywords` (or trigger tokens) overlap. Use LLM judgment for semantic opposition (no regex shortcut). Cap pairwise comparisons to the cursor-batch's 5 files × full-index check.
 
+   **Pairwise-proof requirement (MUST):** record pairwise check metadata in the format `checked: yes, matches: N` where N is the count of contradiction pairs found. "0 across batch" alone is INELIGIBLE — stating a zero count without explicitly confirming that the pairwise comparison was executed is indistinguishable from skipping the check. Placement depends on N: when **N ≥ 1**, record it in each emitted contradiction finding's evidence block; when **N = 0**, no finding is emitted, so record `signal_2_contradiction: checked: yes, matches: 0` in the Stage 1.5 cursor scan trail (field (d) above) — never fabricate a finding just to carry the proof. This requirement exists so downstream retrospects can audit whether Signal 2 ran or was silently elided.
+
 3. **Merge candidate** — two or more entries share a root-cause family but have not been merged:
    - Same principle restated with different examples (the merge-first policy at Stage 4 Action 1d should have collapsed them).
    - Detection method: read each entry's `description` field and root-cause prose; group by concept-level matching (same heuristic as Stage 4 Action 1 duplicate-check). When N ≥ 2 entries share a family AND none has been merged, emit a merge-candidate finding.
+
+   **Pairwise-proof requirement (MUST):** record pairwise check metadata in the format `checked: yes, matches: N` where N is the count of merge-candidate groups found. "0 across batch" alone is INELIGIBLE — stating a zero count without confirming the pairwise comparison was executed is indistinguishable from skipping the check. Placement depends on N: when **N ≥ 1**, record it in each emitted merge-candidate finding's evidence block; when **N = 0**, no finding is emitted, so record `signal_3_merge_candidate: checked: yes, matches: 0` in the Stage 1.5 cursor scan trail (field (d) above) — never fabricate a finding just to carry the proof. Same audit rationale as Signal 2.
 
 4. **Size threshold** — the MEMORY.md **index file itself** has grown past a configurable threshold, increasing the risk that the index is silently truncated at load time and that downstream Stage 1 compaction restoration is incomplete (the upstream structural enabler called out by praxis issue #387). Triggered when EITHER condition fires:
    - Index line count ≥ `PRAXIS_RETROSPECT_INDEX_LINE_THRESHOLD` (default `200`)
@@ -740,6 +751,14 @@ If no Gate-3 (b) demotions occurred, omit this section entirely (do not emit "No
 
 No patterns found: emit the **header**, the **`retrospect:pre_scan_checklist` fence**, the **`retrospect:dismissed_candidates` fence** (populated with any dismissals from Stage 2's Pre-scan Checklist; empty body when zero), and the **distribution card** with all counts = 0 and verdicts = NA, plus literal "This session followed all global `~/.claude/CLAUDE.md` rules. ✅". The two new fences MUST be emitted even in the 0-friction case — otherwise the dismissed-candidate audit trail is silently lost in exactly the path it is most needed (Stage 2 early exit that resolves via demotion-only).
 
+**Enumerate-before-empty-fence (MANDATORY in the 0-friction path):** before emitting an empty `dismissed_candidates` fence in the 0-friction exit, MUST run the following deterministic enumeration — an empty fence is permitted only when step (a) surfaces zero **rule-violation** matches (review-bot output that is purely style nits / refactor suggestions does not count as a rule violation and does not block an empty fence):
+
+(a) Scan the session transcript for codex/review-bot finding markers. "Codex/review-bot finding markers" are explicit tool outputs from: Codex CLI reviewer output blocks, BugBot comment bodies, oh-my-claudecode reviewer agent result text, Cursor review annotations. Every match — regardless of whether it constitutes a rule violation — MUST be inspected for rule-violation content. Any match that is a rule violation (workflow step in `AGENTS.md` / `~/.claude/CLAUDE.md` / hook denial / spec-cited divergence) MUST appear as a ledger line in `dismissed_candidates` with rationale (typically the escape-hatch form: `repeat=false AND resolved=true via in-session apply`, or `not a rule violation — style/refactor suggestion only`). Review-bot findings that are purely style nits or refactor suggestions are acknowledged and dismissed inline; they do NOT require a `dismissed_candidates` entry (per the narrow-scope rule at Stage 2 Pre-scan Checklist "Mandate scope").
+
+(b) Every codex/review-bot match that identifies a rule violation MUST appear as a ledger line: `- {one-line candidate} | reason: {dismissal rationale} | spec_cite: {section name or file:line}`. The escape-hatch `repeat=false AND resolved=true via in-session apply` is the standard rationale when the finding was already fixed in the same session.
+
+(c) An empty `dismissed_candidates` fence is ONLY permitted when step (a) enumeration returns zero **rule-violation** matches. The Red Flag is narrow-scoped to rule violations: emitting an empty fence after step (a) surfaced a rule-violation match (instead of recording it as a ledger line) is a Red Flag (see Red Flags section). A transcript whose review-bot output is purely style nits / refactor suggestions — no rule-violation match — correctly permits an empty fence; the mere presence of a review-bot output block does NOT itself force a ledger entry.
+
 ### Reinforced Patterns (this session)
 
 (Emitted only when pre-scan found ≥1 successful_patterns with `reinforce_action: visualize_only`. Omit this section entirely if none — do not emit "None." Rows with `reinforce_action: memory` are NOT listed here — they appear in Stage 4 Actions Executed report alongside friction-origin memory entries, distinguishable by the `Reinforced — ` description prefix.)
@@ -1193,6 +1212,7 @@ If you catch yourself:
 - **조사 도구 결과를 completeness 검증 없이 결론에 사용 (premise unverified)** — 다음 두 패턴 모두 "premise falsified" (반증 테스트를 설계한 뒤 통과 → 진행 가능)가 아니라 "premise unverified" (도구 출력 자체의 한계를 검증하지 않은 채 결론에 사용 → STOP) 에 해당한다: (a) `find ... | head -N` 결과로 "파일/모듈 없음" 단정 — **`head` 를 제거한 원 명령 `find ... | wc -l` 을 별도로 실행**해 총 라인 수를 확인하고, cap 초과 시 cap 제거 또는 `grep -rn <token>` narrowing 필요 (`head -N` 파이프 뒤에 `| wc -l` 을 붙이면 cap 으로 잘린 뒤의 라인 수만 세므로 정확히 N개와 cap 초과를 구분할 수 없어 검증이 실패한다); (b) `find <path>` 빈 결과로 "경로/모듈 없음" 단정 — `ls <parent>` 로 path coverage 를 확인하거나 상위 경로로 재시도, 또는 `grep -rn <token>` cross-check 필요.
 - **Stage 1.5 hygiene scan을 "MEMORY.md가 작아서" 또는 "이미 다 안다"는 이유로 건너뜀** — Stage 1.5는 unconditional. 코퍼스 크기와 무관하게 cap-and-cursor 메커니즘으로 비용이 amortized 된다. "내가 이미 안다" 는 author-exempt verification trap 의 변형 — Stage 1.5의 detect-only 책임을 Stage 2 friction-scanner 가 대신할 수 없다 (silent recurrence는 마찰 신호 없이 누적).
 - **Stage 2.7 audit-skip을 trail 라인 없이 silent으로 처리** — `<!-- retrospect:audit_skipped: no artifacts -->` (또는 `transcript unreadable` variant)은 mandatory. trail 라인 부재 시 "Stage 2.7이 실행되었는가" vs "스킵되었는가" vs "잊혀졌는가" 를 retrospective audit이 구분할 수 없다. 0-trigger silent skip path도 trail 라인은 emit 한다.
+- **0-friction exit에서 empty `dismissed_candidates` fence를 emit했으나 step (a) 열거가 rule-violation match를 surface함** — enumerate-before-empty-fence 요건 위반. codex/review-bot output(Codex CLI reviewer, BugBot comment, oh-my-claudecode reviewer result, Cursor annotation) 중 **rule violation에 해당하는** match가 있는데도 `dismissed_candidates` fence가 비어 있으면, 열거 결과를 ledger에 기록하지 않은 증거. STOP, rule-violation match를 모두 ledger 라인으로 기록한 뒤 emit. (style nit / refactor suggestion만 있는 output block은 위반이 아니며 empty fence가 정상 — 단순 output block 존재만으로는 Red Flag 아님.)
 
 **ALL of these mean: STOP. Return to Stage 2.**
 
