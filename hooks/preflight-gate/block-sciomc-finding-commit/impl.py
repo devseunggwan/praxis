@@ -135,6 +135,9 @@ def main() -> int:
 
 _SHELL_SEPARATORS = {";", "&", "&&", "|", "||", "\n"}
 _GLOBAL_OPTS_WITH_VALUE = {"-c", "-C", "--git-dir", "--work-tree", "--namespace"}
+# Terminal global options consume the rest as non-execution: `git --help commit`
+# and `git --version commit` print help/version, they do NOT run commit.
+_TERMINAL_GLOBAL_OPTS = {"--help", "-h", "--version"}
 _EXEMPT_FLAGS = {"--amend"}
 _MESSAGE_FLAGS = {"-m", "--message"}
 
@@ -286,6 +289,8 @@ def _scan_tokens_for_commit(tokens: list[str] | None) -> list[str] | None:
             j = i + 1
             while j < n:
                 t = tokens[j]
+                if t in _TERMINAL_GLOBAL_OPTS:
+                    break  # `git --help commit` / `git --version commit` run no commit
                 if t in _GLOBAL_OPTS_WITH_VALUE:
                     j += 2  # skip option + its value
                     continue

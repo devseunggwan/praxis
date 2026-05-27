@@ -254,6 +254,15 @@ run_case "git commit-tree plumbing (silent — not a git commit)" \
   "silent" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit-tree abc123 -m 'tree'\"},\"transcript_path\":\"$TX_FINDING\"}"
 
+# `git --help commit` / `git --version commit` are terminal — no commit runs
+run_case "git --help commit (silent — terminal option)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git --help commit\"},\"transcript_path\":\"$TX_FINDING\"}"
+
+run_case "git --version commit (silent — terminal option)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git --version commit\"},\"transcript_path\":\"$TX_FINDING\"}"
+
 # echo containing "git commit" — no token-level git+commit adjacency
 run_case "echo git commit string not a commit (silent)" \
   "silent" \
