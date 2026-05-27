@@ -30,7 +30,8 @@ Concrete retrospect pattern (praxis issue #374):
      analysis-as-directive pipeline
 
 Block conditions (ALL must hold):
-  (a) Tool is Bash with `git commit` (not amend/merge/revert/cherry-pick)
+  (a) Tool is Bash with a content `git commit` (not amend/merge/rebase/
+      cherry-pick/revert)
   (b) Recent transcript tail (last ~200 lines) contains a sciomc/finding
       marker: "sibling-deviant", "Stage N finding/analysis/complete",
       "sciomc", "[FINDING:", "[STAGE_COMPLETE:", "scientist-agent",
@@ -40,16 +41,29 @@ Block conditions (ALL must hold):
       marker in the transcript tail
 
 Allow conditions (escape hatches):
-  - Commit message contains [user-approved] or [ratified-by-user] token
+  - Commit message (-m / --message value) contains [user-approved] or
+    [ratified-by-user] token (scoped to message value only)
   - CLAUDE_HOOK_BYPASS_SCIOMC_GATE=1 env var
-  - git commit --amend / git merge / git revert / git cherry-pick
-  - --allow-empty
+  - git commit --amend / git merge / git rebase / git revert / git cherry-pick
+
+NOT exempt: --allow-empty / --allow-empty-message. These flags do NOT prevent
+staged content from being committed — `git commit --allow-empty -m x` with a
+staged file commits that file. Exempting them would let staged changes bypass
+the gate. An intentional empty CI-trigger commit uses the [user-approved] token
+or the env bypass instead.
+
+Classification is token-level (shlex), not raw-string, so:
+  - `git commit-tree` plumbing does not match (tokenizes as one token)
+  - `echo "git commit"` does not trip the gate (no `git`+`commit` adjacency)
+  - `--amend` inside a `-m` message is a value token, not a flag
+  - `[user-approved]` outside the message value (e.g. after &&) does not bypass
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -67,10 +81,14 @@ def main() -> int:
         return 0
 
     command = (payload.get("tool_input") or {}).get("command", "")
-    if not _is_content_git_commit(command):
-        return 0
+    commit_args = _commit_invocation_args(command)
+    if commit_args is None:
+        return 0  # no real `git commit` invocation (or unparseable) → fail-open
 
-    if _has_ratification_token(command):
+    if _is_exempt(commit_args):
+        return 0  # --amend (fix-up of an already-gated commit)
+
+    if _has_ratification_token(commit_args):
         return 0
 
     transcript_path = payload.get("transcript_path")
@@ -97,18 +115,36 @@ def main() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Command classification
+#
+# Classification operates on shlex tokens, not the raw command string.
+# Matching a raw string is unsound for a commit gate:
+#   - `--amend` inside a -m message would falsely exempt a content commit
+#   - `git commit-tree` tokenizes as one token "commit-tree" (≠ "commit")
+#     so plumbing subcommands do not match
+#   - `echo "git commit"` has no `git`+`commit` token adjacency → no match
+#   - `[user-approved]` outside the -m value (e.g. after &&) does not bypass
+#
+# Only `--amend` is exempt: its intent is to fix up a prior (already-gated)
+# commit. `--allow-empty` / `--allow-empty-message` are deliberately NOT exempt
+# — they only *permit* an empty commit / message and do not *prevent* staged
+# content from riding along, so exempting them would let
+# `git commit --allow-empty -m x` (with staged changes) bypass the gate.
+# Verified functionally: both flags commit staged files.
 # ---------------------------------------------------------------------------
 
-_GIT_COMMIT_RE = re.compile(r"\bgit\s+commit\b")
-_GIT_NON_CONTENT_RE = re.compile(r"\bgit\s+(merge|rebase|cherry-pick|revert)\b")
-_AMEND_RE = re.compile(r"--amend\b")
-_ALLOW_EMPTY_RE = re.compile(r"--allow-empty\b")
+_SHELL_SEPARATORS = {";", "&", "&&", "|", "||", "\n"}
+_GLOBAL_OPTS_WITH_VALUE = {"-c", "-C", "--git-dir", "--work-tree", "--namespace"}
+# Terminal global options consume the rest as non-execution: `git --help commit`
+# and `git --version commit` print help/version, they do NOT run commit.
+_TERMINAL_GLOBAL_OPTS = {"--help", "-h", "--version"}
+_EXEMPT_FLAGS = {"--amend"}
+_MESSAGE_FLAGS = {"-m", "--message"}
+
 _RATIFICATION_TOKEN_RE = re.compile(
     r"\[(?:user-approved|ratified-by-user|user-ratified)\]",
     re.IGNORECASE,
 )
-_COMMIT_MSG_RE = re.compile(r"""-m\s+(?:"((?:[^"\\]|\\.)*)"|'([^']*)')""")
 
 _FINDING_MARKERS = (
     re.compile(r"\bsibling[- ]deviant\b", re.IGNORECASE),
@@ -135,24 +171,245 @@ _CONSENSUS_REFETCH_MARKERS = (
 )
 
 
-def _is_content_git_commit(command: str) -> bool:
-    if not _GIT_COMMIT_RE.search(command):
-        return False
-    if _AMEND_RE.search(command):
-        return False
-    if _GIT_NON_CONTENT_RE.search(command):
-        return False
-    if _ALLOW_EMPTY_RE.search(command):
-        return False
-    return True
+def _tokenize(command: str) -> list[str] | None:
+    # punctuation_chars=True splits shell operators (`;`, `&&`, `|`, `(`, `)`,
+    # redirects) into their own tokens even when not space-delimited, while
+    # quotes still protect their contents. Plain shlex.split folds
+    # `true;git commit` into a single `true;git` token, letting a content commit
+    # ride behind a space-less separator — a bypass the prior raw regex caught.
+    # whitespace_split=True keeps normal word splitting; commenters='' preserves
+    # the old comments=False behaviour (a bare `#` is not a comment delimiter).
+    try:
+        lex = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        lex.commenters = ""
+        return list(lex)
+    except ValueError:
+        return None  # unbalanced quotes → unparseable → caller fail-opens
 
 
-def _has_ratification_token(command: str) -> bool:
-    msg_match = _COMMIT_MSG_RE.search(command)
-    if not msg_match:
-        return False
-    msg = msg_match.group(1) or msg_match.group(2) or ""
-    return bool(_RATIFICATION_TOKEN_RE.search(msg))
+# shlex (posix) does not treat shell grouping / command-substitution syntax as
+# operators, so `(git commit …)` and `echo $(git commit …)` tokenize the binary
+# as `(git` / `$(git` / `` `git ``. Without normalizing these, the parser would
+# miss a real content commit wrapped in a subshell/group — a bypass the prior
+# raw-regex (`\bgit\s+commit\b`) happened to catch. Strip a leading run of
+# grouping/substitution chars before the binary-name check.
+_GROUP_PREFIX_CHARS = "(){}$`"
+
+
+def _is_git_binary(token: str) -> bool:
+    stripped = token.lstrip(_GROUP_PREFIX_CHARS)
+    return stripped == "git" or stripped.endswith("/git")
+
+
+# Command-substitution spans. Bash executes the inner command even when the
+# substitution sits inside double quotes — where shlex keeps the whole quoted
+# string as a single token — so a content commit can hide in `echo "$(git
+# commit …)"` or `x="$(git …)"`. A regex cannot delimit `$(…)` reliably: nested
+# `$(a $(b))` and escaped `\)` (a literal paren passed to the inner command, not
+# a closer) break naive `\$\(.*?\)` matching. We scan with a paren-depth counter
+# that skips backslash-escaped chars, then re-tokenize each extracted span.
+
+
+def _extract_substitutions(command: str) -> list[str]:
+    # Quote-aware scan. Bash runs `$(…)` / backtick substitution when unquoted
+    # or inside DOUBLE quotes, but NOT inside SINGLE quotes (`echo '$(git …)'`
+    # is a literal string, not an executed commit). We track quote state so the
+    # scanner mirrors what bash actually executes — extracting from single-quoted
+    # text would false-block, scanning raw across quotes would mis-handle an
+    # apostrophe inside double quotes (`"it's $(git …)"`). A paren-depth counter
+    # that skips backslash-escaped chars handles nested `$( $( ) )` and `\)`.
+    spans: list[str] = []
+    i = 0
+    n = len(command)
+    in_squote = False
+    in_dquote = False
+    while i < n:
+        c = command[i]
+        if in_squote:
+            if c == "'":
+                in_squote = False
+            i += 1
+            continue
+        if c == "\\":
+            i += 2  # escaped char is literal, never opens a substitution
+            continue
+        if c == "'" and not in_dquote:
+            in_squote = True
+            i += 1
+            continue
+        if c == '"':
+            in_dquote = not in_dquote
+            i += 1
+            continue
+        if c == "`":  # backtick substitution (active unquoted and in double quotes)
+            j = i + 1
+            while j < n and command[j] != "`":
+                j += 2 if command[j] == "\\" else 1
+            if j >= n:
+                break
+            spans.append(command[i + 1:j])
+            i = j + 1
+            continue
+        if c == "$" and i + 1 < n and command[i + 1] == "(":
+            depth = 1
+            j = i + 2
+            start = j
+            while j < n and depth:
+                ch = command[j]
+                if ch == "\\":  # escaped char (e.g. `\)`) does not close the span
+                    j += 2
+                    continue
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            spans.append(command[start:j])
+            i = j + 1
+            continue
+        i += 1
+    return spans
+
+
+def _scan_tokens_for_commit(tokens: list[str] | None) -> list[str] | None:
+    """Walk shlex tokens and return the arg tokens of the first real
+    `git commit` invocation (from the `commit` token up to the next shell
+    separator or next `git`), or None. `git commit-tree` (single token
+    `commit-tree` ≠ `commit`) and non-content subcommands return None."""
+    if tokens is None:
+        return None
+    n = len(tokens)
+    i = 0
+    while i < n:
+        tok = tokens[i]
+        if _is_git_binary(tok):
+            j = i + 1
+            while j < n:
+                t = tokens[j]
+                if t in _TERMINAL_GLOBAL_OPTS:
+                    break  # `git --help commit` / `git --version commit` run no commit
+                if t in _GLOBAL_OPTS_WITH_VALUE:
+                    j += 2  # skip option + its value
+                    continue
+                if t.startswith("-"):
+                    j += 1
+                    continue
+                break
+            if j < n and tokens[j] == "commit":
+                args: list[str] = []
+                k = j
+                while k < n:
+                    t = tokens[k]
+                    if t in _SHELL_SEPARATORS:
+                        break
+                    if k > j and _is_git_binary(t):
+                        break
+                    args.append(t)
+                    k += 1
+                return args
+            i = j
+            continue
+        i += 1
+    return None
+
+
+def _commit_invocation_args(command: str) -> list[str] | None:
+    """Return the argument tokens of the first real `git commit` invocation, or
+    None if the command runs no `git commit`.
+
+    Hybrid detection: (1) direct shlex tokenization handles plain, grouped
+    (`(git …)`), unquoted-substitution (`$(git …)`), and separator-chained
+    forms; (2) a command-substitution span scan handles QUOTED substitution
+    (`echo "$(git commit …)"`, `x="$(git …)"`) that shlex folds into one token.
+    A plain quoted literal (`echo "git commit"`, `--grep="git commit"`) has no
+    `$(…)`/backtick span and no `git`+`commit` token adjacency, so it is
+    correctly ignored — the precision the token approach was introduced for.
+    """
+    args = _scan_tokens_for_commit(_tokenize(command))
+    if args is not None:
+        return args
+    for inner in _extract_substitutions(command):
+        args = _scan_tokens_for_commit(_tokenize(inner))
+        if args is not None:
+            return args
+    return None
+
+
+def _is_separate_message_flag(arg: str) -> bool:
+    """True if `arg` is a message flag whose value is the NEXT token: `-m`,
+    `--message`, or a clustered short option ending in -m with no attached
+    value (`-am`). Inline forms (`-mMSG`, `--message=MSG`, `-ammsg`) carry the
+    value in the token itself and return False (no separate value token)."""
+    if arg in _MESSAGE_FLAGS:
+        return True
+    return (
+        arg.startswith("-")
+        and not arg.startswith("--")
+        and len(arg) > 2
+        and arg[1] != "m"                     # `-m`/`-mMSG` handled separately
+        and "m" in arg
+        and arg[1:arg.index("m")].isalpha()
+        and not arg[arg.index("m") + 1:]      # no attached value → next token is value
+    )
+
+
+def _is_exempt(commit_args: list[str]) -> bool:
+    # Exempt flags must be standalone flag tokens. A `-m`/`--message`/`-am`
+    # VALUE that happens to equal "--amend" (`git commit -m --amend`) is the
+    # message text, not the amend flag — skip the consumed value token before
+    # matching, or it would false-exempt a content commit.
+    i = 0
+    n = len(commit_args)
+    while i < n:
+        arg = commit_args[i]
+        if _is_separate_message_flag(arg):
+            i += 2  # skip the flag and its separate value token
+            continue
+        if arg in _EXEMPT_FLAGS:
+            return True
+        i += 1
+    return False
+
+
+def _message_values(commit_args: list[str]) -> list[str]:
+    """Extract -m / --message values (separate, joined `-mMSG`, clustered
+    `-am`/`-ammsg`, and `--message=MSG` forms). -F/--file values are file
+    paths, not the message text, so they are not inspected."""
+    values: list[str] = []
+    i = 0
+    n = len(commit_args)
+    while i < n:
+        arg = commit_args[i]
+        if _is_separate_message_flag(arg):
+            if i + 1 < n:
+                values.append(commit_args[i + 1])
+            i += 2
+            continue
+        if arg.startswith("--message="):
+            values.append(arg[len("--message="):])
+        elif arg.startswith("-m") and len(arg) > 2:
+            values.append(arg[2:])
+        elif (
+            arg.startswith("-")
+            and not arg.startswith("--")
+            and len(arg) > 2
+            and arg[1] != "m"
+            and "m" in arg
+            and arg[1:arg.index("m")].isalpha()
+        ):
+            # inline clustered value: `-ammsg` → "msg"
+            values.append(arg[arg.index("m") + 1:])
+        i += 1
+    return values
+
+
+def _has_ratification_token(commit_args: list[str]) -> bool:
+    # Scope the check to -m/--message values so a token elsewhere in a compound
+    # command (`git commit -m x; echo '[user-approved]'`) does not bypass the gate.
+    return any(_RATIFICATION_TOKEN_RE.search(value) for value in _message_values(commit_args))
 
 
 def _read_transcript_tail(path: str, max_lines: int, max_bytes: int) -> str | None:
