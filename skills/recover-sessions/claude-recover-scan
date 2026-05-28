@@ -8,11 +8,74 @@ Usage:
 Output:
   Pipe-delimited lines: mod_time|size|session_id|cwd|first_msg|home_label
 """
-import json, os, sys, datetime
+import json, os, re, sys, datetime
 
 days_ago_str = sys.argv[1]
 from_date_str = sys.argv[2]
 to_date_str = sys.argv[3]
+
+# Claude Code emits a boilerplate prefix on every compaction-restored
+# session — strip it before extracting a display name so every compacted
+# session does not collapse to the same line. Regex (rather than exact
+# string match) tolerates minor wording drift across Claude Code versions.
+RE_COMPACT_BOILERPLATE = re.compile(
+    r"^This session is being continued from .*?conversation\.\s*",
+    re.S,
+)
+# Locate every "Original request:" / "Primary Request and Intent:" label
+# so we can pick the INNERMOST (most-specific) one. A compaction summary
+# typically nests them as "Primary Request and Intent: - Original request:
+# <text>" — matching the first label captures the wrapper section, not
+# the actual request text.
+RE_REQUEST_LABEL_TOKEN = re.compile(
+    r"(?:Original|Primary)\s+(?:request|Request)[^:\n]*:"
+)
+RE_FIRST_SENTENCE = re.compile(
+    r"^[-\s]*\*?\*?(?!Summary\b|Primary\b|\.\.\.|This session\b)"
+    r"([A-Za-zÀ-ſ가-힯\"\'].{10,200}?)(?:\.\s|\n|\*\*|$)",
+    re.MULTILINE,
+)
+
+
+def _trim(text: str) -> str:
+    """Strip surrounding whitespace + leading list/bullet markers + trailing markdown bold and sentence period."""
+    text = text.strip()
+    # Peel a leading "- " or "* " list marker if present (these are
+    # extraction artifacts, not part of the user-visible content).
+    while text.startswith(("- ", "* ")):
+        text = text[2:].lstrip()
+    # Strip trailing markdown emphasis + sentence-terminating period
+    # the captures sometimes pull in. Loop because a value can end in
+    # `**.` and both need to come off.
+    prev = None
+    while prev != text:
+        prev = text
+        text = text.rstrip("*").rstrip(".").rstrip()
+    return text.replace("\n", " ")[:80]
+
+
+def extract_compact_display(content: str) -> str:
+    """Pick a display-friendly line from a compaction summary record."""
+    after = RE_COMPACT_BOILERPLATE.sub("", content, count=1).strip()
+    # Strip the standard "Summary:" header that wraps the body of every
+    # compaction record — it has no per-session signal value.
+    if after.startswith("Summary:"):
+        after = after[len("Summary:"):].lstrip()
+    # Pick the INNERMOST request label; an outer "Primary Request and
+    # Intent:" wraps an inner "Original request:" in the common shape.
+    labels = list(RE_REQUEST_LABEL_TOKEN.finditer(after))
+    if labels:
+        rest = after[labels[-1].end():].lstrip(" *")
+        # Cut at the first newline / bold delimiter / end-of-string.
+        end_match = re.search(r"\n|\*\*", rest)
+        body = rest[: end_match.start()] if end_match else rest
+        cleaned = _trim(body)
+        if cleaned:
+            return cleaned
+    m = RE_FIRST_SENTENCE.search(after)
+    if m:
+        return _trim(m.group(1))
+    return ""
 
 def parse_date(s):
     if not s:
@@ -143,6 +206,7 @@ for base, home_label in config_homes.items():
             cwd = ""
             user_count = 0
             first_real_msg = ""
+            compact_summary = ""
             is_teammate = False
             is_command = False
             is_schedule = False
@@ -168,15 +232,32 @@ for base, home_label in config_homes.items():
                             cwd = obj["cwd"]
 
                         if obj.get("type") == "user" and not obj.get("isSidechain"):
-                            user_count += 1
-                            user_tail_buf.append(obj)
-                            if len(user_tail_buf) > USER_TAIL_SIZE:
-                                user_tail_buf.pop(0)
                             msg = obj.get("message", {})
                             raw = msg.get("content", "") if isinstance(msg, dict) else str(msg)
                             if not isinstance(raw, str):
                                 continue
                             c = raw.strip()
+
+                            # Compaction summary records: extract a display-
+                            # friendly line and short-circuit BEFORE any
+                            # user-count-driven gate (MIN_USER_MSGS,
+                            # command/teammate detection at user_count==1,
+                            # schedule prefix). The boilerplate is identical
+                            # across every compacted session, so without
+                            # this branch every restored session collapses
+                            # to the same "This session is being continued…"
+                            # line; counting it as a user message would
+                            # also let a "real" 3-message session pass the
+                            # 4-message floor with a compaction stub.
+                            if obj.get("isCompactSummary"):
+                                if not compact_summary:
+                                    compact_summary = extract_compact_display(c)
+                                continue
+
+                            user_count += 1
+                            user_tail_buf.append(obj)
+                            if len(user_tail_buf) > USER_TAIL_SIZE:
+                                user_tail_buf.pop(0)
 
                             if user_count <= 5:
                                 if c.startswith("<teammate-message"):
@@ -283,12 +364,25 @@ for base, home_label in config_homes.items():
             if was_exited:
                 filter_counts["exited"] += 1
                 continue
-            if not first_real_msg:
+            # Display-name fallback chain (per #467): compaction summary →
+            # first non-trivial user msg → session_id. The compaction
+            # summary takes precedence because a long session that has
+            # been compacted is identified by what the conversation
+            # *became*, not by the slash-command that originally booted
+            # it (e.g. "/continue" or "/retrospect"). The session_id
+            # final fallback matches the acceptance criterion verbatim —
+            # a UUID label is uninformative but lets the user resume
+            # rather than have the session silently dropped.
+            display_name = compact_summary or first_real_msg or session_id
+            if not display_name:
+                # Genuinely empty (no compact summary, no first msg, no
+                # session id) — defensive only; should never trigger
+                # because session_id is always set above.
                 filter_counts["no_msg"] += 1
                 continue
 
             cwd = cwd or "/tmp"
-            results.append((mod_time, size_h, session_id, cwd, first_real_msg, home_label))
+            results.append((mod_time, size_h, session_id, cwd, display_name, home_label))
 
 results.sort(key=lambda x: x[0], reverse=True)
 
