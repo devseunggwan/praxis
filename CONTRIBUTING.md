@@ -95,6 +95,23 @@ note for `skills/*/SKILL.md` changes is planned as a follow-up to Issue #208.
 It is not yet enforced — the frontmatter + commit body convention above is the
 current gate.
 
+### Skill surface freeze (`EXPECTED_SKILLS`)
+
+Adding or removing a skill directory under `skills/` requires updating the
+`EXPECTED_SKILLS` set in
+[`scripts/check-plugin-manifests.py`](scripts/check-plugin-manifests.py) in the
+same commit. This is a structural gate against silent skill proliferation —
+every intentional surface change is paired with an explicit declaration.
+
+After adding/removing a skill, run:
+
+```bash
+./scripts/check-plugin-manifests.py
+```
+
+If it reports `UNEXPECTED SKILL(S)` or `REMOVED SKILL(S)`, update
+`EXPECTED_SKILLS` to match the new surface.
+
 ## Adding or modifying a hook
 
 Phase 2 of [ADR-0001](docs/adr/0001-hook-layout.md) shipped the role-based
