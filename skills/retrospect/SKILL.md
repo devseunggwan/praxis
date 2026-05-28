@@ -411,7 +411,9 @@ Both the checklist block and the dismissed_candidates block live in Stage 3 outp
 
 Stage 2.7 runs between Stage 2 (Analyze) and Stage 2.5 (Distribution Audit). Its purpose is to surface output-quality defects in artifacts the session produced — defects that the friction-event scanner (Stage 2) cannot see because they are *silent-pass* failures (no observable session friction).
 
-**Adaptive trigger** — Stage 2.7 fires ONLY when the session transcript contains at least one of these artifact-write signals. With zero triggers, Stage 2.7 silently skips.
+**Scope window** — same as Stage 2: scan the most recent 50 turns, or back to the last session boundary (whichever is narrower). The window is intentionally identical so that trigger detection (below) and friction-event analysis operate over the same transcript slice — divergent windows would make `output_quality` findings non-deterministic across invocations and could surface artifacts whose context is no longer visible to Stage 2. If the transcript is unreachable post-compaction, fall through to the `transcript unreachable` failure-mode rule below (skip with `<!-- retrospect:audit_skipped: transcript unreachable -->`).
+
+**Adaptive trigger** — Stage 2.7 fires ONLY when the session transcript (within the Scope window above) contains at least one of these artifact-write signals. With zero triggers, Stage 2.7 silently skips.
 
 Trigger detection (scan the session's Bash invocations + MCP tool calls):
 - `gh pr create | edit | merge | comment` Bash invocations
