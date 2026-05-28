@@ -338,13 +338,19 @@ for base, home_label in config_homes.items():
                 mod_time = ts_local.strftime("%m/%d %H:%M")
 
             # ── Filtering ──
-            if is_teammate:
+            # When a compaction summary has been captured, the session has a
+            # meaningful display name and a real conversation history before
+            # the resume. Slash-command / teammate-only bootstrap turns at
+            # the top of the resumed file (e.g. `/continue`, `/retrospect`)
+            # are restoration artefacts, not the session's identity — do
+            # not filter the session out on their account.
+            if is_teammate and not compact_summary:
                 filter_counts["teammate"] += 1
                 continue
-            if is_command and user_count <= 5:
+            if is_command and user_count <= 5 and not compact_summary:
                 filter_counts["command"] += 1
                 continue
-            if user_count < MIN_USER_MSGS:
+            if user_count < MIN_USER_MSGS and not compact_summary:
                 filter_counts["short"] += 1
                 continue
 

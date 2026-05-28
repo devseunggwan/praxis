@@ -114,6 +114,31 @@ print(json.dumps({
 ")
 build_fixture "$PROJ/eeee5555-5555-5555-5555-555555555555.jsonl" "$E_PAYLOAD"
 
+# Fixture G: compacted session followed by a /continue slash-command — the
+# bootstrap turn must NOT cause the session to be filtered as command.
+# Regression guard for codex round 1 P2.
+COMPACT_G='This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\nSummary: Long-running refactor of the auth layer.'
+G_PATH="$PROJ/gggg7777-7777-7777-7777-777777777777.jsonl"
+: > "$G_PATH"
+python3 -c "
+import json
+print(json.dumps({
+  'type':'user','isSidechain':False,'isCompactSummary':True,
+  'timestamp':'$NOW','cwd':'$CWD',
+  'message':{'content':'''$COMPACT_G'''.replace(chr(92)+'n', chr(10))}
+}))
+" >> "$G_PATH"
+python3 -c "
+import json
+print(json.dumps({
+  'type':'user','isSidechain':False,'timestamp':'$NOW','cwd':'$CWD',
+  'message':{'content':'<command-name>/continue</command-name>'}
+}))
+" >> "$G_PATH"
+# Pad to clear the 10 KB / MIN_USER_MSGS threshold even though the
+# compact-summary bypass would let it through anyway.
+emit_padding_users "$G_PATH"
+
 # Fixture F: session with no real first message AND no compact summary.
 # Per #467 fallback chain, display_name must fall back to session_id.
 # All user records are `<...>`-wrapped so none qualify as first_real_msg.
@@ -210,6 +235,11 @@ assert_equals "drifted-boilerplate-stripped" \
 assert_equals "session-id-final-fallback" \
   "ffff6666" \
   "ffff6666-6666-6666-6666-666666666666"
+
+# G: compacted-then-/continue session — display from compact_summary, not filtered
+assert_equals "compacted-then-continue-survives-filter" \
+  "gggg7777" \
+  "Long-running refactor of the auth layer"
 
 # Boilerplate-leak guard across the entire scan output
 if grep -F 'This session is being continued from' <<< "$out"; then
