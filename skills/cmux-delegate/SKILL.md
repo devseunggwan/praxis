@@ -7,7 +7,7 @@ description: Delegate a task to an independent Claude Code session in a new cmux
 
 ## Overview
 
-현재 대화의 작업 맥락을 자동 수집하여, cmux workspace에서 독립 Claude Code 세션을 열어 범용 작업(리뷰, 디버깅, 구현 등)을 위임합니다. 기존 세션 재사용, 별도 계정 프로필, 다중 항목 병렬 분산을 지원합니다.
+현재 대화의 작업 맥락(git 메타데이터 + 대화에서 합성한 추론 맥락)을 자동 수집하여, cmux workspace에서 독립 Claude Code 세션을 열어 범용 작업(리뷰, 디버깅, 구현 등)을 위임합니다. 기존 세션 재사용, 별도 계정 프로필, 다중 항목 병렬 분산을 지원합니다.
 
 **Core principles:**
 - 프롬프트는 반드시 파일 기반 전달. 인라인 `-p` 절대 사용 금지 (shell escaping 문제 회피).
@@ -143,6 +143,30 @@ if [ -n "$PR_NUM" ]; then
 fi
 ```
 
+### Step 2.5: Synthesize Conversation Handoff
+
+Step 2 의 raw git/PR 메타데이터는 *무엇이 바뀌었는지*만 전달합니다. 위임 세션이 이전 대화 없이도 진행하려면 *왜·어떻게* 의 추론 맥락이 필요합니다. 오케스트레이터(이 스킬을 실행하는 에이전트)는 현재 대화를 이미 보유하므로, **별도 LLM 호출 없이** 합성 결과를 직접 작성합니다 (Step 3 에서 `Write` 도구로 프롬프트 파일에 포함).
+
+**합성 항목** (해당하는 것만, 없으면 생략):
+
+- **Decisions** — 내려진 결정과 그 이유
+- **Findings** — 발견한 제약·사실 (위임 세션의 재조사 비용 절감)
+- **Relevant files** — 대화에서 읽거나 논의한 파일 (git diff 에 안 잡히는 것 포함)
+- **Next task** — self-contained 한 다음 작업 서술
+
+**Task-type 분기** — 위임 *의도*에 따라 handoff 강도를 조절합니다:
+
+| 위임 유형 | Handoff 강도 |
+|----------|-------------|
+| review / audit / fresh-eyes (편향 없는 재검토) | 중립적 *사실*만 (`### Findings` / `### Relevant files`). 오케스트레이터의 결론·의견(`### Decisions` / `### Next task`)은 **배제** — fresh eyes 의 편향 주입 방지 |
+| continue-work / implement / debug (작업 이어가기) | 풍부하게 — 4개 하위 섹션 모두 포함 |
+
+사실 vs 의견 경계 예: 사실 = "파일 X는 캐시 미스 시 빈 응답을 반환함" / 의견 = "파일 X의 캐시 로직이 잘못됨".
+
+**적용 범위:** Step 2.5 는 Step 3(프롬프트 `.md` 생성) 직전 단계로, 신규 세션·기존 세션(`--session`)·distribute 모드 **모두**에서 동일하게 실행됩니다 — 세 모드가 같은 `.md` 를 소비하기 때문입니다.
+
+**Graceful degradation:** 대화 맥락이 빈약하면(사전 맥락 없는 일회성 직접 위임 등) 합성을 생략하고 `## Handoff` 섹션 자체를 넣지 않습니다.
+
 ### Step 3: Generate Prompt File
 
 수집된 맥락과 사용자 프롬프트를 합성하여 `/tmp/cmux-delegate-{timestamp}.md`에 저장합니다.
@@ -167,6 +191,24 @@ fi
 
 - **PR:** {PR_INFO}
 - **Review comments:** {REVIEW_COMMENTS} pending
+
+## Handoff (conversation synthesis)
+
+{전체 생략 조건: 대화 맥락 빈약일 때만. review/audit/fresh-eyes 는 전체 생략이 아니라
+ 아래 ### Decisions / ### Next task 만 제외하고 중립 사실(### Findings / ### Relevant files)은 유지.
+ continue-work/implement/debug 는 4개 하위 섹션 모두 포함 — Step 2.5 task-type 분기를 따름}
+
+### Findings
+{발견한 제약·사실}
+
+### Relevant files
+{대화에서 읽거나 논의한 파일}
+
+### Decisions  — continue-work/implement/debug 한정
+{내려진 결정과 이유}
+
+### Next task  — continue-work/implement/debug 한정
+{self-contained 한 다음 작업}
 
 ## Instructions
 
@@ -346,6 +388,10 @@ user: /cmux-delegate "full code review" --model claude:opus --account claude-2
   ├── Step 2: 맥락 수집 (git, gh)
   │     └── git branch, log, diff, gh pr
   │
+  ├── Step 2.5: 대화 합성 handoff (에이전트 직접 작성, LLM 호출 없음)
+  │     └── Findings / Relevant files (+ continue-work 면 Decisions / Next task)
+  │           (빈약한 맥락 → 전체 생략)
+  │
   ├── Step 3: 프롬프트 .md 생성 (Write tool)
   │     └── /tmp/cmux-delegate-{ts}.md
   │
@@ -367,6 +413,8 @@ user: /cmux-delegate "full code review" --model claude:opus --account claude-2
   ├── Step 1.5: Session Resolution
   │     └── cmux list-workspaces → "claude-2" 매칭
   │
+  ├── Step 2.5: 대화 합성 handoff (작업 이어가기면 풍부하게)
+  │
   ├── Step 3: 프롬프트 .md 생성
   │
   └── Step 5b: cmux send --workspace {matched} "프롬프트 파일 경로"
@@ -378,7 +426,9 @@ user: /cmux-delegate "full code review" --model claude:opus --account claude-2
 ```
 사용자: /cmux-delegate "P1~P5 에러 조사" --account claude-2 --distribute
   │
-  ├── Step 3.5: Distribute — 프롬프트 분할
+  ├── Step 2.5: 대화 합성 handoff (1회) → 공통 Context 블록에 포함
+  │
+  ├── Step 3.5: Distribute — 프롬프트 분할 (Handoff 는 모든 분할에 공통 복사)
   │     ├── /tmp/cmux-delegate-{ts}-1.md (P1)
   │     ├── /tmp/cmux-delegate-{ts}-2.md (P2)
   │     ├── /tmp/cmux-delegate-{ts}-3.md (P3)
@@ -404,4 +454,5 @@ user: /cmux-delegate "full code review" --model claude:opus --account claude-2
 - 결과 파일 자동 수집/보고 미지원 → 사용자가 cmux에서 직접 확인
 - 작업 유형별 템플릿 미지원 → 사용자가 프롬프트에 직접 명시
 - distribute 모드의 자동 분할은 섹션 헤더 기반 — 비정형 프롬프트는 수동 분할 필요
+- **Handoff 합성 품질은 오케스트레이터 대화에 의존** (Step 2.5) — 대화 맥락이 빈약하면 raw git 맥락만 전달되고, fresh-eyes 위임에서는 편향 방지를 위해 의도적으로 최소화됨
 - **codex 쓰기 제약**: `codex exec`는 샌드박스 환경으로 인해 파일 쓰기가 실패해도 오류 없이 종료될 수 있음 — 완료 후 반드시 `git status`로 실제 변경 여부를 확인할 것. 빈 diff가 나오면 즉시 `claude` fallback으로 재위임.
