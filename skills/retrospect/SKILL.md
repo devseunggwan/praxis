@@ -80,7 +80,15 @@ Stage 1.5 runs unconditionally between Stage 1 (Load) and Stage 2 (Analyze). Its
 
 **Scope:** scan MEMORY.md index + a bounded subset of `feedback_*.md` files.
 
-**Cap (mandatory):** scan up to **5 feedback files per invocation**. Persist a cursor at `.omc/state/retrospect-hygiene-cursor.json` recording (a) the timestamp of the last successful pass, (b) the list of file paths scanned, (c) the next-batch pointer (path of the next un-scanned feedback file in sorted order), and (d) the per-signal pairwise-check trail for the batch (`signal_2_contradiction` / `signal_3_merge_candidate`, each `checked: yes|no, matches: N`). Field (d) is the home for the zero-match proof — a clean batch emits no finding, so the negative result is recorded here in the scan trail, not in a (non-existent) per-finding block. Subsequent retrospects resume from the cursor — full corpus coverage amortizes across multiple sessions. When the full corpus has been scanned once, rotate the cursor to restart from the most-recently-modified entries.
+**Cap (mandatory):** scan up to **5 feedback files per invocation**. Persist a cursor at `.omc/state/retrospect-hygiene-cursor.json` recording (a) the timestamp of the last successful pass, (b) the list of file paths scanned (referred to as `scanned_recent_batch` on subsequent reads), (c) the next-batch pointer (`next_batch_pointer` — path of the next un-scanned feedback file in sorted order), (d) the per-signal pairwise-check trail for the batch (`signal_2_contradiction` / `signal_3_merge_candidate`, each `checked: yes|no, matches: N`), and (e) a `note` field holding the previous cycle's signal 1/2/3 findings (one line per finding — keep terse, e.g., `signal 1: feedback_promoted_section.md L5-17 — 12 markdown links to backing files ABSENT`). Field (d) is the home for the zero-match proof — a clean batch emits no finding, so the negative result is recorded here in the scan trail, not in a (non-existent) per-finding block. Field (e) is the carry-forward home — findings that did not complete a Stage 4 resolution in their original cycle live here until they do. Subsequent retrospects resume from the cursor — full corpus coverage amortizes across multiple sessions. When the full corpus has been scanned once, rotate the cursor to restart from the most-recently-modified entries.
+
+**Cursor read mandate (entry — MUST run first).** If `.omc/state/retrospect-hygiene-cursor.json` exists, before scanning ANY feedback file:
+
+- (a) **Use `next_batch_pointer` to choose the batch start** — do NOT make an ad-hoc sort/filter decision (e.g., "scan the 5 most recently modified" / "scan the 5 alphabetically first"). The cursor IS the schedule; overriding it silently re-scans files Stage 1.5 already passed over in the prior cycle and starves the un-scanned tail of the corpus.
+- (b) **Exclude files listed in `scanned_recent_batch` from this batch** — avoid re-scan of the immediately prior batch even if `next_batch_pointer` would otherwise fall inside it (defends against a corrupt or stale pointer).
+- (c) **Carry forward findings stored in the cursor's `note` field** (signals 1/2/3 from the previous cycle) into Stage 3 input. The carried findings flow through Stage 2.5 gates and Stage 3 emit alongside any new findings produced by this batch's scan; they are NOT silently dropped just because the file containing the finding falls outside the current batch's 5-file window. See Stage 3 "Carry-forward integration" for the emit-side contract.
+
+Silent skip of the cursor read (entry without honoring (a)/(b)/(c)) is a Red Flag — it is the structural enabler of the failure mode where a prior cycle's hygiene finding gets contradicted by the current cycle without falsification.
 
 **Four detection signals (each becomes a finding with `category: memory_hygiene`):**
 
@@ -155,6 +163,26 @@ Each Stage 1.5 finding has:
 `Index size threshold tripped — {lines} lines / {bytes} bytes (limit: {line_threshold} / {byte_threshold}). Cleanup actions queued: {n_4a}× promoted-pointer compression, {n_4b}× backlink-zero archive, {n_4c}× length-cap write-guard.`
 
 When signal 4 does NOT fire, the line is omitted entirely (no empty banner). This banner is informational and counted under `memory_hygiene` in the distribution card — it does not introduce a new fence parser key.
+
+**Stage 3 emit — Hygiene Scan Trail (carry-forward integration).** The Hygiene Scan Trail block in the Stage 3 report carries TWO lines whenever the cursor's `note` field (field (e)) was non-empty on entry:
+
+```
+Hygiene Scan Trail
+- Current cycle: signal 1/2/3/4 = <one-line summary per signal that fired this cycle, or `none` if the signal produced no finding>
+- Carried from previous cycle (cursor note): signal 1 = <verbatim copy of the carried finding(s)>; signal 2 = ...; signal 3 = ...
+```
+
+The two lines are separate by construction — current-cycle findings and carried findings MUST NOT be merged into a single line, even when the same signal number appears on both sides. Reviewers (and the next cycle's Stage 1.5) read the second line to decide whether the carried finding is still outstanding.
+
+**Falsification gate before invalidating a carried finding (MUST).** When the current cycle's conclusion contradicts a carried finding (e.g., current cycle says "Promoted section self-managed" while carried `note` says "12 markdown links to backing files ABSENT"), the contradiction is NOT a license to silently overwrite the carried finding. Before the carried finding may be dropped, marked resolved, or replaced by the new conclusion, the skill MUST run an explicit falsification — re-execute the carried finding's original probe (path existence test, grep, manifest lookup) against the *current* tree and record the probe command + observed output in the Hygiene Scan Trail as a third line:
+
+```
+- Falsification of carried finding (signal N): probe=`<command>` output=`<observed>` → carried finding RESOLVED|STILL_OUTSTANDING
+```
+
+If the probe shows the carried finding is genuinely resolved (e.g., the previously-absent files now exist), drop it from the next cycle's `note` field. If the probe re-confirms the finding (still absent / still contradictory / still merge-candidate), the carried finding REMAINS in the cursor `note` for the next cycle regardless of any new-cycle conclusion that disagrees with it. Silent overwrite — emitting a current-cycle conclusion that disagrees with the carried finding without running the falsification probe — is a Red Flag (this is the exact failure mode the issue protecting this section was filed against).
+
+**Self-conflict detection (optional, advisory).** Before Stage 3 emit, perform a lightweight keyword-overlap check between the cursor `note` text and the current cycle's signal-1/2/3 conclusion text. When ≥1 shared content noun overlaps (file path, section name, or unique identifier) AND the two predicates are opposite (`absent` vs `self-managed`, `stale` vs `fresh`, `contradictory` vs `consistent`, `merge candidate` vs `distinct`), STOP-surface to the user with the trail of both texts and ask whether the carried finding should be retained, falsified, or revised. This advisory check is a defense-in-depth layer above the falsification gate; the gate remains MANDATORY whether or not this check fires.
 
 **Stage 1.5 failure modes:**
 - MEMORY.md not accessible → skip Stage 1.5 entirely; emit `<!-- retrospect:hygiene_skipped: index not accessible -->` trail line; proceed to Stage 2.
