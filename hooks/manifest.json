@@ -27,6 +27,14 @@
       "timeout": 5
     },
     {
+      "name": "post-compact-context-inject",
+      "role": "advisory-nudge",
+      "body": "impl.sh",
+      "event": "UserPromptSubmit",
+      "hosts": ["claude"],
+      "timeout": 5
+    },
+    {
       "name": "session-intent",
       "role": "preflight-gate",
       "event": "UserPromptSubmit",
