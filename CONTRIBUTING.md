@@ -98,10 +98,10 @@ current gate.
 ### Skill surface freeze (`EXPECTED_SKILLS`)
 
 Adding or removing a skill directory under `skills/` requires updating the
-`EXPECTED_SKILLS` set in
-[`scripts/check-plugin-manifests.py`](scripts/check-plugin-manifests.py) in the
-same commit. This is a structural gate against silent skill proliferation —
-every intentional surface change is paired with an explicit declaration.
+`EXPECTED_SKILLS` set in [`scripts/constants.py`](scripts/constants.py) in
+the same commit. This is a structural gate against silent skill
+proliferation — every intentional surface change is paired with an explicit
+declaration.
 
 After adding/removing a skill, run:
 
@@ -110,7 +110,7 @@ After adding/removing a skill, run:
 ```
 
 If it reports `UNEXPECTED SKILL(S)` or `REMOVED SKILL(S)`, update
-`EXPECTED_SKILLS` to match the new surface.
+`EXPECTED_SKILLS` in `scripts/constants.py` to match the new surface.
 
 ## Adding or modifying a hook
 

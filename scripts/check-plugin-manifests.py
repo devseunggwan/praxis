@@ -343,13 +343,13 @@ def main() -> int:
         drifts.append(
             f"UNEXPECTED SKILL(S): {sorted(unexpected)!r} — present on disk "
             "but not declared in EXPECTED_SKILLS. If intentional, update "
-            "EXPECTED_SKILLS in scripts/check-plugin-manifests.py."
+            "EXPECTED_SKILLS in scripts/constants.py."
         )
     if removed:
         drifts.append(
             f"REMOVED SKILL(S): {sorted(removed)!r} — declared in "
             "EXPECTED_SKILLS but missing on disk. If intentional, update "
-            "EXPECTED_SKILLS in scripts/check-plugin-manifests.py."
+            "EXPECTED_SKILLS in scripts/constants.py."
         )
 
     if drifts:
