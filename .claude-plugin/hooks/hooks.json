@@ -111,6 +111,11 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/inspection-chain-advisory.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/destructive-bash-guard.sh",
+            "timeout": 5
           }
         ]
       },
