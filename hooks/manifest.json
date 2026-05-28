@@ -33,6 +33,13 @@
       "timeout": 5
     },
     {
+      "name": "postcompact-context",
+      "role": "advisory-nudge",
+      "event": "UserPromptSubmit",
+      "hosts": ["claude"],
+      "timeout": 8
+    },
+    {
       "name": "side-effect-scan",
       "role": "preflight-gate",
       "event": "PreToolUse",
