@@ -136,6 +136,13 @@
       "timeout": 5
     },
     {
+      "name": "inspection-chain-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
       "name": "jq-config-empty-dict-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",

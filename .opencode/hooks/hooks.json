@@ -79,6 +79,11 @@
           },
           {
             "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/inspection-chain-advisory.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/jq-config-empty-dict-advisory.sh",
             "timeout": 5
           },
