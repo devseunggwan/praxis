@@ -52,18 +52,17 @@ It does NOT restore runtime state of previously running commands or sessions.
 
 **How to run:**
 1. User requests "resume sessions", "session restore", etc.
-2. Snapshot resolution — resolve `snapshot` to a full path before the gate, mirroring the CLI's logic at `cmux-resume-sessions` lines 5-13, 23-30 so the gate sees the same file the CLI will open. Strip flags first (mirror of the CLI's `for arg in "$@"; case "$arg" in --no-claude) ... esac` loop), then take the first positional as the snapshot candidate:
+2. Snapshot resolution — resolve `snapshot` to a full path before the gate, mirroring the CLI's logic at `cmux-resume-sessions` lines 5-13, 23-30 so the gate sees the same file the CLI will open. Mirror the CLI parser exactly: consume `--no-claude` (the only recognized flag), and treat **every other token** — including unknown `--flag` strings — as a positional candidate, taking the first one as the snapshot candidate:
 ```bash
 SAVE_DIR="$HOME/.cmux/sessions"
 arg=""
 for a in "$@"; do
   case "$a" in
-    --no-claude) ;;  # known flag, skip (mirror of CLI parser)
-    --*) ;;          # any other flag, skip
-    *) arg="$a"; break ;;  # first non-flag is the snapshot candidate
+    --no-claude) ;;  # only recognized flag — skip (mirror of CLI line 10)
+    *) arg="$a"; break ;;  # every other token, including unknown --flag, is positional (mirror of CLI line 11)
   esac
 done
-# arg is now "" (no positional) or a bare filename / full path
+# arg is now "" (no positional) or a bare filename / full path / a literal "--flag" the CLI would also pass through
 if [[ -z "$arg" ]]; then
   snapshot=$(ls -t "$SAVE_DIR"/sessions-*.json | head -1)
 elif [[ -f "$arg" ]]; then
