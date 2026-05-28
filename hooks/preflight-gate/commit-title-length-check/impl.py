@@ -31,6 +31,7 @@ import sys
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     compound_cascade_hint,
     iter_command_starts,
@@ -275,17 +276,7 @@ def _extract_titles(argv: list[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def _emit_ask(reason: str) -> None:
-    json.dump(
-        {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "ask",
-                "permissionDecisionReason": reason,
-            }
-        },
-        sys.stdout,
-    )
-    sys.stdout.write("\n")
+    emit_decision("ask", reason)
 
 
 # ---------------------------------------------------------------------------
