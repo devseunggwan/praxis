@@ -84,16 +84,29 @@ _FIND_DELETE_TOKENS = frozenset({"-delete", "--delete"})
 
 
 def _segment_starts_with_escalation(raw_argv: list[str]) -> str | None:
-    """Return the escalation binary name if `raw_argv[0]` is sudo/doas, else None.
+    """Return the escalation binary name if sudo/doas appears anywhere
+    in the prefix that `strip_prefix` would peel (env assignments,
+    shell keywords, wrapper commands), or as the first real command.
 
-    Uses the RAW argv (pre-strip_prefix) because strip_prefix peels
-    `sudo` as a PREFIX_WRAPPER — by the time strip_prefix has run, the
-    escalation signal is gone.
+    Naive `raw_argv[0]` check misses `VAR=1 sudo X`, `env sudo X`,
+    `time sudo X`, and the `then sudo X` segment inside
+    `if ...; then sudo X; fi`. Since strip_prefix lists `sudo` in
+    PREFIX_WRAPPERS, scanning everything strip_prefix would peel covers
+    all of those wrapper-position forms.
     """
     if not raw_argv:
         return None
-    bare = os.path.basename(raw_argv[0])
-    return bare if bare in _ESCALATION_BINS else None
+    stripped = strip_prefix(raw_argv)
+    prefix_len = len(raw_argv) - len(stripped)
+    for tok in raw_argv[:prefix_len]:
+        bare = os.path.basename(tok)
+        if bare in _ESCALATION_BINS:
+            return bare
+    if stripped:
+        bare = os.path.basename(stripped[0])
+        if bare in _ESCALATION_BINS:
+            return bare
+    return None
 
 
 def _is_rm_recursive_force(argv: list[str]) -> bool:
@@ -231,12 +244,25 @@ def _is_git_clean_force(argv: list[str]) -> bool:
         break
     if i >= n or argv[i] != "clean":
         return False
-    # `git clean` requires `-f` (or `--force`) to actually delete anything.
-    return any(
-        tok == "--force"
-        or (tok.startswith("-") and not tok.startswith("--") and "f" in tok[1:])
-        for tok in argv[i + 1:]
-    )
+    # `git clean -n` / `--dry-run` reports without deleting — destructive
+    # only if force is present AND dry-run is not. Bundled short flags
+    # (`-nf`, `-fn`) carry both.
+    has_force = False
+    has_dry_run = False
+    for tok in argv[i + 1:]:
+        if tok in {"-n", "--dry-run"}:
+            has_dry_run = True
+            continue
+        if tok == "--force":
+            has_force = True
+            continue
+        if tok.startswith("-") and not tok.startswith("--"):
+            flags = tok[1:]
+            if "f" in flags:
+                has_force = True
+            if "n" in flags:
+                has_dry_run = True
+    return has_force and not has_dry_run
 
 
 def _is_git_reset_hard(argv: list[str]) -> bool:

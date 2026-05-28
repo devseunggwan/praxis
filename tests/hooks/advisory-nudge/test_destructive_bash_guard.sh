@@ -116,6 +116,11 @@ run_case "sudo apt update" advisory "sudo apt update"
 run_case "sudo rm foo" advisory "sudo rm foo"
 run_case "doas pacman -Syu" advisory "doas pacman -Syu"
 run_case "sudo -u admin kubectl apply" advisory "sudo -u admin kubectl apply -f x"
+run_case "VAR=1 sudo apt update (env-assign prefix)" advisory "VAR=1 sudo apt update"
+run_case "env sudo apt (env wrapper prefix)" advisory "env sudo apt update"
+run_case "time sudo apt (time wrapper prefix)" advisory "time sudo apt update"
+run_case "if true; then sudo X; fi (shell keyword prefix)" advisory "if true; then sudo apt update; fi"
+run_case "env -i sudo X (wrapper with flag)" advisory "env -i sudo apt update"
 
 # === ADVISORY — dd raw I/O =================================================
 
@@ -179,6 +184,10 @@ run_case "git -C /tmp clean -f" advisory "git -C /tmp clean -f"
 
 run_case "git clean -dn (dry-run)" silent "git clean -dn"
 run_case "git clean -n" silent "git clean -n"
+run_case "git clean -n -f (force + dry-run)" silent "git clean -n -f"
+run_case "git clean -nf (bundled dry-run+force)" silent "git clean -nf"
+run_case "git clean -fn (bundled force+dry-run)" silent "git clean -fn"
+run_case "git clean --dry-run --force" silent "git clean --dry-run --force"
 
 # === ADVISORY — git reset --hard ===========================================
 
