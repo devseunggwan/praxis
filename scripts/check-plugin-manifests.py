@@ -45,40 +45,7 @@ assert _spec and _spec.loader
 _build = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_build)
 
-
-# Hooks that exist on disk but are intentionally not registered in
-# manifest.json (opt-in). Listed by basename.
-OPT_IN_HOOKS = {"external-write-falsify-check"}
-
-# Valid role names — must match the four ADR-0001 categories.
-VALID_ROLES = {
-    "preflight-gate",
-    "advisory-nudge",
-    "postuse-correction",
-    "completion-verify",
-}
-
-# Frozen skill surface (issue #465). Adding or removing a skill directory
-# requires updating this set in the same commit. Prevents silent skill
-# proliferation; every intentional surface change is paired with an
-# explicit declaration here.
-EXPECTED_SKILLS = {
-    "bypass-review",
-    "cmux-browser",
-    "cmux-delegate",
-    "cmux-recover-sessions",
-    "cmux-resume-sessions",
-    "cmux-save-sessions",
-    "cmux-session-manager",
-    "codex-review-wrap",
-    "recover-sessions",
-    "reset-strikes",
-    "retrospect",
-    "strike",
-    "strikes",
-    "using-praxis",
-    "writing-praxis-skill",
-}
+from constants import EXPECTED_SKILLS, OPT_IN_HOOKS, VALID_ROLES  # noqa: E402
 
 
 def _skill_dirs() -> list[Path]:

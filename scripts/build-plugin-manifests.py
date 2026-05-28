@@ -61,6 +61,9 @@ PLATFORMS_DIR = MANIFESTS_DIR / "platforms"
 ADAPTER_SHELL = REPO_ROOT / "plugins" / "praxis"
 FORWARDED_DIRS = ("skills", "hooks", "scripts")
 HOOKS_DIR = REPO_ROOT / "hooks"
+
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from constants import OPT_IN_HOOKS  # noqa: E402
 MANIFEST_PATH = HOOKS_DIR / "manifest.json"
 
 
@@ -221,18 +224,6 @@ def _wrapper_body(entry: dict) -> str:
     else:
         baked_args = ""
     return WRAPPER_PY_TEMPLATE.format(role=role, name=name, baked_args=baked_args)
-
-
-# Opt-in hooks: live on disk under hooks/<role>/<name>/ but are NOT
-# registered in manifest.json (user must add a hooks entry to their own
-# settings.json or hooks.json fragment to activate). The build still
-# emits a wrapper at hooks/<name>.sh so the documented opt-in command
-# `${CLAUDE_PLUGIN_ROOT}/hooks/<name>.sh` resolves — without this,
-# hooks/<role>/<name>/spec.md guidance would break on first user attempt.
-OPT_IN_HOOKS: dict[str, str] = {
-    # name → role
-    "external-write-falsify-check": "advisory-nudge",
-}
 
 
 def emit_wrappers(manifest: dict) -> list[str]:
