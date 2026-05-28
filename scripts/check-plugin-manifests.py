@@ -21,6 +21,8 @@ Phase 2 (ADR-0001) invariants:
   9. Version consistency across versioned artifacts.
   10. spec.md exists at hooks/<role>/<name>/spec.md for every registered
       hook (Phase 3, ADR-0001 §5.3 — specs collocated with impl).
+  11. skills/<skill-name>/ on disk matches the EXPECTED_SKILLS frozen set
+     (issue #465 — surface freeze gate against silent skill proliferation).
 
 CI invokes this; developers can too, via `./scripts/check-plugin-manifests.py`.
 """
@@ -43,18 +45,26 @@ assert _spec and _spec.loader
 _build = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_build)
 
+from constants import EXPECTED_SKILLS, OPT_IN_HOOKS, VALID_ROLES  # noqa: E402
 
-# Hooks that exist on disk but are intentionally not registered in
-# manifest.json (opt-in). Listed by basename.
-OPT_IN_HOOKS = {"external-write-falsify-check"}
 
-# Valid role names — must match the four ADR-0001 categories.
-VALID_ROLES = {
-    "preflight-gate",
-    "advisory-nudge",
-    "postuse-correction",
-    "completion-verify",
-}
+def _skill_dirs() -> list[Path]:
+    """Return all skill directories under skills/<skill-name>/.
+
+    Mirrors `_hook_dirs()` convention: files (SKILL.md.tmpl) and underscore-
+    prefixed entries (future internal layout) are excluded automatically.
+    """
+    skills_root = REPO_ROOT / "skills"
+    dirs: list[Path] = []
+    if not skills_root.is_dir():
+        return dirs
+    for entry in sorted(skills_root.iterdir()):
+        if not entry.is_dir():
+            continue
+        if entry.name.startswith("_") or entry.name == "__pycache__":
+            continue
+        dirs.append(entry)
+    return dirs
 
 
 def _hook_dirs() -> list[Path]:
@@ -321,6 +331,25 @@ def main() -> int:
         drifts.append(
             "VERSION DRIFT across artifacts: "
             + ", ".join(f"{k}={v}" for k, v in seen.items())
+        )
+
+    # ------------------------------------------------------------------
+    # Rule 11 — Skill surface freeze (#465)
+    # ------------------------------------------------------------------
+    on_disk_skills = {d.name for d in _skill_dirs()}
+    unexpected = on_disk_skills - EXPECTED_SKILLS
+    removed = EXPECTED_SKILLS - on_disk_skills
+    if unexpected:
+        drifts.append(
+            f"UNEXPECTED SKILL(S): {sorted(unexpected)!r} — present on disk "
+            "but not declared in EXPECTED_SKILLS. If intentional, update "
+            "EXPECTED_SKILLS in scripts/constants.py."
+        )
+    if removed:
+        drifts.append(
+            f"REMOVED SKILL(S): {sorted(removed)!r} — declared in "
+            "EXPECTED_SKILLS but missing on disk. If intentional, update "
+            "EXPECTED_SKILLS in scripts/constants.py."
         )
 
     if drifts:
