@@ -75,6 +75,7 @@ import sys
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
     safe_tokenize,
@@ -426,20 +427,6 @@ def handle_user_prompt_submit(payload: dict) -> int:
     if changed:
         write_state(path, state)
     return 0
-
-
-def emit_decision(decision: str, reason: str) -> None:
-    json.dump(
-        {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": decision,
-                "permissionDecisionReason": reason,
-            }
-        },
-        sys.stdout,
-    )
-    sys.stdout.write("\n")
 
 
 def handle_pre_tool_use(payload: dict) -> int:

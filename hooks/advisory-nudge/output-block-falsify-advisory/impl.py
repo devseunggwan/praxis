@@ -51,6 +51,11 @@ import json
 import re
 import sys
 
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
@@ -219,33 +224,15 @@ def _collect_option_texts(options: list) -> list[str]:
     return texts
 
 
-def _emit_decision(decision: str, message: str) -> None:
-    """Output permissionDecision JSON to stdout.
-
-    decision must be "ask" or "deny" (the two tiers used by this hook).
-    "allow" is not used — silent-pass is signaled by no JSON output.
-    """
-    json.dump(
-        {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": decision,
-                "permissionDecisionReason": message,
-            }
-        },
-        sys.stdout,
-    )
-    sys.stdout.write("\n")
-
-
 def _emit_ask(message: str) -> None:
-    """T2 path: soft gate."""
-    _emit_decision("ask", message)
+    """T2 path: soft gate. (decision must be "ask"/"deny" — "allow" is never
+    emitted; silent-pass is signaled by no JSON output.)"""
+    emit_decision("ask", message)
 
 
 def _emit_deny(message: str) -> None:
     """T1 path: hard block (issue #393 upgrade)."""
-    _emit_decision("deny", message)
+    emit_decision("deny", message)
 
 
 # ---------------------------------------------------------------------------

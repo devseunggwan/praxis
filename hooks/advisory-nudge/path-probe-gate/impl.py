@@ -63,6 +63,11 @@ import os
 import subprocess
 import sys
 
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -251,17 +256,7 @@ def _emit_deny(
         depth=depth,
         worktree_root=worktree_root,
     )
-    json.dump(
-        {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": reason,
-            }
-        },
-        sys.stdout,
-    )
-    sys.stdout.write("\n")
+    emit_decision("deny", reason)
 
 
 # ---------------------------------------------------------------------------
