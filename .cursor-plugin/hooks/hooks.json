@@ -81,7 +81,22 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/inspection-chain-advisory.sh",
             "timeout": 5
-          },
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/protected-paths-guard.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/jq-config-empty-dict-advisory.sh",

@@ -143,6 +143,13 @@
       "timeout": 5
     },
     {
+      "name": "protected-paths-guard",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Edit|Write|NotebookEdit",
+      "timeout": 5
+    },
+    {
       "name": "jq-config-empty-dict-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
