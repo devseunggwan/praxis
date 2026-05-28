@@ -7,6 +7,9 @@ description: >
   route to cmux-recover-sessions instead — even when the user also mentions a snapshot,
   because the snapshot may be stale and .jsonl scanning reflects the real latest state.
   Triggers on "resume sessions", "session resume", "session restore", "restore sessions", "cmux resume", "restore from snapshot", "rehydrate sessions", "세션 복원", "스냅샷 복구", "스냅샷 복원".
+verified-against-runtime: true
+runtime-verified-at: 2026-05-28
+runtime-verified-note: "jq 1.x // empty + bash hostname (cmux 1.x snapshot schema: top-level .hostname) — silent-proceed on missing field / null / empty string; emits real value when present; matches against $(hostname). 4 synthetic + 1 real-snapshot cases probed."
 ---
 
 # cmux Resume Sessions
@@ -49,14 +52,36 @@ It does NOT restore runtime state of previously running commands or sessions.
 
 **How to run:**
 1. User requests "resume sessions", "session restore", etc.
-2. Snapshot selection:
-   - No argument: use the most recent snapshot
-   - Filename or full path specified: use that snapshot
-3. Execute:
+2. Snapshot resolution — resolve `snapshot` to a full path before the gate, mirroring the CLI's logic at `cmux-resume-sessions` lines 23-30 so the gate sees the same file the CLI will open:
 ```bash
-bash "$(dirname "$0")/cmux-resume-sessions" [snapshot-file]
+SAVE_DIR="$HOME/.cmux/sessions"
+arg="$1"  # may be empty, a bare filename (sessions-*.json), or a full path
+if [[ -z "$arg" ]]; then
+  snapshot=$(ls -t "$SAVE_DIR"/sessions-*.json | head -1)
+elif [[ -f "$arg" ]]; then
+  snapshot="$arg"
+elif [[ -f "$SAVE_DIR/$arg" ]]; then
+  snapshot="$SAVE_DIR/$arg"
+else
+  echo "ERROR: snapshot '$arg' not found in cwd or $SAVE_DIR" >&2; exit 1
+fi
 ```
-4. Show output to the user
+3. **Hostname mismatch gate** — verify the snapshot's saved host matches the current machine before restoring:
+```bash
+saved_host=$(jq -r '.hostname // empty' "$snapshot")
+current_host=$(hostname)
+```
+   - If `${saved_host}` is empty (legacy snapshot without the field): proceed silently.
+   - If `${saved_host}` equals `${current_host}`: proceed silently.
+   - If `${saved_host}` differs from `${current_host}`: surface `AskUserQuestion`:
+     - Question: `"이 스냅샷은 다른 머신 (${saved_host}) 에서 저장되었습니다. 현재 머신은 ${current_host} 입니다. cwd 경로가 맞지 않을 수 있어 세션 다수가 'cwd not found' 로 스킵될 수 있습니다. 계속할까요?"`
+     - Options: `"계속 진행"` / `"취소"`
+   - If user selects `"취소"`: abort with `"Resume 취소됨 — 호스트 불일치 (${saved_host} → ${current_host})."`
+4. Execute (only after the hostname gate passes). Pass through all original args (`"$@"`) so flags like `--no-claude` survive:
+```bash
+bash "$(dirname "$0")/cmux-resume-sessions" "$@"
+```
+5. Show output to the user
 
 **What gets restored:**
 - Creates a cmux workspace per session (with `--cwd` for working directory)
@@ -128,4 +153,4 @@ Done. Created: 2 | Skipped: 1 | Failed: 1
 | "Restore every snapshot at once" | Old snapshots point to cwd paths that no longer exist. Restore the most recent that's still valid. |
 | "Skip `--no-claude`, always auto-start Claude" | If the target cwd's recent conversation is stale, auto-continue lands in the wrong context. Use `--no-claude` when in doubt. |
 | "Ignore duplicate warnings" | Duplicate workspaces are noise at best, collision at worst. Inspect existing sessions first. |
-| "Restore before verifying the snapshot's host" | Cross-machine restore may succeed with stale paths. Check `hostname` in the JSON before restoring on a new host. |
+| "Restore before verifying the snapshot's host" | Cross-machine restore may succeed with stale paths. The hostname mismatch gate (Step 3 in `resume` "How to run") surfaces an `AskUserQuestion` when `jq -r '.hostname'` differs from `$(hostname)` — do not click through without inspecting the cwd paths. |
