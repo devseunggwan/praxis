@@ -5,7 +5,9 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [6.0.3] - 2026-05-29
+
+1 PR since 6.0.2. Hook false-positive fix only — no skill or hook-behavior additions.
 
 ### Fixed
 - `hook`: `pre-edit-protected-branch-guard` now skips gitignored paths (`git check-ignore`). Gitignored files (runtime state under `.omc/state/`, build artifacts, caches) can never be committed/PR'd, so the Issue-Driven Worktree Workflow the guard enforces is categorically inapplicable — blocking them was a false positive. `.omc/plans/` was already exempt but the sibling `.omc/state/` was not; the `check-ignore` rule generalizes beyond hardcoded paths (#493)
