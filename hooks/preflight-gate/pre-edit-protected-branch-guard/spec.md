@@ -48,6 +48,7 @@ cover (e.g. starting work on an unprotected branch then renaming it to main).
 | Non-protected branch + PR-suffix in log | silent pass-through (guard limited to protected branches) |
 | Edit target in `/tmp/` (no repo root found) | silent pass-through (fail-open) |
 | Edit target in `.omc/plans/` or `.claude/projects/` | silent pass-through (planning artifact) |
+| Edit target is gitignored (`git check-ignore` matches) | silent pass-through (uncommittable → worktree workflow N/A, issue #493) |
 | Edit target is README/CHANGELOG/docs file (unless `PRAXIS_PBGUARD_BLOCK_DOCS=1`) | silent pass-through (docs skip) |
 | Edit target inside `CLAUDE_PLUGIN_ROOT` (praxis plugin self-edit) | silent pass-through |
 | `PRAXIS_PBGUARD_SKIP=1` set in environment | silent pass-through |
@@ -158,6 +159,7 @@ fires automatically when the plugin is loaded.
 | `PRAXIS_PBGUARD_TEST_BRANCH=<name>` | Override current branch. Use `"HEAD"` to simulate detached HEAD. |
 | `PRAXIS_PBGUARD_TEST_STATUS=<porcelain>` | Override `git status --porcelain` output. Empty string = clean tree. |
 | `PRAXIS_PBGUARD_TEST_LOG=<oneline>` | Override `git log --oneline -3` output. Empty string = no commits / no PR signal. |
+| `PRAXIS_PBGUARD_TEST_IGNORED=<rel,paths>` | Override `git check-ignore`. Comma-separated repo-relative paths treated as gitignored. Not set = call real git. |
 
 ### Tests
 
@@ -178,7 +180,9 @@ Covers:
   tree with PR signal (docs skip wins), edit target already in dirty diff
   (in-flight continuation), untracked file in status (counts as in-flight),
   `/tmp/` target (fail-open: not in repo), `.omc/plans/` artifact,
-  `.claude/projects/` memory file, README.md / CHANGELOG.md / `docs/` directory
+  `.claude/projects/` memory file, gitignored target on both dirty-tree and
+  PR-workflow paths + non-ignored target still denies when an unrelated path is
+  ignored (issue #493), README.md / CHANGELOG.md / `docs/` directory
   (docs skip), `PRAXIS_PBGUARD_SKIP=1`, non-scoped tool (Bash, Read),
   `PRAXIS_PBGUARD_TEST_REPO_ROOT=NONE` (not a git repo), detached HEAD,
   malformed stdin, empty `file_path`.
