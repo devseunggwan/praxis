@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.2] - 2026-05-29
+
+1 PR since 6.0.1. Packaging fix only — no skill or hook behavior changes.
+
+### Fixed
+- `manifest`: the generated Claude `plugin.json` declared only `skills`, so Claude Code registered no hooks and the entire suite stayed dormant while skills loaded. Added the missing `hooks` field (`cursor`/`opencode` already had it; regression from the ADR-0001 Phase 2 layout move) (#491)
+
 ## [6.0.1] - 2026-05-29
 
 12 PRs since 6.0.0. All additive (new always-on/advisory hooks, session-management refinements) or internal (refactor, docs) — no breaking changes, no removed skills or hooks.
