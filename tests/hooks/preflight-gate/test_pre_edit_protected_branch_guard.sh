@@ -353,6 +353,47 @@ run_case "dirty+protected+.claude/projects/ target → pass" pass \
   "PRAXIS_PBGUARD_TEST_STATUS=$DIRTY_STATUS"
 
 # ---------------------------------------------------------------------------
+# PASS / DENY: gitignored paths (issue #493)
+# Gitignored files can never be committed/PR'd → worktree workflow N/A → skip.
+# PRAXIS_PBGUARD_TEST_IGNORED mocks `git check-ignore` (comma-separated rel paths).
+# Use .omc/state/ (NOT in planning-artifact patterns) to exercise the new path.
+# ---------------------------------------------------------------------------
+
+# Dirty-tree path: gitignored new target → pass (the core fix)
+run_case "dirty+protected+gitignored-target → pass (issue #493)" pass \
+  Write "$FAKE_ROOT/.omc/state/retrospect-hygiene-cursor.json" \
+  "PRAXIS_PBGUARD_TEST_REPO_ROOT=$FAKE_ROOT" \
+  "PRAXIS_PBGUARD_TEST_BRANCH=main" \
+  "PRAXIS_PBGUARD_TEST_STATUS=$DIRTY_STATUS" \
+  "PRAXIS_PBGUARD_TEST_IGNORED=.omc/state/retrospect-hygiene-cursor.json"
+
+# PR-workflow path (clean tree): gitignored target → pass (skip precedes PR check)
+run_case "clean+protected+PR-suffix+gitignored-target → pass (issue #493)" pass \
+  Write "$FAKE_ROOT/.omc/state/retrospect-hygiene-cursor.json" \
+  "PRAXIS_PBGUARD_TEST_REPO_ROOT=$FAKE_ROOT" \
+  "PRAXIS_PBGUARD_TEST_BRANCH=main" \
+  "PRAXIS_PBGUARD_TEST_STATUS=" \
+  "PRAXIS_PBGUARD_TEST_LOG=abc1234 feat: add feature (#107)" \
+  "PRAXIS_PBGUARD_TEST_IGNORED=.omc/state/retrospect-hygiene-cursor.json"
+
+# Regression: a NON-ignored new target still denies even when an UNRELATED
+# path is gitignored (guard not globally weakened by the new skip rule).
+run_case "dirty+protected+non-ignored-target (other path ignored) → deny (issue #493 regression)" deny \
+  Edit "$NEW_FILE" \
+  "PRAXIS_PBGUARD_TEST_REPO_ROOT=$FAKE_ROOT" \
+  "PRAXIS_PBGUARD_TEST_BRANCH=main" \
+  "PRAXIS_PBGUARD_TEST_STATUS=$DIRTY_STATUS" \
+  "PRAXIS_PBGUARD_TEST_IGNORED=.omc/state/retrospect-hygiene-cursor.json"
+
+# Empty override (set but nothing ignored) → empty set → still denies.
+run_case "dirty+protected+new-target+empty-ignored-override → deny (issue #493)" deny \
+  Edit "$NEW_FILE" \
+  "PRAXIS_PBGUARD_TEST_REPO_ROOT=$FAKE_ROOT" \
+  "PRAXIS_PBGUARD_TEST_BRANCH=main" \
+  "PRAXIS_PBGUARD_TEST_STATUS=$DIRTY_STATUS" \
+  "PRAXIS_PBGUARD_TEST_IGNORED="
+
+# ---------------------------------------------------------------------------
 # PASS: docs-only files (default skip rule)
 # ---------------------------------------------------------------------------
 

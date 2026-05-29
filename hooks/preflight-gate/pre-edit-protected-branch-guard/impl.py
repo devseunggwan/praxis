@@ -18,6 +18,9 @@ Fires on Edit / Write / NotebookEdit tool calls. Two independent deny paths:
 False-positive skip rules (pass-through, no block — apply to both paths):
   - Self-editing: paths inside the praxis plugin directory (CLAUDE_PLUGIN_ROOT)
   - Planning artifacts: /tmp/, .omc/plans/, .claude/projects/ paths
+  - Gitignored paths: any path matched by `git check-ignore` — uncommittable,
+    so the Issue-Driven Worktree Workflow is categorically inapplicable
+    (issue #493). Covers runtime state (.omc/state/), build artifacts, caches.
   - Docs-only: README*, CHANGELOG*, CONTRIBUTING*, /docs/ directory
     (disable per-repo via PRAXIS_PBGUARD_BLOCK_DOCS=1)
   - Full opt-out: PRAXIS_PBGUARD_SKIP=1
@@ -35,6 +38,8 @@ Test overrides (for isolation without a real git repo):
     (empty string = clean tree; not set = call real git)
   - PRAXIS_PBGUARD_TEST_LOG: override `git log --oneline -3` output
     (empty string = no commits / no PR signal; not set = call real git)
+  - PRAXIS_PBGUARD_TEST_IGNORED: comma-separated repo-relative paths to treat
+    as gitignored (not set = call real `git check-ignore`)
 
 Fail-open on all infrastructure errors:
   - Missing git binary, subprocess timeout, malformed stdin JSON → exit 0.
@@ -343,6 +348,38 @@ def is_self_edit(path: str) -> bool:
         return False
 
 
+def is_gitignored(file_path: str, repo_root: str) -> bool:
+    """True if file_path is gitignored (issue #493).
+
+    Gitignored paths can never be committed, PR'd, or appear in a diff, so the
+    Issue-Driven Worktree Workflow this guard enforces does not apply to them.
+
+    Uses PRAXIS_PBGUARD_TEST_IGNORED env var for test isolation: a
+    comma-separated list of repo-relative paths to treat as ignored.
+    Not set = call real `git check-ignore`.
+
+    Fail-toward-guard on uncertainty: any git error (non-repo, missing binary,
+    timeout) returns False so the guard is preserved rather than silently
+    weakened. PRAXIS_PBGUARD_SKIP=1 remains the explicit opt-out. An absolute
+    path physically outside repo_root yields rc=128 from check-ignore, which is
+    likewise treated as non-ignored (guard preserved).
+    """
+    override = os.environ.get("PRAXIS_PBGUARD_TEST_IGNORED")
+    if override is not None:
+        try:
+            rel = os.path.relpath(os.path.abspath(file_path), repo_root)
+        except ValueError:
+            return False
+        ignored = {p.strip() for p in override.split(",") if p.strip()}
+        return rel in ignored
+
+    # `git check-ignore -q <path>`: rc 0 = ignored, 1 = not ignored,
+    # 128/-1 = error. Only rc 0 means ignored; everything else preserves the
+    # guard (_run_git returns -1 on exception).
+    rc, _ = _run_git(["check-ignore", "-q", file_path], repo_root)
+    return rc == 0
+
+
 # ---------------------------------------------------------------------------
 # Output
 # ---------------------------------------------------------------------------
@@ -410,6 +447,11 @@ def main() -> int:
     branch = get_current_branch(repo_root)
     if not branch or branch not in get_protected_branches(config):
         return 0  # not a protected branch (or detached HEAD)
+
+    # Gitignored paths can never be committed / PR'd, so the worktree workflow
+    # is categorically inapplicable (issue #493). Skip before both deny paths.
+    if is_gitignored(file_path, repo_root):
+        return 0
 
     dirty_files = get_dirty_files(repo_root)
     if not dirty_files:
