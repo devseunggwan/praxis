@@ -6,7 +6,8 @@
       "kind": "plugin",
       "path": ".claude-plugin/plugin.json",
       "plugin_overrides": {
-        "skills": "./skills/"
+        "skills": "./skills/",
+        "hooks": "./.claude-plugin/hooks/hooks.json"
       }
     },
     {

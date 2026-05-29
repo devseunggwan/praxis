@@ -14,5 +14,6 @@
     "session-management",
     "cleanup"
   ],
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "hooks": "./.claude-plugin/hooks/hooks.json"
 }
