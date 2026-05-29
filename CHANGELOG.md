@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.1] - 2026-05-29
+
+12 PRs since 6.0.0. All additive (new always-on/advisory hooks, session-management refinements) or internal (refactor, docs) — no breaking changes, no removed skills or hooks.
+
+### Added
+- `inject-post-compact-session-context` hook: re-injects session context after a context-compaction event (#482)
+- destructive-bash-command guard hook (#478)
+- sensitive-credential-file write guard hook (#477)
+- advisory nudge for `&&`-chained inspection commands (#476)
+- `cmux-resume`: hostname mismatch gate (#474)
+- `cmux-delegate`: handoff synthesis (#462)
+- skill-surface freeze gate (`scripts/`) (#473)
+
+### Changed
+- `recover-sessions`: summary-based display name (#475)
+- `hooks`: extract shared emit-decision helper (#471)
+
+### Fixed
+- `retrospect`: mandate cursor read + carry-forward in Stage 1.5 (#485)
+
+### Docs
+- `retrospect`: clarify rule-violation boundary for `dismissed_candidates` (#484); specify Stage 2.7 scope window for trigger detection (#483)
+
 ## [6.0.0] - 2026-05-27
 
 19 PRs since 5.2.0. The headline is the ADR-0001 hook-layout migration (phases 1–3): every hook moved into a role-dir collocation layout (`hooks/<role>/<name>/{impl,spec}`) with manifest-driven generation of the per-platform `hooks.json`. On top of that, several new always-on enforcement gates (commit-title / branch-name / codex-review-on-commit / worktree-edit / child-repo-issue) and the bypass-telemetry suite (Phase 1 hook + Phase 2 review CLI) change commit/PR/write-time behavior for all users — semver **major** for the structural reorganization and the new gating surface.
