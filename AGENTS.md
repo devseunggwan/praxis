@@ -19,16 +19,23 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | Tier | What works | Dependencies |
 |------|-----------|--------------|
 | **Standalone** | recover-sessions, strike / strikes / reset-strikes | `gh` CLI, `jq` (for strike skills) |
-| **Enhanced** | + retrospect | + oh-my-claudecode |
+| **Enhanced** | + retrospect, codex-review-wrap | + oh-my-claudecode |
 | **Full** | + all cmux-* skills | + cmux |
 | **Multi-provider** | + codex/gemini routing in cmux-* | + codex-cli, gemini-cli |
 
-## Skills (12)
+## Skills (15)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Always call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
 > returns `Agent type not found`. See [RUNTIME_CONSTRAINTS.md §3](RUNTIME_CONSTRAINTS.md)
 > for the full rationale and Agent-vs-Skill mapping table.
+
+### Discovery
+
+| Skill | Purpose |
+|-------|---------|
+| `using-praxis` | Onboarding entry point — maps scenarios to the right skill for new praxis users |
+| `writing-praxis-skill` | Guide for authoring a new SKILL.md — template, SRP, trigger keyword design, frontmatter conventions |
 
 ### Development
 
@@ -41,6 +48,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 
 | Skill | Purpose |
 |-------|---------|
+| `bypass-review` | Review bypass-telemetry event logs written by the bypass-telemetry hook — aggregate and inspect JSONL records |
 | `strike` | Declare a rule violation — session-scoped counter, escalating signal (1진 warning → 2진 review → 3진 Stop-hook block) |
 | `strikes` | Show current strike count + recorded violation reasons for the active session |
 | `reset-strikes` | Reset the session strike counter to 0 after a 3진 block (required to unblock responses) |

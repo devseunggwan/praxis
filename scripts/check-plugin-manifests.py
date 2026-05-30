@@ -23,6 +23,9 @@ Phase 2 (ADR-0001) invariants:
       hook (Phase 3, ADR-0001 §5.3 — specs collocated with impl).
   11. skills/<skill-name>/ on disk matches the EXPECTED_SKILLS frozen set
      (issue #465 — surface freeze gate against silent skill proliferation).
+  12. AGENTS.md "## Skills (N)" count and per-skill backtick tokens, and
+     README.md per-skill backtick tokens, all match EXPECTED_SKILLS
+     (issue #498 — doc drift invariant).
 
 CI invokes this; developers can too, via `./scripts/check-plugin-manifests.py`.
 """
@@ -350,6 +353,67 @@ def main() -> int:
             f"REMOVED SKILL(S): {sorted(removed)!r} — declared in "
             "EXPECTED_SKILLS but missing on disk. If intentional, update "
             "EXPECTED_SKILLS in scripts/constants.py."
+        )
+
+    # ------------------------------------------------------------------
+    # Rule 12 — Doc skill-count invariant (#498)
+    #
+    # AGENTS.md carries an explicit "## Skills (N)" header whose count must
+    # equal len(EXPECTED_SKILLS).  Both AGENTS.md and README.md embed skill
+    # names inside table cells as `backtick` tokens; every EXPECTED_SKILLS
+    # member must appear at least once in each document.
+    #
+    # Parsing is intentionally coarse — we match the pattern
+    # `skill-name` (backtick-delimited) so the check is robust to table
+    # reformatting while still catching silent drift.
+    # ------------------------------------------------------------------
+    import re as _re  # local import — avoids polluting module scope
+
+    agents_md_path = REPO_ROOT / "AGENTS.md"
+    readme_md_path = REPO_ROOT / "README.md"
+
+    agents_text = agents_md_path.read_text()
+    readme_text = readme_md_path.read_text()
+
+    # Rule 12a — AGENTS.md "## Skills (N)" count header must match
+    count_match = _re.search(r"^##\s+Skills\s+\((\d+)\)", agents_text, _re.MULTILINE)
+    if count_match is None:
+        drifts.append(
+            "DOC SKILL COUNT MISSING AGENTS.md: expected '## Skills (N)' header — "
+            "add it to keep the count in sync with EXPECTED_SKILLS"
+        )
+    else:
+        declared_count = int(count_match.group(1))
+        expected_count = len(EXPECTED_SKILLS)
+        if declared_count != expected_count:
+            drifts.append(
+                f"DOC SKILL COUNT AGENTS.md: header says {declared_count} but "
+                f"EXPECTED_SKILLS has {expected_count} — update the header"
+            )
+
+    # Rule 12b — every EXPECTED_SKILLS member appears in AGENTS.md
+    agents_backtick_skills = set(_re.findall(r"`([^`]+)`", agents_text))
+    missing_in_agents = EXPECTED_SKILLS - agents_backtick_skills
+    if missing_in_agents:
+        drifts.append(
+            f"DOC SKILL LIST AGENTS.md: {sorted(missing_in_agents)!r} declared in "
+            "EXPECTED_SKILLS but not found as `backtick` tokens — add them to "
+            "the skill table"
+        )
+
+    # Rule 12c — every EXPECTED_SKILLS member appears as the first column of
+    # a README.md skill table row.  We match `| \`skill-name\` |` so that a
+    # skill name mentioned only in a description cell (cross-reference noise)
+    # does not satisfy the check.
+    readme_table_skills = set(
+        _re.findall(r"^\|\s*`([^`]+)`\s*\|", readme_text, _re.MULTILINE)
+    )
+    missing_in_readme = EXPECTED_SKILLS - readme_table_skills
+    if missing_in_readme:
+        drifts.append(
+            f"DOC SKILL LIST README.md: {sorted(missing_in_readme)!r} declared in "
+            "EXPECTED_SKILLS but not found as a first-column `backtick` token in a "
+            "table row — add them to the skill table"
         )
 
     if drifts:
