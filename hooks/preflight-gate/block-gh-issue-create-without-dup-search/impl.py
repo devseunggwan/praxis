@@ -249,10 +249,19 @@ def _skip_gh_global_flags(argv: list[str]) -> int:
 
 
 def _skip_subcommand_flags(argv: list[str], i: int) -> int:
-    """Skip flags between `issue` and the `create`/`new` action token."""
+    """Skip flags between `issue` and the `create`/`new` action token.
+
+    A separate-token value flag (`gh issue -R owner/repo create`) consumes the
+    following token as its value, so it must not be mistaken for the action.
+    Symmetric with `block-child-repo-issue-create._is_gh_issue_create` — keeps
+    the two hooks' `issue [flags] create` parsing aligned (PR #523 review).
+    """
     n = len(argv)
     while i < n and argv[i].startswith("-") and argv[i] != "--":
+        tok = argv[i]
         i += 1
+        if "=" not in tok and tok in _GH_GLOBAL_VALUE_FLAGS and i < n:
+            i += 1
     return i
 
 

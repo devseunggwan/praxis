@@ -209,6 +209,15 @@ run_case "514: gh -R o/r issue create --title= (block)" \
   "block:no-search" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh -R acme/repo issue create --title='feat: zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_EMPTY\"}"
 
+# PR #523 review: a separate-token value flag BETWEEN `issue` and `create`
+# (`gh issue -R owner/repo create`) must not let its value masquerade as the
+# action token — _skip_subcommand_flags now consumes the value so the create
+# is still detected and BLOCKED. (Keeps parsing symmetric with the child-repo
+# hook's _is_gh_issue_create.)
+run_case "523: gh issue -R o/r create (value flag before action, block)" \
+  "block:no-search" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue -R acme/repo create --title 'feat: zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_EMPTY\"}"
+
 # Over-block: the literal `gh issue create` inside a grep pattern is NOT a real
 # invocation — the old raw regex matched it and could block. Token-aware
 # detection must PASS.
