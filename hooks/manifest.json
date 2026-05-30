@@ -324,6 +324,20 @@
       "timeout": 5
     },
     {
+      "name": "pre-output-falsification-gate",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "AskUserQuestion",
+      "timeout": 5
+    },
+    {
+      "name": "pre-output-falsification-gate",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
       "name": "block-ask-end-option",
       "role": "preflight-gate",
       "event": "PreToolUse",
