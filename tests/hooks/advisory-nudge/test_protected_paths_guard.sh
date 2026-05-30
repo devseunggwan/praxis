@@ -102,6 +102,25 @@ print(json.dumps({
   fi
 }
 
+# White-box assertion for _is_self_edit — black-box run_case cannot distinguish
+# the rel == ".." parent-dir case (its basename is never a protected file, so
+# the hook is silent either way). Assert the function return value directly.
+assert_self_edit() {
+  local name="$1" path="$2" plugin_root="$3" expected="$4"
+  local got
+  got=$(CLAUDE_PLUGIN_ROOT="$plugin_root" python3 -c '
+import os, sys, importlib.util
+spec = importlib.util.spec_from_file_location("pg", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m._is_self_edit(sys.argv[2]))' "$HOOK" "$path")
+  if [ "$got" = "$expected" ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] _is_self_edit=$got expected=$expected"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
 # === ADVISORY — basename-exact protected files =============================
 
 run_case ".env (bare)" advisory Write ".env"
@@ -179,6 +198,62 @@ run_case ".claude/projects/X/log.env" silent Write "/proj/.claude/projects/X/log
 
 # Use a temp dir as CLAUDE_PLUGIN_ROOT and a path under it
 run_case "self-edit under plugin root" silent Write "/nonexistent-plugin-root-for-tests/hooks/foo/.env" "CLAUDE_PLUGIN_ROOT=/nonexistent-plugin-root-for-tests"
+
+# === issue #495 — relative-path self-edit exemption bypass fix =============
+#
+# Regression: cwd=plugin_root, relative ".env" → _is_self_edit must return False
+# so the write is NOT silently exempted.
+#
+# CLAUDE_PLUGIN_ROOT is set to ROOT_DIR (this very worktree) so that the
+# abspath-based path would previously have resolved ".env" to inside the root
+# and returned True (false exemption). After the fix it must return False and
+# the write must be detected (advisory/block).
+
+run_case "relative .env blocked in strict (cwd=plugin root, issue #495)" block \
+  Write ".env" \
+  "PRAXIS_PROTECTED_PATHS_STRICT=1 CLAUDE_PLUGIN_ROOT=$ROOT_DIR"
+
+run_case "relative .env advisory (cwd=plugin root, issue #495)" advisory \
+  Write ".env" \
+  "CLAUDE_PLUGIN_ROOT=$ROOT_DIR"
+
+# Absolute path to a file that genuinely lives inside the plugin root must
+# still be silently exempted (regression guard for the legitimate self-edit path).
+run_case "abs-path self-edit still silent (issue #495 regression)" silent \
+  Write "$ROOT_DIR/hooks/advisory-nudge/protected-paths-guard/impl.py" \
+  "CLAUDE_PLUGIN_ROOT=$ROOT_DIR"
+
+# White-box: rel == "." (path == plugin_root) is inside; rel == ".." (path is the
+# parent dir, outside) must NOT be exempted — the bug this guards against.
+assert_self_edit "self-edit: plugin_root itself (rel '.')" "$ROOT_DIR" "$ROOT_DIR" True
+assert_self_edit "self-edit: file inside plugin_root" "$ROOT_DIR/hooks/x/.env" "$ROOT_DIR" True
+assert_self_edit "self-edit: parent dir not exempt (rel '..')" "$(dirname "$ROOT_DIR")" "$ROOT_DIR" False
+assert_self_edit "self-edit: relative path never exempt" ".env" "$ROOT_DIR" False
+
+# === ADVISORY — .git-credentials / .pgpass (issue #495 LOW additions) ======
+
+run_case ".git-credentials advisory" advisory Write "$HOME/.git-credentials"
+run_case ".git-credentials in dir" advisory Write "config/.git-credentials"
+run_case ".pgpass advisory" advisory Write "$HOME/.pgpass"
+run_case ".pgpass in dir" advisory Write "db/.pgpass"
+
+run_case ".git-credentials block (strict)" block Write "$HOME/.git-credentials" "PRAXIS_PROTECTED_PATHS_STRICT=1"
+run_case ".pgpass block (strict)" block Write "$HOME/.pgpass" "PRAXIS_PROTECTED_PATHS_STRICT=1"
+
+# === ADVISORY — .aws / .kube / .gnupg directory components (issue #495 LOW)
+
+run_case ".aws/credentials" advisory Write "$HOME/.aws/credentials"
+run_case ".aws/config" advisory Write "$HOME/.aws/config"
+run_case ".kube/config" advisory Write "$HOME/.kube/config"
+run_case ".gnupg/secring.gpg" advisory Write "$HOME/.gnupg/secring.gpg"
+run_case ".gnupg/trustdb.gpg" advisory Edit "$HOME/.gnupg/trustdb.gpg"
+
+run_case ".aws/credentials block (strict)" block Write "$HOME/.aws/credentials" "PRAXIS_PROTECTED_PATHS_STRICT=1"
+run_case ".kube/config block (strict)" block Write "$HOME/.kube/config" "PRAXIS_PROTECTED_PATHS_STRICT=1"
+
+# fixture paths under protected dirs must still be silent
+run_case ".aws in fixture dir (silent)" silent Write "tests/fixtures/.aws/credentials"
+run_case ".kube in fixture dir (silent)" silent Write "src/__fixtures__/.kube/config"
 
 # === BLOCK — strict mode escalates exit code ===============================
 
