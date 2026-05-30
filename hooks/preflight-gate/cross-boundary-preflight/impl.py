@@ -32,7 +32,6 @@ with the marker in the command shell portion only.
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 import sys as _sys
