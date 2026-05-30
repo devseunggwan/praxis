@@ -27,6 +27,78 @@ FAIL=0
 FAILED_NAMES=()
 
 # ---------------------------------------------------------------------------
+# Hermetic gh stub
+#
+# The hook discovers valid JSON fields by running `gh <subcmd> --json help` and
+# parsing the "Available fields:" list out of gh's error output. That output is
+# version- / auth- / repo-context-dependent, so relying on the ambient gh makes
+# the block/pass cases non-deterministic: they pass on the dev's macOS but fail
+# on the CI ubuntu runner (gh sits in /usr/bin there and the field probe behaves
+# differently). Shadow gh with a fixed-field stub so the test exercises the
+# hook's PARSING logic rather than whichever gh happens to be installed.
+# ---------------------------------------------------------------------------
+GH_STUB_DIR=$(mktemp -d)
+cat >"$GH_STUB_DIR/gh" <<'STUB'
+#!/usr/bin/env bash
+# Deterministic stand-in for `gh <subcmd> --json help`. Emits the real
+# `gh pr view` JSON field set (state/author/title present, `merged` absent)
+# to stderr in gh's documented error shape, so the validator can classify
+# fields offline.
+for arg in "$@"; do
+  if [ "$arg" = "--json" ]; then
+    cat >&2 <<'FIELDS'
+Unknown JSON field: "help"
+Available fields:
+  additions
+  assignees
+  author
+  baseRefName
+  body
+  changedFiles
+  closed
+  closedAt
+  comments
+  commits
+  createdAt
+  deletions
+  files
+  headRefName
+  id
+  isDraft
+  labels
+  mergeStateStatus
+  mergeable
+  mergedAt
+  mergedBy
+  number
+  reviewDecision
+  reviews
+  state
+  statusCheckRollup
+  title
+  updatedAt
+  url
+FIELDS
+    exit 1
+  fi
+done
+exit 0
+STUB
+chmod +x "$GH_STUB_DIR/gh"
+
+# Curated dir for the "gh not in PATH" fail-open case: holds python3 (the hook
+# is launched via `env PATH=… python3`) but deliberately NO gh, so the field
+# probe hits FileNotFoundError regardless of where the ambient gh lives. A bare
+# PATH=/usr/bin:/bin no longer works — CI ubuntu ships gh in /usr/bin.
+# Symlink the REAL interpreter (sys.executable), not `command -v python3`: the
+# latter can resolve to a pyenv/asdf shim (a `#!/usr/bin/env bash` script) that
+# fails to launch under the restricted PATH ("env: bash: No such file").
+NO_GH_DIR=$(mktemp -d)
+ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "$NO_GH_DIR/python3"
+
+trap 'rm -rf "$GH_STUB_DIR" "$NO_GH_DIR"' EXIT
+
+# ---------------------------------------------------------------------------
 # run_case name expectation command [ENV=VAL ...]
 #   expectation:
 #     "block:<marker>" — exit 2, stdout contains <marker>
@@ -54,7 +126,20 @@ print(json.dumps({
   out_file=$(mktemp)
   err_file=$(mktemp)
 
-  printf '%s' "$payload" | env "${extra_env[@]}" python3 "$HOOK_PY" >"$out_file" 2>"$err_file"
+  # Default the hook's PATH to the hermetic gh stub unless the case sets PATH
+  # itself (fail-open uses NO_GH_DIR; bypass cases override their own env).
+  local case_env=("${extra_env[@]}") _has_path=0 _e
+  for _e in "${extra_env[@]}"; do
+    case "$_e" in PATH=*) _has_path=1 ;; esac
+  done
+  if [ "$_has_path" -eq 0 ]; then
+    # Prepend the stub so it shadows the ambient gh, but inherit the rest of
+    # PATH so python3 stays resolvable wherever it lives (/usr/bin on CI ubuntu,
+    # /usr/local/bin on the python docker images) — do not hardcode a location.
+    case_env=("PATH=$GH_STUB_DIR:$PATH" "${extra_env[@]}")
+  fi
+
+  printf '%s' "$payload" | env "${case_env[@]}" python3 "$HOOK_PY" >"$out_file" 2>"$err_file"
   local rc=$?
   local out err
   out=$(cat "$out_file")
@@ -162,7 +247,7 @@ run_case "skip: non-gh bash command ls -la" \
 run_case "fail-open: gh not in PATH" \
   "pass" \
   "gh pr view 1 --json merged" \
-  "PATH=/usr/bin:/bin"
+  "PATH=$NO_GH_DIR"
 
 # ---------------------------------------------------------------------------
 # Case 10: Skip — no `--json` flag present

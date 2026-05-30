@@ -33,7 +33,9 @@ PASS=0; FAIL=0; FAILED_NAMES=()
 
 # Per-test history file (overrides session-id resolution entirely).
 fresh_history() {
-  mktemp -u "${TMPDIR:-/tmp}/praxis-md-escape-test-XXXXXX.json"
+  # XXXXXX must be the template suffix: BSD mktemp (macOS) does not substitute
+  # X's when a literal suffix like ".json" follows them, so append it afterwards.
+  echo "$(mktemp -u "${TMPDIR:-/tmp}/praxis-md-escape-test-XXXXXX").json"
 }
 
 # build_edit_payload <file_path> <old_string>
