@@ -30,6 +30,8 @@ so chained segments and env-prefixed invocations are covered uniformly.
 | `gh pr view 1 --json merged` | **BLOCKED** (`merged` not in gh pr fields; suggests `mergedAt`) |
 | `gh pr view 1 --json state,title,url` | **PASS** |
 | `gh pr view 1 --json state,merged` | **BLOCKED** (one invalid field) |
+| `gh pr view 1 --json help` / `--json=help` | **PASS** (gh's own field introspection — the remediation tells you to run this; issue #514) |
+| `gh pr view 1 --json help,merged` | **BLOCKED** (`help` + a real invalid field = data projection) |
 | `gh issue view 5 --json merged` | **BLOCKED** (`merged` not in gh issue fields) |
 | `gh issue view 5 --json state,number,title` | **PASS** |
 | `gh pr list --json state && gh pr view 1 --json merged` | **BLOCKED** (chained segment scanned) |

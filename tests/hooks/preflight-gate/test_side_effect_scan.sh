@@ -82,6 +82,15 @@ run_case "gh pr merge"              ask  "gh pr merge 42 --squash"
 run_case "gh pr create"             ask  "gh pr create --title x --body y"
 run_case "gh workflow run"          ask  "gh workflow run deploy.yml"
 
+# issue #514 결함1 — a leading gh global flag shifts the subcommand off the
+# fixed argv[1]/argv[2] positions the old detector assumed, so these forms
+# were undetected (no ask). The flag-aware walk must still ask.
+run_case "514: gh --repo pr merge"     ask  "gh --repo owner/repo pr merge --squash"
+run_case "514: gh -R pr merge"         ask  "gh -R owner/repo pr merge"
+run_case "514: gh --repo= pr merge"    ask  "gh --repo=owner/repo pr merge"
+run_case "514: gh -R pr create"        ask  "gh -R owner/repo pr create --title x"
+run_case "514: gh -R workflow run"     ask  "gh -R owner/repo workflow run deploy.yml"
+
 # --- detection: kubectl shared write ---------------------------------------
 run_case "kubectl apply"            ask  "kubectl apply -f pod.yaml"
 run_case "kubectl delete"           ask  "kubectl delete ns my-ns"
@@ -98,6 +107,7 @@ run_case "kubectl apply --env prod" ask  "kubectl apply -f app.yaml --env prod" 
 run_case "git status"               pass "git status"
 run_case "git log"                  pass "git log --oneline -5"
 run_case "gh pr view"               pass "gh pr view 42"
+run_case "514: gh -R pr view (neg)"  pass "gh -R owner/repo pr view 42"
 run_case "kubectl get"              pass "kubectl get pods -n default"
 run_case "ls with git in path"      pass "ls /usr/local/git-lfs"
 run_case "echo commit word"         pass "echo 'i will commit later'"

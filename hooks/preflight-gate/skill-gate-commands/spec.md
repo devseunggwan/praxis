@@ -41,6 +41,7 @@ A command is blocked (exit 2) when ALL hold:
 | Malformed JSON stdin | **PASS** (fail-open) |
 | non-Bash tool call | **PASS** |
 | Global flags before subcommand (`gh -R X pr create`) | matched correctly |
+| Custom (non-built-in) pattern with leading global flag (`gh -R X issue create`, `git -C dir tag`) | matched correctly — the fallback matcher skips known-binary global flags so the flag value no longer breaks token contiguity (issue #514) |
 
 ## Config env var
 

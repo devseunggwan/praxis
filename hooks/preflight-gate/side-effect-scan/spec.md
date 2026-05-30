@@ -13,7 +13,7 @@ prod deploys, and stray auto-commits from CLIs that write to git internally.
 |----------|------------------|------|
 | `git-commit` | `git commit`, `git merge`, `git rebase`, `git cherry-pick`, `git revert`, `iceberg-schema migrate`, `iceberg-schema promote`, `omc ralph` | Commits to the wrong branch or under the wrong author |
 | `git-push` | `git push` | Remote published without intent |
-| `gh-merge` | `gh pr merge`, `gh pr create`, `gh workflow run` | Unintended PR state change or workflow dispatch |
+| `gh-merge` | `gh pr merge`, `gh pr create`, `gh workflow run` (including a leading global flag, e.g. `gh --repo o/r pr merge`, `gh -R o/r workflow run`) | Unintended PR state change or workflow dispatch |
 | `kubectl-apply` | `kubectl apply`, `kubectl delete`, `kubectl replace`, `kubectl patch` | Shared cluster mutation |
 
 ### Response

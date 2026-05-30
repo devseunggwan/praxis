@@ -44,6 +44,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
+from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    iter_command_starts,
+    safe_tokenize,
+    strip_prefix,
+)
 
 
 def _main_inner() -> int:
@@ -59,15 +64,21 @@ def _main_inner() -> int:
         return 0
 
     command = (payload.get("tool_input") or {}).get("command", "")
-    if not _GH_ISSUE_CREATE_RE.search(command):
+
+    # Quote-aware tokenization: locate a real `gh issue create` argv among the
+    # command segments. A raw regex over the command string matches the
+    # literal inside quoted strings / grep patterns (e.g.
+    # `grep -rn "gh issue create" hooks/`) → over-block (issue #514 결함2 MED).
+    create_argv = _find_gh_issue_create_argv(command)
+    if create_argv is None:
         return 0
 
-    # Personal-repo escape hatch.
-    repo_match = _REPO_FLAG_RE.search(command)
-    if repo_match and _PERSONAL_REPO_RE.match(repo_match.group(1)):
+    # Personal-repo escape hatch (parsed from the create argv only).
+    repo = _extract_repo(create_argv)
+    if repo and _PERSONAL_REPO_RE.match(repo):
         return 0
 
-    title = _extract_title(command)
+    title = _extract_title_from_argv(create_argv)
     if _DUP_TOKEN_RE.search(title):
         return 0
 
@@ -110,13 +121,18 @@ def main() -> int:
 # Constants
 # ---------------------------------------------------------------------------
 
-_GH_ISSUE_CREATE_RE = re.compile(r"\bgh\s+issue\s+create\b")
-_REPO_FLAG_RE = re.compile(r"--repo\s+(\S+)")
 _PERSONAL_REPO_RE = re.compile(r"^devseunggwan/", re.IGNORECASE)
 
-_TITLE_RE = re.compile(
-    r"""--title\s+(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+))""",
-)
+# gh global flags that consume the following token as their value, so the
+# `issue` / `create` subcommand walk skips both (e.g. `gh -R o/r issue create`).
+_GH_GLOBAL_VALUE_FLAGS: frozenset[str] = frozenset({
+    "-R", "--repo", "--hostname", "--color",
+})
+# Title flags on `gh issue create` (separate-token value forms).
+_TITLE_FLAGS: frozenset[str] = frozenset({"--title", "-t"})
+# --repo / -R value forms on the create argv.
+_REPO_FLAGS: frozenset[str] = frozenset({"--repo", "-R"})
+
 _DUP_TOKEN_RE = re.compile(
     r"\[(?:dup-checked|no-search-needed|dup-verified)\]",
     re.IGNORECASE,
@@ -190,11 +206,88 @@ _TRAILING_STRIP = '"}],'
 # ---------------------------------------------------------------------------
 
 
-def _extract_title(command: str) -> str:
-    m = _TITLE_RE.search(command)
-    if not m:
-        return ""
-    return m.group(1) or m.group(2) or m.group(3) or ""
+def _find_gh_issue_create_argv(command: str) -> list[str] | None:
+    """Return the argv of a real `gh [globals] issue create|new` invocation,
+    or None when no such command segment exists.
+
+    Quote-aware: uses safe_tokenize → iter_command_starts so the literal
+    `gh issue create` inside a quoted string (`grep -rn "gh issue create"`)
+    is NOT a match — those tokens are a single shlex token, not separate
+    `gh`/`issue`/`create` words (issue #514 결함2 MED).
+    """
+    tokens = safe_tokenize(command)
+    if not tokens:
+        return None
+    for raw_argv in iter_command_starts(tokens):
+        argv = strip_prefix(list(raw_argv))
+        if not argv:
+            continue
+        if argv[0].rsplit("/", 1)[-1] != "gh":
+            continue
+        i = _skip_gh_global_flags(argv)
+        if i < len(argv) and argv[i] == "issue":
+            j = _skip_subcommand_flags(argv, i + 1)
+            if j < len(argv) and argv[j] in ("create", "new"):
+                return argv
+    return None
+
+
+def _skip_gh_global_flags(argv: list[str]) -> int:
+    """Index of the first positional after gh's leading global flags."""
+    i = 1
+    n = len(argv)
+    while i < n:
+        tok = argv[i]
+        if tok == "--":
+            return i + 1
+        if not tok.startswith("-"):
+            break
+        i += 1
+        if "=" not in tok and tok in _GH_GLOBAL_VALUE_FLAGS and i < n:
+            i += 1
+    return i
+
+
+def _skip_subcommand_flags(argv: list[str], i: int) -> int:
+    """Skip flags between `issue` and the `create`/`new` action token."""
+    n = len(argv)
+    while i < n and argv[i].startswith("-") and argv[i] != "--":
+        i += 1
+    return i
+
+
+def _flag_value_from_argv(argv: list[str], flags: frozenset[str]) -> str:
+    """Return the value of the first matching flag in *argv*.
+
+    Handles separate-token (`--title X`, `-t X`), inline (`--title=X`,
+    `-t=X`), and concatenated short-flag (`-tX`, `-Rowner/repo`) forms
+    (issue #514 결함2 HIGH).
+    """
+    short_flags = tuple(
+        f for f in flags
+        if len(f) == 2 and f.startswith("-") and not f.startswith("--")
+    )
+    n = len(argv)
+    for i, tok in enumerate(argv):
+        if "=" in tok:
+            name, _, val = tok.partition("=")
+            if name in flags:
+                return val
+            continue
+        if tok in flags and i + 1 < n:
+            return argv[i + 1]
+        for sf in short_flags:
+            if tok.startswith(sf) and len(tok) > 2:
+                return tok[2:]
+    return ""
+
+
+def _extract_title_from_argv(argv: list[str]) -> str:
+    return _flag_value_from_argv(argv, _TITLE_FLAGS)
+
+
+def _extract_repo(argv: list[str]) -> str:
+    return _flag_value_from_argv(argv, _REPO_FLAGS)
 
 
 def _extract_keywords(title: str) -> list[str]:

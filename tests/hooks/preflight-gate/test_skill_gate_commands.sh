@@ -429,6 +429,43 @@ run_case "git push --push-option=ci.skip origin (= form, block)" \
   "$(mk_payload Bash 'git push --push-option=ci.skip origin main' "$TX_WITHOUT")" \
   "PRAXIS_SKILL_GATED_COMMANDS=$CFG_PUSH"
 
+# ---------------------------------------------------------------------------
+# issue #514 결함4 — custom (non-built-in) pattern with leading gh/git global
+# flag. The naive contiguous fallback put the flag VALUE (`owner/repo`) into
+# the non-flag token list between `gh` and `issue`, breaking contiguity →
+# pattern did not match → gate skipped. The flag-aware fallback skips global
+# flags for known binaries first.
+# ---------------------------------------------------------------------------
+
+CFG_ISSUE_CREATE="gh issue create=>praxis:create-hub-pr"
+
+run_case "514: custom pattern gh -R o/r issue create (block)" \
+  "block" \
+  "$(mk_payload Bash 'gh -R owner/repo issue create --title x' "$TX_WITHOUT")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_ISSUE_CREATE"
+
+run_case "514: custom pattern gh --repo o/r issue create (block)" \
+  "block" \
+  "$(mk_payload Bash 'gh --repo owner/repo issue create --title x' "$TX_WITHOUT")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_ISSUE_CREATE"
+
+run_case "514: custom pattern plain gh issue create still blocks (block)" \
+  "block" \
+  "$(mk_payload Bash 'gh issue create --title x' "$TX_WITHOUT")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_ISSUE_CREATE"
+
+run_case "514: custom pattern gh issue list not matched (silent)" \
+  "silent" \
+  "$(mk_payload Bash 'gh -R owner/repo issue list' "$TX_WITHOUT")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_ISSUE_CREATE"
+
+# git custom pattern with global -C flag value.
+CFG_GIT_TAG="git tag=>praxis:create-hub-pr"
+run_case "514: custom pattern git -C dir tag (block)" \
+  "block" \
+  "$(mk_payload Bash 'git -C /tmp tag v1.2.3' "$TX_WITHOUT")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_GIT_TAG"
+
 run_case "malformed config entry no => (fail-safe, silent)" \
   "silent" \
   "$(mk_payload Bash 'gh pr create --title "feat: x"' "$TX_WITHOUT")" \

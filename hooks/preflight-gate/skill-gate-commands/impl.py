@@ -123,6 +123,14 @@ _SHELL_SEPARATORS = {";", "&", "&&", "|", "||", "\n"}
 _GH_GLOBAL_OPTS_WITH_VALUE = {"-R", "--repo", "-C", "--config"}
 _GIT_GLOBAL_OPTS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
 
+# Per-binary global-flag value sets, used by the custom-pattern fallback so a
+# global flag's value (e.g. `gh -R owner/repo issue create`) does not break
+# contiguity of the pattern tokens (issue #514 결함4).
+_KNOWN_BINARY_GLOBAL_OPTS = {
+    "gh": _GH_GLOBAL_OPTS_WITH_VALUE,
+    "git": _GIT_GLOBAL_OPTS_WITH_VALUE,
+}
+
 # git-push options that consume the next token as their value (space form only;
 # the ``=``-joined form is already a single token and is handled by startswith("-")).
 _GIT_PUSH_OPTS_WITH_VALUE = {"-o", "--push-option", "--receive-pack", "--exec"}
@@ -238,19 +246,66 @@ _PATTERN_MATCHERS = {
 }
 
 
+def _matches_custom_pattern(tokens: list[str], pattern_tokens: list[str]) -> bool:
+    """Flag-aware fallback matcher for custom (non-built-in) patterns.
+
+    Walks each command start; for a known binary (``gh``/``git``) it skips
+    leading global flags (and their values) before comparing the pattern
+    tokens against the contiguous run of subsequent non-flag tokens. This
+    fixes ``gh -R owner/repo issue create`` breaking contiguity because the
+    flag value ``owner/repo`` previously landed in the non-flag list between
+    ``gh`` and ``issue`` (issue #514 결함4).
+
+    Patterns whose first token is not a known binary fall back to the prior
+    naive contiguous non-flag-token subsequence match.
+    """
+    if not pattern_tokens:
+        return False
+    binary = pattern_tokens[0]
+    opts_with_value = _KNOWN_BINARY_GLOBAL_OPTS.get(binary)
+    if opts_with_value is None:
+        # Unknown binary — preserve prior naive contiguous match.
+        non_flag = [
+            t for t in tokens
+            if t not in _SHELL_SEPARATORS and not t.startswith("-")
+        ]
+        plen = len(pattern_tokens)
+        for i in range(len(non_flag) - plen + 1):
+            if non_flag[i:i + plen] == pattern_tokens:
+                return True
+        return False
+
+    n = len(tokens)
+    i = 0
+    while i < n:
+        tok = tokens[i]
+        if tok in _SHELL_SEPARATORS:
+            i += 1
+            continue
+        if tok == binary or tok.endswith("/" + binary):
+            j = _skip_global_flags(tokens, i + 1, opts_with_value)
+            # Compare the remaining pattern tokens against the contiguous run
+            # of non-flag tokens beginning at j.
+            ok = True
+            k = j
+            for pt in pattern_tokens[1:]:
+                if k >= n or tokens[k] in _SHELL_SEPARATORS or tokens[k] != pt:
+                    ok = False
+                    break
+                k += 1
+            if ok:
+                return True
+        i += 1
+    return False
+
+
 def _command_matches_pattern(tokens: list[str], pattern: str) -> bool:
     """Return True if ``tokens`` match ``pattern``."""
     matcher = _PATTERN_MATCHERS.get(pattern)
     if matcher is not None:
         return matcher(tokens)
-    # Fallback: naive contiguous non-flag token subsequence match.
-    # Useful for future custom patterns without requiring a new matcher.
-    pattern_tokens = pattern.split()
-    non_flag = [t for t in tokens if t not in _SHELL_SEPARATORS and not t.startswith("-")]
-    for i in range(len(non_flag) - len(pattern_tokens) + 1):
-        if non_flag[i:i + len(pattern_tokens)] == pattern_tokens:
-            return True
-    return False
+    # Custom pattern: flag-aware fallback (issue #514 결함4).
+    return _matches_custom_pattern(tokens, pattern.split())
 
 
 # ---------------------------------------------------------------------------
