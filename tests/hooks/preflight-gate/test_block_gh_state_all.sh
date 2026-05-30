@@ -129,6 +129,34 @@ malformed_test
 
 # --- PASS: empty command → exit 0 -------------------------------------------
 run_case "pass: empty command"                        pass  Bash ''
+# ---------------------------------------------------------------------------
+# Fail-open: uncaught exception in _main_inner returns 0 (issue #498)
+# ---------------------------------------------------------------------------
+# Inject an unexpected exception (e.g. MemoryError / RecursionError) into
+# _main_inner and assert the outer try/except Exception wrapper in main()
+# returns exit 0 with no stderr — the documented "a hook never breaks a
+# normal session" fail-open contract.
+_failopen_out=$(python3 - << PYEOF 2>&1
+import sys, importlib.util, io
+spec = importlib.util.spec_from_file_location("impl", "$HOOK")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+def _raise(): raise MemoryError("simulated catastrophic failure")
+mod._main_inner = _raise
+sys.stdin = io.StringIO('{}')
+sys.exit(mod.main())
+PYEOF
+)
+_failopen_rc=$?
+if [ "$_failopen_rc" -eq 0 ] && [ -z "$_failopen_out" ]; then
+  echo "PASS  [fail-open] uncaught exception in _main_inner -> exit 0, no stderr"
+  PASS=$((PASS+1))
+else
+  echo "FAIL  [fail-open] uncaught exception in _main_inner (rc=$_failopen_rc out=$(echo "$_failopen_out" | head -c 160))"
+  FAIL=$((FAIL+1)); FAILED_NAMES+=("fail-open uncaught exception in _main_inner")
+fi
+
+
 
 # ---------- summary ----------------------------------------------------------
 echo ""

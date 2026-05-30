@@ -364,7 +364,7 @@ Note: PRAXIS_ASK_END_STRICT=1 (deprecated) also forces strict when set.
 """
 
 
-def main() -> int:
+def _main_inner() -> int:
     try:
         payload = json.load(sys.stdin)
     except Exception:
@@ -407,6 +407,20 @@ def main() -> int:
 
     sys.stderr.write(ADVISORY_MSG)
     return 0
+
+
+def main() -> int:
+    """Preflight gate entrypoint — fail-open on any uncaught exception.
+
+    The blocking logic lives in ``_main_inner``; this wrapper guarantees the
+    documented fail-open contract ("a hook never breaks a normal session"):
+    any unexpected exception from later IO (subprocess / read_text / glob /
+    tokenization) returns 0 instead of crashing the hook.
+    """
+    try:
+        return _main_inner()
+    except Exception:
+        return 0
 
 
 if __name__ == "__main__":

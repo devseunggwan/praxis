@@ -257,7 +257,7 @@ def _emit_block(file_path: str, branch: str, repo_root: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def main() -> int:
+def _main_inner() -> int:
     # Bypass env var — set to any non-empty value
     if os.environ.get("PRAXIS_HOOK_BYPASS_WORKTREE_GATE", "").strip():
         return 0
@@ -304,6 +304,20 @@ def main() -> int:
     # All conditions met: block
     _emit_block(file_path, branch, repo_root)
     return 2
+
+
+def main() -> int:
+    """Preflight gate entrypoint — fail-open on any uncaught exception.
+
+    The blocking logic lives in ``_main_inner``; this wrapper guarantees the
+    documented fail-open contract ("a hook never breaks a normal session"):
+    any unexpected exception from later IO (subprocess / read_text / glob /
+    tokenization) returns 0 instead of crashing the hook.
+    """
+    try:
+        return _main_inner()
+    except Exception:
+        return 0
 
 
 if __name__ == "__main__":
