@@ -440,10 +440,12 @@ run_case "empty settings.json under non-config dir is silent (issue #513 결함3
 # token resolves to the empty fixture created there.
 mkdir -p "$TMPDIR_TEST/root"
 touch "$TMPDIR_TEST/root/settings.json"
+# Unique session_id per run: the hook dedups per session in the shared system
+# TMPDIR, so a hardcoded id would suppress the advisory on re-runs (stale state).
 bare_payload=$(python3 -c '
-import json
-print(json.dumps({"tool_name":"Bash","tool_input":{"command":"jq . settings.json"},"session_id":"bare-513-case"}))
-')
+import json, sys
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":"jq . settings.json"},"session_id":sys.argv[1]}))
+' "bare-513-$$-$RANDOM")
 bare_err=$(mktemp)
 ( cd "$TMPDIR_TEST/root" && echo "$bare_payload" | python3 "$HOOK" >/dev/null 2>"$bare_err" )
 bare_rc=$?
@@ -461,9 +463,9 @@ fi
 # accepts an optional leading `./` so this form is not lost alongside the bare
 # token while subdir paths like sub/settings.json stay excluded).
 dot_payload=$(python3 -c '
-import json
-print(json.dumps({"tool_name":"Bash","tool_input":{"command":"jq . ./settings.json"},"session_id":"dot-513-case"}))
-')
+import json, sys
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":"jq . ./settings.json"},"session_id":sys.argv[1]}))
+' "dot-513-$$-$RANDOM")
 dot_err=$(mktemp)
 ( cd "$TMPDIR_TEST/root" && echo "$dot_payload" | python3 "$HOOK" >/dev/null 2>"$dot_err" )
 dot_rc=$?
