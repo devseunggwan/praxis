@@ -21,9 +21,10 @@ Detection model:
     `.env.example`, `.env.sample`, `.env.template` (exact basename, not
     substring).
   • **Extension** — `*.pem`, `*.key`, `*.p12`, `*.keystore`.
-  • **Directory component** — any path containing a `.ssh` directory component
-    matches (`.ssh/config`, `.ssh/known_hosts`, `.ssh/id_rsa.pub` all match —
-    public keys included because the directory itself is the trust anchor).
+  • **Directory component** — any path containing a `.ssh`, `.aws`, `.kube`,
+    or `.gnupg` directory component matches (e.g. `.ssh/config`,
+    `.aws/credentials`, `.kube/config`, `.gnupg/secring.gpg` — public keys
+    included under `.ssh/` because the directory itself is the trust anchor).
 
 Skip / allowlist:
 
@@ -60,6 +61,8 @@ _PROTECTED_BASENAMES = frozenset({
     ".env",
     ".netrc",
     ".npmrc",
+    ".git-credentials",  # plain-text GitHub token store (git-credential-store)
+    ".pgpass",           # PostgreSQL password file
     "credentials",
     "id_rsa",
     "id_dsa",
@@ -105,6 +108,16 @@ _PLANNING_FRAGMENTS = (
     "/.claude/projects/",
 )
 
+# Directory components that act as trust anchors — any file nested inside
+# these directories inherits the sensitivity of the credential store.
+# `.ssh/id_rsa.pub` matches even though the basename is otherwise allow-listed.
+_PROTECTED_DIR_COMPONENTS = frozenset({
+    ".ssh",
+    ".aws",    # AWS CLI credentials and config
+    ".kube",   # Kubernetes kubeconfig (service-account tokens, cluster certs)
+    ".gnupg",  # GnuPG key material and trustdb
+})
+
 # Under `.ssh/`, the directory-component rule fires first (the directory IS
 # the trust anchor); the public-key allow only applies when the file is
 # elsewhere (e.g. `pubkeys/id_rsa.pub` in a config repo).
@@ -149,17 +162,27 @@ def _self_plugin_root() -> str:
 
 
 def _is_self_edit(path: str) -> bool:
-    """True if path is inside CLAUDE_PLUGIN_ROOT (the praxis plugin itself)."""
+    """True if path is inside CLAUDE_PLUGIN_ROOT (the praxis plugin itself).
+
+    Relative paths are rejected unconditionally: `os.path.abspath` resolves
+    them against the hook process's cwd, so when cwd happens to be inside the
+    plugin root a bare `.env` would resolve to a plugin-root path and trigger
+    a false-positive self-edit exemption — bypassing the check entirely in
+    strict mode.  Only absolute paths carry enough location signal to be
+    trusted.
+    """
+    if not os.path.isabs(path):
+        return False
     plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
     if not plugin_root:
         plugin_root = _self_plugin_root()
     if not plugin_root:
         return False
     try:
-        rel = os.path.relpath(os.path.abspath(path), os.path.abspath(plugin_root))
+        rel = os.path.relpath(os.path.normpath(path), os.path.abspath(plugin_root))
     except ValueError:
         return False
-    return not rel.startswith("..")
+    return rel == "." or not rel.startswith(".." + os.sep)
 
 
 def _is_planning_artifact(path: str) -> bool:
@@ -197,11 +220,14 @@ def _classify(path: str) -> str | None:
         return None
     basename = components[-1]
 
-    # The `.ssh/` rule fires first because the directory itself is the trust
-    # anchor — `.ssh/id_rsa.pub` matches even though `id_rsa.pub` is otherwise
-    # allow-listed elsewhere.
-    if ".ssh" in components:
-        return "path contains a protected directory component (`.ssh/`)"
+    # Directory-component rules fire first — the directory itself is the trust
+    # anchor.  `.ssh/id_rsa.pub` matches even though `id_rsa.pub` is otherwise
+    # allow-listed elsewhere.  `.aws/`, `.kube/`, `.gnupg/` follow the same
+    # pattern: any file inside the directory inherits the sensitivity of the
+    # credential store.
+    for _dir in _PROTECTED_DIR_COMPONENTS:
+        if _dir in components:
+            return f"path contains a protected directory component (`{_dir}/`)"
 
     if basename in _PUBKEY_BASENAMES:
         return None

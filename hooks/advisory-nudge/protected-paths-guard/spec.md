@@ -34,10 +34,10 @@ The hook fires when **all** are true:
 
 | Rule | Matches | Examples |
 |------|---------|----------|
-| Basename-exact | `.env`, `.netrc`, `.npmrc`, `credentials`, `id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519` | `~/.netrc`, `aws/credentials` |
+| Basename-exact | `.env`, `.netrc`, `.npmrc`, `.git-credentials`, `.pgpass`, `credentials`, `id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519` | `~/.netrc`, `aws/credentials`, `~/.git-credentials`, `~/.pgpass` |
 | `.env.<env>` prefix | basename starts with `.env.` AND is not in the env allowlist | `.env.production`, `.env.local` |
 | Extension | `*.pem`, `*.key`, `*.p12`, `*.keystore` | `keys/server.pem`, `tls/cert.p12` |
-| Directory-component | any path component equals `.ssh` | `~/.ssh/config`, `~/.ssh/id_rsa.pub` (under `.ssh/`) |
+| Directory-component | any path component equals `.ssh`, `.aws`, `.kube`, or `.gnupg` | `~/.ssh/config`, `~/.aws/credentials`, `~/.kube/config`, `~/.gnupg/secring.gpg` |
 
 #### Env allowlist (exact basename match)
 
@@ -76,6 +76,11 @@ rule still fires because the directory itself is the trust anchor.
 | `~/.ssh/id_rsa.pub` | **ADVISORY** | directory-component fires first |
 | `~/.ssh/known_hosts` | **ADVISORY** | directory-component |
 | `pubkeys/id_rsa.pub` | **SILENT** | public-key allow (not under `.ssh/`) |
+| `~/.aws/credentials` | **ADVISORY** | directory-component (`.aws/`) |
+| `~/.kube/config` | **ADVISORY** | directory-component (`.kube/`) |
+| `~/.gnupg/secring.gpg` | **ADVISORY** | directory-component (`.gnupg/`) |
+| `~/.git-credentials` | **ADVISORY** | basename-exact |
+| `~/.pgpass` | **ADVISORY** | basename-exact |
 | `keys/server.pem` | **ADVISORY** | extension `.pem` |
 | `tls/cert.p12` | **ADVISORY** | extension `.p12` |
 | `aws/credentials` | **ADVISORY** | basename-exact |
@@ -126,11 +131,11 @@ exit 0 (advisory) or 2 (strict)
   verbatim. If the path is a symlink to a protected file (e.g. `config.json` →
   `.env`), the hook does NOT follow symlinks; the unsuspecting basename
   (`config.json`) passes silently.
-- **Custom credential filenames**: `.aws/config` (without the `credentials`
-  basename), `.kube/config`, `.docker/config.json` are NOT in the basename set
-  — they are config files that may contain non-credential settings, and the
-  false-positive rate would be high. Authors that want to guard these can add
-  a wrapper hook or extend the basename set in a fork.
+- **Custom credential filenames**: `.docker/config.json` is NOT guarded —
+  it is a config file that may contain non-credential settings and the
+  false-positive rate would be high. Authors that want to guard it can add
+  a wrapper hook or extend the directory-component set. (`.aws/` and `.kube/`
+  are now covered by the directory-component rule.)
 - **Allow-list extension form**: `.pem.example` does NOT match the env
   allowlist (which is `.env.<allowed>` only). A test fixture named `.pem` is
   protected unless placed under a fixture directory.
