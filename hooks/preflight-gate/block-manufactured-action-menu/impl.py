@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path as _Path
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
@@ -259,7 +260,6 @@ def _has_manufactured_marker(labels: list[str]) -> bool:
     """
     if not labels:
         return False
-    import re
     ko_markers = MANUFACTURED_MARKERS_KO + AFFIRMATIVE_MARKERS_KO
     en_markers = MANUFACTURED_MARKERS_EN + AFFIRMATIVE_MARKERS_EN
     for label in labels:
@@ -372,7 +372,6 @@ def _has_destructive_label(labels: list[str]) -> bool:
     """
     if not labels:
         return False
-    import re
     for label in labels:
         lower = label.lower()
         for token in DESTRUCTIVE_LABEL_TOKENS_KO:
@@ -466,7 +465,6 @@ def _has_command_signal(user_message: str) -> bool:
     # English: whole-word match (case-insensitive) with negation guard on
     # the preceding window ("don't proceed", "do not continue").
     lower = user_message.lower()
-    import re
     for token in COMMAND_SIGNALS_EN_TOKENS:
         pattern = r"\b" + re.escape(token.lower()) + r"\b"
         for m in re.finditer(pattern, lower):

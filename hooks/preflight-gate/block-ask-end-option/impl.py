@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path as _Path
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
@@ -379,7 +380,6 @@ def _has_action_verb(suffix: str) -> bool:
     Multi-word verb phrases ("go ahead", "move on") are matched as
     substrings since their internal spaces already anchor them.
     """
-    import re
     for verb in ACTION_VERBS_EN:
         if " " in verb:
             if verb in suffix:
