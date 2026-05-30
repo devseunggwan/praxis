@@ -115,6 +115,28 @@ else
 fi
 rm -f "$TMP_LOG"
 
+# Default placement (no PRAXIS_HOOK_ERROR_LOG): lands under ~/.praxis/logs via
+# _paths (PRAXIS_HOME points the home at a temp dir for the test).
+TMP_HOME=$(mktemp -d)
+rc_default=$(env -u PRAXIS_HOOK_ERROR_LOG PRAXIS_HOME="$TMP_HOME" python3 - "$LIB" << 'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from _hook_runtime import fail_open
+@fail_open
+def boom():
+    raise ValueError("home-routed")
+print(boom())
+PYEOF
+)
+assert_eq "default error log routes via ~/.praxis (returns 0)" "0" "$rc_default"
+if [ -s "$TMP_HOME/logs/hook-errors.jsonl" ] \
+   && grep -q '"message": "home-routed"' "$TMP_HOME/logs/hook-errors.jsonl"; then
+  echo "PASS  [default error log written under <PRAXIS_HOME>/logs/hook-errors.jsonl]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [default error log not under PRAXIS_HOME/logs]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("default error log placement")
+fi
+rm -rf "$TMP_HOME"
+
 # Unwritable log path must NOT re-break fail-open (recorder is self-guarded).
 rc_unwritable=$(PRAXIS_HOOK_ERROR_LOG="/proc/nonexistent-dir/err.jsonl" python3 - "$LIB" << 'PYEOF'
 import sys

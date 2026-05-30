@@ -19,12 +19,14 @@ a single behavioral test (`tests/test_hook_runtime.sh`).
 the session alive, but a swallowed crash with no trace is undiagnosable — the
 hook would appear to "work" while silently never enforcing its rule. So every
 swallowed exception is recorded to an append-only JSONL error log
-(``PRAXIS_HOOK_ERROR_LOG`` env override; default
-``${TMPDIR:-/tmp}/praxis-hook-errors.jsonl``) with timestamp, hook identity,
-exception type/message, full traceback, and pid. The recorder is itself fully
-self-guarded — a logging failure can never re-break the fail-open contract.
-Set ``PRAXIS_HOOK_ERROR_STDERR=1`` to additionally surface a terse one-line
-note on stderr (off by default so normal sessions stay quiet).
+(``PRAXIS_HOOK_ERROR_LOG`` env override; default the host-neutral
+``~/.praxis/logs/hook-errors.jsonl`` via ``_paths``, which itself falls back to
+``${TMPDIR:-/tmp}/praxis-hook-errors.jsonl`` when the home dir is not writable)
+with timestamp, hook identity, exception type/message, full traceback, and pid.
+The recorder is itself fully self-guarded — a logging failure can never
+re-break the fail-open contract. Set ``PRAXIS_HOOK_ERROR_STDERR=1`` to
+additionally surface a terse one-line note on stderr (off by default so normal
+sessions stay quiet).
 
 Usage::
 
@@ -50,9 +52,9 @@ Contract details:
   that attribute rather than re-testing the (centrally tested) behavior.
 
 Privacy note: a traceback may incidentally contain argument values (e.g. a
-command string) from local frames. The log is a local, ephemeral file under
-``TMPDIR`` (or an operator-chosen path) and is not committed — treat it like
-the sibling bypass-telemetry log.
+command string) from local frames. The log is a local file under
+``~/.praxis/logs`` (or an operator-chosen path) and is not committed — treat it
+like the sibling bypass-telemetry log.
 """
 from __future__ import annotations
 
@@ -66,12 +68,23 @@ from typing import Callable
 
 
 def _error_log_path() -> str:
-    """Resolve the JSONL error-log path (env override, else TMPDIR default)."""
+    """Resolve the JSONL error-log path.
+
+    ``PRAXIS_HOOK_ERROR_LOG`` wins (explicit operator override). Otherwise the
+    host-neutral ``~/.praxis/logs/hook-errors.jsonl`` via ``_paths`` (which
+    falls back to ``${TMPDIR}/praxis-hook-errors.jsonl`` when the home dir is
+    not writable). The import is guarded so a missing/broken ``_paths`` can
+    never break the recorder.
+    """
     override = os.environ.get("PRAXIS_HOOK_ERROR_LOG")
     if override:
         return override
-    tmp = os.environ.get("TMPDIR") or "/tmp"
-    return os.path.join(tmp, "praxis-hook-errors.jsonl")
+    try:
+        from _paths import resolve_writable
+        return resolve_writable("logs", "hook-errors.jsonl")
+    except Exception:
+        tmp = os.environ.get("TMPDIR") or "/tmp"
+        return os.path.join(tmp, "praxis-hook-errors.jsonl")
 
 
 def _hook_identity(fn: Callable[[], int]) -> str:
