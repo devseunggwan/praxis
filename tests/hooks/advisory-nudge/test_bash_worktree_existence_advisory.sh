@@ -239,6 +239,38 @@ run_case "compact subshell trailing-paren does not cause false advisory" \
   "silent" \
   "(cd $NON_WT_DIR && cd $ROOT_DIR)"
 
+# Regression (issue #516 defect1): the CLOSING segment of a subshell must NOT
+# pollute the outer effective_cwd. In `(cd A && cd B) && cd <rel>`, the outer
+# relative `cd` has to resolve against the hook's *original* cwd, not B.
+#
+# The old code reset in_subshell BEFORE the cwd-update step, so the closing
+# segment's target leaked into effective_cwd. Concretely: with outer cwd lacking
+# `bin/` but B (=/usr) having `bin/`, the buggy code resolved `cd bin` against
+# /usr → /usr/bin exists → no advisory. The fix keeps the closing segment's cwd
+# update on subshell_cwd (via was_in_subshell), leaving effective_cwd intact so
+# `cd bin` resolves to <outer-cwd>/bin → missing → advisory.
+#
+# Run with a controlled outer cwd (a temp dir guaranteed to lack `bin/`).
+DEF1_OUTER=$(mktemp -d)
+{
+  payload_def1=$(python3 -c '
+import json
+print(json.dumps({"tool_name": "Bash",
+    "tool_input": {"command": "(cd /tmp && cd /usr) && cd bin"}}))')
+  err_file=$(mktemp)
+  ( cd "$DEF1_OUTER" && echo "$payload_def1" | "$HOOK" >/dev/null 2>"$err_file" )
+  def1_rc=$?
+  def1_err=$(cat "$err_file"); rm -f "$err_file"
+  if [ "$def1_rc" -eq 0 ] && printf '%s' "$def1_err" | grep -q '\[worktree-missing\]'; then
+    echo "PASS  [subshell close does not pollute outer cwd (defect1)]"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL  [subshell close does not pollute outer cwd (defect1)] rc=$def1_rc stderr=${def1_err:-<empty>}"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("subshell close does not pollute outer cwd (defect1)")
+  fi
+}
+rmdir "$DEF1_OUTER" 2>/dev/null || true
+
 # R3 P2-2: `cat<<EOF` (command-attached, no space) — body cd must be silent.
 run_case "command-attached fused heredoc body cd is silent (cat<<EOF)" \
   "silent" \

@@ -97,16 +97,17 @@ _ERE_LONG_FLAGS = frozenset({"--extended-regexp", "--perl-regexp"})
 _GREP_SHORT_FLAGS_WITH_ARG = frozenset({"m", "A", "B", "C", "f", "D", "d"})
 
 
-def _analyze_grep_argv(argv: list[str]) -> tuple[bool, bool, str]:
-    """Return (has_count, has_ere, first_pattern) for a grep argv.
+def _analyze_grep_argv(argv: list[str]) -> tuple[bool, bool, list[str]]:
+    """Return (has_count, has_ere, patterns) for a grep argv.
 
     argv[0] is expected to be `grep` (or a path to grep). Returns three values:
       has_count  — True iff `-c` / `--count` (or combined `-cE` etc.) is present.
       has_ere    — True iff ERE/PCRE mode is active (`-E`, `-P`, long equivalents,
                    or combined short flags like `-cE`).
-      pattern    — The first detected pattern string, or "" if none found.
+      patterns   — All detected pattern strings (every `-e`/`--regexp` plus the
+                   first positional fallback), or `[]` if none found.
 
-    Fail-open: any IndexError / unexpected shape → return (False, False, "").
+    Fail-open: any IndexError / unexpected shape → return (False, False, []).
     """
     has_count = False
     has_ere = False
@@ -182,8 +183,7 @@ def _analyze_grep_argv(argv: list[str]) -> tuple[bool, bool, str]:
     if not patterns and positional:
         patterns.append(positional[0])
 
-    first_pattern = patterns[0] if patterns else ""
-    return has_count, has_ere, first_pattern
+    return has_count, has_ere, patterns
 
 
 def _has_alternation(pattern: str, ere_mode: bool) -> bool:
@@ -259,10 +259,12 @@ def check_command(command: str) -> bool:
         if not argv or not _is_grep(argv[0]):
             continue
         try:
-            has_count, has_ere, pattern = _analyze_grep_argv(argv)
+            has_count, has_ere, patterns = _analyze_grep_argv(argv)
         except Exception:
             continue
-        if has_count and _has_alternation(pattern, has_ere):
+        if has_count and any(
+            _has_alternation(p, has_ere) for p in patterns
+        ):
             return True
 
     return False

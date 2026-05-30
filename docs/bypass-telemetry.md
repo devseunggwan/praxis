@@ -49,7 +49,8 @@ Both naming conventions used in praxis are detected:
 
 Detection regex: `^(?:CLAUDE_HOOK_|PRAXIS_).*BYPASS`
 
-A var is only recorded if its value is truthy (non-empty and not `"0"`).
+A var is only recorded if its value is truthy: non-empty and not one of the
+shell-falsy literals `0` / `false` / `no` / `off` (case-insensitive).
 
 ## Privacy guarantees
 

@@ -326,7 +326,12 @@ def is_planning_artifact(path: str) -> bool:
 def is_docs_file(path: str) -> bool:
     """True if the path looks like a docs-only file (README, CHANGELOG, /docs/)."""
     norm = path.replace("\\", "/")
-    if "/docs/" in norm or "/documentation/" in norm:
+    if (
+        "/docs/" in norm
+        or "/documentation/" in norm
+        or norm.startswith("docs/")
+        or norm.startswith("documentation/")
+    ):
         return True
     basename = os.path.basename(norm).lower()
     stem = basename.rsplit(".", 1)[0] if "." in basename else basename

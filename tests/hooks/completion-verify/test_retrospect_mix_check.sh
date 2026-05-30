@@ -865,6 +865,30 @@ T_NEW3_ROW="| 1 | output_quality | cli | PR CHANGES_REQUESTED ≥2 | weak first-
 run_case "T-NEW3_pass_output_quality_category_with_cli_layer" "pass" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T_NEW3_CARD" "$T_NEW3_ROW")")"
 
+# Regression (issue #516 defect3): a verdict value with TRAILING whitespace
+# (e.g. "FAIL " from a hand-edited / copy-pasted card) must still block. The
+# awk extractor with -F': *' only trims leading whitespace, so without an
+# explicit trailing-trim the comparison [ "FAIL " = "FAIL" ] is false and the
+# block is silently skipped. The fix pipes each verdict through `xargs`.
+# gate_1 trailing-space variant of T5 (tool label, memory-only, gate_1 FAIL).
+# NB: the trailing space after FAIL is the whole point — append it via a
+# variable so it survives editor whitespace-stripping and stays visible.
+SP=' '
+T_DEF3_G1_CARD=$(cat <<EOF
+- memory: 1
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 0
+- gate_1_verdict: FAIL${SP}
+- gate_2_verdict: PASS
+EOF
+)
+T_DEF3_G1_ROW="| 1 | tool | cli | gh flag missing | tool defect | gap | No | memory | ${RATIONALE_5LINE} | HIGH |"
+run_case "T-DEF3_block_gate1_verdict_fail_trailing_space" "block" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T_DEF3_G1_CARD" "$T_DEF3_G1_ROW")")"
+
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
 #   {expected_decision: "pass"|"block", must_contain: [...], must_not_contain: [...]}

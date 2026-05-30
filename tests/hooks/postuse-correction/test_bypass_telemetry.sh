@@ -235,6 +235,41 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test 5b (issue #516 defect4): VAR=false / no / off -> NOT logged.
+# Shell convention treats these as inactive; the old "non-empty and != 0" rule
+# wrongly recorded them as active bypass events. Case-insensitive.
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== bypass-telemetry: VAR=false/no/off falsey -> not logged ==="
+
+for falsy in false FALSE no No off OFF; do
+  TEL5b="$TMP_DIR/test5b_${falsy}.jsonl"
+  payload5b="$(make_payload Bash "CLAUDE_HOOK_BYPASS_SCIOMC_GATE=${falsy} git commit")"
+  PRAXIS_BYPASS_TELEMETRY_FILE="$TEL5b" python3 "$HOOK" <<< "$payload5b" >/dev/null 2>&1
+  if [ -f "$TEL5b" ]; then
+    lc5b=$(wc -l < "$TEL5b" 2>/dev/null | tr -d ' ')
+    if [ "${lc5b:-0}" -gt 0 ]; then
+      assert_fail "VAR=${falsy} not logged" "file has content despite VAR=${falsy}"
+    else
+      assert_pass "VAR=${falsy} not logged (empty file)"
+    fi
+  else
+    assert_pass "VAR=${falsy} not logged"
+  fi
+done
+
+# Guard against over-correction: a genuinely-truthy value (e.g. `true`) must
+# still be recorded.
+TEL5c="$TMP_DIR/test5c.jsonl"
+payload5c="$(make_payload Bash 'CLAUDE_HOOK_BYPASS_SCIOMC_GATE=true git commit')"
+PRAXIS_BYPASS_TELEMETRY_FILE="$TEL5c" python3 "$HOOK" <<< "$payload5c" >/dev/null 2>&1
+if [ -f "$TEL5c" ] && [ "$(wc -l < "$TEL5c" 2>/dev/null | tr -d ' ')" -gt 0 ]; then
+  assert_pass "VAR=true still logged"
+else
+  assert_fail "VAR=true still logged" "truthy value was not recorded"
+fi
+
+# ---------------------------------------------------------------------------
 # Test 6: VAR= (empty) -> NOT logged
 # ---------------------------------------------------------------------------
 echo ""

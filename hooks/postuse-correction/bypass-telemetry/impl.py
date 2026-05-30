@@ -72,11 +72,21 @@ def _is_bypass_name(name: str) -> bool:
     return bool(_BYPASS_NAME_RE.match(name))
 
 
+# Values that denote an *inactive* bypass even though they are non-empty.
+# Shell convention: `false`/`no`/`off` (and `0`) mean disabled, so a bypass var
+# set to one of these must not be recorded as an active bypass event.
+_FALSY_VALUES = frozenset({"0", "false", "no", "off"})
+
+
 def _is_truthy_value(raw: str) -> bool:
-    """Return True if the value is non-empty and not the literal string "0"."""
+    """Return True if the value denotes an active (enabled) bypass.
+
+    Non-empty and not one of the conventional falsy literals
+    (``0``/``false``/``no``/``off``, matched case-insensitively).
+    """
     # Strip surrounding quotes from inline assignment values
     v = raw.strip("\"'")
-    return bool(v) and v != "0"
+    return bool(v) and v.lower() not in _FALSY_VALUES
 
 
 def _parse_inline_env(command: str) -> dict[str, str]:
