@@ -1,0 +1,29 @@
+name: tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: set up python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: install python deps
+        run: python3 -m pip install pytest
+
+      - name: install jq
+        run: sudo apt-get update -y && sudo apt-get install -y jq
+
+      - name: run tests
+        run: bash scripts/run-tests.sh

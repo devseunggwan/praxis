@@ -196,12 +196,15 @@ Fixed, Removed.
 ## Testing
 
 ```bash
-# Run the full test suite from the repo root
-python -m pytest tests/
-
-# Run the shell-based hook tests directly (pytest only collects .py files)
-for f in tests/hooks/*/test_*.sh; do bash "$f"; done
+# Run the full test suite (pytest + shell tests + manifest check) from the repo root
+bash scripts/run-tests.sh
 ```
+
+This is the single entry point. It runs pytest, all shell-based hook tests, and
+`scripts/check-plugin-manifests.py` under one exit code gate.
+
+CI runs the same command on every push and pull request via
+`.github/workflows/test.yml`.
 
 New hooks must ship with a test under `tests/hooks/<role>/`:
 
