@@ -183,6 +183,19 @@ run_case "silent_cmux_new_workspace_shell" \
   "" \
   'cmux new-workspace dev --command "bash -i"'
 
+# issue #513 결함2: provider name as an identifier substring (CLAUDE_API_KEY)
+# must NOT false-fire the dispatch advisory — word-boundary match required.
+run_case "silent_cmux_provider_substring_in_env_var" \
+  "silent" \
+  "" \
+  'cmux new-workspace --command "CLAUDE_API_KEY=abc myapp"'
+
+# issue #513 결함2 negative: a genuine provider invocation still fires.
+run_case "cmux_dispatch_provider_word_boundary" \
+  "advisory:[praxis:momentum-gate]" \
+  "" \
+  'cmux new-workspace --command "claude -p do real work"'
+
 # --- force-push triggers -------------------------------------------------------
 
 run_case "git_push_force" \

@@ -137,6 +137,21 @@ run_case "edit_allcaps" "advisory:AUTH_TOKEN_SCOPE" \
 run_case "write_sql_3part" "advisory:prod.analytics.events" \
   "$(write_payload 'SELECT * FROM prod.analytics.events WHERE dt > now()')"
 
+# --- issue #513 결함4: Hangul-adjacent ALLCAPS tokens ---
+
+# Positive: Hangul directly after the token (Unicode \w) used to break the
+# trailing \b → now caught via the ASCII (?![A-Z0-9_]) lookahead.
+run_case "hangul_adjacent_allcaps_auth_token" "advisory:AUTH_TOKEN" \
+  "$(write_payload 'AUTH_TOKEN이 필요합니다')"
+
+run_case "hangul_adjacent_allcaps_vendor_key" "advisory:VENDOR_API_KEY" \
+  "$(edit_payload 'VENDOR_API_KEY를 발급받으세요')"
+
+# Negative: an ALLCAPS run embedded in a longer mixed-case identifier must stay
+# clean (leading \b still guards the left edge).
+run_case "mixed_case_identifier_stays_clean" "pass" \
+  "$(write_payload 'value myAUTH_TOKEN here')"
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

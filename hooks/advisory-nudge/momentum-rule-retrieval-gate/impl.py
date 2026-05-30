@@ -61,6 +61,11 @@ TRIGGER_MERGE = "merge"
 TRIGGER_DISPATCH = "dispatch"
 TRIGGER_FORCE_PUSH = "force-push"
 
+# AI-provider name match for cmux dispatch detection. ASCII word boundaries
+# (case-insensitive) so an actual provider invocation matches but an
+# identifier substring like "CLAUDE_API_KEY=abc" does not (issue #513, 결함2).
+_AI_PROVIDER_RE = re.compile(r"\b(claude|codex|gemini)\b", re.IGNORECASE)
+
 CLOSING_LINE = f"{PREFIX} ─────────────────────────────────────────────────────────────"
 
 # ---------------------------------------------------------------------------
@@ -311,8 +316,9 @@ def _is_cmux_dispatch(argv: list[str]) -> bool:
     if "new-workspace" not in argv[1:]:
         return False
 
-    # Scan for --command and inspect its value.
-    ai_provider_tokens = ("claude", "codex", "gemini")
+    # Scan for --command and inspect its value. Match provider names on ASCII
+    # word boundaries so substrings like "CLAUDE_API_KEY=abc" do not false-fire
+    # the dispatch advisory (issue #513, 결함2).
     n = len(argv)
     for i, tok in enumerate(argv):
         value: str | None = None
@@ -322,8 +328,7 @@ def _is_cmux_dispatch(argv: list[str]) -> bool:
             value = tok.split("=", 1)[1]
         if value is None:
             continue
-        lowered = value.lower()
-        if any(p in lowered for p in ai_provider_tokens):
+        if _AI_PROVIDER_RE.search(value):
             return True
     return False
 

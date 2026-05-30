@@ -90,6 +90,7 @@ def _is_wrapper_shape_path(file_path: str) -> bool:
 _TEST_PATH_PATTERN = re.compile(
     r"(?:/|^)tests?/"            # /tests/, /test/, tests/foo.py, test/foo.py
     r"|/test_[^/]*\.py$"         # /test_foo.py
+    r"|^test_[^/]*\.py$"         # bare test_foo.py (no leading dir) — #513 결함5
     r"|_test\.py$"               # foo_test.py
 )
 

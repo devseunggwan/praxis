@@ -71,18 +71,23 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 #
 # A path matches if it ends with .json AND satisfies at least one of:
 #   1. Has .claude/ or .codex/ anywhere in it (absolute or relative)
-#   2. Is literally "settings.json" or "hooks.json" (repo-root files)
+#   2. Is the BARE filename "settings.json" or "hooks.json" (repo-root files)
 #
 # We do NOT anchor on ~/.claude exactly — relative paths like
 # .claude/settings.json are also config paths.
+#
+# The settings.json / hooks.json branches are anchored to the start of the
+# token (no leading `(?:^|/)`) so unrelated files like /tmp/settings.json do
+# not misfire the advisory (issue #513, 결함3). Such config files under a
+# real config dir still match via the .claude/ / .codex/ branches.
 
 _CONFIG_PATH_RE = re.compile(
     r"""
     (?:
         (?:^|/)\.claude/   # under .claude/ dir
       | (?:^|/)\.codex/    # under .codex/ dir
-      | (?:^|/)settings\.json$   # repo-root settings.json
-      | (?:^|/)hooks\.json$      # repo-root hooks.json
+      | ^settings\.json$   # repo-root settings.json (bare filename only)
+      | ^hooks\.json$      # repo-root hooks.json (bare filename only)
     )
     """,
     re.VERBOSE,

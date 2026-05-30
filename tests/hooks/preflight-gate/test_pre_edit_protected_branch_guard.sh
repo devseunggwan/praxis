@@ -352,6 +352,22 @@ run_case "dirty+protected+.claude/projects/ target → pass" pass \
   "PRAXIS_PBGUARD_TEST_BRANCH=main" \
   "PRAXIS_PBGUARD_TEST_STATUS=$DIRTY_STATUS"
 
+# issue #513 결함1: substring "username.omc/plans/" must NOT be treated as a
+# planning artifact (no path-component boundary) → guard still denies.
+run_case "dirty+protected+substring-omc-plans-no-boundary → deny (issue #513 결함1)" deny \
+  Edit "$FAKE_ROOT/username.omc/plans/code.py" \
+  "PRAXIS_PBGUARD_TEST_REPO_ROOT=$FAKE_ROOT" \
+  "PRAXIS_PBGUARD_TEST_BRANCH=main" \
+  "PRAXIS_PBGUARD_TEST_STATUS=$DIRTY_STATUS"
+
+# issue #513 결함1 negative: a genuine repo-root-relative .omc/plans/ path
+# (leading component boundary present) still passes as a planning artifact.
+run_case "dirty+protected+root-relative-.omc/plans/ → pass (issue #513 결함1 negative)" pass \
+  Write "$FAKE_ROOT/.omc/plans/genuine-draft.md" \
+  "PRAXIS_PBGUARD_TEST_REPO_ROOT=$FAKE_ROOT" \
+  "PRAXIS_PBGUARD_TEST_BRANCH=main" \
+  "PRAXIS_PBGUARD_TEST_STATUS=$DIRTY_STATUS"
+
 # ---------------------------------------------------------------------------
 # PASS / DENY: gitignored paths (issue #493)
 # Gitignored files can never be committed/PR'd → worktree workflow N/A → skip.

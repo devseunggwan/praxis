@@ -127,6 +127,12 @@ touch "$EMPTY_CLAUDE2"                                # second empty config file
 EMPTY_CLAUDE_N="$TMPDIR_TEST/.claude/settings-n.json"
 touch "$EMPTY_CLAUDE_N"                               # config path with -n in filename
 
+# issue #513 결함3: empty settings.json under a NON-config dir (e.g. /tmp).
+# Must NOT be classified as a repo config path → hook stays silent.
+EMPTY_NONCONFIG_SETTINGS="$TMPDIR_TEST/sub/settings.json"
+mkdir -p "$TMPDIR_TEST/sub"
+touch "$EMPTY_NONCONFIG_SETTINGS"
+
 # ---------------------------------------------------------------------------
 # === Baseline: existing advisory paths still work ===
 # ---------------------------------------------------------------------------
@@ -419,6 +425,36 @@ fi
 run_case "empty command is silent" \
   "silent" \
   ""
+
+# ---------------------------------------------------------------------------
+# issue #513 결함3: settings.json path-anchor regression
+# ---------------------------------------------------------------------------
+
+# Positive: empty settings.json under a non-config dir must no longer misfire.
+run_case "empty settings.json under non-config dir is silent (issue #513 결함3)" \
+  "silent" \
+  "jq '.' $EMPTY_NONCONFIG_SETTINGS"
+
+# Negative: a bare repo-root settings.json (resolved from cwd) is still a config
+# path → empty file still emits [config-empty]. Run with cwd=TMPDIR so the bare
+# token resolves to the empty fixture created there.
+mkdir -p "$TMPDIR_TEST/root"
+touch "$TMPDIR_TEST/root/settings.json"
+bare_payload=$(python3 -c '
+import json
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":"jq . settings.json"},"session_id":"bare-513-case"}))
+')
+bare_err=$(mktemp)
+( cd "$TMPDIR_TEST/root" && echo "$bare_payload" | python3 "$HOOK" >/dev/null 2>"$bare_err" )
+bare_rc=$?
+bare_err_content=$(cat "$bare_err"); rm -f "$bare_err"
+if [ "$bare_rc" -eq 0 ] && printf '%s' "$bare_err_content" | grep -qF "[config-empty]"; then
+  echo "PASS  [bare repo-root settings.json still emits config-empty (issue #513 결함3 negative)]"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL  [bare repo-root settings.json still emits config-empty] rc=$bare_rc stderr=${bare_err_content:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("bare repo-root settings.json still emits config-empty (issue #513 결함3 negative)")
+fi
 
 # ---------------------------------------------------------------------------
 # Summary
