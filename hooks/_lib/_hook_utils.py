@@ -78,6 +78,14 @@ def safe_tokenize(command: str) -> list[str]:
     Lines that fail to parse (unmatched quote, runaway heredoc, etc.) are
     skipped — better a silent pass than a crashed hook.
 
+    A bash line continuation (a `\\` immediately followed by a newline) is
+    *not* a command separator — it splices the two physical lines into one
+    logical line. We rejoin those before the newline split so argv[0] on the
+    leading line is preserved. Without this, the dangling `\\` left on the
+    first line makes shlex raise ``ValueError: No escaped character`` and the
+    ``except ValueError`` arm below would silently drop the entire first line
+    (issue #510 — neutralised dozens of hooks).
+
     Caller note: a multi-line value inside a quoted flag (e.g.
     ``gh pr create --body "line1\\nline2"``) is split at the unescaped
     newline, separating ``--body`` from its value. In test payloads, use a
@@ -89,6 +97,12 @@ def safe_tokenize(command: str) -> list[str]:
         )
         gh pr create --body "$BODY"
     """
+    # Splice bash line continuations (`\` + newline) into one logical line so
+    # the leading line's argv[0] survives the per-line shlex pass below. A
+    # backslash that is itself escaped (`\\` then newline) is a literal
+    # backslash followed by a real newline separator, so only collapse an
+    # odd-length run of trailing backslashes.
+    command = re.sub(r"(?<!\\)((?:\\\\)*)\\\n", r"\1 ", command)
     lines = [ln for ln in command.split("\n") if ln.strip()]
     if not lines:
         return []

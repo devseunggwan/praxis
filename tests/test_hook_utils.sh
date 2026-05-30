@@ -339,6 +339,53 @@ run_roles_negative "post-DD \$(): \$() after -- must NOT be SUBST_RUN" \
   'kubectl exec pod -- $(echo --flag)'
 
 # ---------------------------------------------------------------------------
+# safe_tokenize — bash line-continuation handling (issue #510)
+# ---------------------------------------------------------------------------
+#
+# A `\` immediately before a newline is a bash line continuation, not a
+# command separator. It must be rejoined before the per-line shlex pass so
+# the leading line's argv[0] is preserved. Each case asserts the full token
+# list (Python repr) matches exactly.
+
+# run_tokens name "<expected python list repr>" <command-as-argv...>
+run_tokens() {
+  local name="$1" expected="$2"
+  shift 2
+  local actual
+  actual=$(python3 -c '
+import sys
+from _hook_utils import safe_tokenize
+print(safe_tokenize(sys.argv[1]))
+' "$1")
+  if [ "$actual" = "$expected" ]; then
+    echo "PASS [tokenize] $name"; PASS=$((PASS + 1))
+  else
+    echo "FAIL [tokenize] $name"
+    echo "  expected: $expected"
+    echo "  actual:   $actual"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# Issue #510 regression: `git \<newline>commit` must keep argv[0] ('git').
+run_tokens "line-continuation rejoins argv[0]" \
+  "['git', 'commit']" \
+  $'git \\\ncommit'
+
+run_tokens "line-continuation with trailing flags" \
+  "['git', 'commit', '-m', 'x']" \
+  $'git \\\ncommit -m x'
+
+run_tokens "multiple line continuations collapse" \
+  "['a', 'b', 'c']" \
+  $'a \\\nb \\\nc'
+
+# A genuine newline (no preceding backslash) is still a `;` separator.
+run_tokens "bare newline stays a separator" \
+  "['git', 'status', ';', 'git', 'log']" \
+  $'git status\ngit log'
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
