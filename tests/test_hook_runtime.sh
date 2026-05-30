@@ -90,10 +90,8 @@ assert_eq "allow (0) passed through"         "0"          "$(get allow)"
 assert_eq "BaseException propagates"         "PROPAGATED" "$(get base)"
 assert_eq "functools.wraps __wrapped__ set"  "yes"        "$(get wrapped)"
 
-# ---------------------------------------------------------------------------
-# Observability: fail-open is NOT fail-silent — a swallowed exception is
-# recorded to the JSONL error log, and a log-write failure still fails open.
-# ---------------------------------------------------------------------------
+# Observability: swallowed exception is recorded to the JSONL log; a failed
+# log write still fails open.
 TMP_LOG="$(mktemp -u "${TMPDIR:-/tmp}/praxis-hook-err-test-XXXXXX").jsonl"
 rc_logged=$(PRAXIS_HOOK_ERROR_LOG="$TMP_LOG" python3 - "$LIB" << 'PYEOF'
 import sys
@@ -115,8 +113,7 @@ else
 fi
 rm -f "$TMP_LOG"
 
-# Default placement (no PRAXIS_HOOK_ERROR_LOG): lands under ~/.praxis/logs via
-# _paths (PRAXIS_HOME points the home at a temp dir for the test).
+# Default placement (no PRAXIS_HOOK_ERROR_LOG): lands under <PRAXIS_HOME>/logs.
 TMP_HOME=$(mktemp -d)
 rc_default=$(env -u PRAXIS_HOOK_ERROR_LOG PRAXIS_HOME="$TMP_HOME" python3 - "$LIB" << 'PYEOF'
 import sys
@@ -150,11 +147,8 @@ PYEOF
 )
 assert_eq "unwritable error log still fails open -> 0" "0" "$rc_unwritable"
 
-# Unwritable log + stderr opt-in OFF must leak NOTHING to stderr. This guards
-# the logging-specific hazard: a handler-less logger would trigger
-# logging.lastResort (writes to stderr), and handleError would print a
-# traceback unless raiseExceptions is False. The NullHandler baseline +
-# raiseExceptions=False must keep stderr empty even when the FileHandler fails.
+# Unwritable log + stderr opt-in OFF must leak NOTHING to stderr (guards the
+# lastResort/handleError hazard; NullHandler + raiseExceptions=False).
 stderr_unwritable=$(env -u PRAXIS_HOOK_ERROR_STDERR PRAXIS_HOOK_ERROR_LOG="/proc/nonexistent-dir/err.jsonl" python3 - "$LIB" << 'PYEOF' 2>&1 1>/dev/null
 import sys
 sys.path.insert(0, sys.argv[1])

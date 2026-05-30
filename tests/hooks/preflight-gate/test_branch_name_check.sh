@@ -530,13 +530,8 @@ else
   FAILED_NAMES+=("bypass message: no '=1 =0' artifact")
   echo "  FAIL  bypass message: no '=1 =0' artifact"
 fi
-# ---------------------------------------------------------------------------
-# Fail-open: entrypoint wrapped by the shared @fail_open guard (issue #498)
-# ---------------------------------------------------------------------------
-# The blocking logic returns 2; _hook_runtime.fail_open turns any uncaught
-# exception into exit 0. The decorator's BEHAVIOR is tested centrally in
-# tests/test_hook_runtime.sh — here we assert only that THIS hook opted into
-# the guard (functools.wraps exposes __wrapped__ on a decorated main()).
+# Fail-open guard opt-in (issue #498): main() must be @fail_open-wrapped;
+# guard behavior is tested centrally in tests/test_hook_runtime.sh.
 _failopen_out=$(python3 - << PYEOF 2>&1
 import importlib.util
 spec = importlib.util.spec_from_file_location("impl", "$HOOK")
