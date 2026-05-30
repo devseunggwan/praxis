@@ -242,6 +242,30 @@ run_case "git_super_prefix_fused_force_push" \
   "" \
   "git --super-prefix=x push --force"
 
+# Issue #512: bundled short-flag clusters carrying `f` (=--force) must fire.
+# `_is_force_push` checked `bare in force_flags` exactly, so `-fu`/`-fv`/`-vf`
+# (where `f` is bundled with another short flag) bypassed the gate.
+run_case "git_push_bundled_fu_force" \
+  "advisory:feedback_force_history_rewrite_mutation" \
+  "" \
+  "git push origin main -fu"
+
+run_case "git_push_bundled_fv_force" \
+  "advisory:feedback_force_history_rewrite_mutation" \
+  "" \
+  "git push origin main -fv"
+
+run_case "git_push_bundled_vf_force" \
+  "advisory:feedback_force_history_rewrite_mutation" \
+  "" \
+  "git push origin main -vf"
+
+# Clean push with a bundled non-force cluster must stay silent.
+run_case "silent_git_push_bundled_no_force" \
+  "silent" \
+  "" \
+  "git push origin main -u"
+
 # --- dynamic memory loading negative cases (issue #359) ----------------------
 # Memory with no momentum: field must NOT surface on any trigger.
 negative_no_momentum_case() {

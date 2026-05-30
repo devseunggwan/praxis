@@ -84,6 +84,13 @@ COMMIT_FLAG_TOKENS: dict[str, str] = {
     "--gpg-sign": "-S (force signing)",
 }
 
+# git commit short options that take NO value — valid inner chars of a bundled
+# POSIX short cluster (e.g. -vn, -anm). Mirrors the sibling commit-title-*-check
+# helper of the same name. Excludes value-taking short opts (-S, -F, -C, -c, -t,
+# -u, -m), so a cluster ending in one of those is left to the per-token branches
+# below rather than being decomposed here.
+GIT_COMMIT_NO_VALUE_SHORT = frozenset("aesvnqzp")
+
 # Why each override is blocked (one line per distinct override).
 ENV_ISSUE_FOR: dict[str, str] = {
     "-n (short form of --no-verify)": (
@@ -103,6 +110,32 @@ ENV_ISSUE_FOR: dict[str, str] = {
         "(gpg --list-secret-keys) and the repo expects signing."
     ),
 }
+
+
+# git commit short options that take a value — when one appears inside a
+# cluster it consumes the remaining chars as its value, so decomposition stops
+# there (e.g. `-nm"msg"` is `-n -m "msg"`, but `-mn` is `-m "n"`).
+_GIT_COMMIT_VALUE_SHORT = frozenset("mFCctuS")
+
+
+def _cluster_has_no_verify(tok: str) -> bool:
+    """True iff a bundled short cluster (e.g. `-vn`, `-anm`) carries `-n`.
+
+    Walks the cluster char-by-char. A value-taking short option (e.g. `m`)
+    swallows the rest of the cluster as its argument, so scanning stops at the
+    first one. To avoid false positives on unrecognized clusters, every char
+    preceding the first value-taker must be a known value-less short option.
+    """
+    for ch in tok[1:]:
+        if ch == "n":
+            return True
+        if ch in _GIT_COMMIT_VALUE_SHORT:
+            # Value-taker consumes the remainder; no `-n` seen before it.
+            return False
+        if ch not in GIT_COMMIT_NO_VALUE_SHORT:
+            # Unknown short option — don't speculate about cluster semantics.
+            return False
+    return False
 
 
 def detect_overrides(argv: list[str]) -> list[str]:
@@ -171,6 +204,17 @@ def detect_overrides(argv: list[str]) -> list[str]:
         tok = argv[j]
         if tok in COMMIT_FLAG_TOKENS:
             overrides.append(COMMIT_FLAG_TOKENS[tok])
+        elif (
+            tok.startswith("-")
+            and not tok.startswith("--")
+            and len(tok) > 2
+            and _cluster_has_no_verify(tok)
+        ):
+            # Bundled POSIX short cluster carrying `n` (=`--no-verify`), e.g.
+            # `-vn`, `-nv`, `-anm`, `-nm`. Decompose the cluster into individual
+            # short options; the exact-match branch above only sees standalone
+            # `-n`, so without this the bundled forms slip through (#512).
+            overrides.append(COMMIT_FLAG_TOKENS["-n"])
         elif tok.startswith("-S") and len(tok) > 2:
             # `-S<keyid>` (signing with explicit keyid, no space).
             overrides.append("-S (force signing)")
