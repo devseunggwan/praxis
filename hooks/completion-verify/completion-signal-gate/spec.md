@@ -70,6 +70,19 @@ no evidence-block indicator is present in the same turn, an advisory is emitted.
 | `결함 없음` | "결함 없음." |
 | `이상 없음` | "이상 없음." |
 
+**Negation / progressive guard (issue #515):** a completion phrase under
+negation or in a not-yet-complete status form does NOT count as a completion
+signal — the assistant is reporting incompletion, not claiming done. English
+matches are disqualified when a negation token (`not `, `n't `, `no `,
+`never `, `without `, `isn't`, `won't`, `can't`, `cannot`, …) appears in the
+24 chars preceding the phrase ("not done yet", "this is not complete", "not
+ready to merge"); progressive `-ing` forms are already excluded by the
+ASCII word-boundary lookarounds ("completing" ≠ "complete"). Korean matches
+are disqualified when a negation form trails the token within 12 chars
+(`되지 않`, `지 않`, `안 됨`, `안 돼`, `안 된`, `못 …`) or when `아직` precedes
+it — so `완료되지 않았습니다`, `완료 안 됨`, `아직 완료 전입니다`, and
+`완료하지 못했습니다` no longer trigger the advisory.
+
 **Evidence-block indicators (any of these suppresses the advisory):**
 
 | Indicator | What counts |

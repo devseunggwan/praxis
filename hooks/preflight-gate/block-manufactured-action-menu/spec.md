@@ -83,10 +83,16 @@ retrieval state.
 - `as directed`
 - `as requested`
 
-All matches are case-insensitive substring checks against the option label.
-Affirmative-form phrases are deliberately multi-word and execute-verb-anchored
-so they do not collide with "leave as-is" labels (`그대로 둬`, `keep as-is`)
-or genuine alternative-path labels.
+Marker matching is case-insensitive. Korean markers use substring matching
+(CJK has no ASCII word boundary and the inflected verb forms have low
+collision risk). English markers use ASCII-letter lookaround (issue #515):
+`proceed` / `continue` / `go ahead` and the affirmative-form phrases match
+only on a word boundary, so a genuine alternative-path label such as
+`Discontinue support for v1` is no longer swept up by the `continue`
+substring while `proceed?` / `proceed 합니다` still match. Affirmative-form
+phrases are additionally multi-word and execute-verb-anchored so they do
+not collide with "leave as-is" labels (`그대로 둬`, `keep as-is`) or genuine
+alternative-path labels.
 
 ### Command-intent signals (user message)
 
@@ -153,10 +159,14 @@ phrasings like `진행 상황 알려줘` or `where should we go from here?`
 do not register as command-intent and therefore never reach the
 manufactured-marker check. Negated directives (`don't proceed yet`,
 `do not continue`, `진행하지 마`, `계속하지 말아줘`) are also rejected:
-Korean tokens require the following 12 chars to not contain
-`하지 마` / `하지 말`, and English tokens require the preceding 30
-chars to not contain a negation marker (`don't`, `do not`, `won't`,
-`will not`, `cannot`, `should not`, `never`, ` not `, ...).
+Korean tokens require the following 16 chars to not contain a negation
+form, and English tokens require the preceding 30 chars to not contain a
+negation marker (`don't`, `do not`, `won't`, `will not`, `cannot`,
+`should not`, `never`, ` not `, ...). The Korean negation set (issue #515)
+covers three shapes — prohibitive `하지 마` / `하지 말`, conditional
+`하면 안`, and declarative `하지 않` / `안 됩니다` / `안 돼` / `안 된다` — so
+`진행하면 안 됩니다`, `진행하지 않습니다`, and `진행 안 됩니다` are no longer
+misread as command-intent.
 
 The Korean command-signal list also includes `계속` so that
 continuation messages like `계속해` / `계속 진행` correctly pair with

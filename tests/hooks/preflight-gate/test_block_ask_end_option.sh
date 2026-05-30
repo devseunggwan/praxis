@@ -508,6 +508,56 @@ P_fp5=$(build_payload "$T_fp5" '["보류 중인 이슈 확인", "보류 상태 �
 run_case "[false-pos] '보류 중인 이슈 확인' / '보류 상태 검토' → pass" pass default "$P_fp5"
 
 # ---------------------------------------------------------------------------
+# (o) Defect 1 (issue #515) — ambiguous stop phrase + action verb is NOT a
+#     stop signal. "I'm done with the analysis, proceed to implementation"
+#     must NOT false-allow the end-option surface; the end-option block must
+#     still fire. The genuine termination form of the same phrase still
+#     short-circuits to pass.
+# ---------------------------------------------------------------------------
+
+# Action-directive readings — ambiguous phrase followed by an action verb →
+# NOT a stop signal → end-option block must still fire.
+T_d1a=$(build_transcript "I'm done with the analysis, proceed to implementation")
+P_d1a=$(build_payload "$T_d1a" '["Plan A", "End here"]')
+run_case "[#515-d1] \"I'm done ..., proceed\" is NOT a stop signal → block" block default "$P_d1a"
+
+T_d1b=$(build_transcript "wrap up the PR tests and deploy")
+P_d1b=$(build_payload "$T_d1b" '["Plan A", "End here"]')
+run_case "[#515-d1] 'wrap up the PR tests and deploy' is NOT a stop → block" block default "$P_d1b"
+
+T_d1c=$(build_transcript "we're done with phase 1, continue to phase 2")
+P_d1c=$(build_payload "$T_d1c" '["Plan A", "End here"]')
+run_case "[#515-d1] \"we're done ..., continue\" is NOT a stop → block" block default "$P_d1c"
+
+T_d1d=$(build_transcript "finish up the migration then run the suite")
+P_d1d=$(build_payload "$T_d1d" '["Plan A", "End here"]')
+run_case "[#515-d1] 'finish up ... then run' is NOT a stop → block" block default "$P_d1d"
+
+T_d1e=$(build_transcript "no more discussion, implement the fix")
+P_d1e=$(build_payload "$T_d1e" '["Plan A", "End here"]')
+run_case "[#515-d1] 'no more discussion, implement' is NOT a stop → block" block default "$P_d1e"
+
+# Genuine termination forms of the SAME ambiguous phrases must still pass —
+# no trailing action verb, so the stop signal stands.
+T_d1f=$(build_transcript "let's wrap up for today")
+P_d1f=$(build_payload "$T_d1f" '["Plan A", "End here"]')
+run_case "[#515-d1+] 'wrap up for today' (genuine stop) → pass" pass default "$P_d1f"
+
+T_d1g=$(build_transcript "we're done for now")
+P_d1g=$(build_payload "$T_d1g" '["Plan A", "End here"]')
+run_case "[#515-d1+] \"we're done for now\" (genuine stop) → pass" pass default "$P_d1g"
+
+T_d1h=$(build_transcript "no more changes, thanks")
+P_d1h=$(build_payload "$T_d1h" '["Plan A", "End here"]')
+run_case "[#515-d1+] 'no more changes, thanks' (genuine stop) → pass" pass default "$P_d1h"
+
+# Termination-specific phrases stay unconditional even when an action verb
+# trails — "stop here" / "that's all" are not in the ambiguous set.
+T_d1i=$(build_transcript "stop here, proceed only tomorrow")
+P_d1i=$(build_payload "$T_d1i" '["Plan A", "End here"]')
+run_case "[#515-d1+] 'stop here' stays a stop signal even before a verb → pass" pass default "$P_d1i"
+
+# ---------------------------------------------------------------------------
 # Summary
 # Fail-open guard opt-in (issue #498): main() must be @fail_open-wrapped;
 # guard behavior is tested centrally in tests/test_hook_runtime.sh.

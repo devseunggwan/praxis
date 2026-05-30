@@ -141,6 +141,37 @@ NEGATION_PATTERNS_EN = (
 )
 NEGATION_WINDOW = 30  # characters preceding the phrase match
 
+# Ambiguous phrases that read as stop signals in isolation but are routinely
+# used as action directives when followed by an object + action verb, e.g.
+# "I'm done with the analysis, proceed to implementation" or "wrap up the PR
+# tests and deploy". For these, a stop match is disqualified when an action
+# verb follows the phrase within ACTION_FOLLOWUP_WINDOW characters — the
+# message is directing further work, not requesting termination.
+#
+# Termination-specific phrases ("stop here", "end the session", "session
+# end", "that's all", "quit now", "cancel this") are deliberately NOT listed
+# here: they resist the action-directive reading and stay unconditional stop
+# signals.
+AMBIGUOUS_STOP_PHRASES_EN = (
+    "wrap up", "wrap this up",
+    "finish up",
+    "no more",
+    "we're done", "we are done", "i'm done", "i am done",
+)
+# Action verbs that, when they appear shortly after an ambiguous stop phrase,
+# reveal the message as a directive to continue working rather than to stop.
+# Matched as whole words to avoid substring false positives ("running" should
+# not count, but a directive "run the tests" should). Multi-word entries
+# ("go ahead", "move on") are matched as phrases.
+ACTION_VERBS_EN = (
+    "proceed", "continue", "implement", "deploy", "merge", "push",
+    "run", "execute", "review", "test", "build", "create", "start",
+    "move on", "go ahead", "commit", "ship", "release", "fix", "add",
+    "update", "write", "refactor", "investigate", "analyze", "check",
+)
+# Characters after an ambiguous phrase to scan for an action verb.
+ACTION_FOLLOWUP_WINDOW = 80
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -303,6 +334,7 @@ def _has_stop_signal(user_message: str) -> bool:
     # English: phrase match with negation guard.
     for phrase in STOP_SIGNALS_EN_PHRASES:
         phrase_lower = phrase.lower()
+        ambiguous = phrase_lower in AMBIGUOUS_STOP_PHRASES_EN
         start = 0
         while True:
             idx = lower.find(phrase_lower, start)
@@ -310,7 +342,17 @@ def _has_stop_signal(user_message: str) -> bool:
                 break
             prefix = lower[max(0, idx - NEGATION_WINDOW):idx]
             if not _has_negation(prefix):
-                return True
+                # Ambiguous phrases are NOT a stop signal when an action verb
+                # follows them ("I'm done with the analysis, proceed ...",
+                # "wrap up the PR tests and deploy") — the user is directing
+                # further work, not asking to terminate.
+                if ambiguous:
+                    suffix = lower[idx + len(phrase_lower):
+                                   idx + len(phrase_lower) + ACTION_FOLLOWUP_WINDOW]
+                    if not _has_action_verb(suffix):
+                        return True
+                else:
+                    return True
             start = idx + 1
 
     return False
@@ -325,6 +367,27 @@ def _has_negation(prefix: str) -> bool:
     negation.
     """
     return any(neg in prefix for neg in NEGATION_PATTERNS_EN)
+
+
+def _has_action_verb(suffix: str) -> bool:
+    """True if the window following an ambiguous stop phrase contains an
+    action verb — i.e. the message is directing further work.
+
+    Single-word verbs are matched as whole words (ASCII lookaround, not
+    Python `\\b`, mirroring the boundary strategy used elsewhere in the
+    suite) so "run the tests" counts but "running smoothly" does not.
+    Multi-word verb phrases ("go ahead", "move on") are matched as
+    substrings since their internal spaces already anchor them.
+    """
+    import re
+    for verb in ACTION_VERBS_EN:
+        if " " in verb:
+            if verb in suffix:
+                return True
+        else:
+            if re.search(r"(?<![a-z])" + re.escape(verb) + r"(?![a-z])", suffix):
+                return True
+    return False
 
 
 # ---------------------------------------------------------------------------

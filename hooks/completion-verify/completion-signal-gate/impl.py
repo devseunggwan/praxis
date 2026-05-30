@@ -73,15 +73,92 @@ _COMPLETION_KO_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"이상\s*없음"),
 ]
 
+# Negation / progressive markers that flip a completion phrase into a
+# NOT-yet-complete statement. Without these, "not done yet", "this isn't
+# complete", "not ready to merge", "still completing", "완료되지 않았습니다",
+# "완료 안 됨" false-trigger the advisory (negation/status-form rule).
+#
+# English: a negation token in the window immediately BEFORE the matched
+# completion phrase ("not done", "isn't complete", "won't be ready to
+# merge"). Progressive "-ing" forms are already excluded by the ASCII
+# word-boundary lookarounds in _COMPLETION_EN_PATTERNS ("completing" does
+# not match "complete"), so only the preceding-negation case needs a guard.
+_NEGATION_WINDOW_EN = 24  # chars preceding the matched completion phrase
+_NEGATION_MARKERS_EN = (
+    "not ",
+    "n't ",
+    "no ",
+    "never ",
+    "without ",
+    "yet to ",
+    "isn't",
+    "aren't",
+    "won't",
+    "can't",
+    "cannot",
+    "wasn't",
+)
+
+# Korean: a negation form FOLLOWING the completion token within a small
+# window ("완료되지 않", "완료 안", "완료 못", "완료 안 됨", "완료 안됐").
+_NEGATION_WINDOW_KO = 12  # chars following the matched completion token
+_NEGATION_MARKERS_KO = (
+    "되지 않",
+    "되지않",
+    "지 않",
+    "지않",
+    "안 됨",
+    "안됨",
+    "안 됐",
+    "안됐",
+    "안 된",
+    "안된",
+    "못 ",
+    "못함",
+    "못했",
+    "아직",
+)
+
+
+def _is_negated_en(text: str, start: int) -> bool:
+    """True if an English completion match at `start` is under negation.
+
+    Scans the window immediately preceding the match for a negation token.
+    """
+    prefix = text[max(0, start - _NEGATION_WINDOW_EN):start].lower()
+    return any(neg in prefix for neg in _NEGATION_MARKERS_EN)
+
+
+def _is_negated_ko(text: str, end: int) -> bool:
+    """True if a Korean completion match ending at `end` is negated.
+
+    Korean negation trails the verb ("완료되지 않았다", "완료 안 됨"), so the
+    window FOLLOWING the match is scanned. "아직" (still / not yet) is also
+    treated as a negation cue for progressive non-completion.
+    """
+    suffix = text[end:end + _NEGATION_WINDOW_KO]
+    if any(neg in suffix for neg in _NEGATION_MARKERS_KO):
+        return True
+    # "아직 완료 전" — progressive "not yet" cue can also precede the token.
+    prefix = text[max(0, end - 24):end]
+    return "아직" in prefix
+
 
 def _has_completion_signal(text: str) -> bool:
-    """True if text contains a completion-signal phrase."""
+    """True if text contains a completion-signal phrase that is NOT negated.
+
+    A completion phrase under negation or in a not-yet-complete status form
+    ("not done yet", "isn't complete", "완료되지 않았습니다", "완료 안 됨") does
+    NOT count — the assistant is reporting incompletion, not claiming done.
+    """
     for pat in _COMPLETION_EN_PATTERNS:
-        if pat.search(text):
-            return True
+        for m in pat.finditer(text):
+            if not _is_negated_en(text, m.start()):
+                return True
     for pat in _COMPLETION_KO_PATTERNS:
-        if pat.search(text):
-            return True
+        for m in pat.finditer(text):
+            if not _is_negated_ko(text, m.end()):
+                return True
     return False
 
 

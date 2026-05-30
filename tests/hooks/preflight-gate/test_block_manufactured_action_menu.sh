@@ -539,6 +539,79 @@ P_ef7=$(build_payload "$T_ef7" '["revise", "as instructed"]')
 run_case "[execute-family] 'the run failed' (non-directive) + marker → pass" pass default "$P_ef7"
 
 # ---------------------------------------------------------------------------
+# (l) Defect 2 (issue #515) — extended Korean negation forms. Before the
+#     fix only "하지 마/말" was handled, so "진행하면 안 됩니다" / "진행하지
+#     않습니다" / "진행 안 됩니다" were misread as command-intent → false
+#     advisory. These negated directives must NOT register as command-intent.
+# ---------------------------------------------------------------------------
+
+T_d2a=$(build_transcript "진행하면 안 됩니다")
+P_d2a=$(build_payload "$T_d2a" '["Plan A", "진행할까요"]')
+run_case "[#515-d2] '진행하면 안 됩니다' (conditional negation) → pass" pass default "$P_d2a"
+
+T_d2b=$(build_transcript "진행하지 않습니다")
+P_d2b=$(build_payload "$T_d2b" '["Plan A", "진행할까요"]')
+run_case "[#515-d2] '진행하지 않습니다' (declarative negation) → pass" pass default "$P_d2b"
+
+T_d2c=$(build_transcript "진행 안 됩니다")
+P_d2c=$(build_payload "$T_d2c" '["Plan A", "진행할까요"]')
+run_case "[#515-d2] '진행 안 됩니다' (안 됩니다 negation) → pass" pass default "$P_d2c"
+
+T_d2d=$(build_transcript "계속하면 안 돼")
+P_d2d=$(build_payload "$T_d2d" '["Plan A", "계속할까요"]')
+run_case "[#515-d2] '계속하면 안 돼' (안 돼 negation) → pass" pass default "$P_d2d"
+
+T_d2e=$(build_transcript "머지하지 않습니다")
+P_d2e=$(build_payload "$T_d2e" '["Plan A", "진행할까요"]')
+run_case "[#515-d2] '머지하지 않습니다' (declarative negation) → pass" pass default "$P_d2e"
+
+# Genuine positive directive must STILL advisory (negation guard didn't
+# swallow legitimate command-intent).
+T_d2f=$(build_transcript "진행하면 됩니다")
+P_d2f=$(build_payload "$T_d2f" '["Plan A", "진행할까요"]')
+run_case "[#515-d2+] '진행하면 됩니다' (affirmative) → advisory" advisory default "$P_d2f"
+
+# Strict-mode variant of the negation guard.
+T_d2g=$(build_transcript "진행하면 안 됩니다")
+P_d2g=$(build_payload "$T_d2g" '["Plan A", "진행할까요"]')
+run_case "[#515-d2] strict + '진행하면 안 됩니다' → pass" pass strict "$P_d2g"
+
+# ---------------------------------------------------------------------------
+# (m) Defect 2 (issue #515) — English marker word-boundary. Before the fix,
+#     markers "proceed" / "continue" / "as requested" substring-matched
+#     genuine alternative-path labels ("Discontinue support") → false
+#     advisory. Word-boundary matching rejects the substring case while
+#     still matching real markers.
+# ---------------------------------------------------------------------------
+
+# "Discontinue support" contains "continue" as a substring only — NOT a
+# manufactured marker. No marker → pass regardless of command signal.
+T_d2h=$(build_transcript "go ahead")
+P_d2h=$(build_payload "$T_d2h" '["Discontinue support for v1", "Keep v1"]')
+run_case "[#515-d2] 'Discontinue support' is NOT a 'continue' marker → pass" pass default "$P_d2h"
+
+# "unprocessed" embeds "proceed"-ish letters but not the token; sanity check
+# that an alternative label naming a real noun does not false-match.
+T_d2i=$(build_transcript "proceed")
+P_d2i=$(build_payload "$T_d2i" '["Reprocess the queue", "Skip the queue"]')
+run_case "[#515-d2] 'Reprocess'/'process' label is NOT a 'proceed' marker → pass" pass default "$P_d2i"
+
+# Genuine English markers must STILL match (word-boundary positive).
+T_d2j=$(build_transcript "go ahead and implement it")
+P_d2j=$(build_payload "$T_d2j" '["Step 1", "proceed"]')
+run_case "[#515-d2+] standalone 'proceed' marker still matches → advisory" advisory default "$P_d2j"
+
+T_d2k=$(build_transcript "continue please")
+P_d2k=$(build_payload "$T_d2k" '["Step A", "continue"]')
+run_case "[#515-d2+] standalone 'continue' marker still matches → advisory" advisory default "$P_d2k"
+
+# Mixed-script label — "proceed" followed by Korean must still match
+# (lookaround rejects only an ASCII-letter neighbour).
+T_d2l=$(build_transcript "진행해주세요")
+P_d2l=$(build_payload "$T_d2l" '["다른 방식", "proceed 합니다"]')
+run_case "[#515-d2+] mixed-script 'proceed 합니다' marker still matches → advisory" advisory default "$P_d2l"
+
+# ---------------------------------------------------------------------------
 # Summary
 # Fail-open guard opt-in (issue #498): main() must be @fail_open-wrapped;
 # guard behavior is tested centrally in tests/test_hook_runtime.sh.

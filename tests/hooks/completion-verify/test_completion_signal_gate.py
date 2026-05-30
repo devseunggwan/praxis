@@ -568,3 +568,86 @@ def test_has_evidence_block(
     last_text: str, has_bash: bool, has_read: bool, expected: bool
 ) -> None:
     assert csg._has_evidence_block(last_text, has_bash, has_read) == expected
+
+
+# ---------------------------------------------------------------------------
+# Defect 3 (issue #515) — negation / progressive completion phrasing must NOT
+# count as a completion signal (negation/status-form rule).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # English negated / not-yet forms
+        "not done yet",
+        "this is not complete",
+        "not ready to merge",
+        "it isn't done",
+        "the migration is not done",
+        "still completing the work",  # progressive: "completing" != "complete"
+        "we are not all set",
+        # Korean negated / not-yet forms
+        "완료되지 않았습니다",
+        "완료 안 됨",
+        "아직 완료 전입니다",
+        "완료하지 못했습니다",
+        "완료 안 됐어요",
+    ],
+)
+def test_negated_completion_not_signal(text: str) -> None:
+    """Negated/progressive completion phrasing → _has_completion_signal False."""
+    assert csg._has_completion_signal(text) is False, (
+        f"negated phrase {text!r} must NOT count as a completion signal"
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Genuine (un-negated) completion forms must still register.
+        "done",
+        "the implementation is complete",
+        "ready to merge",
+        "no fixes needed",
+        "all set",
+        "완료",
+        "실질적 수정은 없습니다",
+        "결함 없음",
+        "이상 없음",
+        "머지하셔도 됩니다",
+    ],
+)
+def test_genuine_completion_still_signal(text: str) -> None:
+    """Genuine completion phrasing must still register after negation guard."""
+    assert csg._has_completion_signal(text) is True, (
+        f"genuine completion {text!r} must still count as a completion signal"
+    )
+
+
+def test_negated_completion_no_advisory_end_to_end(tmp_path: Path) -> None:
+    """End-to-end: a negated completion last turn → no Rule 1 advisory."""
+    events = [
+        mk_user("작업 상태 보고"),
+        mk_assistant("아직 작업이 완료되지 않았습니다. 다음 단계가 남아 있습니다."),
+    ]
+    tp = write_jsonl(events, tmp_path)
+    _, stderr, rc = run_hook(tp)
+    assert rc == 0
+    assert "[praxis:completion-signal-gate]" not in stderr, (
+        f"negated completion must not trigger Rule 1 advisory; stderr={stderr!r}"
+    )
+
+
+def test_negated_completion_en_no_advisory_end_to_end(tmp_path: Path) -> None:
+    """End-to-end (EN): 'not done yet' last turn → no Rule 1 advisory."""
+    events = [
+        mk_user("status?"),
+        mk_assistant("The refactor is not done yet — two modules remain."),
+    ]
+    tp = write_jsonl(events, tmp_path)
+    _, stderr, rc = run_hook(tp)
+    assert rc == 0
+    assert "[praxis:completion-signal-gate]" not in stderr, (
+        f"negated EN completion must not trigger advisory; stderr={stderr!r}"
+    )
