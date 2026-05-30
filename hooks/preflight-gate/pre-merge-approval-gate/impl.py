@@ -40,6 +40,7 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    _is_gh_binary,
     compound_cascade_hint,
     iter_command_starts,
     safe_tokenize,
@@ -80,7 +81,7 @@ def is_gh_pr_merge(argv: list[str]) -> bool:
     `gh -R owner/repo pr merge` is detected correctly.
     """
     argv = strip_prefix(argv)
-    if not argv or argv[0] != "gh":
+    if not argv or not _is_gh_binary(argv[0]):
         return False
 
     # Walk past any global flags (and their arguments) to find the subcommand.

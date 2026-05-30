@@ -51,6 +51,7 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_utils import (  # type: ignore[import-not-found]
+    _is_gh_binary,
     compound_cascade_hint,
     iter_command_starts,
     safe_tokenize,
@@ -189,7 +190,7 @@ def _get_effective_body(argv: list[str], hmap: dict[str, str], command: str) -> 
 def _is_pr_create(argv: list[str]) -> bool:
     """True if argv is `gh pr create/new` (not --help)."""
     argv = strip_prefix(argv)
-    if not argv or argv[0] != "gh":
+    if not argv or not _is_gh_binary(argv[0]):
         return False
     if any(t in ("--help", "-h") or t.startswith(("--help=", "-h="))
            for t in argv):

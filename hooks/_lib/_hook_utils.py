@@ -45,7 +45,15 @@ SHELL_KEYWORDS = {
 # dictionaries list *only* flags that take a separate-token argument so that
 # `sudo --user admin kubectl ...` peels both `--user` and `admin`. Bare flags
 # (with no arg) and `--long=value` forms are handled generically below.
-PREFIX_WRAPPERS = {"env", "sudo", "nice", "time", "stdbuf", "ionice"}
+#
+# `command` / `builtin` are bash shell wrappers that run the following word as
+# a command (`command gh pr merge` executes `gh pr merge`). Without peeling
+# them, an `argv[0] == "gh"` gate is silently bypassed via `command gh ...`.
+# Their flags (`-p`, `-v`, `-V`) take no separate-token argument, so the
+# generic bare-flag peel below handles them.
+PREFIX_WRAPPERS = {
+    "env", "sudo", "nice", "time", "stdbuf", "ionice", "command", "builtin",
+}
 WRAPPER_OPTS_WITH_ARG = {
     "env": {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"},
     "sudo": {
@@ -153,6 +161,29 @@ def strip_prefix(argv: list[str]) -> list[str]:
             continue
         break
     return argv[i:]
+
+
+def _is_gh_binary(token: str) -> bool:
+    """True iff `token` names the GitHub CLI binary `gh`.
+
+    Symmetric with `_is_git_binary` in the commit-gate hooks: accepts the bare
+    name (`gh`) and any path-prefixed form (`/usr/bin/gh`, `./gh`). gh-based
+    PreToolUse gates previously compared `argv[0] == "gh"` exactly, which a
+    path prefix (`/usr/bin/gh pr merge`) bypassed silently. Strip a leading run
+    of shell grouping / command-substitution chars first so a subshell-wrapped
+    form (`(gh …)`, `$(gh …)`) normalizes too — matching the `_is_git_binary`
+    pattern.
+    """
+    stripped = token.lstrip(_GROUP_PREFIX_CHARS)
+    return stripped == "gh" or stripped.endswith("/gh")
+
+
+# Shell grouping / command-substitution chars that may prefix a binary token
+# when it sits inside a subshell or substitution (`(gh …)`, `$(gh …)`,
+# `` `gh …` ``). Stripped before the basename comparison so the binary-name
+# check is not fooled by the wrapper syntax. Mirrors the same constant in the
+# commit-gate hooks' `_is_git_binary`.
+_GROUP_PREFIX_CHARS = "(){}$`"
 
 
 def iter_command_starts(tokens: list[str]):
