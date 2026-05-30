@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # GitHub Actions — keep workflow action versions current with security
+  # and feature updates. This is the only tracked ecosystem: the project
+  # is a Bash/Python skills framework with no package manifests (Python
+  # code uses only the standard library; pytest is installed inline in CI).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+      - "github-actions"
