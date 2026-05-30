@@ -133,6 +133,20 @@ EOF
   esac
   [ -f "$d/gh" ] && chmod +x "$d/gh"
 
+  # For the gh-absent scenario the hook runs under a PATH restricted to this
+  # dir alone (see run_case), so the binaries resolved by name via
+  # `#!/usr/bin/env <x>` — python3 for the hook itself, bash for the git shim —
+  # must live here too. Directory-exclusion PATH tricks (dropping /usr/bin) are
+  # unreliable: on usrmerge distros /bin is a symlink to /usr/bin and would
+  # re-expose the ambient gh that CI ubuntu installs at /usr/bin/gh.
+  if [ "$scenario" = "no-gh" ]; then
+    # Symlink the REAL python3 (sys.executable), not `command -v python3`: the
+    # latter may be a pyenv/asdf shim (`#!/usr/bin/env bash`) that cannot launch
+    # under the restricted PATH and fails with "env: bash: No such file".
+    ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "$d/python3"
+    ln -sf "$(command -v bash)" "$d/bash"
+  fi
+
   echo "$d"
 }
 
@@ -156,7 +170,18 @@ print(json.dumps({
     "tool_input": {"command": sys.argv[2]},
 }))' "$tool_name" "$command")
   err_file=$(mktemp)
-  echo "$payload" | env PATH="$fake_bin:/usr/bin:/bin" "$HOOK" >/dev/null 2>"$err_file"
+  # gh-absent scenario: restrict PATH to the curated fake-bin (python3 + bash +
+  # git shim, no gh) so `shutil.which("gh")` in the hook returns None and the
+  # fail-open path fires. Other scenarios keep the ambient /usr/bin:/bin.
+  # Prepend the fake-bin shims (they shadow the ambient gh/git) but inherit the
+  # rest of PATH so python3 stays resolvable wherever it lives — do not hardcode
+  # /usr/bin. The no-gh scenario is the exception: it restricts PATH to the
+  # curated fake-bin alone so the ambient gh cannot leak back in.
+  local hook_path="$fake_bin:$PATH"
+  if [ "$scenario" = "no-gh" ]; then
+    hook_path="$fake_bin"
+  fi
+  echo "$payload" | env PATH="$hook_path" "$HOOK" >/dev/null 2>"$err_file"
   rc=$?
   local err_content
   err_content=$(cat "$err_file"); rm -f "$err_file"
@@ -306,7 +331,9 @@ run_case "chained command, gh part dedup-checked" pass Bash \
 # ---------------------------------------------------------------------------
 
 bad_json_err=$(mktemp)
-printf 'not-json\n' | env PATH="/usr/bin:/bin" "$HOOK" >/dev/null 2>"$bad_json_err"
+# Inherit PATH (don't hardcode /usr/bin) so python3 resolves wherever it lives;
+# this case fails open on malformed stdin before any gh lookup, so no shim needed.
+printf 'not-json\n' | "$HOOK" >/dev/null 2>"$bad_json_err"
 bad_rc=$?
 if [ "$bad_rc" -eq 0 ]; then
   echo "PASS [pass] malformed stdin fails open"; ((PASS++))

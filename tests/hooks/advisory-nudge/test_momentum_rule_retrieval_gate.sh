@@ -281,7 +281,17 @@ empty_memory_dir_case() {
   if [ "$rc" -eq 0 ] && [[ "$err" == *"Pre-Merge Reporting"* ]] && [[ "$err" != *"Memory:"* ]]; then
     echo "PASS  [$name]"; PASS=$((PASS + 1))
   else
-    echo "FAIL  [$name] rc=$rc static-rule-emitted=$([[ \"$err\" == *\"Pre-Merge Reporting\"* ]] && echo yes || echo no) memory-cite=$([[ \"$err\" == *\"Memory:\"* ]] && echo yes || echo no)"
+    # Diagnostics computed into vars first — a nested $([[ ... ]] ...) inside a
+    # double-quoted echo trips the conditional-expression parser on both bashes,
+    # but with different blast radius: on bash 5.x it is a parse-time error that
+    # fails `bash -n`, aborting the whole test file on CI; on bash 3.2 it errors
+    # only at command-substitution runtime inside this FAIL branch, corrupting
+    # the diagnostic line but not the verdict — which is why the suite passed
+    # locally and the breakage surfaced only on Linux CI.
+    local _static_emitted _memory_cite
+    [[ "$err" == *"Pre-Merge Reporting"* ]] && _static_emitted=yes || _static_emitted=no
+    [[ "$err" == *"Memory:"* ]] && _memory_cite=yes || _memory_cite=no
+    echo "FAIL  [$name] rc=$rc static-rule-emitted=$_static_emitted memory-cite=$_memory_cite"
     FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
   fi
 }
@@ -307,7 +317,12 @@ empty_memory_dir_force_push_case() {
   if [ "$rc" -eq 0 ] && [[ "$err" == *"History rewrite is a mutation"* ]] && [[ "$err" != *"Memory:"* ]]; then
     echo "PASS  [$name]"; PASS=$((PASS + 1))
   else
-    echo "FAIL  [$name] rc=$rc actionable-emitted=$([[ \"$err\" == *\"History rewrite is a mutation\"* ]] && echo yes || echo no) memory-cite=$([[ \"$err\" == *\"Memory:\"* ]] && echo yes || echo no)"
+    # See note at the sibling diagnostic above: nested $([[ ... ]] ...) inside a
+    # double-quoted echo is a bash-5.x syntax error; compute into vars first.
+    local _actionable_emitted _memory_cite
+    [[ "$err" == *"History rewrite is a mutation"* ]] && _actionable_emitted=yes || _actionable_emitted=no
+    [[ "$err" == *"Memory:"* ]] && _memory_cite=yes || _memory_cite=no
+    echo "FAIL  [$name] rc=$rc actionable-emitted=$_actionable_emitted memory-cite=$_memory_cite"
     FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
   fi
 }
