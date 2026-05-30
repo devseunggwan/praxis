@@ -55,6 +55,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -257,6 +258,7 @@ def _emit_block(file_path: str, branch: str, repo_root: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+@fail_open
 def main() -> int:
     # Bypass env var — set to any non-empty value
     if os.environ.get("PRAXIS_HOOK_BYPASS_WORKTREE_GATE", "").strip():

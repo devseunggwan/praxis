@@ -303,6 +303,27 @@ run_case "T34: gh -R owner/repo --hostname x issue list (valid+invalid global fl
 run_case "T35: gh -R owner/repo issue list (known global flag, silent)" \
   "silent" \
   '{"tool_name":"Bash","tool_input":{"command":"gh -R owner/repo issue list"}}'
+# Fail-open guard opt-in (issue #498): main() must be @fail_open-wrapped;
+# guard behavior is tested centrally in tests/test_hook_runtime.sh.
+_failopen_out=$(python3 - << PYEOF 2>&1
+import importlib.util
+spec = importlib.util.spec_from_file_location("impl", "$HOOK")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+assert getattr(mod.main, "__wrapped__", None) is not None, "main is not @fail_open-wrapped"
+print("OK")
+PYEOF
+)
+_failopen_rc=$?
+if [ "$_failopen_rc" -eq 0 ] && [ "$_failopen_out" = "OK" ]; then
+  echo "PASS  [fail-open] main() is wrapped by the shared @fail_open guard"
+  PASS=$((PASS+1))
+else
+  echo "FAIL  [fail-open] main() not @fail_open-wrapped (rc=$_failopen_rc out=$_failopen_out)"
+  FAIL=$((FAIL+1)); FAILED_NAMES+=("fail-open guard wrapping")
+fi
+
+
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
