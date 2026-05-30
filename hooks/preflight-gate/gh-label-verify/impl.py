@@ -88,7 +88,7 @@ _REPO_URL_RE = re.compile(r"[:/]([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
 # ---------------------------------------------------------------------------
 
 
-def main() -> int:
+def _main_inner() -> int:
     try:
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
@@ -115,6 +115,14 @@ def main() -> int:
         if rc != 0:
             return rc
     return 0
+
+
+def main() -> int:
+    """Preflight gate — fail-open on uncaught exception."""
+    try:
+        return _main_inner()
+    except Exception:
+        return 0
 
 
 def _process_segment(argv: list[str], cwd: str) -> int:

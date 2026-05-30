@@ -60,7 +60,7 @@ _TARGET_SKILL = "praxis:codex-review-wrap"
 _MAX_BYTES = 50 * 1024 * 1024
 
 
-def main() -> int:
+def _main_inner() -> int:
     try:
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
@@ -95,6 +95,14 @@ def main() -> int:
 
     _emit_block_message()
     return 2
+
+
+def main() -> int:
+    """Preflight gate — fail-open on uncaught exception."""
+    try:
+        return _main_inner()
+    except Exception:
+        return 0
 
 
 # ---------------------------------------------------------------------------

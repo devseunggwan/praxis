@@ -46,7 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 
 
-def main() -> int:
+def _main_inner() -> int:
     try:
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
@@ -96,6 +96,14 @@ def main() -> int:
 
     _emit_no_overlap_block(keywords, search_cmds[-3:])
     return 2
+
+
+def main() -> int:
+    """Preflight gate — fail-open on uncaught exception."""
+    try:
+        return _main_inner()
+    except Exception:
+        return 0
 
 
 # ---------------------------------------------------------------------------
