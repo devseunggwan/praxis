@@ -67,7 +67,7 @@ import sys
 from pathlib import Path
 
 
-def main() -> int:
+def _main_inner() -> int:
     try:
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
@@ -111,6 +111,14 @@ def main() -> int:
     matched = sorted({m.group(0).strip() for m in _iter_marker_matches(tail, _FINDING_MARKERS)})[:3]
     _emit_block_message(matched)
     return 2
+
+
+def main() -> int:
+    """Preflight gate — fail-open on uncaught exception."""
+    try:
+        return _main_inner()
+    except Exception:
+        return 0
 
 
 # ---------------------------------------------------------------------------

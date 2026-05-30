@@ -435,6 +435,32 @@ run_case "malformed config entry no => (fail-safe, silent)" \
   "PRAXIS_SKILL_GATED_COMMANDS=gh pr create:praxis:create-hub-pr"
 
 # ---------------------------------------------------------------------------
+# Uncaught exception fail-open (outer Exception guard)
+# ---------------------------------------------------------------------------
+
+# Simulate an uncaught exception inside _main_inner (e.g. MemoryError) and
+# verify the outer try/except Exception wrapper in main() returns 0 (fail-open).
+_uncaught_out=$(python3 - << PYEOF 2>&1
+import sys, importlib.util, io
+spec = importlib.util.spec_from_file_location("impl", "$HOOK")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+def _raise(): raise MemoryError("simulated OOM")
+mod._main_inner = _raise
+sys.stdin = io.StringIO('{}')
+sys.exit(mod.main())
+PYEOF
+)
+_uncaught_rc=$?
+if [ "$_uncaught_rc" -eq 0 ] && [ -z "$_uncaught_out" ]; then
+  echo "  PASS  uncaught exception in _main_inner fails open (exit 0, no stderr)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  uncaught exception in _main_inner (rc=$_uncaught_rc, out=$(echo "$_uncaught_out" | head -c 200))"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("uncaught exception in _main_inner fails open")
+fi
+
+# ---------------------------------------------------------------------------
 # Cleanup + summary
 # ---------------------------------------------------------------------------
 

@@ -293,6 +293,30 @@ fi
 rm -f "$_malformed_err"
 
 # ---------------------------------------------------------------------------
+# Uncaught exception fail-open (outer Exception guard)
+# ---------------------------------------------------------------------------
+
+# Simulate an uncaught exception inside _main_inner (e.g. MemoryError) and
+# verify the outer try/except Exception wrapper in main() returns 0 (fail-open).
+_uncaught_out=$(python3 - << PYEOF 2>&1
+import sys, importlib.util, io
+spec = importlib.util.spec_from_file_location("impl", "$HOOK")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+def _raise(): raise MemoryError("simulated OOM")
+mod._main_inner = _raise
+sys.stdin = io.StringIO('{}')
+sys.exit(mod.main())
+PYEOF
+)
+_uncaught_rc=$?
+if [ "$_uncaught_rc" -eq 0 ] && [ -z "$_uncaught_out" ]; then
+  echo "PASS [pass] uncaught exception in _main_inner fails open"; ((PASS++))
+else
+  echo "FAIL [pass→rc=$_uncaught_rc] uncaught exception in _main_inner fails open"; ((FAIL++)); FAILED_NAMES+=("uncaught exception in _main_inner fails open")
+fi
+
+# ---------------------------------------------------------------------------
 # Cleanup + summary
 # ---------------------------------------------------------------------------
 

@@ -166,7 +166,7 @@ def _repo_org(repo: str) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
-def main() -> int:
+def _main_inner() -> int:
     try:
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
@@ -223,6 +223,14 @@ def main() -> int:
         return 2
 
     return 0
+
+
+def main() -> int:
+    """Preflight gate — fail-open on uncaught exception."""
+    try:
+        return _main_inner()
+    except Exception:
+        return 0
 
 
 def _emit_block(repo: str, cfg: OrgConfig) -> None:
