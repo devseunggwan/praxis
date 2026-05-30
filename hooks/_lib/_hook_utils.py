@@ -163,6 +163,14 @@ def strip_prefix(argv: list[str]) -> list[str]:
     return argv[i:]
 
 
+# Shell grouping / command-substitution chars that may prefix a binary token
+# when it sits inside a subshell or substitution (`(gh …)`, `$(gh …)`,
+# `` `gh …` ``). Stripped before the basename comparison so the binary-name
+# check is not fooled by the wrapper syntax. Mirrors the same constant in the
+# commit-gate hooks' `_is_git_binary`.
+_GROUP_PREFIX_CHARS = "(){}$`"
+
+
 def _is_gh_binary(token: str) -> bool:
     """True iff `token` names the GitHub CLI binary `gh`.
 
@@ -176,14 +184,6 @@ def _is_gh_binary(token: str) -> bool:
     """
     stripped = token.lstrip(_GROUP_PREFIX_CHARS)
     return stripped == "gh" or stripped.endswith("/gh")
-
-
-# Shell grouping / command-substitution chars that may prefix a binary token
-# when it sits inside a subshell or substitution (`(gh …)`, `$(gh …)`,
-# `` `gh …` ``). Stripped before the basename comparison so the binary-name
-# check is not fooled by the wrapper syntax. Mirrors the same constant in the
-# commit-gate hooks' `_is_git_binary`.
-_GROUP_PREFIX_CHARS = "(){}$`"
 
 
 def iter_command_starts(tokens: list[str]):
