@@ -90,7 +90,7 @@ Stage 1.5 runs unconditionally between Stage 1 (Load) and Stage 2 (Analyze). Its
 
 Silent skip of the cursor read (entry without honoring (a)/(b)/(c)) is a Red Flag — it is the structural enabler of the failure mode where a prior cycle's hygiene finding gets contradicted by the current cycle without falsification.
 
-**Four detection signals (each becomes a finding with `category: memory_hygiene`):**
+**Five detection signals (each becomes a finding with `category: memory_hygiene`):**
 
 1. **Stale reference** — the entry cites an artifact that no longer matches reality:
    - File path absent: entry references `<path>` that does not exist (verify with `test -e`)
@@ -106,6 +106,8 @@ Silent skip of the cursor read (entry without honoring (a)/(b)/(c)) is a Red Fla
    - CLAUDE.md line shifted: also try `grep -n` with a shorter unique substring of the cited excerpt (the full excerpt may span lines that were reformatted).
    - Skill / hook removed: also try searching the manifest's alias or `name` field, not only the file path.
    Only when all attempted paths fail does the entry qualify as a confirmed stale finding. Record both the primary probe command and the secondary probe(s) in the finding's evidence block.
+
+   **Probe guideline — stored-value oracle match (MUST):** when the stale-looking citation is a **stored measurement / numeric value** (not a file path, CLI flag, or line citation), concluding it stale additionally requires same-oracle confirmation per Stage 2 step 7h — a probe run under a different matching basis / cohort / unit measures a different quantity and cannot mark the stored value stale. If the entry body does not state its originating oracle, DEFER falsification and propose an entry-annotation update instead (route as `memory`, Stage 4 update path). See step 7h for the full rule and `oracle_match` ledger format.
 
 2. **Contradiction** — two entries provide semantically opposed guidance under overlapping triggers:
    - Entry A says "always X under trigger T"; Entry B says "never X under trigger T" — same T, opposite directive.
@@ -143,6 +145,12 @@ Silent skip of the cursor read (entry without honoring (a)/(b)/(c)) is a Red Fla
 
    **Self-applicability** — Signal 4 catches the retrospect skill's own monotonic-growth pattern: each retrospect adds memory entries, but without a hygiene loop the index outgrows its load-time budget. Signal 4 closes this loop by surfacing the size threshold as an actionable finding, not just an emitted warning.
 
+5. **Missing oracle annotation** — a memory entry stores a numeric / measurement / comparison value (latency delta, row count, comparison sum, count) whose body does NOT state the **oracle** (matching basis, cohort, unit) that produced the value. Such an entry cannot be falsified later: a future cycle has no way to know which oracle to re-probe with, so any correction risks the multi-oracle mismatch that Stage 2 step 7h / Gate-6 guard against.
+
+   Detection method: parse the entry body for stored numeric tokens (a number paired with a comparison or measurement verb — `is N faster`, `count = N`, `sum = N`, `N rows`, `Nh`, `Nms`); for each, check whether the body also states a matching basis / cohort / unit. Detect-only — no value is re-measured at Stage 1.5.
+
+   Routed as `memory` (Stage 4 Action 1 update path): the rewrite adds an explicit oracle/unit annotation to the entry body so a future cycle can falsify with a known basis. This is the defer-and-annotate fallback referenced by step 7h step (1).
+
 **Output — emit per-defect findings into the Stage 2 friction-event lane.**
 
 Each Stage 1.5 finding has:
@@ -155,6 +163,7 @@ Each Stage 1.5 finding has:
   - Size threshold / 4a promoted-pointer compression → `memory` (Stage 4 Action 1 update path; body collapses to a single-line link to the promotion target)
   - Size threshold / 4b backlink-zero archive → `issue` (Stage 4 Action 2 — human-confirmed archive move; never auto-delete)
   - Size threshold / 4c length cap → `memory` (Stage 4 Action 1 with the cap as a write-time guard; truncate + spill detail body to a separate file)
+  - Missing oracle annotation (signal 5) → `memory` (Stage 4 Action 1 update path; add an explicit oracle/unit annotation to the entry body)
 
 **0-friction hygiene-only retrospect path** — when Stage 2 pre-scan finds zero friction events but Stage 1.5 produced ≥1 hygiene finding, the skill does NOT take the "No patterns found ✅" early-exit (Stage 2 line). Instead, proceed to Stage 2.5 → Stage 3 with the hygiene findings as the sole input. Emit a banner in Stage 3 report: `Hygiene-only retrospect — no friction events this session.`
 
@@ -181,6 +190,8 @@ The two lines are separate by construction — current-cycle findings and carrie
 ```
 
 If the probe shows the carried finding is genuinely resolved (e.g., the previously-absent files now exist), drop it from the next cycle's `note` field. If the probe re-confirms the finding (still absent / still contradictory / still merge-candidate), the carried finding REMAINS in the cursor `note` for the next cycle regardless of any new-cycle conclusion that disagrees with it. Silent overwrite — emitting a current-cycle conclusion that disagrees with the carried finding without running the falsification probe — is a Red Flag (this is the exact failure mode the issue protecting this section was filed against).
+
+When the carried finding is a **stored-value correction** (a numeric measurement / comparison sum / count, not a path / flag / merge-candidate), the re-executed falsification probe MUST satisfy step 7h oracle-match — i.e. it MUST use the SAME oracle (matching basis, cohort, unit) as the stored value — before the carried finding may be marked RESOLVED; a different-oracle probe is not valid falsification and leaves the carried finding STILL_OUTSTANDING.
 
 **Self-conflict detection (optional, advisory).** Before Stage 3 emit, perform a lightweight keyword-overlap check between the cursor `note` text and the current cycle's signal-1/2/3 conclusion text. When ≥1 shared content noun overlaps (file path, section name, or unique identifier) AND the two predicates are opposite (`absent` vs `self-managed`, `stale` vs `fresh`, `contradictory` vs `consistent`, `merge candidate` vs `distinct`), STOP-surface to the user with the trail of both texts and ask whether the carried finding should be retained, falsified, or revised. This advisory check is a defense-in-depth layer above the falsification gate; the gate remains MANDATORY whether or not this check fires.
 
@@ -411,6 +422,30 @@ Both the checklist block and the dismissed_candidates block live in Stage 3 outp
       - `resolved` — **optional** and NOT verified by Gate-5; emit only when `repeat=true` AND existing resolution action found in step (f)
       - When proposed action ∈ {`memory_create`, `memory_update`}: `memory_scan` MUST be populated — Gate-5 (Stage 2.5) will block Stage 3 if absent
 
+   h. **Stored-value falsification — multi-oracle completeness (MUST)**. This sub-step applies ONLY to a finding whose probe targets a **stored fact VALUE** held in a memory entry — a numeric measurement, a comparison sum, or a count (e.g., "X is 9h faster than Y", "row count = 4.2M", "criteo sum = N"). It does NOT apply to `DESCRIBE` / `SHOW` enumerate results, where the oracle is unambiguous (the catalog itself) and outside this gate.
+
+      An **oracle** is the specific measurement basis that produced the stored value — the matching basis (e.g., warehouse partition key vs FK rowid), the cohort, and the unit. A probe that re-measures the same fact under a *different* oracle measures a *different* quantity; it cannot falsify the stored value, only surface a separate cohort-shift observation.
+
+      Three-step rule:
+
+      1. **Confirm the originating oracle from the entry body.** Read the entry to identify which oracle produced the stored value (matching basis, cohort, unit). If the entry body does NOT state its oracle → **DEFER falsification**: do not attempt to correct the stored value this cycle. Instead propose an entry-annotation update (route as `memory`, Stage 4 update path) that adds the missing oracle/unit annotation, so a future cycle can falsify with a known basis.
+      2. **Probe first with the SAME oracle.** The first falsification probe MUST use the same matching basis, cohort, and unit as the originating oracle. Only a same-oracle probe can confirm or falsify the stored value.
+      3. **Different-oracle results are NOT falsification evidence.** A probe run under a different matching basis / cohort / unit does not invalidate the entry. It MAY be emitted as a *separate* cohort-shift finding (its own row), but it MUST NOT drop, overwrite, or mark-resolved the stored value in the original entry.
+
+      **Ledger fields** (mirror the `memory_scan` HTML-comment format above) — emit one comment per stored-value finding, keyed by `finding #N:`:
+
+      ```
+      <!-- oracle_match finding #N:
+        stored_value_oracle: <matching basis / cohort / unit from entry body, or `absent`>
+        falsification_oracle: <matching basis / cohort / unit of the probe run, or `deferred`>
+        oracle_match: true|false
+      -->
+      ```
+
+      **Invariant**: falsification of a stored value applies ONLY when `oracle_match: true`. When `oracle_match: false`, the probe is a cohort-shift observation, not falsification.
+
+      **Oracle-match confirmation is required before any commit that corrects a stored value.** A value-correcting commit whose finding carries `oracle_match: false` (or absent) is a Red Flag (see Red Flags section).
+
 8. **Auto-assign action type** based on escalation ladder. Use `event.effective_repeat` (from step 6b; equals `event.repeat_count` for singleton events) as the repeat signal for the Repeat-based rows below. Apply Repeat-based rows first; then apply Category-default rows below to override or compound when the event's `category[]` (from pre-scan, step 4) makes memory-only inappropriate even on first occurrence:
 
    | Condition | Action Type | Rationale |
@@ -636,7 +671,26 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 
 > "Finding #N의 Gate-5 (memory_scan 필드 누락)가 통과되지 않습니다. 어떻게 진행할까요? [a] MEMORY.md index를 직접 읽고 memory_scan 필드를 입력 / [b] action을 직접 지정 / [c] 이 finding은 note only로 강등."
 
-**Output (on pass)** — Stage 2.5 emits the distribution card per the Output Schema Contract defined in Stage 3, plus per-finding Gate-1, Gate-2, Gate-3, Gate-4, and Gate-5 verdicts:
+**Gate-6 (Oracle-Match Completeness)** — For every finding whose action would CORRECT a stored value in a memory entry (i.e., the memory action was flagged stored-value-falsification at Stage 2 step 7h), verify the `oracle_match` ledger field is present AND, when the action invalidates/overwrites the stored value, `oracle_match: true`.
+
+> **Why Gate-6 exists**: a stored value can be "falsified" by a probe that measured a *different* quantity (different matching basis / cohort / unit), silently overwriting a correct entry with a cohort-shifted number. Step 7h requires same-oracle confirmation; Gate-6 provides the structural enforcement — value-correcting findings without a matching-oracle probe are returned to step 7h.
+
+**Step 1 — Identify stored-value-correcting findings**: collect all findings flagged at step 7h whose action invalidates / overwrites a stored numeric measurement / comparison sum / count.
+
+**Step 2 — Verify `oracle_match`**: for each finding from step 1, check that the `oracle_match` ledger field (step 7h format) is present. If the action invalidates/overwrites the stored value, require `oracle_match: true`.
+
+**Step 3 — Classify violations**: any finding from step 1 with `oracle_match: false` or absent on a value-correcting action → Gate-6 violation → return that finding to Stage 2 step 7h with instruction to (a) re-probe with the same oracle, or (b) convert to a separate cohort-shift finding (its own row, leaving the stored value untouched), or (c) defer + propose an entry-annotation update when the originating oracle is absent from the entry body. Same 2-re-entry cap per finding, shared across all gates for that finding.
+
+**Gate-6 verdict:**
+- All stored-value-correcting findings have `oracle_match: true` → `gate_6_verdict: PASS`
+- ≥1 stored-value-correcting finding has `oracle_match: false` or absent → `gate_6_verdict: FAIL`
+- No stored-value-correcting findings exist → `gate_6_verdict: NA`
+
+`gate_6_verdict` is informational (parallel to `gate_3_verdict` and `gate_5_verdict`). The Stop hook silently ignores it; enforcement is procedural inside Stage 2.5. If Gate-6 violations persist after 2 per-finding re-entries, surface to user with 3-way override prompt:
+
+> "Finding #N의 Gate-6 (oracle-match 미충족 — 다른 oracle 로 stored value 를 덮어쓰려 함)가 통과되지 않습니다. 어떻게 진행할까요? [a] 같은 oracle 로 재측정 / [b] 별도 cohort-shift finding 으로 전환 (stored value 유지) / [c] originating oracle 이 entry 에 없으니 defer + entry-annotation update 제안."
+
+**Output (on pass)** — Stage 2.5 emits the distribution card per the Output Schema Contract defined in Stage 3, plus per-finding Gate-1, Gate-2, Gate-3, Gate-4, Gate-5, and Gate-6 verdicts:
 
 ```
 <!-- retrospect:distribution begin -->
@@ -653,6 +707,7 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 - gate_3_verdict: {PASS|FAIL|NA}
 - gate_4_verdict: {PASS|WARN|NA}
 - gate_5_verdict: {PASS|FAIL|NA}
+- gate_6_verdict: {PASS|FAIL|NA}
 <!-- retrospect:distribution end -->
 ```
 
@@ -666,8 +721,9 @@ User confirmation required to proceed; if user confirms, log the keyword set fou
 - `gate_3_verdict: NA` — zero findings have `Proposed Actions` count = 2 (every finding is single-action)
 - `gate_4_verdict: NA` — zero `upstream_feedback` findings exist
 - `gate_5_verdict: NA` — zero `memory`-action findings exist
+- `gate_6_verdict: NA` — zero stored-value-correcting findings exist (no finding flagged at step 7h)
 
-The Stop hook `retrospect-mix-check.sh` parses `gate_1_verdict`, `gate_2_verdict`, and `gate_4_verdict`; `gate_3_verdict` is emitted for visibility and audit-trail purposes (the hook silently ignores unknown keys). Gate-3 is enforced procedurally inside Stage 2.5; structural Stop-hook enforcement is reserved for a follow-up tightening if procedural compliance proves insufficient. Gate-4 is enforced both procedurally (Stage 4 Action 4 step 0a per-action approval) and structurally by the Stop hook: a `gate_4_verdict: FAIL` in the card blocks Stage 3 output, and an absent `gate_4_verdict` combined with a `⚠ EXTERNAL:` Rationale prefix also blocks (indicating Stage 2.5 Gate-4 was partially skipped). `gate_5_verdict` is informational-only and INTENTIONALLY EXCLUDED from Stop hook parsing — the hook silently ignores it; Gate-5 enforcement is procedural inside Stage 2.5. (Stop hook wiring for Gate-5 is a deferred follow-up similar to Gate-4's progression in PR #340 — file a follow-up issue when procedural compliance proves insufficient.)
+The Stop hook `retrospect-mix-check.sh` parses `gate_1_verdict`, `gate_2_verdict`, and `gate_4_verdict`; `gate_3_verdict` is emitted for visibility and audit-trail purposes (the hook silently ignores unknown keys). Gate-3 is enforced procedurally inside Stage 2.5; structural Stop-hook enforcement is reserved for a follow-up tightening if procedural compliance proves insufficient. Gate-4 is enforced both procedurally (Stage 4 Action 4 step 0a per-action approval) and structurally by the Stop hook: a `gate_4_verdict: FAIL` in the card blocks Stage 3 output, and an absent `gate_4_verdict` combined with a `⚠ EXTERNAL:` Rationale prefix also blocks (indicating Stage 2.5 Gate-4 was partially skipped). `gate_5_verdict` is informational-only and INTENTIONALLY EXCLUDED from Stop hook parsing — the hook silently ignores it; Gate-5 enforcement is procedural inside Stage 2.5. (Stop hook wiring for Gate-5 is a deferred follow-up similar to Gate-4's progression in PR #340 — file a follow-up issue when procedural compliance proves insufficient.) `gate_6_verdict` is likewise informational-only and INTENTIONALLY EXCLUDED from Stop hook parsing (parallel to `gate_3_verdict` and `gate_5_verdict`) — the hook silently ignores it; Gate-6 enforcement is procedural inside Stage 2.5.
 
 This card and verdict block become Stage 3's input header.
 
@@ -703,6 +759,7 @@ Stage 3 output MUST emit, in this order:
         Gate-3 carve-out: gate_3_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract. The hook's awk parser keys on gate_1_verdict/gate_2_verdict literals only and silently ignores all other lines (regression-tested by tests T8–T17 + the 4 fixture files which still pass without gate_3_verdict). Adding/removing/renaming gate_3_verdict alone does NOT require hook or test changes.
         Gate-4 enforcement note: gate_4_verdict IS structurally enforced by the Stop hook (unlike gate_3_verdict which remains informational-only). Changes to gate_4_verdict semantics or its FAIL/WARN/NA/PASS values REQUIRE synchronized edits to hooks/retrospect-mix-check.sh and tests/test_retrospect_mix_check.sh (T36/T37/T38). Adding/removing gate_4_verdict from the card alone does NOT require fence-marker or action-key changes.
         Gate-5 carve-out: gate_5_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract (parallel to gate_3_verdict). The hook silently ignores gate_5_verdict. Adding/removing/renaming gate_5_verdict alone does NOT require hook or test changes. (Deferred upgrade trajectory similar to Gate-4 in PR #340 — file a follow-up issue for Stop hook wiring when procedural enforcement proves insufficient.)
+        Gate-6 carve-out: gate_6_verdict is informational-only and INTENTIONALLY EXCLUDED from this co-update contract (parallel to gate_3_verdict and gate_5_verdict). The hook silently ignores gate_6_verdict. Adding/removing/renaming gate_6_verdict alone does NOT require hook or test changes.
         Category-count carve-out (memory_hygiene / output_quality): these are CATEGORY counts (count of findings with the respective category in category[]) — NOT action keys. They are emitted as sibling lines to the action-type counts but are informational-only and INTENTIONALLY EXCLUDED from Stop hook parsing. Adding/removing/renaming memory_hygiene OR output_quality alone does NOT require fence-marker or action-key changes; the underlying actions of Stage 1.5 / Stage 2.7 findings still fall under one of the 6 action-type keys above. The Stop hook's awk parser silently ignores both lines (same mechanism as gate_3/gate_5 verdicts).
         Pre-scan-checklist + dismissed_candidates carve-out: the `retrospect:pre_scan_checklist` and `retrospect:dismissed_candidates` fenced blocks (Stage 2 origin) are informational-only and INTENTIONALLY EXCLUDED from Stop hook parsing. They live OUTSIDE the `retrospect:distribution` fence so the awk parser keyed on `distribution begin/end` ignores them. Adding/removing/renaming the checklist OR dismissed_candidates blocks alone does NOT require hook or test changes. -->
    <!-- retrospect:distribution begin -->
@@ -719,6 +776,7 @@ Stage 3 output MUST emit, in this order:
    - gate_3_verdict: PASS
    - gate_4_verdict: PASS
    - gate_5_verdict: PASS
+   - gate_6_verdict: PASS
    <!-- retrospect:distribution end -->
    ```
 
@@ -769,6 +827,7 @@ The Stop hook parses the distribution-card fence (deterministic) and the table (
 - gate_3_verdict: {PASS|FAIL|NA}
 - gate_4_verdict: {PASS|WARN|NA}
 - gate_5_verdict: {PASS|FAIL|NA}
+- gate_6_verdict: {PASS|FAIL|NA}
 <!-- retrospect:distribution end -->
 
 | # | Category | Tool Layer | Pattern | Root Cause | Rule / Gap | Repeat? | Proposed Actions (1~2) | Rationale | Priority |
@@ -1246,6 +1305,7 @@ If you catch yourself:
 - **`upstream_feedback` 행의 `backing_repo` owner가 own-org 밖인데 Stage 2.5 Gate-4 마킹(`⚠ EXTERNAL: per-action approval required at Stage 4` prefix) 없이 Stage 3 진입** — Gate-4 가 실행되지 않은 것. Stage 2.5로 돌아가 Gate-4 재실행.
 - **external-marked finding 의 Stage 4 `upstream_feedback` 실행에서 AskUserQuestion per-action 승인(step 0a) 없이 `gh issue create` 직행** — global `~/.claude/CLAUDE.md` zero-exception 룰 위반. STOP, step 0a AskUserQuestion 실행 먼저.
 - **`memory` action 이 있는 finding 에서 `memory_scan` 필드 없이 Stage 2.5 Gate-5 진입** — Stage 2 step 7 스킵 증거. Stage 2 step 7로 돌아가 2-hop 스캔을 완료하고 `memory_scan` 필드를 기록하라. "MEMORY.md를 이미 알고 있어서 스캔이 필요 없다"는 Gate-5 우회 근거로 인정되지 않는다.
+- **Using a different-oracle probe (different matching basis / cohort / unit) to falsify or correct a stored value without same-oracle confirmation** — Stage 2 step 7h / Gate-6 violation. A probe run under a different oracle measures a different quantity; it cannot invalidate the stored value. STOP — re-probe with the originating oracle, or surface the result as a separate cohort-shift finding (leaving the stored value untouched), or defer + propose an entry-annotation update when the entry body does not state its oracle. (e.g., the warehouse-partition-key vs FK-rowid measurement basis yielded a 9h latency shift that was NOT a falsification of the stored value but a cohort-shift artifact.)
 - **Stage 3 "Execute now" 선택을 external-repo write 의 per-action 승인으로 ratify** — Stage 3 승인은 action 카테고리 선택이지, 외부 repo 개별 write 승인이 아님. Stage 4 step 0a 게이트를 반드시 별도로 실행.
 - **Omitting the `Stage 2 caveats:` line on a finding that has any of: tracer confidence below HIGH, single observation, alternative root cause not ruled out, Gate-3 downgrade, analyst cluster overlap, escape-hatch state** — carry-forward is mandatory whenever ANY of these holds. Silent omission lets Stage 3 rank as if Stage 2 returned clean HIGH-confidence evidence.
 - **조사 도구 결과를 completeness 검증 없이 결론에 사용 (premise unverified)** — 다음 두 패턴 모두 "premise falsified" (반증 테스트를 설계한 뒤 통과 → 진행 가능)가 아니라 "premise unverified" (도구 출력 자체의 한계를 검증하지 않은 채 결론에 사용 → STOP) 에 해당한다: (a) `find ... | head -N` 결과로 "파일/모듈 없음" 단정 — **`head` 를 제거한 원 명령 `find ... | wc -l` 을 별도로 실행**해 총 라인 수를 확인하고, cap 초과 시 cap 제거 또는 `grep -rn <token>` narrowing 필요 (`head -N` 파이프 뒤에 `| wc -l` 을 붙이면 cap 으로 잘린 뒤의 라인 수만 세므로 정확히 N개와 cap 초과를 구분할 수 없어 검증이 실패한다); (b) `find <path>` 빈 결과로 "경로/모듈 없음" 단정 — `ls <parent>` 로 path coverage 를 확인하거나 상위 경로로 재시도, 또는 `grep -rn <token>` cross-check 필요.
@@ -1260,10 +1320,10 @@ If you catch yourself:
 | Stage | Key Activity | Success Criteria |
 |-------|-------------|-----------------|
 | **1. Load** | Read global `~/.claude/CLAUDE.md`, form scan questions | Rule categories identified |
-| **1.5 Hygiene** | Detect-only MEMORY.md scan — stale references / contradictions / merge candidates (cap 5 files/invocation + cursor carryover) + size threshold (index-scoped, every invocation; subsignals 4a/4b/4c) | Stage 1.5 findings emitted with `category: memory_hygiene` (or `hygiene_skipped` trail if MEMORY.md unreachable) |
+| **1.5 Hygiene** | Detect-only MEMORY.md scan — stale references / contradictions / merge candidates (cap 5 files/invocation + cursor carryover) + size threshold (index-scoped, every invocation; subsignals 4a/4b/4c) + missing oracle annotation (signal 5 — stored numeric values lacking matching basis / cohort / unit) | Stage 1.5 findings emitted with `category: memory_hygiene` (or `hygiene_skipped` trail if MEMORY.md unreachable) |
 | **2. Analyze** | Scan conversation, map to rules, find root cause | Root cause (not symptom) for each pattern; every event has `category[]` |
 | **2.7 Audit** | Adaptive post-hoc artifact audit — fires only when session contains `gh pr|issue|comment` / Slack-Notion MCP write / approved external-write events; runs 3 sub-audits (PR mergeability, sub-agent substance, external comment evidence) | Stage 2.7 findings emitted with `category: output_quality` (or `audit_skipped` trail if 0 triggers) |
-| **2.5 Audit** | Run Gate-1 (categorical) + Gate-2 (Schema A 5-line or Schema B dimension-tag rationale) + Gate-3 (evidence robustness for 2-action findings) + Gate-4 (external-repo authorization pre-check for upstream_feedback) + Gate-5 (memory-scan completeness for memory-action findings) | All applicable gates PASS/WARN or per-finding cap reached and surfaced to user |
+| **2.5 Audit** | Run Gate-1 (categorical) + Gate-2 (Schema A 5-line or Schema B dimension-tag rationale) + Gate-3 (evidence robustness for 2-action findings) + Gate-4 (external-repo authorization pre-check for upstream_feedback) + Gate-5 (memory-scan completeness for memory-action findings) + Gate-6 (oracle-match completeness for stored-value corrections) | All applicable gates PASS/WARN or per-finding cap reached and surfaced to user |
 | **3. Report** | Present unified table + distribution card, carry Stage 2 caveats forward, run Pre-Output Falsification Gate before each `AskUserQuestion`, collect approval per item | User approved at least 1 item (or confirmed 0 findings); every `(Recommended)` label has a `Falsification:` trace |
 | **4. Execute** | Run approved actions, verify artifacts | Completion report with links/paths + verification results |
 
@@ -1294,6 +1354,8 @@ If you catch yourself:
 | Stage 2.5 (audit) | Gate-4 — `gh api user --jq .login` fails and `PRAXIS_OWN_ORGS` is unset | Conservative default: treat all `upstream_feedback` findings as external; emit `gate_4_verdict: WARN` |
 | Stage 2.5 (audit) | Gate-5 — memory-action finding missing `memory_scan` field after 2 re-entries | Surface to user with 3-way override prompt (`[a] 직접 MEMORY.md 읽고 memory_scan 입력 / [b] action 직접 지정 / [c] note only 강등`); log selection |
 | Stage 2.5 (audit) | Gate-5 — MEMORY.md index not accessible during step 7 scan | Record `memory_scan: {scanned: true, candidates_reviewed: [], error: "index not accessible"}` and treat all findings as new patterns (repeat=false) |
+| Stage 2.5 (audit) | Gate-6 — stored-value-correcting finding has `oracle_match: false` or absent after 2 re-entries | Surface to user with 3-way override prompt (`[a] 같은 oracle 로 재측정 / [b] 별도 cohort-shift finding 으로 전환 (stored value 유지) / [c] note only 강등`); log selection |
+| Stage 2.5 (audit) | Gate-6 — originating oracle un-determinable (entry body lacks oracle/unit annotation) | Defer falsification; propose an entry-annotation update (`memory`, Stage 4 update path) adding the missing oracle/unit so a future cycle can falsify with a known basis; record `oracle_match: false, falsification_oracle: deferred` |
 | Stage 3 (report) | Pre-Output Falsification Gate triggered but premise cannot be falsified or survives only ambiguously | Drop `(Recommended)` label; surface option unranked; emit explicit premise-confirmation line in `AskUserQuestion` per the gate's "Falsification step not run" row |
 | Stage 3 (report) | Finding lacks Stage 2 caveats line despite tracer confidence below HIGH or single-observation flag | Block Stage 3 emission for that finding; return to Stage 2 step 5 (root cause refinement) or Stage 2.5 Gate-3 (c) (single-observation downgrade) and re-derive |
 | Stage 3 (report) | User rejects all findings | Capture the rejection itself as a feedback signal for future retrospects |
