@@ -60,11 +60,79 @@ from __future__ import annotations
 
 import functools
 import json
+import logging
 import os
 import sys
-import time
 import traceback
 from typing import Callable
+
+
+# ---------------------------------------------------------------------------
+# Error logging (stdlib `logging` with a JSONL formatter)
+# ---------------------------------------------------------------------------
+#
+# A dedicated, non-propagating logger writes one JSON object per line to the
+# error log. The setup is hardened so logging can NEVER pollute the session or
+# break fail-open:
+#   - ``logging.raiseExceptions = False`` so a handler error (disk full, etc.)
+#     is swallowed instead of dumping a traceback to stderr.
+#   - ``logger.propagate = False`` so records never bubble to the root logger.
+#   - a baseline ``NullHandler`` so the logger is never "handler-less" — that
+#     would otherwise trigger ``logging.lastResort`` which writes to stderr.
+#   - the whole record path is additionally wrapped in ``try/except: pass``.
+_LOGGER_NAME = "praxis.hook"
+
+
+class _JsonlFormatter(logging.Formatter):
+    """Render a LogRecord as a single-line JSON object (JSONL)."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
+            "hook": getattr(record, "hook", "<unknown>"),
+            "pid": record.process,
+            "exc_type": getattr(record, "exc_type", ""),
+            "message": record.getMessage(),
+            "traceback": getattr(record, "tb_text", ""),
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
+
+class _StderrFormatter(logging.Formatter):
+    """Terse one-line human-readable form for the opt-in stderr handler."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return (
+            f"[praxis:hook-error] {getattr(record, 'hook', '?')} swallowed "
+            f"{getattr(record, 'exc_type', '?')}: {record.getMessage()} "
+            f"(fail-open; see {getattr(record, 'log_path', '')})"
+        )
+
+
+def _get_logger() -> logging.Logger:
+    """Lazily configure and return the praxis hook-error logger.
+
+    Configured once per process; only invoked on the crash path (inside the
+    fail-open ``except``), so a normal run pays no logging cost.
+    """
+    logger = logging.getLogger(_LOGGER_NAME)
+    if getattr(logger, "_praxis_configured", False):
+        return logger
+    logger.setLevel(logging.ERROR)
+    logger.propagate = False
+    logger.addHandler(logging.NullHandler())  # never handler-less → no lastResort
+    try:
+        fh = logging.FileHandler(_error_log_path(), encoding="utf-8", delay=True)
+        fh.setFormatter(_JsonlFormatter())
+        logger.addHandler(fh)
+    except Exception:
+        pass  # unwritable log must not re-break fail-open
+    if os.environ.get("PRAXIS_HOOK_ERROR_STDERR"):
+        sh = logging.StreamHandler(sys.stderr)
+        sh.setFormatter(_StderrFormatter())
+        logger.addHandler(sh)
+    logger._praxis_configured = True  # type: ignore[attr-defined]
+    return logger
 
 
 def _error_log_path() -> str:
@@ -104,36 +172,24 @@ def _hook_identity(fn: Callable[[], int]) -> str:
 def _record_swallowed_exception(fn: Callable[[], int]) -> None:
     """Record a swallowed exception so the crash stays diagnosable.
 
-    Fully self-guarded: any failure here (unwritable path, serialization
-    error, stderr closed) is itself swallowed — observability must NEVER
-    re-break the fail-open contract. Always appends a JSONL record to the
-    error log; additionally writes a terse stderr line when
-    ``PRAXIS_HOOK_ERROR_STDERR`` is set.
+    Emits one JSONL record via the dedicated ``praxis.hook`` logger (plus a
+    terse stderr line when ``PRAXIS_HOOK_ERROR_STDERR`` is set). Fully
+    self-guarded: a handler error is swallowed by ``raiseExceptions = False``
+    and the whole body by ``try/except: pass`` — observability must NEVER
+    re-break the fail-open contract.
     """
     try:
+        logging.raiseExceptions = False  # handler errors must not hit stderr
         exc_type, exc, tb = sys.exc_info()
-        record = {
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-            "hook": _hook_identity(fn),
-            "pid": os.getpid(),
-            "exc_type": getattr(exc_type, "__name__", str(exc_type)),
-            "message": str(exc),
-            "traceback": "".join(traceback.format_exception(exc_type, exc, tb)),
-        }
-        try:
-            with open(_error_log_path(), "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        except Exception:
-            pass  # unwritable log must not re-break fail-open
-        if os.environ.get("PRAXIS_HOOK_ERROR_STDERR"):
-            try:
-                sys.stderr.write(
-                    f"[praxis:hook-error] {record['hook']} swallowed "
-                    f"{record['exc_type']}: {record['message']} "
-                    f"(fail-open; see {_error_log_path()})\n"
-                )
-            except Exception:
-                pass
+        _get_logger().error(
+            str(exc),
+            extra={
+                "hook": _hook_identity(fn),
+                "exc_type": getattr(exc_type, "__name__", str(exc_type)),
+                "tb_text": "".join(traceback.format_exception(exc_type, exc, tb)),
+                "log_path": _error_log_path(),
+            },
+        )
     except Exception:
         # Last-resort: the recorder itself never propagates.
         pass

@@ -150,6 +150,23 @@ PYEOF
 )
 assert_eq "unwritable error log still fails open -> 0" "0" "$rc_unwritable"
 
+# Unwritable log + stderr opt-in OFF must leak NOTHING to stderr. This guards
+# the logging-specific hazard: a handler-less logger would trigger
+# logging.lastResort (writes to stderr), and handleError would print a
+# traceback unless raiseExceptions is False. The NullHandler baseline +
+# raiseExceptions=False must keep stderr empty even when the FileHandler fails.
+stderr_unwritable=$(env -u PRAXIS_HOOK_ERROR_STDERR PRAXIS_HOOK_ERROR_LOG="/proc/nonexistent-dir/err.jsonl" python3 - "$LIB" << 'PYEOF' 2>&1 1>/dev/null
+import sys
+sys.path.insert(0, sys.argv[1])
+from _hook_runtime import fail_open
+@fail_open
+def boom():
+    raise ValueError("no-stderr-leak")
+boom()
+PYEOF
+)
+assert_eq "unwritable log leaks nothing to stderr (no lastResort)" "" "$stderr_unwritable"
+
 # Opt-in stderr surfacing: off by default, on with PRAXIS_HOOK_ERROR_STDERR=1.
 TMP_LOG2="$(mktemp -u "${TMPDIR:-/tmp}/praxis-hook-err-test2-XXXXXX").jsonl"
 stderr_default=$(PRAXIS_HOOK_ERROR_LOG="$TMP_LOG2" python3 - "$LIB" << 'PYEOF' 2>&1 1>/dev/null
