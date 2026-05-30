@@ -90,6 +90,73 @@ assert_eq "allow (0) passed through"         "0"          "$(get allow)"
 assert_eq "BaseException propagates"         "PROPAGATED" "$(get base)"
 assert_eq "functools.wraps __wrapped__ set"  "yes"        "$(get wrapped)"
 
+# ---------------------------------------------------------------------------
+# Observability: fail-open is NOT fail-silent — a swallowed exception is
+# recorded to the JSONL error log, and a log-write failure still fails open.
+# ---------------------------------------------------------------------------
+TMP_LOG="$(mktemp -u "${TMPDIR:-/tmp}/praxis-hook-err-test-XXXXXX").jsonl"
+rc_logged=$(PRAXIS_HOOK_ERROR_LOG="$TMP_LOG" python3 - "$LIB" << 'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from _hook_runtime import fail_open
+@fail_open
+def boom():
+    raise ValueError("diagnose me")
+print(boom())
+PYEOF
+)
+assert_eq "swallowed exc still returns 0 (with logging)" "0" "$rc_logged"
+if [ -s "$TMP_LOG" ] && grep -q '"exc_type": "ValueError"' "$TMP_LOG" \
+   && grep -q '"message": "diagnose me"' "$TMP_LOG" && grep -q '"traceback"' "$TMP_LOG"; then
+  echo "PASS  [error log records swallowed exception (type+message+traceback)]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [error log missing/incomplete] content=$(cat "$TMP_LOG" 2>/dev/null | head -c 200)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("error log records swallowed exception")
+fi
+rm -f "$TMP_LOG"
+
+# Unwritable log path must NOT re-break fail-open (recorder is self-guarded).
+rc_unwritable=$(PRAXIS_HOOK_ERROR_LOG="/proc/nonexistent-dir/err.jsonl" python3 - "$LIB" << 'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from _hook_runtime import fail_open
+@fail_open
+def boom():
+    raise RuntimeError("x")
+print(boom())
+PYEOF
+)
+assert_eq "unwritable error log still fails open -> 0" "0" "$rc_unwritable"
+
+# Opt-in stderr surfacing: off by default, on with PRAXIS_HOOK_ERROR_STDERR=1.
+TMP_LOG2="$(mktemp -u "${TMPDIR:-/tmp}/praxis-hook-err-test2-XXXXXX").jsonl"
+stderr_default=$(PRAXIS_HOOK_ERROR_LOG="$TMP_LOG2" python3 - "$LIB" << 'PYEOF' 2>&1 1>/dev/null
+import sys
+sys.path.insert(0, sys.argv[1])
+from _hook_runtime import fail_open
+@fail_open
+def boom():
+    raise ValueError("q")
+boom()
+PYEOF
+)
+assert_eq "stderr quiet by default" "" "$stderr_default"
+stderr_optin=$(PRAXIS_HOOK_ERROR_LOG="$TMP_LOG2" PRAXIS_HOOK_ERROR_STDERR=1 python3 - "$LIB" << 'PYEOF' 2>&1 1>/dev/null
+import sys
+sys.path.insert(0, sys.argv[1])
+from _hook_runtime import fail_open
+@fail_open
+def boom():
+    raise ValueError("q")
+boom()
+PYEOF
+)
+case "$stderr_optin" in
+  *"[praxis:hook-error]"*"ValueError"*) echo "PASS  [opt-in stderr surfaces hook error]"; PASS=$((PASS + 1)) ;;
+  *) echo "FAIL  [opt-in stderr] got=$stderr_optin"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("opt-in stderr surfaces hook error") ;;
+esac
+rm -f "$TMP_LOG2"
+
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then
