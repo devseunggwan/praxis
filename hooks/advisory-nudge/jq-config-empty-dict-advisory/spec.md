@@ -23,7 +23,9 @@ Detection surface — config paths matched:
 
 - `~/.claude/*.json`
 - `~/.codex/*.json`
-- Repo-root `settings.json` or `hooks.json` (bare filename)
+- Repo-root `settings.json` or `hooks.json` (bare filename or `./`-relative
+  form; a file under any other directory such as `/tmp/settings.json` does not
+  match)
 - Any `.json` file under a `.claude/` or `.codex/` directory component
   (absolute or relative)
 

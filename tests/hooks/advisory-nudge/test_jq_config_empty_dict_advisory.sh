@@ -456,6 +456,26 @@ else
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("bare repo-root settings.json still emits config-empty (issue #513 결함3 negative)")
 fi
 
+# Negative: the repo-root-relative `./settings.json` form is also a config path
+# and must still emit [config-empty] (PR #521 review feedback — the anchor
+# accepts an optional leading `./` so this form is not lost alongside the bare
+# token while subdir paths like sub/settings.json stay excluded).
+dot_payload=$(python3 -c '
+import json
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":"jq . ./settings.json"},"session_id":"dot-513-case"}))
+')
+dot_err=$(mktemp)
+( cd "$TMPDIR_TEST/root" && echo "$dot_payload" | python3 "$HOOK" >/dev/null 2>"$dot_err" )
+dot_rc=$?
+dot_err_content=$(cat "$dot_err"); rm -f "$dot_err"
+if [ "$dot_rc" -eq 0 ] && printf '%s' "$dot_err_content" | grep -qF "[config-empty]"; then
+  echo "PASS  [./settings.json (repo-root-relative) still emits config-empty (PR #521)]"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL  [./settings.json still emits config-empty] rc=$dot_rc stderr=${dot_err_content:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("./settings.json still emits config-empty (PR #521)")
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
