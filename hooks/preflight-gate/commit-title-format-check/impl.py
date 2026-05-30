@@ -43,6 +43,7 @@ import sys as _sys
 from pathlib import Path as _Path
 
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     compound_cascade_hint,
     iter_command_starts,
@@ -373,7 +374,8 @@ def _build_violation_message(
 # Main
 # ---------------------------------------------------------------------------
 
-def _main_inner() -> int:
+@fail_open
+def main() -> int:
     try:
         payload = json.load(sys.stdin)
     except Exception:
@@ -426,20 +428,6 @@ def _main_inner() -> int:
         return 2
     else:
         _emit_advisory(f"[commit-title-format-check] ADVISORY (STRICT=0):\n{violation}")
-        return 0
-
-
-def main() -> int:
-    """Preflight gate entrypoint — fail-open on any uncaught exception.
-
-    The blocking logic lives in ``_main_inner``; this wrapper guarantees the
-    documented fail-open contract ("a hook never breaks a normal session"):
-    any unexpected exception from later IO (subprocess / read_text / glob /
-    tokenization) returns 0 instead of crashing the hook.
-    """
-    try:
-        return _main_inner()
-    except Exception:
         return 0
 
 

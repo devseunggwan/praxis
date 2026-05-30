@@ -416,30 +416,28 @@ run_case "git -C /path commit valid title (silent)" \
   "silent" \
   '{"tool_name":"Bash","tool_input":{"command":"git -C /some/path commit -m \"feat(scope): add feature\""}}'
 # ---------------------------------------------------------------------------
-# Fail-open: uncaught exception in _main_inner returns 0 (issue #498)
+# Fail-open: entrypoint wrapped by the shared @fail_open guard (issue #498)
 # ---------------------------------------------------------------------------
-# Inject an unexpected exception (e.g. MemoryError / RecursionError) into
-# _main_inner and assert the outer try/except Exception wrapper in main()
-# returns exit 0 with no stderr — the documented "a hook never breaks a
-# normal session" fail-open contract.
+# The blocking logic returns 2; _hook_runtime.fail_open turns any uncaught
+# exception into exit 0. The decorator's BEHAVIOR is tested centrally in
+# tests/test_hook_runtime.sh — here we assert only that THIS hook opted into
+# the guard (functools.wraps exposes __wrapped__ on a decorated main()).
 _failopen_out=$(python3 - << PYEOF 2>&1
-import sys, importlib.util, io
+import importlib.util
 spec = importlib.util.spec_from_file_location("impl", "$HOOK")
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
-def _raise(): raise MemoryError("simulated catastrophic failure")
-mod._main_inner = _raise
-sys.stdin = io.StringIO('{}')
-sys.exit(mod.main())
+assert getattr(mod.main, "__wrapped__", None) is not None, "main is not @fail_open-wrapped"
+print("OK")
 PYEOF
 )
 _failopen_rc=$?
-if [ "$_failopen_rc" -eq 0 ] && [ -z "$_failopen_out" ]; then
-  echo "PASS  [fail-open] uncaught exception in _main_inner -> exit 0, no stderr"
+if [ "$_failopen_rc" -eq 0 ] && [ "$_failopen_out" = "OK" ]; then
+  echo "PASS  [fail-open] main() is wrapped by the shared @fail_open guard"
   PASS=$((PASS+1))
 else
-  echo "FAIL  [fail-open] uncaught exception in _main_inner (rc=$_failopen_rc out=$(echo "$_failopen_out" | head -c 160))"
-  FAIL=$((FAIL+1)); FAILED_NAMES+=("fail-open uncaught exception in _main_inner")
+  echo "FAIL  [fail-open] main() not @fail_open-wrapped (rc=$_failopen_rc out=$_failopen_out)"
+  FAIL=$((FAIL+1)); FAILED_NAMES+=("fail-open guard wrapping")
 fi
 
 
