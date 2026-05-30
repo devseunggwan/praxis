@@ -136,15 +136,21 @@ shell semantics. The following bypass patterns are accepted limits shared
 with `block-pr-without-caller-evidence` and `block-gh-state-all`:
 
 - Variable command name: `SUB=create; gh pr $SUB --title ...`
-- Subshell: `(gh pr create --title ...)`
 - `eval`: `eval gh pr create --title ...`
-- Wrapper indirection: `command gh pr create`, `xargs gh pr`
+- Wrapper indirection: `xargs gh pr`
 - Re-entry via `bash -c "gh pr create ..."`
 - Shell function/alias shadowing of `gh`
 
 Closing these would require a real shell parser. Empirically the failure
 modes the hook targets (forgotten dedup check under task momentum) do not
 involve such patterns; the cost/benefit doesn't favor full coverage.
+
+Closed bypasses (issue #511): path-prefix (`/usr/bin/gh pr create`) and the
+`command`/`builtin` shell wrappers (`command gh pr create`) are now caught.
+`strip_prefix` peels `command`/`builtin`, and gh detection uses the
+basename-aware `_is_gh_binary` helper (symmetric with the commit gates'
+`_is_git_binary`), which also normalizes leading subshell/substitution chars
+(`(gh …)`, `$(gh …)`).
 
 ### Relationship to sibling hooks
 

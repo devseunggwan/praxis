@@ -126,6 +126,74 @@ run_hint "empty command no hint"           false ''
 run_hint "quoted heredoc-like in compound" false 'echo "<<EOF foo" && git push'
 
 # ---------------------------------------------------------------------------
+# strip_prefix / _is_gh_binary — gh-gate normalization (issue #511)
+# ---------------------------------------------------------------------------
+#
+# strip_prefix must peel the `command`/`builtin` shell wrappers so that
+# `command gh pr merge` normalizes to argv[0]=="gh". A path-prefixed binary
+# (`/usr/bin/gh`) is left intact by strip_prefix and instead recognized via
+# the basename-aware _is_gh_binary helper (symmetric with _is_git_binary).
+
+# run_strip name "expected_json_list" "tok1|tok2|..."
+#   argv tokens are passed via the `|`-separated string; expected is a JSON
+#   list compared against repr(strip_prefix(argv)).
+run_strip() {
+  local name="$1" expected="$2" tokens="$3"
+  local actual
+  actual=$(python3 - "$tokens" <<'PYEOF'
+import json, sys
+from _hook_utils import strip_prefix
+argv = sys.argv[1].split("|")
+print(json.dumps(strip_prefix(argv)))
+PYEOF
+)
+  if [ "$actual" = "$expected" ]; then
+    echo "PASS [strip_prefix] $name"; PASS=$((PASS + 1))
+  else
+    echo "FAIL [strip_prefix expected=$expected got=$actual] $name"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# run_gh_bin name expected(true|false) token
+run_gh_bin() {
+  local name="$1" expected="$2" token="$3"
+  local actual
+  actual=$(python3 - "$token" <<'PYEOF'
+import sys
+from _hook_utils import _is_gh_binary
+print(str(_is_gh_binary(sys.argv[1])).lower())
+PYEOF
+)
+  if [ "$actual" = "$expected" ]; then
+    echo "PASS [_is_gh_binary:$expected] $name"; PASS=$((PASS + 1))
+  else
+    echo "FAIL [_is_gh_binary expected=$expected got=$actual] $name"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# command/builtin wrappers peel to the real argv[0]
+run_strip "command wrapper peels"        '["gh", "pr", "merge"]'      'command|gh|pr|merge'
+run_strip "builtin wrapper peels"         '["gh", "pr", "merge"]'      'builtin|gh|pr|merge'
+run_strip "builtin command nested peels"  '["gh", "pr", "merge"]'      'builtin|command|gh|pr|merge'
+run_strip "command after env peels"       '["gh", "pr", "merge"]'      'env|command|gh|pr|merge'
+# path-prefixed gh is left intact by strip_prefix (basename handled downstream)
+run_strip "path-prefix gh untouched"      '["/usr/bin/gh", "pr", "merge"]' '/usr/bin/gh|pr|merge'
+run_strip "command + path-prefix gh"      '["/usr/bin/gh", "pr", "merge"]' 'command|/usr/bin/gh|pr|merge'
+
+# _is_gh_binary basename recognition
+run_gh_bin "bare gh"            true  'gh'
+run_gh_bin "abs path /usr/bin/gh" true '/usr/bin/gh'
+run_gh_bin "rel path ./gh"      true  './gh'
+run_gh_bin "subshell \$(gh"     true  '$(gh'
+run_gh_bin "group (gh"          true  '(gh'
+run_gh_bin "not gh: github"     false 'github'
+run_gh_bin "not gh: ghi"        false 'ghi'
+run_gh_bin "not gh: git"        false 'git'
+run_gh_bin "not gh: foogh"      false 'foogh'
+
+# ---------------------------------------------------------------------------
 # tokenize_with_roles — role-aware token API (issue #263)
 # ---------------------------------------------------------------------------
 #

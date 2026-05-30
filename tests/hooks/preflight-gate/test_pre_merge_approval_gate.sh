@@ -207,6 +207,31 @@ run_case "inline CMUX_DELEGATE=1 gh -R owner/repo pr merge (ask, not delegate se
   "ask" "no-delegate" \
   '{"tool_name":"Bash","tool_input":{"command":"CMUX_DELEGATE=1 gh -R owner/repo pr merge 1"}}'
 
+# --- #511: path-prefix / command-wrapper bypass must NOT slip past the gate → ASK
+# `argv[0] == "gh"` exact match previously let `/usr/bin/gh pr merge` and
+# `command gh pr merge` through silently. _is_gh_binary (basename) + the
+# command/builtin peel in strip_prefix close both.
+
+run_case "direct session: /usr/bin/gh pr merge 5 (path-prefix, ask)" \
+  "ask" "no-delegate" \
+  '{"tool_name":"Bash","tool_input":{"command":"/usr/bin/gh pr merge 5"}}'
+
+run_case "direct session: command gh pr merge 5 (command wrapper, ask)" \
+  "ask" "no-delegate" \
+  '{"tool_name":"Bash","tool_input":{"command":"command gh pr merge 5"}}'
+
+run_case "direct session: builtin command gh pr merge 5 (builtin wrapper, ask)" \
+  "ask" "no-delegate" \
+  '{"tool_name":"Bash","tool_input":{"command":"builtin command gh pr merge 5"}}'
+
+run_case "direct session: /usr/bin/gh -R owner/repo pr merge (path-prefix + global flag, ask)" \
+  "ask" "no-delegate" \
+  '{"tool_name":"Bash","tool_input":{"command":"/usr/bin/gh -R owner/repo pr merge 5"}}'
+
+run_case "direct session: /usr/bin/gh pr list (path-prefix read, not merge, silent)" \
+  "silent" "no-delegate" \
+  '{"tool_name":"Bash","tool_input":{"command":"/usr/bin/gh pr list"}}'
+
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then
