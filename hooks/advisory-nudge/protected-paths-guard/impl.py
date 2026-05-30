@@ -182,7 +182,9 @@ def _is_self_edit(path: str) -> bool:
         rel = os.path.relpath(os.path.normpath(path), os.path.abspath(plugin_root))
     except ValueError:
         return False
-    return rel == "." or not rel.startswith(".." + os.sep)
+    # rel == ".." means `path` IS the parent of plugin_root (outside it), so it
+    # must not be exempted; `rel == "."` (path == plugin_root) is inside.
+    return rel != ".." and not rel.startswith(".." + os.sep)
 
 
 def _is_planning_artifact(path: str) -> bool:

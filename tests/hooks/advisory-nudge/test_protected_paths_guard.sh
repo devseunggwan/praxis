@@ -102,6 +102,25 @@ print(json.dumps({
   fi
 }
 
+# White-box assertion for _is_self_edit — black-box run_case cannot distinguish
+# the rel == ".." parent-dir case (its basename is never a protected file, so
+# the hook is silent either way). Assert the function return value directly.
+assert_self_edit() {
+  local name="$1" path="$2" plugin_root="$3" expected="$4"
+  local got
+  got=$(CLAUDE_PLUGIN_ROOT="$plugin_root" python3 -c '
+import os, sys, importlib.util
+spec = importlib.util.spec_from_file_location("pg", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m._is_self_edit(sys.argv[2]))' "$HOOK" "$path")
+  if [ "$got" = "$expected" ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] _is_self_edit=$got expected=$expected"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
 # === ADVISORY — basename-exact protected files =============================
 
 run_case ".env (bare)" advisory Write ".env"
@@ -203,6 +222,13 @@ run_case "relative .env advisory (cwd=plugin root, issue #495)" advisory \
 run_case "abs-path self-edit still silent (issue #495 regression)" silent \
   Write "$ROOT_DIR/hooks/advisory-nudge/protected-paths-guard/impl.py" \
   "CLAUDE_PLUGIN_ROOT=$ROOT_DIR"
+
+# White-box: rel == "." (path == plugin_root) is inside; rel == ".." (path is the
+# parent dir, outside) must NOT be exempted — the bug this guards against.
+assert_self_edit "self-edit: plugin_root itself (rel '.')" "$ROOT_DIR" "$ROOT_DIR" True
+assert_self_edit "self-edit: file inside plugin_root" "$ROOT_DIR/hooks/x/.env" "$ROOT_DIR" True
+assert_self_edit "self-edit: parent dir not exempt (rel '..')" "$(dirname "$ROOT_DIR")" "$ROOT_DIR" False
+assert_self_edit "self-edit: relative path never exempt" ".env" "$ROOT_DIR" False
 
 # === ADVISORY — .git-credentials / .pgpass (issue #495 LOW additions) ======
 
