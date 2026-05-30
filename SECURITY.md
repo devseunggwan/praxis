@@ -36,17 +36,17 @@ Every entry was verified against the hook source files listed.
 
 | Hook | Command | Purpose |
 |------|---------|---------|
-| `pre-gh-pr-create-dedup-gate.py` | `git remote get-url origin` | Resolve the repo owner/name for the dedup search |
-| `pre-edit-protected-branch-guard.py` | `git rev-parse --show-toplevel` | Locate the git repo root |
-| `pre-edit-protected-branch-guard.py` | `git rev-parse --abbrev-ref HEAD` | Read the current branch name |
-| `pre-edit-protected-branch-guard.py` | `git status --porcelain` | Check for a dirty working tree |
-| `pre-edit-protected-branch-guard.py` | `git log --oneline -3` | Detect recent PR-suffix commits on a clean tree |
+| `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py` | `git remote get-url origin` | Resolve the repo owner/name for the dedup search |
+| `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git rev-parse --show-toplevel` | Locate the git repo root |
+| `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git rev-parse --abbrev-ref HEAD` | Read the current branch name |
+| `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git status --porcelain` | Check for a dirty working tree |
+| `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git log --oneline -3` | Detect recent PR-suffix commits on a clean tree |
 
 ### `gh` — GitHub CLI
 
 | Hook | Command | Purpose |
 |------|---------|---------|
-| `pre-gh-pr-create-dedup-gate.py` | `gh pr list --repo <r> --state all --search <kw> --json ...` | Search existing PRs before creating a new one |
+| `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py` | `gh pr list --repo <r> --state all --search <kw> --json ...` | Search existing PRs before creating a new one |
 
 All `git` and `gh` invocations are **read-only**. No hook writes to remote
 state. Hooks fail-open (exit 0) when the binary is missing or times out.

@@ -18,9 +18,10 @@ user message or recent Bash commands.
 |------|--------------|---------|
 | `completion-verify.sh` | Last ~400 lines of transcript | Verify that a Bash verification command was run in the same turn as a completion claim |
 | `retrospect-mix-check.sh` | Last ~400 lines of transcript | Confirm that retrospect Stage 3 outputs include non-memory action types |
-| `block-ask-end-option.py` | Most recent user message | Detect whether the user sent a stop signal before blocking an end-option menu item |
-| `block-manufactured-action-menu.py` | Most recent user message | Detect command-intent signals to suppress unnecessary confirmation menus |
-| `external-write-falsify-check.py` | Recent Bash commands | Confirm a verification call precedes an external write |
+| `hooks/preflight-gate/block-ask-end-option/impl.py` | Most recent user message | Detect whether the user sent a stop signal before blocking an end-option menu item |
+| `hooks/preflight-gate/block-manufactured-action-menu/impl.py` | Most recent user message | Detect command-intent signals to suppress unnecessary confirmation menus |
+| `hooks/advisory-nudge/external-write-falsify-check/impl.py` | Recent Bash commands | Confirm a verification call precedes an external write |
+| `hooks/advisory-nudge/pre-output-falsification-gate/impl.py` | Last ~400 lines of transcript | Detect negative-evidence context before surfacing a (Recommended) option |
 
 Transcript data is read locally only, never forwarded or stored beyond the
 hook's in-process execution.
@@ -34,8 +35,9 @@ back-compat fallback.
 
 | Hook | State file | Contents |
 |------|-----------|---------|
-| `session-intent.py` | `${TMPDIR:-/tmp}/praxis-session-intent-<session_id>.json` | Detected session intent flag (read vs. mutation) |
-| `pre-edit-md-escape-advisory.py` | `${TMPDIR:-/tmp}/praxis-md-read-history-<session_id>.json` | Set of `.md` file paths Read in this session |
+| `hooks/preflight-gate/session-intent/impl.py` | `${TMPDIR:-/tmp}/praxis-session-intent-<session_id>.json` | Detected session intent flag (read vs. mutation) |
+| `hooks/postuse-correction/pre-edit-md-escape-advisory/impl.py` | `${TMPDIR:-/tmp}/praxis-md-read-history-<session_id>.json` | Set of `.md` file paths Read in this session |
+| `hooks/advisory-nudge/pre-output-falsification-gate/impl.py` | `${TMPDIR:-/tmp}/praxis-pre-output-falsification-gate/<session_id_hash>/<key_hash>` | Per-session command-repetition counters (Lane B) |
 
 Strike counter state is stored in a dedicated directory:
 
@@ -48,7 +50,7 @@ counters). They never contain the text of user messages or assistant responses.
 
 ## Memory Access
 
-`memory-hint.py` reads `*.md` files from the project memory directory
+`hooks/advisory-nudge/memory-hint/impl.py` reads `*.md` files from the project memory directory
 (`~/.claude/projects/<slugified-cwd>/memory/`, or `PRAXIS_MEMORY_DIR` if set).
 This is a read-only scan to surface relevant memory entry descriptions as
 advisory stderr output. Hooks never modify memory files.
@@ -69,7 +71,7 @@ However, praxis hooks and skills DO invoke external CLIs (`git`, `gh`,
 `cmux`, `claude`, `codex`, `gemini`) with the user's own credentials.
 Some of those invocations make network calls — most notably:
 
-- `hooks/pre-gh-pr-create-dedup-gate.py` runs `gh pr list` against the
+- `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py` runs `gh pr list` against the
   target repo's PR search API to detect duplicate PRs.
 - `skills/cmux-delegate` performs two distinct egress steps when run
   in a GitHub-backed repo:
