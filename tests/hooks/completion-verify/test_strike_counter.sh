@@ -491,6 +491,30 @@ test_ac26_legacy_state_migration() {
   [ "$migrated" -eq 1 ] && printf '%s' "$out" | grep -q "Strikes: 2/3"
 }
 
+# ---- AC26b (issue #527): migration does NOT fire when PRAXIS_STATE_DIR set --
+# When an explicit override is in effect the guard `[ -z "${PRAXIS_STATE_DIR:-}" ]`
+# is false, so legacy content must NOT be copied into any location and the
+# counter must be read from the override dir (empty → 0 strikes).
+test_ac26b_no_migration_when_override_set() {
+  local home override_dir legacy_dir sid out migrated
+  home=$(mktemp -d)
+  override_dir=$(mktemp -d)
+  sid="no-migrate-$$-${RANDOM}"
+  # Seed legacy location with a non-zero strike count
+  legacy_dir="$home/.claude/state/praxis/strikes"
+  mkdir -p "$legacy_dir"
+  printf '{"count":1,"reasons":["should not migrate"]}' > "$legacy_dir/$sid.json"
+  # Run with PRAXIS_STATE_DIR set — migration guard must suppress the copy
+  out=$(HOME="$home" PRAXIS_STATE_DIR="$override_dir" \
+    CLAUDE_SESSION_ID="$sid" "$STRIKE" status 2>&1)
+  # New location must NOT contain anything copied from legacy
+  migrated=0
+  [ -f "$override_dir/strikes/$sid.json" ] && migrated=1
+  # Counter must read from the (empty) override dir → 0
+  rm -rf "$home" "$override_dir"
+  [ "$migrated" -eq 0 ] && printf '%s' "$out" | grep -q "Strikes: 0/3"
+}
+
 # ---------- runner ----------------------------------------------------------
 echo "strike-counter.sh tests"
 echo "------------------------"
@@ -520,6 +544,7 @@ run "AC23 stop hook block message includes reflection instructions" test_ac23_st
 run "AC24 block message includes persuasion step instructions" test_ac24_block_message_has_persuasion_step
 run "AC25 state isolated from \$CLAUDE_PLUGIN_DATA (issue #126)" test_ac25_state_isolated_from_claude_plugin_data
 run "AC26 durable strike state migrates to ~/.praxis (issue #527)" test_ac26_legacy_state_migration
+run "AC26b no migration when PRAXIS_STATE_DIR override is set (issue #527)" test_ac26b_no_migration_when_override_set
 
 echo "------------------------"
 echo "Passed: $PASS  Failed: $FAIL"
