@@ -46,7 +46,7 @@ hookEvents: [Bash, Edit, AskUserQuestion]       # event whitelist (default [Bash
 
 ### Authoring
 
-The fields above are not authored by hand in the typical flow. The `retrospect` skill emits them at memory-write time. See [`skills/retrospect/SKILL.md`](../../skills/retrospect/SKILL.md) Stage 4 Action 1 — specifically the "Frontmatter contract — `memory-hint` opt-in" subsection — for the per-category `hookable` default matrix and `hookKeywords` selection rules. This file specifies the **runtime parser contract** (what the hook accepts); the SKILL.md section specifies the **authoring decision** (which memories should opt in, which keywords to pick).
+The fields above are not authored by hand in the typical flow. The `retrospect` skill emits them at memory-write time. See [`skills/retrospect/SKILL.md`](../../../skills/retrospect/SKILL.md) Stage 4 Action 1 — specifically the "Frontmatter contract — `memory-hint` opt-in" subsection — for the per-category `hookable` default matrix and `hookKeywords` selection rules. This file specifies the **runtime parser contract** (what the hook accepts); the SKILL.md section specifies the **authoring decision** (which memories should opt in, which keywords to pick).
 
 ### Per-event tokenization
 

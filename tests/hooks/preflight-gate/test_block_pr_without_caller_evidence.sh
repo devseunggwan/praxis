@@ -223,7 +223,7 @@ payload = json.dumps({
     "tool_input": {"command": sys.argv[1]},
 })
 sys.stdout.write(payload)
-' "$1" | python3 "$ROOT_DIR/hooks/preflight-gate/block-pr-without-caller-evidence/impl.py" 2>&1 >/dev/null || true
+' "$1" | { python3 "$ROOT_DIR/hooks/preflight-gate/block-pr-without-caller-evidence/impl.py" >/dev/null; } 2>&1 || true
 }
 
 # Positive: compound bash with heredoc redirect → hint appears

@@ -62,7 +62,7 @@ for the full schema, supported patterns, and examples.
 
 Whole-transcript scan: one skill invocation anywhere in the session satisfies
 all subsequent matching commands. The mechanism is identical to
-[`block-commit-without-codex-review`](block-commit-without-codex-review.md)
+[`block-commit-without-codex-review`](../block-commit-without-codex-review/spec.md)
 (`_scan_transcript` + `_has_skill_tool_use`).
 
 ## Escape hatches
