@@ -36,9 +36,10 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_MD_ESCAPE_SKIP` | `pre-edit-md-escape-advisory` | Skip the markdown-escape advisory |
 | `PRAXIS_PBGUARD_SKIP` | `pre-edit-protected-branch-guard` | Skip the protected-branch edit guard |
 | `PRAXIS_MOMENTUM_BYPASS` | `momentum-rule-retrieval-gate` | Skip the high-momentum rule nudge |
-| `PRAXIS_MOMENTUM_ACK` | `momentum-rule-retrieval-gate` | Acknowledge the nudge for the current action (one-shot) |
 | `PRAXIS_VERSION_BUMP_BYPASS` | `version-bump-evidence-check` | Skip the version-bump evidence advisory |
-| `PRAXIS_GH_JSON_BYPASS` | `gh-json-validator` | Skip the `gh --json` field validation |
+| `PRAXIS_GH_JSON_BYPASS` | `gh-json-validator` | Skip the `gh --json` field validation (env var form). Note: the inline-comment form `# PRAXIS_GH_JSON_BYPASS=skip` also bypasses the hook but is **not** captured by bypass-telemetry |
+| `PRAXIS_ASK_END_ADVISORY` | `block-ask-end-option` | Demote the end-option guard to advisory mode (exit 0 + stderr) |
+| `PRAXIS_SKIP_COMMIT_FLAG_CHECK` | `verify-commit-flag-override` | Skip the commit-flag override check |
 | `PRAXIS_BYPASS_TELEMETRY_DISABLE` | `bypass-telemetry` | Disable bypass-event logging |
 | `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE` | `block-commit-without-codex-review` | Skip the pre-commit codex-review gate (legacy name) |
 | `CLAUDE_HOOK_BYPASS_DUP_GATE` | `block-gh-issue-create-without-dup-search` | Skip the issue-dedup-search gate (legacy name) |
@@ -46,23 +47,24 @@ in [`../SECURITY.md`](../SECURITY.md).
 
 ## Strict (escalate advisory → block)
 
-| Variable | Hook |
-|----------|------|
-| `PRAXIS_PROTECTED_PATHS_STRICT` | `protected-paths-guard` |
-| `PRAXIS_DESTRUCTIVE_BASH_STRICT` | `destructive-bash-guard` |
-| `PRAXIS_PATH_PROBE_STRICT` | `path-probe-gate` |
-| `PRAXIS_PHANTOM_PATH_STRICT` | `external-write-path-existence-check` |
-| `PRAXIS_MERGE_CLAIM_STRICT` | `merge-state-claim-gate` |
-| `PRAXIS_PUSH_VERIFY_STRICT` | `push-remote-ref-verify` |
-| `PRAXIS_MOMENTUM_STRICT` | `momentum-rule-retrieval-gate` |
-| `PRAXIS_VERSION_BUMP_STRICT` | `version-bump-evidence-check` |
-| `PRAXIS_COMMIT_TITLE_FORMAT_STRICT` | `commit-title-format-check` |
-| `PRAXIS_BRANCH_NAME_STRICT` | `branch-name-check` |
-| `PRAXIS_ASK_END_STRICT` | `block-ask-end-option` |
-| `PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT` | `block-manufactured-action-menu` |
-| `PRAXIS_EXTERNAL_WRITE_STRICT` | `external-write-falsify-check` |
-| `PRAXIS_AUTHOR_EXEMPT_STRICT` | `external-write-falsify-check` |
-| `PRAXIS_CLUSTER_APPROVAL_STRICT` | `external-write-falsify-check` |
+| Variable | Hook | Note |
+|----------|------|------|
+| `PRAXIS_PROTECTED_PATHS_STRICT` | `protected-paths-guard` | |
+| `PRAXIS_DESTRUCTIVE_BASH_STRICT` | `destructive-bash-guard` | |
+| `PRAXIS_PATH_PROBE_STRICT` | `path-probe-gate` | |
+| `PRAXIS_PHANTOM_PATH_STRICT` | `external-write-path-existence-check` | |
+| `PRAXIS_MERGE_CLAIM_STRICT` | `merge-state-claim-gate` | |
+| `PRAXIS_PUSH_VERIFY_STRICT` | `push-remote-ref-verify` | |
+| `PRAXIS_MOMENTUM_STRICT` | `momentum-rule-retrieval-gate` | |
+| `PRAXIS_MOMENTUM_ACK` | `momentum-rule-retrieval-gate` | Strict-mode unlock token — unblocks one invocation when `PRAXIS_MOMENTUM_STRICT=1`; no effect in advisory mode |
+| `PRAXIS_VERSION_BUMP_STRICT` | `version-bump-evidence-check` | |
+| `PRAXIS_COMMIT_TITLE_FORMAT_STRICT` | `commit-title-format-check` | |
+| `PRAXIS_BRANCH_NAME_STRICT` | `branch-name-check` | |
+| `PRAXIS_ASK_END_STRICT` | `block-ask-end-option` | |
+| `PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT` | `block-manufactured-action-menu` | |
+| `PRAXIS_EXTERNAL_WRITE_STRICT` | `external-write-falsify-check` | |
+| `PRAXIS_AUTHOR_EXEMPT_STRICT` | `external-write-falsify-check` | |
+| `PRAXIS_CLUSTER_APPROVAL_STRICT` | `external-write-falsify-check` | |
 
 ## Config (tune behaviour)
 
@@ -80,10 +82,8 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_WORKTREE_ENFORCED_REPOS` | `worktree-edit-gate` | Repos where the worktree workflow is enforced |
 | `PRAXIS_WORKTREE_BASE_BRANCHES` | `worktree-edit-gate` | Base branches treated as "not a worktree" |
 | `PRAXIS_WORKTREE_SOURCE_EXTENSIONS` | `worktree-edit-gate` | File extensions the gate applies to |
-| `PRAXIS_ASK_END_ADVISORY` | `block-ask-end-option` | Force advisory mode (opposite of strict) |
 | `PRAXIS_MD_ESCAPE_MODE` | `pre-edit-md-escape-advisory` | Select advisory vs block mode |
 | `PRAXIS_INTENT_PIVOT_MODE` | `session-intent` | Pivot-detection mode |
-| `PRAXIS_SKIP_COMMIT_FLAG_CHECK` | `verify-commit-flag-override` | Skip the commit-flag override check |
 
 ## Path / test (relocate state, caches, logs)
 
