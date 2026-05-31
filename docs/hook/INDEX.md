@@ -1,8 +1,8 @@
 # Hook Index (categorized)
 
 Praxis hooks grouped by enforcement role. For the full per-hook spec, follow
-each link. For the flat tabular listing (with event column), see the Hook
-section of the [project AGENTS.md](../../AGENTS.md#hook-index).
+each link. For the flat tabular listing (with event column), see the
+[Hook index in ARCHITECTURE.md](../../ARCHITECTURE.md#hook-index).
 
 ---
 
