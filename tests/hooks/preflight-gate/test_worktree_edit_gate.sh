@@ -33,7 +33,7 @@ trap 'rm -rf "$TMPDIR_BASE"' EXIT
 
 # Init repo, make initial commit on main, then create a feature branch.
 (
-  cd "$REPO_DIR"
+  cd "$REPO_DIR" || exit
   git -c user.name="Test" -c user.email="test@test.com" init -b main
   touch dummy.txt
   git -c user.name="Test" -c user.email="test@test.com" add dummy.txt
@@ -54,7 +54,7 @@ REPO_ORG_REPO="myorg/myrepo"
 OTHER_REPO_DIR="$TMPDIR_BASE/other-repo"
 mkdir -p "$OTHER_REPO_DIR"
 (
-  cd "$OTHER_REPO_DIR"
+  cd "$OTHER_REPO_DIR" || exit
   git -c user.name="Test" -c user.email="test@test.com" init -b main
   touch dummy.txt
   git -c user.name="Test" -c user.email="test@test.com" add dummy.txt
@@ -65,7 +65,7 @@ mkdir -p "$OTHER_REPO_DIR"
 SPACED_REPO_DIR="$TMPDIR_BASE/space repo"
 mkdir -p "$SPACED_REPO_DIR"
 (
-  cd "$SPACED_REPO_DIR"
+  cd "$SPACED_REPO_DIR" || exit
   git -c user.name="Test" -c user.email="test@test.com" init -b main
   touch dummy.txt
   git -c user.name="Test" -c user.email="test@test.com" add dummy.txt
@@ -98,6 +98,7 @@ pipe_hook() {
   local payload="$1"; shift
   (
     for kv in "$@"; do
+      # shellcheck disable=SC2163  # kv holds a literal KEY=VALUE pair
       export "$kv"
     done
     printf '%s' "$payload" | python3 "$HOOK"

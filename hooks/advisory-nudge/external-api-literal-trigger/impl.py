@@ -34,7 +34,6 @@ are excluded to avoid noise on internal source-code literals.
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 import sys as _sys

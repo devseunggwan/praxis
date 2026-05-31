@@ -146,7 +146,7 @@ def _process_segment(argv: list[str], cwd: str) -> int:
     if valid is None:
         return 0
 
-    missing = [l for l in labels if l not in valid]
+    missing = [lbl for lbl in labels if lbl not in valid]
     if not missing:
         return 0
 
@@ -334,7 +334,7 @@ def _emit_block(missing: list[str], repo: str, sample: list[str]) -> None:
     ]
     if sample:
         lines.append(f"Labels in {repo} (showing {len(sample)}):")
-        lines.extend(f"  - {l}" for l in sample)
+        lines.extend(f"  - {lbl}" for lbl in sample)
         lines.append("")
     lines.extend([
         "Resolve by one of:",
