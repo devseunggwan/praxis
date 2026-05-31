@@ -142,28 +142,21 @@ NEGATION_PATTERNS_EN = (
 )
 NEGATION_WINDOW = 30  # characters preceding the phrase match
 
-# Ambiguous phrases that read as stop signals in isolation but are routinely
-# used as action directives when followed by an object + action verb, e.g.
-# "I'm done with the analysis, proceed to implementation" or "wrap up the PR
-# tests and deploy". For these, a stop match is disqualified when an action
-# verb follows the phrase within ACTION_FOLLOWUP_WINDOW characters — the
-# message is directing further work, not requesting termination.
-#
-# Termination-specific phrases ("stop here", "end the session", "session
-# end", "that's all", "quit now", "cancel this") are deliberately NOT listed
-# here: they resist the action-directive reading and stay unconditional stop
-# signals.
+# Phrases that read as stop signals in isolation but are routinely action
+# directives when followed by an action verb ("I'm done with the analysis,
+# proceed ..."): a stop match here is disqualified when an action verb follows
+# within ACTION_FOLLOWUP_WINDOW chars (issue #515). Termination-specific
+# phrases ("stop here", "that's all", "quit now") are deliberately excluded —
+# they stay unconditional stop signals.
 AMBIGUOUS_STOP_PHRASES_EN = (
     "wrap up", "wrap this up",
     "finish up",
     "no more",
     "we're done", "we are done", "i'm done", "i am done",
 )
-# Action verbs that, when they appear shortly after an ambiguous stop phrase,
-# reveal the message as a directive to continue working rather than to stop.
-# Matched as whole words to avoid substring false positives ("running" should
-# not count, but a directive "run the tests" should). Multi-word entries
-# ("go ahead", "move on") are matched as phrases.
+# Action verbs that, after an ambiguous stop phrase, mark the message as a
+# directive to keep working. Single words matched whole-word ("run the tests"
+# counts, "running" does not); multi-word entries matched as phrases.
 ACTION_VERBS_EN = (
     "proceed", "continue", "implement", "deploy", "merge", "push",
     "run", "execute", "review", "test", "build", "create", "start",
@@ -344,9 +337,7 @@ def _has_stop_signal(user_message: str) -> bool:
             prefix = lower[max(0, idx - NEGATION_WINDOW):idx]
             if not _has_negation(prefix):
                 # Ambiguous phrases are NOT a stop signal when an action verb
-                # follows them ("I'm done with the analysis, proceed ...",
-                # "wrap up the PR tests and deploy") — the user is directing
-                # further work, not asking to terminate.
+                # follows (the user is directing further work, not stopping).
                 if ambiguous:
                     suffix = lower[idx + len(phrase_lower):
                                    idx + len(phrase_lower) + ACTION_FOLLOWUP_WINDOW]
@@ -371,14 +362,11 @@ def _has_negation(prefix: str) -> bool:
 
 
 def _has_action_verb(suffix: str) -> bool:
-    """True if the window following an ambiguous stop phrase contains an
-    action verb — i.e. the message is directing further work.
+    """True if the window after an ambiguous stop phrase contains an action verb.
 
-    Single-word verbs are matched as whole words (ASCII lookaround, not
-    Python `\\b`, mirroring the boundary strategy used elsewhere in the
-    suite) so "run the tests" counts but "running smoothly" does not.
-    Multi-word verb phrases ("go ahead", "move on") are matched as
-    substrings since their internal spaces already anchor them.
+    Single-word verbs use ASCII-lookaround whole-word matching (mirroring the
+    suite's boundary strategy) so "run the tests" counts but "running" does
+    not; multi-word phrases are matched as substrings.
     """
     for verb in ACTION_VERBS_EN:
         if " " in verb:

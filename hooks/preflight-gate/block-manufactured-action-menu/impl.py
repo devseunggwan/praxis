@@ -111,15 +111,10 @@ COMMAND_SIGNALS_KO = (
     "계속",
 )
 
-# Negation markers that, when found following a Korean signal token,
-# convert the directive into "do not <action>" — must NOT register as
-# command-intent. Examples: "진행하지 마", "계속하지 마", "머지하지 마",
-# "진행하면 안 됩니다", "진행하지 않습니다", "진행 안 됩니다".
-#
-# Three negation shapes are covered:
-#   - prohibitive  "...하지 마/말"   ("don't do it")
-#   - conditional  "...하면 안 ..."  ("must not do it")
-#   - declarative  "...하지 않 ..." / "...안 됩니다/돼/된다" ("is/will not do it")
+# Negation markers following a Korean signal token that turn the directive
+# into "do not <action>" — must NOT register as command-intent (issue #515).
+# Three shapes covered: prohibitive "...하지 마/말", conditional "...하면 안 ...",
+# declarative "...하지 않 ..." / "...안 됩니다/돼/된다".
 NEGATION_FOLLOWUP_KO = (
     "하지 마",
     "하지 말",
@@ -248,15 +243,10 @@ def _collect_option_labels(tool_input: dict) -> list[str]:
 def _has_manufactured_marker(labels: list[str]) -> bool:
     """True if any option label carries a manufactured-menu marker.
 
-    Korean markers stay substring-matched (CJK has no ASCII word boundary
-    and these inflected verb forms have low collision risk). English
-    markers are matched with ASCII-letter lookaround instead of a raw
-    substring so that genuine alternative-path labels are not swept up:
-    `proceed`/`continue`/`go ahead` must not match `Discontinue support`,
-    and `as requested`/`as instructed` must not match arbitrary prose
-    embedding those words. The lookaround mirrors `_has_destructive_label`
-    — it rejects an alphabetic neighbour on either side while still
-    matching mixed-script labels (e.g. `proceed?` / `proceed 합니다`).
+    Korean markers stay substring-matched (CJK has no ASCII word boundary,
+    low collision risk). English markers use ASCII-letter lookaround so
+    alternative-path labels are not swept up (`continue` must not match
+    `Discontinue support`) while mixed-script labels still match (issue #515).
     """
     if not labels:
         return False

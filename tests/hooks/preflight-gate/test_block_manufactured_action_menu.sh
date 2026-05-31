@@ -539,10 +539,8 @@ P_ef7=$(build_payload "$T_ef7" '["revise", "as instructed"]')
 run_case "[execute-family] 'the run failed' (non-directive) + marker → pass" pass default "$P_ef7"
 
 # ---------------------------------------------------------------------------
-# (l) Defect 2 (issue #515) — extended Korean negation forms. Before the
-#     fix only "하지 마/말" was handled, so "진행하면 안 됩니다" / "진행하지
-#     않습니다" / "진행 안 됩니다" were misread as command-intent → false
-#     advisory. These negated directives must NOT register as command-intent.
+# (l) Defect 2 (issue #515) — extended Korean negation forms (conditional /
+#     declarative, beyond "하지 마/말") must NOT register as command-intent.
 # ---------------------------------------------------------------------------
 
 T_d2a=$(build_transcript "진행하면 안 됩니다")
@@ -577,11 +575,8 @@ P_d2g=$(build_payload "$T_d2g" '["Plan A", "진행할까요"]')
 run_case "[#515-d2] strict + '진행하면 안 됩니다' → pass" pass strict "$P_d2g"
 
 # ---------------------------------------------------------------------------
-# (m) Defect 2 (issue #515) — English marker word-boundary. Before the fix,
-#     markers "proceed" / "continue" / "as requested" substring-matched
-#     genuine alternative-path labels ("Discontinue support") → false
-#     advisory. Word-boundary matching rejects the substring case while
-#     still matching real markers.
+# (m) Defect 2 (issue #515) — English marker word-boundary: substring matches
+#     ("Discontinue" → "continue") are rejected; real markers still match.
 # ---------------------------------------------------------------------------
 
 # "Discontinue support" contains "continue" as a substring only — NOT a

@@ -509,10 +509,7 @@ run_case "[false-pos] '보류 중인 이슈 확인' / '보류 상태 검토' →
 
 # ---------------------------------------------------------------------------
 # (o) Defect 1 (issue #515) — ambiguous stop phrase + action verb is NOT a
-#     stop signal. "I'm done with the analysis, proceed to implementation"
-#     must NOT false-allow the end-option surface; the end-option block must
-#     still fire. The genuine termination form of the same phrase still
-#     short-circuits to pass.
+#     stop signal (block still fires); the genuine termination form passes.
 # ---------------------------------------------------------------------------
 
 # Action-directive readings — ambiguous phrase followed by an action verb →
