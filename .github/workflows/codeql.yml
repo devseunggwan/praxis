@@ -1,0 +1,43 @@
+name: codeql
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    # Weekly scan so newly-published CodeQL queries catch issues even when the
+    # code hasn't changed. Monday 07:00 UTC.
+    - cron: "0 7 * * 1"
+
+# A newer push to the same ref cancels the in-flight run.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: analyze (python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Permissions CodeQL needs: read code, write analysis results to the
+    # Security tab. Everything else stays default-denied.
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # CodeQL supports Python (the project's hook/script logic). Bash is not a
+      # CodeQL language — shellcheck.yml covers the shell sources instead.
+      - name: initialize codeql
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+
+      - name: analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"

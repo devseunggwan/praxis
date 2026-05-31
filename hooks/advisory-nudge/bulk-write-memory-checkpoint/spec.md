@@ -2,8 +2,6 @@
 
 Supported hosts: all
 
-Reference: [Bulk-authoring loop pre-checklist — CLAUDE.md](../../../AGENTS.md#bulk-authoring-loop-pre-checklist-mandatory)
-
 `hooks/bulk-write-memory-checkpoint.sh` fires on PreToolUse for `Edit`,
 `Write`, and `NotebookEdit` tool calls that target a Source-of-Truth (SOT)
 directory, and emits a **stderr advisory** (never a block) reminding the

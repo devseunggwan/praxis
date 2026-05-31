@@ -15,7 +15,7 @@ defects a single reviewer misses. Prose alone is unreliable (prompt-layer
 retrieval failure); per the established escalation pattern, structural
 enforcement at the commit checkpoint backs the rule.
 
-This is the inverse of [`block-sciomc-finding-commit`](block-sciomc-finding-commit.md):
+This is the inverse of [`block-sciomc-finding-commit`](../block-sciomc-finding-commit/spec.md):
 that hook blocks on the **presence** of a finding marker; this one blocks on the
 **absence** of the required skill invocation.
 

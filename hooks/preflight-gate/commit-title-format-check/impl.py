@@ -131,8 +131,6 @@ def _is_strict() -> bool:
 # Git commit message extraction (mirrors commit-title-length-check approach)
 # ---------------------------------------------------------------------------
 
-import os.path
-
 
 def _title_from_file(path: str, base_dir: str | None = None) -> str | None:
     """Read first line of a file; return None on any error or if stdin placeholder."""

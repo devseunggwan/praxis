@@ -91,6 +91,7 @@ pipe_hook() {
   local hook="$1" payload="$2"; shift 2
   (
     for kv in "$@"; do
+      # shellcheck disable=SC2163  # kv holds a literal KEY=VALUE pair
       export "$kv"
     done
     printf '%s' "$payload" | "$hook"
