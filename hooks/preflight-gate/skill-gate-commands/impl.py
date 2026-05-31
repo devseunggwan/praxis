@@ -58,14 +58,13 @@ from __future__ import annotations
 
 import json
 import os
-import re
-import shlex
 import sys
 from pathlib import Path
 from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
+from _hook_utils import safe_tokenize  # type: ignore[import-not-found]  # noqa: E402
 
 _MAX_BYTES = 50 * 1024 * 1024
 
@@ -135,25 +134,23 @@ _KNOWN_BINARY_GLOBAL_OPTS = {
 # the ``=``-joined form is already a single token and is handled by startswith("-")).
 _GIT_PUSH_OPTS_WITH_VALUE = {"-o", "--push-option", "--receive-pack", "--exec"}
 
-# Regex matching one or more trailing shell-separator characters attached to the
-# end of a token, e.g. ``create;`` produced by shlex when there is no space
-# before the semicolon.  We strip these so ``gh pr create;`` still matches
-# the pattern ``gh pr create``.
-_TRAIL_SEP_RE = re.compile(r"[;&|]+$")
-
-
 def _tokenize(command: str) -> list[str] | None:
-    """Return shlex tokens or None on parse error (fail-open).
+    """Tokenize via the shared ``safe_tokenize`` primitive (issue #514).
 
-    Post-processes to strip trailing shell-separator characters that shlex
-    attaches to the preceding token when the separator is not space-delimited
-    (e.g. ``gh pr create; echo done`` produces ``['gh', 'pr', 'create;', ...]``).
+    ``safe_tokenize`` (``shlex.shlex`` with ``punctuation_chars=';|&'``) emits
+    shell operators as their own tokens, so a whitespace-free one-liner like
+    ``gh pr create&&echo`` splits to ``['gh', 'pr', 'create', '&&', 'echo']``
+    rather than gluing ``create&&echo`` into a single token that slips past the
+    pattern matchers. Plain ``shlex.split`` keeps operators attached to the
+    adjacent word, which let that form bypass the gate entirely — exactly the
+    failure the shared primitive exists to prevent (see DESIGN.md →
+    "Structural tokenization, not regex").
+
+    Returns ``[]`` for an unparseable command (``safe_tokenize`` swallows
+    per-line parse errors); the matchers then find nothing and the gate fails
+    open. The ``None`` arm is retained for caller-contract stability.
     """
-    try:
-        raw = shlex.split(command, comments=False, posix=True)
-    except ValueError:
-        return None
-    return [_TRAIL_SEP_RE.sub("", t) for t in raw]
+    return safe_tokenize(command)
 
 
 def _skip_global_flags(tokens: list[str], i: int, opts_with_value: set[str]) -> int:

@@ -411,6 +411,36 @@ run_case "echo x; gh pr create (prefix cmd, block)" \
   "PRAXIS_SKILL_GATED_COMMANDS=$CFG_PR_CREATE"
 
 # ---------------------------------------------------------------------------
+# 19b. issue #514 — whitespace-free shell operator (no space on EITHER side).
+# Plain shlex.split glued `create&&echo` / `create;echo` into one token, which
+# the matchers never equalled to `create`, so the gate was bypassed entirely.
+# The trailing-separator strip only handled `create;` (trailing), not the
+# embedded operator. Switching _tokenize to the shared safe_tokenize splits the
+# operator into its own token and closes the bypass. The negative case ensures
+# the split did not start over-blocking a non-gated subcommand.
+# ---------------------------------------------------------------------------
+
+run_case "514: gh pr create&&echo (glued &&, was bypass, block)" \
+  "block" \
+  "$(mk_payload Bash 'gh pr create&&echo done' "$TX_WITHOUT")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_PR_CREATE"
+
+run_case "514: gh pr create;echo (glued ;, was bypass, block)" \
+  "block" \
+  "$(mk_payload Bash 'gh pr create;echo done' "$TX_WITHOUT")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_PR_CREATE"
+
+run_case "514: git push origin&&echo (glued &&, was bypass, block)" \
+  "block" \
+  "$(mk_payload Bash 'git push origin&&echo done' "$TX_WITHOUT")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_PUSH"
+
+run_case "514: gh pr list&&echo (non-gated subcmd, no over-block, silent)" \
+  "silent" \
+  "$(mk_payload Bash 'gh pr list&&echo done' "$TX_WITHOUT")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_PR_CREATE"
+
+# ---------------------------------------------------------------------------
 # 20. git push value-consuming flags (-o/--push-option) before origin (P2-2)
 # ---------------------------------------------------------------------------
 
