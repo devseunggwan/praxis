@@ -38,11 +38,9 @@ import os
 import re
 import subprocess
 import sys
-
-import sys as _sys
 from pathlib import Path as _Path
 
-_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
@@ -121,24 +119,26 @@ def _find_push_argv(command: str):
 
 
 def _parse_push(push_args: list[str]):
-    """Extract {remote, refspec, force} from push argv, or None to skip."""
+    """Extract {remote, refspec} from push argv, or None to skip."""
     positionals: list[str] = []
-    force = False
     i = 0
     while i < len(push_args):
         tok = push_args[i]
         if tok in _SKIP_FLAGS:
             return None
         if tok in ("--force", "-f", "--force-with-lease") or tok.startswith("--force-with-lease="):
-            force = True
             i += 1
             continue
         if tok in _VALUE_FLAGS:
             i += 2  # consume the value token too
             continue
         if tok.startswith("--") and "=" in tok:
-            if tok.split("=", 1)[0] in _SKIP_FLAGS:
+            key = tok.split("=", 1)[0]
+            if key in _SKIP_FLAGS:
                 return None
+            if key in _VALUE_FLAGS:
+                i += 1  # value already inline after `=`; no next token consumed
+                continue
             i += 1
             continue
         if tok.startswith("-"):
@@ -150,7 +150,7 @@ def _parse_push(push_args: list[str]):
         return None  # multiple refspecs — too ambiguous to verify safely
     remote = positionals[0] if positionals else None
     refspec = positionals[1] if len(positionals) >= 2 else None
-    return {"remote": remote, "refspec": refspec, "force": force}
+    return {"remote": remote, "refspec": refspec}
 
 
 def _resolve_targets(cwd: str, parsed: dict):
@@ -231,7 +231,7 @@ def _output_wrote_branch(output: str, branch: str) -> bool:
         return False
     if re.search(r"->\s*" + re.escape(branch) + r"\b", output):
         return True
-    if "[new branch]" in output and branch in output:
+    if "[new branch]" in output and re.search(r"\b" + re.escape(branch) + r"\b", output):
         return True
     return False
 

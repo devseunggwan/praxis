@@ -157,6 +157,31 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+# --- `git push -u origin main` (verified) -> silent (proves -u parses correctly) ---
+setup_repo
+git -C "$WORK" push -q -u origin main
+run_case silent "push-u-verified" "git push -u origin main" \
+  '{"exit":0,"stderr":"Branch '"'"'main'"'"' set up to track remote branch '"'"'main'"'"' from '"'"'origin'"'"'."}'
+
+# --- `git push origin HEAD:refs/heads/feature` absent on remote -> advisory ---
+# Proves refs/heads/ prefix is stripped when resolving remote_branch.
+setup_repo
+git -C "$WORK" push -q -u origin main
+git -C "$WORK" checkout -q -b feature
+echo d >"$WORK/d.txt"
+git -C "$WORK" add d.txt
+git -C "$WORK" commit -qm feat2   # feature never reaches the remote
+run_case advisory "refspec-refs-heads" "git push origin HEAD:refs/heads/feature" \
+  '{"exit":0,"stderr":" * [new branch]      HEAD -> feature"}'
+
+# --- `git push --repo=origin main` -> fail-open silent (proves fix #3: equals-form
+#     value-flag is consumed inline, no extra positional shifted; ls-remote on a
+#     non-remote-named-main is unreachable -> fail-open) -----------------------
+setup_repo
+git -C "$WORK" push -q -u origin main
+run_case silent "repo-equals-form" "git push --repo=origin main" \
+  '{"exit":0,"stderr":"Branch set up to track remote branch."}'
+
 echo "----"
 echo "PASS: $PASS / FAIL: $FAIL"
 [ "$FAIL" -eq 0 ]
