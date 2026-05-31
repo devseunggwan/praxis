@@ -76,12 +76,11 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 # We do NOT anchor on ~/.claude exactly — relative paths like
 # .claude/settings.json are also config paths.
 #
-# The settings.json / hooks.json branches are anchored to the start of the
-# token with an optional leading `./` (no bare `(?:^|/)`) so a repo-root form
-# (`settings.json`, `./settings.json`) matches but an unrelated file under any
-# other directory (`/tmp/settings.json`, `sub/settings.json`) does not misfire
-# the advisory (issue #513, 결함3). Such config files under a real config dir
-# still match via the .claude/ / .codex/ branches.
+# The settings.json / hooks.json branches anchor to the token start with an
+# optional leading `./` (not `(?:^|/)`) so a repo-root form matches but a file
+# under any other directory (`/tmp/settings.json`, `sub/settings.json`) does
+# not misfire (issue #513, 결함3); such files under a real config dir still
+# match via the .claude/ / .codex/ branches.
 
 _CONFIG_PATH_RE = re.compile(
     r"""

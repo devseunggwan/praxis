@@ -316,9 +316,7 @@ def _is_cmux_dispatch(argv: list[str]) -> bool:
     if "new-workspace" not in argv[1:]:
         return False
 
-    # Scan for --command and inspect its value. Match provider names on ASCII
-    # word boundaries so substrings like "CLAUDE_API_KEY=abc" do not false-fire
-    # the dispatch advisory (issue #513, 결함2).
+    # Scan for --command and inspect its value (matched via _AI_PROVIDER_RE).
     n = len(argv)
     for i, tok in enumerate(argv):
         value: str | None = None

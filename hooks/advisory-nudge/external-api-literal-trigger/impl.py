@@ -52,8 +52,7 @@ from _hook_utils import safe_tokenize  # type: ignore[import-not-found]  # noqa:
 # Unicode-aware, so Hangul counts as a word char and `AUTH_TOKEN이` /
 # `VENDOR_API_KEY를` would be missed because the trailing `\b` does not see a
 # boundary between the ASCII token and the adjacent Hangul (issue #513, 결함4).
-# Mirrors the output-block-falsify-advisory `_ANCHORING_EN_PATTERN` right
-# anchor. The leading `\b` is kept so we still avoid matching inside longer
+# The leading `\b` is kept so we still avoid matching inside longer
 # mixed-case identifiers (e.g. `myAUTH_TOKEN`).
 ALLCAPS_RE = re.compile(r"\b([A-Z][A-Z0-9_]{5,})(?![A-Z0-9_])")
 
