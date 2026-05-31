@@ -210,12 +210,9 @@ run_case "S04: --gpg-sign text inside -m body" silent \
   "$(payload 'git commit -m "discuss --gpg-sign policy in docs"')"
 
 # ---------------------------------------------------------------------------
-# Bundled short-flag clusters carrying -n (=--no-verify) (#512).
-#
-# `detect_overrides` matched COMMIT_FLAG_TOKENS exactly, so a standalone `-n`
-# was blocked but bundled clusters like `-vn`, `-nv`, `-anm`, `-nm` slipped
-# through. The decomposition must split the cluster and detect the embedded
-# `n` while leaving clean clusters (no `n`) alone.
+# Bundled short-flag clusters carrying -n (=--no-verify) (#512). The prior
+# exact COMMIT_FLAG_TOKENS match let clusters like `-vn`/`-anm` slip through;
+# clean clusters (no `n`) must stay silent.
 # ---------------------------------------------------------------------------
 
 run_case "C01: git commit -vn -m msg (bundled no-verify)" deny \

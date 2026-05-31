@@ -242,9 +242,8 @@ run_case "git_super_prefix_fused_force_push" \
   "" \
   "git --super-prefix=x push --force"
 
-# Issue #512: bundled short-flag clusters carrying `f` (=--force) must fire.
-# `_is_force_push` checked `bare in force_flags` exactly, so `-fu`/`-fv`/`-vf`
-# (where `f` is bundled with another short flag) bypassed the gate.
+# Issue #512: bundled short-flag clusters carrying `f` (=--force) must fire
+# (the prior exact-match force check let `-fu`/`-fv`/`-vf` bypass the gate).
 run_case "git_push_bundled_fu_force" \
   "advisory:feedback_force_history_rewrite_mutation" \
   "" \

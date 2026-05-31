@@ -363,10 +363,9 @@ def _is_force_push(argv: list[str]) -> bool:
         bare = tok.split("=", 1)[0]
         if bare in force_flags or tok in force_flags:
             return True
-        # Bundled POSIX short cluster (e.g. `-fu`, `-vf`) — decompose into
-        # individual chars and look for `f` (=`--force`). `git push` short opts
-        # are all value-less, so a bare `^-[a-zA-Z]+$` token (no `=`, no `--`)
-        # is a plain cluster of flags (#512).
+        # Bundled POSIX short cluster carrying `f` (=`--force`), e.g. `-fu`, `-vf`.
+        # All `git push` short opts are value-less, so a bare `^-[a-zA-Z]+$` token
+        # is a plain flag cluster (#512).
         if (
             len(tok) > 2
             and tok.startswith("-")
