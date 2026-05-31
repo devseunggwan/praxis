@@ -25,26 +25,29 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # lychee resolves relative file links through symlinks (the
-      # plugins/praxis/{hooks,skills,scripts} mirror dirs are symlinks into the
-      # repo root), so cross-tree relative links validate correctly.
+      # --offline: only validate local file-path links and in-document
+      # fragments. External URLs (66 of the 75 point at github.com) are skipped
+      # to avoid unauthenticated rate-limit (HTTP 429) false failures on every
+      # push — a live link rotting is far less likely to break the build than
+      # GitHub throttling a burst of anonymous requests.
       #
-      # --offline: only validate local file-path links. External URLs (66 of
-      # the 75 point at github.com) are skipped to avoid unauthenticated
-      # rate-limit (HTTP 429) false failures on every push — a live link
-      # rotting is far less likely to break the build than GitHub throttling a
-      # burst of anonymous requests.
+      # --exclude-path '^plugins/': the plugins/praxis/{hooks,skills,scripts}
+      # dirs are symlinks back into the repo root, so globbing descends into
+      # them and re-scans every spec/SKILL a second time under a plugins/ path.
+      # There, relative links like ../../../AGENTS.md resolve against
+      # plugins/praxis/ (which has no AGENTS.md/ETHOS.md/docs) and report as
+      # broken — false positives for files already checked at their canonical
+      # repo-root path. Excluding the mirror checks each doc exactly once.
       #
-      # Fragment (#anchor) checking is intentionally NOT enabled: three
-      # pre-existing doc links point at AGENTS.md anchors that don't exist yet
-      # (tracked separately). Turning on --include-fragments here would fail
-      # the build on that unrelated debt. File-path validation is the high-
-      # value check and is fully covered offline.
+      # --include-fragments: also validate #anchor targets within local files,
+      # catching links to renamed/removed headings.
       - name: link check
         uses: lycheeverse/lychee-action@v2
         with:
           args: >-
             --no-progress
             --offline
+            --exclude-path '^plugins/'
+            --include-fragments
             './**/*.md'
           fail: true
