@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `push-remote-ref-verify` hook: PostToolUse(Bash) advisory after `git push` when the remote branch tip did not advance to the pushed SHA — guards the rotating-endpoint silent-divergence failure where a second push in a session reaches a different proxy endpoint, prints `* [new branch]`, exits 0, but never lands on the intended remote. Fail-open, `PRAXIS_PUSH_VERIFY_BYPASS` / `PRAXIS_PUSH_VERIFY_STRICT` (#539)
 - `pre-output-falsification-gate` hook: advisory when an AskUserQuestion (Recommended)/evaluative option is surfaced under recent negative evidence without a disconfirming probe phrase in the question body, and when a read-only status command (status/get/list) repeats ≥3× in a session (#487)
 - `retrospect`: Stage 2 multi-oracle completeness gate (Gate-6) + Stage 1.5 oracle-annotation signal 5 — stored-value falsification requires same-oracle confirmation; different-oracle results emit a separate cohort-shift finding (#489)
 

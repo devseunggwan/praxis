@@ -178,6 +178,13 @@
       "timeout": 5
     },
     {
+      "name": "push-remote-ref-verify",
+      "role": "advisory-nudge",
+      "event": "PostToolUse",
+      "matcher": "Bash",
+      "timeout": 15
+    },
+    {
       "name": "verify-commit-flag-override",
       "role": "preflight-gate",
       "event": "PreToolUse",
