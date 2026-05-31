@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: ["**"]
 
+# A newer push to the same ref cancels the in-flight run.
+concurrency:
+  group: shellcheck-${{ github.ref }}
+  cancel-in-progress: true
+
 # Least privilege: linting only needs to read the checked-out code.
 permissions:
   contents: read
