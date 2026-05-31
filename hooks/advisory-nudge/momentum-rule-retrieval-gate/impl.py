@@ -43,6 +43,7 @@ import sys
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
     safe_tokenize,
@@ -402,7 +403,8 @@ def _detect_triggers(command: str) -> list[str]:
     return triggered
 
 
-def _main_inner() -> int:
+@fail_open
+def main() -> int:
     # Bypass: scripted batch operations may set this to silence the gate.
     if os.environ.get("PRAXIS_MOMENTUM_BYPASS") == "1":
         return 0
@@ -440,12 +442,6 @@ def _main_inner() -> int:
     return 0
 
 
-def main() -> int:
-    """Advisory hook — fail-open on infrastructure errors."""
-    try:
-        return _main_inner()
-    except Exception:
-        return 0
 
 
 if __name__ == "__main__":

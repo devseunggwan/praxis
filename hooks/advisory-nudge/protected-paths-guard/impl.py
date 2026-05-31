@@ -51,6 +51,10 @@ from __future__ import annotations
 import json
 import os
 import sys
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from pathlib import PurePosixPath
 
 TARGET_TOOLS = frozenset({"Edit", "Write", "NotebookEdit"})
@@ -269,7 +273,8 @@ def _advisory_text(path: str, reason: str, strict: bool) -> str:
     )
 
 
-def _main_inner() -> int:
+@fail_open
+def main() -> int:
     if os.environ.get("PRAXIS_HOOK_BYPASS_PROTECTED_PATHS", "").strip():
         return 0
 
@@ -306,12 +311,6 @@ def _main_inner() -> int:
     return 2 if strict else 0
 
 
-def main() -> int:
-    """Advisory hook — fail-open on uncaught error."""
-    try:
-        return _main_inner()
-    except Exception:
-        return 0
 
 
 if __name__ == "__main__":

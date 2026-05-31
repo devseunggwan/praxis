@@ -54,13 +54,18 @@ import os
 import re
 import shlex
 import sys
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from pathlib import Path
 
 _TARGET_SKILL = "praxis:codex-review-wrap"
 _MAX_BYTES = 50 * 1024 * 1024
 
 
-def _main_inner() -> int:
+@fail_open
+def main() -> int:
     try:
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
@@ -97,12 +102,6 @@ def _main_inner() -> int:
     return 2
 
 
-def main() -> int:
-    """Preflight gate — fail-open on uncaught exception."""
-    try:
-        return _main_inner()
-    except Exception:
-        return 0
 
 
 # ---------------------------------------------------------------------------

@@ -57,6 +57,10 @@ import hashlib
 import json
 import os
 import sys
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Advisory message
@@ -232,7 +236,8 @@ def _mark_advisory_seen(session_hash: str, bucket: str) -> None:
 BULK_THRESHOLD = 2
 
 
-def _main_inner() -> int:
+@fail_open
+def main() -> int:
     if os.environ.get("PRAXIS_BULK_WRITE_BYPASS") == "1":
         return 0
 
@@ -271,12 +276,6 @@ def _main_inner() -> int:
     return 0
 
 
-def main() -> int:
-    """Advisory hook — fail-open on all infrastructure errors."""
-    try:
-        return _main_inner()
-    except Exception:
-        return 0
 
 
 if __name__ == "__main__":
