@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: ["**"]
 
+# A newer push to the same ref cancels the in-flight run.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -18,6 +23,12 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.x"
+          # No requirements.txt/pyproject.toml in the repo, so hash the
+          # workflow file (where the pinned install lives) to give the pip
+          # cache a stable key without setup-python erroring on a missing
+          # dependency manifest.
+          cache: pip
+          cache-dependency-path: .github/workflows/test.yml
 
       - name: install python deps
         run: python3 -m pip install pytest
