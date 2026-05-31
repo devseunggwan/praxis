@@ -112,6 +112,67 @@ run_case silent "stop-hook-active" '{"stop_hook_active": true}'
 build_transcript "All set — worktree cleaned up and the issue closed." none
 run_case advisory "worktree-claim" '{}'
 
+# --- fix #1: GitHub MCP get_issue tool_use as evidence -> silent ----------
+# Regression guard: \bissue\b failed to match get_issue/close_issue because
+# underscore is \w and blocks \b before "issue" in the tool name.
+build_transcript "Issue #503 closed and worktree cleaned." none
+# Build a transcript with a mcp__github__get_issue tool_use as evidence
+python3 - "$TRANSCRIPT" <<'PY'
+import json, sys
+path = sys.argv[1]
+events = [{"message": {"role": "user", "content": "please wrap up"}}]
+asst_blocks = [{"type": "tool_use", "name": "mcp__github__get_issue",
+                "input": {"issueNumber": 503}}]
+events.append({"message": {"role": "assistant", "content": asst_blocks}})
+events.append({"message": {"role": "assistant",
+                           "content": [{"type": "text", "text": "Issue #503 closed and worktree cleaned."}]}})
+with open(path, "w", encoding="utf-8") as f:
+    for e in events:
+        f.write(json.dumps(e, ensure_ascii=False) + "\n")
+PY
+run_case silent "mcp-get-issue-as-evidence" '{}'
+
+# Also test close_issue as evidence
+python3 - "$TRANSCRIPT" <<'PY'
+import json, sys
+path = sys.argv[1]
+events = [{"message": {"role": "user", "content": "please wrap up"}}]
+asst_blocks = [{"type": "tool_use", "name": "mcp__github__close_issue",
+                "input": {"issueNumber": 503}}]
+events.append({"message": {"role": "assistant", "content": asst_blocks}})
+events.append({"message": {"role": "assistant",
+                           "content": [{"type": "text", "text": "Issue #503 closed."}]}})
+with open(path, "w", encoding="utf-8") as f:
+    for e in events:
+        f.write(json.dumps(e, ensure_ascii=False) + "\n")
+PY
+run_case silent "mcp-close-issue-as-evidence" '{}'
+
+# --- fix #2 regression guard: "no conflicts" phrasing must NOT suppress ---
+# The removed \bno\b arm previously suppressed these valid completion claims.
+build_transcript "Issue #503 closed — no conflicts." none
+run_case advisory "no-conflicts-still-fires" '{}'
+
+build_transcript "PR #543 merged — no further action needed." none
+run_case advisory "no-further-action-still-fires" '{}'
+
+# --- fix #3: Korean particle after PR -> advisory fires -------------------
+# \bPR\b failed to match 'PR을'/'PR이' because Hangul is \w and blocks \b.
+build_transcript "PR을 머지했습니다." none
+run_case advisory "pr-korean-particle-merged" '{}'
+
+build_transcript "PR이 닫혔습니다." none
+run_case advisory "pr-korean-particle-closed" '{}'
+
+# --- fix #3 regression guard: IMPROVE / PROXY_URL must NOT trigger -------
+build_transcript "IMPROVE the README — all steps completed." none
+run_case silent "pr-substring-improve" '{}'
+
+# --- fix #4: future passive 'will be merged' -> silent --------------------
+# 'will' added to _NEGATION_RE to suppress future-passive completion phrasing.
+build_transcript "The PR will be merged after review." none
+run_case silent "future-passive-will-be-merged" '{}'
+
 # --- missing transcript path -> fail-open silent --------------------------
 TRANSCRIPT="/nonexistent/transcript.jsonl"
 run_case silent "missing-transcript" '{}'
