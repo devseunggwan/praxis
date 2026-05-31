@@ -99,9 +99,6 @@ def _get_max() -> int:
     return DEFAULT_MAX
 
 
-import os.path  # for joining -C base with relative -F file path
-
-
 def _title_from_file(path: str, base_dir: str | None = None) -> str | None:
     """Read first line of a file; return None on any error or if stdin placeholder.
 
@@ -197,7 +194,7 @@ def _extract_titles(argv: list[str]) -> list[str]:
         tok = sub_argv[i]
 
         # Handle --flag=value embedded form.
-        if "=" in tok and not tok.startswith("-") is False:
+        if "=" in tok and tok.startswith("-") is not False:
             key, _, val = tok.partition("=")
             if key in MESSAGE_FLAGS and not message_seen:
                 titles.append(val.split("\n")[0])
