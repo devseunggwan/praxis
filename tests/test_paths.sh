@@ -67,6 +67,46 @@ PYEOF
 )
 assert_eq "unwritable home falls back to TMPDIR" "/tmp/praxis-hook-errors.jsonl" "$fallback"
 
+# 4. praxis_state_dir() default = ~/.praxis/state (PRAXIS_HOME-aware)
+state_default=$(env -u PRAXIS_STATE_DIR PRAXIS_HOME="/tmp/ph-527" python3 - "$LIB" << 'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from _paths import praxis_state_dir
+print(praxis_state_dir())
+PYEOF
+)
+assert_eq "praxis_state_dir default = <home>/state" "/tmp/ph-527/state" "$state_default"
+
+# 5. PRAXIS_STATE_DIR override wins (back-compat)
+state_override=$(PRAXIS_STATE_DIR="/custom/state" PRAXIS_HOME="/tmp/ph-527" python3 - "$LIB" << 'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from _paths import praxis_state_dir
+print(praxis_state_dir())
+PYEOF
+)
+assert_eq "PRAXIS_STATE_DIR override wins" "/custom/state" "$state_override"
+
+# 6. praxis_cache_dir() = ~/.praxis/cache
+cache_dir=$(PRAXIS_HOME="/tmp/ph-527" python3 - "$LIB" << 'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from _paths import praxis_cache_dir
+print(praxis_cache_dir())
+PYEOF
+)
+assert_eq "praxis_cache_dir = <home>/cache" "/tmp/ph-527/cache" "$cache_dir"
+
+# 7. legacy_state_dir() = ~/.claude/state/praxis (expanded)
+legacy=$(HOME="/tmp/fakehome-527" python3 - "$LIB" << 'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from _paths import legacy_state_dir
+print(legacy_state_dir())
+PYEOF
+)
+assert_eq "legacy_state_dir = ~/.claude/state/praxis" "/tmp/fakehome-527/.claude/state/praxis" "$legacy"
+
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

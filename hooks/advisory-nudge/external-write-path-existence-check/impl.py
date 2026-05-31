@@ -43,6 +43,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
+from _paths import praxis_state_dir  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -87,10 +88,11 @@ _GH_BODY_FILE_SUBCOMMANDS = frozenset({
 _GH_GLOBAL_FLAGS_WITH_ARG = frozenset({"-R", "--repo", "--hostname", "--color"})
 _GH_BODY_FILE_FLAGS = frozenset({"-F", "--body-file"})
 
-# State dir for session-scoped dedup.
-_STATE_DIR = Path(
-    os.environ.get("PRAXIS_STATE_DIR", os.path.expanduser("~/.claude/state/praxis"))
-) / "phantom-path"
+# State dir for session-scoped dedup. Durable root is ~/.praxis/state (#527);
+# PRAXIS_STATE_DIR still overrides the base (back-compat). These markers are
+# regenerable dedup state, so no legacy read-fallback is needed — a moved
+# marker simply lets one advisory re-fire once.
+_STATE_DIR = Path(praxis_state_dir()) / "phantom-path"
 
 
 # ---------------------------------------------------------------------------

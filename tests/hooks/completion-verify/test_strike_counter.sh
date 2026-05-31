@@ -473,6 +473,24 @@ test_ac25_state_isolated_from_claude_plugin_data() {
   [ "$praxis_has_state" -eq 1 ] && [ "$sibling_has_state" -eq 0 ]
 }
 
+# ---- AC26 (issue #527): durable state migrates from the pre-#527 legacy ----
+# ~/.claude/state/praxis to the host-neutral ~/.praxis default, with no
+# PRAXIS_STATE_DIR override set.
+test_ac26_legacy_state_migration() {
+  local home sid out migrated
+  home=$(mktemp -d)
+  sid="migrate-$$-${RANDOM}"
+  mkdir -p "$home/.claude/state/praxis/strikes"
+  printf '{"count":2,"reasons":["legacy a","legacy b"]}' \
+    > "$home/.claude/state/praxis/strikes/$sid.json"
+  out=$(env -u PRAXIS_STATE_DIR -u PRAXIS_HOME HOME="$home" \
+    CLAUDE_SESSION_ID="$sid" "$STRIKE" status 2>&1)
+  migrated=0
+  [ -f "$home/.praxis/state/strikes/$sid.json" ] && migrated=1
+  rm -rf "$home"
+  [ "$migrated" -eq 1 ] && printf '%s' "$out" | grep -q "Strikes: 2/3"
+}
+
 # ---------- runner ----------------------------------------------------------
 echo "strike-counter.sh tests"
 echo "------------------------"
@@ -501,6 +519,7 @@ run "AC22 reset at count<3 not gated by reflection" test_ac22_reset_not_gated_un
 run "AC23 stop hook block message includes reflection instructions" test_ac23_stop_block_has_reflection_instructions
 run "AC24 block message includes persuasion step instructions" test_ac24_block_message_has_persuasion_step
 run "AC25 state isolated from \$CLAUDE_PLUGIN_DATA (issue #126)" test_ac25_state_isolated_from_claude_plugin_data
+run "AC26 durable strike state migrates to ~/.praxis (issue #527)" test_ac26_legacy_state_migration
 
 echo "------------------------"
 echo "Passed: $PASS  Failed: $FAIL"
