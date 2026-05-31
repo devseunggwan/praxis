@@ -183,6 +183,18 @@ run_case "Pass: *_test.py file excluded" pass \
 run_case "Pass: /test/ directory excluded" pass \
   "$(make_write_payload '/repo/test/foo_wrapper.py' 'return create_x(1)')"
 
+# issue #513 결함5: a BARE test_*.py path (no leading dir) is a test file and
+# must be excluded — previously misfired because the pattern required a leading
+# "/". Content matches the delegation heuristic to prove the path-exclusion
+# (not the content) is what suppresses the advisory.
+run_case "Pass: bare test_*.py file excluded (issue #513 결함5)" pass \
+  "$(make_write_payload 'test_client.py' 'return get_user(1)')"
+
+# issue #513 결함5 negative: a bare NON-test file (client.py) with the same
+# delegation content must still emit the advisory — exclusion is test-only.
+run_case "Advisory: bare client.py with delegation still fires (issue #513 결함5 negative)" advisory \
+  "$(make_write_payload 'client.py' 'return get_user(1)')"
+
 # ---------------------------------------------------------------------------
 # EDGE cases — fail-open
 # ---------------------------------------------------------------------------

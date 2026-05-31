@@ -127,6 +127,12 @@ touch "$EMPTY_CLAUDE2"                                # second empty config file
 EMPTY_CLAUDE_N="$TMPDIR_TEST/.claude/settings-n.json"
 touch "$EMPTY_CLAUDE_N"                               # config path with -n in filename
 
+# issue #513 결함3: empty settings.json under a NON-config dir (e.g. /tmp).
+# Must NOT be classified as a repo config path → hook stays silent.
+EMPTY_NONCONFIG_SETTINGS="$TMPDIR_TEST/sub/settings.json"
+mkdir -p "$TMPDIR_TEST/sub"
+touch "$EMPTY_NONCONFIG_SETTINGS"
+
 # ---------------------------------------------------------------------------
 # === Baseline: existing advisory paths still work ===
 # ---------------------------------------------------------------------------
@@ -419,6 +425,58 @@ fi
 run_case "empty command is silent" \
   "silent" \
   ""
+
+# ---------------------------------------------------------------------------
+# issue #513 결함3: settings.json path-anchor regression
+# ---------------------------------------------------------------------------
+
+# Positive: empty settings.json under a non-config dir must no longer misfire.
+run_case "empty settings.json under non-config dir is silent (issue #513 결함3)" \
+  "silent" \
+  "jq '.' $EMPTY_NONCONFIG_SETTINGS"
+
+# Negative: a bare repo-root settings.json (resolved from cwd) is still a config
+# path → empty file still emits [config-empty]. Run with cwd=TMPDIR so the bare
+# token resolves to the empty fixture created there.
+mkdir -p "$TMPDIR_TEST/root"
+touch "$TMPDIR_TEST/root/settings.json"
+# Unique session_id per run: the hook dedups per session in the shared system
+# TMPDIR, so a hardcoded id would suppress the advisory on re-runs (stale state).
+bare_payload=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":"jq . settings.json"},"session_id":sys.argv[1]}))
+' "bare-513-$$-$RANDOM")
+bare_err=$(mktemp)
+( cd "$TMPDIR_TEST/root" && echo "$bare_payload" | python3 "$HOOK" >/dev/null 2>"$bare_err" )
+bare_rc=$?
+bare_err_content=$(cat "$bare_err"); rm -f "$bare_err"
+if [ "$bare_rc" -eq 0 ] && printf '%s' "$bare_err_content" | grep -qF "[config-empty]"; then
+  echo "PASS  [bare repo-root settings.json still emits config-empty (issue #513 결함3 negative)]"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL  [bare repo-root settings.json still emits config-empty] rc=$bare_rc stderr=${bare_err_content:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("bare repo-root settings.json still emits config-empty (issue #513 결함3 negative)")
+fi
+
+# Negative: the repo-root-relative `./settings.json` form is also a config path
+# and must still emit [config-empty] (PR #521 review feedback — the anchor
+# accepts an optional leading `./` so this form is not lost alongside the bare
+# token while subdir paths like sub/settings.json stay excluded).
+dot_payload=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":"jq . ./settings.json"},"session_id":sys.argv[1]}))
+' "dot-513-$$-$RANDOM")
+dot_err=$(mktemp)
+( cd "$TMPDIR_TEST/root" && echo "$dot_payload" | python3 "$HOOK" >/dev/null 2>"$dot_err" )
+dot_rc=$?
+dot_err_content=$(cat "$dot_err"); rm -f "$dot_err"
+if [ "$dot_rc" -eq 0 ] && printf '%s' "$dot_err_content" | grep -qF "[config-empty]"; then
+  echo "PASS  [./settings.json (repo-root-relative) still emits config-empty (PR #521)]"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL  [./settings.json still emits config-empty] rc=$dot_rc stderr=${dot_err_content:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("./settings.json still emits config-empty (PR #521)")
+fi
 
 # ---------------------------------------------------------------------------
 # Summary

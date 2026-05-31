@@ -48,8 +48,13 @@ from _hook_utils import safe_tokenize  # type: ignore[import-not-found]  # noqa:
 # ALL_CAPS_WITH_UNDERSCORES tokens of length ≥ 6.
 # Requires at least one underscore or digit (pure ALL_CAPS words like "SELECT"
 # are excluded by requiring the compound structure).
-# The boundary \b ensures we don't match inside longer identifiers.
-ALLCAPS_RE = re.compile(r"\b([A-Z][A-Z0-9_]{5,})\b")
+# ASCII right-boundary lookahead instead of a trailing `\b`: Python's `\b` is
+# Unicode-aware, so Hangul counts as a word char and `AUTH_TOKEN이` /
+# `VENDOR_API_KEY를` would be missed because the trailing `\b` does not see a
+# boundary between the ASCII token and the adjacent Hangul (issue #513, 결함4).
+# The leading `\b` is kept so we still avoid matching inside longer
+# mixed-case identifiers (e.g. `myAUTH_TOKEN`).
+ALLCAPS_RE = re.compile(r"\b([A-Z][A-Z0-9_]{5,})(?![A-Z0-9_])")
 
 # 3-part SQL identifiers: catalog.schema.table (all lowercase / underscore).
 # Matches only when all three parts follow SQL identifier conventions AND the

@@ -53,13 +53,16 @@ Up to 3 findings are reported per invocation to avoid advisory overload.
 
 #### ALL_CAPS enum candidates
 
-Tokens matching `\b[A-Z][A-Z0-9_]{5,}\b` that additionally contain at
-least one underscore or digit (compound structure). Pure SQL keywords
-(`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `WHERE`) are excluded by the
-compound-structure requirement.
+Tokens matching `\b[A-Z][A-Z0-9_]{5,}(?![A-Z0-9_])` that additionally
+contain at least one underscore or digit (compound structure). Pure SQL
+keywords (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `WHERE`) are excluded by
+the compound-structure requirement. The right boundary is an ASCII
+lookahead rather than `\b`: Python's `\b` is Unicode-aware, so a Hangul
+character immediately after the token (e.g. `AUTH_TOKEN이`) would otherwise
+suppress the match (issue #513).
 
 Examples that fire: `LAST_365_DAYS`, `THIS_WEEK_OF_MONTH`,
-`SHOPBY_AUTH_TOKEN`, `PAYMENT_STATUS_APPROVED`
+`SHOPBY_AUTH_TOKEN`, `PAYMENT_STATUS_APPROVED`, `AUTH_TOKEN이`
 
 #### 3-part SQL identifiers
 

@@ -72,7 +72,7 @@ TARGET_TOOLS = frozenset({"Edit", "Write", "NotebookEdit"})
 
 # /tmp/ scratch files are handled by get_repo_root fail-open (non-repo paths
 # return None). Patterns here cover project-internal planning paths only.
-PLANNING_PATH_PATTERNS = (".omc/plans/", ".claude/projects/")
+PLANNING_PATH_PATTERNS = ("/.omc/plans/", "/.claude/projects/")
 
 DOCS_FILENAMES = frozenset({
     "readme", "changelog", "contributing", "license",
@@ -319,7 +319,11 @@ def is_planning_artifact(path: str) -> bool:
     file will fail-open at get_repo_root (returns None → exit 0). Only
     project-internal planning paths need an explicit skip rule.
     """
-    norm = path.replace("\\", "/")
+    # Prepend a leading "/" so PLANNING_PATH_PATTERNS (which carry a leading
+    # "/") force a path-component boundary even for repo-root-relative paths.
+    # Without this, a substring like "username.omc/plans/" would bypass the
+    # protected-branch guard (issue #513, 결함1).
+    norm = "/" + path.replace("\\", "/").lstrip("/")
     return any(pat in norm for pat in PLANNING_PATH_PATTERNS)
 
 
