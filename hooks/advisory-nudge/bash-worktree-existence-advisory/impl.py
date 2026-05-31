@@ -391,12 +391,9 @@ def _main_inner() -> int:
 
         target, is_subshell_flag = _extract_cd_target(seg_for_extract)
 
-        # Capture whether *this* segment ran inside the subshell BEFORE resetting
-        # the flag. The closing segment of `(cd A && cd B)` still belongs to the
-        # subshell, so its cwd update must land on subshell_cwd — not the outer
-        # effective_cwd. Resetting in_subshell first (then reading it at the
-        # update step below) would route the subshell path into effective_cwd
-        # and pollute the outer base for subsequent relative `cd` resolution.
+        # Capture subshell membership BEFORE resetting the flag: the closing
+        # segment of `(cd A && cd B)` still belongs to the subshell, so its cwd
+        # update must land on subshell_cwd, not pollute the outer effective_cwd.
         was_in_subshell = in_subshell
 
         if seg_closes_subshell and in_subshell:
@@ -429,8 +426,7 @@ def _main_inner() -> int:
                 _record_dedupe(session_id, real_target, "missing")
         else:
             # Path exists. Update the appropriate cwd tracker (keyed on
-            # was_in_subshell, i.e. whether *this* segment ran inside the
-            # subshell — including its closing segment):
+            # was_in_subshell, which includes the subshell's closing segment):
             # - inside a subshell: always update subshell_cwd (outer not
             #   affected regardless of is_subshell_flag; the flag only guards
             #   the outer effective_cwd update for pushd/subshell-opener).

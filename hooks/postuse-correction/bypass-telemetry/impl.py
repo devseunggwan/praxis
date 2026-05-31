@@ -72,9 +72,7 @@ def _is_bypass_name(name: str) -> bool:
     return bool(_BYPASS_NAME_RE.match(name))
 
 
-# Values that denote an *inactive* bypass even though they are non-empty.
-# Shell convention: `false`/`no`/`off` (and `0`) mean disabled, so a bypass var
-# set to one of these must not be recorded as an active bypass event.
+# Non-empty values that shell convention treats as disabled — not recorded.
 _FALSY_VALUES = frozenset({"0", "false", "no", "off"})
 
 

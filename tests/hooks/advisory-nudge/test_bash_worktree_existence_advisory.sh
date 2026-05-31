@@ -240,16 +240,8 @@ run_case "compact subshell trailing-paren does not cause false advisory" \
   "(cd $NON_WT_DIR && cd $ROOT_DIR)"
 
 # Regression (issue #516 defect1): the CLOSING segment of a subshell must NOT
-# pollute the outer effective_cwd. In `(cd A && cd B) && cd <rel>`, the outer
-# relative `cd` has to resolve against the hook's *original* cwd, not B.
-#
-# The old code reset in_subshell BEFORE the cwd-update step, so the closing
-# segment's target leaked into effective_cwd. Concretely: with outer cwd lacking
-# `bin/` but B (=/usr) having `bin/`, the buggy code resolved `cd bin` against
-# /usr → /usr/bin exists → no advisory. The fix keeps the closing segment's cwd
-# update on subshell_cwd (via was_in_subshell), leaving effective_cwd intact so
-# `cd bin` resolves to <outer-cwd>/bin → missing → advisory.
-#
+# pollute the outer effective_cwd. In `(cd /tmp && cd /usr) && cd bin`, the
+# outer relative `cd bin` must resolve against the original cwd, not /usr.
 # Run with a controlled outer cwd (a temp dir guaranteed to lack `bin/`).
 DEF1_OUTER=$(mktemp -d)
 {

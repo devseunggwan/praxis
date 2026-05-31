@@ -33,16 +33,11 @@ PASS=0; FAIL=0; FAILED_NAMES=()
 
 # Per-test history file (overrides session-id resolution entirely).
 fresh_history() {
-  # Must yield a UNIQUE path that does NOT yet exist (state tests below assert a
-  # file was never created when the hook records nothing).
-  #
-  # `mktemp -u` only predicts a name unsafely: under a shared TMPDIR (e.g.
-  # TMPDIR=/tmp/claude-501 with a sibling suite running) it can hand back a path
-  # another process already grabbed → the hook's save_history hits an OSError and
-  # silently records nothing, failing 3 tests. Instead, atomically claim a real
-  # file with mktemp (guaranteed unique), unlink it so the returned name is free
-  # but extremely unlikely to be re-handed-out, and append the ".json" suffix the
-  # hook expects.
+  # Must yield a UNIQUE path that does not yet exist (state tests below assert no
+  # file was created when the hook records nothing). `mktemp -u` only predicts a
+  # name and can collide under a shared TMPDIR; instead atomically claim a real
+  # file (guaranteed unique), unlink it so the name is free, and add the ".json"
+  # suffix the hook expects.
   local base
   base="$(mktemp "${TMPDIR:-/tmp}/praxis-md-escape-test-XXXXXX")" || return 1
   rm -f "$base"

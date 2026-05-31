@@ -866,13 +866,10 @@ run_case "T-NEW3_pass_output_quality_category_with_cli_layer" "pass" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T_NEW3_CARD" "$T_NEW3_ROW")")"
 
 # Regression (issue #516 defect3): a verdict value with TRAILING whitespace
-# (e.g. "FAIL " from a hand-edited / copy-pasted card) must still block. The
-# awk extractor with -F': *' only trims leading whitespace, so without an
-# explicit trailing-trim the comparison [ "FAIL " = "FAIL" ] is false and the
-# block is silently skipped. The fix pipes each verdict through `xargs`.
-# gate_1 trailing-space variant of T5 (tool label, memory-only, gate_1 FAIL).
-# NB: the trailing space after FAIL is the whole point — append it via a
-# variable so it survives editor whitespace-stripping and stays visible.
+# (e.g. "FAIL " from a hand-edited card) must still block, now that each verdict
+# is trimmed via `xargs`. gate_1 trailing-space variant of T5.
+# The trailing space is appended via a variable so it survives editor
+# whitespace-stripping and stays visible.
 SP=' '
 T_DEF3_G1_CARD=$(cat <<EOF
 - memory: 1

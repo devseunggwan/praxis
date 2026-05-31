@@ -98,10 +98,9 @@ DIST_CARD=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk '
 # trips the violation check below.
 # LAST occurrence wins (handles dual-card-in-block case where a stale earlier
 # PASS would otherwise shadow a corrected FAIL).
-# awk -F': *' trims only the leading delimiter whitespace, leaving any trailing
-# whitespace on the value (e.g. "FAIL " from a hand-edited card) intact. That
-# breaks the exact-string verdict comparisons below ([ "FAIL " = "FAIL" ] is
-# false → silent skip), so strip surrounding whitespace from each verdict.
+# `xargs` trims trailing whitespace that awk -F': *' leaves on the value (e.g.
+# "FAIL " from a hand-edited card), which would break the exact-string verdict
+# comparisons below ([ "FAIL " = "FAIL" ] is false → silent skip).
 GATE_1=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_1_verdict:/ {v=$2} END{print v}' | xargs)
 GATE_2=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_2_verdict:/ {v=$2} END{print v}' | xargs)
 GATE_3=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_3_verdict:/ {v=$2} END{print v}' | xargs)
