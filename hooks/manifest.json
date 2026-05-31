@@ -409,6 +409,12 @@
       "timeout": 10
     },
     {
+      "name": "merge-state-claim-gate",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10
+    },
+    {
       "name": "strike-counter",
       "role": "completion-verify",
       "body": "impl.sh",
