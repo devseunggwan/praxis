@@ -210,6 +210,38 @@ run_case "S04: --gpg-sign text inside -m body" silent \
   "$(payload 'git commit -m "discuss --gpg-sign policy in docs"')"
 
 # ---------------------------------------------------------------------------
+# Bundled short-flag clusters carrying -n (=--no-verify) (#512). The prior
+# exact COMMIT_FLAG_TOKENS match let clusters like `-vn`/`-anm` slip through;
+# clean clusters (no `n`) must stay silent.
+# ---------------------------------------------------------------------------
+
+run_case "C01: git commit -vn -m msg (bundled no-verify)" deny \
+  "$(payload 'git commit -vn -m "msg"')"
+
+run_case "C02: git commit -nv -m msg (order swapped)" deny \
+  "$(payload 'git commit -nv -m "msg"')"
+
+run_case "C03: git commit -anm msg (-a -n -m bundled)" deny \
+  "$(payload 'git commit -anm "msg"')"
+
+run_case "C04: git commit -nm msg (-n -m bundled)" deny \
+  "$(payload 'git commit -nm "msg"')"
+
+# Clean bundled clusters with NO -n must pass.
+run_case "C05: git commit -v -m msg (separate, no override)" silent \
+  "$(payload 'git commit -v -m "msg"')"
+
+run_case "C06: git commit -am msg (bundled, no override)" silent \
+  "$(payload 'git commit -am "msg"')"
+
+run_case "C07: git commit -vs -m msg (bundled value-less, no n)" silent \
+  "$(payload 'git commit -vs -m "msg"')"
+
+# `-mn` is `-m` with value `n` — the message, NOT a no-verify cluster.
+run_case "C08: git commit -mn (message value 'n', not no-verify)" silent \
+  "$(payload 'git commit -mn')"
+
+# ---------------------------------------------------------------------------
 # Bypass case (PRAXIS_SKIP_COMMIT_FLAG_CHECK=1 must short-circuit to pass)
 # ---------------------------------------------------------------------------
 
