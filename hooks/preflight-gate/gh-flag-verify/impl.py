@@ -39,7 +39,6 @@ Design notes:
 from __future__ import annotations
 
 import json
-import os
 import sys
 import sys as _sys
 from pathlib import Path as _Path

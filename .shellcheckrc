@@ -1,0 +1,18 @@
+# ShellCheck configuration for the praxis shell sources.
+#
+# Gate level is `warning` (see .github/workflows/lint.yml). Runtime code
+# (hooks/, scripts/) is clean at this level; the exclusions below silence
+# two classes of false positive that only arise in the test harness:
+#
+#   SC2154 — "var is referenced but not assigned": the hook tests source
+#            shared fixture/helper snippets that define vars indirectly, so
+#            ShellCheck can't see the assignment in the same file.
+#   SC2034 — "var appears unused": test scaffolding deliberately assigns
+#            capture vars (e.g. `out`) that are asserted on conditionally or
+#            kept for readability.
+#
+# These are scoped here rather than with inline directives because they recur
+# across many test files; genuine SC2069/SC2163/SC2164/etc. findings are fixed
+# in the code, not disabled.
+disable=SC2154
+disable=SC2034

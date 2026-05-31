@@ -364,7 +364,7 @@ T18_TPATH="$TMPDIR/transcript_t18.jsonl"
 printf '%s\n' "$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")" > "$T18_TPATH"
 T18_PAYLOAD=$(jq -nc --arg path "$T18_TPATH" \
   '{transcript_path: $path, stop_hook_active: false, session_id: "t18"}')
-T18_OUT=$(printf '%s' "$T18_PAYLOAD" | env -i PATH=/usr/bin:/bin bash -c "PATH=$(dirname $(command -v bash)):/usr/bin:/bin '$HOOK'" 2>/dev/null)
+T18_OUT=$(printf '%s' "$T18_PAYLOAD" | env -i PATH=/usr/bin:/bin bash -c "PATH=$(dirname "$(command -v bash)"):/usr/bin:/bin '$HOOK'" 2>/dev/null)
 T18_RC=$?
 if [ "$T18_RC" -eq 0 ] && [ -z "$T18_OUT" ]; then
   echo "PASS  [$T18_NAME]"

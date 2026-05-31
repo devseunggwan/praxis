@@ -41,8 +41,7 @@ run_case() {
   out_file=$(mktemp)
 
   # Unset bypass env so the test exercises the real detection path.
-  PRAXIS_SKIP_COMMIT_FLAG_CHECK= \
-    echo "$payload" | PRAXIS_SKIP_COMMIT_FLAG_CHECK= python3 "$HOOK" >"$out_file" 2>/dev/null
+  echo "$payload" | PRAXIS_SKIP_COMMIT_FLAG_CHECK='' python3 "$HOOK" >"$out_file" 2>/dev/null
   local rc=$?
   local out
   out=$(cat "$out_file")
