@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `retrospect`: Stage 2 multi-oracle completeness gate (Gate-6) + Stage 1.5 oracle-annotation signal 5 — stored-value falsification requires same-oracle confirmation; different-oracle results emit a separate cohort-shift finding (#489)
 
 ### Changed
+- `hooks`: durable cross-session state now defaults to the host-neutral `~/.praxis/state` instead of the Claude-nested `~/.claude/state/praxis` (strike counter, phantom-path markers, and the strike state read by `postcompact-context`). `PRAXIS_STATE_DIR` still overrides the base (back-compat); strike-counter migrates existing state across once on first run, and the readers fall back to the legacy location. New `_paths` helpers (`praxis_state_dir`/`praxis_cache_dir`/`legacy_state_dir`) + layout doc `docs/runtime-state-layout.md`. Volatile `${TMPDIR}/praxis-*` caches are swept in a follow-up (partial of #527)
 - `hooks`: swept the remaining 20 `_main_inner`/`main()` hand-rolled fail-open wrappers onto the shared `@fail_open` decorator (`hooks/_lib/_hook_runtime.py`), so all blocking/advisory Python hooks now use a single fail-open pattern. No behavior change; each hook's copied fail-open test block is replaced by a `main.__wrapped__` structural assertion (behaviour is verified once in `tests/test_hook_runtime.sh`) (#526)
 
 ## [6.0.3] - 2026-05-29

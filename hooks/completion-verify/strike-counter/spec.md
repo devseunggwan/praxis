@@ -43,8 +43,14 @@ not a free retry.
 
 ### State layout
 
+Durable state lives under the host-neutral `~/.praxis/state` by default (#527);
+`PRAXIS_STATE_DIR` still overrides the base (back-compat). On first run after the
+move, if no override is set and the new location is absent, the pre-#527
+`~/.claude/state/praxis/strikes` contents are migrated across once so existing
+counters/latches survive.
+
 ```
-$STATE_DIR = ${PRAXIS_STATE_DIR:-$HOME/.claude/state/praxis}/strikes
+$STATE_DIR = ${PRAXIS_STATE_DIR:-${PRAXIS_HOME:-$HOME/.praxis}/state}/strikes
   <sid>.json              # {"count": N, "reasons": ["...","..."]}
   <sid>.reflection.md     # user-authored reflection (required at count≥3 reset)
   .current-session        # latch — last session_id seen by session-start

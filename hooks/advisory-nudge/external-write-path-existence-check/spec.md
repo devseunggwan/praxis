@@ -70,7 +70,8 @@ outside the repo tree.
 ### Session-scoped dedup
 
 Advisory is emitted at most once per `(session_id, body content SHA-256)` pair.
-State marker written to `${PRAXIS_STATE_DIR:-~/.claude/state/praxis}/phantom-path/<hash>`.
+State marker written to `${PRAXIS_STATE_DIR:-~/.praxis/state}/phantom-path/<hash>`
+(host-neutral durable root, #527; `PRAXIS_STATE_DIR` still overrides the base).
 
 ### Parsing guarantees
 

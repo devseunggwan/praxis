@@ -71,7 +71,7 @@ degrades gracefully — `(none for current branch)` / `0/3` /
 | `PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT` | unset | hook | When `1`, exits silently before reading stdin |
 | `PRAXIS_POSTCOMPACT_CONTEXT_FILE` | unset | hook | Explicit dedup state file path (test override) |
 | `PRAXIS_POSTCOMPACT_TAIL_LINES` | `100` | hook | Transcript tail line count to scan; non-int / <1 falls back to default |
-| `PRAXIS_STATE_DIR` | `~/.claude/state/praxis` | external lookup only | Strike-counter state directory the hook *reads*; does NOT redirect this hook's own dedup state file |
+| `PRAXIS_STATE_DIR` | `~/.praxis/state` | external lookup only | Strike-counter state directory the hook *reads* (host-neutral default, #527; falls back to the legacy `~/.claude/state/praxis` when unset and the new location is absent); does NOT redirect this hook's own dedup state file |
 
 ### State file
 

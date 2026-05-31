@@ -40,7 +40,18 @@ fi
 # multi-plugin installs it can resolve to a sibling plugin's directory and
 # our state would leak there — silently vulnerable to that plugin's
 # cleanup/uninstall.
-STATE_DIR="${PRAXIS_STATE_DIR:-$HOME/.claude/state/praxis}/strikes"
+# [#527] Durable state lives under the host-neutral ~/.praxis/state by default
+# (PRAXIS_HOME-aware); PRAXIS_STATE_DIR still overrides the base (back-compat).
+STATE_DIR="${PRAXIS_STATE_DIR:-${PRAXIS_HOME:-$HOME/.praxis}/state}/strikes"
+# One-time migration: if no override is set and the new location does not yet
+# exist but the pre-#527 ~/.claude/state/praxis/strikes does, move the strike
+# state across so existing counters/latches survive the relocation.
+_LEGACY_STRIKE_DIR="$HOME/.claude/state/praxis/strikes"
+if [ -z "${PRAXIS_STATE_DIR:-}" ] && [ ! -d "$STATE_DIR" ] && [ -d "$_LEGACY_STRIKE_DIR" ]; then
+  if mkdir -p "$STATE_DIR" 2>/dev/null; then
+    cp -a "$_LEGACY_STRIKE_DIR/." "$STATE_DIR/" 2>/dev/null || true
+  fi
+fi
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 LATCH="$STATE_DIR/.current-session"
 BLOCK_LOG="$STATE_DIR/last-block.log"
