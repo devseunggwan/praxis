@@ -31,7 +31,10 @@ On every `UserPromptSubmit`:
      - `cwd`               — from payload (worktree absolute path)
      - `git branch`        — `git -C <cwd> branch --show-current`
      - `active PR`         — `gh pr list --state open --head <branch>` (JSON)
-     - `strike state`      — read `$HOME/.claude/state/praxis/strikes/<sid>.json`
+     - `strike state`      — read `~/.praxis/state/strikes/<sid>.json` first;
+                             fallback to `~/.claude/state/praxis/strikes/<sid>.json`
+                             when no `PRAXIS_STATE_DIR` override is set and the
+                             new location is absent (pre-#527 legacy support)
 6. Emit `hookSpecificOutput.additionalContext` JSON to stdout.
 7. Update state file with `last_compact_uuid_emitted = <uuid>`.
 
