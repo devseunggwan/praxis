@@ -18,7 +18,6 @@ call with `--state all`. Exits 0 otherwise (transparent pass-through).
 from __future__ import annotations
 
 import json
-import os
 import sys
 import sys as _sys
 from pathlib import Path as _Path
