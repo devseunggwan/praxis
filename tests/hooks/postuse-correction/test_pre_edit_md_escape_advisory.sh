@@ -33,9 +33,15 @@ PASS=0; FAIL=0; FAILED_NAMES=()
 
 # Per-test history file (overrides session-id resolution entirely).
 fresh_history() {
-  # XXXXXX must be the template suffix: BSD mktemp (macOS) does not substitute
-  # X's when a literal suffix like ".json" follows them, so append it afterwards.
-  echo "$(mktemp -u "${TMPDIR:-/tmp}/praxis-md-escape-test-XXXXXX").json"
+  # Must yield a UNIQUE path that does not yet exist (state tests below assert no
+  # file was created when the hook records nothing). `mktemp -u` only predicts a
+  # name and can collide under a shared TMPDIR; instead atomically claim a real
+  # file (guaranteed unique), unlink it so the name is free, and add the ".json"
+  # suffix the hook expects.
+  local base
+  base="$(mktemp "${TMPDIR:-/tmp}/praxis-md-escape-test-XXXXXX")" || return 1
+  rm -f "$base"
+  echo "${base}.json"
 }
 
 # build_edit_payload <file_path> <old_string>

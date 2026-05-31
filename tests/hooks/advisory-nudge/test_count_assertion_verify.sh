@@ -141,6 +141,15 @@ run_case "compound_cmd_semicolon" advisory \
 run_case "explicit_e_flag" advisory \
   "grep -c -e 'pat1\|pat2' file.txt"
 
+# Regression (issue #516 defect2): alternation lives only in the SECOND -e
+# pattern. The old code inspected patterns[0] alone and missed it.
+run_case "ere_alternation_second_e_flag" advisory \
+  "grep -Ec -e 'a' -e 'b|c' file.txt"
+
+# BRE variant: first -e plain, second -e carries the \| alternation.
+run_case "bre_alternation_second_e_flag" advisory \
+  "grep -c -e 'a' -e 'b\|c' file.txt"
+
 # ---------------------------------------------------------------------------
 # Pass cases — should NOT fire
 # ---------------------------------------------------------------------------

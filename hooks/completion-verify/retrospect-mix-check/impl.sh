@@ -98,10 +98,13 @@ DIST_CARD=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk '
 # trips the violation check below.
 # LAST occurrence wins (handles dual-card-in-block case where a stale earlier
 # PASS would otherwise shadow a corrected FAIL).
-GATE_1=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_1_verdict:/ {v=$2} END{print v}')
-GATE_2=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_2_verdict:/ {v=$2} END{print v}')
-GATE_3=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_3_verdict:/ {v=$2} END{print v}')
-GATE_4=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_4_verdict:/ {v=$2} END{print v}')
+# `xargs` trims trailing whitespace that awk -F': *' leaves on the value (e.g.
+# "FAIL " from a hand-edited card), which would break the exact-string verdict
+# comparisons below ([ "FAIL " = "FAIL" ] is false → silent skip).
+GATE_1=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_1_verdict:/ {v=$2} END{print v}' | xargs)
+GATE_2=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_2_verdict:/ {v=$2} END{print v}' | xargs)
+GATE_3=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_3_verdict:/ {v=$2} END{print v}' | xargs)
+GATE_4=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '/^- gate_4_verdict:/ {v=$2} END{print v}' | xargs)
 [ -z "$GATE_1" ] && GATE_1="MISSING"
 [ -z "$GATE_2" ] && GATE_2="MISSING"
 # Gate-3 MISSING is not blocked (newly added enforcement; old cards legitimately omit this key).

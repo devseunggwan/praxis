@@ -239,6 +239,30 @@ run_case "compact subshell trailing-paren does not cause false advisory" \
   "silent" \
   "(cd $NON_WT_DIR && cd $ROOT_DIR)"
 
+# Regression (issue #516 defect1): the CLOSING segment of a subshell must NOT
+# pollute the outer effective_cwd. In `(cd /tmp && cd /usr) && cd bin`, the
+# outer relative `cd bin` must resolve against the original cwd, not /usr.
+# Run with a controlled outer cwd (a temp dir guaranteed to lack `bin/`).
+DEF1_OUTER=$(mktemp -d)
+{
+  payload_def1=$(python3 -c '
+import json
+print(json.dumps({"tool_name": "Bash",
+    "tool_input": {"command": "(cd /tmp && cd /usr) && cd bin"}}))')
+  err_file=$(mktemp)
+  ( cd "$DEF1_OUTER" && echo "$payload_def1" | "$HOOK" >/dev/null 2>"$err_file" )
+  def1_rc=$?
+  def1_err=$(cat "$err_file"); rm -f "$err_file"
+  if [ "$def1_rc" -eq 0 ] && printf '%s' "$def1_err" | grep -q '\[worktree-missing\]'; then
+    echo "PASS  [subshell close does not pollute outer cwd (defect1)]"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL  [subshell close does not pollute outer cwd (defect1)] rc=$def1_rc stderr=${def1_err:-<empty>}"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("subshell close does not pollute outer cwd (defect1)")
+  fi
+}
+rmdir "$DEF1_OUTER" 2>/dev/null || true
+
 # R3 P2-2: `cat<<EOF` (command-attached, no space) — body cd must be silent.
 run_case "command-attached fused heredoc body cd is silent (cat<<EOF)" \
   "silent" \

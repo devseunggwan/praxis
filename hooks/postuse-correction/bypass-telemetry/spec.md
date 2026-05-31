@@ -40,8 +40,10 @@ Two naming families are detected (both required):
 
 Detection regex: `^(?:CLAUDE_HOOK_|PRAXIS_).*BYPASS`
 
-**Truthiness rule**: a var is only counted if its value is non-empty and
-not the literal string `"0"`.  `VAR=0` and `VAR=` are treated as inactive.
+**Truthiness rule**: a var is only counted if its value is non-empty and not
+one of the conventional shell-falsy literals `0` / `false` / `no` / `off`
+(matched case-insensitively).  `VAR=0`, `VAR=false`, `VAR=no`, `VAR=off` and
+`VAR=` are all treated as inactive.
 
 **Detection sources** (results are unioned):
 

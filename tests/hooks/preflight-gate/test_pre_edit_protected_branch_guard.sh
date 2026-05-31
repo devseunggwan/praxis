@@ -432,6 +432,15 @@ run_case "dirty+protected+docs/guide.md → pass (docs dir skip)" pass \
   "PRAXIS_PBGUARD_TEST_BRANCH=main" \
   "PRAXIS_PBGUARD_TEST_STATUS=$DIRTY_STATUS"
 
+# Regression (issue #516 defect6): a RELATIVE docs path (no leading slash) must
+# also be recognized as a docs file. The old is_docs_file required "/docs/" in
+# the path, so "docs/guide.md" slipped through; the fix accepts startswith("docs/").
+run_case "dirty+protected+relative docs/guide.md → pass (docs dir skip)" pass \
+  Edit "docs/relative-guide.md" \
+  "PRAXIS_PBGUARD_TEST_REPO_ROOT=$FAKE_ROOT" \
+  "PRAXIS_PBGUARD_TEST_BRANCH=main" \
+  "PRAXIS_PBGUARD_TEST_STATUS=$DIRTY_STATUS"
+
 # ---------------------------------------------------------------------------
 # PASS: PRAXIS_PBGUARD_SKIP=1 opt-out
 # ---------------------------------------------------------------------------
