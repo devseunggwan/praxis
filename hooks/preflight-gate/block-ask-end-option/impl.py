@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path as _Path
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
@@ -140,6 +141,30 @@ NEGATION_PATTERNS_EN = (
     "won't ", "wouldn't ", "shouldn't ", "can't ", "cannot ",
 )
 NEGATION_WINDOW = 30  # characters preceding the phrase match
+
+# Phrases that read as stop signals in isolation but are routinely action
+# directives when followed by an action verb ("I'm done with the analysis,
+# proceed ..."): a stop match here is disqualified when an action verb follows
+# within ACTION_FOLLOWUP_WINDOW chars (issue #515). Termination-specific
+# phrases ("stop here", "that's all", "quit now") are deliberately excluded —
+# they stay unconditional stop signals.
+AMBIGUOUS_STOP_PHRASES_EN = (
+    "wrap up", "wrap this up",
+    "finish up",
+    "no more",
+    "we're done", "we are done", "i'm done", "i am done",
+)
+# Action verbs that, after an ambiguous stop phrase, mark the message as a
+# directive to keep working. Single words matched whole-word ("run the tests"
+# counts, "running" does not); multi-word entries matched as phrases.
+ACTION_VERBS_EN = (
+    "proceed", "continue", "implement", "deploy", "merge", "push",
+    "run", "execute", "review", "test", "build", "create", "start",
+    "move on", "go ahead", "commit", "ship", "release", "fix", "add",
+    "update", "write", "refactor", "investigate", "analyze", "check",
+)
+# Characters after an ambiguous phrase to scan for an action verb.
+ACTION_FOLLOWUP_WINDOW = 80
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -303,6 +328,7 @@ def _has_stop_signal(user_message: str) -> bool:
     # English: phrase match with negation guard.
     for phrase in STOP_SIGNALS_EN_PHRASES:
         phrase_lower = phrase.lower()
+        ambiguous = phrase_lower in AMBIGUOUS_STOP_PHRASES_EN
         start = 0
         while True:
             idx = lower.find(phrase_lower, start)
@@ -310,7 +336,15 @@ def _has_stop_signal(user_message: str) -> bool:
                 break
             prefix = lower[max(0, idx - NEGATION_WINDOW):idx]
             if not _has_negation(prefix):
-                return True
+                # Ambiguous phrases are NOT a stop signal when an action verb
+                # follows (the user is directing further work, not stopping).
+                if ambiguous:
+                    suffix = lower[idx + len(phrase_lower):
+                                   idx + len(phrase_lower) + ACTION_FOLLOWUP_WINDOW]
+                    if not _has_action_verb(suffix):
+                        return True
+                else:
+                    return True
             start = idx + 1
 
     return False
@@ -325,6 +359,23 @@ def _has_negation(prefix: str) -> bool:
     negation.
     """
     return any(neg in prefix for neg in NEGATION_PATTERNS_EN)
+
+
+def _has_action_verb(suffix: str) -> bool:
+    """True if the window after an ambiguous stop phrase contains an action verb.
+
+    Single-word verbs use ASCII-lookaround whole-word matching (mirroring the
+    suite's boundary strategy) so "run the tests" counts but "running" does
+    not; multi-word phrases are matched as substrings.
+    """
+    for verb in ACTION_VERBS_EN:
+        if " " in verb:
+            if verb in suffix:
+                return True
+        else:
+            if re.search(r"(?<![a-z])" + re.escape(verb) + r"(?![a-z])", suffix):
+                return True
+    return False
 
 
 # ---------------------------------------------------------------------------

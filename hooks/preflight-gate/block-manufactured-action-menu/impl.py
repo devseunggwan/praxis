@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path as _Path
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
@@ -110,14 +111,25 @@ COMMAND_SIGNALS_KO = (
     "계속",
 )
 
-# Negation markers that, when found following a Korean signal token,
-# convert the directive into "do not <action>" — must NOT register as
-# command-intent. Examples: "진행하지 마", "계속하지 마", "머지하지 마".
+# Negation markers following a Korean signal token that turn the directive
+# into "do not <action>" — must NOT register as command-intent (issue #515).
+# Three shapes covered: prohibitive "...하지 마/말", conditional "...하면 안 ...",
+# declarative "...하지 않 ..." / "...안 됩니다/돼/된다".
 NEGATION_FOLLOWUP_KO = (
     "하지 마",
     "하지 말",
     "하지마",
     "하지말",
+    "하면 안",
+    "하면안",
+    "하지 않",
+    "하지않",
+    "안 됩니다",
+    "안됩니다",
+    "안 돼",
+    "안돼",
+    "안 된다",
+    "안된다",
 )
 
 # English negation window: # of chars to scan before an EN command token.
@@ -229,13 +241,27 @@ def _collect_option_labels(tool_input: dict) -> list[str]:
 
 
 def _has_manufactured_marker(labels: list[str]) -> bool:
+    """True if any option label carries a manufactured-menu marker.
+
+    Korean markers stay substring-matched (CJK has no ASCII word boundary,
+    low collision risk). English markers use ASCII-letter lookaround so
+    alternative-path labels are not swept up (`continue` must not match
+    `Discontinue support`) while mixed-script labels still match (issue #515).
+    """
     if not labels:
         return False
-    markers = _all_markers()
+    ko_markers = MANUFACTURED_MARKERS_KO + AFFIRMATIVE_MARKERS_KO
+    en_markers = MANUFACTURED_MARKERS_EN + AFFIRMATIVE_MARKERS_EN
     for label in labels:
         lower = label.lower()
-        for marker in markers:
-            if marker.lower() in lower:
+        for marker in ko_markers:
+            if marker in label or marker.lower() in lower:
+                return True
+        for marker in en_markers:
+            pattern = (
+                r"(?<![a-z])" + re.escape(marker.lower()) + r"(?![a-z])"
+            )
+            if re.search(pattern, lower):
                 return True
     return False
 
@@ -336,7 +362,6 @@ def _has_destructive_label(labels: list[str]) -> bool:
     """
     if not labels:
         return False
-    import re
     for label in labels:
         lower = label.lower()
         for token in DESTRUCTIVE_LABEL_TOKENS_KO:
@@ -422,7 +447,7 @@ def _has_command_signal(user_message: str) -> bool:
             idx = user_message.find(ko, start)
             if idx < 0:
                 break
-            tail = user_message[idx + len(ko): idx + len(ko) + 12]
+            tail = user_message[idx + len(ko): idx + len(ko) + 16]
             if not any(neg in tail for neg in NEGATION_FOLLOWUP_KO):
                 return True
             start = idx + len(ko)
@@ -430,7 +455,6 @@ def _has_command_signal(user_message: str) -> bool:
     # English: whole-word match (case-insensitive) with negation guard on
     # the preceding window ("don't proceed", "do not continue").
     lower = user_message.lower()
-    import re
     for token in COMMAND_SIGNALS_EN_TOKENS:
         pattern = r"\b" + re.escape(token.lower()) + r"\b"
         for m in re.finditer(pattern, lower):

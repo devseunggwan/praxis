@@ -128,6 +128,17 @@ Negation guard: a match preceded by `don't`, `do not`, `never`, `no`, `not`,
 `won't`, `wouldn't`, `shouldn't`, `can't`, or `cannot` within 30 characters
 is disqualified (prevents "don't stop" from being a stop signal).
 
+Action-directive guard (issue #515): a small set of ambiguous phrases —
+`wrap up`, `wrap this up`, `finish up`, `no more`, `we're done`,
+`we are done`, `i'm done`, `i am done` — read as stop signals in isolation
+but are routinely action directives when followed by an object + action
+verb (`proceed`, `continue`, `implement`, `deploy`, `merge`, `run`, …)
+within 80 characters. Such a match is NOT treated as a stop signal:
+"I'm done with the analysis, proceed to implementation" and "wrap up the PR
+tests and deploy" keep the end-option block. Termination-specific phrases
+(`stop here`, `end the session`, `session end`, `that's all`, `quit now`,
+`cancel this`) are excluded from this guard and stay unconditional.
+
 ### Response
 
 Block response (exit 2):
