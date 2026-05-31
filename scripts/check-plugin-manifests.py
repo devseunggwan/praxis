@@ -161,7 +161,8 @@ def main() -> int:
     # Rule 4 — completion-verify Stop ordering
     # ------------------------------------------------------------------
     expected_stop = ["completion-verify", "retrospect-mix-check",
-                     "completion-signal-gate", "strike-counter"]
+                     "completion-signal-gate", "merge-state-claim-gate",
+                     "strike-counter"]
     actual_stop: list[str] = []
     for entry in manifest["hooks"]:
         if entry["event"] == "Stop":

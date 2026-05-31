@@ -89,12 +89,13 @@ context, patch false positives, or record tracking state for paired gates.
 
 Stop hooks that gate **completion claims** before the assistant response is
 finalized. Run sequentially: `completion-verify` → `retrospect-mix-check` →
-`completion-signal-gate` → `strike-counter stop`. Also includes
-session-lifecycle enforcement.
+`completion-signal-gate` → `merge-state-claim-gate` → `strike-counter stop`.
+Also includes session-lifecycle enforcement.
 
 | Hook | Trigger | Purpose |
 |------|---------|---------|
 | [completion-verify](../../hooks/completion-verify/completion-verify/spec.md) | Stop | Block "done / 완료" claims without same-turn Bash verification evidence |
 | [retrospect-mix-check](../../hooks/completion-verify/retrospect-mix-check/spec.md) | Stop | Block retrospect Stage 3 outputs that default findings to memory-only |
 | [completion-signal-gate](../../hooks/completion-verify/completion-signal-gate/spec.md) | Stop | Advisory nudge when completion-signal phrase appears without evidence-block; also flags cross-plugin slash commands (Event 2) |
+| [merge-state-claim-gate](../../hooks/completion-verify/merge-state-claim-gate/spec.md) | Stop | Advisory when the final message asserts a merge/PR/issue/worktree state change without a fresh `gh`/GitHub-MCP state query in the recent transcript |
 | [strike-counter](../../hooks/completion-verify/strike-counter/spec.md) | SessionStart + UserPromptSubmit + Stop | Session-scoped three-strike discipline — hard-blocks at strike 3, requires reflection before reset |
