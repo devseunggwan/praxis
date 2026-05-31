@@ -258,6 +258,26 @@ run_case "skip: no --json flag" \
   "gh pr view 1"
 
 # ---------------------------------------------------------------------------
+# issue #514 결함5: `--json help` is gh's OWN field introspection — gh prints
+# the valid field list. Blocking it is self-contradictory because the
+# remediation message tells the agent to run exactly `gh <subcmd> --json help`.
+# A lone `help` field must PASS.
+# ---------------------------------------------------------------------------
+run_case "514: --json help introspection passes" \
+  "pass" \
+  "gh pr view 1 --json help"
+
+run_case "514: --json=help inline introspection passes" \
+  "pass" \
+  "gh pr view 1 --json=help"
+
+# But `help` combined with a real invalid field is a data projection request —
+# still block.
+run_case "514: --json help,merged still blocks" \
+  "block:BLOCKED" \
+  "gh pr view 1 --json help,merged"
+
+# ---------------------------------------------------------------------------
 # Summary
 # Fail-open guard opt-in (issue #498): main() must be @fail_open-wrapped;
 # guard behavior is tested centrally in tests/test_hook_runtime.sh.

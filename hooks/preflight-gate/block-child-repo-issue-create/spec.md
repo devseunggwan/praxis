@@ -33,6 +33,8 @@ A `gh issue create` call is blocked (exit 2) when ALL hold:
 |-----------|--------|
 | `PRAXIS_HUB_MEDIATED_ORGS` unset | **PASS** (NO-OP) |
 | `gh issue create --repo example-org/child` (org configured) | **BLOCKED** |
+| `gh issue create --title "a; b" --repo example-org/child` (separator inside quoted title) | **BLOCKED** (quote-aware tokenization; issue #514) |
+| `grep -rn "gh issue create --repo example-org/child" .` (literal in a quoted string) | **PASS** (not a real invocation; issue #514) |
 | `gh issue create --repo example-org/hub` (this IS the hub) | **PASS** |
 | `gh issue create --repo other-org/anything` (org not in allowlist) | **PASS** |
 | `gh issue create` (no `--repo` flag) | **PASS** |

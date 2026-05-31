@@ -42,6 +42,8 @@ literally in a prior search command.
 | `gh issue create --repo devseunggwan/scratchs ...` | **PASS** (personal-repo carve-out) |
 | `gh issue create --title "feat: foo bar [dup-checked]"` | **PASS** (dup token) |
 | `gh issue create --title "fix: ci"` (no keyword ≥4 chars) | **PASS** (cannot enforce) |
+| `gh issue create --title="…"` / `-t "…"` / `-t="…"` / `gh -R o/r issue create --title …` | **BLOCKED** (title parsed from all flag forms; issue #514) |
+| `grep -rn "gh issue create" hooks/` / `echo gh issue create --title x` | **PASS** (literal inside a quoted string is not a real invocation; issue #514) |
 
 ### Escape hatches
 
@@ -60,7 +62,8 @@ literally in a prior search command.
 bash tests/test_block_gh_issue_create_without_dup_search.sh
 ```
 
-Covers 14 cases: both block paths (no search, no overlap), silent paths
-(each escape hatch, personal-repo carve-out, keyword overlap, unkeyworded
-title), non-Bash tool passthrough, missing `transcript_path`, and malformed
+Covers both block paths (no search, no overlap), silent paths (each escape
+hatch, personal-repo carve-out, keyword overlap, unkeyworded title), the
+title-flag forms and quote-aware over-block guards (issue #514),
+non-Bash tool passthrough, missing `transcript_path`, and malformed
 JSON fail-open.

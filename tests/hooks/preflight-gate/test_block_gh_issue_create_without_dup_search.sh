@@ -183,6 +183,51 @@ run_case "gh issue create with title that has no usable keywords (silent)" \
   "silent" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/foo --title 'fix: a b c d'\"},\"transcript_path\":\"$TX_EMPTY\"}"
 
+# ---------------------------------------------------------------------------
+# issue #514 결함2 — title-flag forms + quote-aware over-block
+# ---------------------------------------------------------------------------
+
+# --title=value form: the old _TITLE_RE matched only `--title <value>`, so the
+# `=`-joined form left the title (and keywords) empty → gate passed silently.
+# Must now extract the title and BLOCK (no prior search).
+run_case "514: --title=value form extracts title (block)" \
+  "block:no-search" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo --title='feat(provider): add zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_EMPTY\"}"
+
+# -t value short-flag form for --title.
+run_case "514: -t value short-flag title (block)" \
+  "block:no-search" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo -t 'feat(provider): add zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_EMPTY\"}"
+
+# -t=value inline short-flag form.
+run_case "514: -t=value inline title (block)" \
+  "block:no-search" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo -t='feat: zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_EMPTY\"}"
+
+# gh global flag before the issue/create group with --title= form.
+run_case "514: gh -R o/r issue create --title= (block)" \
+  "block:no-search" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh -R acme/repo issue create --title='feat: zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_EMPTY\"}"
+
+# A value flag between `issue` and `create` (`gh issue -R o/r create`) must not
+# let its value masquerade as the action token — the create is still BLOCKED.
+run_case "523: gh issue -R o/r create (value flag before action, block)" \
+  "block:no-search" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue -R acme/repo create --title 'feat: zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_EMPTY\"}"
+
+# Over-block: the literal `gh issue create` inside a grep pattern is NOT a real
+# invocation — the old raw regex matched it and could block. Token-aware
+# detection must PASS.
+run_case "514: grep literal 'gh issue create' not blocked (silent)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"grep -rn 'gh issue create' hooks/\"},\"transcript_path\":\"$TX_EMPTY\"}"
+
+# Over-block: an echo string mentioning gh issue create + a title flag must
+# not be treated as a real create.
+run_case "514: echo string with gh issue create --title not blocked (silent)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo run gh issue create --title someBigKeyword\"},\"transcript_path\":\"$TX_EMPTY\"}"
+
 run_case "malformed JSON (silent — fail-open)" \
   "silent" \
   "not-json"

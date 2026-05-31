@@ -300,6 +300,12 @@ def _check_segment(
     if json_fields is None:
         return False, ""
 
+    # `--json help` is gh's own field-introspection (prints valid fields, not
+    # data) — the very command our remediation tells the agent to run, so it
+    # must pass (issue #514 결함5).
+    if json_fields == ["help"]:
+        return False, ""
+
     valid_fields = _get_valid_fields(subcommand_tokens, cache_dir)
     if valid_fields is None:
         return False, ""  # fail-open on gh/network errors

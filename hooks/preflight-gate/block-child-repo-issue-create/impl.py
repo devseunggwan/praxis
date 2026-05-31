@@ -52,13 +52,17 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
+from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    iter_command_starts,
+    safe_tokenize,
+    strip_prefix,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -109,44 +113,101 @@ def _parse_hub_mediated_orgs(raw: str) -> list[OrgConfig]:
 # Repo flag extraction
 # ---------------------------------------------------------------------------
 
-# Matches --repo X, --repo=X, -R X, -R=X, -R<value> (concatenated short form).
-# gh -R accepts OWNER/REPO or HOST/OWNER/REPO; host stripping happens in main().
-# Capture group 1: the repo value.
-_REPO_FLAG_RE = re.compile(
-    r"(?:--repo[ =]|-R[ =]?)([^\s]+)"
-)
-
-# Matches any of the four gh-issue-create invocation forms:
-#   1. gh [global-flags] issue [flags] (create|new) ...  (global -R before command group)
-#   2. gh issue [flags] (create|new) ...                 (standard, alias, flag-before-subcommand)
-# "flags" = sequences of -X[=val] or --flag[=val]; non-flag tokens end the flag run.
-# Pattern gates on subcommand keyword appearing as the first non-flag token after
-# "issue" to avoid matching "create"/"new" as a flag value.
-_GH_ISSUE_CREATE_RE = re.compile(
-    r"\bgh(?:\s+(?:-\S+(?:\s+[^-\s]\S*)?))*\s+issue(?:\s+(?:-\S+(?:\s+[^-\s]\S*)?))*\s+(?:create|new)\b"
-)
-
-# Splits a shell command on pipeline/sequential operators to isolate each
-# individual invocation.  Simple split — does not handle quoting around &&/;.
-_CMD_SEP_RE = re.compile(r"\s*(?:&&|\|\||;|\|)\s*")
+# gh global flags that consume the following token as their value, so the
+# subcommand walk skips both (e.g. `gh -R o/r issue create`).
+_GH_GLOBAL_VALUE_FLAGS: frozenset[str] = frozenset({
+    "-R", "--repo", "--hostname", "--color",
+})
+# --repo / -R value forms on the create argv.
+_REPO_FLAGS: frozenset[str] = frozenset({"--repo", "-R"})
 
 
 def _extract_repos_for_creates(command: str) -> list[str]:
     """Return repo values for every gh-issue-create invocation in *command*.
 
-    Splits on shell operators first so that each segment is checked
-    independently, preventing a hub-repo invocation from masking a later
-    child-repo invocation in a compound command.  Within each segment,
-    searches for a repo flag if that segment contains a gh-issue-create call.
+    Tokenizes quote-aware (safe_tokenize → iter_command_starts) so each
+    command segment is isolated independently — preventing a hub-repo
+    invocation from masking a later child-repo one in a compound command,
+    AND keeping shell separators *inside a quoted title* (`--title "a; b"`)
+    from fragmenting the command (issue #514 결함3 HIGH). The raw-regex
+    `\\bgh\\s+issue\\s+create\\b` also matched inside quoted strings / grep
+    literals → over-block (결함3 MED); token-based detection avoids both.
     """
     repos: list[str] = []
-    for segment in _CMD_SEP_RE.split(command):
-        if not _GH_ISSUE_CREATE_RE.search(segment):
+    tokens = safe_tokenize(command)
+    if not tokens:
+        return repos
+    for raw_argv in iter_command_starts(tokens):
+        argv = strip_prefix(list(raw_argv))
+        if not _is_gh_issue_create(argv):
             continue
-        m = _REPO_FLAG_RE.search(segment)
-        if m:
-            repos.append(m.group(1).strip("'\""))
+        repo = _flag_value_from_argv(argv, _REPO_FLAGS)
+        if repo:
+            repos.append(repo.strip("'\""))
     return repos
+
+
+def _is_gh_issue_create(argv: list[str]) -> bool:
+    """True iff argv is `gh [global flags] issue [flags] (create|new) ...`.
+
+    Flags between `issue` and the action token are skipped, including the
+    value of value-taking flags in their separate-token form
+    (`gh issue -R owner/repo create`).
+    """
+    if not argv or argv[0].rsplit("/", 1)[-1] != "gh":
+        return False
+    i = _skip_gh_global_flags(argv)
+    if i >= len(argv) or argv[i] != "issue":
+        return False
+    j = i + 1
+    n = len(argv)
+    while j < n and argv[j].startswith("-") and argv[j] != "--":
+        tok = argv[j]
+        j += 1
+        # Separate-token value flag (`-R repo`, `--repo repo`) consumes the
+        # following token so it is not mistaken for the action.
+        if "=" not in tok and tok in _GH_GLOBAL_VALUE_FLAGS and j < n:
+            j += 1
+    return j < n and argv[j] in ("create", "new")
+
+
+def _skip_gh_global_flags(argv: list[str]) -> int:
+    """Index of the first positional after gh's leading global flags."""
+    i = 1
+    n = len(argv)
+    while i < n:
+        tok = argv[i]
+        if tok == "--":
+            return i + 1
+        if not tok.startswith("-"):
+            break
+        i += 1
+        if "=" not in tok and tok in _GH_GLOBAL_VALUE_FLAGS and i < n:
+            i += 1
+    return i
+
+
+def _flag_value_from_argv(argv: list[str], flags: frozenset[str]) -> str:
+    """Return the value of the first matching flag in *argv*.
+
+    Handles separate-token (`--repo X`, `-R X`), inline (`--repo=X`,
+    `-R=X`), and concatenated short-flag (`-Rvalue`) forms.
+    """
+    # Short flags (`-R`) eligible for the concatenated `-Rvalue` form.
+    short_flags = tuple(f for f in flags if len(f) == 2 and f.startswith("-") and not f.startswith("--"))
+    n = len(argv)
+    for i, tok in enumerate(argv):
+        if "=" in tok:
+            name, _, val = tok.partition("=")
+            if name in flags:
+                return val
+            continue
+        if tok in flags and i + 1 < n:
+            return argv[i + 1]
+        for sf in short_flags:
+            if tok.startswith(sf) and len(tok) > 2:
+                return tok[2:]
+    return ""
 
 
 def _repo_org(repo: str) -> str:

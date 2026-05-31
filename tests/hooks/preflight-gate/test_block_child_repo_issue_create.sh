@@ -334,6 +334,39 @@ run_case "compound child then hub (block)" \
   "PRAXIS_HUB_MEDIATED_ORGS=$ORGS_CFG"
 
 # ---------------------------------------------------------------------------
+# issue #514 결함3 — quote-aware tokenization (separator inside quoted title)
+# ---------------------------------------------------------------------------
+
+# A separator inside the quoted --title (`--title "a; b"`) once fragmented the
+# raw-regex split and dropped --repo; quote-aware tokenization keeps it intact.
+run_case "514: semicolon in quoted title still blocks child (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --title 'a; b' --repo example-org/child\"}}" \
+  "PRAXIS_HUB_MEDIATED_ORGS=$ORGS_CFG"
+
+run_case "514: && in quoted title still blocks child (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --title 'a && b' --repo example-org/child\"}}" \
+  "PRAXIS_HUB_MEDIATED_ORGS=$ORGS_CFG"
+
+run_case "514: pipe in quoted title still blocks child (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --title 'a | b' -R example-org/child\"}}" \
+  "PRAXIS_HUB_MEDIATED_ORGS=$ORGS_CFG"
+
+# Over-block: literal `gh issue create --repo …` inside a grep / echo string is
+# not a real invocation — token-aware detection must PASS.
+run_case "514: grep literal not blocked (silent)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"grep -rn 'gh issue create --repo example-org/child' .\"}}" \
+  "PRAXIS_HUB_MEDIATED_ORGS=$ORGS_CFG"
+
+run_case "514: echo string not blocked (silent)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo run gh issue create --repo example-org/child\"}}" \
+  "PRAXIS_HUB_MEDIATED_ORGS=$ORGS_CFG"
+
+# ---------------------------------------------------------------------------
 # Uncaught exception fail-open (outer Exception guard)
 # ---------------------------------------------------------------------------
 

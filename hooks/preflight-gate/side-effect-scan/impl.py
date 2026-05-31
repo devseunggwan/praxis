@@ -100,22 +100,72 @@ def argv_matches(argv: list[str], positions, expected) -> bool:
 GH_GLOBAL_FLAGS_WITH_ARG = frozenset({"-R", "--repo", "--hostname", "--color"})
 
 
-def _is_gh_pr_merge(argv: list[str]) -> bool:
-    """Return True iff argv is `gh [global flags] pr merge ...`."""
-    if not argv or argv[0] != "gh":
-        return False
+def _gh_skip_global_flags(argv: list[str]) -> int:
+    """Return the index of the first positional token after gh's leading
+    global flags (`gh [--repo X] [-R Y] ...`).
+
+    A leading global flag (e.g. `gh --repo owner/repo pr merge`) shifts the
+    subcommand off the fixed `argv[1]`/`argv[2]` positions the old
+    fixed-position walk assumed. Skipping the flags first makes the gh
+    detector position-independent — issue #514 결함1.
+    """
     i = 1
-    while i < len(argv):
+    n = len(argv)
+    while i < n:
         tok = argv[i]
         if tok == "--":
-            i += 1
-            break
+            return i + 1
         if not tok.startswith("-"):
             break
         i += 1
-        if "=" not in tok and tok in GH_GLOBAL_FLAGS_WITH_ARG and i < len(argv):
+        if "=" not in tok and tok in GH_GLOBAL_FLAGS_WITH_ARG and i < n:
             i += 1
-    return i + 1 < len(argv) and argv[i] == "pr" and argv[i + 1] == "merge"
+    return i
+
+
+def _gh_subcommand_pair(argv: list[str]) -> tuple[str, str]:
+    """Return the (group, action) subcommand pair for a gh invocation,
+    skipping any leading global flags. Empty strings when absent.
+
+    Examples:
+      ['gh', 'pr', 'merge', ...]               → ('pr', 'merge')
+      ['gh', '--repo', 'o/r', 'pr', 'merge']   → ('pr', 'merge')
+      ['gh', 'workflow', 'run', ...]           → ('workflow', 'run')
+    """
+    if not argv or argv[0] != "gh":
+        return ("", "")
+    i = _gh_skip_global_flags(argv)
+    group = argv[i] if i < len(argv) else ""
+    action = argv[i + 1] if i + 1 < len(argv) else ""
+    return (group, action)
+
+
+def _is_gh_pr_merge(argv: list[str]) -> bool:
+    """Return True iff argv is `gh [global flags] pr merge ...`."""
+    return _gh_subcommand_pair(argv) == ("pr", "merge")
+
+
+# Flag-aware gh detector: maps a (group, {actions}) subcommand pair to the
+# CATEGORIES key it triggers. Replaces the fixed-position argv_matches walk
+# for gh so leading global flags can no longer shift the subcommand out of
+# detection range (issue #514 결함1).
+_GH_CATEGORY_BY_PAIR: list[tuple[str, frozenset[str], str]] = [
+    ("pr", frozenset({"merge", "create"}), "gh-merge"),
+    ("workflow", frozenset({"run"}), "gh-merge"),
+]
+
+
+def _detect_gh(argv: list[str]) -> list[str]:
+    """Flag-aware detection for gh invocations (issue #514 결함1)."""
+    group, action = _gh_subcommand_pair(argv)
+    if not group or not action:
+        return []
+    matched: list[str] = []
+    for want_group, want_actions, category in _GH_CATEGORY_BY_PAIR:
+        if group == want_group and action in want_actions:
+            if category not in matched:
+                matched.append(category)
+    return matched
 
 
 def detect(argv: list[str], delegate_bypass: bool = False) -> list[str]:
@@ -125,9 +175,14 @@ def detect(argv: list[str], delegate_bypass: bool = False) -> list[str]:
     if delegate_bypass and _is_gh_pr_merge(argv):
         return []
     cmd = argv[0].rsplit("/", 1)[-1]
+    if cmd == "gh":
+        # Flag-aware walk — primary gh detector (issue #514 결함1).
+        return _detect_gh(argv)
     matched = []
     for category, spec in CATEGORIES.items():
         for cmd_name, positions, expected in spec["patterns"]:
+            if cmd_name == "gh":
+                continue  # gh handled by the flag-aware _detect_gh walk
             if cmd != cmd_name:
                 continue
             if argv_matches(argv, positions, expected):
