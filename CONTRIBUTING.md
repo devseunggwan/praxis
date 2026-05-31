@@ -155,6 +155,32 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
    Stop ordering, byte-equivalent generated artifacts, and 5+ more
    invariants (see the script preamble).
 
+## Reviewing or auditing a PR
+
+> **When judging what a PR changed, look at the PR ref directly — never assume
+> the ambient working tree is the PR.**
+
+A checked-out working tree is not the PR. After a `git reset --hard origin/main`
+or a `git checkout`, the tree holds whatever ref you last moved to — often
+*pre-merge `main`* — not the PR's contents. Auditing that tree and attributing
+the result to the PR produces confident-but-wrong findings: a real incident
+reported a guard as "unfixed / live bypass" while the PR branch had already
+fixed it, and the claim was only corrected after reading the PR ref with
+`git show`.
+
+Inspect the PR by its ref, not by whatever happens to be on disk:
+
+| Question | Command |
+|----------|---------|
+| What did the PR change? | `git diff origin/main...origin/<branch>` |
+| What does a file look like in the PR? | `git show origin/<branch>:<path>` |
+| Which ref is checked out right now? | `git rev-parse --abbrev-ref HEAD && git log -1 --oneline` |
+
+Confirm the checked-out ref **before** drawing any conclusion, especially right
+after a `reset` or `checkout`. If you must audit from the tree itself, fetch and
+check out the PR branch first (`git fetch origin <branch> && git checkout
+<branch>`) instead of assuming the current tree reflects it.
+
 ## Packaging
 
 **Do not edit generated files directly.** The following are generated outputs:
