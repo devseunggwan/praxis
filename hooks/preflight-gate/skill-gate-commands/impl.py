@@ -135,20 +135,11 @@ _KNOWN_BINARY_GLOBAL_OPTS = {
 _GIT_PUSH_OPTS_WITH_VALUE = {"-o", "--push-option", "--receive-pack", "--exec"}
 
 def _tokenize(command: str) -> list[str] | None:
-    """Tokenize via the shared ``safe_tokenize`` primitive (issue #514).
-
-    ``safe_tokenize`` (``shlex.shlex`` with ``punctuation_chars=';|&'``) emits
-    shell operators as their own tokens, so a whitespace-free one-liner like
-    ``gh pr create&&echo`` splits to ``['gh', 'pr', 'create', '&&', 'echo']``
-    rather than gluing ``create&&echo`` into a single token that slips past the
-    pattern matchers. Plain ``shlex.split`` keeps operators attached to the
-    adjacent word, which let that form bypass the gate entirely — exactly the
-    failure the shared primitive exists to prevent (see DESIGN.md →
-    "Structural tokenization, not regex").
-
-    Returns ``[]`` for an unparseable command (``safe_tokenize`` swallows
-    per-line parse errors); the matchers then find nothing and the gate fails
-    open. The ``None`` arm is retained for caller-contract stability.
+    """Tokenize via the shared ``safe_tokenize`` so whitespace-free operators
+    (``gh pr create&&echo``) split into their own tokens instead of gluing
+    ``create&&echo`` past the matchers — the bypass plain ``shlex.split`` left
+    open (issue #514; DESIGN.md "Structural tokenization, not regex"). Empty
+    list on an unparseable command → matchers find nothing → fail-open.
     """
     return safe_tokenize(command)
 

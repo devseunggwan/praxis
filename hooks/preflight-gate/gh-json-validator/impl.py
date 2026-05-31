@@ -300,11 +300,9 @@ def _check_segment(
     if json_fields is None:
         return False, ""
 
-    # `--json help` is gh's OWN field-introspection request — gh prints the
-    # valid field list rather than projecting data. Blocking it is
-    # self-contradictory: the remediation message itself tells the agent to
-    # run `gh <subcmd> --json help` to discover valid fields (issue #514
-    # 결함5). Treat a lone `help` field as a pass.
+    # `--json help` is gh's own field-introspection (prints valid fields, not
+    # data) — the very command our remediation tells the agent to run, so it
+    # must pass (issue #514 결함5).
     if json_fields == ["help"]:
         return False, ""
 

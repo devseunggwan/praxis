@@ -411,13 +411,9 @@ run_case "echo x; gh pr create (prefix cmd, block)" \
   "PRAXIS_SKILL_GATED_COMMANDS=$CFG_PR_CREATE"
 
 # ---------------------------------------------------------------------------
-# 19b. issue #514 — whitespace-free shell operator (no space on EITHER side).
-# Plain shlex.split glued `create&&echo` / `create;echo` into one token, which
-# the matchers never equalled to `create`, so the gate was bypassed entirely.
-# The trailing-separator strip only handled `create;` (trailing), not the
-# embedded operator. Switching _tokenize to the shared safe_tokenize splits the
-# operator into its own token and closes the bypass. The negative case ensures
-# the split did not start over-blocking a non-gated subcommand.
+# 19b. issue #514 — whitespace-free shell operator (`create&&echo`). shlex.split
+# glued it into one token and bypassed the gate; safe_tokenize splits it. Last
+# case guards against the split over-blocking a non-gated subcommand.
 # ---------------------------------------------------------------------------
 
 run_case "514: gh pr create&&echo (glued &&, was bypass, block)" \

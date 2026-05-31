@@ -337,10 +337,8 @@ run_case "compound child then hub (block)" \
 # issue #514 결함3 — quote-aware tokenization (separator inside quoted title)
 # ---------------------------------------------------------------------------
 
-# A shell separator inside the quoted --title value (`--title "a; b"`) used to
-# fragment the raw-regex command split, dropping the `--repo` token into a
-# segment without `gh issue create` → child-repo block skipped. Quote-aware
-# tokenization keeps the title intact and must BLOCK.
+# A separator inside the quoted --title (`--title "a; b"`) once fragmented the
+# raw-regex split and dropped --repo; quote-aware tokenization keeps it intact.
 run_case "514: semicolon in quoted title still blocks child (block)" \
   "block" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --title 'a; b' --repo example-org/child\"}}" \
