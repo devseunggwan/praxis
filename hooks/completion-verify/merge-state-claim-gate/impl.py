@@ -23,11 +23,9 @@ import json
 import os
 import re
 import sys
-
-import sys as _sys
 from pathlib import Path as _Path
 
-_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 
 _PREFIX = "[merge-state-claim-gate]"
@@ -43,20 +41,23 @@ _EVIDENCE_WINDOW = 80  # how many recent transcript events to scan for evidence
 # ---------------------------------------------------------------------------
 
 _SUBJECT_RE = re.compile(
-    r"\bPR\b|\bpull request\b|\bMR\b|이슈|\bissue\b|worktree|워크트리|#\d+",
+    r"(?<![A-Za-z0-9_])PR(?![A-Za-z0-9_])|\bpull request\b|\bMR\b|이슈|\bissue\b|worktree|워크트리|#\d+",
     re.IGNORECASE,
 )
 
 _CLAIM_KINDS: list[tuple[str, re.Pattern[str]]] = [
     ("merged", re.compile(r"\b(squash[- ]?)?merged\b|머지\s*(됐|했|됨|되었|완료|함)", re.IGNORECASE)),
     ("created", re.compile(r"\bcreated\b|\bopened\b|생성\s*(했|됨|완료|함)|만들었|올렸|작성했", re.IGNORECASE)),
-    ("closed", re.compile(r"\bclosed\b|닫(았|힘|았습)|종료\s*(했|됨)", re.IGNORECASE)),
+    ("closed", re.compile(r"\bclosed\b|닫(았|힘|았습|혔)|종료\s*(했|됨)", re.IGNORECASE)),
     ("cleaned", re.compile(r"\b(removed|cleaned|deleted)\b|정리\s*(했|됨|완료)|삭제\s*(했|됨)|제거\s*(했|됨)", re.IGNORECASE)),
 ]
 
 # Negation present on the line -> skip (conservative; avoids noisy advisories).
+# `\bno\b` intentionally omitted: it over-suppresses realistic lines like
+# "PR #543 merged — no conflicts" and "Issue closed — no further action needed".
+# `\bwill\b` suppresses future-passive ("will be merged") which is intent, not completion.
 _NEGATION_RE = re.compile(
-    r"\bnot\b|n't\b|\bno\b|\bwithout\b|\byet\b|아직|않|못\s|안\s|없|실패|fail",
+    r"\bnot\b|n't\b|\bwithout\b|\byet\b|\bwill\b|아직|않|못\s|안\s|없|실패|fail",
     re.IGNORECASE,
 )
 
@@ -65,7 +66,7 @@ _NEGATION_RE = re.compile(
 # ---------------------------------------------------------------------------
 
 _GH_EVIDENCE_RE = re.compile(r"\bgh\b[^|;&\n]*\b(pr|issue)\b\s+[a-z]", re.IGNORECASE)
-_MCP_GH_EVIDENCE_RE = re.compile(r"pull_request|\bissue\b|merge|pr_", re.IGNORECASE)
+_MCP_GH_EVIDENCE_RE = re.compile(r"pull_request|issue|merge|pr_", re.IGNORECASE)
 
 
 def _load_transcript(path: str) -> list[dict]:
