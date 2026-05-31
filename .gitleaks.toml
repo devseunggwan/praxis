@@ -1,0 +1,15 @@
+# Gitleaks configuration.
+#
+# Extends the upstream default ruleset, then allowlists the synthetic secrets
+# that the hook test suite deliberately embeds to verify the bypass-telemetry
+# redaction path. These are not real credentials.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic test fixtures — not real secrets"
+paths = [
+  # test_bypass_telemetry.sh asserts that a fake AWS-style secret is redacted
+  # in captured tool_input; the literal value must stay in the test source.
+  '''tests/hooks/postuse-correction/test_bypass_telemetry\.sh''',
+]
