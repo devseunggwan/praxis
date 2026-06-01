@@ -4,7 +4,9 @@ A single place to answer **"is this gate active, and how do I tune or disable
 it?"** Praxis hooks read a growing set of `PRAXIS_*` (and a few legacy
 `CLAUDE_HOOK_BYPASS_*`) environment variables. They fall into four kinds:
 
-- **Opt-out** — disable a gate entirely.
+- **Opt-out** — stop a gate from blocking: either disable it entirely (skip before
+  any logic) or demote it to advisory (hook still runs and emits a message, but
+  returns exit 0 instead of blocking).
 - **Strict** — escalate an advisory hook to a hard block (`return 2`).
 - **Config** — tune behaviour (regexes, allowlists, modes).
 - **Path / test** — relocate state/cache/log files (also used for test isolation).
@@ -18,7 +20,7 @@ For the *threat-model boundary* of the token-based guards (what
 `eval`/`bash -c` can hide from them), see the **Guard parser boundary** section
 in [`../SECURITY.md`](../SECURITY.md).
 
-## Opt-out (disable a gate)
+## Opt-out (disable or demote a gate)
 
 | Variable | Hook | Effect when set |
 |----------|------|-----------------|
