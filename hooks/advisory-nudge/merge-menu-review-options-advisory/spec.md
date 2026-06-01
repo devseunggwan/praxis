@@ -96,12 +96,18 @@ exists for users who want the levers always surfaced before any merge gate.
   *safe* failure direction (false suppression never nags) and is accepted by
   design; if it bites in practice, name the preview option without the literal
   `review` substring.
-- The Korean merge token `머지` is matched as a substring (CJK has no ASCII word
-  boundary), so an inflected non-gate label like `머지된 PR 목록` ("list merged
-  PRs") also triggers the advisory. In default advisory mode this is a harmless
-  informational nudge; in strict mode it would be a false block. The sibling
-  `block-ask-end-option` excludes bare KO tokens for the same inflection reason
-  — this hook accepts the bare token because the advisory-mode cost is low.
+- The Korean merge token `머지` is matched by a regex with a negative lookahead
+  (`머지(?!된|하지)`) that excludes two meaning-inverting inflections: `머지된`
+  (already-merged, a triage label) and `머지하지` (the `머지하지 말고` "do NOT
+  merge" form). The second is a semantic inversion — without the exclusion an
+  explicit no-merge label would fire a pre-merge nudge. Real gates still match
+  (`머지`, `머지하기` since 하기 ≠ 하지, `머지할까요`, `스쿼시 머지`, `머지 + 정리`).
+- The lookahead does not cover every non-gate inflection: a noun-modifier label
+  like `머지 충돌 해결` ("resolve merge conflicts") still fires, since `머지` there
+  is genuinely merge-related but not a go/no-go gate. Full KO disambiguation is
+  out of scope (it leads to unbounded quoting/inflection corner cases); the
+  advisory is non-blocking, so an occasional fire on a merge-adjacent label is
+  low-harm. Only the two *inverting* inflections above are excluded.
 
 ### Parsing guarantees
 

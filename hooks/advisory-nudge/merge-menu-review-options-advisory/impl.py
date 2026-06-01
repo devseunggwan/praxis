@@ -47,9 +47,15 @@ from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E
 # unrelated menus), so English tokens use ASCII-letter lookaround: `merge`
 # matches but `merged` / `merger` do not (followed by an ASCII letter), while
 # the mixed-script label `squash 머지` still matches via the Korean token.
-MERGE_TOKENS_KO = (
-    "머지",
-)
+#
+# The Korean token uses a negative lookahead to exclude two inflections that
+# invert the gate's meaning: `머지된` (already-merged, a triage label) and
+# `머지하지` (the `머지하지 말고` "do NOT merge" form). Both would otherwise fire a
+# pre-merge nudge on a label that is not a merge-decision — the second case is a
+# semantic inversion (an explicit no-merge label triggering a merge nudge). The
+# lookahead keeps real gates matching: `머지`, `머지하기` (하기 ≠ 하지),
+# `머지할까요`, `스쿼시 머지`, `머지 + 정리`.
+_KO_MERGE_RE = re.compile(r"머지(?!된|하지)")
 MERGE_TOKENS_EN = (
     "merge",
     "squash",
@@ -117,14 +123,14 @@ def _en_token_present(token: str, lower_label: str) -> bool:
 def _has_merge_decision_option(labels: list[str]) -> bool:
     """True if any option label names a merge-decision action.
 
-    Korean tokens use substring match (CJK has no ASCII word boundary, low
-    collision risk). English tokens use ASCII-letter lookaround for precision.
+    The Korean token uses a regex with a negative lookahead (excludes the
+    meaning-inverting `머지된` / `머지하지` inflections). English tokens use
+    ASCII-letter lookaround for precision.
     """
     for label in labels:
         lower = label.lower()
-        for token in MERGE_TOKENS_KO:
-            if token in label:
-                return True
+        if _KO_MERGE_RE.search(label):
+            return True
         for token in MERGE_TOKENS_EN:
             if _en_token_present(token, lower):
                 return True

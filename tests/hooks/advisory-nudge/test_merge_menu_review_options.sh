@@ -159,8 +159,13 @@ run_case "review only in description → still nudges" advisory default "$DESC_O
 # preview contains the substring 'review' → suppresses (documented safe direction)
 run_case "preview substring suppresses (documented)" pass default "$(build_payload '["merge after preview", "hold"]')"
 
-# KO inflected non-gate label 머지된 still triggers (documented bare-token cost)
-run_case "KO inflected 머지된 triggers (documented)"  advisory default "$(build_payload '["머지된 PR 목록 보기", "취소"]')"
+# KO inflection exclusions: 머지된 (already-merged) and 머지하지 (do-NOT-merge)
+# are NOT merge-decision gates — negative lookahead excludes them.
+run_case "KO 머지된 (already-merged) → no trigger"   pass default "$(build_payload '["머지된 PR 목록 보기", "취소"]')"
+run_case "KO 머지하지 (explicit no-merge) → no trigger" pass default "$(build_payload '["머지하지 말고 대기", "확인"]')"
+# real KO gates still trigger after the lookahead is added
+run_case "KO 머지하기 still triggers (하기≠하지)"      advisory default "$(build_payload '["머지하기", "대기"]')"
+run_case "KO 머지할까요 still triggers"               advisory default "$(build_payload '["지금 머지할까요?", "대기"]')"
 
 # ---------------------------------------------------------------------------
 echo "=== summary ==="
