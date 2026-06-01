@@ -70,6 +70,7 @@ so the agent can self-correct. Fail-open on infrastructure errors by design.
 | [count-assertion-verify](../../hooks/advisory-nudge/count-assertion-verify/spec.md) | PreToolUse | Advisory nudge when `grep -c` with alternation (`\|` BRE or `\|` ERE/PCRE) runs without per-arm verification; prevents citing inflated alternation counts — issue #277 |
 | [bulk-write-memory-checkpoint](../../hooks/advisory-nudge/bulk-write-memory-checkpoint/spec.md) | PreToolUse | Advisory nudge when bulk-writing to SOT-flagged paths (vault/, wiki/, .claude/, skills/, AGENTS.md/CLAUDE.md companions) — reminds to checkpoint memory before the write loop to prevent "Loaded ≠ Retrieved" failures — issue #443 |
 | [pre-output-falsification-gate](../../hooks/advisory-nudge/pre-output-falsification-gate/spec.md) | PreToolUse | Advisory on `AskUserQuestion` when an evaluative/`(Recommended)` option is surfaced under recent negative evidence without a disconfirming-probe phrase in the question body (Lane A), and on `Bash` when a read-only status command (status/get/list) repeats ≥3× in a session (Lane B / B-i) — issue #487 |
+| [merge-menu-review-options-advisory](../../hooks/advisory-nudge/merge-menu-review-options-advisory/spec.md) | PreToolUse | Advisory (opt-in strict) on `AskUserQuestion` when a merge-decision menu (option label names a merge/squash action) offers no review/debate option (codex-review-wrap / code-reviewer / critic) — issue #560 |
 
 ---
 

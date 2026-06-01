@@ -391,6 +391,13 @@
       "timeout": 5
     },
     {
+      "name": "merge-menu-review-options-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "AskUserQuestion",
+      "timeout": 5
+    },
+    {
       "name": "block-ask-end-option",
       "role": "preflight-gate",
       "event": "PreToolUse",
