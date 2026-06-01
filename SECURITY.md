@@ -51,6 +51,32 @@ Every entry was verified against the hook source files listed.
 All `git` and `gh` invocations are **read-only**. No hook writes to remote
 state. Hooks fail-open (exit 0) when the binary is missing or times out.
 
+## Guard Parser Boundary
+
+Several praxis preflight guards (`destructive-bash-guard`, the commit/push
+gates, `skill-gate-commands`, the `gh`-flag guards, …) inspect the **literal
+command tokens** of a Bash invocation via a shared structural tokenizer. This is
+a deliberate, bounded threat model — the guards are correctness/discipline
+nudges, **not a sandbox**:
+
+- **In scope:** literal commands and their flags, including compound chains
+  (`&&`, `;`, `|`), env-var prefixes, common wrappers (`env`, `sudo`, `time`),
+  subshell / command-substitution wrappers, and bundled short flags.
+- **Out of scope:** a command **hidden inside an interpreter string** is not
+  decoded. `eval "rm -rf …"`, `bash -c "…"`, `sh -c "…"`, `python -c "…"`, and
+  `find … -exec rm …` pass the token guards because the dangerous token exists
+  only *inside* a quoted string the tokenizer treats as one opaque argument.
+
+This is an inherent limit of literal-token parsing, not a bug. The answer is not
+a regex arms race (which `feedback_shell_parser_diminishing_returns` records as
+unbounded) but explicit documentation of the boundary. **Do not rely on these
+guards as a security control against an adversary** — they exist to catch
+*accidental* footguns. Anything that must not run should be prevented by the
+runtime permission layer, not by a hook.
+
+Every gate can be disabled or escalated via environment variables — see the
+[hook environment-variable registry](docs/bypass-vars.md).
+
 ## Out of Scope
 
 Praxis invokes third-party CLIs (`gh`, `cmux`, `codex`, `kubectl`, etc.)
