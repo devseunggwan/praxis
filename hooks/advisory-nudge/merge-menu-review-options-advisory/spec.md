@@ -31,6 +31,75 @@ hook catches the complementary defect: a merge menu that is *incomplete*
 (missing the review/debate levers). Both inspect `options[].label` on
 PreToolUse(AskUserQuestion); neither blocks by default.
 
+### Context-aware reviewer routing (L2, #562)
+
+When the menu *is* a merge gate missing a review option, the hook tailors
+**which** reviewer the advisory recommends to the nature of the change being
+merged. It reads the branch's changed file paths (`git diff --name-only
+<base>...HEAD`) and maps them to a reviewer family, leading the advisory with
+the context-specific recommendation before the generic levers.
+
+This runs **only after** the merge-decision + no-review early-returns, so a
+non-merge menu pays **zero** subprocess cost. The diff is path-based (no
+diff-content read).
+
+| Priority | Path signal | Recommendation (Hybrid: type + example agent) |
+|----------|-------------|-----------------------------------------------|
+| 1 (highest) | `auth` / `token` / `secret` / `credential` / `permission` / `oauth` substr, or `.pem` / `.key` suffix | 보안 리뷰 (예: security-reviewer) |
+| 2 | `.sql` suffix, or `/sql/` / `migration` substr | 데이터/SQL 리뷰 (예: review-data) |
+| 3 | `schema` / `/models/` / `/model/` / `entity` substr, or `.prisma` / `.proto` suffix | 설계 리뷰 (예: review-service-design) |
+| 4 | `component` / `/ui/` / `/views/` / `/pages/` substr, or `.tsx` / `.jsx` / `.vue` / `.css` / `.scss` suffix | 디자인/UX 리뷰 (예: designer) |
+| — (no match) | anything else | static generic levers (codex-review-wrap / code-reviewer / critic) |
+
+**Multiple matches resolve to a single recommendation** by priority (security >
+data > design > ux) — a merge gate surfaces the single most consequential lens,
+not a wall of options.
+
+**Hybrid recommendation text** = a portable reviewer *type* ("보안 리뷰") plus a
+parenthetical example agent ("예: security-reviewer"). The type conveys intent
+on every host; the example is a hint for hosts where that agent exists. This is
+why the hook stays `hosts: all` despite naming Claude-ecosystem agents.
+
+**Base ref resolution**: `origin/HEAD` → `origin/main` → `origin/dev` → `main`
+→ `dev`, first that resolves. **Fail-open**: a non-git cwd, an unresolved base,
+a git error, or a timeout yields the static, family-agnostic advisory — a diff
+the hook cannot read never crashes it and never fabricates a routing decision.
+
+**Subprocess budget**: the total git budget (5 base-resolution `rev-parse`
+calls at 0.5s each + one `git diff` at 1.5s = 4.0s worst case) is kept safely
+under the hook's 5s manifest timeout, so the Python fail-open path always runs
+before the hook runner could kill a hung/locked git. Legit git calls return in
+milliseconds; the timeouts only bound the pathological stall (NFS, index.lock).
+
+**Self-consistency with suppression**: routed reviewers whose label may lack a
+`review`/`reviewer` substring are added to the review-suppression tokens —
+`designer` (the UX agent name) and `security` (a security review option phrased
+as `security audit` / `security scan` rather than `security-reviewer`). The
+others (`review-data`, `review-service-design`, and the `security-reviewer`
+example itself) already suppress via `review` / `reviewer`.
+
+**Base-resolution accuracy (multi-base repos)**: `origin/HEAD` (remote default)
+is assumed to be the PR base. On a repo where feature branches target a
+*non-default* base — e.g. branches target `dev` while the remote default is
+`main` — `git diff origin/HEAD...HEAD` can over-include the non-default base's
+unique commits, so a docs-only merge menu might be routed to `security`/`data`
+because of unrelated paths on `dev`. A fully base-accurate pick would require
+per-candidate merge-base comparison (more git calls than the fail-open
+subprocess budget allows — there is a direct tension: tighter budget for
+fail-open safety vs more calls for base accuracy). The common single-base case
+(base = remote default) is optimised; the multi-base non-default case degrades
+to a possibly-broad *recommendation*, never a wrong block (advisory carries the
+generic levers regardless). If a repo needs base-accurate routing, raise a
+follow-up to thread the PR base in explicitly.
+
+**Data-signal tightness**: the data family's substrings are deliberately narrow
+(`.sql` suffix, `/sql/`, `migration`). Broader tokens were rejected for
+mis-routing non-data paths: `etl` matched `getlist.py`, `/load` matched
+`src/loader.py`, and `template` matched FE template directories
+(`web/templates/Card.tsx`). A SQL template lacking a `.sql` suffix falls to the
+generic advisory — the safe direction, since a mis-routed *recommendation* (not
+a block) is the only failure mode.
+
 ### What is advised
 
 | Scenario | Action |
@@ -47,7 +116,8 @@ PreToolUse(AskUserQuestion); neither blocks by default.
 
 #### Merge-decision trigger tokens (option label)
 
-- Korean (substring): `머지`
+- Korean (regex with negative lookahead): `머지(?!된|하지)` — excludes the
+  meaning-inverting `머지된` / `머지하지` inflections (see Known limitations)
 - English (ASCII-letter lookaround): `merge`, `squash`
 
 English tokens use ASCII-letter lookaround (`(?<![a-z])merge(?![a-z])`) so
@@ -59,13 +129,21 @@ lookaround does).
 #### Review / debate option tokens (option label)
 
 - Korean (substring): `리뷰`, `검토`
-- English (substring): `codex`, `review`, `reviewer`, `critic`
+- English (substring): `codex`, `review`, `reviewer`, `critic`, `designer`
 
 Review-token detection uses **substring** matching (not lookaround) on purpose:
 a false positive here only *suppresses* the advisory, which is the safe
 direction (never nag when a review option may exist). So `reviewer` inside
 `code-reviewer` and `review` inside `codex-review-wrap` both correctly count as
 a present review option.
+
+`designer` is in the set for self-consistency with L2 routing: the UX family
+recommends the `designer` agent, whose name contains no `review`/`reviewer`
+substring, so without this token a menu already offering a `designer` option
+would still be (wrongly) nudged. The other routed reviewers (`review-data`,
+`security-reviewer`, `review-service-design`) already match `review` /
+`reviewer`, so no further tokens are needed. (`designer` is a precise enough
+word that `redesign` — which lacks the trailing `er` — does not match it.)
 
 ### Mode and env var behavior
 
@@ -89,13 +167,17 @@ exists for users who want the levers always surfaced before any merge gate.
 - Detection is label-only; a review option expressed solely in an option
   *description* (not its label) is not counted as present and may trigger a
   false advisory. Keep review options' intent in the label.
-- Review-token suppression is substring-based, so an unrelated option label
-  containing `review` as a substring suppresses the nudge. The notable case is
-  `preview` (e.g. `preview diff`, `preview changes`), which contains `review`
-  and silences the advisory even though it offers no review pass. This is the
-  *safe* failure direction (false suppression never nags) and is accepted by
-  design; if it bites in practice, name the preview option without the literal
-  `review` substring.
+- Review-token suppression is substring-based and runs **only on non-merge
+  option labels** — a review lever is a distinct option, not the merge action
+  itself. This matters because the suppression set includes broad tokens
+  (`security`, `designer`, `review`) that can appear inside a merge label
+  describing its change area (`merge security fix`, `merge designer changes`,
+  `merge after preview`). If review detection ran on the merge label too, those
+  substrings would *defeat* the nudge on exactly the high-stakes merges the
+  label describes. Excluding merge labels from review detection fixes that
+  inversion (and the older `preview`-inside-a-merge-label false suppression).
+  A genuine review option still suppresses because it is a separate, non-merge
+  option label (`security audit`, `designer 실행`, `re-run code-reviewer`).
 - The Korean merge token `머지` is matched by a regex with a negative lookahead
   (`머지(?!된|하지)`) that excludes two meaning-inverting inflections: `머지된`
   (already-merged, a triage label) and `머지하지` (the `머지하지 말고` "do NOT
@@ -117,6 +199,8 @@ exists for users who want the levers always surfaced before any merge gate.
 - `questions` absent or not a list → exit 0
 - `options` absent or not a list in a question → that question skipped
 - Empty label set → exit 0
+- L2 routing diff unreadable (non-git cwd, base unresolved, git error/timeout)
+  → static family-agnostic advisory (routing never crashes the hook)
 
 ### Tests
 
@@ -130,4 +214,8 @@ tokens (`merge`, `squash`) advisory; review-option-present suppression
 absent pass-through; non-AskUserQuestion tool pass-through; malformed payload
 fail-open; empty options pass-through; ASCII-lookaround false-positive
 avoidance (`merged` / `merger` do not trigger); mixed-script label
-(`squash 머지`) trigger; multi-question payload.
+(`squash 머지`) trigger; multi-question payload. L2 routing (real git-diff
+path): each reviewer family (security / data / design / ux), priority
+resolution (security > data, design > ux), `designer` suppression, no-match
+static fallback, non-git cwd fail-open, and strict-mode block carrying the
+routed reviewer.

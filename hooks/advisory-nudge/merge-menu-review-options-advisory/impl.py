@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path as _Path
 
@@ -76,7 +77,164 @@ REVIEW_TOKENS_EN = (
     "review",
     "reviewer",
     "critic",
+    # `designer` and `security` are added for self-consistency with the
+    # context-aware routing (L2). The UX family recommends the `designer` agent,
+    # whose name has no `review`/`reviewer` substring. The security family's
+    # example agent `security-reviewer` self-recognizes via `reviewer`, but a
+    # security review option phrased without that suffix (`security audit`,
+    # `security scan`) would not — so `security` is included per the issue SOT.
+    # The remaining routed reviewers (review-data, review-service-design) already
+    # match `review`. False suppression from these broad tokens only silences the
+    # nudge (the safe direction), consistent with the substring-match rationale.
+    "designer",
+    "security",
 )
+
+# ---------------------------------------------------------------------------
+# Context-aware reviewer routing (L2)
+# ---------------------------------------------------------------------------
+#
+# When the menu IS a merge gate missing a review option, tailor WHICH reviewer
+# the advisory recommends to the nature of the change being merged. The hook
+# reads the branch's changed file paths and maps them to a reviewer family.
+# This runs ONLY after the merge-decision + no-review early-returns, so a
+# non-merge menu pays zero subprocess cost.
+#
+# Routing is path-based (cheap, no diff-content read). Multiple matches resolve
+# by priority (security > data > design > ux) to a single recommendation —
+# a merge gate should surface the single most consequential lens, not a wall of
+# options. Each family carries a Hybrid recommendation string: a portable
+# reviewer *type* plus a parenthetical example agent (the type conveys intent on
+# every host; the example is a hint for hosts where that agent exists).
+#
+# Each entry: (key, recommendation_text, signal_label, path_substrings,
+# path_suffixes). A file path matches the family if its lowercased form contains
+# any of path_substrings OR ends with any of path_suffixes.
+_REVIEWER_FAMILIES: tuple[tuple[str, str, str, tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        "security",
+        "보안 리뷰 (예: security-reviewer / oh-my-claudecode:security-reviewer)",
+        "auth / token / secret / credential",
+        ("auth", "token", "secret", "credential", "permission", "oauth"),
+        (".pem", ".key"),
+    ),
+    (
+        "data",
+        "데이터/SQL 리뷰 (예: review-data)",
+        "SQL / 적재 경로",
+        # Substrings kept tight to avoid mis-routing non-data paths: bare `etl`
+        # matched `getlist.py`, `/load` matched `src/loader.py`, and `template`
+        # matched FE template dirs (`web/templates/Card.tsx`). `.sql` suffix +
+        # `/sql/` + `migration` are the reliable data signals; a SQL template
+        # without a `.sql` suffix falls to the generic advisory (safe direction).
+        ("/sql/", "migration"),
+        (".sql",),
+    ),
+    (
+        "design",
+        "설계 리뷰 (예: review-service-design)",
+        "신규 모델 / 테이블 / 스키마",
+        ("schema", "/models/", "/model/", "entity", "entities"),
+        (".prisma", ".proto"),
+    ),
+    (
+        "ux",
+        "디자인/UX 리뷰 (예: designer)",
+        "FE / 컴포넌트",
+        ("component", "/ui/", "/views/", "/pages/"),
+        (".tsx", ".jsx", ".vue", ".css", ".scss"),
+    ),
+)
+
+
+# Total git-subprocess budget MUST stay safely under the hook's manifest timeout
+# (5s) so the Python fail-open path always runs before the hook runner kills the
+# process — otherwise a hung/locked git (NFS stall, index.lock contention) would
+# prevent the advisory/strict block from being emitted at all. Worst case:
+# len(candidates) * _GIT_RESOLVE_TIMEOUT + _GIT_DIFF_TIMEOUT = 5*0.5 + 1.5 = 4.0s
+# < 5s manifest. Legit calls return in milliseconds; these timeouts only bound
+# the pathological hang.
+_GIT_RESOLVE_TIMEOUT = 0.5
+_GIT_DIFF_TIMEOUT = 1.5
+
+
+def _resolve_base(cwd: str) -> str | None:
+    """Resolve a base ref to diff the current branch against.
+
+    Tries, in order: origin/HEAD (the remote's default branch), then common
+    base names. Returns the first ref that resolves, or None when none do
+    (caller falls back to the static, family-agnostic advisory).
+    """
+    # origin/HEAD (the remote default) is assumed to be the PR base — correct for
+    # the common single-base repo. On a repo where feature branches target a
+    # non-default base (e.g. branches target `dev` while remote default is
+    # `main`), `git diff origin/HEAD...HEAD` can over-include the non-default
+    # base's unique commits and over-route the (advisory-only, non-blocking)
+    # recommendation. A fully base-accurate pick would need per-candidate
+    # merge-base comparison — more git calls than the fail-open subprocess budget
+    # (see _GIT_RESOLVE_TIMEOUT) allows — so the common case is optimised and the
+    # multi-base case degrades to a possibly-broad recommendation, never a wrong
+    # block. See spec.md "Known limitations".
+    candidates = ("origin/HEAD", "origin/main", "origin/dev", "main", "dev")
+    for ref in candidates:
+        try:
+            rc = subprocess.run(
+                ["git", "-C", cwd, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+                capture_output=True,
+                timeout=_GIT_RESOLVE_TIMEOUT,
+            ).returncode
+        except Exception:
+            # A transient failure on one candidate (e.g. a hang/timeout on
+            # origin/HEAD) must not forfeit the rest — continue so a fast-
+            # resolving `main` / `dev` is still found. Only a full miss → None.
+            continue
+        if rc == 0:
+            return ref
+    return None
+
+
+def _changed_files(cwd: str) -> list[str] | None:
+    """Return the branch's changed file paths vs the resolved base.
+
+    Fail-open: returns None on any failure (non-git cwd, no base ref, git
+    error, timeout). None signals the caller to use the static advisory rather
+    than a routed one — a diff we cannot read must never crash the hook or
+    fabricate a routing decision.
+    """
+    if not cwd or not isinstance(cwd, str):
+        return None
+    base = _resolve_base(cwd)
+    if base is None:
+        return None
+    try:
+        proc = subprocess.run(
+            ["git", "-C", cwd, "diff", "--name-only", f"{base}...HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_DIFF_TIMEOUT,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    return [line for line in proc.stdout.splitlines() if line.strip()]
+
+
+def _route_reviewer(changed_files: list[str]) -> tuple[str, str, str] | None:
+    """Map changed file paths to the highest-priority reviewer family.
+
+    Pure function (no I/O) — the routing decision is unit-testable in isolation.
+    Returns (key, recommendation_text, signal_label) for the first family (in
+    priority order) that any changed path matches, or None when nothing matches
+    (caller uses the static advisory).
+    """
+    lowered = [p.lower() for p in changed_files]
+    for key, text, signal, substrings, suffixes in _REVIEWER_FAMILIES:
+        for path in lowered:
+            if any(s in path for s in substrings) or path.endswith(suffixes):
+                return (key, text, signal)
+    return None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -120,21 +278,22 @@ def _en_token_present(token: str, lower_label: str) -> bool:
     return re.search(pattern, lower_label) is not None
 
 
-def _has_merge_decision_option(labels: list[str]) -> bool:
-    """True if any option label names a merge-decision action.
+def _is_merge_label(label: str) -> bool:
+    """True if this single label names a merge-decision action.
 
     The Korean token uses a regex with a negative lookahead (excludes the
     meaning-inverting `머지된` / `머지하지` inflections). English tokens use
     ASCII-letter lookaround for precision.
     """
-    for label in labels:
-        lower = label.lower()
-        if _KO_MERGE_RE.search(label):
-            return True
-        for token in MERGE_TOKENS_EN:
-            if _en_token_present(token, lower):
-                return True
-    return False
+    lower = label.lower()
+    if _KO_MERGE_RE.search(label):
+        return True
+    return any(_en_token_present(token, lower) for token in MERGE_TOKENS_EN)
+
+
+def _has_merge_decision_option(labels: list[str]) -> bool:
+    """True if any option label names a merge-decision action."""
+    return any(_is_merge_label(label) for label in labels)
 
 
 def _has_review_option(labels: list[str]) -> bool:
@@ -159,38 +318,61 @@ def _has_review_option(labels: list[str]) -> bool:
 # Messages
 # ---------------------------------------------------------------------------
 
-ADVISORY_MSG = """\
-[advisory] This AskUserQuestion is a merge-decision menu (an option names a
-merge / squash action) but offers NO review / debate option.
-
-A pre-merge gate is the last point before an irreversible shared-state
-mutation. Before surfacing merge vs hold, consider re-authoring the menu to
-also offer the quality levers the user may want at this gate:
+# Generic quality levers, always offered as the baseline set.
+_GENERIC_LEVERS = """\
   - re-run codex-review-wrap (independent Codex pass)
   - re-run oh-my-claudecode:code-reviewer
-  - open a critic debate (oh-my-claudecode:critic)
+  - open a critic debate (oh-my-claudecode:critic)"""
 
-A PreToolUse hook cannot inject options into the rendered menu — re-issue the
-AskUserQuestion with these options added if a fresh review pass is appropriate.
 
-Strict mode disabled. Set PRAXIS_MERGE_MENU_REVIEW_STRICT=1 to block.
-"""
+def _routed_lever_block(routed: tuple[str, str, str] | None) -> str:
+    """Build the recommended-levers block.
 
-BLOCK_MSG = """\
-BLOCKED: merge-decision AskUserQuestion menu offers no review / debate option.
+    When `routed` is set (the branch diff matched a reviewer family), lead with
+    the context-specific recommendation, then the generic levers as fallback.
+    When None, emit only the generic levers (original behaviour).
+    """
+    if routed is None:
+        return _GENERIC_LEVERS
+    text, signal = routed[1], routed[2]
+    return (
+        f"  - {text}\n"
+        f"    (this change touches {signal} — prioritise this lens)\n"
+        f"{_GENERIC_LEVERS}"
+    )
 
-A merge / squash option is present, but none of the options offers a quality
-lever (codex-review-wrap, code-reviewer, critic). A pre-merge gate is the last
-point before an irreversible shared-state mutation — surface the review/debate
-levers as menu options so the user can choose a fresh review before merging.
 
-Re-issue the AskUserQuestion with options for:
-  - re-run codex-review-wrap
-  - re-run oh-my-claudecode:code-reviewer
-  - open a critic debate (oh-my-claudecode:critic)
+def _advisory_msg(routed: tuple[str, str, str] | None) -> str:
+    return (
+        "[advisory] This AskUserQuestion is a merge-decision menu (an option names a\n"
+        "merge / squash action) but offers NO review / debate option.\n"
+        "\n"
+        "A pre-merge gate is the last point before an irreversible shared-state\n"
+        "mutation. Before surfacing merge vs hold, consider re-authoring the menu to\n"
+        "also offer the quality levers the user may want at this gate:\n"
+        f"{_routed_lever_block(routed)}\n"
+        "\n"
+        "A PreToolUse hook cannot inject options into the rendered menu — re-issue the\n"
+        "AskUserQuestion with these options added if a fresh review pass is appropriate.\n"
+        "\n"
+        "Strict mode disabled. Set PRAXIS_MERGE_MENU_REVIEW_STRICT=1 to block.\n"
+    )
 
-To opt out: unset PRAXIS_MERGE_MENU_REVIEW_STRICT (default is advisory).
-"""
+
+def _block_msg(routed: tuple[str, str, str] | None) -> str:
+    return (
+        "BLOCKED: merge-decision AskUserQuestion menu offers no review / debate option.\n"
+        "\n"
+        "A merge / squash option is present, but none of the options offers a quality\n"
+        "lever (codex-review-wrap, code-reviewer, critic). A pre-merge gate is the last\n"
+        "point before an irreversible shared-state mutation — surface the review/debate\n"
+        "levers as menu options so the user can choose a fresh review before merging.\n"
+        "\n"
+        "Re-issue the AskUserQuestion with options for:\n"
+        f"{_routed_lever_block(routed)}\n"
+        "\n"
+        "To opt out: unset PRAXIS_MERGE_MENU_REVIEW_STRICT (default is advisory).\n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -222,11 +404,28 @@ def main() -> int:
     if not _has_merge_decision_option(labels):
         return 0
 
-    # If a review/debate lever is already offered, the menu is complete — pass.
-    if _has_review_option(labels):
+    # If a review/debate lever is already offered as a DISTINCT option, the menu
+    # is complete — pass. Review detection runs only on non-merge labels: a merge
+    # action label describing its change area (`merge security fix`,
+    # `merge designer changes`) must NOT count as a review option, or the broad
+    # `security`/`designer` suppression tokens would defeat the nudge on exactly
+    # the high-stakes merges they describe. A review lever is a separate option,
+    # not the merge action itself.
+    review_candidate_labels = [label for label in labels if not _is_merge_label(label)]
+    if _has_review_option(review_candidate_labels):
         return 0
 
-    # Strict only on the documented `=1` value (spec mode table + ADVISORY_MSG
+    # Past the early-returns: this IS a merge gate missing a review option.
+    # Only now pay the diff cost to route the recommendation to the change's
+    # nature. A None result (non-git cwd, base unresolved, git error) falls back
+    # to the static, family-agnostic advisory — never crashes, never fabricates.
+    cwd = payload.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        cwd = os.getcwd()
+    changed = _changed_files(cwd)
+    routed = _route_reviewer(changed) if changed else None
+
+    # Strict only on the documented `=1` value (spec mode table + advisory text
     # both contract `PRAXIS_MERGE_MENU_REVIEW_STRICT=1`). `.strip() == "1"`
     # matches the dominant codebase convention (destructive-bash-guard,
     # protected-paths-guard, push-remote-ref-verify, path-probe-gate) and avoids
@@ -235,10 +434,10 @@ def main() -> int:
     strict_set = os.environ.get("PRAXIS_MERGE_MENU_REVIEW_STRICT", "").strip() == "1"
 
     if strict_set:
-        sys.stderr.write(BLOCK_MSG)
+        sys.stderr.write(_block_msg(routed))
         return 2
 
-    sys.stderr.write(ADVISORY_MSG)
+    sys.stderr.write(_advisory_msg(routed))
     return 0
 
 
