@@ -175,12 +175,30 @@ run_case advisory "refspec-refs-heads" "git push origin HEAD:refs/heads/feature"
   '{"exit":0,"stderr":" * [new branch]      HEAD -> feature"}'
 
 # --- `git push --repo=origin main` -> fail-open silent (proves fix #3: equals-form
-#     value-flag is consumed inline, no extra positional shifted; ls-remote on a
-#     non-remote-named-main is unreachable -> fail-open) -----------------------
+#     value-flag is consumed inline, no extra positional shifted; the hook parses
+#     positional `main` as the remote, ls-remote on non-existent remote `main`
+#     is unreachable -> fail-open). NOTE: silent here comes from fail-open, not
+#     from verification — see push-option-equals-verified below for the real path.
 setup_repo
 git -C "$WORK" push -q -u origin main
 run_case silent "repo-equals-form" "git push --repo=origin main" \
   '{"exit":0,"stderr":"Branch set up to track remote branch."}'
+
+# --- equals-form value-flag reaches REAL verification (advisory, NOT fail-open)
+# `--push-option=ci.skip` is an equals-form value-flag consumed inline; the
+# positionals `origin feature` then parse to remote=origin/refspec=feature.
+# `feature` is absent on the remote and the output claims a new branch, so the
+# hook reaches genuine verification and emits an advisory. The advisory outcome
+# (not silent) is what distinguishes correct equals-form parsing from the
+# fail-open path that repo-equals-form above exercises.
+setup_repo
+git -C "$WORK" push -q -u origin main
+git -C "$WORK" checkout -q -b feature
+echo d >"$WORK/d.txt"
+git -C "$WORK" add d.txt
+git -C "$WORK" commit -qm feat2   # feature never reaches the remote
+run_case advisory "push-option-equals-verified" "git push --push-option=ci.skip origin feature" \
+  '{"exit":0,"stderr":" * [new branch]      feature -> feature"}'
 
 echo "----"
 echo "PASS: $PASS / FAIL: $FAIL"
