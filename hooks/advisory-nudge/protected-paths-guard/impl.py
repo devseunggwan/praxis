@@ -51,11 +51,9 @@ from __future__ import annotations
 import json
 import os
 import sys
-import sys as _sys
-from pathlib import Path as _Path
-_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from pathlib import Path, PurePosixPath
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
-from pathlib import PurePosixPath
 
 TARGET_TOOLS = frozenset({"Edit", "Write", "NotebookEdit"})
 
