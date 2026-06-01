@@ -55,9 +55,14 @@ _CLAIM_KINDS: list[tuple[str, re.Pattern[str]]] = [
 # Negation present on the line -> skip (conservative; avoids noisy advisories).
 # `\bno\b` intentionally omitted: it over-suppresses realistic lines like
 # "PR #543 merged — no conflicts" and "Issue closed — no further action needed".
-# `\bwill\b` suppresses future-passive ("will be merged") which is intent, not completion.
+# `\bwill\b` intentionally omitted: it is too blunt at the line level — it would
+# suppress mixed-tense lines such as "PR #543 merged — this will close the issue",
+# where a real completion claim co-occurs with a future clause. The narrow
+# false-positive it would have fixed (future-passive "the PR will be merged") is
+# accepted as tolerable advisory noise; silencing a real merged-claim is worse than
+# a noisy advisory on a genuine future statement (this is an advisory-only hook).
 _NEGATION_RE = re.compile(
-    r"\bnot\b|n't\b|\bwithout\b|\byet\b|\bwill\b|아직|않|못\s|안\s|없|실패|fail",
+    r"\bnot\b|n't\b|\bwithout\b|\byet\b|아직|않|못\s|안\s|없|실패|fail",
     re.IGNORECASE,
 )
 
