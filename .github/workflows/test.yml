@@ -11,6 +11,10 @@ concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: the suite only reads the checked-out code.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
