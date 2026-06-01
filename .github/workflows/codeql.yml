@@ -15,6 +15,12 @@ concurrency:
   group: codeql-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege at the top level: any scope not explicitly widened by a job
+# stays read-only. The analyze job below adds security-events: write for the
+# CodeQL upload — the only scope that needs more than read.
+permissions:
+  contents: read
+
 jobs:
   analyze:
     name: analyze (python)
