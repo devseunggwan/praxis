@@ -30,6 +30,9 @@ from __future__ import annotations
 import json
 import re
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +150,8 @@ def _extract_content(tool_name: str, tool_input: dict) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
-def _main_inner() -> int:
+@fail_open
+def main() -> int:
     try:
         payload = json.load(sys.stdin)
     except Exception:
@@ -178,14 +182,6 @@ def _main_inner() -> int:
     return 0
 
 
-def main() -> int:
-    """Advisory hook — must NEVER break tool execution. Any uncaught
-    exception in the inner logic is swallowed and the hook fails open
-    (exit 0)."""
-    try:
-        return _main_inner()
-    except Exception:
-        return 0
 
 
 if __name__ == "__main__":

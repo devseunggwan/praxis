@@ -649,3 +649,13 @@ def test_negated_completion_en_no_advisory_end_to_end(tmp_path: Path) -> None:
     assert "[praxis:completion-signal-gate]" not in stderr, (
         f"negated EN completion must not trigger advisory; stderr={stderr!r}"
     )
+
+
+def test_fail_open_decorator_applied() -> None:
+    """main() opts into the shared @fail_open guard — assert decorator is present.
+
+    Fail-open behaviour itself is covered in tests/test_hook_runtime.sh.
+    """
+    assert getattr(csg.main, "__wrapped__", None) is not None, (
+        "main is not @fail_open-wrapped"
+    )

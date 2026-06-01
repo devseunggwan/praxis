@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pre-output-falsification-gate` hook: advisory when an AskUserQuestion (Recommended)/evaluative option is surfaced under recent negative evidence without a disconfirming probe phrase in the question body, and when a read-only status command (status/get/list) repeats ≥3× in a session (#487)
 - `retrospect`: Stage 2 multi-oracle completeness gate (Gate-6) + Stage 1.5 oracle-annotation signal 5 — stored-value falsification requires same-oracle confirmation; different-oracle results emit a separate cohort-shift finding (#489)
 
+### Changed
+- `hooks`: swept the remaining 20 `_main_inner`/`main()` hand-rolled fail-open wrappers onto the shared `@fail_open` decorator (`hooks/_lib/_hook_runtime.py`), so all blocking/advisory Python hooks now use a single fail-open pattern. No behavior change; each hook's copied fail-open test block is replaced by a `main.__wrapped__` structural assertion (behaviour is verified once in `tests/test_hook_runtime.sh`) (#526)
+
 ## [6.0.3] - 2026-05-29
 
 1 PR since 6.0.2. Hook false-positive fix only — no skill or hook-behavior additions.

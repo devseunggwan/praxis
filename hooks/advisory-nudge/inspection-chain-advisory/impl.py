@@ -50,6 +50,7 @@ from pathlib import Path
 
 _HOOK_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HOOK_DIR.parent.parent / "_lib"))
+from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import safe_tokenize, strip_prefix  # type: ignore[import-not-found]  # noqa: E402
 
 
@@ -312,7 +313,8 @@ def _advisory_text(chain: list[list[str]]) -> str:
     )
 
 
-def _main_inner() -> int:
+@fail_open
+def main() -> int:
     try:
         payload = json.load(sys.stdin)
     except Exception:
@@ -337,12 +339,6 @@ def _main_inner() -> int:
     return 0
 
 
-def main() -> int:
-    """Advisory hook — must NEVER break tool execution."""
-    try:
-        return _main_inner()
-    except Exception:
-        return 0
 
 
 if __name__ == "__main__":

@@ -434,26 +434,24 @@ run_case "[STAGE_COMPLETE: without digit does not block (silent)" \
 # Uncaught exception fail-open (outer Exception guard)
 # ---------------------------------------------------------------------------
 
-# Simulate an uncaught exception inside _main_inner (e.g. MemoryError) and
-# verify the outer try/except Exception wrapper in main() returns 0 (fail-open).
+# main() now opts into the shared @fail_open guard; verify the decorator is
+# applied (fail-open behaviour itself is covered in tests/test_hook_runtime.sh).
 _uncaught_out=$(python3 - << PYEOF 2>&1
 import sys, importlib.util, io
 spec = importlib.util.spec_from_file_location("impl", "$HOOK")
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
-def _raise(): raise MemoryError("simulated OOM")
-mod._main_inner = _raise
-sys.stdin = io.StringIO('{}')
-sys.exit(mod.main())
+if getattr(mod.main, "__wrapped__", None) is None:
+    sys.stderr.write("main not wrapped by @fail_open\n"); sys.exit(1)
 PYEOF
 )
 _uncaught_rc=$?
 if [ "$_uncaught_rc" -eq 0 ] && [ -z "$_uncaught_out" ]; then
-  echo "  PASS  uncaught exception in _main_inner fails open (exit 0, no stderr)"
+  echo "  PASS  main() is wrapped by the shared @fail_open guard (exit 0, no stderr)"
   PASS=$((PASS + 1))
 else
-  echo "  FAIL  uncaught exception in _main_inner (rc=$_uncaught_rc, out=$(echo "$_uncaught_out" | head -c 200))"
-  FAIL=$((FAIL + 1)); FAILED_NAMES+=("uncaught exception in _main_inner fails open")
+  echo "  FAIL  main() not wrapped by @fail_open (rc=$_uncaught_rc, out=$(echo "$_uncaught_out" | head -c 200))"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("main() is wrapped by the shared @fail_open guard")
 fi
 
 # ---------------------------------------------------------------------------

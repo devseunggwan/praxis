@@ -56,6 +56,7 @@ from pathlib import Path
 
 _HOOK_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HOOK_DIR.parent.parent / "_lib"))
+from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import safe_tokenize, iter_command_starts, strip_prefix  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 
@@ -398,7 +399,8 @@ def _advisory_text(reasons: list[str], strict: bool) -> str:
     )
 
 
-def _main_inner() -> int:
+@fail_open
+def main() -> int:
     if os.environ.get("PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH", "").strip():
         return 0
 
@@ -444,12 +446,6 @@ def _main_inner() -> int:
     return 0
 
 
-def main() -> int:
-    """Advisory hook — fail-open on uncaught error."""
-    try:
-        return _main_inner()
-    except Exception:
-        return 0
 
 
 if __name__ == "__main__":
