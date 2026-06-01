@@ -7,7 +7,9 @@
       "role": "completion-verify",
       "body": "impl.sh",
       "event": "SessionStart",
-      "args": ["session-start"],
+      "args": [
+        "session-start"
+      ],
       "timeout": 5
     },
     {
@@ -15,7 +17,9 @@
       "role": "completion-verify",
       "body": "impl.sh",
       "event": "UserPromptSubmit",
-      "args": ["preprompt"],
+      "args": [
+        "preprompt"
+      ],
       "timeout": 5
     },
     {
@@ -23,7 +27,9 @@
       "role": "advisory-nudge",
       "body": "impl.sh",
       "event": "UserPromptSubmit",
-      "hosts": ["claude"],
+      "hosts": [
+        "claude"
+      ],
       "timeout": 5
     },
     {
@@ -36,7 +42,9 @@
       "name": "postcompact-context",
       "role": "advisory-nudge",
       "event": "UserPromptSubmit",
-      "hosts": ["claude"],
+      "hosts": [
+        "claude"
+      ],
       "timeout": 8
     },
     {
@@ -65,7 +73,10 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "hosts": ["claude", "codex"],
+      "hosts": [
+        "claude",
+        "codex"
+      ],
       "timeout": 5
     },
     {
@@ -73,7 +84,10 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "hosts": ["claude", "codex"],
+      "hosts": [
+        "claude",
+        "codex"
+      ],
       "timeout": 5
     },
     {
@@ -116,7 +130,10 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "hosts": ["claude", "codex"],
+      "hosts": [
+        "claude",
+        "codex"
+      ],
       "timeout": 5
     },
     {
@@ -124,7 +141,10 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "hosts": ["claude", "codex"],
+      "hosts": [
+        "claude",
+        "codex"
+      ],
       "timeout": 15
     },
     {
@@ -132,7 +152,10 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "hosts": ["claude", "codex"],
+      "hosts": [
+        "claude",
+        "codex"
+      ],
       "timeout": 15
     },
     {
@@ -224,7 +247,10 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "hosts": ["claude", "codex"],
+      "hosts": [
+        "claude",
+        "codex"
+      ],
       "timeout": 5
     },
     {
@@ -232,7 +258,10 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "hosts": ["claude", "codex"],
+      "hosts": [
+        "claude",
+        "codex"
+      ],
       "timeout": 5
     },
     {
@@ -247,8 +276,20 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "hosts": ["claude"],
+      "hosts": [
+        "claude"
+      ],
       "timeout": 5
+    },
+    {
+      "name": "block-rename-sweep-survivors",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": [
+        "claude"
+      ],
+      "timeout": 10
     },
     {
       "name": "block-gh-issue-create-without-dup-search",
@@ -304,7 +345,10 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Edit|Write|NotebookEdit",
-      "hosts": ["claude", "codex"],
+      "hosts": [
+        "claude",
+        "codex"
+      ],
       "timeout": 8
     },
     {
@@ -312,7 +356,9 @@
       "role": "postuse-correction",
       "event": "PreToolUse",
       "matcher": "Edit",
-      "args": ["pre"],
+      "args": [
+        "pre"
+      ],
       "wrapper_suffix": "-pre",
       "timeout": 5
     },
@@ -377,7 +423,9 @@
       "role": "postuse-correction",
       "event": "PostToolUse",
       "matcher": "Read",
-      "args": ["post"],
+      "args": [
+        "post"
+      ],
       "wrapper_suffix": "-post",
       "timeout": 5
     },
@@ -419,7 +467,9 @@
       "role": "completion-verify",
       "body": "impl.sh",
       "event": "Stop",
-      "args": ["stop"],
+      "args": [
+        "stop"
+      ],
       "timeout": 5
     }
   ]
