@@ -269,6 +269,29 @@ route_present "FE template .tsx → ux not data" "디자인/UX 리뷰"  "web/tem
 route_absent  "loader.py is not data"          "src/loader.py"
 route_absent  "getlist.py is not data (etl)"   "src/getlist.py"
 
+# multi-base: branch forks from `dev` (which carries an auth file) while `main`
+# also exists. Nearest-fork-point resolution must pick `dev`, so the diff is the
+# branch's OWN change (a .tsx → ux) — NOT dev's auth file (would mis-route to
+# security with naive first-resolvable base selection).
+MB_REPO=$(mktemp -d)
+git -C "$MB_REPO" init -q -b main
+git -C "$MB_REPO" -c user.name=t -c user.email=t@t.io commit -q --allow-empty -m "chore: base"
+git -C "$MB_REPO" checkout -q -b dev
+mkdir -p "$MB_REPO/src/auth"; printf 'x\n' > "$MB_REPO/src/auth/login.py"
+git -C "$MB_REPO" add -A && git -C "$MB_REPO" -c user.name=t -c user.email=t@t.io commit -q -m "feat: auth on dev"
+git -C "$MB_REPO" checkout -q -b issue-1-feat-ui
+mkdir -p "$MB_REPO/web"; printf 'x\n' > "$MB_REPO/web/Button.tsx"
+git -C "$MB_REPO" add -A && git -C "$MB_REPO" -c user.name=t -c user.email=t@t.io commit -q -m "feat: ui"
+MB_ERR=$(payload_with_cwd "$MB_REPO" | "$HOOK" 2>&1 >/dev/null)
+rm -rf "$MB_REPO"
+if printf '%s' "$MB_ERR" | grep -qF "디자인/UX 리뷰"; then
+  echo "PASS [route] multi-base picks dev fork-point (ux not security)"; PASS=$((PASS+1))
+elif printf '%s' "$MB_ERR" | grep -qF "보안 리뷰"; then
+  echo "FAIL [route] multi-base mis-routed to security (base not nearest)"; FAIL=$((FAIL+1)); FAILED_NAMES+=("multi-base")
+else
+  echo "FAIL [route] multi-base unexpected output"; FAIL=$((FAIL+1)); FAILED_NAMES+=("multi-base")
+fi
+
 # fail-open: cwd is a non-git directory → static fallback (no routed line)
 NONGIT_TMP=$(mktemp -d)
 NONGIT_ERR=$(payload_with_cwd "$NONGIT_TMP" | "$HOOK" 2>&1 >/dev/null)

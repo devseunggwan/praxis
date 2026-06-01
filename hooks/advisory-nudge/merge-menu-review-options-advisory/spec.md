@@ -60,16 +60,24 @@ parenthetical example agent ("예: security-reviewer"). The type conveys intent
 on every host; the example is a hint for hosts where that agent exists. This is
 why the hook stays `hosts: all` despite naming Claude-ecosystem agents.
 
-**Base ref resolution**: `origin/HEAD` → `origin/main` → `origin/dev` → `main`
-→ `dev`, first that resolves. **Fail-open**: a non-git cwd, an unresolved base,
-a git error, or a timeout yields the static, family-agnostic advisory — a diff
-the hook cannot read never crashes it and never fabricates a routing decision.
+**Base ref resolution (nearest fork point)**: among the candidate refs
+(`origin/HEAD`, `origin/main`, `origin/dev`, `main`), the hook picks the one
+whose **merge-base with HEAD is nearest** — the merge-base that is a descendant
+of all the others. `git diff <base>...HEAD` then includes only *this branch's*
+changes, not a non-default base's unique commits. This makes routing correct on
+multi-base repos (a branch that targets `dev` while the remote default is `main`
+resolves to `dev`, the nearer fork point — not `main`). **Fail-open**: a non-git
+cwd, no resolvable candidate, a git error, or a timeout yields the static,
+family-agnostic advisory — a diff the hook cannot read never crashes it and
+never fabricates a routing decision.
 
-**Subprocess budget**: the total git budget (5 base-resolution `rev-parse`
-calls at 0.5s each + one `git diff` at 1.5s = 4.0s worst case) is kept safely
-under the hook's 5s manifest timeout, so the Python fail-open path always runs
-before the hook runner could kill a hung/locked git. Legit git calls return in
-milliseconds; the timeouts only bound the pathological stall (NFS, index.lock).
+**Subprocess budget**: base resolution runs one `git merge-base` per candidate
+(which doubles as an existence check) plus one `git merge-base --is-ancestor`
+only when a candidate's merge-base differs (the rare multi-base case). Worst
+case 5 merge-base + 4 is-ancestor = 9 calls at 0.3s + one `git diff` at 1.5s =
+4.2s — kept under the 5s manifest timeout so the Python fail-open path always
+runs before the hook runner could kill a hung/locked git. Legit git calls return
+in milliseconds; the timeouts only bound the pathological stall (NFS, index.lock).
 
 **Self-consistency with suppression**: routed reviewers whose label may lack a
 `review`/`reviewer` substring are added to the review-suppression tokens —
@@ -78,19 +86,12 @@ as `security audit` / `security scan` rather than `security-reviewer`). The
 others (`review-data`, `review-service-design`, and the `security-reviewer`
 example itself) already suppress via `review` / `reviewer`.
 
-**Base-resolution accuracy (multi-base repos)**: `origin/HEAD` (remote default)
-is assumed to be the PR base. On a repo where feature branches target a
-*non-default* base — e.g. branches target `dev` while the remote default is
-`main` — `git diff origin/HEAD...HEAD` can over-include the non-default base's
-unique commits, so a docs-only merge menu might be routed to `security`/`data`
-because of unrelated paths on `dev`. A fully base-accurate pick would require
-per-candidate merge-base comparison (more git calls than the fail-open
-subprocess budget allows — there is a direct tension: tighter budget for
-fail-open safety vs more calls for base accuracy). The common single-base case
-(base = remote default) is optimised; the multi-base non-default case degrades
-to a possibly-broad *recommendation*, never a wrong block (advisory carries the
-generic levers regardless). If a repo needs base-accurate routing, raise a
-follow-up to thread the PR base in explicitly.
+**Base-resolution accuracy (multi-base repos)**: handled by the nearest-fork-point
+resolution described above — a branch targeting a non-default base resolves to
+that base, so the diff is not over-included. The residual edge is a repo with
+two equally-near bases (a branch forked from a point both `main` and `dev` share
+identically), which is degenerate; routing then uses whichever candidate is
+probed first, still advisory-only.
 
 **Data-signal tightness**: the data family's substrings are deliberately narrow
 (`.sql` suffix, `/sql/`, `migration`). Broader tokens were rejected for

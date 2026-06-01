@@ -150,47 +150,91 @@ _REVIEWER_FAMILIES: tuple[tuple[str, str, str, tuple[str, ...], tuple[str, ...]]
 # Total git-subprocess budget MUST stay safely under the hook's manifest timeout
 # (5s) so the Python fail-open path always runs before the hook runner kills the
 # process — otherwise a hung/locked git (NFS stall, index.lock contention) would
-# prevent the advisory/strict block from being emitted at all. Worst case:
-# len(candidates) * _GIT_RESOLVE_TIMEOUT + _GIT_DIFF_TIMEOUT = 5*0.5 + 1.5 = 4.0s
-# < 5s manifest. Legit calls return in milliseconds; these timeouts only bound
-# the pathological hang.
-_GIT_RESOLVE_TIMEOUT = 0.5
+# prevent the advisory/strict block from being emitted at all. Worst case for
+# base resolution: 5 candidates × (1 merge-base + 1 is-ancestor) at most, but
+# is-ancestor only runs when a candidate's merge-base differs (the rare
+# multi-base case), so the worst ceiling is 5 merge-base + 4 is-ancestor = 9
+# calls × _GIT_RESOLVE_TIMEOUT (0.3s) = 2.7s, + _GIT_DIFF_TIMEOUT (1.5s) = 4.2s
+# < 5s manifest. Legit calls return in milliseconds; the timeouts only bound the
+# pathological hang.
+_GIT_RESOLVE_TIMEOUT = 0.3
 _GIT_DIFF_TIMEOUT = 1.5
 
 
-def _resolve_base(cwd: str) -> str | None:
-    """Resolve a base ref to diff the current branch against.
+# Candidate base refs. origin/HEAD is the remote default; the explicit
+# origin/main, origin/dev cover repos whose feature branches target a
+# *non-default* base (branches target dev while the remote default is main). The
+# local `main` / `dev` are the fallback for repos without a reachable origin
+# (e.g. a fresh worktree or a local-only repo). Duplicate merge-bases (origin/main
+# and main usually point at the same commit) collapse to one comparison.
+_BASE_CANDIDATES = ("origin/HEAD", "origin/main", "origin/dev", "main", "dev")
 
-    Tries, in order: origin/HEAD (the remote's default branch), then common
-    base names. Returns the first ref that resolves, or None when none do
-    (caller falls back to the static, family-agnostic advisory).
+
+def _merge_base(cwd: str, ref: str) -> str | None:
+    """Return the merge-base sha of `ref` and HEAD, or None on miss/error.
+
+    Doubles as an existence check: a non-existent ref makes `git merge-base`
+    exit non-zero, which yields None (no separate rev-parse needed).
     """
-    # origin/HEAD (the remote default) is assumed to be the PR base — correct for
-    # the common single-base repo. On a repo where feature branches target a
-    # non-default base (e.g. branches target `dev` while remote default is
-    # `main`), `git diff origin/HEAD...HEAD` can over-include the non-default
-    # base's unique commits and over-route the (advisory-only, non-blocking)
-    # recommendation. A fully base-accurate pick would need per-candidate
-    # merge-base comparison — more git calls than the fail-open subprocess budget
-    # (see _GIT_RESOLVE_TIMEOUT) allows — so the common case is optimised and the
-    # multi-base case degrades to a possibly-broad recommendation, never a wrong
-    # block. See spec.md "Known limitations".
-    candidates = ("origin/HEAD", "origin/main", "origin/dev", "main", "dev")
-    for ref in candidates:
-        try:
-            rc = subprocess.run(
-                ["git", "-C", cwd, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
-                capture_output=True,
-                timeout=_GIT_RESOLVE_TIMEOUT,
-            ).returncode
-        except Exception:
-            # A transient failure on one candidate (e.g. a hang/timeout on
-            # origin/HEAD) must not forfeit the rest — continue so a fast-
-            # resolving `main` / `dev` is still found. Only a full miss → None.
-            continue
-        if rc == 0:
-            return ref
+    try:
+        proc = subprocess.run(
+            ["git", "-C", cwd, "merge-base", ref, "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_RESOLVE_TIMEOUT,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def _is_ancestor(cwd: str, ancestor: str, descendant: str) -> bool | None:
+    """True if `ancestor` is an ancestor of `descendant`. None on error.
+
+    `git merge-base --is-ancestor` exits 0 (yes), 1 (no), other (error).
+    """
+    try:
+        rc = subprocess.run(
+            ["git", "-C", cwd, "merge-base", "--is-ancestor", ancestor, descendant],
+            capture_output=True,
+            timeout=_GIT_RESOLVE_TIMEOUT,
+        ).returncode
+    except Exception:
+        return None
+    if rc == 0:
+        return True
+    if rc == 1:
+        return False
     return None
+
+
+def _resolve_base(cwd: str) -> str | None:
+    """Resolve the base ref whose merge-base with HEAD is *nearest* (the true
+    fork point), so `git diff <base>...HEAD` includes only this branch's own
+    changes — not a non-default base's unique commits.
+
+    Among the resolvable candidates, the nearest fork point is the merge-base
+    that is a descendant of all the others. Returns that candidate's ref name,
+    or None when nothing resolves (caller falls back to the static advisory).
+    """
+    best_ref: str | None = None
+    best_mb: str | None = None
+    for ref in _BASE_CANDIDATES:
+        mb = _merge_base(cwd, ref)
+        if mb is None:
+            continue
+        if best_mb is None:
+            best_ref, best_mb = ref, mb
+            continue
+        if mb == best_mb:
+            continue
+        # best_mb is an ancestor of mb  ⇒  mb is the newer fork point  ⇒  ref is
+        # nearer. (None on error → keep the current best, never regress.)
+        if _is_ancestor(cwd, best_mb, mb) is True:
+            best_ref, best_mb = ref, mb
+    return best_ref
 
 
 def _changed_files(cwd: str) -> list[str] | None:
