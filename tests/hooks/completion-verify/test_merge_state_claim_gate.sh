@@ -168,10 +168,18 @@ run_case advisory "pr-korean-particle-closed" '{}'
 build_transcript "IMPROVE the README — all steps completed." none
 run_case silent "pr-substring-improve" '{}'
 
-# --- fix #4: future passive 'will be merged' -> silent --------------------
-# 'will' added to _NEGATION_RE to suppress future-passive completion phrasing.
+# --- known tolerable FP: future passive 'will be merged' -> advisory ------
+# 'will' is NOT in _NEGATION_RE (line-level veto too blunt — it would suppress
+# mixed-tense lines). This future-passive line fires as advisory; accepted as
+# tolerable noise on an advisory-only hook. Documented, not fixed.
 build_transcript "The PR will be merged after review." none
-run_case silent "future-passive-will-be-merged" '{}'
+run_case advisory "future-passive-known-fp" '{}'
+
+# --- regression guard: mixed-tense (real claim + future clause) -> advisory
+# Removing 'will' from negation must NOT suppress lines where a genuine
+# completion claim co-occurs with a future clause on the same line.
+build_transcript "PR #543 merged — this will close the issue." none
+run_case advisory "merged-claim-with-will-clause" '{}'
 
 # --- missing transcript path -> fail-open silent --------------------------
 TRANSCRIPT="/nonexistent/transcript.jsonl"
