@@ -523,6 +523,30 @@ run_case "T2→T1 multi-question: Q1 anchoring, Q2 literal (Recommended) → den
   "$(make_ask_payload_t2_then_t1)"
 
 # ---------------------------------------------------------------------------
+# @fail_open structural assertion
+# ---------------------------------------------------------------------------
+
+# main() opts into the shared @fail_open guard; verify the decorator is
+# applied (fail-open behaviour itself is covered in tests/test_hook_runtime.sh).
+_uncaught_out=$(python3 - << PYEOF 2>&1
+import sys, importlib.util, io
+spec = importlib.util.spec_from_file_location("impl", "$HOOK")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+if getattr(mod.main, "__wrapped__", None) is None:
+    sys.stderr.write("main not wrapped by @fail_open\n"); sys.exit(1)
+PYEOF
+)
+_uncaught_rc=$?
+if [ "$_uncaught_rc" -eq 0 ] && [ -z "$_uncaught_out" ]; then
+  echo "  PASS  main() is wrapped by the shared @fail_open guard (exit 0, no stderr)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  main() not wrapped by @fail_open (rc=$_uncaught_rc, out=$(echo "$_uncaught_out" | head -c 200))"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("main() is wrapped by the shared @fail_open guard")
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
