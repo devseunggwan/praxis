@@ -205,11 +205,37 @@ def _run(cmd: list[str], cwd: str | None = None, timeout: float = 2.0) -> str:
     return ""
 
 
+def _env_timeout(var: str, default: float) -> float:
+    """Subprocess-timeout override from env; falls back to default on a
+    missing, non-numeric, or non-positive value.
+
+    The production defaults (1.5s git / 3.0s gh) are tuned against the 8s
+    manifest budget for real `git`/`gh`. Under a full local test-suite run,
+    however, fork/exec + python-startup contention can push even a trivial
+    mock subprocess past those tight bounds, producing a false timeout (empty
+    PR section) and a flaky assertion. Tests set these vars high so the
+    assertion measures rendering logic, not host load — production behavior is
+    unchanged because the defaults are identical to the previous literals.
+    """
+    raw = os.environ.get(var)
+    if raw is None:
+        return default
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return val if val > 0 else default
+
+
 def _git_branch(cwd: str) -> str:
     # 1.5s leaves headroom under the 8s manifest budget when paired with
     # _active_pr's 3s. Git branch-show is essentially instant; the timeout
     # exists only to bound pathological FS conditions.
-    return _run(["git", "-C", cwd, "branch", "--show-current"], cwd=cwd, timeout=1.5)
+    return _run(
+        ["git", "-C", cwd, "branch", "--show-current"],
+        cwd=cwd,
+        timeout=_env_timeout("PRAXIS_POSTCOMPACT_GIT_TIMEOUT", 1.5),
+    )
 
 
 def _active_pr(cwd: str, branch: str) -> dict | None:
@@ -234,7 +260,7 @@ def _active_pr(cwd: str, branch: str) -> dict | None:
             "--limit", "1",
         ],
         cwd=cwd,
-        timeout=3.0,
+        timeout=_env_timeout("PRAXIS_POSTCOMPACT_GH_TIMEOUT", 3.0),
     )
     if not out:
         return None

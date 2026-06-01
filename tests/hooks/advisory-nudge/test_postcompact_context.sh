@@ -129,7 +129,13 @@ run_hook() {
   # valid (otherwise the leading `;` is a parse error, and `: ; ; echo ...`
   # produces `;;` which bash mis-parses as a case-arm terminator).
   local prefix="${env_setup:-true}"
-  bash -c "$prefix ; echo '$payload' | python3 '$HOOK'" >"$out_file" 2>"$err_file"
+  # Generous subprocess timeouts so full-suite CPU contention cannot trip the
+  # hook's production-tuned 1.5s/3.0s defaults and produce a false timeout
+  # (empty PR section → flaky "#999 rendered" assertion). These assertions
+  # measure rendering logic, not host scheduling; the override keeps them
+  # deterministic under load while production keeps the tight defaults.
+  local timeouts="export PRAXIS_POSTCOMPACT_GIT_TIMEOUT=30 PRAXIS_POSTCOMPACT_GH_TIMEOUT=30"
+  bash -c "$timeouts ; $prefix ; echo '$payload' | python3 '$HOOK'" >"$out_file" 2>"$err_file"
   local rc=$?
   LAST_OUT=$(cat "$out_file")
   LAST_ERR=$(cat "$err_file")
