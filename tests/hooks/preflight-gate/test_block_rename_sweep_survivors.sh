@@ -41,44 +41,36 @@ FAILED_NAMES=()
 
 # run_case name expectation payload_json [extra_env_var=value ...]
 #   expectation:
-#     "deny"   — stdout JSON has permissionDecision "deny", rc=2
-#     "silent" — stdout empty, rc=0
+#     "block"  — rc=2, stderr contains " blocked$" (standard emit_block header)
+#     "silent" — rc=0, stderr empty
 run_case() {
   local name="$1" expectation="$2" payload="$3"
   local env_override="${4:-}"
 
-  local out_file
-  out_file=$(mktemp)
+  local out_file err_file
+  out_file=$(mktemp); err_file=$(mktemp)
 
   if [ -n "$env_override" ]; then
     echo "$payload" | env "$env_override" \
-      PRAXIS_SKIP_RENAME_SWEEP_CHECK='' python3 "$HOOK" >"$out_file" 2>/dev/null
+      PRAXIS_SKIP_RENAME_SWEEP_CHECK='' python3 "$HOOK" >"$out_file" 2>"$err_file"
   else
     echo "$payload" | PRAXIS_SKIP_RENAME_SWEEP_CHECK='' \
-      python3 "$HOOK" >"$out_file" 2>/dev/null
+      python3 "$HOOK" >"$out_file" 2>"$err_file"
   fi
   local rc=$?
-  local out
-  out=$(cat "$out_file")
-  rm -f "$out_file"
+  local err
+  err=$(cat "$err_file")
+  rm -f "$out_file" "$err_file"
 
   local ok=1
   case "$expectation" in
-    deny)
+    block)
       [ "$rc" -eq 2 ] || ok=0
-      echo "$out" | python3 -c "
-import json, sys
-try:
-    d = json.load(sys.stdin)
-    decision = d.get('hookSpecificOutput', {}).get('permissionDecision', '')
-    sys.exit(0 if decision == 'deny' else 1)
-except Exception:
-    sys.exit(1)
-" 2>/dev/null || ok=0
+      echo "$err" | grep -q " blocked$" || ok=0
       ;;
     silent)
       [ "$rc" -eq 0 ] || ok=0
-      [ -z "$out" ] || ok=0
+      [ -z "$err" ] || ok=0
       ;;
     *)
       echo "UNKNOWN expectation: $expectation" >&2
@@ -93,6 +85,7 @@ except Exception:
     echo "FAIL: $name (rc=$rc)"
     FAIL=$((FAIL + 1))
     FAILED_NAMES+=("$name")
+    [ -n "$err" ] && echo "  stderr: $(echo "$err" | head -c 300)"
   fi
 }
 
@@ -132,7 +125,7 @@ ORIG_DIR="$PWD"
 
 # --- Case: sweep with survivors → DENY ---
 REPO=$(setup_repo)
-cd "$REPO"
+cd "$REPO" || exit
 python3 -c "
 for i in range(1, 5):
     open(f'f{i}.py', 'w').write(f'lifecycle-stage = {i}\n')
@@ -146,13 +139,13 @@ for i in range(1, 4):
     open(f'f{i}.py', 'w').write(content)
 "
 git add f1.py f2.py f3.py
-run_case "sweep_with_survivors_denied" "deny" "$COMMIT_PAYLOAD"
-cd "$ORIG_DIR"
+run_case "sweep_with_survivors_denied" "block" "$COMMIT_PAYLOAD"
+cd "$ORIG_DIR" || exit
 rm -rf "$REPO"
 
 # --- Case: sweep with all occurrences staged → PASS ---
 REPO=$(setup_repo)
-cd "$REPO"
+cd "$REPO" || exit
 python3 -c "
 for i in range(1, 4):
     open(f'f{i}.py', 'w').write(f'lifecycle-stage = {i}\n')
@@ -167,12 +160,12 @@ for i in range(1, 4):
 "
 git add f1.py f2.py f3.py
 run_case "sweep_no_survivors_passes" "silent" "$COMMIT_PAYLOAD"
-cd "$ORIG_DIR"
+cd "$ORIG_DIR" || exit
 rm -rf "$REPO"
 
 # --- Case: below threshold (only 2 renames) → PASS ---
 REPO=$(setup_repo)
-cd "$REPO"
+cd "$REPO" || exit
 python3 -c "
 for i in range(1, 3):
     open(f'f{i}.py', 'w').write(f'lifecycle-stage = {i}\n')
@@ -186,12 +179,12 @@ for i in range(1, 3):
 "
 git add f1.py f2.py
 run_case "below_threshold_passes" "silent" "$COMMIT_PAYLOAD"
-cd "$ORIG_DIR"
+cd "$ORIG_DIR" || exit
 rm -rf "$REPO"
 
 # --- Case: all survivors marked exempt → PASS ---
 REPO=$(setup_repo)
-cd "$REPO"
+cd "$REPO" || exit
 python3 -c "
 for i in range(1, 4):
     open(f'f{i}.py', 'w').write(f'lifecycle-stage = {i}\n')
@@ -207,13 +200,13 @@ for i in range(1, 4):
 "
 git add f1.py f2.py f3.py
 run_case "survivors_all_exempt_passes" "silent" "$COMMIT_PAYLOAD"
-cd "$ORIG_DIR"
+cd "$ORIG_DIR" || exit
 rm -rf "$REPO"
 
 # --- Case: grouped hunk layout (regression for buffer-flush parser) ---
 # Consecutive lines in one file produce a grouped hunk: all - lines then all + lines.
 REPO=$(setup_repo)
-cd "$REPO"
+cd "$REPO" || exit
 # One file with 3 consecutive lifecycle-stage lines + 1 survivor in another file
 python3 -c "
 open('f1.py', 'w').write('lifecycle-stage = 1\nlifecycle-stage = 2\nlifecycle-stage = 3\n')
@@ -227,13 +220,13 @@ content = open('f1.py').read().replace('lifecycle-stage', 'lifecycle_stage')
 open('f1.py', 'w').write(content)
 "
 git add f1.py
-run_case "grouped_hunk_with_survivors_denied" "deny" "$COMMIT_PAYLOAD"
-cd "$ORIG_DIR"
+run_case "grouped_hunk_with_survivors_denied" "block" "$COMMIT_PAYLOAD"
+cd "$ORIG_DIR" || exit
 rm -rf "$REPO"
 
 # --- Case: grouped hunk, no survivors → PASS ---
 REPO=$(setup_repo)
-cd "$REPO"
+cd "$REPO" || exit
 python3 -c "
 open('f1.py', 'w').write('lifecycle-stage = 1\nlifecycle-stage = 2\nlifecycle-stage = 3\n')
 "
@@ -245,7 +238,7 @@ open('f1.py', 'w').write(content)
 "
 git add f1.py
 run_case "grouped_hunk_no_survivors_passes" "silent" "$COMMIT_PAYLOAD"
-cd "$ORIG_DIR"
+cd "$ORIG_DIR" || exit
 rm -rf "$REPO"
 
 # ---------------------------------------------------------------------------

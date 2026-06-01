@@ -43,7 +43,7 @@ from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
-from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     compound_cascade_hint,
     iter_command_starts,
@@ -201,36 +201,28 @@ def _survivors(token: str) -> list[str]:
 # Output
 # ---------------------------------------------------------------------------
 
-_DENY_TEMPLATE = """\
-BLOCKED: rename sweep has survivors.
 
-Rename sweep detected ({count}x): '{before}' → '{after}'
-Survivors ({n_survivors}):
-{survivor_lines}
-
-Resolution options:
-  (a) include the surviving lines in this commit (complete the sweep)
-  (b) append `{exempt}` on each surviving line (intentional preserve)
-  (c) split the commit if the survivors are unrelated context
-
-To bypass: PRAXIS_SKIP_RENAME_SWEEP_CHECK=1
-"""
-
-
-def _build_reason(before: str, after: str, count: int, s_lines: list[str]) -> str:
+def _emit_block(before: str, after: str, count: int, s_lines: list[str], command: str) -> None:
     shown = s_lines[:5]
     extra = len(s_lines) - len(shown)
-    lines_text = "\n".join(f"  {ln}" for ln in shown)
+    survivor_text = "\n".join(f"  {ln}" for ln in shown)
     if extra:
-        lines_text += f"\n  ... +{extra} more"
-    return _DENY_TEMPLATE.format(
-        before=before,
-        after=after,
-        count=count,
-        n_survivors=len(s_lines),
-        survivor_lines=lines_text,
-        exempt=EXEMPT_MARKER,
+        survivor_text += f"\n  ... +{extra} more"
+
+    msg = format_block(
+        rule_name="rename-sweep-survivors",
+        why=f"rename sweep detected ({count}x): '{before}' → '{after}' — {len(s_lines)} survivor(s) in tracked tree",
+        correct_path=(
+            "(a) stage the surviving files in this commit (complete the sweep)"
+            f"  (b) append `{EXEMPT_MARKER}` on each surviving line"
+            "  (c) split the commit if the survivors are unrelated context"
+        ),
+        bypass_env="PRAXIS_SKIP_RENAME_SWEEP_CHECK",
+        reference="CLAUDE.md §Atomic Commits",
     )
+    sys.stderr.write(msg)
+    sys.stderr.write(f"\nSurvivors ({len(s_lines)}):\n{survivor_text}\n")
+    sys.stderr.write(compound_cascade_hint(command))
 
 
 # ---------------------------------------------------------------------------
@@ -276,9 +268,7 @@ def main() -> int:
     for before, after, count in sweeps:
         s_lines = _survivors(before)
         if s_lines:
-            reason = _build_reason(before, after, count, s_lines)
-            reason += compound_cascade_hint(command)
-            emit_decision("deny", reason)
+            _emit_block(before, after, count, s_lines, command)
             return 2
 
     return 0
