@@ -392,6 +392,11 @@
           },
           {
             "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/merge-state-claim-gate.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/strike-counter.sh stop",
             "timeout": 5
           }
