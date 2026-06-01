@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.1.0] - 2026-06-01
+
 ### Added
 - `merge-state-claim-gate` hook: Stop advisory when the final assistant message asserts a completed merge/PR/issue/worktree state (EN/KR) but no fresh `gh pr|issue view/list/merge` or GitHub-MCP pull_request/issue read appears in the recent transcript — escalates the repeatedly-hallucinated merge-state-claim family from memory to a structural gate. Fail-open, `PRAXIS_MERGE_CLAIM_BYPASS` / `PRAXIS_MERGE_CLAIM_STRICT` (#503)
 - `push-remote-ref-verify` hook: PostToolUse(Bash) advisory after `git push` when the remote branch tip did not advance to the pushed SHA — guards the rotating-endpoint silent-divergence failure where a second push in a session reaches a different proxy endpoint, prints `* [new branch]`, exits 0, but never lands on the intended remote. Fail-open, `PRAXIS_PUSH_VERIFY_BYPASS` / `PRAXIS_PUSH_VERIFY_STRICT` (#539)
