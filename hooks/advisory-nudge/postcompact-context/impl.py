@@ -31,7 +31,10 @@ On every `UserPromptSubmit`:
      - `cwd`               — from payload (worktree absolute path)
      - `git branch`        — `git -C <cwd> branch --show-current`
      - `active PR`         — `gh pr list --state open --head <branch>` (JSON)
-     - `strike state`      — read `$HOME/.claude/state/praxis/strikes/<sid>.json`
+     - `strike state`      — read `~/.praxis/state/strikes/<sid>.json` first;
+                             fallback to `~/.claude/state/praxis/strikes/<sid>.json`
+                             when no `PRAXIS_STATE_DIR` override is set and the
+                             new location is absent (pre-#527 legacy support)
 6. Emit `hookSpecificOutput.additionalContext` JSON to stdout.
 7. Update state file with `last_compact_uuid_emitted = <uuid>`.
 
@@ -67,6 +70,11 @@ import subprocess
 import sys
 from collections import deque
 from pathlib import Path
+
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _paths import praxis_state_dir, legacy_state_dir  # type: ignore[import-not-found]  # noqa: E402
 
 DEFAULT_TAIL_LINES = 100
 BYPASS_ENV = "PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT"
@@ -246,16 +254,26 @@ def _active_pr(cwd: str, branch: str) -> dict | None:
 
 
 def _strike_state(session_id: str) -> dict | None:
-    """Read the praxis strike state for this session. None if absent/empty."""
-    state_dir = os.environ.get(
-        "PRAXIS_STATE_DIR",
-        os.path.join(os.path.expanduser("~"), ".claude", "state", "praxis"),
-    )
-    path = os.path.join(state_dir, "strikes", f"{session_id}.json")
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, ValueError, UnicodeDecodeError):
+    """Read the praxis strike state for this session. None if absent/empty.
+
+    Reads the host-neutral ~/.praxis/state default (#527), with a read-fallback
+    to the pre-#527 ~/.claude/state/praxis location when no PRAXIS_STATE_DIR
+    override is set and the new location is absent — so strike state written by
+    an older strike-counter still surfaces here.
+    """
+    bases = [praxis_state_dir()]
+    if not os.environ.get("PRAXIS_STATE_DIR"):
+        bases.append(legacy_state_dir())
+    data = None
+    for base in bases:
+        path = os.path.join(base, "strikes", f"{session_id}.json")
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            break
+        except (OSError, ValueError, UnicodeDecodeError):
+            continue
+    if data is None:
         return None
     if not isinstance(data, dict):
         return None
