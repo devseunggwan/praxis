@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.1.1] - 2026-06-02
+
+### Added
+- `block-personal-asset-leak` hook: PreToolUse(Bash) advisory that scans `gh issue/pr create|comment|edit|review` bodies for an absolute home-dotfiles path (`/Users/<name>/.claude/...`, `/home/<name>/.config/...`) and nudges to use the portable `~/` form or remove it — a deterministic backstop for the literal personal-asset path-leak form (semantic surfacing, MCP writes, reverse-direction, tilde, and `/projects/` worktree paths are out of scope). Every body flag is scanned, relative `--body-file` resolves against the payload cwd, and `--body "$BODY"` heredoc-variable bodies are resolved before the scan. Advisory by default; `PRAXIS_PERSONAL_LEAK_STRICT=1` escalates to a block (#565)
+
+### Changed
+- `merge-menu-review-options-advisory` hook: context-aware reviewer routing (L2) — when a merge-decision menu lacks a review option, the advisory now tailors which reviewer it recommends to the change's nature (security > data > design > ux priority) by reading the branch diff, with nearest-fork-point base resolution so routing is correct on multi-base repos. Fail-open to the static generic levers; subprocess budget capped under the manifest timeout (#564)
+
 ## [6.1.0] - 2026-06-01
 
 ### Added
