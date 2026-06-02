@@ -243,6 +243,13 @@
       "timeout": 5
     },
     {
+      "name": "block-personal-asset-leak",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
       "name": "version-bump-evidence-check",
       "role": "advisory-nudge",
       "event": "PreToolUse",
