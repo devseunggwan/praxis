@@ -162,6 +162,23 @@ run_case "whitelist: squash!" \
   "silent" \
   '{"tool_name":"Bash","tool_input":{"command":"git commit -m \"squash! refactor(core): cleanup\""}}'
 
+run_case "whitelist: release: gh pr create capitalized desc (dev->prod convention)" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr create --base prod --head dev --title \"release: Production Deploy (2026-06-02)\" --body \"desc\""}}'
+
+run_case "whitelist: release: gh pr create -t short flag" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr create -t \"release: Production Deploy (2026-06-02)\" --body \"desc\""}}'
+
+# release: exemption is gh-pr-create ONLY — commit and issue create still block
+run_case "block: release: via git commit (PR-only exemption does not cover commits)" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"git commit -m \"release: Production Deploy (2026-06-02)\""}}'
+
+run_case "block: release: via gh issue create (PR-only exemption does not cover issues)" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue create --title \"release: Production Deploy (2026-06-02)\" --body \"desc\""}}'
+
 # ---------------------------------------------------------------------------
 # PASS cases — non-commit commands
 # ---------------------------------------------------------------------------

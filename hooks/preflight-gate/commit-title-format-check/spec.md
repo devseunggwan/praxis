@@ -42,6 +42,9 @@ Examples:
 | `Revert "..."` title | silent pass (whitelisted) |
 | `fixup! ...` title | silent pass (whitelisted) |
 | `squash! ...` title | silent pass (whitelisted) |
+| `gh pr create --title "release: Production Deploy (...)"` | silent pass (release PR convention — **`gh pr create` only**, capitalized desc allowed) |
+| `git commit -m "release: ..."` | block (release exemption is `gh pr create` only) |
+| `gh issue create --title "release: ..."` | block (release exemption is `gh pr create` only) |
 | `git status`, `git push`, etc. | silent pass (not a commit or PR/issue create) |
 | `gh pr list`, `gh issue view`, etc. | silent pass (not create) |
 
@@ -122,7 +125,8 @@ bash tests/hooks/preflight-gate/test_commit_title_format_check.sh
 
 Covers all enumerated surface cases: valid format passes, missing type, uppercase
 description, Korean description char, unreplaced placeholder, scope without
-parens, whitelisted merge/revert/fixup/squash, `gh pr create --title` block,
-`gh issue create --title` block, advisory mode exit code, custom allowed-types,
+parens, whitelisted merge/revert/fixup/squash, `release:` PR-only exemption
+(`gh pr create` passes; commit + `gh issue create` still block), `gh pr create
+--title` block, `gh issue create --title` block, advisory mode exit code, custom allowed-types,
 `-m VALUE` / `-mMSG` / `--message=` extraction variants, non-commit bash
 commands, malformed JSON fail-open.
