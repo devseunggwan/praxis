@@ -26,88 +26,141 @@ FAILED_NAMES=()
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# Fixture: transcript with sciomc structured finding markers
+# Transcript fixtures use the REAL Claude Code transcript JSONL schema
+# (entries carry `type` + `message.content[]` blocks). Finding markers are
+# only honored when they appear in assistant-authored content — assistant
+# `text` blocks or Agent/Task subagent `tool_result`s. Markers inside user
+# turns, system-reminders, or Read/Skill tool-results (loaded docs) are NOT a
+# finding (praxis issue #573). The role-aware parser ignores the simplified
+# pre-#573 fixture shape, so these fixtures must use the real schema.
+
+# Fixture: assistant emits sciomc structured finding markers (true positive)
 TX_FINDING="$TMPDIR/tx-finding.jsonl"
 cat > "$TX_FINDING" <<'EOF'
-{"type":"assistant","message":"Running sciomc analysis"}
-{"type":"tool_use","content":"[FINDING:F1] sibling-deviant pattern detected"}
-{"type":"assistant","message":"about to commit"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Running sciomc analysis"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"[FINDING:F1] sibling-deviant pattern detected"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"about to commit"}]}}
 EOF
 
-# Fixture: transcript with [CONFLICTS:] marker
+# Fixture: assistant emits a [CONFLICTS:] marker
 TX_CONFLICTS="$TMPDIR/tx-conflicts.jsonl"
 cat > "$TX_CONFLICTS" <<'EOF'
-{"type":"assistant","message":"sciomc output:"}
-{"type":"tool_use","content":"[CONFLICTS: design choice in PR body vs sibling convention]"}
-{"type":"assistant","message":"about to commit"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"sciomc output:"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"[CONFLICTS: design choice in PR body vs sibling convention]"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"about to commit"}]}}
 EOF
 
 # Fixture: [CONFLICTS:] payload that includes "user-stated design" text — must still block
 TX_CONFLICTS_USD="$TMPDIR/tx-conflicts-usd.jsonl"
 cat > "$TX_CONFLICTS_USD" <<'EOF'
-{"type":"assistant","message":"sciomc output:"}
-{"type":"tool_use","content":"[CONFLICTS: user-stated design vs sibling convention]"}
-{"type":"assistant","message":"about to commit"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"sciomc output:"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"[CONFLICTS: user-stated design vs sibling convention]"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"about to commit"}]}}
 EOF
 
-# Fixture: transcript with [STAGE_COMPLETE:N] marker
+# Fixture: assistant emits a [STAGE_COMPLETE:N] marker
 TX_STAGE_COMPLETE="$TMPDIR/tx-stage-complete.jsonl"
 cat > "$TX_STAGE_COMPLETE" <<'EOF'
-{"type":"assistant","message":"sciomc output:"}
-{"type":"tool_use","content":"[STAGE_COMPLETE:2] stage 2 done"}
-{"type":"assistant","message":"about to commit"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"sciomc output:"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"[STAGE_COMPLETE:2] stage 2 done"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"about to commit"}]}}
 EOF
 
-# Fixture: transcript with 의미 mismatch marker
+# Fixture: assistant emits 의미 mismatch marker
 TX_UIMI_MISMATCH="$TMPDIR/tx-uimi-mismatch.jsonl"
 cat > "$TX_UIMI_MISMATCH" <<'EOF'
-{"type":"assistant","message":"의미 mismatch detected in sibling convention analysis"}
-{"type":"assistant","message":"about to commit"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"의미 mismatch detected in sibling convention analysis"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"about to commit"}]}}
 EOF
 
-# Fixture: transcript with 의미 충돌 marker
+# Fixture: assistant emits 의미 충돌 marker
 TX_UIMI_CONFLICT="$TMPDIR/tx-uimi-conflict.jsonl"
 cat > "$TX_UIMI_CONFLICT" <<'EOF'
-{"type":"assistant","message":"의미 충돌: 두 sibling 간 설계 불일치"}
-{"type":"assistant","message":"about to commit"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"의미 충돌: 두 sibling 간 설계 불일치"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"about to commit"}]}}
 EOF
 
-# Fixture: transcript with 의미 충돌 + Hangul particle attachment (조사 결합)
+# Fixture: 의미 충돌 + Hangul particle attachment (조사 결합)
 TX_UIMI_CONFLICT_PARTICLE="$TMPDIR/tx-uimi-conflict-particle.jsonl"
 cat > "$TX_UIMI_CONFLICT_PARTICLE" <<'EOF'
-{"type":"assistant","message":"의미 충돌이 감지됩니다 — sibling 간 설계 충돌"}
-{"type":"assistant","message":"about to commit"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"의미 충돌이 감지됩니다 — sibling 간 설계 충돌"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"about to commit"}]}}
 EOF
 
-# Fixture: transcript with 의미 mismatch + Hangul particle attachment (조사 결합)
+# Fixture: 의미 mismatch + Hangul particle attachment (조사 결합)
 TX_UIMI_MISMATCH_PARTICLE="$TMPDIR/tx-uimi-mismatch-particle.jsonl"
 cat > "$TX_UIMI_MISMATCH_PARTICLE" <<'EOF'
-{"type":"assistant","message":"의미 mismatch가 있습니다 — 정렬 필요"}
-{"type":"assistant","message":"about to commit"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"의미 mismatch가 있습니다 — 정렬 필요"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"about to commit"}]}}
 EOF
 
-# Fixture: transcript with sciomc finding AND consensus re-fetch after
+# Fixture: assistant finding, then a `gh pr view --json body` re-fetch recorded
+# as an assistant Bash tool_use (consensus re-fetch AFTER the finding)
 TX_FINDING_REFETCH="$TMPDIR/tx-finding-refetch.jsonl"
 cat > "$TX_FINDING_REFETCH" <<'EOF'
-{"type":"assistant","message":"sibling-deviant pattern detected"}
-{"type":"tool_use","content":"gh pr view 8299 --json body --jq .body"}
-{"type":"assistant","message":"compared with user design"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"sibling-deviant pattern detected"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_b1","name":"Bash","input":{"command":"gh pr view 8299 --json body --jq .body"}}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"compared with user design"}]}}
 EOF
 
-# Fixture: transcript with no finding markers (prose-only, no structured tokens)
+# Fixture: no finding markers (prose-only, no structured tokens)
 TX_NORMAL="$TMPDIR/tx-normal.jsonl"
 cat > "$TX_NORMAL" <<'EOF'
-{"type":"assistant","message":"normal fix work"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"normal fix work"}]}}
 EOF
 
-# Fixture: transcript with removed-prose-only markers (FP regression)
+# Fixture: removed-prose-only markers (FP regression)
 TX_FP_PROSE="$TMPDIR/tx-fp-prose.jsonl"
 cat > "$TX_FP_PROSE" <<'EOF'
-{"type":"assistant","message":"deep-dive 하자"}
-{"type":"assistant","message":"cross-validation 결과를 확인했다"}
-{"type":"assistant","message":"sciomc 라는 도구가 있음"}
-{"type":"assistant","message":"scientist-agent 가 실행됨"}
-{"type":"assistant","message":"Stage 2 analysis 시작"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"deep-dive 하자"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"cross-validation 결과를 확인했다"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"sciomc 라는 도구가 있음"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"scientist-agent 가 실행됨"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Stage 2 analysis 시작"}]}}
+EOF
+
+# ---------------------------------------------------------------------------
+# Role-aware corpus fixtures (praxis issue #573) — surface enumeration of
+# every place a finding marker can appear in a transcript.
+# ---------------------------------------------------------------------------
+
+# (BLOCK) Agent/Task subagent tool-result carrying real sciomc finding output.
+# The tool_use (Agent) and its tool_result are resolved by tool_use_id.
+TX_AGENT_RESULT="$TMPDIR/tx-agent-result.jsonl"
+cat > "$TX_AGENT_RESULT" <<'EOF'
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_agent1","name":"Agent","input":{"subagent_type":"sciomc","prompt":"analyze the design"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_agent1","content":"[FINDING:F2] sibling-deviant detected by subagent analysis"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"about to commit"}]}}
+EOF
+
+# (BLOCK) design-flip regression: assistant emits [CONFLICTS:] then commits
+# with no re-fetch in between — the original sciomc gate intent must hold.
+TX_DESIGN_FLIP="$TMPDIR/tx-design-flip.jsonl"
+cat > "$TX_DESIGN_FLIP" <<'EOF'
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"[CONFLICTS: user PR-body literal vs sibling convention] — flipping the literal"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_e1","name":"Edit","input":{"file_path":"/x/q.sql","old_string":"a","new_string":"b"}}]}}
+EOF
+
+# (SILENT) user-turn skill-load: SKILL.md documentation naming the tokens.
+TX_SKILL_LOAD_DOC="$TMPDIR/tx-skill-load-doc.jsonl"
+cat > "$TX_SKILL_LOAD_DOC" <<'EOF'
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"<command-message>praxis:sciomc loaded</command-message> The output schema documents [FINDING:Fn], [CONFLICTS: A vs B] and [STAGE_COMPLETE:3] tokens."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"about to commit"}]}}
+EOF
+
+# (SILENT) system-reminder block referencing the tokens (e.g. CLAUDE.md context).
+TX_SYSTEM_REMINDER="$TMPDIR/tx-system-reminder.jsonl"
+cat > "$TX_SYSTEM_REMINDER" <<'EOF'
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"<system-reminder>The sciomc skill defines [FINDING:], [CONFLICTS:] and [STAGE_COMPLETE:2] markers in its output schema. 의미 충돌 also appears here.</system-reminder>"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"about to commit"}]}}
+EOF
+
+# (SILENT) Read tool-result returning a SKILL.md file body containing the tokens.
+TX_READ_RESULT_DOC="$TMPDIR/tx-read-result-doc.jsonl"
+cat > "$TX_READ_RESULT_DOC" <<'EOF'
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_read1","name":"Read","input":{"file_path":"/x/skills/sciomc/SKILL.md"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_read1","content":"## Output schema\nEmit [FINDING:Fn] per finding, [CONFLICTS: A vs B] on design conflict, [STAGE_COMPLETE:N] per stage. sibling-deviant 의미 충돌 의미 mismatch."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"about to commit"}]}}
 EOF
 
 # run_case name expectation payload_json [env_vars...]
@@ -294,8 +347,44 @@ run_case "의미 mismatch가 (particle attachment) blocks commit" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: align'\"},\"transcript_path\":\"$TX_UIMI_MISMATCH_PARTICLE\"}"
 
 # ---------------------------------------------------------------------------
+# Role-aware corpus BLOCK cases (praxis issue #573) — markers in genuine
+# agent-authored content must STILL block (no false-negative regression).
+# ---------------------------------------------------------------------------
+
+# Agent/Task subagent tool-result with a real finding — true positive, blocks.
+run_case "Agent subagent tool-result finding blocks commit" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: apply subagent finding'\"},\"transcript_path\":\"$TX_AGENT_RESULT\"}"
+
+# Design-flip: assistant emits [CONFLICTS:] then commits without re-fetch —
+# the original gate intent must hold (regression guard against the #573 fix
+# introducing a false-negative).
+run_case "design-flip [CONFLICTS:] in assistant text still blocks" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix: flip literal'\"},\"transcript_path\":\"$TX_DESIGN_FLIP\"}"
+
+# ---------------------------------------------------------------------------
 # SILENT cases — should not block
 # ---------------------------------------------------------------------------
+
+# ---- Role-aware corpus FP cases (praxis issue #573) ----
+# Markers that appear only in LOADED documentation / non-agent content must
+# NOT block a benign commit.
+
+# user-turn skill-load documenting the token schema → pass
+run_case "skill-load SKILL.md doc markers do not block (silent — #573)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'docs: ingest knowledge base'\"},\"transcript_path\":\"$TX_SKILL_LOAD_DOC\"}"
+
+# system-reminder block referencing the tokens → pass
+run_case "system-reminder markers do not block (silent — #573)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'chore: tidy'\"},\"transcript_path\":\"$TX_SYSTEM_REMINDER\"}"
+
+# Read tool-result returning a SKILL.md body with the tokens → pass
+run_case "Read tool-result SKILL.md body does not block (silent — #573)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'docs: update'\"},\"transcript_path\":\"$TX_READ_RESULT_DOC\"}"
 
 run_case "git commit + finding + gh pr view --json body AFTER (silent)" \
   "silent" \
@@ -423,8 +512,8 @@ run_case "loose Stage N analysis prose (silent — FP regression)" \
 # [STAGE_COMPLETE:<digit> is a valid sciomc output token
 TX_STAGE_COMPLETE_NO_DIGIT="$TMPDIR/tx-stage-complete-nodigit.jsonl"
 cat > "$TX_STAGE_COMPLETE_NO_DIGIT" <<'EOF'
-{"type":"assistant","message":"[STAGE_COMPLETE: some text without digit after colon]"}
-{"type":"assistant","message":"about to commit"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"[STAGE_COMPLETE: some text without digit after colon]"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"about to commit"}]}}
 EOF
 run_case "[STAGE_COMPLETE: without digit does not block (silent)" \
   "silent" \
