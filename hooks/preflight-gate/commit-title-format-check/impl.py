@@ -54,6 +54,9 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     strip_prefix,
 )
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
+from git_commit_titles import (  # type: ignore[import-not-found]  # noqa: E402
+    extract_git_titles,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -83,35 +86,6 @@ GH_PR_TITLE_WHITELIST_PREFIXES = (
     "release: ",
 )
 
-# Flags that carry the commit message (separate-token or embedded form).
-MESSAGE_FLAGS = frozenset({"-m", "--message"})
-# Flags that carry a file path whose first line is the title.
-FILE_FLAGS = frozenset({"-F", "--file"})
-
-# git global flags that consume the next token as their argument.
-GIT_GLOBAL_FLAGS_WITH_ARG = frozenset({
-    "-C", "-c",
-    "--git-dir", "--work-tree", "--namespace",
-    "--exec-path", "--super-prefix",
-    "--config-env", "--attr-source",
-    "-L", "--list-cmds",
-})
-# git global bare flags (no argument consumed).
-GIT_GLOBAL_BARE_FLAGS = frozenset({
-    "--no-pager", "--paginate", "-p",
-    "--bare", "--no-replace-objects",
-    "--no-lazy-fetch", "--no-optional-locks",
-    "--no-advice", "--literal-pathspecs",
-    "--glob-pathspecs", "--noglob-pathspecs",
-    "--icase-pathspecs",
-    "--help", "--version", "-h", "-v",
-})
-
-# git commit short options that take NO value — valid inner chars of a combined
-# short cluster (e.g. -am, -vsm). Excludes value-taking short opts like
-# -S, -F, -C, -c, -t, -u, -m.
-GIT_COMMIT_NO_VALUE_SHORT = frozenset("aesvnqzp")
-
 
 # ---------------------------------------------------------------------------
 # Configuration helpers
@@ -138,148 +112,6 @@ def _build_pattern(allowed_types: tuple[str, ...]) -> re.Pattern[str]:
 
 def _is_strict() -> bool:
     return os.environ.get("PRAXIS_COMMIT_TITLE_FORMAT_STRICT", "1") != "0"
-
-
-# ---------------------------------------------------------------------------
-# Git commit message extraction (mirrors commit-title-length-check approach)
-# ---------------------------------------------------------------------------
-
-
-def _title_from_file(path: str, base_dir: str | None = None) -> str | None:
-    """Read first line of a file; return None on any error or if stdin placeholder."""
-    if path == "-":
-        return None  # stdin — acknowledged limitation, silent pass
-    if base_dir and not os.path.isabs(path):
-        path = os.path.join(base_dir, path)
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return fh.readline().rstrip("\n")
-    except OSError:
-        return None  # unreadable — silent pass
-
-
-def _strip_git_global_flags(argv: list[str]) -> tuple[list[str], str | None]:
-    """Strip git global flags; return (argv_at_subcommand, c_dir)."""
-    c_dir: str | None = None
-    i = 1  # skip 'git' at argv[0]
-    while i < len(argv):
-        tok = argv[i]
-        if tok == "--":
-            i += 1
-            break
-        if not tok.startswith("-"):
-            break
-        if "=" in tok:
-            i += 1
-            continue
-        if tok in GIT_GLOBAL_BARE_FLAGS:
-            i += 1
-            continue
-        if tok in GIT_GLOBAL_FLAGS_WITH_ARG:
-            if tok == "-C" and i + 1 < len(argv):
-                next_dir = argv[i + 1]
-                if c_dir and not os.path.isabs(next_dir):
-                    c_dir = os.path.join(c_dir, next_dir)
-                else:
-                    c_dir = next_dir
-            i += 2
-            continue
-        break
-    return argv[i:], c_dir
-
-
-def _extract_git_titles(argv: list[str]) -> list[str]:
-    """Extract commit title candidates from a git-commit argv.
-
-    Only the FIRST -m / --message flag contributes the title.
-    Handles:
-      git commit -m "title"
-      git commit --message "title"
-      git commit -m="title" / --message="title"
-      git commit -mvalue  (attached short-option)
-      git commit -am "title"  (combined short flag)
-      git commit -F /tmp/msg
-      git -C /path commit -m "title"
-    """
-    argv = strip_prefix(argv)
-    if not argv or argv[0] != "git":
-        return []
-
-    sub_argv, c_dir = _strip_git_global_flags(argv)
-    if not sub_argv or sub_argv[0] != "commit":
-        return []
-
-    titles: list[str] = []
-    message_seen = False
-    i = 1  # sub_argv[0] is "commit"
-    while i < len(sub_argv):
-        tok = sub_argv[i]
-
-        # --flag=value embedded form
-        if "=" in tok and tok.startswith("-"):
-            key, _, val = tok.partition("=")
-            if key in MESSAGE_FLAGS and not message_seen:
-                titles.append(val.split("\n")[0])
-                message_seen = True
-                i += 1
-                continue
-            if key in FILE_FLAGS:
-                t = _title_from_file(val, base_dir=c_dir)
-                if t is not None:
-                    titles.append(t)
-                i += 1
-                continue
-
-        # Attached short-option form: -m<value>
-        if (
-            tok.startswith("-m")
-            and not tok.startswith("--")
-            and len(tok) > 2
-            and not message_seen
-        ):
-            titles.append(tok[2:].split("\n")[0])
-            message_seen = True
-            i += 1
-            continue
-
-        # Combined short flags like -am (e.g. -a -m together)
-        if (
-            tok.startswith("-")
-            and not tok.startswith("--")
-            and len(tok) > 2
-            and tok[-1] == "m"
-            and all(c in GIT_COMMIT_NO_VALUE_SHORT for c in tok[1:-1])
-            and not message_seen
-        ):
-            if i + 1 < len(sub_argv):
-                titles.append(sub_argv[i + 1].split("\n")[0])
-                message_seen = True
-                i += 2
-                continue
-
-        # Standard separate-token flags
-        if tok in MESSAGE_FLAGS and not message_seen:
-            if i + 1 < len(sub_argv):
-                titles.append(sub_argv[i + 1].split("\n")[0])
-                message_seen = True
-                i += 2
-                continue
-            i += 1
-            continue
-
-        if tok in FILE_FLAGS:
-            if i + 1 < len(sub_argv):
-                t = _title_from_file(sub_argv[i + 1], base_dir=c_dir)
-                if t is not None:
-                    titles.append(t)
-                i += 2
-                continue
-            i += 1
-            continue
-
-        i += 1
-
-    return titles
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +248,7 @@ def main() -> int:
 
     for argv in iter_command_starts(tokens):
         # Check git commit titles
-        git_titles = _extract_git_titles(argv)
+        git_titles = extract_git_titles(argv)
         for title in git_titles:
             if _is_whitelisted(title):
                 continue
