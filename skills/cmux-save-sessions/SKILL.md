@@ -34,7 +34,6 @@ The session running this script (the manager session) is excluded by default —
 - Create a shareable snapshot of a multi-workspace setup for another machine
 - Record daily work state for later `cmux-resume-sessions` restore
 - Feed input data to other skills that need a session list
-- Triggers: "save sessions", "session save", "session snapshot", "cmux save", "list snapshots", "snapshot list"
 
 > **Not for crash recovery** — after a power loss, use `cmux-recover-sessions` (reads `.jsonl` files directly).
 

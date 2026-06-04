@@ -25,7 +25,6 @@ trigger phrase to describe a second job, split it into two skills.
 - Creating a new praxis skill from scratch
 - Reviewing an existing SKILL.md for structural compliance
 - Onboarding a contributor who will add a skill
-- Triggers: "new praxis skill", "write praxis skill", "add praxis skill", "skill template", "praxis skill spec", "스킬 작성", "새 스킬"
 
 ## Process
 
@@ -54,6 +53,10 @@ description: >
 - `description` should be concise — keep it short enough to scan at a glance.
 - Always end `description` with a `Triggers on "..."` clause so the routing
   table in global `~/.claude/CLAUDE.md` can reference exact keywords.
+- The frontmatter `Triggers on "..."` clause is the **sole** source of trigger
+  keywords. Do NOT duplicate them in an in-body `- Triggers:` bullet — that
+  bullet was retired (#591) because the two copies drifted; frontmatter is the
+  single source of truth.
 - Use multi-line `>` block for descriptions that include trigger keywords; use
   inline text for short single-line descriptions (see `strike/SKILL.md`).
 

@@ -27,7 +27,6 @@ never close or rename sessions without explicit approval, because a still-runnin
 - End-of-day session hygiene (status dashboard, cleanup, reorganize)
 - Too many orphaned or idle sessions accumulated in cmux
 - Before starting new work — verify no stale workspaces are consuming resources
-- Triggers: "cmux session", "session management", "session cleanup", "cmux status", "cmux cleanup", "cmux tidy"
 
 > **Not for crash recovery** — use `cmux-recover-sessions` after a power loss or cmux crash.
 
