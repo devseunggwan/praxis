@@ -32,9 +32,14 @@ Concrete retrospect pattern (praxis issue #374):
 Block conditions (ALL must hold):
   (a) Tool is Bash with a content `git commit` (not amend/merge/rebase/
       cherry-pick/revert)
-  (b) Recent transcript tail (last ~200 lines) contains a sciomc structured
+  (b) Recent ASSISTANT-AUTHORED transcript content (last ~200 entries:
+      assistant message text + Agent/Task subagent tool-results — NOT user
+      turns, system-reminder blocks, or Read/Skill tool-results that merely
+      *load* documentation such as a SKILL.md) contains a sciomc structured
       output marker: "[FINDING:", "[STAGE_COMPLETE:", "[CONFLICTS:",
-      "sibling-deviant", "의미 mismatch", "의미 충돌"
+      "sibling-deviant", "의미 mismatch", "의미 충돌". Scanning is role-aware
+      (JSONL parsed per-entry) so a SKILL.md that *documents* these tokens as
+      literal example text does not self-trip the gate (praxis issue #573).
   (c) No `gh pr view ... --json body` OR `gh issue view ... --json body` OR
       explicit ratification token was emitted AFTER the most recent finding
       marker in the transcript tail
@@ -99,21 +104,21 @@ def main() -> int:
     if not transcript_path:
         return 0  # no transcript → cannot enforce
 
-    tail = _read_transcript_tail(transcript_path, max_lines=200, max_bytes=50 * 1024 * 1024)
-    if tail is None:
+    scan = _build_finding_scan(transcript_path, max_entries=200, max_bytes=50 * 1024 * 1024)
+    if scan is None:
         return 0
+    stream, finding_offsets, matched_markers = scan
 
-    finding_indices = _find_marker_indices(tail, _FINDING_MARKERS)
-    if not finding_indices:
-        return 0  # no finding context → allow
+    if not finding_offsets:
+        return 0  # no finding context in assistant-authored content → allow
 
-    last_finding_idx = max(finding_indices)
-    after_finding = tail[last_finding_idx:]
+    last_finding_idx = max(finding_offsets)
+    after_finding = stream[last_finding_idx:]
 
     if _has_consensus_refetch(after_finding):
         return 0
 
-    matched = sorted({m.group(0).strip() for m in _iter_marker_matches(tail, _FINDING_MARKERS)})[:3]
+    matched = sorted(set(matched_markers))[:3]
     _emit_block_message(matched)
     return 2
 
@@ -426,7 +431,43 @@ def _has_ratification_token(commit_args: list[str]) -> bool:
     return any(_RATIFICATION_TOKEN_RE.search(value) for value in _message_values(commit_args))
 
 
-def _read_transcript_tail(path: str, max_lines: int, max_bytes: int) -> str | None:
+# ---------------------------------------------------------------------------
+# Role-aware transcript scan (praxis issue #573)
+#
+# The marker corpus is restricted to ASSISTANT-AUTHORED content so a loaded
+# SKILL.md — which *documents* the `[FINDING:` / `[CONFLICTS:` /
+# `[STAGE_COMPLETE:` output schema as literal example text — cannot self-trip
+# the gate. A raw-text tail scan conflated two oracles: genuine agent finding
+# output vs. documentation that merely names the tokens.
+#
+# Included in the finding corpus:
+#   - assistant message TEXT blocks (the agent emitting a finding directly)
+#   - tool_result blocks whose originating tool_use is Agent/Task — a sciomc
+#     subagent's own output. Results are recorded in `user`-type entries, so
+#     each tool_result's tool_use_id is resolved back to its tool name.
+# Excluded from the finding corpus (the #573 false-positive sources):
+#   - user-turn text (real user messages, skill-load doc payloads)
+#   - system-reminder blocks / non-user/assistant entry types
+#   - Read / Skill / Bash / other tool-results (loaded files, command output)
+#
+# The consensus-refetch check still scans the full ordered stream AFTER the
+# last finding (assistant text + assistant tool_use commands + Agent/Task
+# results), so a `gh pr view … --json body` recorded as an assistant Bash
+# tool_use still satisfies the re-fetch gate.
+# ---------------------------------------------------------------------------
+
+_ASSISTANT_TEXT = "assistant_text"
+_ASSISTANT_TOOLUSE = "assistant_tooluse"
+_AGENT_RESULT = "agent_result"
+# Kinds whose text counts as genuine, agent-authored finding output.
+_FINDING_KINDS = frozenset({_ASSISTANT_TEXT, _AGENT_RESULT})
+# tool_use names whose tool_result is a subagent's OWN output (sciomc runs as a
+# subagent). Read/Skill/Bash/etc. results are loaded docs or command output and
+# are NOT part of the finding corpus.
+_SUBAGENT_TOOLS = frozenset({"Agent", "Task"})
+
+
+def _load_transcript_objs(path: str, max_bytes: int) -> list | None:
     try:
         p = Path(path)
         if not p.is_file() or p.stat().st_size > max_bytes:
@@ -434,12 +475,136 @@ def _read_transcript_tail(path: str, max_lines: int, max_bytes: int) -> str | No
         text = p.read_text(encoding="utf-8", errors="replace")
     except (OSError, ValueError):
         return None
-    lines = text.strip().split("\n")
-    return "\n".join(lines[-max_lines:])
+    objs: list = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            objs.append(json.loads(line))
+        except (json.JSONDecodeError, ValueError):
+            continue  # skip non-JSON lines, keep scanning
+    return objs
 
 
-def _find_marker_indices(text: str, patterns: tuple[re.Pattern, ...]) -> list[int]:
-    return [m.start() for pat in patterns for m in pat.finditer(text)]
+def _map_tool_use_names(objs: list) -> dict:
+    """Map tool_use_id → tool name across the WHOLE transcript so a recent
+    tool_result can be resolved even when its originating tool_use predates the
+    recency window."""
+    names: dict = {}
+    for obj in objs:
+        if not isinstance(obj, dict) or obj.get("type") != "assistant":
+            continue
+        message = obj.get("message")
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for blk in content:
+            if isinstance(blk, dict) and blk.get("type") == "tool_use":
+                tuid, name = blk.get("id"), blk.get("name")
+                if isinstance(tuid, str) and isinstance(name, str):
+                    names[tuid] = name
+    return names
+
+
+def _tool_use_text(blk: dict) -> str:
+    inp = blk.get("input")
+    if not isinstance(inp, dict):
+        return ""
+    cmd = inp.get("command")
+    if isinstance(cmd, str):
+        return cmd  # Bash command — where a `gh pr view … --json body` lives
+    try:
+        return json.dumps(inp, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return ""
+
+
+def _tool_result_text(blk: dict) -> str:
+    content = blk.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        out: list = []
+        for item in content:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                out.append(item["text"])
+            elif isinstance(item, str):
+                out.append(item)
+        return "\n".join(out)
+    return ""
+
+
+def _entry_segments(obj, tool_names: dict) -> list:
+    """Return (kind, text) segments contributed by one transcript entry."""
+    if not isinstance(obj, dict):
+        return []
+    typ = obj.get("type")
+    message = obj.get("message")
+    # Simplified string message form: only an assistant string is authored text.
+    if isinstance(message, str):
+        return [(_ASSISTANT_TEXT, message)] if typ == "assistant" else []
+    if not isinstance(message, dict):
+        return []
+    content = message.get("content")
+    if isinstance(content, str):
+        blocks: list = [{"type": "text", "text": content}]
+    elif isinstance(content, list):
+        blocks = content
+    else:
+        return []
+    segs: list = []
+    for blk in blocks:
+        if not isinstance(blk, dict):
+            continue
+        btype = blk.get("type")
+        if typ == "assistant":
+            if btype == "text" and isinstance(blk.get("text"), str):
+                segs.append((_ASSISTANT_TEXT, blk["text"]))
+            elif btype == "tool_use":
+                segs.append((_ASSISTANT_TOOLUSE, _tool_use_text(blk)))
+        elif typ == "user" and btype == "tool_result":
+            # tool_results live in user-type entries; only a subagent's own
+            # output counts as finding content. Read/Skill/etc. are excluded.
+            if tool_names.get(blk.get("tool_use_id")) in _SUBAGENT_TOOLS:
+                segs.append((_AGENT_RESULT, _tool_result_text(blk)))
+        # user text blocks (real user msg / skill-load / system-reminder) and
+        # non-user/assistant entry types contribute nothing to either corpus.
+    return segs
+
+
+def _build_finding_scan(path: str, max_entries: int, max_bytes: int):
+    """Build the role-aware scan over recent transcript entries.
+
+    Returns (stream, finding_offsets, matched_markers), or None when the
+    transcript cannot be read (caller fail-opens):
+      stream          — ordered text of assistant + Agent/Task segments, used
+                        for the positional consensus-refetch check.
+      finding_offsets — offsets in `stream` of finding markers that land in
+                        agent-authored (assistant text / Agent result) spans.
+      matched_markers — the matched marker strings (for the block message).
+    """
+    objs = _load_transcript_objs(path, max_bytes)
+    if objs is None:
+        return None
+    tool_names = _map_tool_use_names(objs)
+    parts: list = []
+    finding_offsets: list = []
+    matched_markers: list = []
+    pos = 0
+    for obj in objs[-max_entries:]:
+        for kind, text in _entry_segments(obj, tool_names):
+            start = pos
+            parts.append(text)
+            parts.append("\n")
+            pos += len(text) + 1
+            if kind in _FINDING_KINDS:
+                for m in _iter_marker_matches(text, _FINDING_MARKERS):
+                    finding_offsets.append(start + m.start())
+                    matched_markers.append(m.group(0).strip())
+    return "".join(parts), finding_offsets, matched_markers
 
 
 def _iter_marker_matches(text: str, patterns: tuple[re.Pattern, ...]):
