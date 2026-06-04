@@ -34,7 +34,7 @@ Restores workspace structure (name, cwd) and continues Claude Code conversations
 RESUME RESTORES STRUCTURE AND CONTINUES CONVERSATIONS.
 ```
 
-Resume restores workspace structure (name, cwd) and runs `claude --continue` to pick up the most recent conversation in each directory.
+Resume restores workspace structure (name, cwd) and, per session, runs `claude --resume <session-id>` when the snapshot carries a session id — falling back to `claude --continue` (the cwd's most recent conversation) when it does not — to pick up the prior conversation in each directory.
 It does NOT restore runtime state of previously running commands or sessions.
 
 ## When to Use
