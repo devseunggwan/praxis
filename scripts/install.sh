@@ -41,18 +41,10 @@ done
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_DIR="${PRAXIS_BIN_DIR:-$HOME/.local/bin}"
 
-# Public CLI scripts. Add new entries here when a skill ships an executable.
-CLI_SCRIPTS=(
-  "skills/recover-sessions/claude-recover"
-  "skills/recover-sessions/claude-recover-scan"
-  "skills/cmux-resume-sessions/cmux-resume-sessions"
-  "skills/cmux-save-sessions/cmux-save-sessions"
-  "skills/cmux-recover-sessions/cmux-recover-sessions"
-  "skills/cmux-session-manager/cmux-session-status"
-  "skills/cmux-session-manager/cmux-session-cleanup"
-  "skills/cmux-browser/cmux-browser"
-  "skills/bypass-review/bypass-review"
-)
+# Public CLI scripts — single source of truth, shared with verify-symlinks.sh.
+# Defines the CLI_SCRIPTS array; add a new entry in scripts/cli-scripts.sh.
+# shellcheck source=scripts/cli-scripts.sh
+source "$(dirname "${BASH_SOURCE[0]}")/cli-scripts.sh"
 
 mkdir -p "$BIN_DIR"
 
