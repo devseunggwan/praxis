@@ -1,0 +1,41 @@
+name: markdownlint
+
+# reviewdog posts inline review comments, which only works in PR context — so
+# unlike the lint/shellcheck gates this runs on pull_request only, not push.
+on:
+  pull_request:
+    branches: ["**"]
+
+# A newer push to the same PR ref cancels the in-flight run.
+concurrency:
+  group: markdownlint-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: read the docs; reviewdog needs pull-requests:write to post
+# the inline review comments.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  markdownlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # Pinned so a future action release can't widen rules and turn CI noisy
+      # without an explicit bump. Rule config lives in .markdownlint.yaml.
+      - uses: reviewdog/action-markdownlint@v0.26.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Inline review comments on the PR diff.
+          reporter: github-pr-review
+          # Only flag lines the PR actually changed; the repo's large existing
+          # backlog (issue #585 scan: 1740 MD013, 1318 MD060) stays untouched.
+          filter_mode: added
+          # Advisory rollout: surface suggestions as warnings without ever
+          # failing the check. Raise to error once the docs backlog settles.
+          level: warning
+          fail_level: none

@@ -1,0 +1,37 @@
+name: actionlint
+
+# reviewdog posts inline review comments, which only works in PR context — so
+# unlike the lint/shellcheck gates this runs on pull_request only, not push.
+on:
+  pull_request:
+    branches: ["**"]
+
+# A newer push to the same PR ref cancels the in-flight run.
+concurrency:
+  group: actionlint-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: read the workflows; reviewdog needs pull-requests:write to
+# post the inline review comments.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # Pinned to the latest release. The existing workflows already pass
+      # actionlint cleanly (issue #585 baseline), so error-level gating starts
+      # from green — any failure is a real workflow bug introduced by the PR.
+      - uses: reviewdog/action-actionlint@v1.72.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-review
+          # Workflow YAML errors (bad expressions, shell injection, deprecated
+          # patterns) are real bugs, not style — gate at error.
+          fail_level: error
