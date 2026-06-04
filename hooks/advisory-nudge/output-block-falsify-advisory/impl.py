@@ -54,6 +54,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from ask_option_text import collect_option_texts  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Messages
@@ -204,25 +205,6 @@ def _has_confidence_anchoring(texts: list[str]) -> bool:
     return False
 
 
-def _collect_option_texts(options: list) -> list[str]:
-    """Collect option.label + option.description into a single text list.
-
-    Used by T2 (confidence-anchoring) detection only — T1 (exact marker)
-    still scans labels only via _has_exact_recommended_marker().
-    """
-    texts: list[str] = []
-    for o in options:
-        if not isinstance(o, dict):
-            continue
-        label = o.get("label")
-        if isinstance(label, str):
-            texts.append(label)
-        desc = o.get("description")
-        if isinstance(desc, str):
-            texts.append(desc)
-    return texts
-
-
 def _emit_ask(message: str) -> None:
     """T2 path: soft gate. (decision must be "ask"/"deny" — "allow" is never
     emitted; silent-pass is signaled by no JSON output.)"""
@@ -335,7 +317,7 @@ def main() -> int:
                     tier_decision = "deny"
                     msg_to_emit = ASK_MSG
                     break  # T1 deny is final — overrides any prior T2 ask
-            elif _has_confidence_anchoring(_collect_option_texts(options)):
+            elif _has_confidence_anchoring(collect_option_texts(options)):
                 # T2 (issue #369): confidence-anchoring framing token in
                 # label OR description. Soft gate — false-positive risk
                 # higher than T1's literal marker. Record but keep scanning
