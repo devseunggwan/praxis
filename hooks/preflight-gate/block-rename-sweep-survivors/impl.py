@@ -184,6 +184,7 @@ def _survivors(token: str) -> list[str]:
         ["git", "grep", "-n", "--fixed-strings", token],
         capture_output=True,
         text=True,
+        timeout=5,
     )
     if result.returncode != 0:
         return []
@@ -256,6 +257,7 @@ def main() -> int:
         ["git", "diff", "--cached", "--unified=0"],
         capture_output=True,
         text=True,
+        timeout=5,
     ).stdout
 
     if not diff.strip():
