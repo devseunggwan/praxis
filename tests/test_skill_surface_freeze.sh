@@ -2,7 +2,7 @@
 # test_skill_surface_freeze.sh — verify check-plugin-manifests.py Rule 11 (#465)
 #
 # Asserts:
-#   1. Current seed (15 skills) passes
+#   1. Current seed (14 skills) passes
 #   2. Unexpected skill dir triggers non-zero exit + UNEXPECTED SKILL message
 #   3. Removed (declared-but-missing) skill triggers non-zero exit + REMOVED SKILL message
 #   4. SKILL.md.tmpl (file, not dir) and underscore-prefixed dirs are excluded
@@ -30,8 +30,9 @@ BACKUP="$BACKUP_DIR/strikes"
 
 cleanup() {
   # Idempotent restore: handles interruption (SIGINT/TERM) mid-fixture.
-  [ -d "$GHOST" ] && rmdir "$GHOST" 2>/dev/null
-  [ -d "$GHOST_UNDERSCORE" ] && rmdir "$GHOST_UNDERSCORE" 2>/dev/null
+  # GHOST now carries a SKILL.md (see Case 2), so rm -rf — not rmdir.
+  [ -d "$GHOST" ] && rm -rf "$GHOST" 2>/dev/null
+  [ -d "$GHOST_UNDERSCORE" ] && rm -rf "$GHOST_UNDERSCORE" 2>/dev/null
   if [ -d "$BACKUP" ] && [ ! -d "$ROOT_DIR/skills/strikes" ]; then
     mv "$BACKUP" "$ROOT_DIR/skills/strikes"
   fi
@@ -63,23 +64,30 @@ run_case() {
   fi
 }
 
-# Case 1: current 15-skill seed passes
-run_case "seed-15-passes" "python3 \"$CHECK\"" 0 "plugin-manifest check OK"
+# Case 1: current 14-skill seed passes (bypass-review demoted to CLI, #582)
+run_case "seed-14-passes" "python3 \"$CHECK\"" 0 "plugin-manifest check OK"
 
 # Case 2: unexpected skill dir triggers UNEXPECTED SKILL
+# Since #582, a dir counts as a skill only if it has a SKILL.md, so the
+# fixture must carry one to be detected as a genuine unexpected skill.
 mkdir -p "$GHOST"
+: > "$GHOST/SKILL.md"
 run_case "unexpected-skill-fails" "python3 \"$CHECK\"" 1 "UNEXPECTED SKILL(S).*ghost-skill-fixture"
-rmdir "$GHOST"
+rm -rf "$GHOST"
 
 # Case 3: removed (declared-but-missing) skill triggers REMOVED SKILL
 mv "$ROOT_DIR/skills/strikes" "$BACKUP"
 run_case "removed-skill-fails" "python3 \"$CHECK\"" 1 "REMOVED SKILL(S).*strikes"
 mv "$BACKUP" "$ROOT_DIR/skills/strikes"
 
-# Case 4: SKILL.md.tmpl (file) and _-prefixed dirs are excluded
+# Case 4: SKILL.md.tmpl (file) and _-prefixed dirs are excluded.
+# The fixture carries a SKILL.md so this isolates the underscore rule: with a
+# SKILL.md present, the only reason it stays excluded is the leading underscore
+# (not the #582 SKILL.md filter, which would otherwise mask a regression here).
 mkdir -p "$GHOST_UNDERSCORE"
+: > "$GHOST_UNDERSCORE/SKILL.md"
 run_case "underscore-prefix-excluded" "python3 \"$CHECK\"" 0 "plugin-manifest check OK"
-rmdir "$GHOST_UNDERSCORE"
+rm -rf "$GHOST_UNDERSCORE"
 
 # Case 5: post-restore returns to passing state
 run_case "post-restore-passes" "python3 \"$CHECK\"" 0 "plugin-manifest check OK"

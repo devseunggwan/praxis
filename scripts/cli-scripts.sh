@@ -5,8 +5,10 @@
 #   - scripts/install.sh         (symlink each into ~/.local/bin)
 #   - scripts/verify-symlinks.sh (drift check those same symlinks)
 #
-# Add a new entry here when a skill ships an executable — both consumers
-# pick it up automatically, so the two lists can never drift apart again.
+# Add a new entry here when a skills/ directory ships an executable CLI
+# (whether or not it is also a skill — e.g. bypass-review is CLI-only, no
+# SKILL.md) — both consumers pick it up automatically, so the two lists can
+# never drift apart again.
 #
 # This file is meant to be *sourced*, not executed. It defines the
 # CLI_SCRIPTS array (repo-relative paths) and nothing else.

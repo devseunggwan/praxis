@@ -41,7 +41,6 @@ OPT_IN_HOOKS: dict[str, str] = {
 # silent skill proliferation; every intentional surface change is paired
 # with an explicit declaration here.
 EXPECTED_SKILLS: frozenset[str] = frozenset({
-    "bypass-review",
     "cmux-browser",
     "cmux-delegate",
     "cmux-recover-sessions",

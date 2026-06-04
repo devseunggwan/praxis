@@ -56,6 +56,11 @@ def _skill_dirs() -> list[Path]:
 
     Mirrors `_hook_dirs()` convention: files (SKILL.md.tmpl) and underscore-
     prefixed entries (future internal layout) are excluded automatically.
+
+    A directory counts as a skill only if it carries a `SKILL.md`. Binary-only
+    dirs (e.g. `bypass-review`, which ships a CLI under `skills/` but has no
+    `SKILL.md` and cannot be invoked as `/praxis:*`) are excluded so they are
+    not double-counted against the skill surface (issue #582).
     """
     skills_root = REPO_ROOT / "skills"
     dirs: list[Path] = []
@@ -65,6 +70,8 @@ def _skill_dirs() -> list[Path]:
         if not entry.is_dir():
             continue
         if entry.name.startswith("_") or entry.name == "__pycache__":
+            continue
+        if not (entry / "SKILL.md").exists():
             continue
         dirs.append(entry)
     return dirs
