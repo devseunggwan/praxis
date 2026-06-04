@@ -23,7 +23,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | **Full** | + all cmux-* skills | + cmux |
 | **Multi-provider** | + codex/gemini routing in cmux-* | + codex-cli, gemini-cli |
 
-## Skills (15)
+## Skills (14)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Always call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
@@ -48,7 +48,6 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 
 | Skill | Purpose |
 |-------|---------|
-| `bypass-review` | Review bypass-telemetry event logs written by the bypass-telemetry hook — aggregate and inspect JSONL records |
 | `strike` | Declare a rule violation — session-scoped counter, escalating signal (1진 warning → 2진 review → 3진 Stop-hook block) |
 | `strikes` | Show current strike count + recorded violation reasons for the active session |
 | `reset-strikes` | Reset the session strike counter to 0 after a 3진 block (required to unblock responses) |
@@ -124,6 +123,7 @@ They are not AI skills — they have no `SKILL.md` and cannot be invoked as `/pr
 
 | Binary | Source | Purpose |
 |--------|--------|---------|
+| `bypass-review` | `skills/bypass-review/bypass-review` | Review bypass-telemetry event logs written by the bypass-telemetry hook — aggregate and inspect JSONL records (no `SKILL.md`; not invocable as `/praxis:*`) |
 | `cmux-browser` | `skills/cmux-browser/cmux-browser` | Pass-through for `cmux browser`; intercepts selector-missing errors and adds subcommand-specific usage hints |
 
 ### Install / refresh CLI symlinks

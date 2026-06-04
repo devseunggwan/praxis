@@ -29,7 +29,6 @@ Development workflow skills for Claude Code — disciplined, fast, resilient.
 
 | Skill | Trigger keywords | When to use | Example invocation |
 |-------|-----------------|-------------|-------------------|
-| `bypass-review` | `bypass review`, `bypass telemetry`, `우회 이벤트 확인`, `bypass log` | bypass-telemetry hook이 기록한 JSONL 이벤트 로그를 집계·검토할 때 | `/praxis:bypass-review` |
 | `strike` | `/strike`, `/praxis:strike`, `strike 1/2/3`, `삼진` | 규칙 위반 발생 시 명시적으로 기록할 때 (colloquial "strike a balance" 등은 제외) | `/praxis:strike <위반 이유>` |
 | `strikes` | `/strikes`, `strike status`, `몇 진`, `check strikes` | 현재 세션의 strike 횟수와 위반 내역을 확인할 때 | `/praxis:strikes` |
 | `reset-strikes` | `/reset-strikes`, `strike 초기화`, `clear strikes` | 3진 블록 후 카운터를 초기화해 응답을 재개할 때 | `/praxis:reset-strikes` |
