@@ -42,7 +42,6 @@ It does NOT restore runtime state of previously running commands or sessions.
 - Restore a workspace layout from a `cmux-save-sessions` snapshot
 - Rehydrate yesterday's working set at the start of a new day
 - Move a session layout to another machine (snapshot → transfer → resume)
-- Triggers: "resume sessions", "session restore", "session resume", "cmux resume"
 
 > **Not for crash recovery** — after a power loss, use `cmux-recover-sessions` (scans `.jsonl` files directly).
 

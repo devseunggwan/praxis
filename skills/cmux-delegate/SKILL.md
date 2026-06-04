@@ -1,6 +1,6 @@
 ---
 name: cmux-delegate
-description: Delegate a task to an independent Claude Code session in a new cmux workspace with auto-collected context. Triggers on "delegate", "cmux delegate", "new session".
+description: Delegate a task to an independent Claude Code session in a new cmux workspace with auto-collected context. Triggers on "delegate", "cmux delegate", "new session", "별도 세션".
 ---
 
 # cmux-delegate
@@ -19,7 +19,6 @@ description: Delegate a task to an independent Claude Code session in a new cmux
 - 디버깅이나 구현을 별도 세션에 위임할 때
 - 현재 컨텍스트의 편향 없이 fresh eyes가 필요할 때
 - 다중 독립 항목을 병렬로 조사/실행할 때
-- Triggers: "delegate", "cmux delegate", "new session", "별도 세션"
 
 ## Inputs
 

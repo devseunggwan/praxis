@@ -53,7 +53,6 @@ See **Step 5** for the full gate.
 
 - Before calling `/codex:review` from any multi-worktree project
 - When the session cwd differs from the worktree you just finished working in
-- Triggers: "codex review", "review codex", "safe review", "/codex-review-wrap"
 
 ## Inputs
 

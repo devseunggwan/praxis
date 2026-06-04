@@ -27,7 +27,6 @@ Recovery reads `.jsonl` files and re-opens them in new tmux panes. It must never
 - After a Mac power loss when all tmux sessions are gone
 - After tmux server crash that killed all running sessions
 - After reboot when previous work sessions need to be restored
-- Triggers: "recover", "session recovery", "restore sessions", "power recovery"
 
 ## Prerequisites
 

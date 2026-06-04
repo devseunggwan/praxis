@@ -44,7 +44,6 @@ Recovery reads `.jsonl` files and re-opens them in new cmux workspaces. It must 
 - After a Bun segfault crash that killed a Claude Code session
 - After a Mac power loss when all cmux workspaces are gone
 - After reboot when previous work sessions need to be restored
-- Triggers: "recover cmux", "cmux session recovery", "cmux restore sessions"
 
 ## Prerequisites
 
