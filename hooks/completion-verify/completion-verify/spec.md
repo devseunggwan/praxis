@@ -46,7 +46,7 @@ When blocked, the hook emits:
 }
 ```
 
-and appends an entry to `~/.claude/scope-confirm/stop-triggered.log`.
+and appends an entry to `${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm/stop-triggered.log`.
 
 ### Fail-safe paths
 
