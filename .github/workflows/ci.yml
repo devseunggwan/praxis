@@ -1,0 +1,150 @@
+name: ci
+
+# Single consolidated CI workflow (issue #590). Triggers are unified to
+# push-on-main + pull_request so a feature-branch push with an open PR runs
+# each check once (the prior per-tool workflows used push:["**"] and double-ran
+# on every PR). codeql stays in its own file — its weekly schedule and
+# security-events:write scope don't belong on the shared trigger.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["**"]
+
+# A newer push to the same ref cancels the in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege default: jobs only read the checked-out code. The reviewdog
+# jobs widen to pull-requests:write at the job level.
+permissions:
+  contents: read
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+          # No dependency manifest; hash this workflow (which pins ruff) for a
+          # stable pip-cache key.
+          cache: pip
+          cache-dependency-path: .github/workflows/ci.yml
+      # Pinned so a future Ruff release can't widen rules and turn CI red
+      # without an explicit bump. Matches ruff.toml's rule selection.
+      - run: python3 -m pip install "ruff==0.15.8"
+      - run: ruff check .
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      # ubuntu-latest ships shellcheck, but install explicitly so the job
+      # doesn't silently depend on the runner image. Rules come from
+      # .shellcheckrc at the repo root.
+      - run: sudo apt-get update -y && sudo apt-get install -y shellcheck
+      - run: |
+          find . -name '*.sh' -not -path './.git/*' -print0 \
+            | xargs -0 shellcheck --severity=warning
+
+  # Trigger moved from push:["**"] to push:[main]+PR, so pre-PR pushes to a
+  # feature branch are intentionally unscanned. Coverage for anything that
+  # reaches main is unchanged: the PR event scans it, and the post-merge
+  # push:[main] re-scans full history (fetch-depth:0) — no secret lands on
+  # main unscanned, it's just scanned at PR time instead of first-push time.
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Full history so gitleaks scans commits, not just the working tree.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      # Synthetic test secrets are allowlisted in .gitleaks.toml.
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
+          # Required for pull_request scans: the action enumerates the PR's
+          # commits via the API. push events scan locally without it.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: .github/workflows/ci.yml
+      - run: python3 -m pip install pytest
+      - run: sudo apt-get update -y && sudo apt-get install -y jq
+      - run: bash scripts/run-tests.sh
+
+  link-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      # --offline: only validate local file-path links and in-document
+      # fragments. External URLs (mostly github.com) are skipped to avoid
+      # unauthenticated 429 false failures. --exclude-path '^plugins/': those
+      # dirs are symlinks back into the repo root and would re-scan every doc
+      # under a plugins/ path where relative links resolve wrong.
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --no-progress
+            --offline
+            --exclude-path '^plugins/'
+            --include-fragments
+            './**/*.md'
+          fail: true
+
+  # reviewdog posts inline review comments, which only works in PR context —
+  # so the two reviewdog jobs are gated to pull_request and skip on push:main.
+  actionlint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+      # Pinned to the latest release; existing workflows pass actionlint
+      # cleanly, so error-level gating starts from green.
+      - uses: reviewdog/action-actionlint@v1.72.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-review
+          # Workflow YAML errors are real bugs, not style — gate at error.
+          fail_level: error
+
+  markdownlint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+      # Rule config lives in .markdownlint.yaml (counts derived under the
+      # version this action bundles — see that file's header).
+      - uses: reviewdog/action-markdownlint@v0.26.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-review
+          # Only flag lines the PR changed; the repo's large existing backlog
+          # stays untouched.
+          filter_mode: added
+          # Advisory rollout: warnings only, never fails the check.
+          level: warning
+          fail_level: none
