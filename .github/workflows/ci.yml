@@ -17,7 +17,9 @@ concurrency:
   cancel-in-progress: true
 
 # Least privilege default: jobs only read the checked-out code. The reviewdog
-# jobs widen to pull-requests:write at the job level.
+# jobs widen to pull-requests:write at the job level. No job pushes back to the
+# repo, so every checkout sets persist-credentials: false — the GITHUB_TOKEN is
+# not left in .git/config for later steps (pip/apt/run-tests.sh) to reach.
 permissions:
   contents: read
 
@@ -27,6 +29,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
@@ -44,6 +48,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       # ubuntu-latest ships shellcheck, but install explicitly so the job
       # doesn't silently depend on the runner image. Rules come from
       # .shellcheckrc at the repo root.
@@ -65,6 +71,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
       # Synthetic test secrets are allowlisted in .gitleaks.toml.
       - uses: gitleaks/gitleaks-action@v2
         env:
@@ -78,6 +85,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
@@ -92,6 +101,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       # --offline: only validate local file-path links and in-document
       # fragments. External URLs (mostly github.com) are skipped to avoid
       # unauthenticated 429 false failures. --exclude-path '^plugins/': those
@@ -118,6 +129,8 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       # Pinned to the latest release; existing workflows pass actionlint
       # cleanly, so error-level gating starts from green.
       - uses: reviewdog/action-actionlint@v1.72.0
@@ -136,6 +149,8 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       # Rule config lives in .markdownlint.yaml (counts derived under the
       # version this action bundles — see that file's header).
       - uses: reviewdog/action-markdownlint@v0.26.2

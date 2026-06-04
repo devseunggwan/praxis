@@ -34,7 +34,12 @@ jobs:
       security-events: write
 
     steps:
+      # persist-credentials: false — the CodeQL actions use the job's
+      # GITHUB_TOKEN directly, so the checkout token need not stay in
+      # .git/config for later steps.
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       # CodeQL supports Python (the project's hook/script logic). Bash is not a
       # CodeQL language — shellcheck.yml covers the shell sources instead.
