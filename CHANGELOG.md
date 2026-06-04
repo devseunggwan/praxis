@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.1.3] - 2026-06-04
+
+### Added
+- `retrospect`: 5th deterministic pre-scan lane `self_correction` — detects a mistake the agent caught and self-corrected mid-session (same intent + changed oracle/target/basis + prior result *wrong* not *errored*), the event the narrative pre-scan is most likely to self-servingly omit. Signature scan → per-candidate LLM judge → genuine self-corrections promote to friction events (`origin: self_correction`); every judged drop is recorded in a `self_correction` ledger, and the ledger fence is emitted even on the 0-friction early-exit path. The fence lives outside the `retrospect:distribution` boundary, so the Stop-hook parser is unaffected (#576)
+- `retrospect`: three honest-labeling improvements rooted in "form-compliance crowding out intent" — (1) Stage 2 pre-agent artifact probe (read a directly-readable artifact before the MANDATORY tracer call and fold the confirmed fact into the briefing, or record `probe skipped:`), (2) per-finding behavioral-label falsification (a dual-nature finding narrowed to a lone `behavioral` label must carry a `behavioral-label-justify:` line or list all categories), and (3) a Stage 1.5 carry-forward `probe-unrunnable` branch (retain-by-default + bounded-drop escape via `PRAXIS_RETROSPECT_UNRUNNABLE_DROP_CYCLES`, default 3). Prose-only; Stop-hook parser unaffected (#577)
+
 ### Fixed
+- `block-sciomc-finding-commit` hook: the finding-marker scan now parses the transcript **role-aware** (JSONL per-entry) instead of grepping the raw tail as text. The marker corpus is restricted to assistant message `text` blocks and `Agent`/`Task` subagent tool-results; markers inside user turns, system-reminder blocks, or `Read`/`Skill` tool-results that merely *load* a SKILL.md documenting the token schema no longer self-trip the gate. The consensus-refetch check still scans the full ordered stream after the finding, so a `gh pr view … --json body` recorded as an assistant Bash tool_use still satisfies the gate (#573, PR #575)
 - `retrospect`: Stage 1.5 hygiene cursor now guards against multi-session lost-update. A new **Cursor write mandate** re-reads the on-disk `.omc/state/retrospect-hygiene-cursor.json` before persisting and, when a sibling session advanced the cursor since this session's entry read, union-merges the `note` carry-forward + scan trail + batch pointer instead of plain-overwriting. Previously two interleaved `/retrospect` runs clobbered each other's findings — the second session's Write silently dropped the first session's carry-forward, breaking the Stage 1.5 carry-forward guarantee under concurrency (#568)
 
 ## [6.1.1] - 2026-06-02
