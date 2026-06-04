@@ -12,16 +12,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_DIR="${PRAXIS_BIN_DIR:-$HOME/.local/bin}"
 
-CLI_SCRIPTS=(
-  "skills/recover-sessions/claude-recover"
-  "skills/recover-sessions/claude-recover-scan"
-  "skills/cmux-resume-sessions/cmux-resume-sessions"
-  "skills/cmux-save-sessions/cmux-save-sessions"
-  "skills/cmux-recover-sessions/cmux-recover-sessions"
-  "skills/cmux-session-manager/cmux-session-status"
-  "skills/cmux-session-manager/cmux-session-cleanup"
-  "skills/cmux-browser/cmux-browser"
-)
+# Single source of truth, shared with install.sh — see scripts/cli-scripts.sh.
+# shellcheck source=scripts/cli-scripts.sh
+source "$(dirname "${BASH_SOURCE[0]}")/cli-scripts.sh"
 
 drift=0
 for script in "${CLI_SCRIPTS[@]}"; do
