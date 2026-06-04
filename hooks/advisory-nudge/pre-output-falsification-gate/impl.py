@@ -64,6 +64,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
+from ask_option_text import collect_option_texts  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -136,21 +137,6 @@ _TRANSCRIPT_SCAN_LINES = 400
 # ---------------------------------------------------------------------------
 # Lane A — AskUserQuestion evaluative-option gate
 # ---------------------------------------------------------------------------
-
-def _collect_option_texts(options: list) -> list[str]:
-    """Collect option.label + option.description into a single text list."""
-    texts: list[str] = []
-    for o in options:
-        if not isinstance(o, dict):
-            continue
-        label = o.get("label")
-        if isinstance(label, str):
-            texts.append(label)
-        desc = o.get("description")
-        if isinstance(desc, str):
-            texts.append(desc)
-    return texts
-
 
 def _has_evaluative_marker(texts: list[str]) -> bool:
     """A1: any text contains an evaluative marker (EN regex or KO substring)."""
@@ -261,7 +247,7 @@ def _lane_a(tool_input: dict, transcript_path: str) -> bool:
             continue
         options = q.get("options")
         if isinstance(options, list):
-            option_texts.extend(_collect_option_texts(options))
+            option_texts.extend(collect_option_texts(options))
         q_body = q.get("question")
         if isinstance(q_body, str):
             body_texts.append(q_body)
