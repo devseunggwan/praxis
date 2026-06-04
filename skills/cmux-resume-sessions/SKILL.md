@@ -6,7 +6,7 @@ description: >
   Crash routing override: if the request mentions a crash, power loss, OOM, or "살려야",
   route to cmux-recover-sessions instead — even when the user also mentions a snapshot,
   because the snapshot may be stale and .jsonl scanning reflects the real latest state.
-  Triggers on "resume sessions", "session resume", "session restore", "restore sessions", "cmux resume", "restore from snapshot", "rehydrate sessions", "세션 복원", "스냅샷 복구", "스냅샷 복원".
+  Triggers on "resume sessions", "session resume", "session restore", "cmux resume", "restore from snapshot", "rehydrate sessions", "세션 복원", "스냅샷 복구", "스냅샷 복원".
 verified-against-runtime: true
 runtime-verified-at: 2026-05-28
 runtime-verified-note: "jq 1.x // empty + bash hostname (cmux 1.x snapshot schema: top-level .hostname) — silent-proceed on missing field / null / empty string; emits real value when present; matches against $(hostname). 4 synthetic + 1 real-snapshot cases probed."
@@ -42,7 +42,7 @@ It does NOT restore runtime state of previously running commands or sessions.
 - Restore a workspace layout from a `cmux-save-sessions` snapshot
 - Rehydrate yesterday's working set at the start of a new day
 - Move a session layout to another machine (snapshot → transfer → resume)
-- Triggers: "resume sessions", "session restore", "session resume", "cmux resume", "restore sessions"
+- Triggers: "resume sessions", "session restore", "session resume", "cmux resume"
 
 > **Not for crash recovery** — after a power loss, use `cmux-recover-sessions` (scans `.jsonl` files directly).
 
