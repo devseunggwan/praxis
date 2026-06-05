@@ -400,6 +400,8 @@ Both the checklist block and the dismissed_candidates block live in Stage 3 outp
 > **Scope:** Scan the most recent 50 turns, or back to the last session boundary.
 > Stop after identifying 5 distinct friction events — clustering (step 6) handles de-duplication.
 > If session history is not accessible, use the user's verbal summary as input to steps 3–8.
+>
+> **Compaction + readable transcript (MUST):** When a compaction summary is present in context AND the session transcript jsonl is also readable on disk, the friction pre-scan MUST full-enumerate the transcript — same mechanism as the `tool_census` / Stage 2.7 scan (last 50 turns or last session boundary) — counting is_error occurrences, user-turn interrupts, and retried commands. It MUST NOT default to the compaction summary's salient narrative. The "not accessible → verbal summary" fallback applies ONLY when the transcript is genuinely unreachable (jsonl absent or unreadable). Treating a compaction summary as "accessible history" that substitutes for the transcript is the meta-process trap this skill exists to prevent.
 
 3. **Refine friction events with agent outputs** — merge pre-scan events with tracer/analyst results:
    - Add any new friction events the agents identified that pre-scan missed
@@ -678,7 +680,7 @@ Finding template:
 **Distribution card field** — Stage 3 emits `- output_quality: N` where N counts findings whose `category[]` includes `output_quality`. Like `memory_hygiene`, this is a **category count**, not an action key; the underlying actions still fall under the 6 action-type slots.
 
 **Stage 2.7 failure modes:**
-- Transcript not accessible (e.g., session-resume after compaction) → Stage 2.7 emits `<!-- retrospect:audit_skipped: transcript unreadable -->` and skips
+- Transcript not accessible (jsonl absent or unreadable — NOT the same as a compaction summary being present in context; see Scope block above) → Stage 2.7 emits `<!-- retrospect:audit_skipped: transcript unreadable -->` and skips. When a compaction summary is present but the transcript is also readable on disk, Stage 2.7 MUST full-enumerate the transcript rather than defaulting to the summary's salient narrative.
 - `gh pr view` API failure for a specific PR → log per-PR error in Stage 3 report Audit Trail section; continue with remaining PRs
 - Hypothesis-marker regex import failure (hook file missing or unreadable) → fallback to a built-in minimal regex (`(might|could|potential|아마)`) AND log the fallback in the report
 
