@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.2.0] - 2026-06-05
+
+24 PRs since 6.1.3. Minor release. Headline changes: the single-process hook
+dispatch runner (ADR-0002) collapses the `(PreToolUse, Bash)` hook group into one
+process, and `block-pr-without-precommit-evidence` gains a `--body-file`
+path-not-found diagnostic. Plus retrospect / falsify-gate fixes and CI hardening.
+
+### Added
+
+- `block-pr-without-precommit-evidence` hook: a distinct `--body-file not found` diagnostic. When `--body-file` names a path absent on disk (a relative path resolves against the hook's own cwd, not the PR worktree) and no inline body is present, the hook now emits a path-not-found message advising an absolute path instead of the misleading generic token-missing block (#608, PR #624)
+
+### Changed
+
+- `hooks`: single-process dispatch runner (ADR-0002). The `(PreToolUse, Bash)` hook group now executes through one `hooks/_dispatch.sh` → `_dispatch.py` process instead of N separate wrapper invocations, cutting per-Bash-call fork overhead. Each dispatched hook's behavior is unchanged. ADR (#614), runner (#615), build wiring (#616), finalize (#619), orphaned dispatch-only wrapper removal (#618, PR #620)
+- `check-plugin-manifests` CI: two new invariants — opt-in wrapper byte-identity (Rule 6c) guarding `external-write-falsify-check.sh` against stale/missing drift (#605, PR #621), and docs/hook redirect-stub parity (Rule 14) requiring a byte-identical stub per hook dir and blocking orphans (#606, PR #622)
+- `hooks`: shared-`_lib` consolidation — option-text collection (#601) and git-argv parsing (#597) hoisted into `_lib` for cross-hook reuse
+- `skills`: `bypass-review` demoted from skill to CLI tool (no `SKILL.md`; not invocable as `/praxis:*`) (#583); in-body Triggers bullets retired in favor of frontmatter (#593); CLI script list single-sourced (#581)
+- `ci`: workflows consolidated and triggers deduped (#592); reviewdog inline static-review actions added (#588)
+
+### Fixed
+
+- `output-block-falsify-advisory` hook: the deny/ask messages now state the line-start (`startswith`) requirement, so a `Falsified:` placed mid-line no longer triggers the same opaque ×2 block (#598, PR #623)
+- `retrospect`: friction pre-scan now full-enumerates a readable transcript even when a compaction summary is present, rather than defaulting to the summary's salient narrative; the verbal-summary fallback is restricted to a genuinely unreachable transcript (#600, PR #625)
+- `block-rename-sweep-survivors` hook: the survivor-scan subprocess call now has a timeout (#609)
+- `hooks`: scope-confirm log routed to the host-neutral `praxis_home` state dir (#612)
+- `skills`: `restore-sessions` trigger deduped (#589); `cmux-resume` Iron Law corrected (#586)
+- `docs`: `codex-review-wrap` citations corrected (#610); the missing `[6.1.2]` changelog entry backfilled (#611)
+
+### Security
+
+- `ci`: credential persistence disabled in `actions/checkout`, so the `GITHUB_TOKEN` is no longer left in the runner git config after checkout (#596)
+
 ## [6.1.3] - 2026-06-04
 
 ### Added
