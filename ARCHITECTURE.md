@@ -149,6 +149,71 @@ else:
 | `merge-menu-review-options-advisory` | PreToolUse | Advisory (opt-in strict via `PRAXIS_MERGE_MENU_REVIEW_STRICT=1`) on `AskUserQuestion` when a merge-decision menu (an option label names a merge/squash action) offers no review/debate option — nudges the agent to re-author the menu with codex-review-wrap / code-reviewer / critic levers before the merge gate (issue #560) | [hooks/advisory-nudge/merge-menu-review-options-advisory/spec.md](hooks/advisory-nudge/merge-menu-review-options-advisory/spec.md) |
 | `bypass-telemetry` | PostToolUse(Bash) | Observe-only: log bypass-env usage (`CLAUDE_HOOK_BYPASS_*` / `PRAXIS_*BYPASS*`) to daily JSONL (`~/.praxis/telemetry/bypass-events-YYYY-MM-DD.jsonl`) — never blocks (issue #441 Phase 1; Phase 2 review CLI + Phase 3 HTTP deferred) | [hooks/postuse-correction/bypass-telemetry/spec.md](hooks/postuse-correction/bypass-telemetry/spec.md) |
 
+### Single-process dispatch (ADR-0002)
+
+Every `Bash` tool call fires the whole `PreToolUse(Bash)` hook group. Under the
+per-hook model each member is a `.sh` wrapper that `exec python3 .../impl.py`, so
+one `Bash` call cold-started ~33 python3 interpreters — ~99% of the latency is
+interpreter startup, not hook logic. ADR-0002 collapses that group into **one**
+python3 process.
+
+- **Declaration.** `hooks/manifest.json` carries a `dispatch_groups` array of
+  `{event, matcher}` pairs. Only `(PreToolUse, Bash)` is collapsed today: the
+  **33** hooks whose manifest `matcher` is exactly `Bash`. The two multi-tool
+  hooks that also fire on Bash — `memory-hint`
+  (`Bash|Edit|Write|NotebookEdit|AskUserQuestion`) and
+  `external-api-literal-trigger` (`Write|Edit|Bash`) — keep standalone wrappers,
+  because folding them into a Bash-only runner would drop their Edit/Write firing.
+- **Build path.** For each platform, `build-plugin-manifests.py`
+  (`filter_hooks_for_host`) emits, after host filtering, exactly **one** dispatcher
+  node per group — `${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh <event> <matcher>
+  <host>` — instead of one node per member. The platform `host_id` is baked into
+  the command so the runtime applies the same `hosts` filter. The node `timeout`
+  is the max of member timeouts (members run sequentially in one process, so the
+  budget matches the slowest member's per-process budget, not the sum).
+- **Runtime path.** `hooks/_lib/_dispatch.py` reads the payload from stdin once,
+  resolves the ordered member list for `(event, matcher)` from the manifest
+  (host-filtered to match the build), imports each member's `impl.py`
+  in-process — the `if __name__ == "__main__"` guard means importing does **not**
+  run `main()` — re-points `sys.stdin` at a fresh copy of the payload per member,
+  and runs each member's `main()` through the existing `_hook_runtime.fail_open`
+  decorator. Member `impl.py` files are unmodified; the dispatcher adapts around
+  them.
+- **Aggregation (most-restrictive wins).** Decisions are classified
+  role-agnostically by exit code / `permissionDecision` marker: any member
+  `deny` (exit 2 or `"permissionDecision": "deny"`) → propagate `deny`; else any
+  `ask` → propagate `ask`; else allow. Every member's stderr (advisory nudges and
+  deny reasons alike) is always forwarded. Role-agnostic detection is deliberate —
+  some `advisory-nudge` hooks emit `ask`/`deny` under strict modes, so a role-gated
+  split would silently drop their gate decisions.
+- **Fail-open** ([`ETHOS.md`](ETHOS.md)). Each member runs under `fail_open`, and
+  the dispatcher's own `main()` swallows exceptions to a `0` (allow), so a crash
+  in one `impl.py` cannot block the tool call or abort the other members —
+  restoring the isolation process separation gave for free. Import-time failures
+  are forwarded to stderr (visible, not silent) before failing open.
+- **Guard.** `scripts/check-plugin-manifests.py` Rule 13 ties the build and
+  runtime paths together: for every `dispatch_groups` pair, per platform, the
+  committed `hooks.json` must hold exactly one dispatcher node (no leaked member
+  node, no second node, correct host args), and `_dispatch.group_members` must
+  resolve the same member set the build collapsed, with every `impl.py` present
+  on disk. A future manifest or schema edit that breaks the collapse fails CI.
+
+**Measured latency** (`/usr/bin/time -p`, warm caches, no-op `ls -la` payload, 33
+members, claude host):
+
+| Path | Wall-clock |
+|------|-----------|
+| Single-process dispatcher (wired runtime path) | **~0.13s** |
+| Reconstructed per-process model (33 wrappers, spawned in parallel) | ~0.46s |
+
+The dispatcher's measured ~0.13s matches the ADR-0002 §1.2 prototype estimate.
+The per-process baseline above is the parallel wrapper-spawn cost on the same
+bench; the ADR §1.1 figure of 1.87s was measured inside a live, CPU-saturated
+Claude Code session (35 hooks) and reflects a harsher orchestration context.
+Either way, the cost-growth shape is what changed: each hook added to the group
+now costs one in-process `main()` call (~ms) instead of one more cold-started
+process on every `Bash` call.
+
 ## Multi-Platform Packaging
 
 Runtime source (`skills/`, `hooks/`, `scripts/`) is shared. Platform-specific
