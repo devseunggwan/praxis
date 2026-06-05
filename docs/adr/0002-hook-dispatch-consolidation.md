@@ -28,7 +28,7 @@ group, which fires on **every** `Bash` tool call.
 
 | Metric | Value |
 |--------|-------|
-| `PreToolUse(Bash)` hook entries | 35 (21 `preflight-gate` + 14 `advisory-nudge`) |
+| `PreToolUse(Bash)` hook entries | 35 fire on a `Bash` call: 33 exact-`Bash` (21 `preflight-gate` + 12 `advisory-nudge`) + 2 multi-tool matcher |
 | Per-hook wrapper body | `command -v python3 \|\| exit 0; exec python3 .../impl.py` |
 | 35 hooks, parallel wall-clock | **1.87s** (user 1.44 + sys 1.33 — CPU saturation) |
 | Hook *logic* for a no-op command (`ls -la`) | **2ms** across all 35 |
@@ -104,6 +104,20 @@ A new shared module that:
 Existing `impl.py` files are **not modified**: they keep reading stdin and
 returning an `int` exactly as today. The dispatcher adapts around them.
 
+### 2.1a Scope: exact-`Bash` matcher only
+
+The `PreToolUse(Bash)` group is the **33** hooks whose manifest `matcher` is
+exactly `Bash`. Two `advisory-nudge` hooks carry multi-tool matchers and are
+**not** in this group:
+
+- `memory-hint` (`Bash|Edit|Write|NotebookEdit|AskUserQuestion`)
+- `external-api-literal-trigger` (`Write|Edit|Bash`)
+
+Folding a multi-tool hook into a Bash-only runner would drop its
+Edit/Write/NotebookEdit firing, so both keep their standalone wrappers in this
+phase. Registering such a hook into each of its tool groups is a follow-up.
+Net: 35 hooks fire on a `Bash` call, **33 are consolidated**, 2 stay independent.
+
 ### 2.2 Decision aggregation (most-restrictive wins)
 
 Reproduces the current multi-process semantics:
@@ -115,9 +129,14 @@ Reproduces the current multi-process semantics:
 | else any `advisory-nudge` stderr/`additionalContext` | accumulate and emit as context, allow |
 | else | exit 0 (transparent pass-through) |
 
-`advisory-nudge` (14) can only ever contribute to the accumulate branch;
-`preflight-gate` (21) is the only role that can `deny`/`ask`. The `role` field
-already in `manifest.json` makes this split declarative.
+Aggregation is **role-agnostic**: the dispatcher classifies each member's result
+purely by exit code (`2`) or the `permissionDecision` marker on stdout, never by
+`role`. This is deliberate — some `advisory-nudge` hooks DO emit `ask`/`deny`
+(`destructive-bash-guard` calls `emit_decision("ask")` under
+`PRAXIS_DESTRUCTIVE_BASH_STRICT`; `output-block-falsify-advisory` emits both
+`ask` and `deny`), so a role-gated split would silently drop their gate
+decisions. `role` is used only for path/module naming, not for deny/ask
+eligibility.
 
 ### 2.3 Isolation: reuse `fail_open`
 
@@ -153,7 +172,7 @@ decision — eager import is already well under the per-process baseline.
 
 | Metric | Before | After |
 |--------|--------|-------|
-| python3 processes per `Bash` call (PreToolUse group) | 35 | 1 |
+| python3 processes per `Bash` call (PreToolUse group) | 35 | 1 (+2 multi-matcher standalone) |
 | `PreToolUse(Bash)` wall-clock (common command) | ~1.87s | ~0.13s |
 | Cost growth per added hook in the group | +1 cold-started process | +1 in-process `main()` call (~ms) |
 
