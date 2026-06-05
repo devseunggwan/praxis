@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/bash-worktree-existence-advisory.sh` intercepts `Bash` tool calls
+`hooks/advisory-nudge/bash-worktree-existence-advisory/impl.py` intercepts `Bash` tool calls
 containing a `cd <path>` command and emits a **stderr advisory** (never a
 block) when the target path does not exist on disk.
 

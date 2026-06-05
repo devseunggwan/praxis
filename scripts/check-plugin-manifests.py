@@ -15,7 +15,8 @@ Phase 2 (ADR-0001) invariants:
      the runtime contract — Claude Code reads the generated file).
   6. Generated runtime wrappers under hooks/*.sh are byte-identical to
      the generator output (Phase 2 strict diff replaces Phase 1's exec-
-     target parity check).
+     target parity check). Dispatch-only members carry NO wrapper and are
+     asserted absent from disk (Rule 6b, ADR-0002 Phase 4 / #618).
   7. INDEX.md ↔ manifest entry cross-check.
   8. Spec `Supported hosts:` ↔ manifest `hosts` cross-check.
   9. Version consistency across versioned artifacts.
@@ -255,10 +256,18 @@ def main() -> int:
 
     # ------------------------------------------------------------------
     # Rule 6 — runtime wrapper byte-identity
+    #
+    # ADR-0002 Phase 4 (#618): a member whose every registration is collapsed
+    # into a dispatch group has no wrapper (invoked via _dispatch.sh). Those
+    # filenames are excluded from the expected set AND asserted absent from disk
+    # below, so a re-emitted orphan wrapper fails CI.
     # ------------------------------------------------------------------
+    dispatch_only = _build.dispatch_only_wrappers(manifest)
     expected_wrappers: dict[str, str] = {}
     for entry in manifest["hooks"]:
         fname = _build._wrapper_filename(entry)
+        if fname in dispatch_only:
+            continue
         body = _build._wrapper_body(entry)
         if fname in expected_wrappers and expected_wrappers[fname] != body:
             drifts.append(
@@ -286,6 +295,16 @@ def main() -> int:
             drifts.append(
                 f"WRAPPER DRIFT hooks/{fname}: regenerate with "
                 "./scripts/build-plugin-manifests.py"
+            )
+
+    # Rule 6b — dispatch-only members must NOT carry a wrapper on disk. The
+    # dispatcher imports their impl.py directly; a lingering hooks/<name>.sh is
+    # dead weight and re-introduces the Approach-A drift #618 removed.
+    for fname in sorted(dispatch_only):
+        if (_build.HOOKS_DIR / fname).exists():
+            drifts.append(
+                f"ORPHAN WRAPPER hooks/{fname}: dispatch-only member must not "
+                "carry a wrapper — remove it (invoked via _dispatch.sh)"
             )
 
     # ------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/block-sciomc-finding-commit.sh` intercepts every Bash tool call and
+`hooks/preflight-gate/block-sciomc-finding-commit/impl.py` intercepts every Bash tool call and
 hard-blocks a content `git commit` issued after a sciomc / reviewer finding
 when no user-design consensus re-fetch happened in between.
 

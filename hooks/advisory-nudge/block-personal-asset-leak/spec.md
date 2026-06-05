@@ -3,9 +3,10 @@
 Supported hosts: all
 
 The hook implementation lives at
-`hooks/advisory-nudge/block-personal-asset-leak/impl.py`; the build generates
-the dispatcher `hooks/block-personal-asset-leak.sh` that the platform
-`hooks.json` invokes. It fires on PreToolUse(Bash), inspects the `gh` write
+`hooks/advisory-nudge/block-personal-asset-leak/impl.py`; it is a member of the
+`(PreToolUse, Bash)` dispatch group, so the build registers it under the shared
+`hooks/_dispatch.sh` dispatcher node in each platform `hooks.json` rather than
+emitting a per-hook wrapper. It fires on PreToolUse(Bash), inspects the `gh` write
 body, and emits a stderr advisory when the body contains an **absolute
 home-dotfiles path** (`/Users/<name>/.claude/...`, `/home/<name>/.config/...`).
 

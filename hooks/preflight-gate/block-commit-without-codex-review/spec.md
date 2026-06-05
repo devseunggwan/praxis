@@ -2,7 +2,7 @@
 
 Supported hosts: claude
 
-`hooks/block-commit-without-codex-review.sh` intercepts every Bash tool call and
+`hooks/preflight-gate/block-commit-without-codex-review/impl.py` intercepts every Bash tool call and
 hard-blocks a content `git commit` when `praxis:codex-review-wrap` has not been
 invoked anywhere in the current session.
 

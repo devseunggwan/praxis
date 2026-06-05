@@ -68,7 +68,7 @@ the *immediately preceding* turn.
 
 ### No escape hatch
 
-Unlike `side-effect-scan.sh` (`# side-effect:ack` marker), this hook
+Unlike `side-effect-scan` (`# side-effect:ack` marker), this hook
 intentionally has **no bypass**. False positives should be reported as a new
 issue, not papered over with a marker — the pattern this hook catches is the
 same pattern the marker would re-enable.

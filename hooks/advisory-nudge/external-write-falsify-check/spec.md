@@ -181,7 +181,7 @@ controls only the hypothesis-marker check (Check 1).
 ### Parsing guarantees
 
 Inherited from `_hook_utils.safe_tokenize` (same primitive as
-`side-effect-scan.sh` and `block-gh-state-all.sh`):
+`side-effect-scan` and `block-gh-state-all`):
 
 - Quoted strings, comments, and `echo` arguments do not match markers.
 - Env prefixes (`FOO=1 gh ...`), wrapper commands (`sudo`, `env`,

@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/jq-config-empty-dict-advisory.sh` watches Bash tool calls that invoke
+`hooks/advisory-nudge/jq-config-empty-dict-advisory/impl.py` watches Bash tool calls that invoke
 `jq` against known config file paths. When the target file is empty (size 0)
 or contains invalid JSON, it emits a stderr advisory — before `jq` silently
 returns `empty` or crashes downstream.

@@ -309,6 +309,48 @@ def _wrapper_body(entry: dict) -> str:
     return WRAPPER_PY_TEMPLATE.format(role=role, name=name, baked_args=baked_args)
 
 
+def _wrapper_registrations(manifest: dict) -> dict[str, list[tuple[str | None, str | None]]]:
+    """Map each wrapper filename to every (event, matcher) it serves.
+
+    A wrapper file is shared by all manifest entries with the same
+    (name, wrapper_suffix), so the registrations must be aggregated ACROSS those
+    entries. This is what makes the dispatch-only test correct for a multi-event
+    hook: one registered for both Bash and AskUserQuestion still needs its wrapper
+    for the (non-dispatched) AskUserQuestion leg, so it is NOT dispatch-only.
+    """
+    regs: dict[str, list[tuple[str | None, str | None]]] = {}
+    for entry in manifest["hooks"]:
+        fname = _wrapper_filename(entry)
+        entries = entry.get("entries") or [
+            {"event": entry.get("event"), "matcher": entry.get("matcher")}
+        ]
+        for e in entries:
+            regs.setdefault(fname, []).append((e.get("event"), e.get("matcher")))
+    return regs
+
+
+def dispatch_only_wrappers(manifest: dict) -> set[str]:
+    """Wrapper filenames whose every registration is collapsed into a dispatch
+    group (ADR-0002 Phase 4 / #618).
+
+    These members are invoked only through the single dispatcher
+    (`_dispatch.sh`), which imports each member's `impl.py` in-process — so the
+    per-member `hooks/<name>.sh` wrapper has no `hooks.json` node referencing it
+    and is dead weight. `emit_wrappers` skips them and
+    `check-plugin-manifests.py` (Rule 6) asserts they are absent from disk. A
+    hook with any non-dispatched registration keeps its wrapper (see
+    `_wrapper_registrations`).
+    """
+    dispatch = frozenset(
+        (g["event"], g.get("matcher")) for g in manifest.get("dispatch_groups", [])
+    )
+    return {
+        fname
+        for fname, regs in _wrapper_registrations(manifest).items()
+        if regs and all(r in dispatch for r in regs)
+    }
+
+
 def emit_wrappers(manifest: dict) -> list[str]:
     """Generate hooks/<name>{suffix}.sh wrappers from the manifest +
     the OPT_IN_HOOKS set.
@@ -318,9 +360,15 @@ def emit_wrappers(manifest: dict) -> list[str]:
     single wrapper file (e.g. strike-counter is registered for three
     events but only needs one wrapper).
     """
+    # ADR-0002 Phase 4 (#618): a member whose every registration is collapsed
+    # into a dispatch group is invoked only through _dispatch.sh, so its
+    # per-member wrapper is never referenced — skip it.
+    skip = dispatch_only_wrappers(manifest)
     emitted: dict[str, str] = {}
     for entry in manifest["hooks"]:
         fname = _wrapper_filename(entry)
+        if fname in skip:
+            continue
         body = _wrapper_body(entry)
         if fname in emitted:
             if emitted[fname] != body:
@@ -344,8 +392,9 @@ def emit_wrappers(manifest: dict) -> list[str]:
 
     # ADR-0002: the single dispatch-runner wrapper. Dispatch-group hooks.json
     # nodes exec this (with event/matcher/host args) instead of one wrapper per
-    # member. Member impl.py wrappers are still emitted (Approach A) so a hook
-    # registered for a non-dispatched event/matcher keeps its own entry point.
+    # member. Members registered ONLY in a dispatch group no longer get their own
+    # wrapper (skipped above, #618); a member also registered for a
+    # non-dispatched event/matcher keeps its wrapper for that leg.
     emitted[DISPATCH_WRAPPER_NAME] = WRAPPER_DISPATCH_TEMPLATE
 
     changed: list[str] = []

@@ -2,7 +2,7 @@
 
 Supported hosts: claude, codex
 
-`hooks/gh-label-verify.sh` intercepts every Bash tool call of the form
+`hooks/preflight-gate/gh-label-verify/impl.py` intercepts every Bash tool call of the form
 `gh (issue|pr) (create|edit)` and hard-blocks invocations whose `--label`
 / `-l` / `--add-label` values are not present in the target repository's
 label set. Probes `gh label list` with a per-repo TTL cache so the

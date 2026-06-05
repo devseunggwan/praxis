@@ -95,7 +95,7 @@ Add an entry to `~/.claude/settings.json` or `.claude/settings.json` under
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/external-write-path-existence-check.sh" }
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/advisory-nudge/external-write-path-existence-check/impl.py" }
         ]
       }
     ]
