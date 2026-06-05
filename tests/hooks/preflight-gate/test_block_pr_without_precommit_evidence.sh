@@ -234,6 +234,60 @@ run_case "body-file tee-overwritten in same command blocks" block Bash \
 rm -f "$TOCTOU_FILE"
 
 # ---------------------------------------------------------------------------
+# body-file path-not-found diagnostic (praxis #608)
+# ---------------------------------------------------------------------------
+
+# Capture stderr for a given command — mirrors _capture_stderr below but
+# is defined early so these cases can use it inline.
+_capture_stderr_for() {
+  python3 -c '
+import json, sys
+payload = json.dumps({
+    "tool_name": "Bash",
+    "tool_input": {"command": sys.argv[1]},
+})
+sys.stdout.write(payload)
+' "$1" | { python3 "$ROOT_DIR/hooks/preflight-gate/block-pr-without-precommit-evidence/impl.py" >/dev/null; } 2>&1 || true
+}
+
+# path-not-found → DISTINCT diagnostic (not generic token-missing message)
+_missing_path="/tmp/praxis-608-does-not-exist-$$.md"
+_pnf_err=$(_capture_stderr_for "gh pr create --title 'fix: x' --body-file $_missing_path")
+_pnf_rc=0
+# Must be a block (rc=2 handled by run_case above) — here we assert message content
+if printf '%s' "$_pnf_err" | grep -q "body-file not found"; then
+  echo "PASS [pnf-diagnostic] missing body-file emits path-not-found message"; ((PASS++))
+else
+  echo "FAIL [pnf-diagnostic] missing body-file did not emit path-not-found message (stderr: $_pnf_err)"; ((FAIL++))
+  FAILED_NAMES+=("pnf-diagnostic: path-not-found message absent")
+fi
+if printf '%s' "$_pnf_err" | grep -q "absolute path"; then
+  echo "PASS [pnf-diagnostic] path-not-found message advises absolute path"; ((PASS++))
+else
+  echo "FAIL [pnf-diagnostic] path-not-found message missing absolute-path advice (stderr: $_pnf_err)"; ((FAIL++))
+  FAILED_NAMES+=("pnf-diagnostic: absolute-path advice absent")
+fi
+# Must NOT emit the generic token-missing message
+if printf '%s' "$_pnf_err" | grep -q "without pre-commit evidence"; then
+  echo "FAIL [pnf-diagnostic] missing body-file leaked generic token-missing message"; ((FAIL++))
+  FAILED_NAMES+=("pnf-diagnostic: generic message leaked")
+else
+  echo "PASS [pnf-diagnostic] missing body-file does not emit generic token-missing message"; ((PASS++))
+fi
+
+# absolute path + token → PASS (no block, no stderr)
+_abs_body=$(mktemp)
+printf 'Pre-commit verified: ran ruff + tests\n' >"$_abs_body"
+_abs_err=$(_capture_stderr_for "gh pr create --title 'fix: x' --body-file $_abs_body")
+if [ -z "$_abs_err" ]; then
+  echo "PASS [pnf-regression] absolute body-file with token passes (no block)"; ((PASS++))
+else
+  echo "FAIL [pnf-regression] absolute body-file with token was blocked (stderr: $_abs_err)"; ((FAIL++))
+  FAILED_NAMES+=("pnf-regression: absolute body-file with token blocked")
+fi
+rm -f "$_abs_body"
+
+# ---------------------------------------------------------------------------
 # Cascade hint (mirror sibling)
 # ---------------------------------------------------------------------------
 

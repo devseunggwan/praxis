@@ -125,8 +125,18 @@ def _path_is_overwritten_in_raw(command: str, path: str) -> bool:
     return any(re.search(p, command) for p in patterns)
 
 
-def _get_effective_body(argv: list[str], hmap: dict[str, str], command: str) -> str:
+def _get_effective_body(
+    argv: list[str], hmap: dict[str, str], command: str
+) -> tuple[str, list[Path]]:
+    """Return (effective_body, missing_body_files).
+
+    missing_body_files is the list of resolved paths that were specified via
+    --body-file but could not be found on disk (and are not stdin or TOCTOU).
+    The caller uses this to emit a path-not-found diagnostic instead of the
+    generic token-missing message.
+    """
     parts: list[str] = []
+    missing: list[Path] = []
     for i, t in enumerate(argv):
         if t in ("--body", "-b") and i + 1 < len(argv):
             parts.append(_resolve_vars(argv[i + 1], hmap))
@@ -141,6 +151,8 @@ def _get_effective_body(argv: list[str], hmap: dict[str, str], command: str) -> 
             p = Path(path).expanduser()
             if p.is_file():
                 parts.append(_safe_read(p))
+            else:
+                missing.append(p)
         elif t.startswith("--body-file="):
             path = t.split("=", 1)[1]
             if path == "-":
@@ -150,7 +162,9 @@ def _get_effective_body(argv: list[str], hmap: dict[str, str], command: str) -> 
             p = Path(path).expanduser()
             if p.is_file():
                 parts.append(_safe_read(p))
-    return "\n".join(parts)
+            else:
+                missing.append(p)
+    return "\n".join(parts), missing
 
 
 def _has_precommit_marker(body: str) -> bool:
@@ -221,6 +235,19 @@ block-pr-without-caller-evidence). The --repo value IS the verification
 target, so bypass would defeat the purpose.
 """
 
+_BODY_FILE_NOT_FOUND_TMPL = """\
+❌ BLOCKED: --body-file not found at {path}
+
+The hook resolves relative paths against its own process cwd, not the PR
+worktree. Use an absolute path so the hook can read the file:
+
+  gh pr create --body-file /absolute/path/to/pr-body.md
+
+Or inline the body directly:
+
+  gh pr create --body "Pre-commit verified: ..."
+"""
+
 
 @fail_open
 def main() -> int:
@@ -249,9 +276,17 @@ def main() -> int:
             continue
         if _uses_template_without_body(argv):
             continue
-        body = _get_effective_body(argv, hmap, command)
+        body, missing_files = _get_effective_body(argv, hmap, command)
         if _has_precommit_marker(_strip_fenced_blocks(body)):
             continue
+        # Emit a distinct diagnostic when a body-file was specified but not
+        # found on disk (relative path resolved against hook cwd, not
+        # PR worktree). This surfaces the real cause instead of letting the
+        # author chase a missing token that was never reachable.
+        if missing_files and not body.strip():
+            msg = _BODY_FILE_NOT_FOUND_TMPL.format(path=missing_files[0].resolve())
+            sys.stderr.write(msg + compound_cascade_hint(command))
+            return 2
         sys.stderr.write(BLOCK_MSG + compound_cascade_hint(command))
         return 2
 

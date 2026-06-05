@@ -44,7 +44,7 @@ none of the three marker patterns below.
 | `--body` / `-b` value contains any marker | allow |
 | `--body-file <path>` content contains any marker | allow |
 | `--body-file -` (stdin) | block — pipe content is uninspectable at PreToolUse time |
-| `--body-file <path>` with path missing on disk | block — treat as empty body so the marker check fires |
+| `--body-file <path>` with path missing on disk | block — emits a **path-not-found diagnostic** (see below) instead of the generic token-missing message |
 | `--body-file <path>` where the same Bash command redirects to `path` (`> path`, `>> path`, `tee path`) | block — TOCTOU; the file on disk is about to be overwritten |
 | Marker present only inside a fenced code block | block — fenced blocks are stripped before matching |
 | `--repo` / `-R` present | **does NOT bypass** (differs from sibling `block-pr-without-caller-evidence`) |
@@ -79,6 +79,8 @@ stderr+exit-2 rather than the JSON `permissionDecision: "deny"` envelope
 — matches sibling `block-pr-without-caller-evidence` and is the simpler
 choice for unconditional gates with no `ask` / fallback mode.
 
+**Generic token-missing message** (body present but no evidence marker):
+
 ```
 ❌ BLOCKED: `gh pr create` without pre-commit evidence.
 
@@ -89,6 +91,29 @@ Add ONE of these lines to the PR body:
   Pre-commit: n/a (<reason>)
   ...
 ```
+
+**Path-not-found diagnostic** (praxis #608) — emitted when `--body-file` names a
+path that does not exist on disk (and is not stdin or a TOCTOU overwrite).
+The real cause is that the hook resolves relative paths against its own process
+cwd, not the PR worktree, so a relative path like `.omc/pr-123-body.md` that
+exists in the worktree is invisible to the hook:
+
+```
+❌ BLOCKED: --body-file not found at <resolved-path>
+
+The hook resolves relative paths against its own process cwd, not the PR
+worktree. Use an absolute path so the hook can read the file:
+
+  gh pr create --body-file /absolute/path/to/pr-body.md
+
+Or inline the body directly:
+
+  gh pr create --body "Pre-commit verified: ..."
+```
+
+This replaces the generic token-missing message when the body-file is absent
+and no inline body is provided, preventing the author from chasing a missing
+token that was never reachable.
 
 ### Compound cascade advisory
 
