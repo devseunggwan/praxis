@@ -34,14 +34,21 @@ run_case() {
 
 echo "test_check_dispatch_wrapper"
 
+# Fail fast if the wrapper is absent — otherwise the EXIT trap below would
+# write an empty backup back over $WRAPPER and corrupt it.
+if [ ! -f "$WRAPPER" ]; then
+  echo "FAIL  [wrapper_exists] expected=yes got=no"
+  exit 1
+fi
+
 # Preserve the wrapper and always restore it, even on early exit.
 BACKUP="$(mktemp)"
 cp "$WRAPPER" "$BACKUP"
 restore() { cp "$BACKUP" "$WRAPPER"; rm -f "$BACKUP"; }
 trap restore EXIT
 
-# 1. The wrapper exists and the baseline check is clean.
-run_case "wrapper_exists" "$([ -f "$WRAPPER" ] && echo yes || echo no)" "yes"
+# 1. The wrapper exists (guarded above) and the baseline check is clean.
+run_case "wrapper_exists" "yes" "yes"
 python3 "$CHECK" >/dev/null 2>&1
 run_case "baseline_check_clean" "$?" "0"
 
