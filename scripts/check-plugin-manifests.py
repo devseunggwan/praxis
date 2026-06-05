@@ -202,6 +202,11 @@ def main() -> int:
             continue
         expected_wrappers[fname] = body
 
+    # ADR-0002: the dispatch runner wrapper is emitted by emit_wrappers outside
+    # the manifest hook loop (it has no manifest entry), so add it here or a
+    # stale/missing hooks/_dispatch.sh slips through CI.
+    expected_wrappers[_build.DISPATCH_WRAPPER_NAME] = _build.WRAPPER_DISPATCH_TEMPLATE
+
     for fname, expected_body in expected_wrappers.items():
         wrapper_path = _build.HOOKS_DIR / fname
         if not wrapper_path.exists():
