@@ -98,6 +98,11 @@ def main() -> int:
     base = _build.load_base()
     manifest = _build.load_manifest()
     hooks_source = _build.expand_to_hooks_json(manifest)
+    # ADR-0002: must mirror build-plugin-manifests.main() so the expected
+    # hooks.json collapses dispatch groups identically to the committed output.
+    dispatch_groups = frozenset(
+        (g["event"], g.get("matcher")) for g in manifest.get("dispatch_groups", [])
+    )
     drifts: list[str] = []
 
     # ------------------------------------------------------------------
@@ -110,7 +115,9 @@ def main() -> int:
             out_path = REPO_ROOT / output["path"]
             expected = (
                 json.dumps(
-                    _build.render_output(base, output, hooks_source, host_id),
+                    _build.render_output(
+                        base, output, hooks_source, host_id, dispatch_groups
+                    ),
                     indent=2,
                     ensure_ascii=False,
                 )
