@@ -250,9 +250,19 @@ def filter_hooks_for_host(
         for group in event_groups:
             matcher = group.get("matcher")
             if (event_name, matcher) in dispatch_groups:
+                group_has_kept_member = any(
+                    hook.get("hosts") is None or host_id in hook.get("hosts", [])
+                    for hook in group.get("hooks", [])
+                )
                 # Emit the single dispatcher node at the first fragment that has
-                # at least one host-kept member; drop every other fragment.
-                if matcher not in dispatch_timeout or matcher in emitted_dispatch:
+                # at least one host-kept member; drop every other fragment. The
+                # group_has_kept_member guard keeps the node in the right slot
+                # when an earlier fragment is entirely host-filtered out.
+                if (
+                    matcher not in dispatch_timeout
+                    or matcher in emitted_dispatch
+                    or not group_has_kept_member
+                ):
                     continue
                 emitted_dispatch.add(matcher)
                 node = _dispatcher_node(
