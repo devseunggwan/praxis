@@ -16,7 +16,9 @@ Phase 2 (ADR-0001) invariants:
   6. Generated runtime wrappers under hooks/*.sh are byte-identical to
      the generator output (Phase 2 strict diff replaces Phase 1's exec-
      target parity check). Dispatch-only members carry NO wrapper and are
-     asserted absent from disk (Rule 6b, ADR-0002 Phase 4 / #618).
+     asserted absent from disk (Rule 6b, ADR-0002 Phase 4 / #618). Opt-in
+     wrappers (OPT_IN_HOOKS, not in the manifest) are byte-identity checked
+     too (Rule 6c, #605).
   7. INDEX.md ↔ manifest entry cross-check.
   8. Spec `Supported hosts:` ↔ manifest `hosts` cross-check.
   9. Version consistency across versioned artifacts.
@@ -281,6 +283,20 @@ def main() -> int:
     # the manifest hook loop (it has no manifest entry), so add it here or a
     # stale/missing hooks/_dispatch.sh slips through CI.
     expected_wrappers[_build.DISPATCH_WRAPPER_NAME] = _build.WRAPPER_DISPATCH_TEMPLATE
+
+    # Rule 6c — opt-in hooks (#605): not in the manifest, but emit_wrappers still
+    # generates hooks/<name>.sh for their documented invocation path
+    # (OPT_IN_HOOKS). Mirror that emit so the existence + byte-identity loop below
+    # covers the opt-in wrapper class too — otherwise a stale/missing opt-in
+    # wrapper slips through CI (Rule 6 derived expected_wrappers only from manifest
+    # entries). A manifest entry of the same name wins (matches emit_wrappers).
+    for opt_in_name, opt_in_role in _build.OPT_IN_HOOKS.items():
+        fname = f"{opt_in_name}.sh"
+        if fname in expected_wrappers:
+            continue
+        expected_wrappers[fname] = _build.WRAPPER_PY_TEMPLATE.format(
+            role=opt_in_role, name=opt_in_name, baked_args=""
+        )
 
     for fname, expected_body in expected_wrappers.items():
         wrapper_path = _build.HOOKS_DIR / fname
