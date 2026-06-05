@@ -129,9 +129,14 @@ Reproduces the current multi-process semantics:
 | else any `advisory-nudge` stderr/`additionalContext` | accumulate and emit as context, allow |
 | else | exit 0 (transparent pass-through) |
 
-`advisory-nudge` (12 in this group) can only ever contribute to the accumulate
-branch; `preflight-gate` (21) is the only role that can `deny`/`ask`. The `role`
-field already in `manifest.json` makes this split declarative.
+Aggregation is **role-agnostic**: the dispatcher classifies each member's result
+purely by exit code (`2`) or the `permissionDecision` marker on stdout, never by
+`role`. This is deliberate — some `advisory-nudge` hooks DO emit `ask`/`deny`
+(`destructive-bash-guard` calls `emit_decision("ask")` under
+`PRAXIS_DESTRUCTIVE_BASH_STRICT`; `output-block-falsify-advisory` emits both
+`ask` and `deny`), so a role-gated split would silently drop their gate
+decisions. `role` is used only for path/module naming, not for deny/ask
+eligibility.
 
 ### 2.3 Isolation: reuse `fail_open`
 
