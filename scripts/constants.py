@@ -36,6 +36,16 @@ OPT_IN_HOOKS: dict[str, str] = {
 }
 
 
+# docs/hook/*.md files that are real, hand-written documentation — NOT the
+# 1-line "Moved to …/spec.md" redirect stubs that build emits per hook dir
+# (ADR-0001 §337-338, #606). The stub-parity rule (check Rule 14) skips these
+# in its reverse direction so a genuine shared-format doc is not flagged as an
+# orphan stub. `INDEX.md` is excluded structurally (it is the index itself).
+NON_HOOK_DOCS: frozenset[str] = frozenset({
+    "block-message-format",
+})
+
+
 # Frozen skill surface (issue #465). Adding or removing a skill directory
 # under skills/ requires updating this set in the same commit. Prevents
 # silent skill proliferation; every intentional surface change is paired

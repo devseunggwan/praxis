@@ -34,6 +34,9 @@ Phase 2 (ADR-0001) invariants:
      its own node, no second dispatcher node), and the runtime resolver
      `_dispatch.group_members` resolves the same member set the build
      collapsed (ADR-0002, #617 — ties build path and runtime path together).
+  14. docs/hook/<name>.md redirect-stub parity (#606): every hook dir owns a
+      byte-identical 1-line stub, and no orphan stub survives (INDEX.md and the
+      hand-written NON_HOOK_DOCS allowlist excepted).
 
 CI invokes this; developers can too, via `./scripts/check-plugin-manifests.py`.
 """
@@ -625,6 +628,42 @@ def main() -> int:
                     expected,
                     _build.DISPATCH_WRAPPER_NAME,
                 )
+            )
+
+    # ------------------------------------------------------------------
+    # Rule 14 — docs/hook stub parity (#606)
+    #
+    # Every hook dir (manifest entries + OPT_IN_HOOKS) owns a 1-line
+    # docs/hook/<name>.md redirect stub (ADR-0001 §337-338), byte-identical to
+    # the generator output. The reverse direction catches an orphan stub — a
+    # docs/hook/*.md with no backing hook dir — except INDEX.md and the
+    # hand-written NON_HOOK_DOCS allowlist.
+    # ------------------------------------------------------------------
+    expected_stubs = {
+        name: _build.doc_stub_body(role, name)
+        for name, role in _build.hook_identities(manifest).items()
+    }
+    for name, expected_body in sorted(expected_stubs.items()):
+        stub_path = _build.DOCS_HOOK_DIR / f"{name}.md"
+        if not stub_path.exists():
+            drifts.append(
+                f"STUB MISSING docs/hook/{name}.md: run "
+                "./scripts/build-plugin-manifests.py"
+            )
+            continue
+        if stub_path.read_text() != expected_body:
+            drifts.append(
+                f"STUB DRIFT docs/hook/{name}.md: regenerate with "
+                "./scripts/build-plugin-manifests.py"
+            )
+    for stub_path in sorted(_build.DOCS_HOOK_DIR.glob("*.md")):
+        stem = stub_path.stem
+        if stem == "INDEX" or stem in _build.NON_HOOK_DOCS:
+            continue
+        if stem not in expected_stubs:
+            drifts.append(
+                f"ORPHAN STUB docs/hook/{stem}.md: no backing hook dir — "
+                "remove it, or add to NON_HOOK_DOCS if it is a real doc"
             )
 
     if drifts:
