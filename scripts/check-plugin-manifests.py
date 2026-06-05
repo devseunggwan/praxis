@@ -26,6 +26,11 @@ Phase 2 (ADR-0001) invariants:
   12. AGENTS.md "## Skills (N)" count and per-skill backtick tokens, and
      README.md per-skill backtick tokens, all match EXPECTED_SKILLS
      (issue #498 — doc drift invariant).
+  13. Each manifest `dispatch_groups` (event, matcher) collapses to exactly
+     one dispatcher node per platform hooks.json (no member silently left as
+     its own node, no second dispatcher node), and the runtime resolver
+     `_dispatch.group_members` resolves the same member set the build
+     collapsed (ADR-0002, #617 — ties build path and runtime path together).
 
 CI invokes this; developers can too, via `./scripts/check-plugin-manifests.py`.
 """
@@ -48,7 +53,68 @@ assert _spec and _spec.loader
 _build = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_build)
 
+# ADR-0002 (#617): the runtime dispatch resolver. Rule 13 cross-checks that the
+# build collapse (filter_hooks_for_host → committed hooks.json) and the runtime
+# resolution (group_members) agree on each dispatch group's members.
+_disp_spec = importlib.util.spec_from_file_location(
+    "praxis_dispatch", REPO_ROOT / "hooks" / "_lib" / "_dispatch.py"
+)
+assert _disp_spec and _disp_spec.loader
+_dispatch = importlib.util.module_from_spec(_disp_spec)
+_disp_spec.loader.exec_module(_dispatch)
+
 from constants import EXPECTED_SKILLS, OPT_IN_HOOKS, VALID_ROLES  # noqa: E402
+
+
+def dispatch_node_drifts(
+    hooks_json: dict,
+    event: str,
+    matcher: str | None,
+    host_id: str,
+    expected_members: set[str],
+    dispatch_wrapper_name: str,
+) -> list[str]:
+    """Drift strings for one (event, matcher) group's node shape in a hooks.json.
+
+    Pure function (no I/O) so the node-shape half of Rule 13 is unit-testable in
+    isolation from the runtime resolver. `expected_members` is the host-kept
+    member set: non-empty → the group must hold exactly ONE node and it must be
+    the dispatcher wrapper carrying `event matcher host_id` args; empty (the host
+    filtered every member) → the group must be absent (zero nodes).
+    """
+    groups = [
+        g
+        for g in hooks_json.get("hooks", {}).get(event, [])
+        if g.get("matcher") == matcher
+    ]
+    nodes = [n for g in groups for n in g.get("hooks", [])]
+    dispatch_nodes = [
+        n for n in nodes if dispatch_wrapper_name in n.get("command", "")
+    ]
+    member_nodes = [
+        n for n in nodes if dispatch_wrapper_name not in n.get("command", "")
+    ]
+    out: list[str] = []
+    want = 1 if expected_members else 0
+    if len(dispatch_nodes) != want:
+        out.append(
+            f"DISPATCH NODE COUNT {event}/{matcher} host={host_id}: expected "
+            f"{want} dispatcher node(s), found {len(dispatch_nodes)}"
+        )
+    if member_nodes:
+        out.append(
+            f"DISPATCH MEMBER LEAK {event}/{matcher} host={host_id}: "
+            f"{len(member_nodes)} non-dispatcher node(s) in a collapsed group: "
+            f"{[n.get('command', '') for n in member_nodes]}"
+        )
+    for n in dispatch_nodes:
+        cmd = n.get("command", "")
+        if f"{event} {matcher} {host_id}" not in cmd:
+            out.append(
+                f"DISPATCH ARGS {event}/{matcher} host={host_id}: dispatcher "
+                f"command {cmd!r} missing '{event} {matcher} {host_id}' args"
+            )
+    return out
 
 
 def _skill_dirs() -> list[Path]:
@@ -435,6 +501,96 @@ def main() -> int:
             "EXPECTED_SKILLS but not found as a first-column `backtick` token in a "
             "table row — add them to the skill table"
         )
+
+    # ------------------------------------------------------------------
+    # Rule 13 — dispatch-group ↔ build/runtime consistency (ADR-0002, #617)
+    #
+    # Each (event, matcher) in manifest.dispatch_groups is collapsed by the
+    # build (filter_hooks_for_host) into ONE dispatcher node, and resolved at
+    # runtime by _dispatch.group_members. Those are two independent readers of
+    # the manifest; this rule ties them — and the committed hooks.json artifact —
+    # together so a future manifest/schema edit cannot silently break the
+    # collapse (drop a member, leave a stray per-member node, emit two dispatcher
+    # nodes, or bake the wrong host into the dispatcher command). For every
+    # platform that emits a hooks.json, per host:
+    #   (a) the (event, matcher) group holds exactly ONE node and it is the
+    #       dispatcher wrapper carrying `event matcher host` args when ≥1 member
+    #       survives the host filter; ZERO nodes when the host filters all
+    #       members — verified by dispatch_node_drifts() above;
+    #   (b) group_members(event, matcher, host) equals the manifest-derived
+    #       member set for that host, with no duplicates, and every resolved
+    #       impl.py exists on disk.
+    # ------------------------------------------------------------------
+    def _manifest_members_for(event: str, matcher: str | None, host: str) -> set[str]:
+        names: set[str] = set()
+        for hook in manifest["hooks"]:
+            hosts = hook.get("hosts")
+            if hosts is not None and host not in hosts:
+                continue
+            entries = hook.get("entries") or [
+                {"event": hook.get("event"), "matcher": hook.get("matcher")}
+            ]
+            if any(
+                e.get("event") == event and e.get("matcher") == matcher
+                for e in entries
+            ):
+                names.add(hook["name"])
+        return names
+
+    hooks_outputs: list[tuple[str, Path]] = []
+    for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
+        platform = json.loads(platform_file.read_text())
+        host_id = platform.get("host_id", platform["platform"])
+        for output in platform["outputs"]:
+            if output["kind"] == "hooks":
+                hooks_outputs.append((host_id, REPO_ROOT / output["path"]))
+
+    for event, matcher in sorted(dispatch_groups, key=lambda em: (em[0], em[1] or "")):
+        for host_id, hooks_path in hooks_outputs:
+            expected = _manifest_members_for(event, matcher, host_id)
+
+            # (b) runtime resolution must match the manifest, with no dup, and
+            #     every resolved impl on disk.
+            resolved = _dispatch.group_members(event, matcher, host_id)
+            resolved_names = [name for _role, name, _impl in resolved]
+            if len(resolved_names) != len(set(resolved_names)):
+                drifts.append(
+                    f"DISPATCH DUP {event}/{matcher} host={host_id}: "
+                    f"group_members resolves a hook more than once "
+                    f"({sorted(resolved_names)})"
+                )
+            if set(resolved_names) != expected:
+                drifts.append(
+                    f"DISPATCH MEMBER DRIFT {event}/{matcher} host={host_id}: "
+                    f"group_members={sorted(set(resolved_names))} != "
+                    f"manifest={sorted(expected)}"
+                )
+            for _role, name, impl in resolved:
+                if not impl.exists():
+                    drifts.append(
+                        f"DISPATCH IMPL MISSING {event}/{matcher} host={host_id}: "
+                        f"{name} -> {impl} does not exist on disk"
+                    )
+
+            # (a) committed hooks.json node shape — exactly one dispatcher node,
+            #     no leaked member node, correct host args.
+            if not hooks_path.exists():
+                drifts.append(
+                    f"DISPATCH HOOKS MISSING {hooks_path}: cannot verify "
+                    f"{event}/{matcher} collapse"
+                )
+                continue
+            hooks_json = json.loads(hooks_path.read_text())
+            drifts.extend(
+                dispatch_node_drifts(
+                    hooks_json,
+                    event,
+                    matcher,
+                    host_id,
+                    expected,
+                    _build.DISPATCH_WRAPPER_NAME,
+                )
+            )
 
     if drifts:
         print("plugin-manifest check FAILED:")
