@@ -61,10 +61,19 @@ PLATFORMS_DIR = MANIFESTS_DIR / "platforms"
 ADAPTER_SHELL = REPO_ROOT / "plugins" / "praxis"
 FORWARDED_DIRS = ("skills", "hooks", "scripts")
 HOOKS_DIR = REPO_ROOT / "hooks"
+DOCS_HOOK_DIR = REPO_ROOT / "docs" / "hook"
 
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
-from constants import OPT_IN_HOOKS  # noqa: E402
+from constants import NON_HOOK_DOCS, OPT_IN_HOOKS  # noqa: E402
 MANIFEST_PATH = HOOKS_DIR / "manifest.json"
+
+# docs/hook/<name>.md is a 1-line redirect stub to the role-based spec
+# (ADR-0001 §337-338): the flat docs/hook/ URLs must keep resolving for one
+# release cycle after the per-role migration. Generated per hook dir, #606.
+DOC_STUB_TEMPLATE = (
+    "> Moved to [hooks/{role}/{name}/spec.md]"
+    "(../../hooks/{role}/{name}/spec.md)\n"
+)
 
 
 # Wrapper body templates — ADR-0001 §2.3.
@@ -415,6 +424,52 @@ def emit_wrappers(manifest: dict) -> list[str]:
     return changed
 
 
+def hook_identities(manifest: dict) -> dict[str, str]:
+    """Map hook name -> role for every hook that owns a directory: manifest
+    entries (deduped by name across multi-event registrations) plus the
+    OPT_IN_HOOKS set (not in the manifest, but a real hook dir). The single
+    source of truth for the per-hook docs/hook stubs (#606) and their
+    byte-identity check (check Rule 14).
+    """
+    ids: dict[str, str] = {}
+    for entry in manifest["hooks"]:
+        ids[entry["name"]] = entry["role"]
+    for name, role in OPT_IN_HOOKS.items():
+        ids.setdefault(name, role)
+    collisions = set(ids) & NON_HOOK_DOCS
+    if collisions:
+        raise SystemExit(
+            "manifest inconsistency: hook name(s) collide with NON_HOOK_DOCS "
+            f"(a hand-written doc would be shadowed by a stub): {sorted(collisions)}"
+        )
+    return ids
+
+
+def doc_stub_body(role: str, name: str) -> str:
+    """The canonical 1-line redirect stub body for docs/hook/<name>.md."""
+    return DOC_STUB_TEMPLATE.format(role=role, name=name)
+
+
+def emit_doc_stubs(manifest: dict) -> list[str]:
+    """Generate docs/hook/<name>.md 1-line redirect stubs, one per hook dir
+    (ADR-0001 §337-338, #606). Idempotent: only files whose body differs are
+    rewritten. Hand-written docs (NON_HOOK_DOCS, e.g. block-message-format.md)
+    are never touched — they are not hook identities.
+
+    Returns relative paths that were created or rewritten.
+    """
+    changed: list[str] = []
+    DOCS_HOOK_DIR.mkdir(parents=True, exist_ok=True)
+    for name, role in sorted(hook_identities(manifest).items()):
+        out_path = DOCS_HOOK_DIR / f"{name}.md"
+        body = doc_stub_body(role, name)
+        existing = out_path.read_text() if out_path.exists() else None
+        if existing != body:
+            out_path.write_text(body)
+            changed.append(str(out_path.relative_to(REPO_ROOT)))
+    return changed
+
+
 # ---------------------------------------------------------------------------
 # Plugin / marketplace / gemini-extension renderers (unchanged)
 # ---------------------------------------------------------------------------
@@ -556,6 +611,9 @@ def main() -> int:
     # Phase 2: runtime wrappers generated from manifest. These replace the
     # 35 hand-maintained source wrappers deleted in Phase 2 commit 2.
     changed_paths.extend(emit_wrappers(manifest))
+
+    # docs/hook/<name>.md redirect stubs, one per hook dir (ADR-0001 §337-338, #606).
+    changed_paths.extend(emit_doc_stubs(manifest))
 
     if changed_paths:
         print("wrote:")
