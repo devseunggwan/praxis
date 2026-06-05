@@ -2,14 +2,14 @@
 
 Supported hosts: all
 
-`hooks/cli-flag-incompat-advisory.sh` is the **advisory** counterpart to the
-deny-mode `gh-flag-verify.sh`. It nudges `<cli> <subcmd> --help` before known
+`hooks/advisory-nudge/cli-flag-incompat-advisory/impl.py` is the **advisory** counterpart to the
+deny-mode `gh-flag-verify`. It nudges `<cli> <subcmd> --help` before known
 mode-incompatible flag combinations land on external CLIs whose surface area
 is too large or too version-fluid to safely hard-block.
 
 ### Why this exists
 
-`gh-flag-verify.sh` blocks unknown flags on a maintained `gh` COMPAT table.
+`gh-flag-verify` blocks unknown flags on a maintained `gh` COMPAT table.
 The same friction recurs on other CLIs (`git`, `kubectl`), but:
 
 - their subcommand surface is larger

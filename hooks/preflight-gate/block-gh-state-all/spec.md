@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/block-gh-state-all.sh` intercepts every Bash tool call and hard-blocks
+`hooks/preflight-gate/block-gh-state-all/impl.py` intercepts every Bash tool call and hard-blocks
 the invalid flag combination `gh search <subcmd> ... --state all`.
 
 ### Why this exists

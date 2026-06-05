@@ -1,7 +1,7 @@
 #!/bin/bash
 # tests/test_cross_boundary_preflight.sh
 #
-# Coverage for hooks/cross-boundary-preflight.sh
+# Coverage for hooks/preflight-gate/cross-boundary-preflight/impl.py
 #
 # Three outcomes:
 #   ask   — stdout contains permissionDecision "ask", exit 0
@@ -14,7 +14,7 @@
 set +e
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-HOOK="$REPO_ROOT/hooks/cross-boundary-preflight.sh"
+HOOK="$REPO_ROOT/hooks/preflight-gate/cross-boundary-preflight/impl.py"
 
 if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook not executable: $HOOK" >&2

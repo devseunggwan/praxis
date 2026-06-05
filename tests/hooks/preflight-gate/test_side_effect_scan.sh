@@ -1,7 +1,7 @@
 #!/bin/bash
 # tests/test_side_effect_scan.sh — PreToolUse(Bash) hook coverage
 #
-# Invokes hooks/side-effect-scan.sh with synthesized hook payloads and asserts
+# Invokes the side-effect-scan impl.py with synthesized hook payloads and asserts
 # the hook's decision: "ask" (reason emitted) or "pass" (no output, exit 0).
 #
 # Run:  ./tests/test_side_effect_scan.sh
@@ -10,7 +10,7 @@
 set +e
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-HOOK="$REPO_ROOT/hooks/side-effect-scan.sh"
+HOOK="$REPO_ROOT/hooks/preflight-gate/side-effect-scan/impl.py"
 
 if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook not executable: $HOOK" >&2

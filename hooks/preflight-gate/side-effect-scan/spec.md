@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/side-effect-scan.sh` intercepts every Bash tool call and flags commands
+`hooks/preflight-gate/side-effect-scan/impl.py` intercepts every Bash tool call and flags commands
 with collateral side effects before the agent runs them. Goal: prevent the
 "primary-effect only" blind spot that has caused unintended merges, unintended
 prod deploys, and stray auto-commits from CLIs that write to git internally.

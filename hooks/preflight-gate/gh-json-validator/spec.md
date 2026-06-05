@@ -2,7 +2,7 @@
 
 Supported hosts: claude, codex
 
-`hooks/gh-json-validator.sh` intercepts every Bash tool call of the form
+`hooks/preflight-gate/gh-json-validator/impl.py` intercepts every Bash tool call of the form
 `gh <subcommand> ... --json <fields>` and hard-blocks invocations whose
 requested field names are not present in the subcommand's valid JSON
 projection. The valid field set is probed at runtime via

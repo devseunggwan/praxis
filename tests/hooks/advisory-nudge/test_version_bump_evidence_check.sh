@@ -13,8 +13,7 @@
 set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-HOOK="$SCRIPT_DIR/../../../hooks/version-bump-evidence-check.sh"
-PY_HOOK="$SCRIPT_DIR/../../../hooks/advisory-nudge/version-bump-evidence-check/impl.py"
+HOOK="$SCRIPT_DIR/../../../hooks/advisory-nudge/version-bump-evidence-check/impl.py"
 
 if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook not executable: $HOOK" >&2

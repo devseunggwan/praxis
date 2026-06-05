@@ -11,9 +11,9 @@ Intercepts two patterns:
    in the same command segment. Hard-blocks (exit 2) and suggests --body-file.
 
 Related hooks that cover adjacent scenarios:
-  block-gh-state-all.sh            → gh search --state all
+  block-gh-state-all               → gh search --state all
   block-pr-without-caller-evidence → gh pr create without Caller chain verified:
-  pre-merge-approval-gate.sh       → gh pr merge without per-PR approval
+  pre-merge-approval-gate          → gh pr merge without per-PR approval
 
 Role-aware tokenization (issue #263): subcommand detection and --repo
 value extraction use the typed `Token` API from `_hook_utils`. Heredoc

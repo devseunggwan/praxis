@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/block-gh-issue-create-without-dup-search.sh` intercepts every Bash
+`hooks/preflight-gate/block-gh-issue-create-without-dup-search/impl.py` intercepts every Bash
 tool call and hard-blocks `gh issue create` when no prior duplicate search
 happened in the same session.
 

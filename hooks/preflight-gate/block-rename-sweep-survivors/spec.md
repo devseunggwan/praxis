@@ -2,7 +2,7 @@
 
 Supported hosts: claude
 
-`hooks/block-rename-sweep-survivors.sh` intercepts every Bash tool call and
+`hooks/preflight-gate/block-rename-sweep-survivors/impl.py` intercepts every Bash tool call and
 hard-blocks a content `git commit` when the staged diff contains a rename sweep
 (≥3 identical 1:1 identifier substitutions) and the old token still exists
 in the tracked tree.
