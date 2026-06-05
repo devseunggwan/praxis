@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `block-sciomc-finding-commit` hook: the finding-marker scan now parses the transcript **role-aware** (JSONL per-entry) instead of grepping the raw tail as text. The marker corpus is restricted to assistant message `text` blocks and `Agent`/`Task` subagent tool-results; markers inside user turns, system-reminder blocks, or `Read`/`Skill` tool-results that merely *load* a SKILL.md documenting the token schema no longer self-trip the gate. The consensus-refetch check still scans the full ordered stream after the finding, so a `gh pr view … --json body` recorded as an assistant Bash tool_use still satisfies the gate (#573, PR #575)
 - `retrospect`: Stage 1.5 hygiene cursor now guards against multi-session lost-update. A new **Cursor write mandate** re-reads the on-disk `.omc/state/retrospect-hygiene-cursor.json` before persisting and, when a sibling session advanced the cursor since this session's entry read, union-merges the `note` carry-forward + scan trail + batch pointer instead of plain-overwriting. Previously two interleaved `/retrospect` runs clobbered each other's findings — the second session's Write silently dropped the first session's carry-forward, breaking the Stage 1.5 carry-forward guarantee under concurrency (#568)
 
+## [6.1.2] - 2026-06-02
+
+2 PRs since 6.1.1. Fix-only release — no new hooks or skills.
+
+### Fixed
+- `retrospect`: Stage 1.5 hygiene cursor now guards against multi-session lost-update. A new **Cursor write mandate** re-reads the on-disk `.omc/state/retrospect-hygiene-cursor.json` before persisting and, when a sibling session advanced the cursor since this session's entry read, union-merges the `note` carry-forward + scan trail + batch pointer instead of plain-overwriting. Previously two interleaved `/retrospect` runs clobbered each other's findings — the second session's Write silently dropped the first session's carry-forward, breaking the Stage 1.5 carry-forward guarantee under concurrency (#568, PR #569)
+- `commit-title-format-check` hook: `release:` prefix now whitelisted for `gh pr create` titles only. The dev→prod release PR convention `release: Production Deploy (YYYY-MM-DD)` was blocked because `release` is not a Conventional Commits type and the pattern enforces a lowercase description. The whitelist is scoped to `gh pr create` — `git commit -m "release: ..."` and `gh issue create --title "release: ..."` still block (Conventional Commits enforced) (#570, PR #571)
+
 ## [6.1.1] - 2026-06-02
 
 ### Added
