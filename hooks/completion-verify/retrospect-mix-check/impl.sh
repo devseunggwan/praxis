@@ -295,8 +295,8 @@ if [ "${#SHORT_ROW_VIOLATIONS[@]}" -gt 0 ]; then
 fi
 
 if [ "$should_block" = "true" ]; then
-  mkdir -p ~/.claude/scope-confirm
-  echo "$(date -Iseconds) session=$SESSION_ID blocked_retrospect_mix_check" >> ~/.claude/scope-confirm/retrospect-mix-blocked.log
+  mkdir -p "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm" || true
+  echo "$(date -Iseconds) session=$SESSION_ID blocked_retrospect_mix_check" >> "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm/retrospect-mix-blocked.log" || true
 
   # Build reason string with ' | ' separator.
   reason=""

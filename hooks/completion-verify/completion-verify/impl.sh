@@ -113,8 +113,8 @@ else
 fi
 
 if [ -n "$block_reason" ]; then
-  mkdir -p ~/.claude/scope-confirm
-  echo "$(date -Iseconds) session=$SESSION_ID blocked_completion_without_evidence" >> ~/.claude/scope-confirm/stop-triggered.log
+  mkdir -p "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm" || true
+  echo "$(date -Iseconds) session=$SESSION_ID blocked_completion_without_evidence" >> "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm/stop-triggered.log" || true
 
   REASON="Completion claim detected without same-turn verification evidence. ${block_reason} See AGENTS.md Verification section."
   jq -n --arg r "$REASON" '{decision: "block", reason: $r}'
