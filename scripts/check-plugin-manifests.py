@@ -98,6 +98,11 @@ def main() -> int:
     base = _build.load_base()
     manifest = _build.load_manifest()
     hooks_source = _build.expand_to_hooks_json(manifest)
+    # ADR-0002: must mirror build-plugin-manifests.main() so the expected
+    # hooks.json collapses dispatch groups identically to the committed output.
+    dispatch_groups = frozenset(
+        (g["event"], g.get("matcher")) for g in manifest.get("dispatch_groups", [])
+    )
     drifts: list[str] = []
 
     # ------------------------------------------------------------------
@@ -110,7 +115,9 @@ def main() -> int:
             out_path = REPO_ROOT / output["path"]
             expected = (
                 json.dumps(
-                    _build.render_output(base, output, hooks_source, host_id),
+                    _build.render_output(
+                        base, output, hooks_source, host_id, dispatch_groups
+                    ),
                     indent=2,
                     ensure_ascii=False,
                 )
@@ -194,6 +201,11 @@ def main() -> int:
             )
             continue
         expected_wrappers[fname] = body
+
+    # ADR-0002: the dispatch runner wrapper is emitted by emit_wrappers outside
+    # the manifest hook loop (it has no manifest entry), so add it here or a
+    # stale/missing hooks/_dispatch.sh slips through CI.
+    expected_wrappers[_build.DISPATCH_WRAPPER_NAME] = _build.WRAPPER_DISPATCH_TEMPLATE
 
     for fname, expected_body in expected_wrappers.items():
         wrapper_path = _build.HOOKS_DIR / fname
