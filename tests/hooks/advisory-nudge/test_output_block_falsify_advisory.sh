@@ -523,6 +523,29 @@ run_case "T2→T1 multi-question: Q1 anchoring, Q2 literal (Recommended) → den
   "$(make_ask_payload_t2_then_t1)"
 
 # ---------------------------------------------------------------------------
+# Line-start hint cases — issue #598
+# ---------------------------------------------------------------------------
+
+# T1: (Recommended) label + Falsified: appears MID-LINE (not at column 0)
+# → hook must still block (deny) AND the message must contain the line-start hint.
+# Needle uses the ASCII word "startswith" which appears literally in the JSON output
+# (Korean is Unicode-escaped by json.dumps, so Korean needle won't match in shell).
+run_case "T1: Falsified: mid-line does not satisfy startswith check — still deny + hint" \
+  "deny:startswith" \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B"]' \
+      "이 선택이 A가 B의 선행. Falsified: checked prior PRs — none exist. 계속?")"
+
+# T2: confidence-anchoring label + Falsified: appears MID-LINE
+# → hook must still block (ask) AND the message must contain the line-start hint.
+run_case "T2: Falsified: mid-line does not satisfy startswith check — still ask + hint" \
+  "ask:startswith" \
+  "$(make_ask_payload_with_descriptions \
+      '["S1 only", "S1+S2"]' \
+      '["가장 안전한 1회 변경", "Faster"]' \
+      "단계별로 진행. Falsified: no duplicate PR found. 어떻게 할까요?")"
+
+# ---------------------------------------------------------------------------
 # @fail_open structural assertion
 # ---------------------------------------------------------------------------
 

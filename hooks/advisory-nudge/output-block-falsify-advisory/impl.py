@@ -71,7 +71,9 @@ ADVISORY_MSG = (
 ASK_MSG = (
     "(Recommended) 라벨이 있으나 question body 에 "
     "'Falsified: <disconfirming test 결과>' 가 없음. "
-    "CLAUDE.md Self-Falsify Before Recommendation Lock 룰. 추가 후 재시도."
+    "CLAUDE.md Self-Falsify Before Recommendation Lock 룰. 추가 후 재시도. "
+    "'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — "
+    "질문문 중간/불릿/코드펜스 내부 배치는 미검출."
 )
 
 ANCHORING_ASK_MSG = (
@@ -79,7 +81,9 @@ ANCHORING_ASK_MSG = (
     "natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/"
     "당연히/분명히/추천/기본값) 이 있으나 question body 에 "
     "'Falsified: <disconfirming test 결과>' 가 없음. "
-    "CLAUDE.md Output-Block-Level Falsification Gate. 추가 후 재시도."
+    "CLAUDE.md Output-Block-Level Falsification Gate. 추가 후 재시도. "
+    "'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — "
+    "질문문 중간/불릿/코드펜스 내부 배치는 미검출."
 )
 
 # ---------------------------------------------------------------------------
