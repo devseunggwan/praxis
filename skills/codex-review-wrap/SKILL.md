@@ -445,7 +445,7 @@ Probe: <command> → <one-line output>
 Examples:
 
 ```
-Probe: grep -n PRAXIS_ASK_END_STRICT hooks/block-ask-end-option.py → line 397: "PRAXIS_ASK_END_STRICT" found
+Probe: grep -n PRAXIS_ASK_END_STRICT hooks/preflight-gate/block-ask-end-option/impl.py → 452: strict_env = os.environ.get("PRAXIS_ASK_END_STRICT", "")
 Probe: grep -rn "col_b" schemas/my_table.sql → (no output — col_b absent)
 Probe: grep -n "def run_query" src/client.py → (no output — symbol not defined)
 ```
@@ -461,9 +461,9 @@ the critic must **retract** the claim before surfacing the finding:
 
 ```
 Retracted: original claim "PRAXIS_ASK_END_STRICT is fabricated"
-Probe: grep -n PRAXIS_ASK_END_STRICT hooks/block-ask-end-option.py →
-  28: if os.environ.get("PRAXIS_ASK_END_STRICT")
-  397: PRAXIS_ASK_END_STRICT is checked here
+Probe: grep -n PRAXIS_ASK_END_STRICT hooks/preflight-gate/block-ask-end-option/impl.py →
+  28: Deprecated: PRAXIS_ASK_END_STRICT=1 is still respected when explicitly set
+  452: strict_env = os.environ.get("PRAXIS_ASK_END_STRICT", "")
 Finding: PRAXIS_ASK_END_STRICT exists — claim withdrawn.
 ```
 
@@ -500,11 +500,11 @@ Critic finding that was surfaced without a probe:
 
 Required probe citation (missing in round-1):
 ```
-Probe: grep -n PRAXIS_ASK_END_STRICT hooks/block-ask-end-option.py → 397: PRAXIS_ASK_END_STRICT
+Probe: grep -n PRAXIS_ASK_END_STRICT hooks/preflight-gate/block-ask-end-option/impl.py → 452: strict_env = os.environ.get("PRAXIS_ASK_END_STRICT", "")
 ```
 
 The probe would have immediately falsified the claim (the variable appears
-at line 397 and 5 other lines). Because the probe was skipped, the round-2
+at lines 28, 30, 31, 417, 451, 452, 457). Because the probe was skipped, the round-2
 fix agent had to discover and correct the critic's error inline — a
 preventable extra round-trip.
 
@@ -534,7 +534,7 @@ Required inline citation format:
   Probe: <command> → <one-line output>
 
 Example:
-  Probe: grep -n PRAXIS_ASK_END_STRICT hooks/block-ask-end-option.py → line 397 found
+  Probe: grep -n PRAXIS_ASK_END_STRICT hooks/preflight-gate/block-ask-end-option/impl.py → 452: strict_env = os.environ.get("PRAXIS_ASK_END_STRICT", "")
 
 "I already read this file earlier" is NOT a valid substitute — re-run
 the probe at the negative-claim emit point. If the probe disproves the
@@ -623,9 +623,9 @@ N=${PRAXIS_DIMINISHING_RETURNS_N:-4}
 In Python hook contexts, the equivalent is
 `int(os.environ.get("PRAXIS_DIMINISHING_RETURNS_N", "4"))` (consistent with
 the `os.environ.get("PRAXIS_EXTERNAL_WRITE_STRICT")` pattern at
-`hooks/external-write-falsify-check.py:579` and the
+`hooks/advisory-nudge/external-write-falsify-check/impl.py:578` and the
 `os.environ.get("PRAXIS_AUTHOR_EXEMPT_STRICT")` pattern at
-`hooks/external-write-falsify-check.py:592`).
+`hooks/advisory-nudge/external-write-falsify-check/impl.py:591`).
 
 **Mid-session change semantics**: the env var is read fresh at each round's
 counter-update step; it is not cached at session start. If
@@ -874,13 +874,13 @@ user selects: 1
     it does not exist in hooks/*.py"
   → gate fires: negative-claim form "does not exist" detected
   → critic required to run probe before surfacing:
-    Probe: grep -n PRAXIS_ASK_END_STRICT hooks/block-ask-end-option.py →
-      28: if os.environ.get("PRAXIS_ASK_END_STRICT")
-      397: PRAXIS_ASK_END_STRICT checked
+    Probe: grep -n PRAXIS_ASK_END_STRICT hooks/preflight-gate/block-ask-end-option/impl.py →
+      28: Deprecated: PRAXIS_ASK_END_STRICT=1 is still respected when explicitly set
+      452: strict_env = os.environ.get("PRAXIS_ASK_END_STRICT", "")
   → probe disproves claim → critic must retract:
     Retracted: "PRAXIS_ASK_END_STRICT is fabricated"
-    Probe: grep -n PRAXIS_ASK_END_STRICT hooks/block-ask-end-option.py →
-      line 28, 30, 31, 363, 396, 397 found
+    Probe: grep -n PRAXIS_ASK_END_STRICT hooks/preflight-gate/block-ask-end-option/impl.py →
+      line 28, 30, 31, 417, 451, 452, 457 found
     Finding: variable exists — claim withdrawn.
 
 [Step 5g — critic pre-lock probe check, F1 scenario]

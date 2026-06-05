@@ -182,7 +182,7 @@ assert_present \
 
 assert_present \
   "worked example F2: probe command shown" \
-  "grep -n PRAXIS_ASK_END_STRICT hooks/block-ask-end-option.py"
+  "grep -n PRAXIS_ASK_END_STRICT hooks/preflight-gate/block-ask-end-option/impl.py"
 
 # ---------------------------------------------------------------------------
 # 8. Worked example F1 (git boolean-flag fix) is present
