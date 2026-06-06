@@ -219,6 +219,26 @@ The next VERSION bump moves those entries under the new version header. Use
 [Keep a Changelog](https://keepachangelog.com/) categories: Added, Changed,
 Fixed, Removed.
 
+## Releasing
+
+Releases are automated by `.github/workflows/release.yml`. To cut one:
+
+1. In your version-bump PR, set `VERSION` and move the `## [Unreleased]`
+   entries under a new `## [X.Y.Z] - YYYY-MM-DD` header in `CHANGELOG.md`.
+2. After it merges to `main`, tag the merge commit and push the tag:
+
+   ```bash
+   git tag vX.Y.Z && git push origin vX.Y.Z
+   ```
+
+3. The `release` workflow builds the body from that CHANGELOG section (via
+   `scripts/extract-changelog-section.sh`) plus a fixed Install/Update footer
+   and publishes the GitHub Release.
+
+To (re)generate a single release by hand, run the workflow via
+`workflow_dispatch` with the tag (e.g. `v6.2.0`). Re-running edits the
+existing release instead of duplicating it.
+
 ## Testing
 
 ```bash

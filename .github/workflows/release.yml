@@ -1,0 +1,82 @@
+name: release
+
+# Publishes a GitHub Release whenever a vX.Y.Z tag is pushed. The release body
+# is the matching CHANGELOG.md section (via scripts/extract-changelog-section.sh)
+# plus a fixed Install/Update footer, so the release notes always track the
+# changelog. workflow_dispatch lets a maintainer (re)generate one release by
+# tag — re-running is idempotent (an existing release is edited, not duplicated).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to (re)generate the release for, e.g. v6.2.0"
+        required: true
+
+# Least-privilege default (mirrors ci.yml / codeql.yml); the release job
+# widens to contents: write at the job level.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # gh release create/edit writes to the Releases API.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Full history so the tagged commit's CHANGELOG is available, and so a
+          # workflow_dispatch run on main can read the section for any version.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve tag
+        id: tag
+        # Bind the dispatch input through env rather than inlining it into the
+        # shell — the established hardening pattern for user-supplied values.
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${TAG_INPUT}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release notes
+        id: notes
+        run: |
+          tag="${{ steps.tag.outputs.tag }}"
+          version="${tag#v}"
+          notes="$(mktemp)"
+          # ANSI-C quoting keeps the ``` code fence literal (single quotes would
+          # make shellcheck read the backticks as a command substitution).
+          footer=$'\n---\n\n### Install / Update\n\n```\n/plugin marketplace add https://github.com/devseunggwan/praxis\n/plugin install praxis\n```\n'
+          {
+            ./scripts/extract-changelog-section.sh "$version"
+            printf '%s' "$footer"
+          } > "$notes"
+          echo "file=${notes}" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.tag.outputs.tag }}"
+          notes="${{ steps.notes.outputs.file }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag exists — updating notes"
+            gh release edit "$tag" --notes-file "$notes"
+          else
+            echo "creating release $tag"
+            gh release create "$tag" --title "$tag" --notes-file "$notes" --verify-tag
+          fi
