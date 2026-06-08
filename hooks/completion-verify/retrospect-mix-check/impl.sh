@@ -11,6 +11,14 @@
 #     Schema B — 1-2 lines matching '^not-others: .+$' (dimension-tag form;
 #       issue #285). No mixing of Schema A and B lines.
 #
+# Gate-7 (Transcript-Enumeration Receipt, issue #600 follow-up): session-level
+#   structural check. When the transcript contains a compaction-summary marker
+#   ("isCompactSummary":true), the Stage 3 report MUST carry a
+#   'retrospect:transcript_receipt' fence (or the '..._skipped' variant). Its
+#   absence blocks — it is the structural enforcement of SKILL.md Stage 2's
+#   "Compaction + readable transcript (MUST)" prose, which recurred as a
+#   salient-window default even after shipping (rule exists != retrieval).
+#
 # Trigger: last assistant message contains a line starting with '## Retrospect
 #   Report' AND the distribution-card fence '<!-- retrospect:distribution
 #   begin -->' / 'end' AND the most-recent '## Retrospect Report' block does
@@ -233,6 +241,25 @@ while IFS= read -r row; do
   fi
 done <<< "$TABLE_LINES"
 
+# Gate-7 (Transcript-Enumeration Receipt). Session-level structural check (not a
+# per-finding Stage 2.5 gate like Gate-1..6). When the session transcript
+# contains a compaction-summary marker, the Stage 3 report MUST carry a
+# 'retrospect:transcript_receipt' fence — the friction pre-scan's
+# full-transcript enumeration evidence (is_error / user-turn / interrupt counts
+# from real commands). Its absence means the pre-scan likely defaulted to the
+# compaction summary's salient narrative instead of enumerating the transcript
+# (skills/retrospect/SKILL.md Stage 2 "Compaction + readable transcript MUST").
+# The skipped variant ('retrospect:transcript_receipt_skipped') matches the same
+# substring and satisfies the structural check; SKILL.md governs when that
+# variant is legitimate. The compaction grep scans the WHOLE file (not the tail)
+# because the marker can sit far back in a long post-compaction session.
+GATE7_VIOLATION=""
+if grep -Eq '"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCRIPT_PATH" 2>/dev/null; then
+  if ! printf '%s\n' "$MOST_RECENT_BLOCK" | grep -qF 'retrospect:transcript_receipt'; then
+    GATE7_VIOLATION="post-compaction session but the Stage 3 report has no '<!-- retrospect:transcript_receipt begin/end -->' fence — run the full-transcript friction scan and paste the REAL command output (is_error / user-turn / interrupt counts) in the receipt fence before Stage 3"
+  fi
+fi
+
 # Decide block.
 should_block=false
 reason_parts=()
@@ -293,6 +320,10 @@ if [ "${#SHORT_ROW_VIOLATIONS[@]}" -gt 0 ]; then
     reason_parts+=("Schema: $v")
   done
 fi
+if [ -n "$GATE7_VIOLATION" ]; then
+  should_block=true
+  reason_parts+=("Gate-7: $GATE7_VIOLATION")
+fi
 
 if [ "$should_block" = "true" ]; then
   mkdir -p "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm" || true
@@ -308,7 +339,7 @@ if [ "$should_block" = "true" ]; then
     fi
   done
 
-  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to Stage 2.5 and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to Stage 2 step 8 and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to Stage 2.5 Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card. See skills/retrospect/SKILL.md."
+  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to Stage 2.5 and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to Stage 2 step 8 and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to Stage 2.5 Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable). See skills/retrospect/SKILL.md."
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'
   exit 0
 fi

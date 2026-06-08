@@ -886,6 +886,56 @@ T_DEF3_G1_ROW="| 1 | tool | cli | gh flag missing | tool defect | gap | No | mem
 run_case "T-DEF3_block_gate1_verdict_fail_trailing_space" "block" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T_DEF3_G1_CARD" "$T_DEF3_G1_ROW")")"
 
+# Gate-7 (Transcript-Enumeration Receipt) cases — issue #600 follow-up --------
+# A compaction-summary record in the transcript ('"isCompactSummary":true')
+# requires the Stage 3 report to carry a 'retrospect:transcript_receipt' fence,
+# else Gate-7 blocks. These transcripts have TWO JSONL lines: the compaction
+# marker (a user-role record, filtered out of LAST_TEXT) + the assistant report.
+
+# Emit one compaction-summary JSONL record (role=user so it never shadows the
+# assistant message the hook extracts for the report block).
+mk_compaction() {
+  jq -nc '{
+    type: "user",
+    isCompactSummary: true,
+    uuid: "compact-test-uuid",
+    message: {role: "user", content: [{type: "text", text: "(compacted summary)"}]}
+  }'
+}
+
+# Receipt fence (real-output form) and the unreachable-skip variant.
+G_RECEIPT_FENCE='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0
+<!-- retrospect:transcript_receipt end -->'
+G_RECEIPT_SKIPPED='<!-- retrospect:transcript_receipt_skipped: transcript unreachable -->'
+
+# G1: block — post-compaction transcript, Stage 3 report WITHOUT a receipt.
+# The card itself is valid (Gates 1-6 pass); only Gate-7 fires.
+G1_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")"
+run_case "G1_block_postcompaction_no_receipt" "block" "$G1_TRANSCRIPT"
+
+# G2: pass — post-compaction transcript, report WITH the receipt fence.
+G2_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_FENCE}"
+G2_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$G2_REPORT")"
+run_case "G2_pass_postcompaction_with_receipt" "pass" "$G2_TRANSCRIPT"
+
+# G3: pass — NO compaction marker, report WITHOUT a receipt. Gate-7 is dormant
+# (regression: the gate must not fire on non-post-compaction sessions).
+run_case "G3_pass_no_compaction_no_receipt_required" "pass" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")"
+
+# G4: pass — post-compaction, report carries the skipped-variant line. The
+# 'retrospect:transcript_receipt' substring matches '..._skipped', satisfying
+# the structural check (SKILL.md governs when the skip variant is legitimate).
+G4_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_SKIPPED}"
+G4_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$G4_REPORT")"
+run_case "G4_pass_postcompaction_receipt_skipped_variant" "pass" "$G4_TRANSCRIPT"
+
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
 #   {expected_decision: "pass"|"block", must_contain: [...], must_not_contain: [...]}
