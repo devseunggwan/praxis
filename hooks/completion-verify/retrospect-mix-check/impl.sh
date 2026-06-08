@@ -253,8 +253,15 @@ done <<< "$TABLE_LINES"
 # substring and satisfies the structural check; SKILL.md governs when that
 # variant is legitimate. The compaction grep scans the WHOLE file (not the tail)
 # because the marker can sit far back in a long post-compaction session.
+# The (^|[^\\]) prefix excludes JSON-escaped textual mentions
+# (\"isCompactSummary\":true inside a message body) so a session that merely
+# DISCUSSES the marker does not false-trigger — only a real top-level field,
+# whose quote is preceded by { or , (never a backslash), matches. grep (not jq)
+# is deliberate: the transcript is appended live and a Stop hook may run
+# mid-write, where jq aborts on a partially-written final line but grep tolerates
+# it. [PR #639] hardened from a bare pattern after a CodeRabbit false-trigger flag.
 GATE7_VIOLATION=""
-if grep -Eq '"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCRIPT_PATH" 2>/dev/null; then
+if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCRIPT_PATH" 2>/dev/null; then
   if ! printf '%s\n' "$MOST_RECENT_BLOCK" | grep -qF 'retrospect:transcript_receipt'; then
     GATE7_VIOLATION="post-compaction session but the Stage 3 report has no '<!-- retrospect:transcript_receipt begin/end -->' fence — run the full-transcript friction scan and paste the REAL command output (is_error / user-turn / interrupt counts) in the receipt fence before Stage 3"
   fi

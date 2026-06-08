@@ -936,6 +936,17 @@ G4_TRANSCRIPT="$(mk_compaction)
 $(mk_assistant "$G4_REPORT")"
 run_case "G4_pass_postcompaction_receipt_skipped_variant" "pass" "$G4_TRANSCRIPT"
 
+# G5: pass — the ONLY occurrence of the marker is a TEXTUAL mention inside a
+# message body. mk_assistant JSON-escapes it to \"isCompactSummary\":true on disk,
+# so the compaction grep's (^|[^\\]) prefix excludes it: Gate-7 stays dormant and
+# the receipt-less report passes. Regression for the false-trigger CodeRabbit
+# flagged on PR #639 — a retrospect session that merely DISCUSSES compaction (this
+# very file does) must not be forced to carry a receipt.
+G5_MENTION='this session discusses the "isCompactSummary":true compaction marker in prose'
+G5_TRANSCRIPT="$(mk_assistant "$G5_MENTION")
+$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")"
+run_case "G5_pass_textual_mention_not_false_triggered" "pass" "$G5_TRANSCRIPT"
+
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
 #   {expected_decision: "pass"|"block", must_contain: [...], must_not_contain: [...]}
