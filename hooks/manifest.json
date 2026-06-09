@@ -477,6 +477,12 @@
       "timeout": 10
     },
     {
+      "name": "readonly-verify-deferral-gate",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10
+    },
+    {
       "name": "merge-state-claim-gate",
       "role": "completion-verify",
       "event": "Stop",
