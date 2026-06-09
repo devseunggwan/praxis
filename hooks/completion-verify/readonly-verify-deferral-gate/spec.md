@@ -7,7 +7,7 @@ an advisory to stderr when the last assistant turn **offers** to run a
 read-only verification ("should I check ...?", "진행할까요?") instead of just
 running it and pasting the result.
 
-### Why this exists
+## Why this exists
 
 A read-only command (a `SELECT`, a `kubectl get`, a `--dry-run`, a `git status`)
 carries no mutation risk. CLAUDE.md states that read-only calls auto-proceed and
@@ -29,12 +29,12 @@ Both live under the `completion-verify` role and fire independently on the same
 
 References: issue [#641](https://github.com/devseunggwan/praxis/issues/641).
 
-### What is detected
+## What is detected
 
 A three-signal AND gate over the last assistant turn's text, plus an
 already-ran suppressor:
 
-```
+```text
 (read-only intent ∧ deferral phrasing ∧ ¬already-ran cue  within ONE sentence)  ∧  ¬mutation carve-out
 ```
 
@@ -47,7 +47,7 @@ the *next* step ("`SELECT …` returned 1024. Should I proceed?") splits them
 across sentences — those do not warn. The mutation carve-out, by contrast, is
 turn-global: a mutation anywhere in the turn suppresses the whole turn.
 
-#### Signal A — read-only verification intent
+### Signal A — read-only verification intent
 
 Built-in, **project-agnostic** patterns (case-insensitive):
 
@@ -73,7 +73,7 @@ the hook — this keeps the hook reusable across repos.
 export PRAXIS_READONLY_VERIFY_SIGNALS='\bmycli\s+inspect\b|\bmycli\s+show\b'
 ```
 
-#### Signal B — deferral phrasing
+### Signal B — deferral phrasing
 
 The phrasing that turns "I ran the read" into "do you want me to run it?".
 
@@ -85,7 +85,7 @@ The phrasing that turns "I ran the read" into "do you want me to run it?".
 `실행할까요`, `검토할까요`, `살펴볼까요`, `원하시면`, `필요하시면`, `알려주세요`,
 `말씀해 주세요`, …
 
-#### Mutation carve-out — suppress when asking is legitimate
+### Mutation carve-out — suppress when asking is legitimate
 
 When the deferred action is (or is mixed with) a **mutation**, asking first is
 correct and no advisory fires. Over-matching here only costs missed read-only
@@ -99,7 +99,7 @@ warns, which this gate prefers over false-warning a real approval gate.
   — uppercase-only so prose ("update the doc", "post a comment") does not trip it.
 - KO markers: `머지`, `배포`, `삭제`, `제거`, `전송`, `발송`, `푸시`, `커밋`, …
 
-#### Already-ran suppressor — past-tense run cue in the offer sentence
+### Already-ran suppressor — past-tense run cue in the offer sentence
 
 If the offer sentence *also* carries a past-tense run cue (EN: `ran`, `executed`,
 `checked`, `fetched`, `queried`, `pulled`, `looked up`; KO: `실행했`, `확인했`,
@@ -115,17 +115,17 @@ the assistant runs read A, then in the final message offers a different read B
 still warn; the offer sentence for B carries no past-run cue, so it does
 (issue #641 codex review, P2).
 
-### Response
+## Response
 
 Advisory text to **stderr only**; no JSON on stdout.
 
-```
+```text
 [praxis:readonly-verify-deferral-gate] a read-only verification was OFFERED instead of run: the last turn names a read-only command (SELECT…FROM, kubectl get/describe/logs, git status, --dry-run, …) and defers it to the user ('should I check?', '진행할까요?').
 [praxis:readonly-verify-deferral-gate] Rule: CLAUDE.md 'Read-only calls auto-proceed' — a read carries no mutation risk, so just run it and paste the result. Do NOT hand it back as an option. Deferral is reserved for mutations (write/push/merge/delete/send/deploy).
 [praxis:readonly-verify-deferral-gate] If the deferred action is actually a mutation, name it explicitly so the carve-out recognises it. Bypass: PRAXIS_READONLY_VERIFY_BYPASS=1; strict (exit 2): PRAXIS_READONLY_VERIFY_STRICT=1.
 ```
 
-### Tiers / env vars
+## Tiers / env vars
 
 | Env var | Effect |
 |---------|--------|
@@ -137,7 +137,7 @@ Advisory text to **stderr only**; no JSON on stdout.
 Exit-2-on-Stop semantics match the sibling `merge-state-claim-gate`: Claude Code
 treats a Stop hook exit 2 as "block the stop and show stderr to the model".
 
-### KNOWN LIMITATION — output-scan proxy
+## KNOWN LIMITATION — output-scan proxy
 
 This hook polices the **articulation** of a deferral, not the behaviour. It is a
 nudge, not a guarantee, and it has three structural blind spots:
@@ -152,10 +152,10 @@ nudge, not a guarantee, and it has three structural blind spots:
 It also has a residual **false-positive** direction (the same-sentence rule
 removes the common cases but not all):
 
-4. **Same-sentence false pair** — a read command and an unrelated deferral that
+1. **Same-sentence false pair** — a read command and an unrelated deferral that
    happen to land in the *same* sentence still pair (e.g. "should I, after
    `git status`, redesign this?"). Rare, but possible.
-5. **`--dry-run` of a mutation** — `--dry-run` is treated as a read signal, so
+2. **`--dry-run` of a mutation** — `--dry-run` is treated as a read signal, so
    offering a dry-run *preview of a deletion/apply* ("want me to `--dry-run` the
    deletion?") warns even though previewing a mutation is a reasonable thing to
    ask. A dry-run carries no actual mutation risk, so running it is fine — but
@@ -166,7 +166,7 @@ cannot see, and a residual false-positive surface remains, the hook is
 intentionally advisory by default. Promote to STRICT only in a context where the
 operator accepts these blind spots.
 
-### Parsing guarantees
+## Parsing guarantees
 
 | Condition | Behavior |
 |-----------|----------|
@@ -180,7 +180,7 @@ operator accepts these blind spots.
 
 Stdlib only (`json`, `os`, `re`, `sys`, `pathlib`); no external dependencies.
 
-### Tests
+## Tests
 
 ```bash
 python3 -m pytest tests/hooks/completion-verify/test_readonly_verify_deferral_gate.py -v
