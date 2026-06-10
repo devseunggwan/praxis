@@ -77,7 +77,7 @@ def main() -> int:
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError, OSError):
-        return 0  # PATH B (malformed input): fail-open, no output
+        return 0  # Early exit (malformed input): fail-open, no output
 
     # Claude Code uses snake_case "tool_name"; camelCase fallback for forward-compat
     tool_name = payload.get("tool_name") or payload.get("toolName") or ""
