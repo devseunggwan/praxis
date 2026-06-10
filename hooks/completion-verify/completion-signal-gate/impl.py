@@ -44,6 +44,12 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
+    extract_last_assistant_text,
+    get_current_turn,
+    has_tool_in_turn,
+    load_transcript,
+)
 
 # ---------------------------------------------------------------------------
 # Prefix
@@ -281,86 +287,6 @@ def _detect_foreign_slash_commands(text: str, cwd_plugin: str | None) -> list[st
 
 
 # ---------------------------------------------------------------------------
-# Transcript parsing
-# ---------------------------------------------------------------------------
-
-
-def _load_transcript(path: str) -> list[dict]:
-    """Load JSONL transcript, return list of event dicts. Fail-open."""
-    events: list[dict] = []
-    try:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                    if isinstance(obj, dict):
-                        events.append(obj)
-                except Exception:
-                    continue
-    except Exception:
-        pass
-    return events
-
-
-def _get_current_turn(events: list[dict]) -> list[dict]:
-    """Return events since the last real user input (non-tool-result user message)."""
-    last_user_idx: int | None = None
-    for i, ev in enumerate(events):
-        msg = ev.get("message", {})
-        if msg.get("role") != "user":
-            continue
-        if ev.get("isSidechain"):
-            continue
-        content = msg.get("content", [])
-        if isinstance(content, str):
-            last_user_idx = i
-        elif isinstance(content, list):
-            non_tool = [b for b in content if b.get("type") != "tool_result"]
-            if non_tool:
-                last_user_idx = i
-    if last_user_idx is None:
-        start = 0
-    else:
-        start = last_user_idx + 1
-    return events[start:]
-
-
-def _extract_last_assistant_text(turn: list[dict]) -> str:
-    """Extract text from the last assistant message in the turn."""
-    last_asst = None
-    for ev in turn:
-        msg = ev.get("message", {})
-        if msg.get("role") == "assistant" and not ev.get("isSidechain"):
-            last_asst = ev
-    if last_asst is None:
-        return ""
-    content = last_asst.get("message", {}).get("content", [])
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = [b.get("text", "") for b in content if b.get("type") == "text"]
-        return "\n".join(parts)
-    return ""
-
-
-def _has_tool_in_turn(turn: list[dict], tool_name: str) -> bool:
-    """True if any assistant message in the turn used the named tool."""
-    for ev in turn:
-        msg = ev.get("message", {})
-        if msg.get("role") != "assistant" or ev.get("isSidechain"):
-            continue
-        content = msg.get("content", [])
-        if isinstance(content, list):
-            for block in content:
-                if block.get("type") == "tool_use" and block.get("name") == tool_name:
-                    return True
-    return False
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -402,20 +328,20 @@ def main() -> int:
     if not transcript_path or not os.path.isfile(transcript_path):
         return 0
 
-    events = _load_transcript(transcript_path)
+    events = load_transcript(transcript_path)
     if not events:
         return 0
 
-    turn = _get_current_turn(events)
+    turn = get_current_turn(events)
     if not turn:
         return 0
 
-    last_text = _extract_last_assistant_text(turn)
+    last_text = extract_last_assistant_text(turn)
     if not last_text:
         return 0
 
-    has_bash = _has_tool_in_turn(turn, "Bash")
-    has_read = _has_tool_in_turn(turn, "Read")
+    has_bash = has_tool_in_turn(turn, "Bash")
+    has_read = has_tool_in_turn(turn, "Read")
 
     # Rule 1: completion-signal without evidence
     if _has_completion_signal(last_text) and not _has_evidence_block(

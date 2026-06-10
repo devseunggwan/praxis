@@ -50,6 +50,7 @@ import sys
 from pathlib import Path as _Path
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import read_last_user_message  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Pattern definitions
@@ -266,84 +267,6 @@ def _has_manufactured_marker(labels: list[str]) -> bool:
     return False
 
 
-def _read_last_user_message(transcript_path: str) -> str | None:
-    """Return the text of the most recent user-authored message in the transcript.
-
-    Returns None when the transcript is missing or unreadable — the caller
-    must fail open per the project hook design contract (`Fail-open on
-    infrastructure errors`). Returns empty string when the transcript was
-    read successfully but no user message contained extractable human
-    text — that is a real "no command-signal" answer and may be acted on.
-
-    Transcript format: JSONL where each line is a JSON object with at
-    least `type` ('user' / 'assistant' / 'system') and either `message`
-    (an Anthropic API message dict with `role` + `content`) or a flatter
-    `content` field. Both shapes are handled.
-
-    tool_result handling: an Anthropic user role message may carry only
-    `tool_result` content blocks when the assistant invoked tools in the
-    same turn before invoking AskUserQuestion. Such entries are NOT human
-    authored — they are the runtime's bridge for tool outputs. We must
-    skip them and keep walking backward until we find a user entry that
-    contains actual `type: text` content.
-    """
-    if not transcript_path or not os.path.isfile(transcript_path):
-        return None
-    try:
-        with open(transcript_path, "r", encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
-    except OSError:
-        return None
-
-    for raw in reversed(lines):
-        raw = raw.strip()
-        if not raw:
-            continue
-        try:
-            entry = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(entry, dict):
-            continue
-
-        role = entry.get("type") or entry.get("role")
-        message = entry.get("message")
-        if isinstance(message, dict) and not role:
-            role = message.get("role")
-
-        if role != "user":
-            continue
-
-        content = None
-        if isinstance(message, dict):
-            content = message.get("content")
-        if content is None:
-            content = entry.get("content")
-
-        text = ""
-        if isinstance(content, str):
-            text = content
-        elif isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if isinstance(item, dict):
-                    item_type = item.get("type")
-                    if item_type and item_type != "text":
-                        continue
-                    t = item.get("text")
-                    if isinstance(t, str):
-                        parts.append(t)
-                elif isinstance(item, str):
-                    parts.append(item)
-            text = "\n".join(parts)
-
-        if text.strip():
-            return text
-        continue
-
-    return ""
-
-
 def _has_destructive_label(labels: list[str]) -> bool:
     """True if any option label names a destructive / irreversible action.
 
@@ -534,7 +457,7 @@ def main() -> int:
         return 0
 
     transcript_path = payload.get("transcript_path") or ""
-    user_message = _read_last_user_message(transcript_path)
+    user_message = read_last_user_message(transcript_path)
     if user_message is None:
         # Fail open per project hook design contract — transcript missing
         # or unreadable, cannot verify command-signal presence.

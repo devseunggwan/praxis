@@ -48,6 +48,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
+from _transcript import TRANSCRIPT_SCAN_LINES  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -293,8 +294,6 @@ _VERIF_BY_CAT: dict[str, tuple[re.Pattern, ...]] = {
     ),
 }
 
-_TRANSCRIPT_SCAN_LINES = 400
-
 
 def _is_separator_row(row: str) -> bool:
     """True for pure separator rows like |---|:---:|---| (no data)."""
@@ -341,7 +340,7 @@ def _recent_bash_commands(transcript_path: str) -> list[str]:
         return []
 
     cmds: list[str] = []
-    for line in lines[-_TRANSCRIPT_SCAN_LINES:]:
+    for line in lines[-TRANSCRIPT_SCAN_LINES:]:
         line = line.strip()
         if not line:
             continue
@@ -464,7 +463,7 @@ CLUSTER_APPROVAL_ADVISORY = (
 def _recent_user_messages(transcript_path: str, count: int) -> list[str]:
     """Return text from the last `count` user messages in the transcript.
 
-    Scans the last _TRANSCRIPT_SCAN_LINES JSONL entries in reverse so that
+    Scans the last TRANSCRIPT_SCAN_LINES JSONL entries in reverse so that
     the most-recent user messages are returned first (index 0 = most recent).
     """
     if not transcript_path or not os.path.isfile(transcript_path):
@@ -476,7 +475,7 @@ def _recent_user_messages(transcript_path: str, count: int) -> list[str]:
         return []
 
     msgs: list[str] = []
-    for line in reversed(lines[-_TRANSCRIPT_SCAN_LINES:]):
+    for line in reversed(lines[-TRANSCRIPT_SCAN_LINES:]):
         line = line.strip()
         if not line:
             continue
