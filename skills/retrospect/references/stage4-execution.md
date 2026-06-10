@@ -97,12 +97,14 @@ For each approved action:
    a. **Stage draft**: write the proposed rule block to `/tmp/claude-md-draft-{slug}.md` (use `.omc/plans/claude-md-draft-{slug}.md` as fallback when `/tmp/` is not writable). Present the full draft content inline before showing the prompt.
 
    b. **AskUserQuestion — 3-option prompt**:
-      ```
+
+      ```text
       options:
         apply  — 승인. 지금 바로 적용합니다.
         수정   — 변경할 내용을 free-text로 입력하면 재작성 후 다시 이 단계로 돌아옵니다.
         보류   — 이번 세션은 적용하지 않습니다. 스테이징 파일을 남겨둡니다.
       ```
+
       - `수정` 선택 시: "무엇을 바꿀까요?" 입력 받음 → re-draft → 다시 (b) 단계로 복귀.
         Cap: 최대 3 라운드. 3 라운드 초과 시: "3회 재작성을 초과했습니다. 수동 편집을 권장합니다: `{staging_path}`" 후 보류 처리.
       - `보류` 선택 시: Edit 호출 없이 staging 파일 경로를 completion report에 기록하고 종료.
@@ -128,7 +130,8 @@ For each approved action:
    4. **Divergence / ambiguity handling.** If `live_backing_repo != declared backing_repo` (after normalization) → ABORT and surface to user via `AskUserQuestion`. Two prompt variants:
 
       **(i) Both sides concrete repos — 3-way prompt:**
-      ```
+
+      ```text
       ⚠ Backing-repo divergence on Finding #N:
          Stage 2/3 declared:    {declared}
          Stage 4 re-resolved:   {live}
@@ -140,7 +143,8 @@ For each approved action:
       ```
 
       **(ii) Re-resolution returned `AMBIGUOUS` (declared is concrete) — 2-way prompt:**
-      ```
+
+      ```text
       ⚠ Backing-repo re-resolution ambiguous on Finding #N:
          Stage 2/3 declared:    {declared}
          Stage 4 re-resolved:   AMBIGUOUS (resolution table's `Other / ambiguous` row)
@@ -178,7 +182,7 @@ For each approved action:
 
    **Mandatory `AskUserQuestion` prompt (do NOT proceed without explicit `[a]` pick):**
 
-   ```
+   ```text
    ⚠ External-repo write authorization required — Finding #N
 
    Proposed: create GitHub issue in {backing_repo} (classified external by Stage 2.5 Gate-4)
@@ -221,10 +225,12 @@ For each approved action:
         Edit/Write on protected branches — both the dirty-tree and the clean-tree
         PR-workflow-signal paths). Create a dedicated worktree on a new branch and
         write the hook inside it:
-        ```
+
+        ```bash
         git -C <repo> worktree add -b retrospect-hook-{slug} \
             <repo-parent>/<repo-name>.retrospect-hook-{slug} <protected-branch>
         ```
+
         Surface the worktree path to the user for the commit / PR decision —
         retrospect does NOT auto-commit or auto-PR the hook; its contract ends at
         the file write.
@@ -254,7 +260,7 @@ For each approved action:
 
 8. **Completion report:**
 
-```
+```markdown
 ## Actions Executed
 
 | # | Action | Result |

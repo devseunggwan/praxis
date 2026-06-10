@@ -19,7 +19,7 @@ hand-written. If the transcript is genuinely unreachable, replace the fence
 with the single line
 `<!-- retrospect:transcript_receipt_skipped: transcript unreachable -->`.
 
-```
+```markdown
 ## Retrospect Report — {session_date}
 
 <!-- retrospect:pre_scan_checklist begin -->
@@ -80,6 +80,7 @@ is_error_count: {N} | user_turn_count: {N} | interrupt_count: {N}
 
 Example (single action — repeat pattern):
 > Finding #2: Workflow step skipped (4th occurrence)
+>
 > - **Proposed Actions**: GitHub issue
 > - **Rationale**: Already recorded 3x in MEMORY.md. Memory alone has failed. Structural fix required.
 > - **What will be created**: issue — `feat(hook): add external-repo commit guard`
@@ -89,6 +90,7 @@ Example (single action — repeat pattern):
 
 Example (compound action — rule gap + repeat):
 > Finding #1 (HIGH): Hasty interpretation without verification (ambiguous signal → worst-case conclusion, 3 occurrences)
+>
 > - **Proposed Actions**: global `~/.claude/CLAUDE.md` draft + `GitHub issue`
 > - **Rationale**: Rule absent + 3× repeat → fill the rule gap (global `~/.claude/CLAUDE.md` draft) and track enforcement compliance (GitHub issue); matches Stage 2 ladder: "Missing rule + Repeat"
 > - **What will be created**:
@@ -100,6 +102,7 @@ Example (compound action — rule gap + repeat):
 
 Example (gate-suppressed `(Recommended)`):
 > Finding #3 (MED): MCP timeout caused 3 retries (single occurrence in this session)
+>
 > - **Proposed Actions**: `upstream_feedback`
 > - **Rationale**: Tool defect surfaced at step 4b — performance issue.<br>backing_repo: `<resolved_backing_repo>`
 > - **What will be created**: issue in the resolved backing repo — `perf(<plugin>): reduce MCP timeout on <op>`
