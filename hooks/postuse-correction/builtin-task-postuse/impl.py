@@ -32,6 +32,11 @@ from __future__ import annotations
 import json
 import sys
 
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+
 BUILTIN_TASK_MGMT_TOOLS = frozenset({
     "TaskCreate",
     "TaskUpdate",
@@ -67,11 +72,12 @@ def _emit_correction() -> None:
     sys.stdout.write("\n")
 
 
-def main() -> None:
+@fail_open
+def main() -> int:
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError, OSError):
-        sys.exit(0)  # PATH B (malformed input): fail-open, no output
+        return 0  # Early exit (malformed input): fail-open, no output
 
     # Claude Code uses snake_case "tool_name"; camelCase fallback for forward-compat
     tool_name = payload.get("tool_name") or payload.get("toolName") or ""
@@ -81,13 +87,12 @@ def main() -> None:
         # Early return here ensures PATH B code can never execute for this
         # invocation, eliminating any possibility of dual-message emission.
         _emit_correction()
-        return  # ← explicit gate: nothing below runs for PATH A
+        return 0  # ← explicit gate: nothing below runs for PATH A
 
     # PATH B: not a built-in task management tool — silent pass-through.
-    # sys.exit(0) is used (not plain return) to make the intent unambiguous:
-    # this invocation produces zero output.
-    sys.exit(0)
+    # This invocation produces zero output.
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

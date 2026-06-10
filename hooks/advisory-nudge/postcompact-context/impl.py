@@ -74,6 +74,7 @@ from pathlib import Path
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _paths import praxis_state_dir, legacy_state_dir  # type: ignore[import-not-found]  # noqa: E402
 
 DEFAULT_TAIL_LINES = 100
@@ -372,6 +373,7 @@ def _tail_lines_setting() -> int:
     return value
 
 
+@fail_open
 def main() -> int:
     if os.environ.get(BYPASS_ENV, "").strip() == "1":
         return 0

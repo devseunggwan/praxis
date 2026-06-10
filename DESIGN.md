@@ -27,6 +27,25 @@ Design mechanisms shared by all hooks:
 - **Session state via `session_id`.** Per-session memory (intent flags,
   DESCRIBE history) keys on the payload's `session_id` field. PPID is a
   back-compat fallback for direct CLI / test invocation only.
+- **Fail-open via `_hook_runtime.fail_open` (issue #645).** A hook crash
+  must never block a legitimate tool call (ETHOS). Coverage has exactly
+  two paths, by execution mode:
+  - **Dispatched hooks** — members of the `(PreToolUse, Bash)` dispatch
+    group (ADR-0002) run inside `_dispatch.py`, which wraps every member
+    `main()` with `_hook_runtime.fail_open` at runtime. Member `impl.py`
+    files need no decorator of their own; an `impl.py`-level reference is
+    redundant but harmless (double-wrap is a no-op).
+  - **Standalone hooks** — everything invoked through its own
+    `hooks/<name>.sh` wrapper (non-Bash or multi-tool matchers,
+    UserPromptSubmit/PostToolUse/Stop events, opt-in hooks) must apply
+    `@fail_open` to `main()` in `impl.py` directly (argv-style mains wrap
+    a zero-arg `_entry()` instead). Rule 15 in
+    `scripts/check-plugin-manifests.py` enforces this invariant.
+
+  Trade-off, stated explicitly: for *gates*, fail-open means a crashed
+  guard allows the action it would have screened. That is the deliberate
+  ETHOS choice — hook infrastructure failure must degrade to "no hook"
+  rather than "no work".
 - **Compound-Bash cascade advisory (issue #229).** When a PreToolUse(Bash)
   hook rejects (block) or asks-and-may-deny a compound command (`&&`, `||`,
   `;`, `|`, newline) containing a state-changing step (`> file`, `<<EOF >`,
