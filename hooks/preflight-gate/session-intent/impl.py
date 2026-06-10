@@ -73,6 +73,7 @@ import os
 import re
 import sys
 import sys as _sys
+import tempfile
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
@@ -287,8 +288,24 @@ def write_state(path: str, state: dict) -> None:
         parent = os.path.dirname(path)
         if parent and not os.path.isdir(parent):
             os.makedirs(parent, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(state, fh)
+        # Atomic write (temp + rename): a crash mid-write must not leave a
+        # truncated JSON file — a concurrent PreToolUse read of partial JSON
+        # would fail to parse and silently fail-open the gate (issue #647 H7).
+        fd, tmp_path = tempfile.mkstemp(
+            dir=parent or ".", prefix=".session-intent-"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(state, fh)
+            os.replace(tmp_path, path)
+        except Exception:
+            # Broad on purpose: json.dump can raise TypeError (not OSError);
+            # any failure before os.replace must unlink the temp file.
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     except OSError:
         # State write failure is non-fatal — the gate will simply not fire
         # for this session, equivalent to a missing state file.
