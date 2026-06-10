@@ -20,8 +20,13 @@ content block is skipped instead of raising into the caller's fail-open
 wrapper, which silently disabled the whole scan.
 
 Transcript format: JSONL where each line is a JSON object with at least
-`type` ('user' / 'assistant' / 'system') and either `message` (an Anthropic
-API message dict with `role` + `content`) or a flatter `content` field.
+`type` ('user' / 'assistant' / 'system') and a nested `message` dict
+(Anthropic API shape with `role` + `content`). A flatter top-level
+`{"role": ..., "content": ...}` shape is additionally tolerated by
+`read_last_user_message` ONLY — live transcripts contain no such events
+(probe: 0 of 2,503 events across 3 real session files), so the
+turn-scanning helpers deliberately read just the nested shape, matching
+the pre-hoist hook behavior.
 
 tool_result handling (codex review #193 F2): an Anthropic user-role message
 may carry only `tool_result` content blocks when the assistant invoked tools
@@ -81,13 +86,13 @@ def load_transcript_objs(path: str, max_bytes: int) -> list | None:
     Returns None when the file is missing, unreadable, or larger than
     `max_bytes` — callers treat None as "cannot scan, fail open".
     Non-JSON lines are skipped, scanning continues.
+
+    The bound is enforced on the bytes actually read (not a stat()
+    pre-check): a live session can append to the transcript between a
+    stat and the read, which would defeat the contract.
     """
-    try:
-        p = Path(path)
-        if not p.is_file() or p.stat().st_size > max_bytes:
-            return None
-        text = p.read_text(encoding="utf-8", errors="replace")
-    except (OSError, ValueError):
+    text = _read_bounded_text(path, max_bytes)
+    if text is None:
         return None
     objs: list = []
     for line in text.splitlines():
@@ -106,16 +111,29 @@ def read_transcript_tail(path: str, max_lines: int, max_bytes: int) -> str | Non
 
     Returns None when the file is missing, unreadable, or larger than
     `max_bytes` — callers treat None as "cannot scan, fail open".
+    The bound is enforced on the bytes actually read (see
+    `load_transcript_objs`).
     """
-    try:
-        p = Path(path)
-        if not p.is_file() or p.stat().st_size > max_bytes:
-            return None
-        text = p.read_text(encoding="utf-8", errors="replace")
-    except (OSError, ValueError):
+    text = _read_bounded_text(path, max_bytes)
+    if text is None:
         return None
     lines = text.strip().split("\n")
     return "\n".join(lines[-max_lines:])
+
+
+def _read_bounded_text(path: str, max_bytes: int) -> str | None:
+    """Read at most `max_bytes` bytes; None when missing or over the bound."""
+    try:
+        p = Path(path)
+        if not p.is_file():
+            return None
+        with p.open("rb") as f:
+            data = f.read(max_bytes + 1)
+    except (OSError, ValueError):
+        return None
+    if len(data) > max_bytes:
+        return None
+    return data.decode("utf-8", errors="replace")
 
 
 def get_current_turn(events: list[dict]) -> list[dict]:
