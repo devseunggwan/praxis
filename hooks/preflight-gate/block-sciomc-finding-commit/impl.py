@@ -73,7 +73,7 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
-from pathlib import Path
+from _transcript import load_transcript_objs  # type: ignore[import-not-found]  # noqa: E402
 
 
 @fail_open
@@ -467,26 +467,6 @@ _FINDING_KINDS = frozenset({_ASSISTANT_TEXT, _AGENT_RESULT})
 _SUBAGENT_TOOLS = frozenset({"Agent", "Task"})
 
 
-def _load_transcript_objs(path: str, max_bytes: int) -> list | None:
-    try:
-        p = Path(path)
-        if not p.is_file() or p.stat().st_size > max_bytes:
-            return None
-        text = p.read_text(encoding="utf-8", errors="replace")
-    except (OSError, ValueError):
-        return None
-    objs: list = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            objs.append(json.loads(line))
-        except (json.JSONDecodeError, ValueError):
-            continue  # skip non-JSON lines, keep scanning
-    return objs
-
-
 def _map_tool_use_names(objs: list) -> dict:
     """Map tool_use_id → tool name across the WHOLE transcript so a recent
     tool_result can be resolved even when its originating tool_use predates the
@@ -586,7 +566,7 @@ def _build_finding_scan(path: str, max_entries: int, max_bytes: int):
                         agent-authored (assistant text / Agent result) spans.
       matched_markers — the matched marker strings (for the block message).
     """
-    objs = _load_transcript_objs(path, max_bytes)
+    objs = load_transcript_objs(path, max_bytes)
     if objs is None:
         return None
     tool_names = _map_tool_use_names(objs)

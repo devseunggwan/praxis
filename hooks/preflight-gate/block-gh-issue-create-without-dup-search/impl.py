@@ -50,6 +50,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
+from _transcript import read_transcript_tail  # type: ignore[import-not-found]  # noqa: E402
 
 
 @fail_open
@@ -92,7 +93,7 @@ def main() -> int:
     if not transcript_path:
         return 0
 
-    tail = _read_transcript_tail(transcript_path, max_lines=400, max_bytes=50 * 1024 * 1024)
+    tail = read_transcript_tail(transcript_path, max_lines=400, max_bytes=50 * 1024 * 1024)
     if tail is None:
         return 0
 
@@ -358,18 +359,6 @@ def _extract_search_topic(cmd: str) -> set[str]:
         topic.update(_topic_tokens_from(tok))
         i += 1
     return topic
-
-
-def _read_transcript_tail(path: str, max_lines: int, max_bytes: int) -> str | None:
-    try:
-        p = Path(path)
-        if not p.is_file() or p.stat().st_size > max_bytes:
-            return None
-        text = p.read_text(encoding="utf-8", errors="replace")
-    except (OSError, ValueError):
-        return None
-    lines = text.strip().split("\n")
-    return "\n".join(lines[-max_lines:])
 
 
 def _emit_no_search_block(keywords: list[str]) -> None:

@@ -65,6 +65,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     strip_prefix,
 )
 from ask_option_text import collect_option_texts  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import TRANSCRIPT_SCAN_LINES  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -130,10 +131,6 @@ _STATE_BASE = os.path.join(
     os.environ.get("TMPDIR", "/tmp"), "praxis-pre-output-falsification-gate"
 )
 
-# How many trailing JSONL lines of the transcript Lane A scans.
-_TRANSCRIPT_SCAN_LINES = 400
-
-
 # ---------------------------------------------------------------------------
 # Lane A — AskUserQuestion evaluative-option gate
 # ---------------------------------------------------------------------------
@@ -189,7 +186,7 @@ def _recent_transcript_negative(transcript_path: str) -> bool:
     except OSError:
         return False
 
-    for raw in lines[-_TRANSCRIPT_SCAN_LINES:]:
+    for raw in lines[-TRANSCRIPT_SCAN_LINES:]:
         raw = raw.strip()
         if not raw:
             continue
