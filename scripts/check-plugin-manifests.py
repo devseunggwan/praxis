@@ -42,6 +42,7 @@ CI invokes this; developers can too, via `./scripts/check-plugin-manifests.py`.
 """
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -147,6 +148,29 @@ def _skill_dirs() -> list[Path]:
             continue
         dirs.append(entry)
     return dirs
+
+
+def _has_fail_open_decorator(impl_path: Path) -> bool:
+    """True iff some function in impl.py carries an `@fail_open` decorator.
+
+    AST-based on purpose (Rule 15, #645): a substring scan would accept
+    `fail_open` mentioned in a comment/docstring or imported-but-unapplied,
+    none of which actually wraps the entrypoint at runtime. A syntactically
+    invalid impl.py returns False — the hook cannot run at all, and the
+    drift message points at the right file either way.
+    """
+    try:
+        tree = ast.parse(impl_path.read_text())
+    except (OSError, SyntaxError, ValueError):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for dec in node.decorator_list:
+                if isinstance(dec, ast.Name) and dec.id == "fail_open":
+                    return True
+                if isinstance(dec, ast.Attribute) and dec.attr == "fail_open":
+                    return True
+    return False
 
 
 def _hook_dirs() -> list[Path]:
@@ -664,6 +688,40 @@ def main() -> int:
             drifts.append(
                 f"ORPHAN STUB docs/hook/{stem}.md: no backing hook dir — "
                 "remove it, or add to NON_HOOK_DOCS if it is a real doc"
+            )
+
+    # ------------------------------------------------------------------
+    # Rule 15 — standalone hooks must apply @fail_open (#645)
+    #
+    # Dispatch-group members get `_hook_runtime.fail_open` wrapping at
+    # runtime (`_dispatch.run_one`); every other execution path runs
+    # impl.py bare, so the impl itself must carry an `@fail_open`
+    # decorator (on main(), or on a zero-arg `_entry()` for argv-style
+    # mains). A hook is dispatch-covered iff ALL its manifest entries
+    # are exactly (PreToolUse, Bash); opt-in hooks are standalone by
+    # definition. impl.sh bodies are exempt (no Python entrypoint).
+    # The rule is one-directional: a redundant decorator in a dispatched
+    # member is harmless (double-wrap is a no-op) and not flagged.
+    # Detection is AST-based (decorator on some function), not substring:
+    # `fail_open` appearing only in a comment/docstring, or imported but
+    # never applied, must NOT satisfy the invariant (codex review P2).
+    # ------------------------------------------------------------------
+    for name, role in sorted(_build.hook_identities(manifest).items()):
+        impl_path = _build.HOOKS_DIR / role / name / "impl.py"
+        if not impl_path.exists():
+            continue  # impl.sh body or missing impl — Rule 3 covers the latter
+        if name in OPT_IN_HOOKS:
+            standalone = True
+        else:
+            standalone = any(
+                not (e.get("event") == "PreToolUse" and e.get("matcher") == "Bash")
+                for e in manifest_by_name.get(name, [])
+            )
+        if standalone and not _has_fail_open_decorator(impl_path):
+            drifts.append(
+                f"FAIL-OPEN MISSING hooks/{role}/{name}/impl.py: hook runs "
+                "standalone (not dispatch-wrapped) but no function carries "
+                "the @fail_open decorator — decorate main() (DESIGN.md, #645)"
             )
 
     if drifts:

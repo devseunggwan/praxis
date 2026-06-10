@@ -109,6 +109,7 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -343,5 +344,12 @@ def main(argv: list[str]) -> int:
     return 0
 
 
+@fail_open
+def _entry() -> int:
+    # main(argv) keeps its testable signature; fail_open wraps zero-arg
+    # callables only, so the wrap happens here at the process boundary.
+    return main(sys.argv)
+
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(_entry())
