@@ -5,6 +5,36 @@ manifests relate. Values come from [`ETHOS.md`](ETHOS.md); implementation
 mechanisms come from [`DESIGN.md`](DESIGN.md). This file describes the
 *wiring*.
 
+## Architectural shape
+
+Four architectural patterns, one per layer — a reading map for the sections
+below.
+
+- **Microkernel (plugin) core.** A small shared kernel (`hooks/_lib/` — the
+  fail-open runtime, the dispatcher, and shared helpers) hosts the hook suite
+  and the skills as independent plugins. Extending praxis at the kernel level
+  means adding one hook directory plus one manifest entry
+  ([`CONTRIBUTING.md`](CONTRIBUTING.md) walks the full checklist); the kernel
+  only executes, isolates, and aggregates. Counts live in the
+  [Hook index](#hook-index) and [`AGENTS.md`](AGENTS.md), not here.
+- **Interceptor chain, most-restrictive-wins.** Hooks intercept the host's
+  lifecycle (PreToolUse → PostToolUse → Stop, plus UserPromptSubmit and
+  SessionStart). Unlike a classic chain-of-responsibility, every member runs
+  and decisions aggregate `deny > ask > allow`
+  ([§Single-process dispatch](#single-process-dispatch-adr-0002)), with each
+  member fail-open isolated.
+- **Ports-and-adapters packaging.** The runtime core (`skills/`, `hooks/`,
+  `scripts/`) knows nothing about platforms; per-platform artifacts are
+  build-time adapters generated from `manifests/`
+  ([§Multi-Platform Packaging](#multi-platform-packaging)). Adding a platform
+  is one manifest file plus one build run.
+- **Declared state + drift gate.** Generated artifacts are committed, and
+  `scripts/check-plugin-manifests.py` invariants enforce manifest ↔ output
+  parity in CI — the same reconciliation model infrastructure-as-code uses.
+
+The structure is self-similar: to its hosts praxis is a plugin; inside, it is
+a microkernel made of plugins.
+
 ## Provider Routing
 
 Skills that dispatch external CLI workers (`cmux-delegate`) can route tasks to multiple AI providers. When only `claude` is installed, the system behaves exactly as before — no errors, no degradation.
