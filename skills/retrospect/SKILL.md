@@ -19,7 +19,7 @@ Symptom-level fixes (e.g., "remember to do X") miss the underlying pattern.
 
 **Pipeline:** `Load → Analyze → Report/Approve → Execute` (4 stages)
 
-**Delegates to:** OMC `tracer` agent (causal pattern analysis), `analyst` agent (pattern clustering)
+**Delegates to:** `oh-my-claudecode:tracer` agent (causal pattern analysis), `oh-my-claudecode:analyst` agent (pattern clustering) — invoked via `Agent(subagent_type="oh-my-claudecode:…")`
 
 ## The Iron Law
 
