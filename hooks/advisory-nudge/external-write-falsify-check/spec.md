@@ -38,6 +38,7 @@ question.
 | `mcp__*slack*__*send*` / `*post*message*` | body field contains hypothesis marker | Check 1 |
 | `mcp__*notion*__*create_page*` / `*update_page*` | text fields contain hypothesis marker | Check 1 |
 | `Write` to staging path (`/tmp/*-issue-*.md`, `/tmp/*-pr-*.md`, `.omc/plans/*.md`) | cluster-approval language in last 5 user messages | Check 3 |
+| any `gh` / MCP write body above | applied-on-branch claim line without reachability probe in recent transcript | Check 4 |
 | `gh issue list` / `gh search issues` / Read tool | — | passthrough silent |
 
 Hypothesis markers (whole-segment substring match): English 16 —
@@ -86,6 +87,7 @@ For strict mode (hard block):
 export PRAXIS_EXTERNAL_WRITE_STRICT=1   # Check 1: hypothesis markers
 export PRAXIS_AUTHOR_EXEMPT_STRICT=1    # Check 2: author-exempt identifiers
 export PRAXIS_CLUSTER_APPROVAL_STRICT=1 # Check 3: cluster-approval staging
+export PRAXIS_APPLIED_CLAIM_STRICT=1    # Check 4: applied-on-branch claims
 ```
 
 Each env var controls its own check independently. All accept the **literal
@@ -246,13 +248,44 @@ hard block (exit 2).
 - Staging path matching is suffix-based (`$` anchor). Paths that embed
   the pattern mid-string are not matched.
 
+### Applied-on-branch detection (issue #656)
+
+A fourth advisory fires when the write body asserts that a change is
+**applied / deployed / landed / blocked on a branch** and no
+**reachability probe** appears in the recent transcript's Bash commands.
+
+A claim line requires, on the same line: a **branch token** (`dev`, `prod`,
+`main`, `master`, `release`, `branch`, `브랜치` — Hangul-safe lookarounds so
+"dev에" matches) AND an **applied-state token** (`applied`, `deployed`,
+`landed`, `blocked since`, `적용됐|적용됨…`, `배포됨…`, `반영됨…`,
+`차단됨…`), with no negation token on the line (`released` deliberately
+excluded — lock-release prose false-positives; `without` deliberately absent
+from the negation set — "deployed to prod without incident" is a genuine
+claim).
+
+The reachability trail accepts: `git merge-base --is-ancestor`, a
+`--json` query carrying **both** `state` and `baseRefName` in the same
+command (bare `grep baseRefName` does not clear, and a baseRefName-only
+query never confirms the merge state), or `git branch --contains` (short
+and long intervening flags tolerated). A generic PR state
+query (`gh pr view --json state`) is deliberately NOT accepted — the
+2026-05-15 incident ran exactly that probe and still mis-released 3 changes
+(merged PR's base was a feature branch; ref-A existence is not ref-B
+application). The regex is mirrored in
+`hooks/completion-verify/merge-state-claim-gate` (2 copies — DRY extraction
+deferred to a 3rd consumer per repo convention); that Stop-hook gates the
+*final-message* surface, this check gates the *external-write* surface.
+
+Default: advisory (exit 0). Set `PRAXIS_APPLIED_CLAIM_STRICT=1` for hard
+block (exit 2).
+
 ### Tests
 
 ```bash
-bash tests/test_external_write_falsify_check.sh
+bash tests/hooks/advisory-nudge/test_external_write_falsify_check.sh
 ```
 
-Covers 34 cases across the warn / silent / strict-block dimensions:
+Covers 48 cases across the warn / silent / strict-block dimensions:
 `gh` write subcommands (`comment`, `create`, `edit`, `review`) with each
 body flag form (`--body`, `-b`, `--body-file`, `-F`, `--body=value`),
 MCP slack / notion writes including nested shapes (Notion
@@ -263,10 +296,16 @@ not surface as body, Korean marker, verified-claim silent paths,
 non-write commands (`gh list` / `gh search`), chained Bash writes,
 strict env toggle, malformed-JSON fail-open, 3 author-exempt cases
 (mapping table without verification, mapping table with transcript
-`gh label list`, bash code block with column name), and 6 cluster-approval
+`gh label list`, bash code block with column name), 6 cluster-approval
 cases (EN pattern + staging path, KO pattern + staging path, EN pattern +
 non-staging path, staging path without cluster-approval language, strict
-mode block, no-transcript fail-open).
+mode block, no-transcript fail-open), and 9 applied-on-branch cases (#656:
+EN/KO claims without reachability, **state-only `gh pr view --json state`
+does NOT clear the claim**, merge-base / baseRefName evidence clearing,
+negated claim, branch-token-only, applied-token-only, strict mode block,
+`grep baseRefName` non-clearing, long-flag `--contains` clearing,
+`without incident` still firing, `released the lock` silent,
+baseRefName-only query non-clearing).
 
 ### Evidence-trail follow-up
 
