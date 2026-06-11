@@ -26,6 +26,21 @@ if evidence == "gh":
 elif evidence == "mcp":
     asst_blocks.append({"type": "tool_use", "name": "mcp__github__pull_request_read",
                         "input": {"pullNumber": 543}})
+elif evidence == "merge-base":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "git merge-base --is-ancestor abc123 origin/prod"}})
+elif evidence == "baserefname":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "gh pr view 543 --json state,baseRefName"}})
+elif evidence == "grep-baserefname":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "grep -n baseRefName hooks/completion-verify/merge-state-claim-gate/impl.py"}})
+elif evidence == "baserefname-only":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "gh pr view 543 --json baseRefName"}})
+elif evidence == "branch-contains-long":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "git branch --merged --contains abc123"}})
 if asst_blocks:
     events.append({"message": {"role": "assistant", "content": asst_blocks}})
 events.append({"message": {"role": "assistant",
@@ -197,6 +212,85 @@ run_case advisory "future-passive-known-fp" '{}'
 # completion claim co-occurs with a future clause on the same line.
 build_transcript "PR #543 merged — this will close the issue." none
 run_case advisory "merged-claim-with-will-clause" '{}'
+
+# --- #656: applied-on-branch claim, no evidence -> advisory ----------------
+build_transcript "The fix is now applied to prod." none
+run_case advisory "applied-en-no-evidence" '{}'
+
+# --- #656: Korean applied claim with branch-only subject -> advisory -------
+build_transcript "수정이 prod에 적용됐습니다." none
+run_case advisory "applied-ko-branch-subject" '{}'
+
+# --- #656 CORE: state-only gh evidence must NOT clear an applied claim -----
+# This is the 2026-05-15 incident shape: `gh pr view --json state` was run,
+# state=MERGED, but the merged PR's base was a feature branch (stacked PR).
+build_transcript "PR #543 merged and the change is applied to dev." gh
+run_case advisory "applied-not-cleared-by-state-query" '{}'
+
+# --- #656: reachability evidence (merge-base) clears applied -> silent -----
+build_transcript "The fix is applied to prod." merge-base
+run_case silent "applied-with-merge-base-evidence" '{}'
+
+# --- #656: baseRefName field query clears applied -> silent ----------------
+build_transcript "변경이 dev 브랜치에 반영됐습니다." baserefname
+run_case silent "applied-with-baserefname-evidence" '{}'
+
+# --- #656: negated applied claim -> silent ----------------------------------
+build_transcript "아직 prod에 적용되지 않았습니다." none
+run_case silent "applied-negated-ko" '{}'
+
+# --- #656: branch token without applied token -> silent ---------------------
+build_transcript "Checked out the dev branch and ran the tests." none
+run_case silent "branch-token-no-applied-token" '{}'
+
+# --- #656: applied token without any subject -> silent ----------------------
+build_transcript "Formatting applied; all files clean." none
+run_case silent "applied-token-no-subject" '{}'
+
+# --- #656: mixed merged+applied with state-only evidence -> advisory --------
+# gh state query clears "merged" but "applied" survives; advisory text must
+# carry the reachability guidance.
+build_transcript "PR #543 merged — fix applied to prod." gh
+run_case advisory "mixed-kinds-applied-survives" '{}'
+printf '%s' "$(python3 -c 'import json,sys; print(json.dumps({"transcript_path": sys.argv[1]}))' "$TRANSCRIPT")" \
+  | python3 "$HOOK" 2>/dev/null \
+  | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+msg = d["systemMessage"]
+assert "merge-base --is-ancestor" in msg, msg
+assert "baseRefName" in msg, msg
+assert "applied" in msg, msg
+' && { echo "PASS  [applied-advisory-has-reachability-guidance]"; PASS=$((PASS + 1)); } \
+  || { echo "FAIL  [applied-advisory-has-reachability-guidance]"; FAIL=$((FAIL + 1)); }
+
+# --- #656: strict mode applied claim -> decision:block ----------------------
+build_transcript "Deployed to prod and verified." none
+run_case advisory-strict "applied-strict-mode" '{}' PRAXIS_MERGE_CLAIM_STRICT=1
+
+# --- #656 review fix: grep of the baseRefName literal must NOT clear -------
+# Bare-token matching would let `grep baseRefName impl.py` (this hook's own
+# source contains the literal) silently clear a genuine claim.
+build_transcript "The fix is applied to prod." grep-baserefname
+run_case advisory "grep-baserefname-does-not-clear" '{}'
+
+# --- #656 review fix: long-flag `git branch --merged --contains` clears ----
+build_transcript "The fix is applied to prod." branch-contains-long
+run_case silent "branch-contains-long-flag-clears" '{}'
+
+# --- #656 review fix: 'without incident' must NOT suppress applied claim ---
+build_transcript "Deployed to prod without incident." none
+run_case advisory "applied-without-incident-still-fires" '{}'
+
+# --- #656 review fix: 'released the lock' no longer false-positives --------
+build_transcript "Released the lock on the main thread." none
+run_case silent "released-lock-prose-silent" '{}'
+
+# --- #656 codex P2: baseRefName-only query (no state field) must NOT clear -
+# Knowing the base alone never confirms the PR actually merged; the canonical
+# probe is `--json state,baseRefName` in one command.
+build_transcript "The fix is applied to prod." baserefname-only
+run_case advisory "baserefname-only-does-not-clear" '{}'
 
 # --- missing transcript path -> fail-open silent --------------------------
 TRANSCRIPT="/nonexistent/transcript.jsonl"
