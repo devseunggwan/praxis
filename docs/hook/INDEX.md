@@ -104,6 +104,12 @@ finalized. Run sequentially: `completion-verify` → `retrospect-mix-check` →
 `merge-state-claim-gate` → `strike-counter stop`.
 Also includes session-lifecycle enforcement.
 
+Signal convention (issue #647 H3): every hook in this role emits stdout JSON —
+advisory tier `{"systemMessage": ...}` (shown to the user, does not block),
+block tier `{"decision": "block", "reason": ...}` (blocks the stop; reason is
+fed to the model). Exit code is 0 in both tiers; stderr is never the signal
+channel.
+
 | Hook | Trigger | Purpose |
 |------|---------|---------|
 | [completion-verify](../../hooks/completion-verify/completion-verify/spec.md) | Stop | Block "done / 완료" claims without same-turn Bash verification evidence |

@@ -53,6 +53,18 @@ PREFIX = "[praxis:readonly-verify-deferral-gate]"
 # ---------------------------------------------------------------------------
 
 
+
+def _msg(stdout: str) -> str:
+    """Extract the systemMessage from the hook's stdout JSON.
+
+    Issue #647 H3: advisories arrive as `{"systemMessage": ...}` on stdout
+    (stderr stays empty). Empty stdout (silent pass) maps to "".
+    """
+    if not stdout.strip():
+        return ""
+    return json.loads(stdout)["systemMessage"]
+
+
 def mk_user(text: str) -> dict[str, Any]:
     return {
         "type": "user",
@@ -163,8 +175,8 @@ def test_triggers_on_readonly_offer(text: str, tmp_path: Path) -> None:
     tp = write_jsonl(events, tmp_path)
     stdout, stderr, rc = run_hook(tp)
     assert rc == 0, f"advisory mode must exit 0; got {rc}"
-    assert stdout == "", f"advisory hook must produce no stdout; got {stdout!r}"
-    assert PREFIX in stderr, f"advisory not emitted for {text!r}; stderr={stderr!r}"
+    assert stderr == "", f"advisory hook must keep stderr empty; got {stderr!r}"
+    assert PREFIX in _msg(stdout), f"advisory not emitted for {text!r}; stdout={stdout!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -189,9 +201,9 @@ def test_mutation_carveout_suppresses(text: str, tmp_path: Path) -> None:
     """Mutation present → asking is legitimate → no advisory."""
     events = [mk_user("진행 방법"), mk_assistant(text)]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert PREFIX not in stderr, f"mutation carve-out failed: {text!r}; stderr={stderr!r}"
+    assert stdout == "", f"mutation carve-out failed: {text!r}; stdout={stdout!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -213,9 +225,9 @@ def test_already_ran_cue_suppresses(text: str, tmp_path: Path) -> None:
     """An offer sentence carrying a past-tense run cue → read already ran → no warn."""
     events = [mk_user("상태"), mk_assistant(text)]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert PREFIX not in stderr, f"already-ran cue must suppress: {text!r}; stderr={stderr!r}"
+    assert stdout == "", f"already-ran cue must suppress: {text!r}; stdout={stdout!r}"
 
 
 def test_declarative_report_then_courtesy_no_advisory(tmp_path: Path) -> None:
@@ -233,9 +245,9 @@ def test_declarative_report_then_courtesy_no_advisory(tmp_path: Path) -> None:
         mk_assistant("`git status` 확인했습니다. 추가로 진행할까요?"),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert PREFIX not in stderr, f"declarative report must not warn; stderr={stderr!r}"
+    assert stdout == "", f"declarative report must not warn; stdout={stdout!r}"
 
 
 def test_mixed_turn_offered_read_differs_from_run_read_warns(tmp_path: Path) -> None:
@@ -254,10 +266,10 @@ def test_mixed_turn_offered_read_differs_from_run_read_warns(tmp_path: Path) -> 
         mk_assistant("Should I run `SELECT count(*) FROM orders` next?"),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert PREFIX in stderr, (
-        f"mixed turn (offered read != run read) must warn; stderr={stderr!r}"
+    assert PREFIX in _msg(stdout), (
+        f"mixed turn (offered read != run read) must warn; stdout={stdout!r}"
     )
 
 
@@ -273,9 +285,9 @@ def test_read_without_deferral_no_advisory(tmp_path: Path) -> None:
         mk_assistant("`SELECT count(*) FROM orders` 결과는 1,024건입니다."),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert PREFIX not in stderr, f"read-without-deferral false positive: {stderr!r}"
+    assert stdout == "", f"read-without-deferral false positive: {stderr!r}"
 
 
 def test_deferral_without_read_no_advisory(tmp_path: Path) -> None:
@@ -285,9 +297,9 @@ def test_deferral_without_read_no_advisory(tmp_path: Path) -> None:
         mk_assistant("다음 단계를 진행할까요? 설계 방향을 먼저 정해야 합니다."),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert PREFIX not in stderr, f"deferral-without-read false positive: {stderr!r}"
+    assert stdout == "", f"deferral-without-read false positive: {stderr!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -314,9 +326,9 @@ def test_cross_sentence_read_and_deferral_no_advisory(text: str, tmp_path: Path)
     """Read and deferral in different sentences → not an offer → no advisory."""
     events = [mk_user("상태 보고"), mk_assistant(text)]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert PREFIX not in stderr, f"cross-sentence false positive: {text!r}; stderr={stderr!r}"
+    assert stdout == "", f"cross-sentence false positive: {text!r}; stdout={stdout!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -332,14 +344,14 @@ def test_signals_env_extends_read_detection(tmp_path: Path) -> None:
     ]
     tp = write_jsonl(events, tmp_path)
     # Without the env var, no built-in pattern matches → no advisory.
-    _, stderr_off, _ = run_hook(tp)
-    assert PREFIX not in stderr_off, f"unexpected match w/o env: {stderr_off!r}"
+    stdout_off, _, _ = run_hook(tp)
+    assert PREFIX not in _msg(stdout_off), f"unexpected match w/o env: {stdout_off!r}"
     # With the env var, the project read CLI matches → advisory.
-    _, stderr_on, rc = run_hook(
+    stdout_on, _, rc = run_hook(
         tp, env_extra={"PRAXIS_READONLY_VERIFY_SIGNALS": r"\bmycli\s+inspect\b"}
     )
     assert rc == 0
-    assert PREFIX in stderr_on, f"SIGNALS env did not extend detection; stderr={stderr_on!r}"
+    assert PREFIX in _msg(stdout_on), f"SIGNALS env did not extend detection; stdout={stdout_on!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -347,16 +359,19 @@ def test_signals_env_extends_read_detection(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_strict_mode_exits_2(tmp_path: Path) -> None:
-    """STRICT=1 escalates a real offer to exit 2 (blocks Stop)."""
+def test_strict_mode_blocks(tmp_path: Path) -> None:
+    """STRICT=1 escalates a real offer to a {decision: block} JSON (blocks Stop)."""
     events = [
         mk_user("확인"),
         mk_assistant("should I run `SELECT 1 FROM dual` to verify?"),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp, env_extra={"PRAXIS_READONLY_VERIFY_STRICT": "1"})
-    assert rc == 2, f"STRICT must exit 2; got {rc}"
-    assert PREFIX in stderr
+    stdout, stderr, rc = run_hook(tp, env_extra={"PRAXIS_READONLY_VERIFY_STRICT": "1"})
+    assert rc == 0, f"STRICT must exit 0 (block is carried by JSON); got {rc}"
+    assert stderr == "", f"strict path must keep stderr empty; got {stderr!r}"
+    decision = json.loads(stdout)
+    assert decision["decision"] == "block"
+    assert PREFIX in decision["reason"]
 
 
 def test_bypass_silences(tmp_path: Path) -> None:
@@ -366,9 +381,9 @@ def test_bypass_silences(tmp_path: Path) -> None:
         mk_assistant("should I run `SELECT 1 FROM dual` to verify?"),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp, env_extra={"PRAXIS_READONLY_VERIFY_BYPASS": "1"})
+    stdout, stderr, rc = run_hook(tp, env_extra={"PRAXIS_READONLY_VERIFY_BYPASS": "1"})
     assert rc == 0
-    assert stderr == "", f"BYPASS must silence; stderr={stderr!r}"
+    assert stdout == "" and stderr == "", f"BYPASS must silence; stdout={stdout!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -408,8 +423,9 @@ def test_failsafe_missing_transcript() -> None:
 def test_failsafe_empty_transcript(tmp_path: Path) -> None:
     tp = str(tmp_path / "empty.jsonl")
     Path(tp).write_text("")
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
+    assert stdout == ""
     assert stderr == ""
 
 

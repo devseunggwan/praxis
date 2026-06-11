@@ -45,26 +45,43 @@ run_case() {
 p={"transcript_path":sys.argv[1]}
 p.update(json.loads(sys.argv[2]))
 print(json.dumps(p))' "$TRANSCRIPT" "$extra")
-  err=$(printf '%s' "$payload" | env "$@" python3 "$HOOK" 2>&1 1>/dev/null)
+  # issue #647 H3: advisory/block both arrive as stdout JSON (exit always 0);
+  # stderr must stay empty in every case.
+  local out
+  out=$(printf '%s' "$payload" | env "$@" python3 "$HOOK" 2>/tmp/msc-stderr.$$)
   rc=$?
+  err=$(cat /tmp/msc-stderr.$$ 2>/dev/null; rm -f /tmp/msc-stderr.$$)
   case "$expected" in
     advisory)
       [ "$rc" -eq 0 ] || ok=0
-      printf '%s' "$err" | grep -q "\[merge-state-claim-gate\]" || ok=0
+      [ -z "$err" ] || ok=0
+      printf '%s' "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert "[merge-state-claim-gate]" in d["systemMessage"]
+assert "decision" not in d
+' || ok=0
       ;;
     advisory-strict)
-      [ "$rc" -eq 2 ] || ok=0
-      printf '%s' "$err" | grep -q "\[merge-state-claim-gate\]" || ok=0
+      [ "$rc" -eq 0 ] || ok=0
+      [ -z "$err" ] || ok=0
+      printf '%s' "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["decision"] == "block"
+assert "[merge-state-claim-gate]" in d["reason"]
+' || ok=0
       ;;
     silent)
       [ "$rc" -eq 0 ] || ok=0
       [ -z "$err" ] || ok=0
+      [ -z "$out" ] || ok=0
       ;;
   esac
   if [ "$ok" -eq 1 ]; then
     echo "PASS  [$name]"; PASS=$((PASS + 1))
   else
-    echo "FAIL  [$name] expected=$expected rc=$rc err=<$err>"; FAIL=$((FAIL + 1))
+    echo "FAIL  [$name] expected=$expected rc=$rc out=<$out> err=<$err>"; FAIL=$((FAIL + 1))
   fi
 }
 
@@ -96,7 +113,7 @@ run_case silent "negated-claim" '{}'
 build_transcript "Next I will create a PR and then merge it." none
 run_case silent "future-intent" '{}'
 
-# --- strict mode -> exit 2 ------------------------------------------------
+# --- strict mode -> decision:block JSON ------------------------------------------------
 build_transcript "PR #543 created and merged." none
 run_case advisory-strict "strict-mode" '{}' PRAXIS_MERGE_CLAIM_STRICT=1
 

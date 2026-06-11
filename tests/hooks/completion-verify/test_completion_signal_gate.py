@@ -50,6 +50,18 @@ spec.loader.exec_module(csg)  # type: ignore[union-attr]
 # ---------------------------------------------------------------------------
 
 
+
+def _msg(stdout: str) -> str:
+    """Extract the systemMessage from the hook's stdout JSON.
+
+    Issue #647 H3: advisories arrive as `{"systemMessage": ...}` on stdout
+    (stderr stays empty). Empty stdout (silent pass) maps to "".
+    """
+    if not stdout.strip():
+        return ""
+    return json.loads(stdout)["systemMessage"]
+
+
 def mk_user(text: str) -> dict[str, Any]:
     return {
         "type": "user",
@@ -158,9 +170,9 @@ def test_rule1_triggers_on_phrase(phrase: str, tmp_path: Path) -> None:
     tp = write_jsonl(events, tmp_path)
     stdout, stderr, rc = run_hook(tp)
     assert rc == 0, f"hook must exit 0 (advisory); got {rc}"
-    assert stdout == "", f"advisory hook must produce no stdout; got: {stdout!r}"
-    assert "[praxis:completion-signal-gate]" in stderr, (
-        f"advisory not emitted for phrase {phrase!r}; stderr={stderr!r}"
+    assert stderr == "", f"advisory hook must keep stderr empty; got: {stderr!r}"
+    assert "[praxis:completion-signal-gate]" in _msg(stdout), (
+        f"advisory not emitted for phrase {phrase!r}; stdout={stdout!r}"
     )
 
 
@@ -180,10 +192,10 @@ def test_rule1_suppressed_by_bash_tool(tmp_path: Path) -> None:
         mk_assistant("5 tests passed. 완료."),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert "[praxis:completion-signal-gate]" not in stderr, (
-        f"must not trigger when Bash tool is present; stderr={stderr!r}"
+    assert stdout == "", (
+        f"must not trigger when Bash tool is present; stdout={stdout!r}"
     )
 
 
@@ -196,10 +208,10 @@ def test_rule1_suppressed_by_read_tool(tmp_path: Path) -> None:
         mk_assistant("파일 확인 완료. 이상 없음."),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert "[praxis:completion-signal-gate]" not in stderr, (
-        f"must not trigger when Read tool is present; stderr={stderr!r}"
+    assert stdout == "", (
+        f"must not trigger when Read tool is present; stdout={stdout!r}"
     )
 
 
@@ -212,10 +224,10 @@ def test_rule1_suppressed_by_cited_output_line(tmp_path: Path) -> None:
         ),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert "[praxis:completion-signal-gate]" not in stderr, (
-        f"must not trigger with cited output; stderr={stderr!r}"
+    assert stdout == "", (
+        f"must not trigger with cited output; stdout={stdout!r}"
     )
 
 
@@ -235,9 +247,9 @@ def test_fp1_bash_evidence_complete(tmp_path: Path) -> None:
         mk_assistant("15 tests passed in 1.2s. 완료."),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert "[praxis:completion-signal-gate]" not in stderr, f"FP1 false-positive: {stderr!r}"
+    assert stdout == "", f"FP1 false-positive: {stderr!r}"
 
 
 def test_fp2_no_completion_phrase(tmp_path: Path) -> None:
@@ -247,9 +259,9 @@ def test_fp2_no_completion_phrase(tmp_path: Path) -> None:
         mk_assistant("다음 단계는 PR 생성입니다. 브랜치를 먼저 확인하겠습니다."),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert "[praxis:completion-signal-gate]" not in stderr, f"FP2 false-positive: {stderr!r}"
+    assert stdout == "", f"FP2 false-positive: {stderr!r}"
 
 
 def test_fp3_read_tool_with_completion_phrase(tmp_path: Path) -> None:
@@ -263,9 +275,9 @@ def test_fp3_read_tool_with_completion_phrase(tmp_path: Path) -> None:
         mk_assistant("hooks.json 확인 완료. 이상 없음."),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert "[praxis:completion-signal-gate]" not in stderr, f"FP3 false-positive: {stderr!r}"
+    assert stdout == "", f"FP3 false-positive: {stderr!r}"
 
 
 def test_fp4_bash_lint_clean(tmp_path: Path) -> None:
@@ -279,9 +291,9 @@ def test_fp4_bash_lint_clean(tmp_path: Path) -> None:
         mk_assistant("0 errors. All done."),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert "[praxis:completion-signal-gate]" not in stderr, f"FP4 false-positive: {stderr!r}"
+    assert stdout == "", f"FP4 false-positive: {stderr!r}"
 
 
 def test_fp5_assistant_in_progress(tmp_path: Path) -> None:
@@ -295,9 +307,9 @@ def test_fp5_assistant_in_progress(tmp_path: Path) -> None:
         mk_assistant("브랜치 상태 확인됨. 다음으로 PR을 생성하겠습니다."),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert "[praxis:completion-signal-gate]" not in stderr, f"FP5 false-positive: {stderr!r}"
+    assert stdout == "", f"FP5 false-positive: {stderr!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -314,10 +326,11 @@ def test_event1_exact_quote(tmp_path: Path) -> None:
         ),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert "[praxis:completion-signal-gate]" in stderr, (
-        f"Event 1 quote must trigger advisory; stderr={stderr!r}"
+    assert stderr == "", f"firing path must keep stderr empty; got {stderr!r}"
+    assert "[praxis:completion-signal-gate]" in _msg(stdout), (
+        f"Event 1 quote must trigger advisory; stdout={stdout!r}"
     )
 
 
@@ -350,8 +363,9 @@ def test_rule2_foreign_plugin_command(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     # Should emit advisory about foreign namespace
-    assert "[praxis:completion-signal-gate]" in result.stderr, (
-        f"Rule 2 must fire for foreign plugin command; stderr={result.stderr!r}"
+    assert result.stderr == "", f"firing path must keep stderr empty; got {result.stderr!r}"
+    assert "[praxis:completion-signal-gate]" in _msg(result.stdout), (
+        f"Rule 2 must fire for foreign plugin command; stdout={result.stdout!r}"
     )
 
 
@@ -374,8 +388,9 @@ def test_rule2_bare_foreign_skill(tmp_path: Path) -> None:
         cwd=str(REPO_ROOT),
     )
     assert result.returncode == 0
-    assert "[praxis:completion-signal-gate]" in result.stderr, (
-        f"Rule 2 must fire for bare foreign skill `/release`; stderr={result.stderr!r}"
+    assert result.stderr == "", f"firing path must keep stderr empty; got {result.stderr!r}"
+    assert "[praxis:completion-signal-gate]" in _msg(result.stdout), (
+        f"Rule 2 must fire for bare foreign skill `/release`; stdout={result.stdout!r}"
     )
 
 
@@ -398,8 +413,8 @@ def test_rule2_bare_unknown_command_silent(tmp_path: Path) -> None:
         cwd=str(REPO_ROOT),
     )
     assert result.returncode == 0
-    assert "[praxis:completion-signal-gate]" not in result.stderr, (
-        f"Rule 2 must NOT fire for unknown bare commands; stderr={result.stderr!r}"
+    assert result.stdout == "", (
+        f"Rule 2 must NOT fire for unknown bare commands; stdout={result.stdout!r}"
     )
 
 
@@ -439,8 +454,8 @@ def test_rule2_namespaced_foreign_silent_in_non_praxis_cwd(tmp_path: Path) -> No
         cwd=str(tmp_path),  # laplace-dev-hub cwd, NOT praxis
     )
     assert result.returncode == 0
-    assert "[praxis:completion-signal-gate]" not in result.stderr, (
-        f"Rule 2 must NOT fire in non-praxis cwd; stderr={result.stderr!r}"
+    assert result.stdout == "", (
+        f"Rule 2 must NOT fire in non-praxis cwd; stdout={result.stdout!r}"
     )
 
 
@@ -480,6 +495,7 @@ def test_failsafe_stop_hook_active(tmp_path: Path) -> None:
         timeout=5,
     )
     assert result.returncode == 0
+    assert result.stdout == ""
     assert result.stderr == ""
 
 
@@ -500,6 +516,7 @@ def test_failsafe_missing_transcript() -> None:
         timeout=5,
     )
     assert result.returncode == 0
+    assert result.stdout == ""
     assert result.stderr == ""
 
 
@@ -518,6 +535,7 @@ def test_failsafe_empty_transcript(tmp_path: Path) -> None:
         timeout=5,
     )
     assert result.returncode == 0
+    assert result.stdout == ""
     assert result.stderr == ""
 
 
@@ -630,10 +648,10 @@ def test_negated_completion_no_advisory_end_to_end(tmp_path: Path) -> None:
         mk_assistant("아직 작업이 완료되지 않았습니다. 다음 단계가 남아 있습니다."),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert "[praxis:completion-signal-gate]" not in stderr, (
-        f"negated completion must not trigger Rule 1 advisory; stderr={stderr!r}"
+    assert stdout == "", (
+        f"negated completion must not trigger Rule 1 advisory; stdout={stdout!r}"
     )
 
 
@@ -644,10 +662,10 @@ def test_negated_completion_en_no_advisory_end_to_end(tmp_path: Path) -> None:
         mk_assistant("The refactor is not done yet — two modules remain."),
     ]
     tp = write_jsonl(events, tmp_path)
-    _, stderr, rc = run_hook(tp)
+    stdout, stderr, rc = run_hook(tp)
     assert rc == 0
-    assert "[praxis:completion-signal-gate]" not in stderr, (
-        f"negated EN completion must not trigger advisory; stderr={stderr!r}"
+    assert stdout == "", (
+        f"negated EN completion must not trigger advisory; stdout={stdout!r}"
     )
 
 

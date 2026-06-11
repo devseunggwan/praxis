@@ -5,7 +5,7 @@ Supported hosts: all
 `hooks/completion-verify/merge-state-claim-gate/impl.py` runs on the `Stop`
 event. It scans the **final assistant message** for a completed merge / PR /
 issue / worktree state assertion and, when no fresh state query appears in the
-recent transcript, emits a **stderr advisory**.
+recent transcript, emits a **stdout `{"systemMessage": ...}` JSON advisory**.
 
 ### Why this exists
 
@@ -23,9 +23,12 @@ did.
 
 ### What is emitted
 
-Advisory by default — exit 0 + stderr. The model has already stopped, so the
-note reaches the user (and the next turn's context). `PRAXIS_MERGE_CLAIM_STRICT=1`
-escalates to exit 2, which re-prompts the model to verify before stopping.
+Advisory by default — exit 0 + stdout `{"systemMessage": ...}` JSON (issue #647
+H3; the old exit-0 stderr form only reached the debug log). The model has
+already stopped, so the note reaches the user (transcript-visible; not fed to
+the model). `PRAXIS_MERGE_CLAIM_STRICT=1`
+escalates to a `{"decision": "block", "reason": ...}` JSON, which re-prompts
+the model to verify before stopping.
 
 | Condition | Result |
 |-----------|--------|
@@ -87,6 +90,6 @@ bash tests/hooks/completion-verify/test_merge_state_claim_gate.sh
 
 13 cases: English/Korean claim without evidence (advisory), claim with `gh`
 evidence / GitHub MCP evidence (silent), neutral message (silent), negated claim
-(silent), future intent (silent), strict mode (exit 2), bypass (silent),
+(silent), future intent (silent), strict mode (decision: block), bypass (silent),
 `stop_hook_active` loop guard (silent), worktree-cleanup claim (advisory),
 missing transcript (fail-open), malformed JSON (fail-open).
