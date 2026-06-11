@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.3.0] - 2026-06-11
+
+17 PRs since 6.2.0. Minor release. Headline changes: a reachability gate for
+applied-on-branch claims (#661), the `readonly-verify-deferral-gate` Stop hook
+(#642), a post-compaction receipt gate for retrospect (#639), and automated
+GitHub Releases from CHANGELOG (#631). Plus the #647 audit follow-ups
+(stop-hook JSON signal unification, fail-open coverage, transcript-utils
+consolidation) and CI supply-chain hardening.
+
+### Added
+
+- `merge-state-claim-gate` hook: `applied` claim kind — a reachability gate for "X is applied on branch B" claims in the final message. General state queries no longer release an applied claim; only reachability evidence (`git merge-base --is-ancestor`, a same-command `--json` state+baseRefName query, `git branch --contains`) does. Companion `external-write-falsify-check` Check 4 requires a reachability probe for same-line branch+applied claims in external write bodies (strict mode via `PRAXIS_APPLIED_CLAIM_STRICT=1`) (#656, PR #661)
+- `block-personal-asset-leak` hook: second opt-in marker class — personal-repo `<owner>/<repo>` references, opt-in via `PRAXIS_PERSONAL_REPO_OWNERS` (unset keeps the existing dotfiles-only behavior). Matcher surface extended `Bash` → `Write|Edit|Bash` with lazy fail-open target-repo discrimination and a dotted-hostname guard against worktree-path false positives (#658, PR #659)
+- `readonly-verify-deferral-gate` hook (Stop, advisory): detects the anti-pattern of *offering* to run a read-only verification ("should I check?", "진행할까요?") instead of just running it and pasting the result — the inverse of the sibling `completion-signal-gate` (#642)
+- `retrospect`: Gate-7 post-compaction receipt gate — a session-level Stop-hook structural check that turns the Stage 2 "compaction + readable transcript" prose MUST into a machine-checkable receipt, after the salient-window default recurred in two independent sessions (#600, PR #639)
+- `ci`: automated GitHub Releases from CHANGELOG — `.github/workflows/release.yml` on `v*` tag push / `workflow_dispatch` builds the release body via the new shared `scripts/extract-changelog-section.sh` (13-case fixture test suite included) (#631)
+- `tests`: behavior test suite for `scripts/install.sh` / `scripts/verify-symlinks.sh` — 35 cases covering the detection/conflict branches the happy-path smoke never reaches (#647, PR #660)
+
+### Changed
+
+- `hooks`: Stop-hook signal mechanism unified on stdout JSON. The 3 python advisory hooks move from stderr+exit (effectively invisible to the user at exit 0) to `systemMessage` / `{decision: "block"}` JSON — per-hook block behavior unchanged, advisory visibility improved (#647, PR #657)
+- `hooks`: transcript JSONL scan logic hoisted into a single `hooks/_lib/_transcript.py` SoT (public API 7 functions + 1 constant); 9 hooks converted, ~430 duplicated lines removed (#643, PR #652)
+- `hooks`: `@fail_open` applied to the 9 standalone-executed hooks that lacked it; dispatch-covered vs standalone classification documented in DESIGN.md; new `check-plugin-manifests` Rule 15 invariant prevents regression (#645, PR #653)
+- `retrospect`: SKILL.md split into `references/` (1,592 → 1,283 lines) — normative body retained in place, report template / worked examples moved to reference docs (#646, PR #654)
+- `docs`: ARCHITECTURE.md gains an up-front "Architectural shape" section naming the 4 wiring patterns with anchor links (#648, PR #649); README prose converted to English with CLI docs synced (#637)
+- `ci`: GitHub Actions pinned to commit SHAs (#633); `github/codeql-action` 3.36.2 → 4.36.2 (#635); `gitleaks/gitleaks-action` 2.3.9 → 3.0.0 (#634)
+
+### Fixed
+
+- `retrospect`: Stage 1.5 Signal-4 index byte threshold lowered below the observed host load budget (`PRAXIS_RETROSPECT_INDEX_BYTE_THRESHOLD` default 30720 → 24000) and an event-driven trigger added — an observed host truncation warning now fires Signal 4 regardless of the numeric thresholds (#651)
+- audit LOW batch (#647, PR #655) — `session-intent` hook state write made atomic via `tempfile.mkstemp` + `os.replace` (H7); over-general bare `cmux-delegate` triggers `"delegate"`/`"new session"` narrowed to 5 compound phrases (S1); retrospect frontmatter delegate agent names qualified to `oh-my-claudecode:` canonical form (S4); advisory-nudge "Never block" INDEX.md wording corrected to state the 2 exceptions (H1)
+
 ## [6.2.0] - 2026-06-05
 
 24 PRs since 6.1.3. Minor release. Headline changes: the single-process hook
