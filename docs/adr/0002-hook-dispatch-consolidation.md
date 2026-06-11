@@ -106,17 +106,20 @@ returning an `int` exactly as today. The dispatcher adapts around them.
 
 ### 2.1a Scope: exact-`Bash` matcher only
 
-The `PreToolUse(Bash)` group is the **33** hooks whose manifest `matcher` is
-exactly `Bash`. Two `advisory-nudge` hooks carry multi-tool matchers and are
+The `PreToolUse(Bash)` group is the **32** hooks whose manifest `matcher` is
+exactly `Bash`. Three `advisory-nudge` hooks carry multi-tool matchers and are
 **not** in this group:
 
 - `memory-hint` (`Bash|Edit|Write|NotebookEdit|AskUserQuestion`)
 - `external-api-literal-trigger` (`Write|Edit|Bash`)
+- `block-personal-asset-leak` (`Write|Edit|Bash` — left the group when issue
+  #658 added Write/Edit surfaces; the §1.1 measurement above predates the
+  change and counted it as exact-`Bash`)
 
 Folding a multi-tool hook into a Bash-only runner would drop its
-Edit/Write/NotebookEdit firing, so both keep their standalone wrappers in this
+Edit/Write/NotebookEdit firing, so these keep their standalone wrappers in this
 phase. Registering such a hook into each of its tool groups is a follow-up.
-Net: 35 hooks fire on a `Bash` call, **33 are consolidated**, 2 stay independent.
+Net: 35 hooks fire on a `Bash` call, **32 are consolidated**, 3 stay independent.
 
 ### 2.2 Decision aggregation (most-restrictive wins)
 

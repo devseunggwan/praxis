@@ -49,17 +49,18 @@ NOOP_PAYLOAD = json.dumps(
 # --------------------------------------------------------------------------- #
 
 def test_group_members_count_and_roles():
-    # Exact-`Bash` matcher only. Two advisory hooks (memory-hint,
-    # external-api-literal-trigger) carry multi-tool matchers (Bash|Edit|Write|…)
-    # and are intentionally excluded — see ADR-0002 §2 scope note.
+    # Exact-`Bash` matcher only. Three advisory hooks (memory-hint,
+    # external-api-literal-trigger, block-personal-asset-leak) carry multi-tool
+    # matchers (Bash|Edit|Write|…) and are intentionally excluded — see
+    # ADR-0002 §2 scope note.
     members = _dispatch.group_members("PreToolUse", "Bash")
-    assert len(members) == 33, f"expected 33 exact-Bash members, got {len(members)}"
+    assert len(members) == 32, f"expected 32 exact-Bash members, got {len(members)}"
     # every impl path must exist on disk
     for role, name, impl in members:
         assert impl.exists(), f"missing impl for {role}/{name}: {impl}"
     roles = [role for role, _name, _impl in members]
     assert roles.count("preflight-gate") == 21
-    assert roles.count("advisory-nudge") == 12
+    assert roles.count("advisory-nudge") == 11
 
 
 def test_group_members_host_filter():
@@ -73,12 +74,12 @@ def test_group_members_host_filter():
     claude = _dispatch.group_members("PreToolUse", "Bash", host="claude")
     codex = _dispatch.group_members("PreToolUse", "Bash", host="codex")
 
-    assert len(unfiltered) == 33  # host=None -> canonical, unfiltered view
+    assert len(unfiltered) == 32  # host=None -> canonical, unfiltered view
     # the only host-restricted Bash members are the 2 claude-only guards
     assert names(claude) == names(unfiltered)
     assert "block-commit-without-codex-review" not in names(codex)
     assert "block-rename-sweep-survivors" not in names(codex)
-    assert len(codex) == 31
+    assert len(codex) == 30
 
 
 # --------------------------------------------------------------------------- #

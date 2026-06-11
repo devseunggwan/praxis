@@ -252,7 +252,7 @@
       "name": "block-personal-asset-leak",
       "role": "advisory-nudge",
       "event": "PreToolUse",
-      "matcher": "Bash",
+      "matcher": "Write|Edit|Bash",
       "timeout": 5
     },
     {
