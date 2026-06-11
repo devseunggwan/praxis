@@ -1,4 +1,7 @@
-"""Standard decision-emit format for praxis PreToolUse hooks (issue #470).
+"""Standard decision-emit format for praxis PreToolUse and Stop hooks.
+
+PreToolUse `permissionDecision` shape: issue #470. Stop advisory/block
+shapes: issue #647 H3 (see the Stop-event emitters section below).
 
 13 PreToolUse hooks each hand-rolled the identical `permissionDecision` JSON
 dump to stdout — `json.dump({"hookSpecificOutput": {"hookEventName":
@@ -73,4 +76,49 @@ def emit_decision(
     """
     out = stream if stream is not None else sys.stdout
     json.dump(format_decision(decision, reason, event_name), out)
+    out.write("\n")
+
+
+# --- Stop-event emitters (issue #647 H3) ------------------------------------
+#
+# completion-verify Stop hooks signal in two tiers, both as stdout JSON so the
+# whole role shares one mechanism (the shell hooks already emit
+# `{decision: "block", reason}` via jq):
+#
+#   advisory  → `{"systemMessage": ...}` + exit 0. Shown to the user in the
+#               transcript; does NOT block the stop and is NOT fed to the
+#               model. (stderr with exit 0 only reaches the debug log, so the
+#               pre-#647 stderr advisories were effectively invisible.)
+#   block     → `{"decision": "block", "reason": ...}` + exit 0. Blocks the
+#               stop; `reason` is fed to the model so it can self-correct.
+#
+# Callers own the exit code (always 0 for both shapes — blocking is carried by
+# the JSON `decision` field, not the exit code).
+
+
+def format_stop_advisory(message: str) -> dict:
+    """Return the non-blocking Stop advisory dict (no I/O)."""
+    return {"systemMessage": message}
+
+
+def format_stop_block(reason: str) -> dict:
+    """Return the blocking Stop decision dict (no I/O).
+
+    Key order matches the shell siblings' `jq -n '{decision: ..., reason: ...}'`
+    output for cross-implementation consistency.
+    """
+    return {"decision": "block", "reason": reason}
+
+
+def emit_stop_advisory(message: str, stream: Optional[TextIO] = None) -> None:
+    """Write the Stop `systemMessage` JSON to stdout (+ trailing newline)."""
+    out = stream if stream is not None else sys.stdout
+    json.dump(format_stop_advisory(message), out)
+    out.write("\n")
+
+
+def emit_stop_block(reason: str, stream: Optional[TextIO] = None) -> None:
+    """Write the Stop `{decision: block}` JSON to stdout (+ trailing newline)."""
+    out = stream if stream is not None else sys.stdout
+    json.dump(format_stop_block(reason), out)
     out.write("\n")

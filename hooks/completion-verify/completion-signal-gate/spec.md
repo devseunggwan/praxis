@@ -3,7 +3,7 @@
 Supported hosts: all
 
 `hooks/completion-signal-gate.py` fires on every `Stop` event and emits an
-advisory to stderr when the last assistant turn contains a completion-signal
+advisory (stdout `{"systemMessage": ...}` JSON) when the last assistant turn contains a completion-signal
 phrase without an evidence-block indicator in the same turn, or when a
 cross-plugin slash command is surfaced in the wrong repo context.
 
@@ -107,10 +107,13 @@ Fires in either of two forms when the cwd's active plugin is `praxis`
 
 ### Response
 
-Both rules emit advisory text to **stderr only**. No JSON is written to
+Both rules emit a single stdout `{"systemMessage": ...}` JSON object per
+invocation (messages joined with a newline when both rules fire; issue #647
+H3 standardized the completion-verify role on stdout JSON — stderr with exit
+0 only reached the debug log). No `decision` field is written to
 stdout. The hook always exits 0 — it never blocks.
 
-**Rule 1 advisory (stderr):**
+**Rule 1 advisory (systemMessage body):**
 
 ```
 [praxis:completion-signal-gate] completion-signal phrase detected in last turn without an evidence-block (Bash tool result, Read tool call, or cited '$ command → output' line).
@@ -118,7 +121,7 @@ stdout. The hook always exits 0 — it never blocks.
 [praxis:completion-signal-gate] Trigger: matched completion-signal token in last assistant turn. Add evidence or remove the completion phrase to suppress this advisory.
 ```
 
-**Rule 2 advisory (stderr):**
+**Rule 2 advisory (systemMessage body):**
 
 ```
 [praxis:completion-signal-gate] cross-plugin slash command(s) /laplace-dev-hub:close-hub-issue surfaced while cwd plugin is 'praxis'.
@@ -179,7 +182,7 @@ triple gate). This hook is complementary:
 - **Weaker evidence gate** — any Bash or Read tool call suppresses this hook;
   `completion-verify.sh` additionally requires the evidence span to be pasted
   verbatim in the message (L2).
-- **Advisory vs block** — this hook emits stderr advisory only; the sibling
+- **Advisory vs block** — this hook emits a `systemMessage` advisory only; the sibling
   hard-blocks. Both fire on the same Stop event, independently.
 
 ### Tests

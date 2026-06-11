@@ -13,9 +13,12 @@ This hook scans the final assistant message for a *completed* merge / PR / issue
 / worktree state assertion and, if no fresh state query
 (`gh pr|issue view/list/merge`, or a GitHub MCP pull_request/issue/merge read)
 appears in the recent transcript, emits an advisory. It is advisory by default
-(exit 0 + stderr; the model has already stopped, so the note reaches the user);
-`PRAXIS_MERGE_CLAIM_STRICT=1` escalates to exit 2 (re-prompts the model to
-verify). Fully fail-open; bypass with `PRAXIS_MERGE_CLAIM_BYPASS=1`.
+(stdout `{"systemMessage": ...}` JSON + exit 0 — shown to the user in the
+transcript; issue #647 H3 standardized the completion-verify role on stdout
+JSON, replacing the old stderr form that only reached the debug log);
+`PRAXIS_MERGE_CLAIM_STRICT=1` escalates to `{"decision": "block", "reason":
+...}` (re-prompts the model to verify). Fully fail-open; bypass with
+`PRAXIS_MERGE_CLAIM_BYPASS=1`.
 """
 from __future__ import annotations
 
@@ -26,6 +29,10 @@ import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_io import (  # type: ignore[import-not-found]  # noqa: E402
+    emit_stop_advisory,
+    emit_stop_block,
+)
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
@@ -166,8 +173,11 @@ def main() -> int:
     if has_fresh_state_query(events):
         return 0  # claim is backed by a recent state query
 
-    sys.stderr.write(_advisory(kinds))
-    return 2 if os.environ.get(_STRICT_ENV, "").strip() == "1" else 0
+    if os.environ.get(_STRICT_ENV, "").strip() == "1":
+        emit_stop_block(_advisory(kinds))
+    else:
+        emit_stop_advisory(_advisory(kinds))
+    return 0
 
 
 if __name__ == "__main__":

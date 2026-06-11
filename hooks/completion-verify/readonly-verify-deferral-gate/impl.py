@@ -33,9 +33,12 @@ A project that wants to recognise its own read-only CLIs sets
 PRAXIS_READONLY_VERIFY_SIGNALS to an extra regex (alternation) — no
 project-specific token is hard-coded in this file.
 
-Tier: advisory (stderr only, exit 0). PRAXIS_READONLY_VERIFY_STRICT=1 escalates
-to exit 2 (Stop is blocked and stderr is shown to the model so it re-runs the
-read). PRAXIS_READONLY_VERIFY_BYPASS=1 silences the hook entirely.
+Tier: advisory (stdout `{"systemMessage": ...}` JSON, exit 0 — issue #647 H3
+standardized the completion-verify role on stdout JSON; the old stderr form
+only reached the debug log). PRAXIS_READONLY_VERIFY_STRICT=1 escalates to
+`{"decision": "block", "reason": ...}` (Stop is blocked and the reason is fed
+to the model so it re-runs the read). PRAXIS_READONLY_VERIFY_BYPASS=1 silences
+the hook entirely.
 
 KNOWN LIMITATION (see spec.md): this is an output-scan proxy. It polices the
 *articulation* of a deferral, not the behaviour — it misses a vague offer that
@@ -57,6 +60,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_io import (  # type: ignore[import-not-found]  # noqa: E402
+    emit_stop_advisory,
+    emit_stop_block,
+)
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
@@ -300,7 +307,7 @@ ADVISORY = (
     "send/deploy).\n"
     f"{PREFIX} If the deferred action is actually a mutation, name it explicitly "
     "so the carve-out recognises it. Bypass: " + _BYPASS_ENV + "=1; "
-    "strict (exit 2): " + _STRICT_ENV + "=1."
+    "strict (decision: block): " + _STRICT_ENV + "=1."
 )
 
 
@@ -344,8 +351,11 @@ def main() -> int:
     if not _is_readonly_offer(last_text, extra):
         return 0
 
-    sys.stderr.write(ADVISORY + "\n")
-    return 2 if os.environ.get(_STRICT_ENV, "").strip() == "1" else 0
+    if os.environ.get(_STRICT_ENV, "").strip() == "1":
+        emit_stop_block(ADVISORY)
+    else:
+        emit_stop_advisory(ADVISORY)
+    return 0
 
 
 if __name__ == "__main__":

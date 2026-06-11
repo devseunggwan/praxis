@@ -3,7 +3,7 @@
 Supported hosts: all
 
 `hooks/readonly-verify-deferral-gate.sh` fires on every `Stop` event and emits
-an advisory to stderr when the last assistant turn **offers** to run a
+a stdout `{"systemMessage": ...}` JSON advisory when the last assistant turn **offers** to run a
 read-only verification ("should I check ...?", "진행할까요?") instead of just
 running it and pasting the result.
 
@@ -117,25 +117,27 @@ still warn; the offer sentence for B carries no past-run cue, so it does
 
 ## Response
 
-Advisory text to **stderr only**; no JSON on stdout.
+Advisory arrives as a single stdout `{"systemMessage": ...}` JSON object
+(issue #647 H3); stderr stays empty.
 
 ```text
 [praxis:readonly-verify-deferral-gate] a read-only verification was OFFERED instead of run: the last turn names a read-only command (SELECT…FROM, kubectl get/describe/logs, git status, --dry-run, …) and defers it to the user ('should I check?', '진행할까요?').
 [praxis:readonly-verify-deferral-gate] Rule: CLAUDE.md 'Read-only calls auto-proceed' — a read carries no mutation risk, so just run it and paste the result. Do NOT hand it back as an option. Deferral is reserved for mutations (write/push/merge/delete/send/deploy).
-[praxis:readonly-verify-deferral-gate] If the deferred action is actually a mutation, name it explicitly so the carve-out recognises it. Bypass: PRAXIS_READONLY_VERIFY_BYPASS=1; strict (exit 2): PRAXIS_READONLY_VERIFY_STRICT=1.
+[praxis:readonly-verify-deferral-gate] If the deferred action is actually a mutation, name it explicitly so the carve-out recognises it. Bypass: PRAXIS_READONLY_VERIFY_BYPASS=1; strict (decision: block): PRAXIS_READONLY_VERIFY_STRICT=1.
 ```
 
 ## Tiers / env vars
 
 | Env var | Effect |
 |---------|--------|
-| (default) | Advisory: stderr + exit 0. Never blocks. |
-| `PRAXIS_READONLY_VERIFY_STRICT=1` | Escalate to exit 2 — Stop is blocked and stderr is shown to the model so it re-runs the read. |
+| (default) | Advisory: stdout `{"systemMessage": ...}` JSON + exit 0. Never blocks. |
+| `PRAXIS_READONLY_VERIFY_STRICT=1` | Escalate to `{"decision": "block", "reason": ...}` — Stop is blocked and the reason is fed to the model so it re-runs the read. |
 | `PRAXIS_READONLY_VERIFY_BYPASS=1` | Silence the hook entirely (exit 0, no scan). |
 | `PRAXIS_READONLY_VERIFY_SIGNALS=<regex>` | OR-ed into Signal A to recognise project-specific read-only CLIs. |
 
 Exit-2-on-Stop semantics match the sibling `merge-state-claim-gate`: Claude Code
-treats a Stop hook exit 2 as "block the stop and show stderr to the model".
+treats a Stop hook `{"decision": "block"}` as "block the stop and feed the
+reason to the model" (equivalent to the exit-2 stderr form, but structured).
 
 ## KNOWN LIMITATION — output-scan proxy
 

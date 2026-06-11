@@ -15,7 +15,7 @@ Two detection rules:
   Rule 1 — completion-signal without evidence-block:
     Scan the last assistant turn for completion-signal tokens (EN/KR).
     If found AND the turn has no evidence-block indicators (Bash tool call,
-    Read tool call, cited `$ ... → output` lines), emit advisory to stderr.
+    Read tool call, cited `$ ... → output` lines), emit the advisory.
 
   Rule 2 — plugin-context anchoring (Event 2):
     Scan the last assistant message text for /command patterns.
@@ -23,9 +23,11 @@ Two detection rules:
     .claude-plugin/marketplace.json or git remote slug).
     If mismatch detected, emit advisory.
 
-Tier: advisory (stderr only, no decision JSON, exit 0).
-Advisory is a system-reminder signal; Claude will see it as additional context
-in the next turn. No blocking until tier promotion (follow-up issue).
+Tier: advisory (stdout `{"systemMessage": ...}` JSON, exit 0 — issue #647 H3
+standardized the completion-verify role on stdout JSON; the old stderr form
+only reached the debug log). No block tier — this hook never blocks.
+The systemMessage is shown to the user in the transcript only — it does NOT
+enter the model's context. No blocking until tier promotion (follow-up issue).
 
 Fail-open contract:
   - Malformed / missing stdin JSON → exit 0
@@ -43,6 +45,7 @@ import subprocess
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_io import emit_stop_advisory  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
@@ -343,11 +346,13 @@ def main() -> int:
     has_bash = has_tool_in_turn(turn, "Bash")
     has_read = has_tool_in_turn(turn, "Read")
 
+    messages: list[str] = []
+
     # Rule 1: completion-signal without evidence
     if _has_completion_signal(last_text) and not _has_evidence_block(
         last_text, has_bash, has_read
     ):
-        sys.stderr.write(ADVISORY_RULE1 + "\n")
+        messages.append(ADVISORY_RULE1)
 
     # Rule 2: plugin-context anchoring
     cwd_plugin = _get_cwd_plugin_name() or _get_cwd_git_slug()
@@ -355,10 +360,15 @@ def main() -> int:
         foreign = _detect_foreign_slash_commands(last_text, cwd_plugin)
         if foreign:
             cmds_str = ", ".join(foreign)
-            msg = ADVISORY_RULE2.replace("{cmds}", cmds_str).replace(
-                "{plugin}", cwd_plugin
+            messages.append(
+                ADVISORY_RULE2.replace("{cmds}", cmds_str).replace(
+                    "{plugin}", cwd_plugin
+                )
             )
-            sys.stderr.write(msg + "\n")
+
+    if messages:
+        # Single JSON object per invocation — both rules can fire in one stop.
+        emit_stop_advisory("\n".join(messages))
 
     return 0
 
