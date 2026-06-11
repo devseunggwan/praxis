@@ -60,8 +60,7 @@ printf '#!/bin/sh\necho foo\n' > "$CLONE/skills/foo/foo"
 chmod +x "$CLONE/skills/foo/foo"
 
 fresh_bin() {
-  BIN="$TMP_ROOT/bin-$RANDOM$RANDOM"
-  mkdir -p "$BIN"
+  BIN=$(mktemp -d "$TMP_ROOT/bin.XXXXXX")
 }
 
 install_sh() { PRAXIS_BIN_DIR="$BIN" bash "$CLONE/scripts/install.sh" "$@" 2>&1; }
@@ -160,14 +159,16 @@ run_case "verify: dangling link exits 1" "$rc" "1"
 echo "$out" | grep -q "^DANGLING   foo"; run_case "verify: reports DANGLING" "$?" "0"
 
 fresh_bin
-# Precondition: DRIFT is only meaningful if $OTHER canonicalizes to a different
-# file than the tracked source — guard explicitly so a fixture refactor that
-# moves $OTHER under the clone can't silently turn DRIFT into OK. Canonicalize
-# via python3 like the scripts themselves (BSD/GNU realpath flags differ).
+DRIFT_TARGET="$TMP_ROOT/drift-target-foo"   # own fixture — independent of the REBIND stanza
+printf '#!/bin/sh\necho drift\n' > "$DRIFT_TARGET"; chmod +x "$DRIFT_TARGET"
+# Precondition: DRIFT is only meaningful if the target canonicalizes to a
+# different file than the tracked source — guard explicitly so a fixture
+# refactor that moves it under the clone can't silently turn DRIFT into OK.
+# Canonicalize via python3 like the scripts themselves (BSD/GNU realpath differ).
 canon() { /usr/bin/env python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
 run_case "verify: drift fixture resolves outside the clone source" \
-  "$([ "$(canon "$OTHER")" != "$(canon "$CLONE/skills/foo/foo")" ] && echo yes || echo no)" "yes"
-ln -s "$OTHER" "$BIN/foo"   # resolves fine, but to a different file
+  "$([ "$(canon "$DRIFT_TARGET")" != "$(canon "$CLONE/skills/foo/foo")" ] && echo yes || echo no)" "yes"
+ln -s "$DRIFT_TARGET" "$BIN/foo"   # resolves fine, but to a different file
 out=$(verify_sh); rc=$?
 run_case "verify: foreign target exits 1" "$rc" "1"
 echo "$out" | grep -q "^DRIFT      foo"; run_case "verify: reports DRIFT" "$?" "0"
