@@ -35,11 +35,13 @@ run_case() {
   local err_file
   err_file=$(mktemp)
   if [ "$strict" = "strict" ]; then
-    echo "$payload" | PRAXIS_EXTERNAL_WRITE_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
+    echo "$payload" | env -u PRAXIS_CLUSTER_APPROVAL_STRICT -u PRAXIS_APPLIED_CLAIM_STRICT PRAXIS_EXTERNAL_WRITE_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
   elif [ "$strict" = "cluster_strict" ]; then
-    echo "$payload" | PRAXIS_CLUSTER_APPROVAL_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
+    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_APPLIED_CLAIM_STRICT PRAXIS_CLUSTER_APPROVAL_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
+  elif [ "$strict" = "applied_strict" ]; then
+    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_CLUSTER_APPROVAL_STRICT PRAXIS_APPLIED_CLAIM_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
   else
-    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_CLUSTER_APPROVAL_STRICT python3 "$HOOK" >/dev/null 2>"$err_file"
+    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_CLUSTER_APPROVAL_STRICT -u PRAXIS_APPLIED_CLAIM_STRICT python3 "$HOOK" >/dev/null 2>"$err_file"
   fi
   local rc=$?
   local err
@@ -274,6 +276,96 @@ rm -f "$CA_TRANSCRIPT_STRICT"
 run_case "cluster-approval: Write + staging path + no transcript (silent)" \
   "silent" "advisory" \
   '{"tool_name":"Write","tool_input":{"file_path":"/tmp/praxis-issue-x.md","content":"draft"}}'
+
+# --- applied-on-branch claim detection (issue #656) ---
+
+# EN applied claim in gh comment body, no reachability in transcript → warn.
+run_case "applied: EN claim to prod, no reachability (warn)" \
+  "warn" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue comment 100 --body \"The fix is deployed to prod.\""}}'
+
+# KO applied claim ("dev에 적용됨") → warn.
+run_case "applied: KO claim dev에 적용됨 (warn)" \
+  "warn" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr comment 200 --body \"수정이 dev에 적용됐습니다.\""}}'
+
+# State-only gh query in transcript must NOT clear the claim (incident shape).
+AP_TRANSCRIPT_STATE=$(mktemp)
+printf '%s\n' '{"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","id":"t1","input":{"command":"gh pr view 543 --json state"}}]}}' > "$AP_TRANSCRIPT_STATE"
+run_case "applied: state-only query does NOT clear (warn)" \
+  "warn" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue comment 100 --body \\\"Change applied to dev.\\\"\"},\"transcript_path\":\"$AP_TRANSCRIPT_STATE\"}"
+rm -f "$AP_TRANSCRIPT_STATE"
+
+# merge-base --is-ancestor in transcript clears the claim → silent.
+AP_TRANSCRIPT_MB=$(mktemp)
+printf '%s\n' '{"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","id":"t1","input":{"command":"git merge-base --is-ancestor abc123 origin/prod"}}]}}' > "$AP_TRANSCRIPT_MB"
+run_case "applied: merge-base evidence clears (silent)" \
+  "silent" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue comment 100 --body \\\"The fix is deployed to prod.\\\"\"},\"transcript_path\":\"$AP_TRANSCRIPT_MB\"}"
+rm -f "$AP_TRANSCRIPT_MB"
+
+# baseRefName query in transcript clears the claim → silent.
+AP_TRANSCRIPT_BRN=$(mktemp)
+printf '%s\n' '{"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","id":"t1","input":{"command":"gh pr view 543 --json state,baseRefName"}}]}}' > "$AP_TRANSCRIPT_BRN"
+run_case "applied: baseRefName evidence clears (silent)" \
+  "silent" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 200 --body \\\"변경이 prod 브랜치에 반영됐습니다.\\\"\"},\"transcript_path\":\"$AP_TRANSCRIPT_BRN\"}"
+rm -f "$AP_TRANSCRIPT_BRN"
+
+# Negated claim line → silent.
+run_case "applied: negated claim (silent)" \
+  "silent" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue comment 100 --body \"아직 prod에 적용되지 않았습니다.\""}}'
+
+# Branch token without applied token → silent.
+run_case "applied: branch token only (silent)" \
+  "silent" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue comment 100 --body \"Checked out the dev branch for testing.\""}}'
+
+# Applied token without branch token → silent.
+run_case "applied: applied token only (silent)" \
+  "silent" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue comment 100 --body \"Formatting applied across all files.\""}}'
+
+# Strict mode → block.
+run_case "applied: strict mode (block)" \
+  "block" "applied_strict" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue comment 100 --body \"Hotfix landed on main.\""}}'
+
+# Review fix: grep of the baseRefName literal must NOT clear the claim.
+AP_TRANSCRIPT_GREP=$(mktemp)
+printf '%s\n' '{"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","id":"t1","input":{"command":"grep -n baseRefName hooks/advisory-nudge/external-write-falsify-check/impl.py"}}]}}' > "$AP_TRANSCRIPT_GREP"
+run_case "applied: grep baseRefName does NOT clear (warn)" \
+  "warn" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue comment 100 --body \\\"The fix is applied to prod.\\\"\"},\"transcript_path\":\"$AP_TRANSCRIPT_GREP\"}"
+rm -f "$AP_TRANSCRIPT_GREP"
+
+# Review fix: long-flag `git branch --merged --contains` clears → silent.
+AP_TRANSCRIPT_LONG=$(mktemp)
+printf '%s\n' '{"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","id":"t1","input":{"command":"git branch --merged --contains abc123"}}]}}' > "$AP_TRANSCRIPT_LONG"
+run_case "applied: branch long-flag --contains clears (silent)" \
+  "silent" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue comment 100 --body \\\"The fix is applied to prod.\\\"\"},\"transcript_path\":\"$AP_TRANSCRIPT_LONG\"}"
+rm -f "$AP_TRANSCRIPT_LONG"
+
+# Review fix: 'without incident' must NOT suppress the claim → warn.
+run_case "applied: without-incident still fires (warn)" \
+  "warn" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue comment 100 --body \"Deployed to prod without incident.\""}}'
+
+# Review fix: 'released the lock' prose no longer false-positives → silent.
+run_case "applied: released-lock prose (silent)" \
+  "silent" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue comment 100 --body \"Released the lock on the main thread.\""}}'
+
+# Codex P2: baseRefName-only query (no state field) must NOT clear → warn.
+AP_TRANSCRIPT_BRO=$(mktemp)
+printf '%s\n' '{"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","id":"t1","input":{"command":"gh pr view 543 --json baseRefName"}}]}}' > "$AP_TRANSCRIPT_BRO"
+run_case "applied: baseRefName-only query does NOT clear (warn)" \
+  "warn" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue comment 100 --body \\\"The fix is applied to prod.\\\"\"},\"transcript_path\":\"$AP_TRANSCRIPT_BRO\"}"
+rm -f "$AP_TRANSCRIPT_BRO"
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"

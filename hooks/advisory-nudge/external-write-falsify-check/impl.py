@@ -417,6 +417,82 @@ AUTHOR_EXEMPT_ADVISORY = (
 
 
 # ---------------------------------------------------------------------------
+# Applied-on-branch claim detection (issue #656)
+# ---------------------------------------------------------------------------
+# "X applied/deployed/blocked on branch Y" published to an external surface is
+# a reference-frame claim: existence on ref A is not application on ref B
+# (stacked-PR base, dev-commit-date != prod-apply-date). Such a claim requires
+# reachability evidence in the recent transcript — a generic PR state query is
+# NOT sufficient (the 2026-05-15 incident ran `gh pr view --json state` and
+# still mis-released 3 changes).
+
+# Lookarounds (not \b) so Korean particles ("dev에", "prod에서") match.
+_BRANCH_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(dev|prod|main|master|release)(?![A-Za-z0-9_])"
+    r"|브랜치|(?<![A-Za-z0-9_])branch(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
+# `released` is deliberately absent — it false-positives on lock/memory
+# release prose ("released the lock on the main thread") and double-counts
+# with the `release` branch token; applied/deployed/landed + 배포/반영 cover
+# the deploy sense.
+_APPLIED_TOKEN_RE = re.compile(
+    r"\b(applied|deployed|landed)\b|\bblocked\s+since\b"
+    r"|적용\s*(됐|했|됨|되었|완료)|배포\s*(됐|됨|되었|완료)|반영\s*(됐|됨|되었|완료)|차단\s*(됐|됨|되었)",
+    re.IGNORECASE,
+)
+# `\bwithout\b` is deliberately absent — genuine deploy claims routinely carry
+# it ("Deployed to prod without incident") and would be silently suppressed.
+# `fail` stays: "prod 배포 실패" is a failure report, not an applied claim;
+# the cost (an applied claim co-occurring with "failing" prose is missed) is
+# accepted and documented.
+_APPLIED_NEGATION_RE = re.compile(
+    r"\bnot\b|n't\b|\byet\b|아직|않|못\s|안\s|없|실패|fail",
+    re.IGNORECASE,
+)
+# Mirrored in hooks/completion-verify/merge-state-claim-gate (2 copies — DRY
+# extraction deferred to a 3rd consumer per repo convention). The baseRefName
+# arm requires the `--json` query context AND a `state` field in the same
+# command (either order): a bare-token match would let `grep baseRefName
+# impl.py` silently clear a genuine claim, and a baseRefName-only query never
+# confirms the PR actually merged — the canonical probe is
+# `--json state,baseRefName`. `--contains` tolerates both short (-r) and long
+# (--merged) intervening flags.
+_REACHABILITY_VERIF_RE = re.compile(
+    r"merge-base\s+--is-ancestor"
+    r"|--json[^|;&\n]*(?:state[^|;&\n]*baseRefName|baseRefName[^|;&\n]*state)"
+    r"|\bbranch\b\s+(?:--?\w[\w-]*\s+)*--contains",
+    re.IGNORECASE,
+)
+
+APPLIED_CLAIM_ADVISORY = (
+    "REMINDER (External-Surface Write / Applied-on-Branch): body asserts a "
+    "change is applied/deployed/blocked on a branch, but no reachability "
+    "probe (`git merge-base --is-ancestor`, `gh pr view --json "
+    "state,baseRefName`, `git branch --contains`) is found in the recent "
+    "transcript.\n"
+    "Existence on ref A is not application on ref B — PR state=MERGED does "
+    "not prove the change reached the target branch (issue #656).\n"
+    "Run the reachability probe and cite its output inline "
+    "(`Probe: <command> -> <output>`) before publishing.\n"
+    "Set PRAXIS_APPLIED_CLAIM_STRICT=1 to convert this advisory into a "
+    "hard block (exit 2).\n"
+)
+
+
+def _has_applied_on_branch_claim(body: str) -> bool:
+    """True if any body line pairs a branch token with an applied-state token
+    and is not negated (line-localized, same approach as the merge-state gate)."""
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line or _APPLIED_NEGATION_RE.search(line):
+            continue
+        if _BRANCH_TOKEN_RE.search(line) and _APPLIED_TOKEN_RE.search(line):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Cluster-approval language detection (issue #276)
 # ---------------------------------------------------------------------------
 # Detects the pattern: user approves a cluster of tasks in bulk ("all 4 together",
@@ -583,6 +659,7 @@ def main() -> int:
     # --- Check 2: author-exempt claim-shape (issue #183) ---
     combined = "\n".join(all_bodies)
     categorized = _extract_categorized_identifiers(combined)
+    commands: list[str] | None = None
     if categorized:
         commands = _recent_bash_commands(transcript_path)
         unverified = _unverified_identifiers(categorized, commands)
@@ -590,6 +667,15 @@ def main() -> int:
             sample = ", ".join(list(dict.fromkeys(unverified))[:3])
             sys.stderr.write(AUTHOR_EXEMPT_ADVISORY.format(identifiers=sample))
             if os.environ.get("PRAXIS_AUTHOR_EXEMPT_STRICT") == "1":
+                exit_code = 2
+
+    # --- Check 4: applied-on-branch claim without reachability probe (#656) ---
+    if _has_applied_on_branch_claim(combined):
+        if commands is None:
+            commands = _recent_bash_commands(transcript_path)
+        if not any(_REACHABILITY_VERIF_RE.search(cmd) for cmd in commands):
+            sys.stderr.write(APPLIED_CLAIM_ADVISORY)
+            if os.environ.get("PRAXIS_APPLIED_CLAIM_STRICT") == "1":
                 exit_code = 2
 
     return exit_code
