@@ -35,11 +35,11 @@ run_case() {
   local err_file
   err_file=$(mktemp)
   if [ "$strict" = "strict" ]; then
-    echo "$payload" | PRAXIS_EXTERNAL_WRITE_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
+    echo "$payload" | env -u PRAXIS_CLUSTER_APPROVAL_STRICT -u PRAXIS_APPLIED_CLAIM_STRICT PRAXIS_EXTERNAL_WRITE_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
   elif [ "$strict" = "cluster_strict" ]; then
-    echo "$payload" | PRAXIS_CLUSTER_APPROVAL_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
+    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_APPLIED_CLAIM_STRICT PRAXIS_CLUSTER_APPROVAL_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
   elif [ "$strict" = "applied_strict" ]; then
-    echo "$payload" | PRAXIS_APPLIED_CLAIM_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
+    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_CLUSTER_APPROVAL_STRICT PRAXIS_APPLIED_CLAIM_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
   else
     echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_CLUSTER_APPROVAL_STRICT -u PRAXIS_APPLIED_CLAIM_STRICT python3 "$HOOK" >/dev/null 2>"$err_file"
   fi

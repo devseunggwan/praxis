@@ -35,7 +35,7 @@ the model to verify before stopping.
 | Final message asserts a completed merge/PR/issue/worktree state AND no fresh state query in the recent transcript | `[merge-state-claim-gate]` advisory |
 | Same, but a fresh `gh pr\|issue …` command or GitHub MCP pull_request/issue/merge tool is present in the recent transcript | silent (claim is backed) |
 | Final message asserts an **applied-on-branch** state (`applied`/`deployed`/`적용됨`/`배포됨` …) AND no **reachability probe** in the recent transcript — a generic state query does NOT clear this kind (#656) | `[merge-state-claim-gate]` advisory with reachability guidance |
-| Applied-on-branch claim WITH a reachability probe (`git merge-base --is-ancestor`, `baseRefName` query, `git branch --contains`) in the recent transcript | silent (claim is backed) |
+| Applied-on-branch claim WITH a reachability probe (`git merge-base --is-ancestor`, `--json state,baseRefName` query, `git branch --contains`) in the recent transcript | silent (claim is backed) |
 | Final message has no such claim | silent |
 | Claim line is negated (`not`, `yet`, `아직`, `않`, …) | silent |
 | Future intent only (`I'll create a PR`, `ready to merge`) | silent (completion tokens are past/perfective) |
@@ -121,7 +121,7 @@ transcript, and any uncaught exception (via the shared `@fail_open` decorator in
 bash tests/hooks/completion-verify/test_merge_state_claim_gate.sh
 ```
 
-38 cases: English/Korean claim without evidence (advisory), claim with `gh`
+39 cases: English/Korean claim without evidence (advisory), claim with `gh`
 evidence / GitHub MCP evidence (silent), neutral message (silent), negated claim
 (silent), future intent (silent), strict mode (decision: block), bypass (silent),
 `stop_hook_active` loop guard (silent), worktree-cleanup claim (advisory),
@@ -135,4 +135,5 @@ guidance), applied strict mode (decision: block), and 4 review-fix
 regressions: `grep baseRefName` does not clear, long-flag
 `branch --merged --contains` clears, `without incident` does not suppress,
 `released the lock` prose stays silent, baseRefName-only query does not
-clear (codex P2).
+clear (codex P2), applied-only advisory drops the (false) generic
+"no fresh state query" sentence when a state query exists (CodeRabbit).

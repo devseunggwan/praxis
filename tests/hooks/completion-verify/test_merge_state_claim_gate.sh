@@ -292,6 +292,21 @@ run_case silent "released-lock-prose-silent" '{}'
 build_transcript "The fix is applied to prod." baserefname-only
 run_case advisory "baserefname-only-does-not-clear" '{}'
 
+# --- CodeRabbit fix: applied-only advisory must NOT carry the (false) -------
+# "no fresh state query" sentence when a state query IS present — only the
+# applied-specific guidance applies in that shape.
+build_transcript "PR #543 merged — fix applied to prod." gh
+printf '%s' "$(python3 -c 'import json,sys; print(json.dumps({"transcript_path": sys.argv[1]}))' "$TRANSCRIPT")" \
+  | python3 "$HOOK" 2>/dev/null \
+  | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+msg = d["systemMessage"]
+assert "applied-on-branch" in msg, msg
+assert "no fresh state query" not in msg, msg
+' && { echo "PASS  [applied-only-advisory-no-false-sentence]"; PASS=$((PASS + 1)); } \
+  || { echo "FAIL  [applied-only-advisory-no-false-sentence]"; FAIL=$((FAIL + 1)); }
+
 # --- missing transcript path -> fail-open silent --------------------------
 TRANSCRIPT="/nonexistent/transcript.jsonl"
 run_case silent "missing-transcript" '{}'

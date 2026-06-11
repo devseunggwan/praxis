@@ -217,19 +217,27 @@ def has_reachability_evidence(events: list[dict]) -> bool:
 
 
 def _advisory(kinds: list[str]) -> str:
-    msg = (
-        f"{_PREFIX} final message asserts a {'/'.join(kinds)} state change but no "
-        "fresh state query (`gh pr|issue view/list/merge` or a GitHub MCP "
-        "pull_request/issue read) appears in the recent transcript.\n"
-        f"{_PREFIX} Rule: re-read the state you are about to assert "
-        "(gh pr view / gh issue view / mcp__github__pull_request_read) and cite "
-        "the result BEFORE declaring it — merge/close/create claims from memory "
-        "have repeatedly hallucinated (issue #503).\n"
-    )
+    # The "no fresh state query" sentence is only true for the non-applied
+    # kinds — an "applied" claim can be unbacked even when a state query
+    # exists (that is exactly the incident shape), so the generic sentence
+    # is emitted only when a non-applied kind is actually unbacked.
+    msg = ""
+    other = [k for k in kinds if k != "applied"]
+    if other:
+        msg += (
+            f"{_PREFIX} final message asserts a {'/'.join(other)} state change but no "
+            "fresh state query (`gh pr|issue view/list/merge` or a GitHub MCP "
+            "pull_request/issue read) appears in the recent transcript.\n"
+            f"{_PREFIX} Rule: re-read the state you are about to assert "
+            "(gh pr view / gh issue view / mcp__github__pull_request_read) and cite "
+            "the result BEFORE declaring it — merge/close/create claims from memory "
+            "have repeatedly hallucinated (issue #503).\n"
+        )
     if "applied" in kinds:
         msg += (
-            f"{_PREFIX} 'applied'-on-branch claims need REACHABILITY evidence, "
-            "not just a state query: PR state=MERGED does NOT prove the change "
+            f"{_PREFIX} final message asserts an applied-on-branch state without "
+            "REACHABILITY evidence in the recent transcript. A state query is "
+            "not sufficient: PR state=MERGED does NOT prove the change "
             "reached the target branch (stacked-PR base; issue #656). Run "
             "`gh pr view <N> --json state,baseRefName` or "
             "`git merge-base --is-ancestor <sha> origin/<target>` and cite the "
