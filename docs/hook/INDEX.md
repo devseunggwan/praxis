@@ -47,8 +47,13 @@ confirmation-prompt layer.
 
 ## advisory-nudge
 
-Pre-tool stderr hints. **Never block** — emit reminders for recurrent patterns
-so the agent can self-correct. Fail-open on infrastructure errors by design.
+Pre-tool stderr hints. **Default: never block** — emit reminders for recurrent
+patterns so the agent can self-correct. Documented exceptions escalate beyond
+stderr: hooks marked "opt-in strict" in the table emit `ask`/`deny`/block only
+when their strict-mode env var is set, and `output-block-falsify-advisory`'s
+T1 tier hard-denies — without any env gate — when the exact `(Recommended)`
+marker appears without an accompanying `Falsified:` line (issue #393).
+Fail-open on infrastructure errors by design.
 
 | Hook | Trigger | Purpose |
 |------|---------|---------|
@@ -60,7 +65,7 @@ so the agent can self-correct. Fail-open on infrastructure errors by design.
 | [memory-hint](../../hooks/advisory-nudge/memory-hint/spec.md) | PreToolUse | Surface hookable memory entries by keyword at decision-construction time |
 | [external-write-falsify-check](../../hooks/advisory-nudge/external-write-falsify-check/spec.md) | PreToolUse (opt-in) | Warn before posting hypothesis-stage text to PR / issue / Slack / Notion |
 | [external-api-literal-trigger](../../hooks/advisory-nudge/external-api-literal-trigger/spec.md) | PreToolUse | Advisory nudge when ALL_CAPS enum candidates or 3-part SQL identifiers are written without prior retrieval verification |
-| [output-block-falsify-advisory](../../hooks/advisory-nudge/output-block-falsify-advisory/spec.md) | PreToolUse | Advisory nudge to run output-block falsification gate before surfacing `(Recommended)` options or bulk-action commands |
+| [output-block-falsify-advisory](../../hooks/advisory-nudge/output-block-falsify-advisory/spec.md) | PreToolUse | Output-block falsification gate before surfacing `(Recommended)` options or bulk-action commands — T1 (exact `(Recommended)` marker without `Falsified:` line) hard-denies; T2 (confidence-anchoring tokens) emits `ask` |
 | [advisory-wrapper-signature-verify](../../hooks/advisory-nudge/advisory-wrapper-signature-verify/spec.md) | PreToolUse | Advisory nudge to verify wrapped function signatures before writing wrapper/client code |
 | [jq-config-empty-dict-advisory](../../hooks/advisory-nudge/jq-config-empty-dict-advisory/spec.md) | PreToolUse | Advisory nudge when `jq` reads a config file (settings.json, hooks.json, ~/.claude/*.json, ~/.codex/*.json) that is empty or invalid JSON |
 | [bash-worktree-existence-advisory](../../hooks/advisory-nudge/bash-worktree-existence-advisory/spec.md) | PreToolUse | Advisory nudge when `cd <path>` targets a path that does not exist on disk |
