@@ -264,6 +264,39 @@ GATE7_VIOLATION=""
 if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCRIPT_PATH" 2>/dev/null; then
   if ! printf '%s\n' "$MOST_RECENT_BLOCK" | grep -qF 'retrospect:transcript_receipt'; then
     GATE7_VIOLATION="post-compaction session but the Stage 3 report has no '<!-- retrospect:transcript_receipt begin/end -->' fence — run the full-transcript friction scan and paste the REAL command output (is_error / user-turn / interrupt counts) in the receipt fence before Stage 3"
+  elif printf '%s\n' "$MOST_RECENT_BLOCK" | grep -qF 'retrospect:transcript_receipt_skipped'; then
+    : # Skipped variant is legitimate (SKILL.md governs when); no content check.
+  else
+    # Content-enumeration check [issue #664]: a real receipt is present. A
+    # 'grep -c' count proves a scan RAN, not that the errors were READ — the
+    # exact gap that let a salient-window pass survive Gate-7 (the receipt's
+    # count satisfied the fence while the error contents went unexamined, and
+    # the most adverse error was silently dropped). When the receipt declares
+    # is_error_count > 0, require a per-event 'retrospect:is_error_enum' block so
+    # each error is surfaced with a promote/note/dismiss disposition. This turns
+    # invisible silent omission into visible (challengeable) mis-disposition.
+    ie_count=$(printf '%s\n' "$MOST_RECENT_BLOCK" \
+      | grep -oE 'is_error_count:[[:space:]]*[0-9]+' | grep -oE '[0-9]+' | head -1)
+    if [ -n "$ie_count" ] && [ "$ie_count" -gt 0 ] 2>/dev/null; then
+      # A bare substring match on 'retrospect:is_error_enum' would itself
+      # reintroduce the count-not-content gap one layer down: a prose mention,
+      # a lone begin marker, or an empty begin/end pair with no rows would all
+      # pass while enumerating nothing. So require the actual fenced block —
+      # both begin AND end markers — AND at least one disposition row
+      # (promote|note|dismiss) BETWEEN them. The awk scan counts disposition
+      # rows only while inside the fence, so rows leaking outside the block do
+      # not satisfy the gate.
+      ie_begin=$(printf '%s\n' "$MOST_RECENT_BLOCK" | grep -cF 'retrospect:is_error_enum begin')
+      ie_end=$(printf '%s\n' "$MOST_RECENT_BLOCK" | grep -cF 'retrospect:is_error_enum end')
+      ie_rows=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk '
+        /retrospect:is_error_enum begin/ { inblock=1; next }
+        /retrospect:is_error_enum end/   { inblock=0 }
+        inblock && /disposition:[[:space:]]*(promote|note|dismiss)/ { c++ }
+        END { print c+0 }')
+      if [ "$ie_begin" -lt 1 ] || [ "$ie_end" -lt 1 ] || [ "$ie_rows" -lt 1 ]; then
+        GATE7_VIOLATION="post-compaction receipt declares is_error_count=$ie_count but has no complete '<!-- retrospect:is_error_enum begin/end -->' block with per-event disposition rows (found begin=$ie_begin end=$ie_end disposition_rows=$ie_rows) — a count proves a scan ran, not that the errors were read; enumerate each is_error inside the fence with a promote/note/dismiss disposition before Stage 3"
+      fi
+    fi
   fi
 fi
 

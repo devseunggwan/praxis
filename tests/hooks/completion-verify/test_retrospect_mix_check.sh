@@ -904,8 +904,37 @@ mk_compaction() {
 }
 
 # Receipt fence (real-output form) and the unreachable-skip variant.
+# [issue #664] is_error_count > 0 requires a nested retrospect:is_error_enum block
+# (count proves a scan ran, not that the errors were read).
 G_RECEIPT_FENCE='<!-- retrospect:transcript_receipt begin -->
 is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0
+<!-- retrospect:is_error_enum begin -->
+- [1] hook advisory fire | disposition: dismiss (negative-list: expected enforcement)
+- [2] transient timeout | disposition: note (retried, resolved)
+- [3] classifier blocked a fabrication attempt | disposition: promote (finding #1)
+<!-- retrospect:is_error_enum end -->
+<!-- retrospect:transcript_receipt end -->'
+# Count-only receipt (is_error_count > 0 but NO enum block) — the issue #664 gap.
+G_RECEIPT_COUNT_ONLY='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0
+<!-- retrospect:transcript_receipt end -->'
+# Zero-error receipt — no enum block required (nothing to enumerate).
+G_RECEIPT_ZERO='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | user_turn_count: 5 | interrupt_count: 0
+<!-- retrospect:transcript_receipt end -->'
+# Enum bypass #1: only the begin marker (no end, no disposition rows). A bare
+# substring check on 'retrospect:is_error_enum' would pass this; the strengthened
+# begin+end+row check must block it [issue #664 / Codex F2].
+G_RECEIPT_ENUM_MARKER_ONLY='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0
+<!-- retrospect:is_error_enum begin -->
+<!-- retrospect:transcript_receipt end -->'
+# Enum bypass #2: complete begin/end fence but EMPTY (no disposition row). The
+# block enumerates nothing — must still block [issue #664 / Codex F2].
+G_RECEIPT_ENUM_EMPTY='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0
+<!-- retrospect:is_error_enum begin -->
+<!-- retrospect:is_error_enum end -->
 <!-- retrospect:transcript_receipt end -->'
 G_RECEIPT_SKIPPED='<!-- retrospect:transcript_receipt_skipped: transcript unreachable -->'
 
@@ -946,6 +975,42 @@ G5_MENTION='this session discusses the "isCompactSummary":true compaction marker
 G5_TRANSCRIPT="$(mk_assistant "$G5_MENTION")
 $(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")"
 run_case "G5_pass_textual_mention_not_false_triggered" "pass" "$G5_TRANSCRIPT"
+
+# G6: block — post-compaction, receipt present with is_error_count=3 > 0 but NO
+# nested 'retrospect:is_error_enum' content block [issue #664]. A count-only
+# receipt proves a scan ran, not that the errors were read; Gate-7 content check
+# fires. This is the exact gap that let a salient-window pass survive the gate.
+G6_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_COUNT_ONLY}"
+G6_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$G6_REPORT")"
+run_case "G6_block_postcompaction_receipt_count_only_no_enum" "block" "$G6_TRANSCRIPT"
+
+# G7: pass — post-compaction, receipt with is_error_count=0. No enum block is
+# required (nothing to enumerate); the content check must NOT fire on zero errors.
+G7_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_ZERO}"
+G7_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$G7_REPORT")"
+run_case "G7_pass_postcompaction_receipt_zero_errors_no_enum_needed" "pass" "$G7_TRANSCRIPT"
+
+# G8: block — enum begin marker present but no end marker and no disposition row.
+# A bare substring match would let this pass; the begin+end+row check blocks it
+# [issue #664 / Codex F2 — marker presence must not substitute for content].
+G8_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_ENUM_MARKER_ONLY}"
+G8_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$G8_REPORT")"
+run_case "G8_block_postcompaction_enum_begin_marker_only" "block" "$G8_TRANSCRIPT"
+
+# G9: block — complete enum begin/end fence but EMPTY (no disposition row). The
+# fence enumerates nothing, so the count-not-content gap reappears one layer down;
+# the disposition-row count must be >= 1 [issue #664 / Codex F2].
+G9_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_ENUM_EMPTY}"
+G9_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$G9_REPORT")"
+run_case "G9_block_postcompaction_enum_fence_empty_no_rows" "block" "$G9_TRANSCRIPT"
 
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
