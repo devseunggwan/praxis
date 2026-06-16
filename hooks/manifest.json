@@ -45,6 +45,19 @@
       "timeout": 5
     },
     {
+      "name": "retrospect-active-marker",
+      "role": "preflight-gate",
+      "event": "UserPromptSubmit",
+      "timeout": 5
+    },
+    {
+      "name": "retrospect-active-marker",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Skill",
+      "timeout": 5
+    },
+    {
       "name": "postcompact-context",
       "role": "advisory-nudge",
       "event": "UserPromptSubmit",
