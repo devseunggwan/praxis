@@ -67,7 +67,9 @@ See [ARCHITECTURE.md → Hook index](ARCHITECTURE.md#hook-index) for the full
 list and per-hook spec links (specs live at `hooks/<role>/<name>/spec.md`;
 the [`docs/hook/INDEX.md`](docs/hook/INDEX.md) index links to them), and
 [DESIGN.md → Hook Design Contracts](DESIGN.md#hook-design-contracts) for the
-shared design contracts every hook follows.
+shared design contracts every hook follows. For a generated summary of hook
+roles, events, host filters, and strict/bypass knobs, see the
+[`Hook Operating Matrix`](docs/hook-operating-matrix.md).
 
 ## Prerequisites
 

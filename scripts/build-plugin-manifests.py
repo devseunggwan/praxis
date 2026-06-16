@@ -28,6 +28,7 @@ Writes (generated artifacts, committed to the repo):
                                    (name, wrapper_suffix) pair; tracked
                                    so marketplace installs (which do not
                                    run this build) get a working tree
+  docs/hook-operating-matrix.md  - generated hook operating surface summary
 
 Also creates `plugins/praxis/{skills,hooks,scripts}` as symlinks into the
 repo root so the Codex adapter shell forwards to the common runtime
@@ -62,6 +63,9 @@ ADAPTER_SHELL = REPO_ROOT / "plugins" / "praxis"
 FORWARDED_DIRS = ("skills", "hooks", "scripts")
 HOOKS_DIR = REPO_ROOT / "hooks"
 DOCS_HOOK_DIR = REPO_ROOT / "docs" / "hook"
+HOOK_OPERATING_MATRIX_PATH = REPO_ROOT / "docs" / "hook-operating-matrix.md"
+BYPASS_VARS_DOC = REPO_ROOT / "docs" / "bypass-vars.md"
+SECURITY_DOC = REPO_ROOT / "SECURITY.md"
 
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from constants import NON_HOOK_DOCS, OPT_IN_HOOKS  # noqa: E402
@@ -471,6 +475,199 @@ def emit_doc_stubs(manifest: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Hook operating matrix
+# ---------------------------------------------------------------------------
+
+def _md_cell(value: str) -> str:
+    """Escape content for a markdown table cell."""
+    return value.replace("|", "\\|").replace("\n", "<br>")
+
+
+def _compact_join(values: list[str]) -> str:
+    uniq = sorted({v for v in values if v})
+    return ", ".join(uniq) if uniq else "-"
+
+
+def _hook_events(entries: list[dict]) -> str:
+    labels: list[str] = []
+    for entry in entries:
+        event = entry["event"]
+        matcher = entry.get("matcher")
+        if matcher:
+            labels.append(f"{event}({matcher})")
+        else:
+            labels.append(event)
+    return _compact_join(labels)
+
+
+def _hook_hosts(entries: list[dict]) -> str:
+    host_sets = {
+        ",".join(entry.get("hosts") or ["all"])
+        for entry in entries
+    }
+    return _compact_join(list(host_sets))
+
+
+def _default_signal(role: str) -> str:
+    if role == "preflight-gate":
+        return "gate"
+    if role == "advisory-nudge":
+        return "advisory"
+    if role == "postuse-correction":
+        return "postuse"
+    if role == "completion-verify":
+        return "stop/session"
+    return role
+
+
+def _parse_env_table(section: str, hook_names: list[str]) -> dict[str, list[str]]:
+    """Map hook name -> env vars from a section in docs/bypass-vars.md."""
+    if not BYPASS_VARS_DOC.exists():
+        return {}
+    text = BYPASS_VARS_DOC.read_text()
+    marker = f"## {section}"
+    start = text.find(marker)
+    if start < 0:
+        return {}
+    next_start = text.find("\n## ", start + len(marker))
+    body = text[start: next_start if next_start >= 0 else len(text)]
+    out: dict[str, list[str]] = {}
+    for line in body.splitlines():
+        if not line.startswith("| `"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        var = cells[0].strip("`")
+        if section == "Strict" and var.endswith("_ACK"):
+            continue
+        hook_cell = cells[1]
+        for hook_name in hook_names:
+            if hook_name in hook_cell:
+                out.setdefault(hook_name, []).append(var)
+    return out
+
+
+def _parse_state_vars(hook_names: list[str]) -> dict[str, list[str]]:
+    """Map hook name -> state/path env vars from the registry."""
+    if not BYPASS_VARS_DOC.exists():
+        return {}
+    text = BYPASS_VARS_DOC.read_text()
+    marker = "## Path / test"
+    start = text.find(marker)
+    if start < 0:
+        return {}
+    next_start = text.find("\n## ", start + len(marker))
+    body = text[start: next_start if next_start >= 0 else len(text)]
+    out: dict[str, list[str]] = {}
+    for line in body.splitlines():
+        if not line.startswith("| `"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 3:
+            continue
+        var = cells[0].strip("`")
+        hook_cell = cells[2]
+        for hook_name in hook_names:
+            if hook_name in hook_cell:
+                out.setdefault(hook_name, []).append(var)
+    return out
+
+
+def _parse_external_commands() -> dict[str, list[str]]:
+    """Map hook name -> read-only external command snippets from SECURITY.md."""
+    if not SECURITY_DOC.exists():
+        return {}
+    out: dict[str, list[str]] = {}
+    for line in SECURITY_DOC.read_text().splitlines():
+        if not line.startswith("| `hooks/"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        hook_path = cells[0].strip("`")
+        parts = hook_path.split("/")
+        if len(parts) < 3:
+            continue
+        hook_name = parts[2]
+        command = cells[1].strip("`")
+        out.setdefault(hook_name, []).append(command)
+    return out
+
+
+def render_hook_operating_matrix(manifest: dict) -> str:
+    """Render a generated hook operating-surface matrix.
+
+    The matrix intentionally uses only structured sources that already have
+    drift gates: hooks/manifest.json for registration shape, docs/bypass-vars.md
+    for env vars, and SECURITY.md for read-only external command declarations.
+    Track 4 can replace remaining blanks with richer structured metadata.
+    """
+    by_name: dict[str, list[dict]] = {}
+    for entry in manifest["hooks"]:
+        by_name.setdefault(entry["name"], []).append(entry)
+
+    hook_names = sorted(by_name)
+    bypass_vars = _parse_env_table("Opt-out", hook_names)
+    strict_vars = _parse_env_table("Strict", hook_names)
+    state_vars = _parse_state_vars(hook_names)
+    external_commands = _parse_external_commands()
+
+    lines = [
+        "# Hook Operating Matrix",
+        "",
+        "<!-- AUTO-GENERATED by scripts/build-plugin-manifests.py - DO NOT EDIT -->",
+        "",
+        "This matrix summarizes the hook operating surface from structured repo",
+        "sources. Regenerate it with `./scripts/build-plugin-manifests.py`; drift",
+        "is checked by `./scripts/check-plugin-manifests.py`.",
+        "",
+        "Sources:",
+        "- `hooks/manifest.json` -> role, event, matcher, hosts",
+        "- `docs/bypass-vars.md` -> bypass, strict, and state/path variables",
+        "- `SECURITY.md` -> read-only external-command declarations",
+        "",
+        "A `-` in the state/path or external-command columns means no structured",
+        "declaration exists in the sources above. Track 4 should promote remaining",
+        "spec-only prose metadata into a structured source before this matrix",
+        "becomes exhaustive.",
+        "",
+        "| Hook | Role | Events | Hosts | Default | Strict env | Bypass env | State/path vars | External commands |",
+        "|------|------|--------|-------|---------|------------|------------|-----------------|-------------------|",
+    ]
+    for name in sorted(by_name):
+        entries = by_name[name]
+        role = entries[0]["role"]
+        spec = f"[`{name}`](../hooks/{role}/{name}/spec.md)"
+        lines.append(
+            "| "
+            + " | ".join([
+                spec,
+                _md_cell(role),
+                _md_cell(_hook_events(entries)),
+                _md_cell(_hook_hosts(entries)),
+                _md_cell(_default_signal(role)),
+                _md_cell(_compact_join(strict_vars.get(name, []))),
+                _md_cell(_compact_join(bypass_vars.get(name, []))),
+                _md_cell(_compact_join(state_vars.get(name, []))),
+                _md_cell(_compact_join(external_commands.get(name, []))),
+            ])
+            + " |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def emit_hook_operating_matrix(manifest: dict) -> list[str]:
+    body = render_hook_operating_matrix(manifest)
+    existing = HOOK_OPERATING_MATRIX_PATH.read_text() if HOOK_OPERATING_MATRIX_PATH.exists() else None
+    if existing == body:
+        return []
+    HOOK_OPERATING_MATRIX_PATH.write_text(body)
+    return [str(HOOK_OPERATING_MATRIX_PATH.relative_to(REPO_ROOT))]
+
+
+# ---------------------------------------------------------------------------
 # Plugin / marketplace / gemini-extension renderers (unchanged)
 # ---------------------------------------------------------------------------
 
@@ -614,6 +811,9 @@ def main() -> int:
 
     # docs/hook/<name>.md redirect stubs, one per hook dir (ADR-0001 §337-338, #606).
     changed_paths.extend(emit_doc_stubs(manifest))
+
+    # Generated operating-surface matrix for hook owners and users.
+    changed_paths.extend(emit_hook_operating_matrix(manifest))
 
     if changed_paths:
         print("wrote:")
