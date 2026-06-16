@@ -18,6 +18,11 @@ real command output run against the live `transcript_path`, never
 hand-written. If the transcript is genuinely unreachable, replace the fence
 with the single line
 `<!-- retrospect:transcript_receipt_skipped: transcript unreachable -->`.
+When `is_error_count > 0` the nested `retrospect:is_error_enum` block is
+**also required** (Gate-7 blocks Stage 3 without it) — each `is_error`
+event enumerated with a `promote`/`note`/`dismiss` disposition [issue #664].
+Omit the nested enum block only when `is_error_count == 0` (nothing to
+enumerate).
 
 ```markdown
 ## Retrospect Report — {session_date}
@@ -50,6 +55,12 @@ $ grep -c '"is_error":true' {transcript_path}
 $ grep -c '"role":"user"' {transcript_path}
 {real N}
 is_error_count: {N} | user_turn_count: {N} | interrupt_count: {N}
+$ python3 -c "...emit each tool_result is_error body..." {transcript_path}
+<!-- retrospect:is_error_enum begin -->
+- [1] {error content excerpt} | disposition: dismiss (negative-list: expected hook fire)
+- [2] {error content excerpt} | disposition: note (transient timeout, retried)
+- [k] {error content excerpt} | disposition: promote (finding #N)
+<!-- retrospect:is_error_enum end -->
 <!-- retrospect:transcript_receipt end -->
 
 <!-- retrospect:distribution begin -->

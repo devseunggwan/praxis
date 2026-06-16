@@ -262,8 +262,95 @@ done <<< "$TABLE_LINES"
 # it. [PR #639] hardened from a bare pattern after a CodeRabbit false-trigger flag.
 GATE7_VIOLATION=""
 if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCRIPT_PATH" 2>/dev/null; then
-  if ! printf '%s\n' "$MOST_RECENT_BLOCK" | grep -qF 'retrospect:transcript_receipt'; then
+  # All Gate-7 content parsing MUST be scoped to the actual transcript_receipt
+  # fence — tokens scattered OUTSIDE it (a stray transcript_receipt_skipped
+  # marker, an is_error_enum block planted elsewhere, a count line in prose)
+  # must not satisfy the gate [issue #664 / CodeRabbit]. Whole-block greps were
+  # the same parse-scope leak this PR closes one level down for is_error_enum.
+  #
+  # Marker matches are anchored to standalone HTML-comment delimiter LINES
+  # (^\s*<!-- MARKER -->\s*$), NOT bare substrings. A post-compaction receipt
+  # legitimately ENUMERATES the prior session's is_error contents, and those
+  # excerpts can themselves quote 'retrospect:transcript_receipt begin' (e.g.
+  # retrospecting THIS very change). A bare substring count would then see >1
+  # 'fence' and false-positive block a valid single-fence report [Codex round 5].
+  # The markers ARE comment delimiters, so only the delimiter-line form counts.
+  re_rb='^[[:space:]]*<!--[[:space:]]*retrospect:transcript_receipt begin[[:space:]]*-->[[:space:]]*$'
+  re_re='^[[:space:]]*<!--[[:space:]]*retrospect:transcript_receipt end[[:space:]]*-->[[:space:]]*$'
+  re_rs='^[[:space:]]*<!--[[:space:]]*retrospect:transcript_receipt_skipped:.*-->[[:space:]]*$'
+  re_ib='^[[:space:]]*<!--[[:space:]]*retrospect:is_error_enum begin[[:space:]]*-->[[:space:]]*$'
+  re_ie='^[[:space:]]*<!--[[:space:]]*retrospect:is_error_enum end[[:space:]]*-->[[:space:]]*$'
+  rcpt_begin=$(printf '%s\n' "$MOST_RECENT_BLOCK" | grep -cE "$re_rb")
+  rcpt_skipped=$(printf '%s\n' "$MOST_RECENT_BLOCK" | grep -cE "$re_rs")
+  # Marker COUNTS cannot detect a malformed fence: a balanced begin==end count
+  # still passes for 'end ... begin' ordering; a prior CLOSED fence (e.g.
+  # is_error_count: 0) followed by a new unterminated 'begin' would let the stale
+  # closed fence satisfy the gate [Codex round 2]; and a NESTED 'begin' inside an
+  # open fence makes the extractor reset its buffer and validate only the inner
+  # span [Codex round 3]. So walk fence state and flag malformed = ended INSIDE a
+  # fence (unterminated) OR saw a 'begin' while already inside one (nested).
+  rcpt_malformed=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk -v rb="$re_rb" -v re="$re_re" '
+    $0 ~ rb { if (inr) nested=1; inr=1; next }
+    $0 ~ re { inr=0; next }
+    END { print (inr || nested) ? 1 : 0 }')
+  if [ "$rcpt_begin" -lt 1 ] && [ "$rcpt_skipped" -gt 0 ]; then
+    : # Skipped variant is legitimate (SKILL.md governs when); no content check.
+  elif [ "$rcpt_begin" -lt 1 ]; then
+    # No fence at all. A stray skipped token alongside a real begin no longer
+    # short-circuits — that bypass is closed.
     GATE7_VIOLATION="post-compaction session but the Stage 3 report has no '<!-- retrospect:transcript_receipt begin/end -->' fence — run the full-transcript friction scan and paste the REAL command output (is_error / user-turn / interrupt counts) in the receipt fence before Stage 3"
+  elif [ "$rcpt_begin" -gt 1 ]; then
+    # A Stage 3 report carries exactly ONE receipt. Multiple closed fences let a
+    # benign trailing fence (is_error_count: 0) mask an earlier adverse one
+    # (is_error_count: 3 with no enum) — the exact masking bypass this PR closes
+    # [Codex round 4]. Reject >1 fence outright rather than picking one to trust.
+    GATE7_VIOLATION="post-compaction report has $rcpt_begin transcript_receipt fences — Stage 3 must carry exactly one; multiple fences let a benign receipt mask an adverse one. Emit a single well-formed begin/end fence before Stage 3"
+  elif [ "$rcpt_malformed" -gt 0 ]; then
+    # The fence is unterminated (begin without end) or nested (begin inside an
+    # open fence). Either way the latest receipt is malformed; validating an
+    # earlier/inner span would let a benign fragment mask the real receipt.
+    GATE7_VIOLATION="post-compaction transcript_receipt fence is malformed (an unterminated or nested 'retrospect:transcript_receipt begin') — emit exactly one well-formed begin/end fence with the REAL scan output before Stage 3"
+  else
+    # Extract ONLY the content inside the receipt fence (last CLOSED fence, which
+    # is guaranteed to be the latest one now that an unterminated trailing fence
+    # is rejected above), then run every content check against that region.
+    RECEIPT_BLOCK=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk -v rb="$re_rb" -v re="$re_re" '
+      $0 ~ rb { inr=1; buf=""; next }
+      $0 ~ re { if (inr) last=buf; inr=0; next }
+      inr { buf = buf $0 "\n" }
+      END { printf "%s", last }')
+    # Content-enumeration check [issue #664]: a 'grep -c' count proves a scan RAN,
+    # not that the errors were READ — the exact gap that let a salient-window pass
+    # survive Gate-7 (the count satisfied the fence while the error contents went
+    # unexamined, and the most adverse error was silently dropped). When the
+    # receipt declares is_error_count > 0, require a per-event
+    # 'retrospect:is_error_enum' block so each error is surfaced with a
+    # promote/note/dismiss disposition — invisible silent omission becomes
+    # visible (challengeable) mis-disposition.
+    # Anchor the count line to line-start so an enum excerpt quoting
+    # 'is_error_count: N' in an error body cannot be picked up as the count.
+    ie_count=$(printf '%s\n' "$RECEIPT_BLOCK" \
+      | grep -oE '^[[:space:]]*is_error_count:[[:space:]]*[0-9]+' | grep -oE '[0-9]+' | head -1)
+    if [ -z "$ie_count" ]; then
+      GATE7_VIOLATION="post-compaction transcript_receipt fence carries no parseable 'is_error_count: N' line inside the fence — paste the REAL grep -c output in the receipt before Stage 3"
+    elif [ "$ie_count" -gt 0 ] 2>/dev/null; then
+      # A bare substring match on 'retrospect:is_error_enum' would reintroduce the
+      # count-not-content gap one layer down: a prose mention, a lone begin marker,
+      # or an empty begin/end pair with no rows would all pass while enumerating
+      # nothing. Require both begin AND end markers AND >= 1 disposition row
+      # (promote|note|dismiss) BETWEEN them; the awk scan counts rows only while
+      # inside the enum fence, so rows leaking outside it do not satisfy the gate.
+      ie_begin=$(printf '%s\n' "$RECEIPT_BLOCK" | grep -cE "$re_ib")
+      ie_end=$(printf '%s\n' "$RECEIPT_BLOCK" | grep -cE "$re_ie")
+      ie_rows=$(printf '%s\n' "$RECEIPT_BLOCK" | awk -v ib="$re_ib" -v ie="$re_ie" '
+        $0 ~ ib { inblock=1; next }
+        $0 ~ ie { inblock=0 }
+        inblock && /disposition:[[:space:]]*(promote|note|dismiss)/ { c++ }
+        END { print c+0 }')
+      if [ "$ie_begin" -lt 1 ] || [ "$ie_end" -lt 1 ] || [ "$ie_rows" -lt 1 ]; then
+        GATE7_VIOLATION="post-compaction receipt declares is_error_count=$ie_count but has no complete '<!-- retrospect:is_error_enum begin/end -->' block with per-event disposition rows inside the receipt fence (found begin=$ie_begin end=$ie_end disposition_rows=$ie_rows) — a count proves a scan ran, not that the errors were read; enumerate each is_error inside the fence with a promote/note/dismiss disposition before Stage 3"
+      fi
+    fi
   fi
 fi
 
