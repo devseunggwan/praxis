@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.3.1] - 2026-06-16
+
+Patch release. Closes the retrospect Stage-3 fence-omission bypass (#666).
+
+### Fixed
+
+- `retrospect-mix-check` Stop hook: a free-form / localized Stage 3 report that omitted the `<!-- retrospect:distribution begin -->` fence evaded all identifier checks, so the hook exited 0 and every gate (Gate-1..7, incl. the post-compaction Gate-7) silently no-op'd — "the gate exists but does not fire", one level deeper than "rule exists ≠ retrieval". The gate now anchors on a session-scoped *retrospect-active marker* (set at skill-invocation time, format-independent) and blocks on `marker AND table-shaped AND no-fence AND not-Stage-4`, so the fence can no longer be omitted to bypass the gates. Prose-only pre-Stage-3 clarification stops still pass through (#666, PR #667)
+
+### Added
+
+- `retrospect-active-marker` preflight hook (multi-event: `PreToolUse(Skill)` + `UserPromptSubmit`): maintains a session-scoped marker recording that a retrospect Stage 3 report is owed in the current turn, independent of the agent's output format. Foundation for the #666 gate above (#666, PR #667)
+
 ## [6.3.0] - 2026-06-11
 
 17 PRs since 6.2.0. Minor release. Headline changes: a reachability gate for
