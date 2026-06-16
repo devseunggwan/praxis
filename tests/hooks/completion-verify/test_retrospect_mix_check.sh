@@ -937,6 +937,70 @@ is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0
 <!-- retrospect:is_error_enum end -->
 <!-- retrospect:transcript_receipt end -->'
 G_RECEIPT_SKIPPED='<!-- retrospect:transcript_receipt_skipped: transcript unreachable -->'
+# Enum bypass #3: a count-only receipt fence (is_error_count=3, NO enum inside),
+# with a complete is_error_enum block + disposition row planted OUTSIDE the
+# receipt fence. Whole-block parsing would pass this; fence-scoped parsing must
+# block it [issue #664 / CodeRabbit — scope parse to the receipt fence].
+G_RECEIPT_ENUM_OUTSIDE_FENCE='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0
+<!-- retrospect:transcript_receipt end -->
+<!-- retrospect:is_error_enum begin -->
+- [1] planted outside the receipt fence | disposition: dismiss (bypass attempt)
+<!-- retrospect:is_error_enum end -->'
+# Enum bypass #4: a count-only receipt fence with a stray transcript_receipt_skipped
+# token elsewhere. The old elif short-circuited on the skipped substring anywhere;
+# fence-scoped parsing must still block (a real begin fence is present) [CodeRabbit].
+G_RECEIPT_SKIPPED_INJECTION='<!-- retrospect:transcript_receipt_skipped: not really -->
+<!-- retrospect:transcript_receipt begin -->
+is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0
+<!-- retrospect:transcript_receipt end -->'
+# Malformed fence: receipt fence present but NO is_error_count line inside it.
+G_RECEIPT_NO_COUNT='<!-- retrospect:transcript_receipt begin -->
+some prose without a parseable count line
+<!-- retrospect:transcript_receipt end -->'
+# Enum bypass #5: a prior CLOSED fence (is_error_count=0, would pass) followed by
+# a new UNTERMINATED begin fence. Marker-count parsing would reuse the stale
+# closed fence and pass; state-based unterminated detection must block [Codex r2].
+G_RECEIPT_UNTERMINATED_TRAILING='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | user_turn_count: 5 | interrupt_count: 0
+<!-- retrospect:transcript_receipt end -->
+<!-- retrospect:transcript_receipt begin -->
+is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0'
+# Enum bypass #6: a NESTED begin inside an open fence. The outer fence carries
+# is_error_count=3 with no enum, but an inner begin/count=0/end is injected before
+# the outer close. The extractor would reset its buffer on the inner begin and
+# validate only the inner count=0 span; nested-begin detection must block [Codex r3].
+G_RECEIPT_NESTED_BEGIN='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0
+<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | user_turn_count: 5 | interrupt_count: 0
+<!-- retrospect:transcript_receipt end -->'
+# Enum bypass #7: TWO complete fences. The first (adverse) has is_error_count=3
+# with no enum; the second (benign) has is_error_count=0. Validating only the
+# last fence would let the benign one mask the adverse one [Codex r4 — exactly
+# one receipt per Stage 3 report].
+G_RECEIPT_MULTI_FENCE_MASK='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0
+<!-- retrospect:transcript_receipt end -->
+<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | user_turn_count: 5 | interrupt_count: 0
+<!-- retrospect:transcript_receipt end -->'
+# Single unterminated fence (begin, count, no end) — exercises the malformed
+# state check in isolation (not caught by the >1 fence count rule).
+G_RECEIPT_SINGLE_UNTERMINATED='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0'
+# Valid single-fence receipt whose enum rows MENTION the marker strings inline
+# (both wrapped and bare). Marker matches are anchored to standalone comment
+# delimiter lines, so these in-row mentions are NOT counted as fences/markers and
+# the report passes — a retrospect OF a session about these markers (e.g. this
+# change) must not be false-positive blocked [Codex round 5].
+G_RECEIPT_VALID_MARKER_MENTIONS='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 2 | user_turn_count: 5 | interrupt_count: 0
+<!-- retrospect:is_error_enum begin -->
+- [1] hook discussed <!-- retrospect:transcript_receipt begin --> marker handling | disposition: note (meta-mention)
+- [2] error citing retrospect:is_error_enum begin and transcript_receipt end in prose | disposition: dismiss (negative-list)
+<!-- retrospect:is_error_enum end -->
+<!-- retrospect:transcript_receipt end -->'
 
 # G1: block — post-compaction transcript, Stage 3 report WITHOUT a receipt.
 # The card itself is valid (Gates 1-6 pass); only Gate-7 fires.
@@ -1011,6 +1075,77 @@ ${G_RECEIPT_ENUM_EMPTY}"
 G9_TRANSCRIPT="$(mk_compaction)
 $(mk_assistant "$G9_REPORT")"
 run_case "G9_block_postcompaction_enum_fence_empty_no_rows" "block" "$G9_TRANSCRIPT"
+
+# G10: block — count-only receipt fence with a valid enum block planted OUTSIDE
+# the receipt fence. Fence-scoped parsing ignores the out-of-fence enum, so the
+# in-fence count=3 with no in-fence enum blocks [issue #664 / CodeRabbit].
+G10_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_ENUM_OUTSIDE_FENCE}"
+G10_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$G10_REPORT")"
+run_case "G10_block_postcompaction_enum_outside_receipt_fence" "block" "$G10_TRANSCRIPT"
+
+# G11: block — count-only receipt fence with a stray transcript_receipt_skipped
+# token elsewhere. The skipped short-circuit no longer fires when a real begin
+# fence exists, so the count=3 with no enum blocks [CodeRabbit].
+G11_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_SKIPPED_INJECTION}"
+G11_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$G11_REPORT")"
+run_case "G11_block_postcompaction_stray_skipped_token_injection" "block" "$G11_TRANSCRIPT"
+
+# G12: block — receipt fence present but no parseable is_error_count line inside.
+# A malformed fence cannot satisfy the gate.
+G12_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_NO_COUNT}"
+G12_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$G12_REPORT")"
+run_case "G12_block_postcompaction_receipt_fence_no_count_line" "block" "$G12_TRANSCRIPT"
+
+# G13: block — a prior closed fence (count=0, would pass) followed by an
+# unterminated trailing begin. The latest fence is malformed; a stale closed
+# fence must not mask it [Codex round 2 — state-based unterminated detection].
+G13_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_UNTERMINATED_TRAILING}"
+G13_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$G13_REPORT")"
+run_case "G13_block_postcompaction_unterminated_trailing_fence" "block" "$G13_TRANSCRIPT"
+
+# G14: block — a nested begin inside an open fence. The outer count=3 has no enum;
+# the inner count=0 span must not be the validation target [Codex round 3].
+G14_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_NESTED_BEGIN}"
+G14_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$G14_REPORT")"
+run_case "G14_block_postcompaction_nested_begin_fence" "block" "$G14_TRANSCRIPT"
+
+# G15: block — two complete fences (adverse count=3 no-enum, then benign count=0).
+# Exactly one receipt is allowed; the benign fence must not mask the adverse one
+# [Codex round 4].
+G15_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_MULTI_FENCE_MASK}"
+G15_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$G15_REPORT")"
+run_case "G15_block_postcompaction_multi_fence_masking" "block" "$G15_TRANSCRIPT"
+
+# G16: block — a single unterminated fence (begin without end). Exercises the
+# malformed state detection in isolation (begin count is 1, so the >1 rule does
+# not fire).
+G16_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_SINGLE_UNTERMINATED}"
+G16_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$G16_REPORT")"
+run_case "G16_block_postcompaction_single_unterminated_fence" "block" "$G16_TRANSCRIPT"
+
+# G17: pass — a VALID single-fence receipt whose enum rows mention the marker
+# strings inline. Anchored marker matching ignores in-row mentions, so a
+# retrospect of a session about these markers is not false-positive blocked
+# [Codex round 5 — anchor to standalone comment-delimiter lines].
+G17_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_VALID_MARKER_MENTIONS}"
+G17_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$G17_REPORT")"
+run_case "G17_pass_postcompaction_valid_receipt_inline_marker_mentions" "pass" "$G17_TRANSCRIPT"
 
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
