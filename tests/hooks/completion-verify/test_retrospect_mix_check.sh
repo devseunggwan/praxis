@@ -1147,6 +1147,127 @@ G17_TRANSCRIPT="$(mk_compaction)
 $(mk_assistant "$G17_REPORT")"
 run_case "G17_pass_postcompaction_valid_receipt_inline_marker_mentions" "pass" "$G17_TRANSCRIPT"
 
+# Issue #666 — retrospect-active Stage-3 fence-omission gate -----------------
+# A session-scoped marker (written by the retrospect-active-marker hook at
+# skill-invocation time) is simulated via PRAXIS_RETROSPECT_ACTIVE_FILE. When
+# the marker is present, a Stage 3 report that omits the distribution fence (and
+# is not a Stage 4 completion) must block — it can no longer no-op the gates by
+# evading the format-keyed identifier checks (localized header / dropped fence).
+# When the marker is ABSENT, the gate stays dormant (existing behavior).
+
+run_marker_case() {
+  # $1 name  $2 expected(block|pass)  $3 transcript  $4 marker-assert(""|cleared|kept)
+  local name="$1" expected="$2" transcript="$3" assert_marker="${4:-}"
+  local tpath="$TMPDIR/mk_transcript_${PASS}_${FAIL}.jsonl"
+  printf '%s\n' "$transcript" > "$tpath"
+  local mfile="$TMPDIR/mk_marker_${PASS}_${FAIL}.json"
+  printf '%s' '{"retrospect_active": true, "source": "test"}' > "$mfile"
+  local payload
+  payload=$(jq -nc --arg path "$tpath" \
+    '{transcript_path: $path, stop_hook_active: false, session_id: "test-session"}')
+  local out rc ok=true
+  out=$(printf '%s' "$payload" | env PRAXIS_RETROSPECT_ACTIVE_FILE="$mfile" "$HOOK" 2>/dev/null)
+  rc=$?
+  if [ "$rc" -ne 0 ]; then ok=false; echo "FAIL  [$name] rc=$rc (expected 0)"; fi
+  case "$expected" in
+    block) echo "$out" | grep -q '"decision": "block"' || { ok=false; echo "FAIL  [$name] expected block, got: ${out:-<empty>}"; } ;;
+    pass)  [ -z "$out" ] || { ok=false; echo "FAIL  [$name] expected pass (no output), got: $out"; } ;;
+  esac
+  case "$assert_marker" in
+    cleared) [ ! -f "$mfile" ] || { ok=false; echo "FAIL  [$name] expected marker cleared, still present"; } ;;
+    kept)    [ -f "$mfile" ]   || { ok=false; echo "FAIL  [$name] expected marker kept, was cleared"; } ;;
+  esac
+  if [ "$ok" = "true" ]; then echo "PASS  [$name]"; PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); fi
+}
+
+# F1: block — localized (non-canonical) header + findings table, NO distribution
+# fence, no Actions Executed, marker active. THE observed bypass (issue #666).
+F666_LOC_BYPASS=$(cat <<EOF
+## 회고 보고서 — 2026-04-30
+
+| # | 분류 | 도구 | 패턴 | 근본 원인 | 규칙 | 반복 | 제안 액션 | 근거 | 우선순위 |
+|---|------|------|------|----------|------|------|----------|------|---------|
+| 1 | behavioral | — | 성급한 결론 | 미검증 | 규칙 없음 | No | memory | 메모만 | MED |
+EOF
+)
+run_marker_case "F666_1_block_localized_header_no_fence" "block" \
+  "$(mk_assistant "$F666_LOC_BYPASS")" "kept"
+
+# F2: pass — valid Stage 3 WITH fence (gates pass), marker active. The marker
+# does not turn a well-formed report into a block; it stays set awaiting approval.
+run_marker_case "F666_2_pass_valid_stage3_with_fence" "pass" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")" "kept"
+
+# F3: pass + marker cleared — Stage 4 (## Actions Executed) reached. Cycle
+# complete; the gate clears the marker so subsequent Stops are not gated.
+run_marker_case "F666_3_pass_stage4_clears_marker" "pass" \
+  "$(mk_assistant "$T13_TEXT")" "cleared"
+
+# F4: pass (regression) — SAME bypass shape as F1 but marker ABSENT. The gate is
+# dormant without the marker; pre-#666 pass-through behavior is preserved.
+run_case "F666_4_pass_no_marker_gate_dormant" "pass" \
+  "$(mk_assistant "$F666_LOC_BYPASS")"
+
+# F5: block — localized header + fence PRESENT but with a Gate-1 violation
+# (tool-labeled, memory-only). Proves the gates now run header-INDEPENDENTLY in a
+# marker-active session: pre-#666 this passed (no canonical header → exit 0).
+F666_LOC_FENCED=$(cat <<EOF
+## 회고 — 2026-04-30
+
+<!-- retrospect:distribution begin -->
+- memory: 1
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 0
+- gate_1_verdict: FAIL
+- gate_2_verdict: PASS
+<!-- retrospect:distribution end -->
+
+| # | Category | Tool Layer | Pattern | Root Cause | Rule / Gap | Repeat? | Proposed Actions (1~2) | Rationale | Priority |
+|---|----------|------------|---------|------------|------------|---------|------------------------|-----------|----------|
+| 1 | tool | cli | gh flag missing | tool defect | gap | No | memory | ${RATIONALE_5LINE} | HIGH |
+EOF
+)
+run_marker_case "F666_5_block_localized_header_fence_gate1_violation" "block" \
+  "$(mk_assistant "$F666_LOC_FENCED")" "kept"
+
+# F6: block — canonical header PRESENT but fence ABSENT (partial bypass: header
+# kept, fence dropped), table present, no actions, marker active.
+F666_HEADER_NO_FENCE=$(cat <<EOF
+## Retrospect Report — 2026-04-30
+
+| # | Category | Tool Layer | Pattern | Root Cause | Rule / Gap | Repeat? | Proposed Actions (1~2) | Rationale | Priority |
+|---|----------|------------|---------|------------|------------|---------|------------------------|-----------|----------|
+| 1 | behavioral | — | x | y | z | No | memory | ${RATIONALE_5LINE} | MED |
+EOF
+)
+run_marker_case "F666_6_block_header_present_fence_absent" "block" \
+  "$(mk_assistant "$F666_HEADER_NO_FENCE")" "kept"
+
+# F7: pass — marker active, a legitimate pre-Stage-3 prose clarification stop
+# (SKILL.md self-conflict / ambiguous-backing_repo surfaces present PROSE, no
+# findings table). The block is narrowed to report-shaped (table-bearing)
+# messages, so a prose clarification is NOT a false positive.
+run_marker_case "F666_7_pass_pre_stage3_prose_clarification_no_table" "pass" \
+  "$(mk_assistant "회고를 진행하기 전에 확인이 필요합니다. carried finding 과 이번 사이클 결론이 충돌합니다: foo.md 가 'absent' vs 'self-managed'. 이 finding 을 유지/반증/수정 중 무엇으로 처리할까요?")" "kept"
+
+# F7b: block — marker active, prose PLUS a localized findings table, no fence,
+# no Actions Executed. The table makes it report-shaped → blocked (the bypass).
+F666_PROSE_TABLE=$(cat <<EOF
+회고 결과를 정리했습니다.
+
+| 번호 | 분류 | 도구 | 패턴 | 근본원인 | 규칙 | 반복 | 액션 | 근거 | 우선순위 |
+|------|------|------|------|----------|------|------|------|------|---------|
+| 1 | behavioral | — | 성급한 결론 | 미검증 | 없음 | No | memory | 메모 | MED |
+
+승인하시겠습니까?
+EOF
+)
+run_marker_case "F666_7b_block_prose_with_localized_table_no_fence" "block" \
+  "$(mk_assistant "$F666_PROSE_TABLE")" "kept"
+
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
 #   {expected_decision: "pass"|"block", must_contain: [...], must_not_contain: [...]}

@@ -62,34 +62,93 @@ LAST_TEXT=$(printf '%s\n' "$LAST_TEXT" | awk '
   !in_fence { print }
 ')
 
-# Identifier check 1: line-anchored '## Retrospect Report' header.
-if ! printf '%s\n' "$LAST_TEXT" | grep -qE '^## Retrospect Report'; then
-  exit 0
+# Canonical Stage-3 signals (computed once; reused below).
+HAS_HEADER=false
+printf '%s\n' "$LAST_TEXT" | grep -qE '^## Retrospect Report' && HAS_HEADER=true
+HAS_FENCE=false
+if printf '%s' "$LAST_TEXT" | grep -qF '<!-- retrospect:distribution begin -->' \
+   && printf '%s' "$LAST_TEXT" | grep -qF '<!-- retrospect:distribution end -->'; then
+  HAS_FENCE=true
+fi
+HAS_ACTIONS=false
+printf '%s\n' "$LAST_TEXT" | grep -qF '## Actions Executed' && HAS_ACTIONS=true
+# Report-shaped signal: a markdown table separator row (e.g. '|---|---|'). This
+# is LANGUAGE-INDEPENDENT — a localized Stage 3 findings table still uses
+# markdown pipe syntax — so it distinguishes "presenting a findings report" from
+# a legitimate pre-Stage-3 prose clarification stop (SKILL.md self-conflict /
+# ambiguous-backing_repo surfaces), without keying on any localizable header.
+HAS_TABLE=false
+printf '%s\n' "$LAST_TEXT" | grep -qE '^[[:space:]]*\|[[:space:]:|-]*-[[:space:]:|-]*\|[[:space:]]*$' && HAS_TABLE=true
+
+# Issue #666 — retrospect-active Stage-3 fence-omission gate.
+# The marker is written by hooks/preflight-gate/retrospect-active-marker/impl.py
+# at retrospect skill-invocation time — a format-INDEPENDENT signal that a
+# Stage 3 report is owed this turn. The identifier checks below key on the
+# agent's own output format (header + distribution fence); a free-form /
+# localized report that omits the fence evades them and silently no-ops every
+# gate (incl. Gate-7) — "the gate exists but does not fire". Close that here,
+# BEFORE the format-keyed pass-throughs run.
+RETRO_ACTIVE=false
+_RM_TMP="${TMPDIR:-/tmp}"; _RM_TMP="${_RM_TMP%/}"
+MARKER_FILE="${PRAXIS_RETROSPECT_ACTIVE_FILE:-${_RM_TMP}/praxis-retrospect-active-${SESSION_ID}.json}"
+[ -f "$MARKER_FILE" ] && RETRO_ACTIVE=true
+
+if [ "$RETRO_ACTIVE" = "true" ]; then
+  if [ "$HAS_ACTIONS" = "true" ]; then
+    # Stage 4 reached — retrospect cycle complete. Clear the marker; the
+    # identifier checks below pass the post-Stage-4 output through.
+    rm -f "$MARKER_FILE" 2>/dev/null || true
+  elif [ "$HAS_FENCE" = "false" ] && [ "$HAS_TABLE" = "true" ]; then
+    # Bypass: retrospect-active, presenting a findings table (report-shaped),
+    # no Stage-4 marker, distribution fence absent. The mix-check gates cannot
+    # evaluate the report. Block. (A retrospect-active stop WITHOUT a table is a
+    # legitimate pre-Stage-3 prose clarification — not gated.)
+    mkdir -p "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm" || true
+    echo "$(date -Iseconds) session=$SESSION_ID blocked_retrospect_fence_omission" \
+      >> "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm/retrospect-mix-blocked.log" || true
+    fence_reason="Retrospect Stage 3 distribution fence missing (issue #666). This is a retrospect-active session (the retrospect skill was invoked this turn) presenting a findings table, but the assistant message carries no '<!-- retrospect:distribution begin -->' fence and no '## Actions Executed' marker. A free-form or localized Stage 3 report bypasses every mix-check gate (Gate-1..7) because the gates key on the canonical output schema. Re-emit the Stage 3 output per the Output Schema Contract in skills/retrospect/SKILL.md: '## Retrospect Report' header -> audit fences -> '<!-- retrospect:distribution begin/end -->' card -> unified findings table."
+    jq -n --arg r "$fence_reason" '{decision: "block", reason: $r}'
+    exit 0
+  fi
 fi
 
-# Identifier check 2: distribution-card fence present.
-if ! printf '%s' "$LAST_TEXT" | grep -qF '<!-- retrospect:distribution begin -->'; then
-  exit 0
+# Identifier check 1+2: a gateable Stage 3 report is EITHER the canonical
+# '## Retrospect Report' header form, OR — in a retrospect-active session — any
+# message carrying the distribution fence (header-independent, so a localized
+# header cannot skip the gates). Otherwise pass through.
+if [ "$HAS_HEADER" = "false" ]; then
+  if [ "$RETRO_ACTIVE" = "true" ] && [ "$HAS_FENCE" = "true" ]; then
+    : # header-independent retrospect report — proceed to gate evaluation.
+  else
+    exit 0
+  fi
 fi
-if ! printf '%s' "$LAST_TEXT" | grep -qF '<!-- retrospect:distribution end -->'; then
+# The distribution-card fence must be present to parse the card.
+if [ "$HAS_FENCE" = "false" ]; then
   exit 0
 fi
 
 # Identifier check 3: within the most recent '## Retrospect Report' block, no
 # '## Actions Executed' marker (otherwise Stage 4 already ran — too late to gate).
 # Extract the most recent block: from the last '^## Retrospect Report' line to
-# either next '^## ' heading or end of message.
-MOST_RECENT_BLOCK=$(printf '%s\n' "$LAST_TEXT" | awk '
-  /^## Retrospect Report/ { capture=1; buf=""; }
-  capture {
-    if (NR > 1 && /^## / && !/^## Retrospect Report/) {
-      capture=0
-      next
+# either next '^## ' heading or end of message. For the header-independent
+# retrospect-active path (no '## Retrospect Report' line), gate the whole
+# message instead.
+if [ "$HAS_HEADER" = "true" ]; then
+  MOST_RECENT_BLOCK=$(printf '%s\n' "$LAST_TEXT" | awk '
+    /^## Retrospect Report/ { capture=1; buf=""; }
+    capture {
+      if (NR > 1 && /^## / && !/^## Retrospect Report/) {
+        capture=0
+        next
+      }
+      buf = buf $0 "\n"
     }
-    buf = buf $0 "\n"
-  }
-  END { printf "%s", buf }
-')
+    END { printf "%s", buf }
+  ')
+else
+  MOST_RECENT_BLOCK="$LAST_TEXT"
+fi
 
 if printf '%s' "$MOST_RECENT_BLOCK" | grep -qF '## Actions Executed'; then
   exit 0

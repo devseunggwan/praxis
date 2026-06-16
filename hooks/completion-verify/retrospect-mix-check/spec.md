@@ -47,6 +47,64 @@ of the following hold:
 | Any row with `Proposed Actions = memory` (single) whose `Rationale` lacks exactly 5 lines `^not (issue\|claude_md_draft\|skill_idea\|hook_code\|upstream_feedback): .+$` | Gate-2 violation detected via independent table parse |
 | Any row with `Proposed Actions` containing `upstream_feedback` or `issue` whose `Rationale` lacks a `backing_repo: <owner/repo>` declaration | Gate-3 (backing_repo) violation — Stage 2 step 8 requires this declaration for routing; Stage 4 Action 4 step 0 aborts on absence |
 
+### Issue #666 — retrospect-active Stage-3 fence-omission gate
+
+The three identifier conditions above key on the agent's **own output format**
+(`## Retrospect Report` header + distribution fence). A free-form / localized
+Stage 3 report that omits the fence fails identifier check 2, so the hook
+`exit 0`s and **every gate (Gate-1..7) silently no-ops** — "the gate exists but
+does not fire", one level deeper than "rule exists ≠ retrieval". This is the
+exact bypass that let a post-compaction salient-window report survive Gate-7.
+
+The fix anchors on a signal the bypassing report cannot avoid: a session-scoped
+**retrospect-active marker** written by
+[`hooks/preflight-gate/retrospect-active-marker`](../../preflight-gate/retrospect-active-marker/spec.md)
+at retrospect skill-invocation time (resolved here from
+`${PRAXIS_RETROSPECT_ACTIVE_FILE:-${TMPDIR:-/tmp}/praxis-retrospect-active-${session_id}.json}`).
+When the marker is present:
+
+| Condition | Action |
+|-----------|--------|
+| `## Actions Executed` present (Stage 4 complete) | clear the marker, pass through |
+| presenting a findings table (markdown separator row) AND fence absent AND not Stage 4 | **block** — re-emit the canonical Stage 3 schema so the gates can evaluate |
+| distribution fence present but no `## Retrospect Report` header | run the gates **header-independently** (a localized header cannot skip them) |
+| no findings table, no fence (a pre-Stage-3 prose clarification stop) | pass through (not a report) |
+
+When the marker is **absent**, this gate is dormant and the hook behaves exactly
+as before (the identifier checks pass through). This keeps the change additive:
+the full pre-#666 test matrix passes unchanged.
+
+The block's *report-shaped* trigger is a markdown table separator row
+(`|---|---|`), which is **language-independent** — a localized Stage 3 findings
+table still uses markdown pipe syntax. So the gate catches the localized-report
+bypass without keying on a localizable English header/column the violator could
+avoid. It deliberately does NOT fire on a retrospect-active stop that presents
+only prose, because SKILL.md prescribes legitimate pre-Stage-3 STOP-to-user
+surfaces (self-conflict detection; ambiguous `backing_repo`) that are prose
+clarifications, not reports.
+
+The marker's lifecycle (set on skill-invoke, cleared on any non-invocation
+`UserPromptSubmit` and on Stage 4) bounds the armed window to the active,
+incomplete retrospect turn, so an abandoned retrospect / topic change does not
+cause a later unrelated Stop to be blocked.
+
+#### Known residual limitations
+
+- **Multi-turn retrospect with a pre-Stage-3 user interaction.** If a retrospect
+  STOP-surfaces a pre-Stage-3 question and the user *answers it in a new prompt*,
+  that prompt clears the marker (it is indistinguishable from a topic change by
+  the `UserPromptSubmit` handler). A subsequent fence-omitting Stage 3 in the
+  next turn would then not be gated. This is the aggressive-clear ↔ false-positive
+  trade-off: aggressive clear was chosen because it gives zero false positives in
+  the **dominant single-turn flow** (invoke → Stage 3 in one turn, where the
+  marker is still set) and closes the common bypass; the multi-turn reopen
+  requires the *optional* pre-Stage-3 surfaces and is the accepted residual.
+- **Localized Stage-4 header.** Stage-4 detection keys on the literal
+  `## Actions Executed`. An agent that both localizes the Stage-4 header AND omits
+  the fence on a findings-table-bearing message would be blocked post-execution
+  with a re-emit nudge. This is a narrow compound deviation; the consequence is a
+  recoverable nudge (actions already ran; no data effect), not a wrong write.
+
 ### What is NOT blocked (pass-through)
 
 - Non-retrospect Stop events (most assistant messages)
