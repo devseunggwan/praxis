@@ -93,7 +93,10 @@ def resolve_state_path(session_id: str | None = None) -> str:
     if explicit:
         return explicit
 
-    tmp = os.environ.get("TMPDIR", "/tmp").rstrip("/")
+    # Root-safe: `"/".rstrip("/")` is "", which would yield a *relative*
+    # marker path. Fall back to "/" so the path stays absolute and the sh
+    # consumer (which computes the same path) agrees.
+    tmp = os.environ.get("TMPDIR", "/tmp").rstrip("/") or "/"
     if session_id:
         return os.path.join(tmp, f"praxis-retrospect-active-{session_id}.json")
     return os.path.join(tmp, f"praxis-retrospect-active-{os.getppid()}.json")
