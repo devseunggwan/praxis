@@ -15,8 +15,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 HOOK="$ROOT_DIR/hooks/preflight-gate/retrospect-active-marker/impl.py"
 
-if [ ! -x "$HOOK" ]; then
-  echo "FAIL: hook not executable: $HOOK" >&2
+if [ ! -f "$HOOK" ]; then
+  echo "FAIL: hook not found: $HOOK" >&2
+  exit 1
+fi
+if [ ! -r "$HOOK" ]; then
+  echo "FAIL: hook not readable: $HOOK" >&2
   exit 1
 fi
 
