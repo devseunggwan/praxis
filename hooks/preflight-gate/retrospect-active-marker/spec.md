@@ -2,15 +2,17 @@
 
 Supported hosts: all
 
-`hooks/retrospect-active-marker.py` is a multi-event hook (`PreToolUse(Skill)`
-+ `UserPromptSubmit`) that maintains a session-scoped marker recording that a
-retrospect Stage 3 report is **owed in the current turn**. It is the
+`hooks/preflight-gate/retrospect-active-marker/impl.py` (runtime wrapper:
+`hooks/retrospect-active-marker.sh`) is a multi-event hook
+(`PreToolUse(Skill)` + `UserPromptSubmit`) that maintains a session-scoped
+marker recording that a retrospect Stage 3 report is **owed in the current
+turn**. It is the
 format-independent foundation for the issue
 [#666](https://github.com/devseunggwan/praxis/issues/666) Stage-3
 fence-omission bypass gate in
 `hooks/completion-verify/retrospect-mix-check/impl.sh`.
 
-### Why this exists
+## Why this exists
 
 The Stop hook `retrospect-mix-check` identifies a Stage 3 report by the agent's
 **own output format** — a `## Retrospect Report` header AND a
@@ -26,7 +28,7 @@ actually invoked this turn"** — a session-level fact captured at
 skill-invocation time, not report time. This hook records that fact so the Stop
 gate can key on it instead of on the avoidable output format.
 
-### What it does
+## What it does
 
 | Event | Action |
 |-------|--------|
@@ -39,9 +41,9 @@ SET on `UserPromptSubmit` — a casual mention must not arm the gate. The
 `PreToolUse(Skill)` path covers genuine natural-language invocation, because it
 still routes through the Skill tool.
 
-### Marker lifecycle
+## Marker lifecycle
 
-```
+```text
 UserPromptSubmit (/retrospect)  ─SET─┐
 PreToolUse(Skill: …retrospect)  ─SET─┤
                                      ├─► marker present ─► Stop gate armed
@@ -55,7 +57,7 @@ every non-invocation `UserPromptSubmit` (and on Stage 4 in the Stop hook) bounds
 the armed window so an abandoned retrospect / topic change does not cause a
 later unrelated Stop to be blocked.
 
-### State file
+## State file
 
 Priority order:
 
@@ -70,12 +72,12 @@ The file body (`{"retrospect_active": true, "source": "skill|slash"}`) is a
 hint; **existence is the signal**. Writes are atomic (temp + rename) so a
 concurrent Stop-hook read never sees a truncated file.
 
-### Fail-safe
+## Fail-safe
 
 The hook **never blocks** — it only records side-effect state. Malformed
 payloads, unreadable/unwritable state, and missing fields all exit 0 silently.
 
-### Pairs with
+## Pairs with
 
 `hooks/completion-verify/retrospect-mix-check/spec.md` (the #666 gate that
 consumes this marker).
