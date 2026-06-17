@@ -6,6 +6,9 @@ description: >
   Triggers on "new praxis skill", "write praxis skill", "add praxis skill",
   "skill template", "praxis skill spec", "스킬 작성", "새 스킬".
   Do NOT activate on "add skill section", "skill up", "skill set".
+verified-against-runtime: true
+runtime-verified-at: 2026-06-16
+runtime-verified-note: "claude 1.x --help + current praxis verified-skill survey — the guide's `--model`/`--resume` examples and AskUserQuestion/Skill runtime constraints still match the live Claude CLI surface."
 ---
 
 # writing-praxis-skill

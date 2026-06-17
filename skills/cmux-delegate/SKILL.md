@@ -1,6 +1,9 @@
 ---
 name: cmux-delegate
 description: Delegate a task to an independent Claude Code session in a new cmux workspace with auto-collected context. Triggers on "cmux delegate", "delegate task", "delegate to new session", "별도 세션", "세션에 위임".
+verified-against-runtime: true
+runtime-verified-at: 2026-06-17
+runtime-verified-note: "cmux/gh/claude/codex/gemini --help probe — cmux new-workspace exists, gh exposes pr/issue commands, claude supports --model/--permission-mode, codex exposes exec, and gemini supports -p/--prompt."
 ---
 
 # cmux-delegate

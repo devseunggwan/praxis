@@ -24,17 +24,20 @@ Phase 2 (ADR-0001) invariants:
   9. Version consistency across versioned artifacts.
   10. spec.md exists at hooks/<role>/<name>/spec.md for every registered
       hook (Phase 3, ADR-0001 §5.3 — specs collocated with impl).
-  11. skills/<skill-name>/ on disk matches the EXPECTED_SKILLS frozen set
+  11. Runtime-sensitive skills carry runtime verification frontmatter
+      (`verified-against-runtime`, `runtime-verified-at`,
+      `runtime-verified-note`).
+  12. skills/<skill-name>/ on disk matches the EXPECTED_SKILLS frozen set
      (issue #465 — surface freeze gate against silent skill proliferation).
-  12. AGENTS.md "## Skills (N)" count and per-skill backtick tokens, and
+  13. AGENTS.md "## Skills (N)" count and per-skill backtick tokens, and
      README.md per-skill backtick tokens, all match EXPECTED_SKILLS
      (issue #498 — doc drift invariant).
-  13. Each manifest `dispatch_groups` (event, matcher) collapses to exactly
+  14. Each manifest `dispatch_groups` (event, matcher) collapses to exactly
      one dispatcher node per platform hooks.json (no member silently left as
      its own node, no second dispatcher node), and the runtime resolver
      `_dispatch.group_members` resolves the same member set the build
      collapsed (ADR-0002, #617 — ties build path and runtime path together).
-  14. docs/hook/<name>.md redirect-stub parity (#606): every hook dir owns a
+  15. docs/hook/<name>.md redirect-stub parity (#606): every hook dir owns a
       byte-identical 1-line stub, and no orphan stub survives (INDEX.md and the
       hand-written NON_HOOK_DOCS allowlist excepted).
   16. docs/hook-operating-matrix.md parity: generated hook operating surface
@@ -48,6 +51,7 @@ import ast
 import importlib.util
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -73,6 +77,120 @@ _dispatch = importlib.util.module_from_spec(_disp_spec)
 _disp_spec.loader.exec_module(_dispatch)
 
 from constants import EXPECTED_SKILLS, OPT_IN_HOOKS, VALID_ROLES  # noqa: E402
+
+
+RUNTIME_METADATA_REQUIRED_FIELDS = (
+    "verified-against-runtime",
+    "runtime-verified-at",
+    "runtime-verified-note",
+)
+RUNTIME_METADATA_PLACEHOLDERS = {
+    "runtime-verified-at": {"YYYY-MM-DD"},
+    "runtime-verified-note": {
+        "<cli-name> <version> — one-line observed behavior",
+        '"<cli-name> <version> — one-line observed behavior"',
+    },
+}
+RUNTIME_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+SKILL_CALL_RE = re.compile(r"\bSkill\(\s*(?:(?:\"|')|skill\s*=)")
+ASK_USER_QUESTION_CALL_RE = re.compile(
+    r"\bAskUserQuestion\s*\("
+    r"|AskUserQuestion:"
+    r"|(?:ask|call|use|offer|confirm|show|surface|present|emit)"
+    r"[^.\n]{0,80}`?AskUserQuestion`?",
+    re.IGNORECASE,
+)
+NEGATED_ASK_USER_QUESTION_RE = re.compile(
+    r"\b(?:do\s+not|don't|never|must\s+not|should\s+not|cannot|can't|avoid)"
+    r"\s+(?:ask|call|use|offer|confirm|show|surface|present|emit)?"
+    r"[^.\n]{0,80}`?AskUserQuestion`?",
+    re.IGNORECASE,
+)
+INLINE_EXECUTION_CONTEXT_RE = re.compile(
+    r"(?:^|\b)(?:run|execute|call|invoke|use|start|launch)"
+    r"(?:\s+(?:(?:the|this)\s+)?(?:command|template|snippet))?"
+    r"\s*:?\s+$",
+    re.IGNORECASE,
+)
+SHELL_COMMAND_TOKEN_RE = re.compile(
+    r"(?:^|[|;&(]\s*|\$\(\s*)"
+    r"(?:[$#]\s+)?"
+    r"(?:(?:if|while|until|elif|then|do|command|exec)\s+)?"
+    r"(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*"
+    r"(?:\{[a-zA-Z_][a-zA-Z0-9_]*\}\s+)?"
+    r"(?:(?:/|\.{1,2}/|~/)?(?:[A-Za-z0-9_.+-]+/)*)"
+    r"([A-Za-z_][A-Za-z0-9_.+-]*)(?=\s|$)"
+)
+ROOT_PROMPT_COMMAND_RE = re.compile(
+    r"^(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*"
+    r"(?:(?:/|\.{1,2}/|~/)?(?:[A-Za-z0-9_.+-]+/)*)"
+    r"([A-Za-z_][A-Za-z0-9_.+-]*)(?=\s|$)"
+)
+KNOWN_EXTERNAL_CLI_COMMANDS = {
+    "airflow",
+    "aws",
+    "claude",
+    "cmux",
+    "codex",
+    "curl",
+    "docker",
+    "gemini",
+    "gh",
+    "git",
+    "jq",
+    "kubectl",
+    "node",
+    "npm",
+    "pnpm",
+    "python",
+    "python3",
+    "wget",
+    "yarn",
+}
+SHELL_NON_EXTERNAL_COMMANDS = {
+    "alias",
+    "break",
+    "case",
+    "cd",
+    "command",
+    "continue",
+    "declare",
+    "do",
+    "done",
+    "echo",
+    "elif",
+    "else",
+    "esac",
+    "eval",
+    "exec",
+    "exit",
+    "export",
+    "fi",
+    "for",
+    "function",
+    "if",
+    "local",
+    "popd",
+    "printf",
+    "pushd",
+    "read",
+    "readonly",
+    "return",
+    "set",
+    "shift",
+    "source",
+    "then",
+    "trap",
+    "type",
+    "typeset",
+    "unset",
+    "while",
+}
+EXTERNAL_CLI_WRAPPER_SKILLS = {
+    # Backstop for wrappers whose runtime-sensitive command templates are not
+    # visible to the static fenced-shell scan.
+    "cmux-delegate",
+}
 
 
 def dispatch_node_drifts(
@@ -150,6 +268,237 @@ def _skill_dirs() -> list[Path]:
             continue
         dirs.append(entry)
     return dirs
+
+
+def _parse_skill_frontmatter(skill_path: Path) -> dict[str, object]:
+    """Best-effort parse of the top-level SKILL.md frontmatter.
+
+    The skill spec frontmatter is intentionally simple: top-level scalar keys
+    plus YAML folded/literal blocks for `description`. We only need scalar
+    extraction for the runtime-verification fields, so this parser ignores
+    nested YAML and continuation lines once it has recorded the parent key.
+    """
+    try:
+        text = skill_path.read_text()
+    except OSError:
+        return {}
+    lines = text.splitlines()
+    if len(lines) < 3 or lines[0].strip() != "---":
+        return {}
+
+    data: dict[str, object] = {}
+    i = 1
+    while i < len(lines):
+        raw = lines[i]
+        stripped = raw.strip()
+        if stripped == "---":
+            return data
+        if not raw or raw[0].isspace() or ":" not in raw:
+            i += 1
+            continue
+        key, value = raw.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if re.fullmatch(r"[>|][+-]?", value):
+            data[key] = value
+            i += 1
+            while i < len(lines):
+                cont = lines[i]
+                if cont.strip() == "---":
+                    return data
+                if cont and not cont[0].isspace():
+                    break
+                i += 1
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        if value.lower() == "true":
+            data[key] = True
+        elif value.lower() == "false":
+            data[key] = False
+        else:
+            data[key] = value
+        i += 1
+    return {}
+
+
+def _skill_has_helper_executable(skill_dir: Path) -> bool:
+    """True iff the skill ships a runtime helper binary/script beside SKILL.md."""
+    for entry in skill_dir.iterdir():
+        if entry.name == "SKILL.md" or not entry.is_file():
+            continue
+        if entry.name.startswith("."):
+            continue
+        if os.access(entry, os.X_OK):
+            return True
+    return False
+
+
+def _skill_has_external_cli_template(text: str) -> bool:
+    """Return True when fenced shell templates invoke external CLI binaries."""
+    in_shell_fence = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            language = stripped[3:].strip().lower()
+            if in_shell_fence:
+                in_shell_fence = False
+            else:
+                in_shell_fence = language in {"", "bash", "sh", "shell", "zsh"}
+            continue
+        if not in_shell_fence or not stripped:
+            continue
+        line_to_scan = stripped
+        if stripped.startswith("#"):
+            prompt_body = stripped[1:].lstrip()
+            if not _looks_like_external_cli_invocation(prompt_body):
+                continue
+            line_to_scan = prompt_body
+        for match in SHELL_COMMAND_TOKEN_RE.finditer(line_to_scan):
+            command = match.group(1)
+            if command not in SHELL_NON_EXTERNAL_COMMANDS:
+                return True
+    return False
+
+
+def _looks_like_external_cli_invocation(
+    snippet: str, *, allow_unknown: bool = False
+) -> bool:
+    """Heuristic for prompt-prefixed or inline command snippets."""
+    stripped = snippet.strip()
+    if " " not in stripped:
+        return False
+    match = ROOT_PROMPT_COMMAND_RE.match(stripped)
+    if not match:
+        return False
+    command = match.group(1)
+    first_token = stripped.split()[0]
+    if command in SHELL_NON_EXTERNAL_COMMANDS:
+        return False
+    return (
+        command in KNOWN_EXTERNAL_CLI_COMMANDS
+        or "/" in first_token
+        or re.search(r"(^|\s)--[A-Za-z0-9][A-Za-z0-9_-]*", stripped) is not None
+        or allow_unknown
+    )
+
+
+def _skill_has_inline_external_cli(text: str) -> bool:
+    """Return True when inline code snippets show external CLI invocations."""
+    for match in re.finditer(r"`([^`\n]+)`", text):
+        context = text[max(0, match.start() - 40) : match.start()]
+        if not INLINE_EXECUTION_CONTEXT_RE.search(context):
+            continue
+        if _looks_like_external_cli_invocation(match.group(1), allow_unknown=True):
+            return True
+    return False
+
+
+def _skill_has_operative_ask_user_question(text: str) -> bool:
+    """True when prose instructs the skill to use AskUserQuestion at runtime."""
+    for match in ASK_USER_QUESTION_CALL_RE.finditer(text):
+        context = text[max(0, match.start() - 80) : match.end()]
+        if NEGATED_ASK_USER_QUESTION_RE.search(context):
+            continue
+        return True
+    return False
+
+
+def _skill_runtime_verification_reasons(skill_dir: Path) -> list[str]:
+    """Return the runtime-sensitive reasons that require frontmatter metadata.
+
+    The rule intentionally prefers low-ambiguity, static signals already
+    codified in CONTRIBUTING.md:
+
+      - `AskUserQuestion(...)` appears in the spec (interactive runtime call)
+      - `Skill(...)` appears in the spec (delegation runtime call)
+      - the skill wraps external CLI command templates in SKILL.md
+      - the skill ships an executable helper beside SKILL.md (wrapper/runtime
+        surface the prose depends on)
+
+    This keeps the gate conservative for prose-only docs skills while still
+    catching the repo's current runtime-sensitive surfaces.
+    """
+    skill_path = skill_dir / "SKILL.md"
+    try:
+        text = skill_path.read_text()
+    except OSError:
+        return []
+
+    reasons: list[str] = []
+    if _skill_has_operative_ask_user_question(text):
+        reasons.append("AskUserQuestion")
+    if SKILL_CALL_RE.search(text):
+        reasons.append("Skill(...)")
+    if (
+        skill_dir.name in EXTERNAL_CLI_WRAPPER_SKILLS
+        or _skill_has_external_cli_template(text)
+        or _skill_has_inline_external_cli(text)
+    ):
+        reasons.append("external-cli-wrapper")
+    if _skill_has_helper_executable(skill_dir):
+        reasons.append("helper-executable")
+    return reasons
+
+
+def _skill_runtime_metadata_drifts(skill_dir: Path) -> list[str]:
+    """Drift strings for one runtime-sensitive skill's verification metadata."""
+    reasons = _skill_runtime_verification_reasons(skill_dir)
+    if not reasons:
+        return []
+
+    skill_path = skill_dir / "SKILL.md"
+    frontmatter = _parse_skill_frontmatter(skill_path)
+    drifts: list[str] = []
+    reason_text = ", ".join(reasons)
+
+    verified = frontmatter.get("verified-against-runtime")
+    if verified is not True:
+        drifts.append(
+            f"SKILL RUNTIME METADATA {skill_dir.name}: runtime-sensitive "
+            f"({reason_text}) but missing `verified-against-runtime: true`"
+        )
+
+    verified_at = frontmatter.get("runtime-verified-at")
+    if not isinstance(verified_at, str) or not verified_at.strip():
+        drifts.append(
+            f"SKILL RUNTIME METADATA {skill_dir.name}: runtime-sensitive "
+            f"({reason_text}) but missing `runtime-verified-at`"
+        )
+    else:
+        normalized = verified_at.strip()
+        if normalized in RUNTIME_METADATA_PLACEHOLDERS["runtime-verified-at"]:
+            drifts.append(
+                f"SKILL RUNTIME METADATA {skill_dir.name}: "
+                "`runtime-verified-at` still carries a template placeholder"
+            )
+        elif not RUNTIME_DATE_RE.fullmatch(normalized):
+            drifts.append(
+                f"SKILL RUNTIME METADATA {skill_dir.name}: "
+                f"`runtime-verified-at` must be YYYY-MM-DD, got {normalized!r}"
+            )
+
+    verified_note = frontmatter.get("runtime-verified-note")
+    if not isinstance(verified_note, str) or not verified_note.strip():
+        drifts.append(
+            f"SKILL RUNTIME METADATA {skill_dir.name}: runtime-sensitive "
+            f"({reason_text}) but missing `runtime-verified-note`"
+        )
+    else:
+        normalized_note = verified_note.strip()
+        if re.fullmatch(r"[>|][+-]?", normalized_note):
+            drifts.append(
+                f"SKILL RUNTIME METADATA {skill_dir.name}: "
+                "`runtime-verified-note` must be an inline verification note, "
+                "not a block scalar"
+            )
+        elif normalized_note in RUNTIME_METADATA_PLACEHOLDERS["runtime-verified-note"]:
+            drifts.append(
+                f"SKILL RUNTIME METADATA {skill_dir.name}: "
+                "`runtime-verified-note` still carries a template placeholder"
+            )
+
+    return drifts
 
 
 def _has_fail_open_decorator(impl_path: Path) -> bool:
@@ -487,7 +836,13 @@ def main() -> int:
         )
 
     # ------------------------------------------------------------------
-    # Rule 11 — Skill surface freeze (#465)
+    # Rule 11 — runtime-sensitive skill metadata
+    # ------------------------------------------------------------------
+    for skill_dir in _skill_dirs():
+        drifts.extend(_skill_runtime_metadata_drifts(skill_dir))
+
+    # ------------------------------------------------------------------
+    # Rule 12 — Skill surface freeze (#465)
     # ------------------------------------------------------------------
     on_disk_skills = {d.name for d in _skill_dirs()}
     unexpected = on_disk_skills - EXPECTED_SKILLS
@@ -506,7 +861,7 @@ def main() -> int:
         )
 
     # ------------------------------------------------------------------
-    # Rule 12 — Doc skill-count invariant (#498)
+    # Rule 13 — Doc skill-count invariant (#498)
     #
     # AGENTS.md carries an explicit "## Skills (N)" header whose count must
     # equal len(EXPECTED_SKILLS).  Both AGENTS.md and README.md embed skill
@@ -525,7 +880,7 @@ def main() -> int:
     agents_text = agents_md_path.read_text()
     readme_text = readme_md_path.read_text()
 
-    # Rule 12a — AGENTS.md "## Skills (N)" count header must match
+    # Rule 13a — AGENTS.md "## Skills (N)" count header must match
     count_match = _re.search(r"^##\s+Skills\s+\((\d+)\)", agents_text, _re.MULTILINE)
     if count_match is None:
         drifts.append(
@@ -541,7 +896,7 @@ def main() -> int:
                 f"EXPECTED_SKILLS has {expected_count} — update the header"
             )
 
-    # Rule 12b — every EXPECTED_SKILLS member appears in AGENTS.md
+    # Rule 13b — every EXPECTED_SKILLS member appears in AGENTS.md
     agents_backtick_skills = set(_re.findall(r"`([^`]+)`", agents_text))
     missing_in_agents = EXPECTED_SKILLS - agents_backtick_skills
     if missing_in_agents:
@@ -551,7 +906,7 @@ def main() -> int:
             "the skill table"
         )
 
-    # Rule 12c — every EXPECTED_SKILLS member appears as the first column of
+    # Rule 13c — every EXPECTED_SKILLS member appears as the first column of
     # a README.md skill table row.  We match `| \`skill-name\` |` so that a
     # skill name mentioned only in a description cell (cross-reference noise)
     # does not satisfy the check.
@@ -567,7 +922,7 @@ def main() -> int:
         )
 
     # ------------------------------------------------------------------
-    # Rule 13 — dispatch-group ↔ build/runtime consistency (ADR-0002, #617)
+    # Rule 14 — dispatch-group ↔ build/runtime consistency (ADR-0002, #617)
     #
     # Each (event, matcher) in manifest.dispatch_groups is collapsed by the
     # build (filter_hooks_for_host) into ONE dispatcher node, and resolved at
@@ -657,7 +1012,7 @@ def main() -> int:
             )
 
     # ------------------------------------------------------------------
-    # Rule 14 — docs/hook stub parity (#606)
+    # Rule 15 — docs/hook stub parity (#606)
     #
     # Every hook dir (manifest entries + OPT_IN_HOOKS) owns a 1-line
     # docs/hook/<name>.md redirect stub (ADR-0001 §337-338), byte-identical to
@@ -693,7 +1048,7 @@ def main() -> int:
             )
 
     # ------------------------------------------------------------------
-    # Rule 15 — standalone hooks must apply @fail_open (#645)
+    # Rule 16 — standalone hooks must apply @fail_open (#645)
     #
     # Dispatch-group members get `_hook_runtime.fail_open` wrapping at
     # runtime (`_dispatch.run_one`); every other execution path runs
