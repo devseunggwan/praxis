@@ -15,16 +15,18 @@
 #
 # Tested surface variants:
 #   1. Grouping by bypass var name — frequency counts are correct
-#   2. Error event highlighting — tool_result_status=="error" events surfaced
-#   3. --errors-only flag — output restricted to error events
-#   4. Zero events — handles empty telemetry dir gracefully
-#   5. Multi-day span — events from multiple files aggregated correctly
-#   6. --days flag — events outside the window are excluded
-#   7. --dir flag — reads from override directory (not ~/.praxis)
-#   8. Malformed JSONL lines — skipped without crashing
-#   9. Missing field graceful — record with absent field doesn't crash
-#  10. Privacy: bypass var VALUES do not appear in output
-#  11. Exit code 0 on success, 1 on bad --days value
+#   2. Hook/rule-family + command-family summaries — grouped safely
+#   3. Error event highlighting — tool_result_status=="error" events surfaced
+#   4. --errors-only flag — output restricted to error events
+#   5. Zero events — handles empty telemetry dir gracefully
+#   6. Multi-day span — events from multiple files aggregated correctly
+#   7. --days flag — events outside the window are excluded
+#   8. --dir flag — reads from override directory (not ~/.praxis)
+#   9. Malformed JSONL lines — skipped without crashing
+#  10. Missing field graceful — record with absent field doesn't crash
+#  11. Privacy: bypass var VALUES do not appear in output
+#  12. Privacy: path-like command families do not expose full paths
+#  13. Exit code 0 on success, 1 on bad --days value
 #
 # Run:  bash tests/test_bypass_review.sh
 # Exit: 0 on success, 1 on at least one failure
@@ -68,26 +70,27 @@ assert_fail() {
   printf 'FAIL  [%s] %s\n' "$name" "$msg"
 }
 
-# make_event <bypass_vars_json_array> <status> [tool] [session]
+# make_event <bypass_vars_json_array> <status> [tool] [session] [tool_input]
 # Emits a single JSON line using TODAY's UTC date in the timestamp.
 make_event() {
   local bypass_vars_json="$1"
   local status="$2"
   local tool="${3:-Bash}"
   local session="${4:-test-session-42}"
+  local tool_input="${5:-CLAUDE_HOOK_BYPASS_X=<redacted> git commit}"
   python3 -c "
 import json, sys
 from datetime import datetime, timezone
 bypass_vars = json.loads(sys.argv[1])
-status, tool, session = sys.argv[2], sys.argv[3], sys.argv[4]
+status, tool, session, tool_input = sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 print(json.dumps({
     'timestamp': datetime.now(tz=timezone.utc).isoformat(),
     'session_id': session,
     'tool': tool,
     'bypass_env_vars': bypass_vars,
-    'tool_input': 'CLAUDE_HOOK_BYPASS_X=<redacted> git commit',
+    'tool_input': tool_input,
     'tool_result_status': status,
-}))" "$bypass_vars_json" "$status" "$tool" "$session"
+}))" "$bypass_vars_json" "$status" "$tool" "$session" "$tool_input"
 }
 
 # write_fixture_file <path> <list of json lines>
@@ -138,7 +141,104 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 2: Error event highlighting
+# Test 2: Hook/rule-family + command-family summaries
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== bypass-review: hook and command family summaries ==="
+
+DIR1B="$TMP_DIR/t1b"
+mkdir -p "$DIR1B"
+ev_git_family=$(make_event '["CLAUDE_HOOK_BYPASS_SCIOMC_GATE"]' "ok" "Bash" "sess-git" \
+  'CLAUDE_HOOK_BYPASS_SCIOMC_GATE=<redacted> git commit -m fix')
+ev_gh_family=$(make_event '["PRAXIS_HOOK_BYPASS_WORKTREE_GATE"]' "error" "Bash" "sess-gh1" \
+  'PRAXIS_HOOK_BYPASS_WORKTREE_GATE=<redacted> gh pr create')
+ev_gh_json=$(make_event '["PRAXIS_GH_JSON_BYPASS"]' "error" "Bash" "sess-gh2" \
+  'PRAXIS_GH_JSON_BYPASS=<redacted> gh issue view 1 --json state')
+ev_lower_env=$(make_event '["PRAXIS_GH_JSON_BYPASS"]' "ok" "Bash" "sess-gh3" \
+  'foo=<redacted> gh issue list')
+ev_env_ignore=$(make_event '["PRAXIS_GH_JSON_BYPASS"]' "ok" "Bash" "sess-gh4" \
+  'env -i PRAXIS_GH_JSON_BYPASS=<redacted> gh pr list')
+ev_env_chdir=$(make_event '["PRAXIS_GH_JSON_BYPASS"]' "ok" "Bash" "sess-gh5" \
+  'env -C /tmp PRAXIS_GH_JSON_BYPASS=<redacted> gh pr view 1')
+ev_env_separator=$(make_event '["PRAXIS_GH_JSON_BYPASS"]' "ok" "Bash" "sess-gh6" \
+  'env -- PRAXIS_GH_JSON_BYPASS=<redacted> gh pr status')
+ev_env_dash_separator=$(make_event '["PRAXIS_GH_JSON_BYPASS"]' "ok" "Bash" "sess-gh7" \
+  'env - PRAXIS_GH_JSON_BYPASS=<redacted> gh pr checks 1')
+ev_env_split_string=$(make_event '["PRAXIS_GH_JSON_BYPASS"]' "ok" "Bash" "sess-gh8" \
+  'env -S "PRAXIS_GH_JSON_BYPASS=<redacted> gh pr diff 1"')
+ev_env_split_string_equals=$(make_event '["PRAXIS_GH_JSON_BYPASS"]' "ok" "Bash" "sess-gh9" \
+  'env --split-string="PRAXIS_GH_JSON_BYPASS=<redacted> gh issue list"')
+write_fixture "$DIR1B/bypass-events-$TODAY.jsonl" "$ev_git_family" "$ev_gh_family" "$ev_gh_json" "$ev_lower_env" "$ev_env_ignore" "$ev_env_chdir" "$ev_env_separator" "$ev_env_dash_separator" "$ev_env_split_string" "$ev_env_split_string_equals"
+
+out1b=$(python3 "$CLI" --dir "$DIR1B" --days 7 2>&1)
+
+if echo "$out1b" | grep -q "Bypass by Hook / Rule Family"; then
+  assert_pass "hook/rule family section present"
+else
+  assert_fail "hook/rule family section present" "section missing; output: $out1b"
+fi
+
+if echo "$out1b" | grep -q "Bypass by Command Family"; then
+  assert_pass "command family section present"
+else
+  assert_fail "command family section present" "section missing; output: $out1b"
+fi
+
+if echo "$out1b" | grep -q "Error-Linked Bypass Signals"; then
+  assert_pass "error-linked summary section present"
+else
+  assert_fail "error-linked summary section present" "section missing; output: $out1b"
+fi
+
+if echo "$out1b" | grep -q "SCIOMC_GATE" && echo "$out1b" | grep -q "WORKTREE_GATE" && echo "$out1b" | grep -q "GH_JSON"; then
+  assert_pass "normalized hook/rule families shown"
+else
+  assert_fail "normalized hook/rule families shown" "expected normalized families missing; output: $out1b"
+fi
+
+if echo "$out1b" | grep -q "gh" && echo "$out1b" | grep -q "git"; then
+  assert_pass "command families shown"
+else
+  assert_fail "command families shown" "expected command families missing; output: $out1b"
+fi
+
+if printf '%s\n' "$out1b" | grep -Fq "gh (2)" && printf '%s\n' "$out1b" | grep -Fq "WORKTREE_GATE (1)"; then
+  assert_pass "error-linked summary groups failed bypasses"
+else
+  assert_fail "error-linked summary groups failed bypasses" "expected error-linked summary entries missing; output: $out1b"
+fi
+
+if printf '%s\n' "$out1b" | grep -Fq "foo=<redacted>" || printf '%s\n' "$out1b" | grep -Fq -- "--ignore-environment" || printf '%s\n' "$out1b" | grep -Fq " -C " || printf '%s\n' "$out1b" | grep -Fq "(unknown)"; then
+  assert_fail "command family skips env assignments and env options" "env assignment/option leaked into command family; output: $out1b"
+else
+  assert_pass "command family skips env assignments and env options"
+fi
+
+DIR1C="$TMP_DIR/t1c"
+mkdir -p "$DIR1C"
+ev_env_split_string_malformed=$(make_event '["PRAXIS_GH_JSON_BYPASS"]' "ok" "Bash" "sess-gh10" \
+  'env -S "PRAXIS_GH_JSON_BYPASS=<redacted> gh pr diff 1')
+ev_env_split_string_equals_malformed=$(make_event '["PRAXIS_GH_JSON_BYPASS"]' "ok" "Bash" "sess-gh11" \
+  'env --split-string="PRAXIS_GH_JSON_BYPASS=<redacted> gh issue list')
+write_fixture "$DIR1C/bypass-events-$TODAY.jsonl" "$ev_env_split_string_malformed" "$ev_env_split_string_equals_malformed"
+
+out1c=$(python3 "$CLI" --dir "$DIR1C" --days 7 2>&1)
+rc1c=$?
+
+if [ "$rc1c" -eq 0 ]; then
+  assert_pass "malformed env split-string: exit code 0"
+else
+  assert_fail "malformed env split-string: exit code 0" "exited with code $rc1c; output: $out1c"
+fi
+
+if printf '%s\n' "$out1c" | grep -Fq "(unknown)"; then
+  assert_pass "malformed env split-string: command family unknown"
+else
+  assert_fail "malformed env split-string: command family unknown" "expected unknown family; output: $out1c"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 3: Error event highlighting
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== bypass-review: error event highlighting ==="
@@ -180,7 +280,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 3: --errors-only flag
+# Test 4: --errors-only flag
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== bypass-review: --errors-only flag ==="
@@ -208,7 +308,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 4: Zero events — empty dir
+# Test 5: Zero events — empty dir
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== bypass-review: zero events — empty telemetry dir ==="
@@ -232,7 +332,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 5: Multi-day aggregation
+# Test 6: Multi-day aggregation
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== bypass-review: multi-day aggregation ==="
@@ -267,7 +367,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 6: --days flag — old events outside window excluded
+# Test 7: --days flag — old events outside window excluded
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== bypass-review: --days=1 excludes yesterday ==="
@@ -295,7 +395,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 7: --dir flag
+# Test 8: --dir flag
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== bypass-review: --dir override ==="
@@ -314,7 +414,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 8: Malformed JSONL lines — skipped without crash
+# Test 9: Malformed JSONL lines — skipped without crash
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== bypass-review: malformed JSONL lines skipped ==="
@@ -345,7 +445,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 9: Missing fields in record — no crash
+# Test 10: Missing fields in record — no crash
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== bypass-review: missing fields in record ==="
@@ -372,7 +472,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 10: Privacy — bypass var VALUES do not appear in output
+# Test 11: Privacy — bypass var VALUES do not appear in output
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== bypass-review: bypass var values never in output ==="
@@ -413,7 +513,34 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 11: Exit code 1 on --days < 1
+# Test 12: Privacy — command family should not expose full path
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== bypass-review: command family path sanitization ==="
+
+DIR10B="$TMP_DIR/t10b"
+mkdir -p "$DIR10B"
+abs_path="/Users/tester/private/internal/run-internal.sh"
+ev_path=$(make_event '["PRAXIS_VERSION_BUMP_BYPASS"]' "ok" "Bash" "test-path" \
+  "PRAXIS_VERSION_BUMP_BYPASS=<redacted> $abs_path --mode verify")
+write_fixture "$DIR10B/bypass-events-$TODAY.jsonl" "$ev_path"
+
+out10b=$(python3 "$CLI" --dir "$DIR10B" --days 1 2>&1)
+
+if printf '%s\n' "$out10b" | grep -Fq "path:run-internal.sh"; then
+  assert_pass "privacy: path-like command family normalized"
+else
+  assert_fail "privacy: path-like command family normalized" "sanitized path family missing; output: $out10b"
+fi
+
+if printf '%s\n' "$out10b" | grep -Fq "$abs_path"; then
+  assert_fail "privacy: full command path not exposed" "absolute path appeared in output"
+else
+  assert_pass "privacy: full command path not exposed"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 13: Exit code 1 on --days < 1
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== bypass-review: exit 1 on bad --days ==="
