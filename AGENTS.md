@@ -147,6 +147,13 @@ to catch "patch landed in the wrong clone" before it bites a future session.
 
 ## Issue & PR Conventions
 
+- **PR comment retrieval scope**: When asked to check PR comments,
+  inspect both surfaces: Conversation comments (`gh pr view --json comments`)
+  and inline review comments/discussions (`gh api
+  repos/{owner}/{repo}/pulls/<PR>/comments --paginate` or the GraphQL review
+  thread equivalent). Links containing `#discussion_r...` are inline review
+  comments, not Conversation comments; do not report "no comments" or "only one
+  comment" until both surfaces have been checked.
 - **Partial-scope PR**: When a PR addresses only a subset of an issue's body
   (e.g., "items 1-3 implemented, P-redesign deferred to follow-up"), use
   `Refs #N` (or `Addresses #N (items X, Y; Z deferred)`) in the PR body
