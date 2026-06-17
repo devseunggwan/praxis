@@ -5,7 +5,7 @@
 # (`.omc/state/retrospect-hygiene-cursor.json`) is shared mutable state. Two
 # sessions running /retrospect concurrently both read the same cursor and the
 # second session's plain Write clobbers the first session's `note` carry-forward.
-# The skill MUST re-read the on-disk cursor before persisting and union-merge on
+# The Stage 1/2 reference MUST re-read the on-disk cursor before persisting and union-merge on
 # a detected concurrent advance instead of overwriting.
 #
 # Like the Stage 3 falsification gate, memory-only enforcement of this rule does
@@ -18,10 +18,10 @@
 set +e
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SKILL="$REPO_ROOT/skills/retrospect/SKILL.md"
+SPEC="$REPO_ROOT/skills/retrospect/references/stage1-2-analysis.md"
 
-if [ ! -f "$SKILL" ]; then
-  echo "FAIL: SKILL.md not found at $SKILL" >&2
+if [ ! -f "$SPEC" ]; then
+  echo "FAIL: stage1-2-analysis.md not found at $SPEC" >&2
   exit 1
 fi
 
@@ -33,19 +33,19 @@ assert_present() {
   local name="$1"
   local pattern="$2"
   local hits
-  hits=$(grep -c -- "$pattern" "$SKILL" 2>/dev/null)
+  hits=$(grep -c -- "$pattern" "$SPEC" 2>/dev/null)
   hits=${hits:-0}
   if [ "$hits" -gt 0 ]; then
     echo "PASS: $name"
     PASS=$((PASS + 1))
   else
-    echo "FAIL: $name — pattern '$pattern' missing in SKILL.md"
+    echo "FAIL: $name — pattern '$pattern' missing in stage1-2-analysis.md"
     FAIL=$((FAIL + 1))
     FAILED_NAMES+=("$name")
   fi
 }
 
-echo "=== retrospect SKILL.md Stage 1.5 cursor write mandate checks ==="
+echo "=== retrospect Stage 1/2 reference Stage 1.5 cursor write mandate checks ==="
 echo ""
 
 # --- 1. Mandate section header exists ----------------------------------------

@@ -1,10 +1,9 @@
 # Stage 3 report template + worked examples (retrospect)
 
-Reference material for [`../SKILL.md`](../SKILL.md) Stage 3. The **Output
-Schema Contract in SKILL.md is the normative source** — on any divergence
-between this template and the contract, the contract wins. Read this file when
-composing the Stage 3 report or calibrating per-finding plans; it carries no
-mandates of its own.
+Reference material for [`../SKILL.md`](../SKILL.md) Stage 3. The **normative
+contract now lives in [`stage3-reporting.md`](stage3-reporting.md)**. Read that
+file first for the canonical emit order, schema rules, and approval gate; use
+this file for the consolidated template and worked examples.
 
 ## Consolidated report template
 
@@ -36,6 +35,12 @@ enumerate).
 <!-- retrospect:dismissed_candidates begin -->
 - {one-line candidate} | reason: {rationale} | spec_cite: {section}
 <!-- retrospect:dismissed_candidates end -->
+
+Hygiene Scan Trail
+- Current cycle: signal 1/2/3/4/5 = {one-line summary per signal, or none}
+- Carried from previous cycle (cursor note): signal N = {verbatim carried finding}
+- Falsification of carried finding (signal N): probe=`{command}` output=`{observed}` -> RESOLVED|STILL_OUTSTANDING|UNRUNNABLE
+- Cursor write: concurrent advance detected — union-merged note ({n_self} self + {n_disk} on-disk lines) + advanced pointer to {pointer}
 
 <!-- retrospect:tool_census begin -->
 - tool_name: {tool} | layer: {mcp|cli|builtin|skill} | call_count: {n} | error_count: {n} | retry_count: {n} | workaround_marker: {true|false} | surfaced_in_friction: {true|false} | signal: {none|summary}
@@ -84,6 +89,13 @@ $ python3 -c "...emit each tool_result is_error body..." {transcript_path}
 |---|----------|------------|---------|------------|------------|---------|------------------------|-----------|----------|
 | 1 | {behavioral|tool|workflow|spec-gap, ...} | {mcp|cli|builtin|skill|—} | {pattern} | {root_cause} | {rule_ref or "gap"} | {Yes(Nx)/No} | {action1[, action2]} | {rationale: 5 `not <action>:` lines for memory-only, or one-line for compound/non-memory} | HIGH/MED/LOW |
 ...
+
+<!-- memory_scan finding #<n>:
+  scanned: true
+  candidates_reviewed: <concrete paths or unreachable marker>
+  repeat: true|false
+  repeat_count: <integer>
+-->
 
 ```
 
