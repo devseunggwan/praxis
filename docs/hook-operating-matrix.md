@@ -7,6 +7,7 @@ sources. Regenerate it with `./scripts/build-plugin-manifests.py`; drift
 is checked by `./scripts/check-plugin-manifests.py`.
 
 Sources:
+
 - `hooks/manifest.json` -> role, event, matcher, hosts
 - `docs/bypass-vars.md` -> bypass, strict, and state/path variables
 - `SECURITY.md` -> read-only external-command declarations
