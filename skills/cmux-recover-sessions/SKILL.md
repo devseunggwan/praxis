@@ -11,6 +11,9 @@ description: >
   Only defer to cmux-resume-sessions when there is NO crash context and the user
   explicitly wants to rehydrate a saved snapshot.
   Triggers on "터졌다", "크래시 복구", "크래시 복원", "전원 꺼짐 복구", "OOM 복구", "세션 살려야", "recover cmux", "crash recovery", "power loss recovery", "cmux session recovery".
+verified-against-runtime: true
+runtime-verified-at: 2026-06-16
+runtime-verified-note: "cmux-recover-sessions --list --show-uuid (fixture HOME) + help probe — list mode bypasses cmux ping, preserves HOME/UUID columns, and scans compact-summary sessions through the shared recover scanner."
 ---
 
 # Recover Sessions (cmux)

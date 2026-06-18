@@ -6,6 +6,9 @@ description: >
   actions, then execute after user approval.
   Triggers on "retrospect", "what went wrong", "session review",
   "session improvement", "what was the issue", "improve".
+verified-against-runtime: true
+runtime-verified-at: 2026-06-16
+runtime-verified-note: "tests/test_retrospect_falsify_recommended.sh + test_retrospect_routing.sh + retrospect hook suites — Stage 3 AskUserQuestion recommendations require falsification traces, and the active-marker/report-fence contract stays aligned."
 ---
 
 # Retrospect

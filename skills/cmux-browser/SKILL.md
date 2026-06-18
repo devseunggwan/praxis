@@ -1,6 +1,9 @@
 ---
 name: cmux-browser
 description: "Browser automation E2E testing via cmux browser CLI — navigation, form input, click, state verification with SPA hydration wait. Triggers on \"cmux browser\", \"cmux 브라우저\"."
+verified-against-runtime: true
+runtime-verified-at: 2026-06-16
+runtime-verified-note: "cmux 1.x browser help + tests/test_cmux_browser.sh — surface handles remain mandatory for most subcommands, and selector-required wrapper errors add usage hints while selector paths pass through."
 ---
 
 # cmux Browser E2E Test
