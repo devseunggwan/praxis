@@ -559,7 +559,7 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
             "external-cli-wrapper",
             "helper-executable",
         ),
-        "retrospect": ("AskUserQuestion", "external-cli-wrapper"),
+        "retrospect": ("external-cli-wrapper",),
         "writing-praxis-skill": (
             "AskUserQuestion",
             "Skill(...)",
