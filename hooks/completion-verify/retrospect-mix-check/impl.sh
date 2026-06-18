@@ -106,7 +106,7 @@ if [ "$RETRO_ACTIVE" = "true" ]; then
     mkdir -p "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm" || true
     echo "$(date -Iseconds) session=$SESSION_ID blocked_retrospect_fence_omission" \
       >> "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm/retrospect-mix-blocked.log" || true
-    fence_reason="Retrospect Stage 3 distribution fence missing (issue #666). This is a retrospect-active session (the retrospect skill was invoked this turn) presenting a findings table, but the assistant message carries no '<!-- retrospect:distribution begin -->' fence and no '## Actions Executed' marker. A free-form or localized Stage 3 report bypasses every mix-check gate (Gate-1..7) because the gates key on the canonical output schema. Re-emit the Stage 3 output per the Output Schema Contract in skills/retrospect/SKILL.md: '## Retrospect Report' header -> audit fences -> '<!-- retrospect:distribution begin/end -->' card -> unified findings table."
+    fence_reason="Retrospect Stage 3 distribution fence missing (issue #666). This is a retrospect-active session (the retrospect skill was invoked this turn) presenting a findings table, but the assistant message carries no '<!-- retrospect:distribution begin -->' fence and no '## Actions Executed' marker. A free-form or localized Stage 3 report bypasses every mix-check gate (Gate-1..7) because the gates key on the canonical output schema. Re-emit the Stage 3 output per the Output Schema Contract in skills/retrospect/references/stage3-reporting.md: '## Retrospect Report' header -> audit fences -> '<!-- retrospect:distribution begin/end -->' card -> unified findings table."
     jq -n --arg r "$fence_reason" '{decision: "block", reason: $r}'
     exit 0
   fi
@@ -285,7 +285,7 @@ while IFS= read -r row; do
 
   # Gate-3 (backing_repo): rows whose Proposed Actions contain upstream_feedback
   # or issue MUST declare backing_repo: <owner/repo> in the Rationale cell.
-  # Stage 2 step 8 documents this as MUST; Stage 4 Action 4 step 0 aborts on absence.
+  # Stage 2 step 7 documents this as MUST; Stage 4 Action 4 step 0 aborts on absence.
   has_routed_action=false
   for tok in "${unique_actions[@]}"; do
     case "$tok" in
@@ -295,7 +295,7 @@ while IFS= read -r row; do
   if [ "$has_routed_action" = "true" ]; then
     normalized_r3=$(printf '%s' "$rationale" | sed 's/<br *\/*>/\n/g')
     if ! printf '%s\n' "$normalized_r3" | grep -qE '^[[:space:]]*backing_repo: [A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*'; then
-      GATE3_VIOLATIONS+=("finding #${finding_num}: Proposed Actions contains upstream_feedback or issue but Rationale missing backing_repo: <owner/repo> — return to Stage 2 step 8")
+      GATE3_VIOLATIONS+=("finding #${finding_num}: Proposed Actions contains upstream_feedback or issue but Rationale missing backing_repo: <owner/repo> — return to Stage 2 step 7")
     fi
   fi
 done <<< "$TABLE_LINES"
@@ -492,7 +492,7 @@ if [ "$should_block" = "true" ]; then
     fi
   done
 
-  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to Stage 2.5 and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to Stage 2 step 8 and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to Stage 2.5 Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable). See skills/retrospect/SKILL.md."
+  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable). See skills/retrospect/references/stage2.5-audit.md and skills/retrospect/references/stage3-reporting.md."
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'
   exit 0
 fi

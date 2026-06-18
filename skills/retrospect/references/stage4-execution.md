@@ -62,10 +62,10 @@ For each approved action:
 
    **Precondition:** This check applies ONLY when the finding's action type is `memory` (new pattern). If Stage 2 already marked `repeat=true` and escalated to issue/hook/global `~/.claude/CLAUDE.md` draft, skip this check — the escalation ladder takes precedence over merge.
 
-   a. Reuse Stage 2 Step 7's repeat scan results — if a finding matched an existing memory but was NOT escalated (i.e., it's a genuinely new sub-pattern), that file is the merge target
+   a. Reuse Stage 2 step 6's repeat scan results — if a finding matched an existing memory but was NOT escalated (i.e., it's a genuinely new sub-pattern), that file is the merge target
    b. If no Stage 2 match: scan MEMORY.md index for entries with overlapping root cause or topic (concept-level, not keyword)
    c. For each candidate, read the existing memory file and compare:
-      - Same root cause / principle → **merge**: append new context (examples, How to apply items) to the existing file. If merge makes this the 2nd+ occurrence, re-evaluate whether action type should escalate per Stage 2 Step 8
+      - Same root cause / principle → **merge**: append new context (examples, How to apply items) to the existing file. If merge makes this the 2nd+ occurrence, re-evaluate whether action type should escalate per Stage 2 step 7
       - Related but distinct principle → **create new file** (genuinely different insight)
    d. **Never create a new file when the insight is a specific instance of an existing general rule** — add it as a numbered sub-item instead
    e. After merge or create, update MEMORY.md index (update description if merged, add new line if created)
@@ -117,7 +117,7 @@ For each approved action:
 
    This gate is the first procedure step for every `upstream_feedback` row, executed **before** any of the resolution-table lookups below. Skipping it means the most salient file path in the executor's local context (often the working project repo) wins the routing decision — which is the exact failure mode this gate prevents.
 
-   1. **Read the declaration.** Parse `backing_repo: <owner/repo>` from the finding's Rationale cell (Stage 2 step 8 makes this MANDATORY for upstream_feedback rows; Stage 3 surfaces it). If the declaration is absent → ABORT this action and return the finding to Stage 2 step 8 with prompt: `"Finding #N upstream_feedback row missing backing_repo declaration — re-run Stage 2 step 8."`
+   1. **Read the declaration.** Parse `backing_repo: <owner/repo>` from the finding's Rationale cell (Stage 2 step 7 makes this MANDATORY for upstream_feedback rows; Stage 3 surfaces it). If the declaration is absent → ABORT this action and return the finding to Stage 2 step 7 with prompt: `"Finding #N upstream_feedback row missing backing_repo declaration — re-run Stage 2 step 7."`
 
    2. **Re-resolve from source-of-truth.** Independently of the declaration, re-resolve the backing repo using the resolution table below. Do NOT use the declared value as the lookup input — use the tool/layer signal from Stage 2 step 4b to derive the repo from scratch. Capture the re-resolved value as `live_backing_repo`. If the resolution table's `Other / ambiguous` row matches the layer (no concrete repo derivable), treat `live_backing_repo = AMBIGUOUS` and skip to step 0.4 with a 2-way prompt instead of 3-way.
 
