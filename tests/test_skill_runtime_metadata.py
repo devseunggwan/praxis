@@ -34,6 +34,7 @@ def _write_skill(
     verified: bool | None = None,
     verified_at: str | None = None,
     verified_note: str | None = None,
+    quote_verified_note: bool = True,
     helper_name: str | None = None,
     helper_executable: bool = True,
 ) -> Path:
@@ -48,7 +49,10 @@ def _write_skill(
     if verified_at is not None:
         lines.append(f"runtime-verified-at: {verified_at}")
     if verified_note is not None:
-        lines.append(f'runtime-verified-note: "{verified_note}"')
+        if quote_verified_note:
+            lines.append(f'runtime-verified-note: "{verified_note}"')
+        else:
+            lines.append(f"runtime-verified-note: {verified_note}")
     lines.extend(["---", "", body])
     skill_path = skill_dir / "SKILL.md"
     skill_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -412,6 +416,7 @@ def test_unquoted_runtime_note_placeholder_is_rejected(tmp_path):
         verified=True,
         verified_at="2026-06-17",
         verified_note="<cli-name> <version> — one-line observed behavior",
+        quote_verified_note=False,
     )
     drifts = check._skill_runtime_metadata_drifts(skill_dir)
     assert any("template placeholder" in d for d in drifts), drifts
