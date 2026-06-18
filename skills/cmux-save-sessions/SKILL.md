@@ -116,7 +116,8 @@ done
       "branch": "main",
       "pr": "none",
       "category": "[DEV]",
-      "cwd": "/path/to/project"
+      "cwd": "/path/to/project",
+      "session_id": "5f3c1e9a-..."
     }
   ]
 }
