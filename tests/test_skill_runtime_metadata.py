@@ -553,6 +553,7 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
             "AskUserQuestion",
             "Skill(...)",
             "external-cli-wrapper",
+            "helper-executable",
         ),
         "recover-sessions": (
             "AskUserQuestion",
