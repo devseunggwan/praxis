@@ -623,6 +623,7 @@ def render_hook_operating_matrix(manifest: dict) -> str:
         "is checked by `./scripts/check-plugin-manifests.py`.",
         "",
         "Sources:",
+        "",
         "- `hooks/manifest.json` -> role, event, matcher, hosts",
         "- `docs/bypass-vars.md` -> bypass, strict, and state/path variables",
         "- `SECURITY.md` -> read-only external-command declarations",
