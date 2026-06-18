@@ -11,12 +11,16 @@ description: >
   in the session ledger. Step 5f tracks rounds-per-region and surfaces a non-blocking
   diminishing-returns advisory when the same file:region accumulates more than N rounds
   (default 4, configurable via PRAXIS_DIMINISHING_RETURNS_N).
+  At phase end it reaps leaked openai-codex app-server brokers via a co-located
+  idle-gated reaper (GC by default; opt-in running-broker kill via
+  PRAXIS_CODEX_REAP=1) to prevent the kernel_task memory-pressure spike caused
+  by brokers that outlive their owning session.
   Triggers on "codex review", "review codex", "safe review", "/codex-review-wrap",
   "premise verification", "flip detection", "sibling defect", "sibling cross-check",
-  "diminishing returns".
+  "diminishing returns", "broker reap".
 verified-against-runtime: true
 runtime-verified-at: 2026-05-13
-runtime-verified-note: "codex-companion 1.0.4 — ARGUMENTS rejected for non-flag string; AskUserQuestion maxItems:4 blocks worktree list >3 items; Skill() cannot delegate to disable-model-invocation skill. Step 4 hardened to a MUST NOT directive in issue #237 (2026-05-16) — directive-only change, no new runtime claim. Step 5f (PR #329) adds procedural prose only (rounds_per_region ledger + advisory text); no runtime hook code changed — existing verification evidence remains valid."
+runtime-verified-note: "codex-companion 1.0.4 — ARGUMENTS rejected for non-flag string; AskUserQuestion maxItems:4 blocks worktree list >3 items; Skill() cannot delegate to disable-model-invocation skill. Step 4 hardened to a MUST NOT directive in issue #237 (2026-05-16) — directive-only change, no new runtime claim. Step 5f (PR #329) adds procedural prose only (rounds_per_region ledger + advisory text); no runtime hook code changed — existing verification evidence remains valid. Step 6 (issue #683) adds codex-broker-reaper.sh; idle-gate functionally verified 2026-06-18 via synthetic broker — fresh-log SKIP, stale-log REAP, concurrent real brokers untouched (scanned=3 reaped=1 skipped=2)."
 ---
 
 # codex-review-wrap
@@ -44,6 +48,11 @@ have touched each `{file}:{region}` pair and emits a one-time non-blocking
 advisory when the count exceeds the configured threshold (default: 4 rounds,
 env var `PRAXIS_DIMINISHING_RETURNS_N`).
 See **Step 5** for the full gate.
+
+A third responsibility runs at phase end: **Step 6** reaps openai-codex
+app-server brokers that outlived their owning session (a process leak that
+spikes `kernel_task` once accumulated RSS crosses the macOS compressor
+threshold). See **Step 6** for the reaper and its safety gate.
 
 ## Invocation Model
 
@@ -775,6 +784,46 @@ The SoT audit is distinct from the per-finding premise verification in 5b:
 The two steps are complementary: 5b prevents bad fixes; 5h prevents missed
 enumerations from reaching the next reviewer.
 
+### Step 6: Reap leaked codex brokers (phase end)
+
+The openai-codex plugin starts a per-session app-server broker that is
+reparented to launchd (`ppid=1`) and is **not** killed when its owning Claude
+session exits. Across multi-day uptime these accumulate; once cumulative RSS
+crosses the macOS memory-compressor threshold, each idle broker's periodic
+wakeup drives compress/decompress churn that surfaces as `kernel_task` system
+CPU — a non-linear spike, not a linear one.
+
+Run the co-located reaper at the end of every review invocation. It is the
+single source of truth for safe reaping, shared with the launchd job (see
+`LAUNCHD.md`). Resolve it via the plugin root, mirroring the strike-counter
+convention used by the `strike` / `reset-strikes` skills:
+
+**Default — GC only (zero risk).** Removes the stale tmp sessionDirs of brokers
+whose pid is already dead. Never signals a running process.
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/skills/codex-review-wrap/codex-broker-reaper.sh" --gc
+```
+
+**Opt-in — also reap running idle brokers.** When `PRAXIS_CODEX_REAP=1` is set,
+additionally kill running brokers whose `broker.log` has been idle longer than
+`--max-age` minutes (default 30). A broker actively serving a review has a
+freshly-touched log and is skipped by the idle gate, so this stays safe to run
+from inside a session even while sibling sessions hold their own brokers.
+
+```bash
+if [ "${PRAXIS_CODEX_REAP:-0}" = "1" ]; then
+  "${CLAUDE_PLUGIN_ROOT}/skills/codex-review-wrap/codex-broker-reaper.sh" --reap --max-age 30
+fi
+```
+
+**Never** broad-kill (`pkill -f codex`, `pkill node`): sibling Claude sessions
+share the same broker process class, and an unscoped kill aborts their
+in-flight reviews. The reaper's per-broker idle gate is the only sanctioned
+path. The heavy, session-independent reclaim of running orphans belongs to the
+launchd job (`LAUNCHD.md`), not to a per-review phase end — phase end only
+keeps the count below the compressor threshold.
+
 ## Error Handling
 
 | Situation | Action |
@@ -795,6 +844,9 @@ enumerations from reaching the next reviewer.
 | Probe command for 5g returns unexpected output or exits with an error code that signals a command failure (e.g. exit=2 "command not found", permission denied) — distinct from `grep` exit=1 (no match), which is the expected signal for verified absence | Surface probe failure to the user; do not auto-retract the claim — let the user decide |
 | SoT audit (5h) — sibling document not locatable | Emit unresolved advisory; do not block review completion |
 | SoT audit (5h) — parent citation site ambiguous (multiple tables at same heading) | Use all tables at the heading as candidate SoT sources; report each comparison separately |
+| Reaper (Step 6) — running broker has no readable `broker.log` | Idle is indeterminate → broker is KEPT (logged as `SKIP ... no logFile`); never reaped on a guess |
+| Reaper (Step 6) — `CLAUDE_PLUGIN_ROOT` unset (skill run outside plugin context) | Resolve the script via the installed-plugins manifest, same as Step 4a; if still unresolved, skip Step 6 with a one-line note — reaping is best-effort hygiene, not a gate |
+| Reaper (Step 6) — agent considers `pkill -f codex` / `pkill node` | Forbidden: aborts sibling sessions' in-flight reviews. Use only the reaper's per-broker idle gate |
 
 ## Example Flow
 
@@ -935,3 +987,6 @@ user selects: 1
 - Step 5h SoT audit detects truncation only for inline-transcribed enumerations; reference-link citations (sibling SoT referenced but not transcribed) are inherently safe and are not audited
 - Step 5h citation-signal scanning is keyword-based; enumerations that use non-standard labels (e.g., custom matrix row identifiers) may not be detected — when authoring, prefer the standard labels listed in the trigger table
 - Step 5h requires the sibling SoT document to be locally readable; remote-only or external URLs are flagged as unresolved advisories and require manual verification
+- Step 6 reaper is macOS-only (launchd reparenting + `/var/folders` sessionDirs); it is a no-op on other platforms
+- Step 6 idle detection uses `broker.log` mtime as an activity proxy — a broker mid-operation that stays silent longer than `--max-age` could be misjudged idle and reaped; the cost is a benign respawn on the next codex call, never a correctness break
+- Step 6 phase-end reaping keeps the broker count below the compressor threshold but does not reclaim every running orphan; the session-independent launchd job (`LAUNCHD.md`) is what reaps orphans whose owning session is already gone
