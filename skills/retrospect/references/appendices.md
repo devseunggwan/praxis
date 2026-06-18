@@ -63,4 +63,3 @@ The following are structural stop signals:
 - Stage 4 action procedures and artifact verification live in
   [`stage4-execution.md`](stage4-execution.md)
 - Worked examples live in [`report-template.md`](report-template.md)
-

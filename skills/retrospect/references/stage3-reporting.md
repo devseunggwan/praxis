@@ -65,6 +65,7 @@ auditable memory-scan evidence block near the unified findings table:
 These lines surface the Gate-5 producer fields from Stage 2.5. Keeping them only
 in internal reasoning is a Red Flag because reviewers and downstream hooks cannot
 verify that the MEMORY.md repeat scan actually ran.
+
 - `Proposed Actions (1~2)` is a subset of:
   `memory`, `issue`, `claude_md_draft`, `skill_idea`, `hook_code`,
   `upstream_feedback`

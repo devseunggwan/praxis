@@ -24,6 +24,7 @@ Symptom-level fixes miss the underlying pattern.
 `Agent(subagent_type="oh-my-claudecode:...")`
 
 **Reference map:**
+
 - Stage 1 / 1.5 / 2 / 2.7 details: [`references/stage1-2-analysis.md`](references/stage1-2-analysis.md)
 - Stage 2.5 gate procedures: [`references/stage2.5-audit.md`](references/stage2.5-audit.md)
 - Stage 3 output contract and approval flow: [`references/stage3-reporting.md`](references/stage3-reporting.md)
