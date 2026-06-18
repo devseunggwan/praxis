@@ -21,8 +21,11 @@ Options:
 Output sections:
   1. Summary — total events + date window
   2. Top bypass vars — frequency table (which rules are bypassed most)
-  3. Bypass by hook/tool — group by tool field
-  4. Error events — events where tool_result_status == "error"
+  3. Bypass by hook/rule family — normalized from bypass var names
+  4. Bypass by command family — first executable token after env prefixes
+  5. Error-linked bypass signals — separate summary for failed bypasses
+  6. Bypass by tool — group by tool field
+  7. Error events — events where tool_result_status == "error"
 
 Privacy contract (read-only, never re-derives omitted fields):
   - bypass var VALUES are not in the JSONL; this CLI never prints them
@@ -37,8 +40,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import shlex
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -55,6 +60,16 @@ FIELD_TOOL_INPUT = "tool_input"
 FIELD_TOOL_RESULT_STATUS = "tool_result_status"
 
 STATUS_ERROR = "error"
+UNKNOWN = "(unknown)"
+
+_INLINE_ENV_TOKEN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_ENV_OPTIONS_WITH_VALUE = {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}
+_BYPASS_PREFIXES = (
+    "CLAUDE_HOOK_BYPASS_",
+    "PRAXIS_HOOK_BYPASS_",
+    "PRAXIS_",
+)
+_BYPASS_SUFFIX = "_BYPASS"
 
 
 # ---------------------------------------------------------------------------
@@ -130,36 +145,176 @@ def load_events(telemetry_dir: Path, days: int) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Aggregation helpers
+# ---------------------------------------------------------------------------
+
+def derive_bypass_family(var_name: object) -> str:
+    """Normalize a bypass var name into a hook/rule-family label."""
+    if not isinstance(var_name, str):
+        return UNKNOWN
+
+    family = var_name.strip()
+    if not family:
+        return UNKNOWN
+
+    for prefix in _BYPASS_PREFIXES:
+        if family.startswith(prefix):
+            family = family[len(prefix):]
+            break
+
+    if family.endswith(_BYPASS_SUFFIX):
+        family = family[: -len(_BYPASS_SUFFIX)]
+
+    return family or UNKNOWN
+
+
+def _looks_like_env_assignment(token: str) -> bool:
+    return bool(_INLINE_ENV_TOKEN_RE.match(token))
+
+
+def _split_env_split_string(value: str) -> list[str] | None:
+    try:
+        return shlex.split(value)
+    except ValueError:
+        return None
+
+
+def _normalize_command_token(token: str) -> str:
+    candidate = token.strip()
+    if not candidate or candidate in {"-", "--"}:
+        return UNKNOWN
+    if "/" in candidate:
+        basename = Path(candidate).name
+        return f"path:{basename}" if basename else "path"
+    return candidate
+
+
+def derive_command_family(tool_input: object) -> str:
+    """Return a safe command-family label from redacted tool_input."""
+    if not isinstance(tool_input, str) or not tool_input.strip():
+        return UNKNOWN
+
+    try:
+        tokens = shlex.split(tool_input, posix=True)
+    except ValueError:
+        tokens = tool_input.split()
+
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if _looks_like_env_assignment(token):
+            index += 1
+            continue
+        if token == "env":
+            index += 1
+            while index < len(tokens):
+                env_token = tokens[index]
+                if _looks_like_env_assignment(env_token):
+                    index += 1
+                    continue
+                if env_token in {"-i", "--ignore-environment", "-0", "--null"}:
+                    index += 1
+                    continue
+                if env_token in {"--", "-"}:
+                    index += 1
+                    continue
+                if env_token in {"-S", "--split-string"} and index + 1 < len(tokens):
+                    split_tokens = _split_env_split_string(tokens[index + 1])
+                    if split_tokens is None:
+                        return UNKNOWN
+                    tokens[index : index + 2] = split_tokens
+                    continue
+                if env_token in _ENV_OPTIONS_WITH_VALUE:
+                    index += 2
+                    continue
+                if (
+                    env_token.startswith("--unset=")
+                    or env_token.startswith("--chdir=")
+                    or env_token.startswith("--split-string=")
+                ):
+                    if env_token.startswith("--split-string="):
+                        split_tokens = _split_env_split_string(
+                            env_token.split("=", 1)[1]
+                        )
+                        if split_tokens is None:
+                            return UNKNOWN
+                        tokens[index : index + 1] = split_tokens
+                        continue
+                    index += 1
+                    continue
+                break
+            continue
+        return _normalize_command_token(token)
+
+    return UNKNOWN
+
+
+def summarize_counter(counter: Counter[str], limit: int = 5) -> str:
+    if not counter:
+        return "none"
+    return ", ".join(f"{name} ({count})" for name, count in counter.most_common(limit))
+
+
+def _coerce_bypass_vars(raw: object) -> list[str]:
+    """Return only the string entries of a bypass_env_vars value.
+
+    JSONL records are produced by an external hook, so a malformed entry
+    (non-list, or a list with non-string items) must degrade to an empty
+    list rather than crash aggregation/rendering on the whole report.
+    """
+    if not isinstance(raw, list):
+        return []
+    return [var for var in raw if isinstance(var, str)]
+
+
+def _sorted_unique_families(bypass_vars: list[str]) -> list[str]:
+    return sorted({derive_bypass_family(var) for var in bypass_vars}) or [UNKNOWN]
+
+
+# ---------------------------------------------------------------------------
 # Aggregation
 # ---------------------------------------------------------------------------
 
 def aggregate(events: list[dict]) -> dict:
     """Return aggregated statistics over the event list."""
     bypass_var_counts: Counter[str] = Counter()
+    bypass_var_error_counts: Counter[str] = Counter()
+    hook_family_counts: Counter[str] = Counter()
+    hook_family_error_counts: Counter[str] = Counter()
+    command_family_counts: Counter[str] = Counter()
+    command_family_error_counts: Counter[str] = Counter()
     tool_counts: Counter[str] = Counter()
     error_events: list[dict] = []
-    # Per-var error count for the "signal too strict?" callout
-    bypass_var_error_counts: Counter[str] = Counter()
 
     for ev in events:
-        bypass_vars: list[str] = ev.get(FIELD_BYPASS_ENV_VARS) or []
-        tool: str = ev.get(FIELD_TOOL) or "(unknown)"
+        bypass_vars: list[str] = _coerce_bypass_vars(ev.get(FIELD_BYPASS_ENV_VARS))
+        tool: str = ev.get(FIELD_TOOL) or UNKNOWN
         status: str = ev.get(FIELD_TOOL_RESULT_STATUS) or "ok"
+        command_family = derive_command_family(ev.get(FIELD_TOOL_INPUT))
 
         for var in bypass_vars:
             bypass_var_counts[var] += 1
+            hook_family = derive_bypass_family(var)
+            hook_family_counts[hook_family] += 1
             if status == STATUS_ERROR:
                 bypass_var_error_counts[var] += 1
+                hook_family_error_counts[hook_family] += 1
 
         tool_counts[tool] += 1
+        command_family_counts[command_family] += 1
 
         if status == STATUS_ERROR:
+            command_family_error_counts[command_family] += 1
             error_events.append(ev)
 
     return {
         "total": len(events),
         "bypass_var_counts": bypass_var_counts,
         "bypass_var_error_counts": bypass_var_error_counts,
+        "hook_family_counts": hook_family_counts,
+        "hook_family_error_counts": hook_family_error_counts,
+        "command_family_counts": command_family_counts,
+        "command_family_error_counts": command_family_error_counts,
         "tool_counts": tool_counts,
         "error_events": error_events,
     }
@@ -174,6 +329,44 @@ _DIVIDER = "─" * 60
 
 def _render_header(title: str) -> str:
     return f"\n{_DIVIDER}\n{title}\n{_DIVIDER}"
+
+
+def _render_error_count_table(
+    lines: list[str],
+    title: str,
+    label: str,
+    counts: Counter[str],
+    error_counts: Counter[str],
+    *,
+    note_label: str,
+    empty_label: str,
+    label_width: int,
+) -> None:
+    lines.append(_render_header(title))
+    if not counts:
+        lines.append(f"  ({empty_label})")
+        return
+
+    lines.append(f"  {label:<{label_width}}  {'Count':>5}  {'Errors':>6}  Note")
+    lines.append(f"  {'─' * label_width}  {'─' * 5}  {'─' * 6}  {'─' * 24}")
+    for name, count in counts.most_common():
+        err_count = error_counts.get(name, 0)
+        note = note_label if err_count > 0 else ""
+        lines.append(f"  {name:<{label_width}}  {count:>5}  {err_count:>6}  {note}")
+
+
+def _render_error_signal_summary(lines: list[str], agg: dict) -> None:
+    lines.append(_render_header("Error-Linked Bypass Signals"))
+    if not agg["error_events"]:
+        lines.append("  (none — all bypasses succeeded)")
+        return
+
+    lines.append("  Vars           : " + summarize_counter(agg["bypass_var_error_counts"]))
+    lines.append("  Hook families  : " + summarize_counter(agg["hook_family_error_counts"]))
+    lines.append("  Command groups : " + summarize_counter(agg["command_family_error_counts"]))
+    lines.append(
+        "  Note: these groupings had a bypass active on the same event that still failed."
+    )
 
 
 def render_report(
@@ -203,23 +396,61 @@ def render_report(
         return "\n".join(lines)
 
     # ── Section 2: Top bypass vars ──
-    lines.append(_render_header("Top Bypass Vars (most bypassed rules)"))
+    _render_error_count_table(
+        lines,
+        "Top Bypass Vars (most bypassed rules)",
+        "Var name",
+        agg["bypass_var_counts"],
+        agg["bypass_var_error_counts"],
+        note_label="⚠ bad-bypass candidate",
+        empty_label="no bypass var data",
+        label_width=50,
+    )
     if agg["bypass_var_counts"]:
-        lines.append(f"  {'Var name':<50}  {'Count':>5}  {'Errors':>6}  Note")
-        lines.append(f"  {'─' * 50}  {'─' * 5}  {'─' * 6}  {'─' * 20}")
-        for var, count in agg["bypass_var_counts"].most_common():
-            err_count = agg["bypass_var_error_counts"].get(var, 0)
-            note = "⚠ bad-bypass candidate" if err_count > 0 else ""
-            lines.append(f"  {var:<50}  {count:>5}  {err_count:>6}  {note}")
         lines.append("")
         lines.append(
             "  Note: high count = rule may be too strict; "
             "Errors = bypass followed by tool failure (bad-bypass candidate)."
         )
-    else:
-        lines.append("  (no bypass var data)")
 
-    # ── Section 3: By tool ──
+    # ── Section 3: By hook/rule family ──
+    _render_error_count_table(
+        lines,
+        "Bypass by Hook / Rule Family",
+        "Family",
+        agg["hook_family_counts"],
+        agg["hook_family_error_counts"],
+        note_label="⚠ error-linked",
+        empty_label="no hook/rule family data",
+        label_width=26,
+    )
+    lines.append("")
+    lines.append(
+        "  Family labels are normalized from bypass var names "
+        "(for example SCIOMC_GATE, WORKTREE_GATE, GH_JSON)."
+    )
+
+    # ── Section 4: By command family ──
+    _render_error_count_table(
+        lines,
+        "Bypass by Command Family",
+        "Command",
+        agg["command_family_counts"],
+        agg["command_family_error_counts"],
+        note_label="⚠ error-linked",
+        empty_label="no command-family data",
+        label_width=20,
+    )
+    lines.append("")
+    lines.append(
+        "  Command family is the first executable token after inline env prefixes; "
+        "path-like commands are collapsed to path:<basename>."
+    )
+
+    # ── Section 5: Error-linked summaries ──
+    _render_error_signal_summary(lines, agg)
+
+    # ── Section 6: By tool ──
     lines.append(_render_header("Bypass Events by Tool"))
     if agg["tool_counts"]:
         lines.append(f"  {'Tool':<30}  {'Count':>5}")
@@ -229,7 +460,7 @@ def render_report(
     else:
         lines.append("  (no tool data)")
 
-    # ── Section 4: Error events detail ──
+    # ── Section 7: Error events detail ──
     _render_error_events(lines, agg["error_events"])
 
     return "\n".join(lines)
@@ -251,13 +482,17 @@ def _render_error_events(lines: list[str], error_events: list[dict]) -> None:
     for i, ev in enumerate(error_events, 1):
         ts = ev.get(FIELD_TIMESTAMP, "(no timestamp)")
         session = ev.get(FIELD_SESSION_ID, "") or "(no session)"
-        tool = ev.get(FIELD_TOOL, "(unknown)")
-        bypass_vars = ev.get(FIELD_BYPASS_ENV_VARS) or []
+        tool = ev.get(FIELD_TOOL, UNKNOWN)
+        bypass_vars = _coerce_bypass_vars(ev.get(FIELD_BYPASS_ENV_VARS))
         tool_input = ev.get(FIELD_TOOL_INPUT, "") or ""
+        families = ", ".join(_sorted_unique_families(bypass_vars))
+        command_family = derive_command_family(tool_input)
         lines.append(f"\n  [{i}] {ts}")
         lines.append(f"      session : {session}")
         lines.append(f"      tool    : {tool}")
         lines.append(f"      bypass  : {', '.join(bypass_vars)}")
+        lines.append(f"      family  : {families}")
+        lines.append(f"      command : {command_family}")
         if tool_input:
             lines.append(f"      input   : {tool_input}")
 

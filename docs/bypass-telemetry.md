@@ -87,13 +87,21 @@ Options:
 
 ### Output
 
-The report has four sections:
+The report has seven sections:
 
 1. **Summary** — total events, date window, error count.
 2. **Top bypass vars** — frequency table; vars with error events are flagged
    `⚠ bad-bypass candidate` (bypass followed by a tool failure).
-3. **Bypass by tool** — group by `tool` field.
-4. **Error events** — per-event detail for `tool_result_status == "error"`.
+3. **Bypass by hook / rule family** — normalized labels derived from the bypass
+   var names (for example `SCIOMC_GATE`, `WORKTREE_GATE`, `GH_JSON`) with
+   per-family error counts.
+4. **Bypass by command family** — first executable token after inline env
+   prefixes, with path-like commands collapsed to `path:<basename>`.
+5. **Error-linked bypass signals** — separate summary for vars / hook families /
+   command groups that still ended in a tool error.
+6. **Bypass by tool** — group by `tool` field.
+7. **Error events** — per-event detail for `tool_result_status == "error"`,
+   including the normalized family and command-group labels.
 
 Use `--errors-only` to print just the error-event section.
 
@@ -101,8 +109,9 @@ Use `--errors-only` to print just the error-event section.
 
 The CLI is read-only and only aggregates what is already in the JSONL.
 Bypass var **values** were never stored by the hook; they do not appear in
-any output.  `tool_input` is printed as-is (already truncated and redacted
-by the writer at ≤200 chars).
+any output. `tool_input` remains truncated/redacted by the writer, and the
+derived command-family view never prints a full path — path-like commands are
+collapsed to `path:<basename>`.
 
 ### Example output
 
