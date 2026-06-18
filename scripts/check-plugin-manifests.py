@@ -37,6 +37,8 @@ Phase 2 (ADR-0001) invariants:
   14. docs/hook/<name>.md redirect-stub parity (#606): every hook dir owns a
       byte-identical 1-line stub, and no orphan stub survives (INDEX.md and the
       hand-written NON_HOOK_DOCS allowlist excepted).
+  16. docs/hook-operating-matrix.md parity: generated hook operating surface
+      summary is byte-identical to the manifest/env/security source render.
 
 CI invokes this; developers can too, via `./scripts/check-plugin-manifests.py`.
 """
@@ -723,6 +725,27 @@ def main() -> int:
                 "standalone (not dispatch-wrapped) but no function carries "
                 "the @fail_open decorator — decorate main() (DESIGN.md, #645)"
             )
+
+    # ------------------------------------------------------------------
+    # Rule 16 — hook operating matrix byte-identity (#672)
+    #
+    # The matrix is intentionally generated from structured sources only:
+    # manifest registration shape, bypass-vars registry, and SECURITY.md
+    # external-command declarations. This keeps Track 1 behavior-preserving
+    # while still giving users a drift-checked operating surface.
+    # ------------------------------------------------------------------
+    expected_matrix = _build.render_hook_operating_matrix(manifest)
+    matrix_path = _build.HOOK_OPERATING_MATRIX_PATH
+    if not matrix_path.exists():
+        drifts.append(
+            "MATRIX MISSING docs/hook-operating-matrix.md: run "
+            "./scripts/build-plugin-manifests.py"
+        )
+    elif matrix_path.read_text() != expected_matrix:
+        drifts.append(
+            "MATRIX DRIFT docs/hook-operating-matrix.md: regenerate with "
+            "./scripts/build-plugin-manifests.py"
+        )
 
     if drifts:
         print("plugin-manifest check FAILED:")

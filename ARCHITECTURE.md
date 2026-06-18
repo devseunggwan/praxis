@@ -119,6 +119,7 @@ else:
 ## Hook index
 
 > See [docs/hook/INDEX.md](docs/hook/INDEX.md) for the categorized index (preflight-gate / advisory-nudge / postuse-correction / completion-verify).
+> See [docs/hook-operating-matrix.md](docs/hook-operating-matrix.md) for the generated operating matrix with roles, events, host filters, and strict/bypass knobs.
 
 | Hook | Event | Purpose | Spec |
 |------|-------|---------|------|

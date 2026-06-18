@@ -2,7 +2,9 @@
 
 Praxis hooks grouped by enforcement role. For the full per-hook spec, follow
 each link. For the flat tabular listing (with event column), see the
-[Hook index in ARCHITECTURE.md](../../ARCHITECTURE.md#hook-index).
+[Hook index in ARCHITECTURE.md](../../ARCHITECTURE.md#hook-index). For the
+generated role/event/host/env-var summary, see the
+[Hook Operating Matrix](../hook-operating-matrix.md).
 
 Cross-cutting: every preflight-gate block message shares one five-field format —
 see [block-message-format](block-message-format.md).
