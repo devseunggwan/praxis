@@ -61,8 +61,14 @@ while [[ $# -gt 0 ]]; do
       # (e.g. `--max-age --dry-run` must error, not silently drop --dry-run and
       # then fall back to a real reap).
       case "${2:-}" in
-        ''|*[!0-9]*) echo "--max-age requires a positive integer (minutes)" >&2; usage; exit 2 ;;
+        ''|*[!0-9]*) echo "--max-age requires an integer >= 1 (minutes)" >&2; usage; exit 2 ;;
       esac
+      # All-digits but zero-valued ("0", "00", ...) must also fail: max_age_sec=0
+      # would make the idle gate skip nothing and reap fresh, in-use brokers.
+      # 10# forces base-10 so leading zeros never trip octal evaluation.
+      if (( 10#$2 < 1 )); then
+        echo "--max-age requires an integer >= 1 (minutes)" >&2; usage; exit 2
+      fi
       MAX_AGE_MIN="$2"; shift ;;
     --dry-run) DRY_RUN=true ;;
     -h|--help) usage; exit 0 ;;
@@ -114,6 +120,14 @@ session_dir_of() {
 # the GC pass can never wipe a real tree on malformed input.
 is_safe_session_dir() {
   local d="$1"
+  # Reject anything but a clean absolute path. A traversal-shaped path such as
+  # /tmp/../Users/me/cxc-x string-matches the /tmp/* allowlist below yet resolves
+  # OUTSIDE the temp root, so a downstream rm -rf would escape. Screen the raw
+  # string for relative form and parent-dir / empty segments before allowlisting.
+  [[ "$d" = /* ]] || return 1
+  case "$d" in
+    *"/../"*|*"/.."|*"//"*) return 1 ;;
+  esac
   case "$(basename "$d")" in cxc-*) ;; *) return 1 ;; esac
   case "$d" in
     /var/folders/*|/private/var/folders/*|/tmp/*|/private/tmp/*) return 0 ;;
