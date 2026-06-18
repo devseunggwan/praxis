@@ -343,7 +343,8 @@ For each tool-friction event or promoted census row, record:
 - `proposed_fix_direction`
 
 Promotion rule: if the census row carries objective evidence (`error_count > 0`,
-`retry_count > 0`, `workaround_marker`, or a non-empty `signal`) and it is not
+`retry_count >= PRAXIS_RETROSPECT_CENSUS_RETRY_THRESHOLD` (default `2`),
+`workaround_marker`, or a non-empty `signal`) and it is not
 already represented by an equivalent step-4 finding, promote it as a tool
 finding. Cap promoted census-origin findings at
 `PRAXIS_RETROSPECT_CENSUS_FINDING_CAP` (default `5`) and record non-promoted

@@ -122,6 +122,7 @@ run_anchor_check "stage1-2 reference keeps self-correction cap priority" "$SKILL
 run_anchor_check "stage1-2 reference keeps action assignment ladder" "$SKILL_DIR/references/stage1-2-analysis.md" "Action assignment (step 7)"
 run_anchor_check "stage1-2 reference keeps hygiene action mapping" "$SKILL_DIR/references/stage1-2-analysis.md" "stale reference -> \`memory\`"
 run_anchor_check "stage1-2 reference keeps bounded-drop cycle rule" "$SKILL_DIR/references/stage1-2-analysis.md" "PRAXIS_RETROSPECT_UNRUNNABLE_DROP_CYCLES"
+run_anchor_check "stage1-2 reference keeps census retry promotion threshold" "$SKILL_DIR/references/stage1-2-analysis.md" "PRAXIS_RETROSPECT_CENSUS_RETRY_THRESHOLD"
 run_anchor_check "stage1-2 reference keeps access-blocked retention" "$SKILL_DIR/references/stage1-2-analysis.md" "access-blocked-only findings are never auto-dropped"
 run_anchor_check "stage1-2 reference keeps cluster repeat propagation" "$SKILL_DIR/references/stage1-2-analysis.md" "cluster_repeat_count = max(repeat_count) + (cluster_event_count - 1)"
 run_anchor_check "stage1-2 reference keeps link scanner wikilink support" "$SKILL_DIR/references/stage1-2-analysis.md" "[[wikilink]]"
