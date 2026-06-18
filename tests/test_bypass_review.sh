@@ -558,6 +558,60 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test 14: Malformed bypass_env_vars type — non-list / non-string items
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== bypass-review: malformed bypass_env_vars type ==="
+
+DIR12="$TMP_DIR/t12"
+mkdir -p "$DIR12"
+# Records whose bypass_env_vars is the wrong shape: a bare string, an int,
+# an object, and a list mixing a valid string with non-string items.
+# A well-formed event is appended so the report still has content to render.
+python3 -c "
+import json
+from datetime import datetime, timezone
+ts = datetime.now(tz=timezone.utc).isoformat()
+def rec(bypass):
+    return json.dumps({
+        'timestamp': ts,
+        'session_id': 'sess-malformed',
+        'tool': 'Bash',
+        'bypass_env_vars': bypass,
+        'tool_input': 'X=<redacted> git status',
+        'tool_result_status': 'error',
+    })
+print(rec('CLAUDE_HOOK_BYPASS_SCIOMC_GATE'))   # bare string, not a list
+print(rec(42))                                  # int
+print(rec({'k': 'v'}))                          # object
+print(rec(['PRAXIS_GH_JSON_BYPASS', 7, None]))  # list with non-string items
+" > "$DIR12/bypass-events-$TODAY.jsonl"
+
+out12=$(python3 "$CLI" --dir "$DIR12" --days 1 2>&1)
+rc12=$?
+
+if [ "$rc12" -eq 0 ]; then
+  assert_pass "malformed bypass_env_vars type: exit 0 (no crash)"
+else
+  assert_fail "malformed bypass_env_vars type: exit 0 (no crash)" "exited $rc12; output: $out12"
+fi
+
+# The one valid string item inside the mixed list must still be counted.
+if echo "$out12" | grep -q "PRAXIS_GH_JSON_BYPASS"; then
+  assert_pass "malformed bypass_env_vars type: valid string item retained"
+else
+  assert_fail "malformed bypass_env_vars type: valid string item retained" "valid item missing; output: $out12"
+fi
+
+# A bare-string value must NOT be iterated character-by-character: no
+# single-character var names should leak into the report.
+if printf '%s\n' "$out12" | grep -Eq "^\s+[A-Z] \([0-9]+\)$"; then
+  assert_fail "malformed bypass_env_vars type: string not char-iterated" "single-char var leaked; output: $out12"
+else
+  assert_pass "malformed bypass_env_vars type: string not char-iterated"
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""

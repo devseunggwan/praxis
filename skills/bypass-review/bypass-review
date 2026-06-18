@@ -255,6 +255,18 @@ def summarize_counter(counter: Counter[str], limit: int = 5) -> str:
     return ", ".join(f"{name} ({count})" for name, count in counter.most_common(limit))
 
 
+def _coerce_bypass_vars(raw: object) -> list[str]:
+    """Return only the string entries of a bypass_env_vars value.
+
+    JSONL records are produced by an external hook, so a malformed entry
+    (non-list, or a list with non-string items) must degrade to an empty
+    list rather than crash aggregation/rendering on the whole report.
+    """
+    if not isinstance(raw, list):
+        return []
+    return [var for var in raw if isinstance(var, str)]
+
+
 def _sorted_unique_families(bypass_vars: list[str]) -> list[str]:
     return sorted({derive_bypass_family(var) for var in bypass_vars}) or [UNKNOWN]
 
@@ -275,7 +287,7 @@ def aggregate(events: list[dict]) -> dict:
     error_events: list[dict] = []
 
     for ev in events:
-        bypass_vars: list[str] = ev.get(FIELD_BYPASS_ENV_VARS) or []
+        bypass_vars: list[str] = _coerce_bypass_vars(ev.get(FIELD_BYPASS_ENV_VARS))
         tool: str = ev.get(FIELD_TOOL) or UNKNOWN
         status: str = ev.get(FIELD_TOOL_RESULT_STATUS) or "ok"
         command_family = derive_command_family(ev.get(FIELD_TOOL_INPUT))
@@ -471,7 +483,7 @@ def _render_error_events(lines: list[str], error_events: list[dict]) -> None:
         ts = ev.get(FIELD_TIMESTAMP, "(no timestamp)")
         session = ev.get(FIELD_SESSION_ID, "") or "(no session)"
         tool = ev.get(FIELD_TOOL, UNKNOWN)
-        bypass_vars = ev.get(FIELD_BYPASS_ENV_VARS) or []
+        bypass_vars = _coerce_bypass_vars(ev.get(FIELD_BYPASS_ENV_VARS))
         tool_input = ev.get(FIELD_TOOL_INPUT, "") or ""
         families = ", ".join(_sorted_unique_families(bypass_vars))
         command_family = derive_command_family(tool_input)
