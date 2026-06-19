@@ -189,6 +189,7 @@ bash tests/hooks/advisory-nudge/test_output_block_falsify_advisory.sh
 Covers 47 cases (44 pre-#682 + 3 new):
 
 **T1 deny-escalation (AskUserQuestion, issue #290/#393):**
+
 - Option label `(Recommended)` + no `Falsified:` in question body → `permissionDecision: deny` (ASK_MSG)
 - Option label `(추천)` + no `Falsified:` → `permissionDecision: deny`
 - Option label `(Recommended)` + `Falsified:` line present → silent pass
@@ -204,6 +205,7 @@ Covers 47 cases (44 pre-#682 + 3 new):
 - T1 precedence: literal `(Recommended)` + anchoring description → `deny` with ASK_MSG (T1 wins, issue #393)
 
 **T2 negative cases (must not fire):**
+
 - `preferential treatment` (no token in set) → pass
 - Bare `safe` (only `safer`/`safest` in set) → pass
 - `unsafer` (word-boundary regression) → pass
@@ -228,6 +230,7 @@ Covers 47 cases (44 pre-#682 + 3 new):
 - Non-string command (int / null) → exit 0, silent pass
 
 **Template-level message cases (issue #682):**
+
 - `(Recommended)` + no `Falsified:` → deny message contains `pre-author-template` ASCII marker
 - confidence-anchoring (`safer`) + no `Falsified:` → ask message contains `pre-author-template` ASCII marker
 - `(Recommended)` + column-0 `Falsified:` present → silent pass (regression — template-level message change must not break satisfaction)
