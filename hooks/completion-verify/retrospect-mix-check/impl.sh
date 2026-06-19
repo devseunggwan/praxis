@@ -468,7 +468,7 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
       fi
 
       if [ "$ie_mismatch" = "1" ] || [ "$ut_mismatch" = "1" ]; then
-        GATE7_VIOLATION="post-compaction receipt declares counts that do not match a live grep of the transcript (tolerance=$GATE7_VALUE_TOLERANCE): declared is_error_count=$declared_ie vs live=$live_ie_count; declared user_turn_count=${declared_ut:-(unparseable)} vs live=$live_ut_count — re-run 'grep -c \"is_error\":true' and 'grep -c \"role\":\"user\"' against the transcript this turn and paste the REAL output in the receipt fence before Stage 3"
+        GATE7_VIOLATION="post-compaction receipt declares counts that do not match a live grep of the transcript (tolerance=$GATE7_VALUE_TOLERANCE): declared is_error_count=$declared_ie vs live=$live_ie_count; declared user_turn_count=${declared_ut:-(unparseable)} vs live=$live_ut_count — re-run grep -c '\"is_error\":true' and grep -c '\"role\":\"user\"' against the transcript this turn and paste the REAL output in the receipt fence before Stage 3"
       fi
     fi
   fi
