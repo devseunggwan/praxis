@@ -412,28 +412,49 @@ def _skill_runtime_verification_reasons(skill_dir: Path) -> list[str]:
 
       - `AskUserQuestion(...)` appears in the spec (interactive runtime call)
       - `Skill(...)` appears in the spec (delegation runtime call)
-      - the skill wraps external CLI command templates in SKILL.md
+      - the skill wraps external CLI command templates in SKILL.md or references/*.md
       - the skill ships an executable helper beside SKILL.md (wrapper/runtime
         surface the prose depends on)
 
+    Scanning includes SKILL.md and all references/*.md so that operative signals
+    that live exclusively in reference files are not missed (false negative).
     This keeps the gate conservative for prose-only docs skills while still
     catching the repo's current runtime-sensitive surfaces.
     """
     skill_path = skill_dir / "SKILL.md"
+    # Read with errors="replace": a non-UTF-8 byte is replaced, never raises.
+    # This is deliberate over `except UnicodeError: return []` — swallowing a
+    # decode failure on SKILL.md would exclude the skill from the gate entirely
+    # (helper-executable / missing-metadata skills would pass undetected). With
+    # replacement the file is still scanned, so ASCII signals survive and the
+    # gate is never silently bypassed. OSError (truly unreadable) still skips.
     try:
-        text = skill_path.read_text()
+        skill_text = skill_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
 
+    # Collect reference texts (references/*.md alongside SKILL.md).
+    ref_texts: list[str] = []
+    refs_dir = skill_dir / "references"
+    if refs_dir.is_dir():
+        for ref_path in sorted(refs_dir.glob("*.md")):
+            try:
+                ref_texts.append(ref_path.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                pass
+
+    # Combined text for signal detection across all prose files
+    all_texts = [skill_text] + ref_texts
+
     reasons: list[str] = []
-    if _skill_has_operative_ask_user_question(text):
+    if any(_skill_has_operative_ask_user_question(t) for t in all_texts):
         reasons.append("AskUserQuestion")
-    if SKILL_CALL_RE.search(text):
+    if any(SKILL_CALL_RE.search(t) for t in all_texts):
         reasons.append("Skill(...)")
     if (
         skill_dir.name in EXTERNAL_CLI_WRAPPER_SKILLS
-        or _skill_has_external_cli_template(text)
-        or _skill_has_inline_external_cli(text)
+        or any(_skill_has_external_cli_template(t) for t in all_texts)
+        or any(_skill_has_inline_external_cli(t) for t in all_texts)
     ):
         reasons.append("external-cli-wrapper")
     if _skill_has_helper_executable(skill_dir):
