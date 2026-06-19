@@ -507,6 +507,22 @@ def test_runtime_note_chomping_block_scalar_is_rejected(tmp_path):
     assert any("block scalar" in drift for drift in drifts), drifts
 
 
+def test_references_only_operative_ask_user_question_is_detected(tmp_path):
+    """Operative AskUserQuestion in references/*.md alone must trigger the gate."""
+    skill_dir = tmp_path / "refs-only-ask"
+    _write_skill(
+        skill_dir,
+        body="# Skill\n\nThis skill delegates work to sub-steps defined in references.\n",
+    )
+    refs_dir = skill_dir / "references"
+    refs_dir.mkdir()
+    (refs_dir / "step1.md").write_text(
+        "# Step 1\n\nSurface the choices via `AskUserQuestion(...)` before proceeding.\n",
+        encoding="utf-8",
+    )
+    assert check._skill_runtime_verification_reasons(skill_dir) == ["AskUserQuestion"]
+
+
 def test_multiple_runtime_signals_are_all_reported(tmp_path):
     skill_dir = tmp_path / "multi-signal"
     _write_skill(
@@ -560,7 +576,7 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
             "external-cli-wrapper",
             "helper-executable",
         ),
-        "retrospect": ("external-cli-wrapper",),
+        "retrospect": ("AskUserQuestion", "external-cli-wrapper"),
         "writing-praxis-skill": (
             "AskUserQuestion",
             "Skill(...)",
