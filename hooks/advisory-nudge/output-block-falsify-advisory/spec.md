@@ -38,7 +38,7 @@ References: issue [#221](https://github.com/devseunggwan/praxis/issues/221) (adv
 
 | Tool | Trigger condition | Decision |
 |------|-----------------|----------|
-| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND question body has no `Falsified:` line | `permissionDecision: ask` (ASK_MSG) |
+| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND question body has no `Falsified:` line | `permissionDecision: deny` (ASK_MSG) |
 | `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND question body has `Falsified:` line | Silent pass |
 | `AskUserQuestion` (T2, issue #369) | Option `label` OR `description` contains a confidence-anchoring framing token AND question body has no `Falsified:` line | `permissionDecision: ask` (ANCHORING_ASK_MSG) |
 | `AskUserQuestion` (T2) | Same as above + `Falsified:` present | Silent pass |
@@ -57,7 +57,7 @@ self-authored proposal block about to be surfaced. When these exact tokens
 
 - **`Falsified:` present** → silent pass. The model has provided verifiable
   evidence of a disconfirming test.
-- **`Falsified:` absent** → `permissionDecision: ask` with ASK_MSG. The model
+- **`Falsified:` absent** → `permissionDecision: deny` with ASK_MSG (hard block — issue #393). The model
   must add the falsification line and retry.
 
 T1 scans `options[].label` ONLY — description is scanned by T2 (below).
@@ -108,16 +108,22 @@ matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
 
 ### Response shape
 
-#### T1 Ask-escalation (AskUserQuestion with exact `(Recommended)` / `(추천)`, no `Falsified:`)
+#### T1 Deny-escalation (AskUserQuestion with exact `(Recommended)` / `(추천)`, no `Falsified:`) — issue #393
 
 **JSON to stdout** (message constant: `ASK_MSG`):
+
+> Issue #682: message upgraded from instance-level ("add Falsified: and retry")
+> to template-level — instructs Claude to bake the `Falsified:` line into the
+> AskUserQuestion compose template for every future `(Recommended)` call, not
+> just fix the current instance. Identified by the `[pre-author-template]` ASCII
+> marker in the message body.
 
 ```json
 {
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
-    "permissionDecision": "ask",
-    "permissionDecisionReason": "(Recommended) 라벨이 있으나 question body 에 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Self-Falsify Before Recommendation Lock 룰. 추가 후 재시도. 'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — 질문문 중간/불릿/코드펜스 내부 배치는 미검출."
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "(Recommended) 라벨이 있으나 question body 에 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Self-Falsify Before Recommendation Lock 룰. [pre-author-template] 이번 호출뿐 아니라 앞으로 (Recommended) 라벨을 붙일 때마다 AskUserQuestion 작성 직전(도구 호출 전) 에 첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — 인스턴스 수정이 아닌 템플릿 수정이 필요하다. 'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — 질문문 중간/불릿/코드펜스 내부 배치는 미검출."
   }
 }
 ```
@@ -126,12 +132,15 @@ matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
 
 **JSON to stdout** (message constant: `ANCHORING_ASK_MSG`):
 
+> Issue #682: same template-level upgrade as T1. The `[pre-author-template]`
+> marker identifies this as template-level guidance (not instance-level).
+
 ```json
 {
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "ask",
-    "permissionDecisionReason": "옵션 라벨/설명에 confidence-anchoring framing 토큰 (safer/safest/natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/당연히/분명히/추천/기본값) 이 있으나 question body 에 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Output-Block-Level Falsification Gate. 추가 후 재시도. 'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — 질문문 중간/불릿/코드펜스 내부 배치는 미검출."
+    "permissionDecisionReason": "옵션 라벨/설명에 confidence-anchoring framing 토큰 (safer/safest/natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/당연히/분명히/추천/기본값) 이 있으나 question body 에 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Output-Block-Level Falsification Gate. [pre-author-template] 이번 호출뿐 아니라 앞으로 confidence-anchoring 토큰을 옵션 라벨/설명에 쓸 때마다 AskUserQuestion 작성 직전(도구 호출 전) 에 첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — 인스턴스 수정이 아닌 템플릿 수정이 필요하다. 'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — 질문문 중간/불릿/코드펜스 내부 배치는 미검출."
   }
 }
 ```
@@ -174,14 +183,15 @@ All parsing is done with the Python standard library only.
 ### Tests
 
 ```bash
-bash tests/test_output_block_falsify_advisory.sh
+bash tests/hooks/advisory-nudge/test_output_block_falsify_advisory.sh
 ```
 
-Covers 40 cases:
+Covers 47 cases (44 pre-#682 + 3 new):
 
-**T1 ask-escalation (AskUserQuestion, issue #290):**
-- Option label `(Recommended)` + no `Falsified:` in question body → `permissionDecision: ask` (ASK_MSG)
-- Option label `(추천)` + no `Falsified:` → `permissionDecision: ask`
+**T1 deny-escalation (AskUserQuestion, issue #290/#393):**
+
+- Option label `(Recommended)` + no `Falsified:` in question body → `permissionDecision: deny` (ASK_MSG)
+- Option label `(추천)` + no `Falsified:` → `permissionDecision: deny`
 - Option label `(Recommended)` + `Falsified:` line present → silent pass
 - Non-recommended option labels → silent pass
 
@@ -192,9 +202,10 @@ Covers 40 cases:
 - Mixed Hangul/ASCII (`prefer this 옵션`) → `ask` — word-boundary regression
 - `(Recommended)` in description-only (no marker in label) → `ask` (replaces former false-positive-guard pass)
 - T2 anchoring + `Falsified:` line → silent pass
-- T1 precedence: literal `(Recommended)` + anchoring description → ASK_MSG (T1 wins)
+- T1 precedence: literal `(Recommended)` + anchoring description → `deny` with ASK_MSG (T1 wins, issue #393)
 
 **T2 negative cases (must not fire):**
+
 - `preferential treatment` (no token in set) → pass
 - Bare `safe` (only `safer`/`safest` in set) → pass
 - `unsafer` (word-boundary regression) → pass
@@ -217,3 +228,9 @@ Covers 40 cases:
 - Empty payload → exit 0, silent pass
 - Unknown tool name → exit 0, silent pass
 - Non-string command (int / null) → exit 0, silent pass
+
+**Template-level message cases (issue #682):**
+
+- `(Recommended)` + no `Falsified:` → deny message contains `pre-author-template` ASCII marker
+- confidence-anchoring (`safer`) + no `Falsified:` → ask message contains `pre-author-template` ASCII marker
+- `(Recommended)` + column-0 `Falsified:` present → silent pass (regression — template-level message change must not break satisfaction)

@@ -71,7 +71,16 @@ ADVISORY_MSG = (
 ASK_MSG = (
     "(Recommended) 라벨이 있으나 question body 에 "
     "'Falsified: <disconfirming test 결과>' 가 없음. "
-    "CLAUDE.md Self-Falsify Before Recommendation Lock 룰. 추가 후 재시도. "
+    "CLAUDE.md Self-Falsify Before Recommendation Lock 룰. "
+    # Template-level guidance (issue #682): the problem is not only this call —
+    # the AskUserQuestion compose template is missing the field. Bake a
+    # column-0 `Falsified:` line into every future (Recommended) compose BEFORE
+    # the tool call is formed, not just when the hook fires.
+    "[pre-author-template] "
+    "이번 호출뿐 아니라 앞으로 (Recommended) 라벨을 붙일 때마다 "
+    "AskUserQuestion 작성 직전(도구 호출 전) 에 "
+    "첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — "
+    "인스턴스 수정이 아닌 템플릿 수정이 필요하다. "
     "'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — "
     "질문문 중간/불릿/코드펜스 내부 배치는 미검출."
 )
@@ -81,7 +90,15 @@ ANCHORING_ASK_MSG = (
     "natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/"
     "당연히/분명히/추천/기본값) 이 있으나 question body 에 "
     "'Falsified: <disconfirming test 결과>' 가 없음. "
-    "CLAUDE.md Output-Block-Level Falsification Gate. 추가 후 재시도. "
+    "CLAUDE.md Output-Block-Level Falsification Gate. "
+    # Template-level guidance (issue #682): bake the Falsified: line into the
+    # AskUserQuestion compose template for every anchoring-framed option, not
+    # just the current call.
+    "[pre-author-template] "
+    "이번 호출뿐 아니라 앞으로 confidence-anchoring 토큰을 옵션 라벨/설명에 쓸 때마다 "
+    "AskUserQuestion 작성 직전(도구 호출 전) 에 "
+    "첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — "
+    "인스턴스 수정이 아닌 템플릿 수정이 필요하다. "
     "'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — "
     "질문문 중간/불릿/코드펜스 내부 배치는 미검출."
 )
