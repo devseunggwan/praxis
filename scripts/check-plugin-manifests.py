@@ -422,18 +422,24 @@ def _skill_runtime_verification_reasons(skill_dir: Path) -> list[str]:
     catching the repo's current runtime-sensitive surfaces.
     """
     skill_path = skill_dir / "SKILL.md"
+    # Read with errors="replace": a non-UTF-8 byte is replaced, never raises.
+    # This is deliberate over `except UnicodeError: return []` — swallowing a
+    # decode failure on SKILL.md would exclude the skill from the gate entirely
+    # (helper-executable / missing-metadata skills would pass undetected). With
+    # replacement the file is still scanned, so ASCII signals survive and the
+    # gate is never silently bypassed. OSError (truly unreadable) still skips.
     try:
-        skill_text = skill_path.read_text()
+        skill_text = skill_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
 
-    # Collect reference texts (references/*.md alongside SKILL.md)
+    # Collect reference texts (references/*.md alongside SKILL.md).
     ref_texts: list[str] = []
     refs_dir = skill_dir / "references"
     if refs_dir.is_dir():
         for ref_path in sorted(refs_dir.glob("*.md")):
             try:
-                ref_texts.append(ref_path.read_text())
+                ref_texts.append(ref_path.read_text(encoding="utf-8", errors="replace"))
             except OSError:
                 pass
 

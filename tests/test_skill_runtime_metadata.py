@@ -523,6 +523,35 @@ def test_references_only_operative_ask_user_question_is_detected(tmp_path):
     assert check._skill_runtime_verification_reasons(skill_dir) == ["AskUserQuestion"]
 
 
+def test_non_utf8_reference_file_does_not_crash(tmp_path):
+    """A non-UTF-8 references/*.md is read with replacement, never crashes (#685)."""
+    skill_dir = tmp_path / "refs-bad-encoding"
+    _write_skill(
+        skill_dir,
+        body="# Skill\n\nAsk the user via `AskUserQuestion(...)` before continuing.\n",
+    )
+    refs_dir = skill_dir / "references"
+    refs_dir.mkdir()
+    # Invalid UTF-8 — a strict decode would raise UnicodeDecodeError.
+    (refs_dir / "bad.md").write_bytes(b"\xff\xfe\x00bad bytes")
+    # The reference is read with replacement; the SKILL.md signal still detected.
+    assert check._skill_runtime_verification_reasons(skill_dir) == ["AskUserQuestion"]
+
+
+def test_non_utf8_skill_md_is_still_scanned_not_bypassed(tmp_path):
+    """A non-UTF-8 SKILL.md must still be scanned, not silently excluded from the
+    gate — a decode-failure return [] would let a runtime-sensitive skill pass
+    undetected (#685, Codex P2)."""
+    skill_dir = tmp_path / "skill-bad-encoding"
+    skill_dir.mkdir()
+    # SKILL.md with a valid ASCII operative signal followed by an invalid byte.
+    frontmatter = '---\nname: fixture-skill\ndescription: "fixture"\n---\n\n'
+    body = "# Skill\n\nSurface choices via `AskUserQuestion(...)` first.\n"
+    (skill_dir / "SKILL.md").write_bytes(frontmatter.encode() + body.encode() + b"\xff\xfe")
+    # ASCII signal survives replacement → gate is NOT bypassed.
+    assert check._skill_runtime_verification_reasons(skill_dir) == ["AskUserQuestion"]
+
+
 def test_multiple_runtime_signals_are_all_reported(tmp_path):
     skill_dir = tmp_path / "multi-signal"
     _write_skill(
