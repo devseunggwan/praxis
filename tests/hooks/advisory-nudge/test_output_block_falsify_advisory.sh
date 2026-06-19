@@ -546,6 +546,32 @@ run_case "T2: Falsified: mid-line does not satisfy startswith check — still as
       "단계별로 진행. Falsified: no duplicate PR found. 어떻게 할까요?")"
 
 # ---------------------------------------------------------------------------
+# Template-level guidance cases — issue #682
+# ---------------------------------------------------------------------------
+
+# T1: (Recommended) without Falsified: → deny message must contain the
+# [pre-author-template] marker, proving the message is template-level
+# (instructs Claude to fix the compose template, not just this instance).
+run_case "T1 (issue #682): (Recommended) + no Falsified: → deny contains pre-author-template" \
+  "deny:pre-author-template" \
+  "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
+
+# T2: confidence-anchoring without Falsified: → ask message must contain the
+# [pre-author-template] marker for the same template-level reason.
+run_case "T2 (issue #682): safer label + no Falsified: → ask contains pre-author-template" \
+  "ask:pre-author-template" \
+  "$(make_ask_payload '["A safer rollout", "B aggressive"]')"
+
+# Regression: a compliant call (Recommended) + column-0 Falsified: — must
+# still silent-pass (the template-level message change must not break this).
+run_case "T1 (issue #682): (Recommended) + column-0 Falsified: → silent pass (regression)" \
+  pass \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B"]' \
+      "Falsified: checked existing PRs — none found.
+What should we do?")"
+
+# ---------------------------------------------------------------------------
 # @fail_open structural assertion
 # ---------------------------------------------------------------------------
 
