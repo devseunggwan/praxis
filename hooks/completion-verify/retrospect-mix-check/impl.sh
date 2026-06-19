@@ -410,6 +410,67 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
         GATE7_VIOLATION="post-compaction receipt declares is_error_count=$ie_count but has no complete '<!-- retrospect:is_error_enum begin/end -->' block with per-event disposition rows inside the receipt fence (found begin=$ie_begin end=$ie_end disposition_rows=$ie_rows) — a count proves a scan ran, not that the errors were read; enumerate each is_error inside the fence with a promote/note/dismiss disposition before Stage 3"
       fi
     fi
+    # Gate-7 VALUE check [issue #671]: presence + structural validity alone do not
+    # prove freshness — a receipt whose counts were transcribed verbatim from the
+    # compaction summary passes every structural check while the declared values
+    # diverge from a live grep of the same transcript. Re-derive is_error_count
+    # and user_turn_count from the transcript and compare against the declared
+    # values. Only runs when no structural violation is already set (no point
+    # overwriting a more specific error).
+    #
+    # Canonical derivation commands (from skills/retrospect/references/report-template.md):
+    #   is_error_count  ← grep -c '"is_error":true' {transcript_path}
+    #   user_turn_count ← grep -c '"role":"user"'  {transcript_path}
+    # interrupt_count has no canonical grep command in the spec; skip re-derivation.
+    #
+    # Tolerance: 1 line off-by-one is accepted to account for live-append races
+    # (the transcript is appended while the Stop hook runs; the final line may be
+    # partially written when grep scans). A delta > GATE7_VALUE_TOLERANCE lines
+    # indicates the count was not derived from a fresh scan this turn.
+    # Exit-code trap: grep -c returns exit code 1 on 0 matches; capture output
+    # into a variable and never put grep -c inside an 'if' condition or '&&' chain.
+    GATE7_VALUE_TOLERANCE=1
+    if [ -z "$GATE7_VIOLATION" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+      # Re-derive is_error_count.
+      live_ie_count=$(grep -c '"is_error":true' "$TRANSCRIPT_PATH" 2>/dev/null || true)
+      live_ie_count=${live_ie_count:-0}
+      # Re-derive user_turn_count (role:user covers both literal JSON forms).
+      live_ut_count=$(grep -c '"role":"user"' "$TRANSCRIPT_PATH" 2>/dev/null || true)
+      live_ut_count=${live_ut_count:-0}
+
+      # Parse declared user_turn_count from the receipt body.
+      # The declared line is: is_error_count: N | user_turn_count: N | interrupt_count: N
+      # Anchor to line-start; pick the first match to resist injection via enum rows.
+      declared_ut=$(printf '%s\n' "$RECEIPT_BLOCK" \
+        | grep -oE '^[[:space:]]*is_error_count:[[:space:]]*[0-9]+[[:space:]]*\|[[:space:]]*user_turn_count:[[:space:]]*[0-9]+' \
+        | grep -oE 'user_turn_count:[[:space:]]*[0-9]+' | grep -oE '[0-9]+' | head -1)
+      # ie_count was already parsed above; reuse it as declared_ie.
+      declared_ie="$ie_count"
+
+      # Numeric comparison helper: abs(a - b) > tol => mismatch.
+      _gate7_mismatch() {
+        local a="$1" b="$2" tol="$3"
+        # Validate both are integers; non-integer means unparseable → treat as mismatch.
+        case "$a$b" in *[!0-9]*) echo 1; return ;; esac
+        local diff=$(( a - b ))
+        [ "$diff" -lt 0 ] && diff=$(( -diff ))
+        [ "$diff" -gt "$tol" ] && echo 1 || echo 0
+      }
+
+      ie_mismatch=$(_gate7_mismatch "$declared_ie" "$live_ie_count" "$GATE7_VALUE_TOLERANCE")
+      # user_turn_count: an absent/unparseable field is always a mismatch.
+      # _gate7_mismatch("", N) silently passes because "" concatenated with a
+      # digit string contains no non-digit chars; guard explicitly instead.
+      if [ -z "$declared_ut" ]; then
+        ut_mismatch=1
+      else
+        ut_mismatch=$(_gate7_mismatch "$declared_ut" "$live_ut_count" "$GATE7_VALUE_TOLERANCE")
+      fi
+
+      if [ "$ie_mismatch" = "1" ] || [ "$ut_mismatch" = "1" ]; then
+        GATE7_VIOLATION="post-compaction receipt declares counts that do not match a live grep of the transcript (tolerance=$GATE7_VALUE_TOLERANCE): declared is_error_count=$declared_ie vs live=$live_ie_count; declared user_turn_count=${declared_ut:-(unparseable)} vs live=$live_ut_count — re-run grep -c '\"is_error\":true' and grep -c '\"role\":\"user\"' against the transcript this turn and paste the REAL output in the receipt fence before Stage 3"
+      fi
+    fi
   fi
 fi
 

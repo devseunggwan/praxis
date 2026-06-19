@@ -46,6 +46,42 @@ of the following hold:
 | Any row with `Category` ∈ {tool, workflow, spec-gap} AND `Proposed Actions = memory` (single) | Gate-1 violation detected via independent table parse |
 | Any row with `Proposed Actions = memory` (single) whose `Rationale` lacks exactly 5 lines `^not (issue\|claude_md_draft\|skill_idea\|hook_code\|upstream_feedback): .+$` | Gate-2 violation detected via independent table parse |
 | Any row with `Proposed Actions` containing `upstream_feedback` or `issue` whose `Rationale` lacks a `backing_repo: <owner/repo>` declaration | Gate-3 (backing_repo) violation — Stage 2 step 8 requires this declaration for routing; Stage 4 Action 4 step 0 aborts on absence |
+| Gate-7 value mismatch: `transcript_receipt` fence declares `is_error_count` or `user_turn_count` that diverges from a live grep of the transcript by more than 1 | Receipt was transcribed verbatim from the compaction summary rather than re-derived this turn (presence ≠ freshness) |
+
+### Gate-7 value check (issue #671)
+
+Previous Gate-7 logic verified that the `transcript_receipt` fence was **present** and
+**structurally valid** (begin/end markers, parseable `is_error_count`, enum block when
+count > 0). It did **not** verify that the declared counts were derived from the live
+transcript this turn. A fence with counts transcribed verbatim from the compaction
+summary's pre-formatted numbers is structurally identical to a fresh one and passed.
+
+The value check re-derives `is_error_count` and `user_turn_count` from the transcript
+independently and compares them against the declared values:
+
+| Field | Canonical derivation command |
+|-------|------------------------------|
+| `is_error_count` | `grep -c '"is_error":true' {transcript_path}` |
+| `user_turn_count` | `grep -c '"role":"user"' {transcript_path}` |
+
+`interrupt_count` is not re-derived (no canonical grep command in the spec).
+
+**Tolerance:** a delta of ≤ 1 line is accepted to account for live-append races (the
+transcript is appended while the Stop hook runs; the final line may be partially
+written at scan time). A delta > 1 indicates the count was not derived from a fresh
+scan this turn and blocks Stage 3.
+
+**Non-firing conditions (same as existing Gate-7):**
+
+- `_skipped` variant present and no `begin` fence: value check is skipped (no fence to verify)
+- No compaction marker in transcript: Gate-7 is dormant
+- A structural violation was already set: value check is skipped (more specific error wins)
+- `transcript_path` is missing or unreadable: value check is skipped
+
+**Note:** `interrupt_count` value-checking is deferred because no canonical grep
+command is specified in the skill's stage reference files. Issue #670 will extend
+Gate-7 with a content-error-signal scan; that PR may also define and add
+`interrupt_count` re-derivation.
 
 ### Issue #666 — retrospect-active Stage-3 fence-omission gate
 
@@ -168,8 +204,8 @@ git -C ~/.claude/plugins/.../praxis apply --reverse <patch>
 
 ### Tests
 
-`tests/test_retrospect_mix_check.sh` covers 38 cases plus 8 synthetic
-regression fixtures:
+`tests/hooks/completion-verify/test_retrospect_mix_check.sh` covers 73 cases
+plus 11 synthetic regression fixtures:
 
 - 4 pass scenarios (behavior-only with rationale, escalated tool, escalated
   workflow, compound action)
@@ -195,6 +231,10 @@ regression fixtures:
   pass — parser ignores; T-NEW2 audit_skipped trail line outside fence → pass
   — trail does not interfere with parsing; T-NEW3 output_quality category
   count in card with cli Tool Layer → pass)
+- 6 Gate-7 value check (issue #671): V1 stale is_error_count blocked; V2
+  counts match live transcript → pass; V3 off-by-one within tolerance → pass;
+  V4 stale user_turn_count blocked; V5 _skipped variant bypasses value check →
+  pass; V6 no compaction Gate-7 dormant → pass
 
 ### Category counts (memory_hygiene, output_quality)
 
