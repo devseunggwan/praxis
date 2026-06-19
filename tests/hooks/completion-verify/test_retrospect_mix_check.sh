@@ -927,7 +927,7 @@ mk_user_turn() {
 # [issue #664] is_error_count > 0 requires a nested retrospect:is_error_enum block
 # (count proves a scan ran, not that the errors were read).
 G_RECEIPT_FENCE='<!-- retrospect:transcript_receipt begin -->
-is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0
+is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0 | content_error_count: 0
 <!-- retrospect:is_error_enum begin -->
 - [1] hook advisory fire | disposition: dismiss (negative-list: expected enforcement)
 - [2] transient timeout | disposition: note (retried, resolved)
@@ -940,7 +940,7 @@ is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0
 <!-- retrospect:transcript_receipt end -->'
 # Zero-error receipt — no enum block required (nothing to enumerate).
 G_RECEIPT_ZERO='<!-- retrospect:transcript_receipt begin -->
-is_error_count: 0 | user_turn_count: 5 | interrupt_count: 0
+is_error_count: 0 | user_turn_count: 5 | interrupt_count: 0 | content_error_count: 0
 <!-- retrospect:transcript_receipt end -->'
 # Enum bypass #1: only the begin marker (no end, no disposition rows). A bare
 # substring check on 'retrospect:is_error_enum' would pass this; the strengthened
@@ -1015,7 +1015,7 @@ is_error_count: 3 | user_turn_count: 5 | interrupt_count: 0'
 # the report passes — a retrospect OF a session about these markers (e.g. this
 # change) must not be false-positive blocked [Codex round 5].
 G_RECEIPT_VALID_MARKER_MENTIONS='<!-- retrospect:transcript_receipt begin -->
-is_error_count: 2 | user_turn_count: 5 | interrupt_count: 0
+is_error_count: 2 | user_turn_count: 5 | interrupt_count: 0 | content_error_count: 0
 <!-- retrospect:is_error_enum begin -->
 - [1] hook discussed <!-- retrospect:transcript_receipt begin --> marker handling | disposition: note (meta-mention)
 - [2] error citing retrospect:is_error_enum begin and transcript_receipt end in prose | disposition: dismiss (negative-list)
@@ -1347,7 +1347,7 @@ run_case "V1_block_stale_is_error_count_from_compaction_summary" "block" "$V1_TR
 # Transcript: 1 compaction (user turn), 2 is_error events, 1 assistant.
 # Live: is_error_count=2, user_turn_count=1.
 V2_RECEIPT='<!-- retrospect:transcript_receipt begin -->
-is_error_count: 2 | user_turn_count: 1 | interrupt_count: 0
+is_error_count: 2 | user_turn_count: 1 | interrupt_count: 0 | content_error_count: 0
 <!-- retrospect:is_error_enum begin -->
 - [1] hook block | disposition: dismiss (expected enforcement)
 - [2] timeout | disposition: note (retried, resolved)
@@ -1366,7 +1366,7 @@ run_case "V2_pass_receipt_counts_match_live_transcript" "pass" "$V2_TRANSCRIPT"
 # Live: is_error_count=3, user_turn_count=1.
 # Declared: is_error_count=2 — delta=1 == tolerance=1 → pass.
 V3_RECEIPT='<!-- retrospect:transcript_receipt begin -->
-is_error_count: 2 | user_turn_count: 1 | interrupt_count: 0
+is_error_count: 2 | user_turn_count: 1 | interrupt_count: 0 | content_error_count: 0
 <!-- retrospect:is_error_enum begin -->
 - [1] hook block | disposition: dismiss (expected enforcement)
 - [2] timeout | disposition: note (retried, resolved)
@@ -1422,6 +1422,115 @@ run_case "V5b_block_absent_user_turn_count_field" "block" "$V5B_TRANSCRIPT"
 # receipt counts diverge (though there is no receipt here anyway).
 V6_TRANSCRIPT="$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")"
 run_case "V6_pass_no_compaction_gate7_dormant" "pass" "$V6_TRANSCRIPT"
+
+# Content-error-signal enum cases — issue #670 --------------------------------
+# The is_error:true flag only fires when the tool CALL itself fails.  Errors
+# embedded in exit-0 tool_result CONTENT (non-zero exit text, js_error, FATAL,
+# etc.) are missed by the existing is_error scan. Gate-7 now also requires a
+# 'content_error_count: N' line in the receipt and, when N > 0, a
+# '<!-- retrospect:content_error_enum begin/end -->' block with per-signal
+# disposition rows — mirroring the is_error_enum enforcement exactly.
+#
+# Calibrated regex: 'Exit code [1-9]|command terminated|js_error|FATAL|
+#   No such file|denied|BLOCKED|Usage: '
+# This matches error SYNTAX, NOT the bare word "error", which appears in
+# benign JSON field names (e.g. "is_error":false) and agent prose.
+
+# CE1: block — receipt declares content_error_count=2 but NO enum block.
+# A count alone proves a scan ran, not that the signals were read.
+CE1_RECEIPT='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | user_turn_count: 1 | interrupt_count: 0 | content_error_count: 2
+<!-- retrospect:transcript_receipt end -->'
+CE1_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${CE1_RECEIPT}"
+CE1_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$CE1_REPORT")"
+run_case "CE1_block_content_error_count_no_enum" "block" "$CE1_TRANSCRIPT"
+
+# CE2: pass — receipt declares content_error_count=2 AND complete enum block
+# with two per-signal disposition rows. Real error signals in the transcript
+# body (is_error:false envelope containing "Exit code 1" text).
+CE2_RECEIPT='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | user_turn_count: 1 | interrupt_count: 0 | content_error_count: 2
+<!-- retrospect:content_error_enum begin -->
+- [1] bash Exit code 1 (npm test) | disposition: note (retried with fix, resolved)
+- [2] FATAL: database connection refused | disposition: promote (finding #2)
+<!-- retrospect:content_error_enum end -->
+<!-- retrospect:transcript_receipt end -->'
+CE2_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${CE2_RECEIPT}"
+CE2_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$CE2_REPORT")"
+run_case "CE2_pass_content_error_count_with_enum" "pass" "$CE2_TRANSCRIPT"
+
+# CE3: pass — receipt declares content_error_count=0. No enum block required.
+CE3_RECEIPT='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | user_turn_count: 1 | interrupt_count: 0 | content_error_count: 0
+<!-- retrospect:transcript_receipt end -->'
+CE3_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${CE3_RECEIPT}"
+CE3_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$CE3_REPORT")"
+run_case "CE3_pass_content_error_count_zero_no_enum_needed" "pass" "$CE3_TRANSCRIPT"
+
+# CE4: block — receipt carries NO content_error_count field at all.
+# An absent field is a mismatch; the agent must run the calibrated regex and
+# paste the real count. Mirrors the is_error_count absent enforcement.
+CE4_RECEIPT='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | user_turn_count: 1 | interrupt_count: 0
+<!-- retrospect:transcript_receipt end -->'
+CE4_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${CE4_RECEIPT}"
+CE4_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$CE4_REPORT")"
+run_case "CE4_block_absent_content_error_count_field" "block" "$CE4_TRANSCRIPT"
+
+# CE5: block — content_error_count=1 with enum begin/end fence but NO
+# disposition rows inside. Empty enum is the same count-not-content gap.
+CE5_RECEIPT='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | user_turn_count: 1 | interrupt_count: 0 | content_error_count: 1
+<!-- retrospect:content_error_enum begin -->
+<!-- retrospect:content_error_enum end -->
+<!-- retrospect:transcript_receipt end -->'
+CE5_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${CE5_RECEIPT}"
+CE5_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$CE5_REPORT")"
+run_case "CE5_block_content_error_enum_fence_empty_no_rows" "block" "$CE5_TRANSCRIPT"
+
+# CE6: pass — benign content containing "is_error":false and field names with
+# "error" in them does NOT produce a positive content_error_count. The
+# calibrated regex matches error SYNTAX, not the bare word "error". The agent
+# runs the regex, gets 0, declares content_error_count: 0, and no enum is needed.
+# (Functional verification: 'grep -cE ...' on the fixture text returns 0.)
+CE6_RECEIPT='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | user_turn_count: 1 | interrupt_count: 0 | content_error_count: 0
+<!-- retrospect:transcript_receipt end -->'
+CE6_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${CE6_RECEIPT}"
+CE6_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$CE6_REPORT")"
+# Verify the calibrated regex indeed yields 0 on benign content
+_ce6_benign='{"type":"tool_result","is_error":false,"content":[{"type":"text","text":"error_code: 0, is_error: false, status: ok"}]}'
+_ce6_live_count=$(printf '%s\n' "$_ce6_benign" | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage: ' || true)
+if [ "${_ce6_live_count:-0}" -ne 0 ]; then
+  echo "FAIL  [CE6_calibration] calibrated regex matched benign content (count=$_ce6_live_count) — regex needs recalibration"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("CE6_calibration")
+fi
+run_case "CE6_pass_benign_error_field_names_no_false_positive" "pass" "$CE6_TRANSCRIPT"
+
+# CE7: calibration check — verify the calibrated regex DOES match real error
+# syntax signals that should be caught (exit-0 content-embedded errors).
+_ce7_errors='Exit code 1\ncommand terminated\njs_error: TypeError\nFATAL: connection refused\nNo such file or directory\nPermission denied\nBLOCKED by hook\nUsage: gh pr create [flags]'
+_ce7_live_count=$(printf '%b\n' "$_ce7_errors" | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage: ' || true)
+_ce7_expected=8
+if [ "${_ce7_live_count:-0}" -ne "$_ce7_expected" ]; then
+  echo "FAIL  [CE7_calibration] calibrated regex matched $_ce7_live_count/${_ce7_expected} expected error signals — regex needs recalibration"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("CE7_calibration")
+else
+  echo "PASS  [CE7_calibration_regex_matches_all_error_signals]"
+  PASS=$((PASS + 1))
+fi
 
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
