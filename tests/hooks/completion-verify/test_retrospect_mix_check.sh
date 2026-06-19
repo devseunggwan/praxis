@@ -903,6 +903,26 @@ mk_compaction() {
   }'
 }
 
+# Emit a JSONL record simulating a tool_result with is_error:true.
+# Used to add real is_error events so hook's grep -c matches declared count.
+mk_is_error() {
+  jq -nc --arg msg "$1" '{
+    type: "tool_result",
+    "is_error": true,
+    message: {role: "tool", content: [{type: "text", text: $msg}]}
+  }'
+}
+
+# Emit a JSONL record for a non-compaction user turn.
+# Used to add real user turns so hook's grep -c '"role":"user"' matches declared count.
+# Note: mk_compaction() already contributes 1 user turn to the count.
+mk_user_turn() {
+  jq -nc --arg msg "$1" '{
+    type: "human",
+    message: {role: "user", content: [{type: "text", text: $msg}]}
+  }'
+}
+
 # Receipt fence (real-output form) and the unreachable-skip variant.
 # [issue #664] is_error_count > 0 requires a nested retrospect:is_error_enum block
 # (count proves a scan ran, not that the errors were read).
@@ -1009,9 +1029,18 @@ $(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")"
 run_case "G1_block_postcompaction_no_receipt" "block" "$G1_TRANSCRIPT"
 
 # G2: pass — post-compaction transcript, report WITH the receipt fence.
+# G_RECEIPT_FENCE declares is_error_count: 3 | user_turn_count: 5.
+# Transcript must contain 3 is_error events and 5 user turns (compaction=1 + 4 more).
 G2_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
 ${G_RECEIPT_FENCE}"
 G2_TRANSCRIPT="$(mk_compaction)
+$(mk_user_turn "user message 2")
+$(mk_user_turn "user message 3")
+$(mk_user_turn "user message 4")
+$(mk_user_turn "user message 5")
+$(mk_is_error "hook advisory fire")
+$(mk_is_error "transient timeout")
+$(mk_is_error "classifier blocked a fabrication attempt")
 $(mk_assistant "$G2_REPORT")"
 run_case "G2_pass_postcompaction_with_receipt" "pass" "$G2_TRANSCRIPT"
 
@@ -1052,9 +1081,15 @@ run_case "G6_block_postcompaction_receipt_count_only_no_enum" "block" "$G6_TRANS
 
 # G7: pass — post-compaction, receipt with is_error_count=0. No enum block is
 # required (nothing to enumerate); the content check must NOT fire on zero errors.
+# G_RECEIPT_ZERO declares is_error_count: 0 | user_turn_count: 5.
+# Transcript must contain 0 is_error events and 5 user turns (compaction=1 + 4 more).
 G7_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
 ${G_RECEIPT_ZERO}"
 G7_TRANSCRIPT="$(mk_compaction)
+$(mk_user_turn "user message 2")
+$(mk_user_turn "user message 3")
+$(mk_user_turn "user message 4")
+$(mk_user_turn "user message 5")
 $(mk_assistant "$G7_REPORT")"
 run_case "G7_pass_postcompaction_receipt_zero_errors_no_enum_needed" "pass" "$G7_TRANSCRIPT"
 
@@ -1141,9 +1176,17 @@ run_case "G16_block_postcompaction_single_unterminated_fence" "block" "$G16_TRAN
 # strings inline. Anchored marker matching ignores in-row mentions, so a
 # retrospect of a session about these markers is not false-positive blocked
 # [Codex round 5 — anchor to standalone comment-delimiter lines].
+# G_RECEIPT_VALID_MARKER_MENTIONS declares is_error_count: 2 | user_turn_count: 5.
+# Transcript must contain 2 is_error events and 5 user turns (compaction=1 + 4 more).
 G17_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
 ${G_RECEIPT_VALID_MARKER_MENTIONS}"
 G17_TRANSCRIPT="$(mk_compaction)
+$(mk_user_turn "user message 2")
+$(mk_user_turn "user message 3")
+$(mk_user_turn "user message 4")
+$(mk_user_turn "user message 5")
+$(mk_is_error "hook discussed marker handling")
+$(mk_is_error "error citing is_error_enum marker in prose")
 $(mk_assistant "$G17_REPORT")"
 run_case "G17_pass_postcompaction_valid_receipt_inline_marker_mentions" "pass" "$G17_TRANSCRIPT"
 
@@ -1267,6 +1310,118 @@ EOF
 )
 run_marker_case "F666_7b_block_prose_with_localized_table_no_fence" "block" \
   "$(mk_assistant "$F666_PROSE_TABLE")" "kept"
+
+# Gate-7 VALUE check cases — issue #671 -------------------------------------
+# A receipt with counts transcribed from a stale compaction summary rather than
+# re-derived this turn passes every STRUCTURAL check but may have counts that
+# diverge from a live grep of the same transcript. The value check re-derives
+# is_error_count and user_turn_count and blocks when the delta > tolerance (1).
+#
+# Transcript construction: the fixtures below use real JSONL so the hook's own
+# grep yields deterministic values. mk_compaction() yields 1 "role":"user" line;
+# mk_assistant() yields 0 "role":"user" lines. mk_is_error() and mk_user_turn()
+# are defined near mk_compaction() above.
+
+# V1: block — receipt declares is_error_count=5 but transcript has 0 is_error events.
+# This is the core "stale receipt from compaction summary" scenario.
+V1_RECEIPT='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 5 | user_turn_count: 1 | interrupt_count: 0
+<!-- retrospect:is_error_enum begin -->
+- [1] hook advisory | disposition: dismiss (expected enforcement)
+- [2] timeout | disposition: note (retried)
+- [3] classifier block | disposition: promote (finding #1)
+- [4] network error | disposition: note (transient)
+- [5] parse error | disposition: dismiss (negative-list)
+<!-- retrospect:is_error_enum end -->
+<!-- retrospect:transcript_receipt end -->'
+V1_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${V1_RECEIPT}"
+# Transcript: 1 compaction (1 user turn), 1 assistant message, 0 is_error events.
+# Live grep: is_error_count=0, user_turn_count=1.
+# Declared: is_error_count=5 — delta=5 > tolerance=1 → block.
+V1_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$V1_REPORT")"
+run_case "V1_block_stale_is_error_count_from_compaction_summary" "block" "$V1_TRANSCRIPT"
+
+# V2: pass — receipt declares counts matching live transcript exactly.
+# Transcript: 1 compaction (user turn), 2 is_error events, 1 assistant.
+# Live: is_error_count=2, user_turn_count=1.
+V2_RECEIPT='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 2 | user_turn_count: 1 | interrupt_count: 0
+<!-- retrospect:is_error_enum begin -->
+- [1] hook block | disposition: dismiss (expected enforcement)
+- [2] timeout | disposition: note (retried, resolved)
+<!-- retrospect:is_error_enum end -->
+<!-- retrospect:transcript_receipt end -->'
+V2_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${V2_RECEIPT}"
+V2_TRANSCRIPT="$(mk_compaction)
+$(mk_is_error "hook advisory fire")
+$(mk_is_error "transient timeout")
+$(mk_assistant "$V2_REPORT")"
+run_case "V2_pass_receipt_counts_match_live_transcript" "pass" "$V2_TRANSCRIPT"
+
+# V3: pass — receipt with is_error_count off by exactly 1 (within tolerance).
+# Transcript: 1 compaction (user turn), 3 is_error events, 1 assistant.
+# Live: is_error_count=3, user_turn_count=1.
+# Declared: is_error_count=2 — delta=1 == tolerance=1 → pass.
+V3_RECEIPT='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 2 | user_turn_count: 1 | interrupt_count: 0
+<!-- retrospect:is_error_enum begin -->
+- [1] hook block | disposition: dismiss (expected enforcement)
+- [2] timeout | disposition: note (retried, resolved)
+<!-- retrospect:is_error_enum end -->
+<!-- retrospect:transcript_receipt end -->'
+V3_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${V3_RECEIPT}"
+V3_TRANSCRIPT="$(mk_compaction)
+$(mk_is_error "hook advisory fire")
+$(mk_is_error "transient timeout")
+$(mk_is_error "third error during live-append race")
+$(mk_assistant "$V3_REPORT")"
+run_case "V3_pass_is_error_count_off_by_one_within_tolerance" "pass" "$V3_TRANSCRIPT"
+
+# V4: block — user_turn_count declared as 7 but transcript has 1 user turn.
+# Delta = 6 > tolerance = 1 → block.
+# is_error_count=0 so no enum block required.
+V4_RECEIPT='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | user_turn_count: 7 | interrupt_count: 0
+<!-- retrospect:transcript_receipt end -->'
+V4_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${V4_RECEIPT}"
+# Transcript: 1 compaction (1 user turn), 0 is_error events, 1 assistant.
+# Live: is_error_count=0, user_turn_count=1. Declared: user_turn_count=7 → block.
+V4_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$V4_REPORT")"
+run_case "V4_block_stale_user_turn_count_from_compaction_summary" "block" "$V4_TRANSCRIPT"
+
+# V5: pass — _skipped variant bypasses value check (no receipt to verify).
+# Regression: the _skipped path must not fire the value check.
+V5_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${G_RECEIPT_SKIPPED}"
+V5_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$V5_REPORT")"
+run_case "V5_pass_skipped_variant_no_value_check" "pass" "$V5_TRANSCRIPT"
+
+# V5b: block — receipt has is_error_count=0 but no user_turn_count field at all.
+# An absent user_turn_count must be treated as a mismatch, not silently skipped
+# (Codex P2: _gate7_mismatch("", N) returns 0 due to concat digit-only check).
+V5B_RECEIPT='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | interrupt_count: 0
+<!-- retrospect:transcript_receipt end -->'
+V5B_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${V5B_RECEIPT}"
+# Transcript: 1 compaction, 0 is_error events, 1 assistant. is_error_count=0 matches
+# live, but user_turn_count is absent from receipt → block.
+V5B_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$V5B_REPORT")"
+run_case "V5b_block_absent_user_turn_count_field" "block" "$V5B_TRANSCRIPT"
+
+# V6: pass — non-post-compaction session; Gate-7 is dormant.
+# No compaction marker in transcript, so value check never runs even if
+# receipt counts diverge (though there is no receipt here anyway).
+V6_TRANSCRIPT="$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")"
+run_case "V6_pass_no_compaction_gate7_dormant" "pass" "$V6_TRANSCRIPT"
 
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
