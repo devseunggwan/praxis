@@ -59,12 +59,24 @@ summary's pre-formatted numbers is structurally identical to a fresh one and pas
 The value check re-derives `is_error_count` and `user_turn_count` from the transcript
 independently and compares them against the declared values:
 
-| Field | Canonical derivation command |
-|-------|------------------------------|
-| `is_error_count` | `grep -c '"is_error":true' {transcript_path}` |
-| `user_turn_count` | `grep -c '"role":"user"' {transcript_path}` |
+| Field | Canonical derivation command | Semantics |
+|-------|------------------------------|-----------|
+| `is_error_count` | `grep -c '"is_error":true' {transcript_path}` | exact (±tolerance) |
+| `user_turn_count` | `grep -c '"role":"user"' {transcript_path}` | exact (±tolerance) |
+| `content_error_count` (issue #670) | `grep '"type":"tool_result"' {transcript_path} \| grep -cE '<calibrated error syntax>'` | floor only |
 
 `interrupt_count` is not re-derived (no canonical grep command in the spec).
+
+**`content_error_count` floor (issue #670):** the structural block accepts a
+declared `content_error_count: 0` without requiring an enum. The floor re-derives
+the count from **tool_result content only** (the grep is scoped to lines bearing
+`"type":"tool_result"` so the calibrated error-syntax regex never matches the
+agent's own analysis prose or the Stage-3 report, which live in assistant/text
+lines). When the receipt declares `0` but the live tool_result scan finds more
+than `tolerance` signals, Stage 3 is blocked — a declared `0` that launders away
+real exit-0 errors is the same gap #671 closed for `is_error_count`. The check is
+a floor, not exact equality: the agent may dismiss matches via the
+`content_error_enum` disposition rows, but cannot claim zero signals existed.
 
 **Tolerance:** a delta of ≤ 1 line is accepted to account for live-append races (the
 transcript is appended while the Stop hook runs; the final line may be partially
@@ -78,10 +90,10 @@ scan this turn and blocks Stage 3.
 - A structural violation was already set: value check is skipped (more specific error wins)
 - `transcript_path` is missing or unreadable: value check is skipped
 
-**Note:** `interrupt_count` value-checking is deferred because no canonical grep
-command is specified in the skill's stage reference files. Issue #670 will extend
-Gate-7 with a content-error-signal scan; that PR may also define and add
-`interrupt_count` re-derivation.
+**Note:** `interrupt_count` value-checking remains deferred because no canonical
+grep command is specified in the skill's stage reference files. Issue #670 added
+the content-error-signal scan and its floor re-derivation (above); `interrupt_count`
+re-derivation is still open.
 
 ### Issue #666 — retrospect-active Stage-3 fence-omission gate
 

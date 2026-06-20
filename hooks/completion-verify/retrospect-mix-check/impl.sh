@@ -457,8 +457,10 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
     # overwriting a more specific error).
     #
     # Canonical derivation commands (from skills/retrospect/references/report-template.md):
-    #   is_error_count  ← grep -c '"is_error":true' {transcript_path}
-    #   user_turn_count ← grep -c '"role":"user"'  {transcript_path}
+    #   is_error_count      ← grep -c '"is_error":true' {transcript_path}
+    #   user_turn_count     ← grep -c '"role":"user"'  {transcript_path}
+    #   content_error_count ← tool_result lines | grep -cE '<calibrated error syntax>'
+    #                         (floor-only: declared 0 while live>tol is laundering)
     # interrupt_count has no canonical grep command in the spec; skip re-derivation.
     #
     # Tolerance: 1 line off-by-one is accepted to account for live-append races
@@ -475,6 +477,13 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
       # Re-derive user_turn_count (role:user covers both literal JSON forms).
       live_ut_count=$(grep -c '"role":"user"' "$TRANSCRIPT_PATH" 2>/dev/null || true)
       live_ut_count=${live_ut_count:-0}
+      # Re-derive content_error_count [issue #670], scoped to tool_result-bearing
+      # lines so the calibrated regex matches errors embedded in exit-0 tool_result
+      # CONTENT, not the agent's own analysis prose or the Stage-3 report (those
+      # live in assistant/text lines, never carry "type":"tool_result").
+      live_ce_count=$(grep '"type":"tool_result"' "$TRANSCRIPT_PATH" 2>/dev/null \
+        | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage: ' 2>/dev/null || true)
+      live_ce_count=${live_ce_count:-0}
 
       # Parse declared user_turn_count from the receipt body.
       # The declared line is: is_error_count: N | user_turn_count: N | interrupt_count: N
@@ -507,6 +516,17 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
 
       if [ "$ie_mismatch" = "1" ] || [ "$ut_mismatch" = "1" ]; then
         GATE7_VIOLATION="post-compaction receipt declares counts that do not match a live grep of the transcript (tolerance=$GATE7_VALUE_TOLERANCE): declared is_error_count=$declared_ie vs live=$live_ie_count; declared user_turn_count=${declared_ut:-(unparseable)} vs live=$live_ut_count — re-run grep -c '\"is_error\":true' and grep -c '\"role\":\"user\"' against the transcript this turn and paste the REAL output in the receipt fence before Stage 3"
+      fi
+
+      # Content-error floor [issue #670]: the structural block above accepts a
+      # declared content_error_count of 0 without requiring an enum. But a declared
+      # 0 while the transcript's tool_result content carries real error signals is
+      # the same laundering #671 closes for is_error_count — the leading signal (the
+      # content scan) was never run. Re-derive and block when declared 0 but live
+      # signals exceed tolerance. Only fires when no earlier violation is set.
+      if [ -z "$GATE7_VIOLATION" ] && [ "${ce_count:-0}" -eq 0 ] 2>/dev/null \
+         && [ "$live_ce_count" -gt "$GATE7_VALUE_TOLERANCE" ]; then
+        GATE7_VIOLATION="post-compaction receipt declares content_error_count=0 but a live scan of the transcript's tool_result content finds $live_ce_count error signal(s) (tolerance=$GATE7_VALUE_TOLERANCE) — exit-0 tool_result content (e.g. 'Exit code 1', 'FATAL', 'js_error') is not flagged by is_error:true; re-run: grep '\"type\":\"tool_result\"' \"\$transcript\" | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage: ' — paste the REAL count and enumerate each signal in a content_error_enum block before Stage 3"
       fi
     fi
   fi

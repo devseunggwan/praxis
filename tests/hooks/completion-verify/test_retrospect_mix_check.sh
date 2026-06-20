@@ -913,6 +913,19 @@ mk_is_error() {
   }'
 }
 
+# Emit a JSONL record simulating an exit-0 tool_result whose CONTENT carries an
+# error signal (is_error:false). Used to exercise the issue #670 content-error
+# floor: the calibrated regex must catch the signal from tool_result content even
+# though the envelope flag is false. The line bears "type":"tool_result" so the
+# hook's scoped re-derivation counts it.
+mk_content_error() {
+  jq -nc --arg msg "$1" '{
+    type: "tool_result",
+    "is_error": false,
+    message: {role: "tool", content: [{type: "text", text: $msg}]}
+  }'
+}
+
 # Emit a JSONL record for a non-compaction user turn.
 # Used to add real user turns so hook's grep -c '"role":"user"' matches declared count.
 # Note: mk_compaction() already contributes 1 user turn to the count.
@@ -1531,6 +1544,49 @@ else
   echo "PASS  [CE7_calibration_regex_matches_all_error_signals]"
   PASS=$((PASS + 1))
 fi
+
+# CE_FLOOR tests [issue #670] — independent re-derivation floor. The structural
+# block accepts a declared content_error_count: 0 without an enum; the floor
+# re-derives from tool_result content and blocks a declared 0 that launders away
+# real exit-0 errors (the same gap #671 closed for is_error_count).
+
+# CE_FLOOR1: block — receipt declares content_error_count: 0 but two tool_result
+# bodies carry exit-0 error signals (live=2 > tolerance=1).
+CE_FLOOR1_RECEIPT='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | user_turn_count: 1 | interrupt_count: 0 | content_error_count: 0
+<!-- retrospect:transcript_receipt end -->'
+CE_FLOOR1_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${CE_FLOOR1_RECEIPT}"
+CE_FLOOR1_TRANSCRIPT="$(mk_compaction)
+$(mk_content_error "Exit code 1: build failed")
+$(mk_content_error "FATAL: connection refused")
+$(mk_assistant "$CE_FLOOR1_REPORT")"
+run_case "CE_FLOOR1_block_declared_zero_while_live_content_errors_exist" "block" "$CE_FLOOR1_TRANSCRIPT"
+
+# CE_FLOOR2: pass — the error syntax appears only in an assistant/text line (the
+# agent's own prose), NOT in a tool_result line. Scoping excludes it, so the
+# floor does not fire on a declared 0.
+CE_FLOOR2_RECEIPT='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | user_turn_count: 1 | interrupt_count: 0 | content_error_count: 0
+<!-- retrospect:transcript_receipt end -->'
+CE_FLOOR2_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+The narrative mentions Exit code 1 and FATAL in prose but no tool actually failed.
+${CE_FLOOR2_RECEIPT}"
+CE_FLOOR2_TRANSCRIPT="$(mk_compaction)
+$(mk_assistant "$CE_FLOOR2_REPORT")"
+run_case "CE_FLOOR2_pass_error_syntax_only_in_assistant_prose_scoped_out" "pass" "$CE_FLOOR2_TRANSCRIPT"
+
+# CE_FLOOR3: pass — a single tool_result error signal is within tolerance (1),
+# so a declared 0 is not blocked (mirrors the is_error/user_turn off-by-one rule).
+CE_FLOOR3_RECEIPT='<!-- retrospect:transcript_receipt begin -->
+is_error_count: 0 | user_turn_count: 1 | interrupt_count: 0 | content_error_count: 0
+<!-- retrospect:transcript_receipt end -->'
+CE_FLOOR3_REPORT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+${CE_FLOOR3_RECEIPT}"
+CE_FLOOR3_TRANSCRIPT="$(mk_compaction)
+$(mk_content_error "Exit code 1: single transient failure")
+$(mk_assistant "$CE_FLOOR3_REPORT")"
+run_case "CE_FLOOR3_pass_single_content_error_within_tolerance" "pass" "$CE_FLOOR3_TRANSCRIPT"
 
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
