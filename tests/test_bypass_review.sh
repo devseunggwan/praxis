@@ -172,7 +172,7 @@ write_fixture "$DIR1B/bypass-events-$TODAY.jsonl" "$ev_git_family" "$ev_gh_famil
 
 out1b=$(python3 "$CLI" --dir "$DIR1B" --days 7 2>&1)
 
-if echo "$out1b" | grep -q "Bypass by Hook / Rule Family"; then
+if echo "$out1b" | grep -q "Per-Hook Aggregation"; then
   assert_pass "hook/rule family section present"
 else
   assert_fail "hook/rule family section present" "section missing; output: $out1b"
@@ -609,6 +609,192 @@ if printf '%s\n' "$out12" | grep -Eq "^\s+[A-Z] \([0-9]+\)$"; then
   assert_fail "malformed bypass_env_vars type: string not char-iterated" "single-char var leaked; output: $out12"
 else
   assert_pass "malformed bypass_env_vars type: string not char-iterated"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 15: Per-Hook Aggregation section (#689)
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== bypass-review: per-hook aggregation section (issue #689) ==="
+
+DIR13="$TMP_DIR/t13"
+mkdir -p "$DIR13"
+ev13_a=$(make_event '["CLAUDE_HOOK_BYPASS_SCIOMC_GATE"]' "ok" "Bash" "sess-a" \
+  'CLAUDE_HOOK_BYPASS_SCIOMC_GATE=<redacted> git commit')
+ev13_b=$(make_event '["CLAUDE_HOOK_BYPASS_SCIOMC_GATE"]' "error" "Bash" "sess-b" \
+  'CLAUDE_HOOK_BYPASS_SCIOMC_GATE=<redacted> git push')
+ev13_c=$(make_event '["PRAXIS_HOOK_BYPASS_WORKTREE_GATE"]' "ok" "Bash" "sess-c" \
+  'PRAXIS_HOOK_BYPASS_WORKTREE_GATE=<redacted> gh pr create')
+write_fixture "$DIR13/bypass-events-$TODAY.jsonl" "$ev13_a" "$ev13_b" "$ev13_c"
+
+out13=$(python3 "$CLI" --dir "$DIR13" --days 1 2>&1)
+
+# Per-Hook Aggregation section header must be present
+if echo "$out13" | grep -q "Per-Hook Aggregation"; then
+  assert_pass "per-hook aggregation: section header present"
+else
+  assert_fail "per-hook aggregation: section header present" "section missing; output: $out13"
+fi
+
+# Both hook families must appear as rows
+if echo "$out13" | grep -q "SCIOMC_GATE" && echo "$out13" | grep -q "WORKTREE_GATE"; then
+  assert_pass "per-hook aggregation: hook families as rows"
+else
+  assert_fail "per-hook aggregation: hook families as rows" "families missing; output: $out13"
+fi
+
+# Err% column must be present (header row check)
+if echo "$out13" | grep -q "Err%"; then
+  assert_pass "per-hook aggregation: Err% column header present"
+else
+  assert_fail "per-hook aggregation: Err% column header present" "Err% missing; output: $out13"
+fi
+
+# Sessions column must be present
+if echo "$out13" | grep -q "Sessions"; then
+  assert_pass "per-hook aggregation: Sessions column header present"
+else
+  assert_fail "per-hook aggregation: Sessions column header present" "Sessions missing; output: $out13"
+fi
+
+# Last Seen column must be present
+if echo "$out13" | grep -q "Last Seen"; then
+  assert_pass "per-hook aggregation: Last Seen column header present"
+else
+  assert_fail "per-hook aggregation: Last Seen column header present" "Last Seen missing; output: $out13"
+fi
+
+# SCIOMC_GATE has 1 error out of 2 bypass events → 50% error rate
+if printf '%s\n' "$out13" | grep -q "SCIOMC_GATE" && printf '%s\n' "$out13" | grep "SCIOMC_GATE" | grep -q "50%"; then
+  assert_pass "per-hook aggregation: SCIOMC_GATE error rate 50%"
+else
+  assert_fail "per-hook aggregation: SCIOMC_GATE error rate 50%" "rate missing; output: $out13"
+fi
+
+# WORKTREE_GATE has 0 errors → 0% error rate
+if printf '%s\n' "$out13" | grep -q "WORKTREE_GATE" && printf '%s\n' "$out13" | grep "WORKTREE_GATE" | grep -q "0%"; then
+  assert_pass "per-hook aggregation: WORKTREE_GATE error rate 0%"
+else
+  assert_fail "per-hook aggregation: WORKTREE_GATE error rate 0%" "rate missing; output: $out13"
+fi
+
+# Distinct sessions: SCIOMC_GATE has 2 sessions (sess-a, sess-b)
+if printf '%s\n' "$out13" | grep "SCIOMC_GATE" | grep -qE "[[:space:]]2[[:space:]]"; then
+  assert_pass "per-hook aggregation: SCIOMC_GATE distinct sessions = 2"
+else
+  assert_fail "per-hook aggregation: SCIOMC_GATE distinct sessions = 2" "session count wrong; output: $out13"
+fi
+
+# Limitation note about derived co-occurrence must appear
+if echo "$out13" | grep -q "DERIVED"; then
+  assert_pass "per-hook aggregation: derived co-occurrence limitation note present"
+else
+  assert_fail "per-hook aggregation: derived co-occurrence limitation note present" "limitation note missing; output: $out13"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 16: --per-hook FAMILY flag (#689)
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== bypass-review: --per-hook flag (issue #689) ==="
+
+DIR14="$TMP_DIR/t14"
+mkdir -p "$DIR14"
+ev14_a=$(make_event '["CLAUDE_HOOK_BYPASS_SCIOMC_GATE"]' "ok" "Bash" "sess-ph-a" \
+  'CLAUDE_HOOK_BYPASS_SCIOMC_GATE=<redacted> git log')
+ev14_b=$(make_event '["CLAUDE_HOOK_BYPASS_SCIOMC_GATE"]' "error" "Bash" "sess-ph-b" \
+  'CLAUDE_HOOK_BYPASS_SCIOMC_GATE=<redacted> git push')
+ev14_c=$(make_event '["PRAXIS_HOOK_BYPASS_WORKTREE_GATE"]' "ok" "Bash" "sess-ph-c" \
+  'PRAXIS_HOOK_BYPASS_WORKTREE_GATE=<redacted> gh pr list')
+write_fixture "$DIR14/bypass-events-$TODAY.jsonl" "$ev14_a" "$ev14_b" "$ev14_c"
+
+out14=$(python3 "$CLI" --dir "$DIR14" --days 1 --per-hook SCIOMC_GATE 2>&1)
+
+# Per-Hook Detail section must appear with the correct family name
+if echo "$out14" | grep -q "Per-Hook Detail: SCIOMC_GATE"; then
+  assert_pass "--per-hook: detail section with correct family"
+else
+  assert_fail "--per-hook: detail section with correct family" "section missing; output: $out14"
+fi
+
+# Should show 2 events (only SCIOMC_GATE events, not WORKTREE_GATE)
+if echo "$out14" | grep -q "\[2 event(s)\]"; then
+  assert_pass "--per-hook: correct event count (2)"
+else
+  assert_fail "--per-hook: correct event count (2)" "event count wrong; output: $out14"
+fi
+
+# WORKTREE_GATE events must NOT appear in the output
+if echo "$out14" | grep -q "WORKTREE_GATE"; then
+  assert_fail "--per-hook: other families filtered out" "WORKTREE_GATE leaked into --per-hook output"
+else
+  assert_pass "--per-hook: other families filtered out"
+fi
+
+# Error events must be marked with ⚠ ERROR
+if echo "$out14" | grep -q "ERROR"; then
+  assert_pass "--per-hook: error events marked"
+else
+  assert_fail "--per-hook: error events marked" "ERROR marker missing; output: $out14"
+fi
+
+# Distinct sessions summary must appear
+if echo "$out14" | grep -q "Distinct sessions"; then
+  assert_pass "--per-hook: distinct sessions line present"
+else
+  assert_fail "--per-hook: distinct sessions line present" "sessions line missing; output: $out14"
+fi
+
+# Test --per-hook with non-existent family: graceful no-match message
+out14b=$(python3 "$CLI" --dir "$DIR14" --days 1 --per-hook DOES_NOT_EXIST 2>&1)
+rc14b=$?
+
+if [ "$rc14b" -eq 0 ]; then
+  assert_pass "--per-hook nonexistent family: exit code 0"
+else
+  assert_fail "--per-hook nonexistent family: exit code 0" "exited $rc14b; output: $out14b"
+fi
+
+if echo "$out14b" | grep -q "no events found for family"; then
+  assert_pass "--per-hook nonexistent family: helpful no-match message"
+else
+  assert_fail "--per-hook nonexistent family: helpful no-match message" "message missing; output: $out14b"
+fi
+
+# Top Bypass Vars and Per-Hook Aggregation sections should NOT appear in --per-hook mode
+if echo "$out14" | grep -q "Top Bypass Vars"; then
+  assert_fail "--per-hook: top bypass vars section suppressed" "Top Bypass Vars appeared in --per-hook output"
+else
+  assert_pass "--per-hook: top bypass vars section suppressed"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 17: --per-hook FAMILY + --errors-only honors the error filter (#689, codex P2)
+# DIR14 SCIOMC_GATE = ev14_a(ok) + ev14_b(error); --errors-only must drop the ok event.
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== bypass-review: --per-hook + --errors-only (issue #689) ==="
+out17=$(python3 "$CLI" --dir "$DIR14" --days 1 --per-hook SCIOMC_GATE --errors-only 2>&1)
+
+if echo "$out17" | grep -q "(errors only)"; then
+  assert_pass "--per-hook+--errors-only: filter note shown in header"
+else
+  assert_fail "--per-hook+--errors-only: filter note shown in header" "note missing; output: $out17"
+fi
+
+if echo "$out17" | grep -q "\[1 event(s)\]"; then
+  assert_pass "--per-hook+--errors-only: ok event filtered (1 of 2 shown)"
+else
+  assert_fail "--per-hook+--errors-only: ok event filtered (1 of 2 shown)" "expected 1 event; output: $out17"
+fi
+
+# Every listed event must be an error (no ok event leaks through the combination).
+listed=$(echo "$out17" | grep -cE '^[[:space:]]+\[[0-9]+\] ' || true)
+err_marked=$(echo "$out17" | grep -c "⚠ ERROR" || true)
+if [ "$listed" = "1" ] && [ "$err_marked" = "1" ]; then
+  assert_pass "--per-hook+--errors-only: every listed event is an error"
+else
+  assert_fail "--per-hook+--errors-only: every listed event is an error" "listed=$listed err=$err_marked; output: $out17"
 fi
 
 # ---------------------------------------------------------------------------
