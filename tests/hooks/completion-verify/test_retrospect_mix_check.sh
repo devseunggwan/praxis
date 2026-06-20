@@ -1445,7 +1445,7 @@ run_case "V6_pass_no_compaction_gate7_dormant" "pass" "$V6_TRANSCRIPT"
 # disposition rows — mirroring the is_error_enum enforcement exactly.
 #
 # Calibrated regex: 'Exit code [1-9]|command terminated|js_error|FATAL|
-#   No such file|denied|BLOCKED|Usage: '
+#   No such file|denied|BLOCKED|Usage:([[:space:]]|$)'
 # This matches error SYNTAX, NOT the bare word "error", which appears in
 # benign JSON field names (e.g. "is_error":false) and agent prose.
 
@@ -1525,7 +1525,7 @@ CE6_TRANSCRIPT="$(mk_compaction)
 $(mk_assistant "$CE6_REPORT")"
 # Verify the calibrated regex indeed yields 0 on benign content
 _ce6_benign='{"type":"tool_result","is_error":false,"content":[{"type":"text","text":"error_code: 0, is_error: false, status: ok"}]}'
-_ce6_live_count=$(printf '%s\n' "$_ce6_benign" | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage: ' || true)
+_ce6_live_count=$(printf '%s\n' "$_ce6_benign" | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage:([[:space:]]|$)' || true)
 if [ "${_ce6_live_count:-0}" -ne 0 ]; then
   echo "FAIL  [CE6_calibration] calibrated regex matched benign content (count=$_ce6_live_count) — regex needs recalibration"
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("CE6_calibration")
@@ -1534,9 +1534,11 @@ run_case "CE6_pass_benign_error_field_names_no_false_positive" "pass" "$CE6_TRAN
 
 # CE7: calibration check — verify the calibrated regex DOES match real error
 # syntax signals that should be caught (exit-0 content-embedded errors).
-_ce7_errors='Exit code 1\ncommand terminated\njs_error: TypeError\nFATAL: connection refused\nNo such file or directory\nPermission denied\nBLOCKED by hook\nUsage: gh pr create [flags]'
-_ce7_live_count=$(printf '%b\n' "$_ce7_errors" | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage: ' || true)
-_ce7_expected=8
+# Last line is a BARE usage banner ("Usage:" with no trailing space / at EOL) —
+# locks the CodeRabbit #693 fix: the Usage: alternation must match end-of-line.
+_ce7_errors='Exit code 1\ncommand terminated\njs_error: TypeError\nFATAL: connection refused\nNo such file or directory\nPermission denied\nBLOCKED by hook\nUsage: gh pr create [flags]\nUsage:'
+_ce7_live_count=$(printf '%b\n' "$_ce7_errors" | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage:([[:space:]]|$)' || true)
+_ce7_expected=9
 if [ "${_ce7_live_count:-0}" -ne "$_ce7_expected" ]; then
   echo "FAIL  [CE7_calibration] calibrated regex matched $_ce7_live_count/${_ce7_expected} expected error signals — regex needs recalibration"
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("CE7_calibration")

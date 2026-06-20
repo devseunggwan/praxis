@@ -418,7 +418,9 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
     # "js_error:"). A separate scan anchored to error SYNTAX (not the bare word
     # "error", which produces false positives on field names like "is_error":false)
     # catches these. Calibrated regex: 'Exit code [1-9]|command terminated|
-    # js_error|FATAL|No such file|denied|BLOCKED|Usage: '.
+    # js_error|FATAL|No such file|denied|BLOCKED|Usage:([[:space:]]|$)'
+    # (the Usage: alternation matches a trailing space OR end-of-line so bare
+    # usage banners without a trailing space are not undercounted).
     # When the receipt declares content_error_count > 0, require a per-signal
     # 'retrospect:content_error_enum' block — same structure as is_error_enum.
     # An absent content_error_count field blocks (mirrors is_error_count absent).
@@ -432,7 +434,7 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
         | grep -oE '[^a-zA-Z0-9_]content_error_count:[[:space:]]*[0-9]+|^[[:space:]]*content_error_count:[[:space:]]*[0-9]+' \
         | grep -oE 'content_error_count:[[:space:]]*[0-9]+' | grep -oE '[0-9]+' | head -1)
       if [ -z "$ce_count" ]; then
-        GATE7_VIOLATION="post-compaction transcript_receipt fence carries no parseable 'content_error_count: N' line inside the fence — run grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage: ' against the transcript content and paste the REAL count in the receipt before Stage 3"
+        GATE7_VIOLATION="post-compaction transcript_receipt fence carries no parseable 'content_error_count: N' line inside the fence — run: grep '\"type\":\"tool_result\"' \"\$transcript\" | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage:([[:space:]]|\$)' and paste the REAL count in the receipt before Stage 3"
       elif [ "$ce_count" -gt 0 ] 2>/dev/null; then
         # Require begin+end markers AND >= 1 disposition row inside the fence,
         # mirroring the is_error_enum enforcement exactly.
@@ -482,7 +484,7 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
       # CONTENT, not the agent's own analysis prose or the Stage-3 report (those
       # live in assistant/text lines, never carry "type":"tool_result").
       live_ce_count=$(grep '"type":"tool_result"' "$TRANSCRIPT_PATH" 2>/dev/null \
-        | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage: ' 2>/dev/null || true)
+        | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage:([[:space:]]|$)' 2>/dev/null || true)
       live_ce_count=${live_ce_count:-0}
 
       # Parse declared user_turn_count from the receipt body.
@@ -526,7 +528,7 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
       # signals exceed tolerance. Only fires when no earlier violation is set.
       if [ -z "$GATE7_VIOLATION" ] && [ "${ce_count:-0}" -eq 0 ] 2>/dev/null \
          && [ "$live_ce_count" -gt "$GATE7_VALUE_TOLERANCE" ]; then
-        GATE7_VIOLATION="post-compaction receipt declares content_error_count=0 but a live scan of the transcript's tool_result content finds $live_ce_count error signal(s) (tolerance=$GATE7_VALUE_TOLERANCE) — exit-0 tool_result content (e.g. 'Exit code 1', 'FATAL', 'js_error') is not flagged by is_error:true; re-run: grep '\"type\":\"tool_result\"' \"\$transcript\" | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage: ' — paste the REAL count and enumerate each signal in a content_error_enum block before Stage 3"
+        GATE7_VIOLATION="post-compaction receipt declares content_error_count=0 but a live scan of the transcript's tool_result content finds $live_ce_count error signal(s) (tolerance=$GATE7_VALUE_TOLERANCE) — exit-0 tool_result content (e.g. 'Exit code 1', 'FATAL', 'js_error') is not flagged by is_error:true; re-run: grep '\"type\":\"tool_result\"' \"\$transcript\" | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage:([[:space:]]|\$)' — paste the REAL count and enumerate each signal in a content_error_enum block before Stage 3"
       fi
     fi
   fi
