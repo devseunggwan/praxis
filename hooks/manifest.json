@@ -16,7 +16,12 @@
       "args": [
         "session-start"
       ],
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "state_paths": [
+          "PRAXIS_STATE_DIR"
+        ]
+      }
     },
     {
       "name": "strike-counter",
@@ -42,7 +47,12 @@
       "name": "session-intent",
       "role": "preflight-gate",
       "event": "UserPromptSubmit",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "state_paths": [
+          "PRAXIS_SESSION_INTENT_FILE"
+        ]
+      }
     },
     {
       "name": "retrospect-active-marker",
@@ -64,7 +74,16 @@
       "hosts": [
         "claude"
       ],
-      "timeout": 8
+      "timeout": 8,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT"
+        ],
+        "state_paths": [
+          "PRAXIS_POSTCOMPACT_CONTEXT_FILE",
+          "PRAXIS_POSTCOMPACT_TAIL_LINES"
+        ]
+      }
     },
     {
       "name": "side-effect-scan",
@@ -114,7 +133,13 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 8
+      "timeout": 8,
+      "mode": {
+        "external_commands": [
+          "git remote get-url origin",
+          "gh pr list --repo <r> --state all --search <kw> --json ..."
+        ]
+      }
     },
     {
       "name": "commit-title-length-check",
@@ -128,14 +153,20 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_COMMIT_TITLE_FORMAT_STRICT"
+      }
     },
     {
       "name": "branch-name-check",
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_BRANCH_NAME_STRICT"
+      }
     },
     {
       "name": "pre-merge-approval-gate",
@@ -164,7 +195,13 @@
         "claude",
         "codex"
       ],
-      "timeout": 15
+      "timeout": 15,
+      "mode": {
+        "state_paths": [
+          "PRAXIS_GH_LABEL_CACHE_PATH",
+          "PRAXIS_GH_LABEL_CACHE_TTL_SEC"
+        ]
+      }
     },
     {
       "name": "gh-json-validator",
@@ -175,7 +212,12 @@
         "claude",
         "codex"
       ],
-      "timeout": 15
+      "timeout": 15,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_GH_JSON_BYPASS"
+        ]
+      }
     },
     {
       "name": "cli-flag-incompat-advisory",
@@ -196,14 +238,26 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_DESTRUCTIVE_BASH_STRICT",
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH"
+        ]
+      }
     },
     {
       "name": "protected-paths-guard",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Edit|Write|NotebookEdit",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_PROTECTED_PATHS_STRICT",
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_PROTECTED_PATHS"
+        ]
+      }
     },
     {
       "name": "jq-config-empty-dict-advisory",
@@ -224,14 +278,25 @@
       "role": "advisory-nudge",
       "event": "PostToolUse",
       "matcher": "Bash",
-      "timeout": 15
+      "timeout": 15,
+      "mode": {
+        "strict_env": "PRAXIS_PUSH_VERIFY_STRICT",
+        "bypass_env": [
+          "PRAXIS_PUSH_VERIFY_BYPASS"
+        ]
+      }
     },
     {
       "name": "verify-commit-flag-override",
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_SKIP_COMMIT_FLAG_CHECK"
+        ]
+      }
     },
     {
       "name": "session-intent",
@@ -259,7 +324,11 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_PHANTOM_PATH_STRICT",
+        "state_paths": ["PRAXIS_STATE_DIR"]
+      }
     },
     {
       "name": "block-personal-asset-leak",
@@ -277,7 +346,13 @@
         "claude",
         "codex"
       ],
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_VERSION_BUMP_STRICT",
+        "bypass_env": [
+          "PRAXIS_VERSION_BUMP_BYPASS"
+        ]
+      }
     },
     {
       "name": "momentum-rule-retrieval-gate",
@@ -288,14 +363,28 @@
         "claude",
         "codex"
       ],
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_MOMENTUM_STRICT",
+        "bypass_env": [
+          "PRAXIS_MOMENTUM_BYPASS"
+        ],
+        "state_paths": [
+          "PRAXIS_MEMORY_DIR"
+        ]
+      }
     },
     {
       "name": "block-sciomc-finding-commit",
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "CLAUDE_HOOK_BYPASS_SCIOMC_GATE"
+        ]
+      }
     },
     {
       "name": "block-commit-without-codex-review",
@@ -305,7 +394,12 @@
       "hosts": [
         "claude"
       ],
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE"
+        ]
+      }
     },
     {
       "name": "block-rename-sweep-survivors",
@@ -322,28 +416,48 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "CLAUDE_HOOK_BYPASS_DUP_GATE"
+        ]
+      }
     },
     {
       "name": "block-child-repo-issue-create",
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_HUB_ENFORCE"
+        ]
+      }
     },
     {
       "name": "skill-gate-commands",
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_SKILL_GATE"
+        ]
+      }
     },
     {
       "name": "memory-hint",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash|Edit|Write|NotebookEdit|AskUserQuestion",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "state_paths": [
+          "PRAXIS_MEMORY_DIR"
+        ]
+      }
     },
     {
       "name": "external-api-literal-trigger",
@@ -357,14 +471,33 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Edit|Write|NotebookEdit",
-      "timeout": 10
+      "timeout": 10,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_PBGUARD_SKIP"
+        ],
+        "state_paths": [
+          "PRAXIS_PBGUARD_TEST_*"
+        ],
+        "external_commands": [
+          "git rev-parse --show-toplevel",
+          "git rev-parse --abbrev-ref HEAD",
+          "git status --porcelain",
+          "git log --oneline -3"
+        ]
+      }
     },
     {
       "name": "worktree-edit-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Edit|Write",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_WORKTREE_GATE"
+        ]
+      }
     },
     {
       "name": "path-probe-gate",
@@ -375,7 +508,13 @@
         "claude",
         "codex"
       ],
-      "timeout": 8
+      "timeout": 8,
+      "mode": {
+        "strict_env": "PRAXIS_PATH_PROBE_STRICT",
+        "bypass_env": [
+          "PRAXIS_PATH_PROBE_SKIP"
+        ]
+      }
     },
     {
       "name": "pre-edit-md-escape-advisory",
@@ -386,7 +525,15 @@
         "pre"
       ],
       "wrapper_suffix": "-pre",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_MD_ESCAPE_SKIP"
+        ],
+        "state_paths": [
+          "PRAXIS_MD_READ_HISTORY_FILE"
+        ]
+      }
     },
     {
       "name": "advisory-wrapper-signature-verify",
@@ -400,14 +547,24 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Edit|Write|NotebookEdit",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_BULK_WRITE_BYPASS"
+        ]
+      }
     },
     {
       "name": "pre-output-falsification-gate",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "AskUserQuestion",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_FALSIFY_GATE_BYPASS"
+        ]
+      }
     },
     {
       "name": "pre-output-falsification-gate",
@@ -428,14 +585,23 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "AskUserQuestion",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_ASK_END_STRICT",
+        "bypass_env": [
+          "PRAXIS_ASK_END_ADVISORY"
+        ]
+      }
     },
     {
       "name": "block-manufactured-action-menu",
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "AskUserQuestion",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT"
+      }
     },
     {
       "name": "output-block-falsify-advisory",
@@ -467,7 +633,15 @@
       "role": "postuse-correction",
       "event": "PostToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_BYPASS_TELEMETRY_DISABLE"
+        ],
+        "state_paths": [
+          "PRAXIS_BYPASS_TELEMETRY_FILE"
+        ]
+      }
     },
     {
       "name": "completion-verify",
@@ -499,7 +673,13 @@
       "name": "merge-state-claim-gate",
       "role": "completion-verify",
       "event": "Stop",
-      "timeout": 10
+      "timeout": 10,
+      "mode": {
+        "strict_env": "PRAXIS_MERGE_CLAIM_STRICT",
+        "bypass_env": [
+          "PRAXIS_MERGE_CLAIM_BYPASS"
+        ]
+      }
     },
     {
       "name": "strike-counter",

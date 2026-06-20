@@ -42,6 +42,11 @@ Phase 2 (ADR-0001) invariants:
       hand-written NON_HOOK_DOCS allowlist excepted).
   16. docs/hook-operating-matrix.md parity: generated hook operating surface
       summary is byte-identical to the manifest/env/security source render.
+  17. Per-hook `mode` metadata in hooks/manifest.json (strict env, bypass env,
+      state/path vars, read-only external commands) ↔ the human-readable views
+      in docs/bypass-vars.md and SECURITY.md, cross-checked in both directions
+      so neither can drift (#688). Opt-in hooks and shared/non-manifest rows are
+      exempt (they own no manifest `mode` block).
 
 CI invokes this; developers can too, via `./scripts/check-plugin-manifests.py`.
 """
@@ -1122,6 +1127,84 @@ def main() -> int:
             "MATRIX DRIFT docs/hook-operating-matrix.md: regenerate with "
             "./scripts/build-plugin-manifests.py"
         )
+
+    # ------------------------------------------------------------------
+    # Rule 17 — hook `mode` metadata ↔ doc cross-check (#688)
+    #
+    # hooks/manifest.json's per-hook `mode` block is the single source of truth
+    # for strict env, bypass env, state-path vars, and read-only external
+    # commands. docs/bypass-vars.md and SECURITY.md are human-readable views.
+    # This rule ties them together in BOTH directions so neither can drift:
+    #
+    #   (a) Manifest → doc: every value declared in a hook's `mode` must appear
+    #       in the matching doc table (no manifest-only value silently undocumented).
+    #   (b) Doc → manifest: every env-var/external-command row in the docs that
+    #       maps to a MANIFEST hook must appear in that hook's `mode` (no doc-only
+    #       orphan). Opt-in hooks (OPT_IN_HOOKS, no manifest entry) and shared
+    #       rows that name no manifest hook are exempt — they have no `mode` block.
+    # ------------------------------------------------------------------
+    mode_by_name: dict[str, dict] = {}
+    for name, entries in manifest_by_name.items():
+        mode = _build.hook_mode(entries)
+        if mode:
+            mode_by_name[name] = mode
+
+    all_hook_names = sorted(manifest_by_name)
+    doc_strict = _build.parse_doc_env_table("Strict", all_hook_names)
+    doc_bypass = _build.parse_doc_env_table("Opt-out", all_hook_names)
+    doc_state = _build.parse_doc_state_vars(all_hook_names)
+    doc_external = _build.parse_doc_external_commands()
+
+    # Field → (manifest accessor, doc map, human label, doc source).
+    # strict_env is scalar in the manifest; normalize to a list for comparison.
+    def _mode_list(mode: dict, key: str) -> list[str]:
+        val = mode.get(key)
+        if val is None:
+            return []
+        return [val] if isinstance(val, str) else list(val)
+
+    field_specs = [
+        ("strict_env", doc_strict, "strict env", "docs/bypass-vars.md (## Strict)"),
+        ("bypass_env", doc_bypass, "bypass env", "docs/bypass-vars.md (## Opt-out)"),
+        ("state_paths", doc_state, "state/path var", "docs/bypass-vars.md (## Path / test)"),
+        ("external_commands", doc_external, "external command", "SECURITY.md"),
+    ]
+
+    # (a) Manifest → doc
+    for name in sorted(mode_by_name):
+        mode = mode_by_name[name]
+        for field, doc_map, label, source in field_specs:
+            manifest_vals = set(_mode_list(mode, field))
+            doc_vals = set(doc_map.get(name, []))
+            for missing in sorted(manifest_vals - doc_vals):
+                drifts.append(
+                    f"MODE DOC MISSING {name}: {label} {missing!r} declared in "
+                    f"manifest `mode` but absent from {source}"
+                )
+
+    # (b) Doc → manifest. Opt-in hooks own no manifest `mode` and are exempt.
+    # Any other doc-named hook that is absent from the manifest is an ORPHAN —
+    # a typo or a stale doc row (e.g. a misspelled `hooks/.../impl.py` path in
+    # SECURITY.md, which parse_doc_external_commands derives a name from without
+    # pre-filtering). Surfacing it is the whole point of the bidirectional gate;
+    # a blanket `continue` would silently swallow exactly the drift it guards.
+    for field, doc_map, label, source in field_specs:
+        for name, doc_vals in doc_map.items():
+            if name in OPT_IN_HOOKS:
+                continue  # opt-in hook — no manifest `mode` expected
+            if name not in manifest_by_name:
+                drifts.append(
+                    f"MODE DOC ORPHAN {name}: {label} {sorted(doc_vals)!r} "
+                    f"documented in {source} but {name!r} is not a manifest hook "
+                    f"or an opt-in hook (typo or stale doc row?)"
+                )
+                continue
+            manifest_vals = set(_mode_list(mode_by_name.get(name, {}), field))
+            for orphan in sorted(set(doc_vals) - manifest_vals):
+                drifts.append(
+                    f"MODE MANIFEST MISSING {name}: {label} {orphan!r} documented "
+                    f"in {source} but absent from the hook's manifest `mode` block"
+                )
 
     if drifts:
         print("plugin-manifest check FAILED:")

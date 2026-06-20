@@ -30,7 +30,11 @@ Prior versions are best-effort only — upgrade to `main` to receive fixes.
 ## Hook External-Command Allowlist
 
 Praxis hooks invoke the following external commands during normal operation.
-Every entry was verified against the hook source files listed.
+Every entry was verified against the hook source files listed. This table is a
+**human-readable view** of the per-hook `external_commands` field in each hook's
+`mode` block in [`hooks/manifest.json`](hooks/manifest.json);
+`scripts/check-plugin-manifests.py` (Rule 17) cross-checks the two so neither can
+drift.
 
 ### `git` — repository state queries
 
