@@ -7,6 +7,7 @@ human review.
 
 Phase 2 of issue #456 (Phase 1 = hook that writes the log; Phase 3 = HTTP
 forwarding, deferred).
+Issue #689: per-hook aggregation view + tool-error co-occurrence.
 
 Usage:
   bypass-review [OPTIONS]
@@ -16,16 +17,26 @@ Options:
   --dir PATH             Override the telemetry directory
                          (default: ~/.praxis/telemetry)
   --errors-only          Show only events where tool_result_status = "error"
+  --per-hook FAMILY      Show detailed breakdown for one hook/rule family only
+                         (e.g. --per-hook SCIOMC_GATE).  Family names are
+                         normalized bypass var suffixes — see Section 3 output
+                         for the list of families in the current window.
   -h, --help             Show this message and exit
 
 Output sections:
   1. Summary — total events + date window
   2. Top bypass vars — frequency table (which rules are bypassed most)
-  3. Bypass by hook/rule family — normalized from bypass var names
+  3. Per-hook aggregation — bypass count, error count, error rate %, distinct
+     sessions, last seen timestamp; one row per hook/rule family.  This is the
+     primary observability surface for deciding whether to add a new block gate.
   4. Bypass by command family — first executable token after env prefixes
   5. Error-linked bypass signals — separate summary for failed bypasses
   6. Bypass by tool — group by tool field
   7. Error events — events where tool_result_status == "error"
+
+With --per-hook FAMILY:
+  Shows only events for the named family: per-event detail including session,
+  tool, command, and error status.
 
 Privacy contract (read-only, never re-derives omitted fields):
   - bypass var VALUES are not in the JSONL; this CLI never prints them
@@ -103,6 +114,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--errors-only",
         action="store_true",
         help="Show only events where tool_result_status == 'error'",
+    )
+    parser.add_argument(
+        "--per-hook",
+        dest="per_hook",
+        default=None,
+        metavar="FAMILY",
+        help=(
+            "Show detailed per-event breakdown for one hook/rule family "
+            "(e.g. SCIOMC_GATE). Family names are the normalized suffixes "
+            "shown in the Per-Hook Aggregation section."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -281,6 +303,9 @@ def aggregate(events: list[dict]) -> dict:
     bypass_var_error_counts: Counter[str] = Counter()
     hook_family_counts: Counter[str] = Counter()
     hook_family_error_counts: Counter[str] = Counter()
+    # Per-hook detail: sessions and last-seen per family (for Section 3).
+    # dict[family] -> {"sessions": set[str], "last_seen": str | None}
+    hook_family_detail: dict[str, dict] = {}
     command_family_counts: Counter[str] = Counter()
     command_family_error_counts: Counter[str] = Counter()
     tool_counts: Counter[str] = Counter()
@@ -291,6 +316,8 @@ def aggregate(events: list[dict]) -> dict:
         tool: str = ev.get(FIELD_TOOL) or UNKNOWN
         status: str = ev.get(FIELD_TOOL_RESULT_STATUS) or "ok"
         command_family = derive_command_family(ev.get(FIELD_TOOL_INPUT))
+        session: str = ev.get(FIELD_SESSION_ID) or ""
+        timestamp: str = ev.get(FIELD_TIMESTAMP) or ""
 
         for var in bypass_vars:
             bypass_var_counts[var] += 1
@@ -299,6 +326,15 @@ def aggregate(events: list[dict]) -> dict:
             if status == STATUS_ERROR:
                 bypass_var_error_counts[var] += 1
                 hook_family_error_counts[hook_family] += 1
+
+            # Accumulate per-hook detail: distinct sessions + latest timestamp.
+            detail = hook_family_detail.setdefault(
+                hook_family, {"sessions": set(), "last_seen": None}
+            )
+            if session:
+                detail["sessions"].add(session)
+            if timestamp and (detail["last_seen"] is None or timestamp > detail["last_seen"]):
+                detail["last_seen"] = timestamp
 
         tool_counts[tool] += 1
         command_family_counts[command_family] += 1
@@ -313,6 +349,7 @@ def aggregate(events: list[dict]) -> dict:
         "bypass_var_error_counts": bypass_var_error_counts,
         "hook_family_counts": hook_family_counts,
         "hook_family_error_counts": hook_family_error_counts,
+        "hook_family_detail": hook_family_detail,
         "command_family_counts": command_family_counts,
         "command_family_error_counts": command_family_error_counts,
         "tool_counts": tool_counts,
@@ -369,12 +406,135 @@ def _render_error_signal_summary(lines: list[str], agg: dict) -> None:
     )
 
 
+def _render_per_hook_aggregation(lines: list[str], agg: dict) -> None:
+    """Render Section 3: Per-Hook Aggregation — the primary observability table.
+
+    Columns: hook family | bypass count | error count | error rate % |
+             distinct sessions | last seen (UTC date only for brevity).
+
+    This is the surface maintainers read before adding a new block gate:
+    high bypass count + low error rate = rule may be too strict;
+    high error rate = bypass actively associated with failures.
+    """
+    lines.append(_render_header("Per-Hook Aggregation"))
+    counts = agg["hook_family_counts"]
+    if not counts:
+        lines.append("  (no hook/rule family data)")
+        return
+
+    error_counts = agg["hook_family_error_counts"]
+    detail = agg["hook_family_detail"]
+
+    col_family = 26
+    lines.append(
+        f"  {'Hook / Rule Family':<{col_family}}  {'Bypasses':>8}  "
+        f"{'Errors':>6}  {'Err%':>5}  {'Sessions':>8}  Last Seen"
+    )
+    lines.append(
+        f"  {'─' * col_family}  {'─' * 8}  {'─' * 6}  {'─' * 5}  "
+        f"{'─' * 8}  {'─' * 10}"
+    )
+
+    for family, count in counts.most_common():
+        err_count = error_counts.get(family, 0)
+        err_rate = f"{100 * err_count / count:.0f}%" if count > 0 else " n/a"
+        d = detail.get(family, {})
+        sessions = len(d.get("sessions") or set())
+        last_seen_raw = d.get("last_seen") or ""
+        # Truncate to date portion (YYYY-MM-DD) — microsecond timestamps are noisy here.
+        last_seen = last_seen_raw[:10] if last_seen_raw else "(unknown)"
+        lines.append(
+            f"  {family:<{col_family}}  {count:>8}  {err_count:>6}  "
+            f"{err_rate:>5}  {sessions:>8}  {last_seen}"
+        )
+
+    lines.append("")
+    lines.append(
+        "  Err% = errors / bypasses.  High Err% means the bypass co-occurred with\n"
+        "  tool failures — strong signal for a new block gate.  High Bypasses + low\n"
+        "  Err% means the rule is frequently bypassed without failures — review\n"
+        "  whether the hook is too strict before tightening it."
+    )
+    lines.append(
+        "  Note: 'error co-occurrence' is DERIVED — the telemetry schema records\n"
+        "  tool_result_status per event; it does not causally link the bypass to\n"
+        "  the failure.  Correlation only.  See follow-up issue #689 for causal\n"
+        "  attribution tracking."
+    )
+
+
+def _render_per_hook_detail(
+    lines: list[str], events: list[dict], family: str, errors_only: bool = False
+) -> None:
+    """Render a per-event detail view for a single hook/rule family.
+
+    Used when --per-hook FAMILY is passed.  Shows every event whose
+    bypass_env_vars contains at least one var normalizing to ``family``.
+    When ``errors_only`` is set, the view is restricted to error events so
+    the flag keeps its documented meaning in combination with --per-hook.
+    """
+    matching = [
+        ev for ev in events
+        if any(
+            derive_bypass_family(var) == family
+            for var in _coerce_bypass_vars(ev.get(FIELD_BYPASS_ENV_VARS))
+        )
+    ]
+    if errors_only:
+        matching = [
+            ev for ev in matching
+            if (ev.get(FIELD_TOOL_RESULT_STATUS) or "ok") == STATUS_ERROR
+        ]
+
+    filter_note = " (errors only)" if errors_only else ""
+    lines.append(
+        _render_header(f"Per-Hook Detail: {family}{filter_note}  [{len(matching)} event(s)]")
+    )
+    if not matching:
+        scope = "error events" if errors_only else "events"
+        lines.append(f"  (no {scope} found for family '{family}')")
+        lines.append(
+            "  Tip: family names are normalized bypass var suffixes. "
+            "Run without --per-hook to see available families."
+        )
+        return
+
+    error_count = sum(
+        1 for ev in matching
+        if (ev.get(FIELD_TOOL_RESULT_STATUS) or "ok") == STATUS_ERROR
+    )
+    err_rate = f"{100 * error_count / len(matching):.0f}%" if matching else "n/a"
+    sessions = {(ev.get(FIELD_SESSION_ID) or "") for ev in matching if ev.get(FIELD_SESSION_ID)}
+    lines.append(f"  Total bypasses : {len(matching)}")
+    lines.append(f"  Errors         : {error_count}  ({err_rate})")
+    lines.append(f"  Distinct sessions: {len(sessions)}")
+    lines.append("")
+
+    for i, ev in enumerate(matching, 1):
+        ts = ev.get(FIELD_TIMESTAMP, "(no timestamp)")
+        session = ev.get(FIELD_SESSION_ID, "") or "(no session)"
+        tool = ev.get(FIELD_TOOL, UNKNOWN)
+        bypass_vars = _coerce_bypass_vars(ev.get(FIELD_BYPASS_ENV_VARS))
+        tool_input = ev.get(FIELD_TOOL_INPUT, "") or ""
+        status = ev.get(FIELD_TOOL_RESULT_STATUS, "ok") or "ok"
+        command_family = derive_command_family(tool_input)
+        status_marker = " ⚠ ERROR" if status == STATUS_ERROR else ""
+        lines.append(f"  [{i}] {ts}{status_marker}")
+        lines.append(f"      session : {session}")
+        lines.append(f"      tool    : {tool}")
+        lines.append(f"      bypass  : {', '.join(bypass_vars)}")
+        lines.append(f"      command : {command_family}")
+        if tool_input:
+            lines.append(f"      input   : {tool_input}")
+
+
 def render_report(
     events: list[dict],
     agg: dict,
     days: int,
     telemetry_dir: Path,
     errors_only: bool,
+    per_hook: str | None = None,
 ) -> str:
     lines: list[str] = []
 
@@ -389,6 +549,11 @@ def render_report(
 
     if agg["total"] == 0:
         lines.append("\n  No bypass events found in the selected period.")
+        return "\n".join(lines)
+
+    # ── --per-hook mode: single-family drill-down ──
+    if per_hook is not None:
+        _render_per_hook_detail(lines, events, per_hook, errors_only)
         return "\n".join(lines)
 
     if errors_only:
@@ -413,22 +578,8 @@ def render_report(
             "Errors = bypass followed by tool failure (bad-bypass candidate)."
         )
 
-    # ── Section 3: By hook/rule family ──
-    _render_error_count_table(
-        lines,
-        "Bypass by Hook / Rule Family",
-        "Family",
-        agg["hook_family_counts"],
-        agg["hook_family_error_counts"],
-        note_label="⚠ error-linked",
-        empty_label="no hook/rule family data",
-        label_width=26,
-    )
-    lines.append("")
-    lines.append(
-        "  Family labels are normalized from bypass var names "
-        "(for example SCIOMC_GATE, WORKTREE_GATE, GH_JSON)."
-    )
+    # ── Section 3: Per-Hook Aggregation (primary observability surface) ──
+    _render_per_hook_aggregation(lines, agg)
 
     # ── Section 4: By command family ──
     _render_error_count_table(
@@ -515,7 +666,9 @@ def main(argv: list[str] | None = None) -> int:
 
     events = load_events(telemetry_dir, args.days)
     agg = aggregate(events)
-    report = render_report(events, agg, args.days, telemetry_dir, args.errors_only)
+    report = render_report(
+        events, agg, args.days, telemetry_dir, args.errors_only, args.per_hook
+    )
     print(report)
     return 0
 
