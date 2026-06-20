@@ -339,6 +339,8 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
   re_rs='^[[:space:]]*<!--[[:space:]]*retrospect:transcript_receipt_skipped:.*-->[[:space:]]*$'
   re_ib='^[[:space:]]*<!--[[:space:]]*retrospect:is_error_enum begin[[:space:]]*-->[[:space:]]*$'
   re_ie='^[[:space:]]*<!--[[:space:]]*retrospect:is_error_enum end[[:space:]]*-->[[:space:]]*$'
+  re_cb='^[[:space:]]*<!--[[:space:]]*retrospect:content_error_enum begin[[:space:]]*-->[[:space:]]*$'
+  re_ce='^[[:space:]]*<!--[[:space:]]*retrospect:content_error_enum end[[:space:]]*-->[[:space:]]*$'
   rcpt_begin=$(printf '%s\n' "$MOST_RECENT_BLOCK" | grep -cE "$re_rb")
   rcpt_skipped=$(printf '%s\n' "$MOST_RECENT_BLOCK" | grep -cE "$re_rs")
   # Marker COUNTS cannot detect a malformed fence: a balanced begin==end count
@@ -410,6 +412,44 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
         GATE7_VIOLATION="post-compaction receipt declares is_error_count=$ie_count but has no complete '<!-- retrospect:is_error_enum begin/end -->' block with per-event disposition rows inside the receipt fence (found begin=$ie_begin end=$ie_end disposition_rows=$ie_rows) — a count proves a scan ran, not that the errors were read; enumerate each is_error inside the fence with a promote/note/dismiss disposition before Stage 3"
       fi
     fi
+    # Content-error-signal check [issue #670]: errors embedded in exit-0
+    # tool_result CONTENT are not flagged by is_error:true — they appear in the
+    # text body of a successful tool_result (e.g. "Exit code 1", "FATAL:",
+    # "js_error:"). A separate scan anchored to error SYNTAX (not the bare word
+    # "error", which produces false positives on field names like "is_error":false)
+    # catches these. Calibrated regex: 'Exit code [1-9]|command terminated|
+    # js_error|FATAL|No such file|denied|BLOCKED|Usage:([[:space:]]|$)'
+    # (the Usage: alternation matches a trailing space OR end-of-line so bare
+    # usage banners without a trailing space are not undercounted).
+    # When the receipt declares content_error_count > 0, require a per-signal
+    # 'retrospect:content_error_enum' block — same structure as is_error_enum.
+    # An absent content_error_count field blocks (mirrors is_error_count absent).
+    if [ -z "$GATE7_VIOLATION" ]; then
+      # content_error_count sits on the pipe-delimited count line (not its own line),
+      # so do NOT anchor with '^'. Use a word-boundary-style guard: require the field
+      # to be preceded by a non-digit non-letter char (pipe/space) or start of string
+      # to resist injection via enum rows that could quote 'content_error_count: 99'.
+      # Pick the first match (head -1) to be consistent with ie_count extraction.
+      ce_count=$(printf '%s\n' "$RECEIPT_BLOCK" \
+        | grep -oE '[^a-zA-Z0-9_]content_error_count:[[:space:]]*[0-9]+|^[[:space:]]*content_error_count:[[:space:]]*[0-9]+' \
+        | grep -oE 'content_error_count:[[:space:]]*[0-9]+' | grep -oE '[0-9]+' | head -1)
+      if [ -z "$ce_count" ]; then
+        GATE7_VIOLATION="post-compaction transcript_receipt fence carries no parseable 'content_error_count: N' line inside the fence — run: grep '\"type\":\"tool_result\"' \"\$transcript\" | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage:([[:space:]]|\$)' and paste the REAL count in the receipt before Stage 3"
+      elif [ "$ce_count" -gt 0 ] 2>/dev/null; then
+        # Require begin+end markers AND >= 1 disposition row inside the fence,
+        # mirroring the is_error_enum enforcement exactly.
+        ce_begin=$(printf '%s\n' "$RECEIPT_BLOCK" | grep -cE "$re_cb")
+        ce_end=$(printf '%s\n' "$RECEIPT_BLOCK" | grep -cE "$re_ce")
+        ce_rows=$(printf '%s\n' "$RECEIPT_BLOCK" | awk -v cb="$re_cb" -v ce="$re_ce" '
+          $0 ~ cb { inblock=1; next }
+          $0 ~ ce { inblock=0 }
+          inblock && /disposition:[[:space:]]*(promote|note|dismiss)/ { c++ }
+          END { print c+0 }')
+        if [ "$ce_begin" -lt 1 ] || [ "$ce_end" -lt 1 ] || [ "$ce_rows" -lt 1 ]; then
+          GATE7_VIOLATION="post-compaction receipt declares content_error_count=$ce_count but has no complete '<!-- retrospect:content_error_enum begin/end -->' block with per-signal disposition rows inside the receipt fence (found begin=$ce_begin end=$ce_end disposition_rows=$ce_rows) — a count proves a scan ran, not that the signals were read; enumerate each content-error signal inside the fence with a promote/note/dismiss disposition before Stage 3"
+        fi
+      fi
+    fi
     # Gate-7 VALUE check [issue #671]: presence + structural validity alone do not
     # prove freshness — a receipt whose counts were transcribed verbatim from the
     # compaction summary passes every structural check while the declared values
@@ -419,8 +459,10 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
     # overwriting a more specific error).
     #
     # Canonical derivation commands (from skills/retrospect/references/report-template.md):
-    #   is_error_count  ← grep -c '"is_error":true' {transcript_path}
-    #   user_turn_count ← grep -c '"role":"user"'  {transcript_path}
+    #   is_error_count      ← grep -c '"is_error":true' {transcript_path}
+    #   user_turn_count     ← grep -c '"role":"user"'  {transcript_path}
+    #   content_error_count ← tool_result lines | grep -cE '<calibrated error syntax>'
+    #                         (floor-only: declared 0 while live>tol is laundering)
     # interrupt_count has no canonical grep command in the spec; skip re-derivation.
     #
     # Tolerance: 1 line off-by-one is accepted to account for live-append races
@@ -437,6 +479,13 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
       # Re-derive user_turn_count (role:user covers both literal JSON forms).
       live_ut_count=$(grep -c '"role":"user"' "$TRANSCRIPT_PATH" 2>/dev/null || true)
       live_ut_count=${live_ut_count:-0}
+      # Re-derive content_error_count [issue #670], scoped to tool_result-bearing
+      # lines so the calibrated regex matches errors embedded in exit-0 tool_result
+      # CONTENT, not the agent's own analysis prose or the Stage-3 report (those
+      # live in assistant/text lines, never carry "type":"tool_result").
+      live_ce_count=$(grep '"type":"tool_result"' "$TRANSCRIPT_PATH" 2>/dev/null \
+        | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage:([[:space:]]|$)' 2>/dev/null || true)
+      live_ce_count=${live_ce_count:-0}
 
       # Parse declared user_turn_count from the receipt body.
       # The declared line is: is_error_count: N | user_turn_count: N | interrupt_count: N
@@ -469,6 +518,17 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
 
       if [ "$ie_mismatch" = "1" ] || [ "$ut_mismatch" = "1" ]; then
         GATE7_VIOLATION="post-compaction receipt declares counts that do not match a live grep of the transcript (tolerance=$GATE7_VALUE_TOLERANCE): declared is_error_count=$declared_ie vs live=$live_ie_count; declared user_turn_count=${declared_ut:-(unparseable)} vs live=$live_ut_count — re-run grep -c '\"is_error\":true' and grep -c '\"role\":\"user\"' against the transcript this turn and paste the REAL output in the receipt fence before Stage 3"
+      fi
+
+      # Content-error floor [issue #670]: the structural block above accepts a
+      # declared content_error_count of 0 without requiring an enum. But a declared
+      # 0 while the transcript's tool_result content carries real error signals is
+      # the same laundering #671 closes for is_error_count — the leading signal (the
+      # content scan) was never run. Re-derive and block when declared 0 but live
+      # signals exceed tolerance. Only fires when no earlier violation is set.
+      if [ -z "$GATE7_VIOLATION" ] && [ "${ce_count:-0}" -eq 0 ] 2>/dev/null \
+         && [ "$live_ce_count" -gt "$GATE7_VALUE_TOLERANCE" ]; then
+        GATE7_VIOLATION="post-compaction receipt declares content_error_count=0 but a live scan of the transcript's tool_result content finds $live_ce_count error signal(s) (tolerance=$GATE7_VALUE_TOLERANCE) — exit-0 tool_result content (e.g. 'Exit code 1', 'FATAL', 'js_error') is not flagged by is_error:true; re-run: grep '\"type\":\"tool_result\"' \"\$transcript\" | grep -cE 'Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage:([[:space:]]|\$)' — paste the REAL count and enumerate each signal in a content_error_enum block before Stage 3"
       fi
     fi
   fi
@@ -553,7 +613,7 @@ if [ "$should_block" = "true" ]; then
     fi
   done
 
-  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable). See skills/retrospect/references/stage2.5-audit.md and skills/retrospect/references/stage3-reporting.md."
+  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670). See skills/retrospect/references/stage2.5-audit.md and skills/retrospect/references/stage3-reporting.md."
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'
   exit 0
 fi
