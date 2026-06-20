@@ -520,17 +520,38 @@ def _default_signal(role: str) -> str:
     return role
 
 
-def _parse_env_table(section: str, hook_names: list[str]) -> dict[str, list[str]]:
-    """Map hook name -> env vars from a section in docs/bypass-vars.md."""
+# ---------------------------------------------------------------------------
+# Doc cross-check parsers (#688)
+#
+# These parse the human-readable views (docs/bypass-vars.md, SECURITY.md) so
+# check-plugin-manifests.py can assert they agree with the canonical manifest
+# `mode` metadata. The matrix RENDERER above reads only the manifest; these
+# parsers exist solely for the drift gate, never to feed the matrix.
+# ---------------------------------------------------------------------------
+
+def _bypass_vars_section_body(section: str) -> str | None:
+    """Return the markdown body of a `## <section>` block in bypass-vars.md."""
     if not BYPASS_VARS_DOC.exists():
-        return {}
+        return None
     text = BYPASS_VARS_DOC.read_text()
     marker = f"## {section}"
     start = text.find(marker)
     if start < 0:
-        return {}
+        return None
     next_start = text.find("\n## ", start + len(marker))
-    body = text[start: next_start if next_start >= 0 else len(text)]
+    return text[start: next_start if next_start >= 0 else len(text)]
+
+
+def parse_doc_env_table(section: str, hook_names: list[str]) -> dict[str, list[str]]:
+    """Map hook name -> env vars from a `## <section>` table in bypass-vars.md.
+
+    Rows are backtick-delimited "VAR | hook | …" cells. The `_ACK` companion var
+    in the Strict section is skipped (it is an unlock token, not a mode switch —
+    it has no manifest `mode` field), matching the matrix's historical exclusion.
+    """
+    body = _bypass_vars_section_body(section)
+    if body is None:
+        return {}
     out: dict[str, list[str]] = {}
     for line in body.splitlines():
         if not line.startswith("| `"):
@@ -548,17 +569,11 @@ def _parse_env_table(section: str, hook_names: list[str]) -> dict[str, list[str]
     return out
 
 
-def _parse_state_vars(hook_names: list[str]) -> dict[str, list[str]]:
-    """Map hook name -> state/path env vars from the registry."""
-    if not BYPASS_VARS_DOC.exists():
+def parse_doc_state_vars(hook_names: list[str]) -> dict[str, list[str]]:
+    """Map hook name -> state/path env vars from the `## Path / test` table."""
+    body = _bypass_vars_section_body("Path / test")
+    if body is None:
         return {}
-    text = BYPASS_VARS_DOC.read_text()
-    marker = "## Path / test"
-    start = text.find(marker)
-    if start < 0:
-        return {}
-    next_start = text.find("\n## ", start + len(marker))
-    body = text[start: next_start if next_start >= 0 else len(text)]
     out: dict[str, list[str]] = {}
     for line in body.splitlines():
         if not line.startswith("| `"):
@@ -574,7 +589,7 @@ def _parse_state_vars(hook_names: list[str]) -> dict[str, list[str]]:
     return out
 
 
-def _parse_external_commands() -> dict[str, list[str]]:
+def parse_doc_external_commands() -> dict[str, list[str]]:
     """Map hook name -> read-only external command snippets from SECURITY.md."""
     if not SECURITY_DOC.exists():
         return {}
@@ -595,43 +610,81 @@ def _parse_external_commands() -> dict[str, list[str]]:
     return out
 
 
+def hook_mode(entries: list[dict]) -> dict:
+    """Aggregate the `mode` metadata for one hook across its manifest entries.
+
+    `mode` is attached to a single (the first) registration of each hook name —
+    multi-event hooks share one operating mode — but a defensive merge here keeps
+    the matrix correct even if a future edit splits fields across entries. The
+    single source of truth for a hook's strict/bypass env vars, state-path env
+    vars, and read-only external commands is this manifest block (#688). The
+    human-readable views in docs/bypass-vars.md and SECURITY.md are cross-checked
+    against it by check-plugin-manifests.py so the two cannot drift.
+    """
+    merged: dict = {}
+    for entry in entries:
+        mode = entry.get("mode")
+        if not mode:
+            continue
+        if "strict_env" in mode and "strict_env" not in merged:
+            merged["strict_env"] = mode["strict_env"]
+        for key in ("bypass_env", "state_paths", "external_commands"):
+            if mode.get(key):
+                merged.setdefault(key, [])
+                for value in mode[key]:
+                    if value not in merged[key]:
+                        merged[key].append(value)
+    return merged
+
+
 def render_hook_operating_matrix(manifest: dict) -> str:
     """Render a generated hook operating-surface matrix.
 
-    The matrix intentionally uses only structured sources that already have
-    drift gates: hooks/manifest.json for registration shape, docs/bypass-vars.md
-    for env vars, and SECURITY.md for read-only external command declarations.
-    Track 4 can replace remaining blanks with richer structured metadata.
+    The matrix is sourced entirely from structured metadata in
+    hooks/manifest.json: registration shape (role, event, matcher, hosts) plus
+    the per-hook `mode` block (strict env, bypass env, state-path vars, read-only
+    external commands). docs/bypass-vars.md and SECURITY.md are human-readable
+    views that check-plugin-manifests.py validates against this manifest, so a
+    value can live in exactly one canonical place (#688).
     """
     by_name: dict[str, list[dict]] = {}
     for entry in manifest["hooks"]:
         by_name.setdefault(entry["name"], []).append(entry)
 
-    hook_names = sorted(by_name)
-    bypass_vars = _parse_env_table("Opt-out", hook_names)
-    strict_vars = _parse_env_table("Strict", hook_names)
-    state_vars = _parse_state_vars(hook_names)
-    external_commands = _parse_external_commands()
+    strict_vars: dict[str, list[str]] = {}
+    bypass_vars: dict[str, list[str]] = {}
+    state_vars: dict[str, list[str]] = {}
+    external_commands: dict[str, list[str]] = {}
+    for name, entries in by_name.items():
+        mode = hook_mode(entries)
+        if mode.get("strict_env"):
+            strict_vars[name] = [mode["strict_env"]]
+        if mode.get("bypass_env"):
+            bypass_vars[name] = mode["bypass_env"]
+        if mode.get("state_paths"):
+            state_vars[name] = mode["state_paths"]
+        if mode.get("external_commands"):
+            external_commands[name] = mode["external_commands"]
 
     lines = [
         "# Hook Operating Matrix",
         "",
         "<!-- AUTO-GENERATED by scripts/build-plugin-manifests.py - DO NOT EDIT -->",
         "",
-        "This matrix summarizes the hook operating surface from structured repo",
-        "sources. Regenerate it with `./scripts/build-plugin-manifests.py`; drift",
-        "is checked by `./scripts/check-plugin-manifests.py`.",
+        "This matrix summarizes the hook operating surface from a single",
+        "structured source. Regenerate it with `./scripts/build-plugin-manifests.py`;",
+        "drift is checked by `./scripts/check-plugin-manifests.py`.",
         "",
-        "Sources:",
+        "Source:",
         "",
-        "- `hooks/manifest.json` -> role, event, matcher, hosts",
-        "- `docs/bypass-vars.md` -> bypass, strict, and state/path variables",
-        "- `SECURITY.md` -> read-only external-command declarations",
+        "- `hooks/manifest.json` -> role, event, matcher, hosts, and the per-hook",
+        "  `mode` block (strict env, bypass env, state/path vars, read-only",
+        "  external commands).",
         "",
-        "A `-` in the state/path or external-command columns means no structured",
-        "declaration exists in the sources above. Track 4 should promote remaining",
-        "spec-only prose metadata into a structured source before this matrix",
-        "becomes exhaustive.",
+        "`docs/bypass-vars.md` and `SECURITY.md` are human-readable views of the",
+        "same `mode` metadata; the check script validates them against the manifest",
+        "so the two cannot drift. A `-` in a column means the hook declares no",
+        "value for it in its manifest `mode` block.",
         "",
         "| Hook | Role | Events | Hosts | Default | Strict env | Bypass env | State/path vars | External commands |",
         "|------|------|--------|-------|---------|------------|------------|-----------------|-------------------|",

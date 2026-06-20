@@ -92,7 +92,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | Variable | Default | Hook(s) |
 |----------|---------|---------|
 | `PRAXIS_HOME` | `~/.praxis` | shared (`_paths.py`) — relocates the whole runtime tree |
-| `PRAXIS_STATE_DIR` | `~/.praxis/state` | shared — durable state base (strike-counter, phantom-path, postcompact read) |
+| `PRAXIS_STATE_DIR` | `~/.praxis/state` | shared — durable state base (strike-counter, external-write-path-existence-check, postcompact read) |
 | `PRAXIS_HOOK_ERROR_LOG` | `~/.praxis/logs/hook-errors.jsonl` | shared (`@fail_open`) |
 | `PRAXIS_HOOK_ERROR_STDERR` | unset | shared — also print swallowed-exception note to stderr |
 | `PRAXIS_BYPASS_TELEMETRY_FILE` | `~/.praxis/telemetry/bypass-events-<date>.jsonl` | `bypass-telemetry` |
@@ -111,8 +111,17 @@ continue to work. See [`runtime-state-layout.md`](runtime-state-layout.md).
 
 ## Maintaining this registry
 
-When you add a hook env var, add a row here in the same PR. To list every var
-referenced by the hooks at any time:
+This registry is a **human-readable view**. The canonical source for a hook's
+strict env, bypass/opt-out env, and state/path vars is the per-hook `mode` block
+in [`hooks/manifest.json`](../hooks/manifest.json). `scripts/check-plugin-manifests.py`
+(Rule 17) cross-checks the Strict / Opt-out / Path-test tables here against that
+`mode` metadata in both directions, so a value documented here without a matching
+manifest entry — or vice versa — fails CI.
+
+When you add a hook env var, add it to the hook's manifest `mode` block AND a row
+here in the same PR (the **Config** section is doc-only — those vars tune
+behaviour rather than switch mode, so they carry no manifest `mode` field). To
+list every var referenced by the hooks at any time:
 
 ```bash
 grep -rhoE "PRAXIS_[A-Z0-9_]+|CLAUDE_HOOK_BYPASS_[A-Z0-9_]+" hooks/ | sort -u
