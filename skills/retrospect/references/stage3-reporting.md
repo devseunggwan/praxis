@@ -23,9 +23,11 @@ Stage 3 output MUST emit, in this order:
    - `<!-- retrospect:audit_skipped: no artifacts -->`
    - `<!-- retrospect:audit_skipped: transcript unreadable -->`
    - per-artifact audit trail lines when triggers were inspected
-7. `<!-- retrospect:distribution begin --> ... end -->`
-8. unified findings table
-9. memory-action evidence blocks for every finding whose proposed action
+7. `<!-- retrospect:suppression_ledger begin --> ... end -->` (mandatory on
+   every path, including the 0-friction "No patterns found" path)
+8. `<!-- retrospect:distribution begin --> ... end -->`
+9. unified findings table
+10. memory-action evidence blocks for every finding whose proposed action
    includes `memory`
 
 The `memory` distribution count includes both finding rows whose Proposed
@@ -102,6 +104,45 @@ is a workflow/spec/hook rule violation must appear as a ledger line:
 An empty `dismissed_candidates` fence is allowed only when this enumeration
 returns zero rule-violation matches. Pure style nits or refactor suggestions do
 not force a ledger entry.
+
+## Suppression ledger
+
+Every Stage 3 report — including the 0-friction "No patterns found" path — MUST
+emit the suppression-ledger fence. It is the report-level record of the Stage 2
+self-incrimination pass (see
+[`stage1-2-analysis.md`](stage1-2-analysis.md)): the audit surface that makes
+self-suppression visible and challengeable instead of silent. Without it, an
+omitted or softened agent-caused failure is indistinguishable from a clean
+session.
+
+```markdown
+<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: <one-line, verbatim painful framing, no softening> | disposition: surface|none-found
+- tempted_to_omit: <item> | reason_considered: <why> | disposition: surface|justified-drop
+- tempted_to_soften: <item> | original_severity: <X> | softened_to: <Y> | restored: true|false
+- self_adversarial: ran | result: <what it surfaced, or "concurred — nothing omitted or softened">
+<!-- retrospect:suppression_ledger end -->
+```
+
+Emit the fence as **bare markdown in the report body**, not inside a fenced
+code block — the Stop hook strips fenced code before parsing, so a ledger
+wrapped in a ```` ```markdown ```` block is invisible to Gate-8 and blocks. The
+block above is illustration only.
+
+Rules:
+
+- The `worst_agent_failure:` line and the `self_adversarial:` line are
+  REQUIRED. The `tempted_to_omit` / `tempted_to_soften` rows appear only when
+  such candidates existed.
+- The fence is mandatory even on the clean path. When the self-incrimination
+  pass found nothing to omit or soften, still emit `worst_agent_failure:` (name
+  the single worst thing this session, however minor) with
+  `disposition: surface`, and a `self_adversarial: ran` line stating the pass
+  ran and concurred. Absence-of-suppression is itself audited.
+- Painful framing is preserved verbatim; softening the wording inside the ledger
+  defeats its purpose.
+- The Stop hook (Gate-8) blocks a Stage 3 report that omits this fence or either
+  required line.
 
 ## Transcript receipt
 
@@ -231,6 +272,10 @@ Stop and return to Stage 2 / Stage 2.5 when any of these are true:
 - Emitting `AskUserQuestion` with ranking language without an accompanying `Falsification:` trace line.
 - Stage 3 ranking that contradicts Stage 2 caveats.
 - Omitting the `Stage 2 caveats:` line when caveats apply.
+- Omitting the `retrospect:suppression_ledger` fence, or emitting it without the
+  required `worst_agent_failure:` and `self_adversarial:` lines.
+- Silently dropping an agent-caused failure the self-incrimination pass surfaced
+  (a `justified-drop` needs an explicit reason in the ledger).
 
 ## Quick Reference
 
@@ -256,11 +301,12 @@ Do not run Stage 4 until the user explicitly approves the finding.
 
 ## Co-update note
 
-Any schema drift here must be co-updated with:
+Any schema drift here — including the `retrospect:suppression_ledger` fence
+(Gate-8) — must be co-updated with:
 
 - `hooks/completion-verify/retrospect-mix-check/impl.sh`
 - `tests/hooks/completion-verify/test_retrospect_mix_check.sh`
-- `tests/fixtures/retrospect-synth-*.expected.json`
+- `tests/fixtures/retrospect-synth-*.jsonl` + `.expected.json`
 
 ## Examples
 

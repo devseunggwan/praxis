@@ -168,16 +168,27 @@ Every emitted finding must carry at least one of:
 If `tool` is present, `Tool Layer` must be one of `mcp`, `cli`, `builtin`, or
 `skill`.
 
+**Self-incrimination pass (anti-suppression, MUST):** after the five lanes and
+before clustering, run the self-incrimination pass — name the single worst
+agent-caused friction you are tempted to omit or soften. It occupies a
+guaranteed slot that does NOT consume the 5-event `friction_events` cap, and a
+failure with no `user_correction` marker or no `self_correction` signature match
+is still in scope. An agent-caused, user-visible-impact failure may not be
+self-downgraded to `note only` (severity-honesty floor). The result is recorded
+in the Stage 3 `retrospect:suppression_ledger` fence. Full rules in
+[`references/stage1-2-analysis.md`](references/stage1-2-analysis.md).
+
 **Core flow:**
 
 1. Pre-scan the transcript and produce the five lanes
-2. Run tracer / analyst where the friction path requires them
-3. Derive root causes rather than symptoms
-4. Cluster overlaps
-5. Run the MEMORY.md scan
-6. Assign preliminary actions
-7. Run Stage 2.7 when the artifact-audit triggers are present
-8. Hand findings to Stage 2.5
+2. Run the self-incrimination pass (anti-suppression)
+3. Run tracer / analyst where the friction path requires them
+4. Derive root causes rather than symptoms
+5. Cluster overlaps
+6. Run the MEMORY.md scan
+7. Assign preliminary actions
+8. Run Stage 2.7 when the artifact-audit triggers are present
+9. Hand findings to Stage 2.5
 
 **Early exit only when all are true:**
 
@@ -230,8 +241,10 @@ Worked examples live in
 1. `## Retrospect Report`
 2. audit fences (`pre_scan_checklist`, `dismissed_candidates`, and the required
    transcript-derived ledgers)
-3. `<!-- retrospect:distribution begin --> ... end -->`
-4. unified findings table
+3. `<!-- retrospect:suppression_ledger begin --> ... end -->` (mandatory on
+   every path — records the self-incrimination pass)
+4. `<!-- retrospect:distribution begin --> ... end -->`
+5. unified findings table
 
 **Per-finding plan must state:**
 
@@ -330,6 +343,8 @@ STOP and return to the owning stage when any of these happen:
 - An `AskUserQuestion` recommendation without an accompanying `Falsification:` trace line
 - Stage 3 ranking that contradicts Stage 2 caveats
 - Omitting the `Stage 2 caveats:` line when caveats apply
+- Omitting the `retrospect:suppression_ledger` fence, or silently dropping /
+  softening an agent-caused failure the self-incrimination pass surfaced
 - Silent overwrite of a concurrently-advanced cursor
 
 The exhaustive Red Flag catalog is in
@@ -341,9 +356,9 @@ The exhaustive Red Flag catalog is in
 |-------|---------------|
 | Stage 1 | Load rule files and calibration questions |
 | Stage 1.5 | Cursor schedule honored; detect-only hygiene scan executed |
-| Stage 2 | Five pre-scan lanes + categories + early-exit carve-outs checked |
+| Stage 2 | Five pre-scan lanes + self-incrimination pass + categories + early-exit carve-outs checked |
 | Stage 2.5 | Gates 1-6 evaluated before any Stage 3 output |
-| Stage 3 | Pre-Output Falsification Gate before each `AskUserQuestion` |
+| Stage 3 | `suppression_ledger` fence emitted; Pre-Output Falsification Gate before each `AskUserQuestion` |
 | Stage 4 | Reference procedure read; artifact verified after execution |
 
 Full tables and stage-by-stage failure handling are in
