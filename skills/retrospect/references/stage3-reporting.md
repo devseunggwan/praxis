@@ -121,6 +121,7 @@ session.
 - tempted_to_omit: <item> | reason_considered: <why> | disposition: surface|justified-drop
 - tempted_to_soften: <item> | original_severity: <X> | softened_to: <Y> | restored: true|false
 - self_adversarial: ran | result: <what it surfaced, or "concurred — nothing omitted or softened">
+- critic_diff: <none|not-run|candidate list> | reason: <tier result or skip reason>
 <!-- retrospect:suppression_ledger end -->
 ```
 
@@ -132,13 +133,25 @@ block above is illustration only.
 Rules:
 
 - The `worst_agent_failure:` line and the `self_adversarial:` line are
-  REQUIRED. The `tempted_to_omit` / `tempted_to_soften` rows appear only when
-  such candidates existed.
+  REQUIRED. The `critic_diff:` line is REQUIRED whenever the Stage 2
+  externalized critic tier is evaluated, even when it did not run. The
+  `tempted_to_omit` / `tempted_to_soften` rows appear only when such candidates
+  existed.
 - The fence is mandatory even on the clean path. When the self-incrimination
   pass found nothing to omit or soften, still emit `worst_agent_failure:` (name
   the single worst thing this session, however minor) with
   `disposition: surface`, and a `self_adversarial: ran` line stating the pass
   ran and concurred. Absence-of-suppression is itself audited.
+- `critic_diff:` values:
+  - `not-run | reason: tier predicate false (...)` when the friction path is
+    empty or the conditional predicate did not fire
+  - `not-run | reason: transcript unreadable` when the tier would fire but the
+    critic cannot be briefed from readable evidence
+  - `none | checked: <N> candidate(s)` when the critic found no unsurfaced
+    candidate
+  - one or more candidate lines when the critic found valid unsurfaced
+    agent-caused failures; each must be surfaced or paired with a
+    `not-suppressed: <reason>` ledger row
 - Painful framing is preserved verbatim; softening the wording inside the ledger
   defeats its purpose.
 - The Stop hook (Gate-8) blocks a Stage 3 report that omits this fence or either
@@ -278,7 +291,8 @@ Stop and return to Stage 2 / Stage 2.5 when any of these are true:
 - Stage 3 ranking that contradicts Stage 2 caveats.
 - Omitting the `Stage 2 caveats:` line when caveats apply.
 - Omitting the `retrospect:suppression_ledger` fence, or emitting it without the
-  required `worst_agent_failure:` and `self_adversarial:` lines.
+  required `worst_agent_failure:`, `self_adversarial:`, and `critic_diff:`
+  lines.
 - Silently dropping an agent-caused failure the self-incrimination pass surfaced
   (a `justified-drop` needs an explicit reason in the ledger).
 

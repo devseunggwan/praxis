@@ -117,6 +117,7 @@ $rows
 <!-- retrospect:suppression_ledger begin -->
 - worst_agent_failure: synthetic Stop-hook fixture — ledger-presence test only, not a real session | disposition: surface
 - self_adversarial: ran | result: synthetic fixture ledger only
+- critic_diff: not-run | reason: tier predicate false (synthetic fixture)
 <!-- retrospect:suppression_ledger end -->
 EOF
 }
@@ -1663,53 +1664,65 @@ $(mk_content_error "Exit code 1: single transient failure")
 $(mk_assistant "$CE_FLOOR3_REPORT")"
 run_case "CE_FLOOR3_pass_single_content_error_within_tolerance" "pass" "$CE_FLOOR3_TRANSCRIPT"
 
-# Gate-8 (Suppression-Ledger Receipt) cases — issue #699 ---------------------
+# Gate-8 (Suppression-Ledger Receipt) cases — issues #699 / #702 -------------
 # Every gateable Stage 3 report must carry a 'retrospect:suppression_ledger'
-# fence with a 'worst_agent_failure:' line and a 'self_adversarial:' line — the
-# report-level record of the Stage 2 self-incrimination pass. Its absence means
-# the painful agent-caused friction was never surfaced for audit.
+# fence with 'worst_agent_failure:', 'self_adversarial:', and 'critic_diff:'
+# lines — the report-level record of the Stage 2 self-incrimination pass and
+# conditional externalized critic tier. Its absence means the painful
+# agent-caused friction was never surfaced for audit.
 
 SL_LEDGER_VALID_ADVERSE='<!-- retrospect:suppression_ledger begin -->
 - worst_agent_failure: ran two identical timeouts before probing cost — wasted a user cycle | disposition: surface
 - tempted_to_omit: the second blind retry | reason_considered: looked transient | disposition: surface
 - self_adversarial: ran | result: surfaced the silent retry the deterministic lanes missed
+- critic_diff: none | checked: 0 candidate(s)
 <!-- retrospect:suppression_ledger end -->'
 SL_LEDGER_CLEAN='<!-- retrospect:suppression_ledger begin -->
 - worst_agent_failure: synthetic clean ledger — no painful agent failure in this canned report | disposition: none-found
 - self_adversarial: ran | result: no real session to scan
+- critic_diff: not-run | reason: tier predicate false (synthetic fixture)
 <!-- retrospect:suppression_ledger end -->'
 SL_LEDGER_CANONICAL_CLEAN='<!-- retrospect:suppression_ledger begin -->
 - worst_agent_failure: clean path — nothing painful surfaced after full scan | disposition: surface
 - self_adversarial: ran | result: concurred — nothing omitted or softened
+- critic_diff: none | checked: 0 candidate(s)
 <!-- retrospect:suppression_ledger end -->'
 SL_LEDGER_SURFACE_CLEAN='<!-- retrospect:suppression_ledger begin -->
 - worst_agent_failure: synthetic Stop-hook fixture — not a real session | disposition: surface
 - self_adversarial: ran | result: concurred — nothing omitted or softened
+- critic_diff: not-run | reason: tier predicate false (synthetic fixture)
 <!-- retrospect:suppression_ledger end -->'
 SL_LEDGER_ADVERSE_SELF_CLEAN='<!-- retrospect:suppression_ledger begin -->
 - worst_agent_failure: repeated failing tool call after assuming the command would recover | disposition: surface
 - self_adversarial: ran | result: concurred — nothing omitted or softened
+- critic_diff: none | checked: 1 candidate(s)
 <!-- retrospect:suppression_ledger end -->'
 SL_LEDGER_ADVERSE_NOT_REAL_SESSION='<!-- retrospect:suppression_ledger begin -->
 - worst_agent_failure: misclassified a real transcript as not a real session and skipped the scan | disposition: surface
 - self_adversarial: ran | result: concurred — nothing omitted or softened
+- critic_diff: none | checked: 1 candidate(s)
 <!-- retrospect:suppression_ledger end -->'
 SL_LEDGER_NO_ADV='<!-- retrospect:suppression_ledger begin -->
 - worst_agent_failure: minor — nothing painful this session | disposition: surface
+- critic_diff: not-run | reason: tier predicate false (synthetic fixture)
 <!-- retrospect:suppression_ledger end -->'
 SL_LEDGER_NO_WORST='<!-- retrospect:suppression_ledger begin -->
 - self_adversarial: ran | result: concurred — nothing omitted
+- critic_diff: not-run | reason: tier predicate false (synthetic fixture)
 <!-- retrospect:suppression_ledger end -->'
 SL_LEDGER_UNTERMINATED='<!-- retrospect:suppression_ledger begin -->
 - worst_agent_failure: x | disposition: surface
-- self_adversarial: ran | result: concurred'
+- self_adversarial: ran | result: concurred
+- critic_diff: not-run | reason: tier predicate false (synthetic fixture)'
 SL_LEDGER_DOUBLE='<!-- retrospect:suppression_ledger begin -->
 - worst_agent_failure: adverse one | disposition: surface
 - self_adversarial: ran | result: surfaced something
+- critic_diff: none | checked: 1 candidate(s)
 <!-- retrospect:suppression_ledger end -->
 <!-- retrospect:suppression_ledger begin -->
 - worst_agent_failure: benign mask | disposition: none-found
 - self_adversarial: ran | result: concurred
+- critic_diff: not-run | reason: tier predicate false (synthetic fixture)
 <!-- retrospect:suppression_ledger end -->'
 
 # SL1: block — canonical Stage 3 report, valid Gates 1-6, but NO ledger fence.
@@ -1740,7 +1753,7 @@ ${SL_LEDGER_DOUBLE}"
 run_case "SL5_block_ledger_double_fence" "block" \
   "$(mk_assistant "$SL5_TEXT")"
 
-# SL6: pass — single well-formed ledger with both required lines (real adverse content).
+# SL6: pass — single well-formed ledger with all required lines (real adverse content).
 SL6_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
 ${SL_LEDGER_VALID_ADVERSE}"
 run_case "SL6_pass_valid_adverse_ledger" "pass" \
@@ -1775,6 +1788,7 @@ SL_LEDGER_NESTED='<!-- retrospect:suppression_ledger begin -->
 - worst_agent_failure: outer | disposition: surface
 <!-- retrospect:suppression_ledger begin -->
 - self_adversarial: ran | result: nested injection
+- critic_diff: not-run | reason: tier predicate false (synthetic fixture)
 <!-- retrospect:suppression_ledger end -->'
 SL9_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
 ${SL_LEDGER_NESTED}"
@@ -1933,6 +1947,17 @@ SL26_TRANSCRIPT="$(mk_is_error "tool failed")
 $(mk_is_error "second tool failed")
 $(mk_assistant "$SL26_TEXT")"
 run_case "SL26_pass_adverse_not_real_session_wording" "pass" "$SL26_TRANSCRIPT"
+
+# SL27: block — issue #702 adds critic_diff as the audit trail for the
+# conditional externalized critic tier.
+SL_LEDGER_NO_CRITIC='<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: adverse one | disposition: surface
+- self_adversarial: ran | result: surfaced something
+<!-- retrospect:suppression_ledger end -->'
+SL27_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_NO_CRITIC}"
+run_case "SL27_block_ledger_missing_critic_diff" "block" \
+  "$(mk_assistant "$SL27_TEXT")"
 
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:

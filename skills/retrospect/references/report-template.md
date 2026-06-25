@@ -68,6 +68,14 @@ $ python3 -c "...emit each tool_result is_error body..." {transcript_path}
 <!-- retrospect:is_error_enum end -->
 <!-- retrospect:transcript_receipt end -->
 
+<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: {single worst agent-caused friction, no softening} | disposition: surface
+- tempted_to_omit: {candidate} | reason_considered: {why tempting} | disposition: surface|justified-drop
+- tempted_to_soften: {candidate} | original_severity: {X} | softened_to: {Y} | restored: true|false
+- self_adversarial: ran | result: {what surfaced, or "concurred — nothing omitted or softened"}
+- critic_diff: {none|not-run|candidate list} | reason: {tier result or skip reason}
+<!-- retrospect:suppression_ledger end -->
+
 <!-- retrospect:distribution begin -->
 - memory: {n}
 - issue: {n}
