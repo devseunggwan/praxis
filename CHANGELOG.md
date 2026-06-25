@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.3.3] - 2026-06-25
+
+Patch release. Hardens retrospect suppression-ledger handling and adds the
+externalized critic re-scan audit trail.
+
+### Added
+
+- `retrospect`: conditional externalized critic re-scan tier after the
+  MEMORY.md repeat scan, with `critic_diff:` recorded in the Stage 3
+  suppression ledger whether the tier runs or is skipped (#702, PR #704)
+
+### Fixed
+
+- `retrospect-mix-check` Stop hook: Gate-8 now requires the `critic_diff:`
+  ledger line alongside `worst_agent_failure:` and `self_adversarial:`, so
+  Stage 3 cannot silently omit the conditional critic tier outcome (#702,
+  PR #704)
+- `retrospect`: Gate-8 self-incrimination and ledger-laundering hardening for
+  suppression-ledger reports (#700, #703)
+
 ## [6.3.1] - 2026-06-16
 
 Patch release. Closes the retrospect Stage-3 fence-omission bypass (#666).
