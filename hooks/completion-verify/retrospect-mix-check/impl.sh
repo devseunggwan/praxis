@@ -537,10 +537,13 @@ fi
 # Gate-8 (Suppression-Ledger Receipt, issue #699). Session-level structural
 # check (not a per-finding Stage 2.5 gate): every gateable Stage 3 report MUST
 # carry a 'retrospect:suppression_ledger' fence with at least a
-# 'worst_agent_failure:' line and a 'self_adversarial:' line. The fence is the
-# report-level record of the Stage 2 self-incrimination pass; its absence means
+# 'worst_agent_failure:' line, a 'self_adversarial:' line, and a 'critic_diff:'
+# line. The fence is the report-level record of the Stage 2 self-incrimination
+# pass and the conditional externalized critic re-scan tier; its absence means
 # the painful agent-caused friction the analyzing context is most motivated to
 # bury was never surfaced for audit ("the retrospect hides the painful parts").
+# [PR #704] `critic_diff:` makes the conditional critic tier auditable even
+# when it is skipped, so Stage 3 cannot silently omit the second-pass result.
 # Mirrors the Gate-7 receipt pattern: presence + minimal content, scoped to the
 # most-recent report block, markers anchored to standalone HTML-comment
 # delimiter LINES so quoted examples / in-row mentions do not false-trigger.
@@ -590,8 +593,9 @@ else
     END { printf "%s", last }')
   sl_worst=$(printf '%s\n' "$SLEDGER_BLOCK" | grep -cE '^[[:space:]]*-?[[:space:]]*worst_agent_failure:[[:space:]]*.+')
   sl_adv=$(printf '%s\n' "$SLEDGER_BLOCK" | grep -cE '^[[:space:]]*-?[[:space:]]*self_adversarial:[[:space:]]*.+')
-  if [ "$sl_worst" -lt 1 ] || [ "$sl_adv" -lt 1 ]; then
-    GATE8_VIOLATION="suppression_ledger fence is present but missing a required line (found worst_agent_failure=$sl_worst self_adversarial=$sl_adv, need >=1 each) — the ledger must name the single worst agent-caused friction and record that the self-incrimination pass ran before Stage 3"
+  sl_critic=$(printf '%s\n' "$SLEDGER_BLOCK" | grep -cE '^[[:space:]]*-?[[:space:]]*critic_diff:[[:space:]]*.+')
+  if [ "$sl_worst" -lt 1 ] || [ "$sl_adv" -lt 1 ] || [ "$sl_critic" -lt 1 ]; then
+    GATE8_VIOLATION="suppression_ledger fence is present but missing a required line (found worst_agent_failure=$sl_worst self_adversarial=$sl_adv critic_diff=$sl_critic, need >=1 each) — the ledger must name the single worst agent-caused friction, record that the self-incrimination pass ran, and record the conditional critic_diff outcome before Stage 3"
   else
     # [PR #703] Gate-8b (Ledger-laundering floor, issue #701): Gate-8 originally proved
     # only that a ledger exists. Re-derive cheap deterministic adverse signals
@@ -773,7 +777,7 @@ if [ "$should_block" = "true" ]; then
     fi
   done
 
-  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670); Gate-8 → emit a '<!-- retrospect:suppression_ledger begin/end -->' fence carrying a 'worst_agent_failure:' line and a 'self_adversarial:' line (the Stage 2 self-incrimination pass record, mandatory on every path incl. the clean one), and do not claim none-found/clean when live transcript signals exceed tolerance — surface or justify those signals before Stage 3. See skills/retrospect/references/stage1-2-analysis.md self-incrimination pass and skills/retrospect/references/stage3-reporting.md."
+  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670); Gate-8 → emit a '<!-- retrospect:suppression_ledger begin/end -->' fence carrying 'worst_agent_failure:', 'self_adversarial:', and 'critic_diff:' lines (the Stage 2 self-incrimination pass plus conditional externalized critic tier record, mandatory on every path incl. the clean one), and do not claim none-found/clean when live transcript signals exceed tolerance — surface or justify those signals before Stage 3. See skills/retrospect/references/stage1-2-analysis.md self-incrimination pass and skills/retrospect/references/stage3-reporting.md."
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'
   exit 0
 fi

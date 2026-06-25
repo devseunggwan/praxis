@@ -178,6 +178,13 @@ self-downgraded to `note only` (severity-honesty floor). The result is recorded
 in the Stage 3 `retrospect:suppression_ledger` fence. Full rules in
 [`references/stage1-2-analysis.md`](references/stage1-2-analysis.md).
 
+**Externalized critic re-scan tier (conditional, issue #702):** after MEMORY
+repeat / cluster signals are available, run a READ-ONLY external critic scan
+when the friction path is non-empty and the tier predicate in
+[`references/stage1-2-analysis.md`](references/stage1-2-analysis.md) fires.
+Record the outcome in the Stage 3 `critic_diff:` ledger line whether the tier
+ran or was skipped.
+
 **Core flow:**
 
 1. Pre-scan the transcript and produce the five lanes
@@ -185,7 +192,8 @@ in the Stage 3 `retrospect:suppression_ledger` fence. Full rules in
 3. Run tracer / analyst where the friction path requires them
 4. Derive root causes rather than symptoms
 5. Cluster overlaps
-6. Run the MEMORY.md scan
+6. Run the MEMORY.md scan, then the conditional externalized critic re-scan
+   tier when triggered
 7. Assign preliminary actions
 8. Run Stage 2.7 when the artifact-audit triggers are present
 9. Hand findings to Stage 2.5

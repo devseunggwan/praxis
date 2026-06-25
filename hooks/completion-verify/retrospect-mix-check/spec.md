@@ -47,7 +47,7 @@ of the following hold:
 | Any row with `Proposed Actions = memory` (single) whose `Rationale` lacks exactly 5 lines `^not (issue\|claude_md_draft\|skill_idea\|hook_code\|upstream_feedback): .+$` | Gate-2 violation detected via independent table parse |
 | Any row with `Proposed Actions` containing `upstream_feedback` or `issue` whose `Rationale` lacks a `backing_repo: <owner/repo>` declaration | Gate-3 (backing_repo) violation — Stage 2 step 8 requires this declaration for routing; Stage 4 Action 4 step 0 aborts on absence |
 | Gate-7 value mismatch: `transcript_receipt` fence declares `is_error_count` or `user_turn_count` that diverges from a live grep of the transcript by more than 1 | Receipt was transcribed verbatim from the compaction summary rather than re-derived this turn (presence ≠ freshness) |
-| Gate-8 (issue #699): the Stage 3 report has no `retrospect:suppression_ledger` fence, has more than one, has a malformed (unterminated/nested) one, or the fence lacks a `worst_agent_failure:` or `self_adversarial:` line | The Stage 2 self-incrimination pass record is missing — the painful agent-caused friction the analyzing context is most motivated to bury was never surfaced for audit. Mandatory on every path incl. the clean one. Skipped only once Stage 4 (`## Actions Executed`) is reached for the latest report |
+| Gate-8 (issues #699, #702): the Stage 3 report has no `retrospect:suppression_ledger` fence, has more than one, has a malformed (unterminated/nested) one, or the fence lacks a `worst_agent_failure:`, `self_adversarial:`, or `critic_diff:` line | The Stage 2 self-incrimination pass / conditional externalized critic re-scan record is missing — the painful agent-caused friction the analyzing context is most motivated to bury was never surfaced for audit. Mandatory on every path incl. the clean one. Skipped only once Stage 4 (`## Actions Executed`) is reached for the latest report |
 | Gate-8b (issue #701): `suppression_ledger` claims a clean/no-failure path while a live transcript scan finds more than one deterministic adverse signal | The ledger exists but launders away visible evidence. The hook re-derives `is_error:true`, content-error syntax, and documented `user_correction` markers on user turns before trusting clean ledger language |
 
 ### Gate-7 value check (issue #671)
@@ -100,8 +100,9 @@ re-derivation is still open.
 ### Gate-8b ledger-laundering floor (issue #701)
 
 Gate-8's original contract proved only that a `suppression_ledger` fence existed
-and carried the required `worst_agent_failure:` / `self_adversarial:` lines. It
-did not verify that a clean-looking ledger was honest. A report could claim
+and carried the required `worst_agent_failure:`, `self_adversarial:`, and
+`critic_diff:` lines. It did not verify that a clean-looking ledger was honest.
+A report could claim
 `disposition: none-found` while the transcript itself contained multiple
 deterministic adverse signals.
 
@@ -248,7 +249,7 @@ git -C ~/.claude/plugins/.../praxis apply --reverse <patch>
 
 ### Tests
 
-`tests/hooks/completion-verify/test_retrospect_mix_check.sh` covers 110 cases
+`tests/hooks/completion-verify/test_retrospect_mix_check.sh` covers 111 cases
 plus 11 synthetic regression fixtures:
 
 - 4 pass scenarios (behavior-only with rationale, escalated tool, escalated
@@ -279,11 +280,12 @@ plus 11 synthetic regression fixtures:
   counts match live transcript → pass; V3 off-by-one within tolerance → pass;
   V4 stale user_turn_count blocked; V5 _skipped variant bypasses value check →
   pass; V6 no compaction Gate-7 dormant → pass
-- 8 Gate-8 suppression ledger (issue #699): SL1 missing fence → block; SL2
-  missing self_adversarial → block; SL3 missing worst_agent_failure → block;
-  SL4 unterminated fence → block; SL5 double fence → block; SL6 valid adverse
-  ledger → pass; SL7 inline mention (no real fence) → block; SL8 Stage-4
-  Actions Executed without ledger → pass (carve-out)
+- 9 Gate-8 suppression ledger (issues #699, #702): SL1 missing fence → block; SL2
+   missing self_adversarial → block; SL3 missing worst_agent_failure → block;
+   SL4 unterminated fence → block; SL5 double fence → block; SL6 valid adverse
+   ledger → pass; SL7 inline mention (no real fence) → block; SL8 Stage-4
+   Actions Executed without ledger → pass (carve-out); SL27 missing
+   critic_diff → block
 
 ### Category counts (memory_hygiene, output_quality)
 

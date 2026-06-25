@@ -263,6 +263,89 @@ Rules:
   allowed only with an explicit `disposition: justified-drop` reason; a silent
   drop is a Red Flag.
 
+### Externalized critic re-scan tier (conditional, issue #702)
+
+The self-incrimination pass still runs inside the same context that made the
+mistake. That closes silent omission only as far as the analyzing context can
+make itself be honest; it does not break same-context anchoring. The
+externalized critic tier adds a separate READ-ONLY context only when the extra
+cost is justified.
+
+Run this tier AFTER cluster fold-back and the MEMORY repeat scan, and BEFORE
+action assignment. At that point the predicate's `repeat=true` /
+`effective_repeat` inputs exist, but no provisional actions have been selected
+yet.
+
+#### Tier predicate
+
+Run the externalized critic re-scan when all of these are true:
+
+1. the friction path is non-empty
+2. the transcript or scoped session context is readable enough to brief a
+   READ-ONLY critic
+3. either:
+   - at least one `friction_events` candidate is agent-caused and
+     user-visible-impact (wasted user cycles, wrong external artifact, or user
+     correction required)
+   - at least one candidate has `repeat=true` or an effective repeat signal from
+     the MEMORY scan / cluster fold-back
+   - `PRAXIS_RETROSPECT_CRITIC=1`
+
+Do not spawn a critic on the 0-friction path. Do not spawn it merely because a
+clean ledger is required. The tier is a selection-bias breaker, not a replacement
+for Gate-8b's deterministic laundering floor.
+
+If the predicate is false, record the skipped outcome for Stage 3:
+
+```markdown
+critic_diff: not-run | reason: tier predicate false (<reason>)
+```
+
+If the transcript is unreadable, record:
+
+```markdown
+critic_diff: not-run | reason: transcript unreadable
+```
+
+#### Critic brief
+
+When the predicate fires, invoke a separate READ-ONLY critic context. Prefer the
+project's normal critic subagent when available; otherwise use the closest
+available read-only review/debate agent. The brief must include:
+
+- transcript / scope window identifier
+- the five pre-scan lanes
+- the self-incrimination pass output
+- the current self-selected friction set
+- the instruction: "Find only agent-caused failures the analyzing agent might
+  minimize, omit, or soften. Do not propose fixes. Do not mutate files or
+  external state."
+
+The critic's job is not to re-run Stage 2. It produces a narrow diff oracle:
+
+```markdown
+critic_candidates:
+- <candidate> | evidence: <turn/tool/output> | why_self_serving_bias_risk: <reason>
+```
+
+#### Diff handling
+
+Compare `critic_candidates` against the self-selected friction set and
+suppression ledger:
+
+- If every critic candidate is already surfaced, record:
+  `critic_diff: none | checked: <N> candidate(s)`
+- If a critic-only candidate is valid, surface it as a friction event or ledger
+  row. A valid critic-only agent-caused, user-visible-impact failure cannot be
+  downgraded to `note only`.
+- If a critic-only candidate is not surfaced, record an explicit
+  `not-suppressed: <reason>` line in the suppression ledger. Valid reasons are
+  duplicate, non-agent-caused, evidence-insufficient, or outside-scope.
+
+A silent drop of a critic-only candidate is a Red Flag. The Stage 3
+`critic_diff:` ledger line is mandatory whenever this tier is evaluated, even
+when it did not run.
+
 ### Categorization
 
 Every emitted finding must carry at least one category:
@@ -285,10 +368,11 @@ Rules:
 
 1. Run the pre-scan
 2. Emit the Pre-scan Checklist and dismissed-candidate ledger inputs
-3. Run tracer / analyst on the friction path
-4. Derive root causes
-5. Cluster overlaps
-6. Run the MEMORY.md repeat scan
+3. Run the self-incrimination pass
+4. Run tracer / analyst on the friction path
+5. Derive root causes and cluster overlaps
+6. Run the MEMORY.md repeat scan, then the conditional externalized critic
+   re-scan tier when triggered
 7. Assign provisional actions
 8. Run Stage 2.7 when triggered
 
