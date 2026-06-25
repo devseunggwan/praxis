@@ -534,6 +534,68 @@ if grep -Eq '(^|[^\\])"isCompactSummary"[[:space:]]*:[[:space:]]*true' "$TRANSCR
   fi
 fi
 
+# Gate-8 (Suppression-Ledger Receipt, issue #699). Session-level structural
+# check (not a per-finding Stage 2.5 gate): every gateable Stage 3 report MUST
+# carry a 'retrospect:suppression_ledger' fence with at least a
+# 'worst_agent_failure:' line and a 'self_adversarial:' line. The fence is the
+# report-level record of the Stage 2 self-incrimination pass; its absence means
+# the painful agent-caused friction the analyzing context is most motivated to
+# bury was never surfaced for audit ("the retrospect hides the painful parts").
+# Mirrors the Gate-7 receipt pattern: presence + minimal content, scoped to the
+# most-recent report block, markers anchored to standalone HTML-comment
+# delimiter LINES so quoted examples / in-row mentions do not false-trigger.
+#
+# Stage-4 carve-out: Gate-8 is the first gate requiring a POSITIVE fence
+# presence (Gates 1-7 only fire on violations), so unlike them it would
+# retroactively block a COMPLETED cycle whose report block predates the #699
+# contract. Skip Gate-8 when an '## Actions Executed' heading appears AFTER the
+# most-recent '## Retrospect Report' header (Stage 4 reached for the latest
+# report). A NEW report block after a prior Actions Executed (the T19 rerun
+# shape) resets the flag, so it is still gated. The existing HAS_ACTIONS (line
+# 74) is position-blind — it cannot distinguish report->actions (carve out) from
+# actions->report2 (still gate), so a dedicated position-aware awk pass is
+# required here, not a reuse of HAS_ACTIONS.
+GATE8_VIOLATION=""
+STAGE4_AFTER_REPORT=$(printf '%s\n' "$LAST_TEXT" | awk '
+  /^## Retrospect Report/ { seen_report=1; actions_after=0; next }
+  /^## Actions Executed/  { if (seen_report) actions_after=1; next }
+  END { print actions_after+0 }')
+if [ "$STAGE4_AFTER_REPORT" != "1" ]; then
+re_sb='^[[:space:]]*<!--[[:space:]]*retrospect:suppression_ledger begin[[:space:]]*-->[[:space:]]*$'
+re_se='^[[:space:]]*<!--[[:space:]]*retrospect:suppression_ledger end[[:space:]]*-->[[:space:]]*$'
+sl_begin=$(printf '%s\n' "$MOST_RECENT_BLOCK" | grep -cE "$re_sb")
+# Walk fence state: malformed = ended INSIDE a fence (unterminated) OR saw a
+# 'begin' while already inside one (nested). Same defense as the Gate-7 receipt.
+sl_malformed=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk -v sb="$re_sb" -v se="$re_se" '
+  $0 ~ sb { if (ins) nested=1; ins=1; next }
+  $0 ~ se { ins=0; next }
+  END { print (ins || nested) ? 1 : 0 }')
+if [ "$sl_begin" -lt 1 ]; then
+  GATE8_VIOLATION="Stage 3 report has no '<!-- retrospect:suppression_ledger begin/end -->' fence (issue #699) — run the Stage 2 self-incrimination pass and emit the ledger with a 'worst_agent_failure:' line and a 'self_adversarial:' line before Stage 3, even on the clean path"
+elif [ "$sl_malformed" -gt 0 ]; then
+  # Check malformed BEFORE the duplicate-count branch: a nested begin makes both
+  # sl_begin>1 AND sl_malformed=1, and the nested case is more precisely a
+  # malformed fence than "multiple fences" [CodeRabbit PR #700].
+  GATE8_VIOLATION="suppression_ledger fence is malformed (an unterminated or nested 'retrospect:suppression_ledger begin') — emit exactly one well-formed begin/end fence before Stage 3"
+elif [ "$sl_begin" -gt 1 ]; then
+  GATE8_VIOLATION="Stage 3 report has $sl_begin suppression_ledger fences — emit exactly one; multiple fences let a benign ledger mask an adverse one"
+else
+  # Extract the content of the (single, well-formed) ledger fence and require
+  # both mandatory lines inside it. Anchored to line-start (optional leading
+  # '- ') so an enum row quoting the field name in prose cannot satisfy it.
+  SLEDGER_BLOCK=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk -v sb="$re_sb" -v se="$re_se" '
+    $0 ~ sb { ins=1; buf=""; next }
+    $0 ~ se { if (ins) last=buf; ins=0; next }
+    ins { buf = buf $0 "\n" }
+    END { printf "%s", last }')
+  sl_worst=$(printf '%s\n' "$SLEDGER_BLOCK" | grep -cE '^[[:space:]]*-?[[:space:]]*worst_agent_failure:[[:space:]]*.+')
+  sl_adv=$(printf '%s\n' "$SLEDGER_BLOCK" | grep -cE '^[[:space:]]*-?[[:space:]]*self_adversarial:[[:space:]]*.+')
+  if [ "$sl_worst" -lt 1 ] || [ "$sl_adv" -lt 1 ]; then
+    GATE8_VIOLATION="suppression_ledger fence is present but missing a required line (found worst_agent_failure=$sl_worst self_adversarial=$sl_adv, need >=1 each) — the ledger must name the single worst agent-caused friction and record that the self-incrimination pass ran before Stage 3"
+  fi
+fi
+fi
+
 # Decide block.
 should_block=false
 reason_parts=()
@@ -598,6 +660,10 @@ if [ -n "$GATE7_VIOLATION" ]; then
   should_block=true
   reason_parts+=("Gate-7: $GATE7_VIOLATION")
 fi
+if [ -n "$GATE8_VIOLATION" ]; then
+  should_block=true
+  reason_parts+=("Gate-8: $GATE8_VIOLATION")
+fi
 
 if [ "$should_block" = "true" ]; then
   mkdir -p "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm" || true
@@ -613,7 +679,7 @@ if [ "$should_block" = "true" ]; then
     fi
   done
 
-  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670). See skills/retrospect/references/stage2.5-audit.md and skills/retrospect/references/stage3-reporting.md."
+  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670); Gate-8 → emit a '<!-- retrospect:suppression_ledger begin/end -->' fence carrying a 'worst_agent_failure:' line and a 'self_adversarial:' line (the Stage 2 self-incrimination pass record, mandatory on every path incl. the clean one) before Stage 3 — see skills/retrospect/references/stage1-2-analysis.md self-incrimination pass. See skills/retrospect/references/stage2.5-audit.md and skills/retrospect/references/stage3-reporting.md."
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'
   exit 0
 fi

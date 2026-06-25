@@ -228,6 +228,41 @@ scope window applies to `tool_census`, `user_correction`, and
      `friction_events` slots
    - false-positive drops must be recorded in the ledger
 
+### Self-incrimination pass (anti-suppression, MUST)
+
+The five pre-scan lanes are deterministic and capped, so they structurally miss
+the friction the analyzing agent is most motivated to bury: its OWN failures
+that left no `user_correction` marker and do not fit the `self_correction`
+three-part signature. The analyzing context is the same context that committed
+those failures, so selection bias suppresses them silently — this is the
+"retrospect hides the painful parts" failure this pass exists to close.
+
+Run this pass AFTER the five lanes and BEFORE root-cause clustering. It is
+unconditional whenever the friction path is non-empty. Answer the adversarial
+question in writing before continuing:
+
+> What is the single most embarrassing agent-caused friction this session that I
+> am tempted to leave out of `friction_events` or to soften? Why am I tempted?
+
+Rules:
+
+- The worst agent-caused friction this pass surfaces occupies a **guaranteed
+  slot that does NOT consume the 5-event `friction_events` cap** — it is
+  surfaced in addition to the capped lanes, never in competition with them. A
+  full cap is not a reason to drop it.
+- Signature non-match is not grounds for exclusion. A failure that fails the
+  `self_correction` 3-part signature, or carries no `user_correction` marker
+  (a *silent* failure the user never caught), is still in scope here; this pass
+  exists precisely to catch that class.
+- Preserve the painful framing verbatim. Do not relabel an agent behavioral
+  failure as neutral "tool friction" or "one-off" to lower its severity, and do
+  not soften the wording.
+- Record every item you considered omitting or softening — with the reason — in
+  the Stage 3 `retrospect:suppression_ledger` fence (see
+  [`stage3-reporting.md`](stage3-reporting.md)). Considering-then-dropping is
+  allowed only with an explicit `disposition: justified-drop` reason; a silent
+  drop is a Red Flag.
+
 ### Categorization
 
 Every emitted finding must carry at least one category:
@@ -290,6 +325,15 @@ into repeat escalation before assigning actions:
 Distinguish "new pattern" from "one-off mistake" by recurrence likelihood:
 structural root causes are new patterns; typo/context-loss edge cases are
 one-off. When uncertain, default to `memory`.
+
+**Severity-honesty floor (MUST).** A friction event that is BOTH agent-caused
+AND user-visible-impact (wasted user cycles, a wrong external artifact shipped,
+or the user had to correct it) may NOT be self-classified as a one-off
+situational mistake and routed to `note only`. It must surface as at least
+`memory` with its painful framing preserved verbatim. The `note only` escape and
+the "one-off" carve-out above apply only to genuinely user-invisible,
+non-recurring edge cases — never as a downgrade path for the self-incrimination
+pass's worst-failure slot.
 
 If `repeat=true`, `Proposed Actions` must not be `memory` alone. The only
 escape hatch is `repeat=true AND resolved=true`, where `note only` is allowed

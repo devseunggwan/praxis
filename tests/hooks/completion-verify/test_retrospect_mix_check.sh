@@ -113,6 +113,28 @@ $card
 | # | Category | Tool Layer | Pattern | Root Cause | Rule / Gap | Repeat? | Proposed Actions (1~2) | Rationale | Priority |
 |---|----------|------------|---------|------------|------------|---------|------------------------|-----------|----------|
 $rows
+
+<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: synthetic Stop-hook fixture — ledger-presence test only, not a real session | disposition: none-found
+- self_adversarial: ran | result: no real session to scan (synthetic fixture)
+<!-- retrospect:suppression_ledger end -->
+EOF
+}
+
+# A Stage 3 report WITHOUT the suppression_ledger fence (Gate-8 negative cases).
+# Same shape as mk_retrospect_stage3 minus the ledger block.
+mk_retrospect_stage3_no_ledger() {
+  local card="$1" rows="$2"
+  cat <<EOF
+## Retrospect Report — 2026-04-30
+
+<!-- retrospect:distribution begin -->
+$card
+<!-- retrospect:distribution end -->
+
+| # | Category | Tool Layer | Pattern | Root Cause | Rule / Gap | Repeat? | Proposed Actions (1~2) | Rationale | Priority |
+|---|----------|------------|---------|------------|------------|---------|------------------------|-----------|----------|
+$rows
 EOF
 }
 
@@ -1589,6 +1611,104 @@ CE_FLOOR3_TRANSCRIPT="$(mk_compaction)
 $(mk_content_error "Exit code 1: single transient failure")
 $(mk_assistant "$CE_FLOOR3_REPORT")"
 run_case "CE_FLOOR3_pass_single_content_error_within_tolerance" "pass" "$CE_FLOOR3_TRANSCRIPT"
+
+# Gate-8 (Suppression-Ledger Receipt) cases — issue #699 ---------------------
+# Every gateable Stage 3 report must carry a 'retrospect:suppression_ledger'
+# fence with a 'worst_agent_failure:' line and a 'self_adversarial:' line — the
+# report-level record of the Stage 2 self-incrimination pass. Its absence means
+# the painful agent-caused friction was never surfaced for audit.
+
+SL_LEDGER_VALID_ADVERSE='<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: ran two identical timeouts before probing cost — wasted a user cycle | disposition: surface
+- tempted_to_omit: the second blind retry | reason_considered: looked transient | disposition: surface
+- self_adversarial: ran | result: surfaced the silent retry the deterministic lanes missed
+<!-- retrospect:suppression_ledger end -->'
+SL_LEDGER_NO_ADV='<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: minor — nothing painful this session | disposition: surface
+<!-- retrospect:suppression_ledger end -->'
+SL_LEDGER_NO_WORST='<!-- retrospect:suppression_ledger begin -->
+- self_adversarial: ran | result: concurred — nothing omitted
+<!-- retrospect:suppression_ledger end -->'
+SL_LEDGER_UNTERMINATED='<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: x | disposition: surface
+- self_adversarial: ran | result: concurred'
+SL_LEDGER_DOUBLE='<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: adverse one | disposition: surface
+- self_adversarial: ran | result: surfaced something
+<!-- retrospect:suppression_ledger end -->
+<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: benign mask | disposition: none-found
+- self_adversarial: ran | result: concurred
+<!-- retrospect:suppression_ledger end -->'
+
+# SL1: block — canonical Stage 3 report, valid Gates 1-6, but NO ledger fence.
+run_case "SL1_block_no_suppression_ledger_fence" "block" \
+  "$(mk_assistant "$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")")"
+
+# SL2: block — ledger fence present but missing the self_adversarial line.
+SL2_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_NO_ADV}"
+run_case "SL2_block_ledger_missing_self_adversarial" "block" \
+  "$(mk_assistant "$SL2_TEXT")"
+
+# SL3: block — ledger fence present but missing the worst_agent_failure line.
+SL3_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_NO_WORST}"
+run_case "SL3_block_ledger_missing_worst_agent_failure" "block" \
+  "$(mk_assistant "$SL3_TEXT")"
+
+# SL4: block — malformed ledger fence (unterminated begin, no end).
+SL4_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_UNTERMINATED}"
+run_case "SL4_block_ledger_unterminated_fence" "block" \
+  "$(mk_assistant "$SL4_TEXT")"
+
+# SL5: block — two complete ledger fences (a benign one could mask an adverse one).
+SL5_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_DOUBLE}"
+run_case "SL5_block_ledger_double_fence" "block" \
+  "$(mk_assistant "$SL5_TEXT")"
+
+# SL6: pass — single well-formed ledger with both required lines (real adverse content).
+SL6_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_VALID_ADVERSE}"
+run_case "SL6_pass_valid_adverse_ledger" "pass" \
+  "$(mk_assistant "$SL6_TEXT")"
+
+# SL7: block — the marker text appears only as an inline PROSE mention, not as a
+# standalone comment-delimiter line. Anchored matching ignores it → no real
+# fence → Gate-8 blocks (a mention is not a ledger).
+SL7_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+I considered emitting a retrospect:suppression_ledger begin marker but left the fence out."
+run_case "SL7_block_ledger_inline_mention_not_a_fence" "block" \
+  "$(mk_assistant "$SL7_TEXT")"
+
+# SL9: block — a NESTED ledger begin (begin/begin/end). Both sl_begin>1 and
+# sl_malformed=1; the malformed branch must win (checked before the duplicate
+# count) so the block reason is "malformed", not "multiple fences" [CodeRabbit
+# PR #700].
+SL_LEDGER_NESTED='<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: outer | disposition: surface
+<!-- retrospect:suppression_ledger begin -->
+- self_adversarial: ran | result: nested injection
+<!-- retrospect:suppression_ledger end -->'
+SL9_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_NESTED}"
+run_case "SL9_block_ledger_nested_begin" "block" \
+  "$(mk_assistant "$SL9_TEXT")"
+
+# SL8: pass — Stage 4 output (## Actions Executed) with no ledger. The hook
+# exits at the Actions-Executed guard before Gate-8; a post-execution report is
+# not forced to carry a ledger.
+SL8_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+
+## Actions Executed
+
+| # | Action | Result |
+|---|--------|--------|
+| 1 | MEMORY.md feedback added | ✅ /tmp/foo.md |"
+run_case "SL8_pass_actions_executed_no_ledger_required" "pass" \
+  "$(mk_assistant "$SL8_TEXT")"
 
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
