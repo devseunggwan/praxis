@@ -935,16 +935,6 @@ mk_is_error() {
   }'
 }
 
-# Emit a single tool_result line that carries both lanes. Gate-8b should count
-# this as one tool event, not two adverse signals.
-mk_is_error_with_content_error() {
-  jq -nc --arg msg "$1" '{
-    type: "tool_result",
-    "is_error": true,
-    message: {role: "tool", content: [{type: "text", text: $msg}]}
-  }'
-}
-
 mk_is_error_spaced_json() {
   mk_is_error "$1" | sed -E 's/"type":/"type": /g; s/"is_error":/"is_error": /g; s/"role":/"role": /g'
 }
@@ -1764,6 +1754,19 @@ I considered emitting a retrospect:suppression_ledger begin marker but left the 
 run_case "SL7_block_ledger_inline_mention_not_a_fence" "block" \
   "$(mk_assistant "$SL7_TEXT")"
 
+# SL8: pass — Stage 4 output (## Actions Executed) with no ledger. The hook
+# exits at the Actions-Executed guard before Gate-8; a post-execution report is
+# not forced to carry a ledger.
+SL8_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+
+## Actions Executed
+
+| # | Action | Result |
+|---|--------|--------|
+| 1 | MEMORY.md feedback added | ✅ /tmp/foo.md |"
+run_case "SL8_pass_actions_executed_no_ledger_required" "pass" \
+  "$(mk_assistant "$SL8_TEXT")"
+
 # SL9: block — a NESTED ledger begin (begin/begin/end). Both sl_begin>1 and
 # sl_malformed=1; the malformed branch must win (checked before the duplicate
 # count) so the block reason is "malformed", not "multiple fences" [CodeRabbit
@@ -1837,7 +1840,7 @@ run_case "SL15_pass_adverse_worst_failure_with_clean_self_adversarial" "pass" "$
 # tolerance.
 SL16_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
 ${SL_LEDGER_CLEAN}"
-SL16_TRANSCRIPT="$(mk_is_error_with_content_error "Exit code 1: single failed command")
+SL16_TRANSCRIPT="$(mk_is_error "Exit code 1: single failed command")
 $(mk_assistant "$SL16_TEXT")"
 run_case "SL16_pass_single_tool_result_deduped_across_lanes" "pass" "$SL16_TRANSCRIPT"
 
@@ -1930,19 +1933,6 @@ SL26_TRANSCRIPT="$(mk_is_error "tool failed")
 $(mk_is_error "second tool failed")
 $(mk_assistant "$SL26_TEXT")"
 run_case "SL26_pass_adverse_not_real_session_wording" "pass" "$SL26_TRANSCRIPT"
-
-# SL8: pass — Stage 4 output (## Actions Executed) with no ledger. The hook
-# exits at the Actions-Executed guard before Gate-8; a post-execution report is
-# not forced to carry a ledger.
-SL8_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
-
-## Actions Executed
-
-| # | Action | Result |
-|---|--------|--------|
-| 1 | MEMORY.md feedback added | ✅ /tmp/foo.md |"
-run_case "SL8_pass_actions_executed_no_ledger_required" "pass" \
-  "$(mk_assistant "$SL8_TEXT")"
 
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
