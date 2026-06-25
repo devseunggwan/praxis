@@ -542,6 +542,8 @@ fi
 # pass and the conditional externalized critic re-scan tier; its absence means
 # the painful agent-caused friction the analyzing context is most motivated to
 # bury was never surfaced for audit ("the retrospect hides the painful parts").
+# [PR #704] `critic_diff:` makes the conditional critic tier auditable even
+# when it is skipped, so Stage 3 cannot silently omit the second-pass result.
 # Mirrors the Gate-7 receipt pattern: presence + minimal content, scoped to the
 # most-recent report block, markers anchored to standalone HTML-comment
 # delimiter LINES so quoted examples / in-row mentions do not false-trigger.
