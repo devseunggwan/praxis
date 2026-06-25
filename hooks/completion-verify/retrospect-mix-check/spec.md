@@ -113,7 +113,7 @@ raw text inside assistant prose:
 |--------|----------------------|
 | `is_error:true` | `jq` count of top-level tool-result objects or nested `message.content[]` tool-result blocks where `.is_error == true` |
 | content-error syntax | `jq` count of top-level or nested tool-result blocks whose text payload matches the content-error regex |
-| `user_correction` marker | `jq` count of non-tool-result user text blocks where the text payload matches the documented negation / redirect / mismatch marker regex from `stage1-2-analysis.md` |
+| `user_correction` marker | `jq` count of non-tool-result user turns/events where the text payload matches the documented negation / redirect / mismatch marker regex from `stage1-2-analysis.md` |
 
 If the ledger uses clean/no-failure language on either `worst_agent_failure:`
 (`disposition: none-found`, `no painful agent failure`, `nothing painful`,
@@ -121,11 +121,11 @@ If the ledger uses clean/no-failure language on either `worst_agent_failure:`
 line with a clean `self_adversarial:` result (`concurred` paired with
 `nothing`/`no`, `nothing omitted`, `nothing softened`, etc.) and the combined
 live signal count is greater than the tolerance (`1`), Stage 3 is blocked.
-Tool-result signals are deduped by JSONL line before applying the tolerance, so
-one failed command that carries both `"is_error":true` and `Exit code 1` counts
-as one adverse tool event. This is a floor, not full semantic judgment: the hook
-does not decide whether every marker is a true correction, but it prevents the
-ledger from claiming that no signal existed.
+Tool-result signals are deduped by top-level JSONL record before applying the
+tolerance, so one record that carries multiple matching nested `tool_result`
+blocks still counts as one adverse tool event. This is a floor, not full
+semantic judgment: the hook does not decide whether every marker is a true
+correction, but it prevents the ledger from claiming that no signal existed.
 
 ### Issue #666 — retrospect-active Stage-3 fence-omission gate
 
@@ -248,7 +248,7 @@ git -C ~/.claude/plugins/.../praxis apply --reverse <patch>
 
 ### Tests
 
-`tests/hooks/completion-verify/test_retrospect_mix_check.sh` covers 107 cases
+`tests/hooks/completion-verify/test_retrospect_mix_check.sh` covers 110 cases
 plus 11 synthetic regression fixtures:
 
 - 4 pass scenarios (behavior-only with rationale, escalated tool, escalated

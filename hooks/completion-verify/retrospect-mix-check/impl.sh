@@ -645,10 +645,10 @@ else
         | if ($c|type) == "array" then
             $c[]? | select(type == "object" and .type == "tool_result")
           else empty end;
-      (
-        select(type == "object" and .type == "tool_result" and ((.is_error == true) or ([block_text] | join("\n") | test($re)))),
-        (select(type == "object") | nested_tool_results | select((.is_error == true) or ([block_text] | join("\n") | test($re))))
-      ) | 1
+      select(type == "object" and (
+        (.type == "tool_result" and ((.is_error == true) or ([block_text] | join("\n") | test($re))))
+        or ([nested_tool_results | select((.is_error == true) or ([block_text] | join("\n") | test($re)))] | length > 0)
+      )) | 1
     ' "$TRANSCRIPT_PATH" 2>/dev/null | wc -l | tr -d '[:space:]')
     live_sl_tool_signal_count=${live_sl_tool_signal_count:-0}
     live_sl_uc_count=$(jq -r --arg re "$sl_user_correction_re" '
@@ -668,11 +668,18 @@ else
     sl_clean_like=false
     sl_worst_line=$(printf '%s\n' "$SLEDGER_BLOCK" | grep -iE '^[[:space:]]*-?[[:space:]]*worst_agent_failure:[[:space:]]*.+' | tail -n 1)
     sl_adv_line=$(printf '%s\n' "$SLEDGER_BLOCK" | grep -iE '^[[:space:]]*-?[[:space:]]*self_adversarial:[[:space:]]*.+' | tail -n 1)
+    sl_adv_clean=false
+    sl_worst_clean_phrase=false
+    if printf '%s\n' "$sl_adv_line" | grep -qiE '(concurred.*(nothing|no ))|nothing omitted|nothing to omit|nothing softened|no omission|no suppression'; then
+      sl_adv_clean=true
+    fi
+    if printf '%s\n' "$sl_worst_line" | grep -qiE 'clean path|no failure|none found|no painful|nothing painful|nothing to omit|nothing omitted|(synthetic|fixture|ledger-presence).*(no real session|not a real session)|(no real session|not a real session).*(synthetic|fixture|ledger-presence)'; then
+      sl_worst_clean_phrase=true
+    fi
     if printf '%s\n' "$sl_worst_line" \
       | grep -qiE 'disposition:[[:space:]]*none-found|no painful agent failure|nothing painful|no real session to scan|nothing to omit|nothing omitted'; then
       sl_clean_like=true
-    elif printf '%s\n' "$sl_worst_line" | grep -qiE 'no failure|none found|clean path' \
-      && printf '%s\n' "$sl_adv_line" | grep -qiE '(concurred.*(nothing|no ))|nothing omitted|nothing to omit|nothing softened|no omission|no suppression'; then
+    elif [ "$sl_adv_clean" = "true" ] && [ "$sl_worst_clean_phrase" = "true" ]; then
       sl_clean_like=true
     fi
 
