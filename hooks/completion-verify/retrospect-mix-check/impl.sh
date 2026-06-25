@@ -593,7 +593,7 @@ else
   if [ "$sl_worst" -lt 1 ] || [ "$sl_adv" -lt 1 ]; then
     GATE8_VIOLATION="suppression_ledger fence is present but missing a required line (found worst_agent_failure=$sl_worst self_adversarial=$sl_adv, need >=1 each) — the ledger must name the single worst agent-caused friction and record that the self-incrimination pass ran before Stage 3"
   else
-    # Gate-8b (Ledger-laundering floor, issue #701): Gate-8 originally proved
+    # [PR #703] Gate-8b (Ledger-laundering floor, issue #701): Gate-8 originally proved
     # only that a ledger exists. Re-derive cheap deterministic adverse signals
     # from the live transcript so a ledger cannot claim a clean/no-failure path
     # while the transcript itself carries multiple user corrections or errors.
