@@ -115,8 +115,8 @@ $card
 $rows
 
 <!-- retrospect:suppression_ledger begin -->
-- worst_agent_failure: synthetic Stop-hook fixture — ledger-presence test only, not a real session | disposition: none-found
-- self_adversarial: ran | result: no real session to scan (synthetic fixture)
+- worst_agent_failure: synthetic Stop-hook fixture — ledger-presence test only, not a real session | disposition: surface
+- self_adversarial: ran | result: synthetic fixture ledger only
 <!-- retrospect:suppression_ledger end -->
 EOF
 }
@@ -935,6 +935,10 @@ mk_is_error() {
   }'
 }
 
+mk_is_error_spaced_json() {
+  mk_is_error "$1" | sed -E 's/"type":/"type": /g; s/"is_error":/"is_error": /g; s/"role":/"role": /g'
+}
+
 # Emit a JSONL record simulating an exit-0 tool_result whose CONTENT carries an
 # error signal (is_error:false). Used to exercise the issue #670 content-error
 # floor: the calibrated regex must catch the signal from tool_result content even
@@ -948,6 +952,49 @@ mk_content_error() {
   }'
 }
 
+mk_tool_result_user_role() {
+  jq -nc --arg msg "$1" '{
+    type: "tool_result",
+    "is_error": false,
+    message: {role: "user", content: [{type: "text", text: $msg}]}
+  }'
+}
+
+mk_nested_tool_result() {
+  jq -nc --arg msg "$1" --argjson is_error "$2" '{
+    type: "user",
+    message: {
+      role: "user",
+      content: [{
+        type: "tool_result",
+        is_error: $is_error,
+        content: [{type: "text", text: $msg}]
+      }]
+    }
+  }'
+}
+
+mk_nested_tool_result_pair() {
+  jq -nc --arg msg1 "$1" --arg msg2 "$2" --argjson is_error "$3" '{
+    type: "user",
+    message: {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          is_error: $is_error,
+          content: [{type: "text", text: $msg1}]
+        },
+        {
+          type: "tool_result",
+          is_error: $is_error,
+          content: [{type: "text", text: $msg2}]
+        }
+      ]
+    }
+  }'
+}
+
 # Emit a JSONL record for a non-compaction user turn.
 # Used to add real user turns so hook's grep -c '"role":"user"' matches declared count.
 # Note: mk_compaction() already contributes 1 user turn to the count.
@@ -956,6 +1003,10 @@ mk_user_turn() {
     type: "human",
     message: {role: "user", content: [{type: "text", text: $msg}]}
   }'
+}
+
+mk_user_turn_spaced_json() {
+  mk_user_turn "$1" | sed -E 's/"type":/"type": /g; s/"role":/"role": /g'
 }
 
 # Receipt fence (real-output form) and the unreachable-skip variant.
@@ -1623,6 +1674,26 @@ SL_LEDGER_VALID_ADVERSE='<!-- retrospect:suppression_ledger begin -->
 - tempted_to_omit: the second blind retry | reason_considered: looked transient | disposition: surface
 - self_adversarial: ran | result: surfaced the silent retry the deterministic lanes missed
 <!-- retrospect:suppression_ledger end -->'
+SL_LEDGER_CLEAN='<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: synthetic clean ledger — no painful agent failure in this canned report | disposition: none-found
+- self_adversarial: ran | result: no real session to scan
+<!-- retrospect:suppression_ledger end -->'
+SL_LEDGER_CANONICAL_CLEAN='<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: clean path — nothing painful surfaced after full scan | disposition: surface
+- self_adversarial: ran | result: concurred — nothing omitted or softened
+<!-- retrospect:suppression_ledger end -->'
+SL_LEDGER_SURFACE_CLEAN='<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: synthetic Stop-hook fixture — not a real session | disposition: surface
+- self_adversarial: ran | result: concurred — nothing omitted or softened
+<!-- retrospect:suppression_ledger end -->'
+SL_LEDGER_ADVERSE_SELF_CLEAN='<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: repeated failing tool call after assuming the command would recover | disposition: surface
+- self_adversarial: ran | result: concurred — nothing omitted or softened
+<!-- retrospect:suppression_ledger end -->'
+SL_LEDGER_ADVERSE_NOT_REAL_SESSION='<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: misclassified a real transcript as not a real session and skipped the scan | disposition: surface
+- self_adversarial: ran | result: concurred — nothing omitted or softened
+<!-- retrospect:suppression_ledger end -->'
 SL_LEDGER_NO_ADV='<!-- retrospect:suppression_ledger begin -->
 - worst_agent_failure: minor — nothing painful this session | disposition: surface
 <!-- retrospect:suppression_ledger end -->'
@@ -1683,6 +1754,19 @@ I considered emitting a retrospect:suppression_ledger begin marker but left the 
 run_case "SL7_block_ledger_inline_mention_not_a_fence" "block" \
   "$(mk_assistant "$SL7_TEXT")"
 
+# SL8: pass — Stage 4 output (## Actions Executed) with no ledger. The hook
+# exits at the Actions-Executed guard before Gate-8; a post-execution report is
+# not forced to carry a ledger.
+SL8_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+
+## Actions Executed
+
+| # | Action | Result |
+|---|--------|--------|
+| 1 | MEMORY.md feedback added | ✅ /tmp/foo.md |"
+run_case "SL8_pass_actions_executed_no_ledger_required" "pass" \
+  "$(mk_assistant "$SL8_TEXT")"
+
 # SL9: block — a NESTED ledger begin (begin/begin/end). Both sl_begin>1 and
 # sl_malformed=1; the malformed branch must win (checked before the duplicate
 # count) so the block reason is "malformed", not "multiple fences" [CodeRabbit
@@ -1697,18 +1781,158 @@ ${SL_LEDGER_NESTED}"
 run_case "SL9_block_ledger_nested_begin" "block" \
   "$(mk_assistant "$SL9_TEXT")"
 
-# SL8: pass — Stage 4 output (## Actions Executed) with no ledger. The hook
-# exits at the Actions-Executed guard before Gate-8; a post-execution report is
-# not forced to carry a ledger.
-SL8_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+# SL10: block — ledger claims none-found while live transcript carries multiple
+# deterministic adverse signals. Gate-8b re-derives the floor from transcript
+# content instead of trusting the ledger text.
+SL10_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_CLEAN}"
+SL10_TRANSCRIPT="$(mk_is_error "tool failed")
+$(mk_is_error "second tool failed")
+$(mk_assistant "$SL10_TEXT")"
+run_case "SL10_block_clean_ledger_launders_live_is_error_signals" "block" "$SL10_TRANSCRIPT"
 
-## Actions Executed
+# SL11: pass — a single adverse signal is within the live-append tolerance and
+# does not block the clean synthetic ledger.
+SL11_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_CLEAN}"
+SL11_TRANSCRIPT="$(mk_is_error "single tolerated signal")
+$(mk_assistant "$SL11_TEXT")"
+run_case "SL11_pass_clean_ledger_single_signal_within_tolerance" "pass" "$SL11_TRANSCRIPT"
 
-| # | Action | Result |
-|---|--------|--------|
-| 1 | MEMORY.md feedback added | ✅ /tmp/foo.md |"
-run_case "SL8_pass_actions_executed_no_ledger_required" "pass" \
-  "$(mk_assistant "$SL8_TEXT")"
+# SL12: block — user-correction markers count only when they appear on user
+# turns. Multiple real user corrections make a clean ledger self-serving.
+SL12_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_CLEAN}"
+SL12_TRANSCRIPT="$(mk_user_turn "아니 그거 말고")
+$(mk_user_turn "that's not what I asked")
+$(mk_assistant "$SL12_TEXT")"
+run_case "SL12_block_clean_ledger_launders_user_corrections" "block" "$SL12_TRANSCRIPT"
+
+# SL13: pass — marker text in assistant prose is scoped out; only user turns
+# contribute to the Gate-8b user-correction floor.
+SL13_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+The narrative mentions 아니 and that's not what I asked, but no user turn did.
+${SL_LEDGER_CLEAN}"
+run_case "SL13_pass_assistant_prose_markers_scoped_out" "pass" \
+  "$(mk_assistant "$SL13_TEXT")"
+
+# SL14: block — canonical clean-path wording uses disposition:surface on
+# worst_agent_failure and records the clean claim on self_adversarial. Gate-8b
+# must treat that self_adversarial line as clean-like too.
+SL14_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_CANONICAL_CLEAN}"
+SL14_TRANSCRIPT="$(mk_is_error "tool failed")
+$(mk_is_error "second tool failed")
+$(mk_assistant "$SL14_TEXT")"
+run_case "SL14_block_canonical_clean_self_adversarial_laundering" "block" "$SL14_TRANSCRIPT"
+
+# SL15: pass — self_adversarial can legitimately say nothing else was omitted
+# when worst_agent_failure already surfaces a concrete adverse event.
+SL15_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_SELF_CLEAN}"
+SL15_TRANSCRIPT="$(mk_is_error "tool failed")
+$(mk_is_error "second tool failed")
+$(mk_assistant "$SL15_TEXT")"
+run_case "SL15_pass_adverse_worst_failure_with_clean_self_adversarial" "pass" "$SL15_TRANSCRIPT"
+
+# SL16: pass — a single tool_result line can carry both is_error:true and
+# content-error syntax. The floor dedupes by tool event before applying
+# tolerance.
+SL16_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_CLEAN}"
+SL16_TRANSCRIPT="$(mk_is_error "Exit code 1: single failed command")
+$(mk_assistant "$SL16_TEXT")"
+run_case "SL16_pass_single_tool_result_deduped_across_lanes" "pass" "$SL16_TRANSCRIPT"
+
+# SL17: block — valid JSONL may include spaces after key separators. Gate-8b
+# must not rely on compact jq -c formatting for is_error/tool_result detection.
+SL17_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_CLEAN}"
+SL17_TRANSCRIPT="$(mk_is_error_spaced_json "tool failed")
+$(mk_is_error_spaced_json "second tool failed")
+$(mk_assistant "$SL17_TEXT")"
+run_case "SL17_block_spaced_json_tool_errors" "block" "$SL17_TRANSCRIPT"
+
+# SL18: block — the same whitespace tolerance applies to user-role correction
+# scans.
+SL18_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_CLEAN}"
+SL18_TRANSCRIPT="$(mk_user_turn_spaced_json "아니 그거 말고")
+$(mk_user_turn_spaced_json "that's not what I asked")
+$(mk_assistant "$SL18_TEXT")"
+run_case "SL18_block_spaced_json_user_corrections" "block" "$SL18_TRANSCRIPT"
+
+# SL19: pass — Claude-style tool_result rows can carry message.role:user.
+# They must not be scanned as human correction turns.
+SL19_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_CLEAN}"
+SL19_TRANSCRIPT="$(mk_tool_result_user_role "no failures in lint output")
+$(mk_tool_result_user_role "no changes needed")
+$(mk_assistant "$SL19_TEXT")"
+run_case "SL19_pass_tool_result_user_role_not_user_correction" "pass" "$SL19_TRANSCRIPT"
+
+# SL20: pass — assistant prose can quote JSON-shaped examples or transcript
+# receipts. Gate-8b scans top-level JSONL events, not escaped text inside the
+# assistant's Stage 3 report.
+SL20_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+Example quoted JSON only: {\"type\":\"tool_result\",\"is_error\":true,\"message\":{\"role\":\"user\",\"content\":[{\"text\":\"Exit code 1 and no failures\"}]}}
+${SL_LEDGER_CLEAN}"
+SL20_TRANSCRIPT="$(mk_is_error "single tolerated signal")
+$(mk_assistant "$SL20_TEXT")"
+run_case "SL20_pass_quoted_json_in_assistant_prose_not_counted" "pass" "$SL20_TRANSCRIPT"
+
+# SL21: block — Claude Code commonly stores tool results as nested
+# message.content[] blocks inside a top-level user event.
+SL21_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_CLEAN}"
+SL21_TRANSCRIPT="$(mk_nested_tool_result "Exit code 1: build failed" true)
+$(mk_nested_tool_result "Exit code 1: test failed" true)
+$(mk_assistant "$SL21_TEXT")"
+run_case "SL21_block_nested_tool_result_errors" "block" "$SL21_TRANSCRIPT"
+
+# SL22: pass — the same nested tool_result block can carry both is_error:true
+# and content-error syntax; it still counts as one tool event.
+SL22_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_CLEAN}"
+SL22_TRANSCRIPT="$(mk_nested_tool_result "Exit code 1: single failed command" true)
+$(mk_assistant "$SL22_TEXT")"
+run_case "SL22_pass_single_nested_tool_result_deduped" "pass" "$SL22_TRANSCRIPT"
+
+# SL23: block — top-level tool_result events may carry their output under
+# message.content[] even when is_error:false.
+SL23_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_CLEAN}"
+SL23_TRANSCRIPT="$(mk_content_error "Exit code 1: build failed")
+$(mk_content_error "Exit code 1: test failed")
+$(mk_assistant "$SL23_TEXT")"
+run_case "SL23_block_top_level_message_content_errors" "block" "$SL23_TRANSCRIPT"
+
+# SL24: pass — multiple failing nested tool_result blocks inside one JSONL
+# record count as one adverse tool event before tolerance is applied.
+SL24_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_CLEAN}"
+SL24_TRANSCRIPT="$(mk_nested_tool_result_pair "Exit code 1: build failed" "Exit code 1: test failed" true)
+$(mk_assistant "$SL24_TEXT")"
+run_case "SL24_pass_multi_nested_tool_results_deduped_per_record" "pass" "$SL24_TRANSCRIPT"
+
+# SL25: block — surface-style clean ledger detection requires both clean
+# worst_agent_failure wording and clean self_adversarial wording.
+SL25_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_SURFACE_CLEAN}"
+SL25_TRANSCRIPT="$(mk_is_error "tool failed")
+$(mk_is_error "second tool failed")
+$(mk_assistant "$SL25_TEXT")"
+run_case "SL25_block_surface_clean_self_adversarial_laundering" "block" "$SL25_TRANSCRIPT"
+
+# SL26: pass — "not a real session" can also describe an actual failure. Do
+# not classify it as clean unless it is explicitly fixture/synthetic clean
+# wording.
+SL26_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOT_REAL_SESSION}"
+SL26_TRANSCRIPT="$(mk_is_error "tool failed")
+$(mk_is_error "second tool failed")
+$(mk_assistant "$SL26_TEXT")"
+run_case "SL26_pass_adverse_not_real_session_wording" "pass" "$SL26_TRANSCRIPT"
 
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:

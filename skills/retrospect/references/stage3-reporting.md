@@ -117,7 +117,7 @@ session.
 
 ```markdown
 <!-- retrospect:suppression_ledger begin -->
-- worst_agent_failure: <one-line, verbatim painful framing, no softening> | disposition: surface|none-found
+- worst_agent_failure: <one-line, verbatim painful framing, no softening> | disposition: surface
 - tempted_to_omit: <item> | reason_considered: <why> | disposition: surface|justified-drop
 - tempted_to_soften: <item> | original_severity: <X> | softened_to: <Y> | restored: true|false
 - self_adversarial: ran | result: <what it surfaced, or "concurred — nothing omitted or softened">
@@ -143,6 +143,11 @@ Rules:
   defeats its purpose.
 - The Stop hook (Gate-8) blocks a Stage 3 report that omits this fence or either
   required line.
+- The Stop hook also re-derives cheap deterministic adverse signals from the
+  live transcript (`is_error:true`, content-error syntax, and documented
+  `user_correction` markers on user turns). When the ledger claims a
+  clean/no-failure path while those signals exceed tolerance, Gate-8 blocks as
+  ledger laundering.
 
 ## Transcript receipt
 
