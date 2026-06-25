@@ -592,6 +592,93 @@ else
   sl_adv=$(printf '%s\n' "$SLEDGER_BLOCK" | grep -cE '^[[:space:]]*-?[[:space:]]*self_adversarial:[[:space:]]*.+')
   if [ "$sl_worst" -lt 1 ] || [ "$sl_adv" -lt 1 ]; then
     GATE8_VIOLATION="suppression_ledger fence is present but missing a required line (found worst_agent_failure=$sl_worst self_adversarial=$sl_adv, need >=1 each) — the ledger must name the single worst agent-caused friction and record that the self-incrimination pass ran before Stage 3"
+  else
+    # Gate-8b (Ledger-laundering floor, issue #701): Gate-8 originally proved
+    # only that a ledger exists. Re-derive cheap deterministic adverse signals
+    # from the live transcript so a ledger cannot claim a clean/no-failure path
+    # while the transcript itself carries multiple user corrections or errors.
+    GATE8_SIGNAL_TOLERANCE=1
+    sl_content_error_re='Exit code [1-9]|command terminated|js_error|FATAL|No such file|denied|BLOCKED|Usage:([[:space:]]|$)'
+    sl_user_correction_re="아니|그거 아니야|하지 마|그거 말고|(^|[^A-Za-z])no([^A-Za-z]|$)|don't|(^|[^A-Za-z])stop([^A-Za-z]|$)|라니까|하라고 했잖아|그게 아니라|내 말은|다시|I said |not that|하라니까|왜 .*안 하고|왜 .*했어|that's not what I asked"
+    live_sl_ie_count=$(jq -r '
+      def message_content: .message.content // .content // empty;
+      def nested_tool_results:
+        message_content as $c
+        | if ($c|type) == "array" then
+            $c[]? | select(type == "object" and .type == "tool_result")
+          else empty end;
+      (
+        select(type == "object" and .type == "tool_result" and .is_error == true),
+        (select(type == "object") | nested_tool_results | select(.is_error == true))
+      ) | 1
+    ' "$TRANSCRIPT_PATH" 2>/dev/null | wc -l | tr -d '[:space:]')
+    live_sl_ie_count=${live_sl_ie_count:-0}
+    live_sl_ce_count=$(jq -r --arg re "$sl_content_error_re" '
+      def message_content: .message.content // .content // empty;
+      def block_text:
+        (.message.content // .content // .text // empty) as $c
+        | if ($c|type) == "array" then
+            $c[]? | if type == "object" then (.text? // empty) else tostring end
+          elif ($c|type) == "string" then $c
+          else empty end;
+      def nested_tool_results:
+        message_content as $c
+        | if ($c|type) == "array" then
+            $c[]? | select(type == "object" and .type == "tool_result")
+          else empty end;
+      (
+        select(type == "object" and .type == "tool_result" and ([block_text] | join("\n") | test($re))),
+        (select(type == "object") | nested_tool_results | select(([block_text] | join("\n") | test($re))))
+      ) | 1
+    ' "$TRANSCRIPT_PATH" 2>/dev/null | wc -l | tr -d '[:space:]')
+    live_sl_ce_count=${live_sl_ce_count:-0}
+    live_sl_tool_signal_count=$(jq -r --arg re "$sl_content_error_re" '
+      def message_content: .message.content // .content // empty;
+      def block_text:
+        (.message.content // .content // .text // empty) as $c
+        | if ($c|type) == "array" then
+            $c[]? | if type == "object" then (.text? // empty) else tostring end
+          elif ($c|type) == "string" then $c
+          else empty end;
+      def nested_tool_results:
+        message_content as $c
+        | if ($c|type) == "array" then
+            $c[]? | select(type == "object" and .type == "tool_result")
+          else empty end;
+      (
+        select(type == "object" and .type == "tool_result" and ((.is_error == true) or ([block_text] | join("\n") | test($re)))),
+        (select(type == "object") | nested_tool_results | select((.is_error == true) or ([block_text] | join("\n") | test($re))))
+      ) | 1
+    ' "$TRANSCRIPT_PATH" 2>/dev/null | wc -l | tr -d '[:space:]')
+    live_sl_tool_signal_count=${live_sl_tool_signal_count:-0}
+    live_sl_uc_count=$(jq -r --arg re "$sl_user_correction_re" '
+      def human_text_payload:
+        (.message.content // .content // empty) as $c
+        | if ($c|type) == "array" then
+            $c[]? | if type == "object" then
+              if ((.type? // "text") == "text") then (.text? // empty) else empty end
+            else tostring end
+          elif ($c|type) == "string" then $c
+          else empty end;
+      select(type == "object" and .type != "tool_result" and (.message.role == "user" or .role == "user" or .type == "user") and ([human_text_payload] | join("\n") | test($re; "i"))) | 1
+    ' "$TRANSCRIPT_PATH" 2>/dev/null | wc -l | tr -d '[:space:]')
+    live_sl_uc_count=${live_sl_uc_count:-0}
+    live_sl_signal_count=$(( live_sl_tool_signal_count + live_sl_uc_count ))
+
+    sl_clean_like=false
+    sl_worst_line=$(printf '%s\n' "$SLEDGER_BLOCK" | grep -iE '^[[:space:]]*-?[[:space:]]*worst_agent_failure:[[:space:]]*.+' | tail -n 1)
+    sl_adv_line=$(printf '%s\n' "$SLEDGER_BLOCK" | grep -iE '^[[:space:]]*-?[[:space:]]*self_adversarial:[[:space:]]*.+' | tail -n 1)
+    if printf '%s\n' "$sl_worst_line" \
+      | grep -qiE 'disposition:[[:space:]]*none-found|no painful agent failure|nothing painful|no real session to scan|nothing to omit|nothing omitted'; then
+      sl_clean_like=true
+    elif printf '%s\n' "$sl_worst_line" | grep -qiE 'no failure|none found|clean path' \
+      && printf '%s\n' "$sl_adv_line" | grep -qiE '(concurred.*(nothing|no ))|nothing omitted|nothing to omit|nothing softened|no omission|no suppression'; then
+      sl_clean_like=true
+    fi
+
+    if [ "$sl_clean_like" = "true" ] && [ "$live_sl_signal_count" -gt "$GATE8_SIGNAL_TOLERANCE" ]; then
+      GATE8_VIOLATION="suppression_ledger claims a clean/no-failure path while a live transcript scan finds $live_sl_signal_count adverse signal(s) (tool_event=$live_sl_tool_signal_count is_error=$live_sl_ie_count content_error=$live_sl_ce_count user_correction_marker=$live_sl_uc_count, tolerance=$GATE8_SIGNAL_TOLERANCE) — re-run the self-incrimination pass and surface or justify the signals instead of laundering them as none-found"
+    fi
   fi
 fi
 fi
@@ -679,7 +766,7 @@ if [ "$should_block" = "true" ]; then
     fi
   done
 
-  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670); Gate-8 → emit a '<!-- retrospect:suppression_ledger begin/end -->' fence carrying a 'worst_agent_failure:' line and a 'self_adversarial:' line (the Stage 2 self-incrimination pass record, mandatory on every path incl. the clean one) before Stage 3 — see skills/retrospect/references/stage1-2-analysis.md self-incrimination pass. See skills/retrospect/references/stage2.5-audit.md and skills/retrospect/references/stage3-reporting.md."
+  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670); Gate-8 → emit a '<!-- retrospect:suppression_ledger begin/end -->' fence carrying a 'worst_agent_failure:' line and a 'self_adversarial:' line (the Stage 2 self-incrimination pass record, mandatory on every path incl. the clean one), and do not claim none-found/clean when live transcript signals exceed tolerance — surface or justify those signals before Stage 3. See skills/retrospect/references/stage1-2-analysis.md self-incrimination pass and skills/retrospect/references/stage3-reporting.md."
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'
   exit 0
 fi
