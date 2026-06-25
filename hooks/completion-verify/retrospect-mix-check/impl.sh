@@ -572,10 +572,13 @@ sl_malformed=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk -v sb="$re_sb" -v se="$r
   END { print (ins || nested) ? 1 : 0 }')
 if [ "$sl_begin" -lt 1 ]; then
   GATE8_VIOLATION="Stage 3 report has no '<!-- retrospect:suppression_ledger begin/end -->' fence (issue #699) — run the Stage 2 self-incrimination pass and emit the ledger with a 'worst_agent_failure:' line and a 'self_adversarial:' line before Stage 3, even on the clean path"
+elif [ "$sl_malformed" -gt 0 ]; then
+  # Check malformed BEFORE the duplicate-count branch: a nested begin makes both
+  # sl_begin>1 AND sl_malformed=1, and the nested case is more precisely a
+  # malformed fence than "multiple fences" [CodeRabbit PR #700].
+  GATE8_VIOLATION="suppression_ledger fence is malformed (an unterminated or nested 'retrospect:suppression_ledger begin') — emit exactly one well-formed begin/end fence before Stage 3"
 elif [ "$sl_begin" -gt 1 ]; then
   GATE8_VIOLATION="Stage 3 report has $sl_begin suppression_ledger fences — emit exactly one; multiple fences let a benign ledger mask an adverse one"
-elif [ "$sl_malformed" -gt 0 ]; then
-  GATE8_VIOLATION="suppression_ledger fence is malformed (an unterminated or nested 'retrospect:suppression_ledger begin') — emit exactly one well-formed begin/end fence before Stage 3"
 else
   # Extract the content of the (single, well-formed) ledger fence and require
   # both mandatory lines inside it. Anchored to line-start (optional leading

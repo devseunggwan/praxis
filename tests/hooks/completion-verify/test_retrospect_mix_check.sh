@@ -115,8 +115,8 @@ $card
 $rows
 
 <!-- retrospect:suppression_ledger begin -->
-- worst_agent_failure: synthesized fixture — minor, no painful agent failure in this canned report | disposition: surface
-- self_adversarial: ran | result: concurred — nothing omitted or softened
+- worst_agent_failure: synthetic Stop-hook fixture — ledger-presence test only, not a real session | disposition: none-found
+- self_adversarial: ran | result: no real session to scan (synthetic fixture)
 <!-- retrospect:suppression_ledger end -->
 EOF
 }
@@ -1682,6 +1682,20 @@ SL7_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
 I considered emitting a retrospect:suppression_ledger begin marker but left the fence out."
 run_case "SL7_block_ledger_inline_mention_not_a_fence" "block" \
   "$(mk_assistant "$SL7_TEXT")"
+
+# SL9: block — a NESTED ledger begin (begin/begin/end). Both sl_begin>1 and
+# sl_malformed=1; the malformed branch must win (checked before the duplicate
+# count) so the block reason is "malformed", not "multiple fences" [CodeRabbit
+# PR #700].
+SL_LEDGER_NESTED='<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: outer | disposition: surface
+<!-- retrospect:suppression_ledger begin -->
+- self_adversarial: ran | result: nested injection
+<!-- retrospect:suppression_ledger end -->'
+SL9_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_NESTED}"
+run_case "SL9_block_ledger_nested_begin" "block" \
+  "$(mk_assistant "$SL9_TEXT")"
 
 # SL8: pass — Stage 4 output (## Actions Executed) with no ledger. The hook
 # exits at the Actions-Executed guard before Gate-8; a post-execution report is
