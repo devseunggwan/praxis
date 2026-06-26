@@ -59,8 +59,8 @@ All three conditions must hold for a block (exit 2):
    ratification token. (`user-stated design` is intentionally NOT a re-fetch
    marker — it appears verbatim inside `[CONFLICTS: user-stated design …]`
    payloads and would self-satisfy the check.) The re-fetch scan runs over
-   the full ordered stream (assistant text + assistant Bash tool_use commands
-   + subagent results), so a `gh pr view` recorded as a tool_use still counts.
+   the full ordered stream (assistant text + assistant Bash tool_use commands +
+   subagent results), so a `gh pr view` recorded as a tool_use still counts.
 
 | Situation | Action |
 |-----------|--------|
