@@ -1991,6 +1991,15 @@ SL29_TRANSCRIPT="$(mk_is_error "tool failed")
 $(mk_assistant "$SL29_TEXT")"
 run_case "SL29_pass_critic_notrun_no_user_correction" "pass" "$SL29_TRANSCRIPT"
 
+# SL29b: pass — boundary. Exactly one user-correction marker stays within the
+# >1 tolerance, so a not-run critic_diff is still legitimate (guards the -gt vs
+# -ge off-by-one: a single genuine correction must NOT force the critic).
+SL29B_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL29B_TRANSCRIPT="$(mk_user_turn "아니 그거 말고")
+$(mk_assistant "$SL29B_TEXT")"
+run_case "SL29b_pass_critic_notrun_single_user_correction" "pass" "$SL29B_TRANSCRIPT"
+
 # SL30: pass — when the critic tier actually ran (critic_diff records a checked
 # result), user corrections in the transcript do not trip Gate-8c.
 SL30_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")

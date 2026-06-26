@@ -700,12 +700,21 @@ else
     # fired. Block a 'critic_diff: not-run' that coexists with live user-correction
     # markers — this converts the verbatim-brief / run-the-critic guidance from
     # unenforced self-feedback into a deterministic format gate. Keyed on
-    # user-correction only (not tool-error signals) to map 1:1 to the predicate's
-    # "user correction required" clause. Threshold reuses GATE8_SIGNAL_TOLERANCE
-    # (>1) for parity with Gate-8b: the user-correction regex is broad (matches
-    # "다시"/"no"/"stop"), so a single stray marker stays within tolerance and only
-    # a genuine multi-correction session trips the floor — minimising false
-    # positives. Guarded by -z GATE8_VIOLATION so a more specific Gate-8b laundering
+    # user-correction only (not tool-error signals), reusing Gate-8b's
+    # GATE8_SIGNAL_TOLERANCE (>1) and its shared user-correction regex.
+    #
+    # PRECISION CAVEAT (do not overstate): that regex is broad — it matches bare
+    # "no"/"stop"/"다시" and so fires on benign phrasings ("no problem", "다시
+    # 설명해줘") on a user turn. Because Gate-8c scans the WHOLE retrospected
+    # session, any non-trivial multi-turn session will usually accumulate >1 such
+    # marker. The practical effect is a FORCING FUNCTION: on a busy session the
+    # external critic must actually run (critic_diff != not-run), and 'not-run' is
+    # reserved for near-trivial / genuinely quiet sessions. This is deliberate and
+    # #715-aligned (default to running the only mechanism with teeth), NOT a
+    # high-precision correction detector — the >1 tolerance only absorbs a single
+    # stray marker, so a session with exactly one genuine correction may still
+    # legitimately mark not-run (a recall gap accepted to avoid single-marker false
+    # blocks). Guarded by -z GATE8_VIOLATION so a more specific Gate-8b laundering
     # message wins.
     if [ -z "$GATE8_VIOLATION" ]; then
       sl_critic_line=$(printf '%s\n' "$SLEDGER_BLOCK" | grep -iE '^[[:space:]]*-?[[:space:]]*critic_diff:[[:space:]]*.+' | tail -n 1)

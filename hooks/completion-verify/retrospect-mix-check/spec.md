@@ -152,15 +152,26 @@ already-derived `user_correction` count (`live_sl_uc_count`). It blocks when
 
 The critic tier predicate (`stage1-2-analysis.md`) fires when a
 `friction_event` required user correction, so a live user-correction count over
-tolerance means the predicate was satisfied and `not-run` is a self-skip, not a
-legitimate skip. The threshold mirrors Gate-8b's tolerance because the
-`user_correction` regex is broad (`다시`/`no`/`stop`): a single stray marker
-stays within tolerance and only a genuine multi-correction session trips the
-floor. The check is guarded by an empty-`GATE8_VIOLATION` test so a more
-specific Gate-8b laundering message keeps precedence. Like Gate-8b this is a
-floor, not semantic judgment: it cannot tell which named failure is the worst,
-but it removes the agent's discretion to skip the external auditor when the
-transcript proves real user-visible friction occurred.
+tolerance means the predicate was satisfied and `not-run` is a self-skip rather
+than a legitimate skip. The threshold reuses Gate-8b's tolerance and Gate-8b's
+shared `user_correction` regex.
+
+**Precision caveat (the gate is a forcing function, not a precise detector).**
+That regex is broad — it matches bare `no`/`stop`/`다시`, so benign user turns
+(`no problem`, `다시 설명해줘`) also count. Because Gate-8c scans the whole
+retrospected session, a non-trivial multi-turn session usually accumulates more
+than one such marker. The practical effect is that on a busy session the
+external critic must actually run (`critic_diff` cannot be `not-run`), and
+`not-run` is reserved for near-trivial / genuinely quiet sessions. This is
+deliberate and #715-aligned — default to running the only anti-concealment
+mechanism with teeth — **not** a high-precision correction detector. The `>1`
+tolerance only absorbs a single stray marker; a session with exactly one
+genuine correction may still legitimately mark `not-run` (an accepted recall gap
+that avoids single-marker false blocks). The check is guarded by an
+empty-`GATE8_VIOLATION` test so a more specific Gate-8b laundering message keeps
+precedence. Like Gate-8b this is a floor, not semantic judgment: it cannot tell
+which named failure is the worst, but it removes the agent's discretion to skip
+the external auditor on a session the transcript shows was correction-heavy.
 
 ### Issue #666 — retrospect-active Stage-3 fence-omission gate
 
@@ -320,8 +331,9 @@ plus 11 synthetic regression fixtures:
    ledger → pass; SL7 inline mention (no real fence) → block; SL8 Stage-4
    Actions Executed without ledger → pass (carve-out); SL27 missing
    critic_diff → block
-- 3 Gate-8c critic self-skip floor (issue #715): SL28 critic_diff not-run +
+- 4 Gate-8c critic self-skip floor (issue #715): SL28 critic_diff not-run +
    2 user corrections → block; SL29 not-run + no user correction → pass;
+   SL29b not-run + exactly 1 user correction → pass (>1 tolerance boundary);
    SL30 critic ran (none|checked) + 2 user corrections → pass
 
 ### Category counts (memory_hygiene, output_quality)
