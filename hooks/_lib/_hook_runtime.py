@@ -148,6 +148,12 @@ def fail_open(fn: Callable[[], int]) -> Callable[[], int]:
     def wrapper() -> int:
         try:
             rc = fn()
+        except SystemExit as exc:
+            # sys.exit() inside main() raises SystemExit (a BaseException), which
+            # bypasses the Exception clause below. Record the fire from the exit
+            # code, then re-raise to preserve the hook's exit semantics.
+            _maybe_record_fire(fn, exc.code)
+            raise
         except Exception:
             _record_swallowed_exception(fn)
             rc = 0

@@ -116,8 +116,15 @@ def _atomic_append(path: Path, lines: list[str]) -> None:
             return  # FIFO / device / socket / symlink — refuse to write
     except FileNotFoundError:
         pass  # absent — created as a regular file below
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o644)
+    # O_NONBLOCK so opening a FIFO swapped in after the lstat fails fast (ENXIO)
+    # instead of blocking; O_NOFOLLOW rejects a symlinked final component. Then
+    # fstat the OPENED fd to close the lstat→open swap window before writing.
+    flags = (os.O_WRONLY | os.O_APPEND | os.O_CREAT
+             | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    fd = os.open(path, flags, 0o644)
     try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return  # target swapped to a non-regular file after the lstat check
         for line in lines:
             os.write(fd, (line + "\n").encode("utf-8"))
     finally:

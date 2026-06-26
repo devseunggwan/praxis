@@ -766,13 +766,16 @@ def roster_split(manifest_path: Path) -> tuple[set[str], set[str]] | None:
         instrumentable: set[str] = set()
         uninstrumentable: set[str] = set()
         for hook in manifest.get("hooks", []):
-            if not isinstance(hook, dict) or not hook.get("name"):
+            if not isinstance(hook, dict):
                 continue
+            name = hook.get("name")
+            if not isinstance(name, str) or not name:
+                continue  # non-string name would break sorted() in the report
             body = hook.get("body") or ""
             if isinstance(body, str) and body.endswith(".sh"):
-                uninstrumentable.add(hook["name"])
+                uninstrumentable.add(name)
             else:
-                instrumentable.add(hook["name"])
+                instrumentable.add(name)
         return instrumentable, uninstrumentable
     except Exception:
         return None
@@ -794,7 +797,7 @@ def bash_group_roster(manifest_path: Path) -> set[str] | None:
             if not isinstance(hook, dict):
                 continue
             name = hook.get("name")
-            if not name:
+            if not isinstance(name, str) or not name:
                 continue
             entries = hook.get("entries") or [
                 {"event": hook.get("event"), "matcher": hook.get("matcher")}

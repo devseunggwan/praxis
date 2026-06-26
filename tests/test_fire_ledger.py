@@ -358,6 +358,35 @@ def test_atomic_append_skips_non_regular_file(tmp_path):
     assert stat.S_ISFIFO(os.lstat(fifo).st_mode)  # untouched, still a FIFO
 
 
+def test_fail_open_records_on_systemexit_and_reraises(tmp_path, monkeypatch):
+    """sys.exit() inside main() raises SystemExit (BaseException) — telemetry must
+    still record (from the exit code) and the exit must propagate (CodeRabbit)."""
+    hr = _load("_hook_runtime_se", _REPO / "hooks" / "_lib" / "_hook_runtime.py")
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    _reset_real_dispatcher_flag(monkeypatch)
+
+    @hr.fail_open
+    def exits() -> int:
+        raise SystemExit(2)
+
+    with pytest.raises(SystemExit) as ei:
+        exits()
+    assert ei.value.code == 2  # exit semantics preserved
+    recs = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    assert recs and recs[0]["decision"] == "block"  # exit 2 -> block
+
+
+def test_roster_split_skips_non_string_name(tmp_path):
+    """A non-string `name` must be skipped, else render's sorted() raises (CodeRabbit)."""
+    manifest = {"hooks": [{"name": 1}, {"name": "ok", "event": "Stop"}]}
+    mpath = tmp_path / "m.json"
+    mpath.write_text(json.dumps(manifest))
+    instrumentable, _ = cli.roster_split(mpath)
+    assert instrumentable == {"ok"} and 1 not in instrumentable
+
+
 def test_aggregate_marks_coarse_hooks():
     events = [
         {"hook": "c", "role": "completion-verify", "decision": "pass",
