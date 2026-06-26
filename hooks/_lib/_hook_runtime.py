@@ -94,6 +94,33 @@ def _hook_identity(fn: Callable[[], int]) -> str:
         return getattr(fn, "__name__", "<unknown>")
 
 
+def _hook_role(fn: Callable[[], int]) -> str:
+    """Hook role = grandparent dir of the entrypoint (hooks/<role>/<name>/impl.py)."""
+    try:
+        return os.path.basename(os.path.dirname(os.path.dirname(fn.__code__.co_filename)))
+    except Exception:
+        return ""
+
+
+def _maybe_record_fire(fn: Callable[[], int], rc: object) -> None:
+    """Record a coarse fire event for a standalone hook (issue #710 coverage).
+
+    Best-effort and isolated: any failure (missing module, I/O) is swallowed so
+    the fail-open guard's contract is never affected. The recorder itself no-ops
+    inside the dispatcher process and when telemetry is disabled.
+    """
+    try:
+        _lib = os.path.dirname(os.path.abspath(__file__))
+        if _lib not in sys.path:
+            sys.path.insert(0, _lib)
+        import _fire_ledger  # type: ignore[import-not-found]
+        _fire_ledger.record_standalone_fire(
+            _hook_identity(fn), _hook_role(fn), rc if isinstance(rc, int) else 0
+        )
+    except Exception:
+        pass
+
+
 def _record_swallowed_exception(fn: Callable[[], int]) -> None:
     """Log a swallowed exception as JSONL. Never raises, never leaks to stderr."""
     try:
@@ -110,13 +137,23 @@ def _record_swallowed_exception(fn: Callable[[], int]) -> None:
 
 
 def fail_open(fn: Callable[[], int]) -> Callable[[], int]:
-    """Return 0 on any uncaught Exception (recording it); else pass through."""
+    """Return 0 on any uncaught Exception (recording it); else pass through.
+
+    Side-effect (issue #710): after `fn()` resolves, records an observe-only
+    coarse fire event via `_maybe_record_fire`. That call never alters the
+    returned rc, never raises (fully swallowed), and never touches the hook's
+    stdin/stdout/stderr — the fail-open contract is unchanged.
+    """
     @functools.wraps(fn)
     def wrapper() -> int:
         try:
-            return fn()
+            rc = fn()
         except Exception:
             _record_swallowed_exception(fn)
-            return 0
+            rc = 0
+        # Coarse fire telemetry (issue #710 coverage). After fn() resolves, never
+        # alters rc or raises. Skipped inside the dispatcher process.
+        _maybe_record_fire(fn, rc)
+        return rc
 
     return wrapper

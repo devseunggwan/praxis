@@ -164,6 +164,15 @@ def run_group(
     event: str, matcher: str, payload_raw: str, host: Optional[str] = None
 ) -> int:
     """Run the whole (event, matcher) group; emit one decision; return its exit code."""
+    # Mark this process as the dispatcher so the fail_open-level coarse recorder
+    # (issue #710 coverage expansion) skips the Bash-group members run below —
+    # they are recorded richly by _record_fires. Avoids double-counting.
+    try:
+        import _fire_ledger  # type: ignore[import-not-found]
+        _fire_ledger.mark_dispatcher_process()
+    except Exception:
+        pass
+
     members = group_members(event, matcher, host)
     results = [run_one(role, name, impl, payload_raw) for role, name, impl in members]
 

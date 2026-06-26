@@ -83,6 +83,7 @@ F_FIRE_TOOL = "tool"
 F_FIRE_HOOK = "hook"
 F_FIRE_ROLE = "role"
 F_FIRE_DECISION = "decision"
+F_FIRE_GRANULARITY = "granularity"
 
 _FIRE_DECISIONS = ("block", "ask", "advise", "pass")
 
@@ -723,12 +724,14 @@ def aggregate_fires(events: list[dict]) -> dict[str, dict]:
         row = by_hook.setdefault(hook, {
             "role": ev.get(F_FIRE_ROLE) or UNKNOWN,
             "fires": 0, "block": 0, "ask": 0, "advise": 0, "pass": 0,
-            "sessions": set(), "last_seen": "",
+            "sessions": set(), "last_seen": "", "coarse": False,
         })
         row["fires"] += 1
         decision = ev.get(F_FIRE_DECISION)
         if decision in _FIRE_DECISIONS:
             row[decision] += 1
+        if ev.get(F_FIRE_GRANULARITY) == "coarse":
+            row["coarse"] = True
         session = ev.get(F_FIRE_SESSION)
         if isinstance(session, str) and session:
             row["sessions"].add(session)
@@ -745,12 +748,42 @@ def default_manifest_path() -> Path:
     return Path(__file__).resolve().parents[2] / "hooks" / "manifest.json"
 
 
+def roster_split(manifest_path: Path) -> tuple[set[str], set[str]] | None:
+    """Split manifest hook names into (instrumentable, uninstrumentable).
+
+    The fire-ledger can only record hooks that flow through the Python
+    @fail_open decorator (coarse) or the Bash dispatch group (rich). Shell hooks
+    (`body: impl.sh`) have no such chokepoint, so they can NEVER produce a fire
+    event and must be excluded from the 'never fired' set — otherwise a shell
+    hook that runs every session is mislabelled as a dead-prune candidate.
+
+    Proxy: instrumentable == body is not an `.sh` file (Python impl, which the
+    praxis convention wraps in @fail_open); uninstrumentable == `body` ends
+    `.sh`. Returns None if the manifest can't be read.
+    """
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        instrumentable: set[str] = set()
+        uninstrumentable: set[str] = set()
+        for hook in manifest.get("hooks", []):
+            if not isinstance(hook, dict) or not hook.get("name"):
+                continue
+            body = hook.get("body") or ""
+            if isinstance(body, str) and body.endswith(".sh"):
+                uninstrumentable.add(hook["name"])
+            else:
+                instrumentable.add(hook["name"])
+        return instrumentable, uninstrumentable
+    except Exception:
+        return None
+
+
 def bash_group_roster(manifest_path: Path) -> set[str] | None:
     """Return hook names dispatched in the PreToolUse(Bash) group, or None.
 
-    The fire-ledger (issue #710) instruments only that group, so the
-    'never fired' set is computed against this roster — not all 64 hooks.
-    Returns None if the manifest can't be read (never-fired then omitted).
+    These are the hooks recorded at RICH granularity (full block/ask/advise/pass)
+    by the central dispatcher. Hooks outside this group are recorded coarsely via
+    fail_open (issue #710 coverage expansion). Returns None if unreadable.
     """
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -783,63 +816,95 @@ def render_fire_report(
     by_hook: dict[str, dict],
     days: int,
     telemetry_dir: Path,
-    roster: set[str] | None,
+    roster: tuple[set[str], set[str]] | None,
 ) -> str:
     lines: list[str] = []
     today = datetime.now(tz=timezone.utc).date()
     since = today - timedelta(days=days - 1)
 
+    coarse_count = sum(1 for r in by_hook.values() if r.get("coarse"))
     lines.append(_render_header("bypass-review: Hook Fire-Rate Report (issue #710)"))
     lines.append(f"  Period : {since} → {today} (last {days} day{'s' if days != 1 else ''})")
     lines.append(f"  Source : {telemetry_dir}")
-    lines.append(f"  Hooks fired : {len(by_hook)}")
-    lines.append("  Scope  : PreToolUse(Bash) dispatch group only (hot-path MVP ceiling)")
+    lines.append(f"  Hooks fired : {len(by_hook)}  ({coarse_count} coarse)")
+    lines.append("  Scope  : Bash dispatch group = rich (block/ask/advise/pass);")
+    lines.append("           other @fail_open hooks = coarse (block/pass only)")
 
     if not by_hook:
+        # Empty window: nothing fired. Intentionally NOT listing the whole roster
+        # as 'never fired' — zero events means 'no telemetry yet', not 'all dead'.
         lines.append("\n  No fire events found in the selected period.")
         return "\n".join(lines)
 
     lines.append(_render_header("Per-Hook Fire Counts"))
     col = 34
     lines.append(
-        f"  {'Hook':<{col}}  {'Fires':>5}  {'Block':>5}  {'Ask':>4}  "
+        f"  {'Hook':<{col}}  {'G':>1}  {'Fires':>5}  {'Block':>5}  {'Ask':>4}  "
         f"{'Advise':>6}  {'Pass':>5}  {'Sess':>4}  Last Seen"
     )
     lines.append(
-        f"  {'─' * col}  {'─' * 5}  {'─' * 5}  {'─' * 4}  {'─' * 6}  "
+        f"  {'─' * col}  {'─' * 1}  {'─' * 5}  {'─' * 5}  {'─' * 4}  {'─' * 6}  "
         f"{'─' * 5}  {'─' * 4}  {'─' * 10}"
     )
     for hook in sorted(by_hook, key=lambda h: by_hook[h]["fires"], reverse=True):
         r = by_hook[hook]
         last_seen = (r["last_seen"] or "")[:10] or "(unknown)"
+        g = "C" if r.get("coarse") else "R"
         lines.append(
-            f"  {hook:<{col}}  {r['fires']:>5}  {r['block']:>5}  {r['ask']:>4}  "
+            f"  {hook:<{col}}  {g:>1}  {r['fires']:>5}  {r['block']:>5}  {r['ask']:>4}  "
             f"{r['advise']:>6}  {r['pass']:>5}  {len(r['sessions']):>4}  {last_seen}"
         )
+    lines.append("")
+    lines.append(
+        "  G: R=rich (Bash dispatch group — full decision granularity).\n"
+        "     C=coarse (standalone @fail_open hook): Block counts EXIT-CODE-2\n"
+        "     blocks only. Stop / UserPromptSubmit hooks block via a stdout JSON\n"
+        "     `decision` field while exiting 0 — those blocks are invisible here\n"
+        "     and fold into Pass (so coarse Block is a lower bound). ask/advise\n"
+        "     also fold into Pass; session id is absent. A coarse 'Fires' count\n"
+        "     ≈ how often the hook's matcher matched, not how often it engaged."
+    )
 
-    # ── Never-fired set (against the Bash-group roster) ──
-    lines.append(_render_header("Never Fired (Bash-group roster − hooks above)"))
+    # ── Never-fired set (instrumentable roster only) ──
+    lines.append(_render_header("Never Fired (instrumentable roster − hooks above)"))
     if roster is None:
         lines.append("  (manifest unavailable — pass --manifest PATH to compute this set)")
     else:
-        never = sorted(roster - set(by_hook))
+        instrumentable, uninstrumentable = roster
+        never = sorted(instrumentable - set(by_hook))
         if not never:
-            lines.append("  (none — every dispatched Bash-group hook fired in this window)")
+            lines.append("  (none — every instrumentable hook fired in this window)")
         else:
-            lines.append(f"  {len(never)} hook(s) in the group never fired:")
+            lines.append(f"  {len(never)} instrumentable hook(s) never fired:")
             for name in never:
                 lines.append(f"    · {name}")
             lines.append("")
             lines.append(
-                "  Caveat: this roster is host-blind — a hook restricted via the\n"
-                "  manifest `hosts` field never fires on a platform it excludes (by\n"
-                "  design), so on a non-claude install it shows here as a false\n"
-                "  'never fired'. Cross-check `hosts` before treating one as dead.")
+                "  Caveat 1 (host-blind): a hook restricted via the manifest `hosts`\n"
+                "  field never fires on a platform it excludes (by design), so on a\n"
+                "  non-claude install it shows here as a false 'never fired'.\n"
+                "  Caveat 2 (rare-but-critical): a low-base-rate guard (e.g. a\n"
+                "  force-push block) may correctly fire ~never — absence here is NOT\n"
+                "  sufficient grounds to prune. Cross-check `hosts` + intent first.")
+
+        # Uninstrumentable hooks are listed separately — they can NEVER produce a
+        # fire event, so conflating them with 'never fired' would mislabel live
+        # shell hooks as dead-prune candidates (codex #714 P2).
+        if uninstrumentable:
+            lines.append("")
+            lines.append(_render_header("Uninstrumented (shell hooks — never recorded)"))
+            lines.append(
+                f"  {len(uninstrumentable)} shell (.sh) hook(s) have no @fail_open /"
+                " dispatch\n  chokepoint, so they emit NO fire events and are EXCLUDED"
+                " from the\n  never-fired set above. Their activity cannot be judged"
+                " from this report:")
+            for name in sorted(uninstrumentable):
+                lines.append(f"    · {name}")
     lines.append("")
     lines.append(
-        "  Ceiling: only the PreToolUse(Bash) dispatch group is instrumented\n"
-        "  (issue #710 hot-path MVP). Hooks on Stop / UserPromptSubmit /\n"
-        "  PostToolUse / SessionStart run standalone and are not counted here."
+        "  Ceiling: coverage spans every hook that uses the @fail_open decorator\n"
+        "  (the praxis convention) plus the Bash dispatch group. Shell (.sh) hooks\n"
+        "  are uninstrumented and listed separately above."
     )
     return "\n".join(lines)
 
@@ -850,7 +915,7 @@ def run_fire_rate(args: argparse.Namespace, telemetry_dir: Path) -> int:
     manifest_path = (
         Path(args.manifest_path) if args.manifest_path else default_manifest_path()
     )
-    roster = bash_group_roster(manifest_path)
+    roster = roster_split(manifest_path)
     print(render_fire_report(by_hook, args.days, telemetry_dir, roster))
     return 0
 
