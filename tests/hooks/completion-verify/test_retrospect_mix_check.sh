@@ -2021,6 +2021,16 @@ $(mk_user_turn "무리하지 마세요")
 $(mk_assistant "$SL29D_TEXT")"
 run_case "SL29d_pass_critic_notrun_benign_korean_imperatives" "pass" "$SL29D_TRANSCRIPT"
 
+# SL29e: pass — the ASCII-anchored 'I said' marker must not match 'AI said …'
+# (substring 'I said ' inside 'AI said '). Guards the codex PR #717 word-boundary
+# finding: a low-friction retrospect narrating "AI said it was done" must not block.
+SL29E_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL29E_TRANSCRIPT="$(mk_user_turn "the AI said it was done")
+$(mk_user_turn "AI said it finished the task")
+$(mk_assistant "$SL29E_TEXT")"
+run_case "SL29e_pass_critic_notrun_ai_said_not_anchored_match" "pass" "$SL29E_TRANSCRIPT"
+
 # SL30: pass — when the critic tier actually ran (critic_diff records a checked
 # result), user corrections in the transcript do not trip Gate-8c.
 SL30_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")

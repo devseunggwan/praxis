@@ -167,7 +167,20 @@ restricted to explicit multi-word redirect/correction phrases (`그거 말고`,
 `I said …`, etc.). Generic Korean imperatives are deliberately excluded — bare
 `하지 마` matches benign `걱정하지 마세요`, `라니까` matches `사실이라니까`, bare
 `왜 .*했어` matches `왜 왔어` (codex PR #717) — and the set is empirically
-verified to match 0/9 benign phrasings and 8/8 genuine corrections. The `>1` tolerance absorbs a single stray strong marker, so
+verified to match 0/9 benign phrasings and 8/8 genuine corrections. ASCII tokens
+that could appear as a substring of a longer word are boundary-anchored: the
+`I said` marker is written `(^|[^A-Za-z])I said` (with a trailing space in the
+literal) so it does not fire on `AI said it was done` (codex PR #717).
+
+**Threat-model boundary.** `sl_strong_correction_re` is a best-effort precision
+floor, not an exhaustive enumeration of every benign phrase in every language — a
+hand-rolled correction regex has effectively unbounded corner cases. The design
+accepts that: the `>1` tolerance is the structural backstop (a single stray match
+never blocks), and the consequence of a residual false positive is only that a
+genuinely low-friction retrospect must run the READ-ONLY critic once. New benign
+false-positive reports are handled by adding the phrase to the exclusion set plus
+a regression case, not by claiming the regex is exhaustive. The `>1` tolerance
+absorbs a single stray strong marker, so
 a session with exactly one genuine correction may still legitimately mark
 `not-run` (an accepted recall gap that avoids single-marker false blocks). The
 check is guarded by an empty-`GATE8_VIOLATION` test so a more specific Gate-8b
@@ -334,11 +347,12 @@ plus 11 synthetic regression fixtures:
    ledger → pass; SL7 inline mention (no real fence) → block; SL8 Stage-4
    Actions Executed without ledger → pass (carve-out); SL27 missing
    critic_diff → block
-- 6 Gate-8c critic self-skip floor (issue #715): SL28 critic_diff not-run +
+- 7 Gate-8c critic self-skip floor (issue #715): SL28 critic_diff not-run +
    2 explicit corrections → block; SL29 not-run + no correction → pass;
    SL29b not-run + exactly 1 explicit correction → pass (>1 tolerance boundary);
    SL29c not-run + 2 benign EN markers (no/stop) → pass (tighter regex excludes);
    SL29d not-run + 2 benign KO imperatives (걱정하지 마세요) → pass (codex #717);
+   SL29e not-run + 2 'AI said …' (anchored I-said no match) → pass (codex #717);
    SL30 critic ran (none|checked) + 2 corrections → pass
 
 ### Category counts (memory_hygiene, output_quality)
