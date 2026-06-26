@@ -696,30 +696,39 @@ else
     # works (external signal, not self-feedback), so an agent must not be free to
     # self-skip it whenever real agent-caused friction exists. The tier predicate
     # (stage1-2-analysis.md) fires when a friction_event required user correction;
-    # a live user-correction marker therefore means the predicate SHOULD have
-    # fired. Block a 'critic_diff: not-run' that coexists with live user-correction
-    # markers — this converts the verbatim-brief / run-the-critic guidance from
-    # unenforced self-feedback into a deterministic format gate. Keyed on
-    # user-correction only (not tool-error signals), reusing Gate-8b's
-    # GATE8_SIGNAL_TOLERANCE (>1) and its shared user-correction regex.
+    # block a 'critic_diff: not-run' that coexists with live user-correction
+    # markers — this converts the run-the-critic guidance from unenforced
+    # self-feedback into a deterministic format gate.
     #
-    # PRECISION CAVEAT (do not overstate): that regex is broad — it matches bare
-    # "no"/"stop"/"다시" and so fires on benign phrasings ("no problem", "다시
-    # 설명해줘") on a user turn. Because Gate-8c scans the WHOLE retrospected
-    # session, any non-trivial multi-turn session will usually accumulate >1 such
-    # marker. The practical effect is a FORCING FUNCTION: on a busy session the
-    # external critic must actually run (critic_diff != not-run), and 'not-run' is
-    # reserved for near-trivial / genuinely quiet sessions. This is deliberate and
-    # #715-aligned (default to running the only mechanism with teeth), NOT a
-    # high-precision correction detector — the >1 tolerance only absorbs a single
-    # stray marker, so a session with exactly one genuine correction may still
-    # legitimately mark not-run (a recall gap accepted to avoid single-marker false
-    # blocks). Guarded by -z GATE8_VIOLATION so a more specific Gate-8b laundering
-    # message wins.
+    # PRECISION: Gate-8c uses a TIGHTER regex than Gate-8b's broad
+    # sl_user_correction_re. Gate-8b is double-guarded by sl_clean_like, so its
+    # broad regex (bare "no"/"stop"/"다시") is acceptable there. Gate-8c is a
+    # single condition, so the broad regex would fire on benign phrasings
+    # ("no problem", "다시 설명해줘", "stop the dev server" — a code-reviewer probe
+    # matched 7/7 benign) and, because Gate-8c scans the WHOLE session, force the
+    # critic on any busy session regardless of real correction. Restrict to
+    # explicit multi-word redirect/correction phrases so the floor keys on genuine
+    # correction density, not session length. Threshold reuses
+    # GATE8_SIGNAL_TOLERANCE (>1): one stray strong marker is absorbed, so a single
+    # genuine correction may still mark not-run (accepted recall gap). Guarded by
+    # -z GATE8_VIOLATION so a more specific Gate-8b laundering message wins.
     if [ -z "$GATE8_VIOLATION" ]; then
+      sl_strong_correction_re="그거 아니야|하지 마|그거 말고|그게 아니라|내 말은|라니까|하라고 했잖아|하라니까|왜 .*안 하고|왜 .*했어|that's not what I asked|I said "
+      live_sl_strong_uc_count=$(jq -r --arg re "$sl_strong_correction_re" '
+        def human_text_payload:
+          (.message.content // .content // empty) as $c
+          | if ($c|type) == "array" then
+              $c[]? | if type == "object" then
+                if ((.type? // "text") == "text") then (.text? // empty) else empty end
+              else tostring end
+            elif ($c|type) == "string" then $c
+            else empty end;
+        select(type == "object" and .type != "tool_result" and (.message.role == "user" or .role == "user" or .type == "user") and ([human_text_payload] | join("\n") | test($re; "i"))) | 1
+      ' "$TRANSCRIPT_PATH" 2>/dev/null | wc -l | tr -d '[:space:]')
+      live_sl_strong_uc_count=${live_sl_strong_uc_count:-0}
       sl_critic_line=$(printf '%s\n' "$SLEDGER_BLOCK" | grep -iE '^[[:space:]]*-?[[:space:]]*critic_diff:[[:space:]]*.+' | tail -n 1)
-      if printf '%s\n' "$sl_critic_line" | grep -qiE 'critic_diff:[[:space:]]*not-run' && [ "$live_sl_uc_count" -gt "$GATE8_SIGNAL_TOLERANCE" ]; then
-        GATE8_VIOLATION="critic_diff is 'not-run' but a live transcript scan finds $live_sl_uc_count user-correction marker(s) (tolerance=$GATE8_SIGNAL_TOLERANCE) — the externalized critic tier predicate (a friction_event required user correction) was satisfied, so the tier must actually run, not be self-skipped. Spawn the READ-ONLY critic, brief it with the verbatim worst_agent_failure, and record its diff in critic_diff; 'not-run' is reserved for the genuinely sub-tolerance user-correction path"
+      if printf '%s\n' "$sl_critic_line" | grep -qiE 'critic_diff:[[:space:]]*not-run' && [ "$live_sl_strong_uc_count" -gt "$GATE8_SIGNAL_TOLERANCE" ]; then
+        GATE8_VIOLATION="critic_diff is 'not-run' but a live transcript scan finds $live_sl_strong_uc_count explicit user-correction marker(s) (tolerance=$GATE8_SIGNAL_TOLERANCE) — the externalized critic tier predicate (a friction_event required user correction) was satisfied, so the tier must actually run, not be self-skipped. Spawn the READ-ONLY critic, brief it with the verbatim worst_agent_failure, and record its diff in critic_diff; 'not-run' is reserved for the genuinely sub-tolerance user-correction path"
       fi
     fi
   fi

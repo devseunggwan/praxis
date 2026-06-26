@@ -2000,6 +2000,17 @@ SL29B_TRANSCRIPT="$(mk_user_turn "아니 그거 말고")
 $(mk_assistant "$SL29B_TEXT")"
 run_case "SL29b_pass_critic_notrun_single_user_correction" "pass" "$SL29B_TRANSCRIPT"
 
+# SL29c: pass — precision floor. Two benign user turns that Gate-8b's broad regex
+# WOULD count ("no problem", "stop the dev server") do NOT match Gate-8c's tighter
+# explicit-correction regex, so not-run is not forced. Guards against the
+# session-length-proxy false positive the code-reviewer flagged.
+SL29C_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL29C_TRANSCRIPT="$(mk_user_turn "no problem, take your time")
+$(mk_user_turn "stop the dev server when done")
+$(mk_assistant "$SL29C_TEXT")"
+run_case "SL29c_pass_critic_notrun_benign_markers_excluded" "pass" "$SL29C_TRANSCRIPT"
+
 # SL30: pass — when the critic tier actually ran (critic_diff records a checked
 # result), user corrections in the transcript do not trip Gate-8c.
 SL30_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
