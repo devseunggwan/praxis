@@ -754,21 +754,29 @@ def bash_group_roster(manifest_path: Path) -> set[str] | None:
     """
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        roster: set[str] = set()
+        # isinstance guards: a valid-JSON-but-misstructured manifest (non-dict
+        # hook, non-list entries) must skip the bad item, not crash fire-rate.
+        for hook in manifest.get("hooks", []):
+            if not isinstance(hook, dict):
+                continue
+            name = hook.get("name")
+            if not name:
+                continue
+            entries = hook.get("entries") or [
+                {"event": hook.get("event"), "matcher": hook.get("matcher")}
+            ]
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if (isinstance(entry, dict)
+                        and entry.get("event") == "PreToolUse"
+                        and entry.get("matcher") == "Bash"):
+                    roster.add(name)
+                    break
+        return roster
     except Exception:
         return None
-    roster: set[str] = set()
-    for hook in manifest.get("hooks", []):
-        name = hook.get("name")
-        if not name:
-            continue
-        entries = hook.get("entries") or [
-            {"event": hook.get("event"), "matcher": hook.get("matcher")}
-        ]
-        for entry in entries:
-            if entry.get("event") == "PreToolUse" and entry.get("matcher") == "Bash":
-                roster.add(name)
-                break
-    return roster
 
 
 def render_fire_report(

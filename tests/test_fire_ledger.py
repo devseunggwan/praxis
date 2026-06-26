@@ -162,6 +162,20 @@ def test_bash_group_roster_missing_manifest_returns_none(tmp_path):
     assert cli.bash_group_roster(tmp_path / "nope.json") is None
 
 
+def test_bash_group_roster_malformed_manifest_does_not_crash(tmp_path):
+    """A valid-JSON-but-misstructured manifest skips bad items, never raises."""
+    manifest = {"hooks": [
+        "not-a-dict",                                       # non-dict hook
+        {"name": "good", "event": "PreToolUse", "matcher": "Bash"},
+        {"name": "bad-entries", "entries": "not-a-list"},   # non-list entries
+        {"name": "bad-entry-item", "entries": ["not-a-dict"]},
+    ]}
+    mpath = tmp_path / "manifest.json"
+    mpath.write_text(json.dumps(manifest))
+    # Skips the three malformed items, keeps the one valid Bash hook.
+    assert cli.bash_group_roster(mpath) == {"good"}
+
+
 def test_writer_reader_roundtrip(tmp_path, monkeypatch):
     """End-to-end: writer output -> CLI fire-rate report, no mirrored mock.
 
