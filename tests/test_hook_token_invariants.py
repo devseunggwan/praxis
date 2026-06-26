@@ -83,18 +83,30 @@ def test_reworded_scan_pattern_is_detected(tmp_path):
 
 def test_partial_scan_drift_is_detected(tmp_path):
     # The core strengthening: rewording ONLY the enforcing regex line must be
-    # caught even though bare copies of the token survive elsewhere (docstrings,
-    # comments, deny messages). A plain `token in text` check would pass here.
-    repo = _temp_repo(tmp_path)
-    inv = canary.INVARIANTS[0]  # 'Pre-commit verified:' — appears 5x in scan file
-    scan_file = repo / inv["scan"]
-    text = scan_file.read_text()
-    assert text.count(inv["token"]) > 1  # bare token appears in comments too
-    # Mutate only the enforcing fragment; bare token copies remain in the file.
-    scan_file.write_text(text.replace(inv["scan_pattern"], _SENTINEL))
-    remaining = scan_file.read_text()
-    assert inv["token"] in remaining  # a bare copy still survives...
-    drifts = canary.check(repo=repo)  # ...yet the canary still catches the drift
+    # caught even when a bare copy of the token survives elsewhere (a comment,
+    # docstring, deny message). A plain `token in text` check would pass here.
+    # A synthetic scan/doc pair keeps this decoupled from any production hook
+    # file's comment wording (so an unrelated comment cleanup can't break it).
+    inv = {
+        "token": "Pre-commit verified:",
+        "scan_pattern": "^Pre-commit verified:",
+        "scan": "hooks/example/impl.py",
+        "doc": "hooks/example/spec.md",
+    }
+    scan_file = tmp_path / inv["scan"]
+    doc_file = tmp_path / inv["doc"]
+    scan_file.parent.mkdir(parents=True, exist_ok=True)
+    doc_file.parent.mkdir(parents=True, exist_ok=True)
+    # A bare token copy (prose comment) alongside the enforcing regex line.
+    scan_file.write_text(
+        "# deny message mentions Pre-commit verified: in prose\n"
+        'PATTERN = re.compile(r"^Pre-commit verified:[ \\t]*\\S")\n'
+    )
+    doc_file.write_text("Add a `Pre-commit verified:` line.\n")
+    # Reword only the enforcing fragment; the bare comment copy remains.
+    scan_file.write_text(scan_file.read_text().replace(inv["scan_pattern"], _SENTINEL))
+    assert inv["token"] in scan_file.read_text()  # a bare copy still survives...
+    drifts = canary.check(repo=tmp_path, invariants=[inv])  # ...yet drift is caught
     assert any(inv["token"] in d and "scan side" in d for d in drifts)
 
 
