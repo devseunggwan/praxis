@@ -73,6 +73,19 @@ FIELD_TOOL_RESULT_STATUS = "tool_result_status"
 STATUS_ERROR = "error"
 UNKNOWN = "(unknown)"
 
+# ---------------------------------------------------------------------------
+# Fire-event field names (issue #710) — cited verbatim from
+# hooks/_lib/_fire_ledger.py record_group_fires()
+# ---------------------------------------------------------------------------
+F_FIRE_TIMESTAMP = "timestamp"
+F_FIRE_SESSION = "session_id"
+F_FIRE_TOOL = "tool"
+F_FIRE_HOOK = "hook"
+F_FIRE_ROLE = "role"
+F_FIRE_DECISION = "decision"
+
+_FIRE_DECISIONS = ("block", "ask", "advise", "pass")
+
 _INLINE_ENV_TOKEN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _ENV_OPTIONS_WITH_VALUE = {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}
 _BYPASS_PREFIXES = (
@@ -95,6 +108,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Reads ~/.praxis/telemetry/bypass-events-YYYY-MM-DD.jsonl files."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "mode",
+        nargs="?",
+        default="bypass",
+        choices=["bypass", "fire-rate"],
+        help=(
+            "Report mode: 'bypass' (default — bypass-events) or 'fire-rate' "
+            "(hook fire ledger from fire-events, issue #710)"
+        ),
+    )
+    parser.add_argument(
+        "--manifest",
+        dest="manifest_path",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Path to hooks/manifest.json for the 'never fired' roster in "
+            "fire-rate mode (default: resolved relative to this CLI's repo)"
+        ),
     )
     parser.add_argument(
         "-d", "--days",
@@ -649,6 +682,172 @@ def _render_error_events(lines: list[str], error_events: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Fire-rate mode (issue #710) — hook fire ledger from fire-events JSONL
+# ---------------------------------------------------------------------------
+
+def load_fire_events(telemetry_dir: Path, days: int) -> list[dict]:
+    """Load valid JSONL records from the last N days of fire-events files."""
+    events: list[dict] = []
+    for date_str in date_range(days):
+        path = telemetry_dir / f"fire-events-{date_str}.jsonl"
+        if not path.is_file():
+            continue
+        try:
+            with path.open(encoding="utf-8") as fh:
+                for raw_line in fh:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(record, dict):
+                        events.append(record)
+        except OSError:
+            continue
+    return events
+
+
+def aggregate_fires(events: list[dict]) -> dict[str, dict]:
+    """Per-hook fire aggregation: counts by decision, sessions, last seen.
+
+    Returns dict[hook_name] -> {role, fires, block, ask, advise, pass,
+    sessions: set[str], last_seen: str}.
+    """
+    by_hook: dict[str, dict] = {}
+    for ev in events:
+        hook = ev.get(F_FIRE_HOOK)
+        if not isinstance(hook, str) or not hook:
+            continue
+        row = by_hook.setdefault(hook, {
+            "role": ev.get(F_FIRE_ROLE) or UNKNOWN,
+            "fires": 0, "block": 0, "ask": 0, "advise": 0, "pass": 0,
+            "sessions": set(), "last_seen": "",
+        })
+        row["fires"] += 1
+        decision = ev.get(F_FIRE_DECISION)
+        if decision in _FIRE_DECISIONS:
+            row[decision] += 1
+        session = ev.get(F_FIRE_SESSION)
+        if isinstance(session, str) and session:
+            row["sessions"].add(session)
+        ts = ev.get(F_FIRE_TIMESTAMP)
+        if isinstance(ts, str) and ts > row["last_seen"]:
+            row["last_seen"] = ts
+    return by_hook
+
+
+def default_manifest_path() -> Path:
+    """hooks/manifest.json resolved relative to this CLI's real (de-symlinked) path."""
+    # __file__ is symlinked from ~/.local/bin into the repo's skills/bypass-review/.
+    # resolve() follows the symlink; parents[2] is the repo root.
+    return Path(__file__).resolve().parents[2] / "hooks" / "manifest.json"
+
+
+def bash_group_roster(manifest_path: Path) -> set[str] | None:
+    """Return hook names dispatched in the PreToolUse(Bash) group, or None.
+
+    The fire-ledger (issue #710) instruments only that group, so the
+    'never fired' set is computed against this roster — not all 64 hooks.
+    Returns None if the manifest can't be read (never-fired then omitted).
+    """
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    roster: set[str] = set()
+    for hook in manifest.get("hooks", []):
+        name = hook.get("name")
+        if not name:
+            continue
+        entries = hook.get("entries") or [
+            {"event": hook.get("event"), "matcher": hook.get("matcher")}
+        ]
+        for entry in entries:
+            if entry.get("event") == "PreToolUse" and entry.get("matcher") == "Bash":
+                roster.add(name)
+                break
+    return roster
+
+
+def render_fire_report(
+    by_hook: dict[str, dict],
+    days: int,
+    telemetry_dir: Path,
+    roster: set[str] | None,
+) -> str:
+    lines: list[str] = []
+    today = datetime.now(tz=timezone.utc).date()
+    since = today - timedelta(days=days - 1)
+
+    lines.append(_render_header("bypass-review: Hook Fire-Rate Report (issue #710)"))
+    lines.append(f"  Period : {since} → {today} (last {days} day{'s' if days != 1 else ''})")
+    lines.append(f"  Source : {telemetry_dir}")
+    lines.append(f"  Hooks fired : {len(by_hook)}")
+    lines.append("  Scope  : PreToolUse(Bash) dispatch group only (hot-path MVP ceiling)")
+
+    if not by_hook:
+        lines.append("\n  No fire events found in the selected period.")
+        return "\n".join(lines)
+
+    lines.append(_render_header("Per-Hook Fire Counts"))
+    col = 34
+    lines.append(
+        f"  {'Hook':<{col}}  {'Fires':>5}  {'Block':>5}  {'Ask':>4}  "
+        f"{'Advise':>6}  {'Pass':>5}  {'Sess':>4}  Last Seen"
+    )
+    lines.append(
+        f"  {'─' * col}  {'─' * 5}  {'─' * 5}  {'─' * 4}  {'─' * 6}  "
+        f"{'─' * 5}  {'─' * 4}  {'─' * 10}"
+    )
+    for hook in sorted(by_hook, key=lambda h: by_hook[h]["fires"], reverse=True):
+        r = by_hook[hook]
+        last_seen = (r["last_seen"] or "")[:10] or "(unknown)"
+        lines.append(
+            f"  {hook:<{col}}  {r['fires']:>5}  {r['block']:>5}  {r['ask']:>4}  "
+            f"{r['advise']:>6}  {r['pass']:>5}  {len(r['sessions']):>4}  {last_seen}"
+        )
+
+    # ── Never-fired set (against the Bash-group roster) ──
+    lines.append(_render_header("Never Fired (Bash-group roster − hooks above)"))
+    if roster is None:
+        lines.append("  (manifest unavailable — pass --manifest PATH to compute this set)")
+    else:
+        never = sorted(roster - set(by_hook))
+        if not never:
+            lines.append("  (none — every dispatched Bash-group hook fired in this window)")
+        else:
+            lines.append(f"  {len(never)} hook(s) in the group never fired:")
+            for name in never:
+                lines.append(f"    · {name}")
+            lines.append("")
+            lines.append(
+                "  Caveat: this roster is host-blind — a hook restricted via the\n"
+                "  manifest `hosts` field never fires on a platform it excludes (by\n"
+                "  design), so on a non-claude install it shows here as a false\n"
+                "  'never fired'. Cross-check `hosts` before treating one as dead.")
+    lines.append("")
+    lines.append(
+        "  Ceiling: only the PreToolUse(Bash) dispatch group is instrumented\n"
+        "  (issue #710 hot-path MVP). Hooks on Stop / UserPromptSubmit /\n"
+        "  PostToolUse / SessionStart run standalone and are not counted here."
+    )
+    return "\n".join(lines)
+
+
+def run_fire_rate(args: argparse.Namespace, telemetry_dir: Path) -> int:
+    events = load_fire_events(telemetry_dir, args.days)
+    by_hook = aggregate_fires(events)
+    manifest_path = (
+        Path(args.manifest_path) if args.manifest_path else default_manifest_path()
+    )
+    roster = bash_group_roster(manifest_path)
+    print(render_fire_report(by_hook, args.days, telemetry_dir, roster))
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -663,6 +862,9 @@ def main(argv: list[str] | None = None) -> int:
         telemetry_dir = Path(args.telemetry_dir)
     else:
         telemetry_dir = Path.home() / ".praxis" / "telemetry"
+
+    if args.mode == "fire-rate":
+        return run_fire_rate(args, telemetry_dir)
 
     events = load_events(telemetry_dir, args.days)
     agg = aggregate(events)
