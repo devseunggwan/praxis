@@ -690,6 +690,29 @@ else
     if [ "$sl_clean_like" = "true" ] && [ "$live_sl_signal_count" -gt "$GATE8_SIGNAL_TOLERANCE" ]; then
       GATE8_VIOLATION="suppression_ledger claims a clean/no-failure path while a live transcript scan finds $live_sl_signal_count adverse signal(s) (tool_event=$live_sl_tool_signal_count is_error=$live_sl_ie_count content_error=$live_sl_ce_count user_correction_marker=$live_sl_uc_count, tolerance=$GATE8_SIGNAL_TOLERANCE) — re-run the self-incrimination pass and surface or justify the signals instead of laundering them as none-found"
     fi
+
+    # [issue #715] Gate-8c (Critic self-skip floor). The externalized critic tier
+    # is the only anti-concealment mechanism the self-correction literature shows
+    # works (external signal, not self-feedback), so an agent must not be free to
+    # self-skip it whenever real agent-caused friction exists. The tier predicate
+    # (stage1-2-analysis.md) fires when a friction_event required user correction;
+    # a live user-correction marker therefore means the predicate SHOULD have
+    # fired. Block a 'critic_diff: not-run' that coexists with live user-correction
+    # markers — this converts the verbatim-brief / run-the-critic guidance from
+    # unenforced self-feedback into a deterministic format gate. Keyed on
+    # user-correction only (not tool-error signals) to map 1:1 to the predicate's
+    # "user correction required" clause. Threshold reuses GATE8_SIGNAL_TOLERANCE
+    # (>1) for parity with Gate-8b: the user-correction regex is broad (matches
+    # "다시"/"no"/"stop"), so a single stray marker stays within tolerance and only
+    # a genuine multi-correction session trips the floor — minimising false
+    # positives. Guarded by -z GATE8_VIOLATION so a more specific Gate-8b laundering
+    # message wins.
+    if [ -z "$GATE8_VIOLATION" ]; then
+      sl_critic_line=$(printf '%s\n' "$SLEDGER_BLOCK" | grep -iE '^[[:space:]]*-?[[:space:]]*critic_diff:[[:space:]]*.+' | tail -n 1)
+      if printf '%s\n' "$sl_critic_line" | grep -qiE 'critic_diff:[[:space:]]*not-run' && [ "$live_sl_uc_count" -gt "$GATE8_SIGNAL_TOLERANCE" ]; then
+        GATE8_VIOLATION="critic_diff is 'not-run' but a live transcript scan finds $live_sl_uc_count user-correction marker(s) (tolerance=$GATE8_SIGNAL_TOLERANCE) — the externalized critic tier predicate (a friction_event required user correction) was satisfied, so the tier must actually run, not be self-skipped. Spawn the READ-ONLY critic, brief it with the verbatim worst_agent_failure, and record its diff in critic_diff; 'not-run' is reserved for the genuinely sub-tolerance user-correction path"
+      fi
+    fi
   fi
 fi
 fi

@@ -49,6 +49,7 @@ of the following hold:
 | Gate-7 value mismatch: `transcript_receipt` fence declares `is_error_count` or `user_turn_count` that diverges from a live grep of the transcript by more than 1 | Receipt was transcribed verbatim from the compaction summary rather than re-derived this turn (presence ≠ freshness) |
 | Gate-8 (issues #699, #702): the Stage 3 report has no `retrospect:suppression_ledger` fence, has more than one, has a malformed (unterminated/nested) one, or the fence lacks a `worst_agent_failure:`, `self_adversarial:`, or `critic_diff:` line | The Stage 2 self-incrimination pass / conditional externalized critic re-scan record is missing — the painful agent-caused friction the analyzing context is most motivated to bury was never surfaced for audit. Mandatory on every path incl. the clean one. Skipped only once Stage 4 (`## Actions Executed`) is reached for the latest report |
 | Gate-8b (issue #701): `suppression_ledger` claims a clean/no-failure path while a live transcript scan finds more than one deterministic adverse signal | The ledger exists but launders away visible evidence. The hook re-derives `is_error:true`, content-error syntax, and documented `user_correction` markers on user turns before trusting clean ledger language |
+| Gate-8c (issue #715): `critic_diff: not-run` while a live transcript scan finds more than one `user_correction` marker | The externalized critic tier — the only anti-concealment mechanism that survives the self-correction literature — was self-skipped in exactly the case its predicate ("a friction_event required user correction") was satisfied. Converts the run-the-critic guidance from unenforced self-feedback into a deterministic format gate |
 
 ### Gate-7 value check (issue #671)
 
@@ -127,6 +128,39 @@ tolerance, so one record that carries multiple matching nested `tool_result`
 blocks still counts as one adverse tool event. This is a floor, not full
 semantic judgment: the hook does not decide whether every marker is a true
 correction, but it prevents the ledger from claiming that no signal existed.
+
+### Gate-8c critic self-skip floor (issue #715)
+
+Gate-8b closes the case where the ledger claims a *clean* path. It does **not**
+cover the subtler concealment where the ledger names a (possibly minor)
+`worst_agent_failure:` — so `sl_clean_like` is false and Gate-8b stays quiet —
+while marking `critic_diff: not-run` to skip the externalized critic tier.
+The self-correction literature that motivates issue #715 (intrinsic
+self-correction without an external signal does not reliably work; the
+bottleneck is error *detection*) makes that tier the one mechanism with teeth.
+Leaving the decision to run it as prose guidance re-creates the exact
+self-feedback dependency the literature says fails.
+
+Gate-8c runs after Gate-8b inside the well-formed-fence branch and reuses the
+already-derived `user_correction` count (`live_sl_uc_count`). It blocks when
+**both** hold:
+
+| Condition | Derivation |
+|-----------|------------|
+| `critic_diff:` value starts with `not-run` | last `critic_diff:` line inside the ledger fence matches `critic_diff:[[:space:]]*not-run` |
+| live `user_correction` count exceeds tolerance (`1`) | same `jq` count of negation/redirect/mismatch markers on user turns that Gate-8b uses |
+
+The critic tier predicate (`stage1-2-analysis.md`) fires when a
+`friction_event` required user correction, so a live user-correction count over
+tolerance means the predicate was satisfied and `not-run` is a self-skip, not a
+legitimate skip. The threshold mirrors Gate-8b's tolerance because the
+`user_correction` regex is broad (`다시`/`no`/`stop`): a single stray marker
+stays within tolerance and only a genuine multi-correction session trips the
+floor. The check is guarded by an empty-`GATE8_VIOLATION` test so a more
+specific Gate-8b laundering message keeps precedence. Like Gate-8b this is a
+floor, not semantic judgment: it cannot tell which named failure is the worst,
+but it removes the agent's discretion to skip the external auditor when the
+transcript proves real user-visible friction occurred.
 
 ### Issue #666 — retrospect-active Stage-3 fence-omission gate
 
@@ -286,6 +320,9 @@ plus 11 synthetic regression fixtures:
    ledger → pass; SL7 inline mention (no real fence) → block; SL8 Stage-4
    Actions Executed without ledger → pass (carve-out); SL27 missing
    critic_diff → block
+- 3 Gate-8c critic self-skip floor (issue #715): SL28 critic_diff not-run +
+   2 user corrections → block; SL29 not-run + no user correction → pass;
+   SL30 critic ran (none|checked) + 2 user corrections → pass
 
 ### Category counts (memory_hygiene, output_quality)
 
