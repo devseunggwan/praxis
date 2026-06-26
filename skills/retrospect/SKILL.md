@@ -175,7 +175,10 @@ guaranteed slot that does NOT consume the 5-event `friction_events` cap, and a
 failure with no `user_correction` marker or no `self_correction` signature match
 is still in scope. An agent-caused, user-visible-impact failure may not be
 self-downgraded to `note only` (severity-honesty floor). The result is recorded
-in the Stage 3 `retrospect:suppression_ledger` fence. Full rules in
+in the Stage 3 `retrospect:suppression_ledger` fence. Only the fence *format* is
+hook-enforceable; judging which item is most painful is a self-feedback step and
+does **not** mechanize (issue #715) — the externalized critic tier below is the
+enforcing external signal, not a smarter self-check. Full rules in
 [`references/stage1-2-analysis.md`](references/stage1-2-analysis.md).
 
 **Externalized critic re-scan tier (conditional, issue #702):** after MEMORY

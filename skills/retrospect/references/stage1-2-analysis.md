@@ -263,6 +263,21 @@ Rules:
   allowed only with an explicit `disposition: justified-drop` reason; a silent
   drop is a Red Flag.
 
+**Limits — what is mechanizable vs what is not (issue #715):** Only the *format*
+of this pass is hook-enforceable: the `retrospect:suppression_ledger` and
+`retrospect:distribution` fences must be present with their required lines, and
+the `## Actions Executed` marker must appear. The *semantic* judgment this pass turns
+on — "is this actually the single most painful item, and did a positive learning
+quietly take its slot?" — is **not** hook-enforceable; it stays a self-feedback
+step even when wrapped in a hook. Four consecutive recurrences of the
+"hid the painful part" failure, plus the self-correction literature (intrinsic
+self-correction without an external signal does not reliably work and can degrade
+output; the bottleneck is error *detection*, not correction), establish that
+adding more self-check prose to this family does not enforce it. Do not keep
+refining self-prompts here — the leverage is the **external** signal (the
+externalized critic tier below, or the user's "you hid it?" probe), not a smarter
+self-instruction.
+
 ### Externalized critic re-scan tier (conditional, issue #702)
 
 The self-incrimination pass still runs inside the same context that made the
@@ -315,11 +330,16 @@ available read-only review/debate agent. The brief must include:
 
 - transcript / scope window identifier
 - the five pre-scan lanes
-- the self-incrimination pass output
+- the self-incrimination pass output, carried **verbatim** — do not paraphrase,
+  summarize, or soften the candidate #1-damage wording before it reaches the
+  critic. A sanitized brief turns the critic into an echo chamber (issue #715):
+  it can only ratify framing it was never allowed to see.
 - the current self-selected friction set
-- the instruction: "Find only agent-caused failures the analyzing agent might
-  minimize, omit, or soften. Do not propose fixes. Do not mutate files or
-  external state."
+- the instruction: "Find agent-caused failures the analyzing agent might
+  minimize, omit, or soften, and judge **how bad the worst one is** — did a
+  positive learning take the #1-damage slot? Record that severity judgment in
+  the candidate's `why_self_serving_bias_risk` cell; do not ask 'is this a good
+  learning'. Do not propose fixes. Do not mutate files or external state."
 
 The critic's job is not to re-run Stage 2. It produces a narrow diff oracle:
 
