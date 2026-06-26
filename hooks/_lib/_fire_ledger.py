@@ -121,7 +121,17 @@ def record_group_fires(members, results, payload_raw: str) -> None:
             return
         path = resolve_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write("\n".join(lines) + "\n")
+        # Per-line atomic append (not one big write): O_APPEND makes each
+        # write() atomic up to PIPE_BUF, and one fire record (~150-250 B) is far
+        # under PIPE_BUF (>=4096), so concurrent dispatchers can't tear a line.
+        # Whole-line interleaving across processes is harmless — the reader is
+        # line-oriented JSONL. A single joined write of all N members (~5 KB)
+        # WOULD exceed PIPE_BUF and risk torn lines, so we write per line.
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            for line in lines:
+                os.write(fd, (line + "\n").encode("utf-8"))
+        finally:
+            os.close(fd)
     except Exception:
         pass  # fail-open — never break the dispatcher
