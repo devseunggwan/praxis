@@ -713,7 +713,11 @@ else
     # genuine correction may still mark not-run (accepted recall gap). Guarded by
     # -z GATE8_VIOLATION so a more specific Gate-8b laundering message wins.
     if [ -z "$GATE8_VIOLATION" ]; then
-      sl_strong_correction_re="그거 아니야|하지 마|그거 말고|그게 아니라|내 말은|라니까|하라고 했잖아|하라니까|왜 .*안 하고|왜 .*했어|that's not what I asked|I said "
+      # Each token must be an UNAMBIGUOUS redirect/correction of the agent, not a
+      # generic Korean imperative. Excluded as too broad (codex PR #717 review):
+      # '하지 마' ("don't <verb>") matches benign 걱정하지 마세요 / 무리하지 마세요;
+      # '라니까' matches benign 사실이라니까; bare '왜 .*했어' matches benign 왜 왔어.
+      sl_strong_correction_re="그거 아니야|그거 말고|그게 아니라|내 말은|하라고 했잖아|하라니까|왜 .*안 하고|that's not what I asked|I said "
       live_sl_strong_uc_count=$(jq -r --arg re "$sl_strong_correction_re" '
         def human_text_payload:
           (.message.content // .content // empty) as $c

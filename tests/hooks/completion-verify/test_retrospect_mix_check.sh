@@ -2011,6 +2011,16 @@ $(mk_user_turn "stop the dev server when done")
 $(mk_assistant "$SL29C_TEXT")"
 run_case "SL29c_pass_critic_notrun_benign_markers_excluded" "pass" "$SL29C_TRANSCRIPT"
 
+# SL29d: pass — benign Korean imperatives/encouragement ("걱정하지 마세요",
+# "무리하지 마세요") must NOT count as corrections. Guards the codex PR #717
+# finding that bare "하지 마" matched benign "don't worry"-style Korean.
+SL29D_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL29D_TRANSCRIPT="$(mk_user_turn "걱정하지 마세요")
+$(mk_user_turn "무리하지 마세요")
+$(mk_assistant "$SL29D_TEXT")"
+run_case "SL29d_pass_critic_notrun_benign_korean_imperatives" "pass" "$SL29D_TRANSCRIPT"
+
 # SL30: pass — when the critic tier actually ran (critic_diff records a checked
 # result), user corrections in the transcript do not trip Gate-8c.
 SL30_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
