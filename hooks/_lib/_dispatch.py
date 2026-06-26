@@ -147,14 +147,39 @@ def run_one(role: str, name: str, impl: Path, payload_raw: str) -> tuple[int, st
     return rc, out.getvalue(), err.getvalue()
 
 
+def _record_fires(members, results, payload_raw: str) -> None:
+    """Log each member's fire decision (issue #710). Fail-open, never raises.
+
+    Lazily imports `_fire_ledger` so a missing/broken module can never break the
+    dispatcher — fire telemetry is observe-only.
+    """
+    try:
+        import _fire_ledger  # type: ignore[import-not-found]
+        _fire_ledger.record_group_fires(members, results, payload_raw)
+    except Exception:
+        pass
+
+
 def run_group(
     event: str, matcher: str, payload_raw: str, host: Optional[str] = None
 ) -> int:
     """Run the whole (event, matcher) group; emit one decision; return its exit code."""
-    results = [
-        run_one(role, name, impl, payload_raw)
-        for role, name, impl in group_members(event, matcher, host)
-    ]
+    # Mark this process as the dispatcher so the fail_open-level coarse recorder
+    # (issue #710 coverage expansion) skips the Bash-group members run below —
+    # they are recorded richly by _record_fires. Avoids double-counting.
+    try:
+        import _fire_ledger  # type: ignore[import-not-found]
+        _fire_ledger.mark_dispatcher_process()
+    except Exception:
+        pass
+
+    members = group_members(event, matcher, host)
+    results = [run_one(role, name, impl, payload_raw) for role, name, impl in members]
+
+    # Fire telemetry (issue #710): record each member's decision before the
+    # aggregation below. Observe-only and fail-open — the dispatcher's decision
+    # is unaffected.
+    _record_fires(members, results, payload_raw)
 
     # Forward every hook's stderr (advisory nudges and deny reasons alike).
     for _rc, _so, se in results:

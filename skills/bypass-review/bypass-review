@@ -73,6 +73,20 @@ FIELD_TOOL_RESULT_STATUS = "tool_result_status"
 STATUS_ERROR = "error"
 UNKNOWN = "(unknown)"
 
+# ---------------------------------------------------------------------------
+# Fire-event field names (issue #710) — cited verbatim from
+# hooks/_lib/_fire_ledger.py record_group_fires()
+# ---------------------------------------------------------------------------
+F_FIRE_TIMESTAMP = "timestamp"
+F_FIRE_SESSION = "session_id"
+F_FIRE_TOOL = "tool"
+F_FIRE_HOOK = "hook"
+F_FIRE_ROLE = "role"
+F_FIRE_DECISION = "decision"
+F_FIRE_GRANULARITY = "granularity"
+
+_FIRE_DECISIONS = ("block", "ask", "advise", "pass")
+
 _INLINE_ENV_TOKEN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _ENV_OPTIONS_WITH_VALUE = {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}
 _BYPASS_PREFIXES = (
@@ -95,6 +109,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Reads ~/.praxis/telemetry/bypass-events-YYYY-MM-DD.jsonl files."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "mode",
+        nargs="?",
+        default="bypass",
+        choices=["bypass", "fire-rate"],
+        help=(
+            "Report mode: 'bypass' (default — bypass-events) or 'fire-rate' "
+            "(hook fire ledger from fire-events, issue #710)"
+        ),
+    )
+    parser.add_argument(
+        "--manifest",
+        dest="manifest_path",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Path to hooks/manifest.json for the 'never fired' roster in "
+            "fire-rate mode (default: resolved relative to this CLI's repo)"
+        ),
     )
     parser.add_argument(
         "-d", "--days",
@@ -649,6 +683,247 @@ def _render_error_events(lines: list[str], error_events: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Fire-rate mode (issue #710) — hook fire ledger from fire-events JSONL
+# ---------------------------------------------------------------------------
+
+def load_fire_events(telemetry_dir: Path, days: int) -> list[dict]:
+    """Load valid JSONL records from the last N days of fire-events files."""
+    events: list[dict] = []
+    for date_str in date_range(days):
+        path = telemetry_dir / f"fire-events-{date_str}.jsonl"
+        if not path.is_file():
+            continue
+        try:
+            with path.open(encoding="utf-8") as fh:
+                for raw_line in fh:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(record, dict):
+                        events.append(record)
+        except OSError:
+            continue
+    return events
+
+
+def aggregate_fires(events: list[dict]) -> dict[str, dict]:
+    """Per-hook fire aggregation: counts by decision, sessions, last seen.
+
+    Returns dict[hook_name] -> {role, fires, block, ask, advise, pass,
+    sessions: set[str], last_seen: str}.
+    """
+    by_hook: dict[str, dict] = {}
+    for ev in events:
+        hook = ev.get(F_FIRE_HOOK)
+        if not isinstance(hook, str) or not hook:
+            continue
+        row = by_hook.setdefault(hook, {
+            "role": ev.get(F_FIRE_ROLE) or UNKNOWN,
+            "fires": 0, "block": 0, "ask": 0, "advise": 0, "pass": 0,
+            "sessions": set(), "last_seen": "", "coarse": False,
+        })
+        row["fires"] += 1
+        decision = ev.get(F_FIRE_DECISION)
+        if decision in _FIRE_DECISIONS:
+            row[decision] += 1
+        if ev.get(F_FIRE_GRANULARITY) == "coarse":
+            row["coarse"] = True
+        session = ev.get(F_FIRE_SESSION)
+        if isinstance(session, str) and session:
+            row["sessions"].add(session)
+        ts = ev.get(F_FIRE_TIMESTAMP)
+        if isinstance(ts, str) and ts > row["last_seen"]:
+            row["last_seen"] = ts
+    return by_hook
+
+
+def default_manifest_path() -> Path:
+    """hooks/manifest.json resolved relative to this CLI's real (de-symlinked) path."""
+    # __file__ is symlinked from ~/.local/bin into the repo's skills/bypass-review/.
+    # resolve() follows the symlink; parents[2] is the repo root.
+    return Path(__file__).resolve().parents[2] / "hooks" / "manifest.json"
+
+
+def roster_split(manifest_path: Path) -> tuple[set[str], set[str]] | None:
+    """Split manifest hook names into (instrumentable, uninstrumentable).
+
+    The fire-ledger can only record hooks that flow through the Python
+    @fail_open decorator (coarse) or the Bash dispatch group (rich). Shell hooks
+    (`body: impl.sh`) have no such chokepoint, so they can NEVER produce a fire
+    event and must be excluded from the 'never fired' set — otherwise a shell
+    hook that runs every session is mislabelled as a dead-prune candidate.
+
+    Proxy: instrumentable == body is not an `.sh` file (Python impl, which the
+    praxis convention wraps in @fail_open); uninstrumentable == `body` ends
+    `.sh`. Returns None if the manifest can't be read.
+    """
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        instrumentable: set[str] = set()
+        uninstrumentable: set[str] = set()
+        for hook in manifest.get("hooks", []):
+            if not isinstance(hook, dict):
+                continue
+            name = hook.get("name")
+            if not isinstance(name, str) or not name:
+                continue  # non-string name would break sorted() in the report
+            body = hook.get("body") or ""
+            if isinstance(body, str) and body.endswith(".sh"):
+                uninstrumentable.add(name)
+            else:
+                instrumentable.add(name)
+        return instrumentable, uninstrumentable
+    except Exception:
+        return None
+
+
+def bash_group_roster(manifest_path: Path) -> set[str] | None:
+    """Return hook names dispatched in the PreToolUse(Bash) group, or None.
+
+    These are the hooks recorded at RICH granularity (full block/ask/advise/pass)
+    by the central dispatcher. Hooks outside this group are recorded coarsely via
+    fail_open (issue #710 coverage expansion). Returns None if unreadable.
+    """
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        roster: set[str] = set()
+        # isinstance guards: a valid-JSON-but-misstructured manifest (non-dict
+        # hook, non-list entries) must skip the bad item, not crash fire-rate.
+        for hook in manifest.get("hooks", []):
+            if not isinstance(hook, dict):
+                continue
+            name = hook.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            entries = hook.get("entries") or [
+                {"event": hook.get("event"), "matcher": hook.get("matcher")}
+            ]
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if (isinstance(entry, dict)
+                        and entry.get("event") == "PreToolUse"
+                        and entry.get("matcher") == "Bash"):
+                    roster.add(name)
+                    break
+        return roster
+    except Exception:
+        return None
+
+
+def render_fire_report(
+    by_hook: dict[str, dict],
+    days: int,
+    telemetry_dir: Path,
+    roster: tuple[set[str], set[str]] | None,
+) -> str:
+    lines: list[str] = []
+    today = datetime.now(tz=timezone.utc).date()
+    since = today - timedelta(days=days - 1)
+
+    coarse_count = sum(1 for r in by_hook.values() if r.get("coarse"))
+    lines.append(_render_header("bypass-review: Hook Fire-Rate Report (issue #710)"))
+    lines.append(f"  Period : {since} → {today} (last {days} day{'s' if days != 1 else ''})")
+    lines.append(f"  Source : {telemetry_dir}")
+    lines.append(f"  Hooks fired : {len(by_hook)}  ({coarse_count} coarse)")
+    lines.append("  Scope  : Bash dispatch group = rich (block/ask/advise/pass);")
+    lines.append("           other @fail_open hooks = coarse (block/pass only)")
+
+    if not by_hook:
+        # Empty window: nothing fired. Intentionally NOT listing the whole roster
+        # as 'never fired' — zero events means 'no telemetry yet', not 'all dead'.
+        lines.append("\n  No fire events found in the selected period.")
+        return "\n".join(lines)
+
+    lines.append(_render_header("Per-Hook Fire Counts"))
+    col = 34
+    lines.append(
+        f"  {'Hook':<{col}}  {'G':>1}  {'Fires':>5}  {'Block':>5}  {'Ask':>4}  "
+        f"{'Advise':>6}  {'Pass':>5}  {'Sess':>4}  Last Seen"
+    )
+    lines.append(
+        f"  {'─' * col}  {'─' * 1}  {'─' * 5}  {'─' * 5}  {'─' * 4}  {'─' * 6}  "
+        f"{'─' * 5}  {'─' * 4}  {'─' * 10}"
+    )
+    for hook in sorted(by_hook, key=lambda h: by_hook[h]["fires"], reverse=True):
+        r = by_hook[hook]
+        last_seen = (r["last_seen"] or "")[:10] or "(unknown)"
+        g = "C" if r.get("coarse") else "R"
+        lines.append(
+            f"  {hook:<{col}}  {g:>1}  {r['fires']:>5}  {r['block']:>5}  {r['ask']:>4}  "
+            f"{r['advise']:>6}  {r['pass']:>5}  {len(r['sessions']):>4}  {last_seen}"
+        )
+    lines.append("")
+    lines.append(
+        "  G: R=rich (Bash dispatch group — full decision granularity).\n"
+        "     C=coarse (standalone @fail_open hook): Block counts EXIT-CODE-2\n"
+        "     blocks only. Stop / UserPromptSubmit hooks block via a stdout JSON\n"
+        "     `decision` field while exiting 0 — those blocks are invisible here\n"
+        "     and fold into Pass (so coarse Block is a lower bound). ask/advise\n"
+        "     also fold into Pass; session id is absent. A coarse 'Fires' count\n"
+        "     ≈ how often the hook's matcher matched, not how often it engaged."
+    )
+
+    # ── Never-fired set (instrumentable roster only) ──
+    lines.append(_render_header("Never Fired (instrumentable roster − hooks above)"))
+    if roster is None:
+        lines.append("  (manifest unavailable — pass --manifest PATH to compute this set)")
+    else:
+        instrumentable, uninstrumentable = roster
+        never = sorted(instrumentable - set(by_hook))
+        if not never:
+            lines.append("  (none — every instrumentable hook fired in this window)")
+        else:
+            lines.append(f"  {len(never)} instrumentable hook(s) never fired:")
+            for name in never:
+                lines.append(f"    · {name}")
+            lines.append("")
+            lines.append(
+                "  Caveat 1 (host-blind): a hook restricted via the manifest `hosts`\n"
+                "  field never fires on a platform it excludes (by design), so on a\n"
+                "  non-claude install it shows here as a false 'never fired'.\n"
+                "  Caveat 2 (rare-but-critical): a low-base-rate guard (e.g. a\n"
+                "  force-push block) may correctly fire ~never — absence here is NOT\n"
+                "  sufficient grounds to prune. Cross-check `hosts` + intent first.")
+
+        # Uninstrumentable hooks are listed separately — they can NEVER produce a
+        # fire event, so conflating them with 'never fired' would mislabel live
+        # shell hooks as dead-prune candidates (codex #714 P2).
+        if uninstrumentable:
+            lines.append("")
+            lines.append(_render_header("Uninstrumented (shell hooks — never recorded)"))
+            lines.append(
+                f"  {len(uninstrumentable)} shell (.sh) hook(s) have no @fail_open /"
+                " dispatch\n  chokepoint, so they emit NO fire events and are EXCLUDED"
+                " from the\n  never-fired set above. Their activity cannot be judged"
+                " from this report:")
+            for name in sorted(uninstrumentable):
+                lines.append(f"    · {name}")
+    lines.append("")
+    lines.append(
+        "  Ceiling: coverage spans every hook that uses the @fail_open decorator\n"
+        "  (the praxis convention) plus the Bash dispatch group. Shell (.sh) hooks\n"
+        "  are uninstrumented and listed separately above."
+    )
+    return "\n".join(lines)
+
+
+def run_fire_rate(args: argparse.Namespace, telemetry_dir: Path) -> int:
+    events = load_fire_events(telemetry_dir, args.days)
+    by_hook = aggregate_fires(events)
+    manifest_path = (
+        Path(args.manifest_path) if args.manifest_path else default_manifest_path()
+    )
+    roster = roster_split(manifest_path)
+    print(render_fire_report(by_hook, args.days, telemetry_dir, roster))
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -663,6 +938,9 @@ def main(argv: list[str] | None = None) -> int:
         telemetry_dir = Path(args.telemetry_dir)
     else:
         telemetry_dir = Path.home() / ".praxis" / "telemetry"
+
+    if args.mode == "fire-rate":
+        return run_fire_rate(args, telemetry_dir)
 
     events = load_events(telemetry_dir, args.days)
     agg = aggregate(events)
