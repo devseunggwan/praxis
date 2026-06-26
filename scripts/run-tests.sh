@@ -5,6 +5,7 @@
 #   1. pytest   — Python unit tests under tests/
 #   2. shell    — shell tests at tests/hooks/*/test_*.sh and tests/test_*.sh
 #   3. manifest — scripts/check-plugin-manifests.py
+#   4. invariants — scripts/check-hook-token-invariants.py
 #
 # Exit code is non-zero if any step fails.
 set -euo pipefail
@@ -65,6 +66,15 @@ fi
 echo ""
 echo "=== manifest check ==="
 if ! python3 ./scripts/check-plugin-manifests.py; then
+  FAILED=1
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Hook-token invariant canary (dual-SoT drift guard, issue #712)
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== hook-token invariant check ==="
+if ! python3 ./scripts/check-hook-token-invariants.py; then
   FAILED=1
 fi
 
