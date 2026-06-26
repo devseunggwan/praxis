@@ -98,8 +98,8 @@ scope.
 
 ### Escape hatches
 
-- Add `[user-approved]` or `[ratified-by-user]` to the commit message when
-  the user explicitly approved the change in this session.
+- Add `[user-approved]`, `[ratified-by-user]`, or `[user-ratified]` to the
+  commit message when the user explicitly approved the change in this session.
 - Set `CLAUDE_HOOK_BYPASS_SCIOMC_GATE=1` for a deliberate one-off bypass.
 - Missing / unreadable / oversized (`>50MB`) transcript → silent pass
   (cannot enforce). Malformed stdin → silent fail-open.
