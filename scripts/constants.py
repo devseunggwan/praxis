@@ -43,6 +43,7 @@ OPT_IN_HOOKS: dict[str, str] = {
 # orphan stub. `INDEX.md` is excluded structurally (it is the index itself).
 NON_HOOK_DOCS: frozenset[str] = frozenset({
     "block-message-format",
+    "RULE-BACKSTOP-GAPS",
 })
 
 
