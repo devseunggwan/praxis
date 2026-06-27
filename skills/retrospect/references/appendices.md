@@ -60,6 +60,11 @@ The following are structural stop signals:
 - The Stop hook parses the distribution card and unified findings table
 - Post-compaction sessions also require the `retrospect:transcript_receipt`
   fence
+- When compaction (or a chunked/bounded rule or transcript read) leaves the
+  transcript or tool census partial, record that limit on the Stage 3
+  `Stage 2 caveats:` line (e.g. `tool census partial: post-compaction salient
+  window only`) instead of implying full coverage — a partial scan reported as
+  complete is itself a concealment
 - Stage 4 action procedures and artifact verification live in
   [`stage4-execution.md`](stage4-execution.md)
 - Worked examples live in [`report-template.md`](report-template.md)

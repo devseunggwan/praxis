@@ -89,7 +89,10 @@ Run only approved actions, then verify the resulting artifacts.
 
 Before scanning the conversation:
 
-1. Read global and project rule files.
+1. Read global and project rule files — load large files (a packaged `SKILL.md`
+   can exceed ~1500 lines) in bounded section/line-range chunks, never a single
+   broad read that can truncate and silently drop tail rules (see
+   [`references/stage1-2-analysis.md`](references/stage1-2-analysis.md)).
 2. Identify the rule categories you will scan against.
 3. Turn each category into a calibration question.
 
