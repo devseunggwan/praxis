@@ -11,6 +11,18 @@ Before scanning the conversation:
 1. Read global and project rule files.
    - Global: `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md`
    - Project: `AGENTS.md` in cwd
+   - **Large rule files — chunked load (MUST).** Rule files, and on some hosts
+     this skill's own packaged `SKILL.md`, can be long (a single-file `SKILL.md`
+     has exceeded ~1500 lines on the Codex host). Loading one with a single broad
+     `rg` or whole-file read can truncate the output, silently dropping the rules
+     at the tail and calibrating against a partial standard. Instead:
+     - Read by section/heading or in bounded line ranges (`sed -n`, or a `Read`
+       with `offset`+`limit`) — one Stage's worth at a time, not a whole-file dump.
+     - When a broad `rg` is unavoidable, cap the match count (a low output limit
+       on the host's grep tool, or `--max-count` for `rg`) and page through
+       sections rather than emitting every match at once.
+     - If any rule read comes back truncated, re-read the missing range before
+       calibrating — never proceed on a partial rule set.
 2. Identify the rule categories you are scanning against.
    - workflow discipline
    - evidence-based delivery
