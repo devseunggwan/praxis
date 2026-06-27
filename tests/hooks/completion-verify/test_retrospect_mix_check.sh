@@ -1959,6 +1959,87 @@ ${SL_LEDGER_NO_CRITIC}"
 run_case "SL27_block_ledger_missing_critic_diff" "block" \
   "$(mk_assistant "$SL27_TEXT")"
 
+# SL28~SL30: Gate-8c (Critic self-skip floor, issue #715). A 'critic_diff: not-run'
+# is concealment when the live transcript shows the tier predicate was satisfied
+# (a friction_event required user correction). worst_agent_failure here is genuinely
+# adverse (no clean-like phrasing) so Gate-8b does NOT fire — these isolate Gate-8c.
+SL_LEDGER_ADVERSE_NOTRUN='<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: shipped a wrong identifier after skipping the schema probe | disposition: surface
+- self_adversarial: ran | result: surfaced the skipped probe as the root cause
+- critic_diff: not-run | reason: tier predicate false (synthetic fixture)
+<!-- retrospect:suppression_ledger end -->'
+SL_LEDGER_ADVERSE_CRITIC_RAN='<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: shipped a wrong identifier after skipping the schema probe | disposition: surface
+- self_adversarial: ran | result: surfaced the skipped probe as the root cause
+- critic_diff: none | checked: 2 candidate(s)
+<!-- retrospect:suppression_ledger end -->'
+
+# SL28: block — not-run critic_diff while two real user corrections prove the tier
+# predicate ("user correction required") was satisfied; self-skip is concealment.
+SL28_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL28_TRANSCRIPT="$(mk_user_turn "아니 그거 말고")
+$(mk_user_turn "that's not what I asked")
+$(mk_assistant "$SL28_TEXT")"
+run_case "SL28_block_critic_notrun_with_user_corrections" "block" "$SL28_TRANSCRIPT"
+
+# SL29: pass — not-run critic_diff is legitimate when the user-correction signal
+# stays within tolerance (a lone tool error is not a user correction).
+SL29_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL29_TRANSCRIPT="$(mk_is_error "tool failed")
+$(mk_assistant "$SL29_TEXT")"
+run_case "SL29_pass_critic_notrun_no_user_correction" "pass" "$SL29_TRANSCRIPT"
+
+# SL29b: pass — boundary. Exactly one user-correction marker stays within the
+# >1 tolerance, so a not-run critic_diff is still legitimate (guards the -gt vs
+# -ge off-by-one: a single genuine correction must NOT force the critic).
+SL29B_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL29B_TRANSCRIPT="$(mk_user_turn "아니 그거 말고")
+$(mk_assistant "$SL29B_TEXT")"
+run_case "SL29b_pass_critic_notrun_single_user_correction" "pass" "$SL29B_TRANSCRIPT"
+
+# SL29c: pass — precision floor. Two benign user turns that Gate-8b's broad regex
+# WOULD count ("no problem", "stop the dev server") do NOT match Gate-8c's tighter
+# explicit-correction regex, so not-run is not forced. Guards against the
+# session-length-proxy false positive the code-reviewer flagged.
+SL29C_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL29C_TRANSCRIPT="$(mk_user_turn "no problem, take your time")
+$(mk_user_turn "stop the dev server when done")
+$(mk_assistant "$SL29C_TEXT")"
+run_case "SL29c_pass_critic_notrun_benign_markers_excluded" "pass" "$SL29C_TRANSCRIPT"
+
+# SL29d: pass — benign Korean imperatives/encouragement ("걱정하지 마세요",
+# "무리하지 마세요") must NOT count as corrections. Guards the codex PR #717
+# finding that bare "하지 마" matched benign "don't worry"-style Korean.
+SL29D_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL29D_TRANSCRIPT="$(mk_user_turn "걱정하지 마세요")
+$(mk_user_turn "무리하지 마세요")
+$(mk_assistant "$SL29D_TEXT")"
+run_case "SL29d_pass_critic_notrun_benign_korean_imperatives" "pass" "$SL29D_TRANSCRIPT"
+
+# SL29e: pass — the ASCII-anchored 'I said' marker must not match 'AI said …'
+# (substring 'I said ' inside 'AI said '). Guards the codex PR #717 word-boundary
+# finding: a low-friction retrospect narrating "AI said it was done" must not block.
+SL29E_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL29E_TRANSCRIPT="$(mk_user_turn "the AI said it was done")
+$(mk_user_turn "AI said it finished the task")
+$(mk_assistant "$SL29E_TEXT")"
+run_case "SL29e_pass_critic_notrun_ai_said_not_anchored_match" "pass" "$SL29E_TRANSCRIPT"
+
+# SL30: pass — when the critic tier actually ran (critic_diff records a checked
+# result), user corrections in the transcript do not trip Gate-8c.
+SL30_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_CRITIC_RAN}"
+SL30_TRANSCRIPT="$(mk_user_turn "아니 그거 말고")
+$(mk_user_turn "that's not what I asked")
+$(mk_assistant "$SL30_TEXT")"
+run_case "SL30_pass_critic_ran_with_user_corrections" "pass" "$SL30_TRANSCRIPT"
+
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
 #   {expected_decision: "pass"|"block", must_contain: [...], must_not_contain: [...]}

@@ -49,6 +49,7 @@ of the following hold:
 | Gate-7 value mismatch: `transcript_receipt` fence declares `is_error_count` or `user_turn_count` that diverges from a live grep of the transcript by more than 1 | Receipt was transcribed verbatim from the compaction summary rather than re-derived this turn (presence ≠ freshness) |
 | Gate-8 (issues #699, #702): the Stage 3 report has no `retrospect:suppression_ledger` fence, has more than one, has a malformed (unterminated/nested) one, or the fence lacks a `worst_agent_failure:`, `self_adversarial:`, or `critic_diff:` line | The Stage 2 self-incrimination pass / conditional externalized critic re-scan record is missing — the painful agent-caused friction the analyzing context is most motivated to bury was never surfaced for audit. Mandatory on every path incl. the clean one. Skipped only once Stage 4 (`## Actions Executed`) is reached for the latest report |
 | Gate-8b (issue #701): `suppression_ledger` claims a clean/no-failure path while a live transcript scan finds more than one deterministic adverse signal | The ledger exists but launders away visible evidence. The hook re-derives `is_error:true`, content-error syntax, and documented `user_correction` markers on user turns before trusting clean ledger language |
+| Gate-8c (issue #715): `critic_diff: not-run` while a live transcript scan finds more than one explicit user-correction marker (tighter `sl_strong_correction_re`, not Gate-8b's broad regex) | The externalized critic tier — the only anti-concealment mechanism that survives the self-correction literature — was self-skipped in exactly the case its predicate ("a friction_event required user correction") was satisfied. Converts the run-the-critic guidance from unenforced self-feedback into a deterministic format gate |
 
 ### Gate-7 value check (issue #671)
 
@@ -127,6 +128,66 @@ tolerance, so one record that carries multiple matching nested `tool_result`
 blocks still counts as one adverse tool event. This is a floor, not full
 semantic judgment: the hook does not decide whether every marker is a true
 correction, but it prevents the ledger from claiming that no signal existed.
+
+### Gate-8c critic self-skip floor (issue #715)
+
+Gate-8b closes the case where the ledger claims a *clean* path. It does **not**
+cover the subtler concealment where the ledger names a (possibly minor)
+`worst_agent_failure:` — so `sl_clean_like` is false and Gate-8b stays quiet —
+while marking `critic_diff: not-run` to skip the externalized critic tier.
+The self-correction literature that motivates issue #715 (intrinsic
+self-correction without an external signal does not reliably work; the
+bottleneck is error *detection*) makes that tier the one mechanism with teeth.
+Leaving the decision to run it as prose guidance re-creates the exact
+self-feedback dependency the literature says fails.
+
+Gate-8c runs after Gate-8b inside the well-formed-fence branch. It blocks when
+**both** hold:
+
+| Condition | Derivation |
+|-----------|------------|
+| `critic_diff:` value starts with `not-run` | last `critic_diff:` line inside the ledger fence matches `critic_diff:[[:space:]]*not-run` |
+| live explicit-correction count exceeds tolerance (`1`) | `jq` count of user turns matching `sl_strong_correction_re` (`live_sl_strong_uc_count`) |
+
+The critic tier predicate (`stage1-2-analysis.md`) fires when a
+`friction_event` required user correction, so an explicit-correction count over
+tolerance means the predicate was satisfied and `not-run` is a self-skip rather
+than a legitimate skip.
+
+**Why a tighter regex than Gate-8b.** Gate-8b's `sl_user_correction_re` is broad —
+it matches bare `no`/`stop`/`다시`, so benign user turns (`no problem`,
+`다시 설명해줘`, `stop the dev server`) also count (a code-reviewer probe matched
+7/7 benign phrasings). That breadth is safe in Gate-8b because Gate-8b is
+double-guarded by `sl_clean_like`; Gate-8c is a single condition, so the broad
+regex — combined with Gate-8c scanning the whole session — would force the critic
+on any busy session regardless of real correction (a session-length proxy, not a
+correction proxy). Gate-8c therefore uses a dedicated `sl_strong_correction_re`
+restricted to explicit multi-word redirect/correction phrases (`그거 말고`,
+`그게 아니라`, `그거 아니야`, `that's not what I asked`, `왜 .*안 하고`,
+`I said …`, etc.). Generic Korean imperatives are deliberately excluded — bare
+`하지 마` matches benign `걱정하지 마세요`, `라니까` matches `사실이라니까`, bare
+`왜 .*했어` matches `왜 왔어` (codex PR #717) — and the set is empirically
+verified to match 0/9 benign phrasings and 8/8 genuine corrections. ASCII tokens
+that could appear as a substring of a longer word are boundary-anchored: the
+`I said` marker is written `(^|[^A-Za-z])I said` (with a trailing space in the
+literal) so it does not fire on `AI said it was done` (codex PR #717).
+
+**Threat-model boundary.** `sl_strong_correction_re` is a best-effort precision
+floor, not an exhaustive enumeration of every benign phrase in every language — a
+hand-rolled correction regex has effectively unbounded corner cases. The design
+accepts that: the `>1` tolerance is the structural backstop (a single stray match
+never blocks), and the consequence of a residual false positive is only that a
+genuinely low-friction retrospect must run the READ-ONLY critic once. New benign
+false-positive reports are handled by adding the phrase to the exclusion set plus
+a regression case, not by claiming the regex is exhaustive. The `>1` tolerance
+absorbs a single stray strong marker, so
+a session with exactly one genuine correction may still legitimately mark
+`not-run` (an accepted recall gap that avoids single-marker false blocks). The
+check is guarded by an empty-`GATE8_VIOLATION` test so a more specific Gate-8b
+laundering message keeps precedence. Like Gate-8b this is a floor, not semantic
+judgment: it cannot tell which named failure is the worst, but it removes the
+agent's discretion to skip the external auditor on a session the transcript shows
+carried genuine user corrections.
 
 ### Issue #666 — retrospect-active Stage-3 fence-omission gate
 
@@ -286,6 +347,13 @@ plus 11 synthetic regression fixtures:
    ledger → pass; SL7 inline mention (no real fence) → block; SL8 Stage-4
    Actions Executed without ledger → pass (carve-out); SL27 missing
    critic_diff → block
+- 7 Gate-8c critic self-skip floor (issue #715): SL28 critic_diff not-run +
+   2 explicit corrections → block; SL29 not-run + no correction → pass;
+   SL29b not-run + exactly 1 explicit correction → pass (>1 tolerance boundary);
+   SL29c not-run + 2 benign EN markers (no/stop) → pass (tighter regex excludes);
+   SL29d not-run + 2 benign KO imperatives (걱정하지 마세요) → pass (codex #717);
+   SL29e not-run + 2 'AI said …' (anchored I-said no match) → pass (codex #717);
+   SL30 critic ran (none|checked) + 2 corrections → pass
 
 ### Category counts (memory_hygiene, output_quality)
 
