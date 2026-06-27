@@ -713,16 +713,23 @@ else
     # genuine correction may still mark not-run (accepted recall gap). Guarded by
     # -z GATE8_VIOLATION so a more specific Gate-8b laundering message wins.
     if [ -z "$GATE8_VIOLATION" ]; then
-      # Each token must be an UNAMBIGUOUS redirect/correction of the agent, not a
-      # generic Korean imperative. Excluded as too broad (codex PR #717 review):
-      # '하지 마' ("don't <verb>") matches benign 걱정하지 마세요 / 무리하지 마세요;
-      # '라니까' matches benign 사실이라니까; bare '왜 .*했어' matches benign 왜 왔어.
-      # 'I said' is ASCII-boundary-anchored ((^|[^A-Za-z])) so 'AI said it was done'
-      # (substring 'I said ' inside 'AI said ') does not false-match — same boundary
-      # convention as sl_user_correction_re's bare-word tokens. This is a best-effort
-      # precision floor, not an exhaustive benign-phrase enumeration; the >1 tolerance
-      # is the backstop against a single stray match (threat model documented in spec).
-      sl_strong_correction_re="그거 아니야|그거 말고|그게 아니라|내 말은|하라고 했잖아|하라니까|왜 .*안 하고|that's not what I asked|(^|[^A-Za-z])I said "
+      # This is a HARD BLOCK, so it must fire only on a LOW-false-positive signal
+      # (issue #722). Because the consequence asymmetry favours a false-negative
+      # (a missed self-skip is still nudged by the prose self-incrimination layer)
+      # over a false-positive (blocking a clean retrospect erodes trust in the
+      # gate), the set is deliberately narrowed to near-unambiguous redirects —
+      # NOT an exhaustive correction detector. Everyday Korean conversational
+      # tokens were measured as high-FP (7/10 benign phrases matched) and dropped:
+      # '그거 아니야' (benign 그거 아니야? 맞는데), '그거 말고' (그거 말고도),
+      # '그게 아니라' (그게 아니라 그냥), '내 말은' (내 말은 ~ 뜻), '하라니까'
+      # (하라니까 바로 했어요), '왜 .*안 하고' (greedy span over narration),
+      # '(^|[^A-Za-z])I said ' (benign English recap "I said I would …").
+      # Kept tokens verified low-FP via jq probe: benign set 13/13 no-match
+      # (incl. reportive '내가 말한 건 아니지만 …' forms — a greedy '내가 말한 건
+      # .*아니' candidate was rejected for matching exactly those, code-reviewer
+      # #722), genuine corrections 3/3 match. The dropped tokens remain the prose
+      # self-incrimination layer's job, not this hard block's.
+      sl_strong_correction_re="하라고 했잖아|that's not what I asked|그렇게 하지 말라고"
       live_sl_strong_uc_count=$(jq -r --arg re "$sl_strong_correction_re" '
         def human_text_payload:
           (.message.content // .content // empty) as $c
