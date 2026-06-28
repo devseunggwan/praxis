@@ -1978,7 +1978,7 @@ SL_LEDGER_ADVERSE_CRITIC_RAN='<!-- retrospect:suppression_ledger begin -->
 # predicate ("user correction required") was satisfied; self-skip is concealment.
 SL28_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
 ${SL_LEDGER_ADVERSE_NOTRUN}"
-SL28_TRANSCRIPT="$(mk_user_turn "아니 그거 말고")
+SL28_TRANSCRIPT="$(mk_user_turn "하라고 했잖아 왜 안 했어")
 $(mk_user_turn "that's not what I asked")
 $(mk_assistant "$SL28_TEXT")"
 run_case "SL28_block_critic_notrun_with_user_corrections" "block" "$SL28_TRANSCRIPT"
@@ -1996,7 +1996,7 @@ run_case "SL29_pass_critic_notrun_no_user_correction" "pass" "$SL29_TRANSCRIPT"
 # -ge off-by-one: a single genuine correction must NOT force the critic).
 SL29B_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
 ${SL_LEDGER_ADVERSE_NOTRUN}"
-SL29B_TRANSCRIPT="$(mk_user_turn "아니 그거 말고")
+SL29B_TRANSCRIPT="$(mk_user_turn "하라고 했잖아 왜 안 했어")
 $(mk_assistant "$SL29B_TEXT")"
 run_case "SL29b_pass_critic_notrun_single_user_correction" "pass" "$SL29B_TRANSCRIPT"
 
@@ -2031,11 +2031,55 @@ $(mk_user_turn "AI said it finished the task")
 $(mk_assistant "$SL29E_TEXT")"
 run_case "SL29e_pass_critic_notrun_ai_said_not_anchored_match" "pass" "$SL29E_TRANSCRIPT"
 
+# SL29f: pass — the low-FP narrowing (issue #722). Each of the 7 everyday-Korean/
+# English phrases measured as benign false-positives under the old broad regex
+# appears TWICE here (14 user turns), so a regression on ANY single dropped token
+# would yield 2 matches (> tolerance) and flip this case to block. critic_diff is
+# not-run and none of these are genuine corrections, so the gate must NOT fire.
+SL29F_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL29F_TRANSCRIPT="$(mk_user_turn "그거 말고도 더 있어요")
+$(mk_user_turn "그거 말고도 더 봐주세요")
+$(mk_user_turn "내 말은 이것도 좋다는 거예요")
+$(mk_user_turn "내 말은 그게 더 낫다는 뜻이에요")
+$(mk_user_turn "그게 아니라 그냥 궁금했어요")
+$(mk_user_turn "그게 아니라 그냥 확인차였어요")
+$(mk_user_turn "왜 빌드가 안 됐는지 보고 배포는 안 하고 넘어갔어")
+$(mk_user_turn "왜 실패했는지 보고 정리는 안 하고 끝냈어")
+$(mk_user_turn "아까 I said I would check the logs")
+$(mk_user_turn "earlier I said I would verify it")
+$(mk_user_turn "하라니까 바로 했어요")
+$(mk_user_turn "하라니까 그냥 했어요")
+$(mk_user_turn "그거 아니야? 맞는 것 같은데")
+$(mk_user_turn "그거 아니야? 다시 봐도 맞는데")
+$(mk_assistant "$SL29F_TEXT")"
+run_case "SL29f_pass_critic_notrun_narrowed_benign_phrases" "pass" "$SL29F_TRANSCRIPT"
+
+# SL29g: block — the third kept token '그렇게 하지 말라고' had NO positive coverage
+# (CodeRabbit PR #723); SL28's block only jointly exercised '하라고 했잖아' +
+# "that's not what I asked". Two turns each carrying ONLY '그렇게 하지 말라고'
+# (no overlap with the other two alternations) give count=2 (> tolerance) → block,
+# so a typo or accidental drop of this alternation branch flips this case to pass.
+SL29G_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL29G_TRANSCRIPT="$(mk_user_turn "그렇게 하지 말라고 했잖아")
+$(mk_user_turn "그렇게 하지 말라고 분명히 말했어")
+$(mk_assistant "$SL29G_TEXT")"
+run_case "SL29g_block_critic_notrun_third_kept_token" "block" "$SL29G_TRANSCRIPT"
+
+# SL29h: pass — boundary for '그렇게 하지 말라고'. Exactly one correction marker
+# stays within the >1 tolerance, mirroring SL29b for the third alternation branch.
+SL29H_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL29H_TRANSCRIPT="$(mk_user_turn "그렇게 하지 말라고 했잖아")
+$(mk_assistant "$SL29H_TEXT")"
+run_case "SL29h_pass_critic_notrun_third_kept_token_single" "pass" "$SL29H_TRANSCRIPT"
+
 # SL30: pass — when the critic tier actually ran (critic_diff records a checked
 # result), user corrections in the transcript do not trip Gate-8c.
 SL30_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
 ${SL_LEDGER_ADVERSE_CRITIC_RAN}"
-SL30_TRANSCRIPT="$(mk_user_turn "아니 그거 말고")
+SL30_TRANSCRIPT="$(mk_user_turn "하라고 했잖아 왜 안 했어")
 $(mk_user_turn "that's not what I asked")
 $(mk_assistant "$SL30_TEXT")"
 run_case "SL30_pass_critic_ran_with_user_corrections" "pass" "$SL30_TRANSCRIPT"

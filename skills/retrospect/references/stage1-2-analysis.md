@@ -290,10 +290,13 @@ refining self-prompts here — the leverage is the **external** signal (the
 externalized critic tier below, or the user's "you hid it?" probe), not a smarter
 self-instruction. That leverage is mechanized, not just described: **Gate-8c**
 in `retrospect-mix-check` blocks a `critic_diff: not-run` whenever the live
-transcript carries more than one *explicit* user-correction marker (a tighter
-regex than Gate-8b's, so benign `no`/`stop`/`다시` turns do not count), so the
-external tier cannot be self-skipped in exactly the case (a genuine user
-correction occurred) its predicate is satisfied. The hook cannot judge *which* failure is worst; it can
+transcript carries more than one *near-unambiguous* user-correction marker (a
+deliberately low-false-positive set — issue #722 — far tighter than Gate-8b's,
+biased toward a false-negative so a clean retrospect is never hard-blocked;
+ambiguous everyday-conversational corrections remain this prose layer's job, not
+the gate's). Within that narrowed set the external tier cannot be self-skipped in
+exactly the case (a genuine, clearly-stated user correction occurred) its
+predicate is satisfied. The hook cannot judge *which* failure is worst; it can
 and does force the external auditor to run when the transcript proves real
 user-visible friction.
 
