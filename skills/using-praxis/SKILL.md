@@ -42,7 +42,6 @@ Recover, save, and orchestrate Claude Code sessions.
 | `cmux-resume-sessions` | Restore a previously saved snapshot |
 | `cmux-session-manager` | Daily status dashboard, cleanup, reorganize |
 | `cmux-delegate` | Delegate a task to an independent session with full context |
-| `cmux-browser` | Browser automation E2E testing via `cmux browser` CLI |
 
 ### Discovery (this skill)
 | Skill | When to call |

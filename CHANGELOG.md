@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.0] - 2026-06-28
+
+Major release. Removes the `cmux-browser` skill, which has migrated to the
+cmux repository (`manaflow-ai/cmux`) where it lives closer to the cmux app it
+automates. Removing a public skill + its installed CLI is a breaking change
+for consumers (`/praxis:cmux-browser` and the `~/.local/bin/cmux-browser`
+command both disappear), so this is a semver major per the project's
+convention for skill removals.
+
+### Removed (BREAKING)
+
+- `cmux-browser`: skill and its pass-through CLI wrapper removed from praxis.
+  The cmux-side documentation skill is maintained in `manaflow-ai/cmux`; the
+  praxis wrapper (`~/.local/bin/cmux-browser`, selector-error usage hints) is
+  dropped because the cmux skill invokes the native `cmux browser` CLI
+  directly. The session-management cmux-* skills (`cmux-delegate`,
+  `cmux-recover-sessions`, `cmux-resume-sessions`, `cmux-save-sessions`,
+  `cmux-session-manager`) are unaffected. (#726)
+
+  > **Upgrade note:** if you installed praxis CLIs via `scripts/install.sh` on
+  > a prior version, `~/.local/bin/cmux-browser` is now a dangling symlink.
+  > Remove it manually (`rm ~/.local/bin/cmux-browser`); `scripts/verify-symlinks.sh`
+  > will also flag it as `DANGLING`.
+
 ## [6.3.3] - 2026-06-25
 
 Patch release. Hardens retrospect suppression-ledger handling and adds the
