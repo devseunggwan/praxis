@@ -2055,6 +2055,26 @@ $(mk_user_turn "그거 아니야? 다시 봐도 맞는데")
 $(mk_assistant "$SL29F_TEXT")"
 run_case "SL29f_pass_critic_notrun_narrowed_benign_phrases" "pass" "$SL29F_TRANSCRIPT"
 
+# SL29g: block — the third kept token '그렇게 하지 말라고' had NO positive coverage
+# (CodeRabbit PR #723); SL28's block only jointly exercised '하라고 했잖아' +
+# "that's not what I asked". Two turns each carrying ONLY '그렇게 하지 말라고'
+# (no overlap with the other two alternations) give count=2 (> tolerance) → block,
+# so a typo or accidental drop of this alternation branch flips this case to pass.
+SL29G_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL29G_TRANSCRIPT="$(mk_user_turn "그렇게 하지 말라고 했잖아")
+$(mk_user_turn "그렇게 하지 말라고 분명히 말했어")
+$(mk_assistant "$SL29G_TEXT")"
+run_case "SL29g_block_critic_notrun_third_kept_token" "block" "$SL29G_TRANSCRIPT"
+
+# SL29h: pass — boundary for '그렇게 하지 말라고'. Exactly one correction marker
+# stays within the >1 tolerance, mirroring SL29b for the third alternation branch.
+SL29H_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_NOTRUN}"
+SL29H_TRANSCRIPT="$(mk_user_turn "그렇게 하지 말라고 했잖아")
+$(mk_assistant "$SL29H_TEXT")"
+run_case "SL29h_pass_critic_notrun_third_kept_token_single" "pass" "$SL29H_TRANSCRIPT"
+
 # SL30: pass — when the critic tier actually ran (critic_diff records a checked
 # result), user corrections in the transcript do not trip Gate-8c.
 SL30_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")

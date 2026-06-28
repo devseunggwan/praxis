@@ -314,7 +314,7 @@ git -C ~/.claude/plugins/.../praxis apply --reverse <patch>
 
 ### Tests
 
-`tests/hooks/completion-verify/test_retrospect_mix_check.sh` covers 119 cases
+`tests/hooks/completion-verify/test_retrospect_mix_check.sh` covers 121 cases
 plus 11 synthetic regression fixtures:
 
 - 4 pass scenarios (behavior-only with rationale, escalated tool, escalated
@@ -351,13 +351,15 @@ plus 11 synthetic regression fixtures:
    ledger → pass; SL7 inline mention (no real fence) → block; SL8 Stage-4
    Actions Executed without ledger → pass (carve-out); SL27 missing
    critic_diff → block
-- 8 Gate-8c critic self-skip floor (issue #715, narrowed #722): SL28 critic_diff
+- 10 Gate-8c critic self-skip floor (issue #715, narrowed #722): SL28 critic_diff
    not-run + 2 kept-token corrections → block; SL29 not-run + no correction → pass;
    SL29b not-run + exactly 1 kept-token correction → pass (>1 tolerance boundary);
    SL29c not-run + 2 benign EN markers (no/stop) → pass (tighter regex excludes);
    SL29d not-run + 2 benign KO imperatives (걱정하지 마세요) → pass (codex #717);
    SL29e not-run + 2 'AI said …' (anchored I-said no match) → pass (codex #717);
    SL29f not-run + 7 dropped-token benign phrases ×2 each → pass (low-FP narrowing #722);
+   SL29g not-run + 2 '그렇게 하지 말라고' (third kept token) → block (CodeRabbit #723);
+   SL29h not-run + exactly 1 '그렇게 하지 말라고' → pass (>1 tolerance boundary);
    SL30 critic ran (none|checked) + 2 corrections → pass
 
 ### Category counts (memory_hygiene, output_quality)
