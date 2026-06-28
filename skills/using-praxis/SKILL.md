@@ -44,6 +44,7 @@ Recover, save, and orchestrate Claude Code sessions.
 | `cmux-delegate` | Delegate a task to an independent session with full context |
 
 ### Discovery (this skill)
+
 | Skill | When to call |
 |-------|-------------|
 | `using-praxis` | First-time orientation — you are here |
