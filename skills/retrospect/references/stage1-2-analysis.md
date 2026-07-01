@@ -615,7 +615,7 @@ transcript before analysis instead of relying only on the compaction summary:
     still under-enumerating. Treat row-count parity with `is_error_count` as a
     Stage 2 MUST even though the hook cannot verify it: do not close the enum
     block until every counted `is_error` has its own disposition row.
-  - **is_error / tool_census cross-check (MUST).** `is_error_count` should
+  - **is_error / tool_census cross-check (MUST).** `is_error_count` must
     equal the sum of `error_count` across all `tool_census` rows (pre-scan
     lane 3) for the same scope window. A mismatch means one of the two scans
     skipped a result — re-scan the narrower one before proceeding to Stage
