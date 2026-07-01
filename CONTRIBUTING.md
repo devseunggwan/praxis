@@ -239,6 +239,29 @@ To (re)generate a single release by hand, run the workflow via
 `workflow_dispatch` with the tag (e.g. `v6.2.0`). Re-running edits the
 existing release instead of duplicating it.
 
+### Pre-PR checklist (version bump)
+
+Before opening a version-bump PR, verify all three artifacts are in sync —
+missing any one of these breaks the automated release body or ships stale
+manifests silently:
+
+```bash
+# 1. VERSION and generated manifests match
+./scripts/build-plugin-manifests.py
+./scripts/check-plugin-manifests.py   # verify no drift
+
+# 2. CHANGELOG.md has a `## [X.Y.Z] - YYYY-MM-DD` section for the new
+#    version — confirm the `## [Unreleased]` entries were moved under it,
+#    not left behind
+
+# 3. The release workflow can extract that section (this is the release
+#    body's actual source, not CHANGELOG.md read informally)
+bash scripts/extract-changelog-section.sh X.Y.Z
+```
+
+If step 3 exits non-zero (exit 2 = version not found in `CHANGELOG.md`), the
+section header doesn't match `VERSION` — fix it before opening the PR.
+
 ## Testing
 
 ```bash
