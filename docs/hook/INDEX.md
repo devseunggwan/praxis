@@ -34,6 +34,7 @@ confirmation-prompt layer.
 | [commit-title-format-check](../../hooks/preflight-gate/commit-title-format-check/spec.md) | PreToolUse | Block `git commit`, `gh pr create`, `gh issue create` when title does not match Conventional Commits format |
 | [branch-name-check](../../hooks/preflight-gate/branch-name-check/spec.md) | PreToolUse | Block branch creation (`checkout -b`, `switch -c`, `worktree add -b`) when the new branch name does not match the configured regex |
 | [pre-merge-approval-gate](../../hooks/preflight-gate/pre-merge-approval-gate/spec.md) | PreToolUse | Surface per-PR approval prompt for `gh pr merge` in direct sessions |
+| [pr-state-refetch-gate](../../hooks/preflight-gate/pr-state-refetch-gate/spec.md) | PreToolUse | Warn or block when `AskUserQuestion` names a PR number + merge-intent keyword whose live `gh pr view` state is already MERGED/CLOSED — issue #719 |
 | [cross-boundary-preflight](../../hooks/preflight-gate/cross-boundary-preflight/spec.md) | PreToolUse | Block heredoc body in `gh pr/issue create`; ask with four-point checklist on cross-repo `--repo` writes |
 | [pre-edit-protected-branch-guard](../../hooks/preflight-gate/pre-edit-protected-branch-guard/spec.md) | PreToolUse | Block Edit/Write/NotebookEdit on protected branches (main/dev/prod/master) outside the expected worktree workflow |
 | [worktree-edit-gate](../../hooks/preflight-gate/worktree-edit-gate/spec.md) | PreToolUse | Block Edit/Write on source files when the repo HEAD is on a base branch — opt-in via `PRAXIS_WORKTREE_ENFORCED_REPOS`; default no-op (issue #437) |

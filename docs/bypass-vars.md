@@ -64,6 +64,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_BRANCH_NAME_STRICT` | `branch-name-check` | |
 | `PRAXIS_ASK_END_STRICT` | `block-ask-end-option` | |
 | `PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT` | `block-manufactured-action-menu` | |
+| `PRAXIS_PR_STATE_REFETCH_STRICT` | `pr-state-refetch-gate` | |
 | `PRAXIS_EXTERNAL_WRITE_STRICT` | `external-write-falsify-check` | |
 | `PRAXIS_AUTHOR_EXEMPT_STRICT` | `external-write-falsify-check` | |
 | `PRAXIS_CLUSTER_APPROVAL_STRICT` | `external-write-falsify-check` | |
