@@ -8,6 +8,9 @@ human review.
 Phase 2 of issue #456 (Phase 1 = hook that writes the log; Phase 3 = HTTP
 forwarding, deferred).
 Issue #689: per-hook aggregation view + tool-error co-occurrence.
+Issue #710 (remaining scope): fire-rate mode gains advise_ignored_rate,
+bypass_count (joined against bypass-events), and a best-effort outcome-proxy
+section (strike counts only — see OUTCOME PROXY LIMITATIONS below).
 
 Usage:
   bypass-review [OPTIONS]
@@ -21,7 +24,27 @@ Options:
                          (e.g. --per-hook SCIOMC_GATE).  Family names are
                          normalized bypass var suffixes — see Section 3 output
                          for the list of families in the current window.
+  --state-dir PATH       fire-rate mode only: override the strike-state
+                         directory used for the outcome-proxy section
+                         (default: $PRAXIS_STATE_DIR/strikes or
+                         ~/.praxis/state/strikes)
   -h, --help             Show this message and exit
+
+OUTCOME PROXY LIMITATIONS (issue #710 item 3, fire-rate mode):
+  Only strike_count is computed — read from the per-session state JSON
+  written by hooks/completion-verify/strike-counter/impl.sh
+  ($STATE_DIR/<session_id>.json, field `count`). Three items from the
+  original issue text are NOT implemented because no telemetry source
+  currently records them:
+    - external-write revert     (no revert/undo event is logged anywhere)
+    - re-clarification loop     (requires transcript-level turn analysis,
+                                  out of scope for this JSONL ledger)
+    - rework commits            (requires git-log correlation per session,
+                                  not present in fire-events/bypass-events)
+  Strike state itself is a lower bound: the strike-counter TTL-deletes state
+  after 7 days and `/praxis:reset-strikes` deletes it immediately on reset,
+  so a session's true historical strike count may already be gone by the
+  time this report runs.
 
 Output sections:
   1. Summary — total events + date window
@@ -51,6 +74,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shlex
 import sys
@@ -158,6 +182,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Show detailed per-event breakdown for one hook/rule family "
             "(e.g. SCIOMC_GATE). Family names are the normalized suffixes "
             "shown in the Per-Hook Aggregation section."
+        ),
+    )
+    parser.add_argument(
+        "--state-dir",
+        dest="state_dir",
+        default=None,
+        metavar="PATH",
+        help=(
+            "fire-rate mode only: override the strike-state directory used "
+            "for the outcome-proxy section (default: "
+            "$PRAXIS_STATE_DIR/strikes or ~/.praxis/state/strikes)"
         ),
     )
     return parser.parse_args(argv)
@@ -741,6 +776,289 @@ def aggregate_fires(events: list[dict]) -> dict[str, dict]:
     return by_hook
 
 
+# ---------------------------------------------------------------------------
+# advise_ignored_rate (issue #710 remaining scope)
+#
+# Definition: for hook H, an "advise" fire in session S is a candidate. Its
+# outcome is the NEXT fire-event for that SAME hook in that SAME session
+# (fire-events only carry hook/session/tool/decision/timestamp — there is no
+# tool_input/command field to diff literal content against, so "did the next
+# tool call change" is approximated by "did this hook's own next evaluation
+# recur identically"). Only a next decision of "advise" again counts as
+# ignored — the same condition fired again unchanged, i.e. the user's next
+# tool call did not address what was flagged. A next decision of "pass"
+# means the hook no longer flags anything (the call changed enough to
+# satisfy it — heeded, NOT ignored). A next decision of block/ask means the
+# hook's own verdict escalated (also NOT "unchanged" — a different outcome).
+# Advise fires with no subsequent same-hook fire in the session are
+# right-censored (outcome unobservable) and excluded from the "observed"
+# denominator, not silently counted either way.
+# ---------------------------------------------------------------------------
+
+def compute_advise_ignored(fire_events: list[dict]) -> dict[str, dict]:
+    """Return dict[hook] -> {advise_fires, observed, ignored, rate}.
+
+    `rate` is `ignored / observed`, or None when `observed == 0`.
+    """
+    by_session_hook: dict[tuple[str, str], list[dict]] = {}
+    for ev in fire_events:
+        hook = ev.get(F_FIRE_HOOK)
+        sid = ev.get(F_FIRE_SESSION)
+        if not (isinstance(hook, str) and hook and isinstance(sid, str) and sid):
+            continue
+        by_session_hook.setdefault((sid, hook), []).append(ev)
+
+    result: dict[str, dict] = {}
+    for (_sid, hook), evs in by_session_hook.items():
+        evs.sort(key=lambda e: e.get(F_FIRE_TIMESTAMP) or "")
+        row = result.setdefault(
+            hook, {"advise_fires": 0, "observed": 0, "ignored": 0}
+        )
+        for i, ev in enumerate(evs):
+            if ev.get(F_FIRE_DECISION) != "advise":
+                continue
+            row["advise_fires"] += 1
+            nxt = evs[i + 1] if i + 1 < len(evs) else None
+            if nxt is None:
+                continue  # right-censored: no later same-hook fire to compare
+            row["observed"] += 1
+            if nxt.get(F_FIRE_DECISION) == "advise":
+                row["ignored"] += 1  # same condition recurred unchanged
+
+    for row in result.values():
+        row["rate"] = (row["ignored"] / row["observed"]) if row["observed"] else None
+    return result
+
+
+# ---------------------------------------------------------------------------
+# bypass_count (issue #710 remaining scope)
+#
+# Primary path: hooks/manifest.json declares an authoritative `mode.bypass_env`
+# list on some hook entries (verified: 22/64 hooks in the current manifest,
+# zero vars mapping to more than one hook) — e.g.
+# block-gh-issue-create-without-dup-search declares
+# mode.bypass_env == ["CLAUDE_HOOK_BYPASS_DUP_GATE"]. When a bypass event's
+# var name is an exact hit in this map, attribution is exact — no heuristic
+# involved.
+#
+# Fallback path: for bypass vars the manifest does NOT declare (most hooks
+# manage their own bypass env ad hoc, without a manifest `mode.bypass_env`
+# entry), fall back to a heuristic joined on session_id (exact) + hook name
+# (bypass var family tokens must be a SUBSET of the hook's kebab-case tokens,
+# e.g. family "PROTECTED_PATHS" <= hook "protected-paths-guard") + timestamp
+# (nearest, to break ties when more than one hook in the session matches the
+# family token-subset). This is best-effort, NOT a stored mapping, and a
+# family that shares no tokens with any fired hook's name falls into the
+# "(unattributed)" bucket rather than being silently mis-attributed.
+# ---------------------------------------------------------------------------
+
+def bypass_env_exact_map(manifest_path: Path) -> dict[str, str]:
+    """Return dict[bypass_env_var] -> hook_name from manifest `mode.bypass_env`.
+
+    Authoritative when present. A var declared on more than one hook (not
+    observed in the current manifest, but a manifest edit could introduce it)
+    is ambiguous and excluded here, falling through to the token heuristic.
+    """
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    raw: dict[str, list[str]] = {}
+    for hook in manifest.get("hooks", []):
+        if not isinstance(hook, dict):
+            continue
+        name = hook.get("name")
+        mode = hook.get("mode")
+        if not (isinstance(name, str) and name and isinstance(mode, dict)):
+            continue
+        bypass_env = mode.get("bypass_env")
+        if not isinstance(bypass_env, list):
+            continue
+        for var in bypass_env:
+            if isinstance(var, str) and var:
+                raw.setdefault(var, []).append(name)
+    return {var: hooks[0] for var, hooks in raw.items() if len(hooks) == 1}
+
+def _parse_fire_ts(raw: object) -> datetime | None:
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _hook_tokens(hook_name: str) -> set[str]:
+    return {t for t in hook_name.split("-") if t}
+
+
+def _family_tokens(family: str) -> set[str]:
+    return {t.lower() for t in family.split("_") if t}
+
+
+def match_family_to_hooks(family: str, hook_names: set[str]) -> set[str]:
+    """Return the subset of `hook_names` whose tokens fully cover `family`."""
+    ftoks = _family_tokens(family)
+    if not ftoks:
+        return set()
+    return {h for h in hook_names if ftoks <= _hook_tokens(h)}
+
+
+def _hooks_fired_in_session(fire_events: list[dict]) -> dict[str, set[str]]:
+    by_session: dict[str, set[str]] = {}
+    for ev in fire_events:
+        sid = ev.get(F_FIRE_SESSION)
+        hook = ev.get(F_FIRE_HOOK)
+        if isinstance(sid, str) and sid and isinstance(hook, str) and hook:
+            by_session.setdefault(sid, set()).add(hook)
+    return by_session
+
+
+def _hook_session_timestamps(
+    fire_events: list[dict],
+) -> dict[tuple[str, str], list[datetime]]:
+    out: dict[tuple[str, str], list[datetime]] = {}
+    for ev in fire_events:
+        sid = ev.get(F_FIRE_SESSION)
+        hook = ev.get(F_FIRE_HOOK)
+        ts = _parse_fire_ts(ev.get(F_FIRE_TIMESTAMP))
+        if isinstance(sid, str) and sid and isinstance(hook, str) and hook and ts:
+            out.setdefault((sid, hook), []).append(ts)
+    return out
+
+
+def _nearest_hook_by_timestamp(
+    candidates: set[str],
+    session_id: str,
+    bypass_ts: datetime,
+    hook_ts_index: dict[tuple[str, str], list[datetime]],
+) -> str | None:
+    best_hook: str | None = None
+    best_delta: float | None = None
+    for hook in candidates:
+        for ts in hook_ts_index.get((session_id, hook), []):
+            delta = abs((ts - bypass_ts).total_seconds())
+            if best_delta is None or delta < best_delta:
+                best_delta = delta
+                best_hook = hook
+    return best_hook
+
+
+UNATTRIBUTED = "(unattributed)"
+
+
+def join_bypass_to_hooks(
+    fire_events: list[dict],
+    bypass_events: list[dict],
+    exact_map: dict[str, str] | None = None,
+) -> dict[str, dict]:
+    """Return dict[hook] -> {bypass_count, sessions}; UNATTRIBUTED bucket for
+    bypass vars that neither `exact_map` nor the family-token heuristic can
+    resolve to one hook.
+
+    `exact_map` (see `bypass_env_exact_map`) is checked first — when a var is
+    a manifest-declared bypass_env for a hook, that hook is attributed
+    directly, without regard to whether it also fired in this session (the
+    manifest is the source of truth for hook identity; requiring session
+    co-occurrence on top of an exact match would only produce false
+    negatives). Vars absent from `exact_map` fall through to the session-
+    scoped family-token heuristic.
+    """
+    session_hooks = _hooks_fired_in_session(fire_events)
+    hook_ts_index = _hook_session_timestamps(fire_events)
+    exact_map = exact_map or {}
+    result: dict[str, dict] = {}
+
+    def _bump(target: str, sid: str) -> None:
+        row = result.setdefault(target, {"bypass_count": 0, "sessions": set()})
+        row["bypass_count"] += 1
+        if sid:
+            row["sessions"].add(sid)
+
+    for ev in bypass_events:
+        sid = ev.get(FIELD_SESSION_ID)
+        if not isinstance(sid, str) or not sid:
+            continue
+        bypass_vars = _coerce_bypass_vars(ev.get(FIELD_BYPASS_ENV_VARS))
+        if not bypass_vars:
+            continue
+        ts = _parse_fire_ts(ev.get(FIELD_TIMESTAMP))
+        hooks_in_session = session_hooks.get(sid) or set()
+
+        for var in bypass_vars:
+            exact_hook = exact_map.get(var)
+            if exact_hook:
+                _bump(exact_hook, sid)
+                continue
+
+            family = derive_bypass_family(var)
+            candidates = match_family_to_hooks(family, hooks_in_session)
+            if len(candidates) == 1:
+                _bump(next(iter(candidates)), sid)
+            elif len(candidates) > 1 and ts is not None:
+                nearest = _nearest_hook_by_timestamp(candidates, sid, ts, hook_ts_index)
+                _bump(nearest if nearest else UNATTRIBUTED, sid)
+            else:
+                _bump(UNATTRIBUTED, sid)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# outcome-proxy (issue #710 item 3, best-effort — see module docstring
+# "OUTCOME PROXY LIMITATIONS" for why only strike_count is implemented)
+# ---------------------------------------------------------------------------
+
+def default_strike_state_dir() -> Path:
+    """Mirror hooks/completion-verify/strike-counter/impl.sh's STATE_DIR resolution."""
+    override = os.environ.get("PRAXIS_STATE_DIR", "").strip()
+    if override:
+        return Path(override) / "strikes"
+    home_override = os.environ.get("PRAXIS_HOME", "").strip()
+    base = Path(home_override) if home_override else Path.home() / ".praxis"
+    return base / "state" / "strikes"
+
+
+def load_strike_state(state_dir: Path, session_id: str) -> dict | None:
+    """Read `<state_dir>/<session_id>.json`; None if absent/unreadable/malformed."""
+    path = state_dir / f"{session_id}.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    count = data.get("count")
+    reasons = data.get("reasons")
+    return {
+        "count": count if isinstance(count, int) else 0,
+        "reasons": reasons if isinstance(reasons, list) else [],
+    }
+
+
+def compute_outcome_proxy(fire_events: list[dict], state_dir: Path) -> dict[str, dict]:
+    """Return dict[session_id] -> {strike_count, strike_state_available}.
+
+    Only covers sessions that appear in the fire-events window. Sessions
+    whose strike state already expired (7-day TTL) or was reset show
+    strike_state_available=False, strike_count=0 — NOT proof of zero strikes.
+    """
+    sessions = sorted({
+        ev.get(F_FIRE_SESSION) for ev in fire_events
+        if isinstance(ev.get(F_FIRE_SESSION), str) and ev.get(F_FIRE_SESSION)
+    })
+    result: dict[str, dict] = {}
+    for sid in sessions:
+        state = load_strike_state(state_dir, sid)
+        result[sid] = {
+            "strike_count": state["count"] if state else 0,
+            "strike_state_available": state is not None,
+        }
+    return result
+
+
 def default_manifest_path() -> Path:
     """hooks/manifest.json resolved relative to this CLI's real (de-symlinked) path."""
     # __file__ is symlinked from ~/.local/bin into the repo's skills/bypass-review/.
@@ -815,11 +1133,111 @@ def bash_group_roster(manifest_path: Path) -> set[str] | None:
         return None
 
 
+def _render_advise_ignored_section(lines: list[str], advise_ignored: dict[str, dict]) -> None:
+    lines.append(_render_header("Advise-Ignored Detail (issue #710)"))
+    rows = {h: r for h, r in advise_ignored.items() if r["advise_fires"] > 0}
+    if not rows:
+        lines.append("  (no advise-decision fires in this window)")
+        return
+    col = 34
+    lines.append(
+        f"  {'Hook':<{col}}  {'Advise':>6}  {'Observed':>8}  {'Ignored':>7}  {'Rate':>5}"
+    )
+    lines.append(
+        f"  {'─' * col}  {'─' * 6}  {'─' * 8}  {'─' * 7}  {'─' * 5}"
+    )
+    for hook in sorted(rows, key=lambda h: rows[h]["advise_fires"], reverse=True):
+        r = rows[hook]
+        rate = f"{100 * r['rate']:.0f}%" if r["rate"] is not None else "n/a"
+        lines.append(
+            f"  {hook:<{col}}  {r['advise_fires']:>6}  {r['observed']:>8}  "
+            f"{r['ignored']:>7}  {rate:>5}"
+        )
+    lines.append("")
+    lines.append(
+        "  Observed = advise fires that had a LATER same-hook fire in the same\n"
+        "  session to compare against (right-censored fires excluded — no way to\n"
+        "  tell if the last advise of a session was heeded). Ignored = that later\n"
+        "  fire was 'advise' again — the same condition recurred unchanged. A\n"
+        "  later 'pass' means the hook stopped flagging (heeded, NOT ignored);\n"
+        "  a later block/ask means the verdict escalated (also NOT ignored — a\n"
+        "  different outcome, not a recurrence). Rate = ignored / observed. This\n"
+        "  approximates 'did the flagged pattern recur' via the hook's own\n"
+        "  re-evaluation, not a literal command diff (fire-events carry no\n"
+        "  tool_input field)."
+    )
+
+
+def _render_bypass_attribution_section(
+    lines: list[str], bypass_join: dict[str, dict]
+) -> None:
+    lines.append(_render_header("Bypass Attribution (issue #710)"))
+    if not bypass_join:
+        lines.append("  (no bypass events joined to this window's fired hooks)")
+        return
+    col = 34
+    lines.append(f"  {'Hook':<{col}}  {'Bypasses':>8}  {'Sessions':>8}")
+    lines.append(f"  {'─' * col}  {'─' * 8}  {'─' * 8}")
+    attributed = {h: r for h, r in bypass_join.items() if h != UNATTRIBUTED}
+    for hook in sorted(attributed, key=lambda h: attributed[h]["bypass_count"], reverse=True):
+        r = attributed[hook]
+        lines.append(f"  {hook:<{col}}  {r['bypass_count']:>8}  {len(r['sessions']):>8}")
+    unattr = bypass_join.get(UNATTRIBUTED)
+    if unattr:
+        lines.append(f"  {UNATTRIBUTED:<{col}}  {unattr['bypass_count']:>8}  {len(unattr['sessions']):>8}")
+    lines.append("")
+    lines.append(
+        "  Attribution priority: (1) exact — manifest `mode.bypass_env` declares\n"
+        "  this var for one hook; (2) fallback heuristic — session_id (exact) +\n"
+        "  hook name (bypass var family tokens must subset the hook's kebab-case\n"
+        "  tokens) + timestamp (nearest, to break ties when >1 hook in the\n"
+        "  session matches). '(unattributed)' = bypass events whose var is not\n"
+        "  manifest-declared AND whose family matched zero or >1 ambiguous\n"
+        "  fired hooks — NOT dropped, still counted, just not attributable to a\n"
+        "  specific hook row above."
+    )
+
+
+def _render_outcome_proxy_section(lines: list[str], outcome_proxy: dict[str, dict]) -> None:
+    lines.append(_render_header("Outcome Proxy — Best Effort (issue #710 item 3)"))
+    if not outcome_proxy:
+        lines.append("  (no sessions in this window)")
+        return
+    with_strikes = {
+        sid: r for sid, r in outcome_proxy.items() if r["strike_count"] > 0
+    }
+    available = sum(1 for r in outcome_proxy.values() if r["strike_state_available"])
+    lines.append(
+        f"  Sessions in window : {len(outcome_proxy)}  "
+        f"(strike state available for {available})"
+    )
+    lines.append(f"  Sessions with strikes : {len(with_strikes)}")
+    if with_strikes:
+        lines.append("")
+        col = 40
+        lines.append(f"  {'Session':<{col}}  {'Strikes':>7}")
+        lines.append(f"  {'─' * col}  {'─' * 7}")
+        for sid in sorted(with_strikes, key=lambda s: with_strikes[s]["strike_count"], reverse=True):
+            lines.append(f"  {sid:<{col}}  {with_strikes[sid]['strike_count']:>7}")
+    lines.append("")
+    lines.append(
+        "  ONLY strike_count is implemented. external-write-revert,\n"
+        "  re-clarification-loop, and rework-commit signals are NOT computed —\n"
+        "  no telemetry source records them yet (see module docstring\n"
+        "  'OUTCOME PROXY LIMITATIONS'). strike_count itself is a lower bound:\n"
+        "  state is TTL-deleted after 7 days and cleared on /praxis:reset-strikes,\n"
+        "  so a session showing 0 may have had strikes that already expired."
+    )
+
+
 def render_fire_report(
     by_hook: dict[str, dict],
     days: int,
     telemetry_dir: Path,
     roster: tuple[set[str], set[str]] | None,
+    advise_ignored: dict[str, dict] | None = None,
+    bypass_join: dict[str, dict] | None = None,
+    outcome_proxy: dict[str, dict] | None = None,
 ) -> str:
     lines: list[str] = []
     today = datetime.now(tz=timezone.utc).date()
@@ -867,6 +1285,11 @@ def render_fire_report(
         "     also fold into Pass; session id is absent. A coarse 'Fires' count\n"
         "     ≈ how often the hook's matcher matched, not how often it engaged."
     )
+
+    # ── issue #710 remaining scope: advise_ignored_rate / bypass_count / outcome-proxy ──
+    _render_advise_ignored_section(lines, advise_ignored or {})
+    _render_bypass_attribution_section(lines, bypass_join or {})
+    _render_outcome_proxy_section(lines, outcome_proxy or {})
 
     # ── Never-fired set (instrumentable roster only) ──
     lines.append(_render_header("Never Fired (instrumentable roster − hooks above)"))
@@ -919,7 +1342,24 @@ def run_fire_rate(args: argparse.Namespace, telemetry_dir: Path) -> int:
         Path(args.manifest_path) if args.manifest_path else default_manifest_path()
     )
     roster = roster_split(manifest_path)
-    print(render_fire_report(by_hook, args.days, telemetry_dir, roster))
+
+    # issue #710 remaining scope: bypass_count joins fire-events against the
+    # SAME telemetry_dir's bypass-events-*.jsonl files (both are written to
+    # ~/.praxis/telemetry by default — see hooks/_lib/_fire_ledger.py and
+    # hooks/postuse-correction/bypass-telemetry/impl.py resolve_*_path()).
+    bypass_events = load_events(telemetry_dir, args.days)
+    advise_ignored = compute_advise_ignored(events)
+    exact_map = bypass_env_exact_map(manifest_path)
+    bypass_join = join_bypass_to_hooks(events, bypass_events, exact_map=exact_map)
+    state_dir = Path(args.state_dir) if args.state_dir else default_strike_state_dir()
+    outcome_proxy = compute_outcome_proxy(events, state_dir)
+
+    print(render_fire_report(
+        by_hook, args.days, telemetry_dir, roster,
+        advise_ignored=advise_ignored,
+        bypass_join=bypass_join,
+        outcome_proxy=outcome_proxy,
+    ))
     return 0
 
 
