@@ -3,9 +3,10 @@
 Evidence-based `keep` / `merge` / `drop` verdict for every hook in
 `hooks/manifest.json`, scored against the fire-rate ledger `bypass-review
 fire-rate` produces (issue #710). This applies ponytail's deletion-over-addition
-lens to praxis's own hook accretion — see
-[`deep-dive-ponytail-vs-praxis-improvements.md`](../.omc/specs/deep-dive-ponytail-vs-praxis-improvements.md)
-P4.
+lens to praxis's own hook accretion — see the P4 work item in
+`.omc/specs/deep-dive-ponytail-vs-praxis-improvements.md` (local planning
+artifact — `.omc/` is gitignored, so this is a plain-text pointer rather than
+a repo-relative link).
 
 ## Data source
 
@@ -23,10 +24,11 @@ sessions**). Test-fixture rows emitted by `tests/test_fire_ledger.py` (`adv`,
 
 ## Axis 1 — never-fired
 
-**Result: none.** Every hook that emits fire-events (55 of 58) fired at least
-once in the window. This is expected — the sample covers the tail end of this
-very session's Wave 1 work, which exercised nearly every gate class (commit,
-PR create, merge, AskUserQuestion, bulk write).
+**Result: none.** Every hook that emits fire-events (54 of 58 — the other 4
+are the uninstrumented shell hooks below) fired at least once in the window.
+This is expected — the sample covers the tail end of this very session's
+Wave 1 work, which exercised nearly every gate class (commit, PR create,
+merge, AskUserQuestion, bulk write).
 
 4 hooks are **shell (`.sh`) implementations with no `@fail_open` / dispatch
 chokepoint** and emit no fire-events at all, so they cannot be scored on any
@@ -106,16 +108,18 @@ advisory) — a 30-day/49-session window without a match is consistent with
 
 | Verdict | Count | Hooks |
 | --- | --- | --- |
-| **Keep** (active or narrow-safety-net) | 51 | All PreToolUse/PostToolUse hooks scored above, plus all hooks with nonzero block/ask/advise activity not otherwise discussed |
+| **Keep** (active or narrow-safety-net) | 50 | All measured PreToolUse/PostToolUse hooks not listed in the two rows below, including every hook with nonzero block/ask/advise activity |
 | **Investigate** (non-drop follow-up) | 2 | `pre-gh-pr-create-dedup-gate` (advisory message clarity), `memory-hint` (keyword-match coverage) |
 | **Merge candidate, blocked on prerequisite** | 2 | `pre-output-falsification-gate` + `output-block-falsify-advisory` — revisit only after Cluster B3's shared-matcher extraction lands and a further fire-rate window still shows full overlap |
 | **Unmeasurable — instrument first** | 4 | `codex-review-route`, `completion-verify`, `retrospect-mix-check`, `strike-counter` (shell hooks, no fire-event emission) |
 | **Drop** | 0 | — |
+| **Total** | 58 | Matches `hooks/manifest.json`'s registered hook count (50+2+2+4) |
 
 ## Bottom line
 
-No hook meets the bar for removal on the current evidence. The 60-hook count
-itself is not, on this data, an accretion of dead weight — it's mostly narrow,
+No hook meets the bar for removal on the current evidence. The 58-hook count
+itself (the ponytail-comparison spec's "~60 hooks" framing, rounded) is not,
+on this data, an accretion of dead weight — it's mostly narrow,
 non-overlapping safety nets whose low individual fire-rate is exactly what a
 targeted advisory should look like. The actionable follow-ups are smaller and
 different in kind: (1) finish Cluster B3's code dedup before reconsidering a
