@@ -20,8 +20,10 @@ with the single line
 When `is_error_count > 0` the nested `retrospect:is_error_enum` block is
 **also required** (Gate-7 blocks Stage 3 without it) — each `is_error`
 event enumerated with a `promote`/`note`/`dismiss` disposition [issue #664].
-Omit the nested enum block only when `is_error_count == 0` (nothing to
-enumerate).
+Row count must equal `is_error_count`; Gate-7 checks only that the block is
+non-empty, so a single category-assumed row is not a substitute for reading
+each body individually [issue #720]. Omit the nested enum block only when
+`is_error_count == 0` (nothing to enumerate).
 
 ```markdown
 ## Retrospect Report — {session_date}

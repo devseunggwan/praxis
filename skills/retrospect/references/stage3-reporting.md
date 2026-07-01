@@ -174,6 +174,15 @@ When `is_error_count > 0`, the receipt must also include a nested
 - `note`
 - `dismiss`
 
+**Row count must equal `is_error_count` (MUST — issue #720).** Gate-7 only
+checks that the block is non-empty; it does not check that every counted
+error has its own row. A category-collapsed row ("these N are all the same
+kind of timeout, dismiss") passes Gate-7's structural check while still
+under-enumerating — read each `is_error` body individually (see
+[`stage1-2-analysis.md` → Transcript-derived trail
+requirements](stage1-2-analysis.md#transcript-derived-trail-requirements))
+and give it its own row rather than assuming its category from a sibling row.
+
 The skipped variant is allowed only when the transcript is genuinely
 unreachable.
 

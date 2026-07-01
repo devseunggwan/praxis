@@ -207,6 +207,10 @@ scope window applies to `tool_census`, `user_correction`, and
      - `workaround_marker`
      - `surfaced_in_friction`
      - `signal`
+   - `error_count` per row must be derived from reading each `is_error: true`
+     result's own body for that tool — not inferred from the tool's typical
+     failure mode or from the count of a prior row. See the `is_error` census
+     cross-check under "Transcript-derived trail requirements" below.
    - `retry_count` is failure-driven only: same tool + parameters re-issued
      after a failed, errored, or unexpected-output prior call. Intentional
      polling, repeated status reads, and background-output re-reads (for example
@@ -593,6 +597,31 @@ For post-compaction sessions with a readable JSONL transcript, enumerate the
 transcript before analysis instead of relying only on the compaction summary:
 
 - scan `is_error` tool results and record `is_error_count`
+  - **Read each `is_error: true` result's own body text individually — do not
+    infer its failure category from the tool name, from a preceding result in
+    the same scan, or from an assumed pattern (MUST).** A retrospect analyzing
+    its own source session committed exactly this failure: it category-assumed
+    `is_error` bodies instead of reading each one, and under-counted as a
+    result — the self-referential "recursive-retrospect anti-pattern" this
+    pass exists to catch (issue #720).
+  - This individual read is what populates the Stage 3
+    `retrospect:is_error_enum` block (see
+    [`stage3-reporting.md`](stage3-reporting.md) and
+    [`report-template.md`](report-template.md)), whose presence Gate-7
+    hard-blocks Stage 3 on. **Gate-7 only checks that the block is non-empty
+    (>= 1 disposition row) — it does NOT check that the row count matches
+    `is_error_count`.** A single category-assumed row ("these are all
+    transient timeouts, dismiss") satisfies Gate-7's structural check while
+    still under-enumerating. Treat row-count parity with `is_error_count` as a
+    Stage 2 MUST even though the hook cannot verify it: do not close the enum
+    block until every counted `is_error` has its own disposition row.
+  - **is_error / tool_census cross-check (MUST).** `is_error_count` should
+    equal the sum of `error_count` across all `tool_census` rows (pre-scan
+    lane 3) for the same scope window. A mismatch means one of the two scans
+    skipped a result — re-scan the narrower one before proceeding to Stage
+    2.5. Record the reconciled `error_count` values directly in the existing
+    `retrospect:tool_census` trail (no separate fence needed); do not silently
+    average or split the difference between the two counts.
 - scan explicit user corrections and record `user_correction_count`
 - scan self-corrections / retries and record `self_correction_count`
 - if the transcript is unreadable, emit
