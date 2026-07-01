@@ -47,7 +47,6 @@ Development workflow skills for Claude Code — disciplined, fast, resilient.
 | `cmux-resume-sessions` | `resume sessions`, `restore from snapshot`, `rehydrate sessions`, `세션 복원`, `스냅샷 복원` | To restore workspaces from a saved snapshot (for crash recovery, use `cmux-recover-sessions`) | `/praxis:cmux-resume-sessions` |
 | `cmux-session-manager` | `cmux session`, `session management`, `session cleanup`, `cmux status`, `cmux tidy` | To run routine session cleanup or view a status dashboard | `/praxis:cmux-session-manager` |
 | `cmux-delegate` | `delegate`, `cmux delegate`, `new session` | To delegate to an independent session while preserving the current task's context (split review / debugging / implementation) | `/praxis:cmux-delegate` |
-| `cmux-browser` | `cmux browser`, `cmux 브라우저` | To run E2E tests via the cmux browser CLI, including SPA hydration waits | `/praxis:cmux-browser` |
 
 > **CLI tools (not skills):** praxis also ships `bypass-review`, a shell wrapper
 > with no `SKILL.md` — it is **not** invocable as `/praxis:*` and is absent from
@@ -173,9 +172,9 @@ existing platforms required.
 ## Local Development
 
 This repository should live at **`~/projects/praxis`**. CLI tools shipped by
-skills (e.g. `cmux-recover-sessions`, `claude-recover`, `cmux-save-sessions`,
-`cmux-browser`) are symlinked from `~/.local/bin` into this clone, so patches
-you commit here land in the version that actually runs at the shell.
+skills (e.g. `cmux-recover-sessions`, `claude-recover`, `cmux-save-sessions`)
+are symlinked from `~/.local/bin` into this clone, so patches you commit here
+land in the version that actually runs at the shell.
 
 ```bash
 # Install / refresh CLI symlinks (idempotent)

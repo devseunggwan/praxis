@@ -23,7 +23,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | **Full** | + all cmux-* skills | + cmux |
 | **Multi-provider** | + codex/gemini routing in cmux-* | + codex-cli, gemini-cli |
 
-## Skills (14)
+## Skills (13)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Always call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
@@ -62,7 +62,6 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | `recover-sessions` | Bulk recover sessions after power loss (tmux backend) |
 | `cmux-session-manager` | Daily session lifecycle — status dashboard, cleanup, reorganize |
 | `cmux-delegate` | Delegate a task to an independent session with auto-collected context |
-| `cmux-browser` | Browser automation E2E testing via cmux browser CLI — SPA hydration wait included |
 
 ## Hooks
 
@@ -108,9 +107,9 @@ for the source files, generated outputs, and add-a-new-platform flow.
 ### Canonical clone path
 
 This repository should live at **`~/projects/praxis`**. The CLI tools shipped
-by skills (e.g. `cmux-recover-sessions`, `claude-recover`, `cmux-save-sessions`,
-`cmux-browser`) are symlinked from `~/.local/bin` into this clone, so patches
-you commit here land in the version that actually runs at the shell. Keeping a
+by skills (e.g. `cmux-recover-sessions`, `claude-recover`, `cmux-save-sessions`)
+are symlinked from `~/.local/bin` into this clone, so patches you commit here
+land in the version that actually runs at the shell. Keeping a
 second clone under a legacy name risks `~/.local/bin` symlinks pointing at stale
 code — a real failure mode previously hit during recover-sessions debugging.
 
@@ -124,7 +123,6 @@ They are not AI skills — they have no `SKILL.md` and cannot be invoked as `/pr
 | Binary | Source | Purpose |
 |--------|--------|---------|
 | `bypass-review` | `skills/bypass-review/bypass-review` | Review bypass-telemetry event logs written by the bypass-telemetry hook — aggregate and inspect JSONL records (no `SKILL.md`; not invocable as `/praxis:*`) |
-| `cmux-browser` | `skills/cmux-browser/cmux-browser` | Pass-through for `cmux browser`; intercepts selector-missing errors and adds subcommand-specific usage hints |
 
 ### Install / refresh CLI symlinks
 

@@ -22,6 +22,5 @@ CLI_SCRIPTS=(
   "skills/cmux-recover-sessions/cmux-recover-sessions"
   "skills/cmux-session-manager/cmux-session-status"
   "skills/cmux-session-manager/cmux-session-cleanup"
-  "skills/cmux-browser/cmux-browser"
   "skills/bypass-review/bypass-review"
 )
