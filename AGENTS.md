@@ -17,13 +17,13 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 ## Prerequisites
 
 | Tier | What works | Dependencies |
-|------|-----------|--------------|
-| **Standalone** | recover-sessions, strike / strikes / reset-strikes | `gh` CLI, `jq` (for strike skills) |
+| ------ | ----------- | -------------- |
+| **Standalone** | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq` (for strike skills); `debt` needs only `git` |
 | **Enhanced** | + retrospect, codex-review-wrap | + oh-my-claudecode |
 | **Full** | + all cmux-* skills | + cmux |
 | **Multi-provider** | + codex/gemini routing in cmux-* | + codex-cli, gemini-cli |
 
-## Skills (13)
+## Skills (14)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Always call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
@@ -40,9 +40,10 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 ### Development
 
 | Skill | Purpose |
-|-------|---------|
+| ------- | --------- |
 | `retrospect` | Session retrospect — find friction root causes, propose improvements |
 | `codex-review-wrap` | Worktree-aware wrapper for `/codex:review` — forces explicit target selection, premise-verification gate, flip detection across rounds |
+| `debt` | Deferred-decision ledger — unions commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) with tree compounding comments (`# [PR #N]`); report-only |
 
 ### Discipline
 

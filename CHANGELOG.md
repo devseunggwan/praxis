@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `debt`: new report-only skill — deferred-decision ledger unioning commit-trailer
+  markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`,
+  `Scope-risk:`) from `git log --grep` with tree compounding comments
+  (`# [PR #N]`) from `grep`. Groups hits, tags markers with no stated revisit
+  condition as `no-trigger`, and never modifies any file. (#711)
+
 ## [7.0.0] - 2026-06-28
 
 Major release. Removes the `cmux-browser` skill, which has migrated to the
