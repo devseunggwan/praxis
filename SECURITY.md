@@ -48,9 +48,10 @@ drift.
 
 ### `gh` — GitHub CLI
 
-| Hook | Command | Purpose |
-|------|---------|---------|
-| `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py` | `gh pr list --repo <r> --state all --search <kw> --json ...` | Search existing PRs before creating a new one |
+| Hook                                                       | Command                                                      | Purpose                                                             |
+|------------------------------------------------------------|--------------------------------------------------------------|---------------------------------------------------------------------|
+| `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py` | `gh pr list --repo <r> --state all --search <kw> --json ...` | Search existing PRs before creating a new one                       |
+| `hooks/preflight-gate/pr-state-refetch-gate/impl.py`       | `gh pr view <N> --json state,mergeStateStatus`               | Re-fetch live PR state before a PR-state-contingent AskUserQuestion |
 
 All `git` and `gh` invocations are **read-only**. No hook writes to remote
 state. Hooks fail-open (exit 0) when the binary is missing or times out.

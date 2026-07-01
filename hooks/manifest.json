@@ -176,6 +176,19 @@
       "timeout": 5
     },
     {
+      "name": "pr-state-refetch-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "AskUserQuestion",
+      "timeout": 8,
+      "mode": {
+        "strict_env": "PRAXIS_PR_STATE_REFETCH_STRICT",
+        "external_commands": [
+          "gh pr view <N> --json state,mergeStateStatus"
+        ]
+      }
+    },
+    {
       "name": "gh-flag-verify",
       "role": "preflight-gate",
       "event": "PreToolUse",
