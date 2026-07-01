@@ -9,7 +9,7 @@ alongside a merge-intent keyword, the hook re-fetches that PR's **live**
 surface. If the live state is already `MERGED` or `CLOSED`, it warns
 (default) or blocks (strict mode) — the question's premise is stale.
 
-### Why this exists
+## Why this exists
 
 A next-step `AskUserQuestion` menu whose text depends on a PR's merge/close
 state can go stale mid-turn: the PR gets merged or closed (by another actor,
@@ -23,7 +23,7 @@ threads, PR mergeable status at merge-ask time).
 No existing hook covers this surface:
 
 | Hook | Why it doesn't cover this |
-|------|---------------------------|
+| ------ | --------------------------- |
 | `merge-state-claim-gate` (Stop) | Only scans the **final assistant message** for a completed-state claim, post-hoc. It cannot see a mid-turn `AskUserQuestion` — by the time the Stop hook runs, the stale question has already been shown to the user. |
 | `output-block-falsify-advisory` (PreToolUse/AskUserQuestion) | Emits a static text reminder ("may already be resolved by a merged PR") but never calls `gh` — it cannot tell whether the premise is actually stale, only that it *might* be. |
 | `pre-merge-approval-gate` (PreToolUse/Bash) | Gates the `gh pr merge` **command** itself, not the **question** that precedes the decision to run it. By the time this hook would fire, the stale menu has already round-tripped through the user. |
@@ -33,9 +33,10 @@ lock-boundary re-fetch pattern (`gh pr view --json mergeable,mergeStateStatus`
 immediately before surfacing a merge-approval ask), extended to a different
 surface: a PR-state-contingent **question**, not a merge **command**.
 
-### Detection signal (co-occurrence)
+## Detection signal (co-occurrence)
 
 Both conditions must hold for the **same** `questions[]` entry (question text
+
 + all of that question's option labels/descriptions, joined):
 
 1. A **PR-number token** — `#\d+` (matches both bare `#123` and `PR #123`;
@@ -51,10 +52,10 @@ unrelated question in the same payload — detection is scoped per-question,
 not payload-wide, so a multi-question menu with an unrelated merge-adjacent
 question elsewhere does not cross-contaminate.
 
-### False-positive boundary (explicit design decisions)
+## False-positive boundary (explicit design decisions)
 
 | Text | Fires? | Why |
-|------|--------|-----|
+| ------ | -------- | ----- |
 | `"PR #714 merge할까요?"` | Yes | number + EN merge keyword, same question |
 | `"이 변경(#714)을 머지할까요?"` | Yes | number + KO merge keyword, same question |
 | `"PR #714 리뷰를 진행할까요?"` | **No** | number present, but no merge/squash/머지 keyword anywhere in the question unit — a review-only menu does not depend on merge state |
@@ -75,11 +76,11 @@ merge decision) without adding recall for the actual target scenario
 fails with a non-zero exit — this naturally routes through the fail-open path
 below rather than needing separate issue-vs-PR disambiguation logic.
 
-### Live re-fetch
+## Live re-fetch
 
 For each candidate PR number (deduplicated, capped at 3 per payload):
 
-```
+```bash
 gh pr view <N> --json state,mergeStateStatus
 ```
 
@@ -89,7 +90,7 @@ worktree's repo, and a 2-second timeout (worst case 3 candidates × 2s = 6s,
 under the 8s manifest timeout).
 
 | Live `state` | Result |
-|---------------|--------|
+| --------------- | -------- |
 | `MERGED` or `CLOSED` | Stale premise — advisory (default) or block (strict) |
 | `OPEN` | Premise holds — silent pass |
 | `gh` call fails, times out, or returns unparseable JSON | **That PR number is skipped** (fail-open) — cannot determine live state, so neither warn nor block on it |
@@ -97,10 +98,10 @@ under the 8s manifest timeout).
 A payload with 2+ candidate PR numbers where only some are stale still fires
 — the message lists only the stale ones.
 
-### What is advised / blocked
+## What is advised / blocked
 
 | Scenario | Action |
-|----------|--------|
+| ---------- | -------- |
 | Default mode, ≥1 candidate PR's live state is MERGED/CLOSED | exit 0 + advisory stderr |
 | `PRAXIS_PR_STATE_REFETCH_STRICT=1`, ≥1 candidate PR's live state is MERGED/CLOSED | exit 2 (block) |
 | Any tool name other than `AskUserQuestion` | silent pass-through |
@@ -109,10 +110,10 @@ A payload with 2+ candidate PR numbers where only some are stale still fires
 | `gh` binary missing / call errors / times out / unparseable JSON, for a given PR number | that number is skipped (fail-open); if no other candidate is stale, silent pass-through |
 | Malformed / missing payload | silent pass-through (fail-open) |
 
-### Mode and env var behavior
+## Mode and env var behavior
 
 | Env var state | Mode | Exit code on match |
-|---------------|------|---------------------|
+| --------------- | ------ | --------------------- |
 | Unset (default) | **Advisory** | 0 + stderr warning |
 | `PRAXIS_PR_STATE_REFETCH_STRICT=1` | Strict | 2 (block) |
 
@@ -125,31 +126,31 @@ mirrors `merge-menu-review-options-advisory` and
 `block-manufactured-action-menu`'s advisory-first-then-strict-opt-in
 convention for `AskUserQuestion` gates.
 
-### Parsing guarantees (fail-open)
+## Parsing guarantees (fail-open)
 
-- Malformed JSON payload → exit 0
-- `tool_name != "AskUserQuestion"` → exit 0
-- `tool_input` absent or not a dict → exit 0
-- `questions` absent or not a list → exit 0 (no candidates)
-- `options` absent or not a list in a question → that question's options
++ Malformed JSON payload → exit 0
++ `tool_name != "AskUserQuestion"` → exit 0
++ `tool_input` absent or not a dict → exit 0
++ `questions` absent or not a list → exit 0 (no candidates)
++ `options` absent or not a list in a question → that question's options
   contribute nothing to its text unit (question text alone is still scanned)
-- No PR-number + merge-keyword co-occurrence in any question → exit 0, zero
++ No PR-number + merge-keyword co-occurrence in any question → exit 0, zero
   `gh` subprocess calls
-- `gh` binary missing, non-zero exit, timeout, or unparseable JSON for a
++ `gh` binary missing, non-zero exit, timeout, or unparseable JSON for a
   candidate number → that number is dropped, not blocked
-- Any uncaught exception → exit 0 (via the shared `@fail_open` decorator in
++ Any uncaught exception → exit 0 (via the shared `@fail_open` decorator in
   `hooks/_lib/_hook_runtime.py`)
 
-### Relationship to sibling hooks
+## Relationship to sibling hooks
 
 | Hook | Overlap |
-|------|---------|
+| ------ | --------- |
 | `merge-state-claim-gate` | None — that hook gates the **assertion** of completed state in the final message (post-hoc); this hook gates the **premise** of a mid-turn question (pre-hoc) |
 | `output-block-falsify-advisory` | Complementary — that hook's static reminder covers the general "may already be resolved" case across many claim types; this hook adds a live, PR-specific re-fetch with an authoritative yes/no answer |
 | `pre-merge-approval-gate` | None — different surface (`gh pr merge` Bash command vs. `AskUserQuestion` menu); same underlying pattern (live `gh pr view` re-fetch at a lock boundary) |
 | `merge-menu-review-options-advisory` | None — that hook checks whether a merge-decision menu **offers a review lever**; this hook checks whether the menu's **premise about a specific PR is still true**. Both inspect `AskUserQuestion` merge-related text but for orthogonal purposes. Merge-keyword regex is mirrored from this hook (2nd consumer; see impl.py docstring) |
 
-### Tests
+## Tests
 
 ```bash
 bash tests/hooks/preflight-gate/test_pr_state_refetch_gate.sh
