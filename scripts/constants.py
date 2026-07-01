@@ -58,6 +58,7 @@ EXPECTED_SKILLS: frozenset[str] = frozenset({
     "cmux-save-sessions",
     "cmux-session-manager",
     "codex-review-wrap",
+    "debt",
     "recover-sessions",
     "reset-strikes",
     "retrospect",

@@ -25,9 +25,10 @@ Development workflow skills for Claude Code — disciplined, fast, resilient.
 ### Development
 
 | Skill | Trigger keywords | When to use | Example invocation |
-|-------|-----------------|-------------|-------------------|
+| ------- | ----------------- | ------------- | ------------------- |
 | `retrospect` | `retrospect`, `what went wrong`, `session review`, `session improvement`, `improve` | To analyze friction patterns / root causes after a session and act on improvements | `/praxis:retrospect` |
 | `codex-review-wrap` | `codex review`, `review codex`, `safe review`, `premise verification`, `flip detection`, `sibling cross-check` | To run `/codex:review` safely in multi-worktree setups, with premise verification and flip detection | `/praxis:codex-review-wrap` |
+| `debt` | `praxis:debt`, `debt ledger`, `지연 결정`, `deferred decision`, `기술 부채 원장`, `commit trailer audit` | To harvest commit-trailer and compounding-comment deferred-decision markers into a report-only ledger | `/praxis:debt` |
 
 ### Discipline
 
@@ -85,8 +86,8 @@ Most skills delegate to external agents or session managers. Install the depende
 ### Compatibility Tiers
 
 | Tier | What works | What you need |
-|------|-----------|---------------|
-| **Standalone** | recover-sessions, strike / strikes / reset-strikes | `gh` CLI, `jq` |
+| ------ | ----------- | --------------- |
+| **Standalone** | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `debt` needs only `git` |
 | **Enhanced** | + retrospect, codex-review-wrap | + oh-my-claudecode |
 | **Full** | + all cmux-* skills | + cmux |
 | **Multi-provider** | + codex/gemini routing in cmux-delegate | + codex-cli, gemini-cli |
