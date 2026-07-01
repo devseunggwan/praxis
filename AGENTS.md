@@ -13,6 +13,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Skill ↔ hook ↔ manifest dependency graph — provider routing, hook index, multi-platform packaging |
 | [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md) | Fixed Claude Code runtime limits every skill must respect |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Skill and hook contribution conventions, live-runtime verification gate |
+| [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md) | Evidence-based keep/merge/drop verdict per hook, scored from the fire-rate ledger (issue #713) |
 
 ## Prerequisites
 
