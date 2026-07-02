@@ -30,13 +30,10 @@ Options:
                          ~/.praxis/state/strikes)
   -h, --help             Show this message and exit
 
-OUTCOME PROXY LIMITATIONS (issue #710 item 3, fire-rate mode):
-  Only strike_count is computed — read from the per-session state JSON
-  written by hooks/completion-verify/strike-counter/impl.sh
-  ($STATE_DIR/<session_id>.json, field `count`). Three items from the
-  original issue text are NOT implemented because no telemetry source
-  currently records them:
-    - external-write revert     (no revert/undo event is logged anywhere)
+OUTCOME PROXY LIMITATIONS (issue #710 item 3 / issue #737, fire-rate mode):
+  strike_count and external_write_revert_count are computed. Two items from
+  the original issue text are still NOT implemented because no telemetry
+  source currently records them:
     - re-clarification loop     (requires transcript-level turn analysis,
                                   out of scope for this JSONL ledger)
     - rework commits            (requires git-log correlation per session,
@@ -45,6 +42,16 @@ OUTCOME PROXY LIMITATIONS (issue #710 item 3, fire-rate mode):
   after 7 days and `/praxis:reset-strikes` deletes it immediately on reset,
   so a session's true historical strike count may already be gone by the
   time this report runs.
+  external_write_revert_count (issue #737) is a COARSE proxy: it counts
+  destructive-bash-guard fire-ledger records with a non-pass decision in the
+  session. The fire-ledger schema (timestamp/session_id/tool/hook/role/
+  decision) carries no per-pattern detail, so this count cannot distinguish
+  the revert-signal patterns it was added for (`git revert`, `gh pr close`,
+  `gh issue reopen`) from that hook's pre-existing destructive-command
+  detections (`rm -rf`, `git reset --hard`, etc.) — see
+  hooks/advisory-nudge/destructive-bash-guard/impl.py. A nonzero count means
+  "destructive-bash-guard flagged something in this session", not "a revert
+  specifically occurred".
 
 Output sections:
   1. Summary — total events + date window
@@ -110,6 +117,11 @@ F_FIRE_DECISION = "decision"
 F_FIRE_GRANULARITY = "granularity"
 
 _FIRE_DECISIONS = ("block", "ask", "advise", "pass")
+
+# issue #737: hook name whose non-pass fires proxy the external-write-revert
+# outcome-proxy signal — cited verbatim from
+# hooks/advisory-nudge/destructive-bash-guard's manifest `name`.
+DESTRUCTIVE_BASH_GUARD_HOOK = "destructive-bash-guard"
 
 _INLINE_ENV_TOKEN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _ENV_OPTIONS_WITH_VALUE = {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}
@@ -1038,23 +1050,48 @@ def load_strike_state(state_dir: Path, session_id: str) -> dict | None:
     }
 
 
+def compute_external_write_revert_counts(fire_events: list[dict]) -> dict[str, int]:
+    """Return dict[session_id] -> count of destructive-bash-guard non-pass fires.
+
+    Issue #737, best-effort COARSE proxy — see module docstring "OUTCOME
+    PROXY LIMITATIONS" for why this conflates the new revert-signal patterns
+    with destructive-bash-guard's pre-existing destructive-command detections.
+    """
+    counts: dict[str, int] = {}
+    for ev in fire_events:
+        if ev.get(F_FIRE_HOOK) != DESTRUCTIVE_BASH_GUARD_HOOK:
+            continue
+        if ev.get(F_FIRE_DECISION) == "pass":
+            continue
+        sid = ev.get(F_FIRE_SESSION)
+        if not isinstance(sid, str) or not sid:
+            continue
+        counts[sid] = counts.get(sid, 0) + 1
+    return counts
+
+
 def compute_outcome_proxy(fire_events: list[dict], state_dir: Path) -> dict[str, dict]:
-    """Return dict[session_id] -> {strike_count, strike_state_available}.
+    """Return dict[session_id] -> {strike_count, strike_state_available,
+    external_write_revert_count}.
 
     Only covers sessions that appear in the fire-events window. Sessions
     whose strike state already expired (7-day TTL) or was reset show
     strike_state_available=False, strike_count=0 — NOT proof of zero strikes.
+    external_write_revert_count is a best-effort proxy — see
+    compute_external_write_revert_counts / module docstring.
     """
     sessions = sorted({
         ev.get(F_FIRE_SESSION) for ev in fire_events
         if isinstance(ev.get(F_FIRE_SESSION), str) and ev.get(F_FIRE_SESSION)
     })
+    revert_counts = compute_external_write_revert_counts(fire_events)
     result: dict[str, dict] = {}
     for sid in sessions:
         state = load_strike_state(state_dir, sid)
         result[sid] = {
             "strike_count": state["count"] if state else 0,
             "strike_state_available": state is not None,
+            "external_write_revert_count": revert_counts.get(sid, 0),
         }
     return result
 
@@ -1206,12 +1243,17 @@ def _render_outcome_proxy_section(lines: list[str], outcome_proxy: dict[str, dic
     with_strikes = {
         sid: r for sid, r in outcome_proxy.items() if r["strike_count"] > 0
     }
+    with_reverts = {
+        sid: r for sid, r in outcome_proxy.items()
+        if r.get("external_write_revert_count", 0) > 0
+    }
     available = sum(1 for r in outcome_proxy.values() if r["strike_state_available"])
     lines.append(
         f"  Sessions in window : {len(outcome_proxy)}  "
         f"(strike state available for {available})"
     )
     lines.append(f"  Sessions with strikes : {len(with_strikes)}")
+    lines.append(f"  Sessions with external-write-revert signal : {len(with_reverts)}")
     if with_strikes:
         lines.append("")
         col = 40
@@ -1219,14 +1261,27 @@ def _render_outcome_proxy_section(lines: list[str], outcome_proxy: dict[str, dic
         lines.append(f"  {'─' * col}  {'─' * 7}")
         for sid in sorted(with_strikes, key=lambda s: with_strikes[s]["strike_count"], reverse=True):
             lines.append(f"  {sid:<{col}}  {with_strikes[sid]['strike_count']:>7}")
+    if with_reverts:
+        lines.append("")
+        col = 40
+        lines.append(f"  {'Session':<{col}}  {'Revert signal':>13}")
+        lines.append(f"  {'─' * col}  {'─' * 13}")
+        for sid in sorted(with_reverts, key=lambda s: with_reverts[s]["external_write_revert_count"], reverse=True):
+            lines.append(f"  {sid:<{col}}  {with_reverts[sid]['external_write_revert_count']:>13}")
     lines.append("")
     lines.append(
-        "  ONLY strike_count is implemented. external-write-revert,\n"
-        "  re-clarification-loop, and rework-commit signals are NOT computed —\n"
+        "  strike_count and external_write_revert_count are implemented.\n"
+        "  re-clarification-loop and rework-commit signals are NOT computed —\n"
         "  no telemetry source records them yet (see module docstring\n"
         "  'OUTCOME PROXY LIMITATIONS'). strike_count itself is a lower bound:\n"
         "  state is TTL-deleted after 7 days and cleared on /praxis:reset-strikes,\n"
-        "  so a session showing 0 may have had strikes that already expired."
+        "  so a session showing 0 may have had strikes that already expired.\n"
+        "  external_write_revert_count (issue #737) is a COARSE proxy — it\n"
+        "  conflates destructive-bash-guard's new revert-signal patterns\n"
+        "  (`git revert`, `gh pr close`, `gh issue reopen`) with its\n"
+        "  pre-existing destructive-command detections (`rm -rf`, etc.); a\n"
+        "  nonzero count means the hook flagged SOMETHING, not specifically\n"
+        "  a revert (see module docstring)."
     )
 
 

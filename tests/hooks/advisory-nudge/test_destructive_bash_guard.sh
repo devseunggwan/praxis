@@ -61,6 +61,15 @@ print(json.dumps({
       echo "$err" | grep -q "\[destructive-bash-guard\]" || ok=0
       echo "$err" | grep -q "ADVISORY" || ok=0
       ;;
+    signal)
+      [ "$rc" -eq 0 ] || ok=0
+      [ -z "$out" ]   || ok=0
+      echo "$err" | grep -q "\[destructive-bash-guard\]" || ok=0
+      echo "$err" | grep -q "outcome-proxy signal detected" || ok=0
+      echo "$err" | grep -q "INFORMATIONAL" || ok=0
+      # never the destructive banner, never wording implying blocking
+      echo "$err" | grep -q "destructive command detected" && ok=0
+      ;;
     ask)
       [ "$rc" -eq 0 ] || ok=0
       [ -z "$err" ]   || ok=0
@@ -232,6 +241,38 @@ run_case "shred -u -z secret.txt" advisory "shred -u -z secret.txt"
 run_case "fork bomb canonical" advisory ":(){ :|:& };:"
 run_case "fork bomb no spaces" advisory ":(){:|:&};:"
 run_case "named bomb() (legit user function — out of scope)" silent "bomb(){ echo hi; }; bomb"
+
+# === SIGNAL — outcome-proxy revert-adjacent commands (issue #737) =========
+
+run_case "git revert HEAD" signal "git revert HEAD"
+run_case "git revert --no-edit HEAD~1" signal "git revert --no-edit HEAD~1"
+run_case "git -C /tmp revert HEAD" signal "git -C /tmp revert HEAD"
+run_case "gh pr close 5" signal "gh pr close 5"
+run_case "gh pr close https://github.com/o/r/pull/5" signal "gh pr close https://github.com/o/r/pull/5"
+run_case "gh issue reopen 10" signal "gh issue reopen 10"
+run_case "gh -R o/r pr close 5 (-R before subcommand)" signal "gh -R octocat/Hello-World pr close 5"
+run_case "gh --repo o/r issue reopen 10 (--repo before subcommand)" signal "gh --repo octocat/Hello-World issue reopen 10"
+run_case "gh --repo=o/r pr close 5 (glued --repo=)" signal "gh --repo=octocat/Hello-World pr close 5"
+run_case "gh pr close 5 -R o/r (-R after args)" signal "gh pr close 5 -R octocat/Hello-World"
+
+# === SILENT — commands that must NOT trigger the revert signal =============
+
+run_case "git reset HEAD (not revert)" silent "git reset HEAD foo"
+run_case "git log --oneline (not revert)" silent "git log --oneline"
+run_case "gh pr status (not close)" silent "gh pr status"
+run_case "gh pr view 5 (not close)" silent "gh pr view 5"
+run_case "gh issue list (not reopen)" silent "gh issue list"
+run_case "gh issue close 10 (opposite action)" silent "gh issue close 10"
+run_case "gh pr merge 5 (not close)" silent "gh pr merge 5"
+
+# === ADVISORY+SIGNAL — compound command carries both categories ============
+
+run_case "rm -rf x && git revert HEAD (both fire)" advisory "rm -rf /tmp/x && git revert HEAD"
+
+# === ASK — strict mode does NOT escalate signal-only commands ==============
+
+run_case "git revert in strict mode stays signal (not ask)" signal "git revert HEAD" "PRAXIS_DESTRUCTIVE_BASH_STRICT=1"
+run_case "gh pr close in strict mode stays signal (not ask)" signal "gh pr close 5" "PRAXIS_DESTRUCTIVE_BASH_STRICT=1"
 
 # === ADVISORY — compound command decomposition =============================
 

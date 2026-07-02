@@ -53,13 +53,42 @@ These device targets are NOT flagged when used as redirect targets:
 
 `/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/zero`, `/dev/tty`
 
+### Outcome-proxy signal detection (issue #737)
+
+Separate from the destructive-command rules above, this hook also detects
+`git revert`, `gh pr close`, and `gh issue reopen` — reversal/undo-adjacent
+commands, NOT destructive ones. This is command-pattern detection only (the
+moment the command executes), not state-reversal correlation (whether an
+earlier mutation was actually undone).
+
+| Rule | Matches | Examples |
+| ------ | --------- | ---------- |
+| `git revert` | `git revert` (any flags/target) | `git revert HEAD`, `git revert --no-edit HEAD~1` |
+| `gh pr close` | `gh pr close` (leading `gh` flags skipped, incl. `-R`/`--repo <value>`) | `gh pr close 5`, `gh -R o/r pr close 5`, `gh --repo=o/r pr close 5` |
+| `gh issue reopen` | `gh issue reopen` (leading `gh` flags skipped, incl. `-R`/`--repo <value>`) | `gh issue reopen 10`, `gh --repo o/r issue reopen 10` |
+
+These fire a **separate** stderr note — `"[destructive-bash-guard] outcome-proxy
+signal detected"` — never the "destructive command detected" banner, and they
+never escalate to `permissionDecision: ask` even under
+`PRAXIS_DESTRUCTIVE_BASH_STRICT=1` (the command is not destructive, so strict
+mode has nothing to gate). The stderr write still makes the shared
+fire-ledger dispatcher (`hooks/_lib/_fire_ledger.py`) record a
+`decision=advise` fire for this hook, which `bypass-review fire-rate`'s
+Outcome Proxy section reads as a best-effort `external_write_revert_count`
+signal (see that script's module docstring "OUTCOME PROXY LIMITATIONS" for
+the precision caveat — the fire-ledger schema cannot distinguish these
+patterns from the hook's pre-existing destructive-command detections).
+
+`PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH=1` silences these too (full hook
+bypass); the strict-mode env var has no effect on them.
+
 ### Modes
 
 | Env var | Effect |
 | --------- | -------- |
 | (unset) | Advisory — stderr text, exit 0. Command proceeds. |
-| `PRAXIS_DESTRUCTIVE_BASH_STRICT=1` | Ask — emit `permissionDecision: ask` JSON. User confirms via runtime prompt. |
-| `PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH=1` | Full bypass — exit 0 silently. |
+| `PRAXIS_DESTRUCTIVE_BASH_STRICT=1` | Ask — emit `permissionDecision: ask` JSON for destructive-command matches. Outcome-proxy signal matches are unaffected (still informational stderr only). |
+| `PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH=1` | Full bypass — exit 0 silently (covers both destructive and outcome-proxy signal detection). |
 
 ### Examples
 
@@ -153,4 +182,7 @@ bash tests/hooks/advisory-nudge/test_destructive_bash_guard.sh
 Cases cover: every detection rule, false-positive guards (`rm -i`, `removed/`
 path, `git clean -n`, safe device targets, non-recursive chmod), compound
 command decomposition (`mkdir x && rm -rf x`), strict-mode JSON output,
-bypass env var, and infrastructure fail-open.
+bypass env var, infrastructure fail-open, and the outcome-proxy signal rules
+(`git revert`, `gh pr close`, `gh issue reopen` — including that strict mode
+does NOT escalate them to `ask`, and that a compound command mixing a
+destructive match with a signal match emits both).
