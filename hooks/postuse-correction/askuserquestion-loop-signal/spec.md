@@ -17,13 +17,13 @@ section only had `strike_count` and `external_write_revert_count`.
 
 ## Behavior
 
-| Condition                          | Action                                     |
-| ----------------------------------- | ------------------------------------------- |
-| `tool_name == "AskUserQuestion"`    | Append one fire-ledger record; exit 0      |
-| `tool_name != "AskUserQuestion"`    | No-op, exit 0                              |
-| Missing/non-string `session_id`     | No-op, exit 0 (cannot attribute the fire)  |
-| `PRAXIS_FIRE_TELEMETRY_DISABLE=1`   | No-op (fire-ledger's shared opt-out)       |
-| Malformed JSON stdin                | Silent fail-open, exit 0                   |
+| Condition                         | Action                                    |
+| --------------------------------- | ----------------------------------------- |
+| `tool_name == "AskUserQuestion"`  | Append one fire-ledger record; exit 0     |
+| `tool_name != "AskUserQuestion"`  | No-op, exit 0                             |
+| Missing/non-string `session_id`   | No-op, exit 0 (cannot attribute the fire) |
+| `PRAXIS_FIRE_TELEMETRY_DISABLE=1` | No-op (fire-ledger's shared opt-out)      |
+| Malformed JSON stdin              | Silent fail-open, exit 0                  |
 
 **This hook NEVER blocks.** It is registered as a `PostToolUse` hook and
 cannot influence tool execution regardless.
@@ -106,16 +106,16 @@ filter to `granularity=="rich"` to avoid conflating the two.
 
 Same file as every other fire-ledger record — no separate stream:
 
-```
+```text
 ~/.praxis/telemetry/fire-events-YYYY-MM-DD.jsonl
 ```
 
 ## Configuration
 
-| Env var                        | Default | Effect                                          |
-| ------------------------------- | ------- | ------------------------------------------------ |
-| `PRAXIS_FIRE_TELEMETRY_DISABLE` | unset   | `1` = full opt-out (fire-ledger's shared toggle) |
-| `PRAXIS_FIRE_TELEMETRY_FILE`    | (daily path above) | Override full file path — used by tests |
+| Env var | Default | Effect |
+| ------- | ------- | ------ |
+| `PRAXIS_FIRE_TELEMETRY_DISABLE` | unset | `1` = full opt-out (fire-ledger's shared toggle) |
+| `PRAXIS_FIRE_TELEMETRY_FILE` | (daily path above) | Override full file path — used by tests |
 
 No hook-specific opt-out variable was added; the fire-ledger's existing
 opt-out already covers this hook since it writes through
