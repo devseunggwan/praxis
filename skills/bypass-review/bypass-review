@@ -10,7 +10,8 @@ forwarding, deferred).
 Issue #689: per-hook aggregation view + tool-error co-occurrence.
 Issue #710 (remaining scope): fire-rate mode gains advise_ignored_rate,
 bypass_count (joined against bypass-events), and a best-effort outcome-proxy
-section (strike counts only — see OUTCOME PROXY LIMITATIONS below).
+section (strike / external-write-revert / rework-commit signals — see
+OUTCOME PROXY LIMITATIONS below).
 
 Usage:
   bypass-review [OPTIONS]
@@ -28,16 +29,18 @@ Options:
                          directory used for the outcome-proxy section
                          (default: $PRAXIS_STATE_DIR/strikes or
                          ~/.praxis/state/strikes)
+  --repo PATH            fire-rate mode only: git repo to correlate commits
+                         against for the rework-commit outcome-proxy signal
+                         (default: current working directory)
   -h, --help             Show this message and exit
 
-OUTCOME PROXY LIMITATIONS (issue #710 item 3 / issue #737, fire-rate mode):
-  strike_count and external_write_revert_count are computed. Two items from
-  the original issue text are still NOT implemented because no telemetry
-  source currently records them:
+OUTCOME PROXY LIMITATIONS (issue #710 item 3 / issue #737 / issue #741,
+fire-rate mode):
+  strike_count, external_write_revert_count, and rework_commit_count are
+  computed. One item from the original issue text is still NOT implemented
+  because no telemetry source currently records it:
     - re-clarification loop     (requires transcript-level turn analysis,
                                   out of scope for this JSONL ledger)
-    - rework commits            (requires git-log correlation per session,
-                                  not present in fire-events/bypass-events)
   Strike state itself is a lower bound: the strike-counter TTL-deletes state
   after 7 days and `/praxis:reset-strikes` deletes it immediately on reset,
   so a session's true historical strike count may already be gone by the
@@ -52,6 +55,23 @@ OUTCOME PROXY LIMITATIONS (issue #710 item 3 / issue #737, fire-rate mode):
   hooks/advisory-nudge/destructive-bash-guard/impl.py. A nonzero count means
   "destructive-bash-guard flagged something in this session", not "a revert
   specifically occurred".
+  rework_commit_count (issue #741) is trailer-first + timestamp-heuristic,
+  mirroring bypass_count's exact-map + heuristic-fallback structure:
+    - Trailer: a `Session-Id: <session_id>` commit trailer is parsed exactly
+      when present (case-insensitive key, first match wins). This repo has
+      no commit-msg hook to insert it automatically — it is a MANUAL
+      convention only, so adoption depends on the committer remembering to
+      add it. The trailer only correlates commits made AFTER this
+      convention exists; it is NOT retroactively backfillable onto
+      historical commits.
+    - Fallback: commits without the trailer are matched to the fire-ledger
+      session whose nearest recorded hook-fire timestamp is within
+      REWORK_WINDOW_SECONDS (900s / 15 minutes) of the commit's author
+      date. Same lossy nature already accepted for bypass_count's
+      _nearest_hook_by_timestamp fallback: two sessions active within the
+      window are indistinguishable by timestamp alone, and a commit with no
+      session active within the window is silently excluded (counted
+      toward no session) rather than guessed.
 
 Output sections:
   1. Summary — total events + date window
@@ -84,6 +104,7 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -122,6 +143,22 @@ _FIRE_DECISIONS = ("block", "ask", "advise", "pass")
 # outcome-proxy signal — cited verbatim from
 # hooks/advisory-nudge/destructive-bash-guard's manifest `name`.
 DESTRUCTIVE_BASH_GUARD_HOOK = "destructive-bash-guard"
+
+# issue #741: commit trailer key for the rework-commit outcome-proxy signal.
+# Named to match the existing trailer family's Capitalized-Hyphenated style
+# (Confidence, Not-tested, Constraint, Rejected, Directive, Scope-risk — see
+# global CLAUDE.md "Commit Trailers"). Manual convention only — no
+# commit-msg hook inserts it; see module docstring "OUTCOME PROXY
+# LIMITATIONS" for the retroactive-coverage limitation this implies.
+REWORK_SESSION_TRAILER = "Session-Id"
+
+# issue #741: timestamp-heuristic fallback window (seconds) for commits
+# lacking the Session-Id trailer — see compute_rework_commit_counts.
+REWORK_WINDOW_SECONDS = 900  # 15 minutes
+
+_SESSION_TRAILER_RE = re.compile(
+    rf"^{REWORK_SESSION_TRAILER}:\s*(\S+)\s*$", re.MULTILINE | re.IGNORECASE
+)
 
 _INLINE_ENV_TOKEN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _ENV_OPTIONS_WITH_VALUE = {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}
@@ -205,6 +242,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "fire-rate mode only: override the strike-state directory used "
             "for the outcome-proxy section (default: "
             "$PRAXIS_STATE_DIR/strikes or ~/.praxis/state/strikes)"
+        ),
+    )
+    parser.add_argument(
+        "--repo",
+        dest="repo_path",
+        default=None,
+        metavar="PATH",
+        help=(
+            "fire-rate mode only: git repo to correlate commits against for "
+            "the rework-commit outcome-proxy signal (default: current "
+            "working directory)"
         ),
     )
     return parser.parse_args(argv)
@@ -1070,21 +1118,30 @@ def compute_external_write_revert_counts(fire_events: list[dict]) -> dict[str, i
     return counts
 
 
-def compute_outcome_proxy(fire_events: list[dict], state_dir: Path) -> dict[str, dict]:
+def compute_outcome_proxy(
+    fire_events: list[dict],
+    state_dir: Path,
+    rework_counts: dict[str, int] | None = None,
+) -> dict[str, dict]:
     """Return dict[session_id] -> {strike_count, strike_state_available,
-    external_write_revert_count}.
+    external_write_revert_count, rework_commit_count}.
 
     Only covers sessions that appear in the fire-events window. Sessions
     whose strike state already expired (7-day TTL) or was reset show
     strike_state_available=False, strike_count=0 — NOT proof of zero strikes.
     external_write_revert_count is a best-effort proxy — see
     compute_external_write_revert_counts / module docstring.
+    rework_commit_count is trailer-first + timestamp-heuristic — see
+    compute_rework_commit_counts / module docstring. `rework_counts` (issue
+    #741) is precomputed by the caller because it needs `days`-scoped git log
+    output, which this function has no repo path to fetch on its own.
     """
     sessions = sorted({
         ev.get(F_FIRE_SESSION) for ev in fire_events
         if isinstance(ev.get(F_FIRE_SESSION), str) and ev.get(F_FIRE_SESSION)
     })
     revert_counts = compute_external_write_revert_counts(fire_events)
+    rework_counts = rework_counts or {}
     result: dict[str, dict] = {}
     for sid in sessions:
         state = load_strike_state(state_dir, sid)
@@ -1092,8 +1149,120 @@ def compute_outcome_proxy(fire_events: list[dict], state_dir: Path) -> dict[str,
             "strike_count": state["count"] if state else 0,
             "strike_state_available": state is not None,
             "external_write_revert_count": revert_counts.get(sid, 0),
+            "rework_commit_count": rework_counts.get(sid, 0),
         }
     return result
+
+
+# ---------------------------------------------------------------------------
+# rework-commits (issue #741, follow-up to #737 item 3) — trailer-first +
+# timestamp-heuristic fallback, mirroring bypass_count's exact-map +
+# heuristic structure (see _nearest_hook_by_timestamp above).
+# ---------------------------------------------------------------------------
+
+def parse_session_trailer(commit_body: str) -> str | None:
+    """Return the `Session-Id:` trailer value from a commit message body, or
+    None if absent. Case-insensitive key match; first occurrence wins."""
+    if not commit_body:
+        return None
+    match = _SESSION_TRAILER_RE.search(commit_body)
+    return match.group(1) if match else None
+
+
+def load_git_commits(repo_path: Path, days: int) -> list[dict]:
+    """Return [{sha, timestamp: datetime, body: str}, ...] for commits in
+    `repo_path` within the last `days` days (author date).
+
+    Fails open to an empty list if `repo_path` is not a git repo, `git` is
+    unavailable, or the process errors/times out — this is a best-effort
+    proxy signal (see module docstring), not a hard dependency the report
+    should crash over.
+    """
+    since = (datetime.now(tz=timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    try:
+        proc = subprocess.run(
+            [
+                "git", "-C", str(repo_path), "log", f"--since={since}",
+                "--pretty=format:%H%x1f%aI%x1f%B%x1e",
+            ],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if proc.returncode != 0 or not proc.stdout:
+        return []
+    commits: list[dict] = []
+    for record in proc.stdout.split("\x1e"):
+        record = record.strip("\n")
+        if not record:
+            continue
+        parts = record.split("\x1f", 2)
+        if len(parts) != 3:
+            continue
+        sha, ts_raw, body = parts
+        ts = _parse_fire_ts(ts_raw)
+        if ts is None:
+            continue
+        commits.append({"sha": sha, "timestamp": ts, "body": body})
+    return commits
+
+
+def _session_timestamp_index(fire_events: list[dict]) -> dict[str, list[datetime]]:
+    out: dict[str, list[datetime]] = {}
+    for ev in fire_events:
+        sid = ev.get(F_FIRE_SESSION)
+        ts = _parse_fire_ts(ev.get(F_FIRE_TIMESTAMP))
+        if isinstance(sid, str) and sid and ts:
+            out.setdefault(sid, []).append(ts)
+    return out
+
+
+def _nearest_session_by_timestamp(
+    commit_ts: datetime,
+    session_ts_index: dict[str, list[datetime]],
+    window_seconds: int,
+) -> str | None:
+    """Return the session_id whose nearest fire-event timestamp to
+    `commit_ts` is within `window_seconds`, or None if no session has an
+    event that close. Mirrors _nearest_hook_by_timestamp's nearest-wins tie
+    break, scoped by a hard window cutoff instead of a candidate set."""
+    best_sid: str | None = None
+    best_delta: float | None = None
+    for sid, timestamps in session_ts_index.items():
+        for ts in timestamps:
+            delta = abs((ts - commit_ts).total_seconds())
+            if delta <= window_seconds and (best_delta is None or delta < best_delta):
+                best_delta = delta
+                best_sid = sid
+    return best_sid
+
+
+def compute_rework_commit_counts(
+    commits: list[dict],
+    fire_events: list[dict],
+    window_seconds: int = REWORK_WINDOW_SECONDS,
+) -> dict[str, int]:
+    """Return dict[session_id] -> commit count correlated to that session.
+
+    Trailer-first: a commit body carrying a `Session-Id:` trailer is
+    attributed directly (exact, no heuristic) — mirrors bypass_env_exact_map's
+    priority over the family-token heuristic. Commits without the trailer
+    fall back to timestamp-proximity against the fire-ledger's session
+    activity timestamps (nearest session within `window_seconds`); commits
+    matching no session within the window are silently excluded, not counted
+    toward any session — see module docstring "OUTCOME PROXY LIMITATIONS".
+    """
+    session_ts_index = _session_timestamp_index(fire_events)
+    counts: dict[str, int] = {}
+    for commit in commits:
+        sid = parse_session_trailer(commit.get("body", ""))
+        if not sid:
+            ts = commit.get("timestamp")
+            if isinstance(ts, datetime):
+                sid = _nearest_session_by_timestamp(ts, session_ts_index, window_seconds)
+        if sid:
+            counts[sid] = counts.get(sid, 0) + 1
+    return counts
 
 
 def default_manifest_path() -> Path:
@@ -1247,6 +1416,10 @@ def _render_outcome_proxy_section(lines: list[str], outcome_proxy: dict[str, dic
         sid: r for sid, r in outcome_proxy.items()
         if r.get("external_write_revert_count", 0) > 0
     }
+    with_rework = {
+        sid: r for sid, r in outcome_proxy.items()
+        if r.get("rework_commit_count", 0) > 0
+    }
     available = sum(1 for r in outcome_proxy.values() if r["strike_state_available"])
     lines.append(
         f"  Sessions in window : {len(outcome_proxy)}  "
@@ -1254,6 +1427,7 @@ def _render_outcome_proxy_section(lines: list[str], outcome_proxy: dict[str, dic
     )
     lines.append(f"  Sessions with strikes : {len(with_strikes)}")
     lines.append(f"  Sessions with external-write-revert signal : {len(with_reverts)}")
+    lines.append(f"  Sessions with rework-commit signal : {len(with_rework)}")
     if with_strikes:
         lines.append("")
         col = 40
@@ -1268,20 +1442,31 @@ def _render_outcome_proxy_section(lines: list[str], outcome_proxy: dict[str, dic
         lines.append(f"  {'─' * col}  {'─' * 13}")
         for sid in sorted(with_reverts, key=lambda s: with_reverts[s]["external_write_revert_count"], reverse=True):
             lines.append(f"  {sid:<{col}}  {with_reverts[sid]['external_write_revert_count']:>13}")
+    if with_rework:
+        lines.append("")
+        col = 40
+        lines.append(f"  {'Session':<{col}}  {'Rework commits':>14}")
+        lines.append(f"  {'─' * col}  {'─' * 14}")
+        for sid in sorted(with_rework, key=lambda s: with_rework[s]["rework_commit_count"], reverse=True):
+            lines.append(f"  {sid:<{col}}  {with_rework[sid]['rework_commit_count']:>14}")
     lines.append("")
     lines.append(
-        "  strike_count and external_write_revert_count are implemented.\n"
-        "  re-clarification-loop and rework-commit signals are NOT computed —\n"
-        "  no telemetry source records them yet (see module docstring\n"
-        "  'OUTCOME PROXY LIMITATIONS'). strike_count itself is a lower bound:\n"
-        "  state is TTL-deleted after 7 days and cleared on /praxis:reset-strikes,\n"
-        "  so a session showing 0 may have had strikes that already expired.\n"
+        "  strike_count, external_write_revert_count, and rework_commit_count\n"
+        "  are implemented. re-clarification-loop is NOT computed — no\n"
+        "  telemetry source records it yet (see module docstring 'OUTCOME\n"
+        "  PROXY LIMITATIONS'). strike_count itself is a lower bound: state is\n"
+        "  TTL-deleted after 7 days and cleared on /praxis:reset-strikes, so a\n"
+        "  session showing 0 may have had strikes that already expired.\n"
         "  external_write_revert_count (issue #737) is a COARSE proxy — it\n"
         "  conflates destructive-bash-guard's new revert-signal patterns\n"
         "  (`git revert`, `gh pr close`, `gh issue reopen`) with its\n"
         "  pre-existing destructive-command detections (`rm -rf`, etc.); a\n"
         "  nonzero count means the hook flagged SOMETHING, not specifically\n"
-        "  a revert (see module docstring)."
+        "  a revert (see module docstring). rework_commit_count (issue #741)\n"
+        "  is trailer-first (`Session-Id:` commit trailer, manual convention,\n"
+        "  NOT retroactive) + timestamp-heuristic fallback (nearest session\n"
+        "  activity within 15 minutes, lossy like the other two proxies) —\n"
+        "  see module docstring."
     )
 
 
@@ -1407,7 +1592,15 @@ def run_fire_rate(args: argparse.Namespace, telemetry_dir: Path) -> int:
     exact_map = bypass_env_exact_map(manifest_path)
     bypass_join = join_bypass_to_hooks(events, bypass_events, exact_map=exact_map)
     state_dir = Path(args.state_dir) if args.state_dir else default_strike_state_dir()
-    outcome_proxy = compute_outcome_proxy(events, state_dir)
+
+    # issue #741: rework-commit signal correlates this window's fire-event
+    # sessions against git commits in `--repo` (default: cwd) — see
+    # compute_rework_commit_counts / module docstring "OUTCOME PROXY
+    # LIMITATIONS" for the trailer-first + timestamp-heuristic design.
+    repo_path = Path(args.repo_path) if args.repo_path else Path.cwd()
+    commits = load_git_commits(repo_path, args.days)
+    rework_counts = compute_rework_commit_counts(commits, events)
+    outcome_proxy = compute_outcome_proxy(events, state_dir, rework_counts=rework_counts)
 
     print(render_fire_report(
         by_hook, args.days, telemetry_dir, roster,
