@@ -45,6 +45,47 @@ printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"ty
 
 NONEXISTENT_TX="/tmp/does-not-exist-praxis-425-$$.jsonl"
 
+# Subagent-transcript fixtures (praxis issue #730) ---------------------------
+# Claude Code lays subagent transcripts out as
+# <project-dir>/<session_id>/subagents/agent-*.jsonl next to the root
+# <project-dir>/<session_id>.jsonl — reproduce that layout under a temp dir so
+# the root path's `.jsonl` suffix + stem-dir lookup resolves correctly.
+SUB_TX_ROOT_DIR=$(mktemp -d)
+SUB_SESSION_ID="session-$$"
+SUB_ROOT_TX="$SUB_TX_ROOT_DIR/$SUB_SESSION_ID.jsonl"
+SUB_AGENTS_DIR="$SUB_TX_ROOT_DIR/$SUB_SESSION_ID/subagents"
+mkdir -p "$SUB_AGENTS_DIR"
+
+# Root transcript has no review evidence of its own.
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"implementing"}]}}' >"$SUB_ROOT_TX"
+
+# Subagent transcript DOES contain the Skill tool_use (matches live-observed
+# subagent JSONL shape: message.content[] tool_use with name=Skill).
+printf '%s\n' '{"parentUuid":null,"isSidechain":true,"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Skill","input":{"skill":"praxis:codex-review-wrap"},"caller":{"type":"direct"}}]}}' >"$SUB_AGENTS_DIR/agent-abc123.jsonl"
+
+# A second, sibling temp-dir layout where the subagents dir exists but no
+# agent transcript invokes codex-review-wrap — must still BLOCK.
+SUB_TX_ROOT_DIR_NOINVOKE=$(mktemp -d)
+SUB_SESSION_ID_NOINVOKE="session-noinvoke-$$"
+SUB_ROOT_TX_NOINVOKE="$SUB_TX_ROOT_DIR_NOINVOKE/$SUB_SESSION_ID_NOINVOKE.jsonl"
+SUB_AGENTS_DIR_NOINVOKE="$SUB_TX_ROOT_DIR_NOINVOKE/$SUB_SESSION_ID_NOINVOKE/subagents"
+mkdir -p "$SUB_AGENTS_DIR_NOINVOKE"
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"implementing"}]}}' >"$SUB_ROOT_TX_NOINVOKE"
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"x.py"}}]}}' >"$SUB_AGENTS_DIR_NOINVOKE/agent-def456.jsonl"
+
+# A third layout: the subagent transcript has a literal
+# "/praxis:codex-review-wrap" line as a `user`-type entry — this is NOT a
+# genuine human slash-command keystroke (subagent "user" turns are
+# Task-dispatch prompts / tool_results), so it must NOT satisfy the gate.
+# Regression guard for the root-only slash-scoping fix (code-review MEDIUM).
+SUB_TX_ROOT_DIR_SLASH=$(mktemp -d)
+SUB_SESSION_ID_SLASH="session-slash-$$"
+SUB_ROOT_TX_SLASH="$SUB_TX_ROOT_DIR_SLASH/$SUB_SESSION_ID_SLASH.jsonl"
+SUB_AGENTS_DIR_SLASH="$SUB_TX_ROOT_DIR_SLASH/$SUB_SESSION_ID_SLASH/subagents"
+mkdir -p "$SUB_AGENTS_DIR_SLASH"
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"implementing"}]}}' >"$SUB_ROOT_TX_SLASH"
+printf '%s\n' '{"type":"user","isSidechain":true,"message":{"role":"user","content":"/praxis:codex-review-wrap"}}' >"$SUB_AGENTS_DIR_SLASH/agent-ghi789.jsonl"
+
 PASS=0; FAIL=0; FAILED_NAMES=()
 
 # run_case <name> <block|pass> <tool_name> <command> [transcript_path|"NONE"] [env]
@@ -151,7 +192,11 @@ run_case "skip token in -m" pass Bash \
 run_case "skip token case-insensitive" pass Bash \
   'git commit -m "docs: typo [SKIP-CODEX-REVIEW]"' "$TX_WITHOUT"
 
-run_case "env bypass" pass Bash \
+# NOTE: this simulates the env var already present in the hook's OWN process
+# env (the only case that actually works — see spec.md Escape hatches). It
+# does NOT simulate `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1 git commit …` as
+# an inline command prefix, which never reaches this process (issue #730).
+run_case "persistent env var in hook process bypasses the gate" pass Bash \
   'git commit -m "x"' "$TX_WITHOUT" "CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1"
 
 # ---------------------------------------------------------------------------
@@ -273,6 +318,19 @@ run_case "git --version commit is terminal option (pass)" pass Bash \
   'git --version commit' "$TX_WITHOUT"
 
 # ---------------------------------------------------------------------------
+# Subagent-transcript scanning (praxis issue #730)
+# ---------------------------------------------------------------------------
+
+run_case "codex-review-wrap run inside a subagent this session satisfies the gate" pass Bash \
+  'git commit -m "feat: x"' "$SUB_ROOT_TX"
+
+run_case "subagent dir exists but no subagent invoked codex-review-wrap" block Bash \
+  'git commit -m "feat: x"' "$SUB_ROOT_TX_NOINVOKE"
+
+run_case "slash-command line inside a subagent transcript does NOT satisfy the gate" block Bash \
+  'git commit -m "feat: x"' "$SUB_ROOT_TX_SLASH"
+
+# ---------------------------------------------------------------------------
 # Fail-open cases
 # ---------------------------------------------------------------------------
 
@@ -319,6 +377,7 @@ fi
 # ---------------------------------------------------------------------------
 
 rm -f "$TX_WITH_SKILL" "$TX_WITH_SLASH" "$TX_ASSISTANT_SLASH" "$TX_WITHOUT" "$TX_WRONG_SKILL" "$TX_GARBAGE_PLUS_SKILL"
+rm -rf "$SUB_TX_ROOT_DIR" "$SUB_TX_ROOT_DIR_NOINVOKE" "$SUB_TX_ROOT_DIR_SLASH"
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
