@@ -32,7 +32,7 @@ Fires when **both** are true:
 ### Detection rules
 
 | Rule | Matches | Examples |
-|------|---------|----------|
+| ------ | --------- | ---------- |
 | Privilege escalation | argv[0] is `sudo` or `doas` (RAW argv, before `strip_prefix`) | `sudo apt install`, `doas pacman -S`, `sudo rm anything` |
 | `rm` recursive force | `rm` with both `-r`/`-R`/`--recursive` AND `-f`/`--force` | `rm -rf .`, `rm -fr /tmp/x`, `rm -r --force foo`, `rm --recursive --force bar` |
 | `dd` raw I/O | `dd` with any `if=…` or `of=…` operand | `dd if=/dev/urandom of=/dev/sda`, `dd if=image.iso of=output.img` |
@@ -45,7 +45,7 @@ Fires when **both** are true:
 | `find … -delete` | `find` with `-delete` or `--delete` | `find /tmp -name '*.bak' -delete` |
 | `truncate -s 0` | `truncate -s 0` / `--size 0` / `-s0` / `--size=0` | `truncate -s 0 logfile` |
 | `shred` | argv[0] is `shred` | `shred sensitive.dat` |
-| Fork bomb | Literal `:(){ :|:& };:` (whitespace-stripped match) | `:(){ :\|:& };:` |
+| Fork bomb | Literal `:(){ : \| :& };:` (whitespace-stripped match) | `:(){ :\|:& };:` |
 
 ### Allow-listed redirect targets (safe sinks)
 
@@ -56,7 +56,7 @@ These device targets are NOT flagged when used as redirect targets:
 ### Modes
 
 | Env var | Effect |
-|---------|--------|
+| --------- | -------- |
 | (unset) | Advisory — stderr text, exit 0. Command proceeds. |
 | `PRAXIS_DESTRUCTIVE_BASH_STRICT=1` | Ask — emit `permissionDecision: ask` JSON. User confirms via runtime prompt. |
 | `PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH=1` | Full bypass — exit 0 silently. |
@@ -64,7 +64,7 @@ These device targets are NOT flagged when used as redirect targets:
 ### Examples
 
 | Command | Action | Why |
-|---------|--------|-----|
+| --------- | -------- | ----- |
 | `rm -rf /tmp/scratch` | **ADVISORY** | rm + recursive + force |
 | `rm -fr /tmp/x` | **ADVISORY** | rm + bundled recursive+force |
 | `rm -r --force foo` | **ADVISORY** | long form recursive + force |
@@ -123,7 +123,7 @@ exit 0
 ### Relationship to sibling hooks
 
 | Hook | Scope | Overlap |
-|------|-------|---------|
+| ------ | ------- | --------- |
 | `side-effect-scan` | mutation CLI gate (`git commit/push/merge`, `gh pr merge/create`, `kubectl apply/delete`) | Complementary — side-effect-scan covers project-state mutations via established CLIs; this hook covers filesystem destruction + privilege escalation. No detected command overlap (rm/dd/mkfs/sudo/doas/find/shred are NOT in side-effect-scan). |
 | `cross-boundary-preflight` | heredoc cross-boundary write, cross-repo ask | None — different defect class |
 | `inspection-chain-advisory` | `&&`-chained inspection commands | Different intent — that hook nudges silent-cascade; this one nudges destruction. Both can fire on the same compound command if applicable. |
@@ -136,7 +136,7 @@ non-trivial UX cost, and the hook fires only on argv shapes that clearly
 match the destructive idiom. Known false-negatives:
 
 | Case | Behaviour |
-|------|-----------|
+| ------ | ----------- |
 | `bash -c "rm -rf ."` | silent — the inner command is a string operand of `bash`, not parsed by the tokenizer's argv scanner. Detect via shell wrapper at the cost of N false positives on legitimate `bash -c "echo hi"` calls. |
 | Path with `rm` in the name (`/usr/local/bin/myrm`) | classified as `rm` if basename == `rm`; the basename check could yield false positives on non-coreutils `rm` binaries with destructive semantics. Acceptable in practice. |
 | `python -c 'import shutil; shutil.rmtree(".")'` | silent — interpreter-internal calls bypass the bash-level detection |

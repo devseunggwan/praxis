@@ -331,7 +331,7 @@ verification matrix.
 **Action map:**
 
 | # | Action | Reference-owned gate |
-|---|--------|----------------------|
+| --- | -------- | ---------------------- |
 | 1 | MEMORY.md feedback | duplicate-check before create; `hookable` / `hookKeywords` decision |
 | 2 | GitHub issue | project issue workflow |
 | 3 | global `~/.claude/CLAUDE.md` draft | target detection + staging + approval |
@@ -369,7 +369,7 @@ The exhaustive Red Flag catalog is in
 ## Quick Reference
 
 | Stage | Minimum check |
-|-------|---------------|
+| ------- | --------------- |
 | Stage 1 | Load rule files and calibration questions |
 | Stage 1.5 | Cursor schedule honored; detect-only hygiene scan executed |
 | Stage 2 | Five pre-scan lanes + self-incrimination pass + categories + early-exit carve-outs checked |
@@ -383,7 +383,7 @@ Full tables and stage-by-stage failure handling are in
 ## Error Handling
 
 | Stage | Failure | Action |
-|-------|---------|--------|
+| ------- | --------- | -------- |
 | Stage 1.5 | MEMORY.md index inaccessible | skip hygiene with the documented trail line; continue to Stage 2 |
 | Stage 2 | transcript unreachable | emit the documented `*_skipped` trail line and continue with the allowed fallback |
 | Stage 3 | Pre-Output Falsification Gate triggered but premise cannot be falsified | drop ranking, surface the option unranked, and ask with open premise |

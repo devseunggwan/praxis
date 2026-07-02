@@ -33,7 +33,7 @@ exists for projects where exact-match failures are particularly costly.
 ### Behavior
 
 | Event | Action |
-|-------|--------|
+| ------- | -------- |
 | `PreToolUse` on `Edit` of a `.md` file with escape-sensitive `old_string` and no recorded Read | warn (default) or deny (opt-in) |
 | `PreToolUse` on `Edit` of a `.md` file after the file was Read this session | silent pass-through |
 | `PreToolUse` on `Edit` of a `.md` file with no escape-sensitive token in `old_string` | silent pass-through |
@@ -48,7 +48,7 @@ exists for projects where exact-match failures are particularly costly.
 Conservative v1 set, chosen to minimize false positives:
 
 | Label | Pattern | Example |
-|-------|---------|---------|
+| ------- | --------- | --------- |
 | `\|` | `\\\|` | `[[name\|alias]]` (Obsidian table wikilink) |
 | `\[` | `\\\[` | `\[bracket]` (escaped opener) |
 | `\]` | `\\\]` | `bracket\]` (escaped closer) |
@@ -63,7 +63,7 @@ recurrence is observed in production sessions.
 ### Configuration
 
 | Env var | Default | Effect |
-|---------|---------|--------|
+| --------- | --------- | -------- |
 | `PRAXIS_MD_ESCAPE_MODE` | `warn` | `block` makes the gate emit `permissionDecision: "deny"` instead of a stderr warning. |
 | `PRAXIS_MD_ESCAPE_SKIP` | unset | `1` = full opt-out for the session (silent pass-through regardless of other conditions). |
 | `PRAXIS_MD_READ_HISTORY_FILE` | (auto-resolved) | Explicit history-path override. Used by tests for isolation; can also pin a known location for long-running sessions. |

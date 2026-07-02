@@ -15,7 +15,7 @@ Include:
 ### Disclosure Timeline
 
 | Severity | Target response | Public disclosure |
-|----------|----------------|-------------------|
+| ---------- | ---------------- | ------------------- |
 | Critical | 48 hours | After patch is released |
 | High | 7 days | 30 days after report |
 | Medium / Low | 30 days | 90 days after report |
@@ -39,7 +39,7 @@ drift.
 ### `git` — repository state queries
 
 | Hook | Command | Purpose |
-|------|---------|---------|
+| ------ | --------- | --------- |
 | `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py` | `git remote get-url origin` | Resolve the repo owner/name for the dedup search |
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git rev-parse --show-toplevel` | Locate the git repo root |
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git rev-parse --abbrev-ref HEAD` | Read the current branch name |

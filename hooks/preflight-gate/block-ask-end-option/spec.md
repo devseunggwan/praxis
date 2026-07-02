@@ -30,7 +30,7 @@ boundary, where the check runs mechanically regardless of retrieval state.
 ### What is blocked
 
 | Scenario | Action |
-|----------|--------|
+| ---------- | -------- |
 | Default mode, direct end marker in any option label, no user stop signal | exit 2 (block) |
 | Default mode, indirect end marker ("take a break" / "잠시 보류" etc.), no stop signal | exit 2 (block) |
 | `PRAXIS_ASK_END_ADVISORY=1`, marker present, no stop signal | exit 0 + advisory stderr |
@@ -100,7 +100,7 @@ All matches are case-insensitive substring checks against the option label.
 ### Mode and env var behavior
 
 | Env var state | Mode | Exit code on match |
-|---------------|------|-------------------|
+| --------------- | ------ | ------------------- |
 | Neither var set (default) | **Strict** | 2 (block) |
 | `PRAXIS_ASK_END_ADVISORY=1` | Advisory | 0 + stderr |
 | `PRAXIS_ASK_END_STRICT=1` (deprecated) | Strict | 2 (block) |

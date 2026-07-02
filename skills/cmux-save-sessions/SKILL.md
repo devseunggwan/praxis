@@ -132,7 +132,7 @@ done
 ## Troubleshooting
 
 | Problem | Cause | Fix |
-|---------|-------|-----|
+| --------- | ------- | ----- |
 | "cmux is not running" | cmux app not running | Start cmux app |
 | "jq is required" | jq not installed | `brew install jq` |
 | 0 sessions saved | Only current session exists | Use `--include-self` flag |
@@ -140,7 +140,7 @@ done
 ## Rationalization Prevention
 
 | Excuse | Reality |
-|--------|---------|
+| -------- | --------- |
 | "Include the current session too" | The manager session would be in the snapshot, and `--include-self` can accidentally close the session you are in. |
 | "Skip saving, I'll remember the layout" | You won't. Multi-workspace layouts vanish on reboot. Save is cheap. |
 | "Overwrite the previous snapshot" | Timestamped files are the history. Overwriting discards recovery points. |

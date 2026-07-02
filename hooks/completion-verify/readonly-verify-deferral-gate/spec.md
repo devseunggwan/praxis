@@ -20,7 +20,7 @@ to approve things that need no approval.
 This hook is the inverse of `completion-signal-gate`:
 
 | Hook | Failure mode it catches |
-|------|------------------------|
+| ------ | ------------------------ |
 | `completion-signal-gate` | Claims **done** *without* producing evidence |
 | `readonly-verify-deferral-gate` | **Offers** to produce read-only evidence instead of producing it |
 
@@ -52,7 +52,7 @@ turn-global: a mutation anywhere in the turn suppresses the whole turn.
 Built-in, **project-agnostic** patterns (case-insensitive):
 
 | Pattern | Example |
-|---------|---------|
+| --------- | --------- |
 | `SELECT … FROM` | "should I run `SELECT count(*) FROM orders`?" |
 | `SHOW TABLES/CATALOGS/SCHEMAS/…` | "want me to `SHOW TABLES`?" |
 | `DESCRIBE <table>` | "shall I `DESCRIBE users`?" |
@@ -129,7 +129,7 @@ Advisory arrives as a single stdout `{"systemMessage": ...}` JSON object
 ## Tiers / env vars
 
 | Env var | Effect |
-|---------|--------|
+| --------- | -------- |
 | (default) | Advisory: stdout `{"systemMessage": ...}` JSON + exit 0. Never blocks. |
 | `PRAXIS_READONLY_VERIFY_STRICT=1` | Escalate to `{"decision": "block", "reason": ...}` — Stop is blocked and the reason is fed to the model so it re-runs the read. |
 | `PRAXIS_READONLY_VERIFY_BYPASS=1` | Silence the hook entirely (exit 0, no scan). |
@@ -171,7 +171,7 @@ operator accepts these blind spots.
 ## Parsing guarantees
 
 | Condition | Behavior |
-|-----------|----------|
+| ----------- | ---------- |
 | Malformed / missing stdin JSON | exit 0 (silent pass) |
 | `PRAXIS_READONLY_VERIFY_BYPASS` set | exit 0 (silent pass) |
 | `stop_hook_active` is true | exit 0 (re-entry guard) |

@@ -25,7 +25,7 @@ pass through silently (fail-open). Inherited flags (`--help`, `-R/--repo`,
 `--hostname`, `--color`) are always allowed regardless of subcommand.
 
 | Command | Action |
-|---------|--------|
+| --------- | -------- |
 | `gh issue list --base main` | **BLOCKED** (`--base` not valid for `issue list`) |
 | `gh pr list --include-prs` | **BLOCKED** (`--include-prs` not valid for `pr list`) |
 | `gh issue create --base main` | **BLOCKED** (`--base` not valid for `issue create`) |
@@ -46,7 +46,7 @@ Validated against the static compatibility table (flags sourced from `gh --help`
 verified 2026-05-11):
 
 | Subcommand | Notable valid-only flags |
-|------------|------------------------|
+| ------------ | ------------------------ |
 | `gh search issues` | `--state {open\|closed}`, `--include-prs`, `--app`, `--commenter` |
 | `gh search prs` | `--state {open\|closed}`, `--merged`, `--review`, `--checks` |
 | `gh search repos` | `--stars`, `--forks`, `--topic` (no `--state`) |

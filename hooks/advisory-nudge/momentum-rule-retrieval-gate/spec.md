@@ -29,7 +29,7 @@ triggers the surface**. Multi-mutation detection (e.g., surfacing only when
 N merges occur in rapid succession) is deferred to Phase 2 (separate issue).
 
 | Command pattern | trigger id | Static rule cites | Dynamic memory cites |
-|-----------------|------------|-------------------|----------------------|
+| ----------------- | ------------ | ------------------- | ---------------------- |
 | `gh pr merge` (any flags) | `merge` | Pre-Merge Reporting + No Approval Transfer | every memory with `momentum:` containing `merge` |
 | `cmux new-workspace` (dispatch via cmux) | `dispatch` | Pre-Implementation Surface Enumeration → Multi-PR / multi-worktree shared state + Self-Authored Labels Are Drafts | every memory with `momentum:` containing `dispatch` |
 | `git push --force` / `--force-with-lease` / `-f` | `force-push` | trigger header + history-rewrite mutation rule | every memory with `momentum:` containing `force-push` |
@@ -75,7 +75,7 @@ Example for `gh pr merge --squash`:
 ### Environment variables
 
 | Variable | Effect |
-|----------|--------|
+| ---------- | -------- |
 | `PRAXIS_MOMENTUM_BYPASS=1` | Skip all output and exit 0 immediately (for scripted batch operations) |
 | `PRAXIS_MOMENTUM_STRICT=1` | Exit 2 (block) instead of exit 0, unless `PRAXIS_MOMENTUM_ACK=1` is also set |
 | `PRAXIS_MOMENTUM_ACK=1` | Acknowledge the surface in strict mode; exit 0 after emitting the advisory |
@@ -113,7 +113,7 @@ prefix-matched form).
 ### Relationship to sibling hooks
 
 | Hook | Overlap |
-|------|---------|
+| ------ | --------- |
 | `pre-merge-approval-gate` | Both fire on `gh pr merge`. The sibling surfaces a `permissionDecision: ask` dialog; this hook emits a stderr rule reminder. Both fire — they are complementary, not redundant. |
 | `side-effect-scan` | Fires on `gh pr merge` / `git push` collateral side effects. Complementary. |
 | `verify-commit-flag-override` | Fires on `git commit --no-verify`. Different trigger, no overlap. |
@@ -126,7 +126,7 @@ Code fires them sequentially; `momentum-rule-retrieval-gate` is registered
 LAST (19th), AFTER `pre-merge-approval-gate` (9th):
 
 | # | Hook |
-|---|------|
+| --- | ------ |
 | 1 | `side-effect-scan` |
 | 2 | `block-gh-state-all` |
 | 3 | `memory-hint` |

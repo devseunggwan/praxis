@@ -145,7 +145,7 @@ Done. Created: 2 | Skipped: 1 | Failed: 1
 ## Troubleshooting
 
 | Problem | Cause | Fix |
-|---------|-------|-----|
+| --------- | ------- | ----- |
 | "cmux is not running" | cmux app not running | Start cmux app |
 | "jq is required" | jq not installed | `brew install jq` |
 | "cwd not found" | Directory was deleted since save | Session is auto-skipped |
@@ -155,7 +155,7 @@ Done. Created: 2 | Skipped: 1 | Failed: 1
 ## Rationalization Prevention
 
 | Excuse | Reality |
-|--------|---------|
+| -------- | --------- |
 | "Restore every snapshot at once" | Old snapshots point to cwd paths that no longer exist. Restore the most recent that's still valid. |
 | "Skip `--no-claude`, always auto-start Claude" | If the target cwd's recent conversation is stale, auto-continue lands in the wrong context. Use `--no-claude` when in doubt. |
 | "Ignore duplicate warnings" | Duplicate workspaces are noise at best, collision at worst. Inspect existing sessions first. |

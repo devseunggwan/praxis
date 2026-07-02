@@ -35,7 +35,7 @@ caller keeps control of the exit code and may append
 ## Field semantics: mandatory vs informational
 
 | Field | Status | Notes |
-|-------|--------|-------|
+| ------- | -------- | ------- |
 | `rule_name` | **Mandatory** | Short rule label; rendered uppercased in the header. |
 | `Why` | **Mandatory** | One line naming the violated convention. Not the symptom — the rule. |
 | `Correct path` | **Mandatory** | The concrete next action: a skill name, an exact command, or a pattern. Avoid "fix it" — say *how*. |

@@ -19,11 +19,11 @@ those two specific failure modes complete.
 
 Fires on `AskUserQuestion` when **all three** conditions hold:
 
-| Leg | Condition |
-|-----|-----------|
-| A1 | An option label or description contains an evaluative marker: `Recommended`, `natural`, `safer` (EN, ASCII word-boundary) or `권장`, `안전한`, `더 안전` (KO substring) |
-| A2 | Recent transcript (last 400 JSONL lines) contains a negative-evidence substring in a `tool_result` content block OR a user message: `fail`, `timeout`, `0 row`, `blank`, `error`, `not found`, `verification failing` |
-| A3-alt | The question body / option descriptions do **NOT** contain a falsification phrase (`if … wrong`, `if … incorrect`, `invalidating link`, `disconfirm`, `반증`, `missing observation`, `이게 틀렸을 때`) |
+| Leg    | Condition                                                                                                                                                                                                             |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1     | An option label or description contains an evaluative marker: `Recommended`, `natural`, `safer` (EN, ASCII word-boundary) or `권장`, `안전한`, `더 안전` (KO substring)                                               |
+| A2     | Recent transcript (last 400 JSONL lines) contains a negative-evidence substring in a `tool_result` content block OR a user message: `fail`, `timeout`, `0 row`, `blank`, `error`, `not found`, `verification failing` |
+| A3-alt | The question body / option descriptions do **NOT** contain a falsification phrase (`if … wrong`, `if … incorrect`, `invalidating link`, `disconfirm`, `반증`, `missing observation`, `이게 틀렸을 때`)                |
 
 When A1 ∧ A2 ∧ ¬A3-alt, the hook emits:
 
@@ -58,24 +58,24 @@ pair. Stale files are cleaned up by the OS tmp purge policy.
 
 ### Behavior table
 
-| Tool | Condition | Behavior |
-|------|-----------|----------|
-| AskUserQuestion | A1 ∧ A2 ∧ ¬A3-alt | Advisory to stderr (exit 0) |
-| AskUserQuestion | falsification phrase present (A3-alt) | Silent — probe already stated |
-| AskUserQuestion | no evaluative marker (¬A1) | Silent |
-| AskUserQuestion | no recent negative evidence (¬A2) | Silent |
-| Bash | read-only subcommand pair repeated ≥3× | Advisory to stderr (exit 0) |
-| Bash | read-only subcommand pair < 3× | Silent (count recorded) |
-| Bash | non-read-only subcommand (`commit`, `apply`, …) | Silent |
-| `PRAXIS_FALSIFY_GATE_BYPASS=1` | any | Silent for both lanes |
-| Malformed JSON stdin | any | Silent (fail-open) |
-| Missing / unreadable transcript (Lane A) | A1 ∧ ¬A3-alt | Silent (A2 fails open to False) |
-| Other tool name (Edit, Read, …) | any | Silent |
+| Tool                                     | Condition                                       | Behavior                        |
+| ---------------------------------------- | ----------------------------------------------- | ------------------------------- |
+| AskUserQuestion                          | A1 ∧ A2 ∧ ¬A3-alt                               | Advisory to stderr (exit 0)     |
+| AskUserQuestion                          | falsification phrase present (A3-alt)           | Silent — probe already stated   |
+| AskUserQuestion                          | no evaluative marker (¬A1)                      | Silent                          |
+| AskUserQuestion                          | no recent negative evidence (¬A2)               | Silent                          |
+| Bash                                     | read-only subcommand pair repeated ≥3×          | Advisory to stderr (exit 0)     |
+| Bash                                     | read-only subcommand pair < 3×                  | Silent (count recorded)         |
+| Bash                                     | non-read-only subcommand (`commit`, `apply`, …) | Silent                          |
+| `PRAXIS_FALSIFY_GATE_BYPASS=1`           | any                                             | Silent for both lanes           |
+| Malformed JSON stdin                     | any                                             | Silent (fail-open)              |
+| Missing / unreadable transcript (Lane A) | A1 ∧ ¬A3-alt                                    | Silent (A2 fails open to False) |
+| Other tool name (Edit, Read, …)          | any                                             | Silent                          |
 
 ### Env vars
 
-| Variable | Effect |
-|----------|--------|
+| Variable                       | Effect                                      |
+| ------------------------------ | ------------------------------------------- |
 | `PRAXIS_FALSIFY_GATE_BYPASS=1` | Disable both lanes entirely for the session |
 
 ### Heuristic limits

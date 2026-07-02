@@ -28,22 +28,22 @@ The hook tokenizes the command via `safe_tokenize` →
 `gh-flag-verify`), so chained segments and env-prefixed invocations are
 covered uniformly.
 
-| Command | Action |
-|---------|--------|
-| `gh pr create --label bug --repo acme/repo` (bug exists) | **PASS** |
-| `gh pr create --label nope --repo acme/repo` (nope absent) | **BLOCKED** |
-| `gh pr create --label bug,nope --repo acme/repo` (one missing) | **BLOCKED** |
-| `gh pr create --label bug --label nope --repo acme/repo` | **BLOCKED** |
-| `gh issue create -l nope --repo acme/repo` | **BLOCKED** |
-| `gh issue edit 1 --add-label nope --repo acme/repo` | **BLOCKED** |
-| `gh pr edit 1 --add-label bug --repo acme/repo` | **PASS** |
-| `gh pr create --label=nope --repo acme/repo` | **BLOCKED** (inline `=` form) |
-| `gh pr create --label bug` (no `--repo`, cwd resolves to acme/repo) | **PASS** |
-| `gh pr create --label bug` (no `--repo`, cwd not a git repo) | **PASS** (fail-open) |
-| `gh label list --repo ...` fails (network / auth) | **PASS** (fail-open) |
-| `gh pr list --label nope` (label is a filter here, not a write) | **PASS** (subcmd not in scope) |
-| `gh pr create --label nope --help` | **PASS** (help skips enforcement) |
-| Non-Bash tool | **PASS** |
+| Command                                                             | Action                            |
+| ------------------------------------------------------------------- | --------------------------------- |
+| `gh pr create --label bug --repo acme/repo` (bug exists)            | **PASS**                          |
+| `gh pr create --label nope --repo acme/repo` (nope absent)          | **BLOCKED**                       |
+| `gh pr create --label bug,nope --repo acme/repo` (one missing)      | **BLOCKED**                       |
+| `gh pr create --label bug --label nope --repo acme/repo`            | **BLOCKED**                       |
+| `gh issue create -l nope --repo acme/repo`                          | **BLOCKED**                       |
+| `gh issue edit 1 --add-label nope --repo acme/repo`                 | **BLOCKED**                       |
+| `gh pr edit 1 --add-label bug --repo acme/repo`                     | **PASS**                          |
+| `gh pr create --label=nope --repo acme/repo`                        | **BLOCKED** (inline `=` form)     |
+| `gh pr create --label bug` (no `--repo`, cwd resolves to acme/repo) | **PASS**                          |
+| `gh pr create --label bug` (no `--repo`, cwd not a git repo)        | **PASS** (fail-open)              |
+| `gh label list --repo ...` fails (network / auth)                   | **PASS** (fail-open)              |
+| `gh pr list --label nope` (label is a filter here, not a write)     | **PASS** (subcmd not in scope)    |
+| `gh pr create --label nope --help`                                  | **PASS** (help skips enforcement) |
+| Non-Bash tool                                                       | **PASS**                          |
 
 ### Repo resolution
 
@@ -78,10 +78,10 @@ fail at execution time, surfacing the original error.
 
 ### Configuration
 
-| Env var | Default | Purpose |
-|---------|---------|---------|
-| `PRAXIS_GH_LABEL_CACHE_TTL_SEC` | `300` | Per-repo cache TTL in seconds |
-| `PRAXIS_GH_LABEL_CACHE_PATH` | (computed) | Override cache file path |
+| Env var                         | Default    | Purpose                       |
+| ------------------------------- | ---------- | ----------------------------- |
+| `PRAXIS_GH_LABEL_CACHE_TTL_SEC` | `300`      | Per-repo cache TTL in seconds |
+| `PRAXIS_GH_LABEL_CACHE_PATH`    | (computed) | Override cache file path      |
 
 ### Relationship to gh-flag-verify
 

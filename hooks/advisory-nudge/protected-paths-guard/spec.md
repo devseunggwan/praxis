@@ -33,7 +33,7 @@ The hook fires when **all** are true:
 ### Detection rules
 
 | Rule | Matches | Examples |
-|------|---------|----------|
+| ------ | --------- | ---------- |
 | Basename-exact | `.env`, `.netrc`, `.npmrc`, `.git-credentials`, `.pgpass`, `credentials`, `id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519` | `~/.netrc`, `aws/credentials`, `~/.git-credentials`, `~/.pgpass` |
 | `.env.<env>` prefix | basename starts with `.env.` AND is not in the env allowlist | `.env.production`, `.env.local` |
 | Extension | `*.pem`, `*.key`, `*.p12`, `*.keystore` | `keys/server.pem`, `tls/cert.p12` |
@@ -55,7 +55,7 @@ rule still fires because the directory itself is the trust anchor.
 ### Skip rules (path-component / fragment based)
 
 | Skip rule | Trigger |
-|-----------|---------|
+| ----------- | --------- |
 | Test fixtures | path contains `/fixtures/`, `/__fixtures__/`, `/test-data/`, `/testdata/`, or `/test_data/` directory component |
 | Planning artifacts | path starts with `/tmp/` or `/private/tmp/` (macOS realpath form), contains `/.omc/plans/`, or contains `/.claude/projects/` |
 | Self-edit | path is inside `CLAUDE_PLUGIN_ROOT` (so this very hook can be edited) |
@@ -63,7 +63,7 @@ rule still fires because the directory itself is the trust anchor.
 ### Examples
 
 | Path | Action | Why |
-|------|--------|-----|
+| ------ | -------- | ----- |
 | `.env` | **ADVISORY** | basename-exact |
 | `path/to/.env` | **ADVISORY** | basename-exact |
 | `.env.production` | **ADVISORY** | `.env.` prefix, not allow-listed |
@@ -93,7 +93,7 @@ rule still fires because the directory itself is the trust anchor.
 ### Modes
 
 | Env var | Effect |
-|---------|--------|
+| --------- | -------- |
 | (unset) | Advisory — stderr text, exit 0. Edit proceeds. |
 | `PRAXIS_PROTECTED_PATHS_STRICT=1` | Block — stderr text + exit 2 (Claude Code blocks the call). |
 | `PRAXIS_HOOK_BYPASS_PROTECTED_PATHS=1` | Full bypass — exit 0 silently. |
@@ -119,7 +119,7 @@ exit 0 (advisory) or 2 (strict)
 ### Relationship to sibling hooks
 
 | Hook | Scope | Overlap |
-|------|-------|---------|
+| ------ | ------- | --------- |
 | `pre-edit-protected-branch-guard` | edits on protected git branches | None — this hook is file-pattern based, not branch-state based |
 | `worktree-edit-gate` | edits to source files when HEAD is on a base branch | None — different defect class (workflow vs credential leak) |
 | `external-write-falsify-check` | external-surface write commands | None — different tool surfaces (Bash vs Edit/Write) |

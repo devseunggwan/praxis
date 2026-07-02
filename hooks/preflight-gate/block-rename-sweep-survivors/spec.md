@@ -34,7 +34,7 @@ All three conditions must hold for a block (exit 2):
    --fixed-strings`), with at least one surviving line not marked exempt.
 
 | Situation | Action |
-|-----------|--------|
+| ----------- | -------- |
 | `git commit` with ≥3 renames and old token in tree | **BLOCKED** (exit 2) |
 | `git commit` with ≥3 renames and all occurrences staged | **PASS** (no survivors) |
 | `git commit` with ≥3 renames and all survivors marked exempt | **PASS** (exempt) |

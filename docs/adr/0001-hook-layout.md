@@ -18,10 +18,10 @@ has measurable friction.
 ### 1.1 Current layout snapshot (2026-05-26)
 
 | Location | Count | Mix |
-|----------|-------|-----|
+| ---------- | ------- | ----- |
 | `hooks/` (flat) | 89 files | 35 `.py` implementations + 39 `.sh` wrappers + 13 `test-*.sh` + `hooks.json` + `_hook_utils.py` + `__pycache__/` |
 | `tests/` (flat) | 30+ files | 28 `test_*.sh` + 1 `tests/hooks/*.py` + `fixtures/` |
-| `docs/hook/` (flat) | 39 markdown specs + `INDEX.md` |
+| `docs/hook/` (flat) | 39 markdown specs | `INDEX.md` |
 
 ```
 hooks/
@@ -227,7 +227,7 @@ literal duplicates are reconciled (kept the more recent variant per
 Naming convention:
 
 | Today | After |
-|-------|-------|
+| ------- | ------- |
 | `hooks/test-block-gh-state-all.sh` | `tests/hooks/preflight-gate/test_block-gh-state-all.sh` |
 | `tests/test_memory_hint.sh` | `tests/hooks/advisory-nudge/test_memory-hint.sh` |
 | `tests/hooks/test_completion_signal_gate.py` | `tests/hooks/completion-verify/test_completion-signal-gate.py` |
@@ -311,7 +311,7 @@ Build invariants verified by `scripts/check-plugin-manifests.py`:
 ### 3.1 Positive
 
 | Metric | Before | After |
-|--------|--------|-------|
+| -------- | -------- | ------- |
 | Flat files under `hooks/` | 89 | ~4 (`_lib/`, `manifest.json`, 4 role dirs) |
 | Hand-maintained wrapper `.sh` files | 39 | 0 |
 | Test locations | 2 (with 2 duplicates) | 1 |
@@ -347,7 +347,7 @@ Build invariants verified by `scripts/check-plugin-manifests.py`:
 ### 3.3 Risks
 
 | Risk | Mitigation |
-|------|------------|
+| ------ | ------------ |
 | Generated platform `hooks.json` paths change and existing plugin installs break mid-upgrade | Phase rollout (§5). Phase 2 keeps wrapper `.sh` files on disk during transition so external installs continue to resolve. Wrapper deletion happens only after Phase 3 build is proven. |
 | Stop-hook ordering accidentally reshuffles | `manifest.json` array order is the canonical declaration. `check-plugin-manifests.py` adds an assertion for the completion-verify ordering. |
 | Spec moves leave dangling links from skill SKILL.md / external docs | grep for `docs/hook/` references during Phase 3; rewrite to `hooks/<role>/<name>/spec.md`. |
@@ -569,7 +569,7 @@ After one full release cycle following Phase 3, delete the 39
 ## 7. Decision record
 
 | Date | Decision | Decided by |
-|------|----------|------------|
+| ------ | ---------- | ------------ |
 | 2026-05-26 | ADR drafted, Status = Proposed | praxis maintainers |
 | 2026-05-26 | Status → Accepted | praxis maintainers |
 | 2026-05-26 | Phase 1 merged (#421 / PR #424) | praxis maintainers |

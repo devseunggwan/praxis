@@ -205,7 +205,7 @@ cmux workspaces are now open. Navigate with:
 ### CLI Options
 
 | Option | Description |
-|--------|-------------|
+| -------- | ------------- |
 | `--days N` | Scan last N days |
 | `--from DATE` | Start date (YYYY-MM-DD or MM-DD) |
 | `--to DATE` | End date (default: yesterday) |
@@ -261,7 +261,7 @@ cmux window
 Same as `recover-sessions` — automatically excludes:
 
 | Filter | What it removes |
-|--------|----------------|
+| -------- | ---------------- |
 | Subagent paths | `/subagents/` directory sessions |
 | Teammate sessions | `<teammate-message>` (omc team workers) |
 | Team orchestrators | `oh-my-claudecode:team` command sessions |
@@ -288,7 +288,7 @@ Named sessions recover instantly: `claude --resume "issue-42"` (fuzzy match).
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
-|---------|-------|-----|
+| --------- | ------- | ----- |
 | "No sessions to recover" | No sessions in range | Widen `--from`/`--to` range |
 | "cmux not reachable" | cmux not running | Start cmux app first |
 | Workspace creation fails | Socket auth issue | Check `CMUX_SOCKET_PASSWORD` |
@@ -297,7 +297,7 @@ Named sessions recover instantly: `claude --resume "issue-42"` (fuzzy match).
 ## Rationalization Prevention
 
 | Excuse | Reality |
-|--------|---------|
+| -------- | --------- |
 | "Ignore the Bun segfault, re-run directly" | The crash may be deterministic. Recover first, then diagnose the crash log. |
 | "Widen the scan to all time" | Massive scans surface months-old throwaway sessions. Use a reasonable `--from`/`--to` window. |
 | "Skip naming sessions, I'll remember which is which" | Unnamed sessions recover as "session_<id>". After 10 recoveries they're indistinguishable. Always `claude --name`. |

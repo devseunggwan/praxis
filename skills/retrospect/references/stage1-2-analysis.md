@@ -439,7 +439,7 @@ into repeat escalation before assigning actions:
   new member of a repeated cluster does not stay at `repeat_count=0`
 
 | Condition | Action Type | Rationale |
-|-----------|-------------|-----------|
+| ----------- | ------------- | ----------- |
 | New pattern with structural root cause | `memory` | First occurrence; capture for future reference |
 | Repeat in MEMORY.md, 1-2x | `issue` | Memory alone failed; needs systemic fix |
 | Repeat 3x+ | `hook_code` or `skill_idea` | Multiple memory entries indicate an enforcement gap |
@@ -499,7 +499,7 @@ findings so they do not disappear behind behavioral memories.
 Tool layers to scan:
 
 | Layer | Examples | Friction signals |
-|-------|----------|-----------------|
+| ------- | ---------- | ----------------- |
 | `mcp` | custom or third-party MCP servers | slow response, missing field, schema mismatch, timeout |
 | `cli` | `gh`, `kubectl`, `git`, project CLIs | missing flag/option, undocumented behavior, workaround needed |
 | `builtin` | Read/Edit/Bash/Grep/Glob, Agent, hooks | environmental constraint, permission issue, output truncation |

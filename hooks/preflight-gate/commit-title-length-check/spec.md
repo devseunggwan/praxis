@@ -25,26 +25,26 @@ issue #177.
 
 ### What is warned
 
-| Command shape | Action |
-|---------------|--------|
-| `git commit -m "title"` | ask when `len(title) > 50` |
-| `git commit --message "title"` | ask when `len(title) > 50` |
-| `git commit -m="title"` | ask when `len(title) > 50` |
-| `git commit -am "title"` | ask when `len(title) > 50` |
-| `git commit --amend -m "title"` | ask when `len(title) > 50` |
-| `git commit -F /path/to/file` | reads first line; ask when over limit |
-| `git commit -F -` (stdin) | silent pass (acknowledged limitation) |
-| `Merge ...` / `Revert ...` title | silent pass (auto-generated) |
-| `git status`, `git push`, etc. | silent pass (not a commit) |
+| Command shape                    | Action                                |
+| -------------------------------- | ------------------------------------- |
+| `git commit -m "title"`          | ask when `len(title) > 50`            |
+| `git commit --message "title"`   | ask when `len(title) > 50`            |
+| `git commit -m="title"`          | ask when `len(title) > 50`            |
+| `git commit -am "title"`         | ask when `len(title) > 50`            |
+| `git commit --amend -m "title"`  | ask when `len(title) > 50`            |
+| `git commit -F /path/to/file`    | reads first line; ask when over limit |
+| `git commit -F -` (stdin)        | silent pass (acknowledged limitation) |
+| `Merge ...` / `Revert ...` title | silent pass (auto-generated)          |
+| `git status`, `git push`, etc.   | silent pass (not a commit)            |
 
 Length counting uses Python `len(str)` which counts Unicode code points — the
 correct measure for the 50-char rule in Korean/CJK mixed commit titles.
 
 ### Configuration
 
-| Env var | Default | Effect |
-|---------|---------|--------|
-| `CLAUDE_COMMIT_TITLE_MAX` | `50` | Override the maximum title length |
+| Env var                   | Default | Effect                            |
+| ------------------------- | ------- | --------------------------------- |
+| `CLAUDE_COMMIT_TITLE_MAX` | `50`    | Override the maximum title length |
 
 Setting `CLAUDE_COMMIT_TITLE_MAX=80` allows longer titles (e.g. for repos with
 a 72-char convention) without disabling the hook.

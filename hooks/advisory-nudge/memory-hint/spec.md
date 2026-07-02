@@ -37,7 +37,7 @@ hookEvents: [Bash, Edit, AskUserQuestion]       # event whitelist (default [Bash
 ```
 
 | Field | Required | Notes |
-|-------|----------|-------|
+| ------- | ---------- | ------- |
 | `hookable` | yes | scalar; `true` / `True` / `TRUE` / `yes` / `Yes` enable. Anything else (or missing) → not indexed. |
 | `hookKeywords` | yes | flat single-line list, e.g. `[a, b, "c d"]`. Scalar form (`hookKeywords: kubectl`) is **rejected** — the memory is silently skipped. |
 | `hookEvents` | no | flat single-line list of supported tool names — any of `Bash`, `Edit`, `Write`, `NotebookEdit`, `AskUserQuestion`. Default `[Bash]`. Tool names outside that set are dropped; if every listed event is unsupported, the parser retains the default `[Bash]`. |
@@ -51,7 +51,7 @@ The fields above are not authored by hand in the typical flow. The `retrospect` 
 ### Per-event tokenization
 
 | Event | Payload surface | Tokenization |
-|---|---|---|
+| --- | --- | --- |
 | `Bash` | `tool_input.command` | shlex via `safe_tokenize` (quoted multi-words preserved as a single non-matching token — see AC-10) |
 | `Edit` | `file_path` + `old_string` + `new_string` | free-text regex (ASCII identifier-with-dashes OR unicode word) |
 | `Write` | `file_path` + `content` | free-text regex |

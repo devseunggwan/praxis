@@ -262,7 +262,7 @@ The execution order each round is:
 #### 5a. Classify each finding
 
 | Type | Examples | Premise check required |
-|------|----------|------------------------|
+| ------ | ---------- | ------------------------ |
 | **Fact-modifying** | WHERE / filter logic, catalog / schema / table / column names, CLI flag or option references, API endpoint / signature, version or SDK identifiers, **string literals used as identifiers** (provider keys, env names, lookup tokens) | **YES** |
 | **Structural** | Code organization, function decomposition, file layout, renames of code symbols only (variables, functions, types) when no string literal is touched | No |
 | **Stylistic** | Comments, formatting, lint-style suggestions | No |
@@ -287,7 +287,7 @@ This table is the canonical reference for the AC #3 documentation
 requirement; lift it when authoring related skills.
 
 | Finding type | Verification method |
-|--------------|---------------------|
+| -------------- | --------------------- |
 | WHERE clause / filter logic | Run the query with and without the filter; compare row counts against the rationale |
 | Catalog / schema / table name | `SHOW CATALOGS` / `SHOW SCHEMAS` / `SHOW TABLES` (or equivalent MCP / Trino / live-env query) |
 | Column name | `DESCRIBE <table>` against the live env |
@@ -368,7 +368,7 @@ AskUserQuestion: "이 PR이 다른 PR/레포의 port · parallel hotfix · A/B �
 Additionally, auto-detect sibling signals:
 
 | Signal source | Detection |
-|---|---|
+| --- | --- |
 | PR body keywords | `Companion`, `Refs #N`, `Mirror of #M`, `Port of`, `Parallel` |
 | Commit message citations | References to a sibling PR number (`#N`) in the commit body |
 | `git worktree list` | Two conceptually-paired branches (e.g., same issue prefix, `*-shell` / `*-python`) |
@@ -390,7 +390,7 @@ sibling-applied: {sibling-repo}#{PR-or-branch} | round={N} | finding={brief-labe
 **Result semantics:**
 
 | Result | Meaning |
-|---|---|
+| --- | --- |
 | `same defect` | Sibling exhibits the identical root-cause failure — sibling PR also needs the fix |
 | `different` | Sibling has a variant or no equivalent code path — no cross-fix needed |
 | `does not apply` | The finding's context (file, function, identifier) does not exist in the sibling |
@@ -431,7 +431,7 @@ The gate fires when the critic's output (or any finding it forwards)
 contains one of the following patterns — in English or Korean:
 
 | English form | Korean form |
-|---|---|
+| --- | --- |
 | "X is fabricated" | "X 는 fabricated" |
 | "X does not exist" | "X 는 존재하지 않음" / "X 는 없음" |
 | "X is unused" | "X 는 사용되지 않음" |
@@ -587,7 +587,7 @@ For each finding, derive a **region label** using the nearest enclosing
 context in the source file:
 
 | File type | Region label |
-|-----------|-------------|
+| ----------- | ------------- |
 | Markdown (`.md`, `.mdx`) | Nearest enclosing heading text at any level (`#` through `######`); H4+ headings are valid region labels because this SKILL.md itself uses `####` and `#####` for sub-steps, and excluding them would leave deeply-nested findings unlabelled |
 | Code (`.py`, `.ts`, `.sh`, `.js`, …) | Enclosing function / class / method symbol name |
 | Plain text / unknown | The file path alone (no region suffix) |
@@ -685,7 +685,7 @@ applied (after 5g)**, before the reviewer session ends.
 Scan the parent document for any of the following citation signals:
 
 | Citation signal | Examples |
-|---|---|
+| --- | --- |
 | Another skill name referenced | `codex-review-wrap`, `cmux-delegate`, `retrospect` |
 | Enumerated test IDs | `Test 1`, `Test 7`, `Test N-M` |
 | Enumerated phase IDs | `Phase 0`, `Phase 1a`, `Phase 2` |
@@ -827,7 +827,7 @@ keeps the count below the compressor threshold.
 ## Error Handling
 
 | Situation | Action |
-|-----------|--------|
+| ----------- | -------- |
 | PR state is CLOSED or MERGED | ABORT: "PR is {state} — review aborted. Re-open or target a different PR." |
 | `git worktree list` fails (not a git repo) | Abort: "git worktree list 실패 — git 저장소인지 확인하세요." |
 | All worktrees are bare | Treat as Case A (single effective target) using cwd |

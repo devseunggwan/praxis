@@ -44,7 +44,7 @@ non-merge menu pays **zero** subprocess cost. The diff is path-based (no
 diff-content read).
 
 | Priority | Path signal | Recommendation (Hybrid: type + example agent) |
-|----------|-------------|-----------------------------------------------|
+| ---------- | ------------- | ----------------------------------------------- |
 | 1 (highest) | `auth` / `token` / `secret` / `credential` / `permission` / `oauth` substr, or `.pem` / `.key` suffix | 보안 리뷰 (예: security-reviewer) |
 | 2 | `.sql` suffix, or `/sql/` / `migration` substr | 데이터/SQL 리뷰 (예: review-data) |
 | 3 | `schema` / `/models/` / `/model/` / `entity` substr, or `.prisma` / `.proto` suffix | 설계 리뷰 (예: review-service-design) |
@@ -104,7 +104,7 @@ a block) is the only failure mode.
 ### What is advised
 
 | Scenario | Action |
-|----------|--------|
+| ---------- | -------- |
 | Default mode, merge-decision option present, no review/debate option present | exit 0 + advisory stderr |
 | `PRAXIS_MERGE_MENU_REVIEW_STRICT=1`, merge option present, no review option present | exit 2 (block) |
 | Any tool name other than `AskUserQuestion` | silent pass-through |
@@ -149,7 +149,7 @@ word that `redesign` — which lacks the trailing `er` — does not match it.)
 ### Mode and env var behavior
 
 | Env var state | Mode | Exit code on match |
-|---------------|------|-------------------|
+| --------------- | ------ | ------------------- |
 | Neither var set (default) | **Advisory** | 0 + stderr warning |
 | `PRAXIS_MERGE_MENU_REVIEW_STRICT=1` | Strict | 2 (block) |
 

@@ -23,7 +23,7 @@ line", which removes the failure mode.
 `/^Caller chain verified:[ \t]*\S/i` line.
 
 | Condition | Behavior |
-|-----------|----------|
+| ----------- | ---------- |
 | `--help` / `-h` present | allow (read-only introspection) |
 | `--repo` / `-R` is present (any value) | allow — the hook checks for the flag's **presence only**, not whether the value points at another project. `gh pr create --repo <current-repo>` therefore also bypasses the gate. Intent is "cross-project PRs are out of scope"; the implementation is broader. Treat the presence of `--repo` as an explicit operator assertion that the caller-chain step has already been done out-of-band. |
 | `--template` / `-T` without `--body` / `-b` / `--body-file` | allow (interactive fill-in; the body is composed after the hook runs) |

@@ -30,18 +30,18 @@ the model). `PRAXIS_MERGE_CLAIM_STRICT=1`
 escalates to a `{"decision": "block", "reason": ...}` JSON, which re-prompts
 the model to verify before stopping.
 
-| Condition | Result |
-|-----------|--------|
-| Final message asserts a completed merge/PR/issue/worktree state AND no fresh state query in the recent transcript | `[merge-state-claim-gate]` advisory |
-| Same, but a fresh `gh pr\|issue …` command or GitHub MCP pull_request/issue/merge tool is present in the recent transcript | silent (claim is backed) |
+| Condition                                                                                                                                                                                                      | Result                                                         |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Final message asserts a completed merge/PR/issue/worktree state AND no fresh state query in the recent transcript                                                                                              | `[merge-state-claim-gate]` advisory                            |
+| Same, but a fresh `gh pr\|issue …` command or GitHub MCP pull_request/issue/merge tool is present in the recent transcript                                                                                     | silent (claim is backed)                                       |
 | Final message asserts an **applied-on-branch** state (`applied`/`deployed`/`적용됨`/`배포됨` …) AND no **reachability probe** in the recent transcript — a generic state query does NOT clear this kind (#656) | `[merge-state-claim-gate]` advisory with reachability guidance |
-| Applied-on-branch claim WITH a reachability probe (`git merge-base --is-ancestor`, `--json state,baseRefName` query, `git branch --contains`) in the recent transcript | silent (claim is backed) |
-| Final message has no such claim | silent |
-| Claim line is negated (`not`, `yet`, `아직`, `않`, …) | silent |
-| Future intent only (`I'll create a PR`, `ready to merge`) | silent (completion tokens are past/perfective) |
-| `stop_hook_active` is true | silent (re-entry loop guard) |
-| Missing/unreadable transcript, malformed stdin | silent (fail-open) |
-| `PRAXIS_MERGE_CLAIM_BYPASS` set | silent (opt-out) |
+| Applied-on-branch claim WITH a reachability probe (`git merge-base --is-ancestor`, `--json state,baseRefName` query, `git branch --contains`) in the recent transcript                                         | silent (claim is backed)                                       |
+| Final message has no such claim                                                                                                                                                                                | silent                                                         |
+| Claim line is negated (`not`, `yet`, `아직`, `않`, …)                                                                                                                                                          | silent                                                         |
+| Future intent only (`I'll create a PR`, `ready to merge`)                                                                                                                                                      | silent (completion tokens are past/perfective)                 |
+| `stop_hook_active` is true                                                                                                                                                                                     | silent (re-entry loop guard)                                   |
+| Missing/unreadable transcript, malformed stdin                                                                                                                                                                 | silent (fail-open)                                             |
+| `PRAXIS_MERGE_CLAIM_BYPASS` set                                                                                                                                                                                | silent (opt-out)                                               |
 
 ### Claim detection
 
@@ -104,10 +104,10 @@ DRY extraction deferred to a 3rd consumer per repo convention).
 
 ### Relationship to sibling hooks
 
-| Hook | Scope | Overlap |
-|------|-------|---------|
-| `completion-signal-gate` | Stop advisory on completion phrases without an evidence block | Complementary — generic "done" claims vs. specific merge/PR state claims |
-| `block-pr-without-caller-evidence` / `block-pr-without-precommit-evidence` | PreToolUse gate on PR *creation* | None — those gate the action; this gates the *assertion* of state |
+| Hook                                                                       | Scope                                                         | Overlap                                                                  |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `completion-signal-gate`                                                   | Stop advisory on completion phrases without an evidence block | Complementary — generic "done" claims vs. specific merge/PR state claims |
+| `block-pr-without-caller-evidence` / `block-pr-without-precommit-evidence` | PreToolUse gate on PR *creation*                              | None — those gate the action; this gates the *assertion* of state        |
 
 ### Parsing guarantees (fail-open)
 

@@ -58,7 +58,7 @@ exit silently drops downstream probes.
 ### Examples
 
 | Command | Action |
-|---------|--------|
+| --------- | -------- |
 | `grep X foo.txt && grep Y bar.txt` | **ADVISORY** — both segments read-only |
 | `gh issue view 1 && gh pr view 2 && git log -1` | **ADVISORY** — three read-only segments |
 | `find . -name '*.py' && wc -l *.py` | **ADVISORY** — find + wc, both read-only |
@@ -96,7 +96,7 @@ sees the stderr text and decides whether to split the chain or proceed.
 ### Relationship to sibling hooks
 
 | Hook | Scope | Overlap |
-|------|-------|---------|
+| ------ | ------- | --------- |
 | `cli-flag-incompat-advisory` | mode-incompatible flag combinations on `git`/`kubectl` | None — different defect class |
 | `side-effect-scan` | gate on mutation CLIs (`git commit`, `gh pr merge`, `kubectl apply`) | None — this hook silently allows mutation chains |
 | `cross-boundary-preflight` | heredoc cross-boundary write | None — different defect class |
@@ -109,7 +109,7 @@ non-zero cost, and the hook is advisory only. Known false-negatives
 (cases where the silent-cascade defect could still bite):
 
 | Case | Behaviour |
-|------|-----------|
+| ------ | ----------- |
 | `(grep x && grep y)` (subshell) | silent — subshell parens corrupt the argv-0 lookup, classifier returns False |
 | `find . && xargs wc -l` | silent — `xargs` is not in the inspection allowlist; its delegated binary is not inspected |
 | `git config user.name X` / `git branch -d foo` / `git tag v1.0` / `git worktree add ...` | classified as inspection — flat subcommand allowlist does not inspect argv. Chains mixing these with reads still nudge spuriously; pure-mutation chains slip through. `side-effect-scan` is the right hook for these. |

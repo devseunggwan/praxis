@@ -16,7 +16,7 @@ For each approved action:
 
    **Success-pattern origin** (new): `successful_patterns` row where `reinforce_action: memory`. Write MEMORY.md entry with:
    - Type: `feedback`
-   - Description MUST start with `Reinforced — <pattern>` (the `Reinforced — ` prefix distinguishes positive reinforcement entries from friction entries in future retrospect scans)
+   - Description MUST start with `Reinforced — <pattern>` (the `Reinforced —` prefix distinguishes positive reinforcement entries from friction entries in future retrospect scans)
    - Evidence: from the `successful_patterns.evidence` field
    - How to apply: describe how to intentionally replicate the successful pattern
 
@@ -43,9 +43,9 @@ For each approved action:
    **Category-based default (apply unless rationale documented):**
 
    | Category | `hookable` default | Rationale |
-   |---|---|---|
+   | --- | --- | --- |
    | behavioral retrieval-critical (silent-recurrence likely; failure mode is "Loaded ≠ Retrieved") | `true` | hook is the only structural enforcement; skill/memory alone fails retrieval at action time |
-   | success-pattern reinforcement (`Reinforced — ` prefix) where intentional replication needs same retrieval surface | `true` | same "retrieve at action time" need applies in reverse |
+   | success-pattern reinforcement (`Reinforced —` prefix) where intentional replication needs same retrieval surface | `true` | same "retrieve at action time" need applies in reverse |
    | abstract / meta / cross-cutting principle (no concrete action signal) | `false` | keyword match would be noisy across unrelated commands |
    | author-generated rule (belongs in `~/.claude/CLAUDE.md` draft) or upstream-feedback note | `false` | not action-gateable; memory is a holding pen, not the enforcement surface |
 
@@ -82,7 +82,7 @@ For each approved action:
    2. **Project vs External uses `realpath`** of the input. This correctly routes both `AGENTS.md` (regular file) and project-local symlinks such as praxis's own `CLAUDE.md → AGENTS.md` (whose `realpath` lands on a file inside cwd) to the Project path.
 
    | Target | Detection | Execution path |
-   |--------|-----------|---------------|
+   | -------- | ----------- | --------------- |
    | **Global `~/.claude/CLAUDE.md`** | EITHER the input path equals `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` (after `$HOME`/`~` expansion) OR `realpath <input>` equals `realpath ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md` (i.e., the finding declared the resolved dotfiles backing file path directly — still the user's own global config, must take the Global flow). | Staging → AskUserQuestion → apply only on explicit approval (see Global path below) |
    | **Project `AGENTS.md`** | Not Global AND `realpath <path>` resolves inside cwd. Covers `AGENTS.md` directly and project-local symlinks like `CLAUDE.md → AGENTS.md`. | Direct Edit (see Project path below) |
    | **External-repo rule file** | Not Global AND `realpath <path>` resolves outside cwd AND outside `~/.claude/` | Same as external-repo gate — do NOT edit; surface to user with resolved path |
@@ -163,7 +163,7 @@ For each approved action:
    ### Backing repo resolution (used by step 0.2 and as reference)
 
    | Tool name / layer pattern | Backing repo resolution |
-   |---|---|
+   | --- | --- |
    | `mcp__<plugin>__*` from a Claude Code plugin | Read `repository` field from that plugin's `.claude-plugin/plugin.json` (or equivalent manifest) |
    | `mcp__<service>-*` from a custom/team MCP server | The MCP server's source repo — `git remote -v` of the server's directory, or read its package manifest |
    | Skill within the praxis distribution itself | The praxis source repo this skill was installed from — read `repository` field in praxis's own plugin manifest |
@@ -247,7 +247,7 @@ For each approved action:
 7. **Verification** — For each executed action, verify the artifact:
 
    | Artifact | Verification |
-   |----------|-------------|
+   | ---------- | ------------- |
    | MEMORY.md feedback (new) | File exists + MEMORY.md index updated + `hookable`/`hookKeywords` frontmatter decision recorded (true with keywords, OR false with rationale in Actions Executed report) |
    | MEMORY.md feedback (merged) | Existing file updated (diff shown) + MEMORY.md index description updated if needed + if existing entry had `hookable: false` **or the field is missing entirely** and merged context now meets the retrieval-critical default, re-evaluate and add/update frontmatter (most pre-existing memories lack `hookable` — missing field is the dominant case, not false) |
    | GitHub issue | `gh issue view {url}` returns valid data |

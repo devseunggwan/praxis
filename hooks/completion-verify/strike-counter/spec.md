@@ -33,7 +33,7 @@ not a free retry.
 ### What this enforces
 
 | Mode | Trigger | Behavior |
-|------|---------|----------|
+| ------ | --------- | ---------- |
 | `session-start` | SessionStart hook | Reads `session_id` from stdin JSON. Writes `CLAUDE_SESSION_ID=<sid>` to `$CLAUDE_ENV_FILE` (primary) and `<STATE_DIR>/.current-session` latch (backstop). If a prior strike count > 0 exists for this session, emits `additionalContext` so Claude sees the carried state. |
 | `preprompt` | UserPromptSubmit hook | Loads count. At count=1 emits a strike-1 warning context; at count=2 emits a strike-2 review-required context with cumulative reason list and forced global `~/.claude/CLAUDE.md` re-read directive; at count≥3 stays silent (Stop hook handles the block). |
 | `stop` | Stop hook | Honors `stop_hook_active=true` to avoid infinite loop. If count≥3, appends to `<STATE_DIR>/last-block.log` and emits `{"decision":"block","reason":"…"}` with the reflection requirement. |

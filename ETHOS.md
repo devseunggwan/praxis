@@ -13,7 +13,7 @@ graph (`ARCHITECTURE.md`) descend from these — they do not override them.
 ## Autonomy vs Convention
 
 | Domain | AI authority | Example |
-|---|---|---|
+| --- | --- | --- |
 | **Problem exploration** | Active judgment expected | Hypothesis choice, debug direction, falsification strategy, tool selection |
 | **Convention** | Follow as defined; no autonomous override | Issue creation path, branch/worktree workflow, external-mutation tool layer, code patterns |
 

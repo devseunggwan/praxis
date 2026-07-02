@@ -115,7 +115,7 @@ For each action backed by exactly one observation and `repeat=false`, downgrade
 one tier:
 
 | Original action | Downgraded to | Rationale |
-|-----------------|---------------|-----------|
+| ----------------- | --------------- | ----------- |
 | `upstream_feedback` | `memory` | One observation against an external party does not justify upstream-write cost |
 | `issue` | `memory` | One observation without repeat does not justify systemic tracking |
 | `hook_code` | `skill_idea` | One observation does not justify enforcement code |

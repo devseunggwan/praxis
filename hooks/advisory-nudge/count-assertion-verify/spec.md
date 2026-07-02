@@ -35,7 +35,7 @@ prior entry `feedback_input_surface_enumeration.md`.
 ### What is detected
 
 | Condition | Advisory |
-|-----------|----------|
+| ----------- | ---------- |
 | `grep` subcommand + count flag (`-c` / `--count` / combined `-cE`) + BRE alternation (`\|`) | Yes |
 | `grep` subcommand + count flag + ERE alternation (unescaped `\|`) with `-E`/`-P`/`--extended-regexp`/`--perl-regexp` | Yes |
 | `grep -c 'single_pattern'` (no alternation) | No |
@@ -47,7 +47,7 @@ prior entry `feedback_input_surface_enumeration.md`.
 #### Alternation detection rules
 
 | Mode | Alternation token | Example pattern |
-|------|------------------|----------------|
+| ------ | ------------------ | ---------------- |
 | BRE (default grep) | `\|` (backslash-pipe) | `'^run_case\|^run_test'` |
 | ERE (`-E`) | unescaped `\|` | `'pat1\|pat2'` |
 | PCRE (`-P`) | unescaped `\|` | `'(cat)\|(dog)'` |
@@ -60,7 +60,7 @@ trigger the advisory. In ERE/PCRE mode, an unescaped `|` is alternation.
 The hook recognises all common grep flag styles:
 
 | Form | Example |
-|------|---------|
+| ------ | --------- |
 | Combined short flags | `-cE`, `-Ec`, `-cP`, `-Pci` |
 | Separate short flags | `-c -E`, `-E -c` |
 | Long flags | `--count --extended-regexp` |
@@ -94,7 +94,7 @@ Emitted to stderr. Exit code `0`. Never blocks — advisory only.
 ### Parsing guarantees
 
 | Condition | Behavior |
-|-----------|----------|
+| ----------- | ---------- |
 | Malformed / missing stdin JSON | exit 0 (silent pass) |
 | `tool_name` not `Bash` | exit 0 (silent pass) |
 | Missing `command` field | exit 0 (silent pass) |

@@ -67,7 +67,7 @@ degrades gracefully — `(none for current branch)` / `0/3` /
 ### Configuration
 
 | Env var | Default | Scope | Effect |
-|---------|---------|-------|--------|
+| --------- | --------- | ------- | -------- |
 | `PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT` | unset | hook | When `1`, exits silently before reading stdin |
 | `PRAXIS_POSTCOMPACT_CONTEXT_FILE` | unset | hook | Explicit dedup state file path (test override) |
 | `PRAXIS_POSTCOMPACT_TAIL_LINES` | `100` | hook | Transcript tail line count to scan; non-int / <1 falls back to default |
@@ -133,7 +133,7 @@ semantics, so the hook is not emitted on their platforms.
 ### Relationship to sibling hooks
 
 | Hook | Scope | Overlap |
-|------|-------|---------|
+| ------ | ------- | --------- |
 | `strike-counter` (SessionStart) | re-emits strike count when session resumes | Complementary — strike-counter fires on session boot; this hook fires after mid-session compaction |
 | `session-intent` (UserPromptSubmit) | classifies first-prompt read-intent | None — disjoint signal; session-intent reads `prompt`, this hook reads `transcript_path` |
 | `codex-review-route` (UserPromptSubmit) | warn on multi-worktree `/codex:review` | None — different trigger surface |
@@ -142,7 +142,7 @@ semantics, so the hook is not emitted on their platforms.
 ### Known limitations
 
 | Case | Behaviour |
-|------|-----------|
+| ------ | ----------- |
 | Compaction summary older than `PRAXIS_POSTCOMPACT_TAIL_LINES` lines | Silent — the dedup ensures correctness; the cost is "first prompt after compaction injects nothing if tail window is too small". Tune via env var on very chatty sessions |
 | Multiple compactions between prompts | Only the **most recent** is injected. Older compactions are considered already-superseded |
 | Non-Claude transcript schema variant | Silent — defensive `dict` / type checks degrade to no-op |

@@ -42,7 +42,7 @@ Skills that dispatch external CLI workers (`cmux-delegate`) can route tasks to m
 ### Provider CLI Spec
 
 | Provider | Non-interactive command | Output format | Stdin prompt | Write access |
-|----------|----------------------|---------------|-------------|-------------|
+| ---------- | ---------------------- | --------------- | ------------- | ------------- |
 | `claude` | `cat $F \| claude --model {m} --output-format stream-json --permission-mode auto` | stream-json (JSONL) | `cat file \| claude` | Full |
 | `codex` | `cat $F \| codex exec {m:+-m m} -o $RESULT_FILE` | stdout verbose logs + last message isolated in `$RESULT_FILE` (preferred); `--json` JSONL also supported | `cat file \| codex exec` | Sandbox-restricted — explicit fallback required |
 | `gemini` | `gemini -p "$(cat $F)" --approval-mode yolo {m:+-m m}` | stream-json (`-o stream-json`) | via `-p` flag | Full |
@@ -54,7 +54,7 @@ All providers share the same completion sentinel: `; echo '===WORKER_DONE===' >>
 Unified `--model` flag across all skills: `<provider>:<model>` or bare model name.
 
 | Notation | Resolves to | CLI command |
-|----------|-------------|-------------|
+| ---------- | ------------- | ------------- |
 | `opus`, `sonnet`, `haiku` | `claude:{name}` | `claude --model {name}` |
 | `claude` | Claude default model | `claude` |
 | `claude:opus` | Claude Opus | `claude --model opus` |
@@ -72,7 +72,7 @@ Two-phase routing: task keywords select the provider, then complexity selects th
 **Phase 1 — Task type to provider:**
 
 | Task pattern | Provider | Rationale |
-|-------------|----------|-----------|
+| ------------- | ---------- | ----------- |
 | implement, fix, refactor, code generation | `codex` | Code-centric, fast execution |
 | search, analyze, summarize, large context | `gemini` | Large context window, search integration |
 | review, design, architecture, security, debug | `claude` | Reasoning depth, nuanced judgment |
@@ -81,7 +81,7 @@ Two-phase routing: task keywords select the provider, then complexity selects th
 **Phase 2 — Complexity to model (claude only; codex/gemini use provider defaults):**
 
 | Provider | Low | Medium | High |
-|----------|-----|--------|------|
+| ---------- | ----- | -------- | ------ |
 | `claude` | haiku | sonnet | opus |
 | `codex` | (default) | (default) | (default or explicit) |
 | `gemini` | (default) | (default) | (default or explicit) |
@@ -122,7 +122,7 @@ else:
 > See [docs/hook-operating-matrix.md](docs/hook-operating-matrix.md) for the generated operating matrix with roles, events, host filters, and strict/bypass knobs.
 
 | Hook | Event | Purpose | Spec |
-|------|-------|---------|------|
+| ------ | ------- | --------- | ------ |
 | `block-gh-state-all` | PreToolUse | Hard-block invalid `gh search ... --state all` flag combo | [hooks/preflight-gate/block-gh-state-all/spec.md](hooks/preflight-gate/block-gh-state-all/spec.md) |
 | `gh-flag-verify` | PreToolUse | Block `gh <subcmd>` calls with flags not in the subcommand's accepted set | [hooks/preflight-gate/gh-flag-verify/spec.md](hooks/preflight-gate/gh-flag-verify/spec.md) |
 | `gh-json-validator` | PreToolUse | Block `gh <subcmd> --json <fields>` calls whose field names are not in the subcommand's valid JSON projection (issue #391) | [hooks/preflight-gate/gh-json-validator/spec.md](hooks/preflight-gate/gh-json-validator/spec.md) |
@@ -157,7 +157,7 @@ else:
 | `external-api-literal-trigger` | PreToolUse | Advisory nudge when ALL_CAPS enum candidates or 3-part SQL identifiers are written without prior retrieval verification (issue #202) | [hooks/advisory-nudge/external-api-literal-trigger/spec.md](hooks/advisory-nudge/external-api-literal-trigger/spec.md) |
 | `block-manufactured-action-menu` | PreToolUse | Warn (advisory) or block (strict) when AskUserQuestion surfaces a manufactured menu — question-form ("shall we proceed?") or affirmative-form ("그대로 진행" / "execute now") — after the user already issued a command-intent signal (issue #377) | [hooks/preflight-gate/block-manufactured-action-menu/spec.md](hooks/preflight-gate/block-manufactured-action-menu/spec.md) |
 | `output-block-falsify-advisory` | PreToolUse | Advisory nudge to run output-block falsification gate before surfacing `(Recommended)` options or bulk-action commands (issue #221) | [hooks/advisory-nudge/output-block-falsify-advisory/spec.md](hooks/advisory-nudge/output-block-falsify-advisory/spec.md) |
-| `count-assertion-verify` | PreToolUse | Advisory nudge when `grep -c` with alternation (`\|` BRE or `|` ERE/PCRE) is run without per-arm verification; prevents citing inflated alternation counts (issue #277) | [hooks/advisory-nudge/count-assertion-verify/spec.md](hooks/advisory-nudge/count-assertion-verify/spec.md) |
+| `count-assertion-verify` | PreToolUse | Advisory nudge when `grep -c` with alternation (`\|` BRE or ` \| ` ERE/PCRE) is run without per-arm verification; prevents citing inflated alternation counts (issue #277) | [hooks/advisory-nudge/count-assertion-verify/spec.md](hooks/advisory-nudge/count-assertion-verify/spec.md) |
 | `pre-gh-pr-create-dedup-gate` | PreToolUse | Run `gh pr list --search` against the resolved target repo before `gh pr create`; surface artifact unconditionally to stderr, hard-block on repo-resolution / gh-call failure (issue #234) | [hooks/preflight-gate/pre-gh-pr-create-dedup-gate/spec.md](hooks/preflight-gate/pre-gh-pr-create-dedup-gate/spec.md) |
 | `advisory-wrapper-signature-verify` | PreToolUse | Advisory nudge to verify wrapped function signatures before writing wrapper/client code with delegation patterns (issue #235) | [hooks/advisory-nudge/advisory-wrapper-signature-verify/spec.md](hooks/advisory-nudge/advisory-wrapper-signature-verify/spec.md) |
 | `block-pr-without-caller-evidence` | PreToolUse | Block `gh pr create` / `gh pr new` unless the effective PR body contains a `Caller chain verified:` line (closes stdin / missing-file / TOCTOU bypasses; issue #158) | [hooks/preflight-gate/block-pr-without-caller-evidence/spec.md](hooks/preflight-gate/block-pr-without-caller-evidence/spec.md) |
@@ -236,7 +236,7 @@ python3 process.
 members, claude host):
 
 | Path | Wall-clock |
-|------|-----------|
+| ------ | ----------- |
 | Single-process dispatcher (wired runtime path) | **~0.13s** |
 | Reconstructed per-process model (33 wrappers, spawned in parallel) | ~0.46s |
 
@@ -270,7 +270,7 @@ Platform manifests support two optional top-level fields:
 Generated (committed) outputs:
 
 | Path | Consumer |
-|------|----------|
+| ------ | ---------- |
 | `.claude-plugin/plugin.json` | Claude plugin root |
 | `.claude-plugin/marketplace.json` | Claude marketplace catalog |
 | `.agents/plugins/marketplace.json` | Codex marketplace root |

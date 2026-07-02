@@ -95,7 +95,7 @@ Auto-detect also fires: PR A body contains `Port of #199`.
 Codex returned two findings on PR A:
 
 | Finding | Type | Rationale |
-|---|---|---|
+| --- | --- | --- |
 | F1: value-bearing globals (`-C <path>`) advance token index → subcommand misread | Fact-modifying | Changes the filter predicate controlling bypass |
 | F2: bare `--gpg-sign` (no `=keyid`) not detected | Fact-modifying | Changes the set of matched CLI flags |
 
@@ -185,7 +185,7 @@ sibling-applied: devseunggwan/praxis#199 | round=1 | finding=F2(--gpg-sign bypas
 ## Expected outcome
 
 | Requirement | Met? |
-|---|---|
+| --- | --- |
 | PR A defect surfaced by codex-review-wrap | Yes — F1 and F2 verified in 5b |
 | Step 5d cross-applies falsifiable test to PR B | Yes — same git invocations run against sibling branch |
 | Ledger records `same defect` for both findings | Yes — two `sibling-applied:` rows with `result=same defect` |

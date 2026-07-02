@@ -15,47 +15,50 @@ resilient development workflow.
 ## Skill Categories
 
 ### Development
+
 Tools for code quality and review workflow.
 
-| Skill | When to call |
-|-------|-------------|
-| `retrospect` | End of session — find friction root causes and create lasting fixes |
-| `codex-review-wrap` | Before running `/codex:review` in a multi-worktree repo |
+| Skill               | When to call                                                        |
+| ------------------- | ------------------------------------------------------------------- |
+| `retrospect`        | End of session — find friction root causes and create lasting fixes |
+| `codex-review-wrap` | Before running `/codex:review` in a multi-worktree repo             |
 
 ### Discipline
+
 Session-scoped rule-violation tracking.
 
-| Skill | When to call |
-|-------|-------------|
-| `strike` | Record a rule violation (`/praxis:strike <reason>`) |
-| `strikes` | Check current strike count and recorded violations |
-| `reset-strikes` | Reset after a 3rd-strike block |
+| Skill           | When to call                                        |
+| --------------- | --------------------------------------------------- |
+| `strike`        | Record a rule violation (`/praxis:strike <reason>`) |
+| `strikes`       | Check current strike count and recorded violations  |
+| `reset-strikes` | Reset after a 3rd-strike block                      |
 
 ### Session Management
+
 Recover, save, and orchestrate Claude Code sessions.
 
-| Skill | When to call |
-|-------|-------------|
-| `cmux-recover-sessions` | Sessions crashed / power loss (cmux backend) |
-| `recover-sessions` | Sessions crashed / power loss (tmux backend) |
-| `cmux-save-sessions` | Save current session layout as a JSON snapshot |
-| `cmux-resume-sessions` | Restore a previously saved snapshot |
-| `cmux-session-manager` | Daily status dashboard, cleanup, reorganize |
-| `cmux-delegate` | Delegate a task to an independent session with full context |
+| Skill                   | When to call                                                |
+| ----------------------- | ----------------------------------------------------------- |
+| `cmux-recover-sessions` | Sessions crashed / power loss (cmux backend)                |
+| `recover-sessions`      | Sessions crashed / power loss (tmux backend)                |
+| `cmux-save-sessions`    | Save current session layout as a JSON snapshot              |
+| `cmux-resume-sessions`  | Restore a previously saved snapshot                         |
+| `cmux-session-manager`  | Daily status dashboard, cleanup, reorganize                 |
+| `cmux-delegate`         | Delegate a task to an independent session with full context |
 
 ### Discovery (this skill)
 
-| Skill | When to call |
-|-------|-------------|
+| Skill          | When to call                          |
+| -------------- | ------------------------------------- |
 | `using-praxis` | First-time orientation — you are here |
 
 ## Common Scenarios
 
-| Situation | Skill to call |
-|-----------|--------------|
-| "Claude Code sessions died after a crash or power-off" | `cmux-recover-sessions` (cmux) or `recover-sessions` (tmux) |
-| "I want to record that a global `~/.claude/CLAUDE.md` rule was broken" | `strike` |
-| "There are too many Codex review comments — where to start?" | `codex-review-wrap` |
+| Situation                                                              | Skill to call                                               |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------- |
+| "Claude Code sessions died after a crash or power-off"                 | `cmux-recover-sessions` (cmux) or `recover-sessions` (tmux) |
+| "I want to record that a global `~/.claude/CLAUDE.md` rule was broken" | `strike`                                                    |
+| "There are too many Codex review comments — where to start?"           | `codex-review-wrap`                                         |
 
 ## Hook System
 
@@ -69,9 +72,8 @@ to per-hook specs at `hooks/<role>/<name>/spec.md`.
 
 ## Prerequisites
 
-| Tier | Skills available | Dependencies |
-|------|-----------------|--------------|
-| **Standalone** | `recover-sessions`, `strike`, `strikes`, `reset-strikes` | `gh` CLI, `jq` |
-| **Enhanced** | + `retrospect`, `codex-review-wrap` | + oh-my-claudecode |
-| **Full** | + all `cmux-*` skills | + cmux |
-
+| Tier           | Skills available                                         | Dependencies       |
+| -------------- | -------------------------------------------------------- | ------------------ |
+| **Standalone** | `recover-sessions`, `strike`, `strikes`, `reset-strikes` | `gh` CLI, `jq`     |
+| **Enhanced**   | + `retrospect`, `codex-review-wrap`                      | + oh-my-claudecode |
+| **Full**       | + all `cmux-*` skills                                    | + cmux             |

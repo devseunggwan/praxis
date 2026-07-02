@@ -34,35 +34,35 @@ modern flag is rejected with the confusing message
 `fatal: --trivial-merge is incompatible with all other options` — even
 though the operator never wrote `--trivial-merge`.
 
-| Command | Action |
-|---------|--------|
-| `git merge-tree --name-only abc HEAD origin/main` | **ADVISORY** — 3 positionals + modern flag |
-| `git merge-tree --write-tree A B C` | **ADVISORY** |
-| `git merge-tree --name-only $(git merge-base HEAD origin/main) HEAD origin/main` | **ADVISORY** (3 positionals expanded) |
-| `git -C /tmp merge-tree --name-only A B C` | **ADVISORY** — `-C` is git global |
-| `git merge-tree --name-only HEAD origin/main` | **SILENT** — 2 positionals, modern OK |
-| `git merge-tree --merge-base=A --name-only HEAD origin/main` | **SILENT** — explicit merge-base (equals form) |
-| `git merge-tree --merge-base A --name-only HEAD origin/main` | **SILENT** — explicit merge-base (space form) |
-| `git merge-tree -X ours --name-only HEAD origin/main` | **SILENT** — `-X` consumes one value token |
+| Command                                                                                       | Action                                                    |
+| --------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `git merge-tree --name-only abc HEAD origin/main`                                             | **ADVISORY** — 3 positionals + modern flag                |
+| `git merge-tree --write-tree A B C`                                                           | **ADVISORY**                                              |
+| `git merge-tree --name-only $(git merge-base HEAD origin/main) HEAD origin/main`              | **ADVISORY** (3 positionals expanded)                     |
+| `git -C /tmp merge-tree --name-only A B C`                                                    | **ADVISORY** — `-C` is git global                         |
+| `git merge-tree --name-only HEAD origin/main`                                                 | **SILENT** — 2 positionals, modern OK                     |
+| `git merge-tree --merge-base=A --name-only HEAD origin/main`                                  | **SILENT** — explicit merge-base (equals form)            |
+| `git merge-tree --merge-base A --name-only HEAD origin/main`                                  | **SILENT** — explicit merge-base (space form)             |
+| `git merge-tree -X ours --name-only HEAD origin/main`                                         | **SILENT** — `-X` consumes one value token                |
 | `git merge-tree --merge-base $(git merge-base HEAD origin/main) --name-only HEAD origin/main` | **SILENT** — unquoted `$(...)` run coalesced as one value |
-| `git merge-tree --merge-base "$(...)" --name-only HEAD origin/main` | **SILENT** — quoted form already one token |
-| `git merge-tree abc HEAD origin/main` | **SILENT** — no modern flag (legacy form) |
+| `git merge-tree --merge-base "$(...)" --name-only HEAD origin/main`                           | **SILENT** — quoted form already one token                |
+| `git merge-tree abc HEAD origin/main`                                                         | **SILENT** — no modern flag (legacy form)                 |
 
 #### `kubectl` deprecated flag
 
 Known deprecations:
 
-| Flag | Reason |
-|------|--------|
+| Flag                     | Reason                                                 |
+| ------------------------ | ------------------------------------------------------ |
 | `--use-protocol-buffers` | Removed in kubectl ≥1.27 — protobuf is auto-negotiated |
 
-| Command | Action |
-|---------|--------|
-| `kubectl --use-protocol-buffers get pods` | **ADVISORY** |
-| `kubectl --use-protocol-buffers=true get pods` | **ADVISORY** (`=value` form) |
-| `kubectl --use-protocol-buffers exec pod -- mytool` | **ADVISORY** — flag is kubectl-side, before `--` |
+| Command                                             | Action                                                          |
+| --------------------------------------------------- | --------------------------------------------------------------- |
+| `kubectl --use-protocol-buffers get pods`           | **ADVISORY**                                                    |
+| `kubectl --use-protocol-buffers=true get pods`      | **ADVISORY** (`=value` form)                                    |
+| `kubectl --use-protocol-buffers exec pod -- mytool` | **ADVISORY** — flag is kubectl-side, before `--`                |
 | `kubectl exec pod -- mytool --use-protocol-buffers` | **SILENT** — flag is the in-container command's arg, after `--` |
-| `kubectl get pods -n default` | **SILENT** |
+| `kubectl get pods -n default`                       | **SILENT**                                                      |
 
 ### Response format
 
@@ -103,11 +103,11 @@ walks every command segment, runs every check, and emits the first hit.
 
 ### Relationship to sibling hooks
 
-| Hook | Scope | Overlap |
-|------|-------|---------|
-| `gh-flag-verify` | `gh <subcmd>` — deny on unknown flag from COMPAT table | None — gh-only, this hook covers other CLIs |
-| `block-gh-state-all` | `gh search --state all` | None — gh-only |
-| `verify-commit-flag-override` | `git commit --no-verify` etc. | Complementary — covers commit safety, this hook covers shape errors |
+| Hook                          | Scope                                                  | Overlap                                                             |
+| ----------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------- |
+| `gh-flag-verify`              | `gh <subcmd>` — deny on unknown flag from COMPAT table | None — gh-only, this hook covers other CLIs                         |
+| `block-gh-state-all`          | `gh search --state all`                                | None — gh-only                                                      |
+| `verify-commit-flag-override` | `git commit --no-verify` etc.                          | Complementary — covers commit safety, this hook covers shape errors |
 
 ### Tests
 

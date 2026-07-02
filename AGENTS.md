@@ -6,23 +6,23 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 
 ## Documentation map
 
-| File | Purpose |
-|------|---------|
-| [`ETHOS.md`](ETHOS.md) | Why praxis exists — values and principles that gate every skill, hook, and manifest; includes [Autonomy vs Convention](ETHOS.md#autonomy-vs-convention) boundary table |
-| [`DESIGN.md`](DESIGN.md) | How hooks are built — structural-tokenization, session_id keying, compound-bash-cascade, ordering, and add-a-new-hook flow |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Skill ↔ hook ↔ manifest dependency graph — provider routing, hook index, multi-platform packaging |
-| [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md) | Fixed Claude Code runtime limits every skill must respect |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Skill and hook contribution conventions, live-runtime verification gate |
-| [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md) | Evidence-based keep/merge/drop verdict per hook, scored from the fire-rate ledger (issue #713) |
+| File                                                   | Purpose                                                                                                                                                                |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`ETHOS.md`](ETHOS.md)                                 | Why praxis exists — values and principles that gate every skill, hook, and manifest; includes [Autonomy vs Convention](ETHOS.md#autonomy-vs-convention) boundary table |
+| [`DESIGN.md`](DESIGN.md)                               | How hooks are built — structural-tokenization, session_id keying, compound-bash-cascade, ordering, and add-a-new-hook flow                                             |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md)                   | Skill ↔ hook ↔ manifest dependency graph — provider routing, hook index, multi-platform packaging                                                                      |
+| [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md)     | Fixed Claude Code runtime limits every skill must respect                                                                                                              |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md)                   | Skill and hook contribution conventions, live-runtime verification gate                                                                                                |
+| [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md) | Evidence-based keep/merge/drop verdict per hook, scored from the fire-rate ledger (issue #713)                                                                         |
 
 ## Prerequisites
 
-| Tier | What works | Dependencies |
-| ------ | ----------- | -------------- |
-| **Standalone** | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq` (for strike skills); `debt` needs only `git` |
-| **Enhanced** | + retrospect, codex-review-wrap | + oh-my-claudecode |
-| **Full** | + all cmux-* skills | + cmux |
-| **Multi-provider** | + codex/gemini routing in cmux-* | + codex-cli, gemini-cli |
+| Tier               | What works                                               | Dependencies                                                |
+| ------------------ | -------------------------------------------------------- | ----------------------------------------------------------- |
+| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq` (for strike skills); `debt` needs only `git` |
+| **Enhanced**       | + retrospect, codex-review-wrap                          | + oh-my-claudecode                                          |
+| **Full**           | + all cmux-* skills                                      | + cmux                                                      |
+| **Multi-provider** | + codex/gemini routing in cmux-*                         | + codex-cli, gemini-cli                                     |
 
 ## Skills (14)
 
@@ -33,37 +33,37 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 
 ### Discovery
 
-| Skill | Purpose |
-|-------|---------|
-| `using-praxis` | Onboarding entry point — maps scenarios to the right skill for new praxis users |
+| Skill                  | Purpose                                                                                             |
+| ---------------------- | --------------------------------------------------------------------------------------------------- |
+| `using-praxis`         | Onboarding entry point — maps scenarios to the right skill for new praxis users                     |
 | `writing-praxis-skill` | Guide for authoring a new SKILL.md — template, SRP, trigger keyword design, frontmatter conventions |
 
 ### Development
 
-| Skill | Purpose |
-| ------- | --------- |
-| `retrospect` | Session retrospect — find friction root causes, propose improvements |
-| `codex-review-wrap` | Worktree-aware wrapper for `/codex:review` — forces explicit target selection, premise-verification gate, flip detection across rounds |
-| `debt` | Deferred-decision ledger — unions commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) with tree compounding comments (`# [PR #N]`); report-only |
+| Skill               | Purpose                                                                                                                                                                                         |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `retrospect`        | Session retrospect — find friction root causes, propose improvements                                                                                                                            |
+| `codex-review-wrap` | Worktree-aware wrapper for `/codex:review` — forces explicit target selection, premise-verification gate, flip detection across rounds                                                          |
+| `debt`              | Deferred-decision ledger — unions commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) with tree compounding comments (`# [PR #N]`); report-only |
 
 ### Discipline
 
-| Skill | Purpose |
-|-------|---------|
-| `strike` | Declare a rule violation — session-scoped counter, escalating signal (1진 warning → 2진 review → 3진 Stop-hook block) |
-| `strikes` | Show current strike count + recorded violation reasons for the active session |
-| `reset-strikes` | Reset the session strike counter to 0 after a 3진 block (required to unblock responses) |
+| Skill           | Purpose                                                                                                               |
+| --------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `strike`        | Declare a rule violation — session-scoped counter, escalating signal (1진 warning → 2진 review → 3진 Stop-hook block) |
+| `strikes`       | Show current strike count + recorded violation reasons for the active session                                         |
+| `reset-strikes` | Reset the session strike counter to 0 after a 3진 block (required to unblock responses)                               |
 
 ### Session Management
 
-| Skill | Purpose |
-|-------|---------|
-| `cmux-save-sessions` | Save cmux session list as JSON snapshot |
-| `cmux-resume-sessions` | Restore cmux workspaces from JSON snapshot |
-| `cmux-recover-sessions` | Bulk recover sessions after crash (cmux backend) |
-| `recover-sessions` | Bulk recover sessions after power loss (tmux backend) |
-| `cmux-session-manager` | Daily session lifecycle — status dashboard, cleanup, reorganize |
-| `cmux-delegate` | Delegate a task to an independent session with auto-collected context |
+| Skill                   | Purpose                                                               |
+| ----------------------- | --------------------------------------------------------------------- |
+| `cmux-save-sessions`    | Save cmux session list as JSON snapshot                               |
+| `cmux-resume-sessions`  | Restore cmux workspaces from JSON snapshot                            |
+| `cmux-recover-sessions` | Bulk recover sessions after crash (cmux backend)                      |
+| `recover-sessions`      | Bulk recover sessions after power loss (tmux backend)                 |
+| `cmux-session-manager`  | Daily session lifecycle — status dashboard, cleanup, reorganize       |
+| `cmux-delegate`         | Delegate a task to an independent session with auto-collected context |
 
 ## Hooks
 
@@ -122,8 +122,8 @@ After every `git pull` or worktree operation, run `./scripts/verify-symlinks.sh`
 These are shell wrappers installed via `scripts/install.sh` into `~/.local/bin`.
 They are not AI skills — they have no `SKILL.md` and cannot be invoked as `/praxis:*`.
 
-| Binary | Source | Purpose |
-|--------|--------|---------|
+| Binary          | Source                               | Purpose                                                                                                                                                     |
+| --------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bypass-review` | `skills/bypass-review/bypass-review` | Review bypass-telemetry event logs written by the bypass-telemetry hook — aggregate and inspect JSONL records (no `SKILL.md`; not invocable as `/praxis:*`) |
 
 ### Install / refresh CLI symlinks

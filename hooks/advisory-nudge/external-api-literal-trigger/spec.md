@@ -36,7 +36,7 @@ Reference: issue [#202](https://github.com/devseunggwan/praxis/issues/202).
 ### What is warned
 
 | Tool | Scanned field | Pattern | Advisory emitted |
-|------|--------------|---------|-----------------|
+| ------ | -------------- | --------- | ----------------- |
 | `Write` | `tool_input.content` | ALL_CAPS_WITH_UNDERSCORES (≥6 chars, compound) | Yes |
 | `Write` | `tool_input.content` | 3-part SQL identifier in SQL context | Yes |
 | `Edit` | `tool_input.new_string` | ALL_CAPS_WITH_UNDERSCORES (≥6 chars, compound) | Yes |
@@ -75,7 +75,7 @@ Three quoting shapes are recognized; quoted forms are normalized
 (delimiters stripped) before reporting:
 
 | Form | Example |
-|------|---------|
+| ------ | --------- |
 | Bare | `mysql.auth.tb_user` |
 | ANSI double-quoted | `"mysql"."auth"."tb_user"` |
 | MySQL / Hive backticked | `` `mysql`.`auth`.`tb_user` `` |
@@ -90,7 +90,7 @@ The following tokens are excluded to suppress noise on common source-code
 constants:
 
 | Category | Excluded tokens |
-|----------|----------------|
+| ---------- | ---------------- |
 | Code markers | `TODO`, `FIXME`, `HACK`, `NOTE`, `WARN`, `WARNING`, `DEBUG` |
 | Licenses | `LICENSE`, `README`, `AUTHORS`, `CHANGELOG`, `CONTRIBUTORS`, `MIT`, `BSD`, `GNU`, `GPL`, `APACHE`, `MPL`, `AGPL` |
 | Format names | `JSON`, `XML`, `CSV`, `YAML`, `TOML`, `SQL`, `HTML`, `UTF8`, `ASCII`, `UNICODE` |
@@ -113,7 +113,7 @@ constants:
 ### Fail-open contract
 
 | Condition | Behavior |
-|-----------|----------|
+| ----------- | ---------- |
 | Malformed / missing stdin JSON | exit 0 (silent pass) |
 | `tool_name` not in `Write`, `Edit`, `Bash` | exit 0 (silent pass) |
 | Missing target field (`content` / `new_string` / `command`) | exit 0 (silent pass) |

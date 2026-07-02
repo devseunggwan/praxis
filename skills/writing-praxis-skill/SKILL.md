@@ -95,7 +95,7 @@ Every SKILL.md must include **Overview**, **When to Use**, and **Process**.
 Add the others when relevant:
 
 | Section | Include when |
-|---------|-------------|
+| --------- | ------------- |
 | `## Overview` | Always |
 | `## When to Use` | Always |
 | `## The Iron Law` | Skill has non-negotiable invariants (recovery, destructive ops) |
@@ -114,7 +114,7 @@ The same SKILL.md runs on both the Claude Code plugin (Claude host) and the
 Codex plugin (Codex host). The two hosts differ in how they expose the skill:
 
 | Aspect | Claude host | Codex host |
-|--------|-------------|------------|
+| -------- | ------------- | ------------ |
 | Invocation | `Skill("praxis:<name>")` or `/praxis:<name>` | `Skill("praxis:<name>")` |
 | `{{ARGUMENTS}}` | Populated from the slash command argument string | Populated from Skill args |
 | `Skill(...)` delegation | Supported for most skills | Supported for most skills |
@@ -138,7 +138,7 @@ Read [`RUNTIME_CONSTRAINTS.md`](../../RUNTIME_CONSTRAINTS.md) before finishing
 the spec. The three constraints that bite most often:
 
 | Constraint | What to do |
-|------------|-----------|
+| ------------ | ----------- |
 | `AskUserQuestion.options` max 4 items | Surface top 3 + "취소"; put the full list in the question body text |
 | `Skill(...)` rejects `disable-model-invocation: true` skills | Use the binary directly (see Step 5) |
 | `Bash` cwd resets between calls | Chain with `&&` or use absolute paths |
@@ -177,7 +177,7 @@ Follow the standard praxis PR workflow:
 ## Failure Modes
 
 | Failure | Cause | Fix |
-|---------|-------|-----|
+| --------- | ------- | ----- |
 | Skill not invoked by routing | Trigger keywords missing from global `~/.claude/CLAUDE.md` routing table | Add keywords to the routing table |
 | `Skill(...)` call fails silently | Target skill uses `disable-model-invocation: true` (both hosts) | Call the underlying binary directly |
 | `AskUserQuestion` call rejected before tool runs | Options array > 4 items — JSON schema rejects the call | Truncate to 3 + "취소" |

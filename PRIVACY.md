@@ -14,14 +14,14 @@ path is passed by the Claude Code runtime in the hook payload as
 `transcript_path`). This is done entirely locally to inspect the most-recent
 user message or recent Bash commands.
 
-| Hook | What it reads | Purpose |
-|------|--------------|---------|
-| `completion-verify.sh` | Last ~400 lines of transcript | Verify that a Bash verification command was run in the same turn as a completion claim |
-| `retrospect-mix-check.sh` | Last ~400 lines of transcript | Confirm that retrospect Stage 3 outputs include non-memory action types |
-| `hooks/preflight-gate/block-ask-end-option/impl.py` | Most recent user message | Detect whether the user sent a stop signal before blocking an end-option menu item |
-| `hooks/preflight-gate/block-manufactured-action-menu/impl.py` | Most recent user message | Detect command-intent signals to suppress unnecessary confirmation menus |
-| `hooks/advisory-nudge/external-write-falsify-check/impl.py` | Recent Bash commands | Confirm a verification call precedes an external write |
-| `hooks/advisory-nudge/pre-output-falsification-gate/impl.py` | Last ~400 lines of transcript | Detect negative-evidence context before surfacing a (Recommended) option |
+| Hook                                                          | What it reads                 | Purpose                                                                                |
+| ------------------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------- |
+| `completion-verify.sh`                                        | Last ~400 lines of transcript | Verify that a Bash verification command was run in the same turn as a completion claim |
+| `retrospect-mix-check.sh`                                     | Last ~400 lines of transcript | Confirm that retrospect Stage 3 outputs include non-memory action types                |
+| `hooks/preflight-gate/block-ask-end-option/impl.py`           | Most recent user message      | Detect whether the user sent a stop signal before blocking an end-option menu item     |
+| `hooks/preflight-gate/block-manufactured-action-menu/impl.py` | Most recent user message      | Detect command-intent signals to suppress unnecessary confirmation menus               |
+| `hooks/advisory-nudge/external-write-falsify-check/impl.py`   | Recent Bash commands          | Confirm a verification call precedes an external write                                 |
+| `hooks/advisory-nudge/pre-output-falsification-gate/impl.py`  | Last ~400 lines of transcript | Detect negative-evidence context before surfacing a (Recommended) option               |
 
 Transcript data is read locally only, never forwarded or stored beyond the
 hook's in-process execution.
@@ -33,16 +33,16 @@ Hooks persist lightweight per-session state in the OS temporary directory
 payload as the key. When `session_id` is unavailable, `PPID` is used as a
 back-compat fallback.
 
-| Hook | State file | Contents |
-|------|-----------|---------|
-| `hooks/preflight-gate/session-intent/impl.py` | `${TMPDIR:-/tmp}/praxis-session-intent-<session_id>.json` | Detected session intent flag (read vs. mutation) |
-| `hooks/postuse-correction/pre-edit-md-escape-advisory/impl.py` | `${TMPDIR:-/tmp}/praxis-md-read-history-<session_id>.json` | Set of `.md` file paths Read in this session |
-| `hooks/advisory-nudge/pre-output-falsification-gate/impl.py` | `${TMPDIR:-/tmp}/praxis-pre-output-falsification-gate/<session_id_hash>/<key_hash>` | Per-session command-repetition counters (Lane B) |
+| Hook                                                           | State file                                                                          | Contents                                         |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `hooks/preflight-gate/session-intent/impl.py`                  | `${TMPDIR:-/tmp}/praxis-session-intent-<session_id>.json`                           | Detected session intent flag (read vs. mutation) |
+| `hooks/postuse-correction/pre-edit-md-escape-advisory/impl.py` | `${TMPDIR:-/tmp}/praxis-md-read-history-<session_id>.json`                          | Set of `.md` file paths Read in this session     |
+| `hooks/advisory-nudge/pre-output-falsification-gate/impl.py`   | `${TMPDIR:-/tmp}/praxis-pre-output-falsification-gate/<session_id_hash>/<key_hash>` | Per-session command-repetition counters (Lane B) |
 
 Strike counter state is stored in a dedicated directory:
 
-| Hook | State file | Contents |
-|------|-----------|---------|
+| Hook                | State file                                                             | Contents                                                  |
+| ------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------- |
 | `strike-counter.sh` | `${PRAXIS_STATE_DIR:-$HOME/.claude/state/praxis}/strikes/<session_id>` | Strike count and violation reasons for the active session |
 
 All state files contain only session-scoped metadata (table names, path sets,

@@ -63,7 +63,7 @@ All three conditions must hold for a block (exit 2):
    subagent results), so a `gh pr view` recorded as a tool_use still counts.
 
 | Situation | Action |
-|-----------|--------|
+| ----------- | -------- |
 | `git commit -m "..."` after a `[FINDING:` line, no re-fetch | **BLOCKED** (exit 2) |
 | `git commit -m "..."` after a `[CONFLICTS: ...]` line, no re-fetch | **BLOCKED** (exit 2) |
 | `git commit -m "..."` after a `[STAGE_COMPLETE:2]` line, no re-fetch | **BLOCKED** (exit 2) |

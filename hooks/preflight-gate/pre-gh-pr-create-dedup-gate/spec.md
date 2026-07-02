@@ -26,7 +26,7 @@ action boundary. Memory entries alone fail to enforce; structural gates do.
 ### What the hook does
 
 | Phase | Action |
-|-------|--------|
+| ------- | -------- |
 | 1. Match | `gh [global flags] pr create/new` — skips `--help`, non-pr-create, non-Bash |
 | 2. Resolve repo | `--repo`/`-R` flag first; fall back to `git remote get-url origin` |
 | 3. Extract keywords | Strip Conventional Commits prefix from `--title`, drop stop-words, keep up to 6 tokens |
@@ -36,7 +36,7 @@ action boundary. Memory entries alone fail to enforce; structural gates do.
 ### Pass / block matrix
 
 | Command | Action |
-|---------|--------|
+| --------- | -------- |
 | `gh pr create --repo o/r --title "feat: add dedup gate"` | **PASS** — artifact emitted, exit 0 |
 | `gh pr create --title "fix(hooks): x"` (origin resolves) | **PASS** — artifact emitted, exit 0 |
 | `gh pr create --title "fix: x"` (no `--repo`, no origin) | **BLOCK (exit 2)** — `cannot resolve PR target repo` |
@@ -155,7 +155,7 @@ basename-aware `_is_gh_binary` helper (symmetric with the commit gates'
 ### Relationship to sibling hooks
 
 | Hook | Overlap |
-|------|---------|
+| ------ | --------- |
 | `cross-boundary-preflight` | None — orthogonal: format/cross-repo gate vs. dedup search |
 | `block-pr-without-caller-evidence` | None — orthogonal: body content gate vs. dedup search |
 | `side-effect-scan` | Same surface (`gh pr create` triggers `gh-merge` category ask) — complementary: side-effect-scan surfaces a generic intent-confirm ask; this hook surfaces the dedup artifact |

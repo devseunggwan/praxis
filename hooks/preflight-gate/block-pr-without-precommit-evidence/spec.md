@@ -32,13 +32,13 @@ is the most accurate authority on whether verification actually ran.
 none of the three marker patterns below.
 
 | Pattern | Regex |
-|---------|-------|
+| --------- | ------- |
 | `Pre-commit verified: <free text>` | `(?im)^Pre-commit verified:[ \t]*\S` |
 | `Pre-commit: verified by CI (<free text>)` | `(?im)^Pre-commit:[ \t]*verified by CI[ \t]*\S` |
 | `Pre-commit: n/a (<free text reason>)` | `(?im)^Pre-commit:[ \t]*n/a[ \t]*\S` |
 
 | Condition | Behavior |
-|-----------|----------|
+| ----------- | ---------- |
 | `--help` / `-h` present | allow (read-only introspection) |
 | `--template` / `-T` without `--body` / `-b` / `--body-file` | allow (interactive fill-in; body composed after the hook runs) |
 | `--body` / `-b` value contains any marker | allow |

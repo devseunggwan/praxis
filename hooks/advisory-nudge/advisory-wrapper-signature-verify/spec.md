@@ -41,7 +41,7 @@ not all `client.py` writes are wrappers.
 The advisory fires when **all** of these conditions hold:
 
 | Condition | Description |
-|-----------|-------------|
+| ----------- | ------------- |
 | Tool name | `Write` or `Edit` |
 | File extension | Path ends with `.py` |
 | Not a test file | Path does **not** match `tests?/`, `test_*.py`, or `*_test.py` |
@@ -58,7 +58,7 @@ is intentionally re-stating a signature, not authoring a production wrapper.
 #### Delegation patterns (any match fires)
 
 | Pattern | Matches |
-|---------|---------|
+| --------- | --------- |
 | `return\s+get_\w+\s*\(` | `return get_user(id)`, `return get_session_token()` |
 | `return\s+create_\w+\s*\(` | `return create_order(data)` |
 | `from\s+[\w.]+\.queries\s+import` | `from foo.queries import get_user` |
@@ -96,7 +96,7 @@ from advisory `PreToolUse` hooks and includes it in the model's context.
 ### Parsing guarantees
 
 | Condition | Behavior |
-|-----------|----------|
+| ----------- | ---------- |
 | Malformed / missing stdin JSON | exit 0 (silent pass) |
 | `tool_name` not `Write` or `Edit` | exit 0 (silent pass) |
 | Missing `file_path` or non-string value | exit 0 (silent pass) |

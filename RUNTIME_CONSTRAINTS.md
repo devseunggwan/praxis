@@ -87,7 +87,7 @@ This is true regardless of whether the underlying skill declares
 (see entry #2), not the Agent-vs-Skill distinction.
 
 | Wrong | Right |
-|-------|-------|
+| ------- | ------- |
 | `Agent(subagent_type="praxis:codex-review-wrap")` | `Skill(skill="praxis:codex-review-wrap")` |
 | `Agent(subagent_type="praxis:retrospect")` | `Skill(skill="praxis:retrospect")` |
 | `Agent(subagent_type="praxis:cmux-delegate")` | `Skill(skill="praxis:cmux-delegate")` |
