@@ -15,6 +15,7 @@ resilient development workflow.
 ## Skill Categories
 
 ### Development
+
 Tools for code quality and review workflow.
 
 | Skill               | When to call                                                        |
@@ -23,6 +24,7 @@ Tools for code quality and review workflow.
 | `codex-review-wrap` | Before running `/codex:review` in a multi-worktree repo             |
 
 ### Discipline
+
 Session-scoped rule-violation tracking.
 
 | Skill           | When to call                                        |
@@ -32,6 +34,7 @@ Session-scoped rule-violation tracking.
 | `reset-strikes` | Reset after a 3rd-strike block                      |
 
 ### Session Management
+
 Recover, save, and orchestrate Claude Code sessions.
 
 | Skill                   | When to call                                                |
@@ -74,4 +77,3 @@ to per-hook specs at `hooks/<role>/<name>/spec.md`.
 | **Standalone** | `recover-sessions`, `strike`, `strikes`, `reset-strikes` | `gh` CLI, `jq`     |
 | **Enhanced**   | + `retrospect`, `codex-review-wrap`                      | + oh-my-claudecode |
 | **Full**       | + all `cmux-*` skills                                    | + cmux             |
-

@@ -16,7 +16,7 @@ For each approved action:
 
    **Success-pattern origin** (new): `successful_patterns` row where `reinforce_action: memory`. Write MEMORY.md entry with:
    - Type: `feedback`
-   - Description MUST start with `Reinforced — <pattern>` (the `Reinforced — ` prefix distinguishes positive reinforcement entries from friction entries in future retrospect scans)
+   - Description MUST start with `Reinforced — <pattern>` (the `Reinforced —` prefix distinguishes positive reinforcement entries from friction entries in future retrospect scans)
    - Evidence: from the `successful_patterns.evidence` field
    - How to apply: describe how to intentionally replicate the successful pattern
 
@@ -45,7 +45,7 @@ For each approved action:
    | Category | `hookable` default | Rationale |
    | --- | --- | --- |
    | behavioral retrieval-critical (silent-recurrence likely; failure mode is "Loaded ≠ Retrieved") | `true` | hook is the only structural enforcement; skill/memory alone fails retrieval at action time |
-   | success-pattern reinforcement (`Reinforced — ` prefix) where intentional replication needs same retrieval surface | `true` | same "retrieve at action time" need applies in reverse |
+   | success-pattern reinforcement (`Reinforced —` prefix) where intentional replication needs same retrieval surface | `true` | same "retrieve at action time" need applies in reverse |
    | abstract / meta / cross-cutting principle (no concrete action signal) | `false` | keyword match would be noisy across unrelated commands |
    | author-generated rule (belongs in `~/.claude/CLAUDE.md` draft) or upstream-feedback note | `false` | not action-gateable; memory is a holding pen, not the enforcement surface |
 

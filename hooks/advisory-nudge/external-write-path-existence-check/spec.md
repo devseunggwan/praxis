@@ -24,6 +24,7 @@ class of error at the last checkpoint before shared-state mutation.
 | Same trigger                                                    | Body contains inline code span `` `hooks/foo.sh` `` with a repo-relative prefix where target is absent | Phantom-path list to stderr |
 
 Path extraction covers two sources:
+
 - **Markdown link targets** (`](path)`) — Phase 1
 - **Inline code spans** (`` `hooks/foo.sh` ``) — Phase 2, repo-relative prefix only
 

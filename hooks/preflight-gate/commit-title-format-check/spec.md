@@ -20,6 +20,7 @@ the global `~/.claude/CLAUDE.md` "Git Commit & Title Rules" section.
 | `description` | Must start with a lowercase ASCII letter `[a-z]`                    |
 
 Examples:
+
 - `feat(auth): add token refresh`
 - `fix: resolve null pointer`
 - `docs(readme): update examples`
