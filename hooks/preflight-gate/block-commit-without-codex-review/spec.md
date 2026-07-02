@@ -4,7 +4,8 @@ Supported hosts: claude
 
 `hooks/preflight-gate/block-commit-without-codex-review/impl.py` intercepts every Bash tool call and
 hard-blocks a content `git commit` when `praxis:codex-review-wrap` has not been
-invoked anywhere in the current session.
+invoked anywhere in the current session — including inside any subagent that
+session dispatched (see [Subagent transcript scanning](#subagent-transcript-scanning-issue-730) below).
 
 ### Why this exists
 
@@ -27,11 +28,12 @@ Both conditions must hold for a block (exit 2):
    `git rebase`, `git cherry-pick`, and `git revert` are exempt. `--allow-empty`
    / `--allow-empty-message` are **not** exempt: they only permit an empty
    commit / message and do not prevent staged content from being committed, so
-   a content commit using them is still gated (use the skip token or env bypass
-   for an intentional empty CI-trigger commit).
-2. The session transcript contains no `Skill` tool_use with
-   `input.skill == "praxis:codex-review-wrap"` and no `/praxis:codex-review-wrap`
-   slash-command invocation (a prose mention such as "should I run
+   a content commit using them is still gated (use the skip token or the
+   persistent env bypass for an intentional empty CI-trigger commit).
+2. Neither the session's own transcript nor any of its subagent transcripts
+   contains a `Skill` tool_use with `input.skill == "praxis:codex-review-wrap"`,
+   and the root transcript has no `/praxis:codex-review-wrap` slash-command
+   invocation either (a prose mention such as "should I run
    /praxis:codex-review-wrap?" does not count — the match is line-anchored).
 
 | Situation | Action |
@@ -39,20 +41,55 @@ Both conditions must hold for a block (exit 2):
 | `git commit -m "..."` with no codex-review-wrap invocation this session | **BLOCKED** (exit 2) |
 | `git commit` after a `Skill(praxis:codex-review-wrap)` tool_use | **PASS** (review ran) |
 | `git commit` after a `/praxis:codex-review-wrap` slash command | **PASS** (review ran) |
+| `git commit` after a subagent ran `Skill(praxis:codex-review-wrap)` | **PASS** (review ran, in a subagent transcript — issue #730) |
 | `git commit --amend` / `git revert` / `git merge` | **PASS** (non-content / exempt) |
 | `git commit -m "docs [skip-codex-review]"` | **PASS** (skip token) |
 
 Granularity is session-level: one codex-review-wrap invocation satisfies all
-subsequent commits in the same session (whole-transcript scan), matching the
-other commit / PR review gates.
+subsequent commits in the same session (whole-transcript scan, root +
+subagents), matching the other commit / PR review gates.
+
+### Subagent transcript scanning (issue #730)
+
+A `Skill(praxis:codex-review-wrap)` call made *inside* a Task/Agent-dispatched
+subagent is recorded only in that subagent's own JSONL file — the root
+transcript carries no `isSidechain` entries at all (live-verified: 0
+`isSidechain` lines across sampled root transcripts, full subagent turns only
+under the sibling `subagents/` directory). A root-only scan is therefore
+structurally blind to review work a subagent actually performed, which forced
+use of the `[skip-codex-review]` escape hatch even when a real review had run
+(surfaced during issue #720 work).
+
+The hook now also scans `<session-dir>/subagents/agent-*.jsonl` — the sibling
+directory Claude Code writes one file into per dispatched subagent, keyed off
+the root transcript path (`<project-dir>/<session_id>.jsonl` →
+`<project-dir>/<session_id>/subagents/`). Each Claude Code session — and
+therefore each worktree/ultrawork branch, since each runs as its own session
+— has its own transcript and its own sibling `subagents/` directory, so this
+scan never crosses session boundaries: a review run in one worktree's session
+does not satisfy the gate for a commit in a different worktree's session. A
+subagent transcript that is individually unreadable/oversized is skipped
+(that one subagent's history just can't contribute a PASS); it does not
+turn the whole scan into a fail-open, since the root transcript already
+answered the question for everything outside that one subagent run.
 
 ### Escape hatches
 
 - Add a `[skip-codex-review]` token to the commit `-m` / `--message` message
   for a deliberate skip (e.g. a trivial docs / typo change). A token elsewhere
   in a compound command does not count — for `-F file` / heredoc commits use
-  the env bypass instead.
-- Set `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1` for a one-off bypass.
+  the persistent env bypass instead (see below).
+- Set `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1` as a **persistent** environment
+  variable — exported in the shell *before* Claude Code starts, or configured
+  via the host's session/settings env. **This does NOT work as an inline
+  command prefix** (`CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1 git commit …`):
+  the PreToolUse hook runs as a separate process that only inherits the
+  Claude Code host's own environment. An inline assignment lives inside
+  `tool_input.command` — data the hook inspects, not env applied to the hook
+  process — so it never reaches this process's `os.environ`. Verified
+  empirically during issue #720 work; the identical inline-prefix bypass is
+  documented (and equally non-functional as written) on the sibling
+  [`block-sciomc-finding-commit`](../block-sciomc-finding-commit/spec.md) gate.
 - Missing / unreadable / oversized (`>50MB`) transcript → silent pass (cannot
   enforce). Malformed stdin or an unparseable command (unbalanced quotes) →
   silent fail-open.
@@ -88,13 +125,15 @@ does not execute it) — correctly ignored.
 bash tests/hooks/preflight-gate/test_block_commit_without_codex_review.sh
 ```
 
-Covers 47 cases: block paths (no invocation, wrong skill, `-F` body, prose-only
-slash mention), pass paths (Skill tool_use, slash command, garbage-line
-resilience), exemptions (amend / allow-empty / merge / revert / rebase /
-cherry-pick), escape hatches (`-m` skip token incl. joined / `--message=`
-forms, env bypass), token-level edge cases (`git commit-tree` plumbing,
-`echo "git commit"`, `git log --grep`, `--amend` inside the message, skip
-token outside the message via `;` / `&&`, commit after `&&`),
+Covers 51 cases: block paths (no invocation, wrong skill, `-F` body, prose-only
+slash mention, subagent dir present but no subagent invocation, slash-command
+line inside a subagent transcript not satisfying the gate), pass paths (Skill
+tool_use, slash command, garbage-line resilience, Skill tool_use inside a
+subagent transcript — issue #730), exemptions (amend / allow-empty / merge /
+revert / rebase / cherry-pick), escape hatches (`-m` skip token incl. joined /
+`--message=` forms, persistent env bypass), token-level edge cases (`git commit-tree`
+plumbing, `echo "git commit"`, `git log --grep`, `--amend` inside the message,
+skip token outside the message via `;` / `&&`, commit after `&&`),
 hardened-parser bypass forms (grouped `(git commit …)`, unquoted substitution
 `$(git commit …)`, no-space separator `true;git commit …`, nested substitution,
 quoted substitution, single-quoted literal pass, double-quoted literal pass,

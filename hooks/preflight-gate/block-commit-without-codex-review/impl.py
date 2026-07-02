@@ -17,14 +17,42 @@ Block conditions (ALL must hold):
       cherry-pick/revert). Commits wrapped in a subshell/group (`(git …)`),
       command substitution (`$(git …)` / backtick), or chained behind a
       space-less separator (`true;git commit …`) are detected too.
-  (b) The session transcript contains NO `Skill` tool_use with
-      input.skill == "praxis:codex-review-wrap" AND no
-      `/praxis:codex-review-wrap` slash-command invocation
+  (b) NEITHER the session's own transcript NOR any of its subagent
+      transcripts (`<session-dir>/subagents/agent-*.jsonl`) contains a
+      `Skill` tool_use with input.skill == "praxis:codex-review-wrap", and
+      the root transcript has no `/praxis:codex-review-wrap` slash-command
+      invocation either.
+
+      Subagent transcripts are scanned because a
+      `Skill(praxis:codex-review-wrap)` call made *inside* a Task/Agent-
+      dispatched subagent is recorded only in that subagent's own JSONL
+      file — the
+      root transcript sees just the subagent's final tool_result text, with
+      no `isSidechain` entries at all (verified against live
+      ~/.claude/projects/<project>/<session_id>*.jsonl files: 0 isSidechain
+      lines in the root transcript, full subagent turns only under
+      <session_id>/subagents/). A root-only scan is structurally blind to
+      review work a subagent actually performed (praxis issue #730,
+      surfaced during issue #720). Each Claude Code session (and therefore
+      each worktree/ultrawork branch, which runs as its own session) has
+      its own transcript file and its own sibling subagents/ directory, so
+      this scan never crosses session boundaries.
 
 Allow conditions (escape hatches):
   - The commit -m/--message message contains a [skip-codex-review] token
-    (a -F file / heredoc body is not argv-visible — use the env bypass there)
-  - CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1 env var
+    (a -F file / heredoc body is not argv-visible — use the persistent env
+    bypass there instead, see below)
+  - CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1 set as a PERSISTENT environment
+    variable (exported before Claude Code starts, or configured via the
+    host's session/settings env) — NOT as an inline command prefix. The
+    PreToolUse hook runs as a separate process that only inherits the
+    Claude Code host's own environment; `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1
+    git commit …` places the assignment inside `tool_input.command`, which is
+    data the hook inspects, not env applied to the hook process itself — it
+    never reaches this process's `os.environ`. Verified empirically during
+    issue #720 work (the identical inline-prefix bypass is documented, and
+    equally non-functional, on the sibling `block-sciomc-finding-commit`
+    gate — see that hook's spec.md).
   - git commit --amend / git merge / git rebase / git cherry-pick / git revert
   - Missing / unreadable / oversized transcript → fail-open (cannot enforce)
   - Malformed / unparseable command (unbalanced quotes) → fail-open
@@ -33,7 +61,7 @@ NOT exempt: --allow-empty / --allow-empty-message. They permit an empty commit
 or empty message but do NOT prevent staged content from being committed, so
 exempting them would let `git commit --allow-empty -m x` (with staged changes)
 bypass the gate. An intentional empty CI-trigger commit uses the skip token or
-the env bypass instead.
+the persistent env bypass instead.
 
 Semantics: a whole-transcript scan means one codex-review-wrap invocation in
 the session satisfies all subsequent commits — the same coarse session-level
@@ -392,21 +420,36 @@ _SLASH_RE = re.compile(r"^\s*/(?:praxis:)?codex-review-wrap(?:\s.*)?$")
 _CMDNAME_RE = re.compile(r"^\s*<command-name>/?(?:praxis:)?codex-review-wrap(?:\s|</|$)")
 
 
-def _scan_transcript(path: str) -> bool | None:
-    """Return True if codex-review-wrap was invoked, False if not, None if the
-    transcript cannot be read (caller treats None as fail-open)."""
+def _read_lines(path: str) -> list[str] | None:
+    """Bounded read of a transcript file into stripped, non-empty lines.
+
+    Returns None when the path is missing, unreadable, or larger than
+    `_MAX_BYTES` (caller decides how to treat None per call site)."""
     try:
         p = Path(path)
         if not p.is_file() or p.stat().st_size > _MAX_BYTES:
             return None
-        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        raw = p.read_text(encoding="utf-8", errors="replace").splitlines()
     except (OSError, ValueError):
         return None
+    return [line.strip() for line in raw if line.strip()]
 
+
+def _lines_invoke_skill(lines: list[str], *, check_slash: bool) -> bool:
+    """True if any JSONL line carries a genuine codex-review-wrap invocation.
+
+    Shared by both the root-transcript scan and the per-subagent-transcript
+    scan below — the event shape (`message.content[].tool_use`) is identical
+    in both file kinds (subagent JSONL is written in the same Anthropic
+    message format, just under `<session>/subagents/agent-*.jsonl`).
+
+    `check_slash` scopes the `/praxis:codex-review-wrap` slash-command check
+    to the root transcript only (subagent scans pass `check_slash=False`): a
+    slash command is a literal *human* keystroke, and a subagent's "user"
+    turns are Task-dispatch prompts / tool_results, never human input — the
+    slash channel cannot fire there in genuine operation, so checking it
+    would only be a phantom code path a fabricated transcript could abuse."""
     for line in lines:
-        line = line.strip()
-        if not line:
-            continue
         try:
             obj = json.loads(line)
         except (json.JSONDecodeError, ValueError):
@@ -422,8 +465,62 @@ def _scan_transcript(path: str) -> bool | None:
         # <command-name> marker) so an assistant suggestion cannot satisfy it.
         if _has_skill_tool_use(obj):
             return True
-        if obj.get("type") == "user" and _has_slash_command(obj):
+        if check_slash and obj.get("type") == "user" and _has_slash_command(obj):
             return True
+    return False
+
+
+def _subagents_dir(transcript_path: str) -> Path | None:
+    """Return `<session-dir>/subagents/` for a root transcript path, if it
+    exists on disk.
+
+    Claude Code lays subagent transcripts out as a sibling directory named
+    after the session: root transcript `<project-dir>/<session_id>.jsonl`,
+    subagent transcripts `<project-dir>/<session_id>/subagents/agent-*.jsonl`
+    (one file per Task/Agent-dispatched subagent, live-verified against
+    `~/.claude/projects/<project>/<session_id>/subagents/`). Each session
+    (and therefore each worktree/ultrawork branch, which runs as its own
+    Claude Code session) has its own transcript and its own sibling
+    subagents/ directory, so this never reaches across sessions.
+
+    Returns None (not an error — just "nothing to scan") when the transcript
+    path has no `.jsonl` suffix or the sibling directory does not exist,
+    e.g. when the hook fires for a session that spawned no subagents yet.
+    """
+    p = Path(transcript_path)
+    if p.suffix != ".jsonl":
+        return None
+    candidate = p.with_suffix("") / "subagents"
+    return candidate if candidate.is_dir() else None
+
+
+def _scan_transcript(path: str) -> bool | None:
+    """Return True if codex-review-wrap was invoked in the session's own
+    transcript OR any of its subagent transcripts, False if not invoked
+    anywhere, None if the root transcript cannot be read (caller treats
+    None as fail-open).
+
+    A subagent transcript that is individually unreadable/oversized is
+    skipped (that one subagent's history just cannot contribute a PASS) —
+    it does not turn the overall result into a fail-open None, since the
+    root transcript (the thing we can actually read) already answered the
+    question definitively for everything outside that one subagent run.
+    """
+    root_lines = _read_lines(path)
+    if root_lines is None:
+        return None  # missing/unreadable/oversized root → cannot enforce
+    if _lines_invoke_skill(root_lines, check_slash=True):
+        return True
+
+    subagents_dir = _subagents_dir(path)
+    if subagents_dir is not None:
+        # check_slash=False: a subagent transcript's "user" turns are
+        # Task-dispatch prompts / tool_results, never human keystrokes, so
+        # slash-command detection is root-only (see _lines_invoke_skill).
+        for agent_file in subagents_dir.glob("agent-*.jsonl"):
+            agent_lines = _read_lines(str(agent_file))
+            if agent_lines and _lines_invoke_skill(agent_lines, check_slash=False):
+                return True
     return False
 
 
@@ -478,10 +575,14 @@ def _emit_block_message() -> None:
                 "Resolve by one of:",
                 "  1. Run the review (it is a model-invocable skill, not an agent):",
                 "       Skill(skill=\"praxis:codex-review-wrap\")",
-                "     then re-run the commit (one run satisfies all commits this session).",
+                "     then re-run the commit (one run satisfies all commits this session,",
+                "     including one run inside a subagent this session dispatched).",
                 "  2. Skip for this commit: add a [skip-codex-review] token to the",
                 "     commit message (e.g. trivial docs/typo change).",
-                "  3. One-off bypass: prefix with CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1",
+                "  3. Persistent bypass: set CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1 in your",
+                "     environment BEFORE starting Claude Code (settings env / shell export).",
+                "     An inline prefix on this command does NOT work — the hook process",
+                "     never sees it.",
                 "",
                 "Fail-open: missing/unreadable transcript and non-content commits",
                 "(--amend / merge / rebase / cherry-pick / revert) pass.",
