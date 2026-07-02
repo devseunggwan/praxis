@@ -175,7 +175,7 @@ decision — eager import is already well under the per-process baseline.
 
 | Metric                                               | Before                  | After                             |
 | ---------------------------------------------------- | ----------------------- | --------------------------------- |
-| python3 processes per `Bash` call (PreToolUse group) | 35                      | 1 (+2 multi-matcher standalone)   |
+| python3 processes per `Bash` call (PreToolUse group) | 35                      | 1 (+3 multi-matcher standalone)   |
 | `PreToolUse(Bash)` wall-clock (common command)       | ~1.87s                  | ~0.13s                            |
 | Cost growth per added hook in the group              | +1 cold-started process | +1 in-process `main()` call (~ms) |
 
