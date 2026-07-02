@@ -270,6 +270,49 @@ def test_record_standalone_fire_opt_out(tmp_path, monkeypatch):
     assert not out.exists()
 
 
+# ---------------------------------------------------------------------------
+# Writer: record_session_fire (issue #740 — RICH single-event recording for
+# standalone hooks outside the Bash dispatch group)
+# ---------------------------------------------------------------------------
+
+def test_record_session_fire_writes_rich_with_real_session(tmp_path, monkeypatch):
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    fl.record_session_fire(
+        "askuserquestion-loop-signal", "postuse-correction", "pass",
+        "sess-real", "AskUserQuestion",
+    )
+    recs = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    assert len(recs) == 1
+    assert recs[0] == {
+        "timestamp": recs[0]["timestamp"],
+        "session_id": "sess-real",
+        "tool": "AskUserQuestion",
+        "hook": "askuserquestion-loop-signal",
+        "role": "postuse-correction",
+        "decision": "pass",
+        "granularity": "rich",
+    }
+
+
+def test_record_session_fire_opt_out(tmp_path, monkeypatch):
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_DISABLE", "1")
+    fl.record_session_fire("h", "r", "pass", "sess-1", "AskUserQuestion")
+    assert not out.exists()
+
+
+def test_record_session_fire_non_string_session_and_tool_default_empty(tmp_path, monkeypatch):
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    fl.record_session_fire("h", "r", "pass", None, None)  # type: ignore[arg-type]
+    rec = json.loads(out.read_text().splitlines()[0])
+    assert rec["session_id"] == "" and rec["tool"] == ""
+
+
 def test_roster_split_separates_shell_hooks(tmp_path):
     manifest = {"hooks": [
         {"name": "a", "event": "PreToolUse", "matcher": "Bash"},   # py (instrumentable)
@@ -660,11 +703,13 @@ def test_compute_outcome_proxy_joins_fire_sessions_to_strike_state(tmp_path):
     result = cli.compute_outcome_proxy(fire_events, state_dir)
     assert result["s1"] == {
         "strike_count": 3, "strike_state_available": True,
-        "external_write_revert_count": 0, "rework_commit_count": 0,
+        "external_write_revert_count": 0, "reclarification_loop_count": 0,
+        "rework_commit_count": 0,
     }
     assert result["s2"] == {
         "strike_count": 0, "strike_state_available": False,
-        "external_write_revert_count": 0, "rework_commit_count": 0,
+        "external_write_revert_count": 0, "reclarification_loop_count": 0,
+        "rework_commit_count": 0,
     }
 
 
@@ -735,6 +780,81 @@ def test_fire_rate_report_shows_nonzero_external_write_revert_signal(tmp_path, m
     assert "Outcome Proxy" in report
     assert "Sessions with external-write-revert signal : 1" in report
     assert "s-revert" in report
+
+
+# issue #740: re-clarification-loop coarse proxy (askuserquestion-loop-signal
+# RICH fires) — see compute_reclarification_loop_counts.
+
+def test_compute_reclarification_loop_counts_counts_rich_fires_only():
+    fire_events = [
+        {"hook": "askuserquestion-loop-signal", "session_id": "s1", "granularity": "rich"},
+        {"hook": "askuserquestion-loop-signal", "session_id": "s1", "granularity": "rich"},
+        # coarse duplicate from @fail_open (session_id="") must be excluded
+        {"hook": "askuserquestion-loop-signal", "session_id": "", "granularity": "coarse"},
+        {"hook": "other-hook", "session_id": "s1", "granularity": "rich"},
+    ]
+    counts = cli.compute_reclarification_loop_counts(fire_events)
+    assert counts == {"s1": 2}
+
+
+def test_compute_reclarification_loop_counts_ignores_missing_session():
+    fire_events = [
+        {"hook": "askuserquestion-loop-signal", "session_id": "", "granularity": "rich"},
+        {"hook": "askuserquestion-loop-signal", "granularity": "rich"},
+    ]
+    assert cli.compute_reclarification_loop_counts(fire_events) == {}
+
+
+def test_compute_outcome_proxy_surfaces_reclarification_loop_count(tmp_path):
+    state_dir = tmp_path / "strikes"
+    state_dir.mkdir()
+    fire_events = [
+        {"hook": "askuserquestion-loop-signal", "session_id": "s1", "granularity": "rich",
+         "timestamp": "2026-06-26T00:00:00+00:00"},
+        {"hook": "askuserquestion-loop-signal", "session_id": "s1", "granularity": "rich",
+         "timestamp": "2026-06-26T00:00:05+00:00"},
+    ]
+    result = cli.compute_outcome_proxy(fire_events, state_dir)
+    assert result["s1"]["reclarification_loop_count"] == 2
+
+
+def test_fire_rate_report_shows_nonzero_reclarification_loop_signal(tmp_path, monkeypatch):
+    """Acceptance criterion (issue #740): a synthetic fixture with 2
+    AskUserQuestion calls in the same session (via the real writer's own
+    askuserquestion-loop-signal RICH fire) shows a nonzero re-clarification-
+    loop value in the Outcome Proxy section."""
+    today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    telem_dir = tmp_path / "telemetry"
+    telem_dir.mkdir()
+    fire_out = telem_dir / f"fire-events-{today}.jsonl"
+    state_dir = tmp_path / "strikes"
+    state_dir.mkdir()
+
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(fire_out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+
+    # Real writer output: askuserquestion-loop-signal fires twice in one
+    # session, as it does when the hook detects 2 AskUserQuestion calls.
+    fl.record_session_fire(
+        "askuserquestion-loop-signal", "postuse-correction", "pass",
+        "s-reclarify", "AskUserQuestion",
+    )
+    fl.record_session_fire(
+        "askuserquestion-loop-signal", "postuse-correction", "pass",
+        "s-reclarify", "AskUserQuestion",
+    )
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cli.main([
+            "fire-rate", "--dir", str(telem_dir), "--state-dir", str(state_dir),
+        ])
+    report = buf.getvalue()
+
+    assert rc == 0
+    assert "Outcome Proxy" in report
+    assert "Sessions with re-clarification-loop signal (>=2 AskUserQuestion calls) : 1" in report
+    assert "s-reclarify" in report
 
 
 def test_default_strike_state_dir_respects_praxis_state_dir_override(tmp_path, monkeypatch):
