@@ -45,6 +45,23 @@ Fail-open contract:
   • Non-Bash tool → exit 0
   • Empty / whitespace command → exit 0
   • Any uncaught exception in inner logic → swallowed, exit 0
+
+Outcome-proxy signal detection (issue #737, deep-interview spec
+`.omc/specs/deep-interview-issue-737-outcome-proxy.md`):
+
+  In addition to the destructive-command surfaces above, this hook detects
+  `git revert`, `gh pr close`, and `gh issue reopen` — command-pattern
+  detection only (the moment a revert-style command executes), NOT
+  state-reversal correlation. These are NOT destructive commands (revert is
+  the *safe* way to undo, not a data-loss risk), so they are reported via a
+  separate, non-alarming "outcome-proxy signal detected" stderr note rather
+  than the "destructive command detected" banner, and they never escalate to
+  `permissionDecision: ask` even under `PRAXIS_DESTRUCTIVE_BASH_STRICT=1`.
+  The stderr write still makes the fire-ledger dispatcher record a
+  decision=advise fire for this hook (see `hooks/_lib/_fire_ledger.py`),
+  which is what `bypass-review fire-rate`'s Outcome Proxy section reads.
+  Reuses the same `safe_tokenize`/`iter_command_starts`/`strip_prefix`
+  pipeline — no new hook, no new manifest entry (issue #737 constraint).
 """
 from __future__ import annotations
 
@@ -318,6 +335,61 @@ def _is_shred(argv: list[str]) -> bool:
     return os.path.basename(argv[0]) == "shred"
 
 
+def _is_git_revert(argv: list[str]) -> bool:
+    """True iff argv invokes `git revert` (any flags/target).
+
+    Mirrors `_is_git_reset_hard`'s subcommand-skip loop so `git -C dir
+    revert HEAD` and `git -c user.name=x revert HEAD` are still detected.
+    """
+    if not argv or os.path.basename(argv[0]) != "git":
+        return False
+    i = 1
+    n = len(argv)
+    while i < n:
+        tok = argv[i]
+        if tok in {"-C", "-c"} and i + 1 < n:
+            i += 2
+            continue
+        if tok.startswith("-"):
+            i += 1
+            continue
+        break
+    return i < n and argv[i] == "revert"
+
+
+
+# `-R`/`--repo` is an inherited gh flag that MAY precede the subcommand —
+# verified live: `gh -R o/r pr close --help` and `gh --repo o/r issue
+# reopen --help` both exit 0 (codex-review-wrap round 1 finding, issue
+# #737). Its value is a separate token in this form, so it must be
+# skipped as a flag+value pair, not just a bare flag.
+_GH_FLAGS_WITH_ARG = frozenset({"-R", "--repo"})
+
+
+def _is_gh_subcommand(argv: list[str], group: str, action: str) -> bool:
+    """True iff argv invokes `gh <group> <action>` (leading flags skipped).
+
+    `gh` has no `-C`/`env`-style prefix in `PREFIX_WRAPPERS`, so leading
+    flags are skipped inline here. `-R`/`--repo <value>` (separate-token
+    form) and `--repo=<value>` (glued form) are both consumed without
+    stopping the scan; other bare leading flags are skipped without value
+    consumption, matching the conservative style of the other detectors in
+    this module (false-negative on an edge case is acceptable; a
+    false-positive `ask` prompt is not).
+    """
+    if not argv or os.path.basename(argv[0]) != "gh":
+        return False
+    rest = argv[1:]
+    i = 0
+    while i < len(rest) and rest[i].startswith("-"):
+        tok = rest[i]
+        if tok in _GH_FLAGS_WITH_ARG and i + 1 < len(rest):
+            i += 2
+            continue
+        i += 1
+    return rest[i:i + 2] == [group, action]
+
+
 def _is_fork_bomb(command: str) -> bool:
     """Detect the canonical fork-bomb idiom `:(){ :|:& };:`.
 
@@ -376,7 +448,27 @@ def _classify_segment(raw_argv: list[str]) -> str | None:
     return None
 
 
+def _classify_signal_segment(argv: list[str]) -> str | None:
+    """Return a one-line reason string if `argv` is an outcome-proxy signal
+    (issue #737), else None. Deliberately separate from `_classify_segment`
+    — these are undo/reversal-adjacent actions, not destructive ones, so
+    they must not be labeled "destructive command detected" or escalate to
+    `ask` under strict mode. `argv` is expected to already be `strip_prefix`d
+    by the caller (mirrors `_classify_segment`'s contract).
+    """
+    if not argv:
+        return None
+    if _is_git_revert(argv):
+        return "`git revert` — external-write revert signal"
+    if _is_gh_subcommand(argv, "pr", "close"):
+        return "`gh pr close` — external-write revert signal"
+    if _is_gh_subcommand(argv, "issue", "reopen"):
+        return "`gh issue reopen` — external-write revert signal"
+    return None
+
+
 _ADVISORY_HEADER = "[destructive-bash-guard] destructive command detected"
+_SIGNAL_HEADER = "[destructive-bash-guard] outcome-proxy signal detected"
 
 
 def _advisory_text(reasons: list[str], strict: bool) -> str:
@@ -396,6 +488,21 @@ def _advisory_text(reasons: list[str], strict: bool) -> str:
         "    • Soften strict mode: unset PRAXIS_DESTRUCTIVE_BASH_STRICT\n"
         "\n"
         "  Reference: issue #463"
+    )
+
+
+def _signal_text(reasons: list[str]) -> str:
+    body_lines = "\n".join(f"    - {r}" for r in reasons)
+    return (
+        f"{_SIGNAL_HEADER} — INFORMATIONAL (not blocked)\n"
+        "\n"
+        f"  Detected:\n{body_lines}\n"
+        "\n"
+        "  This is a reversal/undo-style command, not a destructive one — the\n"
+        "  command proceeds unchanged. Recorded as a fire-ledger telemetry\n"
+        "  signal only (bypass-review fire-rate's Outcome Proxy section).\n"
+        "\n"
+        "  Reference: issue #737"
     )
 
 
@@ -427,22 +534,40 @@ def main() -> int:
         reasons.append(reason)
         seen.add(reason)
 
+    signal_reasons: list[str] = []
+    signal_seen: set[str] = set()
+
     for raw_argv in iter_command_starts(tokens):
         reason = _classify_segment(raw_argv)
         if reason and reason not in seen:
             reasons.append(reason)
             seen.add(reason)
 
-    if not reasons:
+        argv = strip_prefix(raw_argv)
+        if argv:
+            signal_reason = _classify_signal_segment(argv)
+            if signal_reason and signal_reason not in signal_seen:
+                signal_reasons.append(signal_reason)
+                signal_seen.add(signal_reason)
+
+    if not reasons and not signal_reasons:
         return 0
 
     strict = os.environ.get("PRAXIS_DESTRUCTIVE_BASH_STRICT", "").strip() == "1"
 
-    if strict:
-        emit_decision("ask", _advisory_text(reasons, strict=True))
+    if reasons and strict:
+        text = _advisory_text(reasons, strict=True)
+        if signal_reasons:
+            text += "\n\n" + _signal_text(signal_reasons)
+        emit_decision("ask", text)
         return 0
 
-    sys.stderr.write(_advisory_text(reasons, strict=False) + "\n")
+    stderr_parts = []
+    if reasons:
+        stderr_parts.append(_advisory_text(reasons, strict=False))
+    if signal_reasons:
+        stderr_parts.append(_signal_text(signal_reasons))
+    sys.stderr.write("\n\n".join(stderr_parts) + "\n")
     return 0
 
 

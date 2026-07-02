@@ -657,8 +657,83 @@ def test_compute_outcome_proxy_joins_fire_sessions_to_strike_state(tmp_path):
         {"hook": "h", "session_id": "s2", "timestamp": "2026-06-26T00:00:05+00:00"},
     ]
     result = cli.compute_outcome_proxy(fire_events, state_dir)
-    assert result["s1"] == {"strike_count": 3, "strike_state_available": True}
-    assert result["s2"] == {"strike_count": 0, "strike_state_available": False}
+    assert result["s1"] == {
+        "strike_count": 3, "strike_state_available": True,
+        "external_write_revert_count": 0,
+    }
+    assert result["s2"] == {
+        "strike_count": 0, "strike_state_available": False,
+        "external_write_revert_count": 0,
+    }
+
+
+# issue #737: external-write-revert coarse proxy (destructive-bash-guard
+# non-pass fires) — see compute_external_write_revert_counts.
+
+def test_compute_external_write_revert_counts_counts_non_pass_fires():
+    fire_events = [
+        {"hook": "destructive-bash-guard", "session_id": "s1", "decision": "advise"},
+        {"hook": "destructive-bash-guard", "session_id": "s1", "decision": "advise"},
+        {"hook": "destructive-bash-guard", "session_id": "s2", "decision": "pass"},
+        {"hook": "other-hook", "session_id": "s1", "decision": "advise"},
+    ]
+    counts = cli.compute_external_write_revert_counts(fire_events)
+    assert counts == {"s1": 2}
+
+
+def test_compute_external_write_revert_counts_ignores_missing_session():
+    fire_events = [
+        {"hook": "destructive-bash-guard", "session_id": "", "decision": "advise"},
+        {"hook": "destructive-bash-guard", "decision": "advise"},
+    ]
+    assert cli.compute_external_write_revert_counts(fire_events) == {}
+
+
+def test_compute_outcome_proxy_surfaces_external_write_revert_count(tmp_path):
+    state_dir = tmp_path / "strikes"
+    state_dir.mkdir()
+    fire_events = [
+        {"hook": "destructive-bash-guard", "session_id": "s1", "decision": "advise",
+         "timestamp": "2026-06-26T00:00:00+00:00"},
+    ]
+    result = cli.compute_outcome_proxy(fire_events, state_dir)
+    assert result["s1"]["external_write_revert_count"] == 1
+
+
+def test_fire_rate_report_shows_nonzero_external_write_revert_signal(tmp_path, monkeypatch):
+    """Acceptance criterion (issue #737): a synthetic fixture that triggers one
+    of the 3 new revert-signal patterns (here: `git revert`, represented by the
+    real writer's own destructive-bash-guard advise fire) shows a nonzero
+    external-write-revert value in the Outcome Proxy section."""
+    today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    telem_dir = tmp_path / "telemetry"
+    telem_dir.mkdir()
+    fire_out = telem_dir / f"fire-events-{today}.jsonl"
+    state_dir = tmp_path / "strikes"
+    state_dir.mkdir()
+
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(fire_out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+
+    # Real writer output: destructive-bash-guard fires with stderr set, as it
+    # does when impl.py detects `git revert` (see _signal_text in impl.py).
+    members = [("advisory-nudge", "destructive-bash-guard", Path("x"))]
+    fl.record_group_fires(
+        members, [(0, "", "[destructive-bash-guard] outcome-proxy signal detected")],
+        _payload("s-revert", "Bash"),
+    )
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cli.main([
+            "fire-rate", "--dir", str(telem_dir), "--state-dir", str(state_dir),
+        ])
+    report = buf.getvalue()
+
+    assert rc == 0
+    assert "Outcome Proxy" in report
+    assert "Sessions with external-write-revert signal : 1" in report
+    assert "s-revert" in report
 
 
 def test_default_strike_state_dir_respects_praxis_state_dir_override(tmp_path, monkeypatch):
