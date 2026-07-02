@@ -65,6 +65,10 @@ print(json.dumps(payload))' "$tool_name" "$session_id"
 rich_line_count() {
   local file="$1"
   [ -f "$file" ] || { echo 0; return; }
+  # No stderr suppression / error fallback here on purpose: a json.loads()
+  # or file-read failure means malformed telemetry, which must fail the
+  # test loudly rather than silently masquerade as a count of 0
+  # (CodeRabbit PR #743 finding).
   python3 -c "
 import json
 n = 0
@@ -77,7 +81,7 @@ with open('$file') as f:
         if r.get('granularity') == 'rich':
             n += 1
 print(n)
-" 2>/dev/null || echo 0
+"
 }
 
 assert_pass() {
@@ -102,7 +106,13 @@ _test_exit_zero() {
   local name="$1" payload="$2"
   local tel="$TMP_DIR/exit-zero-$RANDOM.jsonl"
   local rc
-  PRAXIS_FIRE_TELEMETRY_FILE="$tel" python3 "$HOOK" <<< "$payload" >/dev/null 2>&1
+  if [ -z "$payload" ]; then
+    # True zero-byte stdin (CodeRabbit PR #743 finding: a `<<< ""`
+    # here-string still writes a trailing newline, not real EOF).
+    PRAXIS_FIRE_TELEMETRY_FILE="$tel" python3 "$HOOK" < /dev/null >/dev/null 2>&1
+  else
+    PRAXIS_FIRE_TELEMETRY_FILE="$tel" python3 "$HOOK" <<< "$payload" >/dev/null 2>&1
+  fi
   rc=$?
   if [ "$rc" -ne 0 ]; then
     assert_fail "$name" "hook exited $rc (expected 0)"
