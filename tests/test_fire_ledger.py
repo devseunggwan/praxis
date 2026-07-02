@@ -20,6 +20,7 @@ import io
 import json
 import os
 import stat
+import subprocess
 import sys
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
@@ -659,11 +660,11 @@ def test_compute_outcome_proxy_joins_fire_sessions_to_strike_state(tmp_path):
     result = cli.compute_outcome_proxy(fire_events, state_dir)
     assert result["s1"] == {
         "strike_count": 3, "strike_state_available": True,
-        "external_write_revert_count": 0,
+        "external_write_revert_count": 0, "rework_commit_count": 0,
     }
     assert result["s2"] == {
         "strike_count": 0, "strike_state_available": False,
-        "external_write_revert_count": 0,
+        "external_write_revert_count": 0, "rework_commit_count": 0,
     }
 
 
@@ -742,13 +743,213 @@ def test_default_strike_state_dir_respects_praxis_state_dir_override(tmp_path, m
 
 
 # ---------------------------------------------------------------------------
+# issue #741: rework-commit outcome-proxy signal (trailer-first +
+# timestamp-heuristic fallback, mirrors bypass_count's exact-map + heuristic
+# structure — see _nearest_hook_by_timestamp above).
+# ---------------------------------------------------------------------------
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    # Inline user.name/email/gpgsign (not global config) so the test doesn't
+    # depend on the host's git config being pre-populated — commit.gpgsign=false
+    # avoids a non-interactive gpg/pinentry failure if the host/CI has
+    # gpgsign=true set globally (CodeRabbit PR #742 finding).
+    return subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "-c", "commit.gpgsign=false", *args],
+        capture_output=True, text=True, check=True,
+    )
+
+
+def test_parse_session_trailer_extracts_value():
+    body = "feat: add thing\n\nSome body text.\n\nSession-Id: sess-abc-123\n"
+    assert cli.parse_session_trailer(body) == "sess-abc-123"
+
+
+def test_parse_session_trailer_missing_returns_none():
+    assert cli.parse_session_trailer("feat: add thing\n\nNo trailer here.\n") is None
+
+
+def test_parse_session_trailer_case_insensitive_key():
+    assert cli.parse_session_trailer("fix: x\n\nsession-id: sess-lower\n") == "sess-lower"
+
+
+def test_parse_session_trailer_empty_body_returns_none():
+    assert cli.parse_session_trailer("") is None
+
+
+def test_parse_session_trailer_ignores_prose_mention():
+    # CodeRabbit PR #742 nitpick: a "Session-Id:"-shaped line in prose
+    # (not the terminal trailer block) must not be misread as a trailer.
+    body = "feat: x\n\nSee Session-Id: not-a-trailer for context.\n\nConfidence: high\n"
+    assert cli.parse_session_trailer(body) is None
+
+
+def test_compute_rework_commit_counts_trailer_exact_match():
+    commits = [
+        {"sha": "a1", "timestamp": datetime(2026, 6, 26, 0, 0, 0, tzinfo=timezone.utc),
+         "body": "feat: x\n\nSession-Id: s-exact\n"},
+    ]
+    counts = cli.compute_rework_commit_counts(commits, fire_events=[])
+    assert counts == {"s-exact": 1}
+
+
+def test_compute_rework_commit_counts_timestamp_heuristic_fallback():
+    commit_ts = datetime(2026, 6, 26, 12, 0, 0, tzinfo=timezone.utc)
+    commits = [{"sha": "b2", "timestamp": commit_ts, "body": "fix: y\n\nno trailer\n"}]
+    fire_events = [
+        {"session_id": "s-heuristic", "timestamp": "2026-06-26T12:03:00+00:00"},
+    ]
+    counts = cli.compute_rework_commit_counts(commits, fire_events)
+    assert counts == {"s-heuristic": 1}
+
+
+def test_compute_rework_commit_counts_outside_window_unattributed():
+    commit_ts = datetime(2026, 6, 26, 12, 0, 0, tzinfo=timezone.utc)
+    commits = [{"sha": "c3", "timestamp": commit_ts, "body": "fix: z\n\nno trailer\n"}]
+    fire_events = [
+        # 1 hour away, default window is 900s (15 min) — outside the window.
+        {"session_id": "s-far", "timestamp": "2026-06-26T13:00:00+00:00"},
+    ]
+    counts = cli.compute_rework_commit_counts(commits, fire_events)
+    assert counts == {}
+
+
+def test_compute_rework_commit_counts_trailer_priority_over_heuristic():
+    commit_ts = datetime(2026, 6, 26, 12, 0, 0, tzinfo=timezone.utc)
+    commits = [{"sha": "d4", "timestamp": commit_ts,
+                "body": "fix: z\n\nSession-Id: s-trailer\n"}]
+    fire_events = [
+        {"session_id": "s-nearby", "timestamp": "2026-06-26T12:00:05+00:00"},
+    ]
+    counts = cli.compute_rework_commit_counts(commits, fire_events)
+    assert counts == {"s-trailer": 1}
+
+
+def test_load_git_commits_reads_trailer_from_real_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "f.txt").write_text("1")
+    _git(repo, "add", "f.txt")
+    _git(repo, "commit", "-q", "-m", "feat: add f\n\nSession-Id: s-real")
+    commits = cli.load_git_commits(repo, days=7)
+    assert len(commits) == 1
+    assert cli.parse_session_trailer(commits[0]["body"]) == "s-real"
+
+
+def test_load_git_commits_non_git_dir_returns_empty(tmp_path):
+    assert cli.load_git_commits(tmp_path, days=7) == []
+
+
+def test_load_git_commits_uses_committer_date_not_author_date(tmp_path):
+    # CodeRabbit PR #742 Major finding: `git log --since` filters by
+    # committer date, so the returned timestamp must be committer date too —
+    # otherwise a rebased/backdated commit's author date (year 2000 here)
+    # would skew the timestamp-heuristic proximity match.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "f.txt").write_text("1")
+    _git(repo, "add", "f.txt")
+    env = os.environ.copy()
+    env["GIT_AUTHOR_DATE"] = "2000-01-01T00:00:00+00:00"
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "-c", "commit.gpgsign=false", "commit", "-q", "-m", "feat: old author date"],
+        capture_output=True, text=True, check=True, env=env,
+    )
+    commits = cli.load_git_commits(repo, days=1)
+    assert len(commits) == 1
+    assert commits[0]["timestamp"].year != 2000
+
+
+def test_compute_outcome_proxy_surfaces_rework_commit_count(tmp_path):
+    state_dir = tmp_path / "strikes"
+    state_dir.mkdir()
+    fire_events = [
+        {"hook": "h", "session_id": "s1", "timestamp": "2026-06-26T00:00:00+00:00"},
+    ]
+    result = cli.compute_outcome_proxy(fire_events, state_dir, rework_counts={"s1": 4})
+    assert result["s1"]["rework_commit_count"] == 4
+
+
+def test_fire_rate_report_shows_nonzero_rework_commit_signal_trailer(tmp_path, monkeypatch):
+    """Acceptance criterion (issue #741): a trailer-tagged commit surfaces as
+    a nonzero rework-commit value in the Outcome Proxy section."""
+    today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    telem_dir = tmp_path / "telemetry"
+    telem_dir.mkdir()
+    fire_out = telem_dir / f"fire-events-{today}.jsonl"
+    state_dir = tmp_path / "strikes"
+    state_dir.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "f.txt").write_text("1")
+    _git(repo, "add", "f.txt")
+    _git(repo, "commit", "-q", "-m", "feat: x\n\nSession-Id: s-trailer-e2e")
+
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(fire_out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    members = [("advisory-nudge", "protected-paths-guard", Path("x"))]
+    fl.record_group_fires(members, [(0, "", "nudge")], _payload("s-trailer-e2e", "Write"))
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cli.main([
+            "fire-rate", "--dir", str(telem_dir), "--state-dir", str(state_dir),
+            "--repo", str(repo),
+        ])
+    report = buf.getvalue()
+
+    assert rc == 0
+    assert "Sessions with rework-commit signal : 1" in report
+    assert "s-trailer-e2e" in report
+
+
+def test_fire_rate_report_shows_nonzero_rework_commit_signal_heuristic(tmp_path, monkeypatch):
+    """Acceptance criterion (issue #741): a commit with no Session-Id trailer
+    still surfaces via the timestamp-heuristic fallback (nearest session
+    activity within the window)."""
+    today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    telem_dir = tmp_path / "telemetry"
+    telem_dir.mkdir()
+    fire_out = telem_dir / f"fire-events-{today}.jsonl"
+    state_dir = tmp_path / "strikes"
+    state_dir.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "f.txt").write_text("1")
+    _git(repo, "add", "f.txt")
+    _git(repo, "commit", "-q", "-m", "fix: y (no trailer)")
+
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(fire_out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    members = [("advisory-nudge", "protected-paths-guard", Path("x"))]
+    fl.record_group_fires(members, [(0, "", "nudge")], _payload("s-heuristic-e2e", "Write"))
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cli.main([
+            "fire-rate", "--dir", str(telem_dir), "--state-dir", str(state_dir),
+            "--repo", str(repo),
+        ])
+    report = buf.getvalue()
+
+    assert rc == 0
+    assert "Sessions with rework-commit signal : 1" in report
+    assert "s-heuristic-e2e" in report
+
+
+# ---------------------------------------------------------------------------
 # issue #710 remaining scope: end-to-end fire-rate report renders new sections
 # ---------------------------------------------------------------------------
 
 def test_fire_rate_report_includes_remaining_scope_sections(tmp_path, monkeypatch):
     """Real writer output (record_group_fires + bypass hook's own JSONL schema)
     flows through run_fire_rate end-to-end and produces non-trivial values for
-    all three remaining-scope metrics — no mirrored/mocked business logic."""
+    all remaining-scope metrics — no mirrored/mocked business logic."""
     today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
     telem_dir = tmp_path / "telemetry"
     telem_dir.mkdir()
@@ -756,6 +957,11 @@ def test_fire_rate_report_includes_remaining_scope_sections(tmp_path, monkeypatc
     bypass_out = telem_dir / f"bypass-events-{today}.jsonl"
     state_dir = tmp_path / "strikes"
     state_dir.mkdir()
+    # Empty repo (no commits in window) — keeps the rework-commit signal
+    # hermetic instead of depending on cwd's real git history.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
 
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(fire_out))
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
@@ -784,6 +990,7 @@ def test_fire_rate_report_includes_remaining_scope_sections(tmp_path, monkeypatc
     with redirect_stdout(buf):
         rc = cli.main([
             "fire-rate", "--dir", str(telem_dir), "--state-dir", str(state_dir),
+            "--repo", str(repo),
         ])
     report = buf.getvalue()
 
