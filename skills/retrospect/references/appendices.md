@@ -34,7 +34,7 @@ The following are structural stop signals:
 ## Quick Reference
 
 | Stage | Key activity | Success criteria |
-|-------|--------------|-----------------|
+| ------- | -------------- | ----------------- |
 | Stage 1 | Load rule files and scan questions | categories and questions are explicit |
 | Stage 1.5 | Detect-only MEMORY.md hygiene scan | cursor honored; findings emitted or documented skip trail |
 | Stage 2 | Symmetric pre-scan + analysis | root causes, categories, and audit trails are complete |
@@ -45,7 +45,7 @@ The following are structural stop signals:
 ## Error handling summary
 
 | Stage | Failure | Action |
-|-------|---------|--------|
+| ------- | --------- | -------- |
 | Stage 1 | missing rule file | continue with defaults; flag it |
 | Stage 1.5 | MEMORY.md index inaccessible | emit hygiene skipped trail and continue |
 | Stage 1.5 | cursor corrupt | reset bounded batch and log the reset |

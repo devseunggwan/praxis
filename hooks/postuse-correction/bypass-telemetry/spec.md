@@ -18,13 +18,13 @@ an active bypass var — creating an auditable local log for future review.
 
 ## Behavior
 
-| Condition | Action |
-|-----------|--------|
-| Bypass env var(s) detected (truthy) | Append one JSONL record; exit 0 |
-| No bypass env detected | No output, no write; exit 0 |
-| Opt-out (`PRAXIS_BYPASS_TELEMETRY_DISABLE=1`) | No-op; exit 0 |
-| Malformed JSON stdin | Silent fail-open; exit 0 |
-| Unwritable telemetry dir/file | Silent fail-open; exit 0 |
+| Condition                                     | Action                          |
+| --------------------------------------------- | ------------------------------- |
+| Bypass env var(s) detected (truthy)           | Append one JSONL record; exit 0 |
+| No bypass env detected                        | No output, no write; exit 0     |
+| Opt-out (`PRAXIS_BYPASS_TELEMETRY_DISABLE=1`) | No-op; exit 0                   |
+| Malformed JSON stdin                          | Silent fail-open; exit 0        |
+| Unwritable telemetry dir/file                 | Silent fail-open; exit 0        |
 
 **This hook NEVER blocks.  It always exits 0.**  It is registered as a
 `PostToolUse` hook and cannot influence tool execution regardless.
@@ -33,10 +33,10 @@ an active bypass var — creating an auditable local log for future review.
 
 Two naming families are detected (both required):
 
-| Family | Pattern | Examples |
-|--------|---------|---------|
-| `CLAUDE_HOOK_*` | starts with `CLAUDE_HOOK_` AND contains `BYPASS` | `CLAUDE_HOOK_BYPASS_SCIOMC_GATE`, `CLAUDE_HOOK_BYPASS_DUP_GATE`, `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE` |
-| `PRAXIS_*` | starts with `PRAXIS_` AND contains `BYPASS` | `PRAXIS_MOMENTUM_BYPASS`, `PRAXIS_GH_JSON_BYPASS`, `PRAXIS_HOOK_BYPASS_WORKTREE_GATE`, `PRAXIS_HOOK_BYPASS_HUB_ENFORCE`, `PRAXIS_VERSION_BUMP_BYPASS` |
+| Family          | Pattern                                          | Examples                                                                                                                                              |
+| --------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLAUDE_HOOK_*` | starts with `CLAUDE_HOOK_` AND contains `BYPASS` | `CLAUDE_HOOK_BYPASS_SCIOMC_GATE`, `CLAUDE_HOOK_BYPASS_DUP_GATE`, `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE`                                               |
+| `PRAXIS_*`      | starts with `PRAXIS_` AND contains `BYPASS`      | `PRAXIS_MOMENTUM_BYPASS`, `PRAXIS_GH_JSON_BYPASS`, `PRAXIS_HOOK_BYPASS_WORKTREE_GATE`, `PRAXIS_HOOK_BYPASS_HUB_ENFORCE`, `PRAXIS_VERSION_BUMP_BYPASS` |
 
 Detection regex: `^(?:CLAUDE_HOOK_|PRAXIS_).*BYPASS`
 
@@ -59,12 +59,12 @@ one of the conventional shell-falsy literals `0` / `false` / `no` / `off`
 
 ### Non-matching examples
 
-| Name | Matches? | Reason |
-|------|---------|--------|
-| `PRAXIS_MD_ESCAPE_SKIP` | No | no `BYPASS` substring |
-| `PRAXIS_ASK_END_ADVISORY` | No | no `BYPASS` substring |
-| `CLAUDE_PROJECT_DIR` | No | no `BYPASS` substring |
-| `HOME` | No | neither prefix nor `BYPASS` |
+| Name                      | Matches? | Reason                      |
+| ------------------------- | -------- | --------------------------- |
+| `PRAXIS_MD_ESCAPE_SKIP`   | No       | no `BYPASS` substring       |
+| `PRAXIS_ASK_END_ADVISORY` | No       | no `BYPASS` substring       |
+| `CLAUDE_PROJECT_DIR`      | No       | no `BYPASS` substring       |
+| `HOME`                    | No       | neither prefix nor `BYPASS` |
 
 ## Log record format
 
@@ -83,27 +83,27 @@ One JSON object per line (JSONL), appended to the daily file.
 
 Field notes:
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `timestamp` | string | UTC ISO-8601, microsecond precision |
-| `session_id` | string | from hook payload; empty string if absent |
-| `tool` | string | always `"Bash"` for Phase 1 (Bash-only matcher) |
-| `bypass_env_vars` | list[string] | sorted list of bypass var **names** — values are never stored |
-| `tool_input` | string | first 200 chars of `tool_input.command`; never the full command |
-| `tool_result_status` | string | `"ok"` or `"error"` derived from `tool_response.exit` / `tool_response.interrupted` / `tool_response.isError` |
+| Field                | Type         | Notes                                                                                                         |
+| -------------------- | ------------ | ------------------------------------------------------------------------------------------------------------- |
+| `timestamp`          | string       | UTC ISO-8601, microsecond precision                                                                           |
+| `session_id`         | string       | from hook payload; empty string if absent                                                                     |
+| `tool`               | string       | always `"Bash"` for Phase 1 (Bash-only matcher)                                                               |
+| `bypass_env_vars`    | list[string] | sorted list of bypass var **names** — values are never stored                                                 |
+| `tool_input`         | string       | first 200 chars of `tool_input.command`; never the full command                                               |
+| `tool_result_status` | string       | `"ok"` or `"error"` derived from `tool_response.exit` / `tool_response.interrupted` / `tool_response.isError` |
 
 ## `tool_result_status` derivation
 
 From the `tool_response` dict in the PostToolUse payload:
 
-| Condition | Status |
-|-----------|--------|
-| `tool_response.exit == 0` | `"ok"` |
-| `tool_response.exit != 0` | `"error"` |
-| `tool_response.interrupted == True` | `"error"` |
-| `tool_response.isError == True` | `"error"` |
-| Non-dict `tool_response` (e.g., string `"success"`) | `"ok"` |
-| None of the above | `"ok"` |
+| Condition                                           | Status    |
+| --------------------------------------------------- | --------- |
+| `tool_response.exit == 0`                           | `"ok"`    |
+| `tool_response.exit != 0`                           | `"error"` |
+| `tool_response.interrupted == True`                 | `"error"` |
+| `tool_response.isError == True`                     | `"error"` |
+| Non-dict `tool_response` (e.g., string `"success"`) | `"ok"`    |
+| None of the above                                   | `"ok"`    |
 
 ## Storage
 
@@ -117,10 +117,10 @@ Directories are created on first write (`exist_ok=True`).
 
 ## Configuration
 
-| Env var | Default | Effect |
-|---------|---------|--------|
-| `PRAXIS_BYPASS_TELEMETRY_DISABLE` | unset | `1` = full opt-out; hook is a no-op |
-| `PRAXIS_BYPASS_TELEMETRY_FILE` | (daily path above) | Override full file path — used by tests for isolation |
+| Env var                           | Default            | Effect                                                |
+| --------------------------------- | ------------------ | ----------------------------------------------------- |
+| `PRAXIS_BYPASS_TELEMETRY_DISABLE` | unset              | `1` = full opt-out; hook is a no-op                   |
+| `PRAXIS_BYPASS_TELEMETRY_FILE`    | (daily path above) | Override full file path — used by tests for isolation |
 
 ## Privacy
 

@@ -35,21 +35,21 @@ When the last assistant message contains:
 …the hook parses the card and the unified findings table, then blocks if any
 of the following hold:
 
-| Trigger | Why blocked |
-|---------|------------|
-| `gate_1_verdict: FAIL` in the distribution card | Stage 2.5 Gate-1 (categorical) was violated |
-| `gate_2_verdict: FAIL` in the distribution card | Stage 2.5 Gate-2 (procedural rationale) was violated |
-| `gate_3_verdict: FAIL` in the distribution card | Stage 2.5 Gate-3 (evidence robustness) was violated — a 2-action compound finding lacked independent evidence per action, or had decision-coupled actions |
-| `gate_4_verdict: FAIL` in the distribution card | Stage 2.5 Gate-4 (external-repo authorization) emitted FAIL |
-| `gate_4_verdict` absent AND Rationale contains `⚠ EXTERNAL:` prefix | Gate-4 ran and marked findings external, but `gate_4_verdict` was not written to the distribution card — Stage 2.5 was partially skipped |
-| `gate_1_verdict` or `gate_2_verdict` key missing | Distribution card is malformed or Stage 2.5 was skipped |
-| Any row with `Category` ∈ {tool, workflow, spec-gap} AND `Proposed Actions = memory` (single) | Gate-1 violation detected via independent table parse |
-| Any row with `Proposed Actions = memory` (single) whose `Rationale` lacks exactly 5 lines `^not (issue\|claude_md_draft\|skill_idea\|hook_code\|upstream_feedback): .+$` | Gate-2 violation detected via independent table parse |
-| Any row with `Proposed Actions` containing `upstream_feedback` or `issue` whose `Rationale` lacks a `backing_repo: <owner/repo>` declaration | Gate-3 (backing_repo) violation — Stage 2 step 8 requires this declaration for routing; Stage 4 Action 4 step 0 aborts on absence |
-| Gate-7 value mismatch: `transcript_receipt` fence declares `is_error_count` or `user_turn_count` that diverges from a live grep of the transcript by more than 1 | Receipt was transcribed verbatim from the compaction summary rather than re-derived this turn (presence ≠ freshness) |
+| Trigger                                                                                                                                                                                                                                             | Why blocked                                                                                                                                                                                                                                                                                                                                       |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gate_1_verdict: FAIL` in the distribution card                                                                                                                                                                                                     | Stage 2.5 Gate-1 (categorical) was violated                                                                                                                                                                                                                                                                                                       |
+| `gate_2_verdict: FAIL` in the distribution card                                                                                                                                                                                                     | Stage 2.5 Gate-2 (procedural rationale) was violated                                                                                                                                                                                                                                                                                              |
+| `gate_3_verdict: FAIL` in the distribution card                                                                                                                                                                                                     | Stage 2.5 Gate-3 (evidence robustness) was violated — a 2-action compound finding lacked independent evidence per action, or had decision-coupled actions                                                                                                                                                                                         |
+| `gate_4_verdict: FAIL` in the distribution card                                                                                                                                                                                                     | Stage 2.5 Gate-4 (external-repo authorization) emitted FAIL                                                                                                                                                                                                                                                                                       |
+| `gate_4_verdict` absent AND Rationale contains `⚠ EXTERNAL:` prefix                                                                                                                                                                                 | Gate-4 ran and marked findings external, but `gate_4_verdict` was not written to the distribution card — Stage 2.5 was partially skipped                                                                                                                                                                                                          |
+| `gate_1_verdict` or `gate_2_verdict` key missing                                                                                                                                                                                                    | Distribution card is malformed or Stage 2.5 was skipped                                                                                                                                                                                                                                                                                           |
+| Any row with `Category` ∈ {tool, workflow, spec-gap} AND `Proposed Actions = memory` (single)                                                                                                                                                       | Gate-1 violation detected via independent table parse                                                                                                                                                                                                                                                                                             |
+| Any row with `Proposed Actions = memory` (single) whose `Rationale` lacks exactly 5 lines `^not (issue\|claude_md_draft\|skill_idea\|hook_code\|upstream_feedback): .+$`                                                                            | Gate-2 violation detected via independent table parse                                                                                                                                                                                                                                                                                             |
+| Any row with `Proposed Actions` containing `upstream_feedback` or `issue` whose `Rationale` lacks a `backing_repo: <owner/repo>` declaration                                                                                                        | Gate-3 (backing_repo) violation — Stage 2 step 8 requires this declaration for routing; Stage 4 Action 4 step 0 aborts on absence                                                                                                                                                                                                                 |
+| Gate-7 value mismatch: `transcript_receipt` fence declares `is_error_count` or `user_turn_count` that diverges from a live grep of the transcript by more than 1                                                                                    | Receipt was transcribed verbatim from the compaction summary rather than re-derived this turn (presence ≠ freshness)                                                                                                                                                                                                                              |
 | Gate-8 (issues #699, #702): the Stage 3 report has no `retrospect:suppression_ledger` fence, has more than one, has a malformed (unterminated/nested) one, or the fence lacks a `worst_agent_failure:`, `self_adversarial:`, or `critic_diff:` line | The Stage 2 self-incrimination pass / conditional externalized critic re-scan record is missing — the painful agent-caused friction the analyzing context is most motivated to bury was never surfaced for audit. Mandatory on every path incl. the clean one. Skipped only once Stage 4 (`## Actions Executed`) is reached for the latest report |
-| Gate-8b (issue #701): `suppression_ledger` claims a clean/no-failure path while a live transcript scan finds more than one deterministic adverse signal | The ledger exists but launders away visible evidence. The hook re-derives `is_error:true`, content-error syntax, and documented `user_correction` markers on user turns before trusting clean ledger language |
-| Gate-8c (issue #715): `critic_diff: not-run` while a live transcript scan finds more than one explicit user-correction marker (tighter `sl_strong_correction_re`, not Gate-8b's broad regex) | The externalized critic tier — the only anti-concealment mechanism that survives the self-correction literature — was self-skipped in exactly the case its predicate ("a friction_event required user correction") was satisfied. Converts the run-the-critic guidance from unenforced self-feedback into a deterministic format gate |
+| Gate-8b (issue #701): `suppression_ledger` claims a clean/no-failure path while a live transcript scan finds more than one deterministic adverse signal                                                                                             | The ledger exists but launders away visible evidence. The hook re-derives `is_error:true`, content-error syntax, and documented `user_correction` markers on user turns before trusting clean ledger language                                                                                                                                     |
+| Gate-8c (issue #715): `critic_diff: not-run` while a live transcript scan finds more than one explicit user-correction marker (tighter `sl_strong_correction_re`, not Gate-8b's broad regex)                                                        | The externalized critic tier — the only anti-concealment mechanism that survives the self-correction literature — was self-skipped in exactly the case its predicate ("a friction_event required user correction") was satisfied. Converts the run-the-critic guidance from unenforced self-feedback into a deterministic format gate             |
 
 ### Gate-7 value check (issue #671)
 
@@ -62,11 +62,11 @@ summary's pre-formatted numbers is structurally identical to a fresh one and pas
 The value check re-derives `is_error_count` and `user_turn_count` from the transcript
 independently and compares them against the declared values:
 
-| Field | Canonical derivation command | Semantics |
-|-------|------------------------------|-----------|
-| `is_error_count` | `grep -c '"is_error":true' {transcript_path}` | exact (±tolerance) |
-| `user_turn_count` | `grep -c '"role":"user"' {transcript_path}` | exact (±tolerance) |
-| `content_error_count` (issue #670) | `grep '"type":"tool_result"' {transcript_path} \| grep -cE '<calibrated error syntax>'` | floor only |
+| Field                              | Canonical derivation command                                                            | Semantics          |
+| ---------------------------------- | --------------------------------------------------------------------------------------- | ------------------ |
+| `is_error_count`                   | `grep -c '"is_error":true' {transcript_path}`                                           | exact (±tolerance) |
+| `user_turn_count`                  | `grep -c '"role":"user"' {transcript_path}`                                             | exact (±tolerance) |
+| `content_error_count` (issue #670) | `grep '"type":"tool_result"' {transcript_path} \| grep -cE '<calibrated error syntax>'` | floor only         |
 
 `interrupt_count` is not re-derived (no canonical grep command in the spec).
 
@@ -111,10 +111,10 @@ Gate-8b runs after the structural Gate-8 checks succeed. It re-derives three
 cheap signal counts from the same transcript using top-level JSONL events, not
 raw text inside assistant prose:
 
-| Signal | Canonical derivation |
-|--------|----------------------|
-| `is_error:true` | `jq` count of top-level tool-result objects or nested `message.content[]` tool-result blocks where `.is_error == true` |
-| content-error syntax | `jq` count of top-level or nested tool-result blocks whose text payload matches the content-error regex |
+| Signal                   | Canonical derivation                                                                                                                                                  |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `is_error:true`          | `jq` count of top-level tool-result objects or nested `message.content[]` tool-result blocks where `.is_error == true`                                                |
+| content-error syntax     | `jq` count of top-level or nested tool-result blocks whose text payload matches the content-error regex                                                               |
 | `user_correction` marker | `jq` count of non-tool-result user turns/events where the text payload matches the documented negation / redirect / mismatch marker regex from `stage1-2-analysis.md` |
 
 If the ledger uses clean/no-failure language on either `worst_agent_failure:`
@@ -144,10 +144,10 @@ self-feedback dependency the literature says fails.
 Gate-8c runs after Gate-8b inside the well-formed-fence branch. It blocks when
 **both** hold:
 
-| Condition | Derivation |
-|-----------|------------|
-| `critic_diff:` value starts with `not-run` | last `critic_diff:` line inside the ledger fence matches `critic_diff:[[:space:]]*not-run` |
-| live explicit-correction count exceeds tolerance (`1`) | `jq` count of user turns matching `sl_strong_correction_re` (`live_sl_strong_uc_count`) |
+| Condition                                              | Derivation                                                                                 |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| `critic_diff:` value starts with `not-run`             | last `critic_diff:` line inside the ledger fence matches `critic_diff:[[:space:]]*not-run` |
+| live explicit-correction count exceeds tolerance (`1`) | `jq` count of user turns matching `sl_strong_correction_re` (`live_sl_strong_uc_count`)    |
 
 The critic tier predicate (`stage1-2-analysis.md`) fires when a
 `friction_event` required user correction, so an explicit-correction count over
@@ -209,12 +209,12 @@ at retrospect skill-invocation time (resolved here from
 `${PRAXIS_RETROSPECT_ACTIVE_FILE:-${TMPDIR:-/tmp}/praxis-retrospect-active-${session_id}.json}`).
 When the marker is present:
 
-| Condition | Action |
-|-----------|--------|
-| `## Actions Executed` present (Stage 4 complete) | clear the marker, pass through |
-| presenting a findings table (markdown separator row) AND fence absent AND not Stage 4 | **block** — re-emit the canonical Stage 3 schema so the gates can evaluate |
-| distribution fence present but no `## Retrospect Report` header | run the gates **header-independently** (a localized header cannot skip them) |
-| no findings table, no fence (a pre-Stage-3 prose clarification stop) | pass through (not a report) |
+| Condition                                                                             | Action                                                                       |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `## Actions Executed` present (Stage 4 complete)                                      | clear the marker, pass through                                               |
+| presenting a findings table (markdown separator row) AND fence absent AND not Stage 4 | **block** — re-emit the canonical Stage 3 schema so the gates can evaluate   |
+| distribution fence present but no `## Retrospect Report` header                       | run the gates **header-independently** (a localized header cannot skip them) |
+| no findings table, no fence (a pre-Stage-3 prose clarification stop)                  | pass through (not a report)                                                  |
 
 When the marker is **absent**, this gate is dormant and the hook behaves exactly
 as before (the identifier checks pass through). This keeps the change additive:

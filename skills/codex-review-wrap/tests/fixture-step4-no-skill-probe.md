@@ -70,7 +70,7 @@ needed.
 ## Validation checklist
 
 | Requirement | Met? |
-|---|---|
+| --- | --- |
 | Step 4 opens with a hard MUST NOT directive against `Skill("codex:review")` | Yes — SKILL.md line ~128 |
 | Failure message reproduced inline so the model sees what would happen | Yes — verbatim block in Step 4 |
 | Constant-property framing (not session-dependent) | Yes — "not retry-able, not environment-gated" |

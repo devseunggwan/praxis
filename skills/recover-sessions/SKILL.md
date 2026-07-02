@@ -193,7 +193,7 @@ Ctrl+B 0-N                # jump to window by number
 ### CLI Options
 
 | Option | Description |
-|--------|-------------|
+| -------- | ------------- |
 | `--days N` | Scan last N days |
 | `--from DATE` | Start date (YYYY-MM-DD or MM-DD) |
 | `--to DATE` | End date (default: yesterday) |
@@ -219,7 +219,7 @@ tmux session "cr"
 The script automatically excludes:
 
 | Filter | What it removes |
-|--------|----------------|
+| -------- | ---------------- |
 | Subagent paths | `/subagents/` directory sessions |
 | Teammate sessions | `<teammate-message>` (omc team workers) |
 | Team orchestrators | `oh-my-claudecode:team` command sessions |
@@ -263,7 +263,7 @@ Named sessions recover instantly: `claude --resume "issue-42"` (fuzzy match).
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
-|---------|-------|-----|
+| --------- | ------- | ----- |
 | "No sessions to recover" | No sessions in range | Widen `--from`/`--to` range |
 | Fewer sessions than expected | Previous recovery changed mtime | Sessions resumed earlier now have today's mtime |
 | tmux creation fails | tmux not installed | `brew install tmux` |
@@ -273,7 +273,7 @@ Named sessions recover instantly: `claude --resume "issue-42"` (fuzzy match).
 ## Rationalization Prevention
 
 | Excuse | Reality |
-|--------|---------|
+| -------- | --------- |
 | "Widen the scan to all time, it'll be fine" | Massive scans surface months-old throwaway sessions. Use a reasonable `--from`/`--to` window. |
 | "Skip naming sessions, I'll remember which is which" | Unnamed sessions recover as "session_<id>". After 10 recoveries they're indistinguishable. Always `claude --name`. |
 | "Re-run recovery if it fails partway" | Re-running changes mtimes and can hide already-recovered sessions. Diagnose the failure first. |

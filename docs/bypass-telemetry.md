@@ -21,21 +21,21 @@ One JSON object per line.  Example:
 {"timestamp": "2026-05-27T12:34:56.789012+00:00", "session_id": "sess-abc123", "tool": "Bash", "bypass_env_vars": ["CLAUDE_HOOK_BYPASS_SCIOMC_GATE"], "tool_input": "CLAUDE_HOOK_BYPASS_SCIOMC_GATE=1 git commit -m 'fix: foo'", "tool_result_status": "ok"}
 ```
 
-| Field | Description |
-|-------|-------------|
-| `timestamp` | UTC ISO-8601, microsecond precision |
-| `session_id` | Claude Code session ID from hook payload |
-| `tool` | Tool name (always `"Bash"` in Phase 1) |
-| `bypass_env_vars` | Sorted list of bypass var **names** (values never stored) |
-| `tool_input` | First 200 chars of the Bash command |
-| `tool_result_status` | `"ok"` or `"error"` |
+| Field                | Description                                               |
+| -------------------- | --------------------------------------------------------- |
+| `timestamp`          | UTC ISO-8601, microsecond precision                       |
+| `session_id`         | Claude Code session ID from hook payload                  |
+| `tool`               | Tool name (always `"Bash"` in Phase 1)                    |
+| `bypass_env_vars`    | Sorted list of bypass var **names** (values never stored) |
+| `tool_input`         | First 200 chars of the Bash command                       |
+| `tool_result_status` | `"ok"` or `"error"`                                       |
 
 ## Env knobs
 
-| Variable | Default | Effect |
-|----------|---------|--------|
-| `PRAXIS_BYPASS_TELEMETRY_DISABLE` | unset | `1` = hook is a no-op for the session |
-| `PRAXIS_BYPASS_TELEMETRY_FILE` | (daily path above) | Override the full target path — useful for tests or custom log aggregation |
+| Variable                          | Default            | Effect                                                                     |
+| --------------------------------- | ------------------ | -------------------------------------------------------------------------- |
+| `PRAXIS_BYPASS_TELEMETRY_DISABLE` | unset              | `1` = hook is a no-op for the session                                      |
+| `PRAXIS_BYPASS_TELEMETRY_FILE`    | (daily path above) | Override the full target path — useful for tests or custom log aggregation |
 
 ## Detected bypass var families
 

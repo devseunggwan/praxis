@@ -35,7 +35,7 @@ shorter than 4 chars. Overlap is satisfied if ANY remaining keyword appears
 literally in a prior search command.
 
 | Situation | Action |
-|-----------|--------|
+| ----------- | -------- |
 | `gh issue create --title "feat: add brands lookup"`, no prior search | **BLOCKED** (no search) |
 | prior `gh search issues "auth token"`, then create titled "chart filter" | **BLOCKED** (no overlap) |
 | prior `gh search issues "brands lookup"`, then create titled "feat: brands lookup CTE" | **PASS** (overlap) |

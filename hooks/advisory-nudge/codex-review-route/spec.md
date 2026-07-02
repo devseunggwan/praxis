@@ -29,7 +29,7 @@ The hook emits up to two independent advisories per trigger. Neither blocks the 
 Emits when **all** of the following hold:
 
 | Gate | Condition |
-|------|-----------|
+| ------ | ----------- |
 | Prompt prefix | `/codex:review` or `/codex-review` (whitespace-separated args allowed) |
 | Worktree count | `git worktree list --porcelain` reports `>= 2` non-bare worktrees |
 | jq available | Hook fail-opens silently when `jq` is missing |
@@ -43,7 +43,7 @@ Emits when the current branch's PR is `CLOSED` or `MERGED`. Requires `gh` CLI; f
 False-positive guards:
 
 | Input | Action |
-|-------|--------|
+| ------- | -------- |
 | `/codex:reviews` (trailing char) | silent — regex requires whitespace or end-of-line after `review` |
 | `/codex:review-thing` (hyphenated suffix) | silent — same guard |
 | `please /codex:review later` (mid-sentence) | silent — regex anchored to start-of-prompt |

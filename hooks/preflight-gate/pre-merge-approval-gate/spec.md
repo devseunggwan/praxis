@@ -27,7 +27,7 @@ is not retrieved.
 ### What is blocked
 
 | Scenario | Action |
-|----------|--------|
+| ---------- | -------- |
 | Direct session (no `CMUX_DELEGATE`), any `gh pr merge` | `permissionDecision: "ask"` |
 | Background agent (`CMUX_DELEGATE=1`), any `gh pr merge` | silent pass-through |
 | Inline `env CMUX_DELEGATE=1 gh pr merge` from direct session | `ask` — inline env sets the child's env, not the hook's own env |

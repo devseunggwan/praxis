@@ -26,12 +26,12 @@ count.
 A session was instrumented to measure the cost of the `PreToolUse(Bash)` hook
 group, which fires on **every** `Bash` tool call.
 
-| Metric | Value |
-|--------|-------|
-| `PreToolUse(Bash)` hook entries | 35 fire on a `Bash` call: 33 exact-`Bash` (21 `preflight-gate` + 12 `advisory-nudge`) + 2 multi-tool matcher |
-| Per-hook wrapper body | `command -v python3 \|\| exit 0; exec python3 .../impl.py` |
-| 35 hooks, parallel wall-clock | **1.87s** (user 1.44 + sys 1.33 — CPU saturation) |
-| Hook *logic* for a no-op command (`ls -la`) | **2ms** across all 35 |
+| Metric                                      | Value                                                                                                        |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `PreToolUse(Bash)` hook entries             | 35 fire on a `Bash` call: 33 exact-`Bash` (21 `preflight-gate` + 12 `advisory-nudge`) + 2 multi-tool matcher |
+| Per-hook wrapper body                       | `command -v python3 \|\| exit 0; exec python3 .../impl.py`                                                   |
+| 35 hooks, parallel wall-clock               | **1.87s** (user 1.44 + sys 1.33 — CPU saturation)                                                            |
+| Hook *logic* for a no-op command (`ls -la`) | **2ms** across all 35                                                                                        |
 
 ~99% of the latency is **python3 interpreter cold-start multiplied across 35
 processes**, not hook logic and not the wrapper. The wrapper is ~1ms as ADR-0001
@@ -44,13 +44,13 @@ A throwaway prototype imported all 35 `impl.py` modules into a single process
 and invoked each `main()` after re-pointing `sys.stdin` at an in-memory copy of
 the payload:
 
-| Check | Result |
-|-------|--------|
-| `import` 35 modules | 76ms; 35/35 succeed; `if __name__ == "__main__"` guards prevent any `main()` from running at import |
-| `ls -la` → 35 `main()` | **2ms** |
-| Output capture | `ask` (stdout JSON), `deny` (exit 2), advisory (stderr) all observable from the caller |
-| stdin reuse | re-assigning `sys.stdin` to a fresh `StringIO` per call lets each existing `impl.py` read the payload **unmodified** |
-| Crash isolation | wrapping each `main()` in the existing `_lib/_hook_runtime.fail_open` decorator contains a per-hook exception |
+| Check                  | Result                                                                                                               |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `import` 35 modules    | 76ms; 35/35 succeed; `if __name__ == "__main__"` guards prevent any `main()` from running at import                  |
+| `ls -la` → 35 `main()` | **2ms**                                                                                                              |
+| Output capture         | `ask` (stdout JSON), `deny` (exit 2), advisory (stderr) all observable from the caller                               |
+| stdin reuse            | re-assigning `sys.stdin` to a fresh `StringIO` per call lets each existing `impl.py` read the payload **unmodified** |
+| Crash isolation        | wrapping each `main()` in the existing `_lib/_hook_runtime.fail_open` decorator contains a per-hook exception        |
 
 Estimated single-process cost: python3 boot (~50ms) + import (76ms cold, less
 once `.pyc` is warm) + logic (~2ms) ≈ **~0.13s**. A ~14× reduction for the
@@ -125,12 +125,12 @@ Net: 35 hooks fire on a `Bash` call, **32 are consolidated**, 3 stay independent
 
 Reproduces the current multi-process semantics:
 
-| Condition (first match wins) | Dispatcher result |
-|------------------------------|-------------------|
-| any hook → `deny` (exit 2, or `permissionDecision: "deny"`) | propagate `deny` (+ reasons) |
-| else any hook → `ask` (`permissionDecision: "ask"`) | propagate `ask` (+ reasons) |
-| else any `advisory-nudge` stderr/`additionalContext` | accumulate and emit as context, allow |
-| else | exit 0 (transparent pass-through) |
+| Condition (first match wins)                                | Dispatcher result                     |
+| ----------------------------------------------------------- | ------------------------------------- |
+| any hook → `deny` (exit 2, or `permissionDecision: "deny"`) | propagate `deny` (+ reasons)          |
+| else any hook → `ask` (`permissionDecision: "ask"`)         | propagate `ask` (+ reasons)           |
+| else any `advisory-nudge` stderr/`additionalContext`        | accumulate and emit as context, allow |
+| else                                                        | exit 0 (transparent pass-through)     |
 
 Aggregation is **role-agnostic**: the dispatcher classifies each member's result
 purely by exit code (`2`) or the `permissionDecision` marker on stdout, never by
@@ -173,11 +173,11 @@ decision — eager import is already well under the per-process baseline.
 
 ### 3.1 Positive
 
-| Metric | Before | After |
-|--------|--------|-------|
-| python3 processes per `Bash` call (PreToolUse group) | 35 | 1 (+2 multi-matcher standalone) |
-| `PreToolUse(Bash)` wall-clock (common command) | ~1.87s | ~0.13s |
-| Cost growth per added hook in the group | +1 cold-started process | +1 in-process `main()` call (~ms) |
+| Metric                                               | Before                  | After                             |
+| ---------------------------------------------------- | ----------------------- | --------------------------------- |
+| python3 processes per `Bash` call (PreToolUse group) | 35                      | 1 (+2 multi-matcher standalone)   |
+| `PreToolUse(Bash)` wall-clock (common command)       | ~1.87s                  | ~0.13s                            |
+| Cost growth per added hook in the group              | +1 cold-started process | +1 in-process `main()` call (~ms) |
 
 ### 3.2 Negative / Costs
 
@@ -196,12 +196,12 @@ decision — eager import is already well under the per-process baseline.
 
 ### 3.3 Risks
 
-| Risk | Mitigation |
-|------|------------|
-| Aggregated decision differs from the current per-process outcome | Phase 2 ships a test that runs all 35 hooks through the dispatcher vs directly and asserts output/exit equivalence per hook, for both a no-op and a gate-firing payload. |
-| A hook relies on process-exit side effects (atexit, fd close) | Audit during Phase 2; none observed in the prototype, but the equivalence test is the gate. |
-| stdin reinjection misses a hook that reads `sys.argv` or env instead of stdin | Dispatcher passes through `sys.argv` and the process env unchanged; only stdin is swapped. |
-| Stop/other groups accidentally pulled in | Scope is `PreToolUse(Bash)` only; manifest grouping is explicit and asserted by `check-plugin-manifests.py` (Phase 4). |
+| Risk                                                                          | Mitigation                                                                                                                                                               |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Aggregated decision differs from the current per-process outcome              | Phase 2 ships a test that runs all 35 hooks through the dispatcher vs directly and asserts output/exit equivalence per hook, for both a no-op and a gate-firing payload. |
+| A hook relies on process-exit side effects (atexit, fd close)                 | Audit during Phase 2; none observed in the prototype, but the equivalence test is the gate.                                                                              |
+| stdin reinjection misses a hook that reads `sys.argv` or env instead of stdin | Dispatcher passes through `sys.argv` and the process env unchanged; only stdin is swapped.                                                                               |
+| Stop/other groups accidentally pulled in                                      | Scope is `PreToolUse(Bash)` only; manifest grouping is explicit and asserted by `check-plugin-manifests.py` (Phase 4).                                                   |
 
 ---
 
@@ -294,8 +294,8 @@ Decision record only. No code change.
 
 ## 7. Decision record
 
-| Date | Decision | Decided by |
-|------|----------|------------|
+| Date       | Decision                       | Decided by         |
+| ---------- | ------------------------------ | ------------------ |
 | 2026-06-05 | ADR drafted, Status = Proposed | praxis maintainers |
 
 ---

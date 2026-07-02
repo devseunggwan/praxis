@@ -7,11 +7,11 @@ Praxis hooks write three kinds of runtime files. Since praxis is multi-platform
 
 ## Roots
 
-| Root | Purpose | Resolver | Override |
-|------|---------|----------|----------|
-| `~/.praxis/state/` | Durable, cross-session state | `praxis_state_dir()` | `PRAXIS_STATE_DIR` (base), `PRAXIS_HOME` |
-| `~/.praxis/cache/` | Regenerable, session-scoped caches / dedup markers | `praxis_cache_dir()` | `PRAXIS_HOME` |
-| `~/.praxis/logs/` | Diagnostics | `resolve_writable("logs", …)` | `PRAXIS_HOME`, per-file env |
+| Root               | Purpose                                            | Resolver                      | Override                                 |
+| ------------------ | -------------------------------------------------- | ----------------------------- | ---------------------------------------- |
+| `~/.praxis/state/` | Durable, cross-session state                       | `praxis_state_dir()`          | `PRAXIS_STATE_DIR` (base), `PRAXIS_HOME` |
+| `~/.praxis/cache/` | Regenerable, session-scoped caches / dedup markers | `praxis_cache_dir()`          | `PRAXIS_HOME`                            |
+| `~/.praxis/logs/`  | Diagnostics                                        | `resolve_writable("logs", …)` | `PRAXIS_HOME`, per-file env              |
 
 `PRAXIS_HOME` relocates the whole tree (used by tests for isolation).
 `resolve_writable` falls back to `${TMPDIR}/praxis-<file>` when the home dir is
@@ -19,10 +19,10 @@ not writable, and never raises.
 
 ## Durable state (`~/.praxis/state/`)
 
-| File | Producer | Consumers |
-|------|----------|-----------|
-| `strikes/<sid>.json`, `strikes/.current-session`, … | [`strike-counter`](../hooks/completion-verify/strike-counter/spec.md) | strike-counter; read by [`postcompact-context`](../hooks/advisory-nudge/postcompact-context/spec.md) |
-| `phantom-path/<hash>` | [`external-write-path-existence-check`](../hooks/advisory-nudge/external-write-path-existence-check/spec.md) | itself (dedup) |
+| File                                                | Producer                                                                                                     | Consumers                                                                                            |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `strikes/<sid>.json`, `strikes/.current-session`, … | [`strike-counter`](../hooks/completion-verify/strike-counter/spec.md)                                        | strike-counter; read by [`postcompact-context`](../hooks/advisory-nudge/postcompact-context/spec.md) |
+| `phantom-path/<hash>`                               | [`external-write-path-existence-check`](../hooks/advisory-nudge/external-write-path-existence-check/spec.md) | itself (dedup)                                                                                       |
 
 ### Back-compat and migration (#527)
 

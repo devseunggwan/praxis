@@ -25,7 +25,7 @@ Claude Code session environment (e.g. via `settings.json`).
 ```
 
 | Field | Description | Example |
-|-------|-------------|---------|
+| ------- | ------------- | --------- |
 | `org` | GitHub org name (case-insensitive) | `example-org` |
 | `hub_repo` | Full `org/repo` of the hub (case-insensitive) | `example-org/hub` |
 | `creation_skill` | Skill to invoke instead (may contain colons) | `example-org:create-hub-issue` |

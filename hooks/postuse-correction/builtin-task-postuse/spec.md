@@ -12,7 +12,7 @@ Claude Code ships two distinct sets of `Task*` tools with completely different
 semantics:
 
 | Tool | Role | Spawns subagent? |
-|------|------|-----------------|
+| ------ | ------ | ----------------- |
 | `Task` | Agent spawner | **Yes** |
 | `TaskCreate` | Create task list entry | No |
 | `TaskUpdate` | Update task list entry | No |

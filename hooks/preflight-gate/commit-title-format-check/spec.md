@@ -13,11 +13,11 @@ the global `~/.claude/CLAUDE.md` "Git Commit & Title Rules" section.
 <type>[(<scope>)]: <description>
 ```
 
-| Part | Constraint |
-|------|-----------|
-| `type` | One of `feat\|fix\|docs\|style\|refactor\|test\|chore` |
-| `scope` | Optional; lowercase alphanumeric + hyphens, enclosed in parentheses |
-| `description` | Must start with a lowercase ASCII letter `[a-z]` |
+| Part          | Constraint                                                          |
+| ------------- | ------------------------------------------------------------------- |
+| `type`        | One of `feat\|fix\|docs\|style\|refactor\|test\|chore`              |
+| `scope`       | Optional; lowercase alphanumeric + hyphens, enclosed in parentheses |
+| `description` | Must start with a lowercase ASCII letter `[a-z]`                    |
 
 Examples:
 - `feat(auth): add token refresh`
@@ -26,45 +26,45 @@ Examples:
 
 ### What is blocked
 
-| Command shape | Action |
-|---------------|--------|
-| `git commit -m "bad title"` | block (exit 2) |
-| `git commit --message "bad title"` | block |
-| `git commit -m="bad title"` | block |
-| `git commit -am "bad title"` | block |
-| `git commit --amend -m "bad title"` | block |
-| `gh pr create --title "bad title"` | block |
-| `gh pr create --title="bad title"` | block |
-| `gh pr create -t "bad title"` | block |
-| `gh issue create --title "bad title"` | block |
-| `gh issue create -t "bad title"` | block |
-| `Merge branch ...` / `Merge pull request ...` | silent pass (whitelisted) |
-| `Revert "..."` title | silent pass (whitelisted) |
-| `fixup! ...` title | silent pass (whitelisted) |
-| `squash! ...` title | silent pass (whitelisted) |
+| Command shape                                             | Action                                                                                  |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `git commit -m "bad title"`                               | block (exit 2)                                                                          |
+| `git commit --message "bad title"`                        | block                                                                                   |
+| `git commit -m="bad title"`                               | block                                                                                   |
+| `git commit -am "bad title"`                              | block                                                                                   |
+| `git commit --amend -m "bad title"`                       | block                                                                                   |
+| `gh pr create --title "bad title"`                        | block                                                                                   |
+| `gh pr create --title="bad title"`                        | block                                                                                   |
+| `gh pr create -t "bad title"`                             | block                                                                                   |
+| `gh issue create --title "bad title"`                     | block                                                                                   |
+| `gh issue create -t "bad title"`                          | block                                                                                   |
+| `Merge branch ...` / `Merge pull request ...`             | silent pass (whitelisted)                                                               |
+| `Revert "..."` title                                      | silent pass (whitelisted)                                                               |
+| `fixup! ...` title                                        | silent pass (whitelisted)                                                               |
+| `squash! ...` title                                       | silent pass (whitelisted)                                                               |
 | `gh pr create --title "release: Production Deploy (...)"` | silent pass (release PR convention — **`gh pr create` only**, capitalized desc allowed) |
-| `git commit -m "release: ..."` | block (release exemption is `gh pr create` only) |
-| `gh issue create --title "release: ..."` | block (release exemption is `gh pr create` only) |
-| `git status`, `git push`, etc. | silent pass (not a commit or PR/issue create) |
-| `gh pr list`, `gh issue view`, etc. | silent pass (not create) |
+| `git commit -m "release: ..."`                            | block (release exemption is `gh pr create` only)                                        |
+| `gh issue create --title "release: ..."`                  | block (release exemption is `gh pr create` only)                                        |
+| `git status`, `git push`, etc.                            | silent pass (not a commit or PR/issue create)                                           |
+| `gh pr list`, `gh issue view`, etc.                       | silent pass (not create)                                                                |
 
 ### Invalid title examples (blocked)
 
-| Title | Reason |
-|-------|--------|
-| `updated stuff` | No type prefix |
-| `feat: Add something` | Description starts with uppercase `A` |
-| `feat: 한글로 시작` | Description starts with a non-ASCII character |
-| `feat scope: desc` | Scope not enclosed in parentheses |
-| `<type>(scope): desc` | Unreplaced `<type>` placeholder |
-| `type(scope): desc` | `type` not in the allowed types list |
+| Title                 | Reason                                        |
+| --------------------- | --------------------------------------------- |
+| `updated stuff`       | No type prefix                                |
+| `feat: Add something` | Description starts with uppercase `A`         |
+| `feat: 한글로 시작`   | Description starts with a non-ASCII character |
+| `feat scope: desc`    | Scope not enclosed in parentheses             |
+| `<type>(scope): desc` | Unreplaced `<type>` placeholder               |
+| `type(scope): desc`   | `type` not in the allowed types list          |
 
 ### Configuration
 
-| Env var | Default | Effect |
-|---------|---------|--------|
-| `PRAXIS_COMMIT_TITLE_FORMAT_STRICT` | `1` | `1` → block (exit 2); `0` → advisory mode (exit 0, message to stderr only) |
-| `PRAXIS_COMMIT_TITLE_ALLOWED_TYPES` | `feat,fix,docs,refactor,chore,test,perf,ci,build,style` | Comma-separated override for the allowed type list |
+| Env var                             | Default                                                 | Effect                                                                     |
+| ----------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `PRAXIS_COMMIT_TITLE_FORMAT_STRICT` | `1`                                                     | `1` → block (exit 2); `0` → advisory mode (exit 0, message to stderr only) |
+| `PRAXIS_COMMIT_TITLE_ALLOWED_TYPES` | `feat,fix,docs,refactor,chore,test,perf,ci,build,style` | Comma-separated override for the allowed type list                         |
 
 ### Response (strict mode)
 

@@ -53,6 +53,7 @@ import copy
 import json
 import os
 import sys
+import unicodedata
 from pathlib import Path
 
 
@@ -488,6 +489,33 @@ def _compact_join(values: list[str]) -> str:
     return ", ".join(uniq) if uniq else "-"
 
 
+def _display_width(value: str) -> int:
+    """East-Asian-wide-aware display width, matching markdownlint MD060."""
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in value)
+
+
+def _render_aligned_table(header: list[str], rows: list[list[str]]) -> list[str]:
+    """Render a GFM table satisfying markdownlint MD060 'aligned' style.
+
+    Each column is padded (with a leading/trailing space inside the pipes)
+    to the display width of its widest cell across header + rows.
+    """
+    widths = [
+        max(_display_width(header[col]), *(_display_width(row[col]) for row in rows))
+        if rows
+        else _display_width(header[col])
+        for col in range(len(header))
+    ]
+
+    def render_row(cells: list[str]) -> str:
+        padded = [cell + " " * (widths[col] - _display_width(cell)) for col, cell in enumerate(cells)]
+        return "| " + " | ".join(padded) + " |"
+
+    lines = [render_row(header), "| " + " | ".join("-" * w for w in widths) + " |"]
+    lines.extend(render_row(row) for row in rows)
+    return lines
+
+
 def _hook_events(entries: list[dict]) -> str:
     labels: list[str] = []
     for entry in entries:
@@ -666,6 +694,27 @@ def render_hook_operating_matrix(manifest: dict) -> str:
         if mode.get("external_commands"):
             external_commands[name] = mode["external_commands"]
 
+    header = [
+        "Hook", "Role", "Events", "Hosts", "Default",
+        "Strict env", "Bypass env", "State/path vars", "External commands",
+    ]
+    table_rows = []
+    for name in sorted(by_name):
+        entries = by_name[name]
+        role = entries[0]["role"]
+        spec = f"[`{name}`](../hooks/{role}/{name}/spec.md)"
+        table_rows.append([
+            spec,
+            _md_cell(role),
+            _md_cell(_hook_events(entries)),
+            _md_cell(_hook_hosts(entries)),
+            _md_cell(_default_signal(role)),
+            _md_cell(_compact_join(strict_vars.get(name, []))),
+            _md_cell(_compact_join(bypass_vars.get(name, []))),
+            _md_cell(_compact_join(state_vars.get(name, []))),
+            _md_cell(_compact_join(external_commands.get(name, []))),
+        ])
+
     lines = [
         "# Hook Operating Matrix",
         "",
@@ -686,28 +735,8 @@ def render_hook_operating_matrix(manifest: dict) -> str:
         "so the two cannot drift. A `-` in a column means the hook declares no",
         "value for it in its manifest `mode` block.",
         "",
-        "| Hook | Role | Events | Hosts | Default | Strict env | Bypass env | State/path vars | External commands |",
-        "|------|------|--------|-------|---------|------------|------------|-----------------|-------------------|",
+        *_render_aligned_table(header, table_rows),
     ]
-    for name in sorted(by_name):
-        entries = by_name[name]
-        role = entries[0]["role"]
-        spec = f"[`{name}`](../hooks/{role}/{name}/spec.md)"
-        lines.append(
-            "| "
-            + " | ".join([
-                spec,
-                _md_cell(role),
-                _md_cell(_hook_events(entries)),
-                _md_cell(_hook_hosts(entries)),
-                _md_cell(_default_signal(role)),
-                _md_cell(_compact_join(strict_vars.get(name, []))),
-                _md_cell(_compact_join(bypass_vars.get(name, []))),
-                _md_cell(_compact_join(state_vars.get(name, []))),
-                _md_cell(_compact_join(external_commands.get(name, []))),
-            ])
-            + " |"
-        )
     lines.append("")
     return "\n".join(lines)
 

@@ -26,7 +26,7 @@ from `_hook_utils.py` (same tokenization pipeline as all sibling hooks),
 so chained segments and env-prefixed invocations are covered uniformly.
 
 | Command | Action |
-|---------|--------|
+| --------- | -------- |
 | `gh pr view 1 --json merged` | **BLOCKED** (`merged` not in gh pr fields; suggests `mergedAt`) |
 | `gh pr view 1 --json state,title,url` | **PASS** |
 | `gh pr view 1 --json state,merged` | **BLOCKED** (one invalid field) |

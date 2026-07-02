@@ -31,7 +31,7 @@ gate can key on it instead of on the avoidable output format.
 ## What it does
 
 | Event | Action |
-|-------|--------|
+| ------- | -------- |
 | `PreToolUse(Skill)` with `tool_input.skill` matching `retrospect` | **SET** the marker (`source: skill`). Primary capture point — covers slash-command, natural-language, and auto-invocation, all of which route through the Skill tool. |
 | `UserPromptSubmit` whose prompt starts with `/retrospect` or `/praxis:retrospect` | **SET** the marker (`source: slash`). Arms the gate even before the Skill `tool_use` record exists. |
 | `UserPromptSubmit` for any other prompt | **CLEAR** the marker. A new user turn that is not a retrospect invocation resets the window. |

@@ -23,7 +23,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 ## Opt-out (disable or demote a gate)
 
 | Variable | Hook | Effect when set |
-|----------|------|-----------------|
+| ---------- | ------ | ----------------- |
 | `PRAXIS_HOOK_BYPASS_PROTECTED_PATHS` | `protected-paths-guard` | Skip the sensitive-file write guard |
 | `PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH` | `destructive-bash-guard` | Skip the destructive-command guard |
 | `PRAXIS_HOOK_BYPASS_SKILL_GATE` | `skill-gate-commands` | Skip the skill-gated-command preflight |
@@ -50,7 +50,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 ## Strict (escalate advisory → block)
 
 | Variable | Hook | Note |
-|----------|------|------|
+| ---------- | ------ | ------ |
 | `PRAXIS_PROTECTED_PATHS_STRICT` | `protected-paths-guard` | |
 | `PRAXIS_DESTRUCTIVE_BASH_STRICT` | `destructive-bash-guard` | |
 | `PRAXIS_PATH_PROBE_STRICT` | `path-probe-gate` | |
@@ -72,7 +72,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 ## Config (tune behaviour)
 
 | Variable | Hook | Effect |
-|----------|------|--------|
+| ---------- | ------ | -------- |
 | `PRAXIS_PROTECTED_BRANCHES` | `pre-edit-protected-branch-guard` | Override the protected-branch list |
 | `PRAXIS_PBGUARD_BLOCK_DOCS` | `pre-edit-protected-branch-guard` | Also gate docs edits |
 | `PRAXIS_PBGUARD_SKIP_PR_CHECK` | `pre-edit-protected-branch-guard` | Skip the PR-existence check portion |
@@ -91,7 +91,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 ## Path / test (relocate state, caches, logs)
 
 | Variable | Default | Hook(s) |
-|----------|---------|---------|
+| ---------- | --------- | --------- |
 | `PRAXIS_HOME` | `~/.praxis` | shared (`_paths.py`) — relocates the whole runtime tree |
 | `PRAXIS_STATE_DIR` | `~/.praxis/state` | shared — durable state base (strike-counter, external-write-path-existence-check, postcompact read) |
 | `PRAXIS_HOOK_ERROR_LOG` | `~/.praxis/logs/hook-errors.jsonl` | shared (`@fail_open`) |

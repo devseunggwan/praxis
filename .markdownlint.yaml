@@ -1,11 +1,15 @@
 # markdownlint config for the reviewdog markdownlint CI (issue #585).
 #
-# Counts below are from a full-tree scan with markdownlint-cli@0.41.0 — the
-# exact version reviewdog/action-markdownlint@v0.26.2 bundles, which depends
-# on markdownlint 0.34.x. (Verified: the action's Dockerfile pins
-# MARKDOWNLINT_CLI_VERSION=v0.41.0, and v0.26.2 is the latest action release.)
-# Counts MUST be re-derived under the pinned version, not a newer local
-# markdownlint — rule sets differ between versions (see the MD060 note below).
+# Counts below predate a version bump (dependabot PR #725,
+# reviewdog/action-markdownlint 0.26.2→0.27.0) that changed the bundled
+# markdownlint-cli from 0.41.0 to 0.49.0 (core markdownlint ~0.34.x →
+# ~0.41.x). That bump silently activated MD060/MD056 repo-wide (issue #734)
+# and drifted the MD013/MD024/MD041/MD033 counts below out of date — they
+# were not re-derived under 0.49.0 as part of #734's fix, since re-deriving
+# unrelated pre-existing counts was out of that issue's scope. Treat the
+# counts below as directional, not exact, until a future pass re-derives
+# them. Counts MUST be re-derived under the pinned version, not a newer local
+# markdownlint — rule sets differ between versions.
 #
 # Only rules the repo intentionally and pervasively diverges from are
 # disabled; everything else stays at markdownlint defaults. plugins/ (a
@@ -31,11 +35,13 @@ MD041: false
 # 6 — a few docs use intentional inline HTML (<details>, <br>, alignment).
 MD033: false
 
-# NOTE: MD060 (table-column-style) is intentionally NOT listed. It was added
-# in markdownlint 0.39.0, but the pinned action bundles 0.34.x, so the rule
-# does not exist in CI and disabling it would be dead config (a no-op).
-# This repo's tables are not column-aligned (~1300 cells), so when
-# action-markdownlint is eventually bumped to a release bundling markdownlint
-# >=0.39, MD060 will activate and surface a large warning backlog — add
-# `MD060: false` here at that time, and re-derive every count above under the
-# new bundled version.
+# MD060 (table-column-style) and MD056 (table-column-count) are intentionally
+# NOT listed — both are active in CI as of the #725 action bump and stay at
+# markdownlint defaults. Issue #734 realigned every pre-existing table to
+# satisfy MD060's per-table "aligned"/"compact" auto-detected style (each
+# column padded to its own max content width, using East-Asian-wide-aware
+# character width for CJK cells) and fixed 5 genuine MD056 violations (a
+# literal, unescaped `|` inside a table cell was being parsed as an extra
+# column separator — escape it as `\|` within the cell). Keep new tables
+# aligned/valid at authoring time rather than disabling these rules — they
+# catch real data-loss bugs (MD056) as well as cosmetic drift (MD060).

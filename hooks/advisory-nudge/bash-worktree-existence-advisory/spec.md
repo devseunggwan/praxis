@@ -22,24 +22,24 @@ fires on the `cd` step itself, before any git operation (praxis issue #322).
 The hook writes advisory text to stderr and exits 0. Tool execution is never
 blocked.
 
-| Condition | Message |
-|-----------|---------|
-| `cd <path>` where path does not exist | `[worktree-missing] <path> does not exist — check 'git worktree list' before retry` |
-| `cd <path>` where path exists | silent (no output) |
-| Bare `cd` (no argument) | silent |
-| `cd $VAR` / `cd $(...)` | silent (variable/substitution expansion, unresolvable) |
-| `cd -` | silent (previous dir, unresolvable) |
-| `cd ~` / `cd ~/foo` / `cd ~user/foo` | silent (tilde expansion; hook process `$HOME` may differ from agent effective `$HOME`) |
-| `pushd /path` where path does not exist | `[worktree-missing] <path> does not exist — check 'git worktree list' before retry` |
-| `pushd /path` where path exists | silent |
-| `(cd /path && ...)` subshell where path does not exist | `[worktree-missing] <path> does not exist — check 'git worktree list' before retry` |
-| `(cd /path && ...)` subshell where path exists | silent |
-| `cd /path` inside a heredoc body — space-separated opener `cat << EOF` | silent (heredoc body segments are skipped — see Heredoc handling) |
-| `cd /path` inside a heredoc body — fused opener (`cat <<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF`) | silent (fused openers are now detected — #337 P6 fix) |
-| Opt-out marker `# worktree-advisory:ack` | silent (all advisories suppressed) |
-| Non-Bash tool name | silent (fail-open) |
-| Malformed JSON stdin | silent (fail-open) |
-| `git` binary unavailable / timeout | silent (fail-open) |
+| Condition                                                                                     | Message                                                                                |
+| --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `cd <path>` where path does not exist                                                         | `[worktree-missing] <path> does not exist — check 'git worktree list' before retry`    |
+| `cd <path>` where path exists                                                                 | silent (no output)                                                                     |
+| Bare `cd` (no argument)                                                                       | silent                                                                                 |
+| `cd $VAR` / `cd $(...)`                                                                       | silent (variable/substitution expansion, unresolvable)                                 |
+| `cd -`                                                                                        | silent (previous dir, unresolvable)                                                    |
+| `cd ~` / `cd ~/foo` / `cd ~user/foo`                                                          | silent (tilde expansion; hook process `$HOME` may differ from agent effective `$HOME`) |
+| `pushd /path` where path does not exist                                                       | `[worktree-missing] <path> does not exist — check 'git worktree list' before retry`    |
+| `pushd /path` where path exists                                                               | silent                                                                                 |
+| `(cd /path && ...)` subshell where path does not exist                                        | `[worktree-missing] <path> does not exist — check 'git worktree list' before retry`    |
+| `(cd /path && ...)` subshell where path exists                                                | silent                                                                                 |
+| `cd /path` inside a heredoc body — space-separated opener `cat << EOF`                        | silent (heredoc body segments are skipped — see Heredoc handling)                      |
+| `cd /path` inside a heredoc body — fused opener (`cat <<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF`) | silent (fused openers are now detected — #337 P6 fix)                                  |
+| Opt-out marker `# worktree-advisory:ack`                                                      | silent (all advisories suppressed)                                                     |
+| Non-Bash tool name                                                                            | silent (fail-open)                                                                     |
+| Malformed JSON stdin                                                                          | silent (fail-open)                                                                     |
+| `git` binary unavailable / timeout                                                            | silent (fail-open)                                                                     |
 
 ### Scope (Phase 2 — #337 P6 + P1)
 
@@ -110,10 +110,10 @@ creating a new directory that does not yet exist).
 
 ### Relationship to sibling hooks
 
-| Hook | Scope | Overlap |
-|------|-------|---------|
-| `cross-boundary-preflight` | `gh` write subcommands across `--repo` boundary | None — different command family |
-| `side-effect-scan` | collateral side effects (`git commit/push`, `gh pr merge`) | Complementary — fires on downstream mutation, not worktree navigation |
+| Hook                       | Scope                                                      | Overlap                                                               |
+| -------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------- |
+| `cross-boundary-preflight` | `gh` write subcommands across `--repo` boundary            | None — different command family                                       |
+| `side-effect-scan`         | collateral side effects (`git commit/push`, `gh pr merge`) | Complementary — fires on downstream mutation, not worktree navigation |
 
 ### Parsing guarantees (fail-open)
 

@@ -30,7 +30,7 @@ A `gh issue create` call is blocked (exit 2) when ALL hold:
 4. `PRAXIS_HOOK_BYPASS_HUB_ENFORCE` is unset / empty.
 
 | Situation | Action |
-|-----------|--------|
+| ----------- | -------- |
 | `PRAXIS_HUB_MEDIATED_ORGS` unset | **PASS** (NO-OP) |
 | `gh issue create --repo example-org/child` (org configured) | **BLOCKED** |
 | `gh issue create --title "a; b" --repo example-org/child` (separator inside quoted title) | **BLOCKED** (quote-aware tokenization; issue #514) |

@@ -29,7 +29,7 @@ A command is blocked (exit 2) when ALL hold:
 4. `PRAXIS_HOOK_BYPASS_SKILL_GATE` is unset / empty.
 
 | Situation | Action |
-|-----------|--------|
+| ----------- | -------- |
 | `PRAXIS_SKILL_GATED_COMMANDS` unset | **PASS** (NO-OP) |
 | All config entries malformed | **PASS** (fail-safe) |
 | Command does not match any configured pattern | **PASS** |

@@ -126,7 +126,7 @@ Claude parses them and handles user interaction.
 Uses the `claude_code=` field from `cmux sidebar-state` as the primary signal:
 
 | `claude_code=` | State | Cleanup target |
-|----------------|-------|---------------|
+| ---------------- | ------- | --------------- |
 | `Running` | ACTIVE | No |
 | `Needs input` | WAITING | Phase 2 (optional) |
 | `Idle` | IDLE or CRASHED | Phase 2 (IDLE) / Phase 1 (CRASHED) |
@@ -171,7 +171,7 @@ The report includes status output + PR status from `sidebar-state`'s `pr=` field
 ## Troubleshooting
 
 | Problem | Cause | Fix |
-|---------|-------|-----|
+| --------- | ------- | ----- |
 | "cmux is not running" | cmux app not running | Start cmux app |
 | "jq is required" | jq not installed | `brew install jq` |
 | Session state UNKNOWN | No claude_code in sidebar-state | Session may not be Claude Code |
@@ -180,7 +180,7 @@ The report includes status output + PR status from `sidebar-state`'s `pr=` field
 ## Rationalization Prevention
 
 | Excuse | Reality |
-|--------|---------|
+| -------- | --------- |
 | "I'll approve the cleanup without looking, it's probably fine" | An IDLE session may be a long-running task paused on input. Read the category/branch first. |
 | "Skip the dry-run, just execute" | Dry-run takes 2 seconds and prevents closing a session you actually wanted to keep. |
 | "The session looks crashed, auto-close it" | Only `auto_cleanup` (Phase 1) kills sessions automatically. Anything in Phase 2 needs your eyes. |

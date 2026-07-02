@@ -43,14 +43,14 @@ retrieval state.
 
 ### What is blocked
 
-| Scenario | Action |
-|----------|--------|
-| Default mode, manufactured marker in any option label, command signal in prior user msg | exit 0 + advisory stderr |
-| `PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT=1`, marker present, command signal in prior msg | exit 2 (block) |
-| Any tool name other than `AskUserQuestion` | silent pass-through |
-| Marker present BUT no command-intent signal in prior user message | silent pass-through |
-| Missing / unreadable transcript | silent pass-through (graceful degrade) |
-| No options match any manufactured-menu marker | silent pass-through |
+| Scenario                                                                                | Action                                 |
+| --------------------------------------------------------------------------------------- | -------------------------------------- |
+| Default mode, manufactured marker in any option label, command signal in prior user msg | exit 0 + advisory stderr               |
+| `PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT=1`, marker present, command signal in prior msg  | exit 2 (block)                         |
+| Any tool name other than `AskUserQuestion`                                              | silent pass-through                    |
+| Marker present BUT no command-intent signal in prior user message                       | silent pass-through                    |
+| Missing / unreadable transcript                                                         | silent pass-through (graceful degrade) |
+| No options match any manufactured-menu marker                                           | silent pass-through                    |
 
 ### Detect patterns
 
@@ -116,10 +116,10 @@ failed", "dry run output"). Korean execute intent is already covered by `실행`
 
 ### Mode and env var behavior
 
-| Env var state | Mode | Exit code on match |
-|---------------|------|-------------------|
-| Neither var set (default) | **Advisory** | 0 + stderr warning |
-| `PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT=1` | Strict | 2 (block) |
+| Env var state                             | Mode         | Exit code on match |
+| ----------------------------------------- | ------------ | ------------------ |
+| Neither var set (default)                 | **Advisory** | 0 + stderr warning |
+| `PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT=1` | Strict       | 2 (block)          |
 
 Default is advisory because this hook is new and exceptions
 (irreversible/destructive actions, genuine multiple alternatives) need to be

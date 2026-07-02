@@ -23,7 +23,7 @@ since the last real user input — for verification evidence.
 The turn passes only if **all** of the following hold:
 
 | Gate | Condition |
-|------|-----------|
+| ------ | ----------- |
 | L1 | A `Bash` tool_use occurred in this turn |
 | L3 | Its `tool_result.content` matches `EVIDENCE_PATTERNS` (`X passed`, `tests passed`, `\bPASS\b`, `exit code 0`, `lint clean`, `테스트.*통과`, `✅`, etc.) |
 | L2 | At least one `EVIDENCE_PATTERNS`-matching span from that `tool_result` is paste'd verbatim in the assistant message text — e.g. `12 passed`, `tests passed`, `lint clean`, `✅` |

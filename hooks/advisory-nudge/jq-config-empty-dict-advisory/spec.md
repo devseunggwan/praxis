@@ -32,7 +32,7 @@ Detection surface — config paths matched:
 Four invocation patterns are recognized:
 
 | Pattern | Example |
-|---------|---------|
+| --------- | --------- |
 | Direct | `jq '.' ~/.claude/settings.json` |
 | Boolean flag | `jq -e '.theme' ~/.claude/settings.json` |
 | Stdin redirect | `jq '.' < ~/.claude/settings.json` |
@@ -42,7 +42,7 @@ Four invocation patterns are recognized:
 File-level outcomes:
 
 | File state | Action |
-|------------|--------|
+| ------------ | -------- |
 | Missing / does not exist | **SILENT** — out of scope; other hooks cover existence |
 | Broken symlink (dangling — target missing) | **ADVISORY** `[config-broken-symlink]` |
 | Empty (size 0) | **ADVISORY** `[config-empty]` |
@@ -52,7 +52,7 @@ File-level outcomes:
 Command-level examples:
 
 | Command | Action |
-|---------|--------|
+| --------- | -------- |
 | `jq '.' ~/.claude/settings.json` (empty) | **ADVISORY** `[config-empty]` |
 | `jq -e '.theme' ~/.claude/settings.json` (empty) | **ADVISORY** `[config-empty]` — `-e` is boolean |
 | `jq --sort-keys '.foo' ~/.claude/settings.json` (empty) | **ADVISORY** `[config-empty]` — `--sort-keys` is boolean |
@@ -74,7 +74,7 @@ Command-level examples:
 Not detected (by design):
 
 | Pattern | Reason |
-|---------|--------|
+| --------- | -------- |
 | `jq '.' /tmp/other.json` | Non-config path, out of scope |
 | `jq -n '{}'` | Null input (`-n`), no file read |
 | Multi-hop pipe `cmd1 \| cmd2 \| jq` | Only immediate prior segment correlated |
@@ -119,7 +119,7 @@ test invocations).
 ### Relationship to sibling hooks
 
 | Hook | Scope | Overlap |
-|------|-------|---------|
+| ------ | ------- | --------- |
 | `cli-flag-incompat-advisory` | Advisory nudge for mode-incompatible flag combos | None — covers flag errors, not file-content errors |
 | `external-api-literal-trigger` | Advisory nudge for unverified ALL_CAPS / 3-part SQL identifiers | None — different detection surface |
 | `memory-hint` | Surface hookable memory entries | None — complementary |

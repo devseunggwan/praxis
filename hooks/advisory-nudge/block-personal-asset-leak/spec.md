@@ -58,11 +58,11 @@ surface the agent uses, so the backstop's value holds without MCP.
 
 ### What is detected
 
-| Surface | Active when | Trigger |
-|---------|-------------|---------|
-| Bash `gh issue/pr create\|comment\|edit`, `gh pr review` with a body flag (`--body` / `-b` / `--body-file` / `-F`) | always | body contains an absolute home-dotfiles path (class 1) |
-| same gh surface | `PRAXIS_PERSONAL_REPO_OWNERS` set | body contains a personal-repo reference AND the write target is not a personal repo (class 2) |
-| Write `content` / Edit `new_string` | `PRAXIS_PERSONAL_REPO_OWNERS` set | content contains either marker class AND `file_path` lands in a team-surface worktree (see target discrimination) |
+| Surface                                                                                                            | Active when                       | Trigger                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------ | --------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Bash `gh issue/pr create\|comment\|edit`, `gh pr review` with a body flag (`--body` / `-b` / `--body-file` / `-F`) | always                            | body contains an absolute home-dotfiles path (class 1)                                                            |
+| same gh surface                                                                                                    | `PRAXIS_PERSONAL_REPO_OWNERS` set | body contains a personal-repo reference AND the write target is not a personal repo (class 2)                     |
+| Write `content` / Edit `new_string`                                                                                | `PRAXIS_PERSONAL_REPO_OWNERS` set | content contains either marker class AND `file_path` lands in a team-surface worktree (see target discrimination) |
 
 The class-1 marker regex is `(?:/Users|/home)/[^/\s<>]+/\.[A-Za-z0-9._-]+` — an
 absolute `/Users` or `/home` prefix, a username segment (excluding `<` / `>` so
@@ -86,10 +86,10 @@ referencing it in a team surface violates the global "Personal repo content
 isolation" rule. Resolution is lazy (git subprocess runs only after a marker
 is found) and **fail-open** (any resolution failure → silent):
 
-| Surface | Target resolution | Exempt (silent) when |
-|---------|-------------------|----------------------|
-| Bash gh | `--repo`/`-R` flag owner; else `git remote get-url origin` of the payload `cwd` | target owner ∈ `PRAXIS_PERSONAL_REPO_OWNERS`, or target unresolvable |
-| Write/Edit | `git remote get-url origin` of `file_path`'s nearest existing ancestor | origin owner ∈ owners, no git repo / no origin remote, or `git check-ignore` matches `file_path` (gitignored scratch areas like `.omc/plans/` pass) |
+| Surface    | Target resolution                                                               | Exempt (silent) when                                                                                                                                |
+| ---------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bash gh    | `--repo`/`-R` flag owner; else `git remote get-url origin` of the payload `cwd` | target owner ∈ `PRAXIS_PERSONAL_REPO_OWNERS`, or target unresolvable                                                                                |
+| Write/Edit | `git remote get-url origin` of `file_path`'s nearest existing ancestor          | origin owner ∈ owners, no git repo / no origin remote, or `git check-ignore` matches `file_path` (gitignored scratch areas like `.omc/plans/` pass) |
 
 Body-extraction robustness (each closed a real FN found in review):
 
@@ -108,18 +108,18 @@ Body-extraction robustness (each closed a real FN found in review):
 
 ### False-positive boundary (what is NOT flagged)
 
-| Input | Flagged? | Why |
-|-------|----------|-----|
-| `/Users/alice/.claude/settings.json` | **yes** | absolute path + hidden dir → leaks username + layout |
-| `/home/bob/.config/foo` | **yes** | same, Linux home |
-| `~/.claude/settings.json` | **no** | tilde form is home-relative, exposes no username — it is the *recommended replacement* the advisory suggests |
-| `/Users/alice/projects/praxis/hooks` | **no** | no dot-prefixed segment after the username → not a dotfiles path; worktree paths are out of scope by user decision |
-| `/Users/<name>/.claude/settings.json` | **no** | the username segment excludes `<` / `>` (`[^/\s<>]+`), so documentation placeholders — which praxis specs and PR bodies write constantly — do not fire; only a concrete username leaks |
-| `block-gh-state-all`, `pre-merge-approval-gate` (praxis hook names) | **no** | hook filenames are not matched; this is what keeps praxis's own PR/issue bodies (which discuss hooks constantly) from being nagged |
-| `xtestowner/foo`, `nottestowner/bar` (owner as suffix of a longer handle) | **no** | class-2 lookbehind rejects a word-ish char before the owner — only the exact declared handle matches |
-| `/Users/testowner/projects/praxis` (worktree path, owner == OS username) | **no** | a slash-preceded class-2 match requires a dotted hostname before the slash — filesystem path segments are not repo references |
-| `testowner/scratchpad#209` written INTO a repo owned by `testowner` | **no** | class 2 is target-discriminated — own-repo writes are exempt |
-| `testowner/scratchpad#209` written into a gitignored path (`.omc/plans/…`) | **no** | gitignored scratch areas are not a published team surface |
+| Input                                                                      | Flagged? | Why                                                                                                                                                                                    |
+| -------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/Users/alice/.claude/settings.json`                                       | **yes**  | absolute path + hidden dir → leaks username + layout                                                                                                                                   |
+| `/home/bob/.config/foo`                                                    | **yes**  | same, Linux home                                                                                                                                                                       |
+| `~/.claude/settings.json`                                                  | **no**   | tilde form is home-relative, exposes no username — it is the *recommended replacement* the advisory suggests                                                                           |
+| `/Users/alice/projects/praxis/hooks`                                       | **no**   | no dot-prefixed segment after the username → not a dotfiles path; worktree paths are out of scope by user decision                                                                     |
+| `/Users/<name>/.claude/settings.json`                                      | **no**   | the username segment excludes `<` / `>` (`[^/\s<>]+`), so documentation placeholders — which praxis specs and PR bodies write constantly — do not fire; only a concrete username leaks |
+| `block-gh-state-all`, `pre-merge-approval-gate` (praxis hook names)        | **no**   | hook filenames are not matched; this is what keeps praxis's own PR/issue bodies (which discuss hooks constantly) from being nagged                                                     |
+| `xtestowner/foo`, `nottestowner/bar` (owner as suffix of a longer handle)  | **no**   | class-2 lookbehind rejects a word-ish char before the owner — only the exact declared handle matches                                                                                   |
+| `/Users/testowner/projects/praxis` (worktree path, owner == OS username)   | **no**   | a slash-preceded class-2 match requires a dotted hostname before the slash — filesystem path segments are not repo references                                                          |
+| `testowner/scratchpad#209` written INTO a repo owned by `testowner`        | **no**   | class 2 is target-discriminated — own-repo writes are exempt                                                                                                                           |
+| `testowner/scratchpad#209` written into a gitignored path (`.omc/plans/…`) | **no**   | gitignored scratch areas are not a published team surface                                                                                                                              |
 
 Known false-negatives (accepted within the narrow charter):
 
@@ -149,12 +149,12 @@ this hook.
 
 ### Mode and env var behavior
 
-| Env var state | Effect |
-|---------------|--------|
-| `PRAXIS_PERSONAL_LEAK_STRICT` unset (default) | **Advisory** — exit 0 + stderr warning on match |
-| `PRAXIS_PERSONAL_LEAK_STRICT=1` | Strict — exit 2 (block) on match, both classes |
-| `PRAXIS_PERSONAL_REPO_OWNERS` unset (default) | Class 2 + Write/Edit surface **inactive** — behavior identical to the pre-#658 dotfiles-only hook |
-| `PRAXIS_PERSONAL_REPO_OWNERS=<owner>[,<owner>…]` | Class 2 active for the listed owner handles (case-insensitive); Write/Edit surface active |
+| Env var state                                    | Effect                                                                                            |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `PRAXIS_PERSONAL_LEAK_STRICT` unset (default)    | **Advisory** — exit 0 + stderr warning on match                                                   |
+| `PRAXIS_PERSONAL_LEAK_STRICT=1`                  | Strict — exit 2 (block) on match, both classes                                                    |
+| `PRAXIS_PERSONAL_REPO_OWNERS` unset (default)    | Class 2 + Write/Edit surface **inactive** — behavior identical to the pre-#658 dotfiles-only hook |
+| `PRAXIS_PERSONAL_REPO_OWNERS=<owner>[,<owner>…]` | Class 2 active for the listed owner handles (case-insensitive); Write/Edit surface active         |
 
 The owners env var mirrors the `worktree-edit-gate` /
 `PRAXIS_WORKTREE_ENFORCED_REPOS` opt-in pattern: shipped users see zero
@@ -167,10 +167,10 @@ write lands.
 
 ### Relationship to sibling hooks
 
-| Hook | Scope | Overlap |
-|------|-------|---------|
-| `external-write-falsify-check` | hypothesis-marker / author-exempt-identifier scan on gh/MCP write surfaces | Complementary — same gh body-extraction logic (this hook copies the gh detection; 2nd occurrence, no shared-lib extraction yet per DRY-on-3rd), different marker class |
-| `cross-boundary-preflight` | `--repo` cross-repo write ASK + heredoc block | Complementary — that hook surfaces a "no internal identifiers" *reminder* on cross-repo writes; this hook deterministically scans the body for one concrete identifier class |
+| Hook                           | Scope                                                                      | Overlap                                                                                                                                                                      |
+| ------------------------------ | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `external-write-falsify-check` | hypothesis-marker / author-exempt-identifier scan on gh/MCP write surfaces | Complementary — same gh body-extraction logic (this hook copies the gh detection; 2nd occurrence, no shared-lib extraction yet per DRY-on-3rd), different marker class       |
+| `cross-boundary-preflight`     | `--repo` cross-repo write ASK + heredoc block                              | Complementary — that hook surfaces a "no internal identifiers" *reminder* on cross-repo writes; this hook deterministically scans the body for one concrete identifier class |
 
 ### Parsing guarantees
 

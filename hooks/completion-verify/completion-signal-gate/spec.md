@@ -53,7 +53,7 @@ no evidence-block indicator is present in the same turn, an advisory is emitted.
 **Completion-signal phrases (EN, case-insensitive, ASCII word-boundary):**
 
 | Phrase | Example |
-|--------|---------|
+| -------- | --------- |
 | `no fixes needed` | "No fixes needed here." |
 | `ready to merge` | "This PR is ready to merge." |
 | `all set` | "All set." |
@@ -63,7 +63,7 @@ no evidence-block indicator is present in the same turn, an advisory is emitted.
 **Completion-signal phrases (KR, substring/regex):**
 
 | Pattern | Example |
-|---------|---------|
+| --------- | --------- |
 | `실질적 수정.*없` | "실질적 수정은 없습니다." |
 | `머지하셔도` | "머지하셔도 무방합니다." |
 | `완료\b` | "작업 완료." |
@@ -86,7 +86,7 @@ it — so `완료되지 않았습니다`, `완료 안 됨`, `아직 완료 전�
 **Evidence-block indicators (any of these suppresses the advisory):**
 
 | Indicator | What counts |
-|-----------|-------------|
+| ----------- | ------------- |
 | Bash tool call | Any `tool_use` with `name == "Bash"` in the current turn |
 | Read tool call | Any `tool_use` with `name == "Read"` in the current turn |
 | Cited output | A `$ command → output` line in the assistant message |
@@ -158,7 +158,7 @@ No change to `hooks/hooks.json` entry is required for tier promotion.
 ### Parsing guarantees
 
 | Condition | Behavior |
-|-----------|----------|
+| ----------- | ---------- |
 | Malformed / missing stdin JSON | exit 0 (silent pass) |
 | `stop_hook_active` is true | exit 0 (silent pass, re-entry guard) |
 | Missing / unreadable `transcript_path` | exit 0 (silent pass) |

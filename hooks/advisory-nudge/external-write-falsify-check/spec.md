@@ -28,18 +28,18 @@ question.
 
 ### What is warned
 
-| Tool call shape | Condition | Advisory |
-|----------------|-----------|----------|
-| `gh issue comment --body <text>` | body contains hypothesis marker | Check 1 |
-| `gh pr comment -b <text>` | body contains hypothesis marker | Check 1 |
-| `gh pr review --comment --body <text>` (or `--approve` / `--request-changes`) | body contains hypothesis marker | Check 1 |
-| `gh issue create --body-file <path>` | body contains hypothesis marker (file contents read) | Check 1 |
-| `gh pr edit -F <path>` | body contains hypothesis marker | Check 1 |
-| `mcp__*slack*__*send*` / `*post*message*` | body field contains hypothesis marker | Check 1 |
-| `mcp__*notion*__*create_page*` / `*update_page*` | text fields contain hypothesis marker | Check 1 |
-| `Write` to staging path (`/tmp/*-issue-*.md`, `/tmp/*-pr-*.md`, `.omc/plans/*.md`) | cluster-approval language in last 5 user messages | Check 3 |
-| any `gh` / MCP write body above | applied-on-branch claim line without reachability probe in recent transcript | Check 4 |
-| `gh issue list` / `gh search issues` / Read tool | — | passthrough silent |
+| Tool call shape                                                                    | Condition                                                                    | Advisory           |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------ |
+| `gh issue comment --body <text>`                                                   | body contains hypothesis marker                                              | Check 1            |
+| `gh pr comment -b <text>`                                                          | body contains hypothesis marker                                              | Check 1            |
+| `gh pr review --comment --body <text>` (or `--approve` / `--request-changes`)      | body contains hypothesis marker                                              | Check 1            |
+| `gh issue create --body-file <path>`                                               | body contains hypothesis marker (file contents read)                         | Check 1            |
+| `gh pr edit -F <path>`                                                             | body contains hypothesis marker                                              | Check 1            |
+| `mcp__*slack*__*send*` / `*post*message*`                                          | body field contains hypothesis marker                                        | Check 1            |
+| `mcp__*notion*__*create_page*` / `*update_page*`                                   | text fields contain hypothesis marker                                        | Check 1            |
+| `Write` to staging path (`/tmp/*-issue-*.md`, `/tmp/*-pr-*.md`, `.omc/plans/*.md`) | cluster-approval language in last 5 user messages                            | Check 3            |
+| any `gh` / MCP write body above                                                    | applied-on-branch claim line without reachability probe in recent transcript | Check 4            |
+| `gh issue list` / `gh search issues` / Read tool                                   | —                                                                            | passthrough silent |
 
 Hypothesis markers (whole-segment substring match): English 16 —
 `might`, `could be`, `could fail`, `could break`, `potentially`,
@@ -134,9 +134,9 @@ a column-list example, or a CLI flag reference without ever running
 
 #### What is detected
 
-| Claim shape | Identifier patterns |
-|-------------|---------------------|
-| Markdown table row (`\| … \|`) | `--cli-flag`, `type:label`, `` `backtick-id` `` |
+| Claim shape                       | Identifier patterns                                          |
+| --------------------------------- | ------------------------------------------------------------ |
+| Markdown table row (`\| … \|`)    | `--cli-flag`, `type:label`, `` `backtick-id` ``              |
 | Any language code block (` ``` `) | All of the above + `snake_case` column names, `schema.table` |
 
 Non-technical table cells (prose words without these patterns) do not

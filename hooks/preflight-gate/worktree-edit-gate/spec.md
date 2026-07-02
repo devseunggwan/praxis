@@ -58,7 +58,7 @@ interfere with projects that have not been explicitly enrolled.
 ## What is blocked / passed
 
 | Scenario | Action |
-|----------|--------|
+| ---------- | -------- |
 | Source file, enforced repo, HEAD on `main` | exit 2 (block) |
 | Source file, enforced repo, HEAD on `dev` | exit 2 (block) |
 | Source file, enforced repo, HEAD on `prod` | exit 2 (block) |
@@ -77,7 +77,7 @@ interfere with projects that have not been explicitly enrolled.
 ## Env vars
 
 | Variable | Default | Description |
-|----------|---------|-------------|
+| ---------- | --------- | ------------- |
 | `PRAXIS_WORKTREE_ENFORCED_REPOS` | _(empty — no-op)_ | Comma-separated repo identifiers. Match by basename (`praxis`) or `org/repo` (`myorg/praxis`). |
 | `PRAXIS_WORKTREE_BASE_BRANCHES` | `main,dev,prod` | Comma-separated branch names that trigger the block. |
 | `PRAXIS_WORKTREE_SOURCE_EXTENSIONS` | `py,ts,tsx,go,sql` | Comma-separated extensions without leading dot. Compound extensions like `j2.sql` are supported. |

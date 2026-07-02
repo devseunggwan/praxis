@@ -23,7 +23,7 @@ The `=>` separator is used because skill names routinely contain colons
 ### Supported command patterns
 
 | Pattern | Matches |
-|---------|---------|
+| --------- | --------- |
 | `gh pr create` | `gh [global-flags] pr create ...` |
 | `gh pr merge` | `gh [global-flags] pr merge ...` |
 | `git push origin` | `git [global-flags] push [flags] origin ...` |

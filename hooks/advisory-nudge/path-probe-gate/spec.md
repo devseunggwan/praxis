@@ -33,17 +33,17 @@ rule "One-Probe-Before-Action Gate" applied to the `Write` tool surface.
 The hook writes advisory text to stderr and exits 0.  Tool execution is never
 blocked in the default mode.
 
-| Condition | Behavior |
-|-----------|----------|
-| Target directly under worktree root (`depth=0`) | Silent — no intermediate dirs |
-| Target at `depth>=1`, parent already enumerated this session | Silent — probe already ran |
-| Target at `depth>=1`, parent not yet enumerated | Advisory to stderr (exit 0) |
-| Target at `depth>=1`, parent not enumerated, `PRAXIS_PATH_PROBE_STRICT=1` | Hard deny (exit 2) |
-| `PRAXIS_PATH_PROBE_SKIP=1` | Silent for all paths |
-| Path not inside any known git worktree | Silent (fail-open) |
-| git unavailable / timeout | Silent (fail-open) |
-| Malformed JSON stdin | Silent (fail-open) |
-| Non-target tool name (e.g. Bash) | Silent |
+| Condition                                                                 | Behavior                      |
+| ------------------------------------------------------------------------- | ----------------------------- |
+| Target directly under worktree root (`depth=0`)                           | Silent — no intermediate dirs |
+| Target at `depth>=1`, parent already enumerated this session              | Silent — probe already ran    |
+| Target at `depth>=1`, parent not yet enumerated                           | Advisory to stderr (exit 0)   |
+| Target at `depth>=1`, parent not enumerated, `PRAXIS_PATH_PROBE_STRICT=1` | Hard deny (exit 2)            |
+| `PRAXIS_PATH_PROBE_SKIP=1`                                                | Silent for all paths          |
+| Path not inside any known git worktree                                    | Silent (fail-open)            |
+| git unavailable / timeout                                                 | Silent (fail-open)            |
+| Malformed JSON stdin                                                      | Silent (fail-open)            |
+| Non-target tool name (e.g. Bash)                                          | Silent                        |
 
 ### Advisory message (default mode)
 
@@ -111,10 +111,10 @@ path is not inside any known worktree, the hook passes through silently.
 
 ### Env vars
 
-| Variable | Effect |
-|----------|--------|
-| `PRAXIS_PATH_PROBE_STRICT=1` | Escalate advisory to hard deny (exit 2) |
-| `PRAXIS_PATH_PROBE_SKIP=1` | Disable the hook entirely for this session |
+| Variable                     | Effect                                     |
+| ---------------------------- | ------------------------------------------ |
+| `PRAXIS_PATH_PROBE_STRICT=1` | Escalate advisory to hard deny (exit 2)    |
+| `PRAXIS_PATH_PROBE_SKIP=1`   | Disable the hook entirely for this session |
 
 ### How to enable
 
@@ -145,11 +145,11 @@ For a manual `.claude/settings.json` installation:
 
 ### Relationship to sibling hooks
 
-| Hook | Scope | Overlap |
-|------|-------|---------|
-| `pre-edit-protected-branch-guard` | Blocks Write/Edit on protected branches | None — different failure mode |
-| `bash-worktree-existence-advisory` | Warns when `cd <path>` targets a missing dir | Complementary — fires on navigation step; this hook fires on the Write step |
-| `external-write-path-existence-check` | Warns when `gh issue/pr` body references phantom repo paths | None — different tool and surface |
+| Hook                                  | Scope                                                       | Overlap                                                                     |
+| ------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `pre-edit-protected-branch-guard`     | Blocks Write/Edit on protected branches                     | None — different failure mode                                               |
+| `bash-worktree-existence-advisory`    | Warns when `cd <path>` targets a missing dir                | Complementary — fires on navigation step; this hook fires on the Write step |
+| `external-write-path-existence-check` | Warns when `gh issue/pr` body references phantom repo paths | None — different tool and surface                                           |
 
 ### Parsing guarantees (fail-open)
 

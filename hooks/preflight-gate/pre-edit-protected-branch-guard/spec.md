@@ -27,10 +27,10 @@ opened for editing**, before any character is written.
 
 ### Relationship to existing hooks (dual-gate)
 
-| Hook | Gate timing | Signal |
-|------|-------------|--------|
-| `pre-edit-protected-branch-guard` | Before first write | Dirty branch + new target file |
-| `block-pr-without-caller-evidence` | At `gh pr create` | Missing caller-chain evidence in PR body |
+| Hook                               | Gate timing        | Signal                                   |
+| ---------------------------------- | ------------------ | ---------------------------------------- |
+| `pre-edit-protected-branch-guard`  | Before first write | Dirty branch + new target file           |
+| `block-pr-without-caller-evidence` | At `gh pr create`  | Missing caller-chain evidence in PR body |
 
 The two gates are complementary, not redundant. This hook prevents the
 mistake from starting; the PR gate is a backstop for cases this hook doesn't
@@ -38,24 +38,24 @@ cover (e.g. starting work on an unprotected branch then renaming it to main).
 
 ### What is blocked
 
-| Scenario | Action |
-|----------|--------|
-| Protected branch + dirty tree + NEW file target | `permissionDecision: "deny"` (dirty-tree path) |
-| Protected branch + clean tree + recent commits show `(#NNN)` PR-suffix | `permissionDecision: "deny"` (PR-workflow path, issue #231) |
-| Protected branch + dirty tree + file ALREADY in diff (in-flight) | silent pass-through |
-| Protected branch + clean tree + no PR-suffix in recent commits | silent pass-through |
-| Non-protected branch (`feature/…`, `issue-N-…`) + dirty tree | silent pass-through |
-| Non-protected branch + PR-suffix in log | silent pass-through (guard limited to protected branches) |
-| Edit target in `/tmp/` (no repo root found) | silent pass-through (fail-open) |
-| Edit target in `.omc/plans/` or `.claude/projects/` | silent pass-through (planning artifact) |
-| Edit target is gitignored (`git check-ignore` matches) | silent pass-through (uncommittable → worktree workflow N/A, issue #493) |
-| Edit target is README/CHANGELOG/docs file (unless `PRAXIS_PBGUARD_BLOCK_DOCS=1`) | silent pass-through (docs skip) |
-| Edit target inside `CLAUDE_PLUGIN_ROOT` (praxis plugin self-edit) | silent pass-through |
-| `PRAXIS_PBGUARD_SKIP=1` set in environment | silent pass-through |
-| `PRAXIS_PBGUARD_SKIP_PR_CHECK=1` set in environment | dirty-tree path still active; PR-workflow path skipped |
-| `git` not installed / subprocess timeout | silent pass-through (fail-open) |
-| Malformed stdin JSON | silent pass-through (fail-open) |
-| Detached HEAD | silent pass-through (fail-open) |
+| Scenario                                                                         | Action                                                                  |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Protected branch + dirty tree + NEW file target                                  | `permissionDecision: "deny"` (dirty-tree path)                          |
+| Protected branch + clean tree + recent commits show `(#NNN)` PR-suffix           | `permissionDecision: "deny"` (PR-workflow path, issue #231)             |
+| Protected branch + dirty tree + file ALREADY in diff (in-flight)                 | silent pass-through                                                     |
+| Protected branch + clean tree + no PR-suffix in recent commits                   | silent pass-through                                                     |
+| Non-protected branch (`feature/…`, `issue-N-…`) + dirty tree                     | silent pass-through                                                     |
+| Non-protected branch + PR-suffix in log                                          | silent pass-through (guard limited to protected branches)               |
+| Edit target in `/tmp/` (no repo root found)                                      | silent pass-through (fail-open)                                         |
+| Edit target in `.omc/plans/` or `.claude/projects/`                              | silent pass-through (planning artifact)                                 |
+| Edit target is gitignored (`git check-ignore` matches)                           | silent pass-through (uncommittable → worktree workflow N/A, issue #493) |
+| Edit target is README/CHANGELOG/docs file (unless `PRAXIS_PBGUARD_BLOCK_DOCS=1`) | silent pass-through (docs skip)                                         |
+| Edit target inside `CLAUDE_PLUGIN_ROOT` (praxis plugin self-edit)                | silent pass-through                                                     |
+| `PRAXIS_PBGUARD_SKIP=1` set in environment                                       | silent pass-through                                                     |
+| `PRAXIS_PBGUARD_SKIP_PR_CHECK=1` set in environment                              | dirty-tree path still active; PR-workflow path skipped                  |
+| `git` not installed / subprocess timeout                                         | silent pass-through (fail-open)                                         |
+| Malformed stdin JSON                                                             | silent pass-through (fail-open)                                         |
+| Detached HEAD                                                                    | silent pass-through (fail-open)                                         |
 
 ### Trigger conditions
 
@@ -153,12 +153,12 @@ fires automatically when the plugin is loaded.
 
 ### Test overrides (for CI / unit tests without a real repo)
 
-| Env var | Effect |
-|---------|--------|
-| `PRAXIS_PBGUARD_TEST_REPO_ROOT=<path>` | Override `get_repo_root`. Use `"NONE"` to simulate not-in-a-repo. |
-| `PRAXIS_PBGUARD_TEST_BRANCH=<name>` | Override current branch. Use `"HEAD"` to simulate detached HEAD. |
-| `PRAXIS_PBGUARD_TEST_STATUS=<porcelain>` | Override `git status --porcelain` output. Empty string = clean tree. |
-| `PRAXIS_PBGUARD_TEST_LOG=<oneline>` | Override `git log --oneline -3` output. Empty string = no commits / no PR signal. |
+| Env var                                   | Effect                                                                                                           |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `PRAXIS_PBGUARD_TEST_REPO_ROOT=<path>`    | Override `get_repo_root`. Use `"NONE"` to simulate not-in-a-repo.                                                |
+| `PRAXIS_PBGUARD_TEST_BRANCH=<name>`       | Override current branch. Use `"HEAD"` to simulate detached HEAD.                                                 |
+| `PRAXIS_PBGUARD_TEST_STATUS=<porcelain>`  | Override `git status --porcelain` output. Empty string = clean tree.                                             |
+| `PRAXIS_PBGUARD_TEST_LOG=<oneline>`       | Override `git log --oneline -3` output. Empty string = no commits / no PR signal.                                |
 | `PRAXIS_PBGUARD_TEST_IGNORED=<rel,paths>` | Override `git check-ignore`. Comma-separated repo-relative paths treated as gitignored. Not set = call real git. |
 
 ### Tests

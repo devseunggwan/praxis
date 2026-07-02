@@ -217,7 +217,7 @@ explicitly evaluate all six action types per non-note-only finding and select
 one or two actions.
 
 | Action Type | When to Choose | Skip If |
-|-------------|---------------|---------|
+| ------------- | --------------- | --------- |
 | `memory` | New pattern, first occurrence, individual learning | `repeat=true`; memory is blocked |
 | `issue` | Systemic fix needed; repeat pattern at 1-2 prior occurrences | One-off mistake, purely local insight |
 | `claude_md_draft` | Explicit cross-project rule gap exists | Existing rule already covers this pattern |
@@ -228,7 +228,7 @@ one or two actions.
 Selection matrix:
 
 | Axis | Signal -> Action |
-|------|------------------|
+| ------ | ------------------ |
 | Repeat count | 0x -> `memory`; 1-2x -> `issue`; 3x+ -> `skill_idea` or `hook_code` |
 | Scope | Cross-project -> `claude_md_draft`; single-project -> `memory` |
 | Gap type | Rule violated -> reinforce; rule absent -> draft; no enforcement -> `skill_idea` |
@@ -313,7 +313,7 @@ option needs `Falsification:` evidence.
 ## Error Handling
 
 | Failure | Action |
-|---|---|
+| --- | --- |
 | Pre-Output Falsification Gate triggered but premise cannot be falsified | Drop ranking and ask with open premise |
 | Finding lacks Stage 2 caveats line despite required caveats | Block Stage 3 emission and return to Stage 2 / 2.5 |
 

@@ -10,7 +10,7 @@ configured naming convention regex.
 ### Intercepted commands
 
 | Command shape | Trigger |
-|---|---|
+| --- | --- |
 | `git checkout -b <name>` | New branch creation |
 | `git checkout --orphan <name>` | New unborn branch creation |
 | `git checkout --track origin/<name>` | Implicit local branch from remote ref basename |
@@ -53,7 +53,7 @@ Examples:
 ### Configuration
 
 | Env var | Default | Effect |
-|---------|---------|--------|
+| --------- | --------- | -------- |
 | `PRAXIS_BRANCH_NAME_REGEX` | `^(hub\|issue)-[0-9]+-(feat\|fix\|docs\|style\|refactor\|chore\|test\|perf\|ci\|build\|hotfix)-[a-z0-9-]+$` | Override the naming pattern |
 | `PRAXIS_BRANCH_NAME_STRICT` | `1` | `1` = deny (block); `0` = advisory (stderr only) |
 | `PRAXIS_BRANCH_NAME_WHITELIST` | `main,master,dev,prod,staging` | Comma-separated names always allowed |

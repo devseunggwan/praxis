@@ -83,7 +83,7 @@ Read [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md) before writing a new
 spec. It lists fixed Claude Code limits that every skill must work within:
 
 | Constraint | Short form |
-|------------|------------|
+| ------------ | ------------ |
 | `AskUserQuestion.options` max 4 items | Truncate dynamic lists to 3 + cancel |
 | `Skill(...)` cannot invoke `disable-model-invocation: true` skills | Use the underlying binary directly |
 | `Bash` cwd resets between calls | Chain with `&&` or use absolute paths |
@@ -171,7 +171,7 @@ fixed it, and the claim was only corrected after reading the PR ref with
 Inspect the PR by its ref, not by whatever happens to be on disk:
 
 | Question | Command |
-|----------|---------|
+| ---------- | --------- |
 | What did the PR change? | `git diff origin/main...origin/<branch>` |
 | What does a file look like in the PR? | `git show origin/<branch>:<path>` |
 | Which ref is checked out right now? | `git rev-parse --abbrev-ref HEAD && git log -1 --oneline` |

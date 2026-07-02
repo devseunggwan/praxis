@@ -27,7 +27,7 @@ The hook writes advisory text to stderr. It exits 0 (advisory) by default;
 agent more forcefully.
 
 | Condition | Result |
-|-----------|--------|
+| ----------- | -------- |
 | Remote tip != local SHA of the pushed ref | `[push-remote-ref-verify]` advisory (expected vs remote tip) |
 | Remote has no such branch while push output claims it wrote it (`-> <branch>` / `[new branch]`) | advisory, remote tip shown as `(absent)` |
 | Mismatch coincides with a `* [new branch]` output line | advisory + explicit rotating-endpoint note |
@@ -80,7 +80,7 @@ SHA, so any difference means the success was illusory.
 ### Relationship to sibling hooks
 
 | Hook | Scope | Overlap |
-|------|-------|---------|
+| ------ | ------- | --------- |
 | `side-effect-scan` | PreToolUse preflight on `git push` / `gh pr merge` | None — runs *before* the push; this hook verifies the *result* |
 | `skill-gate-commands` | PreToolUse gate on gated commands | None — preflight, not result verification |
 | `momentum-rule-retrieval-gate` | PreToolUse nudge at force-push / merge | None — different trigger and timing |

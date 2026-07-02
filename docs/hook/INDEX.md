@@ -20,7 +20,7 @@ Pre-tool blocking / ask-user gates. Run **before** the tool executes; can
 confirmation-prompt layer.
 
 | Hook | Trigger | Purpose |
-|------|---------|---------|
+| ------ | --------- | --------- |
 | [block-gh-state-all](../../hooks/preflight-gate/block-gh-state-all/spec.md) | PreToolUse | Hard-block invalid `gh search ... --state all` flag combo |
 | [gh-flag-verify](../../hooks/preflight-gate/gh-flag-verify/spec.md) | PreToolUse | Block `gh <subcmd>` calls with flags not in the subcommand's accepted set |
 | [gh-json-validator](../../hooks/preflight-gate/gh-json-validator/spec.md) | PreToolUse | Block `gh <subcmd> --json <fields>` calls whose field names are not in the subcommand's valid JSON projection — issue #391 |
@@ -62,7 +62,7 @@ marker appears without an accompanying `Falsified:` line (issue #393).
 Fail-open on infrastructure errors by design.
 
 | Hook | Trigger | Purpose |
-|------|---------|---------|
+| ------ | --------- | --------- |
 | [momentum-rule-retrieval-gate](../../hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md) | PreToolUse | Advisory nudge at high-momentum action points (`gh pr merge`, `cmux new-workspace`, `git push --force`) — surfaces relevant CLAUDE.md rules + memory entries to prevent "Loaded ≠ Retrieved" failures |
 | [cli-flag-incompat-advisory](../../hooks/advisory-nudge/cli-flag-incompat-advisory/spec.md) | PreToolUse | Advisory nudge for known mode-incompatible flag combos (`git merge-tree --name-only` 3-arg form, `kubectl --use-protocol-buffers`) |
 | [inspection-chain-advisory](../../hooks/advisory-nudge/inspection-chain-advisory/spec.md) | PreToolUse | Advisory nudge when 2+ inspection-only commands are chained with `&&` (non-match exit silently drops downstream probes) — issue #469 |
@@ -95,7 +95,7 @@ After-tool-execution hooks. Fire **after** a tool completes; emit corrective
 context, patch false positives, or record tracking state for paired gates.
 
 | Hook | Trigger | Purpose |
-|------|---------|---------|
+| ------ | --------- | --------- |
 | [builtin-task-postuse](../../hooks/postuse-correction/builtin-task-postuse/spec.md) | PostToolUse | Correct upstream "agent spawn" false positives on `TaskCreate` / `TaskUpdate` / etc. |
 | [pre-edit-md-escape-advisory](../../hooks/postuse-correction/pre-edit-md-escape-advisory/spec.md) | PreToolUse(Edit) (`pre-edit-md-escape-advisory-pre`) + PostToolUse(Read) (`pre-edit-md-escape-advisory-post`) | Advisory nudge when Edit on a `.md` file carries escape-sensitive tokens without a recorded Read in the session |
 | [bypass-telemetry](../../hooks/postuse-correction/bypass-telemetry/spec.md) | PostToolUse(Bash) | Observe-only: log bypass-env usage (`CLAUDE_HOOK_BYPASS_*` / `PRAXIS_*BYPASS*`) to daily JSONL — never blocks (issue #441 Phase 1) |
@@ -117,7 +117,7 @@ fed to the model). Exit code is 0 in both tiers; stderr is never the signal
 channel.
 
 | Hook | Trigger | Purpose |
-|------|---------|---------|
+| ------ | --------- | --------- |
 | [completion-verify](../../hooks/completion-verify/completion-verify/spec.md) | Stop | Block "done / 완료" claims without same-turn Bash verification evidence |
 | [retrospect-mix-check](../../hooks/completion-verify/retrospect-mix-check/spec.md) | Stop | Block retrospect Stage 3 outputs that default findings to memory-only |
 | [completion-signal-gate](../../hooks/completion-verify/completion-signal-gate/spec.md) | Stop | Advisory nudge when completion-signal phrase appears without evidence-block; also flags cross-plugin slash commands (Event 2) |

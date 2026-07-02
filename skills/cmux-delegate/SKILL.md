@@ -37,7 +37,7 @@ runtime-verified-note: "cmux/gh/claude/codex/gemini --help probe — cmux new-wo
 ### Arguments
 
 | Argument | Default | Description |
-|----------|---------|-------------|
+| ---------- | --------- | ------------- |
 | `<task>` | (required) | 위임할 작업 설명 |
 | `--model` | `sonnet` | Provider:model notation. `opus`/`sonnet`/`haiku` = claude. Also supports `claude`, `claude:opus`, `codex`, `codex:o3`, `gemini`, `gemini:flash`. See project `ARCHITECTURE.md` Provider Routing. |
 | `--cwd` | current dir | 새 세션의 작업 디렉토리 |
@@ -159,7 +159,7 @@ Step 2 의 raw git/PR 메타데이터는 *무엇이 바뀌었는지*만 전달�
 **Task-type 분기** — 위임 *의도*에 따라 handoff 강도를 조절합니다:
 
 | 위임 유형 | Handoff 강도 |
-|----------|-------------|
+| ---------- | ------------- |
 | review / audit / fresh-eyes (편향 없는 재검토) | 중립적 *사실*만 (`### Findings` / `### Relevant files`). 오케스트레이터의 결론·의견(`### Decisions` / `### Next task`)은 **배제** — fresh eyes 의 편향 주입 방지 |
 | continue-work / implement / debug (작업 이어가기) | 풍부하게 — 4개 하위 섹션 모두 포함 |
 
@@ -368,7 +368,7 @@ cmux에서 {session_name} 탭을 확인하세요.
 ## Error Handling
 
 | Error | Recovery |
-|-------|----------|
+| ------- | ---------- |
 | `cmux` not found | "cmux가 설치되어 있지 않습니다. cmux.app을 설치해주세요." 출력 후 중단 |
 | git 명령 실패 | 해당 맥락 항목을 "unavailable"로 채우고 계속 진행 |
 | `gh` 명령 실패 | PR 정보를 "no PR found"로 채우고 계속 진행 |

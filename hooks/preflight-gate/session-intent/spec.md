@@ -96,16 +96,16 @@ field is sticky once set; it never resets within a session.
 
 ### Mutation-capable surface (v1 scope)
 
-| Pattern | Action |
-|---------|--------|
-| `gh issue (close\|comment\|create\|edit\|delete\|reopen\|lock\|unlock\|transfer)` | gate candidate |
-| `gh pr (create\|comment\|edit\|merge\|close\|reopen\|ready\|review)` | gate candidate |
-| `gh release (create\|edit\|delete\|upload)` | gate candidate |
-| `gh label (create\|edit\|delete)` | gate candidate |
-| `gh api ... --method (POST\|PATCH\|PUT\|DELETE)` | gate candidate |
-| `gh issue list`, `gh pr view`, `gh api repos/foo/bar` (default GET) | silent |
-| Non-`gh` Bash commands | silent |
-| MCP `mcp__*slack*__*post*`, `mcp__*notion*__*update*`, etc. | **v2** (not yet covered) |
+| Pattern                                                                           | Action                   |
+| --------------------------------------------------------------------------------- | ------------------------ |
+| `gh issue (close\|comment\|create\|edit\|delete\|reopen\|lock\|unlock\|transfer)` | gate candidate           |
+| `gh pr (create\|comment\|edit\|merge\|close\|reopen\|ready\|review)`              | gate candidate           |
+| `gh release (create\|edit\|delete\|upload)`                                       | gate candidate           |
+| `gh label (create\|edit\|delete)`                                                 | gate candidate           |
+| `gh api ... --method (POST\|PATCH\|PUT\|DELETE)`                                  | gate candidate           |
+| `gh issue list`, `gh pr view`, `gh api repos/foo/bar` (default GET)               | silent                   |
+| Non-`gh` Bash commands                                                            | silent                   |
+| MCP `mcp__*slack*__*post*`, `mcp__*notion*__*update*`, etc.                       | **v2** (not yet covered) |
 
 `gh` global flags (`-R/--repo`, `--hostname`, `--color`) are peeled before
 subcommand detection so `gh -R owner/repo issue create` is detected
@@ -140,10 +140,10 @@ Mutation verbs (Korean): `닫`, `머지`, `게시`, `푸시`, `등록`, `삭제`
 
 ### Modes
 
-| `PRAXIS_INTENT_PIVOT_MODE` | Effect |
-|----------------------------|--------|
-| unset (default) | `permissionDecision: "ask"` — surfaces a confirmation prompt |
-| `block` | `permissionDecision: "deny"` — hard block, user must re-anchor explicitly |
+| `PRAXIS_INTENT_PIVOT_MODE` | Effect                                                                    |
+| -------------------------- | ------------------------------------------------------------------------- |
+| unset (default)            | `permissionDecision: "ask"` — surfaces a confirmation prompt              |
+| `block`                    | `permissionDecision: "deny"` — hard block, user must re-anchor explicitly |
 
 ### False-positive guards
 

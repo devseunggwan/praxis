@@ -29,11 +29,11 @@ substitutions are excluded from matching.
 Live `git commit` invocations carrying any of these overrides:
 
 | Override | Why it blocks |
-|----------|---------------|
+| ---------- | --------------- |
 | `-n`, `--no-verify` | skips pre-commit hooks (lint/test/format) |
 | `--no-gpg-sign` | forces unsigned commit |
 | `-S`, `-S<keyid>`, `--gpg-sign`, `--gpg-sign=<keyid>` | forces signing without confirming a secret key |
-| `-c commit.gpgsign=true|false` (git-level `-c`) | config-level signing override |
+| `-c commit.gpgsign=true \| false` (git-level `-c`) | config-level signing override |
 | `-c core.hooksPath=...` | redirects pre-commit hooks to another path |
 | `-c commit.template=...` | overrides commit template |
 

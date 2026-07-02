@@ -18,7 +18,7 @@ Development workflow skills for Claude Code — disciplined, fast, resilient.
 ### Discovery
 
 | Skill | Trigger keywords | When to use | Example invocation |
-|-------|-----------------|-------------|-------------------|
+| ------- | ----------------- | ------------- | ------------------- |
 | `using-praxis` | `praxis 처음`, `praxis 사용법`, `어떤 skill 부터`, `praxis intro`, `praxis getting started` | To find the right skill when you're new to praxis or unsure which one fits | `/praxis:using-praxis` |
 | `writing-praxis-skill` | `new skill`, `write skill`, `add skill`, `skill template`, `skill spec`, `스킬 작성`, `새 스킬` | To author a new SKILL.md or get a skill-structure guide | `/praxis:writing-praxis-skill` |
 
@@ -33,7 +33,7 @@ Development workflow skills for Claude Code — disciplined, fast, resilient.
 ### Discipline
 
 | Skill | Trigger keywords | When to use | Example invocation |
-|-------|-----------------|-------------|-------------------|
+| ------- | ----------------- | ------------- | ------------------- |
 | `strike` | `/strike`, `/praxis:strike`, `strike 1/2/3`, `삼진` | To explicitly record a rule violation (excludes colloquial uses like "strike a balance") | `/praxis:strike <violation reason>` |
 | `strikes` | `/strikes`, `strike status`, `몇 진`, `check strikes` | To check the current session's strike count and recorded violations | `/praxis:strikes` |
 | `reset-strikes` | `/reset-strikes`, `strike 초기화`, `clear strikes` | To reset the counter and resume responses after a 3-strike block | `/praxis:reset-strikes` |
@@ -41,7 +41,7 @@ Development workflow skills for Claude Code — disciplined, fast, resilient.
 ### Session Management
 
 | Skill | Trigger keywords | When to use | Example invocation |
-|-------|-----------------|-------------|-------------------|
+| ------- | ----------------- | ------------- | ------------------- |
 | `recover-sessions` | `recover`, `session recovery`, `restore sessions`, `power recovery` | To recover sessions after power loss or a tmux crash (tmux backend) | `/praxis:recover-sessions` |
 | `cmux-recover-sessions` | `터졌다`, `크래시 복구`, `OOM 복구`, `세션 살려야`, `crash recovery`, `power loss recovery`, `cmux session recovery` | To emergency-recover many cmux sessions after a crash / power loss / OOM (`.jsonl` scan based) | `/praxis:cmux-recover-sessions` |
 | `cmux-save-sessions` | `save sessions`, `session save`, `session snapshot`, `cmux save`, `snapshot list` | To save the current cmux session list as JSON for later restore | `/praxis:cmux-save-sessions` |
@@ -76,7 +76,7 @@ roles, events, host filters, and strict/bypass knobs, see the
 Most skills delegate to external agents or session managers. Install the dependencies that match your usage tier.
 
 | Dependency | Required for | Install |
-|------------|-------------|---------|
+| ------------ | ------------- | --------- |
 | **gh CLI** | Standalone (`recover-sessions`), strike skills, PR/issue ops | `brew install gh` |
 | **jq** | Strike skills (session-scoped counter parsing) | `brew install jq` |
 | **oh-my-claudecode** | Agent delegation (tracer, analyst, ultraqa, code-reviewer) | `omc install` |

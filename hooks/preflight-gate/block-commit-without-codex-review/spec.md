@@ -35,7 +35,7 @@ Both conditions must hold for a block (exit 2):
    /praxis:codex-review-wrap?" does not count — the match is line-anchored).
 
 | Situation | Action |
-|-----------|--------|
+| ----------- | -------- |
 | `git commit -m "..."` with no codex-review-wrap invocation this session | **BLOCKED** (exit 2) |
 | `git commit` after a `Skill(praxis:codex-review-wrap)` tool_use | **PASS** (review ran) |
 | `git commit` after a `/praxis:codex-review-wrap` slash command | **PASS** (review ran) |

@@ -18,10 +18,10 @@ issue #199).
 
 The two patterns covered:
 
-| Pattern | Trigger | Action |
-|---------|---------|--------|
-| `HEREDOC_BODY` | `<<` token in same segment as `gh pr/issue create` | **Hard block** (exit 2) — suggests `--body-file` |
-| `CROSS_REPO_WRITE` | `--repo/-R` flag in `gh pr/issue create/comment/edit` | **Ask** — surfaces four-point checklist |
+| Pattern            | Trigger                                               | Action                                           |
+| ------------------ | ----------------------------------------------------- | ------------------------------------------------ |
+| `HEREDOC_BODY`     | `<<` token in same segment as `gh pr/issue create`    | **Hard block** (exit 2) — suggests `--body-file` |
+| `CROSS_REPO_WRITE` | `--repo/-R` flag in `gh pr/issue create/comment/edit` | **Ask** — surfaces four-point checklist          |
 
 ### What is blocked / asked
 
@@ -32,14 +32,14 @@ variable assignments are transparent pass-throughs.
 
 #### HEREDOC_BODY — hard block (exit 2)
 
-| Command | Action |
-|---------|--------|
-| `gh issue create --title "t" <<EOF` | **BLOCKED** |
-| `gh pr create --title "t" <<'EOF'` | **BLOCKED** |
-| `gh pr create --title "t" <<-EOF` | **BLOCKED** |
-| `gh --repo x issue create --title "t" <<EOF` | **BLOCKED** |
+| Command                                                      | Action                                  |
+| ------------------------------------------------------------ | --------------------------------------- |
+| `gh issue create --title "t" <<EOF`                          | **BLOCKED**                             |
+| `gh pr create --title "t" <<'EOF'`                           | **BLOCKED**                             |
+| `gh pr create --title "t" <<-EOF`                            | **BLOCKED**                             |
+| `gh --repo x issue create --title "t" <<EOF`                 | **BLOCKED**                             |
 | `BODY=$(cat <<EOF\n...\nEOF\n)\ngh pr create --body "$BODY"` | **PASS** — heredoc in different segment |
-| `cat <<EOF > /tmp/f.txt` | **PASS** — non-gh command |
+| `cat <<EOF > /tmp/f.txt`                                     | **PASS** — non-gh command               |
 
 Why heredoc is blocked: `shlex` tokenization does not read heredoc content,
 so the `block-pr-without-caller-evidence` hook and `external-write-falsify-check`
@@ -50,16 +50,16 @@ Correct pattern: `Write tool → /tmp/body.md` then `--body-file /tmp/body.md`.
 
 #### CROSS_REPO_WRITE — ask (permissionDecision: "ask")
 
-| Command | Action |
-|---------|--------|
-| `gh pr create --repo owner/repo --title "t" --body-file /tmp/b.md` | **ASK** |
-| `gh issue create --repo owner/repo --title "t"` | **ASK** |
-| `gh issue comment 42 --repo owner/repo --body "..."` | **ASK** |
-| `gh -R owner/repo pr create --title "t" --body-file /tmp/b.md` | **ASK** |
-| `gh pr create --title "t" --body "Caller chain verified: ok"` | **PASS** — no `--repo` |
-| `gh issue list --repo owner/repo` | **PASS** — read-only subcommand |
-| `gh pr list --repo owner/repo` | **PASS** — read-only subcommand |
-| `gh pr create --repo x --title "t" # cross-boundary:ack` | **PASS** — opt-out |
+| Command                                                            | Action                          |
+| ------------------------------------------------------------------ | ------------------------------- |
+| `gh pr create --repo owner/repo --title "t" --body-file /tmp/b.md` | **ASK**                         |
+| `gh issue create --repo owner/repo --title "t"`                    | **ASK**                         |
+| `gh issue comment 42 --repo owner/repo --body "..."`               | **ASK**                         |
+| `gh -R owner/repo pr create --title "t" --body-file /tmp/b.md`     | **ASK**                         |
+| `gh pr create --title "t" --body "Caller chain verified: ok"`      | **PASS** — no `--repo`          |
+| `gh issue list --repo owner/repo`                                  | **PASS** — read-only subcommand |
+| `gh pr list --repo owner/repo`                                     | **PASS** — read-only subcommand |
+| `gh pr create --repo x --title "t" # cross-boundary:ack`           | **PASS** — opt-out              |
 
 The checklist surfaced for `pr create` (four points):
 
@@ -125,12 +125,12 @@ placement guidance.
 
 ### Relationship to sibling hooks
 
-| Hook | Scope | Overlap |
-|------|-------|---------|
-| `block-gh-state-all` | `gh search --state all` | None — different subcommand |
-| `block-pr-without-caller-evidence` | `gh pr create` body missing `Caller chain verified:` | Complementary — this hook fires first as a pre-flight; sibling fires if body is present but missing the line |
-| `pre-merge-approval-gate` | `gh pr merge` | None — different subcommand |
-| `side-effect-scan` | `gh pr create` (gh-merge category) | Complementary — side-effect-scan fires first with a generic "remote trigger" ask; this hook fires with a targeted cross-boundary checklist |
+| Hook                               | Scope                                                | Overlap                                                                                                                                    |
+| ---------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `block-gh-state-all`               | `gh search --state all`                              | None — different subcommand                                                                                                                |
+| `block-pr-without-caller-evidence` | `gh pr create` body missing `Caller chain verified:` | Complementary — this hook fires first as a pre-flight; sibling fires if body is present but missing the line                               |
+| `pre-merge-approval-gate`          | `gh pr merge`                                        | None — different subcommand                                                                                                                |
+| `side-effect-scan`                 | `gh pr create` (gh-merge category)                   | Complementary — side-effect-scan fires first with a generic "remote trigger" ask; this hook fires with a targeted cross-boundary checklist |
 
 ### Tests
 

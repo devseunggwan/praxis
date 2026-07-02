@@ -37,7 +37,7 @@ References: issue [#221](https://github.com/devseunggwan/praxis/issues/221) (adv
 ### What is detected
 
 | Tool | Trigger condition | Decision |
-|------|-----------------|----------|
+| ------ | ----------------- | ---------- |
 | `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND question body has no `Falsified:` line | `permissionDecision: deny` (ASK_MSG) |
 | `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND question body has `Falsified:` line | Silent pass |
 | `AskUserQuestion` (T2, issue #369) | Option `label` OR `description` contains a confidence-anchoring framing token AND question body has no `Falsified:` line | `permissionDecision: ask` (ANCHORING_ASK_MSG) |
@@ -97,7 +97,7 @@ T1's `ASK_MSG` so downstream parsers can distinguish which tier escalated.
 #### Bash: bulk-action mutation keywords
 
 | Type | Patterns detected |
-|------|-----------------|
+| ------ | ----------------- |
 | English (regex, case-insensitive) | `close\s+all`, `delete\s+all`, `merge\s+all`, `reject\s+all`, `approve\s+all` |
 | Korean (substring) | `전부 닫`, `모두 닫`, `전부 삭제`, `모두 삭제`, `전부 머지`, `모두 머지`, `다 머지`, `전부 클로즈`, `모두 클로즈` |
 
@@ -169,7 +169,7 @@ instead of surfacing the proposal.
 ### Parsing guarantees
 
 | Condition | Behavior |
-|-----------|----------|
+| ----------- | ---------- |
 | Malformed / missing stdin JSON | exit 0 (silent pass) |
 | `tool_name` not `AskUserQuestion` or `Bash` | exit 0 (silent pass) |
 | Missing `questions` / `options` / `command` fields | exit 0 (silent pass) |

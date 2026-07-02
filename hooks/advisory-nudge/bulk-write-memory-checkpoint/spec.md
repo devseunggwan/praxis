@@ -26,14 +26,14 @@ Reference: issue [#443](https://github.com/devseunggwan/praxis/issues/443).
 
 ### SOT path set
 
-| Path pattern | Bucket key | Classification rule |
-|---|---|---|
-| `…/vault/…` | `vault` | Any component in the path equals `vault` |
-| `…/wiki/…` | `wiki` | Any component equals `wiki` |
-| `…/.claude/…` | `.claude` | Any component equals `.claude` |
-| `…/skills/…` | `skills` | Any component equals `skills` |
-| `…/AGENTS.md` | `AGENTS.md` | Exact basename (case-sensitive) |
-| `…/CLAUDE.md` | `CLAUDE.md` | Exact basename (case-sensitive) |
+| Path pattern  | Bucket key  | Classification rule                      |
+| ------------- | ----------- | ---------------------------------------- |
+| `…/vault/…`   | `vault`     | Any component in the path equals `vault` |
+| `…/wiki/…`    | `wiki`      | Any component equals `wiki`              |
+| `…/.claude/…` | `.claude`   | Any component equals `.claude`           |
+| `…/skills/…`  | `skills`    | Any component equals `skills`            |
+| `…/AGENTS.md` | `AGENTS.md` | Exact basename (case-sensitive)          |
+| `…/CLAUDE.md` | `CLAUDE.md` | Exact basename (case-sensitive)          |
 
 Boundary rule: a path component must equal the bucket key **exactly** as an
 independent path segment.  This prevents false positives on paths like
@@ -70,8 +70,8 @@ Example for a 2nd write to `vault/my-note.md`:
 
 ### Environment variables
 
-| Variable | Effect |
-|----------|--------|
+| Variable                     | Effect                                 |
+| ---------------------------- | -------------------------------------- |
 | `PRAXIS_BULK_WRITE_BYPASS=1` | Skip all output and exit 0 immediately |
 
 Default mode (no env vars): advisory only — writes to stderr, exits 0.
@@ -97,10 +97,10 @@ conservative direction (advisory rather than silence).
 
 ### Relationship to sibling hooks
 
-| Hook | Overlap |
-|------|---------|
-| `memory-hint` | Surfaces hookable memory entries by keyword. The memory-checkpoint advisory specifically targets the SOT-write loop pattern as structural enforcement of the CLAUDE.md rule; the two are complementary. |
-| `path-probe-gate` | Fires on nested worktree path writes. Complementary — different trigger condition, same event. |
+| Hook              | Overlap                                                                                                                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `memory-hint`     | Surfaces hookable memory entries by keyword. The memory-checkpoint advisory specifically targets the SOT-write loop pattern as structural enforcement of the CLAUDE.md rule; the two are complementary. |
+| `path-probe-gate` | Fires on nested worktree path writes. Complementary — different trigger condition, same event.                                                                                                          |
 
 ### Tests
 

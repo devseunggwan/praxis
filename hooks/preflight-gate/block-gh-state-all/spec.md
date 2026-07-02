@@ -21,7 +21,7 @@ references inside quoted strings, commit messages, grep patterns, or echo
 arguments are transparent pass-throughs.
 
 | Command | Action |
-|---------|--------|
+| --------- | -------- |
 | `gh search issues "q" --state all` | **BLOCKED** (exit 2) |
 | `gh search prs "q" --state=all` | **BLOCKED** (exit 2) |
 | `gh search repos foo --limit 1 --state all` | **BLOCKED** (exit 2) |
