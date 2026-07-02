@@ -749,10 +749,13 @@ def test_default_strike_state_dir_respects_praxis_state_dir_override(tmp_path, m
 # ---------------------------------------------------------------------------
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    # Inline user.name/email (not global config) so the test doesn't depend
-    # on the host's git config being pre-populated.
+    # Inline user.name/email/gpgsign (not global config) so the test doesn't
+    # depend on the host's git config being pre-populated — commit.gpgsign=false
+    # avoids a non-interactive gpg/pinentry failure if the host/CI has
+    # gpgsign=true set globally (CodeRabbit PR #742 finding).
     return subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.com", *args],
+        ["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "-c", "commit.gpgsign=false", *args],
         capture_output=True, text=True, check=True,
     )
 
@@ -772,6 +775,13 @@ def test_parse_session_trailer_case_insensitive_key():
 
 def test_parse_session_trailer_empty_body_returns_none():
     assert cli.parse_session_trailer("") is None
+
+
+def test_parse_session_trailer_ignores_prose_mention():
+    # CodeRabbit PR #742 nitpick: a "Session-Id:"-shaped line in prose
+    # (not the terminal trailer block) must not be misread as a trailer.
+    body = "feat: x\n\nSee Session-Id: not-a-trailer for context.\n\nConfidence: high\n"
+    assert cli.parse_session_trailer(body) is None
 
 
 def test_compute_rework_commit_counts_trailer_exact_match():
@@ -829,6 +839,28 @@ def test_load_git_commits_reads_trailer_from_real_repo(tmp_path):
 
 def test_load_git_commits_non_git_dir_returns_empty(tmp_path):
     assert cli.load_git_commits(tmp_path, days=7) == []
+
+
+def test_load_git_commits_uses_committer_date_not_author_date(tmp_path):
+    # CodeRabbit PR #742 Major finding: `git log --since` filters by
+    # committer date, so the returned timestamp must be committer date too —
+    # otherwise a rebased/backdated commit's author date (year 2000 here)
+    # would skew the timestamp-heuristic proximity match.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "f.txt").write_text("1")
+    _git(repo, "add", "f.txt")
+    env = os.environ.copy()
+    env["GIT_AUTHOR_DATE"] = "2000-01-01T00:00:00+00:00"
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+         "-c", "commit.gpgsign=false", "commit", "-q", "-m", "feat: old author date"],
+        capture_output=True, text=True, check=True, env=env,
+    )
+    commits = cli.load_git_commits(repo, days=1)
+    assert len(commits) == 1
+    assert commits[0]["timestamp"].year != 2000
 
 
 def test_compute_outcome_proxy_surfaces_rework_commit_count(tmp_path):

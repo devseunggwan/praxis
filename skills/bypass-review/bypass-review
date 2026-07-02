@@ -160,6 +160,12 @@ _SESSION_TRAILER_RE = re.compile(
     rf"^{REWORK_SESSION_TRAILER}:\s*(\S+)\s*$", re.MULTILINE | re.IGNORECASE
 )
 
+# issue #741 (CodeRabbit PR #742 nitpick): a trailer line has the git
+# trailer shape `Key: value` — used to scope trailer parsing to the
+# terminal blank-line-separated paragraph so prose mentioning
+# "Session-Id:" earlier in the body isn't misread as the trailer.
+_TRAILER_LINE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*:\s*\S.*$")
+
 _INLINE_ENV_TOKEN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _ENV_OPTIONS_WITH_VALUE = {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}
 _BYPASS_PREFIXES = (
@@ -1160,18 +1166,46 @@ def compute_outcome_proxy(
 # heuristic structure (see _nearest_hook_by_timestamp above).
 # ---------------------------------------------------------------------------
 
+def _trailer_block(commit_body: str) -> str:
+    """Return the trailing trailer/footer block of a commit message — the
+    last blank-line-separated paragraph, if every non-blank line in it has
+    the git trailer shape `Key: value` — or "" if the message has no such
+    block. Scopes trailer parsing to the terminal paragraph so prose
+    mentioning e.g. "Session-Id:" earlier in the body isn't misread."""
+    stripped = commit_body.strip()
+    if not stripped:
+        return ""
+    paragraphs = re.split(r"\n\s*\n", stripped)
+    last = paragraphs[-1]
+    lines = [ln for ln in last.splitlines() if ln.strip()]
+    if lines and all(_TRAILER_LINE_RE.match(ln) for ln in lines):
+        return last
+    return ""
+
+
 def parse_session_trailer(commit_body: str) -> str | None:
-    """Return the `Session-Id:` trailer value from a commit message body, or
-    None if absent. Case-insensitive key match; first occurrence wins."""
+    """Return the `Session-Id:` trailer value from a commit message's
+    terminal trailer block, or None if absent. Case-insensitive key match;
+    first occurrence wins. Only the trailing `Key: value` paragraph is
+    inspected (git trailer convention) — a "Session-Id:" mention in earlier
+    prose is ignored."""
     if not commit_body:
         return None
-    match = _SESSION_TRAILER_RE.search(commit_body)
+    block = _trailer_block(commit_body)
+    if not block:
+        return None
+    match = _SESSION_TRAILER_RE.search(block)
     return match.group(1) if match else None
 
 
 def load_git_commits(repo_path: Path, days: int) -> list[dict]:
     """Return [{sha, timestamp: datetime, body: str}, ...] for commits in
-    `repo_path` within the last `days` days (author date).
+    `repo_path` within the last `days` days (committer date).
+
+    Uses committer date (not author date) because `git log --since` itself
+    filters by committer date (CodeRabbit PR #742 finding) — using author
+    date for the returned timestamp would let the two diverge and skew the
+    timestamp-heuristic proximity match on rebased/backdated commits.
 
     Fails open to an empty list if `repo_path` is not a git repo, `git` is
     unavailable, or the process errors/times out — this is a best-effort
@@ -1183,7 +1217,7 @@ def load_git_commits(repo_path: Path, days: int) -> list[dict]:
         proc = subprocess.run(
             [
                 "git", "-C", str(repo_path), "log", f"--since={since}",
-                "--pretty=format:%H%x1f%aI%x1f%B%x1e",
+                "--pretty=format:%H%x1f%cI%x1f%B%x1e",
             ],
             capture_output=True, text=True, check=False, timeout=10,
         )
