@@ -10,8 +10,8 @@ forwarding, deferred).
 Issue #689: per-hook aggregation view + tool-error co-occurrence.
 Issue #710 (remaining scope): fire-rate mode gains advise_ignored_rate,
 bypass_count (joined against bypass-events), and a best-effort outcome-proxy
-section (strike / external-write-revert / rework-commit signals — see
-OUTCOME PROXY LIMITATIONS below).
+section (strike / external-write-revert / re-clarification-loop /
+rework-commit signals — see OUTCOME PROXY LIMITATIONS below).
 
 Usage:
   bypass-review [OPTIONS]
@@ -34,13 +34,11 @@ Options:
                          (default: current working directory)
   -h, --help             Show this message and exit
 
-OUTCOME PROXY LIMITATIONS (issue #710 item 3 / issue #737 / issue #741,
-fire-rate mode):
-  strike_count, external_write_revert_count, and rework_commit_count are
-  computed. One item from the original issue text is still NOT implemented
-  because no telemetry source currently records it:
-    - re-clarification loop     (requires transcript-level turn analysis,
-                                  out of scope for this JSONL ledger)
+OUTCOME PROXY LIMITATIONS (issue #710 item 3 / issue #737 / issue #740 /
+issue #741, fire-rate mode):
+  strike_count, external_write_revert_count, reclarification_loop_count, and
+  rework_commit_count are all computed — every item from the original issue
+  text (issue #737) now has a telemetry source.
   Strike state itself is a lower bound: the strike-counter TTL-deletes state
   after 7 days and `/praxis:reset-strikes` deletes it immediately on reset,
   so a session's true historical strike count may already be gone by the
@@ -55,6 +53,23 @@ fire-rate mode):
   hooks/advisory-nudge/destructive-bash-guard/impl.py. A nonzero count means
   "destructive-bash-guard flagged something in this session", not "a revert
   specifically occurred".
+  reclarification_loop_count (issue #740) is a COARSE proxy with NO topic
+  clustering: it is simply the count of AskUserQuestion calls in the session
+  (askuserquestion-loop-signal RICH fire-ledger records — see
+  hooks/postuse-correction/askuserquestion-loop-signal/impl.py). The design
+  interview for issue #737 left the "same topic" judgment method open with 3
+  candidates (exact header/question text match, text-similarity/embedding,
+  or this coarse total-call-count); this implementation deliberately chose
+  the coarse count to avoid adding new header/question-text fields to the
+  shared fire-ledger record shape and to avoid a similarity-threshold tuning
+  burden. A count >= RECLARIFICATION_LOOP_THRESHOLD (2) means "the AI asked
+  AskUserQuestion more than once in this session" — it is NOT proof those
+  calls concerned the same topic. A session with 2 AskUserQuestion calls on
+  2 completely unrelated topics is indistinguishable from a true
+  same-topic re-clarification loop under this proxy (false positive); a
+  true same-topic loop spread across 2 separate sessions (e.g. after a
+  compaction) is invisible to this proxy since counting is session-scoped
+  (false negative).
   rework_commit_count (issue #741) is trailer-first + timestamp-heuristic,
   mirroring bypass_count's exact-map + heuristic-fallback structure:
     - Trailer: a `Session-Id: <session_id>` commit trailer is parsed exactly
@@ -143,6 +158,16 @@ _FIRE_DECISIONS = ("block", "ask", "advise", "pass")
 # outcome-proxy signal — cited verbatim from
 # hooks/advisory-nudge/destructive-bash-guard's manifest `name`.
 DESTRUCTIVE_BASH_GUARD_HOOK = "destructive-bash-guard"
+
+# issue #740: hook name whose RICH fires proxy the re-clarification-loop
+# outcome-proxy signal — cited verbatim from
+# hooks/postuse-correction/askuserquestion-loop-signal's manifest `name`.
+ASKUSERQUESTION_LOOP_SIGNAL_HOOK = "askuserquestion-loop-signal"
+
+# issue #740: minimum per-session AskUserQuestion call count to surface as a
+# re-clarification-loop signal in the report (>=2 calls — see module
+# docstring "OUTCOME PROXY LIMITATIONS" for the coarse-proxy accuracy caveat).
+RECLARIFICATION_LOOP_THRESHOLD = 2
 
 # issue #741: commit trailer key for the rework-commit outcome-proxy signal.
 # Named to match the existing trailer family's Capitalized-Hyphenated style
@@ -1124,19 +1149,48 @@ def compute_external_write_revert_counts(fire_events: list[dict]) -> dict[str, i
     return counts
 
 
+def compute_reclarification_loop_counts(fire_events: list[dict]) -> dict[str, int]:
+    """Return dict[session_id] -> count of AskUserQuestion calls (RICH fires).
+
+    Issue #740, best-effort COARSE proxy (no topic clustering) — see module
+    docstring "OUTCOME PROXY LIMITATIONS" for why a nonzero/>=threshold count
+    is not proof of a same-topic loop.
+
+    Filters granularity=="rich" only: askuserquestion-loop-signal also emits
+    an automatic COARSE fire (session_id="") via the standard @fail_open
+    decorator (issue #710 coverage) alongside its own explicit RICH fire
+    (session_id=<real>, via hooks/_lib/_fire_ledger.py's record_session_fire)
+    — the coarse duplicate must be excluded or every session's calls would
+    collapse into the empty-string "session".
+    """
+    counts: dict[str, int] = {}
+    for ev in fire_events:
+        if ev.get(F_FIRE_HOOK) != ASKUSERQUESTION_LOOP_SIGNAL_HOOK:
+            continue
+        if ev.get(F_FIRE_GRANULARITY) != "rich":
+            continue
+        sid = ev.get(F_FIRE_SESSION)
+        if not isinstance(sid, str) or not sid:
+            continue
+        counts[sid] = counts.get(sid, 0) + 1
+    return counts
+
+
 def compute_outcome_proxy(
     fire_events: list[dict],
     state_dir: Path,
     rework_counts: dict[str, int] | None = None,
 ) -> dict[str, dict]:
     """Return dict[session_id] -> {strike_count, strike_state_available,
-    external_write_revert_count, rework_commit_count}.
+    external_write_revert_count, reclarification_loop_count,
+    rework_commit_count}.
 
     Only covers sessions that appear in the fire-events window. Sessions
     whose strike state already expired (7-day TTL) or was reset show
     strike_state_available=False, strike_count=0 — NOT proof of zero strikes.
-    external_write_revert_count is a best-effort proxy — see
-    compute_external_write_revert_counts / module docstring.
+    external_write_revert_count and reclarification_loop_count are
+    best-effort proxies — see compute_external_write_revert_counts /
+    compute_reclarification_loop_counts / module docstring.
     rework_commit_count is trailer-first + timestamp-heuristic — see
     compute_rework_commit_counts / module docstring. `rework_counts` (issue
     #741) is precomputed by the caller because it needs `days`-scoped git log
@@ -1147,6 +1201,7 @@ def compute_outcome_proxy(
         if isinstance(ev.get(F_FIRE_SESSION), str) and ev.get(F_FIRE_SESSION)
     })
     revert_counts = compute_external_write_revert_counts(fire_events)
+    reclarification_counts = compute_reclarification_loop_counts(fire_events)
     rework_counts = rework_counts or {}
     result: dict[str, dict] = {}
     for sid in sessions:
@@ -1155,6 +1210,7 @@ def compute_outcome_proxy(
             "strike_count": state["count"] if state else 0,
             "strike_state_available": state is not None,
             "external_write_revert_count": revert_counts.get(sid, 0),
+            "reclarification_loop_count": reclarification_counts.get(sid, 0),
             "rework_commit_count": rework_counts.get(sid, 0),
         }
     return result
@@ -1450,6 +1506,10 @@ def _render_outcome_proxy_section(lines: list[str], outcome_proxy: dict[str, dic
         sid: r for sid, r in outcome_proxy.items()
         if r.get("external_write_revert_count", 0) > 0
     }
+    with_reclarify = {
+        sid: r for sid, r in outcome_proxy.items()
+        if r.get("reclarification_loop_count", 0) >= RECLARIFICATION_LOOP_THRESHOLD
+    }
     with_rework = {
         sid: r for sid, r in outcome_proxy.items()
         if r.get("rework_commit_count", 0) > 0
@@ -1461,6 +1521,10 @@ def _render_outcome_proxy_section(lines: list[str], outcome_proxy: dict[str, dic
     )
     lines.append(f"  Sessions with strikes : {len(with_strikes)}")
     lines.append(f"  Sessions with external-write-revert signal : {len(with_reverts)}")
+    lines.append(
+        f"  Sessions with re-clarification-loop signal (>={RECLARIFICATION_LOOP_THRESHOLD} "
+        f"AskUserQuestion calls) : {len(with_reclarify)}"
+    )
     lines.append(f"  Sessions with rework-commit signal : {len(with_rework)}")
     if with_strikes:
         lines.append("")
@@ -1476,6 +1540,13 @@ def _render_outcome_proxy_section(lines: list[str], outcome_proxy: dict[str, dic
         lines.append(f"  {'─' * col}  {'─' * 13}")
         for sid in sorted(with_reverts, key=lambda s: with_reverts[s]["external_write_revert_count"], reverse=True):
             lines.append(f"  {sid:<{col}}  {with_reverts[sid]['external_write_revert_count']:>13}")
+    if with_reclarify:
+        lines.append("")
+        col = 40
+        lines.append(f"  {'Session':<{col}}  {'AskUserQuestion calls':>22}")
+        lines.append(f"  {'─' * col}  {'─' * 22}")
+        for sid in sorted(with_reclarify, key=lambda s: with_reclarify[s]["reclarification_loop_count"], reverse=True):
+            lines.append(f"  {sid:<{col}}  {with_reclarify[sid]['reclarification_loop_count']:>22}")
     if with_rework:
         lines.append("")
         col = 40
@@ -1485,22 +1556,26 @@ def _render_outcome_proxy_section(lines: list[str], outcome_proxy: dict[str, dic
             lines.append(f"  {sid:<{col}}  {with_rework[sid]['rework_commit_count']:>14}")
     lines.append("")
     lines.append(
-        "  strike_count, external_write_revert_count, and rework_commit_count\n"
-        "  are implemented. re-clarification-loop is NOT computed — no\n"
-        "  telemetry source records it yet (see module docstring 'OUTCOME\n"
-        "  PROXY LIMITATIONS'). strike_count itself is a lower bound: state is\n"
-        "  TTL-deleted after 7 days and cleared on /praxis:reset-strikes, so a\n"
-        "  session showing 0 may have had strikes that already expired.\n"
+        "  strike_count, external_write_revert_count,\n"
+        "  reclarification_loop_count, and rework_commit_count are all\n"
+        "  implemented (see module docstring 'OUTCOME PROXY LIMITATIONS').\n"
+        "  strike_count itself is a lower bound: state is TTL-deleted after 7\n"
+        "  days and cleared on /praxis:reset-strikes, so a session showing 0\n"
+        "  may have had strikes that already expired.\n"
         "  external_write_revert_count (issue #737) is a COARSE proxy — it\n"
         "  conflates destructive-bash-guard's new revert-signal patterns\n"
         "  (`git revert`, `gh pr close`, `gh issue reopen`) with its\n"
         "  pre-existing destructive-command detections (`rm -rf`, etc.); a\n"
         "  nonzero count means the hook flagged SOMETHING, not specifically\n"
-        "  a revert (see module docstring). rework_commit_count (issue #741)\n"
-        "  is trailer-first (`Session-Id:` commit trailer, manual convention,\n"
-        "  NOT retroactive) + timestamp-heuristic fallback (nearest session\n"
-        "  activity within 15 minutes, lossy like the other two proxies) —\n"
-        "  see module docstring."
+        "  a revert (see module docstring).\n"
+        "  reclarification_loop_count (issue #740) is a COARSE proxy with NO\n"
+        "  topic clustering — it is the raw AskUserQuestion call count per\n"
+        "  session; a count >= threshold does NOT prove those calls concerned\n"
+        "  the same topic (see module docstring).\n"
+        "  rework_commit_count (issue #741) is trailer-first (`Session-Id:`\n"
+        "  commit trailer, manual convention, NOT retroactive) +\n"
+        "  timestamp-heuristic fallback (nearest session activity within 15\n"
+        "  minutes, lossy like the other proxies) — see module docstring."
     )
 
 

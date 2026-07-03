@@ -24,6 +24,13 @@ CEILING: a hook that does NOT use @fail_open is uninstrumented. The dispatcher
 process marks itself (mark_dispatcher_process) so its Bash-group members are not
 double-counted by the coarse path.
 
+SINGLE-EVENT RICH (issue #740): a standalone hook outside the Bash dispatch
+group that still needs real session_id/tool attribution (not the coarse
+session_id="" shape) calls `record_session_fire` directly from its own
+main() after parsing its own stdin payload. It still also goes through
+@fail_open's coarse recording for the same hook name — see
+`record_session_fire`'s docstring for the resulting dedup contract.
+
 Record fields (JSONL, one line per hook fire):
   timestamp    UTC ISO-8601
   session_id   from payload (rich only; "" for coarse)
@@ -216,6 +223,43 @@ def record_standalone_fire(hook: str, role: str, rc: int) -> None:
             "role": role,
             "decision": DECISION_BLOCK if rc == 2 else DECISION_PASS,
             "granularity": "coarse",
+        }
+        _atomic_append(resolve_path(), [json.dumps(record, ensure_ascii=False)])
+    except Exception:
+        pass  # fail-open — never break the hook
+
+
+def record_session_fire(hook: str, role: str, decision: str, session_id: str, tool: str) -> None:
+    """Append a single RICH fire record with a caller-supplied session_id/tool.
+
+    Companion to record_standalone_fire (coarse, session_id/tool always "").
+    For a standalone (non-Bash-dispatched) hook that has already parsed its own
+    stdin payload and holds a real session_id, record_standalone_fire's coarse
+    shape (session_id="") is unusable for per-session aggregation (e.g. issue
+    #740's re-clarification-loop count, which must group fires by session).
+    record_group_fires can't be reused either — it batches an entire dispatched
+    Bash-group member list, which does not exist for a lone standalone hook.
+
+    This mirrors record_group_fires' per-record shape (granularity="rich")
+    without requiring dispatcher batching. A hook calling this directly still
+    goes through the normal @fail_open decorator too, so a COARSE duplicate
+    (session_id="") is also recorded for that hook name — callers that need
+    per-session counts must filter to granularity=="rich" (see
+    skills/bypass-review/bypass-review's compute_reclarification_loop_counts).
+
+    Fail-open: any error → silently no-op, mirrors every other writer here.
+    """
+    if _disabled():
+        return
+    try:
+        record = {
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "session_id": session_id if isinstance(session_id, str) else "",
+            "tool": tool if isinstance(tool, str) else "",
+            "hook": hook,
+            "role": role,
+            "decision": decision,
+            "granularity": "rich",
         }
         _atomic_append(resolve_path(), [json.dumps(record, ensure_ascii=False)])
     except Exception:

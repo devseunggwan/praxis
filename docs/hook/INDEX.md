@@ -99,6 +99,7 @@ context, patch false positives, or record tracking state for paired gates.
 | [builtin-task-postuse](../../hooks/postuse-correction/builtin-task-postuse/spec.md) | PostToolUse | Correct upstream "agent spawn" false positives on `TaskCreate` / `TaskUpdate` / etc. |
 | [pre-edit-md-escape-advisory](../../hooks/postuse-correction/pre-edit-md-escape-advisory/spec.md) | PreToolUse(Edit) (`pre-edit-md-escape-advisory-pre`) + PostToolUse(Read) (`pre-edit-md-escape-advisory-post`) | Advisory nudge when Edit on a `.md` file carries escape-sensitive tokens without a recorded Read in the session |
 | [bypass-telemetry](../../hooks/postuse-correction/bypass-telemetry/spec.md) | PostToolUse(Bash) | Observe-only: log bypass-env usage (`CLAUDE_HOOK_BYPASS_*` / `PRAXIS_*BYPASS*`) to daily JSONL — never blocks (issue #441 Phase 1) |
+| [askuserquestion-loop-signal](../../hooks/postuse-correction/askuserquestion-loop-signal/spec.md) | PostToolUse(AskUserQuestion) | Observe-only: append one fire-ledger record per `AskUserQuestion` call — coarse per-session call-count proxy for the "re-clarification loop" outcome-proxy signal, never blocks (issue #740) |
 
 ---
 

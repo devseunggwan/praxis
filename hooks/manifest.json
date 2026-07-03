@@ -657,6 +657,13 @@
       }
     },
     {
+      "name": "askuserquestion-loop-signal",
+      "role": "postuse-correction",
+      "event": "PostToolUse",
+      "matcher": "AskUserQuestion",
+      "timeout": 5
+    },
+    {
       "name": "completion-verify",
       "role": "completion-verify",
       "body": "impl.sh",
