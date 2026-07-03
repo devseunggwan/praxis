@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.0] - 2026-07-03
+
+4 PRs since 7.0.0. Minor release. Adds the `debt` skill and the 3
+outcome-proxy telemetry signals scoped out of #710/#737 for lack of a
+telemetry source at the time — `bypass-review fire-rate`'s Outcome Proxy
+section now reports `external_write_revert_count`, `rework_commit_count`,
+and `reclarification_loop_count` alongside the existing `strike_count`.
+
 ### Added
 
 - `debt`: new report-only skill — deferred-decision ledger unioning commit-trailer
@@ -14,6 +22,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Scope-risk:`) from `git log --grep` with tree compounding comments
   (`# [PR #N]`) from `grep`. Groups hits, tags markers with no stated revisit
   condition as `no-trigger`, and never modifies any file. (#711)
+- `destructive-bash-guard`: detects `git revert`, `gh pr close`, `gh issue
+  reopen` command patterns and logs an `external_write_revert_count`
+  outcome-proxy signal to the fire-ledger (command-pattern detection only,
+  not state-reversal proof). (#737, #739)
+- `bypass-review`: `rework_commit_count` outcome-proxy signal — correlates
+  git commits to fire-event sessions via a `Session-Id:` commit trailer
+  (exact match, manual convention) with a 15-minute timestamp-heuristic
+  fallback for commits lacking the trailer, mirroring `bypass_count`'s
+  exact-map + heuristic-fallback structure. Trailer coverage is
+  forward-only (not retroactive); both limitations are documented in
+  `OUTCOME PROXY LIMITATIONS`. (#737, #741, PR #742)
+- `askuserquestion-loop-signal`: new `PostToolUse(AskUserQuestion)` hook
+  appending a `reclarification_loop_count` outcome-proxy signal per call.
+  Uses a coarse per-session call-count proxy (≥2, no topic clustering) to
+  avoid adding fields to the shared fire-ledger record schema; the
+  same-topic accuracy limitation (false positives on multi-topic sessions,
+  false negatives across session/compaction boundaries) is documented in
+  `OUTCOME PROXY LIMITATIONS`. Adds `record_session_fire()` to
+  `hooks/_lib/_fire_ledger.py` as a RICH single-event writer for standalone
+  hooks needing real `session_id` attribution outside the Bash dispatch
+  group. (#737, #740, PR #743)
 
 ## [7.0.0] - 2026-06-28
 
