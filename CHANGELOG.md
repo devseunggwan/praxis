@@ -9,11 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.1.0] - 2026-07-03
 
-4 PRs since 7.0.0. Minor release. Adds the `debt` skill and the 3
-outcome-proxy telemetry signals scoped out of #710/#737 for lack of a
-telemetry source at the time — `bypass-review fire-rate`'s Outcome Proxy
-section now reports `external_write_revert_count`, `rework_commit_count`,
-and `reclarification_loop_count` alongside the existing `strike_count`.
+11 PRs since 7.0.0. Minor release. Headline changes: the `debt`
+deferred-decision ledger skill, completion of the `bypass-review fire-rate`
+metrics left open from #710, and the 3 outcome-proxy telemetry signals scoped
+out of #710/#737 for lack of a telemetry source at the time — `bypass-review
+fire-rate`'s Outcome Proxy section now reports `external_write_revert_count`,
+`rework_commit_count`, and `reclarification_loop_count` alongside the existing
+`strike_count`. Plus a PR-state re-fetch gate for stale merge-approval menus,
+a codex-review-wrap subagent-transcript fix, and the retrospect `is_error`
+per-body enumeration fix.
 
 ### Added
 
@@ -22,6 +26,21 @@ and `reclarification_loop_count` alongside the existing `strike_count`.
   `Scope-risk:`) from `git log --grep` with tree compounding comments
   (`# [PR #N]`) from `grep`. Groups hits, tags markers with no stated revisit
   condition as `no-trigger`, and never modifies any file. (#711)
+- `bypass-review`: fire-rate report completed with the three metrics left open
+  from #710 — `advise_ignored_rate` (same-hook recurrence at the SAME advise
+  decision, right-censored fires excluded), `bypass_count` (exact match via
+  manifest `mode.bypass_env` when declared, else a session_id + hook-name
+  token-subset + nearest-timestamp heuristic with an unattributed bucket), and
+  a best-effort `strike_count` outcome-proxy joined via the strike-counter's
+  per-session state. Adds three sections to the existing report without
+  restructuring the Per-Hook Fire Counts table. (#710, PR #731)
+- `pr-state-refetch-gate`: new `PreToolUse(AskUserQuestion)` hook — when a
+  menu's question/header/option text co-occurs a PR number with a merge-intent
+  keyword (EN merge/squash, KO 머지), it re-fetches live PR state via `gh pr
+  view --json state,mergeStateStatus` and surfaces an advisory (or blocks under
+  `PRAXIS_PR_STATE_REFETCH_STRICT=1`) when the PR is already MERGED or CLOSED,
+  preventing a stale merge-approval question against a PR that no longer needs
+  it. (#733)
 - `destructive-bash-guard`: detects `git revert`, `gh pr close`, `gh issue
   reopen` command patterns and logs an `external_write_revert_count`
   outcome-proxy signal to the fire-ledger (command-pattern detection only,
@@ -43,6 +62,28 @@ and `reclarification_loop_count` alongside the existing `strike_count`.
   `hooks/_lib/_fire_ledger.py` as a RICH single-event writer for standalone
   hooks needing real `session_id` attribution outside the Bash dispatch
   group. (#737, #740, PR #743)
+
+### Fixed
+
+- `block-commit-without-codex-review` hook: the codex-review-wrap detection
+  scan now also reads each subagent transcript
+  (`<session-dir>/subagents/agent-*.jsonl`), so a
+  `Skill(praxis:codex-review-wrap)` call made inside a Task/Agent-dispatched
+  subagent is credited — a root-only scan was structurally blind to review
+  work a subagent actually performed. (#730, PR #738)
+- `retrospect`: Stage 2 now requires each `is_error` tool-result body to be
+  read individually (no category inference from the tool name or a preceding
+  result), with a `tool_census`/`is_error_count` cross-check — closing the
+  under-enumeration gap where a single category-collapsed row passed the
+  Gate-7 `is_error_enum` structural check. (#720, PR #729)
+
+### Changed
+
+- `docs`: CONTRIBUTING.md gains a pre-PR version-bump checklist (VERSION +
+  generated manifests + a CHANGELOG section the release workflow can extract)
+  (#728); an evidence-based hook prune audit (`docs/hook-prune-audit.md`)
+  scoring keep/merge/drop per hook (#735); markdown tables realigned for
+  MD060/MD056 (#736).
 
 ## [7.0.0] - 2026-06-28
 
