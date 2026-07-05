@@ -11,6 +11,9 @@
 #         is paste'd as a substring of the assistant message text — i.e. the
 #         specific "12 passed" / "tests passed" / "lint clean" / "✅" / etc.
 #         token that triggered L3 must appear verbatim in the message.
+#   L3/L2 consider only "genuine" tool_results — those produced by a command
+#   that is NOT an echo/printf-only fabrication of the success token, so
+#   `echo "tests passed"` cannot satisfy the gate. [issue #758]
 #   Otherwise, block with a {decision: block, reason: ...} JSON payload.
 
 command -v jq >/dev/null 2>&1 || exit 0
@@ -58,24 +61,35 @@ TURN_JSON=$(tail -n 400 "$TRANSCRIPT_PATH" | jq -sc '
        | select(.message.role == "assistant" and (.isSidechain // false) == false)
        | (.message.content // [])[]
        | select(.type == "tool_use" and .name == "Bash")
-       | .id]) as $bash_ids
+       | {id: .id, cmd: (.input.command // "")}]) as $bash_uses
+  | ($bash_uses | map(.id)) as $bash_ids
   | ([$turn[]
        | select(.message.role == "user")
        | (.message.content // [])[]
        | select(.type == "tool_result"
                 and (.tool_use_id as $t | $bash_ids | any(. == $t)))
-       | (if (.content | type) == "string" then .content
-          elif (.content | type) == "array" then
-            (.content | map(select(.type == "text") | .text) | join("\n"))
-          else "" end)]
-     | join("\n---\n")) as $bash_outputs
-  | {last_text: $last_text, bash_outputs: $bash_outputs}
+       | {tid: .tool_use_id,
+          text: (if (.content | type) == "string" then .content
+                 elif (.content | type) == "array" then
+                   (.content | map(select(.type == "text") | .text) | join("\n"))
+                 else "" end)}]) as $results
+  | ([$results[] | .text] | join("\n---\n")) as $bash_outputs
+  | ([$results[]
+       | . as $r
+       | (($bash_uses[] | select(.id == $r.tid) | .cmd) // "") as $cmd
+       | select(((($cmd | test("^\\s*(echo|printf)\\b")) and (($cmd | test("[;&|`$\\n]")) | not))) | not)
+       | $r.text]
+     | join("\n---\n")) as $genuine_outputs
+  | {last_text: $last_text, bash_outputs: $bash_outputs, genuine_outputs: $genuine_outputs}
 ' 2>/dev/null)
 
 [ -z "$TURN_JSON" ] && exit 0
 
 LAST_TEXT=$(printf '%s' "$TURN_JSON" | jq -r '.last_text // ""')
 BASH_OUTPUTS=$(printf '%s' "$TURN_JSON" | jq -r '.bash_outputs // ""')
+# genuine_outputs excludes results produced by echo/printf-only commands, so a
+# fabricated `echo "tests passed"` cannot satisfy the evidence gate. [issue #758]
+GENUINE_OUTPUTS=$(printf '%s' "$TURN_JSON" | jq -r '.genuine_outputs // ""')
 
 [ -z "$LAST_TEXT" ] && exit 0
 
@@ -90,15 +104,18 @@ block_reason=""
 
 if [ -z "$BASH_OUTPUTS" ]; then
   block_reason="No Bash verification command was run in this turn. Run a real verify command (test/lint/build) and paste its output BEFORE declaring completion."
-elif ! printf '%s' "$BASH_OUTPUTS" | grep -qE "$EVIDENCE_PATTERNS"; then
+elif [ -z "$GENUINE_OUTPUTS" ]; then
+  block_reason="Your only Bash 'verification' this turn was an echo/printf of the success token, not a real command. Run an actual test/lint/build and paste ITS output BEFORE declaring completion."
+elif ! printf '%s' "$GENUINE_OUTPUTS" | grep -qE "$EVIDENCE_PATTERNS"; then
   block_reason="Bash output present but lacks a verification signal (e.g., 'tests passed', 'exit code 0', 'lint clean'). Re-run an actual verify command."
 else
   # Paste check: each EVIDENCE_PATTERNS-matching span in tool_result must
   # appear verbatim in the assistant message. Span-based (not line-based)
   # so decorated output like '======== 12 passed in 0.85s ========' counts
-  # when the assistant cites '12 passed in 0.85s'.
+  # when the assistant cites '12 passed in 0.85s'. Spans are drawn from
+  # genuine (non-echo/printf) outputs only. [issue #758]
   paste_detected=false
-  evidence_spans=$(printf '%s' "$BASH_OUTPUTS" | grep -oE "$EVIDENCE_PATTERNS")
+  evidence_spans=$(printf '%s' "$GENUINE_OUTPUTS" | grep -oE "$EVIDENCE_PATTERNS")
   while IFS= read -r span; do
     [ -z "$span" ] && continue
     if printf '%s' "$LAST_TEXT" | grep -qF -e "$span"; then

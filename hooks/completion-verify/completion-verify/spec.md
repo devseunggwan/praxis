@@ -25,8 +25,9 @@ The turn passes only if **all** of the following hold:
 | Gate | Condition |
 | ------ | ----------- |
 | L1 | A `Bash` tool_use occurred in this turn |
-| L3 | Its `tool_result.content` matches `EVIDENCE_PATTERNS` (`X passed`, `tests passed`, `\bPASS\b`, `exit code 0`, `lint clean`, `테스트.*통과`, `✅`, etc.) |
-| L2 | At least one `EVIDENCE_PATTERNS`-matching span from that `tool_result` is paste'd verbatim in the assistant message text — e.g. `12 passed`, `tests passed`, `lint clean`, `✅` |
+| L4 | At least one Bash tool_result is **genuine** — produced by a command that is not an `echo`/`printf`-only fabrication of the success token (issue #758) |
+| L3 | A genuine `tool_result.content` matches `EVIDENCE_PATTERNS` (`X passed`, `tests passed`, `\bPASS\b`, `exit code 0`, `lint clean`, `테스트.*통과`, `✅`, etc.) |
+| L2 | At least one `EVIDENCE_PATTERNS`-matching span from that genuine `tool_result` is paste'd verbatim in the assistant message text — e.g. `12 passed`, `tests passed`, `lint clean`, `✅` |
 
 A claim with no Bash, with Bash but no evidence signal, or with evidence but
 the verify token not quoted, all block. Tool results from non-Bash tools
@@ -34,6 +35,22 @@ the verify token not quoted, all block. Tool results from non-Bash tools
 executed Bash command qualifies. Span-based paste detection is decoration-
 agnostic — pytest's `============= 12 passed in 0.85s =============` border
 output passes when the assistant cites `12 passed in 0.85s`.
+
+### Anti-gaming: echo/printf-fabricated evidence (issue #758)
+
+The gate reads `tool_result` content **and** the producing command
+(`tool_use.input.command`). A result whose command is `echo`/`printf`-only —
+matches `^\s*(echo|printf)\b` and contains none of `; & | $` backtick or a
+newline — is excluded from the evidence set, so `echo "5 tests passed"` no
+longer satisfies L3/L2. A command that chains (`pytest -q; echo done`) or
+substitutes (`echo "$(pytest -q)"`) runs a real command and stays genuine.
+
+**Limitation** (documented, not a bug): a real-command *disguise* such as
+`true && echo "tests passed"` or `echo a && echo "tests passed"` is not
+caught — the threat model is the model's own lazy single-`echo "done"`
+pattern, not adversarial evasion. The chaining char in a disguise keeps the
+command in the genuine set by design (avoiding false positives on real
+chained verification).
 
 ### Response
 
@@ -75,11 +92,14 @@ same pattern the marker would re-enable.
 
 ### Tests
 
-`tests/test_completion_verify.sh` covers 12 cases: 8 acceptance scenarios
+`tests/test_completion_verify.sh` covers 17 cases: 8 acceptance scenarios
 (same-turn pass, no-Bash claim, no-evidence claim, no-paste claim,
 mid-message claim ignored, non-Bash tool ignored, realistic pytest
-output, Korean evidence) and 4 fail-safes (`stop_hook_active`, missing
-transcript, empty file, malformed JSONL). Run before editing the hook:
+output, Korean evidence), 5 anti-gaming scenarios (echo-fabricated blocked,
+printf-fabricated blocked, real command chained with echo passes, Korean
+echo-fabricated blocked, echo of command-substitution passes — issue #758),
+and 4 fail-safes (`stop_hook_active`, missing transcript, empty file,
+malformed JSONL). Run before editing the hook:
 
 ```bash
 ./tests/test_completion_verify.sh
