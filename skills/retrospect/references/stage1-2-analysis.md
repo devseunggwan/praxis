@@ -191,6 +191,28 @@ jsonl when readable and emit the Stage 3 transcript receipt trail. The same
 scope window applies to `tool_census`, `user_correction`, and
 `self_correction`, so their counts and early-exit decisions share one oracle.
 
+**Sidechain (subagent) inclusion — observation layer (MUST, issue #763).**
+The friction/error lanes (`friction_events`, `tool_census`, `self_correction`,
+and the `is_error` enumeration below) scan the **full corpus, including
+`isSidechain: true` transcript entries** — the events produced inside delegated
+agents (`git-master`, the `review-*` family, `tracer`/`analyst`, any spawned
+subagent). A subagent's `session_id` is identical to the parent's, so
+`isSidechain` is the only discriminator: attribute sidechain-origin friction to
+its delegated agent and surface it distinctly rather than dropping it. Dropping
+sidechain events lets repeated tool errors / retries / verification gaps that
+happened *inside* a delegated agent read as parent-session "smooth / no
+corrections" — the sidechain variant of the global `Retrospect = full corpus,
+not salient window` rule.
+
+This inclusion is **scoped to the observation/retrospect layer only**. It does
+**not** override the discipline-gate `isSidechain` filters in the enforcement
+layer (`completion-verify`, `merge-state-claim-gate`), which correctly exclude
+sidechain entries so that a subagent's *intermediate* completion claim is never
+mistaken for the parent turn's completion. Observation-layer inclusion and
+enforcement-layer exclusion are both correct; do not conflate them or "fix" one
+by changing the other. Retrospect never emits a completion-claim block, so
+including sidechain friction here carries no enforcement risk.
+
 1. **`friction_events`**
    - up to 5 friction events feeding the friction analysis path
 2. **`successful_patterns`**

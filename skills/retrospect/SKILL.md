@@ -157,6 +157,13 @@ Run the symmetric pre-scan before agent calls. The full mechanics live in
 - `user_correction`
 - `self_correction`
 
+The friction/error lanes scan the full corpus **including `isSidechain: true`
+(subagent) events**, attributed to their delegated agent — so friction inside
+`git-master` / `review-*` is not misread as parent "smooth" (issue #763). This
+observation-layer inclusion does not touch the enforcement-layer discipline
+gates' intentional `isSidechain` filter. Full rule in
+[`references/stage1-2-analysis.md`](references/stage1-2-analysis.md).
+
 **Mandatory categorization:**
 
 Every emitted finding must carry at least one of:
