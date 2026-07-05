@@ -241,6 +241,14 @@ Releases are fully automated by `.github/workflows/release-please.yml`
 4. Merge the release PR (squash). The next push-to-`main` run tags the commit
    `vX.Y.Z` and publishes the GitHub Release.
 
+> **Squash-merge determines the version bump.** Because every PR is squash-merged,
+> release-please sees one commit per PR whose type is the **PR title's**
+> Conventional Commit type — not the individual branch commits. A `ci:` / `chore:`
+> / `docs:` PR title bumps **patch**; `feat:` bumps **minor**; a `!` / `BREAKING
+> CHANGE` bumps **major**. Title release-worthy PRs accordingly. To force a
+> specific version regardless of title, put `Release-As: X.Y.Z` in the merged
+> commit body (a one-time override — see the release-please README).
+
 ### One-time setup — the `RELEASE_PLEASE_TOKEN` secret
 
 release-please must act through a fine-grained PAT (or a GitHub App), **not**
