@@ -47,12 +47,27 @@ jobs:
       # release-please bumps VERSION in the release PR, regenerate the manifests
       # on that PR branch so the drift gate passes. Pushed with the PAT so the
       # release PR's `ci` checks re-run against the synced tree.
+      # Guard on `prs_created` (a plain boolean-string output), NOT on `pr`.
+      # On a *tagging* run (release PR already merged → tag+Release published,
+      # no new PR opened) `steps.release.outputs.pr` is empty. Referencing
+      # `fromJson(steps.release.outputs.pr)` inside `env:` makes GitHub evaluate
+      # `fromJson('')` while setting the step up — which throws
+      # "Error reading JToken from JsonReader" and fails the run even though the
+      # step's `if:` is false. So: gate on `prs_created`, pass the raw PR JSON
+      # through env (empty string is harmless — no fromJson at eval time), and
+      # parse the branch name with jq inside `run:`, which only executes when the
+      # guard holds.
       - name: Sync platform manifests on the release PR
-        if: ${{ steps.release.outputs.pr }}
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          PR_BRANCH: ${{ fromJson(steps.release.outputs.pr).headBranchName }}
+          PR_JSON: ${{ steps.release.outputs.pr }}
         run: |
+          PR_BRANCH="$(printf '%s' "${PR_JSON}" | jq -r '.headBranchName')"
+          if [ -z "${PR_BRANCH}" ] || [ "${PR_BRANCH}" = "null" ]; then
+            echo "no release PR branch in outputs — nothing to sync" >&2
+            exit 1
+          fi
           git clone --branch "${PR_BRANCH}" --depth 1 \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" rp
           cd rp
