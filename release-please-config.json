@@ -15,7 +15,16 @@
   "packages": {
     ".": {
       "release-type": "simple",
-      "version-file": "VERSION"
+      "version-file": "VERSION",
+      "extra-files": [
+        { "type": "json", "path": ".claude-plugin/plugin.json", "jsonpath": "$..version" },
+        { "type": "json", "path": ".claude-plugin/marketplace.json", "jsonpath": "$..version" },
+        { "type": "json", "path": ".agents/plugins/marketplace.json", "jsonpath": "$..version" },
+        { "type": "json", "path": ".cursor-plugin/plugin.json", "jsonpath": "$..version" },
+        { "type": "json", "path": ".opencode/plugin.json", "jsonpath": "$..version" },
+        { "type": "json", "path": "gemini-extension.json", "jsonpath": "$..version" },
+        { "type": "json", "path": "plugins/praxis/.codex-plugin/plugin.json", "jsonpath": "$..version" }
+      ]
     }
   }
 }
