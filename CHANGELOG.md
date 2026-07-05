@@ -5,17 +5,6 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- `ci`: release-integrity automation — a `changelog` CI job + `scripts/check-changelog-completeness.sh`
-  fail a version-bump PR whose `## [X.Y.Z]` section declares an "N PRs since
-  X.Y.Z" count that disagrees with the PRs actually merged into the release (the
-  v7.1.0 notes claimed 4 while 11 merged). `release.yml` `workflow_dispatch` now
-  creates and pushes the release tag from inside Actions when it is absent, so
-  cutting a release no longer needs a hand-pushed tag. (#750)
-
 ## [7.1.0] - 2026-07-03
 
 11 PRs since 7.0.0. Minor release. Headline changes: the `debt`
@@ -716,7 +705,6 @@ Milestone release: 4 new PreToolUse/PostToolUse hooks, codex-review-wrap critic 
 ### Fixed
 - `finish-branch`: reorder compounding before merge (#16)
 
-[Unreleased]: https://github.com/devseunggwan/praxis/compare/v3.17.0...HEAD
 [3.17.0]: https://github.com/devseunggwan/praxis/compare/v3.16.0...v3.17.0
 [3.16.0]: https://github.com/devseunggwan/praxis/compare/v3.15.0...v3.16.0
 [3.15.0]: https://github.com/devseunggwan/praxis/compare/v3.14.0...v3.15.0

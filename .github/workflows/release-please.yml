@@ -1,0 +1,72 @@
+name: release-please
+
+# Fully-automated release (issue #752). release-please watches main; when the
+# Conventional Commits since the last release warrant one, it opens/updates a
+# "release PR" that bumps VERSION + CHANGELOG.md. Merging that PR tags the
+# commit and publishes the GitHub Release.
+#
+# Why a PAT (RELEASE_PLEASE_TOKEN) instead of the default GITHUB_TOKEN:
+# GitHub does not start workflow runs for events created by GITHUB_TOKEN, so a
+# release PR opened with it would carry NO CI checks, and the manifest-sync
+# push below would not re-trigger them either. The PAT (fine-grained: Contents,
+# Issues, and Pull requests each read+write — Issues is needed because
+# release-please labels the release PR via the Issues API) makes both the
+# release PR and the sync push run the normal `ci` checks. See
+# CONTRIBUTING.md → Releases for setup.
+on:
+  push:
+    branches: [main]
+
+# release-please needs to write commits/tags/releases, open PRs, and label them
+# (the PR label is applied via the Issues API, so issues:write is required — see
+# the release-please-action README).
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # VERSION is the single source of truth; the 10 per-platform manifests are
+      # generated from it (scripts/build-plugin-manifests.py) and their version
+      # is gated by scripts/check-plugin-manifests.py's VERSION-DRIFT check. When
+      # release-please bumps VERSION in the release PR, regenerate the manifests
+      # on that PR branch so the drift gate passes. Pushed with the PAT so the
+      # release PR's `ci` checks re-run against the synced tree.
+      - name: Sync platform manifests on the release PR
+        if: ${{ steps.release.outputs.pr }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          PR_BRANCH: ${{ fromJson(steps.release.outputs.pr).headBranchName }}
+        run: |
+          git clone --branch "${PR_BRANCH}" --depth 1 \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" rp
+          cd rp
+          python3 scripts/build-plugin-manifests.py
+          # `git status --porcelain` (not `git diff --quiet`) so a newly generated
+          # file — build-plugin-manifests.py can mkdir/write new hook wrappers —
+          # is detected, and `git add -A` stages new/modified/deleted alike (a
+          # bare `commit -am` would silently drop an untracked new file).
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "manifests already in sync — nothing to commit"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: sync platform manifests to release version"
+          git push origin "HEAD:${PR_BRANCH}"

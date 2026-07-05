@@ -118,23 +118,6 @@ jobs:
             './**/*.md'
           fail: true
 
-  # Release-count guard (#750): fail a version-bump PR whose newest CHANGELOG
-  # section declares "N PRs since X.Y.Z" that disagrees with the PRs actually
-  # merged into the release. Self-gating — passes when the count matches, skips
-  # sections without the count line, and fails open when history is too shallow
-  # to resolve the range — so it is safe to run on every push/PR.
-  changelog:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          # Full history + tags so the guard can resolve the [prev]..[current]
-          # changelog-section commit range via `git log -S`.
-          fetch-depth: 0
-          persist-credentials: false
-      - run: bash scripts/check-changelog-completeness.sh
-
   # reviewdog posts inline review comments, which only works in PR context —
   # so the two reviewdog jobs are gated to pull_request and skip on push:main.
   actionlint:
