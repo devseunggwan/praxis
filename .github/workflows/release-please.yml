@@ -15,9 +15,12 @@ on:
   push:
     branches: [main]
 
-# release-please needs to write commits/tags/releases and open PRs.
+# release-please needs to write commits/tags/releases, open PRs, and label them
+# (the PR label is applied via the Issues API, so issues:write is required — see
+# the release-please-action README).
 permissions:
   contents: write
+  issues: write
   pull-requests: write
 
 concurrency:

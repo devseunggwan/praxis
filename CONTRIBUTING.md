@@ -251,6 +251,7 @@ checks and the manifest-sync push would not re-trigger them.
 Create a fine-grained personal access token scoped to this repository with:
 
 - **Contents**: Read and write
+- **Issues**: Read and write (release-please labels the release PR via the Issues API)
 - **Pull requests**: Read and write
 
 Store it as the repository secret `RELEASE_PLEASE_TOKEN`:
