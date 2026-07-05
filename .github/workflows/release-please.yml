@@ -55,11 +55,16 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" rp
           cd rp
           python3 scripts/build-plugin-manifests.py
-          if git diff --quiet; then
+          # `git status --porcelain` (not `git diff --quiet`) so a newly generated
+          # file — build-plugin-manifests.py can mkdir/write new hook wrappers —
+          # is detected, and `git add -A` stages new/modified/deleted alike (a
+          # bare `commit -am` would silently drop an untracked new file).
+          if [ -z "$(git status --porcelain)" ]; then
             echo "manifests already in sync — nothing to commit"
             exit 0
           fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore: sync platform manifests to release version"
+          git add -A
+          git commit -m "chore: sync platform manifests to release version"
           git push origin "HEAD:${PR_BRANCH}"
