@@ -8,9 +8,11 @@ name: release-please
 # Why a PAT (RELEASE_PLEASE_TOKEN) instead of the default GITHUB_TOKEN:
 # GitHub does not start workflow runs for events created by GITHUB_TOKEN, so a
 # release PR opened with it would carry NO CI checks, and the manifest-sync
-# push below would not re-trigger them either. The PAT (fine-grained: Contents
-# read+write, Pull requests read+write) makes both the release PR and the sync
-# push run the normal `ci` checks. See CONTRIBUTING.md → Releases for setup.
+# push below would not re-trigger them either. The PAT (fine-grained: Contents,
+# Issues, and Pull requests each read+write — Issues is needed because
+# release-please labels the release PR via the Issues API) makes both the
+# release PR and the sync push run the normal `ci` checks. See
+# CONTRIBUTING.md → Releases for setup.
 on:
   push:
     branches: [main]

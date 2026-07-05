@@ -705,7 +705,6 @@ Milestone release: 4 new PreToolUse/PostToolUse hooks, codex-review-wrap critic 
 ### Fixed
 - `finish-branch`: reorder compounding before merge (#16)
 
-[Unreleased]: https://github.com/devseunggwan/praxis/compare/v3.17.0...HEAD
 [3.17.0]: https://github.com/devseunggwan/praxis/compare/v3.16.0...v3.17.0
 [3.16.0]: https://github.com/devseunggwan/praxis/compare/v3.15.0...v3.16.0
 [3.15.0]: https://github.com/devseunggwan/praxis/compare/v3.14.0...v3.15.0
