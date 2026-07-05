@@ -100,9 +100,13 @@ fi
 # ---------------------------------------------------------------------------
 # 3. Count unique release PRs (trailing "(#N)"), excluding the version bump.
 # ---------------------------------------------------------------------------
+# `|| true` rescues the whole pipeline under `set -euo pipefail`: an all-bump
+# section (grep -vE matches nothing) or a section with no "(#N)" (grep -oE
+# matches nothing) makes a grep exit 1, which pipefail would surface as a fatal
+# substitution failure — the zero-PR case must fall through to the comparison.
 prs="$(printf '%s\n' "$subjects" \
   | grep -vE '^chore(\([^)]*\))?: bump version' \
-  | grep -oE '\(#[0-9]+\)$' | tr -cd '0-9\n' | sed '/^$/d' | sort -u)"
+  | grep -oE '\(#[0-9]+\)$' | tr -cd '0-9\n' | sed '/^$/d' | sort -u || true)"
 actual="$(printf '%s' "$prs" | grep -c . || true)"
 
 # ---------------------------------------------------------------------------
