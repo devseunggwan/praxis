@@ -5,14 +5,22 @@ name: release-please
 # "release PR" that bumps VERSION + CHANGELOG.md. Merging that PR tags the
 # commit and publishes the GitHub Release.
 #
+# VERSION is the single source of truth; the per-platform manifests are
+# generated from it (scripts/build-plugin-manifests.py) and their version field
+# is gated by scripts/check-plugin-manifests.py's VERSION-DRIFT check. The
+# release PR bumps those version fields directly via the `extra-files`
+# (type: json, jsonpath: $..version) list in release-please-config.json — same
+# commit as the VERSION/CHANGELOG bump — so the drift gate passes with no extra
+# push. jsonpath-plus + detect-indent (the libs release-please uses) were
+# verified to produce byte-identical output to build-plugin-manifests.py, so
+# no manifest regeneration/commit step is needed here.
+#
 # Why a PAT (RELEASE_PLEASE_TOKEN) instead of the default GITHUB_TOKEN:
 # GitHub does not start workflow runs for events created by GITHUB_TOKEN, so a
-# release PR opened with it would carry NO CI checks, and the manifest-sync
-# push below would not re-trigger them either. The PAT (fine-grained: Contents,
-# Issues, and Pull requests each read+write — Issues is needed because
-# release-please labels the release PR via the Issues API) makes both the
-# release PR and the sync push run the normal `ci` checks. See
-# CONTRIBUTING.md → Releases for setup.
+# release PR opened with it would carry NO CI checks. The PAT (fine-grained:
+# Contents, Issues, and Pull requests each read+write — Issues is needed because
+# release-please labels the release PR via the Issues API) makes the release PR
+# run the normal `ci` checks. See CONTRIBUTING.md → Releases for setup.
 on:
   push:
     branches: [main]
@@ -40,48 +48,3 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-
-      # VERSION is the single source of truth; the 10 per-platform manifests are
-      # generated from it (scripts/build-plugin-manifests.py) and their version
-      # is gated by scripts/check-plugin-manifests.py's VERSION-DRIFT check. When
-      # release-please bumps VERSION in the release PR, regenerate the manifests
-      # on that PR branch so the drift gate passes. Pushed with the PAT so the
-      # release PR's `ci` checks re-run against the synced tree.
-      # Guard on `prs_created` (a plain boolean-string output), NOT on `pr`.
-      # On a *tagging* run (release PR already merged → tag+Release published,
-      # no new PR opened) `steps.release.outputs.pr` is empty. Referencing
-      # `fromJson(steps.release.outputs.pr)` inside `env:` makes GitHub evaluate
-      # `fromJson('')` while setting the step up — which throws
-      # "Error reading JToken from JsonReader" and fails the run even though the
-      # step's `if:` is false. So: gate on `prs_created`, pass the raw PR JSON
-      # through env (empty string is harmless — no fromJson at eval time), and
-      # parse the branch name with jq inside `run:`, which only executes when the
-      # guard holds.
-      - name: Sync platform manifests on the release PR
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          PR_JSON: ${{ steps.release.outputs.pr }}
-        run: |
-          PR_BRANCH="$(printf '%s' "${PR_JSON}" | jq -r '.headBranchName')"
-          if [ -z "${PR_BRANCH}" ] || [ "${PR_BRANCH}" = "null" ]; then
-            echo "no release PR branch in outputs — nothing to sync" >&2
-            exit 1
-          fi
-          git clone --branch "${PR_BRANCH}" --depth 1 \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" rp
-          cd rp
-          python3 scripts/build-plugin-manifests.py
-          # `git status --porcelain` (not `git diff --quiet`) so a newly generated
-          # file — build-plugin-manifests.py can mkdir/write new hook wrappers —
-          # is detected, and `git add -A` stages new/modified/deleted alike (a
-          # bare `commit -am` would silently drop an untracked new file).
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "manifests already in sync — nothing to commit"
-            exit 0
-          fi
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "chore: sync platform manifests to release version"
-          git push origin "HEAD:${PR_BRANCH}"
