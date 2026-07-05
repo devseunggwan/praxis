@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ci`: release-integrity automation — a `changelog` CI job + `scripts/check-changelog-completeness.sh`
+  fail a version-bump PR whose `## [X.Y.Z]` section declares an "N PRs since
+  X.Y.Z" count that disagrees with the PRs actually merged into the release (the
+  v7.1.0 notes claimed 4 while 11 merged). `release.yml` `workflow_dispatch` now
+  creates and pushes the release tag from inside Actions when it is absent, so
+  cutting a release no longer needs a hand-pushed tag. (#750)
+
 ## [7.1.0] - 2026-07-03
 
 11 PRs since 7.0.0. Minor release. Headline changes: the `debt`

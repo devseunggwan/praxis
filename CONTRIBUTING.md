@@ -225,19 +225,20 @@ Releases are automated by `.github/workflows/release.yml`. To cut one:
 
 1. In your version-bump PR, set `VERSION` and move the `## [Unreleased]`
    entries under a new `## [X.Y.Z] - YYYY-MM-DD` header in `CHANGELOG.md`.
-2. After it merges to `main`, tag the merge commit and push the tag:
-
-   ```bash
-   git tag vX.Y.Z && git push origin vX.Y.Z
-   ```
-
-3. The `release` workflow builds the body from that CHANGELOG section (via
+2. After it merges to `main`, trigger the `release` workflow via
+   `workflow_dispatch` with the tag (e.g. `v7.1.0`) — from the Actions tab or
+   `gh workflow run release.yml -f tag=vX.Y.Z`. When the tag does not yet
+   exist, the workflow **creates and pushes it from inside Actions**, pointed
+   at the `main` commit whose `VERSION` matches, then publishes the release. No
+   hand-pushed tag is needed (and a policy-restricted session that cannot push
+   `refs/tags/*` is not a blocker).
+3. The workflow builds the body from that CHANGELOG section (via
    `scripts/extract-changelog-section.sh`) plus a fixed Install/Update footer
    and publishes the GitHub Release.
 
-To (re)generate a single release by hand, run the workflow via
-`workflow_dispatch` with the tag (e.g. `v6.2.0`). Re-running edits the
-existing release instead of duplicating it.
+Re-running `workflow_dispatch` on an existing tag just edits that release
+instead of duplicating it. Pushing a `vX.Y.Z` tag by hand still works as a
+fallback and triggers the same publish path.
 
 ### Pre-PR checklist (version bump)
 
@@ -257,10 +258,20 @@ manifests silently:
 # 3. The release workflow can extract that section (this is the release
 #    body's actual source, not CHANGELOG.md read informally)
 bash scripts/extract-changelog-section.sh X.Y.Z
+
+# 4. The new section's "N PRs since X.Y.Z" count matches the PRs actually
+#    merged into the release (guards the #750 omission — a hand-written count
+#    that undercounts silently drops entries from the published notes). CI runs
+#    this too (the `changelog` job).
+bash scripts/check-changelog-completeness.sh
 ```
 
 If step 3 exits non-zero (exit 2 = version not found in `CHANGELOG.md`), the
-section header doesn't match `VERSION` — fix it before opening the PR.
+section header doesn't match `VERSION` — fix it before opening the PR. If step 4
+exits non-zero, reconcile the changelog: add the missing entries and correct the
+`N PRs since` count (or, for a PR deliberately folded into another entry, adjust
+the count). The count is bounded by the `## [prev]`..`## [current]` section
+range, so post-release hotfixes never inflate a frozen release's number.
 
 ## Testing
 

@@ -3,15 +3,21 @@ name: release
 # Publishes a GitHub Release whenever a vX.Y.Z tag is pushed. The release body
 # is the matching CHANGELOG.md section (via scripts/extract-changelog-section.sh)
 # plus a fixed Install/Update footer, so the release notes always track the
-# changelog. workflow_dispatch lets a maintainer (re)generate one release by
-# tag — re-running is idempotent (an existing release is edited, not duplicated).
+# changelog.
+#
+# workflow_dispatch is the tagless cut path (#750): a maintainer runs it with a
+# tag input and — if that tag does not yet exist — the "Ensure tag exists" step
+# creates and pushes it from inside Actions (using GITHUB_TOKEN, which can push
+# refs/tags/* that a policy-restricted session cannot), pointed at the checked-out
+# commit only when its VERSION matches. Dispatching an already-existing tag just
+# re-generates that release, so re-running is idempotent (edited, not duplicated).
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to (re)generate the release for, e.g. v6.2.0"
+        description: "Tag to cut/(re)generate the release for, e.g. v7.1.0"
         required: true
 
 # Least-privilege default (mirrors ci.yml / codeql.yml); the release job
@@ -52,10 +58,48 @@ jobs:
           fi
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
+      # Tagless cut path: on workflow_dispatch, create the tag inside Actions
+      # when it is absent so releasing never needs a hand-pushed tag. The tag is
+      # placed on the checked-out commit (default branch HEAD) ONLY when its
+      # VERSION file matches the requested version, so a stale checkout can't be
+      # mistagged. Re-generating an existing release (tag already fetched by the
+      # fetch-depth:0 checkout) skips creation. On the push:tags path this step
+      # is skipped and behavior is unchanged.
+      - name: Ensure tag exists
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Bind through env — the tag traces to the user-supplied dispatch
+          # input, so inlining it into this GH_TOKEN-holding run block would be a
+          # shell-injection vector (matches the "Resolve tag" hardening pattern).
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          tag="${TAG}"
+          version="${tag#v}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "tag ${tag} already exists — skipping creation (re-generate path)"
+            exit 0
+          fi
+          file_version="$(cat VERSION)"
+          if [ "${file_version}" != "${version}" ]; then
+            echo "::error::VERSION file (${file_version}) does not match requested tag ${tag}. Bump VERSION to ${version} and merge it before cutting the release." >&2
+            exit 1
+          fi
+          sha="$(git rev-parse HEAD)"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${tag}" -m "${tag}" "${sha}"
+          # persist-credentials:false keeps the token out of .git/config, so
+          # authenticate this single push via a tokened remote URL.
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${tag}"
+          echo "created and pushed ${tag} at ${sha}"
+
       - name: Build release notes
         id: notes
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          tag="${{ steps.tag.outputs.tag }}"
+          tag="${TAG}"
           version="${tag#v}"
           notes="$(mktemp)"
           # ANSI-C quoting keeps the ``` code fence literal (single quotes would
@@ -70,9 +114,11 @@ jobs:
       - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          NOTES_FILE: ${{ steps.notes.outputs.file }}
         run: |
-          tag="${{ steps.tag.outputs.tag }}"
-          notes="${{ steps.notes.outputs.file }}"
+          tag="${TAG}"
+          notes="${NOTES_FILE}"
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "release $tag exists — updating notes"
             gh release edit "$tag" --notes-file "$notes"
