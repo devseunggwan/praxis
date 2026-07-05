@@ -226,7 +226,7 @@ Added, `fix` → Fixed, `perf`/`refactor`/`docs`/`ci` → Changed; `chore`/`test
 Releases are fully automated by `.github/workflows/release-please.yml`
 (issue #752). You do **not** cut releases by hand or bump `VERSION` yourself.
 
-**How it works**
+### How it works
 
 1. Every push to `main` runs release-please. It reads the Conventional Commits
    since the last release and, when one is warranted, opens (or updates) a
@@ -241,7 +241,7 @@ Releases are fully automated by `.github/workflows/release-please.yml`
 4. Merge the release PR (squash). The next push-to-`main` run tags the commit
    `vX.Y.Z` and publishes the GitHub Release.
 
-**One-time setup — the `RELEASE_PLEASE_TOKEN` secret**
+### One-time setup — the `RELEASE_PLEASE_TOKEN` secret
 
 release-please must act through a fine-grained PAT (or a GitHub App), **not**
 the default `GITHUB_TOKEN`: GitHub does not start workflow runs for events
@@ -260,7 +260,7 @@ Store it as the repository secret `RELEASE_PLEASE_TOKEN`:
 gh secret set RELEASE_PLEASE_TOKEN --repo <owner>/<repo>
 ```
 
-**Versioning source of truth**
+### Versioning source of truth
 
 `VERSION` is authoritative and release-please owns bumping it;
 `.release-please-manifest.json` tracks the last released version. Never bump
