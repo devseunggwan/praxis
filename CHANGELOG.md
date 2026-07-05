@@ -5,6 +5,19 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.2.1](https://github.com/devseunggwan/praxis/compare/v7.2.0...v7.2.1) (2026-07-05)
+
+
+### Fixed
+
+* **ci:** guard release-please sync on tagging run ([#759](https://github.com/devseunggwan/praxis/issues/759)) ([f7f7c58](https://github.com/devseunggwan/praxis/commit/f7f7c585db3ae82f46ef5432a7f8b5f46e163e92)), closes [#757](https://github.com/devseunggwan/praxis/issues/757)
+* **completion-verify:** block echo-fabricated evidence ([#762](https://github.com/devseunggwan/praxis/issues/762)) ([167c267](https://github.com/devseunggwan/praxis/commit/167c2678d86559c612f51be84711d7b3876e8d7e))
+
+
+### Changed
+
+* **ci:** bump manifests via release-please extra-files ([#764](https://github.com/devseunggwan/praxis/issues/764)) ([512d425](https://github.com/devseunggwan/praxis/commit/512d425cc597c3726486cf48e5756287b037ac1f)), closes [#761](https://github.com/devseunggwan/praxis/issues/761)
+
 ## [7.2.0](https://github.com/devseunggwan/praxis/compare/v7.1.0...v7.2.0) (2026-07-05)
 
 
