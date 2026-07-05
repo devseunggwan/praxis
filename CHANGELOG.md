@@ -5,6 +5,14 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.2.0](https://github.com/devseunggwan/praxis/compare/v7.1.0...v7.2.0) (2026-07-05)
+
+
+### Changed
+
+* automate releases with release-please ([#753](https://github.com/devseunggwan/praxis/issues/753)) ([6054b77](https://github.com/devseunggwan/praxis/commit/6054b77426614a57b255e8a32ebbee79dc120bfa))
+* note squash-title drives release-please bump ([#756](https://github.com/devseunggwan/praxis/issues/756)) ([4c69904](https://github.com/devseunggwan/praxis/commit/4c699043cf24994a0bcd12b22b3063b765583405))
+
 ## [7.1.0] - 2026-07-03
 
 11 PRs since 7.0.0. Minor release. Headline changes: the `debt`
