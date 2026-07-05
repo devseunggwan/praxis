@@ -69,8 +69,12 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
+          # Bind through env — the tag traces to the user-supplied dispatch
+          # input, so inlining it into this GH_TOKEN-holding run block would be a
+          # shell-injection vector (matches the "Resolve tag" hardening pattern).
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          tag="${{ steps.tag.outputs.tag }}"
+          tag="${TAG}"
           version="${tag#v}"
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo "tag ${tag} already exists — skipping creation (re-generate path)"
@@ -92,8 +96,10 @@ jobs:
 
       - name: Build release notes
         id: notes
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          tag="${{ steps.tag.outputs.tag }}"
+          tag="${TAG}"
           version="${tag#v}"
           notes="$(mktemp)"
           # ANSI-C quoting keeps the ``` code fence literal (single quotes would
@@ -108,9 +114,11 @@ jobs:
       - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          NOTES_FILE: ${{ steps.notes.outputs.file }}
         run: |
-          tag="${{ steps.tag.outputs.tag }}"
-          notes="${{ steps.notes.outputs.file }}"
+          tag="${TAG}"
+          notes="${NOTES_FILE}"
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "release $tag exists — updating notes"
             gh release edit "$tag" --notes-file "$notes"
