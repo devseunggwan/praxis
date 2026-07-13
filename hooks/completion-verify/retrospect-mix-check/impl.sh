@@ -40,6 +40,90 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
 [ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
 [ ! -f "$TRANSCRIPT_PATH" ] && exit 0
 
+# ── Silent-pass scan + critic-run detection (issue #772) ──────────────────────
+# HOISTED above every gate because Gate-8c's eligibility (below) consumes
+# GATE9_HARD_COUNT (NEW-2). Everything here is FAIL-OPEN: a missing scanner /
+# catalog, or any jq error, must never convert a pass into a crash — all
+# captures use `2>/dev/null` with numeric/string defaults.
+_SP_LIB="$(dirname "$0")/../../_lib"
+SP_SCANNER="$_SP_LIB/scan-silent-pass.sh"
+SP_CATALOG="$_SP_LIB/silent-pass-catalog.json"
+SILENT_PASS_MATCHES=""
+if [ -f "$SP_SCANNER" ] && [ -f "$SP_CATALOG" ]; then
+  SILENT_PASS_MATCHES=$(bash "$SP_SCANNER" --transcript "$TRANSCRIPT_PATH" --catalog "$SP_CATALOG" 2>/dev/null || true)
+fi
+# Count of HARD (zero-FP) silent-pass candidates — drives Gate-9 coverage AND
+# Gate-8c/Gate-10 eligibility. awk emits `c+0` so this is always an integer.
+GATE9_HARD_COUNT=$(printf '%s\n' "$SILENT_PASS_MATCHES" \
+  | awk -F'\t' 'NF>=2 && $2=="hard" { c++ } END { print c+0 }')
+
+# Strong-correction count (transcript-derived eligibility half). This is the SAME
+# regex + jq the Gate-8c floor uses; hoisted here so both Gate-8c and the
+# block-decision Gate-10 read one value (no double jq, no drift). Kept low-FP per
+# issue #722 (see the Gate-8c comment for the dropped everyday tokens).
+SP_STRONG_CORRECTION_RE="하라고 했잖아|that's not what I asked|그렇게 하지 말라고"
+LIVE_STRONG_UC_COUNT=$(jq -r --arg re "$SP_STRONG_CORRECTION_RE" '
+  def human_text_payload:
+    (.message.content // .content // empty) as $c
+    | if ($c|type) == "array" then
+        $c[]? | if type == "object" then
+          if ((.type? // "text") == "text") then (.text? // empty) else empty end
+        else tostring end
+      elif ($c|type) == "string" then $c
+      else empty end;
+  select(type == "object" and .type != "tool_result" and (.message.role == "user" or .role == "user" or .type == "user") and ([human_text_payload] | join("\n") | test($re; "i"))) | 1
+' "$TRANSCRIPT_PATH" 2>/dev/null | wc -l | tr -d '[:space:]')
+LIVE_STRONG_UC_COUNT=${LIVE_STRONG_UC_COUNT:-0}
+
+# Critic-run detection (D-C2 anti-tamper oracle). The authoritative "did the
+# externalized critic actually run" signal is a `critic_roots:` block emitted in
+# the critic subagent's RETURN. A subagent return is delivered to the main agent
+# as a role:user tool_result record, so we extract text ONLY from tool_result
+# blocks — via `.. | objects | select(.type=="tool_result")`, which finds a
+# tool_result at top level OR nested inside a user message's content array. A
+# `retrospect:critic_roots` fence pasted into the MAIN agent's assistant text
+# (isSidechain:false) is display-only and MUST NOT count — that is the C2
+# property (the agent cannot self-certify the tier by pasting a fence), and it is
+# structurally excluded here because assistant text never lives in a tool_result
+# block. Tool_result attribution is reliable with the pinned critic contract, so
+# the plan's isSidechain:true fallback is NOT used. jq errors on a partially
+# written final line fail open (empty text ⇒ CRITIC_RAN=false ⇒ Gate-8c may
+# block an eligible session — the safe direction).
+CRITIC_TR_TEXT=$(jq -rs '
+  def tr_texts:
+    .. | objects | select(.type == "tool_result")
+    | (.content // .text // empty) as $c
+    | if ($c | type) == "array" then
+        ($c[]? | if type == "object" then (.text? // empty)
+                 elif type == "string" then .
+                 else empty end)
+      elif ($c | type) == "string" then $c
+      else empty end;
+  [ .[] | tr_texts ] | join("\n")
+' "$TRANSCRIPT_PATH" 2>/dev/null || true)
+CRITIC_RAN=false
+CRITIC_ROOTS=""
+if printf '%s\n' "$CRITIC_TR_TEXT" | grep -q 'critic_roots:'; then
+  CRITIC_RAN=true
+  # Root-ids are the contiguous `- <root-id>: <one-line>` bullets that follow the
+  # `critic_roots:` header (blank lines inside the block are tolerated). An empty
+  # block (header with no bullets) yields zero roots → CRITIC_RAN=true with empty
+  # CRITIC_ROOTS (critic ran, 0 roots).
+  CRITIC_ROOTS=$(printf '%s\n' "$CRITIC_TR_TEXT" | awk '
+    /critic_roots:/ { f=1; next }
+    f && /^[[:space:]]*$/ { next }
+    f && /^[[:space:]]*-[[:space:]]*[^:]+:/ {
+      s=$0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", s)
+      sub(/:.*/, "", s)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+      if (s != "") print s
+      next
+    }
+    f { exit }
+  ')
+fi
+
 # Extract last assistant message text from the transcript JSONL.
 LAST_TEXT=$(tail -n 400 "$TRANSCRIPT_PATH" | jq -rs '
   [ .[]
@@ -729,26 +813,94 @@ else
       # .*아니' candidate was rejected for matching exactly those, code-reviewer
       # #722), genuine corrections 3/3 match. The dropped tokens remain the prose
       # self-incrimination layer's job, not this hard block's.
-      sl_strong_correction_re="하라고 했잖아|that's not what I asked|그렇게 하지 말라고"
-      live_sl_strong_uc_count=$(jq -r --arg re "$sl_strong_correction_re" '
-        def human_text_payload:
-          (.message.content // .content // empty) as $c
-          | if ($c|type) == "array" then
-              $c[]? | if type == "object" then
-                if ((.type? // "text") == "text") then (.text? // empty) else empty end
-              else tostring end
-            elif ($c|type) == "string" then $c
-            else empty end;
-        select(type == "object" and .type != "tool_result" and (.message.role == "user" or .role == "user" or .type == "user") and ([human_text_payload] | join("\n") | test($re; "i"))) | 1
-      ' "$TRANSCRIPT_PATH" 2>/dev/null | wc -l | tr -d '[:space:]')
-      live_sl_strong_uc_count=${live_sl_strong_uc_count:-0}
-      sl_critic_line=$(printf '%s\n' "$SLEDGER_BLOCK" | grep -iE '^[[:space:]]*-?[[:space:]]*critic_diff:[[:space:]]*.+' | tail -n 1)
-      if printf '%s\n' "$sl_critic_line" | grep -qiE 'critic_diff:[[:space:]]*not-run' && [ "$live_sl_strong_uc_count" -gt "$GATE8_SIGNAL_TOLERANCE" ]; then
-        GATE8_VIOLATION="critic_diff is 'not-run' but a live transcript scan finds $live_sl_strong_uc_count explicit user-correction marker(s) (tolerance=$GATE8_SIGNAL_TOLERANCE) — the externalized critic tier predicate (a friction_event required user correction) was satisfied, so the tier must actually run, not be self-skipped. Spawn the READ-ONLY critic, brief it with the verbatim worst_agent_failure, and record its diff in critic_diff; 'not-run' is reserved for the genuinely sub-tolerance user-correction path"
+      # NEW-1 (#772): "did the critic run" is TRANSCRIPT-DERIVED (CRITIC_RAN, a
+      # critic_roots block in a subagent tool_result), NOT the agent's critic_diff
+      # label. Eligibility fires on EITHER a hard silent-pass candidate
+      # (GATE9_HARD_COUNT>0) OR the strong-correction floor (LIVE_STRONG_UC_COUNT
+      # > tolerance) — both hoisted above. When eligible AND the critic did not
+      # actually run, block REGARDLESS of the label (not-run/none/checked): a
+      # `none`/`checked` string is no longer a dodge. LIVE_STRONG_UC_COUNT is the
+      # same value the old local jq computed (regex per the comment above).
+      live_sl_strong_uc_count="$LIVE_STRONG_UC_COUNT"
+      eligible=false
+      if [ "${GATE9_HARD_COUNT:-0}" -gt 0 ] || [ "$live_sl_strong_uc_count" -gt "$GATE8_SIGNAL_TOLERANCE" ]; then
+        eligible=true
+      fi
+      if [ "$eligible" = "true" ] && [ "$CRITIC_RAN" != "true" ]; then
+        GATE8_VIOLATION="critic tier owed (eligible: hard silent-pass candidate present and/or user corrections; gate9_hard_candidate_count=${GATE9_HARD_COUNT:-0} strong_user_correction_count=$live_sl_strong_uc_count, tolerance=$GATE8_SIGNAL_TOLERANCE) but no critic_roots block found in any transcript subagent return — the externalized critic must actually run; a 'none'/'checked'/'not-run' label without a real critic subagent return does not satisfy the tier. Spawn the READ-ONLY critic, brief it with the verbatim worst_agent_failure, and record its critic_roots block (the subagent's own return is the oracle, not a pasted fence)"
       fi
     fi
   fi
 fi
+fi
+
+# Gate-9 (silent-pass candidate coverage, issue #772). For each HARD grep-detected
+# silent-pass candidate (from the hoisted scan), the report MUST cover it via
+# EITHER a structured `covers: <class-id>` token in a findings-table Rationale
+# cell (mirrors the backing_repo: parse) OR the class-id listed inside a
+# '<!-- retrospect:dismissed_candidates begin/end -->' fence. A bare prose mention
+# of the keyword (e.g. "credential") does NOT satisfy coverage — the `covers:`
+# token is required (H3 precision). SOFT matches are front-load hints and NEVER
+# block, so only field-2 == "hard" rows are evaluated here.
+declare -a GATE9_VIOLATIONS=()
+if [ -n "$SILENT_PASS_MATCHES" ]; then
+  DISMISSED_BLOCK=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk '
+    /<!--[[:space:]]*retrospect:dismissed_candidates begin[[:space:]]*-->/ { capture=1; next }
+    /<!--[[:space:]]*retrospect:dismissed_candidates end[[:space:]]*-->/ { capture=0 }
+    capture { print }
+  ')
+  while IFS=$'\t' read -r sp_id sp_sev sp_ev; do
+    [ -z "$sp_id" ] && continue
+    [ "$sp_sev" = "hard" ] || continue
+    sp_covered=false
+    # (a) `covers: <class-id>` structured token, class-id bounded so a longer id
+    #     with the same prefix cannot false-satisfy it.
+    if printf '%s\n' "$MOST_RECENT_BLOCK" | grep -qE "covers:[[:space:]]*${sp_id}([^A-Za-z0-9_-]|$)"; then
+      sp_covered=true
+    fi
+    # (b) class-id explicitly listed inside the dismissed_candidates fence.
+    if [ "$sp_covered" = "false" ] && [ -n "$DISMISSED_BLOCK" ] \
+       && printf '%s\n' "$DISMISSED_BLOCK" | grep -qF "$sp_id"; then
+      sp_covered=true
+    fi
+    if [ "$sp_covered" = "false" ]; then
+      GATE9_VIOLATIONS+=("silent-pass candidate '${sp_id}' (hard) neither reported (covers: ${sp_id}) nor dismissed")
+    fi
+  done <<< "$SILENT_PASS_MATCHES"
+fi
+
+# Gate-10 (critic-root coverage, issue #772). Fires only when the critic tier is
+# OWED (eligible = hard candidate OR strong-correction floor). The eligible-AND-
+# critic-DID-NOT-run case is already blocked by Gate-8c (NEW-1); Gate-10 handles
+# the critic-RAN-WITH-roots case: every critic root-id parsed from the subagent's
+# own transcript return must be covered in the findings OR explicitly folded with
+# a non-empty reason (`folded: <root-id> because <reason>`). Empty roots (critic
+# ran, 0 roots) → accept (SL30 / H1). A bare `folded: <id>` with no reason does
+# NOT count as coverage.
+GATE10_ELIGIBLE=false
+if [ "${GATE9_HARD_COUNT:-0}" -gt 0 ] || [ "${LIVE_STRONG_UC_COUNT:-0}" -gt "${GATE8_SIGNAL_TOLERANCE:-1}" ]; then
+  GATE10_ELIGIBLE=true
+fi
+declare -a GATE10_VIOLATIONS=()
+if [ "$GATE10_ELIGIBLE" = "true" ] && [ "$CRITIC_RAN" = "true" ] && [ -n "$CRITIC_ROOTS" ]; then
+  while IFS= read -r root_id; do
+    [ -z "$root_id" ] && continue
+    root_covered=false
+    # Valid fold: `folded: <root-id> because <non-empty reason>`.
+    if printf '%s\n' "$MOST_RECENT_BLOCK" | grep -qE "folded:[[:space:]]*${root_id}[[:space:]]+because[[:space:]]+[^[:space:]]"; then
+      root_covered=true
+    else
+      # Genuine coverage: the root-id appears on a line that is NOT a `folded:
+      # <id>` line (a findings-table row / covers-style mention). Excluding the
+      # folded line prevents a reason-less `folded: <id>` from masquerading as
+      # coverage.
+      other=$(printf '%s\n' "$MOST_RECENT_BLOCK" | grep -F "$root_id" | grep -vE "folded:[[:space:]]*${root_id}([^A-Za-z0-9_-]|$)")
+      [ -n "$other" ] && root_covered=true
+    fi
+    if [ "$root_covered" = "false" ]; then
+      GATE10_VIOLATIONS+=("critic root '${root_id}' neither covered in findings nor folded-with-reason")
+    fi
+  done <<< "$CRITIC_ROOTS"
 fi
 
 # Decide block.
@@ -818,6 +970,18 @@ fi
 if [ -n "$GATE8_VIOLATION" ]; then
   should_block=true
   reason_parts+=("Gate-8: $GATE8_VIOLATION")
+fi
+if [ "${#GATE9_VIOLATIONS[@]}" -gt 0 ]; then
+  should_block=true
+  for v in "${GATE9_VIOLATIONS[@]}"; do
+    reason_parts+=("Gate-9: $v")
+  done
+fi
+if [ "${#GATE10_VIOLATIONS[@]}" -gt 0 ]; then
+  should_block=true
+  for v in "${GATE10_VIOLATIONS[@]}"; do
+    reason_parts+=("Gate-10: $v")
+  done
 fi
 
 if [ "$should_block" = "true" ]; then
