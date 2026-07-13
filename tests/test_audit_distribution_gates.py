@@ -337,3 +337,23 @@ def test_gate6_flag_embedded_in_card(tmp_path: Path) -> None:
         "--gate6", "PASS")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "- gate_6_verdict: PASS" in r.stdout
+
+
+def test_gate3_fail_is_violation(tmp_path: Path) -> None:
+    # CodeRabbit #775: explicit FAIL must not exit 0 with a clean audit.
+    r = run(tmp_path, draft_of(
+        row(1, "tool", "cli", "memory, issue",
+            SCHEMA_A + "<br>backing_repo: devseunggwan/praxis"),
+        extra=MS_BLOCK), "--gate3", "FAIL")
+    assert r.returncode == 1
+    assert "gate-3 verdict is FAIL" in r.stdout
+    assert "- gate_3_verdict: FAIL" in r.stdout
+
+
+def test_gate6_fail_is_violation(tmp_path: Path) -> None:
+    r = run(tmp_path, draft_of(
+        row(1, "behavioral", "—", "memory", SCHEMA_A), extra=MS_BLOCK),
+        "--gate6", "FAIL")
+    assert r.returncode == 1
+    assert "gate-6 verdict is FAIL" in r.stdout
+    assert "- gate_6_verdict: FAIL" in r.stdout

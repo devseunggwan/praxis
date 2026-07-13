@@ -377,6 +377,11 @@ def audit(findings: list[Finding], ms_blocks: dict[str, dict[str, str]],
             "PASS or FAIL"
         )
         gate3 = "FAIL"
+    elif compound and gate3 == "FAIL":
+        violations.append(
+            "gate-3 verdict is FAIL — resolve the compound-finding evidence "
+            "per stage2.5-audit.md (downgrade/demote) before Stage 3"
+        )
     elif not compound:
         if gate3 not in (None, "NA"):
             advisories.append(
@@ -384,6 +389,11 @@ def audit(findings: list[Finding], ms_blocks: dict[str, dict[str, str]],
                 f"'{gate3}' to NA"
             )
         gate3 = "NA"
+    if gate6 == "FAIL":
+        violations.append(
+            "gate-6 verdict is FAIL — re-probe with the stored oracle or "
+            "reroute per stage2.5-audit.md before Stage 3"
+        )
     gate6 = gate6 or "NA"
 
     gate1 = "FAIL" if gate1_fail else ("PASS" if findings else "NA")
