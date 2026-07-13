@@ -2253,6 +2253,38 @@ $(mk_critic_toolresult "- rootX: distinct architectural root the agent folded aw
 $(mk_assistant "$G10D_TEXT")"
 run_case "G10d_block_critic_root_folded_without_reason" "block" "$G10D_TRANSCRIPT"
 
+# G10e: block — the agent pastes the display-only `retrospect:critic_roots` fence
+# listing rootX (per the stage3 contract) but rootX is NOT in the findings table
+# and NOT folded-with-reason. The display fence must be stripped before coverage
+# matching; otherwise the fence's own verbatim listing trivially satisfies
+# coverage and Gate-10 becomes a no-op. Pre-fix this dodged (pass); it must block.
+G10E_TEXT="$(mk_retrospect_stage3_no_ledger "$G9_CARD" "$G10_ROW_COVERS_CRED")
+
+<!-- retrospect:critic_roots begin -->
+critic_roots:
+- rootX: distinct architectural root surfaced by the critic
+<!-- retrospect:critic_roots end -->
+${SL_LEDGER_ADVERSE_CRITIC_RAN}"
+G10E_TRANSCRIPT="$(mk_assistant "showing the connection secret: | aws_secret_access_key | ${SP_FAKE_SECRET} |")
+$(mk_critic_toolresult "- rootX: distinct architectural root the agent folded away")
+$(mk_assistant "$G10E_TEXT")"
+run_case "G10e_block_display_fence_only_not_covered" "block" "$G10E_TRANSCRIPT"
+
+# G10f: pass — same display fence present, but rootX is ALSO covered in a genuine
+# findings-table row. Proves the fence strip does not over-block real coverage
+# that co-exists with the display fence (the normal passing shape).
+G10F_TEXT="$(mk_retrospect_stage3_no_ledger "$G9_CARD" "$(printf '%s\n%s' "$G10_ROW_COVERS_CRED" "$G10_ROW_COVERS_ROOTX")")
+
+<!-- retrospect:critic_roots begin -->
+critic_roots:
+- rootX: distinct architectural root surfaced by the critic
+<!-- retrospect:critic_roots end -->
+${SL_LEDGER_ADVERSE_CRITIC_RAN}"
+G10F_TRANSCRIPT="$(mk_assistant "showing the connection secret: | aws_secret_access_key | ${SP_FAKE_SECRET} |")
+$(mk_critic_toolresult "- rootX: distinct architectural root the agent folded away")
+$(mk_assistant "$G10F_TEXT")"
+run_case "G10f_pass_display_fence_plus_findings_coverage" "pass" "$G10F_TRANSCRIPT"
+
 # ── Soft-only case (#772 residual boundary) ─────────────────────────────────
 # G11: pass — a create-delete-churn (soft) signal with 0 user corrections and no
 # critic. Soft classes are front-load hints only: they do NOT force eligibility

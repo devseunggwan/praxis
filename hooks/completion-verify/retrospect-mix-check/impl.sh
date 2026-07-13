@@ -883,18 +883,29 @@ if [ "${GATE9_HARD_COUNT:-0}" -gt 0 ] || [ "${LIVE_STRONG_UC_COUNT:-0}" -gt "${G
 fi
 declare -a GATE10_VIOLATIONS=()
 if [ "$GATE10_ELIGIBLE" = "true" ] && [ "$CRITIC_RAN" = "true" ] && [ -n "$CRITIC_ROOTS" ]; then
+  # Strip the display-only `retrospect:critic_roots` fence before matching. That
+  # fence lists every root verbatim for display (stage3-reporting contract), so
+  # leaving it in `MOST_RECENT_BLOCK` would let any root trivially satisfy
+  # coverage without a real findings mention or fold — making Gate-10 a no-op.
+  # Mirrors the Gate-9 DISMISSED_BLOCK strip (this awk is the inverse: it drops
+  # the fenced region and keeps the rest).
+  GATE10_MATCH_BLOCK=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk '
+    /<!--[[:space:]]*retrospect:critic_roots begin[[:space:]]*-->/ { skip=1; next }
+    /<!--[[:space:]]*retrospect:critic_roots end[[:space:]]*-->/ { skip=0; next }
+    !skip { print }
+  ')
   while IFS= read -r root_id; do
     [ -z "$root_id" ] && continue
     root_covered=false
     # Valid fold: `folded: <root-id> because <non-empty reason>`.
-    if printf '%s\n' "$MOST_RECENT_BLOCK" | grep -qE "folded:[[:space:]]*${root_id}[[:space:]]+because[[:space:]]+[^[:space:]]"; then
+    if printf '%s\n' "$GATE10_MATCH_BLOCK" | grep -qE "folded:[[:space:]]*${root_id}[[:space:]]+because[[:space:]]+[^[:space:]]"; then
       root_covered=true
     else
       # Genuine coverage: the root-id appears on a line that is NOT a `folded:
       # <id>` line (a findings-table row / covers-style mention). Excluding the
       # folded line prevents a reason-less `folded: <id>` from masquerading as
       # coverage.
-      other=$(printf '%s\n' "$MOST_RECENT_BLOCK" | grep -F "$root_id" | grep -vE "folded:[[:space:]]*${root_id}([^A-Za-z0-9_-]|$)")
+      other=$(printf '%s\n' "$GATE10_MATCH_BLOCK" | grep -F "$root_id" | grep -vE "folded:[[:space:]]*${root_id}([^A-Za-z0-9_-]|$)")
       [ -n "$other" ] && root_covered=true
     fi
     if [ "$root_covered" = "false" ]; then
