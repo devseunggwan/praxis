@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Shared silent-pass scanner for the retrospect completeness gates.
+#
+# Single source of truth for detection, called by BOTH the Stop mix-check hook
+# (Gate-9 candidate coverage) and, best-effort, the PreToolUse marker hook
+# (front-load). Detection MUST never diverge between the two callers, so both
+# invoke this one script.
+#
+# Contract:
+#   scan-silent-pass.sh --transcript <jsonl-path> --catalog <json-path>
+# Output (stdout), one line per matched class:
+#   <class-id>\t<severity>\t<evidence-snippet>
+# Exit 0 always (fail-open: a scan error must never break the calling hook).
+#
+# Design constraints (from the approved plan):
+#   - grep-only over raw JSONL text; NO per-object jq walk over the transcript
+#     (jq is used ONLY to read the small catalog file). Keeps the PreToolUse
+#     front-load inside its 5s budget.
+#   - Self-trigger safety via PRECISE EXCLUSION, never a blanket fenced-code
+#     strip: a blanket strip would blind credential-display to a secret shown
+#     inside a ``` fence (re-opening the headline case). Instead we exclude only
+#     lines that contain an exact fabricated fixture literal, an allowlist entry,
+#     or a catalog STRUCTURAL marker (the catalog file's own JSON field keys /
+#     filename) — so a retrospect that merely *reads or quotes this catalog* does
+#     not self-inject, while real conduct (a different secret value even inside a
+#     fence, or a genuine `aws secretsmanager get-secret-value` invocation) still
+#     matches. NOTE: we deliberately do NOT exclude by the raw grep_pattern
+#     string — a literal pattern's text is identical to real usage, so excluding
+#     it would blind the scanner to the very conduct it targets.
+
+set -uo pipefail
+
+TRANSCRIPT=""
+CATALOG=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --transcript) TRANSCRIPT="${2:-}"; shift 2 ;;
+    --catalog) CATALOG="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+command -v jq >/dev/null 2>&1 || exit 0
+[ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || exit 0
+[ -n "$CATALOG" ] && [ -f "$CATALOG" ] || exit 0
+
+# Filter the transcript to assistant-role records once. All catalog classes
+# scope to assistant output (displayed text OR tool_use command input, both of
+# which live in assistant records). Coarse role filtering + a specific pattern
+# does the discrimination; this is a single linear grep pass, not a jq walk.
+ASSISTANT_LINES=$(grep '"role":"assistant"' "$TRANSCRIPT" 2>/dev/null || true)
+[ -n "$ASSISTANT_LINES" ] || exit 0
+
+# Build the precise-exclusion fixed-string set: every fabricated positive_fixture
+# literal + allowlist entry (fabricated, never in real conduct), plus catalog
+# STRUCTURAL markers (JSON field keys + the catalog filename) that appear when
+# the catalog file itself is read/quoted into a transcript. Lines containing any
+# of these are catalog self-mentions, not real conduct. Raw grep_pattern strings
+# are intentionally NOT excluded (a literal pattern == real usage).
+EXCLUDE_FILE=$(mktemp 2>/dev/null) || exit 0
+trap 'rm -f "$EXCLUDE_FILE"' EXIT
+{
+  jq -r '
+    ( .fabricated_fixture_allowlist[]? ),
+    ( .classes[]? | .positive_fixture // empty )
+  ' "$CATALOG" 2>/dev/null | grep -v '^$'
+  # Bare tokens (no surrounding quotes) so they match whether the catalog is
+  # quoted raw ("grep_pattern") or JSON-escaped inside an assistant record
+  # (\"grep_pattern\"). These tokens do not occur in real credential / bypass /
+  # churn conduct, so the over-exclusion risk is negligible.
+  printf '%s\n' \
+    'silent-pass-catalog' \
+    'grep_pattern' \
+    'positive_fixture' \
+    'negative_fixture' \
+    'cooccurs_with' \
+    'fabricated_fixture_allowlist'
+} > "$EXCLUDE_FILE"
+
+# Cleaned scan scope: assistant lines minus any catalog self-mention.
+if [ -s "$EXCLUDE_FILE" ]; then
+  CLEANED=$(printf '%s\n' "$ASSISTANT_LINES" | grep -vF -f "$EXCLUDE_FILE" 2>/dev/null || true)
+else
+  CLEANED=$(printf '%s\n' "$ASSISTANT_LINES")
+fi
+[ -n "$CLEANED" ] || exit 0
+
+# Iterate classes from the catalog (jq on the small catalog only).
+class_count=$(jq -r '.classes | length' "$CATALOG" 2>/dev/null || echo 0)
+i=0
+while [ "$i" -lt "$class_count" ]; do
+  id=$(jq -r ".classes[$i].id" "$CATALOG" 2>/dev/null)
+  severity=$(jq -r ".classes[$i].severity" "$CATALOG" 2>/dev/null)
+  pat=$(jq -r ".classes[$i].grep_pattern" "$CATALOG" 2>/dev/null)
+  cooccur=$(jq -r ".classes[$i].cooccurs_with // empty" "$CATALOG" 2>/dev/null)
+  i=$((i + 1))
+  [ -n "$id" ] && [ -n "$pat" ] || continue
+
+  primary=$(printf '%s\n' "$CLEANED" | grep -E "$pat" 2>/dev/null | head -n 1)
+  [ -n "$primary" ] || continue
+
+  if [ -n "$cooccur" ]; then
+    # Co-occurrence class: both signatures must be present in the same session.
+    printf '%s\n' "$CLEANED" | grep -Eq "$cooccur" 2>/dev/null || continue
+  fi
+
+  evidence=$(printf '%s' "$primary" | grep -oE "$pat" 2>/dev/null | head -n 1 | cut -c1-60)
+  printf '%s\t%s\t%s\n' "$id" "$severity" "$evidence"
+done
+
+exit 0
