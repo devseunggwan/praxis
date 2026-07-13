@@ -186,6 +186,63 @@ and give it its own row rather than assuming its category from a sibling row.
 The skipped variant is allowed only when the transcript is genuinely
 unreachable.
 
+## Silent-pass candidate & critic-root coverage (Gate-9 / Gate-10, issue #772)
+
+Signal-driven scans miss conduct that produces NO friction (no user correction,
+no tool error): a secret shown in plaintext, a sanctioned wrapper bypassed, a
+PR created then discarded. `retrospect-mix-check` runs a deterministic grep
+catalog (`hooks/_lib/silent-pass-catalog.json`) over the live transcript and
+force-injects any match into the coverage requirement regardless of whether the
+Stage 2 scan surfaced it.
+
+### Gate-9 — hard silent-pass candidate coverage
+
+For each **hard** catalog match (currently `credential-display` and
+`sanctioned-path-bypass`), the report must EITHER:
+
+- bind it in a unified-findings-table Rationale cell with a structured token
+  `covers: <class-id>` (mirrors the `backing_repo:` parse — a bare prose mention
+  of "credential" does NOT satisfy it), OR
+- dismiss it in a `retrospect:dismissed_candidates` fence:
+
+```markdown
+<!-- retrospect:dismissed_candidates begin -->
+- <class-id>: <why this match is a false positive or an intentional, non-leaking display>
+<!-- retrospect:dismissed_candidates end -->
+```
+
+A hard match that is neither covered nor dismissed blocks. **soft** matches
+(currently `create-delete-churn`) are surfaced as hints and NEVER block.
+
+### Gate-10 — critic-root coverage
+
+When the externalized critic tier ran, it emits a `critic_roots:` block in its
+subagent return (see
+[`stage1-2-analysis.md`](stage1-2-analysis.md)). That transcript return — NOT
+any agent-authored fence — is the authoritative oracle. For each root-id the
+report must EITHER cover it in the unified findings table (name the root-id in a
+row) OR fold it with a non-empty reason:
+
+```markdown
+folded: <root-id> because <reason>
+```
+
+A reason-less `folded: <root-id>` does not count. Gate-10 arms on transcript
+eligibility (a hard silent-pass candidate OR a user-correction signal), so an
+eligible session whose transcript shows NO critic invocation blocks regardless
+of the ledger `critic_diff` label.
+
+For display, paste the critic's roots into a `retrospect:critic_roots` fence in
+the report body so a human reader sees them alongside the findings. This fence is
+**display-only** — it is not the oracle and its fidelity is not gated (the hook
+reads the critic's transcript return):
+
+```markdown
+<!-- retrospect:critic_roots begin -->
+- <root-id>: <one-line description>
+<!-- retrospect:critic_roots end -->
+```
+
 ## Per-finding plan contract
 
 For every non-note-only finding, Stage 3 must explain:

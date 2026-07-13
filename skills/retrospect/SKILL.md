@@ -198,7 +198,21 @@ repeat / cluster signals are available, run a READ-ONLY external critic scan
 when the friction path is non-empty and the tier predicate in
 [`references/stage1-2-analysis.md`](references/stage1-2-analysis.md) fires.
 Record the outcome in the Stage 3 `critic_diff:` ledger line whether the tier
-ran or was skipped.
+ran or was skipped. When it runs, the critic emits a `critic_roots:` block in
+its subagent return; each root must be covered in the findings table or
+`folded: <root-id> because <reason>` — `retrospect-mix-check` Gate-10 enforces
+this against the critic's transcript return (not an agent-pasted fence), and
+arms on transcript eligibility so the requirement cannot be self-cleared by the
+`critic_diff` label (issue #772).
+
+**Silent-pass candidate coverage (deterministic, issue #772):** a grep catalog
+(`hooks/_lib/silent-pass-catalog.json`) force-injects friction-free conduct
+(plaintext secret, sanctioned-wrapper bypass, create/delete churn) into the
+coverage requirement regardless of the signal scan. Each **hard** match must be
+bound via a `covers: <class-id>` token in the findings table or dismissed in a
+`retrospect:dismissed_candidates` fence; **soft** matches are hints only. Full
+contract in
+[`references/stage3-reporting.md`](references/stage3-reporting.md).
 
 **Core flow:**
 
@@ -262,8 +276,9 @@ Worked examples live in
 **Output order:**
 
 1. `## Retrospect Report`
-2. audit fences (`pre_scan_checklist`, `dismissed_candidates`, and the required
-   transcript-derived ledgers)
+2. audit fences (`pre_scan_checklist`, `dismissed_candidates`, `critic_roots`
+   (display-only when the critic ran), and the required transcript-derived
+   ledgers)
 3. `<!-- retrospect:suppression_ledger begin --> ... end -->` (mandatory on
    every path — records the self-incrimination pass)
 4. `<!-- retrospect:distribution begin --> ... end -->`
