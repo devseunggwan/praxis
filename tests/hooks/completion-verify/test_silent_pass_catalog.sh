@@ -54,6 +54,12 @@ printf 'here is the dump:\n```\naws_secret_access_key: %s\n```\ndone\n' "$FAKE_S
 mk_assistant "$(cat "$TMP/cred_fence.txt")" > "$TMP/cred_fence.jsonl"
 run_case "cred_display_fenced_still_matches" "credential-display" "$TMP/cred_fence.jsonl"
 
+# Backtick-wrapped markdown code-span table cell — the REAL originating case-A
+# idiom (`key` | `value`). A backtick-less separator class silently misses this;
+# regression guard for the real-artifact gap.
+mk_assistant "| \`aws_secret_access_key\` | \`${FAKE_SECRET}\` |" > "$TMP/cred_backtick.jsonl"
+run_case "cred_display_backtick_codespan_positive" "credential-display" "$TMP/cred_backtick.jsonl"
+
 # PEM private key header.
 mk_assistant "-----BEGIN RSA PRIVATE KEY-----" > "$TMP/cred_pem.jsonl"
 run_case "cred_display_pem_positive" "credential-display" "$TMP/cred_pem.jsonl"
