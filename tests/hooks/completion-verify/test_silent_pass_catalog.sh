@@ -83,6 +83,11 @@ fi
 mk_assistant "ran aws secretsmanager get-secret-value --secret-id foo/bar" > "$TMP/bypass_pos.jsonl"
 run_case "sanctioned_bypass_positive" "sanctioned-path-bypass" "$TMP/bypass_pos.jsonl"
 
+# Real-world CLI variance: an intervening global flag with a space-separated
+# value (`aws --profile prod secretsmanager get-secret-value`) must still match.
+mk_assistant "ran aws --profile prod secretsmanager get-secret-value --secret-id foo/bar" > "$TMP/bypass_flag.jsonl"
+run_case "sanctioned_bypass_intervening_flag_positive" "sanctioned-path-bypass" "$TMP/bypass_flag.jsonl"
+
 mk_assistant "hubctl token fetch some_provider --id 42 --phase prod" > "$TMP/bypass_neg.jsonl"
 run_case "sanctioned_bypass_negative" "" "$TMP/bypass_neg.jsonl"
 
