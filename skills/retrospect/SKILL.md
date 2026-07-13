@@ -249,19 +249,16 @@ miss. Use the full trigger list, audit surfaces, and trail rules in
 
 ### Stage 2.5: Action Distribution Audit
 
-Stage 2.5 is the last gate before Stage 3 output. Run the complete gate suite
-from [`references/stage2.5-audit.md`](references/stage2.5-audit.md).
+Stage 2.5 is the last gate before Stage 3 output. Follow
+[`references/stage2.5-audit.md`](references/stage2.5-audit.md): write the
+draft findings table to a scratch file, run the deterministic audit script
+(`audit-distribution-gates.py` — owns Gate-1 mechanical checks, Gate-2,
+backing_repo, Gate-4, Gate-5, and the distribution card), and evaluate the
+semantic gates yourself (Gate-1 category correctness, Gate-3 evidence
+robustness, Gate-6 oracle match — verdicts passed via `--gate3` / `--gate6`).
 
-**Required gates:**
-
-- Gate-1: categorical integrity
-- Gate-2: memory-only rationale schema
-- Gate-3: evidence robustness for compound actions
-- Gate-4: external-repo authorization pre-check for `upstream_feedback`
-- Gate-5: `memory_scan` completeness
-- Gate-6: oracle-match completeness for stored-value corrections
-
-**Output:** a distribution card with action counts plus gate verdicts.
+**Output:** the script-rendered distribution card with action counts plus gate
+verdicts — paste it verbatim, never hand-edit it.
 
 If a gate still fails after 2 per-finding re-entries, surface the documented
 override prompt rather than silently continuing.
