@@ -55,6 +55,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path as _Path
@@ -150,11 +151,86 @@ def _skill_name(payload: dict) -> str:
     return ""
 
 
+# Shared silent-pass detection assets (single source of truth with the Stop
+# hook — both call the SAME scanner + catalog so detection never diverges).
+_LIB_DIR = _Path(__file__).resolve().parent.parent.parent / "_lib"
+_SCANNER = _LIB_DIR / "scan-silent-pass.sh"
+_CATALOG = _LIB_DIR / "silent-pass-catalog.json"
+
+
+def resolve_candidates_path(session_id: str | None = None) -> str:
+    """Resolve the front-load hint path — the candidates sibling of the marker.
+
+    Mirrors resolve_state_path's location logic with a distinct filename so the
+    hint file and the marker are always separate files. Under an explicit marker
+    override the override path is opaque, so the sibling is that path plus a
+    `.candidates.json` suffix; otherwise it is the TMPDIR
+    `praxis-retrospect-candidates-<session>.json` companion of the marker.
+    """
+    explicit = os.environ.get("PRAXIS_RETROSPECT_ACTIVE_FILE", "").strip()
+    if explicit:
+        return explicit + ".candidates.json"
+    tmp = os.environ.get("TMPDIR", "/tmp").rstrip("/") or "/"
+    token = session_id if session_id else str(os.getppid())
+    return os.path.join(tmp, f"praxis-retrospect-candidates-{token}.json")
+
+
+def write_candidate_hints(payload: dict, session_id: str | None) -> None:
+    """Best-effort Stage-2 front-load: scan the session-so-far transcript for
+    silent-pass conduct and drop a candidate hint file the retrospect skill can
+    read before authoring its report.
+
+    Purely proactive — the Stop-hook Gate-9 re-scans independently and remains
+    the source of truth. Any failure here is swallowed: the marker (already
+    written by the caller) must never be jeopardized by this hint pass.
+    """
+    try:
+        transcript = payload.get("transcript_path")
+        if not (isinstance(transcript, str) and transcript and os.path.isfile(transcript)):
+            return  # No transcript to scan — skip silently (R1).
+        if not (_SCANNER.is_file() and _CATALOG.is_file()):
+            return
+        proc = subprocess.run(
+            ["bash", str(_SCANNER), "--transcript", transcript, "--catalog", str(_CATALOG)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        candidates = []
+        for line in proc.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 3 and parts[0]:
+                candidates.append(
+                    {"class_id": parts[0], "severity": parts[1], "evidence": parts[2]}
+                )
+        try:
+            catalog_version = json.loads(_CATALOG.read_text()).get("version")
+        except Exception:
+            catalog_version = None
+        payload_out = {
+            "mandatory_candidates": candidates,
+            "catalog_version": catalog_version,
+        }
+        cand_path = resolve_candidates_path(session_id)
+        parent = os.path.dirname(cand_path)
+        with tempfile.NamedTemporaryFile(
+            "w", delete=False, dir=parent or ".", prefix=".retrospect-candidates-"
+        ) as fh:
+            json.dump(payload_out, fh)
+            tmp = fh.name
+        os.replace(tmp, cand_path)
+    except Exception:
+        # Fail-open: front-load is advisory; never break the hook.
+        pass
+
+
 def handle_pre_tool_use(payload: dict) -> int:
     if payload.get("tool_name") != "Skill":
         return 0
     if _SKILL_NAME_RE.search(_skill_name(payload)):
-        set_marker(resolve_state_path(_extract_session_id(payload)), "skill")
+        session_id = _extract_session_id(payload)
+        set_marker(resolve_state_path(session_id), "skill")
+        write_candidate_hints(payload, session_id)
     return 0
 
 
