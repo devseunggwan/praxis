@@ -68,6 +68,17 @@ run_case "cred_display_pem_positive" "credential-display" "$TMP/cred_pem.jsonl"
 mk_assistant "aws_access_key_id: FAKEKEYID000000EXAMPLE (id only)" > "$TMP/cred_neg.jsonl"
 run_case "cred_display_keyid_negative" "" "$TMP/cred_neg.jsonl"
 
+# Redaction: the emitted evidence (field 3) must NOT carry the live secret bytes.
+# The match requires >=30 chars of the value and that evidence is persisted into
+# the .candidates.json hint file, so the scanner must redact it — else the class
+# meant to suppress credential display becomes an at-rest copy of the secret.
+red_ev="$(bash "$SCAN" --transcript "$TMP/cred_table.jsonl" --catalog "$CATALOG" 2>/dev/null | cut -f3)"
+if printf '%s' "$red_ev" | grep -qF "$FAKE_SECRET"; then
+  FAIL=$((FAIL + 1)); printf 'FAIL  %s  secret leaked into evidence: [%s]\n' "cred_display_evidence_redacted" "$red_ev"
+else
+  PASS=$((PASS + 1)); printf 'PASS  %s\n' "cred_display_evidence_redacted"
+fi
+
 # --- sanctioned-path-bypass (hard) -------------------------------------------
 mk_assistant "ran aws secretsmanager get-secret-value --secret-id foo/bar" > "$TMP/bypass_pos.jsonl"
 run_case "sanctioned_bypass_positive" "sanctioned-path-bypass" "$TMP/bypass_pos.jsonl"

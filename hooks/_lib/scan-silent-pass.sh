@@ -104,7 +104,14 @@ while [ "$i" -lt "$class_count" ]; do
     printf '%s\n' "$CLEANED" | grep -Eq "$cooccur" 2>/dev/null || continue
   fi
 
-  evidence=$(printf '%s' "$primary" | grep -oE "$pat" 2>/dev/null | head -n 1 | cut -c1-60)
+  # Redact any long high-entropy run (>=20 of [A-Za-z0-9/+]) before emitting
+  # evidence. The credential-display match REQUIRES >=30 chars of the live secret
+  # value, and this evidence is persisted verbatim into the .candidates.json hint
+  # file the skill reads — an at-rest, re-echoable copy of the exact secret this
+  # hard class exists to suppress. Underscored labels (aws_secret_access_key) and
+  # command evidence (bypass/churn) have no such contiguous run and are untouched.
+  raw=$(printf '%s' "$primary" | grep -oE "$pat" 2>/dev/null | head -n 1)
+  evidence=$(printf '%s' "$raw" | sed -E 's#[A-Za-z0-9/+]{20,}#<REDACTED>#g' | cut -c1-60)
   printf '%s\t%s\t%s\n' "$id" "$severity" "$evidence"
 done
 
