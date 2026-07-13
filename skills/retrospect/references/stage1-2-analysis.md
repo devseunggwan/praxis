@@ -183,6 +183,18 @@ Bounded-drop rule:
 
 Stage 2 starts with a symmetric pre-scan before any agent calls.
 
+**Front-load candidate hints (best-effort).** When the retrospect skill was
+invoked, the PreToolUse marker hook may have dropped a silent-pass candidate
+hint file at
+`${TMPDIR:-/tmp}/praxis-retrospect-candidates-<session_id>.json` (or, under an
+explicit marker override, the marker path plus `.candidates.json`). If present,
+read it first: each `mandatory_candidates[]` entry (`class_id`, `severity`,
+`evidence`) is grep-detected friction-free conduct the signal scan would miss.
+Fold each **hard** candidate into the Stage-3 coverage plan up front — the same
+grep runs again at Stop as the source of truth (Gate-9), so pre-covering here
+avoids a late block. Absence of the file is normal (front-load is advisory);
+never depend on it.
+
 ### Pre-scan lanes
 
 Scope window: scan the current session boundary when available; otherwise scan
@@ -396,6 +408,25 @@ critic_candidates:
 - <candidate> | evidence: <turn/tool/output> | why_self_serving_bias_risk: <reason>
 ```
 
+The critic MUST additionally emit a `critic_roots:` block naming the DISTINCT
+root causes it identifies — the roots the analyzing agent is most likely to fold
+into a single finding or drop. Each root is a stable, hyphenated id plus one
+line:
+
+```markdown
+critic_roots:
+- <root-id>: <one-line description of the distinct root>
+```
+
+This block is the **transcript-authoritative oracle** for the Stage-3 Gate-10
+coverage check (issue #772): `retrospect-mix-check` parses the critic's roots
+from **this subagent tool_result**, not from any agent-pasted fence. Emit
+`critic_roots:` with zero bullets when the critic finds no distinct root beyond
+what the agent already surfaced (empty coverage is accepted). Choose root-ids
+that do not collide as a substring with a silent-pass class id
+(`credential-display`, `sanctioned-path-bypass`, `create-delete-churn`) so
+coverage matching stays unambiguous.
+
 #### Diff handling
 
 Compare `critic_candidates` against the self-selected friction set and
@@ -413,6 +444,18 @@ suppression ledger:
 A silent drop of a critic-only candidate is a Red Flag. The Stage 3
 `critic_diff:` ledger line is mandatory whenever this tier is evaluated, even
 when it did not run.
+
+Separately from the `critic_candidates` suppression diff, each `critic_roots`
+entry carries a Stage-3 coverage obligation (issue #772): every root-id must
+either be covered in the unified findings table or explicitly folded with a
+non-empty reason (`folded: <root-id> because <reason>`). A reason-less fold does
+NOT count as coverage. `retrospect-mix-check` Gate-10 enforces this against the
+critic's transcript roots — see
+[`stage3-reporting.md`](stage3-reporting.md). The eligibility that arms Gate-10
+is transcript-derived (a silent-pass hard candidate OR a user-correction signal),
+so an eligible session with **no critic invocation in the transcript** blocks
+regardless of the `critic_diff` label (`not-run` / `none` / `checked`) — the
+label cannot self-clear the requirement that the external critic actually ran.
 
 ### Categorization
 

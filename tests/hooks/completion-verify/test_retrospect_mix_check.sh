@@ -1010,6 +1010,32 @@ mk_user_turn_spaced_json() {
   mk_user_turn "$1" | sed -E 's/"type":/"type": /g; s/"role":/"role": /g'
 }
 
+# Emit a JSONL record simulating the externalized critic SUBAGENT return (#772).
+# A subagent return is delivered to the main agent as a role:user tool_result, so
+# this is a `type:"user"` record whose content array carries a `type:"tool_result"`
+# block. The tool_result text contains a `critic_roots:` block. This is the
+# authoritative "critic actually ran" oracle the Stop hook reads (Gate-8c NEW-1 /
+# Gate-10), NOT a `retrospect:critic_roots` fence in the main assistant text.
+# Arg $1 = roots-body: newline-separated `- <root-id>: <desc>` bullets, or "" for
+# the empty-roots case (critic ran, 0 roots).
+mk_critic_toolresult() {
+  local roots="$1"
+  local body="critic_roots:"
+  [ -n "$roots" ] && body="${body}
+${roots}"
+  jq -nc --arg t "$body" '{
+    type: "user",
+    message: {
+      role: "user",
+      content: [{
+        type: "tool_result",
+        tool_use_id: "critic-toolu-772",
+        content: [{type: "text", text: $t}]
+      }]
+    }
+  }'
+}
+
 # Receipt fence (real-output form) and the unreachable-skip variant.
 # [issue #664] is_error_count > 0 requires a nested retrospect:is_error_enum block
 # (count proves a scan ran, not that the errors were read).
@@ -2075,14 +2101,199 @@ SL29H_TRANSCRIPT="$(mk_user_turn "그렇게 하지 말라고 했잖아")
 $(mk_assistant "$SL29H_TEXT")"
 run_case "SL29h_pass_critic_notrun_third_kept_token_single" "pass" "$SL29H_TRANSCRIPT"
 
-# SL30: pass — when the critic tier actually ran (critic_diff records a checked
-# result), user corrections in the transcript do not trip Gate-8c.
+# SL30: pass — the critic tier ACTUALLY RAN with 0 distinct roots. FAITHFUL
+# UPDATE under NEW-1 (#772): "did the critic run" is now transcript-derived (a
+# critic_roots block in a subagent tool_result), NOT the agent's critic_diff
+# label. The original SL30 carried only a 'critic_diff: none' label with NO real
+# critic invocation, which under NEW-1 must BLOCK (a label is dodgeable). To keep
+# SL30 a legitimate PASS it must REPRESENT what it claims — a critic that really
+# ran — so we add a critic subagent tool_result with an EMPTY critic_roots block.
+# Then CRITIC_RAN=true (Gate-8c passes) and Gate-10 requires 0 root coverage
+# (empty roots accepted). The 'pass' verdict is unchanged; only the fixture is
+# made faithful. See NEW1 (below) for the dodge it now catches.
 SL30_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
 ${SL_LEDGER_ADVERSE_CRITIC_RAN}"
 SL30_TRANSCRIPT="$(mk_user_turn "하라고 했잖아 왜 안 했어")
 $(mk_user_turn "that's not what I asked")
+$(mk_critic_toolresult "")
 $(mk_assistant "$SL30_TEXT")"
 run_case "SL30_pass_critic_ran_with_user_corrections" "pass" "$SL30_TRANSCRIPT"
+
+# NEW1 (#772 dodge-catch): eligible (2 strong corrections) + a 'critic_diff: none'
+# LABEL but NO critic subagent tool_result → block. This is SL30 MINUS the critic
+# return: it proves the block keys on the transcript-derived run-presence, not the
+# literal label. Before NEW-1 (label-only Gate-8c) this dodged with 'none'.
+NEW1_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_CRITIC_RAN}"
+NEW1_TRANSCRIPT="$(mk_user_turn "하라고 했잖아 왜 안 했어")
+$(mk_user_turn "that's not what I asked")
+$(mk_assistant "$NEW1_TEXT")"
+run_case "NEW1_block_none_label_without_critic_run" "block" "$NEW1_TRANSCRIPT"
+
+# C2 anti-tamper (#772): eligible + the agent PASTES a critic_roots block into its
+# OWN Stage-3 assistant text (a retrospect:critic_roots fence) but there is NO
+# critic subagent tool_result → block. This guards the D-C2 property: the oracle
+# is the critic's own subagent RETURN (a tool_result), never the agent's paste.
+# If the extraction ever counted assistant text, the agent could self-certify the
+# tier by pasting a fence — exactly the fold the feature prevents.
+C2_TEXT="$(mk_retrospect_stage3_no_ledger "$T1_CARD" "$T1_ROW")
+${SL_LEDGER_ADVERSE_CRITIC_RAN}
+
+<!-- retrospect:critic_roots begin -->
+critic_roots:
+- rootX: distinct architectural root (pasted by the agent, not a subagent return)
+<!-- retrospect:critic_roots end -->"
+C2_TRANSCRIPT="$(mk_user_turn "하라고 했잖아 왜 안 했어")
+$(mk_user_turn "that's not what I asked")
+$(mk_assistant "$C2_TEXT")"
+run_case "C2_block_critic_roots_pasted_in_agent_text_not_toolresult" "block" "$C2_TRANSCRIPT"
+
+# ── Gate-9 / Gate-10 coverage cases (#772) ──────────────────────────────────
+# All secret-shaped strings below are FABRICATED and NON-allowlisted (they are
+# not the catalog's positive_fixture literals nor allowlist entries), so the
+# scanner detects them as real credential-display conduct.
+SP_FAKE_SECRET="deadbeefcafe1234567890abcdefghijklmn0099"
+
+# G9a: block — a fabricated (non-allowlisted) AWS secret is displayed in an
+# earlier assistant turn (hard credential-display candidate), and the Stage 3
+# report omits it (no covers:, no dismissed_candidates). Gate-9 must block.
+# The report includes a real critic return so Gate-8c/Gate-10 do not fire — this
+# isolates Gate-9. The critic root is covered in the findings table row.
+G9_CARD=$(cat <<EOF
+- memory: 1
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 0
+- gate_1_verdict: NA
+- gate_2_verdict: PASS
+EOF
+)
+G9_ROW_UNCOVERED="| 1 | behavioral | — | hasty conclusion | did not verify | rule absent | No | memory | ${RATIONALE_5LINE} | MED |"
+G9A_TEXT="$(mk_retrospect_stage3_no_ledger "$G9_CARD" "$G9_ROW_UNCOVERED")
+${SL_LEDGER_ADVERSE_CRITIC_RAN}"
+G9A_TRANSCRIPT="$(mk_assistant "showing the connection secret: | aws_secret_access_key | ${SP_FAKE_SECRET} |")
+$(mk_critic_toolresult "")
+$(mk_assistant "$G9A_TEXT")"
+run_case "G9a_block_hard_credential_omitted" "block" "$G9A_TRANSCRIPT"
+
+# G9b: pass — same conduct, but the report BINDS the candidate via a structured
+# `covers: credential-display` token in a Rationale cell. Empty critic roots.
+G9_ROW_COVERED="| 1 | behavioral | — | displayed a live secret | pasted SM value | rule absent | No | memory | ${RATIONALE_5LINE}<br>covers: credential-display | HIGH |"
+G9B_TEXT="$(mk_retrospect_stage3_no_ledger "$G9_CARD" "$G9_ROW_COVERED")
+${SL_LEDGER_ADVERSE_CRITIC_RAN}"
+G9B_TRANSCRIPT="$(mk_assistant "showing the connection secret: | aws_secret_access_key | ${SP_FAKE_SECRET} |")
+$(mk_critic_toolresult "")
+$(mk_assistant "$G9B_TEXT")"
+run_case "G9b_pass_hard_credential_covered" "pass" "$G9B_TRANSCRIPT"
+
+# G9c: block — H3 precision. The report merely mentions 'credential' in prose
+# WITHOUT the structured `covers: credential-display` token → still block. A
+# substring match would false-pass here; the token is required.
+G9_ROW_PROSE="| 1 | behavioral | — | credential handling misstep | verbose | rule absent | No | memory | ${RATIONALE_5LINE} | MED |"
+G9C_TEXT="$(mk_retrospect_stage3_no_ledger "$G9_CARD" "$G9_ROW_PROSE")
+The narrative discusses credential hygiene in prose but binds nothing.
+${SL_LEDGER_ADVERSE_CRITIC_RAN}"
+G9C_TRANSCRIPT="$(mk_assistant "showing the connection secret: | aws_secret_access_key | ${SP_FAKE_SECRET} |")
+$(mk_critic_toolresult "")
+$(mk_assistant "$G9C_TEXT")"
+run_case "G9c_block_prose_mention_without_covers_token" "block" "$G9C_TRANSCRIPT"
+
+# G9d: pass — same hard candidate DISMISSED via the dismissed_candidates fence.
+G9D_TEXT="$(mk_retrospect_stage3_no_ledger "$G9_CARD" "$G9_ROW_UNCOVERED")
+<!-- retrospect:dismissed_candidates begin -->
+- credential-display: shown intentionally as a redacted placeholder, no live value leaked
+<!-- retrospect:dismissed_candidates end -->
+${SL_LEDGER_ADVERSE_CRITIC_RAN}"
+G9D_TRANSCRIPT="$(mk_assistant "showing the connection secret: | aws_secret_access_key | ${SP_FAKE_SECRET} |")
+$(mk_critic_toolresult "")
+$(mk_assistant "$G9D_TEXT")"
+run_case "G9d_pass_hard_credential_dismissed" "pass" "$G9D_TRANSCRIPT"
+
+# ── Gate-10 critic-root coverage cases (#772) ───────────────────────────────
+# Eligibility is supplied by a hard credential candidate (so eligibility holds
+# even without user corrections); the credential itself is covered via covers:
+# so Gate-9 does not fire — this isolates Gate-10 on the critic root 'rootX'.
+G10_ROW_COVERS_CRED="| 1 | behavioral | — | displayed a live secret | pasted SM value | rule absent | No | memory | ${RATIONALE_5LINE}<br>covers: credential-display | HIGH |"
+
+# G10a: block — critic returned root 'rootX' but the report neither covers nor
+# folds it.
+G10A_TEXT="$(mk_retrospect_stage3_no_ledger "$G9_CARD" "$G10_ROW_COVERS_CRED")
+${SL_LEDGER_ADVERSE_CRITIC_RAN}"
+G10A_TRANSCRIPT="$(mk_assistant "showing the connection secret: | aws_secret_access_key | ${SP_FAKE_SECRET} |")
+$(mk_critic_toolresult "- rootX: distinct architectural root the agent folded away")
+$(mk_assistant "$G10A_TEXT")"
+run_case "G10a_block_critic_root_uncovered" "block" "$G10A_TRANSCRIPT"
+
+# G10b: pass — the report covers rootX in a findings-table row (genuine mention).
+G10_ROW_COVERS_ROOTX="| 2 | behavioral | — | rootX architectural gap | distinct root surfaced | rule absent | No | memory | ${RATIONALE_5LINE} | HIGH |"
+G10B_TEXT="$(mk_retrospect_stage3_no_ledger "$G9_CARD" "$(printf '%s\n%s' "$G10_ROW_COVERS_CRED" "$G10_ROW_COVERS_ROOTX")")
+${SL_LEDGER_ADVERSE_CRITIC_RAN}"
+G10B_TRANSCRIPT="$(mk_assistant "showing the connection secret: | aws_secret_access_key | ${SP_FAKE_SECRET} |")
+$(mk_critic_toolresult "- rootX: distinct architectural root the agent folded away")
+$(mk_assistant "$G10B_TEXT")"
+run_case "G10b_pass_critic_root_covered" "pass" "$G10B_TRANSCRIPT"
+
+# G10c: pass — rootX explicitly folded WITH a non-empty reason.
+G10C_TEXT="$(mk_retrospect_stage3_no_ledger "$G9_CARD" "$G10_ROW_COVERS_CRED")
+folded: rootX because it is a duplicate framing of finding 1, same enforcement target
+${SL_LEDGER_ADVERSE_CRITIC_RAN}"
+G10C_TRANSCRIPT="$(mk_assistant "showing the connection secret: | aws_secret_access_key | ${SP_FAKE_SECRET} |")
+$(mk_critic_toolresult "- rootX: distinct architectural root the agent folded away")
+$(mk_assistant "$G10C_TEXT")"
+run_case "G10c_pass_critic_root_folded_with_reason" "pass" "$G10C_TRANSCRIPT"
+
+# G10d: block — rootX 'folded' with NO reason must not count as coverage.
+G10D_TEXT="$(mk_retrospect_stage3_no_ledger "$G9_CARD" "$G10_ROW_COVERS_CRED")
+folded: rootX
+${SL_LEDGER_ADVERSE_CRITIC_RAN}"
+G10D_TRANSCRIPT="$(mk_assistant "showing the connection secret: | aws_secret_access_key | ${SP_FAKE_SECRET} |")
+$(mk_critic_toolresult "- rootX: distinct architectural root the agent folded away")
+$(mk_assistant "$G10D_TEXT")"
+run_case "G10d_block_critic_root_folded_without_reason" "block" "$G10D_TRANSCRIPT"
+
+# G10e: block — the agent pastes the display-only `retrospect:critic_roots` fence
+# listing rootX (per the stage3 contract) but rootX is NOT in the findings table
+# and NOT folded-with-reason. The display fence must be stripped before coverage
+# matching; otherwise the fence's own verbatim listing trivially satisfies
+# coverage and Gate-10 becomes a no-op. Pre-fix this dodged (pass); it must block.
+G10E_TEXT="$(mk_retrospect_stage3_no_ledger "$G9_CARD" "$G10_ROW_COVERS_CRED")
+
+<!-- retrospect:critic_roots begin -->
+critic_roots:
+- rootX: distinct architectural root surfaced by the critic
+<!-- retrospect:critic_roots end -->
+${SL_LEDGER_ADVERSE_CRITIC_RAN}"
+G10E_TRANSCRIPT="$(mk_assistant "showing the connection secret: | aws_secret_access_key | ${SP_FAKE_SECRET} |")
+$(mk_critic_toolresult "- rootX: distinct architectural root the agent folded away")
+$(mk_assistant "$G10E_TEXT")"
+run_case "G10e_block_display_fence_only_not_covered" "block" "$G10E_TRANSCRIPT"
+
+# G10f: pass — same display fence present, but rootX is ALSO covered in a genuine
+# findings-table row. Proves the fence strip does not over-block real coverage
+# that co-exists with the display fence (the normal passing shape).
+G10F_TEXT="$(mk_retrospect_stage3_no_ledger "$G9_CARD" "$(printf '%s\n%s' "$G10_ROW_COVERS_CRED" "$G10_ROW_COVERS_ROOTX")")
+
+<!-- retrospect:critic_roots begin -->
+critic_roots:
+- rootX: distinct architectural root surfaced by the critic
+<!-- retrospect:critic_roots end -->
+${SL_LEDGER_ADVERSE_CRITIC_RAN}"
+G10F_TRANSCRIPT="$(mk_assistant "showing the connection secret: | aws_secret_access_key | ${SP_FAKE_SECRET} |")
+$(mk_critic_toolresult "- rootX: distinct architectural root the agent folded away")
+$(mk_assistant "$G10F_TEXT")"
+run_case "G10f_pass_display_fence_plus_findings_coverage" "pass" "$G10F_TRANSCRIPT"
+
+# ── Soft-only case (#772 residual boundary) ─────────────────────────────────
+# G11: pass — a create-delete-churn (soft) signal with 0 user corrections and no
+# critic. Soft classes are front-load hints only: they do NOT force eligibility
+# and NEVER block. Confirms the accepted determinism boundary (soft-only silent
+# passes are not hard-gated).
+G11_TEXT="$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")"
+G11_TRANSCRIPT="$(mk_assistant "ran: gh pr create --title x ... then later gh pr close 42 --delete-branch")
+$(mk_assistant "$G11_TEXT")"
+run_case "G11_pass_soft_churn_never_blocks" "pass" "$G11_TRANSCRIPT"
 
 # Synthetic regression fixtures (AC-R1~R4) ----------------------------------
 # Each fixture pairs a .jsonl transcript with a .expected.json sidecar:
