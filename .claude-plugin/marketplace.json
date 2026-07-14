@@ -5,12 +5,12 @@
   "owner": {
     "name": "devseunggwan"
   },
-  "version": "7.2.1",
+  "version": "7.3.0",
   "plugins": [
     {
       "name": "praxis",
       "description": "Development workflow skills for Claude Code — disciplined, fast, resilient",
-      "version": "7.2.1",
+      "version": "7.3.0",
       "author": {
         "name": "devseunggwan"
       },
