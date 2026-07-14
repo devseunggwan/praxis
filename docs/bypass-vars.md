@@ -30,6 +30,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_HOOK_BYPASS_WORKTREE_GATE` | `worktree-edit-gate` | Skip the worktree-edit preflight |
 | `PRAXIS_HOOK_BYPASS_HUB_ENFORCE` | `block-child-repo-issue-create` | Skip the hub-mediated child-repo issue guard |
 | `PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT` | `postcompact-context` | Skip the post-compaction context advisory |
+| `PRAXIS_HOOK_BYPASS_POLL_LOOP_GUARD` | `foreground-poll-loop-guard` | Skip the foreground poll-loop ceiling guard |
 | `PRAXIS_BULK_WRITE_BYPASS` | `bulk-write-memory-checkpoint` | Skip the bulk-write checkpoint advisory |
 | `PRAXIS_FALSIFY_GATE_BYPASS` | `pre-output-falsification-gate` | Skip both falsification lanes |
 | `PRAXIS_MERGE_CLAIM_BYPASS` | `merge-state-claim-gate` | Skip the merge/PR/issue-state claim gate |
