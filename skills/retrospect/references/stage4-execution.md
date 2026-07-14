@@ -28,15 +28,17 @@ For each approved action:
 
    **Frontmatter contract — `memory-hint` opt-in (mandatory consideration)**
 
-   In addition to standard fields (`name`, `description`, `type`), every new memory MUST evaluate whether to include the `memory-hint` opt-in fields — `hookable` and `hookKeywords`. The full field spec (parser semantics, matching rules, fail-open contract) lives in `hooks/advisory-nudge/memory-hint/spec.md`; this section defines the authoring-time decision. Use top-level `type:` (consistent with `hooks/advisory-nudge/memory-hint/spec.md` example and existing on-disk memory files); do **not** nest under `metadata:`.
+   In addition to standard fields (`name`, `description`, `type`), every new memory MUST evaluate whether to include the `memory-hint` opt-in fields — `hookable` and `hookKeywords`. The full field spec (parser semantics, matching rules, fail-open contract) lives in `hooks/advisory-nudge/memory-hint/spec.md`; this section defines the authoring-time decision. The parser ignores `type` entirely and reads `hookable` / `hookKeywords` / `hookEvents` regardless of nesting depth (the regexes are indentation-tolerant), so place `type:` per your host's memory convention — this repo's on-disk memories nest taxonomy fields under `metadata:`. Only the opt-in fields' spelling and single-line list form matter for the hook.
 
    ```yaml
    ---
    name: my-memory
    description: Short rule statement
-   type: feedback
-   hookable: true                           # opt into PreToolUse surface
-   hookKeywords: [keyword1, keyword2]       # whole-token match (case-sensitive)
+   metadata:                                # this repo nests taxonomy fields here
+     type: feedback
+     hookable: true                         # opt into PreToolUse surface
+     hookKeywords: [keyword1, keyword2]      # flat single-line list, whole-token (case-sensitive)
+     hookEvents: [Bash, Edit]               # optional; default [Bash] when omitted
    ---
    ```
 
@@ -56,7 +58,8 @@ For each approved action:
    - Whole-token, case-sensitive matching only (per `hooks/advisory-nudge/memory-hint/spec.md`). List multiple casings explicitly if needed (`[Edit, edit]`).
    - 1–4 keywords typical; >5 raises false-positive risk linearly.
    - **Avoid generic English words** (`add`, `run`, `test`, `update`) — they fire on unrelated commands and erode the hint signal.
-   - When the memory targets a non-Bash event (Edit, Write, AskUserQuestion, etc.), the current `memory-hint.py` only fires on Bash — record the intent in the description so a future event-coverage expansion can surface it.
+   - **`hookKeywords` must be a flat single-line list** (`[a, b]`). Multi-line YAML-block form (`- item` on separate lines) and scalar form (`hookKeywords: foo`) are silently skipped — the entire memory is then dropped (not indexed at all) and the hint never fires. Verify the list is single-line before committing.
+   - When the memory targets a non-Bash event, add `hookEvents:` to opt in — the memory-hint hook (`hooks/advisory-nudge/memory-hint/impl.py`) supports `[Bash, Edit, Write, NotebookEdit, AskUserQuestion]` (default `[Bash]` when omitted). Unsupported tool names in the list are dropped; if every listed event is unsupported the parser keeps the `[Bash]` default.
 
    **⚠️ MANDATORY: Duplicate check before creating any memory file:**
 
@@ -248,7 +251,7 @@ For each approved action:
 
    | Artifact | Verification |
    | ---------- | ------------- |
-   | MEMORY.md feedback (new) | File exists + MEMORY.md index updated + `hookable`/`hookKeywords` frontmatter decision recorded (true with keywords, OR false with rationale in Actions Executed report) |
+   | MEMORY.md feedback (new) | File exists + MEMORY.md index updated + `hookable`/`hookKeywords` frontmatter decision recorded (true with keywords, OR false with rationale in Actions Executed report) + if the memory targets a non-Bash tool, confirm `hookEvents` lists that tool (a missing/mistyped `hookEvents` silently reverts to `[Bash]` and the hint never fires on the intended event) |
    | MEMORY.md feedback (merged) | Existing file updated (diff shown) + MEMORY.md index description updated if needed + if existing entry had `hookable: false` **or the field is missing entirely** and merged context now meets the retrieval-critical default, re-evaluate and add/update frontmatter (most pre-existing memories lack `hookable` — missing field is the dominant case, not false) |
    | GitHub issue | `gh issue view {url}` returns valid data |
    | Upstream feedback | `gh issue view {url}` returns valid data + URL repo matches `verified_backing_repo` from step 0 + label convention is correct for the verified repo (`tool-friction:{layer}` ONLY when verified repo is the praxis distribution; otherwise the repo's own convention label per Action 4's label rule) |
