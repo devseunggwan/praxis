@@ -6,15 +6,15 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 
 ## Documentation map
 
-| File                                                   | Purpose                                                                                                                                                                |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`ETHOS.md`](ETHOS.md)                                 | Why praxis exists — values and principles that gate every skill, hook, and manifest; includes [Autonomy vs Convention](ETHOS.md#autonomy-vs-convention) boundary table |
-| [`DESIGN.md`](DESIGN.md)                               | How hooks are built — structural-tokenization, session_id keying, compound-bash-cascade, ordering, and add-a-new-hook flow                                             |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md)                   | Skill ↔ hook ↔ manifest dependency graph — provider routing, hook index, multi-platform packaging                                                                      |
-| [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md)     | Fixed Claude Code runtime limits every skill must respect                                                                                                              |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md)                   | Skill and hook contribution conventions, live-runtime verification gate                                                                                                |
-| [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md) | Evidence-based keep/merge/drop verdict per hook, scored from the fire-rate ledger (issue #713)                                                                         |
-| [`docs/retrospect-prune-audit.md`](docs/retrospect-prune-audit.md) | Same lens on the retrospect skill's gates/fences/stages, scored from retrospective transcript mining (issue #776)                                          |
+| File                                                               | Purpose                                                                                                                                                                |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`ETHOS.md`](ETHOS.md)                                             | Why praxis exists — values and principles that gate every skill, hook, and manifest; includes [Autonomy vs Convention](ETHOS.md#autonomy-vs-convention) boundary table |
+| [`DESIGN.md`](DESIGN.md)                                           | How hooks are built — structural-tokenization, session_id keying, compound-bash-cascade, ordering, and add-a-new-hook flow                                             |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md)                               | Skill ↔ hook ↔ manifest dependency graph — provider routing, hook index, multi-platform packaging                                                                      |
+| [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md)                 | Fixed Claude Code runtime limits every skill must respect                                                                                                              |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md)                               | Skill and hook contribution conventions, live-runtime verification gate                                                                                                |
+| [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md)             | Evidence-based keep/merge/drop verdict per hook, scored from the fire-rate ledger (issue #713)                                                                         |
+| [`docs/retrospect-prune-audit.md`](docs/retrospect-prune-audit.md) | Same lens on the retrospect skill's gates/fences/stages, scored from retrospective transcript mining (issue #776)                                                      |
 
 ## Prerequisites
 

@@ -3,8 +3,8 @@
 Evidence-based `keep` / `merge` / `drop` / `investigate` verdict for every
 enforcement device in the retrospect skill corpus (SKILL.md + references +
 `retrospect-mix-check` Stop hook), scored from retrospective transcript
-mining. This extends the [hook prune audit](hook-prune-audit.md) (issue
-#713) methodology to the one hook that audit could not score —
+mining. This extends the [hook prune audit](hook-prune-audit.md)
+(issue #713) methodology to the one hook that audit could not score —
 `retrospect-mix-check` is fire-ledger-uninstrumented, so its device
 fire-rates are reconstructed from recorded session transcripts instead.
 
@@ -22,7 +22,12 @@ Local Claude Code session transcripts (`~/.claude-4/projects/**/*.jsonl` +
   `## Retrospect Report` header AND the `retrospect:distribution` fence —
   the Stop hook's own identification logic. Fixture cards inside
   `tool_result` payloads (praxis dev/test sessions) are structurally
-  excluded by this dual-signal rule.
+  excluded by this dual-signal rule. Cohort boundary: a fence-omitting
+  Stage 3 draft is blocked by the hook and re-emitted with the fence,
+  so it enters the cohort in its fenced form (the one recorded block
+  below confirms this path); only a draft abandoned without re-emit is
+  invisible, so the fence-omission gate's exposure denominator is a
+  lower bound.
 - Per-report tallies: `gate_1..6_verdict` values, fence occurrence,
   `critic_diff:` values, `memory_hygiene` / `output_quality` category
   counts.
@@ -34,9 +39,14 @@ Local Claude Code session transcripts (`~/.claude-4/projects/**/*.jsonl` +
 
 Reproduce: the miner script is a ~120-line stdlib-Python scan (session
 scratchpad artifact; aggregate-only output, no session content). Core
-counting rules are stated above; spot-check any number with e.g.
-`grep -rl 'gate_1_verdict' ~/.claude-4/projects | wc -l` or
-`grep -rh 'Stop hook feedback' ~/.claude-4/projects/**/*.jsonl | head`.
+counting rules are stated above; exact report counts require the
+dual-signal rule (header + fence in the same assistant text block),
+which grep alone cannot express. Coarse file-level spot-checks across
+both roots:
+`grep -rl 'gate_1_verdict' ~/.claude-4/projects ~/.claude/projects | wc -l`
+(files containing at least one keyed card — upper bound on sessions) and
+`grep -rh 'Stop hook feedback' ~/.claude-4/projects ~/.claude/projects | head`
+(genuine Stop-block feedback events).
 
 ### Known measurement caveats
 
@@ -53,7 +63,8 @@ counting rules are stated above; spot-check any number with e.g.
 
 ## Device exposure (introduction date → reports since)
 
-From `git log --reverse -- skills/retrospect hooks/…/retrospect-mix-check`:
+From `git log --reverse -- skills/retrospect
+hooks/completion-verify/retrospect-mix-check`:
 
 | Device | Landed | Reports since (of 68) |
 | --- | --- | --- |
@@ -71,16 +82,18 @@ From `git log --reverse -- skills/retrospect hooks/…/retrospect-mix-check`:
 
 ## Axis 1 — never-applicable producer gates
 
-Verdict distribution over the 68 recorded cards:
+Verdict distribution over the 68 recorded cards. `ABSENT` = the card
+predates the key (caveat 3) — absent cards are excluded from the keyed
+denominator, so missing schema data is never counted as `NA`:
 
-| Gate | PASS | FAIL | NA | Applicability | Verdict |
-| --- | --- | --- | --- | --- | --- |
-| Gate-1 categorical | 24 | 0 | 30 | 44% of keyed cards | **Keep** — the anchor gate; hook + script (#775) both enforce it. |
-| Gate-2 rationale schema | 40 | 0 | 14 | 74% | **Keep** — highest-applicability gate. |
-| Gate-3 evidence robustness | 12 | 0 | 42 | 22% | **Keep** — applies to 1-in-5 reports; semantic half is cheap post-#775 (verdict flag). |
-| Gate-5 memory-scan | 46 | 0 | 8 | 85% | **Keep** — near-universal applicability. |
-| Gate-4 external-repo | 2 | 0 | 50 | **4%** (2/52) | **Keep (severity floor)** — fired only twice in 68 reports, but it guards external-repo writes (high blast radius, reputational). #775 already collapsed its cost to a script check; prose residue is minimal. Note: the `gate_4` key is absent from 16 cards (vs 14 for the other gates — 2 producers omitted just this key), so its keyed denominator is 52. |
-| Gate-6 oracle-match | 0 | 0 | 52 + 2 `N/A` | **0%** | **Merge/demote** — never once applicable in 68 reports. It also has no defined recording surface (found during #775 review — `oracle_match` lives nowhere until the agent invents a Rationale line), and 2 cards emitted a non-canonical `N/A` spelling the hook silently tolerates. Proposal: fold the producer procedure into the Stage 4 memory-action procedure (where stored-value corrections actually execute) and drop `gate_6_verdict` from the card. Blast radius: prose ~35 lines + one script flag; hook does not parse gate_6. |
+| Gate | PASS | FAIL | NA | ABSENT | Applicability (keyed) | Verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| Gate-1 categorical | 24 | 0 | 30 | 14 | 44% (24/54) | **Keep** — the anchor gate; hook + script (#775) both enforce it. |
+| Gate-2 rationale schema | 40 | 0 | 14 | 14 | 74% (40/54) | **Keep** — highest-applicability gate. |
+| Gate-3 evidence robustness | 12 | 0 | 42 | 14 | 22% (12/54) | **Keep** — applies to 1-in-5 reports; semantic half is cheap post-#775 (verdict flag). |
+| Gate-5 memory-scan | 46 | 0 | 8 | 14 | 85% (46/54) | **Keep** — near-universal applicability. |
+| Gate-4 external-repo | 2 | 0 | 50 | 16 | **4%** (2/52) | **Keep (severity floor)** — applicable only twice across its 52 keyed cards, but it guards external-repo writes (high blast radius, reputational). #775 already collapsed its cost to a script check; prose residue is minimal. Note: the `gate_4` key is absent from 2 more cards than the other gates (16 vs 14 — 2 producers omitted just this key), so its keyed denominator is 52. |
+| Gate-6 oracle-match | 0 | 0 | 52 + 2 `N/A` | 14 | **0%** (0/54) | **Merge/demote** — never once applicable in any of its 54 keyed cards. It also has no defined recording surface (found during #775 review — `oracle_match` lives nowhere until the agent invents a Rationale line), and 2 cards emitted a non-canonical `N/A` spelling the hook silently tolerates. Proposal: fold the producer procedure into the Stage 4 memory-action procedure (where stored-value corrections actually execute) and drop `gate_6_verdict` from the card. Blast radius: prose ~35 lines + one script flag; hook does not parse gate_6. |
 
 **Schema-laxity finding (no device verdict):** the card verdict values are
 free text to every consumer except the hook's `gate_1/2/3/4` keys — the
@@ -99,7 +112,7 @@ other occurrences of the block-reason string in transcripts are
 
 | Device | Genuine blocks | Exposure | Verdict |
 | --- | --- | --- | --- |
-| Fence-omission gate (#666) | 1 | 56 | **Keep** — the only device with a recorded save. |
+| Fence-omission gate (#666) | 1 | 56 (lower bound — see cohort boundary note in the method section) | **Keep** — the only device with a recorded save. |
 | Gate-1/2/3-backing/4 table parse | 0 | 68 | **Keep, cost-shifted** — never blocked, but these are the checks the #775 producer script now pre-flights; the hook side is the 2nd defense line and its cost is already paid (code + 121 tests). Do not extend further. |
 | Gate-7 value check (#692/#693) | 0 | 44 | **Investigate** — receipt fences appear in 40/68 report messages (59%), so the *producer* practice is alive; the enforcement (stale-count detection, live only since 2026-06-19) has never fired in its 44-report exposure. Candidate for simplification if the next instrumented window (see Appendix) still shows 0. |
 | Gate-8 structural + 8b laundering | 0 | 26 | **Keep (young)** — 26-report exposure is below decision threshold. |
@@ -134,7 +147,7 @@ not a prune candidate — Gate-8 blocks a missing ledger only when the
 | Verdict | Devices |
 | --- | --- |
 | Keep | Gate-1, Gate-2, Gate-3, Gate-4 (severity floor), Gate-5, fence-omission gate, Gate-8/8b (young), Stage 1.5 |
-| Merge/demote (proposal) | **Gate-6 oracle-match** (0/68 applicable → fold into Stage 4 memory-action procedure), **Stage 2.7 artifact audit** (0/68 productive → demote to Stage 2 trigger checklist) |
+| Merge/demote (proposal) | **Gate-6 oracle-match** (0/54 keyed-applicable → fold into Stage 4 memory-action procedure), **Stage 2.7 artifact audit** (0/68 productive → demote to Stage 2 trigger checklist) |
 | Investigate at next window | Gate-7 value check, Gate-8c token set, critic tier |
 | No verdict (zero exposure) | Gate-9, Gate-10 |
 
@@ -146,13 +159,20 @@ original motivating incident (#501 for Gate-6, #366 for Stage 2.7).
 
 ## Appendix — instrumentation follow-up (pre-req for the next audit)
 
-#713 already recommends porting the 4 uninstrumented shell hooks to
-fire-event emission. For this corpus specifically:
+Issue #713 already recommends porting the 4 uninstrumented shell hooks
+to fire-event emission. For this corpus specifically:
 
-1. Port `retrospect-mix-check` to emit fire-events (coarse tier is
-   enough: fired / blocked + which gate string), so Axis 2 gets live
-   denominators instead of transcript mining.
-2. Record the plugin release version in the fire event to close the
+1. Port `retrospect-mix-check` to emit fire-events under the existing
+   `hooks/_lib/_fire_ledger.py` contract (`decision: block | ask |
+   advise | pass`, `granularity: rich | coarse`, `hook`, `role`), so
+   Axis 2 gets live denominators instead of transcript mining. The
+   coarse tier is NOT sufficient here: this hook blocks by emitting
+   `{"decision": "block"}` JSON with exit 0 (impl.sh:1013), the exact
+   pattern the ledger docstring says the coarse path records as
+   `pass`. Rich recording (or parsing the emitted JSON) is required,
+   plus a reason/gate field extension to attribute which gate blocked.
+2. Record the plugin release version in the fire event (a schema
+   extension — the current contract has no release field) to close the
    deployment-lag caveat (Axis 4).
 3. Re-run this audit once Gate-9/10 and the #775 producer script have a
    full release cycle of exposure; the `investigate` rows above become
