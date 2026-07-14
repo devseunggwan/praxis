@@ -59,7 +59,7 @@ For each approved action:
    - 1–4 keywords typical; >5 raises false-positive risk linearly.
    - **Avoid generic English words** (`add`, `run`, `test`, `update`) — they fire on unrelated commands and erode the hint signal.
    - **`hookKeywords` must be a flat single-line list** (`[a, b]`). Multi-line YAML-block form (`- item` on separate lines) and scalar form (`hookKeywords: foo`) are silently skipped — the entire memory is then dropped (not indexed at all) and the hint never fires. Verify the list is single-line before committing.
-   - When the memory targets a non-Bash event, add `hookEvents:` to opt in — `memory-hint.py` supports `[Bash, Edit, Write, NotebookEdit, AskUserQuestion]` (default `[Bash]` when omitted). Unsupported tool names in the list are dropped; if every listed event is unsupported the parser keeps the `[Bash]` default.
+   - When the memory targets a non-Bash event, add `hookEvents:` to opt in — the memory-hint hook (`hooks/advisory-nudge/memory-hint/impl.py`) supports `[Bash, Edit, Write, NotebookEdit, AskUserQuestion]` (default `[Bash]` when omitted). Unsupported tool names in the list are dropped; if every listed event is unsupported the parser keeps the `[Bash]` default.
 
    **⚠️ MANDATORY: Duplicate check before creating any memory file:**
 
