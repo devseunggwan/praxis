@@ -5,6 +5,26 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.3.0](https://github.com/devseunggwan/praxis/compare/v7.2.1...v7.3.0) (2026-07-14)
+
+
+### Added
+
+* **hooks:** add foreground poll-loop guard ([#778](https://github.com/devseunggwan/praxis/issues/778)) ([5ce724a](https://github.com/devseunggwan/praxis/commit/5ce724aa49f5e9435ae5b438d5a8aa6bf393854e)), closes [#745](https://github.com/devseunggwan/praxis/issues/745)
+* **retrospect:** enforce silent-pass completeness ([#773](https://github.com/devseunggwan/praxis/issues/773)) ([b34e590](https://github.com/devseunggwan/praxis/commit/b34e590ed0cf4808b6cba22fa3a5e6253325382b))
+* **retrospect:** include sidechain events in corpus ([#765](https://github.com/devseunggwan/praxis/issues/765)) ([f5bc434](https://github.com/devseunggwan/praxis/commit/f5bc43414219d041ded0cfc4fb10aaa0649508a2))
+
+
+### Changed
+
+* bump github/codeql-action/analyze from 4.36.3 to 4.37.0 ([#767](https://github.com/devseunggwan/praxis/issues/767)) ([0d92efd](https://github.com/devseunggwan/praxis/commit/0d92efd2d609dc05b276166ed9a8b7e683b2ed49))
+* bump github/codeql-action/init from 4.36.3 to 4.37.0 ([#768](https://github.com/devseunggwan/praxis/issues/768)) ([e93e61e](https://github.com/devseunggwan/praxis/commit/e93e61e11819a972f74412f0a57def6447bd28c8))
+* bump lycheeverse/lychee-action from 2.8.0 to 2.9.0 ([#769](https://github.com/devseunggwan/praxis/issues/769)) ([2c1a90c](https://github.com/devseunggwan/praxis/commit/2c1a90c266891da19b638fdc4441a1941cf54095))
+* exclude generated CHANGELOG from markdownlint ([#771](https://github.com/devseunggwan/praxis/issues/771)) ([b849cca](https://github.com/devseunggwan/praxis/commit/b849ccaa73ad16bd9337d922af4dd54cb14ed935)), closes [#770](https://github.com/devseunggwan/praxis/issues/770)
+* **retrospect:** add fire-rate prune audit ([#777](https://github.com/devseunggwan/praxis/issues/777)) ([7793b32](https://github.com/devseunggwan/praxis/commit/7793b32dc14dad5147f55081aac64d1b7c1e9df4)), closes [#776](https://github.com/devseunggwan/praxis/issues/776)
+* **retrospect:** codify stage 2.5 gates ([#775](https://github.com/devseunggwan/praxis/issues/775)) ([7e292c5](https://github.com/devseunggwan/praxis/commit/7e292c5f873992f96a3a399420f6e3a8eede3d88)), closes [#774](https://github.com/devseunggwan/praxis/issues/774)
+* **retrospect:** fix stale memory-hint event coverage note ([#780](https://github.com/devseunggwan/praxis/issues/780)) ([3a0f44c](https://github.com/devseunggwan/praxis/commit/3a0f44cf9b2cd144ab168d4bbd6086ad10296051))
+
 ## [7.2.1](https://github.com/devseunggwan/praxis/compare/v7.2.0...v7.2.1) (2026-07-05)
 
 
