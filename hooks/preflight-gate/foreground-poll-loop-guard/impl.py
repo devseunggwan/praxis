@@ -80,6 +80,9 @@ _FOREGROUND_CEILING_S = 120  # Bash default timeout, seconds
 _SAFE_MARGIN_S = 100  # block when worst-case can approach the ceiling
 
 _LOOP_KEYWORDS = {"for", "while", "until"}
+# Separator tokens after which the next token sits in command position (bash
+# grants reserved-word meaning to for/while/until/do/done only there).
+_COMMAND_SEPARATORS = {";", ";;", "&&", "||", "|", "&", "{"}
 _SLEEP_ARG_RE = re.compile(r"(\d+(?:\.\d+)?)([smhd]?)[;)]*$")  # 20 / 2.5 / 30s / 1m / 20;
 _SLEEP_UNIT_S = {"": 1.0, "s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
 _SEQ_HEAD_RE = re.compile(r"^[$(`]*seq$")  # seq / $(seq / `seq
@@ -88,7 +91,9 @@ _BRACE_RANGE_RE = re.compile(r"\{(\d+)\.\.(\d+)\}")  # {A..N} / {N..A}
 _C_INIT_RE = re.compile(r"=\s*(\d+)")  # ((i=0; …
 _C_BOUND_RE = re.compile(r"([<>]=?)\s*(\d+)")  # … i<40 / i<=40 …
 _C_STEP_RE = re.compile(r"[+-]=\s*(\d+)")  # … i+=2 ))
-_HEREDOC_RE = re.compile(r"<<-?\s*([\"']?)(\w+)\1")
+# Delimiter = any non-special word (covers `~EOF` etc. — bash has only `<<`
+# and `<<-`; a leading `~` is part of the delimiter, not an operator variant).
+_HEREDOC_RE = re.compile(r"<<-?\s*([\"']?)([^\s\"'<>|&;()]+)\1")
 
 def _strip_comment(line: str) -> str:
     """Cut the line at an unquoted `#` that starts a word (bash comment rule)."""
@@ -147,10 +152,23 @@ def _iter_loops(tokens: list[str]) -> list[tuple[str, list[str], list[str]]]:
     """
     loops: list[tuple[str, list[str], list[str]]] = []
     stack: list[list[int | None]] = []  # [kw_idx, do_idx]
+    # Bash honours reserved words only in command position; an argument
+    # (`echo done`) must not open/advance/close a loop frame. A `do` grants
+    # command position to its successor only when it was itself reserved —
+    # tracked via `grants_next`, so a literal word list (`for i in do done`)
+    # cannot fake a boundary.
+    grants_next = False
     for i, tok in enumerate(tokens):
-        if tok in _LOOP_KEYWORDS:
+        cmd_pos = i == 0 or tokens[i - 1] in _COMMAND_SEPARATORS or grants_next
+        grants_next = False
+        if not cmd_pos:
+            continue
+        if tok in ("then", "else", "elif"):
+            grants_next = True
+        elif tok in _LOOP_KEYWORDS:
             stack.append([i, None])
         elif tok == "do":
+            grants_next = True
             for frame in reversed(stack):
                 if frame[1] is None:
                     frame[1] = i

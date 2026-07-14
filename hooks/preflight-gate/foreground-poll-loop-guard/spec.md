@@ -6,7 +6,7 @@ Supported hosts: all
 tool call and blocks foreground poll-loops that will hit the Bash default
 120000ms (2-min) timeout and die with SIGTERM (Exit 143) mid-poll.
 
-### Why this exists
+## Why this exists
 
 A `for/while/until ... sleep N ... done` loop run in the FOREGROUND runs until it
 hits the Bash foreground ceiling and is killed, even though the underlying async
@@ -21,7 +21,7 @@ guard keys on the LOOP SHAPE (not the polled command — an allowlist is always
 incomplete) and REDIRECTS to the native async-wait primitives rather than merely
 rejecting.
 
-### What is blocked
+## What is blocked
 
 Exit 2 when a FOREGROUND Bash call (`run_in_background` is not `true`) contains:
 
@@ -32,7 +32,7 @@ Exit 2 when a FOREGROUND Bash call (`run_in_background` is not `true`) contains:
 | `for i in {1..30}; do ...; sleep 5; done` (150s) | **BLOCKED** |
 | `while true; do gh pr checks; sleep 20; done` (unbounded) | **BLOCKED** |
 | `until <cond>; do sleep 15; done` (unbounded) | **BLOCKED** |
-| `for ... sleep 1 (3s); done; while true; do sleep 30; done` | **BLOCKED** (unbounded checked first — a short `for` cannot mask it) |
+| `for ... sleep 1 (3s); done; while true; do sleep 30; done` | **BLOCKED** (per-loop scoping — a short `for` cannot mask the unbounded `while`) |
 | `for i in $(seq 1 5); do ...; sleep 18; done` (90s < 100) | pass (exit 0) |
 | same loop with `run_in_background: true` | pass |
 | `while read line; do ...; sleep 1; done < f` (line-consumer) | pass |
@@ -74,17 +74,17 @@ Known limitations (intentional): a loop backgrounded at the shell level
 returns, so `run_in_background: true` remains the correct redirect. An
 unparseable iteration count or `sleep $VAR` fails open (pass).
 
-### Redirect message
+## Redirect message
 
 The block message names the alternatives so the caller can self-correct:
 `run_in_background: true`, Monitor with an until-loop, `aws cloudformation wait`,
 `gh run watch` / `gh pr checks --watch` / `kubectl wait`.
 
-### Env vars
+## Env vars
 
 - `PRAXIS_HOOK_BYPASS_POLL_LOOP_GUARD` — set to any non-empty value → bypass (exit 0).
 
-### Fail-open
+## Fail-open
 
 Malformed stdin JSON, non-Bash tool, empty command, unparseable count/sleep →
 exit 0 (pass). The guard never blocks on infrastructure error.

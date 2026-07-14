@@ -102,6 +102,12 @@ run_case "unbounded-path-invoked-sleep" block \
   'while true; do /bin/sleep 20; done'
 run_case "bounded-descending-brace" block \
   'for i in {30..1}; do kubectl get pod; sleep 5; done'
+run_case "unbounded-echo-done-no-early-close" block \
+  'while true; do echo done; sleep 30; done'
+run_case "unbounded-quoted-done-argument" block \
+  'while true; do echo "done"; sleep 30; done'
+run_case "bounded-keywords-as-list-words" block \
+  'for i in do done while; do sleep 50; done'
 
 # ---- pass: short bounded / background / consumers / no-sleep ------------------
 run_case "bounded-short-90s" pass \
@@ -147,6 +153,10 @@ run_case "heredoc-then-real-loop-still-blocks" block \
 sample text
 EOF
 while true; do poll; sleep 20; done'
+run_case "heredoc-tilde-delimiter" pass \
+  'cat <<~EOF
+while true; do sleep 20; done
+~EOF'
 
 # ---- pass: quoted literals must not trigger (token-based detection) ----------
 run_case "quoted-commit-message" pass \
