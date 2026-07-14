@@ -14,6 +14,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md)     | Fixed Claude Code runtime limits every skill must respect                                                                                                              |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md)                   | Skill and hook contribution conventions, live-runtime verification gate                                                                                                |
 | [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md) | Evidence-based keep/merge/drop verdict per hook, scored from the fire-rate ledger (issue #713)                                                                         |
+| [`docs/retrospect-prune-audit.md`](docs/retrospect-prune-audit.md) | Same lens on the retrospect skill's gates/fences/stages, scored from retrospective transcript mining (issue #776)                                          |
 
 ## Prerequisites
 
