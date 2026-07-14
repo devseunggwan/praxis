@@ -25,6 +25,7 @@ confirmation-prompt layer.
 | [gh-flag-verify](../../hooks/preflight-gate/gh-flag-verify/spec.md) | PreToolUse | Block `gh <subcmd>` calls with flags not in the subcommand's accepted set |
 | [gh-json-validator](../../hooks/preflight-gate/gh-json-validator/spec.md) | PreToolUse | Block `gh <subcmd> --json <fields>` calls whose field names are not in the subcommand's valid JSON projection — issue #391 |
 | [gh-label-verify](../../hooks/preflight-gate/gh-label-verify/spec.md) | PreToolUse | Block `gh (issue\|pr) (create\|edit)` calls whose `--label` values are absent from the target repo's label set — issue #385 |
+| [foreground-poll-loop-guard](../../hooks/preflight-gate/foreground-poll-loop-guard/spec.md) | PreToolUse | Block foreground Bash poll-loops (`for/while/until … sleep`) that would hit the 120s ceiling (Exit 143); redirects to native async-wait primitives — issue #745 |
 | [block-ask-end-option](../../hooks/preflight-gate/block-ask-end-option/spec.md) | PreToolUse | Block `AskUserQuestion` options carrying end-option markers when no stop signal present |
 | [block-manufactured-action-menu](../../hooks/preflight-gate/block-manufactured-action-menu/spec.md) | PreToolUse | Warn or block when `AskUserQuestion` surfaces a "shall we proceed?" menu after user already issued a command-intent signal |
 | [block-pr-without-caller-evidence](../../hooks/preflight-gate/block-pr-without-caller-evidence/spec.md) | PreToolUse | Block `gh pr create` unless the PR body contains a `Caller chain verified:` line |

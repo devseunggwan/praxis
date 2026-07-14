@@ -100,6 +100,18 @@
       "timeout": 5
     },
     {
+      "name": "foreground-poll-loop-guard",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_POLL_LOOP_GUARD"
+        ]
+      }
+    },
+    {
       "name": "cross-boundary-preflight",
       "role": "preflight-gate",
       "event": "PreToolUse",
