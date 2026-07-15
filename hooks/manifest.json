@@ -299,6 +299,21 @@
       "timeout": 5
     },
     {
+      "name": "pre-commit-staged-file-enumeration",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": [
+        "claude"
+      ],
+      "timeout": 10,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_SKIP_STAGED_FILE_ENUM"
+        ]
+      }
+    },
+    {
       "name": "push-remote-ref-verify",
       "role": "advisory-nudge",
       "event": "PostToolUse",
