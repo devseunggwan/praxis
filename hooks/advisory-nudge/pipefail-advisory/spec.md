@@ -127,6 +127,14 @@ already clean and needs no stripping.
 | `(git commit ... \| tail)` / `(git commit ... \| tail -3)` (compact subshell) | `_recover_command_argv` strips the leading `(`; `_is_truncating_sink` strips a trailing `)` from a bare sink token |
 | `gh pr merge 1 \|& tail -3` (`\|&` pipe-with-stderr operator) | `\|&` is treated as a pipe-continuation separator, equivalent to `\|` |
 
+### False-negative surfaces closed (2026-07-16 codex review round 2)
+
+| Surface | Handling |
+| --------- | ---------- |
+| `read x <<< value; git commit -m x \| tail` (here-string `<<<` before the pipeline) | `_heredoc_open_marker` previously matched `<<<` via its generic `tok.startswith("<<")` check (`"<<<".startswith("<<")` is true) and returned a bogus end-marker, causing the following mutating pipeline to be swallowed as fake heredoc body. `<<<` is now excluded before that generic check — bash here-strings are a distinct operator, never a heredoc opener |
+| `gh issue -R owner/repo create \| head` / `gh pr --repo owner/repo merge 1 \| tail` (global gh flag between object and verb) | `_gh_object_verb` previously only skipped global flags *before* the object, so a flag placed *after* the object (a valid `gh` invocation form) was itself misread as the verb. `_skip_gh_global_flags` is now called at both positions |
+| `LANG=C RESULT=$(gh pr merge 1 \| tail -3)` (plain env assignment preceding the capture assignment) | `_recover_command_argv` previously only inspected `argv[0]` for the `VAR=$(` pattern, so a leading plain assignment (`LANG=C`) shifted the capture assignment to `argv[1]` and it was missed — `strip_prefix` then dropped both tokens, losing `gh` entirely. The `$(` search now walks past any number of leading plain assignments before checking for the substitution prefix |
+
 ### Examples
 
 | Command | Action |
@@ -139,6 +147,9 @@ already clean and needs no stripping.
 | `OUT=$(gh pr merge 123 \| tail -3)` | **ADVISORY** — assignment + command-substitution prefix recovered |
 | `(git commit -m x \| tail)` | **ADVISORY** — compact-subshell prefix/suffix recovered |
 | `gh pr merge 1 \|& tail -3` | **ADVISORY** — `\|&` operator |
+| `read x <<< value; git commit -m x \| tail` | **ADVISORY** — here-string `<<<` correctly not mistaken for a heredoc opener |
+| `gh issue -R owner/repo create \| head` | **ADVISORY** — global gh flag between object and verb correctly skipped |
+| `LANG=C RESULT=$(gh pr merge 1 \| tail -3)` | **ADVISORY** — plain env assignment before a capture assignment correctly recovered |
 | `git log --oneline \| head -20` | **SILENT** — `log` is read-only |
 | `git status \| grep modified` | **SILENT** — `status` is read-only |
 | `gh pr list \| head -5` | **SILENT** — `list` is read-only |
@@ -190,6 +201,7 @@ cost dominates:
 | Multi-line inline heredoc embedded inside a single quoted argument (`--body "$(cat <<'EOF' ... EOF)"` all on the `--body` line) | `safe_tokenize` drops that physical line's tokens entirely on `ValueError` (documented in `safe_tokenize`'s own docstring) — the recommended `BODY=$(cat <<'EOF' ... EOF)` + `--body "$BODY"` two-step form (used in this repo's own test payloads) is the form this hook's heredoc skip is verified against |
 | Heredoc opener that is itself a live mutating pipeline (`gh issue create --body-file - <<EOF \| tail -3`) | Silent (false negative) — the opener segment is dropped entirely once a heredoc-open marker is detected, and the physical-line boundary between the opener's own `\|`-continuation and the heredoc body's first line is not distinguishable after `safe_tokenize` flattens both into the same synthetic-`;`-separated stream. Fixing this correctly requires tracking physical-line provenance through tokenization — out of scope for issue #788; codex review round (2026-07-15) flagged this as [P2] but the compound pattern (heredoc used simultaneously as stdin *and* the command's stdout piped) is rare relative to the gen-1/gen-2 motivating cases, all of which lack heredoc input entirely |
 | Quoted/escaped separator-lookalike content misread as a real operator (e.g. `git commit -m "\|" tail` — the quoted `"\|"` value dequotes to a bare `\|` token indistinguishable from a real pipe) | False positive — `safe_tokenize` (shared `_lib` tokenizer) strips quotes before returning plain strings, discarding quote-provenance. This is a structural limitation of the shared tokenizer, not unique to this hook: `inspection-chain-advisory`'s `&&`-chain detector has the identical exposure (verified: `git a "&&" && grep b foo` → `safe_tokenize` returns two adjacent `&&` tokens, one from the quoted literal). A per-hook workaround would diverge from the established sibling pattern for a narrow, low-likelihood case (a value whose ENTIRE quoted content is exactly `\|`/`&&`/etc., not merely containing the character); a real fix belongs at the `_lib.safe_tokenize` layer as a separate cross-cutting issue |
+| Shell comment analyzed as live command (e.g. `echo ok # example; gh pr merge 1 \| tail` — bash never executes anything after the unescaped `#`, but the hook still flags the commented-out example text as a live mutating pipeline) | False positive — `safe_tokenize` sets `lex.commenters = ""` deliberately (`hooks/_lib/_hook_utils.py:124`), a shared design choice: enabling shlex's default comment-stripping would truncate the token stream at the first unquoted `#`, which is far more damaging for the tokenizer's other consumers (e.g. `block-pr-without-caller-evidence` scanning a `--body` value for a marker line — any `#` in the body, such as a markdown heading, would silently hide everything after it from the gate). A per-hook comment-stripping fix in this file cannot safely distinguish a real comment token from a quoted literal that merely starts with `#` post-dequote (verified: `--body "# heading in markdown body"` and a real `# comment` are both indistinguishable single/plain tokens after `safe_tokenize`) — the same quote-provenance loss as the row above. Codex review round 2 (2026-07-16) flagged this as [P2]; low severity in practice since this hook is advisory-only (never blocks) |
 
 ### Tests
 
@@ -199,8 +211,9 @@ bash tests/hooks/advisory-nudge/test_pipefail_advisory.sh
 
 Cases cover: advisory firing on gen-1/gen-2 patterns, git push, 3-segment
 chains, gh mutating verbs, assignment/subshell/`\|&` prefix recovery
-(2026-07-15 codex review round); silent on read-only commands piped,
-non-truncating sinks, `&&`/`;`/`\|\|`/`&` separators, quoted-pipe
-literals, heredoc body false positives (incl. the EOF-not-end premature-
-close guard), single commands, and infrastructure fail-open (non-Bash,
-malformed JSON, empty command).
+(2026-07-15 codex review round), here-string/gh-flag-position/multi-
+assignment-prefix recovery (2026-07-16 codex review round 2); silent on
+read-only commands piped, non-truncating sinks, `&&`/`;`/`\|\|`/`&`
+separators, quoted-pipe literals, heredoc body false positives (incl.
+the EOF-not-end premature-close guard), single commands, and
+infrastructure fail-open (non-Bash, malformed JSON, empty command).

@@ -148,6 +148,25 @@ run_case "gh pr merge 1 |& tail -3 (pipe-with-stderr operator)" \
   advisory \
   "gh pr merge 1 |& tail -3"
 
+# === ADVISORY — round-2 codex review (here-string, gh flag position, ======
+# === multi-assignment prefix) ==============================================
+
+run_case "here-string before mutating pipe is not mistaken for a heredoc" \
+  advisory \
+  "read x <<< value; git commit -m x | tail"
+
+run_case "gh -R before object still finds the mutating verb" \
+  advisory \
+  "gh issue -R owner/repo create --body x | head"
+
+run_case "gh --repo between object and verb still finds the mutating verb" \
+  advisory \
+  "gh pr --repo owner/repo merge 1 | tail"
+
+run_case "plain env assignment before a capture assignment (LANG=C RESULT=\$(...))" \
+  advisory \
+  'LANG=C RESULT=$(gh pr merge 1 | tail -3)'
+
 # === SILENT — read-only command piped (no mutation) ========================
 
 run_case "git log | head (read-only)" \

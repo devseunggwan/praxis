@@ -123,12 +123,11 @@ def _git_subcommand(argv: list[str]) -> str | None:
     return None
 
 
-def _gh_object_verb(argv: list[str]) -> tuple[str, str] | None:
-    """Return (object, verb) for a `gh <object> <verb>` invocation, else None."""
-    argv = strip_prefix(argv)
-    if not argv or os.path.basename(argv[0]) != "gh":
-        return None
-    i = 1
+def _skip_gh_global_flags(argv: list[str], i: int) -> int:
+    """Advance `i` past `--` or global gh flags (`-R x`, `--repo x`, ...),
+    stopping at the next non-flag token. `gh` accepts global flags both
+    before the object (`gh -R x issue create`) and between the object and
+    verb (`gh issue -R x create`), so callers invoke this at both points."""
     n = len(argv)
     while i < n:
         tok = argv[i]
@@ -140,12 +139,23 @@ def _gh_object_verb(argv: list[str]) -> tuple[str, str] | None:
         i += 1
         if "=" not in tok and tok in _GH_GLOBAL_FLAGS_WITH_ARG and i < n:
             i += 1
+    return i
+
+
+def _gh_object_verb(argv: list[str]) -> tuple[str, str] | None:
+    """Return (object, verb) for a `gh <object> <verb>` invocation, else None."""
+    argv = strip_prefix(argv)
+    if not argv or os.path.basename(argv[0]) != "gh":
+        return None
+    n = len(argv)
+    i = _skip_gh_global_flags(argv, 1)
     if i >= n:
         return None
     obj = argv[i]
-    if i + 1 >= n:
+    i = _skip_gh_global_flags(argv, i + 1)
+    if i >= n:
         return None
-    return (obj, argv[i + 1])
+    return (obj, argv[i])
 
 
 def _recover_command_argv(argv: list[str]) -> list[str]:
@@ -159,20 +169,26 @@ def _recover_command_argv(argv: list[str]) -> list[str]:
     fused `gh` — rather than recognizing the assignment carries a command
     substitution. `(git` is not an env assignment and has no basename
     match against `"git"` either, so it slips past both `strip_prefix` and
-    the plain `os.path.basename(argv[0]) == "git"` check untouched.
+    the plain `os.path.basename(argv[0]) == "git"` check untouched. A plain
+    env assignment may also precede the capture assignment (`LANG=C
+    RESULT=$(gh ...)`), so the `$(` search walks past any number of
+    leading plain assignments rather than only checking argv[0].
     """
     if not argv:
         return argv
-    head = argv[0]
-    original = head
-    # `VAR=$(cmd ...` — keep only the fragment after the last `$(` run.
-    if ENV_ASSIGN_RE.match(head) and "$(" in head:
-        head = head.rsplit("$(", 1)[1]
+    for i, tok in enumerate(argv):
+        if ENV_ASSIGN_RE.match(tok):
+            if "$(" in tok:
+                head = tok.rsplit("$(", 1)[1]
+                return argv[:i] + [head] + argv[i + 1 :]
+            continue
+        break
     # Leading grouping / substitution chars: `(cmd`, `$(cmd`, `` `cmd ``.
-    head = head.lstrip(_GROUP_PREFIX_CHARS)
-    if head == original:
+    head = argv[0]
+    stripped = head.lstrip(_GROUP_PREFIX_CHARS)
+    if stripped == head:
         return argv
-    return [head] + argv[1:]
+    return [stripped] + argv[1:]
 
 
 def _mutating_description(argv: list[str]) -> str | None:
@@ -254,13 +270,18 @@ def _heredoc_open_marker(argv: list[str]) -> str | None:
     Handles both the space-separated form (`cat << EOF` -> tokens
     `['cat', '<<', 'EOF']`) and the fused form (`cat <<EOF`, `cat <<-EOF`
     -> a single token `<<EOF` / `<<-EOF`, shlex-dequoted so `<<'EOF'` and
-    `<<"EOF"` collapse to the same bare form).
+    `<<"EOF"` collapse to the same bare form). `<<<` (here-string, e.g.
+    `read x <<< value`) is a distinct bash operator — not a heredoc — and
+    is excluded before the generic `<<`-prefix check below, which would
+    otherwise match it too (`"<<<".startswith("<<")`).
     """
     for i, tok in enumerate(argv):
         if tok in ("<<", "<<-"):
             if i + 1 < len(argv):
                 return argv[i + 1]
             return None
+        if tok.startswith("<<<"):
+            continue
         if tok.startswith("<<"):
             remainder = tok[2:]
             if remainder.startswith("-"):
