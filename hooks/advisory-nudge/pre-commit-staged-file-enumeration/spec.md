@@ -155,8 +155,17 @@ unreadable transcript, or any uncaught exception (wrapped by `@fail_open`).
 bash tests/hooks/advisory-nudge/test_pre_commit_staged_file_enumeration.sh
 ```
 
-Covers: bash-created staged addition surfaced; Write-created addition silent;
-mixed (only the bash-created one surfaced); `--amend` silent; modification-only
-silent; `git commit-tree` / quoted-literal silent; compound `&&` and
-path-prefixed `git` detected; opt-out marker and env bypass silent; fail-open
-(non-Bash, malformed JSON, empty command, missing transcript).
+Covers: bash-created staged addition surfaced; Write/Edit/MultiEdit-created
+addition silent; mixed (only the bash-created one surfaced); `--amend` with
+staged additions surfaced / clean-index `--amend` silent; `--dry-run` / `--help`
+silent; symlink-to-seen-target surfaced; failed-Write target surfaced;
+modification-only silent; `git commit-tree` / quoted-literal silent; compound
+`&&`, `-c` global flag, and path-prefixed `git` detected; opt-out marker and env
+bypass silent; fail-open (non-Bash, malformed JSON, empty command, missing
+transcript).
+
+The documented boundaries in "Limitations" / "Detection boundaries" are pinned
+by regression tests: single-call create+add+commit is silent; `--only` partial
+commit over-lists the excluded addition; a `git commit` literal in a heredoc
+body false-surfaces; `result=$(git commit)` is not detected. These pin current
+behavior so a future tokenizer change surfaces here.

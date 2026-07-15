@@ -405,6 +405,61 @@ rm -rf "$FAILREPO" 2>/dev/null || true
 rm -f "$TRANSCRIPT_FAIL" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
+# === Documented boundary verification (spec.md "Limitations" / "Detection
+# === boundaries") — pin the exact behavior so a regression is visible ===
+# ---------------------------------------------------------------------------
+
+# #1 single-call create+add+commit: at PreToolUse the file is not yet in the
+# index, so the additions list is empty → SILENT (documented miss). Fresh repo
+# with a clean index isolates the boundary.
+SINGLEREPO=$(mktemp -d)
+git -C "$SINGLEREPO" init -q
+git -C "$SINGLEREPO" config user.email test@example.com
+git -C "$SINGLEREPO" config user.name "Test User"
+printf 'seed\n' > "$SINGLEREPO/seed.txt"
+git -C "$SINGLEREPO" add seed.txt
+git -C "$SINGLEREPO" -c commit.gpgsign=false commit -q -m seed
+run_dir_case "single-call create+add+commit is silent (documented miss)" \
+  "silent" "$SINGLEREPO" \
+  "printf x > forgotten.txt && git add forgotten.txt && git commit -m y" \
+  "$TRANSCRIPT_EMPTY"
+rm -rf "$SINGLEREPO" 2>/dev/null || true
+
+# #3a partial commit (`--only <path>`) over-lists ALL staged additions, not
+# just the pathspec — pin by asserting the EXCLUDED file is still surfaced.
+ONLYREPO=$(mktemp -d)
+git -C "$ONLYREPO" init -q
+git -C "$ONLYREPO" config user.email test@example.com
+git -C "$ONLYREPO" config user.name "Test User"
+printf 'seed\n' > "$ONLYREPO/seed.txt"
+git -C "$ONLYREPO" add seed.txt
+git -C "$ONLYREPO" -c commit.gpgsign=false commit -q -m seed
+printf a > "$ONLYREPO/only_this.txt"
+printf b > "$ONLYREPO/but_not_this.txt"
+git -C "$ONLYREPO" add only_this.txt but_not_this.txt
+run_dir_case "partial commit --only over-lists the excluded addition (boundary)" \
+  "surface:but_not_this.txt" "$ONLYREPO" \
+  "git commit --only only_this.txt -m y" "$TRANSCRIPT_EMPTY"
+rm -rf "$ONLYREPO" 2>/dev/null || true
+
+# #3b a `git commit` literal inside a heredoc body is data, not a command, but
+# the shared tokenizer line-splits it → false-surface. Pin the boundary.
+HEREREPO=$(mktemp -d)
+git -C "$HEREREPO" init -q
+git -C "$HEREREPO" config user.email test@example.com
+git -C "$HEREREPO" config user.name "Test User"
+printf 'seed\n' > "$HEREREPO/seed.txt"
+git -C "$HEREREPO" add seed.txt
+git -C "$HEREREPO" -c commit.gpgsign=false commit -q -m seed
+printf data > "$HEREREPO/staged.txt"
+git -C "$HEREREPO" add staged.txt
+run_dir_case "git commit literal in heredoc body false-surfaces (boundary)" \
+  "surface:staged.txt" "$HEREREPO" \
+  "$(printf 'cat > guide.md <<%sEOF%s\ngit commit -m in-body\nEOF' "'" "'")" \
+  "$TRANSCRIPT_EMPTY"
+rm -rf "$HEREREPO" 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
 # === SILENT: opt-out marker + env bypass ===
 # ---------------------------------------------------------------------------
 
