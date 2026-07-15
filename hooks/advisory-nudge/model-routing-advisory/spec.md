@@ -7,11 +7,16 @@ calls that delegate work with an explicit `--model <tier>` and emits a **stderr
 advisory** (never a block) when the chosen tier does not match the tier implied
 by the task keywords in the command.
 
-This hook, together with the reference decision tree in this spec, **replaces**
-the `Skill & Agent Routing` + `Model Routing Rules` prose blocks that previously
-lived in the always-loaded user-level `CLAUDE.md`. The enforcement (tier nudge)
-lives in the hook; the on-demand reference knowledge (which skill/agent/model for
-which task) lives in this spec — neither is always-loaded.
+This hook, together with the reference decision tree in this spec, is the
+**replacement mechanism** for the `Skill & Agent Routing` + `Model Routing Rules`
+prose blocks in the always-loaded user-level `CLAUDE.md`: the enforcement (tier
+nudge) lives in the hook and the on-demand reference knowledge (which skill/agent/
+model for which task) lives in this spec — neither is always-loaded. Removing the
+blocks from the always-loaded file is a **companion change in the ai-dotfiles
+repo** (the file this hook slims); this praxis PR ships only the mechanism. The
+tier nudge covers the *complexity→model* phase of the two-phase Provider Routing
+model (see ARCHITECTURE.md) — Claude tiers only, not `codex:`/`gemini:` provider
+selection.
 
 ## Why this exists
 
