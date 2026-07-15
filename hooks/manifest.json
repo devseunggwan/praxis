@@ -259,6 +259,13 @@
       "timeout": 5
     },
     {
+      "name": "pipefail-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
       "name": "destructive-bash-guard",
       "role": "advisory-nudge",
       "event": "PreToolUse",
