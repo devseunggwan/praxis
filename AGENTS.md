@@ -25,7 +25,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | **Full**           | + all cmux-* skills                                      | + cmux                                                      |
 | **Multi-provider** | + codex/gemini routing in cmux-*                         | + codex-cli, gemini-cli                                     |
 
-## Skills (14)
+## Skills (15)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Always call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
@@ -46,6 +46,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | `retrospect`        | Session retrospect — find friction root causes, propose improvements                                                                                                                            |
 | `codex-review-wrap` | Worktree-aware wrapper for `/codex:review` — forces explicit target selection, premise-verification gate, flip detection across rounds                                                          |
 | `debt`              | Deferred-decision ledger — unions commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) with tree compounding comments (`# [PR #N]`); report-only |
+| `surface-enumeration` | Pre-implementation input-surface enumeration — before writing a parser/validator/sanitizer/classifier, list every input variant (escape/comment/negation/boundary/quote/encoding/container) so each becomes a required test case; knowledge-injection, no runtime gate |
 
 ### Discipline
 
