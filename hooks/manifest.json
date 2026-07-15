@@ -314,6 +314,21 @@
       }
     },
     {
+      "name": "model-routing-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": [
+        "claude"
+      ],
+      "timeout": 10,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_SKIP_MODEL_ROUTING"
+        ]
+      }
+    },
+    {
       "name": "push-remote-ref-verify",
       "role": "advisory-nudge",
       "event": "PostToolUse",

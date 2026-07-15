@@ -41,6 +41,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_MOMENTUM_BYPASS` | `momentum-rule-retrieval-gate` | Skip the high-momentum rule nudge |
 | `PRAXIS_VERSION_BUMP_BYPASS` | `version-bump-evidence-check` | Skip the version-bump evidence advisory |
 | `PRAXIS_SKIP_STAGED_FILE_ENUM` | `pre-commit-staged-file-enumeration` | Skip the pre-commit staged-file enumeration advisory |
+| `PRAXIS_SKIP_MODEL_ROUTING` | `model-routing-advisory` | Skip the delegation `--model` tier-mismatch advisory |
 | `PRAXIS_GH_JSON_BYPASS` | `gh-json-validator` | Skip the `gh --json` field validation (env var form). Note: the inline-comment form `# PRAXIS_GH_JSON_BYPASS=skip` also bypasses the hook but is **not** captured by bypass-telemetry |
 | `PRAXIS_ASK_END_ADVISORY` | `block-ask-end-option` | Demote the end-option guard to advisory mode (exit 0 + stderr) |
 | `PRAXIS_SKIP_COMMIT_FLAG_CHECK` | `verify-commit-flag-override` | Skip the commit-flag override check |
