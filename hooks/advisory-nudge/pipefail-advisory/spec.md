@@ -135,6 +135,13 @@ already clean and needs no stripping.
 | `gh issue -R owner/repo create \| head` / `gh pr --repo owner/repo merge 1 \| tail` (global gh flag between object and verb) | `_gh_object_verb` previously only skipped global flags *before* the object, so a flag placed *after* the object (a valid `gh` invocation form) was itself misread as the verb. `_skip_gh_global_flags` is now called at both positions |
 | `LANG=C RESULT=$(gh pr merge 1 \| tail -3)` (plain env assignment preceding the capture assignment) | `_recover_command_argv` previously only inspected `argv[0]` for the `VAR=$(` pattern, so a leading plain assignment (`LANG=C`) shifted the capture assignment to `argv[1]` and it was missed — `strip_prefix` then dropped both tokens, losing `gh` entirely. The `$(` search now walks past any number of leading plain assignments before checking for the substitution prefix |
 
+### False-negative surfaces closed (2026-07-16 codex review round 3)
+
+| Surface | Handling |
+| --------- | ---------- |
+| `( git commit -m x \| tail )` (standalone `(` token, space after the paren) | `_recover_command_argv`'s grouping-char `lstrip` previously left an empty-string `argv[0]` when the token was pure grouping characters, which fails every downstream `os.path.basename(argv[0]) == "git"` / `"gh"` check. The empty-token case is now dropped and the function recurses on the remainder so the real command becomes argv[0] |
+| `FOO=$(date) git commit -m x \| tail` (plain assignment whose value is a *self-contained* command substitution, prefixed to a separate command) | `_recover_command_argv` previously treated any `$(` inside an assignment token as an unresolved-extraction target, corrupting `FOO=$(date)` into `date)` and hiding the real `git commit` that follows. The `$(` is now only treated as unresolved when unbalanced within the token (`tok.count("(") > tok.count(")")`, e.g. `OUT=$(gh` from a substitution whose closing `)` is in a later token) — a balanced `VAR=$(cmd)` is left alone so `strip_prefix`'s existing plain-assignment peel finds the real command normally |
+
 ### Examples
 
 | Command | Action |
@@ -150,6 +157,8 @@ already clean and needs no stripping.
 | `read x <<< value; git commit -m x \| tail` | **ADVISORY** — here-string `<<<` correctly not mistaken for a heredoc opener |
 | `gh issue -R owner/repo create \| head` | **ADVISORY** — global gh flag between object and verb correctly skipped |
 | `LANG=C RESULT=$(gh pr merge 1 \| tail -3)` | **ADVISORY** — plain env assignment before a capture assignment correctly recovered |
+| `( git commit -m x \| tail )` | **ADVISORY** — standalone grouping token dropped instead of leaving an empty argv[0] |
+| `FOO=$(date) git commit -m x \| tail` | **ADVISORY** — balanced self-contained substitution left alone, real command reached normally |
 | `git log --oneline \| head -20` | **SILENT** — `log` is read-only |
 | `git status \| grep modified` | **SILENT** — `status` is read-only |
 | `gh pr list \| head -5` | **SILENT** — `list` is read-only |
@@ -202,6 +211,7 @@ cost dominates:
 | Heredoc opener that is itself a live mutating pipeline (`gh issue create --body-file - <<EOF \| tail -3`) | Silent (false negative) — the opener segment is dropped entirely once a heredoc-open marker is detected, and the physical-line boundary between the opener's own `\|`-continuation and the heredoc body's first line is not distinguishable after `safe_tokenize` flattens both into the same synthetic-`;`-separated stream. Fixing this correctly requires tracking physical-line provenance through tokenization — out of scope for issue #788; codex review round (2026-07-15) flagged this as [P2] but the compound pattern (heredoc used simultaneously as stdin *and* the command's stdout piped) is rare relative to the gen-1/gen-2 motivating cases, all of which lack heredoc input entirely |
 | Quoted/escaped separator-lookalike content misread as a real operator (e.g. `git commit -m "\|" tail` — the quoted `"\|"` value dequotes to a bare `\|` token indistinguishable from a real pipe) | False positive — `safe_tokenize` (shared `_lib` tokenizer) strips quotes before returning plain strings, discarding quote-provenance. This is a structural limitation of the shared tokenizer, not unique to this hook: `inspection-chain-advisory`'s `&&`-chain detector has the identical exposure (verified: `git a "&&" && grep b foo` → `safe_tokenize` returns two adjacent `&&` tokens, one from the quoted literal). A per-hook workaround would diverge from the established sibling pattern for a narrow, low-likelihood case (a value whose ENTIRE quoted content is exactly `\|`/`&&`/etc., not merely containing the character); a real fix belongs at the `_lib.safe_tokenize` layer as a separate cross-cutting issue |
 | Shell comment analyzed as live command (e.g. `echo ok # example; gh pr merge 1 \| tail` — bash never executes anything after the unescaped `#`, but the hook still flags the commented-out example text as a live mutating pipeline) | False positive — `safe_tokenize` sets `lex.commenters = ""` deliberately (`hooks/_lib/_hook_utils.py:124`), a shared design choice: enabling shlex's default comment-stripping would truncate the token stream at the first unquoted `#`, which is far more damaging for the tokenizer's other consumers (e.g. `block-pr-without-caller-evidence` scanning a `--body` value for a marker line — any `#` in the body, such as a markdown heading, would silently hide everything after it from the gate). A per-hook comment-stripping fix in this file cannot safely distinguish a real comment token from a quoted literal that merely starts with `#` post-dequote (verified: `--body "# heading in markdown body"` and a real `# comment` are both indistinguishable single/plain tokens after `safe_tokenize`) — the same quote-provenance loss as the row above. Codex review round 2 (2026-07-16) flagged this as [P2]; low severity in practice since this hook is advisory-only (never blocks) |
+| Quoted heredoc-lookalike content misread as a real heredoc opener (e.g. `echo "<<EOF"; git commit -m x \| tail` — `echo` merely prints the literal string `<<EOF`, it does not open a heredoc, but `safe_tokenize` dequotes `"<<EOF"` to the bare token `<<EOF`, indistinguishable from an unquoted heredoc opener) | False negative — same quote-provenance loss as the two rows above: `_heredoc_open_marker` cannot tell a real `<<EOF` from a dequoted `"<<EOF"` string literal once `safe_tokenize` has stripped the quotes. Once misdetected as an opener, the rest of the command — including the real mutating pipeline that follows — is swallowed as fake heredoc body (no matching close-marker segment ever appears), so the advisory that should fire stays silent. Codex review round 3 (2026-07-16) flagged this as [P2]; fixing it requires the same shared-tokenizer quote-tracking change ruled out for the rows above, so it is documented here rather than worked around locally |
 
 ### Tests
 
@@ -212,8 +222,10 @@ bash tests/hooks/advisory-nudge/test_pipefail_advisory.sh
 Cases cover: advisory firing on gen-1/gen-2 patterns, git push, 3-segment
 chains, gh mutating verbs, assignment/subshell/`\|&` prefix recovery
 (2026-07-15 codex review round), here-string/gh-flag-position/multi-
-assignment-prefix recovery (2026-07-16 codex review round 2); silent on
-read-only commands piped, non-truncating sinks, `&&`/`;`/`\|\|`/`&`
-separators, quoted-pipe literals, heredoc body false positives (incl.
-the EOF-not-end premature-close guard), single commands, and
-infrastructure fail-open (non-Bash, malformed JSON, empty command).
+assignment-prefix recovery (2026-07-16 codex review round 2),
+standalone-grouping-token/balanced-substitution-assignment recovery
+(2026-07-16 codex review round 3); silent on read-only commands piped,
+non-truncating sinks, `&&`/`;`/`\|\|`/`&` separators, quoted-pipe
+literals, heredoc body false positives (incl. the EOF-not-end premature-
+close guard), single commands, and infrastructure fail-open (non-Bash,
+malformed JSON, empty command).

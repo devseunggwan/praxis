@@ -167,6 +167,17 @@ run_case "plain env assignment before a capture assignment (LANG=C RESULT=\$(...
   advisory \
   'LANG=C RESULT=$(gh pr merge 1 | tail -3)'
 
+# === ADVISORY — round-3 codex review (standalone group token, balanced ====
+# === self-contained substitution assignment) ================================
+
+run_case "standalone group token with trailing space does not blank argv[0]" \
+  advisory \
+  "( git commit -m x | tail )"
+
+run_case "balanced self-contained substitution assignment reaches the real command" \
+  advisory \
+  'FOO=$(date) git commit -m x | tail'
+
 # === SILENT — read-only command piped (no mutation) ========================
 
 run_case "git log | head (read-only)" \

@@ -173,12 +173,21 @@ def _recover_command_argv(argv: list[str]) -> list[str]:
     env assignment may also precede the capture assignment (`LANG=C
     RESULT=$(gh ...)`), so the `$(` search walks past any number of
     leading plain assignments rather than only checking argv[0].
+
+    A `$(` inside an assignment token is only an unresolved recovery
+    target when it is *unbalanced* within that token (the substitution's
+    closing `)` lives in a later token, e.g. `OUT=$(gh` from a pipe that
+    split the substitution's own internals). When the token already
+    closes its own `(...)` (`FOO=$(date)`), the assignment is a plain,
+    self-contained `KEY=VALUE` prefix to a *separate* following command
+    (`FOO=$(date) git commit ...`) — `strip_prefix` already peels those
+    correctly, so this function must not touch them.
     """
     if not argv:
         return argv
     for i, tok in enumerate(argv):
         if ENV_ASSIGN_RE.match(tok):
-            if "$(" in tok:
+            if "$(" in tok and tok.count("(") > tok.count(")"):
                 head = tok.rsplit("$(", 1)[1]
                 return argv[:i] + [head] + argv[i + 1 :]
             continue
@@ -188,7 +197,13 @@ def _recover_command_argv(argv: list[str]) -> list[str]:
     stripped = head.lstrip(_GROUP_PREFIX_CHARS)
     if stripped == head:
         return argv
-    return [stripped] + argv[1:]
+    if stripped:
+        return [stripped] + argv[1:]
+    # The whole token was pure grouping chars (e.g. a standalone `(` from
+    # `( git commit ... )` with a space after the paren) — drop it and
+    # recurse so the real command becomes argv[0], rather than leaving an
+    # empty-string argv[0] that fails every basename check downstream.
+    return _recover_command_argv(argv[1:])
 
 
 def _mutating_description(argv: list[str]) -> str | None:
