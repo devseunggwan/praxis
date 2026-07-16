@@ -3,7 +3,9 @@
 #
 # Synthesizes Claude Code PreToolUse payloads and asserts:
 #   advisory → exit 0 + stderr non-empty (contains advisory keyword)
-#   pass     → exit 0 + stderr empty
+#   pass     → exit 0 + stderr empty + stdout empty (issue #787 round-6: a
+#              deny/ask decision also exits 0 with empty stderr, so stdout
+#              must be checked too or a real block would misreport as pass)
 #
 # Usage: bash tests/test_output_block_falsify_advisory.sh
 # Exit:  0 = all pass; 1 = at least one fail
@@ -23,6 +25,20 @@ if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook not executable: $HOOK" >&2
   exit 1
 fi
+
+# Test isolation (issue #787 codex round-6 P2): dozens of run_case calls
+# below trigger T1/T2 deny/ask decisions, each of which writes a RICH
+# telemetry record. Without a default override, those records land in the
+# REAL ~/.praxis/telemetry/fire-events-*.jsonl store this suite runs
+# against — polluting the exact block-rate signal issue #787 added
+# telemetry to measure accurately. Point every hook invocation in this
+# script at a throwaway file by default; the telemetry-content-checking
+# cases further down still override PRAXIS_FIRE_TELEMETRY_FILE per-call to
+# their own TEL_DIR paths, which takes precedence over this export for
+# that single invocation. Cleaned up by the trap registered alongside
+# TEL_DIR below (a single EXIT trap covers both).
+DEFAULT_TEL_FILE="$(mktemp)"
+export PRAXIS_FIRE_TELEMETRY_FILE="$DEFAULT_TEL_FILE"
 
 PASS=0
 FAIL=0
@@ -78,8 +94,13 @@ except Exception:
       esac
       ;;
     pass)
+      # Issue #787 codex round-6 P2: deny/ask decisions also exit 0 with
+      # empty stderr (they signal via a stdout JSON permissionDecision, not
+      # stderr) — checking stderr alone cannot distinguish a real silent
+      # pass from an undetected deny/ask. stdout must be empty too.
       [ "$rc" -eq 0 ] || ok=0
       [ -z "$err" ]   || ok=0
+      [ -z "$out" ]   || ok=0
       ;;
     *)
       echo "FAIL  [$name] unknown expectation: $expectation"
@@ -91,7 +112,7 @@ except Exception:
     echo "PASS  [$name]"
     PASS=$((PASS + 1))
   else
-    echo "FAIL  [$name] expectation=$expectation rc=$rc stderr=${err:-<empty>}"
+    echo "FAIL  [$name] expectation=$expectation rc=$rc stderr=${err:-<empty>} stdout=${out:-<empty>}"
     FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
   fi
 }
@@ -570,6 +591,793 @@ run_case "T1 (issue #682): (Recommended) + column-0 Falsified: → silent pass (
       '["Option A (Recommended)", "Option B"]' \
       "Falsified: checked existing PRs — none found.
 What should we do?")"
+
+# ---------------------------------------------------------------------------
+# Ready-to-fill scaffold cases — issue #787
+# ---------------------------------------------------------------------------
+
+# T1: deny message must embed a copy-paste-ready Falsified: line seeded with
+# the triggering option label, not just the generic instruction text.
+run_case "T1 (issue #787): (Recommended) + no Falsified: → deny embeds ready-to-fill scaffold" \
+  "deny:Falsified: Best option (Recommended)" \
+  "$(make_ask_payload '["Best option (Recommended)", "Alternative"]')"
+
+run_case "T1 (issue #787): scaffold section is marked with [scaffold]" \
+  "deny:[scaffold]" \
+  "$(make_ask_payload '["Best option (Recommended)", "Alternative"]')"
+
+# T2: ask message must embed the same ready-to-fill scaffold, seeded with the
+# anchoring-token-carrying label.
+run_case "T2 (issue #787): safer label + no Falsified: → ask embeds ready-to-fill scaffold" \
+  "ask:Falsified: A safer rollout" \
+  "$(make_ask_payload '["A safer rollout", "B aggressive"]')"
+
+# Structural check: 2 options both carrying the (Recommended) marker must
+# produce 2 scaffold lines (one per triggering label), not just 1. Piped
+# straight into python3's stdin (not embedded as a string literal) because
+# the message text itself contains single quotes that would break a
+# triple-quoted Python literal.
+_scaffold_multi_result=$(make_ask_payload '["Option A (Recommended)", "Option B (Recommended)"]' | "$HOOK" 2>/dev/null | python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+reason = d.get('hookSpecificOutput', {}).get('permissionDecisionReason', '')
+# ASK_MSG's own instructional text has 2 'Falsified: ' occurrences + 1 per
+# triggering label (2) in the scaffold = 4.
+ok = reason.count('Falsified: ') == 4 and 'Option A (Recommended)' in reason and 'Option B (Recommended)' in reason
+print('ok' if ok else 'fail_count=' + str(reason.count('Falsified: ')))
+" 2>/dev/null)
+if [ "$_scaffold_multi_result" = "ok" ]; then
+  echo "  PASS  2 triggering labels -> 2 scaffold Falsified: lines (issue #787)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  2 triggering labels -> 2 scaffold Falsified: lines (issue #787) ($_scaffold_multi_result)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("2 triggering labels -> 2 scaffold Falsified: lines")
+fi
+
+# Regression: no scaffold section when Falsified: is already present (pass path).
+run_case "T1 (issue #787): (Recommended) + Falsified: present → no scaffold needed (silent pass)" \
+  pass \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B"]' \
+      "Falsified: checked no existing PR — none found.
+What should we do?")"
+
+# Anti-bypass regression (codex round-2 P1 fix): copy-pasting the scaffold
+# line VERBATIM (placeholders unfilled) into the question body must NOT
+# silently satisfy the gate — the placeholder line itself starts with
+# "Falsified:", so a naive prefix check would let a probe-free retry through.
+run_case "T1 (issue #787 round-2 P1): unfilled scaffold copy-paste does not satisfy gate — still deny" \
+  "deny:Falsified:" \
+  "$(make_ask_payload_with_question \
+      '["Best option (Recommended)", "Alternative"]' \
+      "Falsified: Best option (Recommended) — probe: <command> → <observed>; premise survives because <...>
+What should we do?")"
+
+# Same anti-bypass check for T2 ask.
+run_case "T2 (issue #787 round-2 P1): unfilled scaffold copy-paste does not satisfy gate — still ask" \
+  "ask:Falsified:" \
+  "$(make_ask_payload_with_descriptions \
+      '["A safer rollout", "B aggressive"]' \
+      '["", ""]' \
+      "Falsified: A safer rollout — probe: <command> → <observed>; premise survives because <...>
+Which one?")"
+
+# Regression: once placeholders are actually filled in with real content
+# (no literal <command>/<observed>/<...> left), the line DOES satisfy the
+# gate — the fix must not make legitimate filled-in evidence unsatisfiable.
+run_case "T1 (issue #787 round-2): scaffold filled in with real probe output → silent pass" \
+  pass \
+  "$(make_ask_payload_with_question \
+      '["Best option (Recommended)", "Alternative"]' \
+      "Falsified: Best option (Recommended) — probe: gh pr list --search feature → no existing PR; premise survives because none found
+What should we do?")"
+
+# Anti-bypass regression (codex round-3 P1 fix): ONE question with 2
+# triggering options -> 2 scaffold lines. Filling in only the FIRST one and
+# leaving the second with unfilled placeholders must NOT satisfy the gate —
+# _has_falsified_line's old "return True on first clean line" let a sibling
+# option's fake evidence ride along unchecked.
+run_case "T1 (issue #787 round-3 P1): 1 of 2 scaffold lines filled, other still placeholder → still deny" \
+  "deny:Falsified:" \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B (Recommended)"]' \
+      "Falsified: Option A (Recommended) — probe: gh pr list --search a → none found; premise survives because none found
+Falsified: Option B (Recommended) — probe: <command> → <observed>; premise survives because <...>
+Which one?")"
+
+# Regression: BOTH scaffold lines filled in for the same 2-option question ->
+# silent pass (the round-3 fix must not require MORE than "no placeholder
+# tokens anywhere", it must still accept a fully-filled multi-line case).
+run_case "T1 (issue #787 round-3): both scaffold lines fully filled → silent pass" \
+  pass \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B (Recommended)"]' \
+      "Falsified: Option A (Recommended) — probe: gh pr list --search a → none found; premise survives because none found
+Falsified: Option B (Recommended) — probe: gh pr list --search b → none found; premise survives because none found
+Which one?")"
+
+# Anti-bypass regression (codex round-4 P1 fix): ONE question with 2
+# triggering options -> 2 scaffold lines required. Providing evidence for
+# ONLY the first option and OMITTING the second line entirely (no
+# placeholder text left anywhere) must NOT satisfy the gate — the round-3
+# fix only rejected leftover placeholder tokens, but a deleted line has no
+# placeholder to reject, so clean_count (1) must be compared against the
+# number of triggering labels (2), not treated as boolean-satisfied.
+run_case "T1 (issue #787 round-4 P1): 1 of 2 lines provided, other omitted → still deny" \
+  "deny:Falsified:" \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B (Recommended)"]' \
+      "Falsified: Option A (Recommended) — probe: gh pr list --search a → none found; premise survives because none found
+Which one?")"
+
+# Regression: a SINGLE triggering label with its one clean Falsified: line
+# still satisfies the gate (round-4's required_count must default to 1 for
+# the common single-option case, not silently demand more).
+run_case "T1 (issue #787 round-4): single triggering label, 1 clean line → silent pass" \
+  pass \
+  "$(make_ask_payload_with_question \
+      '["Best option (Recommended)", "Alternative"]' \
+      "Falsified: Best option (Recommended) — probe: gh pr list --search feature → no existing PR; premise survives because none found
+What should we do?")"
+
+# Anti-false-positive regression (codex round-5 P2 fix): when the OPTION
+# LABEL ITSELF happens to contain a literal placeholder-looking substring
+# (e.g. "<command>"), the scaffold seeds that label verbatim into the
+# Falsified: line's prefix. The old whole-line scan flagged this forever,
+# even after the actual probe/observed evidence past "— probe:" was
+# genuinely filled in — a legitimate retry could never pass. Scoping the
+# placeholder scan to the content after "— probe:" fixes this without
+# weakening the anti-bypass guard (verified by the next case).
+run_case "T1 (issue #787 round-5 P2): label contains literal <command>, evidence filled in → silent pass" \
+  pass \
+  "$(make_ask_payload_with_question \
+      '["Run <command> manually (Recommended)", "Alternative"]' \
+      "Falsified: Run <command> manually (Recommended) — probe: gh pr list --search feature → no existing PR found; premise survives because none found.
+What should we do?")"
+
+# Regression: the anti-bypass guard must still fire when the EVIDENCE
+# region (after "— probe:") is the unfilled part, even though the label
+# prefix also happens to contain a placeholder-looking substring — proves
+# round-5's fix narrowed the scan window without disabling it.
+run_case "T1 (issue #787 round-5): label contains <command> AND evidence unfilled → still deny" \
+  "deny:Falsified:" \
+  "$(make_ask_payload_with_question \
+      '["Run <command> manually (Recommended)", "Alternative"]' \
+      "Falsified: Run <command> manually (Recommended) — probe: <command> → <observed>; premise survives because <...>
+What should we do?")"
+
+# Anti-false-positive regression (codex round-6 P2 fix): a LEGACY free-form
+# Falsified line — no "— probe:" marker at all — whose own genuine wording
+# happens to contain a literal placeholder-looking substring. Round-5 only
+# scoped the scan window when the marker WAS present; a marker-less line
+# still fell back to scanning the whole line, so this case still perma-
+# blocked. Marker-less lines are not scaffold-shaped, so round-6 excludes
+# them from placeholder scanning entirely (the real scaffold copy-paste
+# bypass always contains the marker, since it is emitted verbatim).
+run_case "T1 (issue #787 round-6 P2): legacy free-form line, no marker, contains <command> → silent pass" \
+  pass \
+  "$(make_ask_payload_with_question \
+      '["Run <command> manually (Recommended)", "Alternative"]' \
+      "Falsified: checked how <command> is invoked here, does not apply to this case.
+What should we do?")"
+
+# Anti-bypass regression (codex round-6 P2 fix): a 2-option question where
+# BOTH triggering options exist, but the SAME clean Falsified line is
+# pasted TWICE instead of providing distinct evidence for the second
+# option. required_count counted raw lines, so clean_count==2 satisfied
+# the check without ever addressing Option B. Falsified lines are now
+# deduped by exact text before counting, so the duplicate contributes
+# nothing and the question still denies.
+run_case "T1 (issue #787 round-6 P2): same clean line pasted twice for 2 options → still deny" \
+  "deny:Falsified:" \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B (Recommended)"]' \
+      "Falsified: Option A (Recommended) — probe: gh pr list --search a → none found; premise survives because none found
+Falsified: Option A (Recommended) — probe: gh pr list --search a → none found; premise survives because none found
+Which one?")"
+
+# Regression: 2 DISTINCT clean lines for 2 DISTINCT triggering options must
+# still silent-pass (round-6's dedup must not require exact label-text
+# matching — it only rejects exact line-text duplicates).
+run_case "T1 (issue #787 round-6): 2 distinct clean lines for 2 options → silent pass" \
+  pass \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B (Recommended)"]' \
+      "Falsified: Option A (Recommended) — probe: gh pr list --search a → none found; premise survives because none found
+Falsified: Option B (Recommended) — probe: gh pr list --search b → none found; premise survives because none found
+Which one?")"
+
+# Anti-bypass regression (codex round-7 P2 fix): ONE question mixes a T1
+# option (exact "(Recommended)" marker) with a SEPARATE T2 option (a
+# "safer" description, no marker). The old if/elif skipped the T2 check
+# entirely once T1 matched for the question, so the T2 option's label
+# never entered required_count — a retry providing evidence for ONLY the
+# T1 option silent-passed with the T2 option's claim never verified.
+run_case "T1 (issue #787 round-7 P2): mixed T1+T2 in one question, only T1 evidence → still deny" \
+  "deny:Falsified: Option B" \
+  "$(make_ask_payload_with_descriptions \
+      '["Option A (Recommended)", "Option B"]' \
+      '["", "This is the safer choice overall"]' \
+      "Falsified: Option A (Recommended) — probe: gh pr list --search a → none found; premise survives because none found
+Which one?")"
+
+# Regression: the SAME mixed question, with evidence for BOTH the T1 and
+# T2 option, must silent-pass (round-7's fix must not require MORE than
+# one clean line per genuinely distinct triggering label).
+run_case "T1 (issue #787 round-7): mixed T1+T2 in one question, both evidence lines → silent pass" \
+  pass \
+  "$(make_ask_payload_with_descriptions \
+      '["Option A (Recommended)", "Option B"]' \
+      '["", "This is the safer choice overall"]' \
+      "Falsified: Option A (Recommended) — probe: gh pr list --search a → none found; premise survives because none found
+Falsified: Option B — probe: checked B directly → not actually safer for this case; premise survives because verified
+Which one?")"
+
+# Regression (codex round-7 self-catch): T2's bare recommend(?:ed|s)?
+# pattern also matches the literal word inside "(Recommended)", so BOTH
+# options in a pure-T1 2-option question also match T2's confidence-
+# anchoring check. Without excluding t1_triggering labels from
+# t2_triggering, this double-counted each label into both t1_labels and
+# t2_labels, producing 4 scaffold lines (2 duplicated) instead of 2 in the
+# deny message for a case that has no genuine T2-only option at all.
+_scaffold_no_dup_result=$(make_ask_payload '["Option A (Recommended)", "Option B (Recommended)"]' | "$HOOK" 2>/dev/null | python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+reason = d.get('hookSpecificOutput', {}).get('permissionDecisionReason', '')
+ok = reason.count('Falsified: Option A (Recommended)') == 1 and reason.count('Falsified: Option B (Recommended)') == 1
+print('ok' if ok else 'a=' + str(reason.count('Falsified: Option A (Recommended)')) + ' b=' + str(reason.count('Falsified: Option B (Recommended)')))
+" 2>/dev/null)
+if [ "$_scaffold_no_dup_result" = "ok" ]; then
+  echo "  PASS  pure-T1 2-option question -> no T2 double-count duplication in scaffold (issue #787 round-7)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  pure-T1 2-option question -> no T2 double-count duplication in scaffold (issue #787 round-7) ($_scaffold_no_dup_result)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("pure-T1 2-option question -> no T2 double-count duplication")
+fi
+
+# Anti-false-positive regression (codex round-8 P2 fix): an option LABEL
+# that itself contains the literal "— probe:" delimiter substring and a
+# placeholder-looking token (e.g. quoting another probe's shape) used to
+# shift the scan to that label-internal, leftmost marker occurrence via
+# find(), pulling trailing label text — including the placeholder token —
+# into evidence_region and permanently hard-denying even after real
+# evidence was filled in after the actual (rightmost) scaffold delimiter.
+# rfind() now anchors on the real, last-inserted delimiter.
+run_case "T1 (issue #787 round-8 P2): label itself embeds marker+placeholder, real evidence after real delimiter → silent pass" \
+  pass \
+  "$(make_ask_payload_with_question \
+      '["Investigate — probe: <command> approach (Recommended)", "Alternative"]' \
+      "Falsified: Investigate — probe: <command> approach (Recommended) — probe: gh pr list --search x → none found; premise survives because none found
+Which one?")"
+
+# Anti-bypass regression (codex round-8 P2 fix): a 2-option question where
+# the SAME real evidence line is pasted twice, with only a trailing-
+# whitespace difference on the second copy. Exact-text dedup treated the
+# two as DISTINCT, satisfying required_count=2 while Option B still had
+# zero real evidence. Lines are now whitespace-normalized before dedup, so
+# the whitespace-only copy still collapses to 1 clean line and the
+# question still denies.
+run_case "T1 (issue #787 round-8 P2): whitespace-only duplicate line does not satisfy 2nd option → still deny" \
+  "deny:Falsified:" \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B (Recommended)"]' \
+      "Falsified: Option A (Recommended) — probe: gh pr list --search a → none found; premise  survives because none found
+Falsified: Option A (Recommended) — probe: gh pr list --search a → none found; premise survives because none found
+Which one?")"
+
+# Anti-bypass regression (codex round-9 P1 fix): 2 DIFFERENTLY-WORDED clean
+# lines that both address Option A, with Option B never addressed at all.
+# The old count-only check treated 2 distinct lines as satisfying
+# required_count=2 for a 2-option question regardless of which option each
+# line actually verified — Option B's claim silently went unverified.
+# Each clean line is now matched to a specific triggering label by its
+# "Falsified: {label}" prefix, so 2 lines both prefixed with "Option A"
+# leave Option B uncovered and the question still denies.
+run_case "T1 (issue #787 round-9 P1): 2 differently-worded lines, both Option A, Option B uncovered → still deny" \
+  "deny:Falsified:" \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B (Recommended)"]' \
+      "Falsified: Option A (Recommended) — probe: gh pr list --search a -> none found; premise survives (first check)
+Falsified: Option A (Recommended) — probe: gh issue list --search a -> also none found; premise survives (second check, still Option A only)
+Which one?")"
+
+# Regression: the SAME 2-option question with each option addressed by its
+# OWN, differently-worded line must still silent-pass — the round-9 P1 fix
+# maps lines to labels by prefix match, it does not require identical
+# wording or line count beyond one-per-label.
+run_case "T1 (issue #787 round-9 P1): each option addressed by its own distinctly-worded line → silent pass" \
+  pass \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B (Recommended)"]' \
+      "Falsified: Option A (Recommended) — probe: gh pr list --search a -> none found; premise survives (first check)
+Falsified: Option B (Recommended) — probe: gh issue list --search b -> also none found; premise survives (second, distinct check)
+Which one?")"
+
+# Anti-bypass regression (codex round-9 P2 fix): the EVIDENCE text itself
+# (legitimately placed after the real scaffold delimiter) contains a
+# second literal "— probe:" substring, with an unfilled "<command>"
+# placeholder sitting BEFORE that spurious marker but still within the
+# real evidence region. round-8's rfind() anchored on the LAST "— probe:"
+# occurrence — the spurious one — so the leading placeholder fell outside
+# the scanned window and silently passed. The delimiter is now found via
+# find() seeded right after the matched label prefix, so the FIRST
+# "— probe:" after the label (the real, scaffold-inserted one) is used
+# regardless of how many more "— probe:"-shaped substrings appear later in
+# the evidence text — the leading placeholder is caught.
+run_case "T1 (issue #787 round-9 P2): evidence embeds a second marker, unfilled placeholder before it → still deny" \
+  "deny:Falsified:" \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Alternative"]' \
+      "Falsified: Option A (Recommended) — probe: <command> ran — probe: actually done
+What should we do?")"
+
+# Regression: the SAME evidence-embedded-second-marker shape, but with the
+# real evidence genuinely filled in (no placeholder anywhere before the
+# spurious marker) must still silent-pass — the round-9 P2 fix narrows the
+# anchor point, it does not forbid legitimate evidence from containing the
+# word sequence "— probe:" again.
+run_case "T1 (issue #787 round-9 P2): evidence embeds a second marker, no placeholder anywhere → silent pass" \
+  pass \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Alternative"]' \
+      "Falsified: Option A (Recommended) — probe: ran gh pr list — probe: actually done, no PR found
+What should we do?")"
+
+# Anti-bypass regression (codex round-10 P2 fix): a bare (no-marker) T2
+# label ("Rerun") happens to be a literal STRING PREFIX of unrelated
+# evidence text ("Rerunning without confirmation") on the OTHER
+# triggering option's line. round-9's `line.startswith(f"Falsified:
+# {label}")` matched "Rerun" against "Rerunning..." (since "Runtime" ...
+# "Rerunning" both continue the shorter label with more letters), wrongly
+# crediting "Rerun" as covered even though that line never actually
+# addresses it — the real "Rerun" claim stayed unverified.
+run_case "T1+T2 (issue #787 round-10 P2): bare label is a string-prefix of unrelated evidence text → still deny" \
+  "deny:Falsified:" \
+  "$(make_ask_payload_with_descriptions \
+      '["Merge (Recommended)", "Rerun"]' \
+      '["", "This is the safer choice overall"]' \
+      "Falsified: Merge (Recommended) — probe: gh pr list --search x -> none found; premise survives
+Falsified: Rerunning without confirmation — probe: gh issue list -> none found; premise survives
+Which one?")"
+
+# Regression: the SAME bare-label-is-a-prefix shape, but the second line
+# genuinely addresses "Rerun" as its own whole-token label (the marker's
+# leading space forms the required boundary right after the label) must
+# still silent-pass — the round-10 fix requires a boundary after the
+# label, it does not forbid the label from ever matching.
+run_case "T1+T2 (issue #787 round-10 P2): bare label genuinely addressed by its own line → silent pass" \
+  pass \
+  "$(make_ask_payload_with_descriptions \
+      '["Merge (Recommended)", "Rerun"]' \
+      '["", "This is the safer choice overall"]' \
+      "Falsified: Merge (Recommended) — probe: gh pr list --search x -> none found; premise survives
+Falsified: Rerun — probe: checked rerun path -> safe; premise survives
+Which one?")"
+
+# Anti-bypass regression (codex round-11 P2 fix): an option LABEL itself
+# contains a literal embedded newline. `_falsified_scaffold` previously
+# interpolated the raw label verbatim, so the deny message's scaffold hint
+# split across two printed lines — a verbatim copy-paste of that unfilled
+# scaffold then had its placeholder tokens (`<command>` etc.) land on the
+# SECOND physical line, which does not start with `Falsified:` and is
+# invisible to the per-line scan, silently passing. Labels are now
+# whitespace-normalized (embedded newlines collapsed to spaces) at the
+# point they enter the triggering pipeline, so the deny message's scaffold
+# is guaranteed to stay a single physical line regardless of what the raw
+# option label contains — verified here by checking the scaffold segment
+# contains the newline-joined label as ONE line, with no bare "Falsified:
+# Multi" line missing its own evidence marker.
+_newline_label_scaffold_result=$(make_ask_payload '["Multi\nline label (Recommended)", "Alternative"]' | "$HOOK" 2>/dev/null | python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+reason = d.get('hookSpecificOutput', {}).get('permissionDecisionReason', '')
+lines = reason.split('[scaffold]', 1)[-1].splitlines()
+falsified_lines = [l for l in lines if l.startswith('Falsified:')]
+ok = (
+    len(falsified_lines) == 1
+    and 'Multi line label (Recommended)' in falsified_lines[0]
+    and '— probe:' in falsified_lines[0]
+)
+print('ok' if ok else 'falsified_lines=' + repr(falsified_lines))
+")
+if [ "$_newline_label_scaffold_result" = "ok" ]; then
+  echo "  PASS  option label with embedded newline -> scaffold stays a single physical line (issue #787 round-11 P2)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  option label with embedded newline -> scaffold stays a single physical line (issue #787 round-11 P2) ($_newline_label_scaffold_result)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("option label with embedded newline -> single-line scaffold")
+fi
+
+# Regression: the SAME newline-bearing label, with the (now-guaranteed
+# single-line) scaffold copy-pasted verbatim and left unfilled, must still
+# deny — the round-11 fix must not accidentally make the placeholder guard
+# unreachable for labels that originally contained a newline.
+run_case "T1 (issue #787 round-11 P2): newline-bearing label, unfilled single-line scaffold copy-paste → still deny" \
+  "deny:Falsified:" \
+  "$(make_ask_payload_with_question \
+      '["Multi\nline label (Recommended)", "Alternative"]' \
+      "Falsified: Multi line label (Recommended) — probe: <command> → <observed>; premise survives because <...>
+What should we do?")"
+
+# Anti-bypass regression (codex round-12 P2 fix): round-10's non-
+# alphanumeric boundary was still too weak — a genuinely different,
+# unrelated evidence line that happens to share the triggering label as
+# its own prefix, separated by a space (e.g. triggering "Run" vs.
+# evidence text "Run now"), also has a non-alphanumeric boundary. The
+# "Run" option's real claim is never addressed even though the line
+# gets credited toward it.
+run_case "T1+T2 (issue #787 round-12 P2): near-miss label prefix (triggering \"Run\" vs. evidence \"Run now\") → still deny" \
+  "deny:Falsified:" \
+  "$(make_ask_payload_with_descriptions \
+      '["Merge (Recommended)", "Run"]' \
+      '["", "This is the safer choice overall"]' \
+      "Falsified: Merge (Recommended) — probe: gh pr list --search x -> none found; premise survives
+Falsified: Run now — probe: gh issue list -> none found; premise survives
+Which one?")"
+
+# Regression: the SAME near-miss shape, but "Run" is genuinely addressed
+# by its own line ending exactly at the scaffold's own delimiter → still
+# silent-pass — the round-12 fix must not forbid the label from ever
+# matching, only close the near-miss-prefix collision.
+run_case "T1+T2 (issue #787 round-12 P2): label genuinely addressed via the exact scaffold delimiter → silent pass" \
+  pass \
+  "$(make_ask_payload_with_descriptions \
+      '["Merge (Recommended)", "Run"]' \
+      '["", "This is the safer choice overall"]' \
+      "Falsified: Merge (Recommended) — probe: gh pr list --search x -> none found; premise survives
+Falsified: Run — probe: checked run path -> safe; premise survives
+Which one?")"
+
+# Anti-bypass regression (PR #796 CodeRabbit review): the "— probe:" marker
+# is present, but nothing (or only whitespace) follows it on the same
+# line — deleting everything after the marker, or leaving only trailing
+# whitespace, satisfied the gate with zero probe content since the
+# placeholder-token scan finds nothing in an empty evidence_region. The
+# trailing space after "probe:" is built via a Python string literal (not
+# left trailing at end-of-line in this file) so it survives edit-tool
+# whitespace normalization.
+_empty_evidence_decision=$(python3 - <<'PYEOF' | "$HOOK" 2>/dev/null | python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+print(d.get('hookSpecificOutput', {}).get('permissionDecision', 'pass'))
+"
+import json
+question_text = "Falsified: Option A (Recommended) — probe: " + "\nWhat should we do?"
+payload = {
+    "session_id": "test-session",
+    "tool_name": "AskUserQuestion",
+    "tool_input": {
+        "questions": [
+            {
+                "question": question_text,
+                "options": [{"label": "Option A (Recommended)"}, {"label": "Alternative"}],
+            }
+        ]
+    },
+    "cwd": "/tmp",
+}
+print(json.dumps(payload))
+PYEOF
+)
+if [ "$_empty_evidence_decision" = "deny" ]; then
+  echo "  PASS  marker present, empty evidence after it -> still deny (PR #796 CodeRabbit review)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  marker present, empty evidence after it -> still deny (PR #796 CodeRabbit review) (got '$_empty_evidence_decision')"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("marker present, empty evidence after it -> still deny")
+fi
+
+# Regression variant: whitespace-only evidence (not merely zero-length)
+# must also still deny — the fix strips the evidence region before
+# checking emptiness, not just checking for a zero-length string.
+_whitespace_evidence_decision=$(python3 - <<'PYEOF' | "$HOOK" 2>/dev/null | python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+print(d.get('hookSpecificOutput', {}).get('permissionDecision', 'pass'))
+"
+import json
+question_text = "Falsified: Option A (Recommended) — probe: " + "   " + "\nWhat should we do?"
+payload = {
+    "session_id": "test-session",
+    "tool_name": "AskUserQuestion",
+    "tool_input": {
+        "questions": [
+            {
+                "question": question_text,
+                "options": [{"label": "Option A (Recommended)"}, {"label": "Alternative"}],
+            }
+        ]
+    },
+    "cwd": "/tmp",
+}
+print(json.dumps(payload))
+PYEOF
+)
+if [ "$_whitespace_evidence_decision" = "deny" ]; then
+  echo "  PASS  marker present, whitespace-only evidence -> still deny (PR #796 CodeRabbit review)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  marker present, whitespace-only evidence -> still deny (PR #796 CodeRabbit review) (got '$_whitespace_evidence_decision')"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("marker present, whitespace-only evidence -> still deny")
+fi
+
+# Cross-question label preservation (codex round-3 P2 fix): 2 DIFFERENT
+# questions each present an option with the IDENTICAL label text. Global
+# dedup across the whole payload previously collapsed this to 1 scaffold
+# line — but _has_falsified_line checks each question's own text
+# independently, so fixing only the first occurrence would leave the
+# second question blocked on retry.
+make_ask_payload_two_questions_same_label() {
+  python3 - <<'PYEOF'
+import json
+payload = {
+    "session_id": "test-session",
+    "tool_name": "AskUserQuestion",
+    "tool_input": {
+        "questions": [
+            {"question": "Q1?", "options": [{"label": "Fix now (Recommended)"}, {"label": "Q1 alt"}]},
+            {"question": "Q2?", "options": [{"label": "Fix now (Recommended)"}, {"label": "Q2 alt"}]},
+        ]
+    },
+    "cwd": "/tmp",
+}
+print(json.dumps(payload))
+PYEOF
+}
+_same_label_result=$(make_ask_payload_two_questions_same_label | "$HOOK" 2>/dev/null | python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+reason = d.get('hookSpecificOutput', {}).get('permissionDecisionReason', '')
+ok = reason.count('Falsified: Fix now (Recommended)') == 2
+print('ok' if ok else 'fail_count=' + str(reason.count('Falsified: Fix now (Recommended)')))
+")
+if [ "$_same_label_result" = "ok" ]; then
+  echo "  PASS  2 questions with identical label -> 2 scaffold lines, not deduped away (issue #787)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  2 questions with identical label -> 2 scaffold lines, not deduped away (issue #787) ($_same_label_result)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("2 questions with identical label -> 2 scaffold lines")
+fi
+
+# Multi-question aggregation (codex round-1 P2 fix): 2 separate questions,
+# each with its OWN T1 violation, no Falsified: in either. Pre-fix, the loop
+# broke on the first violating question and only Q1's label reached the
+# scaffold — fixing Q1 alone would still hit a T1 block on Q2 at retry.
+make_ask_payload_two_t1_questions() {
+  python3 - <<'PYEOF'
+import json
+payload = {
+    "session_id": "test-session",
+    "tool_name": "AskUserQuestion",
+    "tool_input": {
+        "questions": [
+            {"question": "Q1?", "options": [{"label": "Q1 choice (Recommended)"}, {"label": "Q1 alt"}]},
+            {"question": "Q2?", "options": [{"label": "Q2 choice (추천)"}, {"label": "Q2 alt"}]},
+        ]
+    },
+    "cwd": "/tmp",
+}
+print(json.dumps(payload))
+PYEOF
+}
+_two_t1_result=$(make_ask_payload_two_t1_questions | "$HOOK" 2>/dev/null | python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+reason = d.get('hookSpecificOutput', {}).get('permissionDecisionReason', '')
+# Korean text is \u-escaped by json.dump, so only the ASCII label prefix
+# ('Q2 choice', not the '(추천)' suffix) survives as a literal substring.
+ok = 'Q1 choice (Recommended)' in reason and 'Q2 choice' in reason
+print('ok' if ok else 'fail_' + reason[-300:])
+")
+if [ "$_two_t1_result" = "ok" ]; then
+  echo "  PASS  2 separate T1-violating questions -> both labels in scaffold (issue #787)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  2 separate T1-violating questions -> both labels in scaffold (issue #787) ($_two_t1_result)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("2 separate T1-violating questions -> both labels in scaffold")
+fi
+
+# Multi-question aggregation: 2 separate questions, each with its OWN T2-only
+# (anchoring) violation, neither carrying a T1 marker. Pre-fix, only the
+# first question's label made it into the scaffold (tier_decision is None
+# gate blocked the second).
+make_ask_payload_two_t2_questions() {
+  python3 - <<'PYEOF'
+import json
+payload = {
+    "session_id": "test-session",
+    "tool_name": "AskUserQuestion",
+    "tool_input": {
+        "questions": [
+            {"question": "Q1?", "options": [{"label": "Q1 safer path"}, {"label": "Q1 alt"}]},
+            {"question": "Q2?", "options": [{"label": "Q2 option", "description": "자연스러운 진행"}, {"label": "Q2 alt"}]},
+        ]
+    },
+    "cwd": "/tmp",
+}
+print(json.dumps(payload))
+PYEOF
+}
+_two_t2_result=$(make_ask_payload_two_t2_questions | "$HOOK" 2>/dev/null | python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+h = d.get('hookSpecificOutput', {})
+reason = h.get('permissionDecisionReason', '')
+ok = h.get('permissionDecision') == 'ask' and 'Q1 safer path' in reason and 'Q2 option' in reason
+print('ok' if ok else 'fail_decision=' + str(h.get('permissionDecision')) + '_reason_tail=' + reason[-200:])
+")
+if [ "$_two_t2_result" = "ok" ]; then
+  echo "  PASS  2 separate T2-violating questions -> both labels in scaffold (issue #787)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  2 separate T2-violating questions -> both labels in scaffold (issue #787) ($_two_t2_result)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("2 separate T2-violating questions -> both labels in scaffold")
+fi
+
+# ---------------------------------------------------------------------------
+# Block-event telemetry cases — issue #787
+# ---------------------------------------------------------------------------
+
+TEL_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEL_DIR"; rm -f "$DEFAULT_TEL_FILE"' EXIT
+
+rich_records() {
+  # $1 = telemetry file. Prints one JSON object per RICH line found.
+  local file="$1"
+  [ -f "$file" ] || return 0
+  python3 -c "
+import json
+with open('$file') as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        r = json.loads(line)
+        if r.get('granularity') == 'rich':
+            print(json.dumps(r))
+"
+}
+
+# T1 deny fires -> 1 RICH record, decision=block, correct hook/role/session/tool.
+TEL_T1="$TEL_DIR/t1.jsonl"
+make_ask_payload '["Best option (Recommended)", "Alternative"]' \
+  | PRAXIS_FIRE_TELEMETRY_FILE="$TEL_T1" "$HOOK" >/dev/null 2>&1
+_t1_tel=$(rich_records "$TEL_T1" | python3 -c "
+import json, sys
+lines = [json.loads(l) for l in sys.stdin if l.strip()]
+ok = (
+    len(lines) == 1
+    and lines[0].get('decision') == 'block'
+    and lines[0].get('hook') == 'output-block-falsify-advisory'
+    and lines[0].get('role') == 'advisory-nudge'
+    and lines[0].get('tool') == 'AskUserQuestion'
+    and lines[0].get('session_id') == 'test-session'
+)
+print('ok' if ok else 'fail_' + str(lines))
+")
+if [ "$_t1_tel" = "ok" ]; then
+  echo "  PASS  T1 deny -> 1 RICH telemetry record (decision=block, issue #787)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  T1 deny -> 1 RICH telemetry record (decision=block, issue #787) ($_t1_tel)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("T1 deny -> 1 RICH telemetry record")
+fi
+
+# T1 deny -> the automatic COARSE "pass" duplicate from @fail_open must be
+# suppressed (issue #787 codex round-1 P2): without suppression the file
+# would have 2 lines (RICH block + COARSE pass), corrupting aggregate_fires()
+# block-rate counts. Reusing the same TEL_T1 file/call from the case above.
+_t1_total_lines=$(wc -l < "$TEL_T1" 2>/dev/null | tr -d ' ')
+if [ "${_t1_total_lines:-0}" -eq 1 ]; then
+  echo "  PASS  T1 deny -> coarse duplicate suppressed (1 total line, issue #787)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  T1 deny -> coarse duplicate suppressed (1 total line, issue #787) (got $_t1_total_lines lines)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("T1 deny -> coarse duplicate suppressed")
+fi
+
+# T2 ask fires -> 1 RICH record, decision=ask.
+TEL_T2="$TEL_DIR/t2.jsonl"
+make_ask_payload '["A safer rollout", "B aggressive"]' \
+  | PRAXIS_FIRE_TELEMETRY_FILE="$TEL_T2" "$HOOK" >/dev/null 2>&1
+_t2_tel=$(rich_records "$TEL_T2" | python3 -c "
+import json, sys
+lines = [json.loads(l) for l in sys.stdin if l.strip()]
+ok = len(lines) == 1 and lines[0].get('decision') == 'ask'
+print('ok' if ok else 'fail_' + str(lines))
+")
+if [ "$_t2_tel" = "ok" ]; then
+  echo "  PASS  T2 ask -> 1 RICH telemetry record (decision=ask, issue #787)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  T2 ask -> 1 RICH telemetry record (decision=ask, issue #787) ($_t2_tel)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("T2 ask -> 1 RICH telemetry record")
+fi
+
+# T2 ask -> same coarse-duplicate suppression as T1 above.
+_t2_total_lines=$(wc -l < "$TEL_T2" 2>/dev/null | tr -d ' ')
+if [ "${_t2_total_lines:-0}" -eq 1 ]; then
+  echo "  PASS  T2 ask -> coarse duplicate suppressed (1 total line, issue #787)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  T2 ask -> coarse duplicate suppressed (1 total line, issue #787) (got $_t2_total_lines lines)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("T2 ask -> coarse duplicate suppressed")
+fi
+
+# Silent pass -> no RICH record (nothing to count).
+TEL_PASS="$TEL_DIR/pass.jsonl"
+make_ask_payload '["Option A", "Option B"]' \
+  | PRAXIS_FIRE_TELEMETRY_FILE="$TEL_PASS" "$HOOK" >/dev/null 2>&1
+_pass_tel_count=$(rich_records "$TEL_PASS" | wc -l | tr -d ' ')
+if [ "${_pass_tel_count:-0}" -eq 0 ]; then
+  echo "  PASS  silent pass -> no RICH telemetry record (issue #787)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  silent pass -> no RICH telemetry record (issue #787) (got $_pass_tel_count)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("silent pass -> no RICH telemetry record")
+fi
+
+# Missing session_id -> deny still fires (stdout unaffected). PR #796
+# CodeRabbit review: previously this early-returned before the RICH write,
+# dropping the decision from aggregate_fires()'s fires/block/ask totals
+# entirely. record_session_fire coerces a non-str session_id to "", and
+# aggregate_fires only adds a session to its per-session set when it is a
+# non-empty string, so the RICH record is now written unconditionally with
+# session_id="" — the decision still counts, only per-session attribution
+# is lost.
+make_ask_payload_no_session() {
+  python3 -c "
+import json, sys
+labels = json.loads(sys.argv[1])
+options = [{'label': l} for l in labels]
+payload = {
+    'tool_name': 'AskUserQuestion',
+    'tool_input': {'questions': [{'question': 'What should we do?', 'options': options}]},
+    'cwd': '/tmp',
+}
+print(json.dumps(payload))
+" "$1"
+}
+TEL_NOSESS="$TEL_DIR/nosession.jsonl"
+make_ask_payload_no_session '["Best option (Recommended)", "Alternative"]' \
+  | PRAXIS_FIRE_TELEMETRY_FILE="$TEL_NOSESS" "$HOOK" >/dev/null 2>&1
+_nosess_tel=$(rich_records "$TEL_NOSESS" | python3 -c "
+import json, sys
+lines = [json.loads(l) for l in sys.stdin if l.strip()]
+ok = (
+    len(lines) == 1
+    and lines[0].get('decision') == 'block'
+    and lines[0].get('hook') == 'output-block-falsify-advisory'
+    and lines[0].get('session_id') == ''
+)
+print('ok' if ok else 'fail_' + str(lines))
+")
+if [ "$_nosess_tel" = "ok" ]; then
+  echo "  PASS  missing session_id -> RICH record still written with session_id='' (PR #796 review)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  missing session_id -> RICH record still written with session_id='' (PR #796 review) ($_nosess_tel)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("missing session_id -> RICH record still written with session_id=''")
+fi
+
+# Missing session_id -> the COARSE "pass" duplicate must still be suppressed
+# even though the RICH record is now written — otherwise the same call
+# would produce both a RICH "block" and a COARSE "pass" record, corrupting
+# aggregate_fires() the same way the original T1/T2 coarse-duplicate bug did
+# (issue #787 codex round-1 P2). Total line count in the file must be
+# exactly 1 (the RICH record only).
+if [ -f "$TEL_NOSESS" ]; then
+  _nosess_total_lines=$(wc -l < "$TEL_NOSESS" | tr -d ' ')
+else
+  _nosess_total_lines=0
+fi
+if [ "${_nosess_total_lines:-0}" -eq 1 ]; then
+  echo "  PASS  missing session_id -> coarse duplicate suppressed (1 total line = RICH only, PR #796 review)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  missing session_id -> coarse duplicate suppressed (1 total line = RICH only, PR #796 review) (got $_nosess_total_lines lines)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("missing session_id -> coarse duplicate suppressed")
+fi
 
 # ---------------------------------------------------------------------------
 # @fail_open structural assertion

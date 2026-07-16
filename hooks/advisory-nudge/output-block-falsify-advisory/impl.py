@@ -55,6 +55,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from ask_option_text import collect_option_texts  # type: ignore[import-not-found]  # noqa: E402
+import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
+
+_TELEMETRY_HOOK_NAME = "output-block-falsify-advisory"
+_TELEMETRY_HOOK_ROLE = "advisory-nudge"
 
 # ---------------------------------------------------------------------------
 # Messages
@@ -174,13 +178,180 @@ def _has_exact_recommended_marker(labels: list[str]) -> bool:
     return False
 
 
-def _has_falsified_line(texts: list[str]) -> bool:
-    """True if any question text has a line beginning with 'Falsified:' (exact prefix)."""
+# Issue #787 codex round-2 P1: the ready-to-fill scaffold (see
+# _falsified_scaffold below) itself starts a line with "Falsified:", so a
+# verbatim copy-paste that never fills in the placeholders would otherwise
+# silently satisfy this exact-prefix check with zero probe evidence — the
+# gate this hook exists to enforce. A line carrying any of these literal
+# placeholder tokens in its evidence region does not count as satisfied.
+_SCAFFOLD_PLACEHOLDER_TOKENS = ("<command>", "<observed>", "<...>")
+
+# Issue #787 codex round-5 P2: the scaffold format is
+# "Falsified: {label} — probe: <command> → <observed>; ...", and {label} is
+# seeded verbatim from the actual option label. If an option's own label
+# text happens to contain one of the placeholder tokens (e.g. a label
+# literally reading "Run <command> manually"), scanning the WHOLE line
+# would flag it as unfilled forever, even after the probe/observed content
+# past this marker is genuinely filled in. The evidence a probe must
+# supply lives after this marker, so placeholder scanning is scoped to
+# that region only — the label prefix is never evidence-bearing.
+_PROBE_MARKER = " — probe: "
+
+
+def _has_falsified_line(texts: list[str], triggering_labels: list[str]) -> bool:
+    """True if every label in `triggering_labels` is addressed by its own
+    clean 'Falsified:' line, and NO 'Falsified:'-prefixed, scaffold-shaped
+    line still carries an unfilled scaffold placeholder in its evidence
+    region.
+
+    `triggering_labels` is the deduped list of option labels that triggered
+    T1/T2 for this question. When there are 0 or 1 triggering labels, ANY
+    clean line satisfies the question (the pre-#787 contract, in place
+    since issue #290: a single free-form Falsified line covers the whole
+    question regardless of wording — there is no ambiguity about which
+    option it addresses when only one is in play). When there are 2+
+    triggering labels, each one must be individually covered.
+
+    Issue #787 codex round-9 P1 (count-only verification silent-pass): the
+    prior contract counted DISTINCT clean lines against `required_count`
+    without checking which triggering option each line actually addressed.
+    Two differently-worded lines both about Option A satisfied
+    `required_count=2` for a 2-option question while Option B was never
+    verified at all. A line is now matched to a specific triggering label
+    by checking whether it starts with `"Falsified: {label}"` (the exact
+    shape the scaffold seeds verbatim) — longest labels are checked first
+    so one label can't shadow a longer sibling label that has it as a
+    prefix. Coverage requires every triggering label to have >= 1 matched
+    line; unmatched lines still count toward the single-label-mode
+    "any clean line" contract but no longer inflate a raw count.
+
+    Issue #787 codex round-9 P2 (evidence-embedded marker bypass): round-8
+    anchored the probe-delimiter on `rfind()` (the LAST `— probe:` in the
+    line), assuming the scaffold's real delimiter — inserted once, right
+    after the label — is always the rightmost occurrence. If the EVIDENCE
+    text itself (legitimately placed after the real delimiter) happens to
+    contain a second literal `— probe:` substring, `rfind()` picks that
+    spurious later occurrence instead, pushing an actual unfilled
+    placeholder sitting before it (but still within the real evidence
+    region) outside the scanned window — silent pass. Now that a line is
+    matched to its label first, the delimiter is found via `find()` seeded
+    at the END of the matched label prefix — the FIRST `— probe:` after the
+    label, which is structurally always the real, scaffold-inserted one,
+    regardless of how many more `— probe:`-shaped substrings the evidence
+    text contains afterward. This also still closes round-8's original
+    label-embedded-marker case (a label containing `— probe:` no longer
+    matters, since the scan starts strictly after the whole label prefix).
+    A line that matches no known triggering label (true free-form text, or
+    referencing an option outside the current label set) falls back to the
+    prior `rfind()` behavior — there is no label boundary to anchor on.
+
+    Issue #787 codex round-3 P1 (retained): any unfilled scaffold
+    placeholder anywhere in the evidence region voids satisfaction outright,
+    even when other lines are already filled in correctly — fails closed
+    rather than returning True on the first clean line found.
+
+    Issue #787 codex round-5 P2 (retained): placeholder tokens are only
+    checked in the content after the `— probe:` marker — a line lacking the
+    marker is not scaffold-shaped, so it is never scanned for placeholder
+    tokens at all (issue #787 codex round-6 P2: scanning marker-less lines
+    for bare token substrings falsely perma-blocked genuine free-form
+    evidence whose own wording happened to contain one, e.g. an option
+    literally named `<command>` referenced without ever using the
+    auto-scaffold's `— probe:` phrasing).
+
+    Issue #787 codex round-10 P2 (label-boundary false match): round-9's
+    `line.startswith(f"Falsified: {label}")` matched a label as a bare
+    substring prefix, not a whole-token prefix. With triggering labels
+    `["Run", "Other"]`, a line reading `Falsified: Runtime behavior
+    verified — probe: ...` matched the `"Run"` prefix (since `"Runtime"`
+    starts with `"Run"`) and credited `"Run"` as covered even though the
+    line never actually addresses that option — the real `"Run"` claim
+    stayed unverified while the gate silently passed. round-10 required a
+    non-alphanumeric character immediately after the label prefix.
+
+    Issue #787 codex round-12 P2 (near-miss label prefix): round-10's
+    non-alphanumeric boundary was still too permissive — a genuinely
+    DIFFERENT, unrelated option label that happens to share the triggering
+    label as its own prefix, separated by a space, also has a non-
+    alphanumeric boundary. With triggering labels `["Merge (Recommended)",
+    "Run"]`, a line reading `Falsified: Run now — probe: ...` (evidence
+    that is really about a different `"Run now"` option, not the
+    triggering `"Run"`) matched `"Run"`'s prefix with `" "` as the
+    boundary, wrongly crediting `"Run"` as covered. The only boundary that
+    reliably means "the label ends here and evidence begins" is the
+    scaffold's own delimiter: a label match now counts only when the line
+    ends exactly at the label (remainder empty) or the remainder starts
+    with the literal `_PROBE_MARKER` string. `"Run now"` no longer
+    satisfies `"Run"` because `" now"` does not start with `" — probe: "`.
+    """
+    labels_by_len = sorted(dict.fromkeys(triggering_labels), key=len, reverse=True)
+    single_label_mode = len(labels_by_len) <= 1
+
+    clean_lines: set[str] = set()
+    covered_labels: set[str] = set()
     for text in texts:
         for line in text.splitlines():
-            if line.startswith("Falsified:"):
-                return True
-    return False
+            if not line.startswith("Falsified:"):
+                continue
+
+            matched_label = None
+            label_end = 0
+            for label in labels_by_len:
+                prefix = f"Falsified: {label}"
+                if not line.startswith(prefix):
+                    continue
+                remainder = line[len(prefix) :]
+                # Issue #787 codex round-10 P2: startswith() alone matched
+                # a label as a bare substring prefix, not a whole-token
+                # prefix — labels=["Run", "Other"] let a line reading
+                # "Falsified: Runtime behavior verified — probe: ..." match
+                # "Run" (since "Runtime" starts with "Run"), crediting the
+                # "Run" option as covered even though the line never
+                # actually addresses it. round-10 required a non-
+                # alphanumeric character after the label, but that is still
+                # too weak: issue #787 codex round-12 P2 — a genuinely
+                # DIFFERENT option label sharing the triggering label as its
+                # own prefix, separated by a space (e.g. triggering "Run"
+                # vs. the unrelated text "Run now"), also has a non-
+                # alphanumeric boundary (the space) yet is not evidence for
+                # the triggering label at all. The boundary must be the
+                # scaffold's own delimiter or true end-of-line — nothing
+                # else can be trusted to mean "the label ends here and
+                # evidence begins": the label match only counts when it is
+                # the whole line (remainder empty) or immediately followed
+                # by the literal `_PROBE_MARKER` string.
+                if remainder and not remainder.startswith(_PROBE_MARKER):
+                    continue
+                matched_label = label
+                label_end = len(prefix)
+                break
+
+            if matched_label is not None:
+                marker_at = line.find(_PROBE_MARKER, label_end)
+            else:
+                marker_at = line.rfind(_PROBE_MARKER)
+
+            if marker_at != -1:
+                evidence_region = line[marker_at + len(_PROBE_MARKER) :]
+                # CodeRabbit PR #796 review: deleting everything after the
+                # marker (or moving it to the next physical line) leaves an
+                # empty evidence_region, so the placeholder-token scan finds
+                # nothing and the line silently passes with zero probe
+                # content — the same class of bypass this whole gate exists
+                # to close. A marker-terminated line with no evidence at all
+                # is treated the same as one still carrying a placeholder.
+                if not evidence_region.strip() or any(
+                    token in evidence_region for token in _SCAFFOLD_PLACEHOLDER_TOKENS
+                ):
+                    return False
+
+            clean_lines.add(" ".join(line.split()))
+            if matched_label is not None:
+                covered_labels.add(matched_label)
+
+    if single_label_mode:
+        return len(clean_lines) >= 1
+    return all(label in covered_labels for label in labels_by_len)
 
 
 def _has_recommended_marker(labels: list[str]) -> bool:
@@ -205,6 +376,125 @@ def _has_recommended_marker(labels: list[str]) -> bool:
             if marker in label:
                 return True
     return False
+
+
+def _normalize_label(label: str) -> str:
+    """Collapse embedded newlines/whitespace runs to single spaces.
+
+    Issue #787 codex round-11 P2: a raw option label containing a literal
+    newline splits `_falsified_scaffold`'s single-physical-line output
+    across two printed lines (`f"Falsified: {label} — probe: ..."`
+    interpolates the label verbatim). A verbatim copy-paste of that
+    unfilled scaffold then has its placeholder tokens land on the SECOND
+    physical line, which does not start with `Falsified:` — invisible to
+    `_has_falsified_line`'s per-line scan, silently passing an evidence-free
+    question. Normalizing at the single point labels enter the triggering
+    pipeline (this function's callers) keeps every downstream consumer —
+    scaffold generation and `_has_falsified_line` matching alike — on the
+    same "one physical line per label" invariant, without needing the fix
+    duplicated in each consumer.
+    """
+    return " ".join(label.split())
+
+
+def _t1_matching_labels(labels: list[str]) -> list[str]:
+    """Option labels carrying the exact (Recommended)/(추천) marker (T1 scope)."""
+    matched: list[str] = []
+    for label in labels:
+        if any(marker in label for marker in RECOMMENDED_MARKERS_EXACT_EN):
+            matched.append(_normalize_label(label))
+        elif any(marker in label for marker in RECOMMENDED_MARKERS_EXACT_KO):
+            matched.append(_normalize_label(label))
+    return matched
+
+
+def _t2_matching_labels(options: list) -> list[str]:
+    """Option labels whose own label OR description carries an anchoring token (T2 scope)."""
+    matched: list[str] = []
+    for o in options:
+        if not isinstance(o, dict):
+            continue
+        label = o.get("label")
+        if not isinstance(label, str):
+            continue
+        if _has_confidence_anchoring(collect_option_texts([o])):
+            matched.append(_normalize_label(label))
+    return matched
+
+
+def _dedupe_labels(labels: list[str]) -> list[str]:
+    """Order-preserving de-dup for aggregated scaffold labels (issue #787)."""
+    return list(dict.fromkeys(labels))
+
+
+def _falsified_scaffold(labels: list[str]) -> str:
+    """Ready-to-fill `Falsified:` line(s), one per triggering option label.
+
+    Issue #787: the block message previously told the agent to add a
+    `Falsified:` line but left the whole line to be reconstructed on retry,
+    costing +1 turn every time. The label is the one fact this hook can
+    supply with certainty (it is in the blocked tool_input); probe/observed/
+    reason stay as placeholders — the probe itself is the intended cost and
+    is never fabricated here.
+    """
+    if not labels:
+        return ""
+    lines = [
+        f"Falsified: {label} — probe: <command> → <observed>; premise survives because <...>"
+        for label in labels
+    ]
+    return "\n".join(lines)
+
+
+def _build_ask_msg(labels: list[str]) -> str:
+    scaffold = _falsified_scaffold(labels)
+    if not scaffold:
+        return ASK_MSG
+    return f"{ASK_MSG} [scaffold]\n{scaffold}"
+
+
+def _build_anchoring_ask_msg(labels: list[str]) -> str:
+    scaffold = _falsified_scaffold(labels)
+    if not scaffold:
+        return ANCHORING_ASK_MSG
+    return f"{ANCHORING_ASK_MSG} [scaffold]\n{scaffold}"
+
+
+def _record_block_telemetry(session_id: object, decision: str) -> None:
+    """Rich fire-ledger record for a T1/T2 block event (issue #787).
+
+    The coarse @fail_open recorder sees rc=0 for every call here (deny/ask
+    are signaled via a stdout JSON `permissionDecision`, not exit code 2), so
+    it always logs "pass" for this hook — leaving cross-session block-rate
+    measurement to transcript grep, which over-counts sessions that merely
+    quote the block message in a retrospect report. This records the real
+    decision with session attribution so that count can come from the ledger
+    instead.
+
+    Always suppresses this process's coarse fallback
+    (`_fire_ledger.suppress_coarse_duplicate`) — otherwise `aggregate_fires()`
+    sums both the RICH "block"/"ask" record and the COARSE "pass" record for
+    the same call, turning one deny into `fires=2, block=1, pass=1` and
+    corrupting the exact block-rate count this telemetry exists to provide.
+
+    Coderabbit PR #796 review: a missing `session_id` previously early-returned
+    before the RICH write, dropping the block/ask decision from
+    `aggregate_fires()`'s `fires`/`block`/`ask` totals entirely — worse than
+    the original coarse-pass bug, since the event vanished from the count
+    rather than being merely mislabeled. `record_session_fire` already
+    coerces a non-str `session_id` to `""`, and `aggregate_fires` only adds a
+    session to its per-session set when it is a non-empty string (verified:
+    `by_hook[...]["sessions"].add(session)` is guarded by
+    `isinstance(session, str) and session`), so emitting the RICH record with
+    an empty session_id counts the decision correctly without polluting
+    per-session aggregation. The RICH write is now unconditional; only
+    per-session attribution is lost when `session_id` is missing, not the
+    decision count itself.
+    """
+    _fire_ledger.suppress_coarse_duplicate()
+    _fire_ledger.record_session_fire(
+        _TELEMETRY_HOOK_NAME, _TELEMETRY_HOOK_ROLE, decision, session_id, "AskUserQuestion"
+    )
 
 
 def _has_confidence_anchoring(texts: list[str]) -> bool:
@@ -310,9 +600,17 @@ def main() -> int:
         questions = tool_input.get("questions") or []
         if not isinstance(questions, list):
             questions = []
-        # tier_decision: None | "deny" (T1) | "ask" (T2)
-        tier_decision: str | None = None
-        msg_to_emit: str = ASK_MSG
+        # Issue #787: scan every question — no early break. Stopping at the
+        # first violating question left later violating questions
+        # unaddressed, so the agent hit a second block on retry even after
+        # filling in the first scaffold. any_t1/any_t2 decide the final
+        # tier (T1 still wins over T2, same as the pre-#787 precedence);
+        # t1_labels/t2_labels aggregate labels from EVERY offending
+        # question so one retry can cover all of them.
+        any_t1_violation = False
+        any_t2_violation = False
+        t1_labels: list[str] = []
+        t2_labels: list[str] = []
         advisory_needed = False
         for q in questions:
             if not isinstance(q, dict):
@@ -329,31 +627,82 @@ def main() -> int:
             # Per-question check: only this question's text counts.
             q_text = q.get("question")
             q_texts = [q_text] if isinstance(q_text, str) else []
-            falsified_present = _has_falsified_line(q_texts)
 
+            # Issue #787 codex round-7 P2: T1 and T2 triggering labels are
+            # computed independently (not via if/elif) because a single
+            # question can carry BOTH an exact (Recommended) option (T1)
+            # AND a separate confidence-anchoring option (T2, e.g. a
+            # "safer" description with no (Recommended) marker). The prior
+            # if/elif skipped the T2 check entirely once T1 matched, so the
+            # T2 option's label never entered `required_count` — a retry
+            # that only filled in the T1 option's evidence silent-passed
+            # with the T2 option's claim never verified. T1 still decides
+            # the FINAL deny-vs-ask precedence below (unchanged), but both
+            # tiers' labels are now pooled into one evidence requirement
+            # for the question, consistent with the existing count-based
+            # (not exact-label-matched) `required_count` contract.
+            t1_triggering: list[str] = []
             if _has_exact_recommended_marker(q_labels):
                 # T1: literal (Recommended) / (추천) marker in label.
                 # Issue #393: upgraded from ask to deny (hard block).
-                if not falsified_present:
-                    tier_decision = "deny"
-                    msg_to_emit = ASK_MSG
-                    break  # T1 deny is final — overrides any prior T2 ask
-            elif _has_confidence_anchoring(collect_option_texts(options)):
+                # Dedup WITHIN this question only (defends against a single
+                # question listing the same label twice) — NOT across
+                # questions (issue #787 codex round-3 P2): each question's
+                # own text is checked independently, so 2 different
+                # questions sharing the same label text each need their
+                # own scaffold line.
+                t1_triggering = _dedupe_labels(_t1_matching_labels(q_labels))
+
+            t2_triggering: list[str] = []
+            if _has_confidence_anchoring(collect_option_texts(options)):
                 # T2 (issue #369): confidence-anchoring framing token in
                 # label OR description. Soft gate — false-positive risk
-                # higher than T1's literal marker. Record but keep scanning
-                # so a later T1 violation can upgrade the decision to deny.
-                if not falsified_present and tier_decision is None:
-                    tier_decision = "ask"
-                    msg_to_emit = ANCHORING_ASK_MSG
+                # higher than T1's literal marker.
+                #
+                # Exclude labels already in t1_triggering: T2's bare
+                # `recommend(?:ed|s)?` pattern matches the literal word
+                # inside "(Recommended)" too, so an option carrying the
+                # exact T1 marker also, incidentally, matches T2. Without
+                # this filter the same label would be appended to BOTH
+                # t1_labels and t2_labels below, double-counting it in
+                # `required_count` and duplicating its scaffold line in
+                # the final `t1_labels + t2_labels` deny message — this is
+                # not a second, independent claim to verify, just the
+                # same marker matching two patterns.
+                t2_triggering = [
+                    label
+                    for label in _dedupe_labels(_t2_matching_labels(options))
+                    if label not in t1_triggering
+                ]
+
+            combined_triggering = _dedupe_labels(t1_triggering + t2_triggering)
+            if combined_triggering:
+                # Each label in combined_triggering (issue #787 codex
+                # round-4 P1, extended round-7, round-9 P1) must be
+                # individually addressed by its own clean line — a scaffold
+                # satisfied by deleting a line, or by pasting distinct-but-
+                # off-target evidence for only one option, must still block.
+                if not _has_falsified_line(q_texts, combined_triggering):
+                    if t1_triggering:
+                        any_t1_violation = True
+                        t1_labels.extend(t1_triggering)
+                    if t2_triggering:
+                        any_t2_violation = True
+                        t2_labels.extend(t2_triggering)
             elif _has_recommended_marker(q_labels):
                 # T3 (dead under new precedence — kept for clarity).
                 advisory_needed = True
 
-        if tier_decision == "deny":
-            _emit_deny(msg_to_emit)
-        elif tier_decision == "ask":
-            _emit_ask(msg_to_emit)
+        if any_t1_violation:
+            # T1 deny is final — overrides any T2 ask — but the scaffold
+            # still aggregates T2 labels too so a question that only
+            # violates T2 doesn't reblock on the very next retry. No
+            # cross-question dedup here (see comment above).
+            _record_block_telemetry(payload.get("session_id"), _fire_ledger.DECISION_BLOCK)
+            _emit_deny(_build_ask_msg(t1_labels + t2_labels))
+        elif any_t2_violation:
+            _record_block_telemetry(payload.get("session_id"), _fire_ledger.DECISION_ASK)
+            _emit_ask(_build_anchoring_ask_msg(t2_labels))
         elif advisory_needed:
             sys.stderr.write(ADVISORY_MSG + "\n")
 

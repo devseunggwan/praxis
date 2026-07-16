@@ -104,6 +104,29 @@ def mark_dispatcher_process() -> None:
     _DISPATCHER_PROCESS = True
 
 
+def suppress_coarse_duplicate() -> None:
+    """Skip this process's automatic COARSE fire record (issue #787).
+
+    A standalone hook that calls `record_session_fire` directly already has
+    a RICH record for this invocation. Letting `@fail_open`'s coarse
+    fallback also fire afterwards does not just double-count — when the
+    hook's real decision is "block"/"ask" (signaled via a stdout JSON
+    `permissionDecision`, not exit code 2), the coarse path only ever sees
+    rc=0 and always records "pass". `aggregate_fires()` in
+    skills/bypass-review/bypass-review sums both records unconditionally, so
+    one deny becomes `fires=2, block=1, pass=1` — corrupting the exact
+    per-hook block-rate count this telemetry exists to provide.
+
+    Reuses the dispatcher-process flag: same process-local, one-shot,
+    never-leaks-across-invocations guarantee `mark_dispatcher_process`
+    documents, applied here for the same reason (a richer record for this
+    invocation already exists — skip the redundant coarse fallback). Call
+    only after the RICH record has actually been written, not on every
+    invocation of the hook.
+    """
+    mark_dispatcher_process()
+
+
 def _atomic_append(path: Path, lines: list[str]) -> None:
     """Append `lines` as JSONL with per-line atomic writes; best-effort safe.
 

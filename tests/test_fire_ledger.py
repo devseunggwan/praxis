@@ -394,6 +394,29 @@ def test_dispatcher_process_writes_rich_not_coarse(tmp_path, monkeypatch):
     assert len(recs) == 1 and recs[0]["granularity"] == "rich"
 
 
+def test_suppress_coarse_duplicate_skips_standalone_fire(tmp_path, monkeypatch):
+    """Issue #787: a standalone hook that already wrote a RICH record via
+    record_session_fire must be able to suppress its own subsequent COARSE
+    record — otherwise aggregate_fires() double-counts the same call with a
+    mismatched decision (rich=block/ask, coarse=pass), corrupting block-rate
+    counts. suppress_coarse_duplicate reuses the dispatcher-process flag for
+    this, same mechanism as test_dispatcher_process_writes_rich_not_coarse
+    above, applied outside a real dispatcher context."""
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", False)
+    fl.record_session_fire(
+        "output-block-falsify-advisory", "advisory-nudge", "block",
+        "sess-1", "AskUserQuestion",
+    )
+    fl.suppress_coarse_duplicate()
+    fl.record_standalone_fire("output-block-falsify-advisory", "advisory-nudge", 0)
+    recs = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    assert len(recs) == 1
+    assert recs[0]["granularity"] == "rich" and recs[0]["decision"] == "block"
+
+
 def test_atomic_append_skips_non_regular_file(tmp_path):
     """Security guard: a FIFO target is skipped, never opened (no block, no raise)."""
     fifo = tmp_path / "pipe"
