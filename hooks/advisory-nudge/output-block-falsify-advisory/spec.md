@@ -153,7 +153,7 @@ Both the T1 deny and T2 ask `permissionDecisionReason` above end with a
 `[scaffold]` marker followed by one copy-paste-ready `Falsified:` line per
 triggering option label, parsed straight from the blocked `tool_input`:
 
-```
+```text
 [scaffold]
 Falsified: <option label> — probe: <command> → <observed>; premise survives because <...>
 ```
@@ -381,6 +381,32 @@ label match now counts only when the line ends exactly at the label
 `_PROBE_MARKER` string (`" — probe: "`) — not merely any non-alphanumeric
 character.
 
+**Empty scaffold evidence (PR #796 CodeRabbit review):** the `— probe:`
+marker being present was treated as sufficient — a line reading
+`Falsified: <label> — probe:` with nothing (or only whitespace) after the
+marker satisfied the placeholder-token scan, because `any(token in "" for
+token in _SCAFFOLD_PLACEHOLDER_TOKENS)` is vacuously `False` on an empty
+`evidence_region`. Deleting everything after the marker, or moving the
+placeholder tokens onto the next physical line, silently passed a
+zero-content line. An empty or whitespace-only `evidence_region` is now
+treated identically to an unfilled placeholder
+(`not evidence_region.strip() or any(...)`).
+
+**Missing-session_id telemetry undercounting (PR #796 CodeRabbit review):**
+`_record_block_telemetry` early-returned before the RICH write whenever
+`session_id` was absent, by design ("cannot attribute to a session") — but
+this dropped the T1/T2 decision from `aggregate_fires()`'s
+`fires`/`block`/`ask` totals entirely, which is worse than the original
+coarse-duplicate bug the function exists to prevent (that bug mislabeled
+the decision as `pass`; this one made it vanish from the count). Verified
+`record_session_fire` already coerces a non-str `session_id` to `""`, and
+`aggregate_fires` only adds a session to its per-session set when it is a
+non-empty string — so the RICH record is now written unconditionally
+(`session_id=""` when missing), preserving the correct `fires`/`block`/`ask`
+counts without polluting per-session aggregation. Coarse-duplicate
+suppression also moved to run unconditionally, as the function's first
+statement, so it fires even on the missing-`session_id` path.
+
 #### Advisory (Bash bulk-action only)
 
 Note: case-insensitive `(recommended)` alone previously emitted advisory
@@ -453,7 +479,7 @@ stderr (it signals via stdout JSON, not stderr), so a stderr-only check
 could not actually distinguish a real silent pass from an undetected
 deny/ask.
 
-Covers 88 cases (47 pre-#787 + 41 new — 5 scaffold, 4 telemetry, 4 multi-question/coarse-dedup fixes, 28 anti-bypass/false-positive):
+Covers 91 cases (47 pre-#787 + 44 new — 5 scaffold, 5 telemetry, 4 multi-question/coarse-dedup fixes, 30 anti-bypass/false-positive):
 
 **T1 deny-escalation (AskUserQuestion, issue #290/#393):**
 
@@ -524,7 +550,7 @@ Covers 88 cases (47 pre-#787 + 41 new — 5 scaffold, 4 telemetry, 4 multi-quest
 - 2 separate questions, each with its own T1 violation, no `Falsified:` in either → both labels appear in the deny scaffold (not just the first)
 - 2 separate questions, each with its own T2-only (anchoring) violation → both labels appear in the ask scaffold
 
-**Anti-bypass placeholder-rejection cases (issue #787 codex round-2/3/4/5/6/7/8/9/10/11/12 fixes):**
+**Anti-bypass placeholder-rejection cases (issue #787 codex round-2/3/4/5/6/7/8/9/10/11/12 + PR #796 CodeRabbit review fixes):**
 
 - T1: copying the unfilled scaffold line verbatim into the question body does NOT satisfy the gate → still deny
 - T2: same unfilled-copy-paste check → still ask
@@ -554,3 +580,5 @@ Covers 88 cases (47 pre-#787 + 41 new — 5 scaffold, 4 telemetry, 4 multi-quest
 - Same newline-bearing label, the (now-guaranteed single-line) scaffold copied verbatim and left unfilled → still deny (regression — the fix must not make the placeholder guard unreachable for labels that originally contained a newline)
 - A triggering label (`"Run"`) is the string-prefix of a genuinely different, unrelated evidence line's own text (`"Run now"`) separated by a space → still deny (round-12 P2 — round-10's non-alphanumeric boundary check was too permissive; the boundary must be the exact scaffold delimiter or end-of-line, not any non-alphanumeric character)
 - Same near-miss shape, but the triggering label is genuinely addressed by its own line ending exactly at the scaffold's delimiter → silent pass (regression — the round-12 fix must not forbid the label from ever matching)
+- T1: the `— probe:` marker is present, but nothing (or only whitespace) follows it on the same line → still deny (PR #796 CodeRabbit review — an empty `evidence_region` vacuously satisfied the placeholder-token scan since `any()` over an empty string is `False`)
+- Missing `session_id` → the RICH telemetry record is still written, with `session_id=""`, and the COARSE "pass" duplicate remains suppressed (PR #796 CodeRabbit review — the prior early-return dropped the decision from `aggregate_fires()`'s totals entirely rather than merely mislabeling it)

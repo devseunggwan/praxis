@@ -1028,6 +1028,79 @@ run_case "T1+T2 (issue #787 round-12 P2): label genuinely addressed via the exac
 Falsified: Run — probe: checked run path -> safe; premise survives
 Which one?")"
 
+# Anti-bypass regression (PR #796 CodeRabbit review): the "— probe:" marker
+# is present, but nothing (or only whitespace) follows it on the same
+# line — deleting everything after the marker, or leaving only trailing
+# whitespace, satisfied the gate with zero probe content since the
+# placeholder-token scan finds nothing in an empty evidence_region. The
+# trailing space after "probe:" is built via a Python string literal (not
+# left trailing at end-of-line in this file) so it survives edit-tool
+# whitespace normalization.
+_empty_evidence_decision=$(python3 - <<'PYEOF' | "$HOOK" 2>/dev/null | python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+print(d.get('hookSpecificOutput', {}).get('permissionDecision', 'pass'))
+"
+import json
+question_text = "Falsified: Option A (Recommended) — probe: " + "\nWhat should we do?"
+payload = {
+    "session_id": "test-session",
+    "tool_name": "AskUserQuestion",
+    "tool_input": {
+        "questions": [
+            {
+                "question": question_text,
+                "options": [{"label": "Option A (Recommended)"}, {"label": "Alternative"}],
+            }
+        ]
+    },
+    "cwd": "/tmp",
+}
+print(json.dumps(payload))
+PYEOF
+)
+if [ "$_empty_evidence_decision" = "deny" ]; then
+  echo "  PASS  marker present, empty evidence after it -> still deny (PR #796 CodeRabbit review)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  marker present, empty evidence after it -> still deny (PR #796 CodeRabbit review) (got '$_empty_evidence_decision')"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("marker present, empty evidence after it -> still deny")
+fi
+
+# Regression variant: whitespace-only evidence (not merely zero-length)
+# must also still deny — the fix strips the evidence region before
+# checking emptiness, not just checking for a zero-length string.
+_whitespace_evidence_decision=$(python3 - <<'PYEOF' | "$HOOK" 2>/dev/null | python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+print(d.get('hookSpecificOutput', {}).get('permissionDecision', 'pass'))
+"
+import json
+question_text = "Falsified: Option A (Recommended) — probe: " + "   " + "\nWhat should we do?"
+payload = {
+    "session_id": "test-session",
+    "tool_name": "AskUserQuestion",
+    "tool_input": {
+        "questions": [
+            {
+                "question": question_text,
+                "options": [{"label": "Option A (Recommended)"}, {"label": "Alternative"}],
+            }
+        ]
+    },
+    "cwd": "/tmp",
+}
+print(json.dumps(payload))
+PYEOF
+)
+if [ "$_whitespace_evidence_decision" = "deny" ]; then
+  echo "  PASS  marker present, whitespace-only evidence -> still deny (PR #796 CodeRabbit review)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  marker present, whitespace-only evidence -> still deny (PR #796 CodeRabbit review) (got '$_whitespace_evidence_decision')"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("marker present, whitespace-only evidence -> still deny")
+fi
+
 # Cross-question label preservation (codex round-3 P2 fix): 2 DIFFERENT
 # questions each present an option with the IDENTICAL label text. Global
 # dedup across the whole payload previously collapsed this to 1 scaffold
@@ -1244,8 +1317,14 @@ else
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("silent pass -> no RICH telemetry record")
 fi
 
-# Missing session_id -> deny still fires (stdout unaffected), but no RICH
-# record (cannot attribute to a session).
+# Missing session_id -> deny still fires (stdout unaffected). PR #796
+# CodeRabbit review: previously this early-returned before the RICH write,
+# dropping the decision from aggregate_fires()'s fires/block/ask totals
+# entirely. record_session_fire coerces a non-str session_id to "", and
+# aggregate_fires only adds a session to its per-session set when it is a
+# non-empty string, so the RICH record is now written unconditionally with
+# session_id="" — the decision still counts, only per-session attribution
+# is lost.
 make_ask_payload_no_session() {
   python3 -c "
 import json, sys
@@ -1262,13 +1341,42 @@ print(json.dumps(payload))
 TEL_NOSESS="$TEL_DIR/nosession.jsonl"
 make_ask_payload_no_session '["Best option (Recommended)", "Alternative"]' \
   | PRAXIS_FIRE_TELEMETRY_FILE="$TEL_NOSESS" "$HOOK" >/dev/null 2>&1
-_nosess_tel_count=$(rich_records "$TEL_NOSESS" | wc -l | tr -d ' ')
-if [ "${_nosess_tel_count:-0}" -eq 0 ]; then
-  echo "  PASS  missing session_id -> no RICH telemetry record (issue #787)"
+_nosess_tel=$(rich_records "$TEL_NOSESS" | python3 -c "
+import json, sys
+lines = [json.loads(l) for l in sys.stdin if l.strip()]
+ok = (
+    len(lines) == 1
+    and lines[0].get('decision') == 'block'
+    and lines[0].get('hook') == 'output-block-falsify-advisory'
+    and lines[0].get('session_id') == ''
+)
+print('ok' if ok else 'fail_' + str(lines))
+")
+if [ "$_nosess_tel" = "ok" ]; then
+  echo "  PASS  missing session_id -> RICH record still written with session_id='' (PR #796 review)"
   PASS=$((PASS + 1))
 else
-  echo "  FAIL  missing session_id -> no RICH telemetry record (issue #787) (got $_nosess_tel_count)"
-  FAIL=$((FAIL + 1)); FAILED_NAMES+=("missing session_id -> no RICH telemetry record")
+  echo "  FAIL  missing session_id -> RICH record still written with session_id='' (PR #796 review) ($_nosess_tel)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("missing session_id -> RICH record still written with session_id=''")
+fi
+
+# Missing session_id -> the COARSE "pass" duplicate must still be suppressed
+# even though the RICH record is now written — otherwise the same call
+# would produce both a RICH "block" and a COARSE "pass" record, corrupting
+# aggregate_fires() the same way the original T1/T2 coarse-duplicate bug did
+# (issue #787 codex round-1 P2). Total line count in the file must be
+# exactly 1 (the RICH record only).
+if [ -f "$TEL_NOSESS" ]; then
+  _nosess_total_lines=$(wc -l < "$TEL_NOSESS" | tr -d ' ')
+else
+  _nosess_total_lines=0
+fi
+if [ "${_nosess_total_lines:-0}" -eq 1 ]; then
+  echo "  PASS  missing session_id -> coarse duplicate suppressed (1 total line = RICH only, PR #796 review)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  missing session_id -> coarse duplicate suppressed (1 total line = RICH only, PR #796 review) (got $_nosess_total_lines lines)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("missing session_id -> coarse duplicate suppressed")
 fi
 
 # ---------------------------------------------------------------------------

@@ -333,7 +333,16 @@ def _has_falsified_line(texts: list[str], triggering_labels: list[str]) -> bool:
 
             if marker_at != -1:
                 evidence_region = line[marker_at + len(_PROBE_MARKER) :]
-                if any(token in evidence_region for token in _SCAFFOLD_PLACEHOLDER_TOKENS):
+                # CodeRabbit PR #796 review: deleting everything after the
+                # marker (or moving it to the next physical line) leaves an
+                # empty evidence_region, so the placeholder-token scan finds
+                # nothing and the line silently passes with zero probe
+                # content — the same class of bypass this whole gate exists
+                # to close. A marker-terminated line with no evidence at all
+                # is treated the same as one still carrying a placeholder.
+                if not evidence_region.strip() or any(
+                    token in evidence_region for token in _SCAFFOLD_PLACEHOLDER_TOKENS
+                ):
                     return False
 
             clean_lines.add(" ".join(line.split()))
@@ -462,19 +471,30 @@ def _record_block_telemetry(session_id: object, decision: str) -> None:
     decision with session attribution so that count can come from the ledger
     instead.
 
-    After the RICH record is written, also suppresses this process's coarse
-    fallback (`_fire_ledger.suppress_coarse_duplicate`) — otherwise
-    `aggregate_fires()` sums both the RICH "block"/"ask" record and the
-    COARSE "pass" record for the same call, turning one deny into
-    `fires=2, block=1, pass=1` and corrupting the exact block-rate count
-    this telemetry exists to provide.
+    Always suppresses this process's coarse fallback
+    (`_fire_ledger.suppress_coarse_duplicate`) — otherwise `aggregate_fires()`
+    sums both the RICH "block"/"ask" record and the COARSE "pass" record for
+    the same call, turning one deny into `fires=2, block=1, pass=1` and
+    corrupting the exact block-rate count this telemetry exists to provide.
+
+    Coderabbit PR #796 review: a missing `session_id` previously early-returned
+    before the RICH write, dropping the block/ask decision from
+    `aggregate_fires()`'s `fires`/`block`/`ask` totals entirely — worse than
+    the original coarse-pass bug, since the event vanished from the count
+    rather than being merely mislabeled. `record_session_fire` already
+    coerces a non-str `session_id` to `""`, and `aggregate_fires` only adds a
+    session to its per-session set when it is a non-empty string (verified:
+    `by_hook[...]["sessions"].add(session)` is guarded by
+    `isinstance(session, str) and session`), so emitting the RICH record with
+    an empty session_id counts the decision correctly without polluting
+    per-session aggregation. The RICH write is now unconditional; only
+    per-session attribution is lost when `session_id` is missing, not the
+    decision count itself.
     """
-    if not isinstance(session_id, str) or not session_id:
-        return
+    _fire_ledger.suppress_coarse_duplicate()
     _fire_ledger.record_session_fire(
         _TELEMETRY_HOOK_NAME, _TELEMETRY_HOOK_ROLE, decision, session_id, "AskUserQuestion"
     )
-    _fire_ledger.suppress_coarse_duplicate()
 
 
 def _has_confidence_anchoring(texts: list[str]) -> bool:
