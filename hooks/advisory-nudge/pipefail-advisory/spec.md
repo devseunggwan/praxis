@@ -8,7 +8,7 @@ output is piped into `tail`, `head`, or `grep` — without `pipefail`, the
 pipeline's exit code is the LAST command's exit code, so the mutating
 command's failure is masked.
 
-### Why this exists (issue #788)
+## Why this exists (issue #788)
 
 Without `set -o pipefail`, `cmd1 | cmd2` reports `cmd2`'s exit code
 regardless of whether `cmd1` failed. Two generations of the same
@@ -28,7 +28,7 @@ structural backstop until this hook. Per issue #788's 3-generation
 threshold, gen-2 promoted this from a memory-layer reminder to a
 PreToolUse advisory.
 
-### Trigger criteria
+## Trigger criteria
 
 The advisory fires when **both** are true, within a single `|`-connected
 pipe chain:
@@ -47,7 +47,7 @@ pipe chain:
 2. **The LAST segment** in the chain is `tail`, `head`, or `grep` — the
    three sinks named in issue #788 and observed in both generations.
 
-### Exclusions (silent — no advisory)
+## Exclusions (silent — no advisory)
 
 - **Read-only commands piped**: `git log | head`, `git status | grep`,
   `gh pr list | head` — not in the mutating enum, so excluded by
@@ -68,7 +68,7 @@ pipe chain:
   is skipped via heredoc marker tracking — see "False-positive
   surfaces" below.
 
-### `2>&1` fd-dup normalization
+## `2>&1` fd-dup normalization
 
 `safe_tokenize`'s shlex `punctuation_chars=";|&"` does not include `>`,
 so `2>&1` tokenizes as three tokens (`2>`, `&`, `1`) with the bare `&`
@@ -81,16 +81,16 @@ into two spurious chains and hide the mutating command from the chain
 the hook inspects — silently missing the gen-2 pattern this hook exists
 to catch.
 
-### `|&` pipe operator
+## `|&` pipe operator
 
 Bash's `cmd1 |& cmd2` (shorthand for `cmd1 2>&1 | cmd2`) tokenizes as a
 single `|&` token, distinct from the plain `|` token and not a member of
 `SHELL_SEPARATORS`. Since `|&` has the exact same masked-exit-code shape
-as the `2>&1 | ` pattern this hook targets, it is treated as a
+as the `2>&1 |` pattern this hook targets, it is treated as a
 pipe-continuation separator equivalent to `|` in both the raw
 segment-splitter and the chain-continuation check.
 
-### Subshell / command-substitution prefix recovery
+## Subshell / command-substitution prefix recovery
 
 A mutating command wrapped in a compact subshell (`(git commit ... |
 tail)`) or an assignment-with-substitution (`OUT=$(gh pr merge ... |
@@ -107,7 +107,7 @@ comparison — a sink with trailing args (`(... | tail -3)`) fuses the
 paren onto the last argument token instead, so the sink token itself is
 already clean and needs no stripping.
 
-### False-positive surfaces enumerated (issue #788 requirement)
+## False-positive surfaces enumerated (issue #788 requirement)
 
 | Surface | Handling |
 | --------- | ---------- |
@@ -119,7 +119,7 @@ already clean and needs no stripping.
 | Read-only command piped to tail/head/grep | Silent — not in the mutating enum |
 | Mutating command piped to a non-truncating sink (`cat`, `sort`, `wc`) | Silent — last segment must be `tail`/`head`/`grep` |
 
-### False-negative surfaces closed (2026-07-15 codex review round)
+## False-negative surfaces closed (2026-07-15 codex review round)
 
 | Surface | Handling |
 | --------- | ---------- |
@@ -127,7 +127,7 @@ already clean and needs no stripping.
 | `(git commit ... \| tail)` / `(git commit ... \| tail -3)` (compact subshell) | `_recover_command_argv` strips the leading `(`; `_is_truncating_sink` strips a trailing `)` from a bare sink token |
 | `gh pr merge 1 \|& tail -3` (`\|&` pipe-with-stderr operator) | `\|&` is treated as a pipe-continuation separator, equivalent to `\|` |
 
-### False-negative surfaces closed (2026-07-16 codex review round 2)
+## False-negative surfaces closed (2026-07-16 codex review round 2)
 
 | Surface | Handling |
 | --------- | ---------- |
@@ -135,35 +135,35 @@ already clean and needs no stripping.
 | `gh issue -R owner/repo create \| head` / `gh pr --repo owner/repo merge 1 \| tail` (global gh flag between object and verb) | `_gh_object_verb` previously only skipped global flags *before* the object, so a flag placed *after* the object (a valid `gh` invocation form) was itself misread as the verb. `_skip_gh_global_flags` is now called at both positions |
 | `LANG=C RESULT=$(gh pr merge 1 \| tail -3)` (plain env assignment preceding the capture assignment) | `_recover_command_argv` previously only inspected `argv[0]` for the `VAR=$(` pattern, so a leading plain assignment (`LANG=C`) shifted the capture assignment to `argv[1]` and it was missed — `strip_prefix` then dropped both tokens, losing `gh` entirely. The `$(` search now walks past any number of leading plain assignments before checking for the substitution prefix |
 
-### False-negative surfaces closed (2026-07-16 codex review round 3)
+## False-negative surfaces closed (2026-07-16 codex review round 3)
 
 | Surface | Handling |
 | --------- | ---------- |
 | `( git commit -m x \| tail )` (standalone `(` token, space after the paren) | `_recover_command_argv`'s grouping-char `lstrip` previously left an empty-string `argv[0]` when the token was pure grouping characters, which fails every downstream `os.path.basename(argv[0]) == "git"` / `"gh"` check. The empty-token case is now dropped and the function recurses on the remainder so the real command becomes argv[0] |
 | `FOO=$(date) git commit -m x \| tail` (plain assignment whose value is a *self-contained* command substitution, prefixed to a separate command) | `_recover_command_argv` previously treated any `$(` inside an assignment token as an unresolved-extraction target, corrupting `FOO=$(date)` into `date)` and hiding the real `git commit` that follows. The `$(` is now only treated as unresolved when unbalanced within the token (`tok.count("(") > tok.count(")")`, e.g. `OUT=$(gh` from a substitution whose closing `)` is in a later token) — a balanced `VAR=$(cmd)` is left alone so `strip_prefix`'s existing plain-assignment peel finds the real command normally |
 
-### False-negative surfaces closed (2026-07-16 codex review round 4)
+## False-negative surfaces closed (2026-07-16 codex review round 4)
 
 | Surface | Handling |
 | --------- | ---------- |
 | `STAMP=$(date +%s) git commit -m x \| tail` (multi-token command substitution — the substitution's own command has a space, so `safe_tokenize` splits it into `'STAMP=$(date'` + `'+%s)'`) | Round 3's single-token paren-balance check (`tok.count("(") > tok.count(")")`) only looked at the FIRST fragment (`'STAMP=$(date'`, 1 open / 0 close — appears unbalanced in isolation) and mis-extracted `date` as the recovered command, hiding the real `git commit` that follows. `_recover_command_argv` now walks forward accumulating paren-balance across subsequent tokens until it actually closes (or runs off the end of the argv slice) before deciding whether the substitution is self-contained (skip past the whole run) or genuinely split by a pipe (extract from inside it) |
 | `if (git commit -m x \| tail); then ...` / `while (git push \| head); do ...` (parenthesized pipeline after a shell keyword) | `_recover_command_argv` previously only checked `argv[0]` for a leading grouping character, so a keyword token (`if`, `while`, ...) ahead of the `(`-prefixed command left the grouping check looking at the wrong token and the mutating command was never recovered. Shell keywords (`SHELL_KEYWORDS`, shared with `strip_prefix`) are now skipped the same way as plain env assignments before the grouping-char check runs |
 
-### False-negative surfaces closed (2026-07-16 codex review round 5)
+## False-negative surfaces closed (2026-07-16 codex review round 5)
 
 | Surface | Handling |
 | --------- | ---------- |
 | `gh pr merge 1 --squash \|` (bare newline) `tail -3` (pipe operator followed by a physical line break — valid bash, no trailing backslash needed after `\|`) | `_pipe_chains`'s empty-argv branch previously overwrote `sep_before` unconditionally with the synthetic `;` `safe_tokenize` inserts between physical lines, discarding the fact that the real preceding separator was `\|`/`\|&` and breaking the chain in two. `cmd \| ;` can never be valid bash syntax, so a `;` observed immediately after `\|`/`\|&` is always that synthetic per-line-break artifact — `sep_before` is now only overwritten when it wasn't already `\|`/`\|&`, preserving the pipe-continuation across the gap |
 | `OUT="$(gh pr merge 1 2>&1 \| tail -3)"` (mutating pipeline embedded inside a *quoted* command substitution) | A quoted `"$(...)"` dequotes to a single opaque shlex token — the whole RHS, `\|` included, joins the `OUT=` prefix as one token instead of splitting into separate `\|`-delimited tokens the way an *unquoted* substitution does, leaving `_pipe_chains` no `\|` token to split on. `main()` now falls back to a second pass when the top-level scan finds nothing: `_extract_substitution_bodies` pulls the balanced `$(...)` content out of each top-level token (paren-depth tracked, so nested parens don't mis-close), and each extracted body is re-tokenized and scanned independently, one level deep only (not itself searched for a further-nested substitution, mirroring round 3's balanced-substitution recursive-premise convention) |
 
-### False-negative surfaces closed (2026-07-16 codex review round 6)
+## False-negative surfaces closed (2026-07-16 codex review round 6)
 
 | Surface | Handling |
 | --------- | ---------- |
 | `OUT="$(date) $(gh pr merge 1 \| tail -3)"` (two *sibling* command substitutions in one quoted token, mutating one is not the first) | Round 5's `_extract_substitution_body` (singular) returned only the FIRST `$(...)` run found in a token, so a benign leading substitution (`$(date)`) hid a mutating one later in the same token. Renamed to `_extract_substitution_bodies` (plural) and changed to collect every balanced top-level `$(...)` run in the token — `main()`'s fallback pass now scans each one independently instead of stopping after the first |
 | `gh api repos/o/r/issues -X POST 2>&1 \| tail -3` / `gh api ... --method=DELETE \| tail` (mutating `gh api` REST call) | `gh api` is a passthrough verb with no fixed object/verb pair, so `_gh_object_verb`'s enum never recognized it as mutating regardless of HTTP method. New `_gh_api_mutating_method()` mirrors `session-intent.is_gh_mutating()`'s `gh api` branch (`hooks/preflight-gate/session-intent/impl.py:367-387`) — detects `-X`/`--method`/`-XPOST`/`--method=POST` and matches against `{POST, PATCH, PUT, DELETE}`; a default-method (GET) `gh api` call remains silent |
 
-### Examples
+## Examples
 
 | Command | Action |
 | --------- | -------- |
@@ -196,9 +196,9 @@ already clean and needs no stripping.
 | `BODY=$(cat <<'EOF'` / heredoc body containing `git commit -m x \| tail -3` / `EOF` / `gh issue create --body "$BODY"` | **SILENT** — heredoc body line excluded from chain-building |
 | `cat <<EOF` / `git commit \| tail` / `EOF not-end` / `git push \| tail -1` / `EOF` | **SILENT** — `EOF not-end` does not prematurely close the heredoc (line-anchored end-marker check) |
 
-### Response format
+## Response format
 
-```
+```text
 stderr: "[pipefail-advisory] mutating command piped without `set -o pipefail`
         Detected: <bin1> | <bin2> | ...
         Mutating segment: <desc>
@@ -210,14 +210,14 @@ Advisory-only: the hook **never blocks** and never emits JSON. The user
 sees the stderr text and decides whether to prepend `set -o pipefail;`
 or drop the pipe.
 
-### Parsing guarantees (fail-open)
+## Parsing guarantees (fail-open)
 
 - malformed JSON stdin → exit 0
 - non-Bash tool → exit 0
 - empty / whitespace command → exit 0
 - uncaught exception in inner logic → swallowed, exit 0
 
-### Relationship to sibling hooks
+## Relationship to sibling hooks
 
 | Hook | Scope | Overlap |
 | ------ | ------- | --------- |
@@ -225,7 +225,7 @@ or drop the pipe.
 | `side-effect-scan` | gates (asks) on mutation CLIs before execution | None — this hook fires on a different axis (pipe-masked exit code, not the mutation itself) and never blocks |
 | `bash-worktree-existence-advisory` | `cd`/`pushd` target existence | Shares the heredoc-body-skip pattern (independently implemented as a plain-argv walk here vs this hook's Token-typed walk there — not extracted to `_lib` per DRY's 3rd-occurrence threshold) |
 
-### Known limitations
+## Known limitations
 
 Coverage is intentionally conservative — advisory-only, false-positive
 cost dominates:
@@ -242,7 +242,7 @@ cost dominates:
 | Quoted heredoc-lookalike content misread as a real heredoc opener (e.g. `echo "<<EOF"; git commit -m x \| tail` — `echo` merely prints the literal string `<<EOF`, it does not open a heredoc, but `safe_tokenize` dequotes `"<<EOF"` to the bare token `<<EOF`, indistinguishable from an unquoted heredoc opener) | False negative — same quote-provenance loss as the two rows above: `_heredoc_open_marker` cannot tell a real `<<EOF` from a dequoted `"<<EOF"` string literal once `safe_tokenize` has stripped the quotes. Once misdetected as an opener, the rest of the command — including the real mutating pipeline that follows — is swallowed as fake heredoc body (no matching close-marker segment ever appears), so the advisory that should fire stays silent. Codex review round 3 (2026-07-16) flagged this as [P2]; fixing it requires the same shared-tokenizer quote-tracking change ruled out for the rows above, so it is documented here rather than worked around locally |
 | Single-quoted `$(...)`-lookalike text misread as a live command substitution (e.g. `echo '$(gh pr merge 1 \| tail -3)'` — bash single quotes suppress ALL expansion, so `echo` merely prints the literal string, no substitution ever runs) | False positive — round 5's quoted-command-substitution fallback (`_extract_substitution_bodies`, see round 5's row above) treats any token containing a balanced `$(...)` as a potential live substitution to re-scan. A real distinction exists in bash (double quotes still allow `$(...)` expansion; single quotes never do), but `safe_tokenize`'s posix dequoting strips the wrapping quote character before this hook ever sees the token, so single- and double-quoted forms are indistinguishable at this layer — the same quote-provenance loss as the three rows above. Recovering the distinction would require re-parsing the original command string's quote spans independently of `safe_tokenize` (effectively hand-rolling a second shell tokenizer) — a scope and maintenance cost this advisory-only hook does not carry. Codex review round 6 (2026-07-16) flagged this as [P2]; documented here rather than worked around locally, consistent with the three rows above |
 
-### Tests
+## Tests
 
 ```bash
 bash tests/hooks/advisory-nudge/test_pipefail_advisory.sh
