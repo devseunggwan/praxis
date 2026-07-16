@@ -45,6 +45,7 @@ drift.
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git rev-parse --abbrev-ref HEAD` | Read the current branch name |
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git status --porcelain` | Check for a dirty working tree |
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git log --oneline -3` | Detect recent PR-suffix commits on a clean tree |
+| `hooks/preflight-gate/gh-merge-worktree-precondition/impl.py` | `git worktree list --porcelain` | Check whether a PR's head branch is checked out in another worktree before `gh pr merge --delete-branch` |
 
 ### `gh` — GitHub CLI
 
@@ -52,6 +53,7 @@ drift.
 |------------------------------------------------------------|--------------------------------------------------------------|---------------------------------------------------------------------|
 | `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py` | `gh pr list --repo <r> --state all --search <kw> --json ...` | Search existing PRs before creating a new one                       |
 | `hooks/preflight-gate/pr-state-refetch-gate/impl.py`       | `gh pr view <N> --json state,mergeStateStatus`               | Re-fetch live PR state before a PR-state-contingent AskUserQuestion |
+| `hooks/preflight-gate/gh-merge-worktree-precondition/impl.py` | `gh pr view <identifier> --json headRefName -q .headRefName` | Resolve a PR's live head branch before checking it against `git worktree list` |
 
 All `git` and `gh` invocations are **read-only**. No hook writes to remote
 state. Hooks fail-open (exit 0) when the binary is missing or times out.

@@ -188,6 +188,22 @@
       "timeout": 5
     },
     {
+      "name": "gh-merge-worktree-precondition",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 8,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_MERGE_WORKTREE_GATE"
+        ],
+        "external_commands": [
+          "gh pr view <identifier> --json headRefName -q .headRefName",
+          "git worktree list --porcelain"
+        ]
+      }
+    },
+    {
       "name": "pr-state-refetch-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",
