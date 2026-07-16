@@ -147,6 +147,240 @@ matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
 
 **Exit code:** `0`.
 
+#### Ready-to-fill `Falsified:` scaffold (issue #787)
+
+Both the T1 deny and T2 ask `permissionDecisionReason` above end with a
+`[scaffold]` marker followed by one copy-paste-ready `Falsified:` line per
+triggering option label, parsed straight from the blocked `tool_input`:
+
+```
+[scaffold]
+Falsified: <option label> — probe: <command> → <observed>; premise survives because <...>
+```
+
+One line is emitted per option that actually carried the marker/token that
+tripped the tier (T1: the exact `(Recommended)`/`(추천)` label; T2: the
+label or description matching an anchoring token) — so a question with two
+triggering options gets two scaffold lines. The label is the only field
+this hook can supply with certainty since it is already in the blocked call;
+`<command>` / `<observed>` / `<...>` stay as placeholders — running the
+actual probe is the intended cost this gate preserves, only the *format
+reconstruction* cost is removed. No scaffold section is appended when
+`Falsified:` is already present (silent-pass path).
+
+When more than one option in the same question triggers the tier, one
+`Falsified:` line is emitted per label. When more than one *question* in
+the payload has a violation, labels from every offending question are
+aggregated into the same scaffold (not just the first one encountered) —
+otherwise fixing only the first question's line would still hit a second
+block on retry for the un-addressed question.
+
+**Anti-bypass guard**: because the scaffold line itself starts with
+`Falsified:`, a verbatim copy-paste that never fills in the placeholders
+would otherwise satisfy the exact-prefix check with zero probe evidence —
+defeating the falsification gate this hook exists to enforce.
+`_has_falsified_line` rejects any line containing the literal placeholder
+tokens `<command>`, `<observed>`, or `<...>` — and fails CLOSED for the
+whole question if even one `Falsified:`-prefixed line still carries a
+placeholder, even when a sibling line in the same question is already
+filled in correctly (a question can have more than one triggering option,
+hence more than one scaffold line — partially filling in only one must not
+let the other ride along unchecked).
+
+Placeholder-token rejection alone still leaves a gap: a line can be
+**omitted entirely** rather than left with a placeholder, and an omitted
+line has no placeholder text for the token check to catch. `_has_falsified_line`
+therefore takes a `triggering_labels` parameter — the deduped list of
+labels that tripped T1/T2 for that question — and requires that every
+label in it is covered by its own matched `Falsified:` line. A question
+with 2 triggering options and only 1 `Falsified:` line (the second
+silently absent, not placeholder-marked) now fails the coverage check and
+still denies. When 0 or 1 labels are triggering, ANY clean line satisfies
+the question — preserving the original single-triggering-label contract
+(issue #290) unchanged.
+
+**Per-label coverage, not raw count (issue #787 codex round-9 P1):** a
+prior version of this gate counted DISTINCT clean lines against
+`required_count` without checking which triggering option each line
+actually addressed — 2 differently-worded lines both about Option A
+satisfied `required_count=2` for a 2-option question while Option B was
+never verified at all. Each clean line is now matched to the specific
+triggering label it addresses by checking whether it starts with
+`"Falsified: {label}"` (the exact shape the scaffold seeds verbatim,
+longest labels checked first so a shorter label can't shadow a longer
+sibling that has it as a prefix); satisfaction requires every triggering
+label to have at least one matched line, not just N distinct lines.
+
+**Scan window (issue #787 codex round-5/6 P2)**: the scaffold seeds each
+line's label segment verbatim from the actual option label (`Falsified:
+{label} — probe: ...`). If an option's own label text happens to contain a
+literal `<command>` / `<observed>` / `<...>` substring, scanning the whole
+line for placeholder tokens would flag it as unfilled forever — no amount
+of genuinely filling in the probe/observed content could ever satisfy the
+gate for that label. The evidence a probe must supply lives after the
+`— probe:` marker, so placeholder-token scanning is scoped to that region
+only (`_PROBE_MARKER`); the label prefix, which is never evidence-bearing,
+is excluded. A line WITHOUT the marker is not scaffold-shaped at all — it
+is never scanned for placeholder tokens (round-6 P2 correction: round-5
+still fell back to scanning the whole marker-less line, which continued to
+falsely perma-block genuine free-form evidence whose own wording happened
+to contain one of the three literal token strings without ever using the
+`— probe:` phrasing; the actual scaffold copy-paste bypass this guard
+exists to close always contains the marker, since it is emitted verbatim
+by `_falsified_scaffold`, so exempting marker-less lines cannot reopen it).
+
+**Duplicate-line dedup (issue #787 codex round-6 P2)**: `required_count`
+counting (see above) previously counted raw clean lines, so a 2-option
+question could be satisfied by pasting the SAME clean `Falsified:` line
+twice — `Falsified:` lines are now deduped by exact text before counting,
+so an identical duplicate contributes nothing toward `required_count` and
+the second triggering option still needs its own distinct line.
+
+**Per-question label scope**: dedup of aggregated scaffold labels applies
+only WITHIN a single question (defends against one question listing the
+same label twice), never ACROSS questions. `Falsified:` satisfaction is
+checked per-question against that question's own text, so if two different
+questions happen to present an option with the identical label text, each
+still needs its own scaffold line — collapsing them to one would leave the
+second question blocked on retry.
+
+**Mixed T1+T2 tier pooling (issue #787 codex round-7 P2)**: a single
+question can carry both an exact `(Recommended)` option (T1) and a
+separate confidence-anchoring option with no marker at all (T2 — e.g. a
+`safer` description). T1 and T2 triggering labels are computed
+independently per question (not via `if`/`elif`) and pooled into one
+combined `required_count` — the prior `if`/`elif` skipped the T2 check
+entirely once T1 matched for the question, so a retry that only supplied
+evidence for the T1 option silent-passed with the T2 option's claim never
+verified. T1 still decides the final deny-vs-ask precedence (unchanged);
+only the per-question evidence requirement changed.
+
+T2's bare `recommend(?:ed|s)?` pattern also matches the literal word
+inside `(Recommended)`, so an option carrying the exact T1 marker
+incidentally also matches T2's check. Labels already present in
+`t1_triggering` are excluded from `t2_triggering` before pooling — without
+this, a pure-T1 2-option question would double-count each label into both
+`t1_labels` and `t2_labels`, producing duplicate scaffold lines in the
+final deny message for a case with no genuine T2-only option at all.
+
+**Real-delimiter anchoring + whitespace-normalized dedup (issue #787 codex
+round-8 P2, two findings):**
+
+1. **Label-embedded marker permablock.** The scaffold's own `— probe:`
+   delimiter is always the LAST occurrence of that substring in the line —
+   it is appended once, after the label, at scaffold-generation time. An
+   option label that itself happens to contain the literal `— probe:`
+   substring (e.g. a label quoting another probe's shape) previously
+   shifted the scan to that earlier, label-internal occurrence via
+   `line.find(_PROBE_MARKER)` (leftmost match), pulling trailing label
+   text — and any placeholder token it contained — into `evidence_region`.
+   That permanently hard-denied the line even after genuine evidence was
+   filled in after the real, rightmost delimiter, with no way to ever
+   satisfy the gate for that label. `_has_falsified_line` now uses
+   `line.rfind(_PROBE_MARKER)` to anchor on the real, last-inserted
+   delimiter instead.
+2. **Whitespace-only duplicate bypass.** Exact-text dedup (round-6 P2)
+   treated two lines differing only by whitespace (e.g. one trailing
+   space, or a doubled internal space) as DISTINCT strings. Pasting the
+   same real evidence line twice with a whitespace-only variation on the
+   second copy satisfied `required_count=2` for a 2-option question while
+   the second triggering option still had zero real evidence. Lines are
+   now whitespace-normalized (`" ".join(line.split())` — strips
+   leading/trailing whitespace and collapses internal runs to one space)
+   before entering the dedup set, so a whitespace-only "duplicate" still
+   collapses to the same clean line and contributes nothing toward
+   `required_count`.
+
+**Label-anchored coverage + delimiter matching (issue #787 codex round-9,
+two findings):**
+
+1. **Count-only verification silent-pass (P1).** The round-4/6/8 contract
+   verified a multi-option question by counting distinct clean lines
+   against `required_count` without ever checking which triggering option
+   each line actually addressed. Two differently-worded lines both
+   starting with `Falsified: Option A ...` satisfied `required_count=2`
+   for a 2-option question while `Option B` was never verified — the
+   count was right, the coverage was wrong. `_has_falsified_line` no
+   longer takes a bare count; it takes the `triggering_labels` list
+   directly and matches each clean line to a specific label via its
+   `"Falsified: {label}"` prefix (longest labels checked first, so a
+   label that is a prefix of a longer sibling label can't shadow it).
+   Satisfaction now requires every triggering label to be covered by its
+   own matched line, closing the coverage gap the raw count could not see.
+2. **Evidence-embedded marker bypass (P2).** Round-8's `rfind()` fix
+   assumed the scaffold's real `— probe:` delimiter is always the
+   RIGHTMOST occurrence in the line, since it's inserted once, after the
+   label, at scaffold-generation time. That assumption breaks when the
+   EVIDENCE text itself (legitimately placed after the real delimiter)
+   contains a second literal `— probe:` substring — `rfind()` then
+   anchors on that spurious, later occurrence, pushing an actual unfilled
+   placeholder sitting before it (but still inside the real evidence
+   region) outside the scanned window. Now that each line is matched to
+   its triggering label first, the delimiter is located via
+   `line.find(_PROBE_MARKER, label_end)` — the FIRST `— probe:`
+   occurrence strictly after the matched label's own text — which is
+   structurally always the real, scaffold-inserted delimiter regardless
+   of how many more `— probe:`-shaped substrings appear later in the
+   evidence. This also still closes round-8's original label-embedded-
+   marker case, since the scan now starts after the whole label prefix
+   rather than depending on which occurrence is textually first or last.
+   A line matching no known triggering label (true free-form text, or
+   referencing an option outside the current label set) falls back to the
+   prior `rfind()` behavior, since there is no label boundary to anchor
+   on for that line.
+
+**Label-boundary false match (issue #787 codex round-10 P2):** round-9's
+`line.startswith(f"Falsified: {label}")` matched a label as a bare
+substring prefix, not a whole-token prefix. With triggering labels
+`["Run", "Other"]`, a line reading `Falsified: Runtime behavior verified
+— probe: ...` matched the `"Run"` prefix (since `"Runtime"` starts with
+`"Run"`) and credited `"Run"` as covered even though the line never
+actually addresses that option — the real `"Run"` claim stayed
+unverified while the multi-option coverage gate silently passed. A label
+match now also requires a boundary immediately after the prefix: either
+the line ends there, or the next character is non-alphanumeric (the
+scaffold's own `" — probe: "` continuation, or any other non-identifier-
+continuing delimiter). `"Runtime"` no longer satisfies `"Run"` because
+`"t"` is alphanumeric. This surface is most reachable for bare (no
+`(Recommended)`/`(추천)` suffix) T2 labels, since a label ending in the
+closing paren of an exact marker already has an inherently safe boundary
+in practice.
+
+**Newline-in-label scaffold splitting (issue #787 codex round-11 P2):**
+`_falsified_scaffold` interpolates each triggering option's raw label
+verbatim into a single f-string line (`f"Falsified: {label} — probe:
+..."`). If the label itself contains a literal newline, that single
+logical line prints as two PHYSICAL lines in the deny/ask message. A
+verbatim copy-paste of that unfilled scaffold then has its `Falsified:`
+prefix on the first physical line and its placeholder-bearing evidence
+(`<command>`, `<observed>`, `<...>`) on the second — which does not start
+with `Falsified:` and is therefore invisible to `_has_falsified_line`'s
+per-physical-line scan, silently passing an evidence-free question.
+Labels are now whitespace-normalized (`" ".join(label.split())` —
+identical to the round-8 whitespace-normalization idiom, collapsing any
+embedded newlines/whitespace runs to single spaces) at the single point
+they enter the triggering pipeline (`_t1_matching_labels` /
+`_t2_matching_labels`), before either scaffold generation or
+`_has_falsified_line` matching consumes them — guaranteeing every
+generated scaffold stays exactly one physical line per label regardless
+of what the raw option label contains.
+
+**Near-miss label prefix (issue #787 codex round-12 P2):** round-10's
+non-alphanumeric boundary was still too permissive — a genuinely
+DIFFERENT, unrelated evidence line that happens to share the triggering
+label as its own prefix, separated by a space, also clears a
+non-alphanumeric boundary check. With triggering labels `["Merge
+(Recommended)", "Run"]`, a line reading `Falsified: Run now — probe:
+...` (evidence that is really about a different `"Run now"` option, not
+the triggering `"Run"`) matched `"Run"`'s prefix with `" "` as the
+boundary, wrongly crediting `"Run"` as covered while the real `"Run"`
+claim stayed unverified. The only boundary that reliably means "the
+label ends here and evidence begins" is the scaffold's own delimiter: a
+label match now counts only when the line ends exactly at the label
+(remainder empty) or the remainder starts with the literal
+`_PROBE_MARKER` string (`" — probe: "`) — not merely any non-alphanumeric
+character.
+
 #### Advisory (Bash bulk-action only)
 
 Note: case-insensitive `(recommended)` alone previously emitted advisory
@@ -165,6 +399,26 @@ instead of surfacing the proposal.
 ```
 
 **Exit code:** `0`.
+
+### Block-event telemetry (issue #787)
+
+Every T1 deny / T2 ask decision also appends one RICH record to the shared
+fire-ledger (`hooks/_lib/_fire_ledger.py`, `record_session_fire`) — hook
+`output-block-falsify-advisory`, role `advisory-nudge`, `decision` = `block`
+(T1) or `ask` (T2), `tool` = `AskUserQuestion`, `session_id` from the hook
+payload. Skipped when `session_id` is missing or empty (cannot attribute).
+
+This exists because this hook signals deny/ask via a stdout JSON
+`permissionDecision`, not exit code 2 — so the universal `@fail_open` coarse
+recorder (which only inspects the return code) always logs `pass` for these
+calls. Before issue #787, cross-session block-rate measurement had to fall
+back to grepping session transcripts for the block message string, which
+over-counts sessions that merely quote the message in a retrospect report.
+The RICH record gives an exact per-session count instead.
+
+Storage/opt-out follow `_fire_ledger`'s existing contract: default
+`~/.praxis/telemetry/fire-events-YYYY-MM-DD.jsonl`, override via
+`PRAXIS_FIRE_TELEMETRY_FILE`, disable via `PRAXIS_FIRE_TELEMETRY_DISABLE=1`.
 
 ### Parsing guarantees
 
@@ -186,7 +440,20 @@ All parsing is done with the Python standard library only.
 bash tests/hooks/advisory-nudge/test_output_block_falsify_advisory.sh
 ```
 
-Covers 47 cases (44 pre-#682 + 3 new):
+**Harness isolation (issue #787 codex round-6 P2)**: every `run_case`
+invocation calls the hook directly, and the T1/T2 deny/ask cases each write
+a RICH telemetry record. The script exports a throwaway
+`PRAXIS_FIRE_TELEMETRY_FILE` default at the top so these dozens of test
+invocations never land in the real `~/.praxis/telemetry/` store — the
+telemetry-content-checking cases further down still override the var
+per-call to their own `TEL_DIR` paths, which wins for that one invocation.
+Separately, the `pass` expectation in `run_case` now checks stdout is empty
+in addition to stderr — a deny/ask decision also exits 0 with empty
+stderr (it signals via stdout JSON, not stderr), so a stderr-only check
+could not actually distinguish a real silent pass from an undetected
+deny/ask.
+
+Covers 88 cases (47 pre-#787 + 41 new — 5 scaffold, 4 telemetry, 4 multi-question/coarse-dedup fixes, 28 anti-bypass/false-positive):
 
 **T1 deny-escalation (AskUserQuestion, issue #290/#393):**
 
@@ -234,3 +501,56 @@ Covers 47 cases (44 pre-#682 + 3 new):
 - `(Recommended)` + no `Falsified:` → deny message contains `pre-author-template` ASCII marker
 - confidence-anchoring (`safer`) + no `Falsified:` → ask message contains `pre-author-template` ASCII marker
 - `(Recommended)` + column-0 `Falsified:` present → silent pass (regression — template-level message change must not break satisfaction)
+
+**Ready-to-fill scaffold cases (issue #787):**
+
+- T1 deny message embeds `Falsified: <label>` seeded from the triggering option label
+- T1 deny message contains the `[scaffold]` marker
+- T2 ask message embeds `Falsified: <label>` seeded from the anchoring-token-carrying label
+- 2 options both carrying `(Recommended)` → 2 scaffold `Falsified:` lines (one per label)
+- `(Recommended)` + `Falsified:` already present → no scaffold needed (silent pass, regression)
+
+**Block-event telemetry cases (issue #787):**
+
+- T1 deny → 1 RICH fire-ledger record with `decision=block`, correct `hook`/`role`/`tool`/`session_id`
+- T1 deny → the automatic COARSE `pass` duplicate is suppressed (1 total line in the telemetry file, not 2)
+- T2 ask → 1 RICH fire-ledger record with `decision=ask`
+- T2 ask → COARSE duplicate suppressed (1 total line)
+- Silent pass → no RICH record written
+- Missing `session_id` → deny still fires on stdout, but no RICH record (cannot attribute)
+
+**Multi-question aggregation cases (issue #787 codex round-1 P2 fix):**
+
+- 2 separate questions, each with its own T1 violation, no `Falsified:` in either → both labels appear in the deny scaffold (not just the first)
+- 2 separate questions, each with its own T2-only (anchoring) violation → both labels appear in the ask scaffold
+
+**Anti-bypass placeholder-rejection cases (issue #787 codex round-2/3/4/5/6/7/8/9/10/11/12 fixes):**
+
+- T1: copying the unfilled scaffold line verbatim into the question body does NOT satisfy the gate → still deny
+- T2: same unfilled-copy-paste check → still ask
+- T1: scaffold line with all placeholders replaced by real probe output → silent pass (regression — the fix must not make legitimate filled-in evidence unsatisfiable)
+- T1: 1 of 2 scaffold lines filled in, the other still carries a placeholder → still deny (round-3 P1 — a sibling clean line must not let an unfilled one ride along)
+- T1: both scaffold lines for a 2-option question fully filled in → silent pass (regression)
+- 2 different questions presenting the identical triggering label → 2 separate scaffold lines, not collapsed by dedup (round-3 P2)
+- T1: 1 of 2 triggering options has a `Falsified:` line, the other is omitted entirely (no placeholder left anywhere) → still deny (round-4 P1 — placeholder-token rejection alone cannot catch a deleted line; fixed via `required_count`-based counting)
+- T1: single triggering label with its one clean `Falsified:` line → silent pass (regression — `required_count` defaults to 1, preserving the original single-label contract)
+- T1: option label literally contains `<command>`, evidence past `— probe:` genuinely filled in → silent pass (round-5 P2 — the label prefix is never evidence-bearing, so it must not be scanned for placeholder tokens)
+- T1: option label literally contains `<command>` AND the evidence past `— probe:` is still unfilled → still deny (regression — round-5's narrowed scan window must not disable the guard itself)
+- T1: legacy free-form line with no `— probe:` marker whose own wording contains `<command>` → silent pass (round-6 P2 — round-5 still scanned marker-less lines whole; marker-less lines are excluded from placeholder scanning entirely since they are not scaffold-shaped)
+- T1: same clean `Falsified:` line pasted twice for a 2-option question → still deny (round-6 P2 — raw line-count could be satisfied by duplicating one option's evidence; lines are now deduped by exact text before counting)
+- T1: 2 genuinely distinct clean lines for 2 options → silent pass (regression — dedup must reject only exact-text duplicates, not require exact label-text matching)
+- Mixed T1+T2 in one question, only the T1 option's evidence provided → still deny (round-7 P2 — the prior `if`/`elif` skipped the T2 check entirely once T1 matched, so the T2 option's claim never entered `required_count`)
+- Mixed T1+T2 in one question, both options' evidence provided → silent pass (regression)
+- Pure-T1 2-option question → scaffold shows each label exactly once, no duplication (regression — round-7's self-catch: T2's bare `recommend` pattern also matches inside `(Recommended)`, so T1-covered labels must be excluded from `t2_triggering` or they double-count into both `t1_labels` and `t2_labels`)
+- T1: option label itself embeds the `— probe:` delimiter substring plus a placeholder token, real evidence supplied after the actual (rightmost) delimiter → silent pass (round-8 P2 — `find()`'s leftmost match anchored on the label-internal marker instead of the real, last-inserted one, pulling the label's own placeholder text into `evidence_region` and permanently hard-denying; fixed via `rfind()`)
+- T1: same real evidence line pasted twice for a 2-option question with only a whitespace difference (internal double-space) on the second copy → still deny (round-8 P2 — exact-text dedup treated the two as distinct, satisfying `required_count=2` while the second option had zero real evidence; fixed via whitespace normalization before dedup)
+- T1: 2 differently-worded `Falsified:` lines, both prefixed with the SAME triggering label, the other triggering label never addressed → still deny (round-9 P1 — raw distinct-line count satisfied `required_count=2` without checking which option each line actually addressed; fixed via per-label prefix matching and coverage)
+- T1: 2 triggering options, each addressed by its own distinctly-worded `Falsified:` line → silent pass (regression — the round-9 P1 fix maps lines to labels by prefix, it does not require identical wording or more than one line per label)
+- T1: evidence text (after the real `— probe:` delimiter) itself contains a second `— probe:` substring, with an unfilled `<command>` placeholder sitting before that spurious second marker → still deny (round-9 P2 — `rfind()` anchored on the spurious, later marker instead of the real one, pushing the leading placeholder outside the scanned region; fixed via `find()` seeded right after the matched label prefix)
+- T1: same evidence-embeds-a-second-marker shape, but with the evidence genuinely filled in (no placeholder anywhere) → silent pass (regression — the round-9 P2 fix narrows the anchor point, it does not forbid legitimate evidence from containing the word sequence `— probe:` again)
+- T1+T2: a bare (no-marker) triggering label is a literal string-prefix of unrelated evidence text on a sibling line (e.g. `"Rerun"` inside `"Rerunning without confirmation"`) → still deny (round-10 P2 — `startswith()` matched the label as a bare substring prefix without a boundary check, crediting an option that line never actually addresses)
+- T1+T2: same bare-label-is-a-prefix shape, but the label is genuinely addressed by its own whole-token line → silent pass (regression — the round-10 fix requires a boundary after the label, it does not forbid the label from ever matching)
+- An option label contains a literal embedded newline → the deny message's scaffold hint still renders as exactly one physical `Falsified:` line (round-11 P2 — the raw label is normalized before scaffold generation, so the artifact this whole guard depends on can no longer split across lines)
+- Same newline-bearing label, the (now-guaranteed single-line) scaffold copied verbatim and left unfilled → still deny (regression — the fix must not make the placeholder guard unreachable for labels that originally contained a newline)
+- A triggering label (`"Run"`) is the string-prefix of a genuinely different, unrelated evidence line's own text (`"Run now"`) separated by a space → still deny (round-12 P2 — round-10's non-alphanumeric boundary check was too permissive; the boundary must be the exact scaffold delimiter or end-of-line, not any non-alphanumeric character)
+- Same near-miss shape, but the triggering label is genuinely addressed by its own line ending exactly at the scaffold's delimiter → silent pass (regression — the round-12 fix must not forbid the label from ever matching)
