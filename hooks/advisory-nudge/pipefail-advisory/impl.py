@@ -392,7 +392,18 @@ def _pipe_chains(tokens: list[str]) -> list[list[list[str]]]:
             continue
 
         if not argv:
-            sep_before = sep_after
+            # An empty segment appears when two separators land back to
+            # back — most commonly the synthetic `;` `safe_tokenize`
+            # inserts between physical lines, immediately after a `|`/`|&`
+            # that wraps onto the next line (`gh pr merge ... |\n tail
+            # -3`, valid bash — no trailing backslash needed after a pipe
+            # operator). `cmd | ;` can never be real bash syntax, so a
+            # `;` observed right after `|`/`|&` here is always that
+            # synthetic artifact, not a real chain break. Preserve the
+            # pipe-continuation status through the gap instead of letting
+            # the synthetic separator overwrite it.
+            if sep_before not in ("|", "|&"):
+                sep_before = sep_after
             continue
 
         opens = _heredoc_open_marker(argv)
@@ -437,6 +448,54 @@ def _advisory_text(chain: list[list[str]], mutating_desc: str) -> str:
     )
 
 
+def _scan_tokens_for_advisory(tokens: list[str]) -> str | None:
+    """Return the advisory text for the first mutating-piped-to-sink chain
+    found in `tokens`, else None."""
+    tokens = _merge_fd_dup_redirects(tokens)
+    for chain in _pipe_chains(tokens):
+        if not _is_truncating_sink(chain[-1]):
+            continue
+        for seg in chain[:-1]:
+            desc = _mutating_description(seg)
+            if desc:
+                return _advisory_text(chain, desc)
+    return None
+
+
+def _extract_substitution_body(tok: str) -> str | None:
+    """Return the content of a balanced `$(...)` embedded in `tok`, else
+    None if no `$(` is present or it never closes within this token.
+
+    A *quoted* command substitution (`OUT="$(gh pr merge 1 | tail -3)"`)
+    dequotes to a single opaque token — the whole RHS, `|` included,
+    joins the `OUT=` prefix as one shlex word instead of splitting into
+    separate `|`-delimited tokens the way an *unquoted* substitution
+    accidentally does. `_pipe_chains` has no `|` token to split on in
+    that single-token case, so the pipeline hiding inside it is invisible
+    to the normal scan. This extracts the substitution's inner text so it
+    can be re-tokenized and scanned on its own (one level only — the
+    result is not itself searched for a further-nested embedded
+    substitution, mirroring this codebase's one-level recursive-premise
+    convention).
+    """
+    start = tok.find("$(")
+    if start == -1:
+        return None
+    start += 2
+    depth = 0
+    i = start
+    while i < len(tok):
+        ch = tok[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            if depth == 0:
+                return tok[start:i]
+            depth -= 1
+        i += 1
+    return None
+
+
 @fail_open
 def main() -> int:
     try:
@@ -454,16 +513,22 @@ def main() -> int:
     tokens = safe_tokenize(command.replace("\\\n", " "))
     if not tokens:
         return 0
-    tokens = _merge_fd_dup_redirects(tokens)
 
-    for chain in _pipe_chains(tokens):
-        if not _is_truncating_sink(chain[-1]):
-            continue
-        for seg in chain[:-1]:
-            desc = _mutating_description(seg)
-            if desc:
-                sys.stderr.write(_advisory_text(chain, desc) + "\n")
-                return 0  # advisory — first matching chain suffices
+    advisory = _scan_tokens_for_advisory(tokens)
+    if advisory is None:
+        for tok in tokens:
+            body = _extract_substitution_body(tok)
+            if not body:
+                continue
+            inner_tokens = safe_tokenize(body)
+            if not inner_tokens:
+                continue
+            advisory = _scan_tokens_for_advisory(inner_tokens)
+            if advisory:
+                break
+
+    if advisory:
+        sys.stderr.write(advisory + "\n")
 
     return 0
 

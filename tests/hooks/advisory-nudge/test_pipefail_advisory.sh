@@ -189,6 +189,17 @@ run_case "shell keyword before a parenthesized pipeline still recovers the real 
   advisory \
   "if (git commit -m x | tail); then echo done; fi"
 
+# === ADVISORY — round-5 codex review (pipe-then-newline continuation, =====
+# === embedded pipeline inside a quoted command substitution) ===============
+
+run_case "pipe operator followed by a newline (valid multi-line pipeline)" \
+  advisory \
+  "$(printf 'gh pr merge 1 --squash |\n tail -3')"
+
+run_case "quoted command substitution hides an internal mutating pipeline" \
+  advisory \
+  'OUT="$(gh pr merge 1 2>&1 | tail -3)"'
+
 # === SILENT — read-only command piped (no mutation) ========================
 
 run_case "git log | head (read-only)" \

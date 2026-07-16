@@ -149,6 +149,13 @@ already clean and needs no stripping.
 | `STAMP=$(date +%s) git commit -m x \| tail` (multi-token command substitution — the substitution's own command has a space, so `safe_tokenize` splits it into `'STAMP=$(date'` + `'+%s)'`) | Round 3's single-token paren-balance check (`tok.count("(") > tok.count(")")`) only looked at the FIRST fragment (`'STAMP=$(date'`, 1 open / 0 close — appears unbalanced in isolation) and mis-extracted `date` as the recovered command, hiding the real `git commit` that follows. `_recover_command_argv` now walks forward accumulating paren-balance across subsequent tokens until it actually closes (or runs off the end of the argv slice) before deciding whether the substitution is self-contained (skip past the whole run) or genuinely split by a pipe (extract from inside it) |
 | `if (git commit -m x \| tail); then ...` / `while (git push \| head); do ...` (parenthesized pipeline after a shell keyword) | `_recover_command_argv` previously only checked `argv[0]` for a leading grouping character, so a keyword token (`if`, `while`, ...) ahead of the `(`-prefixed command left the grouping check looking at the wrong token and the mutating command was never recovered. Shell keywords (`SHELL_KEYWORDS`, shared with `strip_prefix`) are now skipped the same way as plain env assignments before the grouping-char check runs |
 
+### False-negative surfaces closed (2026-07-16 codex review round 5)
+
+| Surface | Handling |
+| --------- | ---------- |
+| `gh pr merge 1 --squash \|` (bare newline) `tail -3` (pipe operator followed by a physical line break — valid bash, no trailing backslash needed after `\|`) | `_pipe_chains`'s empty-argv branch previously overwrote `sep_before` unconditionally with the synthetic `;` `safe_tokenize` inserts between physical lines, discarding the fact that the real preceding separator was `\|`/`\|&` and breaking the chain in two. `cmd \| ;` can never be valid bash syntax, so a `;` observed immediately after `\|`/`\|&` is always that synthetic per-line-break artifact — `sep_before` is now only overwritten when it wasn't already `\|`/`\|&`, preserving the pipe-continuation across the gap |
+| `OUT="$(gh pr merge 1 2>&1 \| tail -3)"` (mutating pipeline embedded inside a *quoted* command substitution) | A quoted `"$(...)"` dequotes to a single opaque shlex token — the whole RHS, `\|` included, joins the `OUT=` prefix as one token instead of splitting into separate `\|`-delimited tokens the way an *unquoted* substitution does, leaving `_pipe_chains` no `\|` token to split on. `main()` now falls back to a second pass when the top-level scan finds nothing: `_extract_substitution_body` pulls the balanced `$(...)` content out of each top-level token (paren-depth tracked, so nested parens don't mis-close), and that extracted body is re-tokenized and scanned independently, one level deep only (not itself searched for a further-nested substitution, mirroring round 3's balanced-substitution recursive-premise convention) |
+
 ### Examples
 
 | Command | Action |
@@ -168,6 +175,8 @@ already clean and needs no stripping.
 | `FOO=$(date) git commit -m x \| tail` | **ADVISORY** — balanced self-contained substitution left alone, real command reached normally |
 | `STAMP=$(date +%s) git commit -m x \| tail` | **ADVISORY** — multi-token substitution balance tracked across tokens, real command reached |
 | `if (git commit -m x \| tail); then echo done; fi` | **ADVISORY** — shell keyword skipped before the grouping-char check |
+| `gh pr merge 1 --squash \|` (newline) `tail -3` | **ADVISORY** — pipe-then-newline continuation preserved through the synthetic-`;` gap |
+| `OUT="$(gh pr merge 1 2>&1 \| tail -3)"` | **ADVISORY** — mutating pipeline inside a quoted command substitution recovered via one-level sub-scan |
 | `git log --oneline \| head -20` | **SILENT** — `log` is read-only |
 | `git status \| grep modified` | **SILENT** — `status` is read-only |
 | `gh pr list \| head -5` | **SILENT** — `list` is read-only |
@@ -234,7 +243,9 @@ chains, gh mutating verbs, assignment/subshell/`\|&` prefix recovery
 assignment-prefix recovery (2026-07-16 codex review round 2),
 standalone-grouping-token/balanced-substitution-assignment recovery
 (2026-07-16 codex review round 3), multi-token-substitution/keyword-plus-
-grouping-prefix recovery (2026-07-16 codex review round 4); silent on
+grouping-prefix recovery (2026-07-16 codex review round 4),
+pipe-then-newline continuation/quoted-substitution-embedded-pipeline
+recovery (2026-07-16 codex review round 5); silent on
 read-only commands piped, non-truncating sinks, `&&`/`;`/`\|\|`/`&`
 separators, quoted-pipe literals, heredoc body false positives (incl.
 the EOF-not-end premature-close guard), single commands, and
