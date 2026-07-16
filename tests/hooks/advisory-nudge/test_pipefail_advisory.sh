@@ -200,6 +200,27 @@ run_case "quoted command substitution hides an internal mutating pipeline" \
   advisory \
   'OUT="$(gh pr merge 1 2>&1 | tail -3)"'
 
+# === ADVISORY — round-6 codex review (sibling substitutions in one =========
+# === quoted token, gh api mutating method) ==================================
+
+run_case "sibling substitutions in one quoted token — mutating one is not the first" \
+  advisory \
+  'OUT="$(date) $(gh pr merge 1 | tail -3)"'
+
+run_case "gh api -X POST piped to tail (mutating REST method)" \
+  advisory \
+  "gh api repos/o/r/issues -X POST 2>&1 | tail -3"
+
+run_case "gh api --method=DELETE piped to tail (mutating REST method, = form)" \
+  advisory \
+  "gh api repos/o/r/issues/1 --method=DELETE 2>&1 | tail -3"
+
+# === SILENT — round-6 codex review (read-only gh api method) ===============
+
+run_case "gh api (default GET) piped to tail is read-only" \
+  silent \
+  "gh api repos/o/r/issues 2>&1 | tail -3"
+
 # === SILENT — read-only command piped (no mutation) ========================
 
 run_case "git log | head (read-only)" \

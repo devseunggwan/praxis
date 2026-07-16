@@ -103,6 +103,11 @@ _GH_MUTATING_VERBS: dict[str, frozenset[str]] = {
     "workflow": frozenset({"run"}),
 }
 
+# gh api method flags that signal mutation when present. Mirrors
+# session-intent's GH_API_MUTATING_METHODS — `gh api` bypasses the
+# object/verb enum entirely, so a mutating REST call needs its own check.
+_GH_API_MUTATING_METHODS = frozenset({"POST", "PATCH", "PUT", "DELETE"})
+
 # The three truncating sinks named in issue #788 (both observed generations
 # used `| tail`; `head` / `grep` share the same truncate-then-hide-exit-code
 # shape). Not exhaustive by design — see spec.md "Known limitations".
@@ -239,12 +244,49 @@ def _recover_command_argv(argv: list[str]) -> list[str]:
     return _recover_command_argv(argv[i + 1 :])
 
 
+def _gh_api_mutating_method(argv: list[str]) -> str | None:
+    """Return the HTTP method if `argv` is a `gh api` call carrying a
+    mutating method flag (`-X`/`--method`/`-XPOST`/`--method=POST`), else
+    None. `gh api ... -X POST 2>&1 | tail -3` masks a failed REST mutation
+    exactly like `gh pr merge`/`gh issue create` do, but `gh api` is a
+    passthrough verb with no fixed object/verb pair — `_gh_object_verb`'s
+    enum never sees it. Mirrors session-intent's `is_gh_mutating()` gh-api
+    branch (`hooks/preflight-gate/session-intent/impl.py`).
+    """
+    argv = strip_prefix(argv)
+    if not argv or os.path.basename(argv[0]) != "gh":
+        return None
+    n = len(argv)
+    i = _skip_gh_global_flags(argv, 1)
+    if i >= n or argv[i] != "api":
+        return None
+    j = i + 1
+    while j < n:
+        tok = argv[j]
+        if tok in ("-X", "--method"):
+            if j + 1 < n:
+                method = argv[j + 1].upper()
+                return method if method in _GH_API_MUTATING_METHODS else None
+            return None
+        if tok.startswith("--method="):
+            method = tok.split("=", 1)[1].upper()
+            return method if method in _GH_API_MUTATING_METHODS else None
+        if tok.startswith("-X") and len(tok) > 2:
+            method = tok[2:].upper()
+            return method if method in _GH_API_MUTATING_METHODS else None
+        j += 1
+    return None
+
+
 def _mutating_description(argv: list[str]) -> str | None:
     """Return a short description if argv is a mutating git/gh segment, else None."""
     argv = _recover_command_argv(argv)
     sub = _git_subcommand(argv)
     if sub is not None and sub in _GIT_MUTATING_SUB:
         return f"git {sub}"
+    method = _gh_api_mutating_method(argv)
+    if method is not None:
+        return f"gh api --method {method}"
     gh = _gh_object_verb(argv)
     if gh is not None:
         obj, verb = gh
@@ -462,9 +504,9 @@ def _scan_tokens_for_advisory(tokens: list[str]) -> str | None:
     return None
 
 
-def _extract_substitution_body(tok: str) -> str | None:
-    """Return the content of a balanced `$(...)` embedded in `tok`, else
-    None if no `$(` is present or it never closes within this token.
+def _extract_substitution_bodies(tok: str) -> list[str]:
+    """Return the content of every balanced top-level `$(...)` embedded in
+    `tok`.
 
     A *quoted* command substitution (`OUT="$(gh pr merge 1 | tail -3)"`)
     dequotes to a single opaque token — the whole RHS, `|` included,
@@ -472,28 +514,42 @@ def _extract_substitution_body(tok: str) -> str | None:
     separate `|`-delimited tokens the way an *unquoted* substitution
     accidentally does. `_pipe_chains` has no `|` token to split on in
     that single-token case, so the pipeline hiding inside it is invisible
-    to the normal scan. This extracts the substitution's inner text so it
-    can be re-tokenized and scanned on its own (one level only — the
-    result is not itself searched for a further-nested embedded
+    to the normal scan. This extracts each substitution's inner text so it
+    can be re-tokenized and scanned on its own.
+
+    A single quoted token may embed more than one *sibling* substitution
+    (`"$(date) $(gh pr merge 1 | tail -3)"` — two independent, adjacent
+    `$(...)` runs). Stopping at the first `$(` found would silently skip
+    any mutating pipeline hiding in a later sibling, so every top-level
+    run is collected — but each one only one level deep: the extracted
+    body is not itself searched for a further-nested embedded
     substitution, mirroring this codebase's one-level recursive-premise
-    convention).
+    convention.
     """
-    start = tok.find("$(")
-    if start == -1:
-        return None
-    start += 2
-    depth = 0
-    i = start
-    while i < len(tok):
-        ch = tok[i]
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            if depth == 0:
-                return tok[start:i]
-            depth -= 1
-        i += 1
-    return None
+    bodies: list[str] = []
+    i = 0
+    n = len(tok)
+    while True:
+        start = tok.find("$(", i)
+        if start == -1:
+            return bodies
+        depth = 0
+        j = start + 2
+        closed = False
+        while j < n:
+            ch = tok[j]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                if depth == 0:
+                    bodies.append(tok[start + 2 : j])
+                    i = j + 1
+                    closed = True
+                    break
+                depth -= 1
+            j += 1
+        if not closed:
+            return bodies
 
 
 @fail_open
@@ -517,13 +573,13 @@ def main() -> int:
     advisory = _scan_tokens_for_advisory(tokens)
     if advisory is None:
         for tok in tokens:
-            body = _extract_substitution_body(tok)
-            if not body:
-                continue
-            inner_tokens = safe_tokenize(body)
-            if not inner_tokens:
-                continue
-            advisory = _scan_tokens_for_advisory(inner_tokens)
+            for body in _extract_substitution_bodies(tok):
+                inner_tokens = safe_tokenize(body)
+                if not inner_tokens:
+                    continue
+                advisory = _scan_tokens_for_advisory(inner_tokens)
+                if advisory:
+                    break
             if advisory:
                 break
 
