@@ -276,6 +276,59 @@ run_input_case "34 hit: ASCII keyword adjacent to Hangul splits as separate toke
   "hit:hook_edit_event.md" "$FIXTURES_MAIN" Edit \
   '{"file_path": "/tmp/x.py", "old_string": "EditEventToken할까요?", "new_string": "y"}'
 
+# --- AC-35/36: resolve_memory_dir() fallback-path slugification -------------
+# All cases above always set PRAXIS_MEMORY_DIR explicitly, so the fallback
+# branch in resolve_memory_dir() (cwd -> ~/.claude/projects/<slug>/memory)
+# was never exercised by this suite. That gap let a real bug ship silently:
+# the fallback slugified cwd via cwd.replace("/", "-") only, which does not
+# match Claude Code's actual per-character non-alphanumeric replacement
+# (e.g. "/Users/nathan.song/.claude" slugs to "-Users-nathan-song--claude",
+# not "-Users-nathan.song-.claude") — any home path containing a special
+# character other than "/" left the fallback path permanently unresolvable
+# for that user, silently disabling every hookable memory unconditionally.
+FALLBACK_HOME=$(cd "$(mktemp -d)" && pwd -P)
+# cwd containing a literal "." mirrors the real-world failure (a "." inside
+# a path segment, as in a username like "nathan.song"). Resolve via `pwd -P`
+# (physical path) so this test is immune to macOS's /var -> /private/var
+# symlink, which would otherwise desync the expected slug from what
+# os.getcwd() actually reports.
+FALLBACK_CWD="$FALLBACK_HOME/work/my.repo"
+mkdir -p "$FALLBACK_CWD"
+FALLBACK_SLUG=$(python3 -c "
+import re
+print(re.sub(r'[^a-zA-Z0-9]', '-', '$FALLBACK_CWD'))
+")
+FALLBACK_MEMDIR="$FALLBACK_HOME/.claude/projects/$FALLBACK_SLUG/memory"
+mkdir -p "$FALLBACK_MEMDIR"
+cat > "$FALLBACK_MEMDIR/fallback-slug-probe.md" <<'EOF'
+---
+name: fallback-slug-probe
+description: probe memory for the resolve_memory_dir fallback-path test
+hookable: true
+hookKeywords: [FallbackSlugToken]
+---
+probe body
+EOF
+
+FALLBACK_ERR=$(mktemp)
+(
+  cd "$FALLBACK_CWD" || exit 1
+  echo '{"tool_name": "Bash", "tool_input": {"command": "echo FallbackSlugToken"}}' \
+    | env -u PRAXIS_MEMORY_DIR HOME="$FALLBACK_HOME" "$HOOK" >/dev/null 2>"$FALLBACK_ERR"
+)
+FALLBACK_RC=$?
+FALLBACK_OUT=$(cat "$FALLBACK_ERR")
+rm -f "$FALLBACK_ERR"
+rm -rf "$FALLBACK_HOME"
+
+if [ "$FALLBACK_RC" -eq 0 ] && printf '%s' "$FALLBACK_OUT" | grep -q "fallback-slug-probe.md"; then
+  echo "PASS  [35 hit: resolve_memory_dir() fallback path matches Claude Code's per-char slug for a cwd containing \".\"]"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL  [35 hit: resolve_memory_dir() fallback path matches Claude Code's per-char slug for a cwd containing \".\"] (rc=$FALLBACK_RC, stderr=$FALLBACK_OUT)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("35 resolve_memory_dir fallback slug match")
+fi
+
 # --- summary -----------------------------------------------------------------
 echo ""
 echo "Passed: $PASS  Failed: $FAIL"

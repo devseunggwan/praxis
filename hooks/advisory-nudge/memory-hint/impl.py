@@ -172,6 +172,9 @@ def parse_frontmatter(raw: str) -> dict | None:
     }
 
 
+_SLUG_CHAR_RE = re.compile(r"[^a-zA-Z0-9]")
+
+
 def resolve_memory_dir() -> str | None:
     """Return the resolved memory directory path or None if missing."""
     env_dir = os.environ.get("PRAXIS_MEMORY_DIR", "").strip()
@@ -180,7 +183,15 @@ def resolve_memory_dir() -> str | None:
 
     home = os.path.expanduser("~")
     cwd = os.getcwd()
-    slug = cwd.replace("/", "-")
+    # Claude Code replaces every non-alphanumeric character individually
+    # (not collapsed runs) — e.g. /Users/nathan.song/.claude slugs to
+    # -Users-nathan-song--claude (double dash, since "/." is two chars).
+    # A prior cwd.replace("/", "-") only touched slashes, so any other
+    # special character (a literal "." in a username, for one) left the
+    # fallback path permanently unresolvable — this fallback ran, found
+    # None, and the entire hookable/hookKeywords surface silently never
+    # fired for any memory in the store.
+    slug = _SLUG_CHAR_RE.sub("-", cwd)
     fallback = os.path.join(home, ".claude", "projects", slug, "memory")
     return fallback if os.path.isdir(fallback) else None
 
