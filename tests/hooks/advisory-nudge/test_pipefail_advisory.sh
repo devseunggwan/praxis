@@ -178,6 +178,17 @@ run_case "balanced self-contained substitution assignment reaches the real comma
   advisory \
   'FOO=$(date) git commit -m x | tail'
 
+# === ADVISORY — round-4 codex review (multi-token substitution, keyword+ ==
+# === grouping-prefix combination) ===========================================
+
+run_case "multi-token substitution (space inside \$(...)) still recovers the real command" \
+  advisory \
+  'STAMP=$(date +%s) git commit -m x | tail'
+
+run_case "shell keyword before a parenthesized pipeline still recovers the real command" \
+  advisory \
+  "if (git commit -m x | tail); then echo done; fi"
+
 # === SILENT — read-only command piped (no mutation) ========================
 
 run_case "git log | head (read-only)" \

@@ -142,6 +142,13 @@ already clean and needs no stripping.
 | `( git commit -m x \| tail )` (standalone `(` token, space after the paren) | `_recover_command_argv`'s grouping-char `lstrip` previously left an empty-string `argv[0]` when the token was pure grouping characters, which fails every downstream `os.path.basename(argv[0]) == "git"` / `"gh"` check. The empty-token case is now dropped and the function recurses on the remainder so the real command becomes argv[0] |
 | `FOO=$(date) git commit -m x \| tail` (plain assignment whose value is a *self-contained* command substitution, prefixed to a separate command) | `_recover_command_argv` previously treated any `$(` inside an assignment token as an unresolved-extraction target, corrupting `FOO=$(date)` into `date)` and hiding the real `git commit` that follows. The `$(` is now only treated as unresolved when unbalanced within the token (`tok.count("(") > tok.count(")")`, e.g. `OUT=$(gh` from a substitution whose closing `)` is in a later token) — a balanced `VAR=$(cmd)` is left alone so `strip_prefix`'s existing plain-assignment peel finds the real command normally |
 
+### False-negative surfaces closed (2026-07-16 codex review round 4)
+
+| Surface | Handling |
+| --------- | ---------- |
+| `STAMP=$(date +%s) git commit -m x \| tail` (multi-token command substitution — the substitution's own command has a space, so `safe_tokenize` splits it into `'STAMP=$(date'` + `'+%s)'`) | Round 3's single-token paren-balance check (`tok.count("(") > tok.count(")")`) only looked at the FIRST fragment (`'STAMP=$(date'`, 1 open / 0 close — appears unbalanced in isolation) and mis-extracted `date` as the recovered command, hiding the real `git commit` that follows. `_recover_command_argv` now walks forward accumulating paren-balance across subsequent tokens until it actually closes (or runs off the end of the argv slice) before deciding whether the substitution is self-contained (skip past the whole run) or genuinely split by a pipe (extract from inside it) |
+| `if (git commit -m x \| tail); then ...` / `while (git push \| head); do ...` (parenthesized pipeline after a shell keyword) | `_recover_command_argv` previously only checked `argv[0]` for a leading grouping character, so a keyword token (`if`, `while`, ...) ahead of the `(`-prefixed command left the grouping check looking at the wrong token and the mutating command was never recovered. Shell keywords (`SHELL_KEYWORDS`, shared with `strip_prefix`) are now skipped the same way as plain env assignments before the grouping-char check runs |
+
 ### Examples
 
 | Command | Action |
@@ -159,6 +166,8 @@ already clean and needs no stripping.
 | `LANG=C RESULT=$(gh pr merge 1 \| tail -3)` | **ADVISORY** — plain env assignment before a capture assignment correctly recovered |
 | `( git commit -m x \| tail )` | **ADVISORY** — standalone grouping token dropped instead of leaving an empty argv[0] |
 | `FOO=$(date) git commit -m x \| tail` | **ADVISORY** — balanced self-contained substitution left alone, real command reached normally |
+| `STAMP=$(date +%s) git commit -m x \| tail` | **ADVISORY** — multi-token substitution balance tracked across tokens, real command reached |
+| `if (git commit -m x \| tail); then echo done; fi` | **ADVISORY** — shell keyword skipped before the grouping-char check |
 | `git log --oneline \| head -20` | **SILENT** — `log` is read-only |
 | `git status \| grep modified` | **SILENT** — `status` is read-only |
 | `gh pr list \| head -5` | **SILENT** — `list` is read-only |
@@ -224,8 +233,10 @@ chains, gh mutating verbs, assignment/subshell/`\|&` prefix recovery
 (2026-07-15 codex review round), here-string/gh-flag-position/multi-
 assignment-prefix recovery (2026-07-16 codex review round 2),
 standalone-grouping-token/balanced-substitution-assignment recovery
-(2026-07-16 codex review round 3); silent on read-only commands piped,
-non-truncating sinks, `&&`/`;`/`\|\|`/`&` separators, quoted-pipe
-literals, heredoc body false positives (incl. the EOF-not-end premature-
-close guard), single commands, and infrastructure fail-open (non-Bash,
+(2026-07-16 codex review round 3), multi-token-substitution/keyword-plus-
+grouping-prefix recovery (2026-07-16 codex review round 4); silent on
+read-only commands piped, non-truncating sinks, `&&`/`;`/`\|\|`/`&`
+separators, quoted-pipe literals, heredoc body false positives (incl.
+the EOF-not-end premature-close guard), single commands, and
+infrastructure fail-open (non-Bash,
 malformed JSON, empty command).

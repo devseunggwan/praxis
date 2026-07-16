@@ -70,7 +70,13 @@ from pathlib import Path
 _HOOK_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HOOK_DIR.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
-from _hook_utils import ENV_ASSIGN_RE, SHELL_SEPARATORS, safe_tokenize, strip_prefix  # type: ignore[import-not-found]  # noqa: E402
+from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    ENV_ASSIGN_RE,
+    SHELL_KEYWORDS,
+    SHELL_SEPARATORS,
+    safe_tokenize,
+    strip_prefix,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -175,35 +181,62 @@ def _recover_command_argv(argv: list[str]) -> list[str]:
     leading plain assignments rather than only checking argv[0].
 
     A `$(` inside an assignment token is only an unresolved recovery
-    target when it is *unbalanced* within that token (the substitution's
-    closing `)` lives in a later token, e.g. `OUT=$(gh` from a pipe that
-    split the substitution's own internals). When the token already
-    closes its own `(...)` (`FOO=$(date)`), the assignment is a plain,
-    self-contained `KEY=VALUE` prefix to a *separate* following command
-    (`FOO=$(date) git commit ...`) — `strip_prefix` already peels those
-    correctly, so this function must not touch them.
+    target when its substitution never closes within the visible argv —
+    i.e. cumulative paren-balance across subsequent tokens stays positive
+    to the end (the substitution's closing `)` lives in a LATER pipe-chain
+    segment, e.g. `OUT=$(gh` from a pipe that split the substitution's
+    own internals). When the substitution closes within this argv — either
+    in the same token (`FOO=$(date)`) or spanning a few more tokens when
+    its own command has spaces (`STAMP=$(date +%s)` -> tokens
+    `'STAMP=$(date'`, `'+%s)'`) — the assignment is a plain, self-contained
+    `KEY=VALUE` prefix to a *separate* following command
+    (`FOO=$(date) git commit ...`), so this function skips past the whole
+    substitution run and keeps scanning for the real command instead of
+    extracting from inside it. Shell keywords (`if`, `while`, `{`, ...)
+    are skipped the same way, so a parenthesized pipeline after one
+    (`if (git commit ... | tail); then ...`) still reaches the grouping-
+    char check below instead of stopping at the keyword.
     """
     if not argv:
         return argv
-    for i, tok in enumerate(argv):
-        if ENV_ASSIGN_RE.match(tok):
-            if "$(" in tok and tok.count("(") > tok.count(")"):
-                head = tok.rsplit("$(", 1)[1]
-                return argv[:i] + [head] + argv[i + 1 :]
+    i = 0
+    n = len(argv)
+    while i < n:
+        tok = argv[i]
+        if tok in SHELL_KEYWORDS:
+            i += 1
             continue
-        break
+        if not ENV_ASSIGN_RE.match(tok):
+            break
+        if "$(" not in tok:
+            i += 1
+            continue
+        depth = tok.count("(") - tok.count(")")
+        j = i
+        while depth > 0 and j + 1 < n:
+            j += 1
+            depth += argv[j].count("(") - argv[j].count(")")
+        if depth > 0:
+            head = tok.rsplit("$(", 1)[1]
+            return argv[:i] + [head] + argv[i + 1 :]
+        if j + 1 < n:
+            i = j + 1
+            continue
+        return argv[i:]
     # Leading grouping / substitution chars: `(cmd`, `$(cmd`, `` `cmd ``.
-    head = argv[0]
+    if i >= n:
+        return argv[i:]
+    head = argv[i]
     stripped = head.lstrip(_GROUP_PREFIX_CHARS)
     if stripped == head:
-        return argv
+        return argv[i:] if i > 0 else argv
     if stripped:
-        return [stripped] + argv[1:]
+        return [stripped] + argv[i + 1 :]
     # The whole token was pure grouping chars (e.g. a standalone `(` from
     # `( git commit ... )` with a space after the paren) — drop it and
     # recurse so the real command becomes argv[0], rather than leaving an
     # empty-string argv[0] that fails every basename check downstream.
-    return _recover_command_argv(argv[1:])
+    return _recover_command_argv(argv[i + 1 :])
 
 
 def _mutating_description(argv: list[str]) -> str | None:
