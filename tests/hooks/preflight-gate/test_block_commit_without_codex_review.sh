@@ -373,6 +373,66 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Repeated same-session block escalation (issue #805)
+#
+# The block message escalates from the 2nd same-session block onward, read from
+# the fire ledger (count_session_fires). These cases point the ledger at a temp
+# file, seed prior RICH block records for a session_id, and assert the
+# ESCALATION banner appears only when a prior block exists — while the block
+# verdict (rc 2) is unchanged in every case.
+# ---------------------------------------------------------------------------
+
+ESC_LEDGER=$(mktemp)
+ESC_SESSION="sess-escalate-$$"
+
+# emits a RICH block record for the given session into the ledger
+esc_seed_block() {
+  local sid="$1"
+  printf '%s\n' "{\"granularity\":\"rich\",\"hook\":\"block-commit-without-codex-review\",\"session_id\":\"$sid\",\"decision\":\"block\"}" >>"$ESC_LEDGER"
+}
+
+# run_escalation_case <name> <session_id> <expect-banner:yes|no>
+run_escalation_case() {
+  local name="$1" sid="$2" expect_banner="$3"
+  local payload err_file rc err_content has_banner
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "tool_name": "Bash",
+    "tool_input": {"command": "git commit -m \"feat: x\""},
+    "transcript_path": sys.argv[1],
+    "session_id": sys.argv[2],
+}))' "$TX_WITHOUT" "$sid")
+  err_file=$(mktemp)
+  echo "$payload" | env "PRAXIS_FIRE_TELEMETRY_FILE=$ESC_LEDGER" "$HOOK" >/dev/null 2>"$err_file"
+  rc=$?
+  err_content=$(cat "$err_file"); rm -f "$err_file"
+
+  local ok=1
+  # verdict is always block (rc 2 + non-empty stderr), regardless of escalation
+  [ "$rc" -eq 2 ] && [ -n "$err_content" ] || ok=0
+  case "$err_content" in *ESCALATION*) has_banner=yes;; *) has_banner=no;; esac
+  [ "$has_banner" = "$expect_banner" ] || ok=0
+
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS [block/banner=$expect_banner] $name"; ((PASS++))
+  else
+    echo "FAIL [block/banner want=$expect_banner got=$has_banner rc=$rc] $name"
+    ((FAIL++)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# 1st block for the session: ledger empty → no escalation banner
+run_escalation_case "1st same-session block: no escalation banner" "$ESC_SESSION" no
+# after 1 prior block: 2nd block escalates
+esc_seed_block "$ESC_SESSION"
+run_escalation_case "2nd same-session block: escalation banner present" "$ESC_SESSION" yes
+# a different session with no prior blocks is independent (no escalation)
+run_escalation_case "different session is independent: no banner" "other-session-$$" no
+
+rm -f "$ESC_LEDGER"
+
+# ---------------------------------------------------------------------------
 # Cleanup + summary
 # ---------------------------------------------------------------------------
 

@@ -86,10 +86,25 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from pathlib import Path
 
 _TARGET_SKILL = "praxis:codex-review-wrap"
 _MAX_BYTES = 50 * 1024 * 1024
+
+# Fire-ledger identity — must match this hook's manifest `name`/`role`, since the
+# dispatcher keys its RICH fire records off the manifest entry (see
+# hooks/manifest.json). count_session_fires filters on these exact strings.
+_HOOK_NAME = "block-commit-without-codex-review"
+_HOOK_ROLE = "preflight-gate"
+
+# Escalate the block message once this gate has ALREADY blocked the same session
+# at least this many times before the current block (issue #805). 1 → the 2nd
+# block onward carries the escalated wording; the 1st keeps the plain message.
+# The block/allow verdict is unchanged either way — escalation only strengthens
+# the message (form (a)), never relaxes or tightens the gate, so it adds no
+# bypass incentive.
+_ESCALATE_AFTER_PRIOR_BLOCKS = 1
 
 
 @fail_open
@@ -126,8 +141,22 @@ def main() -> int:
     if invoked:
         return 0  # codex-review-wrap ran this session → allow
 
-    _emit_block_message()
+    _emit_block_message(_prior_block_count(payload.get("session_id")))
     return 2
+
+
+def _prior_block_count(session_id) -> int:
+    """Blocks this gate already emitted for `session_id` this session, read from
+    the fire ledger (issue #805). 0 when session_id is absent or the ledger is
+    unreadable/opted-out — fail-open to the non-escalated message.
+
+    Counts decision=="block" only: a prior pass/advise fire of this hook is not
+    a repeated block and must not inflate the escalation counter. The dispatcher
+    records the current block AFTER this hook returns, so the in-flight block is
+    excluded — this is strictly the count of blocks BEFORE now."""
+    if not isinstance(session_id, str) or not session_id:
+        return 0
+    return _fire_ledger.count_session_fires(_HOOK_NAME, session_id, decision="block")
 
 
 
@@ -562,34 +591,55 @@ def _has_slash_command(obj: dict) -> bool:
     return False
 
 
-def _emit_block_message() -> None:
-    sys.stderr.write(
-        "\n".join(
-            [
-                "BLOCKED: `git commit` without a `praxis:codex-review-wrap` review pass this session.",
-                "",
-                "Rule (AGENTS.md Deliver table): codex-review-wrap is a second mandatory",
-                "independent review pass before commit — an independent Codex pass after",
-                "omc:code-reviewer that catches defects a single reviewer misses.",
-                "",
-                "Resolve by one of:",
-                "  1. Run the review (it is a model-invocable skill, not an agent):",
-                "       Skill(skill=\"praxis:codex-review-wrap\")",
-                "     then re-run the commit (one run satisfies all commits this session,",
-                "     including one run inside a subagent this session dispatched).",
-                "  2. Skip for this commit: add a [skip-codex-review] token to the",
-                "     commit message (e.g. trivial docs/typo change).",
-                "  3. Persistent bypass: set CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1 in your",
-                "     environment BEFORE starting Claude Code (settings env / shell export).",
-                "     An inline prefix on this command does NOT work — the hook process",
-                "     never sees it.",
-                "",
-                "Fail-open: missing/unreadable transcript and non-content commits",
-                "(--amend / merge / rebase / cherry-pick / revert) pass.",
-            ]
-        )
-        + "\n"
+def _escalation_banner(prior_blocks: int) -> list[str]:
+    """Form-(a) escalation preface (issue #805): shown from the 2nd same-session
+    block onward. It does NOT repeat the base message louder — it names the exact
+    anti-pattern the repeat signals (changing HOW the commit is invoked instead
+    of running the review), which is the observed failure mode a plain re-block
+    does not address. The gate verdict is unchanged; only the wording escalates.
+    """
+    times = "time" if prior_blocks == 1 else "times"
+    return [
+        f"ESCALATION: this gate has already blocked `git commit` {prior_blocks} {times} "
+        "in this session.",
+        "Changing HOW you invoke the commit (heredoc, -F file, subshell, a",
+        "different separator) does NOT change the gate condition — it re-checks the",
+        "same session for a codex-review-wrap pass and blocks again. The only",
+        "resolutions are the three below. Run option 1 now (or option 2/3 only if",
+        "this commit genuinely qualifies for a skip).",
+        "",
+    ]
+
+
+def _emit_block_message(prior_blocks: int = 0) -> None:
+    lines: list[str] = []
+    if prior_blocks >= _ESCALATE_AFTER_PRIOR_BLOCKS:
+        lines.extend(_escalation_banner(prior_blocks))
+    lines.extend(
+        [
+            "BLOCKED: `git commit` without a `praxis:codex-review-wrap` review pass this session.",
+            "",
+            "Rule (AGENTS.md Deliver table): codex-review-wrap is a second mandatory",
+            "independent review pass before commit — an independent Codex pass after",
+            "omc:code-reviewer that catches defects a single reviewer misses.",
+            "",
+            "Resolve by one of:",
+            "  1. Run the review (it is a model-invocable skill, not an agent):",
+            "       Skill(skill=\"praxis:codex-review-wrap\")",
+            "     then re-run the commit (one run satisfies all commits this session,",
+            "     including one run inside a subagent this session dispatched).",
+            "  2. Skip for this commit: add a [skip-codex-review] token to the",
+            "     commit message (e.g. trivial docs/typo change).",
+            "  3. Persistent bypass: set CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1 in your",
+            "     environment BEFORE starting Claude Code (settings env / shell export).",
+            "     An inline prefix on this command does NOT work — the hook process",
+            "     never sees it.",
+            "",
+            "Fail-open: missing/unreadable transcript and non-content commits",
+            "(--amend / merge / rebase / cherry-pick / revert) pass.",
+        ]
     )
+    sys.stderr.write("\n".join(lines) + "\n")
 
 
 if __name__ == "__main__":

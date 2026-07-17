@@ -313,6 +313,119 @@ def test_record_session_fire_non_string_session_and_tool_default_empty(tmp_path,
     assert rec["session_id"] == "" and rec["tool"] == ""
 
 
+# ---------------------------------------------------------------------------
+# Reader: count_session_fires (issue #805 — in-session read path for a preflight
+# gate to consume its own repeated-block signal)
+# ---------------------------------------------------------------------------
+
+def _write_records(path: Path, records: list[dict]) -> None:
+    path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+
+
+def test_count_session_fires_missing_file_returns_zero(tmp_path, monkeypatch):
+    out = tmp_path / "nope.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    assert fl.count_session_fires("h", "s1", decision="block") == 0
+
+
+def test_count_session_fires_filters_hook_session_and_decision(tmp_path, monkeypatch):
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    _write_records(out, [
+        {"granularity": "rich", "hook": "gate", "session_id": "s1", "decision": "block"},
+        {"granularity": "rich", "hook": "gate", "session_id": "s1", "decision": "block"},
+        {"granularity": "rich", "hook": "gate", "session_id": "s1", "decision": "pass"},
+        {"granularity": "rich", "hook": "other", "session_id": "s1", "decision": "block"},
+        {"granularity": "rich", "hook": "gate", "session_id": "s2", "decision": "block"},
+    ])
+    # decision-filtered: only s1's own blocks of `gate`
+    assert fl.count_session_fires("gate", "s1", decision="block") == 2
+    # decision=None: every decision for (gate, s1) — 2 blocks + 1 pass
+    assert fl.count_session_fires("gate", "s1") == 3
+    assert fl.count_session_fires("gate", "s2", decision="block") == 1
+    assert fl.count_session_fires("gate", "s3", decision="block") == 0
+    assert fl.count_session_fires("other", "s1", decision="block") == 1
+
+
+def test_count_session_fires_excludes_coarse_records(tmp_path, monkeypatch):
+    """A coarse record carries session_id="" so it can never match a real
+    session anyway, but the granularity filter makes the exclusion explicit —
+    a future coarse record that DID carry a session_id must still not count."""
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    _write_records(out, [
+        {"granularity": "rich", "hook": "gate", "session_id": "s1", "decision": "block"},
+        {"granularity": "coarse", "hook": "gate", "session_id": "s1", "decision": "block"},
+    ])
+    assert fl.count_session_fires("gate", "s1", decision="block") == 1
+
+
+def test_count_session_fires_empty_session_returns_zero(tmp_path, monkeypatch):
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    _write_records(out, [
+        {"granularity": "rich", "hook": "gate", "session_id": "", "decision": "block"},
+    ])
+    assert fl.count_session_fires("gate", "", decision="block") == 0
+    assert fl.count_session_fires("gate", None, decision="block") == 0  # type: ignore[arg-type]
+
+
+def test_count_session_fires_opt_out_returns_zero(tmp_path, monkeypatch):
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_DISABLE", "1")
+    _write_records(out, [
+        {"granularity": "rich", "hook": "gate", "session_id": "s1", "decision": "block"},
+    ])
+    assert fl.count_session_fires("gate", "s1", decision="block") == 0
+
+
+def test_count_session_fires_skips_malformed_lines(tmp_path, monkeypatch):
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    out.write_text(
+        "not json{\n"
+        + json.dumps({"granularity": "rich", "hook": "gate", "session_id": "s1", "decision": "block"}) + "\n"
+        + "\n"  # blank line
+        + json.dumps(["not", "a", "dict"]) + "\n",
+        encoding="utf-8",
+    )
+    assert fl.count_session_fires("gate", "s1", decision="block") == 1
+
+
+def test_count_session_fires_non_regular_file_returns_zero(tmp_path, monkeypatch):
+    """Security/robustness guard: a FIFO at the path must not block or raise —
+    mirrors _atomic_append's regular-file guard on the read side."""
+    fifo = tmp_path / "pipe"
+    os.mkfifo(fifo)
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(fifo))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    assert fl.count_session_fires("gate", "s1", decision="block") == 0
+    assert stat.S_ISFIFO(os.lstat(fifo).st_mode)  # untouched
+
+
+def test_count_session_fires_roundtrip_with_real_writer(tmp_path, monkeypatch):
+    """No SUT-mirrored mock: the dispatcher's own record_group_fires writes the
+    RICH block record, and count_session_fires reads it back. This locks the
+    exact field contract (hook/session_id/decision/granularity) both halves
+    share — a rename on either side fails this test."""
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    members = [("preflight-gate", "block-commit-without-codex-review", Path("x"))]
+    # Two blocking dispatches in the same session, as the real gate produces.
+    fl.record_group_fires(members, [(2, "", "")], _payload("s-round", "Bash"))
+    fl.record_group_fires(members, [(2, "", "")], _payload("s-round", "Bash"))
+    assert fl.count_session_fires(
+        "block-commit-without-codex-review", "s-round", decision="block"
+    ) == 2
+
+
 def test_roster_split_separates_shell_hooks(tmp_path):
     manifest = {"hooks": [
         {"name": "a", "event": "PreToolUse", "matcher": "Bash"},   # py (instrumentable)
