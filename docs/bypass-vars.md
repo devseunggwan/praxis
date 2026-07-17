@@ -43,6 +43,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_MD_ESCAPE_SKIP` | `pre-edit-md-escape-advisory` | Skip the markdown-escape advisory |
 | `PRAXIS_PBGUARD_SKIP` | `pre-edit-protected-branch-guard` | Skip the protected-branch edit guard |
 | `PRAXIS_MOMENTUM_BYPASS` | `momentum-rule-retrieval-gate` | Skip the high-momentum rule nudge |
+| `PRAXIS_MOMENTUM_MERGE_ADVISORY` | `momentum-rule-retrieval-gate` | Demote the merge-briefing escalation to advisory (stderr reminder still fires; no `deny` block on an incomplete pre-merge briefing) |
 | `PRAXIS_VERSION_BUMP_BYPASS` | `version-bump-evidence-check` | Skip the version-bump evidence advisory |
 | `PRAXIS_SKIP_STAGED_FILE_ENUM` | `pre-commit-staged-file-enumeration` | Skip the pre-commit staged-file enumeration advisory |
 | `PRAXIS_SKIP_MODEL_ROUTING` | `model-routing-advisory` | Skip the delegation `--model` tier-mismatch advisory |

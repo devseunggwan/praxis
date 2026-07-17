@@ -587,6 +587,135 @@ run_compound_multi_assert_force_dispatch \
   "compound_force_and_dispatch_both_surfaces" \
   'git push --force && cmux new-workspace --command "claude -p next"'
 
+# --- merge-briefing escalation (issue #797) -----------------------------------
+#
+# When the assistant text preceding a `gh pr merge` lacks the Pre-Merge
+# Reporting briefing (< 4 of 6 items), the merge trigger escalates to a
+# permissionDecision deny on stdout. The stderr advisory still fires. Escalation
+# requires a readable transcript — the existing merge tests carry no
+# transcript_path, so they stay advisory-only (regression-safe).
+FIXTURES_DIR="$SCRIPT_DIR/../../fixtures"
+
+# run_merge_escalation_case name expect_deny(yes|no) env_args transcript_fixture
+run_merge_escalation_case() {
+  local name="$1" expect_deny="$2" env_args="$3" fixture="$4"
+  local transcript="$FIXTURES_DIR/$fixture"
+  local payload
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "tool_name": "Bash",
+    "tool_input": {"command": "gh pr merge --squash --delete-branch"},
+    "transcript_path": sys.argv[1],
+    "session_id": "test-momentum-merge",
+}))' "$transcript")
+
+  local out_file err_file
+  out_file=$(mktemp); err_file=$(mktemp)
+  if [ -n "$env_args" ]; then
+    # shellcheck disable=SC2086
+    echo "$payload" | env $env_args python3 "$HOOK" >"$out_file" 2>"$err_file"
+  else
+    echo "$payload" | python3 "$HOOK" >"$out_file" 2>"$err_file"
+  fi
+  local rc=$?
+  local out err
+  out=$(cat "$out_file"); err=$(cat "$err_file")
+  rm -f "$out_file" "$err_file"
+
+  local ok=1
+  [ "$rc" -eq 0 ] || ok=0
+  # stderr advisory must always fire on the merge trigger.
+  echo "$err" | grep -qF "[praxis:momentum-gate]" || ok=0
+  if [ "$expect_deny" = "yes" ]; then
+    echo "$out" | grep -qF '"permissionDecision": "deny"' || ok=0
+  else
+    echo "$out" | grep -qF '"permissionDecision"' && ok=0
+  fi
+
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] expect_deny=$expect_deny rc=$rc"
+    [ -n "$out" ] && echo "        stdout: $(echo "$out" | head -c 200)"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# Incomplete briefing (3 of 6 items) → deny. Reproduces the #795 failure shape.
+run_merge_escalation_case "merge_escalation_incomplete_briefing" \
+  "yes" "" "momentum-merge-incomplete.jsonl"
+
+# Complete 6-item briefing → advisory only, no deny.
+run_merge_escalation_case "merge_escalation_complete_briefing" \
+  "no" "" "momentum-merge-complete.jsonl"
+
+# Trivial-PR marker present → carve-out, no deny even with 0 items.
+run_merge_escalation_case "merge_escalation_trivial_pr_exempt" \
+  "no" "" "momentum-merge-trivial.jsonl"
+
+# Background delegate session → no escalation (mirror pre-merge-approval-gate).
+run_merge_escalation_case "merge_escalation_delegate_skips" \
+  "no" "CMUX_DELEGATE=1" "momentum-merge-incomplete.jsonl"
+
+# Demote-to-advisory escape hatch → no deny, advisory still fires.
+run_merge_escalation_case "merge_escalation_advisory_env_demotes" \
+  "no" "PRAXIS_MOMENTUM_MERGE_ADVISORY=1" "momentum-merge-incomplete.jsonl"
+
+# Full bypass silences everything, including the escalation.
+merge_escalation_bypass_silent_case() {
+  local name="merge_escalation_full_bypass_silent"
+  local payload
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "tool_name": "Bash",
+    "tool_input": {"command": "gh pr merge --squash"},
+    "transcript_path": sys.argv[1],
+}))' "$FIXTURES_DIR/momentum-merge-incomplete.jsonl")
+  local out_file err_file
+  out_file=$(mktemp); err_file=$(mktemp)
+  echo "$payload" | env PRAXIS_MOMENTUM_BYPASS=1 python3 "$HOOK" >"$out_file" 2>"$err_file"
+  local rc=$?
+  local out err
+  out=$(cat "$out_file"); err=$(cat "$err_file")
+  rm -f "$out_file" "$err_file"
+  if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] rc=$rc out='$out' err-first='$(echo "$err" | head -1)'"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+merge_escalation_bypass_silent_case
+
+# Force-push / dispatch triggers must NEVER emit a deny — escalation is merge-only.
+run_nonmerge_no_deny_case() {
+  local name="$1" command="$2"
+  local payload
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "tool_name": "Bash",
+    "tool_input": {"command": sys.argv[1]},
+    "transcript_path": sys.argv[2],
+}))' "$command" "$FIXTURES_DIR/momentum-merge-incomplete.jsonl")
+  local out_file
+  out_file=$(mktemp)
+  echo "$payload" | python3 "$HOOK" >"$out_file" 2>/dev/null
+  local rc=$?
+  local out
+  out=$(cat "$out_file"); rm -f "$out_file"
+  if [ "$rc" -eq 0 ] && ! echo "$out" | grep -qF '"permissionDecision"'; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] rc=$rc out='$(echo "$out" | head -c 120)'"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+run_nonmerge_no_deny_case "force_push_never_denies" "git push --force origin main"
+run_nonmerge_no_deny_case "dispatch_never_denies" 'cmux new-workspace --command "claude -p go"'
+
 # ---------------------------------------------------------------------------
 # @fail_open structural assertion
 # ---------------------------------------------------------------------------

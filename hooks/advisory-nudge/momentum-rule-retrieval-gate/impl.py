@@ -43,11 +43,14 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
     safe_tokenize,
     strip_prefix,
 )
+from _transcript import TRANSCRIPT_SCAN_LINES  # type: ignore[import-not-found]  # noqa: E402
+from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Prefix used on every stderr line.
@@ -236,6 +239,181 @@ def _emit_for_trigger(trigger: str, directory: str | None) -> str:
             parts.extend(_format_memory_lines(memories))
     parts.append(CLOSING_LINE)
     return "\n".join(parts)
+
+# ---------------------------------------------------------------------------
+# Merge-briefing escalation (issue #797).
+#
+# The `merge` trigger alone is advisory (stderr) — but stderr cannot stop a
+# `gh pr merge` that skips the Pre-Merge Reporting briefing, which recurred
+# despite the advisory firing (memory feedback_pre_merge_briefing_compound_
+# imperative, 2 recurrences). For the `merge` trigger ONLY, this hook inspects
+# the assistant text preceding the merge call and, when the 6-item briefing is
+# absent, escalates to a `permissionDecision: deny` so the merge is blocked and
+# the agent must produce the briefing before retrying.
+#
+# Why deny (not ask): the sibling `pre-merge-approval-gate` already emits an
+# unconditional `ask` on every `gh pr merge`. A second `ask` is redundant with
+# the exact gate that failed to prevent the #795 recurrence (the user approved
+# blindly while the agent never produced the briefing). `deny` adds the missing
+# teeth — it blocks and feeds the reason back so the agent self-corrects.
+#
+# Fail-open / false-positive containment:
+#   • no readable transcript                 → no escalation (fail open)
+#   • CMUX_DELEGATE=1 (background agent)      → no escalation (mirror sibling)
+#   • PRAXIS_MOMENTUM_MERGE_ADVISORY=1        → demote back to advisory only
+#   • trivial-PR markers in the briefing text → no escalation (CLAUDE.md carve-out)
+# ---------------------------------------------------------------------------
+
+MERGE_ADVISORY_ENV = "PRAXIS_MOMENTUM_MERGE_ADVISORY"
+
+# Distinct Pre-Merge Reporting items must be present in the pre-merge assistant
+# text. The documented failure surfaced only 3 of 6 (What changed / verified /
+# risk — missing NOT-verified, Open-items, and the explicit approve-ask), so a
+# floor of 4 separates that case from a complete (or near-complete) briefing
+# while keeping the false-positive rate low.
+MERGE_BRIEFING_MIN_ITEMS = 4
+
+# Each tuple is one Pre-Merge Reporting item; a single keyword hit marks the
+# item present. Bilingual (EN/KO) since briefings are authored in Korean.
+_BRIEFING_ITEM_GROUPS: tuple[tuple[str, ...], ...] = (
+    # 1. What changed
+    ("what changed", "무엇이 변경", "변경 사항", "변경사항", "변경 내용",
+     "changed:", "changes:", "scope summary", "what was changed"),
+    # 2. What was verified
+    ("verified", "검증", "verification", "tested", "test pass", "테스트 통과",
+     "lint clean", "확인 완료", "확인함"),
+    # 3. What was NOT verified
+    ("not verified", "not tested", "미검증", "미확인", "unverified",
+     "not exercised", "검증하지", "확인하지 못", "deferred", "ci pending", "skipped"),
+    # 4. Risk / blast radius
+    ("risk", "blast radius", "리스크", "위험", "영향 범위", "영향범위",
+     "blast", "downstream", "affects"),
+    # 5. Open items
+    ("open item", "미해결", "남은 항목", "남은 작업", "follow-up", "follow up",
+     "후속", "caveat", "unresolved"),
+    # 6. Explicit approve-ask
+    ("approve", "승인", "머지할까요", "머지 할까요", "approve merge", "merge?",
+     "진행할까요", "머지해도", "머지 진행", "proceed with the merge"),
+)
+
+# Trivial-PR carve-out — CLAUDE.md permits a 2-line report for typo / comment /
+# single-line config merges. When the agent has flagged the PR as trivial, the
+# full 6-item briefing is not required, so do not escalate.
+_TRIVIAL_MERGE_MARKERS: tuple[str, ...] = (
+    "trivial pr", "trivial change", "typo", "comment-only", "comment only",
+    "single-line", "single line", "오타", "주석만", "주석 수정", "2-line report",
+)
+
+
+def _briefing_item_count(text: str) -> int:
+    """Count distinct Pre-Merge Reporting items present in the assistant text."""
+    low = text.lower()
+    count = 0
+    for group in _BRIEFING_ITEM_GROUPS:
+        if any(kw in low for kw in group):
+            count += 1
+    return count
+
+
+def _is_trivial_merge(text: str) -> bool:
+    low = text.lower()
+    return any(marker in low for marker in _TRIVIAL_MERGE_MARKERS)
+
+
+def _current_turn_assistant_text(transcript_path: str) -> str | None:
+    """Concatenate assistant text emitted since the last human user message.
+
+    Scans a bounded tail window (TRANSCRIPT_SCAN_LINES) so a long transcript
+    cannot blow the hook timeout. Returns:
+      • None  → transcript missing / unreadable (caller fails open, no block)
+      • ""    → transcript readable but the agent emitted no briefing text this
+                turn (the exact compound-imperative failure — caller escalates)
+      • text  → the briefing text to score
+    """
+    if not transcript_path or not os.path.isfile(transcript_path):
+        return None
+    try:
+        with open(transcript_path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return None
+
+    entries: list[dict] = []
+    for line in lines[-TRANSCRIPT_SCAN_LINES:]:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(obj, dict):
+            entries.append(obj)
+
+    # Locate the most recent human-authored user message (skip tool_result-only
+    # user entries — those are the runtime's tool-output bridge, not input).
+    last_user_idx = -1
+    for i, ev in enumerate(entries):
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "user" or ev.get("isSidechain"):
+            continue
+        content = msg.get("content", [])
+        if isinstance(content, str):
+            if content.strip():
+                last_user_idx = i
+        elif isinstance(content, list):
+            if any(isinstance(b, dict) and b.get("type") != "tool_result" for b in content):
+                last_user_idx = i
+
+    turn = entries[last_user_idx + 1:] if last_user_idx >= 0 else entries
+    texts: list[str] = []
+    for ev in turn:
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
+            continue
+        content = msg.get("content", [])
+        if isinstance(content, str):
+            texts.append(content)
+        elif isinstance(content, list):
+            for b in content:
+                if isinstance(b, dict) and b.get("type") == "text":
+                    t = b.get("text", "")
+                    if isinstance(t, str):
+                        texts.append(t)
+    return "\n".join(texts)
+
+
+def _merge_escalation_reason(payload: dict) -> str | None:
+    """Return a deny reason when the pre-merge briefing is incomplete, else None."""
+    # Background cmux-delegate agents merge autonomously — the delegation intent
+    # is the approval (mirror pre-merge-approval-gate).
+    if os.environ.get("CMUX_DELEGATE") == "1":
+        return None
+    # Demote-to-advisory escape hatch (false-positive relief without full bypass).
+    if os.environ.get(MERGE_ADVISORY_ENV) == "1":
+        return None
+
+    text = _current_turn_assistant_text(payload.get("transcript_path", "") or "")
+    if text is None:
+        return None  # transcript unreadable → fail open, do not block
+    if _is_trivial_merge(text):
+        return None
+    if _briefing_item_count(text) >= MERGE_BRIEFING_MIN_ITEMS:
+        return None
+
+    return format_block(
+        rule_name="Pre-Merge Reporting briefing",
+        why="this gh pr merge is not preceded by the Pre-Merge Reporting "
+            "briefing — fewer than "
+            f"{MERGE_BRIEFING_MIN_ITEMS} of 6 items present (What changed / "
+            "verified / NOT verified / Risk / Open items / explicit approve-ask)",
+        correct_path="surface the 6-item briefing and an explicit 'Approve "
+            "merge?' question, then re-run the merge",
+        bypass_env=MERGE_ADVISORY_ENV,
+        reference="CLAUDE.md → Pre-Merge Reporting; "
+            "hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md",
+    )
+
 
 # ---------------------------------------------------------------------------
 # GH global flags that consume one additional argument.
@@ -429,6 +607,17 @@ def main() -> int:
     # Emit each surface to stderr — static rule text + dynamic memory cites.
     for trigger in triggers:
         sys.stderr.write(_emit_for_trigger(trigger, directory) + "\n")
+
+    # Merge-briefing escalation (issue #797): for the `merge` trigger only,
+    # block the merge when the preceding assistant text lacks the Pre-Merge
+    # Reporting briefing. Runs in default mode — this is the whole point of the
+    # gate (advisory stderr alone did not stop the recurrence). The stderr
+    # advisories above are still emitted so the agent sees the rule text too.
+    if TRIGGER_MERGE in triggers:
+        reason = _merge_escalation_reason(payload)
+        if reason is not None:
+            emit_decision("deny", reason)
+            return 0
 
     # Strict mode: block unless PRAXIS_MOMENTUM_ACK=1 is also present.
     if os.environ.get("PRAXIS_MOMENTUM_STRICT") == "1":
