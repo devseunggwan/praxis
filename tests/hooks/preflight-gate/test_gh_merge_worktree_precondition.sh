@@ -31,14 +31,18 @@ PASS=0; FAIL=0; FAILED_NAMES=()
 # Fake-bin helpers
 # ---------------------------------------------------------------------------
 
-# make_fake_gh <mode> [head-branch]
+# make_fake_gh <mode> [head-branch] [required-repo]
 #   mode:
-#     branch   — `gh pr view ... --json headRefName -q .headRefName` prints
-#                head-branch and exits 0
-#     error    — every call exits 1 (auth-style failure)
-#     empty    — exits 0 but prints nothing (unresolvable PR)
+#     branch        — `gh pr view ... --json headRefName -q .headRefName`
+#                     prints head-branch and exits 0
+#     error         — every call exits 1 (auth-style failure)
+#     empty         — exits 0 but prints nothing (unresolvable PR)
+#     repo-required — prints head-branch ONLY when argv carries
+#                     `-R <required-repo>` (or `--repo <required-repo>`);
+#                     otherwise exits 1. Asserts the hook forwards the
+#                     merge command's repo selection to `gh pr view`.
 make_fake_gh() {
-  local mode="$1" branch="${2:-}"
+  local mode="$1" branch="${2:-}" repo="${3:-}"
   local d
   d=$(mktemp -d)
   case "$mode" in
@@ -60,6 +64,33 @@ EOF
       cat >"$d/gh" <<'EOF'
 #!/usr/bin/env bash
 exit 0
+EOF
+      ;;
+    repo-required)
+      # Prints head-branch only when `-R/--repo <repo>` is present in argv;
+      # also rejects the repo value showing up as a positional argument
+      # (i.e. misparsed as the PR identifier).
+      cat >"$d/gh" <<EOF
+#!/usr/bin/env bash
+prev=""
+found=0
+for arg in "\$@"; do
+  if [ "\$arg" = "$repo" ]; then
+    if [ "\$prev" = "-R" ] || [ "\$prev" = "--repo" ]; then
+      found=1
+    else
+      echo "gh: repo value misparsed as positional identifier" >&2
+      exit 1
+    fi
+  fi
+  prev="\$arg"
+done
+if [ "\$found" = "1" ]; then
+  echo "$branch"
+  exit 0
+fi
+echo "gh: repo selection not forwarded" >&2
+exit 1
 EOF
       ;;
   esac
@@ -121,7 +152,9 @@ run_case() {
   local ok=1
   case "$expect" in
     block)
-      [ "$rc" -eq 2 ] && [ -n "$out" ] || ok=0
+      # exit 2 alone is not enough — the block message must identify the
+      # conflicting worktree, or a crash could masquerade as a gate decision
+      [ "$rc" -eq 2 ] && [[ "$out" == *"$WT"* ]] || ok=0
       ;;
     pass)
       [ "$rc" -eq 0 ] || ok=0
@@ -173,11 +206,28 @@ run_case "8 pass: unrelated gh command (gh pr view)" \
 run_case "9 pass: unrelated Bash command" \
   pass "$BRANCH_GH" "echo hello"
 
-run_case "10 block: global flag before subcommand still detected" \
-  block "$BRANCH_GH" "gh -R owner/repo pr merge 42 --squash --delete-branch"
+REPO_GH=$(make_fake_gh repo-required feature-checked-out owner/repo)
+
+run_case "10 block: global flag before subcommand still detected + -R forwarded to gh pr view" \
+  block "$REPO_GH" "gh -R owner/repo pr merge 42 --squash --delete-branch"
+
+run_case "10b block: --repo=owner/repo inline form forwarded" \
+  block "$REPO_GH" "gh --repo=owner/repo pr merge 42 --squash --delete-branch"
+
+run_case "10c block: -R between pr and merge (inherited flag placement)" \
+  block "$REPO_GH" "gh pr -R owner/repo merge 42 --squash --delete-branch"
+
+run_case "10d block: -R after merge, no identifier -> repo value not misparsed as identifier" \
+  block "$REPO_GH" "gh pr merge -R owner/repo --squash --delete-branch"
+
+run_case "10e block: -R trailing after all merge flags" \
+  block "$REPO_GH" "gh pr merge 42 --squash --delete-branch -R owner/repo"
 
 run_case "11 block: no PR identifier -> gh infers from current branch" \
   block "$BRANCH_GH" "gh pr merge --squash --delete-branch"
+
+run_case "11b pass: -d as a value of --body is not a delete-branch request" \
+  pass "$BRANCH_GH" "gh pr merge 42 --body -d"
 
 PRAXIS_HOOK_BYPASS_MERGE_WORKTREE_GATE=1 \
   run_case "12 pass: bypass env var set" \

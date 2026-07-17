@@ -33,23 +33,29 @@ retrieval path at all.
 
 1. `tool_name == "Bash"` — non-Bash tools exit 0 silently.
 2. Tokenize with `_hook_utils.safe_tokenize` + `iter_command_starts` and scan
-   every command segment for `gh pr merge` (mirrors
-   `pre-merge-approval-gate`'s `is_gh_pr_merge` — `gh` global flags
-   `-R/--repo`/`--hostname`/`--color` are walked past before the subcommand
-   check).
+   every command segment for `gh pr merge`. `gh` global flags
+   (`-R/--repo`/`--hostname`/`--color`) are inherited cobra flags that gh
+   accepts in any position — before `pr`, between `pr` and `merge`, and after
+   `merge` — so the walker skips them (capturing a repo selection) wherever
+   they appear.
 3. Within that segment, `-d`/`--delete-branch` must be present — without it,
    `gh` never attempts to delete the local branch, so no worktree conflict
-   can occur and the segment is skipped.
+   can occur and the segment is skipped. The scan walks past values consumed
+   by value-taking merge flags (`--body -d` is a body of `-d`, not a
+   delete-branch request) and stops at `--`.
 4. Extract the positional PR identifier (number / URL / branch name), if
-   any, walking past `gh pr merge`'s own value-taking flags
+   any, walking past value-taking flags — `gh pr merge`'s own
    (`-A/--author-email`, `-b/--body`, `-F/--body-file`, `-t/--subject`,
-   `--match-head-commit`).
+   `--match-head-commit`) and the inherited global ones, so a post-`merge`
+   `-R owner/repo` is never misread as the identifier.
 5. Resolve the live head branch:
    `gh pr view <identifier> --json headRefName -q .headRefName`
    (`cwd` from the hook payload). When no identifier was parsed, `gh pr view`
    is called with **no positional argument** — gh then infers the PR from the
    current branch, exactly mirroring what `gh pr merge` itself would do with
-   no identifier.
+   no identifier. A `-R/--repo` value on the merge command (separate or
+   `--repo=` inline form) is forwarded to `gh pr view` so the PR resolves in
+   the repository the merge actually targets, not the payload `cwd`'s repo.
 6. List worktrees: `git worktree list --porcelain`, parsed into
    `{branch_name: worktree_path}`.
 7. If the resolved head branch is a key in that map → **block**, citing the
@@ -64,7 +70,9 @@ retrieval path at all.
 | `gh pr merge N --squash` (no delete-branch flag) | pass — no local-branch deletion is attempted |
 | `gh pr merge N --squash --delete-branch`, head branch not checked out anywhere | pass — no conflict |
 | `gh pr merge --squash --delete-branch` (no identifier) | resolved via `gh pr view`'s own current-branch inference, then checked the same way |
-| `gh -R owner/repo pr merge N --delete-branch` | detected — global flags are walked past |
+| `gh -R owner/repo pr merge N --delete-branch` | detected — global flags are walked past, and the repo selection is forwarded to `gh pr view` |
+| `gh pr -R owner/repo merge N -d` / `gh pr merge -R owner/repo -d` | detected — inherited flags are accepted in any position, repo forwarded, and the repo value is never misread as the PR identifier |
+| `gh pr merge N --body -d` | pass — `-d` here is the value of `--body`, not a delete-branch flag |
 | `gh pr view N ...` / other non-`merge` gh subcommands | pass — subcommand check requires exactly `pr merge` |
 
 ## Scope decision — compound commands not special-cased
@@ -117,11 +125,17 @@ hook wins):
 bash tests/hooks/preflight-gate/test_gh_merge_worktree_precondition.sh
 ```
 
-13 cases: block on confirmed conflict (long and short delete-branch flags,
-with and without an explicit PR identifier, with a leading `gh` global
-flag), pass on no-delete-branch / no-conflict / non-Bash / unrelated-command
-segments, fail-open on `gh pr view` error / empty output / malformed stdin
-JSON, and the `PRAXIS_HOOK_BYPASS_MERGE_WORKTREE_GATE` opt-out. Worktree
+18 cases: block on confirmed conflict (long and short delete-branch flags,
+with and without an explicit PR identifier, with `-R`/`--repo=` in every
+placement gh accepts — before `pr`, between `pr` and `merge`, after `merge`,
+trailing — whose value must be forwarded to `gh pr view` and never misparsed
+as the PR identifier, asserted by a repo-required fake `gh`), pass on
+no-delete-branch (including `--body -d`, where `-d` is an option value) /
+no-conflict / non-Bash / unrelated-command segments, fail-open on
+`gh pr view` error / empty output / malformed stdin JSON, and the
+`PRAXIS_HOOK_BYPASS_MERGE_WORKTREE_GATE` opt-out. Block
+assertions require the stderr message to name the conflicting worktree path,
+so a crash cannot masquerade as a gate decision. Worktree
 conflict cases run against a real temporary git repo + `git worktree add`
 (worktree state cannot be faked without a real `.git`); `gh` calls are
 short-circuited via a per-case fake-bin shim prepended to `PATH`.

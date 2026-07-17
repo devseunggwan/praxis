@@ -20,19 +20,24 @@ rule being retrieved from memory every time.
 
 1. `tool_name == "Bash"` — non-Bash tools exit 0 silently.
 2. Tokenize with `_hook_utils.safe_tokenize` + `iter_command_starts` and scan
-   every command segment for `gh pr merge` (mirrors
-   `pre-merge-approval-gate.is_gh_pr_merge` — gh global flags such as
-   `-R/--repo`/`--hostname`/`--color` are walked past).
+   every command segment for `gh pr merge`. gh global flags
+   (`-R/--repo`/`--hostname`/`--color`) are inherited cobra flags accepted in
+   any position — before `pr`, between `pr` and `merge`, and after `merge` —
+   so they are walked past (and a repo selection captured) wherever they
+   appear.
 3. Within that segment, the merge must also carry `-d`/`--delete-branch` —
    without it, gh never attempts to delete the local branch, so the worktree
-   conflict cannot occur.
+   conflict cannot occur. Values consumed by value-taking flags are skipped
+   (`--body -d` is a body value, not a delete request).
 4. Extract the PR identifier (number / URL / branch), if any, walking past
-   `gh pr merge`'s own value-taking flags (`-A/--author-email`, `-b/--body`,
-   `-F/--body-file`, `-t/--subject`, `--match-head-commit`).
+   value-taking flags — `gh pr merge`'s own (`-A/--author-email`, `-b/--body`,
+   `-F/--body-file`, `-t/--subject`, `--match-head-commit`) and the inherited
+   global ones (so `-R owner/repo` is never misread as the identifier).
 5. Resolve the PR's head branch via `gh pr view <identifier> --json
    headRefName -q .headRefName` (or with no identifier when none was given —
    gh then infers the PR from the current branch, exactly mirroring what the
-   merge command itself would do).
+   merge command itself would do). A `-R/--repo` value on the merge command
+   is forwarded so the view resolves in the same repository.
 6. List worktrees via `git worktree list --porcelain` and check whether any
    entry's branch equals the resolved head branch.
 7. A match → deterministic failure → block (exit 2). No match → pass.
@@ -98,67 +103,92 @@ _MERGE_FLAGS_WITH_ARG = frozenset({
     "--match-head-commit",
 })
 
-# `gh pr merge` boolean flags (per `gh pr merge --help`) — needed to detect
-# `--delete-branch`/`-d` and to skip past other boolean flags without
-# mistaking them for the positional identifier.
-_MERGE_BOOL_FLAGS = frozenset({
-    "--admin", "--auto", "-d", "--delete-branch", "--disable-auto",
-    "-m", "--merge", "-r", "--rebase", "-s", "--squash", "--help",
-})
-
 _DELETE_BRANCH_FLAGS = frozenset({"-d", "--delete-branch"})
 
 
-def _merge_segment(argv: list[str]) -> list[str] | None:
-    """Return the argv slice starting at `merge`'s first flag/arg, or None.
+def _merge_segment(argv: list[str]) -> tuple[list[str], str | None] | None:
+    """Return (argv slice after the `merge` token, repo), or None.
 
-    Walks past `gh` global flags and the `pr merge` subcommand tokens.
+    `-R/--repo` (and the other value-taking `gh` global flags) are inherited
+    cobra flags — gh accepts them before `pr`, between `pr` and `merge`, and
+    after `merge` (the last placement is handled by `_scan_tail`). This
+    walker collects the first two non-flag words while skipping flags in any
+    position; the segment is a merge only when those words are exactly
+    `pr merge`. A repo-selection value (`-R owner/repo` / `--repo=owner/repo`)
+    seen along the way is captured so the later `gh pr view` resolves the PR
+    in the same repository the merge targets.
     """
     argv = strip_prefix(argv)
     if not argv or not _is_gh_binary(argv[0]):
         return None
 
+    repo: str | None = None
+    words: list[str] = []
     i = 1
-    while i < len(argv):
+    while i < len(argv) and len(words) < 2:
         tok = argv[i]
         if tok == "--":
             i += 1
-            break
+            if i < len(argv):
+                words.append(argv[i])
+                i += 1
+            continue
         if not tok.startswith("-"):
-            break
+            words.append(tok)
+            i += 1
+            continue
         i += 1
-        if "=" not in tok and tok in GH_GLOBAL_FLAGS_WITH_ARG and i < len(argv):
+        base, eq, inline = tok.partition("=")
+        if eq and base in ("-R", "--repo"):
+            repo = inline or None
+        elif not eq and tok in GH_GLOBAL_FLAGS_WITH_ARG and i < len(argv):
+            if tok in ("-R", "--repo"):
+                repo = argv[i]
             i += 1
 
-    if i + 1 >= len(argv) or argv[i] != "pr" or argv[i + 1] != "merge":
+    if words != ["pr", "merge"]:
         return None
-    return argv[i + 2:]
+    return argv[i:], repo
 
 
-def _has_delete_branch_flag(tail: list[str]) -> bool:
-    for tok in tail:
-        base = tok.split("=", 1)[0]
-        if base in _DELETE_BRANCH_FLAGS:
-            return True
-    return False
+# Value-taking flags that may appear after `merge`: the merge command's own
+# flags plus the inherited gh global flags (cobra allows them post-subcommand).
+_TAIL_FLAGS_WITH_ARG = _MERGE_FLAGS_WITH_ARG | GH_GLOBAL_FLAGS_WITH_ARG
 
 
-def _extract_identifier(tail: list[str]) -> str | None:
-    """Return the first positional (non-flag) token, or None if none present."""
+def _scan_tail(tail: list[str]) -> tuple[bool, str | None, str | None]:
+    """Single walk over the post-`merge` argv: (has_delete, identifier, repo).
+
+    Values consumed by value-taking flags are skipped (`--body -d` must not
+    read `-d` as a delete-branch request, and `-R owner/repo` must not read
+    `owner/repo` as the PR identifier). Everything after `--` is positional.
+    """
+    has_delete = False
+    identifier: str | None = None
+    repo: str | None = None
     i = 0
     while i < len(tail):
         tok = tail[i]
         if tok == "--":
-            i += 1
-            if i < len(tail):
-                return tail[i]
-            return None
+            if identifier is None and i + 1 < len(tail):
+                identifier = tail[i + 1]
+            break
         if not tok.startswith("-"):
-            return tok
-        i += 1
-        if "=" not in tok and tok in _MERGE_FLAGS_WITH_ARG and i < len(tail):
+            if identifier is None:
+                identifier = tok
             i += 1
-    return None
+            continue
+        base, eq, inline = tok.partition("=")
+        if base in _DELETE_BRANCH_FLAGS:
+            has_delete = True
+        if eq and base in ("-R", "--repo"):
+            repo = inline or None
+        i += 1
+        if not eq and base in _TAIL_FLAGS_WITH_ARG and i < len(tail):
+            if base in ("-R", "--repo"):
+                repo = tail[i]
+            i += 1
+    return has_delete, identifier, repo
 
 
 def _run(cmd: list[str], cwd: str | None, timeout: int) -> tuple[int, str]:
@@ -176,10 +206,14 @@ def _run(cmd: list[str], cwd: str | None, timeout: int) -> tuple[int, str]:
         return -1, ""
 
 
-def _resolve_head_branch(identifier: str | None, cwd: str | None) -> str | None:
+def _resolve_head_branch(
+    identifier: str | None, cwd: str | None, repo: str | None = None
+) -> str | None:
     cmd = ["gh", "pr", "view"]
     if identifier:
         cmd.append(identifier)
+    if repo:
+        cmd += ["-R", repo]
     cmd += ["--json", "headRefName", "-q", ".headRefName"]
     rc, out = _run(cmd, cwd, _GH_TIMEOUT_SEC)
     if rc != 0:
@@ -255,14 +289,15 @@ def main() -> int:
         cwd = None
 
     for argv in iter_command_starts(tokens):
-        tail = _merge_segment(argv)
-        if tail is None:
+        seg = _merge_segment(argv)
+        if seg is None:
             continue
-        if not _has_delete_branch_flag(tail):
+        tail, repo = seg
+        has_delete, identifier, tail_repo = _scan_tail(tail)
+        if not has_delete:
             continue
 
-        identifier = _extract_identifier(tail)
-        head_branch = _resolve_head_branch(identifier, cwd)
+        head_branch = _resolve_head_branch(identifier, cwd, tail_repo or repo)
         if not head_branch:
             continue  # cannot determine live head branch — fail-open
 
