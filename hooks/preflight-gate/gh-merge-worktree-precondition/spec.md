@@ -12,7 +12,7 @@ runs, instead of letting it fail and requiring manual recovery.
 
 ## Why this exists
 
-Issue #798. CLAUDE.md's "Pre-merge Worktree Precondition" section documents
+Issue #798. The praxis `worktree-merge-cleanup` skill is the on-demand home for
 the required manual sequence (remove the head-branch worktree, then merge)
 after this exact failure mode recurred across PRs #147, #170-173, #175, and
 #796 in this project — six documented occurrences of the same deterministic
@@ -77,8 +77,9 @@ retrieval path at all.
 
 ## Scope decision — compound commands not special-cased
 
-CLAUDE.md's own "Unified post-merge cleanup sequence" explicitly instructs
-agents NOT to collapse `git worktree remove` + `gh pr merge` into a single
+The `worktree-merge-cleanup` skill's "Unified post-merge cleanup sequence"
+explicitly instructs agents NOT to collapse `git worktree remove` +
+`gh pr merge` into a single
 `&&`-chain (a git hard error mid-chain silently short-circuits later steps
 and trailing output from an earlier step is easily misread as success — the
 exact failure mode `Bulk Operation Pre-Enumeration` and this project's own
@@ -87,7 +88,8 @@ earlier segments of the same compound command for a preceding
 `git worktree remove` that would have already resolved the conflict — adding
 that would require path-order-sensitive reasoning in service of a pattern the
 project's own convention already discourages. Run the two steps as separate
-Bash calls, per the documented "Unified post-merge cleanup sequence."
+Bash calls, per the `worktree-merge-cleanup` skill's "Unified post-merge
+cleanup sequence."
 
 ## Fail-open
 
