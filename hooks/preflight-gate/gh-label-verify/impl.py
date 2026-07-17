@@ -26,9 +26,17 @@ Pipeline:
      name -q '.[].name'`, cached per-repo for PRAXIS_GH_LABEL_CACHE_TTL_SEC
      (default 300) at <XDG_CACHE_HOME or ~/.cache>/claude-praxis/
      gh-label-cache.json. Cache corrupt / unwritable → in-memory only.
-  6. If any extracted label is absent from the fetched set → exit 2 with
-     a stderr block listing the missing labels and a sample of valid
-     labels for the repo.
+  6. Decide whether absence from that set is proof. The listing is row-
+     limited, so when it comes back full the repo may hold labels we cannot
+     see; each absent label is then re-checked via
+     `gh api repos/<r>/labels/<name>` and only a 404 counts as absent
+     (anything else → fail-open). A listing under the limit is complete, so
+     absence is proof on its own and no re-check is needed — which also
+     keeps the gate working offline off a warm cache. Listing and re-checks
+     share one deadline drawn from the gate's manifest timeout; once it
+     passes, remaining re-checks fail open rather than overrun the budget.
+  7. If any label is absent → exit 2 with a stderr block listing the
+     missing labels and a sample of valid labels for the repo.
 
 Fail-open in every infrastructure-error path: gh missing, network fail,
 auth fail, shlex parse error, transcript missing, cwd not a git repo
@@ -48,6 +56,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import quote
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
@@ -67,6 +76,13 @@ _DEFAULT_CACHE_TTL_SEC = 300
 _GH_LABEL_FETCH_TIMEOUT_SEC = 10
 _GIT_REMOTE_TIMEOUT_SEC = 2
 _GH_LABEL_LIMIT = 300
+
+# hooks/manifest.json gives this gate a 15s timeout. The listing fetch and the
+# per-label re-checks share that one budget, so they need a common deadline —
+# left to their own 10s each they would overrun it and the host would kill the
+# hook mid-session. The margin covers interpreter startup and process spawn.
+_HOOK_TIMEOUT_SEC = 15
+_HOOK_TIMEOUT_MARGIN_SEC = 2
 
 _LABEL_FLAGS: frozenset[str] = frozenset({"--label", "-l", "--add-label"})
 _REPO_FLAGS: frozenset[str] = frozenset({"--repo", "-R"})
@@ -91,6 +107,7 @@ _REPO_URL_RE = re.compile(r"[:/]([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
 @fail_open
 def main() -> int:
+    deadline = time.monotonic() + (_HOOK_TIMEOUT_SEC - _HOOK_TIMEOUT_MARGIN_SEC)
     try:
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
@@ -113,7 +130,7 @@ def main() -> int:
 
     for raw_argv in iter_command_starts(tokens):
         argv = strip_prefix(list(raw_argv))
-        rc = _process_segment(argv, cwd)
+        rc = _process_segment(argv, cwd, deadline)
         if rc != 0:
             return rc
     return 0
@@ -121,7 +138,7 @@ def main() -> int:
 
 
 
-def _process_segment(argv: list[str], cwd: str) -> int:
+def _process_segment(argv: list[str], cwd: str, deadline: float) -> int:
     if len(argv) < 3 or argv[0] != "gh":
         return 0
     if (argv[1], argv[2]) not in _LABELED_SUBCMDS:
@@ -138,13 +155,23 @@ def _process_segment(argv: list[str], cwd: str) -> int:
     if not repo:
         return 0
 
-    valid = _get_labels(repo)
-    if valid is None:
+    got = _get_labels(repo)
+    if got is None:
         return 0
+    valid, truncated = got
 
     missing = [lbl for lbl in labels if lbl not in valid]
     if not missing:
         return 0
+
+    # A truncated listing hides the repo's tail, so absence from it proves
+    # nothing — confirm each candidate against the API and block only on a
+    # definite 404. A complete listing is proof on its own, which also keeps
+    # the gate working offline off a warm cache.
+    if truncated:
+        missing = [lbl for lbl in missing if _label_absent(repo, lbl, deadline)]
+        if not missing:
+            return 0
 
     _emit_block(missing, repo, sorted(valid)[:20])
     return 2
@@ -243,11 +270,14 @@ def _cache_ttl_sec() -> int:
         return _DEFAULT_CACHE_TTL_SEC
 
 
-def _get_labels(repo: str) -> frozenset[str] | None:
-    """Return the set of label names defined in `repo`, with caching.
+def _get_labels(repo: str) -> tuple[frozenset[str], bool] | None:
+    """Return (label names defined in `repo`, truncated), with caching.
 
     Returns None when the label set cannot be determined (gh missing,
     network failure, auth failure) — caller treats this as fail-open.
+
+    A cache entry written before `truncated` was tracked is read as truncated,
+    so a stale entry can never justify a block on its own.
     """
     now = time.time()
     cache_path = _cache_path()
@@ -261,14 +291,19 @@ def _get_labels(repo: str) -> frozenset[str] | None:
             and isinstance(labels, list)
             and (now - fetched_at) < _cache_ttl_sec()
         ):
-            return frozenset(labels)
+            return frozenset(labels), bool(entry.get("truncated", True))
 
     fetched = _fetch_labels(repo)
     if fetched is None:
         return None
-    cache[repo] = {"labels": sorted(fetched), "fetched_at": now}
+    names, truncated = fetched
+    cache[repo] = {
+        "labels": sorted(names),
+        "fetched_at": now,
+        "truncated": truncated,
+    }
     _save_cache(cache_path, cache)
-    return frozenset(fetched)
+    return frozenset(names), truncated
 
 
 def _load_cache(path: Path) -> dict:
@@ -291,7 +326,12 @@ def _save_cache(path: Path, cache: dict) -> None:
         pass
 
 
-def _fetch_labels(repo: str) -> set[str] | None:
+def _fetch_labels(repo: str) -> tuple[set[str], bool] | None:
+    """Return (labels, truncated) for `repo`, or None on any fetch failure.
+
+    `truncated` is True when the listing filled the row limit — the repo may
+    hold more labels than we can see, so absence from `labels` proves nothing.
+    """
     try:
         r = subprocess.run(
             [
@@ -309,7 +349,54 @@ def _fetch_labels(repo: str) -> set[str] | None:
         return None
     if r.returncode != 0:
         return None
-    return {ln.strip() for ln in r.stdout.splitlines() if ln.strip()}
+    labels = {ln.strip() for ln in r.stdout.splitlines() if ln.strip()}
+    return labels, len(labels) >= _GH_LABEL_LIMIT
+
+
+def _split_host(repo: str) -> tuple[str | None, str]:
+    """Split gh's `[HOST/]OWNER/REPO` into (host, `OWNER/REPO`).
+
+    `gh label list --repo` resolves the optional host itself; `gh api` does not,
+    so the host has to move to `--hostname` or the request goes to github.com
+    with the host stuck in the path.
+    """
+    parts = repo.split("/")
+    if len(parts) == 3:
+        return parts[0], f"{parts[1]}/{parts[2]}"
+    return None, repo
+
+
+def _label_absent(repo: str, label: str, deadline: float) -> bool:
+    """True only when the API definitively reports `label` missing (404).
+
+    Every other outcome — success, network/auth failure, an unexpected status,
+    no time left in the hook's budget — returns False so the gate fails open
+    rather than blocking on an absence it could not prove.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return False
+
+    host, owner_repo = _split_host(repo)
+    cmd = ["gh", "api"]
+    if host:
+        cmd += ["--hostname", host]
+    cmd.append(f"repos/{owner_repo}/labels/{quote(label, safe='')}")
+    try:
+        r = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=min(remaining, _GH_LABEL_FETCH_TIMEOUT_SEC),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if r.returncode == 0:
+        return False
+    # Match the status marker, not a bare "404": gh echoes the request URL on
+    # connection errors, so a label like `hub-issue-404` would otherwise read
+    # its own name back as proof of its absence.
+    return "(HTTP 404)" in r.stderr
 
 
 # ---------------------------------------------------------------------------
