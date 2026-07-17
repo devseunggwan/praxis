@@ -83,9 +83,10 @@ condition, so each re-check blocks again on the same ground — and, with an
 identical message every time, the 1st block and the 3rd are indistinguishable.
 
 The hook now reads its own prior fires back from the fire ledger
-(`_fire_ledger.count_session_fires`, the in-session read path added in issue
-#805) and, from the **2nd same-session block onward**, prepends an escalation
-banner that names that exact anti-pattern ("changing HOW you invoke the commit
+(`_fire_ledger.count_session_fires`, the in-session read path added in
+issue #805) and, from the **2nd same-session block onward**, prepends an
+escalation banner that names that exact anti-pattern ("changing HOW you invoke
+the commit
 does NOT change the gate condition — run the review"). The count is
 session-scoped and `decision="block"`-filtered: only prior *blocks* of this hook
 in this `session_id` raise it, and the dispatcher records each block *after* the
@@ -169,7 +170,8 @@ hardened-parser bypass forms (grouped `(git commit …)`, unquoted substitution
 quoted substitution, single-quoted literal pass, double-quoted literal pass,
 terminal options `--help`/`--version`), out-of-scope (non-Bash tool, `git push`
 / `git status`), fail-open (no `transcript_path`, nonexistent path,
-malformed stdin, unparseable command), and repeated-block escalation (issue
-#805: 1st same-session block has no banner, 2nd block escalates, a different
-session is independent). The `count_session_fires` read primitive is unit-tested
+malformed stdin, unparseable command), and repeated-block escalation
+(issue #805: 1st same-session block has no banner, 2nd block escalates, a
+different session is independent). The `count_session_fires` read primitive is
+unit-tested
 in `tests/test_fire_ledger.py`.
