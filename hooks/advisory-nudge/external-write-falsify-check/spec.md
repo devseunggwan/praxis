@@ -39,6 +39,7 @@ question.
 | `mcp__*notion*__*create_page*` / `*update_page*`                                   | text fields contain hypothesis marker                                        | Check 1            |
 | `Write` to staging path (`/tmp/*-issue-*.md`, `/tmp/*-pr-*.md`, `.omc/plans/*.md`) | cluster-approval language in last 5 user messages                            | Check 3            |
 | any `gh` / MCP write body above                                                    | applied-on-branch claim line without reachability probe in recent transcript | Check 4            |
+| any `gh` / MCP write body above                                                    | first-person completion claim (over-claiming, e.g. "I've updated")           | Check 5            |
 | `gh issue list` / `gh search issues` / Read tool                                   | —                                                                            | passthrough silent |
 
 Hypothesis markers (whole-segment substring match): English 16 —
@@ -88,6 +89,7 @@ export PRAXIS_EXTERNAL_WRITE_STRICT=1   # Check 1: hypothesis markers
 export PRAXIS_AUTHOR_EXEMPT_STRICT=1    # Check 2: author-exempt identifiers
 export PRAXIS_CLUSTER_APPROVAL_STRICT=1 # Check 3: cluster-approval staging
 export PRAXIS_APPLIED_CLAIM_STRICT=1    # Check 4: applied-on-branch claims
+export PRAXIS_OVERCLAIM_STRICT=1        # Check 5: over-claiming completion claims
 ```
 
 Each env var controls its own check independently. All accept the **literal
@@ -279,13 +281,76 @@ deferred to a 3rd consumer per repo convention); that Stop-hook gates the
 Default: advisory (exit 0). Set `PRAXIS_APPLIED_CLAIM_STRICT=1` for hard
 block (exit 2).
 
+### Over-claiming detection (issue #802)
+
+A fifth advisory fires when the write body contains a **first-person
+modification-completion claim** — the *opposite polarity* of the Check 1
+hypothesis scan. Check 1 catches under-claiming (too uncertain to publish);
+this catches over-claiming (a confident but false "done" claim). A completion
+claim like `§3 제안도 반영했습니다` carries **zero hedging tokens**, so Check 1
+passes it by construction — retrospect 2026-07-17 observed a review reply
+asserting two review items were incorporated when only one actually ran, the
+false sentences mapping 1:1 onto the un-executed items (structural projection
+of the review ask onto the draft).
+
+Full claim↔tool-call verification is an NL-matching problem and out of scope
+(the issue is explicit). The gate is a **pure-detection advisory** with no
+transcript-clearing arm — the failing case *did* run a tool (a docstring fix),
+just not one matching every claim, so an "any tool activity" clearing rule
+would suppress exactly the case to catch. The author self-cross-checks each
+claim.
+
+#### What is detected
+
+- **Korean** (whole-string substring, requires an active completion inflection
+  `했`/`함`): `반영했` / `반영함`, `정리했` / `정리함`, `바꿨`, `변경했`,
+  `수정했`, `완료했` / `완료함`, `교체했`, `추가했`, `제거했`, `삭제했`,
+  `업데이트했`, `갱신했`. Verification/status nouns (`검증 완료: 819 rows`) and
+  the passive `됐` form (`prod에 반영됐습니다` — a factual observation, and the
+  applied-on-branch check's domain) are deliberately excluded.
+- **English** (anchored regex so bare ambiguous past tense does not fire):
+  `I've` / `I have` + `{updated, fixed, changed, rewrote, rewritten,
+  reorganized, replaced, addressed, incorporated, revised, adjusted, reflected,
+  removed, added, edited}`; or `{updated, rewrote, rewritten, reorganized,
+  revised, edited, replaced} the {pr, body, description, comment, doc,
+  docstring}`.
+
+#### Advisory text
+
+```text
+REMINDER (External-Surface Write / Over-Claiming): body contains
+first-person completion claims (반영했 / 정리했 / 수정했 · "I've updated")
+asserting work is done.
+The falsification gate scans for UNDER-claiming (hypothesis hedging); an
+over-claim — a confident but false 'done' claim — carries no hedging token
+and passes by construction (issue #802).
+Cross-check EACH completion claim against a tool call that actually ran this
+session. Remove or correct any claim whose action was not executed ...
+Set PRAXIS_OVERCLAIM_STRICT=1 to convert this advisory into a hard block
+(exit 2).
+```
+
+Default: advisory (exit 0). Set `PRAXIS_OVERCLAIM_STRICT=1` for hard block
+(exit 2).
+
+#### Known limits
+
+- **Fires on truthful completion claims too.** The check cannot tell a true
+  `수정했습니다` from a false one, so it fires on every external write whose
+  body carries a completion verb. This is accepted: the advisory is a
+  self-cross-check reminder, not a truth oracle (the issue is N=1 with the
+  falseness only detectable by claim↔tool-call diff).
+- Scope is the review-reply projection verb family. Ordinary factual verbs
+  (`추가했`/`added` etc.) are included but bare English past tense without the
+  `I've` / verb-the-artifact anchor is not, to bound false positives.
+
 ### Tests
 
 ```bash
 bash tests/hooks/advisory-nudge/test_external_write_falsify_check.sh
 ```
 
-Covers 48 cases across the warn / silent / strict-block dimensions:
+Covers 60 cases across the warn / silent / strict-block dimensions:
 `gh` write subcommands (`comment`, `create`, `edit`, `review`) with each
 body flag form (`--body`, `-b`, `--body-file`, `-F`, `--body=value`),
 MCP slack / notion writes including nested shapes (Notion
@@ -305,7 +370,11 @@ does NOT clear the claim**, merge-base / baseRefName evidence clearing,
 negated claim, branch-token-only, applied-token-only, strict mode block,
 `grep baseRefName` non-clearing, long-flag `--contains` clearing,
 `without incident` still firing, `released the lock` silent,
-baseRefName-only query non-clearing).
+baseRefName-only query non-clearing), and 12 over-claiming cases (#802:
+KO 반영했 / 정리했 / 바꿨 / 완료했 claims, EN `I have updated` / `rewrote the
+description`, MCP slack completion claim, false-positive guards for the 완료
+noun form / passive 반영됐 form / bare EN past tense, strict-mode block, and
+strict-mode silent when no over-claim present).
 
 ### Evidence-trail follow-up
 

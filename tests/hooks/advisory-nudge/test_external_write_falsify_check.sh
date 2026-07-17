@@ -35,13 +35,15 @@ run_case() {
   local err_file
   err_file=$(mktemp)
   if [ "$strict" = "strict" ]; then
-    echo "$payload" | env -u PRAXIS_CLUSTER_APPROVAL_STRICT -u PRAXIS_APPLIED_CLAIM_STRICT PRAXIS_EXTERNAL_WRITE_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
+    echo "$payload" | env -u PRAXIS_CLUSTER_APPROVAL_STRICT -u PRAXIS_APPLIED_CLAIM_STRICT -u PRAXIS_OVERCLAIM_STRICT PRAXIS_EXTERNAL_WRITE_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
   elif [ "$strict" = "cluster_strict" ]; then
-    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_APPLIED_CLAIM_STRICT PRAXIS_CLUSTER_APPROVAL_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
+    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_APPLIED_CLAIM_STRICT -u PRAXIS_OVERCLAIM_STRICT PRAXIS_CLUSTER_APPROVAL_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
   elif [ "$strict" = "applied_strict" ]; then
-    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_CLUSTER_APPROVAL_STRICT PRAXIS_APPLIED_CLAIM_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
+    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_CLUSTER_APPROVAL_STRICT -u PRAXIS_OVERCLAIM_STRICT PRAXIS_APPLIED_CLAIM_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
+  elif [ "$strict" = "overclaim_strict" ]; then
+    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_CLUSTER_APPROVAL_STRICT -u PRAXIS_APPLIED_CLAIM_STRICT PRAXIS_OVERCLAIM_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
   else
-    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_CLUSTER_APPROVAL_STRICT -u PRAXIS_APPLIED_CLAIM_STRICT python3 "$HOOK" >/dev/null 2>"$err_file"
+    echo "$payload" | env -u PRAXIS_EXTERNAL_WRITE_STRICT -u PRAXIS_CLUSTER_APPROVAL_STRICT -u PRAXIS_APPLIED_CLAIM_STRICT -u PRAXIS_OVERCLAIM_STRICT python3 "$HOOK" >/dev/null 2>"$err_file"
   fi
   local rc=$?
   local err
@@ -366,6 +368,66 @@ run_case "applied: baseRefName-only query does NOT clear (warn)" \
   "warn" "advisory" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue comment 100 --body \\\"The fix is applied to prod.\\\"\"},\"transcript_path\":\"$AP_TRANSCRIPT_BRO\"}"
 rm -f "$AP_TRANSCRIPT_BRO"
+
+# --- over-claiming (false-completion) detection (issue #802) ---
+
+# KO first-person completion claim in a review reply → warn.
+run_case "overclaim: KO 반영했습니다 (warn)" \
+  "warn" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr comment 9248 --body \"§3 제안도 반영했습니다.\""}}'
+
+run_case "overclaim: KO 정리했습니다 (warn)" \
+  "warn" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr comment 9248 --body \"§7 체크박스는 근거를 달아 정리했습니다.\""}}'
+
+run_case "overclaim: KO 바꿨습니다 (warn)" \
+  "warn" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue comment 100 --body \"PR 본문을 전수 논증으로 바꿨습니다.\""}}'
+
+run_case "overclaim: KO 완료했습니다 (warn)" \
+  "warn" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue comment 100 --body \"요청한 작업을 모두 완료했습니다.\""}}'
+
+# EN first-person completion claim → warn.
+run_case "overclaim: EN I have updated (warn)" \
+  "warn" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr comment 50 --body \"I have updated the PR body per your review.\""}}'
+
+run_case "overclaim: EN rewrote the description (warn)" \
+  "warn" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr comment 50 --body \"Rewrote the description to use an exhaustive argument.\""}}'
+
+# MCP surface carries the over-claim → warn.
+run_case "overclaim: MCP slack 수정했습니다 (warn)" \
+  "warn" "advisory" \
+  '{"tool_name":"mcp__slack__slack_send_message","tool_input":{"text":"지적하신 부분을 수정했습니다."}}'
+
+# --- over-claiming false-positive guards → silent ---
+
+# 완료 as a noun ("verification complete"), not 완료했 → silent.
+run_case "overclaim: KO 검증 완료 noun form (silent)" \
+  "silent" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue comment 100 --body \"검증 완료: 819 rows.\""}}'
+
+# Passive 됐 form ("was reflected") is a factual observation, not a first-person
+# completion claim; no branch token so applied-on-branch also stays silent.
+run_case "overclaim: KO passive 반영됐 form (silent)" \
+  "silent" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue comment 100 --body \"요청 사항이 반영됐습니다.\""}}'
+
+# Bare ambiguous EN past tense (no I've / no verb-the-artifact) → silent.
+run_case "overclaim: EN bare past tense (silent)" \
+  "silent" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue comment 100 --body \"The value changed after the migration ran.\""}}'
+
+# --- over-claiming strict mode → block ---
+run_case "overclaim: strict mode + KO claim (block)" \
+  "block" "overclaim_strict" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue comment 100 --body \"리뷰 지적을 반영했습니다.\""}}'
+
+run_case "overclaim: strict mode + no over-claim (silent)" \
+  "silent" "overclaim_strict" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh issue comment 100 --body \"Verified by tests.\""}}'
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"

@@ -19,6 +19,13 @@ When the body contains hypothesis markers (might / could / potentially / appears
 to / is failing / 가설 / 추정), it emits a stderr advisory reminding the user
 to verify each factual claim with executed evidence before posting.
 
+The hypothesis scan catches the UNDER-claiming polarity (too uncertain to
+publish). The opposite polarity — a confident but false COMPLETION claim
+(반영했습니다 / "I've updated the PR") — carries zero hedging tokens and would
+pass the hypothesis scan by construction. A separate over-claiming scan
+(issue #802) detects first-person modification-completion phrases and reminds
+the author to cross-check each claim against a tool call that actually ran.
+
 Additionally, when the body contains author-exempt claim shapes (mapping table
 rows or bash code blocks with unverified identifiers) and no verification call
 (gh label list / DESCRIBE / <binary> --help) is found in the recent transcript,
@@ -26,9 +33,11 @@ it emits a separate advisory (issue #183).
 
 Exits 0 by default — this is an advisory, not a block. Set
 `PRAXIS_EXTERNAL_WRITE_STRICT=1` to convert hypothesis-marker detection into a
-hard block (exit 2). Set `PRAXIS_AUTHOR_EXEMPT_STRICT=1` to convert author-exempt
-detection into a hard block (exit 2). Set `PRAXIS_CLUSTER_APPROVAL_STRICT=1` to
-convert cluster-approval staging detection into a hard block (exit 2).
+hard block (exit 2). Set `PRAXIS_OVERCLAIM_STRICT=1` to convert over-claiming
+detection into a hard block (exit 2). Set `PRAXIS_AUTHOR_EXEMPT_STRICT=1` to
+convert author-exempt detection into a hard block (exit 2). Set
+`PRAXIS_CLUSTER_APPROVAL_STRICT=1` to convert cluster-approval staging detection
+into a hard block (exit 2).
 
 Uses shlex tokenization (same approach as block-gh-state-all.py / side-effect-scan.py)
 so that pattern references inside quoted strings, echo arguments, or comments
@@ -250,6 +259,67 @@ def _has_hypothesis_marker(body: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Over-claiming (false-completion) marker scan (issue #802)
+# ---------------------------------------------------------------------------
+# The opposite polarity of the hypothesis scan. A confident but false completion
+# claim ("§3 제안도 반영했습니다" when §3 was never executed) has no hedging
+# token, so the hypothesis scan passes it by construction. Retrospect
+# 2026-07-17 observed exactly this: a review reply asserted two review items
+# were incorporated when only one ran; the false sentences mapped 1:1 onto the
+# un-executed items (structural projection of the review ask onto the draft).
+#
+# Full claim↔tool-call verification is an NL-matching problem and out of scope
+# (the issue is explicit about this). The realistic gate is an advisory that
+# fires on first-person modification-completion phrases and asks the author to
+# self-cross-check each claim against a tool call that actually ran.
+#
+# Scope is the review-reply projection verb family (reflected / organized /
+# fixed / changed / replaced / updated / completed). The Korean markers require
+# an active completion inflection (했/함) so that verification/status nouns
+# ("검증 완료: 819 rows") and the passive 됐 form ("prod에 반영됐습니다" — a
+# factual observation, and the applied-on-branch check's domain) do not surface.
+_OVERCLAIM_MARKERS_KO = (
+    "반영했", "반영함",
+    "정리했", "정리함",
+    "바꿨",
+    "변경했",
+    "수정했",
+    "완료했", "완료함",
+    "교체했",
+    "추가했",
+    "제거했",
+    "삭제했",
+    "업데이트했",
+    "갱신했",
+)
+
+# English first-person completion claims. Anchored to "I've / I have + verb" or
+# "verb + the <artifact>" so bare ambiguous past tense ("the value changed")
+# does not false-positive.
+_OVERCLAIM_MARKERS_EN = (
+    re.compile(
+        r"\bi(?:'ve|\s+have)\s+"
+        r"(?:updated|fixed|changed|rewrote|rewritten|reorganized|replaced|"
+        r"addressed|incorporated|revised|adjusted|reflected|removed|added|edited)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:updated|rewrote|rewritten|reorganized|revised|edited|replaced)\s+"
+        r"the\s+(?:pr|body|description|comment|doc|docstring)\b",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _has_overclaim_marker(body: str) -> bool:
+    if not body:
+        return False
+    if any(marker in body for marker in _OVERCLAIM_MARKERS_KO):
+        return True
+    return any(p.search(body) for p in _OVERCLAIM_MARKERS_EN)
+
+
+# ---------------------------------------------------------------------------
 # Author-exempt claim-shape detection (issue #183)
 # ---------------------------------------------------------------------------
 # Detects unverified identifiers the agent authored itself: mapping table rows
@@ -403,6 +473,21 @@ ADVISORY_MESSAGE = (
     ".omc/plans/ instead.\n"
     "Set PRAXIS_EXTERNAL_WRITE_STRICT=1 to convert this advisory into a "
     "hard block (exit 2).\n"
+)
+
+OVERCLAIM_ADVISORY = (
+    "REMINDER (External-Surface Write / Over-Claiming): body contains "
+    "first-person completion claims (반영했 / 정리했 / 수정했 · \"I've "
+    "updated\") asserting work is done.\n"
+    "The falsification gate scans for UNDER-claiming (hypothesis hedging); "
+    "an over-claim — a confident but false 'done' claim — carries no hedging "
+    "token and passes by construction (issue #802).\n"
+    "Cross-check EACH completion claim against a tool call that actually ran "
+    "this session. Remove or correct any claim whose action was not executed — "
+    "execution scope silently narrows while the draft still matches the full "
+    "ask.\n"
+    "Set PRAXIS_OVERCLAIM_STRICT=1 to convert this advisory into a hard block "
+    "(exit 2).\n"
 )
 
 AUTHOR_EXEMPT_ADVISORY = (
@@ -653,6 +738,15 @@ def main() -> int:
         if _has_hypothesis_marker(b):
             sys.stderr.write(ADVISORY_MESSAGE)
             if os.environ.get("PRAXIS_EXTERNAL_WRITE_STRICT") == "1":
+                exit_code = 2
+            break
+
+    # --- Check 5: over-claiming completion phrases (issue #802) ---
+    # Opposite polarity of Check 1 — runs independently so a body can trip both.
+    for b in all_bodies:
+        if _has_overclaim_marker(b):
+            sys.stderr.write(OVERCLAIM_ADVISORY)
+            if os.environ.get("PRAXIS_OVERCLAIM_STRICT") == "1":
                 exit_code = 2
             break
 
