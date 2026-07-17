@@ -113,7 +113,7 @@ context, patch false positives, or record tracking state for paired gates.
 Stop hooks that gate **completion claims** before the assistant response is
 finalized. Run sequentially: `completion-verify` → `retrospect-mix-check` →
 `completion-signal-gate` → `readonly-verify-deferral-gate` →
-`merge-state-claim-gate` → `strike-counter stop`.
+`merge-state-claim-gate` → `runtime-state-claim-gate` → `strike-counter stop`.
 Also includes session-lifecycle enforcement.
 
 Signal convention (issue #647 H3): every hook in this role emits stdout JSON —
@@ -129,4 +129,5 @@ channel.
 | [completion-signal-gate](../../hooks/completion-verify/completion-signal-gate/spec.md) | Stop | Advisory nudge when completion-signal phrase appears without evidence-block; also flags cross-plugin slash commands (Event 2) |
 | [readonly-verify-deferral-gate](../../hooks/completion-verify/readonly-verify-deferral-gate/spec.md) | Stop | Advisory when the last turn offers to run a read-only verification (SELECT/kubectl get/git status/--dry-run) instead of running it; mutation carve-out + read-already-run suppressor |
 | [merge-state-claim-gate](../../hooks/completion-verify/merge-state-claim-gate/spec.md) | Stop | Advisory when the final message asserts a merge/PR/issue/worktree state change without a fresh `gh`/GitHub-MCP state query — applied-on-branch claims additionally require reachability evidence (#656) |
+| [runtime-state-claim-gate](../../hooks/completion-verify/runtime-state-claim-gate/spec.md) | Stop | Advisory when the final message asserts a runtime/execution state ("X is running in Y" / "로컬은 건드리지 않습니다") with no probe tool_use in the current turn — launch success does not reveal where something runs (#809) |
 | [strike-counter](../../hooks/completion-verify/strike-counter/spec.md) | SessionStart + UserPromptSubmit + Stop | Session-scoped three-strike discipline — hard-blocks at strike 3, requires reflection before reset |
