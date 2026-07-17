@@ -595,6 +595,23 @@
       }
     },
     {
+      "name": "exclusion-probe-gate",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Edit|Write",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_EXCLUSION_PROBE_STRICT",
+        "bypass_env": [
+          "PRAXIS_EXCLUSION_PROBE_SKIP"
+        ]
+      }
+    },
+    {
       "name": "pre-edit-md-escape-advisory",
       "role": "postuse-correction",
       "event": "PreToolUse",

@@ -39,6 +39,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY` | `negative-existence-verdict-gate` | Demote the negative-existence verdict gate from block to advisory (systemMessage, non-blocking). Set to any non-falsey value (`1` / `true` / `yes`); `0` / `false` / empty keep block mode (mirrors `PRAXIS_ASK_END_ADVISORY`) |
 | `PRAXIS_PUSH_VERIFY_BYPASS` | `push-remote-ref-verify` | Skip the post-push remote-ref verification |
 | `PRAXIS_PATH_PROBE_SKIP` | `path-probe-gate` | Skip the deep-path write gate |
+| `PRAXIS_EXCLUSION_PROBE_SKIP` | `exclusion-probe-gate` | Skip the unprobed-exclusion-directive content gate |
 | `PRAXIS_MD_ESCAPE_SKIP` | `pre-edit-md-escape-advisory` | Skip the markdown-escape advisory |
 | `PRAXIS_PBGUARD_SKIP` | `pre-edit-protected-branch-guard` | Skip the protected-branch edit guard |
 | `PRAXIS_MOMENTUM_BYPASS` | `momentum-rule-retrieval-gate` | Skip the high-momentum rule nudge |
@@ -60,6 +61,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_PROTECTED_PATHS_STRICT` | `protected-paths-guard` | |
 | `PRAXIS_DESTRUCTIVE_BASH_STRICT` | `destructive-bash-guard` | |
 | `PRAXIS_PATH_PROBE_STRICT` | `path-probe-gate` | |
+| `PRAXIS_EXCLUSION_PROBE_STRICT` | `exclusion-probe-gate` | |
 | `PRAXIS_PHANTOM_PATH_STRICT` | `external-write-path-existence-check` | |
 | `PRAXIS_MERGE_CLAIM_STRICT` | `merge-state-claim-gate` | |
 | `PRAXIS_PUSH_VERIFY_STRICT` | `push-remote-ref-verify` | |
