@@ -767,6 +767,18 @@
       }
     },
     {
+      "name": "negative-existence-verdict-gate",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_NEGATIVE_EXISTENCE_GATE",
+          "PRAXIS_NEGATIVE_EXISTENCE_ADVISORY"
+        ]
+      }
+    },
+    {
       "name": "strike-counter",
       "role": "completion-verify",
       "body": "impl.sh",
