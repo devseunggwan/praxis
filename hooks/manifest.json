@@ -784,6 +784,18 @@
       }
     },
     {
+      "name": "runtime-state-claim-gate",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10,
+      "mode": {
+        "strict_env": "PRAXIS_RUNTIME_CLAIM_STRICT",
+        "bypass_env": [
+          "PRAXIS_RUNTIME_CLAIM_BYPASS"
+        ]
+      }
+    },
+    {
       "name": "negative-existence-verdict-gate",
       "role": "completion-verify",
       "event": "Stop",

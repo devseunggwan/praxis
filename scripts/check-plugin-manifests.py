@@ -649,7 +649,8 @@ def main() -> int:
     # ------------------------------------------------------------------
     expected_stop = ["completion-verify", "retrospect-mix-check",
                      "completion-signal-gate", "readonly-verify-deferral-gate",
-                     "merge-state-claim-gate", "negative-existence-verdict-gate",
+                     "merge-state-claim-gate", "runtime-state-claim-gate",
+                     "negative-existence-verdict-gate",
                      "strike-counter"]
     actual_stop: list[str] = []
     for entry in manifest["hooks"]:

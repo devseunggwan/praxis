@@ -35,6 +35,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_BULK_WRITE_BYPASS` | `bulk-write-memory-checkpoint` | Skip the bulk-write checkpoint advisory |
 | `PRAXIS_FALSIFY_GATE_BYPASS` | `pre-output-falsification-gate` | Skip both falsification lanes |
 | `PRAXIS_MERGE_CLAIM_BYPASS` | `merge-state-claim-gate` | Skip the merge/PR/issue-state claim gate |
+| `PRAXIS_RUNTIME_CLAIM_BYPASS` | `runtime-state-claim-gate` | Skip the runtime/execution-state claim gate |
 | `PRAXIS_HOOK_BYPASS_NEGATIVE_EXISTENCE_GATE` | `negative-existence-verdict-gate` | Skip the negative-existence verdict `Enumerated:`-line gate |
 | `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY` | `negative-existence-verdict-gate` | Demote the negative-existence verdict gate from block to advisory (systemMessage, non-blocking). Set to any non-falsey value (`1` / `true` / `yes`); `0` / `false` / empty keep block mode (mirrors `PRAXIS_ASK_END_ADVISORY`) |
 | `PRAXIS_PUSH_VERIFY_BYPASS` | `push-remote-ref-verify` | Skip the post-push remote-ref verification |
@@ -64,6 +65,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_EXCLUSION_PROBE_STRICT` | `exclusion-probe-gate` | |
 | `PRAXIS_PHANTOM_PATH_STRICT` | `external-write-path-existence-check` | |
 | `PRAXIS_MERGE_CLAIM_STRICT` | `merge-state-claim-gate` | |
+| `PRAXIS_RUNTIME_CLAIM_STRICT` | `runtime-state-claim-gate` | |
 | `PRAXIS_PUSH_VERIFY_STRICT` | `push-remote-ref-verify` | |
 | `PRAXIS_MOMENTUM_STRICT` | `momentum-rule-retrieval-gate` | |
 | `PRAXIS_MOMENTUM_ACK` | `momentum-rule-retrieval-gate` | Strict-mode unlock token — unblocks one invocation when `PRAXIS_MOMENTUM_STRICT=1`; no effect in advisory mode |
