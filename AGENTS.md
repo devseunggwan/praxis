@@ -25,7 +25,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | **Full**           | + all cmux-* skills                                      | + cmux                                                      |
 | **Multi-provider** | + codex/gemini routing in cmux-*                         | + codex-cli, gemini-cli                                     |
 
-## Skills (15)
+## Skills (16)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Always call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
@@ -41,12 +41,13 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 
 ### Development
 
-| Skill                 | Purpose                                                                                                                                                                                         |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `retrospect`          | Session retrospect — find friction root causes, propose improvements                                                                                                                            |
-| `codex-review-wrap`   | Worktree-aware wrapper for `/codex:review` — forces explicit target selection, premise-verification gate, flip detection across rounds                                                          |
-| `debt`                | Deferred-decision ledger — unions commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) with tree compounding comments (`# [PR #N]`); report-only |
-| `surface-enumeration` | Pre-implementation input-surface enumeration — enumerate every input variant before writing a parser/validator/sanitizer/classifier so each becomes a required test case                        |
+| Skill                    | Purpose                                                                                                                                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `retrospect`             | Session retrospect — find friction root causes, propose improvements                                                                                                                                     |
+| `codex-review-wrap`      | Worktree-aware wrapper for `/codex:review` — forces explicit target selection, premise-verification gate, flip detection across rounds                                                                   |
+| `debt`                   | Deferred-decision ledger — unions commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) with tree compounding comments (`# [PR #N]`); report-only          |
+| `surface-enumeration`    | Pre-implementation input-surface enumeration — enumerate every input variant before writing a parser/validator/sanitizer/classifier so each becomes a required test case                                 |
+| `worktree-merge-cleanup` | On-demand home for the pre-merge worktree precondition + unified post-merge cleanup sequence — base-worktree call site, submodule `--force` caveat, squash-ancestry stale-HEAD guard, no-`&&`-chain rule |
 
 ### Discipline
 

@@ -66,5 +66,6 @@ EXPECTED_SKILLS: frozenset[str] = frozenset({
     "strikes",
     "surface-enumeration",
     "using-praxis",
+    "worktree-merge-cleanup",
     "writing-praxis-skill",
 })
