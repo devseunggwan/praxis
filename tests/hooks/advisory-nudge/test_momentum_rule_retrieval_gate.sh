@@ -650,6 +650,42 @@ run_merge_escalation_case "merge_escalation_incomplete_briefing" \
 run_merge_escalation_case "merge_escalation_complete_briefing" \
   "no" "" "momentum-merge-complete.jsonl"
 
+# Substring-pollution regression (CodeRabbit): a changed+not-verified+risk
+# briefing is 3 real items. "미검증" ⊃ "검증" must NOT also satisfy the verified
+# group (which would inflate to 4 and wrongly pass). Expect deny.
+run_merge_escalation_case "merge_escalation_notverified_substring_denies" \
+  "yes" "" "momentum-merge-notverified-substring.jsonl"
+
+# Direct count assertion: not-verified phrasing must NOT double-count as verified.
+notverified_count_case() {
+  local name="briefing_count_notverified_not_double_counted"
+  local out
+  out=$(python3 - "$HOOK" << 'PYEOF'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("impl", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+cases = {
+    "en": "변경 사항: x. Prod path is not verified. 리스크 낮음.",
+    "ko": "변경 사항: x. prod 경로 미검증. 리스크 낮음.",
+    "unverified": "what changed: x. prod path unverified. risk low.",
+}
+bad = [f"{k}={m._briefing_item_count(v)}" for k, v in cases.items() if m._briefing_item_count(v) >= 4]
+# Complete briefing must still score both verified AND not-verified (6 total).
+full = "변경 사항: x. 테스트 통과 확인. 미검증: prod. 리스크 없음. 남은 항목 없음. Approve merge?"
+if m._briefing_item_count(full) != 6:
+    bad.append(f"complete={m._briefing_item_count(full)}!=6")
+print("OK" if not bad else "BAD:" + ",".join(bad))
+PYEOF
+)
+  if [ "$out" = "OK" ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] $out"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+notverified_count_case
+
 # Trivial-PR marker present → carve-out, no deny even with 0 items.
 run_merge_escalation_case "merge_escalation_trivial_pr_exempt" \
   "no" "" "momentum-merge-trivial.jsonl"

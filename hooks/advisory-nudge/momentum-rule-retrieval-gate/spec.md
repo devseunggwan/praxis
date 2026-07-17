@@ -66,7 +66,10 @@ and silently skip the memory rather than raise.
 ### What is emitted
 
 Each triggered surface writes lines to stderr, all prefixed with
-`[praxis:momentum-gate]`. Tool execution is never blocked in default mode.
+`[praxis:momentum-gate]`. The `dispatch` and `force-push` surfaces never block
+in default mode. The `merge` surface additionally emits a `permissionDecision:
+deny` when the pre-merge briefing is incomplete — see
+[Merge-briefing escalation](#merge-briefing-escalation-issue-797).
 
 Example for `gh pr merge --squash`:
 

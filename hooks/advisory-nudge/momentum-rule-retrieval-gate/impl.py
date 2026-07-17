@@ -40,6 +40,7 @@ import json
 import os
 import re
 import sys
+from collections import deque
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
@@ -296,6 +297,17 @@ _BRIEFING_ITEM_GROUPS: tuple[tuple[str, ...], ...] = (
      "진행할까요", "머지해도", "머지 진행", "proceed with the merge"),
 )
 
+# The 'verified' group shares substrings with the 'not verified' group —
+# "not verified" ⊃ "verified", "not tested" ⊃ "tested", "unverified" ⊃
+# "verified", "미검증" ⊃ "검증". A negative-phrasing briefing would otherwise
+# satisfy BOTH groups from one phrase and inflate the count, letting a
+# changed / not-verified / risk briefing reach the 4-item pass threshold with
+# only 3 real items. The verified check therefore runs against a haystack with
+# the not-verified phrases stripped out first (see _briefing_item_count).
+# Named indices keep the strip correct if the group order is ever changed.
+_VERIFIED_GROUP_IDX = 1
+_NOT_VERIFIED_GROUP_IDX = 2
+
 # Trivial-PR carve-out — CLAUDE.md permits a 2-line report for typo / comment /
 # single-line config merges. When the agent has flagged the PR as trivial, the
 # full 6-item briefing is not required, so do not escalate.
@@ -306,11 +318,21 @@ _TRIVIAL_MERGE_MARKERS: tuple[str, ...] = (
 
 
 def _briefing_item_count(text: str) -> int:
-    """Count distinct Pre-Merge Reporting items present in the assistant text."""
+    """Count distinct Pre-Merge Reporting items present in the assistant text.
+
+    The 'verified' group is checked against a haystack with the 'not verified'
+    phrases stripped out, so a negative-phrasing briefing cannot satisfy both
+    the verified and not-verified items from a single phrase (substring overlap
+    documented at _VERIFIED_GROUP_IDX / _NOT_VERIFIED_GROUP_IDX).
+    """
     low = text.lower()
+    verified_haystack = low
+    for kw in _BRIEFING_ITEM_GROUPS[_NOT_VERIFIED_GROUP_IDX]:
+        verified_haystack = verified_haystack.replace(kw, " ")
     count = 0
-    for group in _BRIEFING_ITEM_GROUPS:
-        if any(kw in low for kw in group):
+    for idx, group in enumerate(_BRIEFING_ITEM_GROUPS):
+        haystack = verified_haystack if idx == _VERIFIED_GROUP_IDX else low
+        if any(kw in haystack for kw in group):
             count += 1
     return count
 
@@ -334,12 +356,14 @@ def _current_turn_assistant_text(transcript_path: str) -> str | None:
         return None
     try:
         with open(transcript_path, "r", encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
+            # Bounded tail read — hold at most TRANSCRIPT_SCAN_LINES lines in
+            # memory instead of loading the whole (potentially huge) transcript.
+            lines = deque(fh, maxlen=TRANSCRIPT_SCAN_LINES)
     except OSError:
         return None
 
     entries: list[dict] = []
-    for line in lines[-TRANSCRIPT_SCAN_LINES:]:
+    for line in lines:
         line = line.strip()
         if not line:
             continue
