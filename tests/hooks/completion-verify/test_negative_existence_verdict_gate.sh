@@ -40,10 +40,11 @@ p.update(json.loads(sys.argv[2]))
 print(json.dumps(p))' "$TRANSCRIPT" "$extra")
   # issue #647 H3: advisory/block both arrive as stdout JSON (exit always 0);
   # stderr must stay empty in every case.
-  local out
-  out=$(printf '%s' "$payload" | env "$@" python3 "$HOOK" 2>/tmp/nev-stderr.$$)
+  local out err_file
+  err_file=$(mktemp)
+  out=$(printf '%s' "$payload" | env "$@" python3 "$HOOK" 2>"$err_file")
   rc=$?
-  err=$(cat /tmp/nev-stderr.$$ 2>/dev/null; rm -f /tmp/nev-stderr.$$)
+  err=$(cat "$err_file"); rm -f "$err_file"
   case "$expected" in
     block)
       [ "$rc" -eq 0 ] || ok=0
