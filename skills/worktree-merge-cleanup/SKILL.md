@@ -70,9 +70,11 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
 3. `cd <base-worktree-path>` or chain `cd <path> && gh pr merge ...` in the same
    Bash call (avoid cwd-reset trap between Bash calls).
 4. Even if the call fails on a worktree conflict, the PR may already be merged
-   on remote (gh order: remote merge → local sync). Manual cleanup:
-   `git worktree remove <path> && git branch -D <branch> && git worktree prune &&
-   git pull origin <base>`.
+   on remote (gh order: remote merge → local sync). Manual cleanup — run each as
+   a **separate** Bash call, never chained (a failure in one step must not
+   short-circuit the rest): `git worktree remove <path>`, then
+   `git branch -D <branch>`, then `git worktree prune`, then
+   `git pull origin <base>`.
 5. **Squash-ancestry stale HEAD guard (post-merge sync mandatory)**: immediately
    after `gh pr merge --squash --delete-branch`, run `git pull origin
    <base-branch>` as a **separate step**. gh merges remote then deletes local
