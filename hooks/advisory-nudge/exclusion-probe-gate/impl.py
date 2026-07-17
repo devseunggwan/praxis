@@ -137,7 +137,46 @@ def _is_skipped_path(file_path: str) -> bool:
 # Non-content masking (fenced code, inline code, blockquotes)
 # ---------------------------------------------------------------------------
 
-_FENCE_RE = re.compile(r"^(\s*)(```+|~~~+)")
+_FENCE_RE = re.compile(r"^(\s*)(`{3,}|~{3,})")
+
+
+def _mask_inline_code(line: str) -> str:
+    """Mask inline-code spans, preserving length.
+
+    Handles multi-backtick delimiters (CommonMark): a span opens on a run of N
+    backticks and closes on the next run of exactly N backticks, so a stray
+    single backtick inside a ``double`` span does not terminate it. A run with
+    no matching closer is left untouched (not a code span).
+    """
+    out = list(line)
+    i = 0
+    n = len(line)
+    while i < n:
+        if line[i] != "`":
+            i += 1
+            continue
+        run = i
+        while run < n and line[run] == "`":
+            run += 1
+        fence_len = run - i
+        # look for a closing run of exactly fence_len backticks
+        j = run
+        while j < n:
+            if line[j] == "`":
+                close = j
+                while close < n and line[close] == "`":
+                    close += 1
+                if close - j == fence_len:
+                    for k in range(i, close):
+                        out[k] = " "
+                    i = close
+                    break
+                j = close
+            else:
+                j += 1
+        else:
+            i = run  # unmatched opener — skip past it
+    return "".join(out)
 
 
 def _mask_noncontent(text: str) -> str:
@@ -150,6 +189,7 @@ def _mask_noncontent(text: str) -> str:
     out_lines: list[str] = []
     in_fence = False
     fence_marker = ""
+    fence_len = 0
     for line in text.split("\n"):
         m = _FENCE_RE.match(line)
         if m:
@@ -157,10 +197,12 @@ def _mask_noncontent(text: str) -> str:
             if not in_fence:
                 in_fence = True
                 fence_marker = token[0]  # ` or ~
+                fence_len = len(token)
                 out_lines.append(" " * len(line))
                 continue
-            # closing fence must use the same fence char
-            if token[0] == fence_marker:
+            # A closing fence must use the same char AND be at least as long as
+            # the opening run (CommonMark): a shorter inner run stays content.
+            if token[0] == fence_marker and len(token) >= fence_len:
                 in_fence = False
                 out_lines.append(" " * len(line))
                 continue
@@ -173,7 +215,7 @@ def _mask_noncontent(text: str) -> str:
             out_lines.append(" " * len(line))
             continue
         # inline-code spans -> spaces (keep length so column math is stable)
-        out_lines.append(re.sub(r"`[^`\n]*`", lambda mm: " " * len(mm.group(0)), line))
+        out_lines.append(_mask_inline_code(line))
     return "\n".join(out_lines)
 
 
@@ -214,9 +256,30 @@ _AXIS_B_PATTERNS = [
 ]
 _AXIS_B_RE = re.compile("|".join(f"(?:{p})" for p in _AXIS_B_PATTERNS), re.IGNORECASE)
 
-# A verification claim is void when negated just before it.
-_NEGATION_PREFIXES = ("not ", "n't ", "never ", "without ", "아직 ", "안 ")
-_NEGATION_TOKENS = ("검증하지", "확인하지", "확인 안", "검증 안", "대조하지")
+# A verification claim is void only when the negation governs the verification
+# verb itself — the negation may be separated from the verb by auxiliaries /
+# adverbs ("has not been verified via", "was never actually confirmed with"),
+# but NOT by another content word. This is what distinguishes a negated claim
+# from an exclusion directive that merely contains a negation word ("do NOT
+# add X, confirmed via Y" — here "not" governs "add", and the claim is live).
+_EN_VERB = r"(?:verified|confirmed|checked|validated|cross-?checked|tested)\s+(?:via|with|by|against|using|through)"
+# negation + (allowed aux/adverb filler)* + verification verb
+_NEG_CLAIM_EN_RE = re.compile(
+    r"(?:\b(?:not|never|without|cannot)\b|n't)"
+    r"(?:\s+(?:been|being|yet|ever|actually|fully|really|properly|"
+    r"independently|directly|so\s+far|as\s+of\s+yet))*"
+    r"\s+" + _EN_VERB,
+    re.IGNORECASE,
+)
+# Korean: negation bound to the verification verb (검증되지 않 / 확인하지 못 /
+# 아직 검증 / 대조 안 됨). The Axis-B forms are the affirmative 확인함·검증됨·
+# 대조 완료, so a negated claim reads 검증/확인/대조 + 하지/되지 + 않/못, or a
+# leading 아직/못/안 directly before the verb.
+_NEG_CLAIM_KO_RE = re.compile(
+    r"(?:검증|확인|대조)\s*(?:하지|되지|한|된)?\s*(?:않|못)"
+    r"|아직\s*(?:검증|확인|대조)"
+    r"|(?:검증|확인|대조)\s*(?:안\s*(?:함|했|됨|해))"
+)
 
 # ---------------------------------------------------------------------------
 # Probe citation (exculpating)
@@ -225,16 +288,18 @@ _NEGATION_TOKENS = ("검증하지", "확인하지", "확인 안", "검증 안", 
 _PROBE_RE = re.compile(r"\bProbe:\s*\S", re.IGNORECASE)
 
 
-def _claim_is_negated(window: str, claim_start: int) -> bool:
-    preceding = window[max(0, claim_start - 12):claim_start].lower()
-    if any(preceding.endswith(p) for p in _NEGATION_PREFIXES):
-        return True
-    return any(tok in window[max(0, claim_start - 12):claim_start + 8] for tok in _NEGATION_TOKENS)
+def _negated_spans(window: str) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    for rx in (_NEG_CLAIM_EN_RE, _NEG_CLAIM_KO_RE):
+        spans.extend((m.start(), m.end()) for m in rx.finditer(window))
+    return spans
 
 
 def _has_live_claim(window: str) -> bool:
+    negated = _negated_spans(window)
     for m in _AXIS_B_RE.finditer(window):
-        if not _claim_is_negated(window, m.start()):
+        # The claim is live unless it falls inside a negated-claim construct.
+        if not any(lo <= m.start() and m.end() <= hi for lo, hi in negated):
             return True
     return False
 
@@ -316,6 +381,33 @@ def _format_items(findings: list[tuple[str, str]]) -> str:
     return "".join(out)
 
 
+def _resolve_scan_text(tool_name: str, tool_input: dict, file_path: str) -> str:
+    """Return the text to scan.
+
+    Write: the new content directly.
+    Edit: the *post-edit* full file, so a directive that already lives in the
+      file and an Edit that only adds the verification claim still co-occur
+      (the two axes must be checked against the resulting file, not the
+      new_string fragment alone). If the current file cannot be read, fall
+      back to scanning new_string in isolation (fail-open, never crash).
+    """
+    if tool_name == "Write":
+        return tool_input.get("content") or ""
+
+    new_string = tool_input.get("new_string") or ""
+    old_string = tool_input.get("old_string") or ""
+    try:
+        with open(file_path, encoding="utf-8") as fh:
+            current = fh.read()
+    except (OSError, ValueError):
+        return new_string  # new file or unreadable — scan the fragment only
+    if not old_string:
+        return current + "\n" + new_string
+    if tool_input.get("replace_all"):
+        return current.replace(old_string, new_string)
+    return current.replace(old_string, new_string, 1)
+
+
 @fail_open
 def main() -> int:
     try:
@@ -337,9 +429,7 @@ def main() -> int:
     if _is_skipped_path(file_path):
         return 0
 
-    content = tool_input.get("content")
-    if content is None:
-        content = tool_input.get("new_string")
+    content = _resolve_scan_text(tool_name, tool_input, file_path)
     if not content:
         return 0
 

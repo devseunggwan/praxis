@@ -58,7 +58,7 @@ concrete verification claim is what isolates the error class.
 | Same, with `PRAXIS_EXCLUSION_PROBE_STRICT=1` | Hard deny (exit 2) |
 | Exclusion directive alone (no claim) | Silent |
 | Probe citation (`Probe: <cmd> -> <output>`) in the window | Silent — substantiated |
-| Negated claim (`not verified`, `검증하지 않`) | Silent — not a claim |
+| Negated claim (`not verified`, `has not been verified via`, `검증하지 않`) | Silent — negation governs the verification verb |
 | Normative-document path (`CLAUDE.md`/`AGENTS.md`/`SKILL.md`/`spec.md`/…) | Silent — path skipped |
 | Test / fixture path (`tests/`, `test_*`, `fixtures/`, `*_test.*`, `*.spec.*`) | Silent — path skipped |
 | Directive inside a fenced code block / inline code / blockquote | Silent — masked as illustrative |
@@ -91,12 +91,26 @@ exclusion is a semantic judgment a regex cannot make.
   in a fence is not caught. This is the same threat-model-boundary posture as
   the hand-rolled-shell-parser lesson — surfaced here rather than chased with
   ever-more masking corner cases.
-- **T1 — surface scope.** Only Write `content` and Edit `new_string` (the file
-  path that was the actual cause) are scanned. Bash heredoc / `gh … --body`
-  writes are a **deferred follow-up**: covering them would be the third
-  occurrence of the gh-body/heredoc extractor (`block-pr-without-caller-evidence`,
-  `block-personal-asset-leak`) and should trigger a shared-helper refactor
-  (DRY rule-of-three) rather than a third local copy in this PR.
+- **T1 — surface scope.** Write and Edit only. For Write the new `content` is
+  scanned; for Edit the **post-edit full file** is scanned (current file with
+  `old_string`→`new_string` applied), so a directive that already lives in the
+  file plus an Edit that only adds the verification claim still co-occur — the
+  two axes are checked against the resulting file, not the `new_string`
+  fragment alone (fails open to the fragment if the file is unreadable). Bash
+  heredoc / `gh … --body` writes are a **deferred follow-up**: covering them
+  would be the third occurrence of the gh-body/heredoc extractor
+  (`block-pr-without-caller-evidence`, `block-personal-asset-leak`) and should
+  trigger a shared-helper refactor (DRY rule-of-three) rather than a third
+  local copy in this PR.
+- **Negation is verb-local.** A claim is treated as negated only when the
+  negation governs the verification verb directly (allowing auxiliary/adverb
+  fillers: `has not been verified via`, `was never actually confirmed with`).
+  A negation that belongs to the exclusion directive itself (`do NOT add X,
+  confirmed via Y`) does not suppress the claim.
+- **Code-span masking is length-aware.** Fenced blocks close only on a fence
+  run at least as long as the opener (a 4-backtick fence is not closed by an
+  inner 3-backtick line), and inline-code masking handles multi-backtick
+  delimiters (a stray backtick inside a `` ``double`` `` span does not end it).
 - **T1 — advisory-first severity.** The detection target is natural language
   and the initial false-positive rate is unmeasured; escalation to a hard block
   is gated on measuring that rate in the field (mirrors `path-probe-gate`).

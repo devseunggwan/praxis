@@ -173,6 +173,53 @@ run_case "FP: PR 'not verified' section" silent \
 - do not include the sandbox rows in the count"
 
 # ===========================================================================
+# === codex round-1 regressions (P2) ===
+# ===========================================================================
+
+# P2-2: negation separated from claim by an auxiliary/adverb must still pass.
+run_case "P2-2: 'has not been verified via' (aux between neg and claim)" silent \
+  "Write" "/tmp/pr.md" "do not include Y; it has not been verified via the prod path"
+run_case "P2-2: 'was never actually confirmed with'" silent \
+  "Write" "/tmp/pr.md" "these were deliberately omitted but never actually confirmed with prod"
+# ...but a genuinely unnegated claim in the same shape still fires.
+run_case "P2-2: unnegated 'was verified via' still fires" advisory \
+  "Write" "/tmp/pr.md" "do not include Y; it was verified via the prod path"
+
+# P2-3: multi-backtick inline-code span must be masked (illustrative).
+run_case "P2-3: double-backtick inline code masked" silent \
+  "Write" "/tmp/doc.md" "See the marker \`\`DELIBERATELY EXCLUDED (verified via HMS)\`\` in old code."
+
+# P2-4: a closing fence shorter than the opening run does not close it.
+run_case "P2-4: 4-backtick fence with inner 3-backtick masked" silent \
+  "Write" "/tmp/doc.md" "\`\`\`\`
+\`\`\`
+DELIBERATELY EXCLUDED (verified via HMS)
+\`\`\`
+\`\`\`\`"
+
+# P2-1: Edit scans the POST-EDIT full file, not new_string alone.
+#   A pre-existing directive + an Edit that adds only the claim (adjacent line)
+#   must fire; the same Edit on a non-existent file (claim fragment only,
+#   directive absent) must stay silent.
+P2_DIR=$(mktemp -d)
+printf '# notes\nDELIBERATELY EXCLUDED these two tables\n- table_a\n' > "$P2_DIR/notes.md"
+printf '%s' "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$P2_DIR/notes.md\",\"old_string\":\"- table_a\",\"new_string\":\"- table_a (this exclusion confirmed via prod)\"}}" \
+  | "$HOOK" >/dev/null 2>/tmp/p2e
+if grep -q '\[exclusion-probe-gate\]' /tmp/p2e; then
+  echo "PASS  [P2-1: Edit fires on directive-in-file + claim-only new_string]"; PASS=$((PASS+1))
+else
+  echo "FAIL  [P2-1: Edit fires on directive-in-file + claim-only new_string]"; FAIL=$((FAIL+1)); FAILED_NAMES+=("P2-1 post-edit fire")
+fi
+printf '%s' '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/nonexistent_807_xyz.md","old_string":"a","new_string":"this exclusion confirmed via prod"}}' \
+  | "$HOOK" >/dev/null 2>/tmp/p2e2
+if [ -s /tmp/p2e2 ]; then
+  echo "FAIL  [P2-1: absent directive on new file stays silent]"; FAIL=$((FAIL+1)); FAILED_NAMES+=("P2-1 new-file silent")
+else
+  echo "PASS  [P2-1: absent directive on new file stays silent]"; PASS=$((PASS+1))
+fi
+rm -rf "$P2_DIR" /tmp/p2e /tmp/p2e2
+
+# ===========================================================================
 # === STRICT / SKIP modes ===
 # ===========================================================================
 
