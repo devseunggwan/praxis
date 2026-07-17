@@ -34,14 +34,21 @@ trap 'rm -rf "$TMPDIR"' EXIT
 # ---------------------------------------------------------------------------
 #
 # The stub recognises a handful of canned repos:
-#   acme/repo   → labels: bug, enhancement, tool-friction:cli
-#   acme/empty  → labels: (none)
-#   acme/fail   → exit 1 (simulates network/auth failure)
-#   anything else → exit 1
+#   acme/repo      → labels: bug, enhancement, tool-friction:cli
+#   acme/empty     → labels: (none)
+#   acme/fail      → exit 1 (simulates network/auth failure)
+#   acme/truncated → `label list` returns only `head-label`, but the label
+#                    `tail-label` really exists and is reachable via
+#                    `gh api`. Simulates a repo with more labels than the
+#                    row limit, where the tail is invisible to the listing.
+#   anything else  → exit 1
 #
-# Only `gh label list --repo <r> ...` is recognised — any other invocation
-# (e.g. `gh issue create`) exits 0 with empty output, so test payloads
-# that would otherwise call `gh` for real are inert.
+# Two invocations are recognised:
+#   `gh label list --repo <r> ...`      → the canned listing above
+#   `gh api repos/<r>/labels/<name>`    → exit 0 when the label really
+#       exists, else `gh: Not Found (HTTP 404)` on stderr + exit 1
+# Any other invocation (e.g. `gh issue create`) exits 0 with empty output,
+# so test payloads that would otherwise call `gh` for real are inert.
 MOCK_BIN="$TMPDIR/mockbin"
 mkdir -p "$MOCK_BIN"
 cat > "$MOCK_BIN/gh" <<'EOF'
@@ -59,6 +66,11 @@ if [ "$1" = "label" ] && [ "$2" = "list" ]; then
   case "$repo" in
     acme/repo)
       printf 'bug\nenhancement\ntool-friction:cli\n' ;;
+    acme/truncated)
+      # Fill the row limit (300) so the listing looks truncated. `tail-label`
+      # is deliberately absent from it but real — see the `gh api` arm.
+      printf 'head-label\n'
+      for i in $(seq 1 299); do printf 'filler-%s\n' "$i"; done ;;
     acme/empty)
       : ;;
     acme/fail|"")
@@ -67,6 +79,26 @@ if [ "$1" = "label" ] && [ "$2" = "list" ]; then
       exit 1 ;;
   esac
   exit 0
+fi
+
+# `gh api repos/<owner>/<repo>/labels/<name>` — ground truth for existence.
+if [ "$1" = "api" ]; then
+  case "$2" in
+    repos/*/labels/*)
+      repo="${2#repos/}"; repo="${repo%%/labels/*}"
+      name="${2##*/labels/}"
+      truth=""
+      case "$repo" in
+        acme/repo)      truth='bug enhancement tool-friction:cli' ;;
+        acme/truncated) truth='head-label tail-label' ;;
+      esac
+      for l in $truth; do
+        if [ "$l" = "$name" ]; then exit 0; fi
+      done
+      echo "gh: Not Found (HTTP 404)" >&2
+      exit 1
+      ;;
+  esac
 fi
 exit 0
 EOF
@@ -137,6 +169,17 @@ run_case "gh pr create --label bug (exists) — silent" \
 run_case "gh pr create --label nope (missing) — block" \
   "block" \
   '{"tool_name":"Bash","tool_input":{"command":"gh pr create --label nope --repo acme/repo --title t --body b"}}'
+
+# Regression (#803): the listing is row-limited, so a repo with more labels
+# than the limit hides its tail. Absence from the listing must not block on
+# its own — `tail-label` is real and the API says so.
+run_case "gh pr create --label tail-label (listing truncated, label real) — silent" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr create --label tail-label --repo acme/truncated --title t --body b"}}'
+
+run_case "gh pr create --label ghost (listing truncated, label absent) — block" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr create --label ghost --repo acme/truncated --title t --body b"}}'
 
 run_case "gh issue create --label bug (exists) — silent" \
   "silent" \

@@ -26,9 +26,15 @@ Pipeline:
      name -q '.[].name'`, cached per-repo for PRAXIS_GH_LABEL_CACHE_TTL_SEC
      (default 300) at <XDG_CACHE_HOME or ~/.cache>/claude-praxis/
      gh-label-cache.json. Cache corrupt / unwritable → in-memory only.
-  6. If any extracted label is absent from the fetched set → exit 2 with
-     a stderr block listing the missing labels and a sample of valid
-     labels for the repo.
+  6. Decide whether absence from that set is proof. The listing is row-
+     limited, so when it comes back full the repo may hold labels we cannot
+     see; each absent label is then re-checked via
+     `gh api repos/<r>/labels/<name>` and only a 404 counts as absent
+     (anything else → fail-open). A listing under the limit is complete, so
+     absence is proof on its own and no re-check is needed — which also
+     keeps the gate working offline off a warm cache.
+  7. If any label is absent → exit 2 with a stderr block listing the
+     missing labels and a sample of valid labels for the repo.
 
 Fail-open in every infrastructure-error path: gh missing, network fail,
 auth fail, shlex parse error, transcript missing, cwd not a git repo
@@ -48,6 +54,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import quote
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
@@ -138,13 +145,23 @@ def _process_segment(argv: list[str], cwd: str) -> int:
     if not repo:
         return 0
 
-    valid = _get_labels(repo)
-    if valid is None:
+    got = _get_labels(repo)
+    if got is None:
         return 0
+    valid, truncated = got
 
     missing = [lbl for lbl in labels if lbl not in valid]
     if not missing:
         return 0
+
+    # A truncated listing hides the repo's tail, so absence from it proves
+    # nothing — confirm each candidate against the API and block only on a
+    # definite 404. A complete listing is proof on its own, which also keeps
+    # the gate working offline off a warm cache.
+    if truncated:
+        missing = [lbl for lbl in missing if _label_absent(repo, lbl)]
+        if not missing:
+            return 0
 
     _emit_block(missing, repo, sorted(valid)[:20])
     return 2
@@ -243,11 +260,14 @@ def _cache_ttl_sec() -> int:
         return _DEFAULT_CACHE_TTL_SEC
 
 
-def _get_labels(repo: str) -> frozenset[str] | None:
-    """Return the set of label names defined in `repo`, with caching.
+def _get_labels(repo: str) -> tuple[frozenset[str], bool] | None:
+    """Return (label names defined in `repo`, truncated), with caching.
 
     Returns None when the label set cannot be determined (gh missing,
     network failure, auth failure) — caller treats this as fail-open.
+
+    A cache entry written before `truncated` was tracked is read as truncated,
+    so a stale entry can never justify a block on its own.
     """
     now = time.time()
     cache_path = _cache_path()
@@ -261,14 +281,19 @@ def _get_labels(repo: str) -> frozenset[str] | None:
             and isinstance(labels, list)
             and (now - fetched_at) < _cache_ttl_sec()
         ):
-            return frozenset(labels)
+            return frozenset(labels), bool(entry.get("truncated", True))
 
     fetched = _fetch_labels(repo)
     if fetched is None:
         return None
-    cache[repo] = {"labels": sorted(fetched), "fetched_at": now}
+    names, truncated = fetched
+    cache[repo] = {
+        "labels": sorted(names),
+        "fetched_at": now,
+        "truncated": truncated,
+    }
     _save_cache(cache_path, cache)
-    return frozenset(fetched)
+    return frozenset(names), truncated
 
 
 def _load_cache(path: Path) -> dict:
@@ -291,7 +316,12 @@ def _save_cache(path: Path, cache: dict) -> None:
         pass
 
 
-def _fetch_labels(repo: str) -> set[str] | None:
+def _fetch_labels(repo: str) -> tuple[set[str], bool] | None:
+    """Return (labels, truncated) for `repo`, or None on any fetch failure.
+
+    `truncated` is True when the listing filled the row limit — the repo may
+    hold more labels than we can see, so absence from `labels` proves nothing.
+    """
     try:
         r = subprocess.run(
             [
@@ -309,7 +339,29 @@ def _fetch_labels(repo: str) -> set[str] | None:
         return None
     if r.returncode != 0:
         return None
-    return {ln.strip() for ln in r.stdout.splitlines() if ln.strip()}
+    labels = {ln.strip() for ln in r.stdout.splitlines() if ln.strip()}
+    return labels, len(labels) >= _GH_LABEL_LIMIT
+
+
+def _label_absent(repo: str, label: str) -> bool:
+    """True only when the API definitively reports `label` missing (404).
+
+    Every other outcome — success, network/auth failure, an unexpected status —
+    returns False so the gate fails open rather than blocking on an absence it
+    could not prove.
+    """
+    try:
+        r = subprocess.run(
+            ["gh", "api", f"repos/{repo}/labels/{quote(label, safe='')}"],
+            capture_output=True,
+            text=True,
+            timeout=_GH_LABEL_FETCH_TIMEOUT_SEC,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if r.returncode == 0:
+        return False
+    return "404" in r.stderr
 
 
 # ---------------------------------------------------------------------------
