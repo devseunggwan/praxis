@@ -36,7 +36,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_FALSIFY_GATE_BYPASS` | `pre-output-falsification-gate` | Skip both falsification lanes |
 | `PRAXIS_MERGE_CLAIM_BYPASS` | `merge-state-claim-gate` | Skip the merge/PR/issue-state claim gate |
 | `PRAXIS_HOOK_BYPASS_NEGATIVE_EXISTENCE_GATE` | `negative-existence-verdict-gate` | Skip the negative-existence verdict `Enumerated:`-line gate |
-| `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY` | `negative-existence-verdict-gate` | Demote the negative-existence verdict gate from block to advisory (exit 0 + systemMessage) |
+| `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY` | `negative-existence-verdict-gate` | Demote the negative-existence verdict gate from block to advisory (systemMessage, non-blocking). Set to any non-falsey value (`1` / `true` / `yes`); `0` / `false` / empty keep block mode (mirrors `PRAXIS_ASK_END_ADVISORY`) |
 | `PRAXIS_PUSH_VERIFY_BYPASS` | `push-remote-ref-verify` | Skip the post-push remote-ref verification |
 | `PRAXIS_PATH_PROBE_SKIP` | `path-probe-gate` | Skip the deep-path write gate |
 | `PRAXIS_MD_ESCAPE_SKIP` | `pre-edit-md-escape-advisory` | Skip the markdown-escape advisory |

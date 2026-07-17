@@ -174,9 +174,17 @@ run_case block "multi-para-one-unenumerated" '{}'
 # Tiers / env
 # =====================================================================
 
-# advisory demote -> systemMessage, no decision
+# advisory demote (=1) -> systemMessage, no decision
 build_transcript "게이트 결과가 나왔습니다 — 매핑 규칙이 없습니다."
 run_case advisory "advisory-demote" '{}' PRAXIS_NEGATIVE_EXISTENCE_ADVISORY=1
+
+# advisory env non-falsey value (=true) -> advisory (sibling PRAXIS_ASK_END_ADVISORY convention)
+build_transcript "게이트 결과가 나왔습니다 — 매핑 규칙이 없습니다."
+run_case advisory "advisory-demote-true" '{}' PRAXIS_NEGATIVE_EXISTENCE_ADVISORY=true
+
+# advisory env falsey value (=0) -> still block (default preserved)
+build_transcript "게이트 결과가 나왔습니다 — 매핑 규칙이 없습니다."
+run_case block "advisory-env-zero-still-blocks" '{}' PRAXIS_NEGATIVE_EXISTENCE_ADVISORY=0
 
 # bypass -> silent
 build_transcript "게이트 결과가 나왔습니다 — 매핑 규칙이 없습니다."

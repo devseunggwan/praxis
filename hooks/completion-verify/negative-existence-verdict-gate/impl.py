@@ -211,7 +211,13 @@ def main() -> int:
     if not has_unenumerated_verdict(last_text):
         return 0
 
-    if os.environ.get(_ADVISORY_ENV, "").strip() == "1":
+    # Advisory-demote follows the sibling advisory-env convention
+    # (block-ask-end-option's PRAXIS_ASK_END_ADVISORY): any set, non-falsey
+    # value opts out of the block; `0` / `false` / empty keep the default
+    # block. Broader than a bare `== "1"` so `=true` / `=yes` also work,
+    # while `=0` / `=false` correctly stay in block mode.
+    advisory_env = os.environ.get(_ADVISORY_ENV, "")
+    if advisory_env not in ("", "0", "false", "False"):
         emit_stop_advisory(_MESSAGE)
     else:
         emit_stop_block(_MESSAGE)
