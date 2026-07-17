@@ -27,6 +27,55 @@ Text rules in global `~/.claude/CLAUDE.md` or skill bodies alone cannot enforce 
 `loaded != retrieved` limit. This hook enforces the rule at the tool
 boundary, where the check runs mechanically regardless of retrieval state.
 
+### Agent-facing: when to surface an end option
+
+The hook below enforces the rule mechanically at the tool boundary. This
+section is the human-facing decision logic it backs — the reference an
+agent consults when deciding whether an `AskUserQuestion` call should carry
+an end option at all. Formerly this table lived in always-loaded
+`~/.claude/CLAUDE.md`; it moved here so the always-loaded surface can shrink
+to a one-line pointer while the enforcement stays at the tool boundary.
+
+Do **not** mechanically transcribe "end here" / "session end" / "여기서 종료"
+boilerplate from skill guides into `AskUserQuestion` options without context
+verification. **Agent-generated** unilateral end declarations ("이 세션을
+여기서 마무리합니다" / "I'll wrap up here", "다음 세션에서 진행하세요" /
+"continue in the next session") are forbidden. The same phrases carry the
+opposite weight when they come from the **user**: `다음 세션` in the user's
+most recent message is a recognized stop signal
+([Stop signals](#stop-signals-user-message)) and legitimately permits an end
+option — the prohibition is on the agent originating the language, not on
+honoring it.
+
+The stop-signal set and its scope are defined authoritatively in
+[Stop signals (user message)](#stop-signals-user-message) below — this table
+summarizes the decision, it is **not** a second signal list. The hook reads
+only the **most recent** user message (not accumulated earlier context), and
+recognizes Korean bare tokens (`종료`, `여기까지`, `그만`, `마무리`, `스톱`,
+`중단`) but only English *phrases* (`stop here`, `we're done`, `cancel this`,
+…) — bare English words (`stop` / `done` / `cancel`) are deliberately not
+signals. Surface an end option only under a signal the hook actually
+recognizes, or the call is blocked at the tool boundary.
+
+| Context signal | Surface end option? |
+| --- | --- |
+| The **most recent** user message carries an explicit stop signal from the recognized set ([Stop signals](#stop-signals-user-message)) | OK to add as 4th option |
+| 4+ step chained intent clearly established (e.g., worktree → planning → sub-issue → start work) | End surface ignores intent — **omit** |
+| Natural next actionable step clearly exists in immediate context | Surface that step, or wait for explicit user direction |
+
+**Skill-guide boilerplate handling:** even when a skill's "Step N — chaining"
+section lists an "end here" option, this rule takes precedence (global
+CLAUDE.md → `Rule Conflict Precedence — CLAUDE.md over Skills`). Apply the
+context table; omit or include based on signal.
+
+**Exceptions (skills where ending IS the intent):** in issue-closing skills
+(`close-hub-issue`, equivalent) and release / deploy completion skills,
+ending is the legitimate terminal step. The hook has **no skill-context
+detection** — it cannot see which skill is running — so an end option in
+these flows is still blocked unless the most recent user message carries an
+explicit stop signal. When ending is genuinely intended but no stop signal is
+present, opt out for that call with `PRAXIS_ASK_END_ADVISORY=1`.
+
 ### What is blocked
 
 | Scenario | Action |
