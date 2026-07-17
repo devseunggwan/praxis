@@ -83,6 +83,18 @@ _GIT_GLOBAL_BARE_FLAGS = frozenset({
 # Shell separators that end a single command's argument list.
 _SHELL_SEPARATORS = {";", "&&", "||", "|", "&"}
 
+# Shell redirect operators. This regex matches a token that *starts* with a
+# redirect operator: optional leading fd digits, then one of `>` `>>` `<` `<<`
+# `<<<` `>&` `<&`, plus the `&>`/`&>>` merge forms. A branch name can never
+# begin this way, so any match is a redirect, not a name.
+#
+# The fd-dup alternative is `\d*[<>]&` WITHOUT a trailing `\d*`: for a merged
+# token like `2>&1` (see `_merge_fd_redirects`) the operator is `2>&` and the
+# target fd `1` is the *attached* target. Matching the trailing `1` too would
+# make `match.end() == len(tok)`, mis-classify the token as a bare operator,
+# and drop the *following* token (the branch name) as a phantom target.
+_REDIRECT_OPERATOR_RE = re.compile(r"^(?:&>>?|\d*>>?|\d*<<?<?|\d*[<>]&)")
+
 
 # ---------------------------------------------------------------------------
 # Config helpers
@@ -115,6 +127,84 @@ def _get_whitelist() -> frozenset[str]:
 # name for creation commands.  Uses a token walker (not naive space-split) so
 # that `-b` values containing spaces or other edge forms are handled correctly.
 # ---------------------------------------------------------------------------
+
+# A bare redirect operator token that can precede an fd-dup `&` (`2>`, `>`,
+# `1>`, `<`, `0<`). Used to re-merge the `&`-split fd-dup forms below.
+_FD_DUP_LEFT_RE = re.compile(r"^\d*[<>]$")
+# The fd target that follows the `&` in an fd-dup (`2>&1`, `>&-`).
+_FD_DUP_TARGET_RE = re.compile(r"^(?:\d+|-)$")
+
+
+def _merge_fd_redirects(tokens: list[str]) -> list[str]:
+    """Re-merge fd-dup redirect forms that `safe_tokenize` split on `&`.
+
+    `safe_tokenize` uses `punctuation_chars=';|&'`, so `2>&1` tokenizes to
+    `['2>', '&', '1']` and `iter_command_starts` then treats the `&` as a
+    command separator — splitting `git branch 2>&1 bad-name` into two bogus
+    segments and letting `bad-name` slip through unchecked (issue #806 review).
+    This re-joins `<op> & <fd>` (`2>&1`, `1>&2`, `>&-`) and `& <op-target>`
+    (`&>file`) into a single redirect token BEFORE segment splitting, so the
+    trailing branch name stays in the same segment and gets validated.
+
+    A `&` that is a genuine job-control separator (`cmd & other`, `a && b`) is
+    left untouched — it is only merged when the adjacent tokens are themselves
+    redirect-shaped.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(tokens)
+    while i < n:
+        tok = tokens[i]
+        # `<op> & <fd>` → `<op>&<fd>` (e.g. `2>` `&` `1` → `2>&1`).
+        if (
+            i + 2 < n
+            and tokens[i + 1] == "&"
+            and _FD_DUP_LEFT_RE.match(tok)
+            and _FD_DUP_TARGET_RE.match(tokens[i + 2])
+        ):
+            out.append(tok + "&" + tokens[i + 2])
+            i += 3
+            continue
+        # `& <op-target>` → `&<op-target>` (e.g. `&` `>file` → `&>file`).
+        if i + 1 < n and tok == "&" and tokens[i + 1].startswith(">"):
+            out.append("&" + tokens[i + 1])
+            i += 2
+            continue
+        out.append(tok)
+        i += 1
+    return out
+
+
+def _strip_redirects(argv: list[str]) -> list[str]:
+    """Drop shell redirect operators and their targets from argv.
+
+    A bare operator token (`>`, `2>`, `>>`, `<`) consumes the *following* token
+    as its file/fd target (`> /tmp/out`), so both are dropped. An operator with
+    an attached target (`>file`, `2>/dev/null`, `<<EOF`) is a single token and
+    is dropped alone. Tokens containing whitespace cannot be unquoted shell
+    words, so any redirect-like substring in them is literal and left intact
+    (mirrors `_segment_has_redirect` in `_hook_utils.py`). Without this,
+    `git branch 2>&1` (a query) is misread as `git branch 2>` (a creation).
+    """
+    out: list[str] = []
+    i = 0
+    n = len(argv)
+    while i < n:
+        tok = argv[i]
+        if " " in tok or "\t" in tok:
+            out.append(tok)
+            i += 1
+            continue
+        match = _REDIRECT_OPERATOR_RE.match(tok)
+        if match:
+            # Whole token is the operator → also drop its target (next token).
+            # Attached target (`>file`) → drop this token only.
+            i += 2 if match.end() == len(tok) else 1
+            continue
+        out.append(tok)
+        i += 1
+    return out
+
 
 def _strip_git_globals(argv: list[str]) -> list[str]:
     """Strip git global flags between 'git' (argv[0]) and the subcommand.
@@ -164,6 +254,10 @@ def _extract_new_branch(argv: list[str]) -> str | None:
     argv = strip_prefix(argv)
     if not argv or argv[0] != "git":
         return None
+
+    # Drop shell redirect tokens before positional detection so a query like
+    # `git branch 2>&1` is not misparsed as `git branch <name>` (issue #806).
+    argv = _strip_redirects(argv)
 
     sub = _strip_git_globals(argv)
     if not sub:
@@ -474,6 +568,11 @@ def main() -> int:
     tokens = safe_tokenize(command)
     if not tokens:
         return 0
+
+    # Re-merge fd-dup redirects (`2>&1`) that safe_tokenize split on `&`, so a
+    # branch name after such a redirect stays in the same command segment and
+    # is not dropped as a phantom separator (issue #806 review).
+    tokens = _merge_fd_redirects(tokens)
 
     branch_regex = _get_regex()
     strict = _get_strict()
