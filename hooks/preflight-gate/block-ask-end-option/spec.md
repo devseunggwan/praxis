@@ -38,9 +38,14 @@ to a one-line pointer while the enforcement stays at the tool boundary.
 
 Do **not** mechanically transcribe "end here" / "session end" / "여기서 종료"
 boilerplate from skill guides into `AskUserQuestion` options without context
-verification. Unilateral end declarations ("이 세션을 여기서 마무리합니다" /
-"I'll wrap up here", "다음 세션에서 진행하세요" / "continue in the next
-session") are forbidden.
+verification. **Agent-generated** unilateral end declarations ("이 세션을
+여기서 마무리합니다" / "I'll wrap up here", "다음 세션에서 진행하세요" /
+"continue in the next session") are forbidden. The same phrases carry the
+opposite weight when they come from the **user**: `다음 세션` in the user's
+most recent message is a recognized stop signal
+([Stop signals](#stop-signals-user-message)) and legitimately permits an end
+option — the prohibition is on the agent originating the language, not on
+honoring it.
 
 The stop-signal set and its scope are defined authoritatively in
 [Stop signals (user message)](#stop-signals-user-message) below — this table
