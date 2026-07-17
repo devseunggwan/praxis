@@ -63,10 +63,13 @@ if [ "$1" = "label" ] && [ "$2" = "list" ]; then
       *) shift ;;
     esac
   done
+  # `gh` resolves the optional [HOST/] prefix itself; canned repos are keyed
+  # by OWNER/REPO, so drop it.
+  case "$repo" in */*/*) repo="${repo#*/}" ;; esac
   case "$repo" in
     acme/repo)
       printf 'bug\nenhancement\ntool-friction:cli\n' ;;
-    acme/truncated)
+    acme/truncated|acme/neterr)
       # Fill the row limit (300) so the listing looks truncated. `tail-label`
       # is deliberately absent from it but real — see the `gh api` arm.
       printf 'head-label\n'
@@ -81,16 +84,33 @@ if [ "$1" = "label" ] && [ "$2" = "list" ]; then
   exit 0
 fi
 
-# `gh api repos/<owner>/<repo>/labels/<name>` — ground truth for existence.
+# `gh api [--hostname <h>] repos/<owner>/<repo>/labels/<name>` — ground truth
+# for existence. `gh api` does NOT parse a [HOST/] prefix out of the path, so
+# a caller must pass the host via --hostname; keying truth off the path alone
+# therefore catches a caller that leaves the host in the path.
 if [ "$1" = "api" ]; then
-  case "$2" in
+  shift
+  path=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --hostname) shift 2 ;;
+      *) path="$1"; shift ;;
+    esac
+  done
+  case "$path" in
     repos/*/labels/*)
-      repo="${2#repos/}"; repo="${repo%%/labels/*}"
-      name="${2##*/labels/}"
+      repo="${path#repos/}"; repo="${repo%%/labels/*}"
+      name="${path##*/labels/}"
       truth=""
       case "$repo" in
         acme/repo)      truth='bug enhancement tool-friction:cli' ;;
         acme/truncated) truth='head-label tail-label' ;;
+        acme/neterr)
+          # gh echoes the request URL on a connection error, so the label name
+          # lands in stderr — a label called *404* must not read its own name
+          # back as proof of absence.
+          echo "Get \"https://api.github.com/$path\": dial tcp: connect: connection refused" >&2
+          exit 1 ;;
       esac
       for l in $truth; do
         if [ "$l" = "$name" ]; then exit 0; fi
@@ -180,6 +200,19 @@ run_case "gh pr create --label tail-label (listing truncated, label real) — si
 run_case "gh pr create --label ghost (listing truncated, label absent) — block" \
   "block" \
   '{"tool_name":"Bash","tool_input":{"command":"gh pr create --label ghost --repo acme/truncated --title t --body b"}}'
+
+# gh echoes the request URL on a connection error, so a label named *404*
+# appears in its own failure message. Only the `(HTTP 404)` status marker
+# means absent — a network error must fail open.
+run_case "gh pr create --label hub-issue-404 (re-check hits network error) — silent" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr create --label hub-issue-404 --repo acme/neterr --title t --body b"}}'
+
+# gh accepts [HOST/]OWNER/REPO. `gh label list` resolves the host itself, but
+# `gh api` needs it in --hostname — left in the path it would 404 on a real label.
+run_case "gh pr create --label tail-label --repo <host>/acme/truncated — silent" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr create --label tail-label --repo ghe.example.com/acme/truncated --title t --body b"}}'
 
 run_case "gh issue create --label bug (exists) — silent" \
   "silent" \
@@ -392,6 +425,43 @@ if [ "$_uncaught_rc" -eq 0 ] && [ -z "$_uncaught_out" ]; then
 else
   echo "  FAIL  main() not wrapped by @fail_open (rc=$_uncaught_rc, out=$(echo "$_uncaught_out" | head -c 200))"
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("main() is wrapped by the shared @fail_open guard")
+fi
+
+# ---------------------------------------------------------------------------
+# Re-check honours the shared hook deadline
+# ---------------------------------------------------------------------------
+
+# The listing fetch and the per-label re-checks share the gate's 15s manifest
+# budget. Once the deadline passes, a re-check must fail open immediately
+# rather than spawn gh and overrun. Asserted directly: reproducing it through
+# a payload would mean burning the whole budget in wall-clock.
+_deadline_out=$(python3 - << PYEOF 2>&1
+import sys, importlib.util, time
+spec = importlib.util.spec_from_file_location("impl", "$HOOK")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+# gh would exit 0 here (label exists) — if it were consulted, absent=False for
+# the wrong reason. Make any spawn a hard failure instead.
+def _boom(*a, **k):
+    raise AssertionError("gh spawned after the deadline had passed")
+mod.subprocess.run = _boom
+
+if mod._label_absent("acme/repo", "ghost", time.monotonic() - 1) is not False:
+    sys.stderr.write("expired deadline did not fail open\n"); sys.exit(1)
+
+# Budget must be derived from the manifest timeout, not exceed it.
+if mod._HOOK_TIMEOUT_SEC - mod._HOOK_TIMEOUT_MARGIN_SEC >= mod._HOOK_TIMEOUT_SEC:
+    sys.stderr.write("deadline leaves no margin under the manifest timeout\n"); sys.exit(1)
+PYEOF
+)
+_deadline_rc=$?
+if [ "$_deadline_rc" -eq 0 ] && [ -z "$_deadline_out" ]; then
+  echo "  PASS  expired deadline fails open without spawning gh"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  deadline not honoured (rc=$_deadline_rc, out=$(echo "$_deadline_out" | head -c 200))"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("expired deadline fails open without spawning gh")
 fi
 
 # ---------------------------------------------------------------------------

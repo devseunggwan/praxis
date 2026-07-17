@@ -32,7 +32,9 @@ Pipeline:
      `gh api repos/<r>/labels/<name>` and only a 404 counts as absent
      (anything else → fail-open). A listing under the limit is complete, so
      absence is proof on its own and no re-check is needed — which also
-     keeps the gate working offline off a warm cache.
+     keeps the gate working offline off a warm cache. Listing and re-checks
+     share one deadline drawn from the gate's manifest timeout; once it
+     passes, remaining re-checks fail open rather than overrun the budget.
   7. If any label is absent → exit 2 with a stderr block listing the
      missing labels and a sample of valid labels for the repo.
 
@@ -75,6 +77,13 @@ _GH_LABEL_FETCH_TIMEOUT_SEC = 10
 _GIT_REMOTE_TIMEOUT_SEC = 2
 _GH_LABEL_LIMIT = 300
 
+# hooks/manifest.json gives this gate a 15s timeout. The listing fetch and the
+# per-label re-checks share that one budget, so they need a common deadline —
+# left to their own 10s each they would overrun it and the host would kill the
+# hook mid-session. The margin covers interpreter startup and process spawn.
+_HOOK_TIMEOUT_SEC = 15
+_HOOK_TIMEOUT_MARGIN_SEC = 2
+
 _LABEL_FLAGS: frozenset[str] = frozenset({"--label", "-l", "--add-label"})
 _REPO_FLAGS: frozenset[str] = frozenset({"--repo", "-R"})
 _HELP_FLAGS: frozenset[str] = frozenset({"--help", "-h"})
@@ -98,6 +107,7 @@ _REPO_URL_RE = re.compile(r"[:/]([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
 @fail_open
 def main() -> int:
+    deadline = time.monotonic() + (_HOOK_TIMEOUT_SEC - _HOOK_TIMEOUT_MARGIN_SEC)
     try:
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
@@ -120,7 +130,7 @@ def main() -> int:
 
     for raw_argv in iter_command_starts(tokens):
         argv = strip_prefix(list(raw_argv))
-        rc = _process_segment(argv, cwd)
+        rc = _process_segment(argv, cwd, deadline)
         if rc != 0:
             return rc
     return 0
@@ -128,7 +138,7 @@ def main() -> int:
 
 
 
-def _process_segment(argv: list[str], cwd: str) -> int:
+def _process_segment(argv: list[str], cwd: str, deadline: float) -> int:
     if len(argv) < 3 or argv[0] != "gh":
         return 0
     if (argv[1], argv[2]) not in _LABELED_SUBCMDS:
@@ -159,7 +169,7 @@ def _process_segment(argv: list[str], cwd: str) -> int:
     # definite 404. A complete listing is proof on its own, which also keeps
     # the gate working offline off a warm cache.
     if truncated:
-        missing = [lbl for lbl in missing if _label_absent(repo, lbl)]
+        missing = [lbl for lbl in missing if _label_absent(repo, lbl, deadline)]
         if not missing:
             return 0
 
@@ -343,25 +353,50 @@ def _fetch_labels(repo: str) -> tuple[set[str], bool] | None:
     return labels, len(labels) >= _GH_LABEL_LIMIT
 
 
-def _label_absent(repo: str, label: str) -> bool:
+def _split_host(repo: str) -> tuple[str | None, str]:
+    """Split gh's `[HOST/]OWNER/REPO` into (host, `OWNER/REPO`).
+
+    `gh label list --repo` resolves the optional host itself; `gh api` does not,
+    so the host has to move to `--hostname` or the request goes to github.com
+    with the host stuck in the path.
+    """
+    parts = repo.split("/")
+    if len(parts) == 3:
+        return parts[0], f"{parts[1]}/{parts[2]}"
+    return None, repo
+
+
+def _label_absent(repo: str, label: str, deadline: float) -> bool:
     """True only when the API definitively reports `label` missing (404).
 
-    Every other outcome — success, network/auth failure, an unexpected status —
-    returns False so the gate fails open rather than blocking on an absence it
-    could not prove.
+    Every other outcome — success, network/auth failure, an unexpected status,
+    no time left in the hook's budget — returns False so the gate fails open
+    rather than blocking on an absence it could not prove.
     """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return False
+
+    host, owner_repo = _split_host(repo)
+    cmd = ["gh", "api"]
+    if host:
+        cmd += ["--hostname", host]
+    cmd.append(f"repos/{owner_repo}/labels/{quote(label, safe='')}")
     try:
         r = subprocess.run(
-            ["gh", "api", f"repos/{repo}/labels/{quote(label, safe='')}"],
+            cmd,
             capture_output=True,
             text=True,
-            timeout=_GH_LABEL_FETCH_TIMEOUT_SEC,
+            timeout=min(remaining, _GH_LABEL_FETCH_TIMEOUT_SEC),
         )
     except (OSError, subprocess.SubprocessError):
         return False
     if r.returncode == 0:
         return False
-    return "404" in r.stderr
+    # Match the status marker, not a bare "404": gh echoes the request URL on
+    # connection errors, so a label like `hub-issue-404` would otherwise read
+    # its own name back as proof of its absence.
+    return "(HTTP 404)" in r.stderr
 
 
 # ---------------------------------------------------------------------------
