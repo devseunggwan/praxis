@@ -122,6 +122,18 @@ operator with an attached target (`>file`) is a single token. Real creations
 with a trailing redirect (`git branch bad-name > /tmp/log`) are still detected
 and blocked — only the redirect tokens are stripped, not the branch name.
 
+**fd-dup `&` re-merge.** `safe_tokenize` uses `punctuation_chars=';|&'`, so an
+fd-dup redirect (`2>&1`, `1>&2`, `&>file`) is split on its internal `&` into
+separate tokens, and `iter_command_starts` then treats that `&` as a command
+separator. Without correction, `git checkout -b 2>&1 bad-name` fragments into
+`git checkout -b 2>` and `1 bad-name` — and `bad-name`, which the shell
+actually creates, escapes validation entirely (a **bypass**, not just a false
+positive). `_merge_fd_redirects` re-joins `<op> & <fd>` and `& <op-target>`
+into a single redirect token **before** segment splitting, keeping the branch
+name in the same segment. A genuine job-control `&` (`git status & git checkout
+-b x`, `a && b`) is left untouched — the merge fires only when the tokens
+adjacent to `&` are themselves redirect-shaped.
+
 ### Fail-open guarantees
 
 - Malformed JSON stdin → exit 0 (pass)

@@ -445,6 +445,36 @@ run_case "git branch hub-5-feat-ok 2>&1 (good creation + redirect, pass)" \
   "silent" \
   '{"tool_name":"Bash","tool_input":{"command":"git branch hub-5-feat-ok 2>&1"}}'
 
+# Critical (issue #806 review): a redirect placed BEFORE the branch name must
+# not let the name slip through. `safe_tokenize` splits `2>&1` on `&`; without
+# re-merging, `git checkout -b 2>&1 bad-name` fragments into two segments and
+# `bad-name` (which the shell actually creates) escapes validation.
+run_case "checkout -b 2>&1 <bad> (redirect before name, block)" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"git checkout -b 2>&1 bad-name"}}'
+
+run_case "checkout -b 2>&1 <good> (redirect before name, pass)" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"git checkout -b 2>&1 hub-5-feat-ok"}}'
+
+run_case "git branch 2>&1 <bad> (redirect before name, block)" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch 2>&1 bad-name"}}'
+
+run_case "switch -c 1>&2 <bad> (fd-dup before name, block)" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"git switch -c 1>&2 bad-branch"}}'
+
+run_case "worktree add -b 2>&1 <bad> <path> (redirect before name, block)" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"git worktree add -b 2>&1 bad-name /tmp/wt"}}'
+
+# Real job-control `&` separator must survive the fd-merge — the second
+# command is still validated.
+run_case "git status & checkout -b <bad> (background sep preserved, block)" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"git status & git checkout -b bad-bg"}}'
+
 # ---------------------------------------------------------------------------
 # git worktree add implicit basename branch creation (P2 bypass paths)
 # ---------------------------------------------------------------------------
