@@ -287,3 +287,86 @@ def record_session_fire(hook: str, role: str, decision: str, session_id: str, to
         _atomic_append(resolve_path(), [json.dumps(record, ensure_ascii=False)])
     except Exception:
         pass  # fail-open — never break the hook
+
+
+def count_session_fires(hook: str, session_id: str, decision: str | None = None) -> int:
+    """Count today's RICH fire records for `(hook, session_id)`; the in-session
+    read path this ledger previously lacked (issue #805).
+
+    Every writer above is append-only: the ledger records that a hook fired but
+    offers no way for a hook to ask, at its own fire time, "how many times have I
+    already fired this session?" A preflight gate that repeats the same block on
+    the same session is a strong signal the agent is bypassing rather than
+    resolving — this read lets the gate consume that signal (escalate its
+    message) instead of re-emitting an identical block. Counterpart to the
+    record_* writers; read-only, never mutates the ledger.
+
+    Filters to granularity=="rich" — only rich records carry a real session_id
+    (coarse records always store ""), so a coarse record can never match a real
+    session_id anyway; the explicit filter documents intent and guards a future
+    coarse record that happens to carry one. When `decision` is given only
+    records with that decision are counted (e.g. decision="block" to count prior
+    blocks, ignoring pass/advise fires of the same hook); None counts every
+    decision.
+
+    Reads only today's file (resolve_path()) — the same daily-rotation file the
+    writers append to. A session straddling UTC midnight loses its pre-midnight
+    fires here; that is an accepted bound — an escalation counter resetting at
+    midnight under-counts (a benign missed escalation), never over-counts (which
+    would false-escalate a first-of-day block).
+
+    Timing note for dispatched Bash-group members: the dispatcher records a
+    member's fire AFTER running its main() (see _dispatch.run_group), so a gate
+    calling this from inside its own main() sees only its PRIOR fires this
+    session, not the in-flight one — exactly the "already blocked N times before
+    now" count an escalation wants.
+
+    Fail-open: any error (disabled, missing/unreadable file, non-regular target,
+    malformed lines) → 0. A telemetry read must never break the calling hook,
+    and 0 means "no escalation" — the safe default that leaves the base block
+    message intact.
+    """
+    if _disabled():
+        return 0
+    if not isinstance(session_id, str) or not session_id:
+        return 0
+    try:
+        path = resolve_path()
+        # Mirror _atomic_append's regular-file guard: O_NONBLOCK so opening a
+        # FIFO swapped in at the path fails fast (ENXIO) instead of blocking the
+        # calling hook; O_NOFOLLOW rejects a symlinked final component. Then
+        # fstat the opened fd to confirm a regular file before reading.
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        try:
+            fd = os.open(path, flags)
+        except OSError:
+            return 0
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return 0
+            with os.fdopen(fd, encoding="utf-8", errors="replace") as f:
+                fd = -1  # ownership transferred to the file object
+                count = 0
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    if not isinstance(rec, dict):
+                        continue
+                    if rec.get("granularity") != "rich":
+                        continue
+                    if rec.get("hook") != hook or rec.get("session_id") != session_id:
+                        continue
+                    if decision is not None and rec.get("decision") != decision:
+                        continue
+                    count += 1
+                return count
+        finally:
+            if fd >= 0:
+                os.close(fd)
+    except Exception:
+        return 0
