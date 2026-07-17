@@ -39,7 +39,7 @@ question.
 | `mcp__*notion*__*create_page*` / `*update_page*`                                   | text fields contain hypothesis marker                                        | Check 1            |
 | `Write` to staging path (`/tmp/*-issue-*.md`, `/tmp/*-pr-*.md`, `.omc/plans/*.md`) | cluster-approval language in last 5 user messages                            | Check 3            |
 | any `gh` / MCP write body above                                                    | applied-on-branch claim line without reachability probe in recent transcript | Check 4            |
-| any `gh` / MCP write body above                                                    | first-person completion claim (over-claiming — 반영했 / "I've updated")       | Check 5            |
+| any `gh` / MCP write body above                                                    | first-person completion claim (over-claiming, e.g. "I've updated")           | Check 5            |
 | `gh issue list` / `gh search issues` / Read tool                                   | —                                                                            | passthrough silent |
 
 Hypothesis markers (whole-segment substring match): English 16 —
