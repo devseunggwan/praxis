@@ -445,7 +445,8 @@
       "mode": {
         "strict_env": "PRAXIS_MOMENTUM_STRICT",
         "bypass_env": [
-          "PRAXIS_MOMENTUM_BYPASS"
+          "PRAXIS_MOMENTUM_BYPASS",
+          "PRAXIS_MOMENTUM_MERGE_ADVISORY"
         ],
         "state_paths": [
           "PRAXIS_MEMORY_DIR"

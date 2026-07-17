@@ -5,10 +5,15 @@ Supported hosts: claude, codex
 Reference: [Autonomy vs Convention — ETHOS.md](../../../ETHOS.md#autonomy-vs-convention)
 
 `hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py` intercepts `Bash` tool calls at
-high-momentum action points and emits a **stderr advisory** (never a block
-in default mode) surfacing the relevant CLAUDE.md rules and memory entries
-that retrieval failure studies show are most likely to be skipped under
-session momentum.
+high-momentum action points and emits a **stderr advisory** surfacing the
+relevant CLAUDE.md rules and memory entries that retrieval failure studies
+show are most likely to be skipped under session momentum.
+
+The `dispatch` and `force-push` triggers are advisory-only in default mode.
+The `merge` trigger additionally **blocks** (via `permissionDecision: deny`)
+when the assistant text preceding the merge lacks the Pre-Merge Reporting
+briefing — see [Merge-briefing escalation](#merge-briefing-escalation-issue-797)
+below.
 
 ### Why this exists
 
@@ -61,7 +66,10 @@ and silently skip the memory rather than raise.
 ### What is emitted
 
 Each triggered surface writes lines to stderr, all prefixed with
-`[praxis:momentum-gate]`. Tool execution is never blocked in default mode.
+`[praxis:momentum-gate]`. The `dispatch` and `force-push` surfaces never block
+in default mode. The `merge` surface additionally emits a `permissionDecision:
+deny` when the pre-merge briefing is incomplete — see
+[Merge-briefing escalation](#merge-briefing-escalation-issue-797).
 
 Example for `gh pr merge --squash`:
 
@@ -72,15 +80,59 @@ Example for `gh pr merge --squash`:
 ...
 ```
 
+### Merge-briefing escalation (issue #797)
+
+The `merge` trigger alone is advisory — but a stderr line cannot stop a
+`gh pr merge` that skips the Pre-Merge Reporting briefing, and that failure
+recurred despite the advisory firing (memory
+`feedback_pre_merge_briefing_compound_imperative`, two recurrences; the #795
+retrospect confirmed the advisory fired yet the merge ran with 3 of 6 briefing
+items and no explicit approve-ask). For the `merge` trigger **only**, the hook
+reads the assistant text preceding the merge call and, when fewer than
+`MERGE_BRIEFING_MIN_ITEMS` (default **4**) of the 6 Pre-Merge Reporting items
+are present, escalates to `permissionDecision: deny` so the merge is blocked
+and the agent must produce the briefing before retrying. The stderr advisory
+is still emitted alongside the deny.
+
+The 6 items (a single keyword hit marks each present, EN/KO): What changed /
+What was verified / What was NOT verified / Risk-blast-radius / Open items /
+explicit approve-ask.
+
+**Why `deny`, not `ask`:** the sibling `pre-merge-approval-gate` already emits
+an unconditional `ask` on *every* `gh pr merge`. A second `ask` would be
+redundant with the exact gate that failed to prevent the #795 recurrence (the
+user approved the `ask` blindly while the agent never produced the briefing).
+`deny` adds the missing teeth — it blocks and feeds the reason back so the
+agent self-corrects, rather than re-surfacing an approval the user will again
+approve blindly.
+
+**Escalation is contained** (fail-open and false-positive relief):
+
+- No readable transcript (`transcript_path` absent/unreadable) → no escalation
+  (fail open). The advisory still fires.
+- `CMUX_DELEGATE=1` (background agent) → no escalation — the delegation intent
+  is the approval, mirroring `pre-merge-approval-gate`.
+- `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` → demote back to advisory only (keeps the
+  stderr reminder, skips the deny). The escape hatch for a mis-scored briefing.
+- Trivial-PR markers (`typo`, `comment-only`, `single-line`, `오타`, `주석만`,
+  `trivial pr`, `2-line report`, …) in the briefing text → no escalation,
+  matching CLAUDE.md's "Trivial PRs: a 2-line report is fine" carve-out.
+
+The `dispatch` and `force-push` triggers never emit a decision — escalation is
+merge-only, per the issue scope (only the merge failure was reproduced).
+
 ### Environment variables
 
 | Variable | Effect |
 | ---------- | -------- |
 | `PRAXIS_MOMENTUM_BYPASS=1` | Skip all output and exit 0 immediately (for scripted batch operations) |
+| `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` | Demote the merge-briefing escalation to advisory only (stderr reminder still fires, no `deny`) |
 | `PRAXIS_MOMENTUM_STRICT=1` | Exit 2 (block) instead of exit 0, unless `PRAXIS_MOMENTUM_ACK=1` is also set |
 | `PRAXIS_MOMENTUM_ACK=1` | Acknowledge the surface in strict mode; exit 0 after emitting the advisory |
 
-Default mode (no env vars): advisory only — writes to stderr, exits 0.
+Default mode (no env vars): advisory for `dispatch` / `force-push`; the `merge`
+trigger blocks with `deny` only when the pre-merge briefing is incomplete
+(above), otherwise advisory. `CMUX_DELEGATE=1` background sessions never escalate.
 
 ### Scope (Phase 1 vs Phase 2)
 
@@ -114,7 +166,7 @@ prefix-matched form).
 
 | Hook | Overlap |
 | ------ | --------- |
-| `pre-merge-approval-gate` | Both fire on `gh pr merge`. The sibling surfaces a `permissionDecision: ask` dialog; this hook emits a stderr rule reminder. Both fire — they are complementary, not redundant. |
+| `pre-merge-approval-gate` | Both fire on `gh pr merge`. The sibling surfaces an **unconditional** `permissionDecision: ask` (per-PR user approval, content-blind). This hook emits the stderr rule reminder and, when the pre-merge briefing is incomplete, a **content-aware** `permissionDecision: deny` (blocks so the agent produces the briefing). Different checks — the sibling gates *user* approval, this hook gates *briefing existence*. When both fire, `deny` wins (more restrictive), and the agent self-corrects. |
 | `side-effect-scan` | Fires on `gh pr merge` / `git push` collateral side effects. Complementary. |
 | `verify-commit-flag-override` | Fires on `git commit --no-verify`. Different trigger, no overlap. |
 | `memory-hint` | Surfaces `hookable: true` memory entries by keyword. The momentum gate specifically surfaces the entries most relevant to merge / dispatch / force-push momentum, as a targeted complement to the general memory-hint scan. |
