@@ -92,7 +92,14 @@ clarify *why* a block fired.
 Memory directory resolution order:
 1. `PRAXIS_MEMORY_DIR` env var (when set + points to an existing directory)
 2. fallback `~/.claude/projects/{slugified-cwd}/memory/` — slugify rule:
-   replace `/` with `-` on the absolute cwd
+   replace every non-alphanumeric character in the absolute cwd with `-`
+   (per-character, not collapsed) — matches Claude Code's own project-slug
+   convention, e.g. `/Users/nathan.song/.claude` → `-Users-nathan-song--claude`
+   (double dash from the adjacent `/` and `.`). A naive `cwd.replace("/", "-")`
+   left any other special character (such as a literal `.` in a home-directory
+   segment) un-slugified, permanently desyncing the fallback path from the
+   real project directory and silently disabling this hook end-to-end for
+   affected users (issue #799).
 3. neither resolves → exit 0 silently (no fallback attempt, no error)
 
 Five exit-0 fail-safe paths:
@@ -115,6 +122,8 @@ NOT supported — any parse error skips that memory, never the hook.
 bash tests/test_memory_hint.sh
 ```
 
-Covers 21 cases: hit/silent core paths, frontmatter gates, noise cap, mtime
+Covers 36 cases: hit/silent core paths, frontmatter gates, noise cap, mtime
 ordering, discovery fail-safes, malformed inputs, AC-21 (no description),
-AC-22 (scalar rejection), AC-23 (case sensitivity).
+AC-22 (scalar rejection), AC-23 (case sensitivity), and (35) the
+`resolve_memory_dir()` fallback-path per-character slugification fix
+(issue #799).
