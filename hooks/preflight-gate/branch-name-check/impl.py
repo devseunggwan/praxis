@@ -83,6 +83,15 @@ _GIT_GLOBAL_BARE_FLAGS = frozenset({
 # Shell separators that end a single command's argument list.
 _SHELL_SEPARATORS = {";", "&&", "||", "|", "&"}
 
+# Shell redirect operators. safe_tokenize (punctuation_chars=';|&') splits `&`
+# out of fd-dup forms, so `git branch 2>&1` arrives as the operator token `2>`
+# followed by a separate `&`-delimited segment — and `2>` is then misread as
+# the first positional (the new branch name). This regex matches a token that
+# *starts* with a redirect operator: optional leading fd digits, then one of
+# `>` `>>` `<` `<<` `<<<` `>&` `<&`, plus the `&>`/`&>>` merge forms. A branch
+# name can never begin this way, so any match is a redirect, not a name.
+_REDIRECT_OPERATOR_RE = re.compile(r"^(?:&>>?|\d*>>?|\d*<<?<?|\d*[<>]&\d*)")
+
 
 # ---------------------------------------------------------------------------
 # Config helpers
@@ -115,6 +124,37 @@ def _get_whitelist() -> frozenset[str]:
 # name for creation commands.  Uses a token walker (not naive space-split) so
 # that `-b` values containing spaces or other edge forms are handled correctly.
 # ---------------------------------------------------------------------------
+
+def _strip_redirects(argv: list[str]) -> list[str]:
+    """Drop shell redirect operators and their targets from argv.
+
+    A bare operator token (`>`, `2>`, `>>`, `<`) consumes the *following* token
+    as its file/fd target (`> /tmp/out`), so both are dropped. An operator with
+    an attached target (`>file`, `2>/dev/null`, `<<EOF`) is a single token and
+    is dropped alone. Tokens containing whitespace cannot be unquoted shell
+    words, so any redirect-like substring in them is literal and left intact
+    (mirrors `_segment_has_redirect` in `_hook_utils.py`). Without this,
+    `git branch 2>&1` (a query) is misread as `git branch 2>` (a creation).
+    """
+    out: list[str] = []
+    i = 0
+    n = len(argv)
+    while i < n:
+        tok = argv[i]
+        if " " in tok or "\t" in tok:
+            out.append(tok)
+            i += 1
+            continue
+        match = _REDIRECT_OPERATOR_RE.match(tok)
+        if match:
+            # Whole token is the operator → also drop its target (next token).
+            # Attached target (`>file`) → drop this token only.
+            i += 2 if match.end() == len(tok) else 1
+            continue
+        out.append(tok)
+        i += 1
+    return out
+
 
 def _strip_git_globals(argv: list[str]) -> list[str]:
     """Strip git global flags between 'git' (argv[0]) and the subcommand.
@@ -164,6 +204,10 @@ def _extract_new_branch(argv: list[str]) -> str | None:
     argv = strip_prefix(argv)
     if not argv or argv[0] != "git":
         return None
+
+    # Drop shell redirect tokens before positional detection so a query like
+    # `git branch 2>&1` is not misparsed as `git branch <name>` (issue #806).
+    argv = _strip_redirects(argv)
 
     sub = _strip_git_globals(argv)
     if not sub:

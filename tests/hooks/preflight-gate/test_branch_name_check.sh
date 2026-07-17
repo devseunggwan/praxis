@@ -382,6 +382,70 @@ run_case "git branch issue-1-style-format (style type, pass)" \
   '{"tool_name":"Bash","tool_input":{"command":"git branch issue-1-style-format"}}'
 
 # ---------------------------------------------------------------------------
+# Shell redirect false-positive guard (issue #806)
+# `git branch <redirect>` is a QUERY — the redirect token must not be read as
+# the new branch name. Enumerate every redirect form; all must pass.
+# ---------------------------------------------------------------------------
+
+run_case "git branch 2>&1 (fd merge, query, pass)" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch 2>&1"}}'
+
+run_case "git branch 1>&2 (fd merge reversed, query, pass)" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch 1>&2"}}'
+
+run_case "git branch >file (attached output redirect, query, pass)" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch >file"}}'
+
+run_case "git branch > /tmp/out (spaced output redirect, query, pass)" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch > /tmp/out"}}'
+
+run_case "git branch >> file (append redirect, query, pass)" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch >> file"}}'
+
+run_case "git branch 2>/dev/null (fd output attached, query, pass)" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch 2>/dev/null"}}'
+
+run_case "git branch &>file (fd-all merge, query, pass)" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch &>file"}}'
+
+run_case "git branch <file (attached input redirect, query, pass)" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch <file"}}'
+
+run_case "git branch < input.txt (spaced input redirect, query, pass)" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch < input.txt"}}'
+
+run_case "git branch 3>&2 (arbitrary fd, query, pass)" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch 3>&2"}}'
+
+run_case "git branch | head (pipe, downstream not read as name, pass)" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch | head"}}'
+
+# Regression: real creation with a trailing redirect must STILL be blocked —
+# stripping redirects must not blind the creation check.
+run_case "git branch bad-name > /tmp/log (creation + redirect, block)" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch bad-name > /tmp/log"}}'
+
+run_case "git checkout -b bad-branch 2>&1 (creation + redirect, block)" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"git checkout -b bad-branch 2>&1"}}'
+
+run_case "git branch hub-5-feat-ok 2>&1 (good creation + redirect, pass)" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch hub-5-feat-ok 2>&1"}}'
+
+# ---------------------------------------------------------------------------
 # git worktree add implicit basename branch creation (P2 bypass paths)
 # ---------------------------------------------------------------------------
 

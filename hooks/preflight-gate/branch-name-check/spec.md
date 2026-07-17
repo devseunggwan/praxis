@@ -100,6 +100,27 @@ Uses `safe_tokenize` / `iter_command_starts` / `strip_prefix` from `_hook_utils.
 - Env prefixes and wrapper commands (`sudo`, `env`) are peeled before matching
 - Quoted strings protect their contents — `echo "git checkout -b bad"` does not trigger
 - Git global flags (`-C`, `-c`, `--git-dir`, etc.) are stripped before the subcommand check
+- Shell redirect tokens are stripped before positional detection (see below)
+
+### Redirect handling (issue #806)
+
+`git branch` with no positional is a **query**. A trailing shell redirect
+(`git branch 2>&1`, `git branch > /tmp/out`) must not be misread as a branch
+*creation*, since the redirect token would otherwise be captured as the first
+non-flag positional. `_strip_redirects` drops redirect operators (and their
+targets) from the argv before positional detection:
+
+| Form | Example | Handling |
+| --- | --- | --- |
+| fd merge | `2>&1`, `1>&2`, `&>`, `3>&2` | operator token dropped |
+| output redirect | `>`, `>>`, `2>`, `>file`, `2>/dev/null` | attached target dropped with token; spaced target dropped as the next token |
+| input redirect | `<`, `<<`, `<<<`, `<file`, `< input.txt` | same as output |
+| pipe | `git branch \| head` | separate segment — `head` is never read as a name |
+
+A bare operator (`>`, `2>`) consumes the following token as its target; an
+operator with an attached target (`>file`) is a single token. Real creations
+with a trailing redirect (`git branch bad-name > /tmp/log`) are still detected
+and blocked — only the redirect tokens are stripped, not the branch name.
 
 ### Fail-open guarantees
 
