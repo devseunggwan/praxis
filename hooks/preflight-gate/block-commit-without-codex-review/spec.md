@@ -73,6 +73,37 @@ subagent transcript that is individually unreadable/oversized is skipped
 turn the whole scan into a fail-open, since the root transcript already
 answered the question for everything outside that one subagent run.
 
+### Escalation on repeated same-session block (issue #805)
+
+The block verdict is self-sufficient, but a session that hits it repeatedly is
+a signal in itself: the agent is changing *how* it invokes the commit (heredoc,
+`-F` file, subshell, a different separator) rather than running the review the
+message asks for. Those input-shape changes are orthogonal to the gate
+condition, so each re-check blocks again on the same ground — and, with an
+identical message every time, the 1st block and the 3rd are indistinguishable.
+
+The hook now reads its own prior fires back from the fire ledger
+(`_fire_ledger.count_session_fires`, the in-session read path added in
+issue #805) and, from the **2nd same-session block onward**, prepends an
+escalation banner that names that exact anti-pattern ("changing HOW you invoke
+the commit
+does NOT change the gate condition — run the review"). The count is
+session-scoped and `decision="block"`-filtered: only prior *blocks* of this hook
+in this `session_id` raise it, and the dispatcher records each block *after* the
+hook returns, so the in-flight block is excluded (the banner reports blocks
+*before* now).
+
+This is a **message-only** escalation (option (a) of the issue): the block/allow
+verdict is unchanged — escalation never relaxes the gate (which would create a
+bypass incentive) nor tightens it (e.g. revoking the skip token, which would
+punish a legitimately trivial commit). Fail-open throughout: a missing / opted-
+out / unreadable ledger, or an absent `session_id`, yields count 0 and the plain
+(non-escalated) message. Granularity is session-level, matching the gate's
+existing model (one review satisfies all commits this session); it does not
+distinguish "episode" boundaries (the same commit retried vs. a genuinely
+different commit) — an accepted bound, since the banner's claim ("this gate
+already blocked N times this session") is true regardless of episode structure.
+
 ### Escape hatches
 
 - Add a `[skip-codex-review]` token to the commit `-m` / `--message` message
@@ -125,7 +156,7 @@ does not execute it) — correctly ignored.
 bash tests/hooks/preflight-gate/test_block_commit_without_codex_review.sh
 ```
 
-Covers 51 cases: block paths (no invocation, wrong skill, `-F` body, prose-only
+Covers 54 cases: block paths (no invocation, wrong skill, `-F` body, prose-only
 slash mention, subagent dir present but no subagent invocation, slash-command
 line inside a subagent transcript not satisfying the gate), pass paths (Skill
 tool_use, slash command, garbage-line resilience, Skill tool_use inside a
@@ -138,5 +169,9 @@ hardened-parser bypass forms (grouped `(git commit …)`, unquoted substitution
 `$(git commit …)`, no-space separator `true;git commit …`, nested substitution,
 quoted substitution, single-quoted literal pass, double-quoted literal pass,
 terminal options `--help`/`--version`), out-of-scope (non-Bash tool, `git push`
-/ `git status`), and fail-open (no `transcript_path`, nonexistent path,
-malformed stdin, unparseable command).
+/ `git status`), fail-open (no `transcript_path`, nonexistent path,
+malformed stdin, unparseable command), and repeated-block escalation
+(issue #805: 1st same-session block has no banner, 2nd block escalates, a
+different session is independent). The `count_session_fires` read primitive is
+unit-tested
+in `tests/test_fire_ledger.py`.

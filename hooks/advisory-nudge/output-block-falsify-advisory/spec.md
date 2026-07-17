@@ -34,6 +34,54 @@ References: issue [#221](https://github.com/devseunggwan/praxis/issues/221) (adv
 [#290](https://github.com/devseunggwan/praxis/issues/290) (T1 ask escalation),
 [#369](https://github.com/devseunggwan/praxis/issues/369) (T2 confidence-anchoring extension).
 
+### Source rule detail (always-loaded SoT reference)
+
+The always-loaded `~/.claude/CLAUDE.md` keeps only the 1-line headline + STOP
+imperative for this gate; the full detail lives here as the reference SoT
+(issue [#793](https://github.com/devseunggwan/praxis/issues/793) partial-slim —
+the headline stays always-loaded to shape pre-tool-call reasoning, the detail
+below moves to the hook backing it). This hook structurally enforces the
+`AskUserQuestion` and `Bash` subset of the rule; the remaining trigger forms
+below stay agent-side retrieval discipline (no PreToolUse surface exists to
+intercept assistant prose).
+
+**Triggers** — output forms that require the gate to fire BEFORE the text is surfaced:
+
+- Action item / follow-up / "P2/P3" / "Recommended" labeled proposal in answer trailer
+- Hub issue title + body + 24-repo checkbox block
+- PR title + body + design table
+- `AskUserQuestion` menu option labeled `(Recommended)` or framed as "safe" / "natural" / "safer"
+- Design tables or scope summaries presented mid-answer to a question the user did not ask
+
+Of these, the hook structurally catches the `AskUserQuestion` evaluative-option
+trigger (T1/T2 in the detection table below) and the `Bash` bulk-action
+downstream-consequence trigger. The answer-trailer proposal, Hub issue body, PR
+body, and mid-answer design table are surfaced as assistant prose — no
+PreToolUse surface exists to intercept them, so they remain agent-retrieval
+discipline.
+
+**Mandatory pre-output question** — asked in the agent's internal reasoning, not the user-facing text:
+
+> "Is this proposal's stated objective already addressed by in-flight work, a
+> merged PR, an existing artifact, or a parallel proposal in the same session?
+> If I had to cite the link that breaks this proposal's necessity, what would
+> it be?"
+
+If a concrete invalidating link/artifact exists → **STOP**. Do not surface the
+proposal. Report the existing solution instead, in one sentence.
+
+**Externalization** — for high-stakes output (irreversible mutation,
+external-surface write, schema change, multi-repo PR, Hub issue body), spawn
+`Agent(subagent_type="oh-my-claudecode:critic")` **in parallel** with the
+self-falsification step. Brief it with the proposal + the invalidating-link
+question and ask it to disprove. Same-cache self-debate inherits the same
+anchoring; a separate context window does not. Skip when self-falsification
+already produced a concrete invalidating link, or when the output is in the
+Out-of-scope set below.
+
+**Out of scope** — single-token answers to direct user questions, mechanical
+edits the user requested, reversible exploration commands.
+
 ### What is detected
 
 | Tool | Trigger condition | Decision |

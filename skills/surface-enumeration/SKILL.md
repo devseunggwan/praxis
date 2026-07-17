@@ -5,7 +5,8 @@ description: >
   parser/validator/sanitizer/classifier, enumerate every input variant so each
   becomes a required test case.
   Triggers on "surface enumerate", "input surface enumeration", "input parser",
-  "input validation", "intent classifier", "정규식 경계", "입력 표면 열거".
+  "input validation", "intent classifier", "정규식 경계", "입력 표면 열거",
+  "multi-PR shared state", "convention guide reflection", "apply lesson".
   Do NOT activate on "surface a question", "user-facing surface", or merely
   explaining an existing parser.
 verified-against-runtime: true
@@ -36,6 +37,9 @@ variant you did not list is a variant you did not test.
   fixing only that case, enumerate the whole surface so the next round is empty.
 - Designing a mock/fixture for input-handling code (each enumerated variant is a
   fixture case, including a must-fail case).
+- Dispatching N independent PRs / worktrees in parallel, or authoring a
+  lesson-reflection / convention-guideline update — enumerate the shared-file
+  collision surface, or the source guideline's own §1~§N matrix, before starting.
 
 Skip for code with a fixed, closed input (a function called only with an enum you
 control) or a single-token mechanical transform with no interpretation.
@@ -52,6 +56,8 @@ Name what the code does to the input — this selects which variant families app
 | NLP / signal detection | intent classifier, command-signal hook | affirmation, **negation**, **status/question**, continuation-without-headline, substring-vs-word-boundary |
 | Regex over mixed text | Korean+English command strings | ASCII word-boundary in Unicode (`\b` is Unicode-aware) |
 | Text / grammar parser | shell/SQL/markup tokenizer | comment/heredoc stripping, quoting variants, command-position-only keywords, direction-sensitive ranges, path-invoked binaries, dynamic expansions |
+| Multi-PR / shared state | parallel PR dispatch, multi-worktree | shared-file collision (`hooks.json`, `CLAUDE.md`/`AGENTS.md` + symlink targets, `marketplace.json`, `plugin.json`, README/docs hook-index), first-merge-wins rebase |
+| Convention-guideline reflection | lesson-reflection PR, skill update from source-PR findings | oracle = the guideline's own §1~§N matrix (not the surfaced finding list), lint-bypass silent-merge |
 | Bulk / stateful | 100+ item loop, multi-run write | connection lifecycle, per-item isolation, idempotency (see limitations) |
 
 ### Step 2: Enumerate the surface
@@ -87,6 +93,24 @@ Cover **both** dimensions: semantic coverage (count/threshold math) does NOT
 substitute for syntactic coverage (the variants above), and vice versa. Scope
 each construct independently — never merge tokens across sibling constructs into
 one verdict.
+
+Two enumeration surfaces are process-level rather than string-input — they apply
+when the surface being enumerated is a set of PRs or a source guideline, not a
+value being parsed:
+
+- **Multi-PR / multi-worktree shared state**: when dispatching independent PRs
+  in parallel, enumerate every file each PR touches that a sibling also touches —
+  `hooks.json`, `AGENTS.md`/`CLAUDE.md` (and their symlink targets),
+  `marketplace.json`, `plugin.json`, hook-index tables in `README`/`docs/`. First
+  PR to merge wins; each sibling then needs a rebase.
+- **Convention-guideline reflection artifacts**: when authoring a "lessons from
+  PR X about guideline G" artifact (lesson-reflection PR, skill update reflecting
+  upstream/source-PR findings), the enumeration oracle is **G itself — its §1~§N
+  matrix** — not the externally-surfaced finding list (BugBot, Codex,
+  sibling-conflict, mode dispatch). Sweep §1~§N against every commit in the
+  source PR, or lint-bypass violations (deprecated import, hardcoded literals,
+  `any` typing, missing i18n) silent-merge. Trigger phrases: "apply lesson",
+  "skill update", "convention guide update".
 
 ### Step 3: Promote each variant to a test case
 
