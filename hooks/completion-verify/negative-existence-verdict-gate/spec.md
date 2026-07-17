@@ -8,7 +8,7 @@ verdict surfaced under a registered decision/gate framing without an
 `Enumerated:` line**, and blocks the stop (default) so the model re-surfaces
 the verdict with the candidates it actually covered.
 
-### Why this exists
+## Why this exists
 
 `#346` added a **critic pre-lock probe gate** to codex-review-wrap Step 5g: a
 critic surfacing "X does not exist / is fabricated / is unused" must cite a
@@ -18,7 +18,7 @@ nothing.
 
 **Motivating case (Hub #3981).** An acceptance criterion read (verbatim):
 
-```
+```text
 - [ ] SQL 파일 → 영향 테스트 매핑 규칙 실재 여부 확인 (없으면 후보 A 재설계 또는 중단)
 ```
 
@@ -50,7 +50,7 @@ This is the same surface as the sibling `merge-state-claim-gate` /
 Reference: issue [#804](https://github.com/devseunggwan/praxis/issues/804)
 (Refs #346).
 
-### Design — narrowed on a 200-session simulation
+## Design — narrowed on a 200-session simulation
 
 The risk is **not** a negative claim in isolation. "Column `cost` is missing"
 surfaces its own error on the next query. The risk is a negative verdict that
@@ -68,15 +68,17 @@ Three candidates were simulated over 200 laplace-dev-hub sessions:
 v1/v2 are rejected in the issue body. The v3 firing rate — 1/23 of v1 — is
 what makes a hard block affordable.
 
-### What is detected
+## What is detected
 
 The trigger requires **both**, in the same `\n\n`-delimited paragraph:
 
-**(a) Negative-existence marker**
+### (a) Negative-existence marker
+
 - KO substrings: `없습니다`, `존재하지 않`, `미구현`, `찾지 못했`
 - EN substring (case-insensitive): `does not exist`
 
-**(b) Registered decision / verdict framing**
+### (b) Registered decision / verdict framing
+
 - KO substrings: `게이트 결과`, `게이트 판정`, `완료 조건`, `판정이 나왔`, `검증 결과`, `확인 결과`
 - EN substrings (case-insensitive): `acceptance`, `ac #`
 
@@ -87,14 +89,14 @@ framing head is listed. Each EN framing/marker still requires its
 counterpart in the same paragraph, so a bare positive "Acceptance criteria
 met" cannot fire on its own.
 
-### The requirement — presence enforcement, not adequacy verification
+## The requirement — presence enforcement, not adequacy verification
 
 A probe-existence check is **unusable**: the motivating case HAD a probe (it
 read the wrong directory). Mirroring `output-block-falsify-advisory`'s
 `Falsified:` line, this hook forces the verdict paragraph to contain a line
 starting at column 0:
 
-```
+```text
 Enumerated: <candidates actually covered> → <result of each>
 ```
 
@@ -105,7 +107,7 @@ Placement is paragraph-scoped: the marker, the framing, and the satisfying
 `Enumerated:` line must all live in the **same** verdict paragraph (an
 `Enumerated:` line in an unrelated paragraph does not clear the verdict).
 
-### Honest limitation
+## Honest limitation
 
 Forcing the `Enumerated:` line is **not guaranteed** to have caught the
 motivating case. Writing `Enumerated: .../templates/sql` does not automatically
@@ -116,7 +118,7 @@ the case, (b) the single-candidate enumeration is made visible next to the
 kill branch, and (c) the same mechanism blocked 4/4 on the adjacent
 `Falsified:` problem in one session.
 
-### Tiers
+## Tiers
 
 | Condition | Decision |
 | --- | --- |
@@ -133,7 +135,7 @@ specifically to justify a hard block at 0.10 fires/session, and the
 `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY=1` demotes to advisory for callers who
 want the nudge without the block.
 
-### Response shape
+## Response shape
 
 Block (issue #647 H3 — completion-verify Stop hooks signal via stdout JSON,
 exit 0; the block is carried by the `decision` field, not the exit code):
@@ -150,7 +152,7 @@ Advisory (`PRAXIS_NEGATIVE_EXISTENCE_ADVISORY=1`):
 
 **Exit code:** `0` in every case.
 
-### Fail-open contract
+## Fail-open contract
 
 | Condition | Behavior |
 | --- | --- |
@@ -165,7 +167,7 @@ member), so `main()` carries the `@fail_open` decorator directly per DESIGN.md
 (issue #645, enforced by `check-plugin-manifests.py` Rule 16). No external
 dependencies — standard library only.
 
-### Tests
+## Tests
 
 ```bash
 bash tests/hooks/completion-verify/test_negative_existence_verdict_gate.sh
