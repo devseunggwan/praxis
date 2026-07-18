@@ -5,6 +5,41 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.4.0](https://github.com/devseunggwan/praxis/compare/v7.3.0...v7.4.0) (2026-07-18)
+
+
+### Added
+
+* **hook:** model-routing tier-mismatch advisory ([#789](https://github.com/devseunggwan/praxis/issues/789)) ([af98844](https://github.com/devseunggwan/praxis/commit/af988445979a6dc56fad8dae4e38d325dc9ba770))
+* **hook:** pre-commit staged-file enum advisory ([#785](https://github.com/devseunggwan/praxis/issues/785)) ([6db4a8c](https://github.com/devseunggwan/praxis/commit/6db4a8c24b56722e2d101a49d3653a7bbfe6dc5c))
+* **hooks:** add runtime-state-claim-gate stop hook ([#818](https://github.com/devseunggwan/praxis/issues/818)) ([a042f35](https://github.com/devseunggwan/praxis/commit/a042f350eb860bf6fdf6c5a0271e59226778083d))
+* **hooks:** escalate momentum gate on merge ([#819](https://github.com/devseunggwan/praxis/issues/819)) ([65ff72c](https://github.com/devseunggwan/praxis/commit/65ff72c3c4009fa5ae0b8ebc2e1f1f8b8da0489b))
+* **hooks:** escalate repeated same-session blocks ([#813](https://github.com/devseunggwan/praxis/issues/813)) ([5727666](https://github.com/devseunggwan/praxis/commit/5727666fc6b942c47e926a0f4f1185525ea22cdc))
+* **hooks:** gate unprobed exclusion directives ([#814](https://github.com/devseunggwan/praxis/issues/814)) ([4140c51](https://github.com/devseunggwan/praxis/commit/4140c51214f392d3a7cc41d933d8af58d081dc9b))
+* **hooks:** gh-merge-worktree-precondition gate ([#801](https://github.com/devseunggwan/praxis/issues/801)) ([b5e639f](https://github.com/devseunggwan/praxis/commit/b5e639fcb481112528bc69113b6fbc87cc75b35f))
+* **hooks:** negative-existence verdict probe gate ([#812](https://github.com/devseunggwan/praxis/issues/812)) ([e4306b3](https://github.com/devseunggwan/praxis/commit/e4306b38bc5a05b4442fca72d008a03498a6d9a4))
+* **hooks:** ready-to-fill falsified scaffold ([#796](https://github.com/devseunggwan/praxis/issues/796)) ([45065c5](https://github.com/devseunggwan/praxis/commit/45065c52d4958fe6c64a6d9b268e829e5e2dc8c8))
+* **skill:** add surface-enumeration skill ([#782](https://github.com/devseunggwan/praxis/issues/782)) ([600b9f0](https://github.com/devseunggwan/praxis/commit/600b9f0c189727ca81c67e2a4f0eb501a6d94b8f))
+
+
+### Fixed
+
+* **hooks:** confirm label absence before blocking ([#808](https://github.com/devseunggwan/praxis/issues/808)) ([e5b0f3f](https://github.com/devseunggwan/praxis/commit/e5b0f3fea3e4c9cd06b164770c909ef42ed724fd)), closes [#803](https://github.com/devseunggwan/praxis/issues/803)
+* **hooks:** detect over-claiming in falsify check ([#811](https://github.com/devseunggwan/praxis/issues/811)) ([945ce88](https://github.com/devseunggwan/praxis/commit/945ce887b02a62388e3f4c383c8c325a05570988))
+* **hooks:** resolve memory-hint dir-slug mismatch ([#800](https://github.com/devseunggwan/praxis/issues/800)) ([d4cd812](https://github.com/devseunggwan/praxis/commit/d4cd812f4e427a48dd65cff70fc4768bcec72a3c))
+* **hooks:** skip shell redirects in branch-name-check ([#810](https://github.com/devseunggwan/praxis/issues/810)) ([62d23bb](https://github.com/devseunggwan/praxis/commit/62d23bb3da0e3bd9f885d6a4c671b4cbae283934)), closes [#806](https://github.com/devseunggwan/praxis/issues/806)
+
+
+### Changed
+
+* bump github/codeql-action/analyze from 4.37.0 to 4.37.1 ([#820](https://github.com/devseunggwan/praxis/issues/820)) ([07301c0](https://github.com/devseunggwan/praxis/commit/07301c052b6d4f0ead7bc7e54d1fbe50e1991352))
+* bump github/codeql-action/init from 4.37.0 to 4.37.1 ([#821](https://github.com/devseunggwan/praxis/issues/821)) ([a460c2a](https://github.com/devseunggwan/praxis/commit/a460c2a9f37b382752b5a0b8dd8d4b7b98165912))
+* bump reviewdog/action-markdownlint from 0.27.0 to 0.28.0 ([#822](https://github.com/devseunggwan/praxis/issues/822)) ([34515af](https://github.com/devseunggwan/praxis/commit/34515af396adbe416b85b020a9c4ab9d4b79593b))
+* **hook:** ask-end-option agent-facing decision ([#794](https://github.com/devseunggwan/praxis/issues/794)) ([9af49a6](https://github.com/devseunggwan/praxis/commit/9af49a6558311145fcb05dde3026b4e1b14d40dc))
+* **hooks:** move falsify gate detail to specs ([#815](https://github.com/devseunggwan/praxis/issues/815)) ([e3fbd32](https://github.com/devseunggwan/praxis/commit/e3fbd32b41690a3ee1946ebdadb2b73bd0cdae50))
+* **hooks:** on-demand home for merge cleanup seq ([#817](https://github.com/devseunggwan/praxis/issues/817)) ([754ef32](https://github.com/devseunggwan/praxis/commit/754ef32cce994d9656ae120b82cc5f60d4dae03d))
+* **skills:** absorb surface-enum detail classes ([#816](https://github.com/devseunggwan/praxis/issues/816)) ([f3399db](https://github.com/devseunggwan/praxis/commit/f3399db6c8ead43c100724e0b5e9dc9196c61849)), closes [#792](https://github.com/devseunggwan/praxis/issues/792)
+
 ## [7.3.0](https://github.com/devseunggwan/praxis/compare/v7.2.1...v7.3.0) (2026-07-14)
 
 
