@@ -168,6 +168,7 @@ def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
 
 
 def _build_message(unreported: list[str], report_files: list[str]) -> str:
+    """Compose the Stop advisory naming the unreported PR(s) and up to 3 files."""
     seen: list[str] = []
     for f in report_files:
         if f not in seen:
@@ -190,6 +191,7 @@ def _build_message(unreported: list[str], report_files: list[str]) -> str:
 
 @fail_open
 def main() -> int:
+    """Stop-hook entrypoint: emit the advisory when a context PR went unreported."""
     if os.environ.get(_BYPASS_ENV, "").strip():
         return 0
 
