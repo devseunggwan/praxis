@@ -650,6 +650,7 @@ Covers 95 cases (91 pre-#828 + 4 new — description-field satisfaction, per-lab
 - Single `(Recommended)` option with no `description` at all, whose own `label` is crafted to read as a clean `Falsified:` line → still `deny` (regression for the self-referential label-as-evidence bypass caught by codex review — see spec detail above)
 
 **T2 ask-escalation (AskUserQuestion, issue #369):**
+
 - KO `가장 안전한` in `options[].description` + no `Falsified:` → `ask` (ANCHORING_ASK_MSG) — in-vivo regression for the ai-dotfiles PR #84 session
 - EN `safer` / `safest` / `prefer this` / `obvious choice` in label or description → `ask`
 - KO `자연스러운` / `안전한` / `당연히` in description → `ask`
