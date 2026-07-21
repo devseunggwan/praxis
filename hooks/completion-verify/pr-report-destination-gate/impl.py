@@ -39,7 +39,8 @@ be many turns apart:
 
   Default -> advisory (non-blocking). The signal is heuristic ("is this local
     .md a PR report that should be shared?" is a semantic judgment), so a hard
-    block is not affordable; a false fire costs one ignorable stderr line.
+    block is not affordable; a false fire costs one ignorable advisory line
+    (emitted as a `systemMessage` JSON on stdout, not stderr).
   `PRAXIS_HOOK_BYPASS_PR_REPORT_DESTINATION_GATE=1` -> full bypass (exit 0).
 
 ## Honest limitation
@@ -80,7 +81,13 @@ _PR_URL_RE = re.compile(r"github\.com/[\w.-]+/[\w.-]+/pull/(\d+)", re.IGNORECASE
 
 
 def _pr_num(cmd: str, subs: str) -> str | None:
-    """Extract a PR number from `gh pr <sub> <target>` (number or /pull/N URL)."""
+    """Extract a PR number from `gh pr <sub> <target>` (number or /pull/N URL).
+
+    The target is read as the token directly after the subcommand, so a flag
+    before the positional (`gh pr comment -b "…" 123`) is not matched — an
+    accepted advisory-only miss; scanning the whole command would false-match
+    a number inside a flag value (`--body "closes 999"`).
+    """
     m = re.search(rf"gh\s+pr\s+(?:{subs})\s+(?:\S*?/pull/(\d+)|(\d+))", cmd, re.IGNORECASE)
     if not m:
         return None

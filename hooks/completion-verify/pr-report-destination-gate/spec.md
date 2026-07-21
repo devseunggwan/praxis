@@ -73,14 +73,21 @@ no successful post).
 
 A genuinely private scratch `.md` (never meant for a PR) still trips the
 advisory when a context PR exists in the session. This is accepted:
-advisory-only, so the cost is one ignorable stderr line, and the message
-explicitly says to ignore it for private scratch/draft files.
+advisory-only, so the cost is one ignorable `systemMessage` line, and the
+message explicitly says to ignore it for private scratch/draft files.
+
+A second known limitation: the posted-PR extraction reads the PR number as
+the token directly following the `comment`/`review` subcommand, so a flag
+placed before the positional target (`gh pr comment -b "…" 123`) is not
+matched and the advisory may still fire. Accepted for the same
+advisory-only reason; relaxing the regex to scan the whole command risks
+matching a number inside a flag value (e.g. `--body "closes 999"`).
 
 ## Tiers
 
 | Tier | Env | Behavior |
 | --- | --- | --- |
-| Default | — | advisory (non-blocking stderr `systemMessage`) |
+| Default | — | advisory (non-blocking `systemMessage` JSON on stdout) |
 | Bypass | `PRAXIS_HOOK_BYPASS_PR_REPORT_DESTINATION_GATE=1` | full bypass, exit 0 |
 
 There is no block tier: the "is this local file a PR report?" signal is
