@@ -35,12 +35,13 @@ the report write and the PR context are often many turns apart.
 
 ### Context PRs — the work is bound to these
 
-- `gh pr view|create|diff|checks|checkout|edit|ready|merge <N>` (number or `…/pull/<N>` URL)
-- any `github.com/<owner>/<repo>/pull/<N>` URL anywhere in the transcript
+- `gh pr view|create|diff|checks|checkout|edit|ready|merge <N>` (number or `…/pull/<N>` URL) — every occurrence in a compound command
+- any `github.com/<owner>/<repo>/pull/<N>` URL in narrative (assistant/user) prose
+- a PR URL in tool output only when that result carries exactly one distinct PR (a create/view success), never a multi-PR listing (`gh pr list`)
 
 ### Posted PRs — a successful post targeted these
 
-- `gh pr comment|review <N>`
+- `gh pr comment|review <N>` — every occurrence in a compound command
 - POST `gh api …/pulls/<N>/{comments,reviews}` — POST only, see guards below
 
 ### Report-like local `.md` write
@@ -58,30 +59,50 @@ no successful post).
 
 ## Correctness guards
 
-- **GET `gh api` is not a post.** `gh api` defaults to `GET`; it is a `POST`
-  only with `--method POST` / `-X POST` or a body field (`-f` / `-F` /
-  `--field` / `--raw-field` / `--input`). A GET read of existing reviews does
-  not count as posting. (Verified via `gh api --help`.)
+- **Explicit HTTP method wins for `gh api`.** An explicit `--method`/`-X`
+  value decides POST-ness, so `--method GET …/reviews -f page=1` is a
+  documented GET (query params), NOT a post; only when no method is given does
+  a body field (`-f` / `-F` / `--field` / `--raw-field` / `--input`) imply
+  POST. (`gh api` defaults to GET — verified via `gh api --help`.)
 - **Failed posts do not count.** A `gh pr comment`/`gh pr review` whose
   `tool_result` is `is_error` is excluded, matched by tool_use `id` ↔
   tool_result `tool_use_id`. Otherwise a 403/network failure would silence the
   advisory that is precisely the point.
 - **Posting to an unrelated PR does not clear the current PR.** Per-PR set
   arithmetic keeps a `gh pr comment 456` from marking context PR 123 reported.
+- **Compound commands contribute every PR.** `_pr_nums` uses finditer, so
+  `gh pr view 10 && gh pr view 11` records both — not just the first.
+- **Tool output URLs are gated to avoid listing floods.** A PR URL in a
+  tool result counts as context only when that result carries exactly one
+  distinct PR (a create/view success); a multi-PR listing (`gh pr list`) is
+  ignored. Narrative (assistant/user) prose contributes all URLs.
+- **Fires once per session.** The whole-transcript scan re-derives the same
+  condition on every Stop; a session-fire dedup (`count_session_fires`/
+  `record_session_fire`, issue #805) suppresses the repeat while an unreported
+  context PR persists. When `session_id` is absent (or telemetry disabled) the
+  dedup degrades to no-op — the advisory may repeat, but is never wrong.
 
-## Honest limitation
+## Honest limitations
 
-A genuinely private scratch `.md` (never meant for a PR) still trips the
-advisory when a context PR exists in the session. This is accepted:
-advisory-only, so the cost is one ignorable `systemMessage` line, and the
-message explicitly says to ignore it for private scratch/draft files.
+Each is a bounded false signal — the hook is advisory-only, so the cost of any
+one is a single ignorable `systemMessage` line.
 
-A second known limitation: the posted-PR extraction reads the PR number as
-the token directly following the `comment`/`review` subcommand, so a flag
-placed before the positional target (`gh pr comment -b "…" 123`) is not
-matched and the advisory may still fire. Accepted for the same
-advisory-only reason; relaxing the regex to scan the whole command risks
-matching a number inside a flag value (e.g. `--body "closes 999"`).
+- A genuinely private scratch `.md` (never meant for a PR) still trips the
+  advisory when a context PR exists; the message says to ignore it for
+  private scratch/draft files.
+- A post is counted whenever a successful `comment`/`review` targets the PR —
+  the post's **content** is not correlated with the report file. Posting a
+  "review starting" comment then leaving the final report unposted still
+  suppresses the advisory (false negative).
+- PRs are keyed by **number only**, so two repos sharing a number
+  (`org/a#178` vs `org/b#178`) collide within one session — a bare
+  `gh pr view 178` carries no owner/repo, so a full owner/repo key is not
+  recoverable.
+- The posted-PR extraction reads the number as the token directly following
+  the `comment`/`review` subcommand, so a flag before the positional
+  (`gh pr comment -b "…" 123`) is not matched. Relaxing the regex to scan the
+  whole command risks matching a number inside a flag value
+  (`--body "closes 999"`).
 
 ## Tiers
 

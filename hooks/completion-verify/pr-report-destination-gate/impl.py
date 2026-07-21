@@ -28,12 +28,21 @@ be many turns apart:
 
 ## Correctness guards (all covered by functional tests)
 
-  - GET `gh api` (no --method POST / -f / -F / --field / --input) is a read,
-    NOT a post — excluded. (`gh api` defaults to GET; POST only when the
-    method is overridden or a body field is added.)
+  - `gh api` POST detection honors an explicit --method/-X value first, so
+    `--method GET … -f page=1` is a documented GET (query params), NOT a post;
+    only when no method is given does a body field (-f/-F/--field/--raw-field/
+    --input) imply POST. (`gh api` defaults to GET.)
   - A post command whose tool_result is is_error is a FAILED post — excluded,
     matched by tool_use `id` <-> tool_result `tool_use_id`.
   - Posting to an unrelated PR does not mark the current PR as reported.
+  - Compound commands (`gh pr view 10 && gh pr view 11`) contribute EVERY PR
+    target (finditer), not just the first.
+  - A PR URL in tool output counts as context only when the result carries
+    exactly ONE distinct PR (a create/view success), never a multi-PR listing
+    (`gh pr list`); narrative (assistant/user) prose contributes all URLs.
+  - Fires once per session: the whole-transcript scan re-derives the same
+    condition each Stop, so a session-fire dedup (issue #805) suppresses the
+    repeat while an unreported context PR persists.
 
 ## Tiers
 
@@ -43,10 +52,17 @@ be many turns apart:
     (emitted as a `systemMessage` JSON on stdout, not stderr).
   `PRAXIS_HOOK_BYPASS_PR_REPORT_DESTINATION_GATE=1` -> full bypass (exit 0).
 
-## Honest limitation
+## Honest limitations (advisory-only, so each is a bounded false signal)
 
-  A genuinely private scratch .md (never meant for the PR) still trips the
-  advisory when a context PR exists. Advisory-only, so the cost is bounded.
+  - A genuinely private scratch .md (never meant for the PR) still trips the
+    advisory when a context PR exists.
+  - A post is counted whenever a successful comment/review targets the PR — the
+    post's CONTENT is not correlated with the report file, so posting a
+    "review starting" comment then leaving the final report unposted still
+    suppresses the advisory (false negative).
+  - PRs are keyed by number only, so two repos sharing a number
+    (`org/a#178` vs `org/b#178`) collide in one session — bare `gh pr view 178`
+    carries no owner/repo, so a full owner/repo key is not recoverable.
 
 ## Fail-open contract
   - Malformed / missing stdin JSON -> exit 0
@@ -63,10 +79,13 @@ import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_stop_advisory  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import load_transcript  # type: ignore[import-not-found]  # noqa: E402
 
+_HOOK_NAME = "pr-report-destination-gate"
+_ROLE = "completion-verify"
 _PREFIX = "[pr-report-destination-gate]"
 _BYPASS_ENV = "PRAXIS_HOOK_BYPASS_PR_REPORT_DESTINATION_GATE"
 
@@ -74,31 +93,48 @@ _BYPASS_ENV = "PRAXIS_HOOK_BYPASS_PR_REPORT_DESTINATION_GATE"
 _REPORT_PATH_RE = re.compile(r"(^|/)(tmp|scratchpad)/|\.omc/plans/", re.IGNORECASE)
 _REPORT_NAME_RE = re.compile(r"(review|verif|verdict|report|impact|검증|리뷰)[^/]*\.md$", re.IGNORECASE)
 
-# A `gh api` call is a POST when it overrides the method or adds a body field.
-_API_POST_RE = re.compile(r"--method\s+POST\b|-X\s+POST\b|(^|\s)(-f|-F|--field|--raw-field|--input)\b", re.IGNORECASE)
+# A `gh api` POST: an explicit --method/-X value wins; absent one, a body field implies POST.
+_API_METHOD_RE = re.compile(r"(?:--method|-X)\s+([A-Za-z]+)", re.IGNORECASE)
+_API_BODY_RE = re.compile(r"(^|\s)(-f|-F|--field|--raw-field|--input)\b", re.IGNORECASE)
 _API_TARGET_RE = re.compile(r"gh\s+api\s+[^\n]*?pulls/(\d+)/(?:comments|reviews)\b", re.IGNORECASE)
 _PR_URL_RE = re.compile(r"github\.com/[\w.-]+/[\w.-]+/pull/(\d+)", re.IGNORECASE)
 
 
-def _pr_num(cmd: str, subs: str) -> str | None:
-    """Extract a PR number from `gh pr <sub> <target>` (number or /pull/N URL).
+def _is_api_post(cmd: str) -> bool:
+    """True when a `gh api` call actually POSTs.
 
-    The target is read as the token directly after the subcommand, so a flag
-    before the positional (`gh pr comment -b "…" 123`) is not matched — an
-    accepted advisory-only miss; scanning the whole command would false-match
-    a number inside a flag value (`--body "closes 999"`).
+    An explicit `--method`/`-X` value wins, so `--method GET … -f page=1` is a
+    documented GET (query params), not a post; only when no method is given
+    does a body field (`-f`/`-F`/`--field`/`--raw-field`/`--input`) imply POST.
     """
-    m = re.search(rf"gh\s+pr\s+(?:{subs})\s+(?:\S*?/pull/(\d+)|(\d+))", cmd, re.IGNORECASE)
-    if not m:
-        return None
-    return m.group(1) or m.group(2)
+    m = _API_METHOD_RE.search(cmd)
+    if m:
+        return m.group(1).upper() == "POST"
+    return bool(_API_BODY_RE.search(cmd))
+
+
+def _pr_nums(cmd: str, subs: str) -> list[str]:
+    """All PR numbers from `gh pr <sub> <target>` occurrences (number or /pull/N URL).
+
+    finditer (not search) so a compound command (`gh pr view 10 && gh pr view 11`)
+    yields every target, not just the first. The target is read as the token
+    directly after the subcommand, so a flag before the positional
+    (`gh pr comment -b "…" 123`) is not matched — an accepted advisory-only miss;
+    scanning the whole command would false-match a number inside a flag value
+    (`--body "closes 999"`).
+    """
+    return [
+        m.group(1) or m.group(2)
+        for m in re.finditer(rf"gh\s+pr\s+(?:{subs})\s+(?:\S*?/pull/(\d+)|(\d+))", cmd, re.IGNORECASE)
+    ]
 
 
 def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
     """Return (unreported_context_prs, sample_report_files)."""
     tool_uses: list[dict] = []
     result_is_error: dict[str, bool] = {}
-    raw_text_parts: list[str] = []
+    narrative_parts: list[str] = []       # assistant/user prose — intentional PR references
+    tool_result_texts: list[str] = []     # one combined string per tool_result block
 
     for ev in events:
         msg = ev.get("message")
@@ -106,7 +142,7 @@ def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
             continue
         content = msg.get("content")
         if isinstance(content, str):
-            raw_text_parts.append(content)
+            narrative_parts.append(content)
             continue
         if not isinstance(content, list):
             continue
@@ -117,7 +153,7 @@ def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
             if kind == "text":
                 text = block.get("text")
                 if isinstance(text, str):
-                    raw_text_parts.append(text)
+                    narrative_parts.append(text)
             elif kind == "tool_use":
                 tool_uses.append(block)
             elif kind == "tool_result":
@@ -125,14 +161,15 @@ def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
                 if isinstance(tid, str):
                     result_is_error[tid] = block.get("is_error") is True
                 rc = block.get("content")
+                parts: list[str] = []
                 if isinstance(rc, str):
-                    raw_text_parts.append(rc)
+                    parts.append(rc)
                 elif isinstance(rc, list):
                     for c in rc:
                         if isinstance(c, dict) and isinstance(c.get("text"), str):
-                            raw_text_parts.append(c["text"])
-
-    raw_text = "\n".join(raw_text_parts)
+                            parts.append(c["text"])
+                if parts:
+                    tool_result_texts.append("\n".join(parts))
 
     def succeeded(u: dict) -> bool:
         # Missing result (e.g. the final call) counts as success — bias to silence.
@@ -150,24 +187,28 @@ def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
         inp = u.get("input") or {}
         if name == "Bash" and isinstance(inp.get("command"), str):
             cmd = inp["command"]
-            ctx = _pr_num(cmd, "view|create|diff|checks|checkout|edit|ready|merge")
-            if ctx:
-                context_prs.add(ctx)
+            context_prs.update(_pr_nums(cmd, "view|create|diff|checks|checkout|edit|ready|merge"))
             if not succeeded(u):
                 continue
-            posted = _pr_num(cmd, "comment|review")
-            if posted:
-                posted_prs.add(posted)
-            am = _API_TARGET_RE.search(cmd)
-            if am and _API_POST_RE.search(cmd):
-                posted_prs.add(am.group(1))
+            posted_prs.update(_pr_nums(cmd, "comment|review"))
+            if _is_api_post(cmd):
+                posted_prs.update(m.group(1) for m in _API_TARGET_RE.finditer(cmd))
         elif name in ("Write", "Edit") and isinstance(inp.get("file_path"), str) and succeeded(u):
             fp = inp["file_path"]
             if fp.lower().endswith(".md") and (_REPORT_PATH_RE.search(fp) or _REPORT_NAME_RE.search(fp)):
                 report_files.append(fp)
 
-    for m in _PR_URL_RE.finditer(raw_text):
+    # Narrative prose (assistant/user text) referencing a PR is intentional context.
+    narrative_text = "\n".join(narrative_parts)
+    for m in _PR_URL_RE.finditer(narrative_text):
         context_prs.add(m.group(1))
+    # Tool output: count a PR URL only when a result carries exactly ONE distinct
+    # PR (a `gh pr create`/`view` success), never a multi-PR listing (`gh pr list`)
+    # which would flood unrelated PRs into context.
+    for text in tool_result_texts:
+        urls = {m.group(1) for m in _PR_URL_RE.finditer(text)}
+        if len(urls) == 1:
+            context_prs.add(next(iter(urls)))
 
     if not report_files:
         return ([], [])
@@ -225,7 +266,17 @@ def main() -> int:
     if not unreported or not report_files:
         return 0
 
+    # Fire once per session: the whole-transcript scan re-derives the same
+    # condition on every Stop, so without this the advisory would repeat each
+    # turn while an unreported context PR persists (sanctioned dedup, issue #805).
+    session_id = payload.get("session_id")
+    has_session = isinstance(session_id, str) and bool(session_id)
+    if has_session and _fire_ledger.count_session_fires(_HOOK_NAME, session_id, _fire_ledger.DECISION_ADVISE) > 0:
+        return 0
+
     emit_stop_advisory(_build_message(unreported, report_files))
+    if has_session:
+        _fire_ledger.record_session_fire(_HOOK_NAME, _ROLE, _fire_ledger.DECISION_ADVISE, session_id, "Stop")
     return 0
 
 

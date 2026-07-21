@@ -96,6 +96,24 @@ run_case advisory "failed-post-excluded" '{}'
 build_transcript "[$(bash_use t1 'gh pr view 178'),$(write_use t2 /tmp/verify-report.md),$(bash_use t3 'gh pr comment 456 --body x'),$(result t3 false)]"
 run_case advisory "posted-to-other-pr" '{}'
 
+# explicit --method GET is a read, not a post -> advisory (Codex #6)
+build_transcript "[$(bash_use t1 'gh pr view 178'),$(write_use t2 /tmp/verify-report.md),$(bash_use t3 'gh api --method GET repos/o/r/pulls/178/reviews -f page=1'),$(result t3 false)]"
+run_case advisory "api-explicit-get-not-post" '{}'
+
+# compound command: both PRs are context; posting only one leaves the other unreported (Codex #5)
+build_transcript "[$(bash_use t1 'gh pr view 178 && gh pr view 179'),$(write_use t2 /tmp/verify-report.md),$(bash_use t3 'gh pr comment 178 --body x'),$(result t3 false)]"
+run_case advisory "compound-context-partial-post" '{}'
+
+# multi-PR listing in tool output is NOT context -> silent (report, no bound PR) (Codex #4)
+build_transcript "[$(write_use t1 /tmp/verify-report.md),{\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"z\",\"content\":\"https://github.com/o/r/pull/900\\nhttps://github.com/o/r/pull/901\"}]}}]"
+run_case silent "listing-output-not-context" '{}'
+
+# session dedup: first fire records, repeat is silent (Codex #2)
+LEDGER=$(mktemp); rm -f "$LEDGER"
+build_transcript "[$(bash_use t1 'gh pr view 178'),$(write_use t2 /tmp/verification-report.md)]"
+run_case advisory "session-first-fire" '{"session_id":"sDEDUP1"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER"
+run_case silent "session-dedup-repeat" '{"session_id":"sDEDUP1"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER"
+
 # =====================================================================
 # Non-triggering
 # =====================================================================
