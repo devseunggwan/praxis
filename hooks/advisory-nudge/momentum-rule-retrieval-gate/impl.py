@@ -354,18 +354,16 @@ _APPROVAL_TOKENS = frozenset({
     "좋습니다", "그래", "ㄱ",
 })
 
-# Recording-fidelity proxy: a current turn with this many tool_use-bearing
-# assistant entries but zero text-bearing ones signals a harness that is not
-# recording assistant narration (issue #826 blind spot) — the briefing may be
-# real yet invisible, so escalation demotes to advisory rather than deny.
+# Recording-fidelity proxy: when the ENTIRE scanned window holds assistant
+# messages with tool activity but ZERO recorded text, the harness is dropping
+# assistant narration (issue #826 blind spot) — a real briefing is invisible,
+# so escalation demotes to advisory. A single recorded text block anywhere
+# proves recording works, so a normal tool-only turn (with narration in earlier
+# turns) is NOT treated as unreliable and still denies on a genuine skip.
 _FIDELITY_MIN_TOOLUSE = 3
 
-# PR number a `gh pr merge` targets (positional number or /pull/N URL); the
-# optional -R/--repo global flag may precede `pr`.
-_MERGE_PR_RE = re.compile(
-    r"gh\s+(?:(?:-R|--repo)\s+\S+\s+)?pr\s+merge\s+(?:\S*?/pull/(\d+)|(\d+))",
-    re.IGNORECASE,
-)
+# A single positional token that is a bare PR number or a …/pull/N URL.
+_PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
 
 
 def _load_turn_entries(transcript_path: str) -> list[dict] | None:
@@ -429,11 +427,17 @@ def _assistant_text(entries: list[dict], lo: int, hi: int) -> str:
     return "\n".join(texts)
 
 
-def _fidelity_unreliable(entries: list[dict], lo: int) -> bool:
-    """True when the current turn (entries[lo:]) shows tool activity but no
-    recorded narration — a proxy for a harness that drops assistant text."""
+def _recording_unreliable(entries: list[dict]) -> bool:
+    """True when the whole window shows tool activity but ZERO recorded assistant
+    text — a harness dropping narration (issue #826), not a mere quiet turn.
+
+    Scanning the whole window (not just the current turn) is what separates a
+    non-recording harness from a normal tool-only turn: the latter still has
+    narration somewhere in earlier turns, so a genuine briefing skip is NOT
+    excused just because the final turn happened to be tool-only.
+    """
     n_text = n_tool = 0
-    for ev in entries[lo:]:
+    for ev in entries:
         msg = ev.get("message")
         if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
             continue
@@ -448,7 +452,7 @@ def _fidelity_unreliable(entries: list[dict], lo: int) -> bool:
                 n_text += 1
             if any(isinstance(b, dict) and b.get("type") == "tool_use" for b in content):
                 n_tool += 1
-    return n_tool >= _FIDELITY_MIN_TOOLUSE and n_text == 0
+    return n_text == 0 and n_tool >= _FIDELITY_MIN_TOOLUSE
 
 
 def _user_message_text(content: object) -> str:
@@ -469,13 +473,37 @@ def _is_approval_reply(content: object) -> bool:
     return norm in _APPROVAL_TOKENS
 
 
-def _merge_target_pr(payload: dict) -> str | None:
-    """PR number the `gh pr merge` command targets, or None (branch-name merge)."""
-    cmd = (payload.get("tool_input") or {}).get("command")
-    if not isinstance(cmd, str):
+def _segment_merge_target(argv: list[str]) -> str | None:
+    """PR number a `gh pr merge` argv segment targets (first bare-number/pull
+    positional after `merge`), or None for a branch-name/numberless merge."""
+    argv = strip_prefix(argv)
+    if not _is_gh_pr_merge(argv):
         return None
-    m = _MERGE_PR_RE.search(cmd)
-    return (m.group(1) or m.group(2)) if m else None
+    # Scan only the tokens AFTER `pr merge` for a PR token, so a numeric global
+    # flag value before the subcommand cannot be mistaken for the target. Body
+    # values (`--body "closes 999"`) tokenize with internal whitespace, so they
+    # never match the anchored bare-number/pull pattern.
+    for i in range(len(argv) - 1):
+        if argv[i] == "pr" and argv[i + 1] == "merge":
+            for tok in argv[i + 2:]:
+                m = _PULL_TOKEN_RE.match(tok)
+                if m:
+                    return m.group(1) or m.group(2)
+            return None
+    return None
+
+
+def _merge_segments(command: object) -> list[str | None]:
+    """One entry per `gh pr merge` segment in a (possibly compound) command:
+    its PR number, or None when the segment merges by branch (no number)."""
+    if not isinstance(command, str):
+        return []
+    out: list[str | None] = []
+    for argv in iter_command_starts(safe_tokenize(command)):
+        stripped = strip_prefix(argv)
+        if _is_gh_pr_merge(stripped):
+            out.append(_segment_merge_target(stripped))
+    return out
 
 
 def _mentions_pr(text: str, pr: str) -> bool:
@@ -509,19 +537,31 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     # briefing → user approval → merge, which places the briefing in the turn
     # BEFORE the approving user message — outside the since-last-user window.
     # When the last user message is a short approval reply, also score the prior
-    # assistant turn, gated on it referencing THIS PR so a stale prior-turn
-    # briefing for a different PR cannot satisfy the gate.
-    target_pr = _merge_target_pr(payload)
-    if target_pr and len(idxs) >= 2 and _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
+    # assistant turn.
+    segments = _merge_segments((payload.get("tool_input") or {}).get("command"))
+    # A single approval authorizes ONE merge; a compound `merge A && merge B`
+    # must not ride one approval (No Approval Transfer), so ≥2 targets skip the
+    # extension entirely and fall through to deny.
+    single_merge = len(segments) == 1
+    if single_merge and len(idxs) >= 2 \
+            and _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
         prev_text = _assistant_text(entries, idxs[-2] + 1, idxs[-1])
-        if _mentions_pr(prev_text, target_pr) \
+        # A trivial-PR briefing in the prior turn is also carved out.
+        if _is_trivial_merge(prev_text):
+            return None
+        target_pr = segments[0]
+        # Correlate to the target PR when the command names one; a numberless
+        # branch merge has no PR to correlate, so a real prior-turn briefing +
+        # approval suffices (the merge runs on the current branch).
+        correlated = target_pr is None or _mentions_pr(prev_text, target_pr)
+        if correlated \
                 and _briefing_item_count(current_text + "\n" + prev_text) >= MERGE_BRIEFING_MIN_ITEMS:
             return None
 
     # Non-recording fallback (issue #826, fidelity axis): a harness that drops
     # assistant narration makes a real briefing invisible. Demote to advisory
     # (fail safe) rather than hard-deny a legitimate merge.
-    if _fidelity_unreliable(entries, lo):
+    if _recording_unreliable(entries):
         return None
 
     return format_block(

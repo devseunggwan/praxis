@@ -109,16 +109,28 @@ Two mechanisms resolve this:
 - **Prior-turn extension.** When the last human user message is a short
   approval reply (`ok` / `진행` / `승인` / … — exact normalized match against
   `_APPROVAL_TOKENS`), the immediately preceding assistant turn is also scored.
-  To keep the extension safe, that prior turn must reference the **merge target
-  PR** (`#N` or the bare number, from the `gh pr merge <N>` command) — a stale
-  prior-turn briefing for a different PR cannot satisfy the gate. A branch-name
-  merge (no PR number) disables the extension.
+  Safety gates on the extension:
+  - **PR correlation.** When the `gh pr merge <N>` command names a PR, the prior
+    turn must reference that `#N` (or the bare number) — a stale prior-turn
+    briefing for a *different* PR cannot satisfy the gate. A numberless branch
+    merge (`gh pr merge --squash`, the project standard) has no PR to correlate,
+    so a real prior-turn briefing + approval suffices (the merge runs on the
+    current branch). Command parsing reuses the trigger tokenizer, so fused
+    global flags (`gh --repo=o/r pr merge 833`) resolve the target correctly.
+  - **No multi-target transfer.** A compound `gh pr merge A && gh pr merge B`
+    (≥2 merge segments) skips the extension entirely — one approval cannot
+    authorize two merges (No Approval Transfer Across Companion PRs).
+  - **Trivial carve-out.** A trivial-PR marker in the *prior* turn is honored
+    the same as in the current turn (the 2-line briefing sits before the "ok").
 - **Recording-fidelity fallback.** Some harnesses do not persist assistant
-  narration to the transcript, so a real briefing scores 0. When the current
-  turn shows tool activity (≥ `_FIDELITY_MIN_TOOLUSE`, default **3**, tool_use
-  entries) but **zero** recorded text entries, the briefing is presumed
-  invisible-not-absent and escalation demotes to advisory (fail safe) instead of
-  a hard deny.
+  narration to the transcript, so a real briefing scores 0. When the **whole
+  scanned window** shows tool activity (≥ `_FIDELITY_MIN_TOOLUSE`, default **3**,
+  tool_use entries) but **zero** recorded text entries *anywhere*, the harness is
+  presumed to be dropping narration and escalation demotes to advisory (fail
+  safe). Scanning the whole window — not just the final turn — is what separates
+  a non-recording harness from an ordinary tool-only turn: the latter still has
+  narration in earlier turns, so a genuine briefing skip is **not** excused just
+  because the last turn happened to be tool-only.
 
 **Why `deny`, not `ask`:** the sibling `pre-merge-approval-gate` already emits
 an unconditional `ask` on *every* `gh pr merge`. A second `ask` would be

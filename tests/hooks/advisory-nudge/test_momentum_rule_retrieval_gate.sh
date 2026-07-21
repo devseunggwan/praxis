@@ -704,10 +704,29 @@ run_merge_escalation_cmd_case "merge_escalation_prior_turn_wrong_pr_denies" \
 run_merge_escalation_cmd_case "merge_escalation_substantive_reply_denies" \
   "yes" "" "momentum-merge-substantive-reply.jsonl" "gh pr merge 833 --squash"
 
-# Recording-fidelity proxy: current turn has 3 tool_use entries, 0 recorded
+# Recording-fidelity proxy: whole window has 3 tool_use entries, 0 recorded
 # narration → demote to advisory (fail-open), no deny.
 run_merge_escalation_case "merge_escalation_fidelity_unreliable_demotes" \
   "no" "" "momentum-merge-fidelity-unreliable.jsonl"
+
+# Numberless branch merge (`gh pr merge --squash`, the project standard) with a
+# prior-turn briefing + approval → extension applies without PR correlation.
+run_merge_escalation_cmd_case "merge_escalation_numberless_prior_briefing_passes" \
+  "no" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge --squash --delete-branch"
+
+# Compound multi-target (`merge 833 && merge 999`) → one approval cannot cover
+# both → no extension → deny (No Approval Transfer).
+run_merge_escalation_cmd_case "merge_escalation_multi_target_denies" \
+  "yes" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge 833 --squash && gh pr merge 999 --squash"
+
+# Fused global flag (`gh --repo=o/r pr merge 833`) → tokenizer still extracts
+# target 833, correlation passes → no deny.
+run_merge_escalation_cmd_case "merge_escalation_fused_repo_flag_passes" \
+  "no" "" "momentum-merge-prior-turn-briefing.jsonl" "gh --repo=o/r pr merge 833 --squash"
+
+# Trivial-PR briefing in the PRIOR turn + approval → carve-out applies, no deny.
+run_merge_escalation_cmd_case "merge_escalation_prior_turn_trivial_exempt" \
+  "no" "" "momentum-merge-prior-turn-trivial.jsonl" "gh pr merge 833 --squash"
 
 # Incomplete briefing (3 of 6 items) → deny. Reproduces the #795 failure shape.
 run_merge_escalation_case "merge_escalation_incomplete_briefing" \
