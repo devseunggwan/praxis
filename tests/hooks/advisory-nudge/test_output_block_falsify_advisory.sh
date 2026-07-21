@@ -389,6 +389,85 @@ run_case "AskUserQuestion: (Recommended) + no Falsified: → T1 deny (issue #393
   "deny:Falsified:" \
   "$(make_ask_payload '["Best option (Recommended)", "Alternative"]')"
 
+# Case 2b (issue #828): Falsified: line in the triggering option's OWN
+# description field (not the question body) also satisfies T1 — the
+# question field itself stays short, which is the trigger-reduction this
+# issue exists for.
+run_case "AskUserQuestion: (Recommended) + Falsified: in option description (not body) → pass (issue #828)" \
+  pass \
+  "$(make_ask_payload_with_descriptions \
+      '["Option A (Recommended)"]' \
+      '["Falsified: Option A (Recommended) — probe: grep for existing PR → none found; premise survives because no in-flight PR covers this."]' \
+      'Which approach?')"
+
+# Case 2c (issue #828 regression): per-label coverage still enforced when
+# evidence is supplied via description — 2 triggering options, only one
+# covered (via its own description), the other has no Falsified: line
+# anywhere → still deny.
+run_case "AskUserQuestion: 2x (Recommended), only one covered via description → still T1 deny (issue #828)" \
+  "deny:Falsified:" \
+  "$(make_ask_payload_with_descriptions \
+      '["Option A (Recommended)", "Option B (Recommended)"]' \
+      '["Falsified: Option A (Recommended) — probe: grep → none found; premise survives because none.", "plain description, no evidence"]' \
+      'Which approach?')"
+
+# Case 2d (issue #828): T2 (confidence-anchoring) also satisfied via a
+# Falsified: line placed in the anchoring option's own description field
+# (the line must still start at column 0 within the field, same contract
+# as the question-body path — a leading newline puts it there).
+run_case "T2: 'safer' + Falsified: line in same description field → pass (issue #828)" \
+  pass \
+  "$(make_ask_payload_with_descriptions \
+      '["Option A", "Option B"]' \
+      "$(python3 -c 'import json; print(json.dumps(["safer choice.\nFalsified: Option A — probe: ran both, no measurable difference; premise survives because none.", "Alternative"]))')" \
+      'Which approach?')"
+
+# Case 2e (issue #828 codex review P2 — self-referential label bypass):
+# a single (Recommended) option whose own LABEL is crafted to read as a
+# clean `Falsified:` line (no `description` at all) must NOT satisfy the
+# gate. Only `description` is a valid evidence source — `label` is the
+# same attacker/model-controlled field the (Recommended) marker itself
+# lives in, so it must never double as the evidence proving that marker's
+# premise. Regression for a real bypass caught by codex review (single-
+# label mode: "any clean Falsified: line anywhere" previously included
+# `collect_option_texts()`'s label text).
+run_case "AskUserQuestion: label itself crafted as a Falsified: line, no description → still T1 deny (issue #828 codex P2)" \
+  "deny:Falsified:" \
+  "$(make_ask_payload \
+      '["Falsified: Option A (Recommended) (Recommended) — probe: fake → fake; premise survives because fake"]')"
+
+# Case 2f (issue #828 codex review round-2 P2 — cross-option description
+# bypass): a single triggering (Recommended) option with NO description of
+# its own must NOT be satisfied by a DIFFERENT, non-triggering option's
+# unrelated `Falsified:` line. Before this fix, adding every option's
+# description unconditionally to q_texts let single-label mode ("any clean
+# line anywhere satisfies") accept evidence that never addressed the
+# actual triggering option at all — the triggering option's premise was
+# never falsified. Only a triggering option's OWN description counts.
+run_case "AskUserQuestion: non-triggering option's unrelated Falsified: description does not cover a different triggering option → still T1 deny (issue #828 codex round-2 P2)" \
+  "deny:Falsified:" \
+  "$(make_ask_payload_with_descriptions \
+      '["Option A (Recommended)", "Option B"]' \
+      '[null, "Falsified: totally unrelated evidence about something else — probe: n/a → n/a; premise survives because n/a"]' \
+      'Which approach?')"
+
+# Case 2g (issue #828 codex review round-3 P2 — same-normalized-label
+# cross-option collision): two DIFFERENT options can share the same
+# normalized label (e.g. "Option  A" double-space vs "Option A"). Before
+# this fix, evidence collection matched by `_normalize_label(label) in
+# triggering_norm` (a string set) rather than option identity, so a
+# non-triggering option's unrelated `Falsified:` description satisfied a
+# DIFFERENT, T2-triggering option that merely shared the same normalized
+# label and carried no evidence of its own. Index-based matching
+# (`_t1_triggering_indices` / `_t2_triggering_indices`) closes this: two
+# distinct options never share the same index.
+run_case "AskUserQuestion: non-triggering option sharing a normalized label with the triggering option does not supply its evidence → still T2 ask (issue #828 codex round-3 P2)" \
+  "ask:Falsified:" \
+  "$(make_ask_payload_with_descriptions \
+      '["Option  A", "Option A"]' \
+      '["safer path overall", "Falsified: totally unrelated evidence about something else — probe: n/a → n/a; premise survives because n/a"]' \
+      'Which approach?')"
+
 # Case 3 (updated by issue #369): (Recommended) in description-only is now
 # scanned by T2 (bare `recommended` token, label OR description). Original
 # expectation `pass` upgraded to `ask` — false-positive guard was over-
@@ -621,9 +700,10 @@ _scaffold_multi_result=$(make_ask_payload '["Option A (Recommended)", "Option B 
 import json, sys
 d = json.loads(sys.stdin.read())
 reason = d.get('hookSpecificOutput', {}).get('permissionDecisionReason', '')
-# ASK_MSG's own instructional text has 2 'Falsified: ' occurrences + 1 per
-# triggering label (2) in the scaffold = 4.
-ok = reason.count('Falsified: ') == 4 and 'Option A (Recommended)' in reason and 'Option B (Recommended)' in reason
+# ASK_MSG's own instructional text has 3 'Falsified: ' occurrences (issue
+# #828 added a 3rd, in the [trigger-reduction] description-field hint) + 1
+# per triggering label (2) in the scaffold = 5.
+ok = reason.count('Falsified: ') == 5 and 'Option A (Recommended)' in reason and 'Option B (Recommended)' in reason
 print('ok' if ok else 'fail_count=' + str(reason.count('Falsified: ')))
 " 2>/dev/null)
 if [ "$_scaffold_multi_result" = "ok" ]; then

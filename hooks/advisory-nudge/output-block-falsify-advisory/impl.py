@@ -33,8 +33,10 @@ This hook adds a structural enforcement point at two surfaces:
          for ergonomics: framing-token detection is broader and carries
          higher false-positive risk than the literal T1 marker.
 
-     When `Falsified:` is present in the question body, both tiers
-     silent-pass.
+     When `Falsified:` is present in the question body OR the triggering
+     option's own `description` field, both tiers silent-pass (issue #828:
+     the description-field path lets the evidence stay out of the shared
+     `question` string, keeping it short — see `q_texts` construction below).
 
   2. Bash — bulk-action commands containing patterns like "close all",
      "delete all", "merge all" (+ Korean equivalents). Advisory only.
@@ -73,8 +75,8 @@ ADVISORY_MSG = (
 )
 
 ASK_MSG = (
-    "(Recommended) 라벨이 있으나 question body 에 "
-    "'Falsified: <disconfirming test 결과>' 가 없음. "
+    "(Recommended) 라벨이 있으나 question body 또는 해당 옵션의 description "
+    "필드 어디에도 'Falsified: <disconfirming test 결과>' 가 없음. "
     "CLAUDE.md Self-Falsify Before Recommendation Lock 룰. "
     # Template-level guidance (issue #682): the problem is not only this call —
     # the AskUserQuestion compose template is missing the field. Bake a
@@ -86,14 +88,19 @@ ASK_MSG = (
     "첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — "
     "인스턴스 수정이 아닌 템플릿 수정이 필요하다. "
     "'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — "
-    "질문문 중간/불릿/코드펜스 내부 배치는 미검출."
+    "질문문 중간/불릿/코드펜스 내부 배치는 미검출. "
+    # Issue #828: prefer the option's own description field over the
+    # question body so long/multiline evidence doesn't accumulate in one
+    # shared string.
+    "[trigger-reduction] question 은 짧게 유지하고, Falsified: 줄은 해당 옵션 "
+    "(Recommended) 의 description 필드에 넣는 것을 권장 — 두 위치 모두 검증됨."
 )
 
 ANCHORING_ASK_MSG = (
     "옵션 라벨/설명에 confidence-anchoring framing 토큰 (safer/safest/"
     "natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/"
-    "당연히/분명히/추천/기본값) 이 있으나 question body 에 "
-    "'Falsified: <disconfirming test 결과>' 가 없음. "
+    "당연히/분명히/추천/기본값) 이 있으나 question body 또는 해당 옵션의 "
+    "description 필드 어디에도 'Falsified: <disconfirming test 결과>' 가 없음. "
     "CLAUDE.md Output-Block-Level Falsification Gate. "
     # Template-level guidance (issue #682): bake the Falsified: line into the
     # AskUserQuestion compose template for every anchoring-framed option, not
@@ -104,7 +111,10 @@ ANCHORING_ASK_MSG = (
     "첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — "
     "인스턴스 수정이 아닌 템플릿 수정이 필요하다. "
     "'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — "
-    "질문문 중간/불릿/코드펜스 내부 배치는 미검출."
+    "질문문 중간/불릿/코드펜스 내부 배치는 미검출. "
+    # Issue #828: same trigger-reduction guidance as ASK_MSG.
+    "[trigger-reduction] question 은 짧게 유지하고, Falsified: 줄은 해당 옵션의 "
+    "description 필드에 넣는 것을 권장 — 두 위치 모두 검증됨."
 )
 
 # ---------------------------------------------------------------------------
@@ -422,6 +432,58 @@ def _t2_matching_labels(options: list) -> list[str]:
     return matched
 
 
+def _t1_triggering_indices(options: list) -> set[int]:
+    """Indices (into `options`) of options carrying the exact (Recommended)/(추천) marker.
+
+    Issue #828 codex round-3 P2: evidence-collection must key on option
+    IDENTITY (index), not on normalized label text. Two distinct options
+    can share the same normalized label (e.g. "Option  A" and "Option A"
+    both collapse to "Option A") — matching by label string let a
+    non-triggering option's unrelated `Falsified:` description satisfy a
+    *different*, triggering option with the same normalized label. Live
+    probe: option 0 label="Option  A" description="safer path overall"
+    (T2-triggering, no evidence of its own) + option 1 label="Option A"
+    description="Falsified: unrelated ... premise survives because n/a"
+    (non-triggering) → silent pass (rc=0, empty stdout) under label-string
+    matching. Index-based matching closes this because index 0 and index
+    1 are never equal.
+    """
+    indices: set[int] = set()
+    for idx, o in enumerate(options):
+        if not isinstance(o, dict):
+            continue
+        label = o.get("label")
+        if not isinstance(label, str):
+            continue
+        if any(marker in label for marker in RECOMMENDED_MARKERS_EXACT_EN):
+            indices.add(idx)
+        elif any(marker in label for marker in RECOMMENDED_MARKERS_EXACT_KO):
+            indices.add(idx)
+    return indices
+
+
+def _t2_triggering_indices(options: list) -> set[int]:
+    """Indices (into `options`) of options whose own label OR description
+    carries an anchoring token (T2 scope). See `_t1_triggering_indices` for
+    why index identity, not label text, is the matching key (issue #828
+    codex round-3 P2).
+
+    Unlike T1 (marker lives in `label` only), T2's OR-contract means a
+    missing/non-string `label` must not exclude an option whose
+    `description` alone carries the anchoring token (PR #829 CodeRabbit
+    review) — `collect_option_texts([o])` already tolerates a non-string
+    `label` by omitting it from the scanned text, so no separate guard is
+    needed here.
+    """
+    indices: set[int] = set()
+    for idx, o in enumerate(options):
+        if not isinstance(o, dict):
+            continue
+        if _has_confidence_anchoring(collect_option_texts([o])):
+            indices.add(idx)
+    return indices
+
+
 def _dedupe_labels(labels: list[str]) -> list[str]:
     """Order-preserving de-dup for aggregated scaffold labels (issue #787)."""
     return list(dict.fromkeys(labels))
@@ -677,12 +739,80 @@ def main() -> int:
 
             combined_triggering = _dedupe_labels(t1_triggering + t2_triggering)
             if combined_triggering:
+                # Issue #828: a `Falsified:` line placed in a TRIGGERING
+                # option's own `description` field also counts. A
+                # PreToolUse hook cannot see the assistant's own preceding
+                # prose (confirmed infeasible — see
+                # pre-output-falsification-gate's Lane A "A3 INFEASIBILITY
+                # NOTE"), so the evidence cannot be moved out of
+                # `tool_input` entirely. Splitting it across each
+                # triggering option's own `description` instead of
+                # concatenating it into one long `question` string keeps
+                # `question` short/single-purpose, reducing the
+                # long+multiline+non-ASCII payload shape implicated in the
+                # harness's malformed-tool-call-emission bug (upstream
+                # anthropics/claude-code #69522/#79339/#74800).
+                #
+                # Scoped to TRIGGERING options only, and computed here
+                # (after combined_triggering exists) rather than
+                # unconditionally for every option in the question — two
+                # codex-review-caught bypasses required this:
+                #
+                # 1. label excluded from evidence: pulling in
+                #    collect_option_texts() (label + description) let a
+                #    single triggering option's own LABEL satisfy T1/T2
+                #    with zero real probe evidence (single-label mode
+                #    accepts "any clean line anywhere"). `label` already
+                #    carries the (Recommended)/anchoring MARKER; it must
+                #    never also double as the evidence proving that
+                #    marker's own premise.
+                # 2. non-triggering options excluded: adding EVERY
+                #    option's description unconditionally let an unrelated,
+                #    non-triggering option's description (with its own
+                #    unrelated `Falsified:` line) satisfy the gate for a
+                #    *different* triggering option in single-label mode —
+                #    the actual triggering option's premise was never
+                #    falsified at all. Live probe: a lone `(Recommended)`
+                #    option with no description, paired with a sibling
+                #    option whose description read
+                #    "Falsified: unrelated ... premise survives because
+                #    n/a" → silent pass (rc=0, empty stdout) before this
+                #    fix. Only a triggering option's OWN description can
+                #    supply its evidence.
+                # 3. index identity, not label-string matching (codex
+                #    round-3 P2): matching via
+                #    `_normalize_label(label) in triggering_norm` conflates
+                #    two DIFFERENT options that happen to share the same
+                #    normalized label — e.g. "Option  A" (double space,
+                #    T2-triggering) and "Option A" (non-triggering). The
+                #    non-triggering option's unrelated `Falsified:`
+                #    description satisfied the triggering option's gate.
+                #    Live probe: options=[{label:"Option  A",
+                #    description:"safer path overall"}, {label:"Option A",
+                #    description:"Falsified: unrelated ... premise
+                #    survives because n/a"}] → silent pass (rc=0, empty
+                #    stdout) before this fix. `_t1_triggering_indices` /
+                #    `_t2_triggering_indices` key on option position in
+                #    `options`, which two distinct options can never share.
+                t1_idx = _t1_triggering_indices(options)
+                t2_idx = _t2_triggering_indices(options) - t1_idx
+                triggering_indices = t1_idx | t2_idx
+                falsify_texts = list(q_texts)
+                for idx, o in enumerate(options):
+                    if idx not in triggering_indices:
+                        continue
+                    if not isinstance(o, dict):
+                        continue
+                    desc = o.get("description")
+                    if isinstance(desc, str):
+                        falsify_texts.append(desc)
+
                 # Each label in combined_triggering (issue #787 codex
                 # round-4 P1, extended round-7, round-9 P1) must be
                 # individually addressed by its own clean line — a scaffold
                 # satisfied by deleting a line, or by pasting distinct-but-
                 # off-target evidence for only one option, must still block.
-                if not _has_falsified_line(q_texts, combined_triggering):
+                if not _has_falsified_line(falsify_texts, combined_triggering):
                     if t1_triggering:
                         any_t1_violation = True
                         t1_labels.extend(t1_triggering)
