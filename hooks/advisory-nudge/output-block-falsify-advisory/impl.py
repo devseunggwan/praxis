@@ -467,13 +467,17 @@ def _t2_triggering_indices(options: list) -> set[int]:
     carries an anchoring token (T2 scope). See `_t1_triggering_indices` for
     why index identity, not label text, is the matching key (issue #828
     codex round-3 P2).
+
+    Unlike T1 (marker lives in `label` only), T2's OR-contract means a
+    missing/non-string `label` must not exclude an option whose
+    `description` alone carries the anchoring token (PR #829 CodeRabbit
+    review) — `collect_option_texts([o])` already tolerates a non-string
+    `label` by omitting it from the scanned text, so no separate guard is
+    needed here.
     """
     indices: set[int] = set()
     for idx, o in enumerate(options):
         if not isinstance(o, dict):
-            continue
-        label = o.get("label")
-        if not isinstance(label, str):
             continue
         if _has_confidence_anchoring(collect_option_texts([o])):
             indices.add(idx)
