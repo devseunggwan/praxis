@@ -342,16 +342,34 @@ def _is_trivial_merge(text: str) -> bool:
     return any(marker in low for marker in _TRIVIAL_MERGE_MARKERS)
 
 
-def _current_turn_assistant_text(transcript_path: str) -> str | None:
-    """Concatenate assistant text emitted since the last human user message.
+# Short user acknowledgements that count as "approval reply" (EN/KO). Matched
+# by exact normalized-string equality, so a substantive short message
+# ("go fix the parser") never triggers the prior-turn window extension.
+_APPROVAL_TOKENS = frozenset({
+    "ok", "okay", "okey", "k", "kk", "yes", "yep", "yup", "y", "go", "go ahead",
+    "do it", "proceed", "proceed with the merge", "merge", "merge it", "sure",
+    "lgtm", "ship it", "sounds good",
+    "네", "넵", "응", "ㅇㅋ", "ㅇㅇ", "ㄱㄱ", "고고", "승인", "진행", "진행해",
+    "진행해줘", "진행하자", "머지", "머지해", "머지해줘", "머지 진행", "좋아",
+    "좋습니다", "그래", "ㄱ",
+})
 
-    Scans a bounded tail window (TRANSCRIPT_SCAN_LINES) so a long transcript
-    cannot blow the hook timeout. Returns:
-      • None  → transcript missing / unreadable (caller fails open, no block)
-      • ""    → transcript readable but the agent emitted no briefing text this
-                turn (the exact compound-imperative failure — caller escalates)
-      • text  → the briefing text to score
-    """
+# Recording-fidelity proxy: a current turn with this many tool_use-bearing
+# assistant entries but zero text-bearing ones signals a harness that is not
+# recording assistant narration (issue #826 blind spot) — the briefing may be
+# real yet invisible, so escalation demotes to advisory rather than deny.
+_FIDELITY_MIN_TOOLUSE = 3
+
+# PR number a `gh pr merge` targets (positional number or /pull/N URL); the
+# optional -R/--repo global flag may precede `pr`.
+_MERGE_PR_RE = re.compile(
+    r"gh\s+(?:(?:-R|--repo)\s+\S+\s+)?pr\s+merge\s+(?:\S*?/pull/(\d+)|(\d+))",
+    re.IGNORECASE,
+)
+
+
+def _load_turn_entries(transcript_path: str) -> list[dict] | None:
+    """Parse a bounded tail of the transcript into entry dicts, or None if unreadable."""
     if not transcript_path or not os.path.isfile(transcript_path):
         return None
     try:
@@ -361,7 +379,6 @@ def _current_turn_assistant_text(transcript_path: str) -> str | None:
             lines = deque(fh, maxlen=TRANSCRIPT_SCAN_LINES)
     except OSError:
         return None
-
     entries: list[dict] = []
     for line in lines:
         line = line.strip()
@@ -373,10 +390,12 @@ def _current_turn_assistant_text(transcript_path: str) -> str | None:
             continue
         if isinstance(obj, dict):
             entries.append(obj)
+    return entries
 
-    # Locate the most recent human-authored user message (skip tool_result-only
-    # user entries — those are the runtime's tool-output bridge, not input).
-    last_user_idx = -1
+
+def _human_user_indices(entries: list[dict]) -> list[int]:
+    """Indices of human-authored user messages (skip tool_result-only bridges)."""
+    idxs: list[int] = []
     for i, ev in enumerate(entries):
         msg = ev.get("message")
         if not isinstance(msg, dict) or msg.get("role") != "user" or ev.get("isSidechain"):
@@ -384,14 +403,17 @@ def _current_turn_assistant_text(transcript_path: str) -> str | None:
         content = msg.get("content", [])
         if isinstance(content, str):
             if content.strip():
-                last_user_idx = i
+                idxs.append(i)
         elif isinstance(content, list):
             if any(isinstance(b, dict) and b.get("type") != "tool_result" for b in content):
-                last_user_idx = i
+                idxs.append(i)
+    return idxs
 
-    turn = entries[last_user_idx + 1:] if last_user_idx >= 0 else entries
+
+def _assistant_text(entries: list[dict], lo: int, hi: int) -> str:
+    """Concatenate assistant text blocks in entries[lo:hi]."""
     texts: list[str] = []
-    for ev in turn:
+    for ev in entries[lo:hi]:
         msg = ev.get("message")
         if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
             continue
@@ -407,6 +429,60 @@ def _current_turn_assistant_text(transcript_path: str) -> str | None:
     return "\n".join(texts)
 
 
+def _fidelity_unreliable(entries: list[dict], lo: int) -> bool:
+    """True when the current turn (entries[lo:]) shows tool activity but no
+    recorded narration — a proxy for a harness that drops assistant text."""
+    n_text = n_tool = 0
+    for ev in entries[lo:]:
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
+            continue
+        content = msg.get("content", [])
+        if isinstance(content, str):
+            if content.strip():
+                n_text += 1
+            continue
+        if isinstance(content, list):
+            if any(isinstance(b, dict) and b.get("type") == "text"
+                   and isinstance(b.get("text"), str) and b["text"].strip() for b in content):
+                n_text += 1
+            if any(isinstance(b, dict) and b.get("type") == "tool_use" for b in content):
+                n_tool += 1
+    return n_tool >= _FIDELITY_MIN_TOOLUSE and n_text == 0
+
+
+def _user_message_text(content: object) -> str:
+    """Flatten a user message's content (str or block list) to plain text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            b["text"] for b in content
+            if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)
+        )
+    return ""
+
+
+def _is_approval_reply(content: object) -> bool:
+    """True when a user message is a short bare approval token (ok / 진행 / 승인 …)."""
+    norm = re.sub(r"\s+", " ", _user_message_text(content).strip().lower()).strip(" .!~,·")
+    return norm in _APPROVAL_TOKENS
+
+
+def _merge_target_pr(payload: dict) -> str | None:
+    """PR number the `gh pr merge` command targets, or None (branch-name merge)."""
+    cmd = (payload.get("tool_input") or {}).get("command")
+    if not isinstance(cmd, str):
+        return None
+    m = _MERGE_PR_RE.search(cmd)
+    return (m.group(1) or m.group(2)) if m else None
+
+
+def _mentions_pr(text: str, pr: str) -> bool:
+    """True when the text references the target PR (`#N` or the bare number)."""
+    return re.search(rf"#{pr}\b|\b{pr}\b", text) is not None
+
+
 def _merge_escalation_reason(payload: dict) -> str | None:
     """Return a deny reason when the pre-merge briefing is incomplete, else None."""
     # Background cmux-delegate agents merge autonomously — the delegation intent
@@ -417,12 +493,35 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     if os.environ.get(MERGE_ADVISORY_ENV) == "1":
         return None
 
-    text = _current_turn_assistant_text(payload.get("transcript_path", "") or "")
-    if text is None:
+    entries = _load_turn_entries(payload.get("transcript_path", "") or "")
+    if entries is None:
         return None  # transcript unreadable → fail open, do not block
-    if _is_trivial_merge(text):
+
+    idxs = _human_user_indices(entries)
+    lo = (idxs[-1] + 1) if idxs else 0
+    current_text = _assistant_text(entries, lo, len(entries))
+    if _is_trivial_merge(current_text):
         return None
-    if _briefing_item_count(text) >= MERGE_BRIEFING_MIN_ITEMS:
+    if _briefing_item_count(current_text) >= MERGE_BRIEFING_MIN_ITEMS:
+        return None
+
+    # Window extension (issue #826, window-scoping axis): the mandated flow is
+    # briefing → user approval → merge, which places the briefing in the turn
+    # BEFORE the approving user message — outside the since-last-user window.
+    # When the last user message is a short approval reply, also score the prior
+    # assistant turn, gated on it referencing THIS PR so a stale prior-turn
+    # briefing for a different PR cannot satisfy the gate.
+    target_pr = _merge_target_pr(payload)
+    if target_pr and len(idxs) >= 2 and _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
+        prev_text = _assistant_text(entries, idxs[-2] + 1, idxs[-1])
+        if _mentions_pr(prev_text, target_pr) \
+                and _briefing_item_count(current_text + "\n" + prev_text) >= MERGE_BRIEFING_MIN_ITEMS:
+            return None
+
+    # Non-recording fallback (issue #826, fidelity axis): a harness that drops
+    # assistant narration makes a real briefing invisible. Demote to advisory
+    # (fail safe) rather than hard-deny a legitimate merge.
+    if _fidelity_unreliable(entries, lo):
         return None
 
     return format_block(

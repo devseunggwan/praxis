@@ -642,6 +642,73 @@ print(json.dumps({
   fi
 }
 
+# run_merge_escalation_cmd_case name expect_deny env_args transcript_fixture command
+# Variant carrying a custom merge command so the PR-number correlation
+# (window extension, issue #826) can be exercised.
+run_merge_escalation_cmd_case() {
+  local name="$1" expect_deny="$2" env_args="$3" fixture="$4" command="$5"
+  local transcript="$FIXTURES_DIR/$fixture"
+  local payload
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "tool_name": "Bash",
+    "tool_input": {"command": sys.argv[2]},
+    "transcript_path": sys.argv[1],
+    "session_id": "test-momentum-merge",
+}))' "$transcript" "$command")
+
+  local out_file err_file
+  out_file=$(mktemp); err_file=$(mktemp)
+  if [ -n "$env_args" ]; then
+    # shellcheck disable=SC2086
+    echo "$payload" | env $env_args python3 "$HOOK" >"$out_file" 2>"$err_file"
+  else
+    echo "$payload" | python3 "$HOOK" >"$out_file" 2>"$err_file"
+  fi
+  local rc=$?
+  local out err
+  out=$(cat "$out_file"); err=$(cat "$err_file")
+  rm -f "$out_file" "$err_file"
+
+  local ok=1
+  [ "$rc" -eq 0 ] || ok=0
+  echo "$err" | grep -qF "[praxis:momentum-gate]" || ok=0
+  if [ "$expect_deny" = "yes" ]; then
+    echo "$out" | grep -qF '"permissionDecision": "deny"' || ok=0
+  else
+    echo "$out" | grep -qF '"permissionDecision"' && ok=0
+  fi
+
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] expect_deny=$expect_deny rc=$rc"
+    [ -n "$out" ] && echo "        stdout: $(echo "$out" | head -c 200)"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# Window extension (issue #826): briefing in the PRIOR turn + short approval
+# reply ("ok") + merge of the SAME PR → no deny (the mandated flow).
+run_merge_escalation_cmd_case "merge_escalation_prior_turn_briefing_passes" \
+  "no" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge 833 --squash --delete-branch"
+
+# Prior-turn briefing is for a DIFFERENT PR (#999) than the merge target (833)
+# → correlation fails, extension denied → deny.
+run_merge_escalation_cmd_case "merge_escalation_prior_turn_wrong_pr_denies" \
+  "yes" "" "momentum-merge-prior-turn-wrong-pr.jsonl" "gh pr merge 833 --squash"
+
+# Last user message is a substantive instruction, not an approval reply → no
+# window extension → deny.
+run_merge_escalation_cmd_case "merge_escalation_substantive_reply_denies" \
+  "yes" "" "momentum-merge-substantive-reply.jsonl" "gh pr merge 833 --squash"
+
+# Recording-fidelity proxy: current turn has 3 tool_use entries, 0 recorded
+# narration → demote to advisory (fail-open), no deny.
+run_merge_escalation_case "merge_escalation_fidelity_unreliable_demotes" \
+  "no" "" "momentum-merge-fidelity-unreliable.jsonl"
+
 # Incomplete briefing (3 of 6 items) → deny. Reproduces the #795 failure shape.
 run_merge_escalation_case "merge_escalation_incomplete_briefing" \
   "yes" "" "momentum-merge-incomplete.jsonl"

@@ -98,6 +98,28 @@ The 6 items (a single keyword hit marks each present, EN/KO): What changed /
 What was verified / What was NOT verified / Risk-blast-radius / Open items /
 explicit approve-ask.
 
+**Window scoping (issue #826).** The mandated Pre-Merge Reporting flow is
+*briefing → user approval → merge*, which necessarily places the briefing in
+the turn **before** the approving user message — outside the "since the last
+human user message" window. Scoring only that window would therefore penalise
+the *correct* flow (briefing → "ok" → merge) and pass only the anti-pattern
+(briefing + merge crammed into one turn, i.e. auto-proceed without waiting).
+Two mechanisms resolve this:
+
+- **Prior-turn extension.** When the last human user message is a short
+  approval reply (`ok` / `진행` / `승인` / … — exact normalized match against
+  `_APPROVAL_TOKENS`), the immediately preceding assistant turn is also scored.
+  To keep the extension safe, that prior turn must reference the **merge target
+  PR** (`#N` or the bare number, from the `gh pr merge <N>` command) — a stale
+  prior-turn briefing for a different PR cannot satisfy the gate. A branch-name
+  merge (no PR number) disables the extension.
+- **Recording-fidelity fallback.** Some harnesses do not persist assistant
+  narration to the transcript, so a real briefing scores 0. When the current
+  turn shows tool activity (≥ `_FIDELITY_MIN_TOOLUSE`, default **3**, tool_use
+  entries) but **zero** recorded text entries, the briefing is presumed
+  invisible-not-absent and escalation demotes to advisory (fail safe) instead of
+  a hard deny.
+
 **Why `deny`, not `ask`:** the sibling `pre-merge-approval-gate` already emits
 an unconditional `ask` on *every* `gh pr merge`. A second `ask` would be
 redundant with the exact gate that failed to prevent the #795 recurrence (the
@@ -117,6 +139,8 @@ approve blindly.
 - Trivial-PR markers (`typo`, `comment-only`, `single-line`, `오타`, `주석만`,
   `trivial pr`, `2-line report`, …) in the briefing text → no escalation,
   matching CLAUDE.md's "Trivial PRs: a 2-line report is fine" carve-out.
+- Prior-turn briefing (approval reply + PR-number match) or an
+  unreliable-recording current turn → no escalation (issue #826, above).
 
 The `dispatch` and `force-push` triggers never emit a decision — escalation is
 merge-only, per the issue scope (only the merge failure was reproduced).
