@@ -113,10 +113,10 @@ checked no existing PR — none found`).
 T1's *marker* scan (is `(Recommended)`/`(추천)` present at all) reads
 `options[].label` ONLY — description is scanned for the marker by T2
 (below). The *evidence* scan (does a `Falsified:` line exist) reads the
-question body AND each **triggering** option's own `description` (issue
-#828) — never `label`, and never a non-triggering option's description.
-See the two "Why …" subsections below for why both scoping decisions are
-load-bearing, not stylistic.
+question body AND each **triggering** option's own `description` (issue #828)
+— never `label`, and never a non-triggering option's description. See the
+"Why …" subsections below for why each scoping decision is load-bearing,
+not stylistic.
 
 #### AskUserQuestion T1/T2 evidence location: question body OR option description (issue #828)
 
@@ -248,6 +248,42 @@ a triggering option's own description can supply its own evidence.
 Regression test: "AskUserQuestion: non-triggering option's unrelated
 Falsified: description does not cover a different triggering option →
 still T1 deny (issue #828 codex round-2 P2)" in the test suite.
+
+**Why matching must key on option identity (index), not normalized label
+text (codex review round-3, third in-vivo P2 catch)**: the round-2 fix
+still matched evidence ownership via `_normalize_label(label) in
+triggering_norm` — a set of normalized label STRINGS. Two distinct options
+can normalize to the identical string (e.g. `"Option  A"` with a doubled
+internal space and `"Option A"` both collapse to `"Option A"` under
+`_normalize_label`'s whitespace-run collapsing). When one such option is
+the actual T2-triggering option (via a `safer`-style anchoring token, no
+evidence of its own) and the OTHER, non-triggering option happens to share
+the same normalized label, that sibling's unrelated `Falsified:`
+description was accepted as if it belonged to the triggering option — the
+triggering option's own premise was still never falsified. Live probe
+(`impl.py` fed `options=[{label:"Option  A", description:"safer path
+overall"}, {label:"Option A", description:"Falsified: unrelated ...
+premise survives because n/a"}]`) → rc=0, empty stdout — confirmed silent
+pass before this third fix.
+
+The fix replaces label-string matching with two new index-keyed helpers,
+`_t1_triggering_indices(options)` and `_t2_triggering_indices(options)`,
+which record the POSITION of each triggering option within the `options`
+list rather than its (normalizable) label text. Two distinct list
+positions are never equal, so a same-labeled sibling can no longer donate
+its description to a different option's evidence requirement. This
+mirrors the round-1 fix's "label must never double as evidence" principle
+one layer deeper: round-1 closed the case where a label IS its own
+evidence; round-2 closed the case where a DIFFERENT option's description
+covers the wrong evidence slot by omission; round-3 closes the case where
+label TEXT COLLISION, not omission, misroutes a different option's
+description into the wrong slot. The pre-existing label-based
+`t1_triggering` / `t2_triggering` / `combined_triggering` machinery used
+for messaging (scaffold text, deny/ask reason) is unchanged — only the
+evidence-collection step now reads option identity directly. Regression
+test: "AskUserQuestion: non-triggering option sharing a normalized label
+with the triggering option does not supply its evidence → still T2 ask
+(issue #828 codex round-3 P2)" in the test suite.
 
 #### AskUserQuestion T2: confidence-anchoring framing (issue #369)
 
@@ -666,7 +702,7 @@ stderr (it signals via stdout JSON, not stderr), so a stderr-only check
 could not actually distinguish a real silent pass from an undetected
 deny/ask.
 
-Covers 96 cases (91 pre-#828 + 5 new — description-field satisfaction, per-label coverage regression via description, T2 via description, label-only self-referential bypass regression, cross-option unrelated-description bypass regression):
+Covers 97 cases (91 pre-#828 + 6 new — description-field satisfaction, per-label coverage regression via description, T2 via description, label-only self-referential bypass regression, cross-option unrelated-description bypass regression, same-normalized-label index-identity bypass regression):
 
 **T1 deny-escalation (AskUserQuestion, issue #290/#393):**
 

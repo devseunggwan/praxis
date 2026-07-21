@@ -432,6 +432,54 @@ def _t2_matching_labels(options: list) -> list[str]:
     return matched
 
 
+def _t1_triggering_indices(options: list) -> set[int]:
+    """Indices (into `options`) of options carrying the exact (Recommended)/(추천) marker.
+
+    Issue #828 codex round-3 P2: evidence-collection must key on option
+    IDENTITY (index), not on normalized label text. Two distinct options
+    can share the same normalized label (e.g. "Option  A" and "Option A"
+    both collapse to "Option A") — matching by label string let a
+    non-triggering option's unrelated `Falsified:` description satisfy a
+    *different*, triggering option with the same normalized label. Live
+    probe: option 0 label="Option  A" description="safer path overall"
+    (T2-triggering, no evidence of its own) + option 1 label="Option A"
+    description="Falsified: unrelated ... premise survives because n/a"
+    (non-triggering) → silent pass (rc=0, empty stdout) under label-string
+    matching. Index-based matching closes this because index 0 and index
+    1 are never equal.
+    """
+    indices: set[int] = set()
+    for idx, o in enumerate(options):
+        if not isinstance(o, dict):
+            continue
+        label = o.get("label")
+        if not isinstance(label, str):
+            continue
+        if any(marker in label for marker in RECOMMENDED_MARKERS_EXACT_EN):
+            indices.add(idx)
+        elif any(marker in label for marker in RECOMMENDED_MARKERS_EXACT_KO):
+            indices.add(idx)
+    return indices
+
+
+def _t2_triggering_indices(options: list) -> set[int]:
+    """Indices (into `options`) of options whose own label OR description
+    carries an anchoring token (T2 scope). See `_t1_triggering_indices` for
+    why index identity, not label text, is the matching key (issue #828
+    codex round-3 P2).
+    """
+    indices: set[int] = set()
+    for idx, o in enumerate(options):
+        if not isinstance(o, dict):
+            continue
+        label = o.get("label")
+        if not isinstance(label, str):
+            continue
+        if _has_confidence_anchoring(collect_option_texts([o])):
+            indices.add(idx)
+    return indices
+
+
 def _dedupe_labels(labels: list[str]) -> list[str]:
     """Order-preserving de-dup for aggregated scaffold labels (issue #787)."""
     return list(dict.fromkeys(labels))
@@ -727,15 +775,29 @@ def main() -> int:
                 #    n/a" → silent pass (rc=0, empty stdout) before this
                 #    fix. Only a triggering option's OWN description can
                 #    supply its evidence.
-                triggering_norm = set(combined_triggering)
+                # 3. index identity, not label-string matching (codex
+                #    round-3 P2): matching via
+                #    `_normalize_label(label) in triggering_norm` conflates
+                #    two DIFFERENT options that happen to share the same
+                #    normalized label — e.g. "Option  A" (double space,
+                #    T2-triggering) and "Option A" (non-triggering). The
+                #    non-triggering option's unrelated `Falsified:`
+                #    description satisfied the triggering option's gate.
+                #    Live probe: options=[{label:"Option  A",
+                #    description:"safer path overall"}, {label:"Option A",
+                #    description:"Falsified: unrelated ... premise
+                #    survives because n/a"}] → silent pass (rc=0, empty
+                #    stdout) before this fix. `_t1_triggering_indices` /
+                #    `_t2_triggering_indices` key on option position in
+                #    `options`, which two distinct options can never share.
+                t1_idx = _t1_triggering_indices(options)
+                t2_idx = _t2_triggering_indices(options) - t1_idx
+                triggering_indices = t1_idx | t2_idx
                 falsify_texts = list(q_texts)
-                for o in options:
+                for idx, o in enumerate(options):
+                    if idx not in triggering_indices:
+                        continue
                     if not isinstance(o, dict):
-                        continue
-                    label = o.get("label")
-                    if not isinstance(label, str):
-                        continue
-                    if _normalize_label(label) not in triggering_norm:
                         continue
                     desc = o.get("description")
                     if isinstance(desc, str):

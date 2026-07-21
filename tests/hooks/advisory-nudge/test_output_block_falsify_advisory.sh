@@ -451,6 +451,23 @@ run_case "AskUserQuestion: non-triggering option's unrelated Falsified: descript
       '[null, "Falsified: totally unrelated evidence about something else — probe: n/a → n/a; premise survives because n/a"]' \
       'Which approach?')"
 
+# Case 2g (issue #828 codex review round-3 P2 — same-normalized-label
+# cross-option collision): two DIFFERENT options can share the same
+# normalized label (e.g. "Option  A" double-space vs "Option A"). Before
+# this fix, evidence collection matched by `_normalize_label(label) in
+# triggering_norm` (a string set) rather than option identity, so a
+# non-triggering option's unrelated `Falsified:` description satisfied a
+# DIFFERENT, T2-triggering option that merely shared the same normalized
+# label and carried no evidence of its own. Index-based matching
+# (`_t1_triggering_indices` / `_t2_triggering_indices`) closes this: two
+# distinct options never share the same index.
+run_case "AskUserQuestion: non-triggering option sharing a normalized label with the triggering option does not supply its evidence → still T2 ask (issue #828 codex round-3 P2)" \
+  "ask:Falsified:" \
+  "$(make_ask_payload_with_descriptions \
+      '["Option  A", "Option A"]' \
+      '["safer path overall", "Falsified: totally unrelated evidence about something else — probe: n/a → n/a; premise survives because n/a"]' \
+      'Which approach?')"
+
 # Case 3 (updated by issue #369): (Recommended) in description-only is now
 # scanned by T2 (bare `recommended` token, label OR description). Original
 # expectation `pass` upgraded to `ask` — false-positive guard was over-
