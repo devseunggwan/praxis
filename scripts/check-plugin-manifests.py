@@ -651,6 +651,7 @@ def main() -> int:
                      "completion-signal-gate", "readonly-verify-deferral-gate",
                      "merge-state-claim-gate", "runtime-state-claim-gate",
                      "negative-existence-verdict-gate",
+                     "pr-report-destination-gate",
                      "strike-counter"]
     actual_stop: list[str] = []
     for entry in manifest["hooks"]:
