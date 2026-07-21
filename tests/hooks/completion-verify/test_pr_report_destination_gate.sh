@@ -107,6 +107,10 @@ run_case silent "no-pr-context" '{}'
 build_transcript "[$(bash_use t1 'gh pr view 178'),$(write_use t2 src/main.py)]"
 run_case silent "no-report-file" '{}'
 
+# gh pr checkout establishes context (no post) -> advisory
+build_transcript "[$(bash_use t1 'gh pr checkout 178'),$(write_use t2 /tmp/verify-report.md)]"
+run_case advisory "checkout-establishes-context" '{}'
+
 # PR URL establishes context (no post) -> advisory
 build_transcript "[$(write_use t1 /tmp/impact-report.md),{\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"z\",\"content\":\"https://github.com/o/r/pull/999\"}]}}]"
 run_case advisory "pr-url-context" '{}'

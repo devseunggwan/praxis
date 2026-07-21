@@ -1,5 +1,7 @@
 # Stop PR-Report-Destination Gate
 
+Supported hosts: all
+
 Non-blocking Stop hook. Fires when a session did PR-bound verification/review
 work, wrote the results to a **local report file**, and never posted them to
 the PR — nudging the agent to share the results on the PR before it stops.
@@ -33,7 +35,7 @@ the report write and the PR context are often many turns apart.
 
 ### Context PRs — the work is bound to these
 
-- `gh pr view|create|diff|checks|edit|ready <N>` (number or `…/pull/<N>` URL)
+- `gh pr view|create|diff|checks|checkout|edit|ready|merge <N>` (number or `…/pull/<N>` URL)
 - any `github.com/<owner>/<repo>/pull/<N>` URL anywhere in the transcript
 
 ### Posted PRs — a successful post targeted these

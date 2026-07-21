@@ -18,7 +18,8 @@ Detection is per-PR, not a global boolean, so it survives multi-PR sessions
 be many turns apart:
 
   context PRs — PR numbers the session actually worked on:
-    `gh pr view|create|diff|checks|edit|ready <N>` and any `…/pull/<N>` URL.
+    `gh pr view|create|diff|checks|checkout|edit|ready|merge <N>` and any
+    `…/pull/<N>` URL.
   posted PRs  — PR numbers a SUCCESSFUL post targeted:
     `gh pr comment|review <N>`, and POST `gh api …/pulls/<N>/{comments,reviews}`.
 
@@ -142,7 +143,7 @@ def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
         inp = u.get("input") or {}
         if name == "Bash" and isinstance(inp.get("command"), str):
             cmd = inp["command"]
-            ctx = _pr_num(cmd, "view|create|diff|checks|edit|ready")
+            ctx = _pr_num(cmd, "view|create|diff|checks|checkout|edit|ready|merge")
             if ctx:
                 context_prs.add(ctx)
             if not succeeded(u):
