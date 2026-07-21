@@ -637,36 +637,6 @@ def main() -> int:
             # Per-question check: only this question's text counts.
             q_text = q.get("question")
             q_texts = [q_text] if isinstance(q_text, str) else []
-            # Issue #828: a `Falsified:` line placed in an option's own
-            # `description` field also counts. A PreToolUse hook cannot see
-            # the assistant's own preceding prose (confirmed infeasible —
-            # see pre-output-falsification-gate's Lane A "A3 INFEASIBILITY
-            # NOTE"), so the evidence cannot be moved out of `tool_input`
-            # entirely. Splitting it across each option's own `description`
-            # instead of concatenating it into one long `question` string
-            # keeps `question` short/single-purpose, reducing the
-            # long+multiline+non-ASCII payload shape implicated in the
-            # harness's malformed-tool-call-emission bug (upstream
-            # anthropics/claude-code #69522/#79339/#74800).
-            #
-            # `description` ONLY — codex review caught that pulling in
-            # `collect_option_texts()` (label + description) let a single
-            # triggering option's own LABEL satisfy T1/T2 with zero real
-            # probe evidence: in `_has_falsified_line`'s single-label mode
-            # (<=1 triggering label), ANY clean `Falsified:`-prefixed line
-            # anywhere in `texts` passes, so an option literally labeled
-            # `"Falsified: Option A (Recommended) — probe: ..."` silent-
-            # passed the gate it was itself triggering — a self-referential
-            # bypass with no falsification cost at all. `label` is
-            # attacker/model-controlled input already scanned for the
-            # (Recommended)/anchoring MARKER (T1/T2 detection above); it
-            # must never also double as the evidence that satisfies the
-            # marker it carries.
-            for o in options:
-                if isinstance(o, dict):
-                    desc = o.get("description")
-                    if isinstance(desc, str):
-                        q_texts.append(desc)
 
             # Issue #787 codex round-7 P2: T1 and T2 triggering labels are
             # computed independently (not via if/elif) because a single
@@ -717,12 +687,66 @@ def main() -> int:
 
             combined_triggering = _dedupe_labels(t1_triggering + t2_triggering)
             if combined_triggering:
+                # Issue #828: a `Falsified:` line placed in a TRIGGERING
+                # option's own `description` field also counts. A
+                # PreToolUse hook cannot see the assistant's own preceding
+                # prose (confirmed infeasible — see
+                # pre-output-falsification-gate's Lane A "A3 INFEASIBILITY
+                # NOTE"), so the evidence cannot be moved out of
+                # `tool_input` entirely. Splitting it across each
+                # triggering option's own `description` instead of
+                # concatenating it into one long `question` string keeps
+                # `question` short/single-purpose, reducing the
+                # long+multiline+non-ASCII payload shape implicated in the
+                # harness's malformed-tool-call-emission bug (upstream
+                # anthropics/claude-code #69522/#79339/#74800).
+                #
+                # Scoped to TRIGGERING options only, and computed here
+                # (after combined_triggering exists) rather than
+                # unconditionally for every option in the question — two
+                # codex-review-caught bypasses required this:
+                #
+                # 1. label excluded from evidence: pulling in
+                #    collect_option_texts() (label + description) let a
+                #    single triggering option's own LABEL satisfy T1/T2
+                #    with zero real probe evidence (single-label mode
+                #    accepts "any clean line anywhere"). `label` already
+                #    carries the (Recommended)/anchoring MARKER; it must
+                #    never also double as the evidence proving that
+                #    marker's own premise.
+                # 2. non-triggering options excluded: adding EVERY
+                #    option's description unconditionally let an unrelated,
+                #    non-triggering option's description (with its own
+                #    unrelated `Falsified:` line) satisfy the gate for a
+                #    *different* triggering option in single-label mode —
+                #    the actual triggering option's premise was never
+                #    falsified at all. Live probe: a lone `(Recommended)`
+                #    option with no description, paired with a sibling
+                #    option whose description read
+                #    "Falsified: unrelated ... premise survives because
+                #    n/a" → silent pass (rc=0, empty stdout) before this
+                #    fix. Only a triggering option's OWN description can
+                #    supply its evidence.
+                triggering_norm = set(combined_triggering)
+                falsify_texts = list(q_texts)
+                for o in options:
+                    if not isinstance(o, dict):
+                        continue
+                    label = o.get("label")
+                    if not isinstance(label, str):
+                        continue
+                    if _normalize_label(label) not in triggering_norm:
+                        continue
+                    desc = o.get("description")
+                    if isinstance(desc, str):
+                        falsify_texts.append(desc)
+
                 # Each label in combined_triggering (issue #787 codex
                 # round-4 P1, extended round-7, round-9 P1) must be
                 # individually addressed by its own clean line — a scaffold
                 # satisfied by deleting a line, or by pasting distinct-but-
                 # off-target evidence for only one option, must still block.
-                if not _has_falsified_line(q_texts, combined_triggering):
+                if not _has_falsified_line(falsify_texts, combined_triggering):
                     if t1_triggering:
                         any_t1_violation = True
                         t1_labels.extend(t1_triggering)

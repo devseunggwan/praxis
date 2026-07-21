@@ -436,6 +436,21 @@ run_case "AskUserQuestion: label itself crafted as a Falsified: line, no descrip
   "$(make_ask_payload \
       '["Falsified: Option A (Recommended) (Recommended) — probe: fake → fake; premise survives because fake"]')"
 
+# Case 2f (issue #828 codex review round-2 P2 — cross-option description
+# bypass): a single triggering (Recommended) option with NO description of
+# its own must NOT be satisfied by a DIFFERENT, non-triggering option's
+# unrelated `Falsified:` line. Before this fix, adding every option's
+# description unconditionally to q_texts let single-label mode ("any clean
+# line anywhere satisfies") accept evidence that never addressed the
+# actual triggering option at all — the triggering option's premise was
+# never falsified. Only a triggering option's OWN description counts.
+run_case "AskUserQuestion: non-triggering option's unrelated Falsified: description does not cover a different triggering option → still T1 deny (issue #828 codex round-2 P2)" \
+  "deny:Falsified:" \
+  "$(make_ask_payload_with_descriptions \
+      '["Option A (Recommended)", "Option B"]' \
+      '[null, "Falsified: totally unrelated evidence about something else — probe: n/a → n/a; premise survives because n/a"]' \
+      'Which approach?')"
+
 # Case 3 (updated by issue #369): (Recommended) in description-only is now
 # scanned by T2 (bare `recommended` token, label OR description). Original
 # expectation `pass` upgraded to `ask` — false-positive guard was over-

@@ -86,10 +86,10 @@ edits the user requested, reversible exploration commands.
 
 | Tool | Trigger condition | Decision |
 | ------ | ----------------- | ---------- |
-| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND no `Falsified:` line in the question body or any option `description` | `permissionDecision: deny` (ASK_MSG) |
-| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND a `Falsified:` line is present (question body OR option `description`, issue #828) | Silent pass |
-| `AskUserQuestion` (T2, issue #369) | Option `label` OR `description` contains a confidence-anchoring framing token AND no `Falsified:` line in the question body or any option `description` | `permissionDecision: ask` (ANCHORING_ASK_MSG) |
-| `AskUserQuestion` (T2) | Same as above + `Falsified:` present (question body OR option `description`, issue #828) | Silent pass |
+| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND no `Falsified:` line in the question body or that triggering option's own `description` | `permissionDecision: deny` (ASK_MSG) |
+| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND a `Falsified:` line is present (question body OR that triggering option's own `description`, issue #828) | Silent pass |
+| `AskUserQuestion` (T2, issue #369) | Option `label` OR `description` contains a confidence-anchoring framing token AND no `Falsified:` line in the question body or that triggering option's own `description` | `permissionDecision: ask` (ANCHORING_ASK_MSG) |
+| `AskUserQuestion` (T2) | Same as above + `Falsified:` present (question body OR that triggering option's own `description`, issue #828) | Silent pass |
 | `AskUserQuestion` (T3) | Option `label` contains case-insensitive `(recommended)` only | Dead under new precedence — T2's bare `recommend(ed\|s)?` token catches it first as ask |
 | `Bash` | Command matches a bulk-action mutation keyword (see table below) | Advisory stderr |
 | Any other tool | — | Silent pass-through |
@@ -113,9 +113,10 @@ checked no existing PR — none found`).
 T1's *marker* scan (is `(Recommended)`/`(추천)` present at all) reads
 `options[].label` ONLY — description is scanned for the marker by T2
 (below). The *evidence* scan (does a `Falsified:` line exist) reads the
-question body AND every option's `description` (issue #828) — never
-`label`. See "Why `description` only, never `label`" below for why this
-distinction is load-bearing, not stylistic.
+question body AND each **triggering** option's own `description` (issue
+#828) — never `label`, and never a non-triggering option's description.
+See the two "Why …" subsections below for why both scoping decisions are
+load-bearing, not stylistic.
 
 #### AskUserQuestion T1/T2 evidence location: question body OR option description (issue #828)
 
@@ -169,8 +170,10 @@ instead of being concatenated into the single shared `question` string.
 `_has_falsified_line` already matched a `Falsified:` line by its
 `"Falsified: {label}"` prefix regardless of which text it came from, so no
 change to that matching logic was needed; only the set of texts fed into it
-(`q_texts`) was widened to include each option's `description` (not
-`label` — see the next subsection). This:
+(`q_texts`) was widened to include each **triggering** option's own
+`description` (not `label`, and not every option in the question — see the
+two subsections below for why both scoping decisions are load-bearing).
+This:
 
 - Keeps `question` short and single-line (just the actual question sentence)
   in the common case, reducing the long+multiline+non-ASCII payload shape.
@@ -215,6 +218,36 @@ The fix (see `impl.py` `q_texts` construction) collects only `o.get("description
 per option, never `o.get("label")`. Regression test: "AskUserQuestion:
 label itself crafted as a Falsified: line, no description → still T1 deny
 (issue #828 codex P2)" in the test suite.
+
+**Why evidence is scoped to TRIGGERING options only, never every option in
+the question (codex review round-2, second in-vivo P2 catch)**: the fix
+above still added the description of **every** option in the question to
+`q_texts` unconditionally — not just the triggering ones. That reopened
+the same single-triggering-label-mode gap from a different angle: a
+question with exactly one triggering `(Recommended)` option and **no
+description on that option at all**, paired with a second, non-triggering
+option whose own unrelated description happened to read
+`"Falsified: totally unrelated evidence about something else — probe:
+n/a → n/a; premise survives because n/a"`, silent-passed — because
+single-label mode accepts "any clean `Falsified:` line anywhere in
+`texts`" and does not check which option contributed it. The actual
+triggering option's premise was never falsified; an unrelated sibling
+option's unrelated text satisfied the gate on its behalf. Live probe
+(`impl.py` fed that exact 2-option payload) → rc=0, empty stdout —
+confirmed silent pass before this second fix.
+
+The fix computes `combined_triggering` (the deduped T1+T2 triggering
+label set) **before** collecting description evidence, then only appends
+an option's `description` to the evidence pool when that option's own
+(normalized) label is a member of `combined_triggering` — mirroring the
+existing `"Falsified: {label}"` per-label ownership contract that already
+governs multi-label coverage matching, just applied one step earlier (at
+evidence-collection time, not only at coverage-checking time). A
+non-triggering option's description is never evidence for anything; only
+a triggering option's own description can supply its own evidence.
+Regression test: "AskUserQuestion: non-triggering option's unrelated
+Falsified: description does not cover a different triggering option →
+still T1 deny (issue #828 codex round-2 P2)" in the test suite.
 
 #### AskUserQuestion T2: confidence-anchoring framing (issue #369)
 
@@ -633,7 +666,7 @@ stderr (it signals via stdout JSON, not stderr), so a stderr-only check
 could not actually distinguish a real silent pass from an undetected
 deny/ask.
 
-Covers 95 cases (91 pre-#828 + 4 new — description-field satisfaction, per-label coverage regression via description, T2 via description, label-only self-referential bypass regression):
+Covers 96 cases (91 pre-#828 + 5 new — description-field satisfaction, per-label coverage regression via description, T2 via description, label-only self-referential bypass regression, cross-option unrelated-description bypass regression):
 
 **T1 deny-escalation (AskUserQuestion, issue #290/#393):**
 
@@ -648,6 +681,7 @@ Covers 95 cases (91 pre-#828 + 4 new — description-field satisfaction, per-lab
 - 2 triggering `(Recommended)` options, only one covered via `description`, the other has no `Falsified:` line anywhere → still `deny` (per-label coverage still enforced across mixed sources)
 - T2 anchoring token (`safer`) + `Falsified:` line in the same option's `description` → `ask` → silent pass once evidence supplied
 - Single `(Recommended)` option with no `description` at all, whose own `label` is crafted to read as a clean `Falsified:` line → still `deny` (regression for the self-referential label-as-evidence bypass caught by codex review — see spec detail above)
+- Single triggering `(Recommended)` option with no `description` of its own, paired with a different non-triggering option whose unrelated `description` reads a clean `Falsified:` line → still `deny` (regression for the cross-option unrelated-description bypass caught by codex review round-2 — see spec detail above)
 
 **T2 ask-escalation (AskUserQuestion, issue #369):**
 
