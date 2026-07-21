@@ -86,10 +86,10 @@ edits the user requested, reversible exploration commands.
 
 | Tool | Trigger condition | Decision |
 | ------ | ----------------- | ---------- |
-| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND question body has no `Falsified:` line | `permissionDecision: deny` (ASK_MSG) |
-| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND question body has `Falsified:` line | Silent pass |
-| `AskUserQuestion` (T2, issue #369) | Option `label` OR `description` contains a confidence-anchoring framing token AND question body has no `Falsified:` line | `permissionDecision: ask` (ANCHORING_ASK_MSG) |
-| `AskUserQuestion` (T2) | Same as above + `Falsified:` present | Silent pass |
+| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND no `Falsified:` line in the question body or any option `description` | `permissionDecision: deny` (ASK_MSG) |
+| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND a `Falsified:` line is present (question body OR option `description`, issue #828) | Silent pass |
+| `AskUserQuestion` (T2, issue #369) | Option `label` OR `description` contains a confidence-anchoring framing token AND no `Falsified:` line in the question body or any option `description` | `permissionDecision: ask` (ANCHORING_ASK_MSG) |
+| `AskUserQuestion` (T2) | Same as above + `Falsified:` present (question body OR option `description`, issue #828) | Silent pass |
 | `AskUserQuestion` (T3) | Option `label` contains case-insensitive `(recommended)` only | Dead under new precedence — T2's bare `recommend(ed\|s)?` token catches it first as ask |
 | `Bash` | Command matches a bulk-action mutation keyword (see table below) | Advisory stderr |
 | Any other tool | — | Silent pass-through |
@@ -100,15 +100,121 @@ edits the user requested, reversible exploration commands.
 `(Recommended)` and `(추천)` in option labels are the canonical signal for a
 self-authored proposal block about to be surfaced. When these exact tokens
 (case-sensitive, including parentheses) are detected, the hook checks the
-`question` field of each question object for a line that starts with `Falsified:`
-(exact prefix at line start, as in `Falsified: checked no existing PR — none found`).
+`question` field of each question object, plus every option's own
+`description` field (issue #828 — see below; NOT `label`), for a line that
+starts with `Falsified:` (exact prefix at line start, as in `Falsified:
+checked no existing PR — none found`).
 
 - **`Falsified:` present** → silent pass. The model has provided verifiable
   evidence of a disconfirming test.
 - **`Falsified:` absent** → `permissionDecision: deny` with ASK_MSG (hard block — issue #393). The model
   must add the falsification line and retry.
 
-T1 scans `options[].label` ONLY — description is scanned by T2 (below).
+T1's *marker* scan (is `(Recommended)`/`(추천)` present at all) reads
+`options[].label` ONLY — description is scanned for the marker by T2
+(below). The *evidence* scan (does a `Falsified:` line exist) reads the
+question body AND every option's `description` (issue #828) — never
+`label`. See "Why `description` only, never `label`" below for why this
+distinction is load-bearing, not stylistic.
+
+#### AskUserQuestion T1/T2 evidence location: question body OR option description (issue #828)
+
+**Why this exists**: praxis skill `praxis:cmux-delegate` (and this hook
+itself) require a `Falsified:` line to satisfy T1/T2 before the deny/ask
+decision clears. Before issue #828 the only place `_has_falsified_line`
+scanned was `questions[].question` — the single string field carrying the
+literal user-facing question text. In practice this pushed the model to
+prepend the full falsification rationale (often multi-paragraph, Korean,
+multi-line) onto that one field, because the alternative was retrying the
+tool call with no way to record the evidence anywhere else the hook would
+accept.
+
+That shape — a long, multi-line, non-ASCII (CJK) string inside a single
+tool-call argument — matches the trigger conditions reported for a
+Claude Code harness bug where tool-call arguments are double-encoded to a
+JSON string and rejected as malformed input
+(`{"__unparsedToolInput": {...}}` / `InputValidationError`; upstream
+anthropics/claude-code
+[#69522](https://github.com/anthropics/claude-code/issues/69522),
+[#79339](https://github.com/anthropics/claude-code/issues/79339),
+[#74800](https://github.com/anthropics/claude-code/issues/74800)). This
+hook's own T1/T2 requirement was a **self-inflicted contributor** to that
+trigger: every `(Recommended)` call was forced to inflate `question` with
+exactly the long/multiline/non-ASCII payload shape the bug is sensitive to.
+
+**Feasibility investigation — moving the check to preceding assistant
+prose (rejected, infeasible)**: the original idea was to let the model
+write the `Falsified:` line as ordinary assistant text *before* the
+`AskUserQuestion` tool call, and have this PreToolUse hook read that
+preceding prose from the transcript instead of from `tool_input` at all —
+fully removing the evidence from the tool call's JSON payload. This is
+infeasible: a `PreToolUse` hook only receives the already-parsed
+`tool_input` for the call it is gating; it cannot see the text blocks the
+assistant emitted in the same in-flight turn, because those blocks are not
+yet flushed to the transcript file when the hook runs (confirmed by this
+repo's own prior investigation — see `pre-output-falsification-gate`
+Lane A's "A3 INFEASIBILITY NOTE" in `impl.py`, which hit and documented the
+identical limitation: "A PreToolUse hook cannot see the assistant turn
+being authored — only the tool_input being submitted"). The
+`extract_last_assistant_text` / `has_tool_in_turn` helpers in `_lib/_transcript.py`
+that could theoretically do this are used only by **Stop** hooks (see
+`hooks/completion-verify/*`), which fire after the full turn — including
+any pre-tool-call text — has already been persisted. No PreToolUse hook in
+this repo reads current-turn assistant prose for this reason.
+
+**What shipped instead**: since the evidence cannot leave `tool_input`
+entirely, it is now allowed to live in a smaller, more naturally-scoped
+field within `tool_input` — each triggering option's own `description` —
+instead of being concatenated into the single shared `question` string.
+`_has_falsified_line` already matched a `Falsified:` line by its
+`"Falsified: {label}"` prefix regardless of which text it came from, so no
+change to that matching logic was needed; only the set of texts fed into it
+(`q_texts`) was widened to include each option's `description` (not
+`label` — see the next subsection). This:
+
+- Keeps `question` short and single-line (just the actual question sentence)
+  in the common case, reducing the long+multiline+non-ASCII payload shape.
+- Distributes multi-option evidence across N smaller per-option strings
+  instead of one large concatenated block.
+- Requires no transcript access and no new failure mode — it is a pure
+  `tool_input`-local check, same as the pre-#828 contract.
+- Is fully backward compatible: a `Falsified:` line in `question` still
+  satisfies the gate exactly as before (no regression), so an agent that
+  keeps the old convention does not get newly blocked.
+
+The `[trigger-reduction]` sentence appended to both `ASK_MSG` and
+`ANCHORING_ASK_MSG` (see Response shape below) tells the model to prefer
+the option-`description` placement going forward.
+
+**Why `description` only, never `label` (codex review, in-vivo P2 catch
+during this issue's own review pass)**: the first implementation widened
+`q_texts` using the existing `collect_option_texts(options)` helper, which
+returns label + description per option (it already existed for T2's
+anchoring-token scan). That reintroduced a self-referential bypass:
+`_has_falsified_line`'s single-triggering-label mode (issue #290 contract
+— when `len(triggering_labels) <= 1`, ANY clean `Falsified:`-prefixed line
+anywhere in `texts` satisfies the gate) does not care which option a line
+came from when there is only one triggering option. A single `(Recommended)`
+option whose own **label** was crafted to read
+`"Falsified: Option A (Recommended) — probe: fake → fake; premise survives
+because fake"` silent-passed the gate it was itself triggering — the
+model could satisfy the falsification requirement by writing a
+label that merely *looks like* evidence, with zero actual probe run and
+zero real observation. Live probe (`impl.py` fed that exact payload) → rc=0,
+empty stdout — confirmed silent pass before the fix.
+
+`label` is the same field the `(Recommended)`/`(추천)` marker itself lives
+in (T1's marker scan) and the same field T2 scans for anchoring tokens —
+it must never also serve as the evidence proving that marker's own premise,
+or the gate collapses to "does the label contain a `Falsified:`-shaped
+string", which any single-line edit can satisfy trivially. `description`
+does not have this problem: T1's marker scan reads `label` only (never
+`description`), so a `description` field can carry `Falsified:` evidence
+without also being the very marker the evidence is supposed to falsify.
+The fix (see `impl.py` `q_texts` construction) collects only `o.get("description")`
+per option, never `o.get("label")`. Regression test: "AskUserQuestion:
+label itself crafted as a Falsified: line, no description → still T1 deny
+(issue #828 codex P2)" in the test suite.
 
 #### AskUserQuestion T2: confidence-anchoring framing (issue #369)
 
@@ -171,7 +277,7 @@ matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
-    "permissionDecisionReason": "(Recommended) 라벨이 있으나 question body 에 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Self-Falsify Before Recommendation Lock 룰. [pre-author-template] 이번 호출뿐 아니라 앞으로 (Recommended) 라벨을 붙일 때마다 AskUserQuestion 작성 직전(도구 호출 전) 에 첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — 인스턴스 수정이 아닌 템플릿 수정이 필요하다. 'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — 질문문 중간/불릿/코드펜스 내부 배치는 미검출."
+    "permissionDecisionReason": "(Recommended) 라벨이 있으나 question body 또는 해당 옵션의 description 필드 어디에도 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Self-Falsify Before Recommendation Lock 룰. [pre-author-template] 이번 호출뿐 아니라 앞으로 (Recommended) 라벨을 붙일 때마다 AskUserQuestion 작성 직전(도구 호출 전) 에 첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — 인스턴스 수정이 아닌 템플릿 수정이 필요하다. 'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — 질문문 중간/불릿/코드펜스 내부 배치는 미검출. [trigger-reduction] question 은 짧게 유지하고, Falsified: 줄은 해당 옵션 (Recommended) 의 description 필드에 넣는 것을 권장 — 두 위치 모두 검증됨."
   }
 }
 ```
@@ -188,7 +294,7 @@ matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "ask",
-    "permissionDecisionReason": "옵션 라벨/설명에 confidence-anchoring framing 토큰 (safer/safest/natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/당연히/분명히/추천/기본값) 이 있으나 question body 에 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Output-Block-Level Falsification Gate. [pre-author-template] 이번 호출뿐 아니라 앞으로 confidence-anchoring 토큰을 옵션 라벨/설명에 쓸 때마다 AskUserQuestion 작성 직전(도구 호출 전) 에 첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — 인스턴스 수정이 아닌 템플릿 수정이 필요하다. 'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — 질문문 중간/불릿/코드펜스 내부 배치는 미검출."
+    "permissionDecisionReason": "옵션 라벨/설명에 confidence-anchoring framing 토큰 (safer/safest/natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/당연히/분명히/추천/기본값) 이 있으나 question body 또는 해당 옵션의 description 필드 어디에도 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Output-Block-Level Falsification Gate. [pre-author-template] 이번 호출뿐 아니라 앞으로 confidence-anchoring 토큰을 옵션 라벨/설명에 쓸 때마다 AskUserQuestion 작성 직전(도구 호출 전) 에 첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — 인스턴스 수정이 아닌 템플릿 수정이 필요하다. 'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — 질문문 중간/불릿/코드펜스 내부 배치는 미검출. [trigger-reduction] question 은 짧게 유지하고, Falsified: 줄은 해당 옵션의 description 필드에 넣는 것을 권장 — 두 위치 모두 검증됨."
   }
 }
 ```
@@ -527,7 +633,7 @@ stderr (it signals via stdout JSON, not stderr), so a stderr-only check
 could not actually distinguish a real silent pass from an undetected
 deny/ask.
 
-Covers 91 cases (47 pre-#787 + 44 new — 5 scaffold, 5 telemetry, 4 multi-question/coarse-dedup fixes, 30 anti-bypass/false-positive):
+Covers 95 cases (91 pre-#828 + 4 new — description-field satisfaction, per-label coverage regression via description, T2 via description, label-only self-referential bypass regression):
 
 **T1 deny-escalation (AskUserQuestion, issue #290/#393):**
 
@@ -535,6 +641,13 @@ Covers 91 cases (47 pre-#787 + 44 new — 5 scaffold, 5 telemetry, 4 multi-quest
 - Option label `(추천)` + no `Falsified:` → `permissionDecision: deny`
 - Option label `(Recommended)` + `Falsified:` line present → silent pass
 - Non-recommended option labels → silent pass
+
+**Description-field evidence location (issue #828):**
+
+- Option label `(Recommended)` + `Falsified:` line in that option's own `description` (not `question`) → silent pass, `question` stays short
+- 2 triggering `(Recommended)` options, only one covered via `description`, the other has no `Falsified:` line anywhere → still `deny` (per-label coverage still enforced across mixed sources)
+- T2 anchoring token (`safer`) + `Falsified:` line in the same option's `description` → `ask` → silent pass once evidence supplied
+- Single `(Recommended)` option with no `description` at all, whose own `label` is crafted to read as a clean `Falsified:` line → still `deny` (regression for the self-referential label-as-evidence bypass caught by codex review — see spec detail above)
 
 **T2 ask-escalation (AskUserQuestion, issue #369):**
 - KO `가장 안전한` in `options[].description` + no `Falsified:` → `ask` (ANCHORING_ASK_MSG) — in-vivo regression for the ai-dotfiles PR #84 session

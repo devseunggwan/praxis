@@ -33,8 +33,10 @@ This hook adds a structural enforcement point at two surfaces:
          for ergonomics: framing-token detection is broader and carries
          higher false-positive risk than the literal T1 marker.
 
-     When `Falsified:` is present in the question body, both tiers
-     silent-pass.
+     When `Falsified:` is present in the question body OR the triggering
+     option's own `description` field, both tiers silent-pass (issue #828:
+     the description-field path lets the evidence stay out of the shared
+     `question` string, keeping it short — see `q_texts` construction below).
 
   2. Bash — bulk-action commands containing patterns like "close all",
      "delete all", "merge all" (+ Korean equivalents). Advisory only.
@@ -73,8 +75,8 @@ ADVISORY_MSG = (
 )
 
 ASK_MSG = (
-    "(Recommended) 라벨이 있으나 question body 에 "
-    "'Falsified: <disconfirming test 결과>' 가 없음. "
+    "(Recommended) 라벨이 있으나 question body 또는 해당 옵션의 description "
+    "필드 어디에도 'Falsified: <disconfirming test 결과>' 가 없음. "
     "CLAUDE.md Self-Falsify Before Recommendation Lock 룰. "
     # Template-level guidance (issue #682): the problem is not only this call —
     # the AskUserQuestion compose template is missing the field. Bake a
@@ -86,14 +88,19 @@ ASK_MSG = (
     "첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — "
     "인스턴스 수정이 아닌 템플릿 수정이 필요하다. "
     "'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — "
-    "질문문 중간/불릿/코드펜스 내부 배치는 미검출."
+    "질문문 중간/불릿/코드펜스 내부 배치는 미검출. "
+    # Issue #828: prefer the option's own description field over the
+    # question body so long/multiline evidence doesn't accumulate in one
+    # shared string.
+    "[trigger-reduction] question 은 짧게 유지하고, Falsified: 줄은 해당 옵션 "
+    "(Recommended) 의 description 필드에 넣는 것을 권장 — 두 위치 모두 검증됨."
 )
 
 ANCHORING_ASK_MSG = (
     "옵션 라벨/설명에 confidence-anchoring framing 토큰 (safer/safest/"
     "natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/"
-    "당연히/분명히/추천/기본값) 이 있으나 question body 에 "
-    "'Falsified: <disconfirming test 결과>' 가 없음. "
+    "당연히/분명히/추천/기본값) 이 있으나 question body 또는 해당 옵션의 "
+    "description 필드 어디에도 'Falsified: <disconfirming test 결과>' 가 없음. "
     "CLAUDE.md Output-Block-Level Falsification Gate. "
     # Template-level guidance (issue #682): bake the Falsified: line into the
     # AskUserQuestion compose template for every anchoring-framed option, not
@@ -104,7 +111,10 @@ ANCHORING_ASK_MSG = (
     "첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — "
     "인스턴스 수정이 아닌 템플릿 수정이 필요하다. "
     "'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — "
-    "질문문 중간/불릿/코드펜스 내부 배치는 미검출."
+    "질문문 중간/불릿/코드펜스 내부 배치는 미검출. "
+    # Issue #828: same trigger-reduction guidance as ASK_MSG.
+    "[trigger-reduction] question 은 짧게 유지하고, Falsified: 줄은 해당 옵션의 "
+    "description 필드에 넣는 것을 권장 — 두 위치 모두 검증됨."
 )
 
 # ---------------------------------------------------------------------------
@@ -627,6 +637,36 @@ def main() -> int:
             # Per-question check: only this question's text counts.
             q_text = q.get("question")
             q_texts = [q_text] if isinstance(q_text, str) else []
+            # Issue #828: a `Falsified:` line placed in an option's own
+            # `description` field also counts. A PreToolUse hook cannot see
+            # the assistant's own preceding prose (confirmed infeasible —
+            # see pre-output-falsification-gate's Lane A "A3 INFEASIBILITY
+            # NOTE"), so the evidence cannot be moved out of `tool_input`
+            # entirely. Splitting it across each option's own `description`
+            # instead of concatenating it into one long `question` string
+            # keeps `question` short/single-purpose, reducing the
+            # long+multiline+non-ASCII payload shape implicated in the
+            # harness's malformed-tool-call-emission bug (upstream
+            # anthropics/claude-code #69522/#79339/#74800).
+            #
+            # `description` ONLY — codex review caught that pulling in
+            # `collect_option_texts()` (label + description) let a single
+            # triggering option's own LABEL satisfy T1/T2 with zero real
+            # probe evidence: in `_has_falsified_line`'s single-label mode
+            # (<=1 triggering label), ANY clean `Falsified:`-prefixed line
+            # anywhere in `texts` passes, so an option literally labeled
+            # `"Falsified: Option A (Recommended) — probe: ..."` silent-
+            # passed the gate it was itself triggering — a self-referential
+            # bypass with no falsification cost at all. `label` is
+            # attacker/model-controlled input already scanned for the
+            # (Recommended)/anchoring MARKER (T1/T2 detection above); it
+            # must never also double as the evidence that satisfies the
+            # marker it carries.
+            for o in options:
+                if isinstance(o, dict):
+                    desc = o.get("description")
+                    if isinstance(desc, str):
+                        q_texts.append(desc)
 
             # Issue #787 codex round-7 P2: T1 and T2 triggering labels are
             # computed independently (not via if/elif) because a single
