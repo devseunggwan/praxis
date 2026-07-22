@@ -5,6 +5,30 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.5.0](https://github.com/devseunggwan/praxis/compare/v7.4.0...v7.5.0) (2026-07-22)
+
+
+### Added
+
+* **hooks:** add pr-report-destination-gate Stop hook ([#833](https://github.com/devseunggwan/praxis/issues/833)) ([244e170](https://github.com/devseunggwan/praxis/commit/244e1700d57cdb9ea7db0714833a72e23c0a565e))
+* **hooks:** add secret-print-redaction advisory ([#838](https://github.com/devseunggwan/praxis/issues/838)) ([4d4699e](https://github.com/devseunggwan/praxis/commit/4d4699e5952f5b857532d9f34fc5a9a22efaa6a9))
+* **hooks:** add source-citation probe gate ([#839](https://github.com/devseunggwan/praxis/issues/839)) ([255c066](https://github.com/devseunggwan/praxis/commit/255c06661938e3e2fe05226e51ec26b29f5a3f78))
+* **hooks:** surface pr-body tokens at deny time ([#840](https://github.com/devseunggwan/praxis/issues/840)) ([18bf86f](https://github.com/devseunggwan/praxis/commit/18bf86f60e700513a3e9e5f094e816b6c56873f4)), closes [#824](https://github.com/devseunggwan/praxis/issues/824)
+
+
+### Fixed
+
+* **ask-falsify-gate:** move falsified line out of question body ([0e58c46](https://github.com/devseunggwan/praxis/commit/0e58c46c77559da0e641c7d07021d1506a87c2aa))
+* **hooks:** extract shared memory-dir resolver ([#837](https://github.com/devseunggwan/praxis/issues/837)) ([e56e7e1](https://github.com/devseunggwan/praxis/commit/e56e7e1efd5a7777ef09963e1d473b661728d504))
+* **momentum-gate:** add in-band briefing-surfaced bypass marker ([#835](https://github.com/devseunggwan/praxis/issues/835)) ([b2bbaf3](https://github.com/devseunggwan/praxis/commit/b2bbaf3f8fb80521a1d45a73eb6e0a36afdd69c7))
+* **momentum-gate:** scope merge-briefing window to prior turn ([#834](https://github.com/devseunggwan/praxis/issues/834)) ([f4319bc](https://github.com/devseunggwan/praxis/commit/f4319bcf634fc5d88f8cdd277de2f86318373f99))
+
+
+### Changed
+
+* add review-body surface to pr comment scope ([#836](https://github.com/devseunggwan/praxis/issues/836)) ([0212f68](https://github.com/devseunggwan/praxis/commit/0212f684bb5a1c8e90fe6c60fd8488a0c1b5b687))
+* **ask-falsify-gate:** allow evidence in description ([#829](https://github.com/devseunggwan/praxis/issues/829)) ([0e58c46](https://github.com/devseunggwan/praxis/commit/0e58c46c77559da0e641c7d07021d1506a87c2aa))
+
 ## [7.4.0](https://github.com/devseunggwan/praxis/compare/v7.3.0...v7.4.0) (2026-07-18)
 
 
