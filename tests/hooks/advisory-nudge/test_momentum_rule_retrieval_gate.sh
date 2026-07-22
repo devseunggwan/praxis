@@ -784,6 +784,21 @@ run_merge_escalation_case "merge_escalation_briefing_marker_bare_demotes" \
 run_merge_escalation_case "merge_escalation_no_marker_still_denies" \
   "yes" "" "momentum-merge-incomplete.jsonl" "gh pr merge --squash --delete-branch"
 
+# round-1 P1: one self-attestation must not release a compound multi-merge.
+# Marker present but TWO merge segments → not demoted → deny.
+run_merge_escalation_case "merge_escalation_marker_multi_merge_denies" \
+  "yes" "" "momentum-merge-incomplete.jsonl" "gh pr merge 833 --squash && gh pr merge 999 --squash # briefing-surfaced"
+
+# round-1 P1: a looped merge with the marker also stays denied.
+run_merge_escalation_case "merge_escalation_marker_loop_denies" \
+  "yes" "" "momentum-merge-incomplete.jsonl" 'for pr in 833 999; do gh pr merge "$pr" --squash; done # briefing-surfaced'
+
+# round-1 P2: the marker inside a QUOTED argument is data, not an attestation
+# comment → must NOT bypass. `grep '# briefing-surfaced' …` before the merge
+# still denies on the incomplete briefing.
+run_merge_escalation_case "merge_escalation_marker_quoted_denies" \
+  "yes" "" "momentum-merge-incomplete.jsonl" "grep '# briefing-surfaced' spec.md && gh pr merge --squash"
+
 # Full bypass silences everything, including the escalation.
 merge_escalation_bypass_silent_case() {
   local name="merge_escalation_full_bypass_silent"

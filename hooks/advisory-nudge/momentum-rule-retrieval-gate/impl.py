@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import sys
 from collections import deque
 from pathlib import Path
@@ -282,9 +283,38 @@ MERGE_ADVISORY_ENV = "PRAXIS_MOMENTUM_MERGE_ADVISORY"
 _BRIEFING_MARKER_RE = re.compile(r"#\s*briefing-surfaced\b", re.IGNORECASE)
 
 
+def _tokenize_code_only(command: str) -> list[str]:
+    """Tokenize with `#` as a shell comment starter, so unquoted `# …` comments
+    are DROPPED while a quoted `'# …'` argument is KEPT as a token. Mirrors
+    `safe_tokenize` (per-line, punctuation_chars) but with commenters='#'."""
+    tokens: list[str] = []
+    for line in command.split("\n"):
+        if not line.strip():
+            continue
+        try:
+            lex = shlex.shlex(line, posix=True, punctuation_chars=";|&")
+            lex.whitespace_split = True
+            lex.commenters = "#"
+            tokens.extend(list(lex))
+        except ValueError:
+            continue
+    return tokens
+
+
 def _has_briefing_marker(command: object) -> bool:
-    """True when the command carries the in-band `# briefing-surfaced` marker."""
-    return isinstance(command, str) and _BRIEFING_MARKER_RE.search(command) is not None
+    """True when the command carries the in-band `# briefing-surfaced` marker in
+    an UNQUOTED shell comment (not inside a quoted argument or other data).
+
+    The marker must be a real shell comment — a quoted occurrence (e.g.
+    `grep '# briefing-surfaced' spec.md && gh pr merge …`) is data, not an
+    attestation, and must not bypass the gate (round-1 P2). Detection: the marker
+    is present in the raw command but ABSENT once `#` comments are stripped by the
+    lexer; a marker that survives comment-stripping is quoted data.
+    """
+    if not isinstance(command, str) or _BRIEFING_MARKER_RE.search(command) is None:
+        return False
+    code_only = " ".join(_tokenize_code_only(command))
+    return _BRIEFING_MARKER_RE.search(code_only) is None
 
 # Distinct Pre-Merge Reporting items must be present in the pre-merge assistant
 # text. The documented failure surfaced only 3 of 6 (What changed / verified /
@@ -659,9 +689,14 @@ def _merge_escalation_reason(payload: dict) -> str | None:
         return None
 
     command = (payload.get("tool_input") or {}).get("command")
-    # In-band bypass (issue #826): a `# briefing-surfaced` marker in the command
-    # demotes to advisory where the env bypass cannot reach the hook process.
-    if _has_briefing_marker(command):
+    # In-band bypass (issue #826): a `# briefing-surfaced` marker in an UNQUOTED
+    # shell comment demotes to advisory where the env bypass cannot reach the
+    # hook process — but only for a SINGLE merge with no loop. One
+    # self-attestation must not release a compound `merge A && merge B` or a
+    # looped merge (round-1 P1: same No-Approval-Transfer guard the prior-turn
+    # extension applies).
+    if _has_briefing_marker(command) \
+            and len(_merge_segments(command)) == 1 and not _has_repetition(command):
         return None
 
     entries = _load_turn_entries(payload.get("transcript_path", "") or "")
