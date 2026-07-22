@@ -262,10 +262,29 @@ def _emit_for_trigger(trigger: str, directory: str | None) -> str:
 #   • no readable transcript                 → no escalation (fail open)
 #   • CMUX_DELEGATE=1 (background agent)      → no escalation (mirror sibling)
 #   • PRAXIS_MOMENTUM_MERGE_ADVISORY=1        → demote back to advisory only
+#   • `# briefing-surfaced` in the command    → demote back to advisory only
 #   • trivial-PR markers in the briefing text → no escalation (CLAUDE.md carve-out)
 # ---------------------------------------------------------------------------
 
 MERGE_ADVISORY_ENV = "PRAXIS_MOMENTUM_MERGE_ADVISORY"
+
+# In-band bypass marker (issue #826). The env bypass above is read from the hook
+# process `os.environ` and is NOT reachable via a Bash inline `VAR=1 cmd` prefix
+# — the hook is spawned by the harness, not as a child of the command. In a
+# bridge-session harness that ALSO drops assistant text from the transcript, a
+# legitimate briefing-surfaced merge is otherwise permanently blocked with no
+# in-band way to release it (observed live: #826, and again merging #834). A
+# marker embedded in the command string (a shell `#` comment, harmless at exec —
+# bash ignores everything after `#`) IS reachable in-band and demotes escalation
+# to advisory. This is a conscious self-attestation, appropriate for a
+# self-discipline nudge rather than an adversarial boundary: the agent asserts
+# the briefing was surfaced, exactly as the env bypass would.
+_BRIEFING_MARKER_RE = re.compile(r"#\s*briefing-surfaced\b", re.IGNORECASE)
+
+
+def _has_briefing_marker(command: object) -> bool:
+    """True when the command carries the in-band `# briefing-surfaced` marker."""
+    return isinstance(command, str) and _BRIEFING_MARKER_RE.search(command) is not None
 
 # Distinct Pre-Merge Reporting items must be present in the pre-merge assistant
 # text. The documented failure surfaced only 3 of 6 (What changed / verified /
@@ -639,6 +658,12 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     if os.environ.get(MERGE_ADVISORY_ENV) == "1":
         return None
 
+    command = (payload.get("tool_input") or {}).get("command")
+    # In-band bypass (issue #826): a `# briefing-surfaced` marker in the command
+    # demotes to advisory where the env bypass cannot reach the hook process.
+    if _has_briefing_marker(command):
+        return None
+
     entries = _load_turn_entries(payload.get("transcript_path", "") or "")
     if entries is None:
         return None  # transcript unreadable → fail open, do not block
@@ -651,8 +676,7 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     if _briefing_item_count(current_text) >= MERGE_BRIEFING_MIN_ITEMS:
         return None
 
-    if _prior_turn_extension_passes(
-            entries, idxs, (payload.get("tool_input") or {}).get("command")):
+    if _prior_turn_extension_passes(entries, idxs, command):
         return None
 
     return format_block(
@@ -664,6 +688,9 @@ def _merge_escalation_reason(payload: dict) -> str | None:
         correct_path="surface the 6-item briefing and an explicit 'Approve "
             "merge?' question, then re-run the merge",
         bypass_env=MERGE_ADVISORY_ENV,
+        bypass_reason_hint="with a one-line reason — or, where the env var "
+            "cannot reach the hook (bridge-session harness), append "
+            "`# briefing-surfaced: <reason>` to the merge command",
         reference="CLAUDE.md → Pre-Merge Reporting; "
             "hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md",
     )

@@ -177,6 +177,19 @@ approve blindly.
   is the approval, mirroring `pre-merge-approval-gate`.
 - `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` → demote back to advisory only (keeps the
   stderr reminder, skips the deny). The escape hatch for a mis-scored briefing.
+- `# briefing-surfaced` in the merge command (an **in-band** marker, issue #826)
+  → demote back to advisory only. The env bypass above is read from the hook
+  process `os.environ` and is **not** reachable via a Bash inline `VAR=1 cmd`
+  prefix — the hook is spawned by the harness, not as a child of the command. In
+  a bridge-session harness that *also* drops assistant text from the transcript
+  (so the briefing scores 0), a legitimate briefing-surfaced merge would be
+  permanently blocked with no in-band release. A shell-comment marker embedded in
+  the command (harmless at exec — bash ignores everything after `#`) is reachable
+  in-band. Matched case-insensitively as `#\s*briefing-surfaced`; a trailing
+  `: <reason>` is recommended but not required. This is a conscious
+  self-attestation, appropriate for a self-discipline nudge (not an adversarial
+  boundary): the agent asserts the briefing was surfaced, exactly as the env
+  bypass would.
 - Trivial-PR markers (`typo`, `comment-only`, `single-line`, `오타`, `주석만`,
   `trivial pr`, `2-line report`, …) in the briefing text → no escalation,
   matching CLAUDE.md's "Trivial PRs: a 2-line report is fine" carve-out.
@@ -192,7 +205,7 @@ merge-only, per the issue scope (only the merge failure was reproduced).
 | Variable | Effect |
 | ---------- | -------- |
 | `PRAXIS_MOMENTUM_BYPASS=1` | Skip all output and exit 0 immediately (for scripted batch operations) |
-| `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` | Demote the merge-briefing escalation to advisory only (stderr reminder still fires, no `deny`) |
+| `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` | Demote the merge-briefing escalation to advisory only (stderr reminder still fires, no `deny`). See also the in-band `# briefing-surfaced` command marker (issue #826) for harnesses where this env var cannot reach the hook |
 | `PRAXIS_MOMENTUM_STRICT=1` | Exit 2 (block) instead of exit 0, unless `PRAXIS_MOMENTUM_ACK=1` is also set |
 | `PRAXIS_MOMENTUM_ACK=1` | Acknowledge the surface in strict mode; exit 0 after emitting the advisory |
 

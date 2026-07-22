@@ -769,6 +769,21 @@ run_merge_escalation_case "merge_escalation_delegate_skips" \
 run_merge_escalation_case "merge_escalation_advisory_env_demotes" \
   "no" "PRAXIS_MOMENTUM_MERGE_ADVISORY=1" "momentum-merge-incomplete.jsonl"
 
+# In-band bypass marker (issue #826): `# briefing-surfaced` in the command
+# demotes to advisory where the env var cannot reach the hook. Incomplete
+# briefing fixture would otherwise deny → marker present → no deny.
+run_merge_escalation_case "merge_escalation_briefing_marker_demotes" \
+  "no" "" "momentum-merge-incomplete.jsonl" "gh pr merge --squash # briefing-surfaced: env unreachable in this harness"
+
+# Marker with no reason still demotes (reason is recommended, not required).
+run_merge_escalation_case "merge_escalation_briefing_marker_bare_demotes" \
+  "no" "" "momentum-merge-incomplete.jsonl" "gh pr merge --squash --delete-branch # briefing-surfaced"
+
+# Sanity: WITHOUT the marker the same incomplete briefing still denies (the
+# marker, not the fixture, is what demotes).
+run_merge_escalation_case "merge_escalation_no_marker_still_denies" \
+  "yes" "" "momentum-merge-incomplete.jsonl" "gh pr merge --squash --delete-branch"
+
 # Full bypass silences everything, including the escalation.
 merge_escalation_bypass_silent_case() {
   local name="merge_escalation_full_bypass_silent"
