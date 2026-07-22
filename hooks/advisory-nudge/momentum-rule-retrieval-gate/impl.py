@@ -50,6 +50,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
+from _memory_dir import resolve_memory_dir  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import TRANSCRIPT_SCAN_LINES  # type: ignore[import-not-found]  # noqa: E402
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 
@@ -172,17 +173,6 @@ def _parse_momentum_frontmatter(raw: str) -> dict | None:
         )
 
     return {"triggers": triggers, "description": description}
-
-
-def _resolve_memory_dir() -> str | None:
-    env_dir = os.environ.get("PRAXIS_MEMORY_DIR", "").strip()
-    if env_dir:
-        return env_dir if os.path.isdir(env_dir) else None
-    home = os.path.expanduser("~")
-    cwd = os.getcwd()
-    slug = cwd.replace("/", "-")
-    fallback = os.path.join(home, ".claude", "projects", slug, "memory")
-    return fallback if os.path.isdir(fallback) else None
 
 
 def _load_momentum_memories(directory: str, trigger: str) -> list[tuple[str, str, float]]:
@@ -968,7 +958,7 @@ def main() -> int:
     if not triggers:
         return 0
 
-    directory = _resolve_memory_dir()
+    directory = resolve_memory_dir()
 
     # Emit each surface to stderr — static rule text + dynamic memory cites.
     for trigger in triggers:

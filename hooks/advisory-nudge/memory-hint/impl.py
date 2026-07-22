@@ -26,7 +26,8 @@ sibling hook blocked the command.
 Memory directory discovery:
   1. `PRAXIS_MEMORY_DIR` env var (when set + exists)
   2. fallback to `~/.claude/projects/{slugified-cwd}/memory/`
-     (slugify rule: replace `/` with `-` on the absolute cwd)
+     (slugify rule: replace every non-alphanumeric character with `-`,
+     per-character — see `hooks/_lib/_memory_dir.py`, the shared SoT)
   3. missing dir → exit 0 silently
 
 Frontmatter parser is pure regex (no PyYAML dependency). Supported shapes:
@@ -52,6 +53,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
+from _memory_dir import resolve_memory_dir  # type: ignore[import-not-found]  # noqa: E402
 
 
 HIT_LIMIT = 3
@@ -170,30 +172,6 @@ def parse_frontmatter(raw: str) -> dict | None:
         "description": description,
         "events": events,
     }
-
-
-_SLUG_CHAR_RE = re.compile(r"[^a-zA-Z0-9]")
-
-
-def resolve_memory_dir() -> str | None:
-    """Return the resolved memory directory path or None if missing."""
-    env_dir = os.environ.get("PRAXIS_MEMORY_DIR", "").strip()
-    if env_dir:
-        return env_dir if os.path.isdir(env_dir) else None
-
-    home = os.path.expanduser("~")
-    cwd = os.getcwd()
-    # Claude Code replaces every non-alphanumeric character individually
-    # (not collapsed runs) — e.g. /Users/nathan.song/.claude slugs to
-    # -Users-nathan-song--claude (double dash, since "/." is two chars).
-    # A prior cwd.replace("/", "-") only touched slashes, so any other
-    # special character (a literal "." in a username, for one) left the
-    # fallback path permanently unresolvable — this fallback ran, found
-    # None, and the entire hookable/hookKeywords surface silently never
-    # fired for any memory in the store.
-    slug = _SLUG_CHAR_RE.sub("-", cwd)
-    fallback = os.path.join(home, ".claude", "projects", slug, "memory")
-    return fallback if os.path.isdir(fallback) else None
 
 
 def index_memories(directory: str) -> list[tuple[str, dict, float]]:

@@ -42,9 +42,11 @@ N merges occur in rapid succession) is deferred to Phase 2 (separate issue).
 ### Dynamic memory loading
 
 Memory cites are no longer hardcoded — they are loaded at hook fire time
-from the same user-scoped memory directory used by `memory-hint`
-(`PRAXIS_MEMORY_DIR` env var when set, otherwise
-`~/.claude/projects/{slugified-cwd}/memory/`). A memory file participates
+from the same user-scoped memory directory used by `memory-hint`, resolved
+via the shared `hooks/_lib/_memory_dir.py` resolver (#823): `PRAXIS_MEMORY_DIR`
+env var when set, otherwise `~/.claude/projects/{slugified-cwd}/memory/` —
+slugify replaces every non-alphanumeric character with `-`, per-character
+(Claude Code's own project-slug rule). A memory file participates
 by adding a flat single-line `momentum:` list to its frontmatter:
 
 ```yaml
