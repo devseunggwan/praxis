@@ -714,6 +714,23 @@
       "timeout": 5
     },
     {
+      "name": "source-citation-probe-gate",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_SOURCE_CITATION_STRICT"
+      }
+    },
+    {
+      "name": "source-citation-probe-gate",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "mcp__.*slack.*|mcp__.*notion.*",
+      "timeout": 5
+    },
+    {
       "name": "builtin-task-postuse",
       "role": "postuse-correction",
       "event": "PostToolUse",
