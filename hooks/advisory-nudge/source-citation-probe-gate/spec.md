@@ -20,18 +20,18 @@ lacked a recurrence trail at adoption time), this hook is
 an established recurrence trail and the clearing arm (any Read/grep of the
 cited file) keeps the false-positive cost low.
 
-### What is detected
+## What is detected
 
 Detection runs on the extracted write body after two preprocessing steps:
 URLs are stripped (`\w+://\S+`), then fenced code blocks (paired ` ``` `)
 are removed — code samples are `external-write-falsify-check`'s
 author-exempt Check 2 territory.
 
-| Tier | Citation shape                | Pattern                                                                                                     |
-| ---- | ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| T1   | `file:line` reference         | `impl.py:42`, `hooks/foo/impl.py:42`, anchor form `impl.py#L42`; extension must start with a letter; TLD denylist {com, org, net, io, co, ai, dev} on the extension |
-| T2   | exact call syntax             | inside **inline code spans (single backticks) only**: `name(...)` whose argument list contains `.` or `[` — the weakest detector by design |
-| T3   | test-semantics claim          | `test*` token + `assert*` / `raise(s)` / `expect*` within an 80-char same-sentence window (case-insensitive) |
+| Tier | Citation shape | Pattern |
+| --- | --- | --- |
+| T1 | `file:line` reference | `impl.py:42`, `hooks/foo/impl.py:42`, anchor form `impl.py#L42`; extension must start with a letter; TLD denylist {com, org, net, io, co, ai, dev} on the extension |
+| T2 | exact call syntax | inside **inline code spans (single backticks) only**: `name(...)` whose argument list contains `.` or `[` — the weakest detector by design |
+| T3 | test-semantics claim | `test*` token + `assert*` / `raise(s)` / `expect*` within an 80-char same-sentence window (case-insensitive) |
 
 Surfaces scanned (same extraction as `external-write-falsify-check` — gh
 argv walk + MCP nested container/leaf walk, 2nd copy per repo 2-copy
@@ -43,7 +43,7 @@ convention):
   `*append*block*` (nested `children[].paragraph.rich_text[].text.content` /
   `blocks[].text.text` shapes gated to recognized container/leaf entry points)
 
-### Clearing — "probe basis present" (per citation)
+## Clearing — "probe basis present" (per citation)
 
 **Arm A (in-body):**
 
@@ -64,7 +64,7 @@ convention):
 - T3 clears on a `pytest` run or a `test_*` file basename in a transcript
   Bash command / Read.
 
-### Response
+## Response
 
 ```text
 REMINDER (External-Surface Write / Source-Citation Probe): body cites
@@ -85,7 +85,7 @@ block). Set `PRAXIS_SOURCE_CITATION_STRICT=1` to convert into a hard block
 (exit 2). The env var accepts the **literal value `1` only** — `true` /
 `yes` / `on` do NOT activate strict mode.
 
-### Known limits
+## Known limits
 
 - **Conversational prose is not covered.** A PreToolUse hook only sees tool
   inputs — a recall-fabricated `file:line` in the assistant's free prose
@@ -112,7 +112,7 @@ block). Set `PRAXIS_SOURCE_CITATION_STRICT=1` to convert into a hard block
   function name anywhere in any transcript Bash command clears it — recall
   is bounded, precision is prioritized.
 
-### Parsing guarantees
+## Parsing guarantees
 
 Inherited from `_hook_utils.safe_tokenize` (same primitive as
 `external-write-falsify-check` / `side-effect-scan`): quoted strings,
@@ -121,7 +121,7 @@ and wrapper commands are peeled; subshells (`$(...)`) are opaque to shlex.
 Malformed stdin JSON, missing `transcript_path`, and unreadable transcript
 files all fail-open (exit 0, no output).
 
-### Tests
+## Tests
 
 ```bash
 bash tests/hooks/advisory-nudge/test_source_citation_probe_gate.sh
