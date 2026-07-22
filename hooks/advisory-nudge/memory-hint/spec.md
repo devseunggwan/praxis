@@ -89,17 +89,18 @@ clarify *why* a block fired.
 
 ### Discovery and fail-safe
 
-Memory directory resolution order:
+Memory directory resolution is delegated to the shared resolver
+`hooks/_lib/_memory_dir.py` (`resolve_memory_dir()`) — hoisted there as the
+single source of truth in #823 after `momentum-rule-retrieval-gate`'s private
+copy drifted from the #799/#800 per-character slugify fix. Resolution order:
+
 1. `PRAXIS_MEMORY_DIR` env var (when set + points to an existing directory)
 2. fallback `~/.claude/projects/{slugified-cwd}/memory/` — slugify rule:
    replace every non-alphanumeric character in the absolute cwd with `-`
    (per-character, not collapsed) — matches Claude Code's own project-slug
    convention, e.g. `/Users/nathan.song/.claude` → `-Users-nathan-song--claude`
-   (double dash from the adjacent `/` and `.`). A naive `cwd.replace("/", "-")`
-   left any other special character (such as a literal `.` in a home-directory
-   segment) un-slugified, permanently desyncing the fallback path from the
-   real project directory and silently disabling this hook end-to-end for
-   affected users (issue #799).
+   (double dash from the adjacent `/` and `.`). The full #799 drift story
+   lives in the `_memory_dir.py` module docstring.
 3. neither resolves → exit 0 silently (no fallback attempt, no error)
 
 Five exit-0 fail-safe paths:
