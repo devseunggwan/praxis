@@ -704,15 +704,36 @@ run_merge_escalation_cmd_case "merge_escalation_prior_turn_wrong_pr_denies" \
 run_merge_escalation_cmd_case "merge_escalation_substantive_reply_denies" \
   "yes" "" "momentum-merge-substantive-reply.jsonl" "gh pr merge 833 --squash"
 
-# Recording-fidelity proxy: whole window has 3 tool_use entries, 0 recorded
-# narration → demote to advisory (fail-open), no deny.
-run_merge_escalation_case "merge_escalation_fidelity_unreliable_demotes" \
-  "no" "" "momentum-merge-fidelity-unreliable.jsonl"
+# Tool-only turn, no recorded briefing narration, single human message (no
+# approval reply) → fidelity fallback removed (issue #826), so a genuine
+# briefing skip now denies rather than demoting to advisory.
+run_merge_escalation_case "merge_escalation_tool_only_no_briefing_denies" \
+  "yes" "" "momentum-merge-fidelity-unreliable.jsonl"
 
-# Numberless branch merge (`gh pr merge --squash`, the project standard) with a
-# prior-turn briefing + approval → extension applies without PR correlation.
-run_merge_escalation_cmd_case "merge_escalation_numberless_prior_briefing_passes" \
+# Numberless branch merge (`gh pr merge --squash`, the project standard): the
+# window carries the mandated Pre-Merge probe (`gh pr checks 833`), so the real
+# target (833) is derived and correlated against the prior-turn briefing → pass.
+run_merge_escalation_cmd_case "merge_escalation_numberless_context_pr_passes" \
   "no" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge --squash --delete-branch"
+
+# Numberless merge but NO Pre-Merge probe in the window → target unresolvable →
+# fail closed (No Approval Transfer: an unresolved target may differ from the
+# briefed PR). Deny even though a prior-turn briefing + approval exist.
+run_merge_escalation_cmd_case "merge_escalation_numberless_no_probe_denies" \
+  "yes" "" "momentum-merge-numberless-no-probe.jsonl" "gh pr merge --squash --delete-branch"
+
+# Flag value must not be misread as the merge target (P2#6): `merge feature-x
+# --subject 999` targets branch `feature-x` (numberless), NOT PR 999. Target
+# resolves to None → context PR 833 (from the probe) correlates → pass. A
+# regression that read 999 as the target would fail correlation and wrongly deny.
+run_merge_escalation_cmd_case "merge_escalation_flag_value_not_target" \
+  "no" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge feature-x --subject 999 --squash"
+
+# Shell loop repeating the merge (`for pr in 833 999; do gh pr merge "$pr"`) →
+# one approval must not ride a loop → extension disabled → deny (P1#3). The `do`
+# keyword is peeled by strip_prefix so the inner `gh pr merge` IS detected.
+run_merge_escalation_cmd_case "merge_escalation_loop_repetition_denies" \
+  "yes" "" "momentum-merge-prior-turn-briefing.jsonl" 'for pr in 833 999; do gh pr merge "$pr" --squash; done'
 
 # Compound multi-target (`merge 833 && merge 999`) → one approval cannot cover
 # both → no extension → deny (No Approval Transfer).

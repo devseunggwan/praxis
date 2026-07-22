@@ -354,16 +354,35 @@ _APPROVAL_TOKENS = frozenset({
     "좋습니다", "그래", "ㄱ",
 })
 
-# Recording-fidelity proxy: when the ENTIRE scanned window holds assistant
-# messages with tool activity but ZERO recorded text, the harness is dropping
-# assistant narration (issue #826 blind spot) — a real briefing is invisible,
-# so escalation demotes to advisory. A single recorded text block anywhere
-# proves recording works, so a normal tool-only turn (with narration in earlier
-# turns) is NOT treated as unreliable and still denies on a genuine skip.
-_FIDELITY_MIN_TOOLUSE = 3
-
 # A single positional token that is a bare PR number or a …/pull/N URL.
 _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
+
+# `gh pr merge` flags that consume a following value token — skipped when
+# scanning for the first positional (the merge target) so a flag value like
+# `--subject 833` is never mistaken for the PR number (issue #826, P2#6).
+_MERGE_VALUE_FLAGS = frozenset({
+    "-b", "--body", "-F", "--body-file", "-t", "--subject",
+    "--match-head-commit", "--author-email",
+})
+
+# Read-only `gh pr` verbs whose positional PR argument identifies the PR the
+# session is operating on. A numberless `gh pr merge` runs on the current
+# branch, so its real target is derived from the most recent such command in
+# the window — the mandated Pre-Merge probe (`gh pr checks/view N`).
+_CONTEXT_VERBS = frozenset({
+    "view", "checks", "diff", "ready", "edit", "status", "comment", "review",
+})
+_CONTEXT_VALUE_FLAGS = frozenset({
+    "-b", "--body", "-F", "--body-file", "-t", "--title", "--subject",
+    "--json", "--jq", "--template", "--repo", "-R",
+})
+
+# Shell constructs that repeat a single textual merge segment at runtime
+# (`for pr in 833 999; do gh pr merge "$pr"; done`, `xargs gh pr merge`). One
+# approval must not ride a loop, so their presence disables the single-approval
+# window extension. Matched as whole tokens (not a substring regex) so a
+# hyphenated branch name like `issue-1-fix-for-x` is never mistaken for a loop.
+_LOOP_KEYWORDS = frozenset({"for", "while", "until", "xargs"})
 
 
 def _load_turn_entries(transcript_path: str) -> list[dict] | None:
@@ -427,34 +446,6 @@ def _assistant_text(entries: list[dict], lo: int, hi: int) -> str:
     return "\n".join(texts)
 
 
-def _recording_unreliable(entries: list[dict]) -> bool:
-    """True when the whole window shows tool activity but ZERO recorded assistant
-    text — a harness dropping narration (issue #826), not a mere quiet turn.
-
-    Scanning the whole window (not just the current turn) is what separates a
-    non-recording harness from a normal tool-only turn: the latter still has
-    narration somewhere in earlier turns, so a genuine briefing skip is NOT
-    excused just because the final turn happened to be tool-only.
-    """
-    n_text = n_tool = 0
-    for ev in entries:
-        msg = ev.get("message")
-        if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
-            continue
-        content = msg.get("content", [])
-        if isinstance(content, str):
-            if content.strip():
-                n_text += 1
-            continue
-        if isinstance(content, list):
-            if any(isinstance(b, dict) and b.get("type") == "text"
-                   and isinstance(b.get("text"), str) and b["text"].strip() for b in content):
-                n_text += 1
-            if any(isinstance(b, dict) and b.get("type") == "tool_use" for b in content):
-                n_tool += 1
-    return n_text == 0 and n_tool >= _FIDELITY_MIN_TOOLUSE
-
-
 def _user_message_text(content: object) -> str:
     """Flatten a user message's content (str or block list) to plain text."""
     if isinstance(content, str):
@@ -473,24 +464,59 @@ def _is_approval_reply(content: object) -> bool:
     return norm in _APPROVAL_TOKENS
 
 
-def _segment_merge_target(argv: list[str]) -> str | None:
-    """PR number a `gh pr merge` argv segment targets (first bare-number/pull
-    positional after `merge`), or None for a branch-name/numberless merge."""
-    argv = strip_prefix(argv)
-    if not _is_gh_pr_merge(argv):
-        return None
-    # Scan only the tokens AFTER `pr merge` for a PR token, so a numeric global
-    # flag value before the subcommand cannot be mistaken for the target. Body
-    # values (`--body "closes 999"`) tokenize with internal whitespace, so they
-    # never match the anchored bare-number/pull pattern.
-    for i in range(len(argv) - 1):
-        if argv[i] == "pr" and argv[i + 1] == "merge":
-            for tok in argv[i + 2:]:
-                m = _PULL_TOKEN_RE.match(tok)
-                if m:
-                    return m.group(1) or m.group(2)
-            return None
+def _first_positional(tokens: list[str], value_flags: frozenset[str]) -> str | None:
+    """First positional token, skipping option flags and each value-flag's
+    following value — so `--subject 833` never yields `833` as a positional."""
+    j = 0
+    n = len(tokens)
+    while j < n:
+        tok = tokens[j]
+        if tok == "--":
+            return tokens[j + 1] if j + 1 < n else None
+        if tok.startswith("-"):
+            if "=" not in tok and tok in value_flags and j + 1 < n:
+                j += 2
+            else:
+                j += 1
+            continue
+        return tok
     return None
+
+
+def _gh_pr_target(argv: list[str], verbs: frozenset[str],
+                  value_flags: frozenset[str]) -> str | None:
+    """PR number the first positional of a `gh pr <verb>` segment resolves to
+    (bare number or …/pull/N), or None when the segment has no numeric target.
+
+    Global flags before the subcommand are walked exactly as `_is_gh_pr_merge`
+    does, so a numeric global-flag value cannot be mistaken for the target."""
+    argv = strip_prefix(argv)
+    if not argv or argv[0] != "gh":
+        return None
+    i = 1
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--":
+            i += 1
+            break
+        if not tok.startswith("-"):
+            break
+        i += 1
+        if "=" not in tok and tok in GH_GLOBAL_FLAGS_WITH_ARG and i < len(argv):
+            i += 1
+    if i + 1 >= len(argv) or argv[i] != "pr" or argv[i + 1] not in verbs:
+        return None
+    pos = _first_positional(argv[i + 2:], value_flags)
+    if pos is None:
+        return None
+    m = _PULL_TOKEN_RE.match(pos)
+    return (m.group(1) or m.group(2)) if m else None
+
+
+def _segment_merge_target(argv: list[str]) -> str | None:
+    """PR number a `gh pr merge` segment targets (its first positional), or None
+    for a branch-name / numberless merge."""
+    return _gh_pr_target(argv, frozenset({"merge"}), _MERGE_VALUE_FLAGS)
 
 
 def _merge_segments(command: object) -> list[str | None]:
@@ -509,6 +535,40 @@ def _merge_segments(command: object) -> list[str | None]:
 def _mentions_pr(text: str, pr: str) -> bool:
     """True when the text references the target PR (`#N` or the bare number)."""
     return re.search(rf"#{pr}\b|\b{pr}\b", text) is not None
+
+
+def _context_pr_from_window(entries: list[dict], lo: int, hi: int) -> str | None:
+    """PR number named by the most recent read-only `gh pr <verb> N` (the
+    mandated Pre-Merge probe) in the window's assistant tool_use Bash commands,
+    or None when no such command resolves a target."""
+    found: str | None = None
+    for ev in entries[lo:hi]:
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not (isinstance(b, dict) and b.get("type") == "tool_use"
+                    and b.get("name") == "Bash"):
+                continue
+            cmd = (b.get("input") or {}).get("command")
+            if not isinstance(cmd, str):
+                continue
+            for argv in iter_command_starts(safe_tokenize(cmd)):
+                pr = _gh_pr_target(argv, _CONTEXT_VERBS, _CONTEXT_VALUE_FLAGS)
+                if pr is not None:
+                    found = pr  # last (most recent) resolved target wins
+    return found
+
+
+def _has_repetition(command: object) -> bool:
+    """True when the command wraps the merge in a shell loop / xargs — a single
+    approval must not authorize a repeated merge (No Approval Transfer)."""
+    if not isinstance(command, str):
+        return False
+    return any(tok in _LOOP_KEYWORDS for tok in safe_tokenize(command))
 
 
 def _merge_escalation_reason(payload: dict) -> str | None:
@@ -537,32 +597,35 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     # briefing → user approval → merge, which places the briefing in the turn
     # BEFORE the approving user message — outside the since-last-user window.
     # When the last user message is a short approval reply, also score the prior
-    # assistant turn.
-    segments = _merge_segments((payload.get("tool_input") or {}).get("command"))
-    # A single approval authorizes ONE merge; a compound `merge A && merge B`
-    # must not ride one approval (No Approval Transfer), so ≥2 targets skip the
-    # extension entirely and fall through to deny.
-    single_merge = len(segments) == 1
+    # assistant turn — scored ALONE, so text authored AFTER the approval cannot
+    # supplement a briefing the user never saw before approving (P2#5).
+    command = (payload.get("tool_input") or {}).get("command")
+    segments = _merge_segments(command)
+    # A single approval authorizes ONE merge. A compound `merge A && merge B` (≥2
+    # segments) or a shell loop repeating one segment (`for pr in …; do merge`)
+    # must not ride a single approval (No Approval Transfer) → skip the extension.
+    single_merge = len(segments) == 1 and not _has_repetition(command)
     if single_merge and len(idxs) >= 2 \
             and _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
         prev_text = _assistant_text(entries, idxs[-2] + 1, idxs[-1])
-        # A trivial-PR briefing in the prior turn is also carved out.
-        if _is_trivial_merge(prev_text):
-            return None
         target_pr = segments[0]
-        # Correlate to the target PR when the command names one; a numberless
-        # branch merge has no PR to correlate, so a real prior-turn briefing +
-        # approval suffices (the merge runs on the current branch).
-        correlated = target_pr is None or _mentions_pr(prev_text, target_pr)
-        if correlated \
-                and _briefing_item_count(current_text + "\n" + prev_text) >= MERGE_BRIEFING_MIN_ITEMS:
-            return None
-
-    # Non-recording fallback (issue #826, fidelity axis): a harness that drops
-    # assistant narration makes a real briefing invisible. Demote to advisory
-    # (fail safe) rather than hard-deny a legitimate merge.
-    if _recording_unreliable(entries):
-        return None
+        if target_pr is not None:
+            correlated = _mentions_pr(prev_text, target_pr)
+        else:
+            # A numberless branch merge names no PR; derive the actual target
+            # from the window's Pre-Merge probe and correlate against THAT.
+            # Fail closed when the target cannot be resolved — an unresolved
+            # target may differ from the briefed PR (No Approval Transfer, P1#2).
+            ctx_pr = _context_pr_from_window(entries, idxs[-2] + 1, len(entries))
+            correlated = ctx_pr is not None and _mentions_pr(prev_text, ctx_pr)
+        # The trivial-PR carve-out and the briefing-count pass apply ONLY once
+        # the merge is correlated to the briefed PR — never to an unrelated
+        # trivial/complete briefing about a different PR (P1#1).
+        if correlated:
+            if _is_trivial_merge(prev_text):
+                return None
+            if _briefing_item_count(prev_text) >= MERGE_BRIEFING_MIN_ITEMS:
+                return None
 
     return format_block(
         rule_name="Pre-Merge Reporting briefing",
