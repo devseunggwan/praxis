@@ -111,19 +111,37 @@ against `_APPROVAL_TOKENS`), the immediately preceding assistant turn is scored
 before approving). Safety gates on the extension:
 
 - **PR correlation.** The prior-turn briefing must reference the PR actually
-  being merged:
-  - When the `gh pr merge <N>` command names a PR, the prior turn must reference
-    that `#N` (or the bare number). Only the *first positional* is read as the
-    target, skipping each value-flag's arity, so `gh pr merge feature-x
-    --subject 999` targets branch `feature-x` — not PR 999.
-  - A numberless branch merge (`gh pr merge --squash`, the project standard)
-    names no PR, so the real target is **derived from the window's mandated
-    Pre-Merge probe** (`gh pr checks/view <N>`, scanned from assistant tool_use
-    Bash commands) and the prior turn must reference *that* number. When no
-    probe resolves a target, the extension **fails closed** (denies) — an
-    unresolved target may differ from the briefed PR (No Approval Transfer).
+  being merged. The merge target is the segment's *first positional* token
+  (value-flag arity skipped, including trailing gh global flags like `-R
+  org/repo <N>`), classified three ways:
+  - **Numeric** (`gh pr merge 833`, `.../pull/833`) → the prior turn must
+    reference that `#N` (or bare number).
+  - **No positional** (`gh pr merge --squash`, the project standard) → a
+    current-branch merge; the real target is **derived from the window's
+    mandated Pre-Merge probe** (`gh pr checks/view <N>`, scanned from assistant
+    tool_use Bash commands) and the prior turn must reference *that* number.
+    When no probe resolves a target, the extension **fails closed** (denies).
+  - **Named branch** (`gh pr merge feature-x`) → targets that branch's PR, which
+    cannot be mapped to a number without a live `gh` call and is not the current
+    branch, so the window probe does not identify it → **fails closed** (denies).
+    A prior probe of a *different* PR must not be treated as this branch's target
+    (round-3 P1b).
   - Command parsing reuses the trigger tokenizer, so fused global flags
     (`gh --repo=o/r pr merge 833`) resolve the target correctly.
+
+  > **Accepted residual gaps (advisory-hook threat model).** This gate is a
+  > self-discipline *nudge* for an honest agent that forgets the briefing (the
+  > #795 failure), not an adversarial security boundary — `deny` merely adds
+  > teeth, and `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` is a standing escape hatch. Two
+  > CLI forms that only an adversarial target-swap would use are therefore left
+  > as documented gaps rather than chased across further rounds: (a) an
+  > `xargs`-wrapped merge (`… | xargs -n1 gh pr merge`) is not recognized by the
+  > trigger tokenizer (`xargs` is not a peeled prefix), so it bypasses the gate
+  > entirely; (b) a bare-number reference is not repo-scoped, so a cross-repo
+  > `gh -R org/other pr merge 833` after briefing *this* repo's #833 (or a
+  > `Closes #833` line in a different PR's briefing) can false-correlate. Both
+  > require an explicit-signal redesign to close soundly and are out of scope for
+  > the honest-agent nudge.
 - **No multi-target / loop transfer.** A compound `gh pr merge A && gh pr merge
   B` (≥2 merge segments) OR a shell loop / `xargs` repeating one segment
   (`for pr in 833 999; do gh pr merge "$pr"; done`, detected via whole-token

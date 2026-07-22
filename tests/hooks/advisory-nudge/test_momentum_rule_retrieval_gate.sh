@@ -722,12 +722,19 @@ run_merge_escalation_cmd_case "merge_escalation_numberless_context_pr_passes" \
 run_merge_escalation_cmd_case "merge_escalation_numberless_no_probe_denies" \
   "yes" "" "momentum-merge-numberless-no-probe.jsonl" "gh pr merge --squash --delete-branch"
 
-# Flag value must not be misread as the merge target (P2#6): `merge feature-x
-# --subject 999` targets branch `feature-x` (numberless), NOT PR 999. Target
-# resolves to None → context PR 833 (from the probe) correlates → pass. A
-# regression that read 999 as the target would fail correlation and wrongly deny.
-run_merge_escalation_cmd_case "merge_escalation_flag_value_not_target" \
-  "no" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge feature-x --subject 999 --squash"
+# Named-branch merge (`gh pr merge feature-for-999`) targets that branch's PR,
+# which the window probe (#833) does NOT identify → fail closed → deny (round-3
+# P1b: a prior probe of a different PR is not this branch's target). The `-for-`
+# in the branch name must also NOT be read as a loop keyword (whole-token match).
+run_merge_escalation_cmd_case "merge_escalation_named_branch_denies" \
+  "yes" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge feature-for-999 --squash"
+
+# Repo flag trailing the subcommand (`gh pr merge -R o/r 833`) must skip its
+# value so the target resolves to 833, not `o/r` (round-3 P1d). 833 correlates
+# with the prior-turn briefing → pass. Value-flag arity skip (`--subject 999`
+# not read as target) is exercised here too since -R sits before the positional.
+run_merge_escalation_cmd_case "merge_escalation_repo_flag_arity_passes" \
+  "no" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge -R o/r 833 --squash"
 
 # Shell loop repeating the merge (`for pr in 833 999; do gh pr merge "$pr"`) →
 # one approval must not ride a loop → extension disabled → deny (P1#3). The `do`

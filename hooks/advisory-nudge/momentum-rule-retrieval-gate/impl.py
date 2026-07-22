@@ -359,10 +359,14 @@ _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
 
 # `gh pr merge` flags that consume a following value token — skipped when
 # scanning for the first positional (the merge target) so a flag value like
-# `--subject 833` is never mistaken for the PR number (issue #826, P2#6).
+# `--subject 833` is never mistaken for the PR number (issue #826, P2#6). The
+# gh *global* value flags (`-R`/`--repo`, …) are included because they may trail
+# the subcommand (`gh pr merge -R org/repo 999`); without skipping their value,
+# `org/repo` would be read as the positional and 999 misclassified (P1d).
 _MERGE_VALUE_FLAGS = frozenset({
     "-b", "--body", "-F", "--body-file", "-t", "--subject",
     "--match-head-commit", "--author-email",
+    "-R", "--repo", "--hostname", "--color",
 })
 
 # Read-only `gh pr` verbs whose positional PR argument identifies the PR the
@@ -483,10 +487,11 @@ def _first_positional(tokens: list[str], value_flags: frozenset[str]) -> str | N
     return None
 
 
-def _gh_pr_target(argv: list[str], verbs: frozenset[str],
-                  value_flags: frozenset[str]) -> str | None:
-    """PR number the first positional of a `gh pr <verb>` segment resolves to
-    (bare number or …/pull/N), or None when the segment has no numeric target.
+def _gh_pr_positional(argv: list[str], verbs: frozenset[str],
+                      value_flags: frozenset[str]) -> str | None:
+    """First positional token of a `gh pr <verb>` segment — the RAW token, which
+    may be a PR number, a …/pull/N URL, or a branch name — or None when the
+    segment has no positional at all (a bare `gh pr merge --squash`).
 
     Global flags before the subcommand are walked exactly as `_is_gh_pr_merge`
     does, so a numeric global-flag value cannot be mistaken for the target."""
@@ -506,29 +511,32 @@ def _gh_pr_target(argv: list[str], verbs: frozenset[str],
             i += 1
     if i + 1 >= len(argv) or argv[i] != "pr" or argv[i + 1] not in verbs:
         return None
-    pos = _first_positional(argv[i + 2:], value_flags)
+    return _first_positional(argv[i + 2:], value_flags)
+
+
+def _gh_pr_target(argv: list[str], verbs: frozenset[str],
+                  value_flags: frozenset[str]) -> str | None:
+    """PR *number* the first positional resolves to (bare number or …/pull/N),
+    or None when the segment has no positional OR the positional is a non-numeric
+    branch name."""
+    pos = _gh_pr_positional(argv, verbs, value_flags)
     if pos is None:
         return None
     m = _PULL_TOKEN_RE.match(pos)
     return (m.group(1) or m.group(2)) if m else None
 
 
-def _segment_merge_target(argv: list[str]) -> str | None:
-    """PR number a `gh pr merge` segment targets (its first positional), or None
-    for a branch-name / numberless merge."""
-    return _gh_pr_target(argv, frozenset({"merge"}), _MERGE_VALUE_FLAGS)
-
-
 def _merge_segments(command: object) -> list[str | None]:
-    """One entry per `gh pr merge` segment in a (possibly compound) command:
-    its PR number, or None when the segment merges by branch (no number)."""
+    """One entry per `gh pr merge` segment in a (possibly compound) command: its
+    first positional token (PR number OR branch name), or None when the segment
+    has no positional (`gh pr merge --squash`, a current-branch merge)."""
     if not isinstance(command, str):
         return []
     out: list[str | None] = []
     for argv in iter_command_starts(safe_tokenize(command)):
         stripped = strip_prefix(argv)
         if _is_gh_pr_merge(stripped):
-            out.append(_segment_merge_target(stripped))
+            out.append(_gh_pr_positional(stripped, frozenset({"merge"}), _MERGE_VALUE_FLAGS))
     return out
 
 
@@ -608,16 +616,25 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     if single_merge and len(idxs) >= 2 \
             and _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
         prev_text = _assistant_text(entries, idxs[-2] + 1, idxs[-1])
-        target_pr = segments[0]
-        if target_pr is not None:
-            correlated = _mentions_pr(prev_text, target_pr)
-        else:
-            # A numberless branch merge names no PR; derive the actual target
-            # from the window's Pre-Merge probe and correlate against THAT.
-            # Fail closed when the target cannot be resolved — an unresolved
-            # target may differ from the briefed PR (No Approval Transfer, P1#2).
+        pos = segments[0]
+        if pos is None:
+            # Truly numberless (`gh pr merge --squash`) → runs on the CURRENT
+            # branch. Derive the real target from the window's mandated Pre-Merge
+            # probe (`gh pr checks/view N`) and correlate against THAT. Fail
+            # closed when no probe resolves a target (No Approval Transfer, P1#2).
             ctx_pr = _context_pr_from_window(entries, idxs[-2] + 1, len(entries))
             correlated = ctx_pr is not None and _mentions_pr(prev_text, ctx_pr)
+        else:
+            m = _PULL_TOKEN_RE.match(pos)
+            if m:
+                correlated = _mentions_pr(prev_text, m.group(1) or m.group(2))
+            else:
+                # A NAMED branch (`gh pr merge feature-x`) targets that branch's
+                # PR — which cannot be mapped to a number without a live `gh`
+                # call, and is NOT the current branch, so the window probe does
+                # not identify it. Fail closed (round-3 P1b): a prior probe of a
+                # different PR must not be treated as this branch's target.
+                correlated = False
         # The trivial-PR carve-out and the briefing-count pass apply ONLY once
         # the merge is correlated to the briefed PR — never to an unrelated
         # trivial/complete briefing about a different PR (P1#1).
