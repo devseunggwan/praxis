@@ -282,6 +282,13 @@
       "timeout": 5
     },
     {
+      "name": "secret-print-redaction-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash|Write|Edit",
+      "timeout": 5
+    },
+    {
       "name": "destructive-bash-guard",
       "role": "advisory-nudge",
       "event": "PreToolUse",
