@@ -247,6 +247,16 @@ else
   echo "PASS [hint] single-command block has no cascade hint"; ((PASS++))
 fi
 
+# (g) shared pr-body evidence checklist (#824): the deny message must also
+#     enumerate the SIBLING gate's token so one deny teaches all tokens.
+_checklist_err=$(_capture_stderr 'gh pr create --body "no marker"')
+if printf '%s' "$_checklist_err" | grep -q "Pre-commit verified:"; then
+  echo "PASS [checklist] block message enumerates sibling Pre-commit token"; ((PASS++))
+else
+  echo "FAIL [checklist] block message missing sibling Pre-commit token"; ((FAIL++))
+  FAILED_NAMES+=("checklist missing sibling Pre-commit token")
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # Fail-open guard opt-in (issue #498): main() must be @fail_open-wrapped;

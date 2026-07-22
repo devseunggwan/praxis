@@ -17,7 +17,12 @@ Resolution order:
   1. `PRAXIS_MEMORY_DIR` env var — when set, it is authoritative: return it
      if it is an existing directory, else None (no fallback attempt)
   2. fallback `~/.claude/projects/{slugified-cwd}/memory` if it exists
-  3. otherwise None
+  3. linked-worktree fallback (#824): when 2 misses, resolve the main
+     worktree via `git rev-parse --git-common-dir` (its parent dir is the
+     main worktree) and retry with THAT path's slug — Claude Code keys the
+     memory dir to the main project path, so a worktree cwd slug never
+     resolves. Any git error / absence falls through to step 4.
+  4. otherwise None
 
 Public API:
   SLUG_CHAR_RE                       — per-character slugify pattern
@@ -28,6 +33,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 
 SLUG_CHAR_RE = re.compile(r"[^a-zA-Z0-9]")
 
@@ -47,6 +53,32 @@ def slugify_project_path(path: str) -> str:
     return SLUG_CHAR_RE.sub("-", path)
 
 
+def _main_worktree_path() -> str | None:
+    """Return the main worktree's absolute path, or None outside git.
+
+    `git rev-parse --git-common-dir` prints the shared `.git` directory —
+    from a linked worktree that is `<main-worktree>/.git` (absolute); from
+    the main worktree it is the relative `.git`, which abspath()s back to
+    the current cwd so the caller's `!= cwd` guard skips it. Fail-safe:
+    any git error (git absent, not a repo, timeout) → None.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    common = proc.stdout.strip()
+    if not common:
+        return None
+    return os.path.dirname(os.path.abspath(common))
+
+
 def resolve_memory_dir() -> str | None:
     """Return the resolved memory directory path or None if missing."""
     env_dir = os.environ.get("PRAXIS_MEMORY_DIR", "").strip()
@@ -57,4 +89,17 @@ def resolve_memory_dir() -> str | None:
     cwd = os.getcwd()
     slug = slugify_project_path(cwd)
     fallback = os.path.join(home, ".claude", "projects", slug, "memory")
-    return fallback if os.path.isdir(fallback) else None
+    if os.path.isdir(fallback):
+        return fallback
+
+    # Linked-worktree fallback (#824): memory dirs are keyed to the main
+    # project path, so a worktree cwd slug misses even though the store
+    # exists. Retry with the main worktree's slug.
+    main_path = _main_worktree_path()
+    if main_path and main_path != cwd:
+        main_fallback = os.path.join(
+            home, ".claude", "projects", slugify_project_path(main_path), "memory"
+        )
+        if os.path.isdir(main_fallback):
+            return main_fallback
+    return None

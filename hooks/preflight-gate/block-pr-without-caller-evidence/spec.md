@@ -61,6 +61,15 @@ Add a `Caller chain verified:` line to the PR body first:
   ...
 ```
 
+The deny message is suffixed with the shared PR-body evidence checklist
+(`hooks/_lib/block_message.py → pr_body_evidence_checklist()`, praxis #824)
+enumerating ALL required pr-body tokens — this gate's `Caller chain
+verified:` plus the sibling gate's `Pre-commit verified:` — with the
+column-0 / same-line / outside-fenced-blocks format rules and a pointer to
+the related commit (`[skip-codex-review]`) and AskUserQuestion
+(`Falsified:`) gates, so one deny teaches the full enumeration instead of
+one token per deny round.
+
 ### Compound cascade advisory (issue #229)
 
 When the block fires on a compound Bash command (`&&`, `||`, `;`, `|`,

@@ -92,6 +92,34 @@ def test_emit_block_writes_to_stream_with_trailing_newline() -> None:
     assert text.endswith("\n")
 
 
+def test_pr_body_evidence_checklist_enumerates_all_tokens() -> None:
+    """Checklist must name BOTH pr-body gate tokens (praxis #824) plus the
+    format rules and related-gate pointers, so one deny teaches the full
+    enumeration."""
+    out = bm.pr_body_evidence_checklist()
+    assert "Caller chain verified:" in out
+    assert "Pre-commit verified:" in out
+    assert "column 0" in out
+    assert "fenced code blocks" in out
+    assert "[skip-codex-review]" in out
+    assert "Falsified:" in out
+    # Trailing newline — callers concatenate before the cascade hint.
+    assert out.endswith("\n")
+
+
+def test_pr_body_gates_append_checklist() -> None:
+    """Both pr-body gates must import the shared checklist and append it to
+    their deny message."""
+    for name in (
+        "block-pr-without-caller-evidence",
+        "block-pr-without-precommit-evidence",
+    ):
+        src = (PREFLIGHT_DIR / name / "impl.py").read_text(encoding="utf-8")
+        assert "pr_body_evidence_checklist" in src, (
+            f"{name} must append pr_body_evidence_checklist() to its deny message"
+        )
+
+
 # ---------------------------------------------------------------------------
 # 2. Adoption lint
 # ---------------------------------------------------------------------------
@@ -100,6 +128,9 @@ def test_emit_block_writes_to_stream_with_trailing_newline() -> None:
 # migrated in issue #439 are intentionally absent. Reserved-for-other-issue
 # hooks (block-sciomc-finding-commit / commit-title-length-check) stay listed.
 # Migrating any of these later = removing it from this set.
+# NOTE: the two block-pr-without-*-evidence gates import block_message for
+# the shared checklist suffix (#824) but still hand-roll their main deny
+# message — they stay listed until migrated to format_block/emit_block.
 LEGACY_UNMIGRATED = {
     "block-ask-end-option",
     "block-commit-without-codex-review",

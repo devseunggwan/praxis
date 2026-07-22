@@ -96,6 +96,77 @@ def test_env_override_missing_dir_returns_none(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# linked-worktree fallback (#824)
+# --------------------------------------------------------------------------- #
+
+WORKTREE_CWD = "/Users/nathan.song/projects/praxis-issue-824"
+
+
+class _FakeGitProc:
+    def __init__(self, stdout: str, returncode: int = 0):
+        self.stdout = stdout
+        self.returncode = returncode
+
+
+def test_worktree_cwd_resolves_to_main_project_memory(tmp_path, monkeypatch):
+    # Core #824 regression: from a linked-worktree cwd the cwd-slug dir does
+    # not exist, but the main worktree (parent of --git-common-dir) does.
+    monkeypatch.delenv("PRAXIS_MEMORY_DIR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: WORKTREE_CWD)
+    monkeypatch.setattr(
+        _memory_dir.subprocess,
+        "run",
+        lambda *a, **k: _FakeGitProc(f"{FAKE_CWD}/.git\n"),
+    )
+    memory = tmp_path / ".claude" / "projects" / FAKE_SLUG / "memory"
+    memory.mkdir(parents=True)
+    assert _memory_dir.resolve_memory_dir() == str(memory)
+
+
+def test_worktree_fallback_git_absent_returns_none(tmp_path, monkeypatch):
+    # Fail-safe: any git error (binary absent, not a repo) → current behavior.
+    monkeypatch.delenv("PRAXIS_MEMORY_DIR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: WORKTREE_CWD)
+
+    def _raise(*a, **k):
+        raise FileNotFoundError("git not found")
+
+    monkeypatch.setattr(_memory_dir.subprocess, "run", _raise)
+    (tmp_path / ".claude" / "projects" / FAKE_SLUG / "memory").mkdir(parents=True)
+    assert _memory_dir.resolve_memory_dir() is None
+
+
+def test_worktree_fallback_git_error_returns_none(tmp_path, monkeypatch):
+    monkeypatch.delenv("PRAXIS_MEMORY_DIR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: WORKTREE_CWD)
+    monkeypatch.setattr(
+        _memory_dir.subprocess,
+        "run",
+        lambda *a, **k: _FakeGitProc("", returncode=128),
+    )
+    (tmp_path / ".claude" / "projects" / FAKE_SLUG / "memory").mkdir(parents=True)
+    assert _memory_dir.resolve_memory_dir() is None
+
+
+def test_main_worktree_same_as_cwd_skips_retry(tmp_path, monkeypatch):
+    # From the main worktree, --git-common-dir abspath()s back to cwd/.git —
+    # the `!= cwd` guard must skip the redundant retry and return None when
+    # the (identical) slug dir is absent.
+    monkeypatch.delenv("PRAXIS_MEMORY_DIR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: FAKE_CWD)
+    monkeypatch.setattr(
+        _memory_dir.subprocess,
+        "run",
+        lambda *a, **k: _FakeGitProc(f"{FAKE_CWD}/.git\n"),
+    )
+    assert _memory_dir.resolve_memory_dir() is None
+
+
+# --------------------------------------------------------------------------- #
 # consumer hooks share the single resolver (dual-SoT guard)
 # --------------------------------------------------------------------------- #
 

@@ -51,6 +51,7 @@ from _hook_utils import (  # type: ignore[import-not-found]
     safe_tokenize,
     strip_prefix,
 )
+from block_message import pr_body_evidence_checklist  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -287,7 +288,9 @@ def main() -> int:
             msg = _BODY_FILE_NOT_FOUND_TMPL.format(path=missing_files[0].resolve())
             sys.stderr.write(msg + compound_cascade_hint(command))
             return 2
-        sys.stderr.write(BLOCK_MSG + compound_cascade_hint(command))
+        sys.stderr.write(
+            BLOCK_MSG + pr_body_evidence_checklist() + compound_cascade_hint(command)
+        )
         return 2
 
     return 0
