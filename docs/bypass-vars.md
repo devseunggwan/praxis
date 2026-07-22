@@ -80,6 +80,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_EXTERNAL_WRITE_STRICT` | `external-write-falsify-check` | |
 | `PRAXIS_AUTHOR_EXEMPT_STRICT` | `external-write-falsify-check` | |
 | `PRAXIS_CLUSTER_APPROVAL_STRICT` | `external-write-falsify-check` | |
+| `PRAXIS_SOURCE_CITATION_STRICT` | `source-citation-probe-gate` | |
 
 ## Config (tune behaviour)
 

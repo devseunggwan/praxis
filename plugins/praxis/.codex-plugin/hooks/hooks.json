@@ -218,6 +218,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "mcp__.*slack.*|mcp__.*notion.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/source-citation-probe-gate.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
