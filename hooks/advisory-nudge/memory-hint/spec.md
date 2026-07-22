@@ -93,6 +93,7 @@ Memory directory resolution is delegated to the shared resolver
 `hooks/_lib/_memory_dir.py` (`resolve_memory_dir()`) — hoisted there as the
 single source of truth in #823 after `momentum-rule-retrieval-gate`'s private
 copy drifted from the #799/#800 per-character slugify fix. Resolution order:
+
 1. `PRAXIS_MEMORY_DIR` env var (when set + points to an existing directory)
 2. fallback `~/.claude/projects/{slugified-cwd}/memory/` — slugify rule:
    replace every non-alphanumeric character in the absolute cwd with `-`
