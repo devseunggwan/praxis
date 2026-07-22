@@ -283,44 +283,71 @@ _BRIEFING_MARKER_RE = re.compile(r"#\s*briefing-surfaced\b", re.IGNORECASE)
 
 
 def _split_shell_comment(command: str) -> tuple[str, str]:
-    """Split each line into (code, comment) at an UNQUOTED, word-boundary `#`,
+    """Split a command into (code, comment) at each UNQUOTED, word-boundary `#`,
     matching Bash semantics: `#` starts a comment only at the start of a word
-    (preceded by whitespace or a command separator, or at line start) and outside
-    quotes. A mid-word `x#` or a quoted `'#'` is literal data, not a comment.
+    (preceded by whitespace / a command separator / line start) and outside
+    quotes; it runs to the end of that physical line. A mid-word `x#`, a quoted
+    `'#'`, or a backslash-escaped `\\#` is literal data, not a comment.
+
+    Lexical state (quote + backslash escape) is tracked continuously across
+    physical lines so a single-quoted string spanning newlines (e.g.
+    `printf 'a\\n# x\\n'`) is not misread as a comment (round-3 P2). Heredoc
+    bodies are NOT parsed — a `# briefing-surfaced` inside a `<<EOF` body would
+    be treated as a comment; under this gate's non-adversarial threat model
+    (self-discipline nudge, not a security boundary) that residual is accepted.
 
     Returns (code_without_comments, joined_comment_text). Used so the marker is
     detected only in a real comment (round-1/2 P2) AND so segment/repetition
     analysis never sees the comment's reason text (round-2 P2b)."""
-    code_lines: list[str] = []
-    comment_parts: list[str] = []
-    for line in command.split("\n"):
-        in_single = in_double = False
-        prev_is_boundary = True  # line start is a word boundary
-        cut = None
-        for i, c in enumerate(line):
-            if in_single:
-                in_single = c != "'"
-                prev_is_boundary = False
-            elif in_double:
-                in_double = c != '"'
-                prev_is_boundary = False
-            elif c == "'":
-                in_single = True
-                prev_is_boundary = False
-            elif c == '"':
-                in_double = True
-                prev_is_boundary = False
-            elif c == "#" and prev_is_boundary:
-                cut = i
-                break
+    code_chars: list[str] = []
+    comment_chars: list[str] = []
+    in_single = in_double = escaped = in_comment = False
+    prev_is_boundary = True  # command start is a word boundary
+    for c in command:
+        if in_comment:
+            if c == "\n":
+                in_comment = False
+                prev_is_boundary = True
+                code_chars.append(c)
             else:
-                prev_is_boundary = c.isspace() or c in ";|&("
-        if cut is None:
-            code_lines.append(line)
+                comment_chars.append(c)
+        elif escaped:  # backslash-escaped char is literal data
+            code_chars.append(c)
+            escaped = False
+            prev_is_boundary = False
+        elif in_single:
+            code_chars.append(c)
+            in_single = c != "'"
+            prev_is_boundary = False
+        elif in_double:
+            code_chars.append(c)
+            if c == "\\":
+                escaped = True
+            else:
+                in_double = c != '"'
+            prev_is_boundary = False
+        elif c == "\\":
+            code_chars.append(c)
+            escaped = True
+            prev_is_boundary = False
+        elif c == "'":
+            code_chars.append(c)
+            in_single = True
+            prev_is_boundary = False
+        elif c == '"':
+            code_chars.append(c)
+            in_double = True
+            prev_is_boundary = False
+        elif c == "#" and prev_is_boundary:
+            in_comment = True
+            comment_chars.append(c)
+        elif c == "\n":
+            code_chars.append(c)
+            prev_is_boundary = True
         else:
-            code_lines.append(line[:cut])
-            comment_parts.append(line[cut:])
-    return "\n".join(code_lines), "\n".join(comment_parts)
+            code_chars.append(c)
+            prev_is_boundary = c.isspace() or c in ";|&("
+    return "".join(code_chars), "".join(comment_chars)
 
 
 def _has_briefing_marker(command: object) -> bool:

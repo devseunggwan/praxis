@@ -189,7 +189,15 @@ approve blindly.
   `: <reason>` is recommended but not required. This is a conscious
   self-attestation, appropriate for a self-discipline nudge (not an adversarial
   boundary): the agent asserts the briefing was surfaced, exactly as the env
-  bypass would.
+  bypass would. The marker is honored only in a **real** unquoted shell comment,
+  parsed with a continuous quote/escape scanner (`_split_shell_comment`): a
+  quoted `'# briefing-surfaced'`, a mid-word `x#`, a backslash-escaped `\#`, or a
+  `#` inside a single-quoted string spanning newlines is data, not an
+  attestation, and does not demote (round-1/2/3 codex findings). It is honored
+  only for a **single** merge segment with no loop (No Approval Transfer). A
+  `# briefing-surfaced` inside a heredoc body (`<<EOF … EOF`) is the one residual
+  the scanner does not exclude — accepted under the non-adversarial threat model,
+  as with the `xargs`/cross-repo gaps above.
 - Trivial-PR markers (`typo`, `comment-only`, `single-line`, `오타`, `주석만`,
   `trivial pr`, `2-line report`, …) in the briefing text → no escalation,
   matching CLAUDE.md's "Trivial PRs: a 2-line report is fine" carve-out.

@@ -811,6 +811,16 @@ run_merge_escalation_case "merge_escalation_marker_midword_hash_denies" \
 run_merge_escalation_case "merge_escalation_marker_reason_with_for_demotes" \
   "no" "" "momentum-merge-incomplete.jsonl" "gh pr merge --squash # briefing-surfaced: required for bridge harness"
 
+# round-3 P2: a `# briefing-surfaced` inside a single-quoted string that spans
+# physical lines is DATA, not a comment. Quote state must persist across the
+# newline so the marker is not misdetected → incomplete briefing still denies.
+run_merge_escalation_case "merge_escalation_marker_multiline_quoted_denies" \
+  "yes" "" "momentum-merge-incomplete.jsonl" $'gh pr merge --squash\nprintf \'line\n# briefing-surfaced\n\''
+
+# round-3: a backslash-escaped `\#` is a literal, not a comment start → deny.
+run_merge_escalation_case "merge_escalation_marker_escaped_hash_denies" \
+  "yes" "" "momentum-merge-incomplete.jsonl" "gh pr merge --squash \\# briefing-surfaced"
+
 # Full bypass silences everything, including the escalation.
 merge_escalation_bypass_silent_case() {
   local name="merge_escalation_full_bypass_silent"
