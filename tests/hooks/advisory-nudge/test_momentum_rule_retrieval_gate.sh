@@ -769,6 +769,58 @@ run_merge_escalation_case "merge_escalation_delegate_skips" \
 run_merge_escalation_case "merge_escalation_advisory_env_demotes" \
   "no" "PRAXIS_MOMENTUM_MERGE_ADVISORY=1" "momentum-merge-incomplete.jsonl"
 
+# In-band bypass marker (issue #826): `# briefing-surfaced` in the command
+# demotes to advisory where the env var cannot reach the hook. Incomplete
+# briefing fixture would otherwise deny → marker present → no deny.
+run_merge_escalation_case "merge_escalation_briefing_marker_demotes" \
+  "no" "" "momentum-merge-incomplete.jsonl" "gh pr merge --squash # briefing-surfaced: env unreachable in this harness"
+
+# Marker with no reason still demotes (reason is recommended, not required).
+run_merge_escalation_case "merge_escalation_briefing_marker_bare_demotes" \
+  "no" "" "momentum-merge-incomplete.jsonl" "gh pr merge --squash --delete-branch # briefing-surfaced"
+
+# Sanity: WITHOUT the marker the same incomplete briefing still denies (the
+# marker, not the fixture, is what demotes).
+run_merge_escalation_case "merge_escalation_no_marker_still_denies" \
+  "yes" "" "momentum-merge-incomplete.jsonl" "gh pr merge --squash --delete-branch"
+
+# round-1 P1: one self-attestation must not release a compound multi-merge.
+# Marker present but TWO merge segments → not demoted → deny.
+run_merge_escalation_case "merge_escalation_marker_multi_merge_denies" \
+  "yes" "" "momentum-merge-incomplete.jsonl" "gh pr merge 833 --squash && gh pr merge 999 --squash # briefing-surfaced"
+
+# round-1 P1: a looped merge with the marker also stays denied.
+run_merge_escalation_case "merge_escalation_marker_loop_denies" \
+  "yes" "" "momentum-merge-incomplete.jsonl" 'for pr in 833 999; do gh pr merge "$pr" --squash; done # briefing-surfaced'
+
+# round-1 P2: the marker inside a QUOTED argument is data, not an attestation
+# comment → must NOT bypass. `grep '# briefing-surfaced' …` before the merge
+# still denies on the incomplete briefing.
+run_merge_escalation_case "merge_escalation_marker_quoted_denies" \
+  "yes" "" "momentum-merge-incomplete.jsonl" "grep '# briefing-surfaced' spec.md && gh pr merge --squash"
+
+# round-2 P2a: a mid-word `#` (no preceding word boundary) is NOT a shell
+# comment in Bash. `echo x# briefing-surfaced` is an argument, not an
+# attestation → must still deny (shlex commenters="#" wrongly stripped this).
+run_merge_escalation_case "merge_escalation_marker_midword_hash_denies" \
+  "yes" "" "momentum-merge-incomplete.jsonl" "echo x# briefing-surfaced && gh pr merge --squash"
+
+# round-2 P2b: a reason clause containing a loop keyword ("for") must not trip
+# the repetition guard — segment/repetition run on the comment-stripped code
+# only, so the single merge still demotes.
+run_merge_escalation_case "merge_escalation_marker_reason_with_for_demotes" \
+  "no" "" "momentum-merge-incomplete.jsonl" "gh pr merge --squash # briefing-surfaced: required for bridge harness"
+
+# round-3 P2: a `# briefing-surfaced` inside a single-quoted string that spans
+# physical lines is DATA, not a comment. Quote state must persist across the
+# newline so the marker is not misdetected → incomplete briefing still denies.
+run_merge_escalation_case "merge_escalation_marker_multiline_quoted_denies" \
+  "yes" "" "momentum-merge-incomplete.jsonl" $'gh pr merge --squash\nprintf \'line\n# briefing-surfaced\n\''
+
+# round-3: a backslash-escaped `\#` is a literal, not a comment start → deny.
+run_merge_escalation_case "merge_escalation_marker_escaped_hash_denies" \
+  "yes" "" "momentum-merge-incomplete.jsonl" "gh pr merge --squash \\# briefing-surfaced"
+
 # Full bypass silences everything, including the escalation.
 merge_escalation_bypass_silent_case() {
   local name="merge_escalation_full_bypass_silent"
