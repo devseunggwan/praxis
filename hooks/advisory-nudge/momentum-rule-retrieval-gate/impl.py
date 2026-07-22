@@ -579,6 +579,56 @@ def _has_repetition(command: object) -> bool:
     return any(tok in _LOOP_KEYWORDS for tok in safe_tokenize(command))
 
 
+def _prior_turn_extension_passes(entries: list[dict], idxs: list[int],
+                                 command: object) -> bool:
+    """True when the prior-turn briefing satisfies the gate (issue #826).
+
+    The mandated flow is briefing → user approval → merge, which places the
+    briefing in the turn BEFORE the approving user message — outside the
+    since-last-user window. When the last user message is a short approval reply,
+    the immediately preceding assistant turn is scored ALONE (so text authored
+    AFTER the approval cannot supplement a briefing the user never saw), and only
+    when the merge is correlated to the briefed PR.
+    """
+    segments = _merge_segments(command)
+    # A single approval authorizes ONE merge. A compound `merge A && merge B` (≥2
+    # segments) or a shell loop repeating one segment (`for pr in …; do merge`)
+    # must not ride a single approval (No Approval Transfer) → no extension.
+    if len(segments) != 1 or _has_repetition(command) or len(idxs) < 2:
+        return False
+    if not _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
+        return False
+
+    prev_text = _assistant_text(entries, idxs[-2] + 1, idxs[-1])
+    pos = segments[0]
+    if pos is None:
+        # Truly numberless (`gh pr merge --squash`) → runs on the CURRENT branch.
+        # Derive the real target from the window's mandated Pre-Merge probe
+        # (`gh pr checks/view N`) and correlate against THAT. Fail closed when no
+        # probe resolves a target (No Approval Transfer, P1#2).
+        ctx_pr = _context_pr_from_window(entries, idxs[-2] + 1, len(entries))
+        correlated = ctx_pr is not None and _mentions_pr(prev_text, ctx_pr)
+    else:
+        m = _PULL_TOKEN_RE.match(pos)
+        if m:
+            correlated = _mentions_pr(prev_text, m.group(1) or m.group(2))
+        else:
+            # A NAMED branch (`gh pr merge feature-x`) targets that branch's PR —
+            # which cannot be mapped to a number without a live `gh` call, and is
+            # NOT the current branch, so the window probe does not identify it.
+            # Fail closed (round-3 P1b): a prior probe of a different PR must not
+            # be treated as this branch's target.
+            correlated = False
+
+    # The trivial-PR carve-out and the briefing-count pass apply ONLY once the
+    # merge is correlated to the briefed PR — never to an unrelated trivial /
+    # complete briefing about a different PR (P1#1).
+    if not correlated:
+        return False
+    return _is_trivial_merge(prev_text) \
+        or _briefing_item_count(prev_text) >= MERGE_BRIEFING_MIN_ITEMS
+
+
 def _merge_escalation_reason(payload: dict) -> str | None:
     """Return a deny reason when the pre-merge briefing is incomplete, else None."""
     # Background cmux-delegate agents merge autonomously — the delegation intent
@@ -601,48 +651,9 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     if _briefing_item_count(current_text) >= MERGE_BRIEFING_MIN_ITEMS:
         return None
 
-    # Window extension (issue #826, window-scoping axis): the mandated flow is
-    # briefing → user approval → merge, which places the briefing in the turn
-    # BEFORE the approving user message — outside the since-last-user window.
-    # When the last user message is a short approval reply, also score the prior
-    # assistant turn — scored ALONE, so text authored AFTER the approval cannot
-    # supplement a briefing the user never saw before approving (P2#5).
-    command = (payload.get("tool_input") or {}).get("command")
-    segments = _merge_segments(command)
-    # A single approval authorizes ONE merge. A compound `merge A && merge B` (≥2
-    # segments) or a shell loop repeating one segment (`for pr in …; do merge`)
-    # must not ride a single approval (No Approval Transfer) → skip the extension.
-    single_merge = len(segments) == 1 and not _has_repetition(command)
-    if single_merge and len(idxs) >= 2 \
-            and _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
-        prev_text = _assistant_text(entries, idxs[-2] + 1, idxs[-1])
-        pos = segments[0]
-        if pos is None:
-            # Truly numberless (`gh pr merge --squash`) → runs on the CURRENT
-            # branch. Derive the real target from the window's mandated Pre-Merge
-            # probe (`gh pr checks/view N`) and correlate against THAT. Fail
-            # closed when no probe resolves a target (No Approval Transfer, P1#2).
-            ctx_pr = _context_pr_from_window(entries, idxs[-2] + 1, len(entries))
-            correlated = ctx_pr is not None and _mentions_pr(prev_text, ctx_pr)
-        else:
-            m = _PULL_TOKEN_RE.match(pos)
-            if m:
-                correlated = _mentions_pr(prev_text, m.group(1) or m.group(2))
-            else:
-                # A NAMED branch (`gh pr merge feature-x`) targets that branch's
-                # PR — which cannot be mapped to a number without a live `gh`
-                # call, and is NOT the current branch, so the window probe does
-                # not identify it. Fail closed (round-3 P1b): a prior probe of a
-                # different PR must not be treated as this branch's target.
-                correlated = False
-        # The trivial-PR carve-out and the briefing-count pass apply ONLY once
-        # the merge is correlated to the briefed PR — never to an unrelated
-        # trivial/complete briefing about a different PR (P1#1).
-        if correlated:
-            if _is_trivial_merge(prev_text):
-                return None
-            if _briefing_item_count(prev_text) >= MERGE_BRIEFING_MIN_ITEMS:
-                return None
+    if _prior_turn_extension_passes(
+            entries, idxs, (payload.get("tool_input") or {}).get("command")):
+        return None
 
     return format_block(
         rule_name="Pre-Merge Reporting briefing",

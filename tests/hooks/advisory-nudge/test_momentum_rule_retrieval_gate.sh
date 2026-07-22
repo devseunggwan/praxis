@@ -596,19 +596,23 @@ run_compound_multi_assert_force_dispatch \
 # transcript_path, so they stay advisory-only (regression-safe).
 FIXTURES_DIR="$SCRIPT_DIR/../../fixtures"
 
-# run_merge_escalation_case name expect_deny(yes|no) env_args transcript_fixture
+# run_merge_escalation_case name expect_deny(yes|no) env_args transcript_fixture [command]
+# The optional 5th arg overrides the merge command (defaults to the standard
+# numberless squash merge), letting PR-number correlation (window extension,
+# issue #826) be exercised without a second near-identical helper.
 run_merge_escalation_case() {
   local name="$1" expect_deny="$2" env_args="$3" fixture="$4"
+  local command="${5:-gh pr merge --squash --delete-branch}"
   local transcript="$FIXTURES_DIR/$fixture"
   local payload
   payload=$(python3 -c '
 import json, sys
 print(json.dumps({
     "tool_name": "Bash",
-    "tool_input": {"command": "gh pr merge --squash --delete-branch"},
+    "tool_input": {"command": sys.argv[2]},
     "transcript_path": sys.argv[1],
     "session_id": "test-momentum-merge",
-}))' "$transcript")
+}))' "$transcript" "$command")
 
   local out_file err_file
   out_file=$(mktemp); err_file=$(mktemp)
@@ -642,66 +646,19 @@ print(json.dumps({
   fi
 }
 
-# run_merge_escalation_cmd_case name expect_deny env_args transcript_fixture command
-# Variant carrying a custom merge command so the PR-number correlation
-# (window extension, issue #826) can be exercised.
-run_merge_escalation_cmd_case() {
-  local name="$1" expect_deny="$2" env_args="$3" fixture="$4" command="$5"
-  local transcript="$FIXTURES_DIR/$fixture"
-  local payload
-  payload=$(python3 -c '
-import json, sys
-print(json.dumps({
-    "tool_name": "Bash",
-    "tool_input": {"command": sys.argv[2]},
-    "transcript_path": sys.argv[1],
-    "session_id": "test-momentum-merge",
-}))' "$transcript" "$command")
-
-  local out_file err_file
-  out_file=$(mktemp); err_file=$(mktemp)
-  if [ -n "$env_args" ]; then
-    # shellcheck disable=SC2086
-    echo "$payload" | env $env_args python3 "$HOOK" >"$out_file" 2>"$err_file"
-  else
-    echo "$payload" | python3 "$HOOK" >"$out_file" 2>"$err_file"
-  fi
-  local rc=$?
-  local out err
-  out=$(cat "$out_file"); err=$(cat "$err_file")
-  rm -f "$out_file" "$err_file"
-
-  local ok=1
-  [ "$rc" -eq 0 ] || ok=0
-  echo "$err" | grep -qF "[praxis:momentum-gate]" || ok=0
-  if [ "$expect_deny" = "yes" ]; then
-    echo "$out" | grep -qF '"permissionDecision": "deny"' || ok=0
-  else
-    echo "$out" | grep -qF '"permissionDecision"' && ok=0
-  fi
-
-  if [ "$ok" -eq 1 ]; then
-    echo "PASS  [$name]"; PASS=$((PASS + 1))
-  else
-    echo "FAIL  [$name] expect_deny=$expect_deny rc=$rc"
-    [ -n "$out" ] && echo "        stdout: $(echo "$out" | head -c 200)"
-    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
-  fi
-}
-
 # Window extension (issue #826): briefing in the PRIOR turn + short approval
 # reply ("ok") + merge of the SAME PR → no deny (the mandated flow).
-run_merge_escalation_cmd_case "merge_escalation_prior_turn_briefing_passes" \
+run_merge_escalation_case "merge_escalation_prior_turn_briefing_passes" \
   "no" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge 833 --squash --delete-branch"
 
 # Prior-turn briefing is for a DIFFERENT PR (#999) than the merge target (833)
 # → correlation fails, extension denied → deny.
-run_merge_escalation_cmd_case "merge_escalation_prior_turn_wrong_pr_denies" \
+run_merge_escalation_case "merge_escalation_prior_turn_wrong_pr_denies" \
   "yes" "" "momentum-merge-prior-turn-wrong-pr.jsonl" "gh pr merge 833 --squash"
 
 # Last user message is a substantive instruction, not an approval reply → no
 # window extension → deny.
-run_merge_escalation_cmd_case "merge_escalation_substantive_reply_denies" \
+run_merge_escalation_case "merge_escalation_substantive_reply_denies" \
   "yes" "" "momentum-merge-substantive-reply.jsonl" "gh pr merge 833 --squash"
 
 # Tool-only turn, no recorded briefing narration, single human message (no
@@ -713,47 +670,47 @@ run_merge_escalation_case "merge_escalation_tool_only_no_briefing_denies" \
 # Numberless branch merge (`gh pr merge --squash`, the project standard): the
 # window carries the mandated Pre-Merge probe (`gh pr checks 833`), so the real
 # target (833) is derived and correlated against the prior-turn briefing → pass.
-run_merge_escalation_cmd_case "merge_escalation_numberless_context_pr_passes" \
+run_merge_escalation_case "merge_escalation_numberless_context_pr_passes" \
   "no" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge --squash --delete-branch"
 
 # Numberless merge but NO Pre-Merge probe in the window → target unresolvable →
 # fail closed (No Approval Transfer: an unresolved target may differ from the
 # briefed PR). Deny even though a prior-turn briefing + approval exist.
-run_merge_escalation_cmd_case "merge_escalation_numberless_no_probe_denies" \
+run_merge_escalation_case "merge_escalation_numberless_no_probe_denies" \
   "yes" "" "momentum-merge-numberless-no-probe.jsonl" "gh pr merge --squash --delete-branch"
 
 # Named-branch merge (`gh pr merge feature-for-999`) targets that branch's PR,
 # which the window probe (#833) does NOT identify → fail closed → deny (round-3
 # P1b: a prior probe of a different PR is not this branch's target). The `-for-`
 # in the branch name must also NOT be read as a loop keyword (whole-token match).
-run_merge_escalation_cmd_case "merge_escalation_named_branch_denies" \
+run_merge_escalation_case "merge_escalation_named_branch_denies" \
   "yes" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge feature-for-999 --squash"
 
 # Repo flag trailing the subcommand (`gh pr merge -R o/r 833`) must skip its
 # value so the target resolves to 833, not `o/r` (round-3 P1d). 833 correlates
 # with the prior-turn briefing → pass. Value-flag arity skip (`--subject 999`
 # not read as target) is exercised here too since -R sits before the positional.
-run_merge_escalation_cmd_case "merge_escalation_repo_flag_arity_passes" \
+run_merge_escalation_case "merge_escalation_repo_flag_arity_passes" \
   "no" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge -R o/r 833 --squash"
 
 # Shell loop repeating the merge (`for pr in 833 999; do gh pr merge "$pr"`) →
 # one approval must not ride a loop → extension disabled → deny (P1#3). The `do`
 # keyword is peeled by strip_prefix so the inner `gh pr merge` IS detected.
-run_merge_escalation_cmd_case "merge_escalation_loop_repetition_denies" \
+run_merge_escalation_case "merge_escalation_loop_repetition_denies" \
   "yes" "" "momentum-merge-prior-turn-briefing.jsonl" 'for pr in 833 999; do gh pr merge "$pr" --squash; done'
 
 # Compound multi-target (`merge 833 && merge 999`) → one approval cannot cover
 # both → no extension → deny (No Approval Transfer).
-run_merge_escalation_cmd_case "merge_escalation_multi_target_denies" \
+run_merge_escalation_case "merge_escalation_multi_target_denies" \
   "yes" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge 833 --squash && gh pr merge 999 --squash"
 
 # Fused global flag (`gh --repo=o/r pr merge 833`) → tokenizer still extracts
 # target 833, correlation passes → no deny.
-run_merge_escalation_cmd_case "merge_escalation_fused_repo_flag_passes" \
+run_merge_escalation_case "merge_escalation_fused_repo_flag_passes" \
   "no" "" "momentum-merge-prior-turn-briefing.jsonl" "gh --repo=o/r pr merge 833 --squash"
 
 # Trivial-PR briefing in the PRIOR turn + approval → carve-out applies, no deny.
-run_merge_escalation_cmd_case "merge_escalation_prior_turn_trivial_exempt" \
+run_merge_escalation_case "merge_escalation_prior_turn_trivial_exempt" \
   "no" "" "momentum-merge-prior-turn-trivial.jsonl" "gh pr merge 833 --squash"
 
 # Incomplete briefing (3 of 6 items) → deny. Reproduces the #795 failure shape.
