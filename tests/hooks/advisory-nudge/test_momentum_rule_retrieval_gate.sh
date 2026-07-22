@@ -799,6 +799,18 @@ run_merge_escalation_case "merge_escalation_marker_loop_denies" \
 run_merge_escalation_case "merge_escalation_marker_quoted_denies" \
   "yes" "" "momentum-merge-incomplete.jsonl" "grep '# briefing-surfaced' spec.md && gh pr merge --squash"
 
+# round-2 P2a: a mid-word `#` (no preceding word boundary) is NOT a shell
+# comment in Bash. `echo x# briefing-surfaced` is an argument, not an
+# attestation → must still deny (shlex commenters="#" wrongly stripped this).
+run_merge_escalation_case "merge_escalation_marker_midword_hash_denies" \
+  "yes" "" "momentum-merge-incomplete.jsonl" "echo x# briefing-surfaced && gh pr merge --squash"
+
+# round-2 P2b: a reason clause containing a loop keyword ("for") must not trip
+# the repetition guard — segment/repetition run on the comment-stripped code
+# only, so the single merge still demotes.
+run_merge_escalation_case "merge_escalation_marker_reason_with_for_demotes" \
+  "no" "" "momentum-merge-incomplete.jsonl" "gh pr merge --squash # briefing-surfaced: required for bridge harness"
+
 # Full bypass silences everything, including the escalation.
 merge_escalation_bypass_silent_case() {
   local name="merge_escalation_full_bypass_silent"

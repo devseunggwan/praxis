@@ -39,7 +39,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 import sys
 from collections import deque
 from pathlib import Path
@@ -283,38 +282,58 @@ MERGE_ADVISORY_ENV = "PRAXIS_MOMENTUM_MERGE_ADVISORY"
 _BRIEFING_MARKER_RE = re.compile(r"#\s*briefing-surfaced\b", re.IGNORECASE)
 
 
-def _tokenize_code_only(command: str) -> list[str]:
-    """Tokenize with `#` as a shell comment starter, so unquoted `# …` comments
-    are DROPPED while a quoted `'# …'` argument is KEPT as a token. Mirrors
-    `safe_tokenize` (per-line, punctuation_chars) but with commenters='#'."""
-    tokens: list[str] = []
+def _split_shell_comment(command: str) -> tuple[str, str]:
+    """Split each line into (code, comment) at an UNQUOTED, word-boundary `#`,
+    matching Bash semantics: `#` starts a comment only at the start of a word
+    (preceded by whitespace or a command separator, or at line start) and outside
+    quotes. A mid-word `x#` or a quoted `'#'` is literal data, not a comment.
+
+    Returns (code_without_comments, joined_comment_text). Used so the marker is
+    detected only in a real comment (round-1/2 P2) AND so segment/repetition
+    analysis never sees the comment's reason text (round-2 P2b)."""
+    code_lines: list[str] = []
+    comment_parts: list[str] = []
     for line in command.split("\n"):
-        if not line.strip():
-            continue
-        try:
-            lex = shlex.shlex(line, posix=True, punctuation_chars=";|&")
-            lex.whitespace_split = True
-            lex.commenters = "#"
-            tokens.extend(list(lex))
-        except ValueError:
-            continue
-    return tokens
+        in_single = in_double = False
+        prev_is_boundary = True  # line start is a word boundary
+        cut = None
+        for i, c in enumerate(line):
+            if in_single:
+                in_single = c != "'"
+                prev_is_boundary = False
+            elif in_double:
+                in_double = c != '"'
+                prev_is_boundary = False
+            elif c == "'":
+                in_single = True
+                prev_is_boundary = False
+            elif c == '"':
+                in_double = True
+                prev_is_boundary = False
+            elif c == "#" and prev_is_boundary:
+                cut = i
+                break
+            else:
+                prev_is_boundary = c.isspace() or c in ";|&("
+        if cut is None:
+            code_lines.append(line)
+        else:
+            code_lines.append(line[:cut])
+            comment_parts.append(line[cut:])
+    return "\n".join(code_lines), "\n".join(comment_parts)
 
 
 def _has_briefing_marker(command: object) -> bool:
     """True when the command carries the in-band `# briefing-surfaced` marker in
-    an UNQUOTED shell comment (not inside a quoted argument or other data).
+    an UNQUOTED shell comment (not a quoted argument, not a mid-word `#`).
 
-    The marker must be a real shell comment — a quoted occurrence (e.g.
-    `grep '# briefing-surfaced' spec.md && gh pr merge …`) is data, not an
-    attestation, and must not bypass the gate (round-1 P2). Detection: the marker
-    is present in the raw command but ABSENT once `#` comments are stripped by the
-    lexer; a marker that survives comment-stripping is quoted data.
-    """
-    if not isinstance(command, str) or _BRIEFING_MARKER_RE.search(command) is None:
+    A quoted occurrence (`grep '# briefing-surfaced' … && gh pr merge …`) or a
+    mid-word `#` (`echo x# briefing-surfaced`) is data, not an attestation, and
+    must not bypass the gate (round-1/2 P2)."""
+    if not isinstance(command, str):
         return False
-    code_only = " ".join(_tokenize_code_only(command))
-    return _BRIEFING_MARKER_RE.search(code_only) is None
+    _, comment = _split_shell_comment(command)
+    return _BRIEFING_MARKER_RE.search(comment) is not None
 
 # Distinct Pre-Merge Reporting items must be present in the pre-merge assistant
 # text. The documented failure surfaced only 3 of 6 (What changed / verified /
@@ -689,6 +708,10 @@ def _merge_escalation_reason(payload: dict) -> str | None:
         return None
 
     command = (payload.get("tool_input") or {}).get("command")
+    # Analyze only the EXECUTABLE portion (unquoted shell comment stripped) for
+    # segments/repetition, so a `# briefing-surfaced: … for …` reason text never
+    # trips the loop guard (round-2 P2b).
+    code = _split_shell_comment(command)[0] if isinstance(command, str) else command
     # In-band bypass (issue #826): a `# briefing-surfaced` marker in an UNQUOTED
     # shell comment demotes to advisory where the env bypass cannot reach the
     # hook process — but only for a SINGLE merge with no loop. One
@@ -696,7 +719,7 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     # looped merge (round-1 P1: same No-Approval-Transfer guard the prior-turn
     # extension applies).
     if _has_briefing_marker(command) \
-            and len(_merge_segments(command)) == 1 and not _has_repetition(command):
+            and len(_merge_segments(code)) == 1 and not _has_repetition(code):
         return None
 
     entries = _load_turn_entries(payload.get("transcript_path", "") or "")
@@ -711,7 +734,7 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     if _briefing_item_count(current_text) >= MERGE_BRIEFING_MIN_ITEMS:
         return None
 
-    if _prior_turn_extension_passes(entries, idxs, command):
+    if _prior_turn_extension_passes(entries, idxs, code):
         return None
 
     return format_block(
