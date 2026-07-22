@@ -323,6 +323,16 @@ else
   echo "PASS [hint] single-command block has no cascade hint"; ((PASS++))
 fi
 
+# Shared pr-body evidence checklist (#824, mirror sibling): the deny message
+# must also enumerate the SIBLING gate's token so one deny teaches all tokens.
+_checklist_err=$(_capture_stderr 'gh pr create --body "no marker"')
+if printf '%s' "$_checklist_err" | grep -q "Caller chain verified:"; then
+  echo "PASS [checklist] block message enumerates sibling Caller-chain token"; ((PASS++))
+else
+  echo "FAIL [checklist] block message missing sibling Caller-chain token"; ((FAIL++))
+  FAILED_NAMES+=("checklist missing sibling Caller-chain token")
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # Fail-open guard opt-in (issue #498): main() must be @fail_open-wrapped;

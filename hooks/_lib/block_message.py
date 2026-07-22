@@ -81,6 +81,35 @@ def format_block(
     return "\n".join(lines)
 
 
+def pr_body_evidence_checklist() -> str:
+    """Full PR-body evidence-token enumeration for pr-body gate deny messages.
+
+    The two pr-body gates (block-pr-without-caller-evidence,
+    block-pr-without-precommit-evidence) each deny on their own missing
+    token, so an author discovers the required tokens one deny at a time
+    (praxis #824). Appending this checklist to BOTH deny messages teaches
+    the full enumeration on the first deny.
+
+    Returns the checklist WITH a trailing newline — callers concatenate it
+    after their own newline-terminated block message and before any
+    cascade hint.
+    """
+    return """\
+
+📋 Full PR-body evidence checklist (satisfy ALL in one authoring pass):
+
+  Caller chain verified: <evidence>         ← block-pr-without-caller-evidence
+  Pre-commit verified: <command + result>   ← block-pr-without-precommit-evidence
+
+Format rules: each token starts at column 0 of its own line, content follows
+the colon on the same line, and the line must sit OUTSIDE fenced code blocks.
+
+Related gates nearby: `git commit` needs a codex review pass or a
+`[skip-codex-review]` marker; an AskUserQuestion `(Recommended)` label needs
+a `Falsified:` line.
+"""
+
+
 def emit_block(
     rule_name: str,
     why: str,

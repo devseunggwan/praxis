@@ -92,6 +92,15 @@ Add ONE of these lines to the PR body:
   ...
 ```
 
+The generic token-missing message is suffixed with the shared PR-body
+evidence checklist (`hooks/_lib/block_message.py →
+pr_body_evidence_checklist()`, praxis #824) enumerating ALL required
+pr-body tokens — this gate's `Pre-commit verified:` plus the sibling
+gate's `Caller chain verified:` — with the column-0 / same-line /
+outside-fenced-blocks format rules, so one deny teaches the full
+enumeration. The path-not-found diagnostic below is NOT suffixed — its
+cause is a path resolution failure, not a missing token.
+
 **Path-not-found diagnostic** (praxis #608) — emitted when `--body-file` names a
 path that does not exist on disk (and is not stdin or a TOCTOU overwrite).
 The real cause is that the hook resolves relative paths against its own process
