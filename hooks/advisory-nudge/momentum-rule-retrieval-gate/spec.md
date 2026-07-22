@@ -98,6 +98,69 @@ The 6 items (a single keyword hit marks each present, EN/KO): What changed /
 What was verified / What was NOT verified / Risk-blast-radius / Open items /
 explicit approve-ask.
 
+**Window scoping (issue #826).** The mandated Pre-Merge Reporting flow is
+*briefing → user approval → merge*, which necessarily places the briefing in
+the turn **before** the approving user message — outside the "since the last
+human user message" window. Scoring only that window would therefore penalise
+the *correct* flow (briefing → "ok" → merge) and pass only the anti-pattern
+(briefing + merge crammed into one turn, i.e. auto-proceed without waiting).
+The **prior-turn extension** resolves this. When the last human user message is
+a short approval reply (`ok` / `진행` / `승인` / … — exact normalized match
+against `_APPROVAL_TOKENS`), the immediately preceding assistant turn is scored
+**alone** (post-approval text must not supplement a briefing the user never saw
+before approving). Safety gates on the extension:
+
+- **PR correlation.** The prior-turn briefing must reference the PR actually
+  being merged. The merge target is the segment's *first positional* token
+  (value-flag arity skipped, including trailing gh global flags like `-R
+  org/repo <N>`), classified three ways:
+  - **Numeric** (`gh pr merge 833`, `.../pull/833`) → the prior turn must
+    reference that `#N` (or bare number).
+  - **No positional** (`gh pr merge --squash`, the project standard) → a
+    current-branch merge; the real target is **derived from the window's
+    mandated Pre-Merge probe** (`gh pr checks/view <N>`, scanned from assistant
+    tool_use Bash commands) and the prior turn must reference *that* number.
+    When no probe resolves a target, the extension **fails closed** (denies).
+  - **Named branch** (`gh pr merge feature-x`) → targets that branch's PR, which
+    cannot be mapped to a number without a live `gh` call and is not the current
+    branch, so the window probe does not identify it → **fails closed** (denies).
+    A prior probe of a *different* PR must not be treated as this branch's target
+    (round-3 P1b).
+  - Command parsing reuses the trigger tokenizer, so fused global flags
+    (`gh --repo=o/r pr merge 833`) resolve the target correctly.
+
+  > **Accepted residual gaps (advisory-hook threat model).** This gate is a
+  > self-discipline *nudge* for an honest agent that forgets the briefing (the
+  > #795 failure), not an adversarial security boundary — `deny` merely adds
+  > teeth, and `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` is a standing escape hatch. Two
+  > CLI forms that only an adversarial target-swap would use are therefore left
+  > as documented gaps rather than chased across further rounds: (a) an
+  > `xargs`-wrapped merge (`… | xargs -n1 gh pr merge`) is not recognized by the
+  > trigger tokenizer (`xargs` is not a peeled prefix), so it bypasses the gate
+  > entirely; (b) a bare-number reference is not repo-scoped, so a cross-repo
+  > `gh -R org/other pr merge 833` after briefing *this* repo's #833 (or a
+  > `Closes #833` line in a different PR's briefing) can false-correlate. Both
+  > require an explicit-signal redesign to close soundly and are out of scope for
+  > the honest-agent nudge.
+- **No multi-target / loop transfer.** A compound `gh pr merge A && gh pr merge
+  B` (≥2 merge segments) OR a shell loop / `xargs` repeating one segment
+  (`for pr in 833 999; do gh pr merge "$pr"; done`, detected via whole-token
+  match of `for`/`while`/`until`/`xargs`) skips the extension entirely — one
+  approval cannot authorize repeated merges (No Approval Transfer Across
+  Companion PRs).
+- **Trivial carve-out.** A trivial-PR marker in the *prior* turn is honored the
+  same as in the current turn (the 2-line briefing sits before the "ok"), but
+  **only once the merge is correlated to the briefed PR** — an unrelated trivial
+  briefing about a different PR cannot carve out the merge.
+
+> **Recording-fidelity axis (deferred).** A separate #826 concern — harnesses
+> that drop assistant narration so a real briefing scores 0 — is **not** handled
+> here. A text-absence heuristic cannot distinguish a non-recording harness from
+> a genuine briefing skip that happens to be tool-only (it is gameable by
+> suppressing all narration), so it was dropped from this change rather than
+> shipped as a weak gate. If needed, address it with an explicit harness signal
+> in a follow-up, not an inference.
+
 **Why `deny`, not `ask`:** the sibling `pre-merge-approval-gate` already emits
 an unconditional `ask` on *every* `gh pr merge`. A second `ask` would be
 redundant with the exact gate that failed to prevent the #795 recurrence (the
@@ -117,6 +180,9 @@ approve blindly.
 - Trivial-PR markers (`typo`, `comment-only`, `single-line`, `오타`, `주석만`,
   `trivial pr`, `2-line report`, …) in the briefing text → no escalation,
   matching CLAUDE.md's "Trivial PRs: a 2-line report is fine" carve-out.
+- Prior-turn briefing correlated to the merged PR (approval reply + PR-number
+  match, or numberless merge whose window-derived target matches) → no
+  escalation (issue #826, above).
 
 The `dispatch` and `force-push` triggers never emit a decision — escalation is
 merge-only, per the issue scope (only the merge failure was reproduced).

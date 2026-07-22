@@ -1,0 +1,4 @@
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": "PR 833 머지 준비"}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "content": [{"type": "text", "text": "PR #833 브리핑. 변경 사항: hook 파일 수정. 테스트 통과 확인. 미검증: 없음. 리스크: 없음. 남은 항목: 없음. Approve merge?"}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": "그 전에 파서 로직도 리팩터해줘"}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "content": [{"type": "text", "text": "네, 파서부터 확인하겠습니다."}]}}

@@ -342,16 +342,55 @@ def _is_trivial_merge(text: str) -> bool:
     return any(marker in low for marker in _TRIVIAL_MERGE_MARKERS)
 
 
-def _current_turn_assistant_text(transcript_path: str) -> str | None:
-    """Concatenate assistant text emitted since the last human user message.
+# Short user acknowledgements that count as "approval reply" (EN/KO). Matched
+# by exact normalized-string equality, so a substantive short message
+# ("go fix the parser") never triggers the prior-turn window extension.
+_APPROVAL_TOKENS = frozenset({
+    "ok", "okay", "okey", "k", "kk", "yes", "yep", "yup", "y", "go", "go ahead",
+    "do it", "proceed", "proceed with the merge", "merge", "merge it", "sure",
+    "lgtm", "ship it", "sounds good",
+    "네", "넵", "응", "ㅇㅋ", "ㅇㅇ", "ㄱㄱ", "고고", "승인", "진행", "진행해",
+    "진행해줘", "진행하자", "머지", "머지해", "머지해줘", "머지 진행", "좋아",
+    "좋습니다", "그래", "ㄱ",
+})
 
-    Scans a bounded tail window (TRANSCRIPT_SCAN_LINES) so a long transcript
-    cannot blow the hook timeout. Returns:
-      • None  → transcript missing / unreadable (caller fails open, no block)
-      • ""    → transcript readable but the agent emitted no briefing text this
-                turn (the exact compound-imperative failure — caller escalates)
-      • text  → the briefing text to score
-    """
+# A single positional token that is a bare PR number or a …/pull/N URL.
+_PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
+
+# `gh pr merge` flags that consume a following value token — skipped when
+# scanning for the first positional (the merge target) so a flag value like
+# `--subject 833` is never mistaken for the PR number (issue #826, P2#6). The
+# gh *global* value flags (`-R`/`--repo`, …) are included because they may trail
+# the subcommand (`gh pr merge -R org/repo 999`); without skipping their value,
+# `org/repo` would be read as the positional and 999 misclassified (P1d).
+_MERGE_VALUE_FLAGS = frozenset({
+    "-b", "--body", "-F", "--body-file", "-t", "--subject",
+    "--match-head-commit", "--author-email",
+    "-R", "--repo", "--hostname", "--color",
+})
+
+# Read-only `gh pr` verbs whose positional PR argument identifies the PR the
+# session is operating on. A numberless `gh pr merge` runs on the current
+# branch, so its real target is derived from the most recent such command in
+# the window — the mandated Pre-Merge probe (`gh pr checks/view N`).
+_CONTEXT_VERBS = frozenset({
+    "view", "checks", "diff", "ready", "edit", "status", "comment", "review",
+})
+_CONTEXT_VALUE_FLAGS = frozenset({
+    "-b", "--body", "-F", "--body-file", "-t", "--title", "--subject",
+    "--json", "--jq", "--template", "--repo", "-R",
+})
+
+# Shell constructs that repeat a single textual merge segment at runtime
+# (`for pr in 833 999; do gh pr merge "$pr"; done`, `xargs gh pr merge`). One
+# approval must not ride a loop, so their presence disables the single-approval
+# window extension. Matched as whole tokens (not a substring regex) so a
+# hyphenated branch name like `issue-1-fix-for-x` is never mistaken for a loop.
+_LOOP_KEYWORDS = frozenset({"for", "while", "until", "xargs"})
+
+
+def _load_turn_entries(transcript_path: str) -> list[dict] | None:
+    """Parse a bounded tail of the transcript into entry dicts, or None if unreadable."""
     if not transcript_path or not os.path.isfile(transcript_path):
         return None
     try:
@@ -361,7 +400,6 @@ def _current_turn_assistant_text(transcript_path: str) -> str | None:
             lines = deque(fh, maxlen=TRANSCRIPT_SCAN_LINES)
     except OSError:
         return None
-
     entries: list[dict] = []
     for line in lines:
         line = line.strip()
@@ -373,10 +411,12 @@ def _current_turn_assistant_text(transcript_path: str) -> str | None:
             continue
         if isinstance(obj, dict):
             entries.append(obj)
+    return entries
 
-    # Locate the most recent human-authored user message (skip tool_result-only
-    # user entries — those are the runtime's tool-output bridge, not input).
-    last_user_idx = -1
+
+def _human_user_indices(entries: list[dict]) -> list[int]:
+    """Indices of human-authored user messages (skip tool_result-only bridges)."""
+    idxs: list[int] = []
     for i, ev in enumerate(entries):
         msg = ev.get("message")
         if not isinstance(msg, dict) or msg.get("role") != "user" or ev.get("isSidechain"):
@@ -384,14 +424,17 @@ def _current_turn_assistant_text(transcript_path: str) -> str | None:
         content = msg.get("content", [])
         if isinstance(content, str):
             if content.strip():
-                last_user_idx = i
+                idxs.append(i)
         elif isinstance(content, list):
             if any(isinstance(b, dict) and b.get("type") != "tool_result" for b in content):
-                last_user_idx = i
+                idxs.append(i)
+    return idxs
 
-    turn = entries[last_user_idx + 1:] if last_user_idx >= 0 else entries
+
+def _assistant_text(entries: list[dict], lo: int, hi: int) -> str:
+    """Concatenate assistant text blocks in entries[lo:hi]."""
     texts: list[str] = []
-    for ev in turn:
+    for ev in entries[lo:hi]:
         msg = ev.get("message")
         if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
             continue
@@ -407,6 +450,185 @@ def _current_turn_assistant_text(transcript_path: str) -> str | None:
     return "\n".join(texts)
 
 
+def _user_message_text(content: object) -> str:
+    """Flatten a user message's content (str or block list) to plain text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            b["text"] for b in content
+            if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)
+        )
+    return ""
+
+
+def _is_approval_reply(content: object) -> bool:
+    """True when a user message is a short bare approval token (ok / 진행 / 승인 …)."""
+    norm = re.sub(r"\s+", " ", _user_message_text(content).strip().lower()).strip(" .!~,·")
+    return norm in _APPROVAL_TOKENS
+
+
+def _first_positional(tokens: list[str], value_flags: frozenset[str]) -> str | None:
+    """First positional token, skipping option flags and each value-flag's
+    following value — so `--subject 833` never yields `833` as a positional."""
+    j = 0
+    n = len(tokens)
+    while j < n:
+        tok = tokens[j]
+        if tok == "--":
+            return tokens[j + 1] if j + 1 < n else None
+        if tok.startswith("-"):
+            if "=" not in tok and tok in value_flags and j + 1 < n:
+                j += 2
+            else:
+                j += 1
+            continue
+        return tok
+    return None
+
+
+def _gh_pr_positional(argv: list[str], verbs: frozenset[str],
+                      value_flags: frozenset[str]) -> str | None:
+    """First positional token of a `gh pr <verb>` segment — the RAW token, which
+    may be a PR number, a …/pull/N URL, or a branch name — or None when the
+    segment has no positional at all (a bare `gh pr merge --squash`).
+
+    Global flags before the subcommand are walked exactly as `_is_gh_pr_merge`
+    does, so a numeric global-flag value cannot be mistaken for the target."""
+    argv = strip_prefix(argv)
+    if not argv or argv[0] != "gh":
+        return None
+    i = 1
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--":
+            i += 1
+            break
+        if not tok.startswith("-"):
+            break
+        i += 1
+        if "=" not in tok and tok in GH_GLOBAL_FLAGS_WITH_ARG and i < len(argv):
+            i += 1
+    if i + 1 >= len(argv) or argv[i] != "pr" or argv[i + 1] not in verbs:
+        return None
+    return _first_positional(argv[i + 2:], value_flags)
+
+
+def _gh_pr_target(argv: list[str], verbs: frozenset[str],
+                  value_flags: frozenset[str]) -> str | None:
+    """PR *number* the first positional resolves to (bare number or …/pull/N),
+    or None when the segment has no positional OR the positional is a non-numeric
+    branch name."""
+    pos = _gh_pr_positional(argv, verbs, value_flags)
+    if pos is None:
+        return None
+    m = _PULL_TOKEN_RE.match(pos)
+    return (m.group(1) or m.group(2)) if m else None
+
+
+def _merge_segments(command: object) -> list[str | None]:
+    """One entry per `gh pr merge` segment in a (possibly compound) command: its
+    first positional token (PR number OR branch name), or None when the segment
+    has no positional (`gh pr merge --squash`, a current-branch merge)."""
+    if not isinstance(command, str):
+        return []
+    out: list[str | None] = []
+    for argv in iter_command_starts(safe_tokenize(command)):
+        stripped = strip_prefix(argv)
+        if _is_gh_pr_merge(stripped):
+            out.append(_gh_pr_positional(stripped, frozenset({"merge"}), _MERGE_VALUE_FLAGS))
+    return out
+
+
+def _mentions_pr(text: str, pr: str) -> bool:
+    """True when the text references the target PR (`#N` or the bare number)."""
+    return re.search(rf"#{pr}\b|\b{pr}\b", text) is not None
+
+
+def _context_pr_from_window(entries: list[dict], lo: int, hi: int) -> str | None:
+    """PR number named by the most recent read-only `gh pr <verb> N` (the
+    mandated Pre-Merge probe) in the window's assistant tool_use Bash commands,
+    or None when no such command resolves a target."""
+    found: str | None = None
+    for ev in entries[lo:hi]:
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not (isinstance(b, dict) and b.get("type") == "tool_use"
+                    and b.get("name") == "Bash"):
+                continue
+            cmd = (b.get("input") or {}).get("command")
+            if not isinstance(cmd, str):
+                continue
+            for argv in iter_command_starts(safe_tokenize(cmd)):
+                pr = _gh_pr_target(argv, _CONTEXT_VERBS, _CONTEXT_VALUE_FLAGS)
+                if pr is not None:
+                    found = pr  # last (most recent) resolved target wins
+    return found
+
+
+def _has_repetition(command: object) -> bool:
+    """True when the command wraps the merge in a shell loop / xargs — a single
+    approval must not authorize a repeated merge (No Approval Transfer)."""
+    if not isinstance(command, str):
+        return False
+    return any(tok in _LOOP_KEYWORDS for tok in safe_tokenize(command))
+
+
+def _prior_turn_extension_passes(entries: list[dict], idxs: list[int],
+                                 command: object) -> bool:
+    """True when the prior-turn briefing satisfies the gate (issue #826).
+
+    The mandated flow is briefing → user approval → merge, which places the
+    briefing in the turn BEFORE the approving user message — outside the
+    since-last-user window. When the last user message is a short approval reply,
+    the immediately preceding assistant turn is scored ALONE (so text authored
+    AFTER the approval cannot supplement a briefing the user never saw), and only
+    when the merge is correlated to the briefed PR.
+    """
+    segments = _merge_segments(command)
+    # A single approval authorizes ONE merge. A compound `merge A && merge B` (≥2
+    # segments) or a shell loop repeating one segment (`for pr in …; do merge`)
+    # must not ride a single approval (No Approval Transfer) → no extension.
+    if len(segments) != 1 or _has_repetition(command) or len(idxs) < 2:
+        return False
+    if not _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
+        return False
+
+    prev_text = _assistant_text(entries, idxs[-2] + 1, idxs[-1])
+    pos = segments[0]
+    if pos is None:
+        # Truly numberless (`gh pr merge --squash`) → runs on the CURRENT branch.
+        # Derive the real target from the window's mandated Pre-Merge probe
+        # (`gh pr checks/view N`) and correlate against THAT. Fail closed when no
+        # probe resolves a target (No Approval Transfer, P1#2).
+        ctx_pr = _context_pr_from_window(entries, idxs[-2] + 1, len(entries))
+        correlated = ctx_pr is not None and _mentions_pr(prev_text, ctx_pr)
+    else:
+        m = _PULL_TOKEN_RE.match(pos)
+        if m:
+            correlated = _mentions_pr(prev_text, m.group(1) or m.group(2))
+        else:
+            # A NAMED branch (`gh pr merge feature-x`) targets that branch's PR —
+            # which cannot be mapped to a number without a live `gh` call, and is
+            # NOT the current branch, so the window probe does not identify it.
+            # Fail closed (round-3 P1b): a prior probe of a different PR must not
+            # be treated as this branch's target.
+            correlated = False
+
+    # The trivial-PR carve-out and the briefing-count pass apply ONLY once the
+    # merge is correlated to the briefed PR — never to an unrelated trivial /
+    # complete briefing about a different PR (P1#1).
+    if not correlated:
+        return False
+    return _is_trivial_merge(prev_text) \
+        or _briefing_item_count(prev_text) >= MERGE_BRIEFING_MIN_ITEMS
+
+
 def _merge_escalation_reason(payload: dict) -> str | None:
     """Return a deny reason when the pre-merge briefing is incomplete, else None."""
     # Background cmux-delegate agents merge autonomously — the delegation intent
@@ -417,12 +639,20 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     if os.environ.get(MERGE_ADVISORY_ENV) == "1":
         return None
 
-    text = _current_turn_assistant_text(payload.get("transcript_path", "") or "")
-    if text is None:
+    entries = _load_turn_entries(payload.get("transcript_path", "") or "")
+    if entries is None:
         return None  # transcript unreadable → fail open, do not block
-    if _is_trivial_merge(text):
+
+    idxs = _human_user_indices(entries)
+    lo = (idxs[-1] + 1) if idxs else 0
+    current_text = _assistant_text(entries, lo, len(entries))
+    if _is_trivial_merge(current_text):
         return None
-    if _briefing_item_count(text) >= MERGE_BRIEFING_MIN_ITEMS:
+    if _briefing_item_count(current_text) >= MERGE_BRIEFING_MIN_ITEMS:
+        return None
+
+    if _prior_turn_extension_passes(
+            entries, idxs, (payload.get("tool_input") or {}).get("command")):
         return None
 
     return format_block(
