@@ -218,8 +218,10 @@ LIVE=$(jq -r '.plugins["praxis@praxis"][0].installPath' "$CFG/plugins/installed_
 echo "$LIVE"
 
 # Diff the live copy against your working tree.
-# Use the hook's actual body from the manifest — impl.sh for the shell hooks.
-diff "$LIVE/hooks/<role>/<name>/impl.py" hooks/<role>/<name>/impl.py
+# Use the hook's actual body from the manifest — impl.sh for the shell hooks,
+# and diff the generated wrapper (hooks/<name>.sh) separately for those.
+BODY=$(python3 -c "import json;print(next(h.get('body','impl.py') for h in json.load(open('hooks/manifest.json'))['hooks'] if h['name']=='<name>'))")
+diff "$LIVE/hooks/<role>/<name>/$BODY" "hooks/<role>/<name>/$BODY"
 ```
 
 `CLAUDE_CONFIG_DIR` is easy to miss and the failure is silent: both config
@@ -246,10 +248,15 @@ mutation. Each is a real probe used during the 2026-07-22 release-lag incident.
 
    ```bash
    LEDGER=$(mktemp)
-   printf '%s' "$PAYLOAD" | PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" \
-     python3 hooks/<role>/<name>/impl.py
+   # Unset the opt-out — if PRAXIS_FIRE_TELEMETRY_DISABLE=1 is inherited the
+   # writer is a no-op, and the empty ledger reads as "hook never fired".
+   printf '%s' "$PAYLOAD" | env -u PRAXIS_FIRE_TELEMETRY_DISABLE \
+     PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" python3 hooks/<role>/<name>/impl.py
    jq -r 'select(.hook=="<name>") | "\(.decision) \(.granularity)"' "$LEDGER"
    ```
+
+   Use the invocation surface from procedure A — `hooks/<name>.sh <args...>`
+   for `impl.sh` hooks — not a bare `impl.py` for every hook.
 
    Two caveats when reading the result:
 
