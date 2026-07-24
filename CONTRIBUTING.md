@@ -154,6 +154,147 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
    directory↔manifest cross-check, role↔dirname agreement, impl existence,
    Stop ordering, byte-equivalent generated artifacts, and 5+ more
    invariants (see the script preamble).
+9. Canary the change — see
+   [Verifying a hook change at runtime](#verifying-a-hook-change-at-runtime-canary)
+   below. A green test suite does not tell you what the runtime is executing.
+
+### Verifying a hook change at runtime (canary)
+
+Hooks do not execute from this repository. They execute from a versioned copy
+under `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/praxis/praxis/<version>/`
+— note the config dir is relocatable, so `~/.claude` is the default, not a
+given — and a merged change is not live until
+`release → plugin update → session reload` completes. Measured
+lead time from merge to release is a median of **33.7 hours** (max observed:
+201 hours, n=44 — see issue #841). Treat that lag as a permanent property of
+the repo, not an incident: the release cadence is deliberate.
+
+The consequence is that **you cannot validate a hook change in the session that
+wrote it by simply triggering the hook.** Triggering it runs the *previous*
+release. Two separate questions need two separate procedures — conflating them
+is the failure this section exists to prevent.
+
+#### A. Is the new logic correct?
+
+Invoke the working-tree impl directly with a synthetic payload. This is the same
+surface the tests use, so mirror an existing test rather than inventing one.
+
+The invocation surface depends on the hook's manifest entry — read `body` and
+`args` before assuming `impl.py` with no arguments:
+
+```bash
+# Default: body omitted (impl.py), no args
+printf '%s' "$PAYLOAD" | python3 hooks/<role>/<name>/impl.py; echo "rc=$?"
+
+# body: "impl.sh" (codex-review-route, completion-verify,
+# retrospect-mix-check, strike-counter) — the generated wrapper is the
+# invocation surface, and args are part of the registration
+printf '%s' "$PAYLOAD" | hooks/<name>.sh <args...>; echo "rc=$?"
+```
+
+A hook can hold several manifest entries that differ only by `args` —
+`strike-counter` registers `session-start`, `preprompt`, and `stop` — and
+`pre-edit-md-escape-advisory` splits into `-pre` / `-post` wrappers via
+`wrapper_suffix`. Probing the wrong entry exercises a different mode than the
+one you changed:
+
+```bash
+python3 -c "import json;[print(h['name'], h.get('body','impl.py'), h.get('args'), h.get('wrapper_suffix','')) for h in json.load(open('hooks/manifest.json'))['hooks'] if h['name']=='<name>']"
+```
+
+This proves the logic. It proves nothing about the runtime.
+
+#### B. Is the runtime executing the new logic?
+
+Compare against the cache copy that is actually registered:
+
+```bash
+# Resolve the config dir FIRST — CLAUDE_CONFIG_DIR relocates it, and reading
+# the wrong one silently reports a different (often stale) install.
+CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
+# Which version is live right now
+LIVE=$(jq -r '.plugins["praxis@praxis"][0].installPath' "$CFG/plugins/installed_plugins.json")
+echo "$LIVE"
+
+# Diff the live copy against your working tree.
+# Use the hook's actual body from the manifest — impl.sh for the shell hooks,
+# and diff the generated wrapper (hooks/<name>.sh) separately for those.
+BODY=$(python3 -c "import json;print(next(h.get('body','impl.py') for h in json.load(open('hooks/manifest.json'))['hooks'] if h['name']=='<name>'))")
+diff "$LIVE/hooks/<role>/<name>/$BODY" "hooks/<role>/<name>/$BODY"
+```
+
+`CLAUDE_CONFIG_DIR` is easy to miss and the failure is silent: both config
+dirs can hold a populated `plugins/cache/praxis/praxis/<version>/` tree, so
+hardcoding `$HOME/.claude` returns a plausible version that is simply not the
+one running. Verify against the config dir the session actually loaded — the
+`praxis:*` skill header printed at invocation names it directly.
+
+A non-empty diff means the runtime is still on the old logic — any behaviour you
+observe in-session is evidence about the *old* hook, and must not be reported as
+verification of the change.
+
+#### Canary probes
+
+Use these to confirm a hook is wired and discriminating, without performing any
+mutation. Each is a real probe used during the 2026-07-22 release-lag incident.
+
+1. **Fire-ledger probe** — confirm the hook fired at all, and with which
+   decision. `@fail_open` hooks append JSONL records to
+   `~/.praxis/telemetry/fire-events-YYYY-MM-DD.jsonl`. Isolate the probe with
+   `PRAXIS_FIRE_TELEMETRY_FILE` so it never pollutes the production ledger
+   (see issue #849) — and **query the same path you set**, or you will be
+   reading pre-existing production rows and mistaking them for your probe:
+
+   ```bash
+   LEDGER=$(mktemp)
+   # Unset the opt-out — if PRAXIS_FIRE_TELEMETRY_DISABLE=1 is inherited the
+   # writer is a no-op, and the empty ledger reads as "hook never fired".
+   printf '%s' "$PAYLOAD" | env -u PRAXIS_FIRE_TELEMETRY_DISABLE \
+     PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" python3 hooks/<role>/<name>/impl.py
+   jq -r 'select(.hook=="<name>") | "\(.decision) \(.granularity)"' "$LEDGER"
+   ```
+
+   Use the invocation surface from procedure A — `hooks/<name>.sh <args...>`
+   for `impl.sh` hooks — not a bare `impl.py` for every hook.
+
+   Two caveats when reading the result:
+
+   - **`granularity` first.** `coarse` records collapse `ask`/`advise`/`pass`
+     together, and Stop / UserPromptSubmit hooks that block via a stdout
+     `decision` field while exiting 0 are recorded as `pass`. A `coarse`
+     "pass" is therefore **not** evidence the hook allowed the call.
+   - **One fire can produce two rows.** A hook that calls
+     `record_session_fire` directly (`pr-report-destination-gate`,
+     `askuserquestion-loop-signal`) still passes through `@fail_open`, so a
+     `rich` row and a `coarse` duplicate are both written for a single
+     invocation — see `_fire_ledger.record_session_fire`'s docstring. Filter
+     to `granularity=="rich"` rather than counting rows, or a single fire
+     reads as two.
+
+2. **Non-existent-target probe** — for any gate that queries external state
+   (`gh pr view`, `gh issue view`), drive it with an identifier that does not
+   exist. A correct gate fails open or blocks explicitly; a defective one
+   fabricates a verdict from an empty response. This costs nothing and mutates
+   nothing.
+
+3. **Negative-discrimination probe** — feed an input the hook is specified to
+   *ignore* and confirm silence. For `model-routing-advisory`, a non-Claude
+   provider prefix (`--model gemini:pro`) must stay silent per its spec. A hook
+   that fires on its documented no-op input is over-triggering, which a
+   positive-only test will not catch.
+
+   Silence alone is not a pass: a malformed payload is also silent. Pair every
+   negative probe with a positive one that differs *only* in the discriminating
+   field, and confirm the positive case fires. Without that pair you are
+   verifying your payload shape, not the hook.
+
+#### Advisory output is not visible to the model
+
+`advisory-nudge` hooks emit on stderr, which the model does not see. Never infer
+that an advisory fired from the absence of a reaction in the transcript, and
+never report an advisory as verified on that basis. Confirm through the
+fire-ledger (probe 1) or by invoking the impl directly (procedure A).
 
 ## Reviewing or auditing a PR
 
