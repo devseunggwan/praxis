@@ -313,6 +313,37 @@ def test_record_session_fire_non_string_session_and_tool_default_empty(tmp_path,
     assert rec["session_id"] == "" and rec["tool"] == ""
 
 
+def test_record_session_fire_returns_true_on_success(tmp_path, monkeypatch):
+    """Callers gate coarse suppression on this return (coderabbit finding on
+    PR #855): a successful rich append reports True."""
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    assert fl.record_session_fire("h", "r", "advise", "s1", "Stop") is True
+
+
+def test_record_session_fire_returns_false_when_disabled(tmp_path, monkeypatch):
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_DISABLE", "1")
+    assert fl.record_session_fire("h", "r", "advise", "s1", "Stop") is False
+
+
+def test_record_session_fire_returns_false_on_write_error(tmp_path, monkeypatch):
+    """A swallowed write failure must report False so the caller keeps its
+    coarse fallback instead of suppressing it — else the fire is dropped from
+    both streams."""
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+
+    def _boom(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(fl, "_atomic_append", _boom)
+    assert fl.record_session_fire("h", "r", "advise", "s1", "Stop") is False
+
+
 # ---------------------------------------------------------------------------
 # Reader: count_session_fires (issue #805 — in-session read path for a preflight
 # gate to consume its own repeated-block signal)
@@ -579,6 +610,28 @@ def test_aggregate_marks_coarse_hooks():
     assert agg["r"]["coarse"] is False
 
 
+def test_aggregate_marks_mixed_granularity_stop_hook():
+    """issue #847: a single-event-rich Stop hook records its escalation rich
+    (real Block/Advise) but its silent passes stay coarse — the row carries
+    BOTH flags and must render as G=M, not G=C (which the legend says folds
+    Block into Pass, contradicting a visible Block=1)."""
+    events = [
+        {"hook": "merge-state-claim-gate", "role": "completion-verify", "decision": "block",
+         "granularity": "rich", "session_id": "s1", "timestamp": "2026-06-26T01:00:00+00:00"},
+        {"hook": "merge-state-claim-gate", "role": "completion-verify", "decision": "pass",
+         "granularity": "coarse", "session_id": "", "timestamp": "2026-06-26T01:00:10+00:00"},
+    ]
+    agg = cli.aggregate_fires(events)
+    assert agg["merge-state-claim-gate"]["coarse"] is True
+    assert agg["merge-state-claim-gate"]["rich"] is True
+    assert agg["merge-state-claim-gate"]["block"] == 1
+
+    report = cli.render_fire_report(agg, 30, Path("/tmp"), None)
+    # The row's G column is M (mixed), and the summary/legend name it.
+    assert "1 mixed" in report
+    assert "M=mixed" in report
+
+
 # ---------------------------------------------------------------------------
 # issue #710 remaining scope: advise_ignored_rate
 # ---------------------------------------------------------------------------
@@ -652,6 +705,32 @@ def test_advise_ignored_pass_after_advise_is_heeded_not_ignored():
     assert row["observed"] == 1
     assert row["ignored"] == 0
     assert row["rate"] == 0.0
+
+
+def test_advise_ignored_excludes_partial_rich_stop_hook_when_scoped():
+    """issue #847: a single-event-rich Stop hook records only escalations —
+    its silent passes never reach the rich stream, so advise, advise (the
+    intervening heeded pass invisible) would mis-score as ignored=100%. When a
+    full-rich roster is supplied, the partial-stream hook is excluded entirely
+    while a genuine full-rich hook is still scored."""
+    events = [
+        # partial-rich Stop hook: two advises, the heeded pass between them is
+        # never recorded rich, so leaving it in would read as ignored.
+        {"hook": "merge-state-claim-gate", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
+        {"hook": "merge-state-claim-gate", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:20+00:00"},
+        # full-rich Bash-group hook: advise then pass (heeded) — still scored.
+        {"hook": "destructive-bash-guard", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
+        {"hook": "destructive-bash-guard", "session_id": "s1", "decision": "pass", "timestamp": "2026-06-26T00:00:10+00:00"},
+    ]
+    scoped = cli.compute_advise_ignored(events, {"destructive-bash-guard"})
+    assert "merge-state-claim-gate" not in scoped  # partial stream — excluded
+    assert scoped["destructive-bash-guard"]["observed"] == 1
+    assert scoped["destructive-bash-guard"]["ignored"] == 0  # pass = heeded
+
+    # None (roster unreadable) falls back to legacy unscoped behavior — the
+    # partial-rich hook reappears and its advise, advise reads as ignored.
+    legacy = cli.compute_advise_ignored(events)
+    assert legacy["merge-state-claim-gate"]["ignored"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1223,19 +1302,22 @@ def test_fire_rate_report_includes_remaining_scope_sections(tmp_path, monkeypatc
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
 
     # Two dispatches of the same hook in the same session: advise then advise
-    # again (ignored), via the real writer.
-    members = [("advisory-nudge", "protected-paths-guard", Path("x"))]
-    fl.record_group_fires(members, [(0, "", "nudge")], _payload("s1", "Write"))
-    fl.record_group_fires(members, [(0, "", "nudge")], _payload("s1", "Write"))
+    # again (ignored), via the real writer. Uses a genuine PreToolUse(Bash)
+    # group hook so it survives the advise-ignored roster scoping (issue #847):
+    # single-event-rich Stop hooks are excluded because their passes are not
+    # rich, so the fixture must be a full-rich Bash-group hook.
+    members = [("preflight-gate", "destructive-bash-guard", Path("x"))]
+    fl.record_group_fires(members, [(0, "", "advise")], _payload("s1", "Bash"))
+    fl.record_group_fires(members, [(0, "", "advise")], _payload("s1", "Bash"))
 
     # bypass-events file uses the real writer's own field schema (session_id,
     # tool, bypass_env_vars, tool_input, tool_result_status).
     bypass_record = {
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
         "session_id": "s1",
-        "tool": "Write",
-        "bypass_env_vars": ["PRAXIS_HOOK_BYPASS_PROTECTED_PATHS"],
-        "tool_input": "echo hi",
+        "tool": "Bash",
+        "bypass_env_vars": ["PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH"],
+        "tool_input": "rm -rf x",
         "tool_result_status": "ok",
     }
     bypass_out.write_text(json.dumps(bypass_record) + "\n")
@@ -1252,7 +1334,7 @@ def test_fire_rate_report_includes_remaining_scope_sections(tmp_path, monkeypatc
 
     assert rc == 0
     assert "Advise-Ignored Detail" in report
-    assert "protected-paths-guard" in report
+    assert "destructive-bash-guard" in report
     assert "100%" in report  # both advise fires ignored (no escalation)
     assert "Bypass Attribution" in report
     assert "Outcome Proxy" in report

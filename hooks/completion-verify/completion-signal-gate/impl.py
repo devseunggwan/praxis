@@ -45,6 +45,7 @@ import subprocess
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
+import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_stop_advisory  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
@@ -59,6 +60,9 @@ from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
 # ---------------------------------------------------------------------------
 
 PREFIX = "[praxis:completion-signal-gate]"
+
+_HOOK_NAME = "completion-signal-gate"
+_ROLE = "completion-verify"
 
 # ---------------------------------------------------------------------------
 # Rule 1 — completion-signal tokens
@@ -369,6 +373,22 @@ def main() -> int:
     if messages:
         # Single JSON object per invocation — both rules can fire in one stop.
         emit_stop_advisory("\n".join(messages))
+        # Rich fire record (issue #847): this advisory exits 0, so @fail_open's
+        # coarse path records only "pass" — indistinguishable from a silent
+        # allow. Record the real decision (one rich record per genuine emit;
+        # stop_hook_active already guards re-entrant re-fires), keeping session
+        # attribution when present and forgoing it otherwise.
+        # suppress_coarse_duplicate() drops the redundant coarse "pass" so
+        # aggregate_fires() does not count one emit as fires=2.
+        session_id = payload.get("session_id")
+        if _fire_ledger.record_session_fire(
+            _HOOK_NAME, _ROLE, _fire_ledger.DECISION_ADVISE,
+            session_id if isinstance(session_id, str) else "", "Stop",
+        ):
+            # Suppress the coarse fallback ONLY when the rich record actually
+            # landed — else a failed rich append would drop the fire from both
+            # streams (coderabbit finding on PR #855).
+            _fire_ledger.suppress_coarse_duplicate()
 
     return 0
 
