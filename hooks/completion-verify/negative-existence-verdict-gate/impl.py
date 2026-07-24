@@ -78,6 +78,7 @@ from _hook_io import (  # type: ignore[import-not-found]  # noqa: E402
     emit_stop_advisory,
     emit_stop_block,
 )
+import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
@@ -86,6 +87,8 @@ from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
 )
 
 _PREFIX = "[negative-existence-verdict-gate]"
+_HOOK_NAME = "negative-existence-verdict-gate"
+_ROLE = "completion-verify"
 _BYPASS_ENV = "PRAXIS_HOOK_BYPASS_NEGATIVE_EXISTENCE_GATE"
 _ADVISORY_ENV = "PRAXIS_NEGATIVE_EXISTENCE_ADVISORY"
 
@@ -219,8 +222,22 @@ def main() -> int:
     advisory_env = os.environ.get(_ADVISORY_ENV, "")
     if advisory_env not in ("", "0", "false", "False"):
         emit_stop_advisory(_MESSAGE)
+        decision = _fire_ledger.DECISION_ADVISE
     else:
         emit_stop_block(_MESSAGE)
+        decision = _fire_ledger.DECISION_BLOCK
+    # Rich fire record (issue #847): Stop hooks signal block/advise via a stdout
+    # decision while exiting 0, so @fail_open's coarse path records only "pass".
+    # Record the real decision (one rich record per genuine emit; stop_hook_active
+    # already guards re-entrant re-fires), keeping session attribution when present
+    # and forgoing it otherwise. suppress_coarse_duplicate() drops the redundant
+    # coarse "pass" so aggregate_fires() does not count one emit as fires=2.
+    session_id = payload.get("session_id")
+    _fire_ledger.record_session_fire(
+        _HOOK_NAME, _ROLE, decision,
+        session_id if isinstance(session_id, str) else "", "Stop",
+    )
+    _fire_ledger.suppress_coarse_duplicate()
     return 0
 
 

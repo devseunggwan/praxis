@@ -85,6 +85,17 @@ until a user opts into strict mode — a 0-block count for these is the designed
 default, not evidence of dead code, so they're also excluded from a "drop"
 read (though still listed below for completeness).
 
+> **Update (issue #847):** the coarse Stop-lane blind spot this restriction
+> works around is now closed for the five completion-verify Stop gates
+> (`completion-signal-gate`, `merge-state-claim-gate`,
+> `negative-existence-verdict-gate`, `runtime-state-claim-gate`,
+> `readonly-verify-deferral-gate`). Each now calls `record_session_fire` at
+> its emit point with the real decision (block/advise), so future audits can
+> score them on this axis directly by filtering `granularity="rich"`. Before
+> #847 the Stop lane recorded structurally zero non-pass fires — every
+> block/advise collapsed to coarse "pass" — so any pre-#847 "never escalates"
+> read on these hooks is measurement-absent, not evidence of dead code.
+
 Remaining `PreToolUse`/`PostToolUse` hooks with **zero block AND zero advise**
 across 49 sessions / 30 days (i.e., every fire resolved to a silent Pass):
 

@@ -29,6 +29,7 @@ import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import (  # type: ignore[import-not-found]  # noqa: E402
     emit_stop_advisory,
     emit_stop_block,
@@ -44,6 +45,8 @@ _PREFIX = "[merge-state-claim-gate]"
 _BYPASS_ENV = "PRAXIS_MERGE_CLAIM_BYPASS"
 _STRICT_ENV = "PRAXIS_MERGE_CLAIM_STRICT"
 _EVIDENCE_WINDOW = 80  # how many recent transcript events to scan for evidence
+_HOOK_NAME = "merge-state-claim-gate"
+_ROLE = "completion-verify"
 
 # ---------------------------------------------------------------------------
 # Claim detection — a claim needs a SUBJECT token and a COMPLETED-state token
@@ -292,8 +295,22 @@ def main() -> int:
 
     if os.environ.get(_STRICT_ENV, "").strip() == "1":
         emit_stop_block(_advisory(unbacked))
+        decision = _fire_ledger.DECISION_BLOCK
     else:
         emit_stop_advisory(_advisory(unbacked))
+        decision = _fire_ledger.DECISION_ADVISE
+    # Rich fire record (issue #847): Stop hooks signal block/advise via a stdout
+    # decision while exiting 0, so @fail_open's coarse path records only "pass".
+    # Record the real decision (one rich record per genuine emit; stop_hook_active
+    # already guards re-entrant re-fires), keeping session attribution when present
+    # and forgoing it otherwise. suppress_coarse_duplicate() drops the redundant
+    # coarse "pass" so aggregate_fires() does not count one emit as fires=2.
+    session_id = payload.get("session_id")
+    _fire_ledger.record_session_fire(
+        _HOOK_NAME, _ROLE, decision,
+        session_id if isinstance(session_id, str) else "", "Stop",
+    )
+    _fire_ledger.suppress_coarse_duplicate()
     return 0
 
 

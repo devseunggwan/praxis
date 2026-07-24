@@ -31,6 +31,24 @@ main() after parsing its own stdin payload. It still also goes through
 @fail_open's coarse recording for the same hook name — see
 `record_session_fire`'s docstring for the resulting dedup contract.
 
+STOP-LANE BLOCK RECOVERY (issue #847): the five completion-verify Stop
+hooks (completion-signal-gate, merge-state-claim-gate,
+negative-existence-verdict-gate, runtime-state-claim-gate,
+readonly-verify-deferral-gate) close the coarse block-invisibility gap
+above by calling `record_session_fire` at their emit point with the real
+decision (block under their strict env var, else advise), then
+`suppress_coarse_duplicate()` to drop the redundant coarse "pass" that
+`aggregate_fires` would otherwise sum into `fires=2, block=1, pass=1` for
+a single emit. One rich record is written per genuine emit — no
+session-level dedup (each hook's `stop_hook_active` early-return already
+guards re-entrant re-fires, so distinct per-turn engagements are counted,
+not collapsed). session_id attribution is kept when the payload carries
+one and forgone otherwise (`record_session_fire` normalizes a missing id
+to ""), so the decision is never dropped just because the id is absent.
+Before #847 the Stop lane recorded structurally zero non-pass fires
+(every block/advise collapsed to coarse "pass"), which mis-scored these
+gates in the fire-ledger prune audit.
+
 Record fields (JSONL, one line per hook fire):
   timestamp    UTC ISO-8601
   session_id   from payload (rich only; "" for coarse)

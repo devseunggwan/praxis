@@ -64,6 +64,7 @@ from _hook_io import (  # type: ignore[import-not-found]  # noqa: E402
     emit_stop_advisory,
     emit_stop_block,
 )
+import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
@@ -80,6 +81,8 @@ PREFIX = "[praxis:readonly-verify-deferral-gate]"
 _BYPASS_ENV = "PRAXIS_READONLY_VERIFY_BYPASS"
 _STRICT_ENV = "PRAXIS_READONLY_VERIFY_STRICT"
 _SIGNALS_ENV = "PRAXIS_READONLY_VERIFY_SIGNALS"
+_HOOK_NAME = "readonly-verify-deferral-gate"
+_ROLE = "completion-verify"
 
 # ---------------------------------------------------------------------------
 # Signal A — read-only verification intent
@@ -353,8 +356,22 @@ def main() -> int:
 
     if os.environ.get(_STRICT_ENV, "").strip() == "1":
         emit_stop_block(ADVISORY)
+        decision = _fire_ledger.DECISION_BLOCK
     else:
         emit_stop_advisory(ADVISORY)
+        decision = _fire_ledger.DECISION_ADVISE
+    # Rich fire record (issue #847): Stop hooks signal block/advise via a stdout
+    # decision while exiting 0, so @fail_open's coarse path records only "pass".
+    # Record the real decision (one rich record per genuine emit; stop_hook_active
+    # already guards re-entrant re-fires), keeping session attribution when present
+    # and forgoing it otherwise. suppress_coarse_duplicate() drops the redundant
+    # coarse "pass" so aggregate_fires() does not count one emit as fires=2.
+    session_id = payload.get("session_id")
+    _fire_ledger.record_session_fire(
+        _HOOK_NAME, _ROLE, decision,
+        session_id if isinstance(session_id, str) else "", "Stop",
+    )
+    _fire_ledger.suppress_coarse_duplicate()
     return 0
 
 
