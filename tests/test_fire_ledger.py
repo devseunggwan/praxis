@@ -654,6 +654,32 @@ def test_advise_ignored_pass_after_advise_is_heeded_not_ignored():
     assert row["rate"] == 0.0
 
 
+def test_advise_ignored_excludes_partial_rich_stop_hook_when_scoped():
+    """issue #847: a single-event-rich Stop hook records only escalations —
+    its silent passes never reach the rich stream, so advise, advise (the
+    intervening heeded pass invisible) would mis-score as ignored=100%. When a
+    full-rich roster is supplied, the partial-stream hook is excluded entirely
+    while a genuine full-rich hook is still scored."""
+    events = [
+        # partial-rich Stop hook: two advises, the heeded pass between them is
+        # never recorded rich, so leaving it in would read as ignored.
+        {"hook": "merge-state-claim-gate", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
+        {"hook": "merge-state-claim-gate", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:20+00:00"},
+        # full-rich Bash-group hook: advise then pass (heeded) — still scored.
+        {"hook": "destructive-bash-guard", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
+        {"hook": "destructive-bash-guard", "session_id": "s1", "decision": "pass", "timestamp": "2026-06-26T00:00:10+00:00"},
+    ]
+    scoped = cli.compute_advise_ignored(events, {"destructive-bash-guard"})
+    assert "merge-state-claim-gate" not in scoped  # partial stream — excluded
+    assert scoped["destructive-bash-guard"]["observed"] == 1
+    assert scoped["destructive-bash-guard"]["ignored"] == 0  # pass = heeded
+
+    # None (roster unreadable) falls back to legacy unscoped behavior — the
+    # partial-rich hook reappears and its advise, advise reads as ignored.
+    legacy = cli.compute_advise_ignored(events)
+    assert legacy["merge-state-claim-gate"]["ignored"] == 1
+
+
 # ---------------------------------------------------------------------------
 # issue #710 remaining scope: bypass_count join
 # ---------------------------------------------------------------------------
@@ -1223,19 +1249,22 @@ def test_fire_rate_report_includes_remaining_scope_sections(tmp_path, monkeypatc
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
 
     # Two dispatches of the same hook in the same session: advise then advise
-    # again (ignored), via the real writer.
-    members = [("advisory-nudge", "protected-paths-guard", Path("x"))]
-    fl.record_group_fires(members, [(0, "", "nudge")], _payload("s1", "Write"))
-    fl.record_group_fires(members, [(0, "", "nudge")], _payload("s1", "Write"))
+    # again (ignored), via the real writer. Uses a genuine PreToolUse(Bash)
+    # group hook so it survives the advise-ignored roster scoping (issue #847):
+    # single-event-rich Stop hooks are excluded because their passes are not
+    # rich, so the fixture must be a full-rich Bash-group hook.
+    members = [("preflight-gate", "destructive-bash-guard", Path("x"))]
+    fl.record_group_fires(members, [(0, "", "advise")], _payload("s1", "Bash"))
+    fl.record_group_fires(members, [(0, "", "advise")], _payload("s1", "Bash"))
 
     # bypass-events file uses the real writer's own field schema (session_id,
     # tool, bypass_env_vars, tool_input, tool_result_status).
     bypass_record = {
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
         "session_id": "s1",
-        "tool": "Write",
-        "bypass_env_vars": ["PRAXIS_HOOK_BYPASS_PROTECTED_PATHS"],
-        "tool_input": "echo hi",
+        "tool": "Bash",
+        "bypass_env_vars": ["PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH"],
+        "tool_input": "rm -rf x",
         "tool_result_status": "ok",
     }
     bypass_out.write_text(json.dumps(bypass_record) + "\n")
@@ -1252,7 +1281,7 @@ def test_fire_rate_report_includes_remaining_scope_sections(tmp_path, monkeypatc
 
     assert rc == 0
     assert "Advise-Ignored Detail" in report
-    assert "protected-paths-guard" in report
+    assert "destructive-bash-guard" in report
     assert "100%" in report  # both advise fires ignored (no escalation)
     assert "Bypass Attribution" in report
     assert "Outcome Proxy" in report
