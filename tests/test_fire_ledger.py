@@ -313,6 +313,37 @@ def test_record_session_fire_non_string_session_and_tool_default_empty(tmp_path,
     assert rec["session_id"] == "" and rec["tool"] == ""
 
 
+def test_record_session_fire_returns_true_on_success(tmp_path, monkeypatch):
+    """Callers gate coarse suppression on this return (coderabbit finding on
+    PR #855): a successful rich append reports True."""
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    assert fl.record_session_fire("h", "r", "advise", "s1", "Stop") is True
+
+
+def test_record_session_fire_returns_false_when_disabled(tmp_path, monkeypatch):
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_DISABLE", "1")
+    assert fl.record_session_fire("h", "r", "advise", "s1", "Stop") is False
+
+
+def test_record_session_fire_returns_false_on_write_error(tmp_path, monkeypatch):
+    """A swallowed write failure must report False so the caller keeps its
+    coarse fallback instead of suppressing it — else the fire is dropped from
+    both streams."""
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+
+    def _boom(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(fl, "_atomic_append", _boom)
+    assert fl.record_session_fire("h", "r", "advise", "s1", "Stop") is False
+
+
 # ---------------------------------------------------------------------------
 # Reader: count_session_fires (issue #805 — in-session read path for a preflight
 # gate to consume its own repeated-block signal)
@@ -577,6 +608,28 @@ def test_aggregate_marks_coarse_hooks():
     agg = cli.aggregate_fires(events)
     assert agg["c"]["coarse"] is True
     assert agg["r"]["coarse"] is False
+
+
+def test_aggregate_marks_mixed_granularity_stop_hook():
+    """issue #847: a single-event-rich Stop hook records its escalation rich
+    (real Block/Advise) but its silent passes stay coarse — the row carries
+    BOTH flags and must render as G=M, not G=C (which the legend says folds
+    Block into Pass, contradicting a visible Block=1)."""
+    events = [
+        {"hook": "merge-state-claim-gate", "role": "completion-verify", "decision": "block",
+         "granularity": "rich", "session_id": "s1", "timestamp": "2026-06-26T01:00:00+00:00"},
+        {"hook": "merge-state-claim-gate", "role": "completion-verify", "decision": "pass",
+         "granularity": "coarse", "session_id": "", "timestamp": "2026-06-26T01:00:10+00:00"},
+    ]
+    agg = cli.aggregate_fires(events)
+    assert agg["merge-state-claim-gate"]["coarse"] is True
+    assert agg["merge-state-claim-gate"]["rich"] is True
+    assert agg["merge-state-claim-gate"]["block"] == 1
+
+    report = cli.render_fire_report(agg, 30, Path("/tmp"), None)
+    # The row's G column is M (mixed), and the summary/legend name it.
+    assert "1 mixed" in report
+    assert "M=mixed" in report
 
 
 # ---------------------------------------------------------------------------

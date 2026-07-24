@@ -850,14 +850,17 @@ def aggregate_fires(events: list[dict]) -> dict[str, dict]:
         row = by_hook.setdefault(hook, {
             "role": ev.get(F_FIRE_ROLE) or UNKNOWN,
             "fires": 0, "block": 0, "ask": 0, "advise": 0, "pass": 0,
-            "sessions": set(), "last_seen": "", "coarse": False,
+            "sessions": set(), "last_seen": "", "coarse": False, "rich": False,
         })
         row["fires"] += 1
         decision = ev.get(F_FIRE_DECISION)
         if decision in _FIRE_DECISIONS:
             row[decision] += 1
-        if ev.get(F_FIRE_GRANULARITY) == "coarse":
+        gran = ev.get(F_FIRE_GRANULARITY)
+        if gran == "coarse":
             row["coarse"] = True
+        elif gran == "rich":
+            row["rich"] = True
         session = ev.get(F_FIRE_SESSION)
         if isinstance(session, str) and session:
             row["sessions"].add(session)
@@ -1607,13 +1610,16 @@ def render_fire_report(
     today = datetime.now(tz=timezone.utc).date()
     since = today - timedelta(days=days - 1)
 
-    coarse_count = sum(1 for r in by_hook.values() if r.get("coarse"))
+    coarse_count = sum(1 for r in by_hook.values() if r.get("coarse") and not r.get("rich"))
+    mixed_count = sum(1 for r in by_hook.values() if r.get("coarse") and r.get("rich"))
     lines.append(_render_header("bypass-review: Hook Fire-Rate Report (issue #710)"))
     lines.append(f"  Period : {since} → {today} (last {days} day{'s' if days != 1 else ''})")
     lines.append(f"  Source : {telemetry_dir}")
-    lines.append(f"  Hooks fired : {len(by_hook)}  ({coarse_count} coarse)")
+    lines.append(f"  Hooks fired : {len(by_hook)}  ({coarse_count} coarse, {mixed_count} mixed)")
     lines.append("  Scope  : Bash dispatch group = rich (block/ask/advise/pass);")
-    lines.append("           other @fail_open hooks = coarse (block/pass only)")
+    lines.append("           other @fail_open hooks = coarse (block/pass only);")
+    lines.append("           single-event-rich Stop hooks = mixed (rich escalations")
+    lines.append("           + coarse passes)")
 
     if not by_hook:
         # Empty window: nothing fired. Intentionally NOT listing the whole roster
@@ -1634,7 +1640,12 @@ def render_fire_report(
     for hook in sorted(by_hook, key=lambda h: by_hook[h]["fires"], reverse=True):
         r = by_hook[hook]
         last_seen = (r["last_seen"] or "")[:10] or "(unknown)"
-        g = "C" if r.get("coarse") else "R"
+        if r.get("coarse") and r.get("rich"):
+            g = "M"
+        elif r.get("coarse"):
+            g = "C"
+        else:
+            g = "R"
         lines.append(
             f"  {hook:<{col}}  {g:>1}  {r['fires']:>5}  {r['block']:>5}  {r['ask']:>4}  "
             f"{r['advise']:>6}  {r['pass']:>5}  {len(r['sessions']):>4}  {last_seen}"
@@ -1647,7 +1658,11 @@ def render_fire_report(
         "     `decision` field while exiting 0 — those blocks are invisible here\n"
         "     and fold into Pass (so coarse Block is a lower bound). ask/advise\n"
         "     also fold into Pass; session id is absent. A coarse 'Fires' count\n"
-        "     ≈ how often the hook's matcher matched, not how often it engaged."
+        "     ≈ how often the hook's matcher matched, not how often it engaged.\n"
+        "     M=mixed (single-event-rich Stop hook, issue #847): escalations\n"
+        "     (Block/Advise) are recorded rich with the real decision; silent\n"
+        "     passes stay coarse. So Block/Advise here are exact, but Pass is the\n"
+        "     coarse matcher-match count, and 'Fires' sums both granularities."
     )
 
     # ── issue #710 remaining scope: advise_ignored_rate / bypass_count / outcome-proxy ──

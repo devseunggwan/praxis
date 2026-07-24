@@ -37,9 +37,12 @@ negative-existence-verdict-gate, runtime-state-claim-gate,
 readonly-verify-deferral-gate) close the coarse block-invisibility gap
 above by calling `record_session_fire` at their emit point with the real
 decision (block under their strict env var, else advise), then
-`suppress_coarse_duplicate()` to drop the redundant coarse "pass" that
-`aggregate_fires` would otherwise sum into `fires=2, block=1, pass=1` for
-a single emit. One rich record is written per genuine emit — no
+`suppress_coarse_duplicate()` — GATED on record_session_fire returning True —
+to drop the redundant coarse "pass" that `aggregate_fires` would otherwise
+sum into `fires=2, block=1, pass=1` for a single emit. Suppression is
+conditional: on a failed rich append (returns False) the coarse fallback is
+left in place, so a transient ledger-write error never drops the fire from
+both streams. One rich record is written per genuine emit — no
 session-level dedup (each hook's `stop_hook_active` early-return already
 guards re-entrant re-fires, so distinct per-turn engagements are counted,
 not collapsed). session_id attribution is kept when the payload carries
@@ -270,8 +273,15 @@ def record_standalone_fire(hook: str, role: str, rc: int) -> None:
         pass  # fail-open — never break the hook
 
 
-def record_session_fire(hook: str, role: str, decision: str, session_id: str, tool: str) -> None:
+def record_session_fire(hook: str, role: str, decision: str, session_id: str, tool: str) -> bool:
     """Append a single RICH fire record with a caller-supplied session_id/tool.
+
+    Returns True iff the rich record was actually appended, False otherwise
+    (telemetry disabled, or a write error swallowed by the fail-open guard). A
+    caller that suppresses its coarse @fail_open fallback after a rich record
+    MUST gate the suppression on this return: suppressing after a FAILED rich
+    append would drop the engagement from both streams (no rich, no coarse) —
+    a silently-unrecorded fire. On False, leave the coarse fallback in place.
 
     Companion to record_standalone_fire (coarse, session_id/tool always "").
     For a standalone (non-Bash-dispatched) hook that has already parsed its own
@@ -288,10 +298,11 @@ def record_session_fire(hook: str, role: str, decision: str, session_id: str, to
     per-session counts must filter to granularity=="rich" (see
     skills/bypass-review/bypass-review's compute_reclarification_loop_counts).
 
-    Fail-open: any error → silently no-op, mirrors every other writer here.
+    Fail-open: any error → silently no-op (returns False), mirrors every other
+    writer here.
     """
     if _disabled():
-        return
+        return False
     try:
         record = {
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
@@ -303,8 +314,9 @@ def record_session_fire(hook: str, role: str, decision: str, session_id: str, to
             "granularity": "rich",
         }
         _atomic_append(resolve_path(), [json.dumps(record, ensure_ascii=False)])
+        return True
     except Exception:
-        pass  # fail-open — never break the hook
+        return False  # fail-open — never break the hook
 
 
 def count_session_fires(hook: str, session_id: str, decision: str | None = None) -> int:

@@ -367,11 +367,14 @@ def main() -> int:
     # and forgoing it otherwise. suppress_coarse_duplicate() drops the redundant
     # coarse "pass" so aggregate_fires() does not count one emit as fires=2.
     session_id = payload.get("session_id")
-    _fire_ledger.record_session_fire(
+    if _fire_ledger.record_session_fire(
         _HOOK_NAME, _ROLE, decision,
         session_id if isinstance(session_id, str) else "", "Stop",
-    )
-    _fire_ledger.suppress_coarse_duplicate()
+    ):
+        # Suppress the coarse fallback ONLY when the rich record actually
+        # landed — else a failed rich append would drop the fire from both
+        # streams (coderabbit finding on PR #855).
+        _fire_ledger.suppress_coarse_duplicate()
     return 0
 
 
