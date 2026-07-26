@@ -117,7 +117,8 @@ Stop hooks that gate **completion claims** before the assistant response is
 finalized. Run sequentially: `completion-verify` → `retrospect-mix-check` →
 `completion-signal-gate` → `readonly-verify-deferral-gate` →
 `merge-state-claim-gate` → `runtime-state-claim-gate` →
-`negative-existence-verdict-gate` → `pr-report-destination-gate` →
+`negative-existence-verdict-gate` → `artifact-verdict-evidence-gate` →
+`pr-report-destination-gate` →
 `strike-counter stop`.
 Also includes session-lifecycle enforcement.
 
@@ -135,6 +136,7 @@ channel.
 | [readonly-verify-deferral-gate](../../hooks/completion-verify/readonly-verify-deferral-gate/spec.md) | Stop | Advisory when the last turn offers to run a read-only verification (SELECT/kubectl get/git status/--dry-run) instead of running it; mutation carve-out + read-already-run suppressor |
 | [merge-state-claim-gate](../../hooks/completion-verify/merge-state-claim-gate/spec.md) | Stop | Advisory when the final message asserts a merge/PR/issue/worktree state change without a fresh `gh`/GitHub-MCP state query — applied-on-branch claims additionally require reachability evidence (#656) |
 | [runtime-state-claim-gate](../../hooks/completion-verify/runtime-state-claim-gate/spec.md) | Stop | Advisory when the final message asserts a runtime/execution state ("X is running in Y" / "로컬은 건드리지 않습니다") with no probe tool_use in the current turn — launch success does not reveal where something runs (#809) |
+| [artifact-verdict-evidence-gate](../../hooks/completion-verify/artifact-verdict-evidence-gate/spec.md) | Stop | Advise when the final message surfaces a positive artifact verdict (삭제 후보/중복/통합 대상/superseded) as a candidate list without an adjacent `Verdict-evidence:` line (#862) |
 | [negative-existence-verdict-gate](../../hooks/completion-verify/negative-existence-verdict-gate/spec.md) | Stop | Block when the final message surfaces a negative-existence verdict (없습니다/does not exist) under a registered decision framing (게이트 결과/완료 조건/AC #) without an `Enumerated:` line in the same paragraph (#804) |
 | [pr-report-destination-gate](../../hooks/completion-verify/pr-report-destination-gate/spec.md) | Stop | Advisory when a session wrote a review/verification local `.md` (/tmp/.omc/plans/report-named) for a PR it worked on (`gh pr view/create`/PR URL) but never posted it there (`gh pr comment/review`); per-PR correlation, GET `gh api` and failed posts excluded (#832) |
 | [strike-counter](../../hooks/completion-verify/strike-counter/spec.md) | SessionStart + UserPromptSubmit + Stop | Session-scoped three-strike discipline — hard-blocks at strike 3, requires reflection before reset |
