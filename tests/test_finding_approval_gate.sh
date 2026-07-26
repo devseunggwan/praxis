@@ -146,6 +146,14 @@ assert_present \
   "Backgrounding defers Step 5, it does not skip it"
 
 assert_present \
+  "background handoff branches on whether a user is reachable" \
+  "User is back in an interactive foreground turn"
+
+assert_present \
+  "Other approval paraphrase is re-asked, not accepted" \
+  "apply only on a literal \`적용\`"
+
+assert_present \
   "resolved flips re-enter 5i for their own 적용 answer" \
   "re-enters 5i as a normal finding"
 

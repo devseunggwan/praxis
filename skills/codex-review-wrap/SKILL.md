@@ -221,11 +221,18 @@ add commentary. This matches `/codex:review`'s contract.
 
 If `{{ARGUMENTS}}` includes `--background`, run via `Bash(..., run_in_background: true)`
 and tell the user: "Codex review started in the background. Check `/codex:status` for progress."
-Backgrounding defers Step 5, it does not skip it: when the run completes,
-collect its findings in this same session and enter Step 5 from the top
-(interactivity check → 5f → …). A background review whose findings never
-reach 5i has produced no applicable result — never apply its findings from
-the completion notification alone.
+Backgrounding defers Step 5, it does not skip it. Which path the findings
+take depends on where the session is when the run completes:
+
+- **User is back in an interactive foreground turn** — collect the findings
+  and enter Step 5 from the top (interactivity check → 5f → …); the
+  interactivity check passes and 5i can ask.
+- **No user is reachable** (unattended worker, `-p` run, session already
+  ended) — the interactivity check fails and the findings take the
+  non-interactive path: verified, applied to nothing, deferred.
+
+Either way, never apply a background review's findings from the completion
+notification alone.
 
 ### Step 5: Apply Findings — Premise Verification Gate
 
@@ -924,7 +931,7 @@ Exactly three options, plus the runtime's automatic `Other` slot:
 | `적용` | Apply the edit → ledger `applied:` row → 5e `Premise-Verified:` trailer **if the edit is fact-modifying** (structural and stylistic edits take no trailer, per 5e) |
 | `미적용` | Do not edit → ledger `rejected: … \| reason: user: declined (round N)` |
 | `후속이슈` | Do not edit → ledger `rejected: … \| reason: user: deferred to follow-up` **and** a `deferred:` row |
-| `Other` (free text) | If the instruction is a plain decline or defer, record the matching row above. If it proposes a **different** edit than the finding did, that is a new proposal: re-run 5a classification, 5b premise verification, and the 5c flip scan on it, then ask again — an `Other` answer is never itself an `적용` answer for the modified edit |
+| `Other` (free text) | If the instruction is a plain decline or defer, record the matching row above. If it proposes a **different** edit than the finding did, that is a new proposal: re-run 5a classification, 5b premise verification, and the 5c flip scan on it, then ask again — an `Other` answer is never itself an `적용` answer for the modified edit. If it reads as approval of the **unchanged** edit ("그대로 적용해", "yes, apply this"), do not treat the paraphrase as the answer either: re-ask the same finding with the three options and apply only on a literal `적용` |
 
 Put the agent's recommended option first and mark it `(Recommended)`.
 
@@ -1087,7 +1094,7 @@ user selects: 1
   → apply F3; ledger: applied: cli.sh:L10 | round=1 | "--state all" → "--state open"
   → skip F1;  ledger: rejected: query.sql:query | round=1 | query() → run_query() | reason: user: deferred to follow-up
                ledger: deferred: query.sql:query | round=1 | finding=F1(rename) | issue=pending
-  Commit F3 with trailer:  Premise-Verified: gh search issues --help (excerpt)
+  (아직 커밋하지 않음 — 실행 순서상 5d-ii/iii 가 5e 앞에 온다)
   Round 종료 시 deferred 1건에 대해 구현 접근안 리뷰 surface → 승인 시에만 이슈 생성
 
 [Step 5d] Cross-check sibling: praxis#199 (branch issue-199-hook-shell)
@@ -1100,6 +1107,9 @@ user selects: 1
      현재 PR: praxis#200 — finding: F3 (--state all)
      형제 PR:  praxis#199 — 동일 결함 확인 근거: hook.sh:L8에서 "--state all" 사용 확인
   → surface to user for separate approval before applying sibling fix
+
+[Step 5e — commit, after 5d completes]
+  Commit F3 with trailer:  Premise-Verified: gh search issues --help (excerpt)
 
 [Step 5 — Round 2] Codex now re-suggests changing WHERE col_a = 1 → col_b = 1
   Scan ledger: rejected entry on query.sql:L42 with same A → B transition exists
