@@ -375,7 +375,7 @@ a *decision*, not a disproved premise — the finding may well be correct. When
 the colliding row is one of those, do not claim a factual contradiction; use
 this message instead:
 
-```
+```text
 ⚠ Re-proposal of a user-declined finding: {file}:{region}
    Round N: user chose {미적용|후속이슈} — {A} → {B}
    Round N+M proposes the same change again.
@@ -890,7 +890,7 @@ otherwise collide on one key and share (or overwrite) a single answer.
 
 Each question body must let the user decide without re-reading the diff:
 
-```
+```text
 {file}:{region}
 변경: {value-before} → {value-after}
 판정: {apply | reject} — {one-line reason}
