@@ -38,6 +38,18 @@ user that the list was truncated.
 failure: `codex-review-wrap` Step 2 attempted to surface all 8 active worktrees
 as options, which is impossible per the `maxItems: 4` JSON schema constraint.
 
+### 1a. `AskUserQuestion.questions` — same hard cap of 4 items
+
+**Constraint**: the `questions` array carries its own `minItems: 1` /
+`maxItems: 4`. A step that needs a decision on more than 4 items must issue
+consecutive calls of at most 4 questions each, not one large call.
+
+**Verified**: 2026-07-26 / Claude Code (Opus 5) / Issue #861 — a 4-question
+call (each with 3 explicit options plus the runtime's automatic `Other` slot)
+round-tripped successfully and returned all four answers keyed by question
+text; `codex-review-wrap` Step 5i batches its per-finding approval questions
+against this cap.
+
 ---
 
 ## 2. `Skill(...)` cannot invoke a skill that declares `disable-model-invocation: true`

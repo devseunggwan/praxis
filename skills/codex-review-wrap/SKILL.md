@@ -11,16 +11,18 @@ description: >
   in the session ledger. Step 5f tracks rounds-per-region and surfaces a non-blocking
   diminishing-returns advisory when the same file:region accumulates more than N rounds
   (default 4, configurable via PRAXIS_DIMINISHING_RETURNS_N).
+  Step 5i asks the user, per finding, whether to apply it — no finding is edited
+  on the agent's judgement alone.
   At phase end it reaps leaked openai-codex app-server brokers via a co-located
   idle-gated reaper (GC by default; opt-in running-broker kill via
   PRAXIS_CODEX_REAP=1) to prevent the kernel_task memory-pressure spike caused
   by brokers that outlive their owning session.
   Triggers on "codex review", "review codex", "safe review", "/codex-review-wrap",
   "premise verification", "flip detection", "sibling defect", "sibling cross-check",
-  "diminishing returns", "broker reap".
+  "diminishing returns", "broker reap", "finding approval", "적용 승인".
 verified-against-runtime: true
-runtime-verified-at: 2026-05-13
-runtime-verified-note: "codex-companion 1.0.4 — ARGUMENTS rejected for non-flag string; AskUserQuestion maxItems:4 blocks worktree list >3 items; Skill() cannot delegate to disable-model-invocation skill. Step 4 hardened to a MUST NOT directive in issue #237 (2026-05-16) — directive-only change, no new runtime claim. Step 5f (PR #329) adds procedural prose only (rounds_per_region ledger + advisory text); no runtime hook code changed — existing verification evidence remains valid. Step 6 (issue #683) adds codex-broker-reaper.sh; idle-gate functionally verified 2026-06-18 via synthetic broker — fresh-log SKIP, stale-log REAP, concurrent real brokers untouched (scanned=3 reaped=1 skipped=2)."
+runtime-verified-at: 2026-07-26
+runtime-verified-note: "codex-companion 1.0.4 — ARGUMENTS rejected for non-flag string; AskUserQuestion maxItems:4 blocks worktree list >3 items; Skill() cannot delegate to disable-model-invocation skill. Step 4 hardened to a MUST NOT directive in issue #237 (2026-05-16) — directive-only change, no new runtime claim. Step 5f (PR #329) adds procedural prose only (rounds_per_region ledger + advisory text); no runtime hook code changed — existing verification evidence remains valid. Step 6 (issue #683) adds codex-broker-reaper.sh; idle-gate functionally verified 2026-06-18 via synthetic broker — fresh-log SKIP, stale-log REAP, concurrent real brokers untouched (scanned=3 reaped=1 skipped=2). Step 5i (issue #861) verified 2026-07-26 against the live AskUserQuestion runtime — 3-question and 4-question calls, each question carrying 3 explicit options, round-tripped and returned every answer keyed by question text; the runtime appended its own Other slot, confirming both the 4-question batch size and the 적용/미적용/후속이슈 shape against the 4-option cap (RUNTIME_CONSTRAINTS.md §1a)."
 ---
 
 # codex-review-wrap
@@ -46,7 +48,10 @@ sibling PR or repo, Step 5d additionally cross-checks each verified finding
 against the sibling and records the result. Step 5f tracks how many rounds
 have touched each `{file}:{region}` pair and emits a one-time non-blocking
 advisory when the count exceeds the configured threshold (default: 4 rounds,
-env var `PRAXIS_DIMINISHING_RETURNS_N`).
+env var `PRAXIS_DIMINISHING_RETURNS_N`). Step 5i then puts every finding
+that survived 5b and 5c — fact-modifying, structural, or stylistic — in
+front of the user via `AskUserQuestion` before any edit lands: the agent's
+verdict is a recommendation, the user's answer is the decision.
 See **Step 5** for the full gate.
 
 A third responsibility runs at phase end: **Step 6** reaps openai-codex
@@ -216,6 +221,11 @@ add commentary. This matches `/codex:review`'s contract.
 
 If `{{ARGUMENTS}}` includes `--background`, run via `Bash(..., run_in_background: true)`
 and tell the user: "Codex review started in the background. Check `/codex:status` for progress."
+Backgrounding defers Step 5, it does not skip it: when the run completes,
+collect its findings in this same session and enter Step 5 from the top
+(interactivity check → 5f → …). A background review whose findings never
+reach 5i has produced no applicable result — never apply its findings from
+the completion notification alone.
 
 ### Step 5: Apply Findings — Premise Verification Gate
 
@@ -237,27 +247,43 @@ session, not just the first. Terminology used below:
 Sub-sections below are numbered for cross-reference, not execution order.
 The execution order each round is:
 
+0. **Interactivity check** — if the run cannot reach a user
+   (`claude -p`, background worker, any context where `AskUserQuestion` has
+   no recipient), skip every question step (5d-i and 5i) and take the
+   non-interactive path in *Error Handling*: classify and verify findings
+   (5a–5c) but apply nothing, deferring the survivors. Doing this first is
+   what keeps the unconditional 5d-i question from stalling the round before
+   classification happens.
 1. **5f counter update + advisory check** — increment `rounds_per_region:`
    ledger for each region touched; emit the diminishing-returns advisory if
    `cumulative = N + 1`.
 2. **5d-i sibling-identification question** — `AskUserQuestion` to confirm
-   whether the PR is a port / parallel hotfix / A/B implementation.
+   whether the PR is a port / parallel hotfix / A/B implementation
+   (interactive runs only, per step 0).
 3. **5a classify findings** — fact-modifying vs structural vs stylistic.
 4. **5b verify premises** — falsify each fact-modifying finding's premise
    before applying.
 5. **5c flip detection during apply** — scan ledger for `applied:` /
    `rejected:` collisions before each edit.
-6. **5d-ii / 5d-iii sibling cross-check + propose** — only when 5d-i
-   identified a sibling.
-7. **5e commit-message trailer** — `Premise-Verified:` trailer on the
-   committed edit.
-8. **5g critic pre-lock probe check** — before any critic finding that
+6. **5g critic pre-lock probe check** — before any critic finding that
    contains a negative claim is surfaced to the user, verify the claim
-   with a live probe and cite it inline.
-9. **5h parent-truncates-child SoT audit** — after all findings are
-   applied, scan the parent doc for inline transcriptions of sibling
-   SoT enumerations and emit synthesized findings for any truncation
-   detected.
+   with a live probe and cite it inline. Runs **before** 5i, because 5i
+   surfaces every finding — including structural and stylistic ones,
+   whose 5i question body is allowed to carry `Probe: n/a`.
+7. **5i per-finding user approval gate** — ask the user, in batches of 4,
+   whether to apply each finding; edits are applied only for `적용`
+   answers. Runs **after** classification/verification/flip-scan/probe
+   check (so the question carries evidence) and **before** the first edit
+   of the round.
+8. **5d-ii / 5d-iii sibling cross-check + propose** — only when 5d-i
+   identified a sibling.
+9. **5e commit-message trailer** — `Premise-Verified:` trailer on the
+   committed fact-modifying edit.
+10. **5h parent-truncates-child SoT audit** — after all approved findings
+    are applied, scan the parent doc for inline transcriptions of sibling
+    SoT enumerations and emit synthesized findings for any truncation
+    detected. Synthesized findings re-enter 5g and 5i as their own
+    approval batch before their edits are applied.
 
 #### 5a. Classify each finding
 
@@ -308,22 +334,23 @@ global `~/.claude/CLAUDE.md` "External-Surface Write Requires Falsification".
 #### 5c. Flip detection — halt A→B→A oscillation
 
 Maintain a per-session ledger across all rounds in the same session.
-The ledger has **four record shapes** — `applied`/`rejected` (flip
+The ledger has **five record shapes** — `applied`/`rejected` (flip
 detection input), `sibling-applied` (Step 5d cross-check),
-`rounds_per_region` (Step 5f diminishing-returns) — all must be tracked
-because a finding rejected in round N can re-appear in round N+M and
-would otherwise look novel:
+`rounds_per_region` (Step 5f diminishing-returns), `deferred` (Step 5i
+follow-up issue) — all must be tracked because a finding rejected in
+round N can re-appear in round N+M and would otherwise look novel:
 
 ```
 applied:          {file}:{line-or-region} | round={N} | {value-before} → {value-after}
 rejected:         {file}:{line-or-region} | round={N} | {value-before} → {value-after} | reason: {falsifying evidence}
 sibling-applied:  {sibling-repo}#{PR-or-branch} | round={N} | finding={brief-label} | result={same defect | different | does not apply}
 rounds_per_region: {file}:{region} | round={N} | cumulative={C}
+deferred:         {file}:{line-or-region} | round={N} | finding={brief-label} | issue={URL or "pending"}
 ```
 
 Before applying any new edit, scan records whose prefix token is exactly
-**`applied:`** or **`rejected:`** (NOT `sibling-applied:` or
-`rounds_per_region:`) in the ledger.
+**`applied:`** or **`rejected:`** (NOT `sibling-applied:`,
+`rounds_per_region:`, or `deferred:`) in the ledger.
 A flip fires when:
 
 1. **Applied flip** — the new edit would revert a previously-applied
@@ -340,6 +367,20 @@ In either case, STOP and surface to the user:
    Round N+M now suggests:     {B} → {A}    (or same A → B for re-proposal)
 Both findings cannot be simultaneously correct.
 Resolve before applying further edits.
+```
+
+**Evidence rejection vs user decision.** A `rejected:` row whose reason
+starts with `user:` (written by 5i for a `미적용` / `후속이슈` answer) records
+a *decision*, not a disproved premise — the finding may well be correct. When
+the colliding row is one of those, do not claim a factual contradiction; use
+this message instead:
+
+```
+⚠ Re-proposal of a user-declined finding: {file}:{region}
+   Round N: user chose {미적용|후속이슈} — {A} → {B}
+   Round N+M proposes the same change again.
+Confirm before re-applying; the earlier answer was a decision, not a
+disproved premise.
 ```
 
 Do not apply either side of a flip without explicit user direction. The
@@ -677,8 +718,9 @@ enumeration is a systematic failure mode that round-by-round external review
 catches one missing row at a time. This step collapses that N-round sequence
 into a single pre-merge sweep.
 
-Run this step **once per invocation, after all Codex findings have been
-applied (after 5g)**, before the reviewer session ends.
+Run this step **once per invocation, after every approved finding has been
+applied** — findings the user left at `미적용` or `후속이슈` do not hold it
+back — before the reviewer session ends.
 
 ##### Trigger — does the parent doc cite a sibling SoT?
 
@@ -738,7 +780,8 @@ The synthesized finding is treated as a **structural** finding (not
 fact-modifying): it describes an omission in documentation, not a runtime
 predicate. Apply Step 5a classification accordingly — it does not require a
 premise check via 5b, but **does** flow through the normal apply/commit cycle
-(5c flip detection, 5e trailer if the edit is structural-significant).
+(5c flip detection, 5i approval). Being structural, it takes no
+`Premise-Verified:` trailer — 5e is the single rule for trailer scope.
 
 ##### Unresolved advisory (sibling SoT not locatable)
 
@@ -783,6 +826,134 @@ The SoT audit is distinct from the per-finding premise verification in 5b:
 
 The two steps are complementary: 5b prevents bad fixes; 5h prevents missed
 enumerations from reaching the next reviewer.
+
+#### 5i. Per-finding user approval gate <!-- [#861] -->
+
+Steps 5a–5c decide whether a finding is *correct*. Whether it should be
+applied **in this PR, now** is a separate judgement that belongs to the
+user. This sub-step surfaces that decision explicitly.
+
+**No finding may be edited on the agent's judgement alone.**
+There is no auto-apply path — not for stylistic findings, not for
+"obviously right" one-liners, not for findings the agent already verified
+in 5b. Applying an edit without a recorded `적용` answer is a violation of
+this gate, and the briefing-style disclosure ("I applied these, tell me if
+wrong") is not a substitute for asking first.
+
+##### Scope and ordering
+
+The gate covers **every finding of the round that survives 5b and 5c**:
+fact-modifying, structural, and stylistic alike, plus any finding
+synthesized by 5h. A finding whose premise 5b actively disproved is **not**
+offered as an `적용` option — applying a value already shown to be false is
+never a decision worth surfacing. Report those in one line instead
+("N findings rejected on evidence: …") so the user still sees them.
+Present the surviving findings in a deterministic order so the same round
+always produces the same question sequence:
+
+1. fact-modifying findings (5a row 1)
+2. structural findings (5a row 2)
+3. stylistic findings (5a row 3)
+
+Ties inside a group keep Codex's own output order. Findings already halted
+by 5c flip detection are **not** put through the gate in that state — a flip
+is surfaced on its own per 5c first. Once the user resolves it, the surviving
+side re-enters 5i as a normal finding and needs its own `적용` answer before
+it is edited; the flip-resolution direction is not itself that answer.
+
+If the round produced zero applicable findings, skip 5i entirely and say so
+in one line.
+
+##### Batching
+
+On the Claude host, `AskUserQuestion` accepts at most **4 questions per
+call** and **4 options per question** (see `RUNTIME_CONSTRAINTS.md` §1 and
+§1a). Emit one question per finding, **4 findings per call**, and repeat the
+call until every finding has an answer. Do not compress two findings into
+one question — a single answer cannot carry two decisions.
+
+`skills/` ships to other hosts too (see `manifests/platforms/` and
+`plugins/praxis/.codex-plugin/plugin.json`), and their ask-user tools have
+their own caps. Batch against **the cap of the host actually running** —
+read it from that host's tool schema rather than assuming 4 — and never
+above 4. If the running host exposes **no callable ask-user tool at all**
+(or the one it has is unavailable in the current mode), the run counts as
+non-interactive: take the step-0 path — verify, apply nothing, defer the
+survivors — rather than applying findings without a recorded answer.
+
+Each question's `question` text must start with a stable finding ID
+(`F1`, `F2`, …). Answers come back keyed by question text, so two duplicate
+findings on the same `{file}:{region}` with the same transition would
+otherwise collide on one key and share (or overwrite) a single answer.
+
+##### Question body — required elements
+
+Each question body must let the user decide without re-reading the diff:
+
+```
+{file}:{region}
+변경: {value-before} → {value-after}
+판정: {apply | reject} — {one-line reason}
+Probe: {command} → {one-line output}
+flip: none
+```
+
+- `Probe:` carries the 5b verification evidence verbatim. `Probe: n/a
+  (structural)` / `Probe: n/a (stylistic)` is allowed **only** when the
+  finding is not fact-modifying **and** carries no 5g negative claim; a
+  structural finding that asserts "symbol X is unused / does not exist"
+  still carries its 5g probe output here. The line is never omitted.
+- `flip:` reports the 5c scan result for that region (`none`, or the
+  colliding ledger row).
+- When the agent's verdict option is labelled `(Recommended)`, a line
+  starting at column 0 with the literal prefix `Falsified:` must carry the
+  disconfirming-test result — either in the question body or in that
+  option's `description` (global CLAUDE.md → *Self-Falsify Before
+  Recommendation Lock*; enforced by
+  `hooks/advisory-nudge/output-block-falsify-advisory/impl.py`, which does a
+  `startswith` check, so a mid-sentence or fenced `Falsified:` does not
+  count). The 5b probe usually supplies that line; when it does not, run one
+  and cite it.
+
+##### Options
+
+Exactly three options, plus the runtime's automatic `Other` slot:
+
+| Option | Action |
+| --- | --- |
+| `적용` | Apply the edit → ledger `applied:` row → 5e `Premise-Verified:` trailer **if the edit is fact-modifying** (structural and stylistic edits take no trailer, per 5e) |
+| `미적용` | Do not edit → ledger `rejected: … \| reason: user: declined (round N)` |
+| `후속이슈` | Do not edit → ledger `rejected: … \| reason: user: deferred to follow-up` **and** a `deferred:` row |
+| `Other` (free text) | If the instruction is a plain decline or defer, record the matching row above. If it proposes a **different** edit than the finding did, that is a new proposal: re-run 5a classification, 5b premise verification, and the 5c flip scan on it, then ask again — an `Other` answer is never itself an `적용` answer for the modified edit |
+
+Put the agent's recommended option first and mark it `(Recommended)`.
+
+Both `미적용` and `후속이슈` write a `rejected:` row with a `user:` reason
+prefix, so a finding the user declined in round N still fires 5c if Codex
+re-proposes the same transition in round N+M — but 5c reports it as a
+re-proposal of a *decision*, not as a factual contradiction (see 5c →
+*Evidence rejection vs user decision*).
+
+##### Follow-up issues (`후속이슈` answers)
+
+Do **not** create an issue per answer. Collect all `후속이슈` findings of the
+round and, once the batch is complete, surface a single implementation-approach
+review — scope, target repo(s), expected PR count, verification plan — and
+create issues only after the user approves that approach (global CLAUDE.md →
+*Implementation-approach review BEFORE issue creation*). Append the resulting
+URL to each `deferred:` row; leave `issue=pending` if the user declines.
+
+##### Relationship to 5d-iii (sibling PRs)
+
+An `적용` answer authorizes the edit **on the current PR only**. The sibling
+fix in 5d-iii keeps its own separate approval — approval never transfers
+across PRs.
+
+##### Cancellation
+
+If the user cancels a batch or gives no answer, stop applying findings for
+the round. Report which findings were already applied, which remain
+undecided, and end the round without further edits.
 
 ### Step 6: Reap leaked codex brokers (phase end)
 
@@ -842,6 +1013,10 @@ keeps the count below the compressor threshold.
 | Region label cannot be determined (binary file, empty file) | Use the file path alone as the region label |
 | Critic negative claim emitted without `Probe:` citation (5g) | Halt the finding; prompt the critic to re-run with probe citation before surfacing |
 | Probe command for 5g returns unexpected output or exits with an error code that signals a command failure (e.g. exit=2 "command not found", permission denied) — distinct from `grep` exit=1 (no match), which is the expected signal for verified absence | Surface probe failure to the user; do not auto-retract the claim — let the user decide |
+| Approval gate (5i) — user cancels a batch or gives no answer | Stop applying for the round; report applied / undecided findings; no further edits |
+| Approval gate (5i) — round produced zero applicable findings | Skip 5i; state "no findings to approve" in one line |
+| Approval gate (5i) — user declines the follow-up issue approach review | Keep the `deferred:` rows with `issue=pending`; create nothing |
+| Approval gate (5i) — non-interactive run (`claude -p`, background) where `AskUserQuestion` cannot reach a user | Apply nothing; record every finding that survived 5b/5c as `deferred:` (evidence-rejected and flip-halted findings stay out, same as the interactive path) and report the full list for a later interactive round |
 | SoT audit (5h) — sibling document not locatable | Emit unresolved advisory; do not block review completion |
 | SoT audit (5h) — parent citation site ambiguous (multiple tables at same heading) | Use all tables at the heading as candidate SoT sources; report each comparison separately |
 | Reaper (Step 6) — running broker has no readable `broker.log` | Idle is indeterminate → broker is KEPT (logged as `SKIP ... no logFile`); never reaped on a guess |
@@ -880,14 +1055,40 @@ user selects: 1
   → sibling identified: praxis#199 on branch issue-199-hook-shell
 
 [Step 5 — Round 1 — classify + verify (5a → 5b)] Codex returned 3 findings:
-  - F1: rename `query()` → `run_query()`           [structural — apply directly]
+  - F1: rename `query()` → `run_query()`           [structural — no premise check, still gated by 5i]
   - F2: change WHERE col_a = 1 → col_b = 1         [fact-modifying — verify column exists]
   - F3: drop the `--state all` flag                [fact-modifying — verify CLI accepts the value]
   Verify F2: DESCRIBE my_table → col_b not present
     → ledger: rejected: query.sql:L42 | round=1 | col_a → col_b | reason: col_b absent in DESCRIBE
+    (evidence-rejected → not put through the 5i gate)
   Verify F3: gh search issues --help → --state accepts only {open, closed}
-    → apply; ledger: applied: cli.sh:L10 | round=1 | "--state all" → "--state open"
+
+[Step 5i — approval gate] 2 findings survive to the gate (F3 fact-modifying, F1 structural)
+  1 finding rejected on evidence: F2 (col_b absent) — reported, not offered as 적용
+  AskUserQuestion (1 call, 2 questions):
+    Q1 "F3 — cli.sh:L10 --state 값 수정"   (question text starts with the finding ID)
+       body: cli.sh:parse_prompt
+             변경: "--state all" → "--state open"
+             판정: apply — 현재 값은 CLI 가 거부함
+             Probe: gh search issues --help → --state {open|closed}  ("all" 미지원)
+             flip: none
+       options: 적용 (Recommended) / 미적용 / 후속이슈
+       적용 description: "Falsified: '--state all 도 허용된다' 가설 반증 — probe 출력에 all 없음"
+    Q2 "F1 — query() → run_query() 리네임"
+       body: query.sql:query
+             변경: query() → run_query()
+             판정: apply — 호출부 3곳 동시 수정 필요
+             Probe: n/a (structural)
+             flip: none
+       options: 적용 (Recommended) / 미적용 / 후속이슈
+       적용 description: "Falsified: '호출부가 이미 run_query 를 쓴다' 가설 반증 —
+         grep -n 'query(' src/ → 3곳 모두 구 이름 사용"
+  User: Q1=적용, Q2=후속이슈
+  → apply F3; ledger: applied: cli.sh:L10 | round=1 | "--state all" → "--state open"
+  → skip F1;  ledger: rejected: query.sql:query | round=1 | query() → run_query() | reason: user: deferred to follow-up
+               ledger: deferred: query.sql:query | round=1 | finding=F1(rename) | issue=pending
   Commit F3 with trailer:  Premise-Verified: gh search issues --help (excerpt)
+  Round 종료 시 deferred 1건에 대해 구현 접근안 리뷰 surface → 승인 시에만 이슈 생성
 
 [Step 5d] Cross-check sibling: praxis#199 (branch issue-199-hook-shell)
   Apply same test for F3 against sibling:
@@ -987,6 +1188,9 @@ user selects: 1
 - Step 5h SoT audit detects truncation only for inline-transcribed enumerations; reference-link citations (sibling SoT referenced but not transcribed) are inherently safe and are not audited
 - Step 5h citation-signal scanning is keyword-based; enumerations that use non-standard labels (e.g., custom matrix row identifiers) may not be detected — when authoring, prefer the standard labels listed in the trigger table
 - Step 5h requires the sibling SoT document to be locally readable; remote-only or external URLs are flagged as unresolved advisories and require manual verification
+- Step 5i requires an interactive session — `AskUserQuestion` has no reachable user under `claude -p` or a background worker, so those runs apply nothing and defer every finding
+- Step 5i costs one `AskUserQuestion` round-trip per 4 findings; a round with many stylistic findings trades throughput for control, by design
+- Step 5i decisions live in the same per-session ledger as 5c — a finding declined in one session is not remembered in the next
 - Step 6 reaper is macOS-only (launchd reparenting + `/var/folders` sessionDirs); it is a no-op on other platforms
 - Step 6 idle detection uses `broker.log` mtime as an activity proxy — a broker mid-operation that stays silent longer than `--max-age` could be misjudged idle and reaped; the cost is a benign respawn on the next codex call, never a correctness break
 - Step 6 phase-end reaping keeps the broker count below the compressor threshold but does not reclaim every running orphan; the session-independent launchd job (`LAUNCHD.md`) is what reaps orphans whose owning session is already gone
