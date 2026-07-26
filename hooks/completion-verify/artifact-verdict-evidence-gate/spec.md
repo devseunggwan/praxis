@@ -21,7 +21,7 @@ where the judgement rests on a cheap proxy rather than the artifact's content.
 row was a proxy, not the artifact:
 
 | 판단하려던 속성 | 실제로 쓴 대리지표 | 반증에 필요했던 것 |
-|---|---|---|
+| --- | --- | --- |
 | 두 메모리가 같은 내용인가 | `description` 유사도 | 본문 read |
 | 서로 연결돼 있는가 | `grep '\[\['` | 본문 read (산문 참조를 못 봄) |
 | 섹션이 중복인가 | 섹션 제목 + 줄 간격 | 섹션 본문 read |
@@ -43,7 +43,7 @@ this case verbatim:
 ## Why the existing fleet does not cover it
 
 | Hook | Fires on | Why it missed |
-|---|---|---|
+| --- | --- | --- |
 | `source-citation-probe-gate` | external-write bodies (PR/issue/Slack/Notion) | the table was in-conversation output |
 | `output-block-falsify-advisory` | `AskUserQuestion` / `Bash` surfaces | the table was plain assistant text |
 | `pre-output-falsification-gate` | AskUserQuestion evaluative options | same |
@@ -61,7 +61,7 @@ joined with its immediately preceding lead-in paragraph:
    `redundant` / `obsolete` / `safe to delete`
 2. **Candidate / decision framing** — `후보` / `정리 대상` / `판정` / `티어`,
    or `candidate` / `tier`
-3. **List shape** — a markdown table row, or two or more `- ` / `* ` bullets
+3. **List shape** — a markdown table row, or two or more `-` / `*` bullets
 
 The single-bullet and prose-only cases are deliberately below threshold: a
 one-off mention is not a candidate list, and the verdict surfaces its own
@@ -93,7 +93,7 @@ line elsewhere in the message does not clear the verdict.
 Presence enforcement, **not** adequacy verification — mirroring the
 `Enumerated:` precedent:
 
-```
+```text
 Verdict-evidence: <command run this session> → <output>
 ```
 
@@ -110,7 +110,7 @@ free prose is unreliable enough to produce false blocks.
 ## Tiers
 
 | Setting | Behaviour |
-|---|---|
+| --- | --- |
 | default | advisory (`systemMessage`, non-blocking) |
 | `PRAXIS_ARTIFACT_VERDICT_STRICT=1` | hard block (`{"decision": "block"}`) |
 | `PRAXIS_HOOK_BYPASS_ARTIFACT_VERDICT_GATE` set to any non-blank value | full bypass (exit 0) |
