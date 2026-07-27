@@ -140,7 +140,7 @@ assert_present \
 
 assert_present \
   "snapshot path is repository-scoped, not a fixed /tmp name" \
-  "\$(git rev-parse --git-common-dir)/wt-before-<N>.txt"
+  "\$(git rev-parse --path-format=absolute --git-common-dir)/wt-before-<N>.txt"
 
 assert_present \
   "snapshot path survives the separate-Bash-call rule" \
@@ -148,7 +148,23 @@ assert_present \
 
 assert_present \
   "snapshot name is unique per concurrent cleanup" \
-  "from overwriting each other's baseline"
+  "from overwriting each other's"
+
+assert_present \
+  "absolute path format is declared mandatory" \
+  "\`--path-format=absolute\` is not optional"
+
+assert_present \
+  "relative-path failure mode spelled out" \
+  "resolve to different files"
+
+assert_present \
+  "dry-run is an explicit stop, not a barrier" \
+  "is not a confirmation barrier"
+
+assert_present \
+  "concurrent-worktree assumption stated" \
+  "removed a worktree in this"
 
 assert_present \
   "comparison is filtered to registration lines only" \
@@ -216,13 +232,13 @@ assert_present \
 
 assert_order \
   "snapshot precedes prune in the cleanup block" \
-  "> \"\$(git rev-parse --git-common-dir)/wt-before-<N>.txt\"" \
+  "> \"\$(git rev-parse --path-format=absolute --git-common-dir)/wt-before-<N>.txt\"" \
   "git worktree prune --dry-run -v"
 
 assert_order \
   "dry-run precedes the post-prune comparison in the cleanup block" \
   "git worktree prune --dry-run -v" \
-  "| diff <(grep '^worktree ' \"\$(git rev-parse --git-common-dir)/wt-before-<N>.txt\") -"
+  "| diff <(grep '^worktree ' \\"
 
 # The bare prune is the destructive step; both guards are worthless unless it
 # sits between them.  Anchor on the line that is exactly `git worktree prune`.
@@ -234,7 +250,19 @@ assert_order_re \
 assert_order_re \
   "real prune precedes the post-prune comparison in the cleanup block" \
   "^git worktree prune\$" \
-  "^ *\| diff <\(grep '\^worktree ' \"\\\$\(git rev-parse --git-common-dir\)/wt-before-<N>\.txt\"\) -"
+  "^ *\| diff <\(grep '\^worktree ' \\\\\$"
+
+# The stop-and-read instruction only works if it sits between the dry-run and
+# the destructive prune — inside the block it would be a comment nobody honours.
+assert_order_re \
+  "stop-and-read gate sits between the dry-run and the real prune" \
+  "^git worktree prune --dry-run -v" \
+  "STOP here and read the dry-run output"
+
+assert_order_re \
+  "stop-and-read gate precedes the real prune" \
+  "STOP here and read the dry-run output" \
+  "^git worktree prune\$"
 
 # ---------------------------------------------------------------------------
 # 5. Checklist item 4 points at the new guards

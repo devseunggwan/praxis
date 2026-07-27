@@ -97,11 +97,20 @@ git pull origin <base-branch>                              # resolve squash-ance
 git branch -d <feature-branch> 2>/dev/null \
   || git branch -D <feature-branch>                        # fallback (may already be deleted)
 git worktree list --porcelain \
-  > "$(git rev-parse --git-common-dir)/wt-before-<N>.txt"   # snapshot BEFORE prune (see below)
+  > "$(git rev-parse --path-format=absolute --git-common-dir)/wt-before-<N>.txt"
 git worktree prune --dry-run -v                             # what would go — read it
+```
+
+**STOP here and read the dry-run output.** `--dry-run` reports candidates; it
+is not a confirmation barrier, so the two commands below must not be pasted
+together with the block above. If anything other than your own worktree
+appears, surface it to the user before continuing. Only then:
+
+```bash
 git worktree prune
 git worktree list --porcelain | grep '^worktree ' \
-  | diff <(grep '^worktree ' "$(git rev-parse --git-common-dir)/wt-before-<N>.txt") -
+  | diff <(grep '^worktree ' \
+      "$(git rev-parse --path-format=absolute --git-common-dir)/wt-before-<N>.txt") -
 ```
 
 Even if stdout shows only "deleted remote branch" or is empty, verify local
@@ -111,7 +120,9 @@ the same way — the plain `git worktree list` output is a different format from
 `--porcelain`, so comparing one against the other never matches. Your own
 worktree left the registry back at checklist item 2, so it is already absent
 from the snapshot: when the dry-run printed nothing, the `diff` must print
-nothing either. Any entry it reports as removed belonged to someone else.
+nothing either — assuming no one added or removed a worktree in this
+repository while the sequence was running. Any entry it reports as removed
+belonged to someone else.
 
 ### `prune` is repository-wide — snapshot before running it
 
@@ -126,12 +137,16 @@ fact unless you captured evidence first.
 - **Before**: `git worktree list --porcelain` records every registration and
   marks the already-missing, unlocked ones `prunable` (a locked entry shows
   `locked` instead and is not a prune target). Park it at
-  `$(git rev-parse --git-common-dir)/wt-before-<N>.txt`, substituting the PR
-  number you are cleaning up for `<N>`. Not a shell variable and not a bare
-  `wt-before.txt`: the steps run as separate Bash calls so a `snap=$(mktemp)`
-  variable is gone by the next call, while the common dir recomputes to the
-  same path every time — and the `<N>` suffix keeps two concurrent cleanups in
-  the same repository from overwriting each other's baseline. This snapshot is
+  `$(git rev-parse --path-format=absolute --git-common-dir)/wt-before-<N>.txt`,
+  substituting the PR number you are cleaning up for `<N>`. Not a shell
+  variable and not a bare `wt-before.txt`: the steps run as separate Bash calls
+  so a `snap=$(mktemp)` variable is gone by the next call, while the common dir
+  recomputes to the same path every time — and the `<N>` suffix keeps two
+  concurrent cleanups in the same repository from overwriting each other's
+  baseline. `--path-format=absolute` is not optional: a bare
+  `git rev-parse --git-common-dir` answers `.git` in the main worktree and
+  `../.git` one directory down, so without it the snapshot and the diff can
+  resolve to different files. This snapshot is
   the only thing that later answers "was that sibling worktree already gone, or
   did I break it?" — without it the question is unanswerable, which is worse
   than the removal itself. Write the **unfiltered** porcelain output: the
