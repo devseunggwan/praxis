@@ -36,6 +36,10 @@ the model to verify before stopping.
 | Same, but a fresh `gh pr\|issue …` command or GitHub MCP pull_request/issue/merge tool is present in the recent transcript                                                                                     | silent (claim is backed)                                       |
 | Final message asserts an **applied-on-branch** state (`applied`/`deployed`/`적용됨`/`배포됨` …) AND no **reachability probe** in the recent transcript — a generic state query does NOT clear this kind (#656) | `[merge-state-claim-gate]` advisory with reachability guidance |
 | Applied-on-branch claim WITH a reachability probe (`git merge-base --is-ancestor`, `--json state,baseRefName` query, `git branch --contains`) in the recent transcript                                         | silent (claim is backed)                                       |
+| Final message asserts a **still-open / unchanged / no-loss** state for a specific `#N` (`PR #864 는 여전히 OPEN`, `no commits were lost from PR #864`) AND no fresh `gh pr\|issue` query FOR THAT NUMBER (#869)  | `[merge-state-claim-gate]` advisory                             |
+| Same unchanged claim, cleared by a `gh pr\|issue view <N>` or GitHub MCP call referencing THAT SAME number                                                                                                      | silent (claim is backed)                                       |
+| Same unchanged claim, a query for a DIFFERENT `#M` is present — does NOT clear                                                                                                                                  | `[merge-state-claim-gate]` advisory (per-number specificity)    |
+| Unchanged claim with no `#N` on the line (`the branch still has no open PR`)                                                                                                                                    | silent (deliberate narrowing — #869 scope, see below)           |
 | Final message has no such claim                                                                                                                                                                                | silent                                                         |
 | Claim line is negated (`not`, `yet`, `아직`, `않`, …)                                                                                                                                                          | silent                                                         |
 | Future intent only (`I'll create a PR`, `ready to merge`)                                                                                                                                                      | silent (completion tokens are past/perfective)                 |
@@ -102,6 +106,44 @@ This is deliberately CLI-only: an MCP `pull_request_read` *returns*
 mirrored in `hooks/advisory-nudge/external-write-falsify-check` (2 copies —
 DRY extraction deferred to a 3rd consumer per repo convention).
 
+### Negative-polarity persistence claims (issue #869)
+
+2026-07-27 session retrospect finding #2 (HIGH). Across several turns, the
+assistant repeated "PR #864 는 여전히 OPEN, 커밋 유실 없음" (still open, no
+commits lost) — a pre-compaction snapshot. The PR had actually merged as
+`9ac8fa3` and that commit was the base of the in-progress work. Re-query
+count over the affected turns: zero.
+
+`_NEGATION_RE` originally treated ANY negated line as safe to silence (a
+deliberate false-positive-avoidance choice). But "여전히 OPEN" / "유실 없음"
+were never even reaching that check — `_CLAIM_KINDS`' vocabulary
+(`merged`/`created`/`closed`/`cleaned`/`applied`) has no token for "OPEN" or
+"no loss" at all, so the line was invisible to the hook, negation aside.
+
+A second, independent claim path (`detect_unchanged_claims` /
+`_UNCHANGED_STATE_RE`) now recognizes persistence-of-state assertions —
+`여전히 OPEN`, `그대로`, `유실 없음`, `남아있`, `변경 없`, EN `still open`,
+`no commits lost`, `hasn't been merged`, `remains open` — and, mirroring
+`runtime-state-claim-gate`'s "isolation" kind, does **not** run the generic
+negation suppressor: the negative surface form (`없음`, `not merged`) IS the
+claim, not evidence that the assistant is reporting incompletion.
+
+**Scope narrowing (deliberate, per issue).** This path fires ONLY when a
+`#N` token co-occurs with the persistence vocabulary on the SAME LINE. A
+numberless line ("the branch still has no open PR", "여전히 열려
+있습니다") is left to the existing (silent) generic-negation path — widening
+to numberless lines was explicitly rejected to avoid reopening the original
+false-positive concern that motivated blanket negation suppression.
+
+**Per-number evidence (`has_fresh_query_for_number`).** Unlike the
+positive-kind evidence check (any recent `gh pr|issue` query clears any
+positive kind), an unchanged claim about `#864` is cleared ONLY by a query
+that itself references `864` — a `gh pr view 111 --json state` call sitting
+in the same window does NOT clear a stale claim about `#864`. This mirrors
+the applied-kind's stricter-evidence precedent (#656): a looser generic
+check would have let the incident's exact stale re-assertion pass had any
+unrelated `gh pr view` call happened to appear nearby.
+
 ### Relationship to sibling hooks
 
 | Hook                                                                       | Scope                                                         | Overlap                                                                  |
@@ -121,7 +163,7 @@ transcript, and any uncaught exception (via the shared `@fail_open` decorator in
 bash tests/hooks/completion-verify/test_merge_state_claim_gate.sh
 ```
 
-39 cases: English/Korean claim without evidence (advisory), claim with `gh`
+50 cases: English/Korean claim without evidence (advisory), claim with `gh`
 evidence / GitHub MCP evidence (silent), neutral message (silent), negated claim
 (silent), future intent (silent), strict mode (decision: block), bypass (silent),
 `stop_hook_active` loop guard (silent), worktree-cleanup claim (advisory),
@@ -137,3 +179,14 @@ regressions: `grep baseRefName` does not clear, long-flag
 `released the lock` prose stays silent, baseRefName-only query does not
 clear (codex P2), applied-only advisory drops the (false) generic
 "no fresh state query" sentence when a state query exists (CodeRabbit).
+
+Plus 11 negative-polarity persistence cases (#869): motivating incident
+verbatim (KR still-open + no-loss, zero re-query → advisory), cleared by a
+matching-number `gh pr view 864` / GitHub MCP `pullNumber: 864` query
+(silent, 2 cases), NOT cleared by a different-number query (advisory — the
+per-number specificity guard), EN "has not been merged" without/with a
+matching query (advisory / silent), "no commits lost" phrasing (advisory),
+two numberless claims EN/KR that stay silent (deliberate scope narrowing),
+a mixed message where a generic query clears a "merged" claim but does NOT
+clear an unchanged claim for a different number (advisory — number
+specificity), and strict mode on an unchanged-only claim (decision: block).

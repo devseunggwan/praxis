@@ -41,6 +41,15 @@ elif evidence == "baserefname-only":
 elif evidence == "branch-contains-long":
     asst_blocks.append({"type": "tool_use", "name": "Bash",
                         "input": {"command": "git branch --merged --contains abc123"}})
+elif evidence == "gh-864":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "gh pr view 864 --json state"}})
+elif evidence == "gh-other":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "gh pr view 111 --json state"}})
+elif evidence == "mcp-864":
+    asst_blocks.append({"type": "tool_use", "name": "mcp__github__pull_request_read",
+                        "input": {"pullNumber": 864}})
 if asst_blocks:
     events.append({"message": {"role": "assistant", "content": asst_blocks}})
 events.append({"message": {"role": "assistant",
@@ -319,6 +328,54 @@ if [ "$rc" -eq 0 ] && [ -z "$err" ]; then
 else
   echo "FAIL  [malformed-json] rc=$rc err=<$err>"; FAIL=$((FAIL + 1))
 fi
+
+# =====================================================================
+# Negative-polarity persistence claims (issue #869)
+# =====================================================================
+
+# --- motivating incident verbatim: still-open + no-loss, zero re-query -----
+build_transcript "PR #864 는 여전히 OPEN, 커밋 유실 없음." none
+run_case advisory "unchanged-incident-verbatim-kr" '{}'
+
+# --- same claim, cleared by a per-number gh query --------------------------
+build_transcript "PR #864 는 여전히 OPEN, 커밋 유실 없음." gh-864
+run_case silent "unchanged-cleared-by-matching-number-query" '{}'
+
+# --- same claim, a DIFFERENT number's query does NOT clear it -------------
+build_transcript "PR #864 는 여전히 OPEN, 커밋 유실 없음." gh-other
+run_case advisory "unchanged-not-cleared-by-other-number-query" '{}'
+
+# --- cleared by a per-number GitHub MCP read -------------------------------
+build_transcript "PR #864 는 여전히 OPEN, 커밋 유실 없음." mcp-864
+run_case silent "unchanged-cleared-by-mcp-number-read" '{}'
+
+# --- EN "has not been merged" persistence claim ----------------------------
+build_transcript "PR #864 has not been merged yet." none
+run_case advisory "unchanged-en-not-merged-no-query" '{}'
+
+build_transcript "PR #864 has not been merged yet." gh-864
+run_case silent "unchanged-en-not-merged-cleared" '{}'
+
+# --- "no commits lost" phrasing --------------------------------------------
+build_transcript "No commits were lost from PR #864." none
+run_case advisory "unchanged-no-commits-lost" '{}'
+
+# --- numberless unchanged claim -> silent (deliberate narrowing, #869 scope)
+build_transcript "The branch still has no open PR." none
+run_case silent "unchanged-numberless-out-of-scope" '{}'
+
+build_transcript "여전히 열려 있습니다." none
+run_case silent "unchanged-numberless-kr-out-of-scope" '{}'
+
+# --- mixed message: a cleared "merged" claim alongside an uncleared --------
+# unchanged claim for a DIFFERENT number -> advisory carries only the
+# unchanged sentence (the generic query clears "merged" but not #864).
+build_transcript "PR #497 merged. PR #864 는 여전히 OPEN, 커밋 유실 없음." gh
+run_case advisory "mixed-merged-cleared-unchanged-not" '{}'
+
+# --- strict mode on an unchanged-only claim --------------------------------
+build_transcript "PR #864 는 여전히 OPEN, 커밋 유실 없음." none
+run_case advisory-strict "unchanged-strict-mode" '{}' PRAXIS_MERGE_CLAIM_STRICT=1
 
 echo "----"
 echo "PASS: $PASS / FAIL: $FAIL"
