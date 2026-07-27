@@ -5,6 +5,26 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.6.0](https://github.com/devseunggwan/praxis/compare/v7.5.0...v7.6.0) (2026-07-27)
+
+
+### Added
+
+* **codex-review-wrap:** per-finding approval gate ([#863](https://github.com/devseunggwan/praxis/issues/863)) ([d742c41](https://github.com/devseunggwan/praxis/commit/d742c41d689c2ebf36613862e5968a614715f2bf))
+* **hook:** add artifact-verdict evidence gate ([#864](https://github.com/devseunggwan/praxis/issues/864)) ([9ac8fa3](https://github.com/devseunggwan/praxis/commit/9ac8fa32468cb3b1b0a8a4794e77f136a29f5117)), closes [#862](https://github.com/devseunggwan/praxis/issues/862)
+* **hooks:** record stop-lane block/advise fires ([#855](https://github.com/devseunggwan/praxis/issues/855)) ([cd758b9](https://github.com/devseunggwan/praxis/commit/cd758b95e9c8efd90b65b75f528eafcaabaf4ca1))
+
+
+### Changed
+
+* bump actions/checkout from 7.0.0 to 7.0.1 ([#856](https://github.com/devseunggwan/praxis/issues/856)) ([68ec063](https://github.com/devseunggwan/praxis/commit/68ec063020939ca22060321ee70971e6ddffa920))
+* bump actions/setup-python from 6.3.0 to 7.0.0 ([#858](https://github.com/devseunggwan/praxis/issues/858)) ([4343a82](https://github.com/devseunggwan/praxis/commit/4343a828135ec1713ff1a82006a20278bc9185db))
+* bump github/codeql-action/analyze from 4.37.1 to 4.37.3 ([#859](https://github.com/devseunggwan/praxis/issues/859)) ([1bde14d](https://github.com/devseunggwan/praxis/commit/1bde14dc01d257a864d920d93ee175057fab713d))
+* bump github/codeql-action/init from 4.37.1 to 4.37.3 ([#857](https://github.com/devseunggwan/praxis/issues/857)) ([3bba3d1](https://github.com/devseunggwan/praxis/commit/3bba3d10560344c84b591f4a6e4217f899ec5942))
+* bump reviewdog/action-actionlint from 1.72.0 to 1.73.0 ([#860](https://github.com/devseunggwan/praxis/issues/860)) ([0f2808e](https://github.com/devseunggwan/praxis/commit/0f2808eccab95f6da4f7b5990582f79487c41504))
+* **hooks:** formalize canary verification steps ([#851](https://github.com/devseunggwan/praxis/issues/851)) ([f266f14](https://github.com/devseunggwan/praxis/commit/f266f1459bebe07ccd332b30f9b7d7fea97f0ae4))
+* **worktree-merge-cleanup:** guard prune blast radius ([#867](https://github.com/devseunggwan/praxis/issues/867)) ([d689960](https://github.com/devseunggwan/praxis/commit/d689960d523c8516a69b4dea1d0742e7c84be912))
+
 ## [7.5.0](https://github.com/devseunggwan/praxis/compare/v7.4.0...v7.5.0) (2026-07-22)
 
 
