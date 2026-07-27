@@ -19,6 +19,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 UNWRAPPED="$TMP_DIR/unwrapped.md"
 WRAPPED="$TMP_DIR/wrapped.md"
+INDENTED="$TMP_DIR/indented.md"
 
 cat >"$UNWRAPPED" <<'EOF'
 # Example
@@ -41,25 +42,48 @@ can reveal a removal
 that never happened.
 EOF
 
+# Same sentence again, but wrapped inside a markdown list item so every
+# continuation line carries indentation. This is the shape most of this repo's
+# prose actually has, and replacing only the newline leaves the indent behind
+# as extra spaces at the join — so this fixture is what proves the helper
+# normalises the wrap boundary rather than merely the newline character.
+cat >"$INDENTED" <<'EOF'
+# Example
+
+- The prunable and locked markers
+  are precisely
+  the forensic evidence for
+  what actually happened during cleanup, and a diff against the snapshot
+      can reveal a removal
+  that never happened.
+EOF
+
 # shellcheck source=./_assert_lib.sh
 source "$SCRIPT_DIR/_assert_lib.sh"
 
 RESULTS_MATCH=1
 FAIL_DETAIL=""
 
-for target in "$UNWRAPPED" "$WRAPPED"; do
+for target in "$UNWRAPPED" "$WRAPPED" "$INDENTED"; do
   assert_lib_init "$target"
   assert_present "forensic evidence fragment" "are precisely the forensic evidence"
   assert_present "removal fragment" "a removal that never happened"
   assert_absent "unrelated string is absent" "this string is not in the doc"
 
-  if [ "$target" = "$UNWRAPPED" ]; then
-    unwrapped_pass=$PASS
-    unwrapped_fail=$FAIL
-  else
-    wrapped_pass=$PASS
-    wrapped_fail=$FAIL
-  fi
+  case "$target" in
+    "$UNWRAPPED")
+      unwrapped_pass=$PASS
+      unwrapped_fail=$FAIL
+      ;;
+    "$WRAPPED")
+      wrapped_pass=$PASS
+      wrapped_fail=$FAIL
+      ;;
+    *)
+      indented_pass=$PASS
+      indented_fail=$FAIL
+      ;;
+  esac
 done
 
 echo ""
@@ -77,9 +101,16 @@ else
   RESULTS_MATCH=0
 fi
 
+if [ "$indented_pass" -eq 3 ] && [ "$indented_fail" -eq 0 ]; then
+  echo "PASS  [indented variant: all 3 assertions pass despite list continuation indent]"
+else
+  echo "FAIL  [indented variant: expected 3 pass/0 fail, got $indented_pass pass/$indented_fail fail]"
+  RESULTS_MATCH=0
+fi
+
 echo ""
 if [ "$RESULTS_MATCH" -eq 1 ]; then
-  echo "Passed: 2  Failed: 0"
+  echo "Passed: 3  Failed: 0"
   exit 0
 else
   echo "Passed: 0  Failed: 1"

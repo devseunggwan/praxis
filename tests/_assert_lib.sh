@@ -39,11 +39,21 @@ assert_lib_init() {
     echo "FAIL: target not found at $_ASSERT_TARGET" >&2
     exit 1
   fi
-  # Replace every newline with a single space so a fixed-string match is
-  # insensitive to where prose wraps. Do NOT squeeze pre-existing spaces —
-  # that would also destroy meaningful intra-line indentation (e.g. nested
-  # markdown list markers inside a code fence).
-  _ASSERT_NORMALIZED="$(tr '\n' ' ' <"$_ASSERT_TARGET")"
+  # Collapse each newline *and the indentation that follows it* into a single
+  # space, so a fixed-string match is insensitive to where prose wraps. The
+  # trailing indent matters: most of this repo's prose lives in markdown list
+  # items, whose continuation lines are indented, so replacing only the newline
+  # leaves "precisely" + "\n  the" as "precisely   the" and the match still
+  # fails — the exact fragility this helper exists to remove.
+  #
+  # Indentation NOT adjacent to a wrap point is preserved, so nested list
+  # markers inside a code fence still compare as written.
+  #
+  # sed idiom: :a/N/$!ba slurps the whole file into the pattern space (the file
+  # is a SKILL.md, not a log), then one global substitution does the join.
+  # [[:blank:]] rather than \t — BSD sed does not read \t as a tab.
+  _ASSERT_NORMALIZED="$(sed -e ':a' -e 'N' -e '$!ba' \
+    -e 's/\n[[:blank:]]*/ /g' "$_ASSERT_TARGET")"
   PASS=0
   FAIL=0
   FAILED_NAMES=()
