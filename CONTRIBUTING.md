@@ -421,15 +421,26 @@ artifacts in sync.
 ## Testing
 
 ```bash
-# Run the full test suite (pytest + shell tests + manifest check) from the repo root
+# Run the full test suite (tests + manifest checks + static lint) from the repo root
 bash scripts/run-tests.sh
 ```
 
-This is the single entry point. It runs pytest, all shell-based hook tests, and
-`scripts/check-plugin-manifests.py` under one exit code gate.
+This is the single entry point. It runs pytest, all shell-based hook tests,
+`scripts/check-plugin-manifests.py`, `scripts/check-hook-token-invariants.py`,
+`ruff check`, and `shellcheck` under one exit code gate, plus an advisory
+markdownlint pass over the markdown files your branch changed.
 
-CI runs the same command on every push and pull request via
-`.github/workflows/test.yml`.
+`ruff` and `shellcheck` skip with an explicit `SKIPPED:` line when the tool is
+not installed, so a missing toolchain does not block you — but the
+corresponding CI job still runs, so install them if you want local parity.
+
+CI invokes this runner from the `test` job in `.github/workflows/ci.yml`. It is
+not the whole of CI: `ci.yml` additionally runs `ruff`, `shellcheck`,
+`markdownlint`, `actionlint`, `gitleaks`, and `link-check` as separate jobs,
+and CodeQL's `analyze` job runs from its own `.github/workflows/codeql.yml`.
+Those jobs are authoritative. The runner mirrors `ruff`, `shellcheck`, and
+`markdownlint` so they surface before you open a PR; the rest stay CI-only
+because they depend on network access, tokens, or a full-history scan.
 
 New hooks must ship with a test under `tests/hooks/<role>/`:
 
