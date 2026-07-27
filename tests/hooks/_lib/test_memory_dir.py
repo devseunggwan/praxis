@@ -58,6 +58,7 @@ def test_slugify_adjacent_specials_not_collapsed():
 def _fallback_fixture(tmp_path, monkeypatch):
     """Point HOME/cwd at a fake tree whose cwd contains a `.` (bug trigger)."""
     monkeypatch.delenv("PRAXIS_MEMORY_DIR", raising=False)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: FAKE_CWD)
     memory = tmp_path / ".claude" / "projects" / FAKE_SLUG / "memory"
@@ -74,6 +75,7 @@ def test_fallback_resolves_cwd_with_dot(tmp_path, monkeypatch):
 
 def test_fallback_dir_absent_returns_none(tmp_path, monkeypatch):
     monkeypatch.delenv("PRAXIS_MEMORY_DIR", raising=False)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: FAKE_CWD)
     assert _memory_dir.resolve_memory_dir() is None
@@ -89,10 +91,35 @@ def test_env_override_existing_dir(tmp_path, monkeypatch):
 def test_env_override_missing_dir_returns_none(tmp_path, monkeypatch):
     # Env var is authoritative when set: no fallback attempt on a missing dir.
     monkeypatch.setenv("PRAXIS_MEMORY_DIR", str(tmp_path / "does-not-exist"))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: FAKE_CWD)
     (tmp_path / ".claude" / "projects" / FAKE_SLUG / "memory").mkdir(parents=True)
     assert _memory_dir.resolve_memory_dir() is None
+
+
+# --------------------------------------------------------------------------- #
+# CLAUDE_CONFIG_DIR relocation (#853)
+# --------------------------------------------------------------------------- #
+
+def test_claude_config_dir_relocates_fallback(tmp_path, monkeypatch):
+    # #853 core regression: when CLAUDE_CONFIG_DIR points off ~/.claude, the
+    # fallback must read from THAT root, not the hardcoded ~/.claude default
+    # (which is left empty here to prove the relocated path is what resolves).
+    monkeypatch.delenv("PRAXIS_MEMORY_DIR", raising=False)
+    relocated = tmp_path / "relocated-config"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(relocated))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: FAKE_CWD)
+    memory = relocated / "projects" / FAKE_SLUG / "memory"
+    memory.mkdir(parents=True)
+    assert _memory_dir.resolve_memory_dir() == str(memory)
+
+
+def test_claude_config_dir_unset_falls_back_to_home_claude(tmp_path, monkeypatch):
+    # No CLAUDE_CONFIG_DIR → default remains ~/.claude (back-compat).
+    memory = _fallback_fixture(tmp_path, monkeypatch)
+    assert _memory_dir.resolve_memory_dir() == str(memory)
 
 
 # --------------------------------------------------------------------------- #
@@ -112,6 +139,7 @@ def test_worktree_cwd_resolves_to_main_project_memory(tmp_path, monkeypatch):
     # Core #824 regression: from a linked-worktree cwd the cwd-slug dir does
     # not exist, but the main worktree (parent of --git-common-dir) does.
     monkeypatch.delenv("PRAXIS_MEMORY_DIR", raising=False)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: WORKTREE_CWD)
     monkeypatch.setattr(
@@ -127,6 +155,7 @@ def test_worktree_cwd_resolves_to_main_project_memory(tmp_path, monkeypatch):
 def test_worktree_fallback_git_absent_returns_none(tmp_path, monkeypatch):
     # Fail-safe: any git error (binary absent, not a repo) → current behavior.
     monkeypatch.delenv("PRAXIS_MEMORY_DIR", raising=False)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: WORKTREE_CWD)
 
@@ -140,6 +169,7 @@ def test_worktree_fallback_git_absent_returns_none(tmp_path, monkeypatch):
 
 def test_worktree_fallback_git_error_returns_none(tmp_path, monkeypatch):
     monkeypatch.delenv("PRAXIS_MEMORY_DIR", raising=False)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: WORKTREE_CWD)
     monkeypatch.setattr(
@@ -156,6 +186,7 @@ def test_main_worktree_same_as_cwd_skips_retry(tmp_path, monkeypatch):
     # the `!= cwd` guard must skip the redundant retry and return None when
     # the (identical) slug dir is absent.
     monkeypatch.delenv("PRAXIS_MEMORY_DIR", raising=False)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: FAKE_CWD)
     monkeypatch.setattr(

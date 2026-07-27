@@ -16,7 +16,11 @@ Both hooks now import from here so the resolution semantics cannot drift.
 Resolution order:
   1. `PRAXIS_MEMORY_DIR` env var — when set, it is authoritative: return it
      if it is an existing directory, else None (no fallback attempt)
-  2. fallback `~/.claude/projects/{slugified-cwd}/memory` if it exists
+  2. fallback `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/{slugified-cwd}/memory`
+     if it exists (#853: `CLAUDE_CONFIG_DIR` relocates Claude Code's config
+     root off the `~/.claude` default — a hardcoded `~/.claude` silently
+     reads the wrong/stale store on any host where that var is set and not
+     symlinked back to `~/.claude`)
   3. linked-worktree fallback (#824): when 2 misses, resolve the main
      worktree via `git rev-parse --git-common-dir` (its parent dir is the
      main worktree) and retry with THAT path's slug — Claude Code keys the
@@ -53,6 +57,16 @@ def slugify_project_path(path: str) -> str:
     return SLUG_CHAR_RE.sub("-", path)
 
 
+def _claude_config_dir(home: str) -> str:
+    """Claude Code's config root: `CLAUDE_CONFIG_DIR` override, else `~/.claude`.
+
+    #853: this resolver previously hardcoded `home + "/.claude"`, silently
+    ignoring `CLAUDE_CONFIG_DIR` when Claude Code's config root is relocated.
+    """
+    override = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    return override if override else os.path.join(home, ".claude")
+
+
 def _main_worktree_path() -> str | None:
     """Return the main worktree's absolute path, or None outside git.
 
@@ -86,9 +100,10 @@ def resolve_memory_dir() -> str | None:
         return env_dir if os.path.isdir(env_dir) else None
 
     home = os.path.expanduser("~")
+    config_dir = _claude_config_dir(home)
     cwd = os.getcwd()
     slug = slugify_project_path(cwd)
-    fallback = os.path.join(home, ".claude", "projects", slug, "memory")
+    fallback = os.path.join(config_dir, "projects", slug, "memory")
     if os.path.isdir(fallback):
         return fallback
 
@@ -98,7 +113,7 @@ def resolve_memory_dir() -> str | None:
     main_path = _main_worktree_path()
     if main_path and main_path != cwd:
         main_fallback = os.path.join(
-            home, ".claude", "projects", slugify_project_path(main_path), "memory"
+            config_dir, "projects", slugify_project_path(main_path), "memory"
         )
         if os.path.isdir(main_fallback):
             return main_fallback
