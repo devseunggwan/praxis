@@ -175,6 +175,64 @@ earlier step is easily misread as "cleanup done". Run steps separately; after a
 fragile step (worktree remove / pull) fails, re-verify primitive state with
 `git worktree list` / `git branch | grep`.
 
+## Squash merge under bulk cleanup — the merged-ness oracle
+
+The unified sequence above cleans up **one** worktree right after its own PR
+merge, where `gh pr merge` itself is the merged-ness proof. Bulk cleanup of N
+already-merged local branches (no `gh pr merge` call in the loop) needs its
+own oracle, and under a squash-merge repo the obvious ones are wrong.
+
+- **`git branch --merged` is invalid.** It answers "is this branch's tip an
+  ancestor of `<base>`?" — true for a fast-forward or merge-commit, but a
+  squash merge creates a brand-new commit on `<base>` that is never an
+  ancestor of the original branch tip. A genuinely merged squash branch shows
+  up as **not** merged by this check.
+- **`git diff base...branch` (or `--stat`) is equally invalid**, for the
+  mirror reason: 3-dot diff shows the branch's unique commits relative to
+  their merge-base with `<base>`, and squash does not rewrite or remove those
+  commits from the branch ref — it only adds a new, unrelated commit to
+  `<base>`. A squash-merged branch still reports the same non-empty diff a
+  never-merged branch would, so an empty-diff check can never fire true and a
+  non-empty one can never rule the branch out.
+- **Valid oracle — tip SHA vs `headRefOid`, plus PR `state`.** Compare the
+  branch's local tip against the PR's recorded head SHA, then check the PR
+  closed as merged:
+
+  ```bash
+  git rev-parse <branch>
+  gh pr list --search "head:<branch>" --json number,headRefOid,state,mergedAt
+  ```
+
+  (`gh pr view <N> --json headRefOid,state,mergedAt` works the same way when
+  the PR number is already known.) The branch is safe to delete only when
+  **both** hold: the local tip SHA equals `headRefOid`, **and** `state` is
+  `MERGED` (not `OPEN`/`CLOSED`). `state` alone is insufficient — a PR can be
+  merged and the local branch since amended with unpushed commits, in which
+  case the tip SHA no longer matches the merged head and the extra commits
+  would be lost by deleting it.
+- Do not write verdict language ("safe to delete", "confirmed merged") before
+  this two-step check has actually run against live `gh` output — a plausible
+  guess from branch name or commit message is not evidence.
+
+### Bulk branch-delete procedure
+
+1. **Enumerate candidates**: list local branches to review (e.g.
+   `git branch --format='%(refname:short)'`, excluding the base branch).
+2. **Look up each branch's PR** with
+   `gh pr list --search "head:<branch>" --json number,headRefOid,state,mergedAt`.
+   - **No PR found** (never pushed, or pushed to a fork/deleted remote): this
+     branch is not tracked by the oracle above — fall back to a separate,
+     manual path (inspect the branch's own commits / confirm with the user)
+     rather than assuming it is safe or unsafe.
+3. **Confirm `state == "MERGED"`.** `OPEN` or `CLOSED` (without `mergedAt`)
+   means do not delete.
+4. **Compare tip SHA**: `git rev-parse <branch>` must equal the PR's
+   `headRefOid`. A mismatch means the local branch has commits the merged PR
+   never saw — do not delete without inspecting the difference first.
+5. Only after both checks pass, `git branch -D <branch>` (`-D` because the
+   squash commit is not an ancestor of the branch tip, so `-d` refuses with
+   "not fully merged" even though the PR is in fact merged).
+
 ## Relationship to enforcement
 
 | Layer | Home | Covers |
@@ -194,3 +252,8 @@ does not (and structurally cannot) enforce.
   out of scope here.
 - Worktree-recovery after an accidental removal is a separate concern (recover
   via `git worktree add`, never `git clone`).
+- The bulk branch-delete oracle covers branches with a discoverable PR only
+  (`gh pr list --search "head:<branch>"` returns a result). A branch pushed to
+  a fork, or whose PR/remote was deleted, has no `headRefOid` to compare
+  against — that case is out of scope here and needs a separate, manual
+  review path.
