@@ -212,6 +212,31 @@ assert_present \
   "never \`git clone\`"
 
 # ---------------------------------------------------------------------------
+# 7. Squash merged-ness oracle states every condition it depends on
+#
+# The oracle is a delete gate, so a silently weakened one is worse than none:
+# dropping --state merged makes it match nothing (every branch reads as
+# "no PR found"), and dropping baseRefName lets a branch merged into a sibling
+# base pass while cleaning this one.
+# ---------------------------------------------------------------------------
+
+assert_present \
+  "oracle query filters to merged PRs" \
+  "--state merged"
+
+assert_present \
+  "oracle explains why --state merged is required" \
+  "defaults to \`--state open\`"
+
+assert_present \
+  "oracle checks the merge base, not just state" \
+  "\`baseRefName\` equals the \`<base>\` you are cleaning up"
+
+assert_present \
+  "3-dot diff is named as an invalid oracle" \
+  "\`git diff base...branch\`"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
