@@ -430,9 +430,17 @@ This is the single entry point. It runs pytest, all shell-based hook tests,
 `ruff check`, and `shellcheck` under one exit code gate, plus an advisory
 markdownlint pass over the markdown files your branch changed.
 
-`ruff` and `shellcheck` skip with an explicit `SKIPPED:` line when the tool is
-not installed, so a missing toolchain does not block you — but the
-corresponding CI job still runs, so install them if you want local parity.
+All three static checks — `ruff`, `shellcheck`, and `markdownlint` — skip with
+an explicit `SKIPPED:` line when the tool is not installed, so a missing
+toolchain does not block you. The corresponding CI job still runs either way,
+so install them if you want local parity.
+
+The markdownlint pass normally covers only the markdown your branch changed,
+measured against `origin/main`. When `origin/main` is not available — a shallow
+clone, or a fork that has not fetched upstream — it prints
+`NOTE: origin/main unavailable` and falls back to linting every tracked
+markdown file, which surfaces the repo's existing backlog. It stays advisory in
+both modes and never fails the run.
 
 CI invokes this runner from the `test` job in `.github/workflows/ci.yml`. It is
 not the whole of CI: `ci.yml` additionally runs `ruff`, `shellcheck`,
