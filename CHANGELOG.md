@@ -5,6 +5,37 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.7.0](https://github.com/devseunggwan/praxis/compare/v7.6.0...v7.7.0) (2026-07-28)
+
+
+### Added
+
+* **hook:** advisory for perf multiplier without timing artifact ([#888](https://github.com/devseunggwan/praxis/issues/888)) ([105a7f9](https://github.com/devseunggwan/praxis/commit/105a7f9cd0ee5a0f9dd95a53daf1dad360eeb55b)), closes [#850](https://github.com/devseunggwan/praxis/issues/850)
+* **hook:** block bare git worktree prune without snapshot ([#881](https://github.com/devseunggwan/praxis/issues/881)) ([363d6c7](https://github.com/devseunggwan/praxis/commit/363d6c74b10ccd02141b9c470dab72cd85ec8150)), closes [#870](https://github.com/devseunggwan/praxis/issues/870)
+* **hook:** cover negative-polarity PR state claims ([#884](https://github.com/devseunggwan/praxis/issues/884)) ([318fc0e](https://github.com/devseunggwan/praxis/commit/318fc0e6890f14b59d15c90f1e80a67724bc2fd9))
+* **hook:** gate PR-claims lacking same-turn mutation ([#880](https://github.com/devseunggwan/praxis/issues/880)) ([7ba3a03](https://github.com/devseunggwan/praxis/commit/7ba3a0317e0ffb21af37d4805dfbe60f89707c55)), closes [#868](https://github.com/devseunggwan/praxis/issues/868)
+* **hooks:** advisory for cwd-dependent relative execution ([#882](https://github.com/devseunggwan/praxis/issues/882)) ([726abf9](https://github.com/devseunggwan/praxis/commit/726abf95c917070ec7bf3f995328b3ec3389e7b8)), closes [#852](https://github.com/devseunggwan/praxis/issues/852)
+* **hooks:** cover squash-merge title length ([#890](https://github.com/devseunggwan/praxis/issues/890)) ([a51d83b](https://github.com/devseunggwan/praxis/commit/a51d83b0b7454493127fbd90ecb69a378d96b4c9))
+* **hooks:** guard force-push in bash commands ([#886](https://github.com/devseunggwan/praxis/issues/886)) ([20385bd](https://github.com/devseunggwan/praxis/commit/20385bd9e6817d66de3593ce8eba76b6b037afff))
+* **hooks:** stop-lane gate for prose proposal blocks ([#885](https://github.com/devseunggwan/praxis/issues/885)) ([b97b541](https://github.com/devseunggwan/praxis/commit/b97b541c7e56398c1136a4740fbd476718d56503))
+* **hook:** warn on suppressed-stderr negative-verdict fallback ([#896](https://github.com/devseunggwan/praxis/issues/896)) ([1381f4f](https://github.com/devseunggwan/praxis/commit/1381f4f54c26bfef852a1535b7b5952e49ae4ea0))
+* **skills:** file-based agent report handoff ([#894](https://github.com/devseunggwan/praxis/issues/894)) ([1918eae](https://github.com/devseunggwan/praxis/commit/1918eaebcbce1c8757868e0f948fddc20bbd2334))
+* **telemetry:** instrument impl.sh hooks ([#892](https://github.com/devseunggwan/praxis/issues/892)) ([c8454f4](https://github.com/devseunggwan/praxis/commit/c8454f49a9b82bb7ff0e94acc8eff922c64f4ab9))
+
+
+### Fixed
+
+* **hooks:** honor CLAUDE_CONFIG_DIR in memory resolver ([#878](https://github.com/devseunggwan/praxis/issues/878)) ([337d7c6](https://github.com/devseunggwan/praxis/commit/337d7c60ce78793769b2ba12f2eb1b571108e795)), closes [#853](https://github.com/devseunggwan/praxis/issues/853)
+* **telemetry:** isolate test writes from ledger ([#883](https://github.com/devseunggwan/praxis/issues/883)) ([e4df858](https://github.com/devseunggwan/praxis/commit/e4df8582842098ffe73f9b29127dccb28a6addc3))
+* **tests:** guard mktemp -d failure across the suite ([#898](https://github.com/devseunggwan/praxis/issues/898)) ([1980c6e](https://github.com/devseunggwan/praxis/commit/1980c6efd3dac115c6c6d3f360e82d214fcc2231))
+
+
+### Changed
+
+* add lint tier to run-tests.sh ([#875](https://github.com/devseunggwan/praxis/issues/875)) ([b3ab7db](https://github.com/devseunggwan/praxis/commit/b3ab7db1ab41f2971b8e1e1c9ec1591c3f0a9b40)), closes [#866](https://github.com/devseunggwan/praxis/issues/866)
+* **contributing:** qualify canary lag figures ([#895](https://github.com/devseunggwan/praxis/issues/895)) ([15ae2ce](https://github.com/devseunggwan/praxis/commit/15ae2cea17ea23909abe0fa72cc0ecd15162891f))
+* **worktree-merge-cleanup:** add squash merged-ness oracle ([#879](https://github.com/devseunggwan/praxis/issues/879)) ([485dc34](https://github.com/devseunggwan/praxis/commit/485dc3462112145e1301404fafef46392b67af01)), closes [#871](https://github.com/devseunggwan/praxis/issues/871)
+
 ## [7.6.0](https://github.com/devseunggwan/praxis/compare/v7.5.0...v7.6.0) (2026-07-27)
 
 
