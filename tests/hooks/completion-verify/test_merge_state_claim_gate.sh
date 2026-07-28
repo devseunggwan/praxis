@@ -41,6 +41,36 @@ elif evidence == "baserefname-only":
 elif evidence == "branch-contains-long":
     asst_blocks.append({"type": "tool_use", "name": "Bash",
                         "input": {"command": "git branch --merged --contains abc123"}})
+elif evidence == "gh-864":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "gh pr view 864 --json state"}})
+elif evidence == "gh-other":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "gh pr view 111 --json state"}})
+elif evidence == "mcp-864":
+    asst_blocks.append({"type": "tool_use", "name": "mcp__github__pull_request_read",
+                        "input": {"pullNumber": 864}})
+elif evidence == "gh-1864":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "gh pr view 1864 --json state"}})
+elif evidence == "mcp-1864":
+    asst_blocks.append({"type": "tool_use", "name": "mcp__github__pull_request_read",
+                        "input": {"pullNumber": 1864}})
+elif evidence == "gh-864-in-slug":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "gh pr view 111 --repo org/project-864 --json state"}})
+elif evidence == "mcp-864-in-owner":
+    asst_blocks.append({"type": "tool_use", "name": "mcp__github__pull_request_read",
+                        "input": {"owner": "team864", "pullNumber": 111}})
+elif evidence == "gh-864-merge":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "gh pr merge 864 --squash"}})
+elif evidence == "mcp-864-merge":
+    asst_blocks.append({"type": "tool_use", "name": "mcp__github__merge_pull_request",
+                        "input": {"pullNumber": 864}})
+elif evidence == "gh-864-url":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "gh pr view https://github.com/o/r/pull/864 --json state"}})
 if asst_blocks:
     events.append({"message": {"role": "assistant", "content": asst_blocks}})
 events.append({"message": {"role": "assistant",
@@ -51,7 +81,7 @@ with open(path, "w", encoding="utf-8") as f:
 PY
 }
 
-# run_case <advisory|advisory-strict|silent> <name> <stop_payload_extra_json> [ENV=v ...]
+# run_case <advisory|advisory-unchanged-only|advisory-strict|silent> <name> <stop_payload_extra_json> [ENV=v ...]
 run_case() {
   local expected="$1" name="$2" extra="$3"
   shift 3
@@ -75,6 +105,22 @@ import json, sys
 d = json.load(sys.stdin)
 assert "[merge-state-claim-gate]" in d["systemMessage"]
 assert "decision" not in d
+' || ok=0
+      ;;
+    advisory-unchanged-only)
+      # the advisory carries ONLY the per-number persistence guidance — the
+      # generic "no fresh state query" sentence belongs to the merged claim,
+      # which the generic query already cleared.
+      [ "$rc" -eq 0 ] || ok=0
+      [ -z "$err" ] || ok=0
+      printf '%s' "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+m = d["systemMessage"]
+assert "[merge-state-claim-gate]" in m
+assert "decision" not in d
+assert "still-open / unchanged / no-loss" in m
+assert "asserts a" not in m, m
 ' || ok=0
       ;;
     advisory-strict)
@@ -319,6 +365,84 @@ if [ "$rc" -eq 0 ] && [ -z "$err" ]; then
 else
   echo "FAIL  [malformed-json] rc=$rc err=<$err>"; FAIL=$((FAIL + 1))
 fi
+
+# =====================================================================
+# Negative-polarity persistence claims (issue #869)
+# =====================================================================
+
+# --- motivating incident verbatim: still-open + no-loss, zero re-query -----
+build_transcript "PR #864 는 여전히 OPEN, 커밋 유실 없음." none
+run_case advisory "unchanged-incident-verbatim-kr" '{}'
+
+# --- same claim, cleared by a per-number gh query --------------------------
+build_transcript "PR #864 는 여전히 OPEN, 커밋 유실 없음." gh-864
+run_case silent "unchanged-cleared-by-matching-number-query" '{}'
+
+# --- same claim, a DIFFERENT number's query does NOT clear it -------------
+build_transcript "PR #864 는 여전히 OPEN, 커밋 유실 없음." gh-other
+run_case advisory "unchanged-not-cleared-by-other-number-query" '{}'
+
+# --- cleared by a per-number GitHub MCP read -------------------------------
+build_transcript "PR #864 는 여전히 OPEN, 커밋 유실 없음." mcp-864
+run_case silent "unchanged-cleared-by-mcp-number-read" '{}'
+
+# --- EN "has not been merged" persistence claim ----------------------------
+build_transcript "PR #864 has not been merged yet." none
+run_case advisory "unchanged-en-not-merged-no-query" '{}'
+
+build_transcript "PR #864 has not been merged yet." gh-864
+run_case silent "unchanged-en-not-merged-cleared" '{}'
+
+# --- "no commits lost" phrasing --------------------------------------------
+build_transcript "No commits were lost from PR #864." none
+run_case advisory "unchanged-no-commits-lost" '{}'
+
+# --- numberless unchanged claim -> silent (deliberate narrowing, #869 scope)
+build_transcript "The branch still has no open PR." none
+run_case silent "unchanged-numberless-out-of-scope" '{}'
+
+build_transcript "여전히 열려 있습니다." none
+run_case silent "unchanged-numberless-kr-out-of-scope" '{}'
+
+# --- mixed message: a cleared "merged" claim alongside an uncleared --------
+# unchanged claim for a DIFFERENT number -> advisory carries only the
+# unchanged sentence (the generic query clears "merged" but not #864).
+# The two claims MUST sit on separate lines: `detect_claims()` is line-scoped
+# and the `유실 없음` negation would otherwise disqualify the merged claim
+# sharing that line, so the intended path would never be exercised.
+build_transcript "PR #497 merged.
+PR #864 는 여전히 OPEN, 커밋 유실 없음." gh
+run_case advisory-unchanged-only "mixed-merged-cleared-unchanged-not" '{}'
+
+# --- number-collision regressions: a query for #1864 must NOT clear #864 ---
+build_transcript "PR #864 는 여전히 OPEN." gh-1864
+run_case advisory "unchanged-not-cleared-by-longer-number" '{}'
+
+build_transcript "PR #864 는 여전히 OPEN." mcp-1864
+run_case advisory "unchanged-not-cleared-by-longer-number-mcp" '{}'
+
+# --- the number must sit at the READ subcommand's target position ----------
+# (codex review on #884): whole-command scanning cleared #864 off an
+# unrelated PR whose repo slug carried the digits, and off a mutation that
+# says nothing about the post-merge state the claim asserts.
+build_transcript "PR #864 는 여전히 OPEN." gh-864-in-slug
+run_case advisory "unchanged-not-cleared-by-digits-in-repo-slug" '{}'
+
+build_transcript "PR #864 는 여전히 OPEN." mcp-864-in-owner
+run_case advisory "unchanged-not-cleared-by-digits-in-owner" '{}'
+
+build_transcript "PR #864 는 여전히 OPEN." gh-864-merge
+run_case advisory "unchanged-not-cleared-by-cli-mutation" '{}'
+
+build_transcript "PR #864 는 여전히 OPEN." mcp-864-merge
+run_case advisory "unchanged-not-cleared-by-mcp-mutation" '{}'
+
+build_transcript "PR #864 는 여전히 OPEN." gh-864-url
+run_case silent "unchanged-cleared-by-pr-url-read" '{}'
+
+# --- strict mode on an unchanged-only claim --------------------------------
+build_transcript "PR #864 는 여전히 OPEN, 커밋 유실 없음." none
+run_case advisory-strict "unchanged-strict-mode" '{}' PRAXIS_MERGE_CLAIM_STRICT=1
 
 echo "----"
 echo "PASS: $PASS / FAIL: $FAIL"
