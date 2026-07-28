@@ -209,6 +209,22 @@ run_case "git -C /tmp reset --hard" advisory "git -C /tmp reset --hard HEAD~1"
 run_case "git reset HEAD foo" silent "git reset HEAD foo"
 run_case "git reset --mixed" silent "git reset --mixed"
 
+# === ADVISORY — git push --force (issue #844) ==============================
+
+run_case "git push --force origin branch" advisory "git push --force origin branch"
+run_case "git push -f origin branch" advisory "git push -f origin branch"
+run_case "git push --force-with-lease origin branch" advisory "git push --force-with-lease origin branch"
+run_case "git push --force-with-lease=branch:sha origin branch (inline refspec)" advisory "git push --force-with-lease=branch:sha origin branch"
+run_case "git -C /tmp push --force (global flag)" advisory "git -C /tmp push --force origin branch"
+run_case "git push origin branch --force (flag after refspec)" advisory "git push origin branch --force"
+
+# === SILENT — git push without a force flag ================================
+
+run_case "git push origin branch" silent "git push origin branch"
+run_case "git push --no-force origin branch" silent "git push --no-force origin branch"
+run_case "git push --force-with-lease-typo (not the real flag)" silent "git push --force-with-lease-typo origin branch"
+run_case "git push -- --force (positional after --)" silent "git push -- --force"
+
 # === ADVISORY — find -delete ===============================================
 
 run_case "find /tmp -delete" advisory "find /tmp -name '*.bak' -delete"
@@ -364,6 +380,32 @@ if [ "$_uncaught_rc" -eq 0 ] && [ -z "$_uncaught_out" ]; then
 else
   echo "  FAIL  main() not wrapped by @fail_open (rc=$_uncaught_rc, out=$(echo "$_uncaught_out" | head -c 200))"
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("main() is wrapped by the shared @fail_open guard")
+fi
+
+# === ADVISORY — fixup-commit alternative appears only for force-push =======
+
+_fp_out=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "git push --force origin branch"}}))' \
+  | python3 "$HOOK" 2>&1 1>/dev/null)
+if echo "$_fp_out" | grep -q "git commit --fixup="; then
+  echo "PASS  [git push --force message includes fixup-commit alternative]"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL  [git push --force message includes fixup-commit alternative]"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("git push --force message includes fixup-commit alternative")
+fi
+
+_rm_out=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/x"}}))' \
+  | python3 "$HOOK" 2>&1 1>/dev/null)
+if echo "$_rm_out" | grep -q "git commit --fixup="; then
+  echo "FAIL  [rm -rf message does NOT include the fixup-commit hint]"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("rm -rf message does NOT include fixup-commit hint")
+else
+  echo "PASS  [rm -rf message does NOT include the fixup-commit hint]"
+  PASS=$((PASS + 1))
 fi
 
 # === Summary ==============================================================

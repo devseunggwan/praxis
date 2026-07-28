@@ -42,6 +42,7 @@ Fires when **both** are true:
 | Block-device redirect | `>` or `>>` targeting `/dev/sd*`, `/dev/nvme*`, `/dev/disk*`, `/dev/hd*` | `cat foo > /dev/sda`, `tar c . > /dev/nvme0n1` |
 | `git clean -f` | `git clean` with `-f` or `--force` (any bundled form) | `git clean -fd`, `git clean -fdx`, `git clean --force .` |
 | `git reset --hard` | `git reset` with `--hard` | `git reset --hard HEAD~1` |
+| `git push --force` | `git push` with `-f`, `--force`, or `--force-with-lease[=<refspec>]` | `git push --force origin branch`, `git push -f origin branch`, `git push --force-with-lease origin branch` |
 | `find … -delete` | `find` with `-delete` or `--delete` | `find /tmp -name '*.bak' -delete` |
 | `truncate -s 0` | `truncate -s 0` / `--size 0` / `-s0` / `--size=0` | `truncate -s 0 logfile` |
 | `shred` | argv[0] is `shred` | `shred sensitive.dat` |
@@ -52,6 +53,46 @@ Fires when **both** are true:
 These device targets are NOT flagged when used as redirect targets:
 
 `/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/zero`, `/dev/tty`
+
+### `git push --force*` — force-history-rewrite mutation (issue #844)
+
+`git push --force` / `-f` / `--force-with-lease[=<refspec>]` rewrites a
+published ref — the memory rule `force-history-rewrite-mutation` requires
+individual, explicit approval for this class of mutation, but until this
+issue there was no structural enforcement (`destructive-bash-guard` covered
+only `rm -rf` and `git clean -f`; a 2026-07-22 retrospect found the
+recurrence: two force-with-lease pushes executed without a prior surface,
+once from a delegated agent instruction and once directly, both bypassing
+the memory-only rule under an "unresponsive agent recovery" narrative).
+
+**Extend, not new sibling** — decided after surveying ≥2 sibling hooks
+(`gh-merge-worktree-precondition`, `commit-title-length-check` — both
+preflight-gate, ask/block severity) plus this hook's own existing `git
+clean -f` / `git reset --hard` rules. `destructive-bash-guard` already hosts
+git-subcommand-shape classifiers with the exact severity this issue asks
+for (advisory-by-default, MED severity, self-service bypass) — adding a new
+sibling hook would duplicate the tokenization/dispatch scaffold for a rule
+that fits the existing dispatch table's shape (one more `_is_git_*`
+classifier feeding `_classify_segment`). A new hook would be justified only
+if the severity needed to default to `ask`/`deny` (it does not — see
+"Task" §3 of the issue: "blast radius 참고: 자기 PR branch 대상이 대부분이라
+severity MED — advisory 우선").
+
+Detection: `git [-C <dir>|-c <k=v>|<bare flag>]* push ... (-f|--force|
+--force-with-lease[=<refspec>])`, scanning the tail after the `push` token
+and stopping at a literal `--` separator (so `git push -- --force` — a
+positional refspec named `--force` — does not false-positive). Matches exact
+tokens only, not bundled short flags — `git push` has few short flags and
+bundling a force flag with others is not an idiomatic form, so this mirrors
+the module's existing conservative-false-negative trade-off (see Known
+limitations).
+
+The advisory message conditionally appends a fixup-commit alternative
+(`git commit --fixup=<sha>` — squash merge absorbs it automatically, no
+force-push needed) and a `#844` reference **only** when a force-push reason
+is present — other destructive-command advisories are unaffected. This is
+the only rule in the module whose message body is reason-dependent; every
+other rule shares the same generic body.
 
 ### Outcome-proxy signal detection (issue #737)
 
@@ -115,6 +156,12 @@ bypass); the strict-mode env var has no effect on them.
 | `git clean -dn` | **SILENT** | dry-run (`-n`), no force |
 | `git reset --hard HEAD` | **ADVISORY** | git reset --hard |
 | `git reset HEAD foo` | **SILENT** | not --hard |
+| `git push --force origin branch` | **ADVISORY** | git push force (message includes fixup-commit alternative) |
+| `git push -f origin branch` | **ADVISORY** | short-flag force |
+| `git push --force-with-lease origin branch` | **ADVISORY** | force-with-lease |
+| `git push origin branch` | **SILENT** | no force flag |
+| `git push --no-force origin branch` | **SILENT** | explicit no-force |
+| `git push -- --force` | **SILENT** | `--force` is a positional refspec after `--` |
 | `find /tmp -name '*.tmp' -delete` | **ADVISORY** | find -delete |
 | `truncate -s 0 log.txt` | **ADVISORY** | truncate zero |
 | `truncate -s 100M file` | **SILENT** | non-zero size |
@@ -180,9 +227,15 @@ bash tests/hooks/advisory-nudge/test_destructive_bash_guard.sh
 ```
 
 Cases cover: every detection rule, false-positive guards (`rm -i`, `removed/`
-path, `git clean -n`, safe device targets, non-recursive chmod), compound
-command decomposition (`mkdir x && rm -rf x`), strict-mode JSON output,
-bypass env var, infrastructure fail-open, and the outcome-proxy signal rules
-(`git revert`, `gh pr close`, `gh issue reopen` — including that strict mode
-does NOT escalate them to `ask`, and that a compound command mixing a
+path, `git clean -n`, safe device targets, non-recursive chmod), the
+`git push --force`/`-f`/`--force-with-lease[=<refspec>]` rule (bare, short
+flag, inline-refspec form, global `-C` flag, flag positioned after the
+refspec) plus its negative cases (`--no-force`, a lookalike
+`--force-with-lease-typo`, `--force` as a positional after `--`), the
+reason-dependent fixup-commit hint appearing only on force-push advisories
+(never on `rm -rf`), compound command decomposition (`mkdir x && rm -rf x`),
+strict-mode JSON output, bypass env var, infrastructure fail-open, and the
+outcome-proxy signal rules (`git revert`, `gh pr close`, `gh issue reopen` —
+including that strict mode does NOT escalate them to `ask`, and that a
+compound command mixing a
 destructive match with a signal match emits both).

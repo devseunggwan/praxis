@@ -33,6 +33,9 @@ Detected surfaces (issue #463 enumeration):
     (NOT `> /dev/null` or `> /dev/stderr`)
   • `git clean -fdx` / `git clean -fd` / `git clean -fx` etc.
   • `git reset --hard`
+  • `git push --force` / `-f` / `--force-with-lease[=<refspec>]` (issue #844
+    — rewrites a published ref; advisory only, MED severity, message
+    suggests a fixup commit as the non-destructive alternative)
   • `find ... -delete`
   • `truncate -s 0` / `truncate --size 0`
   • `shred` (overwrite-and-delete)
@@ -302,6 +305,45 @@ def _is_git_reset_hard(argv: list[str]) -> bool:
     return any(tok == "--hard" for tok in argv[i + 1:])
 
 
+def _is_git_push_force(argv: list[str]) -> bool:
+    """True iff argv invokes `git push` with `-f`/`--force` or
+    `--force-with-lease[=<refspec>]`.
+
+    Mirrors `_is_git_reset_hard`'s subcommand-skip loop for `-C dir` /
+    `-c key=val` global flags. Matches exact tokens only (no bundled-short-
+    flag handling like `_is_rm_recursive_force`) — `git push` has few short
+    flags and bundling a force flag with others is not an idiomatic form, so
+    the conservative-false-negative trade-off documented for this module
+    applies here too (see spec.md Known limitations).
+
+    Issue #844: `git push --force*` rewrites a published ref, distinct from
+    the local-only `git reset --hard` above.
+    """
+    if not argv or os.path.basename(argv[0]) != "git":
+        return False
+    i = 1
+    n = len(argv)
+    while i < n:
+        tok = argv[i]
+        if tok in {"-C", "-c"} and i + 1 < n:
+            i += 2
+            continue
+        if tok.startswith("-"):
+            i += 1
+            continue
+        break
+    if i >= n or argv[i] != "push":
+        return False
+    for tok in argv[i + 1:]:
+        if tok == "--":
+            break
+        if tok in {"-f", "--force"}:
+            return True
+        if tok == "--force-with-lease" or tok.startswith("--force-with-lease="):
+            return True
+    return False
+
+
 def _is_find_delete(argv: list[str]) -> bool:
     if not argv or os.path.basename(argv[0]) != "find":
         return False
@@ -438,6 +480,8 @@ def _classify_segment(raw_argv: list[str]) -> str | None:
         return "`git clean -f` — force-delete untracked files"
     if _is_git_reset_hard(argv):
         return "`git reset --hard` — discard working-tree changes"
+    if _is_git_push_force(argv):
+        return "`git push --force`/`--force-with-lease`/`-f` — rewrites published ref history"
     if _is_find_delete(argv):
         return "`find ... -delete` — bulk filesystem delete"
     if _is_truncate_zero(argv):
@@ -474,6 +518,17 @@ _SIGNAL_HEADER = "[destructive-bash-guard] outcome-proxy signal detected"
 def _advisory_text(reasons: list[str], strict: bool) -> str:
     mode = "BLOCKED-for-ask (strict mode)" if strict else "ADVISORY"
     body_lines = "\n".join(f"    - {r}" for r in reasons)
+    is_force_push = any("git push" in r for r in reasons)
+    force_push_hint = ""
+    if is_force_push:
+        force_push_hint = (
+            "\n"
+            "  Force-pushing rewrites a published ref other agents/reviewers may\n"
+            "  already be looking at. If the branch already has an open PR, prefer\n"
+            "  a fixup commit instead: `git commit --fixup=<sha>` — squash merge\n"
+            "  (this repo's convention) absorbs it automatically, no rewrite needed.\n"
+        )
+    reference = "issue #463, #844" if is_force_push else "issue #463"
     return (
         f"{_ADVISORY_HEADER} — {mode}\n"
         "\n"
@@ -482,12 +537,13 @@ def _advisory_text(reasons: list[str], strict: bool) -> str:
         "  Destructive commands can permanently delete files, overwrite\n"
         "  partitions, or escalate privileges. Verify the target path and\n"
         "  scope before proceeding.\n"
+        f"{force_push_hint}"
         "\n"
         "  Bypass options:\n"
         "    • Skip this single call: PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH=1\n"
         "    • Soften strict mode: unset PRAXIS_DESTRUCTIVE_BASH_STRICT\n"
         "\n"
-        "  Reference: issue #463"
+        f"  Reference: {reference}"
     )
 
 
