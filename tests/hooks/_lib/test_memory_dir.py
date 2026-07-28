@@ -152,6 +152,27 @@ def test_worktree_cwd_resolves_to_main_project_memory(tmp_path, monkeypatch):
     assert _memory_dir.resolve_memory_dir() == str(memory)
 
 
+def test_worktree_cwd_honors_relocated_config_dir(tmp_path, monkeypatch):
+    # The two #853 fixes above only exercise the cwd-slug branch, and the #824
+    # test above only exercises the ~/.claude default — so the crossing of the
+    # two (relocated config root reached via the main-worktree slug) was the
+    # one path no test covered, even though it is the shape this repo actually
+    # runs in. ~/.claude is left empty so only the relocated root can answer.
+    monkeypatch.delenv("PRAXIS_MEMORY_DIR", raising=False)
+    relocated = tmp_path / "relocated-config"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(relocated))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: WORKTREE_CWD)
+    monkeypatch.setattr(
+        _memory_dir.subprocess,
+        "run",
+        lambda *a, **k: _FakeGitProc(f"{FAKE_CWD}/.git\n"),
+    )
+    memory = relocated / "projects" / FAKE_SLUG / "memory"
+    memory.mkdir(parents=True)
+    assert _memory_dir.resolve_memory_dir() == str(memory)
+
+
 def test_worktree_fallback_git_absent_returns_none(tmp_path, monkeypatch):
     # Fail-safe: any git error (binary absent, not a repo) → current behavior.
     monkeypatch.delenv("PRAXIS_MEMORY_DIR", raising=False)
