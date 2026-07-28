@@ -125,11 +125,23 @@ printf '{"transcript_path":"%s","session_id":"sess-rm"}' "$TMP/rm.jsonl" \
     bash "$ROOT_DIR/hooks/completion-verify/retrospect-mix-check/impl.sh" >/dev/null
 assert_record "$LEDGER" "retrospect-mix-check records pass" retrospect-mix-check pass sess-rm
 
-# codex-review-route — /codex:review advises
+# codex-review-route — /codex:review advises.
+#
+# The advisory fires on >= 2 non-bare worktrees, so it must run against a
+# repository this test builds rather than whichever checkout happens to host
+# the run: a developer machine mid-session has many worktrees and a CI runner
+# has exactly one, which would make the same assertion pass locally and fail
+# in CI.
+CR_REPO="$TMP/cr-repo"
+git init -q "$CR_REPO"
+: > "$CR_REPO/seed"
+git -C "$CR_REPO" add seed
+git -C "$CR_REPO" -c user.name=t -c user.email=t@e commit -qm seed
+git -C "$CR_REPO" worktree add -q -b second "$TMP/cr-wt2"
 LEDGER="$TMP/cr-led.jsonl"
 printf '{"prompt":"/codex:review","session_id":"sess-cr"}' \
-  | PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" \
-    bash "$ROOT_DIR/hooks/advisory-nudge/codex-review-route/impl.sh" >/dev/null
+  | (cd "$CR_REPO" && PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" \
+      bash "$ROOT_DIR/hooks/advisory-nudge/codex-review-route/impl.sh") >/dev/null
 assert_record "$LEDGER" "codex-review-route records advise" codex-review-route advise sess-cr
 
 # strike-counter — three strikes then a blocking stop
