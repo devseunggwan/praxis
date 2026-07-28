@@ -28,6 +28,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH` | `destructive-bash-guard` | Skip the destructive-command guard |
 | `PRAXIS_HOOK_BYPASS_SKILL_GATE` | `skill-gate-commands` | Skip the skill-gated-command preflight |
 | `PRAXIS_HOOK_BYPASS_WORKTREE_GATE` | `worktree-edit-gate` | Skip the worktree-edit preflight |
+| `PRAXIS_HOOK_BYPASS_WORKTREE_PRUNE_SNAPSHOT` | `worktree-prune-snapshot-gate` | Skip the snapshot-before-prune gate |
 | `PRAXIS_HOOK_BYPASS_MERGE_WORKTREE_GATE` | `gh-merge-worktree-precondition` | Skip the `gh pr merge --delete-branch` worktree-conflict precondition check |
 | `PRAXIS_HOOK_BYPASS_HUB_ENFORCE` | `block-child-repo-issue-create` | Skip the hub-mediated child-repo issue guard |
 | `PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT` | `postcompact-context` | Skip the post-compaction context advisory |
@@ -121,6 +122,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_POSTCOMPACT_CONTEXT_FILE` | `${TMPDIR}/praxis-postcompact-context-<sid>.json` | `postcompact-context` |
 | `PRAXIS_POSTCOMPACT_TAIL_LINES` | `100` | `postcompact-context` |
 | `PRAXIS_SESSION_INTENT_FILE` | `${TMPDIR}/praxis-session-intent-<sid>.json` | `session-intent` |
+| `PRAXIS_WORKTREE_PRUNE_SNAPSHOT_FILE` | `${TMPDIR}/praxis-worktree-prune-snapshot-<sid>.json` | `worktree-prune-snapshot-gate` |
 | `PRAXIS_MD_READ_HISTORY_FILE` | `${TMPDIR}/praxis-md-read-history-<sid>.json` | `pre-edit-md-escape-advisory` |
 | `PRAXIS_PBGUARD_TEST_*` | unset | `pre-edit-protected-branch-guard` — test-only injection (branch/status/repo-root/ignored/log) |
 
