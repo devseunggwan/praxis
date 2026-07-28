@@ -216,6 +216,28 @@ Step 2 의 raw git/PR 메타데이터는 *무엇이 바뀌었는지*만 전달�
 
 {task description from user}
 
+## Completion protocol (REQUIRED)
+
+작업을 마치면 **작업 중인 worktree 루트**에 `.agent-report.json` 을 씁니다.
+이 파일이 완료 보고의 정본이고, 채팅 메시지는 포인터일 뿐입니다.
+
+    {
+      "branch": "issue-123-feat-x",
+      "head_sha": "0123456789abcdef0123456789abcdef01234567",
+      "pushed": true,
+      "pr_url": "https://github.com/owner/repo/pull/456",
+      "tests": {"command": "./scripts/run-tests.sh", "passed": 507, "failed": 0},
+      "completed_at": "2026-07-28T09:00:00Z"
+    }
+
+
+- `pushed` 는 `git push` 가 **성공한 뒤에만** true. 커밋만 했으면 false.
+- `pr_url` 은 실제로 생성된 PR 이 없으면 `null` — 빈 문자열이나 예상 URL 금지.
+- `tests` 의 숫자는 실행한 명령의 출력에서 그대로 옮깁니다. 추정 금지.
+- 작업을 끝내지 못했으면 **파일을 쓰지 마세요.** 파일 부재 = 미완료입니다.
+
+마지막 메시지에는 `.agent-report.json` 의 절대 경로만 남깁니다.
+
 ---
 Report results in Korean.
 ```
@@ -365,6 +387,40 @@ Sent to {TARGET} ({session_name})
 cmux에서 {session_name} 탭을 확인하세요.
 ```
 
+### Step 7: Collect the Report (file, not prose)
+
+위임한 작업의 완료를 판정할 때는 **에이전트의 메시지를 읽지 않고**
+`{cwd}/.agent-report.json` 을 읽습니다. 이 단계는 위임 직후가 아니라,
+결과를 소비하기 직전(다음 단계 진입, 사용자 보고, 머지 판단) 에 실행합니다.
+
+**왜 파일인가.** prose 채널은 양극단으로 고장난 이력이 있습니다 —
+존재하지 않는 PR 을 생성 완료로 보고한 fabrication, 지시 2회에 무응답인
+silence. 어느 쪽도 메시지만 읽어서는 구분되지 않습니다. 파일 부재는
+결정론적으로 "미완료" 이고, 파일 존재는 필드별 재검증의 대상입니다.
+
+```bash
+REPORT="{cwd}/.agent-report.json"
+[ -f "$REPORT" ] || { echo "미완료: .agent-report.json 부재"; exit 1; }
+```
+
+읽은 값은 **그대로 믿지 않고** 필드마다 fresh 하게 재확인합니다. 보고서는
+에이전트가 쓴 것이므로 그 자체로는 증거가 아닙니다 — 아래 명령의 출력이
+증거입니다.
+
+| 필드 | 재검증 명령 | 불일치 시 |
+| --- | --- | --- |
+| `head_sha` + `pushed: true` | `git ls-remote origin refs/heads/<branch>` | remote SHA 가 없거나 다르면 push 미완료 — 보고서의 `pushed` 를 무시 |
+| `pr_url` | `gh pr view <url> --json state,headRefOid` | 조회 실패 = PR 부재(fabrication), `headRefOid` 불일치 = 보고 이후 커밋 존재 |
+| `tests` | 같은 명령을 직접 재실행 | 숫자 불일치 = 보고서 수치 신뢰 불가 |
+
+`pushed: false` 는 실패가 아니라 **정상적인 부분 완료** 입니다 — 커밋은
+있으나 push 는 남았다는 뜻이므로, 위임자가 push 를 이어받거나 에이전트에
+재지시합니다.
+
+**커버리지 한계 (명기).** 이 단계는 silence 를 *탐지* 할 뿐 원인을 진단하지
+않습니다 — 세션 crash 인지 장시간 도구 호출 대기인지는 파일 부재만으로
+구분되지 않으며, 그 판별은 이 스킬의 범위 밖입니다.
+
 ## Error Handling
 
 | Error | Recovery |
@@ -376,6 +432,9 @@ cmux에서 {session_name} 탭을 확인하세요.
 | `--session` 매칭 실패 | 사용 가능한 워크스페이스 목록을 보여주고 중단 |
 | `--account` 디렉토리 미존재 | 에러 메시지 출력 후 중단 |
 | distribute 분할 실패 | 분할 불가 시 단일 세션으로 fallback, 유저에게 알림 |
+| `.agent-report.json` 부재 | **미완료로 취급** — 완료 주장 메시지가 있어도 마찬가지. 에이전트에 재지시하거나 위임자가 인수 |
+| `.agent-report.json` JSON 파싱 실패 | 미완료로 취급. 파일 내용을 그대로 보여주고 중단 (부분 기록일 수 있으므로 삭제 금지) |
+| 보고서 필드 ↔ 재검증 불일치 | 재검증 출력을 채택하고 보고서 값은 폐기. 어긋난 필드를 사용자에게 명시 |
 
 ## Architecture
 
@@ -453,7 +512,8 @@ user: /cmux-delegate "full code review" --model claude:opus --account claude-2
 
 ## Limitations
 
-- 결과 파일 자동 수집/보고 미지원 → 사용자가 cmux에서 직접 확인
+- 완료 판정은 `.agent-report.json` 으로 결정론적이지만, **작업 산출물 자체의 자동 수집은 미지원** → 사용자가 cmux에서 직접 확인
+- silence 는 *탐지* 만 가능하고 원인(세션 crash vs 장시간 도구 대기)은 판별 불가 — 파일 부재만으로는 구분되지 않음
 - 작업 유형별 템플릿 미지원 → 사용자가 프롬프트에 직접 명시
 - distribute 모드의 자동 분할은 섹션 헤더 기반 — 비정형 프롬프트는 수동 분할 필요
 - **Handoff 합성 품질은 오케스트레이터 대화에 의존** (Step 2.5) — 대화 맥락이 빈약하면 raw git 맥락만 전달되고, fresh-eyes 위임에서는 편향 방지를 위해 의도적으로 최소화됨
