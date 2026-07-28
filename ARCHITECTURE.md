@@ -132,6 +132,7 @@ else:
 | `cli-flag-incompat-advisory` | PreToolUse | Advisory nudge for known mode-incompatible flag combos in other CLIs (`git merge-tree --name-only` 3-arg form, `kubectl --use-protocol-buffers`) — issue #248 | [hooks/advisory-nudge/cli-flag-incompat-advisory/spec.md](hooks/advisory-nudge/cli-flag-incompat-advisory/spec.md) |
 | `inspection-chain-advisory` | PreToolUse | Advisory nudge when 2+ inspection-only commands are chained with `&&` (non-match exit silently drops downstream probes) — issue #469 | [hooks/advisory-nudge/inspection-chain-advisory/spec.md](hooks/advisory-nudge/inspection-chain-advisory/spec.md) |
 | `pipefail-advisory` | PreToolUse | Advisory nudge when a mutating `git`/`gh` command is piped into `tail`/`head`/`grep` without `set -o pipefail` (non-zero exit masked by the sink's own exit 0) — issue #788 | [hooks/advisory-nudge/pipefail-advisory/spec.md](hooks/advisory-nudge/pipefail-advisory/spec.md) |
+| `fallback-negative-warn` | PreToolUse | Advisory nudge when a suppressed-stderr `\|\|` fallback prints negative-verdict vocabulary — command failure and true-negative collapse into the same string — issue #893 | [hooks/advisory-nudge/fallback-negative-warn/spec.md](hooks/advisory-nudge/fallback-negative-warn/spec.md) |
 | `secret-print-redaction-advisory` | PreToolUse | Advisory nudge when a live Bash command or an agent-authored script both fetches a secret and routes the value to stdout unmasked (2-signal AND gate; masked/digest output and bare interactive fetches silent) — issue #827 | [hooks/advisory-nudge/secret-print-redaction-advisory/spec.md](hooks/advisory-nudge/secret-print-redaction-advisory/spec.md) |
 | `destructive-bash-guard` | PreToolUse | Advisory (or strict-mode `ask`) before destructive bash (`rm -rf`, `sudo`/`doas`, `dd`, `mkfs`, `chmod -R 777`, block-device redirects, `git clean -f`/`reset --hard`, `find -delete`, `truncate -s 0`, `shred`, fork bomb) — issue #463 | [hooks/advisory-nudge/destructive-bash-guard/spec.md](hooks/advisory-nudge/destructive-bash-guard/spec.md) |
 | `protected-paths-guard` | PreToolUse | Advisory (or strict-mode block) on Edit/Write/NotebookEdit calls targeting sensitive files (`.env`, private keys, `.ssh/`, `credentials`, `.netrc`, `.npmrc`) — issue #464 | [hooks/advisory-nudge/protected-paths-guard/spec.md](hooks/advisory-nudge/protected-paths-guard/spec.md) |
@@ -212,7 +213,9 @@ python3 process.
 
 - **Declaration.** `hooks/manifest.json` carries a `dispatch_groups` array of
   `{event, matcher}` pairs. Only `(PreToolUse, Bash)` is collapsed today: the
-  **33** hooks whose manifest `matcher` is exactly `Bash`. The two multi-tool
+  **43** hooks whose manifest `matcher` is exactly `Bash` (count asserted by
+  `tests/hooks/_lib/test_dispatch.py::test_group_members_count_and_roles` —
+  keep in sync when adding/removing an exact-`Bash` hook). The two multi-tool
   hooks that also fire on Bash — `memory-hint`
   (`Bash|Edit|Write|NotebookEdit|AskUserQuestion`) and
   `external-api-literal-trigger` (`Write|Edit|Bash`) — keep standalone wrappers,
@@ -252,7 +255,8 @@ python3 process.
   on disk. A future manifest or schema edit that breaks the collapse fails CI.
 
 **Measured latency** (`/usr/bin/time -p`, warm caches, no-op `ls -la` payload, 33
-members, claude host):
+members at measurement time, claude host — historical benchmark run, not
+resynced to the current member count on every hook addition):
 
 | Path | Wall-clock |
 | ------ | ----------- |
