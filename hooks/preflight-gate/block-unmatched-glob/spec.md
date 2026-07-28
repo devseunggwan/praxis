@@ -5,7 +5,7 @@ Supported hosts: claude
 `hooks/block-unmatched-glob.sh` intercepts `Bash` tool calls and **blocks**
 (exit 2) when the command contains an unquoted glob that matches nothing.
 
-### Why this exists
+## Why this exists
 
 The Bash tool's shell is zsh. On an unmatched glob zsh aborts the entire
 command at expansion time (`no matches found`) rather than falling back to the
@@ -34,7 +34,7 @@ at the memory layer. The 4th occurrence — the first to produce a wrong
 conclusion rather than a noisy log — falsifies that remedy, which is what moves
 this to structural enforcement.
 
-### Detection
+## Detection
 
 The verdict is **delegated to zsh**, not re-implemented. Each candidate word is
 replayed as:
@@ -65,20 +65,20 @@ through, because there a word's meaning depends on shell grammar the hook does
 not model — which branch actually runs, what the cwd is by the time a later
 segment executes, whether the text is a heredoc body:
 
-| Condition                                                   | Behavior              |
-| ------------------------------------------------------------ | --------------------- |
-| No glob metacharacters in the command                       | Silent — pass         |
-| Metacharacters were quoted (`-name '*.log'`)                | Silent — never expanded |
-| Unquoted `$` / `` ` `` (variable, arithmetic, substitution)  | Silent — prefix unresolvable |
+| Condition | Behavior |
+| --- | --- |
+| No glob metacharacters in the command | Silent — pass |
+| Metacharacters were quoted (`-name '*.log'`) | Silent — never expanded |
+| Unquoted `$` / `` ` `` (variable, arithmetic, substitution) | Silent — prefix unresolvable |
 | Unquoted compound structure: `&&`, `\|\|`, `\|`, `;`, `&`, newline, `<<` | Silent — segment context unknown |
-| Control-flow word or `cd` **in command position**            | Silent — same reason  |
-| Assignment word **before the command word** (`FOO=*.x cmd`)  | Silent — values are not glob-expanded |
+| Control-flow word or `cd` **in command position** | Silent — same reason |
+| Assignment word **before the command word** (`FOO=*.x cmd`) | Silent — values are not glob-expanded |
 | `noglob` / `setopt` / `unsetopt` / `eval` **in command position** | Silent — failure disabled by the command |
-| Shell-syntax word (`[`, `[[`, `]`, `]]`)                     | Silent — not a pathname pattern |
-| Pattern inside a `#` comment                                 | Silent — never reaches the shell |
-| zsh expands the pattern successfully                         | Silent — pass         |
-| zsh reports `no matches found`                               | **Blocked (exit 2)**  |
-| Malformed stdin, non-Bash tool, zsh unavailable, probe timeout | Silent — fail-open    |
+| Shell-syntax word (`[`, `[[`, `]`, `]]`) | Silent — not a pathname pattern |
+| Pattern inside a `#` comment | Silent — never reaches the shell |
+| zsh expands the pattern successfully | Silent — pass |
+| zsh reports `no matches found` | **Blocked (exit 2)** |
+| Malformed stdin, non-Bash tool, zsh unavailable, probe timeout | Silent — fail-open |
 
 This trades recall for precision deliberately. `cd hooks && echo *.md` does
 abort in zsh and the gate lets it through — a blocking gate that halts a valid
@@ -99,7 +99,7 @@ Note that a glob attached to a flag (`--include=*.log`) **is** a candidate:
 zsh expands the whole word before the tool ever sees it, so an unmatched
 pattern there aborts exactly like a bare one.
 
-### Why zsh decides, and not this hook
+## Why zsh decides, and not this hook
 
 A pure-Python model was written first and rejected. Checked against live zsh it
 disagreed on ten of fourteen cases, across seven independent axes: `**`
@@ -118,7 +118,7 @@ while `_lib`'s `fail_open` wrapper and `format_block` renderer are shared as
 usual. Recorded here rather than left implicit, per AGENTS.md
 "Convention Survey Before Design".
 
-### Bypass
+## Bypass
 
 None. The gate fires only on commands that the shell would refuse to run
 anyway, so there is no correct case to preserve — every fix listed in the block
