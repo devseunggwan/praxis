@@ -362,6 +362,130 @@ rm -f "$R4_F2_MSG" "$R4_F2_ABS_MSG"
 rmdir "$R4_F2_DIR" "$R4_F2_ABS_DIR" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
+# Squash-merge path (issue #843) — `gh pr merge --squash` resolves the PR
+# title via a live `gh pr view` call, faked here via a per-case PATH-
+# prepended fake `gh` binary. Advisory (stderr, non-blocking), never `ask`.
+# ---------------------------------------------------------------------------
+
+# make_fake_gh_title <title> — `gh pr view ... -q .title` prints <title>.
+make_fake_gh_title() {
+  local title="$1" d
+  d=$(mktemp -d)
+  cat >"$d/gh" <<EOF
+#!/usr/bin/env bash
+echo "$title"
+exit 0
+EOF
+  chmod +x "$d/gh"
+  echo "$d"
+}
+
+# make_fake_gh_error — every `gh` call exits 1 (auth-style failure).
+make_fake_gh_error() {
+  local d
+  d=$(mktemp -d)
+  cat >"$d/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "gh: authentication required" >&2
+exit 1
+EOF
+  chmod +x "$d/gh"
+  echo "$d"
+}
+
+# run_case_gh name expectation command gh_dir
+#   expectation:
+#     advisory — stdout empty, stderr contains "Squash-merge title too long", rc=0
+#     silent   — stdout empty, stderr empty, rc=0
+run_case_gh() {
+  local name="$1" expectation="$2" command="$3" gh_dir="$4"
+  local payload out_file err_file
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}))
+' "$command")
+
+  out_file=$(mktemp)
+  err_file=$(mktemp)
+  echo "$payload" | env -u CLAUDE_COMMIT_TITLE_MAX PATH="$gh_dir:$PATH" python3 "$HOOK" \
+    >"$out_file" 2>"$err_file"
+  local rc=$?
+  local out err
+  out=$(cat "$out_file")
+  err=$(cat "$err_file")
+  rm -f "$out_file" "$err_file"
+
+  local ok=1
+  case "$expectation" in
+    advisory)
+      [ "$rc" -eq 0 ] || ok=0
+      [ -z "$out" ]   || ok=0
+      echo "$err" | grep -q "Squash-merge title too long" || ok=0
+      ;;
+    silent)
+      [ "$rc" -eq 0 ] || ok=0
+      [ -z "$out" ]   || ok=0
+      [ -z "$err" ]   || ok=0
+      ;;
+    *)
+      echo "  internal: unknown expectation '$expectation'" >&2
+      ok=0
+      ;;
+  esac
+
+  if [ "$ok" -eq 1 ]; then
+    PASS=$((PASS + 1))
+    echo "  PASS  $name"
+  else
+    FAIL=$((FAIL + 1))
+    FAILED_NAMES+=("$name")
+    echo "  FAIL  $name (rc=$rc, expected=$expectation)"
+    [ -n "$out" ] && echo "        stdout: $(echo "$out" | head -c 400)"
+    [ -n "$err" ] && echo "        stderr: $(echo "$err" | head -c 400)"
+  fi
+}
+
+LONG_TITLE_GH=$(make_fake_gh_title "fix(momentum-gate): scope merge-briefing window to a very long prior turn")
+SHORT_TITLE_GH=$(make_fake_gh_title "fix(hook): short title")
+ERROR_GH=$(make_fake_gh_error)
+
+run_case_gh "squash + long PR title (advisory)" \
+  advisory "gh pr merge 42 --squash" "$LONG_TITLE_GH"
+
+run_case_gh "squash short flag -s + long PR title (advisory)" \
+  advisory "gh pr merge 42 -s" "$LONG_TITLE_GH"
+
+run_case_gh "squash + short PR title (silent)" \
+  silent "gh pr merge 42 --squash" "$SHORT_TITLE_GH"
+
+run_case_gh "no --squash flag at all (silent, no gh call needed)" \
+  silent "gh pr merge 42" "$ERROR_GH"
+
+run_case_gh "-t/--subject overrides PR title, long (advisory, no gh call)" \
+  advisory 'gh pr merge 42 --squash -t "this subject line is definitely far too long to pass fifty chars"' "$ERROR_GH"
+
+run_case_gh "-t/--subject overrides PR title, short (silent, no gh call)" \
+  silent 'gh pr merge 42 --squash -t "short title"' "$ERROR_GH"
+
+run_case_gh "gh pr view errors -> fail-open (silent)" \
+  silent "gh pr merge 42 --squash" "$ERROR_GH"
+
+run_case_gh "gh -R owner/repo pr merge --squash (global flag before subcommand)" \
+  advisory "gh -R owner/repo pr merge 42 --squash" "$LONG_TITLE_GH"
+
+run_case_gh "opt-out marker suppresses squash advisory too (silent)" \
+  silent "gh pr merge 42 --squash  # title-length:ack" "$LONG_TITLE_GH"
+
+run_case_gh "gh api pulls/N/merge is a deliberate gap (silent, not matched)" \
+  silent "gh api repos/o/r/pulls/42/merge -X PUT -f merge_method=squash" "$LONG_TITLE_GH"
+
+run_case_gh "gh pr merge --merge (no squash) is silent even with long title" \
+  silent "gh pr merge 42 --merge" "$LONG_TITLE_GH"
+
+run_case_gh "gh pr view (unrelated gh command) is silent" \
+  silent "gh pr view 42 --json title" "$LONG_TITLE_GH"
+
+# ---------------------------------------------------------------------------
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then
