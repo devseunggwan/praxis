@@ -159,6 +159,9 @@ def detect_unchanged_claims(text: str) -> list[str]:
 
 _GH_EVIDENCE_RE = re.compile(r"\bgh\b[^|;&\n]*\b(pr|issue)\b\s+[a-z]", re.IGNORECASE)
 _MCP_GH_EVIDENCE_RE = re.compile(r"pull_request|issue|merge|pr_", re.IGNORECASE)
+# Digit runs bounded on both sides: `864` must not be cleared by a query for
+# `1864` (`digits in cmd` substring matching cleared that collision).
+_STANDALONE_NUM_RE = re.compile(r"(?<![0-9])[0-9]+(?![0-9])")
 
 # Reachability evidence for "applied" claims (#656). A generic state query
 # (`gh pr view --json state`) is NOT sufficient — the 2026-05-15 incident ran
@@ -270,6 +273,12 @@ def has_reachability_evidence(events: list[dict]) -> bool:
     return False
 
 
+def _cites_number(text: str, digits: str) -> bool:
+    """True if `digits` appears in `text` as a whole number, not as a
+    substring of a longer one — `1864` must not clear a claim about `864`."""
+    return digits in _STANDALONE_NUM_RE.findall(text)
+
+
 def has_fresh_query_for_number(events: list[dict], number: str) -> bool:
     """True if a recent assistant `gh pr|issue` Bash command or GitHub MCP
     call explicitly references `number` (e.g. `gh pr view 864 --json state`
@@ -293,11 +302,11 @@ def has_fresh_query_for_number(events: list[dict], number: str) -> bool:
             if name == "Bash":
                 inp = block.get("input", {})
                 cmd = inp.get("command", "") if isinstance(inp, dict) else ""
-                if cmd and _GH_EVIDENCE_RE.search(cmd) and digits in cmd:
+                if cmd and _GH_EVIDENCE_RE.search(cmd) and _cites_number(cmd, digits):
                     return True
             elif name.startswith("mcp__github__") and _MCP_GH_EVIDENCE_RE.search(name):
                 inp = block.get("input", {})
-                if isinstance(inp, dict) and digits in json.dumps(inp):
+                if isinstance(inp, dict) and _cites_number(json.dumps(inp), digits):
                     return True
     return False
 

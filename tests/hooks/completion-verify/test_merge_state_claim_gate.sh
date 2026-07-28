@@ -50,6 +50,12 @@ elif evidence == "gh-other":
 elif evidence == "mcp-864":
     asst_blocks.append({"type": "tool_use", "name": "mcp__github__pull_request_read",
                         "input": {"pullNumber": 864}})
+elif evidence == "gh-1864":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "gh pr view 1864 --json state"}})
+elif evidence == "mcp-1864":
+    asst_blocks.append({"type": "tool_use", "name": "mcp__github__pull_request_read",
+                        "input": {"pullNumber": 1864}})
 if asst_blocks:
     events.append({"message": {"role": "assistant", "content": asst_blocks}})
 events.append({"message": {"role": "assistant",
@@ -60,7 +66,7 @@ with open(path, "w", encoding="utf-8") as f:
 PY
 }
 
-# run_case <advisory|advisory-strict|silent> <name> <stop_payload_extra_json> [ENV=v ...]
+# run_case <advisory|advisory-unchanged-only|advisory-strict|silent> <name> <stop_payload_extra_json> [ENV=v ...]
 run_case() {
   local expected="$1" name="$2" extra="$3"
   shift 3
@@ -84,6 +90,22 @@ import json, sys
 d = json.load(sys.stdin)
 assert "[merge-state-claim-gate]" in d["systemMessage"]
 assert "decision" not in d
+' || ok=0
+      ;;
+    advisory-unchanged-only)
+      # the advisory carries ONLY the per-number persistence guidance — the
+      # generic "no fresh state query" sentence belongs to the merged claim,
+      # which the generic query already cleared.
+      [ "$rc" -eq 0 ] || ok=0
+      [ -z "$err" ] || ok=0
+      printf '%s' "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+m = d["systemMessage"]
+assert "[merge-state-claim-gate]" in m
+assert "decision" not in d
+assert "still-open / unchanged / no-loss" in m
+assert "asserts a" not in m, m
 ' || ok=0
       ;;
     advisory-strict)
@@ -370,8 +392,19 @@ run_case silent "unchanged-numberless-kr-out-of-scope" '{}'
 # --- mixed message: a cleared "merged" claim alongside an uncleared --------
 # unchanged claim for a DIFFERENT number -> advisory carries only the
 # unchanged sentence (the generic query clears "merged" but not #864).
-build_transcript "PR #497 merged. PR #864 는 여전히 OPEN, 커밋 유실 없음." gh
-run_case advisory "mixed-merged-cleared-unchanged-not" '{}'
+# The two claims MUST sit on separate lines: `detect_claims()` is line-scoped
+# and the `유실 없음` negation would otherwise disqualify the merged claim
+# sharing that line, so the intended path would never be exercised.
+build_transcript "PR #497 merged.
+PR #864 는 여전히 OPEN, 커밋 유실 없음." gh
+run_case advisory-unchanged-only "mixed-merged-cleared-unchanged-not" '{}'
+
+# --- number-collision regressions: a query for #1864 must NOT clear #864 ---
+build_transcript "PR #864 는 여전히 OPEN." gh-1864
+run_case advisory "unchanged-not-cleared-by-longer-number" '{}'
+
+build_transcript "PR #864 는 여전히 OPEN." mcp-1864
+run_case advisory "unchanged-not-cleared-by-longer-number-mcp" '{}'
 
 # --- strict mode on an unchanged-only claim --------------------------------
 build_transcript "PR #864 는 여전히 OPEN, 커밋 유실 없음." none

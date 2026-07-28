@@ -7,7 +7,7 @@ event. It scans the **final assistant message** for a completed merge / PR /
 issue / worktree state assertion and, when no fresh state query appears in the
 recent transcript, emits a **stdout `{"systemMessage": ...}` JSON advisory**.
 
-### Why this exists
+## Why this exists
 
 A praxis ultrawork session (#487/#489) hallucinated review/merge state four
 times in one session: "PR #495/#497 created, merged, issue closed, worktree
@@ -21,7 +21,7 @@ they cannot gate a *claim*. The Stop hook is the exact complement: it sees the
 final assistant output and can cross-check it against what the session actually
 did.
 
-### What is emitted
+## What is emitted
 
 Advisory by default — exit 0 + stdout `{"systemMessage": ...}` JSON (issue #647
 H3; the old exit-0 stderr form only reached the debug log). The model has
@@ -30,24 +30,24 @@ the model). `PRAXIS_MERGE_CLAIM_STRICT=1`
 escalates to a `{"decision": "block", "reason": ...}` JSON, which re-prompts
 the model to verify before stopping.
 
-| Condition                                                                                                                                                                                                      | Result                                                         |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Final message asserts a completed merge/PR/issue/worktree state AND no fresh state query in the recent transcript                                                                                              | `[merge-state-claim-gate]` advisory                            |
-| Same, but a fresh `gh pr\|issue …` command or GitHub MCP pull_request/issue/merge tool is present in the recent transcript                                                                                     | silent (claim is backed)                                       |
+| Condition | Result |
+| --- | --- |
+| Final message asserts a completed merge/PR/issue/worktree state AND no fresh state query in the recent transcript | `[merge-state-claim-gate]` advisory |
+| Same, but a fresh `gh pr\|issue …` command or GitHub MCP pull_request/issue/merge tool is present in the recent transcript | silent (claim is backed) |
 | Final message asserts an **applied-on-branch** state (`applied`/`deployed`/`적용됨`/`배포됨` …) AND no **reachability probe** in the recent transcript — a generic state query does NOT clear this kind (#656) | `[merge-state-claim-gate]` advisory with reachability guidance |
-| Applied-on-branch claim WITH a reachability probe (`git merge-base --is-ancestor`, `--json state,baseRefName` query, `git branch --contains`) in the recent transcript                                         | silent (claim is backed)                                       |
-| Final message asserts a **still-open / unchanged / no-loss** state for a specific `#N` (`PR #864 는 여전히 OPEN`, `no commits were lost from PR #864`) AND no fresh `gh pr\|issue` query FOR THAT NUMBER (#869)  | `[merge-state-claim-gate]` advisory                             |
-| Same unchanged claim, cleared by a `gh pr\|issue view <N>` or GitHub MCP call referencing THAT SAME number                                                                                                      | silent (claim is backed)                                       |
-| Same unchanged claim, a query for a DIFFERENT `#M` is present — does NOT clear                                                                                                                                  | `[merge-state-claim-gate]` advisory (per-number specificity)    |
-| Unchanged claim with no `#N` on the line (`the branch still has no open PR`)                                                                                                                                    | silent (deliberate narrowing — #869 scope, see below)           |
-| Final message has no such claim                                                                                                                                                                                | silent                                                         |
-| Claim line is negated (`not`, `yet`, `아직`, `않`, …)                                                                                                                                                          | silent                                                         |
-| Future intent only (`I'll create a PR`, `ready to merge`)                                                                                                                                                      | silent (completion tokens are past/perfective)                 |
-| `stop_hook_active` is true                                                                                                                                                                                     | silent (re-entry loop guard)                                   |
-| Missing/unreadable transcript, malformed stdin                                                                                                                                                                 | silent (fail-open)                                             |
-| `PRAXIS_MERGE_CLAIM_BYPASS` set                                                                                                                                                                                | silent (opt-out)                                               |
+| Applied-on-branch claim WITH a reachability probe (`git merge-base --is-ancestor`, `--json state,baseRefName` query, `git branch --contains`) in the recent transcript | silent (claim is backed) |
+| Final message asserts a **still-open / unchanged / no-loss** state for a specific `#N` (`PR #864 는 여전히 OPEN`, `no commits were lost from PR #864`) AND no fresh `gh pr\|issue` query FOR THAT NUMBER (#869) | `[merge-state-claim-gate]` advisory |
+| Same unchanged claim, cleared by a `gh pr\|issue view <N>` or GitHub MCP call referencing THAT SAME number | silent (claim is backed) |
+| Same unchanged claim, a query for a DIFFERENT `#M` is present — does NOT clear | `[merge-state-claim-gate]` advisory (per-number specificity) |
+| Unchanged claim with no `#N` on the line (`the branch still has no open PR`) | silent (deliberate narrowing — #869 scope, see below) |
+| Final message has no such claim | silent |
+| **Completed-state** claim line is negated (`not`, `yet`, `아직`, `않`, …) — persistence claims (`has not been merged`, `유실 없음`) are covered by the unchanged rows above, not silenced here | silent |
+| Future intent only (`I'll create a PR`, `ready to merge`) | silent (completion tokens are past/perfective) |
+| `stop_hook_active` is true | silent (re-entry loop guard) |
+| Missing/unreadable transcript, malformed stdin | silent (fail-open) |
+| `PRAXIS_MERGE_CLAIM_BYPASS` set | silent (opt-out) |
 
-### Claim detection
+## Claim detection
 
 A claim requires, **on the same line**, both:
 
@@ -73,7 +73,7 @@ narrower negation set with `without` dropped — "Deployed to prod without
 incident" is a genuine claim and must still fire (`fail` stays; the
 applied-claim-next-to-failing-prose miss is an accepted, documented trade-off).
 
-### Evidence detection
+## Evidence detection
 
 The recent transcript (last 80 events) is scanned for an assistant `tool_use`
 that is either:
@@ -106,7 +106,7 @@ This is deliberately CLI-only: an MCP `pull_request_read` *returns*
 mirrored in `hooks/advisory-nudge/external-write-falsify-check` (2 copies —
 DRY extraction deferred to a 3rd consumer per repo convention).
 
-### Negative-polarity persistence claims (issue #869)
+## Negative-polarity persistence claims (issue #869)
 
 2026-07-27 session retrospect finding #2 (HIGH). Across several turns, the
 assistant repeated "PR #864 는 여전히 OPEN, 커밋 유실 없음" (still open, no
@@ -144,20 +144,20 @@ the applied-kind's stricter-evidence precedent (#656): a looser generic
 check would have let the incident's exact stale re-assertion pass had any
 unrelated `gh pr view` call happened to appear nearby.
 
-### Relationship to sibling hooks
+## Relationship to sibling hooks
 
-| Hook                                                                       | Scope                                                         | Overlap                                                                  |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `completion-signal-gate`                                                   | Stop advisory on completion phrases without an evidence block | Complementary — generic "done" claims vs. specific merge/PR state claims |
-| `block-pr-without-caller-evidence` / `block-pr-without-precommit-evidence` | PreToolUse gate on PR *creation*                              | None — those gate the action; this gates the *assertion* of state        |
+| Hook | Scope | Overlap |
+| --- | --- | --- |
+| `completion-signal-gate` | Stop advisory on completion phrases without an evidence block | Complementary — generic "done" claims vs. specific merge/PR state claims |
+| `block-pr-without-caller-evidence` / `block-pr-without-precommit-evidence` | PreToolUse gate on PR *creation* | None — those gate the action; this gates the *assertion* of state |
 
-### Parsing guarantees (fail-open)
+## Parsing guarantees (fail-open)
 
 Returns exit 0 on every infrastructure error — malformed stdin, missing/unreadable
 transcript, and any uncaught exception (via the shared `@fail_open` decorator in
 `hooks/_lib/_hook_runtime.py`). It never blocks a normal Stop in the default mode.
 
-### Tests
+## Tests
 
 ```bash
 bash tests/hooks/completion-verify/test_merge_state_claim_gate.sh
