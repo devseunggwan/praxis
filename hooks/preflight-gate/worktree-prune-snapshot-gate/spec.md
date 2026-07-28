@@ -71,7 +71,7 @@ it never resets within a session (mirrors `session-intent`'s
 
 **Block** (`block_message.emit_block`, exit 2):
 
-```
+```text
 ⚠️ WORKTREE-PRUNE-SNAPSHOT-GATE blocked
 
 Why: `git worktree prune` takes no target argument — it removes the
