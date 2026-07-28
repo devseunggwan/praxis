@@ -8,7 +8,7 @@ phrase ("보내도 됩니다", "머지 가능", "ready to merge") that coexists 
 unresolved-gap marker ("⚠", "미해소", "TODO", "unverified") **in the same
 output**, and emits a stdout `{"systemMessage": ...}` JSON advisory.
 
-### Why this exists
+## Why this exists
 
 Retrospect-promoted 2026-07-23. In a PR review session, the assistant
 self-flagged "⚠️ 미해소 갭 — 데이터 동일성 검증 증거 부재" as a headline in
@@ -26,7 +26,7 @@ search failure: always-loaded rules (Author-exempt trap, Verification Before
 Completion, PR Review Protocol) and 4 memory entries were already present and
 did not prevent the repeat.
 
-### Probe-first result (issue's own precondition)
+## Probe-first result (issue's own precondition)
 
 The issue requires running a discriminating probe (`session_search` for 3-5
 independent co-occurrence cases) BEFORE building, to avoid a keyword hook on
@@ -48,7 +48,7 @@ could recur across, so "not found in this slice" is weaker evidence of
 for whoever reviews this PR to weigh; not a substitute for the issue's own
 gate.
 
-### What is detected
+## What is detected
 
 **GO-verdict phrases** (issue's trigger list + "all clear" from the issue
 title), non-negated, non-quoted (`>` lines skipped):
@@ -62,10 +62,10 @@ title), non-negated, non-quoted (`>` lines skipped):
 | `ready to merge` (EN) | "This is ready to merge." |
 | `all clear` (EN) | "All clear." |
 
-Negation (`지 않`, `안 됩`, `못 `, `아니` trailing the KR match within 12
-chars; `not `, `n't `, `no `, `never `, `isn't`, … preceding the EN match
-within 24 chars) disqualifies the match — "머지 가능하지 않습니다" and "not
-ready to merge" are not verdicts.
+Negation (`지 않`, `안 됩`, `못␣`, `아니` trailing the KR match within 12
+chars; `not␣`, `n't␣`, `no␣`, `never␣`, `isn't`, … preceding the EN match
+within 24 chars; `␣` marks a literal trailing space) disqualifies the
+match — "머지 가능하지 않습니다" and "not ready to merge" are not verdicts.
 
 **Unresolved-gap markers**: `⚠`/`⚠️`, `미해소`, `검증 증거 부재`, bare `갭`,
 EN `unverified`, `not verified`, `TODO`, `pending`. A marker immediately
@@ -80,7 +80,7 @@ is resolved`, `after resolving the gap`) — i.e. the exact remedy this
 advisory recommends — the hook stays silent. Firing on an already-applied
 remedy would be pure noise.
 
-### Response
+## Response
 
 Advisory by default — exit 0 + stdout `{"systemMessage": ...}` JSON.
 `PRAXIS_VERDICT_GAP_STRICT=1` escalates to `{"decision": "block", "reason":
@@ -88,13 +88,13 @@ Advisory by default — exit 0 + stdout `{"systemMessage": ...}` JSON.
 requested by the issue body, which specifies advisory only).
 `PRAXIS_VERDICT_GAP_BYPASS=1` silences the hook entirely.
 
-```
+```text
 [verdict-gap-coexistence-gate] final message asserts a GO verdict (보내도 됩니다/머지 가능/ready to merge/all clear/...) while ALSO disclosing an unresolved gap (⚠/미해소/검증 증거 부재/unverified/TODO/pending) in the same output.
 [verdict-gap-coexistence-gate] Rule: a disclosed gap is a condition on the verdict, not an aside — rewrite the verdict as conditional on the gap ("갭 X 해소 시 보내도 됨") or resolve the gap FIRST, before locking the verdict (issue #845: ...).
 [verdict-gap-coexistence-gate] bypass: PRAXIS_VERDICT_GAP_BYPASS=1
 ```
 
-### Relationship to sibling hooks
+## Relationship to sibling hooks
 
 | Hook | Scope | Overlap |
 | ---- | ----- | ------- |
@@ -102,7 +102,7 @@ requested by the issue body, which specifies advisory only).
 | `output-block-falsify-advisory` / `pre-output-falsification-gate` | PreToolUse advisory on `(Recommended)` proposals before an external write | Different event (PreToolUse cannot see in-flight assistant text — issue #487 finding A3); this is the Stop-hook complement for the same conflation failure, scoped narrowly to GO-verdict + gap-marker co-occurrence |
 | `merge-state-claim-gate` / `pr-claim-mutation-gate` | Stop advisory on completed-state / processed assertions | Different claim shape — those gate "X happened" claims; this gates "X is fine to ship" verdicts that self-contradict a disclosed gap |
 
-### Parsing guarantees (fail-open)
+## Parsing guarantees (fail-open)
 
 Returns exit 0 on every infrastructure error — malformed stdin, missing/
 unreadable transcript, empty transcript, no assistant text in the current
@@ -110,7 +110,7 @@ turn, and any uncaught exception (via the shared `@fail_open` decorator in
 `hooks/_lib/_hook_runtime.py`). `stop_hook_active: true` short-circuits to
 exit 0 (re-entry loop guard). It never blocks in the default (advisory) mode.
 
-### Tests
+## Tests
 
 ```bash
 bash tests/hooks/completion-verify/test_verdict_gap_coexistence_gate.sh
