@@ -360,6 +360,13 @@
       "timeout": 5
     },
     {
+      "name": "cwd-relative-exec-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
       "name": "pre-commit-staged-file-enumeration",
       "role": "advisory-nudge",
       "event": "PreToolUse",
