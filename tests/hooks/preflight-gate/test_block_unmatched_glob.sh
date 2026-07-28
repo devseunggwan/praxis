@@ -31,6 +31,13 @@ if ! command -v zsh >/dev/null 2>&1; then
   exit 0
 fi
 
+# The gate reads $SHELL to decide whether the executing shell is zsh at all.
+# CI runners report bash, so without this every blocking assertion would test
+# the non-zsh pass-through path instead. The portability block near the end
+# overrides SHELL per invocation and is unaffected.
+SHELL=$(command -v zsh)
+export SHELL
+
 FIXTURE=$(mktemp -d)
 trap 'rm -rf "$FIXTURE"' EXIT
 mkdir -p "$FIXTURE/logs" "$FIXTURE/nested/deep"
