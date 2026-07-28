@@ -38,6 +38,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_RUNTIME_CLAIM_BYPASS` | `runtime-state-claim-gate` | Skip the runtime/execution-state claim gate |
 | `PRAXIS_HOOK_BYPASS_NEGATIVE_EXISTENCE_GATE` | `negative-existence-verdict-gate` | Skip the negative-existence verdict `Enumerated:`-line gate |
 | `PRAXIS_HOOK_BYPASS_ARTIFACT_VERDICT_GATE` | `artifact-verdict-evidence-gate` | Skip the artifact-verdict `Verdict-evidence:`-line gate |
+| `PRAXIS_PR_CLAIM_BYPASS` | `pr-claim-mutation-gate` | Skip the PR-claim mutation advisory |
 | `PRAXIS_HOOK_BYPASS_PR_REPORT_DESTINATION_GATE` | `pr-report-destination-gate` | Skip the PR-report-destination advisory (local report not posted to the PR) |
 | `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY` | `negative-existence-verdict-gate` | Demote the negative-existence verdict gate from block to advisory (systemMessage, non-blocking). Set to any non-falsey value (`1` / `true` / `yes`); `0` / `false` / empty keep block mode (mirrors `PRAXIS_ASK_END_ADVISORY`) |
 | `PRAXIS_PUSH_VERIFY_BYPASS` | `push-remote-ref-verify` | Skip the post-push remote-ref verification |
@@ -67,6 +68,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_PATH_PROBE_STRICT` | `path-probe-gate` | |
 | `PRAXIS_ARTIFACT_VERDICT_STRICT` | `artifact-verdict-evidence-gate` | Promote the artifact-verdict gate from advisory to block. Any non-falsey value (`1` / `true` / `yes`); `0` / `false` / empty keep advisory |
 | `PRAXIS_EXCLUSION_PROBE_STRICT` | `exclusion-probe-gate` | |
+| `PRAXIS_PR_CLAIM_STRICT` | `pr-claim-mutation-gate` | Promote the PR-claim gate from advisory to block |
 | `PRAXIS_PHANTOM_PATH_STRICT` | `external-write-path-existence-check` | |
 | `PRAXIS_MERGE_CLAIM_STRICT` | `merge-state-claim-gate` | |
 | `PRAXIS_RUNTIME_CLAIM_STRICT` | `runtime-state-claim-gate` | |

@@ -118,7 +118,7 @@ finalized. Run sequentially: `completion-verify` → `retrospect-mix-check` →
 `completion-signal-gate` → `readonly-verify-deferral-gate` →
 `merge-state-claim-gate` → `runtime-state-claim-gate` →
 `negative-existence-verdict-gate` → `artifact-verdict-evidence-gate` →
-`pr-report-destination-gate` →
+`pr-report-destination-gate` → `pr-claim-mutation-gate` →
 `strike-counter stop`.
 Also includes session-lifecycle enforcement.
 
@@ -139,4 +139,5 @@ channel.
 | [artifact-verdict-evidence-gate](../../hooks/completion-verify/artifact-verdict-evidence-gate/spec.md) | Stop | Advise when the final message surfaces a positive artifact verdict (삭제 후보/중복/통합 대상/superseded) as a candidate list without an adjacent `Verdict-evidence:` line (#862) |
 | [negative-existence-verdict-gate](../../hooks/completion-verify/negative-existence-verdict-gate/spec.md) | Stop | Block when the final message surfaces a negative-existence verdict (없습니다/does not exist) under a registered decision framing (게이트 결과/완료 조건/AC #) without an `Enumerated:` line in the same paragraph (#804) |
 | [pr-report-destination-gate](../../hooks/completion-verify/pr-report-destination-gate/spec.md) | Stop | Advisory when a session wrote a review/verification local `.md` (/tmp/.omc/plans/report-named) for a PR it worked on (`gh pr view/create`/PR URL) but never posted it there (`gh pr comment/review`); per-PR correlation, GET `gh api` and failed posts excluded (#832) |
+| [pr-claim-mutation-gate](../../hooks/completion-verify/pr-claim-mutation-gate/spec.md) | Stop | Advisory when the final message claims a PR/review comment was processed (처리했/반영했/resolved) with no PR-surface mutation in the current turn — a read-only `gh api` listing does not clear it (#868) |
 | [strike-counter](../../hooks/completion-verify/strike-counter/spec.md) | SessionStart + UserPromptSubmit + Stop | Session-scoped three-strike discipline — hard-blocks at strike 3, requires reflection before reset |
