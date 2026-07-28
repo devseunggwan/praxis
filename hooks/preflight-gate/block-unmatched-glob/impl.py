@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """PreToolUse(Bash) guard: block a command whose glob matches nothing.
 
-The Bash tool's shell is zsh. On an unmatched glob zsh aborts the ENTIRE
-command at expansion time ("no matches found") instead of falling back to the
-literal pattern the way bash does. Two consequences make this a correctness
-hazard rather than noise:
+The Bash tool runs the user's login shell. When that is zsh, an unmatched glob
+aborts the ENTIRE command at expansion time ("no matches found") instead of
+falling back to the literal pattern the way bash does. Two consequences make
+this a correctness hazard rather than noise:
 
   1. `2>/dev/null` does not suppress it — the error is emitted by the shell's
      expansion stage, not by the command, so the redirect never applies.
@@ -37,6 +37,8 @@ model:
     patterns at all
   * patterns carrying a zsh glob qualifier — `*(e:'cmd':)` executes `cmd`, and
     a preflight gate must never run the command it is inspecting
+  * every command, when the executing shell is not zsh (`$SHELL`) — bash and
+    fish pass the literal pattern to the command, which then runs
   * every command, when the executing shell has `nullglob` / `nonomatch` /
     `noglob` set, because then nothing aborts in the first place
 
@@ -53,6 +55,7 @@ glob. Exits 0 otherwise (transparent pass-through).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys as _sys
 import time
@@ -335,6 +338,19 @@ def candidate_spans(command: str) -> list[str] | None:
     return spans
 
 
+def executing_shell_is_zsh() -> bool:
+    """True when the shell that will run the command is zsh.
+
+    The whole premise is zsh-specific: bash and fish hand an unmatched pattern
+    to the command literally, so the command *does* run and `2>/dev/null` *does*
+    suppress the error. Blocking there would be a pure false positive. The Bash
+    tool runs the user's login shell, which `$SHELL` names; unknown or non-zsh
+    is treated as "not zsh" so the gate stays silent.
+    """
+    shell = os.environ.get("SHELL") or ""
+    return bool(shell) and _Path(shell).name == "zsh"
+
+
 def executing_shell_glob_state() -> list[str] | None:
     """Glob options to replay in the probe, or None when the gate must not fire.
 
@@ -402,6 +418,9 @@ def find_unmatched_globs(command: str, cwd: str) -> list[str]:
     dispatch group — letting per-candidate timeouts accumulate could blow the
     group's budget and discard *other* gates' verdicts along with this one.
     """
+    if not executing_shell_is_zsh():
+        return []  # free check, and the cheapest possible one — do it first
+
     if should_pass_through(command):
         return []
 

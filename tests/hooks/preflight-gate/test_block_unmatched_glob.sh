@@ -237,6 +237,45 @@ fi
 run_case "pattern inside [[ ]] is a match operand" pass Bash \
   "[[ abc = *.nonexistent-xyz ]]"
 
+# --- portability: the premise is zsh-specific -------------------------------
+# bash and fish hand the literal pattern to the command, which then runs and
+# whose stderr `2>/dev/null` does suppress. Blocking there is a false positive.
+for shell_path in /bin/bash /usr/bin/fish ""; do
+  label="SHELL=${shell_path:-<unset>} does not block"
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "tool_name": "Bash",
+    "tool_input": {"command": sys.argv[1]},
+    "cwd": sys.argv[2],
+}))' "ls -d $FIXTURE/nosuchdir/*.json" "$FIXTURE")
+  err_file=$(mktemp)
+  if [ -n "$shell_path" ]; then
+    echo "$payload" | SHELL="$shell_path" "$HOOK" >/dev/null 2>"$err_file"
+  else
+    echo "$payload" | env -u SHELL "$HOOK" >/dev/null 2>"$err_file"
+  fi
+  rc=$?
+  err=$(cat "$err_file"); rm -f "$err_file"
+  if [ "$rc" = 0 ] && [ -z "$err" ]; then
+    PASS=$((PASS + 1)); printf '  ok   %s\n' "$label"
+  else
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$label")
+    printf '  FAIL %s (rc=%s stderr_len=%s)\n' "$label" "$rc" "${#err}"
+  fi
+done
+# Guard the guard: the very same payload under a zsh SHELL must still block, or
+# the three assertions above would pass for the wrong reason.
+err_file=$(mktemp)
+echo "$payload" | SHELL=/bin/zsh "$HOOK" >/dev/null 2>"$err_file"
+rc=$?; err=$(cat "$err_file"); rm -f "$err_file"
+if [ "$rc" = 2 ] && [ -n "$err" ]; then
+  PASS=$((PASS + 1)); printf '  ok   %s\n' "same payload under SHELL=zsh still blocks"
+else
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("zsh control case")
+  printf '  FAIL %s (rc=%s)\n' "same payload under SHELL=zsh still blocks" "$rc"
+fi
+
 # --- fail-open --------------------------------------------------------------
 err_file=$(mktemp)
 printf 'not json' | "$HOOK" >/dev/null 2>"$err_file"

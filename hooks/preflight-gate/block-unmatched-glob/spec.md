@@ -67,6 +67,7 @@ segment executes, whether the text is a heredoc body:
 
 | Condition | Behavior |
 | --- | --- |
+| Executing shell (`$SHELL`) is not zsh, or unset | Silent — nothing aborts there |
 | No glob metacharacters in the command | Silent — pass |
 | Metacharacters were quoted (`-name '*.log'`) | Silent — never expanded |
 | Unquoted `$` / `` ` `` (variable, arithmetic, substitution) | Silent — prefix unresolvable |
@@ -117,6 +118,22 @@ A quote-aware scanner that preserves source spans is therefore kept locally,
 while `_lib`'s `fail_open` wrapper and `format_block` renderer are shared as
 usual. Recorded here rather than left implicit, per AGENTS.md
 "Convention Survey Before Design".
+
+## Where this gate is inert
+
+The premise is zsh-specific, so the gate is silent wherever it does not hold —
+in every case by passing through, never by blocking on a guess.
+
+| Environment | Behavior |
+| --- | --- |
+| Login shell is bash / fish (`$SHELL`) | Silent. Those hand the literal pattern to the command, which runs, and whose stderr `2>/dev/null` does suppress — the hazard does not exist |
+| `$SHELL` unset | Silent. The executing shell is unknown, and an unknown shell is not a licence to block |
+| zsh binary absent (most Linux containers and CI images) | Silent. Both probes fail and return the never-block value |
+| Login shell sets `nullglob` / `nonomatch` / `noglob` / `cshnullglob` | Silent. Nothing aborts in the first place |
+| Login shell startup exceeds the 2s probe timeout | Silent. Timeout is a fail-open path, not a fail-closed one |
+
+The repo's own CI installs zsh for exactly this reason: without it the hook's
+suite tests nothing but the fail-open path, which passes vacuously.
 
 ## Bypass
 
