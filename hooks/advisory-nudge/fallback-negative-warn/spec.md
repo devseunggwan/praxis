@@ -61,11 +61,11 @@ made the miss unobservable from the output alone.
 2. **`||` fallback** — the segment immediately after `||` is `echo`,
    `printf`, or `true`.
 3. **Negative-verdict vocabulary** — for `echo`/`printf`, the joined
-   argument text contains one of: `없`, `none`, `no ` (trailing space —
-   avoids matching "known"/"not"/"annoying"), `not found`, `empty`, `(0`,
-   `skip`. `true` never carries a message, so condition 3 can never be
-   satisfied for it — this is how `|| true` alone stays silent without a
-   special case.
+   argument text contains one of: `없`, `none`, `"no "` (the word `no`
+   followed by a space — avoids matching "known"/"not"/"annoying"),
+   `not found`, `empty`, `(0`, `skip`. `true` never carries a message, so
+   condition 3 can never be satisfied for it — this is how `|| true`
+   alone stays silent without a special case.
 
 All three must hold. Log-noise suppression (`2>/dev/null` alone) and
 existence-branching idioms (`|| true` alone, or a `||` fallback with
@@ -163,7 +163,7 @@ dominates:
 | `&>/dev/null` (bash combined-redirect shorthand) | Silent (false negative) — only `2>/dev/null`, the order-correct `>/dev/null 2>&1` form, and the reverse order gated on a following pipe are matched |
 | A quoted argument whose ENTIRE content happens to equal a recognized redirect token (e.g. `--body '2>/dev/null'`) | False positive (codex review round 2, F3, accepted — not fixed) — `safe_tokenize` dequotes before this hook sees the tokens, so a quote-exact literal is indistinguishable from a live redirect. `pipefail-advisory` documents the identical quote-provenance exposure for its own operators rather than fixing it (`hooks/advisory-nudge/pipefail-advisory/spec.md` → "Known limitations" → the `"\|"`/comment/heredoc-lookalike rows) — recovering the distinction requires re-parsing the original command string's quote spans independently of `safe_tokenize`, a scope and maintenance cost this advisory-only hook does not carry either. The false-positive cost is a single stderr nudge on a command whose stderr was never actually redirected, not a block |
 | Heredoc body text containing the trigger pattern as example text | Not specially excluded (unlike `pipefail-advisory`'s heredoc-marker tracking) — a heredoc body line is itself a Bash statement to `safe_tokenize`, so if it happens to contain a live-looking `\|\|` shape it could be flagged. Lower-risk than `pipefail-advisory`'s case in practice (a heredoc body embedding this exact 3-condition shape as prose is rare), and the cost of a false positive here is a single stderr nudge, not a block |
-| A negative-worded `||` fallback with a genuinely absent stderr redirect several statements earlier reused via a shell function/alias | Silent (false negative) — the scan is textual/per-invocation, not cross-invocation or alias-aware |
+| A negative-worded `\|\|` fallback with a genuinely absent stderr redirect several statements earlier reused via a shell function/alias | Silent (false negative) — the scan is textual/per-invocation, not cross-invocation or alias-aware |
 
 ## Tests
 

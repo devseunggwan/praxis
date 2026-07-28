@@ -213,7 +213,9 @@ python3 process.
 
 - **Declaration.** `hooks/manifest.json` carries a `dispatch_groups` array of
   `{event, matcher}` pairs. Only `(PreToolUse, Bash)` is collapsed today: the
-  **33** hooks whose manifest `matcher` is exactly `Bash`. The two multi-tool
+  **43** hooks whose manifest `matcher` is exactly `Bash` (count asserted by
+  `tests/hooks/_lib/test_dispatch.py::test_group_members_count_and_roles` —
+  keep in sync when adding/removing an exact-`Bash` hook). The two multi-tool
   hooks that also fire on Bash — `memory-hint`
   (`Bash|Edit|Write|NotebookEdit|AskUserQuestion`) and
   `external-api-literal-trigger` (`Write|Edit|Bash`) — keep standalone wrappers,
@@ -253,7 +255,8 @@ python3 process.
   on disk. A future manifest or schema edit that breaks the collapse fails CI.
 
 **Measured latency** (`/usr/bin/time -p`, warm caches, no-op `ls -la` payload, 33
-members, claude host):
+members at measurement time, claude host — historical benchmark run, not
+resynced to the current member count on every hook addition):
 
 | Path | Wall-clock |
 | ------ | ----------- |
