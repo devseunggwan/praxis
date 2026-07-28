@@ -94,9 +94,9 @@ same design: presence, not adequacy).
 `PreToolUse(Bash)` only, `gh issue|pr create|comment` only. A prose
 "synthesis block" surfaced with no tool call at all (a perf claim written
 directly into chat, never posted via `gh`) is out of scope here — that is
-the `Stop`-lane concern already covered by `proposal-premise-gate` (issue
-#846) for code-checkable premises in general. One gate per surface (YAGNI)
-rather than one hook trying to cover both PreToolUse and Stop.
+the `Stop`-lane concern already covered by `proposal-premise-gate`
+(issue #846) for code-checkable premises in general. One gate per surface
+(YAGNI) rather than one hook trying to cover both PreToolUse and Stop.
 
 ## Silent cases
 
