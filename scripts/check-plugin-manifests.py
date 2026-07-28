@@ -1231,11 +1231,21 @@ def main() -> int:
         if not sh_path.exists():
             continue
         body = sh_path.read_text(encoding="utf-8", errors="replace")
-        # The line must also be executable shell: a commented-out or
-        # heredoc-quoted arm call reads identically to the real one, so a
-        # leading `#` disqualifies the match (coderabbit, PR #892).
+        # The match must look like an executable call, not a mention of one:
+        # anchored at the start of its own line, so a comment, an `echo
+        # "praxis_fire_arm ..."`, or an assignment holding the same text no
+        # longer satisfies the rule (coderabbit + codex, PR #892). All four
+        # instrumented hooks put the call at line start, after the `command -v`
+        # guard's line continuation.
+        #
+        # Deliberately not a shell parser: a heredoc body line that itself
+        # begins with a bare call still passes. Closing that residue means
+        # tracking quoting and heredoc state, which in this codebase has
+        # repeatedly traded one corner case for the next. The rule guards
+        # against the instrumentation being dropped, not against someone
+        # disguising its absence.
         if not re.search(
-            rf"(?m)^(?!\s*#).*\bpraxis_fire_arm\s+{re.escape(name)}\b", body
+            rf"(?m)^[ \t]*praxis_fire_arm\s+{re.escape(name)}\b", body
         ):
             drifts.append(
                 f"FIRE-LEDGER MISSING hooks/{role}/{name}/impl.sh: shell hook "
