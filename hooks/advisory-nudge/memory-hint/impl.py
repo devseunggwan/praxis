@@ -25,7 +25,7 @@ sibling hook blocked the command.
 
 Memory directory discovery:
   1. `PRAXIS_MEMORY_DIR` env var (when set + exists)
-  2. fallback to `~/.claude/projects/{slugified-cwd}/memory/`
+  2. fallback to `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/{slugified-cwd}/memory/`
      (slugify rule: replace every non-alphanumeric character with `-`,
      per-character — see `hooks/_lib/_memory_dir.py`, the shared SoT)
   3. missing dir → exit 0 silently
