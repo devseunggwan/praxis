@@ -144,6 +144,32 @@ printf '{"prompt":"/codex:review","session_id":"sess-cr"}' \
       bash "$ROOT_DIR/hooks/advisory-nudge/codex-review-route/impl.sh") >/dev/null
 assert_record "$LEDGER" "codex-review-route records advise" codex-review-route advise sess-cr
 
+# An absent session_id must reach the ledger as "", never as the "unknown"
+# placeholder those hooks use for their log lines and marker filenames.
+# aggregate_fires adds any non-empty session string to its distinct-session
+# set, so "unknown" would collapse every unattributed fire into one fake
+# session — inflating the session count these records exist to measure.
+for probe in \
+  "completion-verify:completion-verify/completion-verify/impl.sh" \
+  "retrospect-mix-check:completion-verify/retrospect-mix-check/impl.sh"
+do
+  probe_hook="${probe%%:*}"
+  LEDGER="$TMP/${probe_hook}-nosess.jsonl"
+  printf '{"transcript_path":"%s"}' "$TMP/rm.jsonl" \
+    | PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" \
+      bash "$ROOT_DIR/hooks/${probe#*:}" >/dev/null
+  if python3 -c '
+import json, sys
+recs = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+sys.exit(0 if recs and all(r.get("session_id") == "" for r in recs) else 1)
+' "$LEDGER" 2>/dev/null; then
+    ok "$probe_hook records an absent session as empty, not \"unknown\""
+  else
+    ko "$probe_hook records an absent session as empty, not \"unknown\"" \
+      "$(cat "$LEDGER" 2>/dev/null)"
+  fi
+done
+
 # strike-counter — three strikes then a blocking stop
 STATE="$TMP/state"
 printf '{"session_id":"sess-sc"}' \

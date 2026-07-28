@@ -36,11 +36,14 @@ INPUT=$(cat)
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // ""')
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
+# "unknown" is fine for the marker filename and the log lines below, but not
+# for the ledger — see the same guard in completion-verify/impl.sh.
+TELEMETRY_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""')
 
 # shellcheck source=../../_lib/record_fire.sh
 . "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true
 command -v praxis_fire_arm >/dev/null 2>&1 && \
-  praxis_fire_arm retrospect-mix-check completion-verify "$SESSION_ID" ""
+  praxis_fire_arm retrospect-mix-check completion-verify "$TELEMETRY_SESSION_ID" ""
 
 [ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
 [ ! -f "$TRANSCRIPT_PATH" ] && exit 0
