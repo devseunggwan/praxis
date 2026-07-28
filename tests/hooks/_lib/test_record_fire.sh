@@ -28,7 +28,12 @@ rows = [json.loads(line) for line in open(path, encoding="utf-8") if line.strip(
 match = [r for r in rows
          if r["hook"] == hook and r["decision"] == decision
          and r["session_id"] == session and r["granularity"] == "rich"]
-assert match, f"no rich {hook}/{decision}/{session} record in {rows}"
+# Exactly one: a duplicate arm (say, sourcing record_fire.sh twice) would
+# double-count the engagement, and "at least one" cannot see that.
+assert len(match) == 1, (
+    f"expected exactly 1 rich {hook}/{decision}/{session} record, "
+    f"got {len(match)} in {rows}"
+)
 PY
   if [ $? -eq 0 ]; then ok "$name"; else ko "$name" "record mismatch"; fi
 }

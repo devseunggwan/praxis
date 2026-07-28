@@ -1231,7 +1231,12 @@ def main() -> int:
         if not sh_path.exists():
             continue
         body = sh_path.read_text(encoding="utf-8", errors="replace")
-        if not re.search(rf"praxis_fire_arm\s+{re.escape(name)}\b", body):
+        # The line must also be executable shell: a commented-out or
+        # heredoc-quoted arm call reads identically to the real one, so a
+        # leading `#` disqualifies the match (coderabbit, PR #892).
+        if not re.search(
+            rf"(?m)^(?!\s*#).*\bpraxis_fire_arm\s+{re.escape(name)}\b", body
+        ):
             drifts.append(
                 f"FIRE-LEDGER MISSING hooks/{role}/{name}/impl.sh: shell hook "
                 "does not arm fire-ledger instrumentation — source "
