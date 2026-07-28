@@ -95,6 +95,18 @@ case "$MODE" in
     ;;
 esac
 
+# Fire-ledger instrumentation (issue #848). Hook modes only: the slash modes
+# are user-invoked commands, not hook engagements, so counting them would
+# inflate the fire rate this ledger exists to measure.
+case "$MODE" in
+  session-start|preprompt|stop)
+    # shellcheck source=../../_lib/record_fire.sh
+    . "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true
+    command -v praxis_fire_arm >/dev/null 2>&1 && \
+      praxis_fire_arm strike-counter completion-verify "$SID" ""
+    ;;
+esac
+
 if [ -z "$SID" ]; then
   echo "strike-counter: session_id unavailable — skipping" >&2
   exit 0
@@ -170,6 +182,7 @@ case "$MODE" in
     COUNT=$(load_count)
     if [ "$COUNT" -gt 0 ] 2>/dev/null; then
       # Emit as JSON additionalContext so Claude sees current strike state
+      PRAXIS_FIRE_DECISION=advise
       jq -n --arg ctx "Praxis strikes carried from prior activity this session: $COUNT/3" \
         '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'
     fi
@@ -187,6 +200,7 @@ case "$MODE" in
         MSG="⚠️ Praxis strike 1/3 — warning. Recorded violation:
 $REASONS
 Stay extra careful with the rules this session."
+        PRAXIS_FIRE_DECISION=advise
         jq -n --arg ctx "$MSG" \
           '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $ctx}}'
         ;;
@@ -195,6 +209,7 @@ Stay extra careful with the rules this session."
         MSG="🔶 Praxis strike 2/3 — review required. Cumulative violations:
 $REASONS
 Before your next action, re-read the relevant sections of ~/.claude/CLAUDE.md and explicitly state how you will avoid another violation. One more strike triggers a hard block."
+        PRAXIS_FIRE_DECISION=advise
         jq -n --arg ctx "$MSG" \
           '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $ctx}}'
         ;;
@@ -223,6 +238,7 @@ Before your next action, re-read the relevant sections of ~/.claude/CLAUDE.md an
 $REASONS
 
 $REQUIREMENT"
+      PRAXIS_FIRE_DECISION=block
       jq -n --arg r "$REASON_MSG" '{decision: "block", reason: $r}'
     fi
     exit 0

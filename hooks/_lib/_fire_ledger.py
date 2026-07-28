@@ -20,9 +20,26 @@ COVERAGE (issue #710, two tiers):
            `decision` field while exiting 0, so THEIR blocks are invisible to the
            coarse path and recorded as "pass" (PreToolUse blocks do exit 2 and
            are captured). Treat coarse Block as a lower bound.
-CEILING: a hook that does NOT use @fail_open is uninstrumented. The dispatcher
-process marks itself (mark_dispatcher_process) so its Bash-group members are not
+CEILING: a hook that reaches neither @fail_open nor an explicit
+`record_session_fire` call is uninstrumented. The dispatcher process marks
+itself (mark_dispatcher_process) so its Bash-group members are not
 double-counted by the coarse path.
+
+SHELL HOOKS (issue #848): `impl.sh` hooks run no Python `main()`, so
+@fail_open never wraps them — all four (strike-counter across its three
+events, completion-verify, retrospect-mix-check, codex-review-route) held
+zero records while an audit reading this ledger scored their absence as
+"never fires". They now source `_lib/record_fire.sh` and arm an EXIT trap
+(`praxis_fire_arm`) that writes exactly one RICH record per invocation via
+`record_session_fire`. Rich, not coarse: a shell hook has already parsed its
+own stdin payload and holds a real session_id. Because there is no coarse
+path for them, there is nothing to suppress on success and nothing to
+restore on failure — the `suppress_coarse_duplicate` contract below does not
+apply. Two deliberate gaps: guard clauses that exit BEFORE session_id is
+parsed (missing jq, unparseable stdin) are unrecorded, since a record keyed
+to an unknown session cannot be aggregated per-session; and strike-counter's
+slash-command modes (strike/status/reset) are user invocations, not hook
+engagements, so counting them would inflate the fire rate.
 
 SINGLE-EVENT RICH (issue #740): a standalone hook outside the Bash dispatch
 group that still needs real session_id/tool attribution (not the coarse

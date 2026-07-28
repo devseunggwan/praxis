@@ -22,6 +22,12 @@ fi
 
 INPUT=$(cat)
 PROMPT=$(echo "$INPUT" | jq -r '.prompt // empty' 2>/dev/null)
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""' 2>/dev/null)
+
+# shellcheck source=../../_lib/record_fire.sh
+. "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true
+command -v praxis_fire_arm >/dev/null 2>&1 && \
+  praxis_fire_arm codex-review-route advisory-nudge "$SESSION_ID" ""
 
 if [ -z "$PROMPT" ]; then
   exit 0
@@ -114,6 +120,7 @@ ${PR_STATE_MSG}"
   fi
 fi
 
+PRAXIS_FIRE_DECISION=advise
 jq -n --arg ctx "$COMBINED_MSG" \
   '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $ctx}}'
 

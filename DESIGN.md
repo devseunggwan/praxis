@@ -42,10 +42,27 @@ Design mechanisms shared by all hooks:
     a zero-arg `_entry()` instead). Rule 15 in
     `scripts/check-plugin-manifests.py` enforces this invariant.
 
+  Shell hooks (`impl.sh`) have no Python entrypoint, so neither path
+  applies to them — they carry their own `set +e` / `|| true` posture, and
+  reach the fire ledger through `_lib/record_fire.sh` instead (see the
+  instrumentation bullet below).
+
   Trade-off, stated explicitly: for *gates*, fail-open means a crashed
   guard allows the action it would have screened. That is the deliberate
   ETHOS choice — hook infrastructure failure must degrade to "no hook"
   rather than "no work".
+- **Fire-ledger instrumentation for shell hooks (issue #848).** A hook's
+  engagements land in the fire ledger via `@fail_open` (standalone) or the
+  dispatcher (Bash group) — both Python-only, so the four `impl.sh` hooks
+  recorded nothing at all while an audit reading that ledger scored the
+  silence as "never fires". A shell hook sources `_lib/record_fire.sh` and
+  calls `praxis_fire_arm <hook> <role> "$SESSION_ID" ""` right after it
+  parses its stdin payload; the armed EXIT trap writes exactly one RICH
+  record whichever branch exits, so a later-added early `exit 0` cannot
+  silently drop out of the ledger. Set `PRAXIS_FIRE_DECISION=block|advise`
+  before the emitting branch; the default is `pass`. Rule 18 in
+  `scripts/check-plugin-manifests.py` enforces that every manifest-listed
+  `impl.sh` arms it.
 - **Compound-Bash cascade advisory (issue #229).** When a PreToolUse(Bash)
   hook rejects (block) or asks-and-may-deny a compound command (`&&`, `||`,
   `;`, `|`, newline) containing a state-changing step (`> file`, `<<EOF >`,

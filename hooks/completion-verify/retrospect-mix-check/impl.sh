@@ -37,6 +37,11 @@ TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // ""')
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
 
+# shellcheck source=../../_lib/record_fire.sh
+. "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true
+command -v praxis_fire_arm >/dev/null 2>&1 && \
+  praxis_fire_arm retrospect-mix-check completion-verify "$SESSION_ID" ""
+
 [ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
 [ ! -f "$TRANSCRIPT_PATH" ] && exit 0
 
@@ -191,6 +196,7 @@ if [ "$RETRO_ACTIVE" = "true" ]; then
     echo "$(date -Iseconds) session=$SESSION_ID blocked_retrospect_fence_omission" \
       >> "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm/retrospect-mix-blocked.log" || true
     fence_reason="Retrospect Stage 3 distribution fence missing (issue #666). This is a retrospect-active session (the retrospect skill was invoked this turn) presenting a findings table, but the assistant message carries no '<!-- retrospect:distribution begin -->' fence and no '## Actions Executed' marker. A free-form or localized Stage 3 report bypasses every mix-check gate (Gate-1..7) because the gates key on the canonical output schema. Re-emit the Stage 3 output per the Output Schema Contract in skills/retrospect/references/stage3-reporting.md: '## Retrospect Report' header -> audit fences -> '<!-- retrospect:distribution begin/end -->' card -> unified findings table."
+    PRAXIS_FIRE_DECISION=block
     jq -n --arg r "$fence_reason" '{decision: "block", reason: $r}'
     exit 0
   fi
@@ -1010,6 +1016,7 @@ if [ "$should_block" = "true" ]; then
   done
 
   full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670); Gate-8 → emit a '<!-- retrospect:suppression_ledger begin/end -->' fence carrying 'worst_agent_failure:', 'self_adversarial:', and 'critic_diff:' lines (the Stage 2 self-incrimination pass plus conditional externalized critic tier record, mandatory on every path incl. the clean one), and do not claim none-found/clean when live transcript signals exceed tolerance — surface or justify those signals before Stage 3. See skills/retrospect/references/stage1-2-analysis.md self-incrimination pass and skills/retrospect/references/stage3-reporting.md."
+  PRAXIS_FIRE_DECISION=block
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'
   exit 0
 fi
