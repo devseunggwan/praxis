@@ -18,7 +18,9 @@
       ],
       "timeout": 5,
       "mode": {
-        "state_paths": ["PRAXIS_STATE_DIR"]
+        "state_paths": [
+          "PRAXIS_STATE_DIR"
+        ]
       }
     },
     {
@@ -96,6 +98,22 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5
+    },
+    {
+      "name": "block-unmatched-glob",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": [
+        "claude"
+      ],
+      "timeout": 5,
+      "mode": {
+        "external_commands": [
+          "zsh -lc setopt",
+          "zsh -f -c 'setopt nomatch; : <pattern>'"
+        ]
+      }
     },
     {
       "name": "foreground-poll-loop-guard",

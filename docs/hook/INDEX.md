@@ -22,6 +22,7 @@ confirmation-prompt layer.
 | Hook | Trigger | Purpose |
 | ------ | --------- | --------- |
 | [block-gh-state-all](../../hooks/preflight-gate/block-gh-state-all/spec.md) | PreToolUse | Hard-block invalid `gh search ... --state all` flag combo |
+| [block-unmatched-glob](../../hooks/preflight-gate/block-unmatched-glob/spec.md) | PreToolUse | Hard-block a command whose unquoted glob matches nothing — zsh aborts it before it runs |
 | [gh-flag-verify](../../hooks/preflight-gate/gh-flag-verify/spec.md) | PreToolUse | Block `gh <subcmd>` calls with flags not in the subcommand's accepted set |
 | [gh-json-validator](../../hooks/preflight-gate/gh-json-validator/spec.md) | PreToolUse | Block `gh <subcmd> --json <fields>` calls whose field names are not in the subcommand's valid JSON projection — issue #391 |
 | [gh-label-verify](../../hooks/preflight-gate/gh-label-verify/spec.md) | PreToolUse | Block `gh (issue\|pr) (create\|edit)` calls whose `--label` values are absent from the target repo's label set — issue #385 |
