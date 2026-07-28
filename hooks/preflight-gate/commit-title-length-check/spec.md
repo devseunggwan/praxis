@@ -7,7 +7,7 @@ Bash call and emits `permissionDecision: "ask"` when the first line of the
 commit message exceeds the configured maximum (default 50, matching the global
 global `~/.claude/CLAUDE.md` "Git Commit & Title Rules — Title: max 50 characters" rule).
 
-### Why a PreToolUse hook instead of a git commit-msg hook
+## Why a PreToolUse hook instead of a git commit-msg hook
 
 The issue body suggests a commit-msg hook because that is the natural insertion
 point. However, the praxis distribution model ships Claude Code hooks (loaded
@@ -23,43 +23,43 @@ Trade-off: the hook only catches AI-authored commits (not manual shell commits),
 which is exactly the population that produced the silent violations described in
 issue #177.
 
-### What is warned
+## What is warned
 
-| Command shape                    | Action                                |
-| -------------------------------- | ------------------------------------- |
-| `git commit -m "title"`          | ask when `len(title) > 50`            |
-| `git commit --message "title"`   | ask when `len(title) > 50`            |
-| `git commit -m="title"`          | ask when `len(title) > 50`            |
-| `git commit -am "title"`         | ask when `len(title) > 50`            |
-| `git commit --amend -m "title"`  | ask when `len(title) > 50`            |
-| `git commit -F /path/to/file`    | reads first line; ask when over limit |
-| `git commit -F -` (stdin)        | silent pass (acknowledged limitation) |
-| `Merge ...` / `Revert ...` title | silent pass (auto-generated)          |
-| `git status`, `git push`, etc.   | silent pass (not a commit)            |
+| Command shape | Action |
+| --- | --- |
+| `git commit -m "title"` | ask when `len(title) > 50` |
+| `git commit --message "title"` | ask when `len(title) > 50` |
+| `git commit -m="title"` | ask when `len(title) > 50` |
+| `git commit -am "title"` | ask when `len(title) > 50` |
+| `git commit --amend -m "title"` | ask when `len(title) > 50` |
+| `git commit -F /path/to/file` | reads first line; ask when over limit |
+| `git commit -F -` (stdin) | silent pass (acknowledged limitation) |
+| `Merge ...` / `Revert ...` title | silent pass (auto-generated) |
+| `git status`, `git push`, etc. | silent pass (not a commit) |
 
 Length counting uses Python `len(str)` which counts Unicode code points — the
 correct measure for the 50-char rule in Korean/CJK mixed commit titles.
 
-### Squash-merge path (issue #843)
+## Squash-merge path (issue #843)
 
 `git commit` is not the only path a commit title reaches `main` through: `gh
 pr merge --squash` combines the PR's title into the squash commit title on
 GitHub's side, a shape the `git commit` matcher above cannot see. Two real
-squash titles already landed on `main` over the limit — #834 at 61 chars,
-#835 at 63 chars (both measured excluding any trailing `(#N)` suffix GitHub
-appends) — because the gate only ever fired on the branch's own `git commit`
+squash titles already landed on `main` over the limit — #834 at 61
+chars, #835 at 63 chars (both measured excluding any trailing `(#N)`
+suffix GitHub appends) — because the gate only ever fired on the branch's own `git commit`
 calls, never on the merge that actually produced the title landing on
 `main`.
 
-| Command shape                                        | Action |
-| ------------------------------------------------------ | -------- |
-| `gh pr merge <id> --squash` / `-s`                     | resolve PR title via `gh pr view`; **advisory** (stderr) when over limit |
-| `gh pr merge <id> --squash -t "<subject>"`             | `-t`/`--subject` value IS the title — no network call, checked directly |
-| `gh pr merge <id> --merge` / `--rebase` (no `-s`)      | silent — not a squash, title composition differs |
-| `gh -R owner/repo pr merge <id> --squash`              | `-R`/`--repo` forwarded to the `gh pr view` resolution call |
+| Command shape | Action |
+| --- | --- |
+| `gh pr merge <id> --squash` / `-s` | resolve PR title via `gh pr view`; **advisory** (stderr) when over limit |
+| `gh pr merge <id> --squash -t "<subject>"` | `-t`/`--subject` value IS the title — no network call, checked directly |
+| `gh pr merge <id> --merge` / `--rebase` (no `-s`) | silent — not a squash, title composition differs |
+| `gh -R owner/repo pr merge <id> --squash` | `-R`/`--repo` forwarded to the `gh pr view` resolution call |
 | `gh api repos/.../pulls/N/merge -f merge_method=squash` | **NOT matched — deliberate gap**, see "Ordering constraint" below |
 
-#### Severity: advisory, not `ask`
+### Severity: advisory, not `ask`
 
 Unlike the `git commit` path (which blocks via `ask`), the squash-merge path
 only ever writes a stderr advisory and always exits 0 — it never blocks the
@@ -70,7 +70,7 @@ recommends starting conservative — "1단계는 advisory로 시작 권장" — 
 new failure surface (network dependency) this path introduces relative to
 the pure-local `git commit` check.
 
-#### Ordering constraint — `gh api .../pulls/N/merge` intentionally NOT sealed
+### Ordering constraint — `gh api .../pulls/N/merge` intentionally NOT sealed
 
 The issue body asks to also match `gh api repos/.../pulls/N/merge` (the same
 mutation via the raw API instead of the `gh pr merge` subcommand). This PR
@@ -82,23 +82,23 @@ same change window would remove that escape hatch before its blocking issue
 resolves. Extending coverage to `gh api` is left to a follow-up once that
 ordering constraint clears.
 
-#### `-t`/`--subject` override
+### `-t`/`--subject` override
 
 `gh pr merge` accepts `-t`/`--subject <value>` to set the squash commit
 subject directly, overriding the PR title. When present, that value **is**
 the title — checked directly, no `gh pr view` call needed (and none of its
 fail-open/network-error paths apply).
 
-### Configuration
+## Configuration
 
-| Env var                   | Default | Effect                            |
-| ------------------------- | ------- | --------------------------------- |
-| `CLAUDE_COMMIT_TITLE_MAX` | `50`    | Override the maximum title length |
+| Env var | Default | Effect |
+| --- | --- | --- |
+| `CLAUDE_COMMIT_TITLE_MAX` | `50` | Override the maximum title length |
 
 Setting `CLAUDE_COMMIT_TITLE_MAX=80` allows longer titles (e.g. for repos with
 a 72-char convention) without disabling the hook.
 
-### Response
+## Response
 
 ```json
 {
@@ -110,7 +110,7 @@ a 72-char convention) without disabling the hook.
 }
 ```
 
-### Compound cascade advisory (issue #229)
+## Compound cascade advisory (issue #229)
 
 When the ask fires on a compound Bash command containing a state-changing
 step (e.g. `mkdir -p /tmp/log && git commit -m "$(cat /tmp/log/very-long-..."`),
@@ -119,7 +119,7 @@ the ask reason is suffixed with the shared
 chained `mkdir`/redirect/download also did not run — retries must materialize
 those files first.
 
-### Opt-out marker
+## Opt-out marker
 
 Embed `# title-length:ack` anywhere in the command to bypass the check for
 known-intentional long titles (e.g. auto-generated merge commits handled by a
@@ -136,7 +136,7 @@ either path runs):
 gh pr merge 42 --squash  # title-length:ack
 ```
 
-### Parsing guarantees
+## Parsing guarantees
 
 Inherits `safe_tokenize` / `iter_command_starts` / `strip_prefix` from
 `_hook_utils.py` (same primitive as the sibling hooks):
@@ -161,14 +161,14 @@ Inherits `safe_tokenize` / `iter_command_starts` / `strip_prefix` from
   tokenizer (see `_hook_utils.py` docstring), preserved to keep
   newline-separated multi-command detection intact for sibling hooks.
 
-### Fail-open (squash-merge path)
+## Fail-open (squash-merge path)
 
 `gh pr view` failure (auth error, timeout, non-zero exit, empty output) ->
 silent pass, same fail-open contract as `gh-merge-worktree-precondition`'s
 own `gh pr view` call. The advisory only fires on a positively-resolved,
 over-limit title.
 
-### Tests
+## Tests
 
 ```bash
 bash tests/hooks/preflight-gate/test_commit_title_length_check.sh
