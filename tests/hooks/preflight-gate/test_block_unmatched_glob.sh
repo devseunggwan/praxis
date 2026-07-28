@@ -23,6 +23,14 @@ if [ ! -x "$HOOK" ]; then
   exit 1
 fi
 
+# The gate delegates every verdict to a real zsh and fails open without one, so
+# each blocking assertion below would silently become a fail-open assertion.
+# Skip loudly rather than report 14 unexplained failures (CI installs zsh).
+if ! command -v zsh >/dev/null 2>&1; then
+  echo "SKIPPED: zsh not available — block-unmatched-glob has nothing to delegate to"
+  exit 0
+fi
+
 FIXTURE=$(mktemp -d)
 trap 'rm -rf "$FIXTURE"' EXIT
 mkdir -p "$FIXTURE/logs" "$FIXTURE/nested/deep"

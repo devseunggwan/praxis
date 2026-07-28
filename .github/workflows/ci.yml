@@ -93,7 +93,10 @@ jobs:
           cache: pip
           cache-dependency-path: .github/workflows/ci.yml
       - run: python3 -m pip install pytest
-      - run: sudo apt-get update -y && sudo apt-get install -y jq
+      # zsh is not preinstalled on ubuntu-latest. block-unmatched-glob delegates
+      # its verdict to a real zsh, so without it that hook's suite has nothing to
+      # assert against and silently degrades to fail-open coverage.
+      - run: sudo apt-get update -y && sudo apt-get install -y jq zsh
       - run: bash scripts/run-tests.sh
 
   link-check:
