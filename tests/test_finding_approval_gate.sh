@@ -18,48 +18,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SKILL="$ROOT_DIR/skills/codex-review-wrap/SKILL.md"
 
-if [ ! -f "$SKILL" ]; then
-  echo "FAIL: SKILL.md not found at $SKILL" >&2
-  exit 1
-fi
-
-PASS=0
-FAIL=0
-FAILED_NAMES=()
-
-# Assert that a fixed-string pattern appears at least once in SKILL.md.
-assert_present() {
-  local name="$1"
-  local pattern="$2"
-  local hits
-  hits=$(grep -Fc -- "$pattern" "$SKILL" 2>/dev/null)
-  hits=${hits:-0}
-  if [ "$hits" -gt 0 ]; then
-    echo "PASS  [$name]"
-    PASS=$((PASS + 1))
-  else
-    echo "FAIL  [$name] — pattern not found: $pattern"
-    FAIL=$((FAIL + 1))
-    FAILED_NAMES+=("$name")
-  fi
-}
-
-# Assert that an extended-regex pattern appears at least once in SKILL.md.
-assert_present_re() {
-  local name="$1"
-  local pattern="$2"
-  local hits
-  hits=$(grep -Ec -- "$pattern" "$SKILL" 2>/dev/null)
-  hits=${hits:-0}
-  if [ "$hits" -gt 0 ]; then
-    echo "PASS  [$name]"
-    PASS=$((PASS + 1))
-  else
-    echo "FAIL  [$name] — regex not matched: $pattern"
-    FAIL=$((FAIL + 1))
-    FAILED_NAMES+=("$name")
-  fi
-}
+# shellcheck source=./_assert_lib.sh
+source "$SCRIPT_DIR/_assert_lib.sh"
+assert_lib_init "$SKILL"
 
 # ---------------------------------------------------------------------------
 # 1. Section exists and is reachable from the execution-order list
@@ -285,13 +246,4 @@ assert_present \
 # Summary
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "Passed: $PASS  Failed: $FAIL"
-if [ "$FAIL" -gt 0 ]; then
-  echo "Failed tests:"
-  for t in "${FAILED_NAMES[@]}"; do
-    echo "  - $t"
-  done
-  exit 1
-fi
-exit 0
+assert_lib_summary
