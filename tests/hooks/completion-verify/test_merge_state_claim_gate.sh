@@ -56,6 +56,21 @@ elif evidence == "gh-1864":
 elif evidence == "mcp-1864":
     asst_blocks.append({"type": "tool_use", "name": "mcp__github__pull_request_read",
                         "input": {"pullNumber": 1864}})
+elif evidence == "gh-864-in-slug":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "gh pr view 111 --repo org/project-864 --json state"}})
+elif evidence == "mcp-864-in-owner":
+    asst_blocks.append({"type": "tool_use", "name": "mcp__github__pull_request_read",
+                        "input": {"owner": "team864", "pullNumber": 111}})
+elif evidence == "gh-864-merge":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "gh pr merge 864 --squash"}})
+elif evidence == "mcp-864-merge":
+    asst_blocks.append({"type": "tool_use", "name": "mcp__github__merge_pull_request",
+                        "input": {"pullNumber": 864}})
+elif evidence == "gh-864-url":
+    asst_blocks.append({"type": "tool_use", "name": "Bash",
+                        "input": {"command": "gh pr view https://github.com/o/r/pull/864 --json state"}})
 if asst_blocks:
     events.append({"message": {"role": "assistant", "content": asst_blocks}})
 events.append({"message": {"role": "assistant",
@@ -405,6 +420,25 @@ run_case advisory "unchanged-not-cleared-by-longer-number" '{}'
 
 build_transcript "PR #864 는 여전히 OPEN." mcp-1864
 run_case advisory "unchanged-not-cleared-by-longer-number-mcp" '{}'
+
+# --- the number must sit at the READ subcommand's target position ----------
+# (codex review on #884): whole-command scanning cleared #864 off an
+# unrelated PR whose repo slug carried the digits, and off a mutation that
+# says nothing about the post-merge state the claim asserts.
+build_transcript "PR #864 는 여전히 OPEN." gh-864-in-slug
+run_case advisory "unchanged-not-cleared-by-digits-in-repo-slug" '{}'
+
+build_transcript "PR #864 는 여전히 OPEN." mcp-864-in-owner
+run_case advisory "unchanged-not-cleared-by-digits-in-owner" '{}'
+
+build_transcript "PR #864 는 여전히 OPEN." gh-864-merge
+run_case advisory "unchanged-not-cleared-by-cli-mutation" '{}'
+
+build_transcript "PR #864 는 여전히 OPEN." mcp-864-merge
+run_case advisory "unchanged-not-cleared-by-mcp-mutation" '{}'
+
+build_transcript "PR #864 는 여전히 OPEN." gh-864-url
+run_case silent "unchanged-cleared-by-pr-url-read" '{}'
 
 # --- strict mode on an unchanged-only claim --------------------------------
 build_transcript "PR #864 는 여전히 OPEN, 커밋 유실 없음." none

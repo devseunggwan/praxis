@@ -144,6 +144,25 @@ the applied-kind's stricter-evidence precedent (#656): a looser generic
 check would have let the incident's exact stale re-assertion pass had any
 unrelated `gh pr view` call happened to appear nearby.
 
+The reference must be **positional and read-only**, not a substring of the
+command text:
+
+| Evidence shape | Clears `#864`? |
+| --- | --- |
+| `gh pr view 864 --json state` / `gh issue view 864` / `gh -R o/r pr view 864` | yes |
+| `gh pr view https://github.com/o/r/pull/864` | yes (URL target ends in `/864`) |
+| MCP read (`pull_request_read`, `get_issue`, …) with `pullNumber`/`issue_number` = `864` | yes |
+| `gh pr view 1864` | no — digits must be a whole number, not a longer one's prefix |
+| `gh pr view 111 --repo org/project-864` | no — the digits sit in a slug, not at the target position |
+| MCP read with `owner: team864`, `pullNumber: 111` | no — only PR/issue *number* fields count |
+| `gh pr merge 864 --squash`, MCP `merge_pull_request` | no — a mutation does not report the post-mutation state the claim asserts |
+
+**Known gap (deliberate).** A combined line ("PR #864 는 OPEN이고 커밋 유실
+없음") is cleared as a whole by a state-only read, even though `--json state`
+cannot witness a force-push that dropped commits. Requiring commit/head
+history evidence for the no-loss subtype specifically would change the
+gate's contract beyond issue #869's scope; it is left to a follow-up.
+
 ## Relationship to sibling hooks
 
 | Hook | Scope | Overlap |

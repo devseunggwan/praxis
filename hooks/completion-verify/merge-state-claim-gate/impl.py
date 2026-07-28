@@ -159,9 +159,22 @@ def detect_unchanged_claims(text: str) -> list[str]:
 
 _GH_EVIDENCE_RE = re.compile(r"\bgh\b[^|;&\n]*\b(pr|issue)\b\s+[a-z]", re.IGNORECASE)
 _MCP_GH_EVIDENCE_RE = re.compile(r"pull_request|issue|merge|pr_", re.IGNORECASE)
-# Digit runs bounded on both sides: `864` must not be cleared by a query for
-# `1864` (`digits in cmd` substring matching cleared that collision).
-_STANDALONE_NUM_RE = re.compile(r"(?<![0-9])[0-9]+(?![0-9])")
+# The queried number must sit at the TARGET position of a READ subcommand.
+# Whole-command scanning cleared `#864` off `gh pr view 111 --repo org/p-864`
+# (number in an unrelated slug) and off `gh pr merge 864` (a mutation, which
+# tells you nothing about the post-merge state the claim asserts).
+_GH_READ_VERBS = frozenset({"view", "list", "status", "checks", "diff"})
+_GH_TARGET_RE = re.compile(
+    r"\bgh\b(?P<mid>[^|;&\n]*?)\b(?:pr|issue)\s+(?P<verb>[a-z-]+)(?P<rest>[^|;&\n]*)",
+    re.IGNORECASE,
+)
+_TARGET_NUM_RE = re.compile(r"(?:^|/)(?P<n>[0-9]+)$")
+# GitHub MCP reads only — a merge/create/close tool is a mutation, same
+# exclusion as the CLI verb allow-list above.
+_MCP_GH_READ_RE = re.compile(r"^mcp__github__(?:get|list|search|read)_|_read$", re.IGNORECASE)
+_MCP_NUMBER_KEY_RE = re.compile(
+    r"^(?:number|pull_?number|issue_?number|pr_?number)$", re.IGNORECASE
+)
 
 # Reachability evidence for "applied" claims (#656). A generic state query
 # (`gh pr view --json state`) is NOT sufficient — the 2026-05-15 incident ran
@@ -273,10 +286,39 @@ def has_reachability_evidence(events: list[dict]) -> bool:
     return False
 
 
-def _cites_number(text: str, digits: str) -> bool:
-    """True if `digits` appears in `text` as a whole number, not as a
-    substring of a longer one — `1864` must not clear a claim about `864`."""
-    return digits in _STANDALONE_NUM_RE.findall(text)
+def _bash_reads_number(cmd: str, digits: str) -> bool:
+    """True if `cmd` is a gh READ of exactly `digits`.
+
+    Positional, not substring: the number must appear as a bare argument or
+    a PR/issue URL ending in `/864`, and the subcommand must be a read verb.
+    `gh pr view 1864`, `gh pr view 111 --repo org/project-864` (digits inside
+    a slug never follow a `/`) and `gh pr merge 864 --squash` all fail.
+    Flag *values* are scanned too rather than assuming the target is the
+    first positional — `gh pr view --json state 864` is a real shape and a
+    value-taking-flag table would be its own drift surface.
+    """
+    for m in _GH_TARGET_RE.finditer(cmd):
+        if m.group("verb").lower() not in _GH_READ_VERBS:
+            continue
+        for token in m.group("rest").split():
+            if token.startswith("-"):
+                continue
+            hit = _TARGET_NUM_RE.search(token.rstrip("/"))
+            if hit and hit.group("n") == digits:
+                return True
+    return False
+
+
+def _mcp_reads_number(name: str, inp: dict, digits: str) -> bool:
+    """True if a GitHub MCP READ tool was called with `digits` in a
+    PR/issue *number* field. An owner/repo slug carrying the digits, and any
+    mutation tool (merge/create/close), do not count."""
+    if not _MCP_GH_READ_RE.search(name):
+        return False
+    for key, value in inp.items():
+        if _MCP_NUMBER_KEY_RE.match(str(key)) and str(value) == digits:
+            return True
+    return False
 
 
 def has_fresh_query_for_number(events: list[dict], number: str) -> bool:
@@ -302,11 +344,11 @@ def has_fresh_query_for_number(events: list[dict], number: str) -> bool:
             if name == "Bash":
                 inp = block.get("input", {})
                 cmd = inp.get("command", "") if isinstance(inp, dict) else ""
-                if cmd and _GH_EVIDENCE_RE.search(cmd) and _cites_number(cmd, digits):
+                if cmd and _bash_reads_number(cmd, digits):
                     return True
-            elif name.startswith("mcp__github__") and _MCP_GH_EVIDENCE_RE.search(name):
+            elif name.startswith("mcp__github__"):
                 inp = block.get("input", {})
-                if isinstance(inp, dict) and _cites_number(json.dumps(inp), digits):
+                if isinstance(inp, dict) and _mcp_reads_number(name, inp, digits):
                     return True
     return False
 
