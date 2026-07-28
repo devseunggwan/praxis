@@ -154,7 +154,7 @@ run_documented_gate() {  # $1 = cwd under test
   return 0
 }
 
-GATE_TMP="$(mktemp -d)"
+GATE_TMP="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 mkdir -p "$GATE_TMP/normal" "$GATE_TMP/fabricated" "$GATE_TMP/truncated"
 cat > "$GATE_TMP/normal/.agent-report.json" <<'JSON'
 {"branch": "issue-1-x", "head_sha": "abc", "pushed": true,

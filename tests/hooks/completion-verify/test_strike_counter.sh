@@ -36,7 +36,7 @@ run() {
 # Isolated sandbox per test invocation
 fresh_env() {
   local dir
-  dir=$(mktemp -d)
+  dir=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   export PRAXIS_STATE_DIR="$dir"
   export CLAUDE_SESSION_ID="test-$$-${RANDOM}"
 }
@@ -208,7 +208,7 @@ test_ac10_latch_fallback() {
 # ---- AC11: missing session_id fails cleanly --------------------------------
 test_ac11_missing_session_id() {
   local dir
-  dir=$(mktemp -d)
+  dir=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   PRAXIS_STATE_DIR="$dir" env -u CLAUDE_SESSION_ID "$STRIKE" strike "x" >/tmp/out.$$ 2>/tmp/err.$$
   local code=$?
   local out err
@@ -452,8 +452,8 @@ test_ac17_ttl_cleanup() {
 # pointing $CLAUDE_PLUGIN_DATA at a sibling dir must NOT cause writes there.
 test_ac25_state_isolated_from_claude_plugin_data() {
   local praxis_dir sibling_dir
-  praxis_dir=$(mktemp -d)
-  sibling_dir=$(mktemp -d)
+  praxis_dir=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
+  sibling_dir=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   export PRAXIS_STATE_DIR="$praxis_dir"
   export CLAUDE_PLUGIN_DATA="$sibling_dir"
   export CLAUDE_SESSION_ID="ac25-$$-${RANDOM}"
@@ -478,7 +478,7 @@ test_ac25_state_isolated_from_claude_plugin_data() {
 # PRAXIS_STATE_DIR override set.
 test_ac26_legacy_state_migration() {
   local home sid out migrated
-  home=$(mktemp -d)
+  home=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   sid="migrate-$$-${RANDOM}"
   mkdir -p "$home/.claude/state/praxis/strikes"
   printf '{"count":2,"reasons":["legacy a","legacy b"]}' \
@@ -497,8 +497,8 @@ test_ac26_legacy_state_migration() {
 # counter must be read from the override dir (empty → 0 strikes).
 test_ac26b_no_migration_when_override_set() {
   local home override_dir legacy_dir sid out migrated
-  home=$(mktemp -d)
-  override_dir=$(mktemp -d)
+  home=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
+  override_dir=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   sid="no-migrate-$$-${RANDOM}"
   # Seed legacy location with a non-zero strike count
   legacy_dir="$home/.claude/state/praxis/strikes"

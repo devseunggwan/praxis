@@ -14,7 +14,7 @@
 set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TMP_DIR="$(mktemp -d)"
+TMP_DIR="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 UNWRAPPED="$TMP_DIR/unwrapped.md"

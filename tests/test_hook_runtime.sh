@@ -114,7 +114,7 @@ fi
 rm -f "$TMP_LOG"
 
 # Default placement (no PRAXIS_HOOK_ERROR_LOG): lands under <PRAXIS_HOME>/logs.
-TMP_HOME=$(mktemp -d)
+TMP_HOME=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 rc_default=$(env -u PRAXIS_HOOK_ERROR_LOG PRAXIS_HOME="$TMP_HOME" python3 - "$LIB" << 'PYEOF'
 import sys
 sys.path.insert(0, sys.argv[1])

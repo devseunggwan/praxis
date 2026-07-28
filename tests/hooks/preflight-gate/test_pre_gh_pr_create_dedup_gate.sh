@@ -39,7 +39,7 @@ PASS=0; FAIL=0; FAILED_NAMES=()
 make_fake_bin() {
   local scenario="$1"
   local d
-  d=$(mktemp -d)
+  d=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 
   # git shim — returns origin URL unless `no-git` scenario.
   if [ "$scenario" = "no-git" ]; then

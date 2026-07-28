@@ -41,7 +41,7 @@ PY
 # --- helper contract -------------------------------------------------------
 # A shell hook lives two directories below _lib, so the probe harness has to
 # reproduce that depth for the relative source path to resolve.
-PROBE_ROOT="$(mktemp -d)"
+PROBE_ROOT="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 mkdir -p "$PROBE_ROOT/_lib" "$PROBE_ROOT/role/name"
 cp "$ROOT_DIR/hooks/_lib/record_fire.sh" "$PROBE_ROOT/_lib/"
 cp "$ROOT_DIR/hooks/_lib/_fire_ledger.py" "$PROBE_ROOT/_lib/"
@@ -73,7 +73,7 @@ else
 fi
 
 # fail-open: _fire_ledger.py missing from the resolved _lib
-NOLIB_ROOT="$(mktemp -d)"
+NOLIB_ROOT="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 mkdir -p "$NOLIB_ROOT/_lib" "$NOLIB_ROOT/role/name"
 cp "$ROOT_DIR/hooks/_lib/record_fire.sh" "$NOLIB_ROOT/_lib/"
 cp "$PROBE_ROOT/role/name/impl.sh" "$NOLIB_ROOT/role/name/impl.sh"
@@ -92,7 +92,7 @@ rc=$?
   || ko "unwritable ledger fails open" "rc=$rc"
 
 # --- end-to-end: each instrumented impl.sh hook ----------------------------
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 
 # completion-verify — claim without evidence blocks
 python3 - "$TMP/cv.jsonl" <<'PY'

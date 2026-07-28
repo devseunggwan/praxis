@@ -166,7 +166,7 @@ print(json.dumps({"prompt": sys.argv[1], "session_id": "test-sid"}))' "$prompt")
 }
 
 # --- setup fixture repos -----------------------------------------------------
-TMPROOT=$(mktemp -d)
+TMPROOT=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 MULTI="$TMPROOT/multi"
 SINGLE="$TMPROOT/single"
 BARE_LINKED="$TMPROOT/bare-plus-linked"
@@ -233,7 +233,7 @@ malformed_json_test
 not_in_repo_test() {
   local name="13 silent: cwd not a git repo"
   local nogit
-  nogit=$(mktemp -d)
+  nogit=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   local payload
   payload=$(python3 -c '
 import json, sys

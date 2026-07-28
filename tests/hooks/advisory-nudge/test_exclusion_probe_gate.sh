@@ -201,7 +201,7 @@ DELIBERATELY EXCLUDED (verified via HMS)
 #   A pre-existing directive + an Edit that adds only the claim (adjacent line)
 #   must fire; the same Edit on a non-existent file (claim fragment only,
 #   directive absent) must stay silent.
-P2_DIR=$(mktemp -d)
+P2_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 printf '# notes\nDELIBERATELY EXCLUDED these two tables\n- table_a\n' > "$P2_DIR/notes.md"
 printf '%s' "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$P2_DIR/notes.md\",\"old_string\":\"- table_a\",\"new_string\":\"- table_a (this exclusion confirmed via prod)\"}}" \
   | "$HOOK" >/dev/null 2>/tmp/p2e

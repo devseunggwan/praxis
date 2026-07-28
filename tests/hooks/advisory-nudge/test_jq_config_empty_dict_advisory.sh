@@ -103,7 +103,7 @@ print(json.dumps(d))
 # Setup: temp directory for fixture files
 # ---------------------------------------------------------------------------
 
-TMPDIR_TEST=$(mktemp -d)
+TMPDIR_TEST=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$TMPDIR_TEST"' EXIT
 
 # Create fixture files
@@ -297,7 +297,7 @@ run_case "multi-file: both valid config paths are silent" \
 # We simulate this by running the hook with PATH set to an empty directory.
 # ---------------------------------------------------------------------------
 
-EMPTY_BIN_DIR=$(mktemp -d)
+EMPTY_BIN_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 # Resolve the real python3 binary (not a pyenv shim) so it remains callable
 # after we strip PATH down to EMPTY_BIN_DIR (which removes the shim layer).
 PYTHON3_BIN="$(python3 -c 'import sys; print(sys.executable)')"

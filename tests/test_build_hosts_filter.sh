@@ -39,7 +39,7 @@ run_case() {
 # ---------------------------------------------------------------------------
 
 setup_fixture() {
-  FIXTURE_DIR="$(mktemp -d)"
+  FIXTURE_DIR="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 
   # Minimal hooks.json fixture with three hooks:
   #   - hook-no-hosts: no hosts field  (= all platforms)

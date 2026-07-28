@@ -87,7 +87,7 @@ print(json.dumps(d))
 # ---------------------------------------------------------------------------
 
 # Existing directory that is NOT a registered git worktree.
-NON_WT_DIR=$(mktemp -d)
+NON_WT_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 
 # Path that does not exist at all.
 MISSING_PATH="$NON_WT_DIR/does-not-exist-$$"
@@ -243,7 +243,7 @@ run_case "compact subshell trailing-paren does not cause false advisory" \
 # pollute the outer effective_cwd. In `(cd /tmp && cd /usr) && cd bin`, the
 # outer relative `cd bin` must resolve against the original cwd, not /usr.
 # Run with a controlled outer cwd (a temp dir guaranteed to lack `bin/`).
-DEF1_OUTER=$(mktemp -d)
+DEF1_OUTER=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 {
   payload_def1=$(python3 -c '
 import json

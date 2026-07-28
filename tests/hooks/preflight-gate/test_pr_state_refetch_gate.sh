@@ -60,7 +60,7 @@ print(json.dumps({
 make_fake_gh() {
   local mode="$1" map_content="${2:-}"
   local d
-  d=$(mktemp -d)
+  d=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   case "$mode" in
     absent)
       ;;

@@ -12,7 +12,7 @@ if [[ ! -f "$SCAN" ]]; then
   exit 1
 fi
 
-TMPHOME=$(mktemp -d)
+TMPHOME=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 PROJ="$TMPHOME/.claude/projects/-tmp-fake-cwd"
 mkdir -p "$PROJ"
 

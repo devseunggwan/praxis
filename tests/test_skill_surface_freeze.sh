@@ -25,7 +25,7 @@ PASS=0
 FAIL=0
 GHOST="$ROOT_DIR/skills/ghost-skill-fixture"
 GHOST_UNDERSCORE="$ROOT_DIR/skills/_internal-fixture"
-BACKUP_DIR="$(mktemp -d)"
+BACKUP_DIR="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 BACKUP="$BACKUP_DIR/strikes"
 
 cleanup() {

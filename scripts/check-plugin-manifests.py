@@ -1254,6 +1254,43 @@ def main() -> int:
                 "session_id is parsed (#848)"
             )
 
+    # ------------------------------------------------------------------
+    # Rule 19 — test temp-dir creation must be guarded (#897)
+    #
+    # The suite runs under `set +e`, so an unguarded `mktemp -d` failure
+    # leaves its variable empty and every path built from it re-anchors at
+    # the filesystem root: `$TMP/cr-repo` becomes `/cr-repo`, and
+    # `mkdir -p "$PROBE_ROOT/_lib"` becomes `mkdir -p /_lib`. Observed for
+    # real in a codex sandbox that blocks DARWIN_USER_TEMP_DIR — one
+    # unusable temp dir surfaced as eleven unrelated assertion failures,
+    # which reads as a defect in the code under test.
+    # ------------------------------------------------------------------
+    # Matches the call shape only — an assignment whose value is a command
+    # substitution running `mktemp -d`. Anything else mentioning the text (a
+    # comment, or this rule's own fixture passing candidate lines as string
+    # arguments) is not an invocation and must not be flagged.
+    mktemp_site_re = re.compile(
+        r"^[ \t]*(?:local [A-Za-z_][A-Za-z0-9_]*; *)?"
+        r"[A-Za-z_][A-Za-z0-9_]*=\"?\$\(.*mktemp -d.*"
+    )
+    for sh_file in sorted((REPO_ROOT / "tests").rglob("*.sh")):
+        for lineno, line in enumerate(
+            sh_file.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+        ):
+            if not mktemp_site_re.match(line):
+                continue
+            # The guard has to sit on the same line: `VAR=$(mktemp -d)`
+            # returns the substitution's status, and that status is the only
+            # signal available before the empty value is used.
+            if "||" not in line:
+                rel = sh_file.relative_to(REPO_ROOT)
+                drifts.append(
+                    f"UNGUARDED MKTEMP {rel}:{lineno}: `mktemp -d` failure is "
+                    "not checked — append "
+                    '`|| { echo "FATAL: mktemp -d failed" >&2; exit 1; }` so a '
+                    "missing temp dir fails once instead of re-anchoring every "
+                    "derived path at / (#897)"
+                )
 
     if drifts:
         print("plugin-manifest check FAILED:")

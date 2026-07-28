@@ -34,7 +34,7 @@ FIXTURE="$REPO_ROOT/tests/fixtures/retrospect-replay-silent-pass.jsonl"
 
 PASS=0
 FAIL=0
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$TMP"' EXIT
 
 mk_assistant() {

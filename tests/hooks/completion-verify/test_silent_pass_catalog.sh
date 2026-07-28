@@ -37,7 +37,7 @@ run_case() {
   fi
 }
 
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$TMP"' EXIT
 
 # A fabricated, NON-allowlisted 40-char secret-shaped value used across cases.

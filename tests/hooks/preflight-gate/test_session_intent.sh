@@ -27,7 +27,7 @@ PASS=0
 FAIL=0
 FAILED_NAMES=()
 
-WORK_DIR=$(mktemp -d)
+WORK_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 # run_hook state_file mode_env payload

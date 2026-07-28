@@ -37,7 +37,7 @@ FAILED_NAMES=()
 # differently). Shadow gh with a fixed-field stub so the test exercises the
 # hook's PARSING logic rather than whichever gh happens to be installed.
 # ---------------------------------------------------------------------------
-GH_STUB_DIR=$(mktemp -d)
+GH_STUB_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 cat >"$GH_STUB_DIR/gh" <<'STUB'
 #!/usr/bin/env bash
 # Deterministic stand-in for `gh <subcmd> --json help`. Emits the real
@@ -93,7 +93,7 @@ chmod +x "$GH_STUB_DIR/gh"
 # Symlink the REAL interpreter (sys.executable), not `command -v python3`: the
 # latter can resolve to a pyenv/asdf shim (a `#!/usr/bin/env bash` script) that
 # fails to launch under the restricted PATH ("env: bash: No such file").
-NO_GH_DIR=$(mktemp -d)
+NO_GH_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "$NO_GH_DIR/python3"
 
 trap 'rm -rf "$GH_STUB_DIR" "$NO_GH_DIR"' EXIT

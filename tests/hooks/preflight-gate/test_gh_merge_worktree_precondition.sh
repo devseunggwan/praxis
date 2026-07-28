@@ -44,7 +44,7 @@ PASS=0; FAIL=0; FAILED_NAMES=()
 make_fake_gh() {
   local mode="$1" branch="${2:-}" repo="${3:-}"
   local d
-  d=$(mktemp -d)
+  d=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   case "$mode" in
     branch)
       cat >"$d/gh" <<EOF
@@ -102,14 +102,14 @@ EOF
 # Real git repo (worktree state needs a real .git)
 # ---------------------------------------------------------------------------
 
-REPO=$(cd "$(mktemp -d)" && pwd -P)
+REPO=$(cd "$(mktemp -d)" && pwd -P) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -C "$REPO" init -q -b main
 git -C "$REPO" -c user.name=test -c user.email=test@example.com \
   commit -q --allow-empty -m init
 git -C "$REPO" branch feature-checked-out
 git -C "$REPO" branch feature-not-checked-out
 
-WT=$(mktemp -d)
+WT=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 rm -rf "$WT"
 git -C "$REPO" worktree add -q "$WT" feature-checked-out >/dev/null 2>&1
 

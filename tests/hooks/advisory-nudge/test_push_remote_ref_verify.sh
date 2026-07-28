@@ -17,7 +17,7 @@ FAIL=0
 # setup_repo -> sets globals WORK (work tree) and REMOTE (bare repo)
 setup_repo() {
   local base
-  base="$(mktemp -d)"
+  base="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   REMOTE="$base/remote.git"
   WORK="$base/work"
   git init --bare -q "$REMOTE"
