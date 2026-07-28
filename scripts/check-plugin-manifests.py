@@ -1212,6 +1212,49 @@ def main() -> int:
                     f"in {source} but absent from the hook's manifest `mode` block"
                 )
 
+    # ------------------------------------------------------------------
+    # Rule 18 — impl.sh hooks must reach the fire ledger (#848)
+    #
+    # Rule 16 above exempts impl.sh bodies because they have no Python
+    # entrypoint for @fail_open to decorate — but that exemption is exactly
+    # what left four shell hooks writing zero ledger records while an audit
+    # reading the ledger scored the silence as "never fires". A shell hook
+    # instead sources `_lib/record_fire.sh` and arms the EXIT trap. The match
+    # is the ARM CALL carrying the hook's own manifest name — not a bare
+    # `praxis_fire_arm` substring, which the `command -v praxis_fire_arm`
+    # availability guard satisfies on its own even after the actual arm call
+    # is deleted. A shell hook that legitimately must not record belongs in
+    # this rule as an explicit exemption, not as silent absence.
+    # ------------------------------------------------------------------
+    for name, role in sorted(_build.hook_identities(manifest).items()):
+        sh_path = _build.HOOKS_DIR / role / name / "impl.sh"
+        if not sh_path.exists():
+            continue
+        body = sh_path.read_text(encoding="utf-8", errors="replace")
+        # The match must look like an executable call, not a mention of one:
+        # anchored at the start of its own line, so a comment, an `echo
+        # "praxis_fire_arm ..."`, or an assignment holding the same text no
+        # longer satisfies the rule (coderabbit + codex, PR #892). All four
+        # instrumented hooks put the call at line start, after the `command -v`
+        # guard's line continuation.
+        #
+        # Deliberately not a shell parser: a heredoc body line that itself
+        # begins with a bare call still passes. Closing that residue means
+        # tracking quoting and heredoc state, which in this codebase has
+        # repeatedly traded one corner case for the next. The rule guards
+        # against the instrumentation being dropped, not against someone
+        # disguising its absence.
+        if not re.search(
+            rf"(?m)^[ \t]*praxis_fire_arm\s+{re.escape(name)}\b", body
+        ):
+            drifts.append(
+                f"FIRE-LEDGER MISSING hooks/{role}/{name}/impl.sh: shell hook "
+                "does not arm fire-ledger instrumentation — source "
+                "_lib/record_fire.sh and call praxis_fire_arm after "
+                "session_id is parsed (#848)"
+            )
+
+
     if drifts:
         print("plugin-manifest check FAILED:")
         for d in drifts:

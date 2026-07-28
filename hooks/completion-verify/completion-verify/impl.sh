@@ -22,6 +22,17 @@ INPUT=$(cat)
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // ""')
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
+# The log line below has always written the "unknown" placeholder, but the
+# ledger must not: aggregate_fires adds any non-empty session string to its
+# distinct-session set, so "unknown" would collapse every unattributed fire
+# into one fake session. Empty is the documented unattributed value — it
+# still counts the decision, it only forgoes per-session attribution.
+TELEMETRY_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""')
+
+# shellcheck source=../../_lib/record_fire.sh
+. "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true
+command -v praxis_fire_arm >/dev/null 2>&1 && \
+  praxis_fire_arm completion-verify completion-verify "$TELEMETRY_SESSION_ID" ""
 
 [ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
 [ ! -f "$TRANSCRIPT_PATH" ] && exit 0
@@ -133,6 +144,7 @@ if [ -n "$block_reason" ]; then
   mkdir -p "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm" || true
   echo "$(date -Iseconds) session=$SESSION_ID blocked_completion_without_evidence" >> "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm/stop-triggered.log" || true
 
+  PRAXIS_FIRE_DECISION=block
   REASON="Completion claim detected without same-turn verification evidence. ${block_reason} See AGENTS.md Verification section."
   jq -n --arg r "$REASON" '{decision: "block", reason: $r}'
   exit 0
