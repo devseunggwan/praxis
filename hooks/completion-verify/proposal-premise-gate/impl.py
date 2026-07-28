@@ -262,7 +262,7 @@ def count_unprobed_premises(text: str, turn: list[dict]) -> int:
 
 _MESSAGE_TMPL = (
     f"{_PREFIX} Prose proposal contains {{n}} code-checkable premise(s) with "
-    f"no probe this session. Probe before locking. Bypass: {_BYPASS_ENV}=1"
+    f"no probe in the current turn. Probe before locking. Bypass: {_BYPASS_ENV}=1"
 )
 
 

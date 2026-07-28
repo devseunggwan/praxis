@@ -108,7 +108,7 @@ crude token-overlap matching is explicitly acknowledged as the main design
 problem, so a block tier is not justified yet.
 
 ```json
-{"systemMessage": "[proposal-premise-gate] Prose proposal contains N code-checkable premise(s) with no probe this session. Probe before locking. Bypass: PRAXIS_PROPOSAL_PREMISE_BYPASS=1"}
+{"systemMessage": "[proposal-premise-gate] Prose proposal contains N code-checkable premise(s) with no probe in the current turn. Probe before locking. Bypass: PRAXIS_PROPOSAL_PREMISE_BYPASS=1"}
 ```
 
 **Exit code:** `0` in every case.
@@ -142,13 +142,6 @@ This is a standalone Stop hook (not a `(PreToolUse, Bash)` dispatch-group
 member), so `main()` carries the `@fail_open` decorator directly per
 DESIGN.md (issue #645, enforced by `check-plugin-manifests.py` Rule 16). No
 external dependencies — standard library only.
-
-## Registration
-
-Deferred to phase integration (this PR ships `impl.py` + `spec.md` + tests
-only — no `hooks/manifest.json` entry, no generated `hooks.json`, no
-`docs/hook/INDEX.md` / `ARCHITECTURE.md` update). Intended registration:
-`Stop`, role `completion-verify`.
 
 ## Tests
 
