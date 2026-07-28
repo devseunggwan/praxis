@@ -29,7 +29,7 @@ FAILED_NAMES=()
 # separate scratch git repo with exactly 1 worktree (no ambiguity).
 # ---------------------------------------------------------------------------
 
-MULTI_BASE=$(mktemp -d)
+MULTI_BASE=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -c init.defaultBranch=main init -q "$MULTI_BASE/main"
 (
   cd "$MULTI_BASE/main" || exit 1
@@ -37,7 +37,7 @@ git -c init.defaultBranch=main init -q "$MULTI_BASE/main"
 )
 git -C "$MULTI_BASE/main" worktree add -q -b other-wt "$MULTI_BASE/other" >/dev/null 2>&1
 
-SINGLE_BASE=$(mktemp -d)
+SINGLE_BASE=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -c init.defaultBranch=main init -q "$SINGLE_BASE/solo"
 (
   cd "$SINGLE_BASE/solo" || exit 1
@@ -229,7 +229,7 @@ fi
 # === SILENT: non-git cwd ===
 # ---------------------------------------------------------------------------
 
-NON_GIT_DIR=$(mktemp -d)
+NON_GIT_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 run_case "non-git cwd is silent" \
   "silent" \
   "./scripts/foo.sh" \

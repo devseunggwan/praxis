@@ -50,7 +50,7 @@ NONEXISTENT_TX="/tmp/does-not-exist-praxis-425-$$.jsonl"
 # <project-dir>/<session_id>/subagents/agent-*.jsonl next to the root
 # <project-dir>/<session_id>.jsonl — reproduce that layout under a temp dir so
 # the root path's `.jsonl` suffix + stem-dir lookup resolves correctly.
-SUB_TX_ROOT_DIR=$(mktemp -d)
+SUB_TX_ROOT_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 SUB_SESSION_ID="session-$$"
 SUB_ROOT_TX="$SUB_TX_ROOT_DIR/$SUB_SESSION_ID.jsonl"
 SUB_AGENTS_DIR="$SUB_TX_ROOT_DIR/$SUB_SESSION_ID/subagents"
@@ -65,7 +65,7 @@ printf '%s\n' '{"parentUuid":null,"isSidechain":true,"type":"assistant","message
 
 # A second, sibling temp-dir layout where the subagents dir exists but no
 # agent transcript invokes codex-review-wrap — must still BLOCK.
-SUB_TX_ROOT_DIR_NOINVOKE=$(mktemp -d)
+SUB_TX_ROOT_DIR_NOINVOKE=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 SUB_SESSION_ID_NOINVOKE="session-noinvoke-$$"
 SUB_ROOT_TX_NOINVOKE="$SUB_TX_ROOT_DIR_NOINVOKE/$SUB_SESSION_ID_NOINVOKE.jsonl"
 SUB_AGENTS_DIR_NOINVOKE="$SUB_TX_ROOT_DIR_NOINVOKE/$SUB_SESSION_ID_NOINVOKE/subagents"
@@ -78,7 +78,7 @@ printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"ty
 # genuine human slash-command keystroke (subagent "user" turns are
 # Task-dispatch prompts / tool_results), so it must NOT satisfy the gate.
 # Regression guard for the root-only slash-scoping fix (code-review MEDIUM).
-SUB_TX_ROOT_DIR_SLASH=$(mktemp -d)
+SUB_TX_ROOT_DIR_SLASH=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 SUB_SESSION_ID_SLASH="session-slash-$$"
 SUB_ROOT_TX_SLASH="$SUB_TX_ROOT_DIR_SLASH/$SUB_SESSION_ID_SLASH.jsonl"
 SUB_AGENTS_DIR_SLASH="$SUB_TX_ROOT_DIR_SLASH/$SUB_SESSION_ID_SLASH/subagents"

@@ -199,7 +199,7 @@ print(json.dumps({
 # and PRAXIS_* env vars are inlined per-case.
 
 new_case_dir() {
-  T=$(mktemp -d)
+  T=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   TRANSCRIPT="$T/transcript.jsonl"
   STATE_FILE="$T/state.json"
   MOCK_BIN="$T/bin"

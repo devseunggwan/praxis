@@ -339,10 +339,10 @@ run_case "R4-F1: -am long (preserves -am combined behavior, ask)" \
 # into _title_from_file.
 # ---------------------------------------------------------------------------
 
-R4_F2_DIR=$(mktemp -d)
+R4_F2_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 R4_F2_MSG="$R4_F2_DIR/.gitmsg"
 echo "fix(very-very-long-scope): include description that easily exceeds fifty" >"$R4_F2_MSG"
-R4_F2_ABS_DIR=$(mktemp -d)
+R4_F2_ABS_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 R4_F2_ABS_MSG="$R4_F2_ABS_DIR/.gitmsg"
 echo "fix(very-very-long-scope): absolute path with 73 chars title for boundary" >"$R4_F2_ABS_MSG"
 
@@ -370,7 +370,7 @@ rmdir "$R4_F2_DIR" "$R4_F2_ABS_DIR" 2>/dev/null || true
 # make_fake_gh_title <title> — `gh pr view ... -q .title` prints <title>.
 make_fake_gh_title() {
   local title="$1" d
-  d=$(mktemp -d)
+  d=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   cat >"$d/gh" <<EOF
 #!/usr/bin/env bash
 echo "$title"
@@ -383,7 +383,7 @@ EOF
 # make_fake_gh_error — every `gh` call exits 1 (auth-style failure).
 make_fake_gh_error() {
   local d
-  d=$(mktemp -d)
+  d=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   cat >"$d/gh" <<'EOF'
 #!/usr/bin/env bash
 echo "gh: authentication required" >&2

@@ -25,7 +25,7 @@ fi
 
 PASS=0; FAIL=0; FAILED_NAMES=()
 
-STATE_DIR=$(mktemp -d)
+STATE_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$STATE_DIR"' EXIT
 _case_n=0
 

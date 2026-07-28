@@ -195,7 +195,7 @@ run_case "KO 머지할까요 still triggers"               advisory default "$(b
 # on a feature branch over a `main` base. git identity is injected inline
 # (no global config dependency); no 2>/dev/null on setup (surface real errors).
 setup_git_repo() {
-  local tmp; tmp=$(mktemp -d)
+  local tmp; tmp=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   git -C "$tmp" init -q -b main
   git -C "$tmp" -c user.name=t -c user.email=t@t.io commit -q --allow-empty -m "chore: base"
   git -C "$tmp" checkout -q -b feature
@@ -273,7 +273,7 @@ route_absent  "getlist.py is not data (etl)"   "src/getlist.py"
 # also exists. Nearest-fork-point resolution must pick `dev`, so the diff is the
 # branch's OWN change (a .tsx → ux) — NOT dev's auth file (would mis-route to
 # security with naive first-resolvable base selection).
-MB_REPO=$(mktemp -d)
+MB_REPO=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -C "$MB_REPO" init -q -b main
 git -C "$MB_REPO" -c user.name=t -c user.email=t@t.io commit -q --allow-empty -m "chore: base"
 git -C "$MB_REPO" checkout -q -b dev
@@ -293,7 +293,7 @@ else
 fi
 
 # fail-open: cwd is a non-git directory → static fallback (no routed line)
-NONGIT_TMP=$(mktemp -d)
+NONGIT_TMP=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 NONGIT_ERR=$(payload_with_cwd "$NONGIT_TMP" | "$HOOK" 2>&1 >/dev/null)
 rm -rf "$NONGIT_TMP"
 if printf '%s' "$NONGIT_ERR" | grep -q 'touches'; then

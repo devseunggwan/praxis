@@ -43,7 +43,7 @@ echo "test_cli_scripts_behavior"
 # Fixture: mini-clone with one tracked CLI ("foo"), fresh bin dir per stanza.
 # ---------------------------------------------------------------------------
 
-TMP_ROOT=$(mktemp -d)
+TMP_ROOT=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 CLONE="$TMP_ROOT/clone"
@@ -60,7 +60,7 @@ printf '#!/bin/sh\necho foo\n' > "$CLONE/skills/foo/foo"
 chmod +x "$CLONE/skills/foo/foo"
 
 fresh_bin() {
-  BIN=$(mktemp -d "$TMP_ROOT/bin.XXXXXX")
+  BIN=$(mktemp -d "$TMP_ROOT/bin.XXXXXX") || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 }
 
 install_sh() { PRAXIS_BIN_DIR="$BIN" bash "$CLONE/scripts/install.sh" "$@" 2>&1; }

@@ -25,7 +25,7 @@ PASS=0; FAIL=0; FAILED_NAMES=()
 # Real git repo fixture
 # ---------------------------------------------------------------------------
 
-TMPDIR_BASE=$(mktemp -d)
+TMPDIR_BASE=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 REPO_DIR="$TMPDIR_BASE/myorg/myrepo"
 mkdir -p "$REPO_DIR"
 

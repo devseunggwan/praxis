@@ -45,7 +45,7 @@ FAIL=0
 FAILED_NAMES=()
 
 # Shared temp dir -- cleaned up on exit
-TMP_DIR="$(mktemp -d)"
+TMP_DIR="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 # Scrub any bypass env vars that might be present in the developer's shell or CI.

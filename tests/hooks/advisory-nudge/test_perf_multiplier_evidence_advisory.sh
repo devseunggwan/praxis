@@ -174,7 +174,7 @@ run_case "non-gh command with 3x is silent" \
 # === --body-file handling ===
 # ---------------------------------------------------------------------------
 
-BODY_FILE_DIR=$(mktemp -d)
+BODY_FILE_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 echo '3x speedup expected, no measurement yet' > "$BODY_FILE_DIR/body.md"
 run_case "--body-file relative, unreadable timing -> advisory" \
   "advisory:[perf-multiplier-evidence-advisory]" \

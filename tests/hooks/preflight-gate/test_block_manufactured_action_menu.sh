@@ -25,7 +25,7 @@ if [ ! -x "$HOOK" ]; then
 fi
 
 PASS=0; FAIL=0; FAILED_NAMES=()
-WORK=$(mktemp -d)
+WORK=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$WORK"' EXIT
 
 # Build a transcript JSONL file from a single user message.

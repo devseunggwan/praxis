@@ -304,7 +304,7 @@ negative_no_momentum_case
 empty_memory_dir_case() {
   local name="empty_memory_dir_static_only"
   local tmpdir
-  tmpdir=$(mktemp -d)
+  tmpdir=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   local payload
   payload=$(build_payload "Bash" "gh pr merge --squash")
   local err_file
@@ -340,7 +340,7 @@ empty_memory_dir_case
 empty_memory_dir_force_push_case() {
   local name="empty_memory_dir_force_push_actionable"
   local tmpdir
-  tmpdir=$(mktemp -d)
+  tmpdir=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   local payload
   payload=$(build_payload "Bash" "git push --force origin main")
   local err_file

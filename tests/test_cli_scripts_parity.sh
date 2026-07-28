@@ -68,7 +68,7 @@ run_case "verify_sources_canonical"  "$([ "$VERIFY_SOURCES" -ge 1 ] && echo yes 
 # 4. Functional parity: install into a temp bin dir, then verify reports OK
 #    for bypass-review (the previously-omitted entry), both exit 0.
 # ---------------------------------------------------------------------------
-TMP_BIN="$(mktemp -d)"
+TMP_BIN="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$TMP_BIN"' EXIT
 INSTALL_OUT="$(PRAXIS_BIN_DIR="$TMP_BIN" bash "$INSTALL" 2>&1)"
 INSTALL_RC=$?

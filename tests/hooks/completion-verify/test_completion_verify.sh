@@ -22,7 +22,7 @@ PASS=0
 FAIL=0
 FAILED_NAMES=()
 
-TMPDIR=$(mktemp -d)
+TMPDIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$TMPDIR"' EXIT
 
 # Build a JSONL transcript file from $3 (multi-line content) and run the hook.

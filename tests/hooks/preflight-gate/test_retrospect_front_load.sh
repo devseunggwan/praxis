@@ -17,7 +17,7 @@ CATALOG="$ROOT_DIR/hooks/_lib/silent-pass-catalog.json"
 
 PASS=0
 FAIL=0
-WORK_DIR=$(mktemp -d)
+WORK_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 ok()   { PASS=$((PASS + 1)); printf 'PASS  %s\n' "$1"; }

@@ -221,7 +221,7 @@ run_case "gh issue create --body-file unreadable path (silent)" \
   '{"tool_name":"Bash","tool_input":{"command":"gh issue create --title t --body-file /nonexistent/does-not-exist-12345.md"}}'
 
 # --- relative --body-file resolved against payload cwd (codex P2 round 2) ---
-REL_DIR=$(mktemp -d)
+REL_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 printf 'cfg at /Users/grace/.claude/hooks/impl.py\n' > "$REL_DIR/body.md"
 run_case "relative --body-file resolved against payload cwd (warn)" \
   "warn" "advisory" \
@@ -237,12 +237,12 @@ rm -rf "$REL_DIR"
 # Two local git fixtures stand in for a team repo (origin owner != personal)
 # and a personal repo (origin owner ∈ PRAXIS_PERSONAL_REPO_OWNERS). No network
 # access — only the remote URL string matters to the hook.
-TEAM_REPO=$(mktemp -d)
+TEAM_REPO=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -C "$TEAM_REPO" init -q
 git -C "$TEAM_REPO" remote add origin https://github.com/exampleorg/team-wiki.git
 printf '.omc/\n' > "$TEAM_REPO/.gitignore"
 
-PERSONAL_REPO=$(mktemp -d)
+PERSONAL_REPO=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -C "$PERSONAL_REPO" init -q
 git -C "$PERSONAL_REPO" remote add origin git@github.com:testowner/scratchpad.git
 
@@ -350,7 +350,7 @@ run_case "heredoc-var body with owner ref (warn)" \
   '{"tool_name":"Bash","tool_input":{"command":"BODY=$(cat <<EOF\nsee testowner/scratchpad#5\nEOF\n)\ngh issue create --repo exampleorg/team --title t --body \"$BODY\""}}' \
   "testowner"
 
-INTERNAL_PERSONAL_REPO=$(mktemp -d)
+INTERNAL_PERSONAL_REPO=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -C "$INTERNAL_PERSONAL_REPO" init -q
 git -C "$INTERNAL_PERSONAL_REPO" remote add origin git@internalhost:testowner/scratchpad.git
 run_case "Write owner-ref into TLD-less scp-origin personal repo (silent)" \

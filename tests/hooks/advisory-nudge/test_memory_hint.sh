@@ -218,7 +218,7 @@ run_case "25 hit: undecodable peer does not break sibling matches" "hit:hook_kub
 undecodable_silent_test() {
   local name="26 silent: undecodable memory alone exits 0 silently"
   local tmpdir
-  tmpdir=$(mktemp -d)
+  tmpdir=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   cp "$FIXTURES_MAIN/non_utf8.md" "$tmpdir/non_utf8.md"
   local payload
   payload=$(python3 -c '
@@ -286,7 +286,7 @@ run_input_case "34 hit: ASCII keyword adjacent to Hangul splits as separate toke
 # not "-Users-nathan.song-.claude") — any home path containing a special
 # character other than "/" left the fallback path permanently unresolvable
 # for that user, silently disabling every hookable memory unconditionally.
-FALLBACK_HOME=$(cd "$(mktemp -d)" && pwd -P)
+FALLBACK_HOME=$(cd "$(mktemp -d)" && pwd -P) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 # cwd containing a literal "." mirrors the real-world failure (a "." inside
 # a path segment, as in a username like "nathan.song"). Resolve via `pwd -P`
 # (physical path) so this test is immune to macOS's /var -> /private/var

@@ -1298,7 +1298,7 @@ fi
 # Block-event telemetry cases — issue #787
 # ---------------------------------------------------------------------------
 
-TEL_DIR="$(mktemp -d)"
+TEL_DIR="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$TEL_DIR"; rm -f "$DEFAULT_TEL_FILE"' EXIT
 
 rich_records() {

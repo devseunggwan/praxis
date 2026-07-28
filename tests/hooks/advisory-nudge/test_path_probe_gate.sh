@@ -107,7 +107,7 @@ print(json.dumps(d))
 #   <wt_root>/repo-subdir/                  ← intermediate dir (depth=1)
 #   <wt_root>/repo-subdir/content-root/     ← deeper dir (depth=2)
 
-WT_ROOT=$(mktemp -d)
+WT_ROOT=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 mkdir -p "$WT_ROOT/repo-subdir/content-root"
 
 # Initialize a git repo at WT_ROOT so git worktree list returns it.
@@ -123,7 +123,7 @@ if ! git -C "$WT_ROOT" log --oneline -1 >/dev/null 2>&1; then
 fi
 
 # Outside dir: a directory NOT in any git worktree.
-OUTSIDE_DIR=$(mktemp -d)
+OUTSIDE_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 mkdir -p "$OUTSIDE_DIR/subdir"
 
 # ---------------------------------------------------------------------------

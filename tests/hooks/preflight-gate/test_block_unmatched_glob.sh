@@ -38,7 +38,7 @@ fi
 SHELL=$(command -v zsh)
 export SHELL
 
-FIXTURE=$(mktemp -d)
+FIXTURE=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$FIXTURE"' EXIT
 mkdir -p "$FIXTURE/logs" "$FIXTURE/nested/deep"
 : >"$FIXTURE/logs/alpha.log"

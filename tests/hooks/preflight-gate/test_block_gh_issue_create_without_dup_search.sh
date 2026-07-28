@@ -23,7 +23,7 @@ PASS=0
 FAIL=0
 FAILED_NAMES=()
 
-TMPDIR=$(mktemp -d)
+TMPDIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$TMPDIR"' EXIT
 
 TX_EMPTY="$TMPDIR/tx-empty.jsonl"

@@ -113,7 +113,7 @@ run_case "empty_command_passes" "silent" \
 
 setup_repo() {
   local repo
-  repo=$(mktemp -d)
+  repo=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
   cd "$repo" || return 1
   git init -q
   git config user.email "test@example.com"

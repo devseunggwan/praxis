@@ -39,7 +39,7 @@ PYEOF
 assert_eq "default home = ~/.praxis (expanded)" "yes" "$default_home"
 
 # 2. PRAXIS_HOME override honored + a real file created under <home>/logs
-TMP_HOME=$(mktemp -d)
+TMP_HOME=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 override_path=$(PRAXIS_HOME="$TMP_HOME" python3 - "$LIB" << 'PYEOF'
 import sys
 sys.path.insert(0, sys.argv[1])

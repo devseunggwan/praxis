@@ -192,7 +192,7 @@ print(json.dumps({"tool_name": "Bash",
 # ---------------------------------------------------------------------------
 # Fixture repo
 # ---------------------------------------------------------------------------
-REPO=$(mktemp -d)
+REPO=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -C "$REPO" init -q
 git -C "$REPO" config user.email test@example.com
 git -C "$REPO" config user.name "Test User"
@@ -328,7 +328,7 @@ run_repo_case "assignment command-substitution commit is not detected (boundary)
 
 # Modify a tracked file (staged M, no A). Reset the index of the additions
 # first so only a modification is staged.
-MODREPO=$(mktemp -d)
+MODREPO=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -C "$MODREPO" init -q
 git -C "$MODREPO" config user.email test@example.com
 git -C "$MODREPO" config user.name "Test User"
@@ -356,7 +356,7 @@ rm -rf "$MODREPO" 2>/dev/null || true
 # ---------------------------------------------------------------------------
 
 # --amend with a CLEAN index (no staged additions) → silent.
-AMENDREPO=$(mktemp -d)
+AMENDREPO=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -C "$AMENDREPO" init -q
 git -C "$AMENDREPO" config user.email test@example.com
 git -C "$AMENDREPO" config user.name "Test User"
@@ -369,7 +369,7 @@ rm -rf "$AMENDREPO" 2>/dev/null || true
 
 # A staged symlink whose TARGET was Write-seen must NOT be suppressed:
 # canonical() preserves the final component so alias != target.
-SYMREPO=$(mktemp -d)
+SYMREPO=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -C "$SYMREPO" init -q
 git -C "$SYMREPO" config user.email test@example.com
 git -C "$SYMREPO" config user.name "Test User"
@@ -388,7 +388,7 @@ rm -f "$TRANSCRIPT_SYM" 2>/dev/null || true
 
 # A FAILED Write (tool_result is_error) must not count its target as seen —
 # a bash-staged file at that path is surfaced.
-FAILREPO=$(mktemp -d)
+FAILREPO=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -C "$FAILREPO" init -q
 git -C "$FAILREPO" config user.email test@example.com
 git -C "$FAILREPO" config user.name "Test User"
@@ -412,7 +412,7 @@ rm -f "$TRANSCRIPT_FAIL" 2>/dev/null || true
 # #1 single-call create+add+commit: at PreToolUse the file is not yet in the
 # index, so the additions list is empty → SILENT (documented miss). Fresh repo
 # with a clean index isolates the boundary.
-SINGLEREPO=$(mktemp -d)
+SINGLEREPO=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -C "$SINGLEREPO" init -q
 git -C "$SINGLEREPO" config user.email test@example.com
 git -C "$SINGLEREPO" config user.name "Test User"
@@ -427,7 +427,7 @@ rm -rf "$SINGLEREPO" 2>/dev/null || true
 
 # #3a partial commit (`--only <path>`) over-lists ALL staged additions, not
 # just the pathspec — pin by asserting the EXCLUDED file is still surfaced.
-ONLYREPO=$(mktemp -d)
+ONLYREPO=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -C "$ONLYREPO" init -q
 git -C "$ONLYREPO" config user.email test@example.com
 git -C "$ONLYREPO" config user.name "Test User"
@@ -444,7 +444,7 @@ rm -rf "$ONLYREPO" 2>/dev/null || true
 
 # #3b a `git commit` literal inside a heredoc body is data, not a command, but
 # the shared tokenizer line-splits it → false-surface. Pin the boundary.
-HEREREPO=$(mktemp -d)
+HEREREPO=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 git -C "$HEREREPO" init -q
 git -C "$HEREREPO" config user.email test@example.com
 git -C "$HEREREPO" config user.name "Test User"
@@ -518,7 +518,7 @@ ok=1; [ "$empty_rc" -eq 0 ] || ok=0; [ -z "$empty_content" ] || ok=0
 record "empty command is silent" "$ok" "$empty_rc" "$empty_content" "silent"
 
 # Not inside a git repo → silent (run from a non-repo temp dir).
-NONREPO=$(mktemp -d)
+NONREPO=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 nonrepo_err=$(mktemp)
 nonrepo_payload=$(python3 -c '
 import json, sys
