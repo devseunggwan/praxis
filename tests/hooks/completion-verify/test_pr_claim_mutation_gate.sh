@@ -168,7 +168,7 @@ run_case silent "claim-with-gh-pr-review" '{}'
 build_transcript "Applied the review comment fixes." api-write
 run_case silent "claim-with-gh-api-write" '{}'
 
-# --- claim WITH read-only gh api (listing) -> STILL advisory ----------------
+# --- claim WITH read-only gh api (listing) -> STILL fires --------------------
 # Listing comments is not resolving them.
 build_transcript "Fixed the review comments." api-read
 run_case block "claim-with-gh-api-read-only-still-fires" '{}'
@@ -177,11 +177,11 @@ run_case block "claim-with-gh-api-read-only-still-fires" '{}'
 build_transcript "Addressed the PR review comments." mcp
 run_case silent "claim-with-mcp-comment" '{}'
 
-# --- Write tool_use is not PR-surface mutation -> advisory ------------------
+# --- Write tool_use is not PR-surface mutation -> block ---------------------
 build_transcript "Handled the review comments." write
 run_case block "write-is-not-pr-mutation" '{}'
 
-# --- mutation in PREVIOUS turn only -> advisory (turn-scoped evidence) ------
+# --- mutation in PREVIOUS turn only -> block (turn-scoped evidence) ---------
 build_transcript "The PR review comments have been resolved." prev-turn-push
 run_case block "prev-turn-mutation-not-evidence" '{}'
 

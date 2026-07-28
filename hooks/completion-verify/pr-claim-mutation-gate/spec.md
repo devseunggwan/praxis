@@ -146,16 +146,25 @@ exit 0 (re-entry loop guard). It never blocks a normal Stop in the default
 bash tests/hooks/completion-verify/test_pr_claim_mutation_gate.sh
 ```
 
-27 cases: the motivating incident verbatim (KR, zero mutation → advisory),
-4 EN/KR claim variants without mutation (advisory), claim cleared by `git
+33 cases: the motivating incident verbatim (KR, zero mutation → block),
+4 EN/KR claim variants without mutation (block), claim cleared by `git
 push` / `gh pr comment` / `gh pr review` / write-method `gh api` / GitHub MCP
-comment tool (silent, 5 cases), claim NOT cleared by a read-only `gh api`
-listing call (advisory — the incident-shape guard), `Write` tool_use does not
-count as PR mutation (advisory), mutation in the **previous** turn does not
-back a claim in this one (advisory — turn-scoped evidence), no PR subject
-(silent — out of this hook's scope), subject present but no claim verb
-(silent), negated claim EN/KR (silent), the documented double-negation gap
-(silent, accepted trade-off), hedged EN/KR forms (silent), question-form
-EN/KR (silent), a quoted line reporting a claim rather than making one
-(silent), strict mode (`decision: block`), bypass env (silent),
-`stop_hook_active` loop guard (silent), missing transcript (fail-open).
+comment tool (silent, 5 cases).
+
+Six cases pin the things that *look* like mutations but are not, and so must
+still block: a read-only `gh api` listing (the incident-shape guard), a
+write-method `gh api` on a `.../labels` endpoint, a consolidated MCP reader
+(`get_review_comments`), a `--dry-run` push, and an echoed push. The sixth is
+one half of a matched pair — a failed push (`is_error`) blocks while an
+otherwise identical succeeded push stays silent, so what the pair
+distinguishes is the result correlation, not the command text.
+
+The rest: `Write` tool_use does not count as PR mutation (block), mutation in
+the **previous** turn does not back a claim in this one (block — turn-scoped
+evidence), no PR subject (silent — out of this hook's scope), subject present
+but no claim verb (silent), negated claim EN/KR (silent), the documented
+double-negation gap (silent, accepted trade-off), hedged EN/KR forms
+(silent), question-form EN/KR (silent), a quoted line reporting a claim
+rather than making one (silent), `PRAXIS_PR_CLAIM_ADVISORY` demote
+(`systemMessage`, no `decision`), bypass env (silent), `stop_hook_active`
+loop guard (silent), missing transcript (fail-open).
