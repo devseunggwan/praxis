@@ -220,6 +220,21 @@
       }
     },
     {
+      "name": "worktree-prune-snapshot-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_WORKTREE_PRUNE_SNAPSHOT"
+        ],
+        "state_paths": [
+          "PRAXIS_WORKTREE_PRUNE_SNAPSHOT_FILE"
+        ]
+      }
+    },
+    {
       "name": "pr-state-refetch-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",

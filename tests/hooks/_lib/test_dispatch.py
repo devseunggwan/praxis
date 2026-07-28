@@ -54,12 +54,12 @@ def test_group_members_count_and_roles():
     # matchers (Bash|Edit|Write|…) and are intentionally excluded — see
     # ADR-0002 §2 scope note.
     members = _dispatch.group_members("PreToolUse", "Bash")
-    assert len(members) == 39, f"expected 39 exact-Bash members, got {len(members)}"
+    assert len(members) == 40, f"expected 40 exact-Bash members, got {len(members)}"
     # every impl path must exist on disk
     for role, name, impl in members:
         assert impl.exists(), f"missing impl for {role}/{name}: {impl}"
     roles = [role for role, _name, _impl in members]
-    assert roles.count("preflight-gate") == 24
+    assert roles.count("preflight-gate") == 25
     assert roles.count("advisory-nudge") == 15
 
 
@@ -74,7 +74,7 @@ def test_group_members_host_filter():
     claude = _dispatch.group_members("PreToolUse", "Bash", host="claude")
     codex = _dispatch.group_members("PreToolUse", "Bash", host="codex")
 
-    assert len(unfiltered) == 39  # host=None -> canonical, unfiltered view
+    assert len(unfiltered) == 40  # host=None -> canonical, unfiltered view
     # the only host-restricted Bash members are the 5 claude-only guards
     assert names(claude) == names(unfiltered)
     assert "block-commit-without-codex-review" not in names(codex)
@@ -82,7 +82,7 @@ def test_group_members_host_filter():
     assert "pre-commit-staged-file-enumeration" not in names(codex)
     assert "model-routing-advisory" not in names(codex)
     assert "block-unmatched-glob" not in names(codex)
-    assert len(codex) == 34
+    assert len(codex) == 35
 
 
 # --------------------------------------------------------------------------- #
