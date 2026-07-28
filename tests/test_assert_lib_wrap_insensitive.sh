@@ -4,9 +4,9 @@
 # Regression test for issue #872: assert_present/assert_absent must keep
 # passing when a sentence is re-wrapped at a different column, since that is
 # precisely the failure mode that broke tests/test_worktree_merge_cleanup.sh
-# ~8 times in one review round. This test builds two on-disk variants of the
-# same prose — unwrapped (one line) and wrapped (split mid-sentence) — and
-# asserts both produce identical PASS/FAIL results.
+# ~8 times in one review round. This test builds three on-disk variants of the
+# same prose — unwrapped, re-wrapped mid-sentence, and wrapped inside an
+# indented list item — and asserts all three produce identical PASS/FAIL results.
 #
 # Run:  bash tests/test_assert_lib_wrap_insensitive.sh
 # Exit: 0 = all pass; 1 = at least one fail
@@ -70,6 +70,15 @@ for target in "$UNWRAPPED" "$WRAPPED" "$INDENTED"; do
   assert_present "removal fragment" "a removal that never happened"
   assert_absent "unrelated string is absent" "this string is not in the doc"
 
+  # Deliberately expected to FAIL. The string above is absent from both the raw
+  # file and the normalised buffer, so it passes either way and cannot tell us
+  # which buffer assert_absent reads. This fragment exists ONLY after
+  # normalisation (it spans a wrap in two of the three fixtures), so a pass here
+  # would mean assert_absent had silently fallen back to the raw file.
+  # Output suppressed: the FAIL line is the expected result, not a problem.
+  assert_absent "cross-wrap fragment must be seen as present" \
+    "are precisely the forensic evidence" >/dev/null
+
   case "$target" in
     "$UNWRAPPED")
       unwrapped_pass=$PASS
@@ -87,24 +96,24 @@ for target in "$UNWRAPPED" "$WRAPPED" "$INDENTED"; do
 done
 
 echo ""
-if [ "$unwrapped_pass" -eq 3 ] && [ "$unwrapped_fail" -eq 0 ]; then
+if [ "$unwrapped_pass" -eq 3 ] && [ "$unwrapped_fail" -eq 1 ]; then
   echo "PASS  [unwrapped variant: all 3 assertions pass]"
 else
-  echo "FAIL  [unwrapped variant: expected 3 pass/0 fail, got $unwrapped_pass pass/$unwrapped_fail fail]"
+  echo "FAIL  [unwrapped variant: expected 3 pass/1 fail, got $unwrapped_pass pass/$unwrapped_fail fail]"
   RESULTS_MATCH=0
 fi
 
-if [ "$wrapped_pass" -eq 3 ] && [ "$wrapped_fail" -eq 0 ]; then
+if [ "$wrapped_pass" -eq 3 ] && [ "$wrapped_fail" -eq 1 ]; then
   echo "PASS  [wrapped variant: all 3 assertions pass despite mid-sentence re-wrap]"
 else
-  echo "FAIL  [wrapped variant: expected 3 pass/0 fail, got $wrapped_pass pass/$wrapped_fail fail]"
+  echo "FAIL  [wrapped variant: expected 3 pass/1 fail, got $wrapped_pass pass/$wrapped_fail fail]"
   RESULTS_MATCH=0
 fi
 
-if [ "$indented_pass" -eq 3 ] && [ "$indented_fail" -eq 0 ]; then
+if [ "$indented_pass" -eq 3 ] && [ "$indented_fail" -eq 1 ]; then
   echo "PASS  [indented variant: all 3 assertions pass despite list continuation indent]"
 else
-  echo "FAIL  [indented variant: expected 3 pass/0 fail, got $indented_pass pass/$indented_fail fail]"
+  echo "FAIL  [indented variant: expected 3 pass/1 fail, got $indented_pass pass/$indented_fail fail]"
   RESULTS_MATCH=0
 fi
 
