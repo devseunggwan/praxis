@@ -124,6 +124,7 @@ else:
 | Hook | Event | Purpose | Spec |
 | ------ | ------- | --------- | ------ |
 | `block-gh-state-all` | PreToolUse | Hard-block invalid `gh search ... --state all` flag combo | [hooks/preflight-gate/block-gh-state-all/spec.md](hooks/preflight-gate/block-gh-state-all/spec.md) |
+| `block-unmatched-glob` | PreToolUse | Hard-block a command whose unquoted glob matches nothing — zsh aborts it before it runs, so the empty result reads as a false negative | [hooks/preflight-gate/block-unmatched-glob/spec.md](hooks/preflight-gate/block-unmatched-glob/spec.md) |
 | `gh-flag-verify` | PreToolUse | Block `gh <subcmd>` calls with flags not in the subcommand's accepted set | [hooks/preflight-gate/gh-flag-verify/spec.md](hooks/preflight-gate/gh-flag-verify/spec.md) |
 | `gh-json-validator` | PreToolUse | Block `gh <subcmd> --json <fields>` calls whose field names are not in the subcommand's valid JSON projection (issue #391) | [hooks/preflight-gate/gh-json-validator/spec.md](hooks/preflight-gate/gh-json-validator/spec.md) |
 | `gh-label-verify` | PreToolUse | Block `gh (issue\|pr) (create\|edit)` calls whose `--label` values are absent from the target repo's label set (issue #385) | [hooks/preflight-gate/gh-label-verify/spec.md](hooks/preflight-gate/gh-label-verify/spec.md) |

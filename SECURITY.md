@@ -55,8 +55,21 @@ drift.
 | `hooks/preflight-gate/pr-state-refetch-gate/impl.py`       | `gh pr view <N> --json state,mergeStateStatus`               | Re-fetch live PR state before a PR-state-contingent AskUserQuestion |
 | `hooks/preflight-gate/gh-merge-worktree-precondition/impl.py` | `gh pr view <identifier> --json headRefName -q .headRefName` | Resolve a PR's live head branch before checking it against `git worktree list` |
 
-All `git` and `gh` invocations are **read-only**. No hook writes to remote
-state. Hooks fail-open (exit 0) when the binary is missing or times out.
+### `zsh` — glob-expansion probes
+
+| Hook | Command | Purpose |
+| ------ | --------- | --------- |
+| `hooks/preflight-gate/block-unmatched-glob/impl.py` | `zsh -lc setopt` | Confirm the executing shell actually aborts on an unmatched glob before the gate can block |
+| `hooks/preflight-gate/block-unmatched-glob/impl.py` | `zsh -f -c 'setopt nomatch; : <pattern>'` | Ask zsh whether a candidate pattern expands; `:` is a no-op builtin, so expansion is the only effect |
+
+The probe replays **one word at a time**, never the user's command. `-f` skips
+startup files, and any word containing `(` — zsh glob qualifiers can carry code
+(`*(e:'cmd':)`) — is excluded from probing entirely, so no command body from the
+inspected input is ever executed. Both probes are bounded by a 2s per-call and
+3s total budget.
+
+All `git`, `gh`, and `zsh` invocations are **read-only**. No hook writes to
+remote state. Hooks fail-open (exit 0) when the binary is missing or times out.
 
 ## Guard Parser Boundary
 
