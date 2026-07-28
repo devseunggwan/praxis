@@ -22,20 +22,39 @@ Detection path:
 Opt-out: embed `# title-length:ack` anywhere in the command to bypass.
 Skip: Merge / Revert commits, -F - (stdin body), unreadable -F files.
 Config: CLAUDE_COMMIT_TITLE_MAX=<n> (integer ≥ 1) overrides default 50.
+
+Squash-merge path (issue #843): `gh pr merge --squash` combines the PR title
+into the squash commit title on GitHub's side — a shape this hook's `git
+commit` matcher cannot see. Detected separately below and reported via
+stderr ADVISORY (not `ask`), never blocking the merge itself:
+
+  gh [global flags] pr merge [flags] --squash|-s
+    -> `-t`/`--subject <value>` present -> that value IS the title (no
+       network call needed)
+    -> otherwise -> `gh pr view <id> [-R repo] --json title -q .title`
+       (5s timeout, fail-open on any error)
+  len(title) > MAX -> stderr advisory (exit 0, command proceeds)
+
+`gh api repos/.../pulls/N/merge` is a DELIBERATE gap, not an oversight —
+see "Ordering constraint" in spec.md. The `git commit` path is unchanged
+(still `ask`, still blocking); only the new squash-merge path is advisory.
 """
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    _is_gh_binary,
     compound_cascade_hint,
     iter_command_starts,
     safe_tokenize,
+    strip_prefix,
 )
 from git_commit_titles import (  # type: ignore[import-not-found]  # noqa: E402
     extract_git_titles,
@@ -50,6 +69,135 @@ OPT_OUT_MARKER = "# title-length:ack"
 
 # Prefixes that indicate auto-generated merge/revert commits — skip them.
 SKIP_PREFIXES = ("Merge ", "Revert ")
+
+# ---------------------------------------------------------------------------
+# Squash-merge path (issue #843)
+# ---------------------------------------------------------------------------
+
+_GH_TIMEOUT_SEC = 5
+
+# gh global flags that consume one separate-token argument. Same set
+# duplicated across ~11 sibling hooks in this repo (pre-merge-approval-gate,
+# gh-merge-worktree-precondition, gh-flag-verify, etc.) — established repo
+# convention keeps this local rather than extracted to _lib.
+_GH_GLOBAL_FLAGS_WITH_ARG = frozenset({
+    "-R", "--repo",
+    "--hostname",
+    "--color",
+})
+
+# `gh pr merge` flags that consume one separate-token argument (per
+# `gh help pr merge`), needed to walk past them when scanning the tail.
+_MERGE_FLAGS_WITH_ARG = frozenset({
+    "-A", "--author-email",
+    "-b", "--body",
+    "-F", "--body-file",
+    "-t", "--subject",
+    "--match-head-commit",
+})
+
+_SQUASH_FLAGS = frozenset({"-s", "--squash"})
+_SUBJECT_FLAGS = frozenset({"-t", "--subject"})
+
+_TAIL_FLAGS_WITH_ARG = _MERGE_FLAGS_WITH_ARG | _GH_GLOBAL_FLAGS_WITH_ARG
+
+
+def _gh_pr_merge_segment(argv: list[str]) -> tuple[list[str], str | None] | None:
+    """Return (argv slice after `merge`, repo), or None if not `gh pr merge`.
+
+    Mirrors `gh-merge-worktree-precondition`'s `_merge_segment` — `-R`/
+    `--repo` (and the other value-taking gh global flags) are inherited
+    cobra flags gh accepts before `pr`, between `pr` and `merge`, and after
+    `merge` (the last placement handled by the tail scan below).
+    """
+    argv = strip_prefix(argv)
+    if not argv or not _is_gh_binary(argv[0]):
+        return None
+
+    repo: str | None = None
+    words: list[str] = []
+    i = 1
+    while i < len(argv) and len(words) < 2:
+        tok = argv[i]
+        if tok == "--":
+            i += 1
+            if i < len(argv):
+                words.append(argv[i])
+                i += 1
+            continue
+        if not tok.startswith("-"):
+            words.append(tok)
+            i += 1
+            continue
+        i += 1
+        base, eq, inline = tok.partition("=")
+        if eq and base in ("-R", "--repo"):
+            repo = inline or None
+        elif not eq and tok in _GH_GLOBAL_FLAGS_WITH_ARG and i < len(argv):
+            if tok in ("-R", "--repo"):
+                repo = argv[i]
+            i += 1
+
+    if words != ["pr", "merge"]:
+        return None
+    return argv[i:], repo
+
+
+def _scan_merge_tail(tail: list[str]) -> tuple[bool, str | None, str | None, str | None]:
+    """Single walk over the post-`merge` argv:
+    (has_squash, identifier, repo, subject_override)."""
+    has_squash = False
+    identifier: str | None = None
+    repo: str | None = None
+    subject: str | None = None
+    i = 0
+    while i < len(tail):
+        tok = tail[i]
+        if tok == "--":
+            if identifier is None and i + 1 < len(tail):
+                identifier = tail[i + 1]
+            break
+        if not tok.startswith("-"):
+            if identifier is None:
+                identifier = tok
+            i += 1
+            continue
+        base, eq, inline = tok.partition("=")
+        if base in _SQUASH_FLAGS:
+            has_squash = True
+        if eq and base in ("-R", "--repo"):
+            repo = inline or None
+        elif eq and base in _SUBJECT_FLAGS:
+            subject = inline
+        i += 1
+        if not eq and base in _TAIL_FLAGS_WITH_ARG and i < len(tail):
+            if base in ("-R", "--repo"):
+                repo = tail[i]
+            elif base in _SUBJECT_FLAGS:
+                subject = tail[i]
+            i += 1
+    return has_squash, identifier, repo, subject
+
+
+def _resolve_pr_title(identifier: str | None, cwd: str | None, repo: str | None) -> str | None:
+    """`gh pr view <id> [-R repo] --json title -q .title`, fail-open on error."""
+    cmd = ["gh", "pr", "view"]
+    if identifier:
+        cmd.append(identifier)
+    if repo:
+        cmd += ["-R", repo]
+    cmd += ["--json", "title", "-q", ".title"]
+    try:
+        result = subprocess.run(
+            cmd, cwd=cwd or None, capture_output=True, text=True,
+            timeout=_GH_TIMEOUT_SEC, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    title = result.stdout.strip()
+    return title or None
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +223,13 @@ def _get_max() -> int:
 
 def _emit_ask(reason: str) -> None:
     emit_decision("ask", reason)
+
+
+def _emit_squash_advisory(reason: str) -> None:
+    """Stderr-only advisory for the squash-merge path (issue #843) — never
+    `ask`, so a `gh pr view` network hiccup or an over-eager match cannot
+    block a merge. See spec.md 'Severity: advisory, not ask' for rationale."""
+    sys.stderr.write(f"[commit-title-length-check] {reason}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +263,7 @@ def main() -> int:
         return 0
 
     max_len = _get_max()
+    cwd = payload.get("cwd") or None
 
     for argv in iter_command_starts(tokens):
         titles = extract_git_titles(argv)
@@ -123,6 +279,33 @@ def main() -> int:
                     + compound_cascade_hint(command)
                 )
                 return 0  # ask emitted; only report first violation
+
+        merge_segment = _gh_pr_merge_segment(argv)
+        if merge_segment is None:
+            continue
+        tail, repo = merge_segment
+        has_squash, identifier, tail_repo, subject = _scan_merge_tail(tail)
+        if not has_squash:
+            continue
+        repo = tail_repo or repo
+
+        # `-t`/`--subject` overrides the PR title as the squash commit
+        # title — no network call needed when present.
+        title = subject if subject is not None else _resolve_pr_title(identifier, cwd, repo)
+        if not title:
+            continue  # unresolvable (fail-open) or genuinely empty
+        if any(title.startswith(p) for p in SKIP_PREFIXES):
+            continue
+        length = len(title)
+        if length > max_len:
+            _emit_squash_advisory(
+                f"Squash-merge title too long: {length} chars (max {max_len}).\n"
+                f"Title: {title!r}\n"
+                "The PR title becomes the squash commit title on merge. Shorten "
+                "the PR title, pass `-t <title>` (≤50 chars) to override the "
+                "subject, or embed `# title-length:ack` to acknowledge."
+            )
+            return 0  # advisory emitted; only report first violation
 
     return 0
 
