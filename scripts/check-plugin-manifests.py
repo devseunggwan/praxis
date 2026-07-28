@@ -654,6 +654,7 @@ def main() -> int:
                      "artifact-verdict-evidence-gate",
                      "pr-report-destination-gate",
                      "pr-claim-mutation-gate",
+                     "proposal-premise-gate",
                      "strike-counter"]
     actual_stop: list[str] = []
     for entry in manifest["hooks"]:

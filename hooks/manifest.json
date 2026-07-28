@@ -886,6 +886,17 @@
       }
     },
     {
+      "name": "proposal-premise-gate",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_PROPOSAL_PREMISE_BYPASS"
+        ]
+      }
+    },
+    {
       "name": "strike-counter",
       "role": "completion-verify",
       "body": "impl.sh",
