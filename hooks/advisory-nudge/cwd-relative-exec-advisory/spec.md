@@ -54,7 +54,7 @@ past, mirroring `output-block-falsify-advisory`'s T2 tier. Severity is MED
 
 Both conditions must hold:
 
-1. **`git worktree list --porcelain` reports 2+ `worktree ` lines.** Fewer
+1. **`git worktree list --porcelain` reports 2+ `worktree` lines.** Fewer
    than 2 → no ambiguity, silent. Command failure (non-git cwd, timeout,
    missing binary) → silent (cannot confirm ambiguity either way).
 2. **A relative-path execution with no preceding `cd`/`pushd` segment in the
