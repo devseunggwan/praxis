@@ -5,10 +5,10 @@ Supported hosts: all
 `hooks/completion-verify/pr-claim-mutation-gate/impl.py` runs on the `Stop`
 event. It scans the **final assistant message** for a PR-surface completion
 claim ("리뷰 코멘트를 처리했습니다", "Fixed the review comments") and, when the
-**current turn** contains no PR-surface mutation tool call, emits a stdout
-`{"systemMessage": ...}` JSON advisory.
+**current turn** contains no *successful* PR-surface mutation tool call,
+blocks the stop with a `{"decision": "block", ...}` JSON.
 
-### Why this exists
+## Why this exists
 
 2026-07-27 session retrospect finding #1 (HIGH, repeat 3x). CodeRabbit raised
 3 review findings on an open PR. The assistant applied the fixes to the LOCAL
@@ -36,7 +36,7 @@ This hook is narrower and stricter: the claim must combine a PR/review
 SUBJECT with a processed-state CLAIM verb, and the evidence gate requires a
 tool call that specifically mutates the PR surface — not any tool call.
 
-### What is detected
+## What is detected
 
 A claim requires, **on the same line**:
 
@@ -68,7 +68,7 @@ double-negation parsing is out of scope for a line-level regex gate; this is
 a documented trade-off in the same style as `merge-state-claim-gate`'s
 `without`/`fail` notes.
 
-### Mutation evidence (current turn only)
+## Mutation evidence (current turn only)
 
 Evidence is scoped to the **current turn** (not a wider event window): the
 claim is specifically about what *this turn* did to the PR, and the
@@ -82,9 +82,22 @@ A turn clears the gate if any assistant `tool_use` matches:
 | Push | `git push` |
 | PR comment | `gh pr comment ...` |
 | PR review | `gh pr review ...` |
-| Write-method `gh api` | `gh api ... --method POST\|PATCH\|PUT\|DELETE` or `-X POST\|PATCH\|PUT\|DELETE` |
+| Write-method `gh api` | `gh api ... --method POST\|PATCH\|PUT\|DELETE` (or `-X ...`) **on a `comments`/`reviews`/`threads` endpoint** |
 | GraphQL thread resolve | a command containing `resolveReviewThread` |
-| GitHub MCP mutation | `mcp__github__*` tool whose name matches `comment\|review\|merge\|thread` |
+| GitHub MCP mutation | `mcp__github__*` tool whose name carries a write verb (`add`/`create`/`submit`/`update`/`edit`/`delete`/`reply`/`resolve`/`dismiss`/`merge`); a `get`/`list`/`search`/`read` prefix always loses |
+
+Three things that look like mutations but are not, and therefore do not clear
+the gate:
+
+- a call whose `tool_result` is `is_error` — a rejected push or a 422 from
+  `gh pr comment` leaves the PR exactly as it was (correlated by tool_use
+  `id` ↔ tool_result `tool_use_id`, mirroring `pr-report-destination-gate`);
+- a `--dry-run` / `--help` / `man` rehearsal;
+- command text inside `echo` / `printf` / `cat`.
+
+A write-method `gh api` on a non-review endpoint (`.../labels`,
+`.../milestones`) mutates GitHub but not the surface the claim is about, so
+the endpoint segment is required rather than decorative.
 
 A **read-only** `gh api .../comments` call (no explicit write method — the
 default HTTP verb is GET) does **not** clear the gate: listing comments is
@@ -93,20 +106,24 @@ PR-surface command also do not clear it — this is the key delta from
 `completion-signal-gate`, which treats any `Bash`/`Read` call as sufficient
 evidence.
 
-### Response
+## Response
 
-Advisory by default — exit 0 + stdout `{"systemMessage": ...}` JSON.
-`PRAXIS_PR_CLAIM_STRICT=1` escalates to `{"decision": "block", "reason":
-...}` (re-prompts the model to push/comment/resolve before stopping).
-`PRAXIS_PR_CLAIM_BYPASS=1` silences the hook entirely.
+**Blocks by default** — exit 0 + stdout `{"decision": "block", "reason":
+...}`, which re-prompts the model to push/comment/resolve before stopping.
+This is what issue #868 asks for verbatim ("부재 시 차단 ... advisory 티어의
+실측 효과가 0 이므로 advisory 로는 같은 실패가 반복된다"), and it mirrors
+`negative-existence-verdict-gate`, which also blocks by default with an
+advisory-demote escape hatch. `PRAXIS_PR_CLAIM_ADVISORY=1` demotes it to a
+`{"systemMessage": ...}` advisory; `PRAXIS_PR_CLAIM_BYPASS=1` silences it
+entirely.
 
-```
+```text
 [pr-claim-mutation-gate] final message claims a PR review comment / feedback was processed (처리했/반영했/resolved/applied/handled/fixed the comments) but the CURRENT TURN contains no PR-surface mutation (`git push`, `gh pr comment`, `gh pr review`, a write-method `gh api` call, a GraphQL thread resolve, or a GitHub MCP comment/review tool).
 [pr-claim-mutation-gate] Rule: the claim's surface is the PR — a local edit does not back it. Push and post/resolve on the PR BEFORE reporting the findings as handled (issue #868: 3 CodeRabbit findings were fixed locally only; push/comment/resolve were all zero).
 [pr-claim-mutation-gate] bypass: PRAXIS_PR_CLAIM_BYPASS=1
 ```
 
-### Relationship to sibling hooks
+## Relationship to sibling hooks
 
 | Hook | Scope | Overlap |
 | ---- | ----- | ------- |
@@ -114,7 +131,7 @@ Advisory by default — exit 0 + stdout `{"systemMessage": ...}` JSON.
 | `merge-state-claim-gate` | Stop advisory, merge/PR/issue/worktree **state** assertions (`merged`, `created`, `closed`), evidence = any fresh `gh pr\|issue` query in the recent 80-event window | None — that hook gates state assertions about the PR's lifecycle; this one gates "I processed the review feedback" claims and requires an actual **mutation**, not just a query, in the **current turn** only |
 | `runtime-state-claim-gate` | Stop advisory, runtime/execution state claims, evidence = any probe tool in current turn | Structural sibling (same turn-scoped-evidence shape); different claim domain |
 
-### Parsing guarantees (fail-open)
+## Parsing guarantees (fail-open)
 
 Returns exit 0 on every infrastructure error — malformed stdin, missing/
 unreadable transcript, empty transcript, no assistant text in the current
@@ -123,7 +140,7 @@ turn, and any uncaught exception (via the shared `@fail_open` decorator in
 exit 0 (re-entry loop guard). It never blocks a normal Stop in the default
 (advisory) mode.
 
-### Tests
+## Tests
 
 ```bash
 bash tests/hooks/completion-verify/test_pr_claim_mutation_gate.sh

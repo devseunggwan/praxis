@@ -863,9 +863,9 @@
       "event": "Stop",
       "timeout": 10,
       "mode": {
-        "strict_env": "PRAXIS_PR_CLAIM_STRICT",
         "bypass_env": [
-          "PRAXIS_PR_CLAIM_BYPASS"
+          "PRAXIS_PR_CLAIM_BYPASS",
+          "PRAXIS_PR_CLAIM_ADVISORY"
         ]
       }
     },
