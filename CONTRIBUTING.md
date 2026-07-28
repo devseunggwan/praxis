@@ -164,10 +164,22 @@ Hooks do not execute from this repository. They execute from a versioned copy
 under `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/praxis/praxis/<version>/`
 — note the config dir is relocatable, so `~/.claude` is the default, not a
 given — and a merged change is not live until
-`release → plugin update → session reload` completes. Measured
-lead time from merge to release is a median of **33.7 hours** (max observed:
-201 hours, n=44 — see issue #841). Treat that lag as a permanent property of
-the repo, not an incident: the release cadence is deliberate.
+`release → plugin update → session reload` completes.
+
+Both hops were measured on 2026-07-28 (issue #841). They are not comparable in
+size, so quote the window along with the number — an unqualified median invites
+the reader to apply a 14-day figure to a 7-week history:
+
+| Hop | Window | Result |
+| ---- | ------- | ------- |
+| merge → release | trailing 14 days (n=46) | median **22.6h**, max 90.8h |
+| merge → release | since the first release (n=120) | median **50.0h**, max 469.2h |
+| release → adoption | v7.6.0, both config dirs | **~2 minutes** |
+
+Merge → release is therefore the whole of the lag; the plugin-cache hop is
+effectively instant, so a stale cache is a symptom to investigate rather than
+the expected state. Treat the release lag itself as a permanent property of the
+repo, not an incident: the release cadence is deliberate.
 
 The consequence is that **you cannot validate a hook change in the session that
 wrote it by simply triggering the hook.** Triggering it runs the *previous*
