@@ -38,6 +38,8 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_RUNTIME_CLAIM_BYPASS` | `runtime-state-claim-gate` | Skip the runtime/execution-state claim gate |
 | `PRAXIS_HOOK_BYPASS_NEGATIVE_EXISTENCE_GATE` | `negative-existence-verdict-gate` | Skip the negative-existence verdict `Enumerated:`-line gate |
 | `PRAXIS_HOOK_BYPASS_ARTIFACT_VERDICT_GATE` | `artifact-verdict-evidence-gate` | Skip the artifact-verdict `Verdict-evidence:`-line gate |
+| `PRAXIS_PR_CLAIM_BYPASS` | `pr-claim-mutation-gate` | Skip the PR-claim mutation gate entirely |
+| `PRAXIS_PR_CLAIM_ADVISORY` | `pr-claim-mutation-gate` | Demote the PR-claim mutation gate from block to advisory (systemMessage, non-blocking); mirrors `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY` |
 | `PRAXIS_HOOK_BYPASS_PR_REPORT_DESTINATION_GATE` | `pr-report-destination-gate` | Skip the PR-report-destination advisory (local report not posted to the PR) |
 | `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY` | `negative-existence-verdict-gate` | Demote the negative-existence verdict gate from block to advisory (systemMessage, non-blocking). Set to any non-falsey value (`1` / `true` / `yes`); `0` / `false` / empty keep block mode (mirrors `PRAXIS_ASK_END_ADVISORY`) |
 | `PRAXIS_PUSH_VERIFY_BYPASS` | `push-remote-ref-verify` | Skip the post-push remote-ref verification |
