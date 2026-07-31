@@ -11,18 +11,23 @@
 #   surfaces as kernel_task sys time — a non-linear spike, not a linear one.
 #
 # Safety model:
-#   - A broker actively serving a review has a freshly-touched broker.log, so
-#     the idle-age gate (--max-age) skips it. We never broad-kill: each running
-#     broker must individually pass the idle gate.
-#   - Worst case for a misjudged reap is a benign respawn on the next codex
-#     call (the broker is stateless infra) — never a correctness break.
+#   - A broker with ANY child process is KEPT. Its descendants include the live
+#     `codex app-server` backend, and collect_tree() signals the whole tree — so
+#     reaping such a broker kills the owning session, not leaked infra (#919:
+#     13 live-but-idle sessions were killed this way).
+#   - The idle gate (--max-age) is a necessary but NOT sufficient condition: it
+#     measures whether the broker is serving right now, not whether its session
+#     is alive. A session idle between turns leaves broker.log untouched.
+#   - Only a childless, idle broker is reaped — the backend has already detached,
+#     so the worst case is a benign respawn on the next codex call.
 #   - When idleness cannot be determined (no logFile), the broker is KEPT.
 #
 # Modes:
 #   --gc                 GC only: remove stale tmp sessionDirs whose broker pid
 #                        is dead. Zero risk. (default)
-#   --reap [--max-age N] Also kill RUNNING brokers idle > N minutes (default 30),
-#                        then GC. Used by the launchd job and the opt-in
+#   --reap [--max-age N] Also kill RUNNING brokers that are childless AND idle
+#                        > N minutes (default 30), then GC. Used by the launchd
+#                        job and the opt-in
 #                        PRAXIS_CODEX_REAP=1 path in codex-review-wrap.
 #   --dry-run            Print actions without executing.
 #
@@ -45,7 +50,9 @@ usage() {
 Usage: codex-broker-reaper.sh [--gc | --reap] [--max-age MINUTES] [--dry-run]
 
   --gc            Remove stale tmp sessionDirs of dead brokers (zero risk). Default.
-  --reap          Also kill running brokers idle longer than --max-age, then GC.
+  --reap          Also kill running brokers that have no child process AND have
+                  been idle longer than --max-age, then GC. A broker with a
+                  child still owns a live codex backend and is never killed.
   --max-age N     Idle-minutes threshold for --reap (default: 30).
   --dry-run       Show what would happen; make no changes.
   -h, --help      This help.
@@ -105,6 +112,16 @@ collect_tree() {
     collect_tree "$child"
   done
   printf '%s ' "$pid"
+}
+
+# Direct children of a pid as a space-separated list; empty when it has none.
+# `pgrep` exits 1 on no match, so the pipeline is terminated by `tr` (always 0)
+# to keep `set -e` out of it.
+child_pids_of() {
+  local kids
+  kids="$(pgrep -P "$1" 2>/dev/null | tr '\n' ' ')"
+  [[ -n "${kids// /}" ]] && printf '%s' "${kids% }"
+  return 0
 }
 
 # Resolve the broker's sessionDir from its command-line endpoint:
@@ -171,6 +188,16 @@ if [[ "$MODE" == "reap" ]]; then
       skipped=$(( skipped + 1 )); continue
     fi
 
+    # Owner-liveness gate (#919). A broker's children are its `codex app-server`
+    # backend; collect_tree() below would sweep them into the kill. An idle log
+    # only proves the broker is not serving *right now*, so children are the
+    # evidence that a session still owns it.
+    children="$(child_pids_of "$pid")"
+    if [[ -n "$children" ]]; then
+      echo "SKIP   pid=$pid (owner alive: child pids $children — reaping would kill the codex backend)"
+      skipped=$(( skipped + 1 )); continue
+    fi
+
     if [[ "$DRY_RUN" == "true" ]]; then
       echo "WOULD REAP pid=$pid idle=${idle}s dir=$sdir"
     else
@@ -180,6 +207,13 @@ if [[ "$MODE" == "reap" ]]; then
       case "$m2" in ''|*[!0-9]*) m2=$now2 ;; esac
       if (( now2 - m2 < max_age_sec )); then
         echo "SKIP   pid=$pid (became active before kill)"
+        skipped=$(( skipped + 1 )); continue
+      fi
+      # Same re-check for ownership: a backend can attach in the gap, and
+      # collect_tree() would then sweep it into the kill.
+      children="$(child_pids_of "$pid")"
+      if [[ -n "$children" ]]; then
+        echo "SKIP   pid=$pid (owner attached before kill: child pids $children)"
         skipped=$(( skipped + 1 )); continue
       fi
       tree="$(collect_tree "$pid")"
