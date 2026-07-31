@@ -1,6 +1,6 @@
 # Praxis runtime state layout
 
-Praxis hooks and skills write four kinds of runtime files. Since praxis is
+Praxis hooks and skills write runtime files under six roots. Since praxis is
 multi-platform (Claude, Codex, Cursor, Gemini, OpenCode), these live under a
 **host-neutral** `~/.praxis` root rather than the Claude-nested legacy location.
 The resolver is [`hooks/_lib/_paths.py`](../hooks/_lib/_paths.py), mirrored for
