@@ -24,12 +24,13 @@ Two event handlers share a session state file:
 
 Session state location (in priority order):
   1. `PRAXIS_SESSION_INTENT_FILE` env var (test override; explicit path)
-  2. `${TMPDIR:-/tmp}/praxis-session-intent-${session_id}.json` when the
-     hook payload carries a `session_id` field (the canonical praxis hook
-     pattern — same key used by `completion-verify.sh`,
-     `retrospect-mix-check.sh`, `strike-counter.sh`)
-  3. `${TMPDIR:-/tmp}/praxis-session-intent-${PPID}.json` (back-compat
-     fallback when the payload does not include `session_id`)
+  2. `<PRAXIS_HOME>/cache/session-intent-${session_id}.json` when the hook
+     payload carries a `session_id` field (the canonical praxis hook pattern —
+     same key used by `completion-verify.sh`, `retrospect-mix-check.sh`,
+     `strike-counter.sh`). Pre-#903 this lived under `${TMPDIR}`;
+     `resolve_cache_file` adopts that file if it is still there.
+  3. `${PPID}` replaces `${session_id}` in the filename (back-compat fallback
+     when the payload does not include `session_id`)
 
 The `$CLAUDE_PROJECT_DIR/.praxis-session-intent.json` branch was removed
 intentionally (codex P1 review on PR #190): a project-rooted state file
@@ -83,6 +84,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
+from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Lexical signal sets — module-level constants (Korean + English).
@@ -265,11 +267,8 @@ def resolve_state_path(session_id: str | None = None) -> str:
     if explicit:
         return explicit
 
-    tmp = os.environ.get("TMPDIR", "/tmp").rstrip("/")
-    if session_id:
-        return os.path.join(tmp, f"praxis-session-intent-{session_id}.json")
-    ppid = os.getppid()
-    return os.path.join(tmp, f"praxis-session-intent-{ppid}.json")
+    key = session_id or str(os.getppid())
+    return resolve_cache_file(f"session-intent-{key}.json")
 
 
 def read_state(path: str) -> dict:

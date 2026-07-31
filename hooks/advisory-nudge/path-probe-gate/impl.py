@@ -43,7 +43,7 @@ Bypass:
 
 State:
   Session-scoped enumeration markers under:
-    ${TMPDIR:-/tmp}/praxis-path-probe-gate/<session_id_hash>/<parent_hash>
+    <PRAXIS_HOME>/cache/path-probe-gate/<session_id_hash>/<parent_hash>
   A marker's presence means the parent was enumerated this session.
   Stale markers are cleaned up by the OS tmp purge policy.
 
@@ -66,6 +66,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from _paths import praxis_cache_dir  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -102,9 +103,7 @@ _DENY_TMPL = (
     "  NotebookEdit are monitored by this hook.\n"
 )
 
-_STATE_BASE = os.path.join(
-    os.environ.get("TMPDIR", "/tmp"), "praxis-path-probe-gate"
-)
+_STATE_BASE = os.path.join(praxis_cache_dir(), "path-probe-gate")
 
 
 # ---------------------------------------------------------------------------

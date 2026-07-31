@@ -41,11 +41,12 @@ that still routes through the Skill tool.
 
 State file (priority order)
   1. `PRAXIS_RETROSPECT_ACTIVE_FILE` env var (explicit override for tests).
-  2. `${TMPDIR:-/tmp}/praxis-retrospect-active-${session_id}.json` — the
-     canonical praxis hook session key (same field consumed by
-     `session-intent`, `retrospect-mix-check.sh`, `strike-counter.sh`).
-  3. `${TMPDIR:-/tmp}/praxis-retrospect-active-${PPID}.json` back-compat
-     fallback when no `session_id` is supplied (direct CLI / test usage).
+  2. `<PRAXIS_HOME>/cache/retrospect-active-${session_id}.json` — the canonical
+     praxis hook session key (same field consumed by `session-intent`,
+     `retrospect-mix-check.sh`, `strike-counter.sh`). Pre-#903 this lived in
+     `${TMPDIR}`; `resolve_cache_file` adopts that file if it is still there.
+  3. `${PPID}` replaces `${session_id}` in the filename when no `session_id`
+     is supplied (direct CLI / test usage).
 
 Fail-open everywhere — malformed payloads / unwritable state exit 0 silently.
 The hook never blocks; it only records side-effect state for the Stop gate.
@@ -64,6 +65,7 @@ _sys_path = str(_Path(__file__).resolve().parent.parent.parent / "_lib")
 if _sys_path not in sys.path:
     sys.path.insert(0, _sys_path)
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
 
 # Explicit retrospect slash-command invocation at the start of the prompt.
 # `/retrospect`, `/praxis:retrospect` (the plugin-namespaced form). A trailing
@@ -94,13 +96,8 @@ def resolve_state_path(session_id: str | None = None) -> str:
     if explicit:
         return explicit
 
-    # Root-safe: `"/".rstrip("/")` is "", which would yield a *relative*
-    # marker path. Fall back to "/" so the path stays absolute and the sh
-    # consumer (which computes the same path) agrees.
-    tmp = os.environ.get("TMPDIR", "/tmp").rstrip("/") or "/"
-    if session_id:
-        return os.path.join(tmp, f"praxis-retrospect-active-{session_id}.json")
-    return os.path.join(tmp, f"praxis-retrospect-active-{os.getppid()}.json")
+    key = session_id or str(os.getppid())
+    return resolve_cache_file(f"retrospect-active-{key}.json")
 
 
 def set_marker(path: str, source: str) -> None:
@@ -164,15 +161,14 @@ def resolve_candidates_path(session_id: str | None = None) -> str:
     Mirrors resolve_state_path's location logic with a distinct filename so the
     hint file and the marker are always separate files. Under an explicit marker
     override the override path is opaque, so the sibling is that path plus a
-    `.candidates.json` suffix; otherwise it is the TMPDIR
-    `praxis-retrospect-candidates-<session>.json` companion of the marker.
+    `.candidates.json` suffix; otherwise it is the cache-dir
+    `retrospect-candidates-<session>.json` companion of the marker.
     """
     explicit = os.environ.get("PRAXIS_RETROSPECT_ACTIVE_FILE", "").strip()
     if explicit:
         return explicit + ".candidates.json"
-    tmp = os.environ.get("TMPDIR", "/tmp").rstrip("/") or "/"
     token = session_id if session_id else str(os.getppid())
-    return os.path.join(tmp, f"praxis-retrospect-candidates-{token}.json")
+    return resolve_cache_file(f"retrospect-candidates-{token}.json")
 
 
 def write_candidate_hints(payload: dict, session_id: str | None) -> None:

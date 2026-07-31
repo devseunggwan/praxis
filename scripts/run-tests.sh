@@ -23,6 +23,14 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$REPO_ROOT"
 
+# Run against a throwaway PRAXIS_HOME (#903). Hooks now resolve their runtime
+# files through it, so without this the suite would write into — and let
+# prune_stale sweep — the developer's own ~/.praxis. Individual cases that care
+# about the default still unset it themselves (see tests/test_paths.sh).
+PRAXIS_HOME="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+export PRAXIS_HOME
+trap 'rm -rf "$PRAXIS_HOME"' EXIT
+
 FAILED=0
 
 # ---------------------------------------------------------------------------

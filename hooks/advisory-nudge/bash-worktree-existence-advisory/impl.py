@@ -42,7 +42,7 @@ Silent cases (no output emitted):
 
 Deduplication:
   Per-session marker files in
-  `${TMPDIR:-/tmp}/praxis-bash-worktree-advisory/<session_id>.<path-hash>.<state>`
+  `<PRAXIS_HOME>/cache/bash-worktree-advisory/<session_id>.<path-hash>.<state>`
   suppress repeat advisories for the same (session, path, state) triple.
   State is `missing`. If path state changes (e.g. directory is created),
   the old marker does not suppress the new state's advisory.
@@ -84,6 +84,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     filter_argv,
     tokenize_with_roles,
 )
+from _paths import praxis_cache_dir  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +96,7 @@ OPT_OUT_MARKER = "# worktree-advisory:ack"
 # Dedupe dir — per-session markers suppress repeat advisories for the same
 # (path, state) pair. State is encoded in the marker filename suffix so that
 # a path transitioning from missing → exists triggers a fresh advisory.
-_DEDUPE_BASE = os.path.join(os.environ.get("TMPDIR", "/tmp"), "praxis-bash-worktree-advisory")
+_DEDUPE_BASE = os.path.join(praxis_cache_dir(), "bash-worktree-advisory")
 
 
 # ---------------------------------------------------------------------------

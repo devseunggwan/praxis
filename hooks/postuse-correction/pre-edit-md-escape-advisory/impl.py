@@ -41,8 +41,8 @@ Resolution order:
      tests for isolation.
   2. `session_id` from the hook payload (primary key — stable across
      PreToolUse / PostToolUse invocations within a single Claude Code
-     session) → `${TMPDIR:-/tmp}/praxis-md-read-history-<session_id>.json`.
-  3. `${TMPDIR:-/tmp}/praxis-md-read-history-${PPID}.json` — last-resort
+     session) → `<PRAXIS_HOME>/cache/md-read-history-<session_id>.json`.
+  3. `<PRAXIS_HOME>/cache/md-read-history-${PPID}.json` — last-resort
      back-compat fallback when the payload does not carry a `session_id`
      (e.g., direct CLI / test invocation).
 
@@ -110,6 +110,7 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -168,11 +169,8 @@ def resolve_history_path(session_id: str | None = None) -> str:
     if override:
         return override
 
-    tmp = os.environ.get("TMPDIR", "/tmp").rstrip("/") or "/tmp"
-    if session_id:
-        return os.path.join(tmp, f"praxis-md-read-history-{session_id}.json")
-    ppid = os.getppid()
-    return os.path.join(tmp, f"praxis-md-read-history-{ppid}.json")
+    key = session_id or str(os.getppid())
+    return resolve_cache_file(f"md-read-history-{key}.json")
 
 
 def load_history(path: str) -> dict:

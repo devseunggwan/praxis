@@ -107,6 +107,185 @@ PYEOF
 )
 assert_eq "legacy_state_dir = ~/.claude/state/praxis" "/tmp/fakehome-527/.claude/state/praxis" "$legacy"
 
+# 8. prune_stale removes entries past the TTL and keeps fresh ones (#903)
+prune_result=$(python3 - "$LIB" << 'PYEOF'
+import os, sys, tempfile, time
+sys.path.insert(0, sys.argv[1])
+from _paths import prune_stale
+
+d = tempfile.mkdtemp()
+old, fresh = os.path.join(d, "old.json"), os.path.join(d, "fresh.json")
+for p in (old, fresh):
+    open(p, "w").close()
+stale = time.time() - 8 * 86400
+os.utime(old, (stale, stale))
+
+olddir = os.path.join(d, "olddir")
+os.makedirs(olddir)
+inner = os.path.join(olddir, "inner")
+open(inner, "w").close()
+# Backdate the contents too: a directory is judged by its newest descendant,
+# so backdating only the dir would (correctly) spare it. Case 15 covers that.
+os.utime(inner, (stale, stale))
+os.utime(olddir, (stale, stale))
+
+removed = prune_stale(d, ttl_days=7)
+print(f"{removed}:{os.path.exists(old)}:{os.path.exists(fresh)}:{os.path.exists(olddir)}")
+PYEOF
+)
+assert_eq "prune_stale sweeps stale files and dirs, keeps fresh" "2:False:True:False" "$prune_result"
+
+# 9. PRAXIS_CACHE_TTL_DAYS=0 disables the sweep
+prune_disabled=$(PRAXIS_CACHE_TTL_DAYS=0 python3 - "$LIB" << 'PYEOF'
+import os, sys, tempfile, time
+sys.path.insert(0, sys.argv[1])
+from _paths import prune_stale
+d = tempfile.mkdtemp()
+p = os.path.join(d, "old.json")
+open(p, "w").close()
+stale = time.time() - 400 * 86400
+os.utime(p, (stale, stale))
+print(f"{prune_stale(d)}:{os.path.exists(p)}")
+PYEOF
+)
+assert_eq "PRAXIS_CACHE_TTL_DAYS=0 disables the sweep" "0:True" "$prune_disabled"
+
+# 10. prune_stale on a missing directory returns 0 rather than raising
+prune_missing=$(python3 - "$LIB" << 'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from _paths import prune_stale
+print(prune_stale("/nonexistent-praxis-903", ttl_days=1))
+PYEOF
+)
+assert_eq "prune_stale on missing dir returns 0" "0" "$prune_missing"
+
+# 10b. resolve_cache_file adopts a pre-#903 ${TMPDIR} file (#903)
+# A session already holding intent/marker state when praxis upgrades must not
+# read the new path as "no state" — that silently disarms the Stop gate.
+adopt=$(python3 - "$LIB" << 'PYEOF'
+import os, sys, tempfile
+sys.path.insert(0, sys.argv[1])
+home, tmp = tempfile.mkdtemp(), tempfile.mkdtemp()
+os.environ["PRAXIS_HOME"], os.environ["TMPDIR"] = home, tmp
+from _paths import resolve_cache_file
+legacy = os.path.join(tmp, "praxis-session-intent-x.json")
+with open(legacy, "w") as fh:
+    fh.write('{"mutation_verb_seen": true}')
+p = resolve_cache_file("session-intent-x.json")
+print(f"{p.startswith(home)}:{open(p).read()}:{os.path.exists(legacy)}")
+PYEOF
+)
+assert_eq "resolve_cache_file adopts the legacy TMPDIR file" \
+  'True:{"mutation_verb_seen": true}:False' "$adopt"
+
+# 10c. With no legacy file, resolve_cache_file just returns the new path
+fresh=$(python3 - "$LIB" << 'PYEOF'
+import os, sys, tempfile
+sys.path.insert(0, sys.argv[1])
+home, tmp = tempfile.mkdtemp(), tempfile.mkdtemp()
+os.environ["PRAXIS_HOME"], os.environ["TMPDIR"] = home, tmp
+from _paths import resolve_cache_file
+p = resolve_cache_file("session-intent-y.json")
+print(f"{p == os.path.join(home, 'cache', 'session-intent-y.json')}:{os.path.exists(p)}")
+PYEOF
+)
+assert_eq "resolve_cache_file with no legacy file creates nothing" "True:False" "$fresh"
+
+# --- _paths.sh must agree with _paths.py (#903) -----------------------------
+# The writer/reader halves of a protocol are split across the two languages, so
+# a divergence here silently sends them to different files.
+
+sh_eval() {  # sh_eval <shell-expression>
+  sh -c ". \"$LIB/_paths.sh\"; $1"
+}
+
+# 11. shell praxis_home honors PRAXIS_HOME and defaults to ~/.praxis
+assert_eq "sh praxis_home: PRAXIS_HOME override" "/tmp/ph-903" \
+  "$(PRAXIS_HOME=/tmp/ph-903 sh_eval 'praxis_home')"
+assert_eq "sh praxis_home: default" "/tmp/fakehome-903/.praxis" \
+  "$(unset PRAXIS_HOME; HOME=/tmp/fakehome-903 sh_eval 'praxis_home')"
+
+# 12. shell state/cache dirs match the Python resolver, override precedence included
+assert_eq "sh praxis_state_dir default" "/tmp/ph-903/state" \
+  "$(unset PRAXIS_STATE_DIR; PRAXIS_HOME=/tmp/ph-903 sh_eval 'praxis_state_dir')"
+assert_eq "sh PRAXIS_STATE_DIR override wins" "/custom/state" \
+  "$(PRAXIS_STATE_DIR=/custom/state PRAXIS_HOME=/tmp/ph-903 sh_eval 'praxis_state_dir')"
+assert_eq "sh praxis_cache_dir" "/tmp/ph-903/cache" \
+  "$(PRAXIS_HOME=/tmp/ph-903 sh_eval 'praxis_cache_dir')"
+
+# 13. shell resolve_writable creates the subdir, and falls back like Python
+SH_HOME=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+assert_eq "sh praxis_resolve_writable path" "$SH_HOME/cache/x.json" \
+  "$(PRAXIS_HOME="$SH_HOME" sh_eval 'praxis_resolve_writable cache x.json')"
+if [ -d "$SH_HOME/cache" ]; then
+  echo "PASS  [sh praxis_resolve_writable created the subdir]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [sh praxis_resolve_writable did not create subdir]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("sh subdir created")
+fi
+rm -rf "$SH_HOME"
+assert_eq "sh unwritable home falls back to TMPDIR" "/tmp/praxis-hook-errors.jsonl" \
+  "$(PRAXIS_HOME=/proc/nonexistent-praxis-home TMPDIR=/tmp sh_eval 'praxis_resolve_writable logs hook-errors.jsonl')"
+
+# 14. A literal tilde in PRAXIS_HOME must expand the same way on both sides.
+# Python runs os.path.expanduser; shell left alone does not, so a quoted or
+# config-exported PRAXIS_HOME='~/praxis' would split the two resolvers apart.
+TILDE='~'   # kept in a variable so the literal never sits inside quotes
+assert_eq "sh praxis_home expands a literal ~/" "/tmp/fakehome-903/praxis" \
+  "$(HOME=/tmp/fakehome-903 PRAXIS_HOME="$TILDE/praxis" sh_eval 'praxis_home')"
+assert_eq "sh praxis_home expands a bare ~" "/tmp/fakehome-903" \
+  "$(HOME=/tmp/fakehome-903 PRAXIS_HOME="$TILDE" sh_eval 'praxis_home')"
+assert_eq "sh/py agree on a literal ~/ PRAXIS_HOME" \
+  "$(HOME=/tmp/fakehome-903 PRAXIS_HOME="$TILDE/praxis" python3 -c "import sys; sys.path.insert(0, '$LIB'); import _paths; print(_paths.praxis_home())")" \
+  "$(HOME=/tmp/fakehome-903 PRAXIS_HOME="$TILDE/praxis" sh_eval 'praxis_home')"
+assert_eq "sh praxis_home leaves a mid-path tilde alone" "/tmp/a~b" \
+  "$(PRAXIS_HOME='/tmp/a~b' sh_eval 'praxis_home')"
+
+# 15. prune_stale must judge a directory by its newest descendant, not its own
+# mtime. The dedup hooks nest state two levels down, and writing there does not
+# touch the top-level dir — so an mtime-only check deletes live session state.
+PRUNE_HOME=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+mkdir -p "$PRUNE_HOME/tree/session-a"
+: > "$PRUNE_HOME/tree/session-a/live"
+: > "$PRUNE_HOME/loose-old"
+# Backdate the parent dir and the loose file; leave the nested file fresh.
+touch -t 202001010000 "$PRUNE_HOME/tree" "$PRUNE_HOME/tree/session-a" "$PRUNE_HOME/loose-old"
+python3 -c "import sys; sys.path.insert(0, '$LIB'); import _paths; _paths.prune_stale('$PRUNE_HOME', 7.0)" >/dev/null
+if [ -f "$PRUNE_HOME/tree/session-a/live" ]; then
+  echo "PASS  [prune_stale keeps a stale dir holding fresh nested state]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [prune_stale deleted active nested state]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("prune nested state")
+fi
+if [ -f "$PRUNE_HOME/loose-old" ]; then
+  echo "FAIL  [prune_stale left a genuinely stale file]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("prune stale file")
+else
+  echo "PASS  [prune_stale still removes a genuinely stale file]"; PASS=$((PASS + 1))
+fi
+# A tree that is stale all the way down still goes.
+mkdir -p "$PRUNE_HOME/dead/session-b"
+: > "$PRUNE_HOME/dead/session-b/old"
+touch -t 202001010000 "$PRUNE_HOME/dead/session-b/old" "$PRUNE_HOME/dead/session-b" "$PRUNE_HOME/dead"
+python3 -c "import sys; sys.path.insert(0, '$LIB'); import _paths; _paths.prune_stale('$PRUNE_HOME', 7.0)" >/dev/null
+if [ -d "$PRUNE_HOME/dead" ]; then
+  echo "FAIL  [prune_stale left a fully stale tree]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("prune stale tree")
+else
+  echo "PASS  [prune_stale removes a fully stale tree]"; PASS=$((PASS + 1))
+fi
+rm -rf "$PRUNE_HOME"
+
+# 16. A concurrent migration must not hand back the abandoned legacy path.
+# Two processes can both see the new path absent; the loser's move fails, and
+# returning `legacy` then writes where no later reader looks.
+RACE_HOME=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+RACE_TMP=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+mkdir -p "$RACE_HOME/cache"
+printf '{"winner": true}' > "$RACE_HOME/cache/race.json"
+printf '{"stale": true}' > "$RACE_TMP/praxis-race.json"
+assert_eq "resolve_cache_file prefers the new path when both exist" \
+  "$RACE_HOME/cache/race.json" \
+  "$(PRAXIS_HOME="$RACE_HOME" TMPDIR="$RACE_TMP" python3 -c "import sys; sys.path.insert(0, '$LIB'); import _paths; print(_paths.resolve_cache_file('race.json'))")"
+rm -rf "$RACE_HOME" "$RACE_TMP"
+
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then
