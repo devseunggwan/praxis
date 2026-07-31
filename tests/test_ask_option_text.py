@@ -145,11 +145,11 @@ def _decision(stdout: str) -> str | None:
     return obj.get("hookSpecificOutput", {}).get("permissionDecision")
 
 
-def test_output_block_recommended_without_falsified_denies():
+def test_output_block_recommended_without_falsified_asks():
     payload = _make_ask_payload(["Option A (Recommended)", "Option B"])
     proc = _run_hook(OUTPUT_BLOCK, payload)
     assert proc.returncode == 0
-    assert _decision(proc.stdout) == "deny"
+    assert _decision(proc.stdout) == "ask"
 
 
 def test_output_block_recommended_with_falsified_line_silent():

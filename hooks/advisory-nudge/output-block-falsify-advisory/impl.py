@@ -14,14 +14,17 @@ This hook adds a structural enforcement point at two surfaces:
      lacks a `Falsified:` line (exact prefix at line start):
 
      T1. Label contains exact `(Recommended)` or `(추천)` (case-sensitive)
-         — original literal-marker path. **Emits `permissionDecision: deny`
-         (hard block)** — issue #393 upgrade. Rationale: the explicit
-         marker is a high-confidence false-positive-free signal; soft
-         `ask` permitted acknowledge-and-proceed and within-session
-         recurrence was observed (retrospect 2026-05-23, 3 calls in
-         a single codex-review-wrap chain). False-positive rate of
-         a literal `(Recommended)` label without `Falsified:` is low
-         enough to justify hard block.
+         — original literal-marker path. **Emits `permissionDecision: ask`
+         (soft gate)** — issue #899 restores the pre-#393 tier. #393 raised
+         this to `deny` because compliance was absent (retrospect
+         2026-05-23: 3 calls, 0 `Falsified:` lines). That premise no
+         longer holds — 90-day transcript census shows `Falsified:` lines
+         (221/wk) now exceed `(Recommended)` labels (184/wk), i.e. the
+         template is over-applied. Under `deny` the surviving cost was a
+         forced re-author round trip: 306 blocks / 30 days, 48% of all
+         AskUserQuestion blocks, up to 14 in one session — which pushed
+         questions onto the ungated prose surface instead (AQ per 1k
+         assistant turns 9.25 → 6.36; prose-ask/AQ 1.71 → 2.08).
 
      T2. Label OR description contains a confidence-anchoring framing
          token (issue #369). EN tokens (case-insensitive, ASCII word
@@ -584,9 +587,9 @@ def _emit_ask(message: str) -> None:
     emit_decision("ask", message)
 
 
-def _emit_deny(message: str) -> None:
-    """T1 path: hard block (issue #393 upgrade)."""
-    emit_decision("deny", message)
+def _emit_t1_ask(message: str) -> None:
+    """T1 path: soft gate (issue #899 — restores the pre-#393 tier)."""
+    emit_decision("ask", message)
 
 
 # ---------------------------------------------------------------------------
@@ -824,12 +827,12 @@ def main() -> int:
                 advisory_needed = True
 
         if any_t1_violation:
-            # T1 deny is final — overrides any T2 ask — but the scaffold
-            # still aggregates T2 labels too so a question that only
-            # violates T2 doesn't reblock on the very next retry. No
-            # cross-question dedup here (see comment above).
-            _record_block_telemetry(payload.get("session_id"), _fire_ledger.DECISION_BLOCK)
-            _emit_deny(_build_ask_msg(t1_labels + t2_labels))
+            # T1 takes precedence over T2 (its message is the stricter one)
+            # — but the scaffold still aggregates T2 labels too so a
+            # question that only violates T2 doesn't regate on the very
+            # next retry. No cross-question dedup here (see comment above).
+            _record_block_telemetry(payload.get("session_id"), _fire_ledger.DECISION_ASK)
+            _emit_t1_ask(_build_ask_msg(t1_labels + t2_labels))
         elif any_t2_violation:
             _record_block_telemetry(payload.get("session_id"), _fire_ledger.DECISION_ASK)
             _emit_ask(_build_anchoring_ask_msg(t2_labels))
