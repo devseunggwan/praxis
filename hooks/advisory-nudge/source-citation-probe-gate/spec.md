@@ -33,9 +33,9 @@ author-exempt Check 2 territory.
 | T2 | exact call syntax | inside **inline code spans (single backticks) only**: `name(...)` whose argument list contains `.` or `[` — the weakest detector by design |
 | T3 | test-semantics claim | `test*` token + `assert*` / `raise(s)` / `expect*` within an 80-char same-sentence window (case-insensitive) |
 
-Surfaces scanned (same extraction as `external-write-falsify-check` — gh
-argv walk + MCP nested container/leaf walk, 2nd copy per repo 2-copy
-convention):
+Surfaces scanned (shared with `external-write-falsify-check` — gh argv walk
++ MCP nested container/leaf walk, extracted to `_lib/_external_write_body.py`
+at the 3rd consumer per repo 2-copy convention, issue #907):
 
 - `gh issue|pr comment|create|edit`, `gh pr review` with `--body` / `-b` /
   `--body=` / `--body-file` / `-F` (file contents read best-effort)
