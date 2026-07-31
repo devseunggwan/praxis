@@ -99,10 +99,10 @@ run_case silent "f5-verdict-with-enumerated" '{}'
 # Enumerated line, BLOCK without one.
 # =====================================================================
 
-build_transcript "확인 결과: gmail OAuth 는 없습니다. 있는 건 facebook/google_ads/github 뿐."
+build_transcript "게이트 결과: gmail OAuth 는 없습니다. 있는 건 facebook/google_ads/github 뿐."
 run_case block "legit-verdict-no-enumerated" '{}'
 
-build_transcript "확인 결과: gmail OAuth 는 없습니다. 있는 건 facebook/google_ads/github 뿐.
+build_transcript "게이트 결과: gmail OAuth 는 없습니다. 있는 건 facebook/google_ads/github 뿐.
 Enumerated: facebook, google_ads, github, gmail → gmail 만 부재"
 run_case silent "legit-verdict-with-enumerated" '{}'
 
@@ -145,8 +145,24 @@ run_case block "ac-hash-framing-block" '{}'
 # Other KO markers / framings
 # =====================================================================
 
-build_transcript "완료 조건 검토: 해당 엔드포인트는 미구현 상태입니다."
-run_case block "wanryo-jogeon-migujeon" '{}'
+build_transcript "게이트 판정: 해당 엔드포인트는 미구현 상태입니다."
+run_case block "geiteu-panjeong-migujeon" '{}'
+
+# Issue #901 — the three removed framings are ordinary investigative prose
+# and must no longer fire, even alongside a marker in the same paragraph.
+build_transcript "확인 결과: gmail OAuth 는 없습니다. 있는 건 facebook/google_ads 뿐."
+run_case silent "removed-framing-hwagin-gyeolgwa" '{}'
+
+build_transcript "검증 결과: 해당 엔드포인트는 미구현 상태입니다."
+run_case silent "removed-framing-geomjeung-gyeolgwa" '{}'
+
+build_transcript "완료 조건 3항 추가 — 존재하지 않는 이슈 참조 없이 자기완결형으로 정리."
+run_case silent "removed-framing-wanryo-jogeon" '{}'
+
+# Issue #901 regression — the motivating Hub #3981 verdict must still fire
+# with the narrowed token set.
+build_transcript "게이트 결과가 나왔습니다 — 매핑 규칙이 없습니다."
+run_case block "hub3981-motivating-case" '{}'
 
 build_transcript "판정이 나왔습니다: 관련 훅을 찾지 못했습니다."
 run_case block "panjeong-motchatda" '{}'

@@ -79,15 +79,35 @@ The trigger requires **both**, in the same `\n\n`-delimited paragraph:
 
 ### (b) Registered decision / verdict framing
 
-- KO substrings: `게이트 결과`, `게이트 판정`, `완료 조건`, `판정이 나왔`, `검증 결과`, `확인 결과`
+- KO substrings: `게이트 결과`, `게이트 판정`, `판정이 나왔`
 - EN substrings (case-insensitive): `acceptance`, `ac #`
 
-`검증 결과` / `확인 결과` are the combined "verification/confirmation result …없"
-framings from the proposal; the trailing "…없" is carried by the separate
-marker requirement (the paragraph must also contain a marker), so only the
-framing head is listed. Each EN framing/marker still requires its
-counterpart in the same paragraph, so a bare positive "Acceptance criteria
-met" cannot fire on its own.
+Each EN framing/marker still requires its counterpart in the same paragraph,
+so a bare positive "Acceptance criteria met" cannot fire on its own.
+
+### Removed in issue #901 — `확인 결과` / `검증 결과` / `완료 조건`
+
+The proposal listed these as "verification/confirmation result …없" framings,
+with the trailing "…없" carried by the separate marker requirement. Live
+deployment showed the marker co-occurrence requirement is not a sufficient
+discriminator for them. Applying this hook's own detector to a 30-day
+transcript corpus:
+
+| framing token | fires |
+| --- | --- |
+| `확인 결과` | 7 |
+| `완료 조건` | 4 |
+| `게이트 결과` / `게이트 판정` / `판정이 나왔` | **0** |
+
+7 of 8 sampled fires were incidental substring matches, not verdicts —
+`확인 결과, 정리할 부분 없습니다.` (an ordinary answer), `"미구현 항목 — 닫지
+마세요" 절을 … 교체` (a changelog of an issue-body edit), `… 자기완결형
+(존재하지 않는 이슈 참조 없이)` (an adverbial phrase). `확인 결과` is everyday
+Korean for "upon checking" and appears in any investigative prose; it does
+not mark a *registered decision*. Meanwhile the tier the hook was designed
+for never fired at all. Removing the three eliminates every observed
+false positive while the motivating case (`게이트 결과가 나왔습니다 — 매핑
+규칙이 없습니다`) still triggers on `게이트 결과`.
 
 ## The requirement — presence enforcement, not adequacy verification
 
@@ -173,12 +193,14 @@ dependencies — standard library only.
 bash tests/hooks/completion-verify/test_negative_existence_verdict_gate.sh
 ```
 
-22 cases: F5 motivating-case regression (block without / pass with an
+28 cases: F5 motivating-case regression (block without / pass with an
 `Enumerated:` line), the issue's false-positive-regression verdict
-(`확인 결과 … gmail OAuth 는 없습니다`), marker-XOR-framing negatives,
+(`게이트 결과 … gmail OAuth 는 없습니다`), marker-XOR-framing negatives,
 marker+framing in different paragraphs, EN `does not exist` / `Acceptance` /
 `AC #` tokens, other KO markers (`미구현`, `찾지 못했`) and framings
-(`완료 조건`, `판정이 나왔`), `Enumerated:` edge cases (empty after colon,
+(`게이트 판정`, `판정이 나왔`), the three framings removed in #901 asserted
+silent (`확인 결과`, `검증 결과`, `완료 조건`), the Hub #3981 verdict asserted
+still-blocking under the narrowed set, `Enumerated:` edge cases (empty after colon,
 inline/indented, multi-paragraph partial coverage), advisory demote, bypass
 env, `stop_hook_active` loop guard, and fail-open (missing transcript,
 malformed JSON, empty payload).
