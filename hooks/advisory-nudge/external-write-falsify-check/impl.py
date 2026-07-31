@@ -56,7 +56,6 @@ from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
     safe_tokenize,
-    strip_prefix,
 )
 from _transcript import TRANSCRIPT_SCAN_LINES  # type: ignore[import-not-found]  # noqa: E402
 
@@ -79,170 +78,16 @@ HYPOTHESIS_MARKERS_KO = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Bash gh detection
-# ---------------------------------------------------------------------------
-
-GH_GLOBAL_FLAGS_WITH_ARG = frozenset({
-    "-R", "--repo",
-    "--hostname",
-    "--color",
-})
-
-# `gh <obj> <sub>` pairs that write to external surfaces.
-GH_WRITE_SUBCOMMANDS = frozenset({
-    ("issue", "comment"),
-    ("pr", "comment"),
-    ("issue", "create"),
-    ("pr", "create"),
-    ("issue", "edit"),
-    ("pr", "edit"),
-    ("pr", "review"),  # accepts --body / -b / --body-file / -F; posts public review comment
-})
-
-GH_BODY_FLAGS_WITH_ARG = frozenset({"-b", "--body", "-F", "--body-file"})
-
-
-def _resolve_body(flag: str, value: str) -> str:
-    """Read body content. For --body-file, read file contents (best effort)."""
-    if flag in {"-F", "--body-file"}:
-        try:
-            with open(value, encoding="utf-8") as fh:
-                return fh.read()
-        except OSError:
-            return ""  # treat unreadable file as empty body — advisory-only hook
-    return value
-
-
-def _extract_gh_body(argv: list[str]) -> str | None:
-    """Pull body text from --body / --body-file in a gh argv. None if absent.
-
-    `gh issue/pr comment` and friends only accept body via flags (--body / -b
-    / --body-file / -F per `gh <subcmd> --help`); positional form
-    `gh issue comment <num> "body"` is rejected by gh itself with
-    `accepts 1 arg(s)`. Detecting positional shape would only add noise on
-    already-invalid invocations, so this extractor is flag-only.
-    """
-    for i, tok in enumerate(argv):
-        if "=" in tok:
-            key, _, val = tok.partition("=")
-            if key in GH_BODY_FLAGS_WITH_ARG:
-                return _resolve_body(key, val)
-            continue
-        if tok in GH_BODY_FLAGS_WITH_ARG and i + 1 < len(argv):
-            return _resolve_body(tok, argv[i + 1])
-    return None
-
-
-def _is_gh_external_write(argv: list[str]) -> bool:
-    """Return True iff argv invokes a gh subcommand that writes to a public surface."""
-    argv = strip_prefix(argv)
-    if not argv or argv[0] != "gh":
-        return False
-
-    i = 1
-    while i < len(argv):
-        tok = argv[i]
-        if tok == "--":
-            i += 1
-            break
-        if not tok.startswith("-"):
-            break
-        i += 1
-        if "=" not in tok and tok in GH_GLOBAL_FLAGS_WITH_ARG and i < len(argv):
-            i += 1
-
-    if i + 1 >= len(argv):
-        return False
-    obj, sub = argv[i], argv[i + 1]
-    return (obj, sub) in GH_WRITE_SUBCOMMANDS
-
-
-# ---------------------------------------------------------------------------
-# MCP detection
-# ---------------------------------------------------------------------------
-
-MCP_EXTERNAL_WRITE_PATTERNS = (
-    re.compile(r".*slack.*send.*", re.IGNORECASE),
-    re.compile(r".*slack.*post.*", re.IGNORECASE),
-    re.compile(r".*slack.*update.*", re.IGNORECASE),
-    re.compile(r".*notion.*create.*page.*", re.IGNORECASE),
-    re.compile(r".*notion.*update.*page.*", re.IGNORECASE),
-    re.compile(r".*notion.*append.*block.*", re.IGNORECASE),
+# Shared surface detection + body extraction now lives in
+# `_lib/_external_write_body.py` (extracted at the 3rd consumer per repo
+# convention — see that module's docstring). Aliased to the previous
+# private names so call sites and tests stay unchanged.
+from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E402
+    extract_gh_body as _extract_gh_body,
+    extract_mcp_body as _extract_mcp_body,
+    is_gh_external_write as _is_gh_external_write,
+    is_mcp_external_write as _is_mcp_external_write,
 )
-
-
-def _is_mcp_external_write(tool_name: str) -> bool:
-    return any(p.match(tool_name) for p in MCP_EXTERNAL_WRITE_PATTERNS)
-
-
-# Leaf keys whose value is body content (collect descendant strings).
-BODY_LEAF_KEYS = frozenset({
-    "text", "content", "body", "message", "page_content",
-})
-
-# Container keys that wrap block/rich-text lists. Inside a container we
-# traverse wrapper dicts (paragraph, heading_1, section, ...) until we hit
-# a body leaf or another container.
-BODY_CONTAINER_KEYS = frozenset({
-    "children", "blocks", "rich_text",
-})
-
-
-# [PR #179] P2: MCP payloads nest body text under shapes like Notion's
-# `children[].paragraph.rich_text[].text.content` (3 levels deep) and Slack's
-# `blocks[].text.text`. A flat top-level scan missed both. An unconstrained
-# recursive walk (earlier revision) over-collected siblings — page property
-# titles like `properties.Name.title[].text.content` would surface and trip
-# markers like "potential" / "likely" inside legitimate titles. So entry into
-# body subtrees is gated: top level accepts BODY_LEAF_KEYS or BODY_CONTAINER_KEYS;
-# inside containers, wrapper dicts (paragraph / section / heading_X) are
-# transparent — recursion continues until a leaf is reached.
-def _collect_under_leaf(node, parts: list[str]) -> None:
-    """Collect every string descendant. Called once a leaf key is entered."""
-    if isinstance(node, str):
-        parts.append(node)
-    elif isinstance(node, list):
-        for item in node:
-            _collect_under_leaf(item, parts)
-    elif isinstance(node, dict):
-        for val in node.values():
-            _collect_under_leaf(val, parts)
-
-
-def _walk_in_container(node, parts: list[str]) -> None:
-    """Inside `children` / `blocks` / `rich_text`: traverse wrapper dicts
-    (paragraph / section / heading_X) and nested containers transparently,
-    switching to leaf-collection only at body keys."""
-    if isinstance(node, list):
-        for item in node:
-            _walk_in_container(item, parts)
-    elif isinstance(node, dict):
-        for key, val in node.items():
-            if isinstance(key, str) and key.lower() in BODY_LEAF_KEYS:
-                _collect_under_leaf(val, parts)
-            else:
-                _walk_in_container(val, parts)
-
-
-def _extract_mcp_body(tool_input: dict) -> str:
-    """Body extraction from MCP tool_input gated by recognized entry points.
-
-    At the top level only BODY_LEAF_KEYS and BODY_CONTAINER_KEYS are
-    entered — sibling keys like `properties`, `parent`, `channel`, `title`
-    are ignored so that property metadata (e.g. Notion page property
-    titles under `properties.Name.title`) does not surface as body.
-    """
-    parts: list[str] = []
-    for key, val in tool_input.items():
-        if not isinstance(key, str):
-            continue
-        kl = key.lower()
-        if kl in BODY_LEAF_KEYS:
-            _collect_under_leaf(val, parts)
-        elif kl in BODY_CONTAINER_KEYS:
-            _walk_in_container(val, parts)
-    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
