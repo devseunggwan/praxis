@@ -223,11 +223,9 @@ Step 2 의 raw git/PR 메타데이터는 *무엇이 바뀌었는지*만 전달�
 루트가 아니라 `PRAXIS_HOME` 아래입니다. worktree 는 대개 남의 repo 이고,
 praxis 가 거기에 파일을 남길 이유가 없습니다.
 
-```bash
-ARP="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/agent-report-path.sh"
-WORKTREE="$(sh "$ARP" --worktree "$PWD")"   # ← 보고서의 worktree 필드에 그대로
-REPORT="$(sh "$ARP" "$PWD")"
-```
+    ARP="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/agent-report-path.sh"
+    WORKTREE="$(sh "$ARP" --worktree "$PWD")"   # ← 보고서의 worktree 필드에
+    REPORT="$(sh "$ARP" "$PWD")"
 
 `$PWD` 가 worktree 하위 디렉터리여도 됩니다 — 헬퍼가 worktree 루트로
 정규화하므로 위임자와 같은 경로가 나옵니다.
@@ -241,7 +239,6 @@ REPORT="$(sh "$ARP" "$PWD")"
       "tests": {"command": "./scripts/run-tests.sh", "passed": 507, "failed": 0},
       "completed_at": "2026-07-28T09:00:00Z"
     }
-
 
 - `worktree` 는 위 `$WORKTREE` 값을 그대로 넣습니다. 파일명이 해시라서 이
   필드가 없으면 위임자가 자기 것인지 확인할 수 없습니다.

@@ -10,14 +10,14 @@ on opposite sides of that split.
 
 ## Roots
 
-| Root                       | Purpose                                            | Resolver                                | Override                                 |
-| -------------------------- | -------------------------------------------------- | --------------------------------------- | ---------------------------------------- |
-| `~/.praxis/state/`         | Durable, cross-session state                       | `praxis_state_dir()`                    | `PRAXIS_STATE_DIR` (base), `PRAXIS_HOME` |
-| `~/.praxis/cache/`         | Regenerable, session-scoped caches / dedup markers | `praxis_cache_dir()`, `resolve_cache_file()` | `PRAXIS_HOME`, per-file env         |
-| `~/.praxis/logs/`          | Diagnostics                                        | `resolve_writable("logs", …)`           | `PRAXIS_HOME`, per-file env              |
-| `~/.praxis/agent-reports/` | cmux-delegate completion reports                   | `skills/cmux-delegate/agent-report-path.sh` | `PRAXIS_HOME`                        |
-| `~/.praxis/telemetry/`     | fire / bypass event ledgers (daily rotation)       | `hooks/_lib/_fire_ledger.py`            | `PRAXIS_FIRE_TELEMETRY_FILE`, `PRAXIS_HOME` |
-| `~/.praxis/scope-confirm/` | Stop-gate block logs                               | `praxis_resolve_writable scope-confirm …` | `PRAXIS_HOME`                          |
+| Root                       | Purpose                                            | Resolver                                     | Override                                    |
+| -------------------------- | -------------------------------------------------- | -------------------------------------------- | ------------------------------------------- |
+| `~/.praxis/state/`         | Durable, cross-session state                       | `praxis_state_dir()`                         | `PRAXIS_STATE_DIR` (base), `PRAXIS_HOME`    |
+| `~/.praxis/cache/`         | Regenerable, session-scoped caches / dedup markers | `praxis_cache_dir()`, `resolve_cache_file()` | `PRAXIS_HOME`, per-file env                 |
+| `~/.praxis/logs/`          | Diagnostics                                        | `resolve_writable("logs", …)`                | `PRAXIS_HOME`, per-file env                 |
+| `~/.praxis/agent-reports/` | cmux-delegate completion reports                   | `skills/cmux-delegate/agent-report-path.sh`  | `PRAXIS_HOME`                               |
+| `~/.praxis/telemetry/`     | fire / bypass event ledgers (daily rotation)       | `hooks/_lib/_fire_ledger.py`                 | `PRAXIS_FIRE_TELEMETRY_FILE`, `PRAXIS_HOME` |
+| `~/.praxis/scope-confirm/` | Stop-gate block logs                               | `praxis_resolve_writable scope-confirm …`    | `PRAXIS_HOME`                               |
 
 `PRAXIS_HOME` relocates the whole tree — that is the single knob, and every
 runtime path praxis writes goes through one of the resolvers above so it stays
@@ -57,19 +57,19 @@ dir is not writable, and never raises.
 Session-scoped dedup and state files. All of these lived under `${TMPDIR}`
 before #903, which meant `PRAXIS_HOME` did not move them:
 
-| Entry                                  | Producer                          |
-| -------------------------------------- | --------------------------------- |
-| `session-intent-<sid>.json`            | `preflight-gate/session-intent`   |
+| Entry                                                              | Producer                                                                                     |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `session-intent-<sid>.json`                                        | `preflight-gate/session-intent`                                                              |
 | `retrospect-active-<sid>.json`, `retrospect-candidates-<sid>.json` | `preflight-gate/retrospect-active-marker` (read by `completion-verify/retrospect-mix-check`) |
-| `md-read-history-<sid>.json`           | `postuse-correction/pre-edit-md-escape-advisory` |
-| `postcompact-context-<sid>.json`       | `advisory-nudge/postcompact-context` |
-| `jq-config-advisory-<sid>.json`        | `advisory-nudge/jq-config-empty-dict-advisory` |
-| `path-probe-gate/`                     | `advisory-nudge/path-probe-gate`  |
-| `pre-output-falsification-gate/`       | `advisory-nudge/pre-output-falsification-gate` |
-| `bulk-write-checkpoint/`               | `advisory-nudge/bulk-write-memory-checkpoint` |
-| `bash-worktree-advisory/`              | `advisory-nudge/bash-worktree-existence-advisory` |
-| `gh-json-<sid>/`                       | `preflight-gate/gh-json-validator` |
-| `worktree-prune-snapshot-<sid>.json`   | `preflight-gate/worktree-prune-snapshot-gate` |
+| `md-read-history-<sid>.json`                                       | `postuse-correction/pre-edit-md-escape-advisory`                                             |
+| `postcompact-context-<sid>.json`                                   | `advisory-nudge/postcompact-context`                                                         |
+| `jq-config-advisory-<sid>.json`                                    | `advisory-nudge/jq-config-empty-dict-advisory`                                               |
+| `path-probe-gate/`                                                 | `advisory-nudge/path-probe-gate`                                                             |
+| `pre-output-falsification-gate/`                                   | `advisory-nudge/pre-output-falsification-gate`                                               |
+| `bulk-write-checkpoint/`                                           | `advisory-nudge/bulk-write-memory-checkpoint`                                                |
+| `bash-worktree-advisory/`                                          | `advisory-nudge/bash-worktree-existence-advisory`                                            |
+| `gh-json-<sid>/`                                                   | `preflight-gate/gh-json-validator`                                                           |
+| `worktree-prune-snapshot-<sid>.json`                               | `preflight-gate/worktree-prune-snapshot-gate`                                                |
 
 ### Sweeping
 
