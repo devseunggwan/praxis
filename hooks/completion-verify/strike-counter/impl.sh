@@ -42,7 +42,16 @@ fi
 # cleanup/uninstall.
 # [#527] Durable state lives under the host-neutral ~/.praxis/state by default
 # (PRAXIS_HOME-aware); PRAXIS_STATE_DIR still overrides the base (back-compat).
-STATE_DIR="${PRAXIS_STATE_DIR:-${PRAXIS_HOME:-$HOME/.praxis}/state}/strikes"
+# [#903] Resolution moved into _paths.sh so shell and Python agree on one rule.
+# shellcheck source=../../_lib/_paths.sh
+. "$(dirname "$0")/../../_lib/_paths.sh"
+# A missing _paths.sh must not read as "no state" — that silently disarms the
+# gate below, which is the failure mode this hook exists to prevent. Surface it.
+if ! command -v praxis_resolve_writable >/dev/null 2>&1; then
+  echo "praxis: hooks/_lib/_paths.sh unreadable — broken install, strike-counter disarmed" >&2
+  exit 0
+fi
+STATE_DIR="$(praxis_state_dir)/strikes"
 # One-time migration: if no override is set and the new location does not yet
 # exist but the pre-#527 ~/.claude/state/praxis/strikes does, move the strike
 # state across so existing counters/latches survive the relocation.

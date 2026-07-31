@@ -31,6 +31,14 @@ TELEMETRY_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""')
 
 # shellcheck source=../../_lib/record_fire.sh
 . "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true
+# shellcheck source=../../_lib/_paths.sh
+. "$(dirname "$0")/../../_lib/_paths.sh"
+# A missing _paths.sh must not read as "no state" — that silently disarms the
+# gate below, which is the failure mode this hook exists to prevent. Surface it.
+if ! command -v praxis_resolve_writable >/dev/null 2>&1; then
+  echo "praxis: hooks/_lib/_paths.sh unreadable — broken install, completion-verify disarmed" >&2
+  exit 0
+fi
 command -v praxis_fire_arm >/dev/null 2>&1 && \
   praxis_fire_arm completion-verify completion-verify "$TELEMETRY_SESSION_ID" ""
 
@@ -141,8 +149,8 @@ else
 fi
 
 if [ -n "$block_reason" ]; then
-  mkdir -p "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm" || true
-  echo "$(date -Iseconds) session=$SESSION_ID blocked_completion_without_evidence" >> "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm/stop-triggered.log" || true
+  _log="$(praxis_resolve_writable scope-confirm stop-triggered.log)"
+  echo "$(date -Iseconds) session=$SESSION_ID blocked_completion_without_evidence" >> "$_log" || true
 
   PRAXIS_FIRE_DECISION=block
   REASON="Completion claim detected without same-turn verification evidence. ${block_reason} See AGENTS.md Verification section."
