@@ -41,7 +41,7 @@ On every `UserPromptSubmit`:
 State file
 ==========
 
-`${TMPDIR:-/tmp}/praxis-postcompact-context-${session_id}.json`
+`<PRAXIS_HOME>/cache/postcompact-context-${session_id}.json`
 
 Path resolution: `PRAXIS_POSTCOMPACT_CONTEXT_FILE` env override → session_id
 keyed file. The PPID fallback used by sibling `preflight-gate/session-intent`
@@ -75,7 +75,11 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
-from _paths import praxis_state_dir, legacy_state_dir  # type: ignore[import-not-found]  # noqa: E402
+from _paths import (  # type: ignore[import-not-found]  # noqa: E402
+    legacy_state_dir,
+    praxis_state_dir,
+    resolve_cache_file,
+)
 
 DEFAULT_TAIL_LINES = 100
 BYPASS_ENV = "PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT"
@@ -98,7 +102,7 @@ def resolve_state_path(session_id: str) -> str:
     """Resolve the dedup state file path.
 
     Priority: `PRAXIS_POSTCOMPACT_CONTEXT_FILE` env override → `session_id`
-    keyed file under `${TMPDIR:-/tmp}`. The caller is responsible for
+    keyed file under `<PRAXIS_HOME>/cache`. The caller is responsible for
     rejecting missing session_id BEFORE calling this — `main()` already
     does so, so no PPID fallback is needed (the session-intent hook keeps
     one only to support direct CLI / test invocation without a payload).
@@ -106,8 +110,7 @@ def resolve_state_path(session_id: str) -> str:
     explicit = os.environ.get(STATE_FILE_ENV, "").strip()
     if explicit:
         return explicit
-    tmp = os.environ.get("TMPDIR", "/tmp").rstrip("/")
-    return os.path.join(tmp, f"praxis-postcompact-context-{session_id}.json")
+    return resolve_cache_file(f"postcompact-context-{session_id}.json")
 
 
 def read_state(path: str) -> dict:

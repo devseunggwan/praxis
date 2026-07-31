@@ -452,10 +452,11 @@ run_case "missing tool_input → silent" silent \
 # ---------------------------------------------------------------------------
 
 # Build a payload with explicit session_id and verify the post-hook writes
-# under ${TMPDIR}/praxis-md-read-history-<session_id>.json.
+# under <PRAXIS_HOME>/cache/md-read-history-<session_id>.json (#903 — the file
+# used to live in ${TMPDIR}; PRAXIS_HOME now relocates it).
 sid="test-session-$$-$RANDOM"
-expected_path="${TMPDIR:-/tmp}/praxis-md-read-history-${sid}.json"
-rm -f "$expected_path"
+SID_HOME="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+expected_path="$SID_HOME/cache/md-read-history-${sid}.json"
 
 payload_with_sid=$(python3 -c '
 import json, sys
@@ -467,16 +468,16 @@ print(json.dumps({
 }))
 ' "$sid" "/Users/test/session-id.md")
 
-printf '%s' "$payload_with_sid" | "$POST_HOOK" >/dev/null 2>&1
+printf '%s' "$payload_with_sid" | PRAXIS_HOME="$SID_HOME" "$POST_HOOK" >/dev/null 2>&1
 
 if [ -f "$expected_path" ] && python3 -c "
 import json
 data = json.load(open('$expected_path'))
 assert '/Users/test/session-id.md' in data.get('read', []), data
 " 2>/dev/null; then
-  echo "PASS [state] session_id resolves to ${TMPDIR:-/tmp}/praxis-md-read-history-<sid>.json"
+  echo "PASS [state] session_id resolves to <PRAXIS_HOME>/cache/md-read-history-<sid>.json"
   ((PASS++))
-  rm -f "$expected_path"
+  rm -rf "$SID_HOME"
 else
   echo "FAIL [state] session_id-based path resolution"
   ((FAIL++)); FAILED_NAMES+=("session_id-based path resolution")

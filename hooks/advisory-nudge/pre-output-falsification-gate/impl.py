@@ -66,6 +66,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from ask_option_text import collect_option_texts  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import TRANSCRIPT_SCAN_LINES  # type: ignore[import-not-found]  # noqa: E402
+from _paths import praxis_cache_dir  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -127,9 +128,7 @@ REPEAT_THRESHOLD = 3
 # is reset (codex review #487: monotonic counter nagged on legitimate repeats).
 _REPEAT_WINDOW_SECONDS = 300
 
-_STATE_BASE = os.path.join(
-    os.environ.get("TMPDIR", "/tmp"), "praxis-pre-output-falsification-gate"
-)
+_STATE_BASE = os.path.join(praxis_cache_dir(), "pre-output-falsification-gate")
 
 # ---------------------------------------------------------------------------
 # Lane A — AskUserQuestion evaluative-option gate

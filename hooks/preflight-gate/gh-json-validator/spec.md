@@ -63,13 +63,14 @@ Available fields:
 ### Caching
 
 Field sets are cached per subcommand under
-`/tmp/praxis-gh-json-<session_id>/` as JSON files (one per subcommand
-shape). Cache is session-scoped — a new session starts with a fresh
-cache. `PPID` is used as the session_id fallback for direct CLI / test
-invocation.
+`<PRAXIS_HOME>/cache/gh-json-<session_id>/` as JSON files (one per
+subcommand shape). Cache is session-scoped — a new session starts with a
+fresh cache. `PPID` is used as the session_id fallback for direct CLI /
+test invocation.
 
-Override `PRAXIS_GH_JSON_CACHE_DIR` is not required; the `/tmp/` path is
-sufficient for session-scoped state.
+The location follows `praxis_cache_dir()` (#903), so `PRAXIS_HOME`
+relocates it along with every other praxis runtime file; entries are
+swept by `prune_stale` once past the cache TTL.
 
 ### Closest-match suggestion
 

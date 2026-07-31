@@ -427,8 +427,9 @@ case_run "19. explicit env wins over CLAUDE_PROJECT_DIR seeded state → ask" "a
 # Without PRAXIS_SESSION_INTENT_FILE override, the resolver must derive
 # the path from session_id and produce distinct paths for distinct ids.
 # -----------------------------------------------------------------------
+SI_HOME="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
 PATH_A=$(
-  env -u PRAXIS_SESSION_INTENT_FILE -u CLAUDE_PROJECT_DIR \
+  env -u PRAXIS_SESSION_INTENT_FILE -u CLAUDE_PROJECT_DIR PRAXIS_HOME="$SI_HOME" \
     python3 -c "
 import os, sys
 sys.path.insert(0, '$ROOT_DIR/hooks')
@@ -439,7 +440,7 @@ spec.loader.exec_module(mod)
 print(mod.resolve_state_path('sess-A'))
 ")
 PATH_B=$(
-  env -u PRAXIS_SESSION_INTENT_FILE -u CLAUDE_PROJECT_DIR \
+  env -u PRAXIS_SESSION_INTENT_FILE -u CLAUDE_PROJECT_DIR PRAXIS_HOME="$SI_HOME" \
     python3 -c "
 import os, sys
 sys.path.insert(0, '$ROOT_DIR/hooks')
@@ -450,8 +451,8 @@ spec.loader.exec_module(mod)
 print(mod.resolve_state_path('sess-B'))
 ")
 if [ -n "$PATH_A" ] && [ -n "$PATH_B" ] && [ "$PATH_A" != "$PATH_B" ] \
-  && echo "$PATH_A" | grep -q "praxis-session-intent-sess-A.json" \
-  && echo "$PATH_B" | grep -q "praxis-session-intent-sess-B.json"; then
+  && echo "$PATH_A" | grep -q "cache/session-intent-sess-A.json" \
+  && echo "$PATH_B" | grep -q "cache/session-intent-sess-B.json"; then
   case_run "20. different session_id routes to different state files" "silent" "" "0"
 else
   case_run "20. different session_id routes to different state files" "silent" "PATH_A=$PATH_A PATH_B=$PATH_B" "1"
@@ -464,7 +465,7 @@ fi
 # -----------------------------------------------------------------------
 CURRENT_PPID=$$
 PATH_SID=$(
-  env -u PRAXIS_SESSION_INTENT_FILE -u CLAUDE_PROJECT_DIR \
+  env -u PRAXIS_SESSION_INTENT_FILE -u CLAUDE_PROJECT_DIR PRAXIS_HOME="$SI_HOME" \
     python3 -c "
 import os, sys
 sys.path.insert(0, '$ROOT_DIR/hooks')
@@ -475,8 +476,8 @@ spec.loader.exec_module(mod)
 print(mod.resolve_state_path('my-session-key'))
 ")
 # The resolved path should contain 'my-session-key' (not the PPID).
-if echo "$PATH_SID" | grep -q "praxis-session-intent-my-session-key.json" \
-  && ! echo "$PATH_SID" | grep -q "praxis-session-intent-${CURRENT_PPID}.json"; then
+if echo "$PATH_SID" | grep -q "cache/session-intent-my-session-key.json" \
+  && ! echo "$PATH_SID" | grep -q "session-intent-${CURRENT_PPID}.json"; then
   case_run "21. session_id present → state file derived from session_id, not PPID" "silent" "" "0"
 else
   case_run "21. session_id present → state file derived from session_id, not PPID" "silent" "PATH_SID=$PATH_SID PPID=$CURRENT_PPID" "1"
@@ -489,7 +490,7 @@ fi
 # without a payload remains functional.
 # -----------------------------------------------------------------------
 PATH_FALLBACK=$(
-  env -u PRAXIS_SESSION_INTENT_FILE -u CLAUDE_PROJECT_DIR \
+  env -u PRAXIS_SESSION_INTENT_FILE -u CLAUDE_PROJECT_DIR PRAXIS_HOME="$SI_HOME" \
     python3 -c "
 import os, sys
 sys.path.insert(0, '$ROOT_DIR/hooks')
@@ -500,14 +501,15 @@ spec.loader.exec_module(mod)
 # Call with no argument — exercises the PPID fallback branch.
 print(mod.resolve_state_path())
 ")
-# Should look like /tmp/praxis-session-intent-<ppid>.json — extract numeric ppid
-PPID_PATTERN=$(echo "$PATH_FALLBACK" | sed -n 's/.*praxis-session-intent-\([0-9][0-9]*\)\.json$/\1/p')
+# Should look like <home>/cache/session-intent-<ppid>.json — extract numeric ppid
+PPID_PATTERN=$(echo "$PATH_FALLBACK" | sed -n 's/.*session-intent-\([0-9][0-9]*\)\.json$/\1/p')
 if [ -n "$PPID_PATTERN" ]; then
   case_run "22. missing session_id → PPID fallback path" "silent" "" "0"
 else
   case_run "22. missing session_id → PPID fallback path" "silent" "PATH_FALLBACK=$PATH_FALLBACK" "1"
 fi
 
+rm -rf "$SI_HOME"
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

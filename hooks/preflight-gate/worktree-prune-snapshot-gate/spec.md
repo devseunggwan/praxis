@@ -37,10 +37,11 @@ State file location (priority order):
 
 1. `PRAXIS_WORKTREE_PRUNE_SNAPSHOT_FILE` env var (explicit override; used by
    tests).
-2. `${TMPDIR:-/tmp}/praxis-worktree-prune-snapshot-${session_id}.json` when
-   the payload carries `session_id` (primary key).
-3. `${TMPDIR:-/tmp}/praxis-worktree-prune-snapshot-${PPID}.json` (back-compat
-   fallback for direct CLI/test invocation without a payload).
+2. `<PRAXIS_HOME>/cache/worktree-prune-snapshot-${session_id}.json` when the
+   payload carries `session_id` (primary key). Pre-#903 this lived under
+   `${TMPDIR}`; `resolve_cache_file` adopts that file if it is still there.
+3. `${PPID}` replaces `${session_id}` in the filename (back-compat fallback
+   for direct CLI/test invocation without a payload).
 
 State file shape: `{"snapshot_taken": true}`. The flag is sticky once set —
 it never resets within a session (mirrors `session-intent`'s

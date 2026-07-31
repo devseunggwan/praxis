@@ -36,7 +36,7 @@ Bulk definition (mirrors path-probe-gate session-state keying):
 
   Session state is keyed on `session_id` from the stdin payload (the canonical
   session identity per Claude Code), stored under
-  `${TMPDIR:-/tmp}/praxis-bulk-write-checkpoint/<session_id_hash>/`.
+  `<PRAXIS_HOME>/cache/bulk-write-checkpoint/<session_id_hash>/`.
   This mirrors path-probe-gate's (session_id, parent_hash) dedup pattern.
 
 Behavior:
@@ -60,6 +60,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _paths import praxis_cache_dir  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Advisory message
@@ -155,9 +156,7 @@ def _extract_file_path(payload: dict) -> str:
 # Session-scoped write counter (keyed on session_id + SOT bucket)
 # ---------------------------------------------------------------------------
 
-_STATE_BASE = os.path.join(
-    os.environ.get("TMPDIR", "/tmp"), "praxis-bulk-write-checkpoint"
-)
+_STATE_BASE = os.path.join(praxis_cache_dir(), "bulk-write-checkpoint")
 
 # Per-session global write counter across all SOT paths (tracks total SOT writes).
 # Stored as a simple touch-marker per (session_hash, bucket_hash).

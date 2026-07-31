@@ -66,6 +66,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
     safe_tokenize,
 )
+from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 
 _BYPASS_ENV = "PRAXIS_HOOK_BYPASS_WORKTREE_PRUNE_SNAPSHOT"
@@ -150,11 +151,8 @@ def resolve_state_path(session_id: str | None = None) -> str:
     explicit = os.environ.get(_STATE_FILE_ENV, "").strip()
     if explicit:
         return explicit
-    tmp = os.environ.get("TMPDIR", "/tmp").rstrip("/")
-    if session_id:
-        return os.path.join(tmp, f"praxis-worktree-prune-snapshot-{session_id}.json")
-    ppid = os.getppid()
-    return os.path.join(tmp, f"praxis-worktree-prune-snapshot-{ppid}.json")
+    key = session_id or str(os.getppid())
+    return resolve_cache_file(f"worktree-prune-snapshot-{key}.json")
 
 
 def read_state(path: str) -> dict:

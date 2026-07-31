@@ -37,7 +37,7 @@ Actions:
 
 Deduplicated per session_id + path so the nudge fires at most once per
 advisory-emitting invocation per session. Session-state file:
-  ${TMPDIR:-/tmp}/praxis-jq-config-advisory-<session_id>.json
+  <PRAXIS_HOME>/cache/jq-config-advisory-<session_id>.json
 
 Fail-open contract:
   • malformed JSON / non-Bash payload → exit 0
@@ -63,6 +63,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     strip_prefix,
     _coalesce_subst_runs,
 )
+from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -349,11 +350,8 @@ def _extract_session_id(payload: dict) -> Optional[str]:
 
 
 def _resolve_dedup_path(session_id: Optional[str]) -> str:
-    tmp = os.environ.get("TMPDIR", "/tmp").rstrip("/") or "/tmp"
-    if session_id:
-        return os.path.join(tmp, f"praxis-jq-config-advisory-{session_id}.json")
-    ppid = os.getppid()
-    return os.path.join(tmp, f"praxis-jq-config-advisory-{ppid}.json")
+    key = session_id or str(os.getppid())
+    return resolve_cache_file(f"jq-config-advisory-{key}.json")
 
 
 def _load_seen(path: str) -> set:

@@ -42,6 +42,7 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from _paths import praxis_cache_dir  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
     safe_tokenize,
@@ -69,7 +70,7 @@ _EXCLUDED_FIRST_TOKENS: frozenset[str] = frozenset({"api"})
 
 def _session_cache_dir(session_id: str) -> Path:
     """Return per-session cache directory for gh JSON field sets."""
-    return Path(f"/tmp/praxis-gh-json-{session_id}")
+    return Path(praxis_cache_dir()) / f"gh-json-{session_id}"
 
 
 def _cache_key(subcommand_tokens: tuple[str, ...]) -> str:

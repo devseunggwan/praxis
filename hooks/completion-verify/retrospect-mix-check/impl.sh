@@ -42,6 +42,14 @@ TELEMETRY_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""')
 
 # shellcheck source=../../_lib/record_fire.sh
 . "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true
+# shellcheck source=../../_lib/_paths.sh
+. "$(dirname "$0")/../../_lib/_paths.sh"
+# A missing _paths.sh must not read as "no state" — that silently disarms the
+# gate below, which is the failure mode this hook exists to prevent. Surface it.
+if ! command -v praxis_resolve_writable >/dev/null 2>&1; then
+  echo "praxis: hooks/_lib/_paths.sh unreadable — broken install, retrospect-mix-check disarmed" >&2
+  exit 0
+fi
 command -v praxis_fire_arm >/dev/null 2>&1 && \
   praxis_fire_arm retrospect-mix-check completion-verify "$TELEMETRY_SESSION_ID" ""
 
@@ -181,8 +189,20 @@ printf '%s\n' "$LAST_TEXT" | grep -qE '^[[:space:]]*\|[[:space:]:|-]*-[[:space:]
 # gate (incl. Gate-7) — "the gate exists but does not fire". Close that here,
 # BEFORE the format-keyed pass-throughs run.
 RETRO_ACTIVE=false
-_RM_TMP="${TMPDIR:-/tmp}"; _RM_TMP="${_RM_TMP%/}"
-MARKER_FILE="${PRAXIS_RETROSPECT_ACTIVE_FILE:-${_RM_TMP}/praxis-retrospect-active-${SESSION_ID}.json}"
+# [#903] The marker moved from ${TMPDIR} to <praxis_home>/cache. A session that
+# was already retrospect-active when the upgrade landed still has its marker at
+# the old path, so fall back to it for reads — otherwise the gate goes silent
+# mid-retrospect, which is the failure #666 was opened for.
+if [ -n "${PRAXIS_RETROSPECT_ACTIVE_FILE:-}" ]; then
+  MARKER_FILE="$PRAXIS_RETROSPECT_ACTIVE_FILE"
+else
+  MARKER_FILE="$(praxis_resolve_writable cache "retrospect-active-${SESSION_ID}.json")"
+  if [ ! -f "$MARKER_FILE" ]; then
+    _RM_TMP="${TMPDIR:-/tmp}"; _RM_TMP="${_RM_TMP%/}"
+    _RM_LEGACY="${_RM_TMP}/praxis-retrospect-active-${SESSION_ID}.json"
+    [ -f "$_RM_LEGACY" ] && MARKER_FILE="$_RM_LEGACY"
+  fi
+fi
 [ -f "$MARKER_FILE" ] && RETRO_ACTIVE=true
 
 if [ "$RETRO_ACTIVE" = "true" ]; then
@@ -195,9 +215,9 @@ if [ "$RETRO_ACTIVE" = "true" ]; then
     # no Stage-4 marker, distribution fence absent. The mix-check gates cannot
     # evaluate the report. Block. (A retrospect-active stop WITHOUT a table is a
     # legitimate pre-Stage-3 prose clarification — not gated.)
-    mkdir -p "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm" || true
+    _log="$(praxis_resolve_writable scope-confirm retrospect-mix-blocked.log)"
     echo "$(date -Iseconds) session=$SESSION_ID blocked_retrospect_fence_omission" \
-      >> "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm/retrospect-mix-blocked.log" || true
+      >> "$_log" || true
     fence_reason="Retrospect Stage 3 distribution fence missing (issue #666). This is a retrospect-active session (the retrospect skill was invoked this turn) presenting a findings table, but the assistant message carries no '<!-- retrospect:distribution begin -->' fence and no '## Actions Executed' marker. A free-form or localized Stage 3 report bypasses every mix-check gate (Gate-1..7) because the gates key on the canonical output schema. Re-emit the Stage 3 output per the Output Schema Contract in skills/retrospect/references/stage3-reporting.md: '## Retrospect Report' header -> audit fences -> '<!-- retrospect:distribution begin/end -->' card -> unified findings table."
     PRAXIS_FIRE_DECISION=block
     jq -n --arg r "$fence_reason" '{decision: "block", reason: $r}'
@@ -1005,8 +1025,8 @@ if [ "${#GATE10_VIOLATIONS[@]}" -gt 0 ]; then
 fi
 
 if [ "$should_block" = "true" ]; then
-  mkdir -p "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm" || true
-  echo "$(date -Iseconds) session=$SESSION_ID blocked_retrospect_mix_check" >> "${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm/retrospect-mix-blocked.log" || true
+  _log="$(praxis_resolve_writable scope-confirm retrospect-mix-blocked.log)"
+  echo "$(date -Iseconds) session=$SESSION_ID blocked_retrospect_mix_check" >> "$_log" || true
 
   # Build reason string with ' | ' separator.
   reason=""
