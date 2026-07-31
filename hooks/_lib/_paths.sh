@@ -13,9 +13,23 @@
 # Every function writes its result to stdout and never exits non-zero.
 
 # PRAXIS_HOME override, else ~/.praxis. Not created.
+#
+# The tilde is expanded explicitly: an unquoted PRAXIS_HOME=~/praxis is expanded
+# by the assigning shell, but a quoted or exported-from-config one arrives here
+# literally, while _paths.py runs os.path.expanduser on the same value. Left
+# alone, shell and Python halves of one protocol resolve different directories.
 praxis_home() {
     if [ -n "${PRAXIS_HOME:-}" ]; then
-        printf '%s\n' "${PRAXIS_HOME%/}"
+        _ph_raw="${PRAXIS_HOME%/}"
+        # Held in a variable so the tilde stays a literal to match against
+        # rather than something the shell might try to expand here.
+        _ph_tilde='~'
+        case "$_ph_raw" in
+            "$_ph_tilde") _ph_raw="$HOME" ;;
+            "$_ph_tilde"/*) _ph_raw="$HOME/${_ph_raw#"$_ph_tilde"/}" ;;
+        esac
+        printf '%s\n' "$_ph_raw"
+        unset _ph_raw _ph_tilde
     else
         printf '%s\n' "$HOME/.praxis"
     fi
