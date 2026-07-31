@@ -6,12 +6,16 @@
 #   which failed in both directions — one agent reported a PR it had never
 #   created (and had not even pushed the branch), another went silent through
 #   two direct instructions. Neither is distinguishable by reading the message.
-#   The skill must therefore (a) make the agent write .agent-report.json,
+#   The skill must therefore (a) make the agent write a completion report,
 #   (b) make the orchestrator read that file rather than the message, and
 #   (c) treat file absence as incomplete.
 #
-# All assertions are static document checks against SKILL.md, mirroring
-# tests/test_worktree_merge_cleanup.sh.
+# Issue #903 moved the report out of the worktree root into
+# <PRAXIS_HOME>/agent-reports/<sha1(worktree)>.json, so §6 additionally
+# exercises the shipped path helper both halves of the protocol call.
+#
+# Assertions are static document checks against SKILL.md (mirroring
+# tests/test_worktree_merge_cleanup.sh) plus an executable gate in §6.
 #
 # Run:  bash tests/test_agent_report_handoff.sh
 # Exit: 0 = all pass; 1 = at least one fail
@@ -47,10 +51,14 @@ assert_present \
   "Completion protocol"
 
 assert_present \
-  "report file named" \
-  ".agent-report.json"
+  "report path comes from the shared helper, not a literal path (#903)" \
+  "agent-report-path.sh"
 
-for field in branch head_sha pushed pr_url tests completed_at; do
+assert_present \
+  "report no longer lands in the worktree root (#903)" \
+  "worktree 루트가 아니라"
+
+for field in worktree branch head_sha pushed pr_url tests completed_at; do
   assert_present \
     "report field documented: $field" \
     "\"$field\""
@@ -86,7 +94,11 @@ assert_present \
 
 assert_present \
   "file absence is deterministic incompletion" \
-  "미완료: .agent-report.json 부재"
+  "미완료: 완료 보고서 부재"
+
+assert_present \
+  "reader confirms the report belongs to its own worktree (#903)" \
+  "보고서의 worktree 가"
 
 assert_present \
   "report values are re-verified, not trusted" \
@@ -126,7 +138,7 @@ assert_present \
 
 assert_present \
   "missing-report row present" \
-  "부재 | **미완료로 취급**"
+  "완료 보고서 부재 | **미완료로 취급**"
 
 assert_present \
   "malformed-report row keeps the file for inspection" \
@@ -137,51 +149,119 @@ assert_present \
   "재검증 출력을 채택하고 보고서 값은 폐기"
 
 # ---------------------------------------------------------------------------
-# 6. The documented gate actually separates the two failure shapes
+# 6. The documented gate actually separates the failure shapes
 #
 # Static presence checks prove the text is there, not that the procedure it
-# describes discriminates. Lift the gate verbatim out of Step 7 and run it
-# against both states the issue names: a normal completion and a fabrication
-# (a completion CLAIM with no report file). The prose channel cannot tell
-# these apart — this gate must.
+# describes discriminates. Run the gate against every state the issues name: a
+# normal completion, a fabrication (a completion CLAIM with no report file), a
+# truncated write, and — since #903 keys reports by worktree hash rather than
+# location — a report belonging to a different worktree.
+#
+# The path comes from the shipped helper, not a transcription of it. A
+# transcription passes even when writer and reader have drifted apart, which
+# is the failure the shared helper exists to prevent.
 # ---------------------------------------------------------------------------
 
-run_documented_gate() {  # $1 = cwd under test
-  local report="$1/.agent-report.json"
-  [ -f "$report" ] || { echo "미완료: .agent-report.json 부재"; return 1; }
+HELPER="$ROOT_DIR/skills/cmux-delegate/agent-report-path.sh"
+GATE_TMP="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
+export PRAXIS_HOME="$GATE_TMP/praxis-home"
+
+report_path_for() { sh "$HELPER" "$1"; }
+worktree_for() { sh "$HELPER" --worktree "$1"; }
+
+run_documented_gate() {  # $1 = path the delegator holds (worktree or a subdir)
+  local report worktree
+  report="$(report_path_for "$1")" || return 1
+  worktree="$(worktree_for "$1")" || return 1
+  [ -f "$report" ] || { echo "미완료: 완료 보고서 부재 ($report)"; return 1; }
   python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$report" 2>/dev/null \
     || { echo "미완료: JSON 파싱 실패"; return 1; }
+  [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("worktree",""))' "$report")" = "$worktree" ] \
+    || { echo "미완료: 보고서의 worktree 불일치"; return 1; }
   return 0
 }
 
-GATE_TMP="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
-mkdir -p "$GATE_TMP/normal" "$GATE_TMP/fabricated" "$GATE_TMP/truncated"
-cat > "$GATE_TMP/normal/.agent-report.json" <<'JSON'
-{"branch": "issue-1-x", "head_sha": "abc", "pushed": true,
+WT_NORMAL="$GATE_TMP/normal"
+WT_FABRICATED="$GATE_TMP/fabricated"
+WT_TRUNCATED="$GATE_TMP/truncated"
+WT_FOREIGN="$GATE_TMP/foreign"
+
+cat > "$(report_path_for "$WT_NORMAL")" <<JSON
+{"worktree": "$WT_NORMAL", "branch": "issue-1-x", "head_sha": "abc", "pushed": true,
  "pr_url": null, "tests": {"command": "true", "passed": 1, "failed": 0},
  "completed_at": "2026-07-28T00:00:00Z"}
 JSON
-# fabricated/: the agent said "PR created, all done" and wrote nothing.
-printf '{"branch": "issue-1-x", "head_sha"' > "$GATE_TMP/truncated/.agent-report.json"
+# fabricated: the agent said "PR created, all done" and wrote nothing.
+printf '{"worktree": "%s", "head_sha"' "$WT_TRUNCATED" > "$(report_path_for "$WT_TRUNCATED")"
+# foreign: a well-formed report that belongs to some other worktree.
+cat > "$(report_path_for "$WT_FOREIGN")" <<JSON
+{"worktree": "$GATE_TMP/somewhere-else", "branch": "issue-2-y", "head_sha": "def",
+ "pushed": true, "pr_url": null, "tests": {"command": "true", "passed": 1, "failed": 0},
+ "completed_at": "2026-07-28T00:00:00Z"}
+JSON
 
-run_documented_gate "$GATE_TMP/normal" >/dev/null
+# Writer and reader independently derive the same path — the property the
+# shared helper exists to guarantee.
+_assert_record "writer and reader derive the same path" \
+  "$([ "$(report_path_for "$WT_NORMAL")" = "$(report_path_for "$WT_NORMAL/")" ] && echo 1 || echo 0)" \
+  "trailing slash changed the derived report path"
+
+case "$(report_path_for "$WT_NORMAL")" in
+  "$PRAXIS_HOME"/agent-reports/*) _assert_record "report lands under PRAXIS_HOME" 1 "" ;;
+  *) _assert_record "report lands under PRAXIS_HOME" 0 "path escaped PRAXIS_HOME" ;;
+esac
+
+_assert_record "report does not land in the worktree" \
+  "$([ ! -e "$WT_NORMAL" ] && echo 1 || echo 0)" \
+  "the worktree dir was created/written to"
+
+run_documented_gate "$WT_NORMAL" >/dev/null
 _assert_record "gate accepts a normal completion" "$([ $? -eq 0 ] && echo 1 || echo 0)" \
   "documented gate rejected a valid report"
 
-run_documented_gate "$GATE_TMP/fabricated" >/dev/null
+run_documented_gate "$WT_FABRICATED" >/dev/null
 _assert_record "gate rejects a completion claim with no file" \
   "$([ $? -ne 0 ] && echo 1 || echo 0)" "documented gate accepted a missing report"
 
-run_documented_gate "$GATE_TMP/truncated" >/dev/null
+run_documented_gate "$WT_TRUNCATED" >/dev/null
 _assert_record "gate rejects a truncated report" \
   "$([ $? -ne 0 ] && echo 1 || echo 0)" "documented gate accepted malformed JSON"
 
-if [ -f "$GATE_TMP/truncated/.agent-report.json" ]; then
+run_documented_gate "$WT_FOREIGN" >/dev/null
+_assert_record "gate rejects a report from another worktree" \
+  "$([ $? -ne 0 ] && echo 1 || echo 0)" "documented gate accepted a foreign report"
+
+if [ -f "$(report_path_for "$WT_TRUNCATED")" ]; then
   _assert_record "gate leaves a malformed report on disk for inspection" 1 ""
 else
   _assert_record "gate leaves a malformed report on disk for inspection" 0 "file removed"
 fi
 
+# The case that motivated the normalization: the agent writes from a package
+# subdirectory while the delegator holds the path it passed to `--cwd`. Hashing
+# the raw argument would send the two to different files, and a finished task
+# would read as incomplete.
+GIT_WT="$GATE_TMP/real-repo"
+mkdir -p "$GIT_WT/pkg/nested"
+git -C "$GIT_WT" init -q 2>/dev/null
+
+_assert_record "agent in a subdir derives the delegator's report path" \
+  "$([ "$(report_path_for "$GIT_WT/pkg/nested")" = "$(report_path_for "$GIT_WT")" ] && echo 1 || echo 0)" \
+  "subdirectory hashed to a different report than the worktree root"
+
+cat > "$(report_path_for "$GIT_WT/pkg/nested")" <<JSON
+{"worktree": "$(worktree_for "$GIT_WT/pkg/nested")", "branch": "issue-3-z",
+ "head_sha": "abc", "pushed": true, "pr_url": null,
+ "tests": {"command": "true", "passed": 1, "failed": 0},
+ "completed_at": "2026-07-28T00:00:00Z"}
+JSON
+
+run_documented_gate "$GIT_WT" >/dev/null
+_assert_record "gate accepts a report written from a subdirectory" \
+  "$([ $? -eq 0 ] && echo 1 || echo 0)" \
+  "gate rejected a report the agent wrote from a package subdir"
+
+unset PRAXIS_HOME
 rm -rf "$GATE_TMP"
 
 assert_lib_summary
