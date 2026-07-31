@@ -77,7 +77,7 @@ run_case() {
       local expected_decision="${expectation%%:*}"
       local needle="${expectation#*:}"
       [ "$rc" -eq 0 ] || ok=0
-      local decision
+      local decision reason
       decision=$(python3 -c "
 import json, sys
 try:
@@ -88,7 +88,17 @@ except Exception:
     print('')
 " "$out" 2>/dev/null)
       [ "$decision" = "$expected_decision" ] || ok=0
-      case "$out" in
+      reason=$(python3 -c "
+import json, sys
+try:
+    d = json.loads(sys.argv[1])
+    h = d.get('hookSpecificOutput', {})
+    reason = h.get('permissionDecisionReason', '')
+    print(reason if isinstance(reason, str) else '')
+except Exception:
+    print('')
+" "$out" 2>/dev/null)
+      case "$reason" in
         *"$needle"*) ;;
         *) ok=0 ;;
       esac
@@ -386,7 +396,7 @@ What should we do?")"
 
 # Case 2 (updated by issue #393): (Recommended) label + no Falsified: → DENY (block)
 run_case "AskUserQuestion: (Recommended) + no Falsified: → T1 ask (issue #393)" \
-  "ask:Falsified:" \
+  "ask:A '(Recommended)' marker is present" \
   "$(make_ask_payload '["Best option (Recommended)", "Alternative"]')"
 
 # Case 2b (issue #828): Falsified: line in the triggering option's OWN
@@ -476,9 +486,10 @@ run_case "AskUserQuestion: (Recommended) in description only — T2 escalates to
   "ask:Falsified:" \
   "$(make_ask_payload_description_only)"
 
-# Case 4 (updated by issue #393): (추천) Korean label + no Falsified: → DENY (block)
+# Case 4 (updated by issue #393): fixed guidance remains English, while the
+# copy-paste-ready scaffold preserves the user-supplied Korean label verbatim.
 run_case "AskUserQuestion: (추천) Korean label + no Falsified: → T1 ask (issue #393)" \
-  "ask:Falsified:" \
+  "ask:Falsified: 권장 방법 (추천) — probe:" \
   "$(make_ask_payload '["권장 방법 (추천)", "대안"]')"
 
 # Case 5: Non-recommended option — no (Recommended) label — silent pass (no advisory)
@@ -570,7 +581,7 @@ run_case "T2: word-boundary — 'unsafer' is not safer — pass" \
 
 # T2 ANCHORING_ASK_MSG content (verify the new message variant is emitted).
 run_case "T2: KO '안전한' triggers ANCHORING_ASK_MSG (not ASK_MSG)" \
-  "ask:confidence-anchoring" \
+  "ask:An option label or description contains a confidence-anchoring framing token" \
   "$(make_ask_payload '["가장 안전한 옵션", "alt"]')"
 
 # T1 precedence over T2 — when label has literal (Recommended) AND
@@ -647,6 +658,51 @@ run_case "T2: Falsified: mid-line does not satisfy startswith check — still as
       "단계별로 진행. Falsified: no duplicate PR found. 어떻게 할까요?")"
 
 # ---------------------------------------------------------------------------
+# Exact predicate guidance — issue #910
+# ---------------------------------------------------------------------------
+
+# A valid free-form line does not override a second scaffold-shaped line that
+# still contains placeholders. The reason must expose this fail-closed rule.
+run_case "T1 (issue #910): single-trigger clean line plus placeholder scaffold → reason exposes fail-closed rule" \
+  "ask:all modes: every scaffold-shaped line must have non-empty evidence" \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)"]' \
+      "Falsified: checked all options against open PRs — none found.
+Falsified: Option A (Recommended) — probe: <command> → <observed>
+Which one?")"
+
+# Two triggering labels switch _has_falsified_line into multi-trigger mode.
+# A generic column-0 line is not enough; the reason must expose the exact
+# per-label contract instead of asking for another format-guessing retry.
+run_case "T1 (issue #910): multi-trigger prefix mismatch → reason exposes per-label contract" \
+  "ask:multi-trigger: within each question, one line per normalized full option label" \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B (Recommended)"]' \
+      "Falsified: checked all options against open PRs — none found.
+Which one?")"
+
+# A near-match that drops the marker suffix must remain blocked, and the
+# reason must say that marker suffixes are part of the full label.
+run_case "T1 (issue #910): missing marker suffix → reason names suffix requirement" \
+  "ask:including marker suffixes" \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B (Recommended)"]' \
+      "Falsified: Option A — probe: gh pr list --search a → none found
+Falsified: Option B — probe: gh pr list --search b → none found
+Which one?")"
+
+# T2 uses the same _has_falsified_line predicate, so its message must expose
+# the same exact label-boundary rule rather than drifting from T1.
+run_case "T2 (issue #910): multi-trigger mismatch → reason exposes label boundary" \
+  "ask:followed by end-of-line or" \
+  "$(make_ask_payload_with_descriptions \
+      '["A safer rollout", "B safest rollout"]' \
+      '["safer for staged release", "safest for direct release"]' \
+      "Falsified: A safer rollout later — probe: checked A → no match
+Falsified: B safest rollout later — probe: checked B → no match
+Which one?")"
+
+# ---------------------------------------------------------------------------
 # Template-level guidance cases — issue #682
 # ---------------------------------------------------------------------------
 
@@ -701,11 +757,12 @@ _scaffold_multi_result=$(make_ask_payload '["Option A (Recommended)", "Option B 
 import json, sys
 d = json.loads(sys.stdin.read())
 reason = d.get('hookSpecificOutput', {}).get('permissionDecisionReason', '')
-# ASK_MSG's own instructional text has 3 'Falsified: ' occurrences (issue
-# #828 added a 3rd, in the [trigger-reduction] description-field hint) + 1
-# per triggering label (2) in the scaffold = 5.
-ok = reason.count('Falsified: ') == 5 and 'Option A (Recommended)' in reason and 'Option B (Recommended)' in reason
-print('ok' if ok else 'fail_count=' + str(reason.count('Falsified: ')))
+# Assert the two label-seeded scaffold lines directly. Counting every
+# instructional 'Falsified:' mention couples this behavior test to prose.
+a_line = 'Falsified: Option A (Recommended) — probe: '
+b_line = 'Falsified: Option B (Recommended) — probe: '
+ok = reason.count(a_line) == 1 and reason.count(b_line) == 1
+print('ok' if ok else 'fail_scaffold_lines')
 " 2>/dev/null)
 if [ "$_scaffold_multi_result" = "ok" ]; then
   echo "  PASS  2 triggering labels -> 2 scaffold Falsified: lines (issue #787)"
@@ -1209,15 +1266,17 @@ _same_label_result=$(make_ask_payload_two_questions_same_label | "$HOOK" 2>/dev/
 import json, sys
 d = json.loads(sys.stdin.read())
 reason = d.get('hookSpecificOutput', {}).get('permissionDecisionReason', '')
-ok = reason.count('Falsified: Fix now (Recommended)') == 2
-print('ok' if ok else 'fail_count=' + str(reason.count('Falsified: Fix now (Recommended)')))
+scaffold_count = reason.count('Falsified: Fix now (Recommended)')
+has_hint = 'within each question, one line per normalized full option label' in reason
+ok = scaffold_count == 2 and has_hint
+print('ok' if ok else 'fail_count=' + str(scaffold_count) + '; hint=' + str(has_hint))
 ")
 if [ "$_same_label_result" = "ok" ]; then
-  echo "  PASS  2 questions with identical label -> 2 scaffold lines, not deduped away (issue #787)"
+  echo "  PASS  2 questions with identical label -> 2 scaffold lines + per-question hint (issues #787, #910)"
   PASS=$((PASS + 1))
 else
-  echo "  FAIL  2 questions with identical label -> 2 scaffold lines, not deduped away (issue #787) ($_same_label_result)"
-  FAIL=$((FAIL + 1)); FAILED_NAMES+=("2 questions with identical label -> 2 scaffold lines")
+  echo "  FAIL  2 questions with identical label -> 2 scaffold lines + per-question hint (issues #787, #910) ($_same_label_result)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("2 questions with identical label -> scaffold + per-question hint")
 fi
 
 # Multi-question aggregation (codex round-1 P2 fix): 2 separate questions,

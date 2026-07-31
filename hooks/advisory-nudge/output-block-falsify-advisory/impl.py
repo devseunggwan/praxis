@@ -77,47 +77,64 @@ ADVISORY_MSG = (
     "instead of surfacing the proposal."
 )
 
+FALSIFIED_FORMAT_HINT = (
+    "[falsified-format] A clean evidence line starts at column 0. "
+    "all modes: every scaffold-shaped line must have non-empty evidence with no "
+    "unfilled placeholder. single-trigger: at least one clean line with the exact "
+    "prefix 'Falsified:' is required. multi-trigger: within each question, one "
+    "line per normalized full option label, "
+    "including marker suffixes when present, such as '(Recommended)'/'(추천)'; "
+    "each line must start "
+    "exactly 'Falsified: {full option label}' and the label must be followed by "
+    "end-of-line or ' — probe: '. "
+)
+
 ASK_MSG = (
-    "(Recommended) 라벨이 있으나 question body 또는 해당 옵션의 description "
-    "필드 어디에도 'Falsified: <disconfirming test 결과>' 가 없음. "
-    "CLAUDE.md Self-Falsify Before Recommendation Lock 룰. "
+    "A '(Recommended)' marker is present, but neither the question body nor "
+    "the triggering option's description contains clean evidence that satisfies "
+    "the actual Falsified predicate. "
+    f"{FALSIFIED_FORMAT_HINT}"
+    "CLAUDE.md Self-Falsify Before Recommendation Lock rule. "
     # Template-level guidance (issue #682): the problem is not only this call —
     # the AskUserQuestion compose template is missing the field. Bake a
     # column-0 `Falsified:` line into every future (Recommended) compose BEFORE
     # the tool call is formed, not just when the hook fires.
     "[pre-author-template] "
-    "이번 호출뿐 아니라 앞으로 (Recommended) 라벨을 붙일 때마다 "
-    "AskUserQuestion 작성 직전(도구 호출 전) 에 "
-    "첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — "
-    "인스턴스 수정이 아닌 템플릿 수정이 필요하다. "
-    "'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — "
-    "질문문 중간/불릿/코드펜스 내부 배치는 미검출. "
+    "For this call and every future '(Recommended)' option, include a column-0 "
+    "'Falsified: <verification result>' line in the AskUserQuestion composition "
+    "template before invoking the tool; fix the template, not only this instance. "
+    "'Falsified:' must begin at column 0 of its own line (a startswith check); "
+    "text embedded in prose, bullets, or code fences is not detected. "
     # Issue #828: prefer the option's own description field over the
     # question body so long/multiline evidence doesn't accumulate in one
     # shared string.
-    "[trigger-reduction] question 은 짧게 유지하고, Falsified: 줄은 해당 옵션 "
-    "(Recommended) 의 description 필드에 넣는 것을 권장 — 두 위치 모두 검증됨."
+    "[trigger-reduction] Keep the question short and place the 'Falsified:' "
+    "line in the corresponding '(Recommended)' option's description; both "
+    "locations are checked."
 )
 
 ANCHORING_ASK_MSG = (
-    "옵션 라벨/설명에 confidence-anchoring framing 토큰 (safer/safest/"
+    "An option label or description contains a confidence-anchoring framing "
+    "token (safer/safest/"
     "natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/"
-    "당연히/분명히/추천/기본값) 이 있으나 question body 또는 해당 옵션의 "
-    "description 필드 어디에도 'Falsified: <disconfirming test 결과>' 가 없음. "
+    "당연히/분명히/추천/기본값), but neither the question body nor the "
+    "triggering option's description contains clean evidence that satisfies "
+    "the actual Falsified predicate. "
+    f"{FALSIFIED_FORMAT_HINT}"
     "CLAUDE.md Output-Block-Level Falsification Gate. "
     # Template-level guidance (issue #682): bake the Falsified: line into the
     # AskUserQuestion compose template for every anchoring-framed option, not
     # just the current call.
     "[pre-author-template] "
-    "이번 호출뿐 아니라 앞으로 confidence-anchoring 토큰을 옵션 라벨/설명에 쓸 때마다 "
-    "AskUserQuestion 작성 직전(도구 호출 전) 에 "
-    "첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — "
-    "인스턴스 수정이 아닌 템플릿 수정이 필요하다. "
-    "'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — "
-    "질문문 중간/불릿/코드펜스 내부 배치는 미검출. "
+    "For this call and every future option that uses confidence-anchoring "
+    "framing, include a column-0 'Falsified: <verification result>' line in "
+    "the AskUserQuestion composition template before invoking the tool; fix "
+    "the template, not only this instance. 'Falsified:' must begin at column 0 "
+    "of its own line (a startswith check); text embedded in prose, bullets, or "
+    "code fences is not detected. "
     # Issue #828: same trigger-reduction guidance as ASK_MSG.
-    "[trigger-reduction] question 은 짧게 유지하고, Falsified: 줄은 해당 옵션의 "
-    "description 필드에 넣는 것을 권장 — 두 위치 모두 검증됨."
+    "[trigger-reduction] Keep the question short and place the 'Falsified:' "
+    "line in the corresponding option's description; both locations are checked."
 )
 
 # ---------------------------------------------------------------------------
