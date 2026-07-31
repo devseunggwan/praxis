@@ -98,7 +98,12 @@ def resolve_cache_file(filename: str) -> str:
         try:
             _ = shutil.move(legacy, path)
         except (OSError, shutil.Error):
-            return legacy
+            # The move usually fails because a concurrent hook process won the
+            # race and already moved it. Returning `legacy` unconditionally
+            # would send this process on writing to the old location that
+            # every later reader has stopped consulting.
+            if os.path.exists(legacy) and not os.path.exists(path):
+                return legacy
     return path
 
 
@@ -138,9 +143,11 @@ def prune_stale(directory: str, ttl_days: float | None = None) -> int:
     with entries:
         for entry in entries:
             try:
-                if entry.stat().st_mtime >= cutoff:
+                is_dir = entry.is_dir(follow_symlinks=False)
+                mtime = _newest_mtime(entry.path) if is_dir else entry.stat().st_mtime
+                if mtime >= cutoff:
                     continue
-                if entry.is_dir(follow_symlinks=False):
+                if is_dir:
                     shutil.rmtree(entry.path, ignore_errors=True)
                 else:
                     os.unlink(entry.path)
@@ -148,4 +155,26 @@ def prune_stale(directory: str, ttl_days: float | None = None) -> int:
             except OSError:
                 continue
     return removed
+
+
+def _newest_mtime(directory: str) -> float:
+    """Newest mtime among `directory` and everything below it.
+
+    A directory's own mtime tracks only its direct entries, so the session
+    trees the dedup hooks keep (`<cache>/path-probe-gate/<sid>/<key>`) look
+    untouched to the parent while a live session writes into them. Judging the
+    parent by its own mtime therefore deletes active state.
+    """
+    newest = 0.0
+    try:
+        newest = os.stat(directory).st_mtime
+    except OSError:
+        return newest
+    for root, _dirs, files in os.walk(directory):
+        for name in (root, *(os.path.join(root, f) for f in files)):
+            try:
+                newest = max(newest, os.stat(name).st_mtime)
+            except OSError:
+                continue
+    return newest
 

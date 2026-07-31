@@ -122,7 +122,11 @@ os.utime(old, (stale, stale))
 
 olddir = os.path.join(d, "olddir")
 os.makedirs(olddir)
-open(os.path.join(olddir, "inner"), "w").close()
+inner = os.path.join(olddir, "inner")
+open(inner, "w").close()
+# Backdate the contents too: a directory is judged by its newest descendant,
+# so backdating only the dir would (correctly) spare it. Case 15 covers that.
+os.utime(inner, (stale, stale))
 os.utime(olddir, (stale, stale))
 
 removed = prune_stale(d, ttl_days=7)
@@ -222,6 +226,65 @@ fi
 rm -rf "$SH_HOME"
 assert_eq "sh unwritable home falls back to TMPDIR" "/tmp/praxis-hook-errors.jsonl" \
   "$(PRAXIS_HOME=/proc/nonexistent-praxis-home TMPDIR=/tmp sh_eval 'praxis_resolve_writable logs hook-errors.jsonl')"
+
+# 14. A literal tilde in PRAXIS_HOME must expand the same way on both sides.
+# Python runs os.path.expanduser; shell left alone does not, so a quoted or
+# config-exported PRAXIS_HOME='~/praxis' would split the two resolvers apart.
+TILDE='~'   # kept in a variable so the literal never sits inside quotes
+assert_eq "sh praxis_home expands a literal ~/" "/tmp/fakehome-903/praxis" \
+  "$(HOME=/tmp/fakehome-903 PRAXIS_HOME="$TILDE/praxis" sh_eval 'praxis_home')"
+assert_eq "sh praxis_home expands a bare ~" "/tmp/fakehome-903" \
+  "$(HOME=/tmp/fakehome-903 PRAXIS_HOME="$TILDE" sh_eval 'praxis_home')"
+assert_eq "sh/py agree on a literal ~/ PRAXIS_HOME" \
+  "$(HOME=/tmp/fakehome-903 PRAXIS_HOME="$TILDE/praxis" python3 -c "import sys; sys.path.insert(0, '$LIB'); import _paths; print(_paths.praxis_home())")" \
+  "$(HOME=/tmp/fakehome-903 PRAXIS_HOME="$TILDE/praxis" sh_eval 'praxis_home')"
+assert_eq "sh praxis_home leaves a mid-path tilde alone" "/tmp/a~b" \
+  "$(PRAXIS_HOME='/tmp/a~b' sh_eval 'praxis_home')"
+
+# 15. prune_stale must judge a directory by its newest descendant, not its own
+# mtime. The dedup hooks nest state two levels down, and writing there does not
+# touch the top-level dir — so an mtime-only check deletes live session state.
+PRUNE_HOME=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+mkdir -p "$PRUNE_HOME/tree/session-a"
+: > "$PRUNE_HOME/tree/session-a/live"
+: > "$PRUNE_HOME/loose-old"
+# Backdate the parent dir and the loose file; leave the nested file fresh.
+touch -t 202001010000 "$PRUNE_HOME/tree" "$PRUNE_HOME/tree/session-a" "$PRUNE_HOME/loose-old"
+python3 -c "import sys; sys.path.insert(0, '$LIB'); import _paths; _paths.prune_stale('$PRUNE_HOME', 7.0)" >/dev/null
+if [ -f "$PRUNE_HOME/tree/session-a/live" ]; then
+  echo "PASS  [prune_stale keeps a stale dir holding fresh nested state]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [prune_stale deleted active nested state]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("prune nested state")
+fi
+if [ -f "$PRUNE_HOME/loose-old" ]; then
+  echo "FAIL  [prune_stale left a genuinely stale file]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("prune stale file")
+else
+  echo "PASS  [prune_stale still removes a genuinely stale file]"; PASS=$((PASS + 1))
+fi
+# A tree that is stale all the way down still goes.
+mkdir -p "$PRUNE_HOME/dead/session-b"
+: > "$PRUNE_HOME/dead/session-b/old"
+touch -t 202001010000 "$PRUNE_HOME/dead/session-b/old" "$PRUNE_HOME/dead/session-b" "$PRUNE_HOME/dead"
+python3 -c "import sys; sys.path.insert(0, '$LIB'); import _paths; _paths.prune_stale('$PRUNE_HOME', 7.0)" >/dev/null
+if [ -d "$PRUNE_HOME/dead" ]; then
+  echo "FAIL  [prune_stale left a fully stale tree]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("prune stale tree")
+else
+  echo "PASS  [prune_stale removes a fully stale tree]"; PASS=$((PASS + 1))
+fi
+rm -rf "$PRUNE_HOME"
+
+# 16. A concurrent migration must not hand back the abandoned legacy path.
+# Two processes can both see the new path absent; the loser's move fails, and
+# returning `legacy` then writes where no later reader looks.
+RACE_HOME=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+RACE_TMP=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+mkdir -p "$RACE_HOME/cache"
+printf '{"winner": true}' > "$RACE_HOME/cache/race.json"
+printf '{"stale": true}' > "$RACE_TMP/praxis-race.json"
+assert_eq "resolve_cache_file prefers the new path when both exist" \
+  "$RACE_HOME/cache/race.json" \
+  "$(PRAXIS_HOME="$RACE_HOME" TMPDIR="$RACE_TMP" python3 -c "import sys; sys.path.insert(0, '$LIB'); import _paths; print(_paths.resolve_cache_file('race.json'))")"
+rm -rf "$RACE_HOME" "$RACE_TMP"
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
