@@ -60,9 +60,10 @@ confirmation-prompt layer.
 Pre-tool stderr hints. **Default: never block** — emit reminders for recurrent
 patterns so the agent can self-correct. Documented exceptions escalate beyond
 stderr: hooks marked "opt-in strict" in the table emit `ask`/`deny`/block only
-when their strict-mode env var is set, and `output-block-falsify-advisory`'s
-T1 tier hard-denies — without any env gate — when the exact `(Recommended)`
-marker appears without an accompanying `Falsified:` line (issue #393).
+when their strict-mode env var is set, and `output-block-falsify-advisory`
+emits `ask` — without any env gate — when a `(Recommended)`/anchoring option
+appears without an accompanying `Falsified:` line (issue #393 made the T1
+tier a hard deny; #899 restored it to `ask`).
 Fail-open on infrastructure errors by design.
 
 | Hook | Trigger | Purpose |
@@ -78,7 +79,7 @@ Fail-open on infrastructure errors by design.
 | [memory-hint](../../hooks/advisory-nudge/memory-hint/spec.md) | PreToolUse | Surface hookable memory entries by keyword at decision-construction time |
 | [external-write-falsify-check](../../hooks/advisory-nudge/external-write-falsify-check/spec.md) | PreToolUse (opt-in) | Warn before posting hypothesis-stage text or unverified applied-on-branch claims (#656) to PR / issue / Slack / Notion |
 | [external-api-literal-trigger](../../hooks/advisory-nudge/external-api-literal-trigger/spec.md) | PreToolUse | Advisory nudge when ALL_CAPS enum candidates or 3-part SQL identifiers are written without prior retrieval verification |
-| [output-block-falsify-advisory](../../hooks/advisory-nudge/output-block-falsify-advisory/spec.md) | PreToolUse | Output-block falsification gate before surfacing `(Recommended)` options or bulk-action commands — T1 (exact `(Recommended)` marker without `Falsified:` line) hard-denies; T2 (confidence-anchoring tokens) emits `ask` |
+| [output-block-falsify-advisory](../../hooks/advisory-nudge/output-block-falsify-advisory/spec.md) | PreToolUse | Output-block falsification gate before surfacing `(Recommended)` options or bulk-action commands — T1 (exact `(Recommended)` marker without `Falsified:` line) and T2 (confidence-anchoring tokens) both emit `ask` (T1 was a hard deny until #899) |
 | [source-citation-probe-gate](../../hooks/advisory-nudge/source-citation-probe-gate/spec.md) | PreToolUse | Advisory when an external-write body (gh / Slack / Notion) cites source facts (file:line, inline-code call syntax, test-semantics claims) with no read-probe in the recent transcript and no in-body `Probe:` / `[verified]` basis — issue #830 |
 | [advisory-wrapper-signature-verify](../../hooks/advisory-nudge/advisory-wrapper-signature-verify/spec.md) | PreToolUse | Advisory nudge to verify wrapped function signatures before writing wrapper/client code |
 | [jq-config-empty-dict-advisory](../../hooks/advisory-nudge/jq-config-empty-dict-advisory/spec.md) | PreToolUse | Advisory nudge when `jq` reads a config file (settings.json, hooks.json, ~/.claude/*.json, ~/.codex/*.json) that is empty or invalid JSON |

@@ -130,8 +130,10 @@ kill branch, and (c) the same mechanism blocked 4/4 on the adjacent
 | `PRAXIS_HOOK_BYPASS_NEGATIVE_EXISTENCE_GATE=1` | Silent pass (full bypass) |
 
 Default is **block** (not advisory): the issue's v3 design was built
-specifically to justify a hard block at 0.10 fires/session, and the
-`Falsified:` precedent (`output-block-falsify-advisory` T1) is a hard deny.
+specifically to justify a hard block at 0.10 fires/session. The
+`Falsified:` precedent it originally cited (`output-block-falsify-advisory`
+T1) no longer supports it — that tier was downgraded to `ask` in #899 —
+so this gate's default now rests on the fire-rate argument alone.
 `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY=1` demotes to advisory for callers who
 want the nudge without the block.
 

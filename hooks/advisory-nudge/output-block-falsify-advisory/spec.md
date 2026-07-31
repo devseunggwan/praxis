@@ -31,7 +31,7 @@ Text rules and MEMORY.md entries alone have proven insufficient to prevent
 recurrence. A structural hook moves the gate to the tool-call use-site.
 
 References: issue [#221](https://github.com/devseunggwan/praxis/issues/221) (advisory),
-[#290](https://github.com/devseunggwan/praxis/issues/290) (T1 ask escalation),
+[#290](https://github.com/devseunggwan/praxis/issues/290) (T1 ask escalation), [#899](https://github.com/devseunggwan/praxis/issues/899) (T1 deny → ask restore),
 [#369](https://github.com/devseunggwan/praxis/issues/369) (T2 confidence-anchoring extension).
 
 ### Source rule detail (always-loaded SoT reference)
@@ -86,7 +86,7 @@ edits the user requested, reversible exploration commands.
 
 | Tool | Trigger condition | Decision |
 | ------ | ----------------- | ---------- |
-| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND no `Falsified:` line in the question body or that triggering option's own `description` | `permissionDecision: deny` (ASK_MSG) |
+| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND no `Falsified:` line in the question body or that triggering option's own `description` | `permissionDecision: ask` (ASK_MSG) |
 | `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND a `Falsified:` line is present (question body OR that triggering option's own `description`, issue #828) | Silent pass |
 | `AskUserQuestion` (T2, issue #369) | Option `label` OR `description` contains a confidence-anchoring framing token AND no `Falsified:` line in the question body or that triggering option's own `description` | `permissionDecision: ask` (ANCHORING_ASK_MSG) |
 | `AskUserQuestion` (T2) | Same as above + `Falsified:` present (question body OR that triggering option's own `description`, issue #828) | Silent pass |
@@ -107,8 +107,21 @@ checked no existing PR — none found`).
 
 - **`Falsified:` present** → silent pass. The model has provided verifiable
   evidence of a disconfirming test.
-- **`Falsified:` absent** → `permissionDecision: deny` with ASK_MSG (hard block — issue #393). The model
-  must add the falsification line and retry.
+- **`Falsified:` absent** → `permissionDecision: ask` with ASK_MSG (soft gate — issue #393
+  raised this to `deny`, issue #899 restored it). The scaffold still names the
+  missing line, but the decision is acknowledge-and-proceed rather than a forced
+  re-author round trip.
+
+  Why the downgrade: #393's premise was systematic non-compliance (retrospect
+  2026-05-23 — 3 calls, 0 `Falsified:` lines). A 90-day Claude Code transcript
+  census no longer supports it — `Falsified:` lines (221/wk) now outnumber
+  `(Recommended)` labels (184/wk), i.e. the template is applied even where the
+  hook would not fire. What `deny` still cost was the retry tax: 306 blocks over
+  30 days, 48% of all `AskUserQuestion` blocks, up to 14 in a single session.
+  That tax displaced questions onto the ungated prose surface (AskUserQuestion
+  per 1k assistant turns 9.25 → 6.36; prose-ask/AskUserQuestion 1.71 → 2.08),
+  reproducing the very defect the gate exists to catch, where the gate cannot
+  see it.
 
 T1's *marker* scan (is `(Recommended)`/`(추천)` present at all) reads
 `options[].label` ONLY — description is scanned for the marker by T2
@@ -121,7 +134,7 @@ not stylistic.
 #### AskUserQuestion T1/T2 evidence location: question body OR option description (issue #828)
 
 **Why this exists**: praxis skill `praxis:cmux-delegate` (and this hook
-itself) require a `Falsified:` line to satisfy T1/T2 before the deny/ask
+itself) require a `Falsified:` line to satisfy T1/T2 before the ask
 decision clears. Before issue #828 the only place `_has_falsified_line`
 scanned was `questions[].question` — the single string field carrying the
 literal user-facing question text. In practice this pushed the model to
@@ -216,7 +229,7 @@ does not have this problem: T1's marker scan reads `label` only (never
 without also being the very marker the evidence is supposed to falsify.
 The fix (see `impl.py` `q_texts` construction) collects only `o.get("description")`
 per option, never `o.get("label")`. Regression test: "AskUserQuestion:
-label itself crafted as a Falsified: line, no description → still T1 deny
+label itself crafted as a Falsified: line, no description → still T1 gates
 (issue #828 codex P2)" in the test suite.
 
 **Why evidence is scoped to TRIGGERING options only, never every option in
@@ -247,7 +260,7 @@ non-triggering option's description is never evidence for anything; only
 a triggering option's own description can supply its own evidence.
 Regression test: "AskUserQuestion: non-triggering option's unrelated
 Falsified: description does not cover a different triggering option →
-still T1 deny (issue #828 codex round-2 P2)" in the test suite.
+still T1 gates (issue #828 codex round-2 P2)" in the test suite.
 
 **Why matching must key on option identity (index), not normalized label
 text (codex review round-3, third in-vivo P2 catch)**: the round-2 fix
@@ -279,7 +292,7 @@ covers the wrong evidence slot by omission; round-3 closes the case where
 label TEXT COLLISION, not omission, misroutes a different option's
 description into the wrong slot. The pre-existing label-based
 `t1_triggering` / `t2_triggering` / `combined_triggering` machinery used
-for messaging (scaffold text, deny/ask reason) is unchanged — only the
+for messaging (scaffold text, ask reason) is unchanged — only the
 evidence-collection step now reads option identity directly. Regression
 test: "AskUserQuestion: non-triggering option sharing a normalized label
 with the triggering option does not supply its evidence → still T2 ask
@@ -345,7 +358,7 @@ matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
 {
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
-    "permissionDecision": "deny",
+    "permissionDecision": "ask",
     "permissionDecisionReason": "(Recommended) 라벨이 있으나 question body 또는 해당 옵션의 description 필드 어디에도 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Self-Falsify Before Recommendation Lock 룰. [pre-author-template] 이번 호출뿐 아니라 앞으로 (Recommended) 라벨을 붙일 때마다 AskUserQuestion 작성 직전(도구 호출 전) 에 첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — 인스턴스 수정이 아닌 템플릿 수정이 필요하다. 'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — 질문문 중간/불릿/코드펜스 내부 배치는 미검출. [trigger-reduction] question 은 짧게 유지하고, Falsified: 줄은 해당 옵션 (Recommended) 의 description 필드에 넣는 것을 권장 — 두 위치 모두 검증됨."
   }
 }
@@ -372,7 +385,7 @@ matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
 
 #### Ready-to-fill `Falsified:` scaffold (issue #787)
 
-Both the T1 deny and T2 ask `permissionDecisionReason` above end with a
+Both the T1 and T2 ask `permissionDecisionReason` above end with a
 `[scaffold]` marker followed by one copy-paste-ready `Falsified:` line per
 triggering option label, parsed straight from the blocked `tool_input`:
 
@@ -475,7 +488,7 @@ independently per question (not via `if`/`elif`) and pooled into one
 combined `required_count` — the prior `if`/`elif` skipped the T2 check
 entirely once T1 matched for the question, so a retry that only supplied
 evidence for the T1 option silent-passed with the T2 option's claim never
-verified. T1 still decides the final deny-vs-ask precedence (unchanged);
+verified. T1 still decides the final message precedence (unchanged);
 only the per-question evidence requirement changed.
 
 T2's bare `recommend(?:ed|s)?` pattern also matches the literal word
@@ -484,7 +497,7 @@ incidentally also matches T2's check. Labels already present in
 `t1_triggering` are excluded from `t2_triggering` before pooling — without
 this, a pure-T1 2-option question would double-count each label into both
 `t1_labels` and `t2_labels`, producing duplicate scaffold lines in the
-final deny message for a case with no genuine T2-only option at all.
+final gate message for a case with no genuine T2-only option at all.
 
 **Real-delimiter anchoring + whitespace-normalized dedup (issue #787 codex
 round-8 P2, two findings):**
@@ -573,7 +586,7 @@ in practice.
 `_falsified_scaffold` interpolates each triggering option's raw label
 verbatim into a single f-string line (`f"Falsified: {label} — probe:
 ..."`). If the label itself contains a literal newline, that single
-logical line prints as two PHYSICAL lines in the deny/ask message. A
+logical line prints as two PHYSICAL lines in the ask message. A
 verbatim copy-paste of that unfilled scaffold then has its `Falsified:`
 prefix on the first physical line and its placeholder-bearing evidence
 (`<command>`, `<observed>`, `<...>`) on the second — which does not start
@@ -651,13 +664,14 @@ instead of surfacing the proposal.
 
 ### Block-event telemetry (issue #787)
 
-Every T1 deny / T2 ask decision also appends one RICH record to the shared
+Every T1 / T2 ask decision also appends one RICH record to the shared
 fire-ledger (`hooks/_lib/_fire_ledger.py`, `record_session_fire`) — hook
-`output-block-falsify-advisory`, role `advisory-nudge`, `decision` = `block`
-(T1) or `ask` (T2), `tool` = `AskUserQuestion`, `session_id` from the hook
+`output-block-falsify-advisory`, role `advisory-nudge`, `decision` = `ask`
+for both tiers since issue #899 (T1 recorded `block` while it emitted
+`deny`), `tool` = `AskUserQuestion`, `session_id` from the hook
 payload. Skipped when `session_id` is missing or empty (cannot attribute).
 
-This exists because this hook signals deny/ask via a stdout JSON
+This exists because this hook signals its decision via a stdout JSON
 `permissionDecision`, not exit code 2 — so the universal `@fail_open` coarse
 recorder (which only inspects the return code) always logs `pass` for these
 calls. Before issue #787, cross-session block-rate measurement had to fall
@@ -690,34 +704,34 @@ bash tests/hooks/advisory-nudge/test_output_block_falsify_advisory.sh
 ```
 
 **Harness isolation (issue #787 codex round-6 P2)**: every `run_case`
-invocation calls the hook directly, and the T1/T2 deny/ask cases each write
+invocation calls the hook directly, and the T1/T2 ask cases each write
 a RICH telemetry record. The script exports a throwaway
 `PRAXIS_FIRE_TELEMETRY_FILE` default at the top so these dozens of test
 invocations never land in the real `~/.praxis/telemetry/` store — the
 telemetry-content-checking cases further down still override the var
 per-call to their own `TEL_DIR` paths, which wins for that one invocation.
 Separately, the `pass` expectation in `run_case` now checks stdout is empty
-in addition to stderr — a deny/ask decision also exits 0 with empty
+in addition to stderr — an ask decision also exits 0 with empty
 stderr (it signals via stdout JSON, not stderr), so a stderr-only check
 could not actually distinguish a real silent pass from an undetected
-deny/ask.
+the ask decision.
 
 Covers 97 cases (91 pre-#828 + 6 new — description-field satisfaction, per-label coverage regression via description, T2 via description, label-only self-referential bypass regression, cross-option unrelated-description bypass regression, same-normalized-label index-identity bypass regression):
 
-**T1 deny-escalation (AskUserQuestion, issue #290/#393):**
+**T1 ask-escalation (AskUserQuestion, issue #290 / #393 / #899):**
 
-- Option label `(Recommended)` + no `Falsified:` in question body → `permissionDecision: deny` (ASK_MSG)
-- Option label `(추천)` + no `Falsified:` → `permissionDecision: deny`
+- Option label `(Recommended)` + no `Falsified:` in question body → `permissionDecision: ask` (ASK_MSG)
+- Option label `(추천)` + no `Falsified:` → `permissionDecision: ask`
 - Option label `(Recommended)` + `Falsified:` line present → silent pass
 - Non-recommended option labels → silent pass
 
 **Description-field evidence location (issue #828):**
 
 - Option label `(Recommended)` + `Falsified:` line in that option's own `description` (not `question`) → silent pass, `question` stays short
-- 2 triggering `(Recommended)` options, only one covered via `description`, the other has no `Falsified:` line anywhere → still `deny` (per-label coverage still enforced across mixed sources)
+- 2 triggering `(Recommended)` options, only one covered via `description`, the other has no `Falsified:` line anywhere → still gates (`ask`) (per-label coverage still enforced across mixed sources)
 - T2 anchoring token (`safer`) + `Falsified:` line in the same option's `description` → `ask` → silent pass once evidence supplied
-- Single `(Recommended)` option with no `description` at all, whose own `label` is crafted to read as a clean `Falsified:` line → still `deny` (regression for the self-referential label-as-evidence bypass caught by codex review — see spec detail above)
-- Single triggering `(Recommended)` option with no `description` of its own, paired with a different non-triggering option whose unrelated `description` reads a clean `Falsified:` line → still `deny` (regression for the cross-option unrelated-description bypass caught by codex review round-2 — see spec detail above)
+- Single `(Recommended)` option with no `description` at all, whose own `label` is crafted to read as a clean `Falsified:` line → still gates (`ask`) (regression for the self-referential label-as-evidence bypass caught by codex review — see spec detail above)
+- Single triggering `(Recommended)` option with no `description` of its own, paired with a different non-triggering option whose unrelated `description` reads a clean `Falsified:` line → still gates (`ask`) (regression for the cross-option unrelated-description bypass caught by codex review round-2 — see spec detail above)
 
 **T2 ask-escalation (AskUserQuestion, issue #369):**
 
@@ -727,7 +741,7 @@ Covers 97 cases (91 pre-#828 + 6 new — description-field satisfaction, per-lab
 - Mixed Hangul/ASCII (`prefer this 옵션`) → `ask` — word-boundary regression
 - `(Recommended)` in description-only (no marker in label) → `ask` (replaces former false-positive-guard pass)
 - T2 anchoring + `Falsified:` line → silent pass
-- T1 precedence: literal `(Recommended)` + anchoring description → `deny` with ASK_MSG (T1 wins, issue #393)
+- T1 precedence: literal `(Recommended)` + anchoring description → `ask` with ASK_MSG (T1 wins, issue #393)
 
 **T2 negative cases (must not fire):**
 
@@ -756,61 +770,61 @@ Covers 97 cases (91 pre-#828 + 6 new — description-field satisfaction, per-lab
 
 **Template-level message cases (issue #682):**
 
-- `(Recommended)` + no `Falsified:` → deny message contains `pre-author-template` ASCII marker
+- `(Recommended)` + no `Falsified:` → gate message contains `pre-author-template` ASCII marker
 - confidence-anchoring (`safer`) + no `Falsified:` → ask message contains `pre-author-template` ASCII marker
 - `(Recommended)` + column-0 `Falsified:` present → silent pass (regression — template-level message change must not break satisfaction)
 
 **Ready-to-fill scaffold cases (issue #787):**
 
-- T1 deny message embeds `Falsified: <label>` seeded from the triggering option label
-- T1 deny message contains the `[scaffold]` marker
+- T1 gate message embeds `Falsified: <label>` seeded from the triggering option label
+- T1 gate message contains the `[scaffold]` marker
 - T2 ask message embeds `Falsified: <label>` seeded from the anchoring-token-carrying label
 - 2 options both carrying `(Recommended)` → 2 scaffold `Falsified:` lines (one per label)
 - `(Recommended)` + `Falsified:` already present → no scaffold needed (silent pass, regression)
 
 **Block-event telemetry cases (issue #787):**
 
-- T1 deny → 1 RICH fire-ledger record with `decision=block`, correct `hook`/`role`/`tool`/`session_id`
-- T1 deny → the automatic COARSE `pass` duplicate is suppressed (1 total line in the telemetry file, not 2)
+- T1 ask → 1 RICH fire-ledger record with `decision=ask`, correct `hook`/`role`/`tool`/`session_id`
+- T1 ask → the automatic COARSE `pass` duplicate is suppressed (1 total line in the telemetry file, not 2)
 - T2 ask → 1 RICH fire-ledger record with `decision=ask`
 - T2 ask → COARSE duplicate suppressed (1 total line)
 - Silent pass → no RICH record written
-- Missing `session_id` → deny still fires on stdout, but no RICH record (cannot attribute)
+- Missing `session_id` → the ask decision still fires on stdout, but no RICH record (cannot attribute)
 
 **Multi-question aggregation cases (issue #787 codex round-1 P2 fix):**
 
-- 2 separate questions, each with its own T1 violation, no `Falsified:` in either → both labels appear in the deny scaffold (not just the first)
+- 2 separate questions, each with its own T1 violation, no `Falsified:` in either → both labels appear in the ask scaffold (not just the first)
 - 2 separate questions, each with its own T2-only (anchoring) violation → both labels appear in the ask scaffold
 
 **Anti-bypass placeholder-rejection cases (issue #787 codex round-2/3/4/5/6/7/8/9/10/11/12 + PR #796 CodeRabbit review fixes):**
 
-- T1: copying the unfilled scaffold line verbatim into the question body does NOT satisfy the gate → still deny
+- T1: copying the unfilled scaffold line verbatim into the question body does NOT satisfy the gate → still gates
 - T2: same unfilled-copy-paste check → still ask
 - T1: scaffold line with all placeholders replaced by real probe output → silent pass (regression — the fix must not make legitimate filled-in evidence unsatisfiable)
-- T1: 1 of 2 scaffold lines filled in, the other still carries a placeholder → still deny (round-3 P1 — a sibling clean line must not let an unfilled one ride along)
+- T1: 1 of 2 scaffold lines filled in, the other still carries a placeholder → still gates (round-3 P1 — a sibling clean line must not let an unfilled one ride along)
 - T1: both scaffold lines for a 2-option question fully filled in → silent pass (regression)
 - 2 different questions presenting the identical triggering label → 2 separate scaffold lines, not collapsed by dedup (round-3 P2)
-- T1: 1 of 2 triggering options has a `Falsified:` line, the other is omitted entirely (no placeholder left anywhere) → still deny (round-4 P1 — placeholder-token rejection alone cannot catch a deleted line; fixed via `required_count`-based counting)
+- T1: 1 of 2 triggering options has a `Falsified:` line, the other is omitted entirely (no placeholder left anywhere) → still gates (round-4 P1 — placeholder-token rejection alone cannot catch a deleted line; fixed via `required_count`-based counting)
 - T1: single triggering label with its one clean `Falsified:` line → silent pass (regression — `required_count` defaults to 1, preserving the original single-label contract)
 - T1: option label literally contains `<command>`, evidence past `— probe:` genuinely filled in → silent pass (round-5 P2 — the label prefix is never evidence-bearing, so it must not be scanned for placeholder tokens)
-- T1: option label literally contains `<command>` AND the evidence past `— probe:` is still unfilled → still deny (regression — round-5's narrowed scan window must not disable the guard itself)
+- T1: option label literally contains `<command>` AND the evidence past `— probe:` is still unfilled → still gates (regression — round-5's narrowed scan window must not disable the guard itself)
 - T1: legacy free-form line with no `— probe:` marker whose own wording contains `<command>` → silent pass (round-6 P2 — round-5 still scanned marker-less lines whole; marker-less lines are excluded from placeholder scanning entirely since they are not scaffold-shaped)
-- T1: same clean `Falsified:` line pasted twice for a 2-option question → still deny (round-6 P2 — raw line-count could be satisfied by duplicating one option's evidence; lines are now deduped by exact text before counting)
+- T1: same clean `Falsified:` line pasted twice for a 2-option question → still gates (round-6 P2 — raw line-count could be satisfied by duplicating one option's evidence; lines are now deduped by exact text before counting)
 - T1: 2 genuinely distinct clean lines for 2 options → silent pass (regression — dedup must reject only exact-text duplicates, not require exact label-text matching)
-- Mixed T1+T2 in one question, only the T1 option's evidence provided → still deny (round-7 P2 — the prior `if`/`elif` skipped the T2 check entirely once T1 matched, so the T2 option's claim never entered `required_count`)
+- Mixed T1+T2 in one question, only the T1 option's evidence provided → still gates (round-7 P2 — the prior `if`/`elif` skipped the T2 check entirely once T1 matched, so the T2 option's claim never entered `required_count`)
 - Mixed T1+T2 in one question, both options' evidence provided → silent pass (regression)
 - Pure-T1 2-option question → scaffold shows each label exactly once, no duplication (regression — round-7's self-catch: T2's bare `recommend` pattern also matches inside `(Recommended)`, so T1-covered labels must be excluded from `t2_triggering` or they double-count into both `t1_labels` and `t2_labels`)
-- T1: option label itself embeds the `— probe:` delimiter substring plus a placeholder token, real evidence supplied after the actual (rightmost) delimiter → silent pass (round-8 P2 — `find()`'s leftmost match anchored on the label-internal marker instead of the real, last-inserted one, pulling the label's own placeholder text into `evidence_region` and permanently hard-denying; fixed via `rfind()`)
-- T1: same real evidence line pasted twice for a 2-option question with only a whitespace difference (internal double-space) on the second copy → still deny (round-8 P2 — exact-text dedup treated the two as distinct, satisfying `required_count=2` while the second option had zero real evidence; fixed via whitespace normalization before dedup)
-- T1: 2 differently-worded `Falsified:` lines, both prefixed with the SAME triggering label, the other triggering label never addressed → still deny (round-9 P1 — raw distinct-line count satisfied `required_count=2` without checking which option each line actually addressed; fixed via per-label prefix matching and coverage)
+- T1: option label itself embeds the `— probe:` delimiter substring plus a placeholder token, real evidence supplied after the actual (rightmost) delimiter → silent pass (round-8 P2 — `find()`'s leftmost match anchored on the label-internal marker instead of the real, last-inserted one, pulling the label's own placeholder text into `evidence_region` and permanently hard-gating; fixed via `rfind()`)
+- T1: same real evidence line pasted twice for a 2-option question with only a whitespace difference (internal double-space) on the second copy → still gates (round-8 P2 — exact-text dedup treated the two as distinct, satisfying `required_count=2` while the second option had zero real evidence; fixed via whitespace normalization before dedup)
+- T1: 2 differently-worded `Falsified:` lines, both prefixed with the SAME triggering label, the other triggering label never addressed → still gates (round-9 P1 — raw distinct-line count satisfied `required_count=2` without checking which option each line actually addressed; fixed via per-label prefix matching and coverage)
 - T1: 2 triggering options, each addressed by its own distinctly-worded `Falsified:` line → silent pass (regression — the round-9 P1 fix maps lines to labels by prefix, it does not require identical wording or more than one line per label)
-- T1: evidence text (after the real `— probe:` delimiter) itself contains a second `— probe:` substring, with an unfilled `<command>` placeholder sitting before that spurious second marker → still deny (round-9 P2 — `rfind()` anchored on the spurious, later marker instead of the real one, pushing the leading placeholder outside the scanned region; fixed via `find()` seeded right after the matched label prefix)
+- T1: evidence text (after the real `— probe:` delimiter) itself contains a second `— probe:` substring, with an unfilled `<command>` placeholder sitting before that spurious second marker → still gates (round-9 P2 — `rfind()` anchored on the spurious, later marker instead of the real one, pushing the leading placeholder outside the scanned region; fixed via `find()` seeded right after the matched label prefix)
 - T1: same evidence-embeds-a-second-marker shape, but with the evidence genuinely filled in (no placeholder anywhere) → silent pass (regression — the round-9 P2 fix narrows the anchor point, it does not forbid legitimate evidence from containing the word sequence `— probe:` again)
-- T1+T2: a bare (no-marker) triggering label is a literal string-prefix of unrelated evidence text on a sibling line (e.g. `"Rerun"` inside `"Rerunning without confirmation"`) → still deny (round-10 P2 — `startswith()` matched the label as a bare substring prefix without a boundary check, crediting an option that line never actually addresses)
+- T1+T2: a bare (no-marker) triggering label is a literal string-prefix of unrelated evidence text on a sibling line (e.g. `"Rerun"` inside `"Rerunning without confirmation"`) → still gates (round-10 P2 — `startswith()` matched the label as a bare substring prefix without a boundary check, crediting an option that line never actually addresses)
 - T1+T2: same bare-label-is-a-prefix shape, but the label is genuinely addressed by its own whole-token line → silent pass (regression — the round-10 fix requires a boundary after the label, it does not forbid the label from ever matching)
-- An option label contains a literal embedded newline → the deny message's scaffold hint still renders as exactly one physical `Falsified:` line (round-11 P2 — the raw label is normalized before scaffold generation, so the artifact this whole guard depends on can no longer split across lines)
-- Same newline-bearing label, the (now-guaranteed single-line) scaffold copied verbatim and left unfilled → still deny (regression — the fix must not make the placeholder guard unreachable for labels that originally contained a newline)
-- A triggering label (`"Run"`) is the string-prefix of a genuinely different, unrelated evidence line's own text (`"Run now"`) separated by a space → still deny (round-12 P2 — round-10's non-alphanumeric boundary check was too permissive; the boundary must be the exact scaffold delimiter or end-of-line, not any non-alphanumeric character)
+- An option label contains a literal embedded newline → the gate message's scaffold hint still renders as exactly one physical `Falsified:` line (round-11 P2 — the raw label is normalized before scaffold generation, so the artifact this whole guard depends on can no longer split across lines)
+- Same newline-bearing label, the (now-guaranteed single-line) scaffold copied verbatim and left unfilled → still gates (regression — the fix must not make the placeholder guard unreachable for labels that originally contained a newline)
+- A triggering label (`"Run"`) is the string-prefix of a genuinely different, unrelated evidence line's own text (`"Run now"`) separated by a space → still gates (round-12 P2 — round-10's non-alphanumeric boundary check was too permissive; the boundary must be the exact scaffold delimiter or end-of-line, not any non-alphanumeric character)
 - Same near-miss shape, but the triggering label is genuinely addressed by its own line ending exactly at the scaffold's delimiter → silent pass (regression — the round-12 fix must not forbid the label from ever matching)
-- T1: the `— probe:` marker is present, but nothing (or only whitespace) follows it on the same line → still deny (PR #796 CodeRabbit review — an empty `evidence_region` vacuously satisfied the placeholder-token scan since `any()` over an empty string is `False`)
+- T1: the `— probe:` marker is present, but nothing (or only whitespace) follows it on the same line → still gates (PR #796 CodeRabbit review — an empty `evidence_region` vacuously satisfied the placeholder-token scan since `any()` over an empty string is `False`)
 - Missing `session_id` → the RICH telemetry record is still written, with `session_id=""`, and the COARSE "pass" duplicate remains suppressed (PR #796 CodeRabbit review — the prior early-return dropped the decision from `aggregate_fires()`'s totals entirely rather than merely mislabeling it)
