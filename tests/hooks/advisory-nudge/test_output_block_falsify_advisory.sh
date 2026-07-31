@@ -661,6 +661,16 @@ run_case "T2: Falsified: mid-line does not satisfy startswith check — still as
 # Exact predicate guidance — issue #910
 # ---------------------------------------------------------------------------
 
+# A valid free-form line does not override a second scaffold-shaped line that
+# still contains placeholders. The reason must expose this fail-closed rule.
+run_case "T1 (issue #910): single-trigger clean line plus placeholder scaffold → reason exposes fail-closed rule" \
+  "ask:every scaffold-shaped line must have non-empty evidence" \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)"]' \
+      "Falsified: checked all options against open PRs — none found.
+Falsified: Option A (Recommended) — probe: <command> → <observed>
+Which one?")"
+
 # Two triggering labels switch _has_falsified_line into multi-trigger mode.
 # A generic column-0 line is not enough; the reason must expose the exact
 # per-label contract instead of asking for another format-guessing retry.

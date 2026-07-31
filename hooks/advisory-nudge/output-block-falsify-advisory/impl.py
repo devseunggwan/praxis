@@ -79,13 +79,13 @@ ADVISORY_MSG = (
 
 FALSIFIED_FORMAT_HINT = (
     "[falsified-format] A clean evidence line starts at column 0. "
-    "single-trigger: any clean line with the exact prefix 'Falsified:' satisfies "
-    "the question. multi-trigger: one line per normalized full option label, "
+    "single-trigger: at least one clean line with the exact prefix 'Falsified:' "
+    "is required, and every scaffold-shaped line must have non-empty evidence "
+    "with no unfilled placeholder. multi-trigger: one line per normalized full option label, "
     "including marker suffixes when present, such as '(Recommended)'/'(추천)'; "
     "each line must start "
     "exactly 'Falsified: {full option label}' and the label must be followed by "
-    "end-of-line or ' — probe: '. A scaffold-shaped line is clean only when its "
-    "evidence after that delimiter is non-empty and has no unfilled placeholder. "
+    "end-of-line or ' — probe: '. "
 )
 
 ASK_MSG = (
