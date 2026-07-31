@@ -664,7 +664,7 @@ run_case "T2: Falsified: mid-line does not satisfy startswith check — still as
 # A valid free-form line does not override a second scaffold-shaped line that
 # still contains placeholders. The reason must expose this fail-closed rule.
 run_case "T1 (issue #910): single-trigger clean line plus placeholder scaffold → reason exposes fail-closed rule" \
-  "ask:every scaffold-shaped line must have non-empty evidence" \
+  "ask:all modes: every scaffold-shaped line must have non-empty evidence" \
   "$(make_ask_payload_with_question \
       '["Option A (Recommended)"]' \
       "Falsified: checked all options against open PRs — none found.
@@ -675,7 +675,7 @@ Which one?")"
 # A generic column-0 line is not enough; the reason must expose the exact
 # per-label contract instead of asking for another format-guessing retry.
 run_case "T1 (issue #910): multi-trigger prefix mismatch → reason exposes per-label contract" \
-  "ask:multi-trigger: one line per normalized full option label" \
+  "ask:multi-trigger: within each question, one line per normalized full option label" \
   "$(make_ask_payload_with_question \
       '["Option A (Recommended)", "Option B (Recommended)"]' \
       "Falsified: checked all options against open PRs — none found.
@@ -1266,15 +1266,17 @@ _same_label_result=$(make_ask_payload_two_questions_same_label | "$HOOK" 2>/dev/
 import json, sys
 d = json.loads(sys.stdin.read())
 reason = d.get('hookSpecificOutput', {}).get('permissionDecisionReason', '')
-ok = reason.count('Falsified: Fix now (Recommended)') == 2
-print('ok' if ok else 'fail_count=' + str(reason.count('Falsified: Fix now (Recommended)')))
+scaffold_count = reason.count('Falsified: Fix now (Recommended)')
+has_hint = 'within each question, one line per normalized full option label' in reason
+ok = scaffold_count == 2 and has_hint
+print('ok' if ok else 'fail_count=' + str(scaffold_count) + '; hint=' + str(has_hint))
 ")
 if [ "$_same_label_result" = "ok" ]; then
-  echo "  PASS  2 questions with identical label -> 2 scaffold lines, not deduped away (issue #787)"
+  echo "  PASS  2 questions with identical label -> 2 scaffold lines + per-question hint (issues #787, #910)"
   PASS=$((PASS + 1))
 else
-  echo "  FAIL  2 questions with identical label -> 2 scaffold lines, not deduped away (issue #787) ($_same_label_result)"
-  FAIL=$((FAIL + 1)); FAILED_NAMES+=("2 questions with identical label -> 2 scaffold lines")
+  echo "  FAIL  2 questions with identical label -> 2 scaffold lines + per-question hint (issues #787, #910) ($_same_label_result)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("2 questions with identical label -> scaffold + per-question hint")
 fi
 
 # Multi-question aggregation (codex round-1 P2 fix): 2 separate questions,

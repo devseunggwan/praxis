@@ -335,13 +335,13 @@ T1's `ASK_MSG` so downstream parsers can distinguish which tier escalated.
 Both T1 and T2 messages expose the exact branch-aware format contract through
 the same `FALSIFIED_FORMAT_HINT` text:
 
-> [falsified-format] A clean evidence line starts at column 0. single-trigger:
-> at least one clean line with the exact prefix 'Falsified:' is required, and
-> every scaffold-shaped line must have non-empty evidence with no unfilled
-> placeholder. multi-trigger: one line per normalized full option label,
-> including marker suffixes when present, such as '(Recommended)'/'(추천)'; each
-> line must start exactly 'Falsified: {full option label}' and the label must be
-> followed by end-of-line or ' — probe: '.
+> [falsified-format] A clean evidence line starts at column 0. all modes: every
+> scaffold-shaped line must have non-empty evidence with no unfilled placeholder.
+> single-trigger: at least one clean line with the exact prefix 'Falsified:' is
+> required. multi-trigger: within each question, one line per normalized full
+> option label, including marker suffixes when present, such as
+> '(Recommended)'/'(추천)'; each line must start exactly 'Falsified: {full option
+> label}' and the label must be followed by end-of-line or ' — probe: '.
 
 This distinction is load-bearing. With zero or one triggering label,
 `_has_falsified_line()` preserves the issue #290 compatibility contract: any
@@ -353,6 +353,9 @@ the full label retains `(Recommended)` / `(추천)`. A prefix match counts only
 when the label is immediately followed by end-of-line or the literal
 ` — probe: ` delimiter, so near-miss text such as `Run now` cannot cover the
 triggering label `Run`.
+Each question is evaluated independently, so identical normalized labels in
+separate questions still require evidence in each question's own text or
+triggering option description.
 
 The fixed explanatory prose in both messages is English. The scaffold is the
 only content-language exception: it echoes each user-supplied option label
@@ -388,7 +391,7 @@ matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "ask",
-    "permissionDecisionReason": "A '(Recommended)' marker is present, but neither the question body nor the triggering option's description contains clean evidence that satisfies the actual Falsified predicate. [falsified-format] A clean evidence line starts at column 0. single-trigger: at least one clean line with the exact prefix 'Falsified:' is required, and every scaffold-shaped line must have non-empty evidence with no unfilled placeholder. multi-trigger: one line per normalized full option label, including marker suffixes when present, such as '(Recommended)'/'(추천)'; each line must start exactly 'Falsified: {full option label}' and the label must be followed by end-of-line or ' — probe: '. CLAUDE.md Self-Falsify Before Recommendation Lock rule. [pre-author-template] For this call and every future '(Recommended)' option, include a column-0 'Falsified: <verification result>' line in the AskUserQuestion composition template before invoking the tool; fix the template, not only this instance. 'Falsified:' must begin at column 0 of its own line (a startswith check); text embedded in prose, bullets, or code fences is not detected. [trigger-reduction] Keep the question short and place the 'Falsified:' line in the corresponding '(Recommended)' option's description; both locations are checked."
+    "permissionDecisionReason": "A '(Recommended)' marker is present, but neither the question body nor the triggering option's description contains clean evidence that satisfies the actual Falsified predicate. [falsified-format] A clean evidence line starts at column 0. all modes: every scaffold-shaped line must have non-empty evidence with no unfilled placeholder. single-trigger: at least one clean line with the exact prefix 'Falsified:' is required. multi-trigger: within each question, one line per normalized full option label, including marker suffixes when present, such as '(Recommended)'/'(추천)'; each line must start exactly 'Falsified: {full option label}' and the label must be followed by end-of-line or ' — probe: '. CLAUDE.md Self-Falsify Before Recommendation Lock rule. [pre-author-template] For this call and every future '(Recommended)' option, include a column-0 'Falsified: <verification result>' line in the AskUserQuestion composition template before invoking the tool; fix the template, not only this instance. 'Falsified:' must begin at column 0 of its own line (a startswith check); text embedded in prose, bullets, or code fences is not detected. [trigger-reduction] Keep the question short and place the 'Falsified:' line in the corresponding '(Recommended)' option's description; both locations are checked."
   }
 }
 ```
@@ -405,7 +408,7 @@ matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "ask",
-    "permissionDecisionReason": "An option label or description contains a confidence-anchoring framing token (safer/safest/natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/당연히/분명히/추천/기본값), but neither the question body nor the triggering option's description contains clean evidence that satisfies the actual Falsified predicate. [falsified-format] A clean evidence line starts at column 0. single-trigger: at least one clean line with the exact prefix 'Falsified:' is required, and every scaffold-shaped line must have non-empty evidence with no unfilled placeholder. multi-trigger: one line per normalized full option label, including marker suffixes when present, such as '(Recommended)'/'(추천)'; each line must start exactly 'Falsified: {full option label}' and the label must be followed by end-of-line or ' — probe: '. CLAUDE.md Output-Block-Level Falsification Gate. [pre-author-template] For this call and every future option that uses confidence-anchoring framing, include a column-0 'Falsified: <verification result>' line in the AskUserQuestion composition template before invoking the tool; fix the template, not only this instance. 'Falsified:' must begin at column 0 of its own line (a startswith check); text embedded in prose, bullets, or code fences is not detected. [trigger-reduction] Keep the question short and place the 'Falsified:' line in the corresponding option's description; both locations are checked."
+    "permissionDecisionReason": "An option label or description contains a confidence-anchoring framing token (safer/safest/natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/당연히/분명히/추천/기본값), but neither the question body nor the triggering option's description contains clean evidence that satisfies the actual Falsified predicate. [falsified-format] A clean evidence line starts at column 0. all modes: every scaffold-shaped line must have non-empty evidence with no unfilled placeholder. single-trigger: at least one clean line with the exact prefix 'Falsified:' is required. multi-trigger: within each question, one line per normalized full option label, including marker suffixes when present, such as '(Recommended)'/'(추천)'; each line must start exactly 'Falsified: {full option label}' and the label must be followed by end-of-line or ' — probe: '. CLAUDE.md Output-Block-Level Falsification Gate. [pre-author-template] For this call and every future option that uses confidence-anchoring framing, include a column-0 'Falsified: <verification result>' line in the AskUserQuestion composition template before invoking the tool; fix the template, not only this instance. 'Falsified:' must begin at column 0 of its own line (a startswith check); text embedded in prose, bullets, or code fences is not detected. [trigger-reduction] Keep the question short and place the 'Falsified:' line in the corresponding option's description; both locations are checked."
   }
 }
 ```
