@@ -45,12 +45,19 @@ GH_BODY_FLAGS_WITH_ARG = frozenset({"-b", "--body", "-F", "--body-file"})
 
 
 def resolve_body(flag: str, value: str) -> str:
-    """Read body content. For --body-file, read file contents (best effort)."""
+    """Read body content. For --body-file, read file contents (best effort).
+
+    A non-UTF-8 file raises UnicodeDecodeError, which is not an OSError. Left
+    uncaught it escapes to the hook's `fail_open` wrapper, so ONE undecodable
+    body silently skips the whole call's scan — including sibling writes
+    chained in the same command. Same category as an unreadable file, so it
+    takes the same empty-body fallback and the other bodies still get scanned.
+    """
     if flag in {"-F", "--body-file"}:
         try:
             with open(value, encoding="utf-8") as fh:
                 return fh.read()
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             return ""  # treat unreadable file as empty body — advisory-only hooks
     return value
 
