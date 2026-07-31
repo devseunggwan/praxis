@@ -7,16 +7,16 @@ Supported hosts: all
 being written authors a **decision block that also carries a constraint**, with
 no `Consistency:` line stating that the two do not contradict.
 
-### Why this exists
+## Why this exists
 
 Three falsification gates already exist, and none of them observes the `Write`
 surface:
 
-| gate | surfaces scanned |
-|---|---|
-| `output-block-falsify-advisory` | AskUserQuestion, Bash |
-| `pre-output-falsification-gate` | AskUserQuestion (Lane A), Bash (Lane B) |
-| `source-citation-probe-gate` | gh issue/pr write bodies, Slack/Notion MCP |
+| gate                            | surfaces scanned                           |
+| ------------------------------- | ------------------------------------------ |
+| `output-block-falsify-advisory` | AskUserQuestion, Bash                      |
+| `pre-output-falsification-gate` | AskUserQuestion (Lane A), Bash (Lane B)    |
+| `source-citation-probe-gate`    | gh issue/pr write bodies, Slack/Notion MCP |
 
 So the moment a delegation handoff is authored — a `Write` of
 `/tmp/cmux-delegate-*.md` — is structurally unguarded (issue #905).
@@ -48,7 +48,7 @@ half a PreToolUse hook can reach. The other half of the same session's failure
 any PreToolUse hook and stays a memory-layer rule — a documented gap, not an
 oversight.
 
-### Block conditions
+## Block conditions
 
 Fenced code blocks and inline code spans are blanked out first (line count
 preserved), so a document that *shows* a Decisions example — including this
@@ -57,13 +57,13 @@ spec — is not read as authoring one.
 The gate fires when **any** decision block in the remaining body satisfies all
 of:
 
-| # | Condition |
-|---|---|
-| 1 | `tool_name` is in {`Write`, `Edit`} — `NotebookEdit` is excluded |
-| 2 | The block is introduced by `^ {0,3}#{2,6}\s*(Decisions?\|결정)\b` (case-insensitive) |
-| 3 | Its interior holds at least one markdown list item |
-| 4 | Its interior holds at least one **non-negated** constraint marker |
-| 5 | Its interior holds no line starting with `Consistency:` (column 0) |
+| # | Condition                                                                                             |
+| - | ----------------------------------------------------------------------------------------------------- |
+| 1 | `tool_name` is in {`Write`, `Edit`} — `NotebookEdit` is excluded                                      |
+| 2 | The block is introduced by a decision header (`Decisions` or `결정`, `##`-`######`, case-insensitive) |
+| 3 | Its interior holds at least one markdown list item                                                    |
+| 4 | Its interior holds at least one **non-negated** constraint marker                                     |
+| 5 | Its interior holds no line starting with `Consistency:` (column 0)                                    |
 
 **Block interior** = from the end of the decision header to the next header at
 the same or higher level (`#` count at most the decision header's), or
@@ -85,7 +85,7 @@ Scoping conditions 3–5 to the interior is what keeps the false-positive rate
 low: a document that merely mentions scope in a Background section does not
 fire.
 
-### Constraint markers
+## Constraint markers
 
 Substring match against the lowercased interior:
 
@@ -94,11 +94,11 @@ Substring match against the lowercased interior:
 `out of scope` · `not in scope` · `by design` · `deliberate` ·
 `do not touch` · `must not`
 
-### Clearing arm
+## Clearing arm
 
 A line at column 0:
 
-```
+```text
 Consistency: <decision> vs <constraint> — <why they do not contradict>
 ```
 
@@ -108,13 +108,13 @@ checks only that the line exists — it cannot verify the reasoning, and does no
 claim to. Its value is forcing the cross-check to be *performed and written*,
 the step that was skipped in #905.
 
-### Configuration
+## Configuration
 
-| Env var | Default | Effect |
-|---------|---------|--------|
-| `PRAXIS_HOOK_BYPASS_DECISION_CONSISTENCY_GATE` | unset | Any non-empty value → full bypass |
+| Env var                                        | Default | Effect                            |
+| ---------------------------------------------- | ------- | --------------------------------- |
+| `PRAXIS_HOOK_BYPASS_DECISION_CONSISTENCY_GATE` | unset   | Any non-empty value → full bypass |
 
-### Fail-open contract
+## Fail-open contract
 
 - Malformed / missing stdin JSON → exit 0
 - `tool_name` not in {`Write`, `Edit`} → exit 0
@@ -122,7 +122,7 @@ the step that was skipped in #905.
 - No decision header → exit 0
 - Any uncaught exception → exit 0 (via `@fail_open`)
 
-### Known limitations
+## Known limitations
 
 - **Edit sees only the replacement fragment.** An `Edit` whose `new_string`
   adds a decision to a block whose constraint lives outside the fragment does
