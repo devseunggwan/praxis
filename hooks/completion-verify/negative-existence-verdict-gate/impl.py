@@ -35,7 +35,7 @@ surfaces its own error on the next query). It is a negative verdict that
 trigger requires BOTH, in the same paragraph:
 
   (a) a negative-existence marker  (없습니다 / 존재하지 않 / does not exist / ...)
-  (b) a registered decision/verdict framing  (게이트 결과 / 완료 조건 / AC # / ...)
+  (b) a registered decision/verdict framing  (게이트 결과 / 게이트 판정 / AC # / ...)
 
 Requirement — presence enforcement, NOT adequacy verification. A probe-
 existence check is unusable: the motivating case HAD a probe (it read the
@@ -106,17 +106,16 @@ _ADVISORY_ENV = "PRAXIS_NEGATIVE_EXISTENCE_ADVISORY"
 _MARKERS_KO = ("없습니다", "존재하지 않", "미구현", "찾지 못했")
 _MARKERS_EN = ("does not exist",)
 
-# (b) Registered decision / verdict framing. `검증 결과` / `확인 결과` are the
-# combined "verification/confirmation result …없" framings from the proposal;
-# the trailing "…없" is supplied by the separate marker requirement (the
-# paragraph must carry a marker too), so only the framing head is listed here.
+# (b) Registered decision / verdict framing. Issue #901 removed `확인 결과`,
+# `검증 결과` and `완료 조건`: a 30-day transcript census attributed all 11
+# observed fires to those three and none to the gate-tier tokens below. They
+# are ordinary Korean investigative prose ("upon checking …"), not a
+# registered decision framing, so the marker co-occurrence requirement was
+# not a sufficient discriminator on its own.
 _FRAMINGS_KO = (
     "게이트 결과",
     "게이트 판정",
-    "완료 조건",
     "판정이 나왔",
-    "검증 결과",
-    "확인 결과",
 )
 _FRAMINGS_EN = ("acceptance", "ac #")
 
@@ -169,7 +168,7 @@ def has_unenumerated_verdict(text: str) -> bool:
 
 _MESSAGE = (
     f"{_PREFIX} 마지막 assistant 메시지가 등록된 결정/게이트 프레이밍 "
-    "(게이트 결과 / 완료 조건 / AC # / Acceptance ...) 아래에서 부정존재 판정 "
+    "(게이트 결과 / 게이트 판정 / 판정이 나왔 / AC # / Acceptance) 아래에서 부정존재 판정 "
     "(없습니다 / 존재하지 않 / does not exist ...) 을 surface 했으나, 같은 문단에 "
     "첫 칼럼에서 시작하는 'Enumerated:' 줄이 없습니다.\n"
     f"{_PREFIX} Rule: kill-branch 가 걸린 사전 등록 결정 질문에 부정 판정으로 "
