@@ -374,6 +374,13 @@
       "timeout": 5
     },
     {
+      "name": "pytest-direct-exec-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
       "name": "perf-multiplier-evidence-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
