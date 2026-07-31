@@ -32,12 +32,24 @@ TELEMETRY_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""')
 # shellcheck source=../../_lib/record_fire.sh
 . "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true
 # shellcheck source=../../_lib/_paths.sh
-. "$(dirname "$0")/../../_lib/_paths.sh"
+# A POSIX shell aborts outright when `.` cannot find the file, so the guard
+# below is unreachable without this — the degraded path must stay reachable.
+. "$(dirname "$0")/../../_lib/_paths.sh" 2>/dev/null || true
 # A missing _paths.sh must not read as "no state" — that silently disarms the
-# gate below, which is the failure mode this hook exists to prevent. Surface it.
+# gate below. Exit 0 means "pass" here, so bailing out on a broken install
+# would drop completion verification entirely; degrade to the pre-#903 inline
+# expansion instead and keep verifying.
 if ! command -v praxis_resolve_writable >/dev/null 2>&1; then
-  echo "praxis: hooks/_lib/_paths.sh unreadable — broken install, completion-verify disarmed" >&2
-  exit 0
+  echo "praxis: hooks/_lib/_paths.sh unreadable — broken install, completion-verify running on the inline path default" >&2
+  praxis_resolve_writable() {
+    _prw_dir="${PRAXIS_HOME:-$HOME/.praxis}/$1"
+    if mkdir -p "$_prw_dir" 2>/dev/null && [ -w "$_prw_dir" ]; then
+      printf '%s\n' "$_prw_dir/$2"
+    else
+      printf '%s\n' "${TMPDIR:-/tmp}/praxis-$2"
+    fi
+    unset _prw_dir
+  }
 fi
 command -v praxis_fire_arm >/dev/null 2>&1 && \
   praxis_fire_arm completion-verify completion-verify "$TELEMETRY_SESSION_ID" ""
