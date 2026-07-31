@@ -358,9 +358,10 @@ separate questions still require evidence in each question's own text or
 triggering option description.
 
 The fixed explanatory prose in both messages is English. The scaffold is the
-only content-language exception: it echoes each user-supplied option label
-verbatim, including localized text, because translating a label would make the
-copy-paste-ready line fail the full-label predicate it is meant to satisfy.
+only content-language exception: it preserves each user-supplied option label,
+including localized text, while applying the predicate's whitespace
+normalization. Translating a label would make the copy-paste-ready line fail
+the full-label predicate it is meant to satisfy.
 
 #### Bash: bulk-action mutation keywords
 
