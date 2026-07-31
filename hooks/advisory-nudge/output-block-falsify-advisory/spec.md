@@ -86,10 +86,10 @@ edits the user requested, reversible exploration commands.
 
 | Tool | Trigger condition | Decision |
 | ------ | ----------------- | ---------- |
-| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND no `Falsified:` line in the question body or that triggering option's own `description` | `permissionDecision: ask` (ASK_MSG) |
-| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND a `Falsified:` line is present (question body OR that triggering option's own `description`, issue #828) | Silent pass |
-| `AskUserQuestion` (T2, issue #369) | Option `label` OR `description` contains a confidence-anchoring framing token AND no `Falsified:` line in the question body or that triggering option's own `description` | `permissionDecision: ask` (ANCHORING_ASK_MSG) |
-| `AskUserQuestion` (T2) | Same as above + `Falsified:` present (question body OR that triggering option's own `description`, issue #828) | Silent pass |
+| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND the question body plus triggering option descriptions do not satisfy the `Falsified:` predicate | `permissionDecision: ask` (ASK_MSG) |
+| `AskUserQuestion` (T1) | Option `label` contains exact `(Recommended)` or `(추천)` AND the question body plus triggering option descriptions satisfy the `Falsified:` predicate | Silent pass |
+| `AskUserQuestion` (T2, issue #369) | Option `label` OR `description` contains a confidence-anchoring framing token AND the question body plus triggering option descriptions do not satisfy the `Falsified:` predicate | `permissionDecision: ask` (ANCHORING_ASK_MSG) |
+| `AskUserQuestion` (T2) | Same as above + the question body plus triggering option descriptions satisfy the `Falsified:` predicate | Silent pass |
 | `AskUserQuestion` (T3) | Option `label` contains case-insensitive `(recommended)` only | Dead under new precedence — T2's bare `recommend(ed\|s)?` token catches it first as ask |
 | `Bash` | Command matches a bulk-action mutation keyword (see table below) | Advisory stderr |
 | Any other tool | — | Silent pass-through |
@@ -330,6 +330,29 @@ the falsification line.
 label + anchoring in description). T2's `ANCHORING_ASK_MSG` differs from
 T1's `ASK_MSG` so downstream parsers can distinguish which tier escalated.
 
+#### Message-visible `Falsified:` predicate (issue #910)
+
+Both T1 and T2 messages expose the exact branch-aware format contract through
+the same `FALSIFIED_FORMAT_HINT` text:
+
+> [falsified-format] A clean evidence line starts at column 0. single-trigger:
+> any clean line with the exact prefix 'Falsified:' satisfies the question.
+> multi-trigger: one line per normalized full option label, including marker
+> suffixes when present, such as '(Recommended)'/'(추천)'; each line must start
+> exactly 'Falsified: {full option label}' and the label must be followed by
+> end-of-line or ' — probe: '. A scaffold-shaped line is clean only when its
+> evidence after that delimiter is non-empty and has no unfilled placeholder.
+
+This distinction is load-bearing. With zero or one triggering label,
+`_has_falsified_line()` preserves the issue #290 compatibility contract: any
+clean column-0 `Falsified:` line is unambiguous and satisfies the question.
+With two or more triggering labels, every normalized full label must be covered
+individually. Normalization collapses embedded newlines and whitespace runs;
+the full label retains `(Recommended)` / `(추천)`. A prefix match counts only
+when the label is immediately followed by end-of-line or the literal
+` — probe: ` delimiter, so near-miss text such as `Run now` cannot cover the
+triggering label `Run`.
+
 #### Bash: bulk-action mutation keywords
 
 | Type | Patterns detected |
@@ -359,7 +382,7 @@ matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "ask",
-    "permissionDecisionReason": "(Recommended) 라벨이 있으나 question body 또는 해당 옵션의 description 필드 어디에도 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Self-Falsify Before Recommendation Lock 룰. [pre-author-template] 이번 호출뿐 아니라 앞으로 (Recommended) 라벨을 붙일 때마다 AskUserQuestion 작성 직전(도구 호출 전) 에 첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — 인스턴스 수정이 아닌 템플릿 수정이 필요하다. 'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — 질문문 중간/불릿/코드펜스 내부 배치는 미검출. [trigger-reduction] question 은 짧게 유지하고, Falsified: 줄은 해당 옵션 (Recommended) 의 description 필드에 넣는 것을 권장 — 두 위치 모두 검증됨."
+    "permissionDecisionReason": "(Recommended) 라벨이 있으나 question body 또는 해당 옵션의 description 필드 어디에도 실제 Falsified predicate를 만족하는 clean evidence가 없음. [falsified-format] A clean evidence line starts at column 0. single-trigger: any clean line with the exact prefix 'Falsified:' satisfies the question. multi-trigger: one line per normalized full option label, including marker suffixes when present, such as '(Recommended)'/'(추천)'; each line must start exactly 'Falsified: {full option label}' and the label must be followed by end-of-line or ' — probe: '. A scaffold-shaped line is clean only when its evidence after that delimiter is non-empty and has no unfilled placeholder. CLAUDE.md Self-Falsify Before Recommendation Lock 룰. [pre-author-template] 이번 호출뿐 아니라 앞으로 (Recommended) 라벨을 붙일 때마다 AskUserQuestion 작성 직전(도구 호출 전) 에 첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — 인스턴스 수정이 아닌 템플릿 수정이 필요하다. 'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — 질문문 중간/불릿/코드펜스 내부 배치는 미검출. [trigger-reduction] question 은 짧게 유지하고, Falsified: 줄은 해당 옵션 (Recommended) 의 description 필드에 넣는 것을 권장 — 두 위치 모두 검증됨."
   }
 }
 ```
@@ -376,7 +399,7 @@ matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "ask",
-    "permissionDecisionReason": "옵션 라벨/설명에 confidence-anchoring framing 토큰 (safer/safest/natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/당연히/분명히/추천/기본값) 이 있으나 question body 또는 해당 옵션의 description 필드 어디에도 'Falsified: <disconfirming test 결과>' 가 없음. CLAUDE.md Output-Block-Level Falsification Gate. [pre-author-template] 이번 호출뿐 아니라 앞으로 confidence-anchoring 토큰을 옵션 라벨/설명에 쓸 때마다 AskUserQuestion 작성 직전(도구 호출 전) 에 첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — 인스턴스 수정이 아닌 템플릿 수정이 필요하다. 'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — 질문문 중간/불릿/코드펜스 내부 배치는 미검출. [trigger-reduction] question 은 짧게 유지하고, Falsified: 줄은 해당 옵션의 description 필드에 넣는 것을 권장 — 두 위치 모두 검증됨."
+    "permissionDecisionReason": "옵션 라벨/설명에 confidence-anchoring framing 토큰 (safer/safest/natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/당연히/분명히/추천/기본값) 이 있으나 question body 또는 해당 옵션의 description 필드 어디에도 실제 Falsified predicate를 만족하는 clean evidence가 없음. [falsified-format] A clean evidence line starts at column 0. single-trigger: any clean line with the exact prefix 'Falsified:' satisfies the question. multi-trigger: one line per normalized full option label, including marker suffixes when present, such as '(Recommended)'/'(추천)'; each line must start exactly 'Falsified: {full option label}' and the label must be followed by end-of-line or ' — probe: '. A scaffold-shaped line is clean only when its evidence after that delimiter is non-empty and has no unfilled placeholder. CLAUDE.md Output-Block-Level Falsification Gate. [pre-author-template] 이번 호출뿐 아니라 앞으로 confidence-anchoring 토큰을 옵션 라벨/설명에 쓸 때마다 AskUserQuestion 작성 직전(도구 호출 전) 에 첫 칼럼 시작 'Falsified: <검증 결과>' 줄을 템플릿에 포함하라 — 인스턴스 수정이 아닌 템플릿 수정이 필요하다. 'Falsified:' 는 자기 줄 첫 칼럼에서 시작해야 한다 (startswith 검사) — 질문문 중간/불릿/코드펜스 내부 배치는 미검출. [trigger-reduction] question 은 짧게 유지하고, Falsified: 줄은 해당 옵션의 description 필드에 넣는 것을 권장 — 두 위치 모두 검증됨."
   }
 }
 ```
@@ -716,7 +739,7 @@ stderr (it signals via stdout JSON, not stderr), so a stderr-only check
 could not actually distinguish a real silent pass from an undetected
 the ask decision.
 
-Covers 97 cases (91 pre-#828 + 6 new — description-field satisfaction, per-label coverage regression via description, T2 via description, label-only self-referential bypass regression, cross-option unrelated-description bypass regression, same-normalized-label index-identity bypass regression):
+Covers 100 cases (97 pre-#910 + 3 new message-contract assertions):
 
 **T1 ask-escalation (AskUserQuestion, issue #290 / #393 / #899):**
 
@@ -773,6 +796,12 @@ Covers 97 cases (91 pre-#828 + 6 new — description-field satisfaction, per-lab
 - `(Recommended)` + no `Falsified:` → gate message contains `pre-author-template` ASCII marker
 - confidence-anchoring (`safer`) + no `Falsified:` → ask message contains `pre-author-template` ASCII marker
 - `(Recommended)` + column-0 `Falsified:` present → silent pass (regression — template-level message change must not break satisfaction)
+
+**Exact predicate message cases (issue #910):**
+
+- T1 with 2 triggering labels and generic free-form evidence → still asks, and the reason states the multi-trigger full-label contract
+- T1 with 2 triggering labels whose evidence omits `(Recommended)` → still asks, and the reason states that marker suffixes are part of the full label
+- T2 with 2 triggering labels and near-miss label prefixes → still asks, and the reason states the end-of-line / exact scaffold-delimiter boundary
 
 **Ready-to-fill scaffold cases (issue #787):**
 

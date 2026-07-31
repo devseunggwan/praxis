@@ -647,6 +647,41 @@ run_case "T2: Falsified: mid-line does not satisfy startswith check — still as
       "단계별로 진행. Falsified: no duplicate PR found. 어떻게 할까요?")"
 
 # ---------------------------------------------------------------------------
+# Exact predicate guidance — issue #910
+# ---------------------------------------------------------------------------
+
+# Two triggering labels switch _has_falsified_line into multi-trigger mode.
+# A generic column-0 line is not enough; the reason must expose the exact
+# per-label contract instead of asking for another format-guessing retry.
+run_case "T1 (issue #910): multi-trigger prefix mismatch → reason exposes per-label contract" \
+  "ask:multi-trigger: one line per normalized full option label" \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B (Recommended)"]' \
+      "Falsified: checked all options against open PRs — none found.
+Which one?")"
+
+# A near-match that drops the marker suffix must remain blocked, and the
+# reason must say that marker suffixes are part of the full label.
+run_case "T1 (issue #910): missing marker suffix → reason names suffix requirement" \
+  "ask:including marker suffixes" \
+  "$(make_ask_payload_with_question \
+      '["Option A (Recommended)", "Option B (Recommended)"]' \
+      "Falsified: Option A — probe: gh pr list --search a → none found
+Falsified: Option B — probe: gh pr list --search b → none found
+Which one?")"
+
+# T2 uses the same _has_falsified_line predicate, so its message must expose
+# the same exact label-boundary rule rather than drifting from T1.
+run_case "T2 (issue #910): multi-trigger mismatch → reason exposes label boundary" \
+  "ask:followed by end-of-line or" \
+  "$(make_ask_payload_with_descriptions \
+      '["A safer rollout", "B safest rollout"]' \
+      '["safer for staged release", "safest for direct release"]' \
+      "Falsified: A safer rollout later — probe: checked A → no match
+Falsified: B safest rollout later — probe: checked B → no match
+Which one?")"
+
+# ---------------------------------------------------------------------------
 # Template-level guidance cases — issue #682
 # ---------------------------------------------------------------------------
 

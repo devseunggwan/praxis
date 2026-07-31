@@ -77,9 +77,21 @@ ADVISORY_MSG = (
     "instead of surfacing the proposal."
 )
 
+FALSIFIED_FORMAT_HINT = (
+    "[falsified-format] A clean evidence line starts at column 0. "
+    "single-trigger: any clean line with the exact prefix 'Falsified:' satisfies "
+    "the question. multi-trigger: one line per normalized full option label, "
+    "including marker suffixes when present, such as '(Recommended)'/'(추천)'; "
+    "each line must start "
+    "exactly 'Falsified: {full option label}' and the label must be followed by "
+    "end-of-line or ' — probe: '. A scaffold-shaped line is clean only when its "
+    "evidence after that delimiter is non-empty and has no unfilled placeholder. "
+)
+
 ASK_MSG = (
     "(Recommended) 라벨이 있으나 question body 또는 해당 옵션의 description "
-    "필드 어디에도 'Falsified: <disconfirming test 결과>' 가 없음. "
+    "필드 어디에도 실제 Falsified predicate를 만족하는 clean evidence가 없음. "
+    f"{FALSIFIED_FORMAT_HINT}"
     "CLAUDE.md Self-Falsify Before Recommendation Lock 룰. "
     # Template-level guidance (issue #682): the problem is not only this call —
     # the AskUserQuestion compose template is missing the field. Bake a
@@ -103,7 +115,9 @@ ANCHORING_ASK_MSG = (
     "옵션 라벨/설명에 confidence-anchoring framing 토큰 (safer/safest/"
     "natural/obvious/clearly/default/prefer/recommend/안전한/자연스러운/"
     "당연히/분명히/추천/기본값) 이 있으나 question body 또는 해당 옵션의 "
-    "description 필드 어디에도 'Falsified: <disconfirming test 결과>' 가 없음. "
+    "description 필드 어디에도 실제 Falsified predicate를 만족하는 clean "
+    "evidence가 없음. "
+    f"{FALSIFIED_FORMAT_HINT}"
     "CLAUDE.md Output-Block-Level Falsification Gate. "
     # Template-level guidance (issue #682): bake the Falsified: line into the
     # AskUserQuestion compose template for every anchoring-framed option, not
