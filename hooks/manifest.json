@@ -640,6 +640,18 @@
       }
     },
     {
+      "name": "write-decision-consistency-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Edit|Write",
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_DECISION_CONSISTENCY_GATE"
+        ]
+      }
+    },
+    {
       "name": "path-probe-gate",
       "role": "advisory-nudge",
       "event": "PreToolUse",

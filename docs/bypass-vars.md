@@ -28,6 +28,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH` | `destructive-bash-guard` | Skip the destructive-command guard |
 | `PRAXIS_HOOK_BYPASS_SKILL_GATE` | `skill-gate-commands` | Skip the skill-gated-command preflight |
 | `PRAXIS_HOOK_BYPASS_WORKTREE_GATE` | `worktree-edit-gate` | Skip the worktree-edit preflight |
+| `PRAXIS_HOOK_BYPASS_DECISION_CONSISTENCY_GATE` | `write-decision-consistency-gate` | Skip the Decisions-block consistency preflight |
 | `PRAXIS_HOOK_BYPASS_WORKTREE_PRUNE_SNAPSHOT` | `worktree-prune-snapshot-gate` | Skip the snapshot-before-prune gate |
 | `PRAXIS_HOOK_BYPASS_MERGE_WORKTREE_GATE` | `gh-merge-worktree-precondition` | Skip the `gh pr merge --delete-branch` worktree-conflict precondition check |
 | `PRAXIS_HOOK_BYPASS_HUB_ENFORCE` | `block-child-repo-issue-create` | Skip the hub-mediated child-repo issue guard |
