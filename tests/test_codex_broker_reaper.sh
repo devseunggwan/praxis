@@ -9,14 +9,16 @@
 #      /tmp/../Users/me/cxc-x string-matches the /tmp/* allowlist yet resolves
 #      OUTSIDE the temp root, letting rm -rf escape.
 #   3. (#919) The reap decision itself. Idleness does not imply the owner is
-#      gone, so a kill needs positive orphan evidence about the broker's
-#      WORKSPACE ROOT: it was deleted, or no live process has it as its cwd.
-#      Anything undetermined must keep the broker. (Children are NOT a liveness
-#      signal — the broker spawns `codex app-server` at startup and closes it
+#      gone, so a kill needs positive orphan evidence: the broker's WORKSPACE
+#      ROOT has been deleted. Anything else — including a workspace that still
+#      exists — must keep the broker. (Children are NOT a liveness signal
+#      either: the broker spawns `codex app-server` at startup and closes it
 #      only on its own shutdown, so orphans keep a child too.)
 #
 # Run:  ./tests/test_codex_broker_reaper.sh
 # Exit: 0 on success, 1 on first failure (after summary).
+# Gates whose platform prerequisites are missing print a SKIPPED line and are
+# listed in the summary; they never fail the run.
 
 set +e
 
@@ -31,9 +33,13 @@ fi
 PASS=0
 FAIL=0
 FAILED_NAMES=()
+SKIPPED_NAMES=()
 
 pass() { PASS=$((PASS + 1)); echo "  PASS  $1"; }
 fail() { FAIL=$((FAIL + 1)); FAILED_NAMES+=("$1"); echo "  FAIL  $1" >&2; }
+# A gate whose platform prerequisites are absent. Announced here and listed in
+# the summary — never silently dropped (mirrors run-tests.sh's SKIPPED lines).
+skip() { SKIPPED_NAMES+=("$1"); echo "SKIPPED: $1"; }
 
 # --- Gate 1: --max-age validation -------------------------------------------
 # Expect exit 2 (rejected) for non-positive / non-numeric values.
@@ -85,35 +91,33 @@ else
   assert_reject "/etc/cxc-a"                   # outside allowlist
 fi
 
-# --- Gate 3: #919 owner-liveness oracle (behavior) ---------------------------
+# --- Gate 3: #919 owner-death oracle (behavior) ------------------------------
 # Real execution against synthetic processes. The shipped pgrep pattern
-# (app-server-broker.mjs) would match this host's PRODUCTION brokers, so the SUT
-# is copied with ONLY BROKER_PATTERN rewritten to this run's unique fixture path
-# — the reap decision under test is the shipped code, and every pid the copy can
-# see is one this test started. CLAUDE_CONFIG_DIR points the state root at a
-# sandbox tree, so the real ~/.claude state dirs are never read or written, and
+# (app-server-broker.mjs) would match a developer host's PRODUCTION brokers, so
+# the SUT is copied with ONLY BROKER_PATTERN rewritten to this run's unique
+# fixture path — the reap decision under test is the shipped code, and every pid
+# the copy can see is one this test started. CLAUDE_CONFIG_DIR points the state
+# root at a sandbox tree, so real state dirs are never read or written, and
 # TMPDIR keeps the lock inside the sandbox too.
 #
-# The fixtures mirror two production invariants that the oracle depends on:
-#   - a broker is started IN its workspace root and never chdirs, and its
-#     app-server child inherits that cwd (so both must be subtracted before
-#     "someone is working here" can mean anything);
-#   - broker.json files of crashed brokers are never GC'd, so a pid can be
-#     claimed by more than one state dir.
-#
-# Seven brokers, all equally idle, differing only in owner evidence:
-#   ALIVE   workspace has a live process outside the broker tree → survive
-#   WSGONE  workspaceRoot recorded, directory deleted            → reap (C)
-#   NOCWD   only the broker tree itself sits in the workspace    → reap (D)
-#   NOJOBS  state dir without jobs/*.json (undeterminable)       → survive
-#   NOSTATE no state dir claims the pid (undeterminable)         → survive
+# Six brokers, all equally idle, differing only in owner evidence:
+#   ALIVE   workspaceRoot recorded and still present        → survive
+#   WSGONE  workspaceRoot recorded, directory deleted        → reap
+#   NOJOBS  state dir without jobs/*.json (undeterminable)   → survive
+#   NOSTATE no state dir claims the pid (undeterminable)     → survive
 #   PIDDUP  a stale state dir claims the same pid; the sessionDir-matching one
-#           (workspace alive) must win over it                   → survive
-#   AMBIG   two state dirs match both pid AND sessionDir         → survive
+#           (workspace alive) must win over it               → survive
+#   AMBIG   two state dirs match both pid AND sessionDir     → survive
+#
+# The reaper's idle gate reads mtime through BSD `stat -f %m`, which is Darwin
+# syntax, so this gate is skipped elsewhere (the CI runner is Ubuntu).
+if [ "$(uname -s)" != "Darwin" ]; then
+  skip "gate 3 owner-death behavior (needs Darwin: reaper's idle gate uses BSD 'stat -f %m')"
+else
 
-TMPD="$(mktemp -d /private/tmp/px919.XXXXXX)"
+TMPROOT="${TMPDIR:-/tmp}"; TMPROOT="${TMPROOT%/}"
+TMPD="$(mktemp -d "$TMPROOT/px919.XXXXXX")"
 FIXTURE="$TMPD/broker-fixture.sh"
-HOLDER="$TMPD/cwd-holder.sh"
 REAPER_COPY="$TMPD/reaper-copy.sh"
 STATE_ROOT="$TMPD/config/plugins/data/codex-openai-codex/state"
 FIXTURE_PIDS=()
@@ -140,14 +144,6 @@ exec 3<> "$PX919_FIFO"
 read -r -u 3
 FIX
 
-# What "someone is working in this workspace" looks like to the cwd scan.
-cat > "$HOLDER" <<'HOLD'
-#!/bin/bash
-cd "$PX919_CWD" || exit 1
-exec 3<> "$PX919_FIFO"
-read -r -u 3
-HOLD
-
 sed "s|^BROKER_PATTERN=.*|BROKER_PATTERN='$FIXTURE'|" "$REAPER" > "$REAPER_COPY"
 
 proc_alive() {
@@ -160,15 +156,6 @@ proc_gone() {
   local i
   for i in $(seq 1 30); do
     proc_alive "$1" || return 0
-    sleep 0.1
-  done
-  return 1
-}
-# Wait until $1 reports $2 as its cwd, so the scan cannot race the fixture.
-wait_for_cwd() {
-  local i
-  for i in $(seq 1 50); do
-    if lsof -a -d cwd -p "$1" -Fn -w 2>/dev/null | grep -qx "n$2"; then return 0; fi
     sleep 0.1
   done
   return 1
@@ -194,16 +181,6 @@ start_broker() {
   printf '%s' "$pid"   # caller records it in FIXTURE_PIDS (this runs in a subshell)
 }
 
-start_cwd_holder() {
-  local dir="$1"
-  local fifo="$TMPD/holder-$2.fifo"
-  local pid
-  mkfifo "$fifo"
-  PX919_FIFO="$fifo" PX919_CWD="$dir" bash "$HOLDER" >/dev/null 2>&1 &
-  pid=$!
-  printf '%s' "$pid"
-}
-
 # A state dir as the plugin writes it: broker.json carries pid + sessionDir,
 # jobs/*.json the workspaceRoot. $5 names the sessionDir it claims, which is how
 # a stale duplicate is told apart from the real one.
@@ -222,29 +199,25 @@ write_state() {
 if ! grep -q "^BROKER_PATTERN='$FIXTURE'$" "$REAPER_COPY"; then
   fail "#919: could not isolate BROKER_PATTERN in the reaper copy (refusing to run against real brokers)"
 else
-  for w in alive wsgone nocwd nojobs nostate piddup pidgone ambig ambgone; do
+  for w in alive wsgone nojobs nostate piddup pidgone ambig ambgone; do
     mkdir -p "$TMPD/ws-$w"
   done
-  WS_ALIVE="$TMPD/ws-alive"; WS_GONE="$TMPD/ws-wsgone"; WS_NOCWD="$TMPD/ws-nocwd"
+  WS_ALIVE="$TMPD/ws-alive"; WS_GONE="$TMPD/ws-wsgone"
   WS_NOJOBS="$TMPD/ws-nojobs"; WS_NOSTATE="$TMPD/ws-nostate"
   WS_PIDDUP="$TMPD/ws-piddup"; WS_PIDGONE="$TMPD/ws-pidgone"
   WS_AMBIG="$TMPD/ws-ambig"; WS_AMBGONE="$TMPD/ws-ambgone"
 
   PID_ALIVE="$(start_broker ALIVE "$WS_ALIVE")"
   PID_WSGONE="$(start_broker WSGONE "$WS_GONE")"
-  PID_NOCWD="$(start_broker NOCWD "$WS_NOCWD")"
   PID_NOJOBS="$(start_broker NOJOBS "$WS_NOJOBS")"
   PID_NOSTATE="$(start_broker NOSTATE "$WS_NOSTATE")"
   PID_PIDDUP="$(start_broker PIDDUP "$WS_PIDDUP")"
   PID_AMBIG="$(start_broker AMBIG "$WS_AMBIG")"
-  HOLDER_ALIVE="$(start_cwd_holder "$WS_ALIVE" alive)"
-  HOLDER_PIDDUP="$(start_cwd_holder "$WS_PIDDUP" piddup)"
-  FIXTURE_PIDS+=("$PID_ALIVE" "$PID_WSGONE" "$PID_NOCWD" "$PID_NOJOBS" "$PID_NOSTATE"
-                 "$PID_PIDDUP" "$PID_AMBIG" "$HOLDER_ALIVE" "$HOLDER_PIDDUP")
+  FIXTURE_PIDS+=("$PID_ALIVE" "$PID_WSGONE" "$PID_NOJOBS" "$PID_NOSTATE"
+                 "$PID_PIDDUP" "$PID_AMBIG")
 
   write_state alive   "$WS_ALIVE"   "$PID_ALIVE"   1 ALIVE
   write_state wsgone  "$WS_GONE"    "$PID_WSGONE"  1 WSGONE
-  write_state nocwd   "$WS_NOCWD"   "$PID_NOCWD"   1 NOCWD
   write_state nojobs  "$WS_NOJOBS"  "$PID_NOJOBS"  0 NOJOBS
   # NOSTATE deliberately gets no state dir at all.
 
@@ -256,17 +229,20 @@ else
   write_state aaaambig "$WS_AMBGONE" "$PID_AMBIG"  1 AMBIG
   write_state ambig    "$WS_AMBIG"   "$PID_AMBIG"  1 AMBIG
 
-  rmdir "$WS_GONE" "$WS_PIDGONE" "$WS_AMBGONE"   # signal C for these workspaces
+  rmdir "$WS_GONE" "$WS_PIDGONE" "$WS_AMBGONE"   # the deleted workspaces
 
-  if ! wait_for_cwd "$HOLDER_ALIVE" "$WS_ALIVE" || ! wait_for_cwd "$HOLDER_PIDDUP" "$WS_PIDDUP"; then
-    fail "#919: cwd holders never entered their workspaces"
-  elif ! wait_for_cwd "$PID_NOCWD" "$WS_NOCWD" || ! wait_for_cwd "$PID_ALIVE" "$WS_ALIVE"; then
-    fail "#919: fixture brokers never entered their workspaces"
+  ready=true
+  for p in "$PID_ALIVE" "$PID_WSGONE" "$PID_NOJOBS" "$PID_NOSTATE" "$PID_PIDDUP" "$PID_AMBIG"; do
+    proc_alive "$p" || ready=false
+  done
+
+  if [ "$ready" != true ]; then
+    fail "#919: fixture brokers did not come up"
   else
     DRY_OUT="$(TMPDIR="$TMPD" CLAUDE_CONFIG_DIR="$TMPD/config" bash "$REAPER_COPY" --reap --max-age 5 --dry-run 2>&1)"
 
     case "$DRY_OUT" in
-      *"SKIP   pid=$PID_ALIVE (owner alive"*) pass "#919 dry-run: broker whose workspace has another live cwd is SKIP" ;;
+      *"SKIP   pid=$PID_ALIVE (owner alive"*) pass "#919 dry-run: broker with a live workspace is SKIP (owner alive)" ;;
       *) fail "#919 dry-run: expected owner-alive SKIP for pid=$PID_ALIVE, got: $DRY_OUT" ;;
     esac
     case "$DRY_OUT" in
@@ -276,11 +252,11 @@ else
 
     REAP_OUT="$(TMPDIR="$TMPD" CLAUDE_CONFIG_DIR="$TMPD/config" bash "$REAPER_COPY" --reap --max-age 5 2>&1)"
 
-    # 1. Regression: idle + someone else working in the workspace → survive.
+    # 1. Regression: idle is not death — a live workspace keeps the broker.
     if proc_alive "$PID_ALIVE"; then
-      pass "#919 regression: idle broker with a live workspace cwd survived --reap"
+      pass "#919 regression: idle broker with a live workspace survived --reap"
     else
-      fail "#919 regression: idle broker with a live workspace cwd was killed (output: $REAP_OUT)"
+      fail "#919 regression: idle broker with a live workspace was killed (output: $REAP_OUT)"
     fi
     if [ -d "$TMPD/cxc-ALIVE" ]; then
       pass "#919 regression: surviving broker's sessionDir kept"
@@ -288,12 +264,12 @@ else
       fail "#919 regression: surviving broker's sessionDir was removed"
     fi
     case "$REAP_OUT" in
-      *"SKIP   pid=$PID_ALIVE (owner alive: pid $HOLDER_ALIVE is working in $WS_ALIVE)"*)
-        pass "#919 regression: skip reason names the live pid and workspace" ;;
-      *) fail "#919 regression: expected owner-alive SKIP naming pid $HOLDER_ALIVE in $WS_ALIVE, got: $REAP_OUT" ;;
+      *"SKIP   pid=$PID_ALIVE (owner alive: workspace $WS_ALIVE still exists)"*)
+        pass "#919 regression: skip reason names the live workspace" ;;
+      *) fail "#919 regression: expected owner-alive SKIP naming $WS_ALIVE, got: $REAP_OUT" ;;
     esac
 
-    # 2. Signal C — workspaceRoot recorded but the directory is gone → reap.
+    # 2. The one orphan signal — workspaceRoot recorded, directory gone → reap.
     if proc_gone "$PID_WSGONE"; then
       pass "#919 C: broker whose workspace was deleted is reaped"
     else
@@ -309,19 +285,7 @@ else
       fail "#919 C: reaped broker's sessionDir still present"
     fi
 
-    # 3. Signal D — the broker's OWN tree sits in the workspace and must not
-    #    count as an owner, or D can never fire (codex round-2 F2).
-    if proc_gone "$PID_NOCWD"; then
-      pass "#919 D: broker alone in its workspace is reaped (own tree excluded)"
-    else
-      fail "#919 D: broker alone in its workspace survived --reap (output: $REAP_OUT)"
-    fi
-    case "$REAP_OUT" in
-      *"REAPED pid=$PID_NOCWD"*) pass "#919 D: reap reported for the unused-workspace broker" ;;
-      *) fail "#919 D: expected REAPED line for pid=$PID_NOCWD, got: $REAP_OUT" ;;
-    esac
-
-    # 4. Undeterminable owners must fall to KEEP.
+    # 3. Undeterminable owners must fall to KEEP.
     if proc_alive "$PID_NOJOBS"; then
       pass "#919 safe-default: broker with no jobs file survived --reap"
     else
@@ -343,15 +307,15 @@ else
       *) fail "#919 safe-default: expected unknown-owner SKIP for pid=$PID_NOSTATE, got: $REAP_OUT" ;;
     esac
 
-    # 5. PID reuse — a stale broker.json claiming the same pid must not decide
-    #    the verdict (codex round-2 F3).
+    # 4. PID reuse — a stale broker.json claiming the same pid must not decide
+    #    the verdict, or its deleted workspace kills a live broker.
     if proc_alive "$PID_PIDDUP"; then
       pass "#919 F3: stale duplicate state dir did not get the live broker killed"
     else
       fail "#919 F3: broker killed via a stale state dir claiming its pid (output: $REAP_OUT)"
     fi
     case "$REAP_OUT" in
-      *"SKIP   pid=$PID_PIDDUP (owner alive: pid $HOLDER_PIDDUP is working in $WS_PIDDUP)"*)
+      *"SKIP   pid=$PID_PIDDUP (owner alive: workspace $WS_PIDDUP still exists)"*)
         pass "#919 F3: the sessionDir-matching state dir is the one adopted" ;;
       *) fail "#919 F3: expected the sessionDir-matching state dir to decide pid=$PID_PIDDUP, got: $REAP_OUT" ;;
     esac
@@ -367,10 +331,21 @@ else
     esac
   fi
 fi
+
+fi   # Darwin gate
 echo ""
 echo "=== summary ==="
 echo "PASS: $PASS"
 echo "FAIL: $FAIL"
+echo "SKIP: ${#SKIPPED_NAMES[@]}"
+
+if [ "${#SKIPPED_NAMES[@]}" -gt 0 ]; then
+  echo ""
+  echo "Skipped gates:"
+  for n in "${SKIPPED_NAMES[@]}"; do
+    echo "  - $n"
+  done
+fi
 
 if [ "$FAIL" -gt 0 ]; then
   echo ""

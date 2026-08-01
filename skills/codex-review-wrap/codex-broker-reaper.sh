@@ -16,21 +16,21 @@
 #     A session idle between turns leaves broker.log untouched — that is how
 #     #919 killed 13 live sessions.
 #   - So a kill also requires positive evidence that the owner is GONE: the
-#     broker's workspace root (recovered from its state dir) has been deleted,
-#     or no live process is working in it. See the owner-liveness oracle below.
-#   - Every indeterminate signal KEEPS the broker: unknown idleness (no
-#     logFile), no state dir for the pid, no recorded workspaceRoot, or a
-#     failed cwd scan.
+#     broker's workspace root, recovered from its state dir, has been deleted.
+#     See the owner-liveness oracle below.
+#   - Every other signal KEEPS the broker: unknown idleness (no logFile), no
+#     unambiguous state dir for the pid, no recorded workspaceRoot, or a
+#     workspace that still exists. Under-reaping is the intended bias.
 #   - A reap therefore costs at worst a respawn on the next codex call in a
-#     workspace nobody is using.
+#     workspace that has been deleted.
 #
 # Modes:
 #   --gc                 GC only: remove stale tmp sessionDirs whose broker pid
 #                        is dead. Zero risk. (default)
 #   --reap [--max-age N] Also kill RUNNING brokers idle > N minutes (default 30)
-#                        whose owning workspace is provably gone, then GC. Used
-#                        by the launchd job and the opt-in
-#                        PRAXIS_CODEX_REAP=1 path in codex-review-wrap.
+#                        whose workspace root has been deleted, then GC. Used by
+#                        the launchd job and the opt-in PRAXIS_CODEX_REAP=1 path
+#                        in codex-review-wrap.
 #   --dry-run            Print actions without executing.
 #
 # macOS-only: the leak it addresses is inherent to launchd reparenting and the
@@ -53,8 +53,9 @@ Usage: codex-broker-reaper.sh [--gc | --reap] [--max-age MINUTES] [--dry-run]
 
   --gc            Remove stale tmp sessionDirs of dead brokers (zero risk). Default.
   --reap          Also kill running brokers idle longer than --max-age whose
-                  owning workspace is provably gone (deleted, or no live process
-                  works in it), then GC. Anything undetermined is kept.
+                  workspace root has been deleted, then GC. A broker whose
+                  workspace still exists, or whose owner cannot be determined,
+                  is kept.
   --max-age N     Idle-minutes threshold for --reap (default: 30).
   --dry-run       Show what would happen; make no changes.
   -h, --help      This help.
@@ -150,45 +151,21 @@ is_safe_session_dir() {
 # and only closes it from its own shutdown path, so a genuine orphan keeps that
 # child forever. Every live broker observed had one, and so would every orphan.
 #
-# The broker's owning unit is the WORKSPACE ROOT, not the session: the plugin
-# names its state dir `<slug>-<sha256(workspaceRoot) first 16 hex>`. That gives
-# two positive orphan signals — a broker is reaped only when one of them fires:
+# The broker's owning unit is the WORKSPACE ROOT, not the session. Exactly ONE
+# positive orphan signal is trusted here:
 #   C  workspaceRoot is known (from the state dir's jobs/*.json) and that
 #      directory no longer exists → the worktree is gone → orphan.
-#   D  workspaceRoot still exists but no live process OUTSIDE the broker's own
-#      tree has it as its cwd → nothing is working in that workspace → orphan.
-# Every indeterminate path (no unambiguous state dir for the pid, no jobs file,
-# lsof or shasum failure) reports "unknown" and the broker is KEPT.
-
-# "<pid> <sha256-16 of its cwd>" per live process. The pid is retained because
-# the broker itself is started IN its workspace root and never chdirs — so is
-# its app-server child. Counting those as "someone is working here" would make
-# signal D unfirable, so the caller subtracts the tree it is judging.
+# Every other outcome KEEPS the broker: workspace still present, no unambiguous
+# state dir for the pid, no jobs file, no recorded workspaceRoot.
 #
-# owner_status() runs inside a command substitution, so this snapshot lives for
-# exactly one judgement — which is what the pre-kill re-check needs anyway.
-# Empty map => the scan failed; LIVE_CWD_SCAN_OK distinguishes it from unrun.
-LIVE_CWD_MAP=""
-LIVE_CWD_SCAN_OK=false
-scan_live_cwds() {
-  if [[ "$LIVE_CWD_SCAN_OK" == "true" ]]; then return 0; fi
-  local raw line cur="" h
-  raw="$(lsof -a -d cwd -Fpn -w 2>/dev/null)"
-  [[ -n "$raw" ]] || return 0
-  while IFS= read -r line; do
-    case "$line" in
-      p*) cur="${line#p}" ;;
-      n*)
-        [[ -n "$cur" ]] || continue
-        h="$(printf '%s' "${line#n}" | shasum -a 256 2>/dev/null | cut -c1-16)"
-        [[ -n "$h" ]] && LIVE_CWD_MAP="$LIVE_CWD_MAP$cur $h"$'\n'
-        ;;
-    esac
-  done <<< "$raw"
-  [[ -n "$LIVE_CWD_MAP" ]] && LIVE_CWD_SCAN_OK=true
-  return 0
-}
-
+# A second signal — "workspace exists but nobody is working in it", decided by
+# matching live process cwds against the state dir's workspace hash — was built
+# and then dropped from this pass. It could not be made safe here: the plugin
+# records the GIT ROOT as workspaceRoot while a session's cwd may be any
+# subdirectory (lib/workspace.mjs `resolveWorkspaceRoot` -> `ensureGitRepository`),
+# so exact matching reports a live owner as dead. It also depends on `lsof`,
+# which the Ubuntu CI runner cannot be assumed to provide, and costs a full cwd
+# scan per broker. That recovery path is tracked separately.
 # The one state dir that belongs to this broker, or empty when that cannot be
 # decided. pid alone is not a key: broker.json files left behind by crashed
 # brokers are never GC'd, and pids get reused (observed: two state dirs claiming
@@ -211,14 +188,10 @@ state_dir_of_broker() {
 # "<status>:<reason>" where status is dead | alive | unknown. Only `dead`
 # licenses a kill. $2 is the sessionDir read off the broker's command line.
 owner_status() {
-  local pid="$1" want="$2" sdir suffix wroot own lpid lhash
+  local pid="$1" want="$2" sdir wroot
   sdir="$(state_dir_of_broker "$pid" "$want")"
   if [[ -z "$sdir" ]]; then
     printf 'unknown:no single state dir matches this pid and sessionDir'; return 0
-  fi
-  suffix="$(basename "$sdir")"; suffix="${suffix##*-}"
-  if [[ ! "$suffix" =~ ^[0-9a-f]{16}$ ]]; then
-    printf 'unknown:state dir %s has no workspace hash suffix' "$(basename "$sdir")"; return 0
   fi
   wroot="$(jq -r '.workspaceRoot // empty' "$sdir"/jobs/*.json 2>/dev/null | head -1 || true)"
   if [[ -z "$wroot" ]]; then
@@ -227,20 +200,7 @@ owner_status() {
   if [[ ! -d "$wroot" ]]; then
     printf 'dead:workspace %s no longer exists' "$wroot"; return 0
   fi
-  scan_live_cwds
-  if [[ "$LIVE_CWD_SCAN_OK" != "true" ]]; then
-    printf 'unknown:live-cwd scan produced nothing'; return 0
-  fi
-  # The broker and its app-server child sit in the workspace themselves, so they
-  # are subtracted before the match — otherwise every broker would vouch for its
-  # own owner and D could never fire.
-  own=" $(collect_tree "$pid")"
-  while read -r lpid lhash; do
-    [[ "$lhash" == "$suffix" ]] || continue
-    case "$own" in *" $lpid "*) continue ;; esac
-    printf 'alive:pid %s is working in %s' "$lpid" "$wroot"; return 0
-  done <<< "$LIVE_CWD_MAP"
-  printf 'dead:no live process outside the broker tree has %s as its cwd' "$wroot"
+  printf 'alive:workspace %s still exists' "$wroot"
 }
 
 # Best-effort single instance: the opt-in phase-end reaper and the launchd job
@@ -298,8 +258,8 @@ if [[ "$MODE" == "reap" ]]; then
         echo "SKIP   pid=$pid (became active before kill)"
         skipped=$(( skipped + 1 )); continue
       fi
-      # Same re-check for ownership: work can start in the workspace during the
-      # gap, and each call takes its own cwd snapshot.
+      # Same re-check for ownership: the workspace can be restored (a worktree
+      # re-added, a checkout redone) between the gate and the kill.
       owner="$(owner_status "$pid" "$sdir")"
       if [[ "${owner%%:*}" != "dead" ]]; then
         echo "SKIP   pid=$pid (owner ${owner%%:*} before kill: ${owner#*:})"
