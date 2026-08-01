@@ -133,8 +133,8 @@ P2=$(build_payload "$T2" '["Implement", "Review", "End here"]')
 run_case "english end marker, neutral user message" block default "$P2"
 
 T3=$(build_transcript "다음 단계 진행해주세요")
-P3=$(build_payload "$T3" '["Step 1", "Step 2", "세션 종료"]')
-run_case "korean continuation, korean end marker" block default "$P3"
+P3=$(build_payload "$T3" '["Step 1", "Step 2", "세션 종료 — 여기서 끊자"]')
+run_case "korean continuation, korean end marker (heading-separator)" block default "$P3"
 
 # ---------------------------------------------------------------------------
 # (b) BLOCK cases — explicit strict env var (deprecated, still honoured)
@@ -480,6 +480,28 @@ run_case "[#236-fp] '회의 마무리 방식 검토' (compound) → pass" pass d
 T_fp_inf3=$(build_transcript "이슈 정렬 기준 알려주세요")
 P_fp_inf3=$(build_payload "$T_fp_inf3" '["종료 시각 기준", "생성 시각 기준", "우선순위 기준"]')
 run_case "[#236-fp] '종료 시각 기준' (inflected noun) → pass" pass default "$P_fp_inf3"
+
+# ---------------------------------------------------------------------------
+# (n-pre2) Issue #922 — bare "세션 종료" false positives on work labels
+# ---------------------------------------------------------------------------
+#
+# "세션 종료" was a bare phrased marker matching any label containing the
+# substring, regardless of separator. "세션" is an everyday noun for
+# process/workspace/agent sessions in this tool environment, so it clustered
+# in legitimate work labels. Demoted to the same heading-separator condition
+# as bare 종료/그만/마무리 (see END_OPTION_MARKERS_KO comment in impl.py).
+
+T_922_1=$(build_transcript "프로세스 정리 부탁해")
+P_922_1=$(build_payload "$T_922_1" '["전부 정리", "중복 MCP만, 부모 세션 종료 후", "그대로 둠"]')
+run_case "[#922-fp] '중복 MCP만, 부모 세션 종료 후' (real-world label) → pass" pass default "$P_922_1"
+
+T_922_2=$(build_transcript "남은 중복 MCP 어떻게 할까요")
+P_922_2=$(build_payload "$T_922_2" '["지금 정리", "21873 세션 종료 여부를 먼저 확인", "보류"]')
+run_case "[#922-fp] '21873 세션 종료 여부를 먼저 확인' (real-world label) → pass" pass default "$P_922_2"
+
+T_922_pos=$(build_transcript "다음 단계 진행해주세요")
+P_922_pos=$(build_payload "$T_922_pos" '["Plan A", "Plan B", "세션 종료 — 컨텍스트"]')
+run_case "[#922-pos] '세션 종료 —' separator label still blocks" block default "$P_922_pos"
 
 # ---------------------------------------------------------------------------
 # (n) False positive avoidance — legitimate work options must NOT be blocked

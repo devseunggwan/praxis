@@ -112,7 +112,6 @@ present, opt out for that call with `PRAXIS_ASK_END_ADVISORY=1`.
 Phrased forms:
 
 - `여기서 종료`
-- `세션 종료`
 - `여기서 끝`
 - `여기까지`
 
@@ -123,14 +122,21 @@ nouns like `종료된`, `마무리 방식`:
 - `종료 —`, `종료 -`, `종료:`
 - `그만 —`, `그만 -`, `그만:`
 - `마무리 —`, `마무리 -`, `마무리:`
+- `세션 종료 —`, `세션 종료 -`, `세션 종료:` (demoted from a bare phrased
+  form by issue #922 — `세션` is an everyday noun for
+  process/workspace/agent sessions in this tool environment, so bare
+  `세션 종료` clustered in legitimate work labels like
+  `중복 MCP만, 부모 세션 종료 후` and `21873 세션 종료 여부를 먼저 확인`;
+  same false-positive risk the bare-token exception below already guards
+  against)
 
-Bare `종료` / `그만` / `마무리` are intentionally **not** markers on the
-option-label side: Korean productively inflects, and labels like
-`종료된 이슈 목록` / `회의 마무리 방식 검토` / `종료 시각 기준` are
-legitimate triage options. The asymmetry with `STOP_SIGNALS_KO` (which
-does match these bare tokens in user prose) is intentional — option
-labels are exactly where these noun forms cluster, while user messages
-typically use phrasal stop signals.
+Bare `종료` / `그만` / `마무리` / `세션 종료` are intentionally **not**
+markers on the option-label side: Korean productively inflects, and labels
+like `종료된 이슈 목록` / `회의 마무리 방식 검토` / `종료 시각 기준` /
+`21873 세션 종료 여부를 먼저 확인` are legitimate triage options. The
+asymmetry with `STOP_SIGNALS_KO` (which does match these bare tokens in user
+prose) is intentional — option labels are exactly where these noun forms
+cluster, while user messages typically use phrasal stop signals.
 
 #### Indirect end-option markers (Korean)
 
@@ -213,8 +219,11 @@ bash hooks/test-block-ask-end-option.sh
 
 Covers: direct Korean/English end markers (block + advisory modes),
 heading-separator KO end-tokens in option labels (issue #236 — `종료 —`,
-`그만 —`, `마무리:`, etc.) including inflected-noun false-positive regression
-(`종료된 이슈 목록`, `회의 마무리 방식 검토`, `종료 시각 기준`), indirect
+`그만 —`, `마무리:`, etc., plus `세션 종료 —` per issue #922) including
+inflected-noun false-positive regression (`종료된 이슈 목록`,
+`회의 마무리 방식 검토`, `종료 시각 기준`) and the issue-#922 real-world
+false positives (`중복 MCP만, 부모 세션 종료 후`,
+`21873 세션 종료 여부를 먼저 확인`), indirect
 English phrasing (take a break, prioritize other work, pause for now, resume in
 a later session, other work first), indirect Korean phrasing (잠시 멈춰, 잠시
 보류, 휴식, 다른 작업 우선, 다음 세션), 4-option padding pattern (4th

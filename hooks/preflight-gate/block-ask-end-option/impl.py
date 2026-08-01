@@ -70,7 +70,6 @@ from _transcript import read_last_user_message  # type: ignore[import-not-found]
 # collide with inflected nouns.
 END_OPTION_MARKERS_KO = (
     "여기서 종료",
-    "세션 종료",
     "여기서 끝",
     "여기까지",
     # Heading-separator patterns for bare KO end-tokens (issue #236).
@@ -79,6 +78,13 @@ END_OPTION_MARKERS_KO = (
     "종료 —", "종료 -", "종료:",
     "그만 —", "그만 -", "그만:",
     "마무리 —", "마무리 -", "마무리:",
+    # "세션 종료" demoted to the same heading-separator condition (issue
+    # #922). "세션" is an everyday noun for process/workspace/agent
+    # sessions in this tool environment, so bare "세션 종료" clusters in
+    # legitimate work labels ("중복 MCP만, 부모 세션 종료 후",
+    # "21873 세션 종료 여부를 먼저 확인") — same false-positive risk the
+    # bare-token exception above already guards against.
+    "세션 종료 —", "세션 종료 -", "세션 종료:",
     # Indirect Korean: pause / break / defer / other-work framing.
     # Bare "보류" intentionally omitted: substring match would false-block
     # legitimate work labels like "보류 중인 이슈 확인" / "보류 상태 검토".
