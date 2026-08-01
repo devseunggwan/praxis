@@ -119,7 +119,13 @@ TMPROOT="${TMPDIR:-/tmp}"; TMPROOT="${TMPROOT%/}"
 TMPD="$(mktemp -d "$TMPROOT/px919.XXXXXX")"
 FIXTURE="$TMPD/broker-fixture.sh"
 REAPER_COPY="$TMPD/reaper-copy.sh"
-STATE_ROOT="$TMPD/config/plugins/data/codex-openai-codex/state"
+# The space is deliberate: CLAUDE_CONFIG_DIR is relocatable (CONTRIBUTING.md),
+# and a bare `for f in $(grep -l ...)` over the state dir splits such a path at
+# the space — every lookup misses, every broker reads as "unknown", and the reap
+# pass silently dies. Keeping the fixture path spaced makes that a standing
+# regression check for the whole gate rather than one bolted-on case.
+CONFIG_FIXTURE="$TMPD/config dir"
+STATE_ROOT="$CONFIG_FIXTURE/plugins/data/codex-openai-codex/state"
 FIXTURE_PIDS=()
 
 cleanup_fixtures() {
@@ -239,7 +245,7 @@ else
   if [ "$ready" != true ]; then
     fail "#919: fixture brokers did not come up"
   else
-    DRY_OUT="$(TMPDIR="$TMPD" CLAUDE_CONFIG_DIR="$TMPD/config" bash "$REAPER_COPY" --reap --max-age 5 --dry-run 2>&1)"
+    DRY_OUT="$(TMPDIR="$TMPD" CLAUDE_CONFIG_DIR="$CONFIG_FIXTURE" bash "$REAPER_COPY" --reap --max-age 5 --dry-run 2>&1)"
 
     case "$DRY_OUT" in
       *"SKIP   pid=$PID_ALIVE (owner alive"*) pass "#919 dry-run: broker with a live workspace is SKIP (owner alive)" ;;
@@ -250,7 +256,7 @@ else
       *) fail "#919 dry-run: expected WOULD REAP for pid=$PID_WSGONE, got: $DRY_OUT" ;;
     esac
 
-    REAP_OUT="$(TMPDIR="$TMPD" CLAUDE_CONFIG_DIR="$TMPD/config" bash "$REAPER_COPY" --reap --max-age 5 2>&1)"
+    REAP_OUT="$(TMPDIR="$TMPD" CLAUDE_CONFIG_DIR="$CONFIG_FIXTURE" bash "$REAPER_COPY" --reap --max-age 5 2>&1)"
 
     # 1. Regression: idle is not death — a live workspace keeps the broker.
     if proc_alive "$PID_ALIVE"; then

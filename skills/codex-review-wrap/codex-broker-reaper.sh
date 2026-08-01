@@ -176,11 +176,17 @@ is_safe_session_dir() {
 state_dir_of_broker() {
   local pid="$1" want="$2" bj found="" n=0
   [[ -n "$want" ]] || return 0
-  for bj in $(grep -lE "\"pid\"[[:space:]]*:[[:space:]]*$pid([^0-9]|\$)" "$STATE_DIR"/*/broker.json 2>/dev/null || true); do
+  # Read the grep hits line by line instead of splitting a bare command
+  # substitution: CLAUDE_CONFIG_DIR is relocatable (CONTRIBUTING.md), so a path
+  # like "/Volumes/External Drive/.claude" would otherwise be split at the space
+  # and every jq lookup would miss — leaving each broker "unknown" and the reap
+  # pass dead. Process substitution keeps the counters in this shell.
+  while IFS= read -r bj; do
+    [[ -n "$bj" ]] || continue
     [[ "$(jq -r '.pid // empty' "$bj" 2>/dev/null || true)" == "$pid" ]] || continue
     [[ "$(jq -r '.sessionDir // empty' "$bj" 2>/dev/null || true)" == "$want" ]] || continue
     found="$(dirname "$bj")"; n=$(( n + 1 ))
-  done
+  done < <(grep -lE "\"pid\"[[:space:]]*:[[:space:]]*$pid([^0-9]|\$)" "$STATE_DIR"/*/broker.json 2>/dev/null || true)
   (( n == 1 )) && printf '%s' "$found"
   return 0
 }
