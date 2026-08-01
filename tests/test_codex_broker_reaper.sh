@@ -116,7 +116,7 @@ if [ "$(uname -s)" != "Darwin" ]; then
 else
 
 TMPROOT="${TMPDIR:-/tmp}"; TMPROOT="${TMPROOT%/}"
-TMPD="$(mktemp -d "$TMPROOT/px919.XXXXXX")"
+TMPD="$(mktemp -d "$TMPROOT/px919.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
 FIXTURE="$TMPD/broker-fixture.sh"
 REAPER_COPY="$TMPD/reaper-copy.sh"
 # The space is deliberate: CLAUDE_CONFIG_DIR is relocatable (CONTRIBUTING.md),
