@@ -155,48 +155,66 @@ is_safe_session_dir() {
 # two positive orphan signals — a broker is reaped only when one of them fires:
 #   C  workspaceRoot is known (from the state dir's jobs/*.json) and that
 #      directory no longer exists → the worktree is gone → orphan.
-#   D  workspaceRoot still exists but NO live process has it as its cwd →
-#      nothing is working in that workspace → orphan.
-# Every indeterminate path (no state dir for the pid, no jobs file, lsof or
-# shasum failure) reports "unknown" and the broker is KEPT.
+#   D  workspaceRoot still exists but no live process OUTSIDE the broker's own
+#      tree has it as its cwd → nothing is working in that workspace → orphan.
+# Every indeterminate path (no unambiguous state dir for the pid, no jobs file,
+# lsof or shasum failure) reports "unknown" and the broker is KEPT.
 
-# sha256-16 of every live process cwd, computed once per scan. Empty list =>
-# the scan failed or is not yet run; LIVE_CWD_SCAN_OK distinguishes the two.
-LIVE_CWD_HASHES=""
+# "<pid> <sha256-16 of its cwd>" per live process. The pid is retained because
+# the broker itself is started IN its workspace root and never chdirs — so is
+# its app-server child. Counting those as "someone is working here" would make
+# signal D unfirable, so the caller subtracts the tree it is judging.
+#
+# owner_status() runs inside a command substitution, so this snapshot lives for
+# exactly one judgement — which is what the pre-kill re-check needs anyway.
+# Empty map => the scan failed; LIVE_CWD_SCAN_OK distinguishes it from unrun.
+LIVE_CWD_MAP=""
 LIVE_CWD_SCAN_OK=false
 scan_live_cwds() {
   if [[ "$LIVE_CWD_SCAN_OK" == "true" ]]; then return 0; fi
-  local paths p h
-  paths="$(lsof -a -d cwd -Fn -w 2>/dev/null | sed -n 's/^n//p' | sort -u)"
-  [[ -n "$paths" ]] || return 0
-  while IFS= read -r p; do
-    [[ -n "$p" ]] || continue
-    h="$(printf '%s' "$p" | shasum -a 256 2>/dev/null | cut -c1-16)"
-    [[ -n "$h" ]] && LIVE_CWD_HASHES="$LIVE_CWD_HASHES $h"
-  done <<< "$paths"
-  [[ -n "$LIVE_CWD_HASHES" ]] && LIVE_CWD_SCAN_OK=true
+  local raw line cur="" h
+  raw="$(lsof -a -d cwd -Fpn -w 2>/dev/null)"
+  [[ -n "$raw" ]] || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      p*) cur="${line#p}" ;;
+      n*)
+        [[ -n "$cur" ]] || continue
+        h="$(printf '%s' "${line#n}" | shasum -a 256 2>/dev/null | cut -c1-16)"
+        [[ -n "$h" ]] && LIVE_CWD_MAP="$LIVE_CWD_MAP$cur $h"$'\n'
+        ;;
+    esac
+  done <<< "$raw"
+  [[ -n "$LIVE_CWD_MAP" ]] && LIVE_CWD_SCAN_OK=true
   return 0
 }
 
-# The state dir whose broker.json claims this pid, or empty. grep narrows the
-# candidates so the jq confirmation runs on one file, not all ~400.
+# The one state dir that belongs to this broker, or empty when that cannot be
+# decided. pid alone is not a key: broker.json files left behind by crashed
+# brokers are never GC'd, and pids get reused (observed: two state dirs claiming
+# pid 17869). The live broker's own command line carries the authoritative
+# sessionDir, so a candidate must match on pid AND sessionDir — and if that
+# still leaves 0 or several candidates, the caller must treat the owner as
+# undetermined rather than trust an arbitrary one.
 state_dir_of_broker() {
-  local pid="$1" bj
+  local pid="$1" want="$2" bj found="" n=0
+  [[ -n "$want" ]] || return 0
   for bj in $(grep -lE "\"pid\"[[:space:]]*:[[:space:]]*$pid([^0-9]|\$)" "$STATE_DIR"/*/broker.json 2>/dev/null || true); do
-    if [[ "$(jq -r '.pid // empty' "$bj" 2>/dev/null || true)" == "$pid" ]]; then
-      dirname "$bj"; return 0
-    fi
+    [[ "$(jq -r '.pid // empty' "$bj" 2>/dev/null || true)" == "$pid" ]] || continue
+    [[ "$(jq -r '.sessionDir // empty' "$bj" 2>/dev/null || true)" == "$want" ]] || continue
+    found="$(dirname "$bj")"; n=$(( n + 1 ))
   done
+  (( n == 1 )) && printf '%s' "$found"
   return 0
 }
 
 # "<status>:<reason>" where status is dead | alive | unknown. Only `dead`
-# licenses a kill.
+# licenses a kill. $2 is the sessionDir read off the broker's command line.
 owner_status() {
-  local pid="$1" sdir suffix wroot
-  sdir="$(state_dir_of_broker "$pid")"
+  local pid="$1" want="$2" sdir suffix wroot own lpid lhash
+  sdir="$(state_dir_of_broker "$pid" "$want")"
   if [[ -z "$sdir" ]]; then
-    printf 'unknown:no state dir claims this pid'; return 0
+    printf 'unknown:no single state dir matches this pid and sessionDir'; return 0
   fi
   suffix="$(basename "$sdir")"; suffix="${suffix##*-}"
   if [[ ! "$suffix" =~ ^[0-9a-f]{16}$ ]]; then
@@ -213,10 +231,16 @@ owner_status() {
   if [[ "$LIVE_CWD_SCAN_OK" != "true" ]]; then
     printf 'unknown:live-cwd scan produced nothing'; return 0
   fi
-  case " $LIVE_CWD_HASHES " in
-    *" $suffix "*) printf 'alive:a live process is working in %s' "$wroot"; return 0 ;;
-  esac
-  printf 'dead:no live process has %s as its cwd' "$wroot"
+  # The broker and its app-server child sit in the workspace themselves, so they
+  # are subtracted before the match — otherwise every broker would vouch for its
+  # own owner and D could never fire.
+  own=" $(collect_tree "$pid")"
+  while read -r lpid lhash; do
+    [[ "$lhash" == "$suffix" ]] || continue
+    case "$own" in *" $lpid "*) continue ;; esac
+    printf 'alive:pid %s is working in %s' "$lpid" "$wroot"; return 0
+  done <<< "$LIVE_CWD_MAP"
+  printf 'dead:no live process outside the broker tree has %s as its cwd' "$wroot"
 }
 
 # Best-effort single instance: the opt-in phase-end reaper and the launchd job
@@ -257,7 +281,7 @@ if [[ "$MODE" == "reap" ]]; then
 
     # Owner-liveness gate (#919). Idleness only says the broker is not serving
     # right now; the kill needs positive evidence that its workspace is gone.
-    owner="$(owner_status "$pid")"
+    owner="$(owner_status "$pid" "$sdir")"
     if [[ "${owner%%:*}" != "dead" ]]; then
       echo "SKIP   pid=$pid (owner ${owner%%:*}: ${owner#*:})"
       skipped=$(( skipped + 1 )); continue
@@ -275,9 +299,8 @@ if [[ "$MODE" == "reap" ]]; then
         skipped=$(( skipped + 1 )); continue
       fi
       # Same re-check for ownership: work can start in the workspace during the
-      # gap, so the cached cwd scan is discarded and re-taken.
-      LIVE_CWD_HASHES=""; LIVE_CWD_SCAN_OK=false
-      owner="$(owner_status "$pid")"
+      # gap, and each call takes its own cwd snapshot.
+      owner="$(owner_status "$pid" "$sdir")"
       if [[ "${owner%%:*}" != "dead" ]]; then
         echo "SKIP   pid=$pid (owner ${owner%%:*} before kill: ${owner#*:})"
         skipped=$(( skipped + 1 )); continue
