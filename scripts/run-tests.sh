@@ -31,6 +31,17 @@ PRAXIS_HOME="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
 export PRAXIS_HOME
 trap 'rm -rf "$PRAXIS_HOME"' EXIT
 
+# Same isolation, for the fire-ledger (#849). resolve_path() in
+# hooks/_lib/_fire_ledger.py does NOT fall under PRAXIS_HOME — it defaults to
+# Path.home()/.praxis/telemetry regardless, so PRAXIS_HOME alone leaves it
+# writing into the developer's real ledger. Most tests/hooks/*/test_*.sh files
+# invoke an instrumented impl.sh/impl.py directly and never set
+# PRAXIS_FIRE_TELEMETRY_FILE themselves (only a handful do, e.g.
+# tests/hooks/_lib/test_record_fire.sh) — mirrors the pytest-side fix in
+# tests/conftest.py: an inline `PRAXIS_FIRE_TELEMETRY_FILE=... command`
+# prefix on a specific call still wins over this exported default.
+export PRAXIS_FIRE_TELEMETRY_FILE="$PRAXIS_HOME/fire-events-test.jsonl"
+
 FAILED=0
 
 # ---------------------------------------------------------------------------
