@@ -11,23 +11,25 @@
 #   surfaces as kernel_task sys time — a non-linear spike, not a linear one.
 #
 # Safety model:
-#   - A broker with ANY child process is KEPT. Its descendants include the live
-#     `codex app-server` backend, and collect_tree() signals the whole tree — so
-#     reaping such a broker kills the owning session, not leaked infra (#919:
-#     13 live-but-idle sessions were killed this way).
-#   - The idle gate (--max-age) is a necessary but NOT sufficient condition: it
-#     measures whether the broker is serving right now, not whether its session
-#     is alive. A session idle between turns leaves broker.log untouched.
-#   - Only a childless, idle broker is reaped — the backend has already detached,
-#     so the worst case is a benign respawn on the next codex call.
-#   - When idleness cannot be determined (no logFile), the broker is KEPT.
+#   - The idle gate (--max-age) is necessary but NOT sufficient: it measures
+#     whether the broker is serving right now, not whether its owner is alive.
+#     A session idle between turns leaves broker.log untouched — that is how
+#     #919 killed 13 live sessions.
+#   - So a kill also requires positive evidence that the owner is GONE: the
+#     broker's workspace root (recovered from its state dir) has been deleted,
+#     or no live process is working in it. See the owner-liveness oracle below.
+#   - Every indeterminate signal KEEPS the broker: unknown idleness (no
+#     logFile), no state dir for the pid, no recorded workspaceRoot, or a
+#     failed cwd scan.
+#   - A reap therefore costs at worst a respawn on the next codex call in a
+#     workspace nobody is using.
 #
 # Modes:
 #   --gc                 GC only: remove stale tmp sessionDirs whose broker pid
 #                        is dead. Zero risk. (default)
-#   --reap [--max-age N] Also kill RUNNING brokers that are childless AND idle
-#                        > N minutes (default 30), then GC. Used by the launchd
-#                        job and the opt-in
+#   --reap [--max-age N] Also kill RUNNING brokers idle > N minutes (default 30)
+#                        whose owning workspace is provably gone, then GC. Used
+#                        by the launchd job and the opt-in
 #                        PRAXIS_CODEX_REAP=1 path in codex-review-wrap.
 #   --dry-run            Print actions without executing.
 #
@@ -50,9 +52,9 @@ usage() {
 Usage: codex-broker-reaper.sh [--gc | --reap] [--max-age MINUTES] [--dry-run]
 
   --gc            Remove stale tmp sessionDirs of dead brokers (zero risk). Default.
-  --reap          Also kill running brokers that have no child process AND have
-                  been idle longer than --max-age, then GC. A broker with a
-                  child still owns a live codex backend and is never killed.
+  --reap          Also kill running brokers idle longer than --max-age whose
+                  owning workspace is provably gone (deleted, or no live process
+                  works in it), then GC. Anything undetermined is kept.
   --max-age N     Idle-minutes threshold for --reap (default: 30).
   --dry-run       Show what would happen; make no changes.
   -h, --help      This help.
@@ -114,16 +116,6 @@ collect_tree() {
   printf '%s ' "$pid"
 }
 
-# Direct children of a pid as a space-separated list; empty when it has none.
-# `pgrep` exits 1 on no match, so the pipeline is terminated by `tr` (always 0)
-# to keep `set -e` out of it.
-child_pids_of() {
-  local kids
-  kids="$(pgrep -P "$1" 2>/dev/null | tr '\n' ' ')"
-  [[ -n "${kids// /}" ]] && printf '%s' "${kids% }"
-  return 0
-}
-
 # Resolve the broker's sessionDir from its command-line endpoint:
 #   ... serve --endpoint unix:/<sessionDir>/broker.sock
 session_dir_of() {
@@ -150,6 +142,81 @@ is_safe_session_dir() {
     /var/folders/*|/private/var/folders/*|/tmp/*|/private/tmp/*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# --- Owner-liveness oracle (#919) -------------------------------------------
+# "Has no children" is NOT a liveness signal: app-server-broker.mjs connects a
+# CodexAppServerClient at startup (which spawns `codex app-server` as its child)
+# and only closes it from its own shutdown path, so a genuine orphan keeps that
+# child forever. Every live broker observed had one, and so would every orphan.
+#
+# The broker's owning unit is the WORKSPACE ROOT, not the session: the plugin
+# names its state dir `<slug>-<sha256(workspaceRoot) first 16 hex>`. That gives
+# two positive orphan signals — a broker is reaped only when one of them fires:
+#   C  workspaceRoot is known (from the state dir's jobs/*.json) and that
+#      directory no longer exists → the worktree is gone → orphan.
+#   D  workspaceRoot still exists but NO live process has it as its cwd →
+#      nothing is working in that workspace → orphan.
+# Every indeterminate path (no state dir for the pid, no jobs file, lsof or
+# shasum failure) reports "unknown" and the broker is KEPT.
+
+# sha256-16 of every live process cwd, computed once per scan. Empty list =>
+# the scan failed or is not yet run; LIVE_CWD_SCAN_OK distinguishes the two.
+LIVE_CWD_HASHES=""
+LIVE_CWD_SCAN_OK=false
+scan_live_cwds() {
+  if [[ "$LIVE_CWD_SCAN_OK" == "true" ]]; then return 0; fi
+  local paths p h
+  paths="$(lsof -a -d cwd -Fn -w 2>/dev/null | sed -n 's/^n//p' | sort -u)"
+  [[ -n "$paths" ]] || return 0
+  while IFS= read -r p; do
+    [[ -n "$p" ]] || continue
+    h="$(printf '%s' "$p" | shasum -a 256 2>/dev/null | cut -c1-16)"
+    [[ -n "$h" ]] && LIVE_CWD_HASHES="$LIVE_CWD_HASHES $h"
+  done <<< "$paths"
+  [[ -n "$LIVE_CWD_HASHES" ]] && LIVE_CWD_SCAN_OK=true
+  return 0
+}
+
+# The state dir whose broker.json claims this pid, or empty. grep narrows the
+# candidates so the jq confirmation runs on one file, not all ~400.
+state_dir_of_broker() {
+  local pid="$1" bj
+  for bj in $(grep -lE "\"pid\"[[:space:]]*:[[:space:]]*$pid([^0-9]|\$)" "$STATE_DIR"/*/broker.json 2>/dev/null || true); do
+    if [[ "$(jq -r '.pid // empty' "$bj" 2>/dev/null || true)" == "$pid" ]]; then
+      dirname "$bj"; return 0
+    fi
+  done
+  return 0
+}
+
+# "<status>:<reason>" where status is dead | alive | unknown. Only `dead`
+# licenses a kill.
+owner_status() {
+  local pid="$1" sdir suffix wroot
+  sdir="$(state_dir_of_broker "$pid")"
+  if [[ -z "$sdir" ]]; then
+    printf 'unknown:no state dir claims this pid'; return 0
+  fi
+  suffix="$(basename "$sdir")"; suffix="${suffix##*-}"
+  if [[ ! "$suffix" =~ ^[0-9a-f]{16}$ ]]; then
+    printf 'unknown:state dir %s has no workspace hash suffix' "$(basename "$sdir")"; return 0
+  fi
+  wroot="$(jq -r '.workspaceRoot // empty' "$sdir"/jobs/*.json 2>/dev/null | head -1 || true)"
+  if [[ -z "$wroot" ]]; then
+    printf 'unknown:no workspaceRoot recorded in %s/jobs' "$(basename "$sdir")"; return 0
+  fi
+  if [[ ! -d "$wroot" ]]; then
+    printf 'dead:workspace %s no longer exists' "$wroot"; return 0
+  fi
+  scan_live_cwds
+  if [[ "$LIVE_CWD_SCAN_OK" != "true" ]]; then
+    printf 'unknown:live-cwd scan produced nothing'; return 0
+  fi
+  case " $LIVE_CWD_HASHES " in
+    *" $suffix "*) printf 'alive:a live process is working in %s' "$wroot"; return 0 ;;
+  esac
+  printf 'dead:no live process has %s as its cwd' "$wroot"
 }
 
 # Best-effort single instance: the opt-in phase-end reaper and the launchd job
@@ -188,13 +255,11 @@ if [[ "$MODE" == "reap" ]]; then
       skipped=$(( skipped + 1 )); continue
     fi
 
-    # Owner-liveness gate (#919). A broker's children are its `codex app-server`
-    # backend; collect_tree() below would sweep them into the kill. An idle log
-    # only proves the broker is not serving *right now*, so children are the
-    # evidence that a session still owns it.
-    children="$(child_pids_of "$pid")"
-    if [[ -n "$children" ]]; then
-      echo "SKIP   pid=$pid (owner alive: child pids $children — reaping would kill the codex backend)"
+    # Owner-liveness gate (#919). Idleness only says the broker is not serving
+    # right now; the kill needs positive evidence that its workspace is gone.
+    owner="$(owner_status "$pid")"
+    if [[ "${owner%%:*}" != "dead" ]]; then
+      echo "SKIP   pid=$pid (owner ${owner%%:*}: ${owner#*:})"
       skipped=$(( skipped + 1 )); continue
     fi
 
@@ -209,11 +274,12 @@ if [[ "$MODE" == "reap" ]]; then
         echo "SKIP   pid=$pid (became active before kill)"
         skipped=$(( skipped + 1 )); continue
       fi
-      # Same re-check for ownership: a backend can attach in the gap, and
-      # collect_tree() would then sweep it into the kill.
-      children="$(child_pids_of "$pid")"
-      if [[ -n "$children" ]]; then
-        echo "SKIP   pid=$pid (owner attached before kill: child pids $children)"
+      # Same re-check for ownership: work can start in the workspace during the
+      # gap, so the cached cwd scan is discarded and re-taken.
+      LIVE_CWD_HASHES=""; LIVE_CWD_SCAN_OK=false
+      owner="$(owner_status "$pid")"
+      if [[ "${owner%%:*}" != "dead" ]]; then
+        echo "SKIP   pid=$pid (owner ${owner%%:*} before kill: ${owner#*:})"
         skipped=$(( skipped + 1 )); continue
       fi
       tree="$(collect_tree "$pid")"
