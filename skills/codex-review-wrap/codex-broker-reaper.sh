@@ -11,19 +11,26 @@
 #   surfaces as kernel_task sys time — a non-linear spike, not a linear one.
 #
 # Safety model:
-#   - A broker actively serving a review has a freshly-touched broker.log, so
-#     the idle-age gate (--max-age) skips it. We never broad-kill: each running
-#     broker must individually pass the idle gate.
-#   - Worst case for a misjudged reap is a benign respawn on the next codex
-#     call (the broker is stateless infra) — never a correctness break.
-#   - When idleness cannot be determined (no logFile), the broker is KEPT.
+#   - The idle gate (--max-age) is necessary but NOT sufficient: it measures
+#     whether the broker is serving right now, not whether its owner is alive.
+#     A session idle between turns leaves broker.log untouched — that is how
+#     #919 killed 13 live sessions.
+#   - So a kill also requires positive evidence that the owner is GONE: the
+#     broker's workspace root, recovered from its state dir, has been deleted.
+#     See the owner-liveness oracle below.
+#   - Every other signal KEEPS the broker: unknown idleness (no logFile), no
+#     unambiguous state dir for the pid, no recorded workspaceRoot, or a
+#     workspace that still exists. Under-reaping is the intended bias.
+#   - A reap therefore costs at worst a respawn on the next codex call in a
+#     workspace that has been deleted.
 #
 # Modes:
 #   --gc                 GC only: remove stale tmp sessionDirs whose broker pid
 #                        is dead. Zero risk. (default)
-#   --reap [--max-age N] Also kill RUNNING brokers idle > N minutes (default 30),
-#                        then GC. Used by the launchd job and the opt-in
-#                        PRAXIS_CODEX_REAP=1 path in codex-review-wrap.
+#   --reap [--max-age N] Also kill RUNNING brokers idle > N minutes (default 30)
+#                        whose workspace root has been deleted, then GC. Used by
+#                        the launchd job and the opt-in PRAXIS_CODEX_REAP=1 path
+#                        in codex-review-wrap.
 #   --dry-run            Print actions without executing.
 #
 # macOS-only: the leak it addresses is inherent to launchd reparenting and the
@@ -45,7 +52,10 @@ usage() {
 Usage: codex-broker-reaper.sh [--gc | --reap] [--max-age MINUTES] [--dry-run]
 
   --gc            Remove stale tmp sessionDirs of dead brokers (zero risk). Default.
-  --reap          Also kill running brokers idle longer than --max-age, then GC.
+  --reap          Also kill running brokers idle longer than --max-age whose
+                  workspace root has been deleted, then GC. A broker whose
+                  workspace still exists, or whose owner cannot be determined,
+                  is kept.
   --max-age N     Idle-minutes threshold for --reap (default: 30).
   --dry-run       Show what would happen; make no changes.
   -h, --help      This help.
@@ -135,6 +145,70 @@ is_safe_session_dir() {
   esac
 }
 
+# --- Owner-liveness oracle (#919) -------------------------------------------
+# "Has no children" is NOT a liveness signal: app-server-broker.mjs connects a
+# CodexAppServerClient at startup (which spawns `codex app-server` as its child)
+# and only closes it from its own shutdown path, so a genuine orphan keeps that
+# child forever. Every live broker observed had one, and so would every orphan.
+#
+# The broker's owning unit is the WORKSPACE ROOT, not the session. Exactly ONE
+# positive orphan signal is trusted here:
+#   C  workspaceRoot is known (from the state dir's jobs/*.json) and that
+#      directory no longer exists → the worktree is gone → orphan.
+# Every other outcome KEEPS the broker: workspace still present, no unambiguous
+# state dir for the pid, no jobs file, no recorded workspaceRoot.
+#
+# A second signal — "workspace exists but nobody is working in it", decided by
+# matching live process cwds against the state dir's workspace hash — was built
+# and then dropped from this pass. It could not be made safe here: the plugin
+# records the GIT ROOT as workspaceRoot while a session's cwd may be any
+# subdirectory (lib/workspace.mjs `resolveWorkspaceRoot` -> `ensureGitRepository`),
+# so exact matching reports a live owner as dead. It also depends on `lsof`,
+# which the Ubuntu CI runner cannot be assumed to provide, and costs a full cwd
+# scan per broker. That recovery path is tracked separately.
+# The one state dir that belongs to this broker, or empty when that cannot be
+# decided. pid alone is not a key: broker.json files left behind by crashed
+# brokers are never GC'd, and pids get reused (observed: two state dirs claiming
+# pid 17869). The live broker's own command line carries the authoritative
+# sessionDir, so a candidate must match on pid AND sessionDir — and if that
+# still leaves 0 or several candidates, the caller must treat the owner as
+# undetermined rather than trust an arbitrary one.
+state_dir_of_broker() {
+  local pid="$1" want="$2" bj found="" n=0
+  [[ -n "$want" ]] || return 0
+  # Read the grep hits line by line instead of splitting a bare command
+  # substitution: CLAUDE_CONFIG_DIR is relocatable (CONTRIBUTING.md), so a path
+  # like "/Volumes/External Drive/.claude" would otherwise be split at the space
+  # and every jq lookup would miss — leaving each broker "unknown" and the reap
+  # pass dead. Process substitution keeps the counters in this shell.
+  while IFS= read -r bj; do
+    [[ -n "$bj" ]] || continue
+    [[ "$(jq -r '.pid // empty' "$bj" 2>/dev/null || true)" == "$pid" ]] || continue
+    [[ "$(jq -r '.sessionDir // empty' "$bj" 2>/dev/null || true)" == "$want" ]] || continue
+    found="$(dirname "$bj")"; n=$(( n + 1 ))
+  done < <(grep -lE "\"pid\"[[:space:]]*:[[:space:]]*$pid([^0-9]|\$)" "$STATE_DIR"/*/broker.json 2>/dev/null || true)
+  (( n == 1 )) && printf '%s' "$found"
+  return 0
+}
+
+# "<status>:<reason>" where status is dead | alive | unknown. Only `dead`
+# licenses a kill. $2 is the sessionDir read off the broker's command line.
+owner_status() {
+  local pid="$1" want="$2" sdir wroot
+  sdir="$(state_dir_of_broker "$pid" "$want")"
+  if [[ -z "$sdir" ]]; then
+    printf 'unknown:no single state dir matches this pid and sessionDir'; return 0
+  fi
+  wroot="$(jq -r '.workspaceRoot // empty' "$sdir"/jobs/*.json 2>/dev/null | head -1 || true)"
+  if [[ -z "$wroot" ]]; then
+    printf 'unknown:no workspaceRoot recorded in %s/jobs' "$(basename "$sdir")"; return 0
+  fi
+  if [[ ! -d "$wroot" ]]; then
+    printf 'dead:workspace %s no longer exists' "$wroot"; return 0
+  fi
+  printf 'alive:workspace %s still exists' "$wroot"
+}
+
 # Best-effort single instance: the opt-in phase-end reaper and the launchd job
 # can otherwise overlap on the same sessionDirs. A stale lock (>5 min — a prior
 # run killed before its EXIT trap) is stolen.
@@ -171,6 +245,14 @@ if [[ "$MODE" == "reap" ]]; then
       skipped=$(( skipped + 1 )); continue
     fi
 
+    # Owner-liveness gate (#919). Idleness only says the broker is not serving
+    # right now; the kill needs positive evidence that its workspace is gone.
+    owner="$(owner_status "$pid" "$sdir")"
+    if [[ "${owner%%:*}" != "dead" ]]; then
+      echo "SKIP   pid=$pid (owner ${owner%%:*}: ${owner#*:})"
+      skipped=$(( skipped + 1 )); continue
+    fi
+
     if [[ "$DRY_RUN" == "true" ]]; then
       echo "WOULD REAP pid=$pid idle=${idle}s dir=$sdir"
     else
@@ -180,6 +262,13 @@ if [[ "$MODE" == "reap" ]]; then
       case "$m2" in ''|*[!0-9]*) m2=$now2 ;; esac
       if (( now2 - m2 < max_age_sec )); then
         echo "SKIP   pid=$pid (became active before kill)"
+        skipped=$(( skipped + 1 )); continue
+      fi
+      # Same re-check for ownership: the workspace can be restored (a worktree
+      # re-added, a checkout redone) between the gate and the kill.
+      owner="$(owner_status "$pid" "$sdir")"
+      if [[ "${owner%%:*}" != "dead" ]]; then
+        echo "SKIP   pid=$pid (owner ${owner%%:*} before kill: ${owner#*:})"
         skipped=$(( skipped + 1 )); continue
       fi
       tree="$(collect_tree "$pid")"
