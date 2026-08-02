@@ -152,7 +152,7 @@ def resolve_state_path(session_id: str | None = None) -> str:
     if explicit:
         return explicit
     key = session_id or str(os.getppid())
-    return resolve_cache_file(f"worktree-prune-snapshot-{key}.json")
+    return resolve_cache_file(f"worktree-prune-snapshot-{key}.json", session_id=key)
 
 
 def read_state(path: str) -> dict:

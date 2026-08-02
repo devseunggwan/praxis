@@ -110,7 +110,9 @@ def resolve_state_path(session_id: str) -> str:
     explicit = os.environ.get(STATE_FILE_ENV, "").strip()
     if explicit:
         return explicit
-    return resolve_cache_file(f"postcompact-context-{session_id}.json")
+    return resolve_cache_file(
+        f"postcompact-context-{session_id}.json", session_id=session_id
+    )
 
 
 def read_state(path: str) -> dict:

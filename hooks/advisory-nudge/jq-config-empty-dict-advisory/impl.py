@@ -351,7 +351,7 @@ def _extract_session_id(payload: dict) -> Optional[str]:
 
 def _resolve_dedup_path(session_id: Optional[str]) -> str:
     key = session_id or str(os.getppid())
-    return resolve_cache_file(f"jq-config-advisory-{key}.json")
+    return resolve_cache_file(f"jq-config-advisory-{key}.json", session_id=key)
 
 
 def _load_seen(path: str) -> set:
