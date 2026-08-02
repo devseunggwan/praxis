@@ -321,6 +321,10 @@ declare -a GATE1_VIOLATIONS=()
 declare -a GATE2_VIOLATIONS=()
 declare -a GATE3_VIOLATIONS=()
 declare -a SHORT_ROW_VIOLATIONS=()
+# Finding IDs proposing a remedy-layer action — Gate-11's coverage list. Built
+# here rather than re-parsed later: the table is already being split cell-wise,
+# and the card's per-action counts cannot say WHICH findings owe a receipt.
+declare -a REMEDY_FINDING_IDS=()
 ROW_INDEX=0
 PIPE_SENTINEL=$'\x01PIPE\x01'
 
@@ -366,6 +370,16 @@ while IFS= read -r row; do
       *)
         seen_str="$seen_str$t "
         unique_actions+=("$t")
+        ;;
+    esac
+  done
+
+  # Gate-11 coverage list: this finding owes a remedy-reach row.
+  for act in "${unique_actions[@]}"; do
+    case "$act" in
+      memory|claude_md_draft|skill_idea|hook_code)
+        REMEDY_FINDING_IDS+=("$finding_num")
+        break
         ;;
     esac
   done
@@ -875,6 +889,91 @@ else
 fi
 fi
 
+# Gate-11 (Remedy-Reach Receipt, issue #917). A remedy only works on the surface
+# it lives on, and the recurring failure is to diagnose a gap correctly, place
+# the remedy where it cannot fire, then describe the shortfall as legitimate.
+# Whenever the report proposes a remedy-layer action, it must carry a
+# 'retrospect:remedy_reach' fence with at least one row stating reach / surface /
+# unreached axis. Structure only: this gate proves the reach question was
+# answered on the record, not that the answer is right.
+#
+# Same Stage-4 carve-out and fence discipline as Gate-8 (a positive-presence
+# gate must not retroactively block a completed cycle).
+#
+# Trigger and coverage read different oracles because neither one alone is
+# sound. The card carries counts, not identities, so it cannot say WHICH
+# findings owe a row — two remedy findings would satisfy a count-based check
+# with a single row naming whichever was easiest to answer for. But
+# REMEDY_FINDING_IDS alone cannot say WHETHER a row is owed: a card declaring a
+# remedy total while no findings-table row parses as a remedy action leaves the
+# ID list empty and the gate silent, which is exactly the self-inconsistent
+# report that most needs asking. So the card's remedy total decides whether a
+# receipt is required, and REMEDY_FINDING_IDS decides who it must name.
+# Grepping the report body for the action tokens works for neither — the card
+# enumerates all six by name (`- memory: 0`), which fires on the 0-friction path.
+GATE11_VIOLATION=""
+if [ "$STAGE4_AFTER_REPORT" != "1" ]; then
+  rr_card_total=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '
+    /^-[[:space:]]*(memory|claude_md_draft|skill_idea|hook_code):/ {
+      v=$2; gsub(/[^0-9]/, "", v); if (v != "") t += v
+    }
+    END { print t + 0 }')
+  if [ "${#REMEDY_FINDING_IDS[@]}" -gt 0 ] || [ "$rr_card_total" -gt 0 ]; then
+    re_rb='^[[:space:]]*<!--[[:space:]]*retrospect:remedy_reach begin[[:space:]]*-->[[:space:]]*$'
+    re_re='^[[:space:]]*<!--[[:space:]]*retrospect:remedy_reach end[[:space:]]*-->[[:space:]]*$'
+    rr_begin=$(printf '%s\n' "$MOST_RECENT_BLOCK" | grep -cE "$re_rb" || true)
+    rr_malformed=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk -v sb="$re_rb" -v se="$re_re" '
+      $0 ~ sb { if (ins) nested=1; ins=1; next }
+      $0 ~ se { ins=0; next }
+      END { print (ins || nested) ? 1 : 0 }')
+    if [ "$rr_begin" -lt 1 ]; then
+      rr_owed="${REMEDY_FINDING_IDS[*]:-none parsed from the findings table, but the distribution card declares $rr_card_total}"
+      GATE11_VIOLATION="Stage 3 report proposes a remedy-layer action (finding(s) ${rr_owed}) but has no '<!-- retrospect:remedy_reach begin/end -->' fence (issue #917) — for each such finding state whether the remedy's surface fires where the finding was uttered: '- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na'"
+    elif [ "$rr_malformed" -gt 0 ]; then
+      GATE11_VIOLATION="remedy_reach fence is malformed (an unterminated or nested 'retrospect:remedy_reach begin') — emit exactly one well-formed begin/end fence before Stage 3"
+    elif [ "$rr_begin" -gt 1 ]; then
+      GATE11_VIOLATION="Stage 3 report has $rr_begin remedy_reach fences — emit exactly one; multiple fences let a reaching remedy mask a non-reaching one"
+    else
+      RR_BLOCK=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk -v sb="$re_rb" -v se="$re_re" '
+        $0 ~ sb { ins=1; buf=""; next }
+        $0 ~ se { if (ins) last=buf; ins=0; next }
+        ins { buf = buf $0 "\n" }
+        END { printf "%s", last }')
+      # Every remedy-layer finding needs its OWN complete row, and complete means
+      # all four fields the contract names. Each one carries a distinct load:
+      # `reach=full` alone stands in for an axis nobody wrote down; a missing
+      # `surface:` hides the action-to-layer mismatch this gate exists to expose
+      # (a `hook_code` remedy whose surface is a MEMORY.md entry); and
+      # `worse_axis:` is where the author has to say out loud that the axis the
+      # remedy cannot reach is the larger-damage one. Accepting a row without
+      # them would reproduce this PR's own defect class — a contract asking for
+      # more than the gate checks.
+      #
+      # Each label is anchored to its delimiter — right after 'finding #N:' or
+      # after the '|' that closes the previous field. An unanchored '.*reach='
+      # accepts 'unreach=full', 'nonsurface:', and 'not_unreached:', which is
+      # the same substring-boundary hole the receipt exists to close.
+      rr_row_tail='[[:space:]]*\|[[:space:]]*surface:[[:space:]]*[^|]*[^[:space:]|][[:space:]]*\|[[:space:]]*unreached:[[:space:]]*[^|]*[^[:space:]|][[:space:]]*\|[[:space:]]*worse_axis:[[:space:]]*(yes|no|na)([^A-Za-z]|$)'
+      rr_missing=""
+      for rr_id in "${REMEDY_FINDING_IDS[@]}"; do
+        if ! printf '%s\n' "$RR_BLOCK" | grep -qE \
+          "^[[:space:]]*-?[[:space:]]*finding[[:space:]]*#${rr_id}:[[:space:]]*reach=(full|partial|none)${rr_row_tail}"; then
+          rr_missing="$rr_missing #$rr_id"
+        fi
+      done
+      # Card-only trigger: no finding IDs parsed, so nobody can be named. Ask
+      # for one well-formed row rather than passing the inconsistency through.
+      if [ "${#REMEDY_FINDING_IDS[@]}" -eq 0 ] && ! printf '%s\n' "$RR_BLOCK" | grep -qE \
+        "^[[:space:]]*-?[[:space:]]*finding[[:space:]]*#[0-9]+:[[:space:]]*reach=(full|partial|none)${rr_row_tail}"; then
+        rr_missing=" (card declares $rr_card_total remedy action(s); no findings-table row parsed as one)"
+      fi
+      if [ -n "$rr_missing" ]; then
+        GATE11_VIOLATION="remedy_reach fence is present but has no complete row for finding(s)${rr_missing} — each finding proposing memory / claude_md_draft / skill_idea / hook_code needs its own '- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na', with all four fields present; one row cannot answer for a sibling finding whose remedy lives on a different surface"
+      fi
+    fi
+  fi
+fi
+
 # Gate-9 (silent-pass candidate coverage, issue #772). For each HARD grep-detected
 # silent-pass candidate (from the hoisted scan), the report MUST cover it via
 # EITHER a structured `covers: <class-id>` token in a findings-table Rationale
@@ -1035,6 +1134,10 @@ if [ "${#GATE10_VIOLATIONS[@]}" -gt 0 ]; then
     reason_parts+=("Gate-10: $v")
   done
 fi
+if [ -n "$GATE11_VIOLATION" ]; then
+  should_block=true
+  reason_parts+=("Gate-11: $GATE11_VIOLATION")
+fi
 
 if [ "$should_block" = "true" ]; then
   _log="$(praxis_resolve_writable scope-confirm retrospect-mix-blocked.log)"
@@ -1050,7 +1153,7 @@ if [ "$should_block" = "true" ]; then
     fi
   done
 
-  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670); Gate-8 → emit a '<!-- retrospect:suppression_ledger begin/end -->' fence carrying 'worst_agent_failure:', 'self_adversarial:', and 'critic_diff:' lines (the Stage 2 self-incrimination pass plus conditional externalized critic tier record, mandatory on every path incl. the clean one), and do not claim none-found/clean when live transcript signals exceed tolerance — surface or justify those signals before Stage 3. See skills/retrospect/references/stage1-2-analysis.md self-incrimination pass and skills/retrospect/references/stage3-reporting.md."
+  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670); Gate-8 → emit a '<!-- retrospect:suppression_ledger begin/end -->' fence carrying 'worst_agent_failure:', 'self_adversarial:', and 'critic_diff:' lines (the Stage 2 self-incrimination pass plus conditional externalized critic tier record, mandatory on every path incl. the clean one), and do not claim none-found/clean when live transcript signals exceed tolerance — surface or justify those signals before Stage 3; Gate-11 → emit a '<!-- retrospect:remedy_reach begin/end -->' fence with one row per remedy-layer finding ('- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na'), naming the axis the remedy's surface structurally cannot reach instead of describing the shortfall as legitimate. See skills/retrospect/references/stage1-2-analysis.md self-incrimination pass and skills/retrospect/references/stage3-reporting.md."
   PRAXIS_FIRE_DECISION=block
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'
   exit 0
