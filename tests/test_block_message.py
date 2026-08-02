@@ -146,13 +146,17 @@ def test_merge_verb_checklist_names_every_merge_gate() -> None:
     for gate in (
         "momentum-rule-retrieval-gate",
         "pre-merge-approval-gate",
+        "side-effect-scan",
         "gh-merge-worktree-precondition",
         "commit-title-length-check",
+        "pipefail-advisory",
+        "skill-gate-commands",
     ):
         assert gate in out, f"merge checklist must name {gate}"
     # Satisfaction forms, verified against each hook's own source.
     assert "PRAXIS_MOMENTUM_MERGE_ADVISORY=1" in out
     assert "# briefing-surfaced:" in out
+    assert "# side-effect:ack" in out
     assert "--delete-branch" in out
     assert out.endswith("\n")
 
@@ -163,11 +167,48 @@ def test_ask_verb_checklist_names_every_ask_gate() -> None:
         "output-block-falsify-advisory",
         "block-ask-end-option",
         "block-manufactured-action-menu",
+        "pr-state-refetch-gate",
+        "merge-menu-review-options-advisory",
+        "pre-output-falsification-gate",
+        "memory-hint",
     ):
         assert gate in out, f"AskUserQuestion checklist must name {gate}"
     assert "PRAXIS_ASK_END_ADVISORY=1" in out
     assert "column 0" in out
     assert out.endswith("\n")
+
+
+def test_ask_end_optout_is_not_described_as_per_call() -> None:
+    """`block-ask-end-option` reads PRAXIS_ASK_END_ADVISORY from its own process
+    env (impl.py: `os.environ.get`), so an inline `VAR=1 <cmd>` prefix never
+    reaches it. Calling the opt-out per-call sends the reader into a retry loop
+    — the exact cost this checklist exists to remove."""
+    out = bm.verb_gate_checklist("AskUserQuestion")
+    assert "Opt out per call" not in out
+    assert "SESSION environment" in out
+
+
+def test_ask_and_merge_checklists_match_the_hook_registry() -> None:
+    """The checklists must not drift below what `hooks/manifest.json` registers.
+
+    Codex review of PR #931 caught this exact gap: the first draft named 3 of
+    the 7 PreToolUse hooks on AskUserQuestion. A checklist that under-enumerates
+    reproduces the very defect #873 fixes, and reads as authoritative while
+    doing it.
+    """
+    import json
+
+    manifest = json.loads(
+        (REPO_ROOT / "hooks" / "manifest.json").read_text(encoding="utf-8")
+    )
+    registered = {
+        h["name"]
+        for h in manifest["hooks"]
+        if h.get("event") == "PreToolUse" and "AskUserQuestion" in (h.get("matcher") or "")
+    }
+    out = bm.verb_gate_checklist("AskUserQuestion")
+    missing = sorted(name for name in registered if name not in out)
+    assert not missing, f"AskUserQuestion checklist omits registered hooks: {missing}"
 
 
 def test_verb_checklists_do_not_start_a_column_0_falsified_line() -> None:

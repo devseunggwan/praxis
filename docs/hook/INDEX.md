@@ -21,8 +21,14 @@ single source, reached via `verb_gate_checklist(verb)`:
 | Verb | Gates enumerated on the first block | Emitted by |
 | ------ | ------------------------------------- | ------------ |
 | `gh pr create` | block-pr-without-caller-evidence, block-pr-without-precommit-evidence | both pr-body gates |
-| `gh pr merge` | momentum-rule-retrieval-gate, pre-merge-approval-gate, gh-merge-worktree-precondition, commit-title-length-check | momentum-rule-retrieval-gate |
-| `AskUserQuestion` | output-block-falsify-advisory, block-ask-end-option, block-manufactured-action-menu | output-block-falsify-advisory |
+| `gh pr merge` | momentum-rule-retrieval-gate, pre-merge-approval-gate, side-effect-scan, gh-merge-worktree-precondition, commit-title-length-check, + conditional (pipefail-advisory, skill-gate-commands) | momentum-rule-retrieval-gate |
+| `AskUserQuestion` | output-block-falsify-advisory, block-ask-end-option, block-manufactured-action-menu, + conditional (pr-state-refetch-gate, merge-menu-review-options-advisory) and advisory-only (pre-output-falsification-gate, memory-hint) | output-block-falsify-advisory |
+
+A checklist that under-enumerates reproduces the defect it exists to fix, and
+reads as authoritative while doing it — the first draft of the
+`AskUserQuestion` entry named 3 of the 7 registered hooks.
+`tests/test_block_message.py::test_ask_and_merge_checklists_match_the_hook_registry`
+pins the entry against `hooks/manifest.json` so it cannot silently fall behind.
 
 `git commit` and `gh issue create` also carry several gates each and are not
 covered yet — adding a verb means adding its registry entry *and* wiring one

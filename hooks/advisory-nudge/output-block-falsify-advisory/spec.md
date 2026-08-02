@@ -446,8 +446,11 @@ block on retry for the un-addressed question.
 
 #### Verb gate checklist (issue #873)
 
-`Falsified:` is one of three gates on `AskUserQuestion` — the other two are
-`block-ask-end-option` and `block-manufactured-action-menu`. An author who
+`Falsified:` is one of seven PreToolUse hooks registered on `AskUserQuestion`:
+`block-ask-end-option` and `block-manufactured-action-menu` block
+unconditionally, `pr-state-refetch-gate` and `merge-menu-review-options-advisory`
+block only under their strict env vars, and `pre-output-falsification-gate` and
+`memory-hint` never block. An author who
 learns only about this one spends a further retry turn on the next, so both
 ask messages (T1 and the anchoring path) append
 `verb_gate_checklist("AskUserQuestion")` from `hooks/_lib/block_message.py`,

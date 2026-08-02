@@ -124,10 +124,18 @@ a `Falsified:` line.
     `# briefing-surfaced: <reason>` on the merge command itself.
   Explicit per-PR user approval             ← pre-merge-approval-gate
     Always asks. No agent-attachable bypass exists, by design.
+  Intentional-side-effect acknowledgement   ← side-effect-scan
+    Asks on every `gh pr merge`. Opt out in-band: `# side-effect:ack`.
   Head-branch worktree removed first        ← gh-merge-worktree-precondition
     Only when `--delete-branch` / `-d` is present.
   PR title ≤ 50 chars                       ← commit-title-length-check
     Advisory. With `--squash` the PR title becomes the squash commit title.
+
+Conditional — fire only in the stated situation:
+  Merge piped into another command          ← pipefail-advisory
+    `gh pr merge ... | tail -3` reports success even when the merge failed.
+  Required skill not invoked this session   ← skill-gate-commands
+    NO-OP unless PRAXIS_SKILL_GATED_COMMANDS lists `gh pr merge`.
 
 Approving one PR approves only that PR — a companion or follow-up merge needs
 its own briefing and its own answer.
@@ -143,9 +151,23 @@ its own briefing and its own answer.
     in the triggering option's own `description`.
   No end-of-session option                  ← block-ask-end-option
     Direct ("세션 종료") and indirect ("잠시 보류", "take a break") forms both
-    block without a user stop signal. Opt out per call: PRAXIS_ASK_END_ADVISORY=1.
+    block without a user stop signal. Opt out by setting
+    PRAXIS_ASK_END_ADVISORY=1 in the SESSION environment — the hook reads its
+    own process env, so an inline `VAR=1 <cmd>` prefix never reaches it and
+    there is no per-call marker.
   No manufactured action menu               ← block-manufactured-action-menu
     Do not re-ask a question the user's own prior message already answered.
+
+Conditional — fire only in the stated situation:
+  Live PR state re-fetched                  ← pr-state-refetch-gate
+    A merge-intent question naming a PR number: warns when that PR is already
+    MERGED/CLOSED, blocks under PRAXIS_PR_STATE_REFETCH_STRICT=1.
+  Merge menu offers a review option         ← merge-menu-review-options-advisory
+    A merge-decision menu with no review/inspect option; blocks under
+    PRAXIS_MERGE_MENU_REVIEW_STRICT=1.
+
+Advisory only — never block, no action needed to proceed:
+  pre-output-falsification-gate, memory-hint (stderr reminders).
 """,
 }
 
