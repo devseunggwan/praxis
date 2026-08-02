@@ -170,7 +170,7 @@ def resolve_history_path(session_id: str | None = None) -> str:
         return override
 
     key = session_id or str(os.getppid())
-    return resolve_cache_file(f"md-read-history-{key}.json")
+    return resolve_cache_file(f"md-read-history-{key}.json", session_id=key)
 
 
 def load_history(path: str) -> dict:

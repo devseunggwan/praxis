@@ -62,15 +62,19 @@ def _tmp_root() -> str:
     return os.environ.get("TMPDIR") or "/tmp"
 
 
-def resolve_writable(subdir: str, filename: str) -> str:
+def resolve_writable(subdir: str, filename: str, session_id: str | None = None) -> str:
     """Path under ~/.praxis/<subdir>/, creating it; TMPDIR fallback if
-    unwritable. Never raises."""
+    unwritable. Never raises.
+
+    `session_id` names the session whose cache entries the opportunistic sweep
+    must leave alone — see `prune_stale`.
+    """
     try:
         d = os.path.join(praxis_home(), subdir)
         os.makedirs(d, exist_ok=True)
         if os.access(d, os.W_OK):
             if subdir == "cache":
-                _ = prune_stale(d)
+                _ = prune_stale(d, session_id=session_id)
             return os.path.join(d, filename)
     except Exception:
         pass
@@ -82,7 +86,7 @@ def legacy_tmp_path(filename: str) -> str:
     return os.path.join(_tmp_root().rstrip("/") or "/", "praxis-" + filename)
 
 
-def resolve_cache_file(filename: str) -> str:
+def resolve_cache_file(filename: str, session_id: str | None = None) -> str:
     """Cache path for `filename`, adopting the pre-#903 ${TMPDIR} file if present.
 
     Session-scoped state (retrospect marker, session intent, dedup markers) is
@@ -91,8 +95,12 @@ def resolve_cache_file(filename: str) -> str:
     retrospect marker that means the Stop gate silently stops firing, the exact
     failure #666 was opened for. The adoption is a one-time move, mirroring the
     #527 strike-state migration in strike-counter/impl.sh.
+
+    Pass the caller's `session_id` (the same token its filename is keyed on) so
+    the sweep this resolution triggers cannot delete the calling session's own
+    entries — see `prune_stale`.
     """
-    path = resolve_writable("cache", filename)
+    path = resolve_writable("cache", filename, session_id=session_id)
     legacy = legacy_tmp_path(filename)
     if legacy != path and not os.path.exists(path) and os.path.exists(legacy):
         try:
@@ -119,7 +127,21 @@ def cache_ttl_days() -> float:
         return 0.0
 
 
-def prune_stale(directory: str, ttl_days: float | None = None) -> int:
+def _belongs_to_session(name: str, session_id: str) -> bool:
+    """True when cache entry `name` is keyed on `session_id`.
+
+    Consumers all name their entries `<prefix>-<session_id><suffix>`, so the
+    token is matched at a boundary rather than as a bare substring: a PPID
+    fallback key like `123` would otherwise protect `md-read-history-1234.json`
+    belonging to an unrelated session.
+    """
+    head, _sep, tail = name.rpartition("-" + session_id)
+    return bool(head) and _sep != "" and (tail == "" or tail.startswith("."))
+
+
+def prune_stale(
+    directory: str, ttl_days: float | None = None, session_id: str | None = None
+) -> int:
     """Delete entries in `directory` older than the cache TTL; return the count.
 
     TMPDIR had an OS janitor behind it. ~/.praxis/cache does not, and these
@@ -128,6 +150,13 @@ def prune_stale(directory: str, ttl_days: float | None = None) -> int:
     opportunistically from `resolve_writable`, which is already on the write
     path of every cache consumer. Never raises: a failed sweep must not take a
     hook down with it.
+
+    Age is not ownership (#920). A marker is written once at the start of a
+    session and then only read, so its mtime stops advancing while the session
+    is very much alive; past the TTL the sweep would delete it and the gate that
+    reads it goes silently quiet — the #666 failure. `session_id` is therefore
+    excluded from the sweep: entries keyed on the calling session survive
+    regardless of age, while other sessions' entries age out as before.
     """
     ttl = cache_ttl_days() if ttl_days is None else ttl_days
     if ttl <= 0:
@@ -143,6 +172,8 @@ def prune_stale(directory: str, ttl_days: float | None = None) -> int:
     with entries:
         for entry in entries:
             try:
+                if session_id and _belongs_to_session(entry.name, session_id):
+                    continue
                 is_dir = entry.is_dir(follow_symlinks=False)
                 mtime = _newest_mtime(entry.path) if is_dir else entry.stat().st_mtime
                 if mtime >= cutoff:

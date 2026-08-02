@@ -97,7 +97,7 @@ def resolve_state_path(session_id: str | None = None) -> str:
         return explicit
 
     key = session_id or str(os.getppid())
-    return resolve_cache_file(f"retrospect-active-{key}.json")
+    return resolve_cache_file(f"retrospect-active-{key}.json", session_id=key)
 
 
 def set_marker(path: str, source: str) -> None:
@@ -168,7 +168,7 @@ def resolve_candidates_path(session_id: str | None = None) -> str:
     if explicit:
         return explicit + ".candidates.json"
     token = session_id if session_id else str(os.getppid())
-    return resolve_cache_file(f"retrospect-candidates-{token}.json")
+    return resolve_cache_file(f"retrospect-candidates-{token}.json", session_id=token)
 
 
 def write_candidate_hints(payload: dict, session_id: str | None) -> None:

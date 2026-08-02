@@ -268,7 +268,7 @@ def resolve_state_path(session_id: str | None = None) -> str:
         return explicit
 
     key = session_id or str(os.getppid())
-    return resolve_cache_file(f"session-intent-{key}.json")
+    return resolve_cache_file(f"session-intent-{key}.json", session_id=key)
 
 
 def read_state(path: str) -> dict:
