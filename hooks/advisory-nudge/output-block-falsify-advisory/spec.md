@@ -457,14 +457,26 @@ ask paths (T1 and the anchoring path) emit
 the single source for the verb → gate mapping (see
 [docs/hook/INDEX.md](../../../docs/hook/INDEX.md)).
 
-**The checklist rides stderr, not the decision JSON.** `hooks/_lib/_dispatch.py`
-forwards every hook's stderr but surfaces only the **first** deny's stdout
-decision JSON. All seven gates run in parallel on the same `AskUserQuestion`
-call, so a checklist embedded in this hook's `permissionDecisionReason` is
-dropped whenever a sibling denies first — the exact multi-gate case the
-checklist exists for. `_emit_verb_checklist()` writes it to stderr from both
-`_emit_ask` and `_emit_t1_ask`, immediately before the decision, so it survives
-regardless of which gate wins. The ask-message text itself is unchanged.
+**The checklist goes out on both channels (issue #932).** Neither one alone
+reaches the model in every case:
+
+- **decision JSON** (`_with_verb_checklist`, appended to the ask reason) — this
+  is the channel that works for the common case, because this hook's decision
+  is an `ask` and the dispatcher returns 0 for an ask
+  (`hooks/_lib/_dispatch.py:203-207`). On exit 0 a PreToolUse hook's stderr is
+  never fed to the model.
+- **stderr** (`_emit_verb_checklist`, called from `_emit_ask` and
+  `_emit_t1_ask`) — covers what the reason string cannot. All seven gates run
+  in parallel on the same `AskUserQuestion` call, and `_dispatch.py:195-201`
+  surfaces only the **first** deny's stdout, so a sibling denying first
+  discards this hook's reason. That same deny makes the dispatcher exit 2 —
+  exactly when stderr does reach the model.
+
+#873 shipped stderr-only, reasoning from the deny path where stderr always
+arrives. The ask path was the majority case and the checklist went nowhere. Issue #874
+records the same exit-0 invisibility for the ADVISE tier generally — 42 fires
+in one session, zero observed effect. The ask-message text is otherwise
+unchanged.
 
 The checklist names the `Falsified:` token but **indents** it. That is not
 cosmetic: the token is only recognised at column 0, so an unindented line here

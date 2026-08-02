@@ -290,11 +290,22 @@ run_case "AskUserQuestion: (recommended) lowercase — T2 escalates to ask (issu
   "ask:Falsified:" \
   "$(make_ask_payload '["use existing approach (recommended)"]')"
 
-# Issue #873: `Falsified:` is one of several gates on this verb, and the
-# checklist must ride STDERR — `_dispatch.py` surfaces only the FIRST ask/deny's
-# stdout, so a sibling that blocks first (block-ask-end-option on an end-option
-# label) would discard it. Every hook's stderr is forwarded unconditionally.
-run_case "AskUserQuestion: checklist rides stderr, T1 path (issue #873)" \
+# Issues #873 / #932: `Falsified:` is one of several gates on this verb, and the
+# checklist must go out on BOTH channels. The decision JSON is what reaches the
+# model here — an ask makes the dispatcher exit 0, and a PreToolUse hook's
+# stderr is fed to the model only on exit 2. stderr still matters for the case
+# the reason string cannot cover: a sibling denying first (block-ask-end-option
+# on an end-option label) discards this hook's stdout while exiting 2, which is
+# exactly when its stderr does reach the model.
+#
+# #873 shipped stderr-only; the exit-0 ask was the majority case and the
+# checklist silently went nowhere. Assert BOTH channels per case so neither can
+# regress alone.
+run_case "AskUserQuestion: checklist in decision reason, T1 path (issue #932)" \
+  "ask:block-ask-end-option" \
+  "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
+
+run_case "AskUserQuestion: checklist also on stderr, T1 path (issue #873)" \
   "advisory:block-ask-end-option" \
   "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
 
@@ -302,7 +313,15 @@ run_case "AskUserQuestion: checklist names the action-menu gate (issue #873)" \
   "advisory:block-manufactured-action-menu" \
   "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
 
-run_case "AskUserQuestion: checklist rides stderr, anchoring path (issue #873)" \
+run_case "AskUserQuestion: action-menu gate reaches the reason too (issue #932)" \
+  "ask:block-manufactured-action-menu" \
+  "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
+
+run_case "AskUserQuestion: checklist in decision reason, anchoring path (issue #932)" \
+  "ask:block-ask-end-option" \
+  "$(make_ask_payload '["use existing approach (recommended)"]')"
+
+run_case "AskUserQuestion: checklist also on stderr, anchoring path (issue #873)" \
   "advisory:block-ask-end-option" \
   "$(make_ask_payload '["use existing approach (recommended)"]')"
 

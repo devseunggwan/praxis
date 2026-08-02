@@ -704,18 +704,22 @@ run_merge_escalation_case "merge_escalation_loop_repetition_denies" \
 run_merge_escalation_case "merge_escalation_multi_target_denies" \
   "yes" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge 833 --squash && gh pr merge 999 --squash"
 
-# --- verb gate checklist on stderr (issue #873) -------------------------------
+# --- verb gate checklist on both channels (issues #873, #932) -----------------
 #
 # The briefing is one of several gates on `gh pr merge`. Before #873 the deny
 # named only its own requirement, so the rest were each discovered by a separate
 # block, costing a retry turn apiece.
 #
-# The checklist must ride STDERR, not the decision JSON: `_dispatch.py` surfaces
-# only the FIRST deny's stdout, so a sibling that denies first (e.g.
-# gh-merge-worktree-precondition on `--delete-branch`) would discard it, while
-# every hook's stderr is forwarded unconditionally.
+# The checklist must go out on BOTH channels, because neither alone reaches the
+# model in every case:
+#   - decision JSON — `_dispatch.py:195-201` surfaces only the FIRST deny's
+#     stdout, so a sibling denying first (gh-merge-worktree-precondition on
+#     `--delete-branch`) discards this hook's reason string;
+#   - stderr — forwarded unconditionally, but a PreToolUse hook's stderr reaches
+#     the model only when the dispatcher exits 2 (the deny path), never on the
+#     exit-0 ask path. #873 shipped stderr-only and #932 caught the gap.
 run_merge_checklist_case() {
-  local name="merge_checklist_rides_stderr_not_decision_json"
+  local name="merge_checklist_on_both_channels"
   local payload out err ok=1
   local out_file err_file
   payload=$(python3 -c '
@@ -743,11 +747,8 @@ print(json.dumps({
     "briefing-surfaced:"
   do
     echo "$err" | grep -qF "$token" || { ok=0; echo "        missing from stderr: $token"; }
+    echo "$out" | grep -qF "$token" || { ok=0; echo "        missing from decision JSON: $token"; }
   done
-  # Survives a sibling winning the JSON race only if it is NOT in the JSON.
-  echo "$out" | grep -qF "pre-merge-approval-gate" && {
-    ok=0; echo "        checklist is in the decision JSON — a sibling deny would drop it"
-  }
 
   if [ "$ok" -eq 1 ]; then
     echo "PASS  [$name]"; PASS=$((PASS + 1))

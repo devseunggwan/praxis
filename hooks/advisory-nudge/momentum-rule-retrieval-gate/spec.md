@@ -228,17 +228,26 @@ the gap; retrieval at call time was. This hook therefore emits
 is the single source for that mapping (see
 [docs/hook/INDEX.md](../../../docs/hook/INDEX.md)).
 
-**The checklist rides stderr, not the decision JSON.** `hooks/_lib/_dispatch.py`
-forwards **every** hook's stderr, but surfaces only the **first** deny's stdout
-decision JSON. These gates run in parallel on the same command, so whenever a
-sibling gate denies first, a checklist embedded in this hook's
-`permissionDecisionReason` is discarded — precisely in the multi-gate case the
-checklist exists for. Writing it to stderr immediately before
-`emit_decision("deny", ...)` makes it survive regardless of which gate wins the
-decision. `format_block`'s five-field output is therefore unchanged, and the
-checklist is not part of the reason string.
-`tests/hooks/advisory-nudge/test_momentum_rule_retrieval_gate.sh::merge_checklist_rides_stderr_not_decision_json`
-pins both halves: the gate names appear in stderr and are absent from the JSON.
+**The checklist goes out on both channels (issue #932).** Neither one alone
+reaches the model in every case:
+
+- **decision JSON** — `hooks/_lib/_dispatch.py:195-201` surfaces only the
+  **first** deny's stdout. These gates run in parallel on the same command, so
+  whenever a sibling denies first, a checklist embedded in this hook's
+  `permissionDecisionReason` is discarded — precisely the multi-gate case the
+  checklist exists for.
+- **stderr** — forwarded for **every** hook, but a PreToolUse hook's stderr is
+  fed to the model only when the dispatcher exits 2. That is the deny path
+  (`:201 return 2`), never the ask path (`:207 return 0`).
+
+A deny is always exit 2, so stderr alone would in fact suffice *here*. #873
+shipped stderr-only for both this hook and `output-block-falsify-advisory`,
+where the ask path exits 0 and the checklist silently went nowhere; splitting
+the two hooks' handling is what let that through, so they now emit identically.
+`format_block`'s five-field output is unchanged — the checklist is appended
+after it.
+`tests/hooks/advisory-nudge/test_momentum_rule_retrieval_gate.sh::merge_checklist_on_both_channels`
+pins both channels per gate name.
 
 ### Environment variables
 

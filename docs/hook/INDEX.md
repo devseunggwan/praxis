@@ -24,12 +24,20 @@ single source, reached via `verb_gate_checklist(verb)`:
 | `gh pr merge` | momentum-rule-retrieval-gate, pre-merge-approval-gate, side-effect-scan, + conditional (gh-merge-worktree-precondition on `--delete-branch`, commit-title-length-check on `--squash`, pipefail-advisory when piped, session-intent on an undeclared mutation pivot, skill-gate-commands when opted in) | momentum-rule-retrieval-gate |
 | `AskUserQuestion` | output-block-falsify-advisory, block-ask-end-option, + conditional (block-manufactured-action-menu, pr-state-refetch-gate, merge-menu-review-options-advisory) and advisory-only (pre-output-falsification-gate, memory-hint) | output-block-falsify-advisory |
 
-The emitting hook writes the checklist to **stderr**, not into its decision
-JSON. `hooks/_lib/_dispatch.py` forwards every hook's stderr but surfaces only
-the **first** deny's stdout decision — and these gates run in parallel on the
-same command, so a checklist carried in the reason string is dropped exactly
-when a sibling gate denies first, which is the multi-gate case the checklist
-exists for.
+The emitting hook writes the checklist to **both** its decision reason and
+stderr, because neither channel alone reaches the model in every case
+(issue #932):
+
+- `hooks/_lib/_dispatch.py:195-201` surfaces only the **first** deny's stdout
+  decision, and these gates run in parallel on the same command — so a
+  checklist carried only in the reason string is dropped exactly when a sibling
+  gate denies first, the multi-gate case the checklist exists for;
+- stderr is forwarded for every hook, but a PreToolUse hook's stderr is fed to
+  the model only when the dispatcher exits 2 — the deny path (`:201`), never
+  the ask path (`:207 return 0`).
+
+#873 shipped stderr-only and the `AskUserQuestion` checklist, which travels the
+exit-0 ask path, went nowhere.
 
 A checklist that under-enumerates reproduces the defect it exists to fix, and
 reads as authoritative while doing it — the first draft of the

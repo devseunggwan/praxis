@@ -975,16 +975,20 @@ def main() -> int:
     if TRIGGER_MERGE in triggers:
         reason = _merge_escalation_reason(payload)
         if reason is not None:
-            # The verb checklist rides stderr, not the decision JSON. Only the
-            # FIRST deny's stdout JSON survives the dispatcher's aggregation
-            # (hooks/_lib/_dispatch.py), so a sibling that denies first — e.g.
-            # gh-merge-worktree-precondition on `--delete-branch` — would
-            # discard this hook's checklist entirely and leave the reader to
-            # discover the remaining gates one block at a time, which is the
-            # cascade #873 exists to remove. Every hook's stderr is forwarded
-            # unconditionally, so the checklist arrives whoever wins the race.
-            sys.stderr.write(verb_gate_checklist("gh pr merge"))
-            emit_decision("deny", reason)
+            # The verb checklist goes out on BOTH channels, because neither one
+            # alone reaches the model in every case (issue #932):
+            #   - decision JSON: only the FIRST deny's stdout survives the
+            #     dispatcher's aggregation (hooks/_lib/_dispatch.py:195-201), so
+            #     a sibling denying first — gh-merge-worktree-precondition on
+            #     `--delete-branch`, say — discards this reason string;
+            #   - stderr: forwarded unconditionally, but a PreToolUse hook's
+            #     stderr reaches the model only when the dispatcher exits 2,
+            #     which is the deny path and not the ask path.
+            # Deny is always exit 2, so stderr suffices here — but splitting the
+            # two hooks' handling is what produced #932, so keep them identical.
+            checklist = verb_gate_checklist("gh pr merge")
+            sys.stderr.write(checklist)
+            emit_decision("deny", f"{reason}\n{checklist}")
             return 0
 
     # Strict mode: block unless PRAXIS_MOMENTUM_ACK=1 is also present.
