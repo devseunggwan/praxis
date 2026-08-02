@@ -61,6 +61,7 @@ from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from ask_option_text import collect_option_texts  # type: ignore[import-not-found]  # noqa: E402
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
+from block_message import verb_gate_checklist  # type: ignore[import-not-found]  # noqa: E402
 
 _TELEMETRY_HOOK_NAME = "output-block-falsify-advisory"
 _TELEMETRY_HOOK_ROLE = "advisory-nudge"
@@ -528,6 +529,13 @@ def _falsified_scaffold(labels: list[str]) -> str:
     return "\n".join(lines)
 
 
+# Issue #873: `Falsified:` is one of several gates on this verb. An author who
+# only learns about it here spends a further retry turn on the next one, so
+# every block teaches the whole verb's enumeration — see `_emit_verb_checklist`
+# for why it rides stderr rather than the decision JSON.
+_VERB_CHECKLIST = verb_gate_checklist("AskUserQuestion")
+
+
 def _build_ask_msg(labels: list[str]) -> str:
     scaffold = _falsified_scaffold(labels)
     if not scaffold:
@@ -598,14 +606,29 @@ def _has_confidence_anchoring(texts: list[str]) -> bool:
     return False
 
 
+def _emit_verb_checklist() -> None:
+    """Write the AskUserQuestion gate checklist to stderr (issue #873).
+
+    Not to the decision JSON: only the FIRST ask/deny's stdout survives the
+    dispatcher's aggregation (hooks/_lib/_dispatch.py), so a sibling that
+    blocks first — block-ask-end-option on an end-option label, say — would
+    discard the checklist and leave the remaining gates to be discovered one
+    block at a time. Every hook's stderr is forwarded unconditionally, so the
+    checklist arrives whoever wins the race.
+    """
+    sys.stderr.write(_VERB_CHECKLIST)
+
+
 def _emit_ask(message: str) -> None:
     """T2 path: soft gate. (decision must be "ask"/"deny" — "allow" is never
     emitted; silent-pass is signaled by no JSON output.)"""
+    _emit_verb_checklist()
     emit_decision("ask", message)
 
 
 def _emit_t1_ask(message: str) -> None:
     """T1 path: soft gate (issue #899 — restores the pre-#393 tier)."""
+    _emit_verb_checklist()
     emit_decision("ask", message)
 
 

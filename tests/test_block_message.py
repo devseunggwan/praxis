@@ -121,6 +121,166 @@ def test_pr_body_gates_append_checklist() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 1b. Verb-keyed gate checklists (issue #873)
+# ---------------------------------------------------------------------------
+
+ADVISORY_DIR = REPO_ROOT / "hooks" / "advisory-nudge"
+
+
+def test_verb_gate_checklist_unknown_verb_is_empty() -> None:
+    """An unregistered verb yields "" so a caller cannot append a stray blank
+    block to its deny message."""
+    assert bm.verb_gate_checklist("git bisect") == ""
+    assert bm.verb_gate_checklist("") == ""
+
+
+def test_pr_body_checklist_is_the_create_verb_entry() -> None:
+    """The #824 helper is an alias, not a second copy that can drift."""
+    assert bm.pr_body_evidence_checklist() == bm.verb_gate_checklist("gh pr create")
+
+
+def test_merge_verb_checklist_names_every_merge_gate() -> None:
+    """One deny on `gh pr merge` must teach all four gates on that verb —
+    discovering them one block at a time is the #873 defect."""
+    out = bm.verb_gate_checklist("gh pr merge")
+    for gate in (
+        "momentum-rule-retrieval-gate",
+        "pre-merge-approval-gate",
+        "side-effect-scan",
+        "gh-merge-worktree-precondition",
+        "commit-title-length-check",
+        "pipefail-advisory",
+        "session-intent",
+        "skill-gate-commands",
+    ):
+        assert gate in out, f"merge checklist must name {gate}"
+    # Satisfaction forms, verified against each hook's own source.
+    assert "PRAXIS_MOMENTUM_MERGE_ADVISORY=1" in out
+    assert "# briefing-surfaced:" in out
+    assert "# side-effect:ack" in out
+    assert "--delete-branch" in out
+    assert out.endswith("\n")
+
+
+def test_merge_checklist_splits_unconditional_from_conditional() -> None:
+    """A conditional gate listed as unconditional sends the reader looking for a
+    requirement that does not apply to their command — the mirror of the
+    under-enumeration this checklist exists to prevent (CodeRabbit, PR #931).
+
+    Only three gates fire on every `gh pr merge`; the rest are flag-gated.
+    """
+    out = bm.verb_gate_checklist("gh pr merge")
+    head, _, tail = out.partition("Conditional — fire only in the stated situation:")
+    assert tail, "merge checklist must carry a Conditional section"
+    for always in ("momentum-rule-retrieval-gate", "pre-merge-approval-gate", "side-effect-scan"):
+        assert always in head, f"{always} fires on every merge — belongs above the split"
+    for flag_gated in (
+        "gh-merge-worktree-precondition",   # requires -d / --delete-branch
+        "commit-title-length-check",        # requires -s / --squash
+        "pipefail-advisory",                # requires a pipe
+        "session-intent",                   # requires a read-only-intent session
+        "skill-gate-commands",              # requires PRAXIS_SKILL_GATED_COMMANDS
+    ):
+        assert flag_gated in tail, f"{flag_gated} is flag-gated — belongs below the split"
+
+
+def test_ask_checklist_splits_unconditional_from_conditional() -> None:
+    """Same split on the ask side. `block-manufactured-action-menu` is advisory
+    by default and blocks only under PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT, so
+    listing it among the always-satisfy gates makes readers rewrite menus that
+    were never blocked (Codex round 2, PR #931)."""
+    out = bm.verb_gate_checklist("AskUserQuestion")
+    head, _, tail = out.partition("Conditional — fire only in the stated situation:")
+    assert tail, "AskUserQuestion checklist must carry a Conditional section"
+    for always in ("output-block-falsify-advisory", "block-ask-end-option"):
+        assert always in head, f"{always} blocks by default — belongs above the split"
+    for gated in (
+        "block-manufactured-action-menu",     # strict-mode only
+        "pr-state-refetch-gate",              # merge-intent question + strict
+        "merge-menu-review-options-advisory",  # merge menu + strict
+    ):
+        assert gated in tail, f"{gated} is conditional — belongs below the split"
+
+
+def test_ask_verb_checklist_names_every_ask_gate() -> None:
+    out = bm.verb_gate_checklist("AskUserQuestion")
+    for gate in (
+        "output-block-falsify-advisory",
+        "block-ask-end-option",
+        "block-manufactured-action-menu",
+        "pr-state-refetch-gate",
+        "merge-menu-review-options-advisory",
+        "pre-output-falsification-gate",
+        "memory-hint",
+    ):
+        assert gate in out, f"AskUserQuestion checklist must name {gate}"
+    assert "PRAXIS_ASK_END_ADVISORY=1" in out
+    assert "column 0" in out
+    assert out.endswith("\n")
+
+
+def test_ask_end_optout_is_not_described_as_per_call() -> None:
+    """`block-ask-end-option` reads PRAXIS_ASK_END_ADVISORY from its own process
+    env (impl.py: `os.environ.get`), so an inline `VAR=1 <cmd>` prefix never
+    reaches it. Calling the opt-out per-call sends the reader into a retry loop
+    — the exact cost this checklist exists to remove."""
+    out = bm.verb_gate_checklist("AskUserQuestion")
+    assert "Opt out per call" not in out
+    assert "SESSION environment" in out
+
+
+def test_ask_and_merge_checklists_match_the_hook_registry() -> None:
+    """The checklists must not drift below what `hooks/manifest.json` registers.
+
+    Codex review of PR #931 caught this exact gap: the first draft named 3 of
+    the 7 PreToolUse hooks on AskUserQuestion. A checklist that under-enumerates
+    reproduces the very defect #873 fixes, and reads as authoritative while
+    doing it.
+    """
+    import json
+
+    manifest = json.loads(
+        (REPO_ROOT / "hooks" / "manifest.json").read_text(encoding="utf-8")
+    )
+    registered = {
+        h["name"]
+        for h in manifest["hooks"]
+        if h.get("event") == "PreToolUse" and "AskUserQuestion" in (h.get("matcher") or "")
+    }
+    out = bm.verb_gate_checklist("AskUserQuestion")
+    missing = sorted(name for name in registered if name not in out)
+    assert not missing, f"AskUserQuestion checklist omits registered hooks: {missing}"
+
+
+def test_verb_checklists_do_not_start_a_column_0_falsified_line() -> None:
+    """Self-application guard (#873).
+
+    The AskUserQuestion checklist names the `Falsified:` token, and this text
+    is emitted into the transcript on every block. `output-block-falsify-
+    advisory` accepts the token only at column 0, so an unindented occurrence
+    here would let the hook's own message satisfy the very predicate it is
+    asking the author to satisfy.
+    """
+    for verb in ("gh pr create", "gh pr merge", "AskUserQuestion"):
+        for line in bm.verb_gate_checklist(verb).splitlines():
+            assert not line.startswith("Falsified:"), (
+                f"{verb} checklist emits a column-0 'Falsified:' line"
+            )
+
+
+def test_verb_wired_hooks_append_their_checklist() -> None:
+    """Each hook named by #873 must append its verb's checklist."""
+    for name, verb in (
+        ("momentum-rule-retrieval-gate", "gh pr merge"),
+        ("output-block-falsify-advisory", "AskUserQuestion"),
+    ):
+        src = (ADVISORY_DIR / name / "impl.py").read_text(encoding="utf-8")
+        assert f'verb_gate_checklist("{verb}")' in src, (
+            f"{name} must append verb_gate_checklist(\"{verb}\") to its message"
+        )
+
+
+# ---------------------------------------------------------------------------
 # 2. Adoption lint
 # ---------------------------------------------------------------------------
 

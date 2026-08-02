@@ -52,7 +52,10 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from _memory_dir import resolve_memory_dir  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import TRANSCRIPT_SCAN_LINES  # type: ignore[import-not-found]  # noqa: E402
-from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
+from block_message import (  # type: ignore[import-not-found]  # noqa: E402
+    format_block,
+    verb_gate_checklist,
+)
 
 # ---------------------------------------------------------------------------
 # Prefix used on every stderr line.
@@ -972,6 +975,15 @@ def main() -> int:
     if TRIGGER_MERGE in triggers:
         reason = _merge_escalation_reason(payload)
         if reason is not None:
+            # The verb checklist rides stderr, not the decision JSON. Only the
+            # FIRST deny's stdout JSON survives the dispatcher's aggregation
+            # (hooks/_lib/_dispatch.py), so a sibling that denies first — e.g.
+            # gh-merge-worktree-precondition on `--delete-branch` — would
+            # discard this hook's checklist entirely and leave the reader to
+            # discover the remaining gates one block at a time, which is the
+            # cascade #873 exists to remove. Every hook's stderr is forwarded
+            # unconditionally, so the checklist arrives whoever wins the race.
+            sys.stderr.write(verb_gate_checklist("gh pr merge"))
             emit_decision("deny", reason)
             return 0
 

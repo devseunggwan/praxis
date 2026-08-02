@@ -11,6 +11,36 @@ user-facing surface but are **not** (yet) hooked, ranked by user-facing cost, se
 Cross-cutting: every preflight-gate block message shares one five-field format —
 see [block-message-format](block-message-format.md).
 
+Several gates fire on the **same** action verb. Where they do, the first block
+on that verb enumerates every gate the verb owes, so the requirements are
+satisfiable in one authoring pass instead of one retry turn per gate
+(issue #873). The verb → gate mapping is code, not prose — `_VERB_CHECKLISTS`
+in [`hooks/_lib/block_message.py`](../../hooks/_lib/block_message.py) is the
+single source, reached via `verb_gate_checklist(verb)`:
+
+| Verb | Gates enumerated on the first block | Emitted by |
+| ------ | ------------------------------------- | ------------ |
+| `gh pr create` | block-pr-without-caller-evidence, block-pr-without-precommit-evidence | both pr-body gates |
+| `gh pr merge` | momentum-rule-retrieval-gate, pre-merge-approval-gate, side-effect-scan, + conditional (gh-merge-worktree-precondition on `--delete-branch`, commit-title-length-check on `--squash`, pipefail-advisory when piped, session-intent on an undeclared mutation pivot, skill-gate-commands when opted in) | momentum-rule-retrieval-gate |
+| `AskUserQuestion` | output-block-falsify-advisory, block-ask-end-option, + conditional (block-manufactured-action-menu, pr-state-refetch-gate, merge-menu-review-options-advisory) and advisory-only (pre-output-falsification-gate, memory-hint) | output-block-falsify-advisory |
+
+The emitting hook writes the checklist to **stderr**, not into its decision
+JSON. `hooks/_lib/_dispatch.py` forwards every hook's stderr but surfaces only
+the **first** deny's stdout decision — and these gates run in parallel on the
+same command, so a checklist carried in the reason string is dropped exactly
+when a sibling gate denies first, which is the multi-gate case the checklist
+exists for.
+
+A checklist that under-enumerates reproduces the defect it exists to fix, and
+reads as authoritative while doing it — the first draft of the
+`AskUserQuestion` entry named 3 of the 7 registered hooks.
+`tests/test_block_message.py::test_ask_and_merge_checklists_match_the_hook_registry`
+pins the entry against `hooks/manifest.json` so it cannot silently fall behind.
+
+`git commit` and `gh issue create` also carry several gates each and are not
+covered yet — adding a verb means adding its registry entry *and* wiring one
+hook to emit it, so an unwired entry is never added on its own.
+
 ---
 
 ## preflight-gate

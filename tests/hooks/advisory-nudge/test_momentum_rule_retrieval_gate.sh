@@ -704,6 +704,59 @@ run_merge_escalation_case "merge_escalation_loop_repetition_denies" \
 run_merge_escalation_case "merge_escalation_multi_target_denies" \
   "yes" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge 833 --squash && gh pr merge 999 --squash"
 
+# --- verb gate checklist on stderr (issue #873) -------------------------------
+#
+# The briefing is one of several gates on `gh pr merge`. Before #873 the deny
+# named only its own requirement, so the rest were each discovered by a separate
+# block, costing a retry turn apiece.
+#
+# The checklist must ride STDERR, not the decision JSON: `_dispatch.py` surfaces
+# only the FIRST deny's stdout, so a sibling that denies first (e.g.
+# gh-merge-worktree-precondition on `--delete-branch`) would discard it, while
+# every hook's stderr is forwarded unconditionally.
+run_merge_checklist_case() {
+  local name="merge_checklist_rides_stderr_not_decision_json"
+  local payload out err ok=1
+  local out_file err_file
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "tool_name": "Bash",
+    "tool_input": {"command": "gh pr merge --squash --delete-branch"},
+    "transcript_path": sys.argv[1],
+    "session_id": "test-momentum-checklist",
+}))' "$FIXTURES_DIR/momentum-merge-fidelity-unreliable.jsonl")
+  out_file=$(mktemp); err_file=$(mktemp)
+  echo "$payload" | python3 "$HOOK" >"$out_file" 2>"$err_file"
+  out=$(cat "$out_file"); err=$(cat "$err_file")
+  rm -f "$out_file" "$err_file"
+
+  echo "$out" | grep -qF '"permissionDecision": "deny"' || ok=0
+  local token
+  for token in \
+    "pre-merge-approval-gate" \
+    "side-effect-scan" \
+    "gh-merge-worktree-precondition" \
+    "commit-title-length-check" \
+    "session-intent" \
+    "PRAXIS_MOMENTUM_MERGE_ADVISORY=1" \
+    "briefing-surfaced:"
+  do
+    echo "$err" | grep -qF "$token" || { ok=0; echo "        missing from stderr: $token"; }
+  done
+  # Survives a sibling winning the JSON race only if it is NOT in the JSON.
+  echo "$out" | grep -qF "pre-merge-approval-gate" && {
+    ok=0; echo "        checklist is in the decision JSON — a sibling deny would drop it"
+  }
+
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+run_merge_checklist_case
+
 # Fused global flag (`gh --repo=o/r pr merge 833`) → tokenizer still extracts
 # target 833, correlation passes → no deny.
 run_merge_escalation_case "merge_escalation_fused_repo_flag_passes" \

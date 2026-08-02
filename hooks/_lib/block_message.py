@@ -81,20 +81,26 @@ def format_block(
     return "\n".join(lines)
 
 
-def pr_body_evidence_checklist() -> str:
-    """Full PR-body evidence-token enumeration for pr-body gate deny messages.
+# ---------------------------------------------------------------------------
+# Verb-keyed gate checklists (issue #873)
+#
+# Several gates fire on the SAME action verb, each denying on its own missing
+# token. An author therefore discovers the requirements one deny at a time,
+# spending a retry turn per gate — praxis #873 measured six such blocks in a
+# single session, at least four of which had their satisfaction form already
+# documented. Documentation was never the gap; retrieval at call time was.
+#
+# The fix is to make the FIRST deny on a verb teach every token that verb
+# owes, so the author can satisfy them in one authoring pass. Issue #824
+# introduced this for `gh pr create`; this registry generalises it.
+#
+# Each entry is verified against the owning hook's own source, not recalled —
+# a checklist that names a token the gate does not actually accept is worse
+# than no checklist, because it is read as authoritative.
+# ---------------------------------------------------------------------------
 
-    The two pr-body gates (block-pr-without-caller-evidence,
-    block-pr-without-precommit-evidence) each deny on their own missing
-    token, so an author discovers the required tokens one deny at a time
-    (praxis #824). Appending this checklist to BOTH deny messages teaches
-    the full enumeration on the first deny.
-
-    Returns the checklist WITH a trailing newline — callers concatenate it
-    after their own newline-terminated block message and before any
-    cascade hint.
-    """
-    return """\
+_VERB_CHECKLISTS: dict[str, str] = {
+    "gh pr create": """\
 
 📋 Full PR-body evidence checklist (satisfy ALL in one authoring pass):
 
@@ -107,7 +113,90 @@ the colon on the same line, and the line must sit OUTSIDE fenced code blocks.
 Related gates nearby: `git commit` needs a codex review pass or a
 `[skip-codex-review]` marker; an AskUserQuestion `(Recommended)` label needs
 a `Falsified:` line.
-"""
+""",
+    "gh pr merge": """\
+
+📋 Every gate on `gh pr merge` (satisfy ALL before re-running):
+
+Unconditional — fire on every `gh pr merge`, whatever the flags:
+  6-item briefing in this turn              ← momentum-rule-retrieval-gate
+    What changed / verified / NOT verified / Risk / Open items / approve-ask.
+    Relief: PRAXIS_MOMENTUM_MERGE_ADVISORY=1, or an unquoted shell comment
+    `# briefing-surfaced: <reason>` on the merge command itself.
+  Explicit per-PR user approval             ← pre-merge-approval-gate
+    Always asks. No agent-attachable bypass exists, by design.
+  Intentional-side-effect acknowledgement   ← side-effect-scan
+    Opt out in-band: `# side-effect:ack`.
+
+Conditional — fire only in the stated situation:
+  Head-branch worktree removed first        ← gh-merge-worktree-precondition
+    Only with `--delete-branch` / `-d`.
+  PR title ≤ 50 chars                       ← commit-title-length-check
+    Only with `--squash` / `-s` (the PR title becomes the squash commit
+    title). Advisory.
+  Merge piped into another command          ← pipefail-advisory
+    `gh pr merge ... | tail -3` reports success even when the merge failed.
+  Mutation verb declared for this session   ← session-intent
+    A session that opened read-only and never stated a mutation intent: asks,
+    and denies under PRAXIS_INTENT_PIVOT_MODE=block.
+  Required skill not invoked this session   ← skill-gate-commands
+    NO-OP unless PRAXIS_SKILL_GATED_COMMANDS lists `gh pr merge`.
+
+Approving one PR approves only that PR — a companion or follow-up merge needs
+its own briefing and its own answer.
+""",
+    "AskUserQuestion": """\
+
+📋 Every gate on `AskUserQuestion` (satisfy ALL before re-running):
+
+  Falsified: <result>                       ← output-block-falsify-advisory
+    Required for a `(Recommended)` label and for confidence-anchoring framing
+    (safer / obvious / default / 당연히 / 추천 …). Must begin at column 0 of
+    its own line — prose, bullets, and code fences are not detected. Put it
+    in the triggering option's own `description`.
+  No end-of-session option                  ← block-ask-end-option
+    Direct ("세션 종료") and indirect ("잠시 보류", "take a break") forms both
+    block without a user stop signal. Opt out by setting
+    PRAXIS_ASK_END_ADVISORY=1 in the SESSION environment — the hook reads its
+    own process env, so an inline `VAR=1 <cmd>` prefix never reaches it and
+    there is no per-call marker.
+
+Conditional — fire only in the stated situation:
+  No manufactured action menu               ← block-manufactured-action-menu
+    Do not re-ask a question the user's own prior message already answered.
+    Advisory by default; blocks under PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT=1.
+  Live PR state re-fetched                  ← pr-state-refetch-gate
+    A merge-intent question naming a PR number: warns when that PR is already
+    MERGED/CLOSED, blocks under PRAXIS_PR_STATE_REFETCH_STRICT=1.
+  Merge menu offers a review option         ← merge-menu-review-options-advisory
+    A merge-decision menu with no review/inspect option; blocks under
+    PRAXIS_MERGE_MENU_REVIEW_STRICT=1.
+
+Advisory only — never block, no action needed to proceed:
+  pre-output-falsification-gate, memory-hint (stderr reminders).
+""",
+}
+
+
+def verb_gate_checklist(verb: str) -> str:
+    """Full gate-token enumeration for every gate that fires on `verb`.
+
+    Args:
+      verb: the action verb key — one of the `_VERB_CHECKLISTS` keys, e.g.
+        "gh pr create", "gh pr merge", "AskUserQuestion".
+
+    Returns:
+      The checklist WITH a leading blank line and a trailing newline — callers
+      concatenate it after their own newline-terminated block message and
+      before any cascade hint. An unregistered verb returns "" so a caller
+      cannot inject a stray blank block into its deny message.
+    """
+    return _VERB_CHECKLISTS.get(verb, "")
+
+
+def pr_body_evidence_checklist() -> str:
+    """Back-compat alias for `verb_gate_checklist("gh pr create")` (#824)."""
+    return verb_gate_checklist("gh pr create")
 
 
 def emit_block(

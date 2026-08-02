@@ -290,6 +290,22 @@ run_case "AskUserQuestion: (recommended) lowercase — T2 escalates to ask (issu
   "ask:Falsified:" \
   "$(make_ask_payload '["use existing approach (recommended)"]')"
 
+# Issue #873: `Falsified:` is one of several gates on this verb, and the
+# checklist must ride STDERR — `_dispatch.py` surfaces only the FIRST ask/deny's
+# stdout, so a sibling that blocks first (block-ask-end-option on an end-option
+# label) would discard it. Every hook's stderr is forwarded unconditionally.
+run_case "AskUserQuestion: checklist rides stderr, T1 path (issue #873)" \
+  "advisory:block-ask-end-option" \
+  "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
+
+run_case "AskUserQuestion: checklist names the action-menu gate (issue #873)" \
+  "advisory:block-manufactured-action-menu" \
+  "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
+
+run_case "AskUserQuestion: checklist rides stderr, anchoring path (issue #873)" \
+  "advisory:block-ask-end-option" \
+  "$(make_ask_payload '["use existing approach (recommended)"]')"
+
 # ---------------------------------------------------------------------------
 # AskUserQuestion negative cases
 # ---------------------------------------------------------------------------
