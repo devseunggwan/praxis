@@ -15,7 +15,16 @@
 # an explicit SKIPPED line when its tool is absent, so a contributor without
 # the toolchain is not blocked — CI remains authoritative either way.
 #
-# Exit code is non-zero if any step fails.
+# A skip is not a pass (#917). The SKIPPED line used to scroll past and the run
+# still ended on a bare "ALL TESTS PASSED", which read as full coverage: PR #912
+# shipped 15 markdownlint violations that way, and PR #864 had shipped 23 for the
+# same reason five days earlier. The summary now names what was skipped, and
+# PRAXIS_TESTS_STRICT=1 turns any skip into a non-zero exit — opt-in locally,
+# always on in CI, where the toolchain is installed and a skip means the job
+# silently stopped checking something.
+#
+# Exit code is non-zero if any step fails, or if anything was skipped under
+# PRAXIS_TESTS_STRICT=1.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,6 +52,14 @@ trap 'rm -rf "$PRAXIS_HOME"' EXIT
 export PRAXIS_FIRE_TELEMETRY_FILE="$PRAXIS_HOME/fire-events-test.jsonl"
 
 FAILED=0
+SKIPPED_TOOLS=()
+
+# Records a skipped step and prints its SKIPPED line in one place, so the
+# summary can never drift from what the run actually announced.
+skip_step() {
+  SKIPPED_TOOLS+=("$1")
+  echo "SKIPPED: $1 (not installed — $2)"
+}
 
 # ---------------------------------------------------------------------------
 # 1. pytest
@@ -119,7 +136,7 @@ else
 fi
 
 if [[ ${#RUFF[@]} -eq 0 ]]; then
-  echo "SKIPPED: ruff (not installed — pip install 'ruff==0.15.8')"
+  skip_step ruff "pip install 'ruff==0.15.8'"
 elif ! "${RUFF[@]}" check .; then
   FAILED=1
 fi
@@ -130,7 +147,7 @@ fi
 echo ""
 echo "=== shellcheck ==="
 if ! command -v shellcheck >/dev/null 2>&1; then
-  echo "SKIPPED: shellcheck (not installed — brew install shellcheck)"
+  skip_step shellcheck "brew install shellcheck"
 else
   # Mirrors the CI invocation verbatim so severity and file set cannot drift.
   if ! find . -name '*.sh' -not -path './.git/*' -print0 \
@@ -166,7 +183,7 @@ else
 fi
 
 if [[ ${#MDL[@]} -eq 0 ]]; then
-  echo "SKIPPED: markdownlint (not installed — npm i -g markdownlint-cli2)"
+  skip_step markdownlint "npm i -g markdownlint-cli2"
 else
   # Diff base: the merge-base with origin/main when it is known, else the whole
   # tracked set. `git merge-base` failing (no origin/main in a fresh clone) must
@@ -203,4 +220,21 @@ if [[ $FAILED -ne 0 ]]; then
   echo "TEST SUITE FAILED" >&2
   exit 1
 fi
-echo "ALL TESTS PASSED"
+
+# Scope note: this counts the three tool steps this script owns (5-7). Gates
+# that a sub-suite skips internally — e.g. the Darwin-only gate in
+# tests/test_codex_broker_reaper.sh — announce themselves in their own summary
+# and are not aggregated here; conflating them would make a portable-by-design
+# skip look like a missing toolchain.
+if [[ ${#SKIPPED_TOOLS[@]} -eq 0 ]]; then
+  echo "ALL TESTS PASSED"
+  exit 0
+fi
+
+skipped_list="$(IFS=', '; echo "${SKIPPED_TOOLS[*]}")"
+if [[ "${PRAXIS_TESTS_STRICT:-0}" == "1" ]]; then
+  echo "TEST SUITE INCOMPLETE (${#SKIPPED_TOOLS[@]} skipped: $skipped_list)" >&2
+  echo "PRAXIS_TESTS_STRICT=1 treats a skipped step as a failure — install the tool(s) above or unset the variable." >&2
+  exit 1
+fi
+echo "ALL TESTS PASSED (${#SKIPPED_TOOLS[@]} skipped: $skipped_list)"
