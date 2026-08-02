@@ -757,9 +757,6 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     if _prior_turn_extension_passes(entries, idxs, code):
         return None
 
-    # Issue #873: teach every gate this verb owes on the FIRST deny. The
-    # briefing is only one of four; discovering the rest one block at a time
-    # costs a retry turn each.
     return format_block(
         rule_name="Pre-Merge Reporting briefing",
         why="this gh pr merge is not preceded by the Pre-Merge Reporting "
@@ -774,7 +771,7 @@ def _merge_escalation_reason(payload: dict) -> str | None:
             "`# briefing-surfaced: <reason>` to the merge command",
         reference="CLAUDE.md → Pre-Merge Reporting; "
             "hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md",
-    ) + verb_gate_checklist("gh pr merge")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -978,6 +975,15 @@ def main() -> int:
     if TRIGGER_MERGE in triggers:
         reason = _merge_escalation_reason(payload)
         if reason is not None:
+            # The verb checklist rides stderr, not the decision JSON. Only the
+            # FIRST deny's stdout JSON survives the dispatcher's aggregation
+            # (hooks/_lib/_dispatch.py), so a sibling that denies first — e.g.
+            # gh-merge-worktree-precondition on `--delete-branch` — would
+            # discard this hook's checklist entirely and leave the reader to
+            # discover the remaining gates one block at a time, which is the
+            # cascade #873 exists to remove. Every hook's stderr is forwarded
+            # unconditionally, so the checklist arrives whoever wins the race.
+            sys.stderr.write(verb_gate_checklist("gh pr merge"))
             emit_decision("deny", reason)
             return 0
 

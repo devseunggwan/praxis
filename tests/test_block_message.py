@@ -150,6 +150,7 @@ def test_merge_verb_checklist_names_every_merge_gate() -> None:
         "gh-merge-worktree-precondition",
         "commit-title-length-check",
         "pipefail-advisory",
+        "session-intent",
         "skill-gate-commands",
     ):
         assert gate in out, f"merge checklist must name {gate}"
@@ -177,9 +178,28 @@ def test_merge_checklist_splits_unconditional_from_conditional() -> None:
         "gh-merge-worktree-precondition",   # requires -d / --delete-branch
         "commit-title-length-check",        # requires -s / --squash
         "pipefail-advisory",                # requires a pipe
+        "session-intent",                   # requires a read-only-intent session
         "skill-gate-commands",              # requires PRAXIS_SKILL_GATED_COMMANDS
     ):
         assert flag_gated in tail, f"{flag_gated} is flag-gated — belongs below the split"
+
+
+def test_ask_checklist_splits_unconditional_from_conditional() -> None:
+    """Same split on the ask side. `block-manufactured-action-menu` is advisory
+    by default and blocks only under PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT, so
+    listing it among the always-satisfy gates makes readers rewrite menus that
+    were never blocked (Codex round 2, PR #931)."""
+    out = bm.verb_gate_checklist("AskUserQuestion")
+    head, _, tail = out.partition("Conditional — fire only in the stated situation:")
+    assert tail, "AskUserQuestion checklist must carry a Conditional section"
+    for always in ("output-block-falsify-advisory", "block-ask-end-option"):
+        assert always in head, f"{always} blocks by default — belongs above the split"
+    for gated in (
+        "block-manufactured-action-menu",     # strict-mode only
+        "pr-state-refetch-gate",              # merge-intent question + strict
+        "merge-menu-review-options-advisory",  # merge menu + strict
+    ):
+        assert gated in tail, f"{gated} is conditional — belongs below the split"
 
 
 def test_ask_verb_checklist_names_every_ask_gate() -> None:

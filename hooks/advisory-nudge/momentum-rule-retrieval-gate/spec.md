@@ -212,21 +212,33 @@ merge-only, per the issue scope (only the merge failure was reproduced).
 
 **Deny reason carries the whole verb's checklist (issue #873).** The briefing
 is one of three gates that fire on every `gh pr merge` whatever the flags — the
-other two are `pre-merge-approval-gate` and `side-effect-scan`. Four more are
+other two are `pre-merge-approval-gate` and `side-effect-scan`. Five more are
 conditional: `gh-merge-worktree-precondition` (only with `--delete-branch`),
 `commit-title-length-check` (only with `--squash`), `pipefail-advisory` (only
-when the merge is piped), and `skill-gate-commands` (only when
+when the merge is piped), `session-intent` (only when the session never declared
+a mutation intent), and `skill-gate-commands` (only when
 `PRAXIS_SKILL_GATED_COMMANDS` lists the verb). The checklist keeps that split
 explicit — a conditional gate listed as unconditional sends the reader looking
 for a requirement that does not apply to their command.
 Before #873 each was discovered by its own separate block, costing a retry turn
 apiece — praxis #873 measured six such blocks in one session, at least four of
 which already had their satisfaction form documented. Documentation was never
-the gap; retrieval at call time was. The deny message therefore appends
+the gap; retrieval at call time was. This hook therefore emits
 `verb_gate_checklist("gh pr merge")` from `hooks/_lib/block_message.py`, which
 is the single source for that mapping (see
-[docs/hook/INDEX.md](../../../docs/hook/INDEX.md)). The checklist is appended to
-the `format_block` output, so the five-field format is unchanged.
+[docs/hook/INDEX.md](../../../docs/hook/INDEX.md)).
+
+**The checklist rides stderr, not the decision JSON.** `hooks/_lib/_dispatch.py`
+forwards **every** hook's stderr, but surfaces only the **first** deny's stdout
+decision JSON. These gates run in parallel on the same command, so whenever a
+sibling gate denies first, a checklist embedded in this hook's
+`permissionDecisionReason` is discarded — precisely in the multi-gate case the
+checklist exists for. Writing it to stderr immediately before
+`emit_decision("deny", ...)` makes it survive regardless of which gate wins the
+decision. `format_block`'s five-field output is therefore unchanged, and the
+checklist is not part of the reason string.
+`tests/hooks/advisory-nudge/test_momentum_rule_retrieval_gate.sh::merge_checklist_rides_stderr_not_decision_json`
+pins both halves: the gate names appear in stderr and are absent from the JSON.
 
 ### Environment variables
 

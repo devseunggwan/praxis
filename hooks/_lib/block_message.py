@@ -136,6 +136,9 @@ Conditional — fire only in the stated situation:
     title). Advisory.
   Merge piped into another command          ← pipefail-advisory
     `gh pr merge ... | tail -3` reports success even when the merge failed.
+  Mutation verb declared for this session   ← session-intent
+    A session that opened read-only and never stated a mutation intent: asks,
+    and denies under PRAXIS_INTENT_PIVOT_MODE=block.
   Required skill not invoked this session   ← skill-gate-commands
     NO-OP unless PRAXIS_SKILL_GATED_COMMANDS lists `gh pr merge`.
 
@@ -157,10 +160,11 @@ its own briefing and its own answer.
     PRAXIS_ASK_END_ADVISORY=1 in the SESSION environment — the hook reads its
     own process env, so an inline `VAR=1 <cmd>` prefix never reaches it and
     there is no per-call marker.
-  No manufactured action menu               ← block-manufactured-action-menu
-    Do not re-ask a question the user's own prior message already answered.
 
 Conditional — fire only in the stated situation:
+  No manufactured action menu               ← block-manufactured-action-menu
+    Do not re-ask a question the user's own prior message already answered.
+    Advisory by default; blocks under PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT=1.
   Live PR state re-fetched                  ← pr-state-refetch-gate
     A merge-intent question naming a PR number: warns when that PR is already
     MERGED/CLOSED, blocks under PRAXIS_PR_STATE_REFETCH_STRICT=1.

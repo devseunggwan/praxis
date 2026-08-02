@@ -21,8 +21,15 @@ single source, reached via `verb_gate_checklist(verb)`:
 | Verb | Gates enumerated on the first block | Emitted by |
 | ------ | ------------------------------------- | ------------ |
 | `gh pr create` | block-pr-without-caller-evidence, block-pr-without-precommit-evidence | both pr-body gates |
-| `gh pr merge` | momentum-rule-retrieval-gate, pre-merge-approval-gate, side-effect-scan, + conditional (gh-merge-worktree-precondition on `--delete-branch`, commit-title-length-check on `--squash`, pipefail-advisory when piped, skill-gate-commands when opted in) | momentum-rule-retrieval-gate |
-| `AskUserQuestion` | output-block-falsify-advisory, block-ask-end-option, block-manufactured-action-menu, + conditional (pr-state-refetch-gate, merge-menu-review-options-advisory) and advisory-only (pre-output-falsification-gate, memory-hint) | output-block-falsify-advisory |
+| `gh pr merge` | momentum-rule-retrieval-gate, pre-merge-approval-gate, side-effect-scan, + conditional (gh-merge-worktree-precondition on `--delete-branch`, commit-title-length-check on `--squash`, pipefail-advisory when piped, session-intent on an undeclared mutation pivot, skill-gate-commands when opted in) | momentum-rule-retrieval-gate |
+| `AskUserQuestion` | output-block-falsify-advisory, block-ask-end-option, + conditional (block-manufactured-action-menu, pr-state-refetch-gate, merge-menu-review-options-advisory) and advisory-only (pre-output-falsification-gate, memory-hint) | output-block-falsify-advisory |
+
+The emitting hook writes the checklist to **stderr**, not into its decision
+JSON. `hooks/_lib/_dispatch.py` forwards every hook's stderr but surfaces only
+the **first** deny's stdout decision — and these gates run in parallel on the
+same command, so a checklist carried in the reason string is dropped exactly
+when a sibling gate denies first, which is the multi-gate case the checklist
+exists for.
 
 A checklist that under-enumerates reproduces the defect it exists to fix, and
 reads as authoritative while doing it — the first draft of the

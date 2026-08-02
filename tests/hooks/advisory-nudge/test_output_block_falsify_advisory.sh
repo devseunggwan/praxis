@@ -290,19 +290,20 @@ run_case "AskUserQuestion: (recommended) lowercase — T2 escalates to ask (issu
   "ask:Falsified:" \
   "$(make_ask_payload '["use existing approach (recommended)"]')"
 
-# Issue #873: `Falsified:` is one of three gates on this verb. The ask message
-# must enumerate all three so the other two are not discovered one block at a
-# time — the sibling gates are named here, not just the format rule.
-run_case "AskUserQuestion: ask reason enumerates sibling verb gates (issue #873)" \
-  "ask:block-ask-end-option" \
+# Issue #873: `Falsified:` is one of several gates on this verb, and the
+# checklist must ride STDERR — `_dispatch.py` surfaces only the FIRST ask/deny's
+# stdout, so a sibling that blocks first (block-ask-end-option on an end-option
+# label) would discard it. Every hook's stderr is forwarded unconditionally.
+run_case "AskUserQuestion: checklist rides stderr, T1 path (issue #873)" \
+  "advisory:block-ask-end-option" \
   "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
 
-run_case "AskUserQuestion: ask reason names the action-menu gate (issue #873)" \
-  "ask:block-manufactured-action-menu" \
+run_case "AskUserQuestion: checklist names the action-menu gate (issue #873)" \
+  "advisory:block-manufactured-action-menu" \
   "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
 
-run_case "AskUserQuestion: anchoring path also carries the checklist (issue #873)" \
-  "ask:block-ask-end-option" \
+run_case "AskUserQuestion: checklist rides stderr, anchoring path (issue #873)" \
+  "advisory:block-ask-end-option" \
   "$(make_ask_payload '["use existing approach (recommended)"]')"
 
 # ---------------------------------------------------------------------------

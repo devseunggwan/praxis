@@ -447,15 +447,24 @@ block on retry for the un-addressed question.
 #### Verb gate checklist (issue #873)
 
 `Falsified:` is one of seven PreToolUse hooks registered on `AskUserQuestion`:
-`block-ask-end-option` and `block-manufactured-action-menu` block
-unconditionally, `pr-state-refetch-gate` and `merge-menu-review-options-advisory`
-block only under their strict env vars, and `pre-output-falsification-gate` and
+`block-ask-end-option` blocks unconditionally, `block-manufactured-action-menu`,
+`pr-state-refetch-gate` and `merge-menu-review-options-advisory` block only
+under their strict env vars, and `pre-output-falsification-gate` and
 `memory-hint` never block. An author who
 learns only about this one spends a further retry turn on the next, so both
-ask messages (T1 and the anchoring path) append
+ask paths (T1 and the anchoring path) emit
 `verb_gate_checklist("AskUserQuestion")` from `hooks/_lib/block_message.py`,
 the single source for the verb → gate mapping (see
 [docs/hook/INDEX.md](../../../docs/hook/INDEX.md)).
+
+**The checklist rides stderr, not the decision JSON.** `hooks/_lib/_dispatch.py`
+forwards every hook's stderr but surfaces only the **first** deny's stdout
+decision JSON. All seven gates run in parallel on the same `AskUserQuestion`
+call, so a checklist embedded in this hook's `permissionDecisionReason` is
+dropped whenever a sibling denies first — the exact multi-gate case the
+checklist exists for. `_emit_verb_checklist()` writes it to stderr from both
+`_emit_ask` and `_emit_t1_ask`, immediately before the decision, so it survives
+regardless of which gate wins. The ask-message text itself is unchanged.
 
 The checklist names the `Falsified:` token but **indents** it. That is not
 cosmetic: the token is only recognised at column 0, so an unindented line here
