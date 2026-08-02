@@ -282,6 +282,26 @@ if [[ "$MODE" == "reap" ]]; then
   done
 fi
 
+# True when a broker.json other than the one under inspection claims $1 as its
+# sessionDir and its pid is live. A dead record is not evidence the directory is
+# unowned: crashed brokers leave their broker.json behind and pids get reused,
+# so a stale record can name a directory a live broker is still writing to.
+# #923 gave the reap pass this pid+sessionDir disambiguation; the GC pass had
+# none, and rm -rf'd the live session's dir (#921).
+session_dir_has_live_claimant() {
+  local want="$1" self="$2" other opid osdir
+  shopt -s nullglob
+  for other in "$STATE_DIR"/*/broker.json; do
+    [[ "$other" == "$self" ]] && continue
+    osdir="$(jq -r '.sessionDir // empty' "$other" 2>/dev/null || true)"
+    [[ "$osdir" == "$want" ]] || continue
+    opid="$(jq -r '.pid // empty' "$other" 2>/dev/null || true)"
+    [[ -n "$opid" ]] || continue
+    kill -0 "$opid" 2>/dev/null && return 0
+  done
+  return 1
+}
+
 # --- Pass 2: GC stale tmp sessionDirs of dead brokers (both modes) ---
 if [[ -d "$STATE_DIR" ]]; then
   shopt -s nullglob
@@ -292,6 +312,10 @@ if [[ -d "$STATE_DIR" ]]; then
     # Alive brokers are left to the reap pass (idle-gated); GC only dead ones.
     kill -0 "$pid" 2>/dev/null && continue
     if [[ -n "$sdir" ]] && is_safe_session_dir "$sdir" && [[ -d "$sdir" ]]; then
+      if session_dir_has_live_claimant "$sdir" "$bj"; then
+        echo "SKIP GC dir=$sdir (a live broker still claims this sessionDir)"
+        continue
+      fi
       if [[ "$DRY_RUN" == "true" ]]; then
         echo "WOULD GC  dir=$sdir (broker pid $pid dead)"
       else
