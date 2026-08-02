@@ -2516,6 +2516,25 @@ RR8_TEXT="$(mk_stage3_no_remedy_reach "$T1_CARD" "$T1_ROW")
 run_case "RR8_block_row_without_surface" "block" \
   "$(mk_assistant "$RR8_TEXT")"
 
+# RR9: block — `worse_axis:` is where the author states that the unreachable
+# axis is the larger-damage one. Omitting it leaves the receipt's hardest
+# admission unwritten.
+RR9_TEXT="$(mk_stage3_no_remedy_reach "$T1_CARD" "$T1_ROW")
+<!-- retrospect:remedy_reach begin -->
+- finding #1: reach=partial | surface: MEMORY.md entry | unreached: prose proposals emit no tool call
+<!-- retrospect:remedy_reach end -->"
+run_case "RR9_block_row_without_worse_axis" "block" \
+  "$(mk_assistant "$RR9_TEXT")"
+
+# RR10: block — an empty `unreached:` value satisfies a naive `.+` but names no
+# axis; the fields must carry content, not just appear.
+RR10_TEXT="$(mk_stage3_no_remedy_reach "$T1_CARD" "$T1_ROW")
+<!-- retrospect:remedy_reach begin -->
+- finding #1: reach=partial | surface: MEMORY.md entry | unreached:  | worse_axis: yes
+<!-- retrospect:remedy_reach end -->"
+run_case "RR10_block_empty_unreached_value" "block" \
+  "$(mk_assistant "$RR10_TEXT")"
+
 echo
 echo "================================"
 echo "Cases:    $PASS passed, $FAIL failed"

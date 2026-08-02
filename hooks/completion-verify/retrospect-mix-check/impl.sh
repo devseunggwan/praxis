@@ -927,20 +927,24 @@ if [ "$STAGE4_AFTER_REPORT" != "1" ]; then
         $0 ~ se { if (ins) last=buf; ins=0; next }
         ins { buf = buf $0 "\n" }
         END { printf "%s", last }')
-      # Every remedy-layer finding needs its OWN complete row. A row is complete
-      # only with a reach verdict, a surface, and a named unreached axis:
-      # `reach=full` alone stands in for an axis nobody ever wrote down, and a
-      # missing `surface:` hides the action-to-layer mismatch this gate exists
-      # to expose (a `hook_code` remedy whose surface is a MEMORY.md entry).
+      # Every remedy-layer finding needs its OWN complete row, and complete means
+      # all four fields the contract names. Each one carries a distinct load:
+      # `reach=full` alone stands in for an axis nobody wrote down; a missing
+      # `surface:` hides the action-to-layer mismatch this gate exists to expose
+      # (a `hook_code` remedy whose surface is a MEMORY.md entry); and
+      # `worse_axis:` is where the author has to say out loud that the axis the
+      # remedy cannot reach is the larger-damage one. Accepting a row without
+      # them would reproduce this PR's own defect class — a contract asking for
+      # more than the gate checks.
       rr_missing=""
       for rr_id in "${REMEDY_FINDING_IDS[@]}"; do
         if ! printf '%s\n' "$RR_BLOCK" | grep -qE \
-          "^[[:space:]]*-?[[:space:]]*finding[[:space:]]*#${rr_id}:.*reach=(full|partial|none)([^A-Za-z]|\$).*surface:[[:space:]]*[^|]*[^[:space:]|].*unreached:[[:space:]]*.+"; then
+          "^[[:space:]]*-?[[:space:]]*finding[[:space:]]*#${rr_id}:.*reach=(full|partial|none)([^A-Za-z]|\$).*surface:[[:space:]]*[^|]*[^[:space:]|].*unreached:[[:space:]]*[^|]*[^[:space:]|].*worse_axis:[[:space:]]*(yes|no|na)([^A-Za-z]|\$)"; then
           rr_missing="$rr_missing #$rr_id"
         fi
       done
       if [ -n "$rr_missing" ]; then
-        GATE11_VIOLATION="remedy_reach fence is present but has no complete row for finding(s)${rr_missing} — each finding proposing memory / claude_md_draft / skill_idea / hook_code needs its own '- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na'; one row cannot answer for a sibling finding whose remedy lives on a different surface"
+        GATE11_VIOLATION="remedy_reach fence is present but has no complete row for finding(s)${rr_missing} — each finding proposing memory / claude_md_draft / skill_idea / hook_code needs its own '- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na', with all four fields present; one row cannot answer for a sibling finding whose remedy lives on a different surface"
       fi
     fi
   fi
