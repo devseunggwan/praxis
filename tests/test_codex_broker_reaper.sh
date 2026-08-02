@@ -339,6 +339,95 @@ else
 fi
 
 fi   # Darwin gate
+
+# --- Gate 4: #921 GC sessionDir ownership (behavior) -------------------------
+# The GC pass deletes a sessionDir on one signal: the broker.json naming it
+# records a dead pid. That is not evidence the directory is unowned — a crashed
+# broker leaves its json behind and pids get reused, so a stale record can name
+# a directory a LIVE broker is still writing to. #923 gave the reap pass a
+# pid+sessionDir disambiguation; the GC pass had none, and `--gc` is the DEFAULT
+# mode whose --help calls it "zero risk".
+#
+# Unlike gate 3 this needs no BSD `stat`: the GC pass has no idle gate, so it
+# runs everywhere. Three state dirs:
+#   LIVE    pid alive, sessionDir S            → S must survive
+#   STALE   pid dead,  sessionDir S (the same) → must not decide S's fate
+#   ORPHAN  pid dead,  sessionDir O (its own)  → O must still be GC'd
+if ! command -v jq >/dev/null 2>&1; then
+  skip "gate 4 GC sessionDir ownership (needs jq: the reaper reads broker.json with it)"
+else
+
+TMPROOT4="${TMPDIR:-/tmp}"; TMPROOT4="${TMPROOT4%/}"
+TMPD4="$(mktemp -d "$TMPROOT4/px921.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+# Spaced on purpose, same standing regression as gate 3's fixture.
+CONFIG4="$TMPD4/config dir"
+STATE4="$CONFIG4/plugins/data/codex-openai-codex/state"
+LIVE_PID=""
+
+# Chains gate 3's handler: a bare `trap cleanup_gate4 EXIT` would replace it and
+# strand that gate's fixture tree and broker processes.
+cleanup_gate4() {
+  [ -n "$LIVE_PID" ] && kill -KILL "$LIVE_PID" 2>/dev/null
+  rm -rf "$TMPD4"
+  declare -F cleanup_fixtures >/dev/null && cleanup_fixtures
+  return 0
+}
+trap cleanup_gate4 EXIT INT TERM
+
+# A state dir as the plugin writes it. The GC pass reads only pid + sessionDir,
+# so the slug is free — "aaa" sorts first, putting the stale record ahead of the
+# live one in the glob so a first-match implementation would take it.
+write_gc_state() {
+  local slug="$1" pid="$2" session="$3" sd
+  sd="$STATE4/$slug"
+  mkdir -p "$sd"
+  printf '{"sessionDir":"%s","pid":%s}\n' "$session" "$pid" > "$sd/broker.json"
+}
+
+SHARED_DIR="$TMPD4/cxc-SHARED"
+ORPHAN_DIR="$TMPD4/cxc-ORPHAN"
+mkdir -p "$SHARED_DIR" "$ORPHAN_DIR"
+
+sleep 600 &
+LIVE_PID=$!
+
+# A pid that is definitively gone before the reaper looks at it.
+DEAD_PID="$(bash -c 'echo $$')"
+dead_ready=false
+for _ in $(seq 1 30); do
+  if ! kill -0 "$DEAD_PID" 2>/dev/null; then dead_ready=true; break; fi
+  sleep 0.1
+done
+
+write_gc_state aaastale "$DEAD_PID" "$SHARED_DIR"
+write_gc_state live     "$LIVE_PID" "$SHARED_DIR"
+write_gc_state orphan   "$DEAD_PID" "$ORPHAN_DIR"
+
+if [ "$dead_ready" != true ] || ! kill -0 "$LIVE_PID" 2>/dev/null; then
+  fail "#921: gate 4 fixture pids not in the expected state (live=$LIVE_PID dead=$DEAD_PID)"
+else
+  GC_OUT="$(TMPDIR="$TMPD4" CLAUDE_CONFIG_DIR="$CONFIG4" bash "$REAPER" --gc 2>&1)"
+
+  if [ -d "$SHARED_DIR" ]; then
+    pass "#921: sessionDir claimed by a live broker survives --gc despite a stale dead-pid record"
+  else
+    fail "#921: --gc deleted a live broker's sessionDir on a stale record (output: $GC_OUT)"
+  fi
+  case "$GC_OUT" in
+    *"SKIP GC dir=$SHARED_DIR (a live broker still claims this sessionDir)"*)
+      pass "#921: the skip names the live claimant as the reason" ;;
+    *) fail "#921: expected a live-claimant SKIP GC line for $SHARED_DIR, got: $GC_OUT" ;;
+  esac
+  # The guard must not turn GC off: a dir no live broker claims is still swept.
+  if [ ! -d "$ORPHAN_DIR" ]; then
+    pass "#921: a sessionDir with only dead claimants is still GC'd"
+  else
+    fail "#921: the ownership guard suppressed a legitimate GC (output: $GC_OUT)"
+  fi
+fi
+
+fi   # jq gate
+
 echo ""
 echo "=== summary ==="
 echo "PASS: $PASS"
