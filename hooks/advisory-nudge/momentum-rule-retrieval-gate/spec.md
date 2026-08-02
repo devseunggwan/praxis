@@ -210,6 +210,18 @@ approve blindly.
 The `dispatch` and `force-push` triggers never emit a decision — escalation is
 merge-only, per the issue scope (only the merge failure was reproduced).
 
+**Deny reason carries the whole verb's checklist (issue #873).** The briefing
+is one of four gates on `gh pr merge`; the other three are `pre-merge-approval-gate`,
+`gh-merge-worktree-precondition`, and `commit-title-length-check` (squash path).
+Before #873 each was discovered by its own separate block, costing a retry turn
+apiece — praxis #873 measured six such blocks in one session, at least four of
+which already had their satisfaction form documented. Documentation was never
+the gap; retrieval at call time was. The deny message therefore appends
+`verb_gate_checklist("gh pr merge")` from `hooks/_lib/block_message.py`, which
+is the single source for that mapping (see
+[docs/hook/INDEX.md](../../../docs/hook/INDEX.md)). The checklist is appended to
+the `format_block` output, so the five-field format is unchanged.
+
 ### Environment variables
 
 | Variable | Effect |

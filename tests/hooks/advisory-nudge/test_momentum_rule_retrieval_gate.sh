@@ -704,6 +704,45 @@ run_merge_escalation_case "merge_escalation_loop_repetition_denies" \
 run_merge_escalation_case "merge_escalation_multi_target_denies" \
   "yes" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge 833 --squash && gh pr merge 999 --squash"
 
+# --- verb gate checklist in the deny reason (issue #873) ----------------------
+#
+# The briefing is one of four gates on `gh pr merge`. Before #873 the deny named
+# only its own requirement, so the remaining three were each discovered by a
+# separate block, costing a retry turn apiece. The deny must now enumerate the
+# whole verb.
+run_merge_checklist_case() {
+  local name="merge_deny_reason_enumerates_verb_gates"
+  local payload out ok=1
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "tool_name": "Bash",
+    "tool_input": {"command": "gh pr merge --squash --delete-branch"},
+    "transcript_path": sys.argv[1],
+    "session_id": "test-momentum-checklist",
+}))' "$FIXTURES_DIR/momentum-merge-fidelity-unreliable.jsonl")
+  out=$(echo "$payload" | python3 "$HOOK" 2>/dev/null)
+
+  echo "$out" | grep -qF '"permissionDecision": "deny"' || ok=0
+  local token
+  for token in \
+    "pre-merge-approval-gate" \
+    "gh-merge-worktree-precondition" \
+    "commit-title-length-check" \
+    "PRAXIS_MOMENTUM_MERGE_ADVISORY=1" \
+    "briefing-surfaced:"
+  do
+    echo "$out" | grep -qF "$token" || { ok=0; echo "        missing: $token"; }
+  done
+
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+run_merge_checklist_case
+
 # Fused global flag (`gh --repo=o/r pr merge 833`) → tokenizer still extracts
 # target 833, correlation passes → no deny.
 run_merge_escalation_case "merge_escalation_fused_repo_flag_passes" \

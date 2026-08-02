@@ -52,7 +52,10 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from _memory_dir import resolve_memory_dir  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import TRANSCRIPT_SCAN_LINES  # type: ignore[import-not-found]  # noqa: E402
-from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
+from block_message import (  # type: ignore[import-not-found]  # noqa: E402
+    format_block,
+    verb_gate_checklist,
+)
 
 # ---------------------------------------------------------------------------
 # Prefix used on every stderr line.
@@ -754,6 +757,9 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     if _prior_turn_extension_passes(entries, idxs, code):
         return None
 
+    # Issue #873: teach every gate this verb owes on the FIRST deny. The
+    # briefing is only one of four; discovering the rest one block at a time
+    # costs a retry turn each.
     return format_block(
         rule_name="Pre-Merge Reporting briefing",
         why="this gh pr merge is not preceded by the Pre-Merge Reporting "
@@ -768,7 +774,7 @@ def _merge_escalation_reason(payload: dict) -> str | None:
             "`# briefing-surfaced: <reason>` to the merge command",
         reference="CLAUDE.md → Pre-Merge Reporting; "
             "hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md",
-    )
+    ) + verb_gate_checklist("gh pr merge")
 
 
 # ---------------------------------------------------------------------------

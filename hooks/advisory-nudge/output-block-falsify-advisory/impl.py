@@ -61,6 +61,7 @@ from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from ask_option_text import collect_option_texts  # type: ignore[import-not-found]  # noqa: E402
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
+from block_message import verb_gate_checklist  # type: ignore[import-not-found]  # noqa: E402
 
 _TELEMETRY_HOOK_NAME = "output-block-falsify-advisory"
 _TELEMETRY_HOOK_ROLE = "advisory-nudge"
@@ -528,18 +529,24 @@ def _falsified_scaffold(labels: list[str]) -> str:
     return "\n".join(lines)
 
 
+# Issue #873: `Falsified:` is one of three gates on this verb. An author who
+# only learns about it here spends a further retry turn on the next one, so
+# every block teaches the whole verb's enumeration.
+_VERB_CHECKLIST = verb_gate_checklist("AskUserQuestion")
+
+
 def _build_ask_msg(labels: list[str]) -> str:
     scaffold = _falsified_scaffold(labels)
     if not scaffold:
-        return ASK_MSG
-    return f"{ASK_MSG} [scaffold]\n{scaffold}"
+        return ASK_MSG + _VERB_CHECKLIST
+    return f"{ASK_MSG} [scaffold]\n{scaffold}\n{_VERB_CHECKLIST}"
 
 
 def _build_anchoring_ask_msg(labels: list[str]) -> str:
     scaffold = _falsified_scaffold(labels)
     if not scaffold:
-        return ANCHORING_ASK_MSG
-    return f"{ANCHORING_ASK_MSG} [scaffold]\n{scaffold}"
+        return ANCHORING_ASK_MSG + _VERB_CHECKLIST
+    return f"{ANCHORING_ASK_MSG} [scaffold]\n{scaffold}\n{_VERB_CHECKLIST}"
 
 
 def _record_block_telemetry(session_id: object, decision: str) -> None:

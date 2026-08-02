@@ -121,6 +121,84 @@ def test_pr_body_gates_append_checklist() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 1b. Verb-keyed gate checklists (issue #873)
+# ---------------------------------------------------------------------------
+
+ADVISORY_DIR = REPO_ROOT / "hooks" / "advisory-nudge"
+
+
+def test_verb_gate_checklist_unknown_verb_is_empty() -> None:
+    """An unregistered verb yields "" so a caller cannot append a stray blank
+    block to its deny message."""
+    assert bm.verb_gate_checklist("git bisect") == ""
+    assert bm.verb_gate_checklist("") == ""
+
+
+def test_pr_body_checklist_is_the_create_verb_entry() -> None:
+    """The #824 helper is an alias, not a second copy that can drift."""
+    assert bm.pr_body_evidence_checklist() == bm.verb_gate_checklist("gh pr create")
+
+
+def test_merge_verb_checklist_names_every_merge_gate() -> None:
+    """One deny on `gh pr merge` must teach all four gates on that verb —
+    discovering them one block at a time is the #873 defect."""
+    out = bm.verb_gate_checklist("gh pr merge")
+    for gate in (
+        "momentum-rule-retrieval-gate",
+        "pre-merge-approval-gate",
+        "gh-merge-worktree-precondition",
+        "commit-title-length-check",
+    ):
+        assert gate in out, f"merge checklist must name {gate}"
+    # Satisfaction forms, verified against each hook's own source.
+    assert "PRAXIS_MOMENTUM_MERGE_ADVISORY=1" in out
+    assert "# briefing-surfaced:" in out
+    assert "--delete-branch" in out
+    assert out.endswith("\n")
+
+
+def test_ask_verb_checklist_names_every_ask_gate() -> None:
+    out = bm.verb_gate_checklist("AskUserQuestion")
+    for gate in (
+        "output-block-falsify-advisory",
+        "block-ask-end-option",
+        "block-manufactured-action-menu",
+    ):
+        assert gate in out, f"AskUserQuestion checklist must name {gate}"
+    assert "PRAXIS_ASK_END_ADVISORY=1" in out
+    assert "column 0" in out
+    assert out.endswith("\n")
+
+
+def test_verb_checklists_do_not_start_a_column_0_falsified_line() -> None:
+    """Self-application guard (#873).
+
+    The AskUserQuestion checklist names the `Falsified:` token, and this text
+    is emitted into the transcript on every block. `output-block-falsify-
+    advisory` accepts the token only at column 0, so an unindented occurrence
+    here would let the hook's own message satisfy the very predicate it is
+    asking the author to satisfy.
+    """
+    for verb in ("gh pr create", "gh pr merge", "AskUserQuestion"):
+        for line in bm.verb_gate_checklist(verb).splitlines():
+            assert not line.startswith("Falsified:"), (
+                f"{verb} checklist emits a column-0 'Falsified:' line"
+            )
+
+
+def test_verb_wired_hooks_append_their_checklist() -> None:
+    """Each hook named by #873 must append its verb's checklist."""
+    for name, verb in (
+        ("momentum-rule-retrieval-gate", "gh pr merge"),
+        ("output-block-falsify-advisory", "AskUserQuestion"),
+    ):
+        src = (ADVISORY_DIR / name / "impl.py").read_text(encoding="utf-8")
+        assert f'verb_gate_checklist("{verb}")' in src, (
+            f"{name} must append verb_gate_checklist(\"{verb}\") to its message"
+        )
+
+
+# ---------------------------------------------------------------------------
 # 2. Adoption lint
 # ---------------------------------------------------------------------------
 

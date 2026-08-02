@@ -290,6 +290,21 @@ run_case "AskUserQuestion: (recommended) lowercase — T2 escalates to ask (issu
   "ask:Falsified:" \
   "$(make_ask_payload '["use existing approach (recommended)"]')"
 
+# Issue #873: `Falsified:` is one of three gates on this verb. The ask message
+# must enumerate all three so the other two are not discovered one block at a
+# time — the sibling gates are named here, not just the format rule.
+run_case "AskUserQuestion: ask reason enumerates sibling verb gates (issue #873)" \
+  "ask:block-ask-end-option" \
+  "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
+
+run_case "AskUserQuestion: ask reason names the action-menu gate (issue #873)" \
+  "ask:block-manufactured-action-menu" \
+  "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
+
+run_case "AskUserQuestion: anchoring path also carries the checklist (issue #873)" \
+  "ask:block-ask-end-option" \
+  "$(make_ask_payload '["use existing approach (recommended)"]')"
+
 # ---------------------------------------------------------------------------
 # AskUserQuestion negative cases
 # ---------------------------------------------------------------------------

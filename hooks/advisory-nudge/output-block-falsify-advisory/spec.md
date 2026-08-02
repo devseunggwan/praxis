@@ -444,6 +444,22 @@ aggregated into the same scaffold (not just the first one encountered) —
 otherwise fixing only the first question's line would still hit a second
 block on retry for the un-addressed question.
 
+#### Verb gate checklist (issue #873)
+
+`Falsified:` is one of three gates on `AskUserQuestion` — the other two are
+`block-ask-end-option` and `block-manufactured-action-menu`. An author who
+learns only about this one spends a further retry turn on the next, so both
+ask messages (T1 and the anchoring path) append
+`verb_gate_checklist("AskUserQuestion")` from `hooks/_lib/block_message.py`,
+the single source for the verb → gate mapping (see
+[docs/hook/INDEX.md](../../../docs/hook/INDEX.md)).
+
+The checklist names the `Falsified:` token but **indents** it. That is not
+cosmetic: the token is only recognised at column 0, so an unindented line here
+would let this hook's own output satisfy the predicate it is asking the author
+to satisfy. `tests/test_block_message.py::test_verb_checklists_do_not_start_a_column_0_falsified_line`
+pins that for every registered verb.
+
 **Anti-bypass guard**: because the scaffold line itself starts with
 `Falsified:`, a verbatim copy-paste that never fills in the placeholders
 would otherwise satisfy the exact-prefix check with zero probe evidence —
