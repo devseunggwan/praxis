@@ -211,11 +211,14 @@ The `dispatch` and `force-push` triggers never emit a decision — escalation is
 merge-only, per the issue scope (only the merge failure was reproduced).
 
 **Deny reason carries the whole verb's checklist (issue #873).** The briefing
-is one of five unconditional gates on `gh pr merge` — the others are
-`pre-merge-approval-gate`, `side-effect-scan`, `gh-merge-worktree-precondition`,
-and `commit-title-length-check` (squash path) — plus two conditional ones
-(`pipefail-advisory` when the merge is piped, `skill-gate-commands` when
-`PRAXIS_SKILL_GATED_COMMANDS` lists the verb).
+is one of three gates that fire on every `gh pr merge` whatever the flags — the
+other two are `pre-merge-approval-gate` and `side-effect-scan`. Four more are
+conditional: `gh-merge-worktree-precondition` (only with `--delete-branch`),
+`commit-title-length-check` (only with `--squash`), `pipefail-advisory` (only
+when the merge is piped), and `skill-gate-commands` (only when
+`PRAXIS_SKILL_GATED_COMMANDS` lists the verb). The checklist keeps that split
+explicit — a conditional gate listed as unconditional sends the reader looking
+for a requirement that does not apply to their command.
 Before #873 each was discovered by its own separate block, costing a retry turn
 apiece — praxis #873 measured six such blocks in one session, at least four of
 which already had their satisfaction form documented. Documentation was never

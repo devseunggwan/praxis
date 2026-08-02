@@ -161,6 +161,27 @@ def test_merge_verb_checklist_names_every_merge_gate() -> None:
     assert out.endswith("\n")
 
 
+def test_merge_checklist_splits_unconditional_from_conditional() -> None:
+    """A conditional gate listed as unconditional sends the reader looking for a
+    requirement that does not apply to their command — the mirror of the
+    under-enumeration this checklist exists to prevent (CodeRabbit, PR #931).
+
+    Only three gates fire on every `gh pr merge`; the rest are flag-gated.
+    """
+    out = bm.verb_gate_checklist("gh pr merge")
+    head, _, tail = out.partition("Conditional — fire only in the stated situation:")
+    assert tail, "merge checklist must carry a Conditional section"
+    for always in ("momentum-rule-retrieval-gate", "pre-merge-approval-gate", "side-effect-scan"):
+        assert always in head, f"{always} fires on every merge — belongs above the split"
+    for flag_gated in (
+        "gh-merge-worktree-precondition",   # requires -d / --delete-branch
+        "commit-title-length-check",        # requires -s / --squash
+        "pipefail-advisory",                # requires a pipe
+        "skill-gate-commands",              # requires PRAXIS_SKILL_GATED_COMMANDS
+    ):
+        assert flag_gated in tail, f"{flag_gated} is flag-gated — belongs below the split"
+
+
 def test_ask_verb_checklist_names_every_ask_gate() -> None:
     out = bm.verb_gate_checklist("AskUserQuestion")
     for gate in (

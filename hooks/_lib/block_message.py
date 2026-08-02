@@ -118,6 +118,7 @@ a `Falsified:` line.
 
 📋 Every gate on `gh pr merge` (satisfy ALL before re-running):
 
+Unconditional — fire on every `gh pr merge`, whatever the flags:
   6-item briefing in this turn              ← momentum-rule-retrieval-gate
     What changed / verified / NOT verified / Risk / Open items / approve-ask.
     Relief: PRAXIS_MOMENTUM_MERGE_ADVISORY=1, or an unquoted shell comment
@@ -125,13 +126,14 @@ a `Falsified:` line.
   Explicit per-PR user approval             ← pre-merge-approval-gate
     Always asks. No agent-attachable bypass exists, by design.
   Intentional-side-effect acknowledgement   ← side-effect-scan
-    Asks on every `gh pr merge`. Opt out in-band: `# side-effect:ack`.
-  Head-branch worktree removed first        ← gh-merge-worktree-precondition
-    Only when `--delete-branch` / `-d` is present.
-  PR title ≤ 50 chars                       ← commit-title-length-check
-    Advisory. With `--squash` the PR title becomes the squash commit title.
+    Opt out in-band: `# side-effect:ack`.
 
 Conditional — fire only in the stated situation:
+  Head-branch worktree removed first        ← gh-merge-worktree-precondition
+    Only with `--delete-branch` / `-d`.
+  PR title ≤ 50 chars                       ← commit-title-length-check
+    Only with `--squash` / `-s` (the PR title becomes the squash commit
+    title). Advisory.
   Merge piped into another command          ← pipefail-advisory
     `gh pr merge ... | tail -3` reports success even when the merge failed.
   Required skill not invoked this session   ← skill-gate-commands

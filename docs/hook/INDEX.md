@@ -21,7 +21,7 @@ single source, reached via `verb_gate_checklist(verb)`:
 | Verb | Gates enumerated on the first block | Emitted by |
 | ------ | ------------------------------------- | ------------ |
 | `gh pr create` | block-pr-without-caller-evidence, block-pr-without-precommit-evidence | both pr-body gates |
-| `gh pr merge` | momentum-rule-retrieval-gate, pre-merge-approval-gate, side-effect-scan, gh-merge-worktree-precondition, commit-title-length-check, + conditional (pipefail-advisory, skill-gate-commands) | momentum-rule-retrieval-gate |
+| `gh pr merge` | momentum-rule-retrieval-gate, pre-merge-approval-gate, side-effect-scan, + conditional (gh-merge-worktree-precondition on `--delete-branch`, commit-title-length-check on `--squash`, pipefail-advisory when piped, skill-gate-commands when opted in) | momentum-rule-retrieval-gate |
 | `AskUserQuestion` | output-block-falsify-advisory, block-ask-end-option, block-manufactured-action-menu, + conditional (pr-state-refetch-gate, merge-menu-review-options-advisory) and advisory-only (pre-output-falsification-gate, memory-hint) | output-block-falsify-advisory |
 
 A checklist that under-enumerates reproduces the defect it exists to fix, and
