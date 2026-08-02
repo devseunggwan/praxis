@@ -101,6 +101,14 @@ mk_assistant() {
 # Args:
 #   $1 = distribution-card body (between fences); newline-separated KEY: VALUE lines
 #   $2 = unified-table rows (newline-separated, each row a full markdown row including pipes)
+# Gate-11 (#917) requires this fence whenever a report proposes a remedy-layer
+# action, which every fixture row below does. Both report builders emit it so
+# each existing case keeps testing the gate it was written for; the Gate-11
+# negative cases build their reports without it.
+RR_FENCE_OK='<!-- retrospect:remedy_reach begin -->
+- finding #1: reach=full | surface: PreToolUse hook | unreached: none | worse_axis: na
+<!-- retrospect:remedy_reach end -->'
+
 mk_retrospect_stage3() {
   local card="$1" rows="$2"
   cat <<EOF
@@ -119,6 +127,8 @@ $rows
 - self_adversarial: ran | result: synthetic fixture ledger only
 - critic_diff: not-run | reason: tier predicate false (synthetic fixture)
 <!-- retrospect:suppression_ledger end -->
+
+$RR_FENCE_OK
 EOF
 }
 
@@ -136,6 +146,8 @@ $card
 | # | Category | Tool Layer | Pattern | Root Cause | Rule / Gap | Repeat? | Proposed Actions (1~2) | Rationale | Priority |
 |---|----------|------------|---------|------------|------------|---------|------------------------|-----------|----------|
 $rows
+
+$RR_FENCE_OK
 EOF
 }
 
@@ -2364,6 +2376,87 @@ for jsonl in "$FIXTURE_DIR"/retrospect-synth-*.jsonl; do
 done
 
 # Summary -------------------------------------------------------------------
+
+# --------------------------------------------------------------------------- #
+# Gate-11 — remedy-reach receipt (issue #917)
+# --------------------------------------------------------------------------- #
+# The card, not the report body, is the trigger: it enumerates every action type
+# by name, so a text scan would fire on the 0-friction path too (RR5).
+
+# A report body carrying the ledger but no remedy_reach fence.
+mk_stage3_no_remedy_reach() {
+  local card="$1" rows="$2"
+  cat <<EOF
+## Retrospect Report — 2026-04-30
+
+<!-- retrospect:distribution begin -->
+$card
+<!-- retrospect:distribution end -->
+
+| # | Category | Tool Layer | Pattern | Root Cause | Rule / Gap | Repeat? | Proposed Actions (1~2) | Rationale | Priority |
+|---|----------|------------|---------|------------|------------|---------|------------------------|-----------|----------|
+$rows
+
+<!-- retrospect:suppression_ledger begin -->
+- worst_agent_failure: synthetic Stop-hook fixture — Gate-11 case | disposition: surface
+- self_adversarial: ran | result: synthetic fixture ledger only
+- critic_diff: not-run | reason: tier predicate false (synthetic fixture)
+<!-- retrospect:suppression_ledger end -->
+EOF
+}
+
+# RR1: block — a memory action is proposed and the fence is absent entirely.
+RR1_TEXT="$(mk_stage3_no_remedy_reach "$T1_CARD" "$T1_ROW")"
+run_case "RR1_block_remedy_action_without_fence" "block" \
+  "$(mk_assistant "$RR1_TEXT")"
+
+# RR2: block — the fence exists but its row names no unreached axis, so
+# "reach=full" stands in for a question that was never answered.
+RR2_TEXT="$(mk_stage3_no_remedy_reach "$T1_CARD" "$T1_ROW")
+<!-- retrospect:remedy_reach begin -->
+- finding #1: reach=full | surface: MEMORY.md entry
+<!-- retrospect:remedy_reach end -->"
+run_case "RR2_block_row_without_unreached_axis" "block" \
+  "$(mk_assistant "$RR2_TEXT")"
+
+# RR3: block — two fences let a reaching remedy mask a non-reaching one.
+RR3_TEXT="$(mk_stage3_no_remedy_reach "$T1_CARD" "$T1_ROW")
+${RR_FENCE_OK}
+${RR_FENCE_OK}"
+run_case "RR3_block_duplicate_fences" "block" \
+  "$(mk_assistant "$RR3_TEXT")"
+
+# RR4: block — unterminated fence.
+RR4_TEXT="$(mk_stage3_no_remedy_reach "$T1_CARD" "$T1_ROW")
+<!-- retrospect:remedy_reach begin -->
+- finding #1: reach=full | surface: PreToolUse hook | unreached: none | worse_axis: na"
+run_case "RR4_block_unterminated_fence" "block" \
+  "$(mk_assistant "$RR4_TEXT")"
+
+# RR5: pass — the 0-friction path proposes no remedy, so no receipt is owed.
+RR5_CARD=$(cat <<EOF
+- memory: 0
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 0
+- gate_1_verdict: NA
+- gate_2_verdict: NA
+EOF
+)
+RR5_TEXT="$(mk_stage3_no_remedy_reach "$RR5_CARD" "")"
+run_case "RR5_pass_zero_friction_path_owes_no_receipt" "pass" \
+  "$(mk_assistant "$RR5_TEXT")"
+
+# RR6: pass — an honest partial reach with the unreached axis named is a valid
+# outcome; the gate checks that the answer exists, not that it is "full".
+RR6_TEXT="$(mk_stage3_no_remedy_reach "$T1_CARD" "$T1_ROW")
+<!-- retrospect:remedy_reach begin -->
+- finding #1: reach=partial | surface: PreToolUse hook | unreached: prose proposals emit no tool call | worse_axis: yes
+<!-- retrospect:remedy_reach end -->"
+run_case "RR6_pass_partial_reach_with_named_axis" "pass" \
+  "$(mk_assistant "$RR6_TEXT")"
 
 echo
 echo "================================"

@@ -280,6 +280,9 @@ Worked examples live in
    every path — records the self-incrimination pass)
 4. `<!-- retrospect:distribution begin --> ... end -->`
 5. unified findings table
+6. `<!-- retrospect:remedy_reach begin --> ... end -->` when any finding
+   proposes a remedy-layer action (`memory`, `claude_md_draft`, `skill_idea`,
+   `hook_code`) — Gate-11 blocks the report without it
 
 **Per-finding plan must state:**
 
@@ -288,6 +291,10 @@ Worked examples live in
 3. how it will be verified
 4. `Stage 2 caveats: ...` when applicable
 5. `Falsification: ...`
+6. `remedy_reach: ...` — does this remedy's surface fire where the finding was
+   uttered? Name the axis it structurally cannot reach, and whether that axis is
+   the larger-damage one. See
+   [`references/stage3-reporting.md`](references/stage3-reporting.md).
 
 #### Pre-Output Falsification Gate (AskUserQuestion)
 

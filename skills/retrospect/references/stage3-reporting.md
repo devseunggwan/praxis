@@ -29,6 +29,8 @@ Stage 3 output MUST emit, in this order:
 9. unified findings table
 10. memory-action evidence blocks for every finding whose proposed action
    includes `memory`
+11. `<!-- retrospect:remedy_reach begin --> ... end -->` when any finding
+   proposes a remedy-layer action
 
 The `memory` distribution count includes both finding rows whose Proposed
 Actions include `memory` and `successful_patterns` rows whose
@@ -252,6 +254,44 @@ For every non-note-only finding, Stage 3 must explain:
 3. how it will be verified
 4. `Stage 2 caveats: ...` when caveats apply
 5. `Falsification: ...`
+6. `remedy_reach: ...` — see [Remedy-reach receipt](#remedy-reach-receipt)
+
+### Remedy-reach receipt
+
+A remedy only works on the surface it lives on. The recurring failure (#917) is
+to diagnose a gap correctly, place the remedy on a layer that cannot reach where
+the gap is uttered, and then describe the shortfall as legitimate — the
+canonical instance shipped a `PreToolUse` hook for the tool-call axis while the
+axis the user actually named (a **prose** proposal, which emits no tool call)
+was routed to a memory layer whose adjacent rule already carried
+`recurrence 5 / enforcement none`.
+
+For every finding whose Proposed Actions include a remedy layer
+(`memory`, `claude_md_draft`, `skill_idea`, `hook_code`), Stage 3 MUST emit one
+row inside a single `retrospect:remedy_reach` fence:
+
+```markdown
+<!-- retrospect:remedy_reach begin -->
+- finding #<n>: reach=full|partial|none | surface: <where the remedy lives> | unreached: <axis, or "none"> | worse_axis: yes|no|na
+<!-- retrospect:remedy_reach end -->
+```
+
+- `reach` — does the remedy's surface fire at the point the finding was uttered?
+- `surface` — the concrete layer (`PreToolUse hook`, `MEMORY.md entry`,
+  `SKILL.md step`, `CLAUDE.md rule`), not the action-type token.
+- `unreached` — the axis the remedy structurally cannot see, named plainly.
+  `none` only when the surface covers every axis of the finding.
+- `worse_axis` — whether the unreached axis is the **larger-damage** one. `yes`
+  is not a blocker, but it must be stated rather than discovered in review;
+  `na` when `unreached: none`.
+
+`reach=partial` with an honest `unreached:` is an acceptable outcome. Claiming
+`reach=full` for a surface that demonstrably cannot fire on the finding's axis
+is the failure this receipt exists to make visible.
+
+The `retrospect-mix-check` Stop hook (Gate-11) blocks a Stage 3 report that
+proposes a remedy-layer action without a well-formed fence carrying at least
+one row.
 
 ### Trigger Conditions (Gate-3 (b) demotions)
 

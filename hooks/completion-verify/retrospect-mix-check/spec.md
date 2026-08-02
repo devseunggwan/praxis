@@ -48,8 +48,43 @@ of the following hold:
 | Any row with `Proposed Actions` containing `upstream_feedback` or `issue` whose `Rationale` lacks a `backing_repo: <owner/repo>` declaration                                                                                                        | Gate-3 (backing_repo) violation — Stage 2 step 8 requires this declaration for routing; Stage 4 Action 4 step 0 aborts on absence                                                                                                                                                                                                                 |
 | Gate-7 value mismatch: `transcript_receipt` fence declares `is_error_count` or `user_turn_count` that diverges from a live grep of the transcript by more than 1                                                                                    | Receipt was transcribed verbatim from the compaction summary rather than re-derived this turn (presence ≠ freshness)                                                                                                                                                                                                                              |
 | Gate-8 (issues #699, #702): the Stage 3 report has no `retrospect:suppression_ledger` fence, has more than one, has a malformed (unterminated/nested) one, or the fence lacks a `worst_agent_failure:`, `self_adversarial:`, or `critic_diff:` line | The Stage 2 self-incrimination pass / conditional externalized critic re-scan record is missing — the painful agent-caused friction the analyzing context is most motivated to bury was never surfaced for audit. Mandatory on every path incl. the clean one. Skipped only once Stage 4 (`## Actions Executed`) is reached for the latest report |
+| Gate-11 (issue #917): the distribution card records a non-zero `memory` / `claude_md_draft` / `skill_idea` / `hook_code` count but the report has no `retrospect:remedy_reach` fence, has more than one, has a malformed one, or its rows carry no `reach=` verdict with a named `unreached:` axis | The remedy's reach was never put on the record — the failure mode is a correct diagnosis whose prescription lives on a layer that cannot fire where the finding was uttered, with the shortfall then described as legitimate. Shares Gate-8's Stage-4 carve-out |
 | Gate-8b (issue #701): `suppression_ledger` claims a clean/no-failure path while a live transcript scan finds more than one deterministic adverse signal                                                                                             | The ledger exists but launders away visible evidence. The hook re-derives `is_error:true`, content-error syntax, and documented `user_correction` markers on user turns before trusting clean ledger language                                                                                                                                     |
 | Gate-8c (issue #715): `critic_diff: not-run` while a live transcript scan finds more than one explicit user-correction marker (tighter `sl_strong_correction_re`, not Gate-8b's broad regex)                                                        | The externalized critic tier — the only anti-concealment mechanism that survives the self-correction literature — was self-skipped in exactly the case its predicate ("a friction_event required user correction") was satisfied. Converts the run-the-critic guidance from unenforced self-feedback into a deterministic format gate             |
+
+### Gate-11 remedy-reach receipt (issue #917)
+
+A remedy only works on the surface it lives on. The recurring failure this gate
+targets is diagnosing a gap correctly, placing the remedy on a layer that cannot
+reach where the gap is uttered, and then describing the shortfall as legitimate:
+the canonical instance shipped a `PreToolUse` hook for the tool-call axis while
+the axis the user named — a **prose** proposal, which emits no tool call — was
+routed to a memory layer whose adjacent rule already carried
+`recurrence 5 / enforcement none`.
+
+Whenever the distribution card records a non-zero count for a remedy-layer
+action (`memory`, `claude_md_draft`, `skill_idea`, `hook_code`), the report MUST
+carry exactly one well-formed `retrospect:remedy_reach` fence with at least one
+row of the shape:
+
+```markdown
+- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na
+```
+
+**Why the card, not a text scan.** The distribution card enumerates every action
+type by name, so grepping the report body for `memory` fires even on the
+0-friction path where every count is 0 and no remedy exists. The trigger reads
+the card's counts instead.
+
+**What it does and does not prove.** Structure only: the reach question was
+answered on the record. `reach=partial` with an honest `unreached:` axis is a
+valid outcome — the gate blocks the *absence* of an answer, not an
+uncomfortable one. Requiring both a `reach=` verdict and a non-empty
+`unreached:` is what keeps `reach=full` from standing in for an axis that was
+never named.
+
+Shares Gate-8's Stage-4 carve-out: a positive-presence gate must not
+retroactively block a cycle that already reached `## Actions Executed`.
 
 ### Gate-7 value check (issue #671)
 
@@ -361,6 +396,10 @@ plus 11 synthetic regression fixtures:
    SL29g not-run + 2 '그렇게 하지 말라고' (third kept token) → block (CodeRabbit #723);
    SL29h not-run + exactly 1 '그렇게 하지 말라고' → pass (>1 tolerance boundary);
    SL30 critic ran (none|checked) + 2 corrections → pass
+- 11 Gate-11 remedy-reach receipt (issue #917): RR1 remedy action + no fence →
+   block; RR2 row without an `unreached:` axis → block; RR3 duplicate fences →
+   block; RR4 unterminated fence → block; RR5 0-friction card (all counts 0) +
+   no fence → pass; RR6 `reach=partial` with the axis named → pass
 
 ### Category counts (memory_hygiene, output_quality)
 
