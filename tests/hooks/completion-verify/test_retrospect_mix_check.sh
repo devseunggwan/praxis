@@ -101,12 +101,42 @@ mk_assistant() {
 # Args:
 #   $1 = distribution-card body (between fences); newline-separated KEY: VALUE lines
 #   $2 = unified-table rows (newline-separated, each row a full markdown row including pipes)
-# Gate-11 (#917) requires this fence whenever a report proposes a remedy-layer
-# action, which every fixture row below does. Both report builders emit it so
-# each existing case keeps testing the gate it was written for; the Gate-11
-# negative cases build their reports without it.
-RR_FENCE_OK='<!-- retrospect:remedy_reach begin -->
-- finding #1: reach=full | surface: PreToolUse hook | unreached: none | worse_axis: na
+# Gate-11 (#917) owes one complete row per finding proposing a remedy-layer
+# action, and the row names the surface that remedy actually lives on. Derive
+# the fence from the rows themselves: a fixed row would document the wrong
+# finding number as soon as a case has two findings, and the wrong surface as
+# soon as a case proposes something other than `memory` — both of which the
+# fixtures below do. Both report builders emit it so each existing case keeps
+# testing the gate it was written for; the Gate-11 negative cases build their
+# reports without it.
+mk_remedy_reach() {
+  local rows="$1" body
+  body="$(printf '%s\n' "$rows" | awk -F'|' '
+    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+    $0 ~ /^\|[ \t]*[0-9]+[ \t]*\|/ && NF >= 9 {
+      n = trim($2); acts = trim($9)
+      split(acts, a, ",")
+      for (i in a) {
+        act = trim(a[i])
+        if (act == "memory")           { s = "MEMORY.md entry";  u = "prose proposals emit no tool call" }
+        else if (act == "claude_md_draft") { s = "CLAUDE.md rule"; u = "tool-call-only surfaces" }
+        else if (act == "skill_idea")  { s = "SKILL.md step";    u = "turns where the skill is not invoked" }
+        else if (act == "hook_code")   { s = "PreToolUse hook";  u = "none" }
+        else continue
+        r = (u == "none") ? "full" : "partial"
+        w = (u == "none") ? "na" : "yes"
+        printf "- finding #%s: reach=%s | surface: %s | unreached: %s | worse_axis: %s\n", n, r, s, u, w
+        break
+      }
+    }')"
+  [ -z "$body" ] && return 0
+  printf '<!-- retrospect:remedy_reach begin -->\n%s\n<!-- retrospect:remedy_reach end -->\n' "$body"
+}
+
+# A literal, valid fence for the duplicate-fence case, which needs two copies of
+# the same well-formed block rather than one derived from the rows.
+RR_FENCE_LITERAL='<!-- retrospect:remedy_reach begin -->
+- finding #1: reach=partial | surface: MEMORY.md entry | unreached: prose proposals emit no tool call | worse_axis: yes
 <!-- retrospect:remedy_reach end -->'
 
 mk_retrospect_stage3() {
@@ -128,7 +158,7 @@ $rows
 - critic_diff: not-run | reason: tier predicate false (synthetic fixture)
 <!-- retrospect:suppression_ledger end -->
 
-$RR_FENCE_OK
+$(mk_remedy_reach "$rows")
 EOF
 }
 
@@ -147,7 +177,7 @@ $card
 |---|----------|------------|---------|------------|------------|---------|------------------------|-----------|----------|
 $rows
 
-$RR_FENCE_OK
+$(mk_remedy_reach "$rows")
 EOF
 }
 
@@ -2421,8 +2451,8 @@ run_case "RR2_block_row_without_unreached_axis" "block" \
 
 # RR3: block — two fences let a reaching remedy mask a non-reaching one.
 RR3_TEXT="$(mk_stage3_no_remedy_reach "$T1_CARD" "$T1_ROW")
-${RR_FENCE_OK}
-${RR_FENCE_OK}"
+${RR_FENCE_LITERAL}
+${RR_FENCE_LITERAL}"
 run_case "RR3_block_duplicate_fences" "block" \
   "$(mk_assistant "$RR3_TEXT")"
 
@@ -2457,6 +2487,34 @@ RR6_TEXT="$(mk_stage3_no_remedy_reach "$T1_CARD" "$T1_ROW")
 <!-- retrospect:remedy_reach end -->"
 run_case "RR6_pass_partial_reach_with_named_axis" "pass" \
   "$(mk_assistant "$RR6_TEXT")"
+
+# RR7: block — two remedy findings, one row. A count-based check passes this;
+# coverage is per finding because #2's remedy may sit on a different surface.
+RR7_CARD=$(cat <<EOF
+- memory: 2
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 0
+- gate_1_verdict: NA
+- gate_2_verdict: PASS
+EOF
+)
+RR7_ROW2="| 2 | behavioral | — | second finding | did not verify | rule absent | No | memory | ${RATIONALE_5LINE} | MED |"
+RR7_TEXT="$(mk_stage3_no_remedy_reach "$RR7_CARD" "$(printf '%s\n%s' "$T1_ROW" "$RR7_ROW2")")
+${RR_FENCE_LITERAL}"
+run_case "RR7_block_sibling_finding_uncovered" "block" \
+  "$(mk_assistant "$RR7_TEXT")"
+
+# RR8: block — a row without `surface:` hides the action-to-layer mismatch the
+# receipt exists to expose.
+RR8_TEXT="$(mk_stage3_no_remedy_reach "$T1_CARD" "$T1_ROW")
+<!-- retrospect:remedy_reach begin -->
+- finding #1: reach=partial | unreached: prose proposals emit no tool call | worse_axis: yes
+<!-- retrospect:remedy_reach end -->"
+run_case "RR8_block_row_without_surface" "block" \
+  "$(mk_assistant "$RR8_TEXT")"
 
 echo
 echo "================================"

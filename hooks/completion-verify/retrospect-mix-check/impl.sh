@@ -321,6 +321,10 @@ declare -a GATE1_VIOLATIONS=()
 declare -a GATE2_VIOLATIONS=()
 declare -a GATE3_VIOLATIONS=()
 declare -a SHORT_ROW_VIOLATIONS=()
+# Finding IDs proposing a remedy-layer action — Gate-11's coverage list. Built
+# here rather than re-parsed later: the table is already being split cell-wise,
+# and the card's per-action counts cannot say WHICH findings owe a receipt.
+declare -a REMEDY_FINDING_IDS=()
 ROW_INDEX=0
 PIPE_SENTINEL=$'\x01PIPE\x01'
 
@@ -366,6 +370,16 @@ while IFS= read -r row; do
       *)
         seen_str="$seen_str$t "
         unique_actions+=("$t")
+        ;;
+    esac
+  done
+
+  # Gate-11 coverage list: this finding owes a remedy-reach row.
+  for act in "${unique_actions[@]}"; do
+    case "$act" in
+      memory|claude_md_draft|skill_idea|hook_code)
+        REMEDY_FINDING_IDS+=("$finding_num")
+        break
         ;;
     esac
   done
@@ -884,25 +898,16 @@ fi
 # answered on the record, not that the answer is right.
 #
 # Same Stage-4 carve-out and fence discipline as Gate-8 (a positive-presence
-# gate must not retroactively block a completed cycle). The trigger reads the
-# distribution card's per-action counts, NOT a text scan: the card enumerates
-# every action type by name, so grepping the report body for `memory` fires
-# even on the 0-friction path where the count is 0 and no remedy exists.
+# gate must not retroactively block a completed cycle). Coverage is per finding,
+# keyed on REMEDY_FINDING_IDS built while the findings table was parsed. The
+# distribution card cannot serve as the oracle here: it carries counts, not
+# identities, so a report with two remedy findings satisfies a count-based check
+# with a single row naming whichever one was easiest to answer for. Nor can the
+# report body be grepped for the action tokens — the card enumerates all six by
+# name (`- memory: 0`), which fires even on the 0-friction path.
 GATE11_VIOLATION=""
 if [ "$STAGE4_AFTER_REPORT" != "1" ]; then
-  RR_DIST_BLOCK=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk '
-    /<!--[[:space:]]*retrospect:distribution begin[[:space:]]*-->/ { capture=1; next }
-    /<!--[[:space:]]*retrospect:distribution end[[:space:]]*-->/ { capture=0 }
-    capture { print }')
-  rr_needed=0
-  for rr_key in memory claude_md_draft skill_idea hook_code; do
-    rr_n=$(printf '%s\n' "$RR_DIST_BLOCK" \
-      | sed -nE "s/^[[:space:]]*-?[[:space:]]*${rr_key}:[[:space:]]*([0-9]+).*/\1/p" | head -1)
-    if [ -n "$rr_n" ] && [ "$rr_n" -gt 0 ] 2>/dev/null; then
-      rr_needed=1
-    fi
-  done
-  if [ "${rr_needed:-0}" -gt 0 ]; then
+  if [ "${#REMEDY_FINDING_IDS[@]}" -gt 0 ]; then
     re_rb='^[[:space:]]*<!--[[:space:]]*retrospect:remedy_reach begin[[:space:]]*-->[[:space:]]*$'
     re_re='^[[:space:]]*<!--[[:space:]]*retrospect:remedy_reach end[[:space:]]*-->[[:space:]]*$'
     rr_begin=$(printf '%s\n' "$MOST_RECENT_BLOCK" | grep -cE "$re_rb" || true)
@@ -911,7 +916,7 @@ if [ "$STAGE4_AFTER_REPORT" != "1" ]; then
       $0 ~ se { ins=0; next }
       END { print (ins || nested) ? 1 : 0 }')
     if [ "$rr_begin" -lt 1 ]; then
-      GATE11_VIOLATION="Stage 3 report proposes a remedy-layer action but has no '<!-- retrospect:remedy_reach begin/end -->' fence (issue #917) — for each such finding state whether the remedy's surface fires where the finding was uttered: '- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na'"
+      GATE11_VIOLATION="Stage 3 report proposes a remedy-layer action (finding(s) ${REMEDY_FINDING_IDS[*]}) but has no '<!-- retrospect:remedy_reach begin/end -->' fence (issue #917) — for each such finding state whether the remedy's surface fires where the finding was uttered: '- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na'"
     elif [ "$rr_malformed" -gt 0 ]; then
       GATE11_VIOLATION="remedy_reach fence is malformed (an unterminated or nested 'retrospect:remedy_reach begin') — emit exactly one well-formed begin/end fence before Stage 3"
     elif [ "$rr_begin" -gt 1 ]; then
@@ -922,12 +927,20 @@ if [ "$STAGE4_AFTER_REPORT" != "1" ]; then
         $0 ~ se { if (ins) last=buf; ins=0; next }
         ins { buf = buf $0 "\n" }
         END { printf "%s", last }')
-      # A row must carry both a reach verdict and the unreached axis: `reach=`
-      # alone lets "full" stand in for an axis that was never named.
-      rr_rows=$(printf '%s\n' "$RR_BLOCK" \
-        | grep -cE '^[[:space:]]*-?[[:space:]]*finding[[:space:]]*#[0-9]+:.*reach=(full|partial|none)([^A-Za-z]|$).*unreached:[[:space:]]*.+' || true)
-      if [ "${rr_rows:-0}" -lt 1 ]; then
-        GATE11_VIOLATION="remedy_reach fence is present but carries no complete row (need >=1 '- finding #N: reach=full|partial|none | surface: ... | unreached: ... | worse_axis: ...') — a fence without a reach verdict and a named unreached axis records nothing"
+      # Every remedy-layer finding needs its OWN complete row. A row is complete
+      # only with a reach verdict, a surface, and a named unreached axis:
+      # `reach=full` alone stands in for an axis nobody ever wrote down, and a
+      # missing `surface:` hides the action-to-layer mismatch this gate exists
+      # to expose (a `hook_code` remedy whose surface is a MEMORY.md entry).
+      rr_missing=""
+      for rr_id in "${REMEDY_FINDING_IDS[@]}"; do
+        if ! printf '%s\n' "$RR_BLOCK" | grep -qE \
+          "^[[:space:]]*-?[[:space:]]*finding[[:space:]]*#${rr_id}:.*reach=(full|partial|none)([^A-Za-z]|\$).*surface:[[:space:]]*[^|]*[^[:space:]|].*unreached:[[:space:]]*.+"; then
+          rr_missing="$rr_missing #$rr_id"
+        fi
+      done
+      if [ -n "$rr_missing" ]; then
+        GATE11_VIOLATION="remedy_reach fence is present but has no complete row for finding(s)${rr_missing} — each finding proposing memory / claude_md_draft / skill_idea / hook_code needs its own '- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na'; one row cannot answer for a sibling finding whose remedy lives on a different surface"
       fi
     fi
   fi

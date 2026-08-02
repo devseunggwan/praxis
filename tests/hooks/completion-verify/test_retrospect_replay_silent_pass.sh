@@ -112,11 +112,13 @@ EOF
 }
 
 # Gate-11 (#917): every row above proposes `memory`, so the report owes a
-# remedy-reach receipt. These scenarios exercise Gates 8-10, so the receipt is
-# held constant and valid — a missing one would make every case block for the
-# wrong reason.
+# remedy-reach receipt per finding. These scenarios exercise Gates 8-10, so the
+# receipt is held constant and valid — a missing one would make every case block
+# for the wrong reason. It covers #1 and #2 because scenario (b) emits both
+# rows; a row for a finding the report does not carry is simply unused.
 REMEDY_REACH='<!-- retrospect:remedy_reach begin -->
 - finding #1: reach=partial | surface: MEMORY.md entry | unreached: prose proposals emit no tool call | worse_axis: yes
+- finding #2: reach=partial | surface: MEMORY.md entry | unreached: prose proposals emit no tool call | worse_axis: yes
 <!-- retrospect:remedy_reach end -->'
 
 # A findings row that binds BOTH hard candidates via structured covers: tokens.

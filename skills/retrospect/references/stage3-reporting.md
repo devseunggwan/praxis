@@ -290,8 +290,11 @@ row inside a single `retrospect:remedy_reach` fence:
 is the failure this receipt exists to make visible.
 
 The `retrospect-mix-check` Stop hook (Gate-11) blocks a Stage 3 report that
-proposes a remedy-layer action without a well-formed fence carrying at least
-one row.
+proposes a remedy-layer action without a well-formed fence carrying a complete
+row — `reach=` verdict, `surface:`, and a named `unreached:` axis — **for that
+finding's own number**. One row cannot answer for a sibling finding: two
+findings routed to different layers have different reach, and a shared row
+silently adopts the more comfortable answer.
 
 ### Trigger Conditions (Gate-3 (b) demotions)
 
