@@ -92,12 +92,23 @@ jobs:
           python-version: "3.x"
           cache: pip
           cache-dependency-path: .github/workflows/ci.yml
-      - run: python3 -m pip install pytest
+      # ruff is pinned to the same version as the `ruff` job so the local-parity
+      # step cannot disagree with the blocking one.
+      - run: python3 -m pip install pytest "ruff==0.15.8"
       # zsh is not preinstalled on ubuntu-latest. block-unmatched-glob delegates
       # its verdict to a real zsh, so without it that hook's suite has nothing to
       # assert against and silently degrades to fail-open coverage.
-      - run: sudo apt-get update -y && sudo apt-get install -y jq zsh
+      # shellcheck and markdownlint-cli2 are here for the same reason ruff is:
+      # under PRAXIS_TESTS_STRICT their absence would abort the run (#917).
+      - run: sudo apt-get update -y && sudo apt-get install -y jq zsh shellcheck
+      - run: npm install -g markdownlint-cli2
+      # Strict: in CI the toolchain is installed, so a SKIPPED line means the
+      # run silently stopped checking something rather than accommodating a
+      # contributor's machine. markdownlint stays advisory — strict gates on a
+      # step being skipped, not on its findings.
       - run: bash scripts/run-tests.sh
+        env:
+          PRAXIS_TESTS_STRICT: "1"
 
   link-check:
     runs-on: ubuntu-latest
