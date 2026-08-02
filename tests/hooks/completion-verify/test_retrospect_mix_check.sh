@@ -2535,6 +2535,35 @@ RR10_TEXT="$(mk_stage3_no_remedy_reach "$T1_CARD" "$T1_ROW")
 run_case "RR10_block_empty_unreached_value" "block" \
   "$(mk_assistant "$RR10_TEXT")"
 
+# RR11: block — every label is a substring of a longer word. `unreach=full`,
+# `nonsurface:`, `not_unreached:`, and `no_worse_axis:` satisfy an unanchored
+# search while naming none of the four fields.
+RR11_TEXT="$(mk_stage3_no_remedy_reach "$T1_CARD" "$T1_ROW")
+<!-- retrospect:remedy_reach begin -->
+- finding #1: unreach=full | nonsurface: MEMORY.md entry | not_unreached: none | no_worse_axis: no
+<!-- retrospect:remedy_reach end -->"
+run_case "RR11_block_prefixed_field_labels" "block" \
+  "$(mk_assistant "$RR11_TEXT")"
+
+# RR12: block — the card declares a remedy action but no findings-table row
+# parses as one, so REMEDY_FINDING_IDS is empty. Keying the trigger on the ID
+# list alone would let this self-inconsistent report pass ungated.
+RR12_CARD=$(cat <<EOF
+- memory: 0
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 1
+- upstream_feedback: 0
+- gate_1_verdict: NA
+- gate_2_verdict: PASS
+EOF
+)
+RR12_ROW="| 1 | behavioral | — | first finding | did not verify | rule absent | No | issue | ${RATIONALE_5LINE}<br>backing_repo: devseunggwan/praxis | MED |"
+RR12_TEXT="$(mk_stage3_no_remedy_reach "$RR12_CARD" "$RR12_ROW")"
+run_case "RR12_block_card_remedy_without_table_row" "block" \
+  "$(mk_assistant "$RR12_TEXT")"
+
 echo
 echo "================================"
 echo "Cases:    $PASS passed, $FAIL failed"

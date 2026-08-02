@@ -898,16 +898,27 @@ fi
 # answered on the record, not that the answer is right.
 #
 # Same Stage-4 carve-out and fence discipline as Gate-8 (a positive-presence
-# gate must not retroactively block a completed cycle). Coverage is per finding,
-# keyed on REMEDY_FINDING_IDS built while the findings table was parsed. The
-# distribution card cannot serve as the oracle here: it carries counts, not
-# identities, so a report with two remedy findings satisfies a count-based check
-# with a single row naming whichever one was easiest to answer for. Nor can the
-# report body be grepped for the action tokens — the card enumerates all six by
-# name (`- memory: 0`), which fires even on the 0-friction path.
+# gate must not retroactively block a completed cycle).
+#
+# Trigger and coverage read different oracles because neither one alone is
+# sound. The card carries counts, not identities, so it cannot say WHICH
+# findings owe a row — two remedy findings would satisfy a count-based check
+# with a single row naming whichever was easiest to answer for. But
+# REMEDY_FINDING_IDS alone cannot say WHETHER a row is owed: a card declaring a
+# remedy total while no findings-table row parses as a remedy action leaves the
+# ID list empty and the gate silent, which is exactly the self-inconsistent
+# report that most needs asking. So the card's remedy total decides whether a
+# receipt is required, and REMEDY_FINDING_IDS decides who it must name.
+# Grepping the report body for the action tokens works for neither — the card
+# enumerates all six by name (`- memory: 0`), which fires on the 0-friction path.
 GATE11_VIOLATION=""
 if [ "$STAGE4_AFTER_REPORT" != "1" ]; then
-  if [ "${#REMEDY_FINDING_IDS[@]}" -gt 0 ]; then
+  rr_card_total=$(printf '%s\n' "$DIST_CARD" | awk -F': *' '
+    /^-[[:space:]]*(memory|claude_md_draft|skill_idea|hook_code):/ {
+      v=$2; gsub(/[^0-9]/, "", v); if (v != "") t += v
+    }
+    END { print t + 0 }')
+  if [ "${#REMEDY_FINDING_IDS[@]}" -gt 0 ] || [ "$rr_card_total" -gt 0 ]; then
     re_rb='^[[:space:]]*<!--[[:space:]]*retrospect:remedy_reach begin[[:space:]]*-->[[:space:]]*$'
     re_re='^[[:space:]]*<!--[[:space:]]*retrospect:remedy_reach end[[:space:]]*-->[[:space:]]*$'
     rr_begin=$(printf '%s\n' "$MOST_RECENT_BLOCK" | grep -cE "$re_rb" || true)
@@ -916,7 +927,8 @@ if [ "$STAGE4_AFTER_REPORT" != "1" ]; then
       $0 ~ se { ins=0; next }
       END { print (ins || nested) ? 1 : 0 }')
     if [ "$rr_begin" -lt 1 ]; then
-      GATE11_VIOLATION="Stage 3 report proposes a remedy-layer action (finding(s) ${REMEDY_FINDING_IDS[*]}) but has no '<!-- retrospect:remedy_reach begin/end -->' fence (issue #917) — for each such finding state whether the remedy's surface fires where the finding was uttered: '- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na'"
+      rr_owed="${REMEDY_FINDING_IDS[*]:-none parsed from the findings table, but the distribution card declares $rr_card_total}"
+      GATE11_VIOLATION="Stage 3 report proposes a remedy-layer action (finding(s) ${rr_owed}) but has no '<!-- retrospect:remedy_reach begin/end -->' fence (issue #917) — for each such finding state whether the remedy's surface fires where the finding was uttered: '- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na'"
     elif [ "$rr_malformed" -gt 0 ]; then
       GATE11_VIOLATION="remedy_reach fence is malformed (an unterminated or nested 'retrospect:remedy_reach begin') — emit exactly one well-formed begin/end fence before Stage 3"
     elif [ "$rr_begin" -gt 1 ]; then
@@ -936,13 +948,25 @@ if [ "$STAGE4_AFTER_REPORT" != "1" ]; then
       # remedy cannot reach is the larger-damage one. Accepting a row without
       # them would reproduce this PR's own defect class — a contract asking for
       # more than the gate checks.
+      #
+      # Each label is anchored to its delimiter — right after 'finding #N:' or
+      # after the '|' that closes the previous field. An unanchored '.*reach='
+      # accepts 'unreach=full', 'nonsurface:', and 'not_unreached:', which is
+      # the same substring-boundary hole the receipt exists to close.
+      rr_row_tail='[[:space:]]*\|[[:space:]]*surface:[[:space:]]*[^|]*[^[:space:]|][[:space:]]*\|[[:space:]]*unreached:[[:space:]]*[^|]*[^[:space:]|][[:space:]]*\|[[:space:]]*worse_axis:[[:space:]]*(yes|no|na)([^A-Za-z]|$)'
       rr_missing=""
       for rr_id in "${REMEDY_FINDING_IDS[@]}"; do
         if ! printf '%s\n' "$RR_BLOCK" | grep -qE \
-          "^[[:space:]]*-?[[:space:]]*finding[[:space:]]*#${rr_id}:.*reach=(full|partial|none)([^A-Za-z]|\$).*surface:[[:space:]]*[^|]*[^[:space:]|].*unreached:[[:space:]]*[^|]*[^[:space:]|].*worse_axis:[[:space:]]*(yes|no|na)([^A-Za-z]|\$)"; then
+          "^[[:space:]]*-?[[:space:]]*finding[[:space:]]*#${rr_id}:[[:space:]]*reach=(full|partial|none)${rr_row_tail}"; then
           rr_missing="$rr_missing #$rr_id"
         fi
       done
+      # Card-only trigger: no finding IDs parsed, so nobody can be named. Ask
+      # for one well-formed row rather than passing the inconsistency through.
+      if [ "${#REMEDY_FINDING_IDS[@]}" -eq 0 ] && ! printf '%s\n' "$RR_BLOCK" | grep -qE \
+        "^[[:space:]]*-?[[:space:]]*finding[[:space:]]*#[0-9]+:[[:space:]]*reach=(full|partial|none)${rr_row_tail}"; then
+        rr_missing=" (card declares $rr_card_total remedy action(s); no findings-table row parsed as one)"
+      fi
       if [ -n "$rr_missing" ]; then
         GATE11_VIOLATION="remedy_reach fence is present but has no complete row for finding(s)${rr_missing} — each finding proposing memory / claude_md_draft / skill_idea / hook_code needs its own '- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na', with all four fields present; one row cannot answer for a sibling finding whose remedy lives on a different surface"
       fi

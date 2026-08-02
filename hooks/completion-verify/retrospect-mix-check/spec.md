@@ -71,10 +71,25 @@ row of the shape:
 - finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na
 ```
 
-**Why the card, not a text scan.** The distribution card enumerates every action
+One row is owed per remedy-layer finding, and each row must carry all four
+fields. Every field label is matched at its delimiter — immediately after
+`finding #N:` or after the `|` closing the previous field — so `unreach=full`,
+`nonsurface:`, and `not_unreached:` do not stand in for the real labels.
+
+**Two oracles, because neither is sound alone.** The trigger reads the
+distribution card's remedy counts; coverage reads the finding IDs collected
+while the findings table was parsed. The card carries counts, not identities, so
+it cannot say *which* findings owe a row — a report with two remedy findings
+would satisfy a count-based check with one row naming whichever was easiest to
+answer for. The ID list cannot say *whether* a row is owed — a card declaring a
+remedy total while no findings-table row parses as a remedy action leaves the
+list empty and the gate silent, which is exactly the self-inconsistent report
+that most needs asking. In that card-only case the gate demands one well-formed
+row rather than naming a finding it cannot identify.
+
+**Why neither is a text scan.** The distribution card enumerates every action
 type by name, so grepping the report body for `memory` fires even on the
-0-friction path where every count is 0 and no remedy exists. The trigger reads
-the card's counts instead.
+0-friction path where every count is 0 and no remedy exists.
 
 **What it does and does not prove.** Structure only: the reach question was
 answered on the record. `reach=partial` with an honest `unreached:` axis is a
@@ -399,7 +414,11 @@ plus 11 synthetic regression fixtures:
 - 11 Gate-11 remedy-reach receipt (issue #917): RR1 remedy action + no fence →
    block; RR2 row without an `unreached:` axis → block; RR3 duplicate fences →
    block; RR4 unterminated fence → block; RR5 0-friction card (all counts 0) +
-   no fence → pass; RR6 `reach=partial` with the axis named → pass
+   no fence → pass; RR6 `reach=partial` with the axis named → pass;
+   RR7 two remedy findings + one row → block; RR8 row without `surface:` →
+   block; RR9 row without `worse_axis:` → block; RR10 empty `unreached:` value
+   → block; RR11 prefixed field labels (`unreach=`, `nonsurface:`) → block;
+   RR12 card declares a remedy but no findings row parses as one → block
 
 ### Category counts (memory_hygiene, output_quality)
 
