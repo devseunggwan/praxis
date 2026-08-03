@@ -458,11 +458,12 @@ def test_count_session_fires_roundtrip_with_real_writer(tmp_path, monkeypatch):
     ) == 2
 
 
-def test_roster_split_separates_shell_hooks(tmp_path):
+def test_roster_split_falls_back_to_the_extension_proxy(tmp_path):
+    """No body on disk -> the pre-#892 extension proxy is the only signal left."""
     manifest = {"hooks": [
-        {"name": "a", "event": "PreToolUse", "matcher": "Bash"},   # py (instrumentable)
+        {"name": "a", "event": "PreToolUse", "matcher": "Bash"},   # dispatch group
         {"name": "b", "event": "Stop"},                            # py (instrumentable)
-        {"name": "sh1", "event": "Stop", "body": "impl.sh"},       # shell (uninstrumentable)
+        {"name": "sh1", "event": "Stop", "body": "impl.sh"},       # shell, unreadable
         "not-a-dict",
         {"event": "Stop"},  # no name -> skipped
     ]}
@@ -471,6 +472,80 @@ def test_roster_split_separates_shell_hooks(tmp_path):
     instrumentable, uninstrumentable = cli.roster_split(mpath)
     assert instrumentable == {"a", "b"}
     assert uninstrumentable == {"sh1"}
+
+
+def _write_hook_body(hooks_dir, role, name, body, source):
+    d = hooks_dir / role / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / body).write_text(source, encoding="utf-8")
+
+
+def test_roster_split_reads_the_body_for_a_recording_chokepoint(tmp_path):
+    """#892 gave shell hooks record_fire.sh — the extension alone is now wrong.
+
+    Before this, `body: impl.sh` was read as "emits no fire events", so the
+    report claimed the four shell hooks were unrecorded while its own per-hook
+    table tabulated thousands of their fires. The classification must follow
+    the chokepoint, not the file extension.
+    """
+    hooks_dir = tmp_path / "hooks"
+    _write_hook_body(hooks_dir, "completion-verify", "recorded", "impl.sh",
+                     '#!/bin/bash\nsource "$(dirname "$0")/../../_lib/record_fire.sh"\n')
+    _write_hook_body(hooks_dir, "completion-verify", "silent", "impl.sh",
+                     "#!/bin/bash\nexit 0\n")
+    _write_hook_body(hooks_dir, "preflight-gate", "pyhook", "impl.py",
+                     "from _fail_open import fail_open\n")
+    _write_hook_body(hooks_dir, "preflight-gate", "pysilent", "impl.py",
+                     "print('nothing here')\n")
+    manifest = {"hooks": [
+        {"name": "recorded", "role": "completion-verify", "body": "impl.sh",
+         "event": "Stop"},
+        {"name": "silent", "role": "completion-verify", "body": "impl.sh",
+         "event": "Stop"},
+        {"name": "pyhook", "role": "preflight-gate", "event": "PostToolUse"},
+        {"name": "pysilent", "role": "preflight-gate", "event": "PostToolUse"},
+    ]}
+    mpath = hooks_dir / "manifest.json"
+    mpath.write_text(json.dumps(manifest))
+    instrumentable, uninstrumentable = cli.roster_split(mpath)
+    assert instrumentable == {"recorded", "pyhook"}
+    assert uninstrumentable == {"silent", "pysilent"}
+
+
+def test_roster_split_counts_dispatch_group_membership_as_recorded(tmp_path):
+    """A dispatch-group hook is recorded centrally, so its body carries no marker."""
+    hooks_dir = tmp_path / "hooks"
+    _write_hook_body(hooks_dir, "preflight-gate", "grouped", "impl.py",
+                     "def run(payload):\n    return None\n")
+    manifest = {"hooks": [
+        {"name": "grouped", "role": "preflight-gate", "event": "PreToolUse",
+         "matcher": "Bash"},
+    ]}
+    mpath = hooks_dir / "manifest.json"
+    mpath.write_text(json.dumps(manifest))
+    instrumentable, uninstrumentable = cli.roster_split(mpath)
+    assert instrumentable == {"grouped"}
+    assert uninstrumentable == set()
+
+
+def test_roster_split_lets_one_recorded_entry_win_for_a_multi_event_hook(tmp_path):
+    """Entry order must not decide: any recording entry makes the name recorded."""
+    hooks_dir = tmp_path / "hooks"
+    _write_hook_body(hooks_dir, "completion-verify", "multi", "impl.sh",
+                     "#!/bin/bash\nexit 0\n")
+    _write_hook_body(hooks_dir, "completion-verify", "multi", "impl2.sh",
+                     '#!/bin/bash\nsource ../../_lib/record_fire.sh\n')
+    manifest = {"hooks": [
+        {"name": "multi", "role": "completion-verify", "body": "impl.sh",
+         "event": "SessionStart"},
+        {"name": "multi", "role": "completion-verify", "body": "impl2.sh",
+         "event": "Stop"},
+    ]}
+    mpath = hooks_dir / "manifest.json"
+    mpath.write_text(json.dumps(manifest))
+    instrumentable, uninstrumentable = cli.roster_split(mpath)
+    assert instrumentable == {"multi"}
+    assert uninstrumentable == set()
 
 
 def _reset_real_dispatcher_flag(monkeypatch):
