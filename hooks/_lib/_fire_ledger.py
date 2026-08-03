@@ -221,15 +221,42 @@ def _checkout_root() -> Path | None:
     so real usage keeps writing to the real ledger, while running a hook out of
     a development checkout is by definition development and does not belong in
     production telemetry.
+
+    Only the **package root** is inspected, never an arbitrary ancestor. This
+    module sits at `<root>/hooks/_lib/_fire_ledger.py` in both layouts, so the
+    root is exactly `parents[2]`. Walking further up would call an installed
+    plugin a checkout whenever any ancestor happens to be a git repository —
+    and `CONTRIBUTING.md` states the config dir is relocatable, so
+    `~/.claude` is a default rather than a guarantee. A user whose config dir
+    (or `$HOME`) lives inside a dotfiles repo would silently lose all live
+    telemetry to a dev ledger.
     """
     try:
         here = Path(__file__).resolve()
     except Exception:
         return None
-    for parent in here.parents:
-        if (parent / ".git").exists():
-            return parent
-    return None
+    parents = here.parents
+    if len(parents) < 3:
+        return None
+    root = parents[2]
+    # `.git` is a directory in a normal clone and a file in a linked worktree.
+    return root if (root / ".git").exists() else None
+
+
+def resolve_telemetry_dir() -> Path:
+    """Directory every praxis telemetry writer appends to.
+
+    Shared by the fire ledger and `hooks/postuse-correction/bypass-telemetry`
+    so the two families never split across directories. `bypass-review
+    fire-rate` joins fire-events and bypass-events out of a *single*
+    `telemetry_dir`, so a split would corrupt both sides of that report at
+    once: the default view would mix production fires with development
+    bypasses, and `--dir <dev>` would show fires with no bypasses at all.
+    """
+    checkout = _checkout_root()
+    if checkout is not None:
+        return checkout / DEV_LEDGER_DIRNAME
+    return Path.home() / ".praxis" / "telemetry"
 
 
 def resolve_path() -> Path:
@@ -241,11 +268,7 @@ def resolve_path() -> Path:
     if override:
         return Path(override)
     today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-    filename = f"fire-events-{today}.jsonl"
-    checkout = _checkout_root()
-    if checkout is not None:
-        return checkout / DEV_LEDGER_DIRNAME / filename
-    return Path.home() / ".praxis" / "telemetry" / filename
+    return resolve_telemetry_dir() / f"fire-events-{today}.jsonl"
 
 
 def _extract_payload(payload_raw: str) -> tuple[str, str]:
