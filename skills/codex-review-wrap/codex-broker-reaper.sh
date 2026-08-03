@@ -15,12 +15,16 @@
 #     whether the broker is serving right now, not whether its owner is alive.
 #     A session idle between turns leaves broker.log untouched — that is how
 #     #919 killed 13 live sessions.
-#   - So a kill also requires positive evidence that the owner is GONE: the
-#     broker's workspace root, recovered from its state dir, has been deleted.
-#     See the owner-liveness oracle below.
+#   - So a kill also requires positive evidence that the owner is GONE. Two
+#     signals qualify, both derived from the workspace root recovered from the
+#     broker's state dir (see the owner-liveness oracle below):
+#       C  the workspace directory has been deleted;
+#       D  the workspace still exists, but no live process outside the broker's
+#          own tree has its cwd inside it (#926).
 #   - Every other signal KEEPS the broker: unknown idleness (no logFile), no
 #     unambiguous state dir for the pid, no recorded workspaceRoot, or a
-#     workspace that still exists. Under-reaping is the intended bias.
+#     workspace whose ownership cannot be decided because no cwd source is
+#     available. Under-reaping is the intended bias.
 #   - A reap therefore costs at worst a respawn on the next codex call in a
 #     workspace that has been deleted.
 #
@@ -28,14 +32,17 @@
 #   --gc                 GC only: remove stale tmp sessionDirs whose broker pid
 #                        is dead. Zero risk. (default)
 #   --reap [--max-age N] Also kill RUNNING brokers idle > N minutes (default 30)
-#                        whose workspace root has been deleted, then GC. Used by
-#                        the launchd job and the opt-in PRAXIS_CODEX_REAP=1 path
-#                        in codex-review-wrap.
+#                        whose workspace root has been deleted (signal C) or
+#                        survives with nobody working in it (signal D), then GC.
+#                        Used by the launchd job and the opt-in
+#                        PRAXIS_CODEX_REAP=1 path in codex-review-wrap.
 #   --dry-run            Print actions without executing.
 #
 # macOS-only: the leak it addresses is inherent to launchd reparenting and the
 # /var/folders sessionDirs the codex broker creates, and the companion launchd
-# plist is macOS-only. BSD stat is used directly (no cross-OS shim).
+# plist is macOS-only. BSD stat is used directly (no cross-OS shim). The one
+# exception is the cwd source behind signal D, which also reads /proc on Linux
+# so the signal is testable off Darwin rather than silently unreachable there.
 
 set -euo pipefail
 
@@ -52,10 +59,11 @@ usage() {
 Usage: codex-broker-reaper.sh [--gc | --reap] [--max-age MINUTES] [--dry-run]
 
   --gc            Remove stale tmp sessionDirs of dead brokers (zero risk). Default.
-  --reap          Also kill running brokers idle longer than --max-age whose
-                  workspace root has been deleted, then GC. A broker whose
-                  workspace still exists, or whose owner cannot be determined,
-                  is kept.
+  --reap          Also kill running brokers idle longer than --max-age that no
+                  longer have an owner, then GC. A broker loses its owner when
+                  its workspace root is deleted, or when the workspace survives
+                  but no live process outside the broker's own tree has its cwd
+                  inside it. A broker whose owner cannot be determined is kept.
   --max-age N     Idle-minutes threshold for --reap (default: 30).
   --dry-run       Show what would happen; make no changes.
   -h, --help      This help.
@@ -145,6 +153,111 @@ is_safe_session_dir() {
   esac
 }
 
+# --- cwd snapshot (signal D, #926) ------------------------------------------
+# ONE snapshot per pass, reused across every candidate. Enumerating live process
+# cwds costs ~0.4s on a 500-process host; re-running it per broker is what made
+# this signal too slow to sit inside the 5-minute stale-lock window.
+#
+# Source order: `lsof` when present (the macOS path this script targets), then
+# /proc/<pid>/cwd on Linux for hosts without lsof. When neither exists the
+# snapshot stays unavailable and every workspace-exists broker is KEPT — the
+# behaviour that predates this signal.
+CWD_SNAP=""
+
+cwd_snapshot_clear() {
+  if [[ -n "$CWD_SNAP" && -f "$CWD_SNAP" ]]; then
+    rm -f "$CWD_SNAP" || true
+  fi
+  CWD_SNAP=""
+}
+
+# Emit "<pid> <cwd>" lines; emit nothing when no source is available.
+#
+# SAME-USER ASSUMPTION. Both sources are partial for an unprivileged caller:
+# `lsof` reports only the caller's own processes (measured on the author's host
+# — 36 uids running, zero root-owned entries in a 435-row snapshot), and
+# `readlink /proc/<pid>/cwd` gets EACCES for other users. So a NON-EMPTY
+# snapshot does not prove the process list is complete: an owner running as a
+# different user is invisible, and signal D would read that workspace as
+# unowned. This is sound here only because a broker and its owning session are
+# started by the same user — the same reason `pgrep` finds only that user's
+# brokers to begin with. If that ever stops holding, this signal needs a
+# privileged source, not a wider match.
+cwd_pairs() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -a -d cwd -Fpn 2>/dev/null \
+      | awk '/^p/{pid=substr($0,2)} /^n/{if (pid != "") print pid" "substr($0,2)}'
+    return 0
+  fi
+  [[ "$(uname -s)" == "Linux" ]] || return 0
+  local d pid target
+  for d in /proc/[0-9]*; do
+    pid="${d#/proc/}"
+    target="$(readlink "$d/cwd" 2>/dev/null || true)"
+    [[ -n "$target" ]] && printf '%s %s\n' "$pid" "$target"
+  done
+  return 0
+}
+
+# Build the snapshot once per pass. Returns non-zero when no cwd source
+# produced anything, which callers MUST read as "undetermined" — never as
+# "no owner", or an unreadable /proc would license killing live sessions.
+cwd_snapshot_ensure() {
+  [[ -n "$CWD_SNAP" ]] && return 0
+  local f
+  f="$(mktemp "${TMPDIR:-/tmp}/codex-reaper-cwd.XXXXXX")" || return 1
+  cwd_pairs > "$f" 2>/dev/null || true
+  if [[ ! -s "$f" ]]; then
+    rm -f "$f" || true
+    return 1
+  fi
+  CWD_SNAP="$f"
+  return 0
+}
+
+# True when some live process OUTSIDE this broker's own tree has its cwd inside
+# $wroot.
+#
+# Both qualifiers are load-bearing:
+#   - own tree excluded: every live broker keeps its workspace as its own cwd,
+#     and so do the `codex app-server` / `codex-code-mode-host` children it
+#     spawns (observed 4-deep: broker -> node -> codex -> code-mode-host). Count
+#     those and every broker certifies itself as owned, forever — the #919
+#     failure mode restated.
+#   - component-boundary containment, not a bare string prefix: sibling
+#     worktrees routinely share a name prefix. On the author's host
+#     `laplace-dev-hub` string-prefixes `laplace-dev-hub-hub-4682` and
+#     `-4687`, and a bare prefix test claimed 8 processes from those siblings
+#     as owners of the parent.
+#
+# Both sides are compared as PHYSICAL paths. `lsof` resolves symlinks before
+# reporting a cwd, and on macOS the temp roots this tooling lives under are
+# symlinked (/tmp -> /private/tmp, /var/folders -> /private/var/folders), so a
+# workspaceRoot recorded through the symlinked name never string-matches the
+# cwd lsof reports for a process sitting in it. Comparing raw strings makes
+# every such broker look unowned — a false reap, the dangerous direction.
+workspace_has_live_owner() {
+  local bpid="$1" wroot="$2" tree pid path root
+  # Fail CLOSED. Today the only caller runs cwd_snapshot_ensure first, so this
+  # cannot fire — but if a future one forgets, the `done < "$CWD_SNAP"` redirect
+  # below fails, the function returns non-zero, and owner_status reports `dead`.
+  # That is a kill on a missing file. Verified by running this function in
+  # isolation against an absent snapshot: it returns non-zero, i.e. "no owner".
+  [[ -n "$CWD_SNAP" && -s "$CWD_SNAP" ]] || return 0
+  root="$(cd "$wroot" 2>/dev/null && pwd -P || printf '%s' "$wroot")"
+  tree=" $(collect_tree "$bpid") "
+  while read -r pid path; do
+    [[ -n "$pid" ]] || continue
+    case "$path" in
+      "$root"|"$root"/*|"$wroot"|"$wroot"/*) ;;
+      *) continue ;;
+    esac
+    [[ "$tree" == *" $pid "* ]] && continue
+    return 0
+  done < "$CWD_SNAP"
+  return 1
+}
+
 # --- Owner-liveness oracle (#919) -------------------------------------------
 # "Has no children" is NOT a liveness signal: app-server-broker.mjs connects a
 # CodexAppServerClient at startup (which spawns `codex app-server` as its child)
@@ -206,7 +319,15 @@ owner_status() {
   if [[ ! -d "$wroot" ]]; then
     printf 'dead:workspace %s no longer exists' "$wroot"; return 0
   fi
-  printf 'alive:workspace %s still exists' "$wroot"
+  # Signal D (#926): the workspace survives, but nobody is working in it.
+  if ! cwd_snapshot_ensure; then
+    printf 'alive:workspace %s exists (no cwd source — owner undetermined)' "$wroot"
+    return 0
+  fi
+  if workspace_has_live_owner "$pid" "$wroot"; then
+    printf 'alive:workspace %s has a live process working in it' "$wroot"; return 0
+  fi
+  printf 'dead:workspace %s exists but no live process works in it' "$wroot"
 }
 
 # Best-effort single instance: the opt-in phase-end reaper and the launchd job
@@ -223,10 +344,16 @@ if ! mkdir "$LOCK" 2>/dev/null; then
     exit 0
   fi
 fi
-trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+trap 'cwd_snapshot_clear; rmdir "$LOCK" 2>/dev/null || true' EXIT
 
 # --- Pass 1: reap running, idle brokers (only in --reap mode) ---
 if [[ "$MODE" == "reap" ]]; then
+  # Build the cwd snapshot HERE, in the parent shell. `owner_status` is called
+  # as `$(...)`, and a command substitution runs in a subshell whose variable
+  # assignments are discarded — so a lazy build inside it re-enumerates every
+  # process once per broker (measured: 4 enumerations for 4 candidates) while
+  # looking correct. The subshell inherits this value and reuses the file.
+  cwd_snapshot_ensure || true
   for pid in $(pgrep -f "$BROKER_PATTERN" 2>/dev/null || true); do
     scanned=$(( scanned + 1 ))
     sdir="$(session_dir_of "$pid")"
@@ -265,7 +392,12 @@ if [[ "$MODE" == "reap" ]]; then
         skipped=$(( skipped + 1 )); continue
       fi
       # Same re-check for ownership: the workspace can be restored (a worktree
-      # re-added, a checkout redone) between the gate and the kill.
+      # re-added, a checkout redone) between the gate and the kill, and a
+      # session can start working in it. Drop the cwd snapshot first — reusing
+      # the pass-entry one would re-answer from state captured before the gap
+      # this re-check exists to cover.
+      cwd_snapshot_clear
+      cwd_snapshot_ensure || true
       owner="$(owner_status "$pid" "$sdir")"
       if [[ "${owner%%:*}" != "dead" ]]; then
         echo "SKIP   pid=$pid (owner ${owner%%:*} before kill: ${owner#*:})"
