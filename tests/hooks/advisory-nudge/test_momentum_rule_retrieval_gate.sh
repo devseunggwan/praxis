@@ -736,18 +736,41 @@ print(json.dumps({
   rm -f "$out_file" "$err_file"
 
   echo "$out" | grep -qF '"permissionDecision": "deny"' || ok=0
+
+  # Assert against the decision REASON, not raw stdout — a token matching
+  # anywhere else in the JSON envelope would be a false pass.
+  local reason
+  reason=$(printf '%s' "$out" | python3 -c '
+import json, sys
+print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"])
+') || ok=0
+
+  # Derive every gate name from the registry itself rather than restating a
+  # list here. A hardcoded subset is the same under-enumeration defect this
+  # checklist exists to remove: #932 review found this test naming 5 of the 8
+  # registered gates, so a new registry entry could ship untested.
+  local tokens
+  tokens=$(python3 -c '
+import re, sys
+sys.path.insert(0, sys.argv[1])
+from block_message import verb_gate_checklist
+print("\n".join(sorted(set(re.findall(r"←\s*(\S+)", verb_gate_checklist("gh pr merge"))))))
+' "$ROOT_DIR/hooks/_lib")
+
+  [ -n "$tokens" ] || { ok=0; echo "        derived zero gate names from the registry"; }
+
   local token
-  for token in \
-    "pre-merge-approval-gate" \
-    "side-effect-scan" \
-    "gh-merge-worktree-precondition" \
-    "commit-title-length-check" \
-    "session-intent" \
-    "PRAXIS_MOMENTUM_MERGE_ADVISORY=1" \
-    "briefing-surfaced:"
-  do
-    echo "$err" | grep -qF "$token" || { ok=0; echo "        missing from stderr: $token"; }
-    echo "$out" | grep -qF "$token" || { ok=0; echo "        missing from decision JSON: $token"; }
+  while IFS= read -r token; do
+    [ -n "$token" ] || continue
+    printf '%s' "$err" | grep -qF "$token" || { ok=0; echo "        missing from stderr: $token"; }
+    printf '%s' "$reason" | grep -qF "$token" || { ok=0; echo "        missing from decision reason: $token"; }
+  done <<< "$tokens"
+
+  # Relief affordances are prose, not `←`-tagged gate names, so they are not
+  # derivable above and stay explicit.
+  for token in "PRAXIS_MOMENTUM_MERGE_ADVISORY=1" "briefing-surfaced:"; do
+    printf '%s' "$err" | grep -qF "$token" || { ok=0; echo "        missing from stderr: $token"; }
+    printf '%s' "$reason" | grep -qF "$token" || { ok=0; echo "        missing from decision reason: $token"; }
   done
 
   if [ "$ok" -eq 1 ]; then

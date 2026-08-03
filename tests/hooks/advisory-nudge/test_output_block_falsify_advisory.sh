@@ -301,28 +301,53 @@ run_case "AskUserQuestion: (recommended) lowercase — T2 escalates to ask (issu
 # #873 shipped stderr-only; the exit-0 ask was the majority case and the
 # checklist silently went nowhere. Assert BOTH channels per case so neither can
 # regress alone.
-run_case "AskUserQuestion: checklist in decision reason, T1 path (issue #932)" \
-  "ask:block-ask-end-option" \
+# Gate names are derived from the registry, not restated here. A hardcoded
+# subset would be the same under-enumeration defect the checklist exists to
+# remove — #932 review caught the sibling merge test naming 5 of its 8
+# registered gates, so a new registry entry could ship untested.
+run_checklist_both_channels_case() {
+  local label="$1" payload="$2"
+  local name="AskUserQuestion: every registered gate on both channels — $label"
+  local out err reason tokens token ok=1
+  local out_file err_file
+  out_file=$(mktemp); err_file=$(mktemp)
+  printf '%s' "$payload" | python3 "$HOOK" >"$out_file" 2>"$err_file"
+  out=$(cat "$out_file"); err=$(cat "$err_file")
+  rm -f "$out_file" "$err_file"
+
+  # Assert against the decision REASON, not raw stdout — a token matching
+  # elsewhere in the JSON envelope would be a false pass.
+  reason=$(printf '%s' "$out" | python3 -c '
+import json, sys
+print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"])
+') || { ok=0; echo "        stdout is not a decision JSON"; }
+
+  tokens=$(python3 -c '
+import re, sys
+sys.path.insert(0, sys.argv[1])
+from block_message import verb_gate_checklist
+print("\n".join(sorted(set(re.findall(r"←\s*(\S+)", verb_gate_checklist("AskUserQuestion"))))))
+' "$ROOT_DIR/hooks/_lib")
+
+  [ -n "$tokens" ] || { ok=0; echo "        derived zero gate names from the registry"; }
+
+  while IFS= read -r token; do
+    [ -n "$token" ] || continue
+    printf '%s' "$err" | grep -qF "$token" || { ok=0; echo "        missing from stderr: $token"; }
+    printf '%s' "$reason" | grep -qF "$token" || { ok=0; echo "        missing from decision reason: $token"; }
+  done <<< "$tokens"
+
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+run_checklist_both_channels_case "T1 path" \
   "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
 
-run_case "AskUserQuestion: checklist also on stderr, T1 path (issue #873)" \
-  "advisory:block-ask-end-option" \
-  "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
-
-run_case "AskUserQuestion: checklist names the action-menu gate (issue #873)" \
-  "advisory:block-manufactured-action-menu" \
-  "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
-
-run_case "AskUserQuestion: action-menu gate reaches the reason too (issue #932)" \
-  "ask:block-manufactured-action-menu" \
-  "$(make_ask_payload '["Option A (Recommended)", "Option B"]')"
-
-run_case "AskUserQuestion: checklist in decision reason, anchoring path (issue #932)" \
-  "ask:block-ask-end-option" \
-  "$(make_ask_payload '["use existing approach (recommended)"]')"
-
-run_case "AskUserQuestion: checklist also on stderr, anchoring path (issue #873)" \
-  "advisory:block-ask-end-option" \
+run_checklist_both_channels_case "anchoring path" \
   "$(make_ask_payload '["use existing approach (recommended)"]')"
 
 # ---------------------------------------------------------------------------
