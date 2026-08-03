@@ -5,6 +5,38 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.8.0](https://github.com/devseunggwan/praxis/compare/v7.7.0...v7.8.0) (2026-08-03)
+
+
+### Added
+
+* **hook:** advise on direct pytest execution ([#915](https://github.com/devseunggwan/praxis/issues/915)) ([ff3a51c](https://github.com/devseunggwan/praxis/commit/ff3a51cd20dfc17a1ffd98c494a00dc325d14ab9))
+* **hook:** gate code-defect claims on call-site probe ([#913](https://github.com/devseunggwan/praxis/issues/913)) ([3ab294f](https://github.com/devseunggwan/praxis/commit/3ab294f0cc4fe6129a587e0fffd338fa3a96d7b0))
+* **hook:** gate Write-surface decision blocks on internal consistency ([#912](https://github.com/devseunggwan/praxis/issues/912)) ([5d81746](https://github.com/devseunggwan/praxis/commit/5d81746f4a6c9484364e7c28b7e0d56cd49b08ae))
+* **hooks:** enumerate verb gates on first block ([#931](https://github.com/devseunggwan/praxis/issues/931)) ([cf71fe9](https://github.com/devseunggwan/praxis/commit/cf71fe918afc7f6e1ac6c536e94379f7fcc59ace)), closes [#873](https://github.com/devseunggwan/praxis/issues/873)
+* **retrospect:** gate remedy-reach receipt ([#930](https://github.com/devseunggwan/praxis/issues/930)) ([3b7495b](https://github.com/devseunggwan/praxis/commit/3b7495b831b588d35a21d07da7dd5758b01ab726)), closes [#917](https://github.com/devseunggwan/praxis/issues/917)
+
+
+### Fixed
+
+* **codex-review-wrap:** gate reap on owner death ([#923](https://github.com/devseunggwan/praxis/issues/923)) ([303a466](https://github.com/devseunggwan/praxis/commit/303a466dd71a78fe25a76524b605f2a1f304c390)), closes [#919](https://github.com/devseunggwan/praxis/issues/919)
+* **cw:** guard --gc against live sessionDir ([#927](https://github.com/devseunggwan/praxis/issues/927)) ([1f55c99](https://github.com/devseunggwan/praxis/commit/1f55c99fb7341a5c5e8ca518a7f57cdc6f0fe8be)), closes [#921](https://github.com/devseunggwan/praxis/issues/921)
+* **hook:** demote 세션 종료 to separator form ([#924](https://github.com/devseunggwan/praxis/issues/924)) ([20fc2ae](https://github.com/devseunggwan/praxis/commit/20fc2aebfda7f3264d7cc58324e9956b905919ac))
+* **hook:** downgrade Recommended T1 deny back to ask ([#900](https://github.com/devseunggwan/praxis/issues/900)) ([d8d389c](https://github.com/devseunggwan/praxis/commit/d8d389c5c97f4652cd87903a8d05622358ca9e54))
+* **hook:** expose exact falsified predicate ([3568a43](https://github.com/devseunggwan/praxis/commit/3568a43e272af6616575e5cf1f316ad829de4d8e)), closes [#910](https://github.com/devseunggwan/praxis/issues/910)
+* **hook:** narrow negative-existence framing tokens ([#902](https://github.com/devseunggwan/praxis/issues/902)) ([46b08af](https://github.com/devseunggwan/praxis/commit/46b08afa3906a67b311dbf455acaef4da43c6d84))
+* **hooks:** emit verb checklist on both channels ([#933](https://github.com/devseunggwan/praxis/issues/933)) ([e25689f](https://github.com/devseunggwan/praxis/commit/e25689f2bbb0534092979f4588dae7972b7a1846)), closes [#932](https://github.com/devseunggwan/praxis/issues/932)
+* **hooks:** exempt live session from cache sweep ([#928](https://github.com/devseunggwan/praxis/issues/928)) ([87358f4](https://github.com/devseunggwan/praxis/commit/87358f4e83b25743c2dd2b6622e165bc04fc7348)), closes [#920](https://github.com/devseunggwan/praxis/issues/920)
+* **telemetry:** divert dev-checkout fires off the ledger ([#935](https://github.com/devseunggwan/praxis/issues/935)) ([eb6b3f3](https://github.com/devseunggwan/praxis/commit/eb6b3f34669ff573db256dc27f47e12bbe78fbfc)), closes [#934](https://github.com/devseunggwan/praxis/issues/934)
+* **tests:** isolate fire-ledger in run-tests.sh ([#925](https://github.com/devseunggwan/praxis/issues/925)) ([25be6a2](https://github.com/devseunggwan/praxis/commit/25be6a2f874c3ebbc667e5a8bd4265183d2bdab9))
+
+
+### Changed
+
+* **hook:** extract shared external-write body module ([#908](https://github.com/devseunggwan/praxis/issues/908)) ([cf9c387](https://github.com/devseunggwan/praxis/commit/cf9c387b25bee2e5eeb7ace405d56baea6ba9d93))
+* **hooks:** consolidate runtime files under PRAXIS_HOME ([#911](https://github.com/devseunggwan/praxis/issues/911)) ([bfd7a61](https://github.com/devseunggwan/praxis/commit/bfd7a61cd7623ba110c48e30669a1d663374e6b3)), closes [#903](https://github.com/devseunggwan/praxis/issues/903)
+* **tests:** fail loud on skipped linters ([#929](https://github.com/devseunggwan/praxis/issues/929)) ([83cb2ae](https://github.com/devseunggwan/praxis/commit/83cb2aed457dfe9f27b883c2ce5df66dd21c9942)), closes [#917](https://github.com/devseunggwan/praxis/issues/917)
+
 ## [7.7.0](https://github.com/devseunggwan/praxis/compare/v7.6.0...v7.7.0) (2026-07-28)
 
 
