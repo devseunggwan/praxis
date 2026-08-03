@@ -458,11 +458,12 @@ def test_count_session_fires_roundtrip_with_real_writer(tmp_path, monkeypatch):
     ) == 2
 
 
-def test_roster_split_separates_shell_hooks(tmp_path):
+def test_roster_split_falls_back_to_the_extension_proxy(tmp_path):
+    """No body on disk -> the pre-#892 extension proxy is the only signal left."""
     manifest = {"hooks": [
-        {"name": "a", "event": "PreToolUse", "matcher": "Bash"},   # py (instrumentable)
+        {"name": "a", "event": "PreToolUse", "matcher": "Bash"},   # dispatch group
         {"name": "b", "event": "Stop"},                            # py (instrumentable)
-        {"name": "sh1", "event": "Stop", "body": "impl.sh"},       # shell (uninstrumentable)
+        {"name": "sh1", "event": "Stop", "body": "impl.sh"},       # shell, unreadable
         "not-a-dict",
         {"event": "Stop"},  # no name -> skipped
     ]}
@@ -471,6 +472,140 @@ def test_roster_split_separates_shell_hooks(tmp_path):
     instrumentable, uninstrumentable = cli.roster_split(mpath)
     assert instrumentable == {"a", "b"}
     assert uninstrumentable == {"sh1"}
+
+
+def _write_hook_body(hooks_dir, role, name, body, source):
+    d = hooks_dir / role / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / body).write_text(source, encoding="utf-8")
+
+
+def test_roster_split_reads_the_body_for_a_recording_chokepoint(tmp_path):
+    """#892 gave shell hooks record_fire.sh — the extension alone is now wrong.
+
+    Before this, `body: impl.sh` was read as "emits no fire events", so the
+    report claimed the four shell hooks were unrecorded while its own per-hook
+    table tabulated thousands of their fires. The classification must follow
+    the chokepoint, not the file extension.
+    """
+    hooks_dir = tmp_path / "hooks"
+    _write_hook_body(hooks_dir, "completion-verify", "recorded", "impl.sh",
+                     '#!/bin/bash\nsource "$(dirname "$0")/../../_lib/record_fire.sh"\n')
+    _write_hook_body(hooks_dir, "completion-verify", "silent", "impl.sh",
+                     "#!/bin/bash\nexit 0\n")
+    _write_hook_body(hooks_dir, "preflight-gate", "pyhook", "impl.py",
+                     "from _fail_open import fail_open\n")
+    _write_hook_body(hooks_dir, "preflight-gate", "pysilent", "impl.py",
+                     "print('nothing here')\n")
+    manifest = {"hooks": [
+        {"name": "recorded", "role": "completion-verify", "body": "impl.sh",
+         "event": "Stop"},
+        {"name": "silent", "role": "completion-verify", "body": "impl.sh",
+         "event": "Stop"},
+        {"name": "pyhook", "role": "preflight-gate", "event": "PostToolUse"},
+        {"name": "pysilent", "role": "preflight-gate", "event": "PostToolUse"},
+    ]}
+    mpath = hooks_dir / "manifest.json"
+    mpath.write_text(json.dumps(manifest))
+    instrumentable, uninstrumentable = cli.roster_split(mpath)
+    assert instrumentable == {"recorded", "pyhook"}
+    assert uninstrumentable == {"silent", "pysilent"}
+
+
+# The input surface of records_fire_events(), enumerated up front rather than
+# one reviewer round at a time. A marker can appear in a comment, inside a
+# string, or as the prefix of an unrelated name — and the first two shapes are
+# not hypothetical: every shell hook here carries
+# `# shellcheck source=../../_lib/record_fire.sh` on the line directly above
+# its real `.` source line.
+#
+# The two error directions are not symmetric. A missed real form leaves the
+# hook in "cannot be judged", which is safe; a false match puts a hook that
+# cannot record into the never-fired roster, where it reads as a prune
+# candidate. Anchoring therefore errs toward rejecting.
+RECORDS_FIRE_CASES = [
+    # (label, source, expected)
+    ("A1 shell comment-only", '#!/bin/bash\n# shellcheck source=../../_lib/record_fire.sh\nexit 0\n', False),
+    ("A2 python comment mention", "# this module used to use @fail_open\nx = 1\n", False),
+    ("A3 decorator + trailing comment", "@fail_open  # noqa\ndef run(p): pass\n", True),
+    ("A4 source + trailing comment", '. "$(dirname "$0")/../../_lib/record_fire.sh"  # load\n', True),
+    ("B1 marker inside a call argument", 'print("import fail_open")\n', False),
+    ("B2 marker inside an assignment", 'MSG = "source record_fire.sh"\n', False),
+    ("B3 marker inside a docstring", '"""record_fire is described in this docstring"""\n', False),
+    ("B4 decorator text inside a string", 'msg = "@fail_open"\n', False),
+    ("B5 source line echoed as text", 'echo ". ../_lib/record_fire.sh"\n', False),
+    ("B6 import text inside a string", 'x = "from m import fail_open"\n', False),
+    ("C1 unrelated @fail_opened", "@fail_opened\ndef run(p): pass\n", False),
+    ("C2 unrelated @fail_open_v2", "@fail_open_v2\ndef run(p): pass\n", False),
+    ("C3 bare decorator", "@fail_open\ndef run(p): pass\n", True),
+    ("C4 decorator with args", "@fail_open()\ndef run(p): pass\n", True),
+    ("C5 unrelated symbol imported", "from m import fail_opened\n", False),
+    ("C6 neighbouring filename", ". ../_lib/record_fire.sh.bak\n", False),
+    ("D1 indented source line", '    . "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true\n', True),
+    ("D2 source keyword form", '    source "$(dirname "$0")/../../_lib/record_fire.sh"\n', True),
+    ("F1 from-import with comment", "from _hook_runtime import fail_open  # noqa: E402\n", True),
+    ("F2 bare import", "import fail_open\n", True),
+    ("F3 aliased import", "from _hook_runtime import fail_open as fo\n", True),
+]
+
+
+@pytest.mark.parametrize("label,source,expected", RECORDS_FIRE_CASES,
+                         ids=[c[0] for c in RECORDS_FIRE_CASES])
+def test_records_fire_events_surface(label, source, expected):
+    assert cli.records_fire_events(source) is expected
+
+
+def test_roster_split_counts_a_comment_only_body_as_uninstrumented(tmp_path):
+    """The end-to-end path, not just the matcher: a decorative marker must not
+    move a hook out of the uninstrumented list."""
+    hooks_dir = tmp_path / "hooks"
+    _write_hook_body(hooks_dir, "completion-verify", "decorative", "impl.sh",
+                     "#!/bin/bash\n# shellcheck source=../../_lib/record_fire.sh\nexit 0\n")
+    manifest = {"hooks": [
+        {"name": "decorative", "role": "completion-verify", "body": "impl.sh",
+         "event": "Stop"},
+    ]}
+    mpath = hooks_dir / "manifest.json"
+    mpath.write_text(json.dumps(manifest))
+    instrumentable, uninstrumentable = cli.roster_split(mpath)
+    assert instrumentable == set()
+    assert uninstrumentable == {"decorative"}
+
+
+def test_roster_split_counts_dispatch_group_membership_as_recorded(tmp_path):
+    """A dispatch-group hook is recorded centrally, so its body carries no marker."""
+    hooks_dir = tmp_path / "hooks"
+    _write_hook_body(hooks_dir, "preflight-gate", "grouped", "impl.py",
+                     "def run(payload):\n    return None\n")
+    manifest = {"hooks": [
+        {"name": "grouped", "role": "preflight-gate", "event": "PreToolUse",
+         "matcher": "Bash"},
+    ]}
+    mpath = hooks_dir / "manifest.json"
+    mpath.write_text(json.dumps(manifest))
+    instrumentable, uninstrumentable = cli.roster_split(mpath)
+    assert instrumentable == {"grouped"}
+    assert uninstrumentable == set()
+
+
+def test_roster_split_lets_one_recorded_entry_win_for_a_multi_event_hook(tmp_path):
+    """Entry order must not decide: any recording entry makes the name recorded."""
+    hooks_dir = tmp_path / "hooks"
+    _write_hook_body(hooks_dir, "completion-verify", "multi", "impl.sh",
+                     "#!/bin/bash\nexit 0\n")
+    _write_hook_body(hooks_dir, "completion-verify", "multi", "impl2.sh",
+                     '#!/bin/bash\nsource ../../_lib/record_fire.sh\n')
+    manifest = {"hooks": [
+        {"name": "multi", "role": "completion-verify", "body": "impl.sh",
+         "event": "SessionStart"},
+        {"name": "multi", "role": "completion-verify", "body": "impl2.sh",
+         "event": "Stop"},
+    ]}
+    mpath = hooks_dir / "manifest.json"
+    mpath.write_text(json.dumps(manifest))
+    instrumentable, uninstrumentable = cli.roster_split(mpath)
+    assert instrumentable == {"multi"}
+    assert uninstrumentable == set()
 
 
 def _reset_real_dispatcher_flag(monkeypatch):

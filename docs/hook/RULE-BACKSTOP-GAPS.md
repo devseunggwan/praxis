@@ -24,8 +24,10 @@ this gap list ranks where to extend it next (issue #709).
 
 Cross-reference of two inventories:
 
-- **What is hooked** — `hooks/manifest.json` + each hook's `spec.md` (58 hooks,
-  ~20 deduplicated backstopped rule-concepts).
+- **What is hooked** — `hooks/manifest.json` + each hook's `spec.md` (58 hooks
+  at the time of this cross-reference; the manifest registers 81 as of
+  2026-08-03 — the gap list below has not been re-derived against the newer
+  roster, so treat it as scoped to the 58).
 - **What the ruleset requires** — the prompt-layer MUST / MANDATORY / "no
   exceptions" rules in the global agent ruleset and [`ETHOS.md`](../../ETHOS.md).
 
