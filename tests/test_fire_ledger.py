@@ -1379,10 +1379,14 @@ def test_installed_plugin_still_uses_the_real_ledger(monkeypatch):
     assert resolved.parent == Path.home() / ".praxis" / "telemetry"
 
 
-def test_direct_shell_test_run_does_not_touch_the_real_ledger(tmp_path):
+def test_direct_shell_test_run_does_not_touch_the_real_ledger(tmp_path, monkeypatch):
     """Reproduce the exact failure mode: one hook invoked with NO override.
 
-    Reads the real ledger only — never writes to it.
+    `HOME` is redirected into `tmp_path` first, so the production fallback
+    resolves inside the sandbox and the developer's own ledger is neither read
+    nor written. The oracle survives the redirect: if checkout detection
+    regressed, the record would land in the sandbox ledger and the first
+    assertion below would still fire.
 
     Scoped to THIS invocation on both sides, because neither file is quiet:
     concurrent live sessions append to the real ledger while the test runs (358
@@ -1391,6 +1395,7 @@ def test_direct_shell_test_run_does_not_touch_the_real_ledger(tmp_path):
     record from an earlier run on the same UTC date satisfy the dev-ledger
     assertion even if this dispatcher wrote nothing at all.
     """
+    monkeypatch.setenv("HOME", str(tmp_path))
     today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
     real_file = Path.home() / ".praxis" / "telemetry" / f"fire-events-{today}.jsonl"
     dev_file = _REPO / fl.DEV_LEDGER_DIRNAME / f"fire-events-{today}.jsonl"
