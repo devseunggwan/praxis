@@ -32,9 +32,10 @@
 #   --gc                 GC only: remove stale tmp sessionDirs whose broker pid
 #                        is dead. Zero risk. (default)
 #   --reap [--max-age N] Also kill RUNNING brokers idle > N minutes (default 30)
-#                        whose workspace root has been deleted, then GC. Used by
-#                        the launchd job and the opt-in PRAXIS_CODEX_REAP=1 path
-#                        in codex-review-wrap.
+#                        whose workspace root has been deleted (signal C) or
+#                        survives with nobody working in it (signal D), then GC.
+#                        Used by the launchd job and the opt-in
+#                        PRAXIS_CODEX_REAP=1 path in codex-review-wrap.
 #   --dry-run            Print actions without executing.
 #
 # macOS-only: the leak it addresses is inherent to launchd reparenting and the
@@ -58,10 +59,11 @@ usage() {
 Usage: codex-broker-reaper.sh [--gc | --reap] [--max-age MINUTES] [--dry-run]
 
   --gc            Remove stale tmp sessionDirs of dead brokers (zero risk). Default.
-  --reap          Also kill running brokers idle longer than --max-age whose
-                  workspace root has been deleted, then GC. A broker whose
-                  workspace still exists, or whose owner cannot be determined,
-                  is kept.
+  --reap          Also kill running brokers idle longer than --max-age that no
+                  longer have an owner, then GC. A broker loses its owner when
+                  its workspace root is deleted, or when the workspace survives
+                  but no live process outside the broker's own tree has its cwd
+                  inside it. A broker whose owner cannot be determined is kept.
   --max-age N     Idle-minutes threshold for --reap (default: 30).
   --dry-run       Show what would happen; make no changes.
   -h, --help      This help.
