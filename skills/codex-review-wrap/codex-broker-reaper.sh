@@ -170,6 +170,17 @@ cwd_snapshot_clear() {
 }
 
 # Emit "<pid> <cwd>" lines; emit nothing when no source is available.
+#
+# SAME-USER ASSUMPTION. Both sources are partial for an unprivileged caller:
+# `lsof` reports only the caller's own processes (measured on the author's host
+# — 36 uids running, zero root-owned entries in a 435-row snapshot), and
+# `readlink /proc/<pid>/cwd` gets EACCES for other users. So a NON-EMPTY
+# snapshot does not prove the process list is complete: an owner running as a
+# different user is invisible, and signal D would read that workspace as
+# unowned. This is sound here only because a broker and its owning session are
+# started by the same user — the same reason `pgrep` finds only that user's
+# brokers to begin with. If that ever stops holding, this signal needs a
+# privileged source, not a wider match.
 cwd_pairs() {
   if command -v lsof >/dev/null 2>&1; then
     lsof -a -d cwd -Fpn 2>/dev/null \
@@ -225,6 +236,12 @@ cwd_snapshot_ensure() {
 # every such broker look unowned — a false reap, the dangerous direction.
 workspace_has_live_owner() {
   local bpid="$1" wroot="$2" tree pid path root
+  # Fail CLOSED. Today the only caller runs cwd_snapshot_ensure first, so this
+  # cannot fire — but if a future one forgets, the `done < "$CWD_SNAP"` redirect
+  # below fails, the function returns non-zero, and owner_status reports `dead`.
+  # That is a kill on a missing file. Verified by running this function in
+  # isolation against an absent snapshot: it returns non-zero, i.e. "no owner".
+  [[ -n "$CWD_SNAP" && -s "$CWD_SNAP" ]] || return 0
   root="$(cd "$wroot" 2>/dev/null && pwd -P || printf '%s' "$wroot")"
   tree=" $(collect_tree "$bpid") "
   while read -r pid path; do

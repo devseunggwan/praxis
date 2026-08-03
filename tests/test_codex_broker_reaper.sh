@@ -93,6 +93,44 @@ else
   assert_reject "/etc/cxc-a"                   # outside allowlist
 fi
 
+# --- Gate 2b: #926 workspace_has_live_owner fails CLOSED --------------------
+# The guard is unreachable through the shipped call path (the reap pass builds
+# the snapshot first), so nothing in Gate 3 exercises it. Lift the function out
+# and drive it directly, the same way Gate 2 lifts is_safe_session_dir: without
+# the guard the `done < "$CWD_SNAP"` redirect fails on a missing file, the
+# function returns non-zero, and owner_status turns that into `dead` — a kill
+# licensed by an absent file. No platform prerequisites, so this runs
+# everywhere.
+OWNER_FN="$(sed -n '/^collect_tree()/,/^}/p;/^workspace_has_live_owner()/,/^}/p' "$REAPER")"
+if [ -z "$OWNER_FN" ]; then
+  fail "#926: could not extract workspace_has_live_owner() from reaper"
+else
+  # $1 is the CWD_SNAP value to test with; echo the function's exit status.
+  owner_rc() {
+    bash -c "CWD_SNAP=\"\$1\"
+$OWNER_FN
+workspace_has_live_owner \$\$ /tmp >/dev/null 2>&1; echo \$?" _ "$1"
+  }
+  if [ "$(owner_rc "/nonexistent-snapshot-$$")" = 0 ]; then
+    pass "#926 fail-closed: a missing cwd snapshot reads as OWNED, not as no-owner"
+  else
+    fail "#926 fail-closed: a missing cwd snapshot licensed a reap"
+  fi
+  if [ "$(owner_rc "")" = 0 ]; then
+    pass "#926 fail-closed: an unset cwd snapshot reads as OWNED"
+  else
+    fail "#926 fail-closed: an unset cwd snapshot licensed a reap"
+  fi
+  EMPTY_SNAP="$(mktemp)"
+  : > "$EMPTY_SNAP"
+  if [ "$(owner_rc "$EMPTY_SNAP")" = 0 ]; then
+    pass "#926 fail-closed: an empty cwd snapshot reads as OWNED"
+  else
+    fail "#926 fail-closed: an empty cwd snapshot licensed a reap"
+  fi
+  rm -f "$EMPTY_SNAP"
+fi
+
 # --- Gate 3: #919 owner-death oracle (behavior) ------------------------------
 # Real execution against synthetic processes. The shipped pgrep pattern
 # (app-server-broker.mjs) would match a developer host's PRODUCTION brokers, so
@@ -351,6 +389,13 @@ else
     # threshold on a shared dev host is flaky, and the property that actually
     # matters is "not once per broker". With 9 brokers scanned, a per-broker
     # rebuild would show 9+.
+    #
+    # Scoped to --dry-run deliberately, and the exact count is the right
+    # oracle there: a real reap pass rebuilds once more per pre-kill re-check
+    # (by design — that re-check exists to see state the pass-entry snapshot
+    # predates), so only the dry-run path has a fixed expected count. A looser
+    # upper bound would still pass the regression this caught (5 enumerations)
+    # while going blind to a smaller one.
     if [ -z "${LSOF_BIN:-}" ]; then
       skip "#926 constraint 4 single-snapshot-per-pass (needs lsof to intercept)"
     else
@@ -368,9 +413,9 @@ COUNTLSOF
         bash "$REAPER_COPY" --reap --max-age 5 --dry-run >/dev/null 2>&1 || true
       N_LSOF="$(wc -l < "$COUNTER" | tr -d ' ')"
       if [ "$N_LSOF" = 1 ]; then
-        pass "#926 constraint 4: cwd snapshot built once for the whole pass (9 brokers)"
+        pass "#926 constraint 4: one cwd enumeration for a whole dry-run pass (9 brokers)"
       else
-        fail "#926 constraint 4: expected 1 cwd enumeration per pass, got $N_LSOF"
+        fail "#926 constraint 4: expected 1 cwd enumeration per dry-run pass, got $N_LSOF"
       fi
     fi
 
