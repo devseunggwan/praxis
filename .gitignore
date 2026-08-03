@@ -35,3 +35,8 @@ __pycache__/
 # plugin installs do not run the build script, so the wrappers must
 # be present in the checkout for ${CLAUDE_PLUGIN_ROOT}/hooks/<name>.sh
 # to resolve. See ADR-0001 §2.3 + Codex round-1 P1 finding.
+
+# Dev-checkout fire ledger (issue #934): hooks run out of a git checkout
+# write telemetry here instead of ~/.praxis/telemetry, so running a single
+# test file cannot pollute the real ledger.
+.praxis-dev-telemetry/

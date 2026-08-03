@@ -78,9 +78,11 @@ Record fields (JSONL, one line per hook fire):
   decision     "block" | "ask" | "advise" | "pass"
   granularity  "rich" | "coarse"
 
-Storage:
-  Default:  ~/.praxis/telemetry/fire-events-YYYY-MM-DD.jsonl  (daily rotation)
+Storage (precedence order — see `resolve_path`):
   Override: PRAXIS_FIRE_TELEMETRY_FILE (full path, used by tests)
+  Dev:      <checkout>/.praxis-dev-telemetry/fire-events-YYYY-MM-DD.jsonl when
+            this module lives inside a git checkout (issue #934)
+  Default:  ~/.praxis/telemetry/fire-events-YYYY-MM-DD.jsonl  (daily rotation)
   Opt-out:  PRAXIS_FIRE_TELEMETRY_DISABLE=1 → no-op
 
 Fail-open: any error → silently no-op. Never raises into the dispatcher.
@@ -199,13 +201,51 @@ def _atomic_append(path: Path, lines: list[str]) -> None:
         os.close(fd)
 
 
+DEV_LEDGER_DIRNAME = ".praxis-dev-telemetry"
+
+
+def _checkout_root() -> Path | None:
+    """Return the git checkout this module lives in, or None when installed.
+
+    Issue #934: isolation used to live only at the full-suite entrypoints
+    (`scripts/run-tests.sh` exports the override, `tests/conftest.py` sets it
+    per-test), so running a single shell test — `bash tests/hooks/.../test_x.sh`,
+    an everyday thing while developing — wrote straight into the real ledger.
+    105 of the 112 shell tests never set the override themselves, and CI always
+    goes through `run-tests.sh`, so CI can never catch the leak.
+
+    Anchoring on the module's own location fixes every entrypoint at once,
+    including manual `python3 hooks/_lib/_dispatch.py` probes. An installed
+    plugin is not a checkout — `installed_plugins.json` resolves praxis to
+    `~/.claude/plugins/cache/praxis/praxis/<version>/`, which ships no `.git` —
+    so real usage keeps writing to the real ledger, while running a hook out of
+    a development checkout is by definition development and does not belong in
+    production telemetry.
+    """
+    try:
+        here = Path(__file__).resolve()
+    except Exception:
+        return None
+    for parent in here.parents:
+        if (parent / ".git").exists():
+            return parent
+    return None
+
+
 def resolve_path() -> Path:
-    """Resolve today's fire-events JSONL path (PRAXIS_FIRE_TELEMETRY_FILE wins)."""
+    """Resolve today's fire-events JSONL path.
+
+    Precedence: `PRAXIS_FIRE_TELEMETRY_FILE` → dev checkout → real ledger.
+    """
     override = os.environ.get("PRAXIS_FIRE_TELEMETRY_FILE", "").strip()
     if override:
         return Path(override)
     today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-    return Path.home() / ".praxis" / "telemetry" / f"fire-events-{today}.jsonl"
+    filename = f"fire-events-{today}.jsonl"
+    checkout = _checkout_root()
+    if checkout is not None:
+        return checkout / DEV_LEDGER_DIRNAME / filename
+    return Path.home() / ".praxis" / "telemetry" / filename
 
 
 def _extract_payload(payload_raw: str) -> tuple[str, str]:

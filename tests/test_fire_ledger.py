@@ -1339,3 +1339,72 @@ def test_fire_rate_report_includes_remaining_scope_sections(tmp_path, monkeypatc
     assert "Bypass Attribution" in report
     assert "Outcome Proxy" in report
     assert "s1" in report and "1" in report  # strike_count surfaced
+
+
+# ---------------------------------------------------------------------------
+# Dev-checkout isolation (issue #934)
+#
+# Isolation used to live only at the full-suite entrypoints, so running one
+# shell test directly wrote into the real ~/.praxis/telemetry ledger — 105 of
+# 112 shell tests never set the override themselves, and CI always goes through
+# run-tests.sh, so CI could not catch it. Seven days of ledger were 26% synthetic
+# in the advise tier.
+# ---------------------------------------------------------------------------
+
+
+def test_override_still_wins_over_dev_checkout(tmp_path, monkeypatch):
+    """PRAXIS_FIRE_TELEMETRY_FILE keeps absolute precedence."""
+    target = tmp_path / "explicit.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(target))
+    assert fl.resolve_path() == target
+
+
+def test_dev_checkout_diverts_off_the_real_ledger(monkeypatch):
+    """Running from a checkout must never resolve into ~/.praxis/telemetry."""
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_FILE", raising=False)
+    resolved = fl.resolve_path()
+    real = Path.home() / ".praxis" / "telemetry"
+    assert real not in resolved.parents, f"{resolved} is inside the real ledger dir"
+    assert resolved.parent.name == fl.DEV_LEDGER_DIRNAME
+    # The tests run from a checkout, so this is the checkout branch by construction.
+    assert (resolved.parent.parent / ".git").exists()
+
+
+def test_installed_plugin_still_uses_the_real_ledger(monkeypatch):
+    """No checkout above the module → unchanged production behaviour."""
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_FILE", raising=False)
+    monkeypatch.setattr(fl, "_checkout_root", lambda: None)
+    resolved = fl.resolve_path()
+    assert resolved.parent == Path.home() / ".praxis" / "telemetry"
+
+
+def test_direct_shell_test_run_does_not_touch_the_real_ledger(tmp_path):
+    """Reproduce the exact failure mode: one hook invoked with NO override.
+
+    Reads the real ledger only to compare line counts — never writes to it.
+    """
+    real_dir = Path.home() / ".praxis" / "telemetry"
+    today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    real_file = real_dir / f"fire-events-{today}.jsonl"
+    before = real_file.stat().st_size if real_file.exists() else 0
+
+    env = {k: v for k, v in os.environ.items() if k != "PRAXIS_FIRE_TELEMETRY_FILE"}
+    env.pop("PRAXIS_FIRE_TELEMETRY_DISABLE", None)
+    payload = json.dumps({
+        "session_id": "test-934-isolation",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "echo hi"},
+    })
+    subprocess.run(
+        [sys.executable, str(_REPO / "hooks" / "_lib" / "_dispatch.py"),
+         "PreToolUse", "Bash", "claude"],
+        input=payload, text=True, capture_output=True, env=env, check=False,
+    )
+
+    after = real_file.stat().st_size if real_file.exists() else 0
+    assert after == before, "a hook run from the checkout appended to the real ledger"
+
+    dev_file = _REPO / fl.DEV_LEDGER_DIRNAME / f"fire-events-{today}.jsonl"
+    assert dev_file.exists(), "the dev ledger received nothing — telemetry silently off?"
+    assert "test-934-isolation" in dev_file.read_text(encoding="utf-8")
