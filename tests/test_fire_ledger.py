@@ -22,6 +22,7 @@ import os
 import stat
 import subprocess
 import sys
+import uuid
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from importlib.machinery import SourceFileLoader
@@ -1339,3 +1340,135 @@ def test_fire_rate_report_includes_remaining_scope_sections(tmp_path, monkeypatc
     assert "Bypass Attribution" in report
     assert "Outcome Proxy" in report
     assert "s1" in report and "1" in report  # strike_count surfaced
+
+
+# ---------------------------------------------------------------------------
+# Dev-checkout isolation (issue #934)
+#
+# Isolation used to live only at the full-suite entrypoints, so running one
+# shell test directly wrote into the real ~/.praxis/telemetry ledger — 105 of
+# 112 shell tests never set the override themselves, and CI always goes through
+# run-tests.sh, so CI could not catch it. Seven days of ledger were 26% synthetic
+# in the advise tier.
+# ---------------------------------------------------------------------------
+
+
+def test_override_still_wins_over_dev_checkout(tmp_path, monkeypatch):
+    """PRAXIS_FIRE_TELEMETRY_FILE keeps absolute precedence."""
+    target = tmp_path / "explicit.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(target))
+    assert fl.resolve_path() == target
+
+
+def test_dev_checkout_diverts_off_the_real_ledger(monkeypatch):
+    """Running from a checkout must never resolve into ~/.praxis/telemetry."""
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_FILE", raising=False)
+    resolved = fl.resolve_path()
+    real = Path.home() / ".praxis" / "telemetry"
+    assert real not in resolved.parents, f"{resolved} is inside the real ledger dir"
+    assert resolved.parent.name == fl.DEV_LEDGER_DIRNAME
+    # The tests run from a checkout, so this is the checkout branch by construction.
+    assert (resolved.parent.parent / ".git").exists()
+
+
+def test_installed_plugin_still_uses_the_real_ledger(monkeypatch):
+    """No checkout above the module → unchanged production behaviour."""
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_FILE", raising=False)
+    monkeypatch.setattr(fl, "_checkout_root", lambda: None)
+    resolved = fl.resolve_path()
+    assert resolved.parent == Path.home() / ".praxis" / "telemetry"
+
+
+def test_direct_shell_test_run_does_not_touch_the_real_ledger(tmp_path, monkeypatch):
+    """Reproduce the exact failure mode: one hook invoked with NO override.
+
+    `HOME` is redirected into `tmp_path` first, so the production fallback
+    resolves inside the sandbox and the developer's own ledger is neither read
+    nor written. The oracle survives the redirect: if checkout detection
+    regressed, the record would land in the sandbox ledger and the first
+    assertion below would still fire.
+
+    Scoped to THIS invocation on both sides, because neither file is quiet:
+    concurrent live sessions append to the real ledger while the test runs (358
+    records were observed during one shell-test run), so a whole-file size
+    comparison fails spuriously; and a fixed session id would let a leftover
+    record from an earlier run on the same UTC date satisfy the dev-ledger
+    assertion even if this dispatcher wrote nothing at all.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    real_file = Path.home() / ".praxis" / "telemetry" / f"fire-events-{today}.jsonl"
+    dev_file = _REPO / fl.DEV_LEDGER_DIRNAME / f"fire-events-{today}.jsonl"
+    session_id = f"test-934-isolation-{uuid.uuid4()}"
+
+    # Byte offsets, so only what this invocation appends is ever inspected.
+    real_offset = real_file.stat().st_size if real_file.exists() else 0
+    dev_offset = dev_file.stat().st_size if dev_file.exists() else 0
+
+    env = {k: v for k, v in os.environ.items() if k != "PRAXIS_FIRE_TELEMETRY_FILE"}
+    env.pop("PRAXIS_FIRE_TELEMETRY_DISABLE", None)
+    payload = json.dumps({
+        "session_id": session_id,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "echo hi"},
+    })
+    proc = subprocess.run(
+        [sys.executable, str(_REPO / "hooks" / "_lib" / "_dispatch.py"),
+         "PreToolUse", "Bash", "claude"],
+        input=payload, text=True, capture_output=True, env=env, check=False,
+    )
+    # A crashed dispatcher writes nothing anywhere, which would otherwise read
+    # as "isolation works". 0 = allow, 2 = a member blocked; both are real runs.
+    assert proc.returncode in (0, 2), (
+        f"dispatcher failed (rc={proc.returncode}): {proc.stderr[:400]}"
+    )
+
+    def _tail(path: Path, offset: int) -> str:
+        if not path.exists():
+            return ""
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            fh.seek(offset)
+            return fh.read()
+
+    assert session_id not in _tail(real_file, real_offset), (
+        "a hook run from the checkout appended this invocation to the real ledger"
+    )
+    assert session_id in _tail(dev_file, dev_offset), (
+        "the dev ledger did not receive this invocation — telemetry silently off?"
+    )
+
+
+def test_install_layout_under_a_git_ancestor_is_not_a_checkout(tmp_path, monkeypatch):
+    """An installed plugin nested inside someone's git repo stays production.
+
+    `CONTRIBUTING.md` documents the config dir as relocatable, so the plugin
+    cache can sit under a dotfiles repository. An unbounded ancestor walk finds
+    that `.git` and diverts every live fire into a dev ledger — the whole
+    telemetry stream disappears silently. Only the package root is inspected.
+    """
+    root = tmp_path / "dotfiles"
+    (root / ".git").mkdir(parents=True)
+    pkg = root / "cache" / "praxis" / "7.7.0"
+    lib = pkg / "hooks" / "_lib"
+    lib.mkdir(parents=True)
+    installed = lib / "_fire_ledger.py"
+    installed.write_text(
+        (_REPO / "hooks" / "_lib" / "_fire_ledger.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    mod = _load("_fire_ledger_installed", installed)
+    assert mod._checkout_root() is None, "install layout misread as a checkout"
+
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_FILE", raising=False)
+    assert mod.resolve_telemetry_dir() == Path.home() / ".praxis" / "telemetry"
+
+
+def test_bypass_and_fire_writers_share_one_directory():
+    """Split directories would corrupt both halves of the fire-rate report."""
+    bypass = _load(
+        "bypass_telemetry_impl",
+        _REPO / "hooks" / "postuse-correction" / "bypass-telemetry" / "impl.py",
+    )
+    assert bypass.resolve_telemetry_path().parent == fl.resolve_telemetry_dir()

@@ -1726,6 +1726,10 @@ def run_fire_rate(args: argparse.Namespace, telemetry_dir: Path) -> int:
     # SAME telemetry_dir's bypass-events-*.jsonl files (both are written to
     # ~/.praxis/telemetry by default — see hooks/_lib/_fire_ledger.py and
     # hooks/postuse-correction/bypass-telemetry/impl.py resolve_*_path()).
+    # This default stays the REAL ledger on purpose: since issue #934 a hook run
+    # from a git checkout writes to <checkout>/.praxis-dev-telemetry instead, so
+    # the production numbers this report exists to judge are no longer mixed with
+    # local test runs. Pass --dir to inspect a checkout's dev ledger.
     bypass_events = load_events(telemetry_dir, args.days)
     # Scope advise-ignored to full-rich hooks: single-event-rich Stop hooks
     # (issue #847) record only escalations, so their silent passes are invisible

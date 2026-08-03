@@ -52,6 +52,7 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _fire_ledger import resolve_telemetry_dir  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -211,13 +212,22 @@ def derive_status(tool_response: object) -> str:
 
 
 def resolve_telemetry_path() -> Path:
-    """Resolve the target JSONL path for today's bypass events."""
+    """Resolve the target JSONL path for today's bypass events.
+
+    Shares `_fire_ledger.resolve_telemetry_dir()` so bypass-events and
+    fire-events always land in the same directory (issue #934). `bypass-review
+    fire-rate` joins both families out of a single `telemetry_dir`, so letting
+    only one of them divert to a dev checkout would corrupt both sides of that
+    report: the default view would mix production fires with development
+    bypasses, and `--dir <dev>` would show fires with no bypasses at all.
+
+    """
     override = os.environ.get("PRAXIS_BYPASS_TELEMETRY_FILE", "").strip()
     if override:
         return Path(override)
 
     today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-    return Path.home() / ".praxis" / "telemetry" / f"bypass-events-{today}.jsonl"
+    return resolve_telemetry_dir() / f"bypass-events-{today}.jsonl"
 
 
 def append_record(record: dict) -> None:
