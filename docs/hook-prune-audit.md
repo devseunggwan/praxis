@@ -62,10 +62,14 @@ chokepoint. **That is no longer true.** Issue #892 gave shell bodies
 `bypass-review` itself carried the stale claim: `roster_split()` classified by
 file extension, so the report printed "these 4 emit NO fire events" directly
 below a table tabulating nearly 15,000 of them. The classification now follows the
-chokepoint — Bash-dispatch-group membership, or a `fail_open` / `record_fire`
-reference in the hook's body — and the extension test survives only as the
-fallback for an unreadable body. With that fix the *uninstrumented* roster is
-empty: every registered hook is scoreable.
+chokepoint — Bash-dispatch-group membership, or an anchored instrumentation
+statement in the hook's body (`@fail_open`, an import of `fail_open`, a
+`source`/`.` of `record_fire.sh`) — and the extension test survives only as the
+fallback for an unreadable body. Anchoring matters as much as the marker: every
+shell hook carries `# shellcheck source=…/record_fire.sh` one line above its
+real source line, so a substring test would keep calling a body instrumented
+after the executable line was deleted. With that fix the *uninstrumented*
+roster is empty: every registered hook can produce fire events.
 
 ## Axis 2 — advise-ignored-rate high
 
@@ -125,7 +129,7 @@ behavior to see if the duplication also shows up as duplicate *coverage*:
 
 | Pair | Fire-rate behavior | Verdict |
 | --- | --- | --- |
-| `pre-output-falsification-gate` (advise ×161, block ×0 / 59,172 fires) vs. `output-block-falsify-advisory` (block ×547, ask ×460, advise ×7 / 59,457 fires) | Both scan for the same "self-authored proposal without falsification" pattern (Cluster B3 — shared evaluative-marker/`Falsified:`-phrase matcher, not yet extracted to `hooks/_lib/`). The 30-day window resolves the first audit's open question: `output-block-falsify-advisory` is **not** a narrower duplicate that never fires — it is the deny/ask escalation path (1,007 escalations), while `pre-output-falsification-gate` carries the advisory load (161 advises, zero escalations). The split is by severity, and both halves are live. | **Do not merge.** The first audit called the merge "premature" pending more data; the data arrived and argues against merging at all. Cluster B3's code dedup (shared `_lib` matcher) remains worth doing on its own terms — that is a code-duplication fix, not a hook merge. |
+| `pre-output-falsification-gate` (advise ×161, block ×0 / 59,172 fires) vs. `output-block-falsify-advisory` (block ×547, ask ×460, advise ×7 / 59,457 fires) | Both scan for the same "self-authored proposal without falsification" pattern (Cluster B3 — shared evaluative-marker/`Falsified:`-phrase matcher, not yet extracted to `hooks/_lib/`). The 30-day window resolves the first audit's open question: `output-block-falsify-advisory` is **not** a narrower duplicate that never fires — it is the deny/ask path (547 block + 460 ask), while `pre-output-falsification-gate` carries the advisory load (161 advises, zero block and zero ask). The split is by severity, and both halves are live. | **Do not merge.** The first audit called the merge "premature" pending more data; the data arrived and argues against merging at all. Cluster B3's code dedup (shared `_lib` matcher) remains worth doing on its own terms — that is a code-duplication fix, not a hook merge. |
 | `commit-title-length-check` (ask ×418, advise ×60 / 53,212) vs. `commit-title-format-check` (block ×4,868 / 63,709) | Different escalation levels (ask vs. block) gating different failure modes (length vs. format) that share a git-title-parsing helper (Cluster B2). | **Not coverage-duplicate** — keep both hooks; only the shared parser code is a dedup target. |
 
 **False-positive check (naming-only clustering, ruled out):** `pre-merge-approval-gate`,
@@ -141,54 +145,78 @@ types, not redundant coverage. No action.
 
 ## Axis 4 — advisory-only-never-escalated
 
-**Scope restriction (premise-verification):** a coarse-granularity hook records
-only block-vs-pass — its ask/advise fold into `Pass` and are invisible here, so
+**Scope restriction (premise-verification):** a coarse-only hook records just
+block-vs-pass — its ask/advise fold into `Pass` and are invisible here, so
 scoring one on this axis reports a false "never escalates" for a hook whose
-escalations are simply unmeasured. This axis is therefore restricted to the
-**Bash dispatch group**, where the central dispatcher records the real decision
-(block/ask/advise/pass) for every fire. 45 of the window's hooks are in that
-group.
+escalations are simply unmeasured. The axis population is therefore every
+registered hook that emits **at least one rich record**, because a rich record
+carries the real decision and makes the block/ask/advise counts exact. That is
+**63 of the 81** registered hooks; the other **18 are coarse-only** and stay out
+of this axis (`memory-hint`, `external-api-literal-trigger`,
+`block-personal-asset-leak`, `protected-paths-guard`, `worktree-edit-gate`,
+`secret-print-redaction-advisory`, `pre-edit-md-escape-advisory`,
+`pre-edit-protected-branch-guard`, `advisory-wrapper-signature-verify`,
+`bulk-write-memory-checkpoint`, `path-probe-gate`, `exclusion-probe-gate`,
+`push-remote-ref-verify`, `write-decision-consistency-gate`, `bypass-telemetry`,
+`postcompact-context`, `retrospect-active-marker`, `builtin-task-postuse`).
 
-**Result: 4 of 45** dispatch-group hooks logged zero block, zero ask, and zero
-advise across the whole window.
+This is wider than the Bash dispatch group alone (45 hooks). Issue #847 gave
+the completion-verify Stop gates a real `record_session_fire` at their emit
+point and #892 did the same for shell bodies, so those hooks now record their
+escalations exactly and belong **inside** the population — the first audit's
+Stop/UserPromptSubmit exclusion is closed, not merely noted. Pre-#847 "never
+escalates" reads on them were measurement-absent and are not carried forward.
+
+**Result: 3 of 63** logged zero block, zero ask, and zero advise across the
+window — and none of the three is a prune signal.
 
 | Hook | Fires | Sessions | Purpose (verified via spec.md) | Verdict |
 | --- | --- | --- | --- | --- |
-| `jq-config-empty-dict-advisory` | 59,972 | 400 | Warns before `jq` reads a size-0 or malformed config, where `jq` returns the literal `empty` on stdout instead of erroring and downstream code silently takes a wrong default (issue #323). | **KEEP** — the trigger is "a config file that is empty or invalid *at the moment* a `jq` command reads it". 60k clean reads is the healthy state, not evidence of dead code. A guard for a silent-failure mode is supposed to sit quiet. |
-| `version-bump-evidence-check` | 53,212 | 400 | Warns when a `gh issue/pr create/edit` body describes an **external dependency** version bump (`v24 → v25`, `bump SDK from 3.0 to 4.0`) with no changelog or breaking-changes evidence. `strict_env`-gated. | **KEEP** — and the first audit's reasoning for keeping it was wrong. It read the hook as gating praxis's own `VERSION` bump and excused the zero count by noting no release landed inside the window. The window now contains 7 merged `chore(main): release` PRs (7.2.1 → 7.8.0), and those are irrelevant either way: release PRs are authored by release-please, and the hook targets external-SDK bump prose in agent-authored bodies. The correct read is that the trigger is genuinely rare, not that it was untested. |
-| `pytest-direct-exec-advisory` | 692 | 6 | Nudges away from invoking `pytest` directly instead of the repo's runner. | **KEEP — not scoreable.** 6 sessions is measurement-thin; revisit next audit. |
-| `caller-probe-gate` | 330 | 6 | Requires the caller chain be probed before a claim about who calls what. | **KEEP — not scoreable.** Same reason. |
+| `jq-config-empty-dict-advisory` | 60,634 | 402 | Warns before `jq` reads a size-0 or malformed config, where `jq` returns the literal `empty` on stdout instead of erroring and downstream code silently takes a wrong default (issue #323). | **KEEP** — the trigger is "a config file that is empty or invalid *at the moment* a `jq` command reads it". 60k clean reads is the healthy state. A guard for a silent-failure mode is supposed to sit quiet. |
+| `askuserquestion-loop-signal` | 1,930 | 189 | **Observe-only** PostToolUse recorder (issue #740): appends one ledger record per `AskUserQuestion` call to feed the re-clarification-loop outcome proxy. | **KEEP — not a finding.** It has no escalation path at all, so zero escalations is its specification, not evidence about it. An instrumentation-only hook cannot be scored on this axis and should not be read as inert. |
+| `pytest-direct-exec-advisory` | 1,030 | 8 | Nudges away from invoking `pytest` directly instead of the repo's runner. | **KEEP — not scoreable.** 8 sessions is measurement-thin; revisit next audit. |
 
-Every other dispatch-group hook escalated at least once. No hook in this set is
-recommended for **drop**: two are narrow safety nets whose quiet is the
-designed outcome, and two have too little history to judge.
+Every other hook in the population escalated at least once. Excluding the
+observe-only recorder and the thin-sample hook, **no hook with an escalation
+path and an adequate sample sat inert** — there is nothing here to drop.
 
-> **Superseded (issue #847 / #892):** the first audit excluded eight
-> `Stop`/`UserPromptSubmit` hooks from this axis because their decisions
-> collapsed into coarse `Pass`. #847 gave the five completion-verify Stop gates
-> a real `record_session_fire` at their emit point, and #892 did the same for
-> shell bodies, so the blind spot that motivated the exclusion is closed.
-> Pre-#847 "never escalates" reads on those hooks were measurement-absent and
-> should not be carried forward as evidence.
+> **`version-bump-evidence-check` — the first audit kept it for the wrong
+> reason.** That audit read it as gating praxis's own `VERSION` bump and
+> excused its zero count by noting no release landed inside the window. The
+> hook actually targets **external dependency** bump prose (`v24 → v25`,
+> `bump SDK from 3.0 to 4.0`) in agent-authored `gh issue/pr` bodies; the 7
+> `chore(main): release` PRs in this window are irrelevant to it either way,
+> being authored by release-please. It sat at zero escalations for most of
+> this audit and then logged its first `advise` before the audit finished, so
+> it is no longer in the table above — the trigger is rare, not absent.
+
+**Observer effect.** The ledger is append-only and live, and the session
+writing this audit is one of the sessions being counted.
+`version-bump-evidence-check` and `caller-probe-gate` both moved from zero
+escalations to non-zero while the audit was being written. Treat single-digit
+escalation counts as provisional.
 
 ## Summary verdict table
 
 | Verdict | Count | Hooks |
 | --- | --- | --- |
-| **Keep** (active, or narrow safety net whose quiet is by design) | 77 | Every registered hook not listed below |
-| **Investigate** (non-drop follow-up) | 2 | `pre-gh-pr-create-dedup-gate` (24% ignored — is the advisory actionable?), `memory-hint` (68,799 fires, 0 recorded escalations against 12 memories declaring `hookable: true`; it is coarse-recorded, so that 0 is *measurement-absent*, not evidence — the open question is whether its `hookKeywords` match real tool-call text) |
-| **Keep, but not yet scoreable — revisit next audit** | 2 | `pytest-direct-exec-advisory`, `caller-probe-gate` (6 sessions each) |
+| **Keep** (active, or narrow safety net whose quiet is by design) | 60 | Every rich-recording hook not listed below |
+| **Investigate** (non-drop follow-up) | 1 | `pre-gh-pr-create-dedup-gate` — 24% ignored on 361 observed advises; is the advisory actionable? |
+| **Keep, but not scoreable on Axis 4** | 2 | `askuserquestion-loop-signal` (observe-only by design — no escalation path), `pytest-direct-exec-advisory` (8 sessions) |
+| **Keep, but coarse-recorded — Axis 4 cannot see them** | 18 | The coarse-only list under Axis 4, including `memory-hint` (68,799 fires against 12 memories declaring `hookable: true`; its 0 escalations are *measurement-absent*, so the open question — do its `hookKeywords` match real tool-call text? — stays open) |
 | **Unmeasurable — instrument first** | 0 | — (closed by #847 + #892; see Axis 1) |
 | **Drop** | 0 | — |
-| **Total** | 81 | Matches `hooks/manifest.json`'s 81 distinct names (77+2+2) |
+| **Total** | 81 | Matches `hooks/manifest.json`'s 81 distinct names (60+1+2+18) |
 
 ## Bottom line
 
 No hook meets the bar for removal, on a sample 15× larger than the first
 audit's. The roster grew 58 → 81 in a month, and that growth is still not
-visibly dead weight: 41 of 45 dispatch-group hooks escalated at least once in
-30 days, and the four that did not are two rare-by-design guards plus two
-hooks with almost no history.
+visibly dead weight: 60 of the 63 hooks whose escalations are exactly recorded
+fired a real decision at least once in 30 days, and of the three that did not,
+one is an observe-only recorder with no escalation path and one has an 8-session
+history. Only `jq-config-empty-dict-advisory` is genuinely inert — and it guards
+a silent-failure mode, so quiet is what it looks like when it works.
 
 What the larger window did change is which *claims* survive:
 
@@ -201,7 +229,12 @@ What the larger window did change is which *claims* survive:
    session it was drawn from. The delivery-channel question is still open, but
    it needs an experiment rather than a bigger window.
 4. `version-bump-evidence-check` was kept for the wrong reason and stays kept
-   for the right one.
+   for the right one — it gates external-dependency bump prose, not praxis's
+   own release, and it logged its first `advise` before this audit finished.
+5. Axis 4's population is no longer the Bash dispatch group alone. #847 and
+   #892 made 63 of the 81 hooks exactly scoreable, and widening the axis to
+   all of them is what surfaced `askuserquestion-loop-signal` — a hook whose
+   zero escalations are its specification, not a signal about it.
 
 ### What this audit still cannot answer
 
