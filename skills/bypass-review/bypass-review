@@ -1380,6 +1380,15 @@ def default_manifest_path() -> Path:
     return Path(__file__).resolve().parents[2] / "hooks" / "manifest.json"
 
 
+_PY_DECORATOR_RE = re.compile(r"@fail_open(?![\w])")
+_PY_IMPORT_RE = re.compile(
+    r"(from\s+[\w.]+\s+)?import\s+.*(?<![\w])fail_open(?![\w])")
+# `.*` rather than `\S*`: the real source line is
+# `. "$(dirname "$0")/../../_lib/record_fire.sh"`, whose path argument contains
+# a space inside the command substitution.
+_SH_SOURCE_RE = re.compile(r"(\.|source)\s+.*record_fire\.sh(?![\w.])")
+
+
 def records_fire_events(source: str) -> bool:
     """Does this hook body actually reach a fire-recording chokepoint?
 
@@ -1397,17 +1406,24 @@ def records_fire_events(source: str) -> bool:
       - `@fail_open` decorator (Python)
       - an `import` of `fail_open` (Python)
       - a `source` / `.` line pulling in `record_fire.sh` (shell)
+
+    Each pattern is anchored to the start of the stripped line and closed off
+    with a token boundary, which is what keeps the marker from matching where
+    it is merely *mentioned*: `print("import fail_open")` and
+    `x = "from m import fail_open"` do not begin with `import`/`from`, and
+    `@fail_opened` / `import fail_opened` fail the boundary. Anchoring costs
+    a few real forms — a source line behind a `;` separator, a parenthesised
+    multi-line import — and that is the direction to err in: a missed form
+    lands the hook in "cannot be judged", while a false match lands it in the
+    never-fired roster and reads as a prune candidate.
     """
     for raw in source.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        if line.startswith("@fail_open"):
+        if _PY_DECORATOR_RE.match(line) or _PY_IMPORT_RE.match(line):
             return True
-        if "import" in line and "fail_open" in line:
-            return True
-        if "record_fire.sh" in line and (
-                line.startswith("source ") or line.startswith(". ")):
+        if _SH_SOURCE_RE.match(line):
             return True
     return False
 

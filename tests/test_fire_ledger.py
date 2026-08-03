@@ -512,29 +512,47 @@ def test_roster_split_reads_the_body_for_a_recording_chokepoint(tmp_path):
     assert uninstrumentable == {"silent", "pysilent"}
 
 
-def test_records_fire_events_ignores_a_marker_that_only_appears_in_a_comment():
-    """A commented marker is not instrumentation — and that shape already exists.
+# The input surface of records_fire_events(), enumerated up front rather than
+# one reviewer round at a time. A marker can appear in a comment, inside a
+# string, or as the prefix of an unrelated name — and the first two shapes are
+# not hypothetical: every shell hook here carries
+# `# shellcheck source=../../_lib/record_fire.sh` on the line directly above
+# its real `.` source line.
+#
+# The two error directions are not symmetric. A missed real form leaves the
+# hook in "cannot be judged", which is safe; a false match puts a hook that
+# cannot record into the never-fired roster, where it reads as a prune
+# candidate. Anchoring therefore errs toward rejecting.
+RECORDS_FIRE_CASES = [
+    # (label, source, expected)
+    ("A1 shell comment-only", '#!/bin/bash\n# shellcheck source=../../_lib/record_fire.sh\nexit 0\n', False),
+    ("A2 python comment mention", "# this module used to use @fail_open\nx = 1\n", False),
+    ("A3 decorator + trailing comment", "@fail_open  # noqa\ndef run(p): pass\n", True),
+    ("A4 source + trailing comment", '. "$(dirname "$0")/../../_lib/record_fire.sh"  # load\n', True),
+    ("B1 marker inside a call argument", 'print("import fail_open")\n', False),
+    ("B2 marker inside an assignment", 'MSG = "source record_fire.sh"\n', False),
+    ("B3 marker inside a docstring", '"""record_fire is described in this docstring"""\n', False),
+    ("B4 decorator text inside a string", 'msg = "@fail_open"\n', False),
+    ("B5 source line echoed as text", 'echo ". ../_lib/record_fire.sh"\n', False),
+    ("B6 import text inside a string", 'x = "from m import fail_open"\n', False),
+    ("C1 unrelated @fail_opened", "@fail_opened\ndef run(p): pass\n", False),
+    ("C2 unrelated @fail_open_v2", "@fail_open_v2\ndef run(p): pass\n", False),
+    ("C3 bare decorator", "@fail_open\ndef run(p): pass\n", True),
+    ("C4 decorator with args", "@fail_open()\ndef run(p): pass\n", True),
+    ("C5 unrelated symbol imported", "from m import fail_opened\n", False),
+    ("C6 neighbouring filename", ". ../_lib/record_fire.sh.bak\n", False),
+    ("D1 indented source line", '    . "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true\n', True),
+    ("D2 source keyword form", '    source "$(dirname "$0")/../../_lib/record_fire.sh"\n', True),
+    ("F1 from-import with comment", "from _hook_runtime import fail_open  # noqa: E402\n", True),
+    ("F2 bare import", "import fail_open\n", True),
+    ("F3 aliased import", "from _hook_runtime import fail_open as fo\n", True),
+]
 
-    Every shell hook here carries `# shellcheck source=../../_lib/record_fire.sh`
-    on the line directly above the real `.` source line, so a comment-only body
-    is one deleted line away in four files. A substring test would still call it
-    instrumented, which puts a hook that cannot record into the never-fired
-    roster, where it reads as a prune candidate.
-    """
-    assert cli.records_fire_events(
-        '#!/bin/bash\n# shellcheck source=../../_lib/record_fire.sh\nexit 0\n') is False
-    assert cli.records_fire_events("# this module used to use @fail_open\nx = 1\n") is False
-    assert cli.records_fire_events('"""record_fire is described in this docstring"""\n') is False
 
-
-def test_records_fire_events_accepts_each_real_chokepoint_form():
-    assert cli.records_fire_events(
-        '#!/bin/bash\n. "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true\n')
-    assert cli.records_fire_events(
-        '#!/bin/bash\n    source "$(dirname "$0")/../../_lib/record_fire.sh"\n')
-    assert cli.records_fire_events("@fail_open\ndef run(payload):\n    return None\n")
-    assert cli.records_fire_events(
-        "from _hook_runtime import fail_open  # noqa: E402\n")
+@pytest.mark.parametrize("label,source,expected", RECORDS_FIRE_CASES,
+                         ids=[c[0] for c in RECORDS_FIRE_CASES])
+def test_records_fire_events_surface(label, source, expected):
+    assert cli.records_fire_events(source) is expected
 
 
 def test_roster_split_counts_a_comment_only_body_as_uninstrumented(tmp_path):
