@@ -609,27 +609,47 @@ def _has_confidence_anchoring(texts: list[str]) -> bool:
 def _emit_verb_checklist() -> None:
     """Write the AskUserQuestion gate checklist to stderr (issue #873).
 
-    Not to the decision JSON: only the FIRST ask/deny's stdout survives the
-    dispatcher's aggregation (hooks/_lib/_dispatch.py), so a sibling that
-    blocks first — block-ask-end-option on an end-option label, say — would
-    discard the checklist and leave the remaining gates to be discovered one
-    block at a time. Every hook's stderr is forwarded unconditionally, so the
-    checklist arrives whoever wins the race.
+    This is the *second* of two channels, not the only one — see
+    `_with_verb_checklist` for why both are needed. Only the FIRST ask/deny's
+    stdout survives the dispatcher's aggregation
+    (`hooks/_lib/_dispatch.py:195-201`), so when a sibling blocks first —
+    block-ask-end-option on an end-option label, say — the reason string this
+    hook built is discarded. Every hook's stderr is forwarded unconditionally,
+    and that sibling's deny makes the dispatcher exit 2, which is exactly when
+    stderr reaches the model. So stderr covers the case the reason string
+    cannot.
     """
     sys.stderr.write(_VERB_CHECKLIST)
+
+
+def _with_verb_checklist(message: str) -> str:
+    """Append the checklist to the decision reason (issue #932).
+
+    Issue #873 first routed the checklist to stderr *instead of* the reason
+    string. That was correct for a deny (the dispatcher returns 2, and a
+    PreToolUse hook's stderr is fed to the model only on exit 2) but wrong
+    here: an ask makes the dispatcher return 0
+    (`hooks/_lib/_dispatch.py:203-207`), and on exit 0 stderr is never
+    surfaced to the model. So in the common case — this hook asking with no
+    sibling denying — the checklist was emitted and then dropped.
+
+    Both channels together cover both exit codes: the reason string reaches
+    the model on the exit-0 ask, stderr reaches it on the exit-2 sibling deny.
+    """
+    return f"{message}\n{_VERB_CHECKLIST}"
 
 
 def _emit_ask(message: str) -> None:
     """T2 path: soft gate. (decision must be "ask"/"deny" — "allow" is never
     emitted; silent-pass is signaled by no JSON output.)"""
     _emit_verb_checklist()
-    emit_decision("ask", message)
+    emit_decision("ask", _with_verb_checklist(message))
 
 
 def _emit_t1_ask(message: str) -> None:
     """T1 path: soft gate (issue #899 — restores the pre-#393 tier)."""
     _emit_verb_checklist()
-    emit_decision("ask", message)
+    emit_decision("ask", _with_verb_checklist(message))
 
 
 # ---------------------------------------------------------------------------
