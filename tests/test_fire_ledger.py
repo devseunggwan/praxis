@@ -512,6 +512,48 @@ def test_roster_split_reads_the_body_for_a_recording_chokepoint(tmp_path):
     assert uninstrumentable == {"silent", "pysilent"}
 
 
+def test_records_fire_events_ignores_a_marker_that_only_appears_in_a_comment():
+    """A commented marker is not instrumentation — and that shape already exists.
+
+    Every shell hook here carries `# shellcheck source=../../_lib/record_fire.sh`
+    on the line directly above the real `.` source line, so a comment-only body
+    is one deleted line away in four files. A substring test would still call it
+    instrumented, which puts a hook that cannot record into the never-fired
+    roster, where it reads as a prune candidate.
+    """
+    assert cli.records_fire_events(
+        '#!/bin/bash\n# shellcheck source=../../_lib/record_fire.sh\nexit 0\n') is False
+    assert cli.records_fire_events("# this module used to use @fail_open\nx = 1\n") is False
+    assert cli.records_fire_events('"""record_fire is described in this docstring"""\n') is False
+
+
+def test_records_fire_events_accepts_each_real_chokepoint_form():
+    assert cli.records_fire_events(
+        '#!/bin/bash\n. "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true\n')
+    assert cli.records_fire_events(
+        '#!/bin/bash\n    source "$(dirname "$0")/../../_lib/record_fire.sh"\n')
+    assert cli.records_fire_events("@fail_open\ndef run(payload):\n    return None\n")
+    assert cli.records_fire_events(
+        "from _hook_runtime import fail_open  # noqa: E402\n")
+
+
+def test_roster_split_counts_a_comment_only_body_as_uninstrumented(tmp_path):
+    """The end-to-end path, not just the matcher: a decorative marker must not
+    move a hook out of the uninstrumented list."""
+    hooks_dir = tmp_path / "hooks"
+    _write_hook_body(hooks_dir, "completion-verify", "decorative", "impl.sh",
+                     "#!/bin/bash\n# shellcheck source=../../_lib/record_fire.sh\nexit 0\n")
+    manifest = {"hooks": [
+        {"name": "decorative", "role": "completion-verify", "body": "impl.sh",
+         "event": "Stop"},
+    ]}
+    mpath = hooks_dir / "manifest.json"
+    mpath.write_text(json.dumps(manifest))
+    instrumentable, uninstrumentable = cli.roster_split(mpath)
+    assert instrumentable == set()
+    assert uninstrumentable == {"decorative"}
+
+
 def test_roster_split_counts_dispatch_group_membership_as_recorded(tmp_path):
     """A dispatch-group hook is recorded centrally, so its body carries no marker."""
     hooks_dir = tmp_path / "hooks"

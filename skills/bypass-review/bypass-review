@@ -1380,6 +1380,38 @@ def default_manifest_path() -> Path:
     return Path(__file__).resolve().parents[2] / "hooks" / "manifest.json"
 
 
+def records_fire_events(source: str) -> bool:
+    """Does this hook body actually reach a fire-recording chokepoint?
+
+    Matches the instrumentation *syntax*, not a bare substring. Every shell
+    hook in this repo carries a `# shellcheck source=../../_lib/record_fire.sh`
+    directive on the line directly above the real `. "…/record_fire.sh"` —
+    so a body that mentions a marker only in a comment is not hypothetical,
+    it is one deleted line away in four existing files. A substring test
+    would keep calling such a body instrumented, and a hook wrongly called
+    instrumented lands in the never-fired roster, where it reads as a prune
+    candidate. The mirror error is harmless: wrongly calling a body
+    uninstrumented only moves it to the "cannot be judged" list.
+
+    Recognised chokepoints, comment lines excluded:
+      - `@fail_open` decorator (Python)
+      - an `import` of `fail_open` (Python)
+      - a `source` / `.` line pulling in `record_fire.sh` (shell)
+    """
+    for raw in source.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("@fail_open"):
+            return True
+        if "import" in line and "fail_open" in line:
+            return True
+        if "record_fire.sh" in line and (
+                line.startswith("source ") or line.startswith(". ")):
+            return True
+    return False
+
+
 def roster_split(manifest_path: Path) -> tuple[set[str], set[str]] | None:
     """Split manifest hook names into (instrumentable, uninstrumentable).
 
@@ -1391,11 +1423,11 @@ def roster_split(manifest_path: Path) -> tuple[set[str], set[str]] | None:
 
     The classification asks, per hook, whether it reaches any of the three:
     membership in the Bash dispatch group (where the central dispatcher does
-    the recording, so the hook's own body carries no marker), or a
-    `fail_open` / `record_fire` reference in its body at
-    `hooks/<role>/<name>/<body or impl.py>`. All three must be checked —
-    testing the body alone misclassifies every dispatch-group hook, which is
-    most of the roster.
+    the recording, so the hook's own body carries no marker), or an
+    instrumentation statement in its body at
+    `hooks/<role>/<name>/<body or impl.py>` (see `records_fire_events`).
+    All three must be checked — testing the body alone misclassifies every
+    dispatch-group hook, which is most of the roster.
 
     The older proxy — "`body` ends `.sh` means uninstrumented" — predates
     #892 and reports the four shell hooks as emitting no fire events while
@@ -1406,7 +1438,6 @@ def roster_split(manifest_path: Path) -> tuple[set[str], set[str]] | None:
 
     Returns None if the manifest can't be read.
     """
-    fire_markers = ("record_fire", "fail_open")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         hooks_dir = manifest_path.parent
@@ -1429,7 +1460,7 @@ def roster_split(manifest_path: Path) -> tuple[set[str], set[str]] | None:
                 try:
                     source = (hooks_dir / role / name / body).read_text(
                         encoding="utf-8", errors="replace")
-                    instrumented = any(m in source for m in fire_markers)
+                    instrumented = records_fire_events(source)
                 except OSError:
                     instrumented = not body.endswith(".sh")
             # A name with several manifest entries (multi-event hooks) is
