@@ -9,7 +9,10 @@ brokers are skipped.
 
 It complements **Step 6** of `codex-review-wrap`: phase-end reaping keeps the
 broker count down between runs, while this job reclaims orphans whose owning
-session is already gone.
+session is already gone — either because the workspace directory was deleted,
+or because the workspace survives but nobody works in it any more (the latter
+needs a way to read live process cwds: `lsof`, or `/proc` on Linux; without
+one the broker is kept).
 
 > macOS only. The leak is inherent to launchd reparenting and the
 > `/var/folders` sessionDirs the broker creates.
