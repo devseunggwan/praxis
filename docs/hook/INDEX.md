@@ -36,8 +36,8 @@ stderr, because neither channel alone reaches the model in every case
   the model only when the dispatcher exits 2 — the deny path (`:201`), never
   the ask path (`:207 return 0`).
 
-#873 shipped stderr-only and the `AskUserQuestion` checklist, which travels the
-exit-0 ask path, went nowhere.
+Issue #873 shipped stderr-only, and the `AskUserQuestion` checklist — which
+travels the exit-0 ask path — went nowhere.
 
 A checklist that under-enumerates reproduces the defect it exists to fix, and
 reads as authoritative while doing it — the first draft of the

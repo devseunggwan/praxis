@@ -472,11 +472,11 @@ reaches the model in every case:
   discards this hook's reason. That same deny makes the dispatcher exit 2 —
   exactly when stderr does reach the model.
 
-#873 shipped stderr-only, reasoning from the deny path where stderr always
-arrives. The ask path was the majority case and the checklist went nowhere. Issue #874
-records the same exit-0 invisibility for the ADVISE tier generally — 42 fires
-in one session, zero observed effect. The ask-message text is otherwise
-unchanged.
+Issue #873 shipped stderr-only, reasoning from the deny path where stderr
+always arrives. The ask path was the majority case and the checklist went
+nowhere. Issue #874 records the same exit-0 invisibility for the ADVISE tier
+generally — 42 fires in one session, zero observed effect. The ask-message text
+is otherwise unchanged.
 
 The checklist names the `Falsified:` token but **indents** it. That is not
 cosmetic: the token is only recognised at column 0, so an unindented line here
