@@ -207,7 +207,7 @@ If `$companion` is empty or the file does not exist:
 target** — including the ordinary case where `codex-companion.mjs`
 resolved and no question was asked:
 
-```
+```text
 review-path: target={worktree-path}#{branch} | round={N} | path={codex-companion | code-reviewer | manual}
 ```
 
@@ -282,7 +282,7 @@ The execution order each round is:
    round number (5c → *Round number*).
 2. **5f counter update + advisory check** — increment `rounds_per_region:`
    ledger for each region touched; emit the diminishing-returns advisory if
-   `cumulative = N + 1`.
+   `cumulative = threshold + 1`.
 3. **5d-i sibling-identification question** — `AskUserQuestion` to confirm
    whether the PR is a port / parallel hotfix / A/B implementation
    (interactive runs only, per step 0).
@@ -407,8 +407,15 @@ stays reserved for value transitions — round transitions use
 `from=`/`to=`.
 
 **Round number `N`** is derived, not stored separately:
-`N = (the highest round= value appearing anywhere in the ledger) + 1`, and
-`N=1` when the ledger holds no `round=` value at all. This is monotone by
+`N = (the highest round= value in the ledger) + 1`, and `N=1` when the
+ledger holds no `round=` field at all. Read only the dedicated
+`| round={integer} |` field of a **recognized record shape** — never a
+`round=` that happens to occur inside free-form content. Several fields
+are free-form: `rejected:` carries `reason:` text (falsifying evidence, or
+a `user:` sentence), `sibling-applied:` and `deferred:` carry a
+`finding={brief-label}`, and any of them may quote a URL. A `round=999`
+sitting in one of those would otherwise advance the round counter to 1000
+without a round having started. This is monotone by
 construction, so it stays correct where a `round-continued:`-anchored
 formula does not: a `decision=stop` row carries `to=—` and would re-issue
 its own `from=` on the next invocation in the same session, and a round
@@ -503,7 +510,7 @@ If no sibling is identified (user confirms "No", no auto-detect signal fires), s
 **invocation target** — `sibling={ref[,ref…]}` when siblings were
 identified, `sibling=none` when they were not:
 
-```
+```text
 sibling-id: target={worktree-path}#{branch} | round={N} | sibling={ref[,ref…] | none}
 ```
 
@@ -765,13 +772,16 @@ have touched `{file}:{region}` in the current session.
 
 ##### Advisory threshold
 
-Read the threshold `N` from the environment at the **start of each round**
-(during the counter-update step above). The read mechanism follows the same
+Read the threshold `threshold` from the environment at the **start of each
+round** (during the counter-update step above). It is deliberately **not**
+called `N`: 5c uses `N` for the session-wide round number, and reusing the
+letter here would let `cumulative = threshold + 1` be misread as
+`cumulative = current round + 1`. The read mechanism follows the same
 convention as other `PRAXIS_*` env vars in this codebase — a Bash
 parameter expansion with a default:
 
 ```bash
-N=${PRAXIS_DIMINISHING_RETURNS_N:-4}
+threshold=${PRAXIS_DIMINISHING_RETURNS_N:-4}
 ```
 
 In Python hook contexts, the equivalent is
@@ -788,8 +798,8 @@ between round 3 and round 4), the new value takes effect from round 4 onward.
 Prior rounds use the value that was in effect at their own round start — there
 is no retroactive adjustment to already-recorded ledger entries.
 
-When `cumulative` reaches `N + 1` (i.e., the session is starting its
-`(N+1)`-th round on the same region), surface the following advisory
+When `cumulative` reaches `threshold + 1` (i.e., the session is starting
+its `(threshold+1)`-th round on the same region), surface the following advisory
 **once per `{file}:{region}` per session** — immediately after emitting
 the `rounds_per_region:` ledger entry, before proceeding to 5a
 classification:
@@ -803,7 +813,8 @@ to re-enumerate cases up-front before continuing.
 The advisory is **informational only** — it does not block, does not
 require user confirmation, and does not prevent edits from being applied.
 Do not re-surface the advisory on subsequent rounds (round `N+2`,
-`N+3`, …) for the same region — emit it exactly once at `cumulative = N+1`.
+`threshold+3`, …) for the same region — emit it exactly once at
+`cumulative = threshold+1`.
 
 ##### Interaction with flip detection (5c)
 
@@ -811,7 +822,7 @@ The rounds-per-region counter increments independently of flip detection.
 A flip halt (5c) does not reset or suppress the counter. If a flip is
 halted mid-round, the `rounds_per_region:` entry for that round is still
 recorded (counter increments) but the advisory suppression rule still
-applies (emit only at `cumulative = N+1`, not again on later rounds).
+applies (emit only at `cumulative = threshold+1`, not again on later rounds).
 
 #### 5h. Parent-truncates-child SoT enumeration audit <!-- [#395] -->
 
@@ -910,7 +921,7 @@ resulting `rejected:` row's `reason:` field starts with `user:` and the
 row includes both — that triple is the key the re-synthesis check above
 reads:
 
-```
+```text
 rejected: {parent_file}:{heading} | round={N} | [#395] SoT truncation vs {sibling_file}:{sibling_section} | reason: user: declined (round N)
 ```
 
@@ -960,7 +971,7 @@ The SoT audit is distinct from the per-finding premise verification in 5b:
 - **5h** is a proactive sweep on the parent document itself, independent of
   whether Codex reported a SoT-related finding. It catches truncations that
   external review has not yet surfaced — the same root cause that would have
-  produced the N+1-th round finding.
+  produced the (threshold+1)-th round finding.
 
 The two steps are complementary: 5b prevents bad fixes; 5h prevents missed
 enumerations from reaching the next reviewer.
@@ -1106,9 +1117,10 @@ Fire only when **all three** hold:
 
 - **(a)** at least one edit was actually applied this round — `{C} ≥ 1`,
   counting 5i-approved edits and 5h synthesized-finding edits together;
-- **(b)** those edits are inside codex-companion's review target — the
+- **(b)** those edits are inside the next round's review target — the
   check is membership of the **actual** next-round diff, not of the scope
-  name;
+  name, and it is asked of whichever reviewer the `review-path:` row names,
+  not of codex-companion unconditionally;
 - **(c)** the interactivity check (execution-order item 0) is re-run for
   **this** round and passes.
 
@@ -1148,6 +1160,17 @@ If neither is possible, skip the gate and proceed to Step 6 rather than
 re-entering a round that would review a diff missing this round's work —
 that round reads as convergence while having verified nothing.
 
+**The `code-reviewer` fallback path.** The table above describes
+codex-companion, which is what `review-path: … | path=codex-companion`
+names. When the row names `code-reviewer` instead, condition (b) asks the
+same question of *that* reviewer's next-round target: the Step 4a fallback
+is invoked with cwd set to the selected worktree and reviews what it is
+handed, so establish what it would be handed and confirm every applied
+edit is in it. If that cannot be established for the reviewer in use, **do
+not fire** — conditions (a) and (c) are unaffected, but (b) is unmet, and
+an unmet (b) is a skip, not a warning. `path=manual` never reaches 5j:
+Step 4a's `Manual` branch exits before Step 5.
+
 When the branch-scope path leads 5j to offer a commit and the commit
 contains fact-modifying edits, 5j attaches the `Premise-Verified:` trailer
 itself — one per such edit, quoting the 5b output from this round. 5e
@@ -1176,7 +1199,7 @@ edits are real and the question is still live.
 
 ##### The question
 
-```
+```text
 AskUserQuestion: "라운드 {N} 완료 — 이번 라운드 {C}건 적용, 누적 {R}라운드{,
 수확 체감 region: {regions}}{, 미결정 {K}건}. Codex 리뷰를 한 번 더
 실행할까요?"
@@ -1199,7 +1222,7 @@ whole clause is omitted when it flagged none.
 
 `{regions}` lists every region whose `rounds_per_region:` cumulative count
 exceeds the 5f threshold, **recomputed every round**. 5f's own advisory
-fires once per region and then goes quiet (`cumulative = N+1` only), so
+fires once per region and then goes quiet (`cumulative = threshold+1` only), so
 the gate — not 5f — is what keeps the diminishing-returns signal in front
 of the user as rounds accumulate. This is also why the question grows
 more informative rather than less: without it, round 5's question would
@@ -1221,8 +1244,15 @@ re-ask the same question rather than guessing (same as 5i). Record
 
 1. Return to **Step 4**; skip Steps 1–3 — the review target is already
    fixed.
-2. Reuse the original `{{ARGUMENTS}}`, **minus `--background`**: a
-   re-backgrounded round breaks the gate's synchronous loop.
+2. **Normalize** the original `{{ARGUMENTS}}` before reuse — strip
+   `--background` (a re-backgrounded round breaks the gate's synchronous
+   loop) **and** any existing `--scope` / `--base <ref>`. Then append at
+   most **one** target-selecting flag, the one condition (b) settled
+   above. Stripping first is what keeps the two rules from colliding:
+   without it, "switch the scope for the re-entered round" stacks a second
+   `--scope` on top of the caller's, and which one wins is the CLI's
+   business, not this skill's. After appending, re-run the condition (b)
+   membership check against the arguments actually being passed.
 3. Re-run Step 4's PR-state check every time — the PR can be merged or
    closed between rounds.
 4. Reuse the `sibling-id:` and `review-path:` rows whose `target=` matches
@@ -1233,7 +1263,7 @@ re-ask the same question rather than guessing (same as 5i). Record
 
 Record the decision:
 
-```
+```text
 round-continued: target={worktree-path}#{branch} | from={N} | applied={C} | decision={continue | stop | other} | to={N+1 | —}
 ```
 
@@ -1347,7 +1377,7 @@ user selects: 1
 [Step 5 — Round 1 — counter update (5f, first action)]:
   ledger: rounds_per_region: query.sql:filter_clause | round=1 | cumulative=1
   ledger: rounds_per_region: cli.sh:parse_prompt      | round=1 | cumulative=1
-  (cumulative ≤ N=4 → no advisory emitted yet)
+  (cumulative ≤ threshold=4 → no advisory emitted yet)
 
 [Step 5 — Round 1 — sibling check (5d-i)]: AskUserQuestion fired:
   User: "이 PR은 praxis#199 (shell 버전)의 Python port입니다."
@@ -1431,11 +1461,17 @@ user selects: 1
   (Had the user resolved the flip and applied the surviving side, (a) would
    pass and the gate would fire — a flip halt is not a termination path.)
 
-[Step 5j — Round 3, gate skipped] Codex returned 0 findings
-  5h still ran this round and synthesized nothing either → {C} = 0 → gate does
-  not fire → Step 6. (Had 5h synthesized a truncation and the user approved it,
-  {C} would be 1 and the gate would fire — "Codex 0 findings" alone is not a
-  skip condition.)
+[Step 5j — alternative branch, NOT a continuation of the block above]
+  The block above ended at Step 6, so no round 3 follows it. This branch shows
+  what a round 3 would look like on the other path: the user resolves the round-2
+  flip, applies the surviving side ({C} = 1), the gate fires, the answer is
+  추가 라운드 실행, and Step 4 is re-entered.
+
+  [Round 3, gate skipped] Codex returned 0 findings
+    5h still ran this round and synthesized nothing either → {C} = 0 → gate does
+    not fire → Step 6. (Had 5h synthesized a truncation and the user approved it,
+    {C} would be 1 and the gate would fire — "Codex 0 findings" alone is not a
+    skip condition.)
 
 [Step 5f — Diminishing-returns example] PRAXIS_DIMINISHING_RETURNS_N=4 (default)
   Rounds 1–4: counter increments silently
@@ -1443,7 +1479,7 @@ user selects: 1
     ledger: rounds_per_region: cli.sh:parse_prompt | round=2 | cumulative=2
     ledger: rounds_per_region: cli.sh:parse_prompt | round=3 | cumulative=3
     ledger: rounds_per_region: cli.sh:parse_prompt | round=4 | cumulative=4
-  Round 5 (cumulative = N+1 = 5): advisory emitted once, then 5a continues normally
+  Round 5 (cumulative = threshold+1 = 5): advisory emitted once, then 5a continues normally
     ledger: rounds_per_region: cli.sh:parse_prompt | round=5 | cumulative=5
     Advisory: this is round 5 on cli.sh:parse_prompt. Findings to date suggest
     the underlying surface enumeration may be incomplete. Consider pausing
