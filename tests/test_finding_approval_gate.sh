@@ -175,12 +175,12 @@ assert_present \
   "trailer **if the edit is fact-modifying**"
 
 # ---------------------------------------------------------------------------
-# 7. Ledger integration — five record shapes including deferred
+# 7. Ledger integration — nine record shapes including deferred
 # ---------------------------------------------------------------------------
 
 assert_present \
-  "ledger declares five record shapes" \
-  "**five record shapes**"
+  "ledger declares nine record shapes" \
+  "**nine record shapes**"
 
 assert_present_re \
   "deferred: record shape defined" \
@@ -188,7 +188,7 @@ assert_present_re \
 
 assert_present \
   "deferred: excluded from flip scan prefixes" \
-  "or \`deferred:\`) in the ledger"
+  "\`deferred:\`, \`sibling-id:\`"
 
 assert_present \
   "user declines write a rejected: row with a user: prefix" \

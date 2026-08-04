@@ -21,8 +21,8 @@ description: >
   "premise verification", "flip detection", "sibling defect", "sibling cross-check",
   "diminishing returns", "broker reap", "finding approval", "적용 승인".
 verified-against-runtime: true
-runtime-verified-at: 2026-07-26
-runtime-verified-note: "codex-companion 1.0.4 — ARGUMENTS rejected for non-flag string; AskUserQuestion maxItems:4 blocks worktree list >3 items; Skill() cannot delegate to disable-model-invocation skill. Step 4 hardened to a MUST NOT directive in issue #237 (2026-05-16) — directive-only change, no new runtime claim. Step 5f (PR #329) adds procedural prose only (rounds_per_region ledger + advisory text); no runtime hook code changed — existing verification evidence remains valid. Step 6 (issue #683) adds codex-broker-reaper.sh; its reap and GC decisions are backed by re-runnable behavior tests in tests/test_codex_broker_reaper.sh (Gate 3 owner-death oracle over nine equally-idle brokers, Gate 4 GC sessionDir ownership) — run them for current evidence. The prose record this field used to carry (a 2026-06-18 synthetic-broker observation) was a one-time manual run, not re-executable, and did not prevent the #919 kill of live sessions; issue #921 replaced it with the tests. Step 5i (issue #861) verified 2026-07-26 against the live AskUserQuestion runtime — 3-question and 4-question calls, each question carrying 3 explicit options, round-tripped and returned every answer keyed by question text; the runtime appended its own Other slot, confirming both the 4-question batch size and the 적용/미적용/후속이슈 shape against the 4-option cap (RUNTIME_CONSTRAINTS.md §1a)."
+runtime-verified-at: 2026-08-04
+runtime-verified-note: "codex-companion 1.0.4 — ARGUMENTS rejected for non-flag string; AskUserQuestion maxItems:4 blocks worktree list >3 items; Skill() cannot delegate to disable-model-invocation skill. Step 4 hardened to a MUST NOT directive in issue #237 (2026-05-16) — directive-only change, no new runtime claim. Step 5f (PR #329) adds procedural prose only (rounds_per_region ledger + advisory text); no runtime hook code changed — existing verification evidence remains valid. Step 6 (issue #683) adds codex-broker-reaper.sh; its reap and GC decisions are backed by re-runnable behavior tests in tests/test_codex_broker_reaper.sh (Gate 3 owner-death oracle over nine equally-idle brokers, Gate 4 GC sessionDir ownership) — run them for current evidence. The prose record this field used to carry (a 2026-06-18 synthetic-broker observation) was a one-time manual run, not re-executable, and did not prevent the #919 kill of live sessions; issue #921 replaced it with the tests. Step 5i (issue #861) verified 2026-07-26 against the live AskUserQuestion runtime — 3-question and 4-question calls, each question carrying 3 explicit options, round-tripped and returned every answer keyed by question text; the runtime appended its own Other slot, confirming both the 4-question batch size and the 적용/미적용/후속이슈 shape against the 4-option cap (RUNTIME_CONSTRAINTS.md §1a). Step 5j (issue #945) verified 2026-08-04: the gate's actual option labels (추가 라운드 실행 / 현재 라운드로 충분 — Step 6 으로 진행) round-tripped through the live AskUserQuestion runtime and the answer came back keyed by question text, and the call passed the block-ask-end-option hook (labels and question body checked against all 30 markers in that hook's spec). Fire condition (b) measured the same day against codex@openai-codex 1.0.6 by executing resolveReviewTarget from scripts/lib/git.mjs: a clean worktree resolves to mode=branch with baseRef=main, and a dirty one to mode=working-tree, whose context carries staged, unstaged, and untracked diffs — so an applied edit is in the review target either way under --scope auto. The fire path was then traced end-to-end the same day by running this skill on this very change: round 1 applied 6 findings, 5j fired, the answer was 추가 라운드 실행, Step 4 was re-entered with Steps 1-3 and 5d-i skipped, round 2 returned 4 further findings against round 1's own edits, and the second gate returned Step 6 으로 진행 — so both the continue and stop branches, and the sibling-id reuse, are observed rather than asserted. The skip branches (0 applied) remain documented as a decision table rather than observed live: 5j is prose the agent follows, not hook code, so non-firing has no independent oracle."
 ---
 
 # codex-review-wrap
@@ -62,6 +62,8 @@ threshold). See **Step 6** for the reaper and its safety gate.
 ## Invocation Model
 
 **Cardinality**: This skill handles exactly **one PR per invocation**. For N PRs, invoke the skill N times sequentially. Batch for-loops are **not supported** — they collapse Step 5c per-round ledger emission across multiple PRs and break flip-detection guarantees.
+
+One invocation may still run **N rounds** against that single PR: the axis the batch prohibition guards is PR cardinality, while Step 5j loops on round cardinality, and every one of its iterations passes through an explicit user decision.
 
 ## When to Use
 
@@ -201,6 +203,18 @@ If `$companion` is empty or the file does not exist:
    - `Manual` → run `git diff origin/<base-branch>..HEAD` in `{selected_path}` and exit
    - `Cancel` → abort silently with one-line message
 
+**Record the resolved path in the ledger, on every first round of a
+target** — including the ordinary case where `codex-companion.mjs`
+resolved and no question was asked:
+
+```text
+review-path: target={worktree-path}#{branch} | round={N} | path={codex-companion | code-reviewer | manual}
+```
+
+A round re-entered by 5j reads this row instead of re-resolving or
+re-asking (5j → *Re-entry*, item 4), so without the row the re-entry
+instruction has nothing to read. Match on `target=`, same as `sibling-id:`.
+
 The script derives its own ROOT_DIR via `import.meta.url`, so passing the
 absolute script path to `node` is sufficient — `CLAUDE_PLUGIN_ROOT` does
 not need to be set.
@@ -209,7 +223,9 @@ not need to be set.
 
 Change working directory to the selected worktree, then invoke the
 companion. `{{ARGUMENTS}}` passes any flags (e.g. `--model opus`,
-`--wait`, `--background`) through unchanged.
+`--wait`, `--background`) through unchanged. One exception: a round
+re-entered from 5j drops `--background`, because a re-backgrounded round
+breaks that gate's synchronous loop.
 
 ```bash
 cd {selected_path}
@@ -261,36 +277,44 @@ The execution order each round is:
    (5a–5c) but apply nothing, deferring the survivors. Doing this first is
    what keeps the unconditional 5d-i question from stalling the round before
    classification happens.
-1. **5f counter update + advisory check** — increment `rounds_per_region:`
+1. **`round-started:` ledger row** — write it unconditionally, before any
+   finding is known, so a round that ends up empty still advances the
+   round number (5c → *Round number*).
+2. **5f counter update + advisory check** — increment `rounds_per_region:`
    ledger for each region touched; emit the diminishing-returns advisory if
-   `cumulative = N + 1`.
-2. **5d-i sibling-identification question** — `AskUserQuestion` to confirm
+   `cumulative = threshold + 1`.
+3. **5d-i sibling-identification question** — `AskUserQuestion` to confirm
    whether the PR is a port / parallel hotfix / A/B implementation
    (interactive runs only, per step 0).
-3. **5a classify findings** — fact-modifying vs structural vs stylistic.
-4. **5b verify premises** — falsify each fact-modifying finding's premise
+4. **5a classify findings** — fact-modifying vs structural vs stylistic.
+5. **5b verify premises** — falsify each fact-modifying finding's premise
    before applying.
-5. **5c flip detection during apply** — scan ledger for `applied:` /
+6. **5c flip detection during apply** — scan ledger for `applied:` /
    `rejected:` collisions before each edit.
-6. **5g critic pre-lock probe check** — before any critic finding that
+7. **5g critic pre-lock probe check** — before any critic finding that
    contains a negative claim is surfaced to the user, verify the claim
    with a live probe and cite it inline. Runs **before** 5i, because 5i
    surfaces every finding — including structural and stylistic ones,
    whose 5i question body is allowed to carry `Probe: n/a`.
-7. **5i per-finding user approval gate** — ask the user, in batches of 4,
+8. **5i per-finding user approval gate** — ask the user, in batches of 4,
    whether to apply each finding; edits are applied only for `적용`
    answers. Runs **after** classification/verification/flip-scan/probe
    check (so the question carries evidence) and **before** the first edit
    of the round.
-8. **5d-ii / 5d-iii sibling cross-check + propose** — only when 5d-i
+9. **5d-ii / 5d-iii sibling cross-check + propose** — only when 5d-i
    identified a sibling.
-9. **5e commit-message trailer** — `Premise-Verified:` trailer on the
-   committed fact-modifying edit.
-10. **5h parent-truncates-child SoT audit** — after all approved findings
+10. **5e commit-message trailer** — `Premise-Verified:` trailer on the
+    committed fact-modifying edit.
+11. **5h parent-truncates-child SoT audit** — after all approved findings
     are applied, scan the parent doc for inline transcriptions of sibling
     SoT enumerations and emit synthesized findings for any truncation
     detected. Synthesized findings re-enter 5g and 5i as their own
     approval batch before their edits are applied.
+12. **[round boundary] 5j round-continuation gate** — when at least one
+    edit was applied this round and the round is interactive, ask via
+    `AskUserQuestion` whether to run another Codex round. On `continue`,
+    re-enter **Step 4** for round N+1; otherwise proceed to Step 6.
+    Re-entry skips Steps 1–3 and item 3 (5d-i) above.
 
 #### 5a. Classify each finding
 
@@ -341,23 +365,82 @@ global `~/.claude/CLAUDE.md` "External-Surface Write Requires Falsification".
 #### 5c. Flip detection — halt A→B→A oscillation
 
 Maintain a per-session ledger across all rounds in the same session.
-The ledger has **five record shapes** — `applied`/`rejected` (flip
+The ledger has **nine record shapes** — `applied`/`rejected` (flip
 detection input), `sibling-applied` (Step 5d cross-check),
 `rounds_per_region` (Step 5f diminishing-returns), `deferred` (Step 5i
-follow-up issue) — all must be tracked because a finding rejected in
-round N can re-appear in round N+M and would otherwise look novel:
+follow-up issue), `sibling-id` (Step 5d-i answer, reused across rounds),
+`review-path` (Step 4a reviewer selection, reused across rounds),
+`round-started` (one per round, unconditional), `round-continued`
+(Step 5j gate decision) — all must be tracked because a finding rejected
+in round N can re-appear in round N+M and would otherwise look novel:
 
 ```
+round-started:    target={worktree-path}#{branch} | round={N}
 applied:          {file}:{line-or-region} | round={N} | {value-before} → {value-after}
 rejected:         {file}:{line-or-region} | round={N} | {value-before} → {value-after} | reason: {falsifying evidence}
 sibling-applied:  {sibling-repo}#{PR-or-branch} | round={N} | finding={brief-label} | result={same defect | different | does not apply}
 rounds_per_region: {file}:{region} | round={N} | cumulative={C}
 deferred:         {file}:{line-or-region} | round={N} | finding={brief-label} | issue={URL or "pending"}
+sibling-id:       target={worktree-path}#{branch} | round={N} | sibling={ref[,ref…] | none}
+review-path:      target={worktree-path}#{branch} | round={N} | path={codex-companion | code-reviewer | manual}
+round-continued:  target={worktree-path}#{branch} | from={N} | applied={C} | decision={continue | stop | other} | to={N+1 | —}
 ```
+
+`target=` is `{worktree-path}#{branch}` — both fields confirmed in Step 3,
+because neither identifies the PR on its own: one worktree can be switched
+between branches, and one branch can be checked out at a different path in
+a later session. `target=` is what keeps the per-invocation answers
+(`sibling-id:`, `review-path:`) from leaking: the ledger is
+per-**session**, and the Invocation Model above has one session run N
+sequential invocations for N PRs, so "the session's first round" is not
+the same thing as "this PR's first round". A row is reusable only when
+both fields of its `target=` equal the current invocation's; otherwise ask
+again.
+
+`sibling-id:` is written once per **invocation target** by 5d-i —
+**including when the answer is "no sibling"** (`sibling=none`), because a
+missing row is what would otherwise force 5d-i to re-ask on every
+re-entered round. `round-continued:` records one 5j decision; `to=` is
+filled only when `decision=continue` and is `—` otherwise, so a stopped
+round never leaves a round number that was never started. The `→` glyph
+stays reserved for value transitions — round transitions use
+`from=`/`to=`.
+
+**Round number `N`** is derived, not stored separately:
+`N = (the highest round= value in the ledger) + 1`, and `N=1` when the
+ledger holds no `round=` field at all. Read only the dedicated
+`| round={integer} |` field of a **recognized record shape** — never a
+`round=` that happens to occur inside free-form content. Several fields
+are free-form: `rejected:` carries `reason:` text (falsifying evidence, or
+a `user:` sentence), `sibling-applied:` and `deferred:` carry a
+`finding={brief-label}`, and any of them may quote a URL. A `round=999`
+sitting in one of those would otherwise advance the round counter to 1000
+without a round having started. This is monotone by
+construction, so it stays correct where a `round-continued:`-anchored
+formula does not: a `decision=stop` row carries `to=—` and would re-issue
+its own `from=` on the next invocation in the same session, and a round
+that applied nothing writes no `round-continued:` row at all. Round
+numbers are session-wide and never reset per target — they order the flip
+ledger, which is also session-wide.
+
+**Write `round-started:` as the very first ledger action of every round**,
+ahead of the 5f counter update, and unconditionally — before it is known
+whether the round will produce a finding. Every other row is conditional:
+a round where Codex returns nothing and 5h synthesizes nothing writes no
+`rounds_per_region:`, no `applied:`, and no `round-continued:` row, so
+without `round-started:` that round leaves the ledger's highest `round=`
+untouched and the next round is handed the same `N`.
+
+**Cumulative round count `R`** — the number of rounds run against **the
+current target**, which is what a user reading the 5j question needs.
+`R = count of round-started: rows whose target= matches this invocation's`.
+It is not interchangeable with `N`: `N` is session-wide and never resets,
+so on the second PR of a session `N` already counts the first PR's rounds.
 
 Before applying any new edit, scan records whose prefix token is exactly
 **`applied:`** or **`rejected:`** (NOT `sibling-applied:`,
-`rounds_per_region:`, or `deferred:`) in the ledger.
+`rounds_per_region:`, `deferred:`, `sibling-id:`, `review-path:`,
+`round-started:`, or `round-continued:`) in the ledger.
 A flip fires when:
 
 1. **Applied flip** — the new edit would revert a previously-applied
@@ -422,6 +505,22 @@ Additionally, auto-detect sibling signals:
 | `git worktree list` | Two conceptually-paired branches (e.g., same issue prefix, `*-shell` / `*-python`) |
 
 If no sibling is identified (user confirms "No", no auto-detect signal fires), skip 5d entirely.
+
+**Record the answer either way.** Write one `sibling-id:` ledger row per
+**invocation target** — `sibling={ref[,ref…]}` when siblings were
+identified, `sibling=none` when they were not:
+
+```text
+sibling-id: target={worktree-path}#{branch} | round={N} | sibling={ref[,ref…] | none}
+```
+
+The "none" row matters as much as the positive one: a round re-entered by
+5j reads this row instead of re-asking, and a missing row is
+indistinguishable from "never asked". Ask on the first round **of this
+target**; later rounds against the same target reuse the recorded answer.
+A row whose `target=` differs is another PR's answer and must not be
+reused — reusing it would skip 5d-i for the second PR of the session and
+cross-check it against the first PR's sibling.
 
 ##### 5d-ii. Apply falsifiable tests to sibling
 
@@ -622,6 +721,11 @@ Trailer key uses the canonical hyphen-and-capitalized form
 (`Premise-Verified:`) — not free-form text — so trailer-aware tooling
 can pick it up. Structural and stylistic edits do not need this trailer.
 
+A commit that 5j offers to create follows this same rule. Because 5j runs
+after this step, it attaches the trailer itself, one per fact-modifying
+edit in that commit, using the 5b verification output from the same
+round.
+
 #### 5f. Diminishing-returns advisory — rounds-per-region counter
 
 Repeated rounds on the same file region are a signal that the upstream
@@ -668,13 +772,16 @@ have touched `{file}:{region}` in the current session.
 
 ##### Advisory threshold
 
-Read the threshold `N` from the environment at the **start of each round**
-(during the counter-update step above). The read mechanism follows the same
+Read the threshold `threshold` from the environment at the **start of each
+round** (during the counter-update step above). It is deliberately **not**
+called `N`: 5c uses `N` for the session-wide round number, and reusing the
+letter here would let `cumulative = threshold + 1` be misread as
+`cumulative = current round + 1`. The read mechanism follows the same
 convention as other `PRAXIS_*` env vars in this codebase — a Bash
 parameter expansion with a default:
 
 ```bash
-N=${PRAXIS_DIMINISHING_RETURNS_N:-4}
+threshold=${PRAXIS_DIMINISHING_RETURNS_N:-4}
 ```
 
 In Python hook contexts, the equivalent is
@@ -691,8 +798,8 @@ between round 3 and round 4), the new value takes effect from round 4 onward.
 Prior rounds use the value that was in effect at their own round start — there
 is no retroactive adjustment to already-recorded ledger entries.
 
-When `cumulative` reaches `N + 1` (i.e., the session is starting its
-`(N+1)`-th round on the same region), surface the following advisory
+When `cumulative` reaches `threshold + 1` (i.e., the session is starting
+its `(threshold+1)`-th round on the same region), surface the following advisory
 **once per `{file}:{region}` per session** — immediately after emitting
 the `rounds_per_region:` ledger entry, before proceeding to 5a
 classification:
@@ -706,7 +813,8 @@ to re-enumerate cases up-front before continuing.
 The advisory is **informational only** — it does not block, does not
 require user confirmation, and does not prevent edits from being applied.
 Do not re-surface the advisory on subsequent rounds (round `N+2`,
-`N+3`, …) for the same region — emit it exactly once at `cumulative = N+1`.
+`threshold+3`, …) for the same region — emit it exactly once at
+`cumulative = threshold+1`.
 
 ##### Interaction with flip detection (5c)
 
@@ -714,7 +822,7 @@ The rounds-per-region counter increments independently of flip detection.
 A flip halt (5c) does not reset or suppress the counter. If a flip is
 halted mid-round, the `rounds_per_region:` entry for that round is still
 recorded (counter increments) but the advisory suppression rule still
-applies (emit only at `cumulative = N+1`, not again on later rounds).
+applies (emit only at `cumulative = threshold+1`, not again on later rounds).
 
 #### 5h. Parent-truncates-child SoT enumeration audit <!-- [#395] -->
 
@@ -725,9 +833,33 @@ enumeration is a systematic failure mode that round-by-round external review
 catches one missing row at a time. This step collapses that N-round sequence
 into a single pre-merge sweep.
 
-Run this step **once per invocation, after every approved finding has been
+Run this step **once per round, after every approved finding has been
 applied** — findings the user left at `미적용` or `후속이슈` do not hold it
-back — before the reviewer session ends.
+back — before the round ends. ("Round" is the unit defined at the top of
+Step 5: one invocation of Codex review. Since 5j can re-enter Step 4
+inside a single skill invocation, "per invocation" would be ambiguous.)
+
+**Do not re-synthesize a finding the user already declined.** Before
+emitting, scan the ledger for a `rejected:` row on the same
+`{file}:{region}` that carries `reason: user:`, the `[#395]` marker,
+**and the same cited sibling SoT** (`{sibling_file}:{sibling_section}`);
+if one exists, stay silent for that one citation. Without this check a
+declined synthesized finding is re-emitted every round — 5h is a
+stateless sweep, so it cannot remember on its own — and 5c halts the
+round as a re-proposal of a user-declined finding, every round.
+
+The key needs all three parts because each one alone over- or
+under-suppresses:
+
+- `{file}:{region}` alone silences real truncations in that heading for
+  the rest of the session — region labels are coarse (nearest enclosing
+  heading), and one heading routinely cites more than one sibling SoT.
+- adding `[#395]` separates a declined 5h finding from a declined Codex
+  finding, since `rejected:` rows carry no provenance field — but two 5h
+  findings under the same heading still collapse onto one key.
+- adding the sibling SoT identity is what keeps those two apart, so
+  declining the `Test definitions` truncation leaves the `Phase
+  applicability` truncation under the same heading free to re-emit.
 
 ##### Trigger — does the parent doc cite a sibling SoT?
 
@@ -783,6 +915,16 @@ items, OR replace the inline transcription with a reference link to the
 sibling SoT so the parent can never drift again.
 ```
 
+Carry the `[#395]` marker **and the cited sibling SoT** into the ledger.
+When 5i returns `미적용` or `후속이슈` for a synthesized finding, the
+resulting `rejected:` row's `reason:` field starts with `user:` and the
+row includes both — that triple is the key the re-synthesis check above
+reads:
+
+```text
+rejected: {parent_file}:{heading} | round={N} | [#395] SoT truncation vs {sibling_file}:{sibling_section} | reason: user: declined (round N)
+```
+
 The synthesized finding is treated as a **structural** finding (not
 fact-modifying): it describes an omission in documentation, not a runtime
 predicate. Apply Step 5a classification accordingly — it does not require a
@@ -829,7 +971,7 @@ The SoT audit is distinct from the per-finding premise verification in 5b:
 - **5h** is a proactive sweep on the parent document itself, independent of
   whether Codex reported a SoT-related finding. It catches truncations that
   external review has not yet surfaced — the same root cause that would have
-  produced the N+1-th round finding.
+  produced the (threshold+1)-th round finding.
 
 The two steps are complementary: 5b prevents bad fixes; 5h prevents missed
 enumerations from reaching the next reviewer.
@@ -962,6 +1104,183 @@ If the user cancels a batch or gives no answer, stop applying findings for
 the round. Report which findings were already applied, which remain
 undecided, and end the round without further edits.
 
+#### 5j. Round-continuation gate
+
+This sub-step alone governs the round **boundary** rather than the round
+interior, and it is the only one that draws an edge back to Step 4.
+5a–5i each act on one round's findings; 5j decides whether there is
+another round at all.
+
+##### Fire condition
+
+Fire only when **all three** hold:
+
+- **(a)** at least one edit was actually applied this round — `{C} ≥ 1`,
+  counting 5i-approved edits and 5h synthesized-finding edits together;
+- **(b)** those edits are inside the next round's review target — the
+  check is membership of the **actual** next-round diff, not of the scope
+  name, and it is asked of whichever reviewer the `review-path:` row names,
+  not of codex-companion unconditionally;
+- **(c)** the interactivity check (execution-order item 0) is re-run for
+  **this** round and passes.
+
+Measured against `codex@openai-codex 1.0.6` (`scripts/lib/git.mjs`):
+`resolveReviewTarget` supports three scopes (`:141`) and returns
+`explicit: true` for `--base <ref>`, `--scope working-tree`, and
+`--scope branch` (`:143-160`); under `--scope auto` it picks
+`working-tree` whenever the tree is dirty and `branch` otherwise
+(`:176-190`). `working-tree` mode collects only `git diff --cached` and
+`git diff` (`:309-323`) — both relative to HEAD — while `branch` mode
+collects the base comparison. Re-measure if the plugin version changes.
+
+Each mode therefore **excludes** the other's edits, which is what
+condition (b) has to check:
+
+| Next round resolves to | Carries | Missed if… |
+| ------------------------ | --------- | ------------ |
+| `working-tree` | staged + unstaged + untracked | 5e committed this round's edits |
+| `branch` | commits against the base | this round's edits are still uncommitted |
+
+`--scope auto` does **not** make this self-correcting. `isDirty` is true
+when *any* path is dirty (`getWorkingTreeState`, `:122-131`), so a round
+that commits its edits while an unrelated file stays dirty still resolves
+to `working-tree` — and the commit is outside it. The scope name alone
+never settles condition (b).
+
+So, before firing: determine what the next round would resolve to under
+the same arguments, and confirm every edit applied this round appears in
+that diff. If any is missing, do not fire on a warning — take one of two
+paths and say which in the question body:
+
+- **make the target match** — commit the edits (branch-bound target) or
+  leave them uncommitted (working-tree-bound target); or
+- **switch the scope** for the re-entered round, naming the flag added.
+
+If neither is possible, skip the gate and proceed to Step 6 rather than
+re-entering a round that would review a diff missing this round's work —
+that round reads as convergence while having verified nothing.
+
+**The `code-reviewer` fallback path.** The table above describes
+codex-companion, which is what `review-path: … | path=codex-companion`
+names. When the row names `code-reviewer` instead, condition (b) asks the
+same question of *that* reviewer's next-round target: the Step 4a fallback
+is invoked with cwd set to the selected worktree and reviews what it is
+handed, so establish what it would be handed and confirm every applied
+edit is in it. If that cannot be established for the reviewer in use, **do
+not fire** — conditions (a) and (c) are unaffected, but (b) is unmet, and
+an unmet (b) is a skip, not a warning. `path=manual` never reaches 5j:
+Step 4a's `Manual` branch exits before Step 5.
+
+When the branch-scope path leads 5j to offer a commit and the commit
+contains fact-modifying edits, 5j attaches the `Premise-Verified:` trailer
+itself — one per such edit, quoting the 5b output from this round. 5e
+defines the trailer's scope and format; it simply runs earlier in the
+order (item 10), so it cannot cover a commit created here.
+
+##### Decision table
+
+`{C}` below is the round's **total** applied count — Codex findings plus
+any 5h synthesized finding the user approved. Codex returning 0 findings
+is therefore not its own row: 5h runs every round (see 5h → *once per
+round*) and can produce an edit on a round Codex left empty.
+
+| Round state | Gate fires? | Next |
+| ------------- | ------------- | ------ |
+| `{C}` = 0 for the whole round (no Codex finding applied, no 5h finding applied) | No | Step 6 |
+| 5i batch cancelled, `{C}` = 0 | No | Step 6 |
+| 5i batch cancelled, `{C}` ≥ 1 | **Yes** — question carries the undecided count | per answer |
+| Non-interactive run (`claude -p`, background worker) | No | Step 6 |
+| An applied edit is outside the next round's diff and neither realignment path is available | No | Step 6 |
+| `{C}` ≥ 1, every applied edit confirmed in the next round's diff, interactive | **Yes** | per answer |
+
+A cancelled 5i batch is not a vote against another round — *Cancellation*
+above ends the round while keeping the edits already applied, so the
+edits are real and the question is still live.
+
+##### The question
+
+```text
+AskUserQuestion: "라운드 {N} 완료 — 이번 라운드 {C}건 적용, 누적 {R}라운드{,
+수확 체감 region: {regions}}{, 미결정 {K}건}. Codex 리뷰를 한 번 더
+실행할까요?"
+
+  option 1  "추가 라운드 실행"
+            → Step 4 재진입, 같은 worktree/PR, 라운드 N+1
+  option 2  "현재 라운드로 충분 — Step 6 으로 진행"
+            → broker reaper 후 마무리
+```
+
+`{N}` is the session-wide round number defined in 5c; `{R}` is the
+per-target cumulative count defined alongside it (`count of
+round-started: rows matching this target`). They differ from the second
+PR of a session onward, and `{R}` is the one the question shows — a user
+deciding whether *this* PR has had enough review is not helped by a count
+that includes the previous PR's rounds. `{C}` is the applied count from
+the decision table; `{K}` is the undecided count a cancelled 5i batch
+left behind; `{regions}` lists the regions 5f flagged this round, and the
+whole clause is omitted when it flagged none.
+
+`{regions}` lists every region whose `rounds_per_region:` cumulative count
+exceeds the 5f threshold, **recomputed every round**. 5f's own advisory
+fires once per region and then goes quiet (`cumulative = threshold+1` only), so
+the gate — not 5f — is what keeps the diminishing-returns signal in front
+of the user as rounds accumulate. This is also why the question grows
+more informative rather than less: without it, round 5's question would
+carry exactly as much as round 2's.
+
+Neither option label may contain a bare end-token followed by a heading
+separator (`종료 —`, `여기까지`, `그만:`, `마무리 -`) — the
+`block-ask-end-option` hook cannot see which skill is running and reads
+that shape as a session-end option, blocking the call. Keep labels
+phrased as the action taken ("Step 6 으로 진행"). The same restraint
+applies to the question body.
+
+The runtime appends its own `Other` slot. Route a free-text answer that
+clearly maps to one of the two options accordingly; if it is ambiguous,
+re-ask the same question rather than guessing (same as 5i). Record
+`decision=other` when the answer resolves to neither.
+
+##### Re-entry
+
+1. Return to **Step 4**; skip Steps 1–3 — the review target is already
+   fixed.
+2. **Normalize** the original `{{ARGUMENTS}}` before reuse — strip
+   `--background` (a re-backgrounded round breaks the gate's synchronous
+   loop) **and** any existing `--scope` / `--base <ref>`. Then append at
+   most **one** target-selecting flag, the one condition (b) settled
+   above. Stripping first is what keeps the two rules from colliding:
+   without it, "switch the scope for the re-entered round" stacks a second
+   `--scope` on top of the caller's, and which one wins is the CLI's
+   business, not this skill's. After appending, re-run the condition (b)
+   membership check against the arguments actually being passed.
+3. Re-run Step 4's PR-state check every time — the PR can be merged or
+   closed between rounds.
+4. Reuse the `sibling-id:` and `review-path:` rows whose `target=` matches
+   this invocation's target; do not re-ask either.
+5. If the recorded fallback was the `code-reviewer` path, the 5g critic
+   template must be prepended again on every round — that requirement
+   does not carry across rounds by itself.
+
+Record the decision:
+
+```text
+round-continued: target={worktree-path}#{branch} | from={N} | applied={C} | decision={continue | stop | other} | to={N+1 | —}
+```
+
+##### No round cap
+
+Three paths end the loop: the user chooses to proceed to Step 6, a round
+applies zero edits, or the run is non-interactive so the gate never
+fires. There is no
+maximum round count and no new environment variable. What makes an
+unbounded loop safe is that **every** iteration passes through an
+explicit user decision — not 5f's advisory, which is non-blocking,
+per-region, and emitted exactly once.
+
+A 5c flip halt is **not** a fourth termination path: once the user
+resolves the flip, the surviving side re-enters 5i and can be applied.
+An unresolved flip converges on the zero-edits path instead.
+
 ### Step 6: Reap leaked codex brokers (phase end)
 
 The openai-codex plugin starts a per-session app-server broker that is
@@ -1015,7 +1334,7 @@ keeps the count below the compressor threshold.
 | Premise check (Step 5b) disproves a finding | Skip the edit; reply to Codex with the falsifying evidence |
 | Flip detected (Step 5c) | Halt; surface both rounds to the user; do not apply either side without explicit direction |
 | Sibling identified but branch/repo not accessible locally | Skip 5d for that sibling; record `sibling-applied: ... \| result=inaccessible` in ledger; warn user to check out the branch |
-| Sibling auto-detected but user confirms "not a port" | Skip 5d entirely; no ledger entry needed |
+| Sibling auto-detected but user confirms "not a port" | Skip 5d entirely; still write `sibling-id: … \| sibling=none` so a 5j re-entry does not re-ask |
 | `PRAXIS_DIMINISHING_RETURNS_N` is set but not a positive integer | Use default (4); do not error |
 | Region label cannot be determined (binary file, empty file) | Use the file path alone as the region label |
 | Critic negative claim emitted without `Probe:` citation (5g) | Halt the finding; prompt the critic to re-run with probe citation before surfacing |
@@ -1024,6 +1343,9 @@ keeps the count below the compressor threshold.
 | Approval gate (5i) — round produced zero applicable findings | Skip 5i; state "no findings to approve" in one line |
 | Approval gate (5i) — user declines the follow-up issue approach review | Keep the `deferred:` rows with `issue=pending`; create nothing |
 | Approval gate (5i) — non-interactive run (`claude -p`, background) where `AskUserQuestion` cannot reach a user | Apply nothing; record every finding that survived 5b/5c as `deferred:` (evidence-rejected and flip-halted findings stay out, same as the interactive path) and report the full list for a later interactive round |
+| Round-continuation gate (5j) — user cancels, or `AskUserQuestion` returns no answer (it blocks, so this means cancellation or a tool error) | Do not re-enter; proceed to Step 6. Record `decision=stop` |
+| Round-continuation gate (5j) — next round resolves to `branch` and the applied edits are uncommitted | Offer to commit them; if declined, skip the gate and proceed to Step 6 — a base-pinned review of round N+1 would not see the edits |
+| Round-continuation gate (5j) — next round resolves to `working-tree` and 5e already committed this round's edits | Do not offer a commit. Either re-enter with `--base <ref>` so the commit is in the target, or skip the gate — never fire while telling the user the edits are invisible to round N+1 |
 | SoT audit (5h) — sibling document not locatable | Emit unresolved advisory; do not block review completion |
 | SoT audit (5h) — parent citation site ambiguous (multiple tables at same heading) | Use all tables at the heading as candidate SoT sources; report each comparison separately |
 | Reaper (Step 6) — running broker has no readable `broker.log` | Idle is indeterminate → broker is KEPT (logged as `SKIP ... no logFile`); never reaped on a guess |
@@ -1055,7 +1377,7 @@ user selects: 1
 [Step 5 — Round 1 — counter update (5f, first action)]:
   ledger: rounds_per_region: query.sql:filter_clause | round=1 | cumulative=1
   ledger: rounds_per_region: cli.sh:parse_prompt      | round=1 | cumulative=1
-  (cumulative ≤ N=4 → no advisory emitted yet)
+  (cumulative ≤ threshold=4 → no advisory emitted yet)
 
 [Step 5 — Round 1 — sibling check (5d-i)]: AskUserQuestion fired:
   User: "이 PR은 praxis#199 (shell 버전)의 Python port입니다."
@@ -1111,6 +1433,21 @@ user selects: 1
 [Step 5e — commit, after 5d completes]
   Commit F3 with trailer:  Premise-Verified: gh search issues --help (excerpt)
 
+[Step 5j — round-continuation gate] fire condition check:
+  (a) applied this round = 1 (F3)                          → pass
+  (b) scope=auto, worktree clean after commit → next round resolves to branch
+      diff; F3's edit confirmed present in it                 → pass
+  (c) interactivity check re-run for this round             → pass
+  AskUserQuestion:
+    "라운드 1 완료 — 이번 라운드 1건 적용, 누적 1라운드. Codex 리뷰를
+     한 번 더 실행할까요?"
+    옵션: 추가 라운드 실행 / 현재 라운드로 충분 — Step 6 으로 진행
+  User: 추가 라운드 실행
+  → ledger: round-continued: target=/Users/dev/project-wt/my-repo-feature-1#issue-1-feature | from=1 | applied=1 | decision=continue | to=2
+  → re-enter Step 4 (Steps 1–3 skipped, 5d-i and 4a not re-asked — the sibling-id:
+    and review-path: rows for this target exist, --background dropped if it was
+    present, PR-state re-checked)
+
 [Step 5 — Round 2] Codex now re-suggests changing WHERE col_a = 1 → col_b = 1
   Scan ledger: rejected entry on query.sql:L42 with same A → B transition exists
   → flip fires (re-proposal of rejected); halt and surface to user
@@ -1118,13 +1455,31 @@ user selects: 1
 [Step 5 — Round 2 alt] Codex now suggests "--state open" → "--state all"
   Scan ledger: applied entry on cli.sh:L10 reverses → flip fires (applied flip); halt
 
+[Step 5j — Round 2, gate skipped] the flip halted before any edit landed:
+  (a) applied this round = 0                                → fail
+  → gate does not fire; no round-continued: row is written; proceed to Step 6.
+  (Had the user resolved the flip and applied the surviving side, (a) would
+   pass and the gate would fire — a flip halt is not a termination path.)
+
+[Step 5j — alternative branch, NOT a continuation of the block above]
+  The block above ended at Step 6, so no round 3 follows it. This branch shows
+  what a round 3 would look like on the other path: the user resolves the round-2
+  flip, applies the surviving side ({C} = 1), the gate fires, the answer is
+  추가 라운드 실행, and Step 4 is re-entered.
+
+  [Round 3, gate skipped] Codex returned 0 findings
+    5h still ran this round and synthesized nothing either → {C} = 0 → gate does
+    not fire → Step 6. (Had 5h synthesized a truncation and the user approved it,
+    {C} would be 1 and the gate would fire — "Codex 0 findings" alone is not a
+    skip condition.)
+
 [Step 5f — Diminishing-returns example] PRAXIS_DIMINISHING_RETURNS_N=4 (default)
   Rounds 1–4: counter increments silently
     ledger: rounds_per_region: cli.sh:parse_prompt | round=1 | cumulative=1
     ledger: rounds_per_region: cli.sh:parse_prompt | round=2 | cumulative=2
     ledger: rounds_per_region: cli.sh:parse_prompt | round=3 | cumulative=3
     ledger: rounds_per_region: cli.sh:parse_prompt | round=4 | cumulative=4
-  Round 5 (cumulative = N+1 = 5): advisory emitted once, then 5a continues normally
+  Round 5 (cumulative = threshold+1 = 5): advisory emitted once, then 5a continues normally
     ledger: rounds_per_region: cli.sh:parse_prompt | round=5 | cumulative=5
     Advisory: this is round 5 on cli.sh:parse_prompt. Findings to date suggest
     the underlying surface enumeration may be incomplete. Consider pausing
@@ -1201,6 +1556,11 @@ user selects: 1
 - Step 5i requires an interactive session — `AskUserQuestion` has no reachable user under `claude -p` or a background worker, so those runs apply nothing and defer every finding
 - Step 5i costs one `AskUserQuestion` round-trip per 4 findings; a round with many stylistic findings trades throughput for control, by design
 - Step 5i decisions live in the same per-session ledger as 5c — a finding declined in one session is not remembered in the next
+- Step 5j imposes no maximum round count. Three paths end the loop: the user chooses Step 6, a round applies zero edits (`{C}` = 0, counting 5h synthesized edits — Codex returning zero findings is not on its own one of them), or the run is non-interactive. A 5c flip halt is not one of them — a resolved flip can still be applied; an unresolved one converges on the zero-edits path
+- Step 5j never fires in a non-interactive run, but not by a rule of its own: `claude -p` and background workers apply nothing (5i), so the round reaches the gate with zero applied edits and fails the fire condition. Fire condition (c) re-runs the interactivity check anyway, so the guard does not depend on 5i keeping that behaviour
+- Step 5j extends the review phase for as long as the loop runs, and Step 6 reaps brokers only at phase end — so each round's broker stays resident until the loop finishes. A long loop holds more brokers than a single-round invocation
+- The ledger lives in session working memory, so the longer a 5j loop runs the more rounds compete for that context. Flip detection degrades *within* a session as round count grows — the existing cross-session caveat does not cover this
+- Step 5j's fire condition (b) rests on `resolveReviewTarget` and `collectReviewContext` as measured against `codex@openai-codex 1.0.6`; a change to how either picks or assembles a scope would need re-measuring. What (b) requires is membership of the applied edits in the next round's actual diff — the scope name is not a proxy for it, since `--scope auto` resolves to `working-tree` whenever *any* path is dirty and a commit made this round then falls outside the target
 - Step 6 reaper is macOS-only (launchd reparenting + `/var/folders` sessionDirs); it is a no-op on other platforms
 - Step 6 idle detection uses `broker.log` mtime as an activity proxy — a broker mid-operation that stays silent longer than `--max-age` could be misjudged idle and reaped; the cost is a benign respawn on the next codex call, never a correctness break
 - Step 6 phase-end reaping keeps the broker count below the compressor threshold but does not reclaim every running orphan; the session-independent launchd job (`LAUNCHD.md`) is what reaps orphans whose owning session is already gone
