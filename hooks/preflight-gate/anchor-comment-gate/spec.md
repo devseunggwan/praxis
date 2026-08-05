@@ -1,0 +1,191 @@
+# Anchor Verification Comment Gate
+
+Supported hosts: all
+
+`hooks/preflight-gate/anchor-comment-gate/impl.py` runs on two events. On
+**PreToolUse(Bash)** it blocks a PR verification **anchor** comment whose
+structure is incomplete, deciding that from the command's own body text and
+nothing else. On **PostToolUse(Bash)** it reads the comment that was actually
+published, through the API, and checks its structure again plus the things only
+the real target can answer: SHA freshness and diff coverage.
+
+### Why this exists
+
+The anchor is one comment per PR holding that PR's whole verification, edited
+in place by comment id. Its rules lived only in prose. In the session that
+wrote them, the author shipped two self-contradictions into the rule text
+itself — an update command that would silently rewrite the wrong comment, and
+a result enum with no cell for a check that could not run. An external reviewer
+caught both, after the fact. The failure mode is not ignorance of the rule; it
+is the rule not being retrieved at the moment of posting.
+
+### Why two events
+
+The first design did all of it in PreToolUse: decode the `gh` command, find the
+body, resolve the target PR, decide. Six rounds of adversarial review found
+twenty-five distinct ways that reading fails — an attached shorthand value
+(`-Fanchor.md`), a quoted multi-line body the tokenizer shreds, a leading `cd`,
+a `GH_REPO=` env prefix, gh's own `{owner}`/`{repo}` placeholders, `--hostname`
+before the subcommand, `--input payload.json`. Every finding was real and none
+of them was the last one: statically deciding what a shell command will do is
+not a bounded problem, and each round's fix widened the parser rather than
+closing it.
+
+The split follows what each event can actually know.
+
+| | PreToolUse | PostToolUse |
+| --- | --- | --- |
+| Input | the command string | the comment URL the command printed |
+| Decides | structure, `--edit-last` | structure, SHA freshness, coverage |
+| Network | none | `gh api` + `gh pr view` |
+| On violation | blocks (exit 2) | stderr; exit 2 only under strict |
+| Can be fooled by shell syntax | yes — it warns instead | no |
+
+PostToolUse needs no parsing at all: `gh pr comment` prints the new comment's
+URL and `gh api` returns a JSON body containing it, and that URL names host,
+owner, repo, PR and comment id outright. Whatever the command looked like, the
+published comment is the oracle.
+
+The cost is worth stating plainly: PostToolUse cannot prevent the post. A
+malformed anchor caught there is already visible, and the remedy is "fix it
+now" rather than "you may not" — the anchor is editable, so the exposure is
+seconds. A stale SHA, though, was published. PreToolUse blocking the structure
+case is what keeps that window small, and it is the case that can be decided
+without knowing the target at all.
+
+### PreToolUse — structure only
+
+| Post form | Recognized |
+| --- | --- |
+| `gh pr comment <pr> --body-file anchor.md` | yes |
+| `gh pr comment <pr> --body '### 검증 …'` | yes |
+| `gh api --method PATCH /repos/{o}/{r}/issues/comments/{id} -F body=@anchor.md` | yes |
+| body from stdin (`-F body=@-`) or `--input payload.json` | no — warns, PostToolUse decides |
+
+**Anchor shape decides scope.** Only a body whose first non-empty line starts
+with `### 검증` is an anchor. The one-line update notice that accompanies every
+anchor edit posts through the same `gh pr comment`; blocking it would break the
+procedure this gate exists to protect. Every other comment passes untouched.
+
+Every segment of a compound command is checked, not just the first: two anchor
+posts joined by `&&` would otherwise let the second through on the strength of
+the first being well-formed.
+
+**Two tokenizations, because neither alone sees every post.** `safe_tokenize`
+splits on newlines — correct for Bash, where a newline separates commands, but
+it shreds a *quoted* multi-line body: an inline `--body '### 검증 …'` spanning
+lines loses its `gh pr comment` segment entirely. `shlex.split` keeps quoted
+newlines but glues shell operators to adjacent words, so it cannot replace the
+primary. Both run when the command contains a newline, de-duplicated by body.
+
+**Attached shorthand values** (`-banchor`, `-Fanchor.md`) are split before
+parsing — pflag accepts them, and matching only the bare token would let the
+anchor through unexamined. **Global flags before the subcommand** are consumed
+with their arguments, so `gh --hostname ghe.example api …` resolves to `api`
+rather than to the hostname value. A `~/anchor.md` body-file is expanded and
+relative paths resolve against the segment's own working directory (the
+payload's `cwd`, updated by a plain leading `cd`); subshell and `pushd` scoping
+are *not* modelled — a half-right emulation would be worse than the stated
+limit, and PostToolUse covers what it misses.
+
+Nothing here reaches the network. No repo, no host, no PR number is resolved:
+the checks are exactly those decidable from the body, which is why widening the
+parser is no longer the answer to a miss.
+
+**Structure — five required fields**
+
+| Field | Detected by |
+| --- | --- |
+| SHA+rev heading | `### 검증 — \`<sha>\` (rev N)` **on the first non-empty line** |
+| claim table | at least one `\| <n> \|` row |
+| 미검증 toggle | a `<details>` whose `<summary>` contains `미검증` |
+| per-row evidence toggle | a `<details>` whose `<summary>` starts `<n>.`, for every table row `n` |
+| 갱신 이력 toggle | a `<details>` whose `<summary>` contains `갱신 이력` |
+
+A toggle must be a real `<details>…</details>`: a bare `<summary>` renders as
+plain text, and one quoted inside a code fence is an example — neither is
+something a reviewer can open, so neither satisfies a required field. Row
+numbers are read only from the region before the first toggle, fences stripped:
+a `| 200 | response | ok |` line pasted as evidence would otherwise register as
+claim row 200 and demand a toggle that should not exist.
+
+**`--edit-last` on an anchor body** — `gh pr comment --edit-last` edits *the
+last comment of the current user*, not a named one. Since every anchor edit is
+paired with a one-line notice, from revision 2 the last comment is the notice:
+`--edit-last` rewrites the notice and leaves the anchor stale. That is the
+defect this hook was built for, so the flag is rejected on an anchor body and
+the block names the comment-id `PATCH` form instead.
+
+**Undecodable post → warn, never silent.** A body read from stdin, sent via
+`--input`, or living in a file the same command rewrites before posting, cannot
+be known beforehand. It is not blocked — the hook cannot tell an anchor from an
+ordinary comment there, so blocking would fire on every comment built that way.
+It is not silent either: stderr says the pre-check was skipped, because silence
+reads as "checked and clean", which is the one thing it is not.
+
+### PostToolUse — the published comment
+
+Triggered only when the tool output contains `#issuecomment-`. The URL is
+parsed for host, owner, repo, PR and comment id; `gh api …/issues/comments/{id}
+--jq .body` fetches the body; if it is not an anchor the hook stops.
+
+- **Structure** — the same five fields, re-checked against what was actually
+  published. This is the authoritative pass: it sees the body after every
+  shell expansion, heredoc and file write.
+- **Freshness** — the heading's SHA must prefix-match the PR's current
+  `headRefOid`. An anchor pinned to a commit that is no longer HEAD asserts
+  evidence for code that is not there, which the rule set calls worse than no
+  anchor at all.
+- **Coverage (advisory)** — files in the branch diff that no table row mentions
+  are printed. File-to-claim is not 1:1 (one row can cover several files; a
+  rename touches two paths under one claim), so this never escalates. The
+  comparison point is the PR's own `baseRefName`, which arrives on the same
+  `gh pr view` as the head SHA — a PR targeting `dev` measured against `main`
+  would report base-only files as uncovered. No base, or any git failure,
+  yields no advisory rather than a false one.
+
+Findings print to stderr and the hook exits 0, so the session continues and the
+anchor gets corrected in place. `PRAXIS_ANCHOR_GATE_STRICT=1` makes it exit 2
+instead, for sessions that want the correction to interrupt.
+
+An anchor that turns out to be an ordinary issue comment is simply not an
+anchor by the `### 검증` test, and a lookup failure prints why rather than
+inventing a verdict — after the fact, there is nothing to protect by failing
+closed, and a wrong advisory is worse than a missing one.
+
+### Budget
+
+The dispatcher runs all members of one `(event, matcher)` group **sequentially
+in one process** on a single budget equal to the *max* member timeout
+(`scripts/build-plugin-manifests.py:_dispatcher_node`). That is why the network
+work sits on the PostToolUse side: the PreToolUse group is the hot path on
+every Bash call and this hook now spends no I/O there at all. The PostToolUse
+lookups share a hard 15s deadline, re-measured before every subprocess (8s cap
+per `gh` call, 3s per `git` call, each clamped to what is left).
+
+### Bypass
+
+Two forms, both requiring an explicit act, and both honoured on either event:
+
+- `PRAXIS_HOOK_BYPASS_ANCHOR_GATE=1` in the environment
+- `# anchor-gate: <reason>` as a **trailing shell comment** on the command's
+  last line, outside quotes — an anchor whose evidence block quotes this
+  marker (a test transcript, this spec) must not waive the gate on itself
+
+The reason is the point. An offline or otherwise unverifiable post becomes a
+recorded decision instead of an accident — so a bare `# anchor-gate:` with no
+text after it is **not** a bypass. Waiving the gate without stating why waives
+the audit trail the waiver exists to leave.
+
+### Coupled constant
+
+`### 검증` is both the anchor's heading and the prefix the id-recovery lookup
+matches on:
+
+```bash
+gh api /repos/{owner}/{repo}/issues/<pr>/comments \
+  --jq '[.[]|select(.body|startswith("### 검증"))][0].id'
+```
+
+Changing one without the other leaves the anchor unfindable after its id is
+lost. `_ANCHOR_PREFIX` in `impl.py` and that jq are the two sites.
