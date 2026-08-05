@@ -14,6 +14,7 @@ consuming hook, since that is what distinguishes them.
 """
 from __future__ import annotations
 
+import os
 import re
 
 from _hook_utils import strip_prefix  # type: ignore[import-not-found]
@@ -55,7 +56,10 @@ def resolve_body(flag: str, value: str) -> str:
     """
     if flag in {"-F", "--body-file"}:
         try:
-            with open(value, encoding="utf-8") as fh:
+            # The shell expands `~` before gh ever sees the path, but a hook
+            # reads the command string *before* the shell runs — so a literal
+            # `~/anchor.md` opens nothing and the body silently reads empty.
+            with open(os.path.expanduser(value), encoding="utf-8") as fh:
                 return fh.read()
         except (OSError, UnicodeDecodeError):
             return ""  # treat unreadable file as empty body — advisory-only hooks
