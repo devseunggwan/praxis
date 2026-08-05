@@ -1,0 +1,826 @@
+#!/usr/bin/env python3
+"""Two-phase guard for the PR verification anchor comment.
+
+Issue #947. The anchor is the single place a PR's verification lives: one
+comment per PR, edited in place by comment id, whose table a reviewer reads
+with nothing expanded. Its rules (five required fields, SHA pinned to the
+pushed HEAD) existed only as prose, and in the very session that authored them
+the author violated them twice — a self-defeating update command, and a result
+enum with no cell for a check that could not run. Both were caught by an
+external reviewer, after the text was already written.
+
+## Why two phases
+
+The first design did everything in PreToolUse: decode the `gh` command, find
+the body, look the PR up, decide. Six rounds of adversarial review found
+twenty-five distinct ways that reading fails — an attached shorthand value
+(`-Fanchor.md`), a quoted multi-line body the tokenizer shreds, `cd` in an
+earlier segment, `GH_REPO=` in front of the command, gh's own `{owner}/{repo}`
+placeholders, `--hostname` before the subcommand, `--input payload.json`. The
+findings were all real and none of them were the last one, because statically
+deciding what a shell command will do is not a bounded problem.
+
+So the phases split along what each one can actually know:
+
+- **PreToolUse — structure only, no network.** Decidable from the body text
+  alone. Blocks a malformed anchor *before* it is published, which is the
+  point of a gate. When the command cannot be decoded, it says so on stderr
+  instead of passing silently — an undecodable post is unchecked, and silence
+  reads as clean.
+- **PostToolUse — the published comment is the oracle.** `gh` prints the
+  comment URL (or a JSON response carrying it), so the check reads what was
+  *actually posted* through the API. No shell parsing, no cwd, no host
+  guessing, no placeholder expansion: the URL names the comment. This is where
+  SHA freshness and diff coverage live, because both need the real target.
+
+The cost is honest and worth stating: PostToolUse cannot prevent the post. A
+malformed anchor caught there is already visible, and the correction is "fix
+it now" rather than "you may not". The anchor is editable, so the exposure is
+seconds — except a stale SHA, which was published. PreToolUse blocking the
+structure case is what keeps that window small.
+
+## What blocks (PreToolUse)
+
+All five fields, else block:
+  - `### 검증 — \\`<sha>\\` (rev N)` heading, on the first non-empty line
+  - a claim table with at least one numbered row
+  - a 미검증 toggle
+  - one evidence toggle per numbered table row
+  - a 갱신 이력 toggle
+
+Plus `--edit-last` on an anchor body: that flag edits *the last comment of the
+current user*, which the paired update notice displaces, so from rev 2 it
+rewrites the notice and leaves the anchor stale.
+
+## What warns (both phases)
+
+An undecodable comment post, an unreadable body file, a stale SHA found after
+the fact, and changed files no table row mentions. `PRAXIS_ANCHOR_GATE_STRICT=1`
+turns the PostToolUse advisory into a non-zero exit.
+
+## Bypass
+
+`PRAXIS_HOOK_BYPASS_ANCHOR_GATE=1`, or `# anchor-gate: <reason>` as a trailing
+shell comment. The reason is the point: it turns an unverifiable post into a
+recorded decision rather than an accident.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import time
+from pathlib import Path as _Path
+
+sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    _is_gh_binary,
+    compound_cascade_hint,
+    iter_command_starts,
+    safe_tokenize,
+    strip_prefix,
+)
+from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E402
+    GH_BODY_FLAGS_WITH_ARG,
+    GH_GLOBAL_FLAGS_WITH_ARG,
+)
+from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
+
+_GH_TIMEOUT_SEC = 8
+_GIT_TIMEOUT_SEC = 3
+_LOOKUP_BUDGET_SEC = 15.0
+_BYPASS_ENV = "PRAXIS_HOOK_BYPASS_ANCHOR_GATE"
+_BYPASS_TOKEN = "# anchor-gate:"
+_STRICT_ENV = "PRAXIS_ANCHOR_GATE_STRICT"
+# The skeleton itself lives in the operator's own workflow doc, which is not
+# part of this repo — so the reference names the file a praxis user can
+# actually open, and that spec points onward.
+_REFERENCE = "hooks/preflight-gate/anchor-comment-gate/spec.md"
+
+# The anchor's first line. Also the prefix the id-recovery jq matches on, so
+# the two must move together — see spec.md.
+_ANCHOR_PREFIX = "### 검증"
+
+_SHORT_FLAGS_WITH_ARG = frozenset({"-b", "-F", "-R", "-f", "-X", "-q", "-H", "-t", "-p"})
+_API_FLAGS_WITH_ARG = frozenset({
+    "-X", "--method", "-f", "--raw-field", "-F", "--field", "-H", "--header",
+    "-q", "--jq", "-t", "--template", "--input", "--hostname", "-p",
+    "--preview", "--cache",
+})
+
+_HEADING_RE = re.compile(r"^###\s+검증\s*[—-]\s*`([0-9a-fA-F]{6,40})`\s*\(rev\s*(\d+)\)")
+_TABLE_ROW_RE = re.compile(r"^\|\s*(\d+)\s*\|", re.MULTILINE)
+_DETAILS_RE = re.compile(r"<details\b[^>]*>(.*?)</details>", re.DOTALL)
+_SUMMARY_RE = re.compile(r"<summary\b[^>]*>(.*?)</summary>", re.DOTALL)
+_EVIDENCE_SUMMARY_RE = re.compile(r"^\s*(?:<b>)?\s*(\d+)\s*\.")
+_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+# gh accepts the endpoint with or without a leading slash, and with or without
+# the api.github.com host — anchor both forms or the slashless one slips past.
+_COMMENTS_PATH_RE = re.compile(r"(?:^|/)repos/([^/]+)/([^/]+)/issues/comments/(\d+)")
+# Same path, but anchored enough to recover host/owner/repo/id from a raw
+# command when the command printed nothing to follow.
+_PATCH_ENDPOINT_RE = re.compile(
+    r"(?:https?://([^/\s\"']+)/(?:api/v3/)?)?repos/([^/\s\"']+)/([^/\s\"']+)"
+    r"/issues/comments/(\d+)"
+)
+# A shell redirect or `tee` target: the file the command writes before posting.
+_REDIRECT_TARGET_RE = re.compile(
+    r"""(?:>>?|\btee\b(?:\s+-\w+)*)\s*(?P<q>['"]?)(?P<path>[^\s'"|;&<>]+)(?P=q)"""
+)
+# Both `gh pr comment` (bare URL) and `gh api` (JSON response) put this in stdout.
+_COMMENT_URL_RE = re.compile(
+    r"https?://([^/\s\"]+)/([^/\s\"]+)/([^/\s\"]+)/(?:pull|issues)/(\d+)#issuecomment-(\d+)"
+)
+
+
+# ---------------------------------------------------------------------------
+# Command decoding (PreToolUse)
+# ---------------------------------------------------------------------------
+
+def _split_flag(tok: str) -> tuple[str, str | None]:
+    """Split `--flag=value` into (`--flag`, `value`); else (tok, None)."""
+    if tok.startswith("-") and "=" in tok:
+        name, _, value = tok.partition("=")
+        return name, value
+    return tok, None
+
+
+def _split_short_flags(argv: list[str]) -> list[str]:
+    """Split gh's attached shorthand values (`-banchor`, `-Fanchor.md`) apart.
+
+    pflag accepts `-bVALUE` as well as `-b VALUE`, and a scan that only matches
+    the bare token misses the attached form entirely.
+    """
+    out: list[str] = []
+    for tok in argv:
+        if len(tok) > 2 and tok[0] == "-" and tok[1] != "-" and f"-{tok[1]}" in _SHORT_FLAGS_WITH_ARG:
+            out += [tok[:2], tok[2:]]
+        else:
+            out.append(tok)
+    return out
+
+
+def _subcommand(argv: list[str]) -> str | None:
+    """First real subcommand, skipping global flags and the args they consume.
+
+    `gh --hostname ghe.example api …` is a valid GHES form whose first
+    non-option token is the hostname *value*, not the subcommand.
+    """
+    i = 1
+    while i < len(argv):
+        tok, inline = _split_flag(argv[i])
+        if not tok.startswith("-"):
+            return tok
+        if inline is None and (tok in GH_GLOBAL_FLAGS_WITH_ARG or tok in _SHORT_FLAGS_WITH_ARG):
+            i += 1
+        i += 1
+    return None
+
+
+def _read_file(path: str, cwd: str) -> str:
+    """Read a body file, resolving `~` and relative paths against `cwd`.
+
+    The shell expands `~` and applies the working directory before gh runs, but
+    a PreToolUse hook sees the command string beforehand — so both have to be
+    applied here or the body reads back empty.
+    """
+    try:
+        return _resolve_path(path, cwd).read_text(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        return ""
+
+
+def _resolve_path(path: str, cwd: str) -> _Path:
+    """`path` as gh would see it: `~` expanded, relative resolved against cwd."""
+    candidate = _Path(path).expanduser()
+    return candidate if candidate.is_absolute() else _Path(cwd) / candidate
+
+
+def _canonical(path: str, cwd: str) -> str | None:
+    """A comparable form of `path`, or None if it cannot be resolved."""
+    try:
+        return os.path.normpath(str(_resolve_path(path, cwd)))
+    except (OSError, ValueError):
+        return None
+
+
+def _rewritten_in_command(path: str, command: str, cwd: str) -> bool:
+    """True iff `command` redirects or tees into `path` before posting it.
+
+    Comparison is on resolved paths, not on the text: `printf … > ./anchor.md
+    && gh pr comment -F anchor.md` names the same file twice and a literal
+    match sees two different strings — so the hook would validate the file as
+    it was *before* the rewrite and certify a body gh never posts.
+    """
+    target = _canonical(path, cwd)
+    if target is None:
+        return True  # unresolvable target — treat the body as unknowable
+    return any(
+        _canonical(m.group("path"), cwd) == target
+        for m in _REDIRECT_TARGET_RE.finditer(command)
+    )
+
+
+def _parse_pr_comment(argv: list[str], cwd: str, command: str) -> dict | None:
+    """Parse `gh pr comment <pr> ... --body/--body-file`, else None.
+
+    The body reader is local rather than `_lib`'s `extract_gh_body`: that
+    helper opens the path with no notion of a working directory, and this gate
+    resolves a relative `--body-file` against the segment's own cwd. The flag
+    set itself still comes from `_lib`, so there is one definition of what a
+    body flag is.
+    """
+    argv = _split_short_flags(argv)
+    words: list[str] = []
+    body: str | None = None
+    body_is_file = False
+    edit_last = False
+    i = 1
+    while i < len(argv):
+        tok, inline = _split_flag(argv[i])
+        if not tok.startswith("-"):
+            words.append(tok)
+            i += 1
+            continue
+        value = inline
+        if value is None and tok in (GH_GLOBAL_FLAGS_WITH_ARG | GH_BODY_FLAGS_WITH_ARG):
+            i += 1
+            value = argv[i] if i < len(argv) else None
+        if tok == "--edit-last":
+            edit_last = True
+        elif tok in GH_BODY_FLAGS_WITH_ARG and value is not None:
+            body_is_file = tok in ("-F", "--body-file")
+            if not body_is_file:
+                body = value
+            elif _rewritten_in_command(value, command, cwd):
+                # The file is rewritten earlier in this same command, so what
+                # is on disk now is the PREVIOUS body — validating it would
+                # certify content gh will never post.
+                body = ""
+            else:
+                body = _read_file(value, cwd)
+        i += 1
+
+    if words[:2] != ["pr", "comment"]:
+        return None
+    if body is None:
+        return {"undecodable": "본문 플래그를 찾지 못함"}
+    return {
+        "body": body,
+        "edit_last": edit_last,
+        "undecodable": "본문 파일을 읽지 못함" if body == "" and body_is_file else None,
+    }
+
+
+def _parse_api_patch(argv: list[str], cwd: str, command: str) -> dict | None:
+    """Parse `gh api --method PATCH .../issues/comments/<id> ... body=`."""
+    argv = _split_short_flags(argv)
+    method: str | None = None
+    words: list[str] = []
+    body: str | None = None
+    undecodable: str | None = None
+    i = 1
+    while i < len(argv):
+        tok, inline = _split_flag(argv[i])
+        if not tok.startswith("-"):
+            words.append(tok)
+            i += 1
+            continue
+        value = inline
+        if value is None and tok in _API_FLAGS_WITH_ARG:
+            i += 1
+            value = argv[i] if i < len(argv) else None
+        if tok in ("-X", "--method"):
+            method = (value or "").upper()
+        elif tok == "--input":
+            # The whole request body comes from a JSON file (or stdin). Reading
+            # it would mean re-implementing gh's request assembly; the posted
+            # comment is checked in PostToolUse instead.
+            undecodable = "--input 으로 전달된 JSON 본문"
+        elif tok in ("-f", "--raw-field", "-F", "--field") and value:
+            key, _, raw = value.partition("=")
+            if key == "body":
+                expand = tok in ("-F", "--field")
+                if expand and raw.startswith("@") and _rewritten_in_command(raw[1:], command, cwd):
+                    body = ""
+                    undecodable = "본문 파일이 같은 명령에서 재작성됨"
+                else:
+                    body = _read_body_value(raw, expand, cwd)
+        i += 1
+
+    path = words[1] if len(words) > 1 else None
+    if method != "PATCH" or not path or not _COMMENTS_PATH_RE.search(path):
+        return None
+    if body is None:
+        return {"undecodable": undecodable or "본문 필드를 찾지 못함"}
+    return {"body": body, "edit_last": False, "undecodable": undecodable}
+
+
+def _read_body_value(raw: str, expand_at: bool, cwd: str) -> str | None:
+    """Resolve a `gh api` field value to its text.
+
+    `expand_at` mirrors gh's own split: `-F/--field` expands a leading `@` to
+    the file's contents, `-f/--raw-field` never does. `@-` is stdin, which the
+    hook cannot see, so it resolves to None (unknown body → undecodable).
+    """
+    if not expand_at or not raw.startswith("@"):
+        return raw
+    if raw == "@-":
+        return None
+    return _read_file(raw[1:], cwd) or None
+
+
+def _tokenizations(command: str) -> list[list[str]]:
+    """Both tokenizations of `command`, because neither alone sees every post.
+
+    `safe_tokenize` splits on newlines — correct for Bash, where a newline
+    separates commands, but it shreds a *quoted* multi-line body: an inline
+    `--body '### 검증 …<newline>| 1 | … |'` loses the `gh pr comment` segment
+    entirely. `shlex.split` keeps quoted newlines intact but glues shell
+    operators to adjacent words, which is why it cannot replace the primary.
+    """
+    out = [safe_tokenize(command)]
+    if "\n" in command:
+        try:
+            out.append(_split_glued_operators(shlex.split(command)))
+        except ValueError:  # unbalanced quotes — the primary pass stands alone
+            pass
+    return out
+
+
+def _split_glued_operators(tokens: list[str]) -> list[str]:
+    """Break `ok&&gh` apart, which `shlex.split` leaves glued.
+
+    Only newline-free tokens are split. A quoted multi-line body is precisely
+    what this tokenization exists to preserve, and it is also the one token
+    that could plausibly contain a literal `&&`.
+    """
+    out: list[str] = []
+    for tok in tokens:
+        if "\n" in tok:
+            out.append(tok)
+            continue
+        out += [p for p in re.split(r"(&&|\|\||;|\|)", tok) if p]
+    return out
+
+
+def _comment_posts(command: str, base_cwd: str) -> tuple[list[dict], list[str]]:
+    """Return (anchor posts, undecodable-post reasons) found in `command`."""
+    anchors: list[dict] = []
+    undecodable: list[str] = []
+    seen: set[tuple] = set()
+    for tokens in _tokenizations(command):
+        cwd = base_cwd
+        for argv in iter_command_starts(tokens):
+            argv = strip_prefix(argv)
+            if not argv:
+                continue
+            # `cd X && gh pr comment -F anchor.md` reads the file relative to X.
+            # Only the plain sequential form is tracked — subshell and pushd
+            # scoping belong to the advisory hooks that already model them.
+            if argv[0] == "cd" and len(argv) > 1 and not argv[1].startswith("-"):
+                target = _Path(argv[1]).expanduser()
+                cwd = str(target if target.is_absolute() else _Path(cwd) / target)
+                continue
+            if not _is_gh_binary(argv[0]):
+                continue
+            sub = _subcommand(argv)
+            parsed = (
+                _parse_api_patch(argv, cwd, command) if sub == "api"
+                else _parse_pr_comment(argv, cwd, command)
+            )
+            if not parsed:
+                continue
+            key = (cwd, parsed.get("edit_last"), parsed.get("body"), parsed.get("undecodable"))
+            if key in seen:
+                continue
+            seen.add(key)
+            if parsed.get("undecodable"):
+                undecodable.append(parsed["undecodable"])
+            elif _is_anchor(parsed["body"]):
+                anchors.append(parsed)
+    return anchors, undecodable
+
+
+def _bypassed_with_reason(command: str) -> bool:
+    """True iff the command ends with the bypass marker AND a stated reason.
+
+    Two things have to hold, and both are load-bearing:
+
+    - The marker is a *trailing shell comment*, not any occurrence of the
+      string. A raw substring search means an anchor whose evidence block
+      quotes this very marker — a test transcript, this spec — waives the gate
+      on the post that contains it.
+    - A reason follows it. That is what turns an unverifiable post into a
+      recorded decision.
+    """
+    line = command.rsplit("\n", 1)[-1]
+    idx = line.rfind(_BYPASS_TOKEN)
+    if idx == -1 or not line[idx + len(_BYPASS_TOKEN):].strip():
+        return False
+    try:  # unbalanced prefix ⇒ the marker sits inside a quoted string
+        shlex.split(line[:idx])
+    except ValueError:
+        return False
+    return True
+
+
+def _is_anchor(body: str) -> bool:
+    for line in body.splitlines():
+        if line.strip():
+            return line.strip().startswith(_ANCHOR_PREFIX)
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Structure — decidable from the body alone, so both phases share it
+# ---------------------------------------------------------------------------
+
+def _heading_match(body: str) -> re.Match | None:
+    """Match the SHA+rev heading on the body's FIRST non-empty line, or None.
+
+    Searching the whole body would accept a bare `### 검증` opener with a real
+    heading buried further down: the reader sees a heading with no SHA, while
+    freshness is checked against a SHA they never see.
+    """
+    for line in body.splitlines():
+        if line.strip():
+            return _HEADING_RE.match(line.strip())
+    return None
+
+
+def _claim_table_region(body: str) -> str:
+    """The part of the body that can hold claim rows: before the first toggle.
+
+    Row numbers drive the per-row evidence requirement, so a `| 200 | ok |`
+    line pasted into an evidence block would otherwise read as claim row 200
+    and demand a `<summary>200. …` that should not exist.
+    """
+    head = re.split(r"<details\b", body, maxsplit=1)[0]
+    return _FENCE_RE.sub("", head)
+
+
+def _toggle_summaries(body: str) -> list[str]:
+    """Summaries of real `<details>…</details>` toggles, fenced blocks removed.
+
+    A bare `<summary>` outside any `<details>` renders as plain text, and one
+    quoted inside a code fence is an example — neither is a toggle a reader can
+    open, so neither may satisfy a required field.
+    """
+    stripped = _FENCE_RE.sub("", body)
+    return [
+        s.strip()
+        for block in _DETAILS_RE.findall(stripped)
+        for s in _SUMMARY_RE.findall(block)
+    ]
+
+
+def _structure_findings(body: str) -> list[str]:
+    """Return the names of the required fields that are missing or mismatched."""
+    missing: list[str] = []
+
+    if not _heading_match(body):
+        missing.append("SHA+rev 헤딩 (`### 검증 — `<sha>` (rev N)`) — 첫 줄이어야 함")
+
+    rows = [int(n) for n in _TABLE_ROW_RE.findall(_claim_table_region(body))]
+    if not rows:
+        missing.append("검증 항목 표 (번호 행이 없음)")
+
+    summaries = _toggle_summaries(body)
+    if not any("미검증" in s for s in summaries):
+        missing.append("미검증 토글")
+    if not any("갱신 이력" in s for s in summaries):
+        missing.append("갱신 이력 토글")
+
+    evidence = {
+        int(m.group(1))
+        for s in summaries
+        if (m := _EVIDENCE_SUMMARY_RE.match(s))
+    }
+    uncovered = sorted(set(rows) - evidence)
+    if uncovered:
+        missing.append(
+            "행별 근거 토글 — 표 행 "
+            + ", ".join(str(n) for n in uncovered)
+            + " 에 대응하는 `<details><summary>N. …` 이 없음"
+        )
+    return missing
+
+
+# ---------------------------------------------------------------------------
+# Published-comment verification (PostToolUse)
+# ---------------------------------------------------------------------------
+
+def _gh(args: list[str], deadline: float) -> tuple[str | None, str | None]:
+    """Run gh within the remaining budget; return (stdout, error). Never raises."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return None, "조회 예산 초과"
+    try:
+        proc = subprocess.run(
+            ["gh", *args], capture_output=True, text=True,
+            timeout=min(_GH_TIMEOUT_SEC, remaining),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"gh 실행 실패: {exc}"
+    if proc.returncode != 0:
+        return None, (proc.stderr or "").strip() or f"gh exit {proc.returncode}"
+    return proc.stdout.strip(), None
+
+
+def _comment_refs(output: str) -> list[tuple[str, str, str, str, str]]:
+    """Every distinct comment the output names, as (host, owner, repo, pr, id).
+
+    Every one, not the first: a compound command can post two anchors, and the
+    PreToolUse side already checks each segment — verifying only the first
+    published one would leave the second unexamined on exactly the surface
+    that decides.
+    """
+    seen: set[str] = set()
+    refs: list[tuple[str, str, str, str, str]] = []
+    for m in _COMMENT_URL_RE.finditer(output):
+        if m.group(5) in seen:
+            continue
+        seen.add(m.group(5))
+        refs.append(m.groups())  # type: ignore[arg-type]
+    return refs
+
+
+def _fetch_anchor(
+    ref: tuple[str, str, str, str, str], deadline: float
+) -> tuple[dict | None, str | None]:
+    """Read one published comment back; return it only if it is an anchor."""
+    host, owner, repo, pr, comment_id = ref
+    is_dotcom = host in ("github.com", "www.github.com", "api.github.com")
+    api_host = [] if is_dotcom else ["--hostname", host]
+    body, err = _gh(
+        ["api", *api_host, f"/repos/{owner}/{repo}/issues/comments/{comment_id}",
+         "--jq", ".body"],
+        deadline,
+    )
+    if err:
+        return None, f"게시된 코멘트 {comment_id} 조회 실패 — {err}"
+    if not body or not _is_anchor(body):
+        return None, None
+    return {
+        "body": body,
+        "repo": f"{owner}/{repo}" if is_dotcom else f"{host}/{owner}/{repo}",
+        "pr": pr,
+        "url": f"https://{host}/{owner}/{repo}/pull/{pr}#issuecomment-{comment_id}",
+    }, None
+
+
+def _head_and_base(post: dict, deadline: float) -> tuple[str | None, str | None, str | None]:
+    """The PR's current head SHA and base branch, from one `gh pr view`."""
+    out, err = _gh(
+        ["pr", "view", post["pr"], "--repo", post["repo"],
+         "--json", "headRefOid,baseRefName",
+         "--jq", '.headRefOid + " " + .baseRefName'],
+        deadline,
+    )
+    if err:
+        return None, None, f"PR HEAD 조회 실패 — {err}"
+    sha, _, base = (out or "").partition(" ")
+    if not sha:
+        return None, None, "PR HEAD 가 비어 있음"
+    return sha, (base.strip() or None), None
+
+
+def _uncovered_files(
+    body: str, base: str | None, head: str | None, deadline: float, cwd: str
+) -> list[str]:
+    """Changed files no table row mentions. Best effort; [] on any failure.
+
+    Both endpoints come from the PR itself — its own `baseRefName` and its own
+    `headRefOid` — never from local checkout state. The anchor is routinely
+    posted from somewhere other than the PR branch (the base worktree after a
+    context switch, a second worktree, a fork clone), and a local `HEAD` there
+    describes a different diff entirely: files the PR never touched get
+    reported as uncovered, while the ones it did touch go unmentioned. A wrong
+    advisory is worse than none, so an unresolvable endpoint yields nothing.
+    """
+    if not base or not head:
+        return []
+
+    def _git(args: list[str]) -> subprocess.CompletedProcess | None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        try:
+            return subprocess.run(
+                ["git", *args], capture_output=True, text=True, cwd=cwd,
+                timeout=min(_GIT_TIMEOUT_SEC, remaining),
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    # The PR's head commit has to exist locally for any of this to mean
+    # anything — after a fresh push it does, and when it does not (fork, stale
+    # clone) there is no diff to take.
+    present = _git(["cat-file", "-e", f"{head}^{{commit}}"])
+    if present is None or present.returncode != 0:
+        return []
+    mb = _git(["merge-base", f"origin/{base}", head])
+    merge_base = (mb.stdout.strip() if mb else "")
+    if not merge_base:
+        return []
+    out = _git(["diff", "--name-only", merge_base, head])
+    if out is None or out.returncode != 0:
+        return []
+
+    table = "\n".join(
+        line for line in body.splitlines() if line.lstrip().startswith("|")
+    )
+    return [
+        path
+        for path in (p for p in out.stdout.splitlines() if p.strip())
+        if path not in table and _Path(path).name not in table
+    ]
+
+
+def _tool_output(tool_response: object) -> str:
+    if not isinstance(tool_response, dict):
+        return str(tool_response or "")
+    return "\n".join(
+        str(tool_response.get(key) or "") for key in ("output", "stdout", "stderr")
+    )
+
+
+def _refs_from_command(command: str) -> list[tuple[str, str, str, str, str]]:
+    """Comment refs recoverable from the command when the output names none.
+
+    `gh api --silent`, a `--jq` that projects the URL away, and `> /dev/null`
+    all publish an anchor while printing nothing this hook can follow — and
+    the freshness check is the *only* place a stale SHA is caught, so a silent
+    post must not be a silent pass. A comment-id `PATCH` carries its target in
+    the endpoint literal, which is enough to fetch it; the PR number is not
+    there, so it is resolved from the comment's `issue_url` at fetch time.
+    """
+    return [
+        (m.group(1) or "github.com", m.group(2), m.group(3), "", m.group(4))
+        for m in _PATCH_ENDPOINT_RE.finditer(command)
+    ]
+
+
+def _resolve_pr(ref: tuple[str, str, str, str, str], deadline: float) -> str | None:
+    """The PR number a comment belongs to, when only its id is known."""
+    host, owner, repo, _, comment_id = ref
+    is_dotcom = host in ("github.com", "www.github.com", "api.github.com")
+    out, _ = _gh(
+        ["api", *([] if is_dotcom else ["--hostname", host]),
+         f"/repos/{owner}/{repo}/issues/comments/{comment_id}", "--jq", ".issue_url"],
+        deadline,
+    )
+    m = re.search(r"/issues/(\d+)\s*$", out or "")
+    return m.group(1) if m else None
+
+
+def _post_tool_use(payload: dict) -> int:
+    """Verify the anchors that were actually published. Advisory unless strict."""
+    command = (payload.get("tool_input") or {}).get("command") or ""
+    if not command or os.environ.get(_BYPASS_ENV, "").strip() or _bypassed_with_reason(command):
+        return 0
+
+    deadline = time.monotonic() + _LOOKUP_BUDGET_SEC
+    refs = _comment_refs(_tool_output(payload.get("tool_response")))
+    if not refs:
+        refs = [
+            (host, owner, repo, _resolve_pr((host, owner, repo, "", cid), deadline) or "", cid)
+            for host, owner, repo, _, cid in _refs_from_command(command)
+        ]
+    if not refs:
+        # A `gh pr comment` whose URL was redirected away leaves no id
+        # anywhere — the anchor is unverified, and saying so is the only
+        # honest outcome.
+        posts, _ = _comment_posts(command, payload.get("cwd") or os.getcwd())
+        if posts:
+            print(
+                "[anchor-gate] 앵커를 게시했지만 출력에 코멘트 URL 이 없어 "
+                "SHA 신선도를 확인하지 못했습니다 — 출력을 버리지 말거나 "
+                "comment id 로 PATCH 하세요.",
+                file=sys.stderr,
+            )
+        return 0
+
+    problems: list[str] = []
+    urls: list[str] = []
+    for ref in refs:
+        post, err = _fetch_anchor(ref, deadline)
+        if err:
+            print(f"[anchor-gate] {err} — 게시된 앵커를 검증하지 못했습니다.", file=sys.stderr)
+            continue
+        if post is None:
+            continue
+        urls.append(post["url"])
+        tag = f"[{post['url']}] " if len(refs) > 1 else ""
+        problems += [tag + p for p in _structure_findings(post["body"])]
+
+        heading = _heading_match(post["body"])
+        if not heading:
+            continue
+        if not post["pr"]:
+            problems.append(tag + "SHA 신선도 확인 불가 (코멘트의 PR 번호를 찾지 못함)")
+            continue
+        head, base, lookup_err = _head_and_base(post, deadline)
+        if lookup_err:
+            problems.append(tag + f"SHA 신선도 확인 불가 ({lookup_err})")
+        elif head and not (head.startswith(heading.group(1)) or heading.group(1).startswith(head)):
+            problems.append(
+                tag + f"앵커 SHA `{heading.group(1)}` 가 현재 HEAD `{head[:7]}` 와 다름 — "
+                "stale 앵커는 없는 코드에 대한 증거를 주장한다"
+            )
+        cwd = payload.get("cwd") or os.getcwd()
+        for path in _uncovered_files(post["body"], base, head, deadline, cwd):
+            print(f"[anchor-gate] 미커버 파일 (차단 아님): {path}", file=sys.stderr)
+
+    if not problems:
+        return 0
+    post = {"url": ", ".join(urls) or "(URL 미상)"}
+    print(
+        "[anchor-gate] 게시된 앵커에 문제가 있습니다 — "
+        f"{post['url']}\n  - " + "\n  - ".join(problems)
+        + "\n  코멘트를 지금 수정하세요 (`gh api --method PATCH "
+          ".../issues/comments/<id> -F body=@<file>`). "
+          f"규약: {_REFERENCE}",
+        file=sys.stderr,
+    )
+    return 2 if os.environ.get(_STRICT_ENV, "").strip() == "1" else 0
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def _pre_tool_use(payload: dict) -> int:
+    command = (payload.get("tool_input") or {}).get("command") or ""
+    if not command:
+        return 0
+    if os.environ.get(_BYPASS_ENV, "").strip() or _bypassed_with_reason(command):
+        return 0
+
+    posts, undecodable = _comment_posts(command, payload.get("cwd") or os.getcwd())
+
+    # A post the hook could not decode is not a known-bad anchor, so it is not
+    # blocked — the body may not even be an anchor. It is not silent either:
+    # silence reads as "checked and clean", which is the one thing it is not.
+    # PostToolUse re-checks it against what was actually published.
+    for reason in undecodable:
+        print(
+            f"[anchor-gate] 코멘트 본문을 해독하지 못해 사전 검사를 건너뜀 ({reason}). "
+            "앵커였다면 게시 후 검사로 넘어갑니다.",
+            file=sys.stderr,
+        )
+
+    reasons: list[str] = []
+    for idx, post in enumerate(posts):
+        tag = f"[{idx + 1}/{len(posts)}] " if len(posts) > 1 else ""
+        reasons += [tag + r for r in _structure_findings(post["body"])]
+        if post.get("edit_last"):
+            reasons.append(
+                tag + "`--edit-last` 로 앵커를 갱신할 수 없음 — 이 플래그는 "
+                "'현재 사용자의 마지막 코멘트'를 고치므로, 갱신 고지가 뒤에 붙는 "
+                "순간부터 고지를 덮어쓰고 앵커는 stale 로 남는다. "
+                "`gh api --method PATCH .../issues/comments/<id>` 로 id 를 지정하세요"
+            )
+
+    if not reasons:
+        return 0
+
+    emit_block(
+        rule_name="ANCHOR VERIFICATION COMMENT",
+        why="; ".join(reasons),
+        correct_path=(
+            "앵커를 규약대로 고친 뒤 다시 게시하세요 — 필수 필드 5종"
+            "(SHA+rev 헤딩 / 항목 표 / 미검증 토글 / 행별 근거 토글 / 갱신 이력). "
+            "SHA 신선도는 게시 후 PostToolUse 검사가 실제 코멘트로 확인합니다"
+        ),
+        bypass_env=_BYPASS_ENV,
+        reference=_REFERENCE,
+        bypass_reason_hint=f"또는 명령 끝에 `{_BYPASS_TOKEN} <사유>` 를 붙이세요",
+    )
+    hint = compound_cascade_hint(command)
+    if hint:
+        print(hint, file=sys.stderr)
+    return 2
+
+
+@fail_open
+def main() -> int:
+    try:
+        payload = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError):
+        return 0
+    if payload.get("tool_name") != "Bash":
+        return 0
+    event = payload.get("hookEventName") or payload.get("hook_event_name")
+    if event == "PostToolUse":
+        return _post_tool_use(payload)
+    return _pre_tool_use(payload)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

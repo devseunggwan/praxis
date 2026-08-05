@@ -251,6 +251,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/anchor-comment-gate.sh",
+            "timeout": 25
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/push-remote-ref-verify.sh",
             "timeout": 15
           }
