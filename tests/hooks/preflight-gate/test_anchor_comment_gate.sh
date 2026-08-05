@@ -34,6 +34,9 @@ SHA=abc1234def5678
 STALE=0000000aaaa111
 
 FIX=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+# make_fake_gh runs inside a command substitution, so a parent-shell array
+# cannot collect its temp dirs — a file survives the subshell.
+GH_DIRS_FILE=$(mktemp) || { echo "FATAL: mktemp failed" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # Anchor fixtures
@@ -139,6 +142,7 @@ EOF
       ;;
   esac
   chmod +x "$d/gh"
+  echo "$d" >>"$GH_DIRS_FILE"
   echo "$d"
 }
 
@@ -156,7 +160,12 @@ git -C "$REPO" add untouched-by-anchor.md
 git -C "$REPO" -c user.name=test -c user.email=test@example.com \
   commit -q -m "add file no table row mentions"
 
-cleanup() { rm -rf "$REPO" "$FIX"; }
+cleanup() {
+  local d
+  while IFS= read -r d; do [ -n "$d" ] && rm -rf "$d"; done <"$GH_DIRS_FILE"
+  rm -rf "$REPO" "$FIX" "$GH_DIRS_FILE" "${NOT_ANCHOR:-}" \
+    "${ISSUE_URL_GH:-}" "${TWO_GH:-}" "${COVER_GH:-}"
+}
 trap cleanup EXIT
 
 # ---------------------------------------------------------------------------
@@ -182,7 +191,8 @@ print(json.dumps(payload))
 # run_case <name> <expect> <event> <fake-gh-dir> <command> [cwd] [tool] [output]
 #   expect: block  — exit 2 + rendered block message
 #           pass   — exit 0, and (PostToolUse) no finding on stderr
-#           warn:X — exit 0 and stderr contains X
+#           warn:X   — exit 0 and stderr contains X
+#           nowarn:X — exit 0 and stderr does NOT contain X
 run_case() {
   local name="$1" expect="$2" event="$3" gh_dir="$4" command="$5"
   local cwd="${6:-$FIX}" tool="${7:-Bash}" output="${8:-}"
@@ -210,6 +220,9 @@ run_case() {
       ;;
     warn:*)
       [ "$rc" -eq 0 ] && [[ "$out" == *"${expect#warn:}"* ]] || ok=0
+      ;;
+    nowarn:*)
+      [ "$rc" -eq 0 ] && [[ "$out" != *"${expect#nowarn:}"* ]] || ok=0
       ;;
   esac
 
@@ -348,6 +361,13 @@ run_case "19 warn: 같은 명령에서 재작성되는 body 파일은 해독 불
   "printf 'x' > $FIX/ok.md && gh pr comment 42 --body-file $FIX/ok.md"
 write_anchor "$FIX/ok.md" "$SHA"  # restore — the case above truncated it
 
+# Same file, two spellings: a literal text match sees `./ok.md` and `ok.md` as
+# different paths and would validate the pre-rewrite body.
+run_case "19b warn: 리다이렉트 대상과 --body-file 이 표기만 다른 같은 경로" \
+  "warn:해독하지 못해" PreToolUse "" \
+  "printf 'x' > ./ok.md && gh pr comment 42 --body-file ok.md" "$FIX"
+write_anchor "$FIX/ok.md" "$SHA"
+
 # A raw substring search would let an anchor that quotes this marker as
 # evidence waive the gate on itself.
 write_anchor "$FIX/quotes-marker.md" "$SHA" history
@@ -441,10 +461,76 @@ run_case "39 pass: PostToolUse 에서도 바이패스 토큰 유효" \
 
 # The anchor is well-formed and fresh; the repo has a changed file no table row
 # names. Advisory only — the command must still proceed.
-write_anchor "$REPO/anchor.md" "$SHA"
-COVER_GH=$(make_fake_gh ok "$REPO/anchor.md")
+REPO_SHA=$(git -C "$REPO" rev-parse HEAD)
+write_anchor "$REPO/anchor.md" "$REPO_SHA"
+COVER_GH=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+cat >"$COVER_GH/gh" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = "api" ]; then cat "$REPO/anchor.md"; exit 0; fi
+echo "$REPO_SHA main"
+exit 0
+EOF
+chmod +x "$COVER_GH/gh"
 run_case "40 warn: 표가 언급하지 않은 변경 파일 → 경고만, 통과" \
   "warn:untouched-by-anchor.md" PostToolUse "$COVER_GH" \
+  "gh pr comment 42 --body-file anchor.md" "$REPO" Bash "$COMMENT_URL"
+
+# --silent / a URL-stripping --jq / `> /dev/null` publish an anchor while
+# printing nothing to follow. Freshness is checked ONLY here, so a silent post
+# must not be a silent pass — the comment id in the PATCH endpoint is enough.
+ISSUE_URL_GH=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+cat >"$ISSUE_URL_GH/gh" <<EOF
+#!/usr/bin/env bash
+case " \$* " in
+  *" .issue_url "*) echo "https://api.github.com/repos/owner/repo/issues/42"; exit 0 ;;
+  *" .body "*) cat "$FIX/stale.md"; exit 0 ;;
+esac
+echo "$SHA main"
+exit 0
+EOF
+chmod +x "$ISSUE_URL_GH/gh"
+run_case "41 warn: --silent 로 출력이 없어도 엔드포인트의 comment id 로 추적" \
+  "warn:와 다름" PostToolUse "$ISSUE_URL_GH" \
+  "gh api --silent --method PATCH /repos/owner/repo/issues/comments/999 -F body=@anchor.md" \
+  "$FIX" Bash ""
+
+# `gh pr comment > /dev/null` leaves no id anywhere. Nothing can be fetched,
+# so the only honest outcome is saying the anchor went unverified.
+run_case "41b warn: URL 이 사라진 pr comment 게시는 미검증으로 보고" \
+  "warn:확인하지 못했습니다" PostToolUse "$OK_GH" \
+  "gh pr comment 42 --body-file $FIX/ok.md > /dev/null" \
+  "$FIX" Bash ""
+
+# A compound command can publish two anchors; checking only the first leaves
+# the second unexamined on the surface that decides.
+TWO_GH=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+cat >"$TWO_GH/gh" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = "api" ]; then
+  case " \$* " in
+    *"/comments/999 "*) cat "$FIX/ok.md"; exit 0 ;;
+  esac
+  cat "$FIX/no-history.md"; exit 0
+fi
+echo "$SHA main"
+exit 0
+EOF
+chmod +x "$TWO_GH/gh"
+run_case "42 warn: 한 명령이 게시한 두 번째 앵커도 검사" \
+  "warn:갱신 이력 토글" PostToolUse "$TWO_GH" \
+  "gh pr comment 42 --body-file a.md && gh pr comment 43 --body-file b.md" \
+  "$FIX" Bash "$COMMENT_URL
+https://github.com/owner/repo/pull/43#issuecomment-1000"
+
+# The anchor is routinely posted from a worktree that is not the PR branch.
+# Measuring against local HEAD there describes a different diff entirely.
+git -C "$REPO" switch -q -c sidetrack
+echo other >"$REPO/only-on-sidetrack.md"
+git -C "$REPO" add only-on-sidetrack.md
+git -C "$REPO" -c user.name=test -c user.email=test@example.com \
+  commit -q -m "a commit the PR does not contain"
+run_case "43 nowarn: 커버리지는 로컬 HEAD 가 아니라 PR head 에 고정" \
+  "nowarn:only-on-sidetrack.md" PostToolUse "$COVER_GH" \
   "gh pr comment 42 --body-file anchor.md" "$REPO" Bash "$COMMENT_URL"
 
 # Case 9 needs raw malformed stdin, not a JSON-wrapped command string.
@@ -458,7 +544,6 @@ else
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("9 malformed JSON stdin")
 fi
 
-rm -rf "$NOT_ANCHOR"
 
 # --- summary -----------------------------------------------------------------
 echo ""

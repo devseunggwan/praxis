@@ -77,7 +77,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_MERGE_CLAIM_STRICT` | `merge-state-claim-gate` | |
 | `PRAXIS_RUNTIME_CLAIM_STRICT` | `runtime-state-claim-gate` | |
 | `PRAXIS_PUSH_VERIFY_STRICT` | `push-remote-ref-verify` | |
-| `PRAXIS_ANCHOR_GATE_STRICT` | `anchor-comment-gate` | Make a defect found in the *published* anchor exit 2 instead of printing to stderr; the pre-post structure check blocks either way |
+| `PRAXIS_ANCHOR_GATE_STRICT` | `anchor-comment-gate` | Make a defect found in the *published* anchor exit 2 instead of printing to stderr; the pre-post structure check blocks either way. Exact value `1` only — `true` / `yes` stay advisory |
 | `PRAXIS_MOMENTUM_STRICT` | `momentum-rule-retrieval-gate` | |
 | `PRAXIS_MOMENTUM_ACK` | `momentum-rule-retrieval-gate` | Strict-mode unlock token — unblocks one invocation when `PRAXIS_MOMENTUM_STRICT=1`; no effect in advisory mode |
 | `PRAXIS_VERSION_BUMP_STRICT` | `version-bump-evidence-check` | |

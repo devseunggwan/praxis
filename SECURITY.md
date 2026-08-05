@@ -51,13 +51,14 @@ drift.
 
 ### `gh` — GitHub CLI
 
-| Hook                                                       | Command                                                      | Purpose                                                             |
-|------------------------------------------------------------|--------------------------------------------------------------|---------------------------------------------------------------------|
-| `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py` | `gh pr list --repo <r> --state all --search <kw> --json ...` | Search existing PRs before creating a new one                       |
-| `hooks/preflight-gate/pr-state-refetch-gate/impl.py`       | `gh pr view <N> --json state,mergeStateStatus`               | Re-fetch live PR state before a PR-state-contingent AskUserQuestion |
-| `hooks/preflight-gate/gh-merge-worktree-precondition/impl.py` | `gh pr view <identifier> --json headRefName -q .headRefName` | Resolve a PR's live head branch before checking it against `git worktree list` |
-| `hooks/preflight-gate/anchor-comment-gate/impl.py` | `gh api /repos/{owner}/{repo}/issues/comments/{id} --jq .body` | Read back the verification anchor that was just published, from the comment URL the command itself printed |
-| `hooks/preflight-gate/anchor-comment-gate/impl.py` | `gh pr view <number> --repo <r> --json headRefOid,baseRefName --jq ...` | Resolve the PR's live head SHA (stale-anchor check) and its base branch (coverage advisory) in one call |
+| Hook                                                          | Command                                                                 | Purpose                                                                                                    |
+|---------------------------------------------------------------|-------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
+| `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py`    | `gh pr list --repo <r> --state all --search <kw> --json ...`            | Search existing PRs before creating a new one                                                              |
+| `hooks/preflight-gate/pr-state-refetch-gate/impl.py`          | `gh pr view <N> --json state,mergeStateStatus`                          | Re-fetch live PR state before a PR-state-contingent AskUserQuestion                                        |
+| `hooks/preflight-gate/gh-merge-worktree-precondition/impl.py` | `gh pr view <identifier> --json headRefName -q .headRefName`            | Resolve a PR's live head branch before checking it against `git worktree list`                             |
+| `hooks/preflight-gate/anchor-comment-gate/impl.py`            | `gh api /repos/{owner}/{repo}/issues/comments/{id} --jq .body`          | Read back the verification anchor that was just published, from the comment URL the command itself printed |
+| `hooks/preflight-gate/anchor-comment-gate/impl.py`            | `gh api /repos/{owner}/{repo}/issues/comments/{id} --jq .issue_url`     | Resolve which PR a comment belongs to when the post printed no URL to follow                               |
+| `hooks/preflight-gate/anchor-comment-gate/impl.py`            | `gh pr view <number> --repo <r> --json headRefOid,baseRefName --jq ...` | Resolve the PR's live head SHA (stale-anchor check) and its base branch (coverage advisory) in one call    |
 
 ### `zsh` — glob-expansion probes
 

@@ -9,7 +9,7 @@ nothing else. On **PostToolUse(Bash)** it reads the comment that was actually
 published, through the API, and checks its structure again plus the things only
 the real target can answer: SHA freshness and diff coverage.
 
-### Why this exists
+## Why this exists
 
 The anchor is one comment per PR holding that PR's whole verification, edited
 in place by comment id. Its rules lived only in prose. In the session that
@@ -19,7 +19,7 @@ a result enum with no cell for a check that could not run. An external reviewer
 caught both, after the fact. The failure mode is not ignorance of the rule; it
 is the rule not being retrieved at the moment of posting.
 
-### Why two events
+## Why two events
 
 The first design did all of it in PreToolUse: decode the `gh` command, find the
 body, resolve the target PR, decide. Six rounds of adversarial review found
@@ -53,7 +53,7 @@ seconds. A stale SHA, though, was published. PreToolUse blocking the structure
 case is what keeps that window small, and it is the case that can be decided
 without knowing the target at all.
 
-### PreToolUse — structure only
+## PreToolUse — structure only
 
 | Post form | Recognized |
 | --- | --- |
@@ -92,7 +92,7 @@ Nothing here reaches the network. No repo, no host, no PR number is resolved:
 the checks are exactly those decidable from the body, which is why widening the
 parser is no longer the answer to a miss.
 
-**Structure — five required fields**
+### Structure — five required fields
 
 | Field | Detected by |
 | --- | --- |
@@ -123,11 +123,21 @@ ordinary comment there, so blocking would fire on every comment built that way.
 It is not silent either: stderr says the pre-check was skipped, because silence
 reads as "checked and clean", which is the one thing it is not.
 
-### PostToolUse — the published comment
+## PostToolUse — the published comment
 
-Triggered only when the tool output contains `#issuecomment-`. The URL is
-parsed for host, owner, repo, PR and comment id; `gh api …/issues/comments/{id}
---jq .body` fetches the body; if it is not an anchor the hook stops.
+**Every** comment URL in the tool output is followed, not the first: one
+compound command can publish two anchors, and PreToolUse already checks each
+segment. Each URL names host, owner, repo, PR and comment id; `gh api
+…/issues/comments/{id} --jq .body` fetches the body; a body that is not an
+anchor is dropped.
+
+**A post that prints nothing is not a pass.** `gh api --silent`, a `--jq` that
+projects the URL away, and `> /dev/null` all publish while leaving no URL to
+follow — and since freshness is checked *only* here, silence there would mean a
+stale SHA ships unremarked. A comment-id `PATCH` carries its target in the
+endpoint literal, so the id is recovered from the command and the PR number
+from the comment's own `issue_url`. A `gh pr comment` that printed nothing has
+no id anywhere, and is reported as unverified rather than passed.
 
 - **Structure** — the same five fields, re-checked against what was actually
   published. This is the authoritative pass: it sees the body after every
@@ -153,7 +163,7 @@ anchor by the `### 검증` test, and a lookup failure prints why rather than
 inventing a verdict — after the fact, there is nothing to protect by failing
 closed, and a wrong advisory is worse than a missing one.
 
-### Budget
+## Budget
 
 The dispatcher runs all members of one `(event, matcher)` group **sequentially
 in one process** on a single budget equal to the *max* member timeout
@@ -163,7 +173,7 @@ every Bash call and this hook now spends no I/O there at all. The PostToolUse
 lookups share a hard 15s deadline, re-measured before every subprocess (8s cap
 per `gh` call, 3s per `git` call, each clamped to what is left).
 
-### Bypass
+## Bypass
 
 Two forms, both requiring an explicit act, and both honoured on either event:
 
@@ -177,7 +187,7 @@ recorded decision instead of an accident — so a bare `# anchor-gate:` with no
 text after it is **not** a bypass. Waiving the gate without stating why waives
 the audit trail the waiver exists to leave.
 
-### Coupled constant
+## Coupled constant
 
 `### 검증` is both the anchor's heading and the prefix the id-recovery lookup
 matches on:

@@ -244,6 +244,7 @@
         ],
         "external_commands": [
           "gh api /repos/{owner}/{repo}/issues/comments/{id} --jq .body",
+          "gh api /repos/{owner}/{repo}/issues/comments/{id} --jq .issue_url",
           "gh pr view <number> --repo <r> --json headRefOid,baseRefName --jq ...",
           "git merge-base origin/<base> HEAD",
           "git diff --name-only <merge-base> HEAD"

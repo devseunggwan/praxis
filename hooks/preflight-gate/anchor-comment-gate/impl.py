@@ -121,6 +121,16 @@ _FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 # gh accepts the endpoint with or without a leading slash, and with or without
 # the api.github.com host — anchor both forms or the slashless one slips past.
 _COMMENTS_PATH_RE = re.compile(r"(?:^|/)repos/([^/]+)/([^/]+)/issues/comments/(\d+)")
+# Same path, but anchored enough to recover host/owner/repo/id from a raw
+# command when the command printed nothing to follow.
+_PATCH_ENDPOINT_RE = re.compile(
+    r"(?:https?://([^/\s\"']+)/(?:api/v3/)?)?repos/([^/\s\"']+)/([^/\s\"']+)"
+    r"/issues/comments/(\d+)"
+)
+# A shell redirect or `tee` target: the file the command writes before posting.
+_REDIRECT_TARGET_RE = re.compile(
+    r"""(?:>>?|\btee\b(?:\s+-\w+)*)\s*(?P<q>['"]?)(?P<path>[^\s'"|;&<>]+)(?P=q)"""
+)
 # Both `gh pr comment` (bare URL) and `gh api` (JSON response) put this in stdout.
 _COMMENT_URL_RE = re.compile(
     r"https?://([^/\s\"]+)/([^/\s\"]+)/([^/\s\"]+)/(?:pull|issues)/(\d+)#issuecomment-(\d+)"
@@ -178,21 +188,40 @@ def _read_file(path: str, cwd: str) -> str:
     a PreToolUse hook sees the command string beforehand — so both have to be
     applied here or the body reads back empty.
     """
-    candidate = _Path(path).expanduser()
-    if not candidate.is_absolute():
-        candidate = _Path(cwd) / candidate
     try:
-        return candidate.read_text(encoding="utf-8", errors="replace")
+        return _resolve_path(path, cwd).read_text(encoding="utf-8", errors="replace")
     except (OSError, ValueError):
         return ""
 
 
-def _rewritten_in_command(path: str, command: str) -> bool:
-    """True iff `command` redirects or tees into `path` before posting it."""
-    p = re.escape(path)
-    return bool(
-        re.search(rf">>?\s*{p}(\s|$|['\"])", command)
-        or re.search(rf"\btee\b[^|;&\n]*\s{p}(\s|$|['\"])", command)
+def _resolve_path(path: str, cwd: str) -> _Path:
+    """`path` as gh would see it: `~` expanded, relative resolved against cwd."""
+    candidate = _Path(path).expanduser()
+    return candidate if candidate.is_absolute() else _Path(cwd) / candidate
+
+
+def _canonical(path: str, cwd: str) -> str | None:
+    """A comparable form of `path`, or None if it cannot be resolved."""
+    try:
+        return os.path.normpath(str(_resolve_path(path, cwd)))
+    except (OSError, ValueError):
+        return None
+
+
+def _rewritten_in_command(path: str, command: str, cwd: str) -> bool:
+    """True iff `command` redirects or tees into `path` before posting it.
+
+    Comparison is on resolved paths, not on the text: `printf … > ./anchor.md
+    && gh pr comment -F anchor.md` names the same file twice and a literal
+    match sees two different strings — so the hook would validate the file as
+    it was *before* the rewrite and certify a body gh never posts.
+    """
+    target = _canonical(path, cwd)
+    if target is None:
+        return True  # unresolvable target — treat the body as unknowable
+    return any(
+        _canonical(m.group("path"), cwd) == target
+        for m in _REDIRECT_TARGET_RE.finditer(command)
     )
 
 
@@ -227,7 +256,7 @@ def _parse_pr_comment(argv: list[str], cwd: str, command: str) -> dict | None:
             body_is_file = tok in ("-F", "--body-file")
             if not body_is_file:
                 body = value
-            elif _rewritten_in_command(value, command):
+            elif _rewritten_in_command(value, command, cwd):
                 # The file is rewritten earlier in this same command, so what
                 # is on disk now is the PREVIOUS body — validating it would
                 # certify content gh will never post.
@@ -276,7 +305,7 @@ def _parse_api_patch(argv: list[str], cwd: str, command: str) -> dict | None:
             key, _, raw = value.partition("=")
             if key == "body":
                 expand = tok in ("-F", "--field")
-                if expand and raw.startswith("@") and _rewritten_in_command(raw[1:], command):
+                if expand and raw.startswith("@") and _rewritten_in_command(raw[1:], command, cwd):
                     body = ""
                     undecodable = "본문 파일이 같은 명령에서 재작성됨"
                 else:
@@ -503,20 +532,33 @@ def _gh(args: list[str], deadline: float) -> tuple[str | None, str | None]:
     return proc.stdout.strip(), None
 
 
-def _posted_anchor(output: str, deadline: float) -> tuple[dict | None, str | None]:
-    """Fetch the anchor this command actually published, from its own URL.
+def _comment_refs(output: str) -> list[tuple[str, str, str, str, str]]:
+    """Every distinct comment the output names, as (host, owner, repo, pr, id).
 
-    The URL is the whole point of doing this after the fact: it names host,
-    owner, repo, PR and comment id outright, so none of them has to be
-    recovered from the command line.
+    Every one, not the first: a compound command can post two anchors, and the
+    PreToolUse side already checks each segment — verifying only the first
+    published one would leave the second unexamined on exactly the surface
+    that decides.
     """
-    m = _COMMENT_URL_RE.search(output)
-    if not m:
-        return None, None
-    host, owner, repo, pr, comment_id = m.groups()
-    api_host = [] if host in ("github.com", "www.github.com") else ["--hostname", host]
+    seen: set[str] = set()
+    refs: list[tuple[str, str, str, str, str]] = []
+    for m in _COMMENT_URL_RE.finditer(output):
+        if m.group(5) in seen:
+            continue
+        seen.add(m.group(5))
+        refs.append(m.groups())  # type: ignore[arg-type]
+    return refs
+
+
+def _fetch_anchor(
+    ref: tuple[str, str, str, str, str], deadline: float
+) -> tuple[dict | None, str | None]:
+    """Read one published comment back; return it only if it is an anchor."""
+    host, owner, repo, pr, comment_id = ref
+    is_dotcom = host in ("github.com", "www.github.com", "api.github.com")
+    api_host = [] if is_dotcom else ["--hostname", host]
     body, err = _gh(
-        [*["api"], *api_host, f"/repos/{owner}/{repo}/issues/comments/{comment_id}",
+        ["api", *api_host, f"/repos/{owner}/{repo}/issues/comments/{comment_id}",
          "--jq", ".body"],
         deadline,
     )
@@ -526,9 +568,9 @@ def _posted_anchor(output: str, deadline: float) -> tuple[dict | None, str | Non
         return None, None
     return {
         "body": body,
-        "repo": f"{owner}/{repo}" if host in ("github.com", "www.github.com") else f"{host}/{owner}/{repo}",
+        "repo": f"{owner}/{repo}" if is_dotcom else f"{host}/{owner}/{repo}",
         "pr": pr,
-        "url": m.group(0),
+        "url": f"https://{host}/{owner}/{repo}/pull/{pr}#issuecomment-{comment_id}",
     }, None
 
 
@@ -548,14 +590,20 @@ def _head_and_base(post: dict, deadline: float) -> tuple[str | None, str | None,
     return sha, (base.strip() or None), None
 
 
-def _uncovered_files(body: str, base: str | None, deadline: float, cwd: str) -> list[str]:
+def _uncovered_files(
+    body: str, base: str | None, head: str | None, deadline: float, cwd: str
+) -> list[str]:
     """Changed files no table row mentions. Best effort; [] on any failure.
 
-    `base` is the PR's own base branch, so a PR targeting something other than
-    main is not measured against main. Without it there is no trustworthy
-    comparison point, and a wrong advisory is worse than none.
+    Both endpoints come from the PR itself — its own `baseRefName` and its own
+    `headRefOid` — never from local checkout state. The anchor is routinely
+    posted from somewhere other than the PR branch (the base worktree after a
+    context switch, a second worktree, a fork clone), and a local `HEAD` there
+    describes a different diff entirely: files the PR never touched get
+    reported as uncovered, while the ones it did touch go unmentioned. A wrong
+    advisory is worse than none, so an unresolvable endpoint yields nothing.
     """
-    if not base:
+    if not base or not head:
         return []
 
     def _git(args: list[str]) -> subprocess.CompletedProcess | None:
@@ -570,11 +618,17 @@ def _uncovered_files(body: str, base: str | None, deadline: float, cwd: str) -> 
         except (OSError, subprocess.SubprocessError):
             return None
 
-    mb = _git(["merge-base", f"origin/{base}", "HEAD"])
+    # The PR's head commit has to exist locally for any of this to mean
+    # anything — after a fresh push it does, and when it does not (fork, stale
+    # clone) there is no diff to take.
+    present = _git(["cat-file", "-e", f"{head}^{{commit}}"])
+    if present is None or present.returncode != 0:
+        return []
+    mb = _git(["merge-base", f"origin/{base}", head])
     merge_base = (mb.stdout.strip() if mb else "")
     if not merge_base:
         return []
-    out = _git(["diff", "--name-only", merge_base, "HEAD"])
+    out = _git(["diff", "--name-only", merge_base, head])
     if out is None or out.returncode != 0:
         return []
 
@@ -596,40 +650,96 @@ def _tool_output(tool_response: object) -> str:
     )
 
 
+def _refs_from_command(command: str) -> list[tuple[str, str, str, str, str]]:
+    """Comment refs recoverable from the command when the output names none.
+
+    `gh api --silent`, a `--jq` that projects the URL away, and `> /dev/null`
+    all publish an anchor while printing nothing this hook can follow — and
+    the freshness check is the *only* place a stale SHA is caught, so a silent
+    post must not be a silent pass. A comment-id `PATCH` carries its target in
+    the endpoint literal, which is enough to fetch it; the PR number is not
+    there, so it is resolved from the comment's `issue_url` at fetch time.
+    """
+    return [
+        (m.group(1) or "github.com", m.group(2), m.group(3), "", m.group(4))
+        for m in _PATCH_ENDPOINT_RE.finditer(command)
+    ]
+
+
+def _resolve_pr(ref: tuple[str, str, str, str, str], deadline: float) -> str | None:
+    """The PR number a comment belongs to, when only its id is known."""
+    host, owner, repo, _, comment_id = ref
+    is_dotcom = host in ("github.com", "www.github.com", "api.github.com")
+    out, _ = _gh(
+        ["api", *([] if is_dotcom else ["--hostname", host]),
+         f"/repos/{owner}/{repo}/issues/comments/{comment_id}", "--jq", ".issue_url"],
+        deadline,
+    )
+    m = re.search(r"/issues/(\d+)\s*$", out or "")
+    return m.group(1) if m else None
+
+
 def _post_tool_use(payload: dict) -> int:
-    """Verify the anchor that was actually published. Advisory unless strict."""
+    """Verify the anchors that were actually published. Advisory unless strict."""
     command = (payload.get("tool_input") or {}).get("command") or ""
-    if not command or os.environ.get(_BYPASS_ENV) or _bypassed_with_reason(command):
-        return 0
-    output = _tool_output(payload.get("tool_response"))
-    if "#issuecomment-" not in output:
+    if not command or os.environ.get(_BYPASS_ENV, "").strip() or _bypassed_with_reason(command):
         return 0
 
     deadline = time.monotonic() + _LOOKUP_BUDGET_SEC
-    post, err = _posted_anchor(output, deadline)
-    if err:
-        print(f"[anchor-gate] {err} — 게시된 앵커를 검증하지 못했습니다.", file=sys.stderr)
-        return 0
-    if post is None:
+    refs = _comment_refs(_tool_output(payload.get("tool_response")))
+    if not refs:
+        refs = [
+            (host, owner, repo, _resolve_pr((host, owner, repo, "", cid), deadline) or "", cid)
+            for host, owner, repo, _, cid in _refs_from_command(command)
+        ]
+    if not refs:
+        # A `gh pr comment` whose URL was redirected away leaves no id
+        # anywhere — the anchor is unverified, and saying so is the only
+        # honest outcome.
+        posts, _ = _comment_posts(command, payload.get("cwd") or os.getcwd())
+        if posts:
+            print(
+                "[anchor-gate] 앵커를 게시했지만 출력에 코멘트 URL 이 없어 "
+                "SHA 신선도를 확인하지 못했습니다 — 출력을 버리지 말거나 "
+                "comment id 로 PATCH 하세요.",
+                file=sys.stderr,
+            )
         return 0
 
-    problems = _structure_findings(post["body"])
-    heading = _heading_match(post["body"])
-    if heading:
+    problems: list[str] = []
+    urls: list[str] = []
+    for ref in refs:
+        post, err = _fetch_anchor(ref, deadline)
+        if err:
+            print(f"[anchor-gate] {err} — 게시된 앵커를 검증하지 못했습니다.", file=sys.stderr)
+            continue
+        if post is None:
+            continue
+        urls.append(post["url"])
+        tag = f"[{post['url']}] " if len(refs) > 1 else ""
+        problems += [tag + p for p in _structure_findings(post["body"])]
+
+        heading = _heading_match(post["body"])
+        if not heading:
+            continue
+        if not post["pr"]:
+            problems.append(tag + "SHA 신선도 확인 불가 (코멘트의 PR 번호를 찾지 못함)")
+            continue
         head, base, lookup_err = _head_and_base(post, deadline)
         if lookup_err:
-            problems.append(f"SHA 신선도 확인 불가 ({lookup_err})")
+            problems.append(tag + f"SHA 신선도 확인 불가 ({lookup_err})")
         elif head and not (head.startswith(heading.group(1)) or heading.group(1).startswith(head)):
             problems.append(
-                f"앵커 SHA `{heading.group(1)}` 가 현재 HEAD `{head[:7]}` 와 다름 — "
+                tag + f"앵커 SHA `{heading.group(1)}` 가 현재 HEAD `{head[:7]}` 와 다름 — "
                 "stale 앵커는 없는 코드에 대한 증거를 주장한다"
             )
         cwd = payload.get("cwd") or os.getcwd()
-        for path in _uncovered_files(post["body"], base, deadline, cwd):
+        for path in _uncovered_files(post["body"], base, head, deadline, cwd):
             print(f"[anchor-gate] 미커버 파일 (차단 아님): {path}", file=sys.stderr)
 
     if not problems:
         return 0
+    post = {"url": ", ".join(urls) or "(URL 미상)"}
     print(
         "[anchor-gate] 게시된 앵커에 문제가 있습니다 — "
         f"{post['url']}\n  - " + "\n  - ".join(problems)
@@ -649,7 +759,7 @@ def _pre_tool_use(payload: dict) -> int:
     command = (payload.get("tool_input") or {}).get("command") or ""
     if not command:
         return 0
-    if os.environ.get(_BYPASS_ENV) or _bypassed_with_reason(command):
+    if os.environ.get(_BYPASS_ENV, "").strip() or _bypassed_with_reason(command):
         return 0
 
     posts, undecodable = _comment_posts(command, payload.get("cwd") or os.getcwd())
