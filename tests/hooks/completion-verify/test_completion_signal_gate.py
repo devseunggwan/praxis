@@ -335,6 +335,67 @@ def test_event1_exact_quote(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Rule 1b — GO verdict + unresolved-gap co-occurence
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "phrase,gap",
+    [
+        ("보내도 됩니다", "미해소"),
+        ("문제 없음", "검증 증거 부재"),
+        ("ready to merge", "not verified"),
+    ],
+)
+def test_rule1b_triggers_on_go_verdict_and_gap(
+    phrase: str, gap: str, tmp_path: Path
+) -> None:
+    """Rule 1b should fire when GO phrase and gap marker coexist in one turn."""
+    events = [
+        mk_user("PR 상태를 판단해 주세요"),
+        mk_assistant(f"최종 판단: {phrase}. 현재는 {gap}가 남았습니다."),
+    ]
+    tp = write_jsonl(events, tmp_path)
+    stdout, stderr, rc = run_hook(tp)
+    assert rc == 0
+    assert stderr == "", f"advisory hook must keep stderr empty; got {stderr!r}"
+    msg = _msg(stdout)
+    assert "go-verdict phrase detected together with unresolved-gap marker" in msg, (
+        f"Rule 1b did not fire for {phrase!r}/{gap!r}; stdout={stdout!r}"
+    )
+
+
+def test_rule1_suppressed_when_evidence_present_despite_go_verdict(tmp_path: Path) -> None:
+    """Rule 1 should be suppressed by cited evidence even with a GO phrase."""
+    events = [
+        mk_user("결과 점검해주세요"),
+        mk_assistant(
+            "ready to merge\n"
+            "검증 결과:\n"
+            "$ pytest tests/ → 2 passed"
+        ),
+    ]
+    tp = write_jsonl(events, tmp_path)
+    stdout, stderr, rc = run_hook(tp)
+    assert rc == 0
+    assert stderr == "", f"hook must keep stderr empty; got {stderr!r}"
+    assert stdout == "", f"evidence must suppress Rule 1 when present; stdout={stdout!r}"
+
+
+def test_rule1b_only_gap_without_go_does_not_fire(tmp_path: Path) -> None:
+    """Gap marker alone must not trigger Rule 1b."""
+    events = [
+        mk_user("테스트 결과를 정리해줘"),
+        mk_assistant("현재 미해소 항목은 1개입니다."),
+    ]
+    tp = write_jsonl(events, tmp_path)
+    stdout, stderr, rc = run_hook(tp)
+    assert rc == 0
+    assert stderr == "", f"should remain silent; got {stderr!r}"
+    assert stdout == "", f"gap-only case should be silent; stdout={stdout!r}"
+
+
+# ---------------------------------------------------------------------------
 # Rule 2 — plugin-context anchoring
 # ---------------------------------------------------------------------------
 

@@ -50,6 +50,14 @@ References: issue [#392](https://github.com/devseunggwan/praxis/issues/392).
 When the last assistant turn's text contains a completion-signal phrase AND
 no evidence-block indicator is present in the same turn, an advisory is emitted.
 
+#### Rule 1b — GO verdict with unresolved-gap markers
+
+When a GO / merge-readiness phrase appears in the same turn with an
+unresolved-gap marker, an advisory is emitted.
+
+This blocks mixed outputs such as "ready to merge" and "미해소 항목 있음" appearing
+together and prevents merge-readiness claims from bypassing unresolved work.
+
 **Completion-signal phrases (EN, case-insensitive, ASCII word-boundary):**
 
 | Phrase | Example |
@@ -91,6 +99,16 @@ it — so `완료되지 않았습니다`, `완료 안 됨`, `아직 완료 전�
 | Read tool call | Any `tool_use` with `name == "Read"` in the current turn |
 | Cited output | A `$ command → output` line in the assistant message |
 
+**Unresolved-gap markers:**
+
+| Marker | Meaning |
+| --- | --- |
+| `미해소` | unresolved item exists |
+| `갭` | explicitly marked gap |
+| `⚠` | warning marker |
+| `검증 증거 부재` | evidence is explicitly missing |
+| `not verified` / `unverified` | unresolved verification state (EN) |
+
 #### Rule 2 — plugin-context anchoring (Event 2)
 
 Fires in either of two forms when the cwd's active plugin is `praxis`
@@ -119,6 +137,14 @@ stdout. The hook always exits 0 — it never blocks.
 [praxis:completion-signal-gate] completion-signal phrase detected in last turn without an evidence-block (Bash tool result, Read tool call, or cited '$ command → output' line).
 [praxis:completion-signal-gate] Rule: CLAUDE.md 'Verification Before Completion' — run a real verify command (test/lint/build/probe) and paste its output BEFORE declaring completion.
 [praxis:completion-signal-gate] Trigger: matched completion-signal token in last assistant turn. Add evidence or remove the completion phrase to suppress this advisory.
+```
+
+**Rule 1b advisory (systemMessage body):**
+
+```
+[praxis:completion-signal-gate] go-verdict phrase detected together with unresolved-gap marker in last assistant turn.
+[praxis:completion-signal-gate] Rule: CLAUDE.md 'Output-Block Falsification' — do not claim GO/merge readiness while unresolved gap markers are present in the same output.
+[praxis:completion-signal-gate] Trigger: both a go-verdict phrase and unresolved-gap marker coexist in one turn.
 ```
 
 **Rule 2 advisory (systemMessage body):**
@@ -188,10 +214,10 @@ triple gate). This hook is complementary:
 ### Tests
 
 ```bash
-python3 -m pytest tests/hooks/test_completion_signal_gate.py -v
+python3 -m pytest tests/hooks/completion-verify/test_completion_signal_gate.py -q
 ```
 
-Covers 48 cases:
+Covers 52 cases:
 
 **Rule 1 trigger (15 phrases — EN + KR):**
 - EN: `no fixes needed`, `ready to merge`, `all set`, `done`, `complete`
@@ -203,6 +229,14 @@ Covers 48 cases:
 - Bash tool call in turn → suppressed
 - Read tool call in turn → suppressed
 - Cited `$ command → output` line → suppressed
+
+**Rule 1b trigger (3 cases):**
+- `보내도 됩니다` + `미해소`
+- `문제 없음` + `검증 증거 부재`
+- `ready to merge` + `not verified`
+
+**Rule 1b suppression (1 case):**
+- `보내도 됩니다` + `not verified` + cited output
 
 **False-positive cross-checks (5 normal-completion samples):**
 - FP1: Bash + evidence signal → no advisory

@@ -280,6 +280,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion|Bash|Edit|Read|Write|TaskCreate|TaskUpdate|TaskGet|TaskList|TaskStop|TaskOutput|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/second-failure-advisory.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Stop": [

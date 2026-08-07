@@ -57,7 +57,8 @@ calls, never on the merge that actually produced the title landing on
 | `gh pr merge <id> --squash -t "<subject>"` | `-t`/`--subject` value IS the title — no network call, checked directly |
 | `gh pr merge <id> --merge` / `--rebase` (no `-s`) | silent — not a squash, title composition differs |
 | `gh -R owner/repo pr merge <id> --squash` | `-R`/`--repo` forwarded to the `gh pr view` resolution call |
-| `gh api repos/.../pulls/N/merge -f merge_method=squash` | **NOT matched — deliberate gap**, see "Ordering constraint" below |
+| `gh api repos/.../pulls/N/merge --method PUT -f merge_method=squash` | resolve PR title via `gh pr view` and emit **advisory** when over limit |
+| `gh api repos/.../pulls/N/merge -f merge_method=squash -f commit_title="..."` | check explicit `commit_title` directly, no extra network call |
 
 ### Severity: advisory, not `ask`
 
@@ -70,17 +71,11 @@ recommends starting conservative — "1단계는 advisory로 시작 권장" — 
 new failure surface (network dependency) this path introduces relative to
 the pure-local `git commit` check.
 
-### Ordering constraint — `gh api .../pulls/N/merge` intentionally NOT sealed
+### `gh api .../pulls/N/merge` coverage
 
-The issue body asks to also match `gh api repos/.../pulls/N/merge` (the same
-mutation via the raw API instead of the `gh pr merge` subcommand). This PR
-deliberately does **not** cover that shape. A separate, unresolved
-release-lag issue needs the `gh api` path as an escape hatch while a
-defective *cached* hook (a prior release still running in
-`~/.claude/plugins/cache/`) is in play — fully sealing both paths in the
-same change window would remove that escape hatch before its blocking issue
-resolves. Extending coverage to `gh api` is left to a follow-up once that
-ordering constraint clears.
+`gh api` merge-path coverage is now included for squash merges.
+When `merge_method=squash` is present, the hook checks either explicit
+`commit_title` or PR title (via `gh pr view` fallback).
 
 ### `-t`/`--subject` override
 
@@ -174,7 +169,7 @@ over-limit title.
 bash tests/hooks/preflight-gate/test_commit_title_length_check.sh
 ```
 
-Covers 59 cases: boundary (50 chars), under (49 chars), long via `-m` /
+Covers 61 cases: boundary (50 chars), under (49 chars), long via `-m` /
 `--message` / `-m=value` / `--amend` / `-am`, Korean 51-code-point title,
 Hub #1912 regression (82-char title), Merge/Revert skip, body-in-second-m
 protection, chained command, `CLAUDE_COMMIT_TITLE_MAX` override (both
@@ -187,6 +182,7 @@ stacked `-C` flags — **plus** the squash-merge path (issue #843): long/short
 PR title via a faked `gh pr view`, `-s` short flag, `-t`/`--subject`
 override (long and short, no `gh` call made), `gh pr view` error -> fail-open,
 `-R owner/repo` global-flag forwarding, opt-out marker suppressing the
-squash advisory, `gh api .../pulls/N/merge` confirmed NOT matched (the
-deliberate gap), `--merge`/`--rebase` (no `-s`) staying silent even with a
-long title, and an unrelated `gh pr view` command staying silent.
+squash advisory, `gh api .../pulls/N/merge` over-limit with `merge_method=squash`
+(resolved via `gh pr view`) and explicit `-f commit_title=...`, `--merge`/`--rebase`
+(no `-s`) staying silent even with a long title, and an unrelated `gh pr view`
+command staying silent.

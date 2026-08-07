@@ -88,6 +88,26 @@ _COMPLETION_KO_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"이상\s*없음"),
 ]
 
+# Gate 1 variant: GO verdict phrases (issue #845) must not co-occur with
+# unresolved-gap markers in the same assistant turn.
+_GO_VERDICT_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"보내도\s*됩니다", re.IGNORECASE),
+    re.compile(r"보내도\s*좋습니다", re.IGNORECASE),
+    re.compile(r"머지\s*가능", re.IGNORECASE),
+    re.compile(r"approve\s*가능"),
+    re.compile(r"문제\s*없음", re.IGNORECASE),
+    re.compile(r"ready\s+to\s+merge", re.IGNORECASE),
+]
+
+_GAP_MARKER_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"⚠"),
+    re.compile(r"미해소"),
+    re.compile(r"갭"),
+    re.compile(r"검증\s*증거\s*부재"),
+    re.compile(r"not\s+verified", re.IGNORECASE),
+    re.compile(r"unverified", re.IGNORECASE),
+]
+
 # Negation markers that flip a completion phrase into a not-yet-complete
 # statement (negation/status-form rule, issue #515). EN: token immediately
 # BEFORE the match ("not done"). Progressive "-ing" forms are already
@@ -163,6 +183,20 @@ def _has_completion_signal(text: str) -> bool:
         for m in pat.finditer(text):
             if not _is_negated_ko(text, m.end()):
                 return True
+    return False
+
+
+def _has_go_verdict_with_unresolved_gap(text: str) -> bool:
+    """True if a GO verdict phrase coexists with an unresolved-gap marker."""
+    if not text:
+        return False
+    normalized = text.lower()
+    has_gap = any(pat.search(normalized) for pat in _GAP_MARKER_PATTERNS)
+    if not has_gap:
+        return False
+    for pat in _GO_VERDICT_PATTERNS:
+        if pat.search(text):
+            return True
     return False
 
 
@@ -357,6 +391,18 @@ def main() -> int:
         last_text, has_bash, has_read
     ):
         messages.append(ADVISORY_RULE1)
+
+    # Rule 1b: GO verdict phrasing with unresolved-gap marker in the same turn.
+    if _has_go_verdict_with_unresolved_gap(last_text):
+        messages.append(
+            f"{PREFIX} go-verdict phrase detected together with unresolved-gap "
+            "marker in last assistant turn.\n"
+            f"{PREFIX} Rule: CLAUDE.md 'Output-Block Falsification' — "
+            "do not claim GO/merge readiness while unresolved gap markers are present "
+            "in the same output.\n"
+            f"{PREFIX} Trigger: both a go-verdict phrase and unresolved-gap marker "
+            "coexist in one turn."
+        )
 
     # Rule 2: plugin-context anchoring
     cwd_plugin = _get_cwd_plugin_name() or _get_cwd_git_slug()
