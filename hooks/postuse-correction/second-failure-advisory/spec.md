@@ -76,6 +76,12 @@ error_signature)`를 세션 스코프로 카운트하고 2회차에 advisory")�
 출력합니다. 저장에 실패하면 카운터가 남지 않아 같은 advisory가 다음 실패에서
 중복 발화할 수 있으므로, 저장 실패 시에는 무음 처리합니다.
 
+원자적인 것은 교체(rename)뿐이며, 읽기-증가-쓰기 전체는 직렬화되지 않습니다.
+한 세션에서 도구 호출이 병렬로 끝나면 PostToolUse도 동시에 돌 수 있고, 그때
+한쪽 증가분이 유실될 수 있습니다. 결과는 advisory가 한 번 늦게 나가는 것뿐이라
+lock을 두지 않습니다 — 이 훅은 차단하지 않고 조언만 하므로, 락 생명주기와
+교착 위험을 감수할 만한 이득이 없습니다.
+
 출력은 `stderr`에 아래 형태로 1줄 기록합니다.
 
 ```text
@@ -134,6 +140,7 @@ bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
 
 - 1회 실패: advisory 없음
 - 2회 실패(동일 signature): advisory 출력
+- 3회째 이상(동일 쌍): 추가 advisory 없음
 - 동일 시그니처에서 tool_name이 다르면 advisory 없음
 - 경로/해시/타임스탬프만 바뀐 2회 실패도 advisory 출력
 - 사이에 성공/다른 실패가 끼어도 같은 쌍의 2회째에 advisory 출력

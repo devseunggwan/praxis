@@ -347,17 +347,19 @@ fi
 # Case 9: a failed state write suppresses the advisory (persist-before-advise)
 # ---------------------------------------------------------------------------
 echo "=== case 9: unwritable state path => silent ==="
-STATE13_DIR="$TMP_DIR/ro"
-mkdir -p "$STATE13_DIR"
-STATE13="$STATE13_DIR/c13.json"
-pipe_hook "$(make_payload Bash sess-944-ro 1)" "$STATE13" >/dev/null 2>/dev/null
-chmod 500 "$STATE13_DIR"
+# The first failure is counted normally, then the scratch file `_save_state`
+# writes before renaming is replaced by a directory: open() for write fails with
+# EISDIR for every user including root, while the state file itself stays
+# readable so the count is still loaded. Mode bits would not do this — container
+# CI commonly runs as root, which ignores them.
+STATE9="$TMP_DIR/c9.json"
+pipe_hook "$(make_payload Bash sess-944-ro 1)" "$STATE9" >/dev/null 2>/dev/null
+mkdir -p "$STATE9.tmp"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(make_payload Bash sess-944-ro 1)" "$STATE13" >"$out_file" 2>"$err_file"
+pipe_hook "$(make_payload Bash sess-944-ro 1)" "$STATE9" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
-chmod 700 "$STATE13_DIR"
 
 if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
   assert_pass "9) unwritable state suppresses the advisory"

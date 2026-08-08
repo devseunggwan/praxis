@@ -94,12 +94,15 @@ carry over — the contradiction stands regardless of evidence.
 **Negation / progressive guard (issue #515):** a completion phrase under
 negation or in a not-yet-complete status form does NOT count as a completion
 signal — the assistant is reporting incompletion, not claiming done. English
-matches are disqualified when a negation token (`not `, `n't `, `no `,
-`never `, `without `, `isn't`, `won't`, `can't`, `cannot`, …) appears in the
-24 chars preceding the phrase ("not done yet", "this is not complete", "not
-ready to merge"); progressive `-ing` forms are already excluded by the
-ASCII word-boundary lookarounds ("completing" ≠ "complete"). Korean matches
-are disqualified when a negation form trails the token within 12 chars
+matches are disqualified when a negation token (`not`, `n't`, `no`,
+`never`, `without`, `yet to`, `isn't`, `won't`, `can't`, `cannot`, …) appears
+in the 24 chars preceding the phrase ("not done yet", "this is not complete",
+"not ready to merge"); progressive `-ing` forms are already excluded by the
+ASCII word-boundary lookarounds ("completing" ≠ "complete"). The short markers
+are stored with a trailing space (`"not "`, `"no "`) so that "notable" and
+"nose" do not read as negations; the list above omits it for legibility.
+Korean matches are disqualified when a negation form trails the token within
+12 chars
 (`되지 않`, `지 않`, `안 됨`, `안 돼`, `안 된`, `못 …`) or when `아직` precedes
 it — so `완료되지 않았습니다`, `완료 안 됨`, `아직 완료 전입니다`, and
 `완료하지 못했습니다` no longer trigger the advisory.
@@ -146,7 +149,7 @@ stdout. The hook always exits 0 — it never blocks.
 
 **Rule 1 advisory (systemMessage body):**
 
-```
+```text
 [praxis:completion-signal-gate] completion-signal phrase detected in last turn without an evidence-block (Bash tool result, Read tool call, or cited '$ command → output' line).
 [praxis:completion-signal-gate] Rule: CLAUDE.md 'Verification Before Completion' — run a real verify command (test/lint/build/probe) and paste its output BEFORE declaring completion.
 [praxis:completion-signal-gate] Trigger: matched completion-signal token in last assistant turn. Add evidence or remove the completion phrase to suppress this advisory.
@@ -162,7 +165,7 @@ stdout. The hook always exits 0 — it never blocks.
 
 **Rule 2 advisory (systemMessage body):**
 
-```
+```text
 [praxis:completion-signal-gate] cross-plugin slash command(s) /laplace-dev-hub:close-hub-issue surfaced while cwd plugin is 'praxis'.
 [praxis:completion-signal-gate] Rule: CLAUDE.md 'Plugin-context anchoring' — do not surface skill commands from foreign plugin namespaces. Verify you are working in the correct repo/plugin context before recommending slash commands.
 ```
@@ -233,12 +236,14 @@ python3 -m pytest tests/hooks/completion-verify/test_completion_signal_gate.py -
 Covers 52 cases:
 
 **Rule 1 trigger (15 phrases — EN + KR):**
+
 - EN: `no fixes needed`, `ready to merge`, `all set`, `done`, `complete`
   (case-insensitive variants included)
 - KR: `실질적 수정은 없습니다. 머지하셔도 무방합니다.`, `머지하셔도 됩니다`,
   `완료`, `결함 없음`, `이상 없음`
 
 **Rule 1 suppression (3 evidence-block types):**
+
 - Bash tool call in turn → suppressed
 - Read tool call in turn → suppressed
 - Cited `$ command → output` line → suppressed
@@ -260,6 +265,7 @@ Cited evidence alongside a gap marker does **not** silence Rule 1b; a
 regression case asserts it still fires.
 
 **False-positive cross-checks (5 normal-completion samples):**
+
 - FP1: Bash + evidence signal → no advisory
 - FP2: No completion phrase → no advisory
 - FP3: Read tool + completion phrase → suppressed
@@ -267,17 +273,21 @@ regression case asserts it still fires.
 - FP5: Mid-task assistant message (no completion phrase) → no advisory
 
 **Event 1 reproduction:**
+
 - Exact issue quote "실질적 수정은 없습니다. 머지하셔도 무방합니다." → advisory
 
 **Rule 2:**
+
 - Foreign `/laplace-dev-hub:close-hub-issue` in praxis cwd → advisory
 
 **Fail-safe paths (4):**
+
 - Malformed JSON stdin → exit 0
 - `stop_hook_active: true` → exit 0
 - Missing `transcript_path` → exit 0
 - Empty transcript → exit 0
 
 **Internal unit tests:**
+
 - `_has_completion_signal`: 15 parametrized cases (true/false, EN/KR, word-boundary)
 - `_has_evidence_block`: 4 parametrized cases
