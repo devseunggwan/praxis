@@ -1,0 +1,2 @@
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "text", "text": "PR 833 머지해줘"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "content": [{"type": "text", "text": "PR #833 — 변경 사항: hook 파일 한 줄 수정."}]}}
