@@ -735,6 +735,26 @@ run_merge_escalation_case "merge_escalation_marker_with_partial_briefing_passes"
 run_merge_escalation_case "merge_escalation_partial_briefing_no_marker_denies" \
   "yes" "" "momentum-merge-marker-partial-briefing.jsonl" "gh pr merge 833 --squash"
 
+# The mandated flow puts the briefing in the turn BEFORE the approval, so the
+# current turn is empty. A partial briefing there plus the marker must release
+# the merge: scoring the current turn alone would deny a merge whose briefing
+# the user did see — the exact failure the marker exists to absorb.
+run_merge_escalation_case "merge_escalation_marker_with_prior_turn_partial_passes" \
+  "no" "" "momentum-merge-prior-turn-partial-briefing.jsonl" \
+  "gh pr merge 833 --squash  # briefing-surfaced: counter under-counted"
+
+# Same prior-turn partial briefing WITHOUT the marker → deny (1 item < 4). Pins
+# that the pass above is bought by the marker, not by the extension path.
+run_merge_escalation_case "merge_escalation_prior_turn_partial_no_marker_denies" \
+  "yes" "" "momentum-merge-prior-turn-partial-briefing.jsonl" "gh pr merge 833 --squash"
+
+# Marker + prior turn that briefed a DIFFERENT PR → deny. The lower marker floor
+# reads the prior turn only when the merge correlates to it (No Approval
+# Transfer); an uncorrelated window must not supply the item it needs.
+run_merge_escalation_case "merge_escalation_marker_uncorrelated_prior_turn_denies" \
+  "yes" "" "momentum-merge-prior-turn-partial-briefing.jsonl" \
+  "gh pr merge 999 --squash  # briefing-surfaced: attested"
+
 # An injected (`isMeta`) user entry — a skill body loaded mid-turn — must not
 # start a new window and discard the briefing the user actually saw.
 run_merge_escalation_case "merge_escalation_injected_meta_keeps_window_passes" \

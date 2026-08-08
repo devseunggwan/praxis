@@ -687,9 +687,9 @@ def _has_repetition(command: object) -> bool:
     return any(tok in _LOOP_KEYWORDS for tok in safe_tokenize(command))
 
 
-def _prior_turn_extension_passes(entries: list[dict], idxs: list[int],
-                                 command: object) -> bool:
-    """True when the prior-turn briefing satisfies the gate (issue #826).
+def _correlated_prior_turn_text(entries: list[dict], idxs: list[int],
+                                command: object) -> str | None:
+    """The prior-turn assistant text the gate may score, else None (issue #826).
 
     The mandated flow is briefing → user approval → merge, which places the
     briefing in the turn BEFORE the approving user message — outside the
@@ -697,15 +697,20 @@ def _prior_turn_extension_passes(entries: list[dict], idxs: list[int],
     the immediately preceding assistant turn is scored ALONE (so text authored
     AFTER the approval cannot supplement a briefing the user never saw), and only
     when the merge is correlated to the briefed PR.
+
+    Returning the text rather than a verdict keeps ONE definition of "which
+    window may be scored": the caller decides which threshold applies to it,
+    so the marker's lower floor sees the same window the full-briefing check
+    does instead of scoring an empty current turn (issue #940 review).
     """
     segments = _merge_segments(command)
     # A single approval authorizes ONE merge. A compound `merge A && merge B` (≥2
     # segments) or a shell loop repeating one segment (`for pr in …; do merge`)
     # must not ride a single approval (No Approval Transfer) → no extension.
     if len(segments) != 1 or _has_repetition(command) or len(idxs) < 2:
-        return False
+        return None
     if not _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
-        return False
+        return None
 
     prev_text = _assistant_text(entries, idxs[-2] + 1, idxs[-1])
     pos = segments[0]
@@ -728,13 +733,12 @@ def _prior_turn_extension_passes(entries: list[dict], idxs: list[int],
             # be treated as this branch's target.
             correlated = False
 
-    # The trivial-PR carve-out and the briefing-count pass apply ONLY once the
-    # merge is correlated to the briefed PR — never to an unrelated trivial /
-    # complete briefing about a different PR (P1#1).
+    # An uncorrelated prior turn is not this merge's window at all: returning
+    # None keeps the trivial-PR carve-out, the briefing count, and the marker
+    # floor from ever reading a briefing about a different PR (P1#1).
     if not correlated:
-        return False
-    return _is_trivial_merge(prev_text) \
-        or _briefing_item_count(prev_text) >= MERGE_BRIEFING_MIN_ITEMS
+        return None
+    return prev_text
 
 
 def _merge_escalation_reason(payload: dict) -> str | None:
@@ -781,7 +785,11 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     if items >= MERGE_BRIEFING_MIN_ITEMS:
         return None
 
-    if _prior_turn_extension_passes(entries, idxs, code):
+    prev_text = _correlated_prior_turn_text(entries, idxs, code)
+    if prev_text is not None and (
+        _is_trivial_merge(prev_text)
+        or _briefing_item_count(prev_text) >= MERGE_BRIEFING_MIN_ITEMS
+    ):
         return None
 
     # The marker attests that a briefing was surfaced, so it can stand in for
@@ -789,7 +797,17 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     # phrased outside its vocabulary. It cannot stand in for *existence*: with
     # zero briefing items in the window there is nothing for the attestation to
     # be about, which is exactly the state the marker kept releasing (#940).
-    if marker_ok and items >= MERGE_BRIEFING_MARKER_MIN_ITEMS:
+    #
+    # "The window" is whichever one the gate was allowed to score. In the
+    # mandated briefing → approval → merge flow the briefing sits in the prior
+    # turn and the current turn is empty, so scoring `items` alone would deny a
+    # marked merge whose briefing the user did see — the failure the marker
+    # exists to absorb.
+    marker_items = max(
+        items,
+        _briefing_item_count(prev_text) if prev_text is not None else 0,
+    )
+    if marker_ok and marker_items >= MERGE_BRIEFING_MARKER_MIN_ITEMS:
         return None
 
     if marker_ok:

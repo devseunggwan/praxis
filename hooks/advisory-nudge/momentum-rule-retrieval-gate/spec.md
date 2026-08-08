@@ -221,6 +221,14 @@ approve blindly.
   still fails open, which is the bridge-session case the marker was invented
   for: there is nothing to verify against, so nothing is claimed.
 
+  "The window" is whichever one the gate was allowed to score, current turn or
+  correlated prior turn — the same window the full-briefing check reads. The
+  mandated flow is briefing → approval → merge, which leaves the current turn
+  empty, so a marker floor scored against the current turn alone would deny a
+  marked merge whose briefing the user did see. The prior turn is read only
+  when it is correlated to this merge's PR, so an uncorrelated briefing cannot
+  supply the item the floor needs (No Approval Transfer).
+
 - **Injected user entries do not start a new window (issue #940).** A skill body
   loaded mid-turn and the expansion of a slash command both arrive as
   `role: user` with prose content; the harness stamps them `isMeta: true` while
