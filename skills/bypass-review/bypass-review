@@ -812,8 +812,32 @@ def _render_error_events(lines: list[str], error_events: list[dict]) -> None:
 # Fire-rate mode (issue #710) — hook fire ledger from fire-events JSONL
 # ---------------------------------------------------------------------------
 
-def load_fire_events(telemetry_dir: Path, days: int) -> list[dict]:
-    """Load valid JSONL records from the last N days of fire-events files."""
+def is_test_session(session_id: str) -> bool:
+    """True for a synthetic session id written by a test fixture.
+
+    Real ids are UUIDs, whose hex alphabet cannot spell `test`, so the
+    substring is unambiguous. Issue #939 measured every synthetic record in the
+    2026-07-05..08-03 window this way — `test`, `test-session`, `fixture-test`,
+    `replay-test`, `test-<pid>-<n>` — and the count is identical whether or not
+    `fixture` is also matched, because every fixture id carries `test` too.
+    """
+    return "test" in (session_id or "").lower()
+
+
+def load_fire_events(
+    telemetry_dir: Path, days: int, include_test_sessions: bool = False
+) -> list[dict]:
+    """Load valid JSONL records from the last N days of fire-events files.
+
+    Synthetic records are dropped by default (issue #939). Before #934 taught
+    the ledger to redirect development runs, a directly-invoked shell test wrote
+    into the production ledger: 53,654 records over the audit window, spread
+    across 285 of 751 session ids. Those records are still there — the ledger is
+    append-only — so a report that counts them reads fixture volume as usage.
+
+    Pass `include_test_sessions=True` to get the raw set; `run_fire_rate` does
+    that so it can print both figures rather than silently shrinking the window.
+    """
     events: list[dict] = []
     for date_str in date_range(days):
         path = telemetry_dir / f"fire-events-{date_str}.jsonl"
@@ -829,8 +853,13 @@ def load_fire_events(telemetry_dir: Path, days: int) -> list[dict]:
                         record = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    if isinstance(record, dict):
-                        events.append(record)
+                    if not isinstance(record, dict):
+                        continue
+                    if not include_test_sessions and is_test_session(
+                        str(record.get(FIELD_SESSION_ID) or "")
+                    ):
+                        continue
+                    events.append(record)
         except OSError:
             continue
     return events
@@ -1794,8 +1823,48 @@ def render_fire_report(
     return "\n".join(lines)
 
 
+def format_fire_provenance(raw: list[dict], kept: list[dict]) -> str:
+    """Report what the test-session filter dropped (issue #939).
+
+    Both figures, always — a reader who sees only the filtered count cannot
+    distinguish a genuinely quiet window from one whose fixture records were
+    quietly removed, and the contamination rate is itself the signal that says
+    how far an older audit of the same window can be trusted.
+    """
+    def _sessions(events: list[dict]) -> set[str]:
+        return {
+            str(ev.get(FIELD_SESSION_ID) or "")
+            for ev in events
+            if ev.get(FIELD_SESSION_ID)
+        }
+
+    dropped = len(raw) - len(kept)
+    raw_sids, kept_sids = _sessions(raw), _sessions(kept)
+    pct = (dropped / len(raw) * 100) if raw else 0.0
+    return (
+        "\nRecord provenance (issue #939)\n"
+        f"  Records:  {len(raw):,} read, {dropped:,} synthetic dropped "
+        f"({pct:.2f}%), {len(kept):,} counted\n"
+        f"  Sessions: {len(raw_sids):,} read, "
+        f"{len(raw_sids) - len(kept_sids):,} synthetic dropped, "
+        f"{len(kept_sids):,} counted\n"
+        "  Synthetic = session id containing `test`, written by a fixture that ran\n"
+        "  before issue #934 redirected checkout runs to .praxis-dev-telemetry.\n"
+        "  The ledger is append-only, so these records stay and are filtered on read."
+    )
+
+
 def run_fire_rate(args: argparse.Namespace, telemetry_dir: Path) -> int:
-    events = load_fire_events(telemetry_dir, args.days)
+    # Load raw, then split, so the report can state what it dropped. Reporting
+    # only the filtered figure would leave a reader unable to tell a quiet
+    # window from a heavily-contaminated one.
+    raw_events = load_fire_events(telemetry_dir, args.days, include_test_sessions=True)
+    events = [
+        ev
+        for ev in raw_events
+        if not is_test_session(str(ev.get(FIELD_SESSION_ID) or ""))
+    ]
+    provenance = format_fire_provenance(raw_events, events)
     by_hook = aggregate_fires(events)
     manifest_path = (
         Path(args.manifest_path) if args.manifest_path else default_manifest_path()
@@ -1834,6 +1903,7 @@ def run_fire_rate(args: argparse.Namespace, telemetry_dir: Path) -> int:
         bypass_join=bypass_join,
         outcome_proxy=outcome_proxy,
     ))
+    print(provenance)
     return 0
 
 

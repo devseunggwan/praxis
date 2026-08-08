@@ -14,9 +14,51 @@ a repo-relative link).
 ./skills/bypass-review/bypass-review fire-rate -d 30
 ```
 
-Window: **2026-07-05 → 2026-08-03, 743 sessions** — a full 30 days with
+Window: **2026-07-05 → 2026-08-03, 466 sessions** — a full 30 days with
 fire-events throughout, superseding the first audit's effective 5-day /
 49-session sample (2026-06-26 → 2026-07-01). Recalibrated for issue #874.
+
+**Contamination floor (issue #939).** This audit originally read the window as
+743 sessions. That count included fixture sessions: before issue #934 redirected
+development runs to `<checkout>/.praxis-dev-telemetry`, invoking a shell test
+directly wrote straight into the production ledger. Re-measuring the same window
+gives **751 session ids read, 285 synthetic (37.9%), 466 human** and **53,654
+synthetic records of 2,958,085 (1.81%)**. The 743 → 751 gap on the read side is
+the snapshot boundary — the original figure was taken 2026-08-03T07:5xZ, part-way
+through the window's last day.
+
+`bypass-review fire-rate` now drops synthetic records on read and prints both
+figures under `Record provenance`, so this correction does not have to be
+remembered. The ledger is append-only; nothing was deleted.
+
+Contamination is heavily skewed by hook, so the correction is not uniform
+(re-measured over the whole window, so the denominators run slightly above the
+part-way snapshot the tables below use):
+
+| Hook | Fires | Synthetic | Share |
+| --- | --- | --- | --- |
+| `retrospect-mix-check` | 7,837 | 6,285 | 80.2% |
+| `completion-signal-gate` | 13,106 | 1,245 | 9.5% |
+| `output-block-falsify-advisory` | 61,175 | 1,965 | 3.2% |
+| `jq-config-empty-dict-advisory` | 61,676 | 1,124 | 1.8% |
+| `askuserquestion-loop-signal` | 1,948 | 0 | 0.0% |
+| `pytest-direct-exec-advisory` | 1,734 | 0 | 0.0% |
+
+Per-hook figures below predate the filter and come from the part-way snapshot,
+so re-running the command moves them: fire counts down (synthetic records leave)
+and per-hook session counts either way (synthetic sessions leave, but the rest of
+the last day arrives). `pytest-direct-exec-advisory`, for instance, reads 8
+sessions below and 12 filtered over the whole window.
+
+**The verdicts do not move.** They rest on escalation counts, and re-aggregating
+the three Axis 4 escalation-free candidates with synthetic sessions excluded
+leaves all three still escalation-free:
+
+| Hook | Sessions (filtered) | Decisions | Escalations |
+| --- | --- | --- | --- |
+| `askuserquestion-loop-signal` | 192 | `pass` 1,948 | 0 |
+| `jq-config-empty-dict-advisory` | 403 | `pass` 60,552 | 0 |
+| `pytest-direct-exec-advisory` | 12 | `pass` 1,734 | 0 |
 
 Fire counts below are a snapshot taken 2026-08-03T07:5xZ; the ledger is
 append-only and live, so re-running the command minutes later moves every
@@ -39,7 +81,7 @@ ledger names are excluded from every table below:
 ### What changed since the first audit
 
 The roster grew from 58 registered hooks to 81, and the sample from 49
-sessions to 743. Two of the first audit's structural claims no longer hold —
+sessions to 466. Two of the first audit's structural claims no longer hold —
 see Axis 1 and the Axis 4 update below.
 
 ## Axis 1 — never-fired
@@ -99,7 +141,7 @@ Issue #874 opened on a single session (2026-07-27, `5d46110f`) where 42 ADVISE
 fires produced no observable behaviour change, and inferred that the tier's
 effect is zero because advisories go to stderr where the model cannot see them.
 
-Across 743 sessions the recurrence rates above **do not support that
+Across 466 sessions the recurrence rates above **do not support that
 inference**. `pipefail-advisory` — the highest-volume advisory, and the one
 the issue named first — recurs 24% of the time, meaning roughly three in four
 advises are followed by the hook no longer flagging. `momentum-rule-retrieval-gate`

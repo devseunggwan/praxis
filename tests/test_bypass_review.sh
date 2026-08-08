@@ -798,6 +798,77 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# fire-rate: synthetic (test-session) records are filtered and reported (#939)
+#
+# Record fields copied verbatim from the writer:
+#   hooks/_lib/_fire_ledger.py record_session_fire() lines 387-395.
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== bypass-review fire-rate: test-session filter (#939) ==="
+
+DIR18="$TMP_DIR/t18"
+mkdir -p "$DIR18"
+make_fire() {
+  python3 -c "
+import json, sys
+print(json.dumps({
+    'timestamp': sys.argv[1] + 'T00:00:00+00:00',
+    'session_id': sys.argv[2],
+    'tool': 'Bash',
+    'hook': 'pipefail-advisory',
+    'role': 'advisory-nudge',
+    'decision': sys.argv[3],
+    'granularity': 'rich',
+}))" "$TODAY" "$1" "$2"
+}
+{
+  make_fire "11111111-2222-3333-4444-555555555555" "pass"
+  make_fire "11111111-2222-3333-4444-555555555555" "advise"
+  make_fire "test-session" "pass"
+  make_fire "fixture-test" "advise"
+  make_fire "test-72669-24423" "pass"
+} > "$DIR18/fire-events-$TODAY.jsonl"
+
+out18=$(python3 "$CLI" fire-rate --dir "$DIR18" --days 1 2>&1)
+rc18=$?
+
+if [ "$rc18" -ne 0 ]; then
+  assert_fail "fire-rate filter: exit 0" "exited $rc18; output: $out18"
+else
+  assert_pass "fire-rate filter: exit 0"
+fi
+
+# 5 records read, 3 synthetic dropped, 2 counted; 4 session ids read, 1 counted.
+if echo "$out18" | grep -q "5 read, 3 synthetic dropped"; then
+  assert_pass "fire-rate filter: record counts reported both ways"
+else
+  assert_fail "fire-rate filter: record counts reported both ways" "output: $out18"
+fi
+
+if echo "$out18" | grep -q "Sessions: 4 read, 3 synthetic dropped, 1 counted"; then
+  assert_pass "fire-rate filter: session counts reported both ways"
+else
+  assert_fail "fire-rate filter: session counts reported both ways" "output: $out18"
+fi
+
+# Negative control: a ledger with no synthetic records must report zero dropped,
+# so a passing assertion above cannot come from the filter matching everything.
+DIR19="$TMP_DIR/t19"
+mkdir -p "$DIR19"
+{
+  make_fire "11111111-2222-3333-4444-555555555555" "pass"
+  make_fire "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" "advise"
+} > "$DIR19/fire-events-$TODAY.jsonl"
+
+out19=$(python3 "$CLI" fire-rate --dir "$DIR19" --days 1 2>&1)
+
+if echo "$out19" | grep -q "2 read, 0 synthetic dropped"; then
+  assert_pass "fire-rate filter: clean ledger drops nothing"
+else
+  assert_fail "fire-rate filter: clean ledger drops nothing" "output: $out19"
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
