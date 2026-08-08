@@ -90,13 +90,17 @@ _COMPLETION_KO_PATTERNS: list[re.Pattern[str]] = [
 
 # Gate 1 variant: GO verdict phrases (issue #845) must not co-occur with
 # unresolved-gap markers in the same assistant turn.
-_GO_VERDICT_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"보내도\s*됩니다", re.IGNORECASE),
-    re.compile(r"보내도\s*좋습니다", re.IGNORECASE),
-    re.compile(r"머지\s*가능", re.IGNORECASE),
-    re.compile(r"approve\s*가능"),
-    re.compile(r"문제\s*없음", re.IGNORECASE),
-    re.compile(r"ready\s+to\s+merge", re.IGNORECASE),
+# Each entry carries the language of its predicate, because the negation guards
+# are language-specific: the English one reads the window BEFORE the match, the
+# Korean one the window AFTER. Running both on every match makes an unrelated
+# `No`/`아직` on the other side of the sentence silence a real contradiction.
+_GO_VERDICT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"보내도\s*됩니다", re.IGNORECASE), "ko"),
+    (re.compile(r"보내도\s*좋습니다", re.IGNORECASE), "ko"),
+    (re.compile(r"머지\s*가능", re.IGNORECASE), "ko"),
+    (re.compile(r"approve\s*가능", re.IGNORECASE), "ko"),
+    (re.compile(r"문제\s*없음", re.IGNORECASE), "ko"),
+    (re.compile(r"ready\s+to\s+merge", re.IGNORECASE), "en"),
 ]
 
 _GAP_MARKER_PATTERNS: list[re.Pattern[str]] = [
@@ -151,7 +155,23 @@ _NEGATION_MARKERS_KO = (
 # GO verdicts are negated as predicates ("머지 가능한 것은 아닙니다"), a form the
 # completion-verb markers above do not cover. Scoped to the GO path so the
 # issue-#515 completion-signal behaviour is left untouched.
-_GO_NEGATION_MARKERS_KO = _NEGATION_MARKERS_KO + (
+#
+# `아직` and `못` are deliberately absent: they qualify a completion verb, but
+# next to a GO verdict they usually belong to a *different* clause — in
+# "ready to merge — 아직 실환경은 unverified" the `아직` describes the gap, and
+# treating it as negation would silence exactly the contradiction Rule 1b exists
+# to surface. Only forms that attach directly to the predicate are listed.
+_GO_NEGATION_MARKERS_KO = (
+    "되지 않",
+    "되지않",
+    "지 않",
+    "지않",
+    "안 됨",
+    "안됨",
+    "안 됐",
+    "안됐",
+    "안 된",
+    "안된",
     "아닙",
     "아니다",
     "아니라",
@@ -198,23 +218,46 @@ def _has_completion_signal(text: str) -> bool:
     return False
 
 
+# A gap marker that is itself reported as resolved ("미해소 항목 없음", "갭 없음",
+# "no unverified items") states the opposite of a gap. Matching the marker as a
+# bare substring turns those clean GO outputs into Rule 1b advisories.
+_GAP_RESOLVED_WINDOW = 10  # chars following the matched gap marker
+_GAP_RESOLVED_MARKERS_KO = ("없음", "없습니다", "없다", "해소됨", "해소했", "해소 완료")
+_GAP_RESOLVED_MARKERS_EN = (" none", " resolved", " cleared")
+
+
+def _has_unresolved_gap(text: str, normalized: str) -> bool:
+    """True if a gap marker appears and is not itself reported as resolved."""
+    for pat in _GAP_MARKER_PATTERNS:
+        for match in pat.finditer(normalized):
+            suffix = normalized[match.end():match.end() + _GAP_RESOLVED_WINDOW]
+            if any(m in suffix for m in _GAP_RESOLVED_MARKERS_KO):
+                continue
+            if any(suffix.startswith(m) for m in _GAP_RESOLVED_MARKERS_EN):
+                continue
+            return True
+    return False
+
+
 def _has_go_verdict_with_unresolved_gap(text: str) -> bool:
     """True if a GO verdict phrase coexists with an unresolved-gap marker."""
     if not text:
         return False
     normalized = text.lower()
-    has_gap = any(pat.search(normalized) for pat in _GAP_MARKER_PATTERNS)
-    if not has_gap:
+    if not _has_unresolved_gap(text, normalized):
         return False
-    for pat in _GO_VERDICT_PATTERNS:
+    for pat, lang in _GO_VERDICT_PATTERNS:
         for match in pat.finditer(text):
             # A negated GO phrase ("not ready to merge", "머지 가능하지 않습니다")
             # reports the gap rather than overriding it — same rule the
-            # completion-signal path applies (issue #515).
-            if _is_negated_en(text, match.start()):
+            # completion-signal path applies (issue #515). The guard must match
+            # the predicate's own language; see _GO_VERDICT_PATTERNS.
+            if lang == "en" and _is_negated_en(text, match.start()):
                 continue
-            if _is_negated_ko(text, match.end()):
-                continue
+            # Korean negation always trails, including when it negates an
+            # English predicate ("ready to merge가 아닙니다"), so this runs for
+            # both languages — unlike the English window, which would read an
+            # unrelated leading "No" as negating a Korean verdict.
             suffix = text[match.end():match.end() + _NEGATION_WINDOW_KO]
             if any(neg in suffix for neg in _GO_NEGATION_MARKERS_KO):
                 continue

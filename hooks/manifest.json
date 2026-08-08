@@ -896,7 +896,6 @@
       "name": "second-failure-advisory",
       "role": "postuse-correction",
       "event": "PostToolUse",
-      "matcher": "AskUserQuestion|Bash|Edit|Read|Write|TaskCreate|TaskUpdate|TaskGet|TaskList|TaskStop|TaskOutput|Task",
       "timeout": 5
     },
     {

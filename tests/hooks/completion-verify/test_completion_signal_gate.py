@@ -405,6 +405,62 @@ def test_rule1b_ignores_negated_go_verdicts(verdict: str, tmp_path: Path) -> Non
     )
 
 
+@pytest.mark.parametrize(
+    "turn",
+    [
+        # A gap marker reported as resolved is not a gap.
+        "미해소 항목 없음. 문제 없음",
+        "검증 갭 없음. 머지 가능",
+    ],
+)
+def test_rule1b_ignores_resolved_gap_reports(turn: str, tmp_path: Path) -> None:
+    """`미해소 항목 없음` states the absence of a gap, not a gap."""
+    events = [mk_user("머지해도 되는지 판단해주세요"), mk_assistant(turn)]
+    tp = write_jsonl(events, tmp_path)
+    stdout, stderr, rc = run_hook(tp)
+    assert rc == 0
+    assert stderr == "", f"hook must keep stderr empty; got {stderr!r}"
+    assert "go-verdict phrase detected" not in _msg(stdout), (
+        f"resolved-gap report {turn!r} must not fire Rule 1b; stdout={stdout!r}"
+    )
+
+
+@pytest.mark.parametrize(
+    "turn",
+    [
+        # Korean negation trailing an unrelated clause, not the English verdict.
+        "ready to merge — 아직 실환경은 unverified",
+        # English negation leading an unrelated clause, not the Korean verdict.
+        "No blockers. 머지 가능 — 실환경 unverified",
+    ],
+)
+def test_rule1b_guard_does_not_cross_languages(turn: str, tmp_path: Path) -> None:
+    """A negation in the other language must not silence a real contradiction."""
+    events = [mk_user("머지해도 되는지 판단해주세요"), mk_assistant(turn)]
+    tp = write_jsonl(events, tmp_path)
+    stdout, stderr, rc = run_hook(tp)
+    assert rc == 0
+    assert stderr == "", f"hook must keep stderr empty; got {stderr!r}"
+    assert "go-verdict phrase detected together with unresolved-gap marker" in _msg(
+        stdout
+    ), f"{turn!r} is a real contradiction and must fire Rule 1b; stdout={stdout!r}"
+
+
+def test_rule1b_uppercase_approve_fires(tmp_path: Path) -> None:
+    """`APPROVE 가능` is the same verdict as `approve 가능`."""
+    events = [
+        mk_user("머지해도 되는지 판단해주세요"),
+        mk_assistant("APPROVE 가능 — 미해소 항목 있음"),
+    ]
+    tp = write_jsonl(events, tmp_path)
+    stdout, stderr, rc = run_hook(tp)
+    assert rc == 0
+    assert stderr == "", f"hook must keep stderr empty; got {stderr!r}"
+    assert "go-verdict phrase detected together with unresolved-gap marker" in _msg(
+        stdout
+    ), f"uppercase APPROVE must fire Rule 1b; stdout={stdout!r}"
+
+
 def test_rule1b_fires_even_with_cited_evidence(tmp_path: Path) -> None:
     """Evidence answers 'was anything verified', not 'is the gap resolved'."""
     events = [

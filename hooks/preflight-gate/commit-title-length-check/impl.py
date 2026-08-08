@@ -273,7 +273,7 @@ def _scan_merge_tail(tail: list[str]) -> tuple[bool, str | None, str | None, str
 def _gh_api_segment(argv: list[str]) -> tuple[list[str], str | None] | None:
     """Return `(argv_after_api, repo)` for `gh api` calls, or None."""
     argv = strip_prefix(argv)
-    if not argv or argv[0] != "gh":
+    if not argv or not _is_gh_binary(argv[0]):
         return None
 
     repo: str | None = None

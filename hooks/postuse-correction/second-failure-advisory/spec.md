@@ -19,7 +19,9 @@ Supported hosts: all
 ## Covered surface
 
 - Event: `PostToolUse`
-- Matcher: `all tools` (hook가 등록된 이벤트의 tool_name 제약은 별도 없음)
+- Matcher: `all tools` — `hooks/manifest.json` 항목에 `matcher` 키를 두지
+  않습니다. 명시 목록을 쓰면 MCP 도구·`WebFetch`·`NotebookEdit`처럼 열거되지
+  않은 이름의 반복 실패가 matcher 단계에서 통째로 누락됩니다.
 
 ## Failure 판단
 
@@ -82,10 +84,14 @@ error_signature)`를 세션 스코프로 카운트하고 2회차에 advisory")�
 lock을 두지 않습니다 — 이 훅은 차단하지 않고 조언만 하므로, 락 생명주기와
 교착 위험을 감수할 만한 이득이 없습니다.
 
-출력은 `stderr`에 아래 형태로 1줄 기록합니다.
+출력은 `stdout`에 `hookSpecificOutput.additionalContext`로 1줄 기록합니다
+(DESIGN.md의 PostToolUse 교정 방출 규약, `builtin-task-postuse`와 동일 형태).
+exit 0인 PostToolUse 훅의 `stderr`는 디버그 로그로만 가고 모델에 도달하지
+않으므로, stderr로 내보내면 이 훅이 존재하는 이유인 재시도 루프 교정이
+일어나지 않습니다.
 
-```text
-[second-failure-advisory] 동일한 오류 패턴으로 세션 내 2회째 실패가 감지되었습니다. 원인 분석 없이 즉시 재시도하는 루프가 될 수 있습니다. <tool_name> 실패 패턴 2회째 재현 중입니다. signature=<sig_prefix> Reference: <path?>. ...
+```json
+{"continue": true, "hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "[second-failure-advisory] 동일한 오류 패턴으로 세션 내 2회째 실패가 감지되었습니다. … signature=<sig_prefix> Reference: <path?> — …"}}
 ```
 
 `reference`는 실패 텍스트의 `Reference:` label, `hooks/...` 또는 `*spec.md`

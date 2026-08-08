@@ -159,7 +159,7 @@ rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
 
-if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -n "$err" ] && assert_match "2회째" "$err"; then
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
   assert_pass "2) second same failure emits advisory"
 else
   assert_fail "2) second same failure emits advisory" "rc=$rc out=[$out] err=[$err]"
@@ -243,7 +243,7 @@ rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
 
-if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -n "$err" ] && assert_match "2회째" "$err"; then
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
   assert_pass "5) path/hash/timestamp normalization preserves signature"
 else
   assert_fail "5) path/hash/timestamp normalization preserves signature" "rc=$rc out=[$out] err=[$err]"
@@ -337,7 +337,7 @@ rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
 
-if [ "$rc" -eq 0 ] && [ -z "$out" ] && assert_match "2회째" "$err"; then
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && assert_match "2회째" "$out"; then
   assert_pass "8) non-consecutive repeat still advises on the 2nd occurrence"
 else
   assert_fail "8) non-consecutive repeat still advises on the 2nd occurrence" "rc=$rc out=[$out] err=[$err]"
@@ -399,9 +399,9 @@ rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
 
-if [ "$rc" -eq 0 ] && [ -z "$out" ] \
-  && assert_match "hooks/preflight-gate/foo/spec.md" "$err" \
-  && assert_match "재진술" "$err"; then
+if [ "$rc" -eq 0 ] && [ -z "$err" ] \
+  && assert_match "hooks/preflight-gate/foo/spec.md" "$out" \
+  && assert_match "재진술" "$out"; then
   assert_pass "11) advisory carries the failure-text Reference and restate order"
 else
   assert_fail "11) advisory carries the failure-text Reference and restate order" "rc=$rc out=[$out] err=[$err]"
@@ -440,7 +440,7 @@ rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
 
-if [ "$rc" -eq 0 ] && [ -z "$out" ] && assert_match "2회째" "$err"; then
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && assert_match "2회째" "$out"; then
   assert_pass "13) interrupted response counts as a failure"
 else
   assert_fail "13) interrupted response counts as a failure" "rc=$rc out=[$out] err=[$err]"

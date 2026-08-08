@@ -252,7 +252,14 @@ def _save_state(path: str, state: dict[str, Any]) -> bool:
 
 
 def _emit_advisory(tool_name: str, signature: str, reference: str) -> None:
-    """Emit required advisory message once, on the 2nd failure."""
+    """Emit the advisory once, on the 2nd failure.
+
+    Written as `hookSpecificOutput.additionalContext` (DESIGN.md, PostToolUse
+    corrective emissions), mirroring `builtin-task-postuse`. A PostToolUse hook
+    that exits 0 has its stderr routed to the debug log, never to the model — so
+    the stderr form would leave the retry loop uncorrected, which is the one
+    thing this hook exists to do.
+    """
     message = f"{_ADVISORY_PREFIX}{tool_name} 실패 패턴 2회째 재현 중입니다. "
     message += f"signature={signature[:12]}"
     if reference:
@@ -262,7 +269,18 @@ def _emit_advisory(tool_name: str, signature: str, reference: str) -> None:
         )
     else:
         message += " 재시도 전에 차단 판정 술어를 한 줄로 재진술하세요."
-    sys.stderr.write(message + "\n")
+    json.dump(
+        {
+            "continue": True,
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": message,
+            },
+        },
+        sys.stdout,
+        ensure_ascii=False,
+    )
+    sys.stdout.write("\n")
 
 
 @fail_open

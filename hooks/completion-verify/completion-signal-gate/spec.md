@@ -125,6 +125,14 @@ it — so `완료되지 않았습니다`, `완료 안 됨`, `아직 완료 전�
 | `검증 증거 부재` | evidence is explicitly missing |
 | `not verified` / `unverified` | unresolved verification state (EN) |
 
+A marker that is itself reported as resolved does not count — `미해소 항목 없음`,
+`갭 없음`, `unverified: none` state the *absence* of a gap, and matching the
+marker as a bare substring would turn a clean GO output into a contradiction.
+The 10 chars following each marker are scanned for a resolution form (`없음`,
+`없습니다`, `해소됨`, `none`, `resolved`, `cleared`) before the marker counts. The
+English forms are stored with a leading space so they only match as a separate
+word.
+
 #### Rule 2 — plugin-context anchoring (Event 2)
 
 Fires in either of two forms when the cwd's active plugin is `praxis`
