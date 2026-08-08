@@ -10,8 +10,13 @@
 #   4) 다른 tool + 동일 텍스트 -> tool 분기 때문에 advisory 없음(각 tool은 독립 카운트)
 #   5) 경로/해시/타임스탬프 가변치 차이 -> 정규화 후 동일 시그니처로 2회째 advisory
 #   6) 성공 응답은 무시
-#   7) malformed / 빈 stdin은 fail-open
-#   8) session_id 없음은 fail-open
+#   7) malformed / 빈 stdin / session_id 없음은 fail-open
+#   8) 사이에 성공·다른 실패가 끼어도 같은 쌍의 2회째에 advisory
+#   9) 상태 저장 실패 시 advisory 무음
+#  10) stdout/output만 있는 성공 응답은 반복돼도 무음
+#  11) 실패 텍스트의 Reference 경로가 advisory에 포함
+#  12) 3회째 이상은 추가 advisory 없음
+#  13) interrupted 응답은 실패로 판정
 #
 # Run:
 #   bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
@@ -166,7 +171,19 @@ fi
 echo "=== case 3: same tool, different signature => no advisory ==="
 STATE3="$TMP_DIR/c3.json"
 payload3="$(make_payload Bash sess-944-diff 1 default)"
-payload3b="$(make_payload Bash sess-944-diff 1 output-only)"
+# A genuinely different error signature — not an output-only payload, which
+# would be classified as a success and so would pass this case for the wrong
+# reason.
+payload3b="$(python3 - <<'PY'
+import json
+print(json.dumps({
+    'session_id':'sess-944-diff',
+    'tool_name':'Bash',
+    'tool_input':{'file_path':'/tmp/project/src/main.py'},
+    'tool_response':{'exit':1,'stderr':'permission denied while opening socket'},
+}))
+PY
+)"
 out_file="$(mktemp)" err_file="$(mktemp)"
 pipe_hook "$payload3" "$STATE3" >/dev/null 2>/dev/null
 pipe_hook "$payload3b" "$STATE3" >"$out_file" 2>"$err_file"
@@ -303,6 +320,128 @@ if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
   assert_pass "7-3) missing session_id -> no advisory"
 else
   assert_fail "7-3) missing session_id -> no advisory" "rc=$rc out=[$out] err=[$err]"
+fi
+
+# ---------------------------------------------------------------------------
+# Case 8: the counter is session-cumulative, not consecutive (issue #944)
+# ---------------------------------------------------------------------------
+echo "=== case 8: success/other failure in between still counts ==="
+STATE12="$TMP_DIR/c12.json"
+pipe_hook "$(make_payload Bash sess-944-gap 1)" "$STATE12" >/dev/null 2>/dev/null
+pipe_hook "$(make_payload Bash sess-944-gap 0 success)" "$STATE12" >/dev/null 2>/dev/null
+pipe_hook '{"session_id":"sess-944-gap","tool_name":"Bash","tool_input":{},"tool_response":{"exit":1,"stderr":"a totally different failure"}}' \
+  "$STATE12" >/dev/null 2>/dev/null
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(make_payload Bash sess-944-gap 1)" "$STATE12" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && assert_match "2회째" "$err"; then
+  assert_pass "8) non-consecutive repeat still advises on the 2nd occurrence"
+else
+  assert_fail "8) non-consecutive repeat still advises on the 2nd occurrence" "rc=$rc out=[$out] err=[$err]"
+fi
+
+# ---------------------------------------------------------------------------
+# Case 9: a failed state write suppresses the advisory (persist-before-advise)
+# ---------------------------------------------------------------------------
+echo "=== case 9: unwritable state path => silent ==="
+STATE13_DIR="$TMP_DIR/ro"
+mkdir -p "$STATE13_DIR"
+STATE13="$STATE13_DIR/c13.json"
+pipe_hook "$(make_payload Bash sess-944-ro 1)" "$STATE13" >/dev/null 2>/dev/null
+chmod 500 "$STATE13_DIR"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(make_payload Bash sess-944-ro 1)" "$STATE13" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+chmod 700 "$STATE13_DIR"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+  assert_pass "9) unwritable state suppresses the advisory"
+else
+  assert_fail "9) unwritable state suppresses the advisory" "rc=$rc out=[$out] err=[$err]"
+fi
+
+# ---------------------------------------------------------------------------
+# Case 10: stdout/output-only responses are successes, not failures
+# ---------------------------------------------------------------------------
+echo "=== case 10: repeated stdout-only success => silent ==="
+STATE14="$TMP_DIR/c14.json"
+SUCCESS_PAYLOAD='{"session_id":"sess-944-ok","tool_name":"Bash","tool_input":{},"tool_response":{"stdout":"hello world"}}'
+pipe_hook "$SUCCESS_PAYLOAD" "$STATE14" >/dev/null 2>/dev/null
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$SUCCESS_PAYLOAD" "$STATE14" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+  assert_pass "10) repeated stdout-only success stays silent"
+else
+  assert_fail "10) repeated stdout-only success stays silent" "rc=$rc out=[$out] err=[$err]"
+fi
+
+# ---------------------------------------------------------------------------
+# Case 11: the advisory carries the Reference parsed out of the failure text
+# ---------------------------------------------------------------------------
+echo "=== case 11: Reference extracted from failure text ==="
+STATE15="$TMP_DIR/c15.json"
+REF_PAYLOAD='{"session_id":"sess-944-ref","tool_name":"Bash","tool_input":{},"tool_response":{"exit":1,"stderr":"BLOCKED: gate fired.\nReference: hooks/preflight-gate/foo/spec.md"}}'
+pipe_hook "$REF_PAYLOAD" "$STATE15" >/dev/null 2>/dev/null
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$REF_PAYLOAD" "$STATE15" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] \
+  && assert_match "hooks/preflight-gate/foo/spec.md" "$err" \
+  && assert_match "재진술" "$err"; then
+  assert_pass "11) advisory carries the failure-text Reference and restate order"
+else
+  assert_fail "11) advisory carries the failure-text Reference and restate order" "rc=$rc out=[$out] err=[$err]"
+fi
+
+# ---------------------------------------------------------------------------
+# Case 12: the advisory fires once — the 3rd+ failure adds nothing
+# ---------------------------------------------------------------------------
+echo "=== case 12: third failure => no further advisory ==="
+STATE12="$TMP_DIR/c12.json"
+payload12="$(make_payload Bash sess-944-third 1)"
+pipe_hook "$payload12" "$STATE12" >/dev/null 2>/dev/null
+pipe_hook "$payload12" "$STATE12" >/dev/null 2>/dev/null
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$payload12" "$STATE12" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+  assert_pass "12) third failure emits no further advisory"
+else
+  assert_fail "12) third failure emits no further advisory" "rc=$rc out=[$out] err=[$err]"
+fi
+
+# ---------------------------------------------------------------------------
+# Case 13: an interrupted response counts as a failure
+# ---------------------------------------------------------------------------
+echo "=== case 13: interrupted => failure ==="
+STATE13="$TMP_DIR/c13.json"
+INTERRUPTED='{"session_id":"sess-944-int","tool_name":"Bash","tool_input":{},"tool_response":{"interrupted":true,"stderr":"user cancelled the run"}}'
+pipe_hook "$INTERRUPTED" "$STATE13" >/dev/null 2>/dev/null
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$INTERRUPTED" "$STATE13" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && assert_match "2회째" "$err"; then
+  assert_pass "13) interrupted response counts as a failure"
+else
+  assert_fail "13) interrupted response counts as a failure" "rc=$rc out=[$out] err=[$err]"
 fi
 
 echo

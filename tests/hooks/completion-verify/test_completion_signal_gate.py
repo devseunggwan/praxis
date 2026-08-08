@@ -382,6 +382,48 @@ def test_rule1_suppressed_when_evidence_present_despite_go_verdict(tmp_path: Pat
     assert stdout == "", f"evidence must suppress Rule 1 when present; stdout={stdout!r}"
 
 
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        "not ready to merge",
+        "머지 가능하지 않습니다",
+        "문제 없음이 아닙니다",
+    ],
+)
+def test_rule1b_ignores_negated_go_verdicts(verdict: str, tmp_path: Path) -> None:
+    """A negated GO phrase reports the gap; it does not override it."""
+    events = [
+        mk_user("머지해도 되는지 판단해주세요"),
+        mk_assistant(f"{verdict} — 미해소 항목이 남아 있습니다."),
+    ]
+    tp = write_jsonl(events, tmp_path)
+    stdout, stderr, rc = run_hook(tp)
+    assert rc == 0
+    assert stderr == "", f"hook must keep stderr empty; got {stderr!r}"
+    assert "go-verdict phrase detected" not in _msg(stdout), (
+        f"negated verdict {verdict!r} must not fire Rule 1b; stdout={stdout!r}"
+    )
+
+
+def test_rule1b_fires_even_with_cited_evidence(tmp_path: Path) -> None:
+    """Evidence answers 'was anything verified', not 'is the gap resolved'."""
+    events = [
+        mk_user("머지해도 되는지 판단해주세요"),
+        mk_assistant(
+            "ready to merge\n"
+            "$ pytest tests/ → 2 passed\n"
+            "다만 실환경 전송은 not verified 상태입니다."
+        ),
+    ]
+    tp = write_jsonl(events, tmp_path)
+    stdout, stderr, rc = run_hook(tp)
+    assert rc == 0
+    assert stderr == "", f"hook must keep stderr empty; got {stderr!r}"
+    assert "go-verdict phrase detected together with unresolved-gap marker" in _msg(
+        stdout
+    ), f"Rule 1b must fire despite evidence; stdout={stdout!r}"
+
+
 def test_rule1b_only_gap_without_go_does_not_fire(tmp_path: Path) -> None:
     """Gap marker alone must not trigger Rule 1b."""
     events = [

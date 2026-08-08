@@ -55,8 +55,21 @@ no evidence-block indicator is present in the same turn, an advisory is emitted.
 When a GO / merge-readiness phrase appears in the same turn with an
 unresolved-gap marker, an advisory is emitted.
 
-This blocks mixed outputs such as "ready to merge" and "미해소 항목 있음" appearing
-together and prevents merge-readiness claims from bypassing unresolved work.
+This flags mixed outputs such as "ready to merge" and "미해소 항목 있음" appearing
+together. The hook exits 0 and never blocks — it surfaces the contradiction so
+the turn either drops the GO verdict or resolves the gap.
+
+Negated GO phrases (`not ready to merge`, `머지 가능하지 않습니다`,
+`문제 없음이 아닙니다`) are gap reports, not verdicts, and do not fire Rule 1b.
+The English guard reuses the issue-#515 negation window preceding the match;
+the Korean guard scans the following window and additionally recognises the
+predicate-negation forms (`아닙`, `아니다`, `아니라`, `아님`) that the
+completion-verb marker set does not cover.
+
+Evidence does **not** suppress Rule 1b. A cited `$ command → output` line
+answers "was anything verified"; an unresolved-gap marker in the same turn
+states that something was *not*. Rule 1's evidence gate therefore does not
+carry over — the contradiction stands regardless of evidence.
 
 **Completion-signal phrases (EN, case-insensitive, ASCII word-boundary):**
 
@@ -141,7 +154,7 @@ stdout. The hook always exits 0 — it never blocks.
 
 **Rule 1b advisory (systemMessage body):**
 
-```
+```text
 [praxis:completion-signal-gate] go-verdict phrase detected together with unresolved-gap marker in last assistant turn.
 [praxis:completion-signal-gate] Rule: CLAUDE.md 'Output-Block Falsification' — do not claim GO/merge readiness while unresolved gap markers are present in the same output.
 [praxis:completion-signal-gate] Trigger: both a go-verdict phrase and unresolved-gap marker coexist in one turn.
@@ -231,12 +244,20 @@ Covers 52 cases:
 - Cited `$ command → output` line → suppressed
 
 **Rule 1b trigger (3 cases):**
+
 - `보내도 됩니다` + `미해소`
 - `문제 없음` + `검증 증거 부재`
 - `ready to merge` + `not verified`
 
-**Rule 1b suppression (1 case):**
-- `보내도 됩니다` + `not verified` + cited output
+**Rule 1b silence (5 cases):**
+
+- gap marker alone, no GO verdict → silent
+- negated GO verdicts (`not ready to merge`, `ready to merge가 아닙니다`,
+  `문제 없음이 아닙니다`) with a gap marker → silent
+- GO verdict with cited output but **no** gap marker → silent (Rule 1 path)
+
+Cited evidence alongside a gap marker does **not** silence Rule 1b; a
+regression case asserts it still fires.
 
 **False-positive cross-checks (5 normal-completion samples):**
 - FP1: Bash + evidence signal → no advisory

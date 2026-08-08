@@ -7,7 +7,7 @@ Supported hosts: all
 2회째 실패에 한해 stderr에 advisory를 출력해, 원인 분석 없이 동일 실패를
 무한 재시도하는 패턴을 줄입니다.
 
-### Why this exists
+## Why this exists
 
 최근 일부 도구 호출에서 동일한 원인으로 동일 오류가 반복되는데도 매번 새
 실패로 처리되어, 사용자가 어떤 조치가 필요한지 놓치고 즉시 재시도 루프를
@@ -16,22 +16,22 @@ Supported hosts: all
 `second-failure-advisory`는 경량 추적 기반으로만 동작하므로 툴 실행을
 차단하지 않고(항상 exit 0), 2회째 반복만 알리는 advisory로 동작합니다.
 
-### Covered surface
+## Covered surface
 
 - Event: `PostToolUse`
 - Matcher: `all tools` (hook가 등록된 이벤트의 tool_name 제약은 별도 없음)
 
-### Failure 판단
+## Failure 판단
 
 `tool_response` 기준:
 
 - `isError is True`이면 실패
 - `interrupted is True`이면 실패
 - `exit`가 정수 0이 아니면 실패
-- 위 항목이 없고 `error`/`stderr`/`output`/`stdout`에 비어있지 않은 텍스트가
-  있으면 실패
+- 위 항목이 없고 `error`/`stderr`에 비어있지 않은 텍스트가 있으면 실패
+- `output`/`stdout`만 있는 응답은 성공으로 처리
 
-### Signature 산정
+## Signature 산정
 
 `tool_response`에서 실패 텍스트 후보를 다음 순서로 추출합니다.
 
@@ -55,20 +55,38 @@ Supported hosts: all
 정규화 후 텍스트를 소문자화하고 최대 길이를 제한합니다.
 최종 signature은 `sha1(f"{tool_name}\\0{normalized_signature}")`입니다.
 
-### Output behavior
+## Counting semantics — 세션 누적, 연속 아님
+
+카운터는 `(tool_name, signature)` 쌍별 **세션 누적** 값입니다. 중간에 성공이나
+다른 실패가 끼어들어도 카운터는 리셋되지 않으며, 같은 쌍의 2회째 실패에서
+advisory가 발화합니다. 이는 issue #944가 지정한 동작("`(tool_name,
+error_signature)`를 세션 스코프로 카운트하고 2회차에 advisory")입니다.
+
+"연속 실패"가 아니라 "세션 내 2회째 동일 실패"가 발화 조건이므로, 메시지와
+문서 모두 연속(consecutive)이라는 표현을 쓰지 않습니다.
+
+## Output behavior
 
 다음 경우에만 advisory를 출력합니다.
 
 - 동일 `session_id` 기준 2번째 실패 (`(tool_name, signature)` 조합)
 - 이전 카운트가 1일 때
 
+상태 저장(`os.replace` 기반 원자적 교체)이 성공한 뒤에만 advisory를
+출력합니다. 저장에 실패하면 카운터가 남지 않아 같은 advisory가 다음 실패에서
+중복 발화할 수 있으므로, 저장 실패 시에는 무음 처리합니다.
+
 출력은 `stderr`에 아래 형태로 1줄 기록합니다.
 
-```
-[second-failure-advisory] 동일한 오류 패턴으로 연속 실패가 감지되었습니다. ... signature=<sig_prefix> | reference=<path?>
+```text
+[second-failure-advisory] 동일한 오류 패턴으로 세션 내 2회째 실패가 감지되었습니다. 원인 분석 없이 즉시 재시도하는 루프가 될 수 있습니다. <tool_name> 실패 패턴 2회째 재현 중입니다. signature=<sig_prefix> Reference: <path?>. ...
 ```
 
-`reference`는 `tool_input.file_path`가 있으면 같이 출력합니다.
+`reference`는 실패 텍스트의 `Reference:` label, `hooks/...` 또는 `*spec.md`
+경로에서 먼저 추출하고, 없으면 `tool_input.file_path/path/target`을 사용합니다.
+경로가 추출되면 해당 파일을 read하고 차단 판정 술어를 한 줄로 재진술한 뒤
+재시도하라는 지시를 같이 출력합니다. 경로가 없으면 판정 술어 재진술만
+요구합니다.
 
 다음 경우는 무음(fail-open) 처리이며 exit 0으로 종료됩니다.
 
@@ -79,7 +97,7 @@ Supported hosts: all
 - 첫 번째 실패
 - 저장 실패(상태 파일 I/O 실패)
 
-### State
+## State
 
 기준 파일:
 
@@ -99,12 +117,12 @@ Supported hosts: all
 }
 ```
 
-### Privacy
+## Privacy
 
 - 원문 오류 텍스트 자체를 기록하지 않고, 정규화된 signature의 hash를 저장해
   민감 로그 누출을 줄입니다.
 
-### Tests
+## Tests
 
 Run:
 
@@ -118,4 +136,8 @@ bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
 - 2회 실패(동일 signature): advisory 출력
 - 동일 시그니처에서 tool_name이 다르면 advisory 없음
 - 경로/해시/타임스탬프만 바뀐 2회 실패도 advisory 출력
+- 사이에 성공/다른 실패가 끼어도 같은 쌍의 2회째에 advisory 출력
+- 상태 저장 실패 시 advisory 무음
+- `stdout`/`output`만 있는 성공 응답은 반복돼도 무음
+- 실패 텍스트의 `Reference:` 경로가 advisory와 재진술 지시에 포함됨
 - 비실패/비정상 입력은 fail-open

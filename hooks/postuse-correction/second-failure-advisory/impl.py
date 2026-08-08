@@ -63,13 +63,18 @@ from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa:
 
 _ADVISORY_PREFIX = (
     "[second-failure-advisory] "
-    "동일한 오류 패턴으로 연속 실패가 감지되었습니다. "
+    "동일한 오류 패턴으로 세션 내 2회째 실패가 감지되었습니다. "
     "원인 분석 없이 즉시 재시도하는 루프가 될 수 있습니다. "
 )
 
 _STATE_SCHEMA_VERSION = 1
 _MAX_SIGNATURE_LEN = 4_096
 
+
+# Reference candidates inside a blocking message, most explicit first.
+_REFERENCE_LABEL_RE = re.compile(r"Reference:\s*([^\s\"'`,;]+)")
+_HOOK_PATH_RE = re.compile(r"(?<!\S)(hooks/[^\s\"'`,;]+)")
+_SPEC_PATH_RE = re.compile(r"(?<!\S)([^\s\"'`,;]*spec\.md)")
 
 _PATH_RE = re.compile(r"(?<!\S)/[^\s\"'`]+")
 _WIN_PATH_RE = re.compile(r"(?<!\S)[A-Za-z]:\\[^\s\"'`]+")
@@ -108,7 +113,18 @@ def _extract_tool_input(payload: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def _extract_reference(tool_input: dict[str, Any]) -> str:
+def _extract_reference(tool_input: dict[str, Any], failure_text: str = "") -> str:
+    """Path the agent should read before retrying.
+
+    The failure text wins over `tool_input`: a gate that blocks names the spec
+    holding its decision predicate (`Reference: hooks/.../spec.md`), while
+    `tool_input` only names whatever the agent was already touching.
+    """
+    for pattern in (_REFERENCE_LABEL_RE, _HOOK_PATH_RE, _SPEC_PATH_RE):
+        match = pattern.search(failure_text)
+        if match:
+            return match.group(1).strip()
+
     for key in ("file_path", "path", "target"):
         candidate = tool_input.get(key)
         if isinstance(candidate, str) and candidate.strip():
@@ -138,6 +154,23 @@ def _derive_failure_text(tool_response: Any) -> str:
     return ""
 
 
+def _derive_error_text(tool_response: Any) -> str:
+    """Error-channel text only.
+
+    Distinct from `_derive_failure_text`, which also reads `output`/`stdout` to
+    build a signature: those two carry a *successful* tool's normal output, so
+    treating them as evidence of failure classifies every repeated success as a
+    repeated failure.
+    """
+    if not isinstance(tool_response, dict):
+        return ""
+    for key in ("error", "stderr"):
+        value = tool_response.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def _is_failed(tool_response: Any) -> bool:
     if not isinstance(tool_response, dict):
         return False
@@ -158,8 +191,7 @@ def _is_failed(tool_response: Any) -> bool:
             pass
 
     # Back-compat path: older/malformed payloads that only surfaced text.
-    failure_text = _derive_failure_text(tool_response)
-    return bool(failure_text)
+    return bool(_derive_error_text(tool_response))
 
 
 def _normalize_signature(raw: str) -> str:
@@ -224,7 +256,12 @@ def _emit_advisory(tool_name: str, signature: str, reference: str) -> None:
     message = f"{_ADVISORY_PREFIX}{tool_name} 실패 패턴 2회째 재현 중입니다. "
     message += f"signature={signature[:12]}"
     if reference:
-        message += f" Reference: {reference}"
+        message += (
+            f" Reference: {reference}"
+            f" — 재시도 전에 {reference}를 read하고 차단 판정 술어를 한 줄로 재진술하세요."
+        )
+    else:
+        message += " 재시도 전에 차단 판정 술어를 한 줄로 재진술하세요."
     sys.stderr.write(message + "\n")
 
 
@@ -251,7 +288,10 @@ def main() -> int:
         return 0
 
     signature = _compute_signature(tool_name, tool_response)
-    ref = _extract_reference(_extract_tool_input(payload))
+    ref = _extract_reference(
+        _extract_tool_input(payload),
+        _derive_failure_text(tool_response),
+    )
 
     path = _state_path(session_id)
     state = _load_state(path)
@@ -268,10 +308,13 @@ def main() -> int:
 
     failures[pair_key] = prior_count + 1
 
+    # Persist before advising: a lost write would let the same advisory fire
+    # again on the next failure of this pair.
+    if not _save_state(path, state):
+        return 0
+
     if prior_count == 1:
         _emit_advisory(tool_name, signature, ref)
-
-    _ = _save_state(path, state)
     return 0
 
 

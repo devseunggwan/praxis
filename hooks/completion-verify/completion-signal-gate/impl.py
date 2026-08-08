@@ -148,6 +148,18 @@ _NEGATION_MARKERS_KO = (
 )
 
 
+# GO verdicts are negated as predicates ("머지 가능한 것은 아닙니다"), a form the
+# completion-verb markers above do not cover. Scoped to the GO path so the
+# issue-#515 completion-signal behaviour is left untouched.
+_GO_NEGATION_MARKERS_KO = _NEGATION_MARKERS_KO + (
+    "아닙",
+    "아니다",
+    "아니라",
+    "아니야",
+    "아님",
+)
+
+
 def _is_negated_en(text: str, start: int) -> bool:
     """True if an English completion match at `start` is under negation."""
     prefix = text[max(0, start - _NEGATION_WINDOW_EN):start].lower()
@@ -195,7 +207,17 @@ def _has_go_verdict_with_unresolved_gap(text: str) -> bool:
     if not has_gap:
         return False
     for pat in _GO_VERDICT_PATTERNS:
-        if pat.search(text):
+        for match in pat.finditer(text):
+            # A negated GO phrase ("not ready to merge", "머지 가능하지 않습니다")
+            # reports the gap rather than overriding it — same rule the
+            # completion-signal path applies (issue #515).
+            if _is_negated_en(text, match.start()):
+                continue
+            if _is_negated_ko(text, match.end()):
+                continue
+            suffix = text[match.end():match.end() + _NEGATION_WINDOW_KO]
+            if any(neg in suffix for neg in _GO_NEGATION_MARKERS_KO):
+                continue
             return True
     return False
 
