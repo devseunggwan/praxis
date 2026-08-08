@@ -4,8 +4,8 @@ Supported hosts: all
 
 `hooks/second-failure-advisory` is a PostToolUse 보조 훅입니다. 동일
 `tool_name + error_signature` 조합이 같은 세션에서 반복 실패했을 때
-2회째 실패에 한해 stderr에 advisory를 출력해, 원인 분석 없이 동일 실패를
-무한 재시도하는 패턴을 줄입니다.
+2회째 실패에 한해 stdout의 `hookSpecificOutput.additionalContext`로 advisory를
+출력해, 원인 분석 없이 동일 실패를 무한 재시도하는 패턴을 줄입니다.
 
 ## Why this exists
 
@@ -78,11 +78,18 @@ error_signature)`를 세션 스코프로 카운트하고 2회차에 advisory")�
 출력합니다. 저장에 실패하면 카운터가 남지 않아 같은 advisory가 다음 실패에서
 중복 발화할 수 있으므로, 저장 실패 시에는 무음 처리합니다.
 
-원자적인 것은 교체(rename)뿐이며, 읽기-증가-쓰기 전체는 직렬화되지 않습니다.
-한 세션에서 도구 호출이 병렬로 끝나면 PostToolUse도 동시에 돌 수 있고, 그때
-한쪽 증가분이 유실될 수 있습니다. 결과는 advisory가 한 번 늦게 나가는 것뿐이라
-lock을 두지 않습니다 — 이 훅은 차단하지 않고 조언만 하므로, 락 생명주기와
-교착 위험을 감수할 만한 이득이 없습니다.
+원자적인 것은 교체(rename)뿐이며, 읽기-증가-쓰기-발화 전체는 프로세스 간에
+직렬화되지 않습니다. 한 세션에서 도구 호출이 병렬로 끝나면 PostToolUse는
+호출마다 별도 프로세스로 돌므로, 저장된 count가 1일 때 두 프로세스가 함께
+1을 읽어 각자 2를 쓰고 **둘 다 advisory를 낼 수 있습니다**. 반대로 서로 다른
+쌍의 동시 실패는 한쪽 증가분을 덮어써 advisory가 한 번 늦어질 수 있습니다.
+"3회째 이상 무음"은 순차 실행 기준의 계약이며, 이 창에서는 지켜지지 않습니다.
+
+lock은 두지 않습니다. 피해가 advisory 한 줄 중복 또는 한 박자 지연에 그치고
+이 훅은 차단하지 않기 때문이며, 무엇보다 동일한 읽기-수정-쓰기 + `os.replace`
+패턴을 쓰는 훅이 이 레포에 7개 있고 파일 락 사용은 0건이라, 이 훅 하나만
+직렬화하면 문제는 남긴 채 패턴만 갈라집니다. 직렬화가 필요하다는 판단이
+서면 7개 공통 정책으로 다루는 것이 맞습니다.
 
 출력은 `stdout`에 `hookSpecificOutput.additionalContext`로 1줄 기록합니다
 (DESIGN.md의 PostToolUse 교정 방출 규약, `builtin-task-postuse`와 동일 형태).
