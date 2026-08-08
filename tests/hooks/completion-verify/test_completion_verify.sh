@@ -102,6 +102,22 @@ mk_bash_use() {
     '{type: "tool_use", id: $id, name: "Bash", input: {command: $c}}'
 }
 
+mk_edit_use() {
+  # $1 = tool_use id, $2 = path, $3 = tool name (Edit/Write/MultiEdit/NotebookEdit)
+  local id="$1" path="$2" name="${3:-Edit}"
+  local key="file_path"
+  [ "$name" = "NotebookEdit" ] && key="notebook_path"
+  jq -nc --arg id "$id" --arg p "$path" --arg n "$name" --arg k "$key" \
+    '{type: "tool_use", id: $id, name: $n, input: {($k): $p}}'
+}
+
+mk_named_use() {
+  # $1 = tool_use id, $2 = tool name (e.g. an MCP browser tool)
+  local id="$1" name="$2"
+  jq -nc --arg id "$id" --arg n "$name" \
+    '{type: "tool_use", id: $id, name: $n, input: {}}'
+}
+
 mk_tool_result() {
   local id="$1" content="$2"
   jq -nc --arg id "$id" --arg c "$content" '{
@@ -266,6 +282,123 @@ run_case "AG5 echo of command-substitution passes" pass "$USER_AG5
 $ASST_AG5A
 $RESULT_AG5
 $ASST_AG5B"
+
+# FE — evidence class gated by the changed surface [#943] -------------------
+#
+# A frontend surface edited this turn needs evidence that something observed
+# the rendered page. A generic pass (pytest, curl) satisfies the generic gate
+# but says nothing about what the browser shows.
+
+FE_OUT="============= 12 passed in 0.85s ============="
+FE_CITE="12 passed in 0.85s. 작업 완료."
+
+# fe_case <name> <expected> <edited-path> <tool> <verify-cmd> <verify-out> <final-text>
+fe_case() {
+  local name="$1" expected="$2" path="$3" tool="$4" cmd="$5" out="$6" final="$7"
+  local u a1 b a2 r a3
+  u=$(mk_user_text "고쳐줘")
+  a1=$(mk_assistant "편집 중..." "[$(mk_edit_use "fe-e" "$path" "$tool")]")
+  b=$(mk_bash_use "fe-b" "$cmd")
+  a2=$(mk_assistant "확인 중..." "[$b]")
+  r=$(mk_tool_result "fe-b" "$out")
+  a3=$(mk_assistant "$final")
+  run_case "$name" "$expected" "$u
+$a1
+$a2
+$r
+$a3"
+}
+
+# FE1 — the motivating failure: .tsx edited, only curl/grep evidence → block
+fe_case "FE1 frontend edit with curl-only evidence" block \
+  "apps/web/src/Docs.tsx" Edit \
+  "curl -s -o /dev/null -w '%{http_code}' https://example.test" \
+  "200 — 12 passed in 0.85s" "$FE_CITE"
+
+# FE2 — cmux browser navigation with --snapshot-after → pass
+fe_case "FE2 frontend edit with cmux --snapshot-after" pass \
+  "apps/web/src/Docs.tsx" Edit \
+  "cmux browser goto http://localhost:3000/docs --snapshot-after" \
+  "$FE_OUT" "$FE_CITE"
+
+# FE3 — cmux browser observation subcommand (get text) → pass
+fe_case "FE3 frontend edit with cmux browser get text" pass \
+  "apps/web/src/Docs.tsx" Edit \
+  "cmux browser get text '.doc-link'" "$FE_OUT" "$FE_CITE"
+
+# FE4 — global flags between `cmux` and `browser` must not break the match
+fe_case "FE4 cmux global flag before browser subcommand" pass \
+  "apps/web/src/Docs.tsx" Edit \
+  "cmux --password secret browser snapshot --compact" "$FE_OUT" "$FE_CITE"
+
+# FE6 — echoed browser command is fabrication, not observation → block
+USER_FE6=$(mk_user_text "고쳐줘")
+ASST_FE6A=$(mk_assistant "편집 중..." "[$(mk_edit_use "fe6-e" "apps/web/src/Docs.tsx" Edit)]")
+ASST_FE6B=$(mk_assistant "확인 중..." "[$(mk_bash_use "fe6-b0" 'echo "cmux browser snapshot"')]")
+RESULT_FE6A=$(mk_tool_result "fe6-b0" "cmux browser snapshot")
+ASST_FE6C=$(mk_assistant "테스트 중..." "[$(mk_bash_use "fe6-b1" "pytest -q")]")
+RESULT_FE6B=$(mk_tool_result "fe6-b1" "$FE_OUT")
+ASST_FE6D=$(mk_assistant "$FE_CITE")
+run_case "FE6 echoed browser command is not observation" block "$USER_FE6
+$ASST_FE6A
+$ASST_FE6B
+$RESULT_FE6A
+$ASST_FE6C
+$RESULT_FE6B
+$ASST_FE6D"
+
+# FE5 — a browser MCP tool never appears as a Bash command → pass
+USER_FE5=$(mk_user_text "고쳐줘")
+ASST_FE5A=$(mk_assistant "편집 중..." "[$(mk_edit_use "fe5-e" "apps/web/src/Docs.tsx" Edit)]")
+ASST_FE5B=$(mk_assistant "스냅샷..." "[$(mk_named_use "fe5-m" "mcp__playwright__browser_snapshot")]")
+ASST_FE5C=$(mk_assistant "테스트 중..." "[$(mk_bash_use "fe5-b" "pytest -q")]")
+RESULT_FE5=$(mk_tool_result "fe5-b" "$FE_OUT")
+ASST_FE5D=$(mk_assistant "$FE_CITE")
+run_case "FE5 browser MCP tool counts as observation" pass "$USER_FE5
+$ASST_FE5A
+$ASST_FE5B
+$ASST_FE5C
+$RESULT_FE5
+$ASST_FE5D"
+
+# FE7 — backend-only edit keeps the generic gate's verdict (no regression)
+fe_case "FE7 backend edit unaffected" pass \
+  "src/api/handler.py" Edit "pytest -q" "$FE_OUT" "$FE_CITE"
+
+# FE8 — no edit at all (Q&A turn) → no false positive
+USER_FE8=$(mk_user_text "상태 알려줘")
+ASST_FE8A=$(mk_assistant "확인 중..." "[$(mk_bash_use "fe8-b" "pytest -q")]")
+RESULT_FE8=$(mk_tool_result "fe8-b" "$FE_OUT")
+ASST_FE8B=$(mk_assistant "$FE_CITE")
+run_case "FE8 no edit this turn" pass "$USER_FE8
+$ASST_FE8A
+$RESULT_FE8
+$ASST_FE8B"
+
+# FE9 — extension must be terminal: a .tsx.bak backup is not a frontend surface
+fe_case "FE9 .tsx.bak is not a frontend surface" pass \
+  "apps/web/src/Docs.tsx.bak" Edit "pytest -q" "$FE_OUT" "$FE_CITE"
+
+# FE10 — extension matching is case-insensitive
+fe_case "FE10 uppercase .TSX still frontend" block \
+  "apps/web/src/Docs.TSX" Edit "pytest -q" "$FE_OUT" "$FE_CITE"
+
+# FE11 — Write (file creation), not just Edit, counts as a surface change
+fe_case "FE11 Write of a .vue file counts" block \
+  "app/Card.vue" Write "pytest -q" "$FE_OUT" "$FE_CITE"
+
+# FE12 — NotebookEdit carries notebook_path; .ipynb is not a frontend surface
+fe_case "FE12 NotebookEdit .ipynb is not frontend" pass \
+  "nb/analysis.ipynb" NotebookEdit "pytest -q" "$FE_OUT" "$FE_CITE"
+
+# FE13 — no completion claim → the gate never arms, frontend or not
+fe_case "FE13 frontend edit without a completion claim" pass \
+  "apps/web/src/Docs.tsx" Edit "curl -s https://example.test" "200" \
+  "아직 확인 중입니다."
+
+# FE14 — stylesheets are a frontend surface too
+fe_case "FE14 scss edit counts as frontend" block \
+  "apps/web/src/theme.scss" Edit "pytest -q" "$FE_OUT" "$FE_CITE"
 
 # Fail-safe 1 — stop_hook_active=true → pass (no block) ---------------------
 fs_payload=$(jq -nc '{transcript_path: "/dev/null", stop_hook_active: true, session_id: "x"}')

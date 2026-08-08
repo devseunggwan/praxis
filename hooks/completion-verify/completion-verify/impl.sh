@@ -60,6 +60,35 @@ command -v praxis_fire_arm >/dev/null 2>&1 && \
 CLAIM_PATTERNS='(모두 완료(했)?|완료했습니다[.!。?…]?\s*$|작업 완료[.!。?…]?\s*$|완료[.!。?…]?\s*$|\bdone\b[.!?]?\s*$|\bfinished\b[.!?]?\s*$|cleanup (is |was )?finished|implementation complete|all done)'
 EVIDENCE_PATTERNS='(tests? passed|\bPASS\b|exit code 0|\b[1-9][0-9]* tests? (ran|passed)|\b[1-9][0-9]* passed\b|0 errors|build successful|lint clean|성공적으로|테스트.*통과|✅)'
 
+# --- Evidence class by changed surface (issue #943, stage 1: frontend) --------
+#
+# The patterns above are surface-agnostic, so a genuine command that verified
+# the WRONG thing still passes: a `curl` status sweep and a bundle `grep` are
+# valid oracles for a backend change and prove nothing about what a page
+# renders. The observed failure was a frontend doc-link swap declared complete
+# on 38 curl status codes plus a source grep; the conclusion changed once the
+# page was actually opened.
+#
+# This is a deterministic mapping (changed path → required evidence class), not
+# a sufficiency judgement — one regex match, so it fits inside a shell hook.
+# The SOT for the mapping is the global CLAUDE.md verification table.
+#
+# Only extensions that are unambiguously view-layer are listed. Bare `.ts`/`.js`
+# are deliberately absent: they are as often backend as frontend, and a false
+# block on a server change costs more than the miss.
+FRONTEND_PATH_PATTERN='\.(tsx|jsx|vue|svelte|astro|html|htm|css|scss|sass|less)$'
+
+# Oracles that observe a rendered page. `cmux browser` subcommands verified
+# against `cmux --help`: snapshot / get / is / eval / screenshot read the live
+# DOM, and `--snapshot-after` attaches one to a navigation or interaction.
+# A bare `browser open`/`goto` only navigates, so it is not on its own an
+# observation and is not listed.
+BROWSER_EVIDENCE_CMD_PATTERN='(cmux([[:space:]]+--[^[:space:]]+([[:space:]]+[^[:space:]]+)?)*[[:space:]]+browser[[:space:]].*(snapshot|screenshot|eval|get[[:space:]]|is[[:space:]]|wait[[:space:]])|--snapshot-after|playwright|puppeteer)'
+# Browser automation reached through an MCP server never appears as a Bash
+# command, only as a tool name — without this a Playwright-MCP verification
+# would be blocked as if nothing had been checked.
+BROWSER_EVIDENCE_TOOL_PATTERN='(browser|playwright|puppeteer|chrome_devtools)'
+
 # Single jq pass: extract last assistant text + Bash tool_result texts in current turn.
 # Current turn boundary = events after the last real user input (string content, or
 # array containing any non-tool_result block). Tool-result-only user messages are
@@ -111,7 +140,28 @@ TURN_JSON=$(tail -n 400 "$TRANSCRIPT_PATH" | jq -sc '
        | select(((($cmd | test("^\\s*(echo|printf)\\b")) and (($cmd | test("[;&|`$\\n]")) | not))) | not)
        | $r.text]
      | join("\n---\n")) as $genuine_outputs
-  | {last_text: $last_text, bash_outputs: $bash_outputs, genuine_outputs: $genuine_outputs}
+  | ([$turn[]
+       | select(.message.role == "assistant" and (.isSidechain // false) == false)
+       | (.message.content // [])[]
+       | select(.type == "tool_use")
+       | select(.name == "Edit" or .name == "Write" or .name == "MultiEdit"
+                or .name == "NotebookEdit")
+       | ((.input.file_path // .input.notebook_path) // "")]
+     | join("\n")) as $edited_paths
+  | ([$turn[]
+       | select(.message.role == "assistant" and (.isSidechain // false) == false)
+       | (.message.content // [])[]
+       | select(.type == "tool_use")
+       | .name]
+     | join("\n")) as $tool_names
+  | (($bash_uses
+       | map(select(((. .cmd | test("^\\s*(echo|printf)\\b"))
+                     and ((. .cmd | test("[;&|`$\\n]")) | not)) | not))
+       | map(.cmd))
+     | join("\n")) as $genuine_cmds
+  | {last_text: $last_text, bash_outputs: $bash_outputs,
+     genuine_outputs: $genuine_outputs, edited_paths: $edited_paths,
+     tool_names: $tool_names, genuine_cmds: $genuine_cmds}
 ' 2>/dev/null)
 
 [ -z "$TURN_JSON" ] && exit 0
@@ -121,6 +171,9 @@ BASH_OUTPUTS=$(printf '%s' "$TURN_JSON" | jq -r '.bash_outputs // ""')
 # genuine_outputs excludes results produced by echo/printf-only commands, so a
 # fabricated `echo "tests passed"` cannot satisfy the evidence gate. [issue #758]
 GENUINE_OUTPUTS=$(printf '%s' "$TURN_JSON" | jq -r '.genuine_outputs // ""')
+EDITED_PATHS=$(printf '%s' "$TURN_JSON" | jq -r '.edited_paths // ""')
+TOOL_NAMES=$(printf '%s' "$TURN_JSON" | jq -r '.tool_names // ""')
+GENUINE_CMDS=$(printf '%s' "$TURN_JSON" | jq -r '.genuine_cmds // ""')
 
 [ -z "$LAST_TEXT" ] && exit 0
 
@@ -157,6 +210,25 @@ else
 
   if [ "$paste_detected" = "false" ]; then
     block_reason="Bash output has a verification signal but the evidence span (e.g. 'X passed', 'lint clean', '✅') was not quoted in your message. Paste the verify token verbatim into your reply."
+  fi
+fi
+
+# Surface check runs even when the generic gate passed: the whole point is that
+# a curl/grep/CI-green sweep satisfies the surface-agnostic patterns while
+# proving nothing about a page's rendered output. Skipped when the generic gate
+# already blocked, so the reply carries one reason rather than two.
+if [ -z "$block_reason" ] && [ -n "$EDITED_PATHS" ]; then
+  if printf '%s\n' "$EDITED_PATHS" | grep -qiE "$FRONTEND_PATH_PATTERN"; then
+    fe_evidence=false
+    if printf '%s' "$GENUINE_CMDS" | grep -qiE "$BROWSER_EVIDENCE_CMD_PATTERN"; then
+      fe_evidence=true
+    elif printf '%s' "$TOOL_NAMES" | grep -qiE "$BROWSER_EVIDENCE_TOOL_PATTERN"; then
+      fe_evidence=true
+    fi
+    if [ "$fe_evidence" = "false" ]; then
+      fe_files=$(printf '%s\n' "$EDITED_PATHS" | grep -iE "$FRONTEND_PATH_PATTERN" | head -3 | tr '\n' ' ')
+      block_reason="A frontend surface was changed this turn (${fe_files}) but nothing observed the rendered page. curl status codes, a source or bundle grep, and CI green are valid oracles for other surfaces and say nothing about what renders. Open the page and read the DOM (e.g. 'cmux browser goto <url> --snapshot-after', 'cmux browser get text <selector>', or a Playwright run) BEFORE declaring completion."
+    fi
   fi
 fi
 
