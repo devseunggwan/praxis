@@ -893,6 +893,12 @@
       "timeout": 5
     },
     {
+      "name": "second-failure-advisory",
+      "role": "postuse-correction",
+      "event": "PostToolUse",
+      "timeout": 5
+    },
+    {
       "name": "completion-verify",
       "role": "completion-verify",
       "body": "impl.sh",

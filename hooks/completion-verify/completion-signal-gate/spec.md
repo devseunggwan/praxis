@@ -50,6 +50,27 @@ References: issue [#392](https://github.com/devseunggwan/praxis/issues/392).
 When the last assistant turn's text contains a completion-signal phrase AND
 no evidence-block indicator is present in the same turn, an advisory is emitted.
 
+#### Rule 1b — GO verdict with unresolved-gap markers
+
+When a GO / merge-readiness phrase appears in the same turn with an
+unresolved-gap marker, an advisory is emitted.
+
+This flags mixed outputs such as "ready to merge" and "미해소 항목 있음" appearing
+together. The hook exits 0 and never blocks — it surfaces the contradiction so
+the turn either drops the GO verdict or resolves the gap.
+
+Negated GO phrases (`not ready to merge`, `머지 가능하지 않습니다`,
+`문제 없음이 아닙니다`) are gap reports, not verdicts, and do not fire Rule 1b.
+The English guard reuses the issue-#515 negation window preceding the match;
+the Korean guard scans the following window and additionally recognises the
+predicate-negation forms (`아닙`, `아니다`, `아니라`, `아님`) that the
+completion-verb marker set does not cover.
+
+Evidence does **not** suppress Rule 1b. A cited `$ command → output` line
+answers "was anything verified"; an unresolved-gap marker in the same turn
+states that something was *not*. Rule 1's evidence gate therefore does not
+carry over — the contradiction stands regardless of evidence.
+
 **Completion-signal phrases (EN, case-insensitive, ASCII word-boundary):**
 
 | Phrase | Example |
@@ -73,12 +94,15 @@ no evidence-block indicator is present in the same turn, an advisory is emitted.
 **Negation / progressive guard (issue #515):** a completion phrase under
 negation or in a not-yet-complete status form does NOT count as a completion
 signal — the assistant is reporting incompletion, not claiming done. English
-matches are disqualified when a negation token (`not `, `n't `, `no `,
-`never `, `without `, `isn't`, `won't`, `can't`, `cannot`, …) appears in the
-24 chars preceding the phrase ("not done yet", "this is not complete", "not
-ready to merge"); progressive `-ing` forms are already excluded by the
-ASCII word-boundary lookarounds ("completing" ≠ "complete"). Korean matches
-are disqualified when a negation form trails the token within 12 chars
+matches are disqualified when a negation token (`not`, `n't`, `no`,
+`never`, `without`, `yet to`, `isn't`, `won't`, `can't`, `cannot`, …) appears
+in the 24 chars preceding the phrase ("not done yet", "this is not complete",
+"not ready to merge"); progressive `-ing` forms are already excluded by the
+ASCII word-boundary lookarounds ("completing" ≠ "complete"). The short markers
+are stored with a trailing space (`"not "`, `"no "`) so that "notable" and
+"nose" do not read as negations; the list above omits it for legibility.
+Korean matches are disqualified when a negation form trails the token within
+12 chars
 (`되지 않`, `지 않`, `안 됨`, `안 돼`, `안 된`, `못 …`) or when `아직` precedes
 it — so `완료되지 않았습니다`, `완료 안 됨`, `아직 완료 전입니다`, and
 `완료하지 못했습니다` no longer trigger the advisory.
@@ -90,6 +114,24 @@ it — so `완료되지 않았습니다`, `완료 안 됨`, `아직 완료 전�
 | Bash tool call | Any `tool_use` with `name == "Bash"` in the current turn |
 | Read tool call | Any `tool_use` with `name == "Read"` in the current turn |
 | Cited output | A `$ command → output` line in the assistant message |
+
+**Unresolved-gap markers:**
+
+| Marker | Meaning |
+| --- | --- |
+| `미해소` | unresolved item exists |
+| `갭` | explicitly marked gap |
+| `⚠` | warning marker |
+| `검증 증거 부재` | evidence is explicitly missing |
+| `not verified` / `unverified` | unresolved verification state (EN) |
+
+A marker that is itself reported as resolved does not count — `미해소 항목 없음`,
+`갭 없음`, `unverified: none` state the *absence* of a gap, and matching the
+marker as a bare substring would turn a clean GO output into a contradiction.
+The 10 chars following each marker are scanned for a resolution form (`없음`,
+`없습니다`, `해소됨`, `none`, `resolved`, `cleared`) before the marker counts. The
+English forms are stored with a leading space so they only match as a separate
+word.
 
 #### Rule 2 — plugin-context anchoring (Event 2)
 
@@ -115,15 +157,23 @@ stdout. The hook always exits 0 — it never blocks.
 
 **Rule 1 advisory (systemMessage body):**
 
-```
+```text
 [praxis:completion-signal-gate] completion-signal phrase detected in last turn without an evidence-block (Bash tool result, Read tool call, or cited '$ command → output' line).
 [praxis:completion-signal-gate] Rule: CLAUDE.md 'Verification Before Completion' — run a real verify command (test/lint/build/probe) and paste its output BEFORE declaring completion.
 [praxis:completion-signal-gate] Trigger: matched completion-signal token in last assistant turn. Add evidence or remove the completion phrase to suppress this advisory.
 ```
 
+**Rule 1b advisory (systemMessage body):**
+
+```text
+[praxis:completion-signal-gate] go-verdict phrase detected together with unresolved-gap marker in last assistant turn.
+[praxis:completion-signal-gate] Rule: CLAUDE.md 'Output-Block Falsification' — do not claim GO/merge readiness while unresolved gap markers are present in the same output.
+[praxis:completion-signal-gate] Trigger: both a go-verdict phrase and unresolved-gap marker coexist in one turn.
+```
+
 **Rule 2 advisory (systemMessage body):**
 
-```
+```text
 [praxis:completion-signal-gate] cross-plugin slash command(s) /laplace-dev-hub:close-hub-issue surfaced while cwd plugin is 'praxis'.
 [praxis:completion-signal-gate] Rule: CLAUDE.md 'Plugin-context anchoring' — do not surface skill commands from foreign plugin namespaces. Verify you are working in the correct repo/plugin context before recommending slash commands.
 ```
@@ -188,23 +238,42 @@ triple gate). This hook is complementary:
 ### Tests
 
 ```bash
-python3 -m pytest tests/hooks/test_completion_signal_gate.py -v
+python3 -m pytest tests/hooks/completion-verify/test_completion_signal_gate.py -q
 ```
 
-Covers 48 cases:
+Covers 52 cases:
 
 **Rule 1 trigger (15 phrases — EN + KR):**
+
 - EN: `no fixes needed`, `ready to merge`, `all set`, `done`, `complete`
   (case-insensitive variants included)
 - KR: `실질적 수정은 없습니다. 머지하셔도 무방합니다.`, `머지하셔도 됩니다`,
   `완료`, `결함 없음`, `이상 없음`
 
 **Rule 1 suppression (3 evidence-block types):**
+
 - Bash tool call in turn → suppressed
 - Read tool call in turn → suppressed
 - Cited `$ command → output` line → suppressed
 
+**Rule 1b trigger (3 cases):**
+
+- `보내도 됩니다` + `미해소`
+- `문제 없음` + `검증 증거 부재`
+- `ready to merge` + `not verified`
+
+**Rule 1b silence (5 cases):**
+
+- gap marker alone, no GO verdict → silent
+- negated GO verdicts (`not ready to merge`, `ready to merge가 아닙니다`,
+  `문제 없음이 아닙니다`) with a gap marker → silent
+- GO verdict with cited output but **no** gap marker → silent (Rule 1 path)
+
+Cited evidence alongside a gap marker does **not** silence Rule 1b; a
+regression case asserts it still fires.
+
 **False-positive cross-checks (5 normal-completion samples):**
+
 - FP1: Bash + evidence signal → no advisory
 - FP2: No completion phrase → no advisory
 - FP3: Read tool + completion phrase → suppressed
@@ -212,17 +281,21 @@ Covers 48 cases:
 - FP5: Mid-task assistant message (no completion phrase) → no advisory
 
 **Event 1 reproduction:**
+
 - Exact issue quote "실질적 수정은 없습니다. 머지하셔도 무방합니다." → advisory
 
 **Rule 2:**
+
 - Foreign `/laplace-dev-hub:close-hub-issue` in praxis cwd → advisory
 
 **Fail-safe paths (4):**
+
 - Malformed JSON stdin → exit 0
 - `stop_hook_active: true` → exit 0
 - Missing `transcript_path` → exit 0
 - Empty transcript → exit 0
 
 **Internal unit tests:**
+
 - `_has_completion_signal`: 15 parametrized cases (true/false, EN/KR, word-boundary)
 - `_has_evidence_block`: 4 parametrized cases

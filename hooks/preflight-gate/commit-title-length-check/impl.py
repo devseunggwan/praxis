@@ -41,6 +41,7 @@ see "Ordering constraint" in spec.md. The `git commit` path is unchanged
 """
 from __future__ import annotations
 
+import re
 import json
 import os
 import subprocess
@@ -100,6 +101,96 @@ _SQUASH_FLAGS = frozenset({"-s", "--squash"})
 _SUBJECT_FLAGS = frozenset({"-t", "--subject"})
 
 _TAIL_FLAGS_WITH_ARG = _MERGE_FLAGS_WITH_ARG | _GH_GLOBAL_FLAGS_WITH_ARG
+_API_PATH_RE = re.compile(r"^/?repos/([^/]+)/([^/]+)/pulls/([^/]+)/merge$")
+
+
+def _parse_field_kv(token: str) -> tuple[str, str] | None:
+    """Return (key, value) for `-f`/`--field`-style assignments, if valid."""
+    if "=" not in token:
+        return None
+    key, value = token.split("=", 1)
+    key = key.lstrip("-")
+    return key, value
+
+
+def _parse_gh_api_merge(tail: list[str]) -> tuple[str | None, str | None, str | None, str | None, bool]:
+    """Parse `gh api` merge endpoint.
+
+    Returns:
+        (identifier, repo, commit_title, merge_method, has_merge_endpoint)
+    """
+    identifier: str | None = None
+    repo: str | None = None
+    commit_title: str | None = None
+    merge_method: str | None = None
+    has_merge_endpoint = False
+
+    i = 0
+    while i < len(tail):
+        tok = tail[i]
+        if tok == "--":
+            if i + 1 < len(tail):
+                match = _API_PATH_RE.match(tail[i + 1].lstrip())
+                if match:
+                    has_merge_endpoint = True
+                    identifier = match.group(3)
+                    repo = f"{match.group(1)}/{match.group(2)}"
+            break
+
+        if tok in _SQUASH_FLAGS:
+            # Defensive: ignore unrelated short flags in API payload parsing.
+            pass
+
+        if tok in ("-R", "--repo") and i + 1 < len(tail):
+            repo = tail[i + 1]
+            i += 1
+            i += 1
+            continue
+
+        if tok.startswith("-R") and tok != "-R" and "=" in tok:
+            repo = tok.split("=", 1)[1]
+
+        if tok in ("-f", "--field", "--raw-field"):
+            if i + 1 >= len(tail):
+                i += 1
+                continue
+            pair = _parse_field_kv(tail[i + 1])
+            if pair is not None:
+                key, value = pair
+                if key == "commit_title":
+                    commit_title = value
+                elif key == "merge_method":
+                    merge_method = value.lower()
+            i += 2
+            continue
+
+        if tok.startswith("-f") and not tok.startswith("-f=") and "=" in tok[2:]:
+            pair = _parse_field_kv(tok[2:])
+            if pair is not None:
+                key, value = pair
+                if key == "commit_title":
+                    commit_title = value
+                elif key == "merge_method":
+                    merge_method = value.lower()
+
+        if tok.startswith("--field=") or tok.startswith("--raw-field="):
+            pair = _parse_field_kv(tok.split("=", 1)[1],)
+            if pair is not None:
+                key, value = pair
+                if key == "commit_title":
+                    commit_title = value
+                elif key == "merge_method":
+                    merge_method = value.lower()
+
+        match = _API_PATH_RE.match(tok)
+        if match:
+            has_merge_endpoint = True
+            identifier = match.group(3)
+            repo = repo or f"{match.group(1)}/{match.group(2)}"
+
+        i += 1
+
+    return identifier, repo, commit_title, merge_method, has_merge_endpoint
 
 
 def _gh_pr_merge_segment(argv: list[str]) -> tuple[list[str], str | None] | None:
@@ -177,6 +268,34 @@ def _scan_merge_tail(tail: list[str]) -> tuple[bool, str | None, str | None, str
                 subject = tail[i]
             i += 1
     return has_squash, identifier, repo, subject
+
+
+def _gh_api_segment(argv: list[str]) -> tuple[list[str], str | None] | None:
+    """Return `(argv_after_api, repo)` for `gh api` calls, or None."""
+    argv = strip_prefix(argv)
+    if not argv or not _is_gh_binary(argv[0]):
+        return None
+
+    repo: str | None = None
+    i = 1
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "api":
+            return argv[i + 1 :], repo
+
+        if tok == "--":
+            return None
+
+        base, eq, inline = tok.partition("=")
+        if eq and base in ("-R", "--repo"):
+            repo = inline or None
+        elif not eq and base in _GH_GLOBAL_FLAGS_WITH_ARG:
+            if base in ("-R", "--repo") and i + 1 < len(argv):
+                repo = argv[i + 1]
+            i += 1
+        i += 1
+
+    return None
 
 
 def _resolve_pr_title(identifier: str | None, cwd: str | None, repo: str | None) -> str | None:
@@ -281,8 +400,35 @@ def main() -> int:
                 return 0  # ask emitted; only report first violation
 
         merge_segment = _gh_pr_merge_segment(argv)
+        merge_api_segment = _gh_api_segment(argv)
         if merge_segment is None:
-            continue
+            if merge_api_segment is None:
+                continue
+
+            api_tail, api_repo = merge_api_segment
+            identifier, segment_repo, commit_title, merge_method, has_merge_endpoint = _parse_gh_api_merge(api_tail)
+            if not has_merge_endpoint or merge_method != "squash":
+                continue
+
+            title = commit_title
+            if title is None:
+                title = _resolve_pr_title(identifier, cwd, segment_repo or api_repo)
+            if not title:
+                continue
+
+            if any(title.startswith(p) for p in SKIP_PREFIXES):
+                continue
+            length = len(title)
+            if length > max_len:
+                _emit_squash_advisory(
+                    f"Squash-merge title too long: {length} chars (max {max_len}).\n"
+                    f"Title: {title!r}\n"
+                    "The PR title becomes the squash commit title on merge. Shorten "
+                    "the PR title, pass `-t <title>` (≤50 chars) to override the "
+                    "subject, or embed `# title-length:ack` to acknowledge."
+                )
+                return 0
+
         tail, repo = merge_segment
         has_squash, identifier, tail_repo, subject = _scan_merge_tail(tail)
         if not has_squash:
