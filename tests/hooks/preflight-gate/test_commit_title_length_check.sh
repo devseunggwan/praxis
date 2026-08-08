@@ -485,6 +485,9 @@ run_case_gh "gh api pulls/N/merge with explicit commit_title over limit (advisor
 run_case_gh "gh api pulls/N/merge merge_method=merge is silent (not squash)" \
   silent 'gh api repos/o/r/pulls/42/merge -X PUT -f merge_method=merge -f commit_title="this title can stay long because merge_method is merge"' "$ERROR_GH"
 
+run_case_gh "gh api pulls/N/merge with commit_title within limit (silent, no fallthrough)" \
+  silent 'gh api repos/o/r/pulls/42/merge -X PUT -f merge_method=squash -f commit_title="fix: short title"' "$ERROR_GH"
+
 run_case_gh "path-prefixed gh api pulls/N/merge is still checked" \
   advisory '/usr/bin/gh api repos/o/r/pulls/42/merge -X PUT -f merge_method=squash -f commit_title="this subject line is definitely far too long to pass fifty chars"' "$ERROR_GH"
 

@@ -429,6 +429,10 @@ def main() -> int:
                 )
                 return 0
 
+            # The `gh api` branch is done with this argv — `merge_segment` is
+            # None here, so falling through would unpack None.
+            continue
+
         tail, repo = merge_segment
         has_squash, identifier, tail_repo, subject = _scan_merge_tail(tail)
         if not has_squash:
