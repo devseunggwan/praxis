@@ -1,0 +1,4 @@
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "text", "text": "PR 833 머지해줘"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "content": [{"type": "text", "text": "PR #833 브리핑. 변경 사항: hook 파일 수정. 테스트 통과 확인(lint clean). 미검증 항목: prod 경로 미확인. 리스크: downstream 없음. 남은 항목: 없음. Approve merge"}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "text", "text": "Base directory for this skill: /x\n# some-skill\n\n## Overview\n"}]}, "isMeta": true}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "content": [{"type": "text", "text": "스킬 절차를 따릅니다."}]}}

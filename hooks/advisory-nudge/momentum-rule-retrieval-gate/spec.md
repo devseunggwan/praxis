@@ -200,6 +200,35 @@ approve blindly.
   `# briefing-surfaced` inside a heredoc body (`<<EOF … EOF`) is the one residual
   the scanner does not exclude — accepted under the non-adversarial threat model,
   as with the `xargs`/cross-repo gaps above.
+
+  **The marker attests completeness, never existence (issue #940).** It used to
+  short-circuit before the transcript was read, so it released the merge no
+  matter what the window contained. Measured over 2026-08-01~03: it rode along
+  on **11 of 11** merges and **8 of those had no preceding block at all** — two
+  at 322 and 627 events from the last briefing. Once a marker is a command's
+  default suffix, the gate it relaxes can never fire, and a per-merge
+  re-confirmation never happens; global CLAUDE.md permits a bypass token only
+  after the spec is read and the case matched, and one reading does not cover
+  the next N merges.
+
+  The marker is therefore evaluated **after** the transcript is scanned, and
+  releases the merge only when the window already contains at least
+  `MERGE_BRIEFING_MARKER_MIN_ITEMS` (1) recognised briefing item. That keeps its
+  original purpose — the item counter reads prose and under-counts a briefing
+  phrased outside its vocabulary — while removing the one thing it was never
+  meant to do. With zero items the attestation has no referent and the merge is
+  denied with a distinct reason naming the marker. An unreadable transcript
+  still fails open, which is the bridge-session case the marker was invented
+  for: there is nothing to verify against, so nothing is claimed.
+
+- **Injected user entries do not start a new window (issue #940).** A skill body
+  loaded mid-turn and the expansion of a slash command both arrive as
+  `role: user` with prose content; the harness stamps them `isMeta: true` while
+  a genuinely typed message carries no such flag. Counting them would move the
+  "since the last user message" boundary past a briefing the user actually saw,
+  so a skill invoked between the briefing and the merge made a compliant flow
+  look unbriefed. `_human_user_indices` skips them — a structural discriminator,
+  not a content heuristic.
 - Trivial-PR markers (`typo`, `comment-only`, `single-line`, `오타`, `주석만`,
   `trivial pr`, `2-line report`, …) in the briefing text → no escalation,
   matching CLAUDE.md's "Trivial PRs: a 2-line report is fine" carve-out.

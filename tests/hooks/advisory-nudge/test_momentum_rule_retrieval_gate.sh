@@ -704,6 +704,42 @@ run_merge_escalation_case "merge_escalation_loop_repetition_denies" \
 run_merge_escalation_case "merge_escalation_multi_target_denies" \
   "yes" "" "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge 833 --squash && gh pr merge 999 --squash"
 
+# --- `# briefing-surfaced` marker re-verification (issue #940) -----------------
+#
+# The marker used to short-circuit before the transcript was read, so it
+# released a merge no matter how far back the last briefing was — measured at
+# 8 of 11 merges with no preceding block at all, one 627 events out. It now
+# stands in for a briefing's COMPLETENESS (the counter reads prose and
+# under-counts), never for its EXISTENCE.
+
+# Marker present, no briefing anywhere in the window → deny. This is the case
+# that passed before the fix.
+run_merge_escalation_case "merge_escalation_marker_without_briefing_denies" \
+  "yes" "" "momentum-merge-marker-no-briefing.jsonl" \
+  "gh pr merge 833 --squash  # briefing-surfaced: attested"
+
+# Same fixture, same command WITHOUT the marker → also deny. Pins that the deny
+# above comes from the absent briefing, not from the marker itself being read
+# as a violation.
+run_merge_escalation_case "merge_escalation_no_briefing_no_marker_denies" \
+  "yes" "" "momentum-merge-marker-no-briefing.jsonl" "gh pr merge 833 --squash"
+
+# Briefing present but phrased so the counter recognises only 1 of 6 items;
+# marker attests the rest → pass. Without this the marker would have no purpose
+# left and the fix would be an outright removal.
+run_merge_escalation_case "merge_escalation_marker_with_partial_briefing_passes" \
+  "no" "" "momentum-merge-marker-partial-briefing.jsonl" \
+  "gh pr merge 833 --squash  # briefing-surfaced: counter under-counted"
+
+# Same partial briefing without the marker → deny (1 item < 4).
+run_merge_escalation_case "merge_escalation_partial_briefing_no_marker_denies" \
+  "yes" "" "momentum-merge-marker-partial-briefing.jsonl" "gh pr merge 833 --squash"
+
+# An injected (`isMeta`) user entry — a skill body loaded mid-turn — must not
+# start a new window and discard the briefing the user actually saw.
+run_merge_escalation_case "merge_escalation_injected_meta_keeps_window_passes" \
+  "no" "" "momentum-merge-injected-meta-turn.jsonl" "gh pr merge 833 --squash"
+
 # --- verb gate checklist on both channels (issues #873, #932) -----------------
 #
 # The briefing is one of several gates on `gh pr merge`. Before #873 the deny

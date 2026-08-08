@@ -255,7 +255,8 @@ def _emit_for_trigger(trigger: str, directory: str | None) -> str:
 #   • no readable transcript                 → no escalation (fail open)
 #   • CMUX_DELEGATE=1 (background agent)      → no escalation (mirror sibling)
 #   • PRAXIS_MOMENTUM_MERGE_ADVISORY=1        → demote back to advisory only
-#   • `# briefing-surfaced` in the command    → demote back to advisory only
+#   • `# briefing-surfaced` + SOME briefing   → demote back to advisory only
+#     (the marker attests completeness, never existence — see issue #940)
 #   • trivial-PR markers in the briefing text → no escalation (CLAUDE.md carve-out)
 # ---------------------------------------------------------------------------
 
@@ -361,6 +362,14 @@ def _has_briefing_marker(command: object) -> bool:
 # floor of 4 separates that case from a complete (or near-complete) briefing
 # while keeping the false-positive rate low.
 MERGE_BRIEFING_MIN_ITEMS = 4
+
+# Floor for the `# briefing-surfaced` marker to release a merge (issue #940).
+# The marker exists because the counter above reads prose and under-counts a
+# briefing phrased outside its vocabulary — so it substitutes for the missing
+# items, not for the whole briefing. One recognised item is the weakest evidence
+# that a briefing is being attested to at all; zero means the attestation has no
+# referent, which is the state the marker was releasing on 8 of 11 merges.
+MERGE_BRIEFING_MARKER_MIN_ITEMS = 1
 
 # Each tuple is one Pre-Merge Reporting item; a single keyword hit marks the
 # item present. Bilingual (EN/KO) since briefings are authored in Korean.
@@ -503,11 +512,22 @@ def _load_turn_entries(transcript_path: str) -> list[dict] | None:
 
 
 def _human_user_indices(entries: list[dict]) -> list[int]:
-    """Indices of human-authored user messages (skip tool_result-only bridges)."""
+    """Indices of human-authored user messages (skip tool_result-only bridges).
+
+    `isMeta` entries are injected, not typed (issue #940): a skill body loaded
+    mid-turn and the expansion of a slash command both arrive as `role: user`
+    with prose content, and the harness stamps both `isMeta: true` while a
+    genuinely typed message carries no such flag. Counting them starts a new
+    "since the last user message" window, which discards a briefing the user
+    actually saw — a skill invoked between the briefing and the merge was enough
+    to make a compliant flow look unbriefed.
+    """
     idxs: list[int] = []
     for i, ev in enumerate(entries):
         msg = ev.get("message")
         if not isinstance(msg, dict) or msg.get("role") != "user" or ev.get("isSidechain"):
+            continue
+        if ev.get("isMeta"):
             continue
         content = msg.get("content", [])
         if isinstance(content, str):
@@ -737,10 +757,16 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     # hook process — but only for a SINGLE merge with no loop. One
     # self-attestation must not release a compound `merge A && merge B` or a
     # looped merge (round-1 P1: same No-Approval-Transfer guard the prior-turn
-    # extension applies).
-    if _has_briefing_marker(command) \
-            and len(_merge_segments(code)) == 1 and not _has_repetition(code):
-        return None
+    # extension applies). Whether it releases *this* merge is decided below,
+    # after the transcript is read: issue #940 measured the marker riding along
+    # on 8 of 11 merges with no preceding block at all, one of them 627 events
+    # after the last briefing, because it short-circuited before any evidence
+    # was consulted.
+    marker_ok = (
+        _has_briefing_marker(command)
+        and len(_merge_segments(code)) == 1
+        and not _has_repetition(code)
+    )
 
     entries = _load_turn_entries(payload.get("transcript_path", "") or "")
     if entries is None:
@@ -751,11 +777,34 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     current_text = _assistant_text(entries, lo, len(entries))
     if _is_trivial_merge(current_text):
         return None
-    if _briefing_item_count(current_text) >= MERGE_BRIEFING_MIN_ITEMS:
+    items = _briefing_item_count(current_text)
+    if items >= MERGE_BRIEFING_MIN_ITEMS:
         return None
 
     if _prior_turn_extension_passes(entries, idxs, code):
         return None
+
+    # The marker attests that a briefing was surfaced, so it can stand in for
+    # *completeness* — the item counter reads prose and under-counts a briefing
+    # phrased outside its vocabulary. It cannot stand in for *existence*: with
+    # zero briefing items in the window there is nothing for the attestation to
+    # be about, which is exactly the state the marker kept releasing (#940).
+    if marker_ok and items >= MERGE_BRIEFING_MARKER_MIN_ITEMS:
+        return None
+
+    if marker_ok:
+        return format_block(
+            rule_name="Pre-Merge Reporting briefing",
+            why="this gh pr merge carries `# briefing-surfaced` but no briefing "
+                "is present in the window — the marker attests that a briefing "
+                "was complete, not that one exists, and none was found",
+            correct_path="surface the 6-item briefing and an explicit 'Approve "
+                "merge?' question in this turn, then re-run the merge",
+            bypass_env=MERGE_ADVISORY_ENV,
+            bypass_reason_hint="with a one-line reason",
+            reference="CLAUDE.md → Pre-Merge Reporting; "
+                "hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md",
+        )
 
     return format_block(
         rule_name="Pre-Merge Reporting briefing",
