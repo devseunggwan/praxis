@@ -52,6 +52,61 @@ pattern, not adversarial evasion. The chaining char in a disguise keeps the
 command in the genuine set by design (avoiding false positives on real
 chained verification).
 
+### Evidence class follows the changed surface (issue #943)
+
+The gates above ask *whether* evidence exists, never *whether that evidence
+can see the thing that changed*. A turn that edits a rendered page and then
+runs `curl -w '%{http_code}'` satisfies L1–L4 in full while nothing ever
+looked at what the browser shows — the motivating failure was exactly that:
+a link swapped in a `.tsx` file, verified by an HTTP status code.
+
+So after the generic gate passes, one surface check runs:
+
+| Changed surface | Detected by | Evidence required |
+| --- | --- | --- |
+| Frontend (`.tsx` `.jsx` `.vue` `.svelte` `.astro` `.html` `.htm` `.css` `.scss` `.sass` `.less`) | terminal extension of a **succeeded** `Edit`/`Write`/`MultiEdit`/`NotebookEdit` `file_path` (or `notebook_path`), case-insensitive — **or** a genuine Bash command that writes such a path (`sed -i`, `>`/`>>`, `tee`, `cp`/`mv`) | a genuine, **succeeded** Bash command invoking a browser driver (`cmux … browser {snapshot,screenshot,eval,get,is,wait}` with the subcommand immediately after `browser`, `--snapshot-after`, or `playwright`/`puppeteer` at command position) **or** a succeeded `tool_use` whose name carries both a driver (`browser`/`playwright`/`puppeteer`/`chrome_devtools`) and an observation verb |
+| Anything else | — | the generic gate's verdict stands |
+
+Four properties are load-bearing:
+
+- The browser command is drawn from the **genuine** command set, so
+  `echo "cmux browser snapshot"` is a fabrication here for the same reason it
+  is one at L4.
+- The tool-name path exists because a browser MCP tool never appears as a Bash
+  command at all — gating on commands alone would block every turn verified
+  through Playwright MCP.
+- **Attempting is not observing.** Evidence tool_uses are correlated
+  `id` ↔ `tool_result.tool_use_id` and must have a result that is not
+  `is_error` — a snapshot that failed, or one whose result never arrived,
+  observed nothing. Conversely a **failed** `Edit` changed nothing, so it is
+  dropped from the surface rather than blocking a reply. The same correlation
+  is used by `advisory-nudge/pre-commit-staged-file-enumeration` and
+  `completion-verify/pr-claim-mutation-gate`.
+- **The match must be an operation, not a mention.** `npm ls puppeteer`,
+  `grep -R playwright package.json`, `cmux browser goto http://host/snapshot`,
+  and `browser_close` all name a driver while reading nothing back, so the
+  subcommand is anchored immediately after `browser`, driver names are anchored
+  at command position, and an MCP tool name must also carry an observation verb
+  (`snapshot`/`screenshot`/`eval`/`content`/`text`/`dom`/`inspect`/`console`/
+  `network`/`query`/`read`/`get`). Verbs rather than a vendor tool list,
+  because the inventory is per-server and not verifiable from inside the hook.
+
+The extension test is terminal (`\.tsx$`), so a `Docs.tsx.bak` backup is not a
+frontend surface. `.ipynb` is deliberately absent: a notebook is edited through
+`NotebookEdit`'s `notebook_path` and its output is not a rendered page.
+
+**Residuals** (documented, not bugs): the check keys on the *file extension*,
+so a frontend surface authored in a non-listed extension (a `.js` React file, a
+templating language, a design-system token file) is not covered; a browser
+command that ran but observed a different page than the one edited still
+passes — the gate proves *something* observed a page, not that it observed the
+right one; a frontend file written by a script whose own body holds the path
+(`python build.py`) carries no frontend path on the command line and is not
+detected, since chasing it needs the general shell parser this repo has already
+found to be unbounded; and an MCP tool whose name puts the observation verb
+before the driver (`snapshot_browser`) is missed by the verb-after-driver
+ordering.
+
 ### Response
 
 When blocked, the hook emits:
@@ -92,15 +147,24 @@ same pattern the marker would re-enable.
 
 ### Tests
 
-`tests/test_completion_verify.sh` covers 17 cases: 8 acceptance scenarios
-(same-turn pass, no-Bash claim, no-evidence claim, no-paste claim,
-mid-message claim ignored, non-Bash tool ignored, realistic pytest
-output, Korean evidence), 5 anti-gaming scenarios (echo-fabricated blocked,
-printf-fabricated blocked, real command chained with echo passes, Korean
-echo-fabricated blocked, echo of command-substitution passes — issue #758),
-and 4 fail-safes (`stop_hook_active`, missing transcript, empty file,
-malformed JSONL). Run before editing the hook:
+`tests/hooks/completion-verify/test_completion_verify.sh` covers 38 cases:
+8 acceptance scenarios (same-turn pass, no-Bash claim, no-evidence claim,
+no-paste claim, mid-message claim ignored, non-Bash tool ignored, realistic
+pytest output, Korean evidence), 5 anti-gaming scenarios (echo-fabricated
+blocked, printf-fabricated blocked, real command chained with echo passes,
+Korean echo-fabricated blocked, echo of command-substitution passes —
+issue #758), 21 surface-class scenarios (issue #943) — 14 for the mapping
+itself (curl-only evidence on a `.tsx` blocked, `--snapshot-after` /
+`browser get` / a global flag before `browser` / a browser MCP tool all pass,
+echoed browser command blocked, backend edit and no-edit turns unaffected,
+`.tsx.bak` not frontend, uppercase `.TSX` is, `Write` counts, `.ipynb` does
+not, no-claim turn never arms, `.scss` counts) and 7 from the codex review
+round (failed browser MCP call blocked, failed `Edit` does not block,
+`sed -i` on a `.tsx` blocks, a `.tsx` only read by the command does not,
+`npm ls puppeteer` blocked, `snapshot` inside a `goto` URL blocked,
+`browser_close` blocked) — and 4 fail-safes (`stop_hook_active`, missing
+transcript, empty file, malformed JSONL). Run before editing the hook:
 
 ```bash
-./tests/test_completion_verify.sh
+./tests/hooks/completion-verify/test_completion_verify.sh
 ```
