@@ -31,6 +31,10 @@ Development workflow skills for Claude Code — disciplined, fast, resilient.
 | `debt` | `praxis:debt`, `debt ledger`, `지연 결정`, `deferred decision`, `기술 부채 원장`, `commit trailer audit` | To harvest commit-trailer and compounding-comment deferred-decision markers into a report-only ledger | `/praxis:debt` |
 | `surface-enumeration` | `surface enumerate`, `input surface enumeration`, `input parser`, `input validation`, `intent classifier`, `정규식 경계`, `입력 표면 열거` | To enumerate every input variant before implementing a parser/validator/sanitizer so each becomes a required test case | `/praxis:surface-enumeration` |
 | `worktree-merge-cleanup` | `merge cleanup`, `post-merge cleanup`, `worktree cleanup`, `delete-branch merge`, `squash-ancestry`, `pre-merge worktree`, `머지 후 정리`, `worktree 정리` | To run `gh pr merge --squash --delete-branch` from the right worktree and clean up afterward (submodule `--force`, squash-ancestry guard, no-`&&`-chain) | `/praxis:worktree-merge-cleanup` |
+| `critique` | `plan critique`, `critique this plan`, `review my plan`, `design review`, `poke holes`, `계획 검토`, `설계 반증` | To have an independent reviewer attack a plan before approval — unresolvable references, phase contradictions, criteria with no oracle | `/praxis:critique` |
+| `audit` | `evidence audit`, `is this actually verified`, `audit the evidence`, `완료 검증`, `증거 심사`, `검증 충분성` | To grade whether a completion claim is proven, and name the verification that is missing | `/praxis:audit` |
+| `trace` | `causal trace`, `root cause`, `why is this failing`, `trace the cause`, `근본 원인`, `원인 추적` | To trace a symptom to its cause through competing hypotheses, each refuted or held on evidence | `/praxis:trace` |
+| `interview` | `requirement interview`, `clarify requirements`, `what should I ask`, `deep interview`, `요구사항 정리`, `모호성 도출` | To convert a vague request into blocking questions, implicit premises, and a named acceptance criterion | `/praxis:interview` |
 
 ### Discipline
 

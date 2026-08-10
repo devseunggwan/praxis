@@ -25,7 +25,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | **Full**           | + all cmux-* skills                                      | + cmux                                                      |
 | **Multi-provider** | + codex/gemini routing in cmux-*                         | + codex-cli, gemini-cli                                     |
 
-## Skills (16)
+## Skills (20)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Always call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
@@ -48,6 +48,10 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | `debt`                   | Deferred-decision ledger — unions commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) with tree compounding comments (`# [PR #N]`); report-only          |
 | `surface-enumeration`    | Pre-implementation input-surface enumeration — enumerate every input variant before writing a parser/validator/sanitizer/classifier so each becomes a required test case                                 |
 | `worktree-merge-cleanup` | On-demand home for the pre-merge worktree precondition + unified post-merge cleanup sequence — base-worktree call site, submodule `--force` caveat, squash-ancestry stale-HEAD guard, no-`&&`-chain rule |
+| `critique`               | Adversarial review of a plan before approval — dispatches an independent reviewer that resolves the plan's references, cross-checks its phases, and refuses a completion criterion with no oracle        |
+| `audit`                  | Grades whether a completion claim is actually proven — mock-only proof, suppressed lint, unscoped negatives, and inference-as-measurement are graded VOID rather than green                              |
+| `trace`                  | Traces a symptom to its root cause through competing hypotheses — each hypothesis refuted or held on observed evidence, verdict shipped with the probe that would falsify it                             |
+| `interview`              | Turns a vague request into the questions that must be answered first — blocking ambiguities, implicit premises, and an absent acceptance criterion recorded as blocking                                  |
 
 ### Discipline
 

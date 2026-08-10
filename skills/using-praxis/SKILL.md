@@ -18,10 +18,17 @@ resilient development workflow.
 
 Tools for code quality and review workflow.
 
-| Skill               | When to call                                                        |
-| ------------------- | ------------------------------------------------------------------- |
-| `retrospect`        | End of session — find friction root causes and create lasting fixes |
-| `codex-review-wrap` | Before running `/codex:review` in a multi-worktree repo             |
+| Skill                   | When to call                                                        |
+| ----------------------- | ------------------------------------------------------------------- |
+| `retrospect`            | End of session — find friction root causes and create lasting fixes |
+| `codex-review-wrap`     | Before running `/codex:review` in a multi-worktree repo             |
+| `critique`         | Before a plan or design is approved — especially one you wrote      |
+| `audit`        | Before a merge or release gated on "verified"                       |
+| `trace`          | A symptom is intermittent, or a previous fix did not stop it        |
+| `interview` | A request arrives in a few sentences and work is expected to start  |
+
+The last four dispatch an independent agent rather than reasoning in the current
+session: an agent that produced the artifact cannot audit it without bias.
 
 ### Discipline
 

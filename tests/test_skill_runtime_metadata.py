@@ -572,6 +572,11 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
         if check._skill_runtime_verification_reasons(skill_dir)
     }
     assert actual == {
+        # The four delegating role skills (#958) — audit, critique, interview,
+        # trace — carry probe command templates in their Role Blocks, so they
+        # classify like the other prose skills that ship command examples
+        # (surface-enumeration, worktree-merge-cleanup).
+        "audit": ("external-cli-wrapper",),
         # helper-executable since #903: agent-report-path.sh derives the
         # completion-report path for both halves of the handoff protocol.
         "cmux-delegate": ("external-cli-wrapper", "helper-executable"),
@@ -601,7 +606,9 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
             "external-cli-wrapper",
             "helper-executable",
         ),
+        "critique": ("external-cli-wrapper",),
         "debt": ("external-cli-wrapper",),
+        "interview": ("external-cli-wrapper",),
         "recover-sessions": (
             "AskUserQuestion",
             "external-cli-wrapper",
@@ -613,6 +620,7 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
             "helper-executable",
         ),
         "surface-enumeration": ("external-cli-wrapper",),
+        "trace": ("external-cli-wrapper",),
         "worktree-merge-cleanup": ("external-cli-wrapper",),
         "writing-praxis-skill": (
             "AskUserQuestion",
