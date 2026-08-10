@@ -5,6 +5,24 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.9.0](https://github.com/devseunggwan/praxis/compare/v7.8.0...v7.9.0) (2026-08-08)
+
+
+### Added
+
+* **codex-review-wrap:** add round-continuation gate ([#946](https://github.com/devseunggwan/praxis/issues/946)) ([950d934](https://github.com/devseunggwan/praxis/commit/950d934ed9c3ac74851417d3627b75da550d5f78)), closes [#945](https://github.com/devseunggwan/praxis/issues/945)
+* **hook:** gate the PR verification anchor comment ([#948](https://github.com/devseunggwan/praxis/issues/948)) ([20bd73d](https://github.com/devseunggwan/praxis/commit/20bd73d62fbb4b6de7b1c731522ccb55bc1d601c))
+* **hooks:** advise on repeat failures ([#950](https://github.com/devseunggwan/praxis/issues/950)) ([816903e](https://github.com/devseunggwan/praxis/commit/816903e2963add2b5bada49f7cc5fa483467c27a))
+* **hooks:** gate evidence class on the changed surface ([#957](https://github.com/devseunggwan/praxis/issues/957)) ([03d4f8a](https://github.com/devseunggwan/praxis/commit/03d4f8acb30ef7c4da0f4e64cde4a0816b50e978))
+* **reaper:** reclaim brokers in unowned workspaces ([#936](https://github.com/devseunggwan/praxis/issues/936)) ([8bf1dfa](https://github.com/devseunggwan/praxis/commit/8bf1dfa19c7667f54813643705377f6aca4b9209)), closes [#926](https://github.com/devseunggwan/praxis/issues/926)
+
+
+### Fixed
+
+* **bypass-review:** filter fixture sessions from fire-rate ([#953](https://github.com/devseunggwan/praxis/issues/953)) ([379f25e](https://github.com/devseunggwan/praxis/commit/379f25ec09ae4901f4a5fe086b40866d13f0be6c))
+* **hooks:** stop gh api squash path falling through ([#952](https://github.com/devseunggwan/praxis/issues/952)) ([69e5a4d](https://github.com/devseunggwan/praxis/commit/69e5a4da68fdaa7e07001fc942f821b154330d9f))
+* **hooks:** verify briefing before marker releases merge ([#956](https://github.com/devseunggwan/praxis/issues/956)) ([9e55a40](https://github.com/devseunggwan/praxis/commit/9e55a40d5aa24594ef88b093d981b8f5821ec5d9))
+
 ## [7.8.0](https://github.com/devseunggwan/praxis/compare/v7.7.0...v7.8.0) (2026-08-03)
 
 
