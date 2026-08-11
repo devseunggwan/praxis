@@ -58,14 +58,15 @@ without knowing the target at all.
 | Post form | Recognized |
 | --- | --- |
 | `gh pr comment <pr> --body-file anchor.md` | yes |
-| `gh pr comment <pr> --body '### 검증 …'` | yes |
+| `gh pr comment <pr> --body '### Verification …'` | yes |
 | `gh api --method PATCH /repos/{o}/{r}/issues/comments/{id} -F body=@anchor.md` | yes |
 | body from stdin (`-F body=@-`) or `--input payload.json` | no — warns, PostToolUse decides |
 
 **Anchor shape decides scope.** Only a body whose first non-empty line starts
-with `### 검증` is an anchor. The one-line update notice that accompanies every
-anchor edit posts through the same `gh pr comment`; blocking it would break the
-procedure this gate exists to protect. Every other comment passes untouched.
+with `### Verification` or `### 검증` is an anchor. The one-line update notice
+that accompanies every anchor edit posts through the same `gh pr comment`;
+blocking it would break the procedure this gate exists to protect. Every other
+comment passes untouched.
 
 Every segment of a compound command is checked, not just the first: two anchor
 posts joined by `&&` would otherwise let the second through on the strength of
@@ -73,8 +74,8 @@ the first being well-formed.
 
 **Two tokenizations, because neither alone sees every post.** `safe_tokenize`
 splits on newlines — correct for Bash, where a newline separates commands, but
-it shreds a *quoted* multi-line body: an inline `--body '### 검증 …'` spanning
-lines loses its `gh pr comment` segment entirely. `shlex.split` keeps quoted
+it shreds a *quoted* multi-line body: an inline `--body '### Verification …'`
+spanning lines loses its `gh pr comment` segment entirely. `shlex.split` keeps quoted
 newlines but glues shell operators to adjacent words, so it cannot replace the
 primary. Both run when the command contains a newline, de-duplicated by body.
 
@@ -92,15 +93,39 @@ Nothing here reaches the network. No repo, no host, no PR number is resolved:
 the checks are exactly those decidable from the body, which is why widening the
 parser is no longer the answer to a miss.
 
-### Structure — five required fields
+### Structure — five required fields, in one of two dialects
 
-| Field | Detected by |
-| --- | --- |
-| SHA+rev heading | `### 검증 — \`<sha>\` (rev N)` **on the first non-empty line** |
-| claim table | at least one `\| <n> \|` row |
-| 미검증 toggle | a `<details>` whose `<summary>` contains `미검증` |
-| per-row evidence toggle | a `<details>` whose `<summary>` starts `<n>.`, for every table row `n` |
-| 갱신 이력 toggle | a `<details>` whose `<summary>` contains `갱신 이력` |
+The field *names* come in two dialects. `en` is what the rule prescribes. `ko`
+is the shape this gate originally required, kept for one reason: anchors
+published under it are edited in place and explicitly not retrofitted, so
+rejecting their dialect would lock their own later revisions out of the
+procedure this gate protects.
+
+| Field | `en` — detected by | `ko` — detected by |
+| --- | --- | --- |
+| SHA+rev heading | `### Verification — \`<sha>\` (rev N)` **on the first non-empty line** | `### 검증 — \`<sha>\` (rev N)`, same position |
+| claim table | at least one `\| <n> \|` row | same |
+| unverified toggle | `<summary>` contains `Unverified` | contains `미검증` |
+| per-row evidence toggle | `<summary>` starts `Evidence <n> —`, for every table row `n` | starts `<n>.` |
+| history toggle | `<summary>` contains `History` | contains `갱신 이력` |
+
+**One body, one dialect.** The dialect is chosen by the heading's own keyword
+and then every other field is read in it, so a body that takes its heading from
+one and its toggles from the other reports the missing fields of the dialect it
+opened in. Letting the two mix would make "the labels are a fixed field name"
+unenforceable in exactly the case where an author is drifting between them.
+
+A body opening with neither keyword is not an anchor at all and is not checked
+(see **Anchor shape decides scope** above) — the dialect question only arises
+once the gate is already in scope. When a body in scope has no usable heading,
+findings are reported in `en`, since that is the dialect a new anchor should
+have been written in.
+
+**Drift is the failure this table exists to prevent, and it has happened once
+in the other direction**: the rule pinned the `Evidence <#> —` prefix while
+this gate still required `<n>.`, so a correctly-written anchor was blocked and
+the author had the choice of violating the rule or bypassing the gate. When the
+rule's field names change, this table changes with it.
 
 A toggle must be a real `<details>…</details>`: a bare `<summary>` renders as
 plain text, and one quoted inside a code fence is an example — neither is
@@ -159,7 +184,7 @@ anchor gets corrected in place. `PRAXIS_ANCHOR_GATE_STRICT=1` makes it exit 2
 instead, for sessions that want the correction to interrupt.
 
 An anchor that turns out to be an ordinary issue comment is simply not an
-anchor by the `### 검증` test, and a lookup failure prints why rather than
+anchor by the heading-prefix test, and a lookup failure prints why rather than
 inventing a verdict — after the fact, there is nothing to protect by failing
 closed, and a wrong advisory is worse than a missing one.
 
@@ -189,13 +214,16 @@ the audit trail the waiver exists to leave.
 
 ## Coupled constant
 
-`### 검증` is both the anchor's heading and the prefix the id-recovery lookup
-matches on:
+The heading prefix is both what opens the anchor and what the id-recovery
+lookup matches on, so it has to accept every dialect the gate does:
 
 ```bash
 gh api /repos/{owner}/{repo}/issues/<pr>/comments \
-  --jq '[.[]|select(.body|startswith("### 검증"))][0].id'
+  --jq '[.[]|select(.body|startswith("### Verification") or
+                    (.body|startswith("### 검증")))][0].id'
 ```
 
 Changing one without the other leaves the anchor unfindable after its id is
-lost. `_ANCHOR_PREFIX` in `impl.py` and that jq are the two sites.
+lost. `_ANCHOR_PREFIXES` in `impl.py` and that jq are the two sites — a dialect
+added to one and not the other makes exactly the anchors written in it
+unrecoverable, which is the failure that is invisible until someone needs it.

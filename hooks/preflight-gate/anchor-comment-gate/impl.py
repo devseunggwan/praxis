@@ -42,11 +42,15 @@ structure case is what keeps that window small.
 ## What blocks (PreToolUse)
 
 All five fields, else block:
-  - `### 검증 — \\`<sha>\\` (rev N)` heading, on the first non-empty line
+  - `### Verification — \\`<sha>\\` (rev N)` heading (or the legacy `### 검증`
+    dialect), on the first non-empty line
   - a claim table with at least one numbered row
-  - a 미검증 toggle
-  - one evidence toggle per numbered table row
-  - a 갱신 이력 toggle
+  - an `Unverified` toggle (`미검증` in the legacy dialect)
+  - one evidence toggle per numbered table row, `Evidence <n> —` (legacy `<n>.`)
+  - a `History` toggle (legacy `갱신 이력`)
+
+The dialect is chosen by the heading and every other field is then read in it,
+so a body cannot pass by taking half its labels from each.
 
 Plus `--edit-last` on an anchor body: that flag edits *the last comment of the
 current user*, which the paired update notice displaces, so from rev 2 it
@@ -101,9 +105,9 @@ _STRICT_ENV = "PRAXIS_ANCHOR_GATE_STRICT"
 # actually open, and that spec points onward.
 _REFERENCE = "hooks/preflight-gate/anchor-comment-gate/spec.md"
 
-# The anchor's first line. Also the prefix the id-recovery jq matches on, so
-# the two must move together — see spec.md.
-_ANCHOR_PREFIX = "### 검증"
+# The anchor's first line, in either dialect. Also the prefix the id-recovery
+# jq matches on, so the two must move together — see spec.md.
+_ANCHOR_PREFIXES = ("### Verification", "### 검증")
 
 _SHORT_FLAGS_WITH_ARG = frozenset({"-b", "-F", "-R", "-f", "-X", "-q", "-H", "-t", "-p"})
 _API_FLAGS_WITH_ARG = frozenset({
@@ -112,11 +116,34 @@ _API_FLAGS_WITH_ARG = frozenset({
     "--preview", "--cache",
 })
 
-_HEADING_RE = re.compile(r"^###\s+검증\s*[—-]\s*`([0-9a-fA-F]{6,40})`\s*\(rev\s*(\d+)\)")
+# Field names come in two dialects. `en` is what the rule prescribes; `ko` is
+# kept because anchors published before it are edited in place, never
+# retrofitted, so rejecting their dialect would lock their own revisions out.
+# A body is read in exactly one dialect, chosen by its heading — mixing the two
+# surfaces as a missing field, which is what it is.
+_DIALECTS = {
+    "en": {
+        "heading": re.compile(
+            r"^###\s+Verification\s*[—-]\s*`([0-9a-fA-F]{6,40})`\s*\(rev\s*(\d+)\)"),
+        "heading_label": "SHA+rev 헤딩 (`### Verification — `<sha>` (rev N)`) — 첫 줄이어야 함",
+        "unverified": "Unverified",
+        "history": "History",
+        "evidence": re.compile(r"^\s*(?:<b>)?\s*Evidence\s+(\d+)\s*[—-]"),
+        "evidence_label": "`<details><summary>Evidence N — …`",
+    },
+    "ko": {
+        "heading": re.compile(
+            r"^###\s+검증\s*[—-]\s*`([0-9a-fA-F]{6,40})`\s*\(rev\s*(\d+)\)"),
+        "heading_label": "SHA+rev 헤딩 (`### 검증 — `<sha>` (rev N)`) — 첫 줄이어야 함",
+        "unverified": "미검증",
+        "history": "갱신 이력",
+        "evidence": re.compile(r"^\s*(?:<b>)?\s*(\d+)\s*\."),
+        "evidence_label": "`<details><summary>N. …`",
+    },
+}
 _TABLE_ROW_RE = re.compile(r"^\|\s*(\d+)\s*\|", re.MULTILINE)
 _DETAILS_RE = re.compile(r"<details\b[^>]*>(.*?)</details>", re.DOTALL)
 _SUMMARY_RE = re.compile(r"<summary\b[^>]*>(.*?)</summary>", re.DOTALL)
-_EVIDENCE_SUMMARY_RE = re.compile(r"^\s*(?:<b>)?\s*(\d+)\s*\.")
 _FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 # gh accepts the endpoint with or without a leading slash, and with or without
 # the api.github.com host — anchor both forms or the slashless one slips past.
@@ -432,13 +459,26 @@ def _bypassed_with_reason(command: str) -> bool:
 def _is_anchor(body: str) -> bool:
     for line in body.splitlines():
         if line.strip():
-            return line.strip().startswith(_ANCHOR_PREFIX)
+            return line.strip().startswith(_ANCHOR_PREFIXES)
     return False
 
 
 # ---------------------------------------------------------------------------
 # Structure — decidable from the body alone, so both phases share it
 # ---------------------------------------------------------------------------
+
+def _dialect(body: str) -> dict:
+    """The field-name set this body is read in, chosen by its opening keyword.
+
+    Falls back to `en` — the prescribed dialect — when the body opens with
+    neither, so a body that is not an anchor at all reports the field names a
+    new anchor should have had.
+    """
+    for line in body.splitlines():
+        if line.strip():
+            return _DIALECTS["ko" if line.strip().startswith("### 검증") else "en"]
+    return _DIALECTS["en"]
+
 
 def _heading_match(body: str) -> re.Match | None:
     """Match the SHA+rev heading on the body's FIRST non-empty line, or None.
@@ -449,7 +489,7 @@ def _heading_match(body: str) -> re.Match | None:
     """
     for line in body.splitlines():
         if line.strip():
-            return _HEADING_RE.match(line.strip())
+            return _dialect(body)["heading"].match(line.strip())
     return None
 
 
@@ -482,31 +522,32 @@ def _toggle_summaries(body: str) -> list[str]:
 def _structure_findings(body: str) -> list[str]:
     """Return the names of the required fields that are missing or mismatched."""
     missing: list[str] = []
+    d = _dialect(body)
 
     if not _heading_match(body):
-        missing.append("SHA+rev 헤딩 (`### 검증 — `<sha>` (rev N)`) — 첫 줄이어야 함")
+        missing.append(d["heading_label"])
 
     rows = [int(n) for n in _TABLE_ROW_RE.findall(_claim_table_region(body))]
     if not rows:
         missing.append("검증 항목 표 (번호 행이 없음)")
 
     summaries = _toggle_summaries(body)
-    if not any("미검증" in s for s in summaries):
-        missing.append("미검증 토글")
-    if not any("갱신 이력" in s for s in summaries):
-        missing.append("갱신 이력 토글")
+    if not any(d["unverified"] in s for s in summaries):
+        missing.append(f"{d['unverified']} 토글")
+    if not any(d["history"] in s for s in summaries):
+        missing.append(f"{d['history']} 토글")
 
     evidence = {
         int(m.group(1))
         for s in summaries
-        if (m := _EVIDENCE_SUMMARY_RE.match(s))
+        if (m := d["evidence"].match(s))
     }
     uncovered = sorted(set(rows) - evidence)
     if uncovered:
         missing.append(
             "행별 근거 토글 — 표 행 "
             + ", ".join(str(n) for n in uncovered)
-            + " 에 대응하는 `<details><summary>N. …` 이 없음"
+            + f" 에 대응하는 {d['evidence_label']} 이 없음"
         )
     return missing
 
