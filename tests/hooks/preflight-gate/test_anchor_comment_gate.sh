@@ -80,8 +80,63 @@ write_anchor() {
   } >"$file"
 }
 
+# write_anchor_en <file> <sha> [omit-field]
+#   The dialect the rule prescribes: English field labels, Korean content, and
+#   the literal `Evidence <#> — ` numbering prefix.
+#   omit-field: history | unverified | evidence | badrev | dialect
+#     dialect — English heading with Korean toggles, i.e. a body in neither
+#     dialect. Must not pass by borrowing half of each.
+write_anchor_en() {
+  local file="$1" sha="$2" omit="${3:-}"
+  local mixed=""; [ "$omit" = "dialect" ] && mixed=1
+  {
+    if [ "$omit" = "badrev" ]; then
+      # Prefix right, rev not parenthesized — inside gate scope, heading invalid.
+      echo "### Verification — \`$sha\` rev 1"
+      echo ""
+    else
+      echo "### Verification — \`$sha\` (rev 1)"
+      echo ""
+    fi
+    echo "| # | Claim | Result |"
+    echo "|---|---|---|"
+    echo "| 1 | impl.py 가 앵커를 검사한다 | PASS(live) |"
+    echo ""
+    if [ "$omit" != "unverified" ]; then
+      if [ -n "$mixed" ]; then echo "<details><summary>미검증 없음</summary>"
+      else echo "<details><summary>Unverified — 없음</summary>"; fi
+      echo "<br>"; echo ""; echo "</details>"; echo ""
+    fi
+    if [ "$omit" != "evidence" ]; then
+      if [ -n "$mixed" ]; then echo "<details><summary>1. impl.py 검사</summary>"
+      else echo "<details><summary>Evidence 1 — impl.py 가 앵커를 검사한다</summary>"; fi
+      echo "<br>"; echo ""
+      echo "훅을 직접 실행하는 것이 이 행의 오라클입니다."
+      echo ""
+      echo '$ echo ok'
+      echo "ok"
+      echo ""
+      echo "</details>"; echo ""
+    fi
+    if [ "$omit" != "history" ]; then
+      if [ -n "$mixed" ]; then echo "<details><summary>갱신 이력</summary>"
+      else echo "<details><summary>History</summary>"; fi
+      echo "<br>"; echo ""
+      echo "- rev 1 — \`$sha\`: 최초 검증."
+      echo ""
+      echo "</details>"
+    fi
+  } >"$file"
+}
+
 write_anchor "$FIX/ok.md" "$SHA"
 write_anchor "$FIX/ok2.md" "$SHA"
+write_anchor_en "$FIX/en-ok.md" "$SHA"
+write_anchor_en "$FIX/en-no-history.md" "$SHA" history
+write_anchor_en "$FIX/en-no-unverified.md" "$SHA" unverified
+write_anchor_en "$FIX/en-no-evidence.md" "$SHA" evidence
+write_anchor_en "$FIX/en-badrev.md" "$SHA" badrev
+write_anchor_en "$FIX/en-mixed.md" "$SHA" dialect
 write_anchor "$FIX/no-history.md" "$SHA" history
 write_anchor "$FIX/no-unverified.md" "$SHA" unverified
 write_anchor "$FIX/no-evidence.md" "$SHA" evidence
@@ -257,6 +312,27 @@ run_case "1d warn: PATCH body 가 stdin (-F body=@-) → 해독 불가 경고" \
 run_case "1e warn: --input JSON 본문 → 해독 불가 경고" \
   "warn:해독하지 못해" PreToolUse "" \
   "gh api --method PATCH /repos/owner/repo/issues/comments/999 --input payload.json"
+
+run_case "1f pass: 규약 방언(en) 앵커" \
+  pass PreToolUse "" "gh pr comment 42 --body-file $FIX/en-ok.md"
+
+run_case "1g block: en 앵커의 History 토글 누락" \
+  block PreToolUse "" "gh pr comment 42 --body-file $FIX/en-no-history.md"
+
+run_case "1h block: en 앵커의 Unverified 토글 누락" \
+  block PreToolUse "" "gh pr comment 42 --body-file $FIX/en-no-unverified.md"
+
+run_case "1i block: en 앵커의 Evidence 토글 누락" \
+  block PreToolUse "" "gh pr comment 42 --body-file $FIX/en-no-evidence.md"
+
+# 헤딩이 아예 없으면 앵커로 인식되지 않아 게이트 범위 밖이다(설계). 범위 안에서
+# 헤딩이 무효인 경우 — 접두사는 맞고 rev 가 괄호에 안 싸인 형태 — 를 대신 본다.
+run_case "1j block: en 앵커의 rev 표기 무효" \
+  block PreToolUse "" "gh pr comment 42 --body-file $FIX/en-badrev.md"
+
+# 두 방언을 반씩 섞어 통과하는 경로가 없어야 한다.
+run_case "1k block: en 헤딩 + ko 토글 혼용" \
+  block PreToolUse "" "gh pr comment 42 --body-file $FIX/en-mixed.md"
 
 run_case "2 block: 갱신 이력 토글 누락" \
   block PreToolUse "" "gh pr comment 42 --body-file $FIX/no-history.md"
