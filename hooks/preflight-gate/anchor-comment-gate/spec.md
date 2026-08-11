@@ -121,7 +121,7 @@ findings are reported in `en`, since that is the dialect a new anchor should
 have been written in.
 
 **Drift is the failure this table exists to prevent, and it has happened once
-in the other direction**: the rule pinned the `Evidence <#> — ` prefix while
+in the other direction**: the rule pinned the `Evidence <#> —` prefix while
 this gate still required `<n>.`, so a correctly-written anchor was blocked and
 the author had the choice of violating the rule or bypassing the gate. When the
 rule's field names change, this table changes with it.
