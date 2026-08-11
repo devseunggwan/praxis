@@ -5,6 +5,13 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.9.1](https://github.com/devseunggwan/praxis/compare/v7.9.0...v7.9.1) (2026-08-11)
+
+
+### Fixed
+
+* **hook:** accept the english anchor field labels ([#961](https://github.com/devseunggwan/praxis/issues/961)) ([b21adc5](https://github.com/devseunggwan/praxis/commit/b21adc52d47f40a5c30472b5251b93ac46e735f2)), closes [#960](https://github.com/devseunggwan/praxis/issues/960)
+
 ## [7.9.0](https://github.com/devseunggwan/praxis/compare/v7.8.0...v7.9.0) (2026-08-08)
 
 
