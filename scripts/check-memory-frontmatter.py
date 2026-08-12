@@ -48,7 +48,10 @@ Checks (one entry = one `*.md` file in the memory dir, `MEMORY.md` excluded):
 Note on `hookEvents:` specifically: an empty list (`hookEvents: []`) is NOT
 flagged the same way — `impl.py:150-169` falls back to the `[Bash]` default
 when the bracket content is empty or unparseable, so the memory still gets
-indexed.
+indexed (see check 3's own error text distinguishing the two fields' failure
+modes — this was also caught in the F1/F2 codex-review pass: prior to that,
+`check_file()`'s error message for `hookEvents` incorrectly claimed the same
+"entire memory dropped" consequence hookKeywords has).
 
 Resolution: reuses `hooks/_lib/_memory_dir.py::resolve_memory_dir()`, so this
 follows `PRAXIS_MEMORY_DIR` / `CLAUDE_CONFIG_DIR` exactly like the memory-hint
@@ -158,18 +161,33 @@ def check_file(path: Path) -> list[str]:
             if not nested:
                 errors.append(f"`{field}` is at the top level — must nest under `metadata:`")
         if field in BRACKET_FIELDS:
+            # hookKeywords and hookEvents fail differently at runtime (F2,
+            # issue #942, caught by an independent codex-review pass): a
+            # malformed hookKeywords drops the WHOLE memory (impl.py:117-139
+            # returns None outright), but a malformed hookEvents just falls
+            # back to the `[Bash]` default (impl.py:150-169) — the memory
+            # still gets indexed, only the intended non-Bash event is lost.
+            # An earlier revision of this script used one shared "entire
+            # memory dropped" message for both fields; that was accurate for
+            # hookKeywords and wrong for hookEvents.
+            consequence = (
+                "silently drops the entire memory from the hint index"
+                if field == "hookKeywords"
+                else "silently falls back to the default `[Bash]` event — the memory "
+                "still gets indexed, but the intended non-Bash event is lost"
+            )
             for _nested, value in occs:
                 value = value.strip()
                 if not value:
                     errors.append(
                         f"`{field}:` has no inline value (multi-line YAML-block `- item` form) — "
-                        "the memory-hint parser rejects this shape and silently drops the entire "
-                        "memory from the hint index; use single-line `[a, b]` form"
+                        f"the memory-hint parser rejects this shape and {consequence}; "
+                        "use single-line `[a, b]` form"
                     )
                 elif not value.startswith("["):
                     errors.append(
                         f"`{field}: {value}` is scalar form, not `[a, b]` — the memory-hint parser "
-                        "rejects this shape and silently drops the entire memory from the hint index"
+                        f"rejects this shape and {consequence}"
                     )
                 elif field == "hookKeywords":
                     close_idx = value.find("]")

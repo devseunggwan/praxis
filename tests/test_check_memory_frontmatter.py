@@ -227,6 +227,35 @@ body
     assert check.check_file(p) == []
 
 
+def test_hookevents_block_form_message_says_fallback_not_drop(tmp_path):
+    # F2 (issue #942, same codex-review pass): the shared error message used
+    # to claim "the entire memory is dropped" for both hookKeywords and
+    # hookEvents malformed shapes. For hookEvents that is false — impl.py
+    # falls back to the default [Bash] event and still indexes the memory.
+    p = _write(
+        tmp_path,
+        "feedback_bad_events_blockform.md",
+        """---
+name: bad-events-blockform
+description: test
+metadata:
+  type: feedback
+  hookable: true
+  hookKeywords: [foo]
+  hookEvents:
+    - Edit
+  originSessionId: abc-123
+---
+body
+""",
+    )
+    errors = check.check_file(p)
+    matching = [e for e in errors if e.startswith("`hookEvents:`")]
+    assert matching, errors
+    assert "falls back to the default" in matching[0], matching
+    assert "drops the entire memory" not in matching[0], matching
+
+
 def test_missing_frontmatter_fence_flagged(tmp_path):
     p = _write(tmp_path, "feedback_no_fence.md", "just prose, no frontmatter\n")
     errors = check.check_file(p)
