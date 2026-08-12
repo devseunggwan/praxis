@@ -727,6 +727,91 @@ def test_rule1b_graded_gap_still_fires(payload: str, tmp_path: Path) -> None:
     )
 
 
+# A refusal opens the turn and the GO token appears 800 chars later as a table
+# heading naming the attribute ("머지 가능 상태" = mergeability status). The
+# predicate's KO guard only scans 12 chars after the match, so the refusal is
+# structurally out of its reach.
+_CORPUS_LEADING_REFUSAL = """아니요. 지금 내놓으면 안 됩니다.
+
+### 결론
+
+방금 재조회한 PR 상태 기준으로 **5건 중 4건이 `BLOCKED`** 입니다.
+
+### 차단 요인 (피해 순)
+
+**1. 숫자 정규화 갭 — 고객 데이터가 조용히 사라집니다 (미착수)**
+
+**3. PR 머지 가능 상태 (방금 재조회)**
+
+| PR | base | 상태 |
+|---|---|---|
+| BE #NNNN | dev | BLOCKED |
+"""
+
+# The retraction turn from the genuine fire's session: it quotes its own
+# earlier "보내도 됩니다" in order to withdraw it. A mention, not a use.
+_CORPUS_QUOTED_RETRACTION = """아니요, 솔직히 말하면 **"문제가 없다"를 검증한 게 아닙니다.**
+제가 한 건 정적 코드 리뷰 + CI 확인까지이고, 그걸 "보내도 됩니다" 로 표현한
+건 과했습니다.
+
+## 검증 안 하고 가정으로 넘어간 것
+
+리뷰어가 명시적으로 요청한 "기존 데이터와 동일한지" 는 전혀 안 봤고, 저도
+갭으로 표시만 했습니다.
+"""
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [_CORPUS_LEADING_REFUSAL, _CORPUS_QUOTED_RETRACTION],
+    ids=["refusal-then-status-label", "refusal-then-quoted-retraction"],
+)
+def test_rule1b_leading_refusal_is_silent(payload: str, tmp_path: Path) -> None:
+    """A turn that opens by refusing is a NO-GO report; Rule 1b must not fire."""
+    assert not _fires(payload, tmp_path), (
+        "a leading refusal makes every later GO token a label or a quotation"
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "No blockers. 머지 가능 — 실환경은 unverified 입니다.",
+        "No further work needed. 머지 가능 하지만 미해소 갭 1건이 남습니다.",
+        "ready to merge — 아직 실환경은 unverified 입니다.",
+        "이 방법은 안 됩니다만 저 방법은 됩니다. 머지 가능합니다. 다만 미해소 갭 1건이 남습니다.",
+        "리뷰어 승인이 필요한 건 아닙니다. 머지 가능합니다. 미해소 갭 1건.",
+        "squash 는 안됩니다만 merge commit 은 됩니다. 머지 가능. 검증 증거 부재 1건.",
+    ],
+    ids=[
+        "en-no-blockers",
+        "en-no-further-work",
+        "en-ready-to-merge",
+        "ko-partial-negation-만",
+        "ko-clause-negation-아닙니다",
+        "ko-partial-negation-안됩니다",
+    ],
+)
+def test_rule1b_partial_negation_is_not_a_refusal(payload: str, tmp_path: Path) -> None:
+    """Positive control: a negation that scopes to one clause is not a refusal.
+
+    Every payload here is a genuine GO-verdict-over-gap contradiction that
+    happens to open with a negation word. Silencing any of them is a false
+    NEGATIVE, and a false negative is invisible in a fire count — the corpus
+    number keeps improving while the rule quietly stops working.
+
+    Both directions are real, not hypothetical. `No blockers. 머지 가능 — 실환경
+    unverified` was silenced twice: once by the round that shipped Rule 1b, and
+    once by the first draft of the refusal guard (`^(no|nope|not yet)\\b`),
+    which this control caught. The Korean side is symmetric — `안 됩니다` /
+    `아닙니다` negate whatever clause they sit in, so an earlier draft that
+    scanned 120 chars for them swallowed all three KO cases below.
+    """
+    assert _fires(payload, tmp_path), (
+        "clause-scoped negation must not be read as a turn-level refusal"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Rule 2 — plugin-context anchoring
 # ---------------------------------------------------------------------------

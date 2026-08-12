@@ -239,9 +239,36 @@ def _has_unresolved_gap(text: str, normalized: str) -> bool:
     return False
 
 
+# A turn that OPENS with a refusal is a NO-GO report end to end, so a later GO
+# token is a status label ("PR 머지 가능 상태" as a table heading) or a quotation of
+# the phrase being retracted — not a verdict. The guards above only ever see the
+# characters immediately around the match, so a refusal carried by a *different*
+# sentence is structurally out of their reach.
+# Only a standalone refusal interjection counts, and only as the turn's very
+# first token. Predicate forms (`안 됩니다`, `아닙니다`) are deliberately absent:
+# they negate whatever clause they sit in, so "이 방법은 안 됩니다만 저 방법은
+# 됩니다. 머지 가능합니다. 다만 미해소 갭 1건" — a genuine contradiction — would be
+# silenced by them. The English side is the same hazard: a bare leading `no` is
+# a determiner far more often than a verdict, and "No blockers. 머지 가능 — 실환경
+# unverified" is exactly what Rule 1b exists to catch. Both directions are
+# pinned by positive controls; widening either marker set without re-running
+# them reintroduces a false negative that no fire-count regression will show.
+_LEADING_REFUSAL_RE = re.compile(
+    r"^(아니요|아니오|아뇨)\s*[.,!]?|^(no|nope)\s*[.,!]|^not\s+yet\b",
+    re.IGNORECASE,
+)
+
+
+def _opens_with_refusal(text: str) -> bool:
+    """True if the turn opens by refusing — the verdict is NO-GO, not GO."""
+    return bool(_LEADING_REFUSAL_RE.match(text.lstrip()))
+
+
 def _has_go_verdict_with_unresolved_gap(text: str) -> bool:
     """True if a GO verdict phrase coexists with an unresolved-gap marker."""
     if not text:
+        return False
+    if _opens_with_refusal(text):
         return False
     normalized = text.lower()
     if not _has_unresolved_gap(text, normalized):
