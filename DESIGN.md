@@ -74,6 +74,64 @@ Design mechanisms shared by all hooks:
   the second half expecting the first half to have landed. Single-command
   rejections receive no suffix (no cascade to warn about).
 
+## Session-state concurrency
+
+Every hook that keeps session state does the same three things: read the
+JSON at `resolve_cache_file(...)`, modify it, replace it. `os.replace` makes
+the *replace* atomic — a reader never sees half a file — and that is all it
+makes atomic. The read-modify-write around it is not serialized, so two hook
+processes sharing a `session_id` (parallel sub-agent tool calls are the
+ordinary source) read the same value, each modifies its own copy, and the
+later replace discards the earlier modification.
+
+Locking all of them would be the wrong reading of that. The absence of a lock
+was neither documented as intent nor as an oversight before issue #951; what
+follows is the criterion that settles it per hook, so a new consumer of
+`resolve_cache_file` is classified rather than reflexively locked.
+
+**A lost update needs a lock when the state carries information no later
+event reproduces.** Three questions, in order — the first `yes` decides it:
+
+1. **Does a threshold read the state?** A hook firing on an exact boundary
+   (`count == 2`) misfires in both directions when an increment is lost: two
+   processes crossing the boundary together both fire, and the count that
+   never advanced never fires again. **Lock.**
+2. **Does a gate read the state to decide block vs. pass?** A dropped entry
+   becomes a false verdict about the session — a file that was Read scored as
+   unread — and the verdict lands on the user, not in a log. **Lock.**
+3. **Otherwise:** the state is a dedup marker or a monotone flag, and the
+   worst case is one advisory line repeated or missing. **No lock.** The
+   contention is real, its consequence is not; a lock here buys latency on
+   every tool call and nothing else.
+
+The seven consumers as of #951:
+
+| Hook | State | Loss consequence | Locked |
+| --- | --- | --- | --- |
+| `postuse-correction/second-failure-advisory` | per-`(tool, signature)` counter | fires on `prior_count == 1` exactly — Q1 | yes |
+| `postuse-correction/pre-edit-md-escape-advisory` | accumulating set of Read paths | the Edit gate warns, or denies under `PRAXIS_MD_ESCAPE_MODE=block`, for a file that was Read — Q2 | yes |
+| `advisory-nudge/jq-config-empty-dict-advisory` | dedup set of advised paths | one advisory repeats | no |
+| `advisory-nudge/postcompact-context` | last-injected compact uuid | context re-injected once | no |
+| `preflight-gate/worktree-prune-snapshot-gate` | single `snapshot_taken` flag, only ever set true | concurrent writers write the identical value | no |
+| `preflight-gate/session-intent` | set-once intent flags | written only from `UserPromptSubmit`, which is serialized per session; the `PreToolUse` gate path is read-only | no |
+| `preflight-gate/retrospect-active-marker` | marker existence | whole-file write and `unlink`, no read-modify-write to lose | no |
+
+`hooks/_lib/_state_lock.py` is the primitive: `with state_lock(path):` around
+the read *and* the write, `fcntl.flock` on a `<path>.lock` sibling. Readers
+take no lock — `os.replace` already gives them a whole file.
+
+It yields False rather than raising or waiting when the lock cannot be taken,
+and the body runs regardless. That is the fail-open contract above, applied
+one level down: a hook that cannot lock must degrade to the pre-lock
+behaviour, never to a blocked tool call. The wait has a deadline
+(`PRAXIS_STATE_LOCK_TIMEOUT`, 2s) for the same reason — a lock left by a
+killed sibling must not stall the tool call the hook was only observing.
+
+`tests/test_hook_state_concurrency.py` runs both locked hooks in two real
+processes against one state file. It carries an unlocked arm alongside the
+shipped one, so the defect stays pinned and a regression that drops the lock
+fails there instead of quietly passing.
+
 ## Hook ordering and precedence
 
 - PreToolUse hooks run **in parallel**. Decision precedence is
