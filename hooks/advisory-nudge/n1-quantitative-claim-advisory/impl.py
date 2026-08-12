@@ -249,16 +249,25 @@ def _has_sample_dependent_claim(text: str) -> bool:
 # (2) Sample-size evidence — pass condition
 # ---------------------------------------------------------------------------
 
+# Sample sizes are written with thousands separators as readily as figures
+# are — `n=1,000` must read as 1000, not as 1. The separators are stripped
+# before the int conversion; `_SAMPLE_NUM` is deliberately NOT `_NUM`, since
+# a sample size is a count and never carries a decimal part.
+_SAMPLE_NUM = r"\d{1,3}(?:,\d{3})+|\d+"
+
 # `n=15`, `n = 15`, `N=15`. Left-guarded so `min=15`, `column=15`, and
 # `run=15` do not read as a sample size.
-_N_EQUALS_RE = re.compile(r"(?<![A-Za-z0-9_])[nN]\s*=\s*(\d+)")
+_N_EQUALS_RE = re.compile(rf"(?<![A-Za-z0-9_])[nN]\s*=\s*({_SAMPLE_NUM})")
 # `15회 측정`, `15번 반복`, `15회 실행` — Korean count + repetition verb.
-_KO_REPEAT_RE = re.compile(r"(\d+)\s*(?:회|번)\s*(?:측정|반복|실행|시도|수행)")
+_KO_REPEAT_RE = re.compile(rf"({_SAMPLE_NUM})\s*(?:회|번)\s*(?:측정|반복|실행|시도|수행)")
 # `표본 15`, `표본 크기 15`, `샘플 15`.
-_KO_SAMPLE_RE = re.compile(r"(?:표본|샘플)(?:\s*크기)?\s*(?:은|는|이|가)?\s*(\d+)")
+_KO_SAMPLE_RE = re.compile(
+    rf"(?:표본|샘플)(?:\s*크기)?\s*(?:은|는|이|가)?\s*({_SAMPLE_NUM})"
+)
 # `15 runs`, `15 trials`, `15 samples`, `15 iterations`, `15 measurements`.
 _EN_RUNS_RE = re.compile(
-    r"(\d+)\s*(?:runs?|trials?|samples?|iterations?|measurements?|reps?)(?![A-Za-z])",
+    rf"({_SAMPLE_NUM})\s*(?:runs?|trials?|samples?|iterations?|measurements?|reps?)"
+    r"(?![A-Za-z])",
     re.IGNORECASE,
 )
 
@@ -269,9 +278,9 @@ def _has_sample_size_at_least_two(text: str) -> bool:
     for pattern in _SAMPLE_SIZE_PATTERNS:
         for m in pattern.finditer(text):
             try:
-                if int(m.group(1)) >= 2:
+                if int(m.group(1).replace(",", "")) >= 2:
                     return True
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, AttributeError):
                 continue
     return False
 

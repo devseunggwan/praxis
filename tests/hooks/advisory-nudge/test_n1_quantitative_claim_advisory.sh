@@ -281,6 +281,16 @@ run_case "R8: sentence-initial Verified" "advisory:$MARKER" \
 run_case "R9: PASS stays case-sensitive (no bypass/password match)" silent \
   "gh pr comment 1 --body 'Passed the bypass check in 12s'"
 
+# F4 — sample sizes carry thousands separators too. The point is to admit
+# `n=1,000` as sufficient, NOT to read every comma-separated number as a
+# sample size; R12 is the negative control that keeps a bare year out.
+run_case "R10: n=1,000 is a sufficient sample" silent \
+  "gh pr comment 1 --body 'n=1,000, p50 91ms'"
+run_case "R11: 1,000 runs is a sufficient sample" silent \
+  "gh pr comment 1 --body '1,000 runs, median 91ms'"
+run_case "R12: a bare year is not a sample size" "advisory:$MARKER" \
+  "gh pr comment 1 --body '2026, PASS(live) 91ms'"
+
 # ---------------------------------------------------------------------------
 # === FALSE-POSITIVE GUARDS (word boundary, Unicode, noise vocabulary)
 # ---------------------------------------------------------------------------
