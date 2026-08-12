@@ -10,6 +10,11 @@ effect on `hooks/advisory-nudge/memory-hint/impl.py` (its regexes match
 either position); the only reason to enforce it is cross-entry consistency,
 so a reader never has to check two positions per field.
 
+`node_type` is included in the taxonomy set for *position* checking (if
+present, it must be nested and not duplicated, same as any other taxonomy
+field) but is never required to be present — no hook in this repo reads it
+(grep-verified). A memory missing `node_type` entirely is not drift.
+
 Two retrospect cycles (17 -> 18) flagged the same drift family without it
 ever becoming a re-checkable artifact — the finding lived only in a carried
 `cycle_note` string in `.omc/state/retrospect-hygiene-cursor.json`, which has

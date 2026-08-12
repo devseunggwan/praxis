@@ -45,7 +45,7 @@ For each approved action:
    name: my-memory
    description: Short rule statement
    metadata:                                # this repo nests taxonomy fields here
-     node_type: memory                      # fixed literal; present on nearly all existing entries
+     node_type: memory                      # optional; no hook reads it (grep-verified, issue #942) — carry it when present, don't backfill it when absent
      type: feedback
      originSessionId: <uuid>                # session the memory was authored in
      hookable: true                         # opt into PreToolUse surface
@@ -69,6 +69,17 @@ For each approved action:
    `scripts/check-memory-frontmatter.py` deliberately excludes `momentum`
    from the fields it checks — this is the schema decision that exclusion
    encodes, not an oversight.
+
+   **`node_type: memory` is optional, not required.** `grep -rn node_type`
+   across every hook and script in this repo (issue #942) finds no
+   consumer at all — unlike `type`/`hookable`/`hookKeywords`/`hookEvents`,
+   nothing reads it. It is present on most existing entries (a fixed literal
+   from an earlier authoring convention) but its absence is inert: two
+   entries lack it entirely and `scripts/check-memory-frontmatter.py`
+   reports them clean, correctly, because there is nothing to enforce.
+   When authoring or normalizing a memory, carry `node_type: memory` if
+   it's already there — don't add it to a file that lacks it, and don't
+   treat its absence as drift.
 
    **Category-based default (apply unless rationale documented):**
 

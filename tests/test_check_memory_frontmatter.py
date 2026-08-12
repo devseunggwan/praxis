@@ -161,6 +161,25 @@ body
     assert check.check_file(p) == []
 
 
+def test_missing_node_type_is_not_flagged(tmp_path):
+    # node_type has no consumer (grep-verified, issue #942) — its absence is
+    # optional, not drift. Two real entries in the corpus lack it entirely.
+    p = _write(
+        tmp_path,
+        "feedback_no_node_type.md",
+        """---
+name: no-node-type
+description: test
+metadata:
+  type: feedback
+  originSessionId: abc-123
+---
+body
+""",
+    )
+    assert check.check_file(p) == []
+
+
 # ---------------------------------------------------------------------------
 # main() — directory resolution + skip contract
 # ---------------------------------------------------------------------------
