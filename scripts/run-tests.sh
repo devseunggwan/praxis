@@ -6,14 +6,23 @@
 #   2. shell    — shell tests at tests/hooks/*/test_*.sh and tests/test_*.sh
 #   3. manifest — scripts/check-plugin-manifests.py
 #   4. invariants — scripts/check-hook-token-invariants.py
-#   5. ruff     — static Python lint (mirrors the ci.yml `ruff` job)
-#   6. shellcheck — static shell lint (mirrors the ci.yml `shellcheck` job)
-#   7. markdownlint — advisory markdown lint (mirrors the ci.yml `markdownlint` job)
+#   5. memory-frontmatter — scripts/check-memory-frontmatter.py
+#   6. ruff     — static Python lint (mirrors the ci.yml `ruff` job)
+#   7. shellcheck — static shell lint (mirrors the ci.yml `shellcheck` job)
+#   8. markdownlint — advisory markdown lint (mirrors the ci.yml `markdownlint` job)
 #
-# Steps 5-7 mirror CI jobs that used to have no local equivalent, so a change
+# Steps 6-8 mirror CI jobs that used to have no local equivalent, so a change
 # could pass here and still be flagged on the PR (issue #866). Each skips with
 # an explicit SKIPPED line when its tool is absent, so a contributor without
 # the toolchain is not blocked — CI remains authoritative either way.
+#
+# Step 5 is a different repo-internal script, same family as steps 3-4 (no
+# external toolchain — nothing to install), but it has its own legitimate skip
+# condition: the memory directory it lints is a local, gitignored, per-user
+# store that does not exist in CI or a fresh checkout at all (issue #942). It
+# prints its own SKIPPED line and exit code, honoring PRAXIS_TESTS_STRICT the
+# same way steps 6-8 do — no skip_step() wiring needed here, so a nonzero exit
+# is treated as FAILED like steps 3-4, not routed through the tool-skip path.
 #
 # A skip is not a pass (#917). The SKIPPED line used to scroll past and the run
 # still ended on a bare "ALL TESTS PASSED", which read as full coverage: PR #912
@@ -123,7 +132,24 @@ if ! python3 ./scripts/check-hook-token-invariants.py; then
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Ruff (mirrors ci.yml `ruff` job — blocking there, blocking here)
+# 5. Memory frontmatter lint (schema-drift guard, issue #942)
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== memory frontmatter lint ==="
+# PRAXIS_TESTS_STRICT is deliberately NOT propagated to this one call: unlike
+# steps 6-8 (a tool a contributor could install), the memory dir this checks
+# is a local, gitignored, per-user store that structurally never exists in
+# CI or a fresh checkout — treating its absence as a strict-mode failure
+# would fail every CI run forever, not flag a fixable gap. A SKIPPED here is
+# always benign; only actual detected drift (exit 1 with violations listed)
+# fails this step. The script's own PRAXIS_TESTS_STRICT support still works
+# for direct standalone invocation (see its tests / docstring).
+if ! env -u PRAXIS_TESTS_STRICT python3 ./scripts/check-memory-frontmatter.py; then
+  FAILED=1
+fi
+
+# ---------------------------------------------------------------------------
+# 6. Ruff (mirrors ci.yml `ruff` job — blocking there, blocking here)
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== ruff ==="
@@ -142,7 +168,7 @@ elif ! "${RUFF[@]}" check .; then
 fi
 
 # ---------------------------------------------------------------------------
-# 6. Shellcheck (mirrors ci.yml `shellcheck` job — same find/severity)
+# 7. Shellcheck (mirrors ci.yml `shellcheck` job — same find/severity)
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== shellcheck ==="
@@ -157,7 +183,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 7. Markdownlint (mirrors ci.yml `markdownlint` job)
+# 8. Markdownlint (mirrors ci.yml `markdownlint` job)
 #
 # CI runs this with filter_mode:added and never fails the check, so the repo's
 # existing backlog stays untouched. The advisory half is mirrored exactly — a
@@ -221,7 +247,10 @@ if [[ $FAILED -ne 0 ]]; then
   exit 1
 fi
 
-# Scope note: this counts the three tool steps this script owns (5-7). Gates
+# Scope note: this counts the three tool steps this script owns (6-8). Step 5
+# has its own SKIPPED line but is deliberately excluded from this tally (see
+# its PRAXIS_TESTS_STRICT note above) — it is never a missing-toolchain skip.
+# Gates
 # that a sub-suite skips internally — e.g. the Darwin-only gate in
 # tests/test_codex_broker_reaper.sh — announce themselves in their own summary
 # and are not aggregated here; conflating them would make a portable-by-design
