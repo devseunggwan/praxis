@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+# test_menu_mutation_tier.sh — coverage for
+# hooks/advisory-nudge/menu-mutation-tier-advisory/impl.py
+#
+# Synthesizes Claude Code PreToolUse(AskUserQuestion) payloads and asserts:
+#   advisory → exit 0 + stderr non-empty  (default mode)
+#   block    → exit 2 + stderr non-empty  (PRAXIS_MENU_MUTATION_TIER_STRICT=1)
+#   pass     → exit 0 + stderr empty
+#
+# The hook inspects only options[].label + options[].description — no
+# transcript, no git, no subprocess.
+#
+# Usage: bash tests/hooks/advisory-nudge/test_menu_mutation_tier.sh
+# Exit:  0 = all pass; 1 = at least one fail
+
+set +e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+HOOK="$ROOT_DIR/hooks/advisory-nudge/menu-mutation-tier-advisory/impl.py"
+SPEC="$ROOT_DIR/hooks/advisory-nudge/menu-mutation-tier-advisory/spec.md"
+
+if [ ! -x "$HOOK" ]; then
+  echo "FAIL: hook not executable: $HOOK" >&2
+  exit 1
+fi
+
+PASS=0; FAIL=0; FAILED_NAMES=()
+
+# Build a JSON payload for an AskUserQuestion tool call.
+# $1 = JSON array whose entries are either a label string or a
+#      [label, description] pair.
+build_payload() {
+  local options_json="$1"
+  python3 - "$options_json" <<'PY'
+import json, sys
+entries = json.loads(sys.argv[1])
+options = []
+for e in entries:
+    if isinstance(e, list):
+        label, desc = e[0], e[1]
+    else:
+        label, desc = e, ""
+    options.append({"label": label, "description": desc})
+payload = {
+    "session_id": "test-session",
+    "tool_name": "AskUserQuestion",
+    "tool_input": {
+        "questions": [
+            {
+                "question": "Which?",
+                "header": "Choose",
+                "multiSelect": False,
+                "options": options,
+            }
+        ]
+    },
+    "cwd": "/tmp",
+}
+print(json.dumps(payload))
+PY
+}
+
+# run_case name expected mode payload
+#   expected: advisory | block | pass
+#   mode:     default            → no STRICT env set
+#             strict             → PRAXIS_MENU_MUTATION_TIER_STRICT=1
+#             strictval=<value>  → PRAXIS_MENU_MUTATION_TIER_STRICT=<value>
+run_case() {
+  local name="$1" expected="$2" mode="$3" payload="$4"
+  local err_file rc
+
+  err_file=$(mktemp)
+  case "$mode" in
+    strict)
+      echo "$payload" | PRAXIS_MENU_MUTATION_TIER_STRICT=1 "$HOOK" >/dev/null 2>"$err_file"
+      ;;
+    strictval=*)
+      echo "$payload" | PRAXIS_MENU_MUTATION_TIER_STRICT="${mode#strictval=}" "$HOOK" >/dev/null 2>"$err_file"
+      ;;
+    *)
+      echo "$payload" | "$HOOK" >/dev/null 2>"$err_file"
+      ;;
+  esac
+  rc=$?
+  local err_content
+  err_content=$(cat "$err_file"); rm -f "$err_file"
+
+  local ok=1
+  case "$expected" in
+    advisory) [ "$rc" -eq 0 ] && [ -n "$err_content" ] || ok=0 ;;
+    block)    [ "$rc" -eq 2 ] && [ -n "$err_content" ] || ok=0 ;;
+    pass)     [ "$rc" -eq 0 ] && [ -z "$err_content" ] || ok=0 ;;
+    *) echo "INTERNAL: unknown expected '$expected'" >&2; ok=0 ;;
+  esac
+
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS [$expected] $name"; PASS=$((PASS+1))
+  else
+    echo "FAIL [$expected→rc=$rc,stderr=$([ -n "$err_content" ] && echo non-empty || echo empty)] $name"
+    FAIL=$((FAIL+1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# (a) ADVISORY — every candidate sits in the mutating tier
+# ---------------------------------------------------------------------------
+
+# The 2026-08-11 incident menu, replayed verbatim. Its third option is an
+# abandonment ("다음 정기 실행에 맡김"), which must NOT count as the safe tier —
+# if it did, the hook would be silent on the exact menu it exists for.
+INCIDENT='[["두 소스 다 트리거 (Recommended)", "두 소스 모두 지금 트리거한다"], ["한 건만 먼저", "한 건만 먼저 처리한다"], ["다음 정기 실행에 맡김", "이번에는 아무것도 하지 않는다"]]'
+run_case "2026-08-11 incident menu"          advisory default "$(build_payload "$INCIDENT")"
+
+run_case "EN all-prod menu"                  advisory default "$(build_payload '["deploy to prod (all tenants)", "deploy to prod (one tenant)"]')"
+run_case "KO 실 고객 all-mutating"             advisory default "$(build_payload '["실 고객 테넌트 전체 트리거", "실 고객 한 곳만 트리거"]')"
+run_case "mixed-script prod 트리거"            advisory default "$(build_payload '["prod 트리거 전체", "prod 트리거 부분"]')"
+run_case "uppercase EN mutation token"       advisory default "$(build_payload '["APPLY TO PROD", "APPLY TO PROD PARTIALLY"]')"
+run_case "delete/truncate menu"              advisory default "$(build_payload '["delete the table", "truncate the table"]')"
+
+# Signal carried only in the description (elliptical label). This is why the
+# hook reads label + description, not label alone.
+DESC_ONLY='[["전체", "prod 테넌트 전체에 적용한다"], ["일부", "일부만 먼저 적용한다"]]'
+run_case "mutation signal in description"    advisory default "$(build_payload "$DESC_ONLY")"
+
+# ---------------------------------------------------------------------------
+# (b) PASS — a non-mutating tier IS on the menu
+# ---------------------------------------------------------------------------
+run_case "preview option present"    pass default "$(build_payload '["prod 트리거 전체", "preview 에서 먼저 검증", "prod 트리거 부분"]')"
+run_case "dev option present"        pass default "$(build_payload '["deploy to prod", "deploy to dev first"]')"
+run_case "sandbox option present"    pass default "$(build_payload '["apply to prod", "run in a sandbox"]')"
+run_case "dry-run option present"    pass default "$(build_payload '["트리거 실행", "dry-run 으로 먼저"]')"
+run_case "KO 보고만 present"          pass default "$(build_payload '["실 고객 트리거", "보고만 하고 멈춤"]')"
+run_case "KO 조회만 present"          pass default "$(build_payload '["prod 삭제", "조회만 해서 영향 확인"]')"
+run_case "review lever present"      pass default "$(build_payload '["squash 머지", "code-reviewer 재실행", "머지 후 정리"]')"
+run_case "KO 리뷰 lever present"      pass default "$(build_payload '["prod 배포", "리뷰 한번 더", "prod 배포 부분"]')"
+run_case "low-blast in description"  pass default "$(build_payload '[["전체", "prod 전체 적용"], ["먼저", "preview 환경에서 먼저 확인"]]')"
+
+# ---------------------------------------------------------------------------
+# (c) PASS — menu is not tier-relevant
+# ---------------------------------------------------------------------------
+run_case "doc tone chooser"          pass default "$(build_payload '["격식 있는 톤", "친근한 톤", "중립적인 톤"]')"
+run_case "EN plan chooser"           pass default "$(build_payload '["Plan A", "Plan B", "Plan C"]')"
+run_case "no mutation token"         pass default "$(build_payload '["문서만 고친다", "테스트만 더 쓴다"]')"
+run_case "empty options"             pass default "$(build_payload '[]')"
+run_case "single option"             pass default "$(build_payload '["prod 트리거"]')"
+
+# Whole-token discipline: an inflected form is not the token. Neither of these
+# is a mutation signal, so the menu is not tier-relevant.
+run_case "false-positive: merged/merger"   pass default "$(build_payload '["view merged PRs", "contact the merger"]')"
+run_case "false-positive: deployment doc"  pass default "$(build_payload '["read the deployment doc", "read the applying guide"]')"
+
+# ---------------------------------------------------------------------------
+# (d) Abandonment is NOT a tier — the issue's open question, pinned
+# ---------------------------------------------------------------------------
+# An abandonment option does not suppress: the remaining candidates are still
+# uniformly mutating, and the user still has no safe way to verify.
+run_case "abandon '다음 정기' does not suppress"  advisory default "$(build_payload '["prod 트리거 A", "prod 트리거 B", "다음 정기 실행에 맡김"]')"
+run_case "abandon '하지 않음' does not suppress"  advisory default "$(build_payload '["실 고객 적용 전체", "실 고객 적용 일부", "아무것도 하지 않음"]')"
+run_case "abandon 'skip it' does not suppress"  advisory default "$(build_payload '["deploy to prod", "deploy to prod partially", "skip it for now"]')"
+
+# ...but it is also not a candidate: a binary go/no-go menu leaves exactly one
+# real candidate, which IS a genuine "whether", so no nudge.
+run_case "binary 머지/대기 → not a tier menu"     pass default "$(build_payload '["squash 머지", "대기"]')"
+run_case "binary deploy/cancel → not a tier menu" pass default "$(build_payload '["deploy to prod", "cancel"]')"
+run_case "binary 배포/하지 않음 → not a tier menu"  pass default "$(build_payload '["prod 배포", "하지 않음"]')"
+
+# The paired control: the same shape with a real low-blast alternative in the
+# abandonment slot must pass.
+run_case "safe tier replaces abandon slot"  pass default "$(build_payload '["prod 트리거 A", "prod 트리거 B", "preview 에서 먼저"]')"
+
+# ---------------------------------------------------------------------------
+# (d2) A low-blast token next to a high-blast target does not suppress
+# ---------------------------------------------------------------------------
+# Codex round-1 [P1]: a compound option names the safe step and then the prod
+# one, and ends on the shared surface either way. Before the fix, the `dry-run`
+# token in the first option silenced the whole menu even in strict mode.
+run_case "hybrid dry-run→prod does not suppress"  advisory default "$(build_payload '["Dry-run then deploy to prod", "Deploy directly to prod"]')"
+run_case "hybrid preview→prod (KO)"              advisory default "$(build_payload '["preview 확인 후 prod 트리거", "바로 prod 트리거"]')"
+run_case "strict: hybrid dry-run→prod blocks"    block strict "$(build_payload '["Dry-run then deploy to prod", "Deploy directly to prod"]')"
+
+# The paired control: a mutation VERB aimed at a safe target is still low-blast.
+# Only a high-blast TARGET disqualifies an option, never the verb.
+run_case "mutating verb at safe target suppresses"  pass default "$(build_payload '["deploy to prod", "deploy to dev first"]')"
+run_case "KO 개발 환경 배포 suppresses"              pass default "$(build_payload '["prod 배포", "개발 환경에 먼저 배포"]')"
+
+# Codex round-1 [P2]: `development` is not the whole token `dev`.
+run_case "development recognised as low-blast"   pass default "$(build_payload '["deploy to production", "deploy to development first"]')"
+run_case "strict: development → no block"        pass strict "$(build_payload '["deploy to production", "deploy to development first"]')"
+
+# Codex round-1 [P2]: an external write is a shared-state mutation too.
+run_case "external write: slack/email menu"      advisory default "$(build_payload '["Send Slack now", "Send email instead"]')"
+run_case "external write KO: 전송/발송"           advisory default "$(build_payload '["지금 전체 공지 전송", "일부에게만 발송"]')"
+run_case "external write + safe tier suppresses" pass default "$(build_payload '["Send Slack now", "preview the message only"]')"
+
+# ---------------------------------------------------------------------------
+# (e) BLOCK — strict mode
+# ---------------------------------------------------------------------------
+run_case "strict: incident menu"       block strict "$(build_payload "$INCIDENT")"
+run_case "strict: EN all-prod"         block strict "$(build_payload '["deploy to prod", "deploy to prod partially"]')"
+run_case "strict: preview → pass"      pass  strict "$(build_payload '["deploy to prod", "deploy to preview"]')"
+
+# strict-env value contract: ONLY `=1` (after strip) activates strict.
+run_case "strict=1 with whitespace → block"    block "strictval= 1 " "$(build_payload "$INCIDENT")"
+run_case "strict=no → advisory (not strict)"   advisory "strictval=no" "$(build_payload "$INCIDENT")"
+run_case "strict=0 → advisory"                 advisory "strictval=0" "$(build_payload "$INCIDENT")"
+run_case "strict=true → advisory (only 1)"     advisory "strictval=true" "$(build_payload "$INCIDENT")"
+
+# ---------------------------------------------------------------------------
+# (f) PASS — non-AskUserQuestion tool / malformed payload (fail-open)
+# ---------------------------------------------------------------------------
+run_case "non-AskUserQuestion tool"  pass default '{"tool_name":"Bash","tool_input":{"command":"airflow dags trigger prod_dag"}}'
+run_case "malformed JSON payload"    pass default 'not-json-at-all'
+run_case "tool_input not a dict"     pass default '{"tool_name":"AskUserQuestion","tool_input":"oops"}'
+run_case "questions missing"         pass default '{"tool_name":"AskUserQuestion","tool_input":{}}'
+run_case "questions not a list"      pass default '{"tool_name":"AskUserQuestion","tool_input":{"questions":"oops"}}'
+run_case "options not a list"        pass default '{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"q","header":"h","options":"oops"}]}}'
+run_case "option not a dict"         pass default '{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"q","header":"h","options":["oops","also"]}]}}'
+
+# ---------------------------------------------------------------------------
+# (g) Per-question isolation — one question's safe tier must not cover another
+# ---------------------------------------------------------------------------
+MULTIQ_ISOLATION='{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"q1","header":"a","options":[{"label":"prod 트리거 전체","description":"d"},{"label":"prod 트리거 부분","description":"d"}]},{"question":"q2","header":"b","options":[{"label":"preview 로 검증","description":"d"},{"label":"dev 로 검증","description":"d"}]}]}}'
+run_case "q1 all-prod, q2 safe → still nudges" advisory default "$MULTIQ_ISOLATION"
+
+MULTIQ_CLEAN='{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"q1","header":"a","options":[{"label":"Plan A","description":"d"},{"label":"Plan B","description":"d"}]},{"question":"q2","header":"b","options":[{"label":"prod 배포","description":"d"},{"label":"preview 배포","description":"d"}]}]}}'
+run_case "no question triggers → pass"         pass default "$MULTIQ_CLEAN"
+
+# ---------------------------------------------------------------------------
+# (h) Self-application regression — the hook's own spec must not trip it
+# ---------------------------------------------------------------------------
+# A lexical detector validated only against its author's own fixtures hides
+# FP↔FN cancellation. Feeding the hook its own spec.md — a document dense with
+# every token in all three sets — is an independent payload the author did not
+# shape around the predicate. It must stay silent.
+if [ ! -f "$SPEC" ]; then
+  echo "FAIL: spec.md missing: $SPEC" >&2
+  FAIL=$((FAIL+1)); FAILED_NAMES+=("self-application: spec.md present")
+else
+  SELF_PAYLOAD=$(python3 - "$SPEC" <<'PY'
+import json, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+half = len(text) // 2
+payload = {
+    "tool_name": "AskUserQuestion",
+    "tool_input": {
+        "questions": [
+            {
+                "question": "spec self-application",
+                "header": "spec",
+                "options": [
+                    {"label": "spec part 1", "description": text[:half]},
+                    {"label": "spec part 2", "description": text[half:]},
+                ],
+            }
+        ]
+    },
+}
+print(json.dumps(payload))
+PY
+)
+  run_case "self-application: own spec.md → silent" pass default "$SELF_PAYLOAD"
+fi
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+echo
+echo "PASS=$PASS FAIL=$FAIL"
+if [ "$FAIL" -ne 0 ]; then
+  printf 'failed: %s\n' "${FAILED_NAMES[@]}"
+  exit 1
+fi
+exit 0

@@ -22,7 +22,7 @@ single source, reached via `verb_gate_checklist(verb)`:
 | ------ | ------------------------------------- | ------------ |
 | `gh pr create` | block-pr-without-caller-evidence, block-pr-without-precommit-evidence | both pr-body gates |
 | `gh pr merge` | momentum-rule-retrieval-gate, pre-merge-approval-gate, side-effect-scan, + conditional (gh-merge-worktree-precondition on `--delete-branch`, commit-title-length-check on `--squash`, pipefail-advisory when piped, session-intent on an undeclared mutation pivot, skill-gate-commands when opted in) | momentum-rule-retrieval-gate |
-| `AskUserQuestion` | output-block-falsify-advisory, block-ask-end-option, + conditional (block-manufactured-action-menu, pr-state-refetch-gate, merge-menu-review-options-advisory) and advisory-only (pre-output-falsification-gate, memory-hint) | output-block-falsify-advisory |
+| `AskUserQuestion` | output-block-falsify-advisory, block-ask-end-option, + conditional (block-manufactured-action-menu, pr-state-refetch-gate, merge-menu-review-options-advisory, menu-mutation-tier-advisory) and advisory-only (pre-output-falsification-gate, memory-hint) | output-block-falsify-advisory |
 
 The emitting hook writes the checklist to **both** its decision reason and
 stderr, because neither channel alone reaches the model in every case
@@ -143,6 +143,7 @@ Fail-open on infrastructure errors by design.
 | [bulk-write-memory-checkpoint](../../hooks/advisory-nudge/bulk-write-memory-checkpoint/spec.md) | PreToolUse | Advisory nudge when bulk-writing to SOT-flagged paths (vault/, wiki/, .claude/, skills/, AGENTS.md/CLAUDE.md companions) — reminds to checkpoint memory before the write loop to prevent "Loaded ≠ Retrieved" failures — issue #443 |
 | [pre-output-falsification-gate](../../hooks/advisory-nudge/pre-output-falsification-gate/spec.md) | PreToolUse | Advisory on `AskUserQuestion` when an evaluative/`(Recommended)` option is surfaced under recent negative evidence without a disconfirming-probe phrase in the question body (Lane A), and on `Bash` when a read-only status command (status/get/list) repeats ≥3× in a session (Lane B / B-i) — issue #487 |
 | [merge-menu-review-options-advisory](../../hooks/advisory-nudge/merge-menu-review-options-advisory/spec.md) | PreToolUse | Advisory (opt-in strict) on `AskUserQuestion` when a merge-decision menu (option label names a merge/squash action) offers no review/debate option (codex-review-wrap / code-reviewer / critic) — issue #560 |
+| [menu-mutation-tier-advisory](../../hooks/advisory-nudge/menu-mutation-tier-advisory/spec.md) | PreToolUse | Advisory (opt-in strict) on `AskUserQuestion` when every candidate option in a question sits in the mutating blast-radius tier and none names a non-mutating alternative (preview / dev / sandbox / dry-run / `보고만`) — an abandonment option (`다음 정기 실행에 맡김`) is not a tier — issue #963 |
 
 ---
 

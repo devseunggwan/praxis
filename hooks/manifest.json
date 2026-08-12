@@ -796,6 +796,16 @@
       "timeout": 5
     },
     {
+      "name": "menu-mutation-tier-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "AskUserQuestion",
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_MENU_MUTATION_TIER_STRICT"
+      }
+    },
+    {
       "name": "block-ask-end-option",
       "role": "preflight-gate",
       "event": "PreToolUse",
