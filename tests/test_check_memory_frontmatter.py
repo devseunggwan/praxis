@@ -135,6 +135,98 @@ body
     assert any("scalar form" in e for e in errors), errors
 
 
+def test_hookable_true_missing_hookkeywords_flagged(tmp_path):
+    # F1 (issue #942, codex-review pass after the original release): a field
+    # that is entirely ABSENT from the frontmatter was previously invisible
+    # to this checker — only present-but-malformed forms were caught. The
+    # memory-hint parser (impl.py:117-119) drops the memory outright when
+    # `hookable: true` and `hookKeywords:` has no match at all.
+    p = _write(
+        tmp_path,
+        "feedback_bad_missing_keywords.md",
+        """---
+name: bad-missing-keywords
+description: test
+metadata:
+  type: feedback
+  hookable: true
+  originSessionId: abc-123
+---
+body
+""",
+    )
+    errors = check.check_file(p)
+    assert any("hookable: true" in e and "hookKeywords" in e and "missing" in e for e in errors), errors
+
+
+def test_hookable_false_missing_hookkeywords_not_flagged(tmp_path):
+    # The F1 check is conditional on hookable being truthy — a non-hookable
+    # memory has no hint-index behavior to protect, so omitting hookKeywords
+    # entirely is normal, not drift.
+    p = _write(
+        tmp_path,
+        "feedback_not_hookable.md",
+        """---
+name: not-hookable
+description: test
+metadata:
+  type: feedback
+  originSessionId: abc-123
+---
+body
+""",
+    )
+    assert check.check_file(p) == []
+
+
+def test_hookkeywords_empty_bracket_flagged(tmp_path):
+    # F1: `hookKeywords: []` starts with `[` so the pre-F1 check accepted it
+    # as clean bracket form, but the runtime parser (impl.py:130-139) reads
+    # an empty inner list and returns None — same silent drop as the missing
+    # case above.
+    p = _write(
+        tmp_path,
+        "feedback_bad_empty_keywords.md",
+        """---
+name: bad-empty-keywords
+description: test
+metadata:
+  type: feedback
+  hookable: true
+  hookKeywords: []
+  originSessionId: abc-123
+---
+body
+""",
+    )
+    errors = check.check_file(p)
+    assert any("hookKeywords" in e and "empty list" in e for e in errors), errors
+
+
+def test_hookevents_empty_bracket_not_flagged(tmp_path):
+    # Asymmetric with hookKeywords (F1 scope note): an empty hookEvents list
+    # falls back to the `[Bash]` default at runtime (impl.py:150-169) rather
+    # than dropping the memory, so it is not a drift the way an empty
+    # hookKeywords is.
+    p = _write(
+        tmp_path,
+        "feedback_empty_events.md",
+        """---
+name: empty-events
+description: test
+metadata:
+  type: feedback
+  hookable: true
+  hookKeywords: [foo]
+  hookEvents: []
+  originSessionId: abc-123
+---
+body
+""",
+    )
+    assert check.check_file(p) == []
+
+
 def test_missing_frontmatter_fence_flagged(tmp_path):
     p = _write(tmp_path, "feedback_no_fence.md", "just prose, no frontmatter\n")
     errors = check.check_file(p)

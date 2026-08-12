@@ -34,6 +34,21 @@ Checks (one entry = one `*.md` file in the memory dir, `MEMORY.md` excluded):
      the whole memory — `hookable: true` then never fires. Two entries in the
      corpus shipped this way (issue #942 scan): the hint had been dark since
      they were authored.
+  4. `hookable: true` with `hookKeywords` missing entirely, or present as an
+     empty list (`hookKeywords: []`), is the same silent-drop failure as
+     check 3's block/scalar form — `impl.py:117-139` returns `None` (no
+     memory, no hint, ever) the moment `hookKeywords:` has no match or its
+     bracket content is empty. This check was added in a later revision of
+     this script (issue #942 F1, caught by an independent codex-review pass
+     after the first revision shipped without it): the original release only
+     inspected a field that IS present, so a memory missing `hookKeywords`
+     outright passed as clean while being just as dark as the block-form
+     case check 3 catches.
+
+Note on `hookEvents:` specifically: an empty list (`hookEvents: []`) is NOT
+flagged the same way — `impl.py:150-169` falls back to the `[Bash]` default
+when the bracket content is empty or unparseable, so the memory still gets
+indexed.
 
 Resolution: reuses `hooks/_lib/_memory_dir.py::resolve_memory_dir()`, so this
 follows `PRAXIS_MEMORY_DIR` / `CLAUDE_CONFIG_DIR` exactly like the memory-hint
@@ -85,6 +100,11 @@ TAXONOMY_FIELDS = (
 # Fields that must use single-line `[a, b]` form — the memory-hint parser
 # rejects any other shape outright (see module docstring, check 3).
 BRACKET_FIELDS = ("hookKeywords", "hookEvents")
+
+# Mirrors hooks/advisory-nudge/memory-hint/impl.py:60 exactly (TRUTHY_VALUES) —
+# the runtime's own truthy set for `hookable:`, after the same normalization
+# (strip, lowercase, strip quotes) that impl.py:108-113 applies.
+HOOKABLE_TRUTHY_VALUES = {"true", "yes"}
 
 
 def frontmatter_block(raw: str) -> str | None:
@@ -151,6 +171,31 @@ def check_file(path: Path) -> list[str]:
                         f"`{field}: {value}` is scalar form, not `[a, b]` — the memory-hint parser "
                         "rejects this shape and silently drops the entire memory from the hint index"
                     )
+                elif field == "hookKeywords":
+                    close_idx = value.find("]")
+                    inner = value[1:close_idx].strip() if close_idx != -1 else value[1:]
+                    if not inner:
+                        errors.append(
+                            f"`{field}: {value}` is an empty list — the memory-hint parser treats "
+                            "an empty hookKeywords the same as absent and silently drops the entire "
+                            "memory from the hint index (issue #942 F1)"
+                        )
+
+    # F1 (issue #942): `hookable: true` with `hookKeywords` entirely absent is
+    # the most direct silent-dark shape and was previously invisible to this
+    # lint — the BRACKET_FIELDS loop above only inspects a field that IS
+    # present. hooks/advisory-nudge/memory-hint/impl.py:117-119 returns None
+    # (drops the memory from the hint index) the moment `hookKeywords:` has no
+    # match in the frontmatter block at all.
+    hookable_truthy = False
+    if "hookable" in occurrences:
+        _, hookable_value = occurrences["hookable"][0]
+        hookable_truthy = hookable_value.strip().strip("\"'").lower() in HOOKABLE_TRUTHY_VALUES
+    if hookable_truthy and "hookKeywords" not in occurrences:
+        errors.append(
+            "`hookable: true` but `hookKeywords` is missing — the memory-hint parser requires "
+            "it and silently drops the entire memory from the hint index when absent (issue #942 F1)"
+        )
 
     return errors
 
