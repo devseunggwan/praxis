@@ -49,7 +49,24 @@ def test_timeout_default_and_override(monkeypatch):
     assert _state_lock.lock_timeout() == 0.25
 
 
-@pytest.mark.parametrize("raw", ["", "soon", "-1"])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "",
+        "soon",
+        "-1",
+        # `float()` accepts all four of these and none is caught by a `< 0`
+        # check — `nan < 0` and `inf < 0` are both False. Each would reach the
+        # acquisition loop as a `time.monotonic() >= deadline` that can never
+        # be True, so a contended hook spins until its tool call times out.
+        # That is a hang rather than an exception, which is exactly what
+        # `@fail_open` cannot catch.
+        "nan",
+        "NaN",
+        "inf",
+        "Infinity",
+    ],
+)
 def test_malformed_timeout_falls_back_to_the_default(monkeypatch, raw):
     monkeypatch.setenv("PRAXIS_STATE_LOCK_TIMEOUT", raw)
     assert _state_lock.lock_timeout() == 2.0

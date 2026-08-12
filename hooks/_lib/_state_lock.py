@@ -27,6 +27,7 @@ whole previous file or the whole next one.
 from __future__ import annotations
 
 import contextlib
+import math
 import os
 import time
 from typing import Iterator
@@ -63,6 +64,13 @@ def lock_timeout() -> float:
     A malformed or negative value falls back to the default rather than
     disabling the wait — a typo in the override must not silently reintroduce
     the race it was set to tune.
+
+    `float()` accepts `nan` and `inf`, and neither is caught by the negative
+    check: `nan < 0` and `inf < 0` are both False. Either one reaches the
+    acquisition loop's `time.monotonic() >= deadline` as a comparison that can
+    never be True, so a contended hook spins until the tool call times out.
+    That failure is a hang rather than an exception, so `@fail_open` cannot
+    reach it — the guard has to be here.
     """
     raw = os.environ.get(_TIMEOUT_ENV)
     if raw is None:
@@ -71,7 +79,7 @@ def lock_timeout() -> float:
         value = float(raw)
     except ValueError:
         return _DEFAULT_TIMEOUT_SECONDS
-    if value < 0:
+    if value < 0 or not math.isfinite(value):
         return _DEFAULT_TIMEOUT_SECONDS
     return value
 
