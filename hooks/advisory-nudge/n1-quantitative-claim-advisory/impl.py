@@ -133,9 +133,14 @@ _SUMMARY_KO = ("중앙값", "백분위", "평균")
 # a case-insensitive match would hit `bypass` / `password` / `passed`.
 # A bare `검증` is ordinary Korean PR prose ("검증 앵커"); only the completed
 # form is a verdict.
+#
+# `PASS`/`FAIL` stay case-sensitive: lowercasing them would match `bypass`,
+# `password`, and `passed`. `verified` is the opposite case — an English
+# verification sentence usually starts it, so only that alternative is
+# case-insensitive.
 _VERDICT_RE = re.compile(
     r"(?<![A-Za-z])(?:PASS|FAIL)(?![A-Za-z])"
-    r"|(?<![A-Za-z])verified(?![A-Za-z])"
+    r"|(?<![A-Za-z])(?i:verified)(?![A-Za-z])"
     r"|검증\s*(?:완료|됨|함)",
 )
 # Korean particles attach directly to the unit — `48건을`, `91초로` — so a

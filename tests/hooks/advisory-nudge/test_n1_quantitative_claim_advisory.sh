@@ -275,6 +275,12 @@ run_case "R6: measurement unit followed by a particle" "advisory:$MARKER" \
 run_case "R7: particle guard does not resurrect the msg false positive" silent \
   "gh pr comment 1 --body 'PASS(live) — 2920msg 를 큐에 넣었다'"
 
+# F3 — English verification sentences usually start capitalized.
+run_case "R8: sentence-initial Verified" "advisory:$MARKER" \
+  "gh pr comment 1 --body 'Verified against prod: 91ms'"
+run_case "R9: PASS stays case-sensitive (no bypass/password match)" silent \
+  "gh pr comment 1 --body 'Passed the bypass check in 12s'"
+
 # ---------------------------------------------------------------------------
 # === FALSE-POSITIVE GUARDS (word boundary, Unicode, noise vocabulary)
 # ---------------------------------------------------------------------------
