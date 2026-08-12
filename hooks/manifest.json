@@ -442,6 +442,21 @@
       }
     },
     {
+      "name": "commit-decomposition-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": [
+        "claude"
+      ],
+      "timeout": 10,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_SKIP_COMMIT_DECOMPOSITION_ADVISORY"
+        ]
+      }
+    },
+    {
       "name": "model-routing-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
