@@ -13,14 +13,23 @@ Each case runs twice against the same code:
     silently returning the suite to green.
   * `lock` — the shipped path.
 
-The interleaving is forced by a start barrier plus a fixed delay inserted
-between the state read and the write in both children. Neither alone is
-enough: without the delay the race is a scheduling coin-flip, and without the
-barrier interpreter startup skew alone exceeded the delay often enough that
-the unlocked arm read as "no race". The delay sits at the same point in both
-arms and changes no hook logic; under `lock` the second child simply waits out
-the first child's critical section, which is why the delay must stay well
-under `PRAXIS_STATE_LOCK_TIMEOUT`'s 2s default.
+Both arms open with a start barrier, because interpreter startup skew alone
+exceeded the read window often enough that the unlocked arm read as "no race".
+What holds the window open after that differs by arm, and has to:
+
+  * `nolock` — a second barrier, released once *both* children have returned
+    from the state read. A fixed sleep only makes the overlap likely; on a
+    loaded box the first child can complete its whole read-modify-write before
+    the second is scheduled, and the serialized result that produces fails the
+    arm whose entire job is to prove the race.
+  * `lock` — the fixed delay. A post-read barrier is impossible here: the read
+    sits inside the critical section, so a child waiting there for a sibling
+    that cannot enter until it leaves would deadlock the pair. This arm needs
+    no overlap anyway — it asserts the second child waits the first out, which
+    is why the delay must stay well under `PRAXIS_STATE_LOCK_TIMEOUT`'s 2s
+    default.
+
+Neither arm changes hook logic; both wrap the read at the same point.
 """
 from __future__ import annotations
 
@@ -47,7 +56,10 @@ import os
 import sys
 import time
 
-impl_path, lock_mode, delay, read_fn, argv_mode, ready_file, go_file = sys.argv[1:8]
+(
+    impl_path, lock_mode, delay, read_fn, argv_mode, ready_file, go_file,
+    read_file, peer_read_file,
+) = sys.argv[1:10]
 
 spec = importlib.util.spec_from_file_location("impl_under_test", impl_path)
 mod = importlib.util.module_from_spec(spec)
@@ -63,9 +75,30 @@ _orig_read = getattr(mod, read_fn)
 
 
 def _slow_read(*args, **kwargs):
-    """Real read, then hold the window open so the sibling reaches it too."""
+    """Real read, then hold the window open so the sibling reaches it too.
+
+    Under `nolock` the hold is a barrier on the sibling's own read rather than
+    a fixed sleep: a sleep only makes the overlap likely, and on a loaded CI
+    box the first child can finish its whole read-modify-write before the
+    second is scheduled at all — which produces a serialized result and fails
+    the arm that exists to prove the race.
+
+    The barrier is `nolock`-only, and cannot be otherwise: under `lock` the
+    read happens inside the critical section, so waiting there for a sibling
+    that cannot enter until this process leaves would deadlock both children.
+    That arm keeps the sleep, which is all it needs — it asserts the second
+    child waits the first out, not that the two overlap.
+    """
     result = _orig_read(*args, **kwargs)
-    time.sleep(float(delay))
+    if lock_mode == "nolock":
+        open(read_file, "w").close()
+        _read_deadline = time.monotonic() + 30
+        while not os.path.exists(peer_read_file):
+            if time.monotonic() >= _read_deadline:
+                sys.exit("driver: post-read barrier timed out")
+            time.sleep(0.001)
+    else:
+        time.sleep(float(delay))
     return result
 
 
@@ -106,7 +139,12 @@ def _run_pair(driver: Path, impl: Path, lock_mode: str, payloads, read_fn, argv_
     `communicate` does not return until that child has exited — so the second
     child would not start until the first was done and no race could occur.
     """
+    # The post-read barrier pairs each child with exactly one peer, so a third
+    # payload would leave every child waiting on a file no one else writes.
+    assert len(payloads) == 2, "the post-read barrier pairs exactly two children"
+
     go_file = driver.parent / "go"
+    read_files = [driver.parent / f"read-{i}" for i in range(len(payloads))]
     ready_files = []
     procs = []
     stdin_files = []
@@ -129,6 +167,8 @@ def _run_pair(driver: Path, impl: Path, lock_mode: str, payloads, read_fn, argv_
                     argv_mode,
                     str(ready_file),
                     str(go_file),
+                    str(read_files[index]),
+                    str(read_files[1 - index]),
                 ],
                 stdin=handle,
                 stdout=subprocess.PIPE,
