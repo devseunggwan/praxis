@@ -284,10 +284,48 @@ def _is_abandon(text: str) -> bool:
 # menu is for.
 _REASON_MARKER = "Safe-tier-unavailable:"
 
+_FENCE_RE = re.compile(r"^(`{3,}|~{3,})")
+
+
+def _prose_lines(question_text: str) -> "list[str]":
+    """The lines a reader reads as prose — fenced blocks and HTML comments out.
+
+    A fenced example is the reason this exists: its content sits at column 0
+    like a real marker does, so documenting the marker would otherwise satisfy
+    it. An unterminated fence swallows the rest of the body on purpose — the
+    author who opened it is showing an example, not stating a reason.
+    """
+    lines = []
+    fence = None
+    in_comment = False
+    for line in question_text.splitlines():
+        if fence is not None:
+            close = _FENCE_RE.match(line)
+            # CommonMark: the closer is the same character, at least as long,
+            # and carries no info string.
+            if close and close.group(1)[0] == fence[0] and len(close.group(1)) >= len(fence):
+                if not line[close.end():].strip():
+                    fence = None
+            continue
+        if in_comment:
+            if "-->" in line:
+                in_comment = False
+            continue
+        opener = _FENCE_RE.match(line)
+        if opener:
+            fence = opener.group(1)
+            continue
+        if line.lstrip().startswith("<!--"):
+            if "-->" not in line:
+                in_comment = True
+            continue
+        lines.append(line)
+    return lines
+
 
 def _has_reason_marker(question_text: str) -> bool:
     """True if the question body states why no non-mutating tier is available."""
-    for line in question_text.splitlines():
+    for line in _prose_lines(question_text):
         if line.startswith(_REASON_MARKER):
             if line[len(_REASON_MARKER):].strip():
                 return True

@@ -119,6 +119,13 @@ non-empty text after the colon. A mid-line mention, a bullet, a fenced block, or
 an empty marker does not count — which is also what makes the reason visible to
 the person the menu is for, rather than a token that only satisfies a hook.
 
+The body is read as prose first: fenced blocks (backtick or tilde, any fence
+length) and HTML comments are removed before the marker is looked for, and an
+unterminated fence swallows the rest of the body. Without that, documenting the
+marker suppresses the advisory that asks for it — a fenced example's content
+sits at column 0 exactly like a real marker. A marker following a *closed* fence
+still counts; the fixtures pin both directions.
+
 Read **per question**: a reason on question 1 does not cover an all-prod
 question 2.
 

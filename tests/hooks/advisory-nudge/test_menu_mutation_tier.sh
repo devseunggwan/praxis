@@ -225,6 +225,35 @@ REASON_Q1_ONLY='{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"ques
 run_case "reason on q1 does not cover q2"  advisory default "$REASON_Q1_ONLY"
 
 # ---------------------------------------------------------------------------
+# (d5) The marker is read as prose — fenced blocks and HTML comments are not
+# ---------------------------------------------------------------------------
+# CodeRabbit round-2: a fenced example's content sits at column 0 exactly like a
+# real marker, so documenting the marker suppressed the very advisory that asks
+# for it. spec.md and the impl comment both already promised fences do not
+# count, so this was code contradicting its own stated contract.
+#
+# The whole marker surface is enumerated here, not just the reported fence:
+# every wrapper that puts a line at column 0 without a reader seeing a stated
+# reason. `mid-line` / `empty` / per-question live in (d4) above.
+mk_reason() {  # $1 = question body (JSON-escaped)
+  printf '{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"%s","header":"트리거","options":[{"label":"두 소스 다 트리거","description":"d"},{"label":"한 건만 먼저","description":"prod 트리거"}]}]}}' "$1"
+}
+M='Safe-tier-unavailable: preview 클러스터에 커넥터가 없다'
+run_case "backtick fence does not count"   advisory default "$(mk_reason "예시:\n\`\`\`text\n$M\n\`\`\`")"
+run_case "strict: backtick fence blocks"   block    strict  "$(mk_reason "예시:\n\`\`\`text\n$M\n\`\`\`")"
+run_case "tilde fence does not count"      advisory default "$(mk_reason "예시:\n~~~\n$M\n~~~")"
+run_case "4-backtick fence does not count" advisory default "$(mk_reason "예시:\n\`\`\`\`\n$M\n\`\`\`\`")"
+# An unterminated fence swallows the rest on purpose: the author is showing an
+# example, not stating a reason.
+run_case "unclosed fence does not count"   advisory default "$(mk_reason "예시:\n\`\`\`\n$M")"
+run_case "html comment does not count"     advisory default "$(mk_reason "<!--\n$M\n-->")"
+run_case "indented marker does not count"  advisory default "$(mk_reason "예시:\n    $M")"
+run_case "inline backticks do not count"   advisory default "$(mk_reason "\`$M\`")"
+# Paired control: the fence must not swallow a real marker that follows it, or
+# the fix would suppress the feature instead of the bypass.
+run_case "marker after closed fence counts" pass default "$(mk_reason "\`\`\`\nnoise\n\`\`\`\n$M")"
+
+# ---------------------------------------------------------------------------
 # (e) BLOCK — strict mode
 # ---------------------------------------------------------------------------
 run_case "strict: incident menu"       block strict "$(build_payload "$INCIDENT")"
