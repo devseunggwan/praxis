@@ -30,17 +30,56 @@ For each approved action:
 
    In addition to standard fields (`name`, `description`, `type`), every new memory MUST evaluate whether to include the `memory-hint` opt-in fields — `hookable` and `hookKeywords`. The full field spec (parser semantics, matching rules, fail-open contract) lives in `hooks/advisory-nudge/memory-hint/spec.md`; this section defines the authoring-time decision. The parser ignores `type` entirely and reads `hookable` / `hookKeywords` / `hookEvents` regardless of nesting depth (the regexes are indentation-tolerant), so place `type:` per your host's memory convention — this repo's on-disk memories nest taxonomy fields under `metadata:`. Only the opt-in fields' spelling and single-line list form matter for the hook.
 
+   **Canonical schema (issue #942).** The taxonomy block below is the full
+   field set this repo's memories converge on. Nesting these fields under
+   `metadata:` (vs. leaving them top-level) has **no runtime effect** —
+   `hooks/advisory-nudge/memory-hint/impl.py`'s regexes match either
+   position — so the *only* reason to enforce nesting is cross-entry
+   consistency: a reader (human or a future retrospect scan) should not have
+   to check two positions per field. `scripts/check-memory-frontmatter.py`
+   lints this shape and is wired into CI (see its docstring for what it does
+   and does not catch).
+
    ```yaml
    ---
    name: my-memory
    description: Short rule statement
    metadata:                                # this repo nests taxonomy fields here
+     node_type: memory                      # optional; no hook reads it (grep-verified, issue #942) — carry it when present, don't backfill it when absent
      type: feedback
+     originSessionId: <uuid>                # session the memory was authored in
      hookable: true                         # opt into PreToolUse surface
      hookKeywords: [keyword1, keyword2]      # flat single-line list, whole-token (case-sensitive)
      hookEvents: [Bash, Edit]               # optional; default [Bash] when omitted
+     modified: <ISO-8601>                   # optional; set on later edits
+   momentum: [merge]                        # opt-in, top-level — NOT a taxonomy field, see below
    ---
    ```
+
+   **`momentum:` stays top-level — a deliberate exclusion, not a residual gap.**
+   `momentum` is a *different* opt-in mechanism (consumed by
+   `hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py`'s
+   `MOMENTUM_RE`, not by the memory-hint hook's `hookKeywords`/`hookEvents`)
+   with its own independent hook consumer — it answers "surface this memory
+   at a high-momentum action point" rather than "what kind of memory is
+   this", so it does not belong in the `metadata:` taxonomy block
+   conceptually. Practically: every existing `momentum:` entry (3/3, as of
+   issue #942's scan) is already top-level, so nesting it would be swimming
+   against its own 100%-consistent convention rather than fixing drift.
+   `scripts/check-memory-frontmatter.py` deliberately excludes `momentum`
+   from the fields it checks — this is the schema decision that exclusion
+   encodes, not an oversight.
+
+   **`node_type: memory` is optional, not required.** `grep -rn node_type`
+   across every hook and script in this repo (issue #942) finds no
+   consumer at all — unlike `type`/`hookable`/`hookKeywords`/`hookEvents`,
+   nothing reads it. It is present on most existing entries (a fixed literal
+   from an earlier authoring convention) but its absence is inert: two
+   entries lack it entirely and `scripts/check-memory-frontmatter.py`
+   reports them clean, correctly, because there is nothing to enforce.
+   When authoring or normalizing a memory, carry `node_type: memory` if
+   it's already there — don't add it to a file that lacks it, and don't
+   treat its absence as drift.
 
    **Category-based default (apply unless rationale documented):**
 
@@ -58,8 +97,26 @@ For each approved action:
    - Whole-token, case-sensitive matching only (per `hooks/advisory-nudge/memory-hint/spec.md`). List multiple casings explicitly if needed (`[Edit, edit]`).
    - 1–4 keywords typical; >5 raises false-positive risk linearly.
    - **Avoid generic English words** (`add`, `run`, `test`, `update`) — they fire on unrelated commands and erode the hint signal.
-   - **`hookKeywords` must be a flat single-line list** (`[a, b]`). Multi-line YAML-block form (`- item` on separate lines) and scalar form (`hookKeywords: foo`) are silently skipped — the entire memory is then dropped (not indexed at all) and the hint never fires. Verify the list is single-line before committing.
+   - **`hookKeywords` must be a flat single-line list** (`[a, b]`). Multi-line YAML-block form (`- item` on separate lines) and scalar form (`hookKeywords: foo`) are silently skipped — the entire memory is then dropped (not indexed at all) and the hint never fires. Verify the list is single-line before committing. **This is not hypothetical** — issue #942's full-corpus scan found two `hookable: true` entries (`feedback_hook_flag_file_heredoc_timing.md`, `feedback_merge_ask_ci_comments_precheck.md`) shipped in the block-list form, so their hints had never fired despite `hookable: true` reading as "on". `scripts/check-memory-frontmatter.py` now catches this shape.
    - When the memory targets a non-Bash event, add `hookEvents:` to opt in — the memory-hint hook (`hooks/advisory-nudge/memory-hint/impl.py`) supports `[Bash, Edit, Write, NotebookEdit, AskUserQuestion]` (default `[Bash]` when omitted). Unsupported tool names in the list are dropped; if every listed event is unsupported the parser keeps the `[Bash]` default.
+
+   **Why cycle 17's finding recurred instead of closing (issue #942):** the
+   Stage 1.5 hygiene cursor (`.omc/state/retrospect-hygiene-cursor.json`,
+   gitignored local state) shows cycle 17 recorded the schema-drift family as
+   a carried `cycle_note` string only — no `gh issue create` action ran, so
+   the finding had nowhere to be closed *against*. It sat in the cursor's
+   carry-forward note, silently grew from 2 files to 4 across cycle
+   17→18, and only became an issue (#942) once cycle 18 explicitly promoted
+   it. The gap this exposes: a carried `cycle_note` has no re-verification
+   path of its own (no CI, no lint, no issue to close) — `scripts/check-memory-frontmatter.py`
+   is the structural fix, but only on a contributor's own machine: the
+   memory directory it lints is a local, gitignored, per-user store that is
+   structurally absent in CI, so `scripts/run-tests.sh`'s call to it always
+   prints `N/A` and exits 0 there (verified — F3, issue #942 codex-review
+   pass). **CI cannot catch the next drift of this family; only a local
+   `run-tests.sh` run, or a contributor running the script directly,
+   catches it.** That re-verification path is therefore still incomplete —
+   it exists, but is opt-in rather than structurally enforced on every push.
 
    **⚠️ MANDATORY: Duplicate check before creating any memory file:**
 
