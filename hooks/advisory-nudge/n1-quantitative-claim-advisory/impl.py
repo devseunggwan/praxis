@@ -138,13 +138,19 @@ _VERDICT_RE = re.compile(
     r"|(?<![A-Za-z])verified(?![A-Za-z])"
     r"|검증\s*(?:완료|됨|함)",
 )
+# Korean particles attach directly to the unit — `48건을`, `91초로` — so a
+# blanket Hangul right-guard rejects the natural phrasing. Naming the
+# particles keeps `2920msg`-style false positives out (the guard against
+# Latin letters is unchanged) while admitting the inflected forms.
+_KO_PARTICLE = r"을|를|이|가|은|는|로|으로|에|에서|와|과|의|도|만|보다|까지|부터"
+_UNIT_TAIL = rf"(?![A-Za-z])(?!(?:(?!{_KO_PARTICLE})[가-힣]))"
+
 # Measurement units: sub-minute latency and throughput only. Minute- and
 # hour-scale durations are excluded — those are overwhelmingly build/run
 # times rather than sample-dependent claims, and including them fires on
-# ordinary prose. Right-guarded so `2920msg` and `12sample` are not read as
-# measurements.
+# ordinary prose.
 _MEASUREMENT_RE = re.compile(
-    rf"(?:{_NUM})\s*(?:ms|sec|secs|s|초|qps|rps|req/s)(?![A-Za-z가-힣])",
+    rf"(?:{_NUM})\s*(?:ms|sec|secs|s|초|qps|rps|req/s){_UNIT_TAIL}",
 )
 _VERDICT_WINDOW = 80
 
@@ -194,7 +200,7 @@ def _has_verdict_measurement(text: str) -> bool:
 # condition fields (command / collection scope / where it ran) silences it.
 _COUNT_RE = re.compile(
     rf"(?:{_NUM})\s*(?:건|개|행|줄|rows?|hits?|matches?|files?|cases?|tests?|failures?|failed)"
-    r"(?![A-Za-z가-힣])",
+    rf"{_UNIT_TAIL}",
     re.IGNORECASE,
 )
 # Field 1 — the command that produced it, cited rather than described.

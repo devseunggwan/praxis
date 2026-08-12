@@ -267,6 +267,14 @@ run_case "R3: global flag between gh and its subcommand" "advisory:$MARKER" \
 run_case "R4: path-invoked gh binary" "advisory:$MARKER" \
   "/usr/bin/gh pr comment 1 --body 'p50 91ms'"
 
+# F2 — Korean particles attach directly to the unit.
+run_case "R5: count unit followed by a particle" "advisory:$MARKER" \
+  "gh pr comment 1 --body '검증 완료 — 48건을 확인했다'"
+run_case "R6: measurement unit followed by a particle" "advisory:$MARKER" \
+  "gh pr comment 1 --body 'PASS — 91초로 완료됐다'"
+run_case "R7: particle guard does not resurrect the msg false positive" silent \
+  "gh pr comment 1 --body 'PASS(live) — 2920msg 를 큐에 넣었다'"
+
 # ---------------------------------------------------------------------------
 # === FALSE-POSITIVE GUARDS (word boundary, Unicode, noise vocabulary)
 # ---------------------------------------------------------------------------
@@ -279,8 +287,11 @@ run_case "FP3: bypass/password do not match PASS" silent \
   "gh pr comment 1 --body 'bypass 토큰과 password 를 12s 안에 회전한다'"
 run_case "FP4: bare 검증 is ordinary prose" silent \
   "gh pr comment 1 --body '검증 앵커를 5s 안에 작성한다'"
+# The body carries no count: `3건을` is now a legitimate Form C trigger
+# (verdict-attached count, no run condition), which would mask what this case
+# actually asserts — that `top50` is not read as a percentile.
 run_case "FP5: top50 is not a percentile" silent \
-  "gh pr comment 1 --body 'top50 그룹 3건을 PASS 처리했다'"
+  "gh pr comment 1 --body 'top50 그룹을 PASS 처리했다'"
 run_case "FP6: minute-scale build duration" silent \
   "gh pr comment 1 --body '전체 스위트 12분 소요, PASS(live)'"
 run_case "FP7: 2920msg is not a measurement" silent \
