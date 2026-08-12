@@ -51,6 +51,7 @@ from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Tier signal tokens
@@ -494,7 +495,12 @@ def main() -> int:
         sys.stderr.write(BLOCK_MSG)
         return 2
 
+    # Soft gate, not stderr: this advisory asks the *composing agent* to add a
+    # tier or state a reason, and stderr never reaches it (CONTRIBUTING.md,
+    # "Advisory output is not visible to the model"). The sibling
+    # `output-block-falsify-advisory` gates the same event/matcher the same way.
     sys.stderr.write(ADVISORY_MSG)
+    emit_decision("ask", ADVISORY_MSG)
     return 0
 
 

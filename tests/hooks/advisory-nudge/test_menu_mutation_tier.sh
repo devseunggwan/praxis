@@ -254,6 +254,31 @@ run_case "inline backticks do not count"   advisory default "$(mk_reason "\`$M\`
 run_case "marker after closed fence counts" pass default "$(mk_reason "\`\`\`\nnoise\n\`\`\`\n$M")"
 
 # ---------------------------------------------------------------------------
+# (d6) The advisory reaches the model, not just the terminal
+# ---------------------------------------------------------------------------
+# CodeRabbit + codex both flagged this: stderr is invisible to the model
+# (CONTRIBUTING.md "Advisory output is not visible to the model"), so an
+# advisory asking the composing agent to add a tier could never be acted on.
+# The sibling `output-block-falsify-advisory` gates the same event/matcher via
+# `emit_decision("ask", …)`; this pins that channel so a regression to
+# stderr-only fails here rather than silently.
+adv_stdout=$(printf '%s' "$(build_payload "$INCIDENT")" | "$HOOK" 2>/dev/null)
+if printf '%s' "$adv_stdout" | grep -q '"permissionDecision": "ask"'; then
+  PASS=$((PASS + 1)); echo "PASS [advisory] nudge is emitted on the model-visible channel"
+else
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("model-visible channel"); echo "FAIL [advisory] nudge is emitted on the model-visible channel"
+fi
+
+# Paired control: a silent menu must emit NO decision JSON. Without this, a
+# hook that always emitted "ask" would pass the assertion above.
+silent_stdout=$(printf '%s' "$(build_payload '["preview 에서 먼저 확인", "prod 트리거"]')" | "$HOOK" 2>/dev/null)
+if [ -z "$silent_stdout" ]; then
+  PASS=$((PASS + 1)); echo "PASS [pass] silent menu emits no decision JSON"
+else
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("silent emits no JSON"); echo "FAIL [pass] silent menu emits no decision JSON"
+fi
+
+# ---------------------------------------------------------------------------
 # (e) BLOCK — strict mode
 # ---------------------------------------------------------------------------
 run_case "strict: incident menu"       block strict "$(build_payload "$INCIDENT")"

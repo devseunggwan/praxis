@@ -221,6 +221,19 @@ not match inside `code-reviewer`. A false positive in this set only
 | Empty / missing options | silent pass-through |
 | Missing / malformed payload | silent pass-through (fail-open) |
 
+### Output channel
+
+The default path emits `permissionDecision: ask` via the shared
+`_hook_io.emit_decision` helper, not stderr alone. The advisory asks the
+*composing agent* to add a tier or state a reason, and stderr never reaches it
+(`CONTRIBUTING.md`, "Advisory output is not visible to the model"), so an
+stderr-only nudge could not produce the change it asks for. The sibling
+`output-block-falsify-advisory` gates the same event and matcher the same way.
+stderr is still written, for the human reading the terminal.
+
+Strict mode keeps exit 2 + stderr — a block is a block, and the runtime reads
+the exit code there.
+
 ### Mode and env var behavior
 
 | Env var state | Mode | Exit code on match |
