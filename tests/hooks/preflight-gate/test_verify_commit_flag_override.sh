@@ -267,7 +267,7 @@ fi
 
 # Positive: a deny surfaces the full sibling-gate checklist, not just this
 # gate's own token.
-deny_out=$(echo "$(payload 'git commit -n -m "msg"')" | \
+deny_out=$(payload 'git commit -n -m "msg"' | \
   env -u PRAXIS_SKIP_COMMIT_FLAG_CHECK python3 "$HOOK" 2>/dev/null)
 if echo "$deny_out" | python3 -c "
 import json, sys
@@ -308,7 +308,7 @@ fi
 
 # Negative contrast: no override detected → fully silent, no checklist leaks
 # into a passing invocation.
-silent_out=$(echo "$(payload 'git commit -m "regular message"')" | \
+silent_out=$(payload 'git commit -m "regular message"' | \
   env -u PRAXIS_SKIP_COMMIT_FLAG_CHECK python3 "$HOOK" 2>/dev/null)
 if [ -z "$silent_out" ]; then
   echo "PASS: T02: no override → silent, checklist does not fire"
