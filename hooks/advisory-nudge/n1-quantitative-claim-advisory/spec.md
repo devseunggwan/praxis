@@ -195,13 +195,27 @@ Row 1 rests on a single reading, but row 2's unrelated `n=15` silences the whole
 scan. A verification anchor is exactly a multi-row table, so this is the shape
 the hook most often sees.
 
-This is left as-is deliberately. Narrowing suppression to the claim's
-neighbourhood would raise the fire rate and reopen the noise budget, and every
-sibling gate on this surface (`perf-multiplier-evidence-advisory` and the rest)
-scans the whole body for its own pass condition — narrowing only this one would
-diverge from the shared convention. It is a follow-up judgement, not a defect
-this PR silently carries: the pairing is fixed by a test case, so narrowing the
-suppressors later breaks that case and reopens the decision on purpose.
+This is left as-is deliberately, and for exactly one reason: **narrowing
+suppression to the claim's neighbourhood raises the fire rate by an amount
+nobody has measured.** The noise budget is what this hook's whole design is
+spending, so it cannot be reopened on an estimate.
+
+It is explicitly **not** left as-is for consistency with the siblings. A survey
+of every hook impl in the repo found per-candidate scoping already established
+on this axis: `caller-probe-gate` scopes its suppressor per write — the code
+says so at `impl.py:373`, *"Arm A is per-write: a probe line in one body says
+nothing about a claim published by another"*, and a regression test pins it
+(`two writes: probe in write A does not clear write B (warn)`).
+`merge-state-claim-gate` scopes per PR number via
+`has_fresh_query_for_number(events, n)`. The only gate that scans the whole
+body symmetrically is `perf-multiplier-evidence-advisory`, and it *detects*
+over the whole body too, so it has no narrow/wide mismatch to begin with.
+
+Per-candidate scoping is therefore the convention, and this hook diverges from
+it. That is a debt this spec records rather than a design it defends. What the
+pairing above buys is that the debt is executable: it is fixed by a test case,
+so narrowing the suppressors later breaks that case and reopens the decision on
+purpose instead of by accident.
 
 ## Relationship to the sibling hooks (duplication check)
 
