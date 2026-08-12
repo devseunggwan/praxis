@@ -264,10 +264,15 @@ These checks help you decide whether the override is appropriate. The
 hook does NOT recognize their completion — re-running the same git
 commit invocation will be blocked again.
 
-To proceed:
-  - Set PRAXIS_SKIP_COMMIT_FLAG_CHECK=1 in the environment (justify the
-    bypass in the commit message body).
-  - Or remove the override flag(s) that triggered the block.
+To proceed, BOTH of the following are required (global CLAUDE.md: lint/hook
+suppression needs a stated reason AND explicit user approval — neither one
+alone is sufficient):
+  1. State the concrete reason a root fix / normal commit is not possible.
+  2. Get the user's explicit approval for this specific override.
+  Then set PRAXIS_SKIP_COMMIT_FLAG_CHECK=1 in the environment, with the
+  reason recorded in the commit message body.
+
+Or remove the override flag(s) that triggered the block.
 """
 
 

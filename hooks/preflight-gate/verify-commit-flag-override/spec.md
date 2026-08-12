@@ -54,6 +54,14 @@ The only allow path the hook actually recognizes is the env-var bypass:
   environment before invoking `git commit`. Use sparingly; the bypass
   must be justified in the commit message body or PR description.
 
+The deny message states BOTH requirements explicitly (global CLAUDE.md:
+suppression needs a stated reason AND explicit user approval, neither one
+alone is sufficient) — the bypass env var is not, on its own, a satisfying
+condition; it must be paired with a recorded reason and the user's
+per-instance approval. Before this change (issue #941) the message read
+as an either/or menu ("set the env var" OR "remove the flag"), which did
+not make the approval half of the rule visible at the block site.
+
 The deny message also enumerates every OTHER gate that fires on `git
 commit` (`block-commit-without-codex-review`, `commit-title-format-check`,
 `commit-title-length-check`, `block-sciomc-finding-commit`,

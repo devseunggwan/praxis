@@ -290,6 +290,22 @@ else
   FAILED_NAMES+=("T01")
 fi
 
+# Positive: the deny message states the reason+approval requirement
+# explicitly — the bypass env var alone is not framed as sufficient.
+if echo "$deny_out" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+reason = d['hookSpecificOutput']['permissionDecisionReason']
+assert 'BOTH of the following are required' in reason, f'missing reason+approval requirement: {reason}'
+" 2>/dev/null; then
+  echo "PASS: T01b: deny message requires BOTH reason and user approval"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: T01b: deny message requires BOTH reason and user approval"
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("T01b")
+fi
+
 # Negative contrast: no override detected → fully silent, no checklist leaks
 # into a passing invocation.
 silent_out=$(echo "$(payload 'git commit -m "regular message"')" | \
