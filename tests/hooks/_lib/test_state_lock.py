@@ -42,6 +42,31 @@ def test_lock_path_is_a_sibling_of_the_state_file(tmp_path):
     assert _state_lock.lock_path_for(str(state)) == str(state) + ".lock"
 
 
+def test_lock_is_held_answers_only_while_someone_holds_it(tmp_path):
+    """The probe the cache sweep uses instead of an age check.
+
+    A lock file's mtime freezes at creation, so age cannot separate a lock held
+    right now from one abandoned a month ago. Taking it can: the attempt fails
+    precisely when someone else has it. Two `open()` calls contend even inside
+    one process, because `flock` is held per open file description rather than
+    per process — so no child is needed to observe the held case.
+    """
+    state = str(tmp_path / "state.json")
+    lock = _state_lock.lock_path_for(state)
+
+    assert _state_lock.lock_is_held(lock) is False, "no file yet"
+
+    with _state_lock.state_lock(state) as acquired:
+        assert acquired is True
+        assert _state_lock.lock_is_held(lock) is True
+
+    # Released — and the probe must not leave the lock taken on its way out,
+    # or the next holder would be locked out by the sweep that asked.
+    assert _state_lock.lock_is_held(lock) is False
+    with _state_lock.state_lock(state, timeout=0.05) as acquired:
+        assert acquired is True
+
+
 def test_timeout_default_and_override(monkeypatch):
     monkeypatch.delenv("PRAXIS_STATE_LOCK_TIMEOUT", raising=False)
     assert _state_lock.lock_timeout() == 2.0

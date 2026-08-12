@@ -15,6 +15,8 @@ Coverage:
   - token matching is boundary-anchored: a PPID-shaped key like `123` must not
     protect an unrelated `...-1234.json`
   - resolve_cache_file threads its session_id through to the sweep
+  - a `.lock` held right now survives another session's sweep, and an
+    abandoned one does not — the one entry age cannot judge (#951)
 """
 from __future__ import annotations
 
@@ -29,6 +31,7 @@ if str(LIB) not in sys.path:
     sys.path.insert(0, str(LIB))
 
 import _paths  # noqa: E402
+import _state_lock  # noqa: E402
 
 SID = "abc123-session"
 OTHER = "zzz999-other"
@@ -118,6 +121,49 @@ def test_token_match_is_boundary_anchored(tmp_path: Path) -> None:
     assert not lookalike.exists()
     assert not prefixed.exists()
     assert removed == 2
+
+
+def test_a_held_lock_survives_another_sessions_sweep(tmp_path: Path) -> None:
+    """Age cannot judge a lock file (#951).
+
+    Its mtime freezes at creation — `O_CREAT` leaves an existing file alone and
+    `flock` never touches it — so a lock held for longer than the TTL is
+    indistinguishable by age from one abandoned that long ago. Unlinking a held
+    one is not merely premature: the next caller creates a fresh inode at the
+    same name and takes a *second* concurrent lock, which is the race this
+    whole PR removes. The sweeping session is a different one on purpose, so
+    the #920 session-ownership guard cannot be what saves the file.
+    """
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    state = cache / f"session-intent-{OTHER}.json"
+    _ = state.write_text("{}", encoding="utf-8")
+    lock = Path(_state_lock.lock_path_for(str(state)))
+
+    with _state_lock.state_lock(str(state)) as acquired:
+        assert acquired is True
+        _ = _aged(state, days=30)
+        _ = _aged(lock, days=30)
+
+        removed = _paths.prune_stale(str(cache), ttl_days=7.0, session_id=SID)
+
+        assert lock.exists(), "a held lock was swept"
+        assert _state_lock.lock_is_held(str(lock)) is True, "the probe took it"
+    # The state file itself is not protected — only the lock is.
+    assert removed == 1
+    assert not state.exists()
+
+
+def test_an_abandoned_lock_is_still_swept(tmp_path: Path) -> None:
+    """The guard is a probe, not a blanket exemption for `.lock` names."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    stale = _file(cache, f"session-intent-{OTHER}.json.lock", days=30)
+
+    removed = _paths.prune_stale(str(cache), ttl_days=7.0, session_id=SID)
+
+    assert removed == 1
+    assert not stale.exists()
 
 
 def test_no_session_id_sweeps_everything_stale(tmp_path: Path) -> None:

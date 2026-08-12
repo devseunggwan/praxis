@@ -46,6 +46,9 @@ _DEFAULT_TIMEOUT_SECONDS = 2.0
 _POLL_INTERVAL_SECONDS = 0.005
 
 
+LOCK_SUFFIX = ".lock"
+
+
 def lock_path_for(path: str) -> str:
     """Companion lock file for a state file.
 
@@ -53,9 +56,52 @@ def lock_path_for(path: str) -> str:
     finish with `os.replace`, which swaps the inode out from under any lock
     held on it, so the next process would lock a file no longer at that name.
     The `.lock` suffix keeps `_paths._belongs_to_session` matching, so the
-    cache sweep still treats it as the calling session's own entry.
+    calling session's own cache sweep treats it as its own entry.
+
+    That match protects the lock from *its owner's* sweep only. Another
+    session's sweep sees a name keyed on someone else and judges the file by
+    age — and a lock file's mtime freezes at creation, because `O_CREAT`
+    leaves an existing file alone and `flock` never touches it. `_paths`
+    therefore probes the lock before unlinking a `.lock` entry; see
+    `_paths._lock_is_held`.
     """
-    return path + ".lock"
+    return path + LOCK_SUFFIX
+
+
+def lock_is_held(lock_path: str) -> bool:
+    """True when some process currently holds the lock on `lock_path`.
+
+    The cache sweep judges every other entry by age, which cannot work here:
+    a lock file's mtime stops advancing the moment it is created, so a lock
+    held for longer than the TTL looks exactly like one abandoned that long
+    ago. Taking the lock is the only way to tell them apart — it succeeds
+    precisely when no one else holds it.
+
+    Answers False when it cannot tell (no `fcntl`, file already gone), which
+    hands the decision back to the caller's age check rather than pinning an
+    entry in the cache forever on an inconclusive probe.
+    """
+    if fcntl is None:
+        return False
+    try:
+        fd = os.open(lock_path, os.O_RDWR)
+    except OSError:
+        return False
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        return False
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 
 def lock_timeout() -> float:

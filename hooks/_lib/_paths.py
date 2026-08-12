@@ -26,6 +26,11 @@ import os
 import shutil
 import time
 
+from _state_lock import (  # type: ignore[import-not-found]
+    LOCK_SUFFIX,
+    lock_is_held,
+)
+
 _LEGACY_STATE_DIRNAME = ("~", ".claude", "state", "praxis")
 _DEFAULT_CACHE_TTL_DAYS = 7.0
 
@@ -157,6 +162,12 @@ def prune_stale(
     reads it goes silently quiet — the #666 failure. `session_id` is therefore
     excluded from the sweep: entries keyed on the calling session survive
     regardless of age, while other sessions' entries age out as before.
+
+    A held `.lock` is excluded for the same reason by a different test (#951).
+    Its mtime never advances past creation, so age reports it abandoned while
+    a live session holds it — and unlinking it lets the next caller create a
+    fresh inode at the same name and take a second, concurrent lock. Only the
+    lock itself can answer, so the sweep probes it.
     """
     ttl = cache_ttl_days() if ttl_days is None else ttl_days
     if ttl <= 0:
@@ -173,6 +184,8 @@ def prune_stale(
         for entry in entries:
             try:
                 if session_id and _belongs_to_session(entry.name, session_id):
+                    continue
+                if entry.name.endswith(LOCK_SUFFIX) and lock_is_held(entry.path):
                     continue
                 is_dir = entry.is_dir(follow_symlinks=False)
                 mtime = _newest_mtime(entry.path) if is_dir else entry.stat().st_mtime
