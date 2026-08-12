@@ -85,6 +85,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_BRANCH_NAME_STRICT` | `branch-name-check` | |
 | `PRAXIS_ASK_END_STRICT` | `block-ask-end-option` | |
 | `PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT` | `block-manufactured-action-menu` | |
+| `PRAXIS_MENU_MUTATION_TIER_STRICT` | `menu-mutation-tier-advisory` | Exact value `1` only — `true` / `yes` / `no` / `0` stay advisory |
 | `PRAXIS_PR_STATE_REFETCH_STRICT` | `pr-state-refetch-gate` | |
 | `PRAXIS_EXTERNAL_WRITE_STRICT` | `external-write-falsify-check` | |
 | `PRAXIS_AUTHOR_EXEMPT_STRICT` | `external-write-falsify-check` | |
