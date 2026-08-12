@@ -204,6 +204,45 @@ run_case "B6: throughput unit qps" "advisory:$MARKER" \
   "gh pr comment 1 --body 'PASS(live) — 1,200 qps 를 처리했다'"
 
 # ---------------------------------------------------------------------------
+# === FORM C: verdict-attached bare count with no run condition.
+# Live instance (this session): a count reported as "48건" was actually 43 —
+# the number was not wrong so much as unverifiable, because the command, the
+# collection scope, and where it ran were all unstated. Any ONE of the three
+# fields silences this; the trigger is deliberately the intersection with a
+# verdict token, not every count in every body.
+# ---------------------------------------------------------------------------
+
+run_case "C1: verdict-attached count with no run condition" "advisory:$MARKER" \
+  "gh pr comment 1 --body '검증 완료 — 48건 확인했다'"
+run_case "C2: field 1 (cited command) silences" silent \
+  "gh pr comment 1 --body '검증 완료 — 48건 (\`PYTHONPATH=./x pytest ./tests\`)'"
+run_case "C3: field 2 (collection scope) silences" silent \
+  "gh pr comment 1 --body '검증 완료 — 48건, 수집 범위는 CI 와 동일'"
+run_case "C4: field 3 (where it ran) silences" silent \
+  "gh pr comment 1 --body 'PASS — 41 failed, 로컬 재현'"
+run_case "C5: english failure count with no field" "advisory:$MARKER" \
+  "gh pr comment 1 --body 'PASS — 41 failed'"
+run_case "C6: rows count attached to a verdict" "advisory:$MARKER" \
+  "gh pr comment 1 --body 'PASS(live) — 12 rows 반환'"
+run_case "C7: count with no verdict token is not a claim" silent \
+  "gh pr comment 1 --body '총 48건의 이슈를 정리했다'"
+run_case "C8: CI run id is a location field" silent \
+  "gh pr comment 1 --body 'PASS — 41 failed (CI run 123)'"
+
+# ---------------------------------------------------------------------------
+# === KNOWN MISSES (spec "Known misses"). Two failures produced during this
+# hook's own authoring session, both in the family it targets, NEITHER caught.
+# Asserted as silent so the coverage ceiling is executable rather than prose:
+# if someone later widens the trigger to catch these, these cases fail and the
+# noise-budget decision gets re-opened deliberately instead of by accident.
+# ---------------------------------------------------------------------------
+
+run_case "K1: absence claim with unstated grep scope (not a count claim)" silent \
+  "gh pr comment 1 --body '하드코딩된 카운트 단언은 없다. 검증 완료 — grep 결과 해당 없음.'"
+run_case "K2: unitless counts stated as fact (no unit token to anchor on)" silent \
+  "gh pr comment 1 --body '검증 완료 — 둘 다 들어가면 48/22/48/43 이 된다.'"
+
+# ---------------------------------------------------------------------------
 # === FALSE-POSITIVE GUARDS (word boundary, Unicode, noise vocabulary)
 # ---------------------------------------------------------------------------
 

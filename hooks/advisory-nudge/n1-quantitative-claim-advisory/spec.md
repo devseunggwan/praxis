@@ -63,6 +63,75 @@ A percentile or a central tendency **is** a sample statistic: asserting one is
 asserting a distribution. Form B is instance 1's exact shape — a verification
 row carrying a timing figure.
 
+Form C is a third, sibling family added after a live recurrence (below). It
+uses the same co-location shape as Form B with a **count** in place of a
+unit-bearing measurement, and it carries its own pass condition.
+
+| Form | Definition | Example |
+| --- | --- | --- |
+| C — verdict-attached bare count | a verdict token within 80 chars of a count (`48건`, `12 rows`, `41 failed`, `3 hits`) | `검증 완료 — 48건 확인` |
+
+Form C's pass condition is **not** sample size — it is the count's run
+condition. Any one of three fields silences it:
+
+| Field | Recognised as |
+| --- | --- |
+| the command | a cited `$ …` line, or a backticked invocation naming `pytest`/`grep`/`rg`/`gh`/`git`/`find`/`wc` |
+| what it collected | `수집 범위`, `collection scope`, `PYTHONPATH`, `--maxfail`, `테스트 범위` |
+| where it ran | `로컬 재현`, `CI run`, `CI 조건`, `workflow run`, `ran on/in` |
+
+### Why Form C exists — a live recurrence
+
+A count reported as **48건** in this repo's own workflow was actually 43. The
+number was not so much wrong as **unverifiable**: the reporter's reconstruction
+and the measured scope differed (whole-turn concatenation including subagent
+files, versus the single last assistant message with sidechains excluded), and
+nothing in the report let a reader detect that. `CLAUDE.md` §"Negative Claims
+State Their Scan Scope" already requires the form
+`<n> <unit> (<command>, <scope>, <where it ran>)`; Form C is that clause at
+emission time.
+
+Scope note: firing on *every* count missing all three fields would hit every
+number in every PR body and blow the noise budget this hook exists to protect.
+The trigger is therefore the **intersection with a verdict token** — a count
+being presented as a verified result, which is the shape that actually missed.
+
+### The hook is narrower than the rule — silence is not compliance
+
+The rule requires **all three** run-condition fields. This hook goes silent on
+**any one** of them. The gap is deliberate (a three-field requirement enforced
+mechanically would fire on nearly every count in every body), but it means:
+
+> **A silent hook is not evidence that the rule was followed.** It reports that
+> one field was found, never that the claim is well-formed.
+
+The same asymmetry applies to Forms A and B — see *Adequacy is out of scope*
+below. Both are presence checks; neither judges whether the evidence found
+actually backs the claim.
+
+### Known misses — two failures from this hook's own authoring session
+
+While this hook was being written, its author produced two instances of exactly
+the failure family it targets. **Neither fires.** They are recorded here because
+a coverage claim is worth less than a worked counterexample, and because both
+were caught by a human reviewer rather than by any hook.
+
+| # | The claim | Why it does not fire |
+| --- | --- | --- |
+| 1 | `하드코딩된 카운트 단언은 없다` — a `grep` over `tests/*.py` (which excludes `tests/hooks/_lib/`) reported as a general absence. CI then failed on a hardcoded count in the unscanned directory | It is an **absence** claim, not a count claim. Form C reads counts presented as results; a claim that something is *missing* carries no count to co-locate with a verdict |
+| 2 | `둘 다 들어가면 48/22/48/43` — four counts stated as fact, derived by inference, never measured. A one-line probe disproved them | The numbers carry **no unit**. `_COUNT_RE` requires a unit token (`건`, `rows`, `failed`, …); a bare `48/22/48/43` is indistinguishable from a version string, a ratio, or a date |
+
+Miss 1 is the more important one: absence claims are the larger half of this
+failure family and this hook does not address them at all. Widening to catch
+miss 2 would mean treating every unitless number as a count, which is the
+noise-budget collapse this design exists to avoid. Both remain memory-layer
+only, alongside instances 2 and 3 above.
+
+Counting these, the hook covers **1 of 5** observed instances across two
+sessions. That number is the honest one, and it is here rather than in a commit
+message because a coverage ceiling that is not written down gets forgotten at
+exactly the moment someone wants to trust the hook's silence.
+
 ### (2) No sample size ≥ 2 anywhere in the body
 
 Any one of these silences the scan:
@@ -99,6 +168,11 @@ stated sample size actually backs the specific claim. That adequacy judgment
 mirrors the sibling gates — `perf-multiplier-evidence-advisory`'s timing
 artifact and `negative-existence-verdict-gate`'s `Enumerated:` line are both
 presence, not adequacy.
+
+The consequence is the same one stated for Form C above, and it holds for
+**every** form in this hook: an `n=15` written next to a figure measured once
+silences the hook completely. **A silent hook is not evidence that the rule was
+followed** — it reports only that a token was found.
 
 ## Relationship to the sibling hooks (duplication check)
 

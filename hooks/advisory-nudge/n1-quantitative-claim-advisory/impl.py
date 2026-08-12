@@ -177,6 +177,49 @@ def _has_verdict_measurement(text: str) -> bool:
     return False
 
 
+# Form C — a verdict-attached bare count whose run condition is unstated.
+# `48건` / `12 rows` / `3 hits` says nothing until the reader knows what
+# produced it. Same shape as Form B with a count in place of a unit-bearing
+# measurement, and a different pass condition: any one of the three run-
+# condition fields (command / collection scope / where it ran) silences it.
+_COUNT_RE = re.compile(
+    rf"(?:{_NUM})\s*(?:건|개|행|줄|rows?|hits?|matches?|files?|cases?|tests?|failures?|failed)"
+    r"(?![A-Za-z가-힣])",
+    re.IGNORECASE,
+)
+# Field 1 — the command that produced it, cited rather than described.
+_RUN_COMMAND_RE = re.compile(r"^\s*\$\s+\S+|`[^`\n]*(?:pytest|grep|rg|gh|git|find|wc)[^`\n]*`", re.MULTILINE)
+# Field 2 — what it collected. Field 3 — where it ran.
+_RUN_SCOPE_RE = re.compile(
+    r"수집\s*범위|collection scope|PYTHONPATH|--maxfail|\bmaxfail\b|테스트\s*범위|대상\s*범위",
+    re.IGNORECASE,
+)
+_RUN_LOCATION_RE = re.compile(
+    r"로컬\s*재현|로컬\s*실행|CI\s*run\b|CI\s*조건|workflow\s*run|워크트리|실행\s*위치|ran on\b|ran in\b",
+    re.IGNORECASE,
+)
+
+
+def _has_verdict_count(text: str) -> bool:
+    counts = [m.span() for m in _COUNT_RE.finditer(text)]
+    if not counts:
+        return False
+    for v in _VERDICT_RE.finditer(text):
+        for c_start, c_end in counts:
+            if v.start() - _VERDICT_WINDOW <= c_end and c_start <= v.end() + _VERDICT_WINDOW:
+                return True
+    return False
+
+
+def _has_run_condition(text: str) -> bool:
+    """Any one of command / collection scope / where it ran."""
+    return bool(
+        _RUN_COMMAND_RE.search(text)
+        or _RUN_SCOPE_RE.search(text)
+        or _RUN_LOCATION_RE.search(text)
+    )
+
+
 def _has_sample_dependent_claim(text: str) -> bool:
     return _has_summary_statistic(text) or _has_verdict_measurement(text)
 
@@ -274,6 +317,24 @@ def _advisory_text() -> str:
     )
 
 
+def _count_advisory_text() -> str:
+    return (
+        "[n1-quantitative-claim-advisory] this deliverable states a count as a "
+        "verified result with none of its three run-condition fields present "
+        "(the command, what it collected, where it ran).\n"
+        "  Rule (CLAUDE.md, Negative Claims State Their Scan Scope): a bare "
+        "count is a claim with the polarity flipped — `<n> <unit> (<command>, "
+        "<scope>, <where it ran>)`.\n"
+        "  Cheapest unexecuted broadening probe: re-run the count with the "
+        "invocation pasted verbatim, and state whether it ran locally or in "
+        "CI — the same command under a different collection scope is a "
+        "different number.\n"
+        "  A count is not falsifiable without its run condition, so the "
+        "reader cannot tell a wrong number from a differently-scoped one.\n"
+        "  Opt-out: include `sample-size-noted` in the body."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -305,13 +366,16 @@ def main() -> int:
     if _OPT_OUT_MARKER in body:
         return 0
 
-    if not _has_sample_dependent_claim(body):
+    # Two claim families, each with its own pass condition. A body can carry
+    # both; the first unsatisfied one is reported.
+    if _has_sample_dependent_claim(body) and not _has_sample_size_at_least_two(body):
+        sys.stderr.write(_advisory_text() + "\n")
         return 0
 
-    if _has_sample_size_at_least_two(body):
+    if _has_verdict_count(body) and not _has_run_condition(body):
+        sys.stderr.write(_count_advisory_text() + "\n")
         return 0
 
-    sys.stderr.write(_advisory_text() + "\n")
     return 0
 
 
