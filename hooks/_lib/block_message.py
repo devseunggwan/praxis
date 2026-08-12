@@ -171,6 +171,11 @@ Conditional — fire only in the stated situation:
   Merge menu offers a review option         ← merge-menu-review-options-advisory
     A merge-decision menu with no review/inspect option; blocks under
     PRAXIS_MERGE_MENU_REVIEW_STRICT=1.
+  Menu offers a non-mutating tier           ← menu-mutation-tier-advisory
+    Every candidate option mutates shared state and none names a preview /
+    dev / sandbox / dry-run / 보고만 alternative. An option that merely
+    declines to act is not that tier. Blocks under
+    PRAXIS_MENU_MUTATION_TIER_STRICT=1.
 
 Advisory only — never block, no action needed to proceed:
   pre-output-falsification-gate, memory-hint (stderr reminders).
