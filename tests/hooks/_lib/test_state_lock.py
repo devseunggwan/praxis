@@ -120,9 +120,17 @@ def test_excludes_a_second_process_then_admits_it(tmp_path):
             time.sleep(0.005)
 
         # Contended: a deadline shorter than the hold yields False rather than
-        # waiting for the holder or raising.
+        # waiting for the holder or raising — and it yields at the deadline,
+        # not when the holder happens to finish. That elapsed bound is the
+        # property, not the return value: a hook whose sibling was killed while
+        # holding the lock must not sit on the tool call it was only observing,
+        # and a blocking `flock` returning False after the full hold would
+        # satisfy every other assertion here.
+        started = time.monotonic()
         with _state_lock.state_lock(state, timeout=0.05) as acquired:
             assert acquired is False
+        waited = time.monotonic() - started
+        assert waited < 0.5, f"waited {waited:.3f}s on a 0.05s deadline"
     finally:
         holder.wait(timeout=15)
 
