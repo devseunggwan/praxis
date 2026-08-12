@@ -109,8 +109,14 @@ For each approved action:
    17→18, and only became an issue (#942) once cycle 18 explicitly promoted
    it. The gap this exposes: a carried `cycle_note` has no re-verification
    path of its own (no CI, no lint, no issue to close) — `scripts/check-memory-frontmatter.py`
-   in CI is the structural fix, so the *next* drift of this family fails a
-   build instead of aging quietly in cursor state.
+   is the structural fix, but only on a contributor's own machine: the
+   memory directory it lints is a local, gitignored, per-user store that is
+   structurally absent in CI, so `scripts/run-tests.sh`'s call to it always
+   prints `N/A` and exits 0 there (verified — F3, issue #942 codex-review
+   pass). **CI cannot catch the next drift of this family; only a local
+   `run-tests.sh` run, or a contributor running the script directly,
+   catches it.** That re-verification path is therefore still incomplete —
+   it exists, but is opt-in rather than structurally enforced on every push.
 
    **⚠️ MANDATORY: Duplicate check before creating any memory file:**
 
