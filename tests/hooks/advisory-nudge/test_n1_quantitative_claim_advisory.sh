@@ -242,6 +242,16 @@ run_case "K1: absence claim with unstated grep scope (not a count claim)" silent
 run_case "K2: unitless counts stated as fact (no unit token to anchor on)" silent \
   "gh pr comment 1 --body '검증 완료 — 둘 다 들어가면 48/22/48/43 이 된다.'"
 
+# K3 pins the suppressor-scope leak (spec "Suppressor scope is the whole body").
+# Row 1 rests on one reading; row 2's unrelated n=15 silences the whole scan.
+# Asserted silent so that narrowing the suppressors to the claim's neighbourhood
+# breaks this case and reopens the noise-budget decision deliberately.
+K3='| 1 | 목록 응답 | PASS(live) | 91ms (1회 측정) |
+| 2 | 배치 처리량 | PASS(live) | 별도 벤치 n=15 |'
+
+run_case "K3: unrelated row's sample size suppresses an n=1 row" silent \
+  "gh pr comment 1 --body '$K3'"
+
 # ---------------------------------------------------------------------------
 # === FALSE-POSITIVE GUARDS (word boundary, Unicode, noise vocabulary)
 # ---------------------------------------------------------------------------

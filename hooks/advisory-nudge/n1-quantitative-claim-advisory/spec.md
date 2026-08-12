@@ -174,6 +174,35 @@ The consequence is the same one stated for Form C above, and it holds for
 silences the hook completely. **A silent hook is not evidence that the rule was
 followed** — it reports only that a token was found.
 
+### Suppressor scope is the whole body, and that leaks across claims
+
+The abstract statement above has a concrete failure mode worth naming, because
+it is reachable on this hook's primary surface rather than hypothetical.
+
+Claim **detection** is narrow — `_has_verdict_measurement` and
+`_has_verdict_count` both require a verdict token and a figure within
+`_VERDICT_WINDOW` chars of each other. Claim **suppression** is not: the
+opt-out marker, the sample-size scan, and the run-condition scan all run over
+the entire body. So a suppression signal belonging to one claim silences
+*every* claim in the same body:
+
+| # | Claim | Result |
+| --- | --- | --- |
+| 1 | 목록 응답 | PASS(live) — 91ms (1회 측정) |
+| 2 | 배치 처리량 | PASS(live) — 별도 벤치 n=15 |
+
+Row 1 rests on a single reading, but row 2's unrelated `n=15` silences the whole
+scan. A verification anchor is exactly a multi-row table, so this is the shape
+the hook most often sees.
+
+This is left as-is deliberately. Narrowing suppression to the claim's
+neighbourhood would raise the fire rate and reopen the noise budget, and every
+sibling gate on this surface (`perf-multiplier-evidence-advisory` and the rest)
+scans the whole body for its own pass condition — narrowing only this one would
+diverge from the shared convention. It is a follow-up judgement, not a defect
+this PR silently carries: the pairing is fixed by a test case, so narrowing the
+suppressors later breaks that case and reopens the decision on purpose.
+
 ## Relationship to the sibling hooks (duplication check)
 
 | Hook | Surface | Predicate | Overlap |
