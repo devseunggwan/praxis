@@ -194,6 +194,37 @@ run_case "external write KO: 전송/발송"           advisory default "$(build_
 run_case "external write + safe tier suppresses" pass default "$(build_payload '["Send Slack now", "preview the message only"]')"
 
 # ---------------------------------------------------------------------------
+# (d3) Abandonment is removed BEFORE low-blast is read
+# ---------------------------------------------------------------------------
+# CodeRabbit round-1: `skip this run and review later` carries an abandonment
+# token AND the low-blast `review`. Reading low-blast first let that one option
+# suppress an otherwise all-prod menu.
+run_case "abandon+low-blast overlap does not suppress" advisory default "$(build_payload '["deploy to prod now", "deploy to prod partially", "skip this run and review later"]')"
+run_case "strict: overlap form blocks"                 block strict "$(build_payload '["deploy to prod now", "deploy to prod partially", "skip this run and review later"]')"
+run_case "KO 대기+검토 overlap does not suppress"        advisory default "$(build_payload '["prod 트리거 A", "prod 트리거 B", "대기했다가 나중에 검토"]')"
+
+# ---------------------------------------------------------------------------
+# (d4) A stated reason suppresses — the advisory's second option
+# ---------------------------------------------------------------------------
+# The advisory asks for one of two things: add a safe option, or say why one is
+# impossible. Without honouring the second, strict mode is a gate nothing can
+# pass but an extra option.
+REASON_OK='{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"prod 트리거 승인\nSafe-tier-unavailable: preview 클러스터에 이 소스의 커넥터가 없다","header":"트리거","options":[{"label":"두 소스 다 트리거","description":"d"},{"label":"한 건만 먼저","description":"prod 트리거"}]}]}}'
+run_case "stated reason suppresses"          pass default "$REASON_OK"
+run_case "strict: stated reason suppresses"  pass strict "$REASON_OK"
+
+# The marker must be a real line with real content, mirroring the sibling
+# `Falsified:` contract — prose mentions and empty markers do not count.
+REASON_PROSE='{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"prod 트리거 승인 (Safe-tier-unavailable: 인라인 언급)","header":"트리거","options":[{"label":"두 소스 다 트리거","description":"d"},{"label":"한 건만 먼저","description":"prod 트리거"}]}]}}'
+run_case "reason marker mid-line does not count"  advisory default "$REASON_PROSE"
+REASON_EMPTY='{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"prod 트리거 승인\nSafe-tier-unavailable:   ","header":"트리거","options":[{"label":"두 소스 다 트리거","description":"d"},{"label":"한 건만 먼저","description":"prod 트리거"}]}]}}'
+run_case "empty reason marker does not count"     advisory default "$REASON_EMPTY"
+
+# Per-question: a reason on q1 must not cover an all-prod q2.
+REASON_Q1_ONLY='{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"q1\nSafe-tier-unavailable: 이 소스는 preview 미지원","header":"a","options":[{"label":"prod 트리거 A","description":"d"},{"label":"prod 트리거 B","description":"d"}]},{"question":"q2","header":"b","options":[{"label":"prod 배포 전체","description":"d"},{"label":"prod 배포 일부","description":"d"}]}]}}'
+run_case "reason on q1 does not cover q2"  advisory default "$REASON_Q1_ONLY"
+
+# ---------------------------------------------------------------------------
 # (e) BLOCK — strict mode
 # ---------------------------------------------------------------------------
 run_case "strict: incident menu"       block strict "$(build_payload "$INCIDENT")"

@@ -6,10 +6,11 @@ The hook implementation lives at
 `hooks/advisory-nudge/menu-mutation-tier-advisory/impl.py`; the build generates
 the dispatcher `hooks/menu-mutation-tier-advisory.sh` that the platform
 `hooks.json` invokes. It fires on every PreToolUse(AskUserQuestion) event and
-inspects `options[].label` + `options[].description`. When every *candidate*
-option in a question sits in the mutating blast-radius tier and no option names
-a non-mutating alternative, it emits an advisory asking the agent to add one
-low-blast option — or to state in the menu body why prod is the only path.
+inspects `options[].label` + `options[].description`. When a question's
+*candidate* options sit in the mutating blast-radius tier and none names a
+non-mutating alternative, it emits an advisory asking the agent to add one
+low-blast option — or to state, on a `Safe-tier-unavailable:` line in the
+question body, why prod is the only path.
 
 ### Why this exists
 
@@ -77,10 +78,19 @@ all-prod menu.
 
 For one question's option set, in the order the early-returns run:
 
-1. no option is **low-blast** — carries a low-blast signal *and* names no
-   high-blast target. Any one such option suppresses;
-2. at least **2 non-abandonment candidates** remain;
-3. at least **1 candidate** carries a **mutation** signal.
+0. the question body carries no `Safe-tier-unavailable:` line (see below);
+1. **abandonment options are dropped first** — they are neither a candidate nor
+   a safe tier, so neither question is asked of them;
+2. no remaining candidate is **low-blast** — carries a low-blast signal *and*
+   names no high-blast target. Any one such candidate suppresses;
+3. at least **2 candidates** remain;
+4. at least **1 candidate** carries a **mutation** signal.
+
+Step 1 runs before step 2 because the two classes overlap: `skip this run and
+review later` carries an abandonment token **and** the low-blast `review`.
+Reading low-blast first let that single option suppress an otherwise all-prod
+menu — abandonment being neither class means it has to be removed before either
+question is asked of it.
 
 **Divergence from the issue's wording, stated deliberately.** The issue says
 *every* option must carry a mutation signal. That is not decidable lexically: a
@@ -90,6 +100,27 @@ incident menu in the issue's own background section. The implemented predicate
 takes the mutation signal from at least one candidate and treats the *absence of
 any low-blast option* as the defect — which is the property the issue's headline
 argument is actually about.
+
+### Stating that no safe tier exists — `Safe-tier-unavailable:`
+
+The advisory asks for one of two things: add a low-blast option, **or** say why
+one is impossible. Without a way to record the second, the hook has no
+satisfying path and strict mode becomes a gate nothing can pass except an extra
+option — so the second is in-band:
+
+```text
+Safe-tier-unavailable: preview 클러스터에 이 소스의 커넥터가 없다
+```
+
+The shape mirrors the sibling `output-block-falsify-advisory`'s `Falsified:`
+marker exactly: the literal prefix at **column 0 of its own line** in the
+question body (`question` or `header`), matched with `startswith`, with
+non-empty text after the colon. A mid-line mention, a bullet, a fenced block, or
+an empty marker does not count — which is also what makes the reason visible to
+the person the menu is for, rather than a token that only satisfies a hook.
+
+Read **per question**: a reason on question 1 does not cover an all-prod
+question 2.
 
 ### Detect patterns
 
@@ -176,8 +207,9 @@ not match inside `code-reviewer`. A false positive in this set only
 | Default mode, a question's candidates are all-mutating with no low-blast option | exit 0 + advisory stderr |
 | `PRAXIS_MENU_MUTATION_TIER_STRICT=1`, same condition | exit 2 (block) |
 | Any tool name other than `AskUserQuestion` | silent pass-through |
-| Any option carries a low-blast signal and names no high-blast target | silent pass-through (a safe tier is on the menu) |
-| Fewer than 2 non-abandonment candidates | silent pass-through (binary go/no-go) |
+| A non-abandonment candidate carries a low-blast signal and names no high-blast target | silent pass-through (a safe tier is on the menu) |
+| The question body carries a `Safe-tier-unavailable: <reason>` line | silent pass-through for that question (reason stated) |
+| Fewer than 2 candidates after abandonment options are dropped | silent pass-through (binary go/no-go) |
 | No candidate carries a mutation signal | silent pass-through (not a tier-relevant menu) |
 | Empty / missing options | silent pass-through |
 | Missing / malformed payload | silent pass-through (fail-open) |
@@ -248,7 +280,11 @@ go/no-go with an abandonment option does not fire; the same shape with a real
 low-blast option in that slot passes); the Codex round-1 regressions in both
 directions (a compound `dry-run → prod` option does not suppress, in advisory
 and strict mode; a mutation verb at a safe target still does; `development`
-recognised as low-blast; an external-write-only menu fires); strict-env value
+recognised as low-blast; an external-write-only menu fires); the CodeRabbit
+round-1 regressions (an option matching abandonment *and* low-blast does not
+suppress, in advisory and strict mode, EN and KO; a stated
+`Safe-tier-unavailable:` line suppresses in both modes; a mid-line or empty
+marker does not; a reason on question 1 does not cover question 2); strict-env value
 contract (`1` blocks,
 `0` / `false` / `no` / `true` stay advisory); per-question isolation (a safe
 second question does not cover an all-prod first one); malformed-payload

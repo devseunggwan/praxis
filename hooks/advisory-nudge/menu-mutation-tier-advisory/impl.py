@@ -271,8 +271,37 @@ def _is_abandon(text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _collect_option_texts(tool_input: dict) -> list[list[str]]:
-    """Return one list of option texts per question.
+# In-band marker letting an author state that no safe tier exists. The advisory
+# asks for one of two things — add a low-blast option, or say why one is
+# impossible — so without a way to record the second the hook has no satisfying
+# path, and strict mode becomes a gate nothing can pass but an extra option.
+#
+# Shape mirrors the sibling `output-block-falsify-advisory`'s `Falsified:`
+# marker exactly: the literal prefix at column 0 of its own line in the question
+# body, checked with `startswith`, with non-empty text after it. Prose, bullets,
+# and fenced blocks do not count — an author writing the reason must place it as
+# its own line, which is also what makes the reason visible to the reader the
+# menu is for.
+_REASON_MARKER = "Safe-tier-unavailable:"
+
+
+def _has_reason_marker(question_text: str) -> bool:
+    """True if the question body states why no non-mutating tier is available."""
+    for line in question_text.splitlines():
+        if line.startswith(_REASON_MARKER):
+            if line[len(_REASON_MARKER):].strip():
+                return True
+    return False
+
+
+def _question_body(q: dict) -> str:
+    """The question-level prose the reason marker may live in."""
+    parts = [q.get("question"), q.get("header")]
+    return "\n".join(p for p in parts if isinstance(p, str))
+
+
+def _collect_option_texts(tool_input: dict) -> list[tuple[list[str], str]]:
+    """Return one `(option texts, question body)` pair per question.
 
     Each option contributes `label` + `description` joined — the issue's SOT is
     explicit that the tier signal may live in either ("옵션 라벨/설명에서 mutation
@@ -282,7 +311,7 @@ def _collect_option_texts(tool_input: dict) -> list[list[str]]:
     Tolerant of partial schemas: any missing field yields fewer entries rather
     than an exception. The hook must never crash on a malformed payload.
     """
-    per_question: list[list[str]] = []
+    per_question: list[tuple[list[str], str]] = []
     questions = tool_input.get("questions") or []
     if not isinstance(questions, list):
         return per_question
@@ -301,7 +330,7 @@ def _collect_option_texts(tool_input: dict) -> list[list[str]]:
             if joined.strip():
                 texts.append(joined)
         if texts:
-            per_question.append(texts)
+            per_question.append((texts, _question_body(q)))
     return per_question
 
 
@@ -309,10 +338,19 @@ def _question_triggers(texts: list[str]) -> bool:
     """True if this question's option set is single-tier (all-mutating).
 
     Predicate, in the order the early-returns run:
-      1. no option carries a low-blast signal   (a safe tier would suppress)
-      2. >= 2 non-abandonment candidates        (a binary go/no-go is a genuine
+      1. abandonment options are removed first  (they are neither a candidate
+                                                 nor a safe tier, so they must
+                                                 not be read for either)
+      2. no candidate carries a low-blast signal (a safe tier would suppress)
+      3. >= 2 candidates remain                 (a binary go/no-go is a genuine
                                                  "whether", not a "how much")
-      3. >= 1 candidate carries a mutation signal
+      4. >= 1 candidate carries a mutation signal
+
+    Step 1 runs before step 2 because the two classes overlap: `skip this run
+    and review later` carries an abandonment token AND the low-blast `review`.
+    Reading low-blast first let that single option suppress an otherwise
+    all-prod menu — the spec says abandonment is neither class, so it has to be
+    removed before either question is asked of it.
 
     Divergence from the issue's draft wording, stated deliberately: the issue
     says *every* option must carry a mutation signal. That is not decidable
@@ -322,9 +360,9 @@ def _question_triggers(texts: list[str]) -> bool:
     implemented predicate requires the mutation signal from at least one
     candidate and takes the absence of any low-blast option as the defect.
     """
-    if any(_is_low_blast(t) for t in texts):
-        return False
     candidates = [t for t in texts if not _is_abandon(t)]
+    if any(_is_low_blast(t) for t in candidates):
+        return False
     if len(candidates) < 2:
         return False
     return any(_is_mutation(t) for t in candidates)
@@ -346,8 +384,13 @@ consent is not intact, because the safe tier was never a candidate.
 Do one of two things before surfacing this menu:
   - add one non-mutating option (run the same verification on preview / dev /
     a sandbox, or a report-only pass), or
-  - if prod really is the only path, say so in the menu body in one line —
-    what makes the safe tier impossible here.
+  - if prod really is the only path, say so in the question body on its own
+    line, starting at column 0:
+
+        Safe-tier-unavailable: <what makes a safe tier impossible here>
+
+    That line suppresses this advisory for that question, and it is what the
+    reader of the menu sees when deciding.
 
 Note: an option that simply declines to act (`다음 정기 실행에 맡김`, `하지 않음`,
 `대기`, `skip`) does NOT count as the non-mutating tier. It abandons the
@@ -395,8 +438,13 @@ def main() -> int:
     per_question = _collect_option_texts(tool_input)
     # Evaluated per question, not across the whole payload: two independent
     # questions have independent option sets, and pooling them would let one
-    # question's preview option suppress another question's all-prod menu.
-    if not any(_question_triggers(texts) for texts in per_question):
+    # question's preview option suppress another question's all-prod menu. The
+    # reason marker is read per question for the same reason.
+    fires = any(
+        _question_triggers(texts) and not _has_reason_marker(body)
+        for texts, body in per_question
+    )
+    if not fires:
         return 0
 
     # Strict only on the documented `=1` value, matching the dominant codebase
