@@ -109,6 +109,18 @@ jobs:
       - run: bash scripts/run-tests.sh
         env:
           PRAXIS_TESTS_STRICT: "1"
+      # Standalone step (issue #942), not folded into run-tests.sh: the memory
+      # dir it lints is a local, gitignored, per-user store
+      # ($CLAUDE_CONFIG_DIR/projects/<slug>/memory/) that does not exist on
+      # this runner, so the script always prints SKIPPED here and exits 0 —
+      # its real enforcement runs on a contributor's machine, and unit
+      # coverage for the checker itself lives in
+      # tests/test_check_memory_frontmatter.py (already run by the pytest
+      # step above via `python3 -m pytest tests/` inside run-tests.sh). This
+      # step exists so the script's own CLI entrypoint — resolve_memory_dir(),
+      # the skip path, PRAXIS_TESTS_STRICT — gets exercised on every push,
+      # not just under pytest.
+      - run: python3 scripts/check-memory-frontmatter.py
 
   link-check:
     runs-on: ubuntu-latest
