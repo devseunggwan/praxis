@@ -83,6 +83,10 @@ _GIT_GLOBAL_BARE_FLAGS = frozenset({
 # Shell separators that end a single command's argument list.
 _SHELL_SEPARATORS = {";", "&&", "||", "|", "&"}
 
+# Extracts an alternation group like `(feat|fix|docs|...)` from a branch
+# regex pattern, for verbatim display in the block message (issue #941).
+_ALTERNATION_GROUP_RE = re.compile(r"\(([a-z0-9]+(?:\|[a-z0-9]+)+)\)")
+
 # Shell redirect operators. This regex matches a token that *starts* with a
 # redirect operator: optional leading fd digits, then one of `>` `>>` `<` `<<`
 # `<<<` `>&` `<&`, plus the `&>`/`&>>` merge forms. A branch name can never
@@ -111,6 +115,25 @@ def _get_regex() -> re.Pattern:
 
 def _get_strict() -> bool:
     return os.environ.get("PRAXIS_BRANCH_NAME_STRICT", "1").strip() != "0"
+
+
+def _extract_allowed_types(pattern: str) -> str | None:
+    """Best-effort extraction of the `<type>` alternation group from the
+    branch regex, for verbatim display alongside the raw pattern (issue #941
+    — a deny that shows only the regex makes the author re-derive the
+    allowed values by trial and error across retries).
+
+    The default regex has two alternation groups — `(hub|issue)` then
+    `(feat|fix|...)` — so the LAST group is the type segment in every known
+    shape. Returns None when the pattern has fewer than 2 alternation
+    groups (e.g. a `PRAXIS_BRANCH_NAME_REGEX` override with no `<type>`
+    segment); the message then falls back to the raw pattern only, exactly
+    as before this change.
+    """
+    groups = _ALTERNATION_GROUP_RE.findall(pattern)
+    if len(groups) < 2:
+        return None
+    return groups[-1].replace("|", ", ")
 
 
 def _get_whitelist() -> frozenset[str]:
@@ -527,12 +550,14 @@ def _extract_worktree_add_b(args: list[str]) -> str | None:
 # ---------------------------------------------------------------------------
 
 def _emit_block(branch: str, regex_pattern: str, strict: bool) -> None:
+    allowed_types = _extract_allowed_types(regex_pattern)
+    types_clause = f"; allowed <type> values: {allowed_types}" if allowed_types else ""
     reason = format_block(
         rule_name="branch-name-check",
         why=f"branch '{branch}' does not match the required naming convention",
         correct_path=(
             f"rename to hub-<N>-<type>-<desc> or issue-<N>-<type>-<desc> "
-            f"(pattern: {regex_pattern}); "
+            f"(pattern: {regex_pattern}){types_clause}; "
             f"set PRAXIS_BRANCH_NAME_STRICT=0 to switch to advisory-only mode"
         ),
         bypass_env=None,
