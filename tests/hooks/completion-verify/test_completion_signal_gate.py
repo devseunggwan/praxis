@@ -494,6 +494,325 @@ def test_rule1b_only_gap_without_go_does_not_fire(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Rule 1b — self-application (issue #845 probe, issue #916 risk item)
+#
+# These are CHARACTERIZATION tests: they fix what the hook does today when its
+# own spec.md is the payload, not what it ought to do. The spec quotes every
+# trigger token to document it, so a turn discussing this hook trips it — an
+# inherent property of a lexical scanner, not a defect with a cheap fix.
+#
+# Do NOT "fix" this by adding a suppressor without first re-running it against
+# the genuine fires. The obvious suppressor (skip when the gap is already
+# graded `블로커 아님`/`BLOCKED`/`non-blocking`) was measured over the full local
+# transcript corpus (54,086 turns, hook-faithful: last assistant message per
+# turn, sidechains skipped): it removes 15 of the 41 fires and BOTH genuine
+# fires die with them, because each reports its PR's own
+# `mergeStateStatus: BLOCKED` in its body. Suppression is inverted here.
+# ---------------------------------------------------------------------------
+
+SPEC_PATH = HOOK_PATH.parent / "spec.md"
+
+# Trigger tokens the spec quotes verbatim in its own documentation tables.
+_SPEC_GO_PHRASES = (
+    "보내도 됩니다",
+    "보내도 좋습니다",
+    "머지 가능",
+    "approve 가능",
+    "문제 없음",
+    "ready to merge",
+)
+_SPEC_GAP_MARKERS = (
+    "⚠",
+    "미해소",
+    "갭",
+    "검증 증거 부재",
+    "not verified",
+    "unverified",
+)
+
+
+def _spec_text() -> str:
+    return SPEC_PATH.read_text(encoding="utf-8")
+
+
+def test_rule1b_self_application_own_spec_fires(tmp_path: Path) -> None:
+    """The hook's own spec.md as payload DOES trip Rule 1b — measured, not desired.
+
+    The sibling guard in test_write_decision_consistency_gate.sh asserts silence
+    for that gate's spec; here the measured answer is the opposite, so the
+    assertion follows the measurement rather than the sibling's direction.
+    """
+    events = [
+        mk_user("이 훅 spec 을 검토해줘"),
+        mk_assistant(_spec_text()),
+    ]
+    tp = write_jsonl(events, tmp_path)
+    stdout, stderr, rc = run_hook(tp)
+    assert rc == 0
+    assert stderr == "", f"hook must keep stderr empty; got {stderr!r}"
+    assert "go-verdict phrase detected together with unresolved-gap marker" in _msg(
+        stdout
+    ), (
+        "characterization: own spec.md trips Rule 1b because the spec quotes "
+        f"every trigger token; stdout={stdout!r}"
+    )
+
+
+def test_rule1b_self_application_negative_control_go_removed(tmp_path: Path) -> None:
+    """Negative control: neutralise only the GO phrases → silence.
+
+    Distinguishes "fires because the GO tokens are present" from a detector
+    that is simply stuck on. Without this, the test above passes for a Rule 1b
+    that fires unconditionally.
+    """
+    text = _spec_text()
+    for phrase in _SPEC_GO_PHRASES:
+        text = text.replace(phrase, "<GO-PHRASE>")
+    assert csg._has_unresolved_gap(text, text.lower()), (
+        "control is only meaningful while the gap markers survive"
+    )
+
+    events = [mk_user("이 훅 spec 을 검토해줘"), mk_assistant(text)]
+    tp = write_jsonl(events, tmp_path)
+    stdout, _stderr, rc = run_hook(tp)
+    assert rc == 0
+    assert "go-verdict phrase detected together with unresolved-gap marker" not in _msg(
+        stdout
+    ), f"GO phrases removed → Rule 1b must fall silent; stdout={stdout!r}"
+
+
+def test_rule1b_self_application_negative_control_gap_removed(tmp_path: Path) -> None:
+    """Negative control: neutralise only the gap markers → silence."""
+    text = _spec_text()
+    for marker in _SPEC_GAP_MARKERS:
+        text = text.replace(marker, "<GAP-MARKER>")
+    assert not csg._has_unresolved_gap(text, text.lower()), (
+        "control requires the gap markers to be gone"
+    )
+
+    events = [mk_user("이 훅 spec 을 검토해줘"), mk_assistant(text)]
+    tp = write_jsonl(events, tmp_path)
+    stdout, _stderr, rc = run_hook(tp)
+    assert rc == 0
+    assert "go-verdict phrase detected together with unresolved-gap marker" not in _msg(
+        stdout
+    ), f"gap markers removed → Rule 1b must fall silent; stdout={stdout!r}"
+
+
+# ---------------------------------------------------------------------------
+# Rule 1b — corpus fixtures (issue #845 post-hoc measurement)
+#
+# Every payload below is a real turn from the local transcript corpus, trimmed
+# and with PR numbers / repo names / user ids replaced. They are kept as a pair:
+# the shape the rule EXISTS for, and the shape it fires on by construction.
+# ---------------------------------------------------------------------------
+
+# The genuine fire, and the reason Rule 1b was written: the verdict is handed
+# down first and the unresolved gap trails it, so the verdict is not
+# conditioned on the gap. The very next turn in that session retracted it.
+_CORPUS_UNGRADED_VERDICT = """확인 완료했습니다. 스레드 맥락과 PR #NNNN 을 코드 레벨까지 검증한 결과입니다.
+
+## PR #NNNN 검증 결과
+
+**상태**: OPEN / MERGEABLE / `BLOCKED`(= REVIEW_REQUIRED, 승인만 없음)
+
+## 판단: 리뷰어에게 보내도 됩니다. 단, 아래 1건은 헤드라인으로 남습니다
+
+**⚠️ 미해소 갭 — 데이터 동일성 검증 증거 부재**
+스레드에서 리뷰어가 명시적으로 요청한 건 *"마이그레이션 하고 기존 데이터와
+동일한지"* 인데, mart 데이터 대조는 0건입니다.
+"""
+
+# Graded-gap shape: the verdict is GO and the gap is explicitly filed as
+# non-blocking. Rule 1b fires anyway. This is characterization, not approval —
+# the suppressor that would silence it takes the genuine fire above with it
+# (see the header comment on the self-application block).
+_CORPUS_GRADED_GAP = """## 검증 결과 — PR #NNNN (HEAD `0000000`)
+
+### 결론: 머지 가능. 다만 이슈 완료조건 중 manager 경로 한 갈래가 미커버입니다.
+
+### 남은 갭 (머지 차단 아님, 확인 범위: 변경 파일 2개 + 전체 consumer grep)
+
+**① manager 경로의 error payload는 여전히 조용히 빈 결과 (확인: 코드)**
+"""
+
+# Same class, different session: the gap is parked under an explicit
+# "미검증으로 남는 것" heading below a GO verdict.
+_CORPUS_GRADED_GAP_TRAILING = """PR #NN 검토 결과입니다.
+
+### 결론
+
+머지 가능합니다. 변경은 4파일 86/-5 로 최소이고, CI 2개 job 전부 pass 입니다.
+
+### 미검증으로 남는 것
+
+앵커의 `unverified` 가 이미 짚은 preview 실적재 외에, 카탈로그 연동 경로는
+CI 에서 전부 mock 이라 런타임 영향이 확인되지 않았습니다.
+"""
+
+
+def _fires(payload: str, tmp_path: Path) -> bool:
+    events = [mk_user("PR 검토해줘"), mk_assistant(payload)]
+    stdout, stderr, rc = run_hook(write_jsonl(events, tmp_path))
+    assert rc == 0, f"hook must exit 0; rc={rc}"
+    assert stderr == "", f"hook must keep stderr empty; got {stderr!r}"
+    return "go-verdict phrase detected together with unresolved-gap marker" in _msg(
+        stdout
+    )
+
+
+# The second genuine fire, graded a weak positive by the 2026-08-03 probe. The
+# verdict is scoped to runtime impact while the merge-approval requirement sits
+# unverified in its own section — the gap the verdict does not account for is a
+# different gap from the one the turn headlines.
+#
+# Note which token actually trips the rule: `미검증` is NOT a gap marker, so the
+# fire comes from the `⚠️` in the headline. The turn is a genuine instance on
+# content grounds and a marginal one on lexical grounds, which is exactly what
+# "weak" means here — keep the `⚠️` when editing this fixture or it stops
+# firing for a reason that has nothing to do with the shape being pinned.
+_CORPUS_WEAK_GENUINE = """## PR #NNNN merge-ready 준비 완료 — 그러나 헤드라인 발견 2건
+
+### ⚠️ 헤드라인 1: 이 PR 의 실질 기능이 이미 중복입니다
+
+동일한 unique constraint 가 이미 다른 PR 로 머지돼 있습니다.
+
+### 미검증 항목
+
+- `mergeStateStatus` 는 `BLOCKED` 입니다(`mergeable: MERGEABLE`, CI 는 전부
+  green). Copilot 이 자동으로 코멘트를 달 때까지는 실제 승인 요건 충족 여부를
+  제가 확인할 수 없습니다.
+
+### 리스크 / 권고
+
+- 지금 상태로 머지해도 **런타임 영향은 없습니다**(모델 선언만, 기존 테이블
+  미변경). 안전하게 머지 가능한 상태입니다.
+"""
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [_CORPUS_UNGRADED_VERDICT, _CORPUS_WEAK_GENUINE],
+    ids=["unambiguous", "weak-scoped-verdict"],
+)
+def test_rule1b_genuine_fires_are_retained(payload: str, tmp_path: Path) -> None:
+    """Regression guard for the two fires Rule 1b was built to catch.
+
+    Any change to the Rule 1b predicate must keep both firing. These are the
+    genuine fires in the measured corpus — everything else the rule emits is a
+    false positive, so a change that improves the fire count while dropping one
+    of these has made the rule worse, not better.
+    """
+    assert _fires(payload, tmp_path), (
+        "a GO verdict that does not account for its own unresolved gap is the "
+        "rule's whole purpose"
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [_CORPUS_GRADED_GAP, _CORPUS_GRADED_GAP_TRAILING],
+    ids=["graded-non-blocking", "graded-trailing-section"],
+)
+def test_rule1b_graded_gap_still_fires(payload: str, tmp_path: Path) -> None:
+    """Characterization: a GO verdict over an explicitly graded gap fires too.
+
+    Both payloads are post-release fires and both are false positives — the
+    author separated verdict from gap correctly. They are pinned as FIRING
+    because the only suppressor that reaches them also kills the genuine fire
+    above; changing this assertion to silence means that trade was accepted.
+    """
+    assert _fires(payload, tmp_path), (
+        "graded gaps are not suppressed today; see the header comment for why"
+    )
+
+
+# A refusal opens the turn and the GO token appears 800 chars later as a table
+# heading naming the attribute ("머지 가능 상태" = mergeability status). The
+# predicate's KO guard only scans 12 chars after the match, so the refusal is
+# structurally out of its reach.
+_CORPUS_LEADING_REFUSAL = """아니요. 지금 내놓으면 안 됩니다.
+
+### 결론
+
+방금 재조회한 PR 상태 기준으로 **5건 중 4건이 `BLOCKED`** 입니다.
+
+### 차단 요인 (피해 순)
+
+**1. 숫자 정규화 갭 — 고객 데이터가 조용히 사라집니다 (미착수)**
+
+**3. PR 머지 가능 상태 (방금 재조회)**
+
+| PR | base | 상태 |
+|---|---|---|
+| BE #NNNN | dev | BLOCKED |
+"""
+
+# The retraction turn from the genuine fire's session: it quotes its own
+# earlier "보내도 됩니다" in order to withdraw it. A mention, not a use.
+_CORPUS_QUOTED_RETRACTION = """아니요, 솔직히 말하면 **"문제가 없다"를 검증한 게 아닙니다.**
+제가 한 건 정적 코드 리뷰 + CI 확인까지이고, 그걸 "보내도 됩니다" 로 표현한
+건 과했습니다.
+
+## 검증 안 하고 가정으로 넘어간 것
+
+리뷰어가 명시적으로 요청한 "기존 데이터와 동일한지" 는 전혀 안 봤고, 저도
+갭으로 표시만 했습니다.
+"""
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [_CORPUS_LEADING_REFUSAL, _CORPUS_QUOTED_RETRACTION],
+    ids=["refusal-then-status-label", "refusal-then-quoted-retraction"],
+)
+def test_rule1b_leading_refusal_is_silent(payload: str, tmp_path: Path) -> None:
+    """A turn that opens by refusing is a NO-GO report; Rule 1b must not fire."""
+    assert not _fires(payload, tmp_path), (
+        "a leading refusal makes every later GO token a label or a quotation"
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "No blockers. 머지 가능 — 실환경은 unverified 입니다.",
+        "No further work needed. 머지 가능 하지만 미해소 갭 1건이 남습니다.",
+        "ready to merge — 아직 실환경은 unverified 입니다.",
+        "이 방법은 안 됩니다만 저 방법은 됩니다. 머지 가능합니다. 다만 미해소 갭 1건이 남습니다.",
+        "리뷰어 승인이 필요한 건 아닙니다. 머지 가능합니다. 미해소 갭 1건.",
+        "squash 는 안됩니다만 merge commit 은 됩니다. 머지 가능. 검증 증거 부재 1건.",
+    ],
+    ids=[
+        "en-no-blockers",
+        "en-no-further-work",
+        "en-ready-to-merge",
+        "ko-partial-negation-만",
+        "ko-clause-negation-아닙니다",
+        "ko-partial-negation-안됩니다",
+    ],
+)
+def test_rule1b_partial_negation_is_not_a_refusal(payload: str, tmp_path: Path) -> None:
+    """Positive control: a negation that scopes to one clause is not a refusal.
+
+    Every payload here is a genuine GO-verdict-over-gap contradiction that
+    happens to open with a negation word. Silencing any of them is a false
+    NEGATIVE, and a false negative is invisible in a fire count — the corpus
+    number keeps improving while the rule quietly stops working.
+
+    Both directions are real, not hypothetical. `No blockers. 머지 가능 — 실환경
+    unverified` was silenced twice: once by the round that shipped Rule 1b, and
+    once by the first draft of the refusal guard (`^(no|nope|not yet)\\b`),
+    which this control caught. The Korean side is symmetric — `안 됩니다` /
+    `아닙니다` negate whatever clause they sit in, so an earlier draft that
+    scanned 120 chars for them swallowed all three KO cases below.
+    """
+    assert _fires(payload, tmp_path), (
+        "clause-scoped negation must not be read as a turn-level refusal"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Rule 2 — plugin-context anchoring
 # ---------------------------------------------------------------------------
 

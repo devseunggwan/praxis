@@ -66,6 +66,57 @@ the Korean guard scans the following window and additionally recognises the
 predicate-negation forms (`아닙`, `아니다`, `아니라`, `아님`) that the
 completion-verb marker set does not cover.
 
+**Both guards are adjacent-window only** — they read the 12 characters around
+the match and nothing else, so a negation carried by a *different sentence*
+never reaches them. `아니요. 지금 내놓으면 안 됩니다.` followed 838 characters
+later by the table heading `PR 머지 가능 상태` is a real turn that fired: the
+refusal is a full sentence, the GO match is an attribute name, and no
+adjacent-window guard can connect them.
+
+A separate guard covers that shape. When the turn's **first token** is a
+standalone refusal interjection (`아니요` / `아니오` / `아뇨` / `No` / `Nope` /
+`Not yet`), the verdict is NO-GO end to end and Rule 1b does not fire; every
+later GO token is a label or a quotation of the phrase being withdrawn.
+
+**The guard is deliberately narrow in both position and vocabulary, and
+widening either reintroduces a false negative.**
+
+- *Position* — the interjection must open the turn, not merely appear early.
+- *Vocabulary* — predicate negations (`안 됩니다`, `아닙니다`) are excluded. They
+  negate whatever clause they sit in, so `이 방법은 안 됩니다만 저 방법은 됩니다.
+  머지 가능합니다. 다만 미해소 갭 1건` — a genuine contradiction — dies with them.
+- *English symmetry* — a leading bare `no` is a determiner far more often than
+  a verdict. `No blockers. 머지 가능 — 실환경 unverified` is precisely what Rule 1b
+  exists to catch, and it has been silenced twice: once by the round that
+  shipped Rule 1b, and once by the first draft of this guard (`^(no|nope|not
+  yet)\b`). A positive control caught the second one.
+
+That asymmetry is the reason the controls exist: **a false positive shows up in
+the fire count and a false negative does not.** Widening the markers makes the
+corpus number look better while the rule quietly stops working, so the six
+positive controls in `test_rule1b_partial_negation_is_not_a_refusal` must be
+re-run before any change to the marker set.
+
+**Sample size** — the guard is validated at N=2 on the retention side. The
+corpus holds two genuine fires (one unambiguous, one graded a weak positive by
+the 2026-08-03 probe) and both survive the guard. But there are **zero**
+observed outputs that open with a refusal interjection *and* carry a genuine
+GO-over-gap contradiction, so the false-negative rate is unmeasured rather than
+zero. If another genuine fire is observed, re-validate this guard against it.
+
+**Rejected alternative** — treating `머지 가능 상태` as a noun phrase and
+suppressing on the `상태` suffix. It catches the turn above, but the 2026-08-03
+probe graded `4건 모두 머지 가능 상태입니다` a weak true positive, and the two are
+character-identical. There is no lexical separator.
+
+A gap the turn has already **graded** (`머지 차단 아님`, `non-blocking`,
+`블로커 없음`) still fires. This is deliberate and measured, not an oversight:
+over the local transcript corpus, suppressing graded gaps removes 15 of the 41
+fires and takes **both** genuine fires with them, because each reports its PR's
+own `mergeStateStatus: BLOCKED` in its body. The corresponding fixtures
+in `tests/hooks/completion-verify/test_completion_signal_gate.py` pin the
+graded-gap shape as **firing** for that reason.
+
 Evidence does **not** suppress Rule 1b. A cited `$ command → output` line
 answers "was anything verified"; an unresolved-gap marker in the same turn
 states that something was *not*. Rule 1's evidence gate therefore does not
@@ -268,6 +319,22 @@ Covers 52 cases:
 - negated GO verdicts (`not ready to merge`, `ready to merge가 아닙니다`,
   `문제 없음이 아닙니다`) with a gap marker → silent
 - GO verdict with cited output but **no** gap marker → silent (Rule 1 path)
+- turn opening with a refusal interjection, GO token later as a status label
+  → silent
+- turn opening with a refusal interjection that quotes its own withdrawn GO
+  phrase → silent
+
+**Rule 1b corpus fixtures** (real turns, identifiers replaced):
+
+- ungraded GO verdict followed by an unresolved gap → fires (regression guard;
+  the unambiguous genuine fire in the measured corpus)
+- GO verdict over an explicitly graded gap, two variants → fires
+  (characterization — see the false-positive boundary above for why it is not
+  suppressed)
+- clause-scoped negation that is not a refusal → fires (six positive controls
+  for the leading-refusal guard: `No blockers.` / `No further work needed.` /
+  `ready to merge — 아직 …` on the English side, `안 됩니다만` / `아닙니다` /
+  `안됩니다만` on the Korean side)
 
 Cited evidence alongside a gap marker does **not** silence Rule 1b; a
 regression case asserts it still fires.
