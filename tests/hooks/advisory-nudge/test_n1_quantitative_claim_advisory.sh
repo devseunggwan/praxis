@@ -253,6 +253,21 @@ run_case "K3: unrelated row's sample size suppresses an n=1 row" silent \
   "gh pr comment 1 --body '$K3'"
 
 # ---------------------------------------------------------------------------
+# === REVIEW REGRESSIONS (codex F1, CodeRabbit CR-B) — bind each body flag to
+# its own gh invocation. A regex over raw command text can do neither of the
+# first two; see the PR anchor for the pre-fix measurement.
+# ---------------------------------------------------------------------------
+
+run_case "R1: gh words inside a quoted string post nothing" silent \
+  "echo 'gh pr comment 1' --body 'p50 91ms'"
+run_case "R2: second chained invocation is scanned on its own body" "advisory:$MARKER" \
+  "gh pr comment 1 --body 'n=15 p50 91ms' && gh pr comment 2 --body 'PASS(live) 91ms'"
+run_case "R3: global flag between gh and its subcommand" "advisory:$MARKER" \
+  "gh --repo owner/name pr comment 1 --body 'p50 91ms'"
+run_case "R4: path-invoked gh binary" "advisory:$MARKER" \
+  "/usr/bin/gh pr comment 1 --body 'p50 91ms'"
+
+# ---------------------------------------------------------------------------
 # === FALSE-POSITIVE GUARDS (word boundary, Unicode, noise vocabulary)
 # ---------------------------------------------------------------------------
 

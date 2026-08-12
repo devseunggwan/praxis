@@ -82,12 +82,22 @@ from pathlib import Path
 _HOOK_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HOOK_DIR.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    iter_command_starts,
+    strip_prefix,
+)
 
 # ---------------------------------------------------------------------------
-# Trigger: gh issue|pr create|comment  (mirrors perf-multiplier-evidence-advisory)
+# Trigger: gh issue|pr create|comment
+#
+# Structural tokenization, not regex (DESIGN.md "Design mechanisms shared by
+# all hooks"). A regex over raw command text cannot tell a real invocation
+# from the same words inside a quoted string, and it cannot tell which body
+# flag belongs to which invocation when several are chained.
 # ---------------------------------------------------------------------------
 
-_GH_DELIVERABLE_RE = re.compile(r"\bgh\s+(?:issue|pr)\s+(?:create|comment)\b")
+_GH_OBJECTS = ("issue", "pr")
+_GH_VERBS = ("create", "comment")
 
 _BODY_TEXT_FLAGS = ("--body", "-b")
 _BODY_FILE_FLAGS = ("--body-file", "-F")
@@ -260,13 +270,28 @@ def _has_sample_size_at_least_two(text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _extract_body_text(command: str) -> str | None:
-    """Return the body text this `gh` invocation would post, or None."""
-    try:
-        argv = shlex.split(command, posix=True)
-    except ValueError:
-        return None
+def _is_gh_deliverable(argv: list[str]) -> bool:
+    """True iff this argv slice is a `gh (issue|pr) (create|comment)` call.
 
+    The object and verb are located by scanning past `gh`'s own global flags
+    (`--repo owner/name`, `-R …`), so a flag sitting between them does not
+    hide the invocation.
+    """
+    if not argv:
+        return False
+    head = argv[0].lstrip("(${")
+    if not (head == "gh" or head.endswith("/gh")):
+        return False
+
+    words = [tok for tok in argv[1:] if not tok.startswith("-")]
+    for i, word in enumerate(words):
+        if word in _GH_OBJECTS:
+            return any(w in _GH_VERBS for w in words[i + 1:i + 3])
+    return False
+
+
+def _body_of(argv: list[str]) -> str | None:
+    """Return the body text THIS invocation would post, or None."""
     for i, tok in enumerate(argv):
         flag, sep, inline_value = tok.partition("=")
         if tok in _BODY_TEXT_FLAGS and i + 1 < len(argv):
@@ -278,6 +303,37 @@ def _extract_body_text(command: str) -> str | None:
         if sep and flag in _BODY_FILE_FLAGS:
             return _read_body_file(inline_value)
     return None
+
+
+def _extract_bodies(command: str) -> list[str]:
+    """Every body a `gh` deliverable in this command would post.
+
+    One command can chain several invocations; each carries its own body, and
+    a sample size stated in one says nothing about a claim in another.
+    """
+    # `shlex.split` rather than the shared `safe_tokenize`: this hook's inputs
+    # are GitHub bodies, and a verification anchor opens with `### Verification`.
+    # `safe_tokenize` strips `#` to end-of-line as a shell comment before the
+    # quote state is settled, which swallows the opening quote and shreds every
+    # multi-line body — the primary path. `shlex.split` defaults to
+    # `comments=False`, so `#` stays literal inside the quoted body.
+    # Command-boundary splitting still uses the shared primitives below.
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return []
+    if not tokens:
+        return []
+
+    bodies = []
+    for segment in iter_command_starts(tokens):
+        argv = strip_prefix(segment)
+        if not _is_gh_deliverable(argv):
+            continue
+        body = _body_of(argv)
+        if body:
+            bodies.append(body)
+    return bodies
 
 
 def _read_body_file(path_text: str) -> str | None:
@@ -356,25 +412,21 @@ def main() -> int:
     if not isinstance(command, str) or not command.strip():
         return 0
 
-    if not _GH_DELIVERABLE_RE.search(command):
-        return 0
+    # Each chained invocation is scanned against its OWN body: a sample size
+    # stated in one says nothing about a claim published by another.
+    for body in _extract_bodies(command):
+        if _OPT_OUT_MARKER in body:
+            continue
 
-    body = _extract_body_text(command)
-    if not body:
-        return 0
+        # Two claim families, each with its own pass condition. A body can
+        # carry both; the first unsatisfied one is reported.
+        if _has_sample_dependent_claim(body) and not _has_sample_size_at_least_two(body):
+            sys.stderr.write(_advisory_text() + "\n")
+            return 0
 
-    if _OPT_OUT_MARKER in body:
-        return 0
-
-    # Two claim families, each with its own pass condition. A body can carry
-    # both; the first unsatisfied one is reported.
-    if _has_sample_dependent_claim(body) and not _has_sample_size_at_least_two(body):
-        sys.stderr.write(_advisory_text() + "\n")
-        return 0
-
-    if _has_verdict_count(body) and not _has_run_condition(body):
-        sys.stderr.write(_count_advisory_text() + "\n")
-        return 0
+        if _has_verdict_count(body) and not _has_run_condition(body):
+            sys.stderr.write(_count_advisory_text() + "\n")
+            return 0
 
     return 0
 
