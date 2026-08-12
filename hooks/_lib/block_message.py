@@ -171,6 +171,14 @@ Conditional — fire only in the stated situation:
   Merge menu offers a review option         ← merge-menu-review-options-advisory
     A merge-decision menu with no review/inspect option; blocks under
     PRAXIS_MERGE_MENU_REVIEW_STRICT=1.
+  Menu offers a non-mutating tier           ← menu-mutation-tier-advisory
+    Two or more candidates remain after abandonment options are dropped, at
+    least one of them mutates shared state, and none names a non-mutating
+    alternative (preview / dev / sandbox / dry-run / review / 보고만 / 조회만).
+    An option that merely declines to act ("다음 정기 실행에 맡김", "skip") is
+    neither a candidate nor that tier. State `Safe-tier-unavailable: <reason>`
+    on its own line in the question body when no safe tier exists. Blocks
+    under PRAXIS_MENU_MUTATION_TIER_STRICT=1.
 
 Advisory only — never block, no action needed to proceed:
   pre-output-falsification-gate, memory-hint (stderr reminders).
