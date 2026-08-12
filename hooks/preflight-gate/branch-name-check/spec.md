@@ -134,6 +134,16 @@ name in the same segment. A genuine job-control `&` (`git status & git checkout
 -b x`, `a && b`) is left untouched — the merge fires only when the tokens
 adjacent to `&` are themselves redirect-shaped.
 
+### Deny message content (issue #941)
+
+The `Correct path` line shows the raw pattern AND, when it parses out, a
+verbatim `allowed <type> values: feat, fix, docs, ...` clause — an author
+who only sees the regex has to re-derive the allowed tokens by trial and
+error across retries. Extraction picks the LAST alternation group in the
+pattern (`(hub|issue)` then `(feat|fix|...)` in the default shape); a
+`PRAXIS_BRANCH_NAME_REGEX` override with fewer than two alternation groups
+falls back to showing the raw pattern only, unchanged from before.
+
 ### Fail-open guarantees
 
 - Malformed JSON stdin → exit 0 (pass)

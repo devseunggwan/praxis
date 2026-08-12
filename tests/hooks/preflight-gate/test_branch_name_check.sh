@@ -624,6 +624,48 @@ else
   FAILED_NAMES+=("bypass message: no '=1 =0' artifact")
   echo "  FAIL  bypass message: no '=1 =0' artifact"
 fi
+# ---------------------------------------------------------------------------
+# Allowed <type> list verbatim in deny message (issue #941)
+# ---------------------------------------------------------------------------
+
+# Positive: default regex → the deny message enumerates every allowed
+# <type> value verbatim, not just the raw regex.
+raw_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"git checkout -b bad-name"}}' | \
+  env -u PRAXIS_BRANCH_NAME_REGEX -u PRAXIS_BRANCH_NAME_STRICT -u PRAXIS_BRANCH_NAME_WHITELIST \
+  python3 "$HOOK" 2>/dev/null)
+if echo "$raw_out" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+reason = d['hookSpecificOutput']['permissionDecisionReason']
+assert 'allowed <type> values: feat, fix, docs, style, refactor, chore, test, perf, ci, build, hotfix' in reason, f'type list missing: {reason}'
+" 2>/dev/null; then
+  PASS=$((PASS + 1))
+  echo "  PASS  deny message enumerates allowed <type> values verbatim"
+else
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("deny message enumerates allowed <type> values verbatim")
+  echo "  FAIL  deny message enumerates allowed <type> values verbatim"
+fi
+
+# Negative contrast: a custom regex with no <type> alternation group must
+# NOT fabricate a type list — falls back to the raw pattern only.
+raw_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"git checkout -b other-branch"}}' | \
+  env -u PRAXIS_BRANCH_NAME_STRICT -u PRAXIS_BRANCH_NAME_WHITELIST \
+  PRAXIS_BRANCH_NAME_REGEX='^custom-.*$' python3 "$HOOK" 2>/dev/null)
+if echo "$raw_out" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+reason = d['hookSpecificOutput']['permissionDecisionReason']
+assert 'allowed <type> values' not in reason, f'unexpected type list on a pattern with no type group: {reason}'
+" 2>/dev/null; then
+  PASS=$((PASS + 1))
+  echo "  PASS  no fabricated type list for a custom regex without a <type> group"
+else
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("no fabricated type list for a custom regex without a <type> group")
+  echo "  FAIL  no fabricated type list for a custom regex without a <type> group"
+fi
+
 # Fail-open guard opt-in (issue #498): main() must be @fail_open-wrapped;
 # guard behavior is tested centrally in tests/test_hook_runtime.sh.
 _failopen_out=$(python3 - << PYEOF 2>&1

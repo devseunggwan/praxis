@@ -222,6 +222,31 @@ def detect_overrides(argv: list[str]) -> list[str]:
 # Output
 # ---------------------------------------------------------------------------
 
+# Sibling gates that also fire on `git commit`, listed once at first block so
+# an author who clears THIS gate does not discover the next one only on the
+# following retry (issue #941). Kept local to this hook rather than in
+# `hooks/_lib/block_message.py` — this hook is the only caller, and each
+# token below is transcribed from the owning hook's own source (verified,
+# not recalled), the same discipline #931's `_VERB_CHECKLISTS` used.
+GIT_COMMIT_GATE_CHECKLIST = """
+📋 Other gates that also fire on `git commit` (satisfy the ones that apply):
+  Codex review pass this session            ← block-commit-without-codex-review
+    Skill(skill="praxis:codex-review-wrap"), OR a `[skip-codex-review]` token
+    in the commit message, OR CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1 set
+    BEFORE the session started (an inline command prefix never reaches it).
+  Conventional Commits title format         ← commit-title-format-check
+    <type>(<scope>): <lowercase-description>; run with a bad title to see
+    the exact allowed `Types:` list.
+  Title <= 50 characters                    ← commit-title-length-check
+    Or embed `# title-length:ack` on the command to bypass a longer title.
+  No sciomc finding auto-flip               ← block-sciomc-finding-commit
+    Only fires when a [FINDING:...] / [STAGE_COMPLETE:N] / [CONFLICTS:...]
+    marker sits in the recent transcript; re-fetch the user's stated design
+    (PR/issue body) before committing over it.
+  Staged additions never seen via Read/Edit ← pre-commit-staged-file-enumeration
+    Advisory only — never blocks.
+"""
+
 DENY_TEMPLATE = """BLOCKED: Commit-flag override(s) detected.
 
 Detected override(s): {overrides}
@@ -239,10 +264,15 @@ These checks help you decide whether the override is appropriate. The
 hook does NOT recognize their completion — re-running the same git
 commit invocation will be blocked again.
 
-To proceed:
-  - Set PRAXIS_SKIP_COMMIT_FLAG_CHECK=1 in the environment (justify the
-    bypass in the commit message body).
-  - Or remove the override flag(s) that triggered the block.
+To proceed, BOTH of the following are required (global CLAUDE.md: lint/hook
+suppression needs a stated reason AND explicit user approval — neither one
+alone is sufficient):
+  1. State the concrete reason a root fix / normal commit is not possible.
+  2. Get the user's explicit approval for this specific override.
+  Then set PRAXIS_SKIP_COMMIT_FLAG_CHECK=1 in the environment, with the
+  reason recorded in the commit message body.
+
+Or remove the override flag(s) that triggered the block.
 """
 
 
@@ -329,7 +359,11 @@ def main() -> int:
     if not all_overrides:
         return 0
 
-    _emit_deny(_build_reason(all_overrides) + compound_cascade_hint(command))
+    _emit_deny(
+        _build_reason(all_overrides)
+        + GIT_COMMIT_GATE_CHECKLIST
+        + compound_cascade_hint(command)
+    )
     return 2
 
 

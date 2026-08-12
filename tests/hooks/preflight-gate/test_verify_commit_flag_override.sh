@@ -262,6 +262,64 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Sibling git-commit gate checklist on first block (issue #941)
+# ---------------------------------------------------------------------------
+
+# Positive: a deny surfaces the full sibling-gate checklist, not just this
+# gate's own token.
+deny_out=$(payload 'git commit -n -m "msg"' | \
+  env -u PRAXIS_SKIP_COMMIT_FLAG_CHECK python3 "$HOOK" 2>/dev/null)
+if echo "$deny_out" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+reason = d['hookSpecificOutput']['permissionDecisionReason']
+for token in (
+    'block-commit-without-codex-review',
+    'commit-title-format-check',
+    'commit-title-length-check',
+    'block-sciomc-finding-commit',
+    'pre-commit-staged-file-enumeration',
+):
+    assert token in reason, f'missing {token!r} from deny message'
+" 2>/dev/null; then
+  echo "PASS: T01: deny message enumerates every sibling git-commit gate"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: T01: deny message enumerates every sibling git-commit gate"
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("T01")
+fi
+
+# Positive: the deny message states the reason+approval requirement
+# explicitly — the bypass env var alone is not framed as sufficient.
+if echo "$deny_out" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+reason = d['hookSpecificOutput']['permissionDecisionReason']
+assert 'BOTH of the following are required' in reason, f'missing reason+approval requirement: {reason}'
+" 2>/dev/null; then
+  echo "PASS: T01b: deny message requires BOTH reason and user approval"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: T01b: deny message requires BOTH reason and user approval"
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("T01b")
+fi
+
+# Negative contrast: no override detected → fully silent, no checklist leaks
+# into a passing invocation.
+silent_out=$(payload 'git commit -m "regular message"' | \
+  env -u PRAXIS_SKIP_COMMIT_FLAG_CHECK python3 "$HOOK" 2>/dev/null)
+if [ -z "$silent_out" ]; then
+  echo "PASS: T02: no override → silent, checklist does not fire"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: T02: no override → silent, checklist does not fire (out=$silent_out)"
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("T02")
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # Fail-open guard opt-in (issue #498): main() must be @fail_open-wrapped;
 # guard behavior is tested centrally in tests/test_hook_runtime.sh.

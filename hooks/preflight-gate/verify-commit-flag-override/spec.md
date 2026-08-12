@@ -54,6 +54,24 @@ The only allow path the hook actually recognizes is the env-var bypass:
   environment before invoking `git commit`. Use sparingly; the bypass
   must be justified in the commit message body or PR description.
 
+The deny message states BOTH requirements explicitly (global CLAUDE.md:
+suppression needs a stated reason AND explicit user approval, neither one
+alone is sufficient) — the bypass env var is not, on its own, a satisfying
+condition; it must be paired with a recorded reason and the user's
+per-instance approval. Before this change (issue #941) the message read
+as an either/or menu ("set the env var" OR "remove the flag"), which did
+not make the approval half of the rule visible at the block site.
+
+The deny message also enumerates every OTHER gate that fires on `git
+commit` (`block-commit-without-codex-review`, `commit-title-format-check`,
+`commit-title-length-check`, `block-sciomc-finding-commit`,
+`pre-commit-staged-file-enumeration`) in one pass (issue #941) — an author
+clearing this gate should not discover the next commit-time gate only on
+the following retry. The checklist is local to this hook's `impl.py`
+(`GIT_COMMIT_GATE_CHECKLIST`), not in `hooks/_lib/block_message.py`'s
+verb-checklist registry: this hook is its only caller, and each token is
+transcribed from the owning sibling hook's own source.
+
 The deny message also lists "verification commands" (e.g.,
 `git config --get commit.gpgsign`, `gpg --list-secret-keys`). Running
 those does **not** unblock subsequent invocations — the hook does not
