@@ -1,0 +1,132 @@
+"""Unit coverage for the shared state lock (issue #951).
+
+The cross-process behaviour that motivates the helper is pinned in
+`tests/test_hook_state_concurrency.py`, which runs the real hooks in two
+processes. What is checked here is the contract those call sites depend on:
+the lock is exclusive across processes, it is released on every exit path, and
+every failure mode yields False instead of raising — a hook that cannot lock
+must degrade to the racy behaviour, never to a blocked tool call.
+"""
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "hooks" / "_lib"))
+
+import _state_lock  # noqa: E402
+
+
+# Holds the lock for a fixed span so the parent can observe contention.
+_HOLDER = """
+import sys, time
+sys.path.insert(0, sys.argv[1])
+import _state_lock
+
+with _state_lock.state_lock(sys.argv[2]) as acquired:
+    if not acquired:
+        sys.exit("holder failed to acquire")
+    open(sys.argv[3], "w").close()
+    time.sleep(float(sys.argv[4]))
+"""
+
+
+def test_lock_path_is_a_sibling_of_the_state_file(tmp_path):
+    state = tmp_path / "session-state.json"
+    assert _state_lock.lock_path_for(str(state)) == str(state) + ".lock"
+
+
+def test_timeout_default_and_override(monkeypatch):
+    monkeypatch.delenv("PRAXIS_STATE_LOCK_TIMEOUT", raising=False)
+    assert _state_lock.lock_timeout() == 2.0
+    monkeypatch.setenv("PRAXIS_STATE_LOCK_TIMEOUT", "0.25")
+    assert _state_lock.lock_timeout() == 0.25
+
+
+@pytest.mark.parametrize("raw", ["", "soon", "-1"])
+def test_malformed_timeout_falls_back_to_the_default(monkeypatch, raw):
+    monkeypatch.setenv("PRAXIS_STATE_LOCK_TIMEOUT", raw)
+    assert _state_lock.lock_timeout() == 2.0
+
+
+def test_acquires_and_releases(tmp_path):
+    state = str(tmp_path / "state.json")
+    with _state_lock.state_lock(state) as acquired:
+        assert acquired is True
+    # Released: the same path locks again without waiting out any deadline.
+    started = time.monotonic()
+    with _state_lock.state_lock(state, timeout=0.05) as acquired:
+        assert acquired is True
+    assert time.monotonic() - started < 0.05
+
+
+def test_released_even_when_the_body_raises(tmp_path):
+    state = str(tmp_path / "state.json")
+    with pytest.raises(ValueError):
+        with _state_lock.state_lock(state):
+            raise ValueError("body failed")
+    with _state_lock.state_lock(state, timeout=0.05) as acquired:
+        assert acquired is True
+
+
+def test_creates_the_parent_directory(tmp_path):
+    state = str(tmp_path / "nested" / "dir" / "state.json")
+    with _state_lock.state_lock(state) as acquired:
+        assert acquired is True
+    assert os.path.isdir(os.path.dirname(state))
+
+
+def test_unwritable_location_yields_false_without_raising(tmp_path):
+    denied = tmp_path / "denied"
+    denied.mkdir()
+    denied.chmod(0o500)
+    try:
+        with _state_lock.state_lock(str(denied / "state.json"), timeout=0.05) as acquired:
+            assert acquired is False
+    finally:
+        denied.chmod(0o700)
+
+
+def test_excludes_a_second_process_then_admits_it(tmp_path):
+    state = str(tmp_path / "state.json")
+    held_marker = tmp_path / "held"
+    holder_script = tmp_path / "holder.py"
+    holder_script.write_text(_HOLDER, encoding="utf-8")
+
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            str(holder_script),
+            str(REPO_ROOT / "hooks" / "_lib"),
+            state,
+            str(held_marker),
+            "1.0",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 15
+        while not held_marker.exists():
+            assert holder.poll() is None, "holder exited before taking the lock"
+            assert time.monotonic() < deadline, "holder never took the lock"
+            time.sleep(0.005)
+
+        # Contended: a deadline shorter than the hold yields False rather than
+        # waiting for the holder or raising.
+        with _state_lock.state_lock(state, timeout=0.05) as acquired:
+            assert acquired is False
+    finally:
+        holder.wait(timeout=15)
+
+    # Uncontended again once the holder exits — an exited process releases the
+    # flock even though nothing unlinked the lock file.
+    with _state_lock.state_lock(state, timeout=0.5) as acquired:
+        assert acquired is True
