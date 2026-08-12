@@ -136,6 +136,18 @@ exit 0인 PostToolUse 훅의 `stderr`는 디버그 로그로만 가고 모델에
 }
 ```
 
+## Concurrency (issue #951)
+
+카운트 갱신(read → modify → `os.replace`)은 `_lib/_state_lock.state_lock`
+으로 직렬화합니다. advisory가 `prior_count == 1` 경계에서만 발화하므로,
+같은 `session_id` 를 공유하는 두 프로세스가 같은 카운트를 읽으면 둘 다 그
+경계를 넘어 중복 발화하고(#950 의 미검증 항목), 반영되지 못한 증분은 이후
+어떤 이벤트로도 복구되지 않습니다. 판정 기준과 7개 훅 분류는
+[`DESIGN.md → Session-state concurrency`](../../../DESIGN.md#session-state-concurrency).
+
+잠금 획득 실패는 잠금 이전 동작으로 강등될 뿐 훅을 차단으로 바꾸지
+않습니다 (`@fail_open` 계약).
+
 ## Privacy
 
 - 원문 오류 텍스트 자체를 기록하지 않고, 정규화된 signature의 hash를 저장해
@@ -147,6 +159,7 @@ Run:
 
 ```bash
 bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
+python3 -m pytest tests/test_hook_state_concurrency.py
 ```
 
 필수 커버:
@@ -161,3 +174,5 @@ bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
 - `stdout`/`output`만 있는 성공 응답은 반복돼도 무음
 - 실패 텍스트의 `Reference:` 경로가 advisory와 재진술 지시에 포함됨
 - 비실패/비정상 입력은 fail-open
+- 두 프로세스 동시 실행: 잠금 없이는 증분 유실, 잠금 하에서는 카운트 1→2→3
+  과 advisory 1회 (`tests/test_hook_state_concurrency.py`)

@@ -59,6 +59,7 @@ _ROOT = _Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
+from _state_lock import state_lock  # type: ignore[import-not-found]  # noqa: E402
 
 
 _ADVISORY_PREFIX = (
@@ -312,23 +313,32 @@ def main() -> int:
     )
 
     path = _state_path(session_id)
-    state = _load_state(path)
-    failures = state.get("failures")
-    if not isinstance(failures, dict):
-        failures = {}
-        state["failures"] = failures
-
     pair_key = f"{tool_name}\0{signature}"
-    prior_count = 0
-    count = failures.get(pair_key)
-    if isinstance(count, int) and count > 0:
-        prior_count = count
 
-    failures[pair_key] = prior_count + 1
+    # The whole read-modify-write is serialized (issue #951). The advisory
+    # fires on the exact `prior_count == 1` boundary, so two processes that
+    # read the same count both write count+1 and both cross that boundary —
+    # the duplicate fire recorded as unverified on #950. Persisting inside the
+    # lock is what makes each process observe the other's increment.
+    with state_lock(path):
+        state = _load_state(path)
+        failures = state.get("failures")
+        if not isinstance(failures, dict):
+            failures = {}
+            state["failures"] = failures
 
-    # Persist before advising: a lost write would let the same advisory fire
-    # again on the next failure of this pair.
-    if not _save_state(path, state):
+        prior_count = 0
+        count = failures.get(pair_key)
+        if isinstance(count, int) and count > 0:
+            prior_count = count
+
+        failures[pair_key] = prior_count + 1
+
+        # Persist before advising: a lost write would let the same advisory
+        # fire again on the next failure of this pair.
+        saved = _save_state(path, state)
+
+    if not saved:
         return 0
 
     if prior_count == 1:
