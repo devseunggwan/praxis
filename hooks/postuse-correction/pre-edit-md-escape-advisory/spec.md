@@ -91,6 +91,23 @@ earlier session — breaking the "in this session" contract.
 Read failures (missing file, malformed JSON) → empty history,
 fail-open. Write failures → silently skip recording.
 
+#### Concurrency (issue #951)
+
+The PostToolUse read-modify-write is serialized with
+`_lib/_state_lock.state_lock`. The history *accumulates* one entry per
+Read, so two PostToolUse processes appending concurrently leave only one
+of the two paths on disk — and the dropped entry is not a lost log line:
+`run_pre` reads this set to decide whether the file was Read, so the Edit
+that follows is warned about, or denied outright under
+`PRAXIS_MD_ESCAPE_MODE=block`, for a file the agent did read. The
+criterion and the per-hook verdicts across all seven state-file consumers
+live in
+[`DESIGN.md → Session-state concurrency`](../../../DESIGN.md#session-state-concurrency).
+
+Readers take no lock — `os.replace` already hands them a whole file. A
+lock that cannot be acquired degrades to the pre-lock behaviour rather
+than blocking the tool call (`@fail_open` contract).
+
 ### Response (warn — default)
 
 stderr only:
@@ -197,3 +214,12 @@ Covers 31 cases:
   ignores non-`Read` tools. `session_id`-based history-path resolution.
 - **Fail-open:** malformed stdin (pre + post), empty `file_path`, empty
   `old_string`, missing `tool_input`.
+
+Concurrency (issue #951) is covered separately, in two real processes:
+
+```bash
+python3 -m pytest tests/test_hook_state_concurrency.py
+```
+
+- **Unlocked arm:** the two concurrent Reads do not both survive.
+- **Locked arm:** both paths are recorded.

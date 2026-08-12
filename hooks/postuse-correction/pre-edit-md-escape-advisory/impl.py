@@ -111,6 +111,7 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib")
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
+from _state_lock import state_lock  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -206,19 +207,28 @@ def normalize_path(file_path: str) -> str:
 
 
 def record_read(path: str, file_path: str) -> None:
-    """Record `file_path` as Read in the session history."""
+    """Record `file_path` as Read in the session history.
+
+    The read-modify-write is serialized (issue #951): the history accumulates
+    one entry per Read, and two PostToolUse processes appending concurrently
+    leave only the later one's path on disk. A dropped entry is not a lost log
+    line — `run_pre` reads this set to decide whether the file was Read, so the
+    Edit that follows is warned about, or denied outright under
+    `PRAXIS_MD_ESCAPE_MODE=block`, for a file the agent did read.
+    """
     norm = normalize_path(file_path)
     if not norm:
         return
-    history = load_history(path)
-    read_set = history.setdefault("read", [])
-    if not isinstance(read_set, list):
-        read_set = []
-        history["read"] = read_set
-    if norm not in read_set:
-        read_set.append(norm)
-    history["last_updated"] = int(time.time())
-    save_history(path, history)
+    with state_lock(path):
+        history = load_history(path)
+        read_set = history.setdefault("read", [])
+        if not isinstance(read_set, list):
+            read_set = []
+            history["read"] = read_set
+        if norm not in read_set:
+            read_set.append(norm)
+        history["last_updated"] = int(time.time())
+        save_history(path, history)
 
 
 def get_read_set(path: str) -> set[str]:
