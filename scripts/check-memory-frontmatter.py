@@ -39,17 +39,24 @@ Resolution: reuses `hooks/_lib/_memory_dir.py::resolve_memory_dir()`, so this
 follows `PRAXIS_MEMORY_DIR` / `CLAUDE_CONFIG_DIR` exactly like the memory-hint
 hook does — no separate path convention to drift from that one.
 
-Exit codes: 0 clean (or skipped, unless PRAXIS_TESTS_STRICT=1), 1 on any
-violation (or on a skip under PRAXIS_TESTS_STRICT=1, matching the
-skip-is-not-pass convention `scripts/run-tests.sh` already uses, #917).
+Exit codes: 0 clean (or N/A, unless PRAXIS_TESTS_STRICT=1), 1 on any
+violation (or on N/A under PRAXIS_TESTS_STRICT=1, for standalone invocation).
 
 CI reality: the memory directory is a local, gitignored, per-user store and
-does not exist in CI at all — so in CI this script always prints SKIPPED and
-exits 0. It has enforcement value locally (a contributor normalizing memory
+does not exist in CI at all — so in CI this script always prints N/A and
+exits 0 (`scripts/run-tests.sh` strips PRAXIS_TESTS_STRICT for this one call,
+so N/A can never fail the CI job either). This label is deliberately NOT
+"SKIPPED": `scripts/run-tests.sh`'s header explains why a skip is not a pass
+(#917) — a SKIPPED line names a *fixable* gap (install the tool) that a
+strict rerun can close. This condition can never close; the directory is
+structurally absent in CI by design, forever. Printing it as SKIPPED would
+plant a permanently-unresolvable entry in exactly the noise this repo already
+learned (via #917) drowns out the *actionable* skips — the same signal-loss
+failure mode issue #942 itself was opened to stop recurring. N/A keeps it
+readable as "nothing to check here", not "something you could fix but
+didn't". It has enforcement value locally (a contributor normalizing memory
 frontmatter) and as a component this repo's own tests exercise directly
-(`tests/test_check_memory_frontmatter.py`, via `PRAXIS_MEMORY_DIR`). Wiring
-it into `scripts/run-tests.sh` is a follow-up, deliberately not done here —
-that file is shared with concurrently in-flight PRs.
+(`tests/test_check_memory_frontmatter.py`, via `PRAXIS_MEMORY_DIR`).
 """
 from __future__ import annotations
 
@@ -157,12 +164,12 @@ def main() -> int:
 
     memory_dir = resolve_memory_dir()
     if not memory_dir:
-        print("SKIPPED: memory-frontmatter-lint (memory directory not found — expected in CI / a fresh checkout)")
+        print("N/A: memory-frontmatter-lint (memory directory not found — expected in CI / a fresh checkout, not a fixable gap, see issue #942)")
         return 1 if strict else 0
 
     files = iter_memory_files(memory_dir)
     if not files:
-        print(f"SKIPPED: memory-frontmatter-lint (no memory entries under {memory_dir})")
+        print(f"N/A: memory-frontmatter-lint (no memory entries under {memory_dir})")
         return 1 if strict else 0
 
     total_errors = 0

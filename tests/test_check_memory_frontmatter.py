@@ -181,7 +181,7 @@ body
 
 
 # ---------------------------------------------------------------------------
-# main() — directory resolution + skip contract
+# main() — directory resolution + N/A contract
 # ---------------------------------------------------------------------------
 
 def test_main_skips_when_directory_absent(tmp_path, monkeypatch):
@@ -191,7 +191,7 @@ def test_main_skips_when_directory_absent(tmp_path, monkeypatch):
     with redirect_stdout(out):
         rc = check.main()
     assert rc == 0
-    assert "SKIPPED" in out.getvalue()
+    assert "N/A" in out.getvalue()
 
 
 def test_main_skip_is_failure_under_strict(tmp_path, monkeypatch):
@@ -201,7 +201,7 @@ def test_main_skip_is_failure_under_strict(tmp_path, monkeypatch):
     with redirect_stdout(out):
         rc = check.main()
     assert rc == 1
-    assert "SKIPPED" in out.getvalue()
+    assert "N/A" in out.getvalue()
 
 
 def test_main_fails_on_drifted_entry(tmp_path, monkeypatch):
@@ -236,4 +236,4 @@ def test_main_ignores_memory_md_index_file(tmp_path, monkeypatch):
     with redirect_stdout(out):
         rc = check.main()
     assert rc == 0
-    assert "SKIPPED" in out.getvalue()  # no *.md entries besides MEMORY.md
+    assert "N/A" in out.getvalue()  # no *.md entries besides MEMORY.md

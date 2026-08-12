@@ -17,12 +17,17 @@
 # the toolchain is not blocked — CI remains authoritative either way.
 #
 # Step 5 is a different repo-internal script, same family as steps 3-4 (no
-# external toolchain — nothing to install), but it has its own legitimate skip
-# condition: the memory directory it lints is a local, gitignored, per-user
-# store that does not exist in CI or a fresh checkout at all (issue #942). It
-# prints its own SKIPPED line and exit code, honoring PRAXIS_TESTS_STRICT the
-# same way steps 6-8 do — no skip_step() wiring needed here, so a nonzero exit
-# is treated as FAILED like steps 3-4, not routed through the tool-skip path.
+# external toolchain — nothing to install), but its skip condition is not
+# like steps 6-8's: the memory directory it lints is a local, gitignored,
+# per-user store that is structurally absent in CI or a fresh checkout,
+# always, forever (issue #942) — not a "toolchain not installed" gap a
+# contributor can close. It prints "N/A", never "SKIPPED", to keep that
+# distinction visible in the log (see its own docstring / #917 below), and
+# this call strips PRAXIS_TESTS_STRICT (`env -u`, not passed through like
+# steps 6-8) so that permanent N/A can never fail the job. Real drift
+# (nonzero exit with violations listed) still counts as FAILED, same as
+# steps 3-4 — this is not routed through the SKIPPED_TOOLS/skip_step() path
+# at all.
 #
 # A skip is not a pass (#917). The SKIPPED line used to scroll past and the run
 # still ended on a bare "ALL TESTS PASSED", which read as full coverage: PR #912
@@ -140,10 +145,15 @@ echo "=== memory frontmatter lint ==="
 # steps 6-8 (a tool a contributor could install), the memory dir this checks
 # is a local, gitignored, per-user store that structurally never exists in
 # CI or a fresh checkout — treating its absence as a strict-mode failure
-# would fail every CI run forever, not flag a fixable gap. A SKIPPED here is
-# always benign; only actual detected drift (exit 1 with violations listed)
-# fails this step. The script's own PRAXIS_TESTS_STRICT support still works
-# for direct standalone invocation (see its tests / docstring).
+# would fail every CI run forever, not flag a fixable gap. The script prints
+# "N/A", not "SKIPPED", for exactly this reason: #917 exists because a
+# scrolling SKIPPED line lost its signal value once contributors stopped
+# reading it, and a condition that can never be fixed would sit there as
+# permanent unresolvable noise if it wore the same "SKIPPED" label as steps
+# 6-8's genuinely-fixable tool-absence skips. An N/A here is always benign;
+# only actual detected drift (exit 1 with violations listed) fails this step.
+# The script's own PRAXIS_TESTS_STRICT support still works for direct
+# standalone invocation (see its tests / docstring).
 if ! env -u PRAXIS_TESTS_STRICT python3 ./scripts/check-memory-frontmatter.py; then
   FAILED=1
 fi
@@ -248,9 +258,8 @@ if [[ $FAILED -ne 0 ]]; then
 fi
 
 # Scope note: this counts the three tool steps this script owns (6-8). Step 5
-# has its own SKIPPED line but is deliberately excluded from this tally (see
-# its PRAXIS_TESTS_STRICT note above) — it is never a missing-toolchain skip.
-# Gates
+# has its own N/A line (deliberately not "SKIPPED") and is excluded from this
+# tally on purpose — it is never a missing-toolchain skip. Gates
 # that a sub-suite skips internally — e.g. the Darwin-only gate in
 # tests/test_codex_broker_reaper.sh — announce themselves in their own summary
 # and are not aggregated here; conflating them would make a portable-by-design
