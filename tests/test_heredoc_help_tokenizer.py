@@ -53,6 +53,11 @@ def _has_merge(command: str) -> bool:
     ("unterminated heredoc runs to the end", f"cat <<EOF\n{MERGE} 985"),
     ("near-miss terminator does not end the body",
      f"cat <<EOF\nEOFX\n{MERGE} 985\nEOF"),
+    # bash closes a heredoc only on an exact delimiter line — `EOF  ` is body,
+    # so everything after it is body too (CodeRabbit, verified against bash).
+    ("terminator with trailing spaces does not close the body",
+     f"cat <<EOF\nbody\nEOF  \n{MERGE} 985 --squash"),
+    ("tilde delimiter", f"cat <<~EOF\n{MERGE} 985\n~EOF"),
     # The shape that actually fired: a commit message assembled through a
     # command substitution *inside* double quotes, where the substitution
     # re-opens shell parsing and the heredoc is genuinely a heredoc.
@@ -69,8 +74,6 @@ def test_heredoc_body_is_not_read_as_a_command(name: str, command: str) -> None:
     ("here-string has no body", f"grep x <<< body\n{MERGE} 985 --squash"),
     ("arithmetic left-shift is not an operator",
      f"echo $((1 << 3)); {MERGE} 985 --squash"),
-    ("terminator with trailing whitespace still closes the body",
-     f"cat <<EOF\nbody\nEOF  \n{MERGE} 985 --squash"),
     ("`<<` inside quotes is literal", f'echo "<<EOF"\n{MERGE} 985 --squash'),
 ])
 def test_real_merge_still_reaches_the_gates(name: str, command: str) -> None:
@@ -80,6 +83,12 @@ def test_real_merge_still_reaches_the_gates(name: str, command: str) -> None:
 def test_command_without_heredoc_is_returned_unchanged() -> None:
     command = f"{MERGE} 985 --squash && echo done"
     assert strip_heredoc_bodies(command) == command
+
+
+def test_heredoc_lookalike_in_a_comment_opens_nothing() -> None:
+    """`# <<EOF` is a comment; bash reads no operator past it, so the next line
+    must stay visible (CodeRabbit, verified against bash)."""
+    assert _has_merge(f'echo hi # <<EOF\n{MERGE} 985 --squash')
 
 
 def test_only_body_lines_are_blanked() -> None:

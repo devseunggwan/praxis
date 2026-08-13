@@ -109,6 +109,8 @@ def _heredoc_starts_on_line(line: str) -> list[tuple[str, bool]]:
             quote = ch
             i += 1
             continue
+        if ch == "#" and (i == 0 or line[i - 1] in " \t;|&("):
+            break  # unquoted comment — bash reads no operator past it
         if ch == "\\":
             i += 2
             continue
@@ -145,7 +147,7 @@ def _heredoc_starts_on_line(line: str) -> list[tuple[str, bool]]:
     return out
 
 
-_HEREDOC_WORD_CHARS = re.compile(r"[A-Za-z0-9_.\-/]")
+_HEREDOC_WORD_CHARS = re.compile(r"[A-Za-z0-9_.~\-/]")
 
 
 def _read_heredoc_delim(line: str, j: int) -> tuple[str, int]:
@@ -202,7 +204,7 @@ def strip_heredoc_bodies(command: str) -> str:
         if pending:
             delim, dash = pending[0]
             probe = line.lstrip("\t") if dash else line
-            if probe.rstrip() == delim:
+            if probe == delim:  # exact — `EOF ` does not close a heredoc
                 del pending[0]
                 out.append(line)  # terminator survives — see the docstring
             else:
