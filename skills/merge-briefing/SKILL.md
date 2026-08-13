@@ -238,17 +238,17 @@ to clean up.
 
 ## Relationship to enforcement
 
-Four hooks fire on `gh pr merge` unconditionally. They are backstops for this
-procedure, not substitutes — each catches the omission at the call site, by
-which point the user is already looking at a prompt you should have preceded
-with a briefing.
+Three hooks fire on `gh pr merge` unconditionally, whatever the flags; a fourth
+fires only with `--delete-branch`. They are backstops for this procedure, not
+substitutes — each catches the omission at the call site, by which point the
+user is already looking at a prompt you should have preceded with a briefing.
 
-| Hook | What it catches | Relation to this skill |
-| --- | --- | --- |
-| `momentum-rule-retrieval-gate` | Fewer than 4 of the 6 briefing items present in the turn | Step 4 is what satisfies it |
-| `pre-merge-approval-gate` | Any direct-session merge → `ask`, no agent-attachable bypass | Step 5 is the answer it demands |
-| `side-effect-scan` | Unacknowledged intentional side effect | Opt in-band with `# side-effect:ack` |
-| `gh-merge-worktree-precondition` | `--delete-branch` from the wrong worktree | Owned by `worktree-merge-cleanup` (Step 6) |
+| Hook | Fires | What it catches | Relation to this skill |
+| --- | --- | --- | --- |
+| `momentum-rule-retrieval-gate` | always | Fewer than 4 of the 6 briefing items present in the turn | Step 4 is what satisfies it |
+| `pre-merge-approval-gate` | always | Any direct-session merge → `ask`, no agent-attachable bypass | Step 5 is the answer it demands |
+| `side-effect-scan` | always | Unacknowledged intentional side effect | Opt in-band with `# side-effect:ack` |
+| `gh-merge-worktree-precondition` | `--delete-branch` / `-d` only | Deleting a head branch from the wrong worktree | Owned by `worktree-merge-cleanup` (Step 6) |
 
 `commit-title-length-check` additionally advises when `--squash` is used and the
 PR title exceeds 50 chars — the PR title becomes the squash commit title.
