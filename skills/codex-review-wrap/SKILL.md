@@ -272,6 +272,14 @@ back at the session cwd rather than the worktree Step 2 selected — so
 without it this command reads a different state directory and reports no
 running job at all.
 
+Empty output from that pipeline is **not** the same as "no job is running".
+A failed `status` — wrong directory, unreadable state file, a companion
+version that does not know `--json` — also prints nothing, and `jq` exits 0
+on the empty input, so the pipeline's status says nothing either. Read the
+companion's own exit code before drawing any conclusion from silence, and
+treat a non-zero one as *unknown*, never as *stale*. This matters because
+the next paragraph turns "no matching process" into a cancel.
+
 `.logFile` is an absolute path under the companion's own state directory
 (`$CLAUDE_PLUGIN_DATA/state/<workspace-slug>-<hash>/jobs/`, falling back to
 `$TMPDIR/codex-companion/…`) — it is not relative to the worktree, so use
