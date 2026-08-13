@@ -1244,11 +1244,10 @@ re-ask the same question rather than guessing (same as 5i). Record
 
 1. Return to **Step 4**; skip Steps 1–3 — the review target is already
    fixed.
-2. **Normalize** the original `{{ARGUMENTS}}` before reuse — strip
-   `--background` (a re-backgrounded round breaks the gate's synchronous
-   loop) **and** any existing `--scope` / `--base <ref>`. Then append at
-   most **one** target-selecting flag, the one condition (b) settled
-   above. Stripping first is what keeps the two rules from colliding:
+2. **Normalize** the original `{{ARGUMENTS}}` before reuse — strip any
+   existing `--scope` / `--base <ref>`. Then append at most **one**
+   target-selecting flag, the one condition (b) settled above. Stripping
+   first is what keeps the two rules from colliding:
    without it, "switch the scope for the re-entered round" stacks a second
    `--scope` on top of the caller's, and which one wins is the CLI's
    business, not this skill's. After appending, re-run the condition (b)
@@ -1445,8 +1444,7 @@ user selects: 1
   User: 추가 라운드 실행
   → ledger: round-continued: target=/Users/dev/project-wt/my-repo-feature-1#issue-1-feature | from=1 | applied=1 | decision=continue | to=2
   → re-enter Step 4 (Steps 1–3 skipped, 5d-i and 4a not re-asked — the sibling-id:
-    and review-path: rows for this target exist, --background dropped if it was
-    present, PR-state re-checked)
+    and review-path: rows for this target exist, PR-state re-checked)
 
 [Step 5 — Round 2] Codex now re-suggests changing WHERE col_a = 1 → col_b = 1
   Scan ledger: rejected entry on query.sql:L42 with same A → B transition exists
