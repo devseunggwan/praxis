@@ -147,6 +147,50 @@ assert_present \
   "a failed lookup is not allowed to read as death" \
   "부재를 사망으로 읽지 않는다"
 
+# The selector is stashed at Step 5 rather than re-derived at Step 7, because
+# neither re-derivation path is sound: `short_task` is truncated to 30 chars so
+# titles collide, and `--session` never creates a titled workspace at all.
+# Pinned here because both halves live in one file and a title-lookup rewrite
+# would silently reopen the gap.
+
+assert_present \
+  "Step 7 reads the selectors Step 5 stashed" \
+  "find /tmp/ -maxdepth 1 -name 'cmux-delegate-{timestamp}-*.ws'"
+
+assert_present \
+  "the new-session path stashes one file per workspace" \
+  'echo "$WS_ID" > "/tmp/cmux-delegate-{timestamp}-${WS_REF#workspace:}.ws"'
+
+assert_present \
+  "the existing-session path stashes it the same way" \
+  'echo "$WS_ID" > "/tmp/cmux-delegate-{timestamp}-${TARGET#workspace:}.ws"'
+
+# A failed lookup still lets `head` succeed, so redirecting the pipeline itself
+# leaves a zero-byte file — which the consumer would read as "a worker exists"
+# and then probe with an empty argument, getting usage/rc=2 and no state.
+assert_present \
+  "the stash is gated on a non-empty lookup" \
+  'if [ -n "$WS_ID" ]; then'
+
+assert_present \
+  "the consumer skips an empty stash instead of counting it" \
+  '[ -s "$WS_FILE" ] || { echo "$WS_FILE 비어 있음 — 건너뜀"; continue; }'
+
+assert_present \
+  "state is reset per iteration so one worker cannot inherit another's verdict" \
+  "직전 워커의 값"
+
+# `/tmp` is a symlink to `private/tmp` on macOS, so a bare `find /tmp` returns
+# nothing whether or not the files exist — a dead oracle that reads as "no
+# workers to check". The trailing slash is what makes find follow it.
+assert_present \
+  "the trailing slash that keeps find from silently finding nothing is explained" \
+  "find 는 기본적으로 링크를 따라가지 않아"
+
+assert_present \
+  "the reason the title lookup is only a fallback is stated" \
+  "30자 절단이 동명 워크스페이스를"
+
 # ---------------------------------------------------------------------------
 # 5. Error-handling rows for the three failure shapes
 # ---------------------------------------------------------------------------

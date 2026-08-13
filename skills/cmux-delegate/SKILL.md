@@ -335,7 +335,28 @@ if [[ "$WS_RAW" != OK* ]]; then
 fi
 
 WS_REF=$(echo "$WS_RAW" | sed 's/^OK //')
+
+# Step 7 이 읽을 셀렉터를 지금 박제합니다. 지금이 유일하게 안전한 시점입니다 —
+# 방금 생성된 ref 는 정확히 이 워크스페이스를 가리키고, 나중에 제목으로 되찾으면
+# `short_task` 30자 절단이 만든 동명 워크스페이스와 구별되지 않습니다.
+WS_ID=$(CMUX_QUIET=1 cmux workspace list --json \
+  | jq -r --arg r "$WS_REF" '.workspaces[] | select(.ref == $r) | .id' \
+  | head -1)
+
+# 리다이렉트를 조회에 직접 걸지 않는 이유: 조회가 실패해도 `head` 는 성공하므로
+# 빈 파일이 남고, 그 빈 파일은 Step 7 에서 "워커가 있다"로 읽힙니다.
+if [ -n "$WS_ID" ]; then
+  echo "$WS_ID" > "/tmp/cmux-delegate-{timestamp}-${WS_REF#workspace:}.ws"
+else
+  echo "경고: $WS_REF 의 UUID 조회 실패 — Step 7 은 제목/경로 폴백으로 판정합니다"
+fi
 ```
+
+파일명에 ref 번호가 들어가는 이유는 distribute 모드 때문입니다 — 이 블록이
+항목 수만큼 반복되는데 `{timestamp}` 는 호출 1건당 하나라, 고정 이름이면
+마지막 워크스페이스가 앞의 것들을 전부 덮어씁니다. 파일 안에 ref 가 아니라
+UUID 를 담는 이유는 별개입니다: 워크스페이스가 닫히고 열리는 사이
+`workspace:N` 번호의 안정성이 확인되지 않았고, UUID 는 그 질문 자체가 없습니다.
 
 **distribute 모드에서는 분할된 항목 수만큼 반복 실행합니다.**
 
@@ -357,6 +378,19 @@ fi
 cmux send --workspace "$TARGET" \
   "{prompt_file_path} 파일을 읽고 조사해주세요."
 cmux send-key --workspace "$TARGET" Enter
+
+# 3. Step 7 이 읽을 셀렉터 박제 (Step 5a 와 같은 이유·같은 파일).
+#    이 모드는 "[delegate] …" 워크스페이스를 만들지 않으므로 제목 조회로는
+#    아예 되찾을 수 없습니다 — 여기서 안 쓰면 Step 7 은 경로로 떨어집니다.
+WS_ID=$(CMUX_QUIET=1 cmux workspace list --json \
+  | jq -r --arg r "$TARGET" '.workspaces[] | select(.ref == $r) | .id' \
+  | head -1)
+
+if [ -n "$WS_ID" ]; then
+  echo "$WS_ID" > "/tmp/cmux-delegate-{timestamp}-${TARGET#workspace:}.ws"
+else
+  echo "경고: $TARGET 의 UUID 조회 실패 — Step 7 은 제목/경로 폴백으로 판정합니다"
+fi
 ```
 
 ### Step 6: Report
@@ -423,32 +457,61 @@ REPORT="$(sh "$ARP" "{cwd}")"
 **보고서가 없으면 거기서 멈추지 말고 이유를 묻습니다.** 파일 부재는 네 가지
 서로 다른 상황을 하나로 뭉갠 값이고, 각각 처방이 다릅니다.
 
-```bash
-# Step 5b(기존 세션)로 보냈다면 그 워크스페이스의 디렉터리를 조회합니다.
-# {cwd} 는 위임자가 서 있는 곳이고, --session 으로 잡은 워크스페이스는
-# 대개 다른 곳에 있습니다 — 그 경우 일치하는 워크스페이스가 없어
-# 살아있는 세션이 `crash` 로, 즉 재위임 대상으로 보고됩니다.
-# TARGET 은 `workspace:N` 형태의 ref 입니다. RPC 응답의 `.id` 는 UUID 라
-# 그쪽으로 매칭하면 영원히 빈손입니다 — ref 와 디렉터리를 함께 들고 있는
-# `workspace list --json` 에서 한 번에 읽습니다.
-PROBE_DIR="{cwd}"
-if [ -n "${TARGET:-}" ]; then
-  PROBE_DIR=$(CMUX_QUIET=1 cmux workspace list --json \
-    | jq -r --arg ref "$TARGET" '.workspaces[] | select(.ref == $ref) | .current_directory')
-  [ -n "$PROBE_DIR" ] || { echo "Error: '$TARGET' 의 디렉터리를 찾지 못했습니다"; exit 1; }
-fi
+**조회 대상은 경로가 아니라 워크스페이스입니다.** Step 5 의 `{cwd}` 기본값은
+`args.cwd || $(pwd)` 라 위임된 워크스페이스가 **위임자와 같은 디렉터리에**
+열립니다. 실측: 한 디렉터리에 워크스페이스 18개. 경로로 조회하면 그중 아무거나
+하나가 잡히고, 이벤트도 그 경로 전체에서 걸리므로 **이 프로브를 실행하는
+위임자 자신의 이벤트가 최신**이 되어 끝난 워커도 `working` 으로 보고됩니다.
+그래서 Step 5 가 박제한 워크스페이스 UUID 를 씁니다.
 
-eval "$(sh "${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/agent-liveness.sh" "$PROBE_DIR")"
-echo "$state"   # working | idle | waiting-input | crash | unknown
+```bash
+# 셸 상태는 Bash 호출 간에 유지되지 않으므로(RUNTIME_CONSTRAINTS.md §4)
+# Step 5a/5b 가 파일에 남긴 UUID 를 읽습니다. 제목으로 되찾는 길은 폴백입니다 —
+# `short_task` 30자 절단이 동명 워크스페이스를 만들 수 있고, `--session` 모드는
+# 그 제목의 워크스페이스를 아예 만들지 않습니다.
+# distribute 모드는 항목마다 한 파일이므로 전부 돕니다.
+LIVENESS="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/agent-liveness.sh"
+FOUND=0
+
+# glob 이 아니라 find 인 이유: 매치가 없을 때 zsh 는 `nomatch` 로 블록 전체를
+# 죽입니다(bash 는 리터럴을 넘겨 폴백으로 갑니다). 위임자 셸을 고를 수 없습니다.
+# `/tmp/` 의 후행 슬래시는 필수입니다 — macOS 에서 /tmp 는 private/tmp 심볼릭
+# 링크이고, find 는 기본적으로 링크를 따라가지 않아 무조건 0건이 나옵니다.
+for WS_FILE in $(find /tmp/ -maxdepth 1 -name 'cmux-delegate-{timestamp}-*.ws' 2>/dev/null); do
+  # 빈 파일은 워커가 아니라 조회 실패의 흔적이므로 FOUND 를 올리지 않습니다 —
+  # 올리면 폴백이 막히고, probe 는 빈 인자에 usage/rc=2 로 끝납니다.
+  [ -s "$WS_FILE" ] || { echo "$WS_FILE 비어 있음 — 건너뜀"; continue; }
+  FOUND=1
+  # 반복마다 초기화: eval 이 아무것도 내놓지 않으면 $state 가 직전 워커의 값을
+  # 그대로 들고 있어, 그 판정이 이 워커의 것으로 출력됩니다.
+  state=unknown
+  eval "$(sh "$LIVENESS" "$(cat "$WS_FILE")")"
+  echo "$WS_FILE $state"   # working | idle | waiting-input | crash | unknown
+done
+
+if [ "$FOUND" -eq 0 ]; then
+  WS_SEL=$(CMUX_QUIET=1 cmux workspace list --json \
+    | jq -r --arg t "[delegate] {short_task}" '.workspaces[] | select(.title == $t) | .ref' \
+    | head -1)
+  # 제목으로도 못 찾으면 경로로 떨어지되, 그 답은 ambiguous 를 달고 옵니다.
+  eval "$(sh "$LIVENESS" "${WS_SEL:-{cwd}}")"
+  echo "$state"
+  [ "${ambiguous:-1}" -gt 1 ] && echo "경고: 경로가 워크스페이스 $ambiguous 개와 일치 — 판정은 그중 하나에 대한 것"
+fi
 ```
+
+**보고서 층은 아직 이 축을 따라오지 못합니다.** `agent-report-path.sh` 는
+워크트리 경로로 해싱하므로 distribute 모드의 N개 워커가 보고서 파일 하나를
+공유합니다 (#903 선존). 즉 위 루프는 워커별로 살았는지를 답하지만, 아래
+보고서 검증은 여전히 1건분입니다.
 
 | `state` | 뜻 | 위임자가 할 일 |
 | --- | --- | --- |
 | `working` | 턴 진행 중 (툴 실행 또는 사고) | 기다린다. 재지시는 진행 중인 작업을 버린다 |
 | `idle` | 턴이 끝났는데 보고서가 없다 | 재지시하거나 인수한다. 가장 의심스러운 값 |
 | `waiting-input` | 모달 프롬프트에서 멈춤 | 사람이 그 워크스페이스에서 키를 누른다 |
-| `crash` | cmux 가 응답했고 해당 경로에 워크스페이스가 없음 | 재위임 |
-| `unknown` | 판정 불가 (`reason` 이 어느 쪽인지 말한다: `cmux-unavailable` · `workspace-lookup-failed` · `no-events-in-window`) | 부재를 사망으로 읽지 않는다. 화면을 직접 본다 |
+| `crash` | cmux 가 목록을 정상으로 답했고 그 셀렉터에 해당하는 워크스페이스가 없음 | 재위임 |
+| `unknown` | 판정 불가 (`reason` 이 어느 쪽인지 말한다: `cmux-unavailable` · `workspace-lookup-failed` · `workspace-ref-not-found` · `workspace-has-no-id` · `no-events-in-window`) | 부재를 사망으로 읽지 않는다. 화면을 직접 본다 |
 
 `crash` 와 `unknown/workspace-lookup-failed` 의 경계가 이 표에서 가장 비싼
 지점입니다. `crash` 의 처방은 재위임이므로, 조회가 실패했을 뿐인 경우를 여기로
@@ -483,8 +546,12 @@ echo "$state"   # working | idle | waiting-input | crash | unknown
 **커버리지 한계 (명기).** 위 판정은 워크스페이스 목록과 이벤트 스트림이
 보이는 것까지만 답합니다. 남는 구멍 셋:
 
-- 같은 디렉터리에 워크스페이스가 둘 이상이면 첫 번째 것을 기술합니다.
-  `ambiguous=N` 이 붙으므로 그때는 답을 그대로 믿지 않습니다.
+- `WS_SEL` 이 비어 경로로 떨어진 경우에만 열리는 구멍: 같은 디렉터리에
+  워크스페이스가 둘 이상이면 그중 첫 번째 것을 기술합니다. 위임 기본값이
+  위임자와 같은 디렉터리이므로 이 갈래는 드물지 않고, 실측 최대는 한 경로에
+  18개였습니다. `ambiguous=N` (N>1) 이 붙은 답은 "N개 중 하나에 대한 판정"
+  이므로, 재위임 같은 비가역 처방의 근거로 쓰지 말고 제목으로 ref 를 다시
+  찾거나 화면을 직접 봅니다. ref 로 조회하면 `ambiguous` 자체가 없습니다.
 - 이벤트 보존 창(4096건)을 벗어난 워커는 `unknown` 입니다. 바쁜 호스트에서는
   몇 분이면 벗어납니다.
 - 폴더 신뢰 다이얼로그의 `preview` 문구는 아직 채집되지 않아,
