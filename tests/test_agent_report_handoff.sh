@@ -121,16 +121,31 @@ assert_present \
   "정상적인 부분 완료"
 
 # ---------------------------------------------------------------------------
-# 4. Honest scope — detection only, not diagnosis (issue #842)
+# 4. Honest scope (issue #842, narrowed by #981)
+#
+# #842 could only DETECT silence, so it declared the cause out of scope
+# entirely. #981 classifies that cause, which retires the blanket disclaimer —
+# but not the honesty requirement behind it. What remains uncertain has to stay
+# on the page, so these assertions now pin the narrower limits rather than the
+# retired sentence: the two states the stream cannot separate, and the value
+# that means "no answer" instead of "dead".
 # ---------------------------------------------------------------------------
 
 assert_present \
-  "silence cause is declared out of scope" \
-  "silence 를 *탐지* 할 뿐 원인을 진단하지"
+  "tool-execution and thinking are declared indistinguishable" \
+  "툴 실행 중인지"
+
+assert_present \
+  "the reason PostToolUse cannot close that gap is stated" \
+  "agent.hook.PostToolUse\` 가 중계되지 않아"
 
 assert_present \
   "limitation restated in the Limitations section" \
-  "silence 는 *탐지* 만 가능하고"
+  "툴 실행 중과 사고 중은 구분 불가"
+
+assert_present \
+  "a failed lookup is not allowed to read as death" \
+  "부재를 사망으로 읽지 않는다"
 
 # ---------------------------------------------------------------------------
 # 5. Error-handling rows for the three failure shapes
