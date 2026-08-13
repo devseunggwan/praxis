@@ -602,6 +602,9 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
             "helper-executable",
         ),
         "debt": ("external-cli-wrapper",),
+        # Skill(...) since #978: the approved merge chains into
+        # worktree-merge-cleanup, which owns the merge call itself.
+        "merge-briefing": ("Skill(...)", "external-cli-wrapper"),
         "recover-sessions": (
             "AskUserQuestion",
             "external-cli-wrapper",
