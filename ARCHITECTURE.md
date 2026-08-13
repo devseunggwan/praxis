@@ -49,6 +49,13 @@ Skills that dispatch external CLI workers (`cmux-delegate`) can route tasks to m
 
 All providers share the same completion sentinel: `; echo '===WORKER_DONE===' >> $LOG` appended after the CLI exits.
 
+The `claude` row's stdin column carries a precondition the command does not state:
+`claude --help` says the trust dialog is skipped "via `-p`, or when stdout is not a
+TTY". Neither is guaranteed by the row itself, so **a caller that runs it with
+stdout inherited from a terminal loses the exemption, and the piped prompt is
+consumed exactly as in the interactive case below.** Using the stdin column
+obliges the caller to supply one of the two — redirect stdout, or add `-p`.
+
 **Interactive launches do not use the stdin column (#981).** The table above is the
 *non-interactive* contract, and it is safe precisely because it is non-interactive:
 Claude Code skips its workspace trust dialog when stdout is not a TTY. A launch into

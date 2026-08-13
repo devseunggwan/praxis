@@ -172,4 +172,15 @@ assert_in_arch \
   "codex is unverified here too" \
   "Unverified — not probed"
 
+# The non-interactive row is safe only under a condition it does not state. Left
+# implicit, a caller reads the row as self-sufficient and reintroduces #981 on
+# the path the table calls safe.
+assert_in_arch \
+  "the stdin column names its precondition" \
+  "carries a precondition the command does not state"
+
+assert_in_arch \
+  "and says who has to satisfy it" \
+  "obliges the caller to supply one of the two"
+
 assert_lib_summary
