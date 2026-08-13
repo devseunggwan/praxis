@@ -223,9 +223,18 @@ not need to be set.
 
 Change working directory to the selected worktree, then invoke the
 companion. `{{ARGUMENTS}}` passes any flags (e.g. `--model opus`,
-`--wait`, `--background`) through unchanged. One exception: a round
-re-entered from 5j drops `--background`, because a re-backgrounded round
-breaks that gate's synchronous loop.
+`--wait`) through unchanged.
+
+**Always run this via `Bash(..., run_in_background: true)`.** A review
+routinely runs past a foreground tool timeout, and a timed-out call kills
+it mid-run: the round then ends with no findings, which is
+indistinguishable from a clean review. There is no flag that avoids this —
+`review` has no background path of its own. `handleReview` →
+`handleReviewCommand` → `runForegroundCommand` is unconditional, and the
+`detached: true` worker (`spawnDetachedTaskWorker`) is reachable only from
+`task --background`. The review parser lists `background` in its
+`booleanOptions` and then never reads it, so passing that flag changes
+nothing at all.
 
 ```bash
 cd {selected_path}
@@ -235,10 +244,27 @@ node "{resolved_companion_path}" review "{{ARGUMENTS}}"
 Return the script's stdout **verbatim** — do not paraphrase, summarize, or
 add commentary. This matches `/codex:review`'s contract.
 
-If `{{ARGUMENTS}}` includes `--background`, run via `Bash(..., run_in_background: true)`
-and tell the user: "Codex review started in the background. Check `/codex:status` for progress."
-Backgrounding defers Step 5, it does not skip it. Which path the findings
-take depends on where the session is when the run completes:
+##### Liveness — `ps` and log mtime, never `status` or `elapsed`
+
+A killed review leaves its job file reading `status: "running"` with a dead
+pid: the terminal write in `runTrackedJob` never executes, and `elapsed` is
+computed from `startedAt` against the wall clock, so it keeps climbing
+after the process is gone. Both fields report a dead job as a healthy one.
+Judge liveness on two independent signals instead:
+
+```bash
+ps -p {pid} -o pid=,etime=,stat=          # empty output → process is gone
+stat -f '%Sm' -t '%H:%M:%S' {job-id}.log  # log older than a few minutes → stalled
+```
+
+`status: "running"` with no matching process is a **stale** job, not a
+progressing one. Cancel it (`node "{resolved_companion_path}" cancel
+{job-id}`) and re-launch; polling it longer never resolves.
+
+##### When the review completes
+
+Step 5 runs once the findings are in hand. Which path they take depends on
+where the session is at that moment:
 
 - **User is back in an interactive foreground turn** — collect the findings
   and enter Step 5 from the top (interactivity check → 5f → …); the
@@ -247,8 +273,8 @@ take depends on where the session is when the run completes:
   ended) — the interactivity check fails and the findings take the
   non-interactive path: verified, applied to nothing, deferred.
 
-Either way, never apply a background review's findings from the completion
-notification alone.
+Either way, never apply a review's findings from the completion notification
+alone.
 
 ### Step 5: Apply Findings — Premise Verification Gate
 
