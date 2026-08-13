@@ -286,9 +286,14 @@ Report results in Korean.
 PROMPT_FILE="/tmp/cmux-delegate-{timestamp}.md"
 SCRIPT_FILE="/tmp/cmux-delegate-{timestamp}.sh"
 
-# argv 로 넘길 수 있는 상한. ARG_MAX 는 실측 1048576 이고 환경변수도 그 예산을
-# 나눠 쓰므로 넉넉히 아래로 잡습니다. 실제 위임 프롬프트는 5~16KB 였습니다.
-ARGV_LIMIT=262144
+# argv 로 넘길 수 있는 상한. 구속하는 것은 총 ARG_MAX 가 아니라 **인자 하나**의
+# 상한입니다 — Linux 는 MAX_ARG_STRLEN = 32 페이지로 문자열 하나를 자릅니다
+# (execve(2), 2.6.25+). 4KiB 페이지에서 131072 이므로 고정 리터럴 262144 는
+# 그 호스트에서 조용히 넘어섭니다. praxis 는 host-neutral 이라 값을 박지 않고
+# 페이지 크기에서 도출하고, 한 페이지를 여유로 뺍니다(NUL·포인터 부기 몫).
+# 실제 위임 프롬프트는 5~16KB 라 어느 호스트에서도 여유가 큽니다.
+_PAGE=$(getconf PAGE_SIZE 2>/dev/null || echo 4096)
+ARGV_LIMIT=$(( 32 * _PAGE - _PAGE ))
 
 # Cleanup: .sh만 삭제. .md는 보존 (다른 워크스페이스가 참조할 수 있음)
 trap 'rm -f "$SCRIPT_FILE"' EXIT

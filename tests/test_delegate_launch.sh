@@ -36,8 +36,24 @@ assert_present \
   "the size guard names the limit it enforces" \
   'if [ "$(wc -c < "$PROMPT_FILE")" -lt "$ARGV_LIMIT" ]; then'
 
+# The policy, not the number. A literal would encode this host's page size into a
+# file that runs on every host — which is the defect the derivation replaces:
+# Linux caps a single argument at MAX_ARG_STRLEN = 32 pages, so 262144 was under
+# the cap here (16KiB pages) and over it on any 4KiB-page host.
 assert_present \
-  "the limit is defined, not implied" \
+  "the limit is derived from the platform page size" \
+  "_PAGE=\$(getconf PAGE_SIZE 2>/dev/null || echo 4096)"
+
+assert_present \
+  "the derivation keeps a page of headroom below the per-string cap" \
+  "ARGV_LIMIT=\$(( 32 * _PAGE - _PAGE ))"
+
+assert_present \
+  "the binding constraint is named so the next editor does not re-flatten it" \
+  "MAX_ARG_STRLEN = 32"
+
+assert_absent \
+  "no host-specific literal survives" \
   "ARGV_LIMIT=262144"
 
 # Falling back to the pipe is the defect's own path. It may happen — an
