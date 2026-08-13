@@ -45,8 +45,19 @@ assert_present \
   "_PAGE=\$(getconf PAGE_SIZE 2>/dev/null || echo 4096)"
 
 assert_present \
-  "the derivation keeps a page of headroom below the per-string cap" \
-  "ARGV_LIMIT=\$(( 32 * _PAGE - _PAGE ))"
+  "the per-string cap keeps a page of headroom" \
+  "_PER_STRING=\$(( 32 * _PAGE - _PAGE ))"
+
+# Two ceilings bind, and only the smaller one matters. Modelling the per-string
+# cap alone misses a host whose total ARG_MAX blows first — POSIX floors it at
+# 4096, far under any per-string figure.
+assert_present \
+  "the total budget subtracts the inherited environment it must share with" \
+  "_TOTAL_BUDGET=\$(( _ARG_MAX - _ENV_BYTES - 65536 ))"
+
+assert_present \
+  "the smaller ceiling wins" \
+  "ARGV_LIMIT=\$(( _PER_STRING < _TOTAL_BUDGET ? _PER_STRING : _TOTAL_BUDGET ))"
 
 assert_present \
   "the binding constraint is named so the next editor does not re-flatten it" \

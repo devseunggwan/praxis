@@ -292,8 +292,17 @@ SCRIPT_FILE="/tmp/cmux-delegate-{timestamp}.sh"
 # 그 호스트에서 조용히 넘어섭니다. praxis 는 host-neutral 이라 값을 박지 않고
 # 페이지 크기에서 도출하고, 한 페이지를 여유로 뺍니다(NUL·포인터 부기 몫).
 # 실제 위임 프롬프트는 5~16KB 라 어느 호스트에서도 여유가 큽니다.
+#
+# 상한은 둘이고 더 작은 쪽이 구속합니다. 하나는 위의 인자별 상한, 다른 하나는
+# 인자와 환경변수가 함께 쓰는 총 ARG_MAX 예산입니다 — POSIX 최소값이 4096 이라
+# 인자별 상한만 보면 총량이 먼저 터지는 호스트를 놓칩니다. 환경변수는 상속되므로
+# 실측해서 빼고, 나머지 옵션 몫으로 64KiB 를 더 남깁니다.
 _PAGE=$(getconf PAGE_SIZE 2>/dev/null || echo 4096)
-ARGV_LIMIT=$(( 32 * _PAGE - _PAGE ))
+_ARG_MAX=$(getconf ARG_MAX 2>/dev/null || echo 4096)
+_ENV_BYTES=$(env | wc -c)
+_PER_STRING=$(( 32 * _PAGE - _PAGE ))
+_TOTAL_BUDGET=$(( _ARG_MAX - _ENV_BYTES - 65536 ))
+ARGV_LIMIT=$(( _PER_STRING < _TOTAL_BUDGET ? _PER_STRING : _TOTAL_BUDGET ))
 
 # Cleanup: .sh만 삭제. .md는 보존 (다른 워크스페이스가 참조할 수 있음)
 trap 'rm -f "$SCRIPT_FILE"' EXIT
