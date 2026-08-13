@@ -86,6 +86,13 @@ Commands are tokenized with `shlex.shlex(..., posix=True, punctuation_chars=";|&
   `}`) are peeled from the start of each segment so `if true; then git push`,
   `for x in 1; do kubectl apply`, and `if git push; then ...` all reach the
   real executable.
+- Heredoc bodies are blanked before that split (issue #985): the body is data,
+  so `git commit -m "$(cat <<'EOF' … EOF)"` no longer surfaces the categories
+  its *message text* happens to name. The operator line and everything after
+  the terminator are still scanned.
+- `--help` / `-h` invocations surface nothing — `gh pr merge --help` prints
+  usage and triggers no remote action (issue #985). A help flag sitting in a
+  value position (`--subject -h`) is a value, not a help request.
 - Newlines in the raw command are treated as command separators so multi-line
   Bash blocks (`echo prep\ngit push origin main` across two lines) get the
   second line scanned as a new segment.

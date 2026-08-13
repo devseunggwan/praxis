@@ -124,7 +124,7 @@ by probing the sibling on identical inputs (all three match this hook exactly):
 | --- | --- | --- |
 | `result=$(git commit -m x)` (commit inside an assignment's command substitution) | **not detected** | a commit whose stdout is captured into a shell variable is missed (false-negative) — even the blocking sibling misses it |
 | `git commit --only <path>` / `git commit -- <pathspec>` / `git commit <path>` (partial commit) | detected, but **all** staged additions are listed | additions the pathspec excludes are over-surfaced (advisory noise) |
-| `cat > f <<'EOF'` … `git commit` … `EOF` (commit literal inside a heredoc body) | detected as a command | a `git commit` that is only heredoc *data* triggers a false-surface |
+| `cat > f <<'EOF'` … `git commit` … `EOF` (commit literal inside a heredoc body) | **not detected** (fixed in #985) | heredoc bodies are blanked in `_hook_utils.safe_tokenize`, so data no longer reads as a command — this row is kept as the record of what changed |
 
 These are accepted boundaries, not per-hook defects: the detection idiom is
 shared across the git-commit hook family, so fixing them belongs in
@@ -167,5 +167,5 @@ transcript).
 The documented boundaries in "Limitations" / "Detection boundaries" are pinned
 by regression tests: single-call create+add+commit is silent; `--only` partial
 commit over-lists the excluded addition; a `git commit` literal in a heredoc
-body false-surfaces; `result=$(git commit)` is not detected. These pin current
+body is silent (#985); `result=$(git commit)` is not detected. These pin current
 behavior so a future tokenizer change surfaces here.

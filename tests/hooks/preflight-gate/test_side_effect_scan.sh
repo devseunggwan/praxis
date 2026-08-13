@@ -258,6 +258,15 @@ else
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("non-Bash tool passthrough")
 fi
 
+# --- #985: help output and heredoc bodies trigger nothing --------------------
+run_case "gh pr merge --help (usage only)" pass "gh pr merge --help"
+run_case "gh pr merge -h (usage only)"     pass "gh pr merge -h"
+run_case "gh pr create --help (usage only)" pass "gh pr create --help"
+run_case "commit message quoting a merge"  pass $'git commit -m "$(cat <<\'EOF\'\ngh pr merge is only quoted here\nEOF\n)"'
+run_case "-h as a --subject value"         ask  "gh pr merge 985 --squash --subject -h"
+run_case "merge after heredoc terminator"  ask  $'cat <<\'EOF\'\nbody\nEOF\ngh pr merge 985 --squash'
+
+
 # --- malformed JSON ---------------------------------------------------------
 bad_out=$(echo 'not json' | "$HOOK" 2>/dev/null)
 bad_rc=$?

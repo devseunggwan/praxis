@@ -453,8 +453,10 @@ git -C "$HEREREPO" add seed.txt
 git -C "$HEREREPO" -c commit.gpgsign=false commit -q -m seed
 printf data > "$HEREREPO/staged.txt"
 git -C "$HEREREPO" add staged.txt
-run_dir_case "git commit literal in heredoc body false-surfaces (boundary)" \
-  "surface:staged.txt" "$HEREREPO" \
+# Fixed in #985: the shared tokenizer blanks heredoc bodies, so a `git commit`
+# that is only heredoc data no longer reads as a commit.
+run_dir_case "git commit literal in heredoc body is silent (#985)" \
+  "silent" "$HEREREPO" \
   "$(printf 'cat > guide.md <<%sEOF%s\ngit commit -m in-body\nEOF' "'" "'")" \
   "$TRANSCRIPT_EMPTY"
 rm -rf "$HEREREPO" 2>/dev/null || true

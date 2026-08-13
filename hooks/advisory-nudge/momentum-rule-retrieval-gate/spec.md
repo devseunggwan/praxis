@@ -323,6 +323,18 @@ gh global flags (`-R/--repo`, `--hostname`, `--color`) are walked past before
 checking the subcommand so that `gh -R owner/repo pr merge` is detected
 correctly.
 
+Two argv shapes match `gh pr merge` textually and merge nothing, so neither
+counts as a trigger (issue #985):
+
+- **A help invocation** — `--help` / `-h` prints usage and exits. Demanding a
+  merge briefing for it blocks the command an agent runs precisely to get the
+  merge right. `is_help_invocation` skips value-flag values, so `--subject -h`
+  stays a subject and still triggers.
+- **A heredoc body** — `safe_tokenize` blanks every body line before the
+  per-line split, so a commit message that merely quotes `gh pr merge` is no
+  longer read as one. The operator line and everything after the terminator are
+  untouched, which is what keeps a real merge on a later line firing.
+
 `git push` force detection scans all tokens after the `push` subcommand for
 `--force`, `-f`, and `--force-with-lease` (including `--force-with-lease=<ref>`
 prefix-matched form).
