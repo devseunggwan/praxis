@@ -222,8 +222,11 @@ not need to be set.
 #### 4b. Run the review
 
 Change working directory to the selected worktree, then invoke the
-companion. `{{ARGUMENTS}}` passes any flags (e.g. `--model opus`,
-`--wait`) through unchanged.
+companion. `{{ARGUMENTS}}` passes any flags through unchanged. The review
+path reads `--model`, `--base`, `--scope`, and `--json`. It also *accepts*
+`--wait` and `--background` — both sit in its `booleanOptions` and are then
+never read, so neither changes anything; `options.wait` is consumed only by
+`status`, `options.background` only by `task`.
 
 **Always run this via `Bash(..., run_in_background: true)`.** A review
 routinely runs past a foreground tool timeout, and a timed-out call kills
@@ -232,9 +235,7 @@ indistinguishable from a clean review. There is no flag that avoids this —
 `review` has no background path of its own. `handleReview` →
 `handleReviewCommand` → `runForegroundCommand` is unconditional, and the
 `detached: true` worker (`spawnDetachedTaskWorker`) is reachable only from
-`task --background`. The review parser lists `background` in its
-`booleanOptions` and then never reads it, so passing that flag changes
-nothing at all.
+`task --background`.
 
 ```bash
 cd {selected_path}
