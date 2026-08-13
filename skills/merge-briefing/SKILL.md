@@ -64,7 +64,7 @@ gh pr checks <N> --repo <owner>/<repo>
 
 # 2 — conversation timeline + review bodies + mergeability + pushed HEAD
 gh pr view <N> --repo <owner>/<repo> \
-  --json mergeable,mergeStateStatus,headRefOid,reviews,comments
+  --json mergeable,mergeStateStatus,isDraft,headRefOid,reviews,comments
 ```
 
 ```bash
@@ -112,6 +112,25 @@ positive control the negative claim rests on.
 
 If CI is pending or failing, **stop here** — do not ask yet. A briefing whose
 verification rows are still moving is asking the user to approve a guess.
+
+**The merge state is an allowlist, not a "not obviously broken" check.** Ask
+only when `mergeable` is `MERGEABLE` **and** `mergeStateStatus` is `CLEAN` or
+`HAS_HOOKS` — those two are the only values that mean mergeable with a passing
+commit status. Every other value stops the ask and names itself in the briefing:
+
+| `mergeStateStatus` | What it means | Ask? |
+| --- | --- | --- |
+| `CLEAN` | Mergeable and passing commit status | Yes |
+| `HAS_HOOKS` | Mergeable, passing, pre-receive hooks present | Yes |
+| `UNSTABLE` | Mergeable with a **non-passing** commit status | No — that is the failing CI above |
+| `BLOCKED` | Merge is blocked (protection rule, required review) | No |
+| `BEHIND` | Head ref is out of date | No — rebase first |
+| `DIRTY` | Merge commit cannot be cleanly created | No — conflict |
+| `UNKNOWN` | State cannot currently be determined | No — re-poll |
+
+Draft status is **not** in this enum — it is the separate `isDraft` field, so a
+draft PR can report `CLEAN`. Add `isDraft` to the `--json` list and treat a
+draft as not ready regardless of its merge state.
 
 ### Step 2: Grade every finding on all three surfaces
 
