@@ -121,16 +121,75 @@ assert_present \
   "정상적인 부분 완료"
 
 # ---------------------------------------------------------------------------
-# 4. Honest scope — detection only, not diagnosis (issue #842)
+# 4. Honest scope (issue #842, narrowed by #981)
+#
+# #842 could only DETECT silence, so it declared the cause out of scope
+# entirely. #981 classifies that cause, which retires the blanket disclaimer —
+# but not the honesty requirement behind it. What remains uncertain has to stay
+# on the page, so these assertions now pin the narrower limits rather than the
+# retired sentence: the two states the stream cannot separate, and the value
+# that means "no answer" instead of "dead".
 # ---------------------------------------------------------------------------
 
 assert_present \
-  "silence cause is declared out of scope" \
-  "silence 를 *탐지* 할 뿐 원인을 진단하지"
+  "tool-execution and thinking are declared indistinguishable" \
+  "툴 실행 중인지"
+
+assert_present \
+  "the reason PostToolUse cannot close that gap is stated" \
+  "agent.hook.PostToolUse\` 가 중계되지 않아"
 
 assert_present \
   "limitation restated in the Limitations section" \
-  "silence 는 *탐지* 만 가능하고"
+  "툴 실행 중과 사고 중은 구분 불가"
+
+assert_present \
+  "a failed lookup is not allowed to read as death" \
+  "부재를 사망으로 읽지 않는다"
+
+# The selector is stashed at Step 5 rather than re-derived at Step 7, because
+# neither re-derivation path is sound: `short_task` is truncated to 30 chars so
+# titles collide, and `--session` never creates a titled workspace at all.
+# Pinned here because both halves live in one file and a title-lookup rewrite
+# would silently reopen the gap.
+
+assert_present \
+  "Step 7 reads the selectors Step 5 stashed" \
+  "find /tmp/ -maxdepth 1 -name 'cmux-delegate-{timestamp}-*.ws'"
+
+assert_present \
+  "the new-session path stashes one file per workspace" \
+  'echo "$WS_ID" > "/tmp/cmux-delegate-{timestamp}-${WS_REF#workspace:}.ws"'
+
+assert_present \
+  "the existing-session path stashes it the same way" \
+  'echo "$WS_ID" > "/tmp/cmux-delegate-{timestamp}-${TARGET#workspace:}.ws"'
+
+# A failed lookup still lets `head` succeed, so redirecting the pipeline itself
+# leaves a zero-byte file — which the consumer would read as "a worker exists"
+# and then probe with an empty argument, getting usage/rc=2 and no state.
+assert_present \
+  "the stash is gated on a non-empty lookup" \
+  'if [ -n "$WS_ID" ]; then'
+
+assert_present \
+  "the consumer skips an empty stash instead of counting it" \
+  '[ -s "$WS_FILE" ] || { echo "$WS_FILE 비어 있음 — 건너뜀"; continue; }'
+
+assert_present \
+  "state is reset per iteration so one worker cannot inherit another's verdict" \
+  "직전 워커의 값"
+
+# `/tmp` is a symlink to `private/tmp` on macOS, so a bare `find /tmp` returns
+# nothing whether or not the files exist — a dead oracle that reads as "no
+# workers to check". The trailing slash is what makes find follow it.
+assert_present \
+  "the trailing slash that keeps find from silently finding nothing is explained" \
+  "find 는 기본적으로 링크를 따라가지 않아"
+
+assert_present \
+  "the reason the title lookup is only a fallback is stated" \
+  "30자 절단이 동명 워크스페이스를"
 
 # ---------------------------------------------------------------------------
 # 5. Error-handling rows for the three failure shapes
