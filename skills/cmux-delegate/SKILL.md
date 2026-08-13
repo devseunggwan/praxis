@@ -14,6 +14,9 @@ runtime-verified-note: "cmux 0.64.22 — agent.hook.PostToolUse is not relayed a
 
 **Core principles:**
 - 프롬프트는 반드시 파일 기반 전달. 인라인 `-p` 절대 사용 금지 (shell escaping 문제 회피).
+  금지 대상은 **프롬프트 텍스트를 명령문에 박는 것**입니다. 파일에서 읽어
+  `"$(cat "$PROMPT_FILE")"` 한 겹으로 넘기는 것은 파일 기반 전달에 해당하며,
+  `gemini` 분기가 처음부터 그 형태였습니다.
 - 유저가 세션명/계정을 명시하면 글자 그대로 따른다. 자의적 재해석 금지.
 
 ## When to Use
@@ -283,16 +286,32 @@ Report results in Korean.
 PROMPT_FILE="/tmp/cmux-delegate-{timestamp}.md"
 SCRIPT_FILE="/tmp/cmux-delegate-{timestamp}.sh"
 
+# argv 로 넘길 수 있는 상한. ARG_MAX 는 실측 1048576 이고 환경변수도 그 예산을
+# 나눠 쓰므로 넉넉히 아래로 잡습니다. 실제 위임 프롬프트는 5~16KB 였습니다.
+ARGV_LIMIT=262144
+
 # Cleanup: .sh만 삭제. .md는 보존 (다른 워크스페이스가 참조할 수 있음)
 trap 'rm -f "$SCRIPT_FILE"' EXIT
 
 # Provider-specific invocation (from project ARCHITECTURE.md Provider CLI Spec)
 case "{provider}" in
   claude)
-    cat "$PROMPT_FILE" | {claude_env} claude \
-      --model {sub_model} \
-      --permission-mode {permission_mode} \
-      {budget_flag}
+    # 프롬프트는 argv 로 넘깁니다. 파이프로 넘기면 신뢰 다이얼로그가 그걸
+    # 먹어버리고 워커는 빈 REPL 로 떨어집니다 (#981) — 아래 설명 참조.
+    if [ "$(wc -c < "$PROMPT_FILE")" -lt "$ARGV_LIMIT" ]; then
+      {claude_env} claude \
+        --model {sub_model} \
+        --permission-mode {permission_mode} \
+        {budget_flag} \
+        "$(cat "$PROMPT_FILE")"
+    else
+      echo "경고: 프롬프트가 ${ARGV_LIMIT}바이트를 넘어 stdin 으로 넘깁니다 —" >&2
+      echo "      신뢰되지 않은 경로라면 프롬프트가 유실됩니다 (#981)" >&2
+      cat "$PROMPT_FILE" | {claude_env} claude \
+        --model {sub_model} \
+        --permission-mode {permission_mode} \
+        {budget_flag}
+    fi
     ;;
   codex)
     cat "$PROMPT_FILE" | codex exec \
@@ -313,6 +332,24 @@ cmux notify --title "cmux-delegate" --body "Task completed: {short_task}" 2>/dev
 `{claude_env}` is substituted with `CLAUDE_CONFIG_DIR=~/.{account}` when account is specified (claude provider only).
 `{budget_flag}` is substituted with `--max-budget-usd {budget}` when budget is specified (claude provider only — codex/gemini do not support budget limits).
 
+**왜 claude 분기만 argv 인가 (#981).** Claude Code 는 신뢰되지 않은 디렉터리에서
+시작할 때 워크스페이스 신뢰 다이얼로그를 띄우고, **그 다이얼로그가 파이프된 stdin 을
+소비합니다.** 위임 프롬프트가 stdin 으로 들어오면 통째로 사라지고, 워커는 빈 대화형
+REPL 로 떨어져 아무 일도 하지 않습니다 — 위임자에게는 그저 보고서가 없는 것으로만
+보입니다. 위임의 주 사용처가 **새로 만든 worktree** 라 이 경로가 드물지 않습니다.
+
+argv 로 넘기면 다이얼로그는 여전히 뜨지만 프롬프트를 먹지 못하므로, 사람이 키를
+누르는 순간 그대로 진행됩니다. 조용한 유실이 **보이는 대기**로 바뀌고, 그 대기는
+Step 7 의 liveness 판정이 `waiting-input` 으로 잡습니다.
+
+`claude --help` 는 이 다이얼로그가 `-p` 또는 **stdout 이 TTY 가 아닐 때** 건너뛰어진다고
+명시합니다. `ARCHITECTURE.md` 의 비대화형 행이 안전한 이유가 그것이고, cmux 워크스페이스는
+진짜 터미널이라 그 면제를 받지 못합니다.
+
+`gemini` 분기는 이미 `-p "$(cat …)"` 인자 형태라 해당 없습니다. `codex` 분기는
+`cat … | codex exec` 로 같은 파이프 모양이지만, **codex 에 신뢰 프롬프트가 있는지는
+확인하지 않았습니다** — 미확인이므로 이 이슈에서 건드리지 않습니다.
+
 **이 파일도 `Write` 도구로 생성합니다.** 단, 파일 내용 자체에 shell 변수(`$PROMPT_FILE` 등)가 포함되므로 이는 의도된 것입니다 — 중요한 것은 사용자 프롬프트가 이 스크립트를 거치지 않는다는 점입니다.
 
 **CRITICAL — trap에서 .md 파일을 삭제하지 않습니다.** 워크스페이스가 닫힐 때 trap이 실행되는데, 다른 워크스페이스가 동일 .md 파일을 참조할 수 있기 때문입니다 (distribute 모드, 재시도 등).
@@ -322,6 +359,16 @@ cmux notify --title "cmux-delegate" --body "Task completed: {short_task}" 2>/dev
 `--session`이 지정되지 않은 경우:
 
 ```bash
+# 기동 전 신뢰 상태를 읽어, 워커가 키 입력을 기다릴 것이면 미리 말합니다.
+# 프롬프트 자체는 argv 로 가므로 유실되지 않습니다 (Step 4) — 이건 대기를
+# 예고하는 것이지 막는 것이 아닙니다.
+eval "$(sh "${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/cwd-trust.sh" "{cwd}")"
+if [ "$trusted" = no ]; then
+  echo "주의: {cwd} 는 신뢰되지 않은 경로입니다 (${reason}) — 워커가 신뢰"
+  echo "      다이얼로그에서 멈춥니다. cmux 탭에서 한 번 키를 눌러 주세요."
+  [ -n "${ancestor:-}" ] && echo "      상위 ${ancestor} 는 신뢰됨 (상속 여부는 미확인)"
+fi
+
 WS_RAW=$(cmux new-workspace \
   --name "[delegate] {short_task}" \
   --cwd "{cwd}" \
