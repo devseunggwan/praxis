@@ -242,7 +242,10 @@ cd {selected_path}
 node "{resolved_companion_path}" review "{{ARGUMENTS}}"
 ```
 
-Return the script's stdout **verbatim** — do not paraphrase, summarize, or
+A backgrounded call hands back a task id, not the review, so there is
+nothing to return yet — say so in one line: "Codex review started in the
+background. Check `/codex:status` for progress." Once the run completes,
+return the script's stdout **verbatim** — do not paraphrase, summarize, or
 add commentary. This matches `/codex:review`'s contract.
 
 ##### Liveness — `ps` and log mtime, never `status` or `elapsed`
