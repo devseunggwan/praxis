@@ -71,6 +71,139 @@ WRAPPER_OPTS_WITH_ARG = {
 }
 
 
+def _heredoc_starts_on_line(line: str) -> list[tuple[str, bool]]:
+    """`(delimiter, dash_form)` for every heredoc opened on one physical line.
+
+    Scans character-wise rather than by regex because the three constructs that
+    must NOT be read as a heredoc all look like `<<` to a pattern match: a
+    here-string (`<<<`), an arithmetic left-shift (`$((1 << 3))`), and a literal
+    `<<` inside quotes. Order is preserved — bash reads the bodies of
+    `cat <<A <<B` in the order the operators appear.
+
+    A command substitution re-opens shell parsing even inside double quotes, so
+    `-m "$(cat <<'EOF'`  — the exact shape of a commit-message payload — really
+    does open a heredoc. `subst` stacks the suspended quote state so that one is
+    seen while a plain `"…<<EOF…"` string stays inert.
+    """
+    out: list[tuple[str, bool]] = []
+    i, n = 0, len(line)
+    quote = ""
+    arith = 0
+    subst: list[str] = []
+    while i < n:
+        ch = line[i]
+        if quote == '"' and line.startswith("$(", i) and not line.startswith("$((", i):
+            subst.append(quote)
+            quote = ""
+            i += 2
+            continue
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            i += 1
+            continue
+        if ch == "\\":
+            i += 2
+            continue
+        if line.startswith("$((", i):
+            arith += 1
+            i += 3
+            continue
+        if arith and line.startswith("))", i):
+            arith -= 1
+            i += 2
+            continue
+        if ch == ")" and subst and not arith:
+            quote = subst.pop()
+            i += 1
+            continue
+        if line.startswith("<<", i) and not arith:
+            if line.startswith("<<<", i):  # here-string: no body follows
+                i += 3
+                continue
+            j = i + 2
+            dash = j < n and line[j] == "-"
+            if dash:
+                j += 1
+            while j < n and line[j] in " \t":
+                j += 1
+            delim, j = _read_heredoc_delim(line, j)
+            if delim:
+                out.append((delim, dash))
+                i = j
+                continue
+            i += 2
+            continue
+        i += 1
+    return out
+
+
+_HEREDOC_WORD_CHARS = re.compile(r"[A-Za-z0-9_.\-/]")
+
+
+def _read_heredoc_delim(line: str, j: int) -> tuple[str, int]:
+    """Delimiter word starting at `j`, plus the index just past it.
+
+    `<<EOF`, `<<'EOF'`, `<<"EOF"`, and `<<\\EOF` all name the same delimiter —
+    the quoting only decides whether the body is expanded, which is irrelevant
+    here. Returns `("", j)` when no delimiter word is present, which is what
+    keeps `1 << 3` from being read as a heredoc named `3`.
+    """
+    n = len(line)
+    if j < n and line[j] in "'\"":
+        q = line[j]
+        end = line.find(q, j + 1)
+        return (line[j + 1:end], end + 1) if end != -1 else ("", j)
+    out: list[str] = []
+    while j < n:
+        if line[j] == "\\" and j + 1 < n:
+            out.append(line[j + 1])
+            j += 2
+            continue
+        if not _HEREDOC_WORD_CHARS.match(line[j]):
+            break
+        out.append(line[j])
+        j += 1
+    return "".join(out), j
+
+
+def strip_heredoc_bodies(command: str) -> str:
+    """Blank out every heredoc body line, keeping the line count intact.
+
+    A heredoc body is data, not script: `git commit -m "$(cat <<'EOF' … EOF)"`
+    puts arbitrary prose where the per-line tokenizer expects commands, so a
+    commit message that merely *quotes* `gh pr merge` used to be tokenized as a
+    merge invocation and blocked by every merge gate (issue #985). Bodies are
+    replaced by empty lines rather than dropped so the operator line and the
+    commands after the terminator keep their positions.
+
+    An unterminated heredoc suppresses everything to the end of the command,
+    which is what bash does with it too.
+    """
+    if "<<" not in command:
+        return command
+    out: list[str] = []
+    pending: list[tuple[str, bool]] = []
+    for line in command.split("\n"):
+        if pending:
+            delim, dash = pending[0]
+            probe = line.lstrip("\t") if dash else line
+            if probe.rstrip() == delim:
+                del pending[0]
+            out.append("")
+            continue
+        out.append(line)
+        pending.extend(_heredoc_starts_on_line(line))
+    return "\n".join(out)
+
+
 def safe_tokenize(command: str) -> list[str]:
     """Tokenize with shell operators and line breaks split into tokens.
 
@@ -85,6 +218,10 @@ def safe_tokenize(command: str) -> list[str]:
     synthetic `;` between line tokens so iter_command_starts sees the break.
     Lines that fail to parse (unmatched quote, runaway heredoc, etc.) are
     skipped — better a silent pass than a crashed hook.
+
+    Heredoc bodies are blanked out first (`strip_heredoc_bodies`): they hold
+    data, not commands, so without that pass a commit message quoting a gated
+    command is tokenized as that command (issue #985).
 
     A bash line continuation (a `\\` immediately followed by a newline) is
     *not* a command separator — it splices the two physical lines into one
@@ -111,6 +248,7 @@ def safe_tokenize(command: str) -> list[str]:
     # backslash followed by a real newline separator, so only collapse an
     # odd-length run of trailing backslashes.
     command = re.sub(r"(?<!\\)((?:\\\\)*)\\\n", r"\1 ", command)
+    command = strip_heredoc_bodies(command)
     lines = [ln for ln in command.split("\n") if ln.strip()]
     if not lines:
         return []

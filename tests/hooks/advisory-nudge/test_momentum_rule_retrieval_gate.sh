@@ -495,6 +495,44 @@ run_case "compound_merge_and_dispatch_dispatch_surface" \
   "" \
   'gh pr merge --squash && cmux new-workspace --command "claude -p next"'
 
+# --- issue #985: non-merge commands that only look like a merge -------------
+#
+# Both families used to reach the briefing gate, which then demanded a merge
+# briefing for a command that merges nothing. The must-still-fire cases at the
+# end are what keeps the fix from turning into a bypass.
+
+run_case "heredoc_body_quoting_a_merge_is_not_a_merge" \
+  "silent" \
+  "" \
+  "$(printf 'git commit -m "$(cat <<'EOF'\ngh pr merge is only quoted here\nEOF\n)"')"
+
+run_case "heredoc_unquoted_delimiter_body_is_not_a_merge" \
+  "silent" \
+  "" \
+  "$(printf 'cat <<EOF\ngh pr merge 985\nEOF')"
+
+run_case "heredoc_dash_form_body_is_not_a_merge" \
+  "silent" \
+  "" \
+  "$(printf 'cat <<-EOF\n\tgh pr merge 985\n\tEOF')"
+
+run_case "herestring_is_not_a_heredoc_and_stays_silent" \
+  "silent" \
+  "" \
+  "grep x <<< 'gh pr merge 985'"
+
+# Must still fire — the fix must not become a bypass.
+
+run_case "merge_after_heredoc_terminator_still_merges" \
+  "advisory:TRIGGER: gh pr merge" \
+  "" \
+  "$(printf 'cat <<'EOF'\nbody\nEOF\ngh pr merge 985 --squash')"
+
+run_case "arithmetic_shift_does_not_swallow_a_later_merge" \
+  "advisory:TRIGGER: gh pr merge" \
+  "" \
+  'echo $((1 << 3)); gh pr merge 985 --squash'
+
 # Dedicated multi-trigger inspector — asserts BOTH surfaces appear in the SAME
 # stderr capture, not separated by re-invocation.
 run_compound_multi_assert() {

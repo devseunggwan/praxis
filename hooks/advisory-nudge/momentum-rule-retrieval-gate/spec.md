@@ -323,6 +323,12 @@ gh global flags (`-R/--repo`, `--hostname`, `--color`) are walked past before
 checking the subcommand so that `gh -R owner/repo pr merge` is detected
 correctly.
 
+A heredoc body matches `gh pr merge` textually and merges nothing, so it is
+not a trigger (issue #985): `safe_tokenize` blanks every body line before the
+per-line split, and a commit message that merely quotes `gh pr merge` is no
+longer read as one. The operator line and everything after the terminator are
+untouched, which is what keeps a real merge on a later line firing.
+
 `git push` force detection scans all tokens after the `push` subcommand for
 `--force`, `-f`, and `--force-with-lease` (including `--force-with-lease=<ref>`
 prefix-matched form).
