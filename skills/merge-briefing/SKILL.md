@@ -166,10 +166,16 @@ neither. Treat a bot's severity as an input to your grade, never as the grade �
 and never as a reason to skip the finding because "it's just a bot".
 
 A thread you graded as blocking has one legitimate exit before the merge: it is
-fixed and closed, or it is **regraded** — which means editing the comment to
-`(non-blocking)`, posting the `Revised —` notice, and clearing the review-level
-`REQUEST_CHANGES`. Parking a blocking finding in a follow-up without regrading
-leaves the branch locked while every label reads non-blocking.
+fixed and closed, or it is **regraded** — editing the comment to
+`(non-blocking)` and posting the `Revised —` notice. Parking a blocking finding
+in a follow-up without regrading leaves the branch locked while every label
+reads non-blocking.
+
+**Clearing the review-level `REQUEST_CHANGES` is a separate, later step.** That
+state belongs to the review, which may hold several findings, so it is cleared
+only once **every** blocking finding in it is fixed-and-closed or regraded —
+never on the strength of one. Regrading the last one is what unlocks it; until
+then the review correctly still blocks.
 
 ### Step 3: Carry the anchor's `Unverified` gaps
 
