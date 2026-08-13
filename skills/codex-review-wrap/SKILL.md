@@ -263,8 +263,8 @@ progressing one. Cancel it (`node "{resolved_companion_path}" cancel
 
 ##### When the review completes
 
-Step 5 runs once the findings are in hand. Which path they take depends on
-where the session is at that moment:
+Backgrounding defers Step 5, it does not skip it. Which path the findings
+take depends on where the session is when the run completes:
 
 - **User is back in an interactive foreground turn** — collect the findings
   and enter Step 5 from the top (interactivity check → 5f → …); the
