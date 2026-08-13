@@ -1292,7 +1292,10 @@ re-ask the same question rather than guessing (same as 5i). Record
 ##### Re-entry
 
 1. Return to **Step 4**; skip Steps 1–3 — the review target is already
-   fixed.
+   fixed. The re-entered round is backgrounded like any other, because
+   Step 4b is unconditional. That is not a loop this gate has to hold
+   open: *When the review completes* already routes a finished background
+   round back into Step 5 from the top.
 2. **Normalize** the original `{{ARGUMENTS}}` before reuse — strip any
    existing `--scope` / `--base <ref>`. Then append at most **one**
    target-selecting flag, the one condition (b) settled above. Stripping
