@@ -102,9 +102,16 @@ assert_present \
 # 4. The pre-launch warning
 # ---------------------------------------------------------------------------
 
+# The env prefix is the whole point: --account sends the worker to a different
+# CLAUDE_CONFIG_DIR, and a probe without it reads the delegator's own config and
+# reports someone else's trust state with full confidence.
 assert_present \
-  "Step 5a consults the trust helper before launching" \
-  'sh "${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/cwd-trust.sh" "{cwd}"'
+  "Step 5a consults the trust helper under the worker's own account" \
+  'eval "$({claude_env} sh "${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/cwd-trust.sh" "{cwd}")"'
+
+assert_absent \
+  "the probe never runs unprefixed" \
+  'eval "$(sh "${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/cwd-trust.sh"'
 
 assert_present \
   "the warning tells the human what to do" \

@@ -367,7 +367,11 @@ Step 7 의 liveness 판정이 `waiting-input` 으로 잡습니다.
 # 기동 전 신뢰 상태를 읽어, 워커가 키 입력을 기다릴 것이면 미리 말합니다.
 # 프롬프트 자체는 argv 로 가므로 유실되지 않습니다 (Step 4) — 이건 대기를
 # 예고하는 것이지 막는 것이 아닙니다.
-eval "$(sh "${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/cwd-trust.sh" "{cwd}")"
+#
+# {claude_env} 를 붙이는 것이 필수입니다. --account 는 워커를 다른
+# CLAUDE_CONFIG_DIR 로 보내므로, 프로브가 그걸 빼면 위임자 자신의 설정을 읽고
+# 남의 신뢰 상태를 자신 있게 보고합니다 — 안 묻는 것보다 나쁩니다.
+eval "$({claude_env} sh "${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/cwd-trust.sh" "{cwd}")"
 if [ "$trusted" = no ]; then
   echo "주의: {cwd} 는 신뢰되지 않은 경로입니다 (${reason}) — 워커가 신뢰"
   echo "      다이얼로그에서 멈춥니다. cmux 탭에서 한 번 키를 눌러 주세요."
