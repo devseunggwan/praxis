@@ -138,6 +138,18 @@ check "the trusted ancestor is surfaced" \
 check "no ancestor is claimed when there is none" \
   "" "$(field ancestor "$UNSEEN" "CLAUDE_CONFIG_DIR=$CONFIG_DIR")"
 
+# `/` is an ancestor of everything, and dirname("/") is "/" — a walk that stops
+# on arrival at the root never tests it, so a root entry goes unreported for
+# every path on the machine.
+ROOT_CFG="$TMP/rootcfg"
+mkdir -p "$ROOT_CFG"
+printf '{"projects": {"/": {"hasTrustDialogAccepted": true}}}' > "$ROOT_CFG/.claude.json"
+check "an accepted root entry is reported as the ancestor" \
+  "/" "$(field ancestor "$UNSEEN" "CLAUDE_CONFIG_DIR=$ROOT_CFG")"
+
+check "the root entry does not silently become the verdict" \
+  "no" "$(field trusted "$UNSEEN" "CLAUDE_CONFIG_DIR=$ROOT_CFG")"
+
 # ---------------------------------------------------------------------------
 # 5. Calling convention
 # ---------------------------------------------------------------------------

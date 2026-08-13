@@ -91,11 +91,15 @@ if accepted(target):
     emit(trusted="yes", reason="entry-accepted", config=config, matched=target)
 
 # Nearest accepted ancestor, reported but never substituted for the verdict.
+# `/` is a candidate like any other — dirname("/") is "/", so the walk has to
+# stop on the second visit rather than on arrival, or a root entry is skipped.
 ancestor = None
 walk = os.path.dirname(target)
-while walk and walk != "/":
+while walk:
     if accepted(walk):
         ancestor = walk
+        break
+    if walk == "/":
         break
     walk = os.path.dirname(walk)
 
