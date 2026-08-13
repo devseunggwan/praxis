@@ -278,9 +278,16 @@ running job at all.
 the value the command prints rather than constructing one. Then:
 
 ```bash
-ps -p {pid} -o pid=,etime=,stat=   # empty output → process is gone
-find {logFile} -mmin +5            # prints the path → no write in 5 min, stalled
+ps -p {pid} -o pid=,etime=,stat=     # empty output → process is gone
+find {logFile} -mmin +5              # prints the path → no write in 5 min
 ```
+
+**Only the first is decisive.** A dead pid settles it: the job is stale,
+whatever the log says. A quiet log does not — the companion appends a line
+per item lifecycle event and runs no periodic heartbeat, so one long
+reasoning or command item produces no write at all while the review is
+perfectly healthy. Read a quiet log as *tell the user this is taking a
+while*, never as grounds to cancel. Cancel on the pid.
 
 `find -mmin` is used rather than `stat`, whose mtime syntax splits BSD from
 GNU (`stat -f` on macOS, `stat -c` on Linux); the reaper script next door
