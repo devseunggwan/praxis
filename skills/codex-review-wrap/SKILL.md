@@ -254,12 +254,31 @@ A killed review leaves its job file reading `status: "running"` with a dead
 pid: the terminal write in `runTrackedJob` never executes, and `elapsed` is
 computed from `startedAt` against the wall clock, so it keeps climbing
 after the process is gone. Both fields report a dead job as a healthy one.
-Judge liveness on two independent signals instead:
+Judge liveness on two independent signals instead.
+
+The two signals need a pid and a log path, and **neither is in the
+human-readable status output** — `pid` is never rendered there, and the log
+line only appears for some job states. Take both from `--json`, which
+carries the whole job record:
 
 ```bash
-ps -p {pid} -o pid=,etime=,stat=          # empty output → process is gone
-stat -f '%Sm' -t '%H:%M:%S' {job-id}.log  # log older than a few minutes → stalled
+node "{resolved_companion_path}" status --json \
+  | jq -r '.running[] | "\(.id) \(.pid) \(.logFile)"'
 ```
+
+`.logFile` is an absolute path under the companion's own state directory
+(`$CLAUDE_PLUGIN_DATA/state/<workspace-slug>-<hash>/jobs/`, falling back to
+`$TMPDIR/codex-companion/…`) — it is not relative to the worktree, so use
+the value the command prints rather than constructing one. Then:
+
+```bash
+ps -p {pid} -o pid=,etime=,stat=   # empty output → process is gone
+find {logFile} -mmin +5            # prints the path → no write in 5 min, stalled
+```
+
+`find -mmin` is used rather than `stat`, whose mtime syntax splits BSD from
+GNU (`stat -f` on macOS, `stat -c` on Linux); the reaper script next door
+carries that split and its test skips off Darwin because of it.
 
 `status: "running"` with no matching process is a **stale** job, not a
 progressing one. Cancel it (`node "{resolved_companion_path}" cancel
