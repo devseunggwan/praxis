@@ -279,7 +279,7 @@ the value the command prints rather than constructing one. Then:
 
 ```bash
 ps -p {pid} -o pid=,etime=,stat=     # empty output → process is gone
-find {logFile} -mmin +5              # prints the path → no write in 5 min
+find "{logFile}" -mmin +5            # prints the path → no write in 5 min
 ```
 
 **Only the first is decisive.** A dead pid settles it: the job is stale,
@@ -291,7 +291,9 @@ while*, never as grounds to cancel. Cancel on the pid.
 
 `find -mmin` is used rather than `stat`, whose mtime syntax splits BSD from
 GNU (`stat -f` on macOS, `stat -c` on Linux); the reaper script next door
-carries that split and its test skips off Darwin because of it.
+carries that split and its test skips off Darwin because of it. Quote the
+path — the state directory is relocatable and may sit under a name
+containing spaces.
 
 `status: "running"` with no matching process is a **stale** job, not a
 progressing one. Cancel it (`node "{resolved_companion_path}" cancel --cwd
