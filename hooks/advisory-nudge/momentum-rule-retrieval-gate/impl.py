@@ -46,6 +46,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    GH_MERGE_VALUE_FLAGS,
+    is_help_invocation,
     iter_command_starts,
     safe_tokenize,
     strip_prefix,
@@ -460,11 +462,7 @@ _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
 # gh *global* value flags (`-R`/`--repo`, …) are included because they may trail
 # the subcommand (`gh pr merge -R org/repo 999`); without skipping their value,
 # `org/repo` would be read as the positional and 999 misclassified (P1d).
-_MERGE_VALUE_FLAGS = frozenset({
-    "-b", "--body", "-F", "--body-file", "-t", "--subject",
-    "--match-head-commit", "--author-email",
-    "-R", "--repo", "--hostname", "--color",
-})
+_MERGE_VALUE_FLAGS = GH_MERGE_VALUE_FLAGS
 
 # Read-only `gh pr` verbs whose positional PR argument identifies the PR the
 # session is operating on. A numberless `gh pr merge` runs on the current
@@ -896,7 +894,10 @@ def _is_gh_pr_merge(argv: list[str]) -> bool:
             i += 1
     if i + 1 >= len(argv):
         return False
-    return argv[i] == "pr" and argv[i + 1] == "merge"
+    if argv[i] != "pr" or argv[i + 1] != "merge":
+        return False
+    # `gh pr merge --help` prints usage and merges nothing (issue #985).
+    return not is_help_invocation(argv[i + 2:], _MERGE_VALUE_FLAGS)
 
 
 def _is_cmux_dispatch(argv: list[str]) -> bool:

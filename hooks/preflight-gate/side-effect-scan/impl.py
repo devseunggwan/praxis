@@ -22,7 +22,9 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    GH_MERGE_VALUE_FLAGS,
     compound_cascade_hint,
+    is_help_invocation,
     iter_command_starts,
     safe_tokenize,
     strip_prefix,
@@ -160,6 +162,8 @@ def _detect_gh(argv: list[str]) -> list[str]:
     group, action = _gh_subcommand_pair(argv)
     if not group or not action:
         return []
+    if is_help_invocation(argv, GH_MERGE_VALUE_FLAGS):
+        return []  # `gh pr merge --help` prints usage, triggers nothing (#985)
     matched: list[str] = []
     for want_group, want_actions, category in _GH_CATEGORY_BY_PAIR:
         if group == want_group and action in want_actions:

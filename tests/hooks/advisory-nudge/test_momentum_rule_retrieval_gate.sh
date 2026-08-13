@@ -501,6 +501,21 @@ run_case "compound_merge_and_dispatch_dispatch_surface" \
 # briefing for a command that merges nothing. The must-still-fire cases at the
 # end are what keeps the fix from turning into a bypass.
 
+run_case "help_long_flag_is_not_a_merge" \
+  "silent" \
+  "" \
+  "gh pr merge --help"
+
+run_case "help_short_flag_is_not_a_merge" \
+  "silent" \
+  "" \
+  "gh pr merge -h"
+
+run_case "help_flag_after_pr_number_is_not_a_merge" \
+  "silent" \
+  "" \
+  "gh pr merge 985 --help"
+
 run_case "heredoc_body_quoting_a_merge_is_not_a_merge" \
   "silent" \
   "" \
@@ -522,6 +537,11 @@ run_case "herestring_is_not_a_heredoc_and_stays_silent" \
   "grep x <<< 'gh pr merge 985'"
 
 # Must still fire — the fix must not become a bypass.
+
+run_case "help_flag_as_a_subject_value_still_merges" \
+  "advisory:TRIGGER: gh pr merge" \
+  "" \
+  "gh pr merge 985 --squash --subject -h"
 
 run_case "merge_after_heredoc_terminator_still_merges" \
   "advisory:TRIGGER: gh pr merge" \

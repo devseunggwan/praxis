@@ -40,7 +40,9 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    GH_MERGE_VALUE_FLAGS,
     _is_gh_binary,
+    is_help_invocation,
     compound_cascade_hint,
     iter_command_starts,
     safe_tokenize,
@@ -99,7 +101,10 @@ def is_gh_pr_merge(argv: list[str]) -> bool:
 
     if i + 1 >= len(argv):
         return False
-    return argv[i] == "pr" and argv[i + 1] == "merge"
+    if argv[i] != "pr" or argv[i + 1] != "merge":
+        return False
+    # `gh pr merge --help` prints usage and merges nothing (issue #985).
+    return not is_help_invocation(argv[i + 2:], GH_MERGE_VALUE_FLAGS)
 
 
 def emit_ask(reason: str) -> None:

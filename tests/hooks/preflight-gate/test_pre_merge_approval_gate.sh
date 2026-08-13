@@ -237,9 +237,21 @@ run_case "direct session: /usr/bin/gh pr list (path-prefix read, not merge, sile
 # the flags; a heredoc body is data, so a commit message quoting the command is
 # not the command. The last two cases keep the fix from becoming a bypass.
 
+run_case "direct session: gh pr merge --help (usage only, silent)" \
+  "silent" "no-delegate" \
+  '{"tool_name": "Bash", "tool_input": {"command": "gh pr merge --help"}}'
+
+run_case "direct session: gh pr merge -h (usage only, silent)" \
+  "silent" "no-delegate" \
+  '{"tool_name": "Bash", "tool_input": {"command": "gh pr merge -h"}}'
+
 run_case "direct session: commit message quoting the merge (heredoc body, silent)" \
   "silent" "no-delegate" \
   '{"tool_name": "Bash", "tool_input": {"command": "git commit -m \"$(cat <<'EOF'\ngh pr merge is only quoted here\nEOF\n)\""}}'
+
+run_case "direct session: -h as a --subject value (still a merge, ask)" \
+  "ask" "no-delegate" \
+  '{"tool_name": "Bash", "tool_input": {"command": "gh pr merge 985 --squash --subject -h"}}'
 
 run_case "direct session: merge after a heredoc terminator (still a merge, ask)" \
   "ask" "no-delegate" \

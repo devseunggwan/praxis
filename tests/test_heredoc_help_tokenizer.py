@@ -1,9 +1,11 @@
-"""Tokenizer coverage for a merge-gate false positive (issue #985).
+"""Tokenizer coverage for the two merge-gate false positives (issue #985).
 
-A heredoc body reached every `gh pr merge` gate without merging anything: it
-was tokenized line-by-line as if its prose were commands. The cases below are
-the enumerated input surface for `strip_heredoc_bodies`, including the
-must-still-fire variants that keep the fix from becoming a bypass.
+Both families reached every `gh pr merge` gate without merging anything: a
+heredoc body was tokenized line-by-line as if its prose were commands, and a
+`--help` invocation matched the same argv shape as the real thing. The cases
+below are the enumerated input surface for the two helpers that close them —
+`strip_heredoc_bodies` and `is_help_invocation` — including the must-still-fire
+variants that keep either fix from becoming a bypass.
 
 Written as Python rather than appended to `tests/test_hook_utils.sh` because
 every case is itself a shell string: expressing them as bash literals means
@@ -18,7 +20,12 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "hooks" / "_lib"))
 
-from _hook_utils import safe_tokenize, strip_heredoc_bodies  # noqa: E402
+from _hook_utils import (  # noqa: E402
+    GH_MERGE_VALUE_FLAGS,
+    is_help_invocation,
+    safe_tokenize,
+    strip_heredoc_bodies,
+)
 
 # Split so this file's own text never carries the literal the gates match on —
 # editing these tests would otherwise trip the gate the tests exist to fix.
@@ -83,3 +90,27 @@ def test_suppressed_body_keeps_the_line_count() -> None:
     ]
 
 
+# ---------------------------------------------------------------------------
+# `--help` prints usage and does nothing.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("argv", [
+    ["--help"],
+    ["-h"],
+    ["985", "--help"],
+    ["--squash", "-h"],
+    ["-h", "985"],
+])
+def test_help_invocation_detected(argv: list[str]) -> None:
+    assert is_help_invocation(argv, GH_MERGE_VALUE_FLAGS)
+
+
+@pytest.mark.parametrize("argv", [
+    ["985", "--squash"],
+    ["985", "--subject", "-h"],          # -h is the subject text
+    ["985", "--body", "--help"],         # --help is the body text
+    ["985", "--subject=-h"],             # inline value, not a flag position
+    ["--", "-h"],                        # everything after `--` is positional
+])
+def test_not_a_help_invocation(argv: list[str]) -> None:
+    assert not is_help_invocation(argv, GH_MERGE_VALUE_FLAGS)

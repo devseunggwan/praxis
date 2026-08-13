@@ -204,6 +204,41 @@ def strip_heredoc_bodies(command: str) -> str:
     return "\n".join(out)
 
 
+HELP_FLAGS = frozenset({"-h", "--help"})
+
+# `gh pr merge` flags that consume a following value token. Shared so that a
+# help scan and a positional scan agree on which tokens are values — `--subject
+# -h` must stay a subject, not a help request.
+GH_MERGE_VALUE_FLAGS = frozenset({
+    "-b", "--body", "-F", "--body-file", "-t", "--subject",
+    "--match-head-commit", "--author-email",
+    "-R", "--repo", "--hostname", "--color",
+})
+
+
+def is_help_invocation(argv: list[str], value_flags: frozenset[str]) -> bool:
+    """True when the segment asks for help instead of doing anything.
+
+    `gh pr merge --help` prints usage and exits — it merges nothing, so a gate
+    that treats it as a merge blocks the one command an agent runs to learn the
+    flags it is being asked to get right (issue #985). `value_flags` names the
+    flags that consume the next token, so `--subject -h` stays a subject value
+    and still counts as a real merge.
+    """
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--":
+            return False  # everything after is positional, never a help flag
+        if tok in HELP_FLAGS:
+            return True
+        if tok.startswith("-") and "=" not in tok and tok in value_flags:
+            i += 2
+            continue
+        i += 1
+    return False
+
+
 def safe_tokenize(command: str) -> list[str]:
     """Tokenize with shell operators and line breaks split into tokens.
 

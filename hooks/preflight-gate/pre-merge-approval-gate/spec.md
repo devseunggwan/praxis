@@ -43,7 +43,9 @@ is not retrieved.
 3. Any segment whose `argv[0..2] == ("gh", "pr", "merge")` triggers the check
    (`gh` global flags such as `-R/--repo`/`--hostname`/`--color` are skipped
    so `gh -R owner/repo pr merge` is detected correctly).
-4. Heredoc bodies are blanked by `safe_tokenize` (issue #985): a commit
+4. A `--help` / `-h` invocation is not a merge and does not trigger (issue
+   #985) — value-flag values are skipped, so `--subject -h` still triggers.
+   Heredoc bodies are blanked by `safe_tokenize` for the same reason: a commit
    message quoting `gh pr merge` is prose, not a merge.
 5. If `CMUX_DELEGATE=1` in the hook's own process env → pass.
 6. Otherwise → emit `permissionDecision: "ask"`.
