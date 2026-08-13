@@ -49,6 +49,14 @@ Skills that dispatch external CLI workers (`cmux-delegate`) can route tasks to m
 
 All providers share the same completion sentinel: `; echo '===WORKER_DONE===' >> $LOG` appended after the CLI exits.
 
+The `claude` row's stdin column carries a precondition the command does not state.
+`claude --help` says the workspace trust dialog is skipped "via `-p`, or when
+stdout is not a TTY", and that dialog reads stdin — so a caller that runs the row's
+command with stdout inherited from a terminal, in a directory the user has never
+trusted, has a dialog and a piped prompt competing for the same stream. Neither
+exemption is supplied by the row itself. Using the stdin column obliges the caller
+to supply one: redirect stdout, or add `-p`.
+
 ### Model Notation
 
 Unified `--model` flag across all skills: `<provider>:<model>` or bare model name.
