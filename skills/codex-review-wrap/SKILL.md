@@ -262,9 +262,15 @@ line only appears for some job states. Take both from `--json`, which
 carries the whole job record:
 
 ```bash
-node "{resolved_companion_path}" status --json \
+node "{resolved_companion_path}" status --cwd "{selected_path}" --json \
   | jq -r '.running[] | "\(.id) \(.pid) \(.logFile)"'
 ```
+
+`--cwd` is not optional here. The companion keys its state directory on the
+workspace root it derives from `process.cwd()`, and each Bash call starts
+back at the session cwd rather than the worktree Step 2 selected — so
+without it this command reads a different state directory and reports no
+running job at all.
 
 `.logFile` is an absolute path under the companion's own state directory
 (`$CLAUDE_PLUGIN_DATA/state/<workspace-slug>-<hash>/jobs/`, falling back to
@@ -281,8 +287,10 @@ GNU (`stat -f` on macOS, `stat -c` on Linux); the reaper script next door
 carries that split and its test skips off Darwin because of it.
 
 `status: "running"` with no matching process is a **stale** job, not a
-progressing one. Cancel it (`node "{resolved_companion_path}" cancel
-{job-id}`) and re-launch; polling it longer never resolves.
+progressing one. Cancel it (`node "{resolved_companion_path}" cancel --cwd
+"{selected_path}" {job-id}`) and re-launch; polling it longer never
+resolves. `cancel` resolves its state directory the same way `status` does,
+so it needs the same `--cwd`.
 
 ##### When the review completes
 
