@@ -184,6 +184,13 @@ def strip_heredoc_bodies(command: str) -> str:
     replaced by empty lines rather than dropped so the operator line and the
     commands after the terminator keep their positions.
 
+    The terminator line is kept. Several hooks run their own heredoc scan on
+    top of this one (`pytest-direct-exec-advisory`, `foreground-poll-loop-guard`,
+    `bash-worktree-existence-advisory`) and each waits for that line to resume
+    scanning — blanking it leaves them inside a body that never closes, so
+    everything after the heredoc goes silent. That is a bigger hole than the
+    false positive being closed here.
+
     An unterminated heredoc suppresses everything to the end of the command,
     which is what bash does with it too.
     """
@@ -197,7 +204,9 @@ def strip_heredoc_bodies(command: str) -> str:
             probe = line.lstrip("\t") if dash else line
             if probe.rstrip() == delim:
                 del pending[0]
-            out.append("")
+                out.append(line)  # terminator survives — see the docstring
+            else:
+                out.append("")
             continue
         out.append(line)
         pending.extend(_heredoc_starts_on_line(line))

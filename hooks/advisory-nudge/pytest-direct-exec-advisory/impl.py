@@ -185,6 +185,10 @@ def _without_heredoc_bodies(command: str) -> str:
             candidate = line.lstrip("\t") if strip_tabs else line
             if candidate == marker:
                 active_marker = None
+                # Keep the terminator: this text is handed to safe_tokenize,
+                # whose own heredoc pass (issue #985) would otherwise read the
+                # opener as unterminated and swallow every command after it.
+                live_lines.append(line)
             continue
 
         live_lines.append(line)

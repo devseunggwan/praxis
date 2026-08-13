@@ -69,9 +69,9 @@ def test_heredoc_body_is_not_read_as_a_command(name: str, command: str) -> None:
     ("here-string has no body", f"grep x <<< body\n{MERGE} 985 --squash"),
     ("arithmetic left-shift is not an operator",
      f"echo $((1 << 3)); {MERGE} 985 --squash"),
-    ("`<<` inside quotes is literal", f'echo "<<EOF"\n{MERGE} 985 --squash'),
     ("terminator with trailing whitespace still closes the body",
      f"cat <<EOF\nbody\nEOF  \n{MERGE} 985 --squash"),
+    ("`<<` inside quotes is literal", f'echo "<<EOF"\n{MERGE} 985 --squash'),
 ])
 def test_real_merge_still_reaches_the_gates(name: str, command: str) -> None:
     assert _has_merge(command), name
@@ -82,11 +82,12 @@ def test_command_without_heredoc_is_returned_unchanged() -> None:
     assert strip_heredoc_bodies(command) == command
 
 
-def test_suppressed_body_keeps_the_line_count() -> None:
-    """Blank lines, not deleted ones — line positions stay comparable."""
+def test_only_body_lines_are_blanked() -> None:
+    """Line positions stay comparable, and the terminator survives — hooks
+    running their own heredoc scan on top of this one wait for that line."""
     command = f"cat <<EOF\n{MERGE}\nEOF\necho after"
     assert strip_heredoc_bodies(command).split("\n") == [
-        "cat <<EOF", "", "", "echo after",
+        "cat <<EOF", "", "EOF", "echo after",
     ]
 
 

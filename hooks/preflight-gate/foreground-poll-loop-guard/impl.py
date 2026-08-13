@@ -132,6 +132,10 @@ def _strip_non_executable(command: str) -> str:
             candidate = line.lstrip("\t") if strip_tabs else line
             if candidate == delim:
                 heredoc_delims.pop(0)
+                # Keep the terminator: the result is handed to safe_tokenize,
+                # whose own heredoc pass (issue #985) would otherwise read the
+                # opener as unterminated and drop every command after it.
+                out.append(line)
             continue  # inside a heredoc body — drop
         line = _strip_comment(line)
         for m in _HEREDOC_RE.finditer(line):

@@ -50,9 +50,9 @@ Limitations:
     cwd, not `<dir>` (matches the sibling hooks' cwd-scoped git queries).
   - Shared-tokenizer detection boundaries (identical to the blocking sibling
     `block-rename-sweep-survivors`): `result=$(git commit ...)` is missed;
-    partial commits (`--only` / pathspec) over-list all staged additions; a
-    `git commit` literal inside a heredoc body false-surfaces. See spec.md
-    "Detection boundaries" — fixing these belongs in `_hook_utils`, not here.
+    partial commits (`--only` / pathspec) over-list all staged additions. The
+    heredoc-body false-surface listed here was fixed in `_hook_utils` (#985).
+    See spec.md "Detection boundaries" — the rest belong there too, not here.
 """
 from __future__ import annotations
 
