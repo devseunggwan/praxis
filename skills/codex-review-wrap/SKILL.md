@@ -238,7 +238,7 @@ indistinguishable from a clean review. There is no flag that avoids this —
 `task --background`.
 
 ```bash
-cd {selected_path}
+cd -- "{selected_path}"
 node "{resolved_companion_path}" review "{{ARGUMENTS}}"
 ```
 
