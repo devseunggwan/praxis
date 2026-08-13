@@ -49,6 +49,25 @@ Skills that dispatch external CLI workers (`cmux-delegate`) can route tasks to m
 
 All providers share the same completion sentinel: `; echo '===WORKER_DONE===' >> $LOG` appended after the CLI exits.
 
+**Interactive launches do not use the stdin column (#981).** The table above is the
+*non-interactive* contract, and it is safe precisely because it is non-interactive:
+Claude Code skips its workspace trust dialog when stdout is not a TTY. A launch into
+a real terminal — `cmux new-workspace --command` is the one in this repo — gets no
+such exemption, and that dialog **consumes piped stdin**, silently swallowing the
+prompt and leaving an idle worker. Interactive launches therefore pass the prompt as
+a positional argument read from the same file:
+
+| Provider | Interactive command | Trust dialog eats stdin? |
+| ---------- | --------------------- | -------------------------- |
+| `claude` | `claude --model {m} --permission-mode {p} "$(cat $F)"` | Yes — hence argv |
+| `codex` | unchanged (`cat $F \| codex exec`) | Unverified — not probed |
+| `gemini` | unchanged (`gemini -p "$(cat $F)"`) | N/A — already argv |
+
+The prompt still lives in a file in every row; what changes is how it reaches the
+process. Reading it into argv is not the inline-`-p` that `cmux-delegate` forbids —
+that prohibition is about embedding prompt *text* in the command, and the `gemini`
+row has always been argv-shaped.
+
 ### Model Notation
 
 Unified `--model` flag across all skills: `<provider>:<model>` or bare model name.
