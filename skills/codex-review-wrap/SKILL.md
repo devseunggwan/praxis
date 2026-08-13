@@ -222,21 +222,95 @@ not need to be set.
 #### 4b. Run the review
 
 Change working directory to the selected worktree, then invoke the
-companion. `{{ARGUMENTS}}` passes any flags (e.g. `--model opus`,
-`--wait`, `--background`) through unchanged. One exception: a round
-re-entered from 5j drops `--background`, because a re-backgrounded round
-breaks that gate's synchronous loop.
+companion. `{{ARGUMENTS}}` passes any flags through unchanged. The review
+path reads `--model`, `--base`, `--scope`, and `--json`. It also *accepts*
+`--wait` and `--background` — both sit in its `booleanOptions` and are then
+never read, so neither changes anything; `options.wait` is consumed only by
+`status`, `options.background` only by `task`.
+
+**Always run this via `Bash(..., run_in_background: true)`.** A review
+routinely runs past a foreground tool timeout, and a timed-out call kills
+it mid-run: the round then ends with no findings, which is
+indistinguishable from a clean review. There is no flag that avoids this —
+`review` has no background path of its own. `handleReview` →
+`handleReviewCommand` → `runForegroundCommand` is unconditional, and the
+`detached: true` worker (`spawnDetachedTaskWorker`) is reachable only from
+`task --background`.
 
 ```bash
-cd {selected_path}
+cd -- "{selected_path}"
 node "{resolved_companion_path}" review "{{ARGUMENTS}}"
 ```
 
-Return the script's stdout **verbatim** — do not paraphrase, summarize, or
+A backgrounded call hands back a task id, not the review, so there is
+nothing to return yet — say so in one line: "Codex review started in the
+background. Check `/codex:status` for progress." Once the run completes,
+return the script's stdout **verbatim** — do not paraphrase, summarize, or
 add commentary. This matches `/codex:review`'s contract.
 
-If `{{ARGUMENTS}}` includes `--background`, run via `Bash(..., run_in_background: true)`
-and tell the user: "Codex review started in the background. Check `/codex:status` for progress."
+##### Liveness — `ps` and log mtime, never `status` or `elapsed`
+
+A killed review leaves its job file reading `status: "running"` with a dead
+pid: the terminal write in `runTrackedJob` never executes, and `elapsed` is
+computed from `startedAt` against the wall clock, so it keeps climbing
+after the process is gone. Both fields report a dead job as a healthy one.
+Judge liveness on two independent signals instead.
+
+The two signals need a pid and a log path, and **neither is in the
+human-readable status output** — `pid` is never rendered there, and the log
+line only appears for some job states. Take both from `--json`, which
+carries the whole job record:
+
+```bash
+node "{resolved_companion_path}" status --cwd "{selected_path}" --json \
+  | jq -r '.running[] | "\(.id) \(.pid) \(.logFile)"'
+```
+
+`--cwd` is not optional here. The companion keys its state directory on the
+workspace root it derives from `process.cwd()`, and each Bash call starts
+back at the session cwd rather than the worktree Step 2 selected — so
+without it this command reads a different state directory and reports no
+running job at all.
+
+Empty output from that pipeline is **not** the same as "no job is running".
+A failed `status` — wrong directory, unreadable state file, a companion
+version that does not know `--json` — also prints nothing, and `jq` exits 0
+on the empty input, so the pipeline's status says nothing either. Read the
+companion's own exit code before drawing any conclusion from silence, and
+treat a non-zero one as *unknown*, never as *stale*. This matters because
+the next paragraph turns "no matching process" into a cancel.
+
+`.logFile` is an absolute path under the companion's own state directory
+(`$CLAUDE_PLUGIN_DATA/state/<workspace-slug>-<hash>/jobs/`, falling back to
+`$TMPDIR/codex-companion/…`) — it is not relative to the worktree, so use
+the value the command prints rather than constructing one. Then:
+
+```bash
+ps -p {pid} -o pid=,etime=,stat=     # empty output → process is gone
+find "{logFile}" -mmin +5            # prints the path → no write in 5 min
+```
+
+**Only the first is decisive.** A dead pid settles it: the job is stale,
+whatever the log says. A quiet log does not — the companion appends a line
+per item lifecycle event and runs no periodic heartbeat, so one long
+reasoning or command item produces no write at all while the review is
+perfectly healthy. Read a quiet log as *tell the user this is taking a
+while*, never as grounds to cancel. Cancel on the pid.
+
+`find -mmin` is used rather than `stat`, whose mtime syntax splits BSD from
+GNU (`stat -f` on macOS, `stat -c` on Linux); the reaper script next door
+carries that split and its test skips off Darwin because of it. Quote the
+path — the state directory is relocatable and may sit under a name
+containing spaces.
+
+`status: "running"` with no matching process is a **stale** job, not a
+progressing one. Cancel it (`node "{resolved_companion_path}" cancel --cwd
+"{selected_path}" {job-id}`) and re-launch; polling it longer never
+resolves. `cancel` resolves its state directory the same way `status` does,
+so it needs the same `--cwd`.
+
+##### When the review completes
+
 Backgrounding defers Step 5, it does not skip it. Which path the findings
 take depends on where the session is when the run completes:
 
@@ -247,8 +321,8 @@ take depends on where the session is when the run completes:
   ended) — the interactivity check fails and the findings take the
   non-interactive path: verified, applied to nothing, deferred.
 
-Either way, never apply a background review's findings from the completion
-notification alone.
+Either way, never apply a review's findings from the completion notification
+alone.
 
 ### Step 5: Apply Findings — Premise Verification Gate
 
@@ -1243,12 +1317,14 @@ re-ask the same question rather than guessing (same as 5i). Record
 ##### Re-entry
 
 1. Return to **Step 4**; skip Steps 1–3 — the review target is already
-   fixed.
-2. **Normalize** the original `{{ARGUMENTS}}` before reuse — strip
-   `--background` (a re-backgrounded round breaks the gate's synchronous
-   loop) **and** any existing `--scope` / `--base <ref>`. Then append at
-   most **one** target-selecting flag, the one condition (b) settled
-   above. Stripping first is what keeps the two rules from colliding:
+   fixed. The re-entered round is backgrounded like any other, because
+   Step 4b is unconditional. That is not a loop this gate has to hold
+   open: *When the review completes* already routes a finished background
+   round back into Step 5 from the top.
+2. **Normalize** the original `{{ARGUMENTS}}` before reuse — strip any
+   existing `--scope` / `--base <ref>`. Then append at most **one**
+   target-selecting flag, the one condition (b) settled above. Stripping
+   first is what keeps the two rules from colliding:
    without it, "switch the scope for the re-entered round" stacks a second
    `--scope` on top of the caller's, and which one wins is the CLI's
    business, not this skill's. After appending, re-run the condition (b)
@@ -1445,8 +1521,7 @@ user selects: 1
   User: 추가 라운드 실행
   → ledger: round-continued: target=/Users/dev/project-wt/my-repo-feature-1#issue-1-feature | from=1 | applied=1 | decision=continue | to=2
   → re-enter Step 4 (Steps 1–3 skipped, 5d-i and 4a not re-asked — the sibling-id:
-    and review-path: rows for this target exist, --background dropped if it was
-    present, PR-state re-checked)
+    and review-path: rows for this target exist, PR-state re-checked)
 
 [Step 5 — Round 2] Codex now re-suggests changing WHERE col_a = 1 → col_b = 1
   Scan ledger: rejected entry on query.sql:L42 with same A → B transition exists
