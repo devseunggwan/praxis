@@ -4,6 +4,21 @@ Praxis is a personal toolbox — contributions are primarily self-directed, but
 the conventions below keep the repo coherent across sessions and prevent the
 class of drift bugs that have cost the most debugging time.
 
+## Writing a spec
+
+A *feature spec* states what a change must satisfy, before the change exists.
+It is a different artifact from the *skill spec* discussed under
+[Skill spec drift prevention](#skill-spec-drift-prevention) below — that one is
+a `SKILL.md` describing an existing runtime contract.
+
+Feature specs live at `.praxis/specs/NNN-slug.md`, one file per feature, and
+are tracked by git. Write one inside the worktree, before implementation
+starts; writing it afterwards turns it into post-hoc justification.
+
+Not every change needs one — [`.praxis/specs/README.md`](.praxis/specs/README.md)
+is the source of truth for the naming rules, the required `**Issue**: #N`
+header, and the conditions under which a spec is skipped.
+
 ## Adding or modifying a skill
 
 ### Template
