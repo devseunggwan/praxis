@@ -45,6 +45,7 @@ runtime-verified-note: "cmux 0.64.22 — agent.hook.PostToolUse is not relayed a
 | `--account` | (기본 계정) | Claude 계정 프로필 (예: `claude-2` → `CLAUDE_CONFIG_DIR=~/.claude-2`) |
 | `--session` | (신규 생성) | 기존 워크스페이스에 전달 (이름 또는 workspace ref) |
 | `--distribute` | false | 독립 항목별 병렬 분산 실행 |
+| `--run` | (distribute 시 자동 생성) | 이 위임을 묶을 Run 식별자 (`cmux-orchestrate`) |
 | `--permission-mode` | `auto` | Claude 권한 모드 (acceptEdits/auto/bypassPermissions/default/dontAsk/plan) |
 
 ## Process
@@ -61,6 +62,7 @@ budget = args["max-budget-usd"] || ""
 account = args.account || ""
 session = args.session || ""
 distribute = args.distribute || false
+run = args.run || ""
 permission_mode = args["permission-mode"] || "auto"
 task = args.task (remaining text after flags)
 short_task = task[:30], sanitized to [a-zA-Z0-9가-힣 -] only (for cmux workspace name)
@@ -274,6 +276,28 @@ Report results in Korean.
    - Design/security/review → `claude:opus`
    - Data lookup/status check → `claude:haiku`
 
+### Step 3.6: Resolve the Run
+
+이 위임이 어느 Run 에 속하는지 정하고, 그 식별자를 디스크에 남깁니다.
+
+```bash
+RL="${CLAUDE_PLUGIN_ROOT}/skills/cmux-orchestrate/run-ledger.sh"
+RUN="{run}"                      # --run 인자. 없으면 빈 문자열
+
+# distribute 는 N개를 흩는 것이 정의이므로, 묶을 것이 있는 유일한 자동 생성 조건입니다.
+if [ -z "$RUN" ] && [ "{distribute}" = "true" ]; then
+  eval "$(sh "$RL" create "{short_task}")"
+  RUN="$run"
+fi
+
+[ -n "$RUN" ] && printf '%s' "$RUN" > "/tmp/cmux-delegate-{timestamp}.run"
+```
+
+변수가 아니라 파일인 이유는 `.ws` 와 같습니다 — 셸 상태는 Bash 호출 사이에
+유지되지 않으므로(`RUNTIME_CONSTRAINTS.md` §4), Step 5 와 Step 7 이 이 값을
+읽을 수 있는 곳은 디스크뿐입니다. Run 이 없으면 파일도 없고, 이후 단계의
+원장 호출은 전부 조용히 건너뜁니다 — 원장은 위임의 전제 조건이 아닙니다.
+
 ### Step 4: Generate Wrapper Script
 
 `/tmp/cmux-delegate-{timestamp}.sh`를 생성합니다:
@@ -347,6 +371,10 @@ WS_ID=$(CMUX_QUIET=1 cmux workspace list --json \
 # 빈 파일이 남고, 그 빈 파일은 Step 7 에서 "워커가 있다"로 읽힙니다.
 if [ -n "$WS_ID" ]; then
   echo "$WS_ID" > "/tmp/cmux-delegate-{timestamp}-${WS_REF#workspace:}.ws"
+  # Run 이 있으면 여기서 묶습니다. UUID 를 아는 지점이 여기뿐입니다.
+  RUN=$(cat "/tmp/cmux-delegate-{timestamp}.run" 2>/dev/null || true)
+  [ -n "$RUN" ] && sh "${CLAUDE_PLUGIN_ROOT}/skills/cmux-orchestrate/run-ledger.sh" \
+    bind "$RUN" "$WS_ID" "{short_task}" >/dev/null
 else
   echo "경고: $WS_REF 의 UUID 조회 실패 — Step 7 은 제목/경로 폴백으로 판정합니다"
 fi
@@ -388,6 +416,9 @@ WS_ID=$(CMUX_QUIET=1 cmux workspace list --json \
 
 if [ -n "$WS_ID" ]; then
   echo "$WS_ID" > "/tmp/cmux-delegate-{timestamp}-${TARGET#workspace:}.ws"
+  RUN=$(cat "/tmp/cmux-delegate-{timestamp}.run" 2>/dev/null || true)
+  [ -n "$RUN" ] && sh "${CLAUDE_PLUGIN_ROOT}/skills/cmux-orchestrate/run-ledger.sh" \
+    bind "$RUN" "$WS_ID" "{short_task}" >/dev/null
 else
   echo "경고: $TARGET 의 UUID 조회 실패 — Step 7 은 제목/경로 폴백으로 판정합니다"
 fi
@@ -419,8 +450,11 @@ Distributed to {N} workspaces:
   | {ws_ref}  | {item_title} | {provider} | {sub_model} | {account} |
   ...
 
+  Run: {RUN}
+
 각 cmux 탭에서 진행 상황을 확인하세요.
 완료 시 cmux notify로 개별 알림이 전송됩니다.
+탭을 하나씩 보는 대신 횡단 조회: sh run-ledger.sh summary {RUN}
 ```
 
 **기존 세션 모드:**
@@ -471,6 +505,8 @@ REPORT="$(sh "$ARP" "{cwd}")"
 # 그 제목의 워크스페이스를 아예 만들지 않습니다.
 # distribute 모드는 항목마다 한 파일이므로 전부 돕니다.
 LIVENESS="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/agent-liveness.sh"
+RL="${CLAUDE_PLUGIN_ROOT}/skills/cmux-orchestrate/run-ledger.sh"
+RUN=$(cat "/tmp/cmux-delegate-{timestamp}.run" 2>/dev/null || true)
 FOUND=0
 
 # glob 이 아니라 find 인 이유: 매치가 없을 때 zsh 는 `nomatch` 로 블록 전체를
@@ -487,6 +523,20 @@ for WS_FILE in $(find /tmp/ -maxdepth 1 -name 'cmux-delegate-{timestamp}-*.ws' 2
   state=unknown
   eval "$(sh "$LIVENESS" "$(cat "$WS_FILE")")"
   echo "$WS_FILE $state"   # working | idle | waiting-input | crash | unknown
+
+  # 원장에 접습니다. `crash` 와 `waiting-input` 은 처방이 다르지만(재위임 / 사람이
+  # 키를 누른다) 원장이 답하는 질문은 "누가 사람을 기다리는가" 하나라 둘 다
+  # blocked 입니다. `idle` 은 아직 아무 말도 하지 않습니다 — 보고서 검증이
+  # 판정하고, `unknown` 은 부재이지 상태가 아닙니다.
+  if [ -n "$RUN" ]; then
+    case "$state" in
+      working)             LEDGER_EVENT=start ;;
+      waiting-input|crash) LEDGER_EVENT=block ;;
+      *)                   LEDGER_EVENT="" ;;
+    esac
+    [ -n "$LEDGER_EVENT" ] && sh "$RL" "$LEDGER_EVENT" "$RUN" "$(cat "$WS_FILE")" \
+      "$state" >/dev/null
+  fi
 done
 
 if [ "$FOUND" -eq 0 ]; then
@@ -504,6 +554,20 @@ fi
 워크트리 경로로 해싱하므로 distribute 모드의 N개 워커가 보고서 파일 하나를
 공유합니다 (#903 선존). 즉 위 루프는 워커별로 살았는지를 답하지만, 아래
 보고서 검증은 여전히 1건분입니다.
+
+**그래서 원장의 `done` 은 워커가 하나일 때만 기록합니다.** 보고서 하나를 N명이
+공유하는 동안 그것을 N명의 완료로 접으면, 한 명이 쓴 보고서로 나머지가 끝난
+것이 됩니다 — 원장이 답하기로 한 질문("누가 아직 안 끝났는가")에 정확히 반대로
+답하는 값입니다. distribute 모드의 완료는 #903 이 풀리기 전까지 원장 밖에
+있고, 그 워커들은 `running` 으로 남습니다.
+
+```bash
+if [ -n "$RUN" ] && [ "$(find /tmp/ -maxdepth 1 \
+     -name 'cmux-delegate-{timestamp}-*.ws' 2>/dev/null | wc -l)" -eq 1 ]; then
+  sh "$RL" done "$RUN" "$(cat /tmp/cmux-delegate-{timestamp}-*.ws)" \
+    "보고서 검증 통과" >/dev/null
+fi
+```
 
 | `state` | 뜻 | 위임자가 할 일 |
 | --- | --- | --- |
