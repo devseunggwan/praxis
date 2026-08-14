@@ -633,6 +633,14 @@ run_case "41 report: --silent 로 출력이 없어도 엔드포인트의 comment
   "gh api --silent --method PATCH /repos/owner/repo/issues/comments/999 -F body=@anchor.md" \
   "$FIX" Bash ""
 
+# The command-derived id is the second ref source, and it survives a failure
+# just as the output URL does: a PATCH that landed before a later segment died
+# published a stale anchor, and it prints nothing to fall back on.
+run_case "41a report: exit≠0 라도 엔드포인트 comment id 는 살아있다" \
+  "report:와 다름" PostToolUse "$ISSUE_URL_GH" \
+  "gh api --silent --method PATCH /repos/owner/repo/issues/comments/999 -F body=@anchor.md; false" \
+  "$FIX" Bash "" '{"exit": 1}'
+
 # `gh pr comment > /dev/null` leaves no id anywhere. Nothing can be fetched, so
 # no check ran at all — which is the `unknown` tier, not a pass. Before the tier
 # split this printed to stderr and exited 0, and an exit-0 stderr on PostToolUse

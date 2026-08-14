@@ -777,23 +777,24 @@ def _post_tool_use(payload: dict) -> int:
 
     deadline = time.monotonic() + _LOOKUP_BUDGET_SEC
     refs = _comment_refs(_tool_output(payload.get("tool_response")))
-
-    # A failed response is only evidence that *something* in the command failed.
-    # `gh pr comment ...; false` exits 1 with a real comment URL still in the
-    # output, so the failure is read after the output, never instead of it: a
-    # recovered id means an anchor exists and gets checked exactly as it would
-    # on exit 0. Only when nothing is recoverable does the failure decide, and
-    # then it decides that nothing was published — which keeps the URL-loss
-    # branch below from reporting an anchor that a failed `gh pr comment`
-    # (auth, network) never created.
-    if not refs and _post_failed(payload.get("tool_response")):
-        return 0
-
     if not refs:
         refs = [
             (host, owner, repo, _resolve_pr((host, owner, repo, "", cid), deadline) or "", cid)
             for host, owner, repo, _, cid in _refs_from_command(command)
         ]
+
+    # A failed response is only evidence that *something* in the command failed.
+    # `gh pr comment ...; false` exits 1 with a real comment URL still in the
+    # output, and a `gh api --method PATCH …/comments/999 …; false` carries its
+    # target in the command whether or not it printed anything — so the failure
+    # is read after *both* ref sources, never instead of them. A recovered id
+    # means an anchor to check, and it is checked exactly as it would be on
+    # exit 0. Only with nothing recoverable does the failure decide, and then it
+    # decides nothing was published — which keeps the URL-loss branch below from
+    # reporting an anchor that a failed `gh pr comment` (auth, network) never
+    # created.
+    if not refs and _post_failed(payload.get("tool_response")):
+        return 0
     problems: list[tuple[str, str]] = []
     urls: list[str] = []
 
