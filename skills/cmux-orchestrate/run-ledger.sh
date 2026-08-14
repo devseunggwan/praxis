@@ -15,6 +15,6 @@
 
 set -eu
 
-_RL_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+_RL_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 exec python3 "$_RL_DIR/run_ledger.py" "$@"
