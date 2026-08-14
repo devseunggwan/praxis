@@ -255,6 +255,37 @@ praxis 가 거기에 파일을 남길 이유가 없습니다.
 
 마지막 메시지에는 그 보고서의 절대 경로만 남깁니다.
 
+## Decision gate (판단이 필요할 때)
+
+혼자 정하면 안 되는 지점 — 승인이 필요한 mutation, 두 가지로 읽히는 요구사항 —
+에 닿으면 질문을 게시하고 판정이 올 때까지 막습니다. 자의로 진행하는 것과
+조용히 멈추는 것 둘 다 위임자가 알 수 없으므로, 그 둘 중에 고르지 마세요.
+
+    GATE="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/decision-gate.sh"
+    eval "$(sh "$GATE" ask 'DROP TABLE tmp_x 를 실행해도 됩니까')"
+    # $verdict: approved | rejected | timeout | unavailable
+    # $reason:  위임자가 남긴 사유
+
+질문은 위임자가 **다른 맥락 없이 그것만 읽고** 답할 수 있어야 합니다. 무엇을,
+어디에, 왜 하려는지가 한 문장에 들어가야 합니다 — `계속할까요` 로는 답이 나올
+수 없고, 그 왕복은 통째로 낭비입니다.
+
+| `$verdict` | 뜻 | 워커가 할 일 |
+| --- | --- | --- |
+| `approved` | 승인 | 진행한다 |
+| `rejected` | 거부 | **하지 않는다.** `$reason` 을 근거로 대안을 잡거나, 대안이 없으면 미완료로 보고한다 |
+| `timeout` | 시간 안에 판정 없음 | **하지 않는다.** 거부와 다르다 — 판정이 없었던 것이지 거부된 것이 아니므로, 보고서를 쓰지 말고 질문이 답을 못 받았다고 남긴다 |
+| `unavailable` | 물어볼 수 없음 (cmux 부재 등) | **하지 않는다.** 승인 없이 진행하는 것과 같다 |
+
+`approved` 만이 진행 신호입니다. 나머지 셋은 이유가 다를 뿐 전부 "하지 마라"
+입니다 — 게이트가 답을 못 준 것을 허가로 읽으면 게이트가 없는 것과 같습니다.
+
+기본 대기는 600초이고 `--timeout <초>` 로 조정합니다. 위임자는 폴링하지 않고
+Step 7 에서 질문을 보므로, 짧은 대기는 정상 경로에서 타임아웃이 납니다.
+
+한 번에 한 질문입니다. 새 질문은 직전 기록을 덮어쓰므로, 답을 받기 전에 다시
+묻지 마세요.
+
 ---
 Report results in Korean.
 ```
@@ -474,6 +505,7 @@ silence. 어느 쪽도 메시지만 읽어서는 구분되지 않습니다. 파�
 # distribute 모드는 항목마다 한 파일이므로 전부 돕니다.
 LIVENESS="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/agent-liveness.sh"
 ARP="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/agent-report-path.sh"
+GATE="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/decision-gate.sh"
 WORKTREE="$(sh "$ARP" --worktree "{cwd}")"
 FOUND=0
 
@@ -504,7 +536,13 @@ for WS_FILE in $(find /tmp/ -maxdepth 1 -name 'cmux-delegate-{timestamp}-*.ws' 2
     report=present
   fi
 
-  echo "$WS_FILE $state $report"   # state: working|idle|waiting-input|crash|unknown
+  # 막혀 있는 워커는 여기서 드러납니다. 이 조회가 유일한 소비 지점이고,
+  # 상주 감시자는 두지 않습니다 — 위임자는 이미 이 자리에 서 있습니다.
+  decision=none
+  eval "$(sh "$GATE" status "$WS_ID" | sed 's/^state=/decision=/')"
+
+  echo "$WS_FILE $state $report $decision"   # state: working|idle|waiting-input|crash|unknown
+  [ "$decision" = pending ] && echo "  질문: $question"
 done
 
 if [ "$FOUND" -eq 0 ]; then
@@ -528,6 +566,28 @@ fi
 | `present` | 보고서가 있고 워크트리가 일치 | 아래 필드별 재검증으로 |
 | `absent` | 파일 없음 | `state` 와 조합해 판단. 아래 4가지 원인 표 참조 |
 | `misplaced` | 보고서는 있으나 워크트리 불일치 | 이 워커가 엉뚱한 디렉터리에서 돌았음. 미완료로 취급 |
+
+| `decision` | 뜻 | 위임자가 할 일 |
+| --- | --- | --- |
+| `none` | 물어본 적 없음 | 없음 |
+| `pending` | 워커가 질문하고 막혀 있음 | 답한다 — 아래 `resolve`. 답하기 전에는 `state` 가 `working` 이어도 진행이 아니다 |
+| `resolved` | 이미 답했음 | 없음. 워커는 깨어났다 |
+
+`pending` 은 `state` 표와 함께 읽습니다. 질문을 남기고 막힌 워커는 `wait-for`
+안에 있으므로 `working` 으로 보입니다 — `decision=pending` 이 없으면 그 워커는
+일하는 중으로 오독되고, 타임아웃까지 아무도 답하지 않습니다.
+
+```bash
+GATE="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/decision-gate.sh"
+sh "$GATE" resolve "$WS_ID" approve '이 테이블은 임시본입니다'
+sh "$GATE" resolve "$WS_ID" reject 'prod 는 사람이 직접 한다'
+```
+
+**거부에는 사유를 답니다.** 워커가 받는 것은 판정과 사유뿐이고, 사유가 없으면
+다음 행동을 고를 근거가 없어 그 자리에서 다시 막히거나 임의로 진행합니다.
+이미 답한 질문에 다시 `resolve` 하는 것은 무해합니다 — 첫 판정이 그대로
+반환되고 신호는 다시 가지 않습니다. 두 번째 신호는 이 워크스페이스의 **다음**
+질문을 아무도 답하지 않은 채 통과시킵니다.
 
 | `state` | 뜻 | 위임자가 할 일 |
 | --- | --- | --- |
