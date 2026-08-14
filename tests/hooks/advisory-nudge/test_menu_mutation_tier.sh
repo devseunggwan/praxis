@@ -279,6 +279,110 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# (d7) Tier 1c — `create` / `update` count only on a shared surface
+# ---------------------------------------------------------------------------
+# Issue #974 gap 1 (codex round-1 on PR #966): a menu whose every option mutates
+# was silent because `create` / `update` were in no vocabulary set at all.
+#
+# They are gated rather than added to MUTATION_VERBS because they are also
+# ordinary English for authoring. The unconditional variant was built and
+# measured: it fired on all four negative cases below. Since PR #966 rev 5 the
+# default path is `emit_decision("ask", …)`, so each of those is a human
+# confirmation prompt, not a log line.
+run_case "Tier 1c: create/update a record fires"   advisory default "$(build_payload '["Create the customer record", "Update the customer record"]')"
+run_case "strict: Tier 1c record blocks"           block    strict  "$(build_payload '["Create the customer record", "Update the customer record"]')"
+run_case "Tier 1c KO: 고객 레코드 생성/갱신"          advisory default "$(build_payload '["고객 레코드 생성", "고객 레코드 갱신"]')"
+run_case "Tier 1c: tenants/accounts fire"          advisory default "$(build_payload '["Create the tenant accounts", "Update the tenant accounts"]')"
+
+# The paired control: a safe tier still suppresses a Tier 1c menu, exactly as it
+# does a Tier 1b one. Tier 1c changes what counts as mutating, nothing else.
+run_case "Tier 1c + safe tier suppresses"          pass default "$(build_payload '["Create the customer record", "Preview the change first"]')"
+
+# Negatives — the measured false fires of the unconditional variant. Each of
+# these must stay silent, and this is the block that fails if a future round
+# moves `create` / `update` into MUTATION_VERBS_EN.
+run_case "Tier 1c neg: local file menu"        pass default "$(build_payload '["Create a new test file", "Update the existing test"]')"
+run_case "Tier 1c neg: doc menu"               pass default "$(build_payload '["Create a README section", "Update the changelog"]')"
+run_case "Tier 1c neg: KO 문서 생성/갱신"        pass default "$(build_payload '["문서 생성", "문서 갱신"]')"
+run_case "Tier 1c neg: prompt wording menu"    pass default "$(build_payload '["Create a shorter title", "Update the wording"]')"
+
+# Negatives for the nouns that were drafted into SHARED_SURFACE_NOUNS and
+# removed after probing: their everyday meaning is a repo artifact. Creating a
+# migration authors a file; it is `apply` (Tier 1b) that mutates.
+run_case "Tier 1c neg: migration file"    pass default "$(build_payload '["Create a migration file", "Update the migration file"]')"
+run_case "Tier 1c neg: JSON schema"       pass default "$(build_payload '["Create a JSON schema file", "Update the JSON schema"]')"
+run_case "Tier 1c neg: retry policy"      pass default "$(build_payload '["Create a retry policy in the client", "Update the retry policy"]')"
+run_case "Tier 1c neg: code namespace"    pass default "$(build_payload '["Create a new namespace", "Update the namespace"]')"
+
+# Negatives for the LOCAL_ARTIFACT veto: a kept shared-surface noun sitting
+# inside an authoring artifact is not the shared surface.
+run_case "Tier 1c veto: fixture record"   pass default "$(build_payload '["Create a fixture record for the test", "Update the fixture record"]')"
+run_case "Tier 1c veto: index variable"   pass default "$(build_payload '["Create an index variable", "Update the index variable"]')"
+run_case "Tier 1c veto: test account"     pass default "$(build_payload '["Create a test account", "Update the test account"]')"
+
+# ---------------------------------------------------------------------------
+# (d8) Tier 0b — `cancel` abandons only when nothing else is mutating
+# ---------------------------------------------------------------------------
+# Issue #974 gap 2 (codex round-1 on PR #966). `Cancel the prod deployment`
+# aborts an in-flight change to prod, which is itself a mutation, so a menu of
+# cancel-vs-proceed has no non-mutating tier. It was silent, and NOT because of
+# a vocabulary hole: the option already classified as mutating via `prod`, but
+# `_question_triggers` strips abandonment options before it asks the mutation
+# question, so the single survivor fell below the two-candidate floor.
+run_case "Tier 0b: cancel-with-object fires"   advisory default "$(build_payload '["Cancel the prod deployment", "Proceed with the prod deployment"]')"
+run_case "strict: cancel-with-object blocks"   block    strict  "$(build_payload '["Cancel the prod deployment", "Proceed with the prod deployment"]')"
+run_case "Tier 0b KO: prod 배포 취소/진행"      advisory default "$(build_payload '["prod 배포 취소", "prod 배포 진행"]')"
+
+# The rule is a new false-fire surface in its own right, so both directions are
+# pinned. A bare cancel is still the do-nothing tier — the binary go/no-go that
+# (d) protects must not start firing.
+run_case "Tier 0b neg: bare Cancel"          pass default "$(build_payload '["deploy to prod", "Cancel"]')"
+run_case "Tier 0b neg: 'Cancel this'"        pass default "$(build_payload '["deploy to prod", "Cancel this"]')"
+run_case "Tier 0b neg: KO bare 취소"          pass default "$(build_payload '["prod 배포", "취소"]')"
+run_case "Tier 0b neg: cancel + safe tier"   pass default "$(build_payload '["Cancel the prod deployment", "Preview the rollout first"]')"
+
+# A no-go that spells out what it declines carries the mutation token too, and
+# would have been promoted to a candidate. An explicit negation settles it —
+# read only inside the Tier 0b branch, never as a Tier 0 token of its own.
+run_case "Tier 0b neg: 'Cancel — do not deploy to prod'"  pass default "$(build_payload '["Deploy to prod", "Cancel — do not deploy to prod"]')"
+run_case "Tier 0b neg: KO 취소 — 배포하지 않음"             pass default "$(build_payload '["prod 배포", "취소 — 배포하지 않음"]')"
+
+# The control that keeps the negation token scoped: a global `do not` was tried
+# and rejected because it silenced this menu, where the negation attaches to a
+# rider rather than to the act. Both options still deploy to prod, so it fires.
+run_case "negation token is scoped to cancel"  advisory default "$(build_payload '["Deploy to prod and notify", "Deploy to prod but do not notify"]')"
+
+# ---------------------------------------------------------------------------
+# (d9) Gap 3 — the compound-option VERB axis, documented and deliberately open
+# ---------------------------------------------------------------------------
+# Issue #974 gap 3 asked whether anything remains after (d2)'s row 4 closed the
+# compound-option TARGET axis. Something does: an option pairing a safe MODE
+# token with a mutation verb and naming no high-blast target still suppresses.
+# It is left open on purpose, and these cases pin the reason rather than the
+# wish — a future round that "fixes" it fails here instead of shipping.
+#
+# The residual. `pass` records what the hook DOES, not what is wanted.
+run_case "gap3 residual (open): dry-run→delete, no prod"  pass default "$(build_payload '["Dry-run then delete the customer table", "Delete the customer table"]')"
+run_case "gap3 residual (open): KO 드라이런 후 삭제"        pass default "$(build_payload '["드라이런 후 고객 테이블 삭제", "고객 테이블 삭제"]')"
+
+# The row-4 control proving the residual is real and not a broken probe: the
+# identical shape with a high-blast target fires, in both modes.
+run_case "gap3 control: same shape WITH prod"        advisory default "$(build_payload '["Dry-run then delete the prod table", "Delete the prod table"]')"
+run_case "strict: gap3 control WITH prod blocks"     block    strict  "$(build_payload '["Dry-run then delete the prod table", "Delete the prod table"]')"
+
+# Why it stays open. A verb-axis discriminator (safe MODE + mutation verb and no
+# safe target ⇒ not low-blast) was built and it closes the residual — while also
+# firing on all four menus below. Those are the canonical phrasings of the exact
+# option this hook asks menus to contain, and a dry run necessarily names the
+# verb it simulates: `Dry-run then delete the table` and `Dry-run the deploy` are
+# the same shape. Firing an `ask` at an author who already added the safe tier
+# teaches that adding one does not help, which inverts the hook's purpose.
+run_case "gap3 counter: Dry-run the deploy"        pass default "$(build_payload '["Deploy now", "Dry-run the deploy"]')"
+run_case "gap3 counter: Simulate the merge"        pass default "$(build_payload '["Merge now", "Simulate the merge"]')"
+run_case "gap3 counter: Report-only on the send"   pass default "$(build_payload '["Send the announcement", "Report-only pass on the send"]')"
+run_case "gap3 counter: KO 배포 드라이런"            pass default "$(build_payload '["지금 배포", "배포 드라이런"]')"
+
+# ---------------------------------------------------------------------------
 # (e) BLOCK — strict mode
 # ---------------------------------------------------------------------------
 run_case "strict: incident menu"       block strict "$(build_payload "$INCIDENT")"

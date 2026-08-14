@@ -125,6 +125,127 @@ MUTATION_VERBS_KO = (
 MUTATION_TOKENS_EN = HIGH_BLAST_TARGETS_EN + MUTATION_VERBS_EN
 MUTATION_TOKENS_KO = HIGH_BLAST_TARGETS_KO + MUTATION_VERBS_KO
 
+# Tier 1c — CONDITIONAL mutation verbs (issue #974, codex round-1 gap 1 on
+# PR #966). `create` / `update` do change shared state, but unlike every Tier 1b
+# verb they are also ordinary English for making a file, a heading, or a
+# sentence. They are therefore counted as a mutation signal only when the same
+# option also names a shared surface (below).
+#
+# Measured, not assumed: a prototype that added them to MUTATION_VERBS_EN
+# unconditionally fired on `Create a new test file` / `Update the existing test`,
+# `Create a README section` / `Update the changelog`, `문서 생성` / `문서 갱신`,
+# and `Create a shorter title` / `Update the wording` — four ordinary menus that
+# touch no shared surface. That cost is not a stderr line: since PR #966 rev 5
+# the default path is `emit_decision("ask", …)`, so a false fire is a human
+# confirmation prompt. The gate keeps the issue's own repro (`Create the
+# customer record` / `Update the customer record`) firing while leaving all four
+# silent.
+CONDITIONAL_MUTATION_VERBS_EN = (
+    "create",
+    "update",
+)
+CONDITIONAL_MUTATION_VERBS_KO = (
+    "생성",
+    "갱신",
+)
+
+# The shared surfaces that promote a Tier 1c verb into a mutation signal. Data
+# and infrastructure nouns only — deliberately not `file`, `doc`, `section`,
+# `title`, `test`, which is what separates the issue's repro from the four
+# false-fire menus above. Plurals are listed explicitly because the English
+# lookaround is whole-token (the same reason `development` and `reviewer` are
+# listed beside `dev` and `review`).
+#
+# `schema`, `index`, `namespace`, `migration`, `dag`, `policy` were drafted here
+# and removed after probing: each fired on an ordinary authoring menu
+# (`Create a migration file` / `Update the migration file`,
+# `Create a retry policy in the client` / `Update the retry policy`,
+# `Create a new namespace` / `Update the namespace`, …) because their everyday
+# meaning is a repo artifact, not a shared surface. Creating a migration is
+# authoring a file; it is `apply` — already Tier 1b — that mutates.
+SHARED_SURFACE_NOUNS_EN = (
+    "record",
+    "records",
+    "row",
+    "rows",
+    "table",
+    "tables",
+    "database",
+    "dataset",
+    "bucket",
+    "cluster",
+    "tenant",
+    "tenants",
+    "customer",
+    "customers",
+    "account",
+    "accounts",
+    "subscription",
+    "subscriptions",
+    "secret",
+    "secrets",
+    "credential",
+    "credentials",
+    "pipeline",
+    "webhook",
+)
+SHARED_SURFACE_NOUNS_KO = (
+    "레코드",
+    "테이블",
+    "데이터베이스",
+    "데이터셋",
+    "버킷",
+    "클러스터",
+    "테넌트",
+    "고객",
+    "계정",
+    "구독",
+    "시크릿",
+    "자격 증명",
+    "자격증명",
+    "파이프라인",
+)
+
+# …and the veto: a shared-surface noun sitting inside an authoring artifact is
+# not the shared surface. `Create a fixture record for the test` and
+# `Create an index variable` both name a Tier 1c verb next to a kept noun, and
+# both fired before this set existed.
+#
+# Consulted ONLY from the Tier 1c branch, so no option without `create` /
+# `update` / `생성` / `갱신` changes classification because of it. It is a
+# false-negative surface of its own — a genuine shared-surface menu that
+# happens to say `spec` or `test` goes silent — which is the same direction as
+# the defect being fixed and is recorded under Known limitations in spec.md.
+LOCAL_ARTIFACT_NOUNS_EN = (
+    "file",
+    "files",
+    "doc",
+    "docs",
+    "readme",
+    "changelog",
+    "spec",
+    "comment",
+    "comments",
+    "variable",
+    "fixture",
+    "fixtures",
+    "test",
+    "tests",
+    "draft",
+    "template",
+    "snippet",
+)
+LOCAL_ARTIFACT_NOUNS_KO = (
+    "파일",
+    "문서",
+    "주석",
+    "변수",
+    "테스트",
+    "픽스처",
+    "초안",
+    "템플릿",
+)
+
 # Tier 2 — non-mutating / low blast radius. The option is a real verification
 # alternative that does not touch the shared surface. Presence of ANY of these
 # suppresses the advisory: a safe tier is on the menu, which is all this hook
@@ -196,7 +317,6 @@ ABANDON_TOKENS_EN = (
     "postpone",
     "do nothing",
     "nothing",
-    "cancel",
     "hold",
     "wait",
     "none",
@@ -210,12 +330,59 @@ ABANDON_TOKENS_KO = (
     "안함",
     "대기",
     "보류",
-    "취소",
     "건너뛰",
     "미루",
     "아무것도",
     "그대로 둬",
     "그대로 둔",
+)
+
+# Tier 0b — CONDITIONAL abandonment (issue #974, codex round-1 gap 2 on
+# PR #966). `cancel` / `취소` mean two different things depending on whether the
+# option carries an object. Bare `Cancel` declines to act. `Cancel the prod
+# deployment` cancels something already in flight — that aborts a running change
+# to the shared surface, which is itself a mutation, and a menu of
+# `Cancel the prod deployment` / `Proceed with the prod deployment` has no
+# non-mutating tier at all.
+#
+# Before the fix that menu was silent, and not because of a vocabulary hole:
+# `Cancel the prod deployment` already classified as a mutation via `prod`, but
+# `_question_triggers` strips abandonment options before it ever asks the
+# mutation question, so the option was dropped and the single survivor fell
+# below the two-candidate floor.
+#
+# The discriminator is the mutation evidence the hook already computes, not
+# syntactic object-detection: a regex for `cancel` + determiner + noun would
+# also demote `Cancel the deployment` and `Skip the deployment`, which are
+# genuine do-nothing tiers. The unconditional sets above are checked first, so
+# `do not` / `하지 않` phrasings keep their abandonment status even when they
+# name a prod object.
+CONDITIONAL_ABANDON_EN = ("cancel",)
+CONDITIONAL_ABANDON_KO = ("취소",)
+
+# The rule above has its own false-fire surface, measured: a genuine no-go
+# option that spells out what it is declining (`Cancel — do not deploy to
+# prod`) carries the mutation token too, so it would be promoted to a candidate
+# and fire the advisory on a menu that already offers "whether". An explicit
+# negation settles it in the abandonment direction.
+#
+# Read ONLY inside the Tier 0b branch, never as a Tier 0 token of its own. A
+# global `do not` was tried and rejected: it silenced
+# `Deploy to prod and notify` / `Deploy to prod but do not notify`, where the
+# negation attaches to a rider rather than to the act, and that menu fires
+# today. Scoping it to options that also say `cancel` keeps the blast radius of
+# this whole issue at exactly one word — no option without `cancel` / `취소`
+# changes classification. `하지 않` is already unconditional Tier 0, which is
+# why the KO phrasing never had the reverse false fire; it is listed here too
+# so the pair is readable as one rule.
+NEGATION_TOKENS_EN = (
+    "do not",
+    "don't",
+)
+NEGATION_TOKENS_KO = (
+    "하지 않",
+    "안 함",
+    "안함",
 )
 
 
@@ -236,8 +403,31 @@ def _matches(text: str, ko_tokens: tuple[str, ...], en_tokens: tuple[str, ...]) 
     return any(_en_token_present(token, lower) for token in en_tokens)
 
 
+def _names_shared_surface(text: str) -> bool:
+    """True if the option names a data / infrastructure surface (Tier 1c gate).
+
+    An authoring artifact in the same option vetoes it: `a fixture record for
+    the test` names `record`, but the record is a repo artifact, not the shared
+    surface this hook is about.
+    """
+    if _matches(text, LOCAL_ARTIFACT_NOUNS_KO, LOCAL_ARTIFACT_NOUNS_EN):
+        return False
+    return _matches(text, SHARED_SURFACE_NOUNS_KO, SHARED_SURFACE_NOUNS_EN)
+
+
 def _is_mutation(text: str) -> bool:
-    return _matches(text, MUTATION_TOKENS_KO, MUTATION_TOKENS_EN)
+    """True if this option changes shared state.
+
+    Tier 1a/1b tokens count on their own. Tier 1c verbs (`create` / `update` /
+    `생성` / `갱신`) count only when the option also names a shared surface —
+    they are too common in ordinary file, doc, and prompt wording to carry the
+    signal alone. See the Tier 1c block above for the measured false fires.
+    """
+    if _matches(text, MUTATION_TOKENS_KO, MUTATION_TOKENS_EN):
+        return True
+    if _matches(text, CONDITIONAL_MUTATION_VERBS_KO, CONDITIONAL_MUTATION_VERBS_EN):
+        return _names_shared_surface(text)
+    return False
 
 
 def _names_high_blast_target(text: str) -> bool:
@@ -264,7 +454,22 @@ def _is_low_blast(text: str) -> bool:
 
 
 def _is_abandon(text: str) -> bool:
-    return _matches(text, ABANDON_TOKENS_KO, ABANDON_TOKENS_EN)
+    """True if this option declines to act rather than offering a cheaper path.
+
+    Tier 0 tokens are unconditional. Tier 0b (`cancel` / `취소`) abandons only
+    when nothing else in the option is mutating: a bare `Cancel` is the do-
+    nothing tier, while `Cancel the prod deployment` aborts an in-flight change
+    to the shared surface and stays a candidate (issue #974). An explicit
+    negation inside the same option overrides that — it is a no-go naming its
+    own object, not a cancellation of something already running.
+    """
+    if _matches(text, ABANDON_TOKENS_KO, ABANDON_TOKENS_EN):
+        return True
+    if _matches(text, CONDITIONAL_ABANDON_KO, CONDITIONAL_ABANDON_EN):
+        if _matches(text, NEGATION_TOKENS_KO, NEGATION_TOKENS_EN):
+            return True
+        return not _is_mutation(text)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +595,12 @@ def _question_triggers(texts: list[str]) -> bool:
     Reading low-blast first let that single option suppress an otherwise
     all-prod menu — the spec says abandonment is neither class, so it has to be
     removed before either question is asked of it.
+
+    That ordering is also why `cancel` had to become conditional rather than
+    gain a sibling token (issue #974): step 1 removes the option before step 4
+    can notice it is mutating, so `Cancel the prod deployment` /
+    `Proceed with the prod deployment` fell to one candidate and went silent
+    even though both options change prod.
 
     Divergence from the issue's draft wording, stated deliberately: the issue
     says *every* option must carry a mutation signal. That is not decidable

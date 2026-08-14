@@ -92,6 +92,12 @@ Reading low-blast first let that single option suppress an otherwise all-prod
 menu — abandonment being neither class means it has to be removed before either
 question is asked of it.
 
+That same ordering is why `cancel` had to become *conditional* (Tier 0b below)
+rather than gain a sibling token: step 1 removes the option before step 4 can
+notice it is mutating, so `Cancel the prod deployment` / `Proceed with the prod
+deployment` fell to one candidate and went silent even though both options
+change prod.
+
 **Divergence from the issue's wording, stated deliberately.** The issue says
 *every* option must carry a mutation signal. That is not decidable lexically: a
 scope-reduction option (`한 건만 먼저`) inherits its verb from a sibling option
@@ -170,6 +176,56 @@ a menu offering only `Send Slack now` / `Send email instead` is this same defect
 in different vocabulary. They stay verb-anchored: the nouns (`slack`, `email`)
 also occur in read-only options ("read the Slack thread") and would misfire.
 
+**Tier 1c — conditional mutation verbs** (issue #974, codex round-1 gap 1):
+
+- English (lookaround): `create`, `update`
+- Korean (substring): `생성`, `갱신`
+
+These count as a mutation signal **only when the same option also names a
+shared surface**. They do mutate, but unlike every Tier 1b verb they are also
+ordinary English for authoring a file, a heading, or a sentence — and a false
+fire is not a log line: since PR #966 rev 5 the default path emits
+`permissionDecision: ask`, a human confirmation prompt. The unconditional
+variant was built and measured; it fired on `Create a new test file` /
+`Update the existing test`, `Create a README section` / `Update the changelog`,
+`문서 생성` / `문서 갱신`, and `Create a shorter title` / `Update the wording`.
+The gate keeps the issue's own repro (`Create the customer record` /
+`Update the customer record`) firing while leaving all four silent; the
+fixtures pin both directions.
+
+**Shared surfaces** (promote a Tier 1c verb):
+
+- English (lookaround): `record`, `records`, `row`, `rows`, `table`, `tables`,
+  `database`, `dataset`, `bucket`, `cluster`, `tenant`, `tenants`, `customer`,
+  `customers`, `account`, `accounts`, `subscription`, `subscriptions`,
+  `secret`, `secrets`, `credential`, `credentials`, `pipeline`, `webhook`
+- Korean (substring): `레코드`, `테이블`, `데이터베이스`, `데이터셋`, `버킷`,
+  `클러스터`, `테넌트`, `고객`, `계정`, `구독`, `시크릿`, `자격 증명`,
+  `자격증명`, `파이프라인`
+
+`schema`, `index`, `namespace`, `migration`, `dag`, `policy` were drafted into
+this set and removed after probing: each fired on an ordinary authoring menu
+(`Create a migration file` / `Update the migration file`, `Create a retry
+policy in the client` / `Update the retry policy`, `Create a new namespace` /
+`Update the namespace`), because their everyday meaning is a repo artifact.
+Creating a migration authors a file; it is `apply` — already Tier 1b — that
+mutates.
+
+**Local artifacts** (veto a Tier 1c promotion):
+
+- English (lookaround): `file`, `files`, `doc`, `docs`, `readme`, `changelog`,
+  `spec`, `comment`, `comments`, `variable`, `fixture`, `fixtures`, `test`,
+  `tests`, `draft`, `template`, `snippet`
+- Korean (substring): `파일`, `문서`, `주석`, `변수`, `테스트`, `픽스처`,
+  `초안`, `템플릿`
+
+A shared-surface noun inside an authoring artifact is not the shared surface:
+`Create a fixture record for the test` and `Create an index variable` both name
+a kept noun beside a Tier 1c verb, and both fired before this veto existed.
+
+Both sets are read **only** from the Tier 1c branch, so no option without
+`create` / `update` / `생성` / `갱신` changes classification because of them.
+
 #### Tier 2 — non-mutating / low blast radius (suppresses)
 
 - English (lookaround): `preview`, `dev`, `development`, `staging`, `sandbox`,
@@ -202,10 +258,41 @@ not match inside `code-reviewer`. A false positive in this set only
 #### Tier 0 — abandonment (neither suppresses nor counts as a candidate)
 
 - English (lookaround): `later`, `skip`, `defer`, `postpone`, `do nothing`,
-  `nothing`, `cancel`, `hold`, `wait`, `none`
+  `nothing`, `hold`, `wait`, `none`
 - Korean (substring): `다음 정기`, `다음 주기`, `나중에`, `하지 않`, `안 함`,
-  `안함`, `대기`, `보류`, `취소`, `건너뛰`, `미루`, `아무것도`, `그대로 둬`,
-  `그대로 둔`
+  `안함`, `대기`, `보류`, `건너뛰`, `미루`, `아무것도`, `그대로 둬`, `그대로 둔`
+
+#### Tier 0b — conditional abandonment (`cancel` / `취소`)
+
+Issue #974, codex round-1 gap 2. `cancel` means two different things depending
+on whether the option carries an object. Bare `Cancel` declines to act.
+`Cancel the prod deployment` aborts something already in flight — that is
+itself a change to the shared surface, and a menu of `Cancel the prod
+deployment` / `Proceed with the prod deployment` has no non-mutating tier at
+all. It was silent.
+
+**Not a vocabulary hole.** `Cancel the prod deployment` already classified as
+mutating via `prod`; the fire predicate strips abandonment options at step 1,
+before step 4 ever asks the mutation question, so the option was dropped and
+the single survivor fell below the two-candidate floor. The fix is in the
+classifier, not the token list.
+
+So `cancel` / `취소` abandon **only when nothing else in the option is
+mutating**. The discriminator is the mutation evidence the hook already
+computes, not syntactic object-detection: a regex for `cancel` + determiner +
+noun would also demote `Cancel the deployment` and `Skip the deployment`, which
+are genuine do-nothing tiers.
+
+**Negation override.** The rule has its own false-fire surface, measured: a
+genuine no-go that spells out what it declines (`Cancel — do not deploy to
+prod`) carries the mutation token too and would be promoted to a candidate. An
+explicit negation — `do not`, `don't`, `하지 않`, `안 함`, `안함` — settles it
+back to abandonment. It is read **only** inside the Tier 0b branch, never as a
+Tier 0 token of its own: a global `do not` was tried and rejected because it
+silenced `Deploy to prod and notify` / `Deploy to prod but do not notify`,
+where the negation attaches to a rider rather than to the act, and that menu
+fires today. Scoping it keeps the whole gap-2 blast radius at one word — no
+option without `cancel` / `취소` changes classification.
 
 ### What is advised
 
@@ -217,6 +304,11 @@ not match inside `code-reviewer`. A false positive in this set only
 | A non-abandonment candidate carries a low-blast signal and names no high-blast target | silent pass-through (a safe tier is on the menu) |
 | The question body carries a `Safe-tier-unavailable: <reason>` line | silent pass-through for that question (reason stated) |
 | Fewer than 2 candidates after abandonment options are dropped | silent pass-through (binary go/no-go) |
+| An option says `cancel` / `취소` and carries no other mutation signal | that option is abandonment (dropped, neither candidate nor safe tier) |
+| An option says `cancel` / `취소` and also carries an explicit negation (`do not`, `하지 않`) | that option is abandonment, whatever else it names |
+| An option says `cancel` / `취소` beside a mutation signal and no negation | that option stays a **candidate** (aborting an in-flight change is a mutation) |
+| An option says `create` / `update` / `생성` / `갱신` and names a shared surface | mutation signal (Tier 1c) |
+| …and names a local artifact (`file`, `test`, `문서`, …) instead, or as well | no mutation signal from Tier 1c |
 | No candidate carries a mutation signal | silent pass-through (not a tier-relevant menu) |
 | Empty / missing options | silent pass-through |
 | Missing / malformed payload | silent pass-through (fail-open) |
@@ -261,8 +353,48 @@ around the gate.
   lever (which that sibling asks for anyway) suppresses this one too.
 - **Detection is lexical.** An option that is non-mutating for a reason no token
   names (`another team's staging cluster, called by its hostname`) is invisible,
-  and the advisory fires. The nudge asks for one line of reasoning either way, so
-  a false fire costs one sentence.
+  and the advisory fires. **A false fire is not cheap.** An earlier revision of
+  this section said it "costs one sentence"; that was written when the hook was
+  stderr-only, and has been wrong since PR #966 rev 5 made the default path
+  `emit_decision("ask", …)`. A false fire now costs the user a confirmation
+  prompt, which is why Tier 1c is gated rather than simply widened.
+- **Gap 3 is open on purpose — the compound-option VERB axis.** The suppression
+  rule disqualifies a low-blast token only when the option names a high-blast
+  *target*. An option pairing a safe **mode** token with a mutation **verb** and
+  naming no high-blast target still suppresses, so
+  `Dry-run then delete the customer table` / `Delete the customer table` is
+  silent in both modes — while the identical shape with `prod` inserted fires
+  (strict `rc=2`), which is what shows the residual is real.
+  `Report-only pass then send the announcement`, `Simulate then truncate the
+  table` and `드라이런 후 고객 테이블 삭제` behave the same way.
+
+  The verb-axis discriminator was built and rejected on measurement, not taste.
+  It closes all four residual cases and simultaneously fires on `Deploy now` /
+  `Dry-run the deploy`, `Merge now` / `Simulate the merge`, `Send the
+  announcement` / `Report-only pass on the send`, and `지금 배포` /
+  `배포 드라이런`. Those are the canonical phrasings of the exact option this
+  hook asks menus to contain, and a dry run necessarily names the verb it
+  simulates — `Dry-run then delete the table` and `Dry-run the deploy` are the
+  same shape, and no lexical rule separates them. Firing an `ask` at an author
+  who already added the safe tier teaches that adding one does not help, which
+  inverts the hook's purpose. The residual is the price of the target-based
+  discriminator, and both the residual and the four counter-cases are pinned in
+  the fixtures so a future round fails there rather than shipping the trade
+  blind.
+- **Tier 1c is invisible outside its noun list.** `Create the audit ledger` /
+  `Update the audit ledger` mutates a shared surface no `SHARED_SURFACE_NOUNS`
+  entry names, so it stays silent. That list is an enumeration, not a
+  measurement — no corpus of real `AskUserQuestion` menus backs it, and the size
+  of what it misses is unknown. The miss is in the same direction as the defect
+  gap 1 fixed.
+- **The local-artifact veto over-suppresses symmetrically.** A genuine
+  shared-surface menu that happens to say `spec` or `test`
+  (`Update the customer records in the test tenant`) loses its Tier 1c signal.
+- **`table` still collides with prose tables.**
+  `Create a comparison table in the README` / `Update the existing table` fires:
+  the veto is per option, and the second option names no artifact. Closing it
+  would need a menu-level veto, which was not built because nothing measured
+  justified the extra rule.
 - **`production` matches its adjectival use.** `production-ready` matches the
   lookaround (`-` is not an ASCII letter). `block-manufactured-action-menu`
   omitted the long form for exactly this reason; it is kept here because the
@@ -304,8 +436,17 @@ recognised as low-blast; an external-write-only menu fires); the CodeRabbit
 round-1 regressions (an option matching abandonment *and* low-blast does not
 suppress, in advisory and strict mode, EN and KO; a stated
 `Safe-tier-unavailable:` line suppresses in both modes; a mid-line or empty
-marker does not; a reason on question 1 does not cover question 2); strict-env value
-contract (`1` blocks,
+marker does not; a reason on question 1 does not cover question 2); the issue
+#974 gaps in both directions (Tier 1c fires on `create` / `update` at a shared
+surface, EN and KO, advisory and strict, and stays silent on the four measured
+authoring menus, on the six nouns dropped after probing, and behind the
+local-artifact veto; Tier 0b fires on a cancel-with-object menu, EN and KO, and
+stays silent on a bare `Cancel`, `Cancel this`, KO `취소`, a cancel beside a
+safe tier, and a no-go carrying an explicit negation, while the rider menu
+`do not notify` still fires so the negation token stays scoped; the gap-3
+residual pinned as open, its `prod` control still firing in both modes, and the
+four counter-cases that the rejected verb-axis fix would have broken);
+strict-env value contract (`1` blocks,
 `0` / `false` / `no` / `true` stay advisory); per-question isolation (a safe
 second question does not cover an all-prod first one); malformed-payload
 fail-open across seven shapes; and a self-application regression that feeds the
