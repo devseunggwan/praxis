@@ -186,9 +186,9 @@ no id anywhere, and is reported as unverified rather than passed.
   would report base-only files as uncovered. No base, or any git failure,
   yields no advisory rather than a false one.
 
-### Three tiers, one exit code
+### Three tiers, two channels
 
-Every finding carries a tier, and all three leave through **exit 2**.
+Every finding carries a tier, and the tier decides which channel carries it.
 
 | Tier | What it covers | What the wording asks for |
 | --- | --- | --- |
@@ -219,7 +219,8 @@ is the wrong thing to say about a check that could not run.
 "the SHA could not be read" in one list. Raising the exit code on that list
 would have reported a `gh` outage as a rule violation, and leaving it at 0 let
 an unrun check read as a clean one. Separating the tier keeps both honest: a
-lookup failure still exits 2, and still says which of the two happened.
+lookup failure reaches the model through `additionalContext`, and still says
+which of the two happened.
 
 An anchor that turns out to be an ordinary issue comment is simply not an
 anchor by the heading-prefix test. A lookup failure says why rather than

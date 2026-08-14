@@ -64,12 +64,15 @@ An undecodable comment post and an unreadable body file.
 
 Every finding carries a tier — `blocking` (a rule violation), `advisory` (worth
 considering, possibly a false positive) or `unknown` (the check did not run).
-All three exit 2, because a PostToolUse hook that exits 0 has its stderr
-discarded before Claude sees it: exit 2 is the only channel that reaches the
-model, so it is what "report" means on this event. The tier decides the wording
-and the action asked for, never the exit code. `unknown` exits 2 for the same
-reason the others do — a check that silently did not run reads as a pass, which
-is the one thing it is not.
+Two channels carry them. A body holding at least one `blocking` finding leaves
+through stderr at exit 2, the loudest thing a PostToolUse hook has. A body
+holding only `advisory` and `unknown` findings leaves through
+`hookSpecificOutput.additionalContext` at exit 0 — also model-visible, and it
+does not interrupt a turn over something that may be a false positive or over a
+check that merely did not run. What exiting 0 does discard is bare stderr, so
+neither tier is ever written there. `unknown` still has to be said out loud: a
+check that silently did not run reads as a pass, which is the one thing it is
+not.
 
 ## Bypass
 
@@ -114,9 +117,9 @@ _BYPASS_ENV = "PRAXIS_HOOK_BYPASS_ANCHOR_GATE"
 _BYPASS_TOKEN = "# anchor-gate:"
 _ADVISORY_ENV = "PRAXIS_ANCHOR_GATE_ADVISORY"
 
-# Three tiers, one exit code. A PostToolUse hook cannot block, and exiting 0
-# throws its stderr away unread, so every finding leaves through exit 2 and the
-# tier carries what the reader is being asked to do about it.
+# Three tiers, two channels. `blocking` leaves through stderr at exit 2; the
+# other two through additionalContext at exit 0, which is model-visible where
+# bare stderr at exit 0 is not.
 _BLOCKING = "blocking"
 _ADVISORY = "advisory"
 _UNKNOWN = "unknown"
