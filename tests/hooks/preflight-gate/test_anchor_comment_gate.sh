@@ -246,6 +246,10 @@ print(json.dumps(payload))
 # run_case <name> <expect> <event> <fake-gh-dir> <command> [cwd] [tool] [output]
 #   expect: block  — exit 2 + rendered block message
 #           pass   — exit 0, and (PostToolUse) no finding on stderr
+#           report:X   — exit 2 and stderr contains X (every PostToolUse finding
+#                        exits 2: on this event exit 0 discards the stderr)
+#           noreport:X — exit 2 and stderr does NOT contain X
+#           demoted:X  — exit 0 and stderr contains X (ADVISORY opt-out)
 #           warn:X   — exit 0 and stderr contains X
 #           nowarn:X — exit 0 and stderr does NOT contain X
 run_case() {
@@ -267,11 +271,17 @@ run_case() {
       # block message must be present.
       [ "$rc" -eq 2 ] && [[ "$out" == *"ANCHOR VERIFICATION COMMENT"* ]] || ok=0
       ;;
-    strict-block)
-      [ "$rc" -eq 2 ] && [[ "$out" == *"[anchor-gate]"* ]] || ok=0
+    report:*)
+      [ "$rc" -eq 2 ] && [[ "$out" == *"${expect#report:}"* ]] || ok=0
+      ;;
+    noreport:*)
+      [ "$rc" -eq 2 ] && [[ "$out" != *"${expect#noreport:}"* ]] || ok=0
+      ;;
+    demoted:*)
+      [ "$rc" -eq 0 ] && [[ "$out" == *"${expect#demoted:}"* ]] || ok=0
       ;;
     pass)
-      [ "$rc" -eq 0 ] && [[ "$out" != *"[anchor-gate] 게시된 앵커에 문제"* ]] || ok=0
+      [ "$rc" -eq 0 ] && [[ "$out" != *"[anchor-gate] 게시된 앵커 검사 결과"* ]] || ok=0
       ;;
     warn:*)
       [ "$rc" -eq 0 ] && [[ "$out" == *"${expect#warn:}"* ]] || ok=0
@@ -483,39 +493,61 @@ run_case "30 pass: 게시된 앵커가 정상이고 HEAD 와 일치" \
   pass PostToolUse "$OK_GH" "gh pr comment 42 --body-file anchor.md" \
   "$FIX" Bash "$COMMENT_URL"
 
-run_case "31 warn: 게시된 앵커의 SHA 가 현재 HEAD 와 다름 (stale)" \
-  "warn:와 다름" PostToolUse "$STALE_GH" "gh pr comment 42 --body-file anchor.md" \
+run_case "31 report(blocking): 게시된 앵커의 SHA 가 현재 HEAD 와 다름 (stale)" \
+  "report:와 다름" PostToolUse "$STALE_GH" "gh pr comment 42 --body-file anchor.md" \
   "$FIX" Bash "$COMMENT_URL"
 
-run_case "32 warn: 게시된 앵커에 갱신 이력 토글이 없음" \
-  "warn:갱신 이력 토글" PostToolUse "$BROKEN_GH" "gh pr comment 42 --body-file anchor.md" \
+# Positive control for case 36. There, the PR lookup fails and the freshness
+# row comes back `unknown`; here the identical path with a working lookup
+# produces a verdict instead. Without this pair, "no freshness finding" and
+# "freshness never ran" are the same observation.
+run_case "31b noreport: 조회가 성공하면 unknown 이 아니라 판정이 나온다" \
+  "noreport:확인 불가" PostToolUse "$STALE_GH" "gh pr comment 42 --body-file anchor.md" \
   "$FIX" Bash "$COMMENT_URL"
 
-PRAXIS_ANCHOR_GATE_STRICT=1 \
-  run_case "32b strict: 같은 결함이 strict 에서는 exit 2" \
-  strict-block PostToolUse "$BROKEN_GH" "gh pr comment 42 --body-file anchor.md" \
+run_case "32 report(blocking): 게시된 앵커에 갱신 이력 토글이 없음" \
+  "report:갱신 이력 토글" PostToolUse "$BROKEN_GH" "gh pr comment 42 --body-file anchor.md" \
   "$FIX" Bash "$COMMENT_URL"
+
+# The tier is named in the report, so a reader can tell "the rule was broken"
+# from "the check never ran" without reading the message body.
+run_case "32a report: 구조 결함은 blocking 티어로 라벨링됨" \
+  "report:blocking (규약 위반" PostToolUse "$BROKEN_GH" \
+  "gh pr comment 42 --body-file anchor.md" "$FIX" Bash "$COMMENT_URL"
+
+# The opt-out returns the exit to 0. On PostToolUse that is silence rather than
+# a softer warning, which is exactly what opting out of this gate buys.
+PRAXIS_ANCHOR_GATE_ADVISORY=1 \
+  run_case "32b demoted: ADVISORY=1 이면 같은 결함이 exit 0" \
+  "demoted:갱신 이력 토글" PostToolUse "$BROKEN_GH" \
+  "gh pr comment 42 --body-file anchor.md" "$FIX" Bash "$COMMENT_URL"
+
+# Exact `1` only, matching the value convention of the var it replaced.
+PRAXIS_ANCHOR_GATE_ADVISORY=true \
+  run_case "32c report: ADVISORY=true 는 데모트하지 않음 (정확히 1 만)" \
+  "report:갱신 이력 토글" PostToolUse "$BROKEN_GH" \
+  "gh pr comment 42 --body-file anchor.md" "$FIX" Bash "$COMMENT_URL"
 
 # The URL is what names the target, whatever the command looked like — this is
 # the form the old PreToolUse parser could not decode at all.
-run_case "33 warn: --input 으로 게시해도 URL 로 되읽어 검사" \
-  "warn:갱신 이력 토글" PostToolUse "$BROKEN_GH" \
+run_case "33 report: --input 으로 게시해도 URL 로 되읽어 검사" \
+  "report:갱신 이력 토글" PostToolUse "$BROKEN_GH" \
   "gh api --method PATCH /repos/owner/repo/issues/comments/999 --input payload.json" \
   "$FIX" Bash '{"html_url":"'"$COMMENT_URL"'"}'
 
 GHES_GH=$(make_fake_gh ghes "$FIX/no-history.md")
-run_case "34 warn: GHES URL 의 호스트가 두 조회에 모두 전달됨" \
-  "warn:갱신 이력 토글" PostToolUse "$GHES_GH" "gh pr comment 42 --body-file anchor.md" \
+run_case "34 report: GHES URL 의 호스트가 두 조회에 모두 전달됨" \
+  "report:갱신 이력 토글" PostToolUse "$GHES_GH" "gh pr comment 42 --body-file anchor.md" \
   "$FIX" Bash "https://ghe.example/owner/repo/pull/42#issuecomment-999"
 
 API_ERR_GH=$(make_fake_gh api-error "$FIX/ok.md")
-run_case "35 warn: 코멘트 조회 실패는 판정하지 않고 사유를 밝힘" \
-  "warn:조회 실패" PostToolUse "$API_ERR_GH" "gh pr comment 42 --body-file anchor.md" \
+run_case "35 report(unknown): 코멘트 조회 실패는 판정하지 않고 사유를 밝힘" \
+  "report:조회 실패" PostToolUse "$API_ERR_GH" "gh pr comment 42 --body-file anchor.md" \
   "$FIX" Bash "$COMMENT_URL"
 
 PR_ERR_GH=$(make_fake_gh pr-error "$FIX/ok.md")
-run_case "36 warn: PR 조회 실패 → SHA 신선도 확인 불가" \
-  "warn:신선도 확인 불가" PostToolUse "$PR_ERR_GH" "gh pr comment 42 --body-file anchor.md" \
+run_case "36 report(unknown): PR 조회 실패 → SHA 신선도 확인 불가" \
+  "report:신선도 확인 불가" PostToolUse "$PR_ERR_GH" "gh pr comment 42 --body-file anchor.md" \
   "$FIX" Bash "$COMMENT_URL"
 
 # An ordinary comment is not an anchor, so nothing is checked.
@@ -547,8 +579,8 @@ echo "$REPO_SHA main"
 exit 0
 EOF
 chmod +x "$COVER_GH/gh"
-run_case "40 warn: 표가 언급하지 않은 변경 파일 → 경고만, 통과" \
-  "warn:untouched-by-anchor.md" PostToolUse "$COVER_GH" \
+run_case "40 report(advisory): 표가 언급하지 않은 변경 파일" \
+  "report:untouched-by-anchor.md" PostToolUse "$COVER_GH" \
   "gh pr comment 42 --body-file anchor.md" "$REPO" Bash "$COMMENT_URL"
 
 # --silent / a URL-stripping --jq / `> /dev/null` publish an anchor while
@@ -565,15 +597,22 @@ echo "$SHA main"
 exit 0
 EOF
 chmod +x "$ISSUE_URL_GH/gh"
-run_case "41 warn: --silent 로 출력이 없어도 엔드포인트의 comment id 로 추적" \
-  "warn:와 다름" PostToolUse "$ISSUE_URL_GH" \
+run_case "41 report: --silent 로 출력이 없어도 엔드포인트의 comment id 로 추적" \
+  "report:와 다름" PostToolUse "$ISSUE_URL_GH" \
   "gh api --silent --method PATCH /repos/owner/repo/issues/comments/999 -F body=@anchor.md" \
   "$FIX" Bash ""
 
-# `gh pr comment > /dev/null` leaves no id anywhere. Nothing can be fetched,
-# so the only honest outcome is saying the anchor went unverified.
-run_case "41b warn: URL 이 사라진 pr comment 게시는 미검증으로 보고" \
-  "warn:확인하지 못했습니다" PostToolUse "$OK_GH" \
+# `gh pr comment > /dev/null` leaves no id anywhere. Nothing can be fetched, so
+# no check ran at all — which is the `unknown` tier, not a pass. Before the tier
+# split this printed to stderr and exited 0, and an exit-0 stderr on PostToolUse
+# is discarded before Claude reads it: the report existed and reached no one.
+run_case "41b report(unknown): URL 이 사라진 게시는 검사 미실행으로 보고" \
+  "report:아예 실행하지 못했습니다" PostToolUse "$OK_GH" \
+  "gh pr comment 42 --body-file $FIX/ok.md > /dev/null" \
+  "$FIX" Bash ""
+
+run_case "41c report(unknown): 그 보고가 unknown 티어로 라벨링됨" \
+  "report:unknown (검사가 실행되지 않았습니다" PostToolUse "$OK_GH" \
   "gh pr comment 42 --body-file $FIX/ok.md > /dev/null" \
   "$FIX" Bash ""
 
@@ -593,7 +632,7 @@ exit 0
 EOF
 chmod +x "$TWO_GH/gh"
 run_case "42 warn: 한 명령이 게시한 두 번째 앵커도 검사" \
-  "warn:갱신 이력 토글" PostToolUse "$TWO_GH" \
+  "report:갱신 이력 토글" PostToolUse "$TWO_GH" \
   "gh pr comment 42 --body-file a.md && gh pr comment 43 --body-file b.md" \
   "$FIX" Bash "$COMMENT_URL
 https://github.com/owner/repo/pull/43#issuecomment-1000"
@@ -605,8 +644,8 @@ echo other >"$REPO/only-on-sidetrack.md"
 git -C "$REPO" add only-on-sidetrack.md
 git -C "$REPO" -c user.name=test -c user.email=test@example.com \
   commit -q -m "a commit the PR does not contain"
-run_case "43 nowarn: 커버리지는 로컬 HEAD 가 아니라 PR head 에 고정" \
-  "nowarn:only-on-sidetrack.md" PostToolUse "$COVER_GH" \
+run_case "43 noreport: 커버리지는 로컬 HEAD 가 아니라 PR head 에 고정" \
+  "noreport:only-on-sidetrack.md" PostToolUse "$COVER_GH" \
   "gh pr comment 42 --body-file anchor.md" "$REPO" Bash "$COMMENT_URL"
 
 # Case 9 needs raw malformed stdin, not a JSON-wrapped command string.
