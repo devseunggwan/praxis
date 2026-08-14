@@ -58,15 +58,31 @@ rewrites the notice and leaves the anchor stale.
 
 ## What warns (both phases)
 
-An undecodable comment post, an unreadable body file, a stale SHA found after
-the fact, and changed files no table row mentions. `PRAXIS_ANCHOR_GATE_STRICT=1`
-turns the PostToolUse advisory into a non-zero exit.
+An undecodable comment post and an unreadable body file.
+
+## What PostToolUse reports
+
+Every finding carries a tier — `blocking` (a rule violation), `advisory` (worth
+considering, possibly a false positive) or `unknown` (the check did not run).
+Two channels carry them. A body holding at least one `blocking` finding leaves
+through stderr at exit 2, the loudest thing a PostToolUse hook has. A body
+holding only `advisory` and `unknown` findings leaves through
+`hookSpecificOutput.additionalContext` at exit 0 — also model-visible, and it
+does not interrupt a turn over something that may be a false positive or over a
+check that merely did not run. What exiting 0 does discard is bare stderr, so
+neither tier is ever written there. `unknown` still has to be said out loud: a
+check that silently did not run reads as a pass, which is the one thing it is
+not.
 
 ## Bypass
 
 `PRAXIS_HOOK_BYPASS_ANCHOR_GATE=1`, or `# anchor-gate: <reason>` as a trailing
 shell comment. The reason is the point: it turns an unverifiable post into a
 recorded decision rather than an accident.
+
+`PRAXIS_ANCHOR_GATE_ADVISORY=1` demotes the PostToolUse exit to 0 without
+silencing the pre-post block. It replaces `PRAXIS_ANCHOR_GATE_STRICT`, whose
+behaviour is now the default.
 """
 from __future__ import annotations
 
@@ -99,7 +115,20 @@ _GIT_TIMEOUT_SEC = 3
 _LOOKUP_BUDGET_SEC = 15.0
 _BYPASS_ENV = "PRAXIS_HOOK_BYPASS_ANCHOR_GATE"
 _BYPASS_TOKEN = "# anchor-gate:"
-_STRICT_ENV = "PRAXIS_ANCHOR_GATE_STRICT"
+_ADVISORY_ENV = "PRAXIS_ANCHOR_GATE_ADVISORY"
+
+# Three tiers, two channels. `blocking` leaves through stderr at exit 2; the
+# other two through additionalContext at exit 0, which is model-visible where
+# bare stderr at exit 0 is not.
+_BLOCKING = "blocking"
+_ADVISORY = "advisory"
+_UNKNOWN = "unknown"
+_TIER_NOTE = {
+    _BLOCKING: "규약 위반 — 지금 고치세요",
+    _ADVISORY: "고려하세요 — 오탐일 수 있습니다",
+    _UNKNOWN: "검사가 실행되지 않았습니다 — 통과가 아닙니다",
+}
+_TIER_ORDER = (_BLOCKING, _UNKNOWN, _ADVISORY)
 # The skeleton itself lives in the operator's own workflow doc, which is not
 # part of this repo — so the reference names the file a praxis user can
 # actually open, and that spec points onward.
@@ -519,23 +548,27 @@ def _toggle_summaries(body: str) -> list[str]:
     ]
 
 
-def _structure_findings(body: str) -> list[str]:
-    """Return the names of the required fields that are missing or mismatched."""
-    missing: list[str] = []
+def _structure_findings(body: str) -> list[tuple[str, str]]:
+    """Required fields that are missing or mismatched, each as (tier, message).
+
+    Structure is decidable from the body alone, so every finding here is
+    `blocking`: nothing about it depends on a lookup that could have failed.
+    """
+    missing: list[tuple[str, str]] = []
     d = _dialect(body)
 
     if not _heading_match(body):
-        missing.append(d["heading_label"])
+        missing.append((_BLOCKING, d["heading_label"]))
 
     rows = [int(n) for n in _TABLE_ROW_RE.findall(_claim_table_region(body))]
     if not rows:
-        missing.append("검증 항목 표 (번호 행이 없음)")
+        missing.append((_BLOCKING, "검증 항목 표 (번호 행이 없음)"))
 
     summaries = _toggle_summaries(body)
     if not any(d["unverified"] in s for s in summaries):
-        missing.append(f"{d['unverified']} 토글")
+        missing.append((_BLOCKING, f"{d['unverified']} 토글"))
     if not any(d["history"] in s for s in summaries):
-        missing.append(f"{d['history']} 토글")
+        missing.append((_BLOCKING, f"{d['history']} 토글"))
 
     evidence = {
         int(m.group(1))
@@ -544,11 +577,12 @@ def _structure_findings(body: str) -> list[str]:
     }
     uncovered = sorted(set(rows) - evidence)
     if uncovered:
-        missing.append(
+        missing.append((
+            _BLOCKING,
             "행별 근거 토글 — 표 행 "
             + ", ".join(str(n) for n in uncovered)
-            + f" 에 대응하는 {d['evidence_label']} 이 없음"
-        )
+            + f" 에 대응하는 {d['evidence_label']} 이 없음",
+        ))
     return missing
 
 
@@ -720,6 +754,21 @@ def _resolve_pr(ref: tuple[str, str, str, str, str], deadline: float) -> str | N
     return m.group(1) if m else None
 
 
+def _post_failed(tool_response: object) -> bool:
+    """Whether the Bash call reported a failure — unparseable exit reads as success."""
+    if not isinstance(tool_response, dict):
+        return False
+    if tool_response.get("interrupted") is True or tool_response.get("isError") is True:
+        return True
+    exit_code = tool_response.get("exit")
+    if exit_code is None:
+        return False
+    try:
+        return int(exit_code) != 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _post_tool_use(payload: dict) -> int:
     """Verify the anchors that were actually published. Advisory unless strict."""
     command = (payload.get("tool_input") or {}).get("command") or ""
@@ -733,63 +782,129 @@ def _post_tool_use(payload: dict) -> int:
             (host, owner, repo, _resolve_pr((host, owner, repo, "", cid), deadline) or "", cid)
             for host, owner, repo, _, cid in _refs_from_command(command)
         ]
+
+    # A failed response is only evidence that *something* in the command failed.
+    # `gh pr comment ...; false` exits 1 with a real comment URL still in the
+    # output, and a `gh api --method PATCH …/comments/999 …; false` carries its
+    # target in the command whether or not it printed anything — so the failure
+    # is read after *both* ref sources, never instead of them. A recovered id
+    # means an anchor to check, and it is checked exactly as it would be on
+    # exit 0. Only with nothing recoverable does the failure decide, and then it
+    # decides nothing was published — which keeps the URL-loss branch below from
+    # reporting an anchor that a failed `gh pr comment` (auth, network) never
+    # created.
+    if not refs and _post_failed(payload.get("tool_response")):
+        return 0
+    problems: list[tuple[str, str]] = []
+    urls: list[str] = []
+
     if not refs:
         # A `gh pr comment` whose URL was redirected away leaves no id
-        # anywhere — the anchor is unverified, and saying so is the only
-        # honest outcome.
+        # anywhere. Nothing was checked, and an unrun check is its own state:
+        # reporting it as clean is what makes a stale SHA ship unremarked.
         posts, _ = _comment_posts(command, payload.get("cwd") or os.getcwd())
         if posts:
-            print(
-                "[anchor-gate] 앵커를 게시했지만 출력에 코멘트 URL 이 없어 "
-                "SHA 신선도를 확인하지 못했습니다 — 출력을 버리지 말거나 "
-                "comment id 로 PATCH 하세요.",
-                file=sys.stderr,
-            )
-        return 0
+            problems.append((
+                _UNKNOWN,
+                "앵커를 게시했지만 출력에 코멘트 URL 이 없어 구조·SHA 신선도 검사를 "
+                "아예 실행하지 못했습니다 — 출력을 버리지 말거나 comment id 로 PATCH 하세요.",
+            ))
+        return _report(problems, urls)
 
-    problems: list[str] = []
-    urls: list[str] = []
     for ref in refs:
+        tag = f"[comment {ref[4]}] " if len(refs) > 1 else ""
         post, err = _fetch_anchor(ref, deadline)
         if err:
-            print(f"[anchor-gate] {err} — 게시된 앵커를 검증하지 못했습니다.", file=sys.stderr)
+            problems.append((_UNKNOWN, tag + f"{err} — 게시된 앵커를 검증하지 못했습니다."))
             continue
         if post is None:
             continue
         urls.append(post["url"])
-        tag = f"[{post['url']}] " if len(refs) > 1 else ""
-        problems += [tag + p for p in _structure_findings(post["body"])]
+        problems += [(tier, tag + msg) for tier, msg in _structure_findings(post["body"])]
 
         heading = _heading_match(post["body"])
         if not heading:
             continue
         if not post["pr"]:
-            problems.append(tag + "SHA 신선도 확인 불가 (코멘트의 PR 번호를 찾지 못함)")
+            problems.append((_UNKNOWN, tag + "SHA 신선도 확인 불가 (코멘트의 PR 번호를 찾지 못함)"))
             continue
         head, base, lookup_err = _head_and_base(post, deadline)
         if lookup_err:
-            problems.append(tag + f"SHA 신선도 확인 불가 ({lookup_err})")
+            problems.append((_UNKNOWN, tag + f"SHA 신선도 확인 불가 ({lookup_err})"))
         elif head and not (head.startswith(heading.group(1)) or heading.group(1).startswith(head)):
-            problems.append(
+            problems.append((
+                _BLOCKING,
                 tag + f"앵커 SHA `{heading.group(1)}` 가 현재 HEAD `{head[:7]}` 와 다름 — "
-                "stale 앵커는 없는 코드에 대한 증거를 주장한다"
-            )
+                "stale 앵커는 없는 코드에 대한 증거를 주장한다",
+            ))
         cwd = payload.get("cwd") or os.getcwd()
-        for path in _uncovered_files(post["body"], base, head, deadline, cwd):
-            print(f"[anchor-gate] 미커버 파일 (차단 아님): {path}", file=sys.stderr)
+        uncovered = list(_uncovered_files(post["body"], base, head, deadline, cwd))
+        if uncovered:
+            problems.append((
+                _ADVISORY,
+                tag + "표 행이 언급하지 않는 변경 파일: " + ", ".join(uncovered)
+                + " (파일↔주장은 1:1 이 아니므로 오탐일 수 있습니다)",
+            ))
 
+    return _report(problems, urls)
+
+
+def _report(problems: list[tuple[str, str]], urls: list[str]) -> int:
+    """Print the findings grouped by tier and return the exit code.
+
+    Both channels reach the model, and which one a finding takes has to match
+    what the finding actually is. Exit 2 is read as a *deny* one layer up —
+    `_dispatch.run_group` returns 2 for the whole group and
+    `_fire_ledger.classify_decision` records `block` — so sending a coverage
+    hint or a `gh` timeout out that way files it in the ledger next to a rule
+    violation, and the fire-rate audit that scores this hook then cannot tell
+    the two apart.
+
+    So `blocking` exits 2 and everything else leaves through
+    `hookSpecificOutput.additionalContext` at exit 0, mirroring
+    `second-failure-advisory` and `builtin-task-postuse`. The earlier form
+    exited 2 for all three tiers on the claim that stderr-at-exit-0 is the
+    only alternative — true of stderr, and beside the point: those two hooks
+    were already using this channel on this event.
+
+    The fix instruction rides with the exit-2 branch only. "Fix the comment
+    now" is the wrong thing to say about a check that could not run.
+    `PRAXIS_ANCHOR_GATE_ADVISORY=1` demotes the blocking branch to 0 as well.
+    """
     if not problems:
         return 0
-    post = {"url": ", ".join(urls) or "(URL 미상)"}
+    lines = []
+    for tier in _TIER_ORDER:
+        found = [msg for t, msg in problems if t == tier]
+        if found:
+            lines.append(f"  {tier} ({_TIER_NOTE[tier]}):")
+            lines += [f"    - {m}" for m in found]
+    header = "[anchor-gate] 게시된 앵커 검사 결과 — " + (", ".join(urls) or "(URL 미상)")
+    body = header + "\n" + "\n".join(lines)
+
+    if not any(tier == _BLOCKING for tier, _ in problems):
+        json.dump(
+            {
+                "continue": True,
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": body,
+                },
+            },
+            sys.stdout,
+            ensure_ascii=False,
+        )
+        sys.stdout.write("\n")
+        return 0
+
     print(
-        "[anchor-gate] 게시된 앵커에 문제가 있습니다 — "
-        f"{post['url']}\n  - " + "\n  - ".join(problems)
+        body
         + "\n  코멘트를 지금 수정하세요 (`gh api --method PATCH "
           ".../issues/comments/<id> -F body=@<file>`). "
           f"규약: {_REFERENCE}",
         file=sys.stderr,
     )
-    return 2 if os.environ.get(_STRICT_ENV, "").strip() == "1" else 0
+    return 0 if os.environ.get(_ADVISORY_ENV, "").strip() == "1" else 2
 
 
 # ---------------------------------------------------------------------------
@@ -819,7 +934,9 @@ def _pre_tool_use(payload: dict) -> int:
     reasons: list[str] = []
     for idx, post in enumerate(posts):
         tag = f"[{idx + 1}/{len(posts)}] " if len(posts) > 1 else ""
-        reasons += [tag + r for r in _structure_findings(post["body"])]
+        # PreToolUse blocks on every structure finding regardless of tier: the
+        # post has not happened yet, so there is still something to protect.
+        reasons += [tag + msg for _, msg in _structure_findings(post["body"])]
         if post.get("edit_last"):
             reasons.append(
                 tag + "`--edit-last` 로 앵커를 갱신할 수 없음 — 이 플래그는 "

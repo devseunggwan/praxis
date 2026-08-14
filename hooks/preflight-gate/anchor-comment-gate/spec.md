@@ -38,7 +38,7 @@ The split follows what each event can actually know.
 | Input | the command string | the comment URL the command printed |
 | Decides | structure, `--edit-last` | structure, SHA freshness, coverage |
 | Network | none | `gh api` + `gh pr view` |
-| On violation | blocks (exit 2) | stderr; exit 2 only under strict |
+| On violation | blocks (exit 2) | reports (exit 2 blocking / context otherwise) |
 | Can be fooled by shell syntax | yes — it warns instead | no |
 
 PostToolUse needs no parsing at all: `gh pr comment` prints the new comment's
@@ -156,6 +156,20 @@ segment. Each URL names host, owner, repo, PR and comment id; `gh api
 …/issues/comments/{id} --jq .body` fetches the body; a body that is not an
 anchor is dropped.
 
+**A failed post is read after its ids, never instead of them.** Both ref
+sources run first — the comment URL in `tool_response` and, failing that, the
+`…/comments/<id>` endpoint in the command — and only when neither yields
+anything do `exit`, `isError` and `interrupted` decide. That order is what a
+compound command forces: `gh pr comment ...; false` exits 1 with a real comment
+URL still in the output, and `gh api --silent --method PATCH …; false` carries
+its target in the command while printing nothing at all. Either way the anchor
+was published, so a failure-first check would skip it.
+With nothing recoverable, the failure means nothing was published — a
+`gh pr comment` that died on auth or the network — and the URL-loss branch
+below would otherwise find the anchor body in the *command* and report an
+anchor that does not exist, a second error stacked on the one already on
+screen.
+
 **A post that prints nothing is not a pass.** `gh api --silent`, a `--jq` that
 projects the URL away, and `> /dev/null` all publish while leaving no URL to
 follow — and since freshness is checked *only* here, silence there would mean a
@@ -171,22 +185,55 @@ no id anywhere, and is reported as unverified rather than passed.
   `headRefOid`. An anchor pinned to a commit that is no longer HEAD asserts
   evidence for code that is not there, which the rule set calls worse than no
   anchor at all.
-- **Coverage (advisory)** — files in the branch diff that no table row mentions
-  are printed. File-to-claim is not 1:1 (one row can cover several files; a
-  rename touches two paths under one claim), so this never escalates. The
+- **Coverage** — files in the branch diff that no table row mentions are
+  reported at the `advisory` tier. File-to-claim is not 1:1 (one row can cover
+  several files; a rename touches two paths under one claim), so the tier says
+  so rather than the finding being suppressed. The
   comparison point is the PR's own `baseRefName`, which arrives on the same
   `gh pr view` as the head SHA — a PR targeting `dev` measured against `main`
   would report base-only files as uncovered. No base, or any git failure,
   yields no advisory rather than a false one.
 
-Findings print to stderr and the hook exits 0, so the session continues and the
-anchor gets corrected in place. `PRAXIS_ANCHOR_GATE_STRICT=1` makes it exit 2
-instead, for sessions that want the correction to interrupt.
+### Three tiers, two channels
+
+Every finding carries a tier, and the tier decides which channel carries it.
+
+| Tier | What it covers | What the wording asks for |
+| --- | --- | --- |
+| `blocking` | a missing required field, a confirmed stale SHA | this anchor violates the rule — fix it now |
+| `advisory` | changed files no table row mentions | consider it; it may be a false positive |
+| `unknown` | lookup failed, PR unresolved, no comment URL in the output | the check **did not run** — this is not a pass |
+
+`blocking` exits 2. The other two are written to
+`hookSpecificOutput.additionalContext` and exit 0.
+
+Both of those reach the model; what separates them is what exit 2 *means* one
+layer up. `_dispatch.run_group` returns 2 for the whole group and
+`_fire_ledger.classify_decision` records `block`, so a coverage hint or a `gh`
+timeout sent that way is filed beside a rule violation and the fire-rate audit
+that scores this hook can no longer tell them apart. `additionalContext` is
+the channel `second-failure-advisory` and `builtin-task-postuse` already use
+on this event for exactly that reason.
+
+What exit 0 does *not* buy is silence: a hook that exits 0 has its **stderr**
+routed to the debug log where Claude never reads it, which is why none of
+these findings goes there. `PRAXIS_ANCHOR_GATE_ADVISORY=1` demotes the
+blocking branch to exit 0 as well.
+
+The fix instruction rides with the exit-2 branch only — "fix the comment now"
+is the wrong thing to say about a check that could not run.
+
+`unknown` exists because the previous shape put "the SHA does not match" and
+"the SHA could not be read" in one list. Raising the exit code on that list
+would have reported a `gh` outage as a rule violation, and leaving it at 0 let
+an unrun check read as a clean one. Separating the tier keeps both honest: a
+lookup failure reaches the model through `additionalContext`, and still says
+which of the two happened.
 
 An anchor that turns out to be an ordinary issue comment is simply not an
-anchor by the heading-prefix test, and a lookup failure prints why rather than
-inventing a verdict — after the fact, there is nothing to protect by failing
-closed, and a wrong advisory is worse than a missing one.
+anchor by the heading-prefix test. A lookup failure says why rather than
+inventing a verdict — the tier carries the uncertainty, so nothing has to be
+guessed to keep the report readable.
 
 ## Budget
 
@@ -202,7 +249,9 @@ per `gh` call, 3s per `git` call, each clamped to what is left).
 
 Two forms, both requiring an explicit act, and both honoured on either event:
 
-- `PRAXIS_HOOK_BYPASS_ANCHOR_GATE=1` in the environment
+- `PRAXIS_HOOK_BYPASS_ANCHOR_GATE=1` in the environment (both events)
+- `PRAXIS_ANCHOR_GATE_ADVISORY=1` — PostToolUse only, exact value `1`; demotes
+  the exit to 0, which on this event means the findings go unread
 - `# anchor-gate: <reason>` as a **trailing shell comment** on the command's
   last line, outside quotes — an anchor whose evidence block quotes this
   marker (a test transcript, this spec) must not waive the gate on itself
