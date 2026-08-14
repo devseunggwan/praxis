@@ -110,13 +110,19 @@ checkable requirements, which is the feedback loop this design is built on.
 
 ## Writing a Verify line
 
-The convention and its two rules live in
+The convention and its rules live in
 [`docs/spec-store.md`](../../docs/spec-store.md) → *Verification lines*. In
 short: a nested `- Verify: \`<command>\`` item under the requirement, whose
 exit code reports **the requirement** and not the environment it ran in, and
 which terminates without input. Commands run with stdin at `/dev/null` (#1008),
 so one that reads stdin gets EOF rather than hanging to the timeout and being
 reported `missing`.
+
+The oracle must also **fail when its subject is gone** (#1011). A comparison
+whose *both* sides are command substitutions cannot do that: with the subject
+absent both collapse to the empty string and `test "" = ""` exits 0, so the
+report prints `implemented` for a requirement nothing satisfies. Pin one side
+to a literal.
 
 A requirement with no eligible command keeps no `Verify:` line and says why in
 its own prose — that line is what separates "nobody got to it" from "nothing
