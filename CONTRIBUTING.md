@@ -11,13 +11,16 @@ It is a different artifact from the *skill spec* discussed under
 [Skill spec drift prevention](#skill-spec-drift-prevention) below — that one is
 a `SKILL.md` describing an existing runtime contract.
 
-Feature specs live at `.praxis/specs/NNN-slug.md`, one file per feature, and
-are tracked by git. Write one inside the worktree, before implementation
-starts; writing it afterwards turns it into post-hoc justification.
+Feature specs live at `~/.praxis/docs/specs/NNNN-slug.md`, one file per feature,
+in a store outside every checkout that `PRAXIS_HOME` relocates. Write one before
+implementation starts; writing it afterwards turns it into post-hoc
+justification. Because they are not tracked, a spec never reaches a reviewer —
+anything a reviewer needs belongs in the PR body or a commit trailer.
 
-Not every change needs one — [`.praxis/specs/README.md`](.praxis/specs/README.md)
-is the source of truth for the naming rules, the required `**Issue**: #N`
-header, and the conditions under which a spec is skipped.
+Not every change needs one — [`docs/spec-store.md`](docs/spec-store.md) is the
+source of truth for the naming rules, the required `**Issue**: #N` header, the
+`Verify:` convention `praxis:spec-drift` reads, and the conditions under which
+a spec is skipped.
 
 ## Adding or modifying a skill
 

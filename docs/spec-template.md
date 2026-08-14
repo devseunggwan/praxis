@@ -1,9 +1,9 @@
 <!--
   Copied verbatim from github/spec-kit v0.16.3
   `.specify/templates/spec-template.md` (MIT License, Copyright GitHub, Inc.).
-  Full upstream copyright and permission notice: ../../THIRD-PARTY-NOTICES.md
-  Only this attribution block is added. See .praxis/specs/README.md for how
-  praxis uses it — praxis adopts this one template, not the rest of spec-kit.
+  Full upstream copyright and permission notice: ../THIRD-PARTY-NOTICES.md
+  Only this attribution block is added. See docs/spec-store.md for how praxis
+  uses it — praxis adopts this one template, not the rest of spec-kit.
   Delete this block when copying the file into a new spec; the notice lives in
   THIRD-PARTY-NOTICES.md and does not need to travel into every spec.
 -->

@@ -5,7 +5,7 @@ the upstream copyright and permission notice as its license requires.
 
 ## github/spec-kit
 
-**Used in**: [`.praxis/specs/TEMPLATE.md`](.praxis/specs/TEMPLATE.md) — a verbatim
+**Used in**: [`docs/spec-template.md`](docs/spec-template.md) — a verbatim
 copy of `.specify/templates/spec-template.md` from spec-kit v0.16.3, carrying an
 added attribution block and no other change.
 

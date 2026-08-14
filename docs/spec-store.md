@@ -1,33 +1,51 @@
 # Feature specs
 
-Tracked design documents for praxis features. One file per feature:
-`.praxis/specs/NNN-slug.md`.
+Design documents for praxis features. One file per feature, in a store that
+sits outside every checkout.
 
 These are **feature specs** — what a change must satisfy. They are not the
 same thing as the *skill spec drift* gate in
-[`CONTRIBUTING.md`](../../CONTRIBUTING.md), which is about a `SKILL.md`
-matching live runtime behavior.
+[`CONTRIBUTING.md`](../CONTRIBUTING.md), which is about a `SKILL.md` matching
+live runtime behavior.
+
+## Where specs live
+
+```text
+~/.praxis/docs/specs/NNNN-slug.md
+```
+
+The root resolves through `PRAXIS_HOME` exactly as every other praxis runtime
+root does — see [`runtime-state-layout.md`](runtime-state-layout.md), and
+`praxis_specs_dir()` in [`hooks/_lib/_paths.py`](../hooks/_lib/_paths.py) and
+its shell twin. One store serves every repository you work in, and no
+repository has to adopt anything for it to work.
+
+**It is not version-controlled, and that is the trade.** A reader with only a
+clone cannot see the specs; a requirement change does not appear in any
+`gh pr diff`; a lost machine loses the store, since no remote holds it. In
+exchange the convention costs a repository nothing and follows you across all
+of them. Backing the store up is yours, not praxis's. Anything a *reviewer*
+needs to know has to be restated in the PR body or a commit trailer — the spec
+will not carry it there.
+
+Numbering is global across repositories, because the store is.
 
 ## Why this exists
 
-Before this convention, praxis design intent lived in two places that the
-repository itself cannot see:
+Design intent otherwise lives in two places nothing local can read:
 
-- `.omc/plans/` — excluded by `.gitignore` (`.omc/`)
+- `.omc/plans/` — excluded by `.gitignore` (`.omc/`), and per-tool rather than
+  per-person
 - GitHub issue bodies — remote only
 
-So someone reading a checkout could not answer "what was this hook built to
-satisfy?" A spec file closes that gap by putting the requirements next to the
-code, under review, in version control.
+So the question "what was this hook built to satisfy?" has no local answer.
+A spec file gives it one.
 
 ## When to write one
 
-Write the spec **after the worktree is created, before implementation starts**.
-
-A spec is a tracked file, so it is written inside the worktree like any other
-change — the mandatory issue-driven workflow has the worktree in place before
-tracked files are touched, and writing the spec earlier would mean editing the
-base checkout.
+Write the spec **before implementation starts** — after the issue exists, at
+whatever point the requirements are known. Unlike a tracked file it does not
+wait for a worktree; the store is always there.
 
 What matters is that it lands *before* the implementation: writing it after
 work has started turns it into post-hoc justification — the same reason the
@@ -41,7 +59,7 @@ Write a spec when the change:
 
 **Skip** it for a single-file bug fix, a documentation typo, a mechanical
 rename, or anything whose revert is self-evident. A spec that restates a
-one-line diff costs a review round and teaches nothing.
+one-line diff costs nothing to review and teaches nothing.
 
 The skip list applies **only when no trigger above fires**. The two overlap on
 purpose — a one-file change to a rule's decision predicate is both a
@@ -53,16 +71,17 @@ reconstruct later, not the diff being large.
 
 | Part | Rule |
 | --- | --- |
-| `NNN` | Highest existing number + 1, zero-padded to three digits |
+| `NNNN` | Highest existing number + 1, zero-padded to four digits |
 | `slug` | Lowercase kebab-case, derived from the issue title |
 
-The slug does not have to match the branch name. Branch `issue-1001-docs-spec-convention`
-and spec `001-spec-artifact-convention.md` are the same work under two names,
-and that is fine — each is named for what its own reader is looking for. The
-link between them is the `**Issue**: #N` line, not a shared string; a slug rule
-strict enough to be greppable is one the very first spec here already broke.
+The slug does not have to match the branch name. Branch
+`issue-1001-docs-spec-convention` and spec `0001-spec-store.md` are the same
+work under two names, and that is fine — each is named for what its own reader
+is looking for. The link between them is the `**Issue**: #N` line, not a shared
+string; a slug rule strict enough to be greppable is one the very first spec
+here already broke.
 
-The numbers are independent too: `NNN` is a spec counter, not an issue number.
+The numbers are independent too: `NNNN` is a spec counter, not an issue number.
 
 ## Required header
 
@@ -74,32 +93,78 @@ Every spec starts with a back-reference line directly under the title:
 **Issue**: #1001
 ```
 
-Without it a spec orphans as soon as its branch is deleted.
+Without it a spec has nothing pointing back at the thread it came from — and
+since the store carries no history, that line is the only provenance there is.
 
-**`TEMPLATE.md` does not carry this field** — it is upstream's file, and the
-upstream template has no notion of an issue. Add the line by hand when you copy,
-directly above `**Feature Branch**`. Keeping the omission rather than patching
-the template is deliberate: it leaves the copy byte-identical to upstream, so
-re-syncing a newer spec-kit version stays a diff instead of a merge.
+**The template does not carry this field** — it is upstream's file, and the
+upstream template has no notion of an issue. Add the line by hand when you
+copy, directly above `**Feature Branch**`. Keeping the omission rather than
+patching the template is deliberate: it leaves the copy byte-identical to
+upstream, so re-syncing a newer spec-kit version stays a diff instead of a
+merge.
 
 ## Template
 
-Copy [`TEMPLATE.md`](TEMPLATE.md) and fill it in. It is
+Copy [`spec-template.md`](spec-template.md) and fill it in. It is
 [github/spec-kit](https://github.com/github/spec-kit)'s `spec-template.md`
 v0.16.3 verbatim (MIT), plus an attribution block.
 
-Two conventions on top of the template:
+The template and this document stay **in the praxis repository**, not in the
+store: they are source, and a redistributed MIT file needs the version control
+its notice assumes. Only spec instances live under `PRAXIS_HOME`.
 
+Conventions on top of the template — the count is deliberately not stated, so
+that adding one cannot leave a stale number behind:
+
+- Delete the attribution block. The notice lives in
+  [`THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md) and does not need to
+  travel into every spec.
 - Delete the sections that do not apply. `Key Entities` is marked
   *include if feature involves data* and rarely applies to a hook or skill —
   an empty section reads as an unanswered question.
 - Leave `[NEEDS CLARIFICATION: ...]` markers in place until they are actually
   resolved. An unresolved marker is the point of the format; replacing it
   with a guess defeats it.
-- Delete the `**Status**: Draft` line. praxis does not track spec status in the
-  document: a spec on `main` is accepted and one on a branch is not, which git
-  already answers without anyone remembering to edit a field. The line stays in
-  `TEMPLATE.md` only because that file is upstream's, kept byte-identical.
+- Delete the `**Status**: Draft` line. praxis does not track spec status in a
+  field nobody remembers to edit. The line stays in `spec-template.md` only
+  because that file is upstream's, kept byte-identical.
+
+## Verification lines
+
+A requirement may carry the command that checks it, as a nested `Verify:` item
+directly under it:
+
+```markdown
+- **FR-001**: Specs MUST live at `<praxis_specs_dir()>/NNNN-slug.md`, resolving
+  through `PRAXIS_HOME`. `test -d ~/.praxis/docs/specs` is not the oracle here:
+  it passes on any machine that once created the directory, …
+  - Verify: `test "$(sh -c '. hooks/_lib/_paths.sh; praxis_specs_dir')" = "$HOME/.praxis/docs/specs"`
+```
+
+`praxis:spec-drift` runs these lines and nothing else. **Backticks in the
+surrounding prose are never executed** — the example above is exactly why: one
+of its three backticked spans is the oracle, one is a counter-example the
+requirement exists to reject, and one is a path pattern. A convention that
+guessed between them would run the command the spec says not to trust.
+
+Two rules on what may appear there:
+
+- **The exit code must report the requirement, not the environment.** A command
+  that can exit non-zero for a reason outside the repository is not eligible —
+  `scripts/run-tests.sh` is the standing example, since it reads a per-user
+  store that lives outside the checkout ([#1003](https://github.com/devseunggwan/praxis/issues/1003)).
+  A requirement with no eligible command keeps no `Verify:` line.
+- **The command must terminate without input.** It runs unattended.
+
+Commands run from the repository root of wherever the report was invoked, so a
+`Verify:` line may use repo-relative paths — and a spec written for repository
+A will report `missing` if run from repository B. That is the store being
+shared while the checks are not.
+
+A requirement with no `Verify:` line is reported as `UNKNOWN`, which is a
+readable state rather than a failure — some requirements are about prose, and
+the report says so instead of guessing. What it must never be is a requirement
+that *had* an eligible command and did not carry it.
 
 ## What praxis did not adopt
 
@@ -107,8 +172,8 @@ praxis takes this one template and nothing else from spec-kit. Not adopted:
 
 | spec-kit component | Reason |
 | --- | --- |
-| `.specify/memory/constitution.md` | Duplicate rule source of truth; `CLAUDE.md` and [`ETHOS.md`](../../ETHOS.md) already hold that role |
-| `.specify/extensions.yml` hooks | They instruct the model to invoke its own gates — the prompt-only form [`ETHOS.md`](../../ETHOS.md) replaced with real hooks |
+| `.specify/memory/constitution.md` | Duplicate rule source of truth; `CLAUDE.md` and [`ETHOS.md`](../ETHOS.md) already hold that role |
+| `.specify/extensions.yml` hooks | They instruct the model to invoke its own gates — the prompt-only form [`ETHOS.md`](../ETHOS.md) replaced with real hooks |
 | `.specify/workflows/*.yml` gates | Only fire when driven through `specify workflow run`; an agent working directly bypasses them |
 | `speckit-*` agent skills | Namespace pressure on an already-large skill surface |
 | `specify` CLI at runtime | One template needs no external CLI dependency |
