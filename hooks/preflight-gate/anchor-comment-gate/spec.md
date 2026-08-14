@@ -156,6 +156,12 @@ segment. Each URL names host, owner, repo, PR and comment id; `gh api
 …/issues/comments/{id} --jq .body` fetches the body; a body that is not an
 anchor is dropped.
 
+**A post that failed is not checked at all.** `tool_response`'s `exit`,
+`isError` and `interrupted` are read first: a `gh pr comment` that died on
+auth or the network published nothing, and the URL-loss branch below would
+otherwise find the anchor body in the *command* and report an anchor that does
+not exist — a second error stacked on the one already on screen.
+
 **A post that prints nothing is not a pass.** `gh api --silent`, a `--jq` that
 projects the URL away, and `> /dev/null` all publish while leaving no URL to
 follow — and since freshness is checked *only* here, silence there would mean a

@@ -757,6 +757,23 @@ def _post_tool_use(payload: dict) -> int:
     if not command or os.environ.get(_BYPASS_ENV, "").strip() or _bypassed_with_reason(command):
         return 0
 
+    # A post that failed published nothing, so there is no anchor to check and
+    # nothing was silently skipped. Without this the URL-loss branch below reads
+    # a failed `gh pr comment` — auth error, network — as "posted, but the URL
+    # is missing", and reports an anchor that does not exist. Mirrors
+    # `push-remote-ref-verify/impl.py:282-292`.
+    tool_response = payload.get("tool_response")
+    if isinstance(tool_response, dict):
+        exit_code = tool_response.get("exit")
+        if exit_code is not None:
+            try:
+                if int(exit_code) != 0:
+                    return 0
+            except (TypeError, ValueError):
+                pass
+        if tool_response.get("interrupted") is True or tool_response.get("isError") is True:
+            return 0
+
     deadline = time.monotonic() + _LOOKUP_BUDGET_SEC
     refs = _comment_refs(_tool_output(payload.get("tool_response")))
     if not refs:

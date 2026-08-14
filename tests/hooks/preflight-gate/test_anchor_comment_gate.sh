@@ -237,15 +237,22 @@ payload = {
     "hookEventName": sys.argv[2],
     "tool_input": {"command": sys.argv[1]},
 }
-if sys.argv[4]:
-    payload["tool_response"] = {"output": sys.argv[4]}
+if sys.argv[4] or sys.argv[5]:
+    resp = {"output": sys.argv[4]}
+    # argv[5] carries extra tool_response fields as a JSON object, so a case
+    # can say the tool call itself failed — the field the hook reads before
+    # it decides anything was published.
+    if sys.argv[5]:
+        resp.update(json.loads(sys.argv[5]))
+    payload["tool_response"] = resp
 print(json.dumps(payload))
-' "$1" "$2" "$3" "$4"
+' "$1" "$2" "$3" "$4" "$5"
 }
 
-# run_case <name> <expect> <event> <fake-gh-dir> <command> [cwd] [tool] [output]
+# run_case <name> <expect> <event> <fake-gh-dir> <command> [cwd] [tool] [output] [tool_response-extra-json]
 #   expect: block  — exit 2 + rendered block message
 #           pass   — exit 0, and (PostToolUse) no finding on stderr
+#           silent — exit 0 with nothing on stdout OR stderr
 #           report:X   — exit 2 and stderr contains X (a blocking finding)
 #           context:X  — exit 0 and stdout carries X in additionalContext
 #                        (advisory/unknown findings: model-visible, not a deny)
@@ -258,10 +265,10 @@ print(json.dumps(payload))
 #           nowarn:X — exit 0 and stderr does NOT contain X
 run_case() {
   local name="$1" expect="$2" event="$3" gh_dir="$4" command="$5"
-  local cwd="${6:-$FIX}" tool="${7:-Bash}" output="${8:-}"
+  local cwd="${6:-$FIX}" tool="${7:-Bash}" output="${8:-}" resp_extra="${9:-}"
   local payload out rc path_prefix
 
-  payload=$(build_payload "$command" "$event" "$tool" "$output")
+  payload=$(build_payload "$command" "$event" "$tool" "$output" "$resp_extra")
   path_prefix="$PATH"
   [ -n "$gh_dir" ] && path_prefix="$gh_dir:$PATH"
 
@@ -277,6 +284,13 @@ run_case() {
       ;;
     report:*)
       [ "$rc" -eq 2 ] && [[ "$out" == *"${expect#report:}"* ]] || ok=0
+      ;;
+    silent)
+      # Nothing on either channel. `pass` only inspects stderr, so it would
+      # pass vacuously for a finding that now leaves through stdout.
+      local sout
+      sout=$(cd "$cwd" && echo "$payload" | PATH="$path_prefix" "$HOOK" 2>/dev/null)
+      [ "$rc" -eq 0 ] && [ -z "$sout" ] && [[ "$out" != *"[anchor-gate]"* ]] || ok=0
       ;;
     nocontext:*)
       local ctx
@@ -627,6 +641,18 @@ run_case "41b context(unknown): URL 이 사라진 게시는 검사 미실행으�
   "context:아예 실행하지 못했습니다" PostToolUse "$OK_GH" \
   "gh pr comment 42 --body-file $FIX/ok.md > /dev/null" \
   "$FIX" Bash ""
+
+# A post that failed published nothing. Without the tool_response check the
+# URL-loss branch reads the anchor body out of the *command* and reports an
+# anchor that does not exist — a second error on top of the one the user is
+# already looking at.
+run_case "41d silent: 실패한 게시(exit≠0)는 검사 대상이 아님" \
+  silent PostToolUse "$OK_GH" "gh pr comment 42 --body-file $FIX/ok.md" \
+  "$FIX" Bash "" '{"exit": 1}'
+
+run_case "41e silent: isError 인 게시도 검사 대상이 아님" \
+  silent PostToolUse "$OK_GH" "gh pr comment 42 --body-file $FIX/ok.md" \
+  "$FIX" Bash "" '{"isError": true}'
 
 run_case "41c context(unknown): 그 보고가 unknown 티어로 라벨링됨" \
   "context:unknown (검사가 실행되지 않았습니다" PostToolUse "$OK_GH" \
