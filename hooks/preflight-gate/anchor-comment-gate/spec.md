@@ -38,7 +38,7 @@ The split follows what each event can actually know.
 | Input | the command string | the comment URL the command printed |
 | Decides | structure, `--edit-last` | structure, SHA freshness, coverage |
 | Network | none | `gh api` + `gh pr view` |
-| On violation | blocks (exit 2) | stderr; exit 2 only under strict |
+| On violation | blocks (exit 2) | reports (exit 2, tiered) |
 | Can be fooled by shell syntax | yes — it warns instead | no |
 
 PostToolUse needs no parsing at all: `gh pr comment` prints the new comment's
@@ -171,22 +171,44 @@ no id anywhere, and is reported as unverified rather than passed.
   `headRefOid`. An anchor pinned to a commit that is no longer HEAD asserts
   evidence for code that is not there, which the rule set calls worse than no
   anchor at all.
-- **Coverage (advisory)** — files in the branch diff that no table row mentions
-  are printed. File-to-claim is not 1:1 (one row can cover several files; a
-  rename touches two paths under one claim), so this never escalates. The
+- **Coverage** — files in the branch diff that no table row mentions are
+  reported at the `advisory` tier. File-to-claim is not 1:1 (one row can cover
+  several files; a rename touches two paths under one claim), so the tier says
+  so rather than the finding being suppressed. The
   comparison point is the PR's own `baseRefName`, which arrives on the same
   `gh pr view` as the head SHA — a PR targeting `dev` measured against `main`
   would report base-only files as uncovered. No base, or any git failure,
   yields no advisory rather than a false one.
 
-Findings print to stderr and the hook exits 0, so the session continues and the
-anchor gets corrected in place. `PRAXIS_ANCHOR_GATE_STRICT=1` makes it exit 2
-instead, for sessions that want the correction to interrupt.
+### Three tiers, one exit code
+
+Every finding carries a tier, and all three leave through **exit 2**.
+
+| Tier | What it covers | What the wording asks for |
+| --- | --- | --- |
+| `blocking` | a missing required field, a confirmed stale SHA | this anchor violates the rule — fix it now |
+| `advisory` | changed files no table row mentions | consider it; it may be a false positive |
+| `unknown` | lookup failed, PR unresolved, no comment URL in the output | the check **did not run** — this is not a pass |
+
+The exit code is not a severity dial here, because on this event it cannot be
+one. A PostToolUse hook cannot prevent the post, and a hook that exits 0 has
+its stderr routed to the debug log where Claude never reads it — so exit 0 is
+not "advisory", it is *silence*. Exit 2 is the only channel that reaches the
+model at all, which makes it the only way any of these findings gets reported.
+What used to be `PRAXIS_ANCHOR_GATE_STRICT=1` is now the default, and
+`PRAXIS_ANCHOR_GATE_ADVISORY=1` takes the exit back to 0 — with the silence
+that implies.
+
+`unknown` exists because the previous shape put "the SHA does not match" and
+"the SHA could not be read" in one list. Raising the exit code on that list
+would have reported a `gh` outage as a rule violation, and leaving it at 0 let
+an unrun check read as a clean one. Separating the tier keeps both honest: a
+lookup failure still exits 2, and still says which of the two happened.
 
 An anchor that turns out to be an ordinary issue comment is simply not an
-anchor by the heading-prefix test, and a lookup failure prints why rather than
-inventing a verdict — after the fact, there is nothing to protect by failing
-closed, and a wrong advisory is worse than a missing one.
+anchor by the heading-prefix test. A lookup failure says why rather than
+inventing a verdict — the tier carries the uncertainty, so nothing has to be
+guessed to keep the report readable.
 
 ## Budget
 
@@ -202,7 +224,9 @@ per `gh` call, 3s per `git` call, each clamped to what is left).
 
 Two forms, both requiring an explicit act, and both honoured on either event:
 
-- `PRAXIS_HOOK_BYPASS_ANCHOR_GATE=1` in the environment
+- `PRAXIS_HOOK_BYPASS_ANCHOR_GATE=1` in the environment (both events)
+- `PRAXIS_ANCHOR_GATE_ADVISORY=1` — PostToolUse only, exact value `1`; demotes
+  the exit to 0, which on this event means the findings go unread
 - `# anchor-gate: <reason>` as a **trailing shell comment** on the command's
   last line, outside quotes — an anchor whose evidence block quotes this
   marker (a test transcript, this spec) must not waive the gate on itself
