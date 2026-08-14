@@ -11,7 +11,7 @@ description: >
   live-runtime gate) or on deferred-decision trailers (that is `debt`).
 verified-against-runtime: true
 runtime-verified-at: 2026-08-14
-runtime-verified-note: "python3 3.x — ran the report against the real store resolved from praxis_specs_dir() (/Users/<user>/.praxis/docs/specs, no --spec-dir passed): 2 specs, 18 implemented, 0 missing, 6 UNKNOWN, and 0001's prose-quoted counter-example command was absent from the printed run list (the parse boundary this design rests on). tests/test_spec_drift.sh 23/23 against synthetic fixture spec dirs — including case 14 (store found via a throwaway PRAXIS_HOME with no --spec-dir) and case 15 (caller --spec-dir overrides the resolved default) — positive-controlled on a fixture whose Verify exits 3 (reported `missing` with its command and stderr marker)."
+runtime-verified-note: "python3 3.x — ran the report against the real store resolved from praxis_specs_dir() (<PRAXIS_HOME>/docs/specs, no --spec-dir passed): 2 specs, 18 implemented, 0 missing, 6 UNKNOWN, and 0001's prose-quoted counter-example command was absent from the printed run list (the parse boundary this design rests on). tests/test_spec_drift.sh 33/33 against synthetic fixture spec dirs — case 14 finds the store via a throwaway PRAXIS_HOME with no --spec-dir, 15 has a caller --spec-dir override it, 16-18 pin where a Verify line binds (later-section rebinding, duplicate ids, a second line in one block), 19 a timed-out command keeping its partial output — positive-controlled on a fixture whose Verify exits 3 (reported `missing` with its command and stderr marker)."
 ---
 
 # spec-drift
@@ -118,12 +118,10 @@ A requirement with no eligible command keeps no `Verify:` line and says why in
 its own prose — that line is what separates "nobody got to it" from "nothing
 can check this".
 
-**A `Verify:` line binds to the requirement whose block it sits in**, and a
-block ends at the next line starting in column 0. Nested items and indented
-continuation prose stay inside; a `- Verify:` further down the document, under
-a later heading, belongs to nothing and is not run. A second `Verify:` in one
-block is an authoring error: the first binds, and the rest are printed as
-`warning` lines naming the command that did **not** run.
+**Where a line binds** is stated in the same section of that document: the
+requirement's block, ending at the next line in column 0. A `- Verify:` under
+a later heading belongs to nothing and is not run, and a second one in one
+block prints as a `warning` line naming the command that did **not** run.
 
 ## Limitations
 

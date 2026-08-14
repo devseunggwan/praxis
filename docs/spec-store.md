@@ -154,6 +154,14 @@ of its three backticked spans is the oracle, one is a counter-example the
 requirement exists to reject, and one is a path pattern. A convention that
 guessed between them would run the command the spec says not to trust.
 
+**A `Verify:` line belongs to the requirement whose block it sits in**, and
+that block ends at the next line starting in column 0. The requirement's own
+nested items and indented continuation prose stay inside it; a `- Verify:`
+further down the document, under a later heading, belongs to nothing and is
+not run. Writing a second `Verify:` in one block is an authoring error — the
+first binds, and the report prints the rest as `warning` lines naming the
+command it did not run.
+
 Two rules on what may appear there:
 
 - **The exit code must report the requirement, not the environment.** A command
