@@ -169,7 +169,11 @@ Two rules on what may appear there:
   `scripts/run-tests.sh` is the standing example, since it reads a per-user
   store that lives outside the checkout ([#1003](https://github.com/devseunggwan/praxis/issues/1003)).
   A requirement with no eligible command keeps no `Verify:` line.
-- **The command must terminate without input.** It runs unattended.
+- **The command must terminate without input.** It runs unattended, with stdin
+  at `/dev/null` ([#1008](https://github.com/devseunggwan/praxis/issues/1008)),
+  so a command that reads stdin gets immediate EOF. Before that it inherited the
+  report's own stdin, hung until the timeout, and was reported `missing` — a
+  rule stated here but not enforced showed up only as a wrong verdict.
 
 Commands run from the repository root of wherever the report was invoked, so a
 `Verify:` line may use repo-relative paths — and a spec written for repository

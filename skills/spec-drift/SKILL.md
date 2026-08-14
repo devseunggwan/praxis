@@ -11,7 +11,7 @@ description: >
   live-runtime gate) or on deferred-decision trailers (that is `debt`).
 verified-against-runtime: true
 runtime-verified-at: 2026-08-14
-runtime-verified-note: "python3 3.x — ran the report against the real store resolved from praxis_specs_dir() (<PRAXIS_HOME>/docs/specs, no --spec-dir passed): 2 specs, 18 implemented, 0 missing, 6 UNKNOWN. tests/test_spec_drift.sh 33/33 against synthetic fixture spec dirs — case 6 is the parse boundary this design rests on (a fixture requirement whose PROSE quotes `false`; the report neither runs it nor leaves the requirement anything but UNKNOWN), case 14 finds the store via a throwaway PRAXIS_HOME with no --spec-dir, 15 has a caller --spec-dir override it, 16-18 pin where a Verify line binds (later-section rebinding, duplicate ids, a second line in one block), 19 a timed-out command keeping its partial output — positive-controlled on a fixture whose Verify exits 3 (reported `missing` with its command and stderr marker)."
+runtime-verified-note: "python3 3.x — ran the report against the real store resolved from praxis_specs_dir() (<PRAXIS_HOME>/docs/specs, no --spec-dir passed): 2 specs, 18 implemented, 0 missing, 6 UNKNOWN. tests/test_spec_drift.sh 36/36 against synthetic fixture spec dirs — case 6 is the parse boundary this design rests on (a fixture requirement whose PROSE quotes `false`; the report neither runs it nor leaves the requirement anything but UNKNOWN), case 14 finds the store via a throwaway PRAXIS_HOME with no --spec-dir, 15 has a caller --spec-dir override it, 16-18 pin where a Verify line binds (later-section rebinding, duplicate ids, a second line in one block), 19 a timed-out command keeping its partial output, 20 a Verify command that reads stdin reported `implemented` in 0.04s where the pre-fix code reported `missing (exit 124)` after the full timeout (#1008; fed an open stdin through a FIFO, since a runner whose own stdin is already /dev/null would pass the case vacuously) — positive-controlled on a fixture whose Verify exits 3 (reported `missing` with its command and stderr marker)."
 ---
 
 # spec-drift
@@ -114,7 +114,9 @@ The convention and its two rules live in
 [`docs/spec-store.md`](../../docs/spec-store.md) → *Verification lines*. In
 short: a nested `- Verify: \`<command>\`` item under the requirement, whose
 exit code reports **the requirement** and not the environment it ran in, and
-which terminates without input.
+which terminates without input. Commands run with stdin at `/dev/null` (#1008),
+so one that reads stdin gets EOF rather than hanging to the timeout and being
+reported `missing`.
 
 A requirement with no eligible command keeps no `Verify:` line and says why in
 its own prose — that line is what separates "nobody got to it" from "nothing
