@@ -133,6 +133,25 @@ def strip_git_global_flags(argv: list[str]) -> tuple[list[str], str | None]:
     return argv[i:], c_dir
 
 
+def title_is_unresolved_substitution(title: str) -> bool:
+    """True when a title candidate is a substitution whose value we cannot know.
+
+    `git commit -m "$(cat <<'EOF' … EOF)"` is the standard commit form here, and
+    tokenization hands us the literal text `$(cat <<'EOF'` — the shell expands it,
+    we cannot. Grading that literal against Conventional Commits rejects every such
+    commit with exit 2, so the title gates must stay silent on it instead.
+
+    Narrow on purpose: only a candidate that *opens* a substitution is unknowable.
+    `fix: handle $(foo)` is a real title and stays graded.
+
+    Before the multi-line-quote fix (issue #987) this was rare — the tokenizer
+    dropped the whole line, so no title reached here at all. Making the line
+    visible turned a latent false positive into a routine one.
+    """
+    stripped = title.lstrip()
+    return stripped.startswith("$(") or stripped.startswith("`")
+
+
 def extract_git_titles(argv: list[str]) -> list[str]:
     """Extract commit title candidates from a git-commit argv.
 
@@ -162,6 +181,18 @@ def extract_git_titles(argv: list[str]) -> list[str]:
         return []
 
     titles: list[str] = []
+
+    def add_title(raw: str) -> None:
+        """Record the first line of a message value as a title candidate.
+
+        A value we cannot statically resolve contributes no candidate, but the
+        caller still marks `message_seen` — git took it as the message, we just
+        cannot read it, so later -m flags remain body paragraphs.
+        """
+        first = raw.split("\n")[0]
+        if not title_is_unresolved_substitution(first):
+            titles.append(first)
+
     message_seen = False
     i = 1  # sub_argv[0] is "commit"; start scanning from index 1
     while i < len(sub_argv):
@@ -171,7 +202,7 @@ def extract_git_titles(argv: list[str]) -> list[str]:
         if "=" in tok and tok.startswith("-"):
             key, _, val = tok.partition("=")
             if key in MESSAGE_FLAGS and not message_seen:
-                titles.append(val.split("\n")[0])
+                add_title(val)
                 message_seen = True
                 i += 1
                 continue
@@ -191,7 +222,7 @@ def extract_git_titles(argv: list[str]) -> list[str]:
             and len(tok) > 2
             and not message_seen
         ):
-            titles.append(tok[2:].split("\n")[0])
+            add_title(tok[2:])
             message_seen = True
             i += 1
             continue
@@ -212,7 +243,7 @@ def extract_git_titles(argv: list[str]) -> list[str]:
             and not message_seen
         ):
             if i + 1 < len(sub_argv):
-                titles.append(sub_argv[i + 1].split("\n")[0])
+                add_title(sub_argv[i + 1])
                 message_seen = True
                 i += 2
                 continue
@@ -220,7 +251,7 @@ def extract_git_titles(argv: list[str]) -> list[str]:
         # Standard separate-token flags.
         if tok in MESSAGE_FLAGS and not message_seen:
             if i + 1 < len(sub_argv):
-                titles.append(sub_argv[i + 1].split("\n")[0])
+                add_title(sub_argv[i + 1])
                 message_seen = True
                 i += 2
                 continue

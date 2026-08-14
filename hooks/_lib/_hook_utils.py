@@ -250,6 +250,80 @@ def is_help_invocation(argv: list[str], value_flags: frozenset[str]) -> bool:
     return False
 
 
+def _quote_open_at_eol(line: str, quote: str) -> str:
+    """The quote character still open after consuming `line` from state `quote`.
+
+    Models *shlex*'s quote rules rather than bash's, because shlex is the
+    tokenizer this scanner feeds: a single quote escapes everything, a backslash
+    escapes inside double quotes and outside quotes, and `$(…)` is opaque text
+    rather than a re-entrant parse. Modelling bash here instead would let the
+    line grouping and the tokenizer disagree about where a token ends.
+
+    The one deliberate divergence is the unquoted `#`. `safe_tokenize` runs with
+    `commenters = ""` so the `# side-effect:ack` marker survives as tokens, but
+    bash reads nothing past an unquoted `#` — so the apostrophe in
+    `git status # don't do this` must not be taken for an opening quote that
+    swallows the next line's real command. The word-boundary rule is copied from
+    `_heredoc_starts_on_line` above so the two scanners cannot drift apart. The
+    divergence only ever ends a group *earlier*, never merges more lines into
+    one, so it cannot hide a command that the old per-line split saw.
+    """
+    i, n = 0, len(line)
+    while i < n:
+        ch = line[i]
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            i += 1
+            continue
+        if ch == "#" and (i == 0 or line[i - 1] in " \t;|&("):
+            return ""  # unquoted comment — bash opens no quote past it
+        if ch == "\\":
+            i += 2
+            continue
+        i += 1
+    return quote
+
+
+def _logical_lines(command: str) -> list[str]:
+    """Physical lines folded into logical lines across an unclosed quote.
+
+    A newline inside a quote is *data*, not a command separator — bash keeps
+    reading the same word. Splitting there gave the opening and the closing line
+    their own shlex pass, both raised ``ValueError: No closing quotation``, and
+    the caller's fail-open arm dropped them: that took `gh pr comment`'s argv[0]
+    with it (issue #972) and, when a real command rode on the closing line, the
+    entire command (issue #987 — all three merge gates went silent on
+    ``git commit -m "$(cat <<'EOF' … EOF)" && gh pr merge``).
+
+    Folded lines are rejoined with ``\\n`` so the newline stays *inside* the
+    resulting token, which is what bash hands the process. A group still open at
+    the end of the command is emitted as-is, so shlex raises exactly as it did
+    before and the caller's ``except ValueError`` arm keeps its behavior.
+    """
+    if "\n" not in command:
+        return [command]
+    out: list[str] = []
+    group: list[str] = []
+    quote = ""
+    for line in command.split("\n"):
+        group.append(line)
+        quote = _quote_open_at_eol(line, quote)
+        if not quote:
+            out.append("\n".join(group))
+            group = []
+    if group:  # unterminated at end of command — hand it to shlex unchanged
+        out.append("\n".join(group))
+    return out
+
+
 def safe_tokenize(command: str) -> list[str]:
     """Tokenize with shell operators and line breaks split into tokens.
 
@@ -277,16 +351,20 @@ def safe_tokenize(command: str) -> list[str]:
     ``except ValueError`` arm below would silently drop the entire first line
     (issue #510 — neutralised dozens of hooks).
 
-    Caller note: a multi-line value inside a quoted flag (e.g.
-    ``gh pr create --body "line1\\nline2"``) is split at the unescaped
-    newline, separating ``--body`` from its value. In test payloads, use a
-    heredoc-assigned variable instead::
+    A newline *inside* a quote is data, not a separator, so physical lines are
+    folded into logical lines first (`_logical_lines`) and the newline is kept
+    inside the resulting token. Without that fold, the line holding the opening
+    quote and the line holding the closing one each raised ``ValueError: No
+    closing quotation`` and were dropped by the arm above: a multi-line
+    ``gh pr comment --body '…'`` lost its ``gh`` argv[0] (issue #972) and a real
+    command riding on the closing line vanished outright, blinding all three
+    merge gates (issue #987). A newline *outside* a quote is still a separator
+    and still becomes a synthetic ``;``.
 
-        BODY=$(cat <<'EOF'
-        Caller chain verified: ...
-        EOF
-        )
-        gh pr create --body "$BODY"
+    ``commenters = ""`` is unchanged, so the ``# side-effect:ack`` opt-out
+    marker still tokenizes. Comments are excluded from quote-state tracking
+    only — an unquoted ``#`` never opens a quote, so an apostrophe in
+    ``git status # don't do this`` cannot swallow the next line's command.
     """
     # Splice bash line continuations (`\` + newline) into one logical line so
     # the leading line's argv[0] survives the per-line shlex pass below. A
@@ -295,7 +373,7 @@ def safe_tokenize(command: str) -> list[str]:
     # odd-length run of trailing backslashes.
     command = re.sub(r"(?<!\\)((?:\\\\)*)\\\n", r"\1 ", command)
     command = strip_heredoc_bodies(command)
-    lines = [ln for ln in command.split("\n") if ln.strip()]
+    lines = [ln for ln in _logical_lines(command) if ln.strip()]
     if not lines:
         return []
     tokens: list[str] = []
