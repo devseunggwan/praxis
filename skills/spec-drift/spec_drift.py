@@ -113,9 +113,24 @@ def run_verify(command: str, cwd: Path, timeout: int) -> tuple[int, str]:
             cwd=cwd,
             timeout=timeout,
         )
-    except subprocess.TimeoutExpired:
-        return 124, f"timed out after {timeout}s"
+    except subprocess.TimeoutExpired as expired:
+        # Whatever the command managed to say before it hung is usually the
+        # diagnosis; dropping it leaves a `missing` row carrying nothing but
+        # the fact that it hung. The attributes come back as bytes even under
+        # text=True, and either can be None.
+        partial = _decode(expired.stdout) + _decode(expired.stderr)
+        note = f"timed out after {timeout}s"
+        return 124, f"{partial.strip()}\n{note}" if partial.strip() else note
     return proc.returncode, (proc.stdout + proc.stderr).strip()
+
+
+def _decode(stream: bytes | str | None) -> str:
+    """Bytes / str / None from a TimeoutExpired, as text."""
+    if stream is None:
+        return ""
+    if isinstance(stream, bytes):
+        return stream.decode("utf-8", errors="replace")
+    return stream
 
 
 def display_path(path: Path, root: Path) -> str:

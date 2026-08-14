@@ -24,6 +24,7 @@
 #  16. A Verify line in a LATER section does not rebind the requirement above it
 #  17. A duplicated requirement id keeps its own command, not a shared one
 #  18. A second Verify inside one block is ignored and reported, never silent
+#  19. A timed-out command keeps whatever it printed before it hung
 #
 # Every case runs against a fixture spec dir. This file is a `Verify:` target
 # for several of 0002's requirements, so running the report over the real spec
@@ -305,6 +306,29 @@ check_has "18b second Verify is reported, not swallowed" "$OUT7" \
   "warning      FR-001: second Verify line ignored: sh -c 'echo SECOND_IN_BLOCK; exit 1'"
 check_has "16c indented prose does not close the block" "$OUT7" "implemented  FR-002"
 rm -rf "$FIX6"
+
+# --------------------------------------------------------------------------- #
+# Fixture 7 — a command that prints a diagnosis and then hangs. Dropping what
+# it printed leaves a `missing` row carrying only the fact that it hung, which
+# is the one thing the reader already knows.
+# --------------------------------------------------------------------------- #
+FIX7=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+cat > "$FIX7/0008-timeout.md" <<'EOF'
+# Feature Specification: Timeout output
+
+**Issue**: devseunggwan/praxis#1005
+
+### Functional Requirements
+
+- **FR-001**: Says something, then hangs.
+  - Verify: `sh -c 'echo PARTIAL_BEFORE_HANG; sleep 30'`
+EOF
+
+OUT8=$("$CLI" --spec-dir "$FIX7" --timeout 1 2>&1)
+check_has "19 timeout keeps the partial output" "$OUT8" "PARTIAL_BEFORE_HANG"
+check_has "19b timeout still reports exit 124" "$OUT8" "missing      FR-001  (exit 124)"
+check_has "19c timeout names the limit" "$OUT8" "timed out after 1s"
+rm -rf "$FIX7"
 
 echo ""
 echo "Passed: $PASS  Failed: $FAIL"

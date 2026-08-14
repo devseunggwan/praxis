@@ -76,7 +76,7 @@ Flags:
 
 | Flag | Effect |
 | --- | --- |
-| `--timeout <seconds>` | Per-command timeout (default 120). A command that exceeds it is reported `missing` with exit 124. |
+| `--timeout <seconds>` | Per-command timeout (default 120). A command that exceeds it is reported `missing` with exit 124, carrying whatever it printed before it hung. |
 | `--spec-dir <path>` | Scan somewhere other than the resolved store (used by the tests). |
 
 Exit code is 0 whenever the report itself ran, **including when requirements
