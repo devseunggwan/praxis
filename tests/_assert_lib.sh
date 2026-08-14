@@ -31,7 +31,22 @@
 #   assert_present_re "name" "regex"
 #   assert_order "name" "first fixed string" "second fixed string"
 #   assert_order_re "name" "first regex" "second regex"
+#   assert_lib_retarget "path"  # next document, same tally
 #   assert_lib_summary   # prints Passed/Failed, exits 1 if any FAIL
+
+# Swap the document under test without touching the tally. A second
+# assert_lib_init would zero PASS/FAIL, so a suite spanning two documents would
+# exit 0 on a failure in the first one — the failures print and then stop
+# counting, which is worse than not running them.
+assert_lib_retarget() {
+  _ASSERT_TARGET="$1"
+  if [ ! -f "$_ASSERT_TARGET" ]; then
+    echo "FAIL: target not found at $_ASSERT_TARGET" >&2
+    exit 1
+  fi
+  _ASSERT_NORMALIZED="$(sed -e ':a' -e 'N' -e '$!ba' \
+    -e 's/\n[[:blank:]]*/ /g' "$_ASSERT_TARGET")"
+}
 
 assert_lib_init() {
   _ASSERT_TARGET="$1"
