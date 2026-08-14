@@ -1,6 +1,6 @@
 # Praxis runtime state layout
 
-Praxis hooks and skills write runtime files under six roots. Since praxis is
+Praxis hooks and skills write runtime files under seven roots. Since praxis is
 multi-platform (Claude, Codex, Cursor, Gemini, OpenCode), these live under a
 **host-neutral** `~/.praxis` root rather than the Claude-nested legacy location.
 The resolver is [`hooks/_lib/_paths.py`](../hooks/_lib/_paths.py), mirrored for
@@ -18,6 +18,12 @@ on opposite sides of that split.
 | `~/.praxis/agent-reports/` | cmux-delegate completion reports                   | `skills/cmux-delegate/agent-report-path.sh`  | `PRAXIS_HOME`                               |
 | `~/.praxis/telemetry/`     | fire / bypass event ledgers (daily rotation)       | `hooks/_lib/_fire_ledger.py`                 | `PRAXIS_FIRE_TELEMETRY_FILE`, `PRAXIS_HOME` |
 | `~/.praxis/scope-confirm/` | Stop-gate block logs                               | `praxis_resolve_writable scope-confirm …`    | `PRAXIS_HOME`                               |
+| `~/.praxis/docs/specs/`    | Feature specs ([`spec-store.md`](spec-store.md))   | `praxis_specs_dir()`                         | `PRAXIS_HOME`                               |
+
+The spec store is the one root praxis does not write: a person authors those
+files and `praxis:spec-drift` only reads them. It is here because it is
+relocated by the same knob and must resolve identically from both halves of the
+resolver, not because praxis generates it.
 
 `PRAXIS_HOME` relocates the whole tree — that is the single knob, and every
 runtime path praxis writes goes through one of the resolvers above so it stays

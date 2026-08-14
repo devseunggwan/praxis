@@ -58,6 +58,17 @@ def praxis_cache_dir() -> str:
     return os.path.join(praxis_home(), "cache")
 
 
+def praxis_specs_dir() -> str:
+    """Feature-spec store (~/.praxis/docs/specs). Not created here.
+
+    Unlike the other roots this one holds documents a person writes and reads,
+    not files praxis generates — but it is deliberately outside any checkout so
+    the convention does not have to be adopted per repository. It is therefore
+    not version-controlled; `docs/spec-store.md` states what that gives up.
+    """
+    return os.path.join(praxis_home(), "docs", "specs")
+
+
 def legacy_state_dir() -> str:
     """The pre-#527 Claude-nested durable state root (~/.claude/state/praxis)."""
     return os.path.expanduser(os.path.join(*_LEGACY_STATE_DIRNAME))
