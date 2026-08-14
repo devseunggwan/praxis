@@ -90,11 +90,18 @@ Every spec starts with a back-reference line directly under the title:
 ```markdown
 # Feature Specification: <name>
 
-**Issue**: #1001
+**Issue**: devseunggwan/praxis#1001
 ```
 
 Without it a spec has nothing pointing back at the thread it came from — and
 since the store carries no history, that line is the only provenance there is.
+
+**The repository is part of the reference, not optional context.** One store
+serves every repository you work in, and issue numbers are per-repository, so a
+bare `#1001` names a different thread depending on where the reader happens to
+be standing — and there is no surrounding repository to disambiguate it, which
+is exactly what the move to a shared store gave up. Write `owner/repo#N`, or
+the full issue URL.
 
 **The template does not carry this field** — it is upstream's file, and the
 upstream template has no notion of an issue. Add the line by hand when you
