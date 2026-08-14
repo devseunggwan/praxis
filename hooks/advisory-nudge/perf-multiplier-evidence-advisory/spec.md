@@ -54,7 +54,9 @@ Reference: issue [#850](https://github.com/devseunggwan/praxis/issues/850).
 
 ## What is detected
 
-Both conditions must hold, scanned over the SAME body text:
+Both conditions must hold, scanned over the SAME body text — and "the same
+body text" means the body of ONE invocation (see
+[Body-text extraction](#body-text-extraction)):
 
 ### (1) Perf multiplier notation OR lever verdict
 
@@ -81,13 +83,59 @@ same design: presence, not adequacy).
 
 ## Body-text extraction
 
+### Each body is bound to its own invocation (issue #973)
+
+One Bash command can chain several `gh` calls. The command is tokenized, split
+into per-command segments at the shell separators (`;`, `&&`, `||`, `|`, `&`,
+and a newline outside quotes), and each segment is tested independently: is
+argv[0] the `gh` binary, does it carry an `issue`/`pr` object followed by a
+`create`/`comment` verb, and what body does THAT segment post. The scan then
+runs per body, and fires on the first body that claims a multiplier or a lever
+verdict without its own timing artifact.
+
+This is structural tokenization, not a regex over the raw command text
+(DESIGN.md, "Design mechanisms shared by all hooks"). The earlier regex shape
+matched `gh (issue|pr) (create|comment)` anywhere in the command string and
+then returned the FIRST `--body` in the flat argv, which gave three wrong
+answers — all three are now pinned as regression cases R1–R4 in the test file:
+
+| Command shape | Pre-fix | Correct |
+| --- | --- | --- |
+| `gh issue comment 1 --body "elapsed 12.0s" && gh pr comment 2 --body "5x faster"` | silent — body 1's artifact was the only body read | advisory: body 2 claims a multiplier with no artifact of its own |
+| `curl -X POST --body "harmless" … && gh issue create --body "5x faster"` | silent — `curl`'s body was donated to the `gh` scan | advisory: only the `gh` segment's body counts |
+| `echo "run gh issue create later" > note.txt && printf %s --body "5x faster"` | advisory — the trigger words matched inside a quoted argument | silent: no deliverable write exists |
+
+**Evidence does not cross invocations.** A timing artifact cited by one `gh`
+call measures nothing about a multiplier posted by another, so it silences only
+its own body.
+
+### Newlines vs multi-line bodies
+
+An unquoted newline is a command separator and is rewritten to `;` before
+tokenizing; a newline INSIDE a quoted body is left alone. The shared
+`safe_tokenize` cannot be used here for exactly this reason — it pre-splits on
+every raw newline, so a quoted multi-line body is cut mid-string, each fragment
+then fails to parse on the unmatched quote, and the skip-on-`ValueError` arm
+drops them all. Measured: `gh pr comment 1 --body "### Verification\n3x speedup
+expected"` tokenizes to `[';']` under `safe_tokenize`, losing the invocation
+entirely. Multi-line bodies are this hook's primary input, so the token pass
+uses `shlex.split` and the command breaks it would otherwise swallow are
+restored by the unquoted-newline rewrite. Command-boundary splitting still uses
+the shared `iter_command_starts` / `strip_prefix` primitives.
+
+### Flag forms
+
 - `--body "..."` / `-b "..."` / `--body=...` — inline value, read directly
-  from the parsed argv (`shlex.split`).
+  from the parsed argv.
 - `--body-file <path>` / `-F <path>` / `--body-file=<path>` — the file is
   read from disk (relative paths resolve against the hook process's cwd).
   An unreadable/missing target silently yields no body text for THIS
   invocation (under-firing accepted over hard-failing the hook on a disk
   read error).
+
+The invocation itself is recognized through a path-prefixed binary
+(`/usr/bin/gh`) and through `gh`'s own global flags sitting between the binary
+and its subcommand (`gh --repo owner/name pr comment …`).
 
 ## Scope — deliberately narrow
 
@@ -107,6 +155,9 @@ the `Stop`-lane concern already covered by `proposal-premise-gate`
 | body with a bare `73%` and no direction word nearby | no direction word — likely an unrelated percentage |
 | body with `lever` discussed but no multiplier and no verdict token | condition (1) not met |
 | `--body-file` target does not exist on disk | no body text extractable |
+| a chain where EVERY `gh` body carries its own timing artifact | each body satisfies the pass condition independently |
+| `gh issue create` appearing only inside a quoted string (`echo "… gh issue create …"`) | no `gh` invocation is actually run |
+| a non-`gh` command's `--body` (e.g. `curl --body …`) with no `gh` deliverable in the command | the body belongs to no deliverable write |
 | non-Bash tool call | out of scope |
 | malformed JSON stdin | fail-open |
 
@@ -116,7 +167,8 @@ the `Stop`-lane concern already covered by `proposal-premise-gate`
 | --- | --- |
 | Malformed / missing stdin JSON | exit 0, silent |
 | `tool_name != "Bash"` | exit 0, silent |
-| No `gh issue\|pr create\|comment` invocation | exit 0, silent |
+| No `gh issue\|pr create\|comment` invocation in any command segment | exit 0, silent |
+| Unbalanced quotes (tokenization raises) | exit 0, silent — no bodies extracted |
 | `--body-file` unreadable | exit 0, silent (for that invocation) |
 | Any uncaught exception | exit 0 (`@fail_open`) |
 
