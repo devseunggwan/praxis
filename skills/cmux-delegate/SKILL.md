@@ -225,10 +225,15 @@ praxis 가 거기에 파일을 남길 이유가 없습니다.
 
     ARP="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/agent-report-path.sh"
     WORKTREE="$(sh "$ARP" --worktree "$PWD")"   # ← 보고서의 worktree 필드에
-    REPORT="$(sh "$ARP" "$PWD")"
+    REPORT="$(sh "$ARP")"                       # ← 이 워크스페이스의 보고서
 
-`$PWD` 가 worktree 하위 디렉터리여도 됩니다 — 헬퍼가 worktree 루트로
-정규화하므로 위임자와 같은 경로가 나옵니다.
+`REPORT` 에 경로를 넘기지 않습니다 — 보고서는 **워크스페이스** 단위이고, 헬퍼가
+`$CMUX_WORKSPACE_ID` 에서 그 값을 읽습니다. `$WORKTREE` 는 여전히 `$PWD` 를
+받으며, 하위 디렉터리를 줘도 됩니다(헬퍼가 worktree 루트로 정규화).
+
+`REPORT` 가 `rc=2` 로 실패하면 이 셸이 cmux 워크스페이스 밖이라는 뜻입니다.
+그때는 보고서를 쓰지 말고 그 사실을 마지막 메시지에 남기세요 — 읽는 쪽이
+없는 상태이므로, 파일을 만들면 나중의 무관한 위임이 그것을 줍습니다.
 
     {
       "worktree": "/abs/path/to/worktree",
@@ -240,8 +245,9 @@ praxis 가 거기에 파일을 남길 이유가 없습니다.
       "completed_at": "2026-07-28T09:00:00Z"
     }
 
-- `worktree` 는 위 `$WORKTREE` 값을 그대로 넣습니다. 파일명이 해시라서 이
-  필드가 없으면 위임자가 자기 것인지 확인할 수 없습니다.
+- `worktree` 는 위 `$WORKTREE` 값을 그대로 넣습니다. 신원("이게 내 워커의
+  보고서인가")은 파일명인 워크스페이스 UUID 가 답하므로, 이 필드가 답하는 것은
+  **배치** 입니다 — 워커가 엉뚱한 디렉터리에서 돌았는지.
 - `pushed` 는 `git push` 가 **성공한 뒤에만** true. 커밋만 했으면 false.
 - `pr_url` 은 실제로 생성된 PR 이 없으면 `null` — 빈 문자열이나 예상 URL 금지.
 - `tests` 의 숫자는 실행한 명령의 출력에서 그대로 옮깁니다. 추정 금지.
@@ -445,14 +451,10 @@ cmux에서 {session_name} 탭을 확인하세요.
 silence. 어느 쪽도 메시지만 읽어서는 구분되지 않습니다. 파일 부재는
 결정론적으로 "미완료" 이고, 파일 존재는 필드별 재검증의 대상입니다.
 
-```bash
-ARP="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/agent-report-path.sh"
-WORKTREE="$(sh "$ARP" --worktree "{cwd}")"
-REPORT="$(sh "$ARP" "{cwd}")"
-[ -f "$REPORT" ] || { echo "미완료: 완료 보고서 부재 ($REPORT)"; exit 1; }
-[ "$(jq -r '.worktree // ""' "$REPORT")" = "$WORKTREE" ] \
-  || { echo "미완료: 보고서의 worktree 가 $WORKTREE 와 불일치"; exit 1; }
-```
+**보고서는 워커 하나당 하나입니다.** 키가 워크스페이스 UUID 이므로, `--distribute`
+로 띄운 N개가 같은 워크트리에서 돌아도 서로 다른 파일에 씁니다. 그래서 보고서
+검사는 아래 워크스페이스 루프 **안** 에 있습니다 — 루프 밖에서 한 번 하면 N명의
+완료를 1건분으로 판정하게 되고, 그게 이 단계가 오래 갖고 있던 결함이었습니다.
 
 **보고서가 없으면 거기서 멈추지 말고 이유를 묻습니다.** 파일 부재는 네 가지
 서로 다른 상황을 하나로 뭉갠 값이고, 각각 처방이 다릅니다.
@@ -471,6 +473,8 @@ REPORT="$(sh "$ARP" "{cwd}")"
 # 그 제목의 워크스페이스를 아예 만들지 않습니다.
 # distribute 모드는 항목마다 한 파일이므로 전부 돕니다.
 LIVENESS="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/agent-liveness.sh"
+ARP="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/agent-report-path.sh"
+WORKTREE="$(sh "$ARP" --worktree "{cwd}")"
 FOUND=0
 
 # glob 이 아니라 find 인 이유: 매치가 없을 때 zsh 는 `nomatch` 로 블록 전체를
@@ -484,9 +488,23 @@ for WS_FILE in $(find /tmp/ -maxdepth 1 -name 'cmux-delegate-{timestamp}-*.ws' 2
   FOUND=1
   # 반복마다 초기화: eval 이 아무것도 내놓지 않으면 $state 가 직전 워커의 값을
   # 그대로 들고 있어, 그 판정이 이 워커의 것으로 출력됩니다.
+  WS_ID="$(cat "$WS_FILE")"
   state=unknown
-  eval "$(sh "$LIVENESS" "$(cat "$WS_FILE")")"
-  echo "$WS_FILE $state"   # working | idle | waiting-input | crash | unknown
+  eval "$(sh "$LIVENESS" "$WS_ID")"
+
+  # 이 워커의 보고서. 같은 워크트리의 형제 워커와 다른 파일입니다.
+  REPORT="$(sh "$ARP" --workspace "$WS_ID")"
+  if [ ! -f "$REPORT" ]; then
+    report=absent
+  elif [ "$(jq -r '.worktree // ""' "$REPORT")" != "$WORKTREE" ]; then
+    # 신원은 파일명이 이미 답했으므로, 불일치는 "남의 보고서"가 아니라
+    # 이 워커가 엉뚱한 디렉터리에서 돌았다는 뜻입니다.
+    report=misplaced
+  else
+    report=present
+  fi
+
+  echo "$WS_FILE $state $report"   # state: working|idle|waiting-input|crash|unknown
 done
 
 if [ "$FOUND" -eq 0 ]; then
@@ -500,10 +518,16 @@ if [ "$FOUND" -eq 0 ]; then
 fi
 ```
 
-**보고서 층은 아직 이 축을 따라오지 못합니다.** `agent-report-path.sh` 는
-워크트리 경로로 해싱하므로 distribute 모드의 N개 워커가 보고서 파일 하나를
-공유합니다 (#903 선존). 즉 위 루프는 워커별로 살았는지를 답하지만, 아래
-보고서 검증은 여전히 1건분입니다.
+**두 값을 함께 읽습니다.** `state` 는 워커가 살아 있는지를, `report` 는 결과가
+도착했는지를 말합니다. 판정은 조합에서 나옵니다 — `idle` + `absent` 가 가장
+의심스러운 칸이고(턴은 끝났는데 결과가 없다), `idle` + `present` 가 완료입니다.
+`working` + `absent` 는 정상적인 진행 중입니다.
+
+| `report` | 뜻 | 위임자가 할 일 |
+| --- | --- | --- |
+| `present` | 보고서가 있고 워크트리가 일치 | 아래 필드별 재검증으로 |
+| `absent` | 파일 없음 | `state` 와 조합해 판단. 아래 4가지 원인 표 참조 |
+| `misplaced` | 보고서는 있으나 워크트리 불일치 | 이 워커가 엉뚱한 디렉터리에서 돌았음. 미완료로 취급 |
 
 | `state` | 뜻 | 위임자가 할 일 |
 | --- | --- | --- |
