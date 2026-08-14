@@ -195,6 +195,80 @@ run_case "--body-file missing target is silent (no body text extractable)" \
 rm -rf "$BODY_FILE_DIR"
 
 # ---------------------------------------------------------------------------
+# === CHAINED INVOCATIONS (issue #973) — each body is bound to its OWN gh call.
+# The pre-fix shape read only the first --body in the flat argv and matched the
+# trigger as a regex over the whole command string; neither R1..R4 nor R7 can be
+# answered that way. See the PR anchor for the pre-fix measurement.
+# ---------------------------------------------------------------------------
+
+# R1 is the issue's exact scenario: evidence in body 1 must NOT silence the
+# bare claim in body 2 — a timing artifact posted by one invocation measures
+# nothing about a multiplier posted by another.
+run_case "R1: evidence in body 1 does not silence a claim in body 2 (&&)" \
+  "advisory:[perf-multiplier-evidence-advisory]" \
+  'gh issue comment 1 --body "wall-clock: elapsed 12.0s baseline" && gh pr comment 2 --body "so the new path is 5x faster"'
+
+run_case "R2: same chain with a ';' separator" \
+  "advisory:[perf-multiplier-evidence-advisory]" \
+  'gh issue comment 1 --body "elapsed 12.0s" ; gh pr create --title t --body "5x faster"'
+
+# R3: a non-gh command's --body used to be donated to the gh scan, hiding the
+# real claim behind curl's harmless body.
+run_case "R3: a non-gh --body ahead of the gh claim is not the gh body" \
+  "advisory:[perf-multiplier-evidence-advisory]" \
+  'curl -X POST --body "harmless" https://x && gh issue create --title t --body "5x faster"'
+
+# R4: the false POSITIVE in the same root cause — there is no deliverable here
+# at all, only the words inside a quoted echo argument.
+run_case "R4: 'gh issue create' inside quoted text posts nothing" \
+  silent \
+  'echo "run gh issue create later" > /tmp/note.txt && printf %s --body "5x faster"'
+
+# R5/R6 pin the control direction: a chain must stay silent when EVERY body
+# carries its own timing artifact, so the per-body loop cannot be "fixed" by
+# firing on any chain that contains a multiplier anywhere.
+run_case "R5: both chained bodies carry their own timing artifact is silent" \
+  silent \
+  'gh issue comment 1 --body "3x faster; elapsed 12.0s" && gh pr comment 2 --body "49m -> 12m; wall-clock: measured"'
+
+run_case "R6: unrelated command chained before a silenced claim stays silent" \
+  silent \
+  'git status && gh pr comment 1 --body "3x faster; real 0m12.400s"'
+
+# R7 pins the newline path. Bash separates commands on a newline, but
+# shlex.split consumes it as whitespace — without the unquoted-newline rewrite
+# this flattens to one segment whose argv[0] is `git`, and the gh body is never
+# scanned.
+run_case "R7: newline-separated chain is split at the command boundary" \
+  "advisory:[perf-multiplier-evidence-advisory]" \
+  'git status
+gh pr comment 1 --body "5x faster"'
+
+# R8 is R7's control: the newline rewrite must NOT cut a multi-line body, which
+# is this hook's primary input (`### Verification` anchors are multi-line).
+run_case "R8: multi-line quoted body keeps its timing artifact attached" \
+  silent \
+  'gh pr comment 1 --body "### Verification
+3x speedup
+$ hyperfine ./bench -> wall-clock: 12.4s"'
+
+run_case "R9: multi-line quoted body with no artifact still fires" \
+  "advisory:[perf-multiplier-evidence-advisory]" \
+  'gh pr comment 1 --body "### Verification
+3x speedup expected"'
+
+# R10/R11 mirror the sibling's invocation-shape cases: structural tokenization
+# must find the deliverable through a path-invoked binary and through gh's own
+# global flags sitting between `gh` and its subcommand.
+run_case "R10: path-invoked gh binary" \
+  "advisory:[perf-multiplier-evidence-advisory]" \
+  '/usr/bin/gh pr comment 1 --body "5x faster"'
+
+run_case "R11: global flag between gh and its subcommand" \
+  "advisory:[perf-multiplier-evidence-advisory]" \
+  'gh --repo owner/name pr comment 1 --body "5x faster"'
+
+# ---------------------------------------------------------------------------
 # === SILENT: non-Bash tool / malformed payload ===
 # ---------------------------------------------------------------------------
 
