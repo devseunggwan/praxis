@@ -38,7 +38,7 @@ The split follows what each event can actually know.
 | Input | the command string | the comment URL the command printed |
 | Decides | structure, `--edit-last` | structure, SHA freshness, coverage |
 | Network | none | `gh api` + `gh pr view` |
-| On violation | blocks (exit 2) | reports (exit 2, tiered) |
+| On violation | blocks (exit 2) | reports (exit 2 blocking / context otherwise) |
 | Can be fooled by shell syntax | yes — it warns instead | no |
 
 PostToolUse needs no parsing at all: `gh pr comment` prints the new comment's
@@ -190,14 +190,24 @@ Every finding carries a tier, and all three leave through **exit 2**.
 | `advisory` | changed files no table row mentions | consider it; it may be a false positive |
 | `unknown` | lookup failed, PR unresolved, no comment URL in the output | the check **did not run** — this is not a pass |
 
-The exit code is not a severity dial here, because on this event it cannot be
-one. A PostToolUse hook cannot prevent the post, and a hook that exits 0 has
-its stderr routed to the debug log where Claude never reads it — so exit 0 is
-not "advisory", it is *silence*. Exit 2 is the only channel that reaches the
-model at all, which makes it the only way any of these findings gets reported.
-What used to be `PRAXIS_ANCHOR_GATE_STRICT=1` is now the default, and
-`PRAXIS_ANCHOR_GATE_ADVISORY=1` takes the exit back to 0 — with the silence
-that implies.
+`blocking` exits 2. The other two are written to
+`hookSpecificOutput.additionalContext` and exit 0.
+
+Both of those reach the model; what separates them is what exit 2 *means* one
+layer up. `_dispatch.run_group` returns 2 for the whole group and
+`_fire_ledger.classify_decision` records `block`, so a coverage hint or a `gh`
+timeout sent that way is filed beside a rule violation and the fire-rate audit
+that scores this hook can no longer tell them apart. `additionalContext` is
+the channel `second-failure-advisory` and `builtin-task-postuse` already use
+on this event for exactly that reason.
+
+What exit 0 does *not* buy is silence: a hook that exits 0 has its **stderr**
+routed to the debug log where Claude never reads it, which is why none of
+these findings goes there. `PRAXIS_ANCHOR_GATE_ADVISORY=1` demotes the
+blocking branch to exit 0 as well.
+
+The fix instruction rides with the exit-2 branch only — "fix the comment now"
+is the wrong thing to say about a check that could not run.
 
 `unknown` exists because the previous shape put "the SHA does not match" and
 "the SHA could not be read" in one list. Raising the exit code on that list

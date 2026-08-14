@@ -246,9 +246,13 @@ print(json.dumps(payload))
 # run_case <name> <expect> <event> <fake-gh-dir> <command> [cwd] [tool] [output]
 #   expect: block  — exit 2 + rendered block message
 #           pass   — exit 0, and (PostToolUse) no finding on stderr
-#           report:X   — exit 2 and stderr contains X (every PostToolUse finding
-#                        exits 2: on this event exit 0 discards the stderr)
+#           report:X   — exit 2 and stderr contains X (a blocking finding)
+#           context:X  — exit 0 and stdout carries X in additionalContext
+#                        (advisory/unknown findings: model-visible, not a deny)
 #           noreport:X — exit 2 and stderr does NOT contain X
+#           nocontext:X — exit 0 and stdout does NOT contain X (the advisory
+#                        fired, but not about X — stderr would pass vacuously
+#                        now that advisories leave through stdout)
 #           demoted:X  — exit 0 and stderr contains X (ADVISORY opt-out)
 #           warn:X   — exit 0 and stderr contains X
 #           nowarn:X — exit 0 and stderr does NOT contain X
@@ -273,6 +277,19 @@ run_case() {
       ;;
     report:*)
       [ "$rc" -eq 2 ] && [[ "$out" == *"${expect#report:}"* ]] || ok=0
+      ;;
+    nocontext:*)
+      local ctx
+      ctx=$(cd "$cwd" && echo "$payload" | PATH="$path_prefix" "$HOOK" 2>/dev/null)
+      [ "$rc" -eq 0 ] && [[ "$ctx" == *'"additionalContext"'* ]] \
+        && [[ "$ctx" != *"${expect#nocontext:}"* ]] || ok=0
+      ;;
+    context:*)
+      # stdout, not stderr — run_case captures stderr, so re-run capturing both.
+      local both
+      both=$(cd "$cwd" && echo "$payload" | PATH="$path_prefix" "$HOOK" 2>/dev/null)
+      [ "$rc" -eq 0 ] && [[ "$both" == *'"additionalContext"'* ]] \
+        && [[ "$both" == *"${expect#context:}"* ]] || ok=0
       ;;
     noreport:*)
       [ "$rc" -eq 2 ] && [[ "$out" != *"${expect#noreport:}"* ]] || ok=0
@@ -501,7 +518,7 @@ run_case "31 report(blocking): 게시된 앵커의 SHA 가 현재 HEAD 와 다�
 # row comes back `unknown`; here the identical path with a working lookup
 # produces a verdict instead. Without this pair, "no freshness finding" and
 # "freshness never ran" are the same observation.
-run_case "31b noreport: 조회가 성공하면 unknown 이 아니라 판정이 나온다" \
+run_case "31b report: 조회가 성공하면 unknown 이 아니라 판정이 나온다" \
   "noreport:확인 불가" PostToolUse "$STALE_GH" "gh pr comment 42 --body-file anchor.md" \
   "$FIX" Bash "$COMMENT_URL"
 
@@ -541,13 +558,13 @@ run_case "34 report: GHES URL 의 호스트가 두 조회에 모두 전달됨" \
   "$FIX" Bash "https://ghe.example/owner/repo/pull/42#issuecomment-999"
 
 API_ERR_GH=$(make_fake_gh api-error "$FIX/ok.md")
-run_case "35 report(unknown): 코멘트 조회 실패는 판정하지 않고 사유를 밝힘" \
-  "report:조회 실패" PostToolUse "$API_ERR_GH" "gh pr comment 42 --body-file anchor.md" \
+run_case "35 context(unknown): 코멘트 조회 실패는 판정하지 않고 사유를 밝힘" \
+  "context:조회 실패" PostToolUse "$API_ERR_GH" "gh pr comment 42 --body-file anchor.md" \
   "$FIX" Bash "$COMMENT_URL"
 
 PR_ERR_GH=$(make_fake_gh pr-error "$FIX/ok.md")
-run_case "36 report(unknown): PR 조회 실패 → SHA 신선도 확인 불가" \
-  "report:신선도 확인 불가" PostToolUse "$PR_ERR_GH" "gh pr comment 42 --body-file anchor.md" \
+run_case "36 context(unknown): PR 조회 실패 → SHA 신선도 확인 불가" \
+  "context:신선도 확인 불가" PostToolUse "$PR_ERR_GH" "gh pr comment 42 --body-file anchor.md" \
   "$FIX" Bash "$COMMENT_URL"
 
 # An ordinary comment is not an anchor, so nothing is checked.
@@ -579,8 +596,8 @@ echo "$REPO_SHA main"
 exit 0
 EOF
 chmod +x "$COVER_GH/gh"
-run_case "40 report(advisory): 표가 언급하지 않은 변경 파일" \
-  "report:untouched-by-anchor.md" PostToolUse "$COVER_GH" \
+run_case "40 context(advisory): 표가 언급하지 않은 변경 파일" \
+  "context:untouched-by-anchor.md" PostToolUse "$COVER_GH" \
   "gh pr comment 42 --body-file anchor.md" "$REPO" Bash "$COMMENT_URL"
 
 # --silent / a URL-stripping --jq / `> /dev/null` publish an anchor while
@@ -606,13 +623,13 @@ run_case "41 report: --silent 로 출력이 없어도 엔드포인트의 comment
 # no check ran at all — which is the `unknown` tier, not a pass. Before the tier
 # split this printed to stderr and exited 0, and an exit-0 stderr on PostToolUse
 # is discarded before Claude reads it: the report existed and reached no one.
-run_case "41b report(unknown): URL 이 사라진 게시는 검사 미실행으로 보고" \
-  "report:아예 실행하지 못했습니다" PostToolUse "$OK_GH" \
+run_case "41b context(unknown): URL 이 사라진 게시는 검사 미실행으로 보고" \
+  "context:아예 실행하지 못했습니다" PostToolUse "$OK_GH" \
   "gh pr comment 42 --body-file $FIX/ok.md > /dev/null" \
   "$FIX" Bash ""
 
-run_case "41c report(unknown): 그 보고가 unknown 티어로 라벨링됨" \
-  "report:unknown (검사가 실행되지 않았습니다" PostToolUse "$OK_GH" \
+run_case "41c context(unknown): 그 보고가 unknown 티어로 라벨링됨" \
+  "context:unknown (검사가 실행되지 않았습니다" PostToolUse "$OK_GH" \
   "gh pr comment 42 --body-file $FIX/ok.md > /dev/null" \
   "$FIX" Bash ""
 
@@ -644,8 +661,8 @@ echo other >"$REPO/only-on-sidetrack.md"
 git -C "$REPO" add only-on-sidetrack.md
 git -C "$REPO" -c user.name=test -c user.email=test@example.com \
   commit -q -m "a commit the PR does not contain"
-run_case "43 noreport: 커버리지는 로컬 HEAD 가 아니라 PR head 에 고정" \
-  "noreport:only-on-sidetrack.md" PostToolUse "$COVER_GH" \
+run_case "43 nocontext: 커버리지는 로컬 HEAD 가 아니라 PR head 에 고정" \
+  "nocontext:only-on-sidetrack.md" PostToolUse "$COVER_GH" \
   "gh pr comment 42 --body-file anchor.md" "$REPO" Bash "$COMMENT_URL"
 
 # Case 9 needs raw malformed stdin, not a JSON-wrapped command string.

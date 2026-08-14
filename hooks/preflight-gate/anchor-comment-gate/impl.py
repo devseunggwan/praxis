@@ -821,11 +821,24 @@ def _post_tool_use(payload: dict) -> int:
 def _report(problems: list[tuple[str, str]], urls: list[str]) -> int:
     """Print the findings grouped by tier and return the exit code.
 
-    Exit 2 whenever there is anything to say. A PostToolUse hook cannot stop
-    the post that already happened, so 2 is not a block here — it is the only
-    exit code whose stderr Claude is shown, and therefore the only way a
-    finding reaches anyone. `PRAXIS_ANCHOR_GATE_ADVISORY=1` opts out of that
-    and takes the silence with it.
+    Both channels reach the model, and which one a finding takes has to match
+    what the finding actually is. Exit 2 is read as a *deny* one layer up —
+    `_dispatch.run_group` returns 2 for the whole group and
+    `_fire_ledger.classify_decision` records `block` — so sending a coverage
+    hint or a `gh` timeout out that way files it in the ledger next to a rule
+    violation, and the fire-rate audit that scores this hook then cannot tell
+    the two apart.
+
+    So `blocking` exits 2 and everything else leaves through
+    `hookSpecificOutput.additionalContext` at exit 0, mirroring
+    `second-failure-advisory` and `builtin-task-postuse`. The earlier form
+    exited 2 for all three tiers on the claim that stderr-at-exit-0 is the
+    only alternative — true of stderr, and beside the point: those two hooks
+    were already using this channel on this event.
+
+    The fix instruction rides with the exit-2 branch only. "Fix the comment
+    now" is the wrong thing to say about a check that could not run.
+    `PRAXIS_ANCHOR_GATE_ADVISORY=1` demotes the blocking branch to 0 as well.
     """
     if not problems:
         return 0
@@ -835,10 +848,26 @@ def _report(problems: list[tuple[str, str]], urls: list[str]) -> int:
         if found:
             lines.append(f"  {tier} ({_TIER_NOTE[tier]}):")
             lines += [f"    - {m}" for m in found]
+    header = "[anchor-gate] 게시된 앵커 검사 결과 — " + (", ".join(urls) or "(URL 미상)")
+    body = header + "\n" + "\n".join(lines)
+
+    if not any(tier == _BLOCKING for tier, _ in problems):
+        json.dump(
+            {
+                "continue": True,
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": body,
+                },
+            },
+            sys.stdout,
+            ensure_ascii=False,
+        )
+        sys.stdout.write("\n")
+        return 0
+
     print(
-        "[anchor-gate] 게시된 앵커 검사 결과 — "
-        + (", ".join(urls) or "(URL 미상)") + "\n"
-        + "\n".join(lines)
+        body
         + "\n  코멘트를 지금 수정하세요 (`gh api --method PATCH "
           ".../issues/comments/<id> -F body=@<file>`). "
           f"규약: {_REFERENCE}",
