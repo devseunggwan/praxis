@@ -90,8 +90,20 @@ follows is the criterion that settles it per hook, so a new consumer of
 `resolve_cache_file` is classified rather than reflexively locked.
 
 **A lost update needs a lock when the state carries information no later
-event reproduces.** Three questions, in order — the first `yes` decides it:
+event reproduces.** Four questions, in order — the first `yes` decides it.
+The first asks what the concurrent write *is*; only if it is a lost update do
+the remaining three ask what losing it costs:
 
+0. **Does the write stage through a name a sibling sharing this `session_id`
+   also uses?** Then the failure is not loss but corruption, and the three
+   questions below cannot see it — they all price one missing entry. Two
+   processes writing one `<path>.tmp` interleave, and the shorter write
+   published over the longer one's tail leaves bytes that every reader's
+   `except ValueError` answers with *empty state*: the whole accumulated set
+   is gone, not one entry, so a hook whose lost update was merely a repeated
+   advisory now restarts its session's dedup from scratch. **Lock — and give
+   the staging file a per-process name**, because the lock is fail-open and
+   an unacquired one puts the shared name straight back (issue #970).
 1. **Does a threshold read the state?** A hook firing on an exact boundary
    (`count == 2`) misfires in both directions when an increment is lost: two
    processes crossing the boundary together both fire, and the count that
@@ -104,17 +116,27 @@ event reproduces.** Three questions, in order — the first `yes` decides it:
    contention is real, its consequence is not; a lock here buys latency on
    every tool call and nothing else.
 
-The seven consumers as of #951:
+The seven consumers as of #951, with the `jq-config` row re-graded under Q0
+in #970:
 
 | Hook | State | Loss consequence | Locked |
 | --- | --- | --- | --- |
 | `postuse-correction/second-failure-advisory` | per-`(tool, signature)` counter | fires on `prior_count == 1` exactly — Q1 | yes |
 | `postuse-correction/pre-edit-md-escape-advisory` | accumulating set of Read paths | the Edit gate warns, or denies under `PRAXIS_MD_ESCAPE_MODE=block`, for a file that was Read — Q2 | yes |
-| `advisory-nudge/jq-config-empty-dict-advisory` | dedup set of advised paths | one advisory repeats | no |
+| `advisory-nudge/jq-config-empty-dict-advisory` | dedup set of advised paths | one advisory repeats — but the pair shared one `.tmp` staging name, so the surviving file could also be unparseable, which `_load_seen` reads as empty and the session's whole dedup set restarts — Q0 | yes |
 | `advisory-nudge/postcompact-context` | last-injected compact uuid | context re-injected once | no |
 | `preflight-gate/worktree-prune-snapshot-gate` | single `snapshot_taken` flag, only ever set true | concurrent writers write the identical value | no |
 | `preflight-gate/session-intent` | set-once intent flags | written only from `UserPromptSubmit`, which is serialized per session; the `PreToolUse` gate path is read-only | no |
 | `preflight-gate/retrospect-active-marker` | marker existence | whole-file write and `unlink`, no read-modify-write to lose | no |
+
+Q0 was applied to the other six only far enough to see that it moves no other
+row: `second-failure-advisory` and `pre-edit-md-escape-advisory` share a
+staging name too but are already locked, and the lock covers the staging
+window; `worktree-prune-snapshot-gate`, `retrospect-active-marker` and
+`session-intent` stage through `tempfile.mkstemp`, whose name no sibling can
+collide with; `postcompact-context` holds a single uuid, so a corrupted read
+costs exactly what a lost one does. Re-grading every `resolve_cache_file`
+consumer against Q0 in its own right is follow-up work, not part of #970.
 
 `hooks/_lib/_state_lock.py` is the primitive: `with state_lock(path):` around
 the read *and* the write, `fcntl.flock` on a `<path>.lock` sibling. Readers
@@ -127,10 +149,12 @@ behaviour, never to a blocked tool call. The wait has a deadline
 (`PRAXIS_STATE_LOCK_TIMEOUT`, 2s) for the same reason — a lock left by a
 killed sibling must not stall the tool call the hook was only observing.
 
-`tests/test_hook_state_concurrency.py` runs both locked hooks in two real
+`tests/test_hook_state_concurrency.py` runs all three locked hooks in two real
 processes against one state file. It carries an unlocked arm alongside the
 shipped one, so the defect stays pinned and a regression that drops the lock
-fails there instead of quietly passing.
+fails there instead of quietly passing. The `jq-config` arm adds the Q0 half:
+a companion case asserts the staging name varies per process, because a race
+arm alone cannot say which of the two defects a given scheduling hit.
 
 ## Hook ordering and precedence
 
