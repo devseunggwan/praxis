@@ -454,6 +454,67 @@ run_tokens "bare newline stays a separator" \
   $'git status\ngit log'
 
 # ---------------------------------------------------------------------------
+# safe_tokenize — newlines inside a quote (issues #972, #987)
+# ---------------------------------------------------------------------------
+#
+# A newline *inside* a quote is data, not a separator. Splitting there gave
+# the opening and the closing line their own shlex pass, both raised
+# `ValueError: No closing quotation`, and the fail-open arm dropped them —
+# losing argv[0] (#972) and, when a real command rode on the closing line, the
+# whole command (#987, which blinded all three merge gates). The same cases
+# live in tests/test_safe_tokenize_multiline_quote.py; they are duplicated
+# here because this shell suite runs without pytest installed.
+
+# Issue #972: a multi-line `--body` must keep its `gh` argv[0], and the
+# newline must stay *inside* the body token rather than splitting it off.
+run_tokens "multi-line quoted --body keeps argv[0] (#972)" \
+  "['gh', 'pr', 'comment', '949', '--body', '### Verification\\n| 1 | x | PASS(live) |\\n']" \
+  $'gh pr comment 949 --body \'### Verification\n| 1 | x | PASS(live) |\n\''
+
+# Issue #987: the command riding on the quote-closing line must survive.
+run_tokens "command after a multi-line double quote survives (#987)" \
+  "['git', 'commit', '-m', 'line one\\nline two', '&&', 'gh', 'pr', 'merge', '9', '--squash']" \
+  $'git commit -m "line one\nline two" && gh pr merge 9 --squash'
+
+run_tokens "command after a multi-line single quote survives (#987)" \
+  "['git', 'commit', '-m', 'line one\\nline two', '&&', 'gh', 'pr', 'merge', '9', '--squash']" \
+  $'git commit -m \'line one\nline two\' && gh pr merge 9 --squash'
+
+# The heredoc-in-command-substitution shape #987 reported. The body is blanked
+# by strip_heredoc_bodies first (#985), so the `-m` token is the opaque
+# substitution — but the `&&` and the merge after it are now visible.
+run_tokens "heredoc commit followed by a merge survives (#987)" \
+  "['git', 'commit', '-m', \"\$(cat <<'EOF'\\n\\nEOF\\n)\", '&&', 'gh', 'pr', 'merge', '9', '--squash']" \
+  $'git commit -m "$(cat <<\'EOF\'\nbody line\nEOF\n)" && gh pr merge 9 --squash'
+
+# Anti-bypass: an unquoted `#` comment opens no quote, so the apostrophe in
+# `don't` must not swallow the real merge on the next line. Without the
+# comment rule in `_quote_open_at_eol` this returns [] and every merge gate
+# goes blind — a fresh hole traded for the one being closed.
+run_tokens "apostrophe in an unquoted comment does not swallow the next line" \
+  "[';', 'gh', 'pr', 'merge', '9', '--squash']" \
+  $'git status # don\'t do this\ngh pr merge 9 --squash'
+
+# The mirror case: a `#` *inside* quotes is literal, not a comment, so the
+# quote closes normally and the following line is a separate command.
+run_tokens "hash inside quotes stays inside the token" \
+  "['echo', '# not a comment', ';', 'gh', 'pr', 'merge', '9', '--squash']" \
+  $'echo \'# not a comment\'\ngh pr merge 9 --squash'
+
+# `commenters = ""` is untouched: the side-effect-scan opt-out marker must
+# still tokenize rather than being eaten as a comment.
+run_tokens "side-effect ack marker still tokenizes" \
+  "['git', 'commit', '-m', 'x', '#', 'side-effect:ack']" \
+  'git commit -m x # side-effect:ack'
+
+# Fail-open is preserved: a quote left open at the end of the command is
+# handed to shlex unchanged, so it raises and the `except ValueError` arm
+# returns no tokens rather than crashing the hook.
+run_tokens "unterminated quote still fails open" \
+  "[]" \
+  $'echo "never closed'
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
