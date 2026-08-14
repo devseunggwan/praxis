@@ -13,7 +13,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | [`ARCHITECTURE.md`](ARCHITECTURE.md)                               | Skill ↔ hook ↔ manifest dependency graph — provider routing, hook index, multi-platform packaging                                                                      |
 | [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md)                 | Fixed Claude Code runtime limits every skill must respect                                                                                                              |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md)                               | Skill and hook contribution conventions, live-runtime verification gate                                                                                                |
-| [`.praxis/specs/README.md`](.praxis/specs/README.md)               | Feature-spec convention — tracked design docs at `.praxis/specs/NNN-slug.md`, when one is required and when it is skipped                                              |
+| [`docs/spec-store.md`](docs/spec-store.md)                         | Feature-spec convention — design docs at `~/.praxis/docs/specs/NNNN-slug.md` (outside any checkout, `PRAXIS_HOME`-relocated), when one is required and when skipped    |
 | [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md)             | Evidence-based keep/merge/drop verdict per hook, scored from the fire-rate ledger (issue #713)                                                                         |
 | [`docs/retrospect-prune-audit.md`](docs/retrospect-prune-audit.md) | Same lens on the retrospect skill's gates/fences/stages, scored from retrospective transcript mining (issue #776)                                                      |
 
@@ -26,7 +26,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | **Full**           | + all cmux-* skills                                      | + cmux                                                      |
 | **Multi-provider** | + codex/gemini routing in cmux-*                         | + codex-cli, gemini-cli                                     |
 
-## Skills (17)
+## Skills (18)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Always call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
@@ -48,6 +48,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | `codex-review-wrap`      | Worktree-aware wrapper for `/codex:review` — forces explicit target selection, premise-verification gate, flip detection across rounds                                                                   |
 | `debt`                   | Deferred-decision ledger — unions commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) with tree compounding comments (`# [PR #N]`); report-only          |
 | `surface-enumeration`    | Pre-implementation input-surface enumeration — enumerate every input variant before writing a parser/validator/sanitizer/classifier so each becomes a required test case                                 |
+| `spec-drift`             | Spec↔code drift report — runs each spec-store requirement's `Verify:` command and reports `implemented` / `missing` / `UNKNOWN`; prose backticks are never executed; report-only                         |
 | `merge-briefing`         | On-demand home for the pre-merge approval procedure — three-surface probe, grading findings by blocking decoration, carrying anchor gaps, six-part approve-ask; chains into `worktree-merge-cleanup`     |
 | `worktree-merge-cleanup` | On-demand home for the pre-merge worktree precondition + unified post-merge cleanup sequence — base-worktree call site, submodule `--force` caveat, squash-ancestry stale-HEAD guard, no-`&&`-chain rule |
 

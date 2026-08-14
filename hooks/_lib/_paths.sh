@@ -55,6 +55,13 @@ praxis_logs_dir() {
     printf '%s\n' "$(praxis_home)/logs"
 }
 
+# Feature-spec store. Holds documents a person writes, not files praxis
+# generates, and sits outside any checkout so the convention need not be
+# adopted per repository — see docs/spec-store.md. Not created.
+praxis_specs_dir() {
+    printf '%s\n' "$(praxis_home)/docs/specs"
+}
+
 # Path under <praxis_home>/$1/$2, creating the directory. Falls back to
 # ${TMPDIR}/praxis-$2 when the home dir cannot be written, so a hook on a
 # read-only or unwritable HOME degrades instead of failing.
