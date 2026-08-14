@@ -39,6 +39,11 @@ Deduplicated per session_id + path so the nudge fires at most once per
 advisory-emitting invocation per session. Session-state file:
   <PRAXIS_HOME>/cache/jq-config-advisory-<session_id>.json
 
+The dedup read-modify-write is serialized by `state_lock` and stages through
+a per-process filename (issue #970). A lock that cannot be taken degrades to
+at most a repeated advisory — never to a dedup set read back as empty, which
+is what a shared staging name published when two processes interleaved there.
+
 Fail-open contract:
   • malformed JSON / non-Bash payload → exit 0
   • empty command → exit 0
@@ -64,6 +69,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _coalesce_subst_runs,
 )
 from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
+from _state_lock import state_lock  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -366,13 +372,37 @@ def _load_seen(path: str) -> set:
 
 
 def _save_seen(path: str, seen: set) -> None:
+    """Publish the dedup set atomically, staging through a per-process name.
+
+    The staging name carries the pid because a shared `<path>.tmp` is not a
+    lost update but a corrupted file (issue #970): two processes writing that
+    one name interleave, and whichever `os.replace` lands second publishes a
+    short write over a longer one's tail — bytes that `_load_seen`'s
+    `except ValueError` turns into an EMPTY set, so the session's whole dedup
+    set restarts rather than one entry going missing. Reproduced in 3-7 of
+    every 100 uninstrumented concurrent pairs.
+
+    `main()` holds `state_lock` over this, which closes the same window — but
+    that lock is fail-open by contract (`_state_lock`), and with it present
+    and never acquired the shared name still published unparseable state. The
+    per-process name is the floor under that degraded path: over 100 such
+    pairs it left only lost updates (8), the outcome DESIGN.md already grades
+    as acceptable here, and no wiped set. The rates are scheduling-dependent;
+    that the shared name corrupts and the per-process one cannot is not.
+    """
+    tmp_path = f"{path}.{os.getpid()}.tmp"
     try:
-        tmp_path = path + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as fh:
             json.dump(sorted(seen), fh)
         os.replace(tmp_path, path)
     except OSError:
-        pass
+        # One staging file per pid, so a failed publish leaks an unbounded
+        # number of them rather than reusing one name — unlink it here
+        # (session-intent/impl.py:300 does the same for the same reason).
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -504,24 +534,37 @@ def main() -> int:
 
     session_id = _extract_session_id(payload)
     dedup_path = _resolve_dedup_path(session_id)
-    seen = _load_seen(dedup_path)
 
-    new_seen = set(seen)
+    # Read, mutate and replace as one critical section (issue #970). `os.replace`
+    # serializes the write alone: two hook processes sharing a session_id — the
+    # ordinary source is parallel sub-agent tool calls — each read the same set
+    # and each published only its own entry. Taken here rather than around the
+    # whole body so a Bash call that names no config path pays nothing.
+    #
+    # `_check_file` shells out to jq inside the section (5s cap) rather than
+    # ahead of it: hoisting it out would decide `key in seen` against a set a
+    # sibling is still writing, which is the duplicate advisory this closes.
+    # A validation that outruns the 2s lock deadline only makes the sibling
+    # proceed unlocked — the fail-open degradation below.
+    with state_lock(dedup_path):
+        seen = _load_seen(dedup_path)
 
-    for path in config_paths:
-        # Canonicalize for dedup: expand user + normalize
-        key = os.path.normpath(os.path.expanduser(path))
-        if key in seen:
-            continue
-        msg = _check_file(path)
-        if msg:
-            sys.stderr.write(msg + "\n")
-            # M3 fix: only record in dedup state when advisory was emitted,
-            # so a file that later becomes empty is re-checked.
-            new_seen.add(key)
+        new_seen = set(seen)
 
-    if new_seen != seen:
-        _save_seen(dedup_path, new_seen)
+        for path in config_paths:
+            # Canonicalize for dedup: expand user + normalize
+            key = os.path.normpath(os.path.expanduser(path))
+            if key in seen:
+                continue
+            msg = _check_file(path)
+            if msg:
+                sys.stderr.write(msg + "\n")
+                # M3 fix: only record in dedup state when advisory was emitted,
+                # so a file that later becomes empty is re-checked.
+                new_seen.add(key)
+
+        if new_seen != seen:
+            _save_seen(dedup_path, new_seen)
 
     return 0
 
