@@ -64,25 +64,43 @@ def repo_root() -> Path:
     return Path(proc.stdout.strip())
 
 
-def parse_spec(path: Path) -> list[tuple[str, str | None]]:
-    """Return [(requirement id, Verify command or None)] in document order.
+def parse_spec(path: Path) -> list[tuple[str, str | None, list[str]]]:
+    """Return [(requirement id, Verify command or None, ignored commands)].
 
-    A `Verify:` line binds to the most recent requirement. A nested item that
-    appears before any requirement has nothing to bind to and is ignored.
+    A `Verify:` line binds to the requirement whose block it sits in, and a
+    block ends at the next line that starts in column 0 — the requirement's own
+    nested items and continuation prose are indented, so that boundary is the
+    document's own. Binding to "the most recent requirement" instead let a
+    nested `- Verify:` in a *later* section rebind the requirement above it and
+    silently replace its command, which means running something the spec never
+    put under that requirement.
+
+    A second `Verify:` inside one block is an authoring error, not a case to
+    guess at: the first binds and the rest are returned so the report can name
+    them. Requirements are kept per occurrence, so a duplicated id carries its
+    own command rather than sharing one.
     """
-    found: list[tuple[str, str | None]] = []
-    commands: dict[str, str] = {}
-    current: str | None = None
+    found: list[tuple[str, str | None, list[str]]] = []
+    in_block = False
     for line in path.read_text(encoding="utf-8").splitlines():
         req = REQ_RE.match(line)
         if req:
-            current = req.group(1)
-            found.append((current, None))
+            found.append((req.group(1), None, []))
+            in_block = True
+            continue
+        if not in_block:
+            continue
+        if line.strip() and not line[0].isspace():
+            in_block = False
             continue
         verify = VERIFY_RE.match(line)
-        if verify and current is not None:
-            commands[current] = verify.group(1)
-    return [(rid, commands.get(rid)) for rid, _ in found]
+        if verify:
+            rid, command, extras = found[-1]
+            if command is None:
+                found[-1] = (rid, verify.group(1), extras)
+            else:
+                extras.append(verify.group(1))
+    return found
 
 
 def run_verify(command: str, cwd: Path, timeout: int) -> tuple[int, str]:
@@ -123,7 +141,11 @@ def report_spec(path: Path, root: Path, timeout: int) -> dict[str, int]:
         print("  (no requirements found)")
         return counts
 
-    for rid, command in requirements:
+    for rid, command, ignored in requirements:
+        for extra in ignored:
+            # Never silently: a second Verify in one block means the author
+            # expects a command to run that this report is not running.
+            print(f"  warning      {rid}: second Verify line ignored: {extra}")
         if command is None:
             counts[UNKNOWN] += 1
             print(f"  {UNKNOWN:<12} {rid}")

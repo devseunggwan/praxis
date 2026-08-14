@@ -118,6 +118,13 @@ A requirement with no eligible command keeps no `Verify:` line and says why in
 its own prose — that line is what separates "nobody got to it" from "nothing
 can check this".
 
+**A `Verify:` line binds to the requirement whose block it sits in**, and a
+block ends at the next line starting in column 0. Nested items and indented
+continuation prose stay inside; a `- Verify:` further down the document, under
+a later heading, belongs to nothing and is not run. A second `Verify:` in one
+block is an authoring error: the first binds, and the rest are printed as
+`warning` lines naming the command that did **not** run.
+
 ## Limitations
 
 - **The report executes strings read from files under `PRAXIS_HOME`, which no

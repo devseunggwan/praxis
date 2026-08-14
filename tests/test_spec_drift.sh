@@ -21,6 +21,9 @@
 #  13. The report writes nothing into the spec directory
 #  14. The default store resolves through PRAXIS_HOME (no --spec-dir at all)
 #  15. A caller-supplied --spec-dir overrides that resolved default
+#  16. A Verify line in a LATER section does not rebind the requirement above it
+#  17. A duplicated requirement id keeps its own command, not a shared one
+#  18. A second Verify inside one block is ignored and reported, never silent
 #
 # Every case runs against a fixture spec dir. This file is a `Verify:` target
 # for several of 0002's requirements, so running the report over the real spec
@@ -254,6 +257,54 @@ OUT6=$(PRAXIS_HOME="$FIX5/home" "$CLI" --spec-dir "$FIX5/elsewhere" 2>&1)
 check_has "15 caller --spec-dir wins over the resolved default" "$OUT6" "OVERRIDE_MARKER"
 check_lacks "15b resolved default is not also scanned" "$OUT6" "HOME_STORE_MARKER"
 rm -rf "$FIX5"
+
+# --------------------------------------------------------------------------- #
+# Fixture 6 — where a Verify line binds. Codex review round 1 (#1005) found
+# that binding to "the most recent requirement" let a nested `- Verify:` in a
+# later section replace the command of the requirement above it: the report
+# then runs something the spec never put under that requirement, and says
+# nothing about it. A block now ends at the next column-0 line.
+# --------------------------------------------------------------------------- #
+FIX6=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+cat > "$FIX6/0007-binding.md" <<'EOF'
+# Feature Specification: Verify binding
+
+**Issue**: devseunggwan/praxis#1005
+
+### Functional Requirements
+
+- **FR-001**: Keeps its own command.
+  - Verify: `true`
+  - Verify: `sh -c 'echo SECOND_IN_BLOCK; exit 1'`
+- **FR-001**: A duplicated id carries its own command.
+  - Verify: `sh -c 'echo DUPLICATE_RAN; exit 5'`
+- **FR-002**: Continuation prose stays inside the block.
+
+  Indented prose, then the requirement's own nested item.
+
+  - Verify: `true`
+
+### Notes
+
+Prose about FR-002 that happens to contain a nested item:
+
+  - Verify: `sh -c 'echo LATE_SECTION; exit 9'`
+EOF
+
+OUT7=$("$CLI" --spec-dir "$FIX6" 2>&1)
+check_lacks "16 later-section Verify does not rebind" "$OUT7" "LATE_SECTION"
+check_has "16b requirement keeps its own command" "$OUT7" "running      FR-001: true"
+check_has "17 duplicated id runs its own command" "$OUT7" "DUPLICATE_RAN"
+check_has "17b duplicated id reported separately" "$OUT7" "missing      FR-001  (exit 5)"
+# Anchored on the `running` line, not on the bare marker: the warning line
+# below quotes the command it ignored, so the marker appears in the report
+# either way. What must be absent is the report having EXECUTED it.
+check_lacks "18 second Verify in one block is not run" "$OUT7" \
+  "running      FR-001: sh -c 'echo SECOND_IN_BLOCK"
+check_has "18b second Verify is reported, not swallowed" "$OUT7" \
+  "warning      FR-001: second Verify line ignored: sh -c 'echo SECOND_IN_BLOCK; exit 1'"
+check_has "16c indented prose does not close the block" "$OUT7" "implemented  FR-002"
+rm -rf "$FIX6"
 
 echo ""
 echo "Passed: $PASS  Failed: $FAIL"
