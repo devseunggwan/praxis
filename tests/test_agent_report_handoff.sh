@@ -10,9 +10,10 @@
 #   (b) make the orchestrator read that file rather than the message, and
 #   (c) treat file absence as incomplete.
 #
-# Issue #903 moved the report out of the worktree root into
-# <PRAXIS_HOME>/agent-reports/<sha1(worktree)>.json, so §6 additionally
-# exercises the shipped path helper both halves of the protocol call.
+# Issue #997 re-keyed the report on the WORKSPACE rather than the worktree:
+# `--distribute` opens N workers in one worktree, so a worktree key gave N
+# workers one file and per-worker completion was unanswerable. §6 exercises the
+# shipped helper from both halves of the protocol under the new key.
 #
 # Assertions are static document checks against SKILL.md (mirroring
 # tests/test_worktree_merge_cleanup.sh) plus an executable gate in §6.
@@ -94,11 +95,17 @@ assert_present \
 
 assert_present \
   "file absence is deterministic incompletion" \
-  "미완료: 완료 보고서 부재"
+  '결정론적으로 "미완료" 이고'
 
 assert_present \
-  "reader confirms the report belongs to its own worktree (#903)" \
-  "보고서의 worktree 가"
+  "reader confirms the report was written where the work happened" \
+  "불일치 = 다른 작업의 보고서"
+
+# The defect #997 fixed: one report per WORKER, so the check sits inside the
+# per-workspace loop rather than once outside it.
+assert_present \
+  "the report check is per-worker, inside the workspace loop" \
+  "보고서는 워커 하나당 하나입니다"
 
 assert_present \
   "report values are re-verified, not trusted" \
@@ -225,13 +232,21 @@ HELPER="$ROOT_DIR/skills/cmux-delegate/agent-report-path.sh"
 GATE_TMP="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 export PRAXIS_HOME="$GATE_TMP/praxis-home"
 
-report_path_for() { sh "$HELPER" "$1"; }
+# The delegator addresses a worker by the UUID it stashed at launch; the worker
+# is addressed by its own environment. Both go through the shipped helper.
+report_for_delegator() { sh "$HELPER" --workspace "$1"; }
+report_for_worker() { CMUX_WORKSPACE_ID="$1" sh "$HELPER"; }
 worktree_for() { sh "$HELPER" --worktree "$1"; }
 
-run_documented_gate() {  # $1 = path the delegator holds (worktree or a subdir)
+WS_NORMAL=AAAAAAAA-1111-2222-3333-444444444444
+WS_FABRICATED=BBBBBBBB-1111-2222-3333-444444444444
+WS_TRUNCATED=CCCCCCCC-1111-2222-3333-444444444444
+WS_MISPLACED=DDDDDDDD-1111-2222-3333-444444444444
+
+run_documented_gate() {  # $1 = workspace UUID, $2 = path the delegator holds
   local report worktree
-  report="$(report_path_for "$1")" || return 1
-  worktree="$(worktree_for "$1")" || return 1
+  report="$(report_for_delegator "$1")" || return 1
+  worktree="$(worktree_for "$2")" || return 1
   [ -f "$report" ] || { echo "미완료: 완료 보고서 부재 ($report)"; return 1; }
   python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$report" 2>/dev/null \
     || { echo "미완료: JSON 파싱 실패"; return 1; }
@@ -241,31 +256,68 @@ run_documented_gate() {  # $1 = path the delegator holds (worktree or a subdir)
 }
 
 WT_NORMAL="$GATE_TMP/normal"
-WT_FABRICATED="$GATE_TMP/fabricated"
 WT_TRUNCATED="$GATE_TMP/truncated"
-WT_FOREIGN="$GATE_TMP/foreign"
+WT_MISPLACED="$GATE_TMP/misplaced"
 
-cat > "$(report_path_for "$WT_NORMAL")" <<JSON
+cat > "$(report_for_delegator "$WS_NORMAL")" <<JSON
 {"worktree": "$WT_NORMAL", "branch": "issue-1-x", "head_sha": "abc", "pushed": true,
  "pr_url": null, "tests": {"command": "true", "passed": 1, "failed": 0},
  "completed_at": "2026-07-28T00:00:00Z"}
 JSON
 # fabricated: the agent said "PR created, all done" and wrote nothing.
-printf '{"worktree": "%s", "head_sha"' "$WT_TRUNCATED" > "$(report_path_for "$WT_TRUNCATED")"
-# foreign: a well-formed report that belongs to some other worktree.
-cat > "$(report_path_for "$WT_FOREIGN")" <<JSON
+printf '{"worktree": "%s", "head_sha"' "$WT_TRUNCATED" > "$(report_for_delegator "$WS_TRUNCATED")"
+# misplaced: a well-formed report whose work happened somewhere else entirely.
+cat > "$(report_for_delegator "$WS_MISPLACED")" <<JSON
 {"worktree": "$GATE_TMP/somewhere-else", "branch": "issue-2-y", "head_sha": "def",
  "pushed": true, "pr_url": null, "tests": {"command": "true", "passed": 1, "failed": 0},
  "completed_at": "2026-07-28T00:00:00Z"}
 JSON
 
-# Writer and reader independently derive the same path — the property the
-# shared helper exists to guarantee.
+# The property the shared helper exists to guarantee: the worker writing from
+# inside its workspace and the delegator holding the stashed UUID land on one
+# file, without either side transcribing the derivation.
 _assert_record "writer and reader derive the same path" \
-  "$([ "$(report_path_for "$WT_NORMAL")" = "$(report_path_for "$WT_NORMAL/")" ] && echo 1 || echo 0)" \
-  "trailing slash changed the derived report path"
+  "$([ "$(report_for_worker "$WS_NORMAL")" = "$(report_for_delegator "$WS_NORMAL")" ] && echo 1 || echo 0)" \
+  "the worker's own-environment path differs from the delegator's --workspace path"
 
-case "$(report_path_for "$WT_NORMAL")" in
+# The defect this file's §6 was rewritten for (#997): N workers in ONE worktree.
+_assert_record "two workers in the same worktree get different reports" \
+  "$([ "$(report_for_delegator "$WS_NORMAL")" != "$(report_for_delegator "$WS_FABRICATED")" ] && echo 1 || echo 0)" \
+  "distinct workspaces collided on one report file"
+
+# No fallback to a worktree key: outside cmux the helper refuses rather than
+# writing a file nobody reads now and an unrelated delegation finds later.
+if env -u CMUX_WORKSPACE_ID sh "$HELPER" >/dev/null 2>&1; then
+  _assert_record "no workspace is a hard failure, not a fallback" 0 "helper answered with no workspace id"
+else
+  _assert_record "no workspace is a hard failure, not a fallback" 1 ""
+fi
+
+# The delegator handing over an empty `.ws` must not be answered from the
+# delegator's OWN environment — that reads one worker's completion as another's.
+if CMUX_WORKSPACE_ID="$WS_NORMAL" sh "$HELPER" --workspace "" >/dev/null 2>&1; then
+  _assert_record "an empty --workspace does not fall through to the environment" 0 \
+    "empty value was answered from CMUX_WORKSPACE_ID"
+else
+  _assert_record "an empty --workspace does not fall through to the environment" 1 ""
+fi
+
+# The UUID becomes a filename and arrives from `cat`-ing a file.
+if sh "$HELPER" --workspace "../../etc/passwd" >/dev/null 2>&1; then
+  _assert_record "a non-UUID workspace is rejected" 0 "traversal-shaped value was accepted"
+else
+  _assert_record "a non-UUID workspace is rejected" 1 ""
+fi
+
+# An old `... "$PWD"` call site must fail loudly rather than have its argument
+# ignored while it addresses a different file than the other half.
+if CMUX_WORKSPACE_ID="$WS_NORMAL" sh "$HELPER" "$WT_NORMAL" >/dev/null 2>&1; then
+  _assert_record "the retired positional call form is rejected" 0 "path argument was silently ignored"
+else
+  _assert_record "the retired positional call form is rejected" 1 ""
+fi
+
+case "$(report_for_delegator "$WS_NORMAL")" in
   "$PRAXIS_HOME"/agent-reports/*) _assert_record "report lands under PRAXIS_HOME" 1 "" ;;
   *) _assert_record "report lands under PRAXIS_HOME" 0 "path escaped PRAXIS_HOME" ;;
 esac
@@ -274,48 +326,56 @@ _assert_record "report does not land in the worktree" \
   "$([ ! -e "$WT_NORMAL" ] && echo 1 || echo 0)" \
   "the worktree dir was created/written to"
 
-run_documented_gate "$WT_NORMAL" >/dev/null
+run_documented_gate "$WS_NORMAL" "$WT_NORMAL" >/dev/null
 _assert_record "gate accepts a normal completion" "$([ $? -eq 0 ] && echo 1 || echo 0)" \
   "documented gate rejected a valid report"
 
-run_documented_gate "$WT_FABRICATED" >/dev/null
+run_documented_gate "$WS_FABRICATED" "$GATE_TMP/fabricated" >/dev/null
 _assert_record "gate rejects a completion claim with no file" \
   "$([ $? -ne 0 ] && echo 1 || echo 0)" "documented gate accepted a missing report"
 
-run_documented_gate "$WT_TRUNCATED" >/dev/null
+run_documented_gate "$WS_TRUNCATED" "$WT_TRUNCATED" >/dev/null
 _assert_record "gate rejects a truncated report" \
   "$([ $? -ne 0 ] && echo 1 || echo 0)" "documented gate accepted malformed JSON"
 
-run_documented_gate "$WT_FOREIGN" >/dev/null
-_assert_record "gate rejects a report from another worktree" \
-  "$([ $? -ne 0 ] && echo 1 || echo 0)" "documented gate accepted a foreign report"
+run_documented_gate "$WS_MISPLACED" "$WT_MISPLACED" >/dev/null
+_assert_record "gate rejects a report whose work happened elsewhere" \
+  "$([ $? -ne 0 ] && echo 1 || echo 0)" "documented gate accepted a misplaced report"
 
-if [ -f "$(report_path_for "$WT_TRUNCATED")" ]; then
+if [ -f "$(report_for_delegator "$WS_TRUNCATED")" ]; then
   _assert_record "gate leaves a malformed report on disk for inspection" 1 ""
 else
   _assert_record "gate leaves a malformed report on disk for inspection" 0 "file removed"
 fi
 
-# The case that motivated the normalization: the agent writes from a package
-# subdirectory while the delegator holds the path it passed to `--cwd`. Hashing
-# the raw argument would send the two to different files, and a finished task
-# would read as incomplete.
+# `--worktree` still normalizes a package subdir to the worktree root: the agent
+# commonly works from `<worktree>/pkg` while the delegator holds `--cwd`, and the
+# report's `worktree` field must match across that gap.
 GIT_WT="$GATE_TMP/real-repo"
 mkdir -p "$GIT_WT/pkg/nested"
 git -C "$GIT_WT" init -q 2>/dev/null
 
-_assert_record "agent in a subdir derives the delegator's report path" \
-  "$([ "$(report_path_for "$GIT_WT/pkg/nested")" = "$(report_path_for "$GIT_WT")" ] && echo 1 || echo 0)" \
-  "subdirectory hashed to a different report than the worktree root"
+_assert_record "a subdir normalizes to the worktree root" \
+  "$([ "$(worktree_for "$GIT_WT/pkg/nested")" = "$(worktree_for "$GIT_WT")" ] && echo 1 || echo 0)" \
+  "subdirectory did not normalize to the worktree root"
 
-cat > "$(report_path_for "$GIT_WT/pkg/nested")" <<JSON
+# And it must keep working with no workspace at all — the field it feeds has to
+# be obtainable on a host with no cmux. Q3 of #997 depends on this ordering.
+if env -u CMUX_WORKSPACE_ID sh "$HELPER" --worktree "$GIT_WT" >/dev/null 2>&1; then
+  _assert_record "--worktree works outside a workspace" 1 ""
+else
+  _assert_record "--worktree works outside a workspace" 0 "the workspace check ran before the --worktree return"
+fi
+
+WS_SUBDIR=EEEEEEEE-1111-2222-3333-444444444444
+cat > "$(report_for_delegator "$WS_SUBDIR")" <<JSON
 {"worktree": "$(worktree_for "$GIT_WT/pkg/nested")", "branch": "issue-3-z",
  "head_sha": "abc", "pushed": true, "pr_url": null,
  "tests": {"command": "true", "passed": 1, "failed": 0},
  "completed_at": "2026-07-28T00:00:00Z"}
 JSON
 
-run_documented_gate "$GIT_WT" >/dev/null
+run_documented_gate "$WS_SUBDIR" "$GIT_WT" >/dev/null
 _assert_record "gate accepts a report written from a subdirectory" \
   "$([ $? -eq 0 ] && echo 1 || echo 0)" \
   "gate rejected a report the agent wrote from a package subdir"
