@@ -654,6 +654,23 @@ run_case "41e silent: isError 인 게시도 검사 대상이 아님" \
   silent PostToolUse "$OK_GH" "gh pr comment 42 --body-file $FIX/ok.md" \
   "$FIX" Bash "" '{"isError": true}'
 
+# The other side of 41d. `gh pr comment ...; false` exits 1 with the comment
+# URL still in the output — the post succeeded and only a later segment failed.
+# A failure-first check would skip a published stale anchor here, so the
+# recovered id has to win over the exit code.
+run_case "41f report(blocking): 실패한 compound 도 URL 이 남았으면 검사" \
+  "report:와 다름" PostToolUse "$STALE_GH" \
+  "gh pr comment 42 --body-file anchor.md; false" \
+  "$FIX" Bash "$COMMENT_URL" '{"exit": 1}'
+
+# The URL is discarded, so 41b's `unknown` branch is the one that would fire.
+# A bare `; false` with no redirect passes with or without the guard — nothing
+# recovers an id there either way — so it cannot tell the two shapes apart.
+run_case "41g silent: 같은 실패에 URL 이 없으면 unknown 도 내지 않음" \
+  silent PostToolUse "$STALE_GH" \
+  "gh pr comment 42 --body-file $FIX/ok.md > /dev/null; false" \
+  "$FIX" Bash "" '{"exit": 1}'
+
 run_case "41c context(unknown): 그 보고가 unknown 티어로 라벨링됨" \
   "context:unknown (검사가 실행되지 않았습니다" PostToolUse "$OK_GH" \
   "gh pr comment 42 --body-file $FIX/ok.md > /dev/null" \

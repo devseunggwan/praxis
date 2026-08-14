@@ -156,11 +156,16 @@ segment. Each URL names host, owner, repo, PR and comment id; `gh api
 …/issues/comments/{id} --jq .body` fetches the body; a body that is not an
 anchor is dropped.
 
-**A post that failed is not checked at all.** `tool_response`'s `exit`,
-`isError` and `interrupted` are read first: a `gh pr comment` that died on
-auth or the network published nothing, and the URL-loss branch below would
-otherwise find the anchor body in the *command* and report an anchor that does
-not exist — a second error stacked on the one already on screen.
+**A failed post is read after its output, never instead of it.** The comment
+ids in `tool_response` are parsed first, and only when none is recoverable do
+`exit`, `isError` and `interrupted` decide. That order is what a compound
+command forces: `gh pr comment ...; false` exits 1 with a real comment URL
+still in the output, so a failure-first check would skip a *published* anchor.
+With nothing recoverable, the failure means nothing was published — a
+`gh pr comment` that died on auth or the network — and the URL-loss branch
+below would otherwise find the anchor body in the *command* and report an
+anchor that does not exist, a second error stacked on the one already on
+screen.
 
 **A post that prints nothing is not a pass.** `gh api --silent`, a `--jq` that
 projects the URL away, and `> /dev/null` all publish while leaving no URL to

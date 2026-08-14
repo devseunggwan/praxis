@@ -754,31 +754,41 @@ def _resolve_pr(ref: tuple[str, str, str, str, str], deadline: float) -> str | N
     return m.group(1) if m else None
 
 
+def _post_failed(tool_response: object) -> bool:
+    """Whether the Bash call reported a failure — unparseable exit reads as success."""
+    if not isinstance(tool_response, dict):
+        return False
+    if tool_response.get("interrupted") is True or tool_response.get("isError") is True:
+        return True
+    exit_code = tool_response.get("exit")
+    if exit_code is None:
+        return False
+    try:
+        return int(exit_code) != 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _post_tool_use(payload: dict) -> int:
     """Verify the anchors that were actually published. Advisory unless strict."""
     command = (payload.get("tool_input") or {}).get("command") or ""
     if not command or os.environ.get(_BYPASS_ENV, "").strip() or _bypassed_with_reason(command):
         return 0
 
-    # A post that failed published nothing, so there is no anchor to check and
-    # nothing was silently skipped. Without this the URL-loss branch below reads
-    # a failed `gh pr comment` — auth error, network — as "posted, but the URL
-    # is missing", and reports an anchor that does not exist. Mirrors
-    # `push-remote-ref-verify/impl.py:282-292`.
-    tool_response = payload.get("tool_response")
-    if isinstance(tool_response, dict):
-        exit_code = tool_response.get("exit")
-        if exit_code is not None:
-            try:
-                if int(exit_code) != 0:
-                    return 0
-            except (TypeError, ValueError):
-                pass
-        if tool_response.get("interrupted") is True or tool_response.get("isError") is True:
-            return 0
-
     deadline = time.monotonic() + _LOOKUP_BUDGET_SEC
     refs = _comment_refs(_tool_output(payload.get("tool_response")))
+
+    # A failed response is only evidence that *something* in the command failed.
+    # `gh pr comment ...; false` exits 1 with a real comment URL still in the
+    # output, so the failure is read after the output, never instead of it: a
+    # recovered id means an anchor exists and gets checked exactly as it would
+    # on exit 0. Only when nothing is recoverable does the failure decide, and
+    # then it decides that nothing was published — which keeps the URL-loss
+    # branch below from reporting an anchor that a failed `gh pr comment`
+    # (auth, network) never created.
+    if not refs and _post_failed(payload.get("tool_response")):
+        return 0
+
     if not refs:
         refs = [
             (host, owner, repo, _resolve_pr((host, owner, repo, "", cid), deadline) or "", cid)
