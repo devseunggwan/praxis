@@ -313,8 +313,16 @@ EOF
 FALLBACK_ERR=$(mktemp)
 (
   cd "$FALLBACK_CWD" || exit 1
+  # CLAUDE_CONFIG_DIR must be unset, not pointed elsewhere: resolve_memory_dir()
+  # treats it as authoritative over the HOME-derived default (#853), and the
+  # default is exactly the branch this case exercises. An ambient value sends
+  # the hook to the developer's real store instead of the fixture. Overriding
+  # it with a throwaway path fails identically — "set" is what wins, not the
+  # value. Mirrors tests/hooks/_lib/test_memory_dir.py, whose HOME fixtures all
+  # delenv it and which covers the relocated root as its own separate case.
   echo '{"tool_name": "Bash", "tool_input": {"command": "echo FallbackSlugToken"}}' \
-    | env -u PRAXIS_MEMORY_DIR HOME="$FALLBACK_HOME" "$HOOK" >/dev/null 2>"$FALLBACK_ERR"
+    | env -u PRAXIS_MEMORY_DIR -u CLAUDE_CONFIG_DIR HOME="$FALLBACK_HOME" "$HOOK" \
+      >/dev/null 2>"$FALLBACK_ERR"
 )
 FALLBACK_RC=$?
 FALLBACK_OUT=$(cat "$FALLBACK_ERR")

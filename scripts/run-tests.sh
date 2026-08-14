@@ -65,6 +65,17 @@ trap 'rm -rf "$PRAXIS_HOME"' EXIT
 # prefix on a specific call still wins over this exported default.
 export PRAXIS_FIRE_TELEMETRY_FILE="$PRAXIS_HOME/fire-events-test.jsonl"
 
+# Third isolation, and the one that breaks the pattern of the two above (#1003).
+# CLAUDE_CONFIG_DIR relocates Claude Code's config root, and resolve_memory_dir()
+# treats it as authoritative over the HOME-derived default (#853). A test that
+# builds a HOME fixture and expects that default therefore reads the developer's
+# real store instead. The fix cannot be a throwaway export the way PRAXIS_HOME
+# was: what wins is the variable being *set*, not its value, so an override
+# fails those tests identically to the ambient value. Unset is the only
+# isolation. Saved first, because step 5 wants the real root back.
+CLAUDE_CONFIG_DIR_AMBIENT="${CLAUDE_CONFIG_DIR-}"
+unset CLAUDE_CONFIG_DIR
+
 FAILED=0
 SKIPPED_TOOLS=()
 
@@ -154,7 +165,15 @@ echo "=== memory frontmatter lint ==="
 # only actual detected drift (exit 1 with violations listed) fails this step.
 # The script's own PRAXIS_TESTS_STRICT support still works for direct
 # standalone invocation (see its tests / docstring).
-if ! env -u PRAXIS_TESTS_STRICT python3 ./scripts/check-memory-frontmatter.py; then
+# Re-inject the ambient CLAUDE_CONFIG_DIR the preamble unset (#1003). This is
+# the one step whose whole point is reading the developer's *real* memory store,
+# so the suite-wide isolation above would silently retarget it — at the default
+# root, which on a relocated host holds a different store or none at all.
+MEMCHECK_ENV=(env -u PRAXIS_TESTS_STRICT)
+if [ -n "$CLAUDE_CONFIG_DIR_AMBIENT" ]; then
+  MEMCHECK_ENV+=("CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR_AMBIENT")
+fi
+if ! "${MEMCHECK_ENV[@]}" python3 ./scripts/check-memory-frontmatter.py; then
   FAILED=1
 fi
 
