@@ -162,7 +162,8 @@ not run. Writing a second `Verify:` in one block is an authoring error — the
 first binds, and the report prints the rest as `warning` lines naming the
 command it did not run.
 
-Two rules on what may appear there:
+Rules on what may appear there — the count is deliberately not stated, so that
+adding one cannot leave a stale number behind:
 
 - **The exit code must report the requirement, not the environment.** A command
   that can exit non-zero for a reason outside the repository is not eligible —
@@ -174,6 +175,17 @@ Two rules on what may appear there:
   so a command that reads stdin gets immediate EOF. Before that it inherited the
   report's own stdin, hung until the timeout, and was reported `missing` — a
   rule stated here but not enforced showed up only as a wrong verdict.
+- **The command must fail when its inputs are gone.** An oracle whose subject
+  has been deleted must exit non-zero, not collapse into a vacuous success. The
+  shape that breaks this is a comparison whose *both* sides are command
+  substitutions: when the subject is absent both substitutions fail, both
+  collapse to the empty string, and `test "" = ""` exits 0 — so the report
+  prints `implemented` for a requirement nothing in the tree satisfies
+  ([#1011](https://github.com/devseunggwan/praxis/issues/1011)). Pin at least
+  one side to a literal, so an absent subject compares against something and
+  the mismatch is visible. This does not conflict with the first rule: that one
+  is about per-user state *outside* the checkout, this one is about the
+  repo-relative inputs the requirement is actually asserting.
 
 Commands run from the repository root of wherever the report was invoked, so a
 `Verify:` line may use repo-relative paths — and a spec written for repository
