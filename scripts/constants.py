@@ -53,6 +53,7 @@ NON_HOOK_DOCS: frozenset[str] = frozenset({
 # with an explicit declaration here.
 EXPECTED_SKILLS: frozenset[str] = frozenset({
     "cmux-delegate",
+    "cmux-orchestrate",
     "cmux-recover-sessions",
     "cmux-resume-sessions",
     "cmux-save-sessions",

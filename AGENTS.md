@@ -25,7 +25,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | **Full**           | + all cmux-* skills                                      | + cmux                                                      |
 | **Multi-provider** | + codex/gemini routing in cmux-*                         | + codex-cli, gemini-cli                                     |
 
-## Skills (17)
+## Skills (18)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Always call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
@@ -68,6 +68,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | `recover-sessions`      | Bulk recover sessions after power loss (tmux backend)                 |
 | `cmux-session-manager`  | Daily session lifecycle — status dashboard, cleanup, reorganize       |
 | `cmux-delegate`         | Delegate a task to an independent session with auto-collected context |
+| `cmux-orchestrate`      | Group delegated workspaces into a run and answer how far the work got |
 
 ## Hooks
 
