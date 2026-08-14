@@ -3,11 +3,15 @@
 #
 # Step 7 reads the completion report; this answers the other half — when the
 # report is absent, is the worker dead, blocked on a keypress, or still working?
-# Classification lives in agent_liveness.py. This script exists for one reason:
-# to normalize the argument to the worktree ROOT exactly as agent-report-path.sh
-# does, so the liveness answer and the report lookup are keyed on one identity.
-# Inlining that derivation in both is how one half gets fixed and the two stop
-# agreeing about which worker they are talking about.
+# Classification lives in agent_liveness.py. This script exists to normalize a
+# path argument to the worktree ROOT — the weak selector, kept only as a
+# fallback for callers that have no workspace.
+#
+# It used to say the normalization matched agent-report-path.sh "so the two are
+# keyed on one identity". Since #997 the report is keyed on the WORKSPACE, and
+# so is this probe when given a ref or a UUID: the shared identity is real, but
+# it is the workspace, and the path branch below is where that identity is
+# missing rather than where it is established.
 #
 # No state is kept. An earlier draft cached an event cursor here; that was a
 # bug rather than an optimization — see the module docstring's WINDOW DIRECTION
@@ -32,7 +36,7 @@ _AL_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # A `workspace:N` ref or a UUID names ONE workspace and is passed through
 # untouched. Only a path needs the worktree-root normalization that
-# agent-report-path.sh also does — and a path is the weak selector, because
+# `agent-report-path.sh --worktree` also does — and a path is the weak selector, because
 # delegation defaults to the delegator's own directory and so routinely names
 # several workspaces at once. Prefer the ref that Step 5 captured.
 case "$1" in
