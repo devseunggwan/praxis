@@ -11,7 +11,7 @@ description: >
   live-runtime gate) or on deferred-decision trailers (that is `debt`).
 verified-against-runtime: true
 runtime-verified-at: 2026-08-14
-runtime-verified-note: "python3 3.x — ran the report against the real store resolved from praxis_specs_dir() (<PRAXIS_HOME>/docs/specs, no --spec-dir passed): 2 specs, 18 implemented, 0 missing, 6 UNKNOWN, and 0001's prose-quoted counter-example command was absent from the printed run list (the parse boundary this design rests on). tests/test_spec_drift.sh 33/33 against synthetic fixture spec dirs — case 14 finds the store via a throwaway PRAXIS_HOME with no --spec-dir, 15 has a caller --spec-dir override it, 16-18 pin where a Verify line binds (later-section rebinding, duplicate ids, a second line in one block), 19 a timed-out command keeping its partial output — positive-controlled on a fixture whose Verify exits 3 (reported `missing` with its command and stderr marker)."
+runtime-verified-note: "python3 3.x — ran the report against the real store resolved from praxis_specs_dir() (<PRAXIS_HOME>/docs/specs, no --spec-dir passed): 2 specs, 18 implemented, 0 missing, 6 UNKNOWN. tests/test_spec_drift.sh 33/33 against synthetic fixture spec dirs — case 6 is the parse boundary this design rests on (a fixture requirement whose PROSE quotes `false`; the report neither runs it nor leaves the requirement anything but UNKNOWN), case 14 finds the store via a throwaway PRAXIS_HOME with no --spec-dir, 15 has a caller --spec-dir override it, 16-18 pin where a Verify line binds (later-section rebinding, duplicate ids, a second line in one block), 19 a timed-out command keeping its partial output — positive-controlled on a fixture whose Verify exits 3 (reported `missing` with its command and stderr marker)."
 ---
 
 # spec-drift
@@ -28,9 +28,11 @@ It is **report-only**: no writes, no commits, no issues, the same invariant
 [`debt`](../debt/SKILL.md) carries.
 
 **Core principle:** only a `Verify:` line is ever executed. A well-written
-requirement quotes commands it wants *rejected* as oracles — `0001`'s FR-001
-cites a counter-example command precisely to disqualify it — so a tool that guessed
-between prose backticks would run the one command the spec says not to trust.
+requirement quotes commands it wants *rejected* as oracles — the worked example
+in [`docs/spec-store.md`](../../docs/spec-store.md) → *Verification lines* holds
+three backticked spans, of which exactly one is the oracle — so a tool that
+guessed between prose backticks would run the one command the spec says not to
+trust.
 
 ## When to Use
 
