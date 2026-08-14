@@ -19,6 +19,7 @@ import json
 import pathlib
 import subprocess
 import sys
+import threading
 
 import pytest
 
@@ -185,6 +186,67 @@ def test_resolving_twice_does_not_signal_again(decision_file, monkeypatch):
 
     assert len(calls) == 1
     assert second["verdict"] == "approved"
+
+
+def test_concurrent_resolvers_produce_one_verdict_and_one_signal(
+    decision_file, monkeypatch
+):
+    """Two delegators resolving one pending decision (CodeRabbit, PR #999).
+
+    The read-modify-write had a window where both could pass the
+    already-resolved check, both write, and both signal. The second signal is
+    the damage — it latches and releases this workspace's NEXT question with
+    nobody having answered it.
+    """
+    monkeypatch.setattr(gate, "_cmux", lambda args, timeout: 1)
+    gate.ask(decision_file, _WS, "질문", 1)
+
+    signals: list[list[str]] = []
+    barrier = threading.Barrier(2)
+
+    def counting_cmux(args, timeout):
+        signals.append(args)
+        return 0
+
+    monkeypatch.setattr(gate, "_cmux", counting_cmux)
+
+    results: list[object] = []
+
+    def contend(verdict, reason):
+        barrier.wait()
+        results.append(gate.resolve(decision_file, _WS, verdict, reason))
+
+    threads = [
+        threading.Thread(target=contend, args=("approved", "됩니다")),
+        threading.Thread(target=contend, args=("rejected", "안 됩니다")),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(signals) == 1
+    verdicts = {r["verdict"] for r in results}
+    assert len(verdicts) == 1
+    assert _record(decision_file)["status"] == verdicts.pop()
+
+
+def test_a_new_question_clears_the_previous_claim(decision_file, monkeypatch):
+    """The claim's lifetime is one question. Left behind, it would make every
+    later decision from this workspace unresolvable."""
+    monkeypatch.setattr(gate, "_cmux", lambda args, timeout: 1)
+    gate.ask(decision_file, _WS, "첫 질문", 1)
+    gate.resolve(decision_file, _WS, "approved", "됩니다")
+
+    gate.ask(decision_file, _WS, "둘째 질문", 1)
+    signals: list[list[str]] = []
+    monkeypatch.setattr(gate, "_cmux", lambda args, timeout: signals.append(args) or 0)
+    result = gate.resolve(decision_file, _WS, "rejected", "이번엔 안 됩니다")
+
+    # The second question must be resolvable AND signalled — a leftover claim
+    # would send this down the loser path, which signals nothing.
+    assert result["verdict"] == "rejected"
+    assert len(signals) == 1
 
 
 def test_resolve_on_a_question_nobody_asked(decision_file):

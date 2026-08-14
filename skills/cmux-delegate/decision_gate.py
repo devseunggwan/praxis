@@ -54,6 +54,7 @@ Python twin from a skill would invert the layering (#981).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -92,6 +93,60 @@ def _cmux(args: list[str], timeout: float) -> int | None:
     return completed.returncode
 
 
+_CLAIM_SUFFIX = ".claim"
+_LOSER_TIMEOUT_SECONDS = 2.0
+_LOSER_POLL_SECONDS = 0.005
+
+
+def _claim(path: str) -> bool:
+    """True when THIS process is the one that gets to record the verdict.
+
+    `resolve` is a read-modify-write, and two delegators resolving one pending
+    decision could both read `pending`, both write, and both signal. The second
+    signal is the damage: it latches, and the next question from this workspace
+    is released with nobody having answered it.
+
+    `O_CREAT|O_EXCL` is the arbiter rather than a lock file — one syscall, no
+    deadline, no `fcntl` availability question, and the winner is decided by
+    the kernel. The repo's `_state_lock` would do this too, but it lives under
+    hooks/ and a skill importing it inverts the layering (#981).
+
+    A non-EEXIST failure (unwritable directory) answers True: arbitration is
+    impossible there, and the `_write` immediately after fails for the same
+    reason and returns before anything is signalled.
+    """
+    try:
+        handle = os.open(path + _CLAIM_SUFFIX, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return False
+    except OSError:
+        return True
+    os.close(handle)
+    return True
+
+
+def _release_claim(path: str) -> None:
+    """The claim's lifetime is one question, so publishing a new one clears it."""
+    try:
+        os.unlink(path + _CLAIM_SUFFIX)
+    except OSError:
+        pass
+
+
+def _await_verdict(path: str) -> _Record | None:
+    """The losing resolver's read. The winner may not have written yet, so this
+    waits briefly rather than reporting `pending` for a decision that is about
+    to be resolved a millisecond later."""
+    deadline = time.monotonic() + _LOSER_TIMEOUT_SECONDS
+    while True:
+        record = _read(path)
+        if record is not None and record.get("status") in ("approved", "rejected"):
+            return record
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(_LOSER_POLL_SECONDS)
+
+
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -109,6 +164,7 @@ def ask(path: str, workspace: str, question: str, timeout: int) -> _Record:
         "asked_at": _now(),
         "status": "pending",
     }
+    _release_claim(path)
     if not _write(path, record):
         return {"verdict": "unavailable", "reason": "결정 파일을 쓸 수 없습니다"}
 
@@ -147,6 +203,23 @@ def resolve(path: str, workspace: str, verdict: str, reason: str) -> _Record:
             "workspace": workspace,
             "verdict": str(record["status"]),
             "reason": str(record.get("reason", "")),
+        }
+
+    if not _claim(path):
+        # Another resolver won. It writes the verdict and signals; this one
+        # reports what was actually decided and signals nothing.
+        settled = _await_verdict(path)
+        if settled is None:
+            return {
+                "state": "pending",
+                "workspace": workspace,
+                "reason": "다른 resolve 가 진행 중입니다",
+            }
+        return {
+            "state": "resolved",
+            "workspace": workspace,
+            "verdict": str(settled["status"]),
+            "reason": str(settled.get("reason", "")),
         }
 
     record["status"] = verdict
