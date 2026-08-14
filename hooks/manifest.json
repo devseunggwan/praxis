@@ -238,9 +238,9 @@
       "matcher": "Bash",
       "timeout": 25,
       "mode": {
-        "strict_env": "PRAXIS_ANCHOR_GATE_STRICT",
         "bypass_env": [
-          "PRAXIS_HOOK_BYPASS_ANCHOR_GATE"
+          "PRAXIS_HOOK_BYPASS_ANCHOR_GATE",
+          "PRAXIS_ANCHOR_GATE_ADVISORY"
         ],
         "external_commands": [
           "gh api /repos/{owner}/{repo}/issues/comments/{id} --jq .body",

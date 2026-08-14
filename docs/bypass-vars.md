@@ -42,6 +42,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_HOOK_BYPASS_NEGATIVE_EXISTENCE_GATE` | `negative-existence-verdict-gate` | Skip the negative-existence verdict `Enumerated:`-line gate |
 | `PRAXIS_HOOK_BYPASS_ARTIFACT_VERDICT_GATE` | `artifact-verdict-evidence-gate` | Skip the artifact-verdict `Verdict-evidence:`-line gate |
 | `PRAXIS_PR_CLAIM_BYPASS` | `pr-claim-mutation-gate` | Skip the PR-claim mutation gate entirely |
+| `PRAXIS_ANCHOR_GATE_ADVISORY` | `anchor-comment-gate` | Demote the *published*-anchor findings from exit 2 back to exit 0. Since a PostToolUse hook's exit-0 stderr never reaches Claude, this silences them rather than softening them — the PreToolUse structure block is unaffected. Exact value `1` only, mirroring the retired `PRAXIS_ANCHOR_GATE_STRICT` it replaces |
 | `PRAXIS_PR_CLAIM_ADVISORY` | `pr-claim-mutation-gate` | Demote the PR-claim mutation gate from block to advisory (systemMessage, non-blocking); mirrors `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY` |
 | `PRAXIS_PROPOSAL_PREMISE_BYPASS` | `proposal-premise-gate` | Skip the prose-proposal premise advisory |
 | `PRAXIS_HOOK_BYPASS_PR_REPORT_DESTINATION_GATE` | `pr-report-destination-gate` | Skip the PR-report-destination advisory (local report not posted to the PR) |
@@ -78,7 +79,6 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_MERGE_CLAIM_STRICT` | `merge-state-claim-gate` | |
 | `PRAXIS_RUNTIME_CLAIM_STRICT` | `runtime-state-claim-gate` | |
 | `PRAXIS_PUSH_VERIFY_STRICT` | `push-remote-ref-verify` | |
-| `PRAXIS_ANCHOR_GATE_STRICT` | `anchor-comment-gate` | Make a defect found in the *published* anchor exit 2 instead of printing to stderr; the pre-post structure check blocks either way. Exact value `1` only — `true` / `yes` stay advisory |
 | `PRAXIS_MOMENTUM_STRICT` | `momentum-rule-retrieval-gate` | |
 | `PRAXIS_MOMENTUM_ACK` | `momentum-rule-retrieval-gate` | Strict-mode unlock token — unblocks one invocation when `PRAXIS_MOMENTUM_STRICT=1`; no effect in advisory mode |
 | `PRAXIS_VERSION_BUMP_STRICT` | `version-bump-evidence-check` | |
