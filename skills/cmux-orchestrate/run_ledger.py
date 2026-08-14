@@ -263,8 +263,12 @@ def create(label: str) -> dict[str, Any]:
         "at": int(time.time()),
         "label": label,
     })
-    # Anchor-only group: members join as delegations bind, so creating it with
-    # --from would capture whatever happens to be live right now instead.
+    # Anchor-only, no --from. A cmux group header IS its anchor's sidebar row,
+    # so the group always costs one workspace; --from does not save it, it only
+    # decides whether that row is named after the run or after whichever task
+    # happened to be first. Measured on 0.64.22: member_count 4 for 3 tasks
+    # either way. Reading that count as three tasks plus a stray tab is the
+    # mistake this comment exists to stop.
     _cmux(["workspace-group", "create", "--name", _group_name(run_id)])
     return {"run": run_id, "state": "empty"}
 

@@ -105,14 +105,14 @@ sh "$RL" close "$RUN"
 > when the user explicitly asks you to.
 
 The sidebar is painted with `set-status praxis_run <state>` and
-`set-progress <done/total>`, neither of which carries that prohibition. Issue
-#982's body asked for the `todo` route; that checkbox is unadopted for this
-reason rather than unfinished.
+`set-progress <done/total>`, neither of which carries that prohibition.
+Issue #982's body asked for the `todo` route; that checkbox is unadopted for
+this reason rather than unfinished.
 
 ## Error Handling
 
 | Error | Recovery |
-|-------|----------|
+| ----- | -------- |
 | cmux absent or a cmux call fails | Swallowed. The ledger is written and the answer is unaffected |
 | State dir unwritable | Swallowed, exit 0. A ledger that fails a delegation is worse than no ledger |
 | Unknown run id | `total=0 state='empty'`, exit 0 — not an error, an answer |

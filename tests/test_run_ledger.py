@@ -115,6 +115,48 @@ def test_mark_and_summary_use_one_vocabulary(ledger):
 
 
 # ---------------------------------------------------------------------------
+# 1b. The group header is a workspace, and --from does not change that
+# ---------------------------------------------------------------------------
+
+
+def _group_mutations(calls: list[list[str]]) -> list[list[str]]:
+    """Group calls that change something. `_group_ref` reads the group list on
+    every bind, and counting that read as an action makes every assertion here
+    about call ordering rather than about what was done."""
+    return [c for c in calls if c[:1] == ["workspace-group"] and c[1] != "list"]
+
+
+@pytest.fixture()
+def spy(monkeypatch, tmp_path):
+    """The module with every cmux argv captured instead of executed."""
+    module = _load(monkeypatch, tmp_path / "state")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(module, "_cmux", lambda argv: calls.append(argv))
+    return module, calls
+
+
+def test_the_group_is_anchor_only(spy):
+    """Measured on cmux 0.64.22: `create --from <ws>` still opens a fresh anchor
+    workspace and files <ws> under it — member_count 4 for three tasks, exactly
+    as without --from. The extra member is the group header, not a stray tab,
+    so --from buys nothing and costs the header its run name."""
+    ledger, calls = spy
+    ledger.create("run")
+    made = _group_mutations(calls)
+    assert [c[1] for c in made] == ["create"]
+    assert "--from" not in made[0]
+
+
+def test_bind_adds_to_the_existing_group(spy, monkeypatch):
+    ledger, calls = spy
+    monkeypatch.setattr(ledger, "_group_ref", lambda run_id: "workspace_group:1")
+    run = ledger.create("run")["run"]
+    calls.clear()
+    ledger.bind(run, "WS-B", "task b")
+    assert [c[1] for c in _group_mutations(calls)] == ["add"]
+
+
+# ---------------------------------------------------------------------------
 # 2. Concurrency — N delegations write to one run
 # ---------------------------------------------------------------------------
 
