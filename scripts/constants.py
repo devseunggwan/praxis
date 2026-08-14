@@ -63,6 +63,7 @@ EXPECTED_SKILLS: frozenset[str] = frozenset({
     "recover-sessions",
     "reset-strikes",
     "retrospect",
+    "spec-drift",
     "strike",
     "strikes",
     "surface-enumeration",

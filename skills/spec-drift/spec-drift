@@ -1,0 +1,23 @@
+#!/bin/sh
+# Entry point for praxis:spec-drift (issue #1005).
+#
+# The store lives outside every checkout, under PRAXIS_HOME, so its location is
+# a runtime-path question and `hooks/_lib/_paths.sh` is the only thing that
+# answers it. A skill does not import the Python resolver (#981): the shell
+# layer sources the shell twin and passes the resolved path in, which is what
+# `skills/cmux-delegate/agent-report-path.sh` and `decision-gate.sh` do.
+#
+#   skills/spec-drift/spec-drift [--timeout N] [--spec-dir PATH]
+#
+# The resolved default is passed as the FIRST --spec-dir and the caller's
+# arguments follow, so a caller-supplied --spec-dir lands last and wins. The
+# tests rely on that ordering; it is why spec_drift.py declares no default of
+# its own and cannot silently disagree with this file about where specs live.
+
+set -eu
+
+_SD_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../../hooks/_lib/_paths.sh
+. "$_SD_DIR/../../hooks/_lib/_paths.sh"
+
+exec python3 "$_SD_DIR/spec_drift.py" --spec-dir "$(praxis_specs_dir)" "$@"
