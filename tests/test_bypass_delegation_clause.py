@@ -15,12 +15,21 @@ Checks:
     list and states BOTH halves of the distinction.
   - Deleting either half from a copy makes the corresponding check fail
     (the control: a checker that passes a half-written clause is broken).
+  - A clause that keeps every keyword and REVERSES the policy fails both
+    halves — deletion controls alone cannot see that case.
   - RULE-BACKSTOP-GAPS.md carries gap row #4 at HIGH cost and records that
     the containment is prose, not a hook.
 
 Test override: `PRAXIS_TEST_REPO_ROOT` points the checks at another checkout.
 Used to prove the suite is not vacuous — pointed at a copy with principle 5
-and gap row #4 stripped out, all 7 checks fail; against this tree they pass.
+and gap #4's RECORD stripped out (the table row and the follow-up bullet, both
+of which the checks read), every repo-reading check fails; against this tree
+they pass. Two boundaries worth stating, because both were measured rather
+than assumed: stripping the table row ALONE leaves
+`test_gap_4_is_recorded_as_unhooked` green, since the sentence it reads lives
+in the follow-up list; and `test_an_inverted_clause_fails_both_checks` stays
+green under any strip, because it feeds the predicates a literal and never
+opens the repo.
 """
 from __future__ import annotations
 
@@ -59,17 +68,43 @@ def _principle_5(text: str) -> str:
 # --- the two halves of the distinction, as independent predicates ----------
 
 def _grants_relay(clause: str) -> bool:
-    """Clause explicitly permits relaying praxis' OWN bypass line."""
+    """Clause explicitly permits relaying praxis' OWN bypass line.
+
+    The permission verb and the ownership must be asserted together. Keyword
+    presence alone passes a clause stating the opposite policy — see
+    `INVERTED_CLAUSE` below.
+    """
     return "Bypass (if truly needed)" in clause and bool(
-        re.search(r"\bMAY\b|permit|allowed", clause)
-    )
+        re.search(r"\bMAY\s+relay\b", clause)
+    ) and bool(re.search(r"gate's own|praxis' own|hook printed", clause))
 
 
 def _forbids_origination(clause: str) -> bool:
-    """Clause explicitly forbids agent-originated routes around the guard."""
+    """Clause explicitly forbids agent-originated routes around the guard.
+
+    The prohibition must attach to origination: `originates … is permitted` is
+    this rule inverted, not a statement of it, so a prohibition verb is
+    required inside the same sentence as the keyword.
+    """
     return "settings.json" in clause and bool(
         re.search(r"permission rule", clause)
-    ) and bool(re.search(r"originat", clause, re.I))
+    ) and bool(re.search(
+        r"originat\w*[^.]{0,40}?\b(forbidden|prohibited|MAY NOT|must not|never)\b",
+        clause,
+        re.I,
+    ))
+
+
+# A clause carrying every keyword either predicate looks for while stating the
+# opposite policy. Both predicates returned True on it before the relationship
+# requirements above were added, so the suite would have passed a wholesale
+# policy inversion of the rule it exists to pin.
+INVERTED_CLAUSE = (
+    "**Anything goes.** The agent MAY hand the user whatever route is "
+    "convenient: add a permission rule, walk them through a "
+    "`.claude/settings.json` edit, or relay the gate's `Bypass (if truly "
+    "needed)` line. Every route the agent originates is permitted."
+)
 
 
 # --- must fire: the shipped prose satisfies both halves --------------------
@@ -105,6 +140,17 @@ def test_deleting_the_relay_grant_fails_only_that_check():
     mutated = clause.replace("Bypass (if truly needed)", "some escape hatch")
     assert not _grants_relay(mutated)
     assert _forbids_origination(mutated)
+
+
+def test_an_inverted_clause_fails_both_checks():
+    """The keyword-presence failure mode, pinned in both directions.
+
+    Deleting a half proves each predicate reacts to absence. It does not prove
+    the predicate reads the policy: a clause that keeps every keyword and
+    reverses the rule is the case a presence check cannot see.
+    """
+    assert not _grants_relay(INVERTED_CLAUSE)
+    assert not _forbids_origination(INVERTED_CLAUSE)
 
 
 def test_deleting_the_origination_ban_fails_only_that_check():
