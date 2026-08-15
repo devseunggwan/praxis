@@ -29,8 +29,8 @@ The `retrospect:denied_actions` fence (§3d′) is emitted whenever pre-scan lan
 produced a row, in any session — it is **not** post-compaction-only. Like the
 receipt it **IS parsed by the Stop hook (Gate-12)**, and against a transcript
 oracle rather than the fence itself: when the live transcript carries a
-structural user rejection and no row disposes of one, Stage 3 blocks [issue
-#1013]. Omit the whole block only when the lane found zero rejections.
+structural user rejection and no row disposes of one, Stage 3 blocks
+[issue #1013]. Omit the whole block only when the lane found zero rejections.
 
 ```markdown
 ## Retrospect Report — {session_date}
