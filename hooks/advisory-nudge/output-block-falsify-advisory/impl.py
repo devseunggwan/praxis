@@ -41,8 +41,20 @@ This hook adds a structural enforcement point at two surfaces:
      the description-field path lets the evidence stay out of the shared
      `question` string, keeping it short — see `q_texts` construction below).
 
-  2. Bash — bulk-action commands containing patterns like "close all",
-     "delete all", "merge all" (+ Korean equivalents). Advisory only.
+  2. Bash — two independent legs:
+
+     a. Bulk-action commands containing patterns like "close all",
+        "delete all", "merge all" (+ Korean equivalents). Advisory only.
+
+     b. Blast-radius (issue #1010) — an IRREVERSIBLE VERB co-occurring with
+        a SHARED-SURFACE TOKEN inside the same command segment. **Emits
+        `permissionDecision: ask`.** Before #1010 the only Bash-side
+        discriminator was the five-verb `<verb> all` regex in (a), so a real
+        production recursive delete (`aws s3 rm s3://prod-data-lake/
+        --recursive`, `kubectl delete namespace production`, `psql -c "DROP
+        TABLE prod.users"`) passed the whole PreToolUse/Bash group silently.
+        See `_blast_radius_findings` for the two-factor definition and
+        `BLAST_RADIUS_ASK_MSG` for the message.
 
 Fail-open contract (project hook design):
   - Malformed / missing stdin JSON → exit 0
@@ -53,12 +65,14 @@ Fail-open contract (project hook design):
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from _hook_utils import safe_tokenize, iter_command_starts  # type: ignore[import-not-found]  # noqa: E402
 from ask_option_text import collect_option_texts  # type: ignore[import-not-found]  # noqa: E402
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from block_message import verb_gate_checklist  # type: ignore[import-not-found]  # noqa: E402
@@ -112,6 +126,25 @@ ASK_MSG = (
     "[trigger-reduction] Keep the question short and place the 'Falsified:' "
     "line in the corresponding '(Recommended)' option's description; both "
     "locations are checked."
+)
+
+BLAST_RADIUS_ASK_MSG = (
+    "[blast-radius] This command pairs an irreversible verb ({verbs}) with a "
+    "shared-surface token ({surfaces}) in one command segment — the two-factor "
+    "blast-radius predicate (issue #1010). "
+    "Run the output-block falsification gate on the plan that produced this "
+    "command BEFORE running it: is its objective already addressed by in-flight "
+    "work, a merged PR, or a parallel proposal in this session? If yes — STOP "
+    "and cite the invalidating link instead of running the command. "
+    "If the premise survives, confirm the exact target scope (bucket/prefix, "
+    "namespace, schema-qualified table, path) is the one you intend — an "
+    "irreversible verb on a surface someone else reads has no undo. "
+    # Issue #1010: deliberately no in-command escape marker. The sibling
+    # `side-effect-scan` offers `# side-effect:ack`; this gate does not,
+    # because approving the permission prompt already IS the acknowledgement
+    # and a second, cheaper bypass would make the ask decorative.
+    "[no-satisfaction-path] No in-command marker silences this gate; "
+    "approving the permission prompt is the acknowledgement."
 )
 
 ANCHORING_ASK_MSG = (
@@ -550,8 +583,16 @@ def _build_anchoring_ask_msg(labels: list[str]) -> str:
     return f"{ANCHORING_ASK_MSG} [scaffold]\n{scaffold}"
 
 
-def _record_block_telemetry(session_id: object, decision: str) -> None:
+def _record_block_telemetry(
+    session_id: object, decision: str, tool: str = "AskUserQuestion"
+) -> None:
     """Rich fire-ledger record for a T1/T2 block event (issue #787).
+
+    `tool` defaults to `AskUserQuestion` for the two original call sites; the
+    Bash blast-radius ask (issue #1010) passes `"Bash"` so the two surfaces
+    stay separable in `aggregate_fires()` — they have different retry-tax
+    profiles and the tier decision for one must not be re-scored from the
+    other's fire count.
 
     The coarse @fail_open recorder sees rc=0 for every call here (deny/ask
     are signaled via a stdout JSON `permissionDecision`, not exit code 2), so
@@ -583,7 +624,7 @@ def _record_block_telemetry(session_id: object, decision: str) -> None:
     """
     _fire_ledger.suppress_coarse_duplicate()
     _fire_ledger.record_session_fire(
-        _TELEMETRY_HOOK_NAME, _TELEMETRY_HOOK_ROLE, decision, session_id, "AskUserQuestion"
+        _TELEMETRY_HOOK_NAME, _TELEMETRY_HOOK_ROLE, decision, session_id, tool
     )
 
 
@@ -700,6 +741,176 @@ def _is_bulk_action_command(command: str) -> bool:
         if kw in command:
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Bash: blast-radius two-factor predicate (issue #1010)
+# ---------------------------------------------------------------------------
+#
+# The gap this closes, measured before the change: the only Bash-leg
+# discriminator was `_is_bulk_action_command`'s five-verb `<verb> all` regex
+# above. There was no magnitude, prod-marker or destructive-verb predicate
+# anywhere in the hook, so `aws s3 rm s3://prod-data-lake/ --recursive`,
+# `kubectl delete namespace production` and `psql -c "DROP TABLE prod.users"`
+# all returned rc=0 with empty stdout AND empty stderr.
+#
+# Definition — deliberately two-factor, with NO numeric threshold and no
+# recursive/wildcard weighting. A count ("more than N objects") is not
+# knowable from the command text without executing it, and a weighting
+# scheme is untestable by inspection; a co-occurrence of two named
+# vocabularies is both. The predicate fires only when BOTH hold:
+#
+#   factor 1 — an IRREVERSIBLE VERB, and
+#   factor 2 — a SHARED-SURFACE TOKEN,
+#
+# within the SAME command segment (`iter_command_starts`). Segment scoping is
+# load-bearing, not stylistic: `rm foo.txt && grep -r bar prod` has both
+# factors in the whole command string but in different segments, and nothing
+# irreversible touches anything shared. A whole-string scan would ask on it.
+#
+# Channel — `permissionDecision: ask`, NOT the exit-0 stderr advisory used by
+# the bulk leg. `hooks/_lib/_hook_io.py:88-92` documents stderr-on-exit-0 as
+# reaching the debug log only, never the model, and issue #874 measured that
+# tier at 42 fires in one session with zero observed effect. `ask` is the only
+# channel that reaches the model, and it is how `side-effect-scan` already
+# gates `kubectl delete` (`hooks/preflight-gate/side-effect-scan/impl.py`
+# `kubectl-apply` category, TIER_ASK). The accepted cost is retry tax on a
+# hook that already fires often — which is why the predicate is kept tight.
+
+# Factor 1a: single-word irreversible verbs. Taken from vocabulary the repo
+# already treats as destructive rather than invented here — `delete` is
+# `destructive-bash-guard`'s `find ... -delete` and `side-effect-scan`'s
+# `kubectl delete`; `truncate` is `destructive-bash-guard`'s `truncate -s 0`.
+# `drop` and `purge` are the catalog/queue-side equivalents of the same
+# "content is gone, no undo" class and are added for the shared-surface
+# targets this predicate exists for (schema/table, object store).
+#
+# ASCII lookarounds instead of `\b` for the same reason as `_BULK_PATTERN_EN`
+# above: Python's `\b` is Unicode-aware and misfires on Hangul-adjacent ASCII.
+_IRREVERSIBLE_VERBS_EN = ("delete", "drop", "truncate", "purge")
+
+_IRREVERSIBLE_VERB_PATTERN = re.compile(
+    r"(?<![A-Za-z])(?:" + "|".join(_IRREVERSIBLE_VERBS_EN) + r")(?![A-Za-z])",
+    re.IGNORECASE,
+)
+
+# Factor 1b: recursive removal. Structural (token-level), not regex, because
+# the recursive flag and the `rm` verb are separate argv tokens and can sit
+# arbitrarily far apart — `aws s3 rm s3://bucket/ --recursive` puts three
+# tokens between them. Mirrors `destructive-bash-guard`'s
+# `_is_rm_recursive_force`, minus the force requirement: `-f` suppresses
+# prompts, it is not what makes the delete irreversible, and an `aws s3 rm
+# --recursive` has no force flag at all.
+_RECURSIVE_LONG_FLAGS = frozenset({"--recursive"})
+
+
+def _segment_has_recursive_rm(argv: list[str]) -> bool:
+    """True iff this segment invokes `rm` AND carries a recursive flag.
+
+    `rm` is matched on the token basename so `/bin/rm` counts, and is NOT
+    required to be argv[0] — `aws s3 rm`, `gsutil rm` and `sudo rm` all put
+    it later. Anything after the POSIX `--` separator is a filename, so a
+    file literally named `-r` does not count as the flag.
+    """
+    if not any(os.path.basename(tok) == "rm" for tok in argv):
+        return False
+    for tok in argv:
+        if tok == "--":
+            break
+        if tok in _RECURSIVE_LONG_FLAGS:
+            return True
+        if tok.startswith("-") and not tok.startswith("--"):
+            flags = tok[1:]
+            if "r" in flags or "R" in flags:
+                return True
+    return False
+
+
+# Factor 2: shared-surface tokens — a surface someone other than this session
+# can already be reading. Each entry is (regex, human label for the message).
+#
+# `prod`/`production`: the same literal vocabulary `side-effect-scan` uses
+# (`PROD_LITERAL_TOKENS`), widened to a bounded substring so it also matches
+# inside a path or bucket name (`/srv/prod/uploads`, `s3://prod-data-lake/`).
+# The ASCII lookarounds keep `products` / `reproduce` out.
+#
+# `s3://` / `gs://`: object-store URIs are shared by construction.
+#
+# `namespace`: the kubectl surface `side-effect-scan`'s reason string already
+# tells the caller to re-confirm ("cluster/namespace 재확인").
+#
+# schema-qualified object name: a DDL object keyword followed by a DOTTED
+# identifier (`TABLE prod.users`, `TABLE analytics.events`). Qualification is
+# the discriminator on purpose — an unqualified `drop table tmp` against a
+# local scratch DB is exactly the routine case that must stay silent, while a
+# schema-qualified name means a shared catalog.
+_SHARED_SURFACE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?<![A-Za-z])(?:prod|production)(?![A-Za-z])", re.IGNORECASE), "prod"),
+    (re.compile(r"(?:s3|gs)://", re.IGNORECASE), "object-store URI"),
+    (re.compile(r"(?<![A-Za-z])namespace(?![A-Za-z])", re.IGNORECASE), "namespace"),
+    (
+        re.compile(
+            r"(?<![A-Za-z])(?:table|schema|database)\s+(?:if\s+exists\s+)?"
+            r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*",
+            re.IGNORECASE,
+        ),
+        "schema-qualified object",
+    ),
+)
+
+
+def _blast_radius_findings(command: str) -> tuple[list[str], list[str]] | None:
+    """Return `(verbs, surfaces)` for the first segment satisfying both
+    factors, else None.
+
+    Verb detection runs per-token so a verb quoted inside one argv token is
+    still seen — `psql -c "DROP TABLE prod.users"` tokenizes to
+    `['psql', '-c', 'DROP TABLE prod.users']`, with both factors living
+    inside the third token. Surface detection runs on the segment's tokens
+    re-joined by a single space, because the schema-qualified pattern spans a
+    keyword and its operand, which may or may not be one token depending on
+    quoting.
+    """
+    if not command or not command.strip():
+        return None
+
+    tokens = safe_tokenize(command)
+    if not tokens:
+        return None
+
+    for argv in iter_command_starts(tokens):
+        if not argv:
+            continue
+
+        verbs: list[str] = []
+        if _segment_has_recursive_rm(argv):
+            verbs.append("rm -r")
+        for tok in argv:
+            for match in _IRREVERSIBLE_VERB_PATTERN.finditer(tok):
+                verb = match.group(0).lower()
+                if verb not in verbs:
+                    verbs.append(verb)
+        if not verbs:
+            continue
+
+        haystack = " ".join(argv)
+        surfaces: list[str] = []
+        for pattern, label in _SHARED_SURFACE_PATTERNS:
+            if pattern.search(haystack) and label not in surfaces:
+                surfaces.append(label)
+        if not surfaces:
+            continue
+
+        return verbs, surfaces
+
+    return None
+
+
+def _build_blast_radius_msg(findings: tuple[list[str], list[str]]) -> str:
+    verbs, surfaces = findings
+    return BLAST_RADIUS_ASK_MSG.format(
+        verbs=", ".join(verbs), surfaces=", ".join(surfaces)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -901,8 +1112,22 @@ def main() -> int:
 
     elif tool_name == "Bash":
         command = tool_input.get("command")
-        if isinstance(command, str) and _is_bulk_action_command(command):
-            sys.stderr.write(ADVISORY_MSG + "\n")
+        if isinstance(command, str):
+            # Issue #1010: blast radius takes precedence over the bulk-action
+            # advisory when both match. They are not two independent findings
+            # about the same command — the ask reason already carries the
+            # falsification instruction the advisory would repeat, and the
+            # advisory's channel (stderr on exit 0) does not reach the model
+            # at all, so emitting both would add a duplicate line to the debug
+            # log and nothing else.
+            blast = _blast_radius_findings(command)
+            if blast is not None:
+                _record_block_telemetry(
+                    payload.get("session_id"), _fire_ledger.DECISION_ASK, "Bash"
+                )
+                emit_decision("ask", _build_blast_radius_msg(blast))
+            elif _is_bulk_action_command(command):
+                sys.stderr.write(ADVISORY_MSG + "\n")
 
     return 0
 

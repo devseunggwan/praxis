@@ -5,7 +5,10 @@ Supported hosts: all
 `hooks/output-block-falsify-advisory.py` fires on every `PreToolUse` event
 for `AskUserQuestion` and `Bash` tool calls. It detects two surfaces where
 a self-authored proposal block is about to be surfaced without a falsification
-check and either asks for confirmation or emits an advisory reminder.
+check and either asks for confirmation or emits an advisory reminder. The
+`Bash` surface carries two independent legs: the original bulk-action advisory,
+and the blast-radius two-factor `ask` added by issue
+[#1010](https://github.com/devseunggwan/praxis/issues/1010).
 
 ### Why this exists
 
@@ -32,7 +35,8 @@ recurrence. A structural hook moves the gate to the tool-call use-site.
 
 References: issue [#221](https://github.com/devseunggwan/praxis/issues/221) (advisory),
 [#290](https://github.com/devseunggwan/praxis/issues/290) (T1 ask escalation), [#899](https://github.com/devseunggwan/praxis/issues/899) (T1 deny → ask restore),
-[#369](https://github.com/devseunggwan/praxis/issues/369) (T2 confidence-anchoring extension).
+[#369](https://github.com/devseunggwan/praxis/issues/369) (T2 confidence-anchoring extension),
+[#1010](https://github.com/devseunggwan/praxis/issues/1010) (Bash blast-radius two-factor ask).
 
 ### Source rule detail (always-loaded SoT reference)
 
@@ -91,7 +95,8 @@ edits the user requested, reversible exploration commands.
 | `AskUserQuestion` (T2, issue #369) | Option `label` OR `description` contains a confidence-anchoring framing token AND the question body plus triggering option descriptions do not satisfy the `Falsified:` predicate | `permissionDecision: ask` (ANCHORING_ASK_MSG) |
 | `AskUserQuestion` (T2) | Same as above + the question body plus triggering option descriptions satisfy the `Falsified:` predicate | Silent pass |
 | `AskUserQuestion` (T3) | Option `label` contains case-insensitive `(recommended)` only | Dead under new precedence — T2's bare `recommend(ed\|s)?` token catches it first as ask |
-| `Bash` | Command matches a bulk-action mutation keyword (see table below) | Advisory stderr |
+| `Bash` (blast radius, issue #1010) | One command segment contains BOTH an irreversible verb AND a shared-surface token (see table below) | `permissionDecision: ask` (BLAST_RADIUS_ASK_MSG) |
+| `Bash` | Command matches a bulk-action mutation keyword (see table below) AND no segment satisfies the blast-radius predicate | Advisory stderr |
 | Any other tool | — | Silent pass-through |
 | Malformed payload / missing field | — | Silent fail-open |
 
@@ -374,6 +379,116 @@ Bulk-action commands often reflect a downstream consequence of a proposal block
 whose premise was not falsified ("close all linked issues" after a misframed
 proposal). The advisory fires conservatively: only mutation-verb patterns are
 matched; read-only commands (`git log --all`, `gh pr list`) do not fire.
+
+#### Bash: blast-radius two-factor predicate (issue #1010)
+
+**The gap, measured before the change.** The only falsification-requirement
+discriminators in this hook were `_has_recommended_marker` /
+`_t2_matching_labels` on `AskUserQuestion` and `_is_bulk_action_command`'s
+five-verb `<verb> all` regex on `Bash`. There was no magnitude, prod-marker or
+destructive-verb predicate anywhere, so a real production recursive delete
+passed the entire `PreToolUse`/`Bash` group in silence. Verbatim, before:
+
+```text
+$ echo '{"tool_name":"Bash","tool_input":{"command":"aws s3 rm s3://prod-data-lake/ --recursive"}}' | impl.py
+rc=0   stdout=[]   stderr=[]
+$ echo '{"tool_name":"Bash","tool_input":{"command":"kubectl delete namespace production"}}' | impl.py
+rc=0   stdout=[]   stderr=[]
+$ echo '{"tool_name":"Bash","tool_input":{"command":"psql -c \"DROP TABLE prod.users\""}}' | impl.py
+rc=0   stdout=[]   stderr=[]
+```
+
+(Positive control from the same run, proving the probe harness was live:
+`close all open issues via gh cli` → rc=0 with the bulk advisory on stderr.)
+
+**Definition.** The predicate fires when an **irreversible verb** co-occurs
+with a **shared-surface token** *inside the same command segment*. There is
+deliberately **no numeric threshold** and no recursive/wildcard weighting: an
+object count is not knowable from the command text without executing it, and a
+weighting scheme is not verifiable by inspection. A co-occurrence of two named
+vocabularies is both testable and auditable, which is why the two-factor form
+was chosen.
+
+| Factor | Detected | Where it comes from |
+| ------ | -------- | ------------------- |
+| Irreversible verb (1a) | `delete`, `drop`, `truncate`, `purge` — ASCII word-boundary lookarounds, case-insensitive, matched per argv token so a verb quoted inside one token (`psql -c "DROP TABLE …"`) still counts | `delete` and `truncate` are `destructive-bash-guard`'s own vocabulary (`find … -delete`, `truncate -s 0`) and `side-effect-scan`'s `kubectl delete`; `drop`/`purge` are the catalog/queue equivalents of the same "content is gone" class |
+| Irreversible verb (1b) | Recursive removal — an `rm` token (basename match, any argv position) plus a recursive flag (`-r`, `-R`, bundled `-rf`, `--recursive`) in the same segment | Mirrors `destructive-bash-guard`'s `_is_rm_recursive_force`, minus the force requirement |
+| Shared surface | `prod` / `production` (bounded substring, so `/srv/prod/…` and `s3://prod-…` match); `s3://` / `gs://`; `namespace`; a DDL object keyword (`table`/`schema`/`database`) followed by a **dotted, schema-qualified** identifier | `prod`/`production` is `side-effect-scan`'s `PROD_LITERAL_TOKENS`; `namespace` is the surface its `kubectl-apply` reason already tells the caller to re-confirm |
+
+Three scoping decisions are load-bearing, not stylistic:
+
+- **Same-segment co-occurrence.** Detection walks `safe_tokenize` →
+  `iter_command_starts` (the DESIGN.md structural-tokenization pipeline), so
+  `rm foo.txt && grep -r bar prod_notes.md` does **not** fire — both factors
+  are in the command string, but nothing irreversible touches anything shared.
+  A whole-string scan would ask on it.
+- **`rm` needs the recursive flag, not the force flag.** `-f` suppresses
+  prompts; it is not what makes the delete irreversible, and `aws s3 rm
+  --recursive` carries no force flag at all. `rm /srv/prod/one-file.txt` stays
+  silent.
+- **The schema/table surface requires qualification.** An unqualified `drop
+  table tmp_rows` against a local scratch DB is precisely the routine case that
+  must stay silent; a schema-qualified name (`prod.users`, `analytics.events`)
+  means a shared catalog.
+
+**Why `ask` and not the exit-0 stderr channel.** stderr on exit 0 is the
+channel `hooks/_lib/_hook_io.py:88-92` documents as *not* model-fed ("stderr
+with exit 0 only reaches the debug log"), and issue #874 measured that ADVISE
+tier at 42 fires in one session with zero observed effect. `ask` is the only
+channel that reaches the model, and it is how the sibling `side-effect-scan`
+already gates `kubectl delete` (its `kubectl-apply` category sits at
+`TIER_ASK`). The accepted cost is retry tax on a hook that already fires often
+— which is the reason the predicate is kept to two named vocabularies rather
+than widened.
+
+**No satisfaction path, by decision.** Unlike the `AskUserQuestion` legs (a
+`Falsified:` line silent-passes) and unlike `side-effect-scan` (a
+`# side-effect:ack` comment short-circuits it), this leg has **no in-command
+marker that silences it**. Approving the permission prompt *is* the
+acknowledgement; a second, cheaper bypass would make the ask decorative. The
+message says so explicitly under the `[no-satisfaction-path]` marker.
+
+**Precedence over the bulk-action advisory.** When a command matches both this
+predicate and `_is_bulk_action_command`, only the `ask` is emitted. They are
+not two independent findings: the ask reason already carries the falsification
+instruction the advisory would repeat, and the advisory's channel does not
+reach the model, so emitting both would add a duplicate line to the debug log
+and nothing else. One pre-existing test payload moved tiers because of this —
+`aws s3 rm s3://bucket/ --recursive # delete all objects` was an advisory case
+and is now an ask case; bulk-phrase-only coverage is preserved by a separate
+fixture carrying no shared-surface token.
+
+**Sibling-hook interaction (known, not mitigated).** `side-effect-scan` also
+asks on `kubectl delete`, and `_dispatch.py:203-207` surfaces only the FIRST
+ask on stdout. On a `kubectl delete namespace production` the two hooks
+compete and whichever lands first wins the reason string; the decision is
+`ask` either way, so no gate is lost, but this hook's reason may not be the one
+the model reads. This is the same aggregation constraint issue #932 documents
+for the `AskUserQuestion` verb checklist.
+
+**Known false negatives (probed, accepted).** Each was reproduced against the
+shipped `impl.py`; all exit 0 with empty stdout and empty stderr:
+
+- `echo "prod" | xargs rm -r` — the surface token and the irreversible verb
+  land in different pipeline segments, so same-segment scoping declines. This
+  is the cost of the scoping rule that keeps `rm foo.txt && grep -r bar prod`
+  quiet; widening to a whole-string scan trades this false negative for a
+  false positive on far more common commands.
+- `rm -rf "unterminated /srv/prod` — `safe_tokenize` skips a line it cannot
+  parse (unmatched quote, runaway heredoc), which is the shared pipeline's
+  documented fail-open behaviour, not something this predicate overrides.
+- `rm -rf $(cat /srv/prod/list)` **does** fire, but only because the literal
+  path inside the substitution carries `prod`. A command whose shared surface
+  is only reachable through a variable (`rm -rf "$PROD_DIR"`) is invisible to
+  any text-level predicate.
+
+**Deliberate scope boundary — no new `AskUserQuestion` tier.** Blast radius is
+added to the `Bash` leg **only**. `menu-mutation-tier-advisory` already asks on
+the `AskUserQuestion` surface and its vocabulary is in flight (PR #1016);
+adding a second asker there would double-fire on the same menu and make the
+interaction unmeasurable. This is a boundary, not an omission — if the
+`AskUserQuestion` surface needs blast-radius awareness, it belongs in
+`menu-mutation-tier-advisory`'s existing tier table, not as a second gate here.
 
 ### Response shape
 
@@ -716,6 +831,24 @@ counts without polluting per-session aggregation. Coarse-duplicate
 suppression also moved to run unconditionally, as the function's first
 statement, so it fires even on the missing-`session_id` path.
 
+#### Bash blast-radius ask (issue #1010)
+
+**JSON to stdout** (message constant: `BLAST_RADIUS_ASK_MSG`). `{verbs}` and
+`{surfaces}` are filled with the matched vocabulary from the first satisfying
+segment, so the reason names *which* two factors tripped it:
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "ask",
+    "permissionDecisionReason": "[blast-radius] This command pairs an irreversible verb (rm -r) with a shared-surface token (prod, object-store URI) in one command segment — the two-factor blast-radius predicate (issue #1010). Run the output-block falsification gate on the plan that produced this command BEFORE running it: is its objective already addressed by in-flight work, a merged PR, or a parallel proposal in this session? If yes — STOP and cite the invalidating link instead of running the command. If the premise survives, confirm the exact target scope (bucket/prefix, namespace, schema-qualified table, path) is the one you intend — an irreversible verb on a surface someone else reads has no undo. [no-satisfaction-path] No in-command marker silences this gate; approving the permission prompt is the acknowledgement."
+  }
+}
+```
+
+**Exit code:** `0`.
+
 #### Advisory (Bash bulk-action only)
 
 Note: case-insensitive `(recommended)` alone previously emitted advisory
@@ -743,6 +876,12 @@ fire-ledger (`hooks/_lib/_fire_ledger.py`, `record_session_fire`) — hook
 for both tiers since issue #899 (T1 recorded `block` while it emitted
 `deny`), `tool` = `AskUserQuestion`, `session_id` from the hook
 payload. Skipped when `session_id` is missing or empty (cannot attribute).
+
+The Bash blast-radius ask (issue #1010) records the same way with `tool` =
+`Bash`. `_record_block_telemetry` takes `tool` as a third parameter defaulting
+to `AskUserQuestion`, so the two surfaces stay separable in
+`aggregate_fires()` — they have different retry-tax profiles and a tier
+decision for one must not be re-scored from the other's fire count.
 
 This exists because this hook signals its decision via a stdout JSON
 `permissionDecision`, not exit code 2 — so the universal `@fail_open` coarse
@@ -834,6 +973,34 @@ Covers 100 cases (97 pre-#910 + 3 new message-contract assertions):
 - `git status`, `gh pr list --state open` (read-only) → silent pass
 - `git log --all` (--all flag, no mutation verb) → silent pass
 - `disclose all`, `enclose all` (word-boundary regression) → silent pass
+
+**Blast-radius two-factor predicate (issue #1010)** — both directions are
+pinned; a one-directional suite would let the opposite error in (the predicate
+silently stops firing on prod deletes, or it creeps outward and starts asking
+on `rm -rf node_modules`).
+
+*Must ask (each returned rc=0 with empty stdout AND empty stderr before #1010):*
+
+- `aws s3 rm s3://prod-data-lake/ --recursive` → ask (`rm -r` + prod + object-store URI)
+- `gsutil -m rm -r gs://artifacts-archive/` → ask (`rm -r` + object-store URI, no prod token needed)
+- `kubectl delete namespace production` → ask (`delete` + namespace)
+- `psql -c "DROP TABLE prod.users"` → ask (`drop` + schema-qualified object) — verb and surface both inside one quoted argv token
+- `psql -c "TRUNCATE TABLE analytics.events"` → ask (`truncate` + schema-qualified object, no prod token)
+- `rm -rf /srv/prod/uploads` → ask (`rm -r` + prod inside a path)
+- `aws sqs purge-queue --queue-url https://sqs/prod-jobs` → ask (`purge` + prod)
+- `aws s3 rm s3://bucket/ --recursive # delete all objects` → ask, not advisory (blast radius supersedes the bulk tier)
+
+*Must stay silent:*
+
+- `rm -rf node_modules`, `rm -r build/` → silent pass (the two routine-local controls the decision named explicitly)
+- `sqlite3 /tmp/scratch.db "drop table tmp_rows"` → silent pass (verb alone; unqualified table name is not a shared surface)
+- `truncate -s 0 /tmp/build.log` → silent pass (verb alone)
+- `aws s3 ls s3://prod-data-lake/`, `kubectl get pods --namespace production` → silent pass (surface alone; reading prod is not a blast radius)
+- `rm foo.txt && grep -r bar prod_notes.md` → silent pass (segment-scoping regression — both factors in the string, different segments)
+- `rm -rf ./products/cache`, `rm -rf ./reproduce-case` → silent pass (`prod` word-boundary regression)
+- `rm /srv/prod/one-file.txt` → silent pass (`rm` without a recursive flag)
+- `rm -- -r /srv/prod/weird` → silent pass (POSIX `--`: `-r` is a filename, not the flag)
+- `gh issue list | xargs -n1 gh issue close  # delete all stale entries` → advisory, not ask (bulk tier preserved when no shared surface is present)
 
 **Edge:**
 - Malformed JSON stdin → exit 0, silent pass
