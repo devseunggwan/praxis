@@ -389,7 +389,7 @@ five-verb `<verb> all` regex on `Bash`. There was no magnitude, prod-marker or
 destructive-verb predicate anywhere, so a real production recursive delete
 passed the entire `PreToolUse`/`Bash` group in silence. Verbatim, before:
 
-```
+```text
 $ echo '{"tool_name":"Bash","tool_input":{"command":"aws s3 rm s3://prod-data-lake/ --recursive"}}' | impl.py
 rc=0   stdout=[]   stderr=[]
 $ echo '{"tool_name":"Bash","tool_input":{"command":"kubectl delete namespace production"}}' | impl.py
