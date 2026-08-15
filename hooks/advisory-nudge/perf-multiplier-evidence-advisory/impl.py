@@ -57,6 +57,18 @@ artifact actually measures the SAME lever the multiplier claims (that
 adequacy judgment is out of scope, mirroring the sibling gates' presence-
 only enforcement).
 
+Each body is bound to its OWN invocation (issue #973). One command can chain
+several `gh` calls, and a timing artifact posted by one of them measures
+nothing about a multiplier posted by another — so the scan runs per
+invocation, not over the command as a whole. The pre-fix shape read only the
+first `--body` in the flat argv and matched `gh (issue|pr) (create|comment)`
+as a regex over the raw command text, which produced three wrong answers:
+a claim in a second chained call was never seen; a non-`gh` command's
+`--body` was attributed to the `gh` scan; and the words `gh issue create`
+inside a quoted `echo` argument fired the advisory with no deliverable at
+all. The sibling `n1-quantitative-claim-advisory` was corrected the same way
+(PR #969).
+
 Scope (deliberately narrow, per issue): PreToolUse(Bash) only, `gh issue|pr
 create|comment` invocations only. A prose "synthesis block" surfaced with
 no tool call at all is a Stop-lane concern (see `proposal-premise-gate`,
@@ -84,12 +96,22 @@ from pathlib import Path
 _HOOK_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HOOK_DIR.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    iter_command_starts,
+    strip_prefix,
+)
 
 # ---------------------------------------------------------------------------
 # Trigger: gh issue|pr create|comment
+#
+# Structural tokenization, not regex (DESIGN.md "Design mechanisms shared by
+# all hooks"). A regex over raw command text cannot tell a real invocation
+# from the same words inside a quoted string, and it cannot tell which body
+# flag belongs to which invocation when several are chained (issue #973).
 # ---------------------------------------------------------------------------
 
-_GH_DELIVERABLE_RE = re.compile(r"\bgh\s+(?:issue|pr)\s+(?:create|comment)\b")
+_GH_OBJECTS = ("issue", "pr")
+_GH_VERBS = ("create", "comment")
 
 _BODY_TEXT_FLAGS = ("--body", "-b")
 _BODY_FILE_FLAGS = ("--body-file", "-F")
@@ -174,19 +196,34 @@ def _has_timing_artifact(text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _extract_body_text(command: str) -> str | None:
-    """Return the body text this `gh` invocation would post, or None.
+def _is_gh_deliverable(argv: list[str]) -> bool:
+    """True iff this argv slice is a `gh (issue|pr) (create|comment)` call.
+
+    The object and verb are located by scanning past `gh`'s own global flags
+    (`--repo owner/name`, `-R …`), so a flag sitting between them does not
+    hide the invocation.
+    """
+    if not argv:
+        return False
+    head = argv[0].lstrip("(${")
+    if not (head == "gh" or head.endswith("/gh")):
+        return False
+
+    words = [tok for tok in argv[1:] if not tok.startswith("-")]
+    for i, word in enumerate(words):
+        if word in _GH_OBJECTS:
+            return any(w in _GH_VERBS for w in words[i + 1:i + 3])
+    return False
+
+
+def _body_of(argv: list[str]) -> str | None:
+    """Return the body text THIS invocation would post, or None.
 
     Inline `--body`/`-b` values are read directly from the parsed argv.
     `--body-file`/`-F` values are read from disk (best-effort — an
     unreadable path silently yields None for THIS invocation, not a hook
     failure).
     """
-    try:
-        argv = shlex.split(command, posix=True)
-    except ValueError:
-        return None
-
     for i, tok in enumerate(argv):
         flag, sep, inline_value = tok.partition("=")
         if tok in _BODY_TEXT_FLAGS and i + 1 < len(argv):
@@ -198,6 +235,90 @@ def _extract_body_text(command: str) -> str | None:
         if sep and flag in _BODY_FILE_FLAGS:
             return _read_body_file(inline_value)
     return None
+
+
+def _newlines_to_separators(command: str) -> str:
+    """Rewrite command-separating newlines as `;` so segment splitting sees them.
+
+    A newline separates commands in Bash, but `shlex.split` consumes it as
+    generic whitespace — `git status\\ngh pr comment --body "3x"` flattens into
+    ONE segment whose argv[0] is `git`, and the `gh` body is never scanned.
+    `safe_tokenize` already solves this by inserting a synthetic `;` per line,
+    but it splits on every raw newline, which severs `--body` from a multi-line
+    GitHub body — this hook's primary input. So the newline is rewritten only
+    when it sits OUTSIDE quotes: a body's internal newlines are quoted and stay
+    untouched, while a real command break becomes a separator token.
+
+    Backslash-escaped characters are copied through verbatim, so a `\\`-newline
+    line continuation is not turned into a break.
+    """
+    out: list[str] = []
+    quote: str | None = None
+    i = 0
+    n = len(command)
+    while i < n:
+        ch = command[i]
+        if quote == "'":
+            # Single quotes are literal in Bash — no escapes inside them.
+            if ch == "'":
+                quote = None
+            out.append(ch)
+            i += 1
+        elif ch == "\\" and i + 1 < n:
+            out.append(ch)
+            out.append(command[i + 1])
+            i += 2
+        elif quote == '"':
+            if ch == '"':
+                quote = None
+            out.append(ch)
+            i += 1
+        elif ch in ("'", '"'):
+            quote = ch
+            out.append(ch)
+            i += 1
+        elif ch == "\n":
+            out.append(" ; ")
+            i += 1
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def _extract_bodies(command: str) -> list[str]:
+    """Every body a `gh` deliverable in this command would post.
+
+    One command can chain several invocations; each carries its own body, and
+    a timing artifact cited in one measures nothing about a multiplier claimed
+    by another (issue #973).
+    """
+    # `shlex.split` rather than the shared `safe_tokenize`: this hook's inputs
+    # are multi-line GitHub bodies. `safe_tokenize` pre-splits on every raw
+    # newline (its own docstring flags this as a caller note), so a quoted body
+    # is cut mid-string, every resulting line fails to parse on the unmatched
+    # quote, and the skip-on-ValueError arm drops them all — measured:
+    # `gh pr comment 1 --body "### Verification\n3x speedup expected"`
+    # tokenizes to `[';']`, losing the invocation entirely. `_newlines_to_
+    # separators` above recovers the command breaks that `shlex.split` would
+    # otherwise swallow, without cutting a quoted body. Command-boundary
+    # splitting still uses the shared primitives below.
+    try:
+        tokens = shlex.split(_newlines_to_separators(command), posix=True)
+    except ValueError:
+        return []
+    if not tokens:
+        return []
+
+    bodies = []
+    for segment in iter_command_starts(tokens):
+        argv = strip_prefix(segment)
+        if not _is_gh_deliverable(argv):
+            continue
+        body = _body_of(argv)
+        if body:
+            bodies.append(body)
+    return bodies
 
 
 def _read_body_file(path_text: str) -> str | None:
@@ -217,7 +338,7 @@ def _read_body_file(path_text: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _advisory_text(body: str) -> str:
+def _advisory_text() -> str:
     return (
         "[perf-multiplier-evidence-advisory] perf multiplier / lever verdict "
         "in this deliverable has no adjacent controlled-timing artifact "
@@ -252,20 +373,19 @@ def main() -> int:
     if not isinstance(command, str) or not command.strip():
         return 0
 
-    if not _GH_DELIVERABLE_RE.search(command):
+    # Each chained invocation is scanned against its OWN body: a timing
+    # artifact cited in one body does not silence a multiplier claimed in
+    # another (issue #973). The first unsatisfied body is reported.
+    for body in _extract_bodies(command):
+        if not (_has_multiplier(body) or _has_lever_verdict(body)):
+            continue
+
+        if _has_timing_artifact(body):
+            continue
+
+        sys.stderr.write(_advisory_text() + "\n")
         return 0
 
-    body = _extract_body_text(command)
-    if not body:
-        return 0
-
-    if not (_has_multiplier(body) or _has_lever_verdict(body)):
-        return 0
-
-    if _has_timing_artifact(body):
-        return 0
-
-    sys.stderr.write(_advisory_text(body) + "\n")
     return 0
 
 
