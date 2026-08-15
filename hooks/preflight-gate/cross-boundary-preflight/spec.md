@@ -21,7 +21,7 @@ The two patterns covered:
 | Pattern            | Trigger                                               | Action                                           |
 | ------------------ | ----------------------------------------------------- | ------------------------------------------------ |
 | `HEREDOC_BODY`     | `<<` token in same segment as `gh pr/issue create`    | **Hard block** (exit 2) — suggests `--body-file` |
-| `CROSS_REPO_WRITE` | `--repo/-R` flag in `gh pr/issue create/comment/edit` | **Ask** — surfaces four-point checklist          |
+| `CROSS_REPO_WRITE` | `--repo/-R` flag in `gh pr/issue create/comment/edit` (any owner) | **Ask** — surfaces four-point checklist          |
 
 ### What is blocked / asked
 
@@ -59,17 +59,35 @@ Correct pattern: `Write tool → /tmp/body.md` then `--body-file /tmp/body.md`.
 | `gh pr create --title "t" --body "Caller chain verified: ok"`      | **PASS** — no `--repo`          |
 | `gh issue list --repo owner/repo`                                  | **PASS** — read-only subcommand |
 | `gh pr list --repo owner/repo`                                     | **PASS** — read-only subcommand |
+| `gh issue create --repo <own-org>/repo --title "t"`                | **ASK** — ownership is no exemption |
 | `gh pr create --repo x --title "t" # cross-boundary:ack`           | **PASS** — opt-out              |
 
 The checklist surfaced for `pr create` (four points):
 
-1. **Per-action authorization gate** — explicit approval for THIS specific action
+1. **Per-action authorization gate** — explicit approval for THIS specific
+   action, for **every** `--repo` target including a repo the user or their
+   own org owns
 2. **Caller chain verified** — PR body must contain `Caller chain verified: <source>` (pr create only)
 3. **Body delivery format** — `--body-file`, no heredoc
 4. **Language & content rules** — English only, no internal identifiers
 
 The checklist for `issue create / comment / edit` skips item ② (no caller-chain
 requirement on issues).
+
+#### Ownership is not an exemption (issue #993)
+
+The ASK has always fired on every `--repo` write, but item ① was labelled
+"§External-repo write" only — read as "external repos only", which let own-org
+writes be acked as out of scope. Item ① now states the rule the checklist
+actually enforces: a public repo owned by the user or their own org is a
+cross-boundary write and needs the same per-action prior approval as a
+third-party repo. The verdict and the wording now agree, and they agree with
+retrospect Stage 2.5 Gate-4, where own-org membership likewise stopped being
+an exemption — there the write is unescalated only when the backing repo is
+own-org **and** declared `repo_visibility: private|internal`. This hook cannot
+observe visibility from the command line, so it asks in every case; a repo
+confirmed own-org-and-private is what the `# cross-boundary:ack` marker is
+for.
 
 ### Response format
 
@@ -135,13 +153,15 @@ placement guidance.
 ### Tests
 
 ```bash
-bash tests/test_cross_boundary_preflight.sh
+bash tests/hooks/preflight-gate/test_cross_boundary_preflight.sh
 ```
 
-Covers 35 cases: 7 heredoc block paths (4 original + 3 F2 regression), 12
-cross-repo ask paths (including shorthand flags, chained commands, equals
-forms, F1 regression), 2 ask-detail checks (caller chain item present/absent
-by subcommand), 1 block-msg content check (new ack-placement bullet present
-in stderr), 1 F2 false-positive guard, 9 pass paths (no-repo, read-only,
-non-gh, opt-out, variable-heredoc), 2 infrastructure (non-Bash passthrough,
-malformed JSON fail-open).
+Covers 48 cases: heredoc block paths (originals + F2 regression), cross-repo
+ask paths (shorthand flags, chained commands, equals forms, F1 regression,
+own-org targets per #993), ask-detail checks (caller chain item present/absent
+by subcommand, ownership-is-no-exemption wording per #993), a block-msg
+content check (ack-placement bullet present in stderr), the F2 false-positive
+guard, pass paths (no-repo, read-only including an own-org read-only #993
+control that must stay silent, non-gh, opt-out, variable-heredoc), cascade-hint
+present/absent pair, and infrastructure (non-Bash passthrough, malformed JSON
+fail-open, `@fail_open` wrapping).

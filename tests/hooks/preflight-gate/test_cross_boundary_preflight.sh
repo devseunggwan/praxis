@@ -139,6 +139,28 @@ run_case_detail "issue create checklist no Caller chain item" \
   "body-file"
 
 # ---------------------------------------------------------------------------
+# #993: own-org membership does not exempt a --repo write. The ASK must fire
+# on an own-org target, and the checklist must say ownership is no exemption
+# (the old wording read as "external repos only", which is what let own-org
+# writes proceed without per-action approval).
+# ---------------------------------------------------------------------------
+
+run_case "own-org repo write is still cross-boundary (#993)" ask \
+  'gh issue create --repo devseunggwan/praxis --title "t"'
+
+run_case "own-org pr create is still cross-boundary (#993)" ask \
+  'gh pr create --repo devseunggwan/praxis --title "t" --body-file /tmp/b.md'
+
+run_case_detail "checklist states ownership is not an exemption (#993)" \
+  'gh issue create --repo devseunggwan/praxis --title "t"' \
+  "Ownership does NOT exempt"
+
+# Opposite direction — the #993 wording must not turn read-only own-org
+# traffic into an ask. This control has to stay silent.
+run_case "own-org read-only stays silent (#993 control)" pass \
+  'gh issue list --repo devseunggwan/praxis --state open'
+
+# ---------------------------------------------------------------------------
 # Message content: new bullet 3 appears in HEREDOC_BLOCK_MSG stderr
 # ---------------------------------------------------------------------------
 
