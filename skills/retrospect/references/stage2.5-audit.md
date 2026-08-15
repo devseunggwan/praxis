@@ -36,15 +36,24 @@ The script mechanizes, mirroring the Stop hook's parsing semantics
   `not <action>: <reason>` lines) or Schema B (1-2 `not-others: <dim-tags>`
   lines, no Schema A lines)
 - **backing_repo** — any row routing `upstream_feedback` or `issue` must
-  declare `backing_repo: <owner>/<repo>` in Rationale
-- **Gate-4** — allowlist resolution (`PRAXIS_OWN_ORGS` →
-  `gh api user --jq .login` → conservative all-external fallback), owner
-  classification, and the literal external warning prefix
-  `⚠ EXTERNAL: per-action approval required at Stage 4` on external rows
-  (Stage 4 scans that exact string; a paraphrase disables the per-action
-  approval gate). Verdict `WARN` means at least one external finding exists,
-  or the conservative fallback was required — Stage 4 must then require
-  per-action approval for external rows
+  declare `backing_repo: <owner>/<repo>` in Rationale. An `upstream_feedback`
+  row may add `repo_visibility: public|private|internal` on its own Rationale
+  line; Gate-4 reads it, and its absence means public (issue #993)
+- **Gate-4** — cross-boundary write classification and the literal external
+  warning prefix `⚠ EXTERNAL: per-action approval required at Stage 4` on
+  every escalated row (Stage 4 scans that exact string; a paraphrase disables
+  the per-action approval gate). Since issue #993 the criterion is
+  **visibility, not ownership**: a write to a *public* backing repo is
+  escalated to per-action prior approval even when the owner is your own
+  handle/org. A row is unescalated only when **both** halves hold — the owner
+  resolves inside the own-org allowlist (`PRAXIS_OWN_ORGS` →
+  `gh api user --jq .login` → conservative all-external fallback) **and** the
+  Rationale declares `repo_visibility: private` or `repo_visibility:
+  internal`. An undeclared repo counts as public (an advisory says so), and a
+  third-party repo stays escalated whatever visibility it declares. Verdict
+  `WARN` means at least one external finding exists, or the conservative
+  fallback was required — Stage 4 must then require per-action approval for
+  those rows
 - **Gate-5** — every memory-action finding needs a complete
   `<!-- memory_scan finding #N: ... -->` block (`scanned: true`,
   `candidates_reviewed`, `repeat`, `repeat_count`)

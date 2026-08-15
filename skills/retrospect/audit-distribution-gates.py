@@ -59,9 +59,18 @@ SCHEMA_B_RE = re.compile(r"^\s*not-others: .+")
 BACKING_REPO_RE = re.compile(
     r"^\s*backing_repo: ([A-Za-z0-9_][A-Za-z0-9_.-]*)/[A-Za-z0-9_][A-Za-z0-9_.-]*"
 )
-# Literal Stage 4 warning prefix required on external rows (stage2.5-audit.md
-# Gate-4); Stage 4 scans this exact string — a paraphrase disables the gate.
+# Literal Stage 4 warning prefix required on every cross-boundary row
+# (stage2.5-audit.md Gate-4); Stage 4 scans this exact string — a paraphrase
+# disables the gate.
 EXTERNAL_WARNING = "⚠ EXTERNAL: per-action approval required at Stage 4"
+# Declared visibility of the backing repo (issue #993). Gate-4 keys on
+# visibility, not ownership: a *public* repo is a cross-boundary write even
+# when its owner is the user's own org, so only `private`/`internal` stays
+# unescalated. An absent declaration is treated as public (fail closed).
+REPO_VISIBILITY_RE = re.compile(
+    r"^\s*repo_visibility: (public|private|internal)\s*$"
+)
+UNESCALATED_VISIBILITY = {"private", "internal"}
 
 # Gate-1 behavioral-only safeguard keyword set (stage2.5-audit.md Gate-1).
 SAFEGUARD_KEYWORDS = [
@@ -175,7 +184,12 @@ def parse_memory_scan_blocks(draft_text: str) -> dict[str, dict[str, str]]:
 
 
 def resolve_own_orgs() -> tuple[set[str], bool]:
-    """Allowlist resolution per stage2.5-audit.md Gate-4 priority order.
+    """Own-org handle resolution per stage2.5-audit.md Gate-4 priority order.
+
+    Still called after issue #993, but own-org membership is no longer an
+    exemption on its own — it is only the first half of the (own-org AND
+    private/internal) exemption. A public own-org repo is escalated exactly
+    like a third-party one.
 
     Returns (set of lowercase handles, fallback_used).
     """
@@ -303,13 +317,20 @@ def audit(findings: list[Finding], ms_blocks: dict[str, dict[str, str]],
                 "backing_repo: <owner/repo> — return to Stage 2 step 7"
             )
 
-    # --- Gate-4: external-repo authorization pre-check ---
+    # --- Gate-4: cross-boundary write authorization pre-check (issue #993) ---
+    # Own-org membership no longer exempts on its own: a write to a PUBLIC
+    # repo is a cross-boundary write needing per-action prior approval even
+    # when the owner is the user's own org/handle. The exemption now requires
+    # BOTH halves — own-org owner AND a `repo_visibility: private|internal`
+    # declaration. An undeclared repo counts as public, so a missing line can
+    # never widen the gate, and a third-party repo stays escalated whatever it
+    # declares.
     upstream = [f for f in findings if "upstream_feedback" in f.actions]
     if not upstream:
         gate4 = "NA"
     else:
         own_orgs, fallback = resolve_own_orgs()
-        any_external = fallback
+        any_external = False
         if fallback:
             advisories.append(
                 "gate-4: allowlist unresolved (no PRAXIS_OWN_ORGS, gh "
@@ -317,24 +338,44 @@ def audit(findings: list[Finding], ms_blocks: dict[str, dict[str, str]],
                 "external"
             )
         for f in upstream:
-            owner = None
+            repo = owner = visibility = None
             for ln in f.rationale_lines:
                 m = BACKING_REPO_RE.match(ln)
-                if m:
+                if m and repo is None:
+                    repo = m.group(0).split("backing_repo:", 1)[1].strip()
                     owner = m.group(1).lower()
-                    break
-            if owner is None:
+                v = REPO_VISIBILITY_RE.match(ln)
+                if v and visibility is None:
+                    visibility = v.group(1)
+            if repo is None:
                 continue  # backing_repo violation already recorded above
-            external = fallback or owner not in own_orgs
-            if external:
-                any_external = True
-                if EXTERNAL_WARNING not in f.rationale:
-                    violations.append(
-                        f"finding #{f.num}: external backing_repo owner "
-                        f"'{owner}' but Rationale lacks the literal warning "
-                        f"prefix '{EXTERNAL_WARNING}'"
-                    )
-        gate4 = "WARN" if any_external else "PASS"
+            own = not fallback and owner in own_orgs
+            if own and visibility is None:
+                advisories.append(
+                    f"gate-4: finding #{f.num} is own-org but declares no "
+                    "'repo_visibility: public|private|internal' line — "
+                    "conservative fallback treats the backing repo as public"
+                )
+            if own and visibility in UNESCALATED_VISIBILITY:
+                continue
+            any_external = True
+            why = (
+                f"own-org owner '{owner}' but {visibility or 'public'} — "
+                "own-org membership no longer exempts a public repo"
+                if own else
+                f"owner '{owner}' is outside the own-org allowlist"
+            )
+            if EXTERNAL_WARNING not in f.rationale:
+                violations.append(
+                    f"finding #{f.num}: backing_repo '{repo}' needs "
+                    f"per-action approval ({why}) but Rationale lacks the "
+                    f"literal warning prefix '{EXTERNAL_WARNING}'"
+                )
+        # `fallback` holds the verdict off PASS on its own. With the allowlist
+        # unresolved nothing was actually checked, and a row whose backing_repo
+        # never parsed leaves any_external False — the label would then read as
+        # a clean gate over an unread one.
+        gate4 = "WARN" if any_external or fallback else "PASS"
 
     # --- Gate-5: memory-scan completeness ---
     memory_findings = [f for f in findings if "memory" in f.actions]
