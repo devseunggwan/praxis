@@ -18,9 +18,9 @@ issue #199).
 
 The two patterns covered:
 
-| Pattern            | Trigger                                               | Action                                           |
-| ------------------ | ----------------------------------------------------- | ------------------------------------------------ |
-| `HEREDOC_BODY`     | `<<` token in same segment as `gh pr/issue create`    | **Hard block** (exit 2) — suggests `--body-file` |
+| Pattern            | Trigger                                                           | Action                                           |
+| ------------------ | ----------------------------------------------------------------- | ------------------------------------------------ |
+| `HEREDOC_BODY`     | `<<` token in same segment as `gh pr/issue create`                | **Hard block** (exit 2) — suggests `--body-file` |
 | `CROSS_REPO_WRITE` | `--repo/-R` flag in `gh pr/issue create/comment/edit` (any owner) | **Ask** — surfaces four-point checklist          |
 
 ### What is blocked / asked
@@ -50,17 +50,17 @@ Correct pattern: `Write tool → /tmp/body.md` then `--body-file /tmp/body.md`.
 
 #### CROSS_REPO_WRITE — ask (permissionDecision: "ask")
 
-| Command                                                            | Action                          |
-| ------------------------------------------------------------------ | ------------------------------- |
-| `gh pr create --repo owner/repo --title "t" --body-file /tmp/b.md` | **ASK**                         |
-| `gh issue create --repo owner/repo --title "t"`                    | **ASK**                         |
-| `gh issue comment 42 --repo owner/repo --body "..."`               | **ASK**                         |
-| `gh -R owner/repo pr create --title "t" --body-file /tmp/b.md`     | **ASK**                         |
-| `gh pr create --title "t" --body "Caller chain verified: ok"`      | **PASS** — no `--repo`          |
-| `gh issue list --repo owner/repo`                                  | **PASS** — read-only subcommand |
-| `gh pr list --repo owner/repo`                                     | **PASS** — read-only subcommand |
+| Command                                                            | Action                              |
+| ------------------------------------------------------------------ | ----------------------------------- |
+| `gh pr create --repo owner/repo --title "t" --body-file /tmp/b.md` | **ASK**                             |
+| `gh issue create --repo owner/repo --title "t"`                    | **ASK**                             |
+| `gh issue comment 42 --repo owner/repo --body "..."`               | **ASK**                             |
+| `gh -R owner/repo pr create --title "t" --body-file /tmp/b.md`     | **ASK**                             |
+| `gh pr create --title "t" --body "Caller chain verified: ok"`      | **PASS** — no `--repo`              |
+| `gh issue list --repo owner/repo`                                  | **PASS** — read-only subcommand     |
+| `gh pr list --repo owner/repo`                                     | **PASS** — read-only subcommand     |
 | `gh issue create --repo <own-org>/repo --title "t"`                | **ASK** — ownership is no exemption |
-| `gh pr create --repo x --title "t" # cross-boundary:ack`           | **PASS** — opt-out              |
+| `gh pr create --repo x --title "t" # cross-boundary:ack`           | **PASS** — opt-out                  |
 
 The checklist surfaced for `pr create` (four points):
 
