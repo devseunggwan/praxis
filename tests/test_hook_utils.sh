@@ -501,6 +501,33 @@ run_tokens "hash inside quotes stays inside the token" \
   "['echo', '# not a comment', ';', 'gh', 'pr', 'merge', '9', '--squash']" \
   $'echo \'# not a comment\'\ngh pr merge 9 --squash'
 
+# The word-boundary set is bash's metacharacters, not a subset of them. `)`,
+# `<` and `>` end a word exactly like `;` and `|` do, so a comment opening
+# right after one is a comment — verified with `bash -n`, which rejects
+# `: >#x` (the redirect lost its operand to the comment) while accepting
+# `: >x#x` (there `#` is mid-word and not a comment at all). Reading those
+# three as ordinary text let the apostrophe in `don't` open a quote and
+# swallow the merge on the next line.
+run_tokens "comment after a closing paren does not swallow the next line" \
+  "[';', 'gh', 'pr', 'merge', '9', '--squash']" \
+  $'(echo ok)#don\'t care\ngh pr merge 9 --squash'
+
+run_tokens "comment after an output redirect does not swallow the next line" \
+  "[';', 'gh', 'pr', 'merge', '9', '--squash']" \
+  $': >#don\'t care\ngh pr merge 9 --squash'
+
+run_tokens "comment after an input redirect does not swallow the next line" \
+  "[';', 'gh', 'pr', 'merge', '9', '--squash']" \
+  $': <#don\'t care\ngh pr merge 9 --squash'
+
+# The negative control for the three above: mid-word `#` is NOT a comment in
+# bash (`bash -n` accepts `: >x#x`), so the apostrophe genuinely does open a
+# quote here and folding the lines is correct. Without this case, widening the
+# boundary set to every character would pass the three tests above.
+run_tokens "hash mid-word is not a comment and still folds the lines" \
+  "[]" \
+  $'echo ok#don\'t care\ngh pr merge 9 --squash'
+
 # `commenters = ""` is untouched: the side-effect-scan opt-out marker must
 # still tokenize rather than being eaten as a comment.
 run_tokens "side-effect ack marker still tokenizes" \

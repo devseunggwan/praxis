@@ -71,6 +71,26 @@ WRAPPER_OPTS_WITH_ARG = {
 }
 
 
+# bash's full metacharacter set minus the newline, which line splitting already
+# handles. `)`, `<` and `>` were missing while `(`, `;`, `|` and `&` were
+# present, so a comment opening right after a closing paren or a redirection
+# operator was read as ordinary text — and an apostrophe inside it opened a
+# quote that swallowed the next line's command.
+_WORD_BOUNDARY_CHARS = " \t;|&()<>"
+
+
+def _starts_unquoted_comment(line: str, i: int) -> bool:
+    """True when `line[i]` is a `#` that bash would read as opening a comment.
+
+    A `#` only starts a comment at the start of a word, so the character before
+    it must be a metacharacter that ended the previous token. Both scanners in
+    this module ask this question and they must never answer it differently:
+    `_heredoc_starts_on_line` uses it to stop reading operators, and
+    `_quote_open_at_eol` uses it to stop tracking quote state.
+    """
+    return line[i] == "#" and (i == 0 or line[i - 1] in _WORD_BOUNDARY_CHARS)
+
+
 def _heredoc_starts_on_line(line: str) -> list[tuple[str, bool]]:
     """`(delimiter, dash_form)` for every heredoc opened on one physical line.
 
@@ -109,7 +129,7 @@ def _heredoc_starts_on_line(line: str) -> list[tuple[str, bool]]:
             quote = ch
             i += 1
             continue
-        if ch == "#" and (i == 0 or line[i - 1] in " \t;|&("):
+        if _starts_unquoted_comment(line, i):
             break  # unquoted comment — bash reads no operator past it
         if ch == "\\":
             i += 2
@@ -263,8 +283,9 @@ def _quote_open_at_eol(line: str, quote: str) -> str:
     `commenters = ""` so the `# side-effect:ack` marker survives as tokens, but
     bash reads nothing past an unquoted `#` — so the apostrophe in
     `git status # don't do this` must not be taken for an opening quote that
-    swallows the next line's real command. The word-boundary rule is copied from
-    `_heredoc_starts_on_line` above so the two scanners cannot drift apart. The
+    swallows the next line's real command. The word-boundary rule lives in
+    `_starts_unquoted_comment` so this scanner and `_heredoc_starts_on_line`
+    cannot answer the same question differently. The
     divergence only ever ends a group *earlier*, never merges more lines into
     one, so it cannot hide a command that the old per-line split saw.
     """
@@ -283,7 +304,7 @@ def _quote_open_at_eol(line: str, quote: str) -> str:
             quote = ch
             i += 1
             continue
-        if ch == "#" and (i == 0 or line[i - 1] in " \t;|&("):
+        if _starts_unquoted_comment(line, i):
             return ""  # unquoted comment — bash opens no quote past it
         if ch == "\\":
             i += 2
