@@ -133,31 +133,27 @@ def strip_git_global_flags(argv: list[str]) -> tuple[list[str], str | None]:
     return argv[i:], c_dir
 
 
-def _opener_is_quoted_literal(command: str, opener: str) -> bool:
-    """True when every occurrence of `opener` in `command` sits in single quotes.
+def _single_quoted_runs(command: str) -> list[str]:
+    """Every single-quoted run in `command`, contents only, in source order.
 
-    Tokenization strips quoting, so `'$(x)'` and `"$(x)"` reach the caller as the
-    same string while the shell treats them oppositely: the first is literal text,
-    the second is a substitution. Recovering that distinction needs the raw
-    command, which is why the check cannot live on the token alone.
+    A single-quoted run is the one place the shell substitutes nothing at all,
+    so its contents reach the tokenizer byte-for-byte. That property is what
+    lets the caller below match a token back to its source without tracking
+    positions through the tokenizer.
 
-    Only a single quote makes the opener literal — inside double quotes the shell
-    still substitutes. A backslash escape is handled the same way as `\\$(`: the
-    escape leaves the opener not matching at that index.
-
-    Conservative when the opener appears more than once: one unquoted occurrence
-    is enough to make the title unknowable, because that is the one the shell
-    expanded.
+    Double-quoted spans and backslash escapes are walked so their quotes cannot
+    open or close a run: `"it's"` holds no single-quoted run, and neither does
+    `\\'`.
     """
+    runs: list[str] = []
     quote = ""
+    start = 0
     i, n = 0, len(command)
-    seen_literal = False
     while i < n:
         ch = command[i]
         if quote == "'":
-            if command.startswith(opener, i):
-                seen_literal = True
             if ch == "'":
+                runs.append(command[start:i])
                 quote = ""
             i += 1
             continue
@@ -165,22 +161,47 @@ def _opener_is_quoted_literal(command: str, opener: str) -> bool:
             i += 2
             continue
         if quote == '"':
-            if command.startswith(opener, i):
-                return False  # double quotes still substitute
             if ch == '"':
                 quote = ""
             i += 1
             continue
-        if ch in "'\"":
+        if ch == '"':
             quote = ch
             i += 1
             continue
-        if command.startswith(opener, i):
-            return False  # unquoted occurrence — the shell expanded this one
+        if ch == "'":
+            quote = ch
+            start = i + 1
+            i += 1
+            continue
         i += 1
-    # No occurrence at all means the opener never appeared unquoted either, so
-    # the caller's token did not come from a substitution in this command.
-    return seen_literal
+    return runs
+
+
+def _title_is_single_quoted_literal(command: str, title: str) -> bool:
+    """True when `title` reached us as the contents of a single-quoted run.
+
+    Tokenization strips quoting, so `'$(x)'` and `"$(x)"` arrive as the same
+    string while the shell treats them oppositely: the first is literal text,
+    the second is a substitution. Recovering that distinction needs the raw
+    command, which is why the check cannot live on the token alone.
+
+    The match is on the TITLE, not on the opener. An earlier version asked
+    whether every occurrence of `$(` in the raw command sat in single quotes,
+    which reads far past the segment the title came from: the callers tokenize
+    once and hand every segment the same raw command, so `echo $(date); git
+    commit -m '$(literal) title'` saw the unquoted `$(` from the `echo` and
+    suppressed a title that the shell never touched (CodeRabbit, PR #1014).
+    Matching the token against the runs needs no position tracking through the
+    tokenizer and is unaffected by anything in another segment.
+
+    Residual, stated because the match is by value rather than by position: a
+    command that quotes the SAME text both ways — `echo '$(x)'; git commit -m
+    "$(x)"` — reads as literal here. The direction of that error is to grade a
+    title the shell expanded, so the gates speak up rather than fall silent;
+    closing it needs raw source spans, which the tokenizer does not carry.
+    """
+    return title in _single_quoted_runs(command)
 
 
 def title_is_unresolved_substitution(title: str, command: str | None = None) -> bool:
@@ -208,7 +229,7 @@ def title_is_unresolved_substitution(title: str, command: str | None = None) -> 
     for opener in ("$(", "`"):
         if not stripped.startswith(opener):
             continue
-        if command is not None and _opener_is_quoted_literal(command, opener):
+        if command is not None and _title_is_single_quoted_literal(command, title):
             return False
         return True
     return False

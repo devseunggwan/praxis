@@ -214,6 +214,44 @@ def test_quoting_decides_the_substitution_exception(command, expected):
     assert _titles_from(command) == expected
 
 
+def _titles_from_all_segments(command: str) -> list[str]:
+    """Titles as the gates see them when the command has SEVERAL segments.
+
+    `_titles_from` above hands the whole token list to `extract_git_titles`
+    once, which returns nothing as soon as argv[0] is not `git` — fine for a
+    one-command string, useless for `echo …; git commit …`. The gates walk
+    `iter_command_starts` (`commit-title-format-check/impl.py:249`), so the
+    multi-segment cases below have to walk it too.
+    """
+    from _hook_utils import iter_command_starts as _starts  # noqa: PLC0415
+    from _hook_utils import safe_tokenize as _tok  # noqa: PLC0415
+
+    out: list[str] = []
+    for argv in _starts(_tok(command)):
+        out += extract_git_titles(argv, command)
+    return out
+
+
+@pytest.mark.parametrize(
+    "command, expected",
+    [
+        # An unrelated substitution in ANOTHER segment must not reach the title.
+        # The callers tokenize once and hand every segment the same raw command,
+        # so an opener-based scan saw the `echo`'s `$(` and suppressed a title
+        # the shell never touched (CodeRabbit, PR #1014). Before and after.
+        ("echo $(date); git commit -m '$(literal) title'", ["$(literal) title"]),
+        ("git commit -m '$(literal) title' && echo $(date)", ["$(literal) title"]),
+        ("echo `date`; git commit -m '`literal` title'", ["`literal` title"]),
+        ("git commit -m '`literal` title' && echo `date`", ["`literal` title"]),
+        # The control that keeps the fix from becoming "always literal": an
+        # unrelated segment does not rescue a title the shell really expands.
+        ('echo $(date); git commit -m "$(printf %s x)"', []),
+    ],
+)
+def test_another_segments_substitution_does_not_reach_the_title(command, expected):
+    assert _titles_from_all_segments(command) == expected
+
+
 def test_argv_only_callers_keep_the_conservative_behaviour():
     """Without the raw command there is nothing to disambiguate with, so the
     opener alone still suppresses — old callers must not start hard-blocking."""
