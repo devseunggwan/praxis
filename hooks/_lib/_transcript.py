@@ -43,6 +43,7 @@ Public API:
   extract_last_assistant_text(turn)                      -> str
   has_tool_in_turn(turn, tool_name)                      -> bool
   read_last_user_message(transcript_path)                -> str | None
+  scan_user_rejections(path, max_bytes, max_records)     -> list[dict]
 """
 from __future__ import annotations
 
@@ -281,3 +282,223 @@ def read_last_user_message(transcript_path: str) -> str | None:
         # No human text in this entry — keep walking backward.
 
     return ""
+
+
+# ---------------------------------------------------------------------------
+# User-rejection scan (issues #1007, #1013)
+# ---------------------------------------------------------------------------
+#
+# Two consumers need the same enumeration and must not drift:
+#   - preflight-gate/rejected-mutation-reconsent-gate (#1007) asks again before
+#     a mutation whose target the user already refused;
+#   - retrospect pre-scan lane 6 / retrospect-mix-check Gate-12 (#1013) supply
+#     the denied-actions candidates a confession-biased friction scan misses.
+#
+# Shape, verified against a live transcript (2 records in
+# ~/.claude/projects/<project>/<session>.jsonl, 659 events) rather than assumed.
+# A rejection is a role:user event carrying ALL of:
+#
+#   {"type": "user",
+#    "toolUseResult": "User rejected tool use",
+#    "toolDenialKind": "user-rejected",
+#    "sourceToolAssistantUUID": "<uuid of the assistant record that asked>",
+#    "message": {"role": "user", "content": [
+#       {"type": "tool_result", "tool_use_id": "toolu_…", "is_error": true,
+#        "content": "The user doesn't want to proceed with this tool use. …"}]}}
+#
+# The rejection record itself carries NO tool name and NO tool input — only the
+# `tool_use_id`. The name/input live in the assistant record whose `uuid` equals
+# `sourceToolAssistantUUID`, so the scan is two-pass: collect rejections, then
+# resolve each one's originating `tool_use` block.
+#
+# STRUCTURAL ONLY, belt-and-braces (#1007): all three independent markers must
+# agree — the `toolDenialKind` field, `is_error: true` on the tool_result, and
+# the runtime's fixed refusal sentence. No natural-language judgement is made
+# anywhere in this scan; option-label text is never classified. The cost is
+# stated plainly: should the runtime reword that sentence, this scan goes silent
+# rather than guessing, and both consumers degrade to their pre-#1007 behaviour
+# (no ask / no lane rows) — the fail-open direction ETHOS requires of a gate.
+
+REJECTION_DENIAL_KIND = "user-rejected"
+# Fixed runtime string, copied from a live record. Its apostrophe is ASCII.
+REJECTION_PHRASE = "doesn't want to proceed"
+_DENIAL_KIND_MARKER = '"toolDenialKind"'
+_TOOL_USE_MARKER = '"tool_use"'
+
+# Bounds. The rejection scan reads the WHOLE file (not a tail): a rejection is a
+# standing NO for the rest of the session, so a tail window would expire it
+# after N lines of unrelated work. The byte bound is what keeps that affordable,
+# and both passes pre-filter on a cheap substring before any json.loads, so the
+# common line is never parsed.
+REJECTION_SCAN_MAX_BYTES = 20 * 1024 * 1024
+# Most recent N rejections. A gate only needs the standing refusals, and the
+# resolution pass costs one substring probe per needle per candidate line.
+REJECTION_SCAN_MAX_RECORDS = 20
+# Flattened-input text bound, per rejection (an AskUserQuestion payload with
+# many options is the large case).
+REJECTION_TEXT_MAX_CHARS = 20000
+
+
+def scan_user_rejections(
+    path: str,
+    max_bytes: int = REJECTION_SCAN_MAX_BYTES,
+    max_records: int = REJECTION_SCAN_MAX_RECORDS,
+) -> list[dict]:
+    """Return structurally-recorded user tool rejections, oldest → newest.
+
+    Each entry:
+      tool_use_id  — the rejected tool_use block's id
+      tool_name    — resolved originating tool ("" when unresolvable)
+      tool_input   — resolved tool_use input dict ({} when unresolvable)
+      text         — every string leaf of `tool_input`, newline-joined and
+                     bounded; the identifier/keyword surface both consumers read
+      source_uuid  — `sourceToolAssistantUUID` ("" when absent)
+      timestamp    — record timestamp ("" when absent)
+
+    Fail-open: returns [] when the file is missing, unreadable, or larger than
+    `max_bytes`, and skips any record it cannot parse. An unresolvable
+    `tool_use_id` yields an entry with empty `tool_name`/`tool_input` rather
+    than being dropped — the rejection happened either way, and a consumer that
+    needs the tool identity filters on `tool_name` itself.
+    """
+    text = _read_bounded_text(path, max_bytes)
+    if text is None:
+        return []
+    lines = text.splitlines()
+
+    rejections: list[dict] = []
+    for line in lines:
+        # Cheap structural pre-filter: both markers are literal, so a line
+        # missing either cannot be a rejection record.
+        if _DENIAL_KIND_MARKER not in line or REJECTION_PHRASE not in line:
+            continue
+        try:
+            ev = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("toolDenialKind") != REJECTION_DENIAL_KIND:
+            continue
+        block = _rejected_tool_result(ev)
+        if block is None:
+            continue
+        tool_use_id = block.get("tool_use_id")
+        if not isinstance(tool_use_id, str) or not tool_use_id:
+            continue
+        source_uuid = ev.get("sourceToolAssistantUUID")
+        timestamp = ev.get("timestamp")
+        rejections.append({
+            "tool_use_id": tool_use_id,
+            "tool_name": "",
+            "tool_input": {},
+            "text": "",
+            "source_uuid": source_uuid if isinstance(source_uuid, str) else "",
+            "timestamp": timestamp if isinstance(timestamp, str) else "",
+        })
+
+    if not rejections:
+        return []
+    if max_records > 0:
+        rejections = rejections[-max_records:]
+    _resolve_rejected_tool_uses(lines, rejections)
+    return rejections
+
+
+def _rejected_tool_result(ev: dict) -> dict | None:
+    """Return the rejection's tool_result block, or None if it does not qualify.
+
+    Belt-and-braces: the block must be a `tool_result` with `is_error: true`
+    AND carry the fixed refusal sentence. `toolDenialKind` is checked by the
+    caller — three independent markers, no natural-language judgement.
+    """
+    msg = ev.get("message")
+    if not isinstance(msg, dict):
+        return None
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return None
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "tool_result":
+            continue
+        if block.get("is_error") is not True:
+            continue
+        if REJECTION_PHRASE not in _flatten_strings(block.get("content")):
+            continue
+        return block
+    return None
+
+
+def _resolve_rejected_tool_uses(lines: list[str], rejections: list[dict]) -> None:
+    """Fill `tool_name` / `tool_input` / `text` in place from the uuid index.
+
+    The originating assistant record is located by `sourceToolAssistantUUID`
+    against the record's own `uuid`; the `tool_use` block inside it is then
+    picked by `tool_use_id`. A rejection that carries no `sourceToolAssistantUUID`
+    falls back to the `tool_use_id` alone, which is unique per tool call.
+    """
+    by_id: dict[str, dict] = {}
+    for rec in rejections:
+        by_id.setdefault(rec["tool_use_id"], rec)
+    needles = set(by_id)
+    needles.update(r["source_uuid"] for r in rejections if r["source_uuid"])
+
+    for line in lines:
+        if _TOOL_USE_MARKER not in line:
+            continue
+        if not any(n in line for n in needles):
+            continue
+        try:
+            ev = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(ev, dict):
+            continue
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            rec = by_id.get(block.get("id"))
+            if rec is None or rec["tool_name"]:
+                continue
+            # uuid cross-check when the rejection named its source record: a
+            # replayed / resumed transcript can repeat a tool_use id, and the
+            # wrong record would attribute the refusal to the wrong tool.
+            if rec["source_uuid"] and ev.get("uuid") != rec["source_uuid"]:
+                continue
+            name = block.get("name")
+            tool_input = block.get("input")
+            rec["tool_name"] = name if isinstance(name, str) else ""
+            rec["tool_input"] = tool_input if isinstance(tool_input, dict) else {}
+            rec["text"] = _flatten_strings(rec["tool_input"])
+
+
+def _flatten_strings(value, limit: int = REJECTION_TEXT_MAX_CHARS) -> str:
+    """Newline-join every string leaf of `value`, bounded at `limit` chars.
+
+    Structure-agnostic on purpose: an AskUserQuestion input nests its text under
+    `questions[].question` / `.header` / `.options[].label` / `.description`,
+    and a consumer extracting literal identifiers wants all of it without
+    encoding that schema here (which would silently miss a renamed field).
+    """
+    parts: list[str] = []
+    total = 0
+    stack = [value]
+    while stack:
+        if total >= limit:
+            break
+        item = stack.pop(0)
+        if isinstance(item, str):
+            parts.append(item)
+            total += len(item)
+        elif isinstance(item, dict):
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    joined = "\n".join(parts)
+    return joined[:limit]

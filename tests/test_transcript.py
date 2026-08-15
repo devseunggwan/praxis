@@ -241,6 +241,169 @@ class TestReadLastUserMessage:
 
 
 # ---------------------------------------------------------------------------
+# scan_user_rejections (#1007 / #1013)
+# ---------------------------------------------------------------------------
+
+REJECTION_SENTENCE = (
+    "The user doesn't want to proceed with this tool use. The tool use was "
+    "rejected (eg. if it was a file edit, the new_string was NOT written to "
+    "the file). STOP what you are doing and wait for the user to tell you how "
+    "to proceed."
+)
+
+
+def _asst_tool_use(uuid: str, tool_use_id: str, name: str, tool_input: dict) -> dict:
+    return {
+        "type": "assistant",
+        "uuid": uuid,
+        "isSidechain": False,
+        "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": tool_use_id, "name": name, "input": tool_input},
+        ]},
+    }
+
+
+def _rejection(tool_use_id: str, source_uuid: str, *, is_error=True,
+               denial_kind="user-rejected", sentence=REJECTION_SENTENCE) -> dict:
+    block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": sentence}
+    if is_error is not None:
+        block["is_error"] = is_error
+    ev = {
+        "type": "user",
+        "uuid": f"rej-{tool_use_id}",
+        "timestamp": "2026-08-15T00:00:00Z",
+        "toolUseResult": "User rejected tool use",
+        "sourceToolAssistantUUID": source_uuid,
+        "message": {"role": "user", "content": [block]},
+    }
+    if denial_kind is not None:
+        ev["toolDenialKind"] = denial_kind
+    return ev
+
+
+class TestScanUserRejections:
+    """The live-transcript shape, pinned in both directions.
+
+    Each negative case removes exactly one of the three structural markers the
+    scan requires. A one-directional suite (only 'it finds the rejection')
+    would pass equally well for a scan that returned every tool_result.
+    """
+
+    def test_resolves_tool_name_and_input_through_the_uuid_index(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "AskUserQuestion",
+                           {"questions": [{"question": "Delete s3://b/raw/2024/ ?"}]}),
+            _rejection("toolu_1", "A1"),
+        ])
+        recs = T.scan_user_rejections(path)
+        assert len(recs) == 1
+        assert recs[0]["tool_name"] == "AskUserQuestion"
+        assert recs[0]["tool_use_id"] == "toolu_1"
+        assert recs[0]["source_uuid"] == "A1"
+        assert "s3://b/raw/2024/" in recs[0]["text"]
+
+    def test_flattens_every_string_leaf_of_the_input(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "AskUserQuestion", {"questions": [{
+                "question": "q-text", "header": "h-text",
+                "options": [{"label": "l-text", "description": "d-text"}],
+            }]}),
+            _rejection("toolu_1", "A1"),
+        ])
+        text = T.scan_user_rejections(path)[0]["text"]
+        for needle in ("q-text", "h-text", "l-text", "d-text"):
+            assert needle in text
+
+    def test_non_askuserquestion_tool_is_returned_with_its_own_name(self, tmp_path):
+        # The scan does not filter by tool — consumers do. Returning the Bash
+        # rejection with tool_name="Bash" is what lets the #1007 gate skip it
+        # while the #1013 lane still counts it.
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "Bash", {"command": "aws s3 rm s3://b/x"}),
+            _rejection("toolu_1", "A1"),
+        ])
+        recs = T.scan_user_rejections(path)
+        assert [r["tool_name"] for r in recs] == ["Bash"]
+
+    def test_missing_denial_kind_is_not_a_rejection(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "AskUserQuestion", {"questions": []}),
+            _rejection("toolu_1", "A1", denial_kind=None),
+        ])
+        assert T.scan_user_rejections(path) == []
+
+    def test_missing_is_error_is_not_a_rejection(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "AskUserQuestion", {"questions": []}),
+            _rejection("toolu_1", "A1", is_error=None),
+        ])
+        assert T.scan_user_rejections(path) == []
+
+    def test_missing_fixed_sentence_is_not_a_rejection(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "AskUserQuestion", {"questions": []}),
+            _rejection("toolu_1", "A1", sentence="Tool call failed."),
+        ])
+        assert T.scan_user_rejections(path) == []
+
+    def test_ordinary_tool_error_is_not_a_rejection(self, tmp_path):
+        # The nearby input a broken scan would also match: a real is_error
+        # tool_result from a failed command.
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "Bash", {"command": "false"}),
+            {"type": "user", "uuid": "u1", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_1", "is_error": True,
+                 "content": "Exit code 2"}]}},
+        ])
+        assert T.scan_user_rejections(path) == []
+
+    def test_unresolvable_tool_use_id_still_reports_the_rejection(self, tmp_path):
+        path = _write_jsonl(tmp_path, [_rejection("toolu_missing", "A-gone")])
+        recs = T.scan_user_rejections(path)
+        assert len(recs) == 1
+        assert recs[0]["tool_name"] == ""
+        assert recs[0]["tool_input"] == {}
+
+    def test_uuid_cross_check_rejects_a_replayed_tool_use_id(self, tmp_path):
+        # Same tool_use_id under a different assistant uuid must not be adopted.
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("OTHER", "toolu_1", "AskUserQuestion",
+                           {"questions": [{"question": "wrong record"}]}),
+            _rejection("toolu_1", "A1"),
+        ])
+        assert T.scan_user_rejections(path)[0]["tool_name"] == ""
+
+    def test_returns_oldest_to_newest_and_honours_max_records(self, tmp_path):
+        events = []
+        for i in range(4):
+            events.append(_asst_tool_use(f"A{i}", f"toolu_{i}", "AskUserQuestion",
+                                         {"questions": [{"question": f"q{i}"}]}))
+            events.append(_rejection(f"toolu_{i}", f"A{i}"))
+        path = _write_jsonl(tmp_path, events)
+        assert [r["tool_use_id"] for r in T.scan_user_rejections(path)] == [
+            "toolu_0", "toolu_1", "toolu_2", "toolu_3"]
+        assert [r["tool_use_id"] for r in T.scan_user_rejections(path, max_records=2)] == [
+            "toolu_2", "toolu_3"]
+
+    def test_missing_file_and_oversize_file_fail_open(self, tmp_path):
+        assert T.scan_user_rejections("/nonexistent/x.jsonl") == []
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "AskUserQuestion", {"questions": []}),
+            _rejection("toolu_1", "A1"),
+        ])
+        assert T.scan_user_rejections(path, max_bytes=10) == []
+
+    def test_malformed_line_next_to_a_rejection_is_skipped(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "AskUserQuestion",
+                           {"questions": [{"question": "q"}]}),
+            'not-json {{{ "toolDenialKind" "doesn\'t want to proceed"',
+            _rejection("toolu_1", "A1"),
+        ])
+        assert len(T.scan_user_rejections(path)) == 1
+
+
+# ---------------------------------------------------------------------------
 # Single source — every converted hook binds the SAME function objects
 # ---------------------------------------------------------------------------
 
@@ -262,6 +425,8 @@ _CONSUMERS = {
         ["read_last_user_message"],
     HOOKS / "preflight-gate" / "block-manufactured-action-menu" / "impl.py":
         ["read_last_user_message"],
+    HOOKS / "preflight-gate" / "rejected-mutation-reconsent-gate" / "impl.py":
+        ["scan_user_rejections"],
 }
 
 _CONSTANT_CONSUMERS = [
