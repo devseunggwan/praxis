@@ -230,7 +230,7 @@ python3 process.
 
 - **Declaration.** `hooks/manifest.json` carries a `dispatch_groups` array of
   `{event, matcher}` pairs. Only `(PreToolUse, Bash)` is collapsed today: the
-  **45** hooks whose manifest `matcher` is exactly `Bash` (count asserted by
+  **49** hooks whose manifest `matcher` is exactly `Bash` (count asserted by
   `tests/hooks/_lib/test_dispatch.py::test_group_members_count_and_roles` —
   keep in sync when adding/removing an exact-`Bash` hook). The two multi-tool
   hooks that also fire on Bash — `memory-hint`
