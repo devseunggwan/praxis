@@ -25,6 +25,7 @@
 #  17. A duplicated requirement id keeps its own command, not a shared one
 #  18. A second Verify inside one block is ignored and reported, never silent
 #  19. A timed-out command keeps whatever it printed before it hung
+#  20. A Verify command that reads stdin gets EOF instead of the report's stdin
 #
 # Every case runs against a fixture spec dir. This file is a `Verify:` target
 # for several of 0002's requirements, so running the report over the real spec
@@ -329,6 +330,47 @@ check_has "19 timeout keeps the partial output" "$OUT8" "PARTIAL_BEFORE_HANG"
 check_has "19b timeout still reports exit 124" "$OUT8" "missing      FR-001  (exit 124)"
 check_has "19c timeout names the limit" "$OUT8" "timed out after 1s"
 rm -rf "$FIX7"
+
+# --------------------------------------------------------------------------- #
+# Fixture 8 — a Verify command that reads stdin (#1008). Inheriting the
+# report's stdin meant such a command never saw EOF, burned the whole timeout,
+# and was reported `missing (exit 124)`: a working implementation called
+# unimplemented, with the verdict turning on whether the invoking shell had an
+# open stdin at all.
+#
+# The CLI is fed an OPEN stdin on purpose. scripts/run-tests.sh runs `bash "$f"`
+# with the runner's own stdin, which is usually already /dev/null — this case
+# would then pass on the broken code too, which is the failure mode a regression
+# test exists to rule out. A read-write FIFO is an stdin that never EOFs.
+#
+# FR-002 is the in-test control: a command that genuinely hangs must keep its
+# `exit 124`, so a pass on FR-001 is the stdin fix and not a dead harness.
+# --------------------------------------------------------------------------- #
+FIX8=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+cat > "$FIX8/0009-stdin.md" <<'EOF'
+# Feature Specification: Stdin
+
+**Issue**: devseunggwan/praxis#1008
+
+### Functional Requirements
+
+- **FR-001**: Reads stdin, and must still terminate.
+  - Verify: `sh -c 'echo READS_STDIN; cat > /dev/null'`
+- **FR-002**: Genuinely hangs, and must stay missing.
+  - Verify: `sh -c 'echo CONTROL_HANG; sleep 30'`
+EOF
+
+mkfifo "$FIX8/stdin.fifo"
+exec 9<> "$FIX8/stdin.fifo"
+OUT9=$("$CLI" --spec-dir "$FIX8" --timeout 2 <&9 2>&1)
+exec 9>&-
+
+check_has "20 stdin-reading Verify -> implemented" "$OUT9" "implemented  FR-001"
+check_lacks "20b stdin-reading Verify does not burn the timeout" "$OUT9" \
+  "missing      FR-001  (exit 124)"
+check_has "20c control: a real hang still reports exit 124" "$OUT9" \
+  "missing      FR-002  (exit 124)"
+rm -rf "$FIX8"
 
 echo ""
 echo "Passed: $PASS  Failed: $FAIL"

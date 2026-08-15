@@ -104,7 +104,16 @@ def parse_spec(path: Path) -> list[tuple[str, str | None, list[str]]]:
 
 
 def run_verify(command: str, cwd: Path, timeout: int) -> tuple[int, str]:
-    """Run one Verify command, returning (exit code, combined output)."""
+    """Run one Verify command, returning (exit code, combined output).
+
+    stdin is /dev/null, not the report's own (#1008). Inheriting it meant a
+    command that reads stdin never saw EOF, burned the whole timeout, and was
+    reported `missing (exit 124)` — a working implementation called
+    unimplemented, with the verdict turning on whether the invoking shell
+    happened to have an open stdin at all. docs/spec-store.md already requires
+    a Verify command to terminate without input; this is that rule in code
+    rather than in prose.
+    """
     try:
         proc = subprocess.run(
             ["bash", "-c", command],
@@ -112,6 +121,7 @@ def run_verify(command: str, cwd: Path, timeout: int) -> tuple[int, str]:
             text=True,
             cwd=cwd,
             timeout=timeout,
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired as expired:
         # Whatever the command managed to say before it hung is usually the
