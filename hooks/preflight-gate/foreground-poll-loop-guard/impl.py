@@ -52,9 +52,43 @@ Exit 0 (pass) otherwise: run_in_background=true, short bounded loops (< ~90s),
 no-sleep loops, leading `sleep` without a loop (the runtime already handles that),
 non-Bash tools.
 
+## Read-gate escalation (issue #1012)
+
+A block that is answered with the same loop shape is a block that was not read.
+From the (N+1)-th block of THIS guard in the same session (N =
+`_READ_GATE_AFTER_BLOCKS`), the block message escalates: it names this guard's
+own `spec.md` by absolute path and states that the poll-loop retry stays denied
+until that file has been Read in this session.
+
+Three properties keep the escalation from pointing at nothing or deadlocking:
+
+  1. The referent is this guard's own `spec.md`, not the 132-byte
+     `docs/hook/…md` redirect stub it used to name.
+  2. The path is resolved from the PACKAGE ROOT (`__file__`), so it is absolute
+     and resolves identically whether or not the agent's cwd is a praxis
+     checkout — a bare repo-relative path resolves nowhere else, so the agent
+     that DID read the spec would still be denied.
+  3. If that path does not exist, the escalation FAILS OPEN to the base block.
+     A gate whose own satisfaction condition is unreachable must not add a
+     requirement.
+
+The prior-block count comes from the fire ledger's
+`count_session_fires(hook, session_id, decision="block")` — the dispatcher
+already writes a RICH `(session_id, hook, decision)` row per member per Bash
+call, so no second counter is introduced. The read-set is the one
+`pre-edit-md-escape-advisory` already maintains (its PostToolUse(Read) leg
+records EVERY `.md` Read), so no second read-history is introduced either.
+
+The escalation only ever changes the MESSAGE of a command this guard was
+already going to block — it can never turn a pass into a deny.
+
 ## Env vars
 
 - `PRAXIS_HOOK_BYPASS_POLL_LOOP_GUARD` — set to any non-empty value → bypass (exit 0).
+- `PRAXIS_POLL_LOOP_GUARD_SPEC` — override the spec path the read-gate points at
+  (tests; an unresolvable value exercises the fail-open escape).
+- `PRAXIS_POLL_LOOP_READ_GATE_AFTER` — prior blocks required before the read-gate
+  escalates (default 2 → the 3rd block escalates). Unparseable → default.
 
 ## Fail-open
 
@@ -69,15 +103,31 @@ import re
 import sys
 from pathlib import Path as _Path
 
-_sys_lib = str(_Path(__file__).resolve().parent.parent.parent / "_lib")
+_HERE = _Path(__file__).resolve()
+# <root>/hooks/<role>/<name>/impl.py — parents[2] is hooks/. Anchoring on
+# __file__ (never on cwd) is what makes the paths below resolve the same in a
+# checkout and in an installed plugin; it is the same package-root rule
+# `_lib/_fire_ledger._checkout_root` states for the ledger.
+_HOOKS_DIR = _HERE.parents[2]
+
+_sys_lib = str(_HOOKS_DIR / "_lib")
 if _sys_lib not in sys.path:
     sys.path.insert(0, _sys_lib)
+from _fire_ledger import count_session_fires  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import safe_tokenize  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 
+_HOOK_NAME = "foreground-poll-loop-guard"  # manifest `name` — the fire-ledger key
 _FOREGROUND_CEILING_S = 120  # Bash default timeout, seconds
 _SAFE_MARGIN_S = 100  # block when worst-case can approach the ceiling
+_READ_GATE_AFTER_BLOCKS = 2  # prior session blocks before the read-gate escalates
+# The read-set owner: its PostToolUse(Read) leg records every `.md` Read of the
+# session, spec.md included, so the escalation reuses that history instead of
+# standing up a second one.
+_MD_READ_HISTORY_IMPL = (
+    _HOOKS_DIR / "postuse-correction" / "pre-edit-md-escape-advisory" / "impl.py"
+)
 
 _LOOP_KEYWORDS = {"for", "while", "until"}
 # Separator tokens after which the next token sits in command position (bash
@@ -303,6 +353,85 @@ def _detect(command: str) -> str | None:
     return None
 
 
+def _reference_path() -> str:
+    """Absolute path to this guard's own spec.md (issue #1012).
+
+    Package-root-anchored, never cwd-relative: the reference is both what the
+    block message prints AND the key the read-gate looks up in the session's
+    read-set, so a repo-relative string would name a file that does not exist
+    when the agent is working outside the praxis checkout — the agent that
+    followed the reference would still be denied. `PRAXIS_POLL_LOOP_GUARD_SPEC`
+    overrides it so tests can point the gate at a path that does not resolve.
+    """
+    override = os.environ.get("PRAXIS_POLL_LOOP_GUARD_SPEC", "").strip()
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+    return str(_HERE.parent / "spec.md")
+
+
+def _read_gate_threshold() -> int:
+    """Prior session blocks required before the read-gate escalates."""
+    raw = os.environ.get("PRAXIS_POLL_LOOP_READ_GATE_AFTER", "").strip()
+    try:
+        return max(int(raw), 0) if raw else _READ_GATE_AFTER_BLOCKS
+    except ValueError:
+        return _READ_GATE_AFTER_BLOCKS  # unparseable → default, never a crash
+
+
+def _spec_read_in_session(session_id: str, spec_path: str) -> bool:
+    """True when `spec_path` was Read in this session (issue #1012).
+
+    Reuses the read-set `pre-edit-md-escape-advisory` already maintains — its
+    PostToolUse(Read) leg records EVERY `.md` path Read in the session, so
+    spec.md is already in there and a second read-history mechanism would only
+    be a second thing to drift. Loaded by file location under a unique module
+    name (that sibling hook's module is also called `impl`) and only from the
+    escalation branch, which runs solely on a command this guard is already
+    blocking — the hot Bash path never pays for the import.
+
+    Any failure returns True (= "treat as read"), so a broken lookup relaxes the
+    gate instead of denying on the strength of state it could not read.
+    """
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_praxis_poll_loop_md_read_history", _MD_READ_HISTORY_IMPL
+        )
+        if spec is None or spec.loader is None:
+            return True
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        history_path = module.resolve_history_path(session_id)
+        return module.normalize_path(spec_path) in module.get_read_set(history_path)
+    except Exception:
+        return True
+
+
+def _read_gate_engaged(payload: dict, reference: str) -> int | None:
+    """Prior-block count when the read-gate should escalate, else None.
+
+    Returns None (no escalation) when: the payload carries no session_id, the
+    reference does not resolve on disk (the mandatory fail-open escape — a gate
+    that cannot find its own spec must not add a requirement nobody can
+    satisfy), the session has not been blocked enough times yet, or the spec has
+    already been Read this session.
+    """
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        return None
+    if not os.path.isfile(reference):
+        return None
+    # The dispatcher records a member's fire AFTER running its main(), so this
+    # is the count of PRIOR blocks this session, not including the in-flight one.
+    prior_blocks = count_session_fires(_HOOK_NAME, session_id, decision="block")
+    if prior_blocks < _read_gate_threshold():
+        return None
+    if _spec_read_in_session(session_id, reference):
+        return None
+    return prior_blocks
+
+
 @fail_open
 def main() -> int:
     if os.environ.get("PRAXIS_HOOK_BYPASS_POLL_LOOP_GUARD"):
@@ -329,19 +458,40 @@ def main() -> int:
     if reason is None:
         return 0
 
+    # Issue #1012: the referent used to be `docs/hook/foreground-poll-loop-guard.md`,
+    # a 132-byte redirect stub whose entire content is "Moved to <spec.md>". The
+    # gate now names the spec itself, by absolute package-root-anchored path.
+    reference = _reference_path()
+    correct_path = (
+        "use a native async-wait primitive: run_in_background: true "
+        "(Claude is re-invoked on exit — no polling loop needed), a "
+        "Monitor until-loop, `aws cloudformation wait`, `gh run watch` / "
+        "`gh pr checks --watch` / `kubectl wait`; a short bounded "
+        "foreground poll (worst-case < 90s) is fine"
+    )
+    why = (
+        f"{reason} — the foreground call dies with SIGTERM (Exit 143) "
+        "mid-poll even when the awaited async op succeeds"
+    )
+
+    prior_blocks = _read_gate_engaged(payload, reference)
+    if prior_blocks is not None:
+        why = (
+            f"{why}. READ-GATE: this guard has already blocked {prior_blocks}x in "
+            "this session and the same loop shape came back, so the block message "
+            "is not being consumed"
+        )
+        correct_path = (
+            f"Read {reference} FIRST — a poll-loop retry stays denied until that "
+            f"Read is recorded in this session. Then {correct_path}"
+        )
+
     emit_block(
         rule_name="foreground poll-loop guard",
-        why=f"{reason} — the foreground call dies with SIGTERM (Exit 143) "
-            "mid-poll even when the awaited async op succeeds",
-        correct_path=(
-            "use a native async-wait primitive: run_in_background: true "
-            "(Claude is re-invoked on exit — no polling loop needed), a "
-            "Monitor until-loop, `aws cloudformation wait`, `gh run watch` / "
-            "`gh pr checks --watch` / `kubectl wait`; a short bounded "
-            "foreground poll (worst-case < 90s) is fine"
-        ),
+        why=why,
+        correct_path=correct_path,
         bypass_env="PRAXIS_HOOK_BYPASS_POLL_LOOP_GUARD",
-        reference="docs/hook/foreground-poll-loop-guard.md",
+        reference=reference,
     )
     return 2
 
