@@ -9,16 +9,57 @@ prod deploys, and stray auto-commits from CLIs that write to git internally.
 
 ### Detection categories
 
-| Category | Trigger examples | Risk |
-| ---------- | ------------------ | ------ |
-| `git-commit` | `git commit`, `git merge`, `git rebase`, `git cherry-pick`, `git revert`, `iceberg-schema migrate`, `iceberg-schema promote`, `omc ralph` | Commits to the wrong branch or under the wrong author |
-| `git-push` | `git push` | Remote published without intent |
-| `gh-merge` | `gh pr merge`, `gh pr create`, `gh workflow run` (including a leading global flag, e.g. `gh --repo o/r pr merge`, `gh -R o/r workflow run`) | Unintended PR state change or workflow dispatch |
-| `kubectl-apply` | `kubectl apply`, `kubectl delete`, `kubectl replace`, `kubectl patch` | Shared cluster mutation |
+| Category | Tier | Trigger examples | Risk |
+| ---------- | ------ | ------------------ | ------ |
+| `git-commit` | **advise** | `git commit`, `git merge`, `git rebase`, `git cherry-pick`, `git revert` | Commits to the wrong branch or under the wrong author |
+| `wrapper-commit` | ask | `iceberg-schema migrate`, `iceberg-schema promote`, `omc ralph` | A commit (or catalog write) made inside another process, where no `git commit` gate can see it |
+| `git-push` | ask | `git push` | Remote published without intent |
+| `gh-merge` | ask | `gh pr merge`, `gh pr create`, `gh workflow run` (including a leading global flag, e.g. `gh --repo o/r pr merge`, `gh -R o/r workflow run`) | Unintended PR state change or workflow dispatch |
+| `kubectl-apply` | ask | `kubectl apply`, `kubectl delete`, `kubectl replace`, `kubectl patch` | Shared cluster mutation |
+
+### Tiers — why `git-commit` advises instead of asking (issue #874)
+
+The observation: one 2026-07-27 session (`5d46110f`) spent **23 of its 37 total
+ask prompts** on this single hook — 62%. An approval gate that becomes habitual
+stops functioning as a gate, so the volume itself is the defect.
+
+`git-commit` is the category that absorbs the reduction, and the only one:
+
+1. **It is the only category whose action is local-only and fully reversible.**
+   `git push`, `gh pr merge` / `gh pr create` / `gh workflow run` and
+   `kubectl apply` all publish to state another party can already be reading.
+   A commit is recoverable with `git reset` / `git commit --amend` from the
+   same shell, before anything leaves the machine.
+2. **It is the only category already covered in depth.** Seven sibling
+   `PreToolUse(Bash)` hooks gate a `git commit` argv on their own — enumerated
+   from `hooks/manifest.json` and each verified to key on the `commit`
+   subcommand:
+
+   | Sibling hook | What it gates |
+   | -------------- | --------------- |
+   | `block-commit-without-codex-review` | commit before the review step |
+   | `block-sciomc-finding-commit` | committing a findings artifact |
+   | `commit-title-format-check` | Conventional Commits title format |
+   | `commit-title-length-check` | title length |
+   | `verify-commit-flag-override` | `-n` / `--no-verify` flag override |
+   | `commit-decomposition-advisory` | oversized single commit |
+   | `pre-commit-staged-file-enumeration` | staging without enumerating files |
+
+   Five of the seven are the checklist `verify-commit-flag-override` already
+   prints on its own deny (issue #941). By contrast **no** sibling hook gates
+   `kubectl apply` at all.
+
+**`wrapper-commit` is a deliberate narrowing.** `iceberg-schema
+migrate|promote` and `omc ralph` used to carry the `git-commit` label; issue
+#874's demotion does not follow them down, because both halves of the
+rationale fail for them. The seven sibling gates match a literal `git commit`
+argv, so a commit made *inside* a wrapper process is invisible to every one of
+them, and `iceberg-schema promote` is a catalog operation rather than a local
+one. They keep asking, under their own category name.
 
 ### Response
 
-When any category matches, the hook emits:
+**ASK tier** — any matched category at tier `ask`:
 
 ```json
 {
@@ -33,11 +74,40 @@ When any category matches, the hook emits:
 Claude Code surfaces this as a permission prompt so the user can confirm or
 redirect before the command executes.
 
+A *mixed* match keeps the ask **and every matched category in the reason** —
+`git commit -am x && git push` is unchanged from its pre-#874 text, both
+`[git-commit]` and `[git-push]`. The demotion can therefore never quiet a
+command that also touches shared state.
+
+**ADVISE tier** — the match consists solely of `advise`-tier categories:
+
+```text
+stderr: "[side-effect-scan] [git-commit] local git state mutation — … 의도한 실행이면 …"
+exit 0, no stdout
+```
+
+Two properties of that channel are load-bearing and must not be "simplified":
+
+- `_dispatch.run_group` forwards every member's **stderr** unconditionally
+  (`hooks/_lib/_dispatch.py:196-199`) but forwards member *stdout* only when it
+  carries an ask/deny marker (`:207-218`). stdout is not an option here.
+- `_fire_ledger.classify_decision` derives `advise` from non-empty stderr
+  (`hooks/_lib/_fire_ledger.py:118-119`). Writing nothing would record the fire
+  as `pass` and make the demotion invisible to the ledger this tier decision
+  will be re-scored from.
+
+The advisory keeps the PROD prefix and the `# side-effect:ack` pointer (the
+marker still short-circuits the hook) but **omits the compound cascade hint** —
+that text describes what a *denied* decision does to the rest of a chain, and
+an advisory cannot be denied.
+
 ### Prod emphasis
 
 If any token on the command line matches `prod`, `production`,
 `--env prod`/`--environment=prod`, the reason is prefixed with a
-`⚠️  PROD scope` warning so the reviewer treats it with extra care.
+`⚠️  PROD scope` warning so the reviewer treats it with extra care. The prefix
+rides whichever channel the tier selected — a prod-scoped `git commit` still
+carries it, on stderr.
 
 ### Compound cascade advisory (issue #229)
 
@@ -102,14 +172,20 @@ Commands are tokenized with `shlex.shlex(..., posix=True, punctuation_chars=";|&
 
 ### Tests
 
-`tests/test_side_effect_scan.sh` covers 54 cases — positive detection across
-all categories, prod emphasis, opt-out, shlex-aware evasions,
-operator-adjacent one-liners, env/sudo prefix peeling, wrapper option flags
-(long/short/equals/bare), nested wrappers, shell control-flow keywords,
+`tests/hooks/preflight-gate/test_side_effect_scan.sh` covers 82 cases —
+positive detection across all categories, the #874 tier boundary in both
+directions (git verbs advise; `wrapper-commit` / push / gh / kubectl still ask;
+a mixed commit+push match stays an ask naming both categories; the advisory
+carries no cascade hint), prod emphasis on both channels, opt-out, shlex-aware
+evasions, operator-adjacent one-liners, env/sudo prefix peeling, wrapper option
+flags (long/short/equals/bare), nested wrappers, shell control-flow keywords,
 newline-separated multi-line commands, GNU `time -f FORMAT` / `-o FILE`
-arg-taking flags, non-Bash passthrough, malformed input. Run before editing
-the hook:
+arg-taking flags, non-Bash passthrough, malformed input.
+
+`pass` asserts silence on **both** streams, not just the absence of an ask —
+otherwise an advisory leaking onto `git status` would go unnoticed now that the
+hook writes to stderr at all. Run before editing the hook:
 
 ```bash
-./tests/test_side_effect_scan.sh
+bash tests/hooks/preflight-gate/test_side_effect_scan.sh
 ```

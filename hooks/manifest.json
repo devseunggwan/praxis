@@ -349,7 +349,10 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_PIPEFAIL_ADVISORY_CONTEXT"
+      }
     },
     {
       "name": "fallback-negative-warn",

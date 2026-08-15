@@ -206,9 +206,73 @@ stderr: "[pipefail-advisory] mutating command piped without `set -o pipefail`
 exit 0
 ```
 
-Advisory-only: the hook **never blocks** and never emits JSON. The user
-sees the stderr text and decides whether to prepend `set -o pipefail;`
-or drop the pipe.
+Advisory-only: the hook **never blocks**. By default it emits no JSON at
+all; `PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1` adds a second copy of the same
+text on stdout — see the next section.
+
+## ADVISE-channel experiment (issue #874)
+
+`docs/hook-prune-audit.md` closed the "is the ADVISE tier inert?" question
+(it is not — 24% recurrence over 466 sessions) but left the delivery
+channel explicitly open: *"The delivery-channel question the issue raises
+(stderr vs. `systemMessage`) stands on its own and is not settled by this
+data either way — it needs an experiment, not a larger window."* This hook
+is the named first subject: at 250/1056 advises it is the largest advisory
+load in the 30-day window.
+
+**Arms.** Control = the stderr line above. Treatment =
+`hookSpecificOutput.additionalContext` on stdout, gated on
+`PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1` (exact value `1`, mirroring
+`PRAXIS_ANCHOR_GATE_ADVISORY`). With the variable unset the hook is
+byte-identical to its pre-#874 form.
+
+```json
+{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "<the same advisory text>"}}
+```
+
+**Why `additionalContext` and not `systemMessage`.** `_hook_io.py:88-92`
+documents `systemMessage` as transcript-only and *"NOT fed to the model"*,
+so promoting to it would change where a human sees the text without
+changing what the model sees — the experiment would measure nothing.
+`additionalContext` is the channel PR #1000 (commit `7262740`) validated
+and shipped for `anchor-comment-gate`'s non-blocking findings on this same
+problem; this hook mirrors that mechanism rather than inventing one.
+
+**Why the stderr line stays in both arms** (#1000 dropped it; this hook
+must not):
+
+| Reason | Evidence |
+| ------ | -------- |
+| The metric is derived from stderr | `_fire_ledger.classify_decision` returns `advise` iff `stderr.strip()` is non-empty (`hooks/_lib/_fire_ledger.py:118-119`). Moving the text to stdout would reclassify every fire as `pass`, erasing the recurrence rate the two arms are compared with |
+| stderr is the only channel that leaves the dispatch group today | `_dispatch.run_group` forwards every member's stderr unconditionally (`hooks/_lib/_dispatch.py:196-199`) |
+
+**Known blocker — the treatment arm is inert end-to-end.** This hook is a
+member of the dispatched `PreToolUse(Bash)` group, and
+`_dispatch.run_group` forwards member *stdout* only when it carries a
+`"permissionDecision": "deny"` or `"ask"` marker
+(`hooks/_lib/_dispatch.py:207-218`); everything else is discarded inside
+the dispatcher process. All four generated `hooks.json` files route
+`PreToolUse`/`Bash` through `_dispatch.sh`, so this holds on every
+platform. #1000's hook is PostToolUse and runs in its own process, which
+is why the same emission works there.
+
+Measured, 2026-08-15 (`hooks/_lib/_dispatch.py PreToolUse Bash claude`,
+payload `gh pr merge 123 --squash 2>&1 | tail -3  # side-effect:ack`, env
+`PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1`): the hook's own stdout carries
+`additionalContext`; the dispatcher's stdout does not. Enabling the arm
+for a real session therefore requires `run_group` to also forward
+non-decision stdout — a change outside this hook's file.
+
+Two design constraints the experiment inherits from the audit:
+
+- **Right-censoring.** The last advise of a session has no later fire to
+  compare against and is excluded from the recurrence denominator. That
+  exclusion is not random (a session ending right after an advisory is
+  exactly the case where nothing was done about it), so both arms must be
+  scored with the same exclusion, and the absolute rate read as a bound.
+- **The metric is the hook's own re-evaluation**, not a behaviour diff: a
+  later `pass` can also mean the session moved to commands the matcher
+  does not cover.
 
 ## Parsing guarantees (fail-open)
 
