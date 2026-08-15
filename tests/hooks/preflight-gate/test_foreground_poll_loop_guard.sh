@@ -183,6 +183,158 @@ err=$(echo '{"tool_name": "Bash", "tool_input": {"command": "while true; do slee
 if [ "$rc" -eq 0 ]; then PASS=$((PASS + 1)); echo "ok    [env-bypass]"; else
   echo "FAIL  [env-bypass] expected exit 0, got $rc"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("env-bypass"); fi
 
+# ---- read-gate escalation (issue #1012) ---------------------------------------
+#
+# From the (N+1)-th block of this guard in one session the message escalates to
+# "Read <spec.md> first". The prior-block count comes from the fire ledger's RICH
+# rows, so the fixtures seed that ledger in the exact shape record_group_fires
+# writes — and one case drives the REAL dispatcher, which is the only thing that
+# proves writer and reader still agree on that shape.
+#
+# Both directions are pinned: the gate must fire on the nth un-Read block, and it
+# must stay silent below the threshold, after a Read, and when its own referent
+# does not resolve (the mandatory fail-open escape — a gate that cannot find its
+# spec must not demand it be read).
+
+RG_DIR="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+trap 'rm -rf "$RG_DIR"' EXIT
+RG_SPEC="$REPO_ROOT/hooks/preflight-gate/foreground-poll-loop-guard/spec.md"
+RG_MD_POST="$REPO_ROOT/hooks/postuse-correction/pre-edit-md-escape-advisory/impl.py"
+RG_LOOP='while true; do gh pr checks 7; sleep 20; done'
+
+# seed_blocks <ledger> <session_id> <count> — RICH block rows for this guard.
+seed_blocks() {
+  python3 - "$1" "$2" "$3" <<'PY'
+import json, sys
+ledger, sid, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
+with open(ledger, "a", encoding="utf-8") as fh:
+    for _ in range(n):
+        fh.write(json.dumps({
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "session_id": sid,
+            "tool": "Bash",
+            "hook": "foreground-poll-loop-guard",
+            "role": "preflight-gate",
+            "decision": "block",
+            "granularity": "rich",
+        }) + "\n")
+PY
+}
+
+# rg_payload <session_id> [bg]
+rg_payload() {
+  python3 - "$1" "${2:-}" "$RG_LOOP" <<'PY'
+import json, sys
+sid, bg, cmd = sys.argv[1], sys.argv[2], sys.argv[3]
+tool_input = {"command": cmd}
+if bg == "bg":
+    tool_input["run_in_background"] = True
+print(json.dumps({"session_id": sid, "tool_name": "Bash", "tool_input": tool_input}))
+PY
+}
+
+# rg_run <ledger> <history> <payload> [spec_override] — stderr of one guard run.
+rg_run() {
+  local ledger="$1" history="$2" payload="$3" spec_override="${4:-}"
+  (
+    export PRAXIS_FIRE_TELEMETRY_FILE="$ledger"
+    export PRAXIS_MD_READ_HISTORY_FILE="$history"
+    if [ -n "$spec_override" ]; then export PRAXIS_POLL_LOOP_GUARD_SPEC="$spec_override"; fi
+    # Braces, not a bare `2>&1 >/dev/null`: both orderings capture stderr and
+    # drop stdout, but shellcheck reads the bare form as a likely mistake
+    # (SC2069) and the CI shellcheck job is blocking.
+    { printf '%s' "$payload" | "$HOOK" >/dev/null; } 2>&1
+  )
+}
+
+# rg_assert <name> <gate|nogate> <expected_rc> <actual_rc> <stderr>
+rg_assert() {
+  local name="$1" want="$2" want_rc="$3" rc="$4" err="$5"
+  if [ "$rc" -ne "$want_rc" ]; then
+    echo "FAIL  [$name] expected exit $want_rc, got $rc (stderr: ${err:-<empty>})"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  if [ "$want" = "gate" ] && ! echo "$err" | grep -q 'READ-GATE'; then
+    echo "FAIL  [$name] expected READ-GATE escalation, got: ${err:-<empty>}"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  if [ "$want" = "nogate" ] && echo "$err" | grep -q 'READ-GATE'; then
+    echo "FAIL  [$name] expected NO escalation, got: ${err:-<empty>}"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  PASS=$((PASS + 1)); echo "ok    [$name]"
+}
+
+# The block message must name the spec by ABSOLUTE path: it is both what the
+# agent is told to read and the key the read-set is looked up by, and a
+# repo-relative string resolves nowhere outside a praxis checkout.
+err=$(rg_run "$RG_DIR/ref.jsonl" "$RG_DIR/ref-history.json" "$(rg_payload ref-sess)"); rc=$?
+if [ "$rc" -eq 2 ] && echo "$err" | grep -qF "Reference: $RG_SPEC"; then
+  PASS=$((PASS + 1)); echo "ok    [readgate-reference-is-absolute-spec]"
+else
+  echo "FAIL  [readgate-reference-is-absolute-spec] got: ${err:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("readgate-reference-is-absolute-spec")
+fi
+
+# 1 prior block is below the default threshold of 2 → base block only.
+seed_blocks "$RG_DIR/below.jsonl" below-sess 1
+err=$(rg_run "$RG_DIR/below.jsonl" "$RG_DIR/below-history.json" "$(rg_payload below-sess)"); rc=$?
+rg_assert "readgate-below-threshold-silent" nogate 2 "$rc" "$err"
+
+# 2 prior blocks, spec never Read → the 3rd block escalates.
+seed_blocks "$RG_DIR/nth.jsonl" nth-sess 2
+err=$(rg_run "$RG_DIR/nth.jsonl" "$RG_DIR/nth-history.json" "$(rg_payload nth-sess)"); rc=$?
+rg_assert "readgate-nth-block-demands-read" gate 2 "$rc" "$err"
+
+# Same state, but the spec was Read this session (recorded by the read-set owner
+# pre-edit-md-escape-advisory, not by a second mechanism) → escalation released.
+seed_blocks "$RG_DIR/read.jsonl" read-sess 2
+printf '{"session_id":"read-sess","tool_name":"Read","tool_input":{"file_path":"%s"}}' "$RG_SPEC" \
+  | PRAXIS_MD_READ_HISTORY_FILE="$RG_DIR/read-history.json" python3 "$RG_MD_POST" post >/dev/null 2>&1
+err=$(rg_run "$RG_DIR/read.jsonl" "$RG_DIR/read-history.json" "$(rg_payload read-sess)"); rc=$?
+rg_assert "readgate-released-after-read" nogate 2 "$rc" "$err"
+
+# A Read of some OTHER .md must not satisfy the gate (the read-set is keyed by
+# path — without this the previous case would pass for the wrong reason).
+seed_blocks "$RG_DIR/other.jsonl" other-sess 2
+printf '{"session_id":"other-sess","tool_name":"Read","tool_input":{"file_path":"%s"}}' "$RG_DIR/unrelated.md" \
+  | PRAXIS_MD_READ_HISTORY_FILE="$RG_DIR/other-history.json" python3 "$RG_MD_POST" post >/dev/null 2>&1
+err=$(rg_run "$RG_DIR/other.jsonl" "$RG_DIR/other-history.json" "$(rg_payload other-sess)"); rc=$?
+rg_assert "readgate-other-md-read-does-not-satisfy" gate 2 "$rc" "$err"
+
+# Unresolvable referent → fail OPEN to the base block. Deadlock escape: the gate
+# must never demand a Read of a file that is not there.
+seed_blocks "$RG_DIR/noref.jsonl" noref-sess 2
+err=$(rg_run "$RG_DIR/noref.jsonl" "$RG_DIR/noref-history.json" "$(rg_payload noref-sess)" \
+  "$RG_DIR/absent/spec.md"); rc=$?
+rg_assert "readgate-unresolvable-reference-fails-open" nogate 2 "$rc" "$err"
+
+# No session_id → nothing to count against → base block.
+seed_blocks "$RG_DIR/nosid.jsonl" nosid-sess 2
+err=$(rg_run "$RG_DIR/nosid.jsonl" "$RG_DIR/nosid-history.json" \
+  '{"tool_name":"Bash","tool_input":{"command":"while true; do gh pr checks 7; sleep 20; done"}}'); rc=$?
+rg_assert "readgate-no-session-id-silent" nogate 2 "$rc" "$err"
+
+# The escalation only ever rewrites the message of a command that was already
+# being blocked — an armed gate must not deny a correct retry.
+seed_blocks "$RG_DIR/bg.jsonl" bg-sess 5
+err=$(rg_run "$RG_DIR/bg.jsonl" "$RG_DIR/bg-history.json" "$(rg_payload bg-sess bg)"); rc=$?
+rg_assert "readgate-armed-still-passes-background" nogate 0 "$rc" "$err"
+
+# End to end: the REAL dispatcher writes the rows the read-gate reads. This is
+# the case that fails if record_group_fires' record shape ever drifts from
+# count_session_fires' filter.
+(
+  export PRAXIS_FIRE_TELEMETRY_FILE="$RG_DIR/e2e.jsonl"
+  export PRAXIS_MD_READ_HISTORY_FILE="$RG_DIR/e2e-history.json"
+  export PRAXIS_HOME="$RG_DIR/e2e-home"   # contain every hook's state writes
+  for _ in 1 2; do
+    rg_payload e2e-sess | python3 "$REPO_ROOT/hooks/_lib/_dispatch.py" PreToolUse Bash >/dev/null 2>&1
+  done
+)
+err=$(rg_run "$RG_DIR/e2e.jsonl" "$RG_DIR/e2e-history.json" "$(rg_payload e2e-sess)"); rc=$?
+rg_assert "readgate-dispatcher-written-count-escalates" gate 2 "$rc" "$err"
+
 # ---- summary ------------------------------------------------------------------
 echo ""
 echo "passed: $PASS  failed: $FAIL"

@@ -15,7 +15,8 @@
 #   9) 상태 저장 실패 시 advisory 무음
 #  10) stdout/output만 있는 성공 응답은 반복돼도 무음
 #  11) 실패 텍스트의 Reference 경로가 advisory에 포함
-#  12) 3회째 이상은 추가 advisory 없음
+#  12) 3회째 이상도 계속 advisory (회차 번호 포함) — issue #1012
+#  12b) 첫 회는 여전히 무음 (반대 방향 control)
 #  13) interrupted 응답은 실패로 판정
 #
 # Run:
@@ -408,23 +409,49 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Case 12: the advisory fires once — the 3rd+ failure adds nothing
+# Case 12: occurrences 3..N keep advising, numbered (issue #1012)
+#
+# The old contract stopped at the `prior_count == 1` boundary, so a session that
+# kept replaying the same failure went silent exactly where the loop was worst.
+# Own state file (`c12b`) — case 8 above already writes `c12.json`, and sharing
+# it made the occurrence number here depend on an unrelated case.
 # ---------------------------------------------------------------------------
-echo "=== case 12: third failure => no further advisory ==="
-STATE12="$TMP_DIR/c12.json"
+echo "=== case 12: occurrences 3..N keep advising, numbered ==="
+STATE12B="$TMP_DIR/c12b.json"
 payload12="$(make_payload Bash sess-944-third 1)"
-pipe_hook "$payload12" "$STATE12" >/dev/null 2>/dev/null
-pipe_hook "$payload12" "$STATE12" >/dev/null 2>/dev/null
+pipe_hook "$payload12" "$STATE12B" >/dev/null 2>/dev/null   # 1st — silent
+pipe_hook "$payload12" "$STATE12B" >/dev/null 2>/dev/null   # 2nd — advises
+
+for occurrence in 3 4 5; do
+  out_file="$(mktemp)" err_file="$(mktemp)"
+  pipe_hook "$payload12" "$STATE12B" >"$out_file" 2>"$err_file"
+  rc=$?
+  out=$(cat "$out_file"); err=$(cat "$err_file")
+  rm -f "$out_file" "$err_file"
+
+  if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] \
+    && assert_match "${occurrence}회째" "$out"; then
+    assert_pass "12) occurrence ${occurrence} advises and names its count"
+  else
+    assert_fail "12) occurrence ${occurrence} advises and names its count" \
+      "rc=$rc out=[$out] err=[$err]"
+  fi
+done
+
+# Control for the same boundary in the other direction: occurrence 1 of a FRESH
+# pair must still be silent. Without it, "always advise" would pass case 12 too.
+echo "=== case 12b: first occurrence still silent (control) ==="
+STATE12C="$TMP_DIR/c12c.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$payload12" "$STATE12" >"$out_file" 2>"$err_file"
+pipe_hook "$(make_payload Bash sess-944-first-only 1)" "$STATE12C" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
 
 if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
-  assert_pass "12) third failure emits no further advisory"
+  assert_pass "12b) first occurrence stays silent"
 else
-  assert_fail "12) third failure emits no further advisory" "rc=$rc out=[$out] err=[$err]"
+  assert_fail "12b) first occurrence stays silent" "rc=$rc out=[$out] err=[$err]"
 fi
 
 # ---------------------------------------------------------------------------

@@ -14,9 +14,22 @@ Only the repeated *failure* path is handled:
 - Missing `session_id` -> fail-open (no output, exit 0)
 - Successful tool calls -> no state update, no output
 - First failure for a `(tool_name, signature)` pair -> no output
-- Second failure for the same pair in one session -> stderr advisory
-- Third+ failure for the same pair -> no additional advisory by design (tracked by
-  the dedicated `second` count at `1 -> advisory` boundary)
+- Second failure for the same pair in one session -> advisory
+- Third+ failure for the same pair -> the advisory REPEATS, carrying the running
+  occurrence number (issue #1012)
+
+Why 3..N also advise (issue #1012)
+==================================
+
+The hook used to fire on the exact `prior_count == 1` boundary, so a session that
+kept replaying the same failure got exactly one advisory and then silence — and
+that silence is indistinguishable, to the model reading the transcript, from the
+loop having been noticed and accepted. The measured failure mode this hook exists
+for is precisely the long run (the poll-loop family recurred 6x in one session,
+5 of them after the first correction signal was already in-transcript), i.e. the
+occurrences the boundary suppressed. The advisory now repeats from the 2nd
+occurrence onward and names the count, so the signal gets stronger rather than
+vanishing exactly where the loop is worst.
 
 Failure detection
 ================
@@ -62,11 +75,17 @@ from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa:
 from _state_lock import state_lock  # type: ignore[import-not-found]  # noqa: E402
 
 
-_ADVISORY_PREFIX = (
+# `{n}` is the running occurrence number (2, 3, 4, …) — issue #1012 replaced the
+# fixed "2회째" wording when the advisory stopped firing only on the 2nd failure.
+_ADVISORY_PREFIX_TMPL = (
     "[second-failure-advisory] "
-    "동일한 오류 패턴으로 세션 내 2회째 실패가 감지되었습니다. "
+    "동일한 오류 패턴으로 세션 내 {n}회째 실패가 감지되었습니다. "
     "원인 분석 없이 즉시 재시도하는 루프가 될 수 있습니다. "
 )
+
+# The advisory starts on the 2nd occurrence of a pair and repeats for every
+# occurrence after it (issue #1012).
+_ADVISORY_FROM_OCCURRENCE = 2
 
 _STATE_SCHEMA_VERSION = 1
 _MAX_SIGNATURE_LEN = 4_096
@@ -252,8 +271,8 @@ def _save_state(path: str, state: dict[str, Any]) -> bool:
         return False
 
 
-def _emit_advisory(tool_name: str, signature: str, reference: str) -> None:
-    """Emit the advisory once, on the 2nd failure.
+def _emit_advisory(tool_name: str, signature: str, reference: str, occurrence: int) -> None:
+    """Emit the advisory for the `occurrence`-th failure of this pair (>= 2).
 
     Written as `hookSpecificOutput.additionalContext` (DESIGN.md, PostToolUse
     corrective emissions), mirroring `builtin-task-postuse`. A PostToolUse hook
@@ -261,7 +280,8 @@ def _emit_advisory(tool_name: str, signature: str, reference: str) -> None:
     the stderr form would leave the retry loop uncorrected, which is the one
     thing this hook exists to do.
     """
-    message = f"{_ADVISORY_PREFIX}{tool_name} 실패 패턴 2회째 재현 중입니다. "
+    message = _ADVISORY_PREFIX_TMPL.format(n=occurrence)
+    message += f"{tool_name} 실패 패턴 {occurrence}회째 재현 중입니다. "
     message += f"signature={signature[:12]}"
     if reference:
         message += (
@@ -315,11 +335,14 @@ def main() -> int:
     path = _state_path(session_id)
     pair_key = f"{tool_name}\0{signature}"
 
-    # The whole read-modify-write is serialized (issue #951). The advisory
-    # fires on the exact `prior_count == 1` boundary, so two processes that
-    # read the same count both write count+1 and both cross that boundary —
-    # the duplicate fire recorded as unverified on #950. Persisting inside the
-    # lock is what makes each process observe the other's increment.
+    # The whole read-modify-write is serialized (issue #951). Two processes that
+    # read the same count both write count+1, so without the lock the same
+    # occurrence number is reported twice and one increment is lost — the
+    # duplicate fire recorded as unverified on #950. Persisting inside the lock
+    # is what makes each process observe the other's increment. (Issue #1012
+    # widened the fire condition from the `prior_count == 1` boundary to every
+    # occurrence >= 2; the lost increment still mis-numbers the advisory, so the
+    # lock is still load-bearing.)
     with state_lock(path):
         state = _load_state(path)
         failures = state.get("failures")
@@ -341,8 +364,9 @@ def main() -> int:
     if not saved:
         return 0
 
-    if prior_count == 1:
-        _emit_advisory(tool_name, signature, ref)
+    occurrence = prior_count + 1
+    if occurrence >= _ADVISORY_FROM_OCCURRENCE:
+        _emit_advisory(tool_name, signature, ref, occurrence)
     return 0
 
 

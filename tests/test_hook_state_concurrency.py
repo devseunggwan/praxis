@@ -251,15 +251,17 @@ def _counts(state_file: Path) -> list[int]:
         # Both children read count=1 and both write 2, so the third failure is
         # never recorded. What reaches the model then splits two ways, and the
         # split is a scheduling detail rather than something to pin: usually
-        # both children cross the `prior_count == 1` boundary and the advisory
-        # fires twice (the duplicate recorded as unverified on #950), but the
-        # two also share one `<path>.tmp` staging name, so one child's
-        # `os.replace` can find it already renamed away, fail, and suppress its
-        # own advisory. The lost increment is the invariant violation common to
-        # both, and it is deterministic.
+        # both children advise as "2회째" (the duplicate recorded as unverified
+        # on #950), but the two also share one `<path>.tmp` staging name, so one
+        # child's `os.replace` can find it already renamed away, fail, and
+        # suppress its own advisory. The lost increment is the invariant
+        # violation common to both, and it is deterministic — it is also what
+        # the count assertion below, not the advisory count, discriminates on.
         ("nolock", 2, (1, 2)),
-        # Serialized: 1 -> 2 (advises) -> 3 (silent).
-        ("lock", 3, (1,)),
+        # Serialized: 1 -> 2 (advises) -> 3 (advises too, since #1012 widened
+        # the fire condition from the `prior_count == 1` boundary to every
+        # occurrence >= 2).
+        ("lock", 3, (2,)),
     ],
 )
 def test_second_failure_advisory_race(
