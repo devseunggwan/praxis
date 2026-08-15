@@ -33,7 +33,12 @@ fi
 # 4b slice must stop at it — otherwise 4b's pin assertion would be satisfied by
 # Liveness's pin and neither section would be independently required.
 step4b="$(awk '/^#### 4b\./{f=1} f&&/^##### Liveness/{exit} f&&/^#### /&&!/^#### 4b\./{exit} f' "$SKILL")"
-liveness="$(awk '/^##### Liveness/{f=1} f&&/^#### /{exit} f' "$SKILL")"
+# Stops at the next heading of ITS OWN level too, not only at the next `####`.
+# Ending only at `####` ran the slice 146 lines to `#### 5a.`, swallowing the
+# sibling `##### When the review completes` and `##### Execution order` — so
+# deleting Liveness's own pin and putting the same words in either sibling kept
+# both liveness assertions green.
+liveness="$(awk '/^##### Liveness/{f=1;print;next} f&&/^#{4,5} /{exit} f' "$SKILL")"
 
 assert_match() {
   local name="$1" hay="$2" pat="$3"
