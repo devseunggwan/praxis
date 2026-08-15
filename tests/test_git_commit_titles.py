@@ -177,3 +177,45 @@ def test_both_hooks_share_one_parser_object():
 def test_fail_open_returns_list(argv):
     result = extract_git_titles(argv)
     assert isinstance(result, list)
+
+
+# ---------------------------------------------------------------------------
+# 6. Substitution exception — quoting decides, not the leading characters
+# ---------------------------------------------------------------------------
+#
+# Tokenization strips quoting, so `'$(x)'` and `"$(x)"` arrive here as the same
+# string while the shell treats them oppositely. Deciding on the token alone
+# suppressed both, which let a single-quoted literal title skip the format and
+# length gates entirely — the two things this parser exists to feed.
+
+def _titles_from(command: str) -> list[str]:
+    """Titles as the gates see them: tokenize, then extract with the raw command."""
+    from _hook_utils import safe_tokenize as _tok  # noqa: PLC0415
+
+    return extract_git_titles(_tok(command), command)
+
+
+@pytest.mark.parametrize(
+    "command, expected",
+    [
+        # single quotes: the shell does NOT substitute, so this is a real title
+        ("git commit -m '$(literal) title'", ["$(literal) title"]),
+        ("git commit -m '`literal` title'", ["`literal` title"]),
+        # double quotes: the shell DOES substitute — value unknowable, stay silent
+        ('git commit -m "$(printf %s x)"', []),
+        ('git commit -m "`printf %s x`"', []),
+        # the standard heredoc commit form the exception was written for
+        ("git commit -m \"$(cat <<'EOF'\nbody\nEOF\n)\"", []),
+        # a substitution mid-title was always graded and still is
+        ("git commit -m 'fix: handle $(foo)'", ["fix: handle $(foo)"]),
+    ],
+)
+def test_quoting_decides_the_substitution_exception(command, expected):
+    assert _titles_from(command) == expected
+
+
+def test_argv_only_callers_keep_the_conservative_behaviour():
+    """Without the raw command there is nothing to disambiguate with, so the
+    opener alone still suppresses — old callers must not start hard-blocking."""
+    assert extract_git_titles(["git", "commit", "-m", "$(literal) title"]) == []
+    assert extract_git_titles(["git", "commit", "-m", "$(literal) title"], None) == []

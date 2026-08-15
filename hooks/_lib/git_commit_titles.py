@@ -14,7 +14,7 @@ Public API:
   MESSAGE_FLAGS, FILE_FLAGS  — constant sets
   title_from_file(path, base_dir=None)        -> str | None
   strip_git_global_flags(argv)                -> tuple[list[str], str | None]
-  extract_git_titles(argv)                    -> list[str]
+  extract_git_titles(argv, command=None)      -> list[str]
 
 The two gates differ only in WHAT they do with the extracted titles (length
 check vs format check); the extraction itself is identical and lives here.
@@ -133,7 +133,57 @@ def strip_git_global_flags(argv: list[str]) -> tuple[list[str], str | None]:
     return argv[i:], c_dir
 
 
-def title_is_unresolved_substitution(title: str) -> bool:
+def _opener_is_quoted_literal(command: str, opener: str) -> bool:
+    """True when every occurrence of `opener` in `command` sits in single quotes.
+
+    Tokenization strips quoting, so `'$(x)'` and `"$(x)"` reach the caller as the
+    same string while the shell treats them oppositely: the first is literal text,
+    the second is a substitution. Recovering that distinction needs the raw
+    command, which is why the check cannot live on the token alone.
+
+    Only a single quote makes the opener literal — inside double quotes the shell
+    still substitutes. A backslash escape is handled the same way as `\\$(`: the
+    escape leaves the opener not matching at that index.
+
+    Conservative when the opener appears more than once: one unquoted occurrence
+    is enough to make the title unknowable, because that is the one the shell
+    expanded.
+    """
+    quote = ""
+    i, n = 0, len(command)
+    seen_literal = False
+    while i < n:
+        ch = command[i]
+        if quote == "'":
+            if command.startswith(opener, i):
+                seen_literal = True
+            if ch == "'":
+                quote = ""
+            i += 1
+            continue
+        if ch == "\\" and (quote == '"' or not quote):
+            i += 2
+            continue
+        if quote == '"':
+            if command.startswith(opener, i):
+                return False  # double quotes still substitute
+            if ch == '"':
+                quote = ""
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            i += 1
+            continue
+        if command.startswith(opener, i):
+            return False  # unquoted occurrence — the shell expanded this one
+        i += 1
+    # No occurrence at all means the opener never appeared unquoted either, so
+    # the caller's token did not come from a substitution in this command.
+    return seen_literal
+
+
+def title_is_unresolved_substitution(title: str, command: str | None = None) -> bool:
     """True when a title candidate is a substitution whose value we cannot know.
 
     `git commit -m "$(cat <<'EOF' … EOF)"` is the standard commit form here, and
@@ -144,15 +194,27 @@ def title_is_unresolved_substitution(title: str) -> bool:
     Narrow on purpose: only a candidate that *opens* a substitution is unknowable.
     `fix: handle $(foo)` is a real title and stays graded.
 
+    `command` is the raw shell command the argv was tokenized from. Without it the
+    opening marker alone decides, which cannot tell `'$(literal)'` from
+    `"$(expanded)"` — the shell substitutes only the second, so treating both as
+    unknowable lets a single-quoted literal title skip the format and length gates
+    entirely. Callers that have the raw command must pass it.
+
     Before the multi-line-quote fix (issue #987) this was rare — the tokenizer
     dropped the whole line, so no title reached here at all. Making the line
     visible turned a latent false positive into a routine one.
     """
     stripped = title.lstrip()
-    return stripped.startswith("$(") or stripped.startswith("`")
+    for opener in ("$(", "`"):
+        if not stripped.startswith(opener):
+            continue
+        if command is not None and _opener_is_quoted_literal(command, opener):
+            return False
+        return True
+    return False
 
 
-def extract_git_titles(argv: list[str]) -> list[str]:
+def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]:
     """Extract commit title candidates from a git-commit argv.
 
     Only the FIRST -m / --message flag contributes the title; subsequent -m
@@ -170,6 +232,11 @@ def extract_git_titles(argv: list[str]) -> list[str]:
       git commit --amend -m "title"
       git -C /path commit -m "title"   (git global flags stripped)
       git -c key=val commit -m "title" (git global flags stripped)
+
+    `command` is the raw shell command `argv` was tokenized from. It is optional
+    only so existing argv-only callers keep working; passing it is what lets a
+    single-quoted literal title be graded instead of mistaken for a substitution
+    (see `title_is_unresolved_substitution`).
     """
     argv = strip_prefix(argv)
     if not argv or argv[0] != "git":
@@ -190,7 +257,7 @@ def extract_git_titles(argv: list[str]) -> list[str]:
         cannot read it, so later -m flags remain body paragraphs.
         """
         first = raw.split("\n")[0]
-        if not title_is_unresolved_substitution(first):
+        if not title_is_unresolved_substitution(first, command):
             titles.append(first)
 
     message_seen = False

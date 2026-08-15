@@ -248,7 +248,7 @@ def main() -> int:
 
     for argv in iter_command_starts(tokens):
         # Check git commit titles
-        git_titles = extract_git_titles(argv)
+        git_titles = extract_git_titles(argv, command)
         for title in git_titles:
             if _is_whitelisted(title):
                 continue
