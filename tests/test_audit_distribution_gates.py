@@ -334,6 +334,46 @@ def test_gate4_conservative_fallback_all_external(tmp_path: Path) -> None:
     assert "- gate_4_verdict: WARN" in r.stdout
 
 
+def test_gate4_fallback_stays_warn_when_no_backing_repo_parses(
+    tmp_path: Path,
+) -> None:
+    """Unresolved allowlist AND an unparseable backing_repo — still WARN.
+
+    The two conditions overlap in exactly one place: the row `continue`s before
+    `any_external` is ever set, so the verdict is decided entirely by the
+    fallback flag. Reading PASS here would label an unread gate as a clean one.
+    The exit code is 1 either way (the missing backing_repo is its own
+    violation), which is why only the label distinguishes the two versions.
+    """
+    draft_file = tmp_path / "draft.md"
+    draft_file.write_text(draft_of(
+        row(1, "workflow", "—", "upstream_feedback",
+            "no backing repo declared here")), encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k != "PRAXIS_OWN_ORGS"}
+    env["PATH"] = str(tmp_path)  # empty dir: gh resolution fails
+    r = subprocess.run(
+        [sys.executable, str(SCRIPT), "--draft", str(draft_file)],
+        capture_output=True, text=True, env=env,
+    )
+    assert r.returncode == 1
+    assert "allowlist unresolved" in r.stdout
+    assert "- gate_4_verdict: WARN" in r.stdout
+
+
+def test_gate4_resolved_allowlist_with_no_backing_repo_is_pass(
+    tmp_path: Path,
+) -> None:
+    """The negative control for the case above — without the fallback the same
+    unparseable row leaves the gate at PASS, so the WARN there comes from the
+    unresolved allowlist and not from the missing backing_repo."""
+    r = run(tmp_path, draft_of(
+        row(1, "workflow", "—", "upstream_feedback",
+            "no backing repo declared here")))
+    assert r.returncode == 1  # missing backing_repo is still a violation
+    assert "allowlist unresolved" not in r.stdout
+    assert "- gate_4_verdict: PASS" in r.stdout
+
+
 def test_signals_file_feeds_safeguard(tmp_path: Path) -> None:
     signals = tmp_path / "signals.txt"
     signals.write_text("permission denied while calling kubectl",

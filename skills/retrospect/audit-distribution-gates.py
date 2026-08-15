@@ -371,7 +371,11 @@ def audit(findings: list[Finding], ms_blocks: dict[str, dict[str, str]],
                     f"per-action approval ({why}) but Rationale lacks the "
                     f"literal warning prefix '{EXTERNAL_WARNING}'"
                 )
-        gate4 = "WARN" if any_external else "PASS"
+        # `fallback` holds the verdict off PASS on its own. With the allowlist
+        # unresolved nothing was actually checked, and a row whose backing_repo
+        # never parsed leaves any_external False — the label would then read as
+        # a clean gate over an unread one.
+        gate4 = "WARN" if any_external or fallback else "PASS"
 
     # --- Gate-5: memory-scan completeness ---
     memory_findings = [f for f in findings if "memory" in f.actions]
