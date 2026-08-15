@@ -176,6 +176,17 @@ run_case "zero timeout fails open" \
 run_case "negative timeout fails open" \
   "silent" \
   '{"command": "pytest", "timeout": -900000}'
+# The two non-finite strings parse through `float()` and clear `number <= 0`,
+# so before the `math.isfinite` guard `inf` reached `_advisory`, where
+# `int(inf)` raised and `@fail_open` swallowed it. The observable outcome is
+# silence either way — these cases exist because only the mechanism differs,
+# and a crash on the way to the advisory is not the silent path.
+run_case "NaN timeout is rejected, not carried into the advisory" \
+  "silent" \
+  '{"command": "pytest", "timeout": "NaN"}'
+run_case "Infinity timeout is rejected, not carried into the advisory" \
+  "silent" \
+  '{"command": "pytest", "timeout": "Infinity"}'
 run_case "empty command with a long timeout still fires (command is not read)" \
   "advisory:long-foreground-call-advisory" \
   '{"command": "", "timeout": 900000}'
@@ -213,6 +224,43 @@ check_raw "missing tool_input fails open" \
   '{"tool_name":"Bash"}'
 check_raw "non-dict tool_input fails open" \
   '{"tool_name":"Bash","tool_input":"timeout=900000"}'
+
+# ---------------------------------------------------------------------------
+# Non-finite timeouts must not reach the advisory.
+#
+# The `silent` cases above cannot tell the two versions apart: `inf` clears
+# `number <= 0`, reaches `_advisory`, and `int(inf)` raises — which `@fail_open`
+# swallows, producing the same empty stdout/stderr and exit 0 as a genuine
+# silent path. The swallowed exception is the only observable difference, and
+# `PRAXIS_HOOK_ERROR_LOG` is where the runtime records it. Asserting the log
+# stays empty is what makes these cases able to fail.
+# ---------------------------------------------------------------------------
+check_no_swallowed_exception() {
+  local name="$1" stdin_text="$2"
+  local log="$WORK_DIR/hook-errors-$RANDOM.jsonl" rc
+  printf '%s\n' "$stdin_text" \
+    | PRAXIS_HOOK_ERROR_LOG="$log" python3 "$HOOK" >"$stdout_file" 2>"$stderr_file"
+  rc=$?
+  if [ "$rc" -eq 0 ] && [ ! -s "$stdout_file" ] && [ ! -s "$stderr_file" ] \
+     && [ ! -s "$log" ]; then
+    echo "PASS  [$name]"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] rc=$rc"
+    echo "      stdout=$(<"$stdout_file")"
+    echo "      stderr=$(<"$stderr_file")"
+    echo "      swallowed=$([ -f "$log" ] && cat "$log")"
+    FAIL=$((FAIL + 1))
+    FAILED_NAMES+=("$name")
+  fi
+}
+
+check_no_swallowed_exception "NaN timeout never reaches the advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"pytest","timeout":"NaN"}}'
+check_no_swallowed_exception "Infinity timeout never reaches the advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"pytest","timeout":"Infinity"}}'
+check_no_swallowed_exception "-Infinity timeout never reaches the advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"pytest","timeout":"-Infinity"}}'
 
 echo ""
 echo "== $PASS passed, $FAIL failed =="

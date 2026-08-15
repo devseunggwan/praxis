@@ -58,6 +58,7 @@ Fail-open contract:
 from __future__ import annotations
 
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -95,6 +96,11 @@ def _timeout_ms(value: object) -> float | None:
 
     `bool` is rejected before `int` because `True` is an `int` in Python and
     would otherwise read as a 1ms timeout.
+
+    Non-finite values are rejected here rather than downstream: `inf` clears
+    `number <= 0` and the threshold comparison, so it reaches `_advisory`,
+    where `int(inf)` raises and `@fail_open` swallows it. The call then looks
+    exactly like the silent path while having crashed to get there.
     """
     if isinstance(value, bool) or value is None:
         return None
@@ -107,7 +113,7 @@ def _timeout_ms(value: object) -> float | None:
             return None
     else:
         return None
-    if number <= 0:
+    if not math.isfinite(number) or number <= 0:
         return None
     return number
 
