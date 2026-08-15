@@ -100,11 +100,21 @@ and later becomes empty will re-trigger the advisory on the next call. State
 file:
 
 ```
-${TMPDIR:-/tmp}/praxis-jq-config-advisory-<session_id>.json
+<PRAXIS_HOME>/cache/jq-config-advisory-<session_id>.json
 ```
 
 PPID is used as a fallback key when `session_id` is absent (direct CLI /
 test invocations).
+
+The read-modify-write on that file is serialized with
+`_state_lock.state_lock` and staged through a per-process
+`<state>.<pid>.tmp` filename (issue #970). Two hook processes sharing a
+`session_id` previously each published a set holding only their own entry —
+and, staging through one shared `.tmp`, could publish an unparseable file
+that every reader turns into an empty set, restarting the session's whole
+dedup. The lock closes both; the per-process name keeps the corruption from
+returning on the lock's fail-open path, where a lock that cannot be taken
+degrades to at most a repeated advisory.
 
 ### Parsing guarantees (fail-open)
 

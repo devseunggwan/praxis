@@ -13,6 +13,13 @@ Each case runs twice against the same code:
     silently returning the suite to green.
   * `lock` — the shipped path.
 
+Not every arm pins a lost update. `jq-config-empty-dict-advisory` (#970) also
+staged its write through a filename its sibling used, so an interleaving there
+published bytes no reader can parse — and every reader answers unparseable
+state with an empty one, which loses the whole set rather than one entry. That
+arm therefore asserts what the surviving file cannot hold, and a companion
+case pins the per-process staging name without needing to win a race.
+
 Both arms open with a start barrier, because interpreter startup skew alone
 exceeded the read window often enough that the unlocked arm read as "no race".
 What holds the window open after that differs by arm, and has to:
@@ -33,6 +40,7 @@ Neither arm changes hook logic; both wrap the read at the same point.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -342,3 +350,147 @@ def test_md_read_history_race(driver, tmp_path, monkeypatch, lock_mode, both_rec
         assert sorted(recorded) == sorted([first, second])
     else:
         assert recorded is None or sorted(recorded) != sorted([first, second])
+
+
+# ---------------------------------------------------------------------------
+# jq-config-empty-dict-advisory — a lost entry repeats one advisory, a
+# corrupted state file drops the session's whole dedup set (issue #970)
+# ---------------------------------------------------------------------------
+
+_JQ_CONFIG_IMPL = (
+    HOOKS / "advisory-nudge" / "jq-config-empty-dict-advisory" / "impl.py"
+)
+
+
+def _jq_payload(session_id: str, config_path: str) -> dict:
+    return {
+        "session_id": session_id,
+        "tool_name": "Bash",
+        "tool_input": {"command": f"jq '.' {config_path}"},
+    }
+
+
+def _dedup_state_file(praxis_home: Path, session_id: str) -> Path:
+    """Where the hook keeps its dedup set. It has no env override — the path
+    is `resolve_cache_file`'s, so `PRAXIS_HOME` is the only way to redirect it."""
+    return praxis_home / "cache" / f"jq-config-advisory-{session_id}.json"
+
+
+def _advised_paths(path: Path) -> list[str] | None:
+    """Paths in the dedup set, or None when the file is gone or no longer parses."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, list) else None
+
+
+@pytest.mark.parametrize(
+    "lock_mode,both_recorded",
+    [
+        # Two outcomes, not one, which is why the unlocked assertion is
+        # "cannot hold both" rather than "holds exactly one". Both children
+        # read the absent state and publish a set containing only their own
+        # path — the lost update #951 graded as a repeated advisory. But the
+        # two also staged through one shared `<path>.tmp` name, and a pair
+        # interleaved there publishes bytes that no longer parse, which
+        # `_load_seen`'s `except ValueError` turns into an empty set: the
+        # session's entire dedup set, not one entry. On the pre-fix code both
+        # showed up unforced — 4 and 5 of 100 uninstrumented pairs (#970).
+        ("nolock", False),
+        ("lock", True),
+    ],
+)
+def test_jq_config_dedup_race(driver, tmp_path, monkeypatch, lock_mode, both_recorded):
+    praxis_home = tmp_path / "praxis-home"
+    monkeypatch.setenv("PRAXIS_HOME", str(praxis_home))
+    session_id = "race-session"
+
+    config_dir = tmp_path / ".claude"
+    config_dir.mkdir()
+    first = config_dir / "alpha.json"
+    second = config_dir / "beta.json"
+    # Size 0 — the [config-empty] branch, which is the one that records a
+    # dedup entry without shelling out to `jq` to validate the contents.
+    first.write_bytes(b"")
+    second.write_bytes(b"")
+
+    outputs = _run_pair(
+        driver,
+        _JQ_CONFIG_IMPL,
+        lock_mode,
+        [
+            _jq_payload(session_id, str(first)),
+            _jq_payload(session_id, str(second)),
+        ],
+        read_fn="_load_seen",
+    )
+
+    for rc, _stdout, stderr in outputs:
+        assert rc == 0, stderr
+        assert "[config-empty]" in stderr, "child emitted no advisory to dedup"
+
+    recorded = _advised_paths(_dedup_state_file(praxis_home, session_id))
+    if both_recorded:
+        assert recorded is not None, "dedup state did not survive the pair"
+        assert sorted(recorded) == sorted([str(first), str(second)])
+    else:
+        assert recorded is None or sorted(recorded) != sorted([str(first), str(second)])
+
+
+def _load_impl(path: Path):
+    spec = importlib.util.spec_from_file_location(f"impl_{path.parent.name}", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_jq_config_staging_name_is_per_process(tmp_path, monkeypatch):
+    """The staging name has to vary per process, pinned without a race.
+
+    The race arm above proves the pair misbehaves but not *which* of the two
+    defects it hit on that scheduling, so a regression to the shared `.tmp`
+    name could pass it on a lucky run. This is the deterministic half: the
+    staging file is what one process can overwrite under another's feet, and
+    it is also the floor under `state_lock`'s documented fail-open path —
+    with the lock present and never acquired, the shared name still published
+    unparseable state and the per-process one only ever lost an entry (#970).
+    """
+    impl = _load_impl(_JQ_CONFIG_IMPL)
+    staged: list[str] = []
+    real_replace = os.replace
+
+    def _recording_replace(src, dst):
+        staged.append(str(src))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", _recording_replace)
+    state = tmp_path / "jq-config-advisory-race-session.json"
+
+    monkeypatch.setattr(os, "getpid", lambda: 4242)
+    impl._save_seen(str(state), {"/tmp/.claude/alpha.json"})
+    monkeypatch.setattr(os, "getpid", lambda: 5353)
+    impl._save_seen(str(state), {"/tmp/.claude/beta.json"})
+
+    assert len(staged) == 2
+    assert staged[0] != staged[1], "both processes staged through one filename"
+    assert _advised_paths(state) == ["/tmp/.claude/beta.json"]
+
+
+def test_jq_config_staging_file_is_unlinked_on_failure(tmp_path, monkeypatch):
+    """A failed publish must not leave its staging file behind.
+
+    Per-process names trade one leaked `<state>.tmp` for one per pid, so the
+    cleanup that the shared name could skip is now load-bearing.
+    """
+    impl = _load_impl(_JQ_CONFIG_IMPL)
+
+    def _failing_replace(src, dst):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(os, "replace", _failing_replace)
+    state = tmp_path / "jq-config-advisory-race-session.json"
+    impl._save_seen(str(state), {"/tmp/.claude/alpha.json"})
+
+    assert not state.exists()
+    assert list(tmp_path.iterdir()) == [], "staging file survived a failed replace"
