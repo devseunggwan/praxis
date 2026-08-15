@@ -168,6 +168,8 @@ run_anchor_check "report template includes critic_diff ledger line" "$SKILL_DIR/
 run_anchor_check "stage4 reference exists with memory-hint contract" "$SKILL_DIR/references/stage4-execution.md" "Frontmatter contract"
 run_anchor_check "stage4 reference reuses repeat scan step 6" "$SKILL_DIR/references/stage4-execution.md" "Stage 2 step 6's repeat scan results"
 run_anchor_check "stage4 reference returns backing_repo misses to step 7" "$SKILL_DIR/references/stage4-execution.md" "re-run Stage 2 step 7"
+run_anchor_check "stage4 reference declares memory-lint CI split intended (issue #975)" "$SKILL_DIR/references/stage4-execution.md" "the intended design, not a residual gap"
+run_forbidden_check "stage4 no longer frames the memory-lint path as an open gap (issue #975)" "still incomplete"
 run_anchor_check "appendices reference exists with Red Flags" "$SKILL_DIR/references/appendices.md" "Red Flags"
 
 echo ""

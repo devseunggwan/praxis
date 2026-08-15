@@ -115,8 +115,27 @@ For each approved action:
    prints `N/A` and exits 0 there (verified — F3, issue #942 codex-review
    pass). **CI cannot catch the next drift of this family; only a local
    `run-tests.sh` run, or a contributor running the script directly,
-   catches it.** That re-verification path is therefore still incomplete —
-   it exists, but is opt-in rather than structurally enforced on every push.
+   catches it.**
+
+   **That split is the intended design, not a residual gap (issue #975).**
+   The re-verification path has two halves and only one of them is
+   closable. The script's *logic* is already enforced on every push:
+   `tests/test_check_memory_frontmatter.py` covers 97% of its statements
+   (100 statements, 3 missed — the clean-corpus `OK:` print, its `return
+   0`, and the `sys.exit(main())` entry guard; re-measured under
+   `coverage` for issue #975) and runs inside `run-tests.sh`'s blocking
+   pytest step, which `.github/workflows/ci.yml` executes on every PR. What
+   stays opt-in is only the *scan of the real store*, and that half cannot
+   be closed by writing more tests: its subject is a gitignored per-user
+   memory directory that by construction never enters the repo, so CI is
+   missing an **input**, not a check. Substituting an in-repo fixture
+   corpus would not close it either — it would re-exercise already-covered
+   logic against a second hand-maintained corpus that must stay
+   schema-clean forever, inside a repo whose existing memory fixtures
+   (`tests/fixtures/memory-hint/`) are deliberately drifted on purpose, so
+   pointing this lint at them reports violations by design. Read the `N/A`
+   line as correct output for an absent input, not as a gap awaiting
+   closure.
 
    **⚠️ MANDATORY: Duplicate check before creating any memory file:**
 
