@@ -40,3 +40,9 @@ __pycache__/
 # write telemetry here instead of ~/.praxis/telemetry, so running a single
 # test file cannot pollute the real ledger.
 .praxis-dev-telemetry/
+
+# coverage.py data file — a local run artifact, never a source of truth.
+# It was committed once by accident (PR #1025); this keeps it out.
+.coverage
+.coverage.*
+htmlcov/
