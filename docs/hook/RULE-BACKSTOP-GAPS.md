@@ -40,6 +40,12 @@ Stop hook can structurally intercept them.
 Each row below was verified against the actual hook source at authoring time
 (probe cited inline), not from recall.
 
+Rows **#1–#3** are scoped to the 58-hook roster above. Row **#4** was derived
+separately, against the roster live on 2026-08-15 (96 manifest entries / 86
+distinct hooks), by executing every hook on the three surfaces it names rather
+than by re-reading specs — so its silence is measured, not inferred. The
+#1–#3 scope caveat is unchanged by that.
+
 ## Gap table (ranked by user-facing cost)
 
 | # | Rule | User-facing surface | Why no current hook catches it | Cost |
@@ -47,6 +53,11 @@ Each row below was verified against the actual hook source at authoring time
 | 1 | PR-state-contingent next-step question on a **stale premise** | `AskUserQuestion` surfacing a "what next?" option set whose options assume a PR is still open/unmerged | No hook re-fetches **live** PR state before the question is surfaced. `merge-state-claim-gate` runs on `Stop` and scans only the *final assistant message* for a completed merge/PR claim — it is post-hoc and does not see a mid-turn `AskUserQuestion`. `output-block-falsify-advisory` carries a static reminder that a premise may already be addressed by a merged PR, but it makes **no `gh` call** on any path, and its `AskUserQuestion` trigger fires only on a `(Recommended)`/anchoring token — a neutral "what next?" menu does not trip it, and even when it does it cannot verify the premise. So a stale-premise next-step reaches the user. | **HIGH** (reached the user this session) |
 | 2 | `Closes #N` / `Fixes #N` wrapped in backticks in a PR body | `gh pr create --body` text | GitHub's auto-close parser ignores a closing keyword inside a code span, leaving the issue OPEN after merge (silent orphan). No hook scans the PR body for a backtick-wrapped closing keyword. | **MED** (silent — surfaces only later when the issue is found still open) |
 | 3 | Commit trailers mandatory on behavior-change commits (`Confidence:` / `Not-tested:`) | `git commit` message body | No hook checks for the presence of the required trailers on a behavior-change commit. | **LOW-MED** (degrades future audit grep, not an immediate user-facing miss) |
+| 4 | Agent **originates** a route around a hook block and delegates it to the user ([`ETHOS.md`](../../ETHOS.md#key-principles) principle 5) | A "the hook blocked this — here's how we can get past it" menu, in assistant prose or as an `AskUserQuestion` option set (add a permission rule to `.claude/settings.json`, move the file out of the guarded path, …), plus the `Write`/`Edit` to `.claude/settings.json` that follows the user's pick | Measured 2026-08-15, not assumed — each hook replayed with its own `hooks/manifest.json` invocation against a synthesized transcript / `tool_input`. Silent on **all three** lanes. **Prose lane**: all 12 `Stop` hooks pass it; `completion-verify`, `completion-signal-gate` and `merge-state-claim-gate` key on completion/merge **claims**, and no Stop hook scans a final message for offered bypass routes. **Menu lane**: all 8 PreToolUse `AskUserQuestion` hooks — plus the 1 PostToolUse one — pass the same menu as an option set; `output-block-falsify-advisory` needs a `(Recommended)`/anchoring token, `menu-mutation-tier-advisory` needs a mutating candidate with no safe tier, `merge-menu-review-options-advisory` needs a merge verb, and a bypass menu carries none of the three. **Follow-up-write lane**: `protected-paths-guard` is silent on a `Write` to `.claude/settings.json` — its protected set is credential-shaped (`.env`, `*.pem`, `.ssh/` …) — and no other `Edit\|Write` hook matches a settings path (the only other `settings.json` matcher, `jq-config-empty-dict-advisory`, is a PreToolUse(Bash) **read** advisory). Controls fire on the same harness in each lane: unevidenced merge claim → `completion-verify` + `completion-signal-gate` + `merge-state-claim-gate`; `(Recommended)` with no `Falsified:` → `output-block-falsify-advisory` (+2); `Write` to `.env` → `protected-paths-guard`. | **HIGH** (reached the user this session — and unlike #1, where acceptance cost one rejection, acceptance here **permanently widens the guard** for every later session) |
+
+Row numbers are stable identifiers — issues reference them — so a new row is
+appended rather than renumbered in. The **Cost** column, not the row order,
+carries the ranking: #4 is a HIGH-cost row sitting after the LOW-MED #3.
 
 ## Covered — not gaps (recorded to prevent over-claiming)
 
@@ -74,5 +85,13 @@ Each row below was verified against the actual hook source at authoring time
   recursive-retrospect anti-pattern it is meant to catch). This is a
   skill-internal enumeration weakness, not a hook-backstop gap, but is tracked
   here because the same session surfaced it.
+- **Gap #4 → prose containment, deliberately no hook** ([#1009](https://github.com/devseunggwan/praxis/issues/1009)):
+  the decided fix is [`ETHOS.md`](../../ETHOS.md#key-principles) principle 5,
+  not a new hook. A structural detector would have to separate a relayed
+  `Bypass (if truly needed): …` line — which principle 5 explicitly permits,
+  because it is praxis' own designed escape hatch — from an agent-originated
+  route that merely quotes similar words, and the two are textually
+  indistinguishable in prose. Recorded here as an open backstop gap so the
+  prose clause is not mistaken for enforcement.
 - Gaps **#2** and **#3** are surfaced here but **not yet issue-tracked** — open
   them if/when the cost is judged worth a dedicated hook.
