@@ -50,8 +50,8 @@ stops functioning as a gate, so the volume itself is the defect.
    `kubectl apply` at all.
 
 **`wrapper-commit` is a deliberate narrowing.** `iceberg-schema
-migrate|promote` and `omc ralph` used to carry the `git-commit` label; issue
-#874's demotion does not follow them down, because both halves of the
+migrate|promote` and `omc ralph` used to carry the `git-commit` label;
+issue #874's demotion does not follow them down, because both halves of the
 rationale fail for them. The seven sibling gates match a literal `git commit`
 argv, so a commit made *inside* a wrapper process is invisible to every one of
 them, and `iceberg-schema promote` is a catalog operation rather than a local
