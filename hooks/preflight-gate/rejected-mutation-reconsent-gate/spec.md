@@ -42,8 +42,8 @@ All three → `permissionDecision: "ask"`, quoting the rejected question verbati
 ### What counts as a rejection — structural only
 
 `_lib/_transcript.py::scan_user_rejections` is the shared enumerator (also
-consumed by retrospect pre-scan lane 6 / `retrospect-mix-check` Gate-12, issue
-#1013). A record qualifies only when **three independent markers agree**:
+consumed by retrospect pre-scan lane 6 / `retrospect-mix-check` Gate-12,
+issue #1013). A record qualifies only when **three independent markers agree**:
 
 | Marker | Field |
 | --- | --- |
