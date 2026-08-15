@@ -240,7 +240,10 @@ rg_run() {
     export PRAXIS_FIRE_TELEMETRY_FILE="$ledger"
     export PRAXIS_MD_READ_HISTORY_FILE="$history"
     if [ -n "$spec_override" ]; then export PRAXIS_POLL_LOOP_GUARD_SPEC="$spec_override"; fi
-    printf '%s' "$payload" | "$HOOK" 2>&1 >/dev/null
+    # Braces, not a bare `2>&1 >/dev/null`: both orderings capture stderr and
+    # drop stdout, but shellcheck reads the bare form as a likely mistake
+    # (SC2069) and the CI shellcheck job is blocking.
+    { printf '%s' "$payload" | "$HOOK" >/dev/null; } 2>&1
   )
 }
 
