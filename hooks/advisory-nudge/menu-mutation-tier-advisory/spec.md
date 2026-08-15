@@ -436,8 +436,8 @@ recognised as low-blast; an external-write-only menu fires); the CodeRabbit
 round-1 regressions (an option matching abandonment *and* low-blast does not
 suppress, in advisory and strict mode, EN and KO; a stated
 `Safe-tier-unavailable:` line suppresses in both modes; a mid-line or empty
-marker does not; a reason on question 1 does not cover question 2); the issue
-#974 gaps in both directions (Tier 1c fires on `create` / `update` at a shared
+marker does not; a reason on question 1 does not cover question 2); the
+issue #974 gaps in both directions (Tier 1c fires on `create` / `update` at a shared
 surface, EN and KO, advisory and strict, and stays silent on the four measured
 authoring menus, on the six nouns dropped after probing, and behind the
 local-artifact veto; Tier 0b fires on a cancel-with-object menu, EN and KO, and
