@@ -43,8 +43,8 @@ Each row below was verified against the actual hook source at authoring time
 Rows **#1–#3** are scoped to the 58-hook roster above. Row **#4** was derived
 separately, against the roster live on 2026-08-15 (96 manifest entries / 86
 distinct hooks), by executing every hook on the three surfaces it names rather
-than by re-reading specs — so its silence is measured, not inferred. The
-#1–#3 scope caveat is unchanged by that.
+than by re-reading specs — so its silence is measured, not inferred.
+The #1–#3 scope caveat is unchanged by that.
 
 ## Gap table (ranked by user-facing cost)
 
