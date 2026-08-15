@@ -132,12 +132,69 @@ def test_routed_action_missing_backing_repo(tmp_path: Path) -> None:
     assert "backing_repo" in r.stdout
 
 
-def test_gate4_internal_owner_passes(tmp_path: Path) -> None:
+def test_gate4_own_org_public_is_escalated(tmp_path: Path) -> None:
+    # #993: own-org membership no longer exempts a public backing repo — this
+    # exact draft returned `gate_4_verdict: PASS` + exit 0 before the change.
+    r = run(tmp_path, draft_of(
+        row(1, "workflow", "—", "upstream_feedback",
+            "backing_repo: devseunggwan/praxis<br>repo_visibility: public")))
+    assert r.returncode == 1
+    assert "own-org membership no longer exempts a public repo" in r.stdout
+    assert "literal warning prefix" in r.stdout
+    assert "- gate_4_verdict: WARN" in r.stdout
+
+
+def test_gate4_own_org_undeclared_visibility_is_escalated(tmp_path: Path) -> None:
+    # #993: a missing `repo_visibility:` line must not widen the gate — the
+    # undeclared repo is treated as public and an advisory says so.
     r = run(tmp_path, draft_of(
         row(1, "workflow", "—", "upstream_feedback",
             "backing_repo: devseunggwan/praxis")))
+    assert r.returncode == 1
+    assert "conservative fallback treats the backing repo as public" in r.stdout
+    assert "- gate_4_verdict: WARN" in r.stdout
+
+
+def test_gate4_own_org_public_with_warning_prefix_passes(tmp_path: Path) -> None:
+    # #993: escalated but compliant — WARN verdict, no violation, exit 0.
+    r = run(tmp_path, draft_of(
+        row(1, "workflow", "—", "upstream_feedback",
+            "backing_repo: devseunggwan/praxis<br>repo_visibility: public<br>"
+            "⚠ EXTERNAL: per-action approval required at Stage 4")))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "- gate_4_verdict: WARN" in r.stdout
+
+
+def test_gate4_own_org_private_is_not_escalated(tmp_path: Path) -> None:
+    # #993 opposite direction: the exemption survives only for a repo that is
+    # own-org AND declared private/internal. This case must stay silent.
+    r = run(tmp_path, draft_of(
+        row(1, "workflow", "—", "upstream_feedback",
+            "backing_repo: devseunggwan/internal-notes<br>"
+            "repo_visibility: private")))
     assert r.returncode == 0, r.stdout + r.stderr
     assert "- gate_4_verdict: PASS" in r.stdout
+    assert "gate-4:" not in r.stdout
+
+
+def test_gate4_own_org_internal_is_not_escalated(tmp_path: Path) -> None:
+    r = run(tmp_path, draft_of(
+        row(1, "workflow", "—", "upstream_feedback",
+            "backing_repo: devseunggwan/internal-notes<br>"
+            "repo_visibility: internal")))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "- gate_4_verdict: PASS" in r.stdout
+
+
+def test_gate4_external_private_stays_escalated(tmp_path: Path) -> None:
+    # #993 guard: the visibility exemption must not de-escalate a third-party
+    # repo — `private` on a non-own-org owner is still a cross-boundary write.
+    r = run(tmp_path, draft_of(
+        row(1, "workflow", "—", "upstream_feedback",
+            "backing_repo: someoneelse/repo<br>repo_visibility: private")))
+    assert r.returncode == 1
+    assert "outside the own-org allowlist" in r.stdout
+    assert "- gate_4_verdict: WARN" in r.stdout
 
 
 def test_gate4_external_owner_needs_warning_prefix(tmp_path: Path) -> None:
@@ -273,7 +330,7 @@ def test_gate4_conservative_fallback_all_external(tmp_path: Path) -> None:
         capture_output=True, text=True, env=env,
     )
     assert r.returncode == 1
-    assert "conservative fallback" in r.stdout
+    assert "allowlist unresolved" in r.stdout
     assert "- gate_4_verdict: WARN" in r.stdout
 
 

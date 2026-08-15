@@ -53,6 +53,46 @@ Design:
     tracking, adapted to a plain argv (list[str]) walk since this hook
     does not need role-typed tokens.
 
+ADVISE-channel experiment (issue #874):
+
+  `docs/hook-prune-audit.md` left the delivery-channel question open —
+  stderr keeps 24% of this hook's advises recurring, and stderr at exit 0
+  reaches only the debug log, never the model (canary #841;
+  `_hook_io.py:88-92` states the same for the Stop lane). The audit asked
+  for an experiment, not a larger window, and named this hook first: at
+  250/1056 it carries the largest advisory load in the 30-day ledger.
+
+  The treatment arm is `hookSpecificOutput.additionalContext`, the channel
+  PR #1000 (commit 7262740) validated and shipped for `anchor-comment-gate`
+  on this same problem. NOT `systemMessage`, which `_hook_io.py:88-92`
+  documents as transcript-only and explicitly "NOT fed to the model".
+  `PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1` turns the arm on; unset, this hook
+  behaves byte-identically to its pre-#874 form. An env-var arm switch
+  mirrors `PRAXIS_ANCHOR_GATE_ADVISORY` and the other five `*_ADVISORY`
+  demotions.
+
+  The stderr line is kept in BOTH arms, unlike #1000 which dropped it. Two
+  reasons, both specific to this hook's event:
+    1. `_fire_ledger.classify_decision` derives `advise` from *stderr*
+       (`_fire_ledger.py:118-119`). Moving the text to stdout would
+       reclassify every fire as `pass` and erase the recurrence metric the
+       experiment compares the two arms with.
+    2. `_dispatch.run_group` forwards every member's stderr unconditionally
+       (`_dispatch.py:196-199`) — so the control arm keeps working — but
+       forwards member *stdout* only when it carries an ask or deny marker
+       (`_dispatch.py:207-218`). #1000's hook is PostToolUse and runs in its
+       own process; this one is a member of the dispatched PreToolUse(Bash)
+       group.
+
+  KNOWN BLOCKER — the treatment arm is inert end-to-end today. Because of
+  (2) above, a member's `additionalContext` stdout is dropped inside the
+  dispatcher and never reaches Claude Code, on every platform (all four
+  generated `hooks.json` files route PreToolUse(Bash) through
+  `_dispatch.sh`). Emitting it here is necessary but not sufficient:
+  `run_group` must also forward non-decision stdout. That change lives
+  outside this hook — see spec.md § "ADVISE-channel experiment" for the
+  measurement and the exact dispatcher gap.
+
 Fail-open contract:
 
   • malformed JSON / non-Bash payload → exit 0
@@ -112,6 +152,10 @@ _GH_API_MUTATING_METHODS = frozenset({"POST", "PATCH", "PUT", "DELETE"})
 # used `| tail`; `head` / `grep` share the same truncate-then-hide-exit-code
 # shape). Not exhaustive by design — see spec.md "Known limitations".
 _TRUNCATING_BINS = frozenset({"tail", "head", "grep"})
+
+# ADVISE-channel experiment arm switch (issue #874). Exact value "1" only,
+# mirroring `PRAXIS_ANCHOR_GATE_ADVISORY`'s convention.
+_CONTEXT_ENV = "PRAXIS_PIPEFAIL_ADVISORY_CONTEXT"
 
 
 def _git_subcommand(argv: list[str]) -> str | None:
@@ -552,6 +596,38 @@ def _extract_substitution_bodies(tok: str) -> list[str]:
             return bodies
 
 
+def _emit_additional_context(advisory: str) -> None:
+    """Write the advisory as `hookSpecificOutput.additionalContext` (issue #874).
+
+    Mirrors `anchor-comment-gate`'s shipped non-blocking channel (PR #1000,
+    commit 7262740) with two deliberate differences, both from the event:
+
+      • `hookEventName` is `PreToolUse`, matching this hook's manifest entry.
+        Claude Code keys the payload on it, so the PostToolUse literal cannot
+        be copied over verbatim.
+      • No top-level `"continue": True`. #1000 carries it because
+        `builtin-task-postuse` established that shape on PostToolUse; on
+        PreToolUse `continue` is a stop-processing switch whose default is
+        already the behaviour wanted here, and asserting a field whose
+        PreToolUse semantics this repo has not verified would add an
+        unmeasured claim to an experiment about measurement.
+
+    `ensure_ascii=False` matches #1000; this hook's text is ASCII today, so the
+    kwarg only guards a future non-ASCII line from being escaped into noise.
+    """
+    json.dump(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "additionalContext": advisory,
+            }
+        },
+        sys.stdout,
+        ensure_ascii=False,
+    )
+    sys.stdout.write("\n")
+
+
 @fail_open
 def main() -> int:
     try:
@@ -584,7 +660,12 @@ def main() -> int:
                 break
 
     if advisory:
+        # Control arm, always on: stderr is what `_fire_ledger` reads to
+        # classify this fire as `advise`, and the only channel the dispatcher
+        # forwards unconditionally. See the module docstring (issue #874).
         sys.stderr.write(advisory + "\n")
+        if os.environ.get(_CONTEXT_ENV, "").strip() == "1":
+            _emit_additional_context(advisory)
 
     return 0
 

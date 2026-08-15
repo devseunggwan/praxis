@@ -4,7 +4,7 @@ Supported hosts: all
 
 `hooks/second-failure-advisory` is a PostToolUse 보조 훅입니다. 동일
 `tool_name + error_signature` 조합이 같은 세션에서 반복 실패했을 때
-2회째 실패에 한해 stdout의 `hookSpecificOutput.additionalContext`로 advisory를
+2회째 실패부터 stdout의 `hookSpecificOutput.additionalContext`로 advisory를
 출력해, 원인 분석 없이 동일 실패를 무한 재시도하는 패턴을 줄입니다.
 
 ## Why this exists
@@ -60,19 +60,32 @@ Supported hosts: all
 ## Counting semantics — 세션 누적, 연속 아님
 
 카운터는 `(tool_name, signature)` 쌍별 **세션 누적** 값입니다. 중간에 성공이나
-다른 실패가 끼어들어도 카운터는 리셋되지 않으며, 같은 쌍의 2회째 실패에서
-advisory가 발화합니다. 이는 issue #944가 지정한 동작("`(tool_name,
-error_signature)`를 세션 스코프로 카운트하고 2회차에 advisory")입니다.
+다른 실패가 끼어들어도 카운터는 리셋되지 않으며, 같은 쌍의 2회째 실패부터
+advisory가 발화합니다. issue #944가 지정한 동작은 "`(tool_name,
+error_signature)`를 세션 스코프로 카운트하고 2회차에 advisory"였습니다.
 
-"연속 실패"가 아니라 "세션 내 2회째 동일 실패"가 발화 조건이므로, 메시지와
+"연속 실패"가 아니라 "세션 내 N회째 동일 실패"가 발화 조건이므로, 메시지와
 문서 모두 연속(consecutive)이라는 표현을 쓰지 않습니다.
+
+## 3회째 이상도 계속 advisory (issue #1012)
+
+이전에는 `prior_count == 1` 경계에서만 발화했으므로, 같은 실패를 계속 반복하는
+세션은 advisory를 **정확히 한 번** 받고 그 뒤로는 침묵했습니다. transcript를
+읽는 모델 입장에서 그 침묵은 "루프를 인지하고 수용했다"와 구분되지 않습니다.
+이 훅이 존재하는 근거가 된 실측 패턴 자체가 긴 반복(poll-loop 계열이 한 세션에서
+6회 재발, 그중 5회는 첫 교정 신호가 이미 transcript에 있은 뒤)이므로, 경계가
+잘라낸 구간이 정확히 가장 필요한 구간이었습니다.
+
+이제 2회째부터 매 회 발화하며 메시지에 회차 번호(`{n}회째`)를 싣습니다. 신호가
+가장 나쁜 구간에서 사라지는 대신 누적됩니다. 1회째 무음은 그대로입니다 — 한 번의
+실패는 아직 루프가 아닙니다.
 
 ## Output behavior
 
-다음 경우에만 advisory를 출력합니다.
+다음 경우에 advisory를 출력합니다.
 
-- 동일 `session_id` 기준 2번째 실패 (`(tool_name, signature)` 조합)
-- 이전 카운트가 1일 때
+- 동일 `session_id` 기준 2회째 이상의 실패 (`(tool_name, signature)` 조합)
+- 즉 이전 카운트가 1 이상일 때 (`occurrence = prior_count + 1 >= 2`)
 
 상태 저장(`os.replace` 기반 원자적 교체)이 성공한 뒤에만 advisory를
 출력합니다. 저장에 실패하면 카운터가 남지 않아 같은 advisory가 다음 실패에서
@@ -81,9 +94,11 @@ error_signature)`를 세션 스코프로 카운트하고 2회차에 advisory")�
 원자적인 것은 교체(rename)뿐이며, 읽기-증가-쓰기-발화 전체는 프로세스 간에
 직렬화되지 않습니다. 한 세션에서 도구 호출이 병렬로 끝나면 PostToolUse는
 호출마다 별도 프로세스로 돌므로, 저장된 count가 1일 때 두 프로세스가 함께
-1을 읽어 각자 2를 쓰고 **둘 다 advisory를 낼 수 있습니다**. 반대로 서로 다른
-쌍의 동시 실패는 한쪽 증가분을 덮어써 advisory가 한 번 늦어질 수 있습니다.
-"3회째 이상 무음"은 순차 실행 기준의 계약이며, 이 창에서는 지켜지지 않습니다.
+1을 읽어 각자 2를 쓰고 **둘 다 같은 회차 번호로 advisory를 낼 수 있습니다**.
+반대로 서로 다른 쌍의 동시 실패는 한쪽 증가분을 덮어써 advisory가 한 번
+늦어질 수 있습니다. 회차 번호가 실제 실패 횟수와 일치한다는 것은 순차 실행
+기준의 계약이며, 이 창에서는 지켜지지 않습니다 (issue #1012 이전에는 같은
+창에서 "3회째 이상 무음" 계약이 깨졌습니다).
 
 lock은 두지 않습니다. 피해가 advisory 한 줄 중복 또는 한 박자 지연에 그치고
 이 훅은 차단하지 않기 때문이며, 무엇보다 동일한 읽기-수정-쓰기 + `os.replace`
@@ -98,8 +113,10 @@ exit 0인 PostToolUse 훅의 `stderr`는 디버그 로그로만 가고 모델에
 일어나지 않습니다.
 
 ```json
-{"continue": true, "hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "[second-failure-advisory] 동일한 오류 패턴으로 세션 내 2회째 실패가 감지되었습니다. … signature=<sig_prefix> Reference: <path?> — …"}}
+{"continue": true, "hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "[second-failure-advisory] 동일한 오류 패턴으로 세션 내 <n>회째 실패가 감지되었습니다. … signature=<sig_prefix> Reference: <path?> — …"}}
 ```
+
+`<n>`은 해당 `(tool_name, signature)` 쌍의 세션 누적 회차(2, 3, 4, …)입니다.
 
 `reference`는 실패 텍스트의 `Reference:` label, `hooks/...` 또는 `*spec.md`
 경로에서 먼저 추출하고, 없으면 `tool_input.file_path/path/target`을 사용합니다.
@@ -164,9 +181,9 @@ python3 -m pytest tests/test_hook_state_concurrency.py
 
 필수 커버:
 
-- 1회 실패: advisory 없음
+- 1회 실패: advisory 없음 (양방향 control — "항상 발화"로 퇴화하면 이 케이스가 잡음)
 - 2회 실패(동일 signature): advisory 출력
-- 3회째 이상(동일 쌍): 추가 advisory 없음
+- 3, 4, 5회째(동일 쌍): 계속 advisory 출력, 메시지에 회차 번호 포함 (issue #1012)
 - 동일 시그니처에서 tool_name이 다르면 advisory 없음
 - 경로/해시/타임스탬프만 바뀐 2회 실패도 advisory 출력
 - 사이에 성공/다른 실패가 끼어도 같은 쌍의 2회째에 advisory 출력
@@ -175,4 +192,4 @@ python3 -m pytest tests/test_hook_state_concurrency.py
 - 실패 텍스트의 `Reference:` 경로가 advisory와 재진술 지시에 포함됨
 - 비실패/비정상 입력은 fail-open
 - 두 프로세스 동시 실행: 잠금 없이는 증분 유실, 잠금 하에서는 카운트 1→2→3
-  과 advisory 1회 (`tests/test_hook_state_concurrency.py`)
+  과 advisory 2회(2회째·3회째) (`tests/test_hook_state_concurrency.py`)

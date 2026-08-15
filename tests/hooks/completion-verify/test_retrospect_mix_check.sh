@@ -2564,6 +2564,139 @@ RR12_TEXT="$(mk_stage3_no_remedy_reach "$RR12_CARD" "$RR12_ROW")"
 run_case "RR12_block_card_remedy_without_table_row" "block" \
   "$(mk_assistant "$RR12_TEXT")"
 
+# ---------------------------------------------------------------------------
+# Gate-12 — denied-action coverage (issue #1013)
+#
+# The oracle is the LIVE TRANSCRIPT, not the report: `mk_user_rejection` emits
+# the record shape copied from a real session (toolDenialKind + is_error + the
+# runtime's fixed refusal sentence, joined through sourceToolAssistantUUID).
+# Both directions are pinned — every case above already proves the silent
+# direction (none of them carry a rejection record), and DA1/DA2 below prove it
+# again against the two near-misses that would make the gate fire on everything:
+# a rejection missing one structural marker, and an ordinary is_error result.
+# ---------------------------------------------------------------------------
+
+# mk_user_rejection <tool_name> <question_text> [drop_marker]
+#   drop_marker: "" (complete) | "is_error" | "sentence" | "denial_kind"
+# Emits TWO JSONL lines: the assistant tool_use and the rejection record.
+mk_user_rejection() {
+  local tool="$1" question="$2" drop="${3:-}"
+  python3 - "$tool" "$question" "$drop" <<'PY'
+import json, sys
+tool, question, drop = sys.argv[1], sys.argv[2], sys.argv[3]
+sentence = ("The user doesn't want to proceed with this tool use. The tool use "
+            "was rejected (eg. if it was a file edit, the new_string was NOT "
+            "written to the file). STOP what you are doing and wait for the "
+            "user to tell you how to proceed.")
+if drop == "sentence":
+    sentence = "Tool call failed."
+tool_input = ({"questions": [{"question": question}]}
+              if tool == "AskUserQuestion" else {"command": question})
+assistant = {"type": "assistant", "uuid": "asst-rej-1", "isSidechain": False,
+             "message": {"role": "assistant", "content": [
+                 {"type": "tool_use", "id": "toolu_DENIED1",
+                  "name": tool, "input": tool_input}]}}
+block = {"type": "tool_result", "tool_use_id": "toolu_DENIED1", "content": sentence}
+if drop != "is_error":
+    block["is_error"] = True
+rejection = {"type": "user", "uuid": "rej-1", "timestamp": "2026-08-15T00:00:00Z",
+             "toolUseResult": "User rejected tool use",
+             "sourceToolAssistantUUID": "asst-rej-1",
+             "message": {"role": "user", "content": [block]}}
+if drop != "denial_kind":
+    rejection["toolDenialKind"] = "user-rejected"
+print(json.dumps(assistant))
+print(json.dumps(rejection))
+PY
+}
+
+DA_FENCE='<!-- retrospect:denied_actions begin -->
+- denied: "Delete the remaining ~295M objects under s3://acme-archive/raw/2024/ ?" | tool: AskUserQuestion | source: user_rejection | confessed: no | disposition: promoted (finding #1)
+<!-- retrospect:denied_actions end -->'
+
+DA_QUESTION='Delete the remaining ~295M objects under s3://acme-archive/raw/2024/ ?'
+
+# DA1: block — a structural rejection in the transcript, no denied_actions fence.
+DA1_TRANSCRIPT="$(mk_user_rejection AskUserQuestion "$DA_QUESTION")
+$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")"
+run_case "DA1_block_rejection_without_denied_actions_fence" "block" "$DA1_TRANSCRIPT"
+
+# DA2: pass — same rejection, fence present with a disposed row. One disposed
+# row clears the gate; this is the supply-gate contract, stated as a test so the
+# weakness is pinned rather than assumed away.
+DA2_TRANSCRIPT="$(mk_user_rejection AskUserQuestion "$DA_QUESTION")
+$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+$DA_FENCE")"
+run_case "DA2_pass_rejection_with_disposed_row" "pass" "$DA2_TRANSCRIPT"
+
+# DA3: block — fence present but every row is undisposed. Enumerating a
+# rejection and then dropping it silently is the failure the lane exists for.
+DA3_FENCE='<!-- retrospect:denied_actions begin -->
+- denied: "Delete the remaining ~295M objects" | tool: AskUserQuestion | source: user_rejection | confessed: no
+<!-- retrospect:denied_actions end -->'
+DA3_TRANSCRIPT="$(mk_user_rejection AskUserQuestion "$DA_QUESTION")
+$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+$DA3_FENCE")"
+run_case "DA3_block_fence_without_disposition" "block" "$DA3_TRANSCRIPT"
+
+# DA4: block — empty fence. Structurally well-formed, zero rows.
+DA4_TRANSCRIPT="$(mk_user_rejection AskUserQuestion "$DA_QUESTION")
+$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+<!-- retrospect:denied_actions begin -->
+<!-- retrospect:denied_actions end -->")"
+run_case "DA4_block_empty_denied_actions_fence" "block" "$DA4_TRANSCRIPT"
+
+# DA5: block — unterminated fence (malformed), mirroring the Gate-8/11 defense.
+DA5_TRANSCRIPT="$(mk_user_rejection AskUserQuestion "$DA_QUESTION")
+$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+<!-- retrospect:denied_actions begin -->
+- denied: \"x\" | tool: AskUserQuestion | source: user_rejection | confessed: no | disposition: noted")"
+run_case "DA5_block_malformed_denied_actions_fence" "block" "$DA5_TRANSCRIPT"
+
+# DA6: block — two fences; a disposed one must not mask an ignored one.
+DA6_TRANSCRIPT="$(mk_user_rejection AskUserQuestion "$DA_QUESTION")
+$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+$DA_FENCE
+$DA_FENCE")"
+run_case "DA6_block_duplicate_denied_actions_fences" "block" "$DA6_TRANSCRIPT"
+
+# DA7: pass — a rejection joined to a Bash tool_use still counts (the LANE is
+# tool-agnostic; only the #1007 preflight gate filters to AskUserQuestion), so
+# this case must still carry a disposed row. It pins that the gate does not
+# silently narrow to AskUserQuestion.
+DA7_TRANSCRIPT="$(mk_user_rejection Bash 'aws s3 rm s3://acme-archive/raw/2024/ --recursive')
+$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+$DA_FENCE")"
+run_case "DA7_pass_bash_rejection_with_disposed_row" "pass" "$DA7_TRANSCRIPT"
+
+DA8_TRANSCRIPT="$(mk_user_rejection Bash 'aws s3 rm s3://acme-archive/raw/2024/ --recursive')
+$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")"
+run_case "DA8_block_bash_rejection_without_fence" "block" "$DA8_TRANSCRIPT"
+
+# DA9-DA11: silent controls. Each drops exactly one of the three structural
+# markers; a scan that fired on any of them would also fire on ordinary tool
+# failures, which is the false-positive class that would make Gate-12 unusable.
+for _drop in is_error sentence denial_kind; do
+  _t="$(mk_user_rejection AskUserQuestion "$DA_QUESTION" "$_drop")
+$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")"
+  run_case "DA9_${_drop}_missing_marker_is_not_a_rejection" "pass" "$_t"
+done
+
+# DA12: silent control — an ordinary failed command (is_error tool_result with a
+# real error body) is not a denial.
+DA12_TRANSCRIPT="$(jq -nc '{type:"user", message:{role:"user", content:[{type:"tool_result", tool_use_id:"toolu_FAIL", is_error:true, content:"Exit code 2"}]}}')
+$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")"
+run_case "DA12_pass_ordinary_tool_error_is_not_a_denial" "pass" "$DA12_TRANSCRIPT"
+
+# DA13: pass — Stage-4 carve-out. A completed cycle (Actions Executed after the
+# report) must not be retroactively blocked, same as Gate-8/Gate-11.
+DA13_TRANSCRIPT="$(mk_user_rejection AskUserQuestion "$DA_QUESTION")
+$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+
+## Actions Executed
+- finding #1: memory entry written")"
+run_case "DA13_pass_stage4_carveout" "pass" "$DA13_TRANSCRIPT"
+
 echo
 echo "================================"
 echo "Cases:    $PASS passed, $FAIL failed"

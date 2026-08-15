@@ -6,6 +6,11 @@ Intercepts two patterns:
 1. CROSS_REPO_WRITE — `gh pr create / issue create/comment/edit --repo <X>`
    Emits permissionDecision "ask" with a four-point checklist before the
    command executes. The user must confirm all contracts are satisfied.
+   Fires for every `--repo` target regardless of owner: a public repo owned
+   by the user or their own org is a cross-boundary write too, and needs the
+   same per-action prior approval as a third-party repo (issue #993). The
+   checklist says so explicitly — labelling the gate "external only" was
+   what let own-org writes through without per-action approval.
 
 2. HEREDOC_BODY — `gh pr create / issue create` with a `<<` heredoc operator
    in the same command segment. Hard-blocks (exit 2) and suggests --body-file.
@@ -272,6 +277,9 @@ def _build_checklist(subcommand: tuple[str, str], repo: str) -> str:
         "  ① Per-action authorization gate (CLAUDE.md §External-repo write)",
         "     Explicit approval required for THIS specific action.",
         "     General 'proceed' / 'ok' / 'continue' does NOT count.",
+        "     Ownership does NOT exempt: a public repo owned by you or your",
+        "     own org is a cross-boundary write and needs the same per-action",
+        "     prior approval as a third-party repo (praxis #993).",
         "",
     ]
     if is_pr:

@@ -52,6 +52,8 @@ of the following hold:
 | Gate-8b (issue #701): `suppression_ledger` claims a clean/no-failure path while a live transcript scan finds more than one deterministic adverse signal                                                                                             | The ledger exists but launders away visible evidence. The hook re-derives `is_error:true`, content-error syntax, and documented `user_correction` markers on user turns before trusting clean ledger language                                                                                                                                     |
 | Gate-8c (issue #715): `critic_diff: not-run` while a live transcript scan finds more than one explicit user-correction marker (tighter `sl_strong_correction_re`, not Gate-8b's broad regex)                                                        | The externalized critic tier — the only anti-concealment mechanism that survives the self-correction literature — was self-skipped in exactly the case its predicate ("a friction_event required user correction") was satisfied. Converts the run-the-critic guidance from unenforced self-feedback into a deterministic format gate             |
 
+| Gate-12 (issue #1013): the live transcript carries at least one structurally-rejected tool call and the report has no `retrospect:denied_actions` fence, has more than one, has a malformed one, or carries no row with a `disposition:` token | Every other lane keys on something that happened; a refused action has no outcome, so it leaves no error, no correction and no confession, and selection by ease of recall never reaches it. Shares Gate-8's Stage-4 carve-out |
+
 ### Gate-11 remedy-reach receipt (issue #917)
 
 A remedy only works on the surface it lives on. The recurring failure this gate
@@ -100,6 +102,80 @@ never named.
 
 Shares Gate-8's Stage-4 carve-out: a positive-presence gate must not
 retroactively block a cycle that already reached `## Actions Executed`.
+
+### Gate-12 denied-action coverage (issue #1013)
+
+The retrospect pipeline enforces a full-corpus scan but does not constrain what
+gets **selected** from it, so selection sorts by ease of recall rather than by
+damage. In the motivating session the scan really was exhaustive — 13,324
+records, all 56 `is_error` bodies read individually, tool census reconciled —
+and all five friction slots still went to incidents the agent had already
+confessed in conversation. The three failures the external critic recovered
+appeared in no lane, and the common factor was that **it never ran**: a machine
+guard or the user stopped it, so no outcome existed and nothing was written
+down. The less recovery signal an item carries, the larger its damage can be.
+
+Pre-scan lane 6 (`denied_actions`) supplies those candidates; Gate-12 makes the
+supply non-optional.
+
+**The oracle is the live transcript, not the fence.** Like Gate-10 (which reads
+the critic's subagent return rather than a pasted block), Gate-12 re-derives the
+denied set itself, via the shared enumerator
+`hooks/_lib/_transcript.py::scan_user_rejections`. A record counts only when
+three independent structural markers agree:
+
+| Marker | Field |
+| --- | --- |
+| Denial kind | top-level `toolDenialKind == "user-rejected"` |
+| Error flag | the `tool_result` block's `is_error: true` |
+| Fixed sentence | the runtime's `"The user doesn't want to proceed with this tool use…"` |
+
+No natural-language judgement is made anywhere: an option label reading "No" is
+never classified as a refusal. The same scanner backs the `#1007`
+`rejected-mutation-reconsent-gate`, so the lane, the gate and the preflight gate
+cannot drift into three definitions of "rejected". The gate is **tool-agnostic**
+— a rejected `Bash` call counts as much as a rejected `AskUserQuestion`; only
+the #1007 preflight gate narrows to approval questions.
+
+When at least one rejection exists, the report must carry exactly one
+well-formed fence with at least one disposed row:
+
+```markdown
+- denied: "<verbatim question>" | tool: <name> | source: user_rejection | confessed: yes|no | disposition: promoted (finding #N)|noted|dismissed (<reason>)
+```
+
+**Supply gate, deliberately weak — stated, not hidden.** One disposed row clears
+it. It forces the unconfessed candidates onto the record; it cannot judge which
+one deserved a finding slot, and a single `disposition: dismissed` satisfies the
+letter of it. That is issue #1013's own known limit (`confessed: yes/no` is a
+proxy, and the unreached axis is the larger-damage one). The real lever remains
+the externalized critic (Gate-8c / Gate-10); Gate-12 is the cheap backstop for
+when the critic does not run. A passing Gate-12 is not evidence of a clean
+session.
+
+**Half-coverage, stated.** Issue #1013 names a second unconfessed source —
+mutations stopped by a hook or command classifier. That half is **not
+mechanizable today**, verified rather than assumed:
+
+- `hooks/_lib/_fire_ledger.py` records `hook`, `role`, `decision`, `session_id`
+  and `tool`, and never the command text — a ledger-driven lane could say "a
+  preflight gate blocked something" but not what;
+- its COARSE standalone path (`record_standalone_fire`) writes
+  `session_id: ""`, so those records cannot even be attributed to the session
+  under analysis;
+- in the transcript a hook/classifier block arrives as an ordinary `is_error`
+  tool_result with **no** `toolDenialKind` field (probe on a real 659-event
+  session: 2 `toolDenialKind` records, both `user-rejected`; 5 `is_error`
+  tool_results, the hook-block one carrying only `Exit code 2` and command
+  output) — indistinguishable from a failed command without parsing
+  block-message prose, i.e. exactly the judgement this lane refuses to make.
+
+Blocked-mutation candidates therefore remain the `is_error` enumeration's job
+and the critic's.
+
+Shares Gate-8's Stage-4 carve-out, and fails open at every step: no `python3`,
+an unreadable or oversize transcript, or any scanner error yields a count of 0
+and a silent gate.
 
 ### Gate-7 value check (issue #671)
 
@@ -328,6 +404,9 @@ The hook exits 0 (passes) when any of:
   the 3 identifier conditions fails)
 - `jq` is not installed
 - The distribution-card fence is malformed (parse error)
+- (Gate-12 only) `python3` is unavailable, or the shared rejection scanner
+  cannot read the transcript / hits its 20 MB bound — the denied count is 0 and
+  the gate stays silent
 
 ### No bypass marker
 
@@ -419,6 +498,17 @@ plus 11 synthetic regression fixtures:
    block; RR9 row without `worse_axis:` → block; RR10 empty `unreached:` value
    → block; RR11 prefixed field labels (`unreach=`, `nonsurface:`) → block;
    RR12 card declares a remedy but no findings row parses as one → block
+- 13 Gate-12 denied-action coverage (issue #1013): DA1 transcript rejection + no
+   fence → block; DA2 rejection + fence with a disposed row → pass; DA3 fence
+   with an undisposed row → block; DA4 empty fence → block; DA5 unterminated
+   fence → block; DA6 duplicate fences → block; DA7 rejected `Bash` call +
+   disposed row → pass (the lane is tool-agnostic); DA8 rejected `Bash` call +
+   no fence → block; DA9 ×3 one structural marker dropped (`is_error`,
+   fixed sentence, `toolDenialKind`) → pass; DA12 ordinary `is_error` tool
+   failure → pass; DA13 Stage-4 Actions Executed → pass (carve-out). Every
+   other case in the suite is an additional silent control: none of them carry
+   a rejection record, so a Gate-12 that fired on the wrong signal would break
+   them rather than pass quietly.
 
 ### Category counts (memory_hygiene, output_quality)
 

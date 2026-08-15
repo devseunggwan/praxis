@@ -374,9 +374,22 @@ run_case "Bash: close all — English bulk phrase fires" \
   "advisory:output-block-falsify-advisory" \
   "$(make_bash_payload 'close all open issues via gh cli')"
 
-run_case "Bash: delete all — English bulk phrase fires" \
-  "advisory:output-block-falsify-advisory" \
+# Issue #1010: this payload's ORIGINAL expectation here was
+# `advisory:output-block-falsify-advisory` — the `delete all` comment matched
+# the bulk-phrase regex. It now matches the blast-radius predicate too
+# (`rm -r` + `s3://`), and blast radius takes precedence, so the decision is
+# `ask` on stdout instead of an advisory on stderr. The expectation change is
+# the intended one: an `aws s3 rm --recursive` against an object-store URI is
+# exactly the shape the two-factor predicate exists to catch. Bulk-phrase-only
+# coverage is preserved by the case immediately below, which carries no
+# shared-surface token.
+run_case "Bash: delete all + s3:// — blast radius supersedes the bulk advisory (issue #1010)" \
+  "ask:blast-radius" \
   "$(make_bash_payload 'aws s3 rm s3://bucket/ --recursive # delete all objects')"
+
+run_case "Bash: delete all — English bulk phrase fires (no shared surface → advisory tier kept)" \
+  "advisory:output-block-falsify-advisory" \
+  "$(make_bash_payload 'gh issue list | xargs -n1 gh issue close  # delete all stale entries')"
 
 run_case "Bash: 모두 삭제 — Korean substring fires" \
   "advisory:output-block-falsify-advisory" \
@@ -415,6 +428,104 @@ run_case "Bash: disclose all — word-boundary regression — silent pass" \
 run_case "Bash: enclose all — word-boundary regression — silent pass" \
   pass \
   "$(make_bash_payload 'echo enclose all attachments in the email')"
+
+# ---------------------------------------------------------------------------
+# Bash blast-radius two-factor predicate — issue #1010
+#
+# Before #1010 the only Bash-leg discriminator was the five-verb `<verb> all`
+# bulk regex, so every MUST-ASK case below returned rc=0 with empty stdout AND
+# empty stderr (captured verbatim in the PR body). Both directions are pinned:
+# a one-directional suite would let the opposite error in — either the
+# predicate silently stops firing on prod deletes, or it creeps outward and
+# starts asking on `rm -rf node_modules`.
+# ---------------------------------------------------------------------------
+
+# --- MUST ASK: irreversible verb + shared surface in one segment ---
+
+run_case "Blast radius: aws s3 rm --recursive against a prod bucket → ask" \
+  "ask:blast-radius" \
+  "$(make_bash_payload 'aws s3 rm s3://prod-data-lake/ --recursive')"
+
+run_case "Blast radius: gsutil rm -r against a gs:// bucket → ask" \
+  "ask:object-store URI" \
+  "$(make_bash_payload 'gsutil -m rm -r gs://artifacts-archive/')"
+
+run_case "Blast radius: kubectl delete namespace production → ask" \
+  "ask:namespace" \
+  "$(make_bash_payload 'kubectl delete namespace production')"
+
+run_case "Blast radius: DROP TABLE on a schema-qualified name → ask" \
+  "ask:schema-qualified object" \
+  "$(make_bash_payload 'psql -c "DROP TABLE prod.users"')"
+
+run_case "Blast radius: TRUNCATE TABLE on a schema-qualified name, no prod token → ask" \
+  "ask:schema-qualified object" \
+  "$(make_bash_payload 'psql -c "TRUNCATE TABLE analytics.events"')"
+
+run_case "Blast radius: rm -rf under a prod path → ask" \
+  "ask:prod" \
+  "$(make_bash_payload 'rm -rf /srv/prod/uploads')"
+
+run_case "Blast radius: purge on a prod queue → ask" \
+  "ask:prod" \
+  "$(make_bash_payload 'aws sqs purge-queue --queue-url https://sqs/prod-jobs')"
+
+# --- MUST STAY SILENT: routine local work, and each factor alone ---
+
+# The two controls the decision named explicitly. If either of these starts
+# asking, the predicate has crept outward and the retry tax lands on the most
+# common command in the repo.
+run_case "Blast radius control: rm -rf node_modules — routine local delete → silent pass" \
+  pass \
+  "$(make_bash_payload 'rm -rf node_modules')"
+
+run_case "Blast radius control: rm -r build/ — routine local delete → silent pass" \
+  pass \
+  "$(make_bash_payload 'rm -r build/')"
+
+# Factor 1 alone (irreversible verb, no shared surface).
+run_case "Blast radius control: unqualified drop table on a local sqlite db → silent pass" \
+  pass \
+  "$(make_bash_payload 'sqlite3 /tmp/scratch.db "drop table tmp_rows"')"
+
+run_case "Blast radius control: truncate -s 0 on a local logfile → silent pass" \
+  pass \
+  "$(make_bash_payload 'truncate -s 0 /tmp/build.log')"
+
+# Factor 2 alone (shared surface, no irreversible verb) — reading prod is not
+# a blast radius.
+run_case "Blast radius control: aws s3 ls on a prod bucket — read-only → silent pass" \
+  pass \
+  "$(make_bash_payload 'aws s3 ls s3://prod-data-lake/')"
+
+run_case "Blast radius control: kubectl get pods -n production — read-only → silent pass" \
+  pass \
+  "$(make_bash_payload 'kubectl get pods --namespace production')"
+
+# Segment scoping: both factors present in the command STRING but in different
+# segments — nothing irreversible touches anything shared.
+run_case "Blast radius control: verb and surface in different segments → silent pass" \
+  pass \
+  "$(make_bash_payload 'rm foo.txt && grep -r bar prod_notes.md')"
+
+# Word-boundary regressions on the `prod` surface token.
+run_case "Blast radius control: 'products' is not the prod token → silent pass" \
+  pass \
+  "$(make_bash_payload 'rm -rf ./products/cache')"
+
+run_case "Blast radius control: 'reproduce' is not the prod token → silent pass" \
+  pass \
+  "$(make_bash_payload 'rm -rf ./reproduce-case')"
+
+# `rm` without a recursive flag is not the irreversible-verb factor.
+run_case "Blast radius control: non-recursive rm of a single prod file → silent pass" \
+  pass \
+  "$(make_bash_payload 'rm /srv/prod/one-file.txt')"
+
+# POSIX `--` separator: a file literally named `-r` is not the recursive flag.
+run_case "Blast radius control: 'rm -- -r' in a prod path — '-r' is a filename → silent pass" \
+  pass \
+  "$(make_bash_payload 'rm -- -r /srv/prod/weird')"
 
 # ---------------------------------------------------------------------------
 # Edge cases
@@ -1502,6 +1613,61 @@ if [ "${_t2_total_lines:-0}" -eq 1 ]; then
 else
   echo "  FAIL  T2 ask -> coarse duplicate suppressed (1 total line, issue #787) (got $_t2_total_lines lines)"
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("T2 ask -> coarse duplicate suppressed")
+fi
+
+# Bash blast-radius ask (issue #1010) -> 1 RICH record with tool='Bash', not
+# 'AskUserQuestion'. `_record_block_telemetry` gained a `tool` parameter
+# defaulting to AskUserQuestion; if the Bash call site ever loses its explicit
+# argument the record silently mislabels itself and the two surfaces' fire
+# counts merge — which is exactly what a tier decision must not be re-scored
+# from. Coarse-duplicate suppression is asserted on the same file.
+TEL_BLAST="$TEL_DIR/blast.jsonl"
+make_bash_payload 'kubectl delete namespace production' \
+  | PRAXIS_FIRE_TELEMETRY_FILE="$TEL_BLAST" "$HOOK" >/dev/null 2>&1
+_blast_tel=$(rich_records "$TEL_BLAST" | python3 -c "
+import json, sys
+lines = [json.loads(l) for l in sys.stdin if l.strip()]
+ok = (
+    len(lines) == 1
+    and lines[0].get('decision') == 'ask'
+    and lines[0].get('hook') == 'output-block-falsify-advisory'
+    and lines[0].get('role') == 'advisory-nudge'
+    and lines[0].get('tool') == 'Bash'
+    and lines[0].get('session_id') == 'test-session'
+)
+print('ok' if ok else 'fail_' + str(lines))
+")
+if [ "$_blast_tel" = "ok" ]; then
+  echo "  PASS  Bash blast-radius ask -> 1 RICH record with tool=Bash (issue #1010)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  Bash blast-radius ask -> 1 RICH record with tool=Bash (issue #1010) ($_blast_tel)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("Bash blast-radius ask -> RICH record tool=Bash")
+fi
+
+_blast_total_lines=$(wc -l < "$TEL_BLAST" 2>/dev/null | tr -d ' ')
+if [ "${_blast_total_lines:-0}" -eq 1 ]; then
+  echo "  PASS  Bash blast-radius ask -> coarse duplicate suppressed (1 total line, issue #1010)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  Bash blast-radius ask -> coarse duplicate suppressed (1 total line, issue #1010) (got $_blast_total_lines lines)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("Bash blast-radius ask -> coarse duplicate suppressed")
+fi
+
+# Control for the record above: a Bash command that fires only the bulk-action
+# ADVISORY (stderr, exit 0) must NOT write a RICH record — only the ask path
+# does. Without this, the case above could pass while the hook wrote a RICH
+# record on every Bash call.
+TEL_BULK="$TEL_DIR/bulk.jsonl"
+make_bash_payload 'gh issue list | xargs -n1 gh issue close  # delete all stale entries' \
+  | PRAXIS_FIRE_TELEMETRY_FILE="$TEL_BULK" "$HOOK" >/dev/null 2>&1
+_bulk_rich_count=$(rich_records "$TEL_BULK" | grep -c . | tr -d ' ')
+if [ "${_bulk_rich_count:-0}" -eq 0 ]; then
+  echo "  PASS  Bash bulk advisory -> no RICH telemetry record (issue #1010 control)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  Bash bulk advisory -> no RICH telemetry record (issue #1010 control) (got $_bulk_rich_count)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("Bash bulk advisory -> no RICH record")
 fi
 
 # Silent pass -> no RICH record (nothing to count).

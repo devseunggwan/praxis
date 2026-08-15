@@ -25,6 +25,13 @@ non-empty, so a single category-assumed row is not a substitute for reading
 each body individually [issue #720]. Omit the nested enum block only when
 `is_error_count == 0` (nothing to enumerate).
 
+The `retrospect:denied_actions` fence (§3d′) is emitted whenever pre-scan lane 6
+produced a row, in any session — it is **not** post-compaction-only. Like the
+receipt it **IS parsed by the Stop hook (Gate-12)**, and against a transcript
+oracle rather than the fence itself: when the live transcript carries a
+structural user rejection and no row disposes of one, Stage 3 blocks [issue
+#1013]. Omit the whole block only when the lane found zero rejections.
+
 ```markdown
 ## Retrospect Report — {session_date}
 
@@ -55,6 +62,10 @@ Hygiene Scan Trail
 <!-- retrospect:self_correction begin -->
 - corrective: "{verbatim corrective-call excerpt}" | prior: "{verbatim prior-call excerpt}" | signature: {oracle-mismatch|wrong-target|basis-change} | reason: {why judged not-a-self-correction} | cite: {turn ref}
 <!-- retrospect:self_correction end -->
+
+<!-- retrospect:denied_actions begin -->
+- denied: "{verbatim rejected question, or one-line tool summary}" | tool: {AskUserQuestion|Bash|…} | source: user_rejection | confessed: {yes|no} | disposition: {promoted (finding #N)|noted|dismissed (<reason>)}
+<!-- retrospect:denied_actions end -->
 
 <!-- retrospect:transcript_receipt begin -->
 $ grep -c '"is_error":true' {transcript_path}

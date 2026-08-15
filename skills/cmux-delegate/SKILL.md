@@ -319,6 +319,7 @@ Report results in Korean.
 #!/bin/bash
 PROMPT_FILE="/tmp/cmux-delegate-{timestamp}.md"
 SCRIPT_FILE="/tmp/cmux-delegate-{timestamp}.sh"
+WRAPPER_LOG="/tmp/cmux-delegate-{timestamp}.log"
 
 # Cleanup: .sh만 삭제. .md는 보존 (다른 워크스페이스가 참조할 수 있음)
 trap 'rm -f "$SCRIPT_FILE"' EXIT
@@ -326,10 +327,32 @@ trap 'rm -f "$SCRIPT_FILE"' EXIT
 # Provider-specific invocation (from project ARCHITECTURE.md Provider CLI Spec)
 case "{provider}" in
   claude)
+    # `| tee` 는 로그 적재가 목적이 아니라 계약 이행입니다 (#981). 프로젝트
+    # ARCHITECTURE.md 의 Provider CLI Spec 은 stdin 컬럼(`cat file | claude`)을
+    # 쓰는 호출자에게 "stdout 을 리다이렉트하거나 `-p` 를 붙이거나" 중 하나를
+    # 의무로 지웁니다. `claude --help` 가 워크스페이스 신뢰 대화상자를
+    # 건너뛰는 조건으로 명시한 면제 조항이고, 그 대화상자도 stdin 을 읽으므로
+    # cmux 워크스페이스의 TTY 를 stdout 으로 물려받은 채 실행하면 대화상자와
+    # 파이프된 프롬프트가 같은 스트림을 두고 경쟁합니다. Step 4 는 이 리포지토리의
+    # 유일한 호출부인데 둘 중 어느 것도 공급하지 않고 있었습니다.
+    #
+    # `-p` 가 아니라 리다이렉트를 고른 이유는 아래 "Why Wrapper Script?" 에
+    # 있습니다 — `-p` 는 별개의 실증된 실패(프롬프트 shell 해석)로 이미 배제된
+    # 형태입니다. 전체 리다이렉트(`> "$WRAPPER_LOG"`)가 아니라 `tee` 인 이유는
+    # 이것이 계약을 만족시키는 가장 좁은 리다이렉트이기 때문입니다: claude 의
+    # stdout 은 파이프(비-TTY)가 되어 면제 조항을 충족하지만, tee 의 stdout 은
+    # 여전히 워크스페이스 TTY 라 운영자가 cmux 페인에서 보던 출력이 사라지지
+    # 않습니다. 전체 리다이렉트는 계약은 똑같이 만족시키되 페인을 비웁니다.
+    #
+    # **이것은 버그 수정이 아닙니다.** 소유자의 4회 대조 실행(claude 2.1.232)에서
+    # 프롬프트는 실제로 유실되지 않았습니다. 여기서 메운 것은 관측된 실패가
+    # 아니라 ARCHITECTURE.md 가 문서화한 계약과 호출부 사이의 드리프트입니다 —
+    # 이 줄을 "예전에 프롬프트가 깨졌었다"로 읽으면 안 됩니다.
     cat "$PROMPT_FILE" | {claude_env} claude \
       --model {sub_model} \
       --permission-mode {permission_mode} \
-      {budget_flag}
+      {budget_flag} \
+      | tee "$WRAPPER_LOG"
     ;;
   codex)
     cat "$PROMPT_FILE" | codex exec \
@@ -349,6 +372,13 @@ cmux notify --title "cmux-delegate" --body "Task completed: {short_task}" 2>/dev
 `{provider}` and `{sub_model}` are substituted from the provider resolution result in Step 1.
 `{claude_env}` is substituted with `CLAUDE_CONFIG_DIR=~/.{account}` when account is specified (claude provider only).
 `{budget_flag}` is substituted with `--max-budget-usd {budget}` when budget is specified (claude provider only — codex/gemini do not support budget limits).
+
+`$WRAPPER_LOG` 는 `tee` 의 부산물이지 산출물이 아닙니다. 지워도 위임은 동작하지만
+그러면 claude 의 stdout 이 다시 TTY 가 되어 위 주석의 계약이 깨지므로, 로그가
+필요 없더라도 파이프 자체는 남겨두어야 합니다. trap 은 이 파일도 지우지 않습니다
+— 워커가 죽은 뒤 남는 유일한 stdout 사본이라 사후 분석에 쓰입니다. codex/gemini
+분기에는 같은 의무가 없습니다: ARCHITECTURE.md 의 전제조건은 claude 행에만
+붙어 있고, gemini 는 애초에 stdin 이 아니라 `-p` 로 프롬프트를 받습니다.
 
 **이 파일도 `Write` 도구로 생성합니다.** 단, 파일 내용 자체에 shell 변수(`$PROMPT_FILE` 등)가 포함되므로 이는 의도된 것입니다 — 중요한 것은 사용자 프롬프트가 이 스크립트를 거치지 않는다는 점입니다.
 
@@ -738,6 +768,14 @@ user: /cmux-delegate "full code review" --model claude:opus --account claude-2
 `claude -p "..."` 패턴은 프롬프트에 `$`, `{}`, `` ` `` 등이 포함되면 shell이 해석하여 프롬프트가 깨집니다 (Hub #1001 크리마 검수에서 실제 경험).
 
 `cat file | claude` 패턴은 프롬프트가 shell을 한 번도 거치지 않으므로 모든 특수문자가 안전합니다.
+
+그 대가로 `-p` 가 주는 비대화형 면제(워크스페이스 신뢰 대화상자 건너뛰기)를
+잃습니다. Step 4 가 `| tee "$WRAPPER_LOG"` 로 stdout 을 파이프에 물리는 이유가
+이것입니다 — `claude --help` 는 그 면제를 "`-p`, **또는** stdout 이 TTY 가
+아닐 때"로 명시하므로, 리다이렉트 쪽 조건만으로도 면제가 성립합니다. 즉 `-p`
+없이 위 특수문자 안전성을 유지한 채 계약을 만족시킬 수 있습니다. `--max-budget-usd`
+가 print 모드 전용인 것도 `-p` 를 되살릴 이유가 되지 못합니다: `-p` 를 붙이는
+순간 프롬프트가 shell 을 거쳐 위 실패가 그대로 돌아옵니다.
 
 ## Limitations
 

@@ -37,7 +37,12 @@ print(json.dumps({
   local out_file err_file
   out_file=$(mktemp)
   err_file=$(mktemp)
-  echo "$payload" | python3 "$HOOK" >"$out_file" 2>"$err_file"
+  # `env -u`: these cases pin the DEFAULT arm, so an inherited
+  # PRAXIS_PIPEFAIL_ADVISORY_CONTEXT from the caller's shell must not turn the
+  # #874 treatment arm on underneath them (every `advisory`/`silent` case
+  # asserts empty stdout).
+  echo "$payload" | env -u PRAXIS_PIPEFAIL_ADVISORY_CONTEXT python3 "$HOOK" \
+    >"$out_file" 2>"$err_file"
   local rc=$?
   local out err
   out=$(cat "$out_file")
@@ -297,6 +302,118 @@ run_case "heredoc body line starting with marker word but not alone on the line 
   silent \
   "$(printf 'cat <<EOF\ngit commit | tail\nEOF not-end\nreal body line: git push | tail -1\nEOF')"
 
+# === ADVISE-channel experiment arm (issue #874) ============================
+#
+# Both directions, because a one-directional test lets the opposite error in:
+#   - the treatment arm must ADD additionalContext on a firing command, and
+#     must keep the stderr line (the fire ledger classifies `advise` from
+#     stderr, and the dispatcher only forwards stderr unconditionally);
+#   - the treatment arm must stay SILENT on a non-firing command — the env var
+#     is an arm switch, not a second trigger.
+#
+# NOTE (issue #874): these assert the hook's own stdout. End to end the arm is
+# still inert — `_dispatch.run_group` (hooks/_lib/_dispatch.py:207-218)
+# forwards member stdout only when it carries an ask/deny marker, so the
+# dispatcher discards this JSON. See pipefail-advisory/spec.md § "ADVISE-channel
+# experiment" for the measurement.
+
+run_case_context() {
+  local name="$1" expected="$2" command="$3"
+
+  local payload
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "tool_name": "Bash",
+    "tool_input": {"command": sys.argv[1]},
+}))' "$command")
+
+  local out_file err_file
+  out_file=$(mktemp)
+  err_file=$(mktemp)
+  echo "$payload" | PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1 python3 "$HOOK" \
+    >"$out_file" 2>"$err_file"
+  local rc=$?
+  local out err
+  out=$(cat "$out_file")
+  err=$(cat "$err_file")
+  rm -f "$out_file" "$err_file"
+
+  local ok=1
+  case "$expected" in
+    context)
+      [ "$rc" -eq 0 ] || ok=0
+      # stderr (control arm) must survive the treatment arm.
+      echo "$err" | grep -q "\[pipefail-advisory\]" || ok=0
+      # stdout must be the PreToolUse additionalContext shape, carrying the
+      # SAME text as stderr — not a summary, not a decision.
+      echo "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+hso = d["hookSpecificOutput"]
+assert set(d) == {"hookSpecificOutput"}, d
+assert hso["hookEventName"] == "PreToolUse", hso
+assert "permissionDecision" not in hso, hso
+assert hso["additionalContext"].startswith("[pipefail-advisory]"), hso
+' 2>/dev/null || ok=0
+      ;;
+    silent)
+      [ "$rc" -eq 0 ] || ok=0
+      [ -z "$out" ]   || ok=0
+      [ -z "$err" ]   || ok=0
+      ;;
+    *)
+      echo "FAIL  [$name] unknown expected: $expected"
+      FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+      ;;
+  esac
+
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] expected=$expected rc=$rc"
+    [ -n "$out" ] && echo "        stdout: $out"
+    [ -n "$err" ] && echo "        stderr: $err"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# Must fire — gen-2 pattern, the command the audit's largest advisory load is
+# made of.
+run_case_context "874: treatment arm emits additionalContext + keeps stderr" \
+  context \
+  "gh pr merge 123 --squash 2>&1 | tail -3"
+
+run_case_context "874: treatment arm on gen-1 pattern" \
+  context \
+  "git commit -m x | tail"
+
+# Positive control for the negative side: the same env var on a command the
+# hook does not flag must produce NOTHING on either channel. Without this, a
+# hook that emitted additionalContext unconditionally would still pass the two
+# cases above.
+run_case_context "874: treatment arm silent on read-only pipe (control)" \
+  silent \
+  "git log --oneline | head -20"
+
+run_case_context "874: treatment arm silent on non-truncating sink (control)" \
+  silent \
+  "git commit -m x | cat"
+
+# The switch is exact-value "1" — mirrors PRAXIS_ANCHOR_GATE_ADVISORY. Any
+# other value leaves the default (stderr-only) arm in place.
+_arm_out=$(python3 -c '
+import json
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":"git commit -m x | tail"}}))' \
+  | PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=true python3 "$HOOK" 2>/dev/null)
+if [ -z "$_arm_out" ]; then
+  echo "PASS  [874: non-'1' env value keeps the default stderr-only arm]"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL  [874: non-'1' env value turned the arm on] stdout: $_arm_out"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("874: non-'1' env value keeps default arm")
+fi
+
 # === Fail-open infrastructure =============================================
 
 run_case_raw_payload() {
@@ -305,7 +422,8 @@ run_case_raw_payload() {
   local out_file err_file
   out_file=$(mktemp)
   err_file=$(mktemp)
-  echo "$payload" | python3 "$HOOK" >"$out_file" 2>"$err_file"
+  echo "$payload" | env -u PRAXIS_PIPEFAIL_ADVISORY_CONTEXT python3 "$HOOK" \
+    >"$out_file" 2>"$err_file"
   local rc=$?
   local out err
   out=$(cat "$out_file")

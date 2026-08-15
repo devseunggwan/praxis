@@ -3,14 +3,45 @@
 
 Reads Claude Code hook JSON on stdin; if tool_input.command matches a known
 side-effect category (git mutation, remote trigger, kubernetes write, known
-wrapper CLIs that commit internally), emits permissionDecision "ask" with a
-reason. Otherwise exits 0 (transparent pass-through).
+wrapper CLIs that commit internally), it either emits permissionDecision "ask"
+or writes an advisory to stderr, per the matched category's tier. Otherwise
+exits 0 (transparent pass-through).
 
 Uses shlex for tokenization so quoted/subshelled fragments can't hide a
 matching command from the detector.
 
 Opt-out: embed the marker `# side-effect:ack` anywhere in the command to
 signal an intentional invocation — the hook then exits 0 without prompting.
+
+Tiers (issue #874). `git-commit` is ADVISE; every other category is ASK. The
+observation behind the demotion: one 2026-07-27 session (`5d46110f`) spent 23
+of its 37 total ask prompts on this single hook — 62% — and an approval gate
+that becomes habitual stops functioning as a gate. `git-commit` is the one
+category that can absorb that reduction:
+
+  • It is the only category whose action is local-only and fully reversible.
+    `git push`, `gh pr merge` / `gh pr create` / `gh workflow run` and
+    `kubectl apply` all publish to state someone else can already be reading;
+    a commit is recoverable with `git reset` / `git commit --amend` from the
+    same shell.
+  • It is the only category already covered in depth. Seven sibling
+    PreToolUse(Bash) hooks gate a `git commit` argv on their own — enumerated
+    from `hooks/manifest.json`, each verified to key on the `commit`
+    subcommand: block-commit-without-codex-review, block-sciomc-finding-commit,
+    commit-title-format-check, commit-title-length-check,
+    verify-commit-flag-override, commit-decomposition-advisory,
+    pre-commit-staged-file-enumeration. Five of the seven are also the
+    checklist `verify-commit-flag-override` prints on its own deny (issue
+    #941). No sibling hook gates `kubectl apply` at all.
+
+The wrapper CLIs that used to share the `git-commit` label (`iceberg-schema
+migrate|promote`, `omc ralph`) do NOT follow it down; they now carry their own
+`wrapper-commit` category at ASK. Both halves of the rationale above fail for
+them: the seven sibling gates match a literal `git commit` argv, so a commit
+made *inside* a wrapper process is invisible to every one of them, and
+`iceberg-schema promote` is a catalog operation, not a local one. Splitting
+the category is a deliberate narrowing of issue #874's "demote git-commit" —
+recorded here because the label a reason prints changes with it.
 """
 from __future__ import annotations
 
@@ -31,22 +62,39 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 )
 
 
+# Tier names. See the module docstring for why `git-commit` — and only
+# `git-commit` — sits at ADVISE (issue #874).
+TIER_ASK = "ask"
+TIER_ADVISE = "advise"
+
 CATEGORIES = {
     "git-commit": {
+        "tier": TIER_ADVISE,
         "patterns": [
             ("git", (1,), {"commit", "merge", "rebase", "cherry-pick", "revert"}),
-            ("iceberg-schema", (1,), {"migrate", "promote"}),
-            ("omc", (1,), {"ralph"}),
         ],
         "reason": "local git state mutation — 현재 브랜치/HEAD 확인 필요",
     },
+    # Split out of `git-commit` by issue #874: these commit from *inside*
+    # another process, so the seven sibling `git commit` argv gates never see
+    # them and the coverage half of the demotion rationale does not hold.
+    "wrapper-commit": {
+        "tier": TIER_ASK,
+        "patterns": [
+            ("iceberg-schema", (1,), {"migrate", "promote"}),
+            ("omc", (1,), {"ralph"}),
+        ],
+        "reason": "wrapper CLI commits internally — 대상 카탈로그/브랜치와 의도 재확인",
+    },
     "git-push": {
+        "tier": TIER_ASK,
         "patterns": [
             ("git", (1,), {"push"}),
         ],
         "reason": "remote trigger (git push) — 타겟 브랜치와 upstream 재확인",
     },
     "gh-merge": {
+        "tier": TIER_ASK,
         "patterns": [
             ("gh", (1, 2), ("pr", {"merge", "create"})),
             ("gh", (1, 2), ("workflow", {"run"})),
@@ -54,6 +102,7 @@ CATEGORIES = {
         "reason": "remote trigger via gh — PR/워크플로 타겟과 의도 재확인",
     },
     "kubectl-apply": {
+        "tier": TIER_ASK,
         "patterns": [
             ("kubectl", (1,), {"apply", "delete", "replace", "patch"}),
         ],
@@ -224,8 +273,48 @@ def build_reason(categories: list[str], prod: bool, command: str) -> str:
     return msg
 
 
+def build_advisory(categories: list[str], prod: bool) -> str:
+    """Return the stderr text for an ADVISE-tier-only match (issue #874).
+
+    Two deliberate differences from `build_reason`:
+
+      • No `compound_cascade_hint` suffix. That advisory exists to warn that a
+        *denied* PreToolUse decision aborts every part of a compound command
+        atomically (issue #229). Nothing can be denied here — the hook exits 0
+        and bash runs the command — so appending it would describe a rejection
+        that cannot happen.
+      • A `[side-effect-scan]` prefix, matching the sibling advisory-nudge
+        convention (`[pipefail-advisory]`, `[praxis:momentum-gate]`). An ask
+        reason is already attributed by the permission prompt; a stderr line
+        shares the dispatcher's stream with every other member and is not.
+
+    The `# side-effect:ack` pointer is kept: the marker still short-circuits
+    the hook, which is now how a caller silences the line rather than a prompt.
+    """
+    parts = [f"[{c}] {CATEGORIES[c]['reason']}." for c in categories]
+    msg = "[side-effect-scan] " + " ".join(parts)
+    if prod:
+        msg = "[side-effect-scan] ⚠️  PROD scope 감지 — " + " ".join(parts)
+    msg += (
+        " 의도한 실행이면 command 에 '# side-effect:ack' 주석을 포함해 재호출하세요."
+    )
+    return msg
+
+
 def emit_ask(reason: str) -> None:
     emit_decision("ask", reason)
+
+
+def emit_advisory(text: str) -> None:
+    """Write the ADVISE-tier text to stderr (issue #874).
+
+    stderr, not stdout: `_dispatch.run_group` forwards every member's stderr
+    unconditionally but discards member stdout that carries no ask/deny marker,
+    and `_fire_ledger.classify_decision` reads stderr to record the fire as
+    `advise` rather than `pass`. Both are what keeps this demotion visible in
+    the ledger the tier decision will be re-scored from.
+    """
+    sys.stderr.write(text + "\n")
 
 
 def main() -> int:
@@ -258,8 +347,17 @@ def main() -> int:
     if not matched:
         return 0
 
-    reason = build_reason(matched, has_prod_scope(tokens), command)
-    emit_ask(reason)
+    prod = has_prod_scope(tokens)
+
+    # Mixed matches stay at ASK and keep EVERY matched category in the reason —
+    # `git commit -am x && git push` is unchanged from its pre-#874 text. Only
+    # a match consisting solely of ADVISE-tier categories is demoted, so the
+    # demotion can never quiet a command that also touches shared state.
+    if any(CATEGORIES[c]["tier"] == TIER_ASK for c in matched):
+        emit_ask(build_reason(matched, prod, command))
+        return 0
+
+    emit_advisory(build_advisory(matched, prod))
     return 0
 
 

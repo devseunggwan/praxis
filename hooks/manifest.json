@@ -135,6 +135,13 @@
       "timeout": 5
     },
     {
+      "name": "rejected-mutation-reconsent-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
       "name": "block-pr-without-caller-evidence",
       "role": "preflight-gate",
       "event": "PreToolUse",
@@ -342,7 +349,10 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_PIPEFAIL_ADVISORY_CONTEXT"
+      }
     },
     {
       "name": "fallback-negative-warn",
@@ -407,6 +417,13 @@
     },
     {
       "name": "pytest-direct-exec-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "long-foreground-call-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
