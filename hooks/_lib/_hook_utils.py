@@ -290,8 +290,22 @@ def _quote_open_at_eol(line: str, quote: str) -> str:
     one, so it cannot hide a command that the old per-line split saw.
     """
     i, n = 0, len(line)
+    arith = 0
+    subst: list[str] = []
     while i < n:
         ch = line[i]
+        # A command substitution re-opens shell parsing even inside double
+        # quotes, so the quotes within it are their own. Without this, the inner
+        # `'"'` of `echo "$(printf '"')"` was read as closing the outer double
+        # quote and opening a new one, leaving a quote apparently open at EOL —
+        # the next line was folded in and shlex dropped the pair. `subst` stacks
+        # the suspended outer quote, mirroring `_heredoc_starts_on_line`, which
+        # already had to solve this for the same reason.
+        if quote == '"' and line.startswith("$(", i) and not line.startswith("$((", i):
+            subst.append(quote)
+            quote = ""
+            i += 2
+            continue
         if quote:
             if ch == "\\" and quote == '"':
                 i += 2
@@ -309,8 +323,24 @@ def _quote_open_at_eol(line: str, quote: str) -> str:
         if ch == "\\":
             i += 2
             continue
+        if line.startswith("$((", i):
+            arith += 1
+            i += 3
+            continue
+        if arith and line.startswith("))", i):
+            arith -= 1
+            i += 2
+            continue
+        if ch == ")" and subst and not arith:
+            quote = subst.pop()
+            i += 1
+            continue
         i += 1
-    return quote
+    # A substitution still open at EOL means the command continues, so report
+    # the outermost suspended quote and let the caller keep folding. A `$(`
+    # opened *outside* any quote suspends `""`, which reports closed — that is
+    # the pre-existing behaviour, unchanged here rather than improved.
+    return quote or (subst[0] if subst else "")
 
 
 def _logical_lines(command: str) -> list[str]:

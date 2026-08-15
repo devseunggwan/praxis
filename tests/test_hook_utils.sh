@@ -528,6 +528,24 @@ run_tokens "hash mid-word is not a comment and still folds the lines" \
   "[]" \
   $'echo ok#don\'t care\ngh pr merge 9 --squash'
 
+# A command substitution re-opens shell parsing inside double quotes, so the
+# quotes within it are its own. Reading the inner `'"'` as closing the outer
+# double quote left one apparently open at end of line, folded the next line in,
+# and shlex dropped both — the merge went invisible on a command bash runs fine.
+# The `echo` line itself still yields no tokens — shlex cannot parse a bare
+# `$(printf '"')` and its ValueError arm drops that logical line. The point is
+# that the loss is now confined to it: the merge on the next line survives,
+# where before the two were folded into one group and both disappeared.
+run_tokens "quotes inside a command substitution do not leak to the outer quote" \
+  "[';', 'gh', 'pr', 'merge', '9', '--squash']" \
+  $'echo "$(printf \'"\')"\ngh pr merge 9 --squash'
+
+# The arithmetic form must NOT be taken for a substitution: `$((` is not `$(`,
+# and treating it as one would pop the wrong state at the first `)`.
+run_tokens "arithmetic expansion is not read as a command substitution" \
+  "['echo', '\$((1 << 3))', ';', 'gh', 'pr', 'merge', '9', '--squash']" \
+  $'echo "$((1 << 3))"\ngh pr merge 9 --squash'
+
 # `commenters = ""` is untouched: the side-effect-scan opt-out marker must
 # still tokenize rather than being eaten as a comment.
 run_tokens "side-effect ack marker still tokenizes" \
