@@ -20,6 +20,13 @@ tmp/
 __pycache__/
 *.pyc
 
+# Coverage artifacts. `pytest --cov` / `coverage run` drop these in the repo
+# root, and measuring a script's coverage is a normal step when deciding
+# whether a lint needs its own CI fixture corpus (issue #975).
+.coverage
+.coverage.*
+htmlcov/
+
 # OMC (oh-my-claudecode local state)
 .omc/
 .omx/
