@@ -76,9 +76,28 @@ assert_match "liveness/revisit-condition" "$liveness" '(re-measur|Re-measur)'
 # review. A future edit must not quietly promote it to a working flag.
 assert_no_match "step4b/no-working-background-flag" "$step4b" '`--background`[^.]*(detach|backgrounds the review|works for review)'
 # One pinned version only — catches a half-applied bump that leaves two.
+#
+# Extract every version token and require the distinct set to be exactly
+# {1.0.6}, rather than enumerating the versions to reject. An enumeration has to
+# predict what a future bump looks like and this one did not: `2.0.0`, `3.1.0`,
+# `1.0.60` and `1.0.6-rc1` all failed to match the old pattern and so passed the
+# gate silently, which is the whole invariant inverted.
+assert_only_version() {
+  local name="$1" hay="$2" want="$3" seen
+  seen="$(printf '%s' "$hay" \
+    | grep -oE 'codex@openai-codex [0-9][0-9A-Za-z.+-]*' \
+    | sed 's/^codex@openai-codex //' | sort -u | tr '\n' ' ')"
+  seen="${seen% }"
+  if [ "$seen" = "$want" ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] version set is '$seen', want exactly '$want'"; FAIL=$((FAIL + 1))
+  fi
+}
+
 for sec_name in step4b liveness; do
   sec="$step4b"; [ "$sec_name" = liveness ] && sec="$liveness"
-  assert_no_match "$sec_name/no-other-pinned-version" "$sec" 'codex@openai-codex (0|1\.0\.[0-57-9]|1\.[1-9])'
+  assert_only_version "$sec_name/no-other-pinned-version" "$sec" '1.0.6'
 done
 
 echo
