@@ -135,6 +135,13 @@
       "timeout": 5
     },
     {
+      "name": "rejected-mutation-reconsent-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
       "name": "block-pr-without-caller-evidence",
       "role": "preflight-gate",
       "event": "PreToolUse",
