@@ -413,6 +413,13 @@
       "timeout": 5
     },
     {
+      "name": "long-foreground-call-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
       "name": "perf-multiplier-evidence-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
