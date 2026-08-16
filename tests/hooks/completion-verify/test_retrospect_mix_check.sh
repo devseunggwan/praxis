@@ -2664,14 +2664,54 @@ run_case "DA6_block_duplicate_denied_actions_fences" "block" "$DA6_TRANSCRIPT"
 # tool-agnostic; only the #1007 preflight gate filters to AskUserQuestion), so
 # this case must still carry a disposed row. It pins that the gate does not
 # silently narrow to AskUserQuestion.
+#
+# The receipt names Bash, matching the rejection. It previously reused
+# $DA_FENCE, whose row names AskUserQuestion — a receipt for a different tool
+# than the one refused, which made a passing case out of a mismatch and left
+# the reader no way to see that the row is supposed to describe *this*
+# rejection.
+DA7_FENCE='<!-- retrospect:denied_actions begin -->
+- denied: "aws s3 rm s3://acme-archive/raw/2024/ --recursive" | tool: Bash | source: user_rejection | confessed: no | disposition: promoted (finding #1)
+<!-- retrospect:denied_actions end -->'
 DA7_TRANSCRIPT="$(mk_user_rejection Bash 'aws s3 rm s3://acme-archive/raw/2024/ --recursive')
 $(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
-$DA_FENCE")"
+$DA7_FENCE")"
 run_case "DA7_pass_bash_rejection_with_disposed_row" "pass" "$DA7_TRANSCRIPT"
 
 DA8_TRANSCRIPT="$(mk_user_rejection Bash 'aws s3 rm s3://acme-archive/raw/2024/ --recursive')
 $(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")"
 run_case "DA8_block_bash_rejection_without_fence" "block" "$DA8_TRANSCRIPT"
+
+# DA7a-DA7f: schema negative controls. The gate matches the whole row, so a
+# fence carrying only part of one buys nothing. The first case is the one that
+# matters most — a lone `disposition:` line is the cheapest possible way to
+# silence the lane, and before this it worked. The rest drop one field each,
+# which is what keeps the anchored regex from being satisfiable by a prefix.
+DA7_MALFORMED_ROWS=(
+  'disposition: noted'
+  '- denied: "aws s3 rm s3://acme-archive/raw/2024/ --recursive" | disposition: noted'
+  '- tool: Bash | source: user_rejection | confessed: no | disposition: noted'
+  '- denied: "x" | tool: Bash | confessed: no | disposition: noted'
+  '- denied: "x" | tool: Bash | source: user_rejection | disposition: noted'
+  '- denied: "x" | tool: Bash | source: user_rejection | confessed: maybe | disposition: noted'
+)
+DA7_MALFORMED_NAMES=(
+  bare_disposition_only
+  no_tool_source_confessed
+  no_denied
+  no_source
+  no_confessed
+  confessed_not_yes_no
+)
+for _i in "${!DA7_MALFORMED_ROWS[@]}"; do
+  _fence="<!-- retrospect:denied_actions begin -->
+${DA7_MALFORMED_ROWS[$_i]}
+<!-- retrospect:denied_actions end -->"
+  _t="$(mk_user_rejection Bash 'aws s3 rm s3://acme-archive/raw/2024/ --recursive')
+$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+$_fence")"
+  run_case "DA7_block_malformed_row_${DA7_MALFORMED_NAMES[$_i]}" "block" "$_t"
+done
 
 # DA9-DA11: silent controls. Each drops exactly one of the three structural
 # markers; a scan that fired on any of them would also fire on ordinary tool

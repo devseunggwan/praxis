@@ -1117,10 +1117,19 @@ PY
         ins { buf = buf $0 "\n" }
         END { printf "%s", last }')
       # "Ignored ALL of them" is the block condition: one disposed row clears the
-      # gate. The disposition value is anchored so a prose sentence containing
-      # the word "dismissed" cannot stand in for a row.
-      if ! printf '%s\n' "$DA_BLOCK" | grep -qE 'disposition:[[:space:]]*(promoted|noted|dismissed)([^A-Za-z]|$)'; then
-        GATE12_VIOLATION="denied_actions fence is present but not one of the $DENIED_COUNT transcript rejection(s) carries a disposition — each row needs 'disposition: promoted (finding #N)' / 'noted' / 'dismissed (<reason>)'; an enumerated-but-undisposed rejection is the same silent drop the lane exists to prevent"
+      # gate. The WHOLE row is matched, not just its disposition — a lone
+      # `disposition: noted` line carries no evidence that any rejection was
+      # actually enumerated, and buying the gate off with one such line is the
+      # same silent drop the lane exists to prevent. Anchoring at the list
+      # marker also keeps a prose sentence containing the word "dismissed"
+      # from standing in for a row.
+      da_row_re='^[[:space:]]*-[[:space:]]*denied:[[:space:]]*".*"[[:space:]]*\|'
+      da_row_re="$da_row_re"'[[:space:]]*tool:[[:space:]]*[A-Za-z][A-Za-z0-9_-]*[[:space:]]*\|'
+      da_row_re="$da_row_re"'[[:space:]]*source:[[:space:]]*user_rejection[[:space:]]*\|'
+      da_row_re="$da_row_re"'[[:space:]]*confessed:[[:space:]]*(yes|no)[[:space:]]*\|'
+      da_row_re="$da_row_re"'[[:space:]]*disposition:[[:space:]]*(promoted|noted|dismissed)([^A-Za-z]|$)'
+      if ! printf '%s\n' "$DA_BLOCK" | grep -qE "$da_row_re"; then
+        GATE12_VIOLATION="denied_actions fence is present but carries no schema-valid disposed row for the $DENIED_COUNT transcript rejection(s) — a row must be '- denied: \"<verbatim question>\" | tool: <name> | source: user_rejection | confessed: yes|no | disposition: promoted (finding #N)|noted|dismissed (<reason>)'; a bare 'disposition:' line is not a row, and an enumerated-but-undisposed rejection is the same silent drop the lane exists to prevent"
       fi
     fi
   fi

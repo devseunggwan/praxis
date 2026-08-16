@@ -52,7 +52,7 @@ of the following hold:
 | Gate-8b (issue #701): `suppression_ledger` claims a clean/no-failure path while a live transcript scan finds more than one deterministic adverse signal                                                                                             | The ledger exists but launders away visible evidence. The hook re-derives `is_error:true`, content-error syntax, and documented `user_correction` markers on user turns before trusting clean ledger language                                                                                                                                     |
 | Gate-8c (issue #715): `critic_diff: not-run` while a live transcript scan finds more than one explicit user-correction marker (tighter `sl_strong_correction_re`, not Gate-8b's broad regex)                                                        | The externalized critic tier — the only anti-concealment mechanism that survives the self-correction literature — was self-skipped in exactly the case its predicate ("a friction_event required user correction") was satisfied. Converts the run-the-critic guidance from unenforced self-feedback into a deterministic format gate             |
 
-| Gate-12 (issue #1013): the live transcript carries at least one structurally-rejected tool call and the report has no `retrospect:denied_actions` fence, has more than one, has a malformed one, or carries no row with a `disposition:` token | Every other lane keys on something that happened; a refused action has no outcome, so it leaves no error, no correction and no confession, and selection by ease of recall never reaches it. Shares Gate-8's Stage-4 carve-out |
+| Gate-12 (issue #1013): the live transcript carries at least one structurally-rejected tool call and the report has no `retrospect:denied_actions` fence, has more than one, has a malformed one, or carries no schema-valid disposed row (the whole row is matched — `denied` / `tool` / `source: user_rejection` / `confessed: yes\|no` / `disposition`, anchored at the list marker — so a lone `disposition:` line cannot buy the gate off) | Every other lane keys on something that happened; a refused action has no outcome, so it leaves no error, no correction and no confession, and selection by ease of recall never reaches it. Shares Gate-8's Stage-4 carve-out |
 
 ### Gate-11 remedy-reach receipt (issue #917)
 
@@ -146,8 +146,11 @@ well-formed fence with at least one disposed row:
 
 **Supply gate, deliberately weak — stated, not hidden.** One disposed row clears
 it. It forces the unconfessed candidates onto the record; it cannot judge which
-one deserved a finding slot, and a single `disposition: dismissed` satisfies the
-letter of it. That is issue #1013's own known limit (`confessed: yes/no` is a
+one deserved a finding slot, and a single schema-valid row carrying
+`disposition: dismissed` satisfies the letter of it. What it no longer accepts
+is a *bare* `disposition:` line — the row must name what was denied, on which
+tool, and whether it was confessed, so the weak gate still costs an enumeration
+rather than one word. That is issue #1013's own known limit (`confessed: yes/no` is a
 proxy, and the unreached axis is the larger-damage one). The real lever remains
 the externalized critic (Gate-8c / Gate-10); Gate-12 is the cheap backstop for
 when the critic does not run. A passing Gate-12 is not evidence of a clean
