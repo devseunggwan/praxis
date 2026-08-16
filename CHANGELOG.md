@@ -5,6 +5,56 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.10.0](https://github.com/devseunggwan/praxis/compare/v7.9.1...v7.10.0) (2026-08-16)
+
+
+### Added
+
+* **cmux-delegate:** add a worker decision gate ([0087b84](https://github.com/devseunggwan/praxis/commit/0087b84f5f10aad44f3d29a9f8cc0b0ac62c0777))
+* **cmux-delegate:** classify worker liveness ([3614663](https://github.com/devseunggwan/praxis/commit/361466355850ee4a46d9783a2454a8508c4d7744))
+* **hook:** demote git-commit to advise, add ADVISE-channel arm ([#1030](https://github.com/devseunggwan/praxis/issues/1030)) ([df6cc4e](https://github.com/devseunggwan/praxis/commit/df6cc4e685002370ba6602793de7c9ed1cdaa483))
+* **hook:** re-ask before a mutation the user already refused ([#1028](https://github.com/devseunggwan/praxis/issues/1028)) ([f4182c1](https://github.com/devseunggwan/praxis/commit/f4182c15662215042a9e312f73cef8b23842e28d))
+* **hooks:** add Bash blast-radius ask to output-block-falsify-advisory ([#1025](https://github.com/devseunggwan/praxis/issues/1025)) ([6aa725b](https://github.com/devseunggwan/praxis/commit/6aa725b151e5332f750be200fab505d71b5b729b))
+* **hooks:** advise commit decomposition from the message itself ([#977](https://github.com/devseunggwan/praxis/issues/977)) ([d65c1b2](https://github.com/devseunggwan/praxis/commit/d65c1b2f25c4c119fffe4b82d815472260c8348a))
+* **hooks:** advise on foreground Bash calls declaring long timeouts ([#1026](https://github.com/devseunggwan/praxis/issues/1026)) ([83a95be](https://github.com/devseunggwan/praxis/commit/83a95bebf8c7a2e82115e642524144e06f7344a4))
+* **hooks:** advisory for n=1 quantitative claims ([#969](https://github.com/devseunggwan/praxis/issues/969)) ([09181e8](https://github.com/devseunggwan/praxis/commit/09181e8b2dc21147394c9bce9ba5df84aaa9d1e1))
+* **hooks:** enumerate required tokens on block ([512fd69](https://github.com/devseunggwan/praxis/commit/512fd6974c9ce166551fee5f1a36fbd271ef40e5)), closes [#941](https://github.com/devseunggwan/praxis/issues/941)
+* **hooks:** gate poll-loop retries on reading the guard's own spec ([#1027](https://github.com/devseunggwan/praxis/issues/1027)) ([c4bd6dc](https://github.com/devseunggwan/praxis/commit/c4bd6dc8586a66b442136d187ee93b3eb5100d59))
+* **hooks:** require a non-mutating tier in approval menus ([#966](https://github.com/devseunggwan/praxis/issues/966)) ([3efa1ed](https://github.com/devseunggwan/praxis/commit/3efa1edfa25395d90f357da78fce9607abb6d42d))
+* **retrospect:** add denied-actions lane + Gate-12 ([#1029](https://github.com/devseunggwan/praxis/issues/1029)) ([80110bd](https://github.com/devseunggwan/praxis/commit/80110bdbd805a3b8255294bd9043a59066853aa7))
+* **skill:** add merge-briefing procedure ([#980](https://github.com/devseunggwan/praxis/issues/980)) ([635f561](https://github.com/devseunggwan/praxis/commit/635f5610025f8351f3219f50a03bf56b6e11fc33))
+* **skills:** spec-drift and a spec store outside the repo ([#1006](https://github.com/devseunggwan/praxis/issues/1006)) ([ea24d15](https://github.com/devseunggwan/praxis/commit/ea24d15389c3a1ff9f56850944d6436e615040ee))
+
+
+### Fixed
+
+* **cmux-delegate:** key the report on the workspace ([6d8d653](https://github.com/devseunggwan/praxis/commit/6d8d653d91b3bf7bd2607f33fa6143528748e625))
+* **cmux-delegate:** supply the stdin column's non-TTY exemption ([#1022](https://github.com/devseunggwan/praxis/issues/1022)) ([615d27e](https://github.com/devseunggwan/praxis/commit/615d27e00be020b830e118f61177ffbe3f2146cf)), closes [#981](https://github.com/devseunggwan/praxis/issues/981)
+* **codex-review-wrap:** always background the review call ([#983](https://github.com/devseunggwan/praxis/issues/983)) ([e18de75](https://github.com/devseunggwan/praxis/commit/e18de7589756ef8dbc5eceee8449a449591caec1))
+* **hook:** make the anchor gate's PostToolUse findings reach the model ([#1000](https://github.com/devseunggwan/praxis/issues/1000)) ([7262740](https://github.com/devseunggwan/praxis/commit/7262740facaa0118b4f36f2cbb718a65f15541c8))
+* **hooks:** bind each body flag to its own gh invocation in perf advisory ([#1015](https://github.com/devseunggwan/praxis/issues/1015)) ([2eefdfc](https://github.com/devseunggwan/praxis/commit/2eefdfce2c0cd2c15c8f7a2f4ff9a8f7fc016e68)), closes [#973](https://github.com/devseunggwan/praxis/issues/973) [#973](https://github.com/devseunggwan/praxis/issues/973)
+* **hooks:** fold lines across an open quote in safe_tokenize ([#1014](https://github.com/devseunggwan/praxis/issues/1014)) ([c79d872](https://github.com/devseunggwan/praxis/commit/c79d8725bfd5ce5f9f1c0ac91d35c90e351c047b))
+* **hooks:** guard session state read-modify-write ([#965](https://github.com/devseunggwan/praxis/issues/965)) ([5efc14c](https://github.com/devseunggwan/praxis/commit/5efc14c41a93253e8d1a0819fa34f32522136005))
+* **hooks:** merge gates fire on non-merge commands ([#986](https://github.com/devseunggwan/praxis/issues/986)) ([8dfafdf](https://github.com/devseunggwan/praxis/commit/8dfafdf49a9a296a314c7d95b5bba221cee821fd)), closes [#985](https://github.com/devseunggwan/praxis/issues/985)
+* **hooks:** serialize jq-config dedup state and stage per process ([#1017](https://github.com/devseunggwan/praxis/issues/1017)) ([0e755d1](https://github.com/devseunggwan/praxis/commit/0e755d168e94a321c7cce2b5c21c632bee8a3148)), closes [#970](https://github.com/devseunggwan/praxis/issues/970) [#951](https://github.com/devseunggwan/praxis/issues/951)
+* **hooks:** stop rule 1b firing on refusal-led turns ([#976](https://github.com/devseunggwan/praxis/issues/976)) ([f3979aa](https://github.com/devseunggwan/praxis/commit/f3979aa2079768ffadd487adb83d2861fdf787c0))
+* **menu-tier:** gate create/update on shared surface, cancel on mutation ([#1016](https://github.com/devseunggwan/praxis/issues/1016)) ([8a62c97](https://github.com/devseunggwan/praxis/commit/8a62c9790bda30421ed03a1892f1901e6965bccb))
+* **retrospect:** escalate own-org public repo writes at Gate-4 ([#1024](https://github.com/devseunggwan/praxis/issues/1024)) ([256b428](https://github.com/devseunggwan/praxis/commit/256b4286f86528098c74f313ba88f8997dfc99b0))
+* **spec-drift:** run Verify commands with stdin at /dev/null ([#1018](https://github.com/devseunggwan/praxis/issues/1018)) ([487aea8](https://github.com/devseunggwan/praxis/commit/487aea89aa9ed4047045539cc46feab33485ab13)), closes [#1008](https://github.com/devseunggwan/praxis/issues/1008)
+
+
+### Changed
+
+* **architecture:** state stdin column precondition ([1a5ea64](https://github.com/devseunggwan/praxis/commit/1a5ea6420425ec272b91e4404a1609d737b6e592))
+* bump codeql-action/analyze to 4.37.6 ([ddea2e3](https://github.com/devseunggwan/praxis/commit/ddea2e3d196bbd533730090421d5315fcaf6bb1a))
+* bump codeql-action/init to 4.37.6 ([e1acc9a](https://github.com/devseunggwan/praxis/commit/e1acc9a7ec43f62cd28dc9e9be6aba84eddc15f5))
+* bump reviewdog/action-actionlint from 1.73.0 to 1.73.1 ([#1032](https://github.com/devseunggwan/praxis/issues/1032)) ([075ac78](https://github.com/devseunggwan/praxis/commit/075ac788bc54a7b1ed6202462a81ec2c9d230cf3))
+* **codex-review-wrap:** pin Step 4b and Liveness to companion 1.0.6 ([#1020](https://github.com/devseunggwan/praxis/issues/1020)) ([cb0b375](https://github.com/devseunggwan/praxis/commit/cb0b375264564e939900ff24e93763c627b37f31))
+* **ethos:** forbid delegating a hook workaround to the user ([#1023](https://github.com/devseunggwan/praxis/issues/1023)) ([ad1ecb5](https://github.com/devseunggwan/praxis/commit/ad1ecb55a6666555de3ba9e27525d4db08d334b0))
+* **retrospect:** declare memory-lint CI split intended, not a gap ([#1021](https://github.com/devseunggwan/praxis/issues/1021)) ([0a096ae](https://github.com/devseunggwan/praxis/commit/0a096ae5f4743762fb51831df8ac977bf264aa29)), closes [#975](https://github.com/devseunggwan/praxis/issues/975)
+* **spec:** a Verify oracle must fail when its inputs are gone ([#1019](https://github.com/devseunggwan/praxis/issues/1019)) ([f66836e](https://github.com/devseunggwan/praxis/commit/f66836ec6bbd97e6dfb94e49676d19bfd0e9aad0)), closes [#1011](https://github.com/devseunggwan/praxis/issues/1011) [#1008](https://github.com/devseunggwan/praxis/issues/1008)
+* **spec:** tracked feature-spec convention under .praxis/specs ([#1002](https://github.com/devseunggwan/praxis/issues/1002)) ([7821fa8](https://github.com/devseunggwan/praxis/commit/7821fa87bb4d2f4aeb71a030349f44926cb555d3))
+
 ## [7.9.1](https://github.com/devseunggwan/praxis/compare/v7.9.0...v7.9.1) (2026-08-11)
 
 
