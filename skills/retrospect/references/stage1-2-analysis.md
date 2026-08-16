@@ -202,6 +202,8 @@ the last 50 turns. Post-compaction sessions must use the available transcript
 jsonl when readable and emit the Stage 3 transcript receipt trail. The same
 scope window applies to `tool_census`, `user_correction`, and
 `self_correction`, so their counts and early-exit decisions share one oracle.
+`denied_actions` (lane 6) is the deliberate exception — it reads the whole
+readable transcript; see its own entry for why.
 
 **Sidechain (subagent) inclusion — observation layer (MUST, issue #763).**
 The friction/error lanes (`friction_events`, `tool_census`, `self_correction`,
@@ -277,17 +279,70 @@ including sidechain friction here carries no enforcement risk.
      `user_correction` events and before narrative-only events for retained
      `friction_events` slots
    - false-positive drops must be recorded in the ledger
+6. **`denied_actions`**
+   - deterministic enumeration of actions the user REFUSED (issue #1013)
+   - every other lane keys on something that happened. A refused action has no
+     outcome, so it leaves no error, no correction, and no confession — which is
+     exactly why selection by ease of recall never reaches it, and why its
+     damage can be the largest in the session (the canonical instance: a
+     rejected approval reopened by an adjacent utterance, which would have
+     deleted ~295M objects)
+   - row shape:
+     - `denied` — the rejected question, verbatim, or a one-line tool summary
+     - `tool` — the tool whose call was rejected (`AskUserQuestion`, `Bash`, …)
+     - `source` — `user_rejection`
+     - `confessed` — `yes` when this item was already admitted in conversation,
+       `no` otherwise. **If every candidate across all lanes is `confessed: yes`,
+       the selection is biased** — a `no` from this lane must displace a `yes`,
+       not merely be appended
+     - `disposition` — `promoted (finding #N)`, `noted`, or
+       `dismissed (<reason>)`
+   - detection is STRUCTURAL, not linguistic: a record counts only when
+     `toolDenialKind == "user-rejected"`, its `tool_result` carries
+     `is_error: true`, AND the runtime's fixed refusal sentence is present. An
+     option label reading "No" is never classified as a refusal. The shared
+     enumerator is `hooks/_lib/_transcript.py::scan_user_rejections`, which the
+     `retrospect-mix-check` Gate-12 oracle also calls — one scanner, so the lane
+     and the gate cannot drift
+   - scope: unlike lanes 3-5 this lane reads the **whole readable transcript**,
+     not the scope window. A refusal is a standing NO that does not expire after
+     50 turns, and Gate-12 re-derives the same set from the whole transcript — a
+     narrower lane would be blocked against an oracle it never looked at
+   - emit the `retrospect:denied_actions` fence in Stage 3 whenever this lane
+     produced at least one row (see [`stage3-reporting.md`](stage3-reporting.md));
+     with zero rows, omit the fence
+
+   **Limitation — this lane covers the user-rejection half ONLY (MUST read).**
+   Issue #1013 names a second unconfessed source: mutations stopped by a
+   classifier or hook. That half is **not mechanizable today**, and the lane is
+   incomplete without it:
+
+   - `hooks/_lib/_fire_ledger.py` records `hook`, `role`, `decision`,
+     `session_id`, `tool` — and never the command text. A ledger-driven lane
+     could say "a preflight gate blocked something" but not what was blocked,
+     which is the only part a friction candidate needs.
+   - Worse, the COARSE standalone path (`record_standalone_fire`) writes
+     `session_id: ""` for every non-dispatched hook, so those records cannot
+     even be attributed to the session being analyzed.
+   - In the transcript itself a hook/classifier block arrives as an ordinary
+     `is_error` tool_result with **no** `toolDenialKind` field — indistinguishable
+     from a failed command without parsing block-message prose, i.e. the exact
+     natural-language judgement this lane refuses to make.
+
+   Treat blocked-mutation candidates as the `is_error` enumeration's job and as
+   the externalized critic's, and do not read a clean `denied_actions` fence as
+   "no unconfessed failures existed".
 
 ### Self-incrimination pass (anti-suppression, MUST)
 
-The five pre-scan lanes are deterministic and capped, so they structurally miss
+The six pre-scan lanes are deterministic and capped, so they structurally miss
 the friction the analyzing agent is most motivated to bury: its OWN failures
 that left no `user_correction` marker and do not fit the `self_correction`
 three-part signature. The analyzing context is the same context that committed
 those failures, so selection bias suppresses them silently — this is the
 "retrospect hides the painful parts" failure this pass exists to close.
 
-Run this pass AFTER the five lanes and BEFORE root-cause clustering. It is
+Run this pass AFTER the six lanes and BEFORE root-cause clustering. It is
 unconditional whenever the friction path is non-empty. Answer the adversarial
 question in writing before continuing:
 
@@ -389,7 +444,7 @@ project's normal critic subagent when available; otherwise use the closest
 available read-only review/debate agent. The brief must include:
 
 - transcript / scope window identifier
-- the five pre-scan lanes
+- the six pre-scan lanes
 - the self-incrimination pass output, carried **verbatim** — do not paraphrase,
   summarize, or soften the candidate #1-damage wording before it reaches the
   critic. A sanitized brief turns the critic into an echo chamber (issue #715):

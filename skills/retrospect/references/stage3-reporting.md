@@ -18,6 +18,7 @@ Stage 3 output MUST emit, in this order:
    - `retrospect:tool_census`
    - `retrospect:user_correction`
    - `retrospect:self_correction`
+   - `retrospect:denied_actions` when pre-scan lane 6 produced at least one row
    - `retrospect:transcript_receipt` in post-compaction sessions
 6. Stage 2.7 audit trail or skip marker
    - `<!-- retrospect:audit_skipped: no artifacts -->`
@@ -245,6 +246,52 @@ reads the critic's transcript return):
 <!-- retrospect:critic_roots end -->
 ```
 
+## Denied-action coverage (Gate-12, issue #1013)
+
+Every other lane keys on something that happened. An action the user **refused**
+has no outcome, so it leaves no error, no correction, and no confession — and
+selection by ease of recall never reaches it. In the session that motivated this
+gate the scan was genuinely exhaustive (13,324 records, all 56 `is_error` bodies
+read individually) and all five friction slots still went to incidents the agent
+had already confessed in conversation; the largest-damage item — a rejected
+approval reopened by an adjacent utterance, which would have deleted ~295M
+objects — appeared in no lane.
+
+When pre-scan lane 6 (see [`stage1-2-analysis.md`](stage1-2-analysis.md))
+produced at least one row, Stage 3 MUST emit them:
+
+```markdown
+<!-- retrospect:denied_actions begin -->
+- denied: "{verbatim rejected question, or one-line tool summary}" | tool: {AskUserQuestion|Bash|…} | source: user_rejection | confessed: {yes|no} | disposition: {promoted (finding #N)|noted|dismissed (<reason>)}
+<!-- retrospect:denied_actions end -->
+```
+
+Emit the fence as **bare markdown in the report body**, not inside a fenced code
+block — the Stop hook strips fenced code before parsing (same discipline as the
+suppression ledger). With zero lane rows, omit the fence entirely.
+
+`retrospect-mix-check` Gate-12 re-derives the denied set from the **live
+transcript** with the same structural scanner the lane uses
+(`hooks/_lib/_transcript.py::scan_user_rejections` — `toolDenialKind ==
+"user-rejected"` plus `is_error: true` plus the runtime's fixed refusal
+sentence), so the agent's fence is not the oracle. It blocks when the transcript
+carries at least one rejection and **not one** of them is disposed of: no fence,
+an empty fence, or rows with no `disposition:` token all read as ignored.
+
+**What this gate is and is not.** It is a *supply* gate: it forces the
+unconfessed candidates onto the record, and one disposed row clears it. It
+cannot judge whether the right one was promoted, and a single
+`disposition: dismissed` row satisfies the letter of it — the issue's own known
+limit, restated here so nobody reads a passing Gate-12 as a clean session. The
+real lever remains the externalized critic (Gate-8c / Gate-10); this is the
+cheap backstop for when the critic does not run.
+
+**Half-coverage, stated.** Gate-12 sees user rejections only. Mutations stopped
+by a hook or command classifier — the issue's second unconfessed source — are
+not mechanizable today; see the limitation block under lane 6 for the evidence
+(`_fire_ledger.py` stores no command text, and its coarse path stores an empty
+`session_id`).
+
 ## Per-finding plan contract
 
 For every non-note-only finding, Stage 3 must explain:
@@ -404,6 +451,9 @@ Stop and return to Stage 2 / Stage 2.5 when any of these are true:
   lines.
 - Silently dropping an agent-caused failure the self-incrimination pass surfaced
   (a `justified-drop` needs an explicit reason in the ledger).
+- Omitting the `retrospect:denied_actions` fence, or emitting it with no
+  `disposition:` on any row, when the transcript carries a user rejection
+  (Gate-12).
 
 ## Quick Reference
 
@@ -430,7 +480,8 @@ Do not run Stage 4 until the user explicitly approves the finding.
 ## Co-update note
 
 Any schema drift here — including the `retrospect:suppression_ledger` fence
-(Gate-8) — must be co-updated with:
+(Gate-8) and the `retrospect:denied_actions` fence (Gate-12) — must be
+co-updated with:
 
 - `hooks/completion-verify/retrospect-mix-check/impl.sh`
 - `tests/hooks/completion-verify/test_retrospect_mix_check.sh`

@@ -1054,6 +1054,87 @@ if [ "$GATE10_ELIGIBLE" = "true" ] && [ "$CRITIC_RAN" = "true" ] && [ -n "$CRITI
   done <<< "$CRITIC_ROOTS"
 fi
 
+# Gate-12 (denied-action coverage, issue #1013). Every other lane keys on
+# something that HAPPENED. An action the user refused has no outcome, so it
+# leaves no error, no correction and no confession — and selection by ease of
+# recall never reaches it. In the motivating session the scan was genuinely
+# exhaustive (13,324 records, all 56 is_error bodies read individually) and all
+# five friction slots still went to already-confessed incidents, while the
+# largest-damage item (a rejected approval reopened by an adjacent utterance,
+# ~295M objects) appeared in no lane.
+#
+# The oracle is the LIVE TRANSCRIPT, not the agent's fence — same reason Gate-10
+# reads the critic's subagent return rather than a pasted block: a report cannot
+# self-certify that it enumerated what it was supposed to enumerate. The scan is
+# the shared structural enumerator pre-scan lane 6 uses
+# (hooks/_lib/_transcript.py::scan_user_rejections — toolDenialKind plus
+# is_error plus the runtime's fixed refusal sentence), so lane and gate cannot
+# drift into two definitions of "rejected".
+#
+# SUPPLY GATE, deliberately weak: one disposed row clears it. It forces the
+# unconfessed candidates onto the record; it cannot judge which one deserved a
+# finding slot, and a single `disposition: dismissed` satisfies the letter of it
+# (issue #1013's own stated limit). The real lever stays the externalized critic
+# (Gate-8c/Gate-10); this is the cheap backstop for when the critic does not run.
+#
+# Same Stage-4 carve-out and fence discipline as Gate-8/Gate-11 — a
+# positive-presence gate must not retroactively block a completed cycle.
+#
+# Fail-open at every step: no python3, an unreadable/oversize transcript, or any
+# scanner error yields 0 and the gate stays silent.
+GATE12_VIOLATION=""
+if [ "$STAGE4_AFTER_REPORT" != "1" ] && command -v python3 >/dev/null 2>&1; then
+  DENIED_COUNT=$(python3 - "$_SP_LIB" "$TRANSCRIPT_PATH" 2>/dev/null <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+try:
+    from _transcript import scan_user_rejections
+    print(len(scan_user_rejections(sys.argv[2])))
+except Exception:
+    print(0)
+PY
+)
+  DENIED_COUNT=$(printf '%s' "$DENIED_COUNT" | tr -cd '0-9')
+  [ -z "$DENIED_COUNT" ] && DENIED_COUNT=0
+  if [ "$DENIED_COUNT" -gt 0 ]; then
+    re_db='^[[:space:]]*<!--[[:space:]]*retrospect:denied_actions begin[[:space:]]*-->[[:space:]]*$'
+    re_de='^[[:space:]]*<!--[[:space:]]*retrospect:denied_actions end[[:space:]]*-->[[:space:]]*$'
+    da_begin=$(printf '%s\n' "$MOST_RECENT_BLOCK" | grep -cE "$re_db" || true)
+    da_malformed=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk -v sb="$re_db" -v se="$re_de" '
+      $0 ~ sb { if (ins) nested=1; ins=1; next }
+      $0 ~ se { ins=0; next }
+      END { print (ins || nested) ? 1 : 0 }')
+    if [ "$da_begin" -lt 1 ]; then
+      GATE12_VIOLATION="the live transcript carries $DENIED_COUNT structurally-rejected tool call(s) but the Stage 3 report has no '<!-- retrospect:denied_actions begin/end -->' fence (issue #1013) — a refused action has no outcome and therefore no confession, which is precisely why the friction scan misses it; emit pre-scan lane 6 with one row per rejection: '- denied: \"<verbatim question>\" | tool: <name> | source: user_rejection | confessed: yes|no | disposition: promoted (finding #N)|noted|dismissed (<reason>)'"
+    elif [ "$da_malformed" -gt 0 ]; then
+      GATE12_VIOLATION="denied_actions fence is malformed (an unterminated or nested 'retrospect:denied_actions begin') — emit exactly one well-formed begin/end fence before Stage 3"
+    elif [ "$da_begin" -gt 1 ]; then
+      GATE12_VIOLATION="Stage 3 report has $da_begin denied_actions fences — emit exactly one; multiple fences let a disposed rejection mask an ignored one"
+    else
+      DA_BLOCK=$(printf '%s\n' "$MOST_RECENT_BLOCK" | awk -v sb="$re_db" -v se="$re_de" '
+        $0 ~ sb { ins=1; buf=""; next }
+        $0 ~ se { if (ins) last=buf; ins=0; next }
+        ins { buf = buf $0 "\n" }
+        END { printf "%s", last }')
+      # "Ignored ALL of them" is the block condition: one disposed row clears the
+      # gate. The WHOLE row is matched, not just its disposition — a lone
+      # `disposition: noted` line carries no evidence that any rejection was
+      # actually enumerated, and buying the gate off with one such line is the
+      # same silent drop the lane exists to prevent. Anchoring at the list
+      # marker also keeps a prose sentence containing the word "dismissed"
+      # from standing in for a row.
+      da_row_re='^[[:space:]]*-[[:space:]]*denied:[[:space:]]*".*"[[:space:]]*\|'
+      da_row_re="$da_row_re"'[[:space:]]*tool:[[:space:]]*[A-Za-z][A-Za-z0-9_-]*[[:space:]]*\|'
+      da_row_re="$da_row_re"'[[:space:]]*source:[[:space:]]*user_rejection[[:space:]]*\|'
+      da_row_re="$da_row_re"'[[:space:]]*confessed:[[:space:]]*(yes|no)[[:space:]]*\|'
+      da_row_re="$da_row_re"'[[:space:]]*disposition:[[:space:]]*(promoted|noted|dismissed)([^A-Za-z]|$)'
+      if ! printf '%s\n' "$DA_BLOCK" | grep -qE "$da_row_re"; then
+        GATE12_VIOLATION="denied_actions fence is present but carries no schema-valid disposed row for the $DENIED_COUNT transcript rejection(s) — a row must be '- denied: \"<verbatim question>\" | tool: <name> | source: user_rejection | confessed: yes|no | disposition: promoted (finding #N)|noted|dismissed (<reason>)'; a bare 'disposition:' line is not a row, and an enumerated-but-undisposed rejection is the same silent drop the lane exists to prevent"
+      fi
+    fi
+  fi
+fi
+
 # Decide block.
 should_block=false
 reason_parts=()
@@ -1138,6 +1219,10 @@ if [ -n "$GATE11_VIOLATION" ]; then
   should_block=true
   reason_parts+=("Gate-11: $GATE11_VIOLATION")
 fi
+if [ -n "$GATE12_VIOLATION" ]; then
+  should_block=true
+  reason_parts+=("Gate-12: $GATE12_VIOLATION")
+fi
 
 if [ "$should_block" = "true" ]; then
   _log="$(praxis_resolve_writable scope-confirm retrospect-mix-blocked.log)"
@@ -1153,7 +1238,7 @@ if [ "$should_block" = "true" ]; then
     fi
   done
 
-  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670); Gate-8 → emit a '<!-- retrospect:suppression_ledger begin/end -->' fence carrying 'worst_agent_failure:', 'self_adversarial:', and 'critic_diff:' lines (the Stage 2 self-incrimination pass plus conditional externalized critic tier record, mandatory on every path incl. the clean one), and do not claim none-found/clean when live transcript signals exceed tolerance — surface or justify those signals before Stage 3; Gate-11 → emit a '<!-- retrospect:remedy_reach begin/end -->' fence with one row per remedy-layer finding ('- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na'), naming the axis the remedy's surface structurally cannot reach instead of describing the shortfall as legitimate. See skills/retrospect/references/stage1-2-analysis.md self-incrimination pass and skills/retrospect/references/stage3-reporting.md."
+  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670); Gate-8 → emit a '<!-- retrospect:suppression_ledger begin/end -->' fence carrying 'worst_agent_failure:', 'self_adversarial:', and 'critic_diff:' lines (the Stage 2 self-incrimination pass plus conditional externalized critic tier record, mandatory on every path incl. the clean one), and do not claim none-found/clean when live transcript signals exceed tolerance — surface or justify those signals before Stage 3; Gate-11 → emit a '<!-- retrospect:remedy_reach begin/end -->' fence with one row per remedy-layer finding ('- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na'), naming the axis the remedy's surface structurally cannot reach instead of describing the shortfall as legitimate; Gate-12 → run pre-scan lane 6 (denied_actions) and emit a '<!-- retrospect:denied_actions begin/end -->' fence with one disposed row per structurally-rejected tool call in the transcript ('- denied: \"<verbatim question>\" | tool: <name> | source: user_rejection | confessed: yes|no | disposition: promoted (finding #N)|noted|dismissed (<reason>)') — a refused action has no outcome, so nothing was written about it and the friction scan cannot reach it. See skills/retrospect/references/stage1-2-analysis.md self-incrimination pass and skills/retrospect/references/stage3-reporting.md."
   PRAXIS_FIRE_DECISION=block
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'
   exit 0
