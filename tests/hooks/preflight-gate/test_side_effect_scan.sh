@@ -71,6 +71,44 @@ print(json.dumps({
   PASS=$((PASS + 1))
 }
 
+# Assert an ask fires for the RIGHT reason. `run_case ... ask` only checks that
+# something fired, so it would still pass if the hook picked the wrong category —
+# which is precisely what #985 is about. Used where the category is the point.
+run_case_reason() {
+  local name="$1" want="$2" forbid="$3" command="$4"
+
+  local payload
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "tool_name": "Bash",
+    "tool_input": {"command": sys.argv[1]},
+}))' "$command")
+
+  local out
+  out=$(echo "$payload" | "$HOOK" 2>/dev/null)
+  local rc=$?
+
+  if [ "$rc" -ne 0 ]; then
+    echo "FAIL  [$name] hook exited $rc (expected 0)"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  if ! echo "$out" | grep -q '"permissionDecision": "ask"'; then
+    echo "FAIL  [$name] expected ask, got: ${out:-<empty>}"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  if ! echo "$out" | grep -qF "$want"; then
+    echo "FAIL  [$name] reason missing '$want', got: $out"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  if [ -n "$forbid" ] && echo "$out" | grep -qiF "$forbid"; then
+    echo "FAIL  [$name] reason must not mention '$forbid', got: $out"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  echo "PASS  [$name]"
+  PASS=$((PASS + 1))
+}
+
 # --- detection: git mutation ------------------------------------------------
 run_case "git-commit bare"          ask  "git commit -m 'wip'"
 run_case "git-merge"                ask  "git merge feature-x"
@@ -262,7 +300,14 @@ fi
 run_case "gh pr merge --help (usage only)" pass "gh pr merge --help"
 run_case "gh pr merge -h (usage only)"     pass "gh pr merge -h"
 run_case "gh pr create --help (usage only)" pass "gh pr create --help"
-run_case "commit message quoting a merge"  pass $'git commit -m "$(cat <<\'EOF\'\ngh pr merge is only quoted here\nEOF\n)"'
+# Was `pass` until issue #987. The tokenizer dropped the whole quoted line, so the
+# `git commit` itself was invisible and the case asserted "no output at all" — an
+# over-broad assertion that encoded the blindness rather than #985's intent. With the
+# line visible, `git commit` fires its own intrinsic category (a bare single-line
+# `git commit -m x` fires it too). #985's actual point — a quoted `gh pr merge` is not
+# a merge — is what the forbidden substring now pins.
+run_case_reason "commit message quoting a merge" "[git-commit]" "merge" \
+  $'git commit -m "$(cat <<\'EOF\'\ngh pr merge is only quoted here\nEOF\n)"'
 run_case "-h as a --subject value"         ask  "gh pr merge 985 --squash --subject -h"
 run_case "merge after heredoc terminator"  ask  $'cat <<\'EOF\'\nbody\nEOF\ngh pr merge 985 --squash'
 

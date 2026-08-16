@@ -385,7 +385,7 @@ def main() -> int:
     cwd = payload.get("cwd") or None
 
     for argv in iter_command_starts(tokens):
-        titles = extract_git_titles(argv)
+        titles = extract_git_titles(argv, command)
         for title in titles:
             if any(title.startswith(p) for p in SKIP_PREFIXES):
                 continue
