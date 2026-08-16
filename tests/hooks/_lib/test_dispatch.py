@@ -318,6 +318,69 @@ def test_import_error_fails_open_but_not_silent(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# non-decision additionalContext forwarding (issue #874)
+# --------------------------------------------------------------------------- #
+
+def _fake_context(event: str, text: str) -> str:
+    return (
+        "import json, sys\n"
+        "def main():\n"
+        "    json.dump({'hookSpecificOutput': {'hookEventName': %r,"
+        " 'additionalContext': %r}}, sys.stdout)\n"
+        "    sys.stdout.write('\\n')\n"
+        "    return 0\n" % (event, text)
+    )
+
+
+def _sole_hso(stdout: str) -> dict:
+    # One JSON object, not N concatenated — concatenation is invalid JSON and
+    # would lose every member, which is the failure this forwarding exists to fix.
+    return json.loads(stdout)["hookSpecificOutput"]
+
+
+def test_matching_event_contexts_merge_into_one_object(tmp_path, monkeypatch, capsys):
+    members = [
+        ("advisory-nudge", "c1", _write_fake(tmp_path, "c1", _fake_context("PreToolUse", "first"))),
+        ("advisory-nudge", "c2", _write_fake(tmp_path, "c2", _fake_context("PreToolUse", "second"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    hso = _sole_hso(capsys.readouterr().out)
+    assert rc == 0
+    assert hso["hookEventName"] == "PreToolUse"
+    assert hso["additionalContext"] == "first\n\nsecond"
+
+
+def test_mismatched_event_context_is_dropped(tmp_path, monkeypatch, capsys):
+    # Adopting a member's own event name would let one wrong member label the
+    # merged object; Claude Code discards an object whose event does not match
+    # the hook it invoked, so every member's context would be lost with it.
+    members = [
+        ("advisory-nudge", "bad", _write_fake(tmp_path, "bad", _fake_context("PostToolUse", "wrong-event"))),
+        ("advisory-nudge", "good", _write_fake(tmp_path, "good", _fake_context("PreToolUse", "right-event"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    hso = _sole_hso(capsys.readouterr().out)
+    assert rc == 0
+    assert hso["hookEventName"] == "PreToolUse"
+    assert hso["additionalContext"] == "right-event"
+
+
+def test_all_events_mismatched_writes_nothing(tmp_path, monkeypatch, capsys):
+    # The negative side of the case above: with nothing left to merge the
+    # dispatcher must stay silent rather than emit an empty context object.
+    members = [
+        ("advisory-nudge", "bad1", _write_fake(tmp_path, "bad1", _fake_context("PostToolUse", "a"))),
+        ("advisory-nudge", "bad2", _write_fake(tmp_path, "bad2", _fake_context("", "b"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    assert rc == 0
+    assert capsys.readouterr().out == ""
+
+
+# --------------------------------------------------------------------------- #
 # latency (informational guard, not byte-exact)
 # --------------------------------------------------------------------------- #
 

@@ -217,13 +217,13 @@ def run_group(
         if so and rc != 2 and _DENY_MARKER not in so and _ASK_MARKER not in so
     ]
     if contexts:
-        merged = _merge_additional_context(contexts)
+        merged = _merge_additional_context(contexts, event)
         if merged:
             sys.stdout.write(merged)
     return 0
 
 
-def _merge_additional_context(payloads: list[str]) -> str:
+def _merge_additional_context(payloads: list[str], event: str) -> str:
     """Fold several members' `additionalContext` into ONE hookSpecificOutput.
 
     Claude Code reads a single JSON object from a hook's stdout, so concatenating
@@ -231,8 +231,13 @@ def _merge_additional_context(payloads: list[str]) -> str:
     joined instead. Fail-open: an unparseable or differently-shaped payload is
     dropped rather than corrupting the object the other members produced — the
     advisory's stderr line is emitted separately and is unaffected.
+
+    A member's `hookEventName` is checked against the group's own event instead of
+    being adopted from whichever member came first. Adopting it would let one
+    member's wrong event name label the merged object, and Claude Code discards an
+    object whose event does not match the hook it invoked — losing every member's
+    context, which is the same silent drop this forwarding exists to fix.
     """
-    event_name = ""
     chunks: list[str] = []
     for raw in payloads:
         try:
@@ -242,15 +247,17 @@ def _merge_additional_context(payloads: list[str]) -> str:
         hso = obj.get("hookSpecificOutput") if isinstance(obj, dict) else None
         if not isinstance(hso, dict):
             continue
+        if str(hso.get("hookEventName") or "") != event:
+            continue
         text = hso.get("additionalContext")
         if isinstance(text, str) and text:
             chunks.append(text)
-            event_name = event_name or str(hso.get("hookEventName") or "")
     if not chunks:
         return ""
-    out: dict = {"additionalContext": "\n\n".join(chunks)}
-    if event_name:
-        out["hookEventName"] = event_name
+    out: dict = {
+        "hookEventName": event,
+        "additionalContext": "\n\n".join(chunks),
+    }
     return json.dumps({"hookSpecificOutput": out})
 
 
