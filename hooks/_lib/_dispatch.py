@@ -205,7 +205,60 @@ def run_group(
         sys.stdout.write(ask)
         return 0
 
+    # Issue #874: a member may emit a NON-decision `hookSpecificOutput` at exit 0 —
+    # today only `additionalContext`, which is the one PreToolUse channel that
+    # reaches the model (stderr does not; see _hook_io.py). Without forwarding it
+    # here the dispatcher drops that stdout on the floor and the channel is inert
+    # for every grouped hook. Only reached once deny and ask have both missed, so
+    # this can never put a second decision object on stdout.
+    contexts = [
+        so
+        for rc, so, _se in results
+        if so and rc != 2 and _DENY_MARKER not in so and _ASK_MARKER not in so
+    ]
+    if contexts:
+        merged = _merge_additional_context(contexts, event)
+        if merged:
+            sys.stdout.write(merged)
     return 0
+
+
+def _merge_additional_context(payloads: list[str], event: str) -> str:
+    """Fold several members' `additionalContext` into ONE hookSpecificOutput.
+
+    Claude Code reads a single JSON object from a hook's stdout, so concatenating
+    N objects is invalid JSON and would lose all of them. Their context strings are
+    joined instead. Fail-open: an unparseable or differently-shaped payload is
+    dropped rather than corrupting the object the other members produced — the
+    advisory's stderr line is emitted separately and is unaffected.
+
+    A member's `hookEventName` is checked against the group's own event instead of
+    being adopted from whichever member came first. Adopting it would let one
+    member's wrong event name label the merged object, and Claude Code discards an
+    object whose event does not match the hook it invoked — losing every member's
+    context, which is the same silent drop this forwarding exists to fix.
+    """
+    chunks: list[str] = []
+    for raw in payloads:
+        try:
+            obj = json.loads(raw)
+        except ValueError:
+            continue
+        hso = obj.get("hookSpecificOutput") if isinstance(obj, dict) else None
+        if not isinstance(hso, dict):
+            continue
+        if str(hso.get("hookEventName") or "") != event:
+            continue
+        text = hso.get("additionalContext")
+        if isinstance(text, str) and text:
+            chunks.append(text)
+    if not chunks:
+        return ""
+    out: dict = {
+        "hookEventName": event,
+        "additionalContext": "\n\n".join(chunks),
+    }
+    return json.dumps({"hookSpecificOutput": out})
 
 
 def main() -> int:

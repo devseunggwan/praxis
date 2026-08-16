@@ -89,9 +89,25 @@ Common mistake patterns:
 
 **Exit code:** always `0` (never blocks).
 
-**JSON response:** none — the hook communicates via stderr only
-(`additionalContext` in Claude Code's terminology). Claude Code reads stderr
-from advisory `PreToolUse` hooks and includes it in the model's context.
+**JSON response:** none — the hook writes to stderr and exits 0.
+
+**Channel reality (issue #874).** stderr from a `PreToolUse` hook that exits 0
+does **not** reach the model. `hooks/_lib/_hook_io.py:88-92` records the same
+fact for the Stop lane ("stderr with exit 0 only reaches the debug log, so the
+pre-#647 stderr advisories were effectively invisible"), and the #841 canary
+recorded it for `PreToolUse` — which is why `cwd-relative-exec-advisory` chose
+an `ask` decision over a stderr advisory rather than "reproduce the exact gap
+it is meant to close"
+(`hooks/advisory-nudge/cwd-relative-exec-advisory/spec.md` § "Channel — `ask`,
+not stderr advisory").
+
+Earlier revisions of this spec asserted the opposite — that Claude Code reads
+advisory `PreToolUse` stderr into the model's context — and equated stderr with
+`additionalContext`. Both claims were wrong, and they contradicted `_hook_io.py`,
+which is authoritative. stderr is a **transcript/debug-log** channel here, not a
+model channel; `additionalContext` is a distinct stdout JSON field this hook
+does not emit. Whether the debug-log channel is sufficient for this hook is
+exactly the open escalation question above, not a settled yes.
 
 ### Parsing guarantees
 

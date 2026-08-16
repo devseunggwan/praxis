@@ -206,9 +206,77 @@ stderr: "[pipefail-advisory] mutating command piped without `set -o pipefail`
 exit 0
 ```
 
-Advisory-only: the hook **never blocks** and never emits JSON. The user
-sees the stderr text and decides whether to prepend `set -o pipefail;`
-or drop the pipe.
+Advisory-only: the hook **never blocks**. By default it emits no JSON at
+all; `PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1` adds a second copy of the same
+text on stdout — see the next section.
+
+## ADVISE-channel experiment (issue #874)
+
+`docs/hook-prune-audit.md` closed the "is the ADVISE tier inert?" question
+(it is not — 24% recurrence over 466 sessions) but left the delivery
+channel explicitly open: *"The delivery-channel question the issue raises
+(stderr vs. `systemMessage`) stands on its own and is not settled by this
+data either way — it needs an experiment, not a larger window."* This hook
+is the named first subject: at 250/1056 advises it is the largest advisory
+load in the 30-day window.
+
+**Arms.** Control = the stderr line above. Treatment =
+`hookSpecificOutput.additionalContext` on stdout, gated on
+`PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1` (exact value `1`, mirroring
+`PRAXIS_ANCHOR_GATE_ADVISORY`). With the variable unset the hook is
+byte-identical to its pre-#874 form.
+
+```json
+{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "<the same advisory text>"}}
+```
+
+**Why `additionalContext` and not `systemMessage`.** `_hook_io.py:88-92`
+documents `systemMessage` as transcript-only and *"NOT fed to the model"*,
+so promoting to it would change where a human sees the text without
+changing what the model sees — the experiment would measure nothing.
+`additionalContext` is the channel PR #1000 (commit `7262740`) validated
+and shipped for `anchor-comment-gate`'s non-blocking findings on this same
+problem; this hook mirrors that mechanism rather than inventing one.
+
+**Why the stderr line stays in both arms** (#1000 dropped it; this hook
+must not):
+
+| Reason | Evidence |
+| ------ | -------- |
+| The metric is derived from stderr | `_fire_ledger.classify_decision` returns `advise` iff `stderr.strip()` is non-empty (`hooks/_lib/_fire_ledger.py:118-119`). Moving the text to stdout would reclassify every fire as `pass`, erasing the recurrence rate the two arms are compared with |
+| stderr leaves the dispatch group unconditionally | `_dispatch.run_group` forwards every member's stderr whatever its exit code (`hooks/_lib/_dispatch.py:196-199`), so the control arm is unaffected by whatever the stdout path does |
+
+**End-to-end delivery.** This hook is a member of the dispatched
+`PreToolUse(Bash)` group, so the arm reaches the model only if the
+dispatcher forwards member stdout. `_dispatch.run_group` merges every
+member's non-decision `additionalContext` into one `hookSpecificOutput` and
+writes it, once deny and ask have both missed
+(`hooks/_lib/_dispatch.py:208-223`). Both halves — the emission here and the
+forwarding there — ship in the same PR.
+
+Before that change the arm was inert: `run_group` forwarded member *stdout*
+only when it carried a `"permissionDecision": "deny"` or `"ask"` marker, and
+everything else was discarded inside the dispatcher process. All four
+generated `hooks.json` files route `PreToolUse`/`Bash` through
+`_dispatch.sh`, so that held on every platform. #1000's hook is PostToolUse
+and runs in its own process, which is why the same emission worked there.
+
+Measured, 2026-08-15 (`hooks/_lib/_dispatch.py PreToolUse Bash claude`,
+payload `gh pr merge 123 --squash 2>&1 | tail -3  # side-effect:ack`, env
+`PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1`): with the emission alone the hook's own
+stdout carried `additionalContext` while the dispatcher's did not; with the
+forwarding in place the dispatcher's stdout carries it as well.
+
+Two design constraints the experiment inherits from the audit:
+
+- **Right-censoring.** The last advise of a session has no later fire to
+  compare against and is excluded from the recurrence denominator. That
+  exclusion is not random (a session ending right after an advisory is
+  exactly the case where nothing was done about it), so both arms must be
+  scored with the same exclusion, and the absolute rate read as a bound.
+- **The metric is the hook's own re-evaluation**, not a behaviour diff: a
+  later `pass` can also mean the session moved to commands the matcher
+  does not cover.
 
 ## Parsing guarantees (fail-open)
 

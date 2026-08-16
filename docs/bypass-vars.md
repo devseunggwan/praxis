@@ -112,6 +112,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_WORKTREE_SOURCE_EXTENSIONS` | `worktree-edit-gate` | File extensions the gate applies to |
 | `PRAXIS_MD_ESCAPE_MODE` | `pre-edit-md-escape-advisory` | Select advisory vs block mode |
 | `PRAXIS_INTENT_PIVOT_MODE` | `session-intent` | Pivot-detection mode |
+| `PRAXIS_PIPEFAIL_ADVISORY_CONTEXT` | `pipefail-advisory` | Issue #874 ADVISE-channel experiment arm switch. Also emits the advisory as `hookSpecificOutput.additionalContext`, the one PreToolUse channel that reaches the model; the hook still exits 0, so this is not a strict-mode escalation. Stderr is kept in both arms — `_fire_ledger` classifies `advise` from stderr. Exact value `1` only, mirroring `PRAXIS_ANCHOR_GATE_ADVISORY` |
 
 ## Path / test (relocate state, caches, logs)
 
