@@ -306,8 +306,11 @@ print(json.dumps({
       fi
       ;;
     pass)
-      if [ -n "$out" ]; then
-        echo "FAIL  [$name] expected silent pass under CMUX_DELEGATE=1, got: $out"
+      # Both streams, not just stdout: a delegated bypass that silently started
+      # emitting a stderr advisory is exactly the regression this case exists to
+      # catch, and an stdout-only check reads it as a clean pass.
+      if [ -n "$out" ] || [ -n "$err" ]; then
+        echo "FAIL  [$name] expected silent pass under CMUX_DELEGATE=1, got stdout: ${out:-<empty>} stderr: ${err:-<empty>}"
         FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
       else
         echo "PASS  [$name]"; PASS=$((PASS + 1))
