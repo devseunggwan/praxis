@@ -244,24 +244,28 @@ must not):
 | Reason | Evidence |
 | ------ | -------- |
 | The metric is derived from stderr | `_fire_ledger.classify_decision` returns `advise` iff `stderr.strip()` is non-empty (`hooks/_lib/_fire_ledger.py:118-119`). Moving the text to stdout would reclassify every fire as `pass`, erasing the recurrence rate the two arms are compared with |
-| stderr is the only channel that leaves the dispatch group today | `_dispatch.run_group` forwards every member's stderr unconditionally (`hooks/_lib/_dispatch.py:196-199`) |
+| stderr leaves the dispatch group unconditionally | `_dispatch.run_group` forwards every member's stderr whatever its exit code (`hooks/_lib/_dispatch.py:196-199`), so the control arm is unaffected by whatever the stdout path does |
 
-**Known blocker — the treatment arm is inert end-to-end.** This hook is a
-member of the dispatched `PreToolUse(Bash)` group, and
-`_dispatch.run_group` forwards member *stdout* only when it carries a
-`"permissionDecision": "deny"` or `"ask"` marker
-(`hooks/_lib/_dispatch.py:207-218`); everything else is discarded inside
-the dispatcher process. All four generated `hooks.json` files route
-`PreToolUse`/`Bash` through `_dispatch.sh`, so this holds on every
-platform. #1000's hook is PostToolUse and runs in its own process, which
-is why the same emission works there.
+**End-to-end delivery.** This hook is a member of the dispatched
+`PreToolUse(Bash)` group, so the arm reaches the model only if the
+dispatcher forwards member stdout. `_dispatch.run_group` merges every
+member's non-decision `additionalContext` into one `hookSpecificOutput` and
+writes it, once deny and ask have both missed
+(`hooks/_lib/_dispatch.py:208-223`). Both halves — the emission here and the
+forwarding there — ship in the same PR.
+
+Before that change the arm was inert: `run_group` forwarded member *stdout*
+only when it carried a `"permissionDecision": "deny"` or `"ask"` marker, and
+everything else was discarded inside the dispatcher process. All four
+generated `hooks.json` files route `PreToolUse`/`Bash` through
+`_dispatch.sh`, so that held on every platform. #1000's hook is PostToolUse
+and runs in its own process, which is why the same emission worked there.
 
 Measured, 2026-08-15 (`hooks/_lib/_dispatch.py PreToolUse Bash claude`,
 payload `gh pr merge 123 --squash 2>&1 | tail -3  # side-effect:ack`, env
-`PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1`): the hook's own stdout carries
-`additionalContext`; the dispatcher's stdout does not. Enabling the arm
-for a real session therefore requires `run_group` to also forward
-non-decision stdout — a change outside this hook's file.
+`PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1`): with the emission alone the hook's own
+stdout carried `additionalContext` while the dispatcher's did not; with the
+forwarding in place the dispatcher's stdout carries it as well.
 
 Two design constraints the experiment inherits from the audit:
 

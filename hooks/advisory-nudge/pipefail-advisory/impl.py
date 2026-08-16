@@ -78,20 +78,19 @@ ADVISE-channel experiment (issue #874):
        reclassify every fire as `pass` and erase the recurrence metric the
        experiment compares the two arms with.
     2. `_dispatch.run_group` forwards every member's stderr unconditionally
-       (`_dispatch.py:196-199`) — so the control arm keeps working — but
-       forwards member *stdout* only when it carries an ask or deny marker
-       (`_dispatch.py:207-218`). #1000's hook is PostToolUse and runs in its
-       own process; this one is a member of the dispatched PreToolUse(Bash)
-       group.
+       (`_dispatch.py:196-199`), so the control arm keeps working whatever
+       the stdout path does. #1000's hook is PostToolUse and runs in its own
+       process; this one is a member of the dispatched PreToolUse(Bash)
+       group, so it depends on what the dispatcher chooses to forward.
 
-  KNOWN BLOCKER — the treatment arm is inert end-to-end today. Because of
-  (2) above, a member's `additionalContext` stdout is dropped inside the
-  dispatcher and never reaches Claude Code, on every platform (all four
-  generated `hooks.json` files route PreToolUse(Bash) through
-  `_dispatch.sh`). Emitting it here is necessary but not sufficient:
-  `run_group` must also forward non-decision stdout. That change lives
-  outside this hook — see spec.md § "ADVISE-channel experiment" for the
-  measurement and the exact dispatcher gap.
+  End-to-end delivery: `run_group` merges every member's non-decision
+  `additionalContext` into one `hookSpecificOutput` and writes it, once deny
+  and ask have both missed (`_dispatch.py:208-223`). Before that change the
+  treatment arm was inert — a member's stdout was dropped inside the
+  dispatcher on every platform, since all four generated `hooks.json` files
+  route PreToolUse(Bash) through `_dispatch.sh` — so emitting it here was
+  necessary but not sufficient. Both halves ship together in this PR; see
+  spec.md § "ADVISE-channel experiment" for the measurement.
 
 Fail-open contract:
 

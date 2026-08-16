@@ -307,15 +307,15 @@ run_case "heredoc body line starting with marker word but not alone on the line 
 # Both directions, because a one-directional test lets the opposite error in:
 #   - the treatment arm must ADD additionalContext on a firing command, and
 #     must keep the stderr line (the fire ledger classifies `advise` from
-#     stderr, and the dispatcher only forwards stderr unconditionally);
+#     stderr, and the dispatcher forwards stderr unconditionally);
 #   - the treatment arm must stay SILENT on a non-firing command — the env var
 #     is an arm switch, not a second trigger.
 #
-# NOTE (issue #874): these assert the hook's own stdout. End to end the arm is
-# still inert — `_dispatch.run_group` (hooks/_lib/_dispatch.py:207-218)
-# forwards member stdout only when it carries an ask/deny marker, so the
-# dispatcher discards this JSON. See pipefail-advisory/spec.md § "ADVISE-channel
-# experiment" for the measurement.
+# NOTE (issue #874): these assert the hook's OWN stdout. The other half of the
+# path — `_dispatch.run_group` merging non-decision `additionalContext` and
+# writing it (hooks/_lib/_dispatch.py:208-223) — ships in the same PR and is
+# covered by tests/hooks/_lib/test_dispatch.py. See pipefail-advisory/spec.md
+# § "ADVISE-channel experiment" for the end-to-end measurement.
 
 run_case_context() {
   local name="$1" expected="$2" command="$3"
