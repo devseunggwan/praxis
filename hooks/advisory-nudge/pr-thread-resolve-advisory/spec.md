@@ -61,6 +61,7 @@ exits 2 instead, and only when the needs-a-reply group is non-empty.
 | No open PR for the pushed branch | silent |
 | Two or more open PRs on the same head branch name | silent — see *Which PR* below |
 | Push segment did not run (`true \|\| git push`) or was rejected | silent (nothing landed) |
+| Neither push output nor an exit status in the payload | silent — no evidence the push ran |
 | Push landed but the surrounding command failed (`git push && false`) | advisory — the push is on the remote regardless of the command's exit |
 | Tool call interrupted | silent |
 | Non-`git push` command, or no `git`/`push` substring | silent |
@@ -76,9 +77,11 @@ The whole Bash command's exit status answers the wrong question: `true || git
 push` exits 0 with no push, and `git push && false` exits non-zero with the
 commit already on the remote. The push's own output is what separates them, so
 that is what the hook reads. When the response carries no output field at all,
-it falls back to the exit status — weaker, but silence there would disable the
-hook wherever output is not surfaced. An output field that is present and empty
-is not that case: it is evidence the push produced nothing, so nothing ran.
+the whole command's exit status stands in — weaker, but silence there would
+disable the hook wherever output is not surfaced. An output field that is
+present and empty is not that case: it is evidence the push produced nothing,
+so nothing ran. When neither signal is present the hook stays silent: there is
+then no evidence the push ran, and missing evidence is not a pass.
 
 `gh pr list --head` cannot filter by owner (`"<owner>:<branch>" syntax not
 supported`), so two forks can hold open PRs on one base repo under the same

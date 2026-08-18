@@ -214,6 +214,16 @@ run_case silent "F2-push-rejected" "git push origin main" \
 run_case advisory "F2-no-output-exit0-fallback" "git push origin main" '{"exit":0}'
 run_case silent   "F2-no-output-exit1-fallback" "git push origin main" '{"exit":1}'
 
+# --- R1: neither output nor exit -> silent, not an assumed success ---------
+run_case silent "R1-no-evidence-at-all" "git push origin main" '{}'
+run_case silent "R1-no-evidence-strict" "git push origin main" '{}' \
+  PRAXIS_PR_THREAD_ADVISORY_STRICT=1
+run_case silent "R1-unparseable-exit" "git push origin main" '{"exit":"nope"}'
+
+# --- R2: --repo sets the destination, so the parser must skip the push -----
+run_case silent "R2-repo-equals-form" "git push --repo=other main" "$OK"
+run_case silent "R2-repo-spaced-form" "git push --repo other main" "$OK"
+
 # --- F3: first page all resolved but more pages exist -> still speaks ------
 setup_repo
 stub_gh "$PR_LIST" "$(HAS_NEXT=true threads_json "$(thread true a.py 1 'issue (blocking): already fixed')")"

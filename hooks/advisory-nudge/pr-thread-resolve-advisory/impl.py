@@ -353,14 +353,17 @@ def main() -> int:
     if landed is None:
         # No output captured — fall back to the whole command's exit status.
         # Weaker (a compound command can lie either way), but silence here
-        # would disable the hook wherever output is not surfaced.
+        # would disable the hook wherever output is not surfaced. With neither
+        # signal there is no evidence the push ran at all, and the default when
+        # evidence is missing is silence.
         exit_code = tool_response.get("exit") if isinstance(tool_response, dict) else None
-        if exit_code is not None:
-            try:
-                if int(exit_code) != 0:
-                    return 0
-            except (TypeError, ValueError):
-                pass
+        if exit_code is None:
+            return 0
+        try:
+            if int(exit_code) != 0:
+                return 0
+        except (TypeError, ValueError):
+            return 0
 
     cwd = targets["cwd"]
     pr = _open_pr(targets["remote_branch"], cwd)
