@@ -138,6 +138,12 @@ echo b >>"$WORK/a.txt"
 git -C "$WORK" commit -qam b
 run_case silent "dry-run" "git push --dry-run origin main" '{"exit":0,"stderr":"x"}'
 
+# --- --repo sets the destination -> skip silent ----------------------------
+# `--repo=<repository>` is documented as equivalent to the positional
+# <repository>, so a resolved remote could name one the push never used.
+run_case silent "repo-equals-form" "git push --repo=other main" '{"exit":0,"stderr":"x"}'
+run_case silent "repo-spaced-form" "git push --repo other main" '{"exit":0,"stderr":"x"}'
+
 # --- branch deletion (`:main`) -> skip silent -----------------------------
 setup_repo
 run_case silent "branch-delete" "git push origin :main" '{"exit":0}'
