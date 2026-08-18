@@ -499,6 +499,19 @@
       }
     },
     {
+      "name": "pr-thread-resolve-advisory",
+      "role": "advisory-nudge",
+      "event": "PostToolUse",
+      "matcher": "Bash",
+      "timeout": 20,
+      "mode": {
+        "strict_env": "PRAXIS_PR_THREAD_ADVISORY_STRICT",
+        "bypass_env": [
+          "PRAXIS_PR_THREAD_ADVISORY_BYPASS"
+        ]
+      }
+    },
+    {
       "name": "verify-commit-flag-override",
       "role": "preflight-gate",
       "event": "PreToolUse",

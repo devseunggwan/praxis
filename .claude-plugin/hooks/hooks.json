@@ -273,6 +273,11 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/push-remote-ref-verify.sh",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pr-thread-resolve-advisory.sh",
+            "timeout": 20
           }
         ]
       },
