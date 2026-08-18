@@ -31,9 +31,13 @@ GIT_TIMEOUT_SEC = 10
 SKIP_FLAGS = frozenset({
     "--dry-run", "-n", "--delete", "-d", "--tags", "--all",
     "--mirror", "--prune",
+    # `--repo=<repository>` is documented as equivalent to the positional
+    # <repository>, so consuming it as an opaque value would resolve a remote
+    # the push never used.
+    "--repo",
 })
 # git push flags that consume the following token as a value.
-VALUE_FLAGS = frozenset({"-o", "--push-option", "--exec", "--receive-pack", "--repo"})
+VALUE_FLAGS = frozenset({"-o", "--push-option", "--exec", "--receive-pack"})
 
 
 def git(cwd: str, args: list[str], timeout: int = GIT_TIMEOUT_SEC):
