@@ -8,7 +8,7 @@ pushed branch and lists its **unresolved review threads**. It emits a **stderr
 advisory** (never a block in the default mode) naming the reply-and-resolve
 form each thread is owed.
 
-### Why this exists
+## Why this exists
 
 `Review Comment Reply & Resolve (MUST)` states that a review comment you acted
 on gets a reply in its own thread and that thread gets resolved: fixing the code
@@ -23,7 +23,7 @@ prompt is the measurement: the rule was not self-firing. This hook moves the
 reminder to the moment the fix actually lands — the push that carries it — which
 is exactly when that sentence used to be typed.
 
-### Why GraphQL and not `gh pr view`
+## Why GraphQL and not `gh pr view`
 
 Inline review threads are a third surface. `gh pr view --json comments,reviews`
 returns the conversation timeline and review bodies and does **not** contain
@@ -31,7 +31,7 @@ them, so a hook built on it would report "no open findings" on a PR with six
 open inline threads. `reviewThreads` over `gh api graphql` is the only oracle
 for this claim.
 
-### Two groups, because an open-thread count is not a blocker count
+## Two groups, because an open-thread count is not a blocker count
 
 The first comment's body is graded by its [Conventional
 Comments](https://conventionalcomments.org/) label:
@@ -47,7 +47,7 @@ Comments](https://conventionalcomments.org/) label:
 thread as a blocker is how a merge stalls on a nit. An unlabeled thread is not
 auto-demoted — silence about a grade is not a low grade, so a human reads it.
 
-### What is emitted
+## What is emitted
 
 Advisory text on stderr, exit 0 by default. `PRAXIS_PR_THREAD_ADVISORY_STRICT=1`
 exits 2 instead, and only when the needs-a-reply group is non-empty.
@@ -70,7 +70,7 @@ exits 2 instead, and only when the needs-a-reply group is non-empty.
 | Malformed JSON stdin, non-Bash tool | silent (fail-open) |
 | `PRAXIS_PR_THREAD_ADVISORY_BYPASS` set | silent (opt-out) |
 
-### Which push, and which PR
+## Which push, and which PR
 
 The whole Bash command's exit status answers the wrong question: `true || git
 push` exits 0 with no push, and `git push && false` exits non-zero with the
@@ -89,7 +89,7 @@ The PR URL is matched against `github.com`; a GitHub Enterprise host does not
 match and the hook stays silent there. Deliberate — this install targets
 github.com, and the fail-open path already covers the miss.
 
-### Untrusted strings
+## Untrusted strings
 
 Paths, author logins and comment bodies are written by whoever opened the PR.
 Control bytes are stripped from all three before rendering — an ANSI/OSC
@@ -99,7 +99,7 @@ target behind different text.
 A failed thread lookup returns `None`, not an empty list, so a network error can
 never be consumed as "nothing unresolved".
 
-### How the branch is resolved
+## How the branch is resolved
 
 The `git push` argv parsing is shared with `advisory-nudge/push-remote-ref-verify`
 via `_lib/_git_push_target.py` (`resolve_push_target`), which honours global
@@ -108,7 +108,7 @@ pushes resolved through `@{upstream}`. Anything it cannot parse confidently
 returns `None` and this hook stays silent — a wrong branch name would produce a
 confidently wrong thread list.
 
-### Environment variables
+## Environment variables
 
 | Variable | Effect |
 | -------- | ------ |
@@ -119,7 +119,7 @@ confidently wrong thread list.
 Two `gh` calls at 5s each plus interpreter startup stay inside the 20s manifest
 budget.
 
-### What this hook does not do
+## What this hook does not do
 
 It never replies and never resolves. Both are writes to an external surface and
 belong to the human approval path; the hook only surfaces what is open.
