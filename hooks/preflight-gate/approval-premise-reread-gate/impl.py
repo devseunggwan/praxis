@@ -43,6 +43,7 @@ from pathlib import Path as _Path
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     has_state_changing_redirect,
     iter_command_starts,
@@ -202,21 +203,33 @@ def _carries_prod_marker(blob: str) -> bool:
     return PROD_MARKER_RE.search(blob) is not None
 
 
+# The two questions are the whole point of the gate, so they live in the
+# `correct_path` field the shared renderer prints under "Do this instead".
+_ANSWER_BOTH = (
+    "answer both before this executes -- "
+    "(1) PREMISE: restate in one line the justification the approval was granted "
+    "on, and say whether anything observed SINCE has made it false; if it has, "
+    "this is not an approved action any more, so re-ask. "
+    "(2) TARGET: was the blast radius measured on THIS target, or inherited from "
+    "another member of the same cohort? An enumeration measured on target A is "
+    "not evidence about target B, and it covers the outward side-effect axis "
+    "(mail, webhook, channel post, customer notification), not only the data "
+    "surfaces."
+)
+
+
 def _message(tool_name: str, target: str) -> str:
-    return (
-        "⚠️ APPROVAL-PREMISE-REREAD required\n\n"
-        f"Call: {tool_name}\n"
-        f"Target: {target or '(unnamed)'}\n\n"
-        "Answer both before this executes:\n\n"
-        "  1. PREMISE — restate, in one line, the justification the approval was\n"
-        "     granted on. Has anything observed SINCE that approval made it false?\n"
-        "     If it has, this is not an approved action any more; re-ask.\n\n"
-        "  2. TARGET — was the blast radius measured on THIS target, or inherited\n"
-        "     from another member of the same cohort? An enumeration measured on\n"
-        "     target A is not evidence about target B.\n\n"
-        "     The enumeration includes the outward side-effect axis (mail, webhook,\n"
-        "     channel post, customer notification), not only the data surfaces.\n\n"
-        "Reference: hooks/preflight-gate/approval-premise-reread-gate/spec.md"
+    return format_block(
+        rule_name="approval premise re-read",
+        why="an approval covers the option, not an option whose premise has "
+            f"since dissolved -- {tool_name} names a production target "
+            f"({target or 'unnamed'})",
+        correct_path=_ANSWER_BOTH,
+        # The acknowledgement comment is an attestation the agent writes after
+        # actually re-reading, not an env-var bypass; an env var would let the
+        # session disable the gate for itself.
+        bypass_env=None,
+        reference="hooks/preflight-gate/approval-premise-reread-gate/spec.md",
     )
 
 

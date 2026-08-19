@@ -43,6 +43,15 @@ like independent confirmation — the same circle `Own-greencheck and SUT-commen
 are not evidence` describes. Reach is partial by construction, and this section
 exists so a future reader does not mistake a passing gate for a verified premise.
 
+## The message is the shared five-field block
+
+The reason text is rendered by `hooks/_lib/block_message.py`, like every other
+preflight gate, so the two questions live in the `Correct path` field rather
+than in hand-rolled prose. `bypass_env` is `None` on purpose: the only way past
+this gate is the acknowledgement, which is an attestation the agent writes after
+re-reading, and an environment variable would let a session switch the gate off
+for itself.
+
 ## Originating failures
 
 - **PREMISE_DISSOLVED** — approval granted on "we have to run it to see whether
