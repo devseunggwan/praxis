@@ -5,6 +5,18 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.11.0](https://github.com/devseunggwan/praxis/compare/v7.10.0...v7.11.0) (2026-08-19)
+
+
+### Added
+
+* **hooks:** advise reply+resolve on PR threads ([#1040](https://github.com/devseunggwan/praxis/issues/1040)) ([238148d](https://github.com/devseunggwan/praxis/commit/238148df9c19b254386002900bf8ae8d986a6d9a))
+
+
+### Fixed
+
+* **ci:** bound apt timeouts on a stalled mirror ([#1046](https://github.com/devseunggwan/praxis/issues/1046)) ([559e3aa](https://github.com/devseunggwan/praxis/commit/559e3aa88c0831144878cce669241614422c657d)), closes [#1045](https://github.com/devseunggwan/praxis/issues/1045)
+
 ## [7.10.0](https://github.com/devseunggwan/praxis/compare/v7.9.1...v7.10.0) (2026-08-16)
 
 
