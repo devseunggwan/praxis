@@ -98,8 +98,12 @@ jobs:
       # zsh is not preinstalled on ubuntu-latest. block-unmatched-glob delegates
       # its verdict to a real zsh, so without it that hook's suite has nothing to
       # assert against and silently degrades to fail-open coverage.
-      # shellcheck and markdownlint-cli2 are here for the same reason ruff is:
-      # under PRAXIS_TESTS_STRICT their absence would abort the run (#917).
+      # jq and shellcheck are deliberately NOT installed: the ubuntu-24.04 runner
+      # image already ships both at the versions noble's apt would resolve anyway
+      # (jq 1.7.1, shellcheck 0.9.0), so fetching them only widens the exposure to
+      # the mirror stall below. markdownlint-cli2 still comes from npm for the
+      # same reason ruff is pinned: under PRAXIS_TESTS_STRICT its absence would
+      # abort the run (#917).
       # The Acquire timeouts are load-bearing (#1045). Without them apt waits
       # indefinitely on a mirror that stops responding mid-fetch, which consumed
       # the entire 15-minute job budget three times over two days. Retries alone
@@ -109,7 +113,7 @@ jobs:
           sudo apt-get -o Acquire::Retries=3 \
                        -o Acquire::http::Timeout=20 \
                        -o Acquire::https::Timeout=20 update -y
-          sudo apt-get -o Acquire::Retries=3 install -y jq zsh shellcheck
+          sudo apt-get -o Acquire::Retries=3 install -y zsh
       - run: npm install -g markdownlint-cli2
       # Strict: in CI the toolchain is installed, so a SKIPPED line means the
       # run silently stopped checking something rather than accommodating a
