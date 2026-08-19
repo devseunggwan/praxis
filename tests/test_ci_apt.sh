@@ -130,6 +130,13 @@ run_case "exit_124_tries_3" "$(attempts_made)" "3"
 grep -q "exit 124 -- mirror stalled" "$STUB_ROOT/out"
 run_case "exit_124_names_the_stall" "$?" "0"
 
+# 3b. 137 is the other half of the same story: with --kill-after set, an apt
+#     that ignores TERM ends on KILL and reports 137, not 124. Folding it into
+#     the generic branch would hide the case --kill-after exists for.
+run_case "exit_137_is_retried" "$(STUB_APT_EXIT=137 run_target)" "1"
+run_case "exit_137_tries_3" "$(attempts_made)" "3"
+grep -q "ignored TERM and was killed" "$STUB_ROOT/out"
+run_case "exit_137_names_the_kill" "$?" "0"
 
 # 4. A mirror that recovers mid-window is the whole point: succeed and stop.
 run_case "recovers_on_second_attempt" "$(STUB_APT_EXIT=1 STUB_APT_SUCCEED_ON=2 run_target)" "0"

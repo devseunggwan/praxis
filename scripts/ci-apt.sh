@@ -74,13 +74,21 @@ for ((attempt = 1; attempt <= attempts; attempt++)); do
     exit 0
   fi
 
-  # 124 is timeout(1)'s own exit code for "I killed the child" -- worth naming,
-  # because it is the difference between a stalled mirror and a real apt error.
-  if [ "$status" -eq 124 ]; then
-    echo "apt attempt ${attempt} hit the ${per_attempt}s bound (exit 124 -- mirror stalled)" >&2
-  else
-    echo "apt attempt ${attempt} failed with exit ${status}" >&2
-  fi
+  # timeout(1) reports the two ways it can end a run with different codes, and
+  # the difference is worth naming: 124 says TERM was enough, 137 says apt
+  # ignored it and only KILL stopped it. Folding 137 into the generic branch
+  # would hide exactly the case --kill-after exists for.
+  case "$status" in
+    124)
+      echo "apt attempt ${attempt} hit the ${per_attempt}s bound (exit 124 -- mirror stalled)" >&2
+      ;;
+    137)
+      echo "apt attempt ${attempt} ignored TERM and was killed after the ${kill_grace}s grace (exit 137)" >&2
+      ;;
+    *)
+      echo "apt attempt ${attempt} failed with exit ${status}" >&2
+      ;;
+  esac
 
   if [ "$attempt" -lt "$attempts" ]; then
     sleep "$backoff"
