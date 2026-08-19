@@ -53,17 +53,9 @@ jobs:
       # ubuntu-24.04 ships shellcheck, but install explicitly so the job
       # doesn't silently depend on the runner image. Rules come from
       # .shellcheckrc at the repo root.
-      # Same phase bound as the test job's apt call (#1045): this job carried the
-      # identical unguarded exposure and its own 10-minute budget to lose. The
-      # explicit install stays -- the comment above states why the job refuses to
-      # depend on the image implicitly, and that reason is unchanged.
-      - run: |
-          sudo timeout 300 apt-get -o Acquire::Retries=3 \
-                       -o Acquire::http::Timeout=20 \
-                       -o Acquire::https::Timeout=20 update -y
-          sudo timeout 300 apt-get -o Acquire::Retries=3 \
-                       -o Acquire::http::Timeout=20 \
-                       -o Acquire::https::Timeout=20 install -y shellcheck
+      # The bound from #1046 lives in scripts/ci-apt.sh now, with a retry around
+      # it (#1049): bounding alone only made this job fail faster, never pass.
+      - run: bash scripts/ci-apt.sh shellcheck
       - run: |
           find . -name '*.sh' -not -path './.git/*' -print0 \
             | xargs -0 shellcheck --severity=warning
@@ -114,22 +106,12 @@ jobs:
       # the mirror stall below. markdownlint-cli2 still comes from npm for the
       # same reason ruff is pinned: under PRAXIS_TESTS_STRICT its absence would
       # abort the run (#917).
-      # The Acquire timeouts are load-bearing (#1045). Without them apt waits
-      # indefinitely on a mirror that stops responding mid-fetch, which consumed
-      # the entire 15-minute job budget three times over two days. Retries alone
-      # do not help -- a hang never reaches the retry. Timeout covers the data
-      # transfer, not just connect, which is where the stall actually happened.
-      # Acquire::* bounds each transfer, never the phase: N stalled files still
-      # cost N * 20s, and Retries multiplies that. `timeout` bounds the phase, so
-      # a bad mirror leaves the budget for npm and the suite. sudo wraps timeout
-      # rather than the reverse -- TERM must reach apt, not a sudo that ignores it.
-      - run: |
-          sudo timeout 300 apt-get -o Acquire::Retries=3 \
-                       -o Acquire::http::Timeout=20 \
-                       -o Acquire::https::Timeout=20 update -y
-          sudo timeout 300 apt-get -o Acquire::Retries=3 \
-                       -o Acquire::http::Timeout=20 \
-                       -o Acquire::https::Timeout=20 install -y zsh
+      # The phase bound and the retry around it both live in scripts/ci-apt.sh,
+      # which carries the reasoning (#1046 bounded the stall, #1049 made it
+      # survivable). A stalled mirror was observed killing this step three times
+      # before the bound, and again after it -- bounding made the failure fast,
+      # the retry is what can make it pass.
+      - run: bash scripts/ci-apt.sh zsh
       - run: npm install -g markdownlint-cli2
       # Strict: in CI the toolchain is installed, so a SKIPPED line means the
       # run silently stopped checking something rather than accommodating a
