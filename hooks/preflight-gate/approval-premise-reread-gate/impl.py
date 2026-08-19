@@ -43,14 +43,33 @@ from pathlib import Path as _Path
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    has_state_changing_redirect,
+    iter_command_starts,
+    safe_tokenize,
+    strip_prefix,
+)
 
 ACK_MARKER = "# approval-premise:ack"
 ACK_ARG = "approval_premise_ack"
 
-# A production phase marker can arrive as a flag value, an MCP argument, or a
-# substring of a target identifier. Kept literal rather than regex so the match
-# set is auditable.
-PROD_MARKERS = ("phase=prod", "--phase prod", '"prod"', "'prod'", "prod-")
+# A production phase marker arrives as a flag value, an MCP argument, or a
+# quoted identifier. The named flags absorb the spacing and casing variants a
+# literal list cannot (`--phase=prod`, `--phase  prod`, `-p PROD`); the quoted
+# forms catch a serialized MCP argument.
+#
+# Bare `production` is deliberately absent. The read-only filter below narrows
+# the Bash branch but is not exhaustive, so a marker that common on read-only
+# commands (`kubectl get pods -n production`) would lean on the filter for
+# every namespace query and turn this gate into the noise it exists to replace.
+PROD_MARKER_RE = re.compile(
+    r"""(?ix)
+      (?: --phase | --profile | --env(?:ironment)? | -p ) \s*[=\s]\s* prod\w*
+    | \bphase \s*=\s* ["']? prod \b
+    | ["'] prod ["']
+    | \bprod-
+    """
+)
 
 # Mutating MCP verbs, matched against the leaf name's `_`/`-` separated tokens
 # rather than as substrings. Substring matching classified eight read-only tools
@@ -73,6 +92,105 @@ MUTATING_MCP_VERBS = frozenset((
 ))
 
 
+# A Bash command is left alone only when every segment of it is *provably*
+# read-only. The direction matters more than the coverage: an unrecognised
+# command falls through to "not read-only" and the gate asks, so a gap here
+# costs one question, while a mutation-allowlist would have gone silent on the
+# call it exists to catch.
+#
+# The entries mirror the sanctioned read-only production calls the rule set
+# already names — `kubectl get|describe|logs`, `hubctl token fetch`, Trino
+# SELECT, AWS describe/get/list — plus the inspection commands that carry no
+# side effect. Bare names take any argument; a name mapped to a set is read-only
+# only under those subcommands.
+READONLY_ANY_ARGS = frozenset({
+    "ls", "cat", "head", "tail", "wc", "grep", "rg", "egrep", "fgrep", "find",
+    "echo", "printf", "jq", "yq", "sort", "uniq", "cut", "tr", "column", "diff",
+    "file", "stat", "du", "df", "which", "type", "pwd", "date", "env", "ps",
+    "whoami", "hostname", "uname", "id", "basename", "dirname", "realpath",
+})
+
+READONLY_SUBCOMMANDS = {
+    # `branch`, `tag`, `remote`, `worktree` and `config` are absent on purpose:
+    # each has a write form one flag away (`git branch -D`, `git remote add`),
+    # and falling through only costs a question.
+    "git": frozenset({"log", "status", "diff", "show", "rev-parse", "rev-list",
+                      "describe", "blame", "shortlog", "ls-files", "ls-remote",
+                      "cat-file"}),
+    "gh": frozenset({"view", "list", "status", "checks", "diff", "search", "api"}),
+    "kubectl": frozenset({"get", "describe", "logs", "top", "explain", "api-resources"}),
+    "aws": frozenset({"sts"}),
+    "docker": frozenset({"ps", "images", "inspect", "logs"}),
+    "hubctl": frozenset({"token"}),
+}
+
+# `gh api` and `aws` reach every verb the service has, so the subcommand alone
+# does not settle them: a write is one flag away. Both are read-only only in
+# their query shapes.
+_GH_API_WRITE_FLAGS = frozenset({"-X", "--method", "-f", "-F", "--input"})
+_AWS_READ_PREFIXES = ("describe-", "get-", "list-", "search-", "query-", "batch-get-")
+
+
+def _subcommand(binary: str, argv: list[str]) -> str:
+    """The token that decides what the invocation does.
+
+    Most of these binaries are verb-first (`kubectl get`, `git log`), but `gh`
+    is noun-verb (`gh pr view`), so reading position 1 for it would test the
+    noun. Position matters rather than membership: scanning every token would
+    read `gh pr create --title view` as read-only because `view` appears in it.
+    """
+    non_flags = [a for a in argv[1:] if not a.startswith("-")]
+    if not non_flags:
+        return ""
+    if binary == "gh":
+        if non_flags[0] in ("api", "search", "status"):
+            return non_flags[0]
+        return non_flags[1] if len(non_flags) > 1 else ""
+    return non_flags[0]
+
+
+def _segment_is_readonly(argv: list[str]) -> bool:
+    argv = strip_prefix(argv)
+    if not argv:
+        return False
+    binary = argv[0].rsplit("/", 1)[-1]
+    if binary in READONLY_ANY_ARGS:
+        return True
+
+    allowed = READONLY_SUBCOMMANDS.get(binary)
+    if allowed is None:
+        return False
+    sub = _subcommand(binary, argv)
+    if sub not in allowed:
+        return False
+
+    if binary == "gh" and sub == "api":
+        # A GET is the default; anything naming a method or a body is a write.
+        for i, tok in enumerate(argv):
+            if tok in _GH_API_WRITE_FLAGS:
+                if tok in ("-X", "--method") and argv[i + 1:i + 2] == ["GET"]:
+                    continue
+                return False
+            if tok.startswith("--method="):
+                return tok == "--method=GET"
+        return True
+    if binary == "aws":
+        # `aws sts get-caller-identity` and its siblings only.
+        return any(a.startswith(_AWS_READ_PREFIXES) for a in argv[2:])
+    return True
+
+
+def _bash_is_readonly(command: str) -> bool:
+    """True only when every segment is a recognised read-only invocation."""
+    if has_state_changing_redirect(command):
+        return False
+    tokens = safe_tokenize(command)
+    if not tokens:
+        return False
+    segments = list(iter_command_starts(tokens))
+    return bool(segments) and all(_segment_is_readonly(s) for s in segments)
+
+
 def _is_mutating_mcp(tool_name: str) -> bool:
     if not tool_name.startswith("mcp__"):
         return False
@@ -81,7 +199,7 @@ def _is_mutating_mcp(tool_name: str) -> bool:
 
 
 def _carries_prod_marker(blob: str) -> bool:
-    return any(marker in blob for marker in PROD_MARKERS)
+    return PROD_MARKER_RE.search(blob) is not None
 
 
 def _message(tool_name: str, target: str) -> str:
@@ -121,6 +239,8 @@ def main() -> int:
         if ACK_MARKER in command:
             return 0
         if not _carries_prod_marker(command):
+            return 0
+        if _bash_is_readonly(command):
             return 0
         target = command.strip().splitlines()[0][:120]
     elif _is_mutating_mcp(tool_name):
