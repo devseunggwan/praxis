@@ -53,7 +53,17 @@ jobs:
       # ubuntu-latest ships shellcheck, but install explicitly so the job
       # doesn't silently depend on the runner image. Rules come from
       # .shellcheckrc at the repo root.
-      - run: sudo apt-get update -y && sudo apt-get install -y shellcheck
+      # Same phase bound as the test job's apt call (#1045): this job carried the
+      # identical unguarded exposure and its own 10-minute budget to lose. The
+      # explicit install stays -- the comment above states why the job refuses to
+      # depend on the image implicitly, and that reason is unchanged.
+      - run: |
+          sudo timeout 300 apt-get -o Acquire::Retries=3 \
+                       -o Acquire::http::Timeout=20 \
+                       -o Acquire::https::Timeout=20 update -y
+          sudo timeout 300 apt-get -o Acquire::Retries=3 \
+                       -o Acquire::http::Timeout=20 \
+                       -o Acquire::https::Timeout=20 install -y shellcheck
       - run: |
           find . -name '*.sh' -not -path './.git/*' -print0 \
             | xargs -0 shellcheck --severity=warning
