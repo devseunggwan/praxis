@@ -109,11 +109,17 @@ jobs:
       # the entire 15-minute job budget three times over two days. Retries alone
       # do not help -- a hang never reaches the retry. Timeout covers the data
       # transfer, not just connect, which is where the stall actually happened.
+      # Acquire::* bounds each transfer, never the phase: N stalled files still
+      # cost N * 20s, and Retries multiplies that. `timeout` bounds the phase, so
+      # a bad mirror leaves the budget for npm and the suite. sudo wraps timeout
+      # rather than the reverse -- TERM must reach apt, not a sudo that ignores it.
       - run: |
-          sudo apt-get -o Acquire::Retries=3 \
+          sudo timeout 300 apt-get -o Acquire::Retries=3 \
                        -o Acquire::http::Timeout=20 \
                        -o Acquire::https::Timeout=20 update -y
-          sudo apt-get -o Acquire::Retries=3 install -y zsh
+          sudo timeout 300 apt-get -o Acquire::Retries=3 \
+                       -o Acquire::http::Timeout=20 \
+                       -o Acquire::https::Timeout=20 install -y zsh
       - run: npm install -g markdownlint-cli2
       # Strict: in CI the toolchain is installed, so a SKIPPED line means the
       # run silently stopped checking something rather than accommodating a
