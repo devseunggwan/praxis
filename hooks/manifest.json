@@ -871,6 +871,13 @@
       }
     },
     {
+      "name": "approval-premise-reread-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash|mcp__.*",
+      "timeout": 5
+    },
+    {
       "name": "output-block-falsify-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",

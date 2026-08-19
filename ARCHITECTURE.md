@@ -132,6 +132,7 @@ else:
 | Hook | Event | Purpose | Spec |
 | ------ | ------- | --------- | ------ |
 | `block-gh-state-all` | PreToolUse | Hard-block invalid `gh search ... --state all` flag combo | [hooks/preflight-gate/block-gh-state-all/spec.md](hooks/preflight-gate/block-gh-state-all/spec.md) |
+| `approval-premise-reread-gate` | PreToolUse | Ask before an irreversible production call whose approval premise may have dissolved since it was granted — fires on a mutating Bash/MCP call carrying a production phase marker, and is satisfied by a `# approval-premise:ack <premise re-read>` attestation rather than a bypass token (issue #1043) | [hooks/preflight-gate/approval-premise-reread-gate/spec.md](hooks/preflight-gate/approval-premise-reread-gate/spec.md) |
 | `block-unmatched-glob` | PreToolUse | Hard-block a command whose unquoted glob matches nothing — zsh aborts it before it runs, so the empty result reads as a false negative | [hooks/preflight-gate/block-unmatched-glob/spec.md](hooks/preflight-gate/block-unmatched-glob/spec.md) |
 | `gh-flag-verify` | PreToolUse | Block `gh <subcmd>` calls with flags not in the subcommand's accepted set | [hooks/preflight-gate/gh-flag-verify/spec.md](hooks/preflight-gate/gh-flag-verify/spec.md) |
 | `gh-json-validator` | PreToolUse | Block `gh <subcmd> --json <fields>` calls whose field names are not in the subcommand's valid JSON projection (issue #391) | [hooks/preflight-gate/gh-json-validator/spec.md](hooks/preflight-gate/gh-json-validator/spec.md) |

@@ -60,6 +60,7 @@ confirmation-prompt layer.
 | Hook | Trigger | Purpose |
 | ------ | --------- | --------- |
 | [block-gh-state-all](../../hooks/preflight-gate/block-gh-state-all/spec.md) | PreToolUse | Hard-block invalid `gh search ... --state all` flag combo |
+| [approval-premise-reread-gate](../../hooks/preflight-gate/approval-premise-reread-gate/spec.md) | PreToolUse | Ask before an irreversible production call whose approval premise may have dissolved since it was granted — fires on a mutating Bash/MCP call carrying a production phase marker, and is satisfied by a `# approval-premise:ack <premise re-read>` attestation rather than a bypass token (issue #1043) |
 | [block-unmatched-glob](../../hooks/preflight-gate/block-unmatched-glob/spec.md) | PreToolUse | Hard-block a command whose unquoted glob matches nothing — zsh aborts it before it runs |
 | [gh-flag-verify](../../hooks/preflight-gate/gh-flag-verify/spec.md) | PreToolUse | Block `gh <subcmd>` calls with flags not in the subcommand's accepted set |
 | [gh-json-validator](../../hooks/preflight-gate/gh-json-validator/spec.md) | PreToolUse | Block `gh <subcmd> --json <fields>` calls whose field names are not in the subcommand's valid JSON projection — issue #391 |

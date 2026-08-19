@@ -1,5 +1,7 @@
 # approval-premise-reread-gate
 
+Supported hosts: all
+
 `PreToolUse` gate on irreversible production calls. Tracked by issue #1043.
 
 ## Decision predicate
