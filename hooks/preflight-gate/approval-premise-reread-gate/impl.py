@@ -36,6 +36,7 @@ now says. Attaching it without having done so is a false attestation.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path as _Path
 
@@ -51,19 +52,32 @@ ACK_ARG = "approval_premise_ack"
 # set is auditable.
 PROD_MARKERS = ("phase=prod", "--phase prod", '"prod"', "'prod'", "prod-")
 
-# Mutating MCP verbs. Read-only calls are out of scope entirely — the gate must
-# never fire on a query, or it becomes the noise it is meant to replace.
-MUTATING_MCP_VERBS = (
-    "trigger", "clear", "mark", "delete", "drop", "create", "update",
-    "send", "upload", "invite", "kick", "archive", "rename", "set_",
-)
+# Mutating MCP verbs, matched against the leaf name's `_`/`-` separated tokens
+# rather than as substrings. Substring matching classified eight read-only tools
+# as mutations on this session's 374-tool surface -- `list_labels` via "label",
+# `s3_count_records` via "record", `figma_get_component_sets` via "set" -- and
+# token matching removed all eight while losing no true positive.
+#
+# Read-only calls are out of scope entirely: a gate that fires on a query
+# becomes the noise it is meant to replace. One known false positive survives,
+# `airflow_import_errors`, which reads import errors rather than importing;
+# dropping "import" to silence it would lose `gitbook_git_import`, a real
+# mutation, so the miss is preferred over the drop.
+MUTATING_MCP_VERBS = frozenset((
+    "trigger", "clear", "mark", "unmark", "delete", "drop", "create", "update",
+    "send", "upload", "invite", "kick", "archive", "unarchive", "rename", "set",
+    "write", "insert", "append", "remove", "replace", "move", "copy", "edit",
+    "add", "reply", "forward", "label", "unlabel", "trash", "untrash", "share",
+    "duplicate", "finalize", "redline", "respond", "apply", "convert", "ingest",
+    "prune", "cleanup", "cancel", "start", "record", "import", "style",
+))
 
 
 def _is_mutating_mcp(tool_name: str) -> bool:
     if not tool_name.startswith("mcp__"):
         return False
     leaf = tool_name.rsplit("__", 1)[-1]
-    return any(verb in leaf for verb in MUTATING_MCP_VERBS)
+    return bool(set(re.split(r"[_\-]", leaf.lower())) & MUTATING_MCP_VERBS)
 
 
 def _carries_prod_marker(blob: str) -> bool:
