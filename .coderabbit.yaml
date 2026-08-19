@@ -1,0 +1,18 @@
+# CodeRabbit configuration. Schema: https://coderabbit.ai/integrations/schema.v2.json
+#
+# release-please opens a PR whose entire diff is a CHANGELOG entry and a version
+# bump, so there is nothing for a reviewer to find -- but the review still spends
+# the plan's hourly quota that a real code PR needs (#1047).
+#
+# The discriminator is the title, not the author: release-please runs under a PAT
+# here, so the release PR's author is the repo owner rather than a bot, and
+# ignore_usernames would silence review on every PR they open.
+#
+# The keyword is the full "chore(main): release" prefix rather than bare
+# "release" -- matching is substring, and an ordinary title like
+# "fix(hooks): verify briefing before marker releases merge" contains the shorter
+# form.
+reviews:
+  auto_review:
+    ignore_title_keywords:
+      - "chore(main): release"
