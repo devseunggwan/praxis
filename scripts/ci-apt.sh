@@ -18,21 +18,6 @@
 # red further down and make it harder to read.
 set -euo pipefail
 
-if [ "$#" -eq 0 ]; then
-  echo "usage: $0 <package>..." >&2
-  exit 2
-fi
-
-packages=("$@")
-
-# 3 x 120s + 2 x 15s backoff = 6m30s worst case. Measured against the two jobs
-# that call this: `test` spends ~7m on everything else against a 15-minute
-# budget, and `shellcheck` ~35s against 10 minutes, so both absorb the worst
-# case with room left. Overridable so a caller can tune without editing here.
-attempts="${CI_APT_ATTEMPTS:-3}"
-per_attempt="${CI_APT_TIMEOUT:-120}"
-backoff="${CI_APT_BACKOFF:-15}"
-
 # Per-transfer bounds, kept from #1046. They still do useful work inside an
 # attempt; they are simply not sufficient on their own.
 apt_opts=(
@@ -41,15 +26,42 @@ apt_opts=(
   -o Acquire::https::Timeout=20
 )
 
+# One attempt = update followed by install, and it must cost ONE timeout, not
+# one each: two 120s bounds in sequence make an attempt cost up to 240s, which
+# blows the per-job budget the numbers below are chosen against. The script
+# re-invokes itself in this mode so the pair runs inside a single `timeout` and
+# `apt_opts` keeps a single definition. Not a user-facing flag.
+if [ "${1:-}" = "--run-attempt" ]; then
+  shift
+  apt-get "${apt_opts[@]}" update -y
+  apt-get "${apt_opts[@]}" install -y "$@"
+  exit 0
+fi
+
+if [ "$#" -eq 0 ]; then
+  echo "usage: $0 <package>..." >&2
+  exit 2
+fi
+
+packages=("$@")
+self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+# 3 x 120s + 2 x 15s backoff = 6m30s worst case. Measured
+# against the two jobs that call this: `test` spends ~7m on everything else
+# against a 15-minute budget, and `shellcheck` ~35s against 10 minutes, so both
+# absorb the worst case. Overridable so a caller can tune without editing here.
+attempts="${CI_APT_ATTEMPTS:-3}"
+per_attempt="${CI_APT_TIMEOUT:-120}"
+backoff="${CI_APT_BACKOFF:-15}"
+
 for ((attempt = 1; attempt <= attempts; attempt++)); do
   echo "apt attempt ${attempt}/${attempts} (timeout ${per_attempt}s): ${packages[*]}"
 
-  # `set +e` around the pair, then read the status explicitly: an `if cmd; then`
+  # `set +e` around the call, then read the status explicitly: an `if cmd; then`
   # wrapper would report the *if statement's* status (0 when the condition is
   # false and there is no else branch), which silently hides the failure.
   set +e
-  sudo timeout "$per_attempt" apt-get "${apt_opts[@]}" update -y \
-    && sudo timeout "$per_attempt" apt-get "${apt_opts[@]}" install -y "${packages[@]}"
+  sudo timeout "$per_attempt" bash "$self" --run-attempt "${packages[@]}"
   status=$?
   set -e
 

@@ -51,13 +51,23 @@ BIN="$STUB_ROOT/bin"
 mkdir -p "$BIN" || { echo "FAIL  [mkdir_bin]"; exit 1; }
 
 # `sudo` and `timeout` become transparent pass-throughs so the stubbed apt-get
-# is what decides each attempt's outcome. timeout drops its duration argument.
+# is what decides each attempt's outcome.
 cat > "$BIN/sudo" <<'EOF'
 #!/usr/bin/env bash
 exec "$@"
 EOF
 cat > "$BIN/timeout" <<'EOF'
 #!/usr/bin/env bash
+# Record the full invocation, then drop timeout's own arguments (any leading
+# options, then the duration) and run the command. The log is what lets a case
+# assert how many timeouts one attempt costs and whether --kill-after was set.
+echo "$*" >> "$STUB_TIMEOUT_LOG"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -*) shift ;;
+    *) break ;;
+  esac
+done
 shift
 exec "$@"
 EOF
@@ -81,16 +91,20 @@ if [ "$mode" = "update" ]; then
   fi
   exit "${STUB_APT_EXIT:-1}"
 fi
-# install: only reached when update succeeded
-exit 0
+# install: only reached when update succeeded. Failing here is the shape that
+# matters for the per-attempt budget -- both commands run, so an attempt that
+# bounds them separately costs two timeouts instead of one.
+exit "${STUB_APT_INSTALL_EXIT:-0}"
 EOF
 chmod +x "$BIN/sudo" "$BIN/timeout" "$BIN/apt-get"
 
 export STUB_COUNT="$STUB_ROOT/count"
+export STUB_TIMEOUT_LOG="$STUB_ROOT/timeouts"
 
 # Backoff to 0 so the suite does not spend real seconds sleeping.
 run_target() {
   : > "$STUB_COUNT"
+  : > "$STUB_TIMEOUT_LOG"
   PATH="$BIN:$PATH" \
   CI_APT_ATTEMPTS="${ATTEMPTS_OVERRIDE:-3}" \
   CI_APT_TIMEOUT=5 \
@@ -100,6 +114,7 @@ run_target() {
 }
 
 attempts_made() { cat "$STUB_COUNT" 2>/dev/null || echo 0; }
+timeouts_used() { wc -l < "$STUB_TIMEOUT_LOG" | tr -d ' '; }
 
 # 1. No packages named is a usage error, not a silent success.
 PATH="$BIN:$PATH" bash "$TARGET" >/dev/null 2>&1
@@ -115,6 +130,7 @@ run_case "exit_124_tries_3" "$(attempts_made)" "3"
 grep -q "exit 124 -- mirror stalled" "$STUB_ROOT/out"
 run_case "exit_124_names_the_stall" "$?" "0"
 
+
 # 4. A mirror that recovers mid-window is the whole point: succeed and stop.
 run_case "recovers_on_second_attempt" "$(STUB_APT_EXIT=1 STUB_APT_SUCCEED_ON=2 run_target)" "0"
 run_case "recovery_stops_early" "$(attempts_made)" "2"
@@ -126,6 +142,17 @@ run_case "clean_run_tries_once" "$(attempts_made)" "1"
 # 6. The attempt count is configurable, so the budget can be tuned per caller.
 run_case "attempts_are_configurable" "$(ATTEMPTS_OVERRIDE=2 STUB_APT_EXIT=1 run_target)" "1"
 run_case "attempts_override_respected" "$(attempts_made)" "2"
+
+# 7. One attempt costs ONE timeout, measured on the shape where it can cost two:
+#    update succeeds and install then stalls, so both commands run. Bounding
+#    them separately makes an attempt cost up to 2x per_attempt -- 3 attempts
+#    plus backoff then reach 12m30s, over the shellcheck job's 10-minute budget,
+#    and the job dies before the retry it exists to enable can finish.
+STUB_APT_SUCCEED_ON=1 STUB_APT_INSTALL_EXIT=124 run_target >/dev/null
+run_case "stalled_install_still_costs_one_timeout" "$(timeouts_used)" "3"
+run_case "stalled_install_retries_3" "$(attempts_made)" "3"
+STUB_APT_SUCCEED_ON=1 run_target >/dev/null
+run_case "clean_run_uses_one_timeout" "$(timeouts_used)" "1"
 
 echo "----"
 echo "PASS: $PASS / FAIL: $FAIL"
