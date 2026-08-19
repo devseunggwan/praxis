@@ -74,16 +74,18 @@ for ((attempt = 1; attempt <= attempts; attempt++)); do
     exit 0
   fi
 
-  # timeout(1) reports the two ways it can end a run with different codes, and
-  # the difference is worth naming: 124 says TERM was enough, 137 says apt
-  # ignored it and only KILL stopped it. Folding 137 into the generic branch
-  # would hide exactly the case --kill-after exists for.
+  # 124 is timeout(1)'s own code for "TERM ended the run", so it identifies a
+  # stall. 137 does not identify anything on its own -- it is the conventional
+  # 128+SIGKILL value, which the --kill-after escalation produces, but so does
+  # an OOM kill, and a command is free to exit 137 by itself. Report what was
+  # observed and list the candidates; folding it into the generic branch would
+  # still lose the one code most worth looking at.
   case "$status" in
     124)
       echo "apt attempt ${attempt} hit the ${per_attempt}s bound (exit 124 -- mirror stalled)" >&2
       ;;
     137)
-      echo "apt attempt ${attempt} ignored TERM and was killed after the ${kill_grace}s grace (exit 137)" >&2
+      echo "apt attempt ${attempt} exited 137 (SIGKILL by convention -- timeout's ${kill_grace}s escalation, an OOM kill, or apt's own status)" >&2
       ;;
     *)
       echo "apt attempt ${attempt} failed with exit ${status}" >&2
