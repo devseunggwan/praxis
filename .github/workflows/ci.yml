@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   ruff:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,16 +44,26 @@ jobs:
       - run: ruff check .
 
   shellcheck:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # ubuntu-latest ships shellcheck, but install explicitly so the job
+      # ubuntu-24.04 ships shellcheck, but install explicitly so the job
       # doesn't silently depend on the runner image. Rules come from
       # .shellcheckrc at the repo root.
-      - run: sudo apt-get update -y && sudo apt-get install -y shellcheck
+      # Same phase bound as the test job's apt call (#1045): this job carried the
+      # identical unguarded exposure and its own 10-minute budget to lose. The
+      # explicit install stays -- the comment above states why the job refuses to
+      # depend on the image implicitly, and that reason is unchanged.
+      - run: |
+          sudo timeout 300 apt-get -o Acquire::Retries=3 \
+                       -o Acquire::http::Timeout=20 \
+                       -o Acquire::https::Timeout=20 update -y
+          sudo timeout 300 apt-get -o Acquire::Retries=3 \
+                       -o Acquire::http::Timeout=20 \
+                       -o Acquire::https::Timeout=20 install -y shellcheck
       - run: |
           find . -name '*.sh' -not -path './.git/*' -print0 \
             | xargs -0 shellcheck --severity=warning
@@ -64,7 +74,7 @@ jobs:
   # push:[main] re-scans full history (fetch-depth:0) — no secret lands on
   # main unscanned, it's just scanned at PR time instead of first-push time.
   gitleaks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       # Full history so gitleaks scans commits, not just the working tree.
@@ -81,7 +91,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -95,12 +105,31 @@ jobs:
       # ruff is pinned to the same version as the `ruff` job so the local-parity
       # step cannot disagree with the blocking one.
       - run: python3 -m pip install pytest "ruff==0.15.8"
-      # zsh is not preinstalled on ubuntu-latest. block-unmatched-glob delegates
+      # zsh is not preinstalled on ubuntu-24.04. block-unmatched-glob delegates
       # its verdict to a real zsh, so without it that hook's suite has nothing to
       # assert against and silently degrades to fail-open coverage.
-      # shellcheck and markdownlint-cli2 are here for the same reason ruff is:
-      # under PRAXIS_TESTS_STRICT their absence would abort the run (#917).
-      - run: sudo apt-get update -y && sudo apt-get install -y jq zsh shellcheck
+      # jq and shellcheck are deliberately NOT installed: the ubuntu-24.04 runner
+      # image already ships both at the versions noble's apt would resolve anyway
+      # (jq 1.7.1, shellcheck 0.9.0), so fetching them only widens the exposure to
+      # the mirror stall below. markdownlint-cli2 still comes from npm for the
+      # same reason ruff is pinned: under PRAXIS_TESTS_STRICT its absence would
+      # abort the run (#917).
+      # The Acquire timeouts are load-bearing (#1045). Without them apt waits
+      # indefinitely on a mirror that stops responding mid-fetch, which consumed
+      # the entire 15-minute job budget three times over two days. Retries alone
+      # do not help -- a hang never reaches the retry. Timeout covers the data
+      # transfer, not just connect, which is where the stall actually happened.
+      # Acquire::* bounds each transfer, never the phase: N stalled files still
+      # cost N * 20s, and Retries multiplies that. `timeout` bounds the phase, so
+      # a bad mirror leaves the budget for npm and the suite. sudo wraps timeout
+      # rather than the reverse -- TERM must reach apt, not a sudo that ignores it.
+      - run: |
+          sudo timeout 300 apt-get -o Acquire::Retries=3 \
+                       -o Acquire::http::Timeout=20 \
+                       -o Acquire::https::Timeout=20 update -y
+          sudo timeout 300 apt-get -o Acquire::Retries=3 \
+                       -o Acquire::http::Timeout=20 \
+                       -o Acquire::https::Timeout=20 install -y zsh
       - run: npm install -g markdownlint-cli2
       # Strict: in CI the toolchain is installed, so a SKIPPED line means the
       # run silently stopped checking something rather than accommodating a
@@ -111,7 +140,7 @@ jobs:
           PRAXIS_TESTS_STRICT: "1"
 
   link-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -136,7 +165,7 @@ jobs:
   # so the two reviewdog jobs are gated to pull_request and skip on push:main.
   actionlint:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -156,7 +185,7 @@ jobs:
 
   markdownlint:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
