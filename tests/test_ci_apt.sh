@@ -154,6 +154,12 @@ run_case "stalled_install_retries_3" "$(attempts_made)" "3"
 STUB_APT_SUCCEED_ON=1 run_target >/dev/null
 run_case "clean_run_uses_one_timeout" "$(timeouts_used)" "1"
 
+# 8. TERM alone is not enough: apt that ignores it would outlive its own bound
+#    and overlap the next attempt.
+STUB_APT_EXIT=1 run_target >/dev/null
+grep -qv -- '--kill-after' "$STUB_TIMEOUT_LOG"
+run_case "kill_after_on_every_timeout" "$?" "1"
+
 echo "----"
 echo "PASS: $PASS / FAIL: $FAIL"
 if [ "$FAIL" -gt 0 ]; then

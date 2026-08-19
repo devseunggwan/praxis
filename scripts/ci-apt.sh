@@ -46,13 +46,16 @@ fi
 packages=("$@")
 self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 
-# 3 x 120s + 2 x 15s backoff = 6m30s worst case. Measured
+# 3 x (120s + 10s kill grace) + 2 x 15s backoff = 7m00s worst case. Measured
 # against the two jobs that call this: `test` spends ~7m on everything else
 # against a 15-minute budget, and `shellcheck` ~35s against 10 minutes, so both
 # absorb the worst case. Overridable so a caller can tune without editing here.
 attempts="${CI_APT_ATTEMPTS:-3}"
 per_attempt="${CI_APT_TIMEOUT:-120}"
 backoff="${CI_APT_BACKOFF:-15}"
+# Without this, TERM is the only signal timeout sends: an apt that ignores or
+# delays it keeps running past the bound and overlaps the next attempt.
+kill_grace="${CI_APT_KILL_GRACE:-10}"
 
 for ((attempt = 1; attempt <= attempts; attempt++)); do
   echo "apt attempt ${attempt}/${attempts} (timeout ${per_attempt}s): ${packages[*]}"
@@ -61,7 +64,8 @@ for ((attempt = 1; attempt <= attempts; attempt++)); do
   # wrapper would report the *if statement's* status (0 when the condition is
   # false and there is no else branch), which silently hides the failure.
   set +e
-  sudo timeout "$per_attempt" bash "$self" --run-attempt "${packages[@]}"
+  sudo timeout --kill-after="$kill_grace" "$per_attempt" \
+    bash "$self" --run-attempt "${packages[@]}"
   status=$?
   set -e
 
