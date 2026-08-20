@@ -286,6 +286,12 @@ run_case "gf_docker_host_before_verb" \
 
 # An unrecognised flag makes the verb's position unknowable, so the gate asks
 # rather than guessing -- a gh release adding a global flag lands here.
+# An attached value does not make an unknown flag known. Before the fix the
+# `=` form skipped the membership test entirely and the verb was accepted.
+run_case "gf_unknown_flag_attached_value_asks" \
+  "$(verdict "$(bash_payload 'kubectl --future-global=value get pods --profile prod')")" \
+  "ask"
+
 run_case "gf_unknown_flag_asks" \
   "$(verdict "$(bash_payload 'kubectl --frobnicate x get pods --phase prod')")" \
   "ask"

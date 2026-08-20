@@ -268,12 +268,13 @@ def _subcommand(binary: str, argv: list[str]) -> str | None:
                 return words[1]
             continue
         name = tok.split("=", 1)[0]
-        if "=" in tok or name in bool_flags:
-            continue  # its value is attached, or it takes none
+        if name in bool_flags:
+            continue  # it takes no value, so the verb is still ahead
         if name in value_flags:
-            i += 1  # the next token is this flag's value, not the verb
+            if "=" not in tok:
+                i += 1  # its value is the next token, not the verb
             continue
-        return None
+        return None  # unrecognised, attached value or not
     return None
 
 
