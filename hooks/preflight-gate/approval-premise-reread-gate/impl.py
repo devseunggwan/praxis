@@ -176,22 +176,90 @@ _GH_API_VALUE_FLAGS = frozenset({
 _AWS_READ_PREFIXES = ("describe-", "get-", "list-", "search-", "query-", "batch-get-")
 
 
-def _subcommand(binary: str, argv: list[str]) -> str:
-    """The token that decides what the invocation does.
+# Global flags that sit BEFORE the verb and consume the token after them, so
+# that token is a value and not the subcommand. Transcribed per binary from
+# `kubectl options`, `git --help`, `aws help`, `docker --help` and `gh --help`;
+# the boolean set beside it is the flags that consume nothing. A flag in
+# neither set is unrecognised, and then the verb's position is unknowable --
+# `_subcommand` returns None and the caller asks, which is the safe direction.
+_GLOBAL_VALUE_FLAGS = {
+    "kubectl": frozenset({
+        "--as", "--as-group", "--as-uid", "--cache-dir",
+        "--certificate-authority", "--client-certificate", "--client-key",
+        "--cluster", "--context", "--kubeconfig", "--kuberc",
+        "--log-flush-frequency", "-n", "--namespace", "--password", "--profile",
+        "--profile-output", "--request-timeout", "-s", "--server",
+        "--tls-server-name", "--token", "--user", "--username", "--vmodule",
+    }),
+    # `--exec-path` is absent on purpose: `git --help` spells it
+    # `--exec-path[=<path>]`, so its value only ever arrives attached.
+    "git": frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace",
+                      "--config-env"}),
+    "gh": frozenset({"-R", "--repo"}),
+    "aws": frozenset({"--ca-bundle", "--cli-binary-format", "--cli-error-format",
+                      "--color", "--endpoint-url", "--output", "--profile",
+                      "--query", "--region"}),
+    "docker": frozenset({"--config", "-c", "--context", "-H", "--host",
+                         "-l", "--log-level", "--tlscacert", "--tlscert",
+                         "--tlskey"}),
+}
+
+_GLOBAL_BOOL_FLAGS = {
+    "kubectl": frozenset({"--disable-compression", "--insecure-skip-tls-verify",
+                          "--match-server-version", "--warnings-as-errors",
+                          "-h", "--help"}),
+    "git": frozenset({"-v", "--version", "-h", "--help", "--exec-path",
+                      "--html-path",
+                      "--man-path", "--info-path", "-p", "--paginate", "-P",
+                      "--no-pager", "--no-replace-objects", "--no-lazy-fetch",
+                      "--no-optional-locks", "--no-advice", "--bare"}),
+    "gh": frozenset({"-h", "--help", "--version"}),
+    "aws": frozenset({"--cli-auto-prompt", "--no-cli-auto-prompt", "--debug",
+                      "--no-cli-pager", "--no-paginate", "--no-sign-request",
+                      "--no-verify-ssl", "--version"}),
+    "docker": frozenset({"-D", "--debug", "--tls", "--tlsverify", "-v",
+                         "--version", "-h", "--help"}),
+}
+
+
+def _subcommand(binary: str, argv: list[str]) -> str | None:
+    """The token that decides what the invocation does, or None if unknowable.
 
     Most of these binaries are verb-first (`kubectl get`, `git log`), but `gh`
     is noun-verb (`gh pr view`), so reading position 1 for it would test the
     noun. Position matters rather than membership: scanning every token would
     read `gh pr create --title view` as read-only because `view` appears in it.
+
+    A global flag before the verb shifts that position, and reading its value
+    as the verb is wrong in both directions -- `kubectl --context prod-apne2
+    get pods` asks for nothing, and `kubectl --context get delete pod` passes
+    as read-only. Flag values are therefore skipped, and an unrecognised flag
+    gives up rather than guessing where the verb landed.
     """
-    non_flags = [a for a in argv[1:] if not a.startswith("-")]
-    if not non_flags:
-        return ""
-    if binary == "gh":
-        if non_flags[0] in ("api", "search", "status"):
-            return non_flags[0]
-        return non_flags[1] if len(non_flags) > 1 else ""
-    return non_flags[0]
+    value_flags = _GLOBAL_VALUE_FLAGS.get(binary, frozenset())
+    bool_flags = _GLOBAL_BOOL_FLAGS.get(binary, frozenset())
+    words: list[str] = []
+    i = 1
+    while i < len(argv):
+        tok = argv[i]
+        i += 1
+        if not tok.startswith("-"):
+            words.append(tok)
+            if binary != "gh":
+                return words[0]
+            if len(words) == 1 and words[0] in ("api", "search", "status"):
+                return words[0]
+            if len(words) == 2:
+                return words[1]
+            continue
+        name = tok.split("=", 1)[0]
+        if "=" in tok or name in bool_flags:
+            continue  # its value is attached, or it takes none
+        if name in value_flags:
+            i += 1  # the next token is this flag's value, not the verb
+            continue
+        return None
+    return None
 
 
 def _gh_api_is_readonly(argv: list[str]) -> bool:
@@ -247,7 +315,7 @@ def _segment_is_readonly(argv: list[str]) -> bool:
     if allowed is None:
         return False
     sub = _subcommand(binary, argv)
-    if sub not in allowed:
+    if sub is None or sub not in allowed:
         return False
 
     if binary == "gh" and sub == "api":

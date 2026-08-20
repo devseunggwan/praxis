@@ -117,6 +117,16 @@ read-only here, so those — plus the irreversible operations verbs adjacent to
 them (`approve`, `revoke`, `restore`, `truncate`, `purge`, `rollback`,
 `deploy`, `publish`, `execute`, and their neighbours) — are in the set.
 
+**A global flag before the verb is skipped with its value.** `kubectl --context
+prod-apne2 get pods` and `kubectl --context get delete pod` are both misread
+when the flag's value is taken for the subcommand — the first asks for nothing,
+the second passes a delete as read-only. The value-taking and boolean global
+flags are transcribed per binary from `kubectl options`, `git --help`,
+`aws help`, `docker --help` and `gh --help`. A flag in neither set is
+unrecognised: the verb's position is then unknowable, so the classifier gives
+up and the gate asks. A future release adding a global flag lands there rather
+than through the gate.
+
 **The marker absorbs spacing and casing, but stops at named flags.** Accepted:
 `--phase prod`, `--phase=prod`, `--phase  prod`, `--phase PROD`, `-p prod`,
 `--profile prod`, `--env prod-apne2`, `--phase production-mirror`, and the

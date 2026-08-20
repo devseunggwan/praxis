@@ -173,6 +173,44 @@ run_case "ack_mcp_blank_string" \
   "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","approval_premise_ack":"   "}')")" \
   "ask"
 
+# --- a global flag before the verb shifts where the verb is ----------------
+# Wrong in both directions before the fix: the value read as the subcommand.
+run_case "gf_context_value_not_verb" \
+  "$(verdict "$(bash_payload 'kubectl --context prod-apne2 get pods')")" \
+  "quiet"
+
+run_case "gf_value_named_get" \
+  "$(verdict "$(bash_payload 'kubectl --context get delete pod x -n prod-apne2')")" \
+  "ask"
+
+run_case "gf_attached_value" \
+  "$(verdict "$(bash_payload 'kubectl --context=prod-apne2 get pods')")" \
+  "quiet"
+
+run_case "gf_aws_profile_before_verb" \
+  "$(verdict "$(bash_payload 'aws --profile prod sts get-caller-identity')")" \
+  "quiet"
+
+run_case "gf_git_dash_c" \
+  "$(verdict "$(bash_payload 'git -C /tmp/prod-repo log')")" \
+  "quiet"
+
+# `git --help` spells it `--exec-path[=<path>]`, so the bare form takes no
+# value and the verb is still the next token.
+run_case "gf_git_optional_arg_flag" \
+  "$(verdict "$(bash_payload 'git --exec-path log --phase prod')")" \
+  "quiet"
+
+run_case "gf_docker_host_before_verb" \
+  "$(verdict "$(bash_payload 'docker -H unix:///x ps --filter name=prod-')")" \
+  "quiet"
+
+# An unrecognised flag makes the verb's position unknowable, so the gate asks
+# rather than guessing -- a gh release adding a global flag lands here.
+run_case "gf_unknown_flag_asks" \
+  "$(verdict "$(bash_payload 'kubectl --frobnicate x get pods --phase prod')")" \
+  "ask"
+
 # --- a substitution hides a command the outer binary does not name ---------
 # The shell runs the inner command; the allowlist only ever saw `echo`/`cat`.
 run_case "sub_command_substitution" \
