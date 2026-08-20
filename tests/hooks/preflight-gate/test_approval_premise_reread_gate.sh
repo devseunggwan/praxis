@@ -76,6 +76,12 @@ write_ack() {
   printf '%s' "$1" > "$ACK_FILE"
 }
 
+# Same call, a different session. The ack file is keyed on session_id, so this
+# is what proves one session's acknowledgement cannot cover another's.
+mcp_payload_other_session() {
+  python3 -c 'import json,sys; print(json.dumps({"session_id":"other-session","tool_name":sys.argv[1],"tool_input":json.loads(sys.argv[2])}))' "$1" "$2"
+}
+
 echo "test_approval_premise_reread_gate"
 
 # --- Bash: the marker's spacing, casing and flag-name variants -------------
@@ -225,11 +231,13 @@ run_case "ack_bash_comment_no_space" \
   "$(verdict "$(bash_payload 'kubectl delete pod x -n prod-apne2  #approval-premise:ack re-measured on this pod')")" \
   "quiet"
 
+rm -f "$ACK_FILE"
 run_case "ack_mcp_stray_marker" \
   "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","note":"see # approval-premise:ack in runbook"}')")" \
   "ask"
 # The synthetic argument is gone: a server that validates its schema rejects
 # an undeclared field, so a call carrying it was never reachable at runtime.
+rm -f "$ACK_FILE"
 run_case "ack_mcp_argument_ignored" \
   "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","approval_premise_ack":"re-read"}')")" \
   "ask"
@@ -248,6 +256,29 @@ write_ack 'not json at all'
 run_case "ack_mcp_file_malformed" \
   "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "ask"
+
+# Valid JSON that simply does not carry a premise says nothing about what the
+# premise now holds, which is the whole content of the attestation.
+write_ack '{}'
+run_case "ack_mcp_file_no_premise_key" \
+  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "ask"
+
+write_ack '{"other":"x"}'
+run_case "ack_mcp_file_other_key" \
+  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "ask"
+
+# The file is session-keyed: a valid premise written for one session must not
+# acknowledge another session's call, and must survive it unconsumed.
+write_ack '{"premise": "re-measured on this target"}'
+run_case "ack_mcp_other_session_asks" \
+  "$(verdict "$(mcp_payload_other_session 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "ask"
+
+run_case "ack_mcp_own_session_still_honoured" \
+  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "quiet"
 
 # --- gh api: the effective method decides, body flags only imply POST ------
 # `gh api --help`: a body flag makes the request a POST *unless* the method is
