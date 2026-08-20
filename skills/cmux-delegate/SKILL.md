@@ -378,9 +378,16 @@ case "{provider}" in
 esac
 rc=$?
 
-# 완료 알림은 종료 코드를 반영합니다. rc 를 보지 않으면 권한 거부·크래시·E2BIG
-# 로 죽은 워커도 "Task completed" 로 보고되고, 위임자와 사용자에게는 성공과
+# 알림은 종료 코드를 반영합니다. rc 를 보지 않으면 권한 거부·크래시·E2BIG 로
+# 죽은 워커도 "Task completed" 로 보고되고, 위임자와 사용자에게는 성공과
 # 구별되지 않습니다 — 그게 #1054 의 원래 증상입니다.
+#
+# 다만 claude 분기에서 이 줄들은 **작업 완료 시점에 실행되지 않습니다**. argv +
+# TTY stdin 이면 워커는 평소 대화형 세션이라 작업이 끝나도 프롬프트로 돌아가고
+# 종료하지 않기 때문입니다 (실측: 작업 완료 후에도 래퍼 프로세스 생존, rc 파일
+# 미생성). 여기 도달하는 것은 사람이 세션을 나갔을 때뿐이고, 그때의 rc 는
+# 작업 성패가 아니라 세션 종료 방식을 말합니다. 완료 판정의 정본은 Step 7 이
+# 읽는 보고서 파일입니다 — 이 알림이 아닙니다.
 if [ "$rc" -eq 0 ]; then
   cmux notify --title "cmux-delegate" --body "Task completed: {short_task}" 2>/dev/null || true
 else
@@ -497,7 +504,9 @@ Delegated to {WS_REF}
   CWD: {cwd}
 
 cmux에서 {WS_REF} 탭을 확인하세요.
-완료 시 cmux notify로 알림이 전송됩니다.
+완료 판정은 Step 7 의 보고서 파일로 합니다 — claude 워커는 작업을 마쳐도 세션이
+살아 있어 완료 알림이 오지 않습니다. 알림이 온다면 기동 실패이거나 사람이 세션을
+나간 것입니다.
 ```
 
 **distribute 모드:**
@@ -509,7 +518,8 @@ Distributed to {N} workspaces:
   ...
 
 각 cmux 탭에서 진행 상황을 확인하세요.
-완료 시 cmux notify로 개별 알림이 전송됩니다.
+완료 판정은 워커별 보고서 파일로 합니다 (Step 7). claude 워커의 완료 알림은
+오지 않습니다 — 위와 같은 이유입니다.
 ```
 
 **기존 세션 모드:**
@@ -741,7 +751,7 @@ user: /cmux-delegate "full code review" --model claude:opus --account claude-2
   │     └── /tmp/cmux-delegate-{ts}.sh
   │           └── CLAUDE_CONFIG_DIR=~/.claude-2 claude --model opus "$(cat .md)"
   │           └── trap: .sh만 삭제 (.md 보존)
-  │           └── cmux notify on completion
+  │           └── cmux notify: 기동 실패 / 세션 종료 시에만 (완료 판정 아님)
   │
   └── Step 5a: cmux new-workspace --command "bash .sh"
         └── workspace:{N} → 독립 Claude 세션 (claude-2 계정)

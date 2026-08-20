@@ -84,6 +84,17 @@ assert_present \
   "why rc gating exists is stated, not left to be re-derived" \
   "그게 #1054 의 원래 증상입니다"
 
+# Measured after the switch: an argv+TTY worker stays interactive, so the rc
+# branch is never reached on task completion. Leaving that unsaid re-creates
+# #1054's false-completion expectation with a different mechanism.
+assert_present \
+  "the notify is disclaimed as a completion signal on the claude branch" \
+  "작업 완료 시점에 실행되지 않습니다"
+
+assert_present \
+  "the real completion oracle is named — the Step 7 report file" \
+  "완료 판정의 정본은 Step 7 이"
+
 # ---------------------------------------------------------------------------
 # 4. The argv size limit is guarded, and the guard refuses a fallback
 # ---------------------------------------------------------------------------
