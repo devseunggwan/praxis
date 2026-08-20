@@ -688,12 +688,12 @@ mkdir -p "$SD5_ORPHAN" "$SD5_SHARED"
 sleep 600 &
 LIVE5_PID=$!
 
-DEAD5_PID="$(bash -c 'echo $$')"
-dead5_ready=false
-for _ in $(seq 1 30); do
-  if ! kill -0 "$DEAD5_PID" 2>/dev/null; then dead5_ready=true; break; fi
-  sleep 0.1
-done
+# A high, currently-unused pid rather than a just-exited one: the kernel can
+# hand a recently freed pid to a new process before the reaper runs, and the
+# record would then read as live, failing this gate for an unrelated reason.
+DEAD5_PID=99999
+while kill -0 "$DEAD5_PID" 2>/dev/null; do DEAD5_PID=$((DEAD5_PID - 1)); done
+dead5_ready=true
 
 # Only the SIBLING knows about the orphan — the primary state dir stays empty of
 # it, so a single-dir reaper never sees this record at all.
