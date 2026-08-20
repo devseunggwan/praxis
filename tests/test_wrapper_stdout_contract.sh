@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
-# tests/test_wrapper_stdout_contract.sh — Step 4 stdout contract, prose half (#981)
+# tests/test_wrapper_stdout_contract.sh — Step 4 stdio contract, prose half (#1054)
 #
 # The executable behaviour is pinned in tests/test_wrapper_stdout_contract.py.
-# What this file pins is the SKILL.md text, for two reasons the code cannot
-# cover:
+# What this file pins is the SKILL.md text, for reasons the code cannot cover:
 #
-#   1. `| tee` looks like logging. A future reader who reads it as logging will
-#      delete it as redundant, and the ARCHITECTURE.md obligation silently
-#      lapses. The comment saying it is contract compliance is the load-bearing
-#      part, so it is asserted like code.
-#   2. This is documented-contract drift, NOT a repaired failure — the owner's
-#      4-run control on claude 2.1.232 showed the prompt is not actually lost.
-#      If that disclaimer goes missing, the next reader concludes a real bug
-#      once existed here and reasons from a fiction.
+#   1. Piping the prompt looks harmless and reads as the safer form — it is the
+#      shape most callers reach for. The comment saying what it costs (fd 0, and
+#      with it every permission prompt and `cmux send`) is the load-bearing part,
+#      so it is asserted like code.
+#   2. `"$(cat file)"` looks like the shell-interpolation failure the skill spent
+#      years excluding. The sentence separating an inline literal from a quoted
+#      command substitution is what stops a future reader from "restoring" the
+#      pipe on that reasoning.
+#   3. A notify that ignores the exit code reports a dead worker as a finished
+#      one. That is #1054's original symptom, so the rc gating is asserted here
+#      too — deleting it silently reopens the bug.
 #
 # Run:  bash tests/test_wrapper_stdout_contract.sh
 # Exit: 0 = all pass; 1 = at least one fail
@@ -28,75 +30,138 @@ source "$SCRIPT_DIR/_assert_lib.sh"
 assert_lib_init "$SKILL"
 
 # ---------------------------------------------------------------------------
-# 1. The obligation is named where the call site lives
+# 1. Why the prompt is not piped — the cost is named, not just the rule
 # ---------------------------------------------------------------------------
 
 assert_present \
-  "the redirect is justified as contract compliance, not logging" \
-  "로그 적재가 목적이 아니라 계약 이행입니다"
+  "the call site says the prompt goes through argv" \
+  "프롬프트는 argv 로 넘기고 stdin 은 비워 둡니다"
 
 assert_present \
-  "the obligation is traced to its source document" \
-  "stdout 을 리다이렉트하거나"
+  "the mechanism is stated: cat exiting is what closes fd 0" \
+  "cat\` 이 끝나는 순간 워커의 fd 0 이 닫히고"
 
 assert_present \
-  "the competing-readers mechanism is stated, not just the rule" \
-  "같은 스트림을 두고 경쟁합니다"
+  "the measured consequence is cited, not just asserted" \
+  "exit 0 으로 종료했습니다"
+
+assert_present \
+  "the stdout half names its own cost — the pane goes blank" \
+  "블록 버퍼링이 걸려 실행 중인 페인이"
 
 # ---------------------------------------------------------------------------
-# 2. The disclaimer — the single sentence that stops a future misreading
+# 2. The distinction that keeps the pipe from being "restored"
+# ---------------------------------------------------------------------------
+
+# "Why Wrapper Script?" records a real failure with an inline literal prompt
+# (Hub #1001). The new prose must keep that exclusion while separating it from
+# the argv form, or a future reader re-derives the pipe from the same story.
+assert_present \
+  "the inline-literal exclusion is restated as still binding" \
+  "스크립트 본문이나 명령줄에 리터럴로 들어가면"
+
+assert_present \
+  "the two are separated: a quoted substitution is not re-expanded" \
+  "셸이 치환 결과를 재해석하지 않으므로"
+
+assert_present \
+  "the separation is backed by a transcribed run, not an argument" \
+  'cost is $5 `whoami` ${HOME}'
+
+# ---------------------------------------------------------------------------
+# 3. The completion signal must follow the exit code
 # ---------------------------------------------------------------------------
 
 assert_present \
-  "the file says plainly that no bug was fixed here" \
-  "**이것은 버그 수정이 아닙니다.**"
+  "the notify branches on rc rather than firing unconditionally" \
+  'if [ "$rc" -eq 0 ]; then'
 
 assert_present \
-  "the owner's control run is cited by version" \
-  "소유자의 4회 대조 실행(claude 2.1.232)"
+  "the failure branch carries the exit code to the reader" \
+  "Task FAILED (exit \$rc)"
 
 assert_present \
-  "the reader is told how NOT to read the line" \
-  "예전에 프롬프트가 깨졌었다"
+  "why rc gating exists is stated, not left to be re-derived" \
+  "그게 #1054 의 원래 증상입니다"
+
+# Measured after the switch: an argv+TTY worker stays interactive, so the rc
+# branch is never reached on task completion. Leaving that unsaid re-creates
+# #1054's false-completion expectation with a different mechanism.
+assert_present \
+  "the notify is disclaimed as a completion signal on the claude branch" \
+  "작업 완료 시점에 실행되지 않습니다"
+
+assert_present \
+  "the real completion oracle is named — the Step 7 report file" \
+  "완료 판정의 정본은 Step 7 이"
 
 # ---------------------------------------------------------------------------
-# 3. Why tee and not the two nearby forms that also satisfy the contract
+# 4. The argv size limit is guarded, and the guard refuses a fallback
 # ---------------------------------------------------------------------------
 
 assert_present \
-  "the narrowest-redirect choice is argued against a full redirect" \
-  "가장 좁은 리다이렉트이기 때문입니다"
+  "the prompt is measured against the kernel argument limit" \
+  "ARG_LIMIT=\$(( \$(getconf ARG_MAX) / 4 ))"
 
 assert_present \
-  "the operator-visibility cost of a full redirect is named" \
-  "페인을 비웁니다"
-
-assert_present \
-  "the log is marked as a byproduct, so deleting it does not look free" \
-  "파이프 자체는 남겨두어야 합니다"
+  "the guard fails loudly instead of falling back to the pipe" \
+  "폴백은 두지 않습니다"
 
 # ---------------------------------------------------------------------------
-# 4. Contracts this change must not displace
+# 5. Contracts this change must not displace
 # ---------------------------------------------------------------------------
 
-# "Why Wrapper Script?" records a real, previously-experienced failure with
-# `claude -p "..."`. The new prose must reinforce that exclusion, not reopen it.
-assert_present \
-  "the -p exclusion is restated as still binding" \
-  '`-p` 를 붙이는 순간 프롬프트가 shell 을 거쳐 위 실패가 그대로 돌아옵니다'
-
-assert_present \
-  "the budget flag is not allowed to argue -p back in" \
-  "print 모드 전용인 것도"
-
-# The must-stay-silent direction, mirrored from the .py control: the wrapper
-# must still create the .sh only via Write, and the trap must still spare .md.
 assert_present \
   "the trap still deletes only the .sh" \
   "trap 'rm -f \"\$SCRIPT_FILE\"' EXIT"
 
 assert_absent \
-  "the stdin path is still shell-free — no -p form reintroduced" \
+  "the prompt is never piped into claude again" \
+  'cat "$PROMPT_FILE" | {claude_env} claude'
+
+assert_absent \
+  "no -p form is reintroduced" \
   'claude -p "$(cat'
+
+assert_absent \
+  "the worker is not handed a permission-mode override" \
+  "--permission-mode {permission_mode}"
+
+# ---------------------------------------------------------------------------
+# 6. Findings from the #1057 review — each one was live-reproduced, so each
+#    gets an assertion rather than a comment. Deleting any of these silently
+#    restores a shape that was measured to fail.
+# ---------------------------------------------------------------------------
+
+# A missing prompt file passed the old guard and handed claude an empty argv:
+# the worker sat idle and the wrapper reported rc=0 — #1054's shape again.
+assert_present \
+  "the wrapper refuses to start on an unreadable or empty prompt file" \
+  'if ! PROMPT_BYTES=$(wc -c < "$PROMPT_FILE" 2>/dev/null) || [ "$PROMPT_BYTES" -eq 0 ]; then'
+
+# ARG_MAX is the argv+envp total; Linux caps each single string separately at
+# 32 pages, which is 4x smaller than ARG_MAX/4 on a typical Linux box.
+assert_present \
+  "the per-string kernel limit is enforced alongside the total" \
+  'STR_LIMIT=$(( 32 * $(getconf PAGE_SIZE) ))'
+
+assert_present \
+  "the smaller of the two limits wins" \
+  '[ "$STR_LIMIT" -lt "$ARG_LIMIT" ] && ARG_LIMIT=$STR_LIMIT'
+
+# --max-budget-usd is print-mode only, and this worker is interactive.
+assert_absent \
+  "no budget flag reaches the interactive claude invocation" \
+  "{budget_flag} \\"
+
+# rc here reports how the session closed, not whether the task finished.
+assert_present \
+  "the claude notify says session exit, not task completion" \
+  'Claude session exited (rc=$rc)'
+
+# Command substitution strips trailing newlines; the pipe did not.
+assert_present \
+  "the one behavioural difference from the pipe is stated" \
+  "후행 개행은 잘립니다"
 
 assert_lib_summary

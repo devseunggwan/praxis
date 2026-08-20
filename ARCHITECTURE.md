@@ -47,7 +47,13 @@ Skills that dispatch external CLI workers (`cmux-delegate`) can route tasks to m
 | `codex` | `cat $F \| codex exec {m:+-m m} -o $RESULT_FILE` | stdout verbose logs + last message isolated in `$RESULT_FILE` (preferred); `--json` JSONL also supported | `cat file \| codex exec` | Sandbox-restricted — explicit fallback required |
 | `gemini` | `gemini -p "$(cat $F)" --approval-mode yolo {m:+-m m}` | stream-json (`-o stream-json`) | via `-p` flag | Full |
 
-All providers share the same completion sentinel: `; echo '===WORKER_DONE===' >> $LOG` appended after the CLI exits.
+There is no completion sentinel in this repository. The line documenting
+`; echo '===WORKER_DONE===' >> $LOG` as a shared convention has been removed (#1054):
+`grep -rn WORKER_DONE` found that sentence and nothing else — no caller ever appended
+it and no consumer ever waited on it. It also cannot hold for `cmux-delegate`, whose
+claude worker stays interactive and does not exit after the task. Completion is
+decided by the worker's report file (`cmux-delegate` Step 7), which is keyed by
+workspace UUID and readable whenever the delegator looks.
 
 The `claude` row's stdin column carries a precondition the command does not state.
 `claude --help` says the workspace trust dialog is skipped "via `-p`, or when
@@ -56,6 +62,17 @@ command with stdout inherited from a terminal, in a directory the user has never
 trusted, has a dialog and a piped prompt competing for the same stream. Neither
 exemption is supplied by the row itself. Using the stdin column obliges the caller
 to supply one: redirect stdout, or add `-p`.
+
+**`cmux-delegate` does not use the stdin column** (#1054). Its worker has to stay an
+ordinary session — a live TTY on both descriptors — so it passes the prompt as argv
+instead: `claude --model {m} "$(cat $F)"`. Command substitution inside double quotes
+is not re-expanded by the shell, so this is exactly as safe as the pipe for `$`,
+backticks, and braces, while leaving fd 0 on the terminal. A piped stdin closes when
+`cat` exits, and the worker then has no channel to answer a permission prompt or a
+trust dialog on — measured: it prints "Awaiting your confirmation" and exits 0. The
+precondition above is moot for that caller, because a human can answer the dialog.
+The stdin column stays correct for genuinely non-interactive callers, which must
+still supply one of the two exemptions.
 
 ### Model Notation
 

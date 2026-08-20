@@ -3,8 +3,13 @@
 A delegated worker reaches points where it must not decide alone — a mutation
 needing approval, a requirement with two readings. Its only channel was the
 completion report, which is written once at the end, so the worker's choices
-were to proceed on its own authority or stop silently. `--permission-mode`
-defaults to `auto`, which fixes it to the first.
+were to proceed on its own authority or stop silently.
+
+#1054 restored the worker's stdin, so a *permission* prompt now has a channel —
+a human at the pane can answer it. This gate is still the only channel for the
+questions no permission prompt asks (which of two readings a requirement has,
+whether a plan is the right one), and the only one that survives nobody looking
+at the pane, because the question lands in a file the delegator can read later.
 
 This module gives the worker a third option: publish the question, block, and
 resume on the delegator's verdict.
