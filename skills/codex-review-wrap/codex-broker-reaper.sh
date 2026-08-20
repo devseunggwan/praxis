@@ -551,7 +551,12 @@ fi
 # none, and rm -rf'd the live session's dir (#921).
 session_dir_has_live_claimant() {
   local want="$1" self="$2" opid osdir odir
-  broker_index_ensure || return 1
+  # Fail CLOSED: without an index there is no evidence the dir is unclaimed, and
+  # a non-zero return here is what licenses the caller's rm -rf. The GC pass
+  # gates on the index before it gets here, so this cannot fire today; it is the
+  # convention workspace_has_live_owner already follows, kept consistent so a
+  # future caller cannot inherit the dangerous default.
+  broker_index_ensure || return 0
   # $self is the record under inspection, identified by its state dir -- the
   # index carries no broker.json path, and dirname($self) is exactly the third
   # field. Same per-pass index as state_dir_of_broker: this runs once per GC
