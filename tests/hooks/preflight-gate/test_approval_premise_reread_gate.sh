@@ -191,6 +191,32 @@ run_case "mcp_component_sets_quiet" \
   "$(verdict "$(mcp_payload 'mcp__laplace-figma__figma_get_component_sets' '{"phase":"prod"}')")" \
   "quiet"
 
+# The verbs this repository's own write vocabularies already name -- `merge`
+# and `submit`/`dismiss` from pr-claim-mutation-gate, `close`/`reopen` from
+# pipefail-advisory -- must not read as read-only here. Each of these is
+# irreversible on the surface it names.
+run_case "mcp_merge_pr_fires" \
+  "$(verdict "$(mcp_payload 'mcp__github__merge_pull_request' '{"repo":"prod-svc","pr":1}')")" \
+  "ask"
+
+run_case "mcp_close_issue_fires" \
+  "$(verdict "$(mcp_payload 'mcp__github__close_issue' '{"repo":"prod-svc","number":1}')")" \
+  "ask"
+
+run_case "mcp_reopen_fires" \
+  "$(verdict "$(mcp_payload 'mcp__github__reopen_issue' '{"repo":"prod-svc","number":1}')")" \
+  "ask"
+
+run_case "mcp_submit_review_fires" \
+  "$(verdict "$(mcp_payload 'mcp__github__submit_pending_review' '{"repo":"prod-svc"}')")" \
+  "ask"
+
+# The additions are token-matched like the rest, so a read-only leaf that
+# merely contains one as a substring stays quiet.
+run_case "mcp_closed_at_quiet" \
+  "$(verdict "$(mcp_payload 'mcp__github__list_closed_issues' '{"repo":"prod-svc"}')")" \
+  "quiet"
+
 # --- MCP: a read-only call is out of scope even carrying the marker --------
 run_case "mcp_query_quiet" \
   "$(verdict "$(mcp_payload 'mcp__laplace-trino__trino_query' '{"phase":"prod","sql":"select 1"}')")" \

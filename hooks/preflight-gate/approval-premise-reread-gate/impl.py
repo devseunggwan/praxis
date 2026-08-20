@@ -87,10 +87,19 @@ PROD_MARKER_RE = re.compile(
 # token matching removed all eight while losing no true positive.
 #
 # Read-only calls are out of scope entirely: a gate that fires on a query
-# becomes the noise it is meant to replace. One known false positive survives,
-# `airflow_import_errors`, which reads import errors rather than importing;
-# dropping "import" to silence it would lose `gitbook_git_import`, a real
-# mutation, so the miss is preferred over the drop.
+# becomes the noise it is meant to replace. Three known false positives
+# survive, all preferred over the miss that silencing them would buy:
+# `airflow_import_errors` reads import errors rather than importing, but
+# dropping "import" loses `gitbook_git_import`; `mysql_resolve_user_connectors`
+# is a query, but dropping "resolve" loses a review-thread resolve; and the
+# `merge_readiness_*` state tools are local, but dropping "merge" loses
+# `merge_pull_request`, which is irreversible.
+#
+# The second row is this repository's own write vocabulary rather than a fresh
+# reading of the tool surface: `pr-claim-mutation-gate/spec.md` classifies
+# `submit`/`resolve`/`dismiss`/`merge` as GitHub MCP writes and
+# `pipefail-advisory` adds `close`/`reopen`. A verb this repo already calls a
+# mutation must not read as read-only here.
 MUTATING_MCP_VERBS = frozenset((
     "trigger", "clear", "mark", "unmark", "delete", "drop", "create", "update",
     "send", "upload", "invite", "kick", "archive", "unarchive", "rename", "set",
@@ -98,6 +107,11 @@ MUTATING_MCP_VERBS = frozenset((
     "add", "reply", "forward", "label", "unlabel", "trash", "untrash", "share",
     "duplicate", "finalize", "redline", "respond", "apply", "convert", "ingest",
     "prune", "cleanup", "cancel", "start", "record", "import", "style",
+    "merge", "close", "reopen", "submit", "resolve", "dismiss", "comment",
+    "approve", "revoke", "grant", "restore", "enable", "disable", "stop",
+    "kill", "terminate", "truncate", "purge", "flush", "reset", "rollback",
+    "promote", "backfill", "deploy", "publish", "unpublish", "patch", "upsert",
+    "execute",
 ))
 
 

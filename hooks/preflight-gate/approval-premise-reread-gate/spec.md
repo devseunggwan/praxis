@@ -102,9 +102,20 @@ exposed in one session and an enumerated list of marker spellings.
 matching on that surface: it dropped eight read-only tools — `list_labels` via
 "label", `s3_count_records` via "record", `figma_get_component_sets` and
 `signoz_query_alert_preset` via "set", `shared_memory_read` via "share" — and
-lost no true positive. One false positive survives on purpose:
-`airflow_import_errors` reads import errors rather than importing, and dropping
-"import" to silence it would lose `gitbook_git_import`, a real mutation.
+lost no true positive. Three false positives survive on purpose, each because
+silencing it costs a real mutation: `airflow_import_errors` reads import errors
+rather than importing, but dropping "import" loses `gitbook_git_import`;
+`mysql_resolve_user_connectors` is a query, but dropping "resolve" loses a
+review-thread resolve; the `merge_readiness_*` tools are local session state,
+but dropping "merge" loses `merge_pull_request`.
+
+**The verb set is this repository's write vocabulary, not a fresh reading.**
+`pr-claim-mutation-gate/spec.md` already classifies `submit` / `resolve` /
+`dismiss` / `merge` as GitHub MCP writes and `pipefail-advisory` adds `close` /
+`reopen`. A verb this repository elsewhere calls a mutation must not read as
+read-only here, so those — plus the irreversible operations verbs adjacent to
+them (`approve`, `revoke`, `restore`, `truncate`, `purge`, `rollback`,
+`deploy`, `publish`, `execute`, and their neighbours) — are in the set.
 
 **The marker absorbs spacing and casing, but stops at named flags.** Accepted:
 `--phase prod`, `--phase=prod`, `--phase  prod`, `--phase PROD`, `-p prod`,
