@@ -41,7 +41,7 @@ runtime-verified-note: "cmux 0.64.22 — agent.hook.PostToolUse is not relayed a
 | `<task>` | (required) | 위임할 작업 설명 |
 | `--model` | `sonnet` | Provider:model notation. `opus`/`sonnet`/`haiku` = claude. Also supports `claude`, `claude:opus`, `codex`, `codex:o3`, `gemini`, `gemini:flash`. See project `ARCHITECTURE.md` Provider Routing. |
 | `--cwd` | current dir | 새 세션의 작업 디렉토리 |
-| `--max-budget-usd` | (none) | 최대 예산 한도 |
+| `--max-budget-usd` | — | **미지원 (#1054).** print 모드 전용 플래그라 대화형 워커에 쓸 수 없습니다. 주어지면 무시하지 말고 그 사실을 알리세요 |
 | `--account` | (기본 계정) | Claude 계정 프로필 (예: `claude-2` → `CLAUDE_CONFIG_DIR=~/.claude-2`) |
 | `--session` | (신규 생성) | 기존 워크스페이스에 전달 (이름 또는 workspace ref) |
 | `--distribute` | false | 독립 항목별 병렬 분산 실행 |
@@ -57,7 +57,9 @@ runtime-verified-note: "cmux 0.64.22 — agent.hook.PostToolUse is not relayed a
 args = parse("{{ARGUMENTS}}")
 model = args.model || "sonnet"
 cwd = args.cwd || $(pwd)
-budget = args["max-budget-usd"] || ""
+# 예산 플래그는 받되 전달하지 않고, 받았다는 사실을 사용자에게 알립니다 (#1054).
+# 조용히 버리면 사용자는 한도가 걸린 줄 알고 위임합니다.
+if args["max-budget-usd"]: warn("--max-budget-usd 는 대화형 워커에 적용되지 않습니다 (#1054)")
 account = args.account || ""
 session = args.session || ""
 distribute = args.distribute || false
@@ -332,15 +334,36 @@ SCRIPT_FILE="/tmp/cmux-delegate-{timestamp}.sh"
 # Cleanup: .sh만 삭제. .md는 보존 (다른 워크스페이스가 참조할 수 있음)
 trap 'rm -f "$SCRIPT_FILE"' EXIT
 
+# 프롬프트 파일을 못 읽으면 여기서 끝냅니다. `set -e` 가 없으므로 `wc` 가 실패해도
+# 스크립트는 계속 가고, 그러면 `[ "" -gt N ]` 이 에러를 내며 참이 아니게 되어 가드를
+# 지나친 뒤 빈 argv 가 claude 로 넘어갑니다 — 워커는 할 일 없는 세션으로 앉아 있고
+# rc 는 0 입니다. #1054 가 고치려던 거짓 완료와 같은 모양이므로 fail-closed 입니다.
+if ! PROMPT_BYTES=$(wc -c < "$PROMPT_FILE" 2>/dev/null) || [ "$PROMPT_BYTES" -eq 0 ]; then
+  echo "프롬프트 파일을 읽을 수 없거나 비어 있습니다: $PROMPT_FILE" >&2
+  cmux notify --title "cmux-delegate" --body "Failed to start: prompt unreadable" 2>/dev/null || true
+  exit 1
+fi
+
 # argv 로 넘기므로 프롬프트가 커널의 인자 한도를 먹습니다. 넘치면 exec 이 E2BIG
 # 로 실패하는데, 그 실패는 바깥에서 "워커가 아무 일도 안 했다"와 구별되지 않으므로
 # 여기서 먼저 잡습니다. 폴백은 두지 않습니다 — stdin 으로 되돌리는 순간 #1054 가
-# 그대로 돌아옵니다. ARG_MAX 는 환경변수까지 함께 세므로 4분의 1만 씁니다
-# (macOS 1MiB 기준 256KiB; 실측 프롬프트는 6~10KB 대).
-PROMPT_BYTES=$(wc -c < "$PROMPT_FILE")
+# 그대로 돌아옵니다.
+#
+# 한도가 둘인 이유: `ARG_MAX` 는 argv+envp **총합** 한도라 환경변수까지 함께 세므로
+# 4분의 1만 씁니다. 리눅스에는 그와 별개로 **인자 하나당** 한도가 있습니다 —
+# `execve(2)`: "the limit per string is 32 pages (the kernel constant
+# MAX_ARG_STRLEN)", 4KiB 페이지 기준 128KiB. 리눅스의 ARG_MAX 는 보통 2MiB 라
+# ARG_MAX/4 = 512KiB 로 이 한도의 4배가 되어, 둘 중 작은 쪽을 쓰지 않으면 가드를
+# 통과한 프롬프트가 execve 에서 거부됩니다. 실측 프롬프트는 6~10KB 대라 아직
+# 관측된 사고는 아닙니다.
+#
+# macOS 에서는 이 줄이 아무것도 좁히지 않습니다 — 페이지가 16KiB 라 32페이지가
+# 512KiB 가 되어 ARG_MAX/4(256KiB)보다 크고, min 이 후자를 고릅니다. 실측 확인함.
 ARG_LIMIT=$(( $(getconf ARG_MAX) / 4 ))
+STR_LIMIT=$(( 32 * $(getconf PAGE_SIZE) ))
+[ "$STR_LIMIT" -lt "$ARG_LIMIT" ] && ARG_LIMIT=$STR_LIMIT
 if [ "$PROMPT_BYTES" -gt "$ARG_LIMIT" ]; then
-  echo "프롬프트가 너무 큽니다: ${PROMPT_BYTES}B > ${ARG_LIMIT}B (ARG_MAX/4)" >&2
+  echo "프롬프트가 너무 큽니다: ${PROMPT_BYTES}B > ${ARG_LIMIT}B" >&2
   cmux notify --title "cmux-delegate" --body "Failed to start: prompt too large" 2>/dev/null || true
   exit 1
 fi
@@ -356,14 +379,20 @@ case "{provider}" in
     # 통째로 비어 보였습니다.
     #
     # 셸 해석 위험은 `-p "…인라인 리터럴…"` 형태의 문제이고, `"$(cat file)"` 은
-    # 셸이 치환 결과를 재해석하지 않으므로 특수문자가 그대로 보존됩니다.
+    # 셸이 치환 결과를 재해석하지 않으므로 특수문자가 그대로 보존됩니다. 단
+    # **후행 개행은 잘립니다** — 명령 치환의 정의된 동작이고 파이프와 다른 유일한
+    # 지점입니다. 내부 개행과 나머지 문자는 그대로이므로 프롬프트 의미에는 영향이
+    # 없지만, 파일 끝 바이트가 보존된다고 읽으면 안 됩니다.
     #
     # `--permission-mode` 는 넘기지 않습니다. 위임 워커는 평소 세션이므로 평소
     # 기본값을 씁니다. `dontAsk` 는 묻지 않고 거부라 워커가 똑같이 죽고, 유일하게
     # 툴이 도는 `bypassPermissions` 는 모든 게이트를 무력화합니다.
+    #
+    # `{budget_flag}` 도 넘기지 않습니다. `--max-budget-usd` 는 print 모드 전용인데
+    # 이 형태의 워커는 대화형이라 애초에 print 모드가 아닙니다. Step 1 이 예산을
+    # 받았으면 여기서 조용히 버리지 말고 그 사실을 사용자에게 알립니다.
     {claude_env} claude \
       --model {sub_model} \
-      {budget_flag} \
       "$(cat "$PROMPT_FILE")"
     ;;
   codex)
@@ -388,17 +417,29 @@ rc=$?
 # 미생성). 여기 도달하는 것은 사람이 세션을 나갔을 때뿐이고, 그때의 rc 는
 # 작업 성패가 아니라 세션 종료 방식을 말합니다. 완료 판정의 정본은 Step 7 이
 # 읽는 보고서 파일입니다 — 이 알림이 아닙니다.
-if [ "$rc" -eq 0 ]; then
-  cmux notify --title "cmux-delegate" --body "Task completed: {short_task}" 2>/dev/null || true
-else
-  cmux notify --title "cmux-delegate" --body "Task FAILED (exit $rc): {short_task}" 2>/dev/null || true
-fi
+case "{provider}" in
+  claude)
+    # 여기 도달했다는 것은 세션이 닫혔다는 뜻일 뿐, 작업이 끝났다는 뜻이 아닙니다.
+    # 사람은 작업 도중에도 rc=0 으로 나갈 수 있으므로 "completed" 라고 쓰지 않습니다.
+    cmux notify --title "cmux-delegate" --body "Claude session exited (rc=$rc): {short_task}" 2>/dev/null || true
+    ;;
+  *)
+    # codex/gemini 는 비대화형이라 rc 가 실제로 작업 성패를 말합니다.
+    if [ "$rc" -eq 0 ]; then
+      cmux notify --title "cmux-delegate" --body "Task completed: {short_task}" 2>/dev/null || true
+    else
+      cmux notify --title "cmux-delegate" --body "Task FAILED (exit $rc): {short_task}" 2>/dev/null || true
+    fi
+    ;;
+esac
 exit "$rc"
 ```
 
 `{provider}` and `{sub_model}` are substituted from the provider resolution result in Step 1.
 `{claude_env}` is substituted with `CLAUDE_CONFIG_DIR=~/.{account}` when account is specified (claude provider only).
-`{budget_flag}` is substituted with `--max-budget-usd {budget}` when budget is specified (claude provider only — codex/gemini do not support budget limits).
+`{budget_flag}` 는 더 이상 치환되지 않습니다 (#1054). `--max-budget-usd` 가 print
+모드 전용이라 대화형 워커에는 쓸 수 없기 때문입니다 — codex/gemini 는 애초에 예산
+한도를 지원하지 않으므로, 이 스킬 전체에 예산을 전달할 경로가 없습니다.
 
 **claude 분기는 stdin·stdout 어느 쪽도 파이프에 물리지 않습니다.** 이것이 이 형태의
 요점이라 편의를 위해서라도 되돌리면 안 됩니다 — stdin 을 물리면 워커가 권한

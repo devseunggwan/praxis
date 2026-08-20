@@ -47,7 +47,13 @@ Skills that dispatch external CLI workers (`cmux-delegate`) can route tasks to m
 | `codex` | `cat $F \| codex exec {m:+-m m} -o $RESULT_FILE` | stdout verbose logs + last message isolated in `$RESULT_FILE` (preferred); `--json` JSONL also supported | `cat file \| codex exec` | Sandbox-restricted — explicit fallback required |
 | `gemini` | `gemini -p "$(cat $F)" --approval-mode yolo {m:+-m m}` | stream-json (`-o stream-json`) | via `-p` flag | Full |
 
-All providers share the same completion sentinel: `; echo '===WORKER_DONE===' >> $LOG` appended after the CLI exits.
+There is no completion sentinel in this repository. The line documenting
+`; echo '===WORKER_DONE===' >> $LOG` as a shared convention has been removed (#1054):
+`grep -rn WORKER_DONE` found that sentence and nothing else — no caller ever appended
+it and no consumer ever waited on it. It also cannot hold for `cmux-delegate`, whose
+claude worker stays interactive and does not exit after the task. Completion is
+decided by the worker's report file (`cmux-delegate` Step 7), which is keyed by
+workspace UUID and readable whenever the delegator looks.
 
 The `claude` row's stdin column carries a precondition the command does not state.
 `claude --help` says the workspace trust dialog is skipped "via `-p`, or when

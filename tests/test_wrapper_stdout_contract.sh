@@ -127,4 +127,41 @@ assert_absent \
   "the worker is not handed a permission-mode override" \
   "--permission-mode {permission_mode}"
 
+# ---------------------------------------------------------------------------
+# 6. Findings from the #1057 review — each one was live-reproduced, so each
+#    gets an assertion rather than a comment. Deleting any of these silently
+#    restores a shape that was measured to fail.
+# ---------------------------------------------------------------------------
+
+# A missing prompt file passed the old guard and handed claude an empty argv:
+# the worker sat idle and the wrapper reported rc=0 — #1054's shape again.
+assert_present \
+  "the wrapper refuses to start on an unreadable or empty prompt file" \
+  'if ! PROMPT_BYTES=$(wc -c < "$PROMPT_FILE" 2>/dev/null) || [ "$PROMPT_BYTES" -eq 0 ]; then'
+
+# ARG_MAX is the argv+envp total; Linux caps each single string separately at
+# 32 pages, which is 4x smaller than ARG_MAX/4 on a typical Linux box.
+assert_present \
+  "the per-string kernel limit is enforced alongside the total" \
+  'STR_LIMIT=$(( 32 * $(getconf PAGE_SIZE) ))'
+
+assert_present \
+  "the smaller of the two limits wins" \
+  '[ "$STR_LIMIT" -lt "$ARG_LIMIT" ] && ARG_LIMIT=$STR_LIMIT'
+
+# --max-budget-usd is print-mode only, and this worker is interactive.
+assert_absent \
+  "no budget flag reaches the interactive claude invocation" \
+  "{budget_flag} \\"
+
+# rc here reports how the session closed, not whether the task finished.
+assert_present \
+  "the claude notify says session exit, not task completion" \
+  'Claude session exited (rc=$rc)'
+
+# Command substitution strips trailing newlines; the pipe did not.
+assert_present \
+  "the one behavioural difference from the pipe is stated" \
+  "후행 개행은 잘립니다"
+
 assert_lib_summary
