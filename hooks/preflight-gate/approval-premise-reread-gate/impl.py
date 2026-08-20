@@ -415,33 +415,70 @@ def _message(tool_name: str, target: str, session_id: str = "") -> str:
     )
 
 
+_COMMENT_BOUNDARY = " \t;|&()<>"
+
+
+def _first_unquoted_comment(command: str) -> int | None:
+    """Index of the `#` that bash would read as opening the first comment.
+
+    `safe_tokenize` strips quote delimiters, so after it a quoted `'#'` and a
+    real comment opener are the same token -- which is why this walks the raw
+    text instead. Quote state and the word boundary both have to hold: bash
+    reads `#` as a comment only at the start of a word, and not at all inside
+    quotes.
+    """
+    quote = ""
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch == "\\":
+            i += 2
+            continue
+        if ch in "'\"":
+            quote = ch
+            i += 1
+            continue
+        if ch == "#" and (i == 0 or command[i - 1] in _COMMENT_BOUNDARY):
+            return i
+        i += 1
+    return None
+
+
 def _bash_ack(command: str) -> bool:
     """True when the command's FIRST comment is the marker plus a premise.
 
-    Position decides, not presence, and three positions are wrong. A quoted
-    occurrence is data: `safe_tokenize` keeps it inside the token it belongs
-    to, so `-f body='# approval-premise:ack ...'` -- a request body -- never
-    looks like a comment opener. A marker inside an *earlier* comment is prose
-    about the marker (`# note # approval-premise:ack ...`), so only the first
-    opener is read. And a marker on an earlier line attests for that line, not
-    for a mutation below it, so nothing may follow the comment: the tokenizer
-    ends a line with `;`, and a `;` after the marker means a command comes
-    next.
+    Position decides, not presence, and four positions are wrong. A quoted
+    occurrence is data whether it is the whole marker (`-f body='# ...'`) or
+    just the `#` (`bash -c '...' '#' approval-premise:ack`), so the opener is
+    found in the raw text with quote state intact. A marker inside an *earlier*
+    comment is prose about the marker. And a marker on an earlier line attests
+    for that line, not for a mutation below it, so nothing may follow the
+    comment's own line.
     """
-    tokens = safe_tokenize(command)
-    idx = next((i for i, tok in enumerate(tokens) if tok.startswith("#")), None)
+    idx = _first_unquoted_comment(command)
     if idx is None:
         return False
-    opener = tokens[idx]
-    if opener == "#":
-        word, premise_at = (tokens[idx + 1] if idx + 1 < len(tokens) else ""), idx + 2
-    else:
-        word, premise_at = opener[1:], idx + 1
-    if word != ACK_WORD:
+    comment = command[idx + 1:]
+    newline = comment.find("\n")
+    if newline != -1:
+        if command[idx + 1 + newline + 1:].strip():
+            return False  # a command follows on a later line
+        comment = comment[:newline]
+    body = comment.strip()
+    if not body.startswith(ACK_WORD):
         return False
-    if ";" in tokens[premise_at:]:
-        return False
-    return bool(" ".join(tokens[premise_at:]).strip())
+    premise = body[len(ACK_WORD):]
+    if premise and not premise[:1].isspace():
+        return False  # the marker ran into a longer word
+    return bool(premise.strip())
 
 
 def _ack_file(session_id: str) -> str:

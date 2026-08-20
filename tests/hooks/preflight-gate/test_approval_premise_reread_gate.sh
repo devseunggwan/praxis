@@ -210,6 +210,22 @@ run_case "ack_bash_quoted_string_in_chain" \
   "$(verdict "$(bash_payload 'echo "# approval-premise:ack in a string" --phase prod && kubectl delete pod x -n prod-apne2')")" \
   "ask"
 
+# `safe_tokenize` strips quote delimiters, so after it a quoted `'"'"'#'"'"'` and a real
+# comment opener are the same token. The opener is found in the raw text.
+run_case "ack_bash_quoted_hash_single" \
+  "$(verdict "$(bash_payload "bash -c 'kubectl delete pod x --profile prod' '#' approval-premise:ack reread")")" \
+  "ask"
+
+run_case "ack_bash_quoted_hash_double" \
+  "$(verdict "$(bash_payload 'bash -c "kubectl delete pod x --profile prod" "#" approval-premise:ack reread')")" \
+  "ask"
+
+# The marker must be a whole word: a longer token that merely starts with it
+# is not the marker.
+run_case "ack_bash_marker_prefix_of_word" \
+  "$(verdict "$(bash_payload 'kubectl delete pod x -n prod-apne2 # approval-premise:ackNOTAWORD')")" \
+  "ask"
+
 # A marker inside an EARLIER comment is prose about the marker, not an
 # attestation -- only the first comment opener is read.
 run_case "ack_bash_second_comment" \

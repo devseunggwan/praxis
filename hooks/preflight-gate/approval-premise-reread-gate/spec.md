@@ -62,9 +62,11 @@ inside an unrelated MCP field — a runbook quote, a description, a log line —
 which no one wrote as an attestation, and which the caller cannot even see.
 
 On the Bash surface "where it is declared" means the command's **first unquoted
-comment**, not a substring of the command. `safe_tokenize` leaves a `#` that opens a real shell
-comment standing as its own token and keeps a quoted one inside the token it
-belongs to, so the marker is read only in the first position. Without that,
+comment**, not a substring of the command. The opener is located in the raw text with quote
+state intact rather than in the token stream: `safe_tokenize` strips quote
+delimiters, so after it `'#'` and a real comment opener are the same token and
+`bash -c '<mutation>' '#' approval-premise:ack …` attests for a command it only
+quotes. Without that,
 `gh api -X POST repos/o/prod-svc/issues -f body='# approval-premise:ack ...'`
 attests with its own request body — the mutation carries the words that excuse
 it. Two further positions are refused for the same reason: a marker inside an
