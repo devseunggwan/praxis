@@ -66,7 +66,7 @@ mcp_payload() {
 # The MCP acknowledgement is a hook-owned file, so the suite gets its own
 # PRAXIS_HOME: without it these cases would read and delete the running user's
 # real ack file.
-PRAXIS_HOME="$(mktemp -d)"
+PRAXIS_HOME="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
 export PRAXIS_HOME
 trap 'rm -rf "$PRAXIS_HOME"' EXIT
 ACK_FILE="$PRAXIS_HOME/cache/approval-premise-ack-test-session.json"
