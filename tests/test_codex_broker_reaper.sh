@@ -894,6 +894,91 @@ else
 fi
 
 
+# --- Gate 8: version-drift warning against the plugin manifest (#1059) ------
+# The launchd plist pins the reaper's path down to a plugin version, so an
+# updated plugin leaves the job running an old copy with no signal at all. The
+# reaper compares its own location against the manifest's installPath and says
+# so. Two boundaries the assertions below pin: the check speaks ONLY when the
+# script itself is running from inside the plugin cache (a dev checkout must
+# not warn on every run, or the warning becomes noise nobody reads), and a
+# mismatch never changes what the run does or what it exits with.
+TMPROOT8="${TMPDIR:-/tmp}"; TMPROOT8="${TMPROOT8%/}"
+TMPD8="$(mktemp -d "$TMPROOT8/px1059g8.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+cleanup_gate8() {
+  rm -rf "$TMPD8"
+  declare -F cleanup_gate7 >/dev/null && cleanup_gate7
+  return 0
+}
+trap cleanup_gate8 EXIT INT TERM
+
+if ! command -v jq >/dev/null 2>&1; then
+  skip "#1059 gate 8: needs jq"
+else
+  CONFIG8="$TMPD8/config"
+  CACHE8="$CONFIG8/plugins/cache/praxis/praxis"
+  mkdir -p "$CONFIG8/plugins" "$CACHE8/9.9.9/skills/codex-review-wrap" \
+           "$CACHE8/9.9.8/skills/codex-review-wrap"
+  # The manifest names 9.9.9 as the installed version; a copy of the reaper is
+  # planted under BOTH that path and the older 9.9.8, so the same script can be
+  # run from the current tree and from a stale one.
+  printf '{"plugins":{"praxis@praxis":[{"version":"9.9.9","installPath":"%s/9.9.9"}]}}\n' \
+    "$CACHE8" > "$CONFIG8/plugins/installed_plugins.json"
+  cp "$REAPER" "$CACHE8/9.9.9/skills/codex-review-wrap/codex-broker-reaper.sh"
+  cp "$REAPER" "$CACHE8/9.9.8/skills/codex-review-wrap/codex-broker-reaper.sh"
+
+  # (a) stale copy inside the cache -> warns, and names both versions
+  OUT8_STALE="$(TMPDIR="$TMPD8" CLAUDE_CONFIG_DIR="$CONFIG8" \
+    bash "$CACHE8/9.9.8/skills/codex-review-wrap/codex-broker-reaper.sh" --gc --dry-run 2>&1)"
+  RC8_STALE=$?
+  case "$OUT8_STALE" in
+    *"version drift"*9.9.8*9.9.9*) pass "#1059 gate 8: stale cache copy warns and names both versions" ;;
+    *) fail "#1059 gate 8: expected a version-drift warning naming 9.9.8 and 9.9.9 (output: $OUT8_STALE)" ;;
+  esac
+
+  # (b) the warning is advisory — the run still completes and exits 0
+  if [ "$RC8_STALE" -eq 0 ]; then
+    pass "#1059 gate 8: a drifted run still exits 0"
+  else
+    fail "#1059 gate 8: drifted run exited $RC8_STALE, expected 0"
+  fi
+  case "$OUT8_STALE" in
+    *"codex-broker-reaper: mode=gc"*) pass "#1059 gate 8: a drifted run still does its work" ;;
+    *) fail "#1059 gate 8: drifted run printed no summary line (output: $OUT8_STALE)" ;;
+  esac
+
+  # (c) positive control — the current copy must NOT warn. Without this, a check
+  # that never fires at all would satisfy (a) only by accident of the fixture.
+  OUT8_CUR="$(TMPDIR="$TMPD8" CLAUDE_CONFIG_DIR="$CONFIG8" \
+    bash "$CACHE8/9.9.9/skills/codex-review-wrap/codex-broker-reaper.sh" --gc --dry-run 2>&1)"
+  case "$OUT8_CUR" in
+    *"version drift"*) fail "#1059 gate 8: the current copy warned (output: $OUT8_CUR)" ;;
+    *) pass "#1059 gate 8: the copy the manifest points at stays silent" ;;
+  esac
+
+  # (d) run from outside the cache (this repo's own tree) -> silent, even though
+  # its path can never equal installPath.
+  OUT8_DEV="$(TMPDIR="$TMPD8" CLAUDE_CONFIG_DIR="$CONFIG8" bash "$REAPER" --gc --dry-run 2>&1)"
+  case "$OUT8_DEV" in
+    *"version drift"*) fail "#1059 gate 8: a checkout outside the cache warned (output: $OUT8_DEV)" ;;
+    *) pass "#1059 gate 8: a checkout outside the cache stays silent" ;;
+  esac
+
+  # (e) no manifest at all -> silent. An unreadable manifest is not evidence of
+  # drift, and a warning there would fire on every host that installed the
+  # plugin some other way.
+  CONFIG8B="$TMPD8/config-nomanifest"
+  mkdir -p "$CONFIG8B/plugins/cache/praxis/praxis/9.9.8/skills/codex-review-wrap"
+  cp "$REAPER" "$CONFIG8B/plugins/cache/praxis/praxis/9.9.8/skills/codex-review-wrap/codex-broker-reaper.sh"
+  OUT8_NOMAN="$(TMPDIR="$TMPD8" CLAUDE_CONFIG_DIR="$CONFIG8B" \
+    bash "$CONFIG8B/plugins/cache/praxis/praxis/9.9.8/skills/codex-review-wrap/codex-broker-reaper.sh" \
+    --gc --dry-run 2>&1)"
+  case "$OUT8_NOMAN" in
+    *"version drift"*) fail "#1059 gate 8: warned with no manifest present (output: $OUT8_NOMAN)" ;;
+    *) pass "#1059 gate 8: a missing manifest is not read as drift" ;;
+  esac
+fi
+
+
 echo "=== summary ==="
 echo "PASS: $PASS"
 echo "FAIL: $FAIL"
