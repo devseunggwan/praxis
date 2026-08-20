@@ -123,6 +123,18 @@ broker_index_ensure() {
            | [(.pid|tostring), .sessionDir,
               (input_filename | rtrimstr("/broker.json"))] | @tsv' \
        "${files[@]}" 2>/dev/null > "$f" || true
+    # A jq that failed leaves an EMPTY index behind, and an empty index is
+    # indistinguishable from "no records exist" at every call site. The reap
+    # pass survives that (no match -> owner undetermined -> broker kept), but
+    # the GC pass would read zero rows and report gc_dirs=0 as if the sweep had
+    # run. Files present + zero rows also happens legitimately when every
+    # record is malformed; both readings call for the same answer, which is why
+    # this reports failure instead of telling them apart -- refusing to sweep is
+    # correct whether jq died or the records are unusable.
+    if [[ ! -s "$f" ]]; then
+      rm -f "$f"
+      return 1
+    fi
   fi
   BROKER_INDEX="$f"
   return 0

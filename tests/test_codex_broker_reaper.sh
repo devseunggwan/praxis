@@ -783,6 +783,59 @@ fi   # Darwin gate (5b)
 fi   # jq gate (gate 5)
 
 echo ""
+
+# --- Gate 6: an unusable broker index must not read as an empty sweep --------
+# The GC pass iterates the per-pass index rather than re-parsing every
+# broker.json (two jq spawns per record was the script's whole runtime). That
+# makes a failed index build silently equivalent to "no records exist": the
+# loop reads zero rows and the summary still prints gc_dirs=0, which is exactly
+# what a clean sweep prints. This gate pins the refusal instead.
+# Strip the trailing slash TMPDIR carries on macOS before building a path under
+# it: is_safe_session_dir rejects any path containing "//" outright (its
+# traversal screen), so the doubled separator makes a legitimate sessionDir
+# unsafe and nothing is ever collected. The refusal assertions below would then
+# pass for the wrong reason — which is what the positive control exists to catch.
+TMPROOT6="${TMPDIR:-/tmp}"; TMPROOT6="${TMPROOT6%/}"
+TMPD6="$(mktemp -d "$TMPROOT6/px1056g6.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+CONFIG6="$TMPD6/config"
+SD6="$CONFIG6/plugins/data/codex-openai-codex/state/ws6-deadbeef"
+mkdir -p "$SD6"
+SESS6="$TMPD6/cxc-GATE6"
+mkdir -p "$SESS6"
+# A dead pid whose sessionDir still exists — the one shape --gc collects.
+DEAD6=99999
+while kill -0 "$DEAD6" 2>/dev/null; do DEAD6=$((DEAD6 - 1)); done
+printf '{"pid":%s,"sessionDir":"%s"}\n' "$DEAD6" "$SESS6" > "$SD6/broker.json"
+
+if ! command -v jq >/dev/null 2>&1; then
+  skip "#1056 gate 6: needs jq for the positive control"
+else
+  # Positive control first: without it, a refusal below proves nothing — a
+  # fixture that never collected anything also reports gc_dirs=0.
+  OK6="$(TMPDIR="$TMPD6" CLAUDE_CONFIG_DIR="$CONFIG6" bash "$REAPER" --gc --dry-run 2>&1)"
+  case "$OK6" in
+    *"WOULD GC  dir=$SESS6"*) pass "#1056 gate 6 control: --gc collects the dead record" ;;
+    *) fail "#1056 gate 6 control: --gc should have collected $SESS6 (output: $OK6)" ;;
+  esac
+
+  # Now break the index build by putting a failing `jq` first on PATH.
+  BIN6="$TMPD6/bin"; mkdir -p "$BIN6"
+  printf '#!/bin/sh\nexit 127\n' > "$BIN6/jq"; chmod +x "$BIN6/jq"
+  BAD6="$(PATH="$BIN6:$PATH" TMPDIR="$TMPD6" CLAUDE_CONFIG_DIR="$CONFIG6" \
+          bash "$REAPER" --gc --dry-run 2>&1)"
+  case "$BAD6" in
+    *"WOULD GC"*) fail "#1056 gate 6: --gc collected with an unusable index (output: $BAD6)" ;;
+    *"SKIP GC"*)  pass "#1056 gate 6: unusable index refuses the sweep and says so" ;;
+    *)            fail "#1056 gate 6: unusable index swept silently — no SKIP GC line (output: $BAD6)" ;;
+  esac
+
+  # The refusal must not have deleted anything on the way out.
+  if [ -d "$SESS6" ]; then pass "#1056 gate 6: refusal left the sessionDir intact"
+  else fail "#1056 gate 6: refusal deleted $SESS6"; fi
+fi
+rm -rf "$TMPD6"
+
+
 echo "=== summary ==="
 echo "PASS: $PASS"
 echo "FAIL: $FAIL"
