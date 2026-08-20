@@ -56,7 +56,7 @@ STATE_SUFFIX="plugins/data/codex-openai-codex/state"
 # writes its broker.json under the config dir of the SESSION THAT STARTED IT, so
 # a reaper reading only $STATE_DIR cannot resolve the rest: pid+sessionDir
 # matches nothing, owner_status returns `unknown`, and the under-reap bias keeps
-# them forever. Measured on the author's host: 2143 of 2711 skips across 541
+# them forever. Measured on the author's host: 2161 of 2687 skips across 544
 # launchd runs.
 #
 # Candidates are SIBLINGS of CONFIG_DIR rather than a $HOME glob. Production

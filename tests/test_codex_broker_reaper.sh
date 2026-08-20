@@ -632,8 +632,8 @@ fi   # jq gate
 # broker records its broker.json under the config dir of the session that
 # started it, so a reaper reading only its OWN config dir cannot resolve those
 # brokers: pid+sessionDir matches nothing, owner_status returns `unknown`, and
-# the under-reap bias keeps them forever. Measured on the author's host: 2143 of
-# 2711 skips over 541 launchd runs were `owner unknown`, and pointing
+# the under-reap bias keeps them forever. Measured on the author's host: 2161 of
+# 2687 skips over 544 launchd runs were `owner unknown`, and pointing
 # CLAUDE_CONFIG_DIR at the sibling flipped 17 of 19 to reapable.
 #
 # The fix reads every config dir that is a SIBLING of CONFIG_DIR. Both halves of
