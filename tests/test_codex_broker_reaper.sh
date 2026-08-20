@@ -797,6 +797,15 @@ echo ""
 # pass for the wrong reason — which is what the positive control exists to catch.
 TMPROOT6="${TMPDIR:-/tmp}"; TMPROOT6="${TMPROOT6%/}"
 TMPD6="$(mktemp -d "$TMPROOT6/px1056g6.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+# Chain gate 5's handler rather than replacing it: an early exit anywhere below
+# would otherwise leave this fixture behind, since the active trap only knows
+# about $TMPD5.
+cleanup_gate6() {
+  rm -rf "$TMPD6"
+  declare -F cleanup_gate5 >/dev/null && cleanup_gate5
+  return 0
+}
+trap cleanup_gate6 EXIT INT TERM
 CONFIG6="$TMPD6/config"
 SD6="$CONFIG6/plugins/data/codex-openai-codex/state/ws6-deadbeef"
 mkdir -p "$SD6"
