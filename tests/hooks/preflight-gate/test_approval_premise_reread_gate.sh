@@ -193,6 +193,19 @@ run_case "ack_bash_quoted_string_in_chain" \
   "$(verdict "$(bash_payload 'echo "# approval-premise:ack in a string" --phase prod && kubectl delete pod x -n prod-apne2')")" \
   "ask"
 
+# A marker inside an EARLIER comment is prose about the marker, not an
+# attestation -- only the first comment opener is read.
+run_case "ack_bash_second_comment" \
+  "$(verdict "$(bash_payload 'kubectl delete pod x --profile prod # note # approval-premise:ack reread')")" \
+  "ask"
+
+# A marker on an earlier line attests for that line. The tokenizer ends a line
+# with `;`, so anything after the comment means a command follows it.
+run_case "ack_bash_earlier_line" \
+  "$(verdict "$(bash_payload 'echo hi # approval-premise:ack really re-read
+kubectl delete pod x --profile prod')")" \
+  "ask"
+
 run_case "ack_bash_comment_honoured" \
   "$(verdict "$(bash_payload 'kubectl delete pod x -n prod-apne2  # approval-premise:ack run 16 already recovered, target re-measured')")" \
   "quiet"

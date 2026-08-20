@@ -416,24 +416,32 @@ def _message(tool_name: str, target: str, session_id: str = "") -> str:
 
 
 def _bash_ack(command: str) -> bool:
-    """True when an unquoted Bash comment carries the marker *and* a premise.
+    """True when the command's FIRST comment is the marker plus a premise.
 
-    Position decides, not presence. `safe_tokenize` leaves a `#` that opens a
-    real shell comment standing as its own token and keeps a quoted one inside
-    the token it belongs to, so `-f body='# approval-premise:ack ...'` -- a
-    request body, not an attestation -- is a single token and never matches.
+    Position decides, not presence, and three positions are wrong. A quoted
+    occurrence is data: `safe_tokenize` keeps it inside the token it belongs
+    to, so `-f body='# approval-premise:ack ...'` -- a request body -- never
+    looks like a comment opener. A marker inside an *earlier* comment is prose
+    about the marker (`# note # approval-premise:ack ...`), so only the first
+    opener is read. And a marker on an earlier line attests for that line, not
+    for a mutation below it, so nothing may follow the comment: the tokenizer
+    ends a line with `;`, and a `;` after the marker means a command comes
+    next.
     """
     tokens = safe_tokenize(command)
-    for i, tok in enumerate(tokens):
-        if tok == "#":
-            word, rest = (tokens[i + 1] if i + 1 < len(tokens) else ""), tokens[i + 2:]
-        elif tok == "#" + ACK_WORD:
-            word, rest = ACK_WORD, tokens[i + 1:]
-        else:
-            continue
-        if word == ACK_WORD and " ".join(rest).strip():
-            return True
-    return False
+    idx = next((i for i, tok in enumerate(tokens) if tok.startswith("#")), None)
+    if idx is None:
+        return False
+    opener = tokens[idx]
+    if opener == "#":
+        word, premise_at = (tokens[idx + 1] if idx + 1 < len(tokens) else ""), idx + 2
+    else:
+        word, premise_at = opener[1:], idx + 1
+    if word != ACK_WORD:
+        return False
+    if ";" in tokens[premise_at:]:
+        return False
+    return bool(" ".join(tokens[premise_at:]).strip())
 
 
 def _ack_file(session_id: str) -> str:

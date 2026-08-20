@@ -61,13 +61,17 @@ serialized input. A substring scan accepts `# approval-premise:ack` sitting
 inside an unrelated MCP field — a runbook quote, a description, a log line —
 which no one wrote as an attestation, and which the caller cannot even see.
 
-On the Bash surface "where it is declared" means an **unquoted comment**, not a
-substring of the command. `safe_tokenize` leaves a `#` that opens a real shell
+On the Bash surface "where it is declared" means the command's **first unquoted
+comment**, not a substring of the command. `safe_tokenize` leaves a `#` that opens a real shell
 comment standing as its own token and keeps a quoted one inside the token it
 belongs to, so the marker is read only in the first position. Without that,
 `gh api -X POST repos/o/prod-svc/issues -f body='# approval-premise:ack ...'`
 attests with its own request body — the mutation carries the words that excuse
-it.
+it. Two further positions are refused for the same reason: a marker inside an
+*earlier* comment (`# note # approval-premise:ack …`) is prose about the
+marker, and a marker on an *earlier line* attests for that line rather than for
+a mutation below it — the tokenizer ends a line with `;`, so a `;` after the
+marker means a command follows.
 
 ## Known ceiling
 
