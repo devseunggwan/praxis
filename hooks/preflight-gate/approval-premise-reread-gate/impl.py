@@ -60,7 +60,7 @@ ACK_ARG = "approval_premise_ack"
 # -- the comment in the Bash command, the argument in the MCP input -- because a
 # substring search over serialized input accepts the marker sitting inside an
 # unrelated field, which no one wrote as an attestation.
-_BASH_ACK_RE = re.compile(re.escape(ACK_MARKER) + r"[ \t]*(?P<premise>\S.*)")
+ACK_WORD = ACK_MARKER.split("#", 1)[1].strip()
 
 # A production phase marker arrives as a flag value, an MCP argument, or a
 # quoted identifier. The named flags absorb the spacing and casing variants a
@@ -390,9 +390,24 @@ def _message(tool_name: str, target: str) -> str:
 
 
 def _bash_ack(command: str) -> bool:
-    """True when the Bash comment carries the marker *and* a premise after it."""
-    match = _BASH_ACK_RE.search(command)
-    return bool(match and match.group("premise").strip())
+    """True when an unquoted Bash comment carries the marker *and* a premise.
+
+    Position decides, not presence. `safe_tokenize` leaves a `#` that opens a
+    real shell comment standing as its own token and keeps a quoted one inside
+    the token it belongs to, so `-f body='# approval-premise:ack ...'` -- a
+    request body, not an attestation -- is a single token and never matches.
+    """
+    tokens = safe_tokenize(command)
+    for i, tok in enumerate(tokens):
+        if tok == "#":
+            word, rest = (tokens[i + 1] if i + 1 < len(tokens) else ""), tokens[i + 2:]
+        elif tok == "#" + ACK_WORD:
+            word, rest = ACK_WORD, tokens[i + 1:]
+        else:
+            continue
+        if word == ACK_WORD and " ".join(rest).strip():
+            return True
+    return False
 
 
 def _mcp_ack(tool_input: dict) -> bool:

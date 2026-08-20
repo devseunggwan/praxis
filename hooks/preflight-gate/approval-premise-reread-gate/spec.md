@@ -48,6 +48,14 @@ serialized input. A substring scan accepts `# approval-premise:ack` sitting
 inside an unrelated MCP field — a runbook quote, a description, a log line —
 which no one wrote as an attestation, and which the caller cannot even see.
 
+On the Bash surface "where it is declared" means an **unquoted comment**, not a
+substring of the command. `safe_tokenize` leaves a `#` that opens a real shell
+comment standing as its own token and keeps a quoted one inside the token it
+belongs to, so the marker is read only in the first position. Without that,
+`gh api -X POST repos/o/prod-svc/issues -f body='# approval-premise:ack ...'`
+attests with its own request body — the mutation carries the words that excuse
+it.
+
 ## Known ceiling
 
 The gate checks that an approval record **exists, names a justification, and

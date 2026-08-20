@@ -163,6 +163,24 @@ run_case "mcp_ack" \
 # unrelated MCP field was never written as an attestation. ----------------
 run_case "ack_bash_bare"        "$(verdict "$(bash_payload 'hubctl dev trigger --phase prod # approval-premise:ack')")"       "ask"
 run_case "ack_bash_whitespace"  "$(verdict "$(bash_payload 'hubctl dev trigger --phase prod # approval-premise:ack   ')")"    "ask"
+# The marker has to open a real shell comment. A quoted occurrence is data --
+# a request body, a string argument -- and nobody wrote it as an attestation.
+run_case "ack_bash_quoted_body" \
+  "$(verdict "$(bash_payload "gh api -X POST repos/o/prod-svc/issues -f body='# approval-premise:ack copied from runbook'")")" \
+  "ask"
+
+run_case "ack_bash_quoted_string_in_chain" \
+  "$(verdict "$(bash_payload 'echo "# approval-premise:ack in a string" --phase prod && kubectl delete pod x -n prod-apne2')")" \
+  "ask"
+
+run_case "ack_bash_comment_honoured" \
+  "$(verdict "$(bash_payload 'kubectl delete pod x -n prod-apne2  # approval-premise:ack run 16 already recovered, target re-measured')")" \
+  "quiet"
+
+run_case "ack_bash_comment_no_space" \
+  "$(verdict "$(bash_payload 'kubectl delete pod x -n prod-apne2  #approval-premise:ack re-measured on this pod')")" \
+  "quiet"
+
 run_case "ack_mcp_stray_marker" \
   "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","note":"see # approval-premise:ack in runbook"}')")" \
   "ask"
