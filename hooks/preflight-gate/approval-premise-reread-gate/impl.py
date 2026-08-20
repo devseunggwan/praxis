@@ -499,9 +499,12 @@ def main() -> int:
             return 0
         target = command.strip().splitlines()[0][:120]
     elif _is_mutating_mcp(tool_name):
-        if _mcp_ack(session_id):
-            return 0
+        # Marker first: the ack file is consumed on read, so testing it before
+        # this would let an unrelated non-production mutation eat the premise
+        # written for the production call that is about to be re-issued.
         if not _carries_prod_marker(blob):
+            return 0
+        if _mcp_ack(session_id):
             return 0
         target = str(tool_input.get("dag_id") or tool_input.get("conf") or "")[:120]
     else:

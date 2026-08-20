@@ -172,6 +172,17 @@ run_case "mcp_ack" \
   "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
   "quiet"
 
+# The ack is consumed on read, so a mutation the gate would not have asked
+# about must not eat the premise written for the production call.
+write_ack '{"premise": "re-measured on this target"}'
+run_case "mcp_ack_survives_unmarked_call" \
+  "$(verdict "$(mcp_payload 'mcp__laplace-slack__slack_send_message' '{"channel":"dev-alerts"}')")" \
+  "quiet"
+
+run_case "mcp_ack_used_by_marked_call" \
+  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
+  "quiet"
+
 # Consumed on read: the same call a second time has nothing left to stand on,
 # which is what stops one acknowledgement from becoming an off switch.
 run_case "mcp_ack_consumed_once" \
