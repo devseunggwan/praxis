@@ -158,6 +158,21 @@ run_case "mcp_ack" \
   "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"},"approval_premise_ack":"re-read"}')")" \
   "quiet"
 
+# --- The acknowledgement is a statement, and it is read only on the surface
+# where it is declared. A bare marker attests nothing; a marker sitting in an
+# unrelated MCP field was never written as an attestation. ----------------
+run_case "ack_bash_bare"        "$(verdict "$(bash_payload 'hubctl dev trigger --phase prod # approval-premise:ack')")"       "ask"
+run_case "ack_bash_whitespace"  "$(verdict "$(bash_payload 'hubctl dev trigger --phase prod # approval-premise:ack   ')")"    "ask"
+run_case "ack_mcp_stray_marker" \
+  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","note":"see # approval-premise:ack in runbook"}')")" \
+  "ask"
+run_case "ack_mcp_boolean" \
+  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","approval_premise_ack":true}')")" \
+  "ask"
+run_case "ack_mcp_blank_string" \
+  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","approval_premise_ack":"   "}')")" \
+  "ask"
+
 # --- MCP: mutation classification by token, not by substring ---------------
 # Each of these was misclassified by substring matching on the 374-tool surface.
 run_case "mcp_trigger_fires" \

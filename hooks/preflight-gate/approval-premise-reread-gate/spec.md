@@ -14,8 +14,11 @@ The gate emits `ask` when **all** of the following hold:
    on queries becomes the noise it exists to replace. The two branches ask the
    question from opposite ends, and the section below says why.
 2. The call's arguments carry a production phase marker (`PROD_MARKER_RE`).
-3. No acknowledgement is present — neither the `# approval-premise:ack` comment
-   in a Bash command nor the `approval_premise_ack` MCP argument.
+3. No acknowledgement is present. Each surface is read only where it is
+   declared: the `# approval-premise:ack <premise>` comment **in the Bash
+   command**, the `approval_premise_ack` **argument** in MCP input. Both must
+   carry a non-empty premise — a bare marker, an empty string, and a boolean
+   `true` are all rejected.
 
 Anything else passes silently. A malformed payload fails open.
 
@@ -33,6 +36,17 @@ recorded, in the agent's own words, in the same turn as the execution.
 re-read and states what it now says. Attaching it without having done so is a
 false attestation, and the rules treat that as the documented path by which a
 gate becomes decorative.
+
+**The statement is the acknowledgement, so the gate requires one.** A bare
+marker, a blank premise, and an MCP `approval_premise_ack: true` all say the
+field was set and nothing about what the premise now says; each is rejected.
+What the gate cannot check is whether the sentence is *true* — see
+[Known ceiling](#known-ceiling).
+
+**Each surface is parsed where it is declared**, never by searching the
+serialized input. A substring scan accepts `# approval-premise:ack` sitting
+inside an unrelated MCP field — a runbook quote, a description, a log line —
+which no one wrote as an attestation, and which the caller cannot even see.
 
 ## Known ceiling
 

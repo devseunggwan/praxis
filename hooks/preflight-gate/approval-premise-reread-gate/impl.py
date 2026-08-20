@@ -54,6 +54,14 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 ACK_MARKER = "# approval-premise:ack"
 ACK_ARG = "approval_premise_ack"
 
+# The acknowledgement is an attestation that the premise was re-read and a
+# statement of what it now says, so the statement is the part that matters: a
+# bare marker attests nothing. Each surface is parsed only where it is declared
+# -- the comment in the Bash command, the argument in the MCP input -- because a
+# substring search over serialized input accepts the marker sitting inside an
+# unrelated field, which no one wrote as an attestation.
+_BASH_ACK_RE = re.compile(re.escape(ACK_MARKER) + r"[ \t]*(?P<premise>\S.*)")
+
 # A production phase marker arrives as a flag value, an MCP argument, or a
 # quoted identifier. The named flags absorb the spacing and casing variants a
 # literal list cannot (`--phase=prod`, `--phase  prod`, `-p PROD`); the quoted
@@ -288,6 +296,22 @@ def _message(tool_name: str, target: str) -> str:
     )
 
 
+def _bash_ack(command: str) -> bool:
+    """True when the Bash comment carries the marker *and* a premise after it."""
+    match = _BASH_ACK_RE.search(command)
+    return bool(match and match.group("premise").strip())
+
+
+def _mcp_ack(tool_input: dict) -> bool:
+    """True when the declared MCP argument holds a non-empty premise string.
+
+    A bare `True` is rejected on purpose: the argument's value IS the premise,
+    so a boolean says the field was set, never what it now says.
+    """
+    value = tool_input.get(ACK_ARG)
+    return isinstance(value, str) and bool(value.strip())
+
+
 @fail_open
 def main() -> int:
     try:
@@ -299,12 +323,9 @@ def main() -> int:
     tool_input = payload.get("tool_input", {}) or {}
     blob = json.dumps(tool_input, ensure_ascii=False)
 
-    if tool_input.get(ACK_ARG) or ACK_MARKER in blob:
-        return 0
-
     if tool_name == "Bash":
         command = tool_input.get("command", "") or ""
-        if ACK_MARKER in command:
+        if _bash_ack(command):
             return 0
         if not _carries_prod_marker(command):
             return 0
@@ -312,6 +333,8 @@ def main() -> int:
             return 0
         target = command.strip().splitlines()[0][:120]
     elif _is_mutating_mcp(tool_name):
+        if _mcp_ack(tool_input):
+            return 0
         if not _carries_prod_marker(blob):
             return 0
         target = str(tool_input.get("dag_id") or tool_input.get("conf") or "")[:120]
