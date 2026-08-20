@@ -627,7 +627,273 @@ fi
 
 fi   # jq gate
 
+# --- Gate 5: #1056 sibling CLAUDE_CONFIG_DIR state ---------------------------
+# A host may run more than one Claude config dir (~/.claude, ~/.claude-2). The
+# broker records its broker.json under the config dir of the session that
+# started it, so a reaper reading only its OWN config dir cannot resolve those
+# brokers: pid+sessionDir matches nothing, owner_status returns `unknown`, and
+# the under-reap bias keeps them forever. Measured on the author's host: 2143 of
+# 2711 skips over 541 launchd runs were `owner unknown`, and pointing
+# CLAUDE_CONFIG_DIR at the sibling flipped 17 of 19 to reapable.
+#
+# The fix reads every config dir that is a SIBLING of CONFIG_DIR. Both halves of
+# the sweep must widen together: extending the GC loop across config dirs while
+# leaving the live-claimant check on one dir would let --gc delete a sessionDir
+# a live broker in a sibling config still claims — #921, reintroduced on a new
+# axis. 5a covers that; 5b covers the reap-side resolution.
+if ! command -v jq >/dev/null 2>&1; then
+  skip "gate 5 sibling config dir (needs jq: the reaper reads broker.json with it)"
+else
+
+TMPROOT5="${TMPDIR:-/tmp}"; TMPROOT5="${TMPROOT5%/}"
+TMPD5="$(mktemp -d "$TMPROOT5/px1056.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+# Both spaced on purpose, same standing regression as gates 3 and 4.
+CONFIG5A="$TMPD5/config dir"          # the one CLAUDE_CONFIG_DIR names
+# HIDDEN on purpose. The real siblings are dotfiles (~/.claude-2), so candidate
+# discovery only reaches them with dotglob set -- and a visible fixture name here
+# leaves that load-bearing detail unpinned: dropping dotglob from the fix keeps
+# the whole suite green (measured: 55 PASS / 0 FAIL without dotglob).
+CONFIG5B="$TMPD5/.config dir 2"       # the sibling holding the real records
+STATE5A="$CONFIG5A/plugins/data/codex-openai-codex/state"
+STATE5B="$CONFIG5B/plugins/data/codex-openai-codex/state"
+LIVE5_PID=""
+BROKER5_PID=""
+
+cleanup_gate5() {
+  local kid
+  if [ -n "$BROKER5_PID" ]; then
+    for kid in $(pgrep -P "$BROKER5_PID" 2>/dev/null); do kill -KILL "$kid" 2>/dev/null; done
+    kill -KILL "$BROKER5_PID" 2>/dev/null
+  fi
+  [ -n "$LIVE5_PID" ] && kill -KILL "$LIVE5_PID" 2>/dev/null
+  rm -rf "$TMPD5"
+  declare -F cleanup_gate4 >/dev/null && cleanup_gate4
+  return 0
+}
+trap cleanup_gate5 EXIT INT TERM
+
+# $1 state root, $2 slug, $3 pid, $4 sessionDir
+write_state5() {
+  local root="$1" slug="$2" pid="$3" session="$4" sd
+  sd="$root/$slug"
+  mkdir -p "$sd"
+  printf '{"sessionDir":"%s","pid":%s}\n' "$session" "$pid" > "$sd/broker.json"
+}
+
+# --- 5a: GC reaches sibling records, and respects sibling live claimants -----
+SD5_ORPHAN="$TMPD5/cxc-ORPHAN5"
+SD5_SHARED="$TMPD5/cxc-SHARED5"
+mkdir -p "$SD5_ORPHAN" "$SD5_SHARED"
+
+sleep 600 &
+LIVE5_PID=$!
+
+# A high, currently-unused pid rather than a just-exited one: the kernel can
+# hand a recently freed pid to a new process before the reaper runs, and the
+# record would then read as live, failing this gate for an unrelated reason.
+DEAD5_PID=99999
+while kill -0 "$DEAD5_PID" 2>/dev/null; do DEAD5_PID=$((DEAD5_PID - 1)); done
+dead5_ready=true
+
+# Only the SIBLING knows about the orphan — the primary state dir stays empty of
+# it, so a single-dir reaper never sees this record at all.
+write_state5 "$STATE5B" orphan "$DEAD5_PID" "$SD5_ORPHAN"
+# The live claimant lives in the SIBLING; the stale dead record naming the same
+# sessionDir lives in the PRIMARY. A GC that widened its record sweep but not
+# its claimant check reads only the stale one and deletes a live dir.
+write_state5 "$STATE5B" live      "$LIVE5_PID" "$SD5_SHARED"
+write_state5 "$STATE5A" aaastale  "$DEAD5_PID" "$SD5_SHARED"
+
+if [ "$dead5_ready" != true ] || ! kill -0 "$LIVE5_PID" 2>/dev/null; then
+  fail "#1056: gate 5a fixture pids not in the expected state (live=$LIVE5_PID dead=$DEAD5_PID)"
+else
+  GC5_OUT="$(TMPDIR="$TMPD5" CLAUDE_CONFIG_DIR="$CONFIG5A" bash "$REAPER" --gc 2>&1)"
+
+  if [ ! -d "$SD5_ORPHAN" ]; then
+    pass "#1056: --gc sweeps a stale sessionDir recorded only in a sibling config dir"
+  else
+    fail "#1056: --gc missed a sibling config dir's stale record (output: $GC5_OUT)"
+  fi
+
+  if [ -d "$SD5_SHARED" ]; then
+    pass "#1056: --gc keeps a sessionDir a sibling config dir's live broker claims"
+  else
+    fail "#1056: --gc deleted a dir claimed by a live broker in a sibling config dir (output: $GC5_OUT)"
+  fi
+fi
+
+# --- 5b: the reap pass resolves an owner recorded in a sibling config dir ----
+# Signal C (workspaceRoot deleted) is used deliberately: it needs no cwd
+# snapshot, so this case does not depend on lsof. The idle gate reads BSD
+# `stat -f %m`, so the reap half is Darwin-only like gate 3.
+if [ "$(uname -s)" != "Darwin" ]; then
+  skip "gate 5b sibling-config reap decision (needs Darwin: reaper's idle gate uses BSD 'stat -f %m')"
+else
+
+FIXTURE5="$TMPD5/broker-fixture.sh"
+REAPER5="$TMPD5/reaper-copy.sh"
+SD5_REAP="$TMPD5/cxc-REAP5"
+WS5_GONE="$TMPD5/workspace-deleted"
+
+cat > "$FIXTURE5" <<'FIX5'
+#!/bin/bash
+exec 3<> "$PX1056_FIFO"
+read -r -u 3
+FIX5
+
+sed "s|^BROKER_PATTERN=.*|BROKER_PATTERN='$FIXTURE5'|" "$REAPER" > "$REAPER5"
+
+mkdir -p "$SD5_REAP"
+FIFO5="$TMPD5/broker5.fifo"
+mkfifo "$FIFO5"
+# Backdated so the idle gate always passes.
+touch -t 202001010000 "$SD5_REAP/broker.log"
+PX1056_FIFO="$FIFO5" bash "$FIXTURE5" serve --endpoint "unix:$SD5_REAP/broker.sock" >/dev/null 2>&1 &
+BROKER5_PID=$!
+
+# The record lives ONLY in the sibling config dir, and names a workspace root
+# that does not exist — signal C, an unambiguous orphan.
+SD5_STATE="$STATE5B/reapme-$(printf '%s' "$WS5_GONE" | shasum -a 256 | cut -c1-16)"
+mkdir -p "$SD5_STATE/jobs"
+printf '{"sessionDir":"%s","pid":%s}\n' "$SD5_REAP" "$BROKER5_PID" > "$SD5_STATE/broker.json"
+printf '{"workspaceRoot":"%s"}\n' "$WS5_GONE" > "$SD5_STATE/jobs/job.json"
+
+broker5_ready=false
+for _ in $(seq 1 30); do
+  if kill -0 "$BROKER5_PID" 2>/dev/null; then broker5_ready=true; break; fi
+  sleep 0.1
+done
+
+if [ "$broker5_ready" != true ]; then
+  fail "#1056: gate 5b fixture broker did not come up"
+else
+  DRY5_OUT="$(TMPDIR="$TMPD5" CLAUDE_CONFIG_DIR="$CONFIG5A" bash "$REAPER5" --reap --max-age 5 --dry-run 2>&1)"
+  case "$DRY5_OUT" in
+    *"WOULD REAP pid=$BROKER5_PID"*)
+      pass "#1056: reap resolves a broker whose state lives in a sibling config dir" ;;
+    *"owner unknown"*)
+      fail "#1056: sibling-config broker still reads as 'owner unknown' (output: $DRY5_OUT)" ;;
+    *)
+      fail "#1056: expected WOULD REAP for pid=$BROKER5_PID, got: $DRY5_OUT" ;;
+  esac
+fi
+
+fi   # Darwin gate (5b)
+
+fi   # jq gate (gate 5)
+
 echo ""
+
+# --- Gate 6: an unusable broker index must not read as an empty sweep --------
+# The GC pass iterates the per-pass index rather than re-parsing every
+# broker.json (two jq spawns per record was the script's whole runtime). That
+# makes a failed index build silently equivalent to "no records exist": the
+# loop reads zero rows and the summary still prints gc_dirs=0, which is exactly
+# what a clean sweep prints. This gate pins the refusal instead.
+# Strip the trailing slash TMPDIR carries on macOS before building a path under
+# it: is_safe_session_dir rejects any path containing "//" outright (its
+# traversal screen), so the doubled separator makes a legitimate sessionDir
+# unsafe and nothing is ever collected. The refusal assertions below would then
+# pass for the wrong reason — which is what the positive control exists to catch.
+TMPROOT6="${TMPDIR:-/tmp}"; TMPROOT6="${TMPROOT6%/}"
+TMPD6="$(mktemp -d "$TMPROOT6/px1056g6.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+# Chain gate 5's handler rather than replacing it: an early exit anywhere below
+# would otherwise leave this fixture behind, since the active trap only knows
+# about $TMPD5.
+cleanup_gate6() {
+  rm -rf "$TMPD6"
+  declare -F cleanup_gate5 >/dev/null && cleanup_gate5
+  return 0
+}
+trap cleanup_gate6 EXIT INT TERM
+CONFIG6="$TMPD6/config"
+SD6="$CONFIG6/plugins/data/codex-openai-codex/state/ws6-deadbeef"
+mkdir -p "$SD6"
+SESS6="$TMPD6/cxc-GATE6"
+mkdir -p "$SESS6"
+# A dead pid whose sessionDir still exists — the one shape --gc collects.
+DEAD6=99999
+while kill -0 "$DEAD6" 2>/dev/null; do DEAD6=$((DEAD6 - 1)); done
+printf '{"pid":%s,"sessionDir":"%s"}\n' "$DEAD6" "$SESS6" > "$SD6/broker.json"
+
+if ! command -v jq >/dev/null 2>&1; then
+  skip "#1056 gate 6: needs jq for the positive control"
+else
+  # Positive control first: without it, a refusal below proves nothing — a
+  # fixture that never collected anything also reports gc_dirs=0.
+  OK6="$(TMPDIR="$TMPD6" CLAUDE_CONFIG_DIR="$CONFIG6" bash "$REAPER" --gc --dry-run 2>&1)"
+  case "$OK6" in
+    *"WOULD GC  dir=$SESS6"*) pass "#1056 gate 6 control: --gc collects the dead record" ;;
+    *) fail "#1056 gate 6 control: --gc should have collected $SESS6 (output: $OK6)" ;;
+  esac
+
+  # Now break the index build by putting a failing `jq` first on PATH.
+  BIN6="$TMPD6/bin"; mkdir -p "$BIN6"
+  printf '#!/bin/sh\nexit 127\n' > "$BIN6/jq"; chmod +x "$BIN6/jq"
+  BAD6="$(PATH="$BIN6:$PATH" TMPDIR="$TMPD6" CLAUDE_CONFIG_DIR="$CONFIG6" \
+          bash "$REAPER" --gc --dry-run 2>&1)"
+  case "$BAD6" in
+    *"WOULD GC"*) fail "#1056 gate 6: --gc collected with an unusable index (output: $BAD6)" ;;
+    *"SKIP GC"*)  pass "#1056 gate 6: unusable index refuses the sweep and says so" ;;
+    *)            fail "#1056 gate 6: unusable index swept silently — no SKIP GC line (output: $BAD6)" ;;
+  esac
+
+  # The refusal must not have deleted anything on the way out.
+  if [ -d "$SESS6" ]; then pass "#1056 gate 6: refusal left the sessionDir intact"
+  else fail "#1056 gate 6: refusal deleted $SESS6"; fi
+fi
+
+
+
+# --- Gate 7: a malformed record must not truncate the index -----------------
+# jq aborts the whole stream at the first parse error when handed many files,
+# so one unparseable broker.json used to drop every record after it. The GC
+# pass reads that index: a live broker whose record was dropped no longer
+# claims its sessionDir, and the dir gets collected while still in use (#921
+# by another road). The emptiness guard of gate 6 cannot see this — the index
+# is short, not empty.
+TMPROOT7="${TMPDIR:-/tmp}"; TMPROOT7="${TMPROOT7%/}"
+TMPD7="$(mktemp -d "$TMPROOT7/px1056g7.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+cleanup_gate7() {
+  rm -rf "$TMPD7"
+  declare -F cleanup_gate6 >/dev/null && cleanup_gate6
+  return 0
+}
+trap cleanup_gate7 EXIT INT TERM
+
+if ! command -v jq >/dev/null 2>&1; then
+  skip "#1056 gate 7: needs jq"
+else
+  CONFIG7="$TMPD7/config"
+  SHARED7="$TMPD7/cxc-SHARED7"
+  mkdir -p "$SHARED7"
+  # Ordered so the malformed record sits BETWEEN the dead claimant and the live
+  # one. Directory iteration is sorted, so 01/02/03 fixes that order.
+  DEAD7=99999
+  while kill -0 "$DEAD7" 2>/dev/null; do DEAD7=$((DEAD7 - 1)); done
+  mkdir -p "$CONFIG7/plugins/data/codex-openai-codex/state/01-dead" \
+           "$CONFIG7/plugins/data/codex-openai-codex/state/02-broken" \
+           "$CONFIG7/plugins/data/codex-openai-codex/state/03-live"
+  ST7="$CONFIG7/plugins/data/codex-openai-codex/state"
+  printf '{"pid":%s,"sessionDir":"%s"}\n' "$DEAD7" "$SHARED7" > "$ST7/01-dead/broker.json"
+  printf '{"pid":1,"sessionDir":"/nope"\n'                     > "$ST7/02-broken/broker.json"
+  # This shell is alive and claims the same dir — the record that must survive.
+  printf '{"pid":%s,"sessionDir":"%s"}\n' "$$" "$SHARED7"      > "$ST7/03-live/broker.json"
+
+  GC7="$(TMPDIR="$TMPD7" CLAUDE_CONFIG_DIR="$CONFIG7" bash "$REAPER" --gc 2>&1)"
+  if [ -d "$SHARED7" ]; then
+    pass "#1056 gate 7: live claim behind a malformed record still protects the dir"
+  else
+    fail "#1056 gate 7: --gc deleted $SHARED7 despite a live claimant (output: $GC7)"
+  fi
+  case "$GC7" in
+    *"a live broker still claims this sessionDir"*)
+      pass "#1056 gate 7: the skip names the live claim" ;;
+    *) fail "#1056 gate 7: expected a live-claimant SKIP GC line (output: $GC7)" ;;
+  esac
+fi
+
+
 echo "=== summary ==="
 echo "PASS: $PASS"
 echo "FAIL: $FAIL"
