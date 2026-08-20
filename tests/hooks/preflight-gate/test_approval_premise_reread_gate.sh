@@ -111,6 +111,15 @@ run_case "mut_aws_rm"      "$(verdict "$(bash_payload 'aws s3 rm s3://b/k --prof
 run_case "mut_gh_api_post" "$(verdict "$(bash_payload 'gh api -X POST repos/o/r/issues --profile prod')")"             "ask"
 run_case "mut_unknown_bin" "$(verdict "$(bash_payload 'some-unknown-binary --phase prod')")"                           "ask"
 
+# --- Bash: a binary whose read-onlyness depends on its flags is not on the
+# allowlist at all. Each of these writes under a flag or a second positional,
+# so admitting the bare name would hand the gate a silent path. ------------
+run_case "wr_find_delete"  "$(verdict "$(bash_payload 'find . -name x -delete --profile prod')")"   "ask"
+run_case "wr_yq_inplace"   "$(verdict "$(bash_payload 'yq -i ".a=1" f.yml --profile prod')")"       "ask"
+run_case "wr_sort_output"  "$(verdict "$(bash_payload 'sort f -o out --profile prod')")"            "ask"
+run_case "wr_uniq_outfile" "$(verdict "$(bash_payload 'uniq in out --profile prod')")"              "ask"
+run_case "wr_date_set"     "$(verdict "$(bash_payload 'date -s "2020-01-01" --profile prod')")"     "ask"
+
 # --- Bash: the subcommand is read by position, never by membership ---------
 # Scanning every token for a read-only word would call these read-only, because
 # the word appears as an argument value rather than as the verb.

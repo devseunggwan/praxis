@@ -127,6 +127,13 @@ Three properties carry it, each pinned by a test:
 - **A state-changing redirect disqualifies the command** regardless of its
   verbs, via the existing `has_state_changing_redirect`.
 
+A binary is on the bare-name allowlist only when it is read-only under *every*
+argument. `find`, `yq`, `sort`, `uniq` and `date` therefore are not: each writes
+under a flag or a second positional (`find -delete`, `yq -i`, `sort -o`,
+`uniq in out`, `date -s`), which makes its read-onlyness a property of the
+arguments rather than of the command. Admitting one buys a quiet path in
+exchange for the guarantee the allowlist exists to give.
+
 `git branch`, `tag`, `remote`, `worktree` and `config` are absent from the
 allowlist on purpose: each has a write form one flag away (`git branch -D`,
 `git remote add`). `gh api` and `aws` are admitted only in their query shapes —

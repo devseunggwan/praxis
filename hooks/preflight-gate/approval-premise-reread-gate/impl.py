@@ -104,10 +104,16 @@ MUTATING_MCP_VERBS = frozenset((
 # SELECT, AWS describe/get/list — plus the inspection commands that carry no
 # side effect. Bare names take any argument; a name mapped to a set is read-only
 # only under those subcommands.
+# `find`, `yq`, `sort`, `uniq` and `date` were here and were removed: each
+# writes under a flag or a second positional (`find -delete`, `yq -i`,
+# `sort -o`, `uniq in out`, `date -s`), so its read-onlyness is a property of
+# the arguments rather than of the command. That is not a read-only *shape*,
+# and admitting one costs the guarantee the whole allowlist exists to give.
+# Their absence costs a question on a prod-marked `find`, which is rare.
 READONLY_ANY_ARGS = frozenset({
-    "ls", "cat", "head", "tail", "wc", "grep", "rg", "egrep", "fgrep", "find",
-    "echo", "printf", "jq", "yq", "sort", "uniq", "cut", "tr", "column", "diff",
-    "file", "stat", "du", "df", "which", "type", "pwd", "date", "env", "ps",
+    "ls", "cat", "head", "tail", "wc", "grep", "rg", "egrep", "fgrep",
+    "echo", "printf", "jq", "cut", "tr", "column", "diff",
+    "file", "stat", "du", "df", "which", "type", "pwd", "env", "ps",
     "whoami", "hostname", "uname", "id", "basename", "dirname", "realpath",
 })
 
