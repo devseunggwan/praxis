@@ -494,21 +494,28 @@ def _mcp_ack(session_id: str) -> bool:
     outright by a server that validates its input, so the quiet path it
     described was not reachable at runtime for any such tool.
 
-    The file is consumed on read. One acknowledgement therefore covers one
-    call, which is what keeps it an attestation rather than a session-wide
-    off switch -- there is no shape of this file that disables the gate.
+    The file is *claimed* before it is read, by renaming it to a pid-unique
+    path. Reading and then unlinking loses the race two concurrent hook
+    processes for one session can run: both open the file before either
+    unlinks, and one acknowledgement passes two calls. `os.rename` is atomic,
+    so exactly one process gets the file and the other sees it gone.
     """
     if not session_id:
         return False
     path = _ack_file(session_id)
+    claim = f"{path}.claim-{os.getpid()}"
     try:
-        with open(path, encoding="utf-8") as fh:
+        os.rename(path, claim)
+    except OSError:
+        return False  # absent, or another process claimed it first
+    try:
+        with open(claim, encoding="utf-8") as fh:
             premise = (json.load(fh) or {}).get("premise")
     except Exception:
-        return False  # absent, unreadable or malformed: the gate asks
+        return False  # unreadable or malformed: the gate asks
     finally:
         try:
-            os.unlink(path)
+            os.unlink(claim)
         except OSError:
             pass
     return isinstance(premise, str) and bool(premise.strip())

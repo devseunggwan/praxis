@@ -296,6 +296,44 @@ run_case "ack_mcp_own_session_still_honoured" \
   "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "quiet"
 
+# --- one acknowledgement cannot pass two concurrent calls ------------------
+# Read-then-unlink loses this race: both processes open the file before either
+# unlinks it. The file is claimed with an atomic rename instead. Ten trials of
+# three concurrent calls; more than one quiet in any trial is a failure.
+race_result() {
+  PRAXIS_HOME="$PRAXIS_HOME" HOOK="$HOOK" python3 - <<'RACE'
+import json, os, subprocess, sys
+from concurrent.futures import ThreadPoolExecutor
+
+hook = os.environ["HOOK"]
+ack = os.path.join(os.environ["PRAXIS_HOME"], "cache", "approval-premise-ack-race.json")
+os.makedirs(os.path.dirname(ack), exist_ok=True)
+payload = json.dumps({"session_id": "race",
+                      "tool_name": "mcp__laplace-airflow__airflow_trigger_dag",
+                      "tool_input": {"conf": {"phase": "prod"}}})
+
+
+def call(_):
+    run = subprocess.run([sys.executable, hook], input=payload,
+                         capture_output=True, text=True)
+    return "ask" if '"permissionDecision": "ask"' in run.stdout else "quiet"
+
+
+for _ in range(10):
+    with open(ack, "w") as fh:
+        json.dump({"premise": "re-measured on this target"}, fh)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        verdicts = list(pool.map(call, range(3)))
+    if verdicts.count("quiet") != 1:
+        print("double-pass")
+        break
+else:
+    print("single-pass")
+RACE
+}
+
+run_case "mcp_ack_claimed_atomically" "$(race_result)" "single-pass"
+
 # --- gh api: the effective method decides, body flags only imply POST ------
 # `gh api --help`: a body flag makes the request a POST *unless* the method is
 # given, in which case the fields become query parameters.

@@ -50,8 +50,11 @@ server's schema: a synthetic `approval_premise_ack` field is rejected outright
 by any server that validates its input, so the quiet path it described was
 unreachable at runtime for exactly the tools that validate most strictly. The
 file is hook-owned, session-keyed like every other praxis cache entry, and
-unlinked as it is read — one acknowledgement covers one call, so no shape of it
-disables the gate. The gate's own message prints the resolved path, because an
+claimed with an atomic `os.rename` before it is read — one acknowledgement
+covers one call, so no shape of it disables the gate. The claim is what makes
+that true under concurrency: reading and then unlinking lets two hook processes
+for the same session both open the file before either removes it, and one
+acknowledgement then passes two calls. The gate's own message prints the resolved path, because an
 opt-out nobody can find is an opt-out that does not exist.
 What the gate cannot check is whether the sentence is *true* — see
 [Known ceiling](#known-ceiling).
