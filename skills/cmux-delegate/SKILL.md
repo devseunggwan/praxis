@@ -45,7 +45,7 @@ runtime-verified-note: "cmux 0.64.22 — agent.hook.PostToolUse is not relayed a
 | `--account` | (기본 계정) | Claude 계정 프로필 (예: `claude-2` → `CLAUDE_CONFIG_DIR=~/.claude-2`) |
 | `--session` | (신규 생성) | 기존 워크스페이스에 전달 (이름 또는 workspace ref) |
 | `--distribute` | false | 독립 항목별 병렬 분산 실행 |
-| `--permission-mode` | `auto` | Claude 권한 모드 (acceptEdits/auto/bypassPermissions/default/dontAsk/plan) |
+| `--permission-mode` | — | **제거됨 (#1054).** 위임 워커는 평소 세션이므로 사용자의 평소 기본값을 씁니다 |
 
 ## Process
 
@@ -61,7 +61,6 @@ budget = args["max-budget-usd"] || ""
 account = args.account || ""
 session = args.session || ""
 distribute = args.distribute || false
-permission_mode = args["permission-mode"] || "auto"
 task = args.task (remaining text after flags)
 short_task = task[:30], sanitized to [a-zA-Z0-9가-힣 -] only (for cmux workspace name)
 timestamp = epoch seconds + PID (e.g., 1744163800-12345) to avoid collision
@@ -319,40 +318,43 @@ Report results in Korean.
 #!/bin/bash
 PROMPT_FILE="/tmp/cmux-delegate-{timestamp}.md"
 SCRIPT_FILE="/tmp/cmux-delegate-{timestamp}.sh"
-WRAPPER_LOG="/tmp/cmux-delegate-{timestamp}.log"
 
 # Cleanup: .sh만 삭제. .md는 보존 (다른 워크스페이스가 참조할 수 있음)
 trap 'rm -f "$SCRIPT_FILE"' EXIT
 
+# argv 로 넘기므로 프롬프트가 커널의 인자 한도를 먹습니다. 넘치면 exec 이 E2BIG
+# 로 실패하는데, 그 실패는 바깥에서 "워커가 아무 일도 안 했다"와 구별되지 않으므로
+# 여기서 먼저 잡습니다. 폴백은 두지 않습니다 — stdin 으로 되돌리는 순간 #1054 가
+# 그대로 돌아옵니다. ARG_MAX 는 환경변수까지 함께 세므로 4분의 1만 씁니다
+# (macOS 1MiB 기준 256KiB; 실측 프롬프트는 6~10KB 대).
+PROMPT_BYTES=$(wc -c < "$PROMPT_FILE")
+ARG_LIMIT=$(( $(getconf ARG_MAX) / 4 ))
+if [ "$PROMPT_BYTES" -gt "$ARG_LIMIT" ]; then
+  echo "프롬프트가 너무 큽니다: ${PROMPT_BYTES}B > ${ARG_LIMIT}B (ARG_MAX/4)" >&2
+  cmux notify --title "cmux-delegate" --body "Failed to start: prompt too large" 2>/dev/null || true
+  exit 1
+fi
+
 # Provider-specific invocation (from project ARCHITECTURE.md Provider CLI Spec)
 case "{provider}" in
   claude)
-    # `| tee` 는 로그 적재가 목적이 아니라 계약 이행입니다 (#981). 프로젝트
-    # ARCHITECTURE.md 의 Provider CLI Spec 은 stdin 컬럼(`cat file | claude`)을
-    # 쓰는 호출자에게 "stdout 을 리다이렉트하거나 `-p` 를 붙이거나" 중 하나를
-    # 의무로 지웁니다. `claude --help` 가 워크스페이스 신뢰 대화상자를
-    # 건너뛰는 조건으로 명시한 면제 조항이고, 그 대화상자도 stdin 을 읽으므로
-    # cmux 워크스페이스의 TTY 를 stdout 으로 물려받은 채 실행하면 대화상자와
-    # 파이프된 프롬프트가 같은 스트림을 두고 경쟁합니다. Step 4 는 이 리포지토리의
-    # 유일한 호출부인데 둘 중 어느 것도 공급하지 않고 있었습니다.
+    # 프롬프트는 argv 로 넘기고 stdin 은 비워 둡니다 (#1054). 파이프로 넘기면
+    # `cat` 이 끝나는 순간 워커의 fd 0 이 닫히고, 그 뒤로는 권한 프롬프트에
+    # 답할 통로도 `cmux send` 가 도달할 통로도 남지 않습니다 — 실측에서 워커는
+    # "Awaiting your confirmation" 을 출력하고 exit 0 으로 종료했습니다.
+    # stdout 도 파이프로 물리지 않습니다: 블록 버퍼링이 걸려 실행 중인 페인이
+    # 통째로 비어 보였습니다.
     #
-    # `-p` 가 아니라 리다이렉트를 고른 이유는 아래 "Why Wrapper Script?" 에
-    # 있습니다 — `-p` 는 별개의 실증된 실패(프롬프트 shell 해석)로 이미 배제된
-    # 형태입니다. 전체 리다이렉트(`> "$WRAPPER_LOG"`)가 아니라 `tee` 인 이유는
-    # 이것이 계약을 만족시키는 가장 좁은 리다이렉트이기 때문입니다: claude 의
-    # stdout 은 파이프(비-TTY)가 되어 면제 조항을 충족하지만, tee 의 stdout 은
-    # 여전히 워크스페이스 TTY 라 운영자가 cmux 페인에서 보던 출력이 사라지지
-    # 않습니다. 전체 리다이렉트는 계약은 똑같이 만족시키되 페인을 비웁니다.
+    # 셸 해석 위험은 `-p "…인라인 리터럴…"` 형태의 문제이고, `"$(cat file)"` 은
+    # 셸이 치환 결과를 재해석하지 않으므로 특수문자가 그대로 보존됩니다.
     #
-    # **이것은 버그 수정이 아닙니다.** 소유자의 4회 대조 실행(claude 2.1.232)에서
-    # 프롬프트는 실제로 유실되지 않았습니다. 여기서 메운 것은 관측된 실패가
-    # 아니라 ARCHITECTURE.md 가 문서화한 계약과 호출부 사이의 드리프트입니다 —
-    # 이 줄을 "예전에 프롬프트가 깨졌었다"로 읽으면 안 됩니다.
-    cat "$PROMPT_FILE" | {claude_env} claude \
+    # `--permission-mode` 는 넘기지 않습니다. 위임 워커는 평소 세션이므로 평소
+    # 기본값을 씁니다. `dontAsk` 는 묻지 않고 거부라 워커가 똑같이 죽고, 유일하게
+    # 툴이 도는 `bypassPermissions` 는 모든 게이트를 무력화합니다.
+    {claude_env} claude \
       --model {sub_model} \
-      --permission-mode {permission_mode} \
       {budget_flag} \
-      | tee "$WRAPPER_LOG"
+      "$(cat "$PROMPT_FILE")"
     ;;
   codex)
     cat "$PROMPT_FILE" | codex exec \
@@ -364,21 +366,31 @@ case "{provider}" in
       {sub_model:+-m {sub_model}}
     ;;
 esac
+rc=$?
 
-# Notify on completion
-cmux notify --title "cmux-delegate" --body "Task completed: {short_task}" 2>/dev/null || true
+# 완료 알림은 종료 코드를 반영합니다. rc 를 보지 않으면 권한 거부·크래시·E2BIG
+# 로 죽은 워커도 "Task completed" 로 보고되고, 위임자와 사용자에게는 성공과
+# 구별되지 않습니다 — 그게 #1054 의 원래 증상입니다.
+if [ "$rc" -eq 0 ]; then
+  cmux notify --title "cmux-delegate" --body "Task completed: {short_task}" 2>/dev/null || true
+else
+  cmux notify --title "cmux-delegate" --body "Task FAILED (exit $rc): {short_task}" 2>/dev/null || true
+fi
+exit "$rc"
 ```
 
 `{provider}` and `{sub_model}` are substituted from the provider resolution result in Step 1.
 `{claude_env}` is substituted with `CLAUDE_CONFIG_DIR=~/.{account}` when account is specified (claude provider only).
 `{budget_flag}` is substituted with `--max-budget-usd {budget}` when budget is specified (claude provider only — codex/gemini do not support budget limits).
 
-`$WRAPPER_LOG` 는 `tee` 의 부산물이지 산출물이 아닙니다. 지워도 위임은 동작하지만
-그러면 claude 의 stdout 이 다시 TTY 가 되어 위 주석의 계약이 깨지므로, 로그가
-필요 없더라도 파이프 자체는 남겨두어야 합니다. trap 은 이 파일도 지우지 않습니다
-— 워커가 죽은 뒤 남는 유일한 stdout 사본이라 사후 분석에 쓰입니다. codex/gemini
-분기에는 같은 의무가 없습니다: ARCHITECTURE.md 의 전제조건은 claude 행에만
-붙어 있고, gemini 는 애초에 stdin 이 아니라 `-p` 로 프롬프트를 받습니다.
+**claude 분기는 stdin·stdout 어느 쪽도 파이프에 물리지 않습니다.** 이것이 이 형태의
+요점이라 편의를 위해서라도 되돌리면 안 됩니다 — stdin 을 물리면 워커가 권한
+프롬프트에서 죽고, stdout 을 물리면 실행 중 페인이 비어 사람이 무슨 일이 일어나는지
+볼 수 없습니다. 로그 사본이 필요하면 `tee` 를 다시 끼우는 대신 `cmux read-screen
+--scrollback` 으로 페인에서 꺼냅니다.
+
+codex/gemini 분기는 그대로 둡니다. gemini 는 애초에 `-p` 로 argv 를 받고,
+`codex exec` 는 설계상 비대화형이라 답을 기다리는 상태 자체가 없습니다.
 
 **이 파일도 `Write` 도구로 생성합니다.** 단, 파일 내용 자체에 shell 변수(`$PROMPT_FILE` 등)가 포함되므로 이는 의도된 것입니다 — 중요한 것은 사용자 프롬프트가 이 스크립트를 거치지 않는다는 점입니다.
 
@@ -626,7 +638,7 @@ sh "$GATE" resolve "$WS_ID" reject 'prod 는 사람이 직접 한다'
 | --- | --- | --- |
 | `working` | 턴 진행 중 (툴 실행 또는 사고) | 기다린다. 재지시는 진행 중인 작업을 버린다 |
 | `idle` | 턴이 끝났는데 보고서가 없다 | 재지시하거나 인수한다. 가장 의심스러운 값 |
-| `waiting-input` | 모달 프롬프트에서 멈춤 | 사람이 그 워크스페이스에서 키를 누른다 |
+| `waiting-input` | 모달 프롬프트에서 멈춤 | 사람이 그 워크스페이스에서 키를 누른다. **이 값은 #1054 이후에만 실제로 도달 가능합니다** — 그 전까지 워커에는 stdin 이 없어, 프롬프트를 만나면 대기하지 않고 종료했습니다 |
 | `crash` | cmux 가 목록을 정상으로 답했고 그 셀렉터에 해당하는 워크스페이스가 없음 | 재위임 |
 | `unknown` | 판정 불가 (`reason` 이 어느 쪽인지 말한다: `cmux-unavailable` · `workspace-lookup-failed` · `workspace-ref-not-found` · `workspace-has-no-id` · `no-events-in-window`) | 부재를 사망으로 읽지 않는다. 화면을 직접 본다 |
 
@@ -717,7 +729,7 @@ user: /cmux-delegate "full code review" --model claude:opus --account claude-2
   │
   ├── Step 4: wrapper .sh 생성 (Write tool)
   │     └── /tmp/cmux-delegate-{ts}.sh
-  │           └── cat .md | CLAUDE_CONFIG_DIR=~/.claude-2 claude --model opus
+  │           └── CLAUDE_CONFIG_DIR=~/.claude-2 claude --model opus "$(cat .md)"
   │           └── trap: .sh만 삭제 (.md 보존)
   │           └── cmux notify on completion
   │
@@ -765,17 +777,26 @@ user: /cmux-delegate "full code review" --model claude:opus --account claude-2
 
 ## Why Wrapper Script?
 
-`claude -p "..."` 패턴은 프롬프트에 `$`, `{}`, `` ` `` 등이 포함되면 shell이 해석하여 프롬프트가 깨집니다 (Hub #1001 크리마 검수에서 실제 경험).
+래퍼가 필요한 이유는 프롬프트를 **파일에 두기 위해서**입니다. 프롬프트 텍스트가
+스크립트 본문이나 명령줄에 리터럴로 들어가면 `$`, `{}`, `` ` `` 이 셸에 해석되어
+깨집니다 (Hub #1001 크리마 검수에서 실제 경험).
 
-`cat file | claude` 패턴은 프롬프트가 shell을 한 번도 거치지 않으므로 모든 특수문자가 안전합니다.
+**파일에 두는 것과 stdin 으로 넘기는 것은 별개입니다.** 오래 이 둘이 한 덩어리로
+묶여 있었는데, 깨진 것은 `-p "…리터럴…"` 이지 argv 자체가 아닙니다. `"$(cat file)"`
+은 셸이 치환 결과를 재해석하지 않으므로 파이프와 똑같이 안전합니다:
 
-그 대가로 `-p` 가 주는 비대화형 면제(워크스페이스 신뢰 대화상자 건너뛰기)를
-잃습니다. Step 4 가 `| tee "$WRAPPER_LOG"` 로 stdout 을 파이프에 물리는 이유가
-이것입니다 — `claude --help` 는 그 면제를 "`-p`, **또는** stdout 이 TTY 가
-아닐 때"로 명시하므로, 리다이렉트 쪽 조건만으로도 면제가 성립합니다. 즉 `-p`
-없이 위 특수문자 안전성을 유지한 채 계약을 만족시킬 수 있습니다. `--max-budget-usd`
-가 print 모드 전용인 것도 `-p` 를 되살릴 이유가 되지 못합니다: `-p` 를 붙이는
-순간 프롬프트가 shell 을 거쳐 위 실패가 그대로 돌아옵니다.
+```text
+$ claude --model haiku "$(cat p4.md)"
+cost is $5 `whoami` ${HOME} {a,b} "quoted" 'single' \n      ← 원문 그대로 복귀
+```
+
+그래서 Step 4 는 argv 를 씁니다 — 특수문자 안전성은 그대로 두고 stdin 을 돌려받는
+쪽입니다. stdin 이 살아 있으면 워커는 평소 세션이 되고, 권한 프롬프트와 워크스페이스
+신뢰 대화상자에 사람이 답할 수 있습니다. 파이프 시절 이 대화상자를 우회하려고
+`-p`/리다이렉트 면제를 찾아다녔던 것은, 답할 사람이 없었기 때문에 생긴 문제였습니다.
+
+`--max-budget-usd` 는 여전히 print 모드 전용이라 이 형태에서 쓸 수 없습니다.
+파이프 시절에도 마찬가지였으므로 회귀는 아닙니다.
 
 ## Limitations
 

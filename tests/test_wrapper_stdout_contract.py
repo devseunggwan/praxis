@@ -1,26 +1,24 @@
-"""tests/test_wrapper_stdout_contract.py — Step 4 stdout contract (#981).
+"""tests/test_wrapper_stdout_contract.py — Step 4 stdio contract (#1054).
 
-ARCHITECTURE.md's Provider CLI Spec puts a precondition on the `claude` row's
-stdin column: `claude --help` skips the workspace trust dialog only "via -p, or
-when stdout is not a TTY", that dialog reads stdin, and the row's command pipes
-the prompt into stdin. Using the stdin column therefore obliges the caller to
-supply one exemption. cmux-delegate Step 4 is the only caller in this repo.
+The delegated worker must be an ordinary Claude Code session: a live TTY on
+**both** stdin and stdout. Piping either one is what broke fire-and-forget.
+
+- stdin piped (`cat file | claude`) closes the worker's fd 0 the moment `cat`
+  exits. A permission prompt then has no channel to be answered on, and the
+  worker prints "Awaiting your confirmation" and exits 0 — measured, not
+  inferred. `cmux send` cannot reach it either, which is why Step 5b could not
+  work against a Step 5a workspace.
+- stdout piped (`| tee`) block-buffers the worker's output, so the cmux pane
+  stays empty for the whole run and the operator sees nothing.
 
 This file pins the *executable* half: it extracts the `claude)` branch verbatim
 out of SKILL.md, instantiates the {placeholders}, and runs it under a real PTY
 (what a cmux workspace hands the wrapper) with a stub `claude` on PATH that
-reports isatty(stdout). Grepping the prose cannot catch a redirect that is
-written but does not actually take effect — e.g. a trailing `\\` dropped so the
-pipe lands on the next command instead.
+reports isatty() on both descriptors. Grepping the prose cannot catch a pipe
+that is written but does not actually take effect.
 
-Both directions are pinned on purpose. `test_claude_branch_stdout_is_not_a_tty`
-is the case that must now fire; `test_probe_detects_a_tty` is the control that
-must stay silent, because a stub that reported NO unconditionally would make the
-first test pass for no reason.
-
-NOTE: this is a documented-contract drift, not a repaired failure. The owner's
-4-run control on claude 2.1.232 showed the prompt is not actually lost. Nothing
-here should be read as evidence that delegation was previously broken.
+`test_stub_reports_no_when_piped` is the control: a stub that answered YES
+unconditionally would make the assertions below pass for no reason.
 
 Run:  python3 -m pytest tests/test_wrapper_stdout_contract.py
 """
@@ -29,6 +27,7 @@ import os
 import pathlib
 import pty
 import re
+import subprocess
 
 import pytest
 
@@ -36,9 +35,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SKILL = ROOT / "skills" / "cmux-delegate" / "SKILL.md"
 
 # The prompt carries every character class "Why Wrapper Script?" names as the
-# reason `-p` is excluded. If a future edit reintroduces a shell round-trip,
-# these come back mangled and the assertion below fails.
-HOSTILE_PROMPT = 'cost $5 {brace} `tick` "quote"\n'
+# reason an inline literal is excluded. If a future edit reintroduces a shell
+# round-trip over the prompt text, these come back mangled.
+HOSTILE_PROMPT = 'cost $5 {brace} `tick` "quote"'
 
 
 def _extract_branch(name):
@@ -50,21 +49,22 @@ def _extract_branch(name):
 
 
 def _stub_bin(tmp_path):
-    """A `claude` that reports isatty(stdout) and echoes the prompt it read."""
+    """A `claude` that reports isatty() on both fds and echoes its argv prompt."""
     d = tmp_path / "bin"
     d.mkdir()
     stub = d / "claude"
     stub.write_text(
         "#!/bin/bash\n"
+        'if [ -t 0 ]; then echo "stdin-is-tty=YES"; else echo "stdin-is-tty=NO"; fi\n'
         'if [ -t 1 ]; then echo "stdout-is-tty=YES"; else echo "stdout-is-tty=NO"; fi\n'
-        'echo "prompt=[$(cat)]"\n'
+        'echo "prompt=[${!#}]"\n'
     )
     stub.chmod(0o755)
     return d
 
 
 def _run_under_pty(script, extra_path):
-    """Run `script` with a real TTY on stdout, as a cmux workspace would."""
+    """Run `script` with a real TTY on both fds, as a cmux workspace would."""
     chunks = []
 
     def _read(fd):
@@ -86,76 +86,68 @@ def _run_under_pty(script, extra_path):
 def _instantiate(tmp_path, branch):
     prompt = tmp_path / "prompt.md"
     prompt.write_text(HOSTILE_PROMPT)
-    log = tmp_path / "wrapper.log"
     body = (
         branch.replace("{claude_env}", "")
         .replace("{sub_model}", "sonnet")
-        .replace("{permission_mode}", "auto")
         # Empty is the common case (no --budget). It also proves the trailing
-        # backslash before the pipe still parses when the flag expands to
-        # nothing.
+        # backslash still parses when the flag expands to nothing.
         .replace("{budget_flag}", "")
         .replace("$PROMPT_FILE", str(prompt))
-        .replace("$WRAPPER_LOG", str(log))
     )
     script = tmp_path / "wrapper.sh"
     script.write_text("#!/bin/bash\n" + body)
     script.chmod(0o755)
-    return script, log
+    return script
 
 
-def test_claude_branch_stdout_is_not_a_tty(tmp_path):
-    """Must fire: Step 4 supplies the non-TTY exemption ARCHITECTURE.md names."""
-    script, log = _instantiate(tmp_path, _extract_branch("claude"))
-    out = _run_under_pty(script, _stub_bin(tmp_path))
+@pytest.fixture()
+def wrapper_output(tmp_path):
+    script = _instantiate(tmp_path, _extract_branch("claude"))
+    return _run_under_pty(script, _stub_bin(tmp_path))
 
-    assert "stdout-is-tty=NO" in out, (
-        "claude was handed a TTY on stdout — the trust dialog and the piped "
-        "prompt are competing for stdin (ARCHITECTURE.md Provider CLI Spec)"
+
+def test_claude_branch_keeps_stdin_on_the_tty(wrapper_output):
+    """The #1054 oracle: fd 0 must still be the terminal, not a spent pipe."""
+    assert "stdin-is-tty=YES" in wrapper_output, (
+        "the worker's stdin is a pipe — a permission prompt has no channel to "
+        "be answered on and the worker will exit instead of waiting (#1054)"
     )
-    assert "stdout-is-tty=YES" not in out
+    assert "stdin-is-tty=NO" not in wrapper_output
 
 
-def test_operator_still_sees_the_output(tmp_path):
-    """The redirect must be the narrowest one: a full `>` empties the cmux pane.
-
-    tee keeps the workspace TTY fed while making claude's own stdout a pipe.
-    """
-    script, log = _instantiate(tmp_path, _extract_branch("claude"))
-    out = _run_under_pty(script, _stub_bin(tmp_path))
-
-    assert "stdout-is-tty=NO" in out, "worker output vanished from the terminal"
-    assert log.exists() and "stdout-is-tty=NO" in log.read_text()
+def test_claude_branch_keeps_stdout_on_the_tty(wrapper_output):
+    """A piped stdout block-buffers the run and empties the cmux pane."""
+    assert "stdout-is-tty=YES" in wrapper_output
+    assert "stdout-is-tty=NO" not in wrapper_output
 
 
-def test_prompt_survives_the_pipeline(tmp_path):
-    """The stdin path must stay shell-free — the reason `-p` is excluded."""
-    script, _ = _instantiate(tmp_path, _extract_branch("claude"))
-    out = _run_under_pty(script, _stub_bin(tmp_path))
-
-    assert "prompt=[" + HOSTILE_PROMPT.strip() + "]" in out.replace("\r\n", "\n")
+def test_prompt_survives_argv(wrapper_output):
+    """argv must stay shell-free — the reason an inline literal is excluded."""
+    assert "prompt=[" + HOSTILE_PROMPT + "]" in wrapper_output.replace("\r\n", "\n")
 
 
-def test_probe_detects_a_tty(tmp_path):
-    """Control that must stay silent: the stub reports YES when nothing is
-    redirected. Without this, a stub wedged at NO would pass every test above."""
-    prompt = tmp_path / "prompt.md"
-    prompt.write_text(HOSTILE_PROMPT)
-    script = tmp_path / "bare.sh"
-    script.write_text(f'#!/bin/bash\ncat "{prompt}" | claude --model sonnet\n')
-    script.chmod(0o755)
+def test_stub_reports_no_when_piped(tmp_path):
+    """Control: the stub must be able to answer NO, or every assertion above
+    would pass against a stub wedged at YES."""
+    script = _instantiate(tmp_path, _extract_branch("claude"))
+    env = dict(os.environ, PATH=f"{_stub_bin(tmp_path)}:{os.environ['PATH']}")
+    out = subprocess.run(
+        ["/bin/bash", str(script)],
+        capture_output=True,
+        text=True,
+        env=env,
+        stdin=subprocess.DEVNULL,
+    ).stdout
 
-    out = _run_under_pty(script, _stub_bin(tmp_path))
-    assert "stdout-is-tty=YES" in out
-    assert "stdout-is-tty=NO" not in out
+    assert "stdin-is-tty=NO" in out
+    assert "stdout-is-tty=NO" in out
 
 
 @pytest.mark.parametrize("provider", ["codex", "gemini"])
 def test_other_providers_are_not_redirected(provider):
-    """Control that must stay silent: the obligation is on the claude row only.
+    """Control that must stay silent: no branch pipes the worker's stdout.
 
-    ARCHITECTURE.md attaches the precondition to that row alone, and gemini does
-    not use the stdin column at all (`-p "$(cat …)"`). Blanket-teeing every
-    branch would be cargo-culting this fix outward.
+    gemini already takes the prompt via `-p "$(cat …)"`, and `codex exec` is
+    non-interactive by design, so neither carries the claude row's obligation.
     """
     assert "tee" not in _extract_branch(provider)

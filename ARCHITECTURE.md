@@ -57,6 +57,17 @@ trusted, has a dialog and a piped prompt competing for the same stream. Neither
 exemption is supplied by the row itself. Using the stdin column obliges the caller
 to supply one: redirect stdout, or add `-p`.
 
+**`cmux-delegate` does not use the stdin column** (#1054). Its worker has to stay an
+ordinary session — a live TTY on both descriptors — so it passes the prompt as argv
+instead: `claude --model {m} "$(cat $F)"`. Command substitution inside double quotes
+is not re-expanded by the shell, so this is exactly as safe as the pipe for `$`,
+backticks, and braces, while leaving fd 0 on the terminal. A piped stdin closes when
+`cat` exits, and the worker then has no channel to answer a permission prompt or a
+trust dialog on — measured: it prints "Awaiting your confirmation" and exits 0. The
+precondition above is moot for that caller, because a human can answer the dialog.
+The stdin column stays correct for genuinely non-interactive callers, which must
+still supply one of the two exemptions.
+
 ### Model Notation
 
 Unified `--model` flag across all skills: `<provider>:<model>` or bare model name.
