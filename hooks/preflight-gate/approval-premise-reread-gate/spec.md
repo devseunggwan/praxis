@@ -190,9 +190,13 @@ allowlist on purpose: each has a write form one flag away (`git branch -D`,
 token against the complete flag list from `gh api --help`, because it reaches
 every verb the service has and a write is one flag away:
 
-- a body flag (`-f` / `--raw-field`, `-F` / `--field`, `--input`) is decisive on
-  its own — gh sends a POST with no `--method` present;
-- `-X` / `--method` decides the rest, defaulting to GET;
+- the **effective method** decides, and it is computed before the body flags
+  are judged: an explicit `-X` / `--method` wins, otherwise a body flag
+  (`-f` / `--raw-field`, `-F` / `--field`, `--input`) implies POST and a call
+  with neither is a GET;
+- a body flag is therefore not decisive on its own — `gh api --method GET
+  search/issues -f q=...` sends those fields as query parameters, exactly as
+  `gh api --help` describes, and asking for approval on it is a false positive;
 - long options accept `--name=value` and short ones an attached value
   (`-ftitle=x`, `-XPOST`), so every token is split before it is classified;
 - **an unrecognised flag returns not-read-only.** The list is closed on purpose:

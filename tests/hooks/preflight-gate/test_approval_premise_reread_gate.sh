@@ -191,6 +191,33 @@ run_case "ack_mcp_blank_string" \
   "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","approval_premise_ack":"   "}')")" \
   "ask"
 
+# --- gh api: the effective method decides, body flags only imply POST ------
+# `gh api --help`: a body flag makes the request a POST *unless* the method is
+# given, in which case the fields become query parameters.
+run_case "api_explicit_get_with_field" \
+  "$(verdict "$(bash_payload 'gh api --method GET repos/o/prod-svc/issues -f state=open')")" \
+  "quiet"
+
+run_case "api_explicit_get_short" \
+  "$(verdict "$(bash_payload 'gh api -X GET repos/o/prod-svc/issues -f state=open')")" \
+  "quiet"
+
+run_case "api_explicit_get_attached_raw_field" \
+  "$(verdict "$(bash_payload 'gh api --method=GET repos/o/prod-svc/issues --raw-field state=open')")" \
+  "quiet"
+
+run_case "api_explicit_get_input" \
+  "$(verdict "$(bash_payload 'gh api --method GET repos/o/prod-svc/issues --input q.json')")" \
+  "quiet"
+
+run_case "api_implicit_post_field" \
+  "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues -f title=x')")" \
+  "ask"
+
+run_case "api_implicit_post_input" \
+  "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues --input body.json')")" \
+  "ask"
+
 # --- a global flag before the verb shifts where the verb is ----------------
 # Wrong in both directions before the fix: the value read as the subcommand.
 run_case "gf_context_value_not_verb" \

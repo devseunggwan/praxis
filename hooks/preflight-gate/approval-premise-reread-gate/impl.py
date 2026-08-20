@@ -265,16 +265,20 @@ def _subcommand(binary: str, argv: list[str]) -> str | None:
 def _gh_api_is_readonly(argv: list[str]) -> bool:
     """True only for a `gh api` call recognised, token by token, as a query.
 
-    Two shapes make it a write. A body flag (`-f`, `-F`, `--input`) makes gh
-    send a POST even with no `--method`, so it is decisive on its own. An
-    explicit method decides the rest, defaulting to GET per `gh api --help`.
+    The effective method decides, and it is computed before the body flags are
+    judged. A body flag (`-f`, `-F`, `--input`) only *implies* POST, per
+    `gh api --help`: with an explicit `--method GET` the same flag becomes a
+    query parameter, which is how `gh api --method GET search/issues -f q=...`
+    is written. Returning False on sight of the flag asked for approval on a
+    read-only query.
 
     Long options accept `--name=value` and short ones accept an attached value
     (`-fkey=v`, `-XPOST`), so a plain membership test over raw tokens misses
     both. Every token is split before it is classified, and an unrecognised one
     returns False -- the gate then asks, which is the safe direction.
     """
-    method = "GET"
+    method = ""
+    has_body = False
     i = 1
     while i < len(argv):
         tok = argv[i]
@@ -286,7 +290,8 @@ def _gh_api_is_readonly(argv: list[str]) -> bool:
             # a short flag carrying its value attached: -fkey=v, -XPOST
             name, inline, sep = tok[:2], tok[2:], "="
         if name in _GH_API_BODY_FLAGS:
-            return False
+            has_body = True
+            continue  # its value is a non-flag token, skipped like the endpoint
         if name in _GH_API_METHOD_FLAGS:
             if sep:
                 method = inline
@@ -300,6 +305,8 @@ def _gh_api_is_readonly(argv: list[str]) -> bool:
                 i += 1  # its value is the next token, not an endpoint
             continue
         return False
+    if not method:
+        method = "POST" if has_body else "GET"
     return method.upper() == "GET"
 
 
