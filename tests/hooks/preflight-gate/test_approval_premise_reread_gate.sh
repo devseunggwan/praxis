@@ -92,7 +92,9 @@ run_case "ro_hubctl_token"   "$(verdict "$(bash_payload 'hubctl token fetch data
 run_case "ro_aws_sts"        "$(verdict "$(bash_payload 'aws sts get-caller-identity --profile prod')")" "quiet"
 run_case "ro_git_log"        "$(verdict "$(bash_payload 'git log --oneline --phase prod')")"             "quiet"
 run_case "ro_gh_pr_view"     "$(verdict "$(bash_payload 'gh pr view 1 --profile prod')")"                "quiet"
-run_case "ro_gh_api_get"     "$(verdict "$(bash_payload 'gh api repos/o/r/issues --profile prod')")"     "quiet"
+# `gh api` has no --profile flag, so the marker has to reach it through the
+# endpoint; a made-up flag would now be rejected as unrecognised, correctly.
+run_case "ro_gh_api_get"     "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues')")"             "quiet"
 run_case "ro_sudo_wrapper"   "$(verdict "$(bash_payload 'sudo kubectl get pods --profile prod')")"       "quiet"
 run_case "ro_env_prefix"     "$(verdict "$(bash_payload 'FOO=1 kubectl get pods --profile prod')")"      "quiet"
 run_case "ro_abs_path"       "$(verdict "$(bash_payload '/usr/bin/kubectl get pods --profile prod')")"   "quiet"
@@ -126,6 +128,27 @@ run_case "wr_date_set"     "$(verdict "$(bash_payload 'date -s "2020-01-01" --pr
 run_case "pos_gh_create_titled_view" "$(verdict "$(bash_payload 'gh pr create --title view --profile prod')")" "ask"
 run_case "pos_git_commit_msg_log"    "$(verdict "$(bash_payload 'git commit -m log --phase prod')")"           "ask"
 run_case "pos_git_branch_delete"     "$(verdict "$(bash_payload 'git branch -D x --phase prod')")"             "ask"
+
+# --- `gh api` reaches every verb, so the flags decide. The surface below is
+# the whole `gh api --help` flag list; the classifier admits a call only when it
+# recognises every token, so an unknown flag must ask. --------------------
+run_case "api_short_body"     "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues -f title=x')")"          "ask"
+run_case "api_long_body"      "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues --raw-field title=x')")" "ask"
+run_case "api_long_body_eq"   "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues --raw-field=title=x')")" "ask"
+run_case "api_typed_body"     "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues -F title=x')")"          "ask"
+run_case "api_typed_body_eq"  "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues --field=title=x')")"     "ask"
+run_case "api_input_eq"       "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues --input=file.json')")"   "ask"
+run_case "api_short_attached" "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues -ftitle=x')")"           "ask"
+run_case "api_method_attached" "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues -XPOST')")"             "ask"
+run_case "api_method_eq_write" "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues --method=DELETE')")"    "ask"
+run_case "api_unknown_flag"   "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues --brand-new-flag')")"    "ask"
+
+run_case "api_plain_get"      "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues')")"                     "quiet"
+run_case "api_explicit_get"   "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues -X GET')")"              "quiet"
+run_case "api_method_eq_get"  "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues --method=GET')")"        "quiet"
+run_case "api_read_flags"     "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues --paginate -q ".[].id"')")" "quiet"
+run_case "api_header_value"   "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues -H "Accept: application/vnd"')")" "quiet"
+run_case "api_valueless_reads" "$(verdict "$(bash_payload 'gh api repos/o/prod-svc/issues --cache 60m --slurp --silent')")" "quiet"
 
 # --- The acknowledgement is honoured on both surfaces ----------------------
 run_case "bash_ack" \

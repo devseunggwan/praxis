@@ -134,7 +134,23 @@ READONLY_SUBCOMMANDS = {
 # `gh api` and `aws` reach every verb the service has, so the subcommand alone
 # does not settle them: a write is one flag away. Both are read-only only in
 # their query shapes.
-_GH_API_WRITE_FLAGS = frozenset({"-X", "--method", "-f", "-F", "--input"})
+#
+# The three sets below are the complete `gh api` flag surface, transcribed from
+# `gh api --help`. Completeness is the point: the classifier admits a call only
+# when it recognises *every* token, so a flag added by a future gh release falls
+# through to ask rather than through the gate.
+_GH_API_BODY_FLAGS = frozenset({"-f", "--raw-field", "-F", "--field", "--input"})
+_GH_API_METHOD_FLAGS = frozenset({"-X", "--method"})
+_GH_API_READ_FLAGS = frozenset({
+    "--allow-escape-sequences", "--cache", "-H", "--header", "--hostname",
+    "-i", "--include", "-q", "--jq", "--paginate", "-p", "--preview",
+    "--silent", "--slurp", "-t", "--template", "--verbose",
+})
+# Flags that consume the following token when it is not joined with `=`.
+_GH_API_VALUE_FLAGS = frozenset({
+    "--cache", "-H", "--header", "--hostname", "-q", "--jq", "-p", "--preview",
+    "-t", "--template",
+})
 _AWS_READ_PREFIXES = ("describe-", "get-", "list-", "search-", "query-", "batch-get-")
 
 
@@ -156,6 +172,47 @@ def _subcommand(binary: str, argv: list[str]) -> str:
     return non_flags[0]
 
 
+def _gh_api_is_readonly(argv: list[str]) -> bool:
+    """True only for a `gh api` call recognised, token by token, as a query.
+
+    Two shapes make it a write. A body flag (`-f`, `-F`, `--input`) makes gh
+    send a POST even with no `--method`, so it is decisive on its own. An
+    explicit method decides the rest, defaulting to GET per `gh api --help`.
+
+    Long options accept `--name=value` and short ones accept an attached value
+    (`-fkey=v`, `-XPOST`), so a plain membership test over raw tokens misses
+    both. Every token is split before it is classified, and an unrecognised one
+    returns False -- the gate then asks, which is the safe direction.
+    """
+    method = "GET"
+    i = 1
+    while i < len(argv):
+        tok = argv[i]
+        i += 1
+        if not tok.startswith("-"):
+            continue  # the endpoint, or a value already consumed below
+        name, sep, inline = tok.partition("=")
+        if not sep and not tok.startswith("--") and len(tok) > 2:
+            # a short flag carrying its value attached: -fkey=v, -XPOST
+            name, inline, sep = tok[:2], tok[2:], "="
+        if name in _GH_API_BODY_FLAGS:
+            return False
+        if name in _GH_API_METHOD_FLAGS:
+            if sep:
+                method = inline
+            elif i < len(argv):
+                method, i = argv[i], i + 1
+            else:
+                return False  # -X with nothing after it; do not guess
+            continue
+        if name in _GH_API_READ_FLAGS:
+            if not sep and name in _GH_API_VALUE_FLAGS:
+                i += 1  # its value is the next token, not an endpoint
+            continue
+        return False
+    return method.upper() == "GET"
+
+
 def _segment_is_readonly(argv: list[str]) -> bool:
     argv = strip_prefix(argv)
     if not argv:
@@ -172,15 +229,7 @@ def _segment_is_readonly(argv: list[str]) -> bool:
         return False
 
     if binary == "gh" and sub == "api":
-        # A GET is the default; anything naming a method or a body is a write.
-        for i, tok in enumerate(argv):
-            if tok in _GH_API_WRITE_FLAGS:
-                if tok in ("-X", "--method") and argv[i + 1:i + 2] == ["GET"]:
-                    continue
-                return False
-            if tok.startswith("--method="):
-                return tok == "--method=GET"
-        return True
+        return _gh_api_is_readonly(argv)
     if binary == "aws":
         # `aws sts get-caller-identity` and its siblings only.
         return any(a.startswith(_AWS_READ_PREFIXES) for a in argv[2:])

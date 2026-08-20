@@ -136,9 +136,19 @@ exchange for the guarantee the allowlist exists to give.
 
 `git branch`, `tag`, `remote`, `worktree` and `config` are absent from the
 allowlist on purpose: each has a write form one flag away (`git branch -D`,
-`git remote add`). `gh api` and `aws` are admitted only in their query shapes —
-`gh api` without a method or body flag, `aws` under a `describe-` / `get-` /
-`list-` style verb.
+`git remote add`). `gh api` and `aws` are admitted only in their query shapes. `aws` needs a
+`describe-` / `get-` / `list-` style verb. `gh api` is classified token by
+token against the complete flag list from `gh api --help`, because it reaches
+every verb the service has and a write is one flag away:
+
+- a body flag (`-f` / `--raw-field`, `-F` / `--field`, `--input`) is decisive on
+  its own — gh sends a POST with no `--method` present;
+- `-X` / `--method` decides the rest, defaulting to GET;
+- long options accept `--name=value` and short ones an attached value
+  (`-ftitle=x`, `-XPOST`), so every token is split before it is classified;
+- **an unrecognised flag returns not-read-only.** The list is closed on purpose:
+  a flag added by a future gh release must fall through to `ask`, not through
+  the gate.
 
 ## Not yet done
 
