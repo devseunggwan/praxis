@@ -103,6 +103,13 @@ state_roots() {
 # appear in either without the plugin having written one.
 BROKER_INDEX=""
 
+# The index row: pid, sessionDir, and the state dir the record was read from.
+# Held in a variable because broker_index_ensure runs it two ways -- once over
+# every file, and once per file on the malformed-record fallback.
+BROKER_INDEX_JQ='select(.pid != null and .sessionDir != null)
+  | [(.pid|tostring), .sessionDir,
+     (input_filename | rtrimstr("/broker.json"))] | @tsv'
+
 broker_index_ensure() {
   [[ -n "$BROKER_INDEX" ]] && return 0
   local f bj
@@ -119,10 +126,26 @@ broker_index_ensure() {
   # keeps its own state dir without a --arg per call. An empty file list must not
   # reach jq: with no arguments it reads stdin and would block.
   if (( ${#files[@]} > 0 )); then
-    jq -r 'select(.pid != null and .sessionDir != null)
-           | [(.pid|tostring), .sessionDir,
-              (input_filename | rtrimstr("/broker.json"))] | @tsv' \
-       "${files[@]}" 2>/dev/null > "$f" || true
+    if ! jq -r "$BROKER_INDEX_JQ" "${files[@]}" 2>/dev/null > "$f"; then
+      # jq treats multiple file arguments as ONE concatenated stream and aborts
+      # the whole stream at the first parse error -- it does not skip the bad
+      # file and continue. Verified: three records with the second malformed
+      # yields only the first record's row and exit 5.
+      #
+      # A truncated index is worse than a slow one. Every record after the bad
+      # file disappears, so a LIVE broker's claim on a sessionDir goes unseen,
+      # session_dir_has_live_claimant reports the dir unclaimed, and the GC pass
+      # deletes a directory still in use -- #921, reached by a different road.
+      # The emptiness check below cannot catch it: the index is short, not empty.
+      #
+      # Re-read file by file so one unparseable record costs only itself. This
+      # is the O(records) spawn path the single call exists to avoid, so it runs
+      # only when a malformed record actually exists.
+      : > "$f"
+      for bj in "${files[@]}"; do
+        jq -r "$BROKER_INDEX_JQ" "$bj" 2>/dev/null >> "$f" || true
+      done
+    fi
     # A jq that failed leaves an EMPTY index behind, and an empty index is
     # indistinguishable from "no records exist" at every call site. The reap
     # pass survives that (no match -> owner undetermined -> broker kept), but

@@ -833,7 +833,56 @@ else
   if [ -d "$SESS6" ]; then pass "#1056 gate 6: refusal left the sessionDir intact"
   else fail "#1056 gate 6: refusal deleted $SESS6"; fi
 fi
-rm -rf "$TMPD6"
+
+
+
+# --- Gate 7: a malformed record must not truncate the index -----------------
+# jq aborts the whole stream at the first parse error when handed many files,
+# so one unparseable broker.json used to drop every record after it. The GC
+# pass reads that index: a live broker whose record was dropped no longer
+# claims its sessionDir, and the dir gets collected while still in use (#921
+# by another road). The emptiness guard of gate 6 cannot see this — the index
+# is short, not empty.
+TMPROOT7="${TMPDIR:-/tmp}"; TMPROOT7="${TMPROOT7%/}"
+TMPD7="$(mktemp -d "$TMPROOT7/px1056g7.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+cleanup_gate7() {
+  rm -rf "$TMPD7"
+  declare -F cleanup_gate6 >/dev/null && cleanup_gate6
+  return 0
+}
+trap cleanup_gate7 EXIT INT TERM
+
+if ! command -v jq >/dev/null 2>&1; then
+  skip "#1056 gate 7: needs jq"
+else
+  CONFIG7="$TMPD7/config"
+  SHARED7="$TMPD7/cxc-SHARED7"
+  mkdir -p "$SHARED7"
+  # Ordered so the malformed record sits BETWEEN the dead claimant and the live
+  # one. Directory iteration is sorted, so 01/02/03 fixes that order.
+  DEAD7=99999
+  while kill -0 "$DEAD7" 2>/dev/null; do DEAD7=$((DEAD7 - 1)); done
+  mkdir -p "$CONFIG7/plugins/data/codex-openai-codex/state/01-dead" \
+           "$CONFIG7/plugins/data/codex-openai-codex/state/02-broken" \
+           "$CONFIG7/plugins/data/codex-openai-codex/state/03-live"
+  ST7="$CONFIG7/plugins/data/codex-openai-codex/state"
+  printf '{"pid":%s,"sessionDir":"%s"}\n' "$DEAD7" "$SHARED7" > "$ST7/01-dead/broker.json"
+  printf '{"pid":1,"sessionDir":"/nope"\n'                     > "$ST7/02-broken/broker.json"
+  # This shell is alive and claims the same dir — the record that must survive.
+  printf '{"pid":%s,"sessionDir":"%s"}\n' "$$" "$SHARED7"      > "$ST7/03-live/broker.json"
+
+  GC7="$(TMPDIR="$TMPD7" CLAUDE_CONFIG_DIR="$CONFIG7" bash "$REAPER" --gc 2>&1)"
+  if [ -d "$SHARED7" ]; then
+    pass "#1056 gate 7: live claim behind a malformed record still protects the dir"
+  else
+    fail "#1056 gate 7: --gc deleted $SHARED7 despite a live claimant (output: $GC7)"
+  fi
+  case "$GC7" in
+    *"a live broker still claims this sessionDir"*)
+      pass "#1056 gate 7: the skip names the live claim" ;;
+    *) fail "#1056 gate 7: expected a live-claimant SKIP GC line (output: $GC7)" ;;
+  esac
+fi
 
 
 echo "=== summary ==="
