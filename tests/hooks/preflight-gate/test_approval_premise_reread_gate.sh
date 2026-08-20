@@ -173,6 +173,25 @@ run_case "ack_mcp_blank_string" \
   "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","approval_premise_ack":"   "}')")" \
   "ask"
 
+# --- a substitution hides a command the outer binary does not name ---------
+# The shell runs the inner command; the allowlist only ever saw `echo`/`cat`.
+run_case "sub_command_substitution" \
+  "$(verdict "$(bash_payload 'echo "$(kubectl delete pod x -n prod-apne2)"')")" \
+  "ask"
+
+run_case "sub_backtick" \
+  "$(verdict "$(bash_payload 'echo `kubectl delete pod x -n prod-apne2`')")" \
+  "ask"
+
+run_case "sub_process_substitution" \
+  "$(verdict "$(bash_payload 'cat <(kubectl delete pod x -n prod-apne2)')")" \
+  "ask"
+
+# Arithmetic is not a substitution and must not cost a question.
+run_case "sub_arithmetic_quiet" \
+  "$(verdict "$(bash_payload 'echo $((1 + 2)) --phase prod')")" \
+  "quiet"
+
 # --- MCP: mutation classification by token, not by substring ---------------
 # Each of these was misclassified by substring matching on the 374-tool surface.
 run_case "mcp_trigger_fires" \

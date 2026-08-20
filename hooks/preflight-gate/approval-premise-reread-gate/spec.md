@@ -151,6 +151,12 @@ Three properties carry it, each pinned by a test:
   --title view` and `git commit -m log`.
 - **A state-changing redirect disqualifies the command** regardless of its
   verbs, via the existing `has_state_changing_redirect`.
+- **a substitution anywhere in the command** — `$(…)`, a backtick, `<(…)` or
+  `>(…)`. The outer binary's name says nothing about what the shell runs
+  inside: `echo "$(kubectl delete pod x -n prod-apne2)"` is an `echo` by every
+  test the allowlist applies, and the delete still executes. Recognising the
+  inner command means parsing it, so the allowlist declines the whole command
+  instead. `$((…))` is arithmetic, not a substitution, and is exempt.
 
 A binary is on the bare-name allowlist only when it is read-only under *every*
 argument. `find`, `yq`, `sort`, `uniq` and `date` therefore are not: each writes

@@ -258,9 +258,20 @@ def _segment_is_readonly(argv: list[str]) -> bool:
     return True
 
 
+# A substitution runs a command the outer binary's name says nothing about:
+# `echo "$(kubectl delete pod x -n prod-apne2)"` reads as an `echo`, and the
+# shell still runs the delete. Recognising the inner command would mean parsing
+# it, so the allowlist declines instead -- a command carrying any of these is
+# not a read-only *shape*, whatever sits inside it, and falls through to ask.
+# `$((` is arithmetic, not a substitution, and costs an ask for nothing.
+_SUBSTITUTION_RE = re.compile(r"\$\((?!\()|`|<\(|>\(")
+
+
 def _bash_is_readonly(command: str) -> bool:
     """True only when every segment is a recognised read-only invocation."""
     if has_state_changing_redirect(command):
+        return False
+    if _SUBSTITUTION_RE.search(command):
         return False
     tokens = safe_tokenize(command)
     if not tokens:
