@@ -56,7 +56,7 @@ STATE_SUFFIX="plugins/data/codex-openai-codex/state"
 # writes its broker.json under the config dir of the SESSION THAT STARTED IT, so
 # a reaper reading only $STATE_DIR cannot resolve the rest: pid+sessionDir
 # matches nothing, owner_status returns `unknown`, and the under-reap bias keeps
-# them forever. Measured on the author's host: 2143 of 2711 skips across 541
+# them forever. Measured on the author's host: 2161 of 2687 skips across 544
 # launchd runs.
 #
 # Candidates are SIBLINGS of CONFIG_DIR rather than a $HOME glob. Production
@@ -230,6 +230,49 @@ done
 case "$MAX_AGE_MIN" in
   ''|*[!0-9]*) MAX_AGE_MIN=30 ;;
 esac
+
+# Warn when this copy is not the one the plugin manifest points at (#1059).
+#
+# The launchd plist renders the reaper's path with the plugin version in it
+# (`.../cache/praxis/praxis/<ver>/skills/...`), so updating the plugin leaves the
+# job running the old copy and nothing says so. LAUNCHD.md documents re-running
+# the Install steps, but a manual step nobody is reminded of is a step that gets
+# skipped: this host sat three versions behind for weeks.
+#
+# The check speaks only when the running script is itself inside the plugin
+# cache. A development checkout can never equal installPath, so warning there
+# would fire on every local run and train the reader to ignore the line.
+#
+# A missing or unparseable manifest is silence, not drift -- it is the absence
+# of an answer. Advisory only: nothing here changes what the run does or what it
+# exits with, because running an old reaper still beats running none.
+warn_on_version_drift() {
+  local self plugin_root installed cache_root
+  self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 0
+  # Both sides are resolved with `pwd -P` before comparing. On macOS /var is a
+  # symlink to /private/var, so a CONFIG_DIR that came in as a literal string
+  # and a path that went through `pwd -P` disagree on the same directory and the
+  # prefix test silently never matches.
+  cache_root="$(cd "$CONFIG_DIR/plugins/cache" 2>/dev/null && pwd -P)" || return 0
+  case "$self" in
+    "$cache_root"/*) ;;
+    *) return 0 ;;
+  esac
+  # <plugin_root>/skills/codex-review-wrap -> <plugin_root>, the shape
+  # installPath records.
+  plugin_root="$(cd "$self/../.." && pwd -P)" || return 0
+  local manifest="$CONFIG_DIR/plugins/installed_plugins.json"
+  [[ -f "$manifest" ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  installed="$(jq -r '.plugins["praxis@praxis"][0].installPath // empty' "$manifest" 2>/dev/null || true)"
+  [[ -n "$installed" ]] || return 0
+  # Same resolution on the manifest's side. It records whatever string the
+  # installer wrote, which need not be the physical path.
+  installed="$(cd "$installed" 2>/dev/null && pwd -P)" || return 0
+  [[ "$installed" != "$plugin_root" ]] || return 0
+  echo "WARN version drift: running $plugin_root but the manifest installs $installed — re-run the LAUNCHD.md Install steps to re-render the plist" >&2
+}
+warn_on_version_drift
 
 now=$(date +%s)
 max_age_sec=$(( MAX_AGE_MIN * 60 ))

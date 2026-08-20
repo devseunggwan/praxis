@@ -80,3 +80,21 @@ this targets, prune it periodically (or point `StandardOutPath` /
 plist points at a specific version. After updating the praxis plugin, **re-run
 the Install steps** to re-render the plist against the new path. (The
 phase-end Step 6 reaper resolves its path at runtime and is unaffected.)
+
+Nothing forces that step, so the reaper reports it instead: when it is running
+from inside the plugin cache and its own directory is not the one the manifest
+installs, it writes one line to the log and carries on.
+
+```text
+WARN version drift: running .../praxis/7.8.0 but the manifest installs .../praxis/7.11.0 — re-run the LAUNCHD.md Install steps to re-render the plist
+```
+
+Two things it deliberately does not do. It never exits non-zero — an old reaper
+still beats no reaper, and the exit code is what `launchctl list` shows, so
+spending it here would hide a real failure. And it cannot fire when the pinned
+version's directory is gone entirely (a cache cleanup): the script never runs,
+so nothing self-checks. That case surfaces as a `No such file or directory`
+line from bash in the same log, every `StartInterval`.
+
+A development checkout is silent by construction — the check runs only for a
+copy inside `$CLAUDE_CONFIG_DIR/plugins/cache`.
