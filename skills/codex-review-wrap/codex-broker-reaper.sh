@@ -48,6 +48,102 @@ set -euo pipefail
 
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 STATE_DIR="$CONFIG_DIR/plugins/data/codex-openai-codex/state"
+STATE_SUFFIX="plugins/data/codex-openai-codex/state"
+
+# Every state root this host may hold, not just our own (#1056).
+#
+# A host can run several Claude config dirs (~/.claude, ~/.claude-2). The broker
+# writes its broker.json under the config dir of the SESSION THAT STARTED IT, so
+# a reaper reading only $STATE_DIR cannot resolve the rest: pid+sessionDir
+# matches nothing, owner_status returns `unknown`, and the under-reap bias keeps
+# them forever. Measured on the author's host: 2143 of 2711 skips across 541
+# launchd runs.
+#
+# Candidates are SIBLINGS of CONFIG_DIR rather than a $HOME glob. Production
+# CONFIG_DIR is ~/.claude, so the parent is $HOME either way — but keying off
+# the parent is what lets a sandboxed CLAUDE_CONFIG_DIR enumerate sandboxed
+# siblings, i.e. what makes this testable at all.
+#
+# The path suffix is what discriminates, not the directory name: dotglob is
+# needed because the real ones are dotfiles, and a `*` alone would miss every
+# one of them.
+#
+# Widening is only safe if BOTH halves of the sweep widen together. The GC pass
+# rm -rf's sessionDirs named by these records, and its live-claimant guard reads
+# the same roots; widening the records alone would let it delete a dir a sibling
+# config's live broker still claims — #921 on a new axis.
+state_roots() {
+  local d saved
+  # `shopt -p` exits 1 when the option is UNSET, and `set -e` would kill the
+  # subshell this runs in before a single path was emitted.
+  saved="$(shopt -p nullglob dotglob || true)"
+  shopt -s nullglob dotglob
+  { [[ -d "$STATE_DIR" ]] && printf '%s\n' "$STATE_DIR"
+    for d in "$(dirname "$CONFIG_DIR")"/*/"$STATE_SUFFIX"; do
+      [[ -d "$d" ]] && printf '%s\n' "$d"
+    done
+  } | while IFS= read -r d; do
+        # Physical paths: a symlinked config dir must not be swept twice.
+        (cd "$d" 2>/dev/null && pwd -P) || printf '%s\n' "$d"
+      done | awk '!seen[$0]++'
+  eval "$saved"
+}
+
+# One "<pid> <sessionDir> <state-dir>" row per broker.json, built ONCE per pass
+# and reused by every lookup (#1056 review F1).
+#
+# The obvious shape -- re-scan every record for each broker -- costs one grep
+# process per record per broker. Measured on the author's host: 996 records x 7
+# live brokers = 6972 processes for a single pass, while the reaper holds its
+# lock and the launchd job runs every 30 minutes. The record count only grows,
+# since a crashed broker's state dir survives until a later GC sweeps it.
+#
+# Tab-separated because every field can contain spaces: state dirs live under a
+# relocatable CLAUDE_CONFIG_DIR and sessionDirs under $TMPDIR. A tab cannot
+# appear in either without the plugin having written one.
+BROKER_INDEX=""
+
+broker_index_ensure() {
+  [[ -n "$BROKER_INDEX" ]] && return 0
+  local f bj
+  local -a files=()
+  f="$(mktemp "${TMPDIR:-/tmp}/codex-reaper-idx.XXXXXX")" || return 1
+  while IFS= read -r bj; do
+    [[ -n "$bj" ]] || continue
+    files+=("$bj")
+  done < <(all_broker_jsons)
+  # ONE jq process for the whole index, not one per record. A per-record loop is
+  # still O(records) spawns -- 996 here -- and the early test gates invoke the
+  # reaper repeatedly, so it showed up as a suite that no longer finishes.
+  # input_filename yields the file jq is currently reading, which is how each row
+  # keeps its own state dir without a --arg per call. An empty file list must not
+  # reach jq: with no arguments it reads stdin and would block.
+  if (( ${#files[@]} > 0 )); then
+    jq -r 'select(.pid != null and .sessionDir != null)
+           | [(.pid|tostring), .sessionDir,
+              (input_filename | rtrimstr("/broker.json"))] | @tsv' \
+       "${files[@]}" 2>/dev/null > "$f" || true
+  fi
+  BROKER_INDEX="$f"
+  return 0
+}
+
+broker_index_clear() {
+  [[ -n "$BROKER_INDEX" && -f "$BROKER_INDEX" ]] && rm -f "$BROKER_INDEX"
+  BROKER_INDEX=""
+}
+
+# Every broker.json across every state root, one path per line.
+all_broker_jsons() {
+  local root bj saved
+  saved="$(shopt -p nullglob || true)"
+  shopt -s nullglob
+  while IFS= read -r root; do
+    [[ -n "$root" ]] || continue
+    for bj in "$root"/*/broker.json; do printf '%s\n' "$bj"; done
+  done < <(state_roots)
+  eval "$saved"
+}
 BROKER_PATTERN='app-server-broker.mjs'
 
 MODE="gc"
@@ -287,19 +383,17 @@ workspace_has_live_owner() {
 # still leaves 0 or several candidates, the caller must treat the owner as
 # undetermined rather than trust an arbitrary one.
 state_dir_of_broker() {
-  local pid="$1" want="$2" bj found="" n=0
+  local pid="$1" want="$2" ipid isess idir found="" n=0
   [[ -n "$want" ]] || return 0
-  # Read the grep hits line by line instead of splitting a bare command
-  # substitution: CLAUDE_CONFIG_DIR is relocatable (CONTRIBUTING.md), so a path
-  # like "/Volumes/External Drive/.claude" would otherwise be split at the space
-  # and every jq lookup would miss — leaving each broker "unknown" and the reap
-  # pass dead. Process substitution keeps the counters in this shell.
-  while IFS= read -r bj; do
-    [[ -n "$bj" ]] || continue
-    [[ "$(jq -r '.pid // empty' "$bj" 2>/dev/null || true)" == "$pid" ]] || continue
-    [[ "$(jq -r '.sessionDir // empty' "$bj" 2>/dev/null || true)" == "$want" ]] || continue
-    found="$(dirname "$bj")"; n=$(( n + 1 ))
-  done < <(grep -lE "\"pid\"[[:space:]]*:[[:space:]]*$pid([^0-9]|\$)" "$STATE_DIR"/*/broker.json 2>/dev/null || true)
+  broker_index_ensure || return 0
+  # Read whole fields, never word-split: a state dir or sessionDir may contain
+  # spaces (CLAUDE_CONFIG_DIR is relocatable, and the suite's own fixtures are
+  # spaced on purpose to keep that a standing regression).
+  while IFS=$'\t' read -r ipid isess idir; do
+    [[ "$ipid" == "$pid" ]] || continue
+    [[ "$isess" == "$want" ]] || continue
+    found="$idir"; n=$(( n + 1 ))
+  done < "$BROKER_INDEX"
   (( n == 1 )) && printf '%s' "$found"
   return 0
 }
@@ -344,7 +438,7 @@ if ! mkdir "$LOCK" 2>/dev/null; then
     exit 0
   fi
 fi
-trap 'cwd_snapshot_clear; rmdir "$LOCK" 2>/dev/null || true' EXIT
+trap 'cwd_snapshot_clear; broker_index_clear; rmdir "$LOCK" 2>/dev/null || true' EXIT
 
 # --- Pass 1: reap running, idle brokers (only in --reap mode) ---
 if [[ "$MODE" == "reap" ]]; then
@@ -421,23 +515,25 @@ fi
 # #923 gave the reap pass this pid+sessionDir disambiguation; the GC pass had
 # none, and rm -rf'd the live session's dir (#921).
 session_dir_has_live_claimant() {
-  local want="$1" self="$2" other opid osdir
-  shopt -s nullglob
-  for other in "$STATE_DIR"/*/broker.json; do
-    [[ "$other" == "$self" ]] && continue
-    osdir="$(jq -r '.sessionDir // empty' "$other" 2>/dev/null || true)"
+  local want="$1" self="$2" opid osdir odir
+  broker_index_ensure || return 1
+  # $self is the record under inspection, identified by its state dir -- the
+  # index carries no broker.json path, and dirname($self) is exactly the third
+  # field. Same per-pass index as state_dir_of_broker: this runs once per GC
+  # candidate, so a rescan here is the same N-by-M cost the index removes.
+  local selfdir; selfdir="$(dirname "$self")"
+  while IFS=$'\t' read -r opid osdir odir; do
+    [[ "$odir" == "$selfdir" ]] && continue
     [[ "$osdir" == "$want" ]] || continue
-    opid="$(jq -r '.pid // empty' "$other" 2>/dev/null || true)"
     [[ -n "$opid" ]] || continue
     kill -0 "$opid" 2>/dev/null && return 0
-  done
+  done < "$BROKER_INDEX"
   return 1
 }
 
 # --- Pass 2: GC stale tmp sessionDirs of dead brokers (both modes) ---
-if [[ -d "$STATE_DIR" ]]; then
-  shopt -s nullglob
-  for bj in "$STATE_DIR"/*/broker.json; do
+while IFS= read -r bj; do
+    [[ -n "$bj" ]] || continue
     pid="$(jq -r '.pid // empty' "$bj" 2>/dev/null || true)"
     sdir="$(jq -r '.sessionDir // empty' "$bj" 2>/dev/null || true)"
     [[ -z "$pid" ]] && continue
@@ -456,7 +552,6 @@ if [[ -d "$STATE_DIR" ]]; then
       fi
       gc_dirs=$(( gc_dirs + 1 ))
     fi
-  done
-fi
+done < <(all_broker_jsons)
 
 echo "codex-broker-reaper: mode=$MODE dry_run=$DRY_RUN max_age_min=$MAX_AGE_MIN scanned=$scanned reaped=$reaped gc_dirs=$gc_dirs skipped=$skipped"
