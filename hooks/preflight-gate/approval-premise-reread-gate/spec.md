@@ -15,10 +15,13 @@ The gate emits `ask` when **all** of the following hold:
    question from opposite ends, and the section below says why.
 2. The call's arguments carry a production phase marker (`PROD_MARKER_RE`).
 3. No acknowledgement is present. Each surface is read only where it is
-   declared: the `# approval-premise:ack <premise>` comment **in the Bash
-   command**, the `approval_premise_ack` **argument** in MCP input. Both must
-   carry a non-empty premise — a bare marker, an empty string, and a boolean
-   `true` are all rejected.
+   declared: the `# approval-premise:ack <premise>` **unquoted comment** in the
+   Bash command, and for MCP a **hook-owned file** at
+   `~/.praxis/cache/approval-premise-ack-<session_id>.json` (`PRAXIS_HOME`- and
+   `PRAXIS_STATE_DIR`-aware via `resolve_cache_file`) holding
+   `{"premise": "<one line>"}`. Both must carry a non-empty premise string — a
+   bare marker, an empty string, a boolean `true` and a malformed file are all
+   rejected.
 
 Anything else passes silently. A malformed payload fails open.
 
@@ -38,8 +41,18 @@ false attestation, and the rules treat that as the documented path by which a
 gate becomes decorative.
 
 **The statement is the acknowledgement, so the gate requires one.** A bare
-marker, a blank premise, and an MCP `approval_premise_ack: true` all say the
-field was set and nothing about what the premise now says; each is rejected.
+marker, a blank premise, and a `{"premise": true}` ack file all say the field
+was set and nothing about what the premise now says; each is rejected.
+
+**The MCP acknowledgement is a file, not a tool argument, and it is consumed on
+read.** An MCP call has no comment surface, and its arguments belong to the
+server's schema: a synthetic `approval_premise_ack` field is rejected outright
+by any server that validates its input, so the quiet path it described was
+unreachable at runtime for exactly the tools that validate most strictly. The
+file is hook-owned, session-keyed like every other praxis cache entry, and
+unlinked as it is read — one acknowledgement covers one call, so no shape of it
+disables the gate. The gate's own message prints the resolved path, because an
+opt-out nobody can find is an opt-out that does not exist.
 What the gate cannot check is whether the sentence is *true* — see
 [Known ceiling](#known-ceiling).
 

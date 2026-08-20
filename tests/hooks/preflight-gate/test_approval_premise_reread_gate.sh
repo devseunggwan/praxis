@@ -60,7 +60,20 @@ bash_payload() {
 }
 
 mcp_payload() {
-  python3 -c 'import json,sys; print(json.dumps({"tool_name":sys.argv[1],"tool_input":json.loads(sys.argv[2])}))' "$1" "$2"
+  python3 -c 'import json,sys; print(json.dumps({"session_id":"test-session","tool_name":sys.argv[1],"tool_input":json.loads(sys.argv[2])}))' "$1" "$2"
+}
+
+# The MCP acknowledgement is a hook-owned file, so the suite gets its own
+# PRAXIS_HOME: without it these cases would read and delete the running user's
+# real ack file.
+PRAXIS_HOME="$(mktemp -d)"
+export PRAXIS_HOME
+trap 'rm -rf "$PRAXIS_HOME"' EXIT
+ACK_FILE="$PRAXIS_HOME/cache/approval-premise-ack-test-session.json"
+
+write_ack() {
+  mkdir -p "$(dirname "$ACK_FILE")"
+  printf '%s' "$1" > "$ACK_FILE"
 }
 
 echo "test_approval_premise_reread_gate"
@@ -154,9 +167,16 @@ run_case "api_valueless_reads" "$(verdict "$(bash_payload 'gh api repos/o/prod-s
 run_case "bash_ack" \
   "$(verdict "$(bash_payload 'hubctl dev trigger --phase prod # approval-premise:ack run already recovered, re-checked')")" \
   "quiet"
+write_ack '{"premise": "run 16 already recovered; blast radius re-measured here"}'
 run_case "mcp_ack" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"},"approval_premise_ack":"re-read"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
   "quiet"
+
+# Consumed on read: the same call a second time has nothing left to stand on,
+# which is what stops one acknowledgement from becoming an off switch.
+run_case "mcp_ack_consumed_once" \
+  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
+  "ask"
 
 # --- The acknowledgement is a statement, and it is read only on the surface
 # where it is declared. A bare marker attests nothing; a marker sitting in an
@@ -184,11 +204,25 @@ run_case "ack_bash_comment_no_space" \
 run_case "ack_mcp_stray_marker" \
   "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","note":"see # approval-premise:ack in runbook"}')")" \
   "ask"
-run_case "ack_mcp_boolean" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","approval_premise_ack":true}')")" \
+# The synthetic argument is gone: a server that validates its schema rejects
+# an undeclared field, so a call carrying it was never reachable at runtime.
+run_case "ack_mcp_argument_ignored" \
+  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","approval_premise_ack":"re-read"}')")" \
   "ask"
-run_case "ack_mcp_blank_string" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","approval_premise_ack":"   "}')")" \
+
+write_ack '{"premise": true}'
+run_case "ack_mcp_file_boolean" \
+  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "ask"
+
+write_ack '{"premise": "   "}'
+run_case "ack_mcp_file_blank" \
+  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "ask"
+
+write_ack 'not json at all'
+run_case "ack_mcp_file_malformed" \
+  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "ask"
 
 # --- gh api: the effective method decides, body flags only imply POST ------

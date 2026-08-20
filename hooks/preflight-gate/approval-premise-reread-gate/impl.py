@@ -29,19 +29,25 @@ own documented failure mode — see `Own-greencheck and SUT-comment are not
 evidence` in the rules. The reach here is partial by construction.
 
 Opt-out: embed `# approval-premise:ack <one-line premise re-read>` in the Bash
-command, or pass `approval_premise_ack` in an MCP call's arguments. The marker is
-not a bypass token — it asserts that the premise was re-read and states what it
-now says. Attaching it without having done so is a false attestation.
+command. An MCP call carries no comment surface and its arguments are the
+server's schema to define, so its acknowledgement is written to a hook-owned
+file instead, whose path the gate's own message prints, and consumed by
+the next call that would
+otherwise be asked about. The marker is not a bypass token — it asserts that the
+premise was re-read and states what it now says. Attaching it without having
+done so is a false attestation.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
@@ -52,7 +58,16 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 )
 
 ACK_MARKER = "# approval-premise:ack"
-ACK_ARG = "approval_premise_ack"
+
+# How to attest for a call that has no comment surface. The message prints the
+# resolved path rather than the procedure: an opt-out nobody can find is an
+# opt-out that does not exist.
+def _ack_hint(path: str) -> str:
+    return (
+        "this call has no comment surface, so the acknowledgement goes in a "
+        f"file: write {{\"premise\": \"<one line>\"}} to {path} and re-issue. "
+        "It is consumed on read -- one acknowledgement covers one call."
+    )
 
 # The acknowledgement is an attestation that the premise was re-read and a
 # statement of what it now says, so the statement is the part that matters: a
@@ -381,13 +396,16 @@ _ANSWER_BOTH = (
 )
 
 
-def _message(tool_name: str, target: str) -> str:
+def _message(tool_name: str, target: str, session_id: str = "") -> str:
+    answer = _ANSWER_BOTH
+    if tool_name.startswith("mcp__") and session_id:
+        answer = f"{_ANSWER_BOTH} {_ack_hint(_ack_file(session_id))}"
     return format_block(
         rule_name="approval premise re-read",
         why="an approval covers the option, not an option whose premise has "
             f"since dissolved -- {tool_name} names a production target "
             f"({target or 'unnamed'})",
-        correct_path=_ANSWER_BOTH,
+        correct_path=answer,
         # The acknowledgement comment is an attestation the agent writes after
         # actually re-reading, not an env-var bypass; an env var would let the
         # session disable the gate for itself.
@@ -417,14 +435,37 @@ def _bash_ack(command: str) -> bool:
     return False
 
 
-def _mcp_ack(tool_input: dict) -> bool:
-    """True when the declared MCP argument holds a non-empty premise string.
+def _ack_file(session_id: str) -> str:
+    return resolve_cache_file(f"approval-premise-ack-{session_id}.json",
+                              session_id=session_id)
 
-    A bare `True` is rejected on purpose: the argument's value IS the premise,
-    so a boolean says the field was set, never what it now says.
+
+def _mcp_ack(session_id: str) -> bool:
+    """True when this session left a premise in the hook-owned ack file.
+
+    An MCP call has no comment surface, and its arguments belong to the
+    server's schema: a synthetic `approval_premise_ack` field is rejected
+    outright by a server that validates its input, so the quiet path it
+    described was not reachable at runtime for any such tool.
+
+    The file is consumed on read. One acknowledgement therefore covers one
+    call, which is what keeps it an attestation rather than a session-wide
+    off switch -- there is no shape of this file that disables the gate.
     """
-    value = tool_input.get(ACK_ARG)
-    return isinstance(value, str) and bool(value.strip())
+    if not session_id:
+        return False
+    path = _ack_file(session_id)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            premise = (json.load(fh) or {}).get("premise")
+    except Exception:
+        return False  # absent, unreadable or malformed: the gate asks
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    return isinstance(premise, str) and bool(premise.strip())
 
 
 @fail_open
@@ -434,6 +475,7 @@ def main() -> int:
     except Exception:
         return 0  # fail open — a malformed payload must not block the session
 
+    session_id = str(payload.get("session_id") or "")
     tool_name = payload.get("tool_name", "") or ""
     tool_input = payload.get("tool_input", {}) or {}
     blob = json.dumps(tool_input, ensure_ascii=False)
@@ -448,7 +490,7 @@ def main() -> int:
             return 0
         target = command.strip().splitlines()[0][:120]
     elif _is_mutating_mcp(tool_name):
-        if _mcp_ack(tool_input):
+        if _mcp_ack(session_id):
             return 0
         if not _carries_prod_marker(blob):
             return 0
@@ -456,7 +498,7 @@ def main() -> int:
     else:
         return 0
 
-    emit_decision("ask", _message(tool_name, target))
+    emit_decision("ask", _message(tool_name, target, session_id))
     return 0
 
 
