@@ -231,6 +231,34 @@ def test_concurrent_resolvers_produce_one_verdict_and_one_signal(
     assert _record(decision_file)["status"] == verdicts.pop()
 
 
+def test_a_failed_write_leaves_the_previous_record_readable(
+    decision_file, monkeypatch
+):
+    """The old `open(path, "w")` truncated before writing, so a reader racing
+    a writer could parse nothing (#1031). `_read` reports that as "no file"
+    and `resolve` then answers as if the question had never been asked — a
+    recorded verdict silently becomes an unasked question.
+
+    Failing the write mid-flight is the deterministic stand-in for that race:
+    truncate-then-fail and truncate-then-race leave the same half-file, and
+    only one of them can be scheduled on demand.
+    """
+    gate._write(decision_file, {"status": "pending", "question": "질문"})
+    before = _record(decision_file)
+
+    def failing_dump(record, handle, **kwargs):
+        handle.write('{"status": "app')
+        raise OSError("disk full")
+
+    monkeypatch.setattr(gate.json, "dump", failing_dump)
+    assert gate._write(decision_file, {"status": "approved"}) is False
+
+    monkeypatch.undo()
+    assert _record(decision_file) == before
+    parent = pathlib.Path(decision_file).parent
+    assert [q.name for q in parent.iterdir()] == [pathlib.Path(decision_file).name]
+
+
 def test_a_new_question_clears_the_previous_claim(decision_file, monkeypatch):
     """The claim's lifetime is one question. Left behind, it would make every
     later decision from this workspace unresolvable."""
