@@ -89,7 +89,7 @@ def resolve_writable(subdir: str, filename: str, session_id: str | None = None) 
         d = os.path.join(praxis_home(), subdir)
         os.makedirs(d, exist_ok=True)
         if os.access(d, os.W_OK):
-            if subdir == "cache":
+            if subdir == "cache" and _prune_due(d):
                 _ = prune_stale(d, session_id=session_id)
             return os.path.join(d, filename)
     except Exception:
@@ -155,6 +155,111 @@ def _belongs_to_session(name: str, session_id: str) -> bool:
     return bool(head) and _sep != "" and (tail == "" or tail.startswith("."))
 
 
+# Name of the sweep stamp inside the cache dir. Leading dot so it sorts out of
+# the way and cannot collide with a session-keyed entry name.
+_PRUNE_STAMP_NAME = ".prune-stamp"
+_PRUNE_LOCK_SUFFIX = ".lock"
+_DEFAULT_PRUNE_INTERVAL_HOURS = 24.0
+
+
+def cache_prune_interval_hours() -> float:
+    """Minimum gap between cache sweeps.
+
+    `PRAXIS_CACHE_PRUNE_INTERVAL_HOURS` overrides; 0 or a malformed value
+    sweeps on every resolution, which is the pre-#1079 behavior.
+    """
+    raw = os.environ.get("PRAXIS_CACHE_PRUNE_INTERVAL_HOURS")
+    if raw is None:
+        return _DEFAULT_PRUNE_INTERVAL_HOURS
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 0.0
+
+
+def _prune_due(directory: str) -> bool:
+    """True when the cache sweep should run now (issue #1079).
+
+    `resolve_writable` sits on the write path of every cache consumer, so the
+    sweep it triggers ran on every resolution — a `scandir` plus a full
+    `os.walk` per directory entry, measured at 25ms against 496 entries and
+    growing with the cache. The work is worth doing daily, not per write.
+
+    The stamp is written BEFORE the sweep, not after: a concurrent hook process
+    must see the sweep as already taken rather than starting a second full walk
+    of the same tree. Losing one sweep to a crash between stamp and walk costs a
+    day of delay, which is inside the TTL either way.
+
+    Saying that requires the read and the write to be one indivisible step, and
+    a `stat` followed by an `open` is not: every racer passes the `stat`, and
+    every racer then sweeps (#1079, codex review round 1 — 16 barrier-aligned
+    threads produced 4 to 11 sweeps per trial). `O_EXCL` on a lock beside the
+    stamp is the indivisible step; exactly one caller creates it, and the rest
+    are told so by `FileExistsError`. A lock left behind by a killed process is
+    itself older than the interval, so it is taken over rather than blocking
+    the sweep forever.
+
+    Fail-open: a stamp or lock that cannot be read or written means the throttle
+    cannot work, so the sweep runs — never the other way round, which would
+    leave the cache growing unswept forever. Only losing the lock to another
+    caller returns False, and that is not a failure: someone else is sweeping.
+    """
+    interval = cache_prune_interval_hours()
+    if interval <= 0:
+        return True
+    stamp = os.path.join(directory, _PRUNE_STAMP_NAME)
+    lock = stamp + _PRUNE_LOCK_SUFFIX
+    now = time.time()
+    if not _stamp_expired(stamp, now, interval):
+        return False
+    if not _claim_lock(lock, now, interval):
+        return False
+    try:
+        # Re-read under the lock. A racer that passed the check above may have
+        # swept and refreshed the stamp while we waited for the lock.
+        if not _stamp_expired(stamp, time.time(), interval):
+            return False
+        try:
+            with open(stamp, "a"):
+                pass
+            os.utime(stamp, (now, now))
+        except OSError:
+            pass  # cannot throttle — sweep anyway
+        return True
+    finally:
+        try:
+            os.unlink(lock)
+        except OSError:
+            pass  # a leftover lock ages out and is taken over next time
+
+
+def _stamp_expired(stamp: str, now: float, interval: float) -> bool:
+    """True when the last sweep is older than `interval` hours, or never ran."""
+    try:
+        return now - os.stat(stamp).st_mtime >= interval * 3600
+    except OSError:
+        return True  # no stamp yet, or unreadable — treat as due
+
+
+def _claim_lock(lock: str, now: float, interval: float) -> bool:
+    """True when this caller owns the sweep. `O_EXCL` picks exactly one."""
+    for _ in range(2):
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
+            return True
+        except FileExistsError:
+            pass
+        except OSError:
+            return True  # cannot lock — sweep anyway, same as an unwritable stamp
+        try:
+            if now - os.stat(lock).st_mtime < interval * 3600:
+                return False  # someone is sweeping right now
+            os.unlink(lock)  # abandoned by a killed process — take it over
+        except OSError:
+            return False
+    return False
+
+
 def prune_stale(
     directory: str, ttl_days: float | None = None, session_id: str | None = None
 ) -> int:
@@ -194,6 +299,8 @@ def prune_stale(
     with entries:
         for entry in entries:
             try:
+                if entry.name.startswith(_PRUNE_STAMP_NAME):
+                    continue  # the sweep's own bookkeeping, not a cache entry
                 if session_id and _belongs_to_session(entry.name, session_id):
                     continue
                 if entry.name.endswith(LOCK_SUFFIX) and lock_is_held(entry.path):

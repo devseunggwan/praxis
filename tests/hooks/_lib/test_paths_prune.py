@@ -199,3 +199,150 @@ def test_resolve_cache_file_threads_session_id(tmp_path: Path) -> None:
     finally:
         del os.environ["PRAXIS_HOME"]
         del os.environ["PRAXIS_CACHE_TTL_DAYS"]
+
+
+# ---------------------------------------------------------------------------
+# Sweep throttle (#1079)
+# ---------------------------------------------------------------------------
+#
+# `resolve_writable` sits on the write path of every cache consumer, so the
+# sweep ran on every resolution: a scandir plus a full os.walk per directory
+# entry, 25ms against 496 entries and growing with the cache. These cover that
+# the throttle skips the repeat, that it does not disable the sweep, and that
+# the interval remains overridable — including back to the old every-time
+# behavior.
+
+
+def _stamp(cache: Path) -> Path:
+    return cache / _paths._PRUNE_STAMP_NAME
+
+
+def test_second_resolution_skips_the_sweep(tmp_path: Path, monkeypatch) -> None:
+    """A stale sibling survives the second resolution — the sweep did not run."""
+    home = tmp_path / "praxis-home"
+    cache = home / "cache"
+    cache.mkdir(parents=True)
+    os.environ["PRAXIS_HOME"] = str(home)
+    os.environ["PRAXIS_CACHE_TTL_DAYS"] = "7"
+    # A shell that exports the interval turns these into a different test —
+    # 0 sweeps every time, a large value never resumes (#1079, codex round 1).
+    monkeypatch.delenv("PRAXIS_CACHE_PRUNE_INTERVAL_HOURS", raising=False)
+    try:
+        first = _file(cache, f"retrospect-active-{OTHER}.json", days=30)
+        _paths.resolve_cache_file(f"session-intent-{SID}.json", session_id=SID)
+        assert not first.exists()          # sweep 1 ran
+        assert _stamp(cache).exists()
+
+        second = _file(cache, f"retrospect-active-{OTHER}.json", days=30)
+        _paths.resolve_cache_file(f"session-intent-{SID}.json", session_id=SID)
+        assert second.exists()             # sweep 2 was throttled away
+    finally:
+        del os.environ["PRAXIS_HOME"]
+        del os.environ["PRAXIS_CACHE_TTL_DAYS"]
+
+
+def test_sweep_resumes_once_the_interval_has_passed(tmp_path: Path, monkeypatch) -> None:
+    """Throttling delays the sweep; it must not cancel it."""
+    home = tmp_path / "praxis-home"
+    cache = home / "cache"
+    cache.mkdir(parents=True)
+    os.environ["PRAXIS_HOME"] = str(home)
+    os.environ["PRAXIS_CACHE_TTL_DAYS"] = "7"
+    # A shell that exports the interval turns these into a different test —
+    # 0 sweeps every time, a large value never resumes (#1079, codex round 1).
+    monkeypatch.delenv("PRAXIS_CACHE_PRUNE_INTERVAL_HOURS", raising=False)
+    try:
+        _paths.resolve_cache_file(f"session-intent-{SID}.json", session_id=SID)
+        _aged(_stamp(cache), days=2)       # stamp older than the 24h interval
+        stale = _file(cache, f"retrospect-active-{OTHER}.json", days=30)
+        _paths.resolve_cache_file(f"session-intent-{SID}.json", session_id=SID)
+        assert not stale.exists()
+    finally:
+        del os.environ["PRAXIS_HOME"]
+        del os.environ["PRAXIS_CACHE_TTL_DAYS"]
+
+
+def test_zero_interval_restores_every_time_sweeping(tmp_path: Path) -> None:
+    """The pre-#1079 behavior stays reachable by configuration."""
+    home = tmp_path / "praxis-home"
+    cache = home / "cache"
+    cache.mkdir(parents=True)
+    os.environ["PRAXIS_HOME"] = str(home)
+    os.environ["PRAXIS_CACHE_TTL_DAYS"] = "7"
+    os.environ["PRAXIS_CACHE_PRUNE_INTERVAL_HOURS"] = "0"
+    try:
+        _paths.resolve_cache_file(f"session-intent-{SID}.json", session_id=SID)
+        stale = _file(cache, f"retrospect-active-{OTHER}.json", days=30)
+        _paths.resolve_cache_file(f"session-intent-{SID}.json", session_id=SID)
+        assert not stale.exists()
+    finally:
+        del os.environ["PRAXIS_HOME"]
+        del os.environ["PRAXIS_CACHE_TTL_DAYS"]
+        del os.environ["PRAXIS_CACHE_PRUNE_INTERVAL_HOURS"]
+
+
+def test_stamp_is_not_itself_swept(tmp_path: Path) -> None:
+    """A stamp aged past the TTL must not be deleted as if it were an entry.
+
+    It would only make the sweep run every time again — a degradation the
+    throttle exists to prevent, and one nothing else would surface.
+    """
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    stamp = _file(cache, _paths._PRUNE_STAMP_NAME, days=30)
+    removed = _paths.prune_stale(str(cache), ttl_days=7)
+    assert stamp.exists()
+    assert removed == 0
+
+
+def test_concurrent_callers_produce_exactly_one_sweep(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The throttle has to serialize, not just delay (#1079, codex round 1).
+
+    `stat` then `open` let every racer through: 16 barrier-aligned threads
+    produced 4 to 11 sweeps per trial before the lock. Both entry paths are
+    covered — no stamp at all, and a stamp already past the interval — because
+    they claim through different branches.
+    """
+    import threading
+
+    monkeypatch.delenv("PRAXIS_CACHE_PRUNE_INTERVAL_HOURS", raising=False)
+
+    def race(directory: Path, n: int = 16) -> int:
+        barrier = threading.Barrier(n)
+        results: list[bool] = []
+        lock = threading.Lock()
+
+        def go() -> None:
+            barrier.wait()
+            due = _paths._prune_due(str(directory))
+            with lock:
+                results.append(due)
+
+        threads = [threading.Thread(target=go) for _ in range(n)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        return sum(results)
+
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    assert race(fresh) == 1
+
+    expired = tmp_path / "expired"
+    expired.mkdir()
+    _file(expired, _paths._PRUNE_STAMP_NAME, days=2)
+    assert race(expired) == 1
+
+
+def test_the_sweep_lock_is_not_itself_swept(tmp_path: Path) -> None:
+    """The lock lives beside the stamp and is skipped by the same rule."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    lock = _file(
+        cache, _paths._PRUNE_STAMP_NAME + _paths._PRUNE_LOCK_SUFFIX, days=30
+    )
+    assert _paths.prune_stale(str(cache), ttl_days=7) == 0
+    assert lock.exists()
