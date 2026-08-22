@@ -92,7 +92,7 @@ from __future__ import annotations
 import json
 import os
 import stat
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DECISION_BLOCK = "block"
@@ -167,6 +167,91 @@ def suppress_coarse_duplicate() -> None:
     mark_dispatcher_process()
 
 
+# Days of daily telemetry files kept on disk. The ledger is append-only and had
+# no sweep at all: 59 files over ~2.5 months reached 1.7 GB, growing ~680 MB a
+# month (issue #1078). The sibling cache root under ~/.praxis already had a TTL
+# sweep; only telemetry was missing one.
+#
+# 30 rather than `bypass-review`'s 7-day default window: that default is the
+# report's convenience, not its limit (`-d N` takes any N), and the hook-prune
+# audits in docs/ read 30-day windows. Retention shorter than the longest window
+# anyone actually reads would delete the evidence those audits are scored from.
+_DEFAULT_RETENTION_DAYS = 30
+
+# Both families live in one telemetry_dir and `bypass-review fire-rate` joins
+# them, so they age out together — sweeping one alone would leave the report
+# showing fires with no bypasses, or the reverse.
+_SWEEPABLE_PREFIXES = ("fire-events-", "bypass-events-")
+_DATED_SUFFIX = ".jsonl"
+
+
+def retention_days() -> float:
+    """Age past which a daily telemetry file is swept.
+
+    `PRAXIS_TELEMETRY_RETENTION_DAYS` overrides; 0 or a malformed value keeps
+    everything, which is the pre-#1078 behavior.
+    """
+    raw = os.environ.get("PRAXIS_TELEMETRY_RETENTION_DAYS")
+    if raw is None:
+        return _DEFAULT_RETENTION_DAYS
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 0.0
+
+
+def _file_date(name: str) -> str | None:
+    """The YYYY-MM-DD a daily telemetry filename carries, or None.
+
+    Read from the NAME, not from mtime: these files are the record of what a
+    given day did, and an mtime is changed by anything that touches the file.
+    """
+    for prefix in _SWEEPABLE_PREFIXES:
+        if name.startswith(prefix) and name.endswith(_DATED_SUFFIX):
+            stamp = name[len(prefix):-len(_DATED_SUFFIX)]
+            try:
+                datetime.strptime(stamp, "%Y-%m-%d")
+            except ValueError:
+                return None
+            return stamp
+    return None
+
+
+def prune_telemetry(directory: Path, days: float | None = None) -> int:
+    """Delete daily telemetry files older than the retention window.
+
+    Returns the number removed. Never raises — telemetry housekeeping must not
+    break the hook that triggered it, so every failure is a silent skip.
+
+    Only files matching a known dated family are considered, so anything else a
+    user or a future writer puts in this directory is left alone.
+    """
+    keep = retention_days() if days is None else days
+    if keep <= 0:
+        return 0
+    cutoff = (
+        datetime.now(tz=timezone.utc) - timedelta(days=keep)
+    ).strftime("%Y-%m-%d")
+    removed = 0
+    try:
+        entries = os.scandir(directory)
+    except OSError:
+        return 0
+    with entries:
+        for entry in entries:
+            try:
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+                stamp = _file_date(entry.name)
+                if stamp is None or stamp >= cutoff:
+                    continue
+                os.unlink(entry.path)
+                removed += 1
+            except OSError:
+                continue
+    return removed
+
+
 def _atomic_append(path: Path, lines: list[str]) -> None:
     """Append `lines` as JSONL with per-line atomic writes; best-effort safe.
 
@@ -181,6 +266,13 @@ def _atomic_append(path: Path, lines: list[str]) -> None:
     if not lines:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Retention sweep (#1078), triggered by the day rolling over rather than by
+    # a stamp file: the target is one file per UTC day, so "today's file does
+    # not exist yet" IS the once-a-day edge, and it costs one stat on a path
+    # this function is about to open anyway. Concurrent first-writers may each
+    # sweep; unlink is idempotent and every error is swallowed, so a duplicate
+    # sweep is wasted work, never damage.
+    first_write_of_the_day = not path.exists()
     try:
         if not stat.S_ISREG(os.lstat(path).st_mode):
             return  # FIFO / device / socket / symlink — refuse to write
@@ -199,6 +291,11 @@ def _atomic_append(path: Path, lines: list[str]) -> None:
             os.write(fd, (line + "\n").encode("utf-8"))
     finally:
         os.close(fd)
+    if first_write_of_the_day:
+        try:
+            _ = prune_telemetry(path.parent)
+        except Exception:
+            pass  # housekeeping never breaks the write that triggered it
 
 
 DEV_LEDGER_DIRNAME = ".praxis-dev-telemetry"

@@ -52,7 +52,7 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
-from _fire_ledger import resolve_telemetry_dir  # type: ignore[import-not-found]  # noqa: E402
+from _fire_ledger import prune_telemetry, resolve_telemetry_dir  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -236,10 +236,21 @@ def append_record(record: dict) -> None:
     path = resolve_telemetry_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        # Same day-rollover trigger the fire ledger uses (#1078): today's file
+        # not existing yet is the first write of the day, and the only moment
+        # worth paying for a directory sweep. `bypass-events-` is one of the
+        # retention prefixes, and this is the only path that writes it — the
+        # fire ledger's own sweep never runs when fire telemetry is disabled.
+        first_write_of_the_day = not path.exists()
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:  # noqa: BLE001
-        pass  # fail-open — never block the tool call
+        return  # fail-open — never block the tool call
+    if first_write_of_the_day:
+        try:
+            prune_telemetry(path.parent)
+        except Exception:  # noqa: BLE001
+            pass  # housekeeping never breaks the write that triggered it
 
 
 # ---------------------------------------------------------------------------
