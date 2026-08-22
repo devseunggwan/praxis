@@ -30,7 +30,11 @@ from pathlib import Path as _Path
 # here too keeps the module self-contained (e.g. when imported directly by a
 # differential test) without depending on the importer's path setup.
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
-from _hook_utils import strip_prefix  # type: ignore[import-not-found]  # noqa: E402
+from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    _starts_unquoted_comment,
+    strip_heredoc_bodies,
+    strip_prefix,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -148,7 +152,16 @@ def _quoted_runs(command: str) -> list[tuple[str, str]]:
     Each quote style is walked while inside the other, so a quote character
     that is data cannot open or close a run: `"it's"` holds no single-quoted
     run, and neither does `\\'`.
+
+    Two regions the shell never executes are excluded first, so a quote there
+    cannot disqualify a literal title that lives in the real command:
+    heredoc bodies (blanked via the shared `strip_heredoc_bodies`, same as
+    `safe_tokenize` uses) and unquoted `#…` comments, whose word-boundary rule
+    is the shared `_starts_unquoted_comment` so this scanner and
+    `_quote_open_at_eol` cannot disagree on where a comment starts (issue
+    #1036 follow-up).
     """
+    command = strip_heredoc_bodies(command)
     runs: list[tuple[str, str]] = []
     quote = ""
     start = 0
@@ -169,6 +182,16 @@ def _quoted_runs(command: str) -> list[tuple[str, str]]:
                 runs.append((quote, command[start:i]))
                 quote = ""
             i += 1
+            continue
+        # `_starts_unquoted_comment`'s word-boundary set has no newline in it
+        # because its two callers only ever see one physical line at a time;
+        # this scanner walks the whole multi-line command, so a `#` right
+        # after a line break is a boundary here too, even though the shared
+        # helper alone cannot see it.
+        at_line_start = i == 0 or command[i - 1] == "\n"
+        if ch == "#" and (at_line_start or _starts_unquoted_comment(command, i)):
+            nl = command.find("\n", i)
+            i = n if nl == -1 else nl
             continue
         if ch in ("'", '"'):
             quote = ch
@@ -207,10 +230,17 @@ def _title_is_single_quoted_literal(command: str, title: str) -> bool:
 
     The disqualification is by value, so it also silences the mirror case —
     `git commit -m '$(x)' && echo "$(x)"`, where the title really is the
-    literal and the double-quoted run belongs to another segment. Separating
-    those two needs the source spans the tokenizer discards. Silence is the
-    fail-open direction and the one this repo chooses for a gate, so the
-    residual is pinned by test rather than closed.
+    literal and the double-quoted run belongs to another EXECUTED segment.
+    Separating those two needs the source spans the tokenizer discards.
+    Silence is the fail-open direction and the one this repo chooses for a
+    gate, so that residual is pinned by test rather than closed.
+
+    A narrower case IS closed: `_quoted_runs` excludes comments and heredoc
+    bodies before matching, so `git commit -m '$(x)' # "$(x)"` and a `"$(x)"`
+    sitting inside an unrelated heredoc body no longer disqualify the literal
+    — neither region is code the shell ever runs, so a quoted run found there
+    cannot be "the other segment" the mirror-case paragraph above is about
+    (issue #1036 follow-up).
     """
     runs = _quoted_runs(command)
     single = any(q == "'" and body == title for q, body in runs)

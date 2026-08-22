@@ -287,3 +287,43 @@ def test_argv_only_callers_keep_the_conservative_behaviour():
     opener alone still suppresses — old callers must not start hard-blocking."""
     assert extract_git_titles(["git", "commit", "-m", "$(literal) title"]) == []
     assert extract_git_titles(["git", "commit", "-m", "$(literal) title"], None) == []
+
+
+# ---------------------------------------------------------------------------
+# 7. Value-disqualification ignores regions the shell never executes
+# ---------------------------------------------------------------------------
+#
+# `_quoted_runs` used to scan the whole raw command, including a trailing
+# comment and a heredoc body — text the shell parses as data, not code. A
+# double-quoted run living in either region disqualified a genuine
+# single-quoted literal title, silencing the gates on a title they should
+# have graded (issue #1036 follow-up).
+
+def test_comment_double_quote_does_not_disqualify_the_literal():
+    # The `#` starts a real comment here (preceded by whitespace), so its
+    # double-quoted run never executes and must not cancel the literal.
+    command = """git commit -m '$(x)' # "$(x)\""""
+    assert _titles_from(command) == ["$(x)"]
+
+
+def test_comment_at_the_start_of_a_continuation_line():
+    # A `#` that opens a fresh physical line is a boundary too, even though
+    # `_starts_unquoted_comment`'s callers only ever see one line at a time.
+    command = "echo hi\n# \"$(x)\"\ngit commit -m '$(x)'"
+    assert _titles_from_all_segments(command) == ["$(x)"]
+
+
+def test_heredoc_body_double_quote_does_not_disqualify_the_literal():
+    # The double-quoted text lives inside a heredoc body (data written to a
+    # file), not inside any executed shell segment.
+    command = "cat <<'EOF' > /tmp/x\n\"$(x)\"\nEOF\ngit commit -m '$(x)'"
+    assert _titles_from_all_segments(command) == ["$(x)"]
+
+
+def test_mirror_case_residual_is_unaffected_by_the_region_exclusion():
+    """The comment/heredoc fix must not touch the documented residual: a
+    double-quoted run in a SIBLING executed segment still disqualifies the
+    literal by value, because closing that needs source spans this PR does
+    not add."""
+    command = """git commit -m '$(x)' && echo "$(x)\""""
+    assert _titles_from_all_segments(command) == []
