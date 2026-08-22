@@ -22,9 +22,9 @@ import os
 import stat
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 import uuid
 from contextlib import redirect_stdout
-from datetime import datetime, timezone
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -1607,3 +1607,174 @@ def test_bypass_and_fire_writers_share_one_directory():
         _REPO / "hooks" / "postuse-correction" / "bypass-telemetry" / "impl.py",
     )
     assert bypass.resolve_telemetry_path().parent == fl.resolve_telemetry_dir()
+
+
+# ---------------------------------------------------------------------------
+# Retention sweep (#1078)
+# ---------------------------------------------------------------------------
+#
+# The ledger was append-only with no sweep: 59 daily files over ~2.5 months
+# reached 1.7 GB, growing ~680 MB a month. These cover that old files go, that
+# recent ones and foreign files stay, that both dated families age out together
+# (`bypass-review fire-rate` joins them), and that the sweep is reachable from
+# the write path exactly on the day roll-over.
+
+
+def _dated(directory: Path, prefix: str, days_ago: int) -> Path:
+    stamp = (datetime.now(tz=timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+    p = directory / f"{prefix}{stamp}.jsonl"
+    p.write_text('{"hook": "x"}\n')
+    return p
+
+
+def test_prune_removes_only_files_past_the_window(tmp_path):
+    old = _dated(tmp_path, "fire-events-", 40)
+    edge = _dated(tmp_path, "fire-events-", 30)
+    recent = _dated(tmp_path, "fire-events-", 5)
+    removed = fl.prune_telemetry(tmp_path, days=30)
+    assert not old.exists()
+    assert recent.exists()
+    assert edge.exists()  # exactly at the window is still inside it
+    assert removed == 1
+
+
+def test_prune_ages_both_families_together(tmp_path):
+    """`bypass-review fire-rate` joins the two; sweeping one alone corrupts it."""
+    fires = _dated(tmp_path, "fire-events-", 40)
+    bypasses = _dated(tmp_path, "bypass-events-", 40)
+    assert fl.prune_telemetry(tmp_path, days=30) == 2
+    assert not fires.exists() and not bypasses.exists()
+
+
+def test_prune_leaves_unrelated_files_alone(tmp_path):
+    """Only known dated families are swept — never whatever else lives here."""
+    notes = tmp_path / "notes.md"
+    notes.write_text("keep me")
+    undated = tmp_path / "fire-events-nope.jsonl"
+    undated.write_text("{}\n")
+    assert fl.prune_telemetry(tmp_path, days=1) == 0
+    assert notes.exists() and undated.exists()
+
+
+def test_zero_retention_keeps_everything(tmp_path, monkeypatch):
+    """The pre-#1078 behavior stays reachable by configuration."""
+    monkeypatch.setenv("PRAXIS_TELEMETRY_RETENTION_DAYS", "0")
+    old = _dated(tmp_path, "fire-events-", 400)
+    assert fl.prune_telemetry(tmp_path) == 0
+    assert old.exists()
+
+
+def test_write_sweeps_on_the_day_rollover(tmp_path, monkeypatch):
+    """The first write into a new day's file is the once-a-day sweep trigger."""
+    out = tmp_path / "fire-events-2099-01-01.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    monkeypatch.setenv("PRAXIS_TELEMETRY_RETENTION_DAYS", "30")
+    stale = _dated(tmp_path, "fire-events-", 90)
+
+    fl.record_group_fires([("r", "h", Path("x"))], [(0, "", "")], _payload())
+    assert not stale.exists()          # today's file was new — swept
+
+    survivor = _dated(tmp_path, "fire-events-", 90)
+    fl.record_group_fires([("r", "h", Path("x"))], [(0, "", "")], _payload())
+    assert survivor.exists()           # today's file existed — no second sweep
+
+
+def test_count_session_fires_prefilter_matches_the_parse(tmp_path, monkeypatch):
+    """The substring prefilter must not change a single count (#1078).
+
+    A record that matches carries both literals, so rejecting on them is exact
+    — but a near-miss (right hook, wrong session; right session, wrong hook)
+    is what would break if the needles were built loosely.
+    """
+    out = tmp_path / "fire-events.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    for hook, sid, dec in (
+        ("gate-a", "sess-1", "block"), ("gate-a", "sess-1", "block"),
+        ("gate-a", "sess-1", "advise"),
+        ("gate-a", "sess-2", "block"),      # right hook, other session
+        ("gate-b", "sess-1", "block"),      # right session, other hook
+    ):
+        fl.record_session_fire(hook, "preflight-gate", dec, sid, "Bash")
+    # A coarse record (session_id "") must never match a real session.
+    fl.record_standalone_fire("gate-a", "preflight-gate", 2)
+
+    assert fl.count_session_fires("gate-a", "sess-1", "block") == 2
+    assert fl.count_session_fires("gate-a", "sess-1") == 3
+    assert fl.count_session_fires("gate-a", "sess-2", "block") == 1
+    assert fl.count_session_fires("gate-b", "sess-1") == 1
+    assert fl.count_session_fires("gate-a", "") == 0
+
+
+def test_count_session_fires_survives_an_escaped_session_id(tmp_path, monkeypatch):
+    """A session_id JSON has to escape must not silently count zero (#1078).
+
+    The prefilter's needle is raw, so a quote or a backslash in the value makes
+    it miss every record the writer escaped on the way in. Such a value drops
+    to the full parse instead (codex review round 1 — confirmed: the needle
+    `"session_id": "abc"def"` is absent from the stored `abc\\"def`).
+    """
+    out = tmp_path / "fire-events.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    for sid in ('abc"def', "back\\slash", "plain-1"):
+        fl.record_session_fire("gate-a", "preflight-gate", "block", sid, "Bash")
+
+    assert fl.count_session_fires("gate-a", 'abc"def', "block") == 1
+    assert fl.count_session_fires("gate-a", "back\\slash", "block") == 1
+    assert fl.count_session_fires("gate-a", "plain-1", "block") == 1
+    # The fast path survives for values that need no escaping.
+    assert fl._raw_needle("plain-1") == '"plain-1"'
+    assert fl._raw_needle('abc"def') is None
+
+
+def test_count_session_fires_reads_a_compactly_written_record(tmp_path):
+    """The prefilter must not assume one writer's JSON spacing (#1078).
+
+    A needle carrying the key and its separator (`"session_id": "x"`) matches
+    only records written with a space after the colon. The escalation ledger in
+    `test_block_commit_without_codex_review.sh` is seeded compactly by hand, and
+    a key-bearing needle skipped it — the second same-session block then read as
+    the first and its escalation banner never appeared.
+    """
+    out = tmp_path / "fire-events.jsonl"
+    out.write_text(
+        '{"granularity":"rich","hook":"gate-a",'
+        '"session_id":"sess-1","decision":"block"}\n',
+        encoding="utf-8",
+    )
+    os.environ["PRAXIS_FIRE_TELEMETRY_FILE"] = str(out)
+    os.environ.pop("PRAXIS_FIRE_TELEMETRY_DISABLE", None)
+    try:
+        assert fl.count_session_fires("gate-a", "sess-1", "block") == 1
+    finally:
+        del os.environ["PRAXIS_FIRE_TELEMETRY_FILE"]
+
+
+def test_bypass_writer_sweeps_on_the_first_write_of_the_day(tmp_path, monkeypatch):
+    """`bypass-events-` is a retention prefix, so its writer owns a sweep (#1078).
+
+    The fire ledger's sweep runs inside `_atomic_append`, which the bypass hook
+    never calls — with fire telemetry disabled, nothing would ever prune the
+    bypass files (codex review round 1 — confirmed: `prune_telemetry` had one
+    call site and it was in `_fire_ledger` itself).
+    """
+    bt = _load(
+        "bypass_telemetry_sweep",
+        _REPO / "hooks" / "postuse-correction" / "bypass-telemetry" / "impl.py",
+    )
+    stale = _dated(tmp_path, "bypass-events-", 90)
+    today = tmp_path / (
+        "bypass-events-"
+        + datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+        + ".jsonl"
+    )
+    monkeypatch.setenv("PRAXIS_BYPASS_TELEMETRY_FILE", str(today))
+
+    bt.append_record({"event": "first write of the day"})
+    assert not stale.exists()
+
+    revived = _dated(tmp_path, "bypass-events-", 90)
+    bt.append_record({"event": "second write, same day"})
+    assert revived.exists()          # today's file existed — no second sweep
