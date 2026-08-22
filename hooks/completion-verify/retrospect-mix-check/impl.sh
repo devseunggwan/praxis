@@ -68,89 +68,6 @@ command -v praxis_fire_arm >/dev/null 2>&1 && \
 [ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
 [ ! -f "$TRANSCRIPT_PATH" ] && exit 0
 
-# ── Silent-pass scan + critic-run detection (issue #772) ──────────────────────
-# HOISTED above every gate because Gate-8c's eligibility (below) consumes
-# GATE9_HARD_COUNT (NEW-2). Everything here is FAIL-OPEN: a missing scanner /
-# catalog, or any jq error, must never convert a pass into a crash — all
-# captures use `2>/dev/null` with numeric/string defaults.
-_SP_LIB="$(dirname "$0")/../../_lib"
-SP_SCANNER="$_SP_LIB/scan-silent-pass.sh"
-SP_CATALOG="$_SP_LIB/silent-pass-catalog.json"
-SILENT_PASS_MATCHES=""
-if [ -f "$SP_SCANNER" ] && [ -f "$SP_CATALOG" ]; then
-  SILENT_PASS_MATCHES=$(bash "$SP_SCANNER" --transcript "$TRANSCRIPT_PATH" --catalog "$SP_CATALOG" 2>/dev/null || true)
-fi
-# Count of HARD (zero-FP) silent-pass candidates — drives Gate-9 coverage AND
-# Gate-8c/Gate-10 eligibility. awk emits `c+0` so this is always an integer.
-GATE9_HARD_COUNT=$(printf '%s\n' "$SILENT_PASS_MATCHES" \
-  | awk -F'\t' 'NF>=2 && $2=="hard" { c++ } END { print c+0 }')
-
-# Strong-correction count (transcript-derived eligibility half). This is the SAME
-# regex + jq the Gate-8c floor uses; hoisted here so both Gate-8c and the
-# block-decision Gate-10 read one value (no double jq, no drift). Kept low-FP per
-# issue #722 (see the Gate-8c comment for the dropped everyday tokens).
-SP_STRONG_CORRECTION_RE="하라고 했잖아|that's not what I asked|그렇게 하지 말라고"
-LIVE_STRONG_UC_COUNT=$(jq -r --arg re "$SP_STRONG_CORRECTION_RE" '
-  def human_text_payload:
-    (.message.content // .content // empty) as $c
-    | if ($c|type) == "array" then
-        $c[]? | if type == "object" then
-          if ((.type? // "text") == "text") then (.text? // empty) else empty end
-        else tostring end
-      elif ($c|type) == "string" then $c
-      else empty end;
-  select(type == "object" and .type != "tool_result" and (.message.role == "user" or .role == "user" or .type == "user") and ([human_text_payload] | join("\n") | test($re; "i"))) | 1
-' "$TRANSCRIPT_PATH" 2>/dev/null | wc -l | tr -d '[:space:]')
-LIVE_STRONG_UC_COUNT=${LIVE_STRONG_UC_COUNT:-0}
-
-# Critic-run detection (D-C2 anti-tamper oracle). The authoritative "did the
-# externalized critic actually run" signal is a `critic_roots:` block emitted in
-# the critic subagent's RETURN. A subagent return is delivered to the main agent
-# as a role:user tool_result record, so we extract text ONLY from tool_result
-# blocks — via `.. | objects | select(.type=="tool_result")`, which finds a
-# tool_result at top level OR nested inside a user message's content array. A
-# `retrospect:critic_roots` fence pasted into the MAIN agent's assistant text
-# (isSidechain:false) is display-only and MUST NOT count — that is the C2
-# property (the agent cannot self-certify the tier by pasting a fence), and it is
-# structurally excluded here because assistant text never lives in a tool_result
-# block. Tool_result attribution is reliable with the pinned critic contract, so
-# the plan's isSidechain:true fallback is NOT used. jq errors on a partially
-# written final line fail open (empty text ⇒ CRITIC_RAN=false ⇒ Gate-8c may
-# block an eligible session — the safe direction).
-CRITIC_TR_TEXT=$(jq -rs '
-  def tr_texts:
-    .. | objects | select(.type == "tool_result")
-    | (.content // .text // empty) as $c
-    | if ($c | type) == "array" then
-        ($c[]? | if type == "object" then (.text? // empty)
-                 elif type == "string" then .
-                 else empty end)
-      elif ($c | type) == "string" then $c
-      else empty end;
-  [ .[] | tr_texts ] | join("\n")
-' "$TRANSCRIPT_PATH" 2>/dev/null || true)
-CRITIC_RAN=false
-CRITIC_ROOTS=""
-if printf '%s\n' "$CRITIC_TR_TEXT" | grep -q 'critic_roots:'; then
-  CRITIC_RAN=true
-  # Root-ids are the contiguous `- <root-id>: <one-line>` bullets that follow the
-  # `critic_roots:` header (blank lines inside the block are tolerated). An empty
-  # block (header with no bullets) yields zero roots → CRITIC_RAN=true with empty
-  # CRITIC_ROOTS (critic ran, 0 roots).
-  CRITIC_ROOTS=$(printf '%s\n' "$CRITIC_TR_TEXT" | awk '
-    /critic_roots:/ { f=1; next }
-    f && /^[[:space:]]*$/ { next }
-    f && /^[[:space:]]*-[[:space:]]*[^:]+:/ {
-      s=$0
-      sub(/^[[:space:]]*-[[:space:]]*/, "", s)
-      sub(/:.*/, "", s)
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
-      if (s != "") print s
-      next
-    }
-    f { exit }
-  ')
-fi
 
 # Extract last assistant message text from the transcript JSONL.
 LAST_TEXT=$(tail -n 400 "$TRANSCRIPT_PATH" | jq -rs '
@@ -277,6 +194,99 @@ fi
 
 if printf '%s' "$MOST_RECENT_BLOCK" | grep -qF '## Actions Executed'; then
   exit 0
+fi
+
+# ── Silent-pass scan + critic-run detection (issue #772) ──────────────────────
+# Placed AFTER every gate that can exit without reading them (issue #1077) —
+# the identifier gates and the Stage 4 carve-out both sit above. These
+# three passes read the WHOLE transcript — a grep sweep, a jq pass, and a `jq
+# -rs` slurp — and at 224 MB the grep alone took 19.98s against this hook's 10s
+# budget, so the hook was SIGKILLed and every gate it holds silently vanished.
+# Nothing here is consumed before Gate-8c (first use ~700 lines below), and no
+# path above can block without HAS_FENCE or the retrospect-active marker, so
+# running them only once a gateable Stage 3 report is in hand is behaviour-
+# preserving: the ordinary Stop, which is nearly every Stop, now does none of
+# it, and neither does a Stage 4 completion report, which exits above.
+# Everything here is FAIL-OPEN: a missing scanner / catalog, or any jq error,
+# must never convert a pass into a crash — all captures use `2>/dev/null` with
+# numeric/string defaults.
+_SP_LIB="$(dirname "$0")/../../_lib"
+SP_SCANNER="$_SP_LIB/scan-silent-pass.sh"
+SP_CATALOG="$_SP_LIB/silent-pass-catalog.json"
+SILENT_PASS_MATCHES=""
+if [ -f "$SP_SCANNER" ] && [ -f "$SP_CATALOG" ]; then
+  SILENT_PASS_MATCHES=$(bash "$SP_SCANNER" --transcript "$TRANSCRIPT_PATH" --catalog "$SP_CATALOG" 2>/dev/null || true)
+fi
+# Count of HARD (zero-FP) silent-pass candidates — drives Gate-9 coverage AND
+# Gate-8c/Gate-10 eligibility. awk emits `c+0` so this is always an integer.
+GATE9_HARD_COUNT=$(printf '%s\n' "$SILENT_PASS_MATCHES" \
+  | awk -F'\t' 'NF>=2 && $2=="hard" { c++ } END { print c+0 }')
+
+# Strong-correction count (transcript-derived eligibility half). This is the SAME
+# regex + jq the Gate-8c floor uses; hoisted here so both Gate-8c and the
+# block-decision Gate-10 read one value (no double jq, no drift). Kept low-FP per
+# issue #722 (see the Gate-8c comment for the dropped everyday tokens).
+SP_STRONG_CORRECTION_RE="하라고 했잖아|that's not what I asked|그렇게 하지 말라고"
+LIVE_STRONG_UC_COUNT=$(jq -r --arg re "$SP_STRONG_CORRECTION_RE" '
+  def human_text_payload:
+    (.message.content // .content // empty) as $c
+    | if ($c|type) == "array" then
+        $c[]? | if type == "object" then
+          if ((.type? // "text") == "text") then (.text? // empty) else empty end
+        else tostring end
+      elif ($c|type) == "string" then $c
+      else empty end;
+  select(type == "object" and .type != "tool_result" and (.message.role == "user" or .role == "user" or .type == "user") and ([human_text_payload] | join("\n") | test($re; "i"))) | 1
+' "$TRANSCRIPT_PATH" 2>/dev/null | wc -l | tr -d '[:space:]')
+LIVE_STRONG_UC_COUNT=${LIVE_STRONG_UC_COUNT:-0}
+
+# Critic-run detection (D-C2 anti-tamper oracle). The authoritative "did the
+# externalized critic actually run" signal is a `critic_roots:` block emitted in
+# the critic subagent's RETURN. A subagent return is delivered to the main agent
+# as a role:user tool_result record, so we extract text ONLY from tool_result
+# blocks — via `.. | objects | select(.type=="tool_result")`, which finds a
+# tool_result at top level OR nested inside a user message's content array. A
+# `retrospect:critic_roots` fence pasted into the MAIN agent's assistant text
+# (isSidechain:false) is display-only and MUST NOT count — that is the C2
+# property (the agent cannot self-certify the tier by pasting a fence), and it is
+# structurally excluded here because assistant text never lives in a tool_result
+# block. Tool_result attribution is reliable with the pinned critic contract, so
+# the plan's isSidechain:true fallback is NOT used. jq errors on a partially
+# written final line fail open (empty text ⇒ CRITIC_RAN=false ⇒ Gate-8c may
+# block an eligible session — the safe direction).
+CRITIC_TR_TEXT=$(jq -rs '
+  def tr_texts:
+    .. | objects | select(.type == "tool_result")
+    | (.content // .text // empty) as $c
+    | if ($c | type) == "array" then
+        ($c[]? | if type == "object" then (.text? // empty)
+                 elif type == "string" then .
+                 else empty end)
+      elif ($c | type) == "string" then $c
+      else empty end;
+  [ .[] | tr_texts ] | join("\n")
+' "$TRANSCRIPT_PATH" 2>/dev/null || true)
+CRITIC_RAN=false
+CRITIC_ROOTS=""
+if printf '%s\n' "$CRITIC_TR_TEXT" | grep -q 'critic_roots:'; then
+  CRITIC_RAN=true
+  # Root-ids are the contiguous `- <root-id>: <one-line>` bullets that follow the
+  # `critic_roots:` header (blank lines inside the block are tolerated). An empty
+  # block (header with no bullets) yields zero roots → CRITIC_RAN=true with empty
+  # CRITIC_ROOTS (critic ran, 0 roots).
+  CRITIC_ROOTS=$(printf '%s\n' "$CRITIC_TR_TEXT" | awk '
+    /critic_roots:/ { f=1; next }
+    f && /^[[:space:]]*$/ { next }
+    f && /^[[:space:]]*-[[:space:]]*[^:]+:/ {
+      s=$0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", s)
+      sub(/:.*/, "", s)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+      if (s != "") print s
+      next
+    }
+    f { exit }
+  ')
 fi
 
 # Parse distribution-card key/value pairs.
