@@ -3,4 +3,10 @@
 # Source: hooks/advisory-nudge/external-api-literal-trigger/impl.py  (see ADR-0001 §2.3)
 set +e
 command -v python3 >/dev/null 2>&1 || exit 0
-exec python3 "$(dirname "$0")/advisory-nudge/external-api-literal-trigger/impl.py" "$@"
+# A missing impl makes python3 exit 2, which is this repo's deny code — the
+# launcher would hand the host a block nobody decided. Absent impl means the
+# hook cannot judge, so it must not judge. Normalizing every non-zero code
+# instead would swallow the deliberate exit 2 of every gate.
+IMPL="$(dirname "$0")/advisory-nudge/external-api-literal-trigger/impl.py"
+[ -f "$IMPL" ] || exit 0
+exec python3 "$IMPL" "$@"

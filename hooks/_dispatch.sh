@@ -3,4 +3,8 @@
 # Source: hooks/_lib/_dispatch.py  (see ADR-0002 dispatch consolidation)
 set +e
 command -v python3 >/dev/null 2>&1 || exit 0
-exec python3 "$(dirname "$0")/_lib/_dispatch.py" "$@"
+# See the per-hook wrapper above: a missing impl exits 2, which the host reads
+# as deny. A dispatch group that cannot start must fall through, not block.
+IMPL="$(dirname "$0")/_lib/_dispatch.py"
+[ -f "$IMPL" ] || exit 0
+exec python3 "$IMPL" "$@"
