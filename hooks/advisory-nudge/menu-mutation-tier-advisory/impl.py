@@ -385,6 +385,70 @@ NEGATION_TOKENS_KO = (
     "안함",
 )
 
+# Tier 1e — sequential destructive mutation behind a safe-MODE token (issue
+# #974, codex round-1 gap 3 on PR #966; PR #1016 pinned this as an open
+# residual). `Dry-run then delete the customer table` is two clauses: the
+# safe mode covers only the first, and the delete is unconditional — unlike
+# `Dry-run the deploy`, where the safe token governs the mutation verb as its
+# own object and nothing else happens. `_is_low_blast` cannot tell those apart
+# from a low-blast token alone, so a menu whose only "safe" option is really a
+# disguised delete stayed silent.
+#
+# Scoped to destructive verbs ONLY (delete/drop/truncate/삭제), not every
+# mutation verb. PR #1016 already built and rejected the broad version — a
+# safe-token-plus-any-mutation-verb veto — because it also fired on `Deploy
+# now` / `Dry-run the deploy`, `Merge now` / `Simulate the merge`, `Send the
+# announcement` / `Report-only pass on the send`, and their KO pair, all of
+# which are the exact single-clause dry-run alternative this hook wants menus
+# to carry. None of those four pair a destructive verb with a shared surface,
+# so the narrower scope leaves them untouched — measured against the full
+# fixture set below, not assumed.
+DESTRUCTIVE_VERBS_EN = (
+    "delete",
+    "drop",
+    "truncate",
+)
+DESTRUCTIVE_VERBS_KO = ("삭제",)
+
+# The connector that marks a second clause rather than a single dry-run
+# action. KO uses `" 후 "` (padded, not bare `후`) because the bare character
+# is a common substring (`이후`, `최후`, `후보`, `오후`) — the padding requires
+# it to stand alone as the postposition "after", the same whole-token
+# discipline the EN lookaround already applies.
+SEQUENCE_CONNECTOR_EN = ("then",)
+SEQUENCE_CONNECTOR_KO = (" 후 ",)
+
+SEQUENCE_SPLIT_RE = re.compile(r"(?<![a-z])then(?![a-z])|\s후\s", re.IGNORECASE)
+
+
+def _has_sequential_destructive_mutation(text: str) -> bool:
+    """True if any clause performs a destructive mutation the safe mode does
+    not govern — a destructive verb in a clause carrying no safe-MODE token.
+
+    Co-occurrence is not enough. `Dry-run the delete operation, then inspect
+    the customer table` holds a connector, a destructive verb and a shared
+    surface, yet every one of its deletes is simulated: the verb sits in the
+    dry-run's own clause, as its object. Judging the option as a whole cannot
+    separate that from `Dry-run then delete the customer table`, where the
+    delete stands in a clause of its own and runs for real.
+
+    Order therefore falls out rather than being special-cased — `Delete the
+    table, then dry-run to confirm` disqualifies on its FIRST clause, which
+    carries the verb and no safe token. `_names_shared_surface` still reads
+    the whole option, so the Tier 1c local-artifact veto keeps `Dry-run then
+    delete the test fixture` silent.
+    """
+    clauses = SEQUENCE_SPLIT_RE.split(text)
+    if len(clauses) < 2:
+        return False
+    if not _names_shared_surface(text):
+        return False
+    return any(
+        _matches(clause, DESTRUCTIVE_VERBS_KO, DESTRUCTIVE_VERBS_EN)
+        and not _matches(clause, LOW_BLAST_TOKENS_KO, LOW_BLAST_TOKENS_EN)
+        for clause in clauses
+    )
+
 
 def _en_token_present(token: str, lower_text: str) -> bool:
     """ASCII-letter lookaround match: token not flanked by ASCII letters.
@@ -446,11 +510,18 @@ def _is_low_blast(text: str) -> bool:
 
     A mutation VERB does not disqualify: `deploy to dev first` is a mutating
     verb aimed at a safe surface, which is exactly the alternative this hook
-    asks the menu to carry.
+    asks the menu to carry. A DESTRUCTIVE verb behind a sequence connector
+    does disqualify (gap 3, `_has_sequential_destructive_mutation`): unlike
+    `deploy to dev first`, `dry-run then delete the customer table` performs
+    the mutation unconditionally in its second clause.
     """
     if _names_high_blast_target(text):
         return False
-    return _matches(text, LOW_BLAST_TOKENS_KO, LOW_BLAST_TOKENS_EN)
+    if not _matches(text, LOW_BLAST_TOKENS_KO, LOW_BLAST_TOKENS_EN):
+        return False
+    if _has_sequential_destructive_mutation(text):
+        return False
+    return True
 
 
 def _is_abandon(text: str) -> bool:

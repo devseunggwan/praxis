@@ -247,6 +247,51 @@ precisely the alternative the hook asks for. Only a Tier 1a **target** does.
 `development` is listed explicitly because the lookaround is whole-token and
 `dev` does not match inside it.
 
+**Tier 1e — sequential destructive mutation** (issue #974, codex round-1 gap 3
+on PR #966; closes the residual PR #1016 pinned as open): a low-blast token
+does **not** suppress when a **clause carrying no low-blast token of its own**
+holds a DESTRUCTIVE verb, and the option names a shared surface. The option is
+split on its **sequence connector**; a single-clause option is never in this
+tier. `Dry-run then delete the customer table` splits into a safe first clause
+and a bare `delete the customer table` — the delete is unconditional — unlike
+`Dry-run the deploy`, one clause whose safe token governs the mutation verb as
+its own object.
+
+**Per-clause, not per-option.** Co-occurrence of connector, destructive verb
+and shared surface is not the discriminator: `Dry-run the delete operation,
+then inspect the customer table` has all three, yet its delete is simulated —
+the verb is the dry-run's own object and the trailing clause only reads. An
+option-level test disqualifies it and strict mode then blocks a genuinely safe
+menu, which is the inverse of this hook's purpose (Codex P1 on PR #1072).
+Order needs no special case as a result: `Delete the customer table, then
+dry-run to confirm` disqualifies on its FIRST clause, which carries the verb
+and no safe token.
+
+- Destructive verbs — English (lookaround): `delete`, `drop`, `truncate`.
+  Korean (substring): `삭제`.
+- Sequence connectors — English: `then`. Korean: `" 후 "` (padded with spaces,
+  not the bare character — `후` alone is a common substring inside `이후`,
+  `최후`, `후보`, `오후`, so the padding requires it to stand alone as the
+  postposition "after", the same whole-token discipline the EN lookaround
+  applies).
+- The shared-surface check reuses `_names_shared_surface`, so its Tier 1c
+  local-artifact veto applies here too: `Dry-run then delete the test
+  fixture` stays silent.
+
+**Scoped to destructive verbs only, not every mutation verb.** PR #1016 built
+and rejected the broad version — any low-blast token beside any mutation verb,
+naming no high-blast target, disqualifies the option — because it also fired
+on `Deploy now` / `Dry-run the deploy`, `Merge now` / `Simulate the merge`,
+`Send the announcement` / `Report-only pass on the send`, and `지금 배포` /
+`배포 드라이런`: the canonical single-clause dry-run menus this hook asks
+authors to add. None of those four pairs a destructive verb with a shared
+surface, so the narrower scope leaves all four silent — re-measured against
+the full fixture set, not assumed. `Merge`, `deploy`, `send`, `trigger`,
+`apply`, `backfill`, `overwrite`, `publish`, `push`, `notify`, `broadcast`,
+`announce`, `submit` stay outside Tier 1e on purpose; a sequential
+`Dry-run then merge the PR` / `Merge the PR` menu is still silent, and closing
+it would need the same rejected broad rule.
+
 Review / inspection levers are in this tier on purpose: re-running a review
 verifies without touching the shared surface, which is precisely the cheaper
 alternative this hook asks the menu to carry. `reviewer` / `codex` / `critic` are
@@ -358,29 +403,25 @@ around the gate.
   stderr-only, and has been wrong since PR #966 rev 5 made the default path
   `emit_decision("ask", …)`. A false fire now costs the user a confirmation
   prompt, which is why Tier 1c is gated rather than simply widened.
-- **Gap 3 is open on purpose — the compound-option VERB axis.** The suppression
-  rule disqualifies a low-blast token only when the option names a high-blast
-  *target*. An option pairing a safe **mode** token with a mutation **verb** and
-  naming no high-blast target still suppresses, so
-  `Dry-run then delete the customer table` / `Delete the customer table` is
-  silent in both modes — while the identical shape with `prod` inserted fires
-  (strict `rc=2`), which is what shows the residual is real.
-  `Report-only pass then send the announcement`, `Simulate then truncate the
-  table` and `드라이런 후 고객 테이블 삭제` behave the same way.
-
-  The verb-axis discriminator was built and rejected on measurement, not taste.
-  It closes all four residual cases and simultaneously fires on `Deploy now` /
-  `Dry-run the deploy`, `Merge now` / `Simulate the merge`, `Send the
-  announcement` / `Report-only pass on the send`, and `지금 배포` /
-  `배포 드라이런`. Those are the canonical phrasings of the exact option this
-  hook asks menus to contain, and a dry run necessarily names the verb it
-  simulates — `Dry-run then delete the table` and `Dry-run the deploy` are the
-  same shape, and no lexical rule separates them. Firing an `ask` at an author
-  who already added the safe tier teaches that adding one does not help, which
-  inverts the hook's purpose. The residual is the price of the target-based
-  discriminator, and both the residual and the four counter-cases are pinned in
-  the fixtures so a future round fails there rather than shipping the trade
-  blind.
+- **Gap 3 is closed for destructive verbs, open for every other mutation
+  verb.** Tier 1e (above) closes the exact residual PR #1016 pinned:
+  `Dry-run then delete the customer table` / `Delete the customer table` now
+  fires (strict `rc=2`), matching the identical shape with `prod` inserted
+  that already fired before this fix. The broad version — any mutation verb,
+  not just destructive ones — was built and rejected on measurement, not
+  taste: it also fires on `Deploy now` / `Dry-run the deploy`, `Merge now` /
+  `Simulate the merge`, `Send the announcement` / `Report-only pass on the
+  send`, and `지금 배포` / `배포 드라이런` — the canonical phrasings of the
+  exact single-clause dry-run option this hook asks menus to contain. A dry
+  run necessarily names the verb it simulates, and no lexical rule separates
+  those four from the residual on the verb axis alone; only the destructive
+  subset (`delete` / `drop` / `truncate` / `삭제`) plus a sequence connector
+  (`then` / `" 후 "`) does. `Dry-run then merge the PR` / `Merge the PR`
+  therefore stays silent — merge, deploy, send, trigger, and the rest of
+  Tier 1b remain outside Tier 1e, and closing them would reproduce the
+  rejected broad rule's false-positive cost. Both the fix and the four
+  rejected-fix counter-cases are pinned in the fixtures, re-measured against
+  the narrower rule.
 - **Tier 1c is invisible outside its noun list.** `Create the audit ledger` /
   `Update the audit ledger` mutates a shared surface no `SHARED_SURFACE_NOUNS`
   entry names, so it stays silent. That list is an enumeration, not a
