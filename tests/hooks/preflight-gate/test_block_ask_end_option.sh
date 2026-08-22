@@ -83,12 +83,17 @@ run_case() {
       echo "$payload" | PRAXIS_ASK_END_STRICT=1 "$HOOK" >/dev/null 2>"$err_file"
       ;;
     advisory)
-      # Opt-out to advisory via new env var.
-      echo "$payload" | PRAXIS_ASK_END_ADVISORY=1 "$HOOK" >/dev/null 2>"$err_file"
+      # Opt-out to advisory via new env var. Unset inherited STRICT to avoid
+      # dev-env contamination (hook precedence: STRICT > ADVISORY, so inherited
+      # STRICT would override the intended advisory mode and cause false block).
+      echo "$payload" | env -u PRAXIS_ASK_END_STRICT PRAXIS_ASK_END_ADVISORY=1 "$HOOK" >/dev/null 2>"$err_file"
       ;;
     default|*)
-      # Default is now strict — no env var override.
-      echo "$payload" | "$HOOK" >/dev/null 2>"$err_file"
+      # Default is now strict — no env var override. Unset inherited STRICT for
+      # the same reason: if dev has PRAXIS_ASK_END_STRICT set, it would silently
+      # make default behave as explicit-strict. Guard against future default-change
+      # drift by explicitly managing the env rather than relying on absence.
+      echo "$payload" | env -u PRAXIS_ASK_END_STRICT "$HOOK" >/dev/null 2>"$err_file"
       ;;
   esac
   rc=$?
