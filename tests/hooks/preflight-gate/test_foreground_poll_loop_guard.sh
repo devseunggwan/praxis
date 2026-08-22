@@ -18,6 +18,15 @@ if [ ! -x "$HOOK" ]; then
   exit 1
 fi
 
+# Contain every state write these fixtures cause (issue #1063). The guard now
+# records background waiters under <PRAXIS_HOME>/cache, and the pre-existing
+# `run_in_background: true` cases run through that lane too — without this the
+# suite writes registry files into the developer's real ~/.praxis/cache, one
+# per fixture session id.
+TEST_HOME="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+export PRAXIS_HOME="$TEST_HOME"
+trap 'rm -rf "$TEST_HOME"' EXIT
+
 PASS=0
 FAIL=0
 FAILED_NAMES=()
@@ -197,7 +206,7 @@ if [ "$rc" -eq 0 ]; then PASS=$((PASS + 1)); echo "ok    [env-bypass]"; else
 # spec must not demand it be read).
 
 RG_DIR="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
-trap 'rm -rf "$RG_DIR"' EXIT
+trap 'rm -rf "$TEST_HOME" "$RG_DIR"' EXIT
 RG_SPEC="$REPO_ROOT/hooks/preflight-gate/foreground-poll-loop-guard/spec.md"
 RG_MD_POST="$REPO_ROOT/hooks/postuse-correction/pre-edit-md-escape-advisory/impl.py"
 RG_LOOP='while true; do gh pr checks 7; sleep 20; done'
@@ -334,6 +343,132 @@ rg_assert "readgate-armed-still-passes-background" nogate 0 "$rc" "$err"
 )
 err=$(rg_run "$RG_DIR/e2e.jsonl" "$RG_DIR/e2e-history.json" "$(rg_payload e2e-sess)"); rc=$?
 rg_assert "readgate-dispatcher-written-count-escalates" gate 2 "$rc" "$err"
+
+# ---- background waiter-chain advisory (issue #1063) ---------------------------
+#
+# `run_in_background: true` passes the block above and always will — it is the
+# redirect the block message hands out. It is also where the blocked behaviour
+# moved: chaining background waiters across turns, each differing from the last
+# only in its sleep duration. A second waiter for the same target while the
+# first is still armed draws an ADVISORY (stderr, exit 0), never a block.
+#
+# Both directions are pinned. Fire: a duration-only retry and an identical
+# loop-shaped relaunch. Silence: the FIRST waiter, waiters on different targets
+# (without which the fire cases are indistinguishable from "fires on every
+# second background call"), a background call that does no waiting at all, and
+# an armed window that has elapsed.
+
+BW_DIR="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+trap 'rm -rf "$TEST_HOME" "$RG_DIR" "$BW_DIR"' EXIT
+
+# bw_payload <session_id> <command>
+bw_payload() {
+  python3 - "$1" "$2" <<'PY'
+import json, sys
+sid, cmd = sys.argv[1], sys.argv[2]
+print(json.dumps({
+    "session_id": sid,
+    "tool_name": "Bash",
+    "tool_input": {"command": cmd, "run_in_background": True},
+}))
+PY
+}
+
+# bw_run <home> <session_id> <command> — stderr of one guard run.
+bw_run() {
+  (
+    export PRAXIS_HOME="$1"
+    { bw_payload "$2" "$3" | "$HOOK" >/dev/null; } 2>&1
+  )
+}
+
+# bw_assert <name> <advise|silent> <rc> <stderr>
+bw_assert() {
+  local name="$1" want="$2" rc="$3" err="$4"
+  if [ "$rc" -ne 0 ]; then
+    echo "FAIL  [$name] expected exit 0 (advisory never blocks), got $rc"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  if [ "$want" = "advise" ] && ! echo "$err" | grep -q 'background waiter for this same target'; then
+    echo "FAIL  [$name] expected the waiter-chain advisory, got: ${err:-<empty>}"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  if [ "$want" = "silent" ] && [ -n "$err" ]; then
+    echo "FAIL  [$name] expected silence, got: $err"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  PASS=$((PASS + 1)); echo "ok    [$name]"
+}
+
+# The first waiter is the correct call and must stay silent; the retry that
+# changed only the sleep duration (the observed 240 → 595 shape) is the one
+# that draws the advisory.
+BW_A="$BW_DIR/home-a"
+err=$(bw_run "$BW_A" bw-a 'sleep 240 && tail -50 /tmp/suite.log'); rc=$?
+bw_assert "waiter-first-launch-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_A" bw-a 'sleep 595 && tail -50 /tmp/suite.log'); rc=$?
+bw_assert "waiter-duration-only-retry-advises" advise "$rc" "$err"
+
+# A loop-shaped waiter has no computable end; its armed window is the fixed
+# default, so an identical relaunch inside it advises too.
+BW_B="$BW_DIR/home-b"
+BW_LOOP='until grep -q DONE /tmp/suite.log; do sleep 20; done; tail -50 /tmp/suite.log'
+err=$(bw_run "$BW_B" bw-b "$BW_LOOP"); rc=$?
+bw_assert "waiter-loop-first-launch-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_B" bw-b "$BW_LOOP"); rc=$?
+bw_assert "waiter-loop-relaunch-advises" advise "$rc" "$err"
+
+# False-positive control. Genuinely parallel waits on different targets must
+# stay silent — including the pair whose only discriminator is a bare number,
+# which is why the signature drops the `sleep` argument and nothing else.
+BW_C="$BW_DIR/home-c"
+err=$(bw_run "$BW_C" bw-c 'sleep 60 && tail -50 /tmp/a.log'); rc=$?
+bw_assert "waiter-distinct-target-first" silent "$rc" "$err"
+err=$(bw_run "$BW_C" bw-c 'sleep 60 && tail -50 /tmp/b.log'); rc=$?
+bw_assert "waiter-distinct-file-stays-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_C" bw-c 'until gh run view 123 -q .status | grep -q completed; do sleep 15; done'); rc=$?
+bw_assert "waiter-distinct-run-id-first" silent "$rc" "$err"
+err=$(bw_run "$BW_C" bw-c 'until gh run view 456 -q .status | grep -q completed; do sleep 15; done'); rc=$?
+bw_assert "waiter-distinct-run-id-stays-silent" silent "$rc" "$err"
+
+# Launching the awaited work is not waiting on it — no `sleep`, never recorded.
+BW_D="$BW_DIR/home-d"
+err=$(bw_run "$BW_D" bw-d 'bash scripts/run-tests.sh > /tmp/suite.log 2>&1'); rc=$?
+bw_assert "waiter-non-waiting-background-first" silent "$rc" "$err"
+err=$(bw_run "$BW_D" bw-d 'bash scripts/run-tests.sh > /tmp/suite.log 2>&1'); rc=$?
+bw_assert "waiter-non-waiting-background-stays-silent" silent "$rc" "$err"
+
+# An elapsed armed window releases the target: re-arming a waiter whose
+# predecessor has already returned is the correct call, not a duplicate.
+BW_E="$BW_DIR/home-e"
+err=$(bw_run "$BW_E" bw-e 'sleep 1 && tail -50 /tmp/expired.log'); rc=$?
+bw_assert "waiter-expiry-first-launch-silent" silent "$rc" "$err"
+python3 -c 'import time; time.sleep(1.3)'
+err=$(bw_run "$BW_E" bw-e 'sleep 1 && tail -50 /tmp/expired.log'); rc=$?
+bw_assert "waiter-expired-window-stays-silent" silent "$rc" "$err"
+
+# `PRAXIS_POLL_LOOP_WAITER_TTL` shortens the loop-shaped armed window; a
+# relaunch after it has elapsed is silent, which is also what pins the loop
+# cases above to the TTL rather than to an accident of timing.
+BW_F="$BW_DIR/home-f"
+err=$(PRAXIS_POLL_LOOP_WAITER_TTL=1 bw_run "$BW_F" bw-f "$BW_LOOP"); rc=$?
+bw_assert "waiter-ttl-override-first-launch-silent" silent "$rc" "$err"
+python3 -c 'import time; time.sleep(1.3)'
+err=$(PRAXIS_POLL_LOOP_WAITER_TTL=1 bw_run "$BW_F" bw-f "$BW_LOOP"); rc=$?
+bw_assert "waiter-ttl-override-expired-stays-silent" silent "$rc" "$err"
+
+# The advisory is a background-lane behaviour only: the same command in the
+# FOREGROUND is still the hard block, unchanged.
+BW_G="$BW_DIR/home-g"
+err=$(PRAXIS_HOME="$BW_G" bash -c '{ printf "%s" "$1" | "$2" >/dev/null; } 2>&1' _ \
+  '{"session_id":"bw-g","tool_name":"Bash","tool_input":{"command":"until grep -q DONE /tmp/suite.log; do sleep 20; done"}}' \
+  "$HOOK"); rc=$?
+if [ "$rc" -eq 2 ] && echo "$err" | grep -q 'FOREGROUND POLL-LOOP GUARD blocked'; then
+  PASS=$((PASS + 1)); echo "ok    [waiter-foreground-same-command-still-blocks]"
+else
+  echo "FAIL  [waiter-foreground-same-command-still-blocks] expected exit 2 + block, got rc=$rc: ${err:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("waiter-foreground-same-command-still-blocks")
+fi
 
 # ---- summary ------------------------------------------------------------------
 echo ""

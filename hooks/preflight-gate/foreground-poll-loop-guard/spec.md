@@ -74,6 +74,82 @@ Known limitations (intentional): a loop backgrounded at the shell level
 returns, so `run_in_background: true` remains the correct redirect. An
 unparseable iteration count or `sleep $VAR` fails open (pass).
 
+## Background waiter-chain advisory (issue #1063)
+
+`run_in_background: true` passes the block table above by design, and always
+will — it is the redirect the block message hands out. It is also where the
+blocked behaviour moved. In the 2026-08-20 session that opened this issue the
+foreground `sleep N && tail` form was denied 4 times, each retry changing only
+the duration; the behaviour then moved to chaining short background calls
+across turns and the block count went to 0. The cost: 146 of 500 Bash calls
+(29%) spent waiting on one test suite, 40 waiting calls in the densest 4-minute
+window, and 9 waiters the harness killed two hours later. The first call had
+already been the correct one — `run_in_background` with an `until` loop. The
+agent did not wait for the notification it had itself armed.
+
+**What a waiter is.** A background Bash call whose whole job is to elapse: its
+command contains a parseable `sleep` in command position. Launching the awaited
+work (`bash scripts/run-tests.sh > /tmp/out 2>&1`) carries no `sleep` and is
+never recorded — this lane is about waiting on work, not doing it.
+
+**What "same target" is keyed on: the sleep-normalized command signature.** The
+three candidates the issue names are not equally usable.
+
+| Candidate | Why not / why |
+| --- | --- |
+| Job id | Names the *waiter*, not what it waits on — and does not exist yet at PreToolUse time |
+| Output file path | Present only when the waiter redirects or reads a file; `until gh pr checks; do sleep 20; done` would key on nothing |
+| **Command signature** | The only key every waiting call has — **chosen** |
+
+Normalization drops each `sleep`'s argument token and nothing else, then hashes
+the remaining tokens. That is the narrowest rule that closes the observed gap:
+the retries differed from each other *only* in the duration (240 → 595), so
+`sleep 240 && tail -50 /tmp/suite.log` and `sleep 595 && tail -50 /tmp/suite.log`
+collapse to one key. Dropping bare numerals in general would fold
+`gh run view 123` and `gh run view 456` — two genuinely different targets whose
+sole discriminator is a bare number — and turn the guard into one that fires on
+every second background call.
+
+**Armed window.** A recorded waiter counts as live for its own sleep total; past
+that it has returned and re-arming is the correct call, not a duplicate. A
+*loop-shaped* waiter has no computable end — an `until` loop's per-iteration
+sleep says nothing about when it returns — so that shape uses a fixed default
+(900s, `PRAXIS_POLL_LOOP_WAITER_TTL`). A duplicate does not refresh the existing
+entry: refreshing would push the window forward indefinitely and make the
+reported age of the original waiter a lie.
+
+| Situation (all `run_in_background: true`) | Action |
+| --- | --- |
+| First waiter for a target | pass, recorded (exit 0, silent) |
+| Second waiter, same target, only the `sleep` duration changed | **advisory** (exit 0, stderr) |
+| Second waiter, same target, identical loop-shaped command | **advisory** |
+| Concurrent waits on different files / different run ids | pass (silent) |
+| Background call with no `sleep` at all, twice | pass (silent) |
+| Re-arm after the previous waiter's window elapsed | pass (silent) |
+| Same loop-shaped command in the FOREGROUND | **BLOCKED** (exit 2, unchanged) |
+
+**Advisory, never a block.** The block message names `run_in_background: true`
+as the correct path; denying it would contradict the escape the guard itself
+hands out, and a genuinely-needed second waiter must stay reachable. The
+message names the already-armed waiter, its age and remaining window, and
+`TaskStop` as the way to reap the pile-up.
+
+Known limitation, intentional: PreToolUse cannot see whether the earlier
+background job has already exited or been `TaskStop`ed, so a waiter reaped
+early still counts as armed until its window elapses. The cost of that false
+positive is one stderr line on a call that proceeds.
+
+**State.** `<PRAXIS_HOME>/cache/poll-loop-waiters-<session_id>.json` via
+`resolve_cache_file` (ppid fallback when the payload carries no `session_id`),
+a `{signature: {at, armed, cmd}}` map, staged through a per-process `.tmp` name
+and published with `os.replace`. Expired entries are pruned on write.
+Deliberately **unlocked** under the DESIGN.md
+[session-state-concurrency](../../../DESIGN.md#session-state-concurrency)
+criterion: the per-process staging name settles Q0, no threshold reads the
+state (the test is "a live entry exists", not an exact count — Q1), and no gate
+decides block-vs-pass from it (Q2). A lost update costs one advisory that does
+not fire — Q3, no lock.
+
 ## Redirect message
 
 The block message names the alternatives so the caller can self-correct:
@@ -139,11 +215,15 @@ already going to block. It can never turn a pass into a deny.
 - `PRAXIS_POLL_LOOP_READ_GATE_AFTER` — prior session blocks required before the
   read-gate escalates (default `2` → the 3rd block escalates). Unparseable →
   default.
+- `PRAXIS_POLL_LOOP_WAITER_TTL` — seconds a loop-shaped background waiter counts
+  as armed (default `900`). Unparseable or ≤ 0 → default.
 
 ## Fail-open
 
 Malformed stdin JSON, non-Bash tool, empty command, unparseable count/sleep →
-exit 0 (pass). The guard never blocks on infrastructure error. Within the block
+exit 0 (pass). The guard never blocks on infrastructure error. The waiter-chain
+lane is exit 0 on every path, so an unreadable or corrupt registry costs an
+advisory that does not fire, never a denied call. Within the block
 path, the read-gate escalation additionally fails open (base block, no Read
 demanded) on a missing `session_id`, an unresolvable reference path, or any
 error reading the fire ledger or the read-set.
@@ -161,3 +241,14 @@ escalates (the case that fails if `record_group_fires`' row shape ever drifts
 from `count_session_fires`' filter). Silence direction: below threshold, after a
 Read of this spec, unresolvable reference, missing `session_id`, and
 `run_in_background: true` while armed.
+
+Waiter-chain coverage is two-directional for the same reason. Fire: a
+duration-only retry, an identical loop-shaped relaunch. Silence: the FIRST
+waiter, waits on a different file, waits on a different run id (the pair that
+separates this change from "fires on every second background call"), a
+background call that does no waiting, an elapsed armed window, and the same
+loop-shaped command in the foreground — still exit 2.
+
+The suite exports a temp `PRAXIS_HOME`: the guard now records state on the
+background path, so without it the pre-existing `run_in_background: true`
+fixtures write registry files into the developer's real `~/.praxis/cache`.

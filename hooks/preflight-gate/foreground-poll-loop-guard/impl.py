@@ -52,6 +52,20 @@ Exit 0 (pass) otherwise: run_in_background=true, short bounded loops (< ~90s),
 no-sleep loops, leading `sleep` without a loop (the runtime already handles that),
 non-Bash tools.
 
+## Background waiter-chain advisory (issue #1063)
+
+`run_in_background: true` passes the block above — it is the correct redirect.
+It is also where the blocked behaviour moved: chaining short background waiters
+across turns, each one differing from the last only in its `sleep` duration,
+passed the guard every time (146 of 500 Bash calls in one session, 9 waiters
+left for the harness to kill hours later). A background call whose whole job is
+to elapse is recorded in a session registry keyed on its sleep-normalized
+command signature; a second such call arriving while the first's armed window
+is still open draws an ADVISORY (stderr, exit 0) naming the already-armed
+waiter and `TaskStop`. It never blocks — the block message hands out
+`run_in_background: true` as the escape, so denying it would contradict the
+guard's own redirect.
+
 ## Read-gate escalation (issue #1012)
 
 A block that is answered with the same loop shape is a block that was not read.
@@ -89,6 +103,8 @@ already going to block — it can never turn a pass into a deny.
   (tests; an unresolvable value exercises the fail-open escape).
 - `PRAXIS_POLL_LOOP_READ_GATE_AFTER` — prior blocks required before the read-gate
   escalates (default 2 → the 3rd block escalates). Unparseable → default.
+- `PRAXIS_POLL_LOOP_WAITER_TTL` — seconds a loop-shaped background waiter counts
+  as armed (default 900). Unparseable or ≤ 0 → default.
 
 ## Fail-open
 
@@ -97,10 +113,12 @@ exit 0 (pass).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import sys
+import time
 from pathlib import Path as _Path
 
 _HERE = _Path(__file__).resolve()
@@ -116,12 +134,17 @@ if _sys_lib not in sys.path:
 from _fire_ledger import count_session_fires  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import safe_tokenize  # type: ignore[import-not-found]  # noqa: E402
+from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 
 _HOOK_NAME = "foreground-poll-loop-guard"  # manifest `name` — the fire-ledger key
+_BYPASS_ENV = "PRAXIS_HOOK_BYPASS_POLL_LOOP_GUARD"
 _FOREGROUND_CEILING_S = 120  # Bash default timeout, seconds
 _SAFE_MARGIN_S = 100  # block when worst-case can approach the ceiling
 _READ_GATE_AFTER_BLOCKS = 2  # prior session blocks before the read-gate escalates
+# A loop-shaped waiter has no computable end, so its armed window is a fixed
+# default rather than its own sleep total (issue #1063).
+_OPEN_ENDED_WAITER_TTL_S = 900.0
 # The read-set owner: its PostToolUse(Read) leg records every `.md` Read of the
 # session, spec.md included, so the escalation reuses that history instead of
 # standing up a second one.
@@ -353,6 +376,176 @@ def _detect(command: str) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Background waiter-chain advisory (issue #1063)
+# ---------------------------------------------------------------------------
+
+
+def _waiter_profile(command: str) -> tuple[str, float, str] | None:
+    """`(target_key, armed_seconds, display)` when this command is a waiter, else None.
+
+    A *waiter* is a call whose whole job is to elapse: it contains a parseable
+    `sleep` in command position. Launching the awaited work itself
+    (`bash run-tests.sh > /tmp/out &`) carries no `sleep` and is therefore
+    never recorded — this lane is about waiting on work, not doing it.
+
+    **The target key is the sleep-normalized command signature.** The three
+    candidates #1063 names are not equally usable. A *job id* names the waiter,
+    not what it waits on, and does not exist yet at PreToolUse time. An *output
+    file path* is present only when the waiter redirects or reads a file, so
+    `until gh pr checks; do sleep 20; done` — a waiter with no file anywhere —
+    would key on nothing. The command signature is the only one every waiting
+    call has, and it is what the observed failure actually looked like: the
+    retries differed from each other *only in the sleep duration* (240 → 595).
+    Dropping each `sleep`'s argument, and only that argument, collapses exactly
+    that family into one key.
+
+    Only the sleep argument. Dropping bare numerals generally would fold
+    `gh run watch 123` and `gh run watch 456` together — two genuinely
+    different targets whose sole discriminator is a bare number — and turn the
+    guard into one that fires on every second background call.
+    """
+    tokens = safe_tokenize(_strip_non_executable(command))
+    if not tokens:
+        return None
+
+    normalized: list[str] = []
+    total_sleep = 0.0
+    saw_sleep = False
+    skip_next = False
+    for i, tok in enumerate(tokens):
+        if skip_next:
+            skip_next = False
+            continue
+        if tok != "sleep" and not tok.endswith("/sleep"):
+            normalized.append(tok)
+            continue
+        m = _SLEEP_ARG_RE.match(tokens[i + 1]) if i + 1 < len(tokens) else None
+        if m is None:
+            normalized.append(tok)  # `sleep $VAR` — unparseable, keep verbatim
+            continue
+        saw_sleep = True
+        total_sleep += float(m.group(1)) * _SLEEP_UNIT_S[m.group(2)]
+        normalized.append("sleep")  # `/bin/sleep` and `sleep` are one shape
+        skip_next = True
+    if not saw_sleep:
+        return None
+
+    # A loop's sleep is per-iteration and the iteration count is either absent
+    # (`until`) or irrelevant to when the waiter returns, so the summed sleep
+    # is not the armed window for that shape.
+    open_ended = any(_sleep_args(body) for _kw, _header, body in _iter_loops(tokens))
+    armed = _open_ended_ttl() if open_ended else total_sleep
+    key = hashlib.sha1("\x00".join(normalized).encode("utf-8")).hexdigest()[:16]
+    display = " ".join(command.split())
+    if len(display) > 120:
+        display = display[:117] + "..."
+    return key, armed, display
+
+
+def _open_ended_ttl() -> float:
+    """Armed window for a loop-shaped waiter. `PRAXIS_POLL_LOOP_WAITER_TTL` overrides."""
+    raw = os.environ.get("PRAXIS_POLL_LOOP_WAITER_TTL", "").strip()
+    if not raw:
+        return _OPEN_ENDED_WAITER_TTL_S
+    try:
+        value = float(raw)
+    except ValueError:
+        return _OPEN_ENDED_WAITER_TTL_S
+    return value if value > 0 else _OPEN_ENDED_WAITER_TTL_S
+
+
+def _waiter_registry_path(session_id: str | None) -> str:
+    key = session_id or str(os.getppid())
+    return resolve_cache_file(f"poll-loop-waiters-{key}.json", session_id=key)
+
+
+def _load_waiters(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_waiters(path: str, waiters: dict) -> None:
+    """Publish the registry atomically, staging through a per-process name.
+
+    Per-process because a `<path>.tmp` shared with a sibling hook process on
+    the same `session_id` corrupts rather than loses (DESIGN.md Q0): the
+    shorter write lands over the longer one's tail and every reader's
+    `except ValueError` answers *empty registry*.
+
+    Unlocked, by the same DESIGN.md criterion: no threshold reads this state
+    (the test is "a live entry exists", not an exact count) and no gate decides
+    block-vs-pass from it — this lane is advisory-only. A lost update costs one
+    advisory that does not fire, which is Q3.
+    """
+    tmp_path = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            json.dump(waiters, fh)
+        os.replace(tmp_path, path)
+    except OSError:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def _background_waiter_advisory(command: str, session_id: str | None) -> str | None:
+    """Advisory when a live waiter for this same target is already armed, else None.
+
+    Records the waiter as a side effect. An entry is written only when no live
+    one exists for the key: refreshing on every duplicate would push the armed
+    window forward indefinitely and make the reported age of the original
+    waiter a lie.
+    """
+    profile = _waiter_profile(command)
+    if profile is None:
+        return None
+    key, armed, display = profile
+
+    path = _waiter_registry_path(session_id)
+    waiters = _load_waiters(path)
+    now = time.time()
+
+    live = {
+        k: v
+        for k, v in waiters.items()
+        if isinstance(v, dict)
+        and isinstance(v.get("at"), (int, float))
+        and isinstance(v.get("armed"), (int, float))
+        and now - v["at"] < v["armed"]
+    }
+
+    existing = live.get(key)
+    if existing is None:
+        live[key] = {"at": now, "armed": armed, "cmd": display}
+        _save_waiters(path, live)
+        return None
+
+    if live != waiters:  # expired entries pruned — publish the smaller registry
+        _save_waiters(path, live)
+
+    age = int(now - existing["at"])
+    remaining = max(int(existing["armed"] - (now - existing["at"])), 0)
+    return (
+        f"[{_HOOK_NAME}] A background waiter for this same target was launched "
+        f"{age}s ago and stays armed for ~{remaining}s more:\n"
+        f"    $ {existing.get('cmd', '<unknown>')}\n"
+        "This call waits on it a second time. A background call re-invokes Claude "
+        "when it exits, so the notification is already armed — a second waiter "
+        "does not make it arrive sooner, and every one of them outlives the turn "
+        "that launched it.\n"
+        "Correct path: wait for the notification already armed. If waiters have "
+        "piled up, list them (/tasks) and TaskStop every one but the newest — a "
+        "waiter nobody reaps is killed by the harness hours later.\n"
+        f"Set {_BYPASS_ENV}=1 to silence this guard."
+    )
+
+
 def _reference_path() -> str:
     """Absolute path to this guard's own spec.md (issue #1012).
 
@@ -434,7 +627,7 @@ def _read_gate_engaged(payload: dict, reference: str) -> int | None:
 
 @fail_open
 def main() -> int:
-    if os.environ.get("PRAXIS_HOOK_BYPASS_POLL_LOOP_GUARD"):
+    if os.environ.get(_BYPASS_ENV):
         return 0
 
     try:
@@ -446,12 +639,24 @@ def main() -> int:
         return 0
 
     tool_input = payload.get("tool_input", {}) or {}
-    # Backgrounded polling is the CORRECT pattern — never block it.
-    if tool_input.get("run_in_background") is True:
-        return 0
-
     command = tool_input.get("command", "") or ""
     if not command.strip():
+        return 0
+
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        session_id = None
+
+    # Backgrounded polling is the CORRECT pattern and is never blocked. It is,
+    # however, where the behaviour this guard was built to stop moved once the
+    # foreground form started being denied (issue #1063): chaining short
+    # background waiters across turns passed every time. Advisory, not a block —
+    # the guard's own redirect message names `run_in_background: true` as the
+    # correct path, so denying it would contradict the escape it hands out.
+    if tool_input.get("run_in_background") is True:
+        advisory = _background_waiter_advisory(command, session_id)
+        if advisory:
+            sys.stderr.write(advisory + "\n")
         return 0
 
     reason = _detect(command)
@@ -490,7 +695,7 @@ def main() -> int:
         rule_name="foreground poll-loop guard",
         why=why,
         correct_path=correct_path,
-        bypass_env="PRAXIS_HOOK_BYPASS_POLL_LOOP_GUARD",
+        bypass_env=_BYPASS_ENV,
         reference=reference,
     )
     return 2
