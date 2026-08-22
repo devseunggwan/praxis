@@ -309,6 +309,16 @@ build_transcript_verdict \
   none
 run_case advisory "verdict-unrelated-fraction-not-a-qualifier" '{}'
 
+# --- a bare-PASS key must not be minted from a numerically scoped claim ----
+# "0 PASS" reverses the order, so the bare-PASS pattern matched inside it and
+# recorded pass:bare alongside pass:0 — a prior bare 통과 then read the scoped
+# claim as its own restatement.
+build_transcript_verdict \
+  "12개 중 통과" "2026-08-20T09:19:36.000Z" \
+  "0 PASS 입니다" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-reversed-numeric-is-not-a-bare-pass" '{}'
+
 # --- same-clause qualifier still silences (EN "of N lines" form) -----------
 build_transcript_verdict \
   "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \

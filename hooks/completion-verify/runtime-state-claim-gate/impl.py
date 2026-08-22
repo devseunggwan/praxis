@@ -268,14 +268,22 @@ def extract_verdict_claims(text: str) -> list[dict]:
             if not clause:
                 continue
             qualified = bool(_QUALIFIER_RE.search(clause))
-            for m in _VERDICT_NUM_RE.finditer(clause):
+            numeric = list(_VERDICT_NUM_RE.finditer(clause))
+            for m in numeric:
                 key = _claim_key_from_match(m)
                 if key and key not in seen:
                     seen.add(key)
                     claims.append({"key": key, "qualified": qualified})
-            if _VERDICT_BARE_RE.search(clause) and "pass:bare" not in seen:
-                seen.add("pass:bare")
-                claims.append({"key": "pass:bare", "qualified": qualified})
+            for m in _VERDICT_BARE_RE.finditer(clause):
+                # A reversed count ("0 PASS") puts the number BEFORE the word,
+                # so the bare pattern still matches inside a numerically scoped
+                # claim — minting pass:bare there makes the scoped claim read as
+                # a restatement of an unrelated bare one.
+                if any(n.start() <= m.start() < n.end() for n in numeric):
+                    continue
+                if "pass:bare" not in seen:
+                    seen.add("pass:bare")
+                    claims.append({"key": "pass:bare", "qualified": qualified})
     return claims
 
 
