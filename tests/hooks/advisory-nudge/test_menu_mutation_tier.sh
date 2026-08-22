@@ -397,6 +397,18 @@ run_case "gap3 new-fix control: dry-run→delete a test fixture stays silent" \
 # run of a delete — stays silent, same as the deploy/merge/send counters.
 run_case "gap3 new-fix control: Dry-run the delete (no connector, no target)" \
   pass default "$(build_payload '["Delete now", "Dry-run the delete"]')"
+# Codex P1 on PR #1072. Co-occurrence of connector + destructive verb + shared
+# surface is NOT the discriminator: here every delete is simulated because the
+# verb is the dry-run's own object, and the post-connector clause only reads.
+# The first Tier 1e disqualified this, so strict mode blocked a genuinely safe
+# menu — the opposite of what the hook exists to do.
+run_case "gap3 P1: dry-run OF the delete, then a read-only clause, stays silent" \
+  pass default "$(build_payload '["Delete the customer table", "Dry-run the delete operation, then inspect the customer table"]')"
+# The mirror of the case above, and why the rule is per-clause rather than
+# order-based: the destructive clause comes FIRST and carries no safe token,
+# so the trailing dry-run does not govern it.
+run_case "gap3 reverse order: delete first, dry-run after, still fires" \
+  advisory default "$(build_payload '["Delete the customer table, then dry-run to confirm", "Delete the customer table"]')"
 
 # ---------------------------------------------------------------------------
 # (e) BLOCK — strict mode

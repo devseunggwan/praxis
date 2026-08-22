@@ -249,11 +249,23 @@ precisely the alternative the hook asks for. Only a Tier 1a **target** does.
 
 **Tier 1e — sequential destructive mutation** (issue #974, codex round-1 gap 3
 on PR #966; closes the residual PR #1016 pinned as open): a low-blast token
-does **not** suppress when a DESTRUCTIVE verb naming a shared surface sits
-behind a **sequence connector** in the same option. `Dry-run then delete the
-customer table` is two clauses — the safe mode covers only the first, and the
-delete is unconditional — unlike `Dry-run the deploy`, where the safe token
-governs the mutation verb as its own object and nothing else happens.
+does **not** suppress when a **clause carrying no low-blast token of its own**
+holds a DESTRUCTIVE verb, and the option names a shared surface. The option is
+split on its **sequence connector**; a single-clause option is never in this
+tier. `Dry-run then delete the customer table` splits into a safe first clause
+and a bare `delete the customer table` — the delete is unconditional — unlike
+`Dry-run the deploy`, one clause whose safe token governs the mutation verb as
+its own object.
+
+**Per-clause, not per-option.** Co-occurrence of connector, destructive verb
+and shared surface is not the discriminator: `Dry-run the delete operation,
+then inspect the customer table` has all three, yet its delete is simulated —
+the verb is the dry-run's own object and the trailing clause only reads. An
+option-level test disqualifies it and strict mode then blocks a genuinely safe
+menu, which is the inverse of this hook's purpose (Codex P1 on PR #1072).
+Order needs no special case as a result: `Delete the customer table, then
+dry-run to confirm` disqualifies on its FIRST clause, which carries the verb
+and no safe token.
 
 - Destructive verbs — English (lookaround): `delete`, `drop`, `truncate`.
   Korean (substring): `삭제`.
