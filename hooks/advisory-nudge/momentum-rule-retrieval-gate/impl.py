@@ -447,10 +447,19 @@ _APPROVAL_TOKENS = frozenset({
     "ok", "okay", "okey", "k", "kk", "yes", "yep", "yup", "y", "go", "go ahead",
     "do it", "proceed", "proceed with the merge", "merge", "merge it", "sure",
     "lgtm", "ship it", "sounds good",
+    "approve", "approved",
     "네", "넵", "응", "ㅇㅋ", "ㅇㅇ", "ㄱㄱ", "고고", "승인", "진행", "진행해",
     "진행해줘", "진행하자", "머지", "머지해", "머지해줘", "머지 진행", "좋아",
     "좋습니다", "그래", "ㄱ",
 })
+
+# A user rarely answers a merge ask with one bare word — "ok, merge it" and
+# "사용해보고 결정하겠습니다. 머지 진행" are the same consent, and denying them
+# blocks the mandated briefing → approval → merge flow outright (issue #1087).
+# Only the FINAL clause is matched: an approval token earlier in a message whose
+# last clause is a fresh instruction ("머지 진행 상황 알려주고 파서부터 고쳐줘")
+# still fails, which is the property exact equality was protecting.
+_CLAUSE_TAIL_RE = re.compile(r"[.!?。…\n,;·]+")
 
 # A single positional token that is a bare PR number or a …/pull/N URL.
 _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
@@ -569,8 +578,12 @@ def _user_message_text(content: object) -> str:
 
 def _is_approval_reply(content: object) -> bool:
     """True when a user message is a short bare approval token (ok / 진행 / 승인 …)."""
-    norm = re.sub(r"\s+", " ", _user_message_text(content).strip().lower()).strip(" .!~,·")
-    return norm in _APPROVAL_TOKENS
+    text = re.sub(r"\s+", " ", _user_message_text(content).strip().lower())
+    if text.strip(" .!~,·") in _APPROVAL_TOKENS:
+        return True
+    clauses = [c.strip(" .!~,·") for c in _CLAUSE_TAIL_RE.split(text)]
+    clauses = [c for c in clauses if c]
+    return bool(clauses) and clauses[-1] in _APPROVAL_TOKENS
 
 
 def _first_positional(tokens: list[str], value_flags: frozenset[str]) -> str | None:

@@ -714,6 +714,21 @@ run_merge_escalation_case "merge_escalation_prior_turn_briefing_passes" \
 run_merge_escalation_case "merge_escalation_prior_turn_wrong_pr_denies" \
   "yes" "" "momentum-merge-prior-turn-wrong-pr.jsonl" "gh pr merge 833 --squash"
 
+# A SENTENCE that ends in an approval is still an approval (issue #1087). Exact
+# string equality denied these, so the mandated briefing → approval → merge flow
+# was blocked whenever the user approved in prose rather than one word.
+run_merge_escalation_case "merge_escalation_sentence_approval_ko_passes" \
+  "no" "" "momentum-merge-sentence-approval-ko.jsonl" "gh pr merge 833 --squash"
+
+run_merge_escalation_case "merge_escalation_sentence_approval_en_passes" \
+  "no" "" "momentum-merge-sentence-approval-en.jsonl" "gh pr merge 833 --squash"
+
+# NEGATIVE CONTROL: an approval token appears mid-sentence but the LAST clause
+# is a fresh instruction → still not an approval reply → deny. This is the
+# property exact equality was protecting, and clause splitting must keep it.
+run_merge_escalation_case "merge_escalation_trailing_instruction_denies" \
+  "yes" "" "momentum-merge-sentence-trailing-instruction.jsonl" "gh pr merge 833 --squash"
+
 # Last user message is a substantive instruction, not an approval reply → no
 # window extension → deny.
 run_merge_escalation_case "merge_escalation_substantive_reply_denies" \

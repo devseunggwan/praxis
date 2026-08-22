@@ -107,10 +107,20 @@ human user message" window. Scoring only that window would therefore penalise
 the *correct* flow (briefing → "ok" → merge) and pass only the anti-pattern
 (briefing + merge crammed into one turn, i.e. auto-proceed without waiting).
 The **prior-turn extension** resolves this. When the last human user message is
-a short approval reply (`ok` / `진행` / `승인` / … — exact normalized match
-against `_APPROVAL_TOKENS`), the immediately preceding assistant turn is scored
+an approval reply (`ok` / `진행` / `승인` / … — matched against
+`_APPROVAL_TOKENS` either as the whole normalized message or as its **final
+clause**, issue #1087), the immediately preceding assistant turn is scored
 **alone** (post-approval text must not supplement a briefing the user never saw
 before approving). Safety gates on the extension:
+
+- **Final-clause matching (issue #1087).** Whole-message equality alone denied
+  every approval phrased as prose — `ok, merge it`, `사용해보고 결정하겠습니다.
+  머지 진행` — while the barer `ok` passed, so the mandated flow was blocked
+  whenever the user wrote a sentence. The message is split on clause boundaries
+  (`.!?。…,;·` and newline) and only the LAST clause is matched, which keeps the
+  property whole-message equality existed for: a message whose final clause is a
+  fresh instruction (`머지 진행 상황 알려주고 파서부터 고쳐줘`, `merge it but
+  rebase first`) is not an approval, no matter what appears earlier in it.
 
 - **PR correlation.** The prior-turn briefing must reference the PR actually
   being merged. The merge target is the segment's *first positional* token
