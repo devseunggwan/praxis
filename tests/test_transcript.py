@@ -415,12 +415,27 @@ HOOKS = REPO_ROOT / "hooks"
 
 _CONSUMERS = {
     HOOKS / "completion-verify" / "readonly-verify-deferral-gate" / "impl.py":
-        ["load_transcript", "get_current_turn", "extract_last_assistant_text"],
+        ["load_current_turn", "extract_last_assistant_text"],
     HOOKS / "completion-verify" / "completion-signal-gate" / "impl.py":
-        ["load_transcript", "get_current_turn", "extract_last_assistant_text",
-         "has_tool_in_turn"],
+        ["load_current_turn", "extract_last_assistant_text", "has_tool_in_turn"],
+    # Reads a fixed window past the turn (`events[-_EVIDENCE_WINDOW:]`), so it
+    # binds the min_events reader and slices the turn out itself (#1076).
     HOOKS / "completion-verify" / "merge-state-claim-gate" / "impl.py":
-        ["load_transcript", "get_current_turn", "extract_last_assistant_text"],
+        ["load_recent_events", "get_current_turn", "extract_last_assistant_text"],
+    HOOKS / "completion-verify" / "negative-existence-verdict-gate" / "impl.py":
+        ["load_current_turn", "extract_last_assistant_text"],
+    HOOKS / "completion-verify" / "proposal-premise-gate" / "impl.py":
+        ["load_current_turn", "extract_last_assistant_text"],
+    HOOKS / "completion-verify" / "pr-claim-mutation-gate" / "impl.py":
+        ["load_current_turn", "extract_last_assistant_text"],
+    HOOKS / "completion-verify" / "runtime-state-claim-gate" / "impl.py":
+        ["load_current_turn", "extract_last_assistant_text"],
+    HOOKS / "completion-verify" / "artifact-verdict-evidence-gate" / "impl.py":
+        ["load_current_turn", "extract_last_assistant_text"],
+    # The one scan that genuinely needs the whole session; it streams instead
+    # of materializing it (#1076).
+    HOOKS / "completion-verify" / "pr-report-destination-gate" / "impl.py":
+        ["iter_transcript"],
     HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
         ["read_transcript_tail"],
     HOOKS / "preflight-gate" / "block-sciomc-finding-commit" / "impl.py":

@@ -57,8 +57,9 @@ import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
-    get_current_turn,
-    load_transcript,
+    is_turn_boundary,
+    iter_transcript,
+    load_current_turn,
 )
 
 _PREFIX = "[runtime-state-claim-gate]"
@@ -292,12 +293,15 @@ def extract_verdict_claims(text: str) -> list[dict]:
     return claims
 
 
-def collect_prior_verdict_mentions(prior_events: list[dict]) -> dict[str, str | None]:
+def collect_prior_verdict_mentions(prior_events) -> dict[str, str | None]:
     """Return claim key -> earliest ISO timestamp (or None) it was stated in
     `prior_events` (assistant text, any turn before the current one,
     qualified or not — a qualified prior mention still means the number was
     already said). ISO8601 `Z`-suffixed timestamps sort correctly as strings,
-    so no datetime parsing is needed to track the minimum."""
+    so no datetime parsing is needed to track the minimum.
+
+    Takes any iterable so the caller can stream the file rather than hold it.
+    """
     mentions: dict[str, str | None] = {}
     for ev in prior_events:
         msg = ev.get("message", {})
@@ -350,6 +354,29 @@ def _elapsed_minutes(ts_from: str | None, ts_to: str | None) -> str:
     except ValueError:
         return "unknown"
     return f"{abs((b - a).total_seconds()) / 60:.1f}"
+
+
+def iter_events_before_current_turn(path: str):
+    """Yield every event that precedes the current turn, streaming (#1076).
+
+    This gate asks whether a verdict number was already stated *earlier this
+    session*, so unlike its seven siblings it cannot work from the turn alone.
+    It used to hold the whole transcript in memory to slice the turn off the
+    end — hundreds of MB on a long session, against a 10s budget.
+
+    Streaming forward gives the same slice without the buffer: events pile up
+    until the next real user input proves they belong to a completed turn, and
+    whatever is still pending at EOF IS the current turn and is dropped. Peak
+    memory is one turn, not one session. The current turn must not leak in —
+    the text being judged would then count as its own prior mention and every
+    claim would read as a restatement.
+    """
+    pending: list[dict] = []
+    for ev in iter_transcript(path):
+        if is_turn_boundary(ev):
+            yield from pending
+            pending = []
+        pending.append(ev)
 
 
 def detect_verdict_restatement(
@@ -458,18 +485,15 @@ def main() -> int:
     if not transcript_path or not os.path.isfile(transcript_path):
         return 0
 
-    events = load_transcript(transcript_path)
-    if not events:
-        return 0
-
-    turn = get_current_turn(events)
+    turn = load_current_turn(transcript_path)
     last_text = extract_last_assistant_text(turn) if turn else ""
     if not last_text:
         return 0
 
     kinds = detect_claims(last_text)
-    prior_events = events[: len(events) - len(turn)] if turn else events
-    restated, mentions = detect_verdict_restatement(last_text, prior_events)
+    restated, mentions = detect_verdict_restatement(
+        last_text, iter_events_before_current_turn(transcript_path)
+    )
     if not kinds and not restated:
         return 0
 

@@ -38,7 +38,7 @@ from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
     get_current_turn,
-    load_transcript,
+    load_recent_events,
 )
 
 _PREFIX = "[merge-state-claim-gate]"
@@ -415,7 +415,9 @@ def main() -> int:
     if not transcript_path or not os.path.isfile(transcript_path):
         return 0
 
-    events = load_transcript(transcript_path)
+    # Bounded tail rather than the whole transcript (#1076). min_events
+    # covers the _EVIDENCE_WINDOW slices below, which read past the turn.
+    events = load_recent_events(transcript_path, min_events=_EVIDENCE_WINDOW)
     if not events:
         return 0
 

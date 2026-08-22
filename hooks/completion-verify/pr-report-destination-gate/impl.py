@@ -82,7 +82,7 @@ sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_stop_advisory  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
-from _transcript import load_transcript  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import iter_transcript  # type: ignore[import-not-found]  # noqa: E402
 
 _HOOK_NAME = "pr-report-destination-gate"
 _ROLE = "completion-verify"
@@ -129,12 +129,34 @@ def _pr_nums(cmd: str, subs: str) -> list[str]:
     ]
 
 
-def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
-    """Return (unreported_context_prs, sample_report_files)."""
+def _add_narrative_prs(acc: set[str], text: str) -> None:
+    """Narrative prose (assistant/user text) referencing a PR is intentional context."""
+    for m in _PR_URL_RE.finditer(text):
+        acc.add(m.group(1))
+
+
+def _add_tool_result_prs(acc: set[str], text: str) -> None:
+    """Count a PR URL from tool output only when the result carries exactly ONE
+    distinct PR (a `gh pr create`/`view` success), never a multi-PR listing
+    (`gh pr list`) which would flood unrelated PRs into context."""
+    urls = {m.group(1) for m in _PR_URL_RE.finditer(text)}
+    if len(urls) == 1:
+        acc.add(next(iter(urls)))
+
+
+def find_unreported_prs(events) -> tuple[list[str], list[str]]:
+    """Return (unreported_context_prs, sample_report_files).
+
+    `events` is any iterable of event dicts — pass `iter_transcript(path)` to
+    stream. This scan genuinely needs the whole session (it looks for a PR
+    touched anywhere in it), so it cannot read a bounded tail like its sibling
+    gates; instead it reduces each text block to the PR numbers it carries and
+    drops the text, so memory tracks the number of distinct PRs rather than the
+    size of the session (issue #1076).
+    """
     tool_uses: list[dict] = []
     result_is_error: dict[str, bool] = {}
-    narrative_parts: list[str] = []       # assistant/user prose — intentional PR references
-    tool_result_texts: list[str] = []     # one combined string per tool_result block
+    context_prs: set[str] = set()
 
     for ev in events:
         msg = ev.get("message")
@@ -142,7 +164,7 @@ def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
             continue
         content = msg.get("content")
         if isinstance(content, str):
-            narrative_parts.append(content)
+            _add_narrative_prs(context_prs, content)
             continue
         if not isinstance(content, list):
             continue
@@ -153,7 +175,7 @@ def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
             if kind == "text":
                 text = block.get("text")
                 if isinstance(text, str):
-                    narrative_parts.append(text)
+                    _add_narrative_prs(context_prs, text)
             elif kind == "tool_use":
                 tool_uses.append(block)
             elif kind == "tool_result":
@@ -169,7 +191,7 @@ def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
                         if isinstance(c, dict) and isinstance(c.get("text"), str):
                             parts.append(c["text"])
                 if parts:
-                    tool_result_texts.append("\n".join(parts))
+                    _add_tool_result_prs(context_prs, "\n".join(parts))
 
     def succeeded(u: dict) -> bool:
         # Missing result (e.g. the final call) counts as success — bias to silence.
@@ -178,7 +200,6 @@ def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
             return True
         return result_is_error.get(tid) is not True
 
-    context_prs: set[str] = set()
     posted_prs: set[str] = set()
     report_files: list[str] = []
 
@@ -197,18 +218,6 @@ def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
             fp = inp["file_path"]
             if fp.lower().endswith(".md") and (_REPORT_PATH_RE.search(fp) or _REPORT_NAME_RE.search(fp)):
                 report_files.append(fp)
-
-    # Narrative prose (assistant/user text) referencing a PR is intentional context.
-    narrative_text = "\n".join(narrative_parts)
-    for m in _PR_URL_RE.finditer(narrative_text):
-        context_prs.add(m.group(1))
-    # Tool output: count a PR URL only when a result carries exactly ONE distinct
-    # PR (a `gh pr create`/`view` success), never a multi-PR listing (`gh pr list`)
-    # which would flood unrelated PRs into context.
-    for text in tool_result_texts:
-        urls = {m.group(1) for m in _PR_URL_RE.finditer(text)}
-        if len(urls) == 1:
-            context_prs.add(next(iter(urls)))
 
     if not report_files:
         return ([], [])
@@ -258,11 +267,9 @@ def main() -> int:
     if not transcript_path or not os.path.isfile(transcript_path):
         return 0
 
-    events = load_transcript(transcript_path)
-    if not events:
-        return 0
-
-    unreported, report_files = find_unreported_prs(events)
+    unreported, report_files = find_unreported_prs(
+        iter_transcript(transcript_path)
+    )
     if not unreported or not report_files:
         return 0
 
