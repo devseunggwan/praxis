@@ -118,7 +118,7 @@ hook wins):
 
 | Hook | Checks | Decision |
 | ------ | -------- | ---------- |
-| `pre-merge-approval-gate` | Direct session vs `CMUX_DELEGATE=1` background agent | `ask` (never blocks outright) |
+| `pre-merge-approval-gate` | Whether the command is a `gh pr merge` at all — every session is gated | `ask` (never blocks outright) |
 | `gh-merge-worktree-precondition` (this hook) | Whether `--delete-branch`'s target branch is checked out in another worktree | `deny` (exit 2) on a confirmed conflict |
 
 ## Tests

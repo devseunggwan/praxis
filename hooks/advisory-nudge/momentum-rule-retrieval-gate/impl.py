@@ -255,7 +255,6 @@ def _emit_for_trigger(trigger: str, directory: str | None) -> str:
 #
 # Fail-open / false-positive containment:
 #   • no readable transcript                 → no escalation (fail open)
-#   • CMUX_DELEGATE=1 (background agent)      → no escalation (mirror sibling)
 #   • PRAXIS_MOMENTUM_MERGE_ADVISORY=1        → demote back to advisory only
 #   • `# briefing-surfaced` + SOME briefing   → demote back to advisory only
 #     (the marker attests completeness, never existence — see issue #940)
@@ -741,10 +740,6 @@ def _correlated_prior_turn_text(entries: list[dict], idxs: list[int],
 
 def _merge_escalation_reason(payload: dict) -> str | None:
     """Return a deny reason when the pre-merge briefing is incomplete, else None."""
-    # Background cmux-delegate agents merge autonomously — the delegation intent
-    # is the approval (mirror pre-merge-approval-gate).
-    if os.environ.get("CMUX_DELEGATE") == "1":
-        return None
     # Demote-to-advisory escape hatch (false-positive relief without full bypass).
     if os.environ.get(MERGE_ADVISORY_ENV) == "1":
         return None

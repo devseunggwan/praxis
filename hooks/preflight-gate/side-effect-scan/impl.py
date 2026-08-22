@@ -46,7 +46,6 @@ recorded here because the label a reason prints changes with it.
 from __future__ import annotations
 
 import json
-import os
 import sys
 import sys as _sys
 from pathlib import Path as _Path
@@ -142,12 +141,8 @@ def argv_matches(argv: list[str], positions, expected) -> bool:
     return True
 
 
-# Codex r3 #187: round 2 bypassed the entire `gh-merge` category under
-# CMUX_DELEGATE=1, which also silenced `gh pr create` and `gh workflow run`
-# (other entries in the same category) — broader than the sibling
-# pre-merge-approval-gate hook's scope. The narrowed bypass below targets
-# only `gh pr merge` (with optional gh global flags), leaving sibling
-# patterns gated.
+# gh global flags that consume one additional argument, skipped so the
+# subcommand pair lands at the right position for `gh -R owner/repo pr merge`.
 GH_GLOBAL_FLAGS_WITH_ARG = frozenset({"-R", "--repo", "--hostname", "--color"})
 
 
@@ -191,11 +186,6 @@ def _gh_subcommand_pair(argv: list[str]) -> tuple[str, str]:
     return (group, action)
 
 
-def _is_gh_pr_merge(argv: list[str]) -> bool:
-    """Return True iff argv is `gh [global flags] pr merge ...`."""
-    return _gh_subcommand_pair(argv) == ("pr", "merge")
-
-
 # Flag-aware gh detector: maps a (group, {actions}) subcommand pair to the
 # CATEGORIES key it triggers. Replaces the fixed-position argv_matches walk
 # for gh so leading global flags can no longer shift the subcommand out of
@@ -221,11 +211,9 @@ def _detect_gh(argv: list[str]) -> list[str]:
     return matched
 
 
-def detect(argv: list[str], delegate_bypass: bool = False) -> list[str]:
+def detect(argv: list[str]) -> list[str]:
     argv = strip_prefix(argv)
     if not argv:
-        return []
-    if delegate_bypass and _is_gh_pr_merge(argv):
         return []
     cmd = argv[0].rsplit("/", 1)[-1]
     if cmd == "gh":
@@ -336,11 +324,9 @@ def main() -> int:
     if not tokens:
         return 0
 
-    delegate_bypass = os.environ.get("CMUX_DELEGATE") == "1"
-
     matched: list[str] = []
     for argv in iter_command_starts(tokens):
-        for cat in detect(argv, delegate_bypass=delegate_bypass):
+        for cat in detect(argv):
             if cat not in matched:
                 matched.append(cat)
 

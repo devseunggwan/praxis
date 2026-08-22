@@ -48,9 +48,9 @@ Some gates have **no** authoritative self-bypass, and surfacing a bypass would
 defeat the gate. Omit the line in those cases:
 
 - **`pre-merge-approval-gate`** — a merge approval must come from the user, not
-  from a marker the agent can attach to its own command. The only authoritative
-  signal is `CMUX_DELEGATE=1` set in the *session's* shell env at startup, which
-  is not an inline bypass the agent can self-grant.
+  from a marker the agent can attach to its own command. There is no bypass at
+  all: the gate fires in every session, so the surfaced prompt IS the approval
+  path.
 - **`block-gh-state-all`** — `--state all` is simply invalid for `gh search`;
   there is nothing to bypass, only a correct alternative.
 

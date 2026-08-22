@@ -28,7 +28,8 @@ FAILED_NAMES=()
 #     "ask"    — stdout JSON has permissionDecision "ask", rc=0
 #     "silent" — stdout empty, rc=0
 #   delegate_env:
-#     "delegate"    — run with CMUX_DELEGATE=1 set
+#     "delegate"    — run with CMUX_DELEGATE=1 set. Since #1055 this grants no
+#                     exemption; the cases below assert it is inert.
 #     "no-delegate" — run with CMUX_DELEGATE unset
 run_case() {
   local name="$1" expectation="$2" delegate="$3" payload="$4"
@@ -83,7 +84,7 @@ except Exception:
 
 echo "test_pre_merge_approval_gate"
 
-# --- Direct session (CMUX_DELEGATE unset) → ASK
+# --- Merge in any session → ASK
 
 run_case "direct session: gh pr merge --squash (ask)" \
   "ask" "no-delegate" \
@@ -97,14 +98,14 @@ run_case "direct session: gh pr merge --delete-branch (ask)" \
   "ask" "no-delegate" \
   '{"tool_name":"Bash","tool_input":{"command":"gh pr merge 99 --squash --delete-branch"}}'
 
-# --- Background agent (CMUX_DELEGATE=1) → SILENT
+# --- #1055: CMUX_DELEGATE=1 no longer exempts anything → ASK
 
-run_case "background agent: gh pr merge (silent)" \
-  "silent" "delegate" \
+run_case "CMUX_DELEGATE=1 session: gh pr merge (ask, exemption removed)" \
+  "ask" "delegate" \
   '{"tool_name":"Bash","tool_input":{"command":"gh pr merge 1"}}'
 
-run_case "background agent: gh pr merge --squash (silent)" \
-  "silent" "delegate" \
+run_case "CMUX_DELEGATE=1 session: gh pr merge --squash (ask, exemption removed)" \
+  "ask" "delegate" \
   '{"tool_name":"Bash","tool_input":{"command":"gh pr merge 1 --squash --delete-branch"}}'
 
 # --- R4-F1: marker removed — agent-attachable bypass cannot exist → ASK
@@ -147,11 +148,11 @@ run_case "direct session: quoted body with gh pr merge text (silent)" \
   "silent" "no-delegate" \
   '{"tool_name":"Bash","tool_input":{"command":"gh pr comment 1 --body \"next step: gh pr merge\""}}'
 
-# --- Inline env prefix DOES NOT satisfy CMUX_DELEGATE check → ASK
-# env CMUX_DELEGATE=1 sets the env for the child process (gh), not for this
-# hook. The hook reads its own process env, so it still sees no CMUX_DELEGATE.
+# --- Env-var prefix on the command line → ASK
+# No environment variable exempts a merge (#1055), and an inline prefix would
+# not reach the hook process anyway.
 
-run_case "inline env CMUX_DELEGATE=1 gh pr merge (ask, not a delegate session)" \
+run_case "inline env CMUX_DELEGATE=1 gh pr merge (ask)" \
   "ask" "no-delegate" \
   '{"tool_name":"Bash","tool_input":{"command":"env CMUX_DELEGATE=1 gh pr merge 1 --squash"}}'
 
@@ -203,7 +204,7 @@ run_case "direct session: gh -R repo pr merge + ack marker no longer bypasses (a
   "ask" "no-delegate" \
   '{"tool_name":"Bash","tool_input":{"command":"gh -R owner/repo pr merge 1 # merge-approval:ack"}}'
 
-run_case "inline CMUX_DELEGATE=1 gh -R owner/repo pr merge (ask, not delegate session)" \
+run_case "inline CMUX_DELEGATE=1 gh -R owner/repo pr merge (ask)" \
   "ask" "no-delegate" \
   '{"tool_name":"Bash","tool_input":{"command":"CMUX_DELEGATE=1 gh -R owner/repo pr merge 1"}}'
 

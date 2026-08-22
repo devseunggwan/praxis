@@ -266,10 +266,11 @@ run_case "time -f %E git push"      ask  "time -f %E git push origin main"
 run_case "time -o FILE kubectl"     ask  "time -o /tmp/t.log kubectl apply -f x.yaml"
 run_case "time --format= git push"  ask  "time --format=%E git push"
 
-# --- CMUX_DELEGATE bypass (round 2 — issue #180 integration) --------------
-# gh-merge category silently passes under CMUX_DELEGATE=1 so cmux-delegate
-# background agents stay end-to-end autonomous; sibling categories continue
-# to ask.
+# --- CMUX_DELEGATE is inert (issue #1055) ---------------------------------
+# #180 let the gh-merge category pass silently under CMUX_DELEGATE=1. #1055
+# removed that bypass — nothing ever set the variable, and the delegated worker
+# now runs with a live stdin, so it answers prompts like any other session.
+# These cases keep the env var set and assert every category decides normally.
 
 cmux_run() {
   local name="$1" expected="$2" command="$3"
@@ -305,31 +306,17 @@ print(json.dumps({
         echo "PASS  [$name]"; PASS=$((PASS + 1))
       fi
       ;;
-    pass)
-      # Both streams, not just stdout: a delegated bypass that silently started
-      # emitting a stderr advisory is exactly the regression this case exists to
-      # catch, and an stdout-only check reads it as a clean pass.
-      if [ -n "$out" ] || [ -n "$err" ]; then
-        echo "FAIL  [$name] expected silent pass under CMUX_DELEGATE=1, got stdout: ${out:-<empty>} stderr: ${err:-<empty>}"
-        FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
-      else
-        echo "PASS  [$name]"; PASS=$((PASS + 1))
-      fi
-      ;;
   esac
 }
 
-cmux_run "delegate gh pr merge silent"        pass "gh pr merge 1 --squash"
-cmux_run "delegate gh -R pr merge silent"     pass "gh -R owner/repo pr merge 1"
-cmux_run "delegate gh --repo pr merge silent" pass "gh --repo owner/repo pr merge 1"
-# Round 3: bypass narrowed to gh pr merge only — siblings in gh-merge category
-# (gh pr create, gh workflow run) must still ask even in delegate sessions.
+cmux_run "delegate gh pr merge now asks"      ask  "gh pr merge 1 --squash"
+cmux_run "delegate gh -R pr merge now asks"   ask  "gh -R owner/repo pr merge 1"
+cmux_run "delegate gh --repo pr merge asks"   ask  "gh --repo owner/repo pr merge 1"
 cmux_run "delegate gh pr create still asks"   ask  "gh pr create --title x --body y"
 cmux_run "delegate gh workflow run still ask" ask  "gh workflow run deploy.yml"
 cmux_run "delegate git push still asks"       ask  "git push origin main"
-# Issue #874: git-commit is ADVISE now, but the delegate bypass is scoped to
-# `gh pr merge` only — a delegate session must still SEE the commit advisory,
-# not have it silenced. `pass` here would hide the bypass widening.
+# Issue #874: git-commit is ADVISE tier — a delegate session must still SEE the
+# commit advisory on stderr, not have it silenced.
 cmux_run "delegate git commit still advises" advise "git commit -m wip"
 cmux_run "delegate kubectl apply still ask"   ask  "kubectl apply -f x.yaml"
 

@@ -175,8 +175,6 @@ approve blindly.
 
 - No readable transcript (`transcript_path` absent/unreadable) → no escalation
   (fail open). The advisory still fires.
-- `CMUX_DELEGATE=1` (background agent) → no escalation — the delegation intent
-  is the approval, mirroring `pre-merge-approval-gate`.
 - `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` → demote back to advisory only (keeps the
   stderr reminder, skips the deny). The escape hatch for a mis-scored briefing.
 - `# briefing-surfaced` in the merge command (an **in-band** marker, issue #826)
@@ -297,7 +295,7 @@ pins both channels per gate name.
 
 Default mode (no env vars): advisory for `dispatch` / `force-push`; the `merge`
 trigger blocks with `deny` only when the pre-merge briefing is incomplete
-(above), otherwise advisory. `CMUX_DELEGATE=1` background sessions never escalate.
+(above), otherwise advisory.
 
 ### Scope (Phase 1 vs Phase 2)
 
