@@ -80,15 +80,20 @@ run_case() {
   case "$mode" in
     strict)
       # Explicit legacy strict env var (deprecated but still honoured).
-      echo "$payload" | PRAXIS_ASK_END_STRICT=1 "$HOOK" >/dev/null 2>"$err_file"
+      echo "$payload" | env -u PRAXIS_ASK_END_ADVISORY PRAXIS_ASK_END_STRICT=1 "$HOOK" >/dev/null 2>"$err_file"
       ;;
     advisory)
-      # Opt-out to advisory via new env var.
-      echo "$payload" | PRAXIS_ASK_END_ADVISORY=1 "$HOOK" >/dev/null 2>"$err_file"
+      # Opt-out to advisory via new env var. Unset inherited STRICT to avoid
+      # dev-env contamination (hook precedence: STRICT > ADVISORY, so inherited
+      # STRICT would override the intended advisory mode and cause false block).
+      echo "$payload" | env -u PRAXIS_ASK_END_STRICT PRAXIS_ASK_END_ADVISORY=1 "$HOOK" >/dev/null 2>"$err_file"
       ;;
     default|*)
-      # Default is now strict — no env var override.
-      echo "$payload" | "$HOOK" >/dev/null 2>"$err_file"
+      # Default is now strict — no env var override. Both variables are unset
+      # rather than merely left absent: a dev shell exporting either one decides
+      # this case's mode instead of the default doing so, and ADVISORY=1 flips it
+      # outright (measured: 6 failures). Managing the env beats relying on absence.
+      echo "$payload" | env -u PRAXIS_ASK_END_STRICT -u PRAXIS_ASK_END_ADVISORY "$HOOK" >/dev/null 2>"$err_file"
       ;;
   esac
   rc=$?
