@@ -49,19 +49,19 @@ Advisory by default — exit 0 + stdout `{"systemMessage": ...}` JSON
 `{"decision": "block", "reason": ...}` JSON, which re-prompts the model to
 probe before stopping.
 
-| Condition                                                                                                                | Result                                  |
-| ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- |
-| Final message asserts a runtime state (running / isolation) AND the current turn has no probe tool_use                   | `[runtime-state-claim-gate]` advisory   |
+| Condition                                                                                                                                                                          | Result                                  |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| Final message asserts a runtime state (running / isolation) AND the current turn has no probe tool_use                                                                             | `[runtime-state-claim-gate]` advisory   |
 | Final message restates a verdict number (`실패 N`/`FAIL N`/bare `통과`) already stated earlier this session, WITHOUT a scope qualifier, AND the current turn has no probe tool_use | `[runtime-state-claim-gate]` advisory   |
-| Same claim, but the current turn contains a probe-class tool_use (Bash, Read, Grep, Glob, LSP, Task*, Monitor, `mcp__*`) | silent (claim is backed by observation) |
-| Final message has no runtime-state claim                                                                                 | silent                                  |
-| Verdict number restated WITH its scope qualifier in the same clause (`"1110줄 중 FAIL 0"`)                               | silent (transparent about coverage)     |
-| Verdict number appears for the first time this session (no prior mention) — or the number changed (re-measured)          | silent                                  |
-| Claim line is a question (`…돌고 있나요?`) — either kind                                                                 | silent                                  |
-| "running" claim line is future intent (`will run`, `실행하겠습니다`)                                                     | silent (intent, not state)              |
-| Line is quoted (`> …`)                                                                                                   | silent                                  |
-| `PRAXIS_RUNTIME_CLAIM_BYPASS=1`                                                                                          | silent                                  |
-| `stop_hook_active` in payload                                                                                            | silent (re-entrancy guard)              |
+| Same claim, but the current turn contains a probe-class tool_use (Bash, Read, Grep, Glob, LSP, Task*, Monitor, `mcp__*`)                                                           | silent (claim is backed by observation) |
+| Final message has no runtime-state claim                                                                                                                                           | silent                                  |
+| Verdict number restated WITH its scope qualifier in the same clause (`"1110줄 중 FAIL 0"`)                                                                                         | silent (transparent about coverage)     |
+| Verdict number appears for the first time this session (no prior mention) — or the number changed (re-measured)                                                                    | silent                                  |
+| Claim line is a question (`…돌고 있나요?`) — either kind                                                                                                                           | silent                                  |
+| "running" claim line is future intent (`will run`, `실행하겠습니다`)                                                                                                               | silent (intent, not state)              |
+| Line is quoted (`> …`)                                                                                                                                                             | silent                                  |
+| `PRAXIS_RUNTIME_CLAIM_BYPASS=1`                                                                                                                                                    | silent                                  |
+| `stop_hook_active` in payload                                                                                                                                                      | silent (re-entrancy guard)              |
 
 ## Claim model
 
