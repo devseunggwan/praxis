@@ -92,6 +92,15 @@ command contains a parseable `sleep` in command position. Launching the awaited
 work (`bash scripts/run-tests.sh > /tmp/out 2>&1`) carries no `sleep` and is
 never recorded — this lane is about waiting on work, not doing it.
 
+*Command position* is the literal rule, not a paraphrase: start of the stream,
+after a separator (`;` `&&` `||` `|` `&` `{`), or after `do` / `then` / `else` /
+`elif`. `echo sleep 20` and `some-tool sleep 20` pass `sleep` along as a word and
+wait for nothing, so neither registers a waiter. This is the same rule
+`_iter_loops` applies to `for` / `done` (`echo done` closes no loop), and it is
+applied at both sites through one helper — including inside a loop body, where
+`do echo sleep 20; done` no longer counts as a sleeping loop for the foreground
+gate either. That narrowing can only turn a block into a pass, never the reverse.
+
 **What "same target" is keyed on: the sleep-normalized command signature.** The
 three candidates the issue names are not equally usable.
 

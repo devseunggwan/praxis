@@ -175,6 +175,15 @@ run_case "quoted-loop-in-echo" pass \
 run_case "quoted-seq-no-downgrade" block \
   'for i in $(seq 1 40); do log "seq 1 2"; sleep 3; done'
 
+# ---- pass: `sleep` as an ARGUMENT is not a sleep ------------------------------
+# An unquoted `sleep` that is not in command position waits for nothing — it is
+# a word this command prints or passes along. The control below keeps the rule
+# from being read as "loops with a word-list argument never block".
+run_case "argument-sleep-in-loop-body" pass \
+  'for i in $(seq 1 40); do echo sleep 20; done'
+run_case "argument-sleep-control-still-blocks" block \
+  'for i in $(seq 1 40); do echo waiting; sleep 20; done'
+
 # ---- pass: non-Bash / malformed / empty / bypass ------------------------------
 payload='{"tool_name": "Write", "tool_input": {"file_path": "x", "content": "while true; do sleep 9; done"}}'
 err=$(echo "$payload" | "$HOOK" 2>&1 >/dev/null); rc=$?
@@ -456,6 +465,26 @@ bw_assert "waiter-ttl-override-first-launch-silent" silent "$rc" "$err"
 python3 -c 'import time; time.sleep(1.3)'
 err=$(PRAXIS_POLL_LOOP_WAITER_TTL=1 bw_run "$BW_F" bw-f "$BW_LOOP"); rc=$?
 bw_assert "waiter-ttl-override-expired-stays-silent" silent "$rc" "$err"
+
+# `sleep` counts only in command position. `echo sleep 20` prints a word and
+# waits for nothing — registering it as a waiter would advise against the next
+# genuine wait on that target. The control is the same word after a separator,
+# which IS a wait and must still advise.
+BW_K="$BW_DIR/home-k"
+err=$(bw_run "$BW_K" bw-k 'echo sleep 20 > /tmp/note.txt'); rc=$?
+bw_assert "waiter-argument-sleep-first-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_K" bw-k 'echo sleep 20 > /tmp/note.txt'); rc=$?
+bw_assert "waiter-argument-sleep-never-registers" silent "$rc" "$err"
+err=$(bw_run "$BW_K" bw-k 'some-tool sleep 20'); rc=$?
+bw_assert "waiter-argument-sleep-other-shape-first" silent "$rc" "$err"
+err=$(bw_run "$BW_K" bw-k 'some-tool sleep 20'); rc=$?
+bw_assert "waiter-argument-sleep-other-shape-silent" silent "$rc" "$err"
+
+BW_L="$BW_DIR/home-l"
+err=$(bw_run "$BW_L" bw-l 'touch /tmp/marker; sleep 60 && tail -5 /tmp/sep.log'); rc=$?
+bw_assert "waiter-separator-sleep-first-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_L" bw-l 'touch /tmp/marker; sleep 90 && tail -5 /tmp/sep.log'); rc=$?
+bw_assert "waiter-separator-sleep-advises" advise "$rc" "$err"
 
 # A FINITE `for` loop has a computable end, so it is not the open-ended shape:
 # `for i in 1 2; do sleep 1; done` returns in ~2s and must not stay armed for

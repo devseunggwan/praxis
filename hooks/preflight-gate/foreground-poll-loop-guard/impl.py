@@ -46,7 +46,9 @@ contains a poll loop that can approach/exceed the 120s ceiling:
      unit suffixes.
 
 Comments and heredoc bodies are stripped before tokenization — loop-shaped
-text bash never executes cannot trigger the gate.
+text bash never executes cannot trigger the gate. `sleep` counts only in
+command position, the same rule the loop keywords already follow: `do echo
+sleep 20; done` passes the word along and waits for nothing.
 
 Exit 0 (pass) otherwise: run_in_background=true, short bounded loops (< ~90s),
 no-sleep loops, leading `sleep` without a loop (the runtime already handles that),
@@ -220,6 +222,28 @@ def _strip_non_executable(command: str) -> str:
     return "\n".join(out)
 
 
+def _command_position_flags(tokens: list[str]) -> list[bool]:
+    """Per token: is it in command position (where bash reads a command name)?
+
+    Command position is the start of the stream, anything after a separator, and
+    the successor of a reserved word that opens a compound command (`do`,
+    `then`, `else`, `elif`) — but only when that word was itself in command
+    position, so a literal word list (`for i in do done`) cannot fake a
+    boundary.
+
+    Every rule this guard states about a bare word — `sleep`, `for`, `done` —
+    is a rule about that word in command position. `echo sleep 20` prints a
+    string; `echo done` closes nothing.
+    """
+    flags: list[bool] = []
+    grants_next = False
+    for i, tok in enumerate(tokens):
+        cmd_pos = i == 0 or tokens[i - 1] in _COMMAND_SEPARATORS or grants_next
+        grants_next = cmd_pos and tok in ("then", "else", "elif", "do")
+        flags.append(cmd_pos)
+    return flags
+
+
 def _iter_loops(tokens: list[str]) -> list[tuple[str, list[str], list[str]]]:
     """Split the token stream into (keyword, header, body) per loop.
 
@@ -233,22 +257,14 @@ def _iter_loops(tokens: list[str]) -> list[tuple[str, list[str], list[str]]]:
     loops: list[tuple[str, list[str], list[str]]] = []
     stack: list[list[int | None]] = []  # [kw_idx, do_idx]
     # Bash honours reserved words only in command position; an argument
-    # (`echo done`) must not open/advance/close a loop frame. A `do` grants
-    # command position to its successor only when it was itself reserved —
-    # tracked via `grants_next`, so a literal word list (`for i in do done`)
-    # cannot fake a boundary.
-    grants_next = False
+    # (`echo done`) must not open/advance/close a loop frame.
+    cmd_positions = _command_position_flags(tokens)
     for i, tok in enumerate(tokens):
-        cmd_pos = i == 0 or tokens[i - 1] in _COMMAND_SEPARATORS or grants_next
-        grants_next = False
-        if not cmd_pos:
+        if not cmd_positions[i]:
             continue
-        if tok in ("then", "else", "elif"):
-            grants_next = True
-        elif tok in _LOOP_KEYWORDS:
+        if tok in _LOOP_KEYWORDS:
             stack.append([i, None])
         elif tok == "do":
-            grants_next = True
             for frame in reversed(stack):
                 if frame[1] is None:
                     frame[1] = i
@@ -268,9 +284,17 @@ def _iter_loops(tokens: list[str]) -> list[tuple[str, list[str], list[str]]]:
 
 
 def _sleep_args(body: list[str]) -> list[float]:
-    """Parseable `sleep N[smhd]` arguments inside a loop body, in seconds."""
+    """Parseable `sleep N[smhd]` arguments inside a loop body, in seconds.
+
+    Command position only: `do echo sleep 20; done` sleeps for nothing. A body
+    slice always begins right after its `do`, so index 0 of the slice is itself
+    command position.
+    """
     out: list[float] = []
+    cmd_positions = _command_position_flags(body)
     for i, tok in enumerate(body[:-1]):
+        if not cmd_positions[i]:
+            continue
         if tok != "sleep" and not tok.endswith("/sleep"):
             continue
         m = _SLEEP_ARG_RE.match(body[i + 1])
@@ -403,6 +427,13 @@ def _waiter_profile(command: str) -> tuple[str, float, str] | None:
     Dropping each `sleep`'s argument, and only that argument, collapses exactly
     that family into one key.
 
+    **`sleep` counts only in command position.** `echo sleep 20` prints a word
+    and waits for nothing; matching it at any token position would register a
+    waiter for a command that does no waiting, and then advise against the next
+    genuine one. The rule is the one `_iter_loops` already applies to `for` /
+    `done` — start of stream, after a separator, or after `do` / `then` /
+    `else` / `elif`.
+
     Only the sleep argument. Dropping bare numerals generally would fold
     `gh run watch 123` and `gh run watch 456` together — two genuinely
     different targets whose sole discriminator is a bare number — and turn the
@@ -416,11 +447,12 @@ def _waiter_profile(command: str) -> tuple[str, float, str] | None:
     total_sleep = 0.0
     saw_sleep = False
     skip_next = False
+    cmd_positions = _command_position_flags(tokens)
     for i, tok in enumerate(tokens):
         if skip_next:
             skip_next = False
             continue
-        if tok != "sleep" and not tok.endswith("/sleep"):
+        if not cmd_positions[i] or (tok != "sleep" and not tok.endswith("/sleep")):
             normalized.append(tok)
             continue
         m = _SLEEP_ARG_RE.match(tokens[i + 1]) if i + 1 < len(tokens) else None
