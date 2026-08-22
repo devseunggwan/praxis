@@ -105,8 +105,9 @@ already going to block — it can never turn a pass into a deny.
   (tests; an unresolvable value exercises the fail-open escape).
 - `PRAXIS_POLL_LOOP_READ_GATE_AFTER` — prior blocks required before the read-gate
   escalates (default 2 → the 3rd block escalates). Unparseable → default.
-- `PRAXIS_POLL_LOOP_WAITER_TTL` — seconds a loop-shaped background waiter counts
-  as armed (default 900). Unparseable or ≤ 0 → default.
+- `PRAXIS_POLL_LOOP_WAITER_TTL` — seconds a background waiter with no computable
+  end (`while`/`until`, or a `for` over a dynamic list) counts as armed
+  (default 900). Unparseable or ≤ 0 → default.
 
 ## Fail-open
 
@@ -433,16 +434,44 @@ def _waiter_profile(command: str) -> tuple[str, float, str] | None:
     if not saw_sleep:
         return None
 
-    # A loop's sleep is per-iteration and the iteration count is either absent
-    # (`until`) or irrelevant to when the waiter returns, so the summed sleep
-    # is not the armed window for that shape.
-    open_ended = any(_sleep_args(body) for _kw, _header, body in _iter_loops(tokens))
-    armed = _open_ended_ttl() if open_ended else total_sleep
+    armed = _armed_window(tokens, total_sleep)
     key = hashlib.sha1("\x00".join(normalized).encode("utf-8")).hexdigest()[:16]
     display = " ".join(command.split())
     if len(display) > 120:
         display = display[:117] + "..."
     return key, armed, display
+
+
+def _armed_window(tokens: list[str], total_sleep: float) -> float:
+    """Seconds this waiter counts as armed. `total_sleep` = each `sleep` counted once.
+
+    A loop's sleep is per-iteration, so the flat sum undercounts it. When the
+    iteration count is unknowable — `while` / `until`, or a `for` over a dynamic
+    word list — there is no computable end at all and the fixed TTL is the only
+    honest window (`_open_ended_ttl`).
+
+    A `for` loop whose count IS computable is not that shape. `for i in 1 2; do
+    sleep 1; done` returns in ~2s, and arming it for 900s makes a re-launch
+    minutes later — long after it returned — report a live waiter that does not
+    exist. The same `_for_iterations` the block path already uses supplies the
+    count; the body sleeps are each counted once in `total_sleep`, so only the
+    remaining `n - 1` iterations are added.
+
+    Nested finite loops are UNDER-counted: an inner loop's sleeps appear in its
+    own entry and again in its parent's body, and the parent multiplies them
+    only once. An under-counted window expires early, which costs an advisory
+    that does not fire — the same direction every other fail-open here takes.
+    """
+    extra = 0.0
+    for kw, header, body in _iter_loops(tokens):
+        per_iteration = sum(_sleep_args(body))
+        if per_iteration <= 0:
+            continue
+        iterations = _for_iterations(header) if kw == "for" else None
+        if iterations is None:
+            return _open_ended_ttl()
+        extra += max(iterations - 1, 0) * per_iteration
+    return max(total_sleep + extra, 0.0)
 
 
 def _open_ended_ttl() -> float:

@@ -112,17 +112,30 @@ every second background call.
 
 **Armed window.** A recorded waiter counts as live for its own sleep total; past
 that it has returned and re-arming is the correct call, not a duplicate. A
-*loop-shaped* waiter has no computable end — an `until` loop's per-iteration
-sleep says nothing about when it returns — so that shape uses a fixed default
-(900s, `PRAXIS_POLL_LOOP_WAITER_TTL`). A duplicate does not refresh the existing
-entry: refreshing would push the window forward indefinitely and make the
-reported age of the original waiter a lie.
+waiter with **no computable end** — a `while`/`until` loop, or a `for` over a
+dynamic word list — uses a fixed default (900s,
+`PRAXIS_POLL_LOOP_WAITER_TTL`): an `until` loop's per-iteration sleep says
+nothing about when it returns.
+
+A **finite `for` loop is not that shape.** `for i in 1 2; do sleep 1; done`
+returns in ~2s, and arming it for 900s makes a re-launch minutes later report a
+live waiter that has long since exited. The iteration count comes from the same
+`_for_iterations` the block path uses (`seq`, `{A..B}`, C-style, literal word
+list), and the window is iterations × the body's per-iteration sleep total, plus
+any sleep outside a loop. Nested finite loops are deliberately under-counted —
+an inner loop's sleeps are multiplied only once — so the window expires early,
+costing an advisory that does not fire rather than one that fires falsely.
+
+A duplicate does not refresh the existing entry: refreshing would push the
+window forward indefinitely and make the reported age of the original waiter a
+lie.
 
 | Situation (all `run_in_background: true`) | Action |
 | --- | --- |
 | First waiter for a target | pass, recorded (exit 0, silent) |
 | Second waiter, same target, only the `sleep` duration changed | **advisory** (exit 0, `additionalContext` + stderr) |
-| Second waiter, same target, identical loop-shaped command | **advisory** |
+| Second waiter, same target, identical unbounded-loop command | **advisory** |
+| Re-launch of a finite `for` loop past its own computed total | pass (silent) |
 | Concurrent waits on different files / different run ids | pass (silent) |
 | Background call with no `sleep` at all, twice | pass (silent) |
 | Re-arm after the previous waiter's window elapsed | pass (silent) |

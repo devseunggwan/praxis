@@ -457,6 +457,31 @@ python3 -c 'import time; time.sleep(1.3)'
 err=$(PRAXIS_POLL_LOOP_WAITER_TTL=1 bw_run "$BW_F" bw-f "$BW_LOOP"); rc=$?
 bw_assert "waiter-ttl-override-expired-stays-silent" silent "$rc" "$err"
 
+# A FINITE `for` loop has a computable end, so it is not the open-ended shape:
+# `for i in 1 2; do sleep 1; done` returns in ~2s and must not stay armed for
+# the 900s TTL. Both directions are pinned — a re-launch INSIDE the computed
+# window still advises (without which "silent" would only prove the entry was
+# never recorded), and one after it has elapsed is silent.
+BW_I="$BW_DIR/home-i"
+BW_FINITE='for i in 1 2; do sleep 1; done; tail -50 /tmp/finite.log'
+err=$(bw_run "$BW_I" bw-i "$BW_FINITE"); rc=$?
+bw_assert "waiter-finite-for-first-launch-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_I" bw-i "$BW_FINITE"); rc=$?
+bw_assert "waiter-finite-for-inside-window-advises" advise "$rc" "$err"
+python3 -c 'import time; time.sleep(2.3)'
+err=$(bw_run "$BW_I" bw-i "$BW_FINITE"); rc=$?
+bw_assert "waiter-finite-for-past-own-total-stays-silent" silent "$rc" "$err"
+
+# False-positive control for the clause above: an UNBOUNDED loop over the same
+# elapsed span keeps the TTL, so the silence above is the computed window and
+# not a timing accident.
+BW_J="$BW_DIR/home-j"
+err=$(bw_run "$BW_J" bw-j "$BW_LOOP"); rc=$?
+bw_assert "waiter-unbounded-loop-first-launch-silent" silent "$rc" "$err"
+python3 -c 'import time; time.sleep(2.3)'
+err=$(bw_run "$BW_J" bw-j "$BW_LOOP"); rc=$?
+bw_assert "waiter-unbounded-loop-keeps-ttl-advises" advise "$rc" "$err"
+
 # The advisory has to reach the MODEL, not only the debug log. A PreToolUse
 # hook's stderr is fed to the model only when the dispatcher exits 2 (the deny
 # path), so on this exit-0 lane the same text is also written as
