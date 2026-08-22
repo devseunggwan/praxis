@@ -31,18 +31,44 @@ Supported hosts: all
 - `interrupted is True`이면 실패
 - `exit`가 정수 0이 아니면 실패
 - 위 항목이 없고 `error`/`stderr`에 비어있지 않은 텍스트가 있으면 실패
+  (`stderr`는 아래 harness noise 필터를 거친 뒤 판정합니다)
 - `output`/`stdout`만 있는 응답은 성공으로 처리
+
+## Harness noise 필터 (issue #1042)
+
+이 훅이 전제한 `exit` 키는 실제 Bash `tool_response`에 없습니다. 실 세션
+transcript(`~/.claude/projects/.../*.jsonl`의 `toolUseResult`, `Bash`
+tool_use)로 검증한 실제 형태는 `{stdout, stderr, interrupted, isImage,
+noOutputExpected}`이며 `exit`도 `isError`도 없습니다. 그래서 모든 Bash
+호출이 곧장 `error`/`stderr` 백업 판정으로 떨어지는데, 이 harness는 세션
+호출 사이에 shell cwd를 리셋하면서 성공/실패와 무관하게 매 호출의
+`stderr`에 `"\nShell cwd was reset to <cwd>"`를 덧붙입니다. 이 한 줄은
+실패 근거가 아니지만 백업 판정은 이를 구분하지 못했습니다.
+
+- exit-0 명령이 이 한 줄만 `stderr`에 가지고 있어도 실패로 집계됐습니다
+  (실 세션 1건에서 68회 발화, 마지막 5회 연속이 전부 exit-0 명령).
+- 정규화 후 이 문장은 명령 내용과 무관하게 항상 같은 문자열이 되어, 서로
+  무관한 호출들이 하나의 `(tool_name, signature)` 쌍·하나의 고정
+  signature(`ede370078f51`)로 수렴했습니다 — 독립된 실 세션 상태 파일
+  6개에서 모두 동일 해시로 확인.
+
+`_strip_harness_noise`가 이 줄(그리고 이 줄만)을 실패 판정과 signature
+계산 양쪽에서 사용하기 전에 `stderr`에서 제거합니다. 같은 `stderr` 안의
+다른 줄에 있는 실제 내용은 보존됩니다.
 
 ## Signature 산정
 
 `tool_response`에서 실패 텍스트 후보를 다음 순서로 추출합니다.
 
 1. `error`
-2. `stderr`
+2. `stderr` (harness noise 필터를 거친 뒤)
 3. `output`
 4. `stdout`
 
-추출 실패 시 빈 문자열을 쓰고, 실패 키를 보정합니다.
+추출 실패 시 빈 문자열을 쓰고, 실패 키를 보정합니다. `stderr`가 harness
+noise만 담고 있었다면 필터 후 빈 문자열이 되어 `output`/`stdout`으로
+넘어가므로, 진짜 구분 정보가 `stdout`에만 있는 실패(예: `interrupted:true`
+지만 `stderr`는 noise뿐인 경우)도 명령마다 다른 signature를 받습니다.
 
 동일 실패를 추정하기 위해 아래 토큰은 정규화합니다.
 
@@ -191,5 +217,12 @@ python3 -m pytest tests/test_hook_state_concurrency.py
 - `stdout`/`output`만 있는 성공 응답은 반복돼도 무음
 - 실패 텍스트의 `Reference:` 경로가 advisory와 재진술 지시에 포함됨
 - 비실패/비정상 입력은 fail-open
+- exit-0 Bash 호출이고 `stderr`가 harness cwd-reset 안내뿐이면 5회 반복해도
+  advisory 없음, 상태 파일도 생기지 않음 (issue #1042)
+- 같은 harness noise가 `stderr`에 섞여도 진짜 동일 실패 반복은 여전히
+  2회째부터 advisory (positive control — defect 1 수정이 훅 자체를
+  무력화하지 않았는지 확인)
+- `stderr`가 noise뿐이고 구분 정보가 `stdout`에만 있는 서로 다른 실패 2건은
+  서로 다른 signature를 받아 카운터가 합쳐지지 않음 (issue #1042 defect 2)
 - 두 프로세스 동시 실행: 잠금 없이는 증분 유실, 잠금 하에서는 카운트 1→2→3
   과 advisory 2회(2회째·3회째) (`tests/test_hook_state_concurrency.py`)
