@@ -41,6 +41,14 @@ Design mechanisms shared by all hooks:
     `@fail_open` to `main()` in `impl.py` directly (argv-style mains wrap
     a zero-arg `_entry()` instead). Rule 15 in
     `scripts/check-plugin-manifests.py` enforces this invariant.
+  - **Before either path — the launcher (issue #1053).** Both bullets above
+    run *inside* Python, so neither covers an impl that never starts. A
+    missing `impl.py` makes `python3` exit 2, and 2 is this repo's deny code
+    (`_dispatch.py` aggregates on `rc == 2`), so the host reads a partial
+    install as a block nobody decided. Every generated launcher therefore
+    checks `[ -f "$IMPL" ]` before `exec`. It normalizes *nothing* else:
+    flattening non-zero codes would swallow the deliberate exit 2 that every
+    gate blocks with. `tests/test_launcher_fail_open.sh` pins both halves.
 
   Shell hooks (`impl.sh`) have no Python entrypoint, so neither path
   applies to them — they carry their own `set +e` / `|| true` posture, and

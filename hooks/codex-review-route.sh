@@ -5,4 +5,8 @@
 # `exec sh impl.sh` would re-route through /bin/sh (dash on Debian)
 # and break Bash-only syntax like [[ ... =~ ... ]] used in
 # retrospect-mix-check / codex-review-route / strike-counter.
-exec "$(dirname "$0")/advisory-nudge/codex-review-route/impl.sh" "$@"
+# Absent impl means the hook cannot judge, so it must not judge — same
+# contract as the python wrapper above.
+IMPL="$(dirname "$0")/advisory-nudge/codex-review-route/impl.sh"
+[ -f "$IMPL" ] || exit 0
+exec "$IMPL" "$@"

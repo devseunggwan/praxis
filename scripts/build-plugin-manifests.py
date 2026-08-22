@@ -93,7 +93,13 @@ WRAPPER_PY_TEMPLATE = """\
 # Source: hooks/{role}/{name}/impl.py  (see ADR-0001 §2.3)
 set +e
 command -v python3 >/dev/null 2>&1 || exit 0
-exec python3 "$(dirname "$0")/{role}/{name}/impl.py" {baked_args}"$@"
+# A missing impl makes python3 exit 2, which is this repo's deny code — the
+# launcher would hand the host a block nobody decided. Absent impl means the
+# hook cannot judge, so it must not judge. Normalizing every non-zero code
+# instead would swallow the deliberate exit 2 of every gate.
+IMPL="$(dirname "$0")/{role}/{name}/impl.py"
+[ -f "$IMPL" ] || exit 0
+exec python3 "$IMPL" {baked_args}"$@"
 """
 
 WRAPPER_SH_TEMPLATE = """\
@@ -104,7 +110,11 @@ WRAPPER_SH_TEMPLATE = """\
 # `exec sh impl.sh` would re-route through /bin/sh (dash on Debian)
 # and break Bash-only syntax like [[ ... =~ ... ]] used in
 # retrospect-mix-check / codex-review-route / strike-counter.
-exec "$(dirname "$0")/{role}/{name}/impl.sh" "$@"
+# Absent impl means the hook cannot judge, so it must not judge — same
+# contract as the python wrapper above.
+IMPL="$(dirname "$0")/{role}/{name}/impl.sh"
+[ -f "$IMPL" ] || exit 0
+exec "$IMPL" "$@"
 """
 
 # ADR-0002 — single-process dispatch runner wrapper. A dispatch-group hooks.json
@@ -116,7 +126,11 @@ WRAPPER_DISPATCH_TEMPLATE = """\
 # Source: hooks/_lib/_dispatch.py  (see ADR-0002 dispatch consolidation)
 set +e
 command -v python3 >/dev/null 2>&1 || exit 0
-exec python3 "$(dirname "$0")/_lib/_dispatch.py" "$@"
+# See the per-hook wrapper above: a missing impl exits 2, which the host reads
+# as deny. A dispatch group that cannot start must fall through, not block.
+IMPL="$(dirname "$0")/_lib/_dispatch.py"
+[ -f "$IMPL" ] || exit 0
+exec python3 "$IMPL" "$@"
 """
 DISPATCH_WRAPPER_NAME = "_dispatch.sh"
 
