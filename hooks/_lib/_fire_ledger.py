@@ -496,6 +496,25 @@ def record_session_fire(hook: str, role: str, decision: str, session_id: str, to
         return False  # fail-open — never break the hook
 
 
+def _raw_needle(value: str) -> str | None:
+    """The quoted `value` as it appears in a record, or None if it cannot.
+
+    Two things this must NOT do, both of which turn the prefilter from a
+    necessary condition into a wrong one:
+
+    - Include the key and its separator. `"session_id": "x"` assumes one
+      writer's exact spacing, and a record written compactly (no space after
+      the colon) is then skipped while it should have matched.
+    - Assume the value survives JSON encoding unchanged. A quote or a
+      backslash is escaped on the way in, so the raw needle misses every
+      matching record. Such a value returns None and the caller parses every
+      line — the slow path, never the wrong one.
+    """
+    if json.dumps(value, ensure_ascii=False) != f'"{value}"':
+        return None
+    return f'"{value}"'
+
+
 def count_session_fires(hook: str, session_id: str, decision: str | None = None) -> int:
     """Count today's RICH fire records for `(hook, session_id)`; the in-session
     read path this ledger previously lacked (issue #805).
@@ -554,7 +573,26 @@ def count_session_fires(hook: str, session_id: str, decision: str | None = None)
             with os.fdopen(fd, encoding="utf-8", errors="replace") as f:
                 fd = -1  # ownership transferred to the file object
                 count = 0
+                # Substring prefilter before the parse (#1078). A matching
+                # record must contain both literals, so rejecting on them is
+                # exact — and it rejects in C. The ledger is overwhelmingly
+                # coarse records carrying `"session_id": ""`, which is why
+                # parsing every line to discard almost all of them cost 0.83s
+                # against an 87 MB day file.
+                # A matching record contains both values as quoted literals,
+                # so rejecting on them is a necessary condition — and it
+                # rejects in C. The ledger is overwhelmingly coarse records
+                # carrying an empty session_id, which is why parsing every line
+                # to discard almost all of them cost 0.83s against an 87 MB day
+                # file. `_raw_needle` returns None for a value it cannot match
+                # this way; that value falls through to the full parse.
+                needle_hook = _raw_needle(hook)
+                needle_session = _raw_needle(session_id)
                 for line in f:
+                    if needle_hook is not None and needle_hook not in line:
+                        continue
+                    if needle_session is not None and needle_session not in line:
+                        continue
                     line = line.strip()
                     if not line:
                         continue
