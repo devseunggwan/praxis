@@ -185,6 +185,82 @@ run_case silent "stop-hook-active" '{"stop_hook_active": true}'
 TRANSCRIPT="/nonexistent/transcript.jsonl"
 run_case silent "missing-transcript" '{}'
 
+# ============================================================================
+# Verdict-restatement gate (issue #1062) — PR #1058 anchor rev4 verbatim
+# shape: a verdict number ("FAIL 0") measured once with an accurate scope
+# qualifier ("348줄 중"), then restated bare across later turns while an
+# unrelated progress number (log line count) kept changing beside it.
+# build_transcript_verdict <prior_text> <prior_ts> <final_text> <final_ts> <evidence>
+# -> writes path to $TRANSCRIPT. `prior_text`/`prior_ts` seed an EARLIER turn
+# (separated by a real user message) so the claim is a cross-turn restatement,
+# not a same-message repeat.
+# ============================================================================
+build_transcript_verdict() {
+  local prior_text="$1" prior_ts="$2" final_text="$3" final_ts="$4" evidence="$5"
+  TRANSCRIPT="$(mktemp)"
+  python3 - "$TRANSCRIPT" "$prior_text" "$prior_ts" "$final_text" "$final_ts" "$evidence" <<'PY'
+import json, sys
+path, prior_text, prior_ts, final_text, final_ts, evidence = sys.argv[1:7]
+events = [
+    {"message": {"role": "user", "content": "run the suite"}},
+    {"message": {"role": "assistant", "content": [{"type": "text", "text": prior_text}]},
+     "timestamp": prior_ts},
+    {"message": {"role": "user", "content": "keep going"}},
+]
+if evidence == "bash":
+    events.append({"message": {"role": "assistant", "content": [
+        {"type": "tool_use", "name": "Bash",
+         "input": {"command": "tail -n 50 /tmp/suite.log"}}]}})
+events.append({"message": {"role": "assistant", "content": [
+    {"type": "text", "text": final_text}]}, "timestamp": final_ts})
+with open(path, "w", encoding="utf-8") as f:
+    for e in events:
+        f.write(json.dumps(e, ensure_ascii=False) + "\n")
+PY
+}
+
+# --- gap reproduction: qualified measurement, then bare restatement, no probe
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "1110줄까지 실패 0 으로 진행 중" "2026-08-20T09:21:48.000Z" \
+  none
+run_case advisory "verdict-restatement-no-qualifier" '{}'
+
+# --- false-positive control: restatement KEEPS the qualifier -> silent ------
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "1110줄 중 FAIL 0" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-restatement-qualified-stays-silent" '{}'
+
+# --- restatement WITH a fresh probe in the current turn -> silent -----------
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "실패 0 으로 진행 중" "2026-08-20T09:21:48.000Z" \
+  bash
+run_case silent "verdict-restatement-with-probe" '{}'
+
+# --- first-ever mention (no prior occurrence) -> silent ---------------------
+build_transcript_verdict \
+  "빌드를 시작합니다" "2026-08-20T09:19:36.000Z" \
+  "FAILs: 0 / SKIPPED: 0" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-first-mention-not-restatement" '{}'
+
+# --- a DIFFERENT number is not a restatement (re-measured, not repeated) ----
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "1110줄까지 실패 2" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-different-number-not-restatement" '{}'
+
+# --- bare 통과 (pass, no number) restated without qualifier ------------------
+build_transcript_verdict \
+  "12개 중 통과" "2026-08-20T09:19:36.000Z" \
+  "여전히 통과 상태로 진행 중입니다" "2026-08-20T09:21:48.000Z" \
+  none
+run_case advisory "verdict-bare-pass-restatement" '{}'
+
 echo ""
 echo "runtime-state-claim-gate: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

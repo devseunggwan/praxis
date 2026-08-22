@@ -27,6 +27,21 @@ there. This is the runtime-state sibling of
 [merge-state-claim-gate](../merge-state-claim-gate/spec.md) (#503): a Stop
 hook sees the final assistant text, the exact surface PreToolUse cannot see.
 
+**Second gap, closed by #1062**: the trigger above fires only when the USER
+asks about runtime state. The path a partial measurement actually took to a
+public surface was voluntary RE-STATEMENT, which has no firing point at all.
+PR #1058 anchor rev4: `FAILs: 0` was measured once against a 348-line log
+(6.7% of the eventual 5223-line run); the next sentence carried an accurate
+qualifier ("348줄 중 FAIL 0"), then the same number was restated 4 more times
+over ~2 minutes with the qualifier dropped, while an unrelated progress
+number (log line count: 877/1020/1110) kept changing beside it — making the
+sentence read as fresh. It reached the PR anchor as "실패 0 으로 진행 중"; the
+real failures sat 53.8% into the final log, past the measured window. This
+hook now also scans for a verdict-count claim (`실패 N` / `FAIL N` / bare
+`통과`) that was already stated earlier this session, carries no scope
+qualifier this time, and has no fresh probe in the current turn — same
+evidence gate as the claim above.
+
 ## What is emitted
 
 Advisory by default — exit 0 + stdout `{"systemMessage": ...}` JSON
@@ -37,8 +52,11 @@ probe before stopping.
 | Condition                                                                                                                | Result                                  |
 | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- |
 | Final message asserts a runtime state (running / isolation) AND the current turn has no probe tool_use                   | `[runtime-state-claim-gate]` advisory   |
+| Final message restates a verdict number (`실패 N`/`FAIL N`/bare `통과`) already stated earlier this session, WITHOUT a scope qualifier, AND the current turn has no probe tool_use | `[runtime-state-claim-gate]` advisory   |
 | Same claim, but the current turn contains a probe-class tool_use (Bash, Read, Grep, Glob, LSP, Task*, Monitor, `mcp__*`) | silent (claim is backed by observation) |
 | Final message has no runtime-state claim                                                                                 | silent                                  |
+| Verdict number restated WITH its scope qualifier on the same line (`"1110줄 중 FAIL 0"`)                                 | silent (transparent about coverage)     |
+| Verdict number appears for the first time this session (no prior mention) — or the number changed (re-measured)          | silent                                  |
 | Claim line is a question (`…돌고 있나요?`) — either kind                                                                 | silent                                  |
 | "running" claim line is future intent (`will run`, `실행하겠습니다`)                                                     | silent (intent, not state)              |
 | Line is quoted (`> …`)                                                                                                   | silent                                  |
@@ -66,6 +84,41 @@ the claim: "로컬은 건드리지 않습니다" is an isolation assertion (the 
 incident verbatim). Future/question suppressors apply to "running" only;
 "건드리지 않을 겁니다" still projects an unverified isolation guarantee and is
 gated.
+
+## Verdict-restatement model (#1062)
+
+A different claim shape from the SUBJECT+CLAIM model above: not "is X
+happening now" but "the number I already measured, said again". A claim key
+is `(kind, number)` — e.g. `fail:0`; a bare pass/fail word with no adjacent
+number (`통과`) keys as `pass:bare`.
+
+- **Verdict vocabulary**: a count directly adjacent (≤6 non-digit chars) to
+  `FAIL(s)`/`fail(ed)`/`실패`/`오류`/`에러`/`error` (kind `fail`), or to
+  `PASS(ED)`/`통과`/`성공`/`success` (kind `pass`), in either order
+  (`"FAILs: 0"`, `"0 FAILED"`, `"실패 0"`, `"0건 실패"`). A standalone `N건`
+  with no fail/pass word nearby is deliberately **not** matched — too broad
+  ("이슈 3건" is not a verdict count) — this stays scoped to the vocabulary the
+  issue named, no invented generic-count abstraction.
+- **Scope qualifier**: a line carrying `"N줄 중"` / `"of N lines"` / `"N/M"` /
+  `"N%"` is transparent about what was actually covered and stays silent
+  even when the number was already stated — this is what keeps the
+  motivating incident's own first restatement ("348줄 중 FAIL 0") silent.
+- **Prior-mention scan**: run over the **whole transcript before the current
+  turn** (not the sibling's turn/window scoping) — the incident's
+  restatements spanned several turns, each ending its own Stop event, so a
+  turn-scoped or 80-event-scoped prior-mention check would miss the earlier
+  turns entirely. A claim only fires when its key was already stated
+  earlier in the session, qualified or not.
+- **Elapsed-time message**: the advisory names how many minutes ago the
+  claim key was first stated (`ISO8601` transcript timestamps compared as
+  strings for the minimum, parsed with `datetime` for the delta); "unknown"
+  when either timestamp is missing (older transcripts, or a test fixture
+  that omits `timestamp`) rather than fabricating a number.
+- **Evidence gate is shared** with the SUBJECT+CLAIM model: a probe-class
+  tool_use anywhere in the current turn silences both claim kinds together,
+  since both conditions are computed before that gate is checked and folded
+  into one `systemMessage`/`block` emission (never two JSON blobs on one
+  Stop call).
 
 ## Evidence model
 
