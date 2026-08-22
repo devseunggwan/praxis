@@ -1,39 +1,25 @@
 #!/usr/bin/env python3
 """PreToolUse(Bash) guard: require explicit user approval before `gh pr merge`.
 
-Direct interactive Claude sessions MUST receive per-PR merge approval from the
-user — merge is shared-state and irreversible. Background cmux-delegate agents
-(identified by CMUX_DELEGATE=1 in their shell environment) may merge without an
-extra confirmation gate because the task prompt already carries the delegation
-intent.
+Every Claude session MUST receive per-PR merge approval from the user — merge
+is shared-state and irreversible.
 
 Detection: tokenizes the Bash command with the praxis shlex pipeline and scans
-for any segment whose argv[0..2] == ("gh", "pr", "merge"). If found:
+for any segment whose argv[0..2] == ("gh", "pr", "merge"). If found, emit
+permissionDecision "ask" so Claude Code surfaces a confirmation dialog before
+executing the merge.
 
-  - CMUX_DELEGATE=1 in the hook's own env → silent pass-through (background
-    agent; the delegation intent is the approval).
-  - Otherwise → emit permissionDecision "ask" so Claude Code surfaces a
-    confirmation dialog before executing the merge.
-
-No opt-out marker is provided. Issue #180's contract is that direct sessions
-ALWAYS surface a per-PR approval prompt — an agent-attachable comment marker
-would let the agent silently self-bypass the same gate it is meant to enforce.
-The only authoritative bypass is CMUX_DELEGATE=1 set in the *session's* shell
-env at startup (see note below); inline `env CMUX_DELEGATE=1 gh pr merge` does
-not satisfy this because the hook reads its own process env, not the child's.
-
-Note on inline env prefix (`env CMUX_DELEGATE=1 gh pr merge ...`):
-The hook reads its OWN process environment, not the environment of the child
-command. An inline `env CMUX_DELEGATE=1` prefix only sets the env for the child
-command, NOT for this hook process. Therefore `env CMUX_DELEGATE=1 gh pr merge`
-issued from a non-delegate session still triggers the approval gate. This is
-intentional — the only authoritative delegation signal is CMUX_DELEGATE=1 set
-in the session's shell environment at startup.
+No opt-out marker and no environment bypass are provided. Issue #180's contract
+is that a merge ALWAYS surfaces a per-PR approval prompt — an agent-attachable
+comment marker would let the agent silently self-bypass the same gate it is
+meant to enforce. The background-agent exemption that #180 originally carved out
+was removed in #1055: a delegated worker now runs as an ordinary session with a
+live stdin, so the human at the pane answers the prompt just as in a direct
+session.
 """
 from __future__ import annotations
 
 import json
-import os
 import sys
 import sys as _sys
 from pathlib import Path as _Path
@@ -67,8 +53,7 @@ REASON = format_block(
     correct_path="confirm this merge when the dialog surfaces; approval is "
         "per-PR and does not transfer to sibling/companion PRs",
     # No agent-attachable bypass by design — a self-bypass would defeat the
-    # gate. The only authoritative signal is CMUX_DELEGATE=1 set in the
-    # session's shell env at startup (background cmux-delegate agents).
+    # gate.
     bypass_env=None,
     reference="CLAUDE.md → Pre-Merge Reporting / No Approval Transfer Across "
         "Companion PRs; docs/hook/pre-merge-approval-gate.md",
@@ -130,12 +115,6 @@ def main() -> int:
 
     found = any(is_gh_pr_merge(argv) for argv in iter_command_starts(tokens))
     if not found:
-        return 0
-
-    # Background cmux-delegate agents carry CMUX_DELEGATE=1 in their env.
-    # This is the hook's OWN env — inline `env CMUX_DELEGATE=1 gh pr merge`
-    # does NOT satisfy this check (see module docstring).
-    if os.environ.get("CMUX_DELEGATE") == "1":
         return 0
 
     emit_ask(REASON + compound_cascade_hint(command))

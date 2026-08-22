@@ -952,9 +952,9 @@ notverified_count_case
 run_merge_escalation_case "merge_escalation_trivial_pr_exempt" \
   "no" "" "momentum-merge-trivial.jsonl"
 
-# Background delegate session → no escalation (mirror pre-merge-approval-gate).
-run_merge_escalation_case "merge_escalation_delegate_skips" \
-  "no" "CMUX_DELEGATE=1" "momentum-merge-incomplete.jsonl"
+# Issue #1055: CMUX_DELEGATE=1 is inert — an incomplete briefing still denies.
+run_merge_escalation_case "merge_escalation_delegate_no_longer_skips" \
+  "yes" "CMUX_DELEGATE=1" "momentum-merge-incomplete.jsonl"
 
 # Demote-to-advisory escape hatch → no deny, advisory still fires.
 run_merge_escalation_case "merge_escalation_advisory_env_demotes" \

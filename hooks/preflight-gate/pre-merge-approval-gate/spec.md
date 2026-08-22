@@ -3,21 +3,25 @@
 Supported hosts: all
 
 `hooks/pre-merge-approval-gate.py` fires on every PreToolUse(Bash) event and
-intercepts `gh pr merge` invocations. In direct interactive Claude sessions the
-gate emits `permissionDecision: "ask"` so the user sees the merge attempt and
-must approve it in the Claude Code permission UI. Background cmux-delegate
-agents (identified by `CMUX_DELEGATE=1` in their shell environment) pass
-through silently — the delegation intent from the task prompt already carries
-the authorization.
+intercepts `gh pr merge` invocations. The gate emits
+`permissionDecision: "ask"` so the user sees the merge attempt and must approve
+it in the Claude Code permission UI. This applies to every session — there is
+no environment-variable exemption.
 
 ### Why this exists
 
 Merge is shared-state and irreversible. A task prompt containing a
-"fire-and-forget" or "no STOP gate" directive — intended for background agents
-dispatched via `cmux-delegate` — can bleed into direct interactive sessions
-that mistakenly apply the same exemption. This hook removes the exemption
-ambiguity by making the environment variable (`CMUX_DELEGATE=1`) the sole
-signal for the background-agent path.
+"fire-and-forget" or "no STOP gate" directive — historically written for agents
+dispatched via `cmux-delegate` — can bleed into a session where the user is
+actively reading responses. This hook removes the ambiguity by gating every
+`gh pr merge` unconditionally: no directive in a prompt can stand in for the
+per-PR approval.
+
+Issue #180 originally paired this gate with a `CMUX_DELEGATE=1` background-agent
+exemption. Issue #1055 removed it. Nothing in the repository ever set that
+variable, and the delegated worker now runs with a live stdin (#1054 item A /
+PR #1057), so a prompt surfaced inside a delegated pane is answered by the same
+human — the premise "the delegation intent is the approval" no longer holds.
 
 The per-PR approval rule is already codified in the global `~/.claude/CLAUDE.md` (`No
 Approval Transfer Across Companion PRs` and `Pre-Merge Reporting`). This hook
@@ -28,9 +32,8 @@ is not retrieved.
 
 | Scenario | Action |
 | ---------- | -------- |
-| Direct session (no `CMUX_DELEGATE`), any `gh pr merge` | `permissionDecision: "ask"` |
-| Background agent (`CMUX_DELEGATE=1`), any `gh pr merge` | silent pass-through |
-| Inline `env CMUX_DELEGATE=1 gh pr merge` from direct session | `ask` — inline env sets the child's env, not the hook's own env |
+| Any session, any `gh pr merge` | `permissionDecision: "ask"` |
+| Any env-var prefix (`env FOO=1 gh pr merge`) | `ask` — no environment variable exempts a merge |
 | `# merge-approval:ack` marker (or any comment text) | `ask` — no agent-attachable bypass exists by design |
 | Non-merge gh commands (`gh pr view`, `gh pr list`, etc.) | silent pass-through |
 | `git commit -m "merge note"` (merge in message, not a gh call) | silent pass-through |
@@ -47,26 +50,15 @@ is not retrieved.
    #985) — value-flag values are skipped, so `--subject -h` still triggers.
    Heredoc bodies are blanked by `safe_tokenize` for the same reason: a commit
    message quoting `gh pr merge` is prose, not a merge.
-5. If `CMUX_DELEGATE=1` in the hook's own process env → pass.
-6. Otherwise → emit `permissionDecision: "ask"`.
-
-### Inline env limitation (known)
-
-The hook reads its **own** process environment, not the child's. An inline
-`env CMUX_DELEGATE=1 gh pr merge` prefix only sets `CMUX_DELEGATE` for the
-child `gh` process — the hook process sees no `CMUX_DELEGATE`. This is
-intentional: the only authoritative delegation signal is `CMUX_DELEGATE=1`
-set in the session's shell environment at startup (e.g. by `cmux-delegate`
-when spawning the agent workspace).
+5. Emit `permissionDecision: "ask"`.
 
 ### No opt-out marker (deliberate)
 
 Unlike `side-effect-scan` (`# side-effect:ack`), this hook has **no
-agent-attachable bypass**. Issue #180's contract is that direct sessions
-ALWAYS surface a per-PR approval prompt — a comment-style marker would let
-the agent silently self-bypass the same gate it is meant to enforce. The
-only authoritative bypass is `CMUX_DELEGATE=1` in the *session's* shell env
-at startup; inline `env CMUX_DELEGATE=1` does not satisfy this (see above).
+agent-attachable bypass** and, since #1055, no environment bypass either. The
+contract is that a merge ALWAYS surfaces a per-PR approval prompt — a
+comment-style marker would let the agent silently self-bypass the same gate it
+is meant to enforce.
 
 If a legitimate direct-session merge must proceed, approve the surfaced
 prompt — that single confirmation is the approval the rule requires.
@@ -98,8 +90,9 @@ chained side-effects abort with the merge. Single-command merges (just
 bash tests/test_pre_merge_approval_gate.sh
 ```
 
-Covers direct-session ASK paths (bare, `--merge`, `--delete-branch`),
-background-agent SILENT paths, non-merge command SILENT paths,
+Covers ASK paths (bare, `--merge`, `--delete-branch`), ASK under
+`CMUX_DELEGATE=1` (regression guard for the #1055 exemption removal),
+non-merge command SILENT paths,
 chained-command ASK paths, quoted-body SILENT (text mentions "gh pr merge"
 but is not executed), inline-env ASK, non-Bash tool SILENT, malformed-JSON
 SILENT, `gh -R/--repo/--hostname/--color` global-flag handling, and
