@@ -145,7 +145,11 @@ Inherits `safe_tokenize` / `iter_command_starts` / `strip_prefix` from
 - Second `-m` flag is body, not title — `git commit -m "short" -m "long body"`
   only checks the first `-m` value.
 - Subshells (`$(...)`) are opaque — acknowledged limitation shared with all
-  sibling hooks.
+  sibling hooks. A title that OPENS one is measured only when the raw command
+  shows it came from a single-quoted run, where the shell substitutes nothing.
+  The match is by value, so when the same text appears both single- and
+  double-quoted (`echo '$(x)'; git commit -m "$(x)"`) neither run can be
+  attributed to the title and the gate stays silent (issue #1036).
 - **Literal newline inside a single quoted `-m` value bypasses the check.**
   `git commit -m "Title<newline>Body"` (where `<newline>` is an unescaped LF
   character inside the quoted string) is split by `_hook_utils.safe_tokenize`'s

@@ -252,8 +252,78 @@ def test_another_segments_substitution_does_not_reach_the_title(command, expecte
     assert _titles_from_all_segments(command) == expected
 
 
+@pytest.mark.parametrize(
+    "command, expected",
+    [
+        # The reported case: the SAME text quoted both ways. Nothing in the
+        # token stream says which run produced the title, so its value is
+        # genuinely unknown and the gates must stay silent (issue #1036).
+        # Before the fix the earlier single-quoted run made this read as a
+        # literal and the format gate blocked a legitimate commit.
+        ("""echo '$(x)'; git commit -m "$(x)\"""", []),
+        ("""git commit -m "$(x)" && echo '$(x)'""", []),
+        ("echo '`x`'; git commit -m \"`x`\"", []),
+        # Positive control — a title that IS a single-quoted literal keeps
+        # being graded. Without it the change above is indistinguishable from
+        # disabling literal detection outright.
+        ("""echo "$(y)"; git commit -m '$(x) title'""", ["$(x) title"]),
+    ],
+)
+def test_same_text_quoted_both_ways_is_unknowable(command, expected):
+    assert _titles_from_all_segments(command) == expected
+
+
+def test_value_disqualification_also_silences_the_mirror_case():
+    """Pins the cost of matching by value: here the title IS the literal and
+    the double-quoted run is another segment's, yet the gates stay silent.
+    Closing this needs source spans; silence is the fail-open direction, so the
+    residual is recorded rather than fixed."""
+    command = """git commit -m '$(x)' && echo "$(x)\""""
+    assert _titles_from_all_segments(command) == []
+
+
 def test_argv_only_callers_keep_the_conservative_behaviour():
     """Without the raw command there is nothing to disambiguate with, so the
     opener alone still suppresses — old callers must not start hard-blocking."""
     assert extract_git_titles(["git", "commit", "-m", "$(literal) title"]) == []
     assert extract_git_titles(["git", "commit", "-m", "$(literal) title"], None) == []
+
+
+# ---------------------------------------------------------------------------
+# 7. Value-disqualification ignores regions the shell never executes
+# ---------------------------------------------------------------------------
+#
+# `_quoted_runs` used to scan the whole raw command, including a trailing
+# comment and a heredoc body — text the shell parses as data, not code. A
+# double-quoted run living in either region disqualified a genuine
+# single-quoted literal title, silencing the gates on a title they should
+# have graded (issue #1036 follow-up).
+
+def test_comment_double_quote_does_not_disqualify_the_literal():
+    # The `#` starts a real comment here (preceded by whitespace), so its
+    # double-quoted run never executes and must not cancel the literal.
+    command = """git commit -m '$(x)' # "$(x)\""""
+    assert _titles_from(command) == ["$(x)"]
+
+
+def test_comment_at_the_start_of_a_continuation_line():
+    # A `#` that opens a fresh physical line is a boundary too, even though
+    # `_starts_unquoted_comment`'s callers only ever see one line at a time.
+    command = "echo hi\n# \"$(x)\"\ngit commit -m '$(x)'"
+    assert _titles_from_all_segments(command) == ["$(x)"]
+
+
+def test_heredoc_body_double_quote_does_not_disqualify_the_literal():
+    # The double-quoted text lives inside a heredoc body (data written to a
+    # file), not inside any executed shell segment.
+    command = "cat <<'EOF' > /tmp/x\n\"$(x)\"\nEOF\ngit commit -m '$(x)'"
+    assert _titles_from_all_segments(command) == ["$(x)"]
+
+
+def test_mirror_case_residual_is_unaffected_by_the_region_exclusion():
+    """The comment/heredoc fix must not touch the documented residual: a
+    double-quoted run in a SIBLING executed segment still disqualifies the
+    literal by value, because closing that needs source spans this PR does
+    not add."""
+    command = """git commit -m '$(x)' && echo "$(x)\""""
+    assert _titles_from_all_segments(command) == []

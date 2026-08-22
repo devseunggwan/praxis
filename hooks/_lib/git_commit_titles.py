@@ -30,7 +30,11 @@ from pathlib import Path as _Path
 # here too keeps the module self-contained (e.g. when imported directly by a
 # differential test) without depending on the importer's path setup.
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
-from _hook_utils import strip_prefix  # type: ignore[import-not-found]  # noqa: E402
+from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    _starts_unquoted_comment,
+    strip_heredoc_bodies,
+    strip_prefix,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -133,19 +137,32 @@ def strip_git_global_flags(argv: list[str]) -> tuple[list[str], str | None]:
     return argv[i:], c_dir
 
 
-def _single_quoted_runs(command: str) -> list[str]:
-    """Every single-quoted run in `command`, contents only, in source order.
+def _quoted_runs(command: str) -> list[tuple[str, str]]:
+    """Every quoted run in `command` as `(quote_char, contents)`, in source order.
 
     A single-quoted run is the one place the shell substitutes nothing at all,
     so its contents reach the tokenizer byte-for-byte. That property is what
     lets the caller below match a token back to its source without tracking
     positions through the tokenizer.
 
-    Double-quoted spans and backslash escapes are walked so their quotes cannot
-    open or close a run: `"it's"` holds no single-quoted run, and neither does
-    `\\'`.
+    Double-quoted runs are reported too, and for the opposite reason: their
+    contents are what the shell *does* substitute, so a title that also appears
+    as one cannot be attributed to the single-quoted run by value alone.
+
+    Each quote style is walked while inside the other, so a quote character
+    that is data cannot open or close a run: `"it's"` holds no single-quoted
+    run, and neither does `\\'`.
+
+    Two regions the shell never executes are excluded first, so a quote there
+    cannot disqualify a literal title that lives in the real command:
+    heredoc bodies (blanked via the shared `strip_heredoc_bodies`, same as
+    `safe_tokenize` uses) and unquoted `#…` comments, whose word-boundary rule
+    is the shared `_starts_unquoted_comment` so this scanner and
+    `_quote_open_at_eol` cannot disagree on where a comment starts (issue
+    #1036 follow-up).
     """
-    runs: list[str] = []
+    command = strip_heredoc_bodies(command)
+    runs: list[tuple[str, str]] = []
     quote = ""
     start = 0
     i, n = 0, len(command)
@@ -153,7 +170,7 @@ def _single_quoted_runs(command: str) -> list[str]:
         ch = command[i]
         if quote == "'":
             if ch == "'":
-                runs.append(command[start:i])
+                runs.append((quote, command[start:i]))
                 quote = ""
             i += 1
             continue
@@ -162,14 +179,21 @@ def _single_quoted_runs(command: str) -> list[str]:
             continue
         if quote == '"':
             if ch == '"':
+                runs.append((quote, command[start:i]))
                 quote = ""
             i += 1
             continue
-        if ch == '"':
-            quote = ch
-            i += 1
+        # `_starts_unquoted_comment`'s word-boundary set has no newline in it
+        # because its two callers only ever see one physical line at a time;
+        # this scanner walks the whole multi-line command, so a `#` right
+        # after a line break is a boundary here too, even though the shared
+        # helper alone cannot see it.
+        at_line_start = i == 0 or command[i - 1] == "\n"
+        if ch == "#" and (at_line_start or _starts_unquoted_comment(command, i)):
+            nl = command.find("\n", i)
+            i = n if nl == -1 else nl
             continue
-        if ch == "'":
+        if ch in ("'", '"'):
             quote = ch
             start = i + 1
             i += 1
@@ -195,13 +219,33 @@ def _title_is_single_quoted_literal(command: str, title: str) -> bool:
     Matching the token against the runs needs no position tracking through the
     tokenizer and is unaffected by anything in another segment.
 
-    Residual, stated because the match is by value rather than by position: a
-    command that quotes the SAME text both ways — `echo '$(x)'; git commit -m
-    "$(x)"` — reads as literal here. The direction of that error is to grade a
-    title the shell expanded, so the gates speak up rather than fall silent;
-    closing it needs raw source spans, which the tokenizer does not carry.
+    Because the match is by value, a command that quotes the SAME text both
+    ways — `echo '$(x)'; git commit -m "$(x)"` — offers two source runs that
+    tokenize identically, and nothing in the token stream says which one this
+    title came from. That is not a literal we failed to recognise; it is a
+    title whose value is genuinely unknown at hook time, so the double-quoted
+    run disqualifies the match and the gates stay silent (issue #1036). Reading
+    it as a literal instead graded a title the shell expands, which blocked a
+    legitimate commit.
+
+    The disqualification is by value, so it also silences the mirror case —
+    `git commit -m '$(x)' && echo "$(x)"`, where the title really is the
+    literal and the double-quoted run belongs to another EXECUTED segment.
+    Separating those two needs the source spans the tokenizer discards.
+    Silence is the fail-open direction and the one this repo chooses for a
+    gate, so that residual is pinned by test rather than closed.
+
+    A narrower case IS closed: `_quoted_runs` excludes comments and heredoc
+    bodies before matching, so `git commit -m '$(x)' # "$(x)"` and a `"$(x)"`
+    sitting inside an unrelated heredoc body no longer disqualify the literal
+    — neither region is code the shell ever runs, so a quoted run found there
+    cannot be "the other segment" the mirror-case paragraph above is about
+    (issue #1036 follow-up).
     """
-    return title in _single_quoted_runs(command)
+    runs = _quoted_runs(command)
+    single = any(q == "'" and body == title for q, body in runs)
+    double = any(q == '"' and body == title for q, body in runs)
+    return single and not double
 
 
 def title_is_unresolved_substitution(title: str, command: str | None = None) -> bool:
