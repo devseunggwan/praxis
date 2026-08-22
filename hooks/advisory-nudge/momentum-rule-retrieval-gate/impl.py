@@ -825,7 +825,9 @@ def _merge_escalation_reason(payload: dict) -> str | None:
             correct_path="surface the 6-item briefing and an explicit 'Approve "
                 "merge?' question in this turn, then re-run the merge",
             bypass_env=MERGE_ADVISORY_ENV,
-            bypass_reason_hint="with a one-line reason",
+            bypass_reason_hint="with a one-line reason — set in the session "
+                "environment, since an inline `VAR=1 gh pr merge …` prefix "
+                "never reaches this hook",
             reference="CLAUDE.md → Pre-Merge Reporting; "
                 "hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md",
         )
@@ -839,9 +841,10 @@ def _merge_escalation_reason(payload: dict) -> str | None:
         correct_path="surface the 6-item briefing and an explicit 'Approve "
             "merge?' question, then re-run the merge",
         bypass_env=MERGE_ADVISORY_ENV,
-        bypass_reason_hint="with a one-line reason — or, where the env var "
-            "cannot reach the hook (bridge-session harness), append "
-            "`# briefing-surfaced: <reason>` to the merge command",
+        bypass_reason_hint="with a one-line reason, set in the session "
+            "environment (an inline `VAR=1 gh pr merge …` prefix never reaches "
+            "this hook) — or append `# briefing-surfaced: <reason>` to the "
+            "merge command",
         reference="CLAUDE.md → Pre-Merge Reporting; "
             "hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md",
     )

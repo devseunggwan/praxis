@@ -299,7 +299,7 @@ pins both channels per gate name.
 | Variable | Effect |
 | ---------- | -------- |
 | `PRAXIS_MOMENTUM_BYPASS=1` | Skip all output and exit 0 immediately (for scripted batch operations) |
-| `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` | Demote the merge-briefing escalation to advisory only (stderr reminder still fires, no `deny`). See also the in-band `# briefing-surfaced` command marker (issue #826) for harnesses where this env var cannot reach the hook |
+| `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` | Demote the merge-briefing escalation to advisory only (stderr reminder still fires, no `deny`). Read from the hook process env, so it must be set in the **session** environment — an inline `VAR=1 gh pr merge …` prefix never reaches the hook, and the deny message says so (issue #1087). See also the in-band `# briefing-surfaced` command marker (issue #826) |
 | `PRAXIS_MOMENTUM_STRICT=1` | Exit 2 (block) instead of exit 0, unless `PRAXIS_MOMENTUM_ACK=1` is also set |
 | `PRAXIS_MOMENTUM_ACK=1` | Acknowledge the surface in strict mode; exit 0 after emitting the advisory |
 

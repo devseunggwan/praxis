@@ -729,6 +729,25 @@ run_merge_escalation_case "merge_escalation_sentence_approval_en_passes" \
 run_merge_escalation_case "merge_escalation_trailing_instruction_denies" \
   "yes" "" "momentum-merge-sentence-trailing-instruction.jsonl" "gh pr merge 833 --squash"
 
+# The deny message must not present the env bypass as an inline prefix (issue
+# #1087). The hook is spawned by the harness, not as a child of the command, so
+# `PRAXIS_MOMENTUM_MERGE_ADVISORY=1 gh pr merge …` can never reach it — guidance
+# that reads as runnable sends the author down a path that always fails.
+deny_msg=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "tool_name": "Bash",
+    "tool_input": {"command": "gh pr merge 833 --squash"},
+    "transcript_path": sys.argv[1],
+    "session_id": "test-momentum-merge",
+}))' "$FIXTURES_DIR/momentum-merge-substantive-reply.jsonl" | python3 "$HOOK" 2>&1)
+if printf '%s' "$deny_msg" | grep -q 'session environment'; then
+  echo "PASS  [merge_escalation_deny_names_env_reachability]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [merge_escalation_deny_names_env_reachability] msg=<$deny_msg>"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("merge_escalation_deny_names_env_reachability")
+fi
+
 # Last user message is a substantive instruction, not an approval reply → no
 # window extension → deny.
 run_merge_escalation_case "merge_escalation_substantive_reply_denies" \
