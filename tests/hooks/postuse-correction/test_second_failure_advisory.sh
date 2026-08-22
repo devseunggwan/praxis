@@ -18,6 +18,8 @@
 #  12) 3회째 이상도 계속 advisory (회차 번호 포함) — issue #1012
 #  12b) 첫 회는 여전히 무음 (반대 방향 control)
 #  13) interrupted 응답은 실패로 판정
+#  14) exit-0 Bash 호출(stderr가 harness cwd-reset 안내뿐) -> advisory 없음 (issue #1042)
+#  15) harness noise가 섞여도 동일 실패 반복은 여전히 advisory (positive control)
 #
 # Run:
 #   bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
@@ -471,6 +473,99 @@ if [ "$rc" -eq 0 ] && [ -z "$err" ] && assert_match "2회째" "$out"; then
   assert_pass "13) interrupted response counts as a failure"
 else
   assert_fail "13) interrupted response counts as a failure" "rc=$rc out=[$out] err=[$err]"
+fi
+
+# ---------------------------------------------------------------------------
+# Case 14: exit-0 Bash calls whose only `stderr` is the harness's own
+# cwd-reset notice must never advise (issue #1042).
+#
+# `{stdout, stderr, interrupted, isImage, noOutputExpected}` — no `exit`, no
+# `isError` — is the real `tool_response` shape for a Bash call in this
+# harness (verified against live session `toolUseResult` transcripts); every
+# one of those calls carries `"stderr": "\nShell cwd was reset to <cwd>"`
+# regardless of success. Before the fix, five structurally unrelated exit-0
+# commands in a row (a heredoc, `grep -l`, `head`, a heredoc `cat >`, another
+# heredoc) fired the advisory 4 times running, all under the identical
+# signature `ede370078f51` — reproduced byte-for-byte against the pre-fix
+# code in this exact payload shape.
+# ---------------------------------------------------------------------------
+echo "=== case 14: exit-0 Bash call, harness-noise-only stderr => no advisory ==="
+noise_payload() {
+  # noise_payload <session_id> <stdout>
+  python3 - "$1" "$2" <<'PY'
+import json, sys
+session_id, stdout = sys.argv[1], sys.argv[2]
+print(json.dumps({
+    "session_id": session_id,
+    "tool_name": "Bash",
+    "tool_input": {"command": "irrelevant"},
+    "tool_response": {
+        "stdout": stdout,
+        "stderr": "\nShell cwd was reset to /Users/x/projects/praxis",
+        "interrupted": False,
+        "isImage": False,
+        "noOutputExpected": False,
+    },
+}))
+PY
+}
+
+STATE16="$TMP_DIR/c16.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+for stdout_text in "OK\n" "README.md\n" "line1\nline2\n" "-rw-r--r-- 1 f\n" "index updated\n"; do
+  pipe_hook "$(noise_payload sess-1042-exit0 "$stdout_text")" "$STATE16" >"$out_file" 2>"$err_file"
+done
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -s "$STATE16" ]; then
+  assert_pass "14) five exit-0 calls with only harness-noise stderr stay silent"
+else
+  assert_fail "14) five exit-0 calls with only harness-noise stderr stay silent" \
+    "rc=$rc out=[$out] err=[$err] state=[$(cat "$STATE16" 2>/dev/null)]"
+fi
+
+# ---------------------------------------------------------------------------
+# Case 15: regression / positive control — two genuine repeats of the SAME
+# real failure pattern must still advise on the 2nd occurrence, even with
+# the harness-noise line appended to `stderr` (the defect-1 fix must not
+# disable the hook outright).
+# ---------------------------------------------------------------------------
+echo "=== case 15: genuine repeated failure (harness-noise stderr suffix) still advises ==="
+real_failure_payload() {
+  # real_failure_payload <session_id>
+  python3 - "$1" <<'PY'
+import json, sys
+session_id = sys.argv[1]
+print(json.dumps({
+    "session_id": session_id,
+    "tool_name": "Bash",
+    "tool_input": {"command": "python3 script.py"},
+    "tool_response": {
+        "stdout": "",
+        "stderr": "TypeError: unsupported operand type(s)\nShell cwd was reset to /Users/x/projects/praxis",
+        "interrupted": False,
+        "isImage": False,
+        "noOutputExpected": False,
+    },
+}))
+PY
+}
+
+STATE17="$TMP_DIR/c17.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(real_failure_payload sess-1042-real-fail)" "$STATE17" >/dev/null 2>/dev/null
+pipe_hook "$(real_failure_payload sess-1042-real-fail)" "$STATE17" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "15) genuine repeated failure still advises past harness-noise stripping"
+else
+  assert_fail "15) genuine repeated failure still advises past harness-noise stripping" \
+    "rc=$rc out=[$out] err=[$err]"
 fi
 
 echo
