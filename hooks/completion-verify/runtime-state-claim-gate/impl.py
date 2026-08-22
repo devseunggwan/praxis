@@ -326,14 +326,15 @@ def collect_prior_verdict_mentions(prior_events: list[dict]) -> dict[str, str | 
 
 
 def _last_assistant_timestamp(turn: list[dict]) -> str | None:
-    ts: str | None = None
-    for ev in turn:
+    # The elapsed time must belong to the message the gate is scoring, so a
+    # final event without a timestamp is `unknown` — not the last event that
+    # happened to carry one, which reports an older, wrong elapsed.
+    for ev in reversed(turn):
         msg = ev.get("message", {})
         if isinstance(msg, dict) and msg.get("role") == "assistant" and not ev.get("isSidechain"):
             t = ev.get("timestamp")
-            if isinstance(t, str) and t:
-                ts = t
-    return ts
+            return t if isinstance(t, str) and t else None
+    return None
 
 
 def _elapsed_minutes(ts_from: str | None, ts_to: str | None) -> str:

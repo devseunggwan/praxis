@@ -339,6 +339,34 @@ build_transcript_verdict \
   none
 run_case silent "verdict-same-clause-qualifier-stays-silent" '{}'
 
+# --- elapsed time belongs to the scored message, not an older one ----------
+# A final event carrying no timestamp fell back to an EARLIER assistant event
+# in the same turn, so the advisory reported that event's age ("1 min ago")
+# instead of "unknown". Needs TWO assistant events in the turn to discriminate.
+TRANSCRIPT="$(mktemp)"
+python3 - "$TRANSCRIPT" <<'PY_T'
+import json, sys
+events = [
+    {"message": {"role": "user", "content": "run the suite"}},
+    {"message": {"role": "assistant", "content": [{"type": "text", "text": "348줄 중 FAIL 0"}]},
+     "timestamp": "2026-08-20T09:19:36.000Z"},
+    {"message": {"role": "user", "content": "keep going"}},
+    {"message": {"role": "assistant", "content": [{"type": "text", "text": "계속 진행합니다"}]},
+     "timestamp": "2026-08-20T09:21:00.000Z"},
+    {"message": {"role": "assistant", "content": [{"type": "text", "text": "실패 0 으로 진행 중"}]}},
+]
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    for e in events:
+        f.write(json.dumps(e, ensure_ascii=False) + "\n")
+PY_T
+elapsed_out=$(python3 -c 'import json,sys; print(json.dumps({"transcript_path": sys.argv[1]}))' "$TRANSCRIPT" \
+  | python3 "$HOOK" 2>/dev/null)
+if printf '%s' "$elapsed_out" | grep -q 'last stated unknown'; then
+  echo "PASS  [verdict-elapsed-unknown-when-final-event-untimed]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [verdict-elapsed-unknown-when-final-event-untimed] out=<$elapsed_out>"; FAIL=$((FAIL + 1))
+fi
+
 echo ""
 echo "runtime-state-claim-gate: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
