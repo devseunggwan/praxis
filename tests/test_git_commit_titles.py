@@ -252,6 +252,36 @@ def test_another_segments_substitution_does_not_reach_the_title(command, expecte
     assert _titles_from_all_segments(command) == expected
 
 
+@pytest.mark.parametrize(
+    "command, expected",
+    [
+        # The reported case: the SAME text quoted both ways. Nothing in the
+        # token stream says which run produced the title, so its value is
+        # genuinely unknown and the gates must stay silent (issue #1036).
+        # Before the fix the earlier single-quoted run made this read as a
+        # literal and the format gate blocked a legitimate commit.
+        ("""echo '$(x)'; git commit -m "$(x)\"""", []),
+        ("""git commit -m "$(x)" && echo '$(x)'""", []),
+        ("echo '`x`'; git commit -m \"`x`\"", []),
+        # Positive control — a title that IS a single-quoted literal keeps
+        # being graded. Without it the change above is indistinguishable from
+        # disabling literal detection outright.
+        ("""echo "$(y)"; git commit -m '$(x) title'""", ["$(x) title"]),
+    ],
+)
+def test_same_text_quoted_both_ways_is_unknowable(command, expected):
+    assert _titles_from_all_segments(command) == expected
+
+
+def test_value_disqualification_also_silences_the_mirror_case():
+    """Pins the cost of matching by value: here the title IS the literal and
+    the double-quoted run is another segment's, yet the gates stay silent.
+    Closing this needs source spans; silence is the fail-open direction, so the
+    residual is recorded rather than fixed."""
+    command = """git commit -m '$(x)' && echo "$(x)\""""
+    assert _titles_from_all_segments(command) == []
+
+
 def test_argv_only_callers_keep_the_conservative_behaviour():
     """Without the raw command there is nothing to disambiguate with, so the
     opener alone still suppresses — old callers must not start hard-blocking."""

@@ -109,6 +109,12 @@ Inherits `safe_tokenize` / `iter_command_starts` / `strip_prefix` from
   (`sudo`, `env`), and shell control-flow keywords are peeled before matching.
 - Quoted strings protect their contents — `echo "git commit -m 'fake'"` does
   not trigger the hook because `echo` is argv[0] of that segment.
+- A title that OPENS a substitution (`$(`, `` ` ``) is graded only when the raw
+  command shows it came from a single-quoted run, where the shell substitutes
+  nothing. `-m "$(cat …)"` is unknowable at hook time and stays silent. The
+  match is by value, so when the same text appears both single- and
+  double-quoted (`echo '$(x)'; git commit -m "$(x)"`) neither run can be
+  attributed to the title and the gate stays silent (issue #1036).
 - Backslash-newline continuations are collapsed before tokenization —
   multi-line invocations like `git commit \\\n  -m "..."` parse correctly.
 - Only the FIRST `-m` / `--message` value is checked (title); subsequent `-m`

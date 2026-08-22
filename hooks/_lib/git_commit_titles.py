@@ -133,19 +133,23 @@ def strip_git_global_flags(argv: list[str]) -> tuple[list[str], str | None]:
     return argv[i:], c_dir
 
 
-def _single_quoted_runs(command: str) -> list[str]:
-    """Every single-quoted run in `command`, contents only, in source order.
+def _quoted_runs(command: str) -> list[tuple[str, str]]:
+    """Every quoted run in `command` as `(quote_char, contents)`, in source order.
 
     A single-quoted run is the one place the shell substitutes nothing at all,
     so its contents reach the tokenizer byte-for-byte. That property is what
     lets the caller below match a token back to its source without tracking
     positions through the tokenizer.
 
-    Double-quoted spans and backslash escapes are walked so their quotes cannot
-    open or close a run: `"it's"` holds no single-quoted run, and neither does
-    `\\'`.
+    Double-quoted runs are reported too, and for the opposite reason: their
+    contents are what the shell *does* substitute, so a title that also appears
+    as one cannot be attributed to the single-quoted run by value alone.
+
+    Each quote style is walked while inside the other, so a quote character
+    that is data cannot open or close a run: `"it's"` holds no single-quoted
+    run, and neither does `\\'`.
     """
-    runs: list[str] = []
+    runs: list[tuple[str, str]] = []
     quote = ""
     start = 0
     i, n = 0, len(command)
@@ -153,7 +157,7 @@ def _single_quoted_runs(command: str) -> list[str]:
         ch = command[i]
         if quote == "'":
             if ch == "'":
-                runs.append(command[start:i])
+                runs.append((quote, command[start:i]))
                 quote = ""
             i += 1
             continue
@@ -162,14 +166,11 @@ def _single_quoted_runs(command: str) -> list[str]:
             continue
         if quote == '"':
             if ch == '"':
+                runs.append((quote, command[start:i]))
                 quote = ""
             i += 1
             continue
-        if ch == '"':
-            quote = ch
-            i += 1
-            continue
-        if ch == "'":
+        if ch in ("'", '"'):
             quote = ch
             start = i + 1
             i += 1
@@ -195,13 +196,26 @@ def _title_is_single_quoted_literal(command: str, title: str) -> bool:
     Matching the token against the runs needs no position tracking through the
     tokenizer and is unaffected by anything in another segment.
 
-    Residual, stated because the match is by value rather than by position: a
-    command that quotes the SAME text both ways — `echo '$(x)'; git commit -m
-    "$(x)"` — reads as literal here. The direction of that error is to grade a
-    title the shell expanded, so the gates speak up rather than fall silent;
-    closing it needs raw source spans, which the tokenizer does not carry.
+    Because the match is by value, a command that quotes the SAME text both
+    ways — `echo '$(x)'; git commit -m "$(x)"` — offers two source runs that
+    tokenize identically, and nothing in the token stream says which one this
+    title came from. That is not a literal we failed to recognise; it is a
+    title whose value is genuinely unknown at hook time, so the double-quoted
+    run disqualifies the match and the gates stay silent (issue #1036). Reading
+    it as a literal instead graded a title the shell expands, which blocked a
+    legitimate commit.
+
+    The disqualification is by value, so it also silences the mirror case —
+    `git commit -m '$(x)' && echo "$(x)"`, where the title really is the
+    literal and the double-quoted run belongs to another segment. Separating
+    those two needs the source spans the tokenizer discards. Silence is the
+    fail-open direction and the one this repo chooses for a gate, so the
+    residual is pinned by test rather than closed.
     """
-    return title in _single_quoted_runs(command)
+    runs = _quoted_runs(command)
+    single = any(q == "'" and body == title for q, body in runs)
+    double = any(q == '"' and body == title for q, body in runs)
+    return single and not double
 
 
 def title_is_unresolved_substitution(title: str, command: str | None = None) -> bool:
