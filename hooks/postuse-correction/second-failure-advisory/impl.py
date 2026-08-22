@@ -70,6 +70,13 @@ tell it apart from a real one:
 `stderr` before it is used as failure evidence or signature material.
 Genuine content on other lines of the same `stderr` blob survives.
 
+The strip is also gated on `tool_name == "Bash"` — the noise line is a
+verified property of this harness's own Bash execution path, not of `stderr`
+in general. Without the gate, any other tool (or a hypothetical genuine
+failure whose only stderr line happens to match that shape) would have its
+real failure text silently deleted and be misread as a success or merged
+into an unrelated signature.
+
 Signature derivation
 ===================
 
@@ -150,14 +157,22 @@ _WS_RE = re.compile(r"\s+")
 _HARNESS_CWD_RESET_RE = re.compile(r"(?im)^[ \t]*Shell cwd was reset to .*$")
 
 
-def _strip_harness_noise(text: str) -> str:
+def _strip_harness_noise(text: str, tool_name: str) -> str:
     """Remove the harness's own cwd-reset notice from a `stderr` blob.
 
     Verified against real `Bash` `tool_response` payloads (session
     transcripts): this exact line is present on every call regardless of
     success, and nothing else in those payloads carries an `exit` field for
     the failure check below to consult instead.
+
+    Gated on `tool_name == "Bash"` (issue #1071 review) — that verification
+    only covers Bash. Applying the same regex to every tool's `stderr`
+    regardless of origin would delete a non-Bash tool's genuine error text if
+    it happened to match the same line shape, misreading a real failure as a
+    success.
     """
+    if tool_name != "Bash":
+        return text.strip()
     return _HARNESS_CWD_RESET_RE.sub("", text).strip()
 
 
@@ -203,7 +218,7 @@ def _extract_reference(tool_input: dict[str, Any], failure_text: str = "") -> st
     return ""
 
 
-def _derive_failure_text(tool_response: Any) -> str:
+def _derive_failure_text(tool_response: Any, tool_name: str) -> str:
     if not isinstance(tool_response, dict):
         return ""
     if isinstance(tool_response.get("error"), str):
@@ -211,7 +226,7 @@ def _derive_failure_text(tool_response: Any) -> str:
         if error_text:
             return error_text
     if isinstance(tool_response.get("stderr"), str):
-        err = _strip_harness_noise(tool_response.get("stderr", ""))
+        err = _strip_harness_noise(tool_response.get("stderr", ""), tool_name)
         if err:
             return err
     if isinstance(tool_response.get("output"), str):
@@ -225,7 +240,7 @@ def _derive_failure_text(tool_response: Any) -> str:
     return ""
 
 
-def _derive_error_text(tool_response: Any) -> str:
+def _derive_error_text(tool_response: Any, tool_name: str) -> str:
     """Error-channel text only.
 
     Distinct from `_derive_failure_text`, which also reads `output`/`stdout` to
@@ -240,13 +255,13 @@ def _derive_error_text(tool_response: Any) -> str:
         return error_text.strip()
     stderr_text = tool_response.get("stderr")
     if isinstance(stderr_text, str):
-        stripped = _strip_harness_noise(stderr_text)
+        stripped = _strip_harness_noise(stderr_text, tool_name)
         if stripped:
             return stripped
     return ""
 
 
-def _is_failed(tool_response: Any) -> bool:
+def _is_failed(tool_response: Any, tool_name: str) -> bool:
     if not isinstance(tool_response, dict):
         return False
 
@@ -266,7 +281,7 @@ def _is_failed(tool_response: Any) -> bool:
             pass
 
     # Back-compat path: older/malformed payloads that only surfaced text.
-    return bool(_derive_error_text(tool_response))
+    return bool(_derive_error_text(tool_response, tool_name))
 
 
 def _normalize_signature(raw: str) -> str:
@@ -288,7 +303,7 @@ def _normalize_signature(raw: str) -> str:
 
 
 def _compute_signature(tool_name: str, tool_response: Any) -> str:
-    text = _derive_failure_text(tool_response)
+    text = _derive_failure_text(tool_response, tool_name)
     normalized = _normalize_signature(text)
     if not normalized:
         normalized = "<empty>"
@@ -378,13 +393,13 @@ def main() -> int:
         return 0
 
     tool_response = payload.get("tool_response")
-    if not _is_failed(tool_response):
+    if not _is_failed(tool_response, tool_name):
         return 0
 
     signature = _compute_signature(tool_name, tool_response)
     ref = _extract_reference(
         _extract_tool_input(payload),
-        _derive_failure_text(tool_response),
+        _derive_failure_text(tool_response, tool_name),
     )
 
     path = _state_path(session_id)

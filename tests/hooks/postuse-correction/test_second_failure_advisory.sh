@@ -21,6 +21,7 @@
 #  14) exit-0 Bash 호출(stderr가 harness cwd-reset 안내뿐) -> advisory 없음 (issue #1042)
 #  15) harness noise가 섞여도 동일 실패 반복은 여전히 advisory (positive control)
 #  16) stderr가 noise뿐인 서로 다른 실패는 서로 다른 signature (issue #1042)
+#  17) tool_name이 Bash가 아니면 noise strip 자체를 건너뛰어 진짜 실패로 판정 (PR #1071 리뷰)
 #
 # Run:
 #   bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
@@ -611,6 +612,44 @@ if [ "$distinct_sigs" = "2" ]; then
 else
   assert_fail "16) unrelated noise-only-stderr failures get distinct signatures" \
     "expected 2 distinct signature keys, got $distinct_sigs: $(cat "$STATE18")"
+fi
+
+# ---------------------------------------------------------------------------
+# Case 17: a NON-Bash tool whose `stderr` legitimately matches the harness
+# cwd-reset line shape must still be treated as a failure — the strip is
+# gated on `tool_name == "Bash"` (PR #1071 review finding). Without the
+# gate, this genuine error text would be deleted and misread as a success.
+# ---------------------------------------------------------------------------
+echo "=== case 17: non-Bash tool with harness-noise-shaped stderr is still a failure ==="
+non_bash_noise_shaped_payload() {
+  # non_bash_noise_shaped_payload <session_id>
+  python3 - "$1" <<'PY'
+import json, sys
+session_id = sys.argv[1]
+print(json.dumps({
+    "session_id": session_id,
+    "tool_name": "Read",
+    "tool_input": {"file_path": "/tmp/whatever"},
+    "tool_response": {
+        "stderr": "Shell cwd was reset to /Users/x/projects/praxis",
+    },
+}))
+PY
+}
+
+STATE19="$TMP_DIR/c19.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(non_bash_noise_shaped_payload sess-1042-non-bash)" "$STATE19" >/dev/null 2>/dev/null
+pipe_hook "$(non_bash_noise_shaped_payload sess-1042-non-bash)" "$STATE19" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "17) non-Bash tool with harness-noise-shaped stderr still advises"
+else
+  assert_fail "17) non-Bash tool with harness-noise-shaped stderr still advises" \
+    "rc=$rc out=[$out] err=[$err]"
 fi
 
 echo
