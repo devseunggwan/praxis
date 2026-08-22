@@ -270,6 +270,29 @@ build_transcript_verdict \
   none
 run_case advisory "verdict-range-denominator-not-the-count" '{}'
 
+# --- EN vocabulary needs word boundaries -----------------------------------
+# "pass" inside "bypass" once recorded a bogus pass:0 prior mention, so this
+# GENUINE first "PASS 0" fired an advisory (a block, under strict mode).
+build_transcript_verdict \
+  "bypass 0 으로 우회했습니다" "2026-08-20T09:19:36.000Z" \
+  "PASS 0 입니다" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-en-substring-not-a-verdict-word" '{}'
+
+# --- the count must belong to the verdict word, not an intervening noun ----
+build_transcript_verdict \
+  "error code 0 을 확인했습니다" "2026-08-20T09:19:36.000Z" \
+  "실패 0 입니다" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-count-belongs-to-another-noun" '{}'
+
+# --- EN reversed-order restatement still fires (boundary fix is not a mute) -
+build_transcript_verdict \
+  "348줄 중 0 FAILED" "2026-08-20T09:19:36.000Z" \
+  "0 FAILED 로 진행 중" "2026-08-20T09:21:48.000Z" \
+  none
+run_case advisory "verdict-en-reversed-order-restatement" '{}'
+
 echo ""
 echo "runtime-state-claim-gate: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -92,13 +92,25 @@ happening now" but "the number I already measured, said again". A claim key
 is `(kind, number)` — e.g. `fail:0`; a bare pass/fail word with no adjacent
 number (`통과`) keys as `pass:bare`.
 
-- **Verdict vocabulary**: a count directly adjacent (≤6 non-digit chars) to
+- **Verdict vocabulary**: a count directly adjacent to
   `FAIL(s)`/`fail(ed)`/`실패`/`오류`/`에러`/`error` (kind `fail`), or to
   `PASS(ED)`/`통과`/`성공`/`success` (kind `pass`), in either order
   (`"FAILs: 0"`, `"0 FAILED"`, `"실패 0"`, `"0건 실패"`). A standalone `N건`
   with no fail/pass word nearby is deliberately **not** matched — too broad
   ("이슈 3건" is not a verdict count) — this stays scoped to the vocabulary the
   issue named, no invented generic-count abstraction.
+- **EN vocabulary carries lookaround boundaries**: `(?<![A-Za-z])…(?![A-Za-z])`
+  around `fail(ed|s)`/`error`/`pass(ed)`/`success`, the same convention as the
+  sibling gates' `_en_token_present` (`\b` puts no boundary between Hangul and
+  ASCII). Without them `"bypass 0"` keyed `pass:0` and `"successful 0"` keyed
+  `pass:0` — a bogus prior mention that makes a later **genuine first** verdict
+  fire, and under `PRAXIS_RUNTIME_CLAIM_STRICT=1` blocks a correct message.
+  The Korean half needs no boundary; 실패/통과 carry their own.
+- **The count must belong to the verdict word**: in the forward order only
+  separators (`\s:=`) and the Korean counter/particle that attaches to the
+  word (`건수`/`개수`/`수`/`은`/`는`/`이`/`가`) may sit between them. A blanket
+  `\D{0,6}` bridged an intervening English noun, so `"error code 0"` keyed
+  `fail:0` — the count is "code"'s, not the verdict's.
 - **Reversed order binds tightly**: in the `"0 FAILED"` / `"0건 실패"` order
   only whitespace and a Korean counter suffix (`건`/`개`) may sit between the
   number and the word. A permissive gap lets a range denominator's trailing

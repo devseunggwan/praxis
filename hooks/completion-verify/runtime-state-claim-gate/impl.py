@@ -176,8 +176,17 @@ def detect_claims(text: str) -> list[str]:
 # the issue, no invented "generic count" abstraction.
 # ---------------------------------------------------------------------------
 
-_FAIL_WORD = r"(?:FAILs?|fail(?:ed)?|실패|오류|에러|error)"
-_PASS_WORD = r"(?:PASS(?:ED)?|통과|성공|success)"
+# The EN half needs lookaround boundaries — without them "pass" matched
+# inside "bypass" and "success" inside "successful", recording a bogus
+# `pass:0` prior mention that makes a later GENUINE first verdict fire (and,
+# in strict mode, blocks a correct message). Same `(?<![A-Za-z])…(?![A-Za-z])`
+# convention as the sibling gates' `_en_token_present` (pr-state-refetch-gate,
+# menu-mutation-tier-advisory) — `\b` puts no boundary between Hangul and
+# ASCII. The Korean half needs none: 실패/통과 carry their own boundaries.
+_EN_L = r"(?<![A-Za-z])"
+_EN_R = r"(?![A-Za-z])"
+_FAIL_WORD = rf"(?:{_EN_L}(?:fail(?:ed|s)?|error){_EN_R}|실패|오류|에러)"
+_PASS_WORD = rf"(?:{_EN_L}(?:pass(?:ed)?|success){_EN_R}|통과|성공)"
 
 # Reversed order ("0 FAILED", "0건 실패"): only whitespace and a Korean
 # counter suffix may bridge the number to the word. A permissive `\D{0,3}`
@@ -187,15 +196,21 @@ _PASS_WORD = r"(?:PASS(?:ED)?|통과|성공|success)"
 # finds no prior mention and the gate never fires.
 _REV_GAP = r"\s*(?:건|개)?\s*"
 
+# Forward order ("FAILs: 0", "실패 건수: 0", "실패는 0"): separators, plus the
+# Korean counter/particle that idiomatically attaches to the word. A blanket
+# `\D{0,6}` also bridged an intervening English noun, so "error code 0" keyed
+# `fail:0` — the count belongs to "code", not to the verdict.
+_FWD_GAP = r"[\s:=]{0,3}(?:건수|개수|수|은|는|이|가)?[\s:=]{0,3}"
+
 # A count attached to a fail/pass word, either order, small gap allowed
 # ("FAILs: 0", "0 FAILED", "실패 0", "0건 실패").
 _VERDICT_NUM_RE = re.compile(
-    rf"{_FAIL_WORD}\D{{0,6}}?(\d+)|(\d+){_REV_GAP}{_FAIL_WORD}"
-    rf"|{_PASS_WORD}\D{{0,6}}?(\d+)|(\d+){_REV_GAP}{_PASS_WORD}",
+    rf"{_FAIL_WORD}{_FWD_GAP}(\d+)|(\d+){_REV_GAP}{_FAIL_WORD}"
+    rf"|{_PASS_WORD}{_FWD_GAP}(\d+)|(\d+){_REV_GAP}{_PASS_WORD}",
     re.IGNORECASE,
 )
 # A bare pass claim carrying no adjacent number ("통과", "PASSED").
-_VERDICT_BARE_RE = re.compile(rf"{_PASS_WORD}(?!\D{{0,3}}\d)", re.IGNORECASE)
+_VERDICT_BARE_RE = re.compile(rf"{_PASS_WORD}(?!{_FWD_GAP}\d)", re.IGNORECASE)
 
 # Scope-qualifier phrases naming the measured artifact's coverage — "348줄
 # 중", "of 348 lines", "120/348", "34%". A line carrying one of these is
