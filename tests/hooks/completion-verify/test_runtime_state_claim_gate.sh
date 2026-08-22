@@ -293,6 +293,29 @@ build_transcript_verdict \
   none
 run_case advisory "verdict-en-reversed-order-restatement" '{}'
 
+# --- an unrelated progress number is not the verdict's qualifier -----------
+# Scanned per line, the "80%" marked the whole line qualified and the stale
+# "실패 0" beside it passed silently — the incident's own shape (a moving
+# progress number beside a frozen verdict).
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "진행률 80%, 실패 0 으로 진행 중" "2026-08-20T09:21:48.000Z" \
+  none
+run_case advisory "verdict-unrelated-percent-not-a-qualifier" '{}'
+
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "작업 3/5 완료, 실패 0" "2026-08-20T09:21:48.000Z" \
+  none
+run_case advisory "verdict-unrelated-fraction-not-a-qualifier" '{}'
+
+# --- same-clause qualifier still silences (EN "of N lines" form) -----------
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "FAIL 0 of 1110 lines" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-same-clause-qualifier-stays-silent" '{}'
+
 echo ""
 echo "runtime-state-claim-gate: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

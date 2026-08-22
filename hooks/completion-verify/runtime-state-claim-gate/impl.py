@@ -213,7 +213,7 @@ _VERDICT_NUM_RE = re.compile(
 _VERDICT_BARE_RE = re.compile(rf"{_PASS_WORD}(?!{_FWD_GAP}\d)", re.IGNORECASE)
 
 # Scope-qualifier phrases naming the measured artifact's coverage — "348줄
-# 중", "of 348 lines", "120/348", "34%". A line carrying one of these is
+# 중", "of 348 lines", "120/348", "34%". A clause carrying one of these is
 # transparent about what was actually covered and stays silent even when the
 # same number was already stated (the motivating incident's own first
 # restatement, "348줄 중 FAIL 0", must stay silent per the issue's own
@@ -225,6 +225,14 @@ _QUALIFIER_RE = re.compile(
     r"|\d+\s*%",
     re.IGNORECASE,
 )
+
+
+# A qualifier only qualifies the verdict it shares a CLAUSE with. Scanned per
+# line, ANY percentage or fraction anywhere on the line silenced the verdict —
+# and the incident's own shape is a moving progress number sitting beside a
+# frozen verdict number, so "진행률 80%, 실패 0" read as qualified while the
+# "실패 0" half was exactly the stale restatement this gate exists to catch.
+_CLAUSE_SPLIT_RE = re.compile(r"[,;，、]+|(?<=[.!?。？！])\s+")
 
 
 def _claim_key_from_match(m: "re.Match[str]") -> str | None:
@@ -247,23 +255,27 @@ def _humanize_key(key: str) -> str:
 
 def extract_verdict_claims(text: str) -> list[dict]:
     """Return `{"key", "qualified"}` for each verdict-count claim in `text`,
-    scanned per line (a scope qualifier is read from the same line the
-    number appears on). Quoted lines (`>`) are skipped, matching
-    `detect_claims`."""
+    scanned per line and qualified per CLAUSE — a scope qualifier counts only
+    when it shares a clause with the verdict it is supposed to modify. Quoted
+    lines (`>`) are skipped, matching `detect_claims`."""
     claims: list[dict] = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith(">"):
             continue
-        qualified = bool(_QUALIFIER_RE.search(line))
         seen: set[str] = set()
-        for m in _VERDICT_NUM_RE.finditer(line):
-            key = _claim_key_from_match(m)
-            if key and key not in seen:
-                seen.add(key)
-                claims.append({"key": key, "qualified": qualified})
-        if _VERDICT_BARE_RE.search(line) and "pass:bare" not in seen:
-            claims.append({"key": "pass:bare", "qualified": qualified})
+        for clause in _CLAUSE_SPLIT_RE.split(line):
+            if not clause:
+                continue
+            qualified = bool(_QUALIFIER_RE.search(clause))
+            for m in _VERDICT_NUM_RE.finditer(clause):
+                key = _claim_key_from_match(m)
+                if key and key not in seen:
+                    seen.add(key)
+                    claims.append({"key": key, "qualified": qualified})
+            if _VERDICT_BARE_RE.search(clause) and "pass:bare" not in seen:
+                seen.add("pass:bare")
+                claims.append({"key": "pass:bare", "qualified": qualified})
     return claims
 
 

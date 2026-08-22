@@ -55,7 +55,7 @@ probe before stopping.
 | Final message restates a verdict number (`실패 N`/`FAIL N`/bare `통과`) already stated earlier this session, WITHOUT a scope qualifier, AND the current turn has no probe tool_use | `[runtime-state-claim-gate]` advisory   |
 | Same claim, but the current turn contains a probe-class tool_use (Bash, Read, Grep, Glob, LSP, Task*, Monitor, `mcp__*`) | silent (claim is backed by observation) |
 | Final message has no runtime-state claim                                                                                 | silent                                  |
-| Verdict number restated WITH its scope qualifier on the same line (`"1110줄 중 FAIL 0"`)                                 | silent (transparent about coverage)     |
+| Verdict number restated WITH its scope qualifier in the same clause (`"1110줄 중 FAIL 0"`)                               | silent (transparent about coverage)     |
 | Verdict number appears for the first time this session (no prior mention) — or the number changed (re-measured)          | silent                                  |
 | Claim line is a question (`…돌고 있나요?`) — either kind                                                                 | silent                                  |
 | "running" claim line is future intent (`will run`, `실행하겠습니다`)                                                     | silent (intent, not state)              |
@@ -118,10 +118,19 @@ number (`통과`) keys as `pass:bare`.
   matched `"348 중 FAIL"` first, keyed `fail:348`, and consumed the real
   `"FAIL 0"` — so a later unqualified `"실패 0"` found no prior mention and
   the gate silently never fired.
-- **Scope qualifier**: a line carrying `"N줄 중"` / `"of N lines"` / `"N/M"` /
-  `"N%"` is transparent about what was actually covered and stays silent
-  even when the number was already stated — this is what keeps the
-  motivating incident's own first restatement ("348줄 중 FAIL 0") silent.
+- **Scope qualifier, scoped per clause**: `"N줄 중"` / `"of N lines"` /
+  `"N/M"` / `"N%"` is transparent about what was actually covered and stays
+  silent even when the number was already stated — this is what keeps the
+  motivating incident's own first restatement ("348줄 중 FAIL 0") silent. The
+  qualifier only counts in the **clause it shares with the verdict** (clauses
+  split on `,;，、` and sentence enders). Scanned per line, any percentage or
+  fraction anywhere on the line silenced the verdict — and the incident's own
+  shape is a moving progress number beside a frozen one, so
+  `"진행률 80%, 실패 0"` read as qualified while `"실패 0"` was exactly the
+  stale restatement. The cost of the tighter linkage is that a qualifier
+  parked in its own clause (`"총 348줄, FAIL 0"`) now fires; the advisory it
+  emits asks for `"348줄 중 FAIL 0"`, which is the discipline this gate exists
+  to enforce.
 - **Prior-mention scan**: run over the **whole transcript before the current
   turn** (not the sibling's turn/window scoping) — the incident's
   restatements spanned several turns, each ending its own Stop event, so a
