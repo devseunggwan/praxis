@@ -267,6 +267,11 @@ def extract_verdict_claims(text: str) -> list[dict]:
         for clause in _CLAUSE_SPLIT_RE.split(line):
             if not clause:
                 continue
+            # Asking "실패 0인가요?" is not restating a verdict — the spec puts
+            # a question clause on the silent side for BOTH claim kinds, and
+            # the runtime-state path already reads it that way (detect_claims).
+            if _QUESTION_RE.search(clause):
+                continue
             qualified = bool(_QUALIFIER_RE.search(clause))
             numeric = list(_VERDICT_NUM_RE.finditer(clause))
             for m in numeric:

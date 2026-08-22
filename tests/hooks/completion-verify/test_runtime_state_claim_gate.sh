@@ -319,6 +319,19 @@ build_transcript_verdict \
   none
 run_case silent "verdict-reversed-numeric-is-not-a-bare-pass" '{}'
 
+# --- a verdict stated as a QUESTION stays silent (spec: either kind) --------
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "실패 0인가요?" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-question-clause-stays-silent" '{}'
+
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "FAIL 0?" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-en-question-clause-stays-silent" '{}'
+
 # --- same-clause qualifier still silences (EN "of N lines" form) -----------
 build_transcript_verdict \
   "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
