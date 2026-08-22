@@ -37,8 +37,11 @@ last-user-message extraction both skip them.
 Public API:
   TRANSCRIPT_SCAN_LINES                                  — default tail window
   load_transcript(path)                                  -> list[dict]
+  iter_transcript(path)                                  -> Iterator[dict]
   load_transcript_objs(path, max_bytes)                  -> list | None
   read_transcript_tail(path, max_lines, max_bytes)       -> str | None
+  load_recent_events(path, min_events, max_bytes)        -> list[dict]
+  load_current_turn(path, max_bytes)                     -> list[dict]
   get_current_turn(events)                               -> list[dict]
   extract_last_assistant_text(turn)                      -> str
   has_tool_in_turn(turn, tool_name)                      -> bool
@@ -49,6 +52,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections import deque
 from pathlib import Path
 
 # Default tail window (in JSONL lines) for substring scans over the recent
@@ -79,6 +83,32 @@ def load_transcript(path: str) -> list[dict]:
     except Exception:
         pass
     return events
+
+
+def iter_transcript(path: str):
+    """Yield each event dict in `path`, one line at a time. Fail-open.
+
+    Same parse contract as `load_transcript` (non-JSON and non-dict lines are
+    skipped, a missing or unreadable file yields nothing) without holding the
+    whole transcript in memory. For a consumer that genuinely must see the
+    whole session but can reduce as it goes — a 224MB session materialized as
+    a list cost 741MB of RSS per Stop hook (issue #1076).
+    """
+    try:
+        f = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    with f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if isinstance(obj, dict):
+                yield obj
 
 
 def load_transcript_objs(path: str, max_bytes: int) -> list | None:
@@ -137,6 +167,165 @@ def _read_bounded_text(path: str, max_bytes: int) -> str | None:
     return data.decode("utf-8", errors="replace")
 
 
+# Bytes scanned backwards from EOF before `load_current_turn` gives up looking
+# for the turn boundary. A turn is one user message and the assistant work that
+# answers it; Claude Code truncates individual tool results, so a real turn does
+# not approach this. The cap exists so a transcript whose tail carries no
+# boundary at all (a corrupted or non-Claude JSONL) degrades to a bounded read
+# instead of the whole-file read this function was written to remove.
+CURRENT_TURN_SCAN_MAX_BYTES = 8 * 1024 * 1024
+
+# Reverse-read granularity. Large enough that the common case (boundary within
+# the last few events) finishes in one seek.
+_TAIL_CHUNK_BYTES = 256 * 1024
+
+
+class TranscriptReadError(OSError):
+    """The backward reader could not finish reading the transcript.
+
+    A read that fails partway is not the same fact as a transcript with no
+    signal in it, and callers act on the two differently: every gate here
+    fails open on "could not read" and acts on "read it all, found nothing".
+    Ending the iterator silently collapsed the first into the second.
+    """
+
+
+def _iter_lines_backwards(path: str, max_bytes: int):
+    """Yield complete lines of `path` as bytes, from the end towards the start.
+
+    Stops at the start of the file or once `max_bytes` have been read,
+    whichever comes first. Raises `TranscriptReadError` when the file cannot
+    be opened or read; callers translate that into their own fail-open value.
+    """
+    try:
+        fh = open(path, "rb")
+    except OSError as exc:
+        raise TranscriptReadError(path) from exc
+    with fh:
+        try:
+            fh.seek(0, os.SEEK_END)
+            pos = fh.tell()
+        except OSError as exc:
+            raise TranscriptReadError(path) from exc
+        partial = b""
+        scanned = 0
+        while pos > 0 and scanned < max_bytes:
+            step = min(_TAIL_CHUNK_BYTES, pos, max_bytes - scanned)
+            pos -= step
+            try:
+                fh.seek(pos)
+                chunk = fh.read(step) + partial
+            except OSError as exc:
+                raise TranscriptReadError(path) from exc
+            scanned += step
+            lines = chunk.split(b"\n")
+            # Unless this chunk reached the start of the file, its first element
+            # is the tail of a line whose head is still unread — carry it into
+            # the next iteration rather than parsing a fragment as a record.
+            partial = b"" if pos == 0 else lines.pop(0)
+            for raw in reversed(lines):
+                yield raw
+
+
+def load_recent_events(
+    path: str,
+    min_events: int = 0,
+    max_bytes: int = CURRENT_TURN_SCAN_MAX_BYTES,
+) -> list[dict]:
+    """Tail of the transcript, read backwards, containing the current turn.
+
+    Returns the last events of `path` — in file order — guaranteed to reach
+    back past the last real user input (the turn boundary) and to hold at
+    least `min_events` events. Reading stops as soon as both hold, so a caller
+    that only needs the current turn pays for the current turn.
+
+    A Stop-event session JSONL reaches hundreds of MB and every gate that
+    needed only the tail was parsing all of it (issue #1076). Same empty-list
+    fail-open as `load_transcript` on a missing or unreadable file.
+
+    `min_events` is for a caller that also reads a fixed recent window past the
+    turn (`events[-80:]`); the boundary alone would not guarantee that window
+    is present.
+
+    Reaching the start of the file without a boundary returns everything
+    scanned, which is what `get_current_turn` returns in the same case
+    (`start = 0`). Exhausting `max_bytes` without one returns `[]` instead:
+    the scan runs end-to-start, so a capped tail holds the *last* slice of an
+    over-long turn and has lost its earliest events — a subset of the turn,
+    not a superset. A gate handed that would miss evidence that is present and
+    block on it, so the honest answer is the same empty fail-open this returns
+    for an unreadable file.
+    """
+    tail: deque[dict] = deque()
+    try:
+        for raw in _iter_lines_backwards(path, max_bytes):
+            obj = _parse_line(raw)
+            if obj is None:
+                continue
+            tail.appendleft(obj)
+            if is_turn_boundary(obj) and len(tail) >= min_events:
+                return list(tail)
+    except TranscriptReadError:
+        return []
+    # The loop ran to completion: either the file start was reached (the tail
+    # is the whole file, boundary or not) or the cap cut it short.
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return []
+    return list(tail) if size <= max_bytes else []
+
+
+def load_current_turn(
+    path: str, max_bytes: int = CURRENT_TURN_SCAN_MAX_BYTES
+) -> list[dict]:
+    """Events since the last real user input, read from the tail of `path`.
+
+    Same result as `get_current_turn(load_transcript(path))` without parsing
+    the whole transcript — see `load_recent_events` for the bound and for what
+    the two capped terminations return.
+    """
+    return get_current_turn(load_recent_events(path, max_bytes=max_bytes))
+
+
+def _parse_line(raw: bytes) -> dict | None:
+    """Parse one JSONL line into a dict; None for blank, malformed, non-dict.
+
+    Mirrors `load_transcript`, which keeps dicts and skips everything else.
+    """
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        obj = json.loads(raw.decode("utf-8", errors="replace"))
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def is_turn_boundary(ev: dict) -> bool:
+    """True when `ev` is a real user input — the event a turn starts after.
+
+    Shared by `get_current_turn` (forward, over an in-memory list) and
+    `load_current_turn` (backward, over a file). One predicate so the two
+    directions cannot drift into disagreeing about where a turn begins.
+    """
+    msg = ev.get("message", {})
+    if not isinstance(msg, dict) or msg.get("role") != "user":
+        return False
+    if ev.get("isSidechain"):
+        return False
+    content = msg.get("content", [])
+    if isinstance(content, str):
+        return True
+    if isinstance(content, list):
+        return any(
+            isinstance(b, dict) and b.get("type") != "tool_result"
+            for b in content
+        )
+    return False
+
+
 def get_current_turn(events: list[dict]) -> list[dict]:
     """Return events since the last real user input (non-tool-result user msg).
 
@@ -145,21 +334,8 @@ def get_current_turn(events: list[dict]) -> list[dict]:
     """
     last_user_idx: int | None = None
     for i, ev in enumerate(events):
-        msg = ev.get("message", {})
-        if not isinstance(msg, dict) or msg.get("role") != "user":
-            continue
-        if ev.get("isSidechain"):
-            continue
-        content = msg.get("content", [])
-        if isinstance(content, str):
+        if is_turn_boundary(ev):
             last_user_idx = i
-        elif isinstance(content, list):
-            non_tool = [
-                b for b in content
-                if isinstance(b, dict) and b.get("type") != "tool_result"
-            ]
-            if non_tool:
-                last_user_idx = i
     start = 0 if last_user_idx is None else last_user_idx + 1
     return events[start:]
 
@@ -219,20 +395,30 @@ def read_last_user_message(transcript_path: str) -> str | None:
     if not transcript_path or not os.path.isfile(transcript_path):
         return None
     try:
-        with open(transcript_path, "r", encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
+        size = os.path.getsize(transcript_path)
     except OSError:
         return None
 
-    # Walk in reverse to find the most recent user-role entry whose
-    # content includes human-authored text.
-    for raw in reversed(lines):
-        raw = raw.strip()
+    # Walk in reverse to find the most recent user-role entry whose content
+    # includes human-authored text. Reading backwards from the end (#1076):
+    # this used to `readlines()` the whole transcript, which on a long session
+    # is hundreds of MB for a message that sits within the last turn.
+    # Driven by hand rather than by `for` so a mid-read failure is
+    # distinguishable from exhaustion, without buffering the tail.
+    tail = _iter_lines_backwards(transcript_path, CURRENT_TURN_SCAN_MAX_BYTES)
+    while True:
+        try:
+            raw_bytes = next(tail)
+        except StopIteration:
+            break
+        except TranscriptReadError:
+            return None
+        raw = raw_bytes.strip()
         if not raw:
             continue
         try:
-            entry = json.loads(raw)
-        except json.JSONDecodeError:
+            entry = json.loads(raw.decode("utf-8", errors="replace"))
+        except (json.JSONDecodeError, ValueError):
             continue
         if not isinstance(entry, dict):
             continue
@@ -281,7 +467,11 @@ def read_last_user_message(transcript_path: str) -> str | None:
             return text
         # No human text in this entry — keep walking backward.
 
-    return ""
+    # Nothing found. "" means "read it all, there is no signal" and callers may
+    # act on it; that is only true when the backward walk actually reached the
+    # start of the file. If the scan cap cut it short, the honest answer is the
+    # unreadable one — None, which every caller fails open on.
+    return "" if size <= CURRENT_TURN_SCAN_MAX_BYTES else None
 
 
 # ---------------------------------------------------------------------------

@@ -21,10 +21,14 @@ Run: python3 -m pytest tests/test_transcript.py -q
 """
 from __future__ import annotations
 
+import builtins
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LIB_DIR = REPO_ROOT / "hooks" / "_lib"
@@ -473,3 +477,196 @@ class TestSingleSource:
                 if needle in text:
                     offenders.append(f"{impl}: {needle}")
         assert not offenders, f"local duplicates remain: {offenders}"
+
+
+class TestTailReaders:
+    """The bounded backward readers that replaced the whole-file loads (#1076).
+
+    A Stop-event session JSONL reaches hundreds of MB; nine gates each parsed
+    all of it on every response end. These cover that the tail readers agree
+    with the forward path they replaced, that the bound is real, and that the
+    two capped terminations behave as documented.
+    """
+
+    def test_current_turn_matches_the_forward_path(self, tmp_path):
+        events = [
+            _user(text="first"), _assistant(text="a1"),
+            _user(text="second"), _assistant(text="a2"), _assistant(text="a3"),
+        ]
+        path = _write_jsonl(tmp_path, events)
+        assert T.load_current_turn(path) == T.get_current_turn(T.load_transcript(path))
+
+    def test_tool_result_only_user_entry_is_not_a_boundary(self, tmp_path):
+        """The bridge for tool output is not human input — same rule as forward."""
+        path = _write_jsonl(tmp_path, [
+            _user(text="real input"),
+            _assistant(text="a1"),
+            _user(blocks=[{"type": "tool_result", "content": "out"}]),
+            _assistant(text="a2"),
+        ])
+        turn = T.load_current_turn(path)
+        assert turn == T.get_current_turn(T.load_transcript(path))
+        # The turn reaches back past the tool_result entry to the real input,
+        # so both assistant events are in it — 3 events, not 1.
+        assert len(turn) == 3
+
+    def test_no_boundary_anywhere_returns_every_event(self, tmp_path):
+        """`get_current_turn` returns everything when it finds no user input."""
+        path = _write_jsonl(tmp_path, [_assistant(text="a1"), _assistant(text="a2")])
+        assert T.load_current_turn(path) == T.load_transcript(path)
+
+    def test_missing_file_fails_open_empty(self, tmp_path):
+        assert T.load_current_turn(str(tmp_path / "absent.jsonl")) == []
+
+    def test_boundary_split_across_a_read_chunk(self, tmp_path):
+        """A record straddling the chunk seam must parse whole, not as a fragment.
+
+        The reader carries the leading partial line into the next chunk; without
+        that the boundary record is silently dropped and the turn runs long.
+        """
+        events = [_user(text="B" * (T._TAIL_CHUNK_BYTES // 2))]
+        events += [_assistant(text="x" * 4096) for _ in range(200)]
+        path = _write_jsonl(tmp_path, events)
+        assert T.load_current_turn(path) == T.get_current_turn(T.load_transcript(path))
+
+    def test_min_events_reaches_past_the_turn(self, tmp_path):
+        """merge-state-claim-gate's `events[-N:]` needs the window, not the turn."""
+        events = [_assistant(text=f"old{i}") for i in range(50)]
+        events += [_user(text="now"), _assistant(text="fresh")]
+        path = _write_jsonl(tmp_path, events)
+        full = T.load_transcript(path)
+        assert T.load_recent_events(path, min_events=0) == full[-2:]
+        assert T.load_recent_events(path, min_events=30)[-30:] == full[-30:]
+
+    def test_the_bound_is_enforced(self, tmp_path):
+        """A cap short of the boundary stops the read instead of walking to BOF.
+
+        What it returns is asserted in `TestCappedScanFailsOpen`: the tail it
+        holds has lost the front of the turn, so it fails open rather than
+        passing a subset off as the turn.
+        """
+        events = [_user(text="boundary")] + [_assistant(text="y" * 512) for _ in range(200)]
+        path = _write_jsonl(tmp_path, events)
+        read_bytes = sum(
+            len(raw) + 1 for raw in T._iter_lines_backwards(path, 4096)
+        )
+        assert read_bytes <= 4096 + T._TAIL_CHUNK_BYTES
+        assert read_bytes < os.path.getsize(path)
+
+    def test_last_user_message_matches_the_forward_path(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            _user(text="older"), _assistant(text="a"), _user(text="newest"),
+        ])
+        assert T.read_last_user_message(path) == "newest"
+
+    def test_last_user_message_returns_none_when_the_cap_cut_it_short(
+        self, tmp_path, monkeypatch
+    ):
+        """"" means 'read it all, no signal' and callers act on it.
+
+        When the scan cap stopped short of the start of the file that is not
+        true, so the honest answer is the unreadable one — None, which every
+        caller fails open on.
+        """
+        path = _write_jsonl(tmp_path, [
+            _user(text="buried"),
+            *[_assistant(text="z" * 512) for _ in range(50)],
+        ])
+        monkeypatch.setattr(T, "CURRENT_TURN_SCAN_MAX_BYTES", 1024)
+        assert T.read_last_user_message(path) is None
+
+    def test_iter_transcript_matches_load_transcript(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            _user(text="hi"), "broken", json.dumps([1]), _assistant(text="a"),
+        ])
+        assert list(T.iter_transcript(path)) == T.load_transcript(path)
+
+    def test_iter_transcript_missing_file_yields_nothing(self, tmp_path):
+        assert list(T.iter_transcript(str(tmp_path / "absent.jsonl"))) == []
+
+
+class TestCappedScanFailsOpen:
+    """A capped backward scan is a subset of the turn, never a superset.
+
+    The scan runs end-to-start, so cutting it short at `max_bytes` drops the
+    *earliest* events of the turn. A gate handed that tail would look for
+    evidence that is present in the turn, not find it, and block (codex review
+    round 1 on #1076, P1 — confirmed against a 1.33 MB turn under a 256 KiB cap:
+    590 events, first event of the turn absent).
+    """
+
+    def _over_cap_turn(self, tmp_path):
+        return _write_jsonl(tmp_path, [
+            _user(text="the real user input"),
+            _assistant(text="FIRST_AFTER_BOUNDARY"),
+            *[_assistant(text="y" * 512) for _ in range(60)],
+        ])
+
+    def test_current_turn_is_empty_when_the_cap_hides_the_boundary(
+        self, tmp_path
+    ):
+        path = self._over_cap_turn(tmp_path)
+        assert T.load_current_turn(path, max_bytes=1024) == []
+
+    def test_recent_events_is_empty_when_the_cap_hides_the_boundary(
+        self, tmp_path
+    ):
+        path = self._over_cap_turn(tmp_path)
+        assert T.load_recent_events(path, max_bytes=1024) == []
+
+    def test_whole_file_without_a_boundary_is_still_returned(self, tmp_path):
+        """Reaching the start of the file is not truncation."""
+        path = _write_jsonl(tmp_path, [
+            _assistant(text="a"), _assistant(text="b"),
+        ])
+        assert len(T.load_recent_events(path, max_bytes=10 * 1024)) == 2
+
+    def test_boundary_found_within_the_cap_is_unaffected(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            _user(text="hi"), _assistant(text="one"), _assistant(text="two"),
+        ])
+        turn = T.load_current_turn(path, max_bytes=10 * 1024)
+        assert len(turn) == 2
+
+
+class TestReadFailurePropagates:
+    """A read that fails partway is not a transcript with no signal in it.
+
+    `read_last_user_message` returning "" says "read it all, found nothing" and
+    both preflight callers act on it; only None makes them fail open. An
+    `OSError` raised after `getsize` succeeded used to end the iterator
+    silently and produce "" (codex review round 1 on #1076, P1 — confirmed).
+    """
+
+    def _explode_on_binary_open(self, monkeypatch, path):
+        real_open = builtins.open
+
+        def boom(target, *args, **kwargs):
+            mode = args[0] if args else kwargs.get("mode", "r")
+            if str(target) == str(path) and "b" in mode:
+                raise OSError("simulated read failure")
+            return real_open(target, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", boom)
+
+    def test_last_user_message_is_none_when_the_read_fails(
+        self, tmp_path, monkeypatch
+    ):
+        path = _write_jsonl(tmp_path, [_user(text="hi")])
+        self._explode_on_binary_open(monkeypatch, path)
+        assert T.read_last_user_message(path) is None
+
+    def test_recent_events_fails_open_when_the_read_fails(
+        self, tmp_path, monkeypatch
+    ):
+        path = _write_jsonl(tmp_path, [_user(text="hi"), _assistant(text="a")])
+        self._explode_on_binary_open(monkeypatch, path)
+        assert T.load_recent_events(path) == []
+
+    def test_iter_lines_backwards_raises_rather_than_ending(
+        self, tmp_path, monkeypatch
+    ):
+        path = _write_jsonl(tmp_path, [_user(text="hi")])
+        self._explode_on_binary_open(monkeypatch, path)
+        with pytest.raises(T.TranscriptReadError):
+            list(T._iter_lines_backwards(path, 1024))
