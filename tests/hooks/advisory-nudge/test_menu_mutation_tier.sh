@@ -353,34 +353,50 @@ run_case "Tier 0b neg: KO 취소 — 배포하지 않음"             pass defau
 run_case "negation token is scoped to cancel"  advisory default "$(build_payload '["Deploy to prod and notify", "Deploy to prod but do not notify"]')"
 
 # ---------------------------------------------------------------------------
-# (d9) Gap 3 — the compound-option VERB axis, documented and deliberately open
+# (d9) Gap 3 — the compound-option VERB axis, closed for the destructive verbs
 # ---------------------------------------------------------------------------
 # Issue #974 gap 3 asked whether anything remains after (d2)'s row 4 closed the
-# compound-option TARGET axis. Something does: an option pairing a safe MODE
-# token with a mutation verb and naming no high-blast target still suppresses.
-# It is left open on purpose, and these cases pin the reason rather than the
-# wish — a future round that "fixes" it fails here instead of shipping.
+# compound-option TARGET axis. Something did: an option pairing a safe MODE
+# token with a mutation verb and naming no high-blast target still suppressed.
+# PR #1016 built a fix (safe MODE + ANY mutation verb ⇒ not low-blast) and
+# rejected it — it also fired on the canonical single-clause dry-run menus
+# below, where the safe token governs the mutation verb as its own object and
+# nothing else happens.
 #
-# The residual. `pass` records what the hook DOES, not what is wanted.
-run_case "gap3 residual (open): dry-run→delete, no prod"  pass default "$(build_payload '["Dry-run then delete the customer table", "Delete the customer table"]')"
-run_case "gap3 residual (open): KO 드라이런 후 삭제"        pass default "$(build_payload '["드라이런 후 고객 테이블 삭제", "고객 테이블 삭제"]')"
+# The gap closes here on a narrower axis: a DESTRUCTIVE verb (delete / drop /
+# truncate / 삭제) naming a shared surface, behind a sequence connector
+# ("then" / " 후 ") in the same option as a safe-MODE token, is a second
+# unconditional clause — not a dry run. None of the four rejected-fix
+# counter-cases below pair a destructive verb with a shared surface, so the
+# narrower scope leaves all four silent while closing the residual.
+run_case "gap3 fixed: dry-run→delete, no prod, now fires"     advisory default "$(build_payload '["Dry-run then delete the customer table", "Delete the customer table"]')"
+run_case "gap3 fixed: KO 드라이런 후 삭제, now fires"           advisory default "$(build_payload '["드라이런 후 고객 테이블 삭제", "고객 테이블 삭제"]')"
+run_case "strict: gap3 dry-run→delete blocks"                  block    strict  "$(build_payload '["Dry-run then delete the customer table", "Delete the customer table"]')"
 
-# The row-4 control proving the residual is real and not a broken probe: the
-# identical shape with a high-blast target fires, in both modes.
+# The row-4 control proving the residual was real and not a broken probe: the
+# identical shape with a high-blast target already fired before this fix, in
+# both modes, and still does.
 run_case "gap3 control: same shape WITH prod"        advisory default "$(build_payload '["Dry-run then delete the prod table", "Delete the prod table"]')"
 run_case "strict: gap3 control WITH prod blocks"     block    strict  "$(build_payload '["Dry-run then delete the prod table", "Delete the prod table"]')"
 
-# Why it stays open. A verb-axis discriminator (safe MODE + mutation verb and no
-# safe target ⇒ not low-blast) was built and it closes the residual — while also
-# firing on all four menus below. Those are the canonical phrasings of the exact
-# option this hook asks menus to contain, and a dry run necessarily names the
-# verb it simulates: `Dry-run then delete the table` and `Dry-run the deploy` are
-# the same shape. Firing an `ask` at an author who already added the safe tier
-# teaches that adding one does not help, which inverts the hook's purpose.
+# The four rejected-fix counter-cases from PR #1016, re-measured against this
+# narrower discriminator: none pairs a destructive verb with a shared surface,
+# so all four stay silent — the broad version's false-positive cost does not
+# reproduce here.
 run_case "gap3 counter: Dry-run the deploy"        pass default "$(build_payload '["Deploy now", "Dry-run the deploy"]')"
 run_case "gap3 counter: Simulate the merge"        pass default "$(build_payload '["Merge now", "Simulate the merge"]')"
 run_case "gap3 counter: Report-only on the send"   pass default "$(build_payload '["Send the announcement", "Report-only pass on the send"]')"
 run_case "gap3 counter: KO 배포 드라이런"            pass default "$(build_payload '["지금 배포", "배포 드라이런"]')"
+
+# False-positive controls for the new discriminator itself. A destructive verb
+# behind a connector that names a LOCAL artifact (not a shared surface) stays
+# silent — the same Tier 1c veto `_names_shared_surface` already applies.
+run_case "gap3 new-fix control: dry-run→delete a test fixture stays silent" \
+  pass default "$(build_payload '["Dry-run then delete the test fixture", "Delete the test fixture"]')"
+# A destructive verb with no sequence connector at all — a single-clause dry
+# run of a delete — stays silent, same as the deploy/merge/send counters.
+run_case "gap3 new-fix control: Dry-run the delete (no connector, no target)" \
+  pass default "$(build_payload '["Delete now", "Dry-run the delete"]')"
 
 # ---------------------------------------------------------------------------
 # (e) BLOCK — strict mode

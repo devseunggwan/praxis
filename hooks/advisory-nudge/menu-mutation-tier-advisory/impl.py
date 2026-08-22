@@ -385,6 +385,55 @@ NEGATION_TOKENS_KO = (
     "안함",
 )
 
+# Tier 1e — sequential destructive mutation behind a safe-MODE token (issue
+# #974, codex round-1 gap 3 on PR #966; PR #1016 pinned this as an open
+# residual). `Dry-run then delete the customer table` is two clauses: the
+# safe mode covers only the first, and the delete is unconditional — unlike
+# `Dry-run the deploy`, where the safe token governs the mutation verb as its
+# own object and nothing else happens. `_is_low_blast` cannot tell those apart
+# from a low-blast token alone, so a menu whose only "safe" option is really a
+# disguised delete stayed silent.
+#
+# Scoped to destructive verbs ONLY (delete/drop/truncate/삭제), not every
+# mutation verb. PR #1016 already built and rejected the broad version — a
+# safe-token-plus-any-mutation-verb veto — because it also fired on `Deploy
+# now` / `Dry-run the deploy`, `Merge now` / `Simulate the merge`, `Send the
+# announcement` / `Report-only pass on the send`, and their KO pair, all of
+# which are the exact single-clause dry-run alternative this hook wants menus
+# to carry. None of those four pair a destructive verb with a shared surface,
+# so the narrower scope leaves them untouched — measured against the full
+# fixture set below, not assumed.
+DESTRUCTIVE_VERBS_EN = (
+    "delete",
+    "drop",
+    "truncate",
+)
+DESTRUCTIVE_VERBS_KO = ("삭제",)
+
+# The connector that marks a second clause rather than a single dry-run
+# action. KO uses `" 후 "` (padded, not bare `후`) because the bare character
+# is a common substring (`이후`, `최후`, `후보`, `오후`) — the padding requires
+# it to stand alone as the postposition "after", the same whole-token
+# discipline the EN lookaround already applies.
+SEQUENCE_CONNECTOR_EN = ("then",)
+SEQUENCE_CONNECTOR_KO = (" 후 ",)
+
+
+def _has_sequential_destructive_mutation(text: str) -> bool:
+    """True if a destructive verb naming a shared surface trails a sequence
+    connector in the same option that also carries a safe-MODE token (gap 3).
+
+    Order is not checked — `Delete the table, then dry-run to confirm` is the
+    same two-clause shape read the other way and is just as unconditional.
+    `_names_shared_surface` supplies the same local-artifact veto Tier 1c
+    uses, so `Dry-run then delete the test fixture` stays silent.
+    """
+    if not _matches(text, SEQUENCE_CONNECTOR_KO, SEQUENCE_CONNECTOR_EN):
+        return False
+    if not _matches(text, DESTRUCTIVE_VERBS_KO, DESTRUCTIVE_VERBS_EN):
+        return False
+    return _names_shared_surface(text)
+
 
 def _en_token_present(token: str, lower_text: str) -> bool:
     """ASCII-letter lookaround match: token not flanked by ASCII letters.
@@ -446,11 +495,18 @@ def _is_low_blast(text: str) -> bool:
 
     A mutation VERB does not disqualify: `deploy to dev first` is a mutating
     verb aimed at a safe surface, which is exactly the alternative this hook
-    asks the menu to carry.
+    asks the menu to carry. A DESTRUCTIVE verb behind a sequence connector
+    does disqualify (gap 3, `_has_sequential_destructive_mutation`): unlike
+    `deploy to dev first`, `dry-run then delete the customer table` performs
+    the mutation unconditionally in its second clause.
     """
     if _names_high_blast_target(text):
         return False
-    return _matches(text, LOW_BLAST_TOKENS_KO, LOW_BLAST_TOKENS_EN)
+    if not _matches(text, LOW_BLAST_TOKENS_KO, LOW_BLAST_TOKENS_EN):
+        return False
+    if _has_sequential_destructive_mutation(text):
+        return False
+    return True
 
 
 def _is_abandon(text: str) -> bool:
