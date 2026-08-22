@@ -62,6 +62,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 
@@ -78,12 +79,36 @@ def _read(path: str) -> _Record | None:
 
 
 def _write(path: str, record: _Record) -> bool:
+    """Atomic write (temp + `os.replace`): `open(path, "w")` truncates before
+    writing, so a concurrent `_read` can observe a half-written file. That
+    read raises `ValueError`, which `_read` cannot tell apart from "no file",
+    and `resolve` then reports the decision as never having been asked
+    (#1031). Same convention as `session-intent`'s `write_state` — a sibling
+    on the same truncate-vs-crash hazard (issue #647 H7).
+
+    The temp file is created in `path`'s own directory (never a fixed
+    fallback like `/tmp`): `os.replace` requires both on the same filesystem,
+    and a missing directory must fail here exactly as the old `open(path,
+    "w")` did, not silently write elsewhere.
+    """
+    parent = os.path.dirname(path) or "."
     try:
-        with open(path, "w", encoding="utf-8") as handle:
-            json.dump(record, handle, ensure_ascii=False)
-        return True
+        fd, tmp_path = tempfile.mkstemp(dir=parent, prefix=".decision-gate-")
     except OSError:
         return False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(record, handle, ensure_ascii=False)
+        os.replace(tmp_path, path)
+    except Exception:
+        # Broad on purpose: json.dump can raise TypeError, not just OSError;
+        # any failure before os.replace must still unlink the temp file.
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        return False
+    return True
 
 
 def _cmux(args: list[str], timeout: float) -> int | None:
