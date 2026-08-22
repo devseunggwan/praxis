@@ -211,7 +211,7 @@ def _derive_failure_text(tool_response: Any) -> str:
         if error_text:
             return error_text
     if isinstance(tool_response.get("stderr"), str):
-        err = tool_response.get("stderr", "").strip()
+        err = _strip_harness_noise(tool_response.get("stderr", ""))
         if err:
             return err
     if isinstance(tool_response.get("output"), str):

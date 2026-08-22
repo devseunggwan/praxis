@@ -20,6 +20,7 @@
 #  13) interrupted 응답은 실패로 판정
 #  14) exit-0 Bash 호출(stderr가 harness cwd-reset 안내뿐) -> advisory 없음 (issue #1042)
 #  15) harness noise가 섞여도 동일 실패 반복은 여전히 advisory (positive control)
+#  16) stderr가 noise뿐인 서로 다른 실패는 서로 다른 signature (issue #1042)
 #
 # Run:
 #   bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
@@ -566,6 +567,50 @@ if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "
 else
   assert_fail "15) genuine repeated failure still advises past harness-noise stripping" \
     "rc=$rc out=[$out] err=[$err]"
+fi
+
+# ---------------------------------------------------------------------------
+# Case 16: two structurally unrelated FAILING commands whose `stderr` is
+# ONLY the harness noise (distinguishing text lives in `stdout` instead, as
+# with an `interrupted:true` timeout) must get DIFFERENT signatures and not
+# accumulate into one counter (issue #1042 defect 2).
+# ---------------------------------------------------------------------------
+echo "=== case 16: unrelated failures with noise-only stderr get distinct signatures ==="
+interrupted_noise_payload() {
+  # interrupted_noise_payload <session_id> <stdout>
+  python3 - "$1" "$2" <<'PY'
+import json, sys
+session_id, stdout = sys.argv[1], sys.argv[2]
+print(json.dumps({
+    "session_id": session_id,
+    "tool_name": "Bash",
+    "tool_input": {"command": "irrelevant"},
+    "tool_response": {
+        "stdout": stdout,
+        "stderr": "\nShell cwd was reset to /Users/x/projects/praxis",
+        "interrupted": True,
+        "isImage": False,
+        "noOutputExpected": False,
+    },
+}))
+PY
+}
+
+STATE18="$TMP_DIR/c18.json"
+pipe_hook "$(interrupted_noise_payload sess-1042-sig "waiting on lock A ...\n")" "$STATE18" >/dev/null 2>/dev/null
+pipe_hook "$(interrupted_noise_payload sess-1042-sig "waiting on lock B, unrelated command ...\n")" "$STATE18" >/dev/null 2>/dev/null
+
+distinct_sigs="$(python3 -c "
+import json
+state = json.load(open('$STATE18'))
+print(len(state.get('failures', {})))
+")"
+
+if [ "$distinct_sigs" = "2" ]; then
+  assert_pass "16) unrelated noise-only-stderr failures get distinct signatures"
+else
+  assert_fail "16) unrelated noise-only-stderr failures get distinct signatures" \
+    "expected 2 distinct signature keys, got $distinct_sigs: $(cat "$STATE18")"
 fi
 
 echo

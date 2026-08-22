@@ -61,11 +61,14 @@ noOutputExpected}`이며 `exit`도 `isError`도 없습니다. 그래서 모든 B
 `tool_response`에서 실패 텍스트 후보를 다음 순서로 추출합니다.
 
 1. `error`
-2. `stderr`
+2. `stderr` (harness noise 필터를 거친 뒤)
 3. `output`
 4. `stdout`
 
-추출 실패 시 빈 문자열을 쓰고, 실패 키를 보정합니다.
+추출 실패 시 빈 문자열을 쓰고, 실패 키를 보정합니다. `stderr`가 harness
+noise만 담고 있었다면 필터 후 빈 문자열이 되어 `output`/`stdout`으로
+넘어가므로, 진짜 구분 정보가 `stdout`에만 있는 실패(예: `interrupted:true`
+지만 `stderr`는 noise뿐인 경우)도 명령마다 다른 signature를 받습니다.
 
 동일 실패를 추정하기 위해 아래 토큰은 정규화합니다.
 
@@ -219,5 +222,7 @@ python3 -m pytest tests/test_hook_state_concurrency.py
 - 같은 harness noise가 `stderr`에 섞여도 진짜 동일 실패 반복은 여전히
   2회째부터 advisory (positive control — defect 1 수정이 훅 자체를
   무력화하지 않았는지 확인)
+- `stderr`가 noise뿐이고 구분 정보가 `stdout`에만 있는 서로 다른 실패 2건은
+  서로 다른 signature를 받아 카운터가 합쳐지지 않음 (issue #1042 defect 2)
 - 두 프로세스 동시 실행: 잠금 없이는 증분 유실, 잠금 하에서는 카운트 1→2→3
   과 advisory 2회(2회째·3회째) (`tests/test_hook_state_concurrency.py`)
