@@ -99,6 +99,13 @@ number (`통과`) keys as `pass:bare`.
   with no fail/pass word nearby is deliberately **not** matched — too broad
   ("이슈 3건" is not a verdict count) — this stays scoped to the vocabulary the
   issue named, no invented generic-count abstraction.
+- **Reversed order binds tightly**: in the `"0 FAILED"` / `"0건 실패"` order
+  only whitespace and a Korean counter suffix (`건`/`개`) may sit between the
+  number and the word. A permissive gap lets a range denominator's trailing
+  `"중"` bridge instead: on `"120/348 중 FAIL 0"` the reversed alternative
+  matched `"348 중 FAIL"` first, keyed `fail:348`, and consumed the real
+  `"FAIL 0"` — so a later unqualified `"실패 0"` found no prior mention and
+  the gate silently never fired.
 - **Scope qualifier**: a line carrying `"N줄 중"` / `"of N lines"` / `"N/M"` /
   `"N%"` is transparent about what was actually covered and stays silent
   even when the number was already stated — this is what keeps the

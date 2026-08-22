@@ -261,6 +261,15 @@ build_transcript_verdict \
   none
 run_case advisory "verdict-bare-pass-restatement" '{}'
 
+# --- range denominator must not pre-empt the verdict count -----------------
+# "120/348 중 FAIL 0" once bound 348 as the fail count and consumed the real
+# "FAIL 0", so the later bare "실패 0" found no prior mention and stayed silent.
+build_transcript_verdict \
+  "120/348 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "실패 0 으로 진행 중" "2026-08-20T09:21:48.000Z" \
+  none
+run_case advisory "verdict-range-denominator-not-the-count" '{}'
+
 echo ""
 echo "runtime-state-claim-gate: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

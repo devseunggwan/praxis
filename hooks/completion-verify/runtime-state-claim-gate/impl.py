@@ -179,11 +179,19 @@ def detect_claims(text: str) -> list[str]:
 _FAIL_WORD = r"(?:FAILs?|fail(?:ed)?|실패|오류|에러|error)"
 _PASS_WORD = r"(?:PASS(?:ED)?|통과|성공|success)"
 
+# Reversed order ("0 FAILED", "0건 실패"): only whitespace and a Korean
+# counter suffix may bridge the number to the word. A permissive `\D{0,3}`
+# lets a range denominator's trailing "중" bridge instead — on "120/348 중
+# FAIL 0" the reversed alternative matches "348 중 FAIL" FIRST, stores
+# `fail:348`, and consumes the real "FAIL 0", so a later unqualified "실패 0"
+# finds no prior mention and the gate never fires.
+_REV_GAP = r"\s*(?:건|개)?\s*"
+
 # A count attached to a fail/pass word, either order, small gap allowed
 # ("FAILs: 0", "0 FAILED", "실패 0", "0건 실패").
 _VERDICT_NUM_RE = re.compile(
-    rf"{_FAIL_WORD}\D{{0,6}}?(\d+)|(\d+)\D{{0,3}}?{_FAIL_WORD}"
-    rf"|{_PASS_WORD}\D{{0,6}}?(\d+)|(\d+)\D{{0,3}}?{_PASS_WORD}",
+    rf"{_FAIL_WORD}\D{{0,6}}?(\d+)|(\d+){_REV_GAP}{_FAIL_WORD}"
+    rf"|{_PASS_WORD}\D{{0,6}}?(\d+)|(\d+){_REV_GAP}{_PASS_WORD}",
     re.IGNORECASE,
 )
 # A bare pass claim carrying no adjacent number ("통과", "PASSED").
