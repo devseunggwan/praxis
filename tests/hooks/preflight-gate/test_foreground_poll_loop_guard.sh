@@ -457,6 +457,46 @@ python3 -c 'import time; time.sleep(1.3)'
 err=$(PRAXIS_POLL_LOOP_WAITER_TTL=1 bw_run "$BW_F" bw-f "$BW_LOOP"); rc=$?
 bw_assert "waiter-ttl-override-expired-stays-silent" silent "$rc" "$err"
 
+# The advisory has to reach the MODEL, not only the debug log. A PreToolUse
+# hook's stderr is fed to the model only when the dispatcher exits 2 (the deny
+# path), so on this exit-0 lane the same text is also written as
+# `hookSpecificOutput.additionalContext`. Pinned here because a stderr-only
+# advisory passes every assertion above while being invisible to the agent.
+
+# bw_stdout <home> <session_id> <command> — stdout of one guard run.
+bw_stdout() {
+  (
+    export PRAXIS_HOME="$1"
+    bw_payload "$2" "$3" | "$HOOK" 2>/dev/null
+  )
+}
+
+BW_H="$BW_DIR/home-h"
+out=$(bw_stdout "$BW_H" bw-h 'sleep 30 && tail -50 /tmp/ctx.log'); rc=$?
+if [ "$rc" -eq 0 ] && [ -z "$out" ]; then
+  PASS=$((PASS + 1)); echo "ok    [waiter-first-launch-emits-no-context]"
+else
+  echo "FAIL  [waiter-first-launch-emits-no-context] expected exit 0 + empty stdout, got rc=$rc: ${out:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("waiter-first-launch-emits-no-context")
+fi
+
+out=$(bw_stdout "$BW_H" bw-h 'sleep 90 && tail -50 /tmp/ctx.log'); rc=$?
+# The payload must be model-visible context and NOTHING else: a
+# `permissionDecision` key here would mean this lane started denying.
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+hso = d.get("hookSpecificOutput", {})
+assert hso.get("hookEventName") == "PreToolUse", d
+assert "background waiter for this same target" in hso.get("additionalContext", ""), d
+assert "permissionDecision" not in hso and "decision" not in d, d
+' 2>/dev/null; then
+  PASS=$((PASS + 1)); echo "ok    [waiter-advisory-reaches-model-as-context]"
+else
+  echo "FAIL  [waiter-advisory-reaches-model-as-context] expected exit 0 + additionalContext, got rc=$rc: ${out:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("waiter-advisory-reaches-model-as-context")
+fi
+
 # The advisory is a background-lane behaviour only: the same command in the
 # FOREGROUND is still the hard block, unchanged.
 BW_G="$BW_DIR/home-g"

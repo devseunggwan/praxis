@@ -121,7 +121,7 @@ reported age of the original waiter a lie.
 | Situation (all `run_in_background: true`) | Action |
 | --- | --- |
 | First waiter for a target | pass, recorded (exit 0, silent) |
-| Second waiter, same target, only the `sleep` duration changed | **advisory** (exit 0, stderr) |
+| Second waiter, same target, only the `sleep` duration changed | **advisory** (exit 0, `additionalContext` + stderr) |
 | Second waiter, same target, identical loop-shaped command | **advisory** |
 | Concurrent waits on different files / different run ids | pass (silent) |
 | Background call with no `sleep` at all, twice | pass (silent) |
@@ -134,10 +134,22 @@ hands out, and a genuinely-needed second waiter must stay reachable. The
 message names the already-armed waiter, its age and remaining window, and
 `TaskStop` as the way to reap the pile-up.
 
+**Delivery channel: `additionalContext` AND stderr.** A PreToolUse hook's stderr
+is fed to the model only when the dispatcher exits 2 — the deny path
+([`docs/hook/INDEX.md`](../../../docs/hook/INDEX.md)). On this lane's exit-0 path
+stderr reaches the debug log and nothing else, so a stderr-only advisory is inert
+for the agent it is written for. The same text is therefore also written as
+`hookSpecificOutput.additionalContext`, the one PreToolUse channel that does
+reach the model; `_dispatch.run_group` forwards and merges those once deny and
+ask have both missed. stderr is kept because `_fire_ledger.classify_decision`
+derives `advise` from stderr — dropping it would reclassify every fire of this
+lane as `pass` and erase the metric. Shape mirrors `pipefail-advisory`:
+`hookEventName: PreToolUse`, no top-level `continue`.
+
 Known limitation, intentional: PreToolUse cannot see whether the earlier
 background job has already exited or been `TaskStop`ed, so a waiter reaped
 early still counts as armed until its window elapses. The cost of that false
-positive is one stderr line on a call that proceeds.
+positive is one advisory line on a call that proceeds.
 
 **State.** `<PRAXIS_HOME>/cache/poll-loop-waiters-<session_id>.json` via
 `resolve_cache_file` (ppid fallback when the payload carries no `session_id`),

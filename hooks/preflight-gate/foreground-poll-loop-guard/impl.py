@@ -61,8 +61,10 @@ passed the guard every time (146 of 500 Bash calls in one session, 9 waiters
 left for the harness to kill hours later). A background call whose whole job is
 to elapse is recorded in a session registry keyed on its sleep-normalized
 command signature; a second such call arriving while the first's armed window
-is still open draws an ADVISORY (stderr, exit 0) naming the already-armed
-waiter and `TaskStop`. It never blocks — the block message hands out
+is still open draws an ADVISORY (exit 0) naming the already-armed waiter and
+`TaskStop`. It is written to BOTH `hookSpecificOutput.additionalContext` — the
+one PreToolUse channel that reaches the model at exit 0 — and stderr, which the
+fire ledger reads to classify the fire as `advise`. It never blocks — the block message hands out
 `run_in_background: true` as the escape, so denying it would contradict the
 guard's own redirect.
 
@@ -546,6 +548,35 @@ def _background_waiter_advisory(command: str, session_id: str | None) -> str | N
     )
 
 
+def _emit_additional_context(advisory: str) -> None:
+    """Write the advisory as `hookSpecificOutput.additionalContext` (issue #1063).
+
+    stderr alone leaves this lane inert. A PreToolUse hook's stderr is fed to the
+    model only when the dispatcher exits 2 (`docs/hook/INDEX.md`); on the exit-0
+    path it reaches the debug log and nothing else, so the advisory would never
+    be seen by the agent it is written for. `additionalContext` is the one
+    PreToolUse channel that does reach the model (`_dispatch.py` forwards and
+    merges it once deny and ask have both missed).
+
+    The stderr write is KEPT alongside it: `_fire_ledger.classify_decision`
+    derives `advise` from stderr, so moving the text to stdout would reclassify
+    every fire as `pass`. Shape mirrors `pipefail-advisory` — `PreToolUse` event
+    name, no top-level `continue` (a PreToolUse stop-processing switch whose
+    default is already what is wanted here).
+    """
+    json.dump(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "additionalContext": advisory,
+            }
+        },
+        sys.stdout,
+        ensure_ascii=False,
+    )
+    sys.stdout.write("\n")
+
+
 def _reference_path() -> str:
     """Absolute path to this guard's own spec.md (issue #1012).
 
@@ -657,6 +688,7 @@ def main() -> int:
         advisory = _background_waiter_advisory(command, session_id)
         if advisory:
             sys.stderr.write(advisory + "\n")
+            _emit_additional_context(advisory)
         return 0
 
     reason = _detect(command)
