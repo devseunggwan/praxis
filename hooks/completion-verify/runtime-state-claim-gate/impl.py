@@ -26,6 +26,18 @@ MCP read), emits an advisory. Advisory by default (stdout
 `PRAXIS_RUNTIME_CLAIM_STRICT=1` escalates to `{"decision": "block", ...}`
 (re-prompts the model to probe). Fully fail-open; bypass with
 `PRAXIS_RUNTIME_CLAIM_BYPASS=1`.
+
+Second, unrelated gap closed by issue #1062: the trigger above fires only when
+the USER asks about runtime state. The actual path a partial measurement took
+to a public PR anchor (issue #1062, PR #1058 rev4) was voluntary
+RE-STATEMENT of an already-uttered verdict number ("FAIL 0") with its scope
+qualifier ("348줄 중") silently dropped over several turns, while an unrelated
+progress number (log line count) kept changing beside it — making the
+sentence look fresh. This hook additionally scans the final message for a
+verdict-count claim (`실패 N` / `FAIL N` / bare `통과`) that (a) was already
+stated earlier THIS session, (b) carries no scope qualifier on its line this
+time, and (c) has no fresh probe in the current turn — same evidence gate as
+the running/isolation claim above.
 """
 from __future__ import annotations
 
@@ -33,6 +45,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
@@ -153,6 +166,212 @@ def detect_claims(text: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Verdict-restatement detection (issue #1062) — a DIFFERENT claim shape from
+# the running/isolation claims above: not "is X currently happening" but "the
+# number I already measured, said again". A claim key is (kind, number),
+# e.g. "fail:0"; a bare pass/fail word with no number ("통과") keys as
+# "pass:bare". Only FAIL/PASS-adjacent vocabulary counts — a standalone "N건"
+# with no fail/pass word nearby is deliberately NOT matched (too broad: "이슈
+# 3건" is not a verdict count) — narrowest change that closes the gap named in
+# the issue, no invented "generic count" abstraction.
+# ---------------------------------------------------------------------------
+
+# The EN half needs lookaround boundaries — without them "pass" matched
+# inside "bypass" and "success" inside "successful", recording a bogus
+# `pass:0` prior mention that makes a later GENUINE first verdict fire (and,
+# in strict mode, blocks a correct message). Same `(?<![A-Za-z])…(?![A-Za-z])`
+# convention as the sibling gates' `_en_token_present` (pr-state-refetch-gate,
+# menu-mutation-tier-advisory) — `\b` puts no boundary between Hangul and
+# ASCII. The Korean half needs none: 실패/통과 carry their own boundaries.
+_EN_L = r"(?<![A-Za-z])"
+_EN_R = r"(?![A-Za-z])"
+_FAIL_WORD = rf"(?:{_EN_L}(?:fail(?:ed|s)?|error){_EN_R}|실패|오류|에러)"
+_PASS_WORD = rf"(?:{_EN_L}(?:pass(?:ed)?|success){_EN_R}|통과|성공)"
+
+# Reversed order ("0 FAILED", "0건 실패"): only whitespace and a Korean
+# counter suffix may bridge the number to the word. A permissive `\D{0,3}`
+# lets a range denominator's trailing "중" bridge instead — on "120/348 중
+# FAIL 0" the reversed alternative matches "348 중 FAIL" FIRST, stores
+# `fail:348`, and consumes the real "FAIL 0", so a later unqualified "실패 0"
+# finds no prior mention and the gate never fires.
+_REV_GAP = r"\s*(?:건|개)?\s*"
+
+# Forward order ("FAILs: 0", "실패 건수: 0", "실패는 0"): separators, plus the
+# Korean counter/particle that idiomatically attaches to the word. A blanket
+# `\D{0,6}` also bridged an intervening English noun, so "error code 0" keyed
+# `fail:0` — the count belongs to "code", not to the verdict.
+_FWD_GAP = r"[\s:=]{0,3}(?:건수|개수|수|은|는|이|가)?[\s:=]{0,3}"
+
+# A count attached to a fail/pass word, either order, small gap allowed
+# ("FAILs: 0", "0 FAILED", "실패 0", "0건 실패").
+_VERDICT_NUM_RE = re.compile(
+    rf"{_FAIL_WORD}{_FWD_GAP}(\d+)|(\d+){_REV_GAP}{_FAIL_WORD}"
+    rf"|{_PASS_WORD}{_FWD_GAP}(\d+)|(\d+){_REV_GAP}{_PASS_WORD}",
+    re.IGNORECASE,
+)
+# A bare pass claim carrying no adjacent number ("통과", "PASSED").
+_VERDICT_BARE_RE = re.compile(rf"{_PASS_WORD}(?!{_FWD_GAP}\d)", re.IGNORECASE)
+
+# Scope-qualifier phrases naming the measured artifact's coverage — "348줄
+# 중", "of 348 lines", "120/348", "34%". A clause carrying one of these is
+# transparent about what was actually covered and stays silent even when the
+# same number was already stated (the motivating incident's own first
+# restatement, "348줄 중 FAIL 0", must stay silent per the issue's own
+# false-positive check).
+_QUALIFIER_RE = re.compile(
+    r"\d+\s*(?:줄|line|lines)\s*(?:중|of)"
+    r"|of\s+\d+\s*(?:lines?|줄)?"
+    r"|\d+\s*/\s*\d+"
+    r"|\d+\s*%",
+    re.IGNORECASE,
+)
+
+
+# A qualifier only qualifies the verdict it shares a CLAUSE with. Scanned per
+# line, ANY percentage or fraction anywhere on the line silenced the verdict —
+# and the incident's own shape is a moving progress number sitting beside a
+# frozen verdict number, so "진행률 80%, 실패 0" read as qualified while the
+# "실패 0" half was exactly the stale restatement this gate exists to catch.
+_CLAUSE_SPLIT_RE = re.compile(r"[,;，、]+|(?<=[.!?。？！])\s+")
+
+
+def _claim_key_from_match(m: "re.Match[str]") -> str | None:
+    if m.group(1) is not None:
+        return f"fail:{m.group(1)}"
+    if m.group(2) is not None:
+        return f"fail:{m.group(2)}"
+    if m.group(3) is not None:
+        return f"pass:{m.group(3)}"
+    if m.group(4) is not None:
+        return f"pass:{m.group(4)}"
+    return None
+
+
+def _humanize_key(key: str) -> str:
+    kind, _, num = key.partition(":")
+    word = "FAIL" if kind == "fail" else "PASS"
+    return word if num == "bare" else f"{word} {num}"
+
+
+def extract_verdict_claims(text: str) -> list[dict]:
+    """Return `{"key", "qualified"}` for each verdict-count claim in `text`,
+    scanned per line and qualified per CLAUSE — a scope qualifier counts only
+    when it shares a clause with the verdict it is supposed to modify. Quoted
+    lines (`>`) are skipped, matching `detect_claims`."""
+    claims: list[dict] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(">"):
+            continue
+        seen: set[str] = set()
+        for clause in _CLAUSE_SPLIT_RE.split(line):
+            if not clause:
+                continue
+            # Asking "실패 0인가요?" is not restating a verdict — the spec puts
+            # a question clause on the silent side for BOTH claim kinds, and
+            # the runtime-state path already reads it that way (detect_claims).
+            if _QUESTION_RE.search(clause):
+                continue
+            qualified = bool(_QUALIFIER_RE.search(clause))
+            numeric = list(_VERDICT_NUM_RE.finditer(clause))
+            for m in numeric:
+                key = _claim_key_from_match(m)
+                if key and key not in seen:
+                    seen.add(key)
+                    claims.append({"key": key, "qualified": qualified})
+            for m in _VERDICT_BARE_RE.finditer(clause):
+                # A reversed count ("0 PASS") puts the number BEFORE the word,
+                # so the bare pattern still matches inside a numerically scoped
+                # claim — minting pass:bare there makes the scoped claim read as
+                # a restatement of an unrelated bare one.
+                if any(n.start() <= m.start() < n.end() for n in numeric):
+                    continue
+                if "pass:bare" not in seen:
+                    seen.add("pass:bare")
+                    claims.append({"key": "pass:bare", "qualified": qualified})
+    return claims
+
+
+def collect_prior_verdict_mentions(prior_events: list[dict]) -> dict[str, str | None]:
+    """Return claim key -> earliest ISO timestamp (or None) it was stated in
+    `prior_events` (assistant text, any turn before the current one,
+    qualified or not — a qualified prior mention still means the number was
+    already said). ISO8601 `Z`-suffixed timestamps sort correctly as strings,
+    so no datetime parsing is needed to track the minimum."""
+    mentions: dict[str, str | None] = {}
+    for ev in prior_events:
+        msg = ev.get("message", {})
+        if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
+            continue
+        content = msg.get("content", [])
+        text = ""
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            text = "\n".join(
+                b.get("text", "") for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+        if not text:
+            continue
+        ts = ev.get("timestamp")
+        ts = ts if isinstance(ts, str) and ts else None
+        for claim in extract_verdict_claims(text):
+            key = claim["key"]
+            if key not in mentions:
+                mentions[key] = ts
+            elif ts and (mentions[key] is None or ts < mentions[key]):
+                mentions[key] = ts
+    return mentions
+
+
+def _last_assistant_timestamp(turn: list[dict]) -> str | None:
+    # The elapsed time must belong to the message the gate is scoring, so a
+    # final event without a timestamp is `unknown` — not the last event that
+    # happened to carry one, which reports an older, wrong elapsed.
+    for ev in reversed(turn):
+        msg = ev.get("message", {})
+        if isinstance(msg, dict) and msg.get("role") == "assistant" and not ev.get("isSidechain"):
+            t = ev.get("timestamp")
+            return t if isinstance(t, str) and t else None
+    return None
+
+
+def _elapsed_minutes(ts_from: str | None, ts_to: str | None) -> str:
+    """Minutes between two ISO8601 timestamps, or "unknown" if either is
+    missing or unparseable — the message degrades gracefully rather than
+    fabricating a number (transcripts predating this hook carry no
+    `timestamp` gap this can't cover)."""
+    if not ts_from or not ts_to:
+        return "unknown"
+    try:
+        a = datetime.fromisoformat(ts_from.replace("Z", "+00:00"))
+        b = datetime.fromisoformat(ts_to.replace("Z", "+00:00"))
+    except ValueError:
+        return "unknown"
+    return f"{abs((b - a).total_seconds()) / 60:.1f}"
+
+
+def detect_verdict_restatement(
+    last_text: str, prior_events: list[dict]
+) -> tuple[list[str], dict[str, str | None]]:
+    """Return (restated claim keys, prior-mention timestamps) for verdict
+    numbers in `last_text` that are (a) unqualified here and (b) were already
+    stated somewhere earlier this session."""
+    mentions = collect_prior_verdict_mentions(prior_events)
+    if not mentions:
+        return [], mentions
+    restated: list[str] = []
+    for claim in extract_verdict_claims(last_text):
+        if claim["qualified"]:
+            continue
+        key = claim["key"]
+        if key in mentions and key not in restated:
+            restated.append(key)
+    return restated, mentions
+
+
+# ---------------------------------------------------------------------------
 # Evidence detection — a probe tool_use in the CURRENT turn. Turn-scoped (not
 # the sibling's 80-event window): runtime state goes stale across turns, and
 # the incident turns contained zero tool calls of any kind. Any read-class
@@ -184,7 +403,7 @@ def has_probe_in_turn(turn: list[dict]) -> bool:
     return False
 
 
-def _advisory(kinds: list[str]) -> str:
+def _advisory_running(kinds: list[str]) -> str:
     return (
         f"{_PREFIX} final message asserts a runtime/execution state "
         f"({'/'.join(kinds)}: e.g. \"X is running in Y\" / \"로컬은 건드리지 "
@@ -195,8 +414,29 @@ def _advisory(kinds: list[str]) -> str:
         "intent (\"요청 기준으로는 X입니다. 실측은 하지 않았습니다\"). "
         "Launch success does not reveal WHERE something runs: remote/isolation "
         "modes fall back silently (issue #809).\n"
-        f"{_PREFIX} bypass: {_BYPASS_ENV}=1\n"
     )
+
+
+def _advisory_restatement(restated: list[str], mentions: dict[str, str | None], now: str | None) -> str:
+    lines = [
+        f"{_PREFIX} the final message restates a verdict number already "
+        "stated earlier this session, WITHOUT a scope qualifier (\"N줄 중\" "
+        "/ \"of N lines\"), and the current turn contains NO probe tool call:"
+    ]
+    for key in restated:
+        elapsed = _elapsed_minutes(mentions.get(key), now)
+        lines.append(
+            f"{_PREFIX}   {_humanize_key(key)} — last stated {elapsed} min "
+            "ago. Re-measure against the CURRENT artifact before restating, "
+            "or keep the scope qualifier every time (\"X줄 중 Y\")."
+        )
+    lines.append(
+        f"{_PREFIX} Rule: a changing progress number beside a frozen verdict "
+        "number (log length growing, FAIL count fixed) makes the sentence "
+        "look fresh even when only the frozen half is being repeated "
+        "(issue #1062).\n"
+    )
+    return "\n".join(lines)
 
 
 @fail_open
@@ -228,17 +468,26 @@ def main() -> int:
         return 0
 
     kinds = detect_claims(last_text)
-    if not kinds:
+    prior_events = events[: len(events) - len(turn)] if turn else events
+    restated, mentions = detect_verdict_restatement(last_text, prior_events)
+    if not kinds and not restated:
         return 0
 
     if has_probe_in_turn(turn):
         return 0
 
+    message = ""
+    if kinds:
+        message += _advisory_running(kinds)
+    if restated:
+        message += _advisory_restatement(restated, mentions, _last_assistant_timestamp(turn))
+    message += f"{_PREFIX} bypass: {_BYPASS_ENV}=1\n"
+
     if os.environ.get(_STRICT_ENV, "").strip() == "1":
-        emit_stop_block(_advisory(kinds))
+        emit_stop_block(message)
         decision = _fire_ledger.DECISION_BLOCK
     else:
-        emit_stop_advisory(_advisory(kinds))
+        emit_stop_advisory(message)
         decision = _fire_ledger.DECISION_ADVISE
     # Rich fire record (issue #847): Stop hooks signal block/advise via a stdout
     # decision while exiting 0, so @fail_open's coarse path records only "pass".

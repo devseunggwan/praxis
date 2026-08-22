@@ -185,6 +185,188 @@ run_case silent "stop-hook-active" '{"stop_hook_active": true}'
 TRANSCRIPT="/nonexistent/transcript.jsonl"
 run_case silent "missing-transcript" '{}'
 
+# ============================================================================
+# Verdict-restatement gate (issue #1062) — PR #1058 anchor rev4 verbatim
+# shape: a verdict number ("FAIL 0") measured once with an accurate scope
+# qualifier ("348줄 중"), then restated bare across later turns while an
+# unrelated progress number (log line count) kept changing beside it.
+# build_transcript_verdict <prior_text> <prior_ts> <final_text> <final_ts> <evidence>
+# -> writes path to $TRANSCRIPT. `prior_text`/`prior_ts` seed an EARLIER turn
+# (separated by a real user message) so the claim is a cross-turn restatement,
+# not a same-message repeat.
+# ============================================================================
+build_transcript_verdict() {
+  local prior_text="$1" prior_ts="$2" final_text="$3" final_ts="$4" evidence="$5"
+  TRANSCRIPT="$(mktemp)"
+  python3 - "$TRANSCRIPT" "$prior_text" "$prior_ts" "$final_text" "$final_ts" "$evidence" <<'PY'
+import json, sys
+path, prior_text, prior_ts, final_text, final_ts, evidence = sys.argv[1:7]
+events = [
+    {"message": {"role": "user", "content": "run the suite"}},
+    {"message": {"role": "assistant", "content": [{"type": "text", "text": prior_text}]},
+     "timestamp": prior_ts},
+    {"message": {"role": "user", "content": "keep going"}},
+]
+if evidence == "bash":
+    events.append({"message": {"role": "assistant", "content": [
+        {"type": "tool_use", "name": "Bash",
+         "input": {"command": "tail -n 50 /tmp/suite.log"}}]}})
+events.append({"message": {"role": "assistant", "content": [
+    {"type": "text", "text": final_text}]}, "timestamp": final_ts})
+with open(path, "w", encoding="utf-8") as f:
+    for e in events:
+        f.write(json.dumps(e, ensure_ascii=False) + "\n")
+PY
+}
+
+# --- gap reproduction: qualified measurement, then bare restatement, no probe
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "1110줄까지 실패 0 으로 진행 중" "2026-08-20T09:21:48.000Z" \
+  none
+run_case advisory "verdict-restatement-no-qualifier" '{}'
+
+# --- false-positive control: restatement KEEPS the qualifier -> silent ------
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "1110줄 중 FAIL 0" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-restatement-qualified-stays-silent" '{}'
+
+# --- restatement WITH a fresh probe in the current turn -> silent -----------
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "실패 0 으로 진행 중" "2026-08-20T09:21:48.000Z" \
+  bash
+run_case silent "verdict-restatement-with-probe" '{}'
+
+# --- first-ever mention (no prior occurrence) -> silent ---------------------
+build_transcript_verdict \
+  "빌드를 시작합니다" "2026-08-20T09:19:36.000Z" \
+  "FAILs: 0 / SKIPPED: 0" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-first-mention-not-restatement" '{}'
+
+# --- a DIFFERENT number is not a restatement (re-measured, not repeated) ----
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "1110줄까지 실패 2" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-different-number-not-restatement" '{}'
+
+# --- bare 통과 (pass, no number) restated without qualifier ------------------
+build_transcript_verdict \
+  "12개 중 통과" "2026-08-20T09:19:36.000Z" \
+  "여전히 통과 상태로 진행 중입니다" "2026-08-20T09:21:48.000Z" \
+  none
+run_case advisory "verdict-bare-pass-restatement" '{}'
+
+# --- range denominator must not pre-empt the verdict count -----------------
+# "120/348 중 FAIL 0" once bound 348 as the fail count and consumed the real
+# "FAIL 0", so the later bare "실패 0" found no prior mention and stayed silent.
+build_transcript_verdict \
+  "120/348 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "실패 0 으로 진행 중" "2026-08-20T09:21:48.000Z" \
+  none
+run_case advisory "verdict-range-denominator-not-the-count" '{}'
+
+# --- EN vocabulary needs word boundaries -----------------------------------
+# "pass" inside "bypass" once recorded a bogus pass:0 prior mention, so this
+# GENUINE first "PASS 0" fired an advisory (a block, under strict mode).
+build_transcript_verdict \
+  "bypass 0 으로 우회했습니다" "2026-08-20T09:19:36.000Z" \
+  "PASS 0 입니다" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-en-substring-not-a-verdict-word" '{}'
+
+# --- the count must belong to the verdict word, not an intervening noun ----
+build_transcript_verdict \
+  "error code 0 을 확인했습니다" "2026-08-20T09:19:36.000Z" \
+  "실패 0 입니다" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-count-belongs-to-another-noun" '{}'
+
+# --- EN reversed-order restatement still fires (boundary fix is not a mute) -
+build_transcript_verdict \
+  "348줄 중 0 FAILED" "2026-08-20T09:19:36.000Z" \
+  "0 FAILED 로 진행 중" "2026-08-20T09:21:48.000Z" \
+  none
+run_case advisory "verdict-en-reversed-order-restatement" '{}'
+
+# --- an unrelated progress number is not the verdict's qualifier -----------
+# Scanned per line, the "80%" marked the whole line qualified and the stale
+# "실패 0" beside it passed silently — the incident's own shape (a moving
+# progress number beside a frozen verdict).
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "진행률 80%, 실패 0 으로 진행 중" "2026-08-20T09:21:48.000Z" \
+  none
+run_case advisory "verdict-unrelated-percent-not-a-qualifier" '{}'
+
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "작업 3/5 완료, 실패 0" "2026-08-20T09:21:48.000Z" \
+  none
+run_case advisory "verdict-unrelated-fraction-not-a-qualifier" '{}'
+
+# --- a bare-PASS key must not be minted from a numerically scoped claim ----
+# "0 PASS" reverses the order, so the bare-PASS pattern matched inside it and
+# recorded pass:bare alongside pass:0 — a prior bare 통과 then read the scoped
+# claim as its own restatement.
+build_transcript_verdict \
+  "12개 중 통과" "2026-08-20T09:19:36.000Z" \
+  "0 PASS 입니다" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-reversed-numeric-is-not-a-bare-pass" '{}'
+
+# --- a verdict stated as a QUESTION stays silent (spec: either kind) --------
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "실패 0인가요?" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-question-clause-stays-silent" '{}'
+
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "FAIL 0?" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-en-question-clause-stays-silent" '{}'
+
+# --- same-clause qualifier still silences (EN "of N lines" form) -----------
+build_transcript_verdict \
+  "348줄 중 FAIL 0" "2026-08-20T09:19:36.000Z" \
+  "FAIL 0 of 1110 lines" "2026-08-20T09:21:48.000Z" \
+  none
+run_case silent "verdict-same-clause-qualifier-stays-silent" '{}'
+
+# --- elapsed time belongs to the scored message, not an older one ----------
+# A final event carrying no timestamp fell back to an EARLIER assistant event
+# in the same turn, so the advisory reported that event's age ("1 min ago")
+# instead of "unknown". Needs TWO assistant events in the turn to discriminate.
+TRANSCRIPT="$(mktemp)"
+python3 - "$TRANSCRIPT" <<'PY_T'
+import json, sys
+events = [
+    {"message": {"role": "user", "content": "run the suite"}},
+    {"message": {"role": "assistant", "content": [{"type": "text", "text": "348줄 중 FAIL 0"}]},
+     "timestamp": "2026-08-20T09:19:36.000Z"},
+    {"message": {"role": "user", "content": "keep going"}},
+    {"message": {"role": "assistant", "content": [{"type": "text", "text": "계속 진행합니다"}]},
+     "timestamp": "2026-08-20T09:21:00.000Z"},
+    {"message": {"role": "assistant", "content": [{"type": "text", "text": "실패 0 으로 진행 중"}]}},
+]
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    for e in events:
+        f.write(json.dumps(e, ensure_ascii=False) + "\n")
+PY_T
+elapsed_out=$(python3 -c 'import json,sys; print(json.dumps({"transcript_path": sys.argv[1]}))' "$TRANSCRIPT" \
+  | python3 "$HOOK" 2>/dev/null)
+if printf '%s' "$elapsed_out" | grep -q 'last stated unknown'; then
+  echo "PASS  [verdict-elapsed-unknown-when-final-event-untimed]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [verdict-elapsed-unknown-when-final-event-untimed] out=<$elapsed_out>"; FAIL=$((FAIL + 1))
+fi
+
 echo ""
 echo "runtime-state-claim-gate: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
