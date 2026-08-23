@@ -165,6 +165,9 @@ _SLEEP_ARG_RE = re.compile(r"(\d+(?:\.\d+)?)([smhd]?)[;)]*$")  # 20 / 2.5 / 30s 
 _SLEEP_UNIT_S = {"": 1.0, "s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
 _SEQ_HEAD_RE = re.compile(r"^[$(`]*seq$")  # seq / $(seq / `seq
 _NUMERIC_RE = re.compile(r"^(\d+)[;)`]*$")  # 40 / 40) / 40`
+# `seq` operands may be signed: `seq 10 -2 2` counts down. Kept separate from
+# _NUMERIC_RE, whose callers read an iteration count and must stay unsigned.
+_SEQ_OPERAND_RE = re.compile(r"^(-?\d+)[;)`]*$")  # 10 / -2 / 2)
 _BRACE_RANGE_RE = re.compile(r"\{(\d+)\.\.(\d+)\}")  # {A..N} / {N..A}
 _C_INIT_RE = re.compile(r"=\s*(\d+)")  # ((i=0; …
 _C_BOUND_RE = re.compile(r"([<>]=?)\s*(\d+)")  # … i<40 / i<=40 …
@@ -336,16 +339,22 @@ def _for_iterations(header: list[str]) -> int | None:
             continue
         nums: list[int] = []
         for nxt in header[i + 1 : i + 4]:
-            nm = _NUMERIC_RE.match(nxt)
+            nm = _SEQ_OPERAND_RE.match(nxt)
             if not nm:
                 break
             nums.append(int(nm.group(1)))
         if len(nums) == 1:  # seq N
-            return nums[0]
-        if len(nums) == 2:  # seq A B → B-A+1 iterations
+            return max(nums[0], 0)
+        if len(nums) == 2:  # seq A B → B-A+1 iterations, 0 when B < A
             return max(nums[1] - nums[0] + 1, 0)
-        if len(nums) == 3 and nums[1] > 0:  # seq A STEP B
-            return max((nums[2] - nums[0]) // nums[1] + 1, 0)
+        if len(nums) == 3:  # seq A STEP B — STEP may be negative (descending)
+            start, step, end = nums
+            if step == 0:
+                return None  # `seq A 0 B` never terminates — not a count
+            span = end - start if step > 0 else start - end
+            if span < 0:
+                return 0  # progression runs away from its end — seq prints nothing
+            return span // abs(step) + 1
         return None
     if any(tok.startswith("((") or tok.endswith("))") for tok in header):
         # C-style ((i=A; i<N; i+=S)) — punctuation-split tokens

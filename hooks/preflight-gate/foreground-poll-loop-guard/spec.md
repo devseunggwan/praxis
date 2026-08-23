@@ -62,12 +62,20 @@ stack). An unbounded `while`/`until` whose body contains a parseable `sleep`
 except `while read` / `while IFS= read` line-consumers which terminate on
 input, not time. A `for` loop blocks when `iterations × (sum of body sleeps
 per iteration) ≥ 100s`; the count is parsed from `seq 1 N` / `seq N` /
-`seq A B` (= B−A+1) / `seq A STEP B`, `{A..B}` (either direction), C-style
+`seq A B` (= B−A+1) / `seq A STEP B` (STEP may be negative — `seq 10 -2 2`
+counts down and runs 5 times, not 10), `{A..B}` (either direction), C-style
 `((i=A; i<N; i+=S))` (init, comparison operator, and step honored; missing
 init or comparison → fail-open), or a literal word list (word count; globs
 count as 1 word each — an undercount that only ever passes; `$`/backtick
 expansions in the list → unknowable count → fail-open). `sleep` arguments
 accept `s`/`m`/`h`/`d` unit suffixes.
+
+`seq A B` with `B < A` counts 0, which matches GNU `seq` (it prints nothing)
+and not BSD `seq`, which counts down. The divergence is left in the
+undercounting direction on purpose: an undercount only ever passes, while
+reading it as a descending run would block loops on the platform where it
+prints nothing. A zero step (`seq A 0 B`) never terminates and is not a count →
+fail-open.
 
 Known limitations (intentional): a loop backgrounded at the shell level
 (`… done &`) is still blocked — a `&`-job dies when the Bash tool call

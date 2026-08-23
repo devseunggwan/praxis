@@ -89,6 +89,19 @@ run_case "bounded-literal-list-25" block \
 run_case "bounded-minute-suffix" block \
   'for i in $(seq 1 5); do foo; sleep 2m; done'
 
+# A descending `seq A -S B` counts down: `seq 10 -2 2` runs 5 times, not 10.
+# The signed step used to be rejected, collapsing the header to `seq N` — so a
+# 60s loop was read as 120s and blocked. Both directions, because the fix must
+# not stop the genuinely-too-long descending loop from blocking.
+run_case "bounded-seq-descending-under-ceiling" pass \
+  'for i in $(seq 10 -2 2); do gh pr checks; sleep 12; done'
+run_case "bounded-seq-descending-over-ceiling" block \
+  'for i in $(seq 20 -2 2); do gh pr checks; sleep 12; done'
+run_case "bounded-seq-zero-step-fails-open" pass \
+  'for i in $(seq 1 0 40); do gh pr checks; sleep 30; done'
+run_case "bounded-seq-step-away-from-end" pass \
+  'for i in $(seq 2 -2 10); do gh pr checks; sleep 30; done'
+
 # ---- block: unbounded while/until + sleep ------------------------------------
 run_case "unbounded-while-true" block \
   'while true; do gh pr checks 777; sleep 20; done'
@@ -500,6 +513,19 @@ bw_assert "waiter-finite-for-inside-window-advises" advise "$rc" "$err"
 python3 -c 'import time; time.sleep(2.3)'
 err=$(bw_run "$BW_I" bw-i "$BW_FINITE"); rc=$?
 bw_assert "waiter-finite-for-past-own-total-stays-silent" silent "$rc" "$err"
+
+# A descending `seq` waiter arms for its OWN total. `seq 6 -2 2` runs 3 times,
+# so the window is 1.5s — reading the signed step as `seq 6` armed it for 3s
+# and a re-launch after it had returned reported a live waiter.
+BW_I2="$BW_DIR/home-i2"
+BW_DESC='for i in $(seq 6 -2 2); do sleep 0.5; done; tail -50 /tmp/desc.log'
+err=$(bw_run "$BW_I2" bw-i2 "$BW_DESC"); rc=$?
+bw_assert "waiter-descending-seq-first-launch-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_I2" bw-i2 "$BW_DESC"); rc=$?
+bw_assert "waiter-descending-seq-inside-window-advises" advise "$rc" "$err"
+python3 -c 'import time; time.sleep(1.8)'
+err=$(bw_run "$BW_I2" bw-i2 "$BW_DESC"); rc=$?
+bw_assert "waiter-descending-seq-past-own-total-stays-silent" silent "$rc" "$err"
 
 # False-positive control for the clause above: an UNBOUNDED loop over the same
 # elapsed span keeps the TTL, so the silence above is the computed window and
