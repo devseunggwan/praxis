@@ -428,8 +428,11 @@ _CONSUMERS = {
         ["load_current_turn", "extract_last_assistant_text"],
     HOOKS / "completion-verify" / "pr-claim-mutation-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
+    # Also streams the turns BEFORE the current one, reusing the shared boundary
+    # predicate so the backward and forward directions cannot disagree (#1076).
     HOOKS / "completion-verify" / "runtime-state-claim-gate" / "impl.py":
-        ["load_current_turn", "extract_last_assistant_text"],
+        ["load_current_turn", "extract_last_assistant_text",
+         "is_turn_boundary", "iter_transcript"],
     HOOKS / "completion-verify" / "artifact-verdict-evidence-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     # The one scan that genuinely needs the whole session; it streams instead
@@ -465,6 +468,26 @@ def _load_module(path: Path):
 
 
 class TestSingleSource:
+    def test_consumers_list_every_lib_function_they_import(self):
+        """A hook importing a reader the map omits is unpinned — it could
+        redefine that reader locally and no test above would notice. Constants
+        (`TRANSCRIPT_SCAN_LINES`) are not bindings and are skipped."""
+        import ast
+
+        for impl in sorted(HOOKS.glob("*/*/impl.py")):
+            imported: set[str] = set()
+            for node in ast.walk(ast.parse(impl.read_text())):
+                if isinstance(node, ast.ImportFrom) and node.module == "_transcript":
+                    imported |= {a.name for a in node.names}
+            callables = {s for s in imported if callable(getattr(T, s, None))}
+            if not callables:
+                continue
+            declared = set(_CONSUMERS.get(impl, []))
+            assert callables <= declared, (
+                f"{impl.parent.name} imports {sorted(callables - declared)} "
+                f"but _CONSUMERS does not list them"
+            )
+
     def test_consumers_bind_lib_function_objects(self):
         for path, symbols in _CONSUMERS.items():
             mod = _load_module(path)
