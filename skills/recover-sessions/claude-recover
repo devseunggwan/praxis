@@ -222,11 +222,14 @@ echo ""
 if [[ "$MODE" == "windows" ]]; then
   # Detect terminal app and open accordingly
   TERM_APP=""
-  if [[ "$TERM_PROGRAM" == "ghostty" ]] || pgrep -q Ghostty 2>/dev/null; then
+  # #1095: TERM_PROGRAM is commonly unset under tmux; `${TERM_PROGRAM:-}`
+  # keeps `set -u` from aborting the script and lets detection fall through
+  # to the intended `*)` fallback (attach-manually hint).
+  if [[ "${TERM_PROGRAM:-}" == "ghostty" ]] || pgrep -q Ghostty 2>/dev/null; then
     TERM_APP="Ghostty"
-  elif [[ "$TERM_PROGRAM" == "iTerm.app" ]] || pgrep -q iTerm2 2>/dev/null; then
+  elif [[ "${TERM_PROGRAM:-}" == "iTerm.app" ]] || pgrep -q iTerm2 2>/dev/null; then
     TERM_APP="iTerm"
-  elif [[ "$TERM_PROGRAM" == "Apple_Terminal" ]]; then
+  elif [[ "${TERM_PROGRAM:-}" == "Apple_Terminal" ]]; then
     TERM_APP="Terminal"
   fi
 

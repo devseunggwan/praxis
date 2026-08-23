@@ -77,6 +77,18 @@ print(json.dumps({
 ")
 build_fixture "$PROJ/bbbb2222-2222-2222-2222-222222222222.jsonl" "$B_PAYLOAD"
 
+# Fixture P (#1095): first message contains a literal pipe. The scanner must
+# sanitize it at emit time (replace "|" with "-") so the pipe-delimited record
+# does not shift fields and corrupt the trailing home_label on the consumer.
+P_PAYLOAD=$(python3 -c "
+import json
+print(json.dumps({
+  'type':'user','isSidechain':False,'timestamp':'$NOW','cwd':'$CWD',
+  'message':{'content':'Run foo | grep bar | sort the output'}
+}))
+")
+build_fixture "$PROJ/pppp8888-8888-8888-8888-888888888888.jsonl" "$P_PAYLOAD"
+
 # Fixture C: compact-only "Summary:" form (no Primary/Original labels).
 COMPACT_SHORT='This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\nSummary: Investigate flaky tests in the integration suite.'
 C_PAYLOAD=$(python3 -c "
@@ -215,6 +227,28 @@ assert_no_prefix "no-original-request-label-leak" \
 assert_equals "plain-first-message" \
   "bbbb2222" \
   "Investigate the broken hook chain in PR 472"
+
+# P (#1095): pipe chars in the message are sanitized to dashes so the record
+# stays 6-field. The display field must carry no literal "|", and the trailing
+# home_label field must be intact ("claude") — a leaked pipe would push the
+# real message tail into the home column.
+assert_equals "pipe-in-message-sanitized" \
+  "pppp8888" \
+  "Run foo - grep bar - sort the output"
+# Consume exactly as the recover scripts do: `IFS='|' read` into 6 fields.
+# With an unsanitized pipe the trailing home_label absorbs the message tail
+# ("grep bar - sort the output|claude"), so this is the faithful regression.
+p_record=$(grep -F "|pppp8888" <<< "$out" | head -1)
+IFS='|' read -r _ _ _ _ _ p_home <<< "$p_record"
+if [[ "$p_home" == "claude" ]]; then
+  echo "PASS  [pipe-record-home-field-intact]  (home='$p_home')"
+  pass=$((pass + 1))
+else
+  echo "FAIL  [pipe-record-home-field-intact]"
+  echo "  expected home field: 'claude'"
+  echo "  actual:              '$p_home'"
+  fail=$((fail + 1))
+fi
 
 # C: "Summary: <body>" short form
 assert_equals "summary-prefix-stripped" \
