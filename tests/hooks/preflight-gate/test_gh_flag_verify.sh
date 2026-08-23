@@ -112,6 +112,13 @@ run_case "T04: gh issue list --base main (invalid flag for issue list, deny)" \
   "deny" \
   '{"tool_name":"Bash","tool_input":{"command":"gh issue list --base main"}}'
 
+# #1092: a path-prefixed gh binary must not slip past the flag gate.
+# `argv[0].text == "gh"` exact match previously let `/usr/bin/gh issue list
+# --base main` bypass; `_is_gh_binary` closes it.
+run_case "T04b: /usr/bin/gh issue list --base main (path-prefix, deny)" \
+  "deny" \
+  '{"tool_name":"Bash","tool_input":{"command":"/usr/bin/gh issue list --base main"}}'
+
 # T05: gh issue list --state all (valid for issue list, silent)
 run_case "T05: gh issue list --state all (valid for issue list, silent)" \
   "silent" \

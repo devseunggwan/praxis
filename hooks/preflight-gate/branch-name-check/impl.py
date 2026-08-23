@@ -52,6 +52,18 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 
+# Shell grouping / command-substitution chars that may prefix a binary token
+# when it sits inside a subshell or substitution (`(git …)`, `$(git …)`,
+# `` `git …` ``). Stripped before the basename comparison so the binary-name
+# check is not fooled by the wrapper syntax. Mirrors `_is_git_binary` in the
+# commit-gate hooks and `_is_gh_binary` in `_hook_utils`.
+_GROUP_PREFIX_CHARS = "(){}$`"
+
+
+def _is_git_binary(token: str) -> bool:
+    stripped = token.lstrip(_GROUP_PREFIX_CHARS)
+    return stripped == "git" or stripped.endswith("/git")
+
 # ---------------------------------------------------------------------------
 # Configuration defaults
 # ---------------------------------------------------------------------------
@@ -275,7 +287,7 @@ def _extract_new_branch(argv: list[str]) -> str | None:
       git worktree add --orphan <path>   (implicit: orphan branch = basename(path))
     """
     argv = strip_prefix(argv)
-    if not argv or argv[0] != "git":
+    if not argv or not _is_git_binary(argv[0]):
         return None
 
     # Drop shell redirect tokens before positional detection so a query like

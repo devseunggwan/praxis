@@ -182,6 +182,14 @@ run_case "block: invalid field --json merged" \
   "block:BLOCKED" \
   "gh pr view 1 --json merged"
 
+# #1092: a path-prefixed gh binary must not slip past the --json field gate.
+# `argv[0] == "gh"` exact match previously let `/usr/bin/gh pr view 1 --json
+# merged` bypass; `_is_gh_binary` closes it. (The hook still shells out to the
+# hermetic `gh` stub for the field list regardless of argv[0]'s path.)
+run_case "block: /usr/bin/gh pr view --json merged (path-prefix)" \
+  "block:BLOCKED" \
+  "/usr/bin/gh pr view 1 --json merged"
+
 # ---------------------------------------------------------------------------
 # Case 2: Pass — valid field (`--json state`)
 # `state` IS a valid `gh pr view` JSON field; hook must pass (exit 0).

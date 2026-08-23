@@ -48,6 +48,7 @@ from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E4
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     Token,
     TokenRole,
+    _is_gh_binary,
     filter_argv,
     tokenize_with_roles,
 )
@@ -406,7 +407,7 @@ def check_gh_flags(seg: list[Token]) -> tuple[bool, str]:
          flag region.
     """
     argv = filter_argv(seg)
-    if not argv or argv[0].text != "gh":
+    if not argv or not _is_gh_binary(argv[0].text):
         return False, ""
 
     n = len(argv)

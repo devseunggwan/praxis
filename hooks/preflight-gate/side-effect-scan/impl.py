@@ -53,6 +53,7 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib")
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     GH_MERGE_VALUE_FLAGS,
+    _is_gh_binary,
     compound_cascade_hint,
     is_help_invocation,
     iter_command_starts,
@@ -178,7 +179,7 @@ def _gh_subcommand_pair(argv: list[str]) -> tuple[str, str]:
       ['gh', '--repo', 'o/r', 'pr', 'merge']   → ('pr', 'merge')
       ['gh', 'workflow', 'run', ...]           → ('workflow', 'run')
     """
-    if not argv or argv[0] != "gh":
+    if not argv or not _is_gh_binary(argv[0]):
         return ("", "")
     i = _gh_skip_global_flags(argv)
     group = argv[i] if i < len(argv) else ""

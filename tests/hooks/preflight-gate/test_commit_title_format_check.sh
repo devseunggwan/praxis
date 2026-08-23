@@ -179,6 +179,13 @@ run_case "block: release: via gh issue create (PR-only exemption does not cover 
   "block" \
   '{"tool_name":"Bash","tool_input":{"command":"gh issue create --title \"release: Production Deploy (2026-06-02)\" --body \"desc\""}}'
 
+# #1092: a path-prefixed gh binary must not slip past the title-format gate.
+# `argv[0] == "gh"` exact match previously let `/usr/bin/gh issue create`
+# bypass; `_is_gh_binary` closes it.
+run_case "block: release: via /usr/bin/gh issue create (path-prefix)" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"/usr/bin/gh issue create --title \"release: Production Deploy (2026-06-02)\" --body \"desc\""}}'
+
 # ---------------------------------------------------------------------------
 # PASS cases — non-commit commands
 # ---------------------------------------------------------------------------

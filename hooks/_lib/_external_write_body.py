@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 import re
 
-from _hook_utils import strip_prefix  # type: ignore[import-not-found]
+from _hook_utils import _is_gh_binary, strip_prefix  # type: ignore[import-not-found]
 
 # ---------------------------------------------------------------------------
 # Bash gh detection
@@ -82,7 +82,7 @@ def extract_gh_body(argv: list[str]) -> str | None:
 def is_gh_external_write(argv: list[str]) -> bool:
     """Return True iff argv invokes a gh subcommand that writes to a public surface."""
     argv = strip_prefix(argv)
-    if not argv or argv[0] != "gh":
+    if not argv or not _is_gh_binary(argv[0]):
         return False
 
     i = 1

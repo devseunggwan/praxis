@@ -39,6 +39,7 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    _is_gh_binary,
     iter_command_starts,
     safe_tokenize,
     strip_prefix,
@@ -105,7 +106,7 @@ def _parse_gh_body_file(argv: list[str]) -> str | None:
     Only fires for gh (issue|pr) (create|edit|comment) subcommands.
     """
     argv = strip_prefix(argv)
-    if not argv or argv[0] != "gh":
+    if not argv or not _is_gh_binary(argv[0]):
         return None
 
     # Skip global flags to reach object/subcommand pair.

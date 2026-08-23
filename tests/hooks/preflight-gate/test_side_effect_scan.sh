@@ -170,6 +170,10 @@ run_case "git-push"                 ask  "git push origin main"
 
 # --- detection: gh remote trigger ------------------------------------------
 run_case "gh pr merge"              ask  "gh pr merge 42 --squash"
+# #1092: a path-prefixed gh binary must not slip past the side-effect scan.
+# `argv[0] == "gh"` exact match (in _gh_subcommand_pair) previously let
+# `/usr/bin/gh pr merge` bypass; `_is_gh_binary` closes it.
+run_case "gh pr merge path-prefixed"  ask  "/usr/bin/gh pr merge 42 --squash"
 run_case "gh pr create"             ask  "gh pr create --title x --body y"
 run_case "gh workflow run"          ask  "gh workflow run deploy.yml"
 

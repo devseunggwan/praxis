@@ -80,6 +80,7 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib")
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    _is_gh_binary,
     iter_command_starts,
     safe_tokenize,
     strip_prefix,
@@ -354,7 +355,7 @@ def _walk_past_gh_globals(argv: list[str], start: int) -> int:
 def is_gh_mutating(argv: list[str]) -> tuple[bool, str]:
     """Detect a mutating gh invocation. Returns (matched, description)."""
     argv = strip_prefix(argv)
-    if not argv or argv[0] != "gh":
+    if not argv or not _is_gh_binary(argv[0]):
         return (False, "")
 
     i = _walk_past_gh_globals(argv, 1)

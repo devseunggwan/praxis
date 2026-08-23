@@ -69,6 +69,18 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     tokenize_with_roles,
 )
 
+# Shell grouping / command-substitution chars that may prefix a binary token
+# when it sits inside a subshell or substitution (`(git …)`, `$(git …)`,
+# `` `git …` ``). Stripped before the basename comparison so the binary-name
+# check is not fooled by the wrapper syntax. Mirrors `_is_git_binary` in the
+# commit-gate hooks and `_is_gh_binary` in `_hook_utils`.
+_GROUP_PREFIX_CHARS = "(){}$`"
+
+
+def _is_git_binary(token: str) -> bool:
+    stripped = token.lstrip(_GROUP_PREFIX_CHARS)
+    return stripped == "git" or stripped.endswith("/git")
+
 
 # ---------------------------------------------------------------------------
 # Role-aware flag-value spec (issue #263)
@@ -123,7 +135,7 @@ def _count_merge_tree_positionals(seg: list[Token]) -> int:
     invocation.
     """
     argv = filter_argv(seg)
-    if not argv or argv[0].text != "git":
+    if not argv or not _is_git_binary(argv[0].text):
         return -1
 
     # Find the merge-tree subcommand token. Skip past command-global
@@ -167,7 +179,7 @@ def _count_merge_tree_positionals(seg: list[Token]) -> int:
 def _check_git(seg: list[Token]) -> Optional[str]:
     """Return advisory text for known git mode-incompatible combos, else None."""
     argv = filter_argv(seg)
-    if not argv or argv[0].text != "git":
+    if not argv or not _is_git_binary(argv[0].text):
         return None
 
     # merge-tree: --name-only + 3+ positionals → legacy/modern conflict

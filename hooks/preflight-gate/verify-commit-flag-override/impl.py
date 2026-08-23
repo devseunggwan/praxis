@@ -46,6 +46,18 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     strip_prefix,
 )
 
+# Shell grouping / command-substitution chars that may prefix a binary token
+# when it sits inside a subshell or substitution (`(git …)`, `$(git …)`,
+# `` `git …` ``). Stripped before the basename comparison so the binary-name
+# check is not fooled by the wrapper syntax. Mirrors `_is_git_binary` in the
+# commit-gate hooks and `_is_gh_binary` in `_hook_utils`.
+_GROUP_PREFIX_CHARS = "(){}$`"
+
+
+def _is_git_binary(token: str) -> bool:
+    stripped = token.lstrip(_GROUP_PREFIX_CHARS)
+    return stripped == "git" or stripped.endswith("/git")
+
 # ---------------------------------------------------------------------------
 # Detection
 # ---------------------------------------------------------------------------
@@ -139,7 +151,7 @@ def detect_overrides(argv: list[str]) -> list[str]:
     has no problematic overrides.
     """
     argv = strip_prefix(argv)
-    if not argv or argv[0] != "git":
+    if not argv or not _is_git_binary(argv[0]):
         return []
 
     overrides: list[str] = []
