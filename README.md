@@ -1,79 +1,151 @@
 # Praxis
 
-Development workflow skills for Claude Code — disciplined, fast, resilient.
+A plugin that turns the workflow rules you already wrote in `CLAUDE.md` into things
+that actually fire at the moment they are needed — a merge that stops while a blocking
+review finding is still open, a "done" that will not go out without evidence behind it,
+a worktree workflow that is not skipped because the change looked small. Skills you
+invoke by name, and hooks that fire whether or not anyone remembers them. One runtime,
+packaged for Claude Code, Codex, Cursor, Gemini, and OpenCode.
 
 > **Note:** Skills may be added, removed, or restructured at any time without prior notice. This is a personal toolbox — not a stable API.
 
+## The name
+
+*Praxis* (πρᾶξις) is theory carried into action — where a stated principle stops being a
+statement and becomes something done. That is this repository's whole design, written in
+[`ETHOS.md`](ETHOS.md) as **spec defines, hook enforces**: every hook here is the
+structural enforcement of a rule that already existed as prose in a `CLAUDE.md` or a
+memory entry, and exists precisely because the prose had already failed at the moment it
+was needed. The skills sit on the same axis — `strike`, `debt`, `spec-drift`, and
+`merge-briefing` all make an already-decided rule reachable at execution time rather
+than deciding anything new.
+
+The word carries none of that domain on its own, which is what the paragraph above is
+for. It is also a crowded name: the Praxis API framework (Ruby), PraxisEMR, and several
+unrelated npm and PyPI packages share it. None of them share a namespace with this
+repository — the surfaces that resolve here are `devseunggwan/praxis`, the `praxis:`
+skill prefix behind `/praxis:retrospect`, and the `PRAXIS_*` environment variables.
+
+## Installation
+
+### Claude Code — plugin (recommended)
+
+```bash
+/plugin marketplace add https://github.com/devseunggwan/praxis
+/plugin install praxis
+```
+
+Claude Code reads `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`
+directly from the repo root.
+
+### Codex — marketplace + plugin
+
+```bash
+# Register the local marketplace (points at this repo's .agents/plugins/marketplace.json)
+codex marketplace add https://github.com/devseunggwan/praxis
+codex plugin install praxis
+```
+
+Codex reads `.agents/plugins/marketplace.json` as the marketplace root and
+`plugins/praxis/.codex-plugin/plugin.json` as the plugin root. The `skills/`,
+`hooks/`, and `scripts/` directories inside `plugins/praxis/` are symlinks
+into the repo-root runtime — there is no source duplication.
+
+### Direct skill install (fallback)
+
+When the plugin surface isn't available:
+
+```bash
+git clone https://github.com/devseunggwan/praxis.git ~/projects/praxis
+claude skill add ~/projects/praxis/skills/<skill-name>
+```
+
 ## Skills
 
-> **Invocation**: praxis entries are *skills*, not subagents. Always call them
-> via `Skill(skill="praxis:<name>")`. `Agent(subagent_type="praxis:<name>")`
-> returns `Agent type not found` — Agent and Skill resolve disjoint namespaces.
-> See [RUNTIME_CONSTRAINTS.md §3](RUNTIME_CONSTRAINTS.md) for the mapping table.
+Eighteen skills, grouped as Discovery, Development, Discipline, and Session Management.
+The full table — trigger keywords, when to use each, example invocation — lives in
+[`docs/skills.md`](docs/skills.md).
 
-> **Trigger keywords** mirror each skill's `SKILL.md` `description` field verbatim
-> and are intentionally kept in their source language (some are Korean) so the
-> README stays in sync with what actually triggers the skill — do not translate them.
+If you are new, start with `/praxis:using-praxis`: it asks what you are trying to do and
+routes you to the skill that fits, which is faster than reading the catalogue. The three
+worth knowing by name on day one:
 
-### Discovery
+| Skill | What it is for |
+| ------- | ---------------- |
+| `/praxis:using-praxis` | Finding the right skill when you don't know what exists yet |
+| `/praxis:retrospect` | After a session that went badly — find the friction's root cause and act on it |
+| `/praxis:merge-briefing` | Before merging — probe all three finding surfaces, then brief and ask |
 
-| Skill | Trigger keywords | When to use | Example invocation |
-| ------- | ----------------- | ------------- | ------------------- |
-| `using-praxis` | `praxis 처음`, `praxis 사용법`, `어떤 skill 부터`, `praxis intro`, `praxis getting started` | To find the right skill when you're new to praxis or unsure which one fits | `/praxis:using-praxis` |
-| `writing-praxis-skill` | `new skill`, `write skill`, `add skill`, `skill template`, `skill spec`, `스킬 작성`, `새 스킬` | To author a new SKILL.md or get a skill-structure guide | `/praxis:writing-praxis-skill` |
-
-### Development
-
-| Skill | Trigger keywords | When to use | Example invocation |
-| ------- | ----------------- | ------------- | ------------------- |
-| `retrospect` | `retrospect`, `what went wrong`, `session review`, `session improvement`, `improve` | To analyze friction patterns / root causes after a session and act on improvements | `/praxis:retrospect` |
-| `codex-review-wrap` | `codex review`, `review codex`, `safe review`, `premise verification`, `flip detection`, `sibling cross-check` | To run `/codex:review` safely in multi-worktree setups, with premise verification and flip detection | `/praxis:codex-review-wrap` |
-| `debt` | `praxis:debt`, `debt ledger`, `지연 결정`, `deferred decision`, `기술 부채 원장`, `commit trailer audit` | To harvest commit-trailer and compounding-comment deferred-decision markers into a report-only ledger | `/praxis:debt` |
-| `surface-enumeration` | `surface enumerate`, `input surface enumeration`, `input parser`, `input validation`, `intent classifier`, `정규식 경계`, `입력 표면 열거` | To enumerate every input variant before implementing a parser/validator/sanitizer so each becomes a required test case | `/praxis:surface-enumeration` |
-| `spec-drift` | `spec drift`, `spec-drift`, `스펙 드리프트`, `미구현 요구`, `unmet requirement`, `requirement status` | To report which requirements in the `~/.praxis/docs/specs/` store the current tree does not yet satisfy, by running each one's `Verify:` command | `/praxis:spec-drift` |
-| `merge-briefing` | `merge briefing`, `pre-merge briefing`, `머지 브리핑`, `머지해도 되나`, `approve merge`, `pre-ask probe`, `merge approval` | To probe all three finding surfaces, grade every finding by its blocking decoration, carry anchor `Unverified` gaps, and surface the six-part briefing before asking for merge approval | `/praxis:merge-briefing` |
-| `worktree-merge-cleanup` | `merge cleanup`, `post-merge cleanup`, `worktree cleanup`, `delete-branch merge`, `squash-ancestry`, `pre-merge worktree`, `머지 후 정리`, `worktree 정리` | To run `gh pr merge --squash --delete-branch` from the right worktree and clean up afterward (submodule `--force`, squash-ancestry guard, no-`&&`-chain) | `/praxis:worktree-merge-cleanup` |
-
-### Discipline
-
-| Skill | Trigger keywords | When to use | Example invocation |
-| ------- | ----------------- | ------------- | ------------------- |
-| `strike` | `/strike`, `/praxis:strike`, `strike 1/2/3`, `삼진` | To explicitly record a rule violation (excludes colloquial uses like "strike a balance") | `/praxis:strike <violation reason>` |
-| `strikes` | `/strikes`, `strike status`, `몇 진`, `check strikes` | To check the current session's strike count and recorded violations | `/praxis:strikes` |
-| `reset-strikes` | `/reset-strikes`, `strike 초기화`, `clear strikes` | To reset the counter and resume responses after a 3-strike block | `/praxis:reset-strikes` |
-
-### Session Management
-
-| Skill | Trigger keywords | When to use | Example invocation |
-| ------- | ----------------- | ------------- | ------------------- |
-| `recover-sessions` | `recover`, `session recovery`, `restore sessions`, `power recovery` | To recover sessions after power loss or a tmux crash (tmux backend) | `/praxis:recover-sessions` |
-| `cmux-recover-sessions` | `터졌다`, `크래시 복구`, `OOM 복구`, `세션 살려야`, `crash recovery`, `power loss recovery`, `cmux session recovery` | To emergency-recover many cmux sessions after a crash / power loss / OOM (`.jsonl` scan based) | `/praxis:cmux-recover-sessions` |
-| `cmux-save-sessions` | `save sessions`, `session save`, `session snapshot`, `cmux save`, `snapshot list` | To save the current cmux session list as JSON for later restore | `/praxis:cmux-save-sessions` |
-| `cmux-resume-sessions` | `resume sessions`, `restore from snapshot`, `rehydrate sessions`, `세션 복원`, `스냅샷 복원` | To restore workspaces from a saved snapshot (for crash recovery, use `cmux-recover-sessions`) | `/praxis:cmux-resume-sessions` |
-| `cmux-session-manager` | `cmux session`, `session management`, `session cleanup`, `cmux status`, `cmux tidy` | To run routine session cleanup or view a status dashboard | `/praxis:cmux-session-manager` |
-| `cmux-delegate` | `delegate`, `cmux delegate`, `new session` | To delegate to an independent session while preserving the current task's context (split review / debugging / implementation) | `/praxis:cmux-delegate` |
-
-> **CLI tools (not skills):** praxis also ships `bypass-review`, a shell wrapper
-> with no `SKILL.md` — it is **not** invocable as `/praxis:*` and is absent from
-> the skills above. It inspects the review bypass-telemetry event logs.
-> See [AGENTS.md → Local Development](AGENTS.md#local-development) for the full
-> list of shipped CLI wrappers.
+Praxis also ships `bypass-review`, a shell wrapper with no `SKILL.md`. It is **not**
+invocable as `/praxis:*`; it reads the review bypass-telemetry event logs. See
+[AGENTS.md → Local Development](AGENTS.md#local-development) for every shipped CLI
+wrapper.
 
 ## Hooks
 
-Praxis ships a set of PreToolUse / PostToolUse / Stop / UserPromptSubmit hooks
-that structurally enforce rules captured in CLAUDE.md (e.g. side-effect
-acknowledgment, completion-evidence requirement, protected-branch edit guard,
-manufactured action-menu detection). Hooks fail-open on infrastructure errors
-and never break Claude Code — they only nudge or block specific patterns.
+Hooks are the larger half of praxis: **90 hooks**, registered at 100 points across
+`PreToolUse`, `PostToolUse`, `Stop`, `UserPromptSubmit`, and `SessionStart`. They run
+without being invoked, so this section is the one to read before installing — it is what
+changes about your session.
 
-See [ARCHITECTURE.md → Hook index](ARCHITECTURE.md#hook-index) for the full
-list and per-hook spec links (specs live at `hooks/<role>/<name>/spec.md`;
-the [`docs/hook/INDEX.md`](docs/hook/INDEX.md) index links to them), and
-[DESIGN.md → Hook Design Contracts](DESIGN.md#hook-design-contracts) for the
-shared design contracts every hook follows. For a generated summary of hook
-roles, events, host filters, and strict/bypass knobs, see the
-[`Hook Operating Matrix`](docs/hook-operating-matrix.md).
+They divide into four roles. Two of them block by default, and a third can be
+promoted into blocking:
+
+| Role | Count | What it does |
+| ------ | ------- | -------------- |
+| `preflight-gate` | 35 | Inspects a tool call before it runs and can deny it |
+| `completion-verify` | 12 | Fires at `Stop` — can block a response that claims completion without evidence |
+| `advisory-nudge` | 38 | Prints a warning to stderr and lets the call through — until its `PRAXIS_*_STRICT` variable is set, which turns the same hook into a hard deny |
+| `postuse-correction` | 5 | Reacts after a tool call — telemetry, follow-up signals |
+
+Concretely, what a gate stops looks like this — `gh issue create` without a duplicate
+search first (`block-gh-issue-create-without-dup-search`), an edit to a file while you
+are standing on a protected branch (`pre-edit-protected-branch-guard`), a merge run from
+the wrong worktree (`gh-merge-worktree-precondition`), `gh search --state all` which that
+subcommand does not accept (`block-gh-state-all`), a foreground `sleep`-and-poll loop
+(`foreground-poll-loop-guard`), a commit whose title breaks the repo's format
+(`commit-title-format-check`).
+
+Two properties are load-bearing. **Hooks fail open**: a missing `jq`, a malformed stdin
+payload, an unreadable transcript — all exit 0, so a broken hook degrades to no hook
+rather than to a broken session. And a blocking hook that has a bypass variable **prints
+it in its own deny message** (`hooks/_lib/block_message.py`), so the way out arrives with
+the block rather than having to be hunted for.
+
+The complete list, with each hook's events, hosts, strict/bypass knobs, and the external
+commands it may run, is the generated
+[Hook Operating Matrix](docs/hook-operating-matrix.md). Per-hook specs live at
+`hooks/<role>/<name>/spec.md`, indexed by [`docs/hook/INDEX.md`](docs/hook/INDEX.md);
+[ARCHITECTURE.md → Hook index](ARCHITECTURE.md#hook-index) maps them to the component
+graph, and [DESIGN.md → Hook Design Contracts](DESIGN.md#hook-design-contracts) covers
+the contracts every hook follows.
+
+## Turning it off
+
+A hook that blocks something you meant to do is not a wall. There are three levers, from
+narrowest to widest.
+
+**Opt out of one gate.** 38 of the 90 hooks declare an opt-out variable — set it and
+that gate either skips entirely or demotes itself to a warning, depending on the hook.
+The form is the variable in front of the command it guards, with a reason:
+
+```bash
+PRAXIS_HOOK_BYPASS_SKILL_GATE=1 <command>   # <one-line reason>
+```
+
+Which variable belongs to which hook is the table in
+[`docs/bypass-vars.md`](docs/bypass-vars.md). Opt-outs are recorded by the
+`bypass-telemetry` hook, so `bypass-review` can later show you which gate you keep
+routing around — usually a sign the gate is miscalibrated, not that you are
+undisciplined.
+
+**Escalate instead.** The opposite lever exists too: 20 hooks read a `PRAXIS_*_STRICT`
+variable that promotes an advisory into a hard block. Defaults sit on the permissive
+side of that line — an advisory hook stays advisory until you say otherwise.
+
+**All of it.** Remove the plugin from Claude Code's `/plugin` interface, or drop the
+praxis entries from your `settings.json` hooks block. Skills and hooks are independent —
+removing the hooks leaves every `/praxis:*` skill working.
 
 ## Prerequisites
 
@@ -109,44 +181,6 @@ the system behaves exactly as before — no errors, no degradation.
 
 See [ARCHITECTURE.md → Provider Routing](ARCHITECTURE.md#provider-routing) for
 the full task-type / complexity routing matrix and fallback policy.
-
-## Installation
-
-Praxis ships a single runtime (`skills/`, `hooks/`, `scripts/`) with
-platform-specific packaging adapters generated from a canonical source in
-`manifests/`. Three install surfaces are supported.
-
-### Claude Code — plugin (recommended)
-
-```bash
-/plugin marketplace add https://github.com/devseunggwan/praxis
-/plugin install praxis
-```
-
-Claude Code reads `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`
-directly from the repo root.
-
-### Codex — marketplace + plugin
-
-```bash
-# Register the local marketplace (points at this repo's .agents/plugins/marketplace.json)
-codex marketplace add https://github.com/devseunggwan/praxis
-codex plugin install praxis
-```
-
-Codex reads `.agents/plugins/marketplace.json` as the marketplace root and
-`plugins/praxis/.codex-plugin/plugin.json` as the plugin root. The `skills/`,
-`hooks/`, and `scripts/` directories inside `plugins/praxis/` are symlinks
-into the repo-root runtime — there is no source duplication.
-
-### Direct skill install (fallback)
-
-When the plugin surface isn't available:
-
-```bash
-git clone https://github.com/devseunggwan/praxis.git ~/projects/praxis
-claude skill add ~/projects/praxis/skills/<skill-name>
-```
 
 ## Packaging internals
 
