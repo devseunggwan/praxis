@@ -385,14 +385,19 @@ def detect_verdict_restatement(
 ) -> tuple[list[str], dict[str, str | None]]:
     """Return (restated claim keys, prior-mention timestamps) for verdict
     numbers in `last_text` that are (a) unqualified here and (b) were already
-    stated somewhere earlier this session."""
+    stated somewhere earlier this session.
+
+    Condition (a) is decided from `last_text` alone, so it is decided first:
+    with nothing unqualified to restate, no prior event can change the answer
+    and `prior_events` is left undrained rather than scanned (issue #1076)."""
+    unqualified = [c for c in extract_verdict_claims(last_text) if not c["qualified"]]
+    if not unqualified:
+        return [], {}
     mentions = collect_prior_verdict_mentions(prior_events)
     if not mentions:
         return [], mentions
     restated: list[str] = []
-    for claim in extract_verdict_claims(last_text):
-        if claim["qualified"]:
-            continue
+    for claim in unqualified:
         key = claim["key"]
         if key in mentions and key not in restated:
             restated.append(key)
