@@ -667,6 +667,61 @@ class TestCappedScanFailsOpen:
         assert len(turn) == 2
 
 
+class TestCapDecidedByTheReader:
+    """`""` vs `None` is decided by whether the walk reached the file start.
+
+    A size sampled before the walk cannot answer it: the transcript is appended
+    to live, so a file that measured under the cap can be over it by the time
+    the reader gets there — and `""` ("read it all, no signal") is acted on
+    while `None` fails open (codex review #1083 P2).
+    """
+
+    @staticmethod
+    def _drain(walk):
+        """The value is carried by the StopIteration that ends the walk — a
+        `for` loop swallows it, and a later `next()` sees a closed generator."""
+        while True:
+            try:
+                next(walk)
+            except StopIteration as done:
+                return done.value
+
+    def test_reader_reports_reaching_the_start(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        path.write_text("a\nb\nc\n")
+        assert self._drain(T._iter_lines_backwards(str(path), 1024)) is True
+
+    def test_reader_reports_stopping_at_the_cap(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        path.write_text(("x" * 100 + "\n") * 50)
+        assert self._drain(T._iter_lines_backwards(str(path), 200)) is False
+
+    def test_stale_size_cannot_turn_a_capped_scan_into_no_signal(
+        self, tmp_path, monkeypatch
+    ):
+        path = tmp_path / "t.jsonl"
+        line = json.dumps(
+            {"type": "assistant",
+             "message": {"role": "assistant", "content": [{"type": "text", "text": "x" * 80}]}}
+        )
+        path.write_text((line + "\n") * 60)
+        monkeypatch.setattr(T, "CURRENT_TURN_SCAN_MAX_BYTES", 2000)
+        # A size from before the file grew past the cap — the shape the live
+        # transcript actually produces.
+        real = os.path.getsize
+        monkeypatch.setattr(
+            T.os.path, "getsize", lambda q: 1500 if q == str(path) else real(q)
+        )
+        assert T.read_last_user_message(str(path)) is None
+
+    def test_within_the_cap_still_answers_no_signal(self, tmp_path):
+        """Positive control — `None` everywhere would pass the test above."""
+        path = tmp_path / "t.jsonl"
+        path.write_text(json.dumps({"type": "assistant", "message": {"role": "assistant",
+                                                                     "content": []}}) + "\n")
+        assert T.read_last_user_message(str(path)) == ""
+
+
 class TestReadFailurePropagates:
     """A read that fails partway is not a transcript with no signal in it.
 

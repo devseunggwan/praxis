@@ -196,6 +196,12 @@ def _iter_lines_backwards(path: str, max_bytes: int):
     Stops at the start of the file or once `max_bytes` have been read,
     whichever comes first. Raises `TranscriptReadError` when the file cannot
     be opened or read; callers translate that into their own fail-open value.
+
+    Returns True when the walk reached the start of the file and False when
+    the cap cut it short (read via `StopIteration.value`). A caller cannot
+    infer this from the file size: the transcript is appended to live, so a
+    size sampled before the walk can say "small enough" about a file that has
+    since grown past the cap (codex review #1083 P2).
     """
     try:
         fh = open(path, "rb")
@@ -225,6 +231,7 @@ def _iter_lines_backwards(path: str, max_bytes: int):
             partial = b"" if pos == 0 else lines.pop(0)
             for raw in reversed(lines):
                 yield raw
+        return pos == 0
 
 
 def load_recent_events(
@@ -394,10 +401,6 @@ def read_last_user_message(transcript_path: str) -> str | None:
     """
     if not transcript_path or not os.path.isfile(transcript_path):
         return None
-    try:
-        size = os.path.getsize(transcript_path)
-    except OSError:
-        return None
 
     # Walk in reverse to find the most recent user-role entry whose content
     # includes human-authored text. Reading backwards from the end (#1076):
@@ -406,10 +409,12 @@ def read_last_user_message(transcript_path: str) -> str | None:
     # Driven by hand rather than by `for` so a mid-read failure is
     # distinguishable from exhaustion, without buffering the tail.
     tail = _iter_lines_backwards(transcript_path, CURRENT_TURN_SCAN_MAX_BYTES)
+    reached_start = False
     while True:
         try:
             raw_bytes = next(tail)
-        except StopIteration:
+        except StopIteration as exhausted:
+            reached_start = bool(exhausted.value)
             break
         except TranscriptReadError:
             return None
@@ -470,8 +475,9 @@ def read_last_user_message(transcript_path: str) -> str | None:
     # Nothing found. "" means "read it all, there is no signal" and callers may
     # act on it; that is only true when the backward walk actually reached the
     # start of the file. If the scan cap cut it short, the honest answer is the
-    # unreadable one — None, which every caller fails open on.
-    return "" if size <= CURRENT_TURN_SCAN_MAX_BYTES else None
+    # unreadable one — None, which every caller fails open on. The reader
+    # reports which of the two happened; a size sampled here cannot.
+    return "" if reached_start else None
 
 
 # ---------------------------------------------------------------------------
