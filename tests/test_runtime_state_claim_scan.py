@@ -14,7 +14,6 @@ import importlib.util
 import sys
 from pathlib import Path
 
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "hooks" / "_lib"))
@@ -69,6 +68,5 @@ def test_restatement_still_detected_across_prior_turns() -> None:
         }
     ]
     restated, mentions = gate.detect_verdict_restatement(text, iter(prior))
-    if not mentions:
-        pytest.skip("prior-mention collector did not recognise the fixture text")
+    assert mentions, "prior-mention collector did not recognise the fixture text"
     assert key in restated
