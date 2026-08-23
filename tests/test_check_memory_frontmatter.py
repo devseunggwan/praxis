@@ -5,6 +5,9 @@ Covers the three shapes the script's docstring commits to:
   - a field duplicated across top-level + `metadata:` (or nested twice) fails
   - `hookKeywords:` / `hookEvents:` in multi-line YAML-block or scalar form
     fail — this is the functional-bug case, not just a style drift
+  - `hookKeywords:` opened with `[` but never closed, and `hookable: true`
+    carrying a YAML inline comment with no hookKeywords, both fail — the lint
+    was diverging from the runtime parser on these two shapes (issue #1094)
   - a normalized entry passes
   - directory resolution honors `PRAXIS_MEMORY_DIR` and skips (rather than
     erroring) when the directory is absent, matching resolve_memory_dir()'s
@@ -159,6 +162,32 @@ body
     assert any("hookable: true" in e and "hookKeywords" in e and "missing" in e for e in errors), errors
 
 
+def test_hookable_inline_comment_with_no_keywords_flagged(tmp_path):
+    # issue #1094: `hookable: true # enabled` carries a YAML inline comment.
+    # impl.py:108-111 runs _strip_inline_comment before the truthiness test,
+    # so the runtime reads `true` (truthy) and — with no hookKeywords — drops
+    # the memory (impl.py:117-119 returns None). The pre-#1094 lint did NOT
+    # strip the inline comment, so its truthiness check read `true # enabled`
+    # as non-truthy and skipped the hookable-but-no-keywords check entirely,
+    # passing a memory the runtime silently drops.
+    p = _write(
+        tmp_path,
+        "feedback_bad_hookable_comment.md",
+        """---
+name: bad-hookable-comment
+description: test
+metadata:
+  type: feedback
+  hookable: true # enabled
+  originSessionId: abc-123
+---
+body
+""",
+    )
+    errors = check.check_file(p)
+    assert any("hookable: true" in e and "hookKeywords" in e and "missing" in e for e in errors), errors
+
+
 def test_hookable_false_missing_hookkeywords_not_flagged(tmp_path):
     # The F1 check is conditional on hookable being truthy — a non-hookable
     # memory has no hint-index behavior to protect, so omitting hookKeywords
@@ -201,6 +230,32 @@ body
     )
     errors = check.check_file(p)
     assert any("hookKeywords" in e and "empty list" in e for e in errors), errors
+
+
+def test_hookkeywords_unclosed_bracket_flagged(tmp_path):
+    # issue #1094: `hookKeywords: [kubectl, helm` opens a `[` but never closes
+    # it. impl.py:127-129 returns None the moment `find("]") == -1`, dropping
+    # the whole memory from the hint index. The pre-#1094 lint took
+    # `value[1:]` as the inner list, saw non-empty content, and reported clean
+    # — passing a memory the runtime silently drops (the exact silent-dark
+    # class this lint exists to catch).
+    p = _write(
+        tmp_path,
+        "feedback_bad_unclosed_keywords.md",
+        """---
+name: bad-unclosed-keywords
+description: test
+metadata:
+  type: feedback
+  hookable: true
+  hookKeywords: [kubectl, helm
+  originSessionId: abc-123
+---
+body
+""",
+    )
+    errors = check.check_file(p)
+    assert any("hookKeywords" in e and "no closing `]`" in e for e in errors), errors
 
 
 def test_hookevents_empty_bracket_not_flagged(tmp_path):

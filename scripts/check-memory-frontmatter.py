@@ -106,8 +106,19 @@ BRACKET_FIELDS = ("hookKeywords", "hookEvents")
 
 # Mirrors hooks/advisory-nudge/memory-hint/impl.py:60 exactly (TRUTHY_VALUES) —
 # the runtime's own truthy set for `hookable:`, after the same normalization
-# (strip, lowercase, strip quotes) that impl.py:108-113 applies.
+# that impl.py:108-113 applies: strip an inline `# comment` (via
+# _strip_inline_comment, mirrored below), then strip whitespace, lowercase,
+# and strip quotes. Before issue #1094 this lint omitted the inline-comment
+# strip, so `hookable: true # enabled` read as non-truthy here while the
+# runtime read it as truthy — leaving a hookable-but-no-hookKeywords memory
+# (which impl.py silently drops) unflagged.
 HOOKABLE_TRUTHY_VALUES = {"true", "yes"}
+
+# Mirrors hooks/advisory-nudge/memory-hint/impl.py:81 (INLINE_COMMENT_RE) — a
+# YAML inline comment is a `#` preceded by whitespace (YAML 1.2). impl.py
+# strips this from the `hookable:` value before the truthiness test; the lint
+# must do the same or it diverges from the runtime (issue #1094).
+HOOKABLE_INLINE_COMMENT_RE = re.compile(r"\s+#.*$")
 
 
 def frontmatter_block(raw: str) -> str | None:
@@ -191,13 +202,28 @@ def check_file(path: Path) -> list[str]:
                     )
                 elif field == "hookKeywords":
                     close_idx = value.find("]")
-                    inner = value[1:close_idx].strip() if close_idx != -1 else value[1:]
-                    if not inner:
+                    if close_idx == -1:
+                        # Unclosed bracket (issue #1094): a `[`-opened value
+                        # with no closing `]` (`hookKeywords: [kubectl, helm`)
+                        # makes impl.py:127-129 return None outright — the
+                        # whole memory is dropped from the hint index. The
+                        # prior lint took `value[1:]` as the inner list, saw
+                        # non-empty content, and reported clean, diverging
+                        # from the runtime it exists to mirror. Treat a
+                        # missing `]` as a drop, matching the runtime's None.
                         errors.append(
-                            f"`{field}: {value}` is an empty list — the memory-hint parser treats "
-                            "an empty hookKeywords the same as absent and silently drops the entire "
-                            "memory from the hint index (issue #942 F1)"
+                            f"`{field}: {value}` has no closing `]` — the memory-hint parser "
+                            "requires a closing bracket and silently drops the entire memory "
+                            "from the hint index when it is absent (issue #1094)"
                         )
+                    else:
+                        inner = value[1:close_idx].strip()
+                        if not inner:
+                            errors.append(
+                                f"`{field}: {value}` is an empty list — the memory-hint parser treats "
+                                "an empty hookKeywords the same as absent and silently drops the entire "
+                                "memory from the hint index (issue #942 F1)"
+                            )
 
     # F1 (issue #942): `hookable: true` with `hookKeywords` entirely absent is
     # the most direct silent-dark shape and was previously invisible to this
@@ -208,6 +234,12 @@ def check_file(path: Path) -> list[str]:
     hookable_truthy = False
     if "hookable" in occurrences:
         _, hookable_value = occurrences["hookable"][0]
+        # Strip an inline `# comment` before the truthiness test, mirroring
+        # impl.py:108-111 (issue #1094): otherwise `hookable: true # note`
+        # reads non-truthy here but truthy at runtime, so a hookable memory
+        # with no hookKeywords — which the runtime silently drops — goes
+        # unflagged.
+        hookable_value = HOOKABLE_INLINE_COMMENT_RE.sub("", hookable_value)
         hookable_truthy = hookable_value.strip().strip("\"'").lower() in HOOKABLE_TRUTHY_VALUES
     if hookable_truthy and "hookKeywords" not in occurrences:
         errors.append(
