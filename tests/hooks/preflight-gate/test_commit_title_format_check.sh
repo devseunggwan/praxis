@@ -110,8 +110,12 @@ run_case "valid docs via --message" \
   "silent" \
   '{"tool_name":"Bash","tool_input":{"command":"git commit --message \"docs(readme): update examples\""}}'
 
-run_case "valid chore via -m= embedded" \
-  "silent" \
+# git treats `-m=chore: ...` as the message `=chore: ...` (the `=` is part of
+# the attached value for a short option), so the real title is invalid. #1097
+# stopped the extractor from wrongly stripping that leading `=`, so the gate
+# now correctly blocks this malformed form instead of passing it silently.
+run_case "-m= embedded keeps a leading = and is blocked" \
+  "block" \
   '{"tool_name":"Bash","tool_input":{"command":"git commit -m=\"chore: update dependencies\""}}'
 
 run_case "valid refactor via -am combined flag" \
@@ -178,6 +182,13 @@ run_case "block: release: via git commit (PR-only exemption does not cover commi
 run_case "block: release: via gh issue create (PR-only exemption does not cover issues)" \
   "block" \
   '{"tool_name":"Bash","tool_input":{"command":"gh issue create --title \"release: Production Deploy (2026-06-02)\" --body \"desc\""}}'
+
+# #1092: a path-prefixed gh binary must not slip past the title-format gate.
+# `argv[0] == "gh"` exact match previously let `/usr/bin/gh issue create`
+# bypass; `_is_gh_binary` closes it.
+run_case "block: release: via /usr/bin/gh issue create (path-prefix)" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"/usr/bin/gh issue create --title \"release: Production Deploy (2026-06-02)\" --body \"desc\""}}'
 
 # ---------------------------------------------------------------------------
 # PASS cases — non-commit commands

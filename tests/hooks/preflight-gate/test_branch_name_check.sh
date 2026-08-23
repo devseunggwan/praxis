@@ -203,6 +203,13 @@ run_case "checkout -b wrong format (no issue number, block)" \
   "block" \
   '{"tool_name":"Bash","tool_input":{"command":"git checkout -b feature/my-cool-change"}}'
 
+# #1092: a path-prefixed git binary must not slip past the branch-name gate.
+# `argv[0] == "git"` exact match previously let `/usr/bin/git checkout -b`
+# bypass; `_is_git_binary` closes it.
+run_case "checkout -b path-prefixed git (block)" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"/usr/bin/git checkout -b feature/my-cool-change"}}'
+
 run_case "checkout -b missing prefix (block)" \
   "block" \
   '{"tool_name":"Bash","tool_input":{"command":"git checkout -b 434-feat-branch-check"}}'

@@ -160,6 +160,19 @@ RC=$?
 case_run "3. gh issue comment after read-intent open → ask" "ask" "$OUT" "$RC"
 
 # -----------------------------------------------------------------------
+# Case 3b (#1092): a path-prefixed gh binary must still be detected as a
+# mutating call. `argv[0] == "gh"` exact match previously let `/usr/bin/gh
+# issue comment` bypass the gate; `_is_gh_binary` closes it.
+# -----------------------------------------------------------------------
+SF=$(new_state)
+run_hook "$SF" "" \
+  '{"hookEventName":"UserPromptSubmit","session_id":"test-session-3b","prompt":"analyze the codebase"}' >/dev/null
+OUT=$(run_hook "$SF" "" \
+  '{"hookEventName":"PreToolUse","session_id":"test-session-3b","tool_name":"Bash","tool_input":{"command":"/usr/bin/gh issue comment 178 --body foo"}}')
+RC=$?
+case_run "3b. /usr/bin/gh issue comment after read-intent open → ask" "ask" "$OUT" "$RC"
+
+# -----------------------------------------------------------------------
 # Case 4: Mutation tool call after read-intent open WITH later mutation
 # verb → silent pass
 # -----------------------------------------------------------------------

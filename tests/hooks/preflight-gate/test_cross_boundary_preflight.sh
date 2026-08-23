@@ -68,6 +68,12 @@ run_case() {
 run_case "heredoc in gh issue create" block \
   'gh issue create --title "foo" <<EOF'
 
+# #1092: a path-prefixed gh binary must not slip past the boundary gate.
+# `argv[0].text == "gh"` exact match previously let `/usr/bin/gh issue create`
+# bypass; `_is_gh_binary` closes it.
+run_case "heredoc in /usr/bin/gh issue create (path-prefix)" block \
+  '/usr/bin/gh issue create --title "foo" <<EOF'
+
 run_case "heredoc single-quoted in gh issue create" block \
   "gh issue create --title \"foo\" <<'EOF'"
 

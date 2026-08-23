@@ -152,6 +152,25 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Case 2b (#1092): a path-prefixed gh binary must not slip past the phantom
+# check. `argv[0] == "gh"` exact match previously let `/usr/bin/gh issue
+# create` bypass; `_is_gh_binary` closes it. Same phantom body as Case 2.
+# ---------------------------------------------------------------------------
+run_with_body "$case2_body" '/usr/bin/gh issue create --title "Bug"' "session-miss-prefix-$$" c2b_err c2b_rc
+
+c2b_ok=1
+[ "$c2b_rc" -eq 0 ] || c2b_ok=0
+echo "$c2b_err" | grep -q "\[phantom-path\]" || c2b_ok=0
+if [ "$c2b_ok" -eq 1 ]; then
+  echo "PASS: missing path via /usr/bin/gh (path-prefix) phantom"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: missing path via /usr/bin/gh (rc=$c2b_rc, stderr='${c2b_err:0:120}')"
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("missing path via /usr/bin/gh path-prefix phantom")
+fi
+
+# ---------------------------------------------------------------------------
 # Case 3: mixed paths — one real, one phantom.
 # Only the phantom should appear in the advisory.
 # ---------------------------------------------------------------------------
