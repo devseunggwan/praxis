@@ -177,7 +177,11 @@ malformed_json_test
 run_case "13 silent: tool_name Read"                   silent                    "$FIXTURES_MAIN" Read 'kubectl get'
 run_case "14 silent: empty command"                    silent                    "$FIXTURES_MAIN" Bash ''
 run_case "15 hit: backslash line continuation"         "hit:hook_kubectl.md"     "$FIXTURES_MAIN" Bash "$(printf 'kubectl \\\n  get pods')"
-run_case "16 hit: comment-prefixed token still matches" "hit:hook_kubectl.md"    "$FIXTURES_MAIN" Bash '# kubectl get'
+# A fully commented-out command executes nothing, so #1091 made safe_tokenize
+# strip it and no memory surfaces. A real command with a *trailing* comment is
+# unaffected — its keyword still matches (16b).
+run_case "16 silent: a fully commented-out command runs nothing" silent          "$FIXTURES_MAIN" Bash '# kubectl get'
+run_case "16b hit: keyword before a trailing comment still matches" "hit:hook_kubectl.md" "$FIXTURES_MAIN" Bash 'kubectl get # pods'
 run_case "17 hit: multiple distinct memories fire"     "hit:hook_gh_search.md"   "$FIXTURES_MAIN" Bash 'gh search issues "kubectl"'
 
 # --- AC-21 / AC-22 / AC-23 ---------------------------------------------------
