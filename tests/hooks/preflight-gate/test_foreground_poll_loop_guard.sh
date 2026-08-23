@@ -588,7 +588,14 @@ err=$(bw_run "$BW_N2" bw-n2 'sleep 60 && gh run view 123'); rc=$?
 bw_assert "waiter-norm-run-id-first-silent" silent "$rc" "$err"
 err=$(bw_run "$BW_N2" bw-n2 'sleep 60 && gh run view 456'); rc=$?
 bw_assert "waiter-norm-different-run-id-stays-silent" silent "$rc" "$err"
-err=$(bw_run "$BW_N2" bw-n2 'sleep 60 && tail -50 /tmp/other.log'); rc=$?
+
+# Same shape, same flags, different file: the `-N` fold must not reach the
+# path argument. Paired against its own baseline — comparing it to the run-id
+# waiter above would pass for the wrong reason (the whole command differs).
+BW_N5="$BW_DIR/home-n5"
+err=$(bw_run "$BW_N5" bw-n5 'sleep 60 && tail -50 /tmp/a.log'); rc=$?
+bw_assert "waiter-norm-file-baseline-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_N5" bw-n5 'sleep 60 && tail -50 /tmp/b.log'); rc=$?
 bw_assert "waiter-norm-different-file-stays-silent" silent "$rc" "$err"
 
 BW_N3="$BW_DIR/home-n3"
