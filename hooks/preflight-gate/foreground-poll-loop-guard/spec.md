@@ -119,6 +119,37 @@ collapse to one key. Dropping bare numerals in general would fold
 sole discriminator is a bare number — and turn the guard into one that fires on
 every second background call.
 
+**Four rewrites are normalized away before hashing.** Dropping the `sleep`
+argument closes the retry family that was observed, but nothing makes duration
+the invariant — an agent reaches for these without meaning to evade anything,
+and each was measured silent before this was added:
+
+| Rewrite | Normalization |
+| --- | --- |
+| `sleep 240; tail x` vs `sleep 240 && tail x` | `;` / `&&` / `\|\|` fold to one separator token |
+| `true && <waiter>`, `: ; <waiter>` | a no-op in command position followed by a separator is dropped |
+| `tail -50 x` vs `tail -80 x` | a bare `-<digits>` token folds to `-N` |
+| `bash -c "<waiter>"` | the script argument is spliced into the token stream, one level deep |
+
+Each fold is bounded so it cannot reach a genuinely different target. `\|` and
+`&` stay outside the separator fold — a pipe feeds one command into another and
+`&` detaches, so either really does change the call. Only `-<digits>` folds, not
+bare numerals: `gh run view 123` and `456` are two different targets whose sole
+discriminator is that number. The no-op rule needs both command position and a
+following separator, so the `true` in `while true` survives and so does a
+trailing `&& true`. `bash -c` splices once; a script that wraps itself again is
+not a shape the observed failure takes.
+
+**Still out of reach, stated rather than implied.** A waiter rewritten into a
+different pipeline (`sleep 240 && cat x | tail -50` against
+`sleep 240 && tail -50 x`), or into a different waiting shape altogether
+(`until [ -s x ]; do sleep 20; done`), hashes differently and draws no
+advisory. Collapsing those needs the key to model what is being awaited rather
+than how the call is written — a different design than the command signature,
+and out of scope here. A busy-wait with no `sleep` at all
+(`while ! grep -q DONE x; do :; done`) is not a waiter under the definition
+above and is never recorded.
+
 **Armed window.** A recorded waiter counts as live for its own sleep total; past
 that it has returned and re-arming is the correct call, not a duplicate. A
 waiter with **no computable end** — a `while`/`until` loop, or a `for` over a
@@ -144,6 +175,8 @@ lie.
 | First waiter for a target | pass, recorded (exit 0, silent) |
 | Second waiter, same target, only the `sleep` duration changed | **advisory** (exit 0, `additionalContext` + stderr) |
 | Second waiter, same target, identical unbounded-loop command | **advisory** |
+| Second waiter rewritten with `;`, a leading `true &&`, `-80` for `-50`, or `bash -c` | **advisory** |
+| Second waiter rewritten into a different pipeline or a different waiting shape | pass (silent, out of reach) |
 | Re-launch of a finite `for` loop past its own computed total | pass (silent) |
 | Concurrent waits on different files / different run ids | pass (silent) |
 | Background call with no `sleep` at all, twice | pass (silent) |

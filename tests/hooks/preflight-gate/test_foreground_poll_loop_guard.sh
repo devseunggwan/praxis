@@ -564,6 +564,49 @@ else
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("waiter-foreground-same-command-still-blocks")
 fi
 
+# Signature normalization (issue #1063, group-1 rewrites). Four syntactic
+# no-ops that changed the text of a waiter but not what it awaited, each
+# measured silent before the fix. Fire direction first.
+BW_N1="$BW_DIR/home-n1"
+err=$(bw_run "$BW_N1" bw-n1 'sleep 240 && tail -50 /tmp/norm.log'); rc=$?
+bw_assert "waiter-norm-baseline-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_N1" bw-n1 'sleep 240; tail -50 /tmp/norm.log'); rc=$?
+bw_assert "waiter-norm-separator-swap-advises" advise "$rc" "$err"
+err=$(bw_run "$BW_N1" bw-n1 'true && sleep 240 && tail -50 /tmp/norm.log'); rc=$?
+bw_assert "waiter-norm-leading-noop-advises" advise "$rc" "$err"
+err=$(bw_run "$BW_N1" bw-n1 'sleep 240 && tail -80 /tmp/norm.log'); rc=$?
+bw_assert "waiter-norm-numeric-flag-advises" advise "$rc" "$err"
+err=$(bw_run "$BW_N1" bw-n1 'bash -c "sleep 240 && tail -50 /tmp/norm.log"'); rc=$?
+bw_assert "waiter-norm-shell-c-wrapper-advises" advise "$rc" "$err"
+
+# Silence direction — the folds must not reach genuinely different targets.
+# A bare numeral is the sole discriminator between two run ids, `|` and `&`
+# really do change the shape of a call, and a no-op that is not in command
+# position (or has no separator after it) is left alone.
+BW_N2="$BW_DIR/home-n2"
+err=$(bw_run "$BW_N2" bw-n2 'sleep 60 && gh run view 123'); rc=$?
+bw_assert "waiter-norm-run-id-first-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_N2" bw-n2 'sleep 60 && gh run view 456'); rc=$?
+bw_assert "waiter-norm-different-run-id-stays-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_N2" bw-n2 'sleep 60 && tail -50 /tmp/other.log'); rc=$?
+bw_assert "waiter-norm-different-file-stays-silent" silent "$rc" "$err"
+
+BW_N3="$BW_DIR/home-n3"
+err=$(bw_run "$BW_N3" bw-n3 'sleep 60 && tail -5 /tmp/pipe.log'); rc=$?
+bw_assert "waiter-norm-pipe-baseline-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_N3" bw-n3 'sleep 60 | tail -5 /tmp/pipe.log'); rc=$?
+bw_assert "waiter-norm-pipe-not-folded" silent "$rc" "$err"
+err=$(bw_run "$BW_N3" bw-n3 'sleep 60 && tail -5 /tmp/pipe.log && true'); rc=$?
+bw_assert "waiter-norm-trailing-noop-not-dropped" silent "$rc" "$err"
+
+# `while true` keeps its `true`: it is not in command position, so the
+# no-op rule leaves it alone and the loop still registers as a waiter.
+BW_N4="$BW_DIR/home-n4"
+err=$(bw_run "$BW_N4" bw-n4 'while true; do sleep 20; done'); rc=$?
+bw_assert "waiter-norm-while-true-first-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_N4" bw-n4 'while true; do sleep 20; done'); rc=$?
+bw_assert "waiter-norm-while-true-still-advises" advise "$rc" "$err"
+
 # ---- summary ------------------------------------------------------------------
 echo ""
 echo "passed: $PASS  failed: $FAIL"

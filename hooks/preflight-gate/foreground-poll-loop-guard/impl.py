@@ -173,6 +173,13 @@ _C_STEP_RE = re.compile(r"[+-]=\s*(\d+)")  # … i+=2 ))
 # and `<<-`; a leading `~` is part of the delimiter, not an operator variant).
 _HEREDOC_RE = re.compile(r"<<-?\s*([\"']?)([^\s\"'<>|&;()]+)\1")
 
+# Signature normalization (issue #1063, group-1 rewrites)
+_SHELL_C_WRAPPERS = ("bash", "sh", "zsh", "dash")
+_NOOP_COMMANDS = {"true", ":"}
+_SEQUENCING_SEPARATORS = {";", "&&", "||"}
+_SHORT_NUMERIC_FLAG_RE = re.compile(r"^-\d+$")  # tail -50 / head -20
+
+
 def _strip_comment(line: str) -> str:
     """Cut the line at an unquoted `#` that starts a word (bash comment rule)."""
     in_single = in_double = escaped = False
@@ -408,6 +415,68 @@ def _detect(command: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _inline_shell_c(tokens: list[str]) -> list[str]:
+    """Splice a `bash -c "<script>"` payload into the stream it wraps.
+
+    `bash -c "sleep 240 && tail -50 x"` waits on exactly what the unwrapped
+    form waits on, but the tokenizer hands the whole script back as ONE string
+    token, so the two forms hash differently and the wrapped one reads as a
+    fresh target. Splicing is one level deep on purpose: a script that wraps
+    itself again is not a shape the observed failure takes, and recursion here
+    buys a way for a crafted command to spend the hook's time.
+    """
+    if len(tokens) < 3 or tokens[1] != "-c":
+        return tokens
+    head = tokens[0].rsplit("/", 1)[-1]
+    if head not in _SHELL_C_WRAPPERS:
+        return tokens
+    return safe_tokenize(tokens[2]) + tokens[3:]
+
+
+def _canonical_signature(tokens: list[str]) -> list[str]:
+    """Collapse rewrites that change the text of a waiter but not what it awaits.
+
+    Three of them, each a syntactic no-op an agent reaches for without meaning
+    to evade anything — the observed retries differed only in duration, but
+    nothing makes that the invariant:
+
+    - **Sequencing separators fold together.** `sleep 240; tail x` and
+      `sleep 240 && tail x` wait on one target. `|` and `&` are deliberately
+      NOT in the fold: a pipe feeds one command into another and `&` detaches,
+      so either really does change the shape of the call.
+    - **A leading no-op is dropped.** `true && <waiter>` and `: ; <waiter>` add
+      nothing. Only in command position and only when a separator follows, so
+      the `true` in `while true` — which is not in command position — and a
+      trailing `… && true` both survive.
+    - **A bare `-<digits>` flag folds to `-N`.** `tail -50 x` and `tail -80 x`
+      read the same file. This is narrower than dropping numerals generally,
+      which would fold `gh run watch 123` and `456` — two different targets
+      whose only discriminator is a bare number.
+    """
+    cmd_positions = _command_position_flags(tokens)
+    out: list[str] = []
+    skip_next = False
+    for i, tok in enumerate(tokens):
+        if skip_next:
+            skip_next = False
+            continue
+        if (
+            cmd_positions[i]
+            and tok in _NOOP_COMMANDS
+            and i + 1 < len(tokens)
+            and tokens[i + 1] in _SEQUENCING_SEPARATORS
+        ):
+            skip_next = True
+            continue
+        if tok in _SEQUENCING_SEPARATORS:
+            out.append(";")
+        elif _SHORT_NUMERIC_FLAG_RE.match(tok):
+            out.append("-N")
+        else:
+            out.append(tok)
+    return out
+
+
 def _waiter_profile(command: str) -> tuple[str, float, str] | None:
     """`(target_key, armed_seconds, display)` when this command is a waiter, else None.
 
@@ -439,7 +508,7 @@ def _waiter_profile(command: str) -> tuple[str, float, str] | None:
     different targets whose sole discriminator is a bare number — and turn the
     guard into one that fires on every second background call.
     """
-    tokens = safe_tokenize(_strip_non_executable(command))
+    tokens = _inline_shell_c(safe_tokenize(_strip_non_executable(command)))
     if not tokens:
         return None
 
@@ -467,7 +536,8 @@ def _waiter_profile(command: str) -> tuple[str, float, str] | None:
         return None
 
     armed = _armed_window(tokens, total_sleep)
-    key = hashlib.sha1("\x00".join(normalized).encode("utf-8")).hexdigest()[:16]
+    signature = _canonical_signature(normalized)
+    key = hashlib.sha1("\x00".join(signature).encode("utf-8")).hexdigest()[:16]
     display = " ".join(command.split())
     if len(display) > 120:
         display = display[:117] + "..."
