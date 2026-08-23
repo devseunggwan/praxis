@@ -110,8 +110,12 @@ run_case "valid docs via --message" \
   "silent" \
   '{"tool_name":"Bash","tool_input":{"command":"git commit --message \"docs(readme): update examples\""}}'
 
-run_case "valid chore via -m= embedded" \
-  "silent" \
+# git treats `-m=chore: ...` as the message `=chore: ...` (the `=` is part of
+# the attached value for a short option), so the real title is invalid. #1097
+# stopped the extractor from wrongly stripping that leading `=`, so the gate
+# now correctly blocks this malformed form instead of passing it silently.
+run_case "-m= embedded keeps a leading = and is blocked" \
+  "block" \
   '{"tool_name":"Bash","tool_input":{"command":"git commit -m=\"chore: update dependencies\""}}'
 
 run_case "valid refactor via -am combined flag" \

@@ -67,8 +67,10 @@ extract_git_titles = gct.extract_git_titles
         # separate-token message forms
         (["git", "commit", "-m", "hello world"], ["hello world"]),
         (["git", "commit", "--message", "hello world"], ["hello world"]),
-        # embedded '=' forms (THE branch that carried the dead quirk)
-        (["git", "commit", "-m=hello"], ["hello"]),
+        # embedded '=' forms: only `--long=value` is split. Short `-m=hello`
+        # is `=hello` to git (leading `=` kept), so the extractor keeps it too
+        # via the attached-short-option branch (#1097).
+        (["git", "commit", "-m=hello"], ["=hello"]),
         (["git", "commit", "--message=hello"], ["hello"]),
         # attached short-option form
         (["git", "commit", "-mhello"], ["hello"]),
@@ -101,12 +103,26 @@ def test_extract_contract(argv, expected):
 # ---------------------------------------------------------------------------
 
 def test_embedded_message_branch_clean_form():
-    """The `if "=" in tok and tok.startswith("-")` branch (clean form) must
-    accept `-m=`/`--message=` exactly as the old `is not False` quirk did."""
-    assert extract_git_titles(["git", "commit", "-m=quirk path"]) == ["quirk path"]
+    """The embedded-`=` branch applies to `--long=value` only.
+
+    Git splits on `=` for `--message=…` but NOT for the short `-m`: it takes
+    the whole `=quirk path` (leading `=` kept) as the message. The short form
+    therefore falls through to the attached-short-option branch (`-m<value>`),
+    which preserves the `=` (#1097).
+    """
+    assert extract_git_titles(["git", "commit", "-m=quirk path"]) == ["=quirk path"]
     assert extract_git_titles(["git", "commit", "--message=quirk path"]) == ["quirk path"]
     # a token with '=' but not starting with '-' takes neither branch
     assert extract_git_titles(["git", "commit", "a=b"]) == []
+
+
+def test_short_m_equals_keeps_leading_equals():
+    """`git commit -m=fix: thing` — git's message is `=fix: thing`, so the
+    extracted title must retain its leading `=` rather than being split into
+    `fix: thing` by the `--long=value` branch (#1097)."""
+    titles = extract_git_titles(["git", "commit", "-m=fix: thing"])
+    assert titles == ["=fix: thing"]
+    assert titles[0].startswith("=")
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +134,13 @@ def test_file_message_forms(tmp_path):
     msg.write_text("feat: from file\n\nbody line\n", encoding="utf-8")
     assert extract_git_titles(["git", "commit", "-F", str(msg)]) == ["feat: from file"]
     assert extract_git_titles(["git", "commit", "--file", str(msg)]) == ["feat: from file"]
-    assert extract_git_titles(["git", "commit", f"-F={msg}"]) == ["feat: from file"]
+    # `=`-splitting is `--long=value` only. Git reads `-F=path` as a file
+    # literally named `=path` (verified: `fatal: could not read log file
+    # '=msg.txt'`), so the short form no longer resolves the real file — the
+    # extractor yields no title rather than a wrong one (#1097).
+    assert extract_git_titles(["git", "commit", f"-F={msg}"]) == []
+    # The long form keeps its historical `=`-split behaviour.
+    assert extract_git_titles(["git", "commit", f"--file={msg}"]) == ["feat: from file"]
 
 
 def test_file_relative_resolves_against_dash_C(tmp_path):

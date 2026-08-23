@@ -842,8 +842,17 @@ def test_rule2_foreign_plugin_command(tmp_path: Path) -> None:
     assert result.returncode == 0
     # Should emit advisory about foreign namespace
     assert result.stderr == "", f"firing path must keep stderr empty; got {result.stderr!r}"
-    assert "[praxis:completion-signal-gate]" in _msg(result.stdout), (
+    msg = _msg(result.stdout)
+    assert "[praxis:completion-signal-gate]" in msg, (
         f"Rule 2 must fire for foreign plugin command; stdout={result.stdout!r}"
+    )
+    # The {plugin} placeholder must render the real cwd plugin name, not the
+    # literal '{praxis}' the missing f-prefix used to produce (#1097).
+    assert "plugin is 'praxis'" in msg, (
+        f"Rule 2 must render the real plugin name; stdout={result.stdout!r}"
+    )
+    assert "{praxis}" not in msg, (
+        f"Rule 2 must not leak the literal placeholder; stdout={result.stdout!r}"
     )
 
 
