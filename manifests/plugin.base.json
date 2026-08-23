@@ -1,6 +1,6 @@
 {
   "name": "praxis",
-  "description": "Development workflow skills for Claude Code — disciplined, fast, resilient",
+  "description": "Workflow rules from CLAUDE.md turned into hooks and skills that actually fire",
   "author": {
     "name": "devseunggwan"
   },
