@@ -168,6 +168,47 @@ def test_ack_marker_still_tokenizes() -> None:
     ]
 
 
+# ---------------------------------------------------------------------------
+# Same-line trailing comment with an unbalanced quote (issue #1091).
+# ---------------------------------------------------------------------------
+#
+# The apostrophe hazard of #972/#987 has a second face with no newline to fold:
+# a trailing `# don't` hands the apostrophe straight to shlex, which runs with
+# `commenters = ""` so the `:ack` opt-out markers survive, raises
+# ``ValueError: No closing quotation``, and the fail-open arm dropped the whole
+# line's argv. The genuine unquoted comment is now stripped before the shlex
+# pass — but a comment carrying an `:ack` marker is left intact so it still
+# tokenizes.
+
+def test_same_line_comment_with_apostrophe_keeps_argv() -> None:
+    """Bug 1's exact payload. Before the fix this returned ``[]`` because the
+    comment text reached shlex under ``commenters = ""`` and raised on the
+    unbalanced quote."""
+    assert safe_tokenize(MERGE + " 9 --squash # don't") == [
+        "gh", "pr", "merge", "9", "--squash",
+    ]
+
+
+def test_same_line_comment_with_apostrophe_reaches_the_gates() -> None:
+    assert _has_merge(MERGE + " 9 --squash # don't")
+
+
+def test_same_line_ack_marker_survives_alongside_the_comment() -> None:
+    """The `:ack` opt-out marker must still tokenize even though ordinary
+    same-line comments are now stripped — so the argv *and* the `#`/marker
+    tokens both survive when the trailing comment is the ack marker."""
+    assert safe_tokenize(MERGE + " 9 --squash # side-effect:ack") == [
+        "gh", "pr", "merge", "9", "--squash", "#", "side-effect:ack",
+    ]
+
+
+def test_plain_same_line_comment_is_stripped_not_tokenized() -> None:
+    """A non-`:ack` trailing comment is bash-ignored text, never a command, so
+    it is dropped from the stream rather than kept as `#`+word tokens — while
+    the argv before it survives (issue #1091)."""
+    assert safe_tokenize("git status # tidy up later") == ["git", "status"]
+
+
 @pytest.mark.parametrize("name,command", [
     ("unterminated double quote", 'echo "never closed'),
     ("unterminated single quote", "echo 'never closed"),
