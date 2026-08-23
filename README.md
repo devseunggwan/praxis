@@ -108,9 +108,9 @@ subcommand does not accept (`block-gh-state-all`), a foreground `sleep`-and-poll
 
 Two properties are load-bearing. **Hooks fail open**: a missing `jq`, a malformed stdin
 payload, an unreadable transcript — all exit 0, so a broken hook degrades to no hook
-rather than to a broken session. And a blocking hook that has a bypass variable **prints
-it in its own deny message** (`hooks/_lib/block_message.py`), so the way out arrives with
-the block rather than having to be hunted for.
+rather than to a broken session. And most blocks arrive with their own way out: the
+shared deny-message helper (`hooks/_lib/block_message.py`) prints the hook's bypass
+variable in the message, so you rarely have to go looking for it.
 
 The complete list, with each hook's events, hosts, strict/bypass knobs, and the external
 commands it may run, is the generated
@@ -128,8 +128,8 @@ narrowest to widest.
 **Opt out of one gate.** 38 of the 90 hooks declare an opt-out variable — set it and
 that gate either skips entirely or demotes itself to a warning, depending on the hook.
 Which variable belongs to which hook is the table in
-[`docs/bypass-vars.md`](docs/bypass-vars.md); a blocking hook also prints its own in the
-deny message.
+[`docs/bypass-vars.md`](docs/bypass-vars.md), and the generated
+[Hook Operating Matrix](docs/hook-operating-matrix.md) carries the same mapping per hook.
 
 **Set it where Claude Code can see it** — its own environment, before the session starts:
 
@@ -142,10 +142,11 @@ read `os.environ` of their own process, which never sees a variable scoped to th
 call, so the gate blocks exactly as before. Use the shell export above, or the `env`
 block in your `settings.json`.
 
-Opt-outs whose **name contains `BYPASS`** are recorded by the `bypass-telemetry` hook, so
-`bypass-review` can later show you which gate you keep routing around — usually a sign the
-gate is miscalibrated, not that you are undisciplined. Opt-outs named `*_ADVISORY` are
-outside that filter and leave no trace.
+The `bypass-telemetry` hook logs some of these as they are used, and the `bypass-review`
+CLI reads that log — worth a look if you find yourself routing around the same gate
+repeatedly, which usually means the gate is miscalibrated rather than that you are
+undisciplined. What it captures is narrower than the full set of opt-outs; see
+[`docs/bypass-telemetry.md`](docs/bypass-telemetry.md).
 
 **Escalate instead.** The opposite lever exists too: 20 hooks read a `PRAXIS_*_STRICT`
 variable that promotes them to a hard block — 12 of the 38 advisory hooks, plus 5
