@@ -50,9 +50,8 @@ from _hook_io import emit_stop_advisory  # type: ignore[import-not-found]  # noq
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
-    get_current_turn,
     has_tool_in_turn,
-    load_transcript,
+    load_current_turn,
 )
 
 # ---------------------------------------------------------------------------
@@ -461,11 +460,7 @@ def main() -> int:
     if not transcript_path or not os.path.isfile(transcript_path):
         return 0
 
-    events = load_transcript(transcript_path)
-    if not events:
-        return 0
-
-    turn = get_current_turn(events)
+    turn = load_current_turn(transcript_path)
     if not turn:
         return 0
 
