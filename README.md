@@ -143,9 +143,11 @@ undisciplined.
 variable that promotes an advisory into a hard block. Defaults sit on the permissive
 side of that line — an advisory hook stays advisory until you say otherwise.
 
-**All of it.** Remove the plugin from Claude Code's `/plugin` interface, or drop the
-praxis entries from your `settings.json` hooks block. Skills and hooks are independent —
-removing the hooks leaves every `/praxis:*` skill working.
+**All of it.** On a plugin install, the hooks come from the plugin manifest rather than
+from your settings, so the switch is `claude plugin disable praxis` (or `/plugin` in the
+session). Only a manual install registers praxis in `settings.json`, and there you drop
+its hooks entries. Either way skills and hooks are independent — removing the hooks
+leaves every `/praxis:*` skill working.
 
 ## Prerequisites
 
