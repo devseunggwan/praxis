@@ -144,17 +144,40 @@ def _add_tool_result_prs(acc: set[str], text: str) -> None:
         acc.add(next(iter(urls)))
 
 
+def _reduce_tool_use(block: dict, context_prs: set[str], pending: list) -> None:
+    """Keep only what the success-resolving pass needs, never the block itself."""
+    name = block.get("name")
+    inp = block.get("input") or {}
+    tid = block.get("id")
+    tid = tid if isinstance(tid, str) else None
+    if name == "Bash" and isinstance(inp.get("command"), str):
+        cmd = inp["command"]
+        # Context is success-independent, so it resolves here and needs no buffer.
+        context_prs.update(_pr_nums(cmd, "view|create|diff|checks|checkout|edit|ready|merge"))
+        posted = list(_pr_nums(cmd, "comment|review"))
+        if _is_api_post(cmd):
+            posted.extend(m.group(1) for m in _API_TARGET_RE.finditer(cmd))
+        if posted:
+            pending.append((tid, posted, None))
+    elif name in ("Write", "Edit") and isinstance(inp.get("file_path"), str):
+        fp = inp["file_path"]
+        if fp.lower().endswith(".md") and (_REPORT_PATH_RE.search(fp) or _REPORT_NAME_RE.search(fp)):
+            pending.append((tid, [], fp))
+
+
 def find_unreported_prs(events) -> tuple[list[str], list[str]]:
     """Return (unreported_context_prs, sample_report_files).
 
     `events` is any iterable of event dicts — pass `iter_transcript(path)` to
     stream. This scan genuinely needs the whole session (it looks for a PR
     touched anywhere in it), so it cannot read a bounded tail like its sibling
-    gates; instead it reduces each text block to the PR numbers it carries and
-    drops the text, so memory tracks the number of distinct PRs rather than the
-    size of the session (issue #1076).
+    gates. Every block is reduced on arrival to the PR numbers and report path
+    it carries, and the block itself is dropped: retaining `tool_use` blocks
+    would keep whole Bash command strings alive for the length of the session,
+    which is the cost this gate exists to avoid (issue #1076).
     """
-    tool_uses: list[dict] = []
+    # (tool_use id, PR numbers this call posted to, report file written)
+    pending: list[tuple[str | None, list[str], str | None]] = []
     result_is_error: dict[str, bool] = {}
     context_prs: set[str] = set()
 
@@ -177,7 +200,7 @@ def find_unreported_prs(events) -> tuple[list[str], list[str]]:
                 if isinstance(text, str):
                     _add_narrative_prs(context_prs, text)
             elif kind == "tool_use":
-                tool_uses.append(block)
+                _reduce_tool_use(block, context_prs, pending)
             elif kind == "tool_result":
                 tid = block.get("tool_use_id")
                 if isinstance(tid, str):
@@ -193,31 +216,16 @@ def find_unreported_prs(events) -> tuple[list[str], list[str]]:
                 if parts:
                     _add_tool_result_prs(context_prs, "\n".join(parts))
 
-    def succeeded(u: dict) -> bool:
-        # Missing result (e.g. the final call) counts as success — bias to silence.
-        tid = u.get("id")
-        if not isinstance(tid, str):
-            return True
-        return result_is_error.get(tid) is not True
-
     posted_prs: set[str] = set()
     report_files: list[str] = []
 
-    for u in tool_uses:
-        name = u.get("name")
-        inp = u.get("input") or {}
-        if name == "Bash" and isinstance(inp.get("command"), str):
-            cmd = inp["command"]
-            context_prs.update(_pr_nums(cmd, "view|create|diff|checks|checkout|edit|ready|merge"))
-            if not succeeded(u):
-                continue
-            posted_prs.update(_pr_nums(cmd, "comment|review"))
-            if _is_api_post(cmd):
-                posted_prs.update(m.group(1) for m in _API_TARGET_RE.finditer(cmd))
-        elif name in ("Write", "Edit") and isinstance(inp.get("file_path"), str) and succeeded(u):
-            fp = inp["file_path"]
-            if fp.lower().endswith(".md") and (_REPORT_PATH_RE.search(fp) or _REPORT_NAME_RE.search(fp)):
-                report_files.append(fp)
+    for tid, posted, report_file in pending:
+        # Missing result (e.g. the final call) counts as success — bias to silence.
+        if tid is not None and result_is_error.get(tid) is True:
+            continue
+        posted_prs.update(posted)
+        if report_file is not None:
+            report_files.append(report_file)
 
     if not report_files:
         return ([], [])
