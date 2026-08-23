@@ -330,8 +330,12 @@ def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]
     while i < len(sub_argv):
         tok = sub_argv[i]
 
-        # Handle --flag=value embedded form.
-        if "=" in tok and tok.startswith("-"):
+        # Handle --flag=value embedded form. Restricted to long flags: git
+        # only honours `=` splitting on `--long=value`; for a short flag
+        # `-m=fix: thing` git takes the whole `=fix: thing` (leading `=`
+        # included) as the message value, so splitting it here would drop
+        # the `=` and mis-parse the title (#1097).
+        if "=" in tok and tok.startswith("--"):
             key, _, val = tok.partition("=")
             if key in MESSAGE_FLAGS and not message_seen:
                 add_title(val)
