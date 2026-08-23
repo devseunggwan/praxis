@@ -124,6 +124,11 @@ def test_creates_the_parent_directory(tmp_path):
     assert os.path.isdir(os.path.dirname(state))
 
 
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="chmod 0o500 does not restrict root, so the unwritable-location "
+    "premise cannot hold when the suite runs as root (#1100)",
+)
 def test_unwritable_location_yields_false_without_raising(tmp_path):
     denied = tmp_path / "denied"
     denied.mkdir()
