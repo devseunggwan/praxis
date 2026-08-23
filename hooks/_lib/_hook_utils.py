@@ -91,9 +91,12 @@ def _starts_unquoted_comment(line: str, i: int) -> bool:
     return line[i] == "#" and (i == 0 or line[i - 1] in _WORD_BOUNDARY_CHARS)
 
 
-def _heredoc_starts_on_line(line: str) -> list[tuple[str, bool]]:
-    """`(delimiter, dash_form)` for every heredoc opened on one physical line.
+def _heredoc_starts_on_line(
+    line: str, quote: str = ""
+) -> tuple[list[tuple[str, bool]], str]:
+    """`(openers, quote_open_at_eol)` for one physical line.
 
+    `openers` is `(delimiter, dash_form)` for every heredoc opened on the line.
     Scans character-wise rather than by regex because the three constructs that
     must NOT be read as a heredoc all look like `<<` to a pattern match: a
     here-string (`<<<`), an arithmetic left-shift (`$((1 << 3))`), and a literal
@@ -104,10 +107,17 @@ def _heredoc_starts_on_line(line: str) -> list[tuple[str, bool]]:
     `-m "$(cat <<'EOF'`  — the exact shape of a commit-message payload — really
     does open a heredoc. `subst` stacks the suspended quote state so that one is
     seen while a plain `"…<<EOF…"` string stays inert.
+
+    `quote` is the quote character still open from the *previous* physical line;
+    the returned second element is the quote still open at this line's end.
+    Carrying it lets `strip_heredoc_bodies` mirror `_logical_lines`' fold so a
+    `<<WORD` sitting inside a multi-line quoted string is read as data, not as a
+    heredoc opener (issue #1091, extending the #972/#987 quote-fold). A group
+    still open inside a `$(…)` is reported as its outermost suspended quote,
+    exactly as `_quote_open_at_eol` does.
     """
     out: list[tuple[str, bool]] = []
     i, n = 0, len(line)
-    quote = ""
     arith = 0
     subst: list[str] = []
     while i < n:
@@ -164,7 +174,10 @@ def _heredoc_starts_on_line(line: str) -> list[tuple[str, bool]]:
             i += 2
             continue
         i += 1
-    return out
+    # Report the outermost still-open quote so the caller can carry it into the
+    # next physical line — a `$(…)` open at EOL keeps the command going, so its
+    # suspended quote is what bash is still inside (issue #1091).
+    return out, quote or (subst[0] if subst else "")
 
 
 _HEREDOC_WORD_CHARS = re.compile(r"[A-Za-z0-9_.~\-/]")
@@ -215,11 +228,20 @@ def strip_heredoc_bodies(command: str) -> str:
 
     An unterminated heredoc suppresses everything to the end of the command,
     which is what bash does with it too.
+
+    Quote state is carried across physical lines (issue #1091, mirroring the
+    #972/#987 fold in `_logical_lines`): the per-line heredoc scan used to reset
+    to an unquoted state each line, so a `<<WORD` occurring on a later physical
+    line *inside* an open multi-line quoted string was misread as a heredoc
+    opener — blanking the closing-quote line and everything chained after it
+    (`… "notes\nsee <<EOF …\n" && gh pr merge`). Threading the open quote makes
+    that `<<WORD` read as the string data it is.
     """
     if "<<" not in command:
         return command
     out: list[str] = []
     pending: list[tuple[str, bool]] = []
+    quote = ""  # #1091: open quote carried in from the previous physical line
     for line in command.split("\n"):
         if pending:
             delim, dash = pending[0]
@@ -231,7 +253,8 @@ def strip_heredoc_bodies(command: str) -> str:
                 out.append("")
             continue
         out.append(line)
-        pending.extend(_heredoc_starts_on_line(line))
+        openers, quote = _heredoc_starts_on_line(line, quote)
+        pending.extend(openers)
     return "\n".join(out)
 
 
@@ -375,6 +398,91 @@ def _logical_lines(command: str) -> list[str]:
     return out
 
 
+# `# <marker>:ack` opt-out markers that gates read out of the token stream
+# (`# side-effect:ack`, `# title-length:ack`, `# cross-boundary:ack`, …). These
+# must keep tokenizing even though `safe_tokenize` now strips ordinary trailing
+# comments (issue #1091), so the comment strip below skips any comment carrying
+# one. `commenters = ""` on the shlex pass then turns it into `#` + `<marker>`
+# tokens exactly as before.
+_ACK_MARKER_RE = re.compile(r"#\s*[A-Za-z0-9][A-Za-z0-9-]*:ack\b")
+
+
+def _unquoted_comment_start(line: str) -> int:
+    """Index of the `#` opening a genuine unquoted comment in `line`, or -1.
+
+    Shares the exact quote-state walk of `_quote_open_at_eol` — the two must
+    never disagree on where a comment begins, so both defer to
+    `_starts_unquoted_comment` for the word-boundary rule. `safe_tokenize` uses
+    this to strip a real trailing comment before the shlex pass: with
+    `commenters = ""`, an apostrophe inside a same-line comment
+    (`gh pr merge 9 --squash # don't`) otherwise opens a quote shlex never
+    closes, `ValueError` fires, and the fail-open arm dropped the whole line's
+    argv (issue #1091, extending the #972/#987 quote-fold). A `#` inside a quote
+    or after a non-boundary char (`--format=%h#%s`) is not a comment and returns
+    -1 there.
+    """
+    i, n = 0, len(line)
+    quote = ""
+    arith = 0
+    subst: list[str] = []
+    while i < n:
+        ch = line[i]
+        if quote == '"' and line.startswith("$(", i) and not line.startswith("$((", i):
+            subst.append(quote)
+            quote = ""
+            i += 2
+            continue
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            i += 1
+            continue
+        if _starts_unquoted_comment(line, i):
+            return i
+        if ch == "\\":
+            i += 2
+            continue
+        if line.startswith("$((", i):
+            arith += 1
+            i += 3
+            continue
+        if arith and line.startswith("))", i):
+            arith -= 1
+            i += 2
+            continue
+        if ch == ")" and subst and not arith:
+            quote = subst.pop()
+            i += 1
+            continue
+        i += 1
+    return -1
+
+
+def _strip_trailing_comment(line: str) -> str:
+    """Drop a genuine unquoted trailing comment, preserving `:ack` markers.
+
+    Bash reads nothing past an unquoted `#`, so the comment is never a command —
+    but `safe_tokenize` runs shlex with `commenters = ""` (to keep the `:ack`
+    opt-out markers as tokens), which means an apostrophe or unbalanced quote in
+    the comment text crashes the whole line's parse. Stripping the comment first
+    lets the argv before it survive, while a comment that carries an `:ack`
+    marker is left intact so it still tokenizes (issue #1091).
+    """
+    idx = _unquoted_comment_start(line)
+    if idx < 0:
+        return line
+    if _ACK_MARKER_RE.search(line[idx:]):
+        return line  # opt-out marker must still reach the token stream
+    return line[:idx]
+
+
 def safe_tokenize(command: str) -> list[str]:
     """Tokenize with shell operators and line breaks split into tokens.
 
@@ -416,6 +524,15 @@ def safe_tokenize(command: str) -> list[str]:
     marker still tokenizes. Comments are excluded from quote-state tracking
     only — an unquoted ``#`` never opens a quote, so an apostrophe in
     ``git status # don't do this`` cannot swallow the next line's command.
+
+    A *same-line* trailing comment is a second face of that apostrophe hazard:
+    with no newline to fold, ``gh pr merge 9 --squash # don't`` handed the
+    apostrophe-bearing comment straight to shlex, which raised ``ValueError: No
+    closing quotation`` and the ``except ValueError`` arm dropped the entire
+    line's argv (issue #1091, extending #972/#987). Each logical line therefore
+    has its genuine unquoted trailing comment stripped first
+    (``_strip_trailing_comment``) — except a comment carrying a ``:ack`` marker,
+    which is left intact so the opt-out still tokenizes.
     """
     # Splice bash line continuations (`\` + newline) into one logical line so
     # the leading line's argv[0] survives the per-line shlex pass below. A
@@ -424,7 +541,14 @@ def safe_tokenize(command: str) -> list[str]:
     # odd-length run of trailing backslashes.
     command = re.sub(r"(?<!\\)((?:\\\\)*)\\\n", r"\1 ", command)
     command = strip_heredoc_bodies(command)
-    lines = [ln for ln in _logical_lines(command) if ln.strip()]
+    # Strip a genuine unquoted trailing comment from each logical line before
+    # the shlex pass so an apostrophe in it can't crash the parse (issue #1091);
+    # `:ack` opt-out markers are preserved by `_strip_trailing_comment`.
+    lines = [
+        stripped
+        for ln in _logical_lines(command)
+        if (stripped := _strip_trailing_comment(ln)).strip()
+    ]
     if not lines:
         return []
     tokens: list[str] = []

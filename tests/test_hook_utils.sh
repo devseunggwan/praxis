@@ -488,11 +488,12 @@ run_tokens "heredoc commit followed by a merge survives (#987)" \
   $'git commit -m "$(cat <<\'EOF\'\nbody line\nEOF\n)" && gh pr merge 9 --squash'
 
 # Anti-bypass: an unquoted `#` comment opens no quote, so the apostrophe in
-# `don't` must not swallow the real merge on the next line. Without the
-# comment rule in `_quote_open_at_eol` this returns [] and every merge gate
-# goes blind — a fresh hole traded for the one being closed.
+# `don't` must not swallow the real merge on the next line. #1091 strips the
+# trailing unquoted comment before the shlex pass, so the command's own argv
+# (`git status`) now survives too — the same-line drop and the multi-line
+# comment-line drop were the identical mechanism.
 run_tokens "apostrophe in an unquoted comment does not swallow the next line" \
-  "[';', 'gh', 'pr', 'merge', '9', '--squash']" \
+  "['git', 'status', ';', 'gh', 'pr', 'merge', '9', '--squash']" \
   $'git status # don\'t do this\ngh pr merge 9 --squash'
 
 # The mirror case: a `#` *inside* quotes is literal, not a comment, so the
@@ -509,15 +510,15 @@ run_tokens "hash inside quotes stays inside the token" \
 # three as ordinary text let the apostrophe in `don't` open a quote and
 # swallow the merge on the next line.
 run_tokens "comment after a closing paren does not swallow the next line" \
-  "[';', 'gh', 'pr', 'merge', '9', '--squash']" \
+  "['(echo', 'ok)', ';', 'gh', 'pr', 'merge', '9', '--squash']" \
   $'(echo ok)#don\'t care\ngh pr merge 9 --squash'
 
 run_tokens "comment after an output redirect does not swallow the next line" \
-  "[';', 'gh', 'pr', 'merge', '9', '--squash']" \
+  "[':', '>', ';', 'gh', 'pr', 'merge', '9', '--squash']" \
   $': >#don\'t care\ngh pr merge 9 --squash'
 
 run_tokens "comment after an input redirect does not swallow the next line" \
-  "[';', 'gh', 'pr', 'merge', '9', '--squash']" \
+  "[':', '<', ';', 'gh', 'pr', 'merge', '9', '--squash']" \
   $': <#don\'t care\ngh pr merge 9 --squash'
 
 # The negative control for the three above: mid-word `#` is NOT a comment in
