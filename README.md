@@ -66,9 +66,10 @@ Eighteen skills, grouped as Discovery, Development, Discipline, and Session Mana
 The full table — trigger keywords, when to use each, example invocation — lives in
 [`docs/skills.md`](docs/skills.md).
 
-If you are new, start with `/praxis:using-praxis`: it asks what you are trying to do and
-routes you to the skill that fits, which is faster than reading the catalogue. The three
-worth knowing by name on day one:
+If you are new, `/praxis:using-praxis` maps situations onto the skill that handles each —
+sessions lost to a crash, a broken rule you want on record, a review whose comments have
+piled up — which is a shorter read than the full table. The three worth knowing by name
+on day one:
 
 | Skill | What it is for |
 | ------- | ---------------- |
@@ -95,7 +96,7 @@ promoted into blocking:
 | ------ | ------- | -------------- |
 | `preflight-gate` | 35 | Inspects a tool call before it runs and can deny it |
 | `completion-verify` | 12 | Fires at `Stop` — can block a response that claims completion without evidence |
-| `advisory-nudge` | 38 | Prints a warning to stderr and lets the call through — 12 of them turn into a hard deny when their `PRAXIS_*_STRICT` variable is set |
+| `advisory-nudge` | 38 | Prints a warning to stderr and lets the call through — 12 read a `PRAXIS_*_STRICT` variable that makes them stop the call instead |
 | `postuse-correction` | 5 | Reacts after a tool call — telemetry, follow-up signals |
 
 Concretely, what a gate stops looks like this — `gh issue create` without a duplicate
@@ -122,14 +123,14 @@ the contracts every hook follows.
 
 ## Turning it off
 
-A hook that blocks something you meant to do is not a wall. There are three levers, from
-narrowest to widest.
+A hook that blocks something you meant to do is not a wall. There are three levers.
 
-**Opt out of one gate.** 38 of the 90 hooks declare an opt-out variable — set it and
-that gate either skips entirely or demotes itself to a warning, depending on the hook.
-Which variable belongs to which hook is the table in
-[`docs/bypass-vars.md`](docs/bypass-vars.md), and the generated
-[Hook Operating Matrix](docs/hook-operating-matrix.md) carries the same mapping per hook.
+**One gate.** 38 of the 90 hooks declare an opt-out variable. Which variable belongs to
+which hook, and what setting it actually does to that hook, is the table in
+[`docs/bypass-vars.md`](docs/bypass-vars.md); the generated
+[Hook Operating Matrix](docs/hook-operating-matrix.md) carries the same mapping with each
+hook's default alongside it. Read the row before setting the variable — the hooks differ
+from each other, which is why this section points at the table instead of summarizing it.
 
 **Set it where Claude Code can see it** — its own environment, before the session starts:
 
@@ -142,24 +143,11 @@ read `os.environ` of their own process, which never sees a variable scoped to th
 call, so the gate blocks exactly as before. Use the shell export above, or the `env`
 block in your `settings.json`.
 
-The `bypass-telemetry` hook logs some of these as they are used, and the `bypass-review`
-CLI reads that log — worth a look if you find yourself routing around the same gate
-repeatedly, which usually means the gate is miscalibrated rather than that you are
-undisciplined. What it captures is narrower than the full set of opt-outs; see
-[`docs/bypass-telemetry.md`](docs/bypass-telemetry.md).
-
-**Escalate instead.** The opposite lever exists too: 20 hooks read a `PRAXIS_*_STRICT`
-variable that promotes them to a hard block — 12 of the 38 advisory hooks, plus 5
-preflight gates and 3 `Stop`-time checks that are advisory until you set it. The other 26
-advisory hooks declare no such variable and stay advisory whatever you set. Defaults sit
-on the permissive side of that line.
-
 **All of it.** On a plugin install, `claude plugin disable praxis` (or `/plugin` in the
 session) switches the whole plugin off — skills and hooks together, since both are
-declared in one manifest and `disable` has no hook-only option. If what you want is the
-gates gone but the `/praxis:*` skills kept, that is the first two levers above, not this
-one. Only a manual install registers praxis hooks in `settings.json` as separate
-entries; there, dropping them leaves the skills working.
+declared in one manifest and `disable` has no hook-only option. To keep the skills and
+stop a gate, use the opt-out above instead. Only a manual install registers praxis hooks
+in `settings.json` as separate entries; there, dropping them leaves the skills working.
 
 ## Prerequisites
 
