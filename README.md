@@ -143,11 +143,12 @@ undisciplined.
 variable that promotes an advisory into a hard block. Defaults sit on the permissive
 side of that line — an advisory hook stays advisory until you say otherwise.
 
-**All of it.** On a plugin install, the hooks come from the plugin manifest rather than
-from your settings, so the switch is `claude plugin disable praxis` (or `/plugin` in the
-session). Only a manual install registers praxis in `settings.json`, and there you drop
-its hooks entries. Either way skills and hooks are independent — removing the hooks
-leaves every `/praxis:*` skill working.
+**All of it.** On a plugin install, `claude plugin disable praxis` (or `/plugin` in the
+session) switches the whole plugin off — skills and hooks together, since both are
+declared in one manifest and `disable` has no hook-only option. If what you want is the
+gates gone but the `/praxis:*` skills kept, that is the first two levers above, not this
+one. Only a manual install registers praxis hooks in `settings.json` as separate
+entries; there, dropping them leaves the skills working.
 
 ## Prerequisites
 
