@@ -39,6 +39,10 @@ REQ_RE = re.compile(r"^- \*\*([A-Z]{2,4}-\d+)\*\*:")
 # single backticked span; nested backticks are not supported and would be a
 # spec-authoring error rather than a parse case to guess at.
 VERIFY_RE = re.compile(r"^\s+- Verify:\s*`(.+)`\s*$")
+# A ``` or ~~~ fence line (at any indentation) opens or closes a fenced code
+# block. A `- Verify:` inside such a fence is a documentation example, not an
+# oracle, so it must never be executed (#1093).
+FENCE_RE = re.compile(r"^\s*(?:`{3,}|~{3,})")
 
 IMPLEMENTED, MISSING, UNKNOWN = "implemented", "missing", "UNKNOWN"
 
@@ -82,16 +86,28 @@ def parse_spec(path: Path) -> list[tuple[str, str | None, list[str]]]:
     """
     found: list[tuple[str, str | None, list[str]]] = []
     in_block = False
+    in_fence = False
     for line in path.read_text(encoding="utf-8").splitlines():
         req = REQ_RE.match(line)
         if req:
             found.append((req.group(1), None, []))
             in_block = True
+            in_fence = False
             continue
         if not in_block:
             continue
         if line.strip() and not line[0].isspace():
             in_block = False
+            in_fence = False
+            continue
+        # A column-0 fence has already closed the block above (it is not
+        # indented); this handles an *indented* ``` / ~~~ fence sitting inside a
+        # requirement block. Toggle fence state and skip Verify-matching while a
+        # fence is open, so a `- Verify:` example inside it is never run (#1093).
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
             continue
         verify = VERIFY_RE.match(line)
         if verify:
