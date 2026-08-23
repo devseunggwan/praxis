@@ -95,7 +95,7 @@ promoted into blocking:
 | ------ | ------- | -------------- |
 | `preflight-gate` | 35 | Inspects a tool call before it runs and can deny it |
 | `completion-verify` | 12 | Fires at `Stop` — can block a response that claims completion without evidence |
-| `advisory-nudge` | 38 | Prints a warning to stderr and lets the call through — until its `PRAXIS_*_STRICT` variable is set, which turns the same hook into a hard deny |
+| `advisory-nudge` | 38 | Prints a warning to stderr and lets the call through — 12 of them turn into a hard deny when their `PRAXIS_*_STRICT` variable is set |
 | `postuse-correction` | 5 | Reacts after a tool call — telemetry, follow-up signals |
 
 Concretely, what a gate stops looks like this — `gh issue create` without a duplicate
@@ -127,21 +127,31 @@ narrowest to widest.
 
 **Opt out of one gate.** 38 of the 90 hooks declare an opt-out variable — set it and
 that gate either skips entirely or demotes itself to a warning, depending on the hook.
-The form is the variable in front of the command it guards, with a reason:
+Which variable belongs to which hook is the table in
+[`docs/bypass-vars.md`](docs/bypass-vars.md); a blocking hook also prints its own in the
+deny message.
+
+**Set it where Claude Code can see it** — its own environment, before the session starts:
 
 ```bash
-PRAXIS_HOOK_BYPASS_SKILL_GATE=1 <command>   # <one-line reason>
+export PRAXIS_HOOK_BYPASS_SKILL_GATE=1   # <one-line reason>
 ```
 
-Which variable belongs to which hook is the table in
-[`docs/bypass-vars.md`](docs/bypass-vars.md). Opt-outs are recorded by the
-`bypass-telemetry` hook, so `bypass-review` can later show you which gate you keep
-routing around — usually a sign the gate is miscalibrated, not that you are
-undisciplined.
+An assignment written in front of the command (`VAR=1 git …`) does **not** work. Hooks
+read `os.environ` of their own process, which never sees a variable scoped to the tool
+call, so the gate blocks exactly as before. Use the shell export above, or the `env`
+block in your `settings.json`.
+
+Opt-outs whose **name contains `BYPASS`** are recorded by the `bypass-telemetry` hook, so
+`bypass-review` can later show you which gate you keep routing around — usually a sign the
+gate is miscalibrated, not that you are undisciplined. Opt-outs named `*_ADVISORY` are
+outside that filter and leave no trace.
 
 **Escalate instead.** The opposite lever exists too: 20 hooks read a `PRAXIS_*_STRICT`
-variable that promotes an advisory into a hard block. Defaults sit on the permissive
-side of that line — an advisory hook stays advisory until you say otherwise.
+variable that promotes them to a hard block — 12 of the 38 advisory hooks, plus 5
+preflight gates and 3 `Stop`-time checks that are advisory until you set it. The other 26
+advisory hooks declare no such variable and stay advisory whatever you set. Defaults sit
+on the permissive side of that line.
 
 **All of it.** On a plugin install, `claude plugin disable praxis` (or `/plugin` in the
 session) switches the whole plugin off — skills and hooks together, since both are
