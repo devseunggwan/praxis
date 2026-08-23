@@ -45,6 +45,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path as _Path
 
@@ -293,7 +294,7 @@ def extract_verdict_claims(text: str) -> list[dict]:
     return claims
 
 
-def collect_prior_verdict_mentions(prior_events) -> dict[str, str | None]:
+def collect_prior_verdict_mentions(prior_events: Iterable[dict]) -> dict[str, str | None]:
     """Return claim key -> earliest ISO timestamp (or None) it was stated in
     `prior_events` (assistant text, any turn before the current one,
     qualified or not — a qualified prior mention still means the number was
@@ -380,7 +381,7 @@ def iter_events_before_current_turn(path: str):
 
 
 def detect_verdict_restatement(
-    last_text: str, prior_events: list[dict]
+    last_text: str, prior_events: Iterable[dict]
 ) -> tuple[list[str], dict[str, str | None]]:
     """Return (restated claim keys, prior-mention timestamps) for verdict
     numbers in `last_text` that are (a) unqualified here and (b) were already
