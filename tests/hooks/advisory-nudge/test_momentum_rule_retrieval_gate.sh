@@ -714,6 +714,24 @@ run_merge_escalation_case "merge_escalation_prior_turn_briefing_passes" \
 run_merge_escalation_case "merge_escalation_prior_turn_wrong_pr_denies" \
   "yes" "" "momentum-merge-prior-turn-wrong-pr.jsonl" "gh pr merge 833 --squash"
 
+# A newline is a clause boundary too — the approval sits on its own line under
+# the briefing. Whitespace normalization used to collapse it before the split,
+# so the newline alternation in _CLAUSE_TAIL_RE was dead (CodeRabbit, PR #1089).
+approval_probe=$(python3 - "$ROOT_DIR" <<'PY_A'
+import importlib.util as u, sys
+spec = u.spec_from_file_location(
+    "m", f"{sys.argv[1]}/hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py")
+m = u.module_from_spec(spec); spec.loader.exec_module(m)
+print(m._is_approval_reply("briefing\napprove"))
+PY_A
+)
+if [ "$approval_probe" = "True" ]; then
+  echo "PASS  [approval_reply_newline_is_a_clause_boundary]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [approval_reply_newline_is_a_clause_boundary] got=$approval_probe"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("approval_reply_newline_is_a_clause_boundary")
+fi
+
 # A SENTENCE that ends in an approval is still an approval (issue #1087). Exact
 # string equality denied these, so the mandated briefing → approval → merge flow
 # was blocked whenever the user approved in prose rather than one word.

@@ -578,10 +578,14 @@ def _user_message_text(content: object) -> str:
 
 def _is_approval_reply(content: object) -> bool:
     """True when a user message is a short bare approval token (ok / 진행 / 승인 …)."""
-    text = re.sub(r"\s+", " ", _user_message_text(content).strip().lower())
-    if text.strip(" .!~,·") in _APPROVAL_TOKENS:
+    raw = _user_message_text(content).strip().lower()
+    if re.sub(r"\s+", " ", raw).strip(" .!~,·") in _APPROVAL_TOKENS:
         return True
-    clauses = [c.strip(" .!~,·") for c in _CLAUSE_TAIL_RE.split(text)]
+    # Split the RAW text: normalizing whitespace first turns a newline into a
+    # space, which would collapse "briefing\napprove" into one clause and lose
+    # the boundary the split is looking for. Whitespace inside each clause is
+    # normalized after the split instead.
+    clauses = [re.sub(r"\s+", " ", c).strip(" .!~,·") for c in _CLAUSE_TAIL_RE.split(raw)]
     clauses = [c for c in clauses if c]
     return bool(clauses) and clauses[-1] in _APPROVAL_TOKENS
 
