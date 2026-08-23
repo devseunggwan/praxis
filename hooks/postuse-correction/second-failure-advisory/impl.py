@@ -36,13 +36,34 @@ Failure detection
 
 The hook derives failure from `tool_response`:
 
-- `isError is True`
+- `isError`/`is_error is True`
+- `status == "error"`
+- a non-empty `error` field
 - `interrupted is True`
-- `exit` is a non-zero integer
-- `error`/`stderr` non-empty with no `exit` field (legacy/SDK shape)
+- `exit` is a non-zero integer (synthetic/legacy payloads; real Bash omits it)
+- **non-Bash only**: `error`/`stderr` non-empty (legacy/SDK text-only shape),
+  read through the harness-noise filter below
 
-`stderr` is read through the harness-noise filter below before that last
-check runs — see issue #1042.
+Non-empty `stderr` alone is NOT a failure for Bash (issue #1096)
+---------------------------------------------------------------
+
+Real Bash `tool_response` payloads carry no exit status and no error field —
+verified as `{stdout, stderr, interrupted, isImage, noOutputExpected}` against
+live session transcripts — so the only failure signals actually available for a
+Bash call are `interrupted` (a killed/timed-out run) and, if one is ever
+present, an explicit `isError`/`is_error`/`status == "error"`/`error` marker.
+Crucially, a *successful* command that writes to `stderr` — `git
+fetch`/`clone`/`checkout` progress, `curl` progress meters, deprecation
+warnings, all exit 0 — is byte-for-byte indistinguishable, by its `stderr`
+content, from a genuine failure. #1042 stripped only the one harness cwd-reset
+line; any *other* `stderr` content still fell through to the back-compat check
+and was mislabelled a failure, so the second identical success-with-stderr call
+injected a false "N회째 실패" advisory into context. `_is_failed` therefore no
+longer treats `stderr` text alone as failure evidence for Bash — the
+back-compat `error`/`stderr` fallback runs for non-Bash tools only.
+
+`stderr` is read through the harness-noise filter below before the non-Bash
+back-compat check runs — see issue #1042.
 
 Harness noise in `stderr` (issue #1042)
 =======================================
@@ -265,8 +286,18 @@ def _is_failed(tool_response: Any, tool_name: str) -> bool:
     if not isinstance(tool_response, dict):
         return False
 
-    is_error = tool_response.get("isError")
-    if is_error is True:
+    # Explicit failure markers — trusted for every tool, Bash included. Real
+    # Bash payloads do not carry any of these (issue #1096), but if one ever
+    # appears we honour it so a genuinely-marked failure still fires.
+    if tool_response.get("isError") is True or tool_response.get("is_error") is True:
+        return True
+
+    status = tool_response.get("status")
+    if isinstance(status, str) and status.strip().lower() == "error":
+        return True
+
+    error_field = tool_response.get("error")
+    if isinstance(error_field, str) and error_field.strip():
         return True
 
     interrupted = tool_response.get("interrupted")
@@ -280,7 +311,24 @@ def _is_failed(tool_response: Any, tool_name: str) -> bool:
         except (TypeError, ValueError):
             pass
 
-    # Back-compat path: older/malformed payloads that only surfaced text.
+    # Back-compat path (issue #944): older/SDK payloads that surfaced a failure
+    # only through non-empty `error`/`stderr` text.
+    #
+    # Issue #1096: NOT applied to Bash. A real Bash `tool_response` carries no
+    # exit status and no error field — `{stdout, stderr, interrupted, isImage,
+    # noOutputExpected}`, verified against live session transcripts — so a
+    # success-with-stderr command (git fetch/clone/checkout progress, curl
+    # meters, deprecation warnings; all exit 0) is indistinguishable, by its
+    # `stderr` content, from a genuine failure. #1042 stripped only the one
+    # harness cwd-reset line; any other `stderr` content still fell through here
+    # and was mislabelled a failure, letting a repeated success-with-stderr call
+    # inject a false "N회째 실패" advisory. For Bash a failure is now signalled
+    # only by the real indicators above (interrupted, or an explicit
+    # error/isError/status marker when actually present), never by `stderr`
+    # content. The text-only fallback stays for non-Bash tools (issue #1071
+    # gate; see case 17).
+    if tool_name == "Bash":
+        return False
     return bool(_derive_error_text(tool_response, tool_name))
 
 
