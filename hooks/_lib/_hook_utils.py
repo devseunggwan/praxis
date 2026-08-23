@@ -637,6 +637,21 @@ def _is_gh_binary(token: str) -> bool:
     return stripped == "gh" or stripped.endswith("/gh")
 
 
+def _command_spec_key(token: str) -> str:
+    """Normalize a command token to its bare name for flag_value_spec lookup.
+
+    Strips a leading run of shell grouping / substitution wrappers (as
+    `_is_gh_binary` does) and any path prefix, so a path-prefixed or
+    subshell-wrapped invocation (`/usr/bin/gh`, `(gh`) keys the same
+    flag_value_spec entry as the bare name. Without this the spec lookup in
+    `_resolve_subcommand` / `tokenize_with_roles` was keyed on the literal
+    `argv[0]`, so `/usr/bin/gh search … --state all` never resolved the
+    `gh search` value-flag spec and the separated `--state all` value went
+    unclassified — a path-prefix bypass of the argv[0] fix in #1092 (#1099).
+    """
+    return token.lstrip(_GROUP_PREFIX_CHARS).rsplit("/", 1)[-1]
+
+
 def iter_command_starts(tokens: list[str]):
     """Yield argv slices at each command start across shell separators."""
     start = 0
@@ -877,7 +892,9 @@ def _resolve_subcommand(
     """Return (command_key, subcommand_key) for flag_value_spec lookup.
 
     argv must already be stripped of env/wrapper prefixes via strip_prefix.
-    command_key is argv[0] (e.g. "git"). subcommand_key is the joined form
+    command_key is the bare name of argv[0] (e.g. "git"), normalized via
+    `_command_spec_key` so a path-prefixed / wrapped form keys the same spec
+    (#1099). subcommand_key is the joined form
     "<cmd> <subcmd>" when a non-flag positional token follows the command
     (possibly after some command-global flags). Otherwise subcommand_key
     equals command_key.
@@ -897,7 +914,9 @@ def _resolve_subcommand(
     """
     if not argv:
         return ("", "")
-    command = argv[0]
+    # Normalize to the bare command name so a path-prefixed / wrapped argv[0]
+    # (`/usr/bin/gh`) keys the same subcommand spec as `gh` (#1099).
+    command = _command_spec_key(argv[0])
     value_flags = command_global_value_flags or set()
     i = 1
     n = len(argv)
@@ -986,7 +1005,7 @@ def tokenize_with_roles(
         # correctly identifies merge-tree as the subcommand.
         stripped = strip_prefix(argv)
         if stripped:
-            command_key_only = stripped[0]
+            command_key_only = _command_spec_key(stripped[0])
             command_global = flag_value_spec.get(command_key_only, set())
         else:
             command_global = set()
