@@ -5,6 +5,53 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.12.0](https://github.com/devseunggwan/praxis/compare/v7.11.0...v7.12.0) (2026-08-24)
+
+
+### Added
+
+* **hooks:** add pr-anchor-existence-gate Stop hook ([#1115](https://github.com/devseunggwan/praxis/issues/1115)) ([b1e03ac](https://github.com/devseunggwan/praxis/commit/b1e03ac6706366cfd834f15f279f3cfe4e1dce64))
+* **hooks:** ask before a prod call whose premise may have dissolved ([#1052](https://github.com/devseunggwan/praxis/issues/1052)) ([ee1e1a1](https://github.com/devseunggwan/praxis/commit/ee1e1a1df7728e3d66942e5e0e9499e64de5e948))
+
+
+### Fixed
+
+* assorted gate/parse correctness nits ([1c4b54e](https://github.com/devseunggwan/praxis/commit/1c4b54e7689f453a72fec8db39dd279f09d5ff71)), closes [#1097](https://github.com/devseunggwan/praxis/issues/1097)
+* **ci:** retry the apt phase, not just bound it ([#1050](https://github.com/devseunggwan/praxis/issues/1050)) ([738de04](https://github.com/devseunggwan/praxis/commit/738de049db84b71b775b3d0cf08929db86184e43))
+* **cmux-delegate:** give the delegated worker a real stdin ([#1057](https://github.com/devseunggwan/praxis/issues/1057)) ([12634df](https://github.com/devseunggwan/praxis/commit/12634df80ee9f1c586f3b578859064571a7faca5)), closes [#1054](https://github.com/devseunggwan/praxis/issues/1054)
+* **cmux-delegate:** make decision_gate write atomic ([#1073](https://github.com/devseunggwan/praxis/issues/1073)) ([da9cad5](https://github.com/devseunggwan/praxis/commit/da9cad558b0b182308591b0b6f05439ce90c0a8f))
+* **cw:** read every sibling config dir's broker state ([2a5c0bd](https://github.com/devseunggwan/praxis/commit/2a5c0bd086c93da8f6ec591bbbbf06e8ece09a35))
+* **cw:** warn on reaper version drift ([53edd02](https://github.com/devseunggwan/praxis/commit/53edd0273c6250ab8a35bb6ffbd7041d84e8d3d3))
+* **hooks:** accept an approval in its final clause ([#1089](https://github.com/devseunggwan/praxis/issues/1089)) ([827dad9](https://github.com/devseunggwan/praxis/commit/827dad99b2edcf1aac1b927ae8b45e8806d2889d))
+* **hooks:** block path-prefixed gh/git bypass ([fd25ef8](https://github.com/devseunggwan/praxis/commit/fd25ef8d28ea15265ec11bd8444040a64f41b067)), closes [#1092](https://github.com/devseunggwan/praxis/issues/1092)
+* **hooks:** correct sciomc gate bypass instruction ([#1114](https://github.com/devseunggwan/praxis/issues/1114)) ([81648e1](https://github.com/devseunggwan/praxis/commit/81648e1a344607d71b681587e7b8435604e3d9af)), closes [#1112](https://github.com/devseunggwan/praxis/issues/1112)
+* **hooks:** disqualify a title quoted both ways ([#1069](https://github.com/devseunggwan/praxis/issues/1069)) ([527f561](https://github.com/devseunggwan/praxis/commit/527f5610f452bdf3bef3766bb95f0631f1cbb71f))
+* **hooks:** fall through when a launcher's impl is absent ([#1066](https://github.com/devseunggwan/praxis/issues/1066)) ([96436fb](https://github.com/devseunggwan/praxis/commit/96436fb4de89c23bc88c102d9ce1a790919d984f)), closes [#1053](https://github.com/devseunggwan/praxis/issues/1053)
+* **hooks:** gate unqualified verdict restatement ([#1067](https://github.com/devseunggwan/praxis/issues/1067)) ([06b8b1f](https://github.com/devseunggwan/praxis/commit/06b8b1f7245ec16907912590c5f94baf7ddb824b))
+* **hooks:** guard background poll-waiter chains ([#1068](https://github.com/devseunggwan/praxis/issues/1068)) ([20a412e](https://github.com/devseunggwan/praxis/commit/20a412e9700ea427cf1353be2f3b653d61e0de86))
+* **hooks:** normalize command spec lookup key ([5a7fbd1](https://github.com/devseunggwan/praxis/commit/5a7fbd1206b166e719c50aaddd45bbe82278edc2)), closes [#1099](https://github.com/devseunggwan/praxis/issues/1099)
+* **hooks:** stop advisory firing on exit-0 Bash ([c87cd96](https://github.com/devseunggwan/praxis/commit/c87cd9606ce217336cb0bfc080aae1939f2bb9e5)), closes [#1096](https://github.com/devseunggwan/praxis/issues/1096)
+* **hooks:** stop counting exit-0 calls as failures ([#1071](https://github.com/devseunggwan/praxis/issues/1071)) ([7715c66](https://github.com/devseunggwan/praxis/commit/7715c66346ce190c5bf7a8c52a156601e79ffe9f))
+* **hooks:** stop safe_tokenize dropping a line ([26a4e29](https://github.com/devseunggwan/praxis/commit/26a4e298de67aa487c4aca81d8cda3b0af73ac41)), closes [#1091](https://github.com/devseunggwan/praxis/issues/1091)
+* **menu-tier:** close gap 3 for destructive sequences ([#1072](https://github.com/devseunggwan/praxis/issues/1072)) ([58a2afa](https://github.com/devseunggwan/praxis/commit/58a2afa65a66d67b259bb1ab1c9a0a7878c73202))
+* **recover-sessions:** harden the recovery CLIs ([275bc38](https://github.com/devseunggwan/praxis/commit/275bc38380885eeb947965bd137030aa16cbd1d7)), closes [#1095](https://github.com/devseunggwan/praxis/issues/1095)
+* **scripts:** align memory lint with runtime parser ([128438a](https://github.com/devseunggwan/praxis/commit/128438a655401102b96e35956da70a346b344a05)), closes [#1094](https://github.com/devseunggwan/praxis/issues/1094)
+* **spec-drift:** skip Verify inside fenced blocks ([50d0c63](https://github.com/devseunggwan/praxis/commit/50d0c63283fc171917cdc003e7449e4e362a1c41)), closes [#1093](https://github.com/devseunggwan/praxis/issues/1093)
+
+
+### Changed
+
+* bump github/codeql-action/analyze from 4.37.6 to 4.37.7 ([#1080](https://github.com/devseunggwan/praxis/issues/1080)) ([95c36d8](https://github.com/devseunggwan/praxis/commit/95c36d88e2ef37699913d7364bb1d90ffb8bf5f6))
+* bump github/codeql-action/init from 4.37.6 to 4.37.7 ([#1081](https://github.com/devseunggwan/praxis/issues/1081)) ([811cd53](https://github.com/devseunggwan/praxis/commit/811cd5331558f0bb7b461c80d3c52ba9bf4278ad))
+* bump reviewdog/action-actionlint from 1.73.1 to 1.73.2 ([#1082](https://github.com/devseunggwan/praxis/issues/1082)) ([b03be52](https://github.com/devseunggwan/praxis/commit/b03be5238a568ff644c479b95ea10ae9650e6b2b))
+* **coderabbit:** skip auto-review on release PRs ([#1048](https://github.com/devseunggwan/praxis/issues/1048)) ([3787644](https://github.com/devseunggwan/praxis/commit/3787644e9bbe871a0ef366cb91bedfabab2d8a0e)), closes [#1047](https://github.com/devseunggwan/praxis/issues/1047)
+* **hooks:** bound Stop-gate transcript scans ([#1083](https://github.com/devseunggwan/praxis/issues/1083)) ([dc06931](https://github.com/devseunggwan/praxis/commit/dc069310542628e4611679aa6e9d1ce90dae8c90))
+* **hooks:** drop the CMUX_DELEGATE exemption ([#1074](https://github.com/devseunggwan/praxis/issues/1074)) ([f7543fc](https://github.com/devseunggwan/praxis/commit/f7543fc3d6f43eb8584a60c6a5be82b166682ddb)), closes [#1055](https://github.com/devseunggwan/praxis/issues/1055)
+* **hooks:** scan the transcript only when a gate needs it ([#1084](https://github.com/devseunggwan/praxis/issues/1084)) ([df31269](https://github.com/devseunggwan/praxis/commit/df31269f4cd3b8ac77b433479f0e11be0caab26a))
+* **hooks:** throttle the cache sweep to once a day ([#1086](https://github.com/devseunggwan/praxis/issues/1086)) ([3e1ab0c](https://github.com/devseunggwan/praxis/commit/3e1ab0c7df88f92e7d8699040aaa8665f0f35117))
+* rewrite README as a landing document ([#1090](https://github.com/devseunggwan/praxis/issues/1090)) ([fbfe0e3](https://github.com/devseunggwan/praxis/commit/fbfe0e3ace7de5518755f3536fa694957c7169c8))
+* sync project tagline across manifests ([#1111](https://github.com/devseunggwan/praxis/issues/1111)) ([c1c13f0](https://github.com/devseunggwan/praxis/commit/c1c13f00bd30faa7da10e5ff53759b7f0996c477))
+
 ## [7.11.0](https://github.com/devseunggwan/praxis/compare/v7.10.0...v7.11.0) (2026-08-19)
 
 
