@@ -59,6 +59,13 @@ escalation one.
     when its tool_use has a matching tool_result that is explicitly non-error
     — a missing/unconfirmed result (interrupted call) does not count
     (CodeRabbit finding, PR #1115).
+  - Only a `gh pr create` result's text is ever read (to find its PR URL), and
+    only the extracted URL set is retained, never the raw text — a session
+    with large unrelated tool outputs (file reads, CI logs) must not cost
+    proportional memory/CPU on every Stop (user-reported, PR #1115; mirrors
+    pr-report-destination-gate's #1076 discipline, which this gate's original
+    tool_result handling had NOT actually matched despite the docstring
+    claiming to mirror it).
 
 ## Fail-open contract
   - Malformed / missing stdin JSON -> exit 0
@@ -177,10 +184,14 @@ def _comment_targets(cmd: str) -> list[str]:
     return targets
 
 
-def _reduce_tool_use(block: dict, pending_creates: list, pending_posts: list) -> None:
+def _reduce_tool_use(
+    block: dict, pending_creates: list, pending_posts: list, create_tids: set
+) -> None:
     """Reduce a tool_use block to what the resolver pass needs; drop the block itself
     (retaining whole Bash command strings for the session length is the cost #1076
-    already paid down for this gate's whole-transcript-scan sibling)."""
+    already paid down for this gate's whole-transcript-scan sibling). `create_tids`
+    collects every `gh pr create` tool_use id so the tool_result pass below knows,
+    without buffering anything, which results are worth reading at all."""
     name = block.get("name")
     inp = block.get("input") or {}
     tid = block.get("id")
@@ -191,6 +202,8 @@ def _reduce_tool_use(block: dict, pending_creates: list, pending_posts: list) ->
     for segment in _create_segments(cmd):
         is_draft = bool(_DRAFT_FLAG_RE.search(" " + segment))
         pending_creates.append((tid, is_draft))
+        if tid is not None:
+            create_tids.add(tid)
     posted = list(_comment_targets(cmd))
     posted.extend(_api_post_targets(cmd))
     if posted:
@@ -204,8 +217,15 @@ def find_unanchored_prs(events) -> list[str]:
     pending_creates: list[tuple[str | None, bool]] = []
     # (tool_use id, [PR numbers posted to])
     pending_posts: list[tuple[str | None, list[str]]] = []
+    create_tids: set[str] = set()
     result_is_error: dict[str, bool] = {}
-    result_text: dict[str, str] = {}
+    # Only a `gh pr create` result ever carries a PR URL this gate needs, and
+    # the extracted set is a handful of short digit strings regardless of the
+    # result's own size — never the raw text (a 60MB session transcript with
+    # unrelated large tool outputs previously cost ~60MB of retained RSS per
+    # Stop invocation for a value read from at most a few tids; user-reported
+    # memory/perf concern, PR #1115).
+    create_urls: dict[str, frozenset[str]] = {}
 
     for ev in events:
         msg = ev.get("message")
@@ -219,12 +239,14 @@ def find_unanchored_prs(events) -> list[str]:
                 continue
             kind = block.get("type")
             if kind == "tool_use":
-                _reduce_tool_use(block, pending_creates, pending_posts)
+                _reduce_tool_use(block, pending_creates, pending_posts, create_tids)
             elif kind == "tool_result":
                 tid = block.get("tool_use_id")
                 if not isinstance(tid, str):
                     continue
                 result_is_error[tid] = block.get("is_error") is True
+                if tid not in create_tids:
+                    continue
                 rc = block.get("content")
                 parts: list[str] = []
                 if isinstance(rc, str):
@@ -234,7 +256,9 @@ def find_unanchored_prs(events) -> list[str]:
                         if isinstance(c, dict) and isinstance(c.get("text"), str):
                             parts.append(c["text"])
                 if parts:
-                    result_text[tid] = "\n".join(parts)
+                    create_urls[tid] = frozenset(
+                        m.group(1) for m in _PR_URL_RE.finditer("\n".join(parts))
+                    )
 
     created: set[str] = set()
     for tid, is_draft in pending_creates:
@@ -242,8 +266,7 @@ def find_unanchored_prs(events) -> list[str]:
             continue
         if tid is None or result_is_error.get(tid) is True:
             continue
-        text = result_text.get(tid, "") if tid is not None else ""
-        urls = {m.group(1) for m in _PR_URL_RE.finditer(text)}
+        urls = create_urls.get(tid, frozenset())
         if len(urls) == 1:
             created.add(next(iter(urls)))
 
