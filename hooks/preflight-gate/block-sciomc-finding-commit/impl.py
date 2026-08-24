@@ -622,7 +622,9 @@ def _emit_block_message(matched_markers: list[str]) -> None:
                 "     AskUserQuestion BEFORE committing.",
                 "  2. If user explicitly approved the change in this session, add token",
                 "     [user-approved] or [ratified-by-user] to the commit message.",
-                "  3. One-off bypass: prefix with CLAUDE_HOOK_BYPASS_SCIOMC_GATE=1",
+                "  3. One-off bypass: set CLAUDE_HOOK_BYPASS_SCIOMC_GATE=1 in the session",
+                "     environment, since an inline `VAR=1 git commit ...` prefix never",
+                "     reaches this hook.",
                 "",
                 "CLAUDE.md: Output-Block-Level Falsification Gate / Self-Falsify Before Recommendation Lock",
             ]
