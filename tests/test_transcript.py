@@ -439,6 +439,9 @@ _CONSUMERS = {
     # of materializing it (#1076).
     HOOKS / "completion-verify" / "pr-report-destination-gate" / "impl.py":
         ["iter_transcript"],
+    # Same whole-session rationale as pr-report-destination-gate above (#1113).
+    HOOKS / "completion-verify" / "pr-anchor-existence-gate" / "impl.py":
+        ["iter_transcript"],
     HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
         ["read_transcript_tail"],
     HOOKS / "preflight-gate" / "block-sciomc-finding-commit" / "impl.py":
