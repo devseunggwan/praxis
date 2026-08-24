@@ -51,6 +51,10 @@ escalation one.
     guessed).
   - `gh api` POST-ness reuses pr-report-destination-gate's explicit
     --method/-X-wins rule: `--method GET … -f page=1` is a documented GET.
+  - `gh pr comment` target detection tolerates flag/positional interleaving
+    (`gh pr comment -b "…" 178` is valid gh usage) via a shlex-tokenized walk
+    that skips known flags and their values, rather than a fixed-offset regex
+    (CodeRabbit finding, PR #1115).
 
 ## Fail-open contract
   - Malformed / missing stdin JSON -> exit 0
@@ -63,6 +67,7 @@ from __future__ import annotations
 import os
 import json
 import re
+import shlex
 import sys
 from pathlib import Path as _Path
 
@@ -89,11 +94,16 @@ _DRAFT_FLAG_RE = re.compile(r"(?:^|\s)(?:--draft|-d)(?:\s|$)", re.IGNORECASE)
 
 _PR_URL_RE = re.compile(r"github\.com/[\w.-]+/[\w.-]+/pull/(\d+)", re.IGNORECASE)
 
-# Posted-PR detection — same shape as pr-report-destination-gate's `_pr_nums`:
-# the target must be the token directly after the subcommand (a flag before
-# the positional, `gh pr comment -b "…" 123`, is an accepted advisory-miss —
-# scanning the whole command would false-match a number inside a flag value).
-_PR_COMMENT_RE = re.compile(r"gh\s+pr\s+comment\s+(?:\S*?/pull/(\d+)|(\d+))", re.IGNORECASE)
+# Posted-PR detection. `gh pr comment [<number>|<url>|<branch>] [flags]` lets
+# flags and the positional identifier interleave in any order (Cobra parsing;
+# `gh pr comment -b "…" 178` is valid and confirmed via `gh pr comment --help`
+# and a live invocation) — a fixed-offset regex would miss it and leave a
+# genuinely-posted PR reading as unanchored (CodeRabbit finding, PR #1115).
+# Each invocation's own segment is tokenized with shlex and walked past known
+# flags (skipping a value-flag's own value) so a number *inside* a flag value
+# (`-b "closes 999" 178`) is never mistaken for the positional identifier.
+_PR_COMMENT_SEGMENT_RE = re.compile(r"gh\s+pr\s+comment\b[^\n]*?(?=&&|;|\||$)", re.IGNORECASE)
+_PR_COMMENT_VALUE_FLAGS = frozenset({"-b", "--body", "-F", "--body-file", "-R", "--repo"})
 
 _API_METHOD_RE = re.compile(r"(?:--method|-X)\s+([A-Za-z]+)", re.IGNORECASE)
 _API_BODY_RE = re.compile(r"(^|\s)(-f|-F|--field|--raw-field|--input)\b", re.IGNORECASE)
@@ -135,7 +145,32 @@ def _create_segments(cmd: str) -> list[str]:
 
 
 def _comment_targets(cmd: str) -> list[str]:
-    return [m.group(1) or m.group(2) for m in _PR_COMMENT_RE.finditer(cmd)]
+    """PR identifiers targeted by `gh pr comment` invocations in `cmd`, tolerant
+    of flag/positional interleaving. An unrecognized `-`-prefixed token is
+    treated as a boolean flag (skip one) rather than guessed as a value flag —
+    the conservative default when its arity is unknown."""
+    targets: list[str] = []
+    for segment in _PR_COMMENT_SEGMENT_RE.finditer(cmd):
+        try:
+            tokens = shlex.split(segment.group(0))
+        except ValueError:
+            continue
+        i = 3  # tokens[0:3] == ["gh", "pr", "comment"]
+        while i < len(tokens):
+            tok = tokens[i]
+            if tok in _PR_COMMENT_VALUE_FLAGS:
+                i += 2
+                continue
+            if tok.startswith("-"):
+                i += 1
+                continue
+            m = _PR_URL_RE.search(tok)
+            if m:
+                targets.append(m.group(1))
+            elif tok.isdigit():
+                targets.append(tok)
+            i += 1
+    return targets
 
 
 def _reduce_tool_use(block: dict, pending_creates: list, pending_posts: list) -> None:

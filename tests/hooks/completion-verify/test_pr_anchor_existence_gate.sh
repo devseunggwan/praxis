@@ -130,6 +130,21 @@ run_case advisory "compound-api-post-on-other-pr-not-credited" '{}'
 build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh api --method POST repos/o/r/issues/178/comments -f body=x && gh api repos/o/r/issues/179/comments'),$(result t2 false ok)]"
 run_case silent "compound-api-post-on-this-pr-still-credited" '{}'
 
+# flag-before-positional `gh pr comment -b "…" 178` must still be detected as
+# a post (CodeRabbit finding, PR #1115 — regex previously required the number
+# directly after "comment")
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh pr comment -b anchor-text 178'),$(result t2 false ok)]"
+run_case silent "comment-flag-before-positional" '{}'
+
+# --body-file before the positional number must also be detected
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh pr comment --body-file /tmp/anchor.md 178'),$(result t2 false ok)]"
+run_case silent "comment-body-file-before-positional" '{}'
+
+# a number embedded inside a flag VALUE (not the positional) must not be
+# mistaken for the target PR
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh pr comment -b \"closes 999\" 178'),$(result t2 false ok)]"
+run_case silent "comment-number-in-flag-value-not-mistaken" '{}'
+
 # =====================================================================
 # Escalation — advisory once, then block (issue #1113's design)
 # =====================================================================
