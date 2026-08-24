@@ -18,6 +18,15 @@ if [ ! -x "$HOOK" ]; then
   exit 1
 fi
 
+# Contain every state write these fixtures cause (issue #1063). The guard now
+# records background waiters under <PRAXIS_HOME>/cache, and the pre-existing
+# `run_in_background: true` cases run through that lane too — without this the
+# suite writes registry files into the developer's real ~/.praxis/cache, one
+# per fixture session id.
+TEST_HOME="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+export PRAXIS_HOME="$TEST_HOME"
+trap 'rm -rf "$TEST_HOME"' EXIT
+
 PASS=0
 FAIL=0
 FAILED_NAMES=()
@@ -79,6 +88,19 @@ run_case "bounded-literal-list-25" block \
   'for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do curl x; sleep 5; done'
 run_case "bounded-minute-suffix" block \
   'for i in $(seq 1 5); do foo; sleep 2m; done'
+
+# A descending `seq A -S B` counts down: `seq 10 -2 2` runs 5 times, not 10.
+# The signed step used to be rejected, collapsing the header to `seq N` — so a
+# 60s loop was read as 120s and blocked. Both directions, because the fix must
+# not stop the genuinely-too-long descending loop from blocking.
+run_case "bounded-seq-descending-under-ceiling" pass \
+  'for i in $(seq 10 -2 2); do gh pr checks; sleep 12; done'
+run_case "bounded-seq-descending-over-ceiling" block \
+  'for i in $(seq 20 -2 2); do gh pr checks; sleep 12; done'
+run_case "bounded-seq-zero-step-fails-open" pass \
+  'for i in $(seq 1 0 40); do gh pr checks; sleep 30; done'
+run_case "bounded-seq-step-away-from-end" pass \
+  'for i in $(seq 2 -2 10); do gh pr checks; sleep 30; done'
 
 # ---- block: unbounded while/until + sleep ------------------------------------
 run_case "unbounded-while-true" block \
@@ -166,6 +188,15 @@ run_case "quoted-loop-in-echo" pass \
 run_case "quoted-seq-no-downgrade" block \
   'for i in $(seq 1 40); do log "seq 1 2"; sleep 3; done'
 
+# ---- pass: `sleep` as an ARGUMENT is not a sleep ------------------------------
+# An unquoted `sleep` that is not in command position waits for nothing — it is
+# a word this command prints or passes along. The control below keeps the rule
+# from being read as "loops with a word-list argument never block".
+run_case "argument-sleep-in-loop-body" pass \
+  'for i in $(seq 1 40); do echo sleep 20; done'
+run_case "argument-sleep-control-still-blocks" block \
+  'for i in $(seq 1 40); do echo waiting; sleep 20; done'
+
 # ---- pass: non-Bash / malformed / empty / bypass ------------------------------
 payload='{"tool_name": "Write", "tool_input": {"file_path": "x", "content": "while true; do sleep 9; done"}}'
 err=$(echo "$payload" | "$HOOK" 2>&1 >/dev/null); rc=$?
@@ -197,7 +228,7 @@ if [ "$rc" -eq 0 ]; then PASS=$((PASS + 1)); echo "ok    [env-bypass]"; else
 # spec must not demand it be read).
 
 RG_DIR="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
-trap 'rm -rf "$RG_DIR"' EXIT
+trap 'rm -rf "$TEST_HOME" "$RG_DIR"' EXIT
 RG_SPEC="$REPO_ROOT/hooks/preflight-gate/foreground-poll-loop-guard/spec.md"
 RG_MD_POST="$REPO_ROOT/hooks/postuse-correction/pre-edit-md-escape-advisory/impl.py"
 RG_LOOP='while true; do gh pr checks 7; sleep 20; done'
@@ -334,6 +365,280 @@ rg_assert "readgate-armed-still-passes-background" nogate 0 "$rc" "$err"
 )
 err=$(rg_run "$RG_DIR/e2e.jsonl" "$RG_DIR/e2e-history.json" "$(rg_payload e2e-sess)"); rc=$?
 rg_assert "readgate-dispatcher-written-count-escalates" gate 2 "$rc" "$err"
+
+# ---- background waiter-chain advisory (issue #1063) ---------------------------
+#
+# `run_in_background: true` passes the block above and always will — it is the
+# redirect the block message hands out. It is also where the blocked behaviour
+# moved: chaining background waiters across turns, each differing from the last
+# only in its sleep duration. A second waiter for the same target while the
+# first is still armed draws an ADVISORY (stderr, exit 0), never a block.
+#
+# Both directions are pinned. Fire: a duration-only retry and an identical
+# loop-shaped relaunch. Silence: the FIRST waiter, waiters on different targets
+# (without which the fire cases are indistinguishable from "fires on every
+# second background call"), a background call that does no waiting at all, and
+# an armed window that has elapsed.
+
+BW_DIR="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+trap 'rm -rf "$TEST_HOME" "$RG_DIR" "$BW_DIR"' EXIT
+
+# bw_payload <session_id> <command>
+bw_payload() {
+  python3 - "$1" "$2" <<'PY'
+import json, sys
+sid, cmd = sys.argv[1], sys.argv[2]
+print(json.dumps({
+    "session_id": sid,
+    "tool_name": "Bash",
+    "tool_input": {"command": cmd, "run_in_background": True},
+}))
+PY
+}
+
+# bw_run <home> <session_id> <command> — stderr of one guard run.
+bw_run() {
+  (
+    export PRAXIS_HOME="$1"
+    { bw_payload "$2" "$3" | "$HOOK" >/dev/null; } 2>&1
+  )
+}
+
+# bw_assert <name> <advise|silent> <rc> <stderr>
+bw_assert() {
+  local name="$1" want="$2" rc="$3" err="$4"
+  if [ "$rc" -ne 0 ]; then
+    echo "FAIL  [$name] expected exit 0 (advisory never blocks), got $rc"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  if [ "$want" = "advise" ] && ! echo "$err" | grep -q 'background waiter for this same target'; then
+    echo "FAIL  [$name] expected the waiter-chain advisory, got: ${err:-<empty>}"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  if [ "$want" = "silent" ] && [ -n "$err" ]; then
+    echo "FAIL  [$name] expected silence, got: $err"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  PASS=$((PASS + 1)); echo "ok    [$name]"
+}
+
+# The first waiter is the correct call and must stay silent; the retry that
+# changed only the sleep duration (the observed 240 → 595 shape) is the one
+# that draws the advisory.
+BW_A="$BW_DIR/home-a"
+err=$(bw_run "$BW_A" bw-a 'sleep 240 && tail -50 /tmp/suite.log'); rc=$?
+bw_assert "waiter-first-launch-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_A" bw-a 'sleep 595 && tail -50 /tmp/suite.log'); rc=$?
+bw_assert "waiter-duration-only-retry-advises" advise "$rc" "$err"
+
+# A loop-shaped waiter has no computable end; its armed window is the fixed
+# default, so an identical relaunch inside it advises too.
+BW_B="$BW_DIR/home-b"
+BW_LOOP='until grep -q DONE /tmp/suite.log; do sleep 20; done; tail -50 /tmp/suite.log'
+err=$(bw_run "$BW_B" bw-b "$BW_LOOP"); rc=$?
+bw_assert "waiter-loop-first-launch-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_B" bw-b "$BW_LOOP"); rc=$?
+bw_assert "waiter-loop-relaunch-advises" advise "$rc" "$err"
+
+# False-positive control. Genuinely parallel waits on different targets must
+# stay silent — including the pair whose only discriminator is a bare number,
+# which is why the signature drops the `sleep` argument and nothing else.
+BW_C="$BW_DIR/home-c"
+err=$(bw_run "$BW_C" bw-c 'sleep 60 && tail -50 /tmp/a.log'); rc=$?
+bw_assert "waiter-distinct-target-first" silent "$rc" "$err"
+err=$(bw_run "$BW_C" bw-c 'sleep 60 && tail -50 /tmp/b.log'); rc=$?
+bw_assert "waiter-distinct-file-stays-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_C" bw-c 'until gh run view 123 -q .status | grep -q completed; do sleep 15; done'); rc=$?
+bw_assert "waiter-distinct-run-id-first" silent "$rc" "$err"
+err=$(bw_run "$BW_C" bw-c 'until gh run view 456 -q .status | grep -q completed; do sleep 15; done'); rc=$?
+bw_assert "waiter-distinct-run-id-stays-silent" silent "$rc" "$err"
+
+# Launching the awaited work is not waiting on it — no `sleep`, never recorded.
+BW_D="$BW_DIR/home-d"
+err=$(bw_run "$BW_D" bw-d 'bash scripts/run-tests.sh > /tmp/suite.log 2>&1'); rc=$?
+bw_assert "waiter-non-waiting-background-first" silent "$rc" "$err"
+err=$(bw_run "$BW_D" bw-d 'bash scripts/run-tests.sh > /tmp/suite.log 2>&1'); rc=$?
+bw_assert "waiter-non-waiting-background-stays-silent" silent "$rc" "$err"
+
+# An elapsed armed window releases the target: re-arming a waiter whose
+# predecessor has already returned is the correct call, not a duplicate.
+BW_E="$BW_DIR/home-e"
+err=$(bw_run "$BW_E" bw-e 'sleep 1 && tail -50 /tmp/expired.log'); rc=$?
+bw_assert "waiter-expiry-first-launch-silent" silent "$rc" "$err"
+python3 -c 'import time; time.sleep(1.3)'
+err=$(bw_run "$BW_E" bw-e 'sleep 1 && tail -50 /tmp/expired.log'); rc=$?
+bw_assert "waiter-expired-window-stays-silent" silent "$rc" "$err"
+
+# `PRAXIS_POLL_LOOP_WAITER_TTL` shortens the loop-shaped armed window; a
+# relaunch after it has elapsed is silent, which is also what pins the loop
+# cases above to the TTL rather than to an accident of timing.
+BW_F="$BW_DIR/home-f"
+err=$(PRAXIS_POLL_LOOP_WAITER_TTL=1 bw_run "$BW_F" bw-f "$BW_LOOP"); rc=$?
+bw_assert "waiter-ttl-override-first-launch-silent" silent "$rc" "$err"
+python3 -c 'import time; time.sleep(1.3)'
+err=$(PRAXIS_POLL_LOOP_WAITER_TTL=1 bw_run "$BW_F" bw-f "$BW_LOOP"); rc=$?
+bw_assert "waiter-ttl-override-expired-stays-silent" silent "$rc" "$err"
+
+# `sleep` counts only in command position. `echo sleep 20` prints a word and
+# waits for nothing — registering it as a waiter would advise against the next
+# genuine wait on that target. The control is the same word after a separator,
+# which IS a wait and must still advise.
+BW_K="$BW_DIR/home-k"
+err=$(bw_run "$BW_K" bw-k 'echo sleep 20 > /tmp/note.txt'); rc=$?
+bw_assert "waiter-argument-sleep-first-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_K" bw-k 'echo sleep 20 > /tmp/note.txt'); rc=$?
+bw_assert "waiter-argument-sleep-never-registers" silent "$rc" "$err"
+err=$(bw_run "$BW_K" bw-k 'some-tool sleep 20'); rc=$?
+bw_assert "waiter-argument-sleep-other-shape-first" silent "$rc" "$err"
+err=$(bw_run "$BW_K" bw-k 'some-tool sleep 20'); rc=$?
+bw_assert "waiter-argument-sleep-other-shape-silent" silent "$rc" "$err"
+
+BW_L="$BW_DIR/home-l"
+err=$(bw_run "$BW_L" bw-l 'touch /tmp/marker; sleep 60 && tail -5 /tmp/sep.log'); rc=$?
+bw_assert "waiter-separator-sleep-first-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_L" bw-l 'touch /tmp/marker; sleep 90 && tail -5 /tmp/sep.log'); rc=$?
+bw_assert "waiter-separator-sleep-advises" advise "$rc" "$err"
+
+# A FINITE `for` loop has a computable end, so it is not the open-ended shape:
+# `for i in 1 2; do sleep 1; done` returns in ~2s and must not stay armed for
+# the 900s TTL. Both directions are pinned — a re-launch INSIDE the computed
+# window still advises (without which "silent" would only prove the entry was
+# never recorded), and one after it has elapsed is silent.
+BW_I="$BW_DIR/home-i"
+BW_FINITE='for i in 1 2; do sleep 1; done; tail -50 /tmp/finite.log'
+err=$(bw_run "$BW_I" bw-i "$BW_FINITE"); rc=$?
+bw_assert "waiter-finite-for-first-launch-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_I" bw-i "$BW_FINITE"); rc=$?
+bw_assert "waiter-finite-for-inside-window-advises" advise "$rc" "$err"
+python3 -c 'import time; time.sleep(2.3)'
+err=$(bw_run "$BW_I" bw-i "$BW_FINITE"); rc=$?
+bw_assert "waiter-finite-for-past-own-total-stays-silent" silent "$rc" "$err"
+
+# A descending `seq` waiter arms for its OWN total. `seq 6 -2 2` runs 3 times,
+# so the window is 1.5s — reading the signed step as `seq 6` armed it for 3s
+# and a re-launch after it had returned reported a live waiter.
+BW_I2="$BW_DIR/home-i2"
+BW_DESC='for i in $(seq 6 -2 2); do sleep 0.5; done; tail -50 /tmp/desc.log'
+err=$(bw_run "$BW_I2" bw-i2 "$BW_DESC"); rc=$?
+bw_assert "waiter-descending-seq-first-launch-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_I2" bw-i2 "$BW_DESC"); rc=$?
+bw_assert "waiter-descending-seq-inside-window-advises" advise "$rc" "$err"
+python3 -c 'import time; time.sleep(1.8)'
+err=$(bw_run "$BW_I2" bw-i2 "$BW_DESC"); rc=$?
+bw_assert "waiter-descending-seq-past-own-total-stays-silent" silent "$rc" "$err"
+
+# False-positive control for the clause above: an UNBOUNDED loop over the same
+# elapsed span keeps the TTL, so the silence above is the computed window and
+# not a timing accident.
+BW_J="$BW_DIR/home-j"
+err=$(bw_run "$BW_J" bw-j "$BW_LOOP"); rc=$?
+bw_assert "waiter-unbounded-loop-first-launch-silent" silent "$rc" "$err"
+python3 -c 'import time; time.sleep(2.3)'
+err=$(bw_run "$BW_J" bw-j "$BW_LOOP"); rc=$?
+bw_assert "waiter-unbounded-loop-keeps-ttl-advises" advise "$rc" "$err"
+
+# The advisory has to reach the MODEL, not only the debug log. A PreToolUse
+# hook's stderr is fed to the model only when the dispatcher exits 2 (the deny
+# path), so on this exit-0 lane the same text is also written as
+# `hookSpecificOutput.additionalContext`. Pinned here because a stderr-only
+# advisory passes every assertion above while being invisible to the agent.
+
+# bw_stdout <home> <session_id> <command> — stdout of one guard run.
+bw_stdout() {
+  (
+    export PRAXIS_HOME="$1"
+    bw_payload "$2" "$3" | "$HOOK" 2>/dev/null
+  )
+}
+
+BW_H="$BW_DIR/home-h"
+out=$(bw_stdout "$BW_H" bw-h 'sleep 30 && tail -50 /tmp/ctx.log'); rc=$?
+if [ "$rc" -eq 0 ] && [ -z "$out" ]; then
+  PASS=$((PASS + 1)); echo "ok    [waiter-first-launch-emits-no-context]"
+else
+  echo "FAIL  [waiter-first-launch-emits-no-context] expected exit 0 + empty stdout, got rc=$rc: ${out:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("waiter-first-launch-emits-no-context")
+fi
+
+out=$(bw_stdout "$BW_H" bw-h 'sleep 90 && tail -50 /tmp/ctx.log'); rc=$?
+# The payload must be model-visible context and NOTHING else: a
+# `permissionDecision` key here would mean this lane started denying.
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+hso = d.get("hookSpecificOutput", {})
+assert hso.get("hookEventName") == "PreToolUse", d
+assert "background waiter for this same target" in hso.get("additionalContext", ""), d
+assert "permissionDecision" not in hso and "decision" not in d, d
+' 2>/dev/null; then
+  PASS=$((PASS + 1)); echo "ok    [waiter-advisory-reaches-model-as-context]"
+else
+  echo "FAIL  [waiter-advisory-reaches-model-as-context] expected exit 0 + additionalContext, got rc=$rc: ${out:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("waiter-advisory-reaches-model-as-context")
+fi
+
+# The advisory is a background-lane behaviour only: the same command in the
+# FOREGROUND is still the hard block, unchanged.
+BW_G="$BW_DIR/home-g"
+err=$(PRAXIS_HOME="$BW_G" bash -c '{ printf "%s" "$1" | "$2" >/dev/null; } 2>&1' _ \
+  '{"session_id":"bw-g","tool_name":"Bash","tool_input":{"command":"until grep -q DONE /tmp/suite.log; do sleep 20; done"}}' \
+  "$HOOK"); rc=$?
+if [ "$rc" -eq 2 ] && echo "$err" | grep -q 'FOREGROUND POLL-LOOP GUARD blocked'; then
+  PASS=$((PASS + 1)); echo "ok    [waiter-foreground-same-command-still-blocks]"
+else
+  echo "FAIL  [waiter-foreground-same-command-still-blocks] expected exit 2 + block, got rc=$rc: ${err:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("waiter-foreground-same-command-still-blocks")
+fi
+
+# Signature normalization (issue #1063, group-1 rewrites). Four syntactic
+# no-ops that changed the text of a waiter but not what it awaited, each
+# measured silent before the fix. Fire direction first.
+BW_N1="$BW_DIR/home-n1"
+err=$(bw_run "$BW_N1" bw-n1 'sleep 240 && tail -50 /tmp/norm.log'); rc=$?
+bw_assert "waiter-norm-baseline-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_N1" bw-n1 'sleep 240; tail -50 /tmp/norm.log'); rc=$?
+bw_assert "waiter-norm-separator-swap-advises" advise "$rc" "$err"
+err=$(bw_run "$BW_N1" bw-n1 'true && sleep 240 && tail -50 /tmp/norm.log'); rc=$?
+bw_assert "waiter-norm-leading-noop-advises" advise "$rc" "$err"
+err=$(bw_run "$BW_N1" bw-n1 'sleep 240 && tail -80 /tmp/norm.log'); rc=$?
+bw_assert "waiter-norm-numeric-flag-advises" advise "$rc" "$err"
+err=$(bw_run "$BW_N1" bw-n1 'bash -c "sleep 240 && tail -50 /tmp/norm.log"'); rc=$?
+bw_assert "waiter-norm-shell-c-wrapper-advises" advise "$rc" "$err"
+
+# Silence direction — the folds must not reach genuinely different targets.
+# A bare numeral is the sole discriminator between two run ids, `|` and `&`
+# really do change the shape of a call, and a no-op that is not in command
+# position (or has no separator after it) is left alone.
+BW_N2="$BW_DIR/home-n2"
+err=$(bw_run "$BW_N2" bw-n2 'sleep 60 && gh run view 123'); rc=$?
+bw_assert "waiter-norm-run-id-first-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_N2" bw-n2 'sleep 60 && gh run view 456'); rc=$?
+bw_assert "waiter-norm-different-run-id-stays-silent" silent "$rc" "$err"
+
+# Same shape, same flags, different file: the `-N` fold must not reach the
+# path argument. Paired against its own baseline — comparing it to the run-id
+# waiter above would pass for the wrong reason (the whole command differs).
+BW_N5="$BW_DIR/home-n5"
+err=$(bw_run "$BW_N5" bw-n5 'sleep 60 && tail -50 /tmp/a.log'); rc=$?
+bw_assert "waiter-norm-file-baseline-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_N5" bw-n5 'sleep 60 && tail -50 /tmp/b.log'); rc=$?
+bw_assert "waiter-norm-different-file-stays-silent" silent "$rc" "$err"
+
+BW_N3="$BW_DIR/home-n3"
+err=$(bw_run "$BW_N3" bw-n3 'sleep 60 && tail -5 /tmp/pipe.log'); rc=$?
+bw_assert "waiter-norm-pipe-baseline-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_N3" bw-n3 'sleep 60 | tail -5 /tmp/pipe.log'); rc=$?
+bw_assert "waiter-norm-pipe-not-folded" silent "$rc" "$err"
+err=$(bw_run "$BW_N3" bw-n3 'sleep 60 && tail -5 /tmp/pipe.log && true'); rc=$?
+bw_assert "waiter-norm-trailing-noop-not-dropped" silent "$rc" "$err"
+
+# `while true` keeps its `true`: it is not in command position, so the
+# no-op rule leaves it alone and the loop still registers as a waiter.
+BW_N4="$BW_DIR/home-n4"
+err=$(bw_run "$BW_N4" bw-n4 'while true; do sleep 20; done'); rc=$?
+bw_assert "waiter-norm-while-true-first-silent" silent "$rc" "$err"
+err=$(bw_run "$BW_N4" bw-n4 'while true; do sleep 20; done'); rc=$?
+bw_assert "waiter-norm-while-true-still-advises" advise "$rc" "$err"
 
 # ---- summary ------------------------------------------------------------------
 echo ""
