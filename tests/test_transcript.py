@@ -243,6 +243,16 @@ class TestReadLastUserMessage:
         ])
         assert T.read_last_user_message(path) == "a\nb"
 
+    def test_sidechain_user_msg_is_skipped(self, tmp_path):
+        # A Task-subagent prompt is a user-role event with isSidechain=True
+        # but is assistant-authored — the real human message earlier in the
+        # transcript must be returned instead (#1097).
+        path = _write_jsonl(tmp_path, [
+            _user(text="real human message"),
+            _user(text="agent subagent prompt", sidechain=True),
+        ])
+        assert T.read_last_user_message(path) == "real human message"
+
 
 # ---------------------------------------------------------------------------
 # scan_user_rejections (#1007 / #1013)

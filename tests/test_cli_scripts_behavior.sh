@@ -124,6 +124,25 @@ run_case "install: rebind points dst at this clone" \
   "$([ "$(readlink "$BIN/foo")" = "$CLONE/skills/foo/foo" ] && echo yes || echo no)" "yes"
 
 # ---------------------------------------------------------------------------
+# install.sh — --force on a DIRECTORY destination must refuse, not "succeed"
+# by moving the staged link inside it (#1097).
+# ---------------------------------------------------------------------------
+
+fresh_bin
+mkdir -p "$BIN/foo/nested"   # dst is a real directory, not a symlink
+echo "keep me" > "$BIN/foo/nested/keep"
+out=$(install_sh --force); rc=$?
+run_case "install: --force on directory dst exits 1" "$rc" "1"
+echo "$out" | grep -q "^ERROR    foo (.*is a directory"; run_case "install: directory dst reports ERROR" "$?" "0"
+run_case "install: directory dst left as a directory" \
+  "$([ -d "$BIN/foo" ] && [ ! -L "$BIN/foo" ] && echo yes || echo no)" "yes"
+run_case "install: directory dst contents untouched" \
+  "$([ "$(cat "$BIN/foo/nested/keep" 2>/dev/null)" = "keep me" ] && echo yes || echo no)" "yes"
+# No staged link may have leaked into the directory.
+run_case "install: no staged link leaked into directory" \
+  "$([ -z "$(find "$BIN/foo" -name 'foo.new.*' 2>/dev/null)" ] && echo yes || echo no)" "yes"
+
+# ---------------------------------------------------------------------------
 # install.sh — missing source, bad arguments
 # ---------------------------------------------------------------------------
 

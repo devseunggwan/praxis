@@ -436,6 +436,15 @@ def read_last_user_message(transcript_path: str) -> str | None:
         if role != "user":
             continue
 
+        # Skip sidechain (Task-subagent) events: their user-role prompt is
+        # assistant-authored, not the human's message. Matches the
+        # isSidechain guard the sibling scanners already apply
+        # (get_current_turn / extract_last_assistant_text / has_tool_in_turn)
+        # so this reader cannot surface an agent prompt as the last user
+        # message (#1097).
+        if entry.get("isSidechain"):
+            continue
+
         # Extract text. Possible shapes:
         #   {"type": "user", "message": {"role": "user", "content": "text"}}
         #   {"type": "user", "message": {"role": "user", "content": [{"type":"text","text":"..."}]}}

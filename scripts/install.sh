@@ -53,6 +53,7 @@ already=0
 missing=0
 refused=0
 overwritten=0
+backup_seq=0  # monotonic suffix so same-second forced backups never collide (#1097)
 
 # Small helper: resolve realpath of a path (or empty string on failure).
 # We shell out to python3 because BSD and GNU realpath accept different
@@ -114,14 +115,38 @@ for script in "${CLI_SCRIPTS[@]}"; do
       echo "REBIND   $name: $old_target -> $src"
     fi
 
+    # A directory destination cannot be atomically replaced by the
+    # temp-symlink + rename(2) swap below: `mv -f "$tmp" "$dst"` would move
+    # the staged link INTO the directory and falsely report LINK success.
+    # Refuse loudly — the surrounding code is a symlink installer, not a
+    # tree remover, so blowing away a directory here is not its intent
+    # (#1097).
+    if [[ -d "$dst" && ! -L "$dst" ]]; then
+      echo "ERROR    $name ($dst is a directory; refusing to replace it — remove it by hand)"
+      refused=$((refused + 1))
+      continue
+    fi
+
     # Backup FIRST so we never lose the old binary even if the new
     # symlink write fails later. For symlinks we preserve the link
     # itself (not its target) so recovery keeps its original semantics.
-    backup="$dst.bak.$(date +%s)"
+    # The name embeds $$ and a per-run counter as well as the epoch so two
+    # forced runs landing in the same second (or two conflicts in one run)
+    # cannot collide on the backup path (#1097).
+    backup="$dst.bak.$(date +%s).$$.$backup_seq"
+    backup_seq=$((backup_seq + 1))
+    # A failed backup must not abort the whole loop under `set -e`; guard it
+    # like the stage/rename steps below and treat it as a per-script error.
     if [[ -L "$dst" ]]; then
-      ln -s "$(readlink "$dst")" "$backup"
+      if ! ln -s "$(readlink "$dst")" "$backup"; then
+        echo "ERROR    $name failed to write backup $backup; dst unchanged"
+        exit 1
+      fi
     else
-      cp -a "$dst" "$backup"
+      if ! cp -a "$dst" "$backup"; then
+        echo "ERROR    $name failed to write backup $backup; dst unchanged"
+        exit 1
+      fi
     fi
 
     # Stage the new link in a sibling temp path. Installing via a

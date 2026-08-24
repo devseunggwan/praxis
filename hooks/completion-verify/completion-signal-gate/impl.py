@@ -435,7 +435,11 @@ ADVISORY_RULE1 = (
 
 ADVISORY_RULE2 = (
     f"{PREFIX} cross-plugin slash command(s) {{cmds}} surfaced while cwd "
-    "plugin is '{{plugin}}'.\n"
+    # f-prefix required: a plain string leaves the literal `{{plugin}}`,
+    # so `.replace("{plugin}", …)` would render `'{praxis}'`. The f-string
+    # collapses `{{plugin}}` to the single-brace `{plugin}` placeholder the
+    # caller substitutes, matching the `{cmds}` fragment above (#1097).
+    f"plugin is '{{plugin}}'.\n"
     f"{PREFIX} Rule: CLAUDE.md 'Plugin-context anchoring' — do not surface skill "
     "commands from foreign plugin namespaces. Verify you are working in the "
     "correct repo/plugin context before recommending slash commands."
