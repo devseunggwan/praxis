@@ -190,6 +190,14 @@ run_case "gh pr create --label nope (missing) — block" \
   "block" \
   '{"tool_name":"Bash","tool_input":{"command":"gh pr create --label nope --repo acme/repo --title t --body b"}}'
 
+# #1092: a path-prefixed gh binary must not slip past the label gate.
+# `argv[0] == "gh"` exact match previously let `/usr/bin/gh pr create --label
+# nope` bypass; `_is_gh_binary` closes it. (The hook still shells out to the
+# hermetic `gh` stub for the label listing regardless of argv[0]'s path.)
+run_case "/usr/bin/gh pr create --label nope (path-prefix) — block" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"/usr/bin/gh pr create --label nope --repo acme/repo --title t --body b"}}'
+
 # Regression (#803): the listing is row-limited, so a repo with more labels
 # than the limit hides its tail. Absence from the listing must not block on
 # its own — `tail-label` is real and the API says so.

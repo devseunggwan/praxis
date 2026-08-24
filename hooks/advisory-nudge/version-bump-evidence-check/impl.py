@@ -46,6 +46,7 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    _is_gh_binary,
     iter_command_starts,
     safe_tokenize,
     strip_prefix,
@@ -215,7 +216,7 @@ def _extract_gh_body(argv: list[str]) -> str | None:
 def _is_gh_bump_target(argv: list[str]) -> bool:
     """Return True iff argv invokes a gh subcommand that is in scope for this hook."""
     argv = strip_prefix(argv)
-    if not argv or argv[0] != "gh":
+    if not argv or not _is_gh_binary(argv[0]):
         return False
 
     i = 1

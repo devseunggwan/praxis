@@ -47,6 +47,7 @@ from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     GH_MERGE_VALUE_FLAGS,
+    _is_gh_binary,
     is_help_invocation,
     iter_command_starts,
     safe_tokenize,
@@ -64,6 +65,19 @@ from block_message import (  # type: ignore[import-not-found]  # noqa: E402
 # ---------------------------------------------------------------------------
 
 PREFIX = "[praxis:momentum-gate]"
+
+# Shell grouping / command-substitution chars that may prefix a binary token
+# when it sits inside a subshell or substitution (`(git …)`, `$(git …)`,
+# `` `git …` ``). Stripped before the basename comparison so the binary-name
+# check is not fooled by the wrapper syntax. Mirrors `_is_git_binary` in the
+# commit-gate hooks and `_is_gh_binary` in `_hook_utils`.
+_GROUP_PREFIX_CHARS = "(){}$`"
+
+
+def _is_git_binary(token: str) -> bool:
+    stripped = token.lstrip(_GROUP_PREFIX_CHARS)
+    return stripped == "git" or stripped.endswith("/git")
+
 
 # Trigger identifiers — keys for both static rule surfaces and dynamic
 # memory filtering via the `momentum:` frontmatter field.
@@ -618,7 +632,7 @@ def _gh_pr_positional(argv: list[str], verbs: frozenset[str],
     Global flags before the subcommand are walked exactly as `_is_gh_pr_merge`
     does, so a numeric global-flag value cannot be mistaken for the target."""
     argv = strip_prefix(argv)
-    if not argv or argv[0] != "gh":
+    if not argv or not _is_gh_binary(argv[0]):
         return None
     i = 1
     while i < len(argv):
@@ -894,7 +908,7 @@ GIT_GLOBAL_FLAGS_WITH_ARG = frozenset({
 def _is_gh_pr_merge(argv: list[str]) -> bool:
     """Return True iff the argv segment is `gh pr merge`."""
     argv = strip_prefix(argv)
-    if not argv or argv[0] != "gh":
+    if not argv or not _is_gh_binary(argv[0]):
         return False
     i = 1
     while i < len(argv):
@@ -959,9 +973,14 @@ def _is_force_push(argv: list[str]) -> bool:
     silently bypassing the gate for `git -c user.name=x push --force ...`.
     Mirror the gh global-flags-with-arg pattern: skip both the flag and its
     value token. `--flag=value` fused form needs only single-token skip.
+
+    A leading `+` on a refspec forces just that ref — `git push origin +main`
+    and `git push origin '+refs/heads/*'` are force pushes without any
+    `--force`/`-f` flag, so a bare-flag-only scan misses them. Any positional
+    (non-flag) token starting with `+` is treated as a force refspec.
     """
     argv = strip_prefix(argv)
-    if not argv or argv[0] != "git":
+    if not argv or not _is_git_binary(argv[0]):
         return False
     # Walk past git global flags + their value tokens to find the subcommand.
     i = 1
@@ -985,6 +1004,10 @@ def _is_force_push(argv: list[str]) -> bool:
     for tok in rest:
         bare = tok.split("=", 1)[0]
         if bare in force_flags or tok in force_flags:
+            return True
+        # A refspec with a leading `+` forces that ref (`+main`,
+        # `+refs/heads/*`, `+HEAD:main`) — force without a `--force` flag.
+        if tok.startswith("+"):
             return True
         # Bundled POSIX short cluster carrying `f` (=`--force`), e.g. `-fu`, `-vf`.
         # All `git push` short opts are value-less, so a bare `^-[a-zA-Z]+$` token

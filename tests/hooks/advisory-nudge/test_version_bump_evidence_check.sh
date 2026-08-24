@@ -160,6 +160,12 @@ print(json.dumps({
 run_case "version pair arrow → triggers" warn \
   'gh issue create --title "bump" --body "Upgrading from v24.0 → v25.0"'
 
+# #1092: a path-prefixed gh binary must not slip past the version-bump check.
+# `argv[0] == "gh"` exact match previously let `/usr/bin/gh issue create`
+# bypass; `_is_gh_binary` closes it.
+run_case "version pair via /usr/bin/gh (path-prefix) → triggers" warn \
+  '/usr/bin/gh issue create --title "bump" --body "Upgrading from v24.0 → v25.0"'
+
 run_case "version pair dash-arrow → triggers" warn \
   'gh pr create --title "bump" --body "migrating v1.2 -> v1.3"'
 

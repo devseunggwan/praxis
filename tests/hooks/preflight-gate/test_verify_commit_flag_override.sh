@@ -117,6 +117,12 @@ run_case "B06: git -c core.hooksPath=/tmp/x commit -m msg" deny \
 run_case "B07: short combined -Skeyid" deny \
   "$(payload 'git commit -Sabc123 -m "msg"')"
 
+# #1092: a path-prefixed git binary must not slip past the override gate.
+# `argv[0] == "git"` exact match previously let `/usr/bin/git commit
+# --no-verify` bypass; `_is_git_binary` closes it.
+run_case "B08: /usr/bin/git commit --no-verify (path-prefix, deny)" deny \
+  "$(payload '/usr/bin/git commit --no-verify -m "msg"')"
+
 # ---------------------------------------------------------------------------
 # Pass cases (must NOT deny) — these are the lexical false-positives the
 # port is meant to eliminate. The prior regex-based hook tripped on every

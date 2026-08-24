@@ -44,6 +44,7 @@ from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _paths import praxis_cache_dir  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    _is_gh_binary,
     iter_command_starts,
     safe_tokenize,
     strip_prefix,
@@ -215,9 +216,9 @@ def _resolve_subcommand_tokens(argv: list[str]) -> tuple[str, ...] | None:
     not starting with '-' is consumed as the flag value). This is sufficient
     for subcommand detection; full flag parsing is not needed here.
 
-    Returns None if argv[0] != 'gh' or no subcommand token found.
+    Returns None if argv[0] is not the gh binary or no subcommand token found.
     """
-    if not argv or argv[0] != "gh":
+    if not argv or not _is_gh_binary(argv[0]):
         return None
 
     positionals: list[str] = []
@@ -286,7 +287,7 @@ def _check_segment(
     Returns (is_invalid, reason). is_invalid=True triggers deny.
     """
     argv = strip_prefix(raw_argv)
-    if not argv or argv[0] != "gh":
+    if not argv or not _is_gh_binary(argv[0]):
         return False, ""
 
     subcommand_tokens = _resolve_subcommand_tokens(argv)

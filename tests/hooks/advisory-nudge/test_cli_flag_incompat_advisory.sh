@@ -81,6 +81,13 @@ run_case "merge-tree --name-only with 3 positionals" \
   advisory \
   "git merge-tree --name-only abc123 HEAD origin/main"
 
+# #1092: a path-prefixed git binary must not slip past the merge-tree advisory.
+# `argv[0].text == "git"` exact match previously let `/usr/bin/git merge-tree`
+# bypass; `_is_git_binary` closes it.
+run_case "merge-tree --name-only via /usr/bin/git (path-prefix)" \
+  advisory \
+  "/usr/bin/git merge-tree --name-only abc123 HEAD origin/main"
+
 run_case "merge-tree --name-only chained via && (3 positionals)" \
   advisory \
   "git merge-tree --name-only A B C && echo done"

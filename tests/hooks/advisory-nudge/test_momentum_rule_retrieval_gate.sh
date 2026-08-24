@@ -400,6 +400,33 @@ run_case "strict_mode_blocks_force_push" \
   "PRAXIS_MOMENTUM_STRICT=1" \
   "git push --force"
 
+# #1092: path-prefixed binaries must still trigger. `argv[0] == "gh"` /
+# `argv[0] == "git"` exact matches previously let `/usr/bin/gh pr merge` and
+# `/usr/bin/git push --force` bypass the gate; `_is_gh_binary`/`_is_git_binary`
+# close both.
+run_case "strict_mode_blocks_path_prefixed_merge" \
+  "block" \
+  "PRAXIS_MOMENTUM_STRICT=1" \
+  "/usr/bin/gh pr merge --squash"
+
+run_case "strict_mode_blocks_path_prefixed_force_push" \
+  "block" \
+  "PRAXIS_MOMENTUM_STRICT=1" \
+  "/usr/bin/git push --force"
+
+# #1092: `+refspec` force pushes carry no `--force`/`-f` flag. `_is_force_push`
+# now flags a leading-`+` refspec (`git push origin +main`,
+# `git push origin '+refs/heads/*'`) as a force push.
+run_case "strict_mode_blocks_refspec_plus_force_push" \
+  "block" \
+  "PRAXIS_MOMENTUM_STRICT=1" \
+  "git push origin +main"
+
+run_case "strict_mode_blocks_refspec_plus_glob_force_push" \
+  "block" \
+  "PRAXIS_MOMENTUM_STRICT=1" \
+  "git push origin '+refs/heads/*'"
+
 run_case "strict_mode_with_ack_passes" \
   "advisory:[praxis:momentum-gate]" \
   "PRAXIS_MOMENTUM_STRICT=1 PRAXIS_MOMENTUM_ACK=1" \
