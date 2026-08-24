@@ -45,6 +45,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path as _Path
 
@@ -57,8 +58,9 @@ import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
-    get_current_turn,
-    load_transcript,
+    is_turn_boundary,
+    iter_transcript,
+    load_current_turn,
 )
 
 _PREFIX = "[runtime-state-claim-gate]"
@@ -292,37 +294,57 @@ def extract_verdict_claims(text: str) -> list[dict]:
     return claims
 
 
-def collect_prior_verdict_mentions(prior_events: list[dict]) -> dict[str, str | None]:
+def collect_prior_verdict_mentions(prior_events: Iterable[dict]) -> dict[str, str | None]:
     """Return claim key -> earliest ISO timestamp (or None) it was stated in
     `prior_events` (assistant text, any turn before the current one,
     qualified or not — a qualified prior mention still means the number was
     already said). ISO8601 `Z`-suffixed timestamps sort correctly as strings,
-    so no datetime parsing is needed to track the minimum."""
+    so no datetime parsing is needed to track the minimum.
+
+    Takes any iterable so the caller can stream the file rather than hold it.
+    """
     mentions: dict[str, str | None] = {}
     for ev in prior_events:
-        msg = ev.get("message", {})
-        if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
-            continue
-        content = msg.get("content", [])
-        text = ""
-        if isinstance(content, str):
-            text = content
-        elif isinstance(content, list):
-            text = "\n".join(
-                b.get("text", "") for b in content
-                if isinstance(b, dict) and b.get("type") == "text"
-            )
-        if not text:
-            continue
-        ts = ev.get("timestamp")
-        ts = ts if isinstance(ts, str) and ts else None
-        for claim in extract_verdict_claims(text):
-            key = claim["key"]
-            if key not in mentions:
-                mentions[key] = ts
-            elif ts and (mentions[key] is None or ts < mentions[key]):
-                mentions[key] = ts
+        _merge_mentions(mentions, _event_verdict_mentions(ev))
     return mentions
+
+
+def _event_verdict_mentions(ev: dict) -> dict[str, str | None]:
+    """One event reduced to the verdict keys it states, and when.
+
+    This is the whole of what a prior event contributes, so reducing here lets
+    a caller drop the event itself instead of holding it (codex review #1083
+    P1) — a completed turn can be most of a large session.
+    """
+    msg = ev.get("message", {})
+    if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
+        return {}
+    content = msg.get("content", [])
+    text = ""
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        text = "\n".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    if not text:
+        return {}
+    ts = ev.get("timestamp")
+    ts = ts if isinstance(ts, str) and ts else None
+    found: dict[str, str | None] = {}
+    for claim in extract_verdict_claims(text):
+        found.setdefault(claim["key"], ts)
+    return found
+
+
+def _merge_mentions(into: dict[str, str | None], new: dict[str, str | None]) -> None:
+    """Fold `new` into `into`, keeping the earliest timestamp per key."""
+    for key, ts in new.items():
+        if key not in into:
+            into[key] = ts
+        elif ts and (into[key] is None or ts < into[key]):
+            into[key] = ts
 
 
 def _last_assistant_timestamp(turn: list[dict]) -> str | None:
@@ -352,19 +374,53 @@ def _elapsed_minutes(ts_from: str | None, ts_to: str | None) -> str:
     return f"{abs((b - a).total_seconds()) / 60:.1f}"
 
 
+def prior_verdict_mentions(path: str) -> dict[str, str | None]:
+    """Verdict mentions from every turn BEFORE the current one, streaming (#1076).
+
+    This gate asks whether a verdict number was already stated *earlier this
+    session*, so unlike its seven siblings it cannot work from the turn alone.
+    It used to hold the whole transcript in memory to slice the turn off the
+    end — hundreds of MB on a long session, against a 10s budget.
+
+    Events pile up until the next real user input proves they belong to a
+    completed turn; whatever is still pending at EOF IS the current turn and is
+    dropped. The current turn must not leak in — the text being judged would
+    then count as its own prior mention and every claim would read as a
+    restatement.
+
+    What is held while waiting for that proof is the reduction, not the events:
+    buffering the events themselves made peak memory track the largest turn,
+    which on a long session is most of it (codex review #1083 P1). Peak now
+    tracks the number of distinct verdict keys.
+    """
+    confirmed: dict[str, str | None] = {}
+    pending: dict[str, str | None] = {}
+    for ev in iter_transcript(path):
+        if is_turn_boundary(ev):
+            _merge_mentions(confirmed, pending)
+            pending = {}
+        _merge_mentions(pending, _event_verdict_mentions(ev))
+    return confirmed
+
+
 def detect_verdict_restatement(
-    last_text: str, prior_events: list[dict]
+    last_text: str, transcript_path: str
 ) -> tuple[list[str], dict[str, str | None]]:
     """Return (restated claim keys, prior-mention timestamps) for verdict
     numbers in `last_text` that are (a) unqualified here and (b) were already
-    stated somewhere earlier this session."""
-    mentions = collect_prior_verdict_mentions(prior_events)
+    stated somewhere earlier this session.
+
+    Condition (a) is decided from `last_text` alone, so it is decided first:
+    with nothing unqualified to restate, no prior event can change the answer
+    and the transcript is not read at all (issue #1076)."""
+    unqualified = [c for c in extract_verdict_claims(last_text) if not c["qualified"]]
+    if not unqualified:
+        return [], {}
+    mentions = prior_verdict_mentions(transcript_path)
     if not mentions:
         return [], mentions
     restated: list[str] = []
-    for claim in extract_verdict_claims(last_text):
-        if claim["qualified"]:
-            continue
+    for claim in unqualified:
         key = claim["key"]
         if key in mentions and key not in restated:
             restated.append(key)
@@ -458,18 +514,13 @@ def main() -> int:
     if not transcript_path or not os.path.isfile(transcript_path):
         return 0
 
-    events = load_transcript(transcript_path)
-    if not events:
-        return 0
-
-    turn = get_current_turn(events)
+    turn = load_current_turn(transcript_path)
     last_text = extract_last_assistant_text(turn) if turn else ""
     if not last_text:
         return 0
 
     kinds = detect_claims(last_text)
-    prior_events = events[: len(events) - len(turn)] if turn else events
-    restated, mentions = detect_verdict_restatement(last_text, prior_events)
+    restated, mentions = detect_verdict_restatement(last_text, transcript_path)
     if not kinds and not restated:
         return 0
 

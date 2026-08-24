@@ -1,6 +1,6 @@
 # Praxis
 
-Development workflow skills for Claude Code — disciplined, fast, resilient.
+Workflow rules from CLAUDE.md turned into hooks and skills that actually fire.
 
 Each skill is an orchestrator with pluggable steps. External integrations (issue tracker, PR tool, code review) are routed via the project's CLAUDE.md — no hardcoded dependencies.
 

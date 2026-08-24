@@ -1,6 +1,6 @@
 {
   "name": "praxis",
-  "description": "Development workflow skills for Claude Code — disciplined, fast, resilient",
+  "description": "Workflow rules from CLAUDE.md turned into hooks and skills that actually fire",
   "owner": {
     "name": "devseunggwan"
   },
@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "praxis",
-      "description": "Development workflow skills for Claude Code — disciplined, fast, resilient",
+      "description": "Workflow rules from CLAUDE.md turned into hooks and skills that actually fire",
       "version": "7.11.0",
       "author": {
         "name": "devseunggwan"

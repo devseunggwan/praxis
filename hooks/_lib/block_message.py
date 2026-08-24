@@ -121,8 +121,10 @@ a `Falsified:` line.
 Unconditional — fire on every `gh pr merge`, whatever the flags:
   6-item briefing in this turn              ← momentum-rule-retrieval-gate
     What changed / verified / NOT verified / Risk / Open items / approve-ask.
-    Relief: PRAXIS_MOMENTUM_MERGE_ADVISORY=1, or an unquoted shell comment
-    `# briefing-surfaced: <reason>` on the merge command itself.
+    Relief: an unquoted shell comment `# briefing-surfaced: <reason>` on the
+    merge command itself. PRAXIS_MOMENTUM_MERGE_ADVISORY=1 also works, but
+    ONLY from the session environment — the hook is spawned by the harness,
+    so an inline `VAR=1 gh pr merge …` prefix never reaches it.
   Explicit per-PR user approval             ← pre-merge-approval-gate
     Always asks. No agent-attachable bypass exists, by design.
   Intentional-side-effect acknowledgement   ← side-effect-scan

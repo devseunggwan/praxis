@@ -175,7 +175,7 @@ finalized. Run sequentially: `completion-verify` → `retrospect-mix-check` →
 `merge-state-claim-gate` → `runtime-state-claim-gate` →
 `negative-existence-verdict-gate` → `artifact-verdict-evidence-gate` →
 `pr-report-destination-gate` → `pr-claim-mutation-gate` →
-`proposal-premise-gate` → `strike-counter stop`.
+`pr-anchor-existence-gate` → `proposal-premise-gate` → `strike-counter stop`.
 Also includes session-lifecycle enforcement.
 
 Signal convention (issue #647 H3): every hook in this role emits stdout JSON —
@@ -196,5 +196,6 @@ channel.
 | [negative-existence-verdict-gate](../../hooks/completion-verify/negative-existence-verdict-gate/spec.md) | Stop | Block when the final message surfaces a negative-existence verdict (없습니다/does not exist) under a registered decision framing (게이트 결과/게이트 판정/AC #) without an `Enumerated:` line in the same paragraph (#804) |
 | [pr-report-destination-gate](../../hooks/completion-verify/pr-report-destination-gate/spec.md) | Stop | Advisory when a session wrote a review/verification local `.md` (/tmp/.omc/plans/report-named) for a PR it worked on (`gh pr view/create`/PR URL) but never posted it there (`gh pr comment/review`); per-PR correlation, GET `gh api` and failed posts excluded (#832) |
 | [pr-claim-mutation-gate](../../hooks/completion-verify/pr-claim-mutation-gate/spec.md) | Stop | Block when the final message claims a PR/review comment was processed (처리했/반영했/resolved) with no *successful* PR-surface mutation in the current turn — read-only `gh api` listings, `--dry-run` rehearsals, echoed commands and failed calls all fail to clear it; advisory-demote via `PRAXIS_PR_CLAIM_ADVISORY` (#868) |
+| [pr-anchor-existence-gate](../../hooks/completion-verify/pr-anchor-existence-gate/spec.md) | Stop | Advisory on the 1st Stop, block on the 2nd+ when a successful non-draft `gh pr create` this session received no verification-anchor post (`gh pr comment` / write `gh api .../{issues,pulls}/<N>/comments`) — existence only, not the anchor's shape (that's `anchor-comment-gate`); bypass `PRAXIS_PR_ANCHOR_BYPASS`, pin-advisory `PRAXIS_PR_ANCHOR_ADVISORY` (#1113) |
 | [proposal-premise-gate](../../hooks/completion-verify/proposal-premise-gate/spec.md) | Stop | Advisory when a prose proposal block rests on code-checkable premises that were never probed in the current turn — prose proposals have no PreToolUse surface, so the Stop lane is the only firing point (#846) |
 | [strike-counter](../../hooks/completion-verify/strike-counter/spec.md) | SessionStart + UserPromptSubmit + Stop | Session-scoped three-strike discipline — hard-blocks at strike 3, requires reflection before reset |

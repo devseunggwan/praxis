@@ -82,7 +82,7 @@ sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_stop_advisory  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
-from _transcript import load_transcript  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import iter_transcript  # type: ignore[import-not-found]  # noqa: E402
 
 _HOOK_NAME = "pr-report-destination-gate"
 _ROLE = "completion-verify"
@@ -129,12 +129,57 @@ def _pr_nums(cmd: str, subs: str) -> list[str]:
     ]
 
 
-def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
-    """Return (unreported_context_prs, sample_report_files)."""
-    tool_uses: list[dict] = []
+def _add_narrative_prs(acc: set[str], text: str) -> None:
+    """Narrative prose (assistant/user text) referencing a PR is intentional context."""
+    for m in _PR_URL_RE.finditer(text):
+        acc.add(m.group(1))
+
+
+def _add_tool_result_prs(acc: set[str], text: str) -> None:
+    """Count a PR URL from tool output only when the result carries exactly ONE
+    distinct PR (a `gh pr create`/`view` success), never a multi-PR listing
+    (`gh pr list`) which would flood unrelated PRs into context."""
+    urls = {m.group(1) for m in _PR_URL_RE.finditer(text)}
+    if len(urls) == 1:
+        acc.add(next(iter(urls)))
+
+
+def _reduce_tool_use(block: dict, context_prs: set[str], pending: list) -> None:
+    """Keep only what the success-resolving pass needs, never the block itself."""
+    name = block.get("name")
+    inp = block.get("input") or {}
+    tid = block.get("id")
+    tid = tid if isinstance(tid, str) else None
+    if name == "Bash" and isinstance(inp.get("command"), str):
+        cmd = inp["command"]
+        # Context is success-independent, so it resolves here and needs no buffer.
+        context_prs.update(_pr_nums(cmd, "view|create|diff|checks|checkout|edit|ready|merge"))
+        posted = list(_pr_nums(cmd, "comment|review"))
+        if _is_api_post(cmd):
+            posted.extend(m.group(1) for m in _API_TARGET_RE.finditer(cmd))
+        if posted:
+            pending.append((tid, posted, None))
+    elif name in ("Write", "Edit") and isinstance(inp.get("file_path"), str):
+        fp = inp["file_path"]
+        if fp.lower().endswith(".md") and (_REPORT_PATH_RE.search(fp) or _REPORT_NAME_RE.search(fp)):
+            pending.append((tid, [], fp))
+
+
+def find_unreported_prs(events) -> tuple[list[str], list[str]]:
+    """Return (unreported_context_prs, sample_report_files).
+
+    `events` is any iterable of event dicts — pass `iter_transcript(path)` to
+    stream. This scan genuinely needs the whole session (it looks for a PR
+    touched anywhere in it), so it cannot read a bounded tail like its sibling
+    gates. Every block is reduced on arrival to the PR numbers and report path
+    it carries, and the block itself is dropped: retaining `tool_use` blocks
+    would keep whole Bash command strings alive for the length of the session,
+    which is the cost this gate exists to avoid (issue #1076).
+    """
+    # (tool_use id, PR numbers this call posted to, report file written)
+    pending: list[tuple[str | None, list[str], str | None]] = []
     result_is_error: dict[str, bool] = {}
-    narrative_parts: list[str] = []       # assistant/user prose — intentional PR references
-    tool_result_texts: list[str] = []     # one combined string per tool_result block
+    context_prs: set[str] = set()
 
     for ev in events:
         msg = ev.get("message")
@@ -142,7 +187,7 @@ def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
             continue
         content = msg.get("content")
         if isinstance(content, str):
-            narrative_parts.append(content)
+            _add_narrative_prs(context_prs, content)
             continue
         if not isinstance(content, list):
             continue
@@ -153,9 +198,9 @@ def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
             if kind == "text":
                 text = block.get("text")
                 if isinstance(text, str):
-                    narrative_parts.append(text)
+                    _add_narrative_prs(context_prs, text)
             elif kind == "tool_use":
-                tool_uses.append(block)
+                _reduce_tool_use(block, context_prs, pending)
             elif kind == "tool_result":
                 tid = block.get("tool_use_id")
                 if isinstance(tid, str):
@@ -169,46 +214,18 @@ def find_unreported_prs(events: list[dict]) -> tuple[list[str], list[str]]:
                         if isinstance(c, dict) and isinstance(c.get("text"), str):
                             parts.append(c["text"])
                 if parts:
-                    tool_result_texts.append("\n".join(parts))
+                    _add_tool_result_prs(context_prs, "\n".join(parts))
 
-    def succeeded(u: dict) -> bool:
-        # Missing result (e.g. the final call) counts as success — bias to silence.
-        tid = u.get("id")
-        if not isinstance(tid, str):
-            return True
-        return result_is_error.get(tid) is not True
-
-    context_prs: set[str] = set()
     posted_prs: set[str] = set()
     report_files: list[str] = []
 
-    for u in tool_uses:
-        name = u.get("name")
-        inp = u.get("input") or {}
-        if name == "Bash" and isinstance(inp.get("command"), str):
-            cmd = inp["command"]
-            context_prs.update(_pr_nums(cmd, "view|create|diff|checks|checkout|edit|ready|merge"))
-            if not succeeded(u):
-                continue
-            posted_prs.update(_pr_nums(cmd, "comment|review"))
-            if _is_api_post(cmd):
-                posted_prs.update(m.group(1) for m in _API_TARGET_RE.finditer(cmd))
-        elif name in ("Write", "Edit") and isinstance(inp.get("file_path"), str) and succeeded(u):
-            fp = inp["file_path"]
-            if fp.lower().endswith(".md") and (_REPORT_PATH_RE.search(fp) or _REPORT_NAME_RE.search(fp)):
-                report_files.append(fp)
-
-    # Narrative prose (assistant/user text) referencing a PR is intentional context.
-    narrative_text = "\n".join(narrative_parts)
-    for m in _PR_URL_RE.finditer(narrative_text):
-        context_prs.add(m.group(1))
-    # Tool output: count a PR URL only when a result carries exactly ONE distinct
-    # PR (a `gh pr create`/`view` success), never a multi-PR listing (`gh pr list`)
-    # which would flood unrelated PRs into context.
-    for text in tool_result_texts:
-        urls = {m.group(1) for m in _PR_URL_RE.finditer(text)}
-        if len(urls) == 1:
-            context_prs.add(next(iter(urls)))
+    for tid, posted, report_file in pending:
+        # Missing result (e.g. the final call) counts as success — bias to silence.
+        if tid is not None and result_is_error.get(tid) is True:
+            continue
+        posted_prs.update(posted)
+        if report_file is not None:
+            report_files.append(report_file)
 
     if not report_files:
         return ([], [])
@@ -258,11 +275,9 @@ def main() -> int:
     if not transcript_path or not os.path.isfile(transcript_path):
         return 0
 
-    events = load_transcript(transcript_path)
-    if not events:
-        return 0
-
-    unreported, report_files = find_unreported_prs(events)
+    unreported, report_files = find_unreported_prs(
+        iter_transcript(transcript_path)
+    )
     if not unreported or not report_files:
         return 0
 

@@ -63,7 +63,7 @@ Fail-open contract:
   - Any uncaught exception → exit 0 (`@fail_open`)
 
 Scope note (turn-boundary, not session-boundary): probe evidence is checked
-against the CURRENT turn only (`get_current_turn`), matching every sibling
+against the CURRENT turn only (`load_current_turn`), matching every sibling
 completion-verify Stop hook's scanning convention. The issue's proposal
 language says "no probe this session" — narrowing to the current turn is a
 structural convention inherited from the sibling hooks, not a design choice
@@ -83,8 +83,7 @@ import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
-    get_current_turn,
-    load_transcript,
+    load_current_turn,
 )
 
 _PREFIX = "[proposal-premise-gate]"
@@ -285,11 +284,7 @@ def main() -> int:
     if not transcript_path or not os.path.isfile(transcript_path):
         return 0
 
-    events = load_transcript(transcript_path)
-    if not events:
-        return 0
-
-    turn = get_current_turn(events)
+    turn = load_current_turn(transcript_path)
     last_text = extract_last_assistant_text(turn) if turn else ""
     if not last_text:
         return 0

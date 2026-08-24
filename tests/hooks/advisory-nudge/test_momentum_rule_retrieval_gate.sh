@@ -741,6 +741,58 @@ run_merge_escalation_case "merge_escalation_prior_turn_briefing_passes" \
 run_merge_escalation_case "merge_escalation_prior_turn_wrong_pr_denies" \
   "yes" "" "momentum-merge-prior-turn-wrong-pr.jsonl" "gh pr merge 833 --squash"
 
+# A newline is a clause boundary too — the approval sits on its own line under
+# the briefing. Whitespace normalization used to collapse it before the split,
+# so the newline alternation in _CLAUSE_TAIL_RE was dead (CodeRabbit, PR #1089).
+approval_probe=$(python3 - "$ROOT_DIR" <<'PY_A'
+import importlib.util as u, sys
+spec = u.spec_from_file_location(
+    "m", f"{sys.argv[1]}/hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py")
+m = u.module_from_spec(spec); spec.loader.exec_module(m)
+print(m._is_approval_reply("briefing\napprove"))
+PY_A
+)
+if [ "$approval_probe" = "True" ]; then
+  echo "PASS  [approval_reply_newline_is_a_clause_boundary]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [approval_reply_newline_is_a_clause_boundary] got=$approval_probe"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("approval_reply_newline_is_a_clause_boundary")
+fi
+
+# A SENTENCE that ends in an approval is still an approval (issue #1087). Exact
+# string equality denied these, so the mandated briefing → approval → merge flow
+# was blocked whenever the user approved in prose rather than one word.
+run_merge_escalation_case "merge_escalation_sentence_approval_ko_passes" \
+  "no" "" "momentum-merge-sentence-approval-ko.jsonl" "gh pr merge 833 --squash"
+
+run_merge_escalation_case "merge_escalation_sentence_approval_en_passes" \
+  "no" "" "momentum-merge-sentence-approval-en.jsonl" "gh pr merge 833 --squash"
+
+# NEGATIVE CONTROL: an approval token appears mid-sentence but the LAST clause
+# is a fresh instruction → still not an approval reply → deny. This is the
+# property exact equality was protecting, and clause splitting must keep it.
+run_merge_escalation_case "merge_escalation_trailing_instruction_denies" \
+  "yes" "" "momentum-merge-sentence-trailing-instruction.jsonl" "gh pr merge 833 --squash"
+
+# The deny message must not present the env bypass as an inline prefix (issue
+# #1087). The hook is spawned by the harness, not as a child of the command, so
+# `PRAXIS_MOMENTUM_MERGE_ADVISORY=1 gh pr merge …` can never reach it — guidance
+# that reads as runnable sends the author down a path that always fails.
+deny_msg=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "tool_name": "Bash",
+    "tool_input": {"command": "gh pr merge 833 --squash"},
+    "transcript_path": sys.argv[1],
+    "session_id": "test-momentum-merge",
+}))' "$FIXTURES_DIR/momentum-merge-substantive-reply.jsonl" | python3 "$HOOK" 2>&1)
+if printf '%s' "$deny_msg" | grep -q 'session environment'; then
+  echo "PASS  [merge_escalation_deny_names_env_reachability]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [merge_escalation_deny_names_env_reachability] msg=<$deny_msg>"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("merge_escalation_deny_names_env_reachability")
+fi
+
 # Last user message is a substantive instruction, not an approval reply → no
 # window extension → deny.
 run_merge_escalation_case "merge_escalation_substantive_reply_denies" \

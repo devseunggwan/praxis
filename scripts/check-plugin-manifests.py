@@ -30,7 +30,7 @@ Phase 2 (ADR-0001) invariants:
   12. skills/<skill-name>/ on disk matches the EXPECTED_SKILLS frozen set
      (issue #465 — surface freeze gate against silent skill proliferation).
   13. AGENTS.md "## Skills (N)" count and per-skill backtick tokens, and
-     README.md per-skill backtick tokens, all match EXPECTED_SKILLS
+     docs/skills.md per-skill backtick tokens, all match EXPECTED_SKILLS
      (issue #498 — doc drift invariant).
   14. Each manifest `dispatch_groups` (event, matcher) collapses to exactly
      one dispatcher node per platform hooks.json (no member silently left as
@@ -654,6 +654,7 @@ def main() -> int:
                      "artifact-verdict-evidence-gate",
                      "pr-report-destination-gate",
                      "pr-claim-mutation-gate",
+                     "pr-anchor-existence-gate",
                      "proposal-premise-gate",
                      "strike-counter"]
     actual_stop: list[str] = []
@@ -896,9 +897,9 @@ def main() -> int:
     # Rule 13 — Doc skill-count invariant (#498)
     #
     # AGENTS.md carries an explicit "## Skills (N)" header whose count must
-    # equal len(EXPECTED_SKILLS).  Both AGENTS.md and README.md embed skill
-    # names inside table cells as `backtick` tokens; every EXPECTED_SKILLS
-    # member must appear at least once in each document.
+    # equal len(EXPECTED_SKILLS).  Both AGENTS.md and docs/skills.md embed
+    # skill names inside table cells as `backtick` tokens; every
+    # EXPECTED_SKILLS member must appear at least once in each document.
     #
     # Parsing is intentionally coarse — we match the pattern
     # `skill-name` (backtick-delimited) so the check is robust to table
@@ -907,10 +908,7 @@ def main() -> int:
     import re as _re  # local import — avoids polluting module scope
 
     agents_md_path = REPO_ROOT / "AGENTS.md"
-    readme_md_path = REPO_ROOT / "README.md"
-
     agents_text = agents_md_path.read_text()
-    readme_text = readme_md_path.read_text()
 
     # Rule 13a — AGENTS.md "## Skills (N)" count header must match
     count_match = _re.search(r"^##\s+Skills\s+\((\d+)\)", agents_text, _re.MULTILINE)
@@ -939,17 +937,29 @@ def main() -> int:
         )
 
     # Rule 13c — every EXPECTED_SKILLS member appears as the first column of
-    # a README.md skill table row.  We match `| \`skill-name\` |` so that a
+    # a docs/skills.md table row.  We match `| \`skill-name\` |` so that a
     # skill name mentioned only in a description cell (cross-reference noise)
-    # does not satisfy the check.
-    readme_table_skills = set(
-        _re.findall(r"^\|\s*`([^`]+)`\s*\|", readme_text, _re.MULTILINE)
-    )
-    missing_in_readme = EXPECTED_SKILLS - readme_table_skills
-    if missing_in_readme:
+    # does not satisfy the check.  The table moved out of README.md when the
+    # README became a landing document (#1088); README.md now carries only a
+    # pointer, so enforcing the roster there would fight that split.
+    skills_doc_path = REPO_ROOT / "docs" / "skills.md"
+    if not skills_doc_path.exists():
         drifts.append(
-            f"DOC SKILL LIST README.md: {sorted(missing_in_readme)!r} declared in "
-            "EXPECTED_SKILLS but not found as a first-column `backtick` token in a "
+            "DOC SKILL LIST docs/skills.md: file missing — it is the skill "
+            "roster README.md points at"
+        )
+        skills_doc_table = set()
+    else:
+        skills_doc_table = set(
+            _re.findall(
+                r"^\|\s*`([^`]+)`\s*\|", skills_doc_path.read_text(), _re.MULTILINE
+            )
+        )
+    missing_in_skills_doc = EXPECTED_SKILLS - skills_doc_table
+    if missing_in_skills_doc:
+        drifts.append(
+            f"DOC SKILL LIST docs/skills.md: {sorted(missing_in_skills_doc)!r} declared "
+            "in EXPECTED_SKILLS but not found as a first-column `backtick` token in a "
             "table row — add them to the skill table"
         )
 

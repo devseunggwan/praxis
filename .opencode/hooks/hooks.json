@@ -371,6 +371,11 @@
           },
           {
             "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pr-anchor-existence-gate.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/proposal-premise-gate.sh",
             "timeout": 10
           },
