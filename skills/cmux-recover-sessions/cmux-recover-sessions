@@ -226,17 +226,21 @@ elif [[ "$MODE" == "tabs" ]]; then
     IFS='|' read -r mod_time size session_id project_dir first_msg home_label <<< "${SESSIONS[$i]}"
     resume_cmd=$(build_resume_cmd "$session_id" "$home_label")
 
-    ws_ref=$(create_and_resume "$project_dir" "$resume_cmd")
-    if [[ -n "$ws_ref" ]]; then
-      if [[ "$RENAME" == true ]]; then
-        short_name=$(echo "$first_msg" | cut -c1-30)
-        cmux rename-workspace --workspace "$ws_ref" "$short_name" 2>/dev/null || true
-      fi
-      created=$((created + 1))
-      echo "  ✓ workspace $((i + 1)): ${first_msg:0:50}"
-    else
+    # #1095: skip a single failed workspace instead of aborting the whole
+    # run. Under `set -euo pipefail`, `ws_ref=$(create_and_resume …)` used to
+    # abort the script the moment the helper returned 1, so the old
+    # `else … ✗ failed to create` branch was dead code. Mirror the
+    # `… || { echo …; continue; }` idiom from cmux-resume-sessions.
+    ws_ref=$(create_and_resume "$project_dir" "$resume_cmd") || {
       echo "  ✗ workspace $((i + 1)): failed to create"
+      continue
+    }
+    if [[ "$RENAME" == true ]]; then
+      short_name=$(echo "$first_msg" | cut -c1-30)
+      cmux rename-workspace --workspace "$ws_ref" "$short_name" 2>/dev/null || true
     fi
+    created=$((created + 1))
+    echo "  ✓ workspace $((i + 1)): ${first_msg:0:50}"
   done
 
   echo ""
@@ -262,12 +266,16 @@ elif [[ "$MODE" == "split" ]]; then
     IFS='|' read -r _ _ sid1 dir1 msg1 home1 <<< "${SESSIONS[$i]}"
     resume_cmd1=$(build_resume_cmd "$sid1" "$home1")
 
-    ws_ref=$(create_and_resume "$dir1" "$resume_cmd1")
-    if [[ -z "$ws_ref" ]]; then
+    # #1095: skip a single failed workspace instead of aborting the whole
+    # run. The prior `if [[ -z "$ws_ref" ]]` guard was dead code — under
+    # `set -euo pipefail` the failing command-substitution aborted the
+    # script before it was reached. Mirror cmux-resume-sessions'
+    # `… || { echo …; continue; }` idiom.
+    ws_ref=$(create_and_resume "$dir1" "$resume_cmd1") || {
       echo "  ✗ workspace ${ws_num}: failed to create"
       i=$((i + 1))
       continue
-    fi
+    }
 
     if [[ "$RENAME" == true ]]; then
       cmux rename-workspace --workspace "$ws_ref" "recover-${ws_num}" 2>/dev/null || true

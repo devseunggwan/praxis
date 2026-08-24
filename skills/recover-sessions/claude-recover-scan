@@ -436,4 +436,11 @@ if VERBOSE:
     print(f"Surviving:  {surviving} (after dedupe)", file=_sys.stderr)
 
 for mod_time, size_h, sid, cwd, msg, hlabel in results:
+    # #1095: strip pipe characters from the display message before emitting
+    # the pipe-delimited record. A first-message containing "|" would
+    # otherwise shift the fields and corrupt the trailing home_label on the
+    # consumer side (bash `IFS='|' read`). Mirrors sanitize_pipe semantics
+    # from cmux-session-lib (replace "|" with "-"). The "\n"→" " and [:80]
+    # normalisation still happens upstream where msg is built.
+    msg = msg.replace("|", "-")
     print(f"{mod_time}|{size_h}|{sid}|{cwd}|{msg}|{hlabel}")
