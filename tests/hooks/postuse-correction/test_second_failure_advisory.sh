@@ -19,9 +19,10 @@
 #  12b) 첫 회는 여전히 무음 (반대 방향 control)
 #  13) interrupted 응답은 실패로 판정
 #  14) exit-0 Bash 호출(stderr가 harness cwd-reset 안내뿐) -> advisory 없음 (issue #1042)
-#  15) harness noise가 섞여도 동일 실패 반복은 여전히 advisory (positive control)
+#  15) 진짜 실패(interrupted:true) 반복은 harness noise가 섞여도 여전히 advisory (positive control, issue #1096)
 #  16) stderr가 noise뿐인 서로 다른 실패는 서로 다른 signature (issue #1042)
 #  17) tool_name이 Bash가 아니면 noise strip 자체를 건너뛰어 진짜 실패로 판정 (PR #1071 리뷰)
+#  18) 성공한 Bash 호출이 stderr에 진행 로그를 써도(git fetch 등, exit 0) 반복돼도 advisory 없음 (issue #1096)
 #
 # Run:
 #   bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
@@ -533,6 +534,14 @@ fi
 # real failure pattern must still advise on the 2nd occurrence, even with
 # the harness-noise line appended to `stderr` (the defect-1 fix must not
 # disable the hook outright).
+#
+# Issue #1096: a real Bash `tool_response` carries no exit/isError, so stderr
+# text alone can no longer classify a Bash call as failed (a success-with-stderr
+# command is byte-for-byte indistinguishable by its stderr). This genuine
+# failure is therefore marked the only way a real Bash failure can be — with
+# `interrupted: True` (a killed/timed-out run). The harness-noise line is still
+# appended to `stderr`, so this remains the positive control that noise
+# stripping in signature derivation does not break a genuine repeat.
 # ---------------------------------------------------------------------------
 echo "=== case 15: genuine repeated failure (harness-noise stderr suffix) still advises ==="
 real_failure_payload() {
@@ -547,7 +556,7 @@ print(json.dumps({
     "tool_response": {
         "stdout": "",
         "stderr": "TypeError: unsupported operand type(s)\nShell cwd was reset to /Users/x/projects/praxis",
-        "interrupted": False,
+        "interrupted": True,
         "isImage": False,
         "noOutputExpected": False,
     },
@@ -650,6 +659,81 @@ if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "
 else
   assert_fail "17) non-Bash tool with harness-noise-shaped stderr still advises" \
     "rc=$rc out=[$out] err=[$err]"
+fi
+
+# ---------------------------------------------------------------------------
+# Case 18: a *successful* Bash command that writes progress to `stderr`
+# (git fetch/clone/checkout, curl meters, deprecation warnings; all exit 0)
+# must NEVER advise, even when the identical call repeats (issue #1096).
+#
+# Real Bash `tool_response` is `{stdout, stderr, interrupted, isImage,
+# noOutputExpected}` — no `exit`, no `isError` (verified against live session
+# `toolUseResult` transcripts). #1042 stripped only the harness cwd-reset line;
+# any OTHER stderr content (here, `git fetch` branch-progress output) still fell
+# through the back-compat `stderr`-non-empty check and was mislabelled a
+# failure, so the second identical `git fetch origin` injected a false
+# "2회째 실패" advisory. The fix stops treating stderr text alone as failure for
+# Bash: these succeed, so nothing is counted and nothing is emitted — the state
+# file is never even created.
+# ---------------------------------------------------------------------------
+echo "=== case 18: repeated success-with-stderr Bash call => no advisory (issue #1096) ==="
+success_with_stderr_payload() {
+  # success_with_stderr_payload <session_id> <command> <stderr>
+  python3 - "$1" "$2" "$3" <<'PY'
+import json, sys
+session_id, command, stderr = sys.argv[1], sys.argv[2], sys.argv[3]
+print(json.dumps({
+    "session_id": session_id,
+    "tool_name": "Bash",
+    "tool_input": {"command": command},
+    "tool_response": {
+        "stdout": "",
+        # Real progress output on stderr + the harness cwd-reset suffix. No
+        # `exit`, no `isError` — exactly the real exit-0 Bash payload shape.
+        "stderr": stderr + "\nShell cwd was reset to /Users/x/projects/praxis",
+        "interrupted": False,
+        "isImage": False,
+        "noOutputExpected": False,
+    },
+}))
+PY
+}
+
+STATE20="$TMP_DIR/c20.json"
+GIT_FETCH_STDERR="From github.com:acme/repo
+   abc1234..def5678  main       -> origin/main"
+out_file="$(mktemp)" err_file="$(mktemp)"
+# Two identical successful `git fetch origin` calls — the exact "second
+# identical call" scenario the false advisory fired on.
+pipe_hook "$(success_with_stderr_payload sess-1096-git 'git fetch origin' "$GIT_FETCH_STDERR")" "$STATE20" >/dev/null 2>/dev/null
+pipe_hook "$(success_with_stderr_payload sess-1096-git 'git fetch origin' "$GIT_FETCH_STDERR")" "$STATE20" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -s "$STATE20" ]; then
+  assert_pass "18a) two identical git-fetch successes with stderr stay silent"
+else
+  assert_fail "18a) two identical git-fetch successes with stderr stay silent" \
+    "rc=$rc out=[$out] err=[$err] state=[$(cat "$STATE20" 2>/dev/null)]"
+fi
+
+# A second flavour of success-with-stderr: a deprecation warning on exit 0,
+# repeated. Same expectation — no advisory, no state.
+STATE21="$TMP_DIR/c21.json"
+DEPRECATION_STDERR="DeprecationWarning: 'foo' is deprecated and will be removed"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(success_with_stderr_payload sess-1096-dep 'python3 build.py' "$DEPRECATION_STDERR")" "$STATE21" >/dev/null 2>/dev/null
+pipe_hook "$(success_with_stderr_payload sess-1096-dep 'python3 build.py' "$DEPRECATION_STDERR")" "$STATE21" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -s "$STATE21" ]; then
+  assert_pass "18b) repeated deprecation-warning-on-stderr success stays silent"
+else
+  assert_fail "18b) repeated deprecation-warning-on-stderr success stays silent" \
+    "rc=$rc out=[$out] err=[$err] state=[$(cat "$STATE21" 2>/dev/null)]"
 fi
 
 echo
