@@ -55,6 +55,10 @@ escalation one.
     (`gh pr comment -b "…" 178` is valid gh usage) via a shlex-tokenized walk
     that skips known flags and their values, rather than a fixed-offset regex
     (CodeRabbit finding, PR #1115).
+  - A `gh pr comment` / write-method `gh api` call only counts as "posted"
+    when its tool_use has a matching tool_result that is explicitly non-error
+    — a missing/unconfirmed result (interrupted call) does not count
+    (CodeRabbit finding, PR #1115).
 
 ## Fail-open contract
   - Malformed / missing stdin JSON -> exit 0
@@ -245,7 +249,12 @@ def find_unanchored_prs(events) -> list[str]:
 
     posted: set[str] = set()
     for tid, nums in pending_posts:
-        if tid is not None and result_is_error.get(tid) is True:
+        # Require a *confirmed successful* tool_result (result_is_error[tid] is
+        # explicitly False) — not merely "not is_error=True". `tid is None` or
+        # an interrupted/truncated call with no matching tool_result yet must
+        # not count as posted (CodeRabbit finding, PR #1115): a genuinely
+        # unconfirmed post would otherwise clear the anchor requirement early.
+        if tid is None or result_is_error.get(tid) is not False:
             continue
         posted.update(nums)
 

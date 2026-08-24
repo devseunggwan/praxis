@@ -145,6 +145,13 @@ run_case silent "comment-body-file-before-positional" '{}'
 build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh pr comment -b \"closes 999\" 178'),$(result t2 false ok)]"
 run_case silent "comment-number-in-flag-value-not-mistaken" '{}'
 
+# a `gh pr comment` tool_use with NO matching tool_result at all (interrupted
+# before any result landed) must NOT count as posted (CodeRabbit finding,
+# PR #1115 — previously `result_is_error.get(tid) is None` fell through as
+# "not is_error=True" and was accepted)
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh pr comment 178 --body anchor')]"
+run_case advisory "comment-no-tool-result-not-credited" '{}'
+
 # =====================================================================
 # Escalation — advisory once, then block (issue #1113's design)
 # =====================================================================
