@@ -100,7 +100,9 @@ scope.
 
 - Add `[user-approved]`, `[ratified-by-user]`, or `[user-ratified]` to the
   commit message when the user explicitly approved the change in this session.
-- Set `CLAUDE_HOOK_BYPASS_SCIOMC_GATE=1` for a deliberate one-off bypass.
+- Set `CLAUDE_HOOK_BYPASS_SCIOMC_GATE=1` in the **session environment** for a
+  deliberate one-off bypass, since an inline `VAR=1 git commit …` prefix never
+  reaches this hook — it reads its own process env.
 - Missing / unreadable / oversized (`>50MB`) transcript → silent pass
   (cannot enforce). Malformed stdin → silent fail-open.
 

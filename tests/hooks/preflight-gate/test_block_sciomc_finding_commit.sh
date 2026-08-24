@@ -471,6 +471,12 @@ run_case "env var bypass (silent)" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix'\"},\"transcript_path\":\"$TX_FINDING\"}" \
   "CLAUDE_HOOK_BYPASS_SCIOMC_GATE=1"
 
+# The deny message points at the env var; an inline command prefix cannot reach
+# this hook's process environment, so it must still block.
+run_case "inline env prefix does NOT bypass (block)" \
+  "block" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"CLAUDE_HOOK_BYPASS_SCIOMC_GATE=1 git commit -m 'fix'\"},\"transcript_path\":\"$TX_FINDING\"}"
+
 run_case "missing transcript_path (silent — cannot enforce)" \
   "silent" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m 'fix'\"}}"
