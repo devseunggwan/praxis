@@ -57,27 +57,46 @@ def test_non_create_tool_result_text_is_never_retained() -> None:
     pending_creates: list = []
     pending_posts: list = []
     create_tids: set[str] = set()
+    interesting_tids: set[str] = set()
     gate._reduce_tool_use(
         {"name": "Bash", "id": "t1", "input": {"command": "cat somefile.log"}},
-        pending_creates, pending_posts, create_tids,
+        pending_creates, pending_posts, create_tids, interesting_tids,
     )
     # A plain `cat` is neither a `gh pr create` nor a `gh pr comment`/`gh api`
     # post — nothing about it is worth tracking at all.
     assert pending_creates == []
     assert pending_posts == []
     assert create_tids == set()
+    assert interesting_tids == set()
 
 
 def test_create_tid_is_tracked_for_the_result_pass() -> None:
     pending_creates: list = []
     pending_posts: list = []
     create_tids: set[str] = set()
+    interesting_tids: set[str] = set()
     gate._reduce_tool_use(
         {"name": "Bash", "id": "c1", "input": {"command": "gh pr create --title x --body y"}},
-        pending_creates, pending_posts, create_tids,
+        pending_creates, pending_posts, create_tids, interesting_tids,
     )
     assert pending_creates == [("c1", False)]
     assert create_tids == {"c1"}
+    assert interesting_tids == {"c1"}
+
+
+def test_post_tid_is_interesting_but_not_a_create_tid() -> None:
+    """A `gh pr comment` call needs its is_error looked up (F2) but never its
+    text — it must land in interesting_tids without landing in create_tids."""
+    pending_creates: list = []
+    pending_posts: list = []
+    create_tids: set[str] = set()
+    interesting_tids: set[str] = set()
+    gate._reduce_tool_use(
+        {"name": "Bash", "id": "p1", "input": {"command": "gh pr comment 178 --body anchor"}},
+        pending_creates, pending_posts, create_tids, interesting_tids,
+    )
+    assert create_tids == set()
+    assert interesting_tids == {"p1"}
 
 
 def test_functional_result_unchanged_with_unrelated_large_outputs() -> None:

@@ -55,6 +55,14 @@ escalation one.
     (`gh pr comment -b "…" 178` is valid gh usage) via a shlex-tokenized walk
     that skips known flags and their values, rather than a fixed-offset regex
     (CodeRabbit finding, PR #1115).
+  - Compound-command segmentation (`gh pr create`/`gh pr comment`/`gh api`) is
+    shell-quote-aware: `_split_invocations` tokenizes the WHOLE command with
+    `shlex.shlex(..., punctuation_chars=True)` before splitting on an
+    UNQUOTED `&&`/`;`/`|`/`||`/`;;`. A prior lookahead regex split on those
+    characters even inside quotes, so `gh pr comment -b "verified && ready"
+    178` truncated mid-quote (the anchor read as unposted) and `gh pr create
+    --body "a && b" --draft` lost its `--draft` flag the same way (CodeRabbit
+    finding, PR #1115).
   - A `gh pr comment` / write-method `gh api` call only counts as "posted"
     when its tool_use has a matching tool_result that is explicitly non-error
     — a missing/unconfirmed result (interrupted call) does not count
@@ -97,11 +105,7 @@ _PREFIX = "[pr-anchor-existence-gate]"
 _BYPASS_ENV = "PRAXIS_PR_ANCHOR_BYPASS"
 _ADVISORY_ENV = "PRAXIS_PR_ANCHOR_ADVISORY"
 
-# A `gh pr create` invocation's own segment of a (possibly compound) command —
-# up to the next `&&`/`;`/`|` or end of string — so a draft flag on one call
-# never leaks into a sibling call in the same compound command.
-_PR_CREATE_SEGMENT_RE = re.compile(r"gh\s+pr\s+create\b([^\n]*?)(?=&&|;|\||$)", re.IGNORECASE)
-_DRAFT_FLAG_RE = re.compile(r"(?:^|\s)(?:--draft|-d)(?:\s|$)", re.IGNORECASE)
+_DRAFT_FLAGS = frozenset({"--draft", "-d"})
 
 _PR_URL_RE = re.compile(r"github\.com/[\w.-]+/[\w.-]+/pull/(\d+)", re.IGNORECASE)
 
@@ -110,61 +114,91 @@ _PR_URL_RE = re.compile(r"github\.com/[\w.-]+/[\w.-]+/pull/(\d+)", re.IGNORECASE
 # `gh pr comment -b "…" 178` is valid and confirmed via `gh pr comment --help`
 # and a live invocation) — a fixed-offset regex would miss it and leave a
 # genuinely-posted PR reading as unanchored (CodeRabbit finding, PR #1115).
-# Each invocation's own segment is tokenized with shlex and walked past known
-# flags (skipping a value-flag's own value) so a number *inside* a flag value
-# (`-b "closes 999" 178`) is never mistaken for the positional identifier.
-_PR_COMMENT_SEGMENT_RE = re.compile(r"gh\s+pr\s+comment\b[^\n]*?(?=&&|;|\||$)", re.IGNORECASE)
+# Each invocation's own tokens are walked past known flags (skipping a
+# value-flag's own value) so a number *inside* a flag value (`-b "closes 999"
+# 178`) is never mistaken for the positional identifier.
 _PR_COMMENT_VALUE_FLAGS = frozenset({"-b", "--body", "-F", "--body-file", "-R", "--repo"})
 
 _API_METHOD_RE = re.compile(r"(?:--method|-X)\s+([A-Za-z]+)", re.IGNORECASE)
 _API_BODY_RE = re.compile(r"(^|\s)(-f|-F|--field|--raw-field|--input)\b", re.IGNORECASE)
 _API_TARGET_RE = re.compile(r"gh\s+api\s+[^\n]*?(?:issues|pulls)/(\d+)/comments\b", re.IGNORECASE)
-# A `gh api` invocation's own segment — same segmentation technique as
-# `_PR_CREATE_SEGMENT_RE`, applied here so a compound command mixing methods
-# and targets (`gh api GET .../issues/178/comments && gh api --method POST
-# .../issues/179/comments`) pairs each method with ITS OWN target instead of
-# a whole-command scan letting one invocation's POST clear another's GET, or
-# vice versa (Codex review finding).
-_GH_API_SEGMENT_RE = re.compile(r"gh\s+api\b[^\n]*?(?=&&|;|\||$)", re.IGNORECASE)
+
+# Control operators that separate independent invocations in a compound Bash
+# command. A prior regex-based segmenter (`gh\s+pr\s+create\b([^\n]*?)(?=&&|;
+# |\||$)`) matched these unquoted — `-b "verified && ready" 178` truncated the
+# segment mid-quote (shlex.split then raised, dropping the whole invocation)
+# and `--body "a && b" --draft` lost its `--draft` flag the same way
+# (CodeRabbit finding, PR #1115). shlex's `punctuation_chars` mode keeps a
+# quoted operator inside its token while still splitting on an unquoted one —
+# verified live: `shlex.shlex('gh pr comment -b "verified && ready" 178',
+# posix=True, punctuation_chars=True)` yields ONE token for the quoted body.
+_CONTROL_OPERATORS = frozenset({"&&", "||", ";", ";;", "|"})
 
 
-def _is_api_post(segment: str) -> bool:
+def _split_invocations(cmd: str) -> list[list[str]]:
+    """Tokenize `cmd` with shell-quoting semantics and split into one token
+    list per invocation, on unquoted control operators only. `[]` on
+    unbalanced/malformed quoting (fail open — nothing is guessed)."""
+    try:
+        lexer = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return []
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for tok in tokens:
+        if tok in _CONTROL_OPERATORS:
+            segments.append(current)
+            current = []
+        else:
+            current.append(tok)
+    segments.append(current)
+    return [seg for seg in segments if seg]
+
+
+def _starts_with(seg: list[str], words: tuple[str, ...]) -> bool:
+    return len(seg) >= len(words) and tuple(t.lower() for t in seg[: len(words)]) == words
+
+
+def _is_api_post(tokens: list[str]) -> bool:
     """True when a `gh api` call actually POSTs (explicit --method/-X wins;
     absent one, a body field implies POST — same rule as pr-report-destination-gate).
-    Caller passes ONE invocation's own segment, never a whole compound command."""
-    m = _API_METHOD_RE.search(segment)
+    Caller passes ONE invocation's own tokens, never a whole compound command."""
+    seg = " ".join(tokens)
+    m = _API_METHOD_RE.search(seg)
     if m:
         return m.group(1).upper() == "POST"
-    return bool(_API_BODY_RE.search(segment))
+    return bool(_API_BODY_RE.search(seg))
 
 
-def _api_post_targets(cmd: str) -> list[str]:
-    """PR numbers targeted by a write-method `gh api` call, resolved per
-    invocation segment so method and target are never cross-matched across
-    two different `gh api` calls in the same compound command."""
+def _api_post_targets(segments: list[list[str]]) -> list[str]:
+    """PR numbers targeted by a write-method `gh api` invocation, resolved per
+    invocation so method and target are never cross-matched across two
+    different `gh api` calls in the same compound command."""
     targets: list[str] = []
-    for segment in _GH_API_SEGMENT_RE.finditer(cmd):
-        seg = segment.group(0)
+    for seg in segments:
+        if not _starts_with(seg, ("gh", "api")):
+            continue
         if _is_api_post(seg):
-            targets.extend(m.group(1) for m in _API_TARGET_RE.finditer(seg))
+            seg_text = " ".join(seg)
+            targets.extend(m.group(1) for m in _API_TARGET_RE.finditer(seg_text))
     return targets
 
 
-def _create_segments(cmd: str) -> list[str]:
-    """Every `gh pr create` invocation's own argument segment in `cmd`."""
-    return [m.group(1) for m in _PR_CREATE_SEGMENT_RE.finditer(cmd)]
+def _create_segments(segments: list[list[str]]) -> list[list[str]]:
+    """Every `gh pr create` invocation's own token list."""
+    return [seg for seg in segments if _starts_with(seg, ("gh", "pr", "create"))]
 
 
-def _comment_targets(cmd: str) -> list[str]:
-    """PR identifiers targeted by `gh pr comment` invocations in `cmd`, tolerant
-    of flag/positional interleaving. An unrecognized `-`-prefixed token is
+def _comment_targets(segments: list[list[str]]) -> list[str]:
+    """PR identifiers targeted by `gh pr comment` invocations, tolerant of
+    flag/positional interleaving. An unrecognized `-`-prefixed token is
     treated as a boolean flag (skip one) rather than guessed as a value flag —
     the conservative default when its arity is unknown."""
     targets: list[str] = []
-    for segment in _PR_COMMENT_SEGMENT_RE.finditer(cmd):
-        try:
-            tokens = shlex.split(segment.group(0))
-        except ValueError:
+    for tokens in segments:
+        if not _starts_with(tokens, ("gh", "pr", "comment")):
             continue
         i = 3  # tokens[0:3] == ["gh", "pr", "comment"]
         while i < len(tokens):
@@ -185,29 +219,37 @@ def _comment_targets(cmd: str) -> list[str]:
 
 
 def _reduce_tool_use(
-    block: dict, pending_creates: list, pending_posts: list, create_tids: set
+    block: dict,
+    pending_creates: list,
+    pending_posts: list,
+    create_tids: set,
+    interesting_tids: set,
 ) -> None:
     """Reduce a tool_use block to what the resolver pass needs; drop the block itself
     (retaining whole Bash command strings for the session length is the cost #1076
     already paid down for this gate's whole-transcript-scan sibling). `create_tids`
     collects every `gh pr create` tool_use id so the tool_result pass below knows,
-    without buffering anything, which results are worth reading at all."""
+    without buffering anything, which results are worth reading at all; `interesting_tids`
+    is the wider set (create + post) worth even an `is_error` lookup."""
     name = block.get("name")
     inp = block.get("input") or {}
     tid = block.get("id")
     tid = tid if isinstance(tid, str) else None
     if name != "Bash" or not isinstance(inp.get("command"), str):
         return
-    cmd = inp["command"]
-    for segment in _create_segments(cmd):
-        is_draft = bool(_DRAFT_FLAG_RE.search(" " + segment))
+    segments = _split_invocations(inp["command"])
+    for seg in _create_segments(segments):
+        is_draft = any(t.lower() in _DRAFT_FLAGS for t in seg)
         pending_creates.append((tid, is_draft))
         if tid is not None:
             create_tids.add(tid)
-    posted = list(_comment_targets(cmd))
-    posted.extend(_api_post_targets(cmd))
+            interesting_tids.add(tid)
+    posted = list(_comment_targets(segments))
+    posted.extend(_api_post_targets(segments))
     if posted:
         pending_posts.append((tid, posted))
+        if tid is not None:
+            interesting_tids.add(tid)
 
 
 def find_unanchored_prs(events) -> list[str]:
@@ -218,6 +260,7 @@ def find_unanchored_prs(events) -> list[str]:
     # (tool_use id, [PR numbers posted to])
     pending_posts: list[tuple[str | None, list[str]]] = []
     create_tids: set[str] = set()
+    interesting_tids: set[str] = set()
     result_is_error: dict[str, bool] = {}
     # Only a `gh pr create` result ever carries a PR URL this gate needs, and
     # the extracted set is a handful of short digit strings regardless of the
@@ -239,7 +282,7 @@ def find_unanchored_prs(events) -> list[str]:
                 continue
             kind = block.get("type")
             if kind == "tool_use":
-                _reduce_tool_use(block, pending_creates, pending_posts, create_tids)
+                _reduce_tool_use(block, pending_creates, pending_posts, create_tids, interesting_tids)
             elif kind == "tool_result":
                 tid = block.get("tool_use_id")
                 if not isinstance(tid, str):

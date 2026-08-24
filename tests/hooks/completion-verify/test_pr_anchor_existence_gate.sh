@@ -142,7 +142,7 @@ run_case silent "comment-body-file-before-positional" '{}'
 
 # a number embedded inside a flag VALUE (not the positional) must not be
 # mistaken for the target PR
-build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh pr comment -b \"closes 999\" 178'),$(result t2 false ok)]"
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh pr comment -b "closes 999" 178'),$(result t2 false ok)]"
 run_case silent "comment-number-in-flag-value-not-mistaken" '{}'
 
 # a `gh pr comment` tool_use with NO matching tool_result at all (interrupted
@@ -151,6 +151,21 @@ run_case silent "comment-number-in-flag-value-not-mistaken" '{}'
 # "not is_error=True" and was accepted)
 build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh pr comment 178 --body anchor')]"
 run_case advisory "comment-no-tool-result-not-credited" '{}'
+
+# quoted && inside a gh pr comment body must NOT be read as a control operator
+# (CodeRabbit finding, PR #1115 — the prior lookahead segmenter truncated the
+# command mid-quote and dropped the whole invocation via a shlex ValueError)
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh pr comment -b "verified && ready" 178'),$(result t2 false ok)]"
+run_case silent "comment-quoted-control-operator-not-truncated" '{}'
+
+# a quoted && inside a gh pr create body must not swallow a later --draft flag
+build_transcript "[$(bash_use t1 'gh pr create --title x --body "a && b" --draft'),$(result t1 false 'https://github.com/o/r/pull/178')]"
+run_case silent "create-quoted-control-operator-draft-still-detected" '{}'
+
+# an UNQUOTED && between two gh pr comment invocations must still split them
+# (regression guard: quote-awareness must not stop splitting real compounds)
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh pr comment 179 --body x && gh pr comment 178 --body y'),$(result t2 false ok)]"
+run_case silent "comment-unquoted-control-operator-still-splits" '{}'
 
 # =====================================================================
 # Escalation — advisory once, then block (issue #1113's design)
