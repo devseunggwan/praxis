@@ -85,6 +85,25 @@ def test_command_without_heredoc_is_returned_unchanged() -> None:
     assert strip_heredoc_bodies(command) == command
 
 
+def test_heredoc_lookalike_inside_a_multiline_quote_is_not_an_opener() -> None:
+    """Issue #1091: a `<<WORD` on a later physical line *inside* an open
+    multi-line quoted string was misread as a heredoc opener because the scan
+    reset quote state per physical line — so `strip_heredoc_bodies` blanked the
+    closing-quote line and the chained command riding after it. Carrying quote
+    state across physical lines (mirroring the #972/#987 `_logical_lines` fold)
+    keeps the `<<EOF` as the string data it is, and the `&& gh pr merge`
+    survives. Before the fix `safe_tokenize` of this payload returned ``[]``."""
+    command = f'git commit -m "notes:\nsee <<EOF for details\n" && {MERGE} 9'
+    # strip_heredoc_bodies must leave the whole command untouched — no line is
+    # a heredoc body.
+    assert strip_heredoc_bodies(command) == command
+    assert _has_merge(command)
+    assert safe_tokenize(command) == [
+        "git", "commit", "-m", "notes:\nsee <<EOF for details\n",
+        "&&", "gh", "pr", "merge", "9",
+    ]
+
+
 def test_heredoc_lookalike_in_a_comment_opens_nothing() -> None:
     """`# <<EOF` is a comment; bash reads no operator past it, so the next line
     must stay visible (CodeRabbit, verified against bash)."""
