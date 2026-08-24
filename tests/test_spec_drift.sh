@@ -26,6 +26,7 @@
 #  18. A second Verify inside one block is ignored and reported, never silent
 #  19. A timed-out command keeps whatever it printed before it hung
 #  20. A Verify command that reads stdin gets EOF instead of the report's stdin
+#  21. A `- Verify:` inside a fenced code example is NOT executed (#1093)
 #
 # Every case runs against a fixture spec dir. This file is a `Verify:` target
 # for several of 0002's requirements, so running the report over the real spec
@@ -371,6 +372,46 @@ check_lacks "20b stdin-reading Verify does not burn the timeout" "$OUT9" \
 check_has "20c control: a real hang still reports exit 124" "$OUT9" \
   "missing      FR-002  (exit 124)"
 rm -rf "$FIX8"
+
+# --------------------------------------------------------------------------- #
+# Fixture 9 — a `- Verify:` line sitting inside an indented fenced code example
+# (#1093). parse_spec had no fence awareness, so VERIFY_RE matched the example
+# line and the report EXECUTED it — violating the "prose backticks are never
+# executed" contract, and here it would create a sentinel file. FR-002 is the
+# control: a genuine, non-fenced Verify line in the same spec must still run.
+# --------------------------------------------------------------------------- #
+FIX9=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+SENTINEL="$FIX9/PWNED"
+cat > "$FIX9/0010-fenced.md" <<EOF
+# Feature Specification: Fenced Verify example
+
+**Issue**: #1093
+
+### Functional Requirements
+
+- **FR-001**: Documents how a Verify line looks, inside a fenced example.
+
+  \`\`\`markdown
+  - Verify: \`touch $SENTINEL && true\`
+  \`\`\`
+
+- **FR-002**: A real, non-fenced Verify line still runs.
+  - Verify: \`sh -c 'echo FENCE_CONTROL_RAN; exit 0'\`
+EOF
+
+OUT10=$("$CLI" --spec-dir "$FIX9" 2>&1)
+
+if [ -e "$SENTINEL" ]; then
+  ng "21 fenced Verify example is NOT executed" "sentinel $SENTINEL was created"
+else
+  ok "21 fenced Verify example is NOT executed"
+fi
+check_lacks "21b fenced Verify command is not run" "$OUT10" \
+  "running      FR-001: touch $SENTINEL"
+check_has "21c fenced-only requirement stays UNKNOWN" "$OUT10" "UNKNOWN      FR-001"
+check_has "21d real non-fenced Verify still runs" "$OUT10" "FENCE_CONTROL_RAN"
+check_has "21e real non-fenced Verify -> implemented" "$OUT10" "implemented  FR-002"
+rm -rf "$FIX9"
 
 echo ""
 echo "Passed: $PASS  Failed: $FAIL"
