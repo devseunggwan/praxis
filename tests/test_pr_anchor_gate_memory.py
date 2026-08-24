@@ -116,3 +116,40 @@ def test_peak_memory_does_not_track_unrelated_tool_result_size() -> None:
     assert peak < 2 * 1024 * 1024, (
         f"peak {peak / 1024 / 1024:.2f} MiB — an unrelated tool_result's text is being retained"
     )
+
+
+def _small_unrelated_events(count: int):
+    """Many SMALL unrelated tool calls (no Bash `gh` command at all) — isolates
+    the residual `result_is_error` dict growth from the raw-text retention
+    already covered above (CodeRabbit finding, PR #1115: a tid outside
+    interesting_tids must not get a result_is_error entry at all)."""
+    for i in range(count):
+        tid = f"unrelated-tool-call-id-{i:07d}"
+        yield {"message": {"content": [
+            {"type": "tool_use", "id": tid, "name": "Read", "input": {"file_path": f"/f{i}"}},
+        ]}}
+        yield {"message": {"content": [
+            {"type": "tool_result", "tool_use_id": tid, "is_error": False, "content": "ok"},
+        ]}}
+    yield {"message": {"content": [
+        {"type": "tool_use", "id": "create1", "name": "Bash", "input": {"command": "gh pr create --title x --body y"}},
+    ]}}
+    yield {"message": {"content": [
+        {"type": "tool_result", "tool_use_id": "create1", "is_error": False, "content": "https://github.com/o/r/pull/178"},
+    ]}}
+
+
+def test_peak_memory_does_not_track_unrelated_tool_call_count() -> None:
+    """50,000 unrelated non-`gh` tool_use/tool_result pairs (a plausible
+    long-session count) must not grow `result_is_error` by one entry each —
+    prior to the interesting_tids gate this alone cost ~5.7MB."""
+    tracemalloc.start()
+    try:
+        result = gate.find_unanchored_prs(_small_unrelated_events(50_000))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert result == ["178"]
+    assert peak < 1 * 1024 * 1024, (
+        f"peak {peak / 1024 / 1024:.2f} MiB — result_is_error is retaining unrelated tids"
+    )

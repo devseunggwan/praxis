@@ -63,6 +63,10 @@ escalation one.
     178` truncated mid-quote (the anchor read as unposted) and `gh pr create
     --body "a && b" --draft` lost its `--draft` flag the same way (CodeRabbit
     finding, PR #1115).
+  - Only tids in `interesting_tids` (every `gh pr create`/`gh pr comment`/
+    write-`gh api` tool_use) ever get a `result_is_error` entry at all — a
+    session with tens of thousands of unrelated tool calls must not grow that
+    dict by one entry per call (CodeRabbit finding, PR #1115).
   - A `gh pr comment` / write-method `gh api` call only counts as "posted"
     when its tool_use has a matching tool_result that is explicitly non-error
     — a missing/unconfirmed result (interrupted call) does not count
@@ -285,7 +289,7 @@ def find_unanchored_prs(events) -> list[str]:
                 _reduce_tool_use(block, pending_creates, pending_posts, create_tids, interesting_tids)
             elif kind == "tool_result":
                 tid = block.get("tool_use_id")
-                if not isinstance(tid, str):
+                if not isinstance(tid, str) or tid not in interesting_tids:
                     continue
                 result_is_error[tid] = block.get("is_error") is True
                 if tid not in create_tids:
