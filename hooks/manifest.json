@@ -1062,6 +1062,18 @@
       }
     },
     {
+      "name": "pr-anchor-existence-gate",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_PR_ANCHOR_BYPASS",
+          "PRAXIS_PR_ANCHOR_ADVISORY"
+        ]
+      }
+    },
+    {
       "name": "proposal-premise-gate",
       "role": "completion-verify",
       "event": "Stop",
