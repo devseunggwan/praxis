@@ -82,12 +82,14 @@ run_case "block: sudo wrapper gh search"             block Bash 'sudo gh search 
 run_case "block: chained after echo &&"              block Bash 'echo x && gh search issues "q" --state all'
 # #1092: a path-prefixed gh binary must not slip past the gate. `argv[0].text
 # == "gh"` exact match previously let `/usr/bin/gh search ... --state=all`
-# bypass; `_is_gh_binary` closes it. The fused `--state=all` form is used here
-# because the separate-token `--state all` form under a path-prefixed binary
-# relies on subcommand-keyed value-flag resolution in
-# _hook_utils.tokenize_with_roles (keyed on the literal argv[0]), which the
-# fused form does not need.
-run_case "block: /usr/bin/gh search --state=all (path-prefix)" block Bash '/usr/bin/gh search issues "q" --state=all'
+# bypass; `_is_gh_binary` closes it. #1099 additionally normalizes the
+# subcommand spec key to the bare command name in
+# _hook_utils.tokenize_with_roles, so the separate-token `--state all` form
+# under a path-prefixed binary is now blocked too (it relies on
+# subcommand-keyed value-flag resolution, which was keyed on the literal
+# argv[0] before #1099).
+run_case "block: /usr/bin/gh search --state=all (path-prefix, fused)" block Bash '/usr/bin/gh search issues "q" --state=all'
+run_case "block: /usr/bin/gh search --state all (path-prefix, separated)" block Bash '/usr/bin/gh search issues "q" --state all'
 
 # --- PASS: gh search without --state or with valid states --------------------
 run_case "pass: search issues no --state"             pass  Bash 'gh search issues "test"'
