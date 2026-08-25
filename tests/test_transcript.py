@@ -460,6 +460,10 @@ _CONSUMERS = {
         ["read_last_user_message"],
     HOOKS / "preflight-gate" / "rejected-mutation-reconsent-gate" / "impl.py":
         ["scan_user_rejections"],
+    # Counts this turn's delegation targets and quotes the request they were
+    # meant to serve, so it binds the turn reader and the user-message reader.
+    HOOKS / "preflight-gate" / "fan-out-scope-gate" / "impl.py":
+        ["load_current_turn", "read_last_user_message"],
 }
 
 _CONSTANT_CONSUMERS = [
