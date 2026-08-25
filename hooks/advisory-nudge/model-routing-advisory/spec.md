@@ -145,7 +145,7 @@ consulted on demand.
 | Condition (match top-to-bottom) | Skill/Agent | Notes |
 | --- | --- | --- |
 | Requirements ambiguous (no files/criteria) | `oh-my-claudecode:deep-interview` | Socratic, math-gated |
-| Investigation + requirements | `oh-my-claudecode:deep-dive` | trace → interview |
+| Investigation + requirements | `oh-my-claudecode:research` | canonical research lane |
 | Generic planning | `oh-my-claudecode:plan` | optional interview |
 | Project-specific planning | see project CLAUDE.md | laplace-dev-hub:*, praxis:*, etc. |
 
@@ -154,9 +154,9 @@ consulted on demand.
 | Condition | Skill/Mode | Notes |
 | --- | --- | --- |
 | Setup from scratch (issue+branch+worktree) | manual (`gh issue create` + `git worktree add`) | follow the Issue-Driven Worktree Workflow in AGENTS.md |
-| Full-cycle autonomous (plan→code→QA) | `oh-my-claudecode:autopilot` | includes ralph+ultrawork |
+| Full-cycle autonomous (plan→code→QA) | `oh-my-claudecode:autopilot` | includes ralph |
 | Persist until done | `oh-my-claudecode:ralph` | loop with verification |
-| 5+ independent parallel tasks | `oh-my-claudecode:ultrawork` | no persistence |
+| 5+ independent parallel tasks | `oh-my-claudecode:execute` | `team` for coordinated workers |
 | Coordinated agent team | `oh-my-claudecode:team` | native Claude Code |
 | Documentation lookup | `context7` | library docs |
 
@@ -183,7 +183,7 @@ the Stop hook gates on.
 | --- | --- | --- |
 | Bug / test failure | read stack trace + `oh-my-claudecode:debugger` agent if non-trivial | direct diagnosis |
 | Causal tracing (why did X happen) | `oh-my-claudecode:trace` | 3-lane hypothesis |
-| Deep investigation + spec | `oh-my-claudecode:deep-dive` | trace + interview |
+| Deep investigation + spec | `oh-my-claudecode:research` | canonical research lane |
 | OMC session diagnosis | `oh-my-claudecode:debug` | session/runtime only |
 
 ### Agent Delegation (within execution)
@@ -217,9 +217,8 @@ Default is `sonnet`, never opus. When spawning cmux workers
 | Keyword | Effect |
 | --- | --- |
 | `plan` | Start planning interview (routes via Override Rules) |
-| `autopilot` / `ultrapilot` | Autonomous implementation (workflow steps still apply) |
+| `autopilot` | Autonomous implementation (workflow steps still apply) |
 | `ralph` | Persistence loop — don't stop until verified complete |
-| `ulw` / `ultrawork` | Maximum parallel execution |
 | `eco` / `ecomode` | Token-efficient parallel execution |
 | `stop` / `cancel` | Cancel any active OMC mode |
 
@@ -241,7 +240,7 @@ The hook actively nudges only the **model-tier** signal (`--model` vs task
 keyword). The `Skill & Agent Routing` tree above (scenario → which skill/agent)
 is reference knowledge consulted on demand, not an active per-command nudge — a
 keyword-in-`--model`-command trigger cannot express "you should have used
-`deep-dive` instead of `plan`." Actively nudging scenario→skill would require a
+`research` instead of `plan`." Actively nudging scenario→skill would require a
 prompt-time (`UserPromptSubmit`) intent classifier, deliberately deferred to keep
 this first hook precise and low-noise.
 
