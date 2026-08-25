@@ -85,6 +85,14 @@ Evidence is scoped to the **current turn**: the question is whether *this
 request* is being fanned out past what it named. A worker from a previous turn
 belonged to a different request.
 
+Text that spells out a creation is not a creation. `echo`, `--help`, and
+`--dry-run` were excluded from the first build; a **heredoc body** was not, and
+that gap fired the moment the gate ran against a live session — a
+`python3 - <<'PY' … PY` call editing this hook's own test file was counted
+twice, because the fixture strings inside it contain the literal command.
+`_hook_utils.strip_heredoc_bodies` now blanks those bodies before the scan,
+which is the same helper the merge gates use for the same reason.
+
 A failed creation is not a target — a rejected call left no worker running, so
 it must not push the count toward the prompt. Correlation is tool_use `id` <->
 tool_result `tool_use_id`, mirroring `pr-claim-mutation-gate`. A tool_use with

@@ -267,6 +267,17 @@ run_case "echoed creation is not a target (silent)" \
 run_case "cmux workspace list is not a creation (silent)" \
   "silent" "$(bash_payload "$TX_ONE_OK" "cmux workspace list --json")"
 
+HEREDOC_CMD='python3 - <<'"'"'PY'"'"'
+p = "tests/fixture.sh"
+open(p, "w").write("cmux workspace create --name a")
+PY'
+run_case "creation spelled inside a heredoc body is not a target (silent)" \
+  "silent" "$(bash_payload "$TX_ONE_OK" "$HEREDOC_CMD")"
+
+run_case "heredoc body does not make a lone call multi-target (silent)" \
+  "silent" "$(bash_payload "$TX_EMPTY" "$HEREDOC_CMD")"
+
+
 run_case "cmux workspace close is not a creation (silent)" \
   "silent" "$(bash_payload "$TX_ONE_OK" "cmux workspace close workspace:99")"
 

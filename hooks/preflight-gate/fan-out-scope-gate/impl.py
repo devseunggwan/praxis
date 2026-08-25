@@ -39,6 +39,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     is_help_invocation,
     iter_command_starts,
     safe_tokenize,
+    strip_heredoc_bodies,
     strip_prefix,
 )
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
@@ -103,7 +104,14 @@ def _iter_command_texts(command: str, depth: int = 0):
     starts no process, so recursing into them would count a workspace that
     never gets created — `printf '%s' '$(cmux workspace create ...)'` prints a
     string. Double quotes do not disable either form, so those are followed.
+
+    A heredoc body is data for the same reason. A script written with
+    `python3 - <<'PY' ... PY` puts arbitrary text where the per-line scan
+    expects commands, so a fixture that merely spells out a creation is
+    counted as one — which is exactly how this gate first fired on a call
+    that edited its own test file.
     """
+    command = strip_heredoc_bodies(command)
     yield command
     if depth >= MAX_SUBST_DEPTH:
         return
