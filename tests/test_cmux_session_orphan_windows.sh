@@ -62,7 +62,15 @@ TMUX_T=(tmux -L "$SOCKET")
 # find_orphans types a session safe_numeric only when its name matches ^[0-9]+$.
 SESSION="9$$"
 
-cleanup() { "${TMUX_T[@]}" kill-server 2>/dev/null; }
+# kill-server ends the server process but leaves its socket file on disk, so a
+# run that only kills the server leaks one dead socket inode per invocation.
+# SOCKET_PATH is filled in from the live server below; until then it is empty
+# and cleanup has nothing to unlink.
+SOCKET_PATH=""
+cleanup() {
+  "${TMUX_T[@]}" kill-server 2>/dev/null
+  [ -n "$SOCKET_PATH" ] && rm -f "$SOCKET_PATH"
+}
 trap cleanup EXIT
 
 if ! command -v tmux >/dev/null 2>&1; then
@@ -77,6 +85,10 @@ if ! "${TMUX_T[@]}" new-session -d -s "$SESSION" -n active-shell 2>/dev/null; th
   skip "tmux server would not start on an isolated socket — gates cannot run"
   summary_and_exit
 fi
+
+# Ask the running server where its socket is rather than rebuilding the path
+# from TMUX_TMPDIR/TMPDIR/tmp precedence, which differs per platform.
+SOCKET_PATH=$("${TMUX_T[@]}" display-message -p '#{socket_path}' 2>/dev/null)
 
 # --- Fixture -----------------------------------------------------------------
 # Window 0 (active): a bare shell.  Window 1 (inactive): a non-shell process.
