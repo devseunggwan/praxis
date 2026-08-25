@@ -2,8 +2,8 @@
 name: cmux-delegate
 description: Delegate a task to an independent Claude Code session in a new cmux workspace with auto-collected context. Triggers on "cmux delegate", "delegate task", "delegate to new session", "별도 세션", "세션에 위임".
 verified-against-runtime: true
-runtime-verified-at: 2026-08-13
-runtime-verified-note: "cmux 0.64.22 — agent.hook.PostToolUse is not relayed and PreToolUse received/completed pair in ~2 seq while the tool runs, so liveness reads the turn boundary (agent.hook.Stop); Notification arrives after Stop; cmux events keeps streaming past --limit so it must be read line-wise; rpc mobile.workspace.list exposes current_directory/last_activity_at/preview."
+runtime-verified-at: 2026-08-20
+runtime-verified-note: "cmux 0.64.22 — the wrapper passes the prompt as argv (`claude \"$(cat file)\"`) and keeps stdin on the terminal, so the worker runs as an ordinary interactive session and answers its own permission and folder-trust prompts; `--max-budget-usd` stays print-mode only."
 ---
 
 # cmux-delegate
@@ -15,6 +15,7 @@ runtime-verified-note: "cmux 0.64.22 — agent.hook.PostToolUse is not relayed a
 **Core principles:**
 - 프롬프트는 반드시 파일 기반 전달. 인라인 `-p` 절대 사용 금지 (shell escaping 문제 회피).
 - 유저가 세션명/계정을 명시하면 글자 그대로 따른다. 자의적 재해석 금지.
+- **Fire-and-forget.** 위임하면 끝입니다 — 워커는 위임자에게 아무것도 보고하지 않고, 위임자는 워커를 감시하거나 판정하지 않습니다. 결과는 사용자가 해당 cmux 탭에서 직접 봅니다.
 
 ## When to Use
 
@@ -222,81 +223,6 @@ Step 2 의 raw git/PR 메타데이터는 *무엇이 바뀌었는지*만 전달�
 
 {task description from user}
 
-## Completion protocol (REQUIRED)
-
-작업을 마치면 완료 보고서를 씁니다. 이 파일이 완료 보고의 정본이고,
-채팅 메시지는 포인터일 뿐입니다. 경로는 아래 명령으로 구합니다 — worktree
-루트가 아니라 `PRAXIS_HOME` 아래입니다. worktree 는 대개 남의 repo 이고,
-praxis 가 거기에 파일을 남길 이유가 없습니다.
-
-    ARP="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/agent-report-path.sh"
-    WORKTREE="$(sh "$ARP" --worktree "$PWD")"   # ← 보고서의 worktree 필드에
-    REPORT="$(sh "$ARP")"                       # ← 이 워크스페이스의 보고서
-
-`REPORT` 에 경로를 넘기지 않습니다 — 보고서는 **워크스페이스** 단위이고, 헬퍼가
-`$CMUX_WORKSPACE_ID` 에서 그 값을 읽습니다. `$WORKTREE` 는 여전히 `$PWD` 를
-받으며, 하위 디렉터리를 줘도 됩니다(헬퍼가 worktree 루트로 정규화).
-
-`REPORT` 가 `rc=2` 로 실패하면 이 셸이 cmux 워크스페이스 밖이라는 뜻입니다.
-그때는 보고서를 쓰지 말고 그 사실을 마지막 메시지에 남기세요 — 읽는 쪽이
-없는 상태이므로, 파일을 만들면 나중의 무관한 위임이 그것을 줍습니다.
-
-    {
-      "worktree": "/abs/path/to/worktree",
-      "branch": "issue-123-feat-x",
-      "head_sha": "0123456789abcdef0123456789abcdef01234567",
-      "pushed": true,
-      "pr_url": "https://github.com/owner/repo/pull/456",
-      "tests": {"command": "./scripts/run-tests.sh", "passed": 507, "failed": 0},
-      "completed_at": "2026-07-28T09:00:00Z"
-    }
-
-- `worktree` 는 위 `$WORKTREE` 값을 그대로 넣습니다. 신원("이게 내 워커의
-  보고서인가")은 파일명인 워크스페이스 UUID 가 답하므로, 이 필드가 답하는 것은
-  **배치** 입니다 — 워커가 엉뚱한 디렉터리에서 돌았는지.
-- `pushed` 는 `git push` 가 **성공한 뒤에만** true. 커밋만 했으면 false.
-- `pr_url` 은 실제로 생성된 PR 이 없으면 `null` — 빈 문자열이나 예상 URL 금지.
-- `tests` 의 숫자는 실행한 명령의 출력에서 그대로 옮깁니다. 추정 금지.
-- 작업을 끝내지 못했으면 **파일을 쓰지 마세요.** 파일 부재 = 미완료입니다.
-
-마지막 메시지에는 그 보고서의 절대 경로만 남깁니다.
-
-## Decision gate (판단이 필요할 때)
-
-혼자 정하면 안 되는 지점 — 승인이 필요한 mutation, 두 가지로 읽히는 요구사항 —
-에 닿으면 질문을 게시하고 판정이 올 때까지 막습니다. 자의로 진행하는 것과
-조용히 멈추는 것 둘 다 위임자가 알 수 없으므로, 그 둘 중에 고르지 마세요.
-
-    GATE="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/decision-gate.sh"
-    eval "$(sh "$GATE" ask 'DROP TABLE tmp_x 를 실행해도 됩니까')"
-    # $verdict: approved | rejected | timeout | unavailable
-    # $reason:  위임자가 남긴 사유
-
-질문은 위임자가 **다른 맥락 없이 그것만 읽고** 답할 수 있어야 합니다. 무엇을,
-어디에, 왜 하려는지가 한 문장에 들어가야 합니다 — `계속할까요` 로는 답이 나올
-수 없고, 그 왕복은 통째로 낭비입니다.
-
-| `$verdict` | 뜻 | 워커가 할 일 |
-| --- | --- | --- |
-| `approved` | 승인 | 진행한다 |
-| `rejected` | 거부 | **하지 않는다.** `$reason` 을 근거로 대안을 잡거나, 대안이 없으면 미완료로 보고한다 |
-| `timeout` | 시간 안에 판정 없음 | **하지 않는다.** 거부와 다르다 — 판정이 없었던 것이지 거부된 것이 아니므로, 보고서를 쓰지 말고 질문이 답을 못 받았다고 남긴다 |
-| `unavailable` | 물어볼 수 없음 (cmux 부재 등) | **하지 않는다.** 승인 없이 진행하는 것과 같다 |
-
-`approved` 만이 진행 신호입니다. 나머지 셋은 이유가 다를 뿐 전부 "하지 마라"
-입니다 — 게이트가 답을 못 준 것을 허가로 읽으면 게이트가 없는 것과 같습니다.
-
-기본 대기는 600초이고 `--timeout <초>` 로 조정합니다. 위임자는 폴링하지 않고
-Step 7 에서 질문을 보므로, 짧은 대기는 정상 경로에서 타임아웃이 납니다.
-
-한 번에 한 질문입니다. 새 질문은 직전 기록을 덮어쓰므로, 답을 받기 전에 다시
-묻지 마세요.
-
-**채팅으로 묻지 말고 이 게이트로 물으세요.** 채팅 질문은 페인에 보이기는 하지만
-아무도 그 페인을 보고 있지 않을 때 사라집니다 — 위임자의 Step 7 조회에는 잡히지
-않고, `decision` 칸도 `none` 으로 남습니다. 게이트로 물으면 그 질문은 파일에 남아
-위임자가 언제 조회하든 `pending` 으로 드러납니다.
-
 ---
 Report results in Korean.
 ```
@@ -415,8 +341,8 @@ rc=$?
 # TTY stdin 이면 워커는 평소 대화형 세션이라 작업이 끝나도 프롬프트로 돌아가고
 # 종료하지 않기 때문입니다 (실측: 작업 완료 후에도 래퍼 프로세스 생존, rc 파일
 # 미생성). 여기 도달하는 것은 사람이 세션을 나갔을 때뿐이고, 그때의 rc 는
-# 작업 성패가 아니라 세션 종료 방식을 말합니다. 완료 판정의 정본은 Step 7 이
-# 읽는 보고서 파일입니다 — 이 알림이 아닙니다.
+# 작업 성패가 아니라 세션 종료 방식을 말합니다. 이 알림은 완료 판정이
+# 아닙니다 — 결과는 사용자가 cmux 에서 직접 확인합니다.
 case "{provider}" in
   claude)
     # 여기 도달했다는 것은 세션이 닫혔다는 뜻일 뿐, 작업이 끝났다는 뜻이 아닙니다.
@@ -472,28 +398,7 @@ if [[ "$WS_RAW" != OK* ]]; then
 fi
 
 WS_REF=$(echo "$WS_RAW" | sed 's/^OK //')
-
-# Step 7 이 읽을 셀렉터를 지금 박제합니다. 지금이 유일하게 안전한 시점입니다 —
-# 방금 생성된 ref 는 정확히 이 워크스페이스를 가리키고, 나중에 제목으로 되찾으면
-# `short_task` 30자 절단이 만든 동명 워크스페이스와 구별되지 않습니다.
-WS_ID=$(CMUX_QUIET=1 cmux workspace list --json \
-  | jq -r --arg r "$WS_REF" '.workspaces[] | select(.ref == $r) | .id' \
-  | head -1)
-
-# 리다이렉트를 조회에 직접 걸지 않는 이유: 조회가 실패해도 `head` 는 성공하므로
-# 빈 파일이 남고, 그 빈 파일은 Step 7 에서 "워커가 있다"로 읽힙니다.
-if [ -n "$WS_ID" ]; then
-  echo "$WS_ID" > "/tmp/cmux-delegate-{timestamp}-${WS_REF#workspace:}.ws"
-else
-  echo "경고: $WS_REF 의 UUID 조회 실패 — Step 7 은 제목/경로 폴백으로 판정합니다"
-fi
 ```
-
-파일명에 ref 번호가 들어가는 이유는 distribute 모드 때문입니다 — 이 블록이
-항목 수만큼 반복되는데 `{timestamp}` 는 호출 1건당 하나라, 고정 이름이면
-마지막 워크스페이스가 앞의 것들을 전부 덮어씁니다. 파일 안에 ref 가 아니라
-UUID 를 담는 이유는 별개입니다: 워크스페이스가 닫히고 열리는 사이
-`workspace:N` 번호의 안정성이 확인되지 않았고, UUID 는 그 질문 자체가 없습니다.
 
 **distribute 모드에서는 분할된 항목 수만큼 반복 실행합니다.**
 
@@ -515,19 +420,6 @@ fi
 cmux send --workspace "$TARGET" \
   "{prompt_file_path} 파일을 읽고 조사해주세요."
 cmux send-key --workspace "$TARGET" Enter
-
-# 3. Step 7 이 읽을 셀렉터 박제 (Step 5a 와 같은 이유·같은 파일).
-#    이 모드는 "[delegate] …" 워크스페이스를 만들지 않으므로 제목 조회로는
-#    아예 되찾을 수 없습니다 — 여기서 안 쓰면 Step 7 은 경로로 떨어집니다.
-WS_ID=$(CMUX_QUIET=1 cmux workspace list --json \
-  | jq -r --arg r "$TARGET" '.workspaces[] | select(.ref == $r) | .id' \
-  | head -1)
-
-if [ -n "$WS_ID" ]; then
-  echo "$WS_ID" > "/tmp/cmux-delegate-{timestamp}-${TARGET#workspace:}.ws"
-else
-  echo "경고: $TARGET 의 UUID 조회 실패 — Step 7 은 제목/경로 폴백으로 판정합니다"
-fi
 ```
 
 ### Step 6: Report
@@ -545,9 +437,9 @@ Delegated to {WS_REF}
   CWD: {cwd}
 
 cmux에서 {WS_REF} 탭을 확인하세요.
-완료 판정은 Step 7 의 보고서 파일로 합니다 — claude 워커는 작업을 마쳐도 세션이
-살아 있어 완료 알림이 오지 않습니다. 알림이 온다면 기동 실패이거나 사람이 세션을
-나간 것입니다.
+결과 확인은 사용자가 직접 합니다 — claude 워커는 작업을 마쳐도 세션이 살아 있어
+완료 알림이 오지 않습니다. 알림이 온다면 기동 실패이거나 사람이 세션을 나간
+것입니다.
 ```
 
 **distribute 모드:**
@@ -559,8 +451,8 @@ Distributed to {N} workspaces:
   ...
 
 각 cmux 탭에서 진행 상황을 확인하세요.
-완료 판정은 워커별 보고서 파일로 합니다 (Step 7). claude 워커의 완료 알림은
-오지 않습니다 — 위와 같은 이유입니다.
+결과 확인은 탭마다 직접 합니다. claude 워커의 완료 알림은 오지 않습니다 —
+위와 같은 이유입니다.
 ```
 
 **기존 세션 모드:**
@@ -571,187 +463,6 @@ Sent to {TARGET} ({session_name})
 
 cmux에서 {session_name} 탭을 확인하세요.
 ```
-
-### Step 7: Collect the Report (file, not prose)
-
-위임한 작업의 완료를 판정할 때는 **에이전트의 메시지를 읽지 않고** 보고서
-파일을 읽습니다. 경로는 writer 와 **같은 헬퍼**로 구합니다 — 스니펫을 양쪽에
-복붙하면 한쪽만 고쳐질 때 판정이 조용히 깨집니다. 이 단계는 위임 직후가
-아니라, 결과를 소비하기 직전(다음 단계 진입, 사용자 보고, 머지 판단) 에
-실행합니다.
-
-**왜 파일인가.** prose 채널은 양극단으로 고장난 이력이 있습니다 —
-존재하지 않는 PR 을 생성 완료로 보고한 fabrication, 지시 2회에 무응답인
-silence. 어느 쪽도 메시지만 읽어서는 구분되지 않습니다. 파일 부재는
-결정론적으로 "미완료" 이고, 파일 존재는 필드별 재검증의 대상입니다.
-
-**보고서는 워커 하나당 하나입니다.** 키가 워크스페이스 UUID 이므로, `--distribute`
-로 띄운 N개가 같은 워크트리에서 돌아도 서로 다른 파일에 씁니다. 그래서 보고서
-검사는 아래 워크스페이스 루프 **안** 에 있습니다 — 루프 밖에서 한 번 하면 N명의
-완료를 1건분으로 판정하게 되고, 그게 이 단계가 오래 갖고 있던 결함이었습니다.
-
-**보고서가 없으면 거기서 멈추지 말고 이유를 묻습니다.** 파일 부재는 네 가지
-서로 다른 상황을 하나로 뭉갠 값이고, 각각 처방이 다릅니다.
-
-**조회 대상은 경로가 아니라 워크스페이스입니다.** Step 5 의 `{cwd}` 기본값은
-`args.cwd || $(pwd)` 라 위임된 워크스페이스가 **위임자와 같은 디렉터리에**
-열립니다. 실측: 한 디렉터리에 워크스페이스 18개. 경로로 조회하면 그중 아무거나
-하나가 잡히고, 이벤트도 그 경로 전체에서 걸리므로 **이 프로브를 실행하는
-위임자 자신의 이벤트가 최신**이 되어 끝난 워커도 `working` 으로 보고됩니다.
-그래서 Step 5 가 박제한 워크스페이스 UUID 를 씁니다.
-
-```bash
-# 셸 상태는 Bash 호출 간에 유지되지 않으므로(RUNTIME_CONSTRAINTS.md §4)
-# Step 5a/5b 가 파일에 남긴 UUID 를 읽습니다. 제목으로 되찾는 길은 폴백입니다 —
-# `short_task` 30자 절단이 동명 워크스페이스를 만들 수 있고, `--session` 모드는
-# 그 제목의 워크스페이스를 아예 만들지 않습니다.
-# distribute 모드는 항목마다 한 파일이므로 전부 돕니다.
-LIVENESS="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/agent-liveness.sh"
-ARP="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/agent-report-path.sh"
-GATE="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/decision-gate.sh"
-WORKTREE="$(sh "$ARP" --worktree "{cwd}")"
-FOUND=0
-
-# glob 이 아니라 find 인 이유: 매치가 없을 때 zsh 는 `nomatch` 로 블록 전체를
-# 죽입니다(bash 는 리터럴을 넘겨 폴백으로 갑니다). 위임자 셸을 고를 수 없습니다.
-# `/tmp/` 의 후행 슬래시는 필수입니다 — macOS 에서 /tmp 는 private/tmp 심볼릭
-# 링크이고, find 는 기본적으로 링크를 따라가지 않아 무조건 0건이 나옵니다.
-for WS_FILE in $(find /tmp/ -maxdepth 1 -name 'cmux-delegate-{timestamp}-*.ws' 2>/dev/null); do
-  # 빈 파일은 워커가 아니라 조회 실패의 흔적이므로 FOUND 를 올리지 않습니다 —
-  # 올리면 폴백이 막히고, probe 는 빈 인자에 usage/rc=2 로 끝납니다.
-  [ -s "$WS_FILE" ] || { echo "$WS_FILE 비어 있음 — 건너뜀"; continue; }
-  FOUND=1
-  # 반복마다 초기화: eval 이 아무것도 내놓지 않으면 $state 가 직전 워커의 값을
-  # 그대로 들고 있어, 그 판정이 이 워커의 것으로 출력됩니다.
-  WS_ID="$(cat "$WS_FILE")"
-  state=unknown
-  eval "$(sh "$LIVENESS" "$WS_ID")"
-
-  # 이 워커의 보고서. 같은 워크트리의 형제 워커와 다른 파일입니다.
-  REPORT="$(sh "$ARP" --workspace "$WS_ID")"
-  if [ ! -f "$REPORT" ]; then
-    report=absent
-  elif [ "$(jq -r '.worktree // ""' "$REPORT")" != "$WORKTREE" ]; then
-    # 신원은 파일명이 이미 답했으므로, 불일치는 "남의 보고서"가 아니라
-    # 이 워커가 엉뚱한 디렉터리에서 돌았다는 뜻입니다.
-    report=misplaced
-  else
-    report=present
-  fi
-
-  # 막혀 있는 워커는 여기서 드러납니다. 이 조회가 유일한 소비 지점이고,
-  # 상주 감시자는 두지 않습니다 — 위임자는 이미 이 자리에 서 있습니다.
-  decision=none
-  eval "$(sh "$GATE" status "$WS_ID" | sed 's/^state=/decision=/')"
-
-  echo "$WS_FILE $state $report $decision"   # state: working|idle|waiting-input|crash|unknown
-  [ "$decision" = pending ] && echo "  질문: $question"
-done
-
-if [ "$FOUND" -eq 0 ]; then
-  WS_SEL=$(CMUX_QUIET=1 cmux workspace list --json \
-    | jq -r --arg t "[delegate] {short_task}" '.workspaces[] | select(.title == $t) | .ref' \
-    | head -1)
-  # 제목으로도 못 찾으면 경로로 떨어지되, 그 답은 ambiguous 를 달고 옵니다.
-  eval "$(sh "$LIVENESS" "${WS_SEL:-{cwd}}")"
-  echo "$state"
-  [ "${ambiguous:-1}" -gt 1 ] && echo "경고: 경로가 워크스페이스 $ambiguous 개와 일치 — 판정은 그중 하나에 대한 것"
-fi
-```
-
-**두 값을 함께 읽습니다.** `state` 는 워커가 살아 있는지를, `report` 는 결과가
-도착했는지를 말합니다. 판정은 조합에서 나옵니다 — `idle` + `absent` 가 가장
-의심스러운 칸이고(턴은 끝났는데 결과가 없다), `idle` + `present` 가 완료입니다.
-`working` + `absent` 는 정상적인 진행 중입니다.
-
-| `report` | 뜻 | 위임자가 할 일 |
-| --- | --- | --- |
-| `present` | 보고서가 있고 워크트리가 일치 | 아래 필드별 재검증으로 |
-| `absent` | 파일 없음 | `state` 와 조합해 판단. 아래 4가지 원인 표 참조 |
-| `misplaced` | 보고서는 있으나 워크트리 불일치 | 이 워커가 엉뚱한 디렉터리에서 돌았음. 미완료로 취급 |
-
-| `decision` | 뜻 | 위임자가 할 일 |
-| --- | --- | --- |
-| `none` | 물어본 적 없음 | 없음 |
-| `pending` | 워커가 질문하고 막혀 있음 | 답한다 — 아래 `resolve`. 답하기 전에는 `state` 가 `working` 이어도 진행이 아니다 |
-| `resolved` | 이미 답했음 | 없음. 워커는 깨어났다 |
-
-`pending` 은 `state` 표와 함께 읽습니다. 질문을 남기고 막힌 워커는 `wait-for`
-안에 있으므로 `working` 으로 보입니다 — `decision=pending` 이 없으면 그 워커는
-일하는 중으로 오독되고, 타임아웃까지 아무도 답하지 않습니다.
-
-```bash
-GATE="${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/decision-gate.sh"
-sh "$GATE" resolve "$WS_ID" approve '이 테이블은 임시본입니다'
-sh "$GATE" resolve "$WS_ID" reject 'prod 는 사람이 직접 한다'
-```
-
-**거부에는 사유를 답니다.** 워커가 받는 것은 판정과 사유뿐이고, 사유가 없으면
-다음 행동을 고를 근거가 없어 그 자리에서 다시 막히거나 임의로 진행합니다.
-이미 답한 질문에 다시 `resolve` 하는 것은 무해합니다 — 첫 판정이 그대로
-반환되고 신호는 다시 가지 않습니다. 두 번째 신호는 이 워크스페이스의 **다음**
-질문을 아무도 답하지 않은 채 통과시킵니다. 두 사람이 같은 질문에 동시에 답해도
-마찬가지입니다: 먼저 잡은 쪽만 기록하고 신호하며, 나중 쪽은 실제로 확정된 판정을
-그대로 돌려받습니다. 드물게 `state='pending'` 이 나오면 다른 `resolve` 가 아직
-진행 중이라는 뜻이므로 다시 조회하세요.
-
-| `state` | 뜻 | 위임자가 할 일 |
-| --- | --- | --- |
-| `working` | 턴 진행 중 (툴 실행 또는 사고) | 기다린다. 재지시는 진행 중인 작업을 버린다 |
-| `idle` | 턴이 끝났는데 보고서가 없다 | 재지시하거나 인수한다. 가장 의심스러운 값 |
-| `waiting-input` | 모달 프롬프트에서 멈춤 | 사람이 그 워크스페이스에서 키를 누른다. **이 값은 #1054 이후에만 실제로 도달 가능합니다** — 그 전까지 워커에는 stdin 이 없어, 프롬프트를 만나면 대기하지 않고 종료했습니다 |
-| `crash` | cmux 가 목록을 정상으로 답했고 그 셀렉터에 해당하는 워크스페이스가 없음 | 재위임 |
-| `unknown` | 판정 불가 (`reason` 이 어느 쪽인지 말한다: `cmux-unavailable` · `workspace-lookup-failed` · `workspace-ref-not-found` · `workspace-has-no-id` · `no-events-in-window`) | 부재를 사망으로 읽지 않는다. 화면을 직접 본다 |
-
-`crash` 와 `unknown/workspace-lookup-failed` 의 경계가 이 표에서 가장 비싼
-지점입니다. `crash` 의 처방은 재위임이므로, 조회가 실패했을 뿐인 경우를 여기로
-넣으면 **살아서 일하고 있는 워커 밑에서 같은 작업이 두 번째로 시작됩니다.**
-그래서 RPC 타임아웃·비정상 종료·깨진 JSON 은 전부 `unknown` 입니다 —
-"워크스페이스가 없다"는 cmux 가 목록을 정상으로 답했을 때만 할 수 있는 말입니다.
-
-출력의 모든 값은 작은따옴표로 감싸집니다. `preview` 가 위임된 에이전트의 답변
-텍스트를 그대로 싣기 때문에, 전개되는 인용으로 내보내면 위임받은 쪽이 위임자
-셸에서 실행될 내용을 고르게 됩니다. `eval` 로 읽는 위 관용구는 그대로 두되,
-`grep`/`sed` 로 직접 파싱한다면 이 따옴표를 벗겨야 합니다.
-
-`working` 과 `idle` 은 턴 경계(`agent.hook.Stop`)로 갈립니다. **툴 실행 중인지
-사고 중인지는 구분되지 않습니다** — `agent.hook.PostToolUse` 가 중계되지 않아
-바깥에서 볼 방법이 없고, 위임자의 처방은 어느 쪽이든 "기다린다"로 같습니다.
-
-읽은 값은 **그대로 믿지 않고** 필드마다 fresh 하게 재확인합니다. 보고서는
-에이전트가 쓴 것이므로 그 자체로는 증거가 아닙니다 — 아래 명령의 출력이
-증거입니다.
-
-| 필드 | 재검증 명령 | 불일치 시 |
-| --- | --- | --- |
-| `worktree` | 위 `jq` 비교 | 불일치 = 다른 작업의 보고서. 미완료로 취급 |
-| `head_sha` + `pushed: true` | `git ls-remote origin refs/heads/<branch>` | remote SHA 가 없거나 다르면 push 미완료 — 보고서의 `pushed` 를 무시 |
-| `pr_url` | `gh pr view <url> --json state,headRefOid` | 조회 실패 = PR 부재(fabrication), `headRefOid` 불일치 = 보고 이후 커밋 존재 |
-| `tests` | 같은 명령을 직접 재실행 | 숫자 불일치 = 보고서 수치 신뢰 불가 |
-
-`pushed: false` 는 실패가 아니라 **정상적인 부분 완료** 입니다 — 커밋은
-있으나 push 는 남았다는 뜻이므로, 위임자가 push 를 이어받거나 에이전트에
-재지시합니다.
-
-**커버리지 한계 (명기).** 위 판정은 워크스페이스 목록과 이벤트 스트림이
-보이는 것까지만 답합니다. 남는 구멍 셋:
-
-- `WS_SEL` 이 비어 경로로 떨어진 경우에만 열리는 구멍: 같은 디렉터리에
-  워크스페이스가 둘 이상이면 그중 첫 번째 것을 기술합니다. 위임 기본값이
-  위임자와 같은 디렉터리이므로 이 갈래는 드물지 않고, 실측 최대는 한 경로에
-  18개였습니다. `ambiguous=N` (N>1) 이 붙은 답은 "N개 중 하나에 대한 판정"
-  이므로, 재위임 같은 비가역 처방의 근거로 쓰지 말고 제목으로 ref 를 다시
-  찾거나 화면을 직접 봅니다. ref 로 조회하면 `ambiguous` 자체가 없습니다.
-- 이벤트 보존 창(4096건)을 벗어난 워커는 `unknown` 입니다. 바쁜 호스트에서는
-  몇 분이면 벗어납니다.
-- 폴더 신뢰 다이얼로그의 `preview` 문구는 아직 채집되지 않아,
-  `waiting-input` 이 그 케이스를 잡는지 확인되지 않았습니다.
-- Stop 훅이 `decision: block` 을 내면 턴이 끝나지 않았는데도 `Stop` 이벤트는
-  발생합니다. 중계되는 페이로드는 어느 쪽인지 말하지 않으므로(보존 창의
-  Stop 204건 전수가 `result=acknowledged`·`is_error=null`) 이벤트만으로는
-  구별할 수 없고, 대신 워크스페이스가 30초 이상 조용해야 `idle` 로 갑니다.
-  그 전까지는 `working reason=stop-not-yet-quiet` 입니다 — 끝난 워커를 잠시
-  기다리는 비용이, 일하는 워커에 작업을 두 번 걸치는 비용보다 쌉니다.
 
 ## Error Handling
 
@@ -764,9 +475,6 @@ sh "$GATE" resolve "$WS_ID" reject 'prod 는 사람이 직접 한다'
 | `--session` 매칭 실패 | 사용 가능한 워크스페이스 목록을 보여주고 중단 |
 | `--account` 디렉토리 미존재 | 에러 메시지 출력 후 중단 |
 | distribute 분할 실패 | 분할 불가 시 단일 세션으로 fallback, 유저에게 알림 |
-| 완료 보고서 부재 | **미완료로 취급** — 완료 주장 메시지가 있어도 마찬가지. 그 다음 `agent-liveness.sh` 로 이유를 판정하고 위 표대로 처방 |
-| 완료 보고서 JSON 파싱 실패 | 미완료로 취급. 파일 내용을 그대로 보여주고 중단 (부분 기록일 수 있으므로 삭제 금지) |
-| 보고서 필드 ↔ 재검증 불일치 | 재검증 출력을 채택하고 보고서 값은 폐기. 어긋난 필드를 사용자에게 명시 |
 
 ## Architecture
 
@@ -861,8 +569,8 @@ cost is $5 `whoami` ${HOME} {a,b} "quoted" 'single' \n      ← 원문 그대로
 
 ## Limitations
 
-- 완료 판정은 완료 보고서 파일로 결정론적이지만, **작업 산출물 자체의 자동 수집은 미지원** → 사용자가 cmux에서 직접 확인
-- silence 의 원인은 `agent-liveness.sh` 로 4분류되지만, **툴 실행 중과 사고 중은 구분 불가** — `agent.hook.PostToolUse` 가 중계되지 않음. 보존 창 밖이면 `unknown`
+- **결과 파일 자동 수집/보고 미지원** → 사용자가 cmux 에서 직접 확인. 위임은 fire-and-forget 이고, 위임자는 워커를 감시하지 않습니다
+- 그래서 완료 주장과 실제 완료는 구별되지 않습니다 — 워커가 PR 을 만들었다고 말하면 사용자가 `gh pr view` 로 직접 확인합니다
 - 작업 유형별 템플릿 미지원 → 사용자가 프롬프트에 직접 명시
 - distribute 모드의 자동 분할은 섹션 헤더 기반 — 비정형 프롬프트는 수동 분할 필요
 - **Handoff 합성 품질은 오케스트레이터 대화에 의존** (Step 2.5) — 대화 맥락이 빈약하면 raw git 맥락만 전달되고, fresh-eyes 위임에서는 편향 방지를 위해 의도적으로 최소화됨

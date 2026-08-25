@@ -51,9 +51,9 @@ There is no completion sentinel in this repository. The line documenting
 `; echo '===WORKER_DONE===' >> $LOG` as a shared convention has been removed (#1054):
 `grep -rn WORKER_DONE` found that sentence and nothing else — no caller ever appended
 it and no consumer ever waited on it. It also cannot hold for `cmux-delegate`, whose
-claude worker stays interactive and does not exit after the task. Completion is
-decided by the worker's report file (`cmux-delegate` Step 7), which is keyed by
-workspace UUID and readable whenever the delegator looks.
+claude worker stays interactive and does not exit after the task. That skill is
+fire-and-forget: nothing reports completion back to the delegator, and the user
+reads the result in the worker's own cmux tab.
 
 The `claude` row's stdin column carries a precondition the command does not state.
 `claude --help` says the workspace trust dialog is skipped "via `-p`, or when

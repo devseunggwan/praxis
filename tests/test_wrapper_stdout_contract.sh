@@ -91,9 +91,12 @@ assert_present \
   "the notify is disclaimed as a completion signal on the claude branch" \
   "작업 완료 시점에 실행되지 않습니다"
 
+# There is no completion oracle to name any more (#1130): the skill is
+# fire-and-forget, so the disclaimer has to say where the result actually is
+# instead of pointing at a collection step.
 assert_present \
-  "the real completion oracle is named — the Step 7 report file" \
-  "완료 판정의 정본은 Step 7 이"
+  "the notify's disclaimer routes the reader to the worker's own tab" \
+  "결과는 사용자가 cmux 에서 직접 확인합니다"
 
 # ---------------------------------------------------------------------------
 # 4. The argv size limit is guarded, and the guard refuses a fallback
