@@ -93,6 +93,20 @@ def test_planted_reference_is_reported(tmp_path, monkeypatch):
     assert "ultraqa" in hits[0] and "verify" in hits[0]
 
 
+def test_replacements_match_the_migration_table():
+    # The replacement string is recovery guidance, so it has to name the whole
+    # Replacement column. omc's table pairs ccg with `ask` AND `team`; the
+    # "run ask codex / ask antigravity" half lives in its Notes column, and
+    # quoting only that half drops `team` from the advice.
+    assert drift.RETIRED_NAMES["ccg"] == (
+        "ask + team (run ask codex and ask antigravity, then synthesize)"
+    )
+    assert drift.RETIRED_NAMES["ultrapilot"] == "team"
+    assert drift.RETIRED_NAMES["swarm"] == "team"
+    assert drift.RETIRED_NAMES["learner"] == "remember"
+    assert drift.RETIRED_NAMES["writer-memory"] == "remember"
+
+
 def test_live_names_do_not_drift(tmp_path, monkeypatch):
     repo = _git_repo(tmp_path, {"a.md": "`oh-my-claudecode:research` `oh-my-claudecode:team`\n"})
     monkeypatch.setattr(drift, "REPO", repo)

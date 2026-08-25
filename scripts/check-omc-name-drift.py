@@ -50,7 +50,7 @@ RETIRED_NAMES: dict[str, str] = {
     "merge-readiness": "review",
     "deep-dive": "research",
     "sciomc": "research",
-    "ccg": "ask + team",
+    "ccg": "ask + team (run ask codex and ask antigravity, then synthesize)",
     "omc-teams": "team",
     "setup": "omc-setup",
     "mcp-setup": "omc-setup",
