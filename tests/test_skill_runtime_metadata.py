@@ -572,9 +572,7 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
         if check._skill_runtime_verification_reasons(skill_dir)
     }
     assert actual == {
-        # helper-executable since #903: agent-report-path.sh derives the
-        # completion-report path for both halves of the handoff protocol.
-        "cmux-delegate": ("external-cli-wrapper", "helper-executable"),
+        "cmux-delegate": ("external-cli-wrapper",),
         "cmux-recover-sessions": (
             "AskUserQuestion",
             "external-cli-wrapper",

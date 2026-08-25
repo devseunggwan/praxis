@@ -15,7 +15,6 @@ on opposite sides of that split.
 | `~/.praxis/state/`         | Durable, cross-session state                       | `praxis_state_dir()`                         | `PRAXIS_STATE_DIR` (base), `PRAXIS_HOME`    |
 | `~/.praxis/cache/`         | Regenerable, session-scoped caches / dedup markers | `praxis_cache_dir()`, `resolve_cache_file()` | `PRAXIS_HOME`, per-file env                 |
 | `~/.praxis/logs/`          | Diagnostics                                        | `resolve_writable("logs", …)`                | `PRAXIS_HOME`, per-file env                 |
-| `~/.praxis/agent-reports/` | cmux-delegate completion reports                   | `skills/cmux-delegate/agent-report-path.sh`  | `PRAXIS_HOME`                               |
 | `~/.praxis/telemetry/`     | fire / bypass event ledgers (daily rotation)       | `hooks/_lib/_fire_ledger.py`                 | `PRAXIS_FIRE_TELEMETRY_FILE`, `PRAXIS_HOME` |
 | `~/.praxis/scope-confirm/` | Stop-gate block logs                               | `praxis_resolve_writable scope-confirm …`    | `PRAXIS_HOME`                               |
 | `~/.praxis/docs/specs/`    | Feature specs ([`spec-store.md`](spec-store.md))   | `praxis_specs_dir()`                         | `PRAXIS_HOME`                               |
@@ -90,16 +89,3 @@ opportunistically from `resolve_writable("cache", …)` and drops entries past
 `${TMPDIR}/praxis-<name>` file into the cache root. Without it, a session that
 was already retrospect-active or intent-anchored when the upgrade landed would
 read the new path as "no state" and silently disarm its gate mid-session.
-
-## Agent reports (`~/.praxis/agent-reports/`)
-
-`cmux-delegate` writes one completion report per delegated task, named
-`<sha1(worktree absolute path)>.json`. Before #903 this was `.agent-report.json`
-at the worktree root — inside whatever repository the task happened to target.
-The delegator derives the same path from `{cwd}` via the shared helper and
-checks the report's own `worktree` field before trusting it.
-
-Reports are deliberately **not** swept by `prune_stale`. Absence of a report is
-the deterministic "incomplete" signal, so deleting one a delegator has not yet
-collected would manufacture exactly the false negative the file-based handoff
-exists to eliminate. They are small and one per delegated task.
