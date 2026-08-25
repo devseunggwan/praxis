@@ -35,7 +35,7 @@ Two naming families are detected (both required):
 
 | Family          | Pattern                                          | Examples                                                                                                                                              |
 | --------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CLAUDE_HOOK_*` | starts with `CLAUDE_HOOK_` AND contains `BYPASS` | `CLAUDE_HOOK_BYPASS_SCIOMC_GATE`, `CLAUDE_HOOK_BYPASS_DUP_GATE`, `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE`                                               |
+| `CLAUDE_HOOK_*` | starts with `CLAUDE_HOOK_` AND contains `BYPASS` | `CLAUDE_HOOK_BYPASS_DUP_GATE`, `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE`                                                                                 |
 | `PRAXIS_*`      | starts with `PRAXIS_` AND contains `BYPASS`      | `PRAXIS_MOMENTUM_BYPASS`, `PRAXIS_GH_JSON_BYPASS`, `PRAXIS_HOOK_BYPASS_WORKTREE_GATE`, `PRAXIS_HOOK_BYPASS_HUB_ENFORCE`, `PRAXIS_VERSION_BUMP_BYPASS` |
 
 Detection regex: `^(?:CLAUDE_HOOK_|PRAXIS_).*BYPASS`

@@ -286,7 +286,7 @@ def test_verb_wired_hooks_append_their_checklist() -> None:
 
 # Preflight-gate hooks not yet migrated to the helper. The three hooks
 # migrated in issue #439 are intentionally absent. Reserved-for-other-issue
-# hooks (block-sciomc-finding-commit / commit-title-length-check) stay listed.
+# hooks (commit-title-length-check) stay listed.
 # Migrating any of these later = removing it from this set.
 # NOTE: the two block-pr-without-*-evidence gates import block_message for
 # the shared checklist suffix (#824) but still hand-roll their main deny
@@ -297,7 +297,6 @@ LEGACY_UNMIGRATED = {
     "block-manufactured-action-menu",
     "block-pr-without-caller-evidence",
     "block-pr-without-precommit-evidence",
-    "block-sciomc-finding-commit",
     "commit-title-length-check",
     "cross-boundary-preflight",
     "gh-flag-verify",

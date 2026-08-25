@@ -454,8 +454,6 @@ _CONSUMERS = {
         ["iter_transcript"],
     HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
         ["read_transcript_tail"],
-    HOOKS / "preflight-gate" / "block-sciomc-finding-commit" / "impl.py":
-        ["load_transcript_objs"],
     HOOKS / "preflight-gate" / "block-ask-end-option" / "impl.py":
         ["read_last_user_message"],
     HOOKS / "preflight-gate" / "block-manufactured-action-menu" / "impl.py":

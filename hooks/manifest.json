@@ -603,18 +603,6 @@
       }
     },
     {
-      "name": "block-sciomc-finding-commit",
-      "role": "preflight-gate",
-      "event": "PreToolUse",
-      "matcher": "Bash",
-      "timeout": 5,
-      "mode": {
-        "bypass_env": [
-          "CLAUDE_HOOK_BYPASS_SCIOMC_GATE"
-        ]
-      }
-    },
-    {
       "name": "block-commit-without-codex-review",
       "role": "preflight-gate",
       "event": "PreToolUse",

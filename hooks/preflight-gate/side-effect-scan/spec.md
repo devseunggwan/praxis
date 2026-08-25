@@ -30,7 +30,7 @@ stops functioning as a gate, so the volume itself is the defect.
    `kubectl apply` all publish to state another party can already be reading.
    A commit is recoverable with `git reset` / `git commit --amend` from the
    same shell, before anything leaves the machine.
-2. **It is the only category already covered in depth.** Seven sibling
+2. **It is the only category already covered in depth.** Six sibling
    `PreToolUse(Bash)` hooks gate a `git commit` argv on their own — enumerated
    from `hooks/manifest.json` and each verified to key on the `commit`
    subcommand:
@@ -38,21 +38,20 @@ stops functioning as a gate, so the volume itself is the defect.
    | Sibling hook | What it gates |
    | -------------- | --------------- |
    | `block-commit-without-codex-review` | commit before the review step |
-   | `block-sciomc-finding-commit` | committing a findings artifact |
    | `commit-title-format-check` | Conventional Commits title format |
    | `commit-title-length-check` | title length |
    | `verify-commit-flag-override` | `-n` / `--no-verify` flag override |
    | `commit-decomposition-advisory` | oversized single commit |
    | `pre-commit-staged-file-enumeration` | staging without enumerating files |
 
-   Five of the seven are the checklist `verify-commit-flag-override` already
+   Four of the six are the checklist `verify-commit-flag-override` already
    prints on its own deny (issue #941). By contrast **no** sibling hook gates
    `kubectl apply` at all.
 
 **`wrapper-commit` is a deliberate narrowing.** `iceberg-schema
 migrate|promote` and `omc ralph` used to carry the `git-commit` label;
 issue #874's demotion does not follow them down, because both halves of the
-rationale fail for them. The seven sibling gates match a literal `git commit`
+rationale fail for them. The six sibling gates match a literal `git commit`
 argv, so a commit made *inside* a wrapper process is invisible to every one of
 them, and `iceberg-schema promote` is a catalog operation rather than a local
 one. They keep asking, under their own category name.

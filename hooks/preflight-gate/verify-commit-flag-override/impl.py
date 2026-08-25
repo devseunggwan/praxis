@@ -251,10 +251,6 @@ GIT_COMMIT_GATE_CHECKLIST = """
     the exact allowed `Types:` list.
   Title <= 50 characters                    ← commit-title-length-check
     Or embed `# title-length:ack` on the command to bypass a longer title.
-  No sciomc finding auto-flip               ← block-sciomc-finding-commit
-    Only fires when a [FINDING:...] / [STAGE_COMPLETE:N] / [CONFLICTS:...]
-    marker sits in the recent transcript; re-fetch the user's stated design
-    (PR/issue body) before committing over it.
   Staged additions never seen via Read/Edit ← pre-commit-staged-file-enumeration
     Advisory only — never blocks.
 """

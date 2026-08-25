@@ -8,9 +8,9 @@ commit. Prose alone is unreliable (prompt-layer retrieval failure); per the
 established escalation pattern, this hook enforces the gate at the commit
 checkpoint.
 
-This is the inverse of `block-sciomc-finding-commit`: that hook blocks on the
-PRESENCE of a finding marker; this one blocks on the ABSENCE of the required
-skill invocation.
+The gate keys on an ABSENCE — the required skill invocation is missing from
+the transcript — rather than on the presence of a marker, so a commit cannot
+pass by avoiding whatever vocabulary a marker scan would look for.
 
 Block conditions (ALL must hold):
   (a) Tool is Bash with a content `git commit` (not amend/merge/rebase/
@@ -50,9 +50,7 @@ Allow conditions (escape hatches):
     git commit …` places the assignment inside `tool_input.command`, which is
     data the hook inspects, not env applied to the hook process itself — it
     never reaches this process's `os.environ`. Verified empirically during
-    issue #720 work (the identical inline-prefix bypass is documented, and
-    equally non-functional, on the sibling `block-sciomc-finding-commit`
-    gate — see that hook's spec.md).
+    issue #720 work.
   - git commit --amend / git merge / git rebase / git cherry-pick / git revert
   - Missing / unreadable / oversized transcript → fail-open (cannot enforce)
   - Malformed / unparseable command (unbalanced quotes) → fail-open
