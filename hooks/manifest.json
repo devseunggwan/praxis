@@ -211,6 +211,13 @@
       "timeout": 5
     },
     {
+      "name": "fan-out-scope-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash|Agent",
+      "timeout": 5
+    },
+    {
       "name": "gh-merge-worktree-precondition",
       "role": "preflight-gate",
       "event": "PreToolUse",
