@@ -67,26 +67,6 @@ INVARIANTS: list[dict] = [
         "doc": "hooks/preflight-gate/block-commit-without-codex-review/spec.md",
     },
     {
-        "token": "[user-approved]",
-        "scan_pattern": r"\[(?:user-approved|ratified-by-user|user-ratified)\]",
-        "scan": "hooks/preflight-gate/block-sciomc-finding-commit/impl.py",
-        "doc": "hooks/preflight-gate/block-sciomc-finding-commit/spec.md",
-    },
-    {
-        "token": "[ratified-by-user]",
-        "scan_pattern": r"\[(?:user-approved|ratified-by-user|user-ratified)\]",
-        "scan": "hooks/preflight-gate/block-sciomc-finding-commit/impl.py",
-        "doc": "hooks/preflight-gate/block-sciomc-finding-commit/spec.md",
-    },
-    {
-        # The enforcing regex accepts a third alias; pinning only the first two
-        # let the spec silently drop this one. Found by codex review on #712.
-        "token": "[user-ratified]",
-        "scan_pattern": r"\[(?:user-approved|ratified-by-user|user-ratified)\]",
-        "scan": "hooks/preflight-gate/block-sciomc-finding-commit/impl.py",
-        "doc": "hooks/preflight-gate/block-sciomc-finding-commit/spec.md",
-    },
-    {
         # The bypass-family detection regex itself — the strongest pin
         # available. bypass-telemetry's _BYPASS_NAME_RE source must equal the
         # regex the spec documents, or the telemetry silently stops counting a

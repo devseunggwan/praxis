@@ -64,8 +64,7 @@ not make the approval half of the rule visible at the block site.
 
 The deny message also enumerates every OTHER gate that fires on `git
 commit` (`block-commit-without-codex-review`, `commit-title-format-check`,
-`commit-title-length-check`, `block-sciomc-finding-commit`,
-`pre-commit-staged-file-enumeration`) in one pass (issue #941) — an author
+`commit-title-length-check`, `pre-commit-staged-file-enumeration`) in one pass (issue #941) — an author
 clearing this gate should not discover the next commit-time gate only on
 the following retry. The checklist is local to this hook's `impl.py`
 (`GIT_COMMIT_GATE_CHECKLIST`), not in `hooks/_lib/block_message.py`'s

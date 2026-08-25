@@ -67,7 +67,6 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_BYPASS_TELEMETRY_DISABLE` | `bypass-telemetry` | Disable bypass-event logging |
 | `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE` | `block-commit-without-codex-review` | Skip the pre-commit codex-review gate (legacy name) |
 | `CLAUDE_HOOK_BYPASS_DUP_GATE` | `block-gh-issue-create-without-dup-search` | Skip the issue-dedup-search gate (legacy name) |
-| `CLAUDE_HOOK_BYPASS_SCIOMC_GATE` | `block-sciomc-finding-commit` | Skip the sciomc-finding commit gate (legacy name) |
 
 ## Strict (escalate advisory → block)
 

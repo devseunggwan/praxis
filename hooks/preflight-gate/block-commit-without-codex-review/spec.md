@@ -16,9 +16,8 @@ defects a single reviewer misses. Prose alone is unreliable (prompt-layer
 retrieval failure); per the established escalation pattern, structural
 enforcement at the commit checkpoint backs the rule.
 
-This is the inverse of [`block-sciomc-finding-commit`](../block-sciomc-finding-commit/spec.md):
-that hook blocks on the **presence** of a finding marker; this one blocks on the
-**absence** of the required skill invocation.
+This gate blocks on the **absence** of the required skill invocation, rather
+than on the presence of any marker in the transcript.
 
 ### What is blocked
 
@@ -119,8 +118,8 @@ already blocked N times this session") is true regardless of episode structure.
   `tool_input.command` — data the hook inspects, not env applied to the hook
   process — so it never reaches this process's `os.environ`. Verified
   empirically during issue #720 work; the identical inline-prefix bypass is
-  documented (and equally non-functional as written) on the sibling
-  [`block-sciomc-finding-commit`](../block-sciomc-finding-commit/spec.md) gate.
+  documented (and equally non-functional as written) on the retired
+  sciomc-finding gate.
 - Missing / unreadable / oversized (`>50MB`) transcript → silent pass (cannot
   enforce). Malformed stdin or an unparseable command (unbalanced quotes) →
   silent fail-open.

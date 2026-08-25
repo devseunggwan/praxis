@@ -283,7 +283,6 @@ for token in (
     'block-commit-without-codex-review',
     'commit-title-format-check',
     'commit-title-length-check',
-    'block-sciomc-finding-commit',
     'pre-commit-staged-file-enumeration',
 ):
     assert token in reason, f'missing {token!r} from deny message'

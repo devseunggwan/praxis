@@ -7,24 +7,25 @@
 #   3. manifest — scripts/check-plugin-manifests.py
 #   4. invariants — scripts/check-hook-token-invariants.py
 #   5. memory-frontmatter — scripts/check-memory-frontmatter.py
-#   6. ruff     — static Python lint (mirrors the ci.yml `ruff` job)
-#   7. shellcheck — static shell lint (mirrors the ci.yml `shellcheck` job)
-#   8. markdownlint — advisory markdown lint (mirrors the ci.yml `markdownlint` job)
+#   6. omc-name-drift — scripts/check-omc-name-drift.py
+#   7. ruff     — static Python lint (mirrors the ci.yml `ruff` job)
+#   8. shellcheck — static shell lint (mirrors the ci.yml `shellcheck` job)
+#   9. markdownlint — advisory markdown lint (mirrors the ci.yml `markdownlint` job)
 #
-# Steps 6-8 mirror CI jobs that used to have no local equivalent, so a change
+# Steps 7-9 mirror CI jobs that used to have no local equivalent, so a change
 # could pass here and still be flagged on the PR (issue #866). Each skips with
 # an explicit SKIPPED line when its tool is absent, so a contributor without
 # the toolchain is not blocked — CI remains authoritative either way.
 #
 # Step 5 is a different repo-internal script, same family as steps 3-4 (no
 # external toolchain — nothing to install), but its skip condition is not
-# like steps 6-8's: the memory directory it lints is a local, gitignored,
+# like steps 7-9's: the memory directory it lints is a local, gitignored,
 # per-user store that is structurally absent in CI or a fresh checkout,
 # always, forever (issue #942) — not a "toolchain not installed" gap a
 # contributor can close. It prints "N/A", never "SKIPPED", to keep that
 # distinction visible in the log (see its own docstring / #917 below), and
 # this call strips PRAXIS_TESTS_STRICT (`env -u`, not passed through like
-# steps 6-8) so that permanent N/A can never fail the job. Real drift
+# steps 7-9) so that permanent N/A can never fail the job. Real drift
 # (nonzero exit with violations listed) still counts as FAILED, same as
 # steps 3-4 — this is not routed through the SKIPPED_TOOLS/skip_step() path
 # at all.
@@ -153,7 +154,7 @@ fi
 echo ""
 echo "=== memory frontmatter lint ==="
 # PRAXIS_TESTS_STRICT is deliberately NOT propagated to this one call: unlike
-# steps 6-8 (a tool a contributor could install), the memory dir this checks
+# steps 7-9 (a tool a contributor could install), the memory dir this checks
 # is a local, gitignored, per-user store that structurally never exists in
 # CI or a fresh checkout — treating its absence as a strict-mode failure
 # would fail every CI run forever, not flag a fixable gap. The script prints
@@ -178,7 +179,16 @@ if ! "${MEMCHECK_ENV[@]}" python3 ./scripts/check-memory-frontmatter.py; then
 fi
 
 # ---------------------------------------------------------------------------
-# 6. Ruff (mirrors ci.yml `ruff` job — blocking there, blocking here)
+# 6. omc name-drift guard (retired-workflow references, issue #1122)
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== omc name-drift check ==="
+if ! python3 ./scripts/check-omc-name-drift.py; then
+  FAILED=1
+fi
+
+# ---------------------------------------------------------------------------
+# 7. Ruff (mirrors ci.yml `ruff` job — blocking there, blocking here)
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== ruff ==="
@@ -197,7 +207,7 @@ elif ! "${RUFF[@]}" check .; then
 fi
 
 # ---------------------------------------------------------------------------
-# 7. Shellcheck (mirrors ci.yml `shellcheck` job — same find/severity)
+# 8. Shellcheck (mirrors ci.yml `shellcheck` job — same find/severity)
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== shellcheck ==="
@@ -212,7 +222,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 8. Markdownlint (mirrors ci.yml `markdownlint` job)
+# 9. Markdownlint (mirrors ci.yml `markdownlint` job)
 #
 # CI runs this with filter_mode:added and never fails the check, so the repo's
 # existing backlog stays untouched. The advisory half is mirrored exactly — a
