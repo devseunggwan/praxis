@@ -38,7 +38,17 @@ _DG_USAGE="usage: decision-gate.sh ask [--timeout <seconds>] <question>
 # Long enough for a delegator who is doing something else — this gate exists
 # because the delegator is NOT sitting in a poll loop, so a wait sized for an
 # attentive supervisor would time out on the normal case.
-_DG_TIMEOUT=600
+#
+# It must also stay BELOW the caller's own call ceiling, which this script
+# cannot read. `ask` writes its verdict to stdout once, at the end of the wait;
+# a caller that kills the call at the same instant discards that write, and the
+# worker sees a signal death instead of `verdict='timeout'`. Fail-closed still
+# holds (an unset $verdict falls to the caller's `*)` branch), but the worker
+# can no longer tell "no verdict" from "the gate broke" — which is what pushes
+# it into the poll loop this design rules out. Claude Code's Bash tool caps a
+# call at 600s, so 600 left a zero-second delivery window; the 60s of headroom
+# is what makes the verdict observable.
+_DG_TIMEOUT=540
 
 [ $# -ge 1 ] || { echo "$_DG_USAGE" >&2; exit 2; }
 _DG_CMD="$1"
