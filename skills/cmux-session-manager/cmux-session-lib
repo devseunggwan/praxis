@@ -190,7 +190,12 @@ find_orphans() {
     fi
 
     local pane_cmds
-    pane_cmds=$(tmux list-panes -t "$session_name" -F '#{pane_current_command}' 2>/dev/null) || continue
+    # -s spans every window in the session. Without it tmux lists only the
+    # ACTIVE window's panes, so a session whose active window is a bare shell
+    # classifies as shell-only even while an agent runs in an inactive window.
+    # For a numeric session that means safe_numeric, the one type
+    # cmux-session-cleanup Phase 1 kills without prompting.
+    pane_cmds=$(tmux list-panes -s -t "$session_name" -F '#{pane_current_command}' 2>/dev/null) || continue
 
     local is_shell_only=true
     while IFS= read -r cmd; do
