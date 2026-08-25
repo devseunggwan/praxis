@@ -304,16 +304,42 @@ def count_targets_in_turn(turn: list[dict]) -> int:
     return succeeded + untracked
 
 
+# Openers of host-injected messages that occupy the user slot in a transcript.
+# A turn can begin with one of these — a background task finishing, a hook
+# firing — and then the "request" is something the user never wrote.
+# The tagged ones are injected blocks; the last is the harness preamble that
+# opens a turn resumed after a compaction. The list is not exhaustive — an
+# opener nobody has seen yet gets quoted, which is why the reason line says
+# "the request asked for" rather than asserting the user wrote it.
+SYSTEM_OPENERS = (
+    "<task-notification>",
+    "<system-reminder>",
+    "<local-command-stdout>",
+    "<command-name>",
+    "This session is being continued from a previous conversation",
+)
+
+NO_REQUEST = "(no request in this turn — it was opened by the host, not the user)"
+UNREADABLE = "(the turn's request could not be read)"
+
+
 def _first_line(text: str | None) -> str:
     if not text:
-        return "(the turn's request could not be read)"
+        return UNREADABLE
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped:
-            if len(stripped) > MAX_UTTERANCE_CHARS:
-                return stripped[:MAX_UTTERANCE_CHARS] + "…"
-            return stripped
-    return "(the turn's request could not be read)"
+        if not stripped:
+            continue
+        # Quoting a host notification back to the user is worse than saying
+        # nothing: it reads as the request these targets were meant to serve,
+        # and the whole point of the prompt is that the user can judge the
+        # targets against the request.
+        if stripped.startswith(SYSTEM_OPENERS):
+            return NO_REQUEST
+        if len(stripped) > MAX_UTTERANCE_CHARS:
+            return stripped[:MAX_UTTERANCE_CHARS] + "…"
+        return stripped
+    return UNREADABLE
 
 
 def build_reason(ground: str, utterance: str) -> str:

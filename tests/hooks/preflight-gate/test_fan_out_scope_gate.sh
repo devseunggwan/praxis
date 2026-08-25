@@ -92,6 +92,13 @@ run_case() {
   rm -f "$out_file"
 
   local ok=1
+  local want_reason=""
+  case "$expectation" in
+    ask:*)
+      want_reason="${expectation#ask:}"
+      expectation="ask"
+      ;;
+  esac
   case "$expectation" in
     ask)
       [ "$rc" -eq 0 ] || ok=0
@@ -99,11 +106,14 @@ run_case() {
 import json, sys
 try:
     d = json.load(sys.stdin)
-    decision = d.get('hookSpecificOutput', {}).get('permissionDecision', '')
-    sys.exit(0 if decision == 'ask' else 1)
+    o = d.get('hookSpecificOutput', {})
+    decision = o.get('permissionDecision', '')
+    want = sys.argv[1]
+    reason = o.get('permissionDecisionReason', '')
+    sys.exit(0 if decision == 'ask' and (not want or want in reason) else 1)
 except Exception:
     sys.exit(1)
-" 2>/dev/null || ok=0
+" "$want_reason" 2>/dev/null || ok=0
       ;;
     silent)
       [ "$rc" -eq 0 ] || ok=0
@@ -263,6 +273,20 @@ run_case "--dry-run rehearsal is not a target (silent)" \
 
 run_case "echoed creation is not a target (silent)" \
   "silent" "$(bash_payload "$TX_ONE_OK" "echo cmux workspace create --name b")"
+
+TX_HOST_OPENED="$TMPDIR/tx-host-opened.jsonl"
+cat > "$TX_HOST_OPENED" <<'EOF'
+{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>abc</task-id>\n</task-notification>"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cmux workspace create --name a"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":false}]}}
+EOF
+
+# The prompt exists so the user can weigh the targets against their request.
+# Quoting a host notification back at them puts a sentence they never wrote
+# in that slot, which is worse than admitting there is no request to show.
+run_case "a host notification is not quoted as the request (ask)" \
+  "ask:no request in this turn" \
+  "$(bash_payload "$TX_HOST_OPENED" "cmux workspace create --name b")"
 
 run_case "cmux workspace list is not a creation (silent)" \
   "silent" "$(bash_payload "$TX_ONE_OK" "cmux workspace list --json")"

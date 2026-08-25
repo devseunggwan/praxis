@@ -111,6 +111,15 @@ answerable without scrollback. That pairing is the whole judgement: the reader
 sees "target #3" — or "this one command creates several" — next to what they
 actually asked for, and the mismatch is usually obvious on sight.
 
+**A message the user did not write is not quoted.** A turn can open on
+something the host put in the user slot — a background task notification, a
+system reminder, the preamble of a session resumed after compaction. Quoting
+one of those back as "the request" is worse than showing nothing: it fills the
+one slot the reader uses to judge the targets with a sentence they never
+wrote. Those openers are recognised and replaced with an explicit "no request
+in this turn". The list of openers is not exhaustive, which is why the line
+reads *the request asked for* rather than asserting authorship.
+
 An agent-attachable marker was considered and rejected. The natural design —
 "emit a table mapping each target to a span of the request, and pass" — is
 self-attestation: the agent that mis-scoped the fan-out is the same one filling
