@@ -457,7 +457,8 @@ bash scripts/run-tests.sh
 
 This is the single entry point. It runs pytest, all shell-based hook tests,
 `scripts/check-plugin-manifests.py`, `scripts/check-hook-token-invariants.py`,
-`ruff check`, and `shellcheck` under one exit code gate, plus an advisory
+`scripts/check-omc-name-drift.py`, `ruff check`, and `shellcheck` under one
+exit code gate, plus an advisory
 markdownlint pass over the markdown files your branch changed.
 
 All three static checks — `ruff`, `shellcheck`, and `markdownlint` — skip with
