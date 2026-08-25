@@ -233,6 +233,26 @@ run_case "prior creation belongs to a previous turn (silent)" \
 run_case "prior command only echoed the creation (silent)" \
   "silent" "$(bash_payload "$TX_ONE_ECHOED" "cmux workspace create --name b")"
 
+# --- quoting decides whether a substitution is one
+#
+# Single quotes and a backslash make `$(` and a backtick literal text, so the
+# creation inside them never runs. Double quotes do not — those still expand.
+
+run_case "single-quoted \$( ) inside printf is text, not a target (silent)" \
+  "silent" "$(bash_payload "$TX_ONE_OK" "printf '%s' '\$(cmux workspace create --name b)'")"
+
+run_case "single-quoted backticks inside echo are text, not a target (silent)" \
+  "silent" "$(bash_payload "$TX_ONE_OK" "echo '\`cmux workspace create --name b\`'")"
+
+run_case "escaped \$( ) is text, not a target (silent)" \
+  "silent" "$(bash_payload "$TX_ONE_OK" "echo \\\$(cmux workspace create --name b)")"
+
+run_case "double-quoted \$( ) still expands, so it is a target (ask)" \
+  "ask" "$(bash_payload "$TX_ONE_OK" "echo \"\$(cmux workspace create --name b)\"")"
+
+run_case "a quoted paren does not close the substitution early (ask)" \
+  "ask" "$(bash_payload "$TX_ONE_OK" "WS=\$(cmux workspace create --name \"b)\")")"
+
 # --- the intercepted call is not a target → SILENT
 
 run_case "--help rehearsal is not a target (silent)" \

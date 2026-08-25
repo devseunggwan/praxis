@@ -34,6 +34,7 @@ to the person who wrote it rather than asking the agent to grade its own scope.
 | 2nd (and later) delegation target in a turn | `permissionDecision: "ask"` |
 | One command that can create more than one target | `ask` — even as the 1st |
 | A creation written inside `$( ... )` or backticks | counted, at any nesting depth up to 4 |
+| The same, inside single quotes or after a backslash | not counted — the shell would print it, not run it |
 | `Agent` tool call | counted as a delegation target |
 | `cmux workspace create` / `cmux new-workspace` | counted as a delegation target |
 | Any env-var prefix (`env FOO=1 cmux workspace create`) | counted — no environment variable exempts a target |
@@ -60,6 +61,13 @@ call: a shell function invoked three times, with the creation written as
   command start there at all — the call read as **zero** targets, not one.
 - Even read correctly it is one *call*. The function runs as many times as it
   is called, and no amount of static reading recovers that number.
+
+Quoting decides whether a substitution is one. Single quotes and a backslash
+make `$(` and a backtick literal, so `printf '%s' '$(cmux workspace create …)'`
+prints a string and starts nothing; double quotes disable neither form, so
+those are followed. The span scanner tracks quote and escape state on the way
+in and again while finding the closing delimiter, so a parenthesis inside a
+quoted argument does not end the span early.
 
 So the gate asks on a single call when that call can create more than one
 target: two or more literal creation segments, or one creation reached through
