@@ -8,7 +8,7 @@ turn has already created and, from the second one onward, emits
 `permissionDecision: "ask"` so the user sees the fan-out growing and decides
 whether the new target belongs to what they asked for.
 
-### Why this exists
+## Why this exists
 
 A delegation request named a single target — one link, one item. Three workers
 were spawned. Two of them mapped to nothing in the instruction: they came from
@@ -26,12 +26,14 @@ The count is what the user can judge and the agent cannot. Whether a target
 belongs to the request is a question about the request, so the gate routes it
 to the person who wrote it rather than asking the agent to grade its own scope.
 
-### What is gated
+## What is gated
 
 | Scenario | Action |
 | ---------- | -------- |
 | 1st delegation target in a turn | silent pass-through |
 | 2nd (and later) delegation target in a turn | `permissionDecision: "ask"` |
+| One command that can create more than one target | `ask` — even as the 1st |
+| A creation written inside `$( ... )` or backticks | counted, at any nesting depth up to 4 |
 | `Agent` tool call | counted as a delegation target |
 | `cmux workspace create` / `cmux new-workspace` | counted as a delegation target |
 | Any env-var prefix (`env FOO=1 cmux workspace create`) | counted — no environment variable exempts a target |
@@ -46,7 +48,30 @@ Both workspace-creation spellings count. The canonical form is
 working indefinitely, and it is the form the motivating incident used, so
 matching only the canonical one would leave the observed command unmatched.
 
-### Counting rule
+## One call can carry the whole fan-out
+
+The first build of this gate counted tool calls, and it did not fire on its own
+motivating incident. That incident created three workspaces from **one** Bash
+call: a shell function invoked three times, with the creation written as
+`WS_RAW=$(cmux new-workspace ...)`. Two separate blind spots stacked up.
+
+- The creation sat inside a command substitution. The tokenizer coalesces a
+  `$( ... )` run into a single token, so a scan of the outer text finds no
+  command start there at all — the call read as **zero** targets, not one.
+- Even read correctly it is one *call*. The function runs as many times as it
+  is called, and no amount of static reading recovers that number.
+
+So the gate asks on a single call when that call can create more than one
+target: two or more literal creation segments, or one creation reached through
+a loop or a function body. `$( ... )` and backtick spans are unwrapped and
+scanned recursively (depth 4) before any of that counting happens.
+
+"Can create more than one" is deliberately not "does". A creation sitting beside
+an unrelated `for` loop asks too. The response is a prompt, not a block, so the
+cost of that imprecision is one keystroke — and the alternative is the silence
+that produced the incident.
+
+## Counting rule
 
 Evidence is scoped to the **current turn**: the question is whether *this
 request* is being fanned out past what it named. A worker from a previous turn
@@ -59,15 +84,16 @@ no result yet counts as a success, biasing toward asking: the gate exists to be
 seen while the fan-out is still growing, and silence is the failure it was
 built for.
 
-### Response
+## Response
 
 `permissionDecision: "ask"` — the Claude Code permission dialog surfaces before
 the target is created. There is no environment bypass and no marker.
 
-The reason text carries the **target ordinal** and the **first line of the
-turn's user message**, so the prompt is answerable without scrollback. That
-pairing is the whole judgement: the reader sees "target #3" beside what they
-actually asked for, and one of those two numbers is usually obviously wrong.
+The reason text carries the **first line of the turn's user message** beside
+either the **target ordinal** or the multi-target ground, so the prompt is
+answerable without scrollback. That pairing is the whole judgement: the reader
+sees "target #3" — or "this one command creates several" — next to what they
+actually asked for, and the mismatch is usually obvious on sight.
 
 An agent-attachable marker was considered and rejected. The natural design —
 "emit a table mapping each target to a span of the request, and pass" — is
@@ -75,7 +101,7 @@ self-attestation: the agent that mis-scoped the fan-out is the same one filling
 in the table. `pre-merge-approval-gate` states the same contract for
 `# merge-approval:ack`.
 
-### Known limits
+## Known limits
 
 - **The first target is already running.** `PreToolUse` sees one call at a
   time, so the earliest possible firing point is the second. When the
@@ -91,7 +117,7 @@ in the table. `pre-merge-approval-gate` states the same contract for
   routinely multi-target in ordinary work, so counting them would spend the
   prompt on cases that are almost never the failure.
 
-### Relationship to sibling hooks
+## Relationship to sibling hooks
 
 | Hook | Scope | Overlap |
 | ---- | ----- | ------- |
@@ -99,14 +125,14 @@ in the table. `pre-merge-approval-gate` states the same contract for
 | `block-manufactured-action-menu` | Blocks a surfaced menu whose options were not asked for | Adjacent: that gate catches invented *choices*, this one invented *work* |
 | `side-effect-scan` | Enumerates side effects of a pending command | None — that hook grades one command, this one counts across a turn |
 
-### Parsing guarantees (fail-open)
+## Parsing guarantees (fail-open)
 
 Returns exit 0 on every infrastructure error — malformed stdin, a missing or
 unreadable transcript, an absent `transcript_path`, and any uncaught exception
 (via the shared `@fail_open` decorator in `hooks/_lib/_hook_runtime.py`). It
 never blocks a target on a parsing failure.
 
-### Tests
+## Tests
 
 ```bash
 bash tests/hooks/preflight-gate/test_fan_out_scope_gate.sh

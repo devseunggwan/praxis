@@ -184,6 +184,44 @@ run_case "marker comment does not bypass (ask)" \
 run_case "chained command: creation in the 2nd segment (ask)" \
   "ask" "$(bash_payload "$TX_ONE_OK" "git status && cmux workspace create --name b")"
 
+# --- one call carrying the whole fan-out → ASK even as the 1st target
+#
+# Regression for the motivating incident itself: three workspaces from a single
+# Bash call, the creation written inside `$( ... )` and reached through a shell
+# function invoked three times. A per-call counter reading only the outer text
+# saw zero targets here and stayed silent on the very command it was built for.
+
+INCIDENT_CMD='set -u
+launch() {
+  local n="$1" title="$2"
+  WS_RAW=$(cmux new-workspace --name "[delegate] $title" --command "bash /tmp/d-$n.sh" 2>&1)
+  echo "$WS_RAW"
+}
+launch 1 "first"
+launch 2 "second"
+launch 3 "third"'
+
+run_case "incident shape: creation in \$( ) inside a function, 1st call (ask)" \
+  "ask" "$(bash_payload "$TX_EMPTY" "$INCIDENT_CMD")"
+
+run_case "two literal creations in one command, 1st call (ask)" \
+  "ask" "$(bash_payload "$TX_EMPTY" "cmux workspace create --name a; cmux workspace create --name b")"
+
+run_case "creation inside a for loop, 1st call (ask)" \
+  "ask" "$(bash_payload "$TX_EMPTY" "for n in a b c; do cmux workspace create --name \$n; done")"
+
+run_case "single creation in \$( ) with no loop or function, 1st call (silent)" \
+  "silent" "$(bash_payload "$TX_EMPTY" "WS=\$(cmux workspace create --name a)")"
+
+run_case "single creation in \$( ), 2nd call (ask)" \
+  "ask" "$(bash_payload "$TX_ONE_OK" "WS=\$(cmux workspace create --name b)")"
+
+run_case "single creation in backticks, 2nd call (ask)" \
+  "ask" "$(bash_payload "$TX_ONE_OK" "WS=\`cmux workspace create --name b\`")"
+
+run_case "an unrelated for loop beside a single creation (ask — cannot tell)" \
+  "ask" "$(bash_payload "$TX_EMPTY" "for f in a b; do echo \$f; done; cmux workspace create --name a")"
+
 # --- prior call did not create a target → SILENT
 
 run_case "prior creation failed — no worker started (silent)" \

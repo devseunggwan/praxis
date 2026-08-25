@@ -14,6 +14,13 @@ turn (workspace-creation shell commands and `Agent` tool calls). If the turn
 already has one and the intercepted call is another, emit permissionDecision
 "ask" so the user sees the fan-out growing and decides.
 
+One call can also carry the whole fan-out by itself. The motivating incident
+created three workspaces from a single Bash call — a shell function invoked
+three times — so a per-call counter would have stayed silent on the very
+command it was built for. A command that can create more than one target (two
+literal invocations, or one inside a loop or function body) therefore asks on
+its own, before any prior target exists.
+
 No opt-out marker and no environment bypass. An agent-attachable marker would
 let the agent self-bypass the gate it is meant to enforce — the same contract
 `pre-merge-approval-gate` states for `# merge-approval:ack`.
@@ -21,6 +28,7 @@ let the agent self-bypass the gate it is meant to enforce — the same contract
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path as _Path
 
@@ -79,13 +87,91 @@ def is_workspace_creation(argv: list[str]) -> bool:
     return not any(tok in REHEARSAL_FLAGS for tok in rest)
 
 
+MAX_SUBST_DEPTH = 4
+
+
+def _iter_command_texts(command: str, depth: int = 0):
+    """Yield `command` and the inner text of every `$( ... )` / backtick span.
+
+    A creation is routinely written as `WS=$(cmux workspace create ...)`, and
+    the tokenizer coalesces a substitution run into one token — so a scan of
+    the outer text alone sees no command start there at all. That is how the
+    motivating incident's own command read as zero targets.
+    """
+    yield command
+    if depth >= MAX_SUBST_DEPTH:
+        return
+    i = 0
+    n = len(command)
+    while i < n:
+        if command.startswith("$(", i):
+            j, level = i + 2, 1
+            while j < n and level:
+                if command.startswith("$(", j):
+                    level += 1
+                    j += 2
+                    continue
+                if command[j] == "(":
+                    level += 1
+                elif command[j] == ")":
+                    level -= 1
+                    if not level:
+                        break
+                j += 1
+            if level == 0:
+                yield from _iter_command_texts(command[i + 2:j], depth + 1)
+                i = j + 1
+                continue
+        elif command[i] == "`":
+            j = command.find("`", i + 1)
+            if j != -1:
+                yield from _iter_command_texts(command[i + 1:j], depth + 1)
+                i = j + 1
+                continue
+        i += 1
+
+
+def _count_creation_segments(command: str) -> int:
+    total = 0
+    for text in _iter_command_texts(command):
+        if not text.strip():
+            continue
+        tokens = safe_tokenize(text)
+        if not tokens:
+            continue
+        total += sum(
+            1 for argv in iter_command_starts(tokens) if is_workspace_creation(argv)
+        )
+    return total
+
+
 def _command_creates_target(command: str) -> bool:
-    if not command.strip():
+    return _count_creation_segments(command) > 0
+
+
+# A creation reached through a loop or a function body runs an unknown number
+# of times; static text cannot say how many, and "unknown" is not one.
+_LOOP_RE = re.compile(r"(?:^|[;&|\n(]|\s)(?:for|while|until)\s", re.MULTILINE)
+_FUNCDEF_RE = re.compile(
+    r"(?:^|[;&|\n]|\s)(?:function\s+[A-Za-z_][A-Za-z0-9_]*|"
+    r"[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\))\s*\{",
+    re.MULTILINE,
+)
+
+
+def command_is_multi_target(command: str) -> bool:
+    """True when ONE command can create more than one delegation target.
+
+    Two shapes qualify: two or more literal creation segments, and a single
+    creation reached through a loop or a shell function — the latter runs as
+    many times as it is called, which no amount of static reading recovers.
+    """
+    creations = _count_creation_segments(command)
+    if creations >= 2:
+        return True
+    if creations == 0:
         return False
-    tokens = safe_tokenize(command)
-    if not tokens:
-        return False
-    return any(is_workspace_creation(argv) for argv in iter_command_starts(tokens))
+    return bool(_LOOP_RE.search(command) or _FUNCDEF_RE.search(command))
 
 
 def count_targets_in_turn(turn: list[dict]) -> int:
@@ -153,11 +239,10 @@ def _first_line(text: str | None) -> str:
     return "(the turn's request could not be read)"
 
 
-def build_reason(ordinal: int, utterance: str) -> str:
+def build_reason(ground: str, utterance: str) -> str:
     return format_block(
         rule_name="fan-out scope",
-        why=f"this is delegation target #{ordinal} in one turn — the request "
-            f"asked for: {utterance}",
+        why=f"{ground} — the request asked for: {utterance}",
         correct_path="approve only the targets that map to a span of that "
             "request; a target with no span in it is scope you added, not "
             "scope you were given",
@@ -177,12 +262,14 @@ def main() -> int:
         return 0  # fail-open on malformed input
 
     tool_name = payload.get("tool_name")
+    multi = False
     if tool_name == AGENT_TOOL:
         pass
     elif tool_name == "Bash":
         command = payload.get("tool_input", {}).get("command", "") or ""
         if not _command_creates_target(command):
             return 0
+        multi = command_is_multi_target(command)
     else:
         return 0
 
@@ -191,11 +278,16 @@ def main() -> int:
         return 0
 
     prior = count_targets_in_turn(load_current_turn(transcript_path))
-    if prior < 1:
+    if multi:
+        ground = ("this single command creates more than one delegation "
+                  "target — a loop, a function body, or repeated invocations")
+    elif prior >= 1:
+        ground = f"this is delegation target #{prior + 1} in one turn"
+    else:
         return 0
 
     utterance = _first_line(read_last_user_message(transcript_path))
-    emit_decision("ask", build_reason(prior + 1, utterance))
+    emit_decision("ask", build_reason(ground, utterance))
     return 0
 
 
