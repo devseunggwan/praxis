@@ -10,30 +10,48 @@ runtime-verified-note: "cmux 0.64.22 — the wrapper passes the prompt as argv (
 
 ## Overview
 
-현재 대화의 작업 맥락(git 메타데이터 + 대화에서 합성한 추론 맥락)을 자동 수집하여, cmux workspace에서 독립 Claude Code 세션을 열어 범용 작업(리뷰, 디버깅, 구현 등)을 위임합니다. 기존 세션 재사용, 별도 계정 프로필, 다중 항목 병렬 분산을 지원합니다.
+작업 중에 새로 발생한 **독립 이슈**를 다른 세션으로 넘기는 스킬입니다. 현재 대화의 작업 맥락(git 메타데이터 + 대화에서 합성한 추론 맥락)을 자동 수집해 cmux workspace 에 독립 Claude Code 세션을 열고, 그 세션이 issue→worktree→PR 까지 혼자 완주합니다. 기존 세션 재사용, 별도 계정 프로필, 다중 이슈 병렬 분산을 지원합니다.
 
 **Core principles:**
 - 프롬프트는 반드시 파일 기반 전달. 인라인 `-p` 절대 사용 금지 (shell escaping 문제 회피).
 - 유저가 세션명/계정을 명시하면 글자 그대로 따른다. 자의적 재해석 금지.
+- **위임 단위는 독립 이슈 하나입니다.** 이슈로 설 수 있으면 위임하고, 못 서면 위임 대상이 아니라 이 세션에서 끝낼 조각입니다.
 - **Fire-and-forget.** 위임하면 끝입니다 — 워커는 위임자에게 아무것도 보고하지 않고, 위임자는 워커를 감시하거나 판정하지 않습니다. 결과는 사용자가 해당 cmux 탭에서 직접 봅니다.
 
 ## When to Use
 
-- 현재 작업의 독립 리뷰/검수가 필요할 때
-- 디버깅이나 구현을 별도 세션에 위임할 때
-- 현재 컨텍스트의 편향 없이 fresh eyes가 필요할 때
-- 다중 독립 항목을 병렬로 조사/실행할 때
+작업 도중 **지금 하던 일과 별개인 문제**가 튀어나왔을 때 씁니다.
+
+- 구현 중에 무관한 버그를 발견해 별건으로 떼어낼 때
+- 리뷰에서 나온 지적이 이 PR 범위 밖이라 후속 이슈로 갈 때
+- 그렇게 쌓인 이슈 여러 건을 각각 다른 세션으로 보낼 때 (`--distribute`)
+
+### 위임 대상 판별
+
+**그 항목이 독립 이슈 하나로 설 수 있는가** — 이것 하나로 판별합니다.
+
+| 판별 | 처리 |
+| --- | --- |
+| 이슈로 선다 (자체 재현·범위·완료 조건이 있고, 제 작업이 안 끝나도 진행 가능) | 위임 |
+| 이슈로 못 선다 (제 현재 작업의 조각이라, 결과가 돌아와야 제 작업이 완성됨) | **위임하지 않고 이 세션에서 끝냅니다** |
+
+결과를 받아서 합쳐야 하는 항목은 위임 대상이 아닙니다. 그건 서브에이전트가 할 일이고,
+이 스킬로 그걸 하면 워커에게 보고를 요구하게 되며 — 그 요구가 과거에 완료 보고서 회수
+(#894)와 decision gate(#984)를 불러들였습니다. 둘 다 #1130 에서 제거됐습니다.
 
 ## Inputs
 
-사용자가 위임할 작업을 설명합니다:
+위임할 **이슈**를 이슈 번호로 지정합니다.
 
 ```
-/cmux-delegate 전체 코드 검수 요청 --model opus
-/cmux-delegate "PR #78, #137, #7502 크로스-레포 일관성 검증" --account claude-2
-/cmux-delegate debug auth token refresh failure --session claude-2
-/cmux-delegate "P1~P5 에러 조사" --account claude-2 --distribute
+/cmux-delegate "#1140 auth 토큰 갱신 실패" --model opus
+/cmux-delegate "#1141 리뷰에서 나온 후속 항목" --session claude-2
+/cmux-delegate "별건 3개: #1140, #1141, #1142" --account claude-2 --distribute
 ```
+
+**위임 시점에 이슈가 이미 존재해야 합니다.** 아직 이슈가 없으면 위임 전에 이 세션에서
+만드세요 — 이슈 생성은 승인이 필요한 절차라 워커에게 넘기지 않습니다. 번호 없이 설명만
+넘기면 워커는 어느 이슈에 PR 을 걸어야 할지 알 수 없습니다.
 
 ### Arguments
 
@@ -45,7 +63,7 @@ runtime-verified-note: "cmux 0.64.22 — the wrapper passes the prompt as argv (
 | `--max-budget-usd` | — | **미지원 (#1054).** print 모드 전용 플래그라 대화형 워커에 쓸 수 없습니다. 주어지면 무시하지 말고 그 사실을 알리세요 |
 | `--account` | (기본 계정) | Claude 계정 프로필 (예: `claude-2` → `CLAUDE_CONFIG_DIR=~/.claude-2`) |
 | `--session` | (신규 생성) | 기존 워크스페이스에 전달 (이름 또는 workspace ref) |
-| `--distribute` | false | 독립 항목별 병렬 분산 실행 |
+| `--distribute` | false | 이슈 단위 병렬 분산 실행. 한 작업의 샤딩이 아닙니다 |
 | `--permission-mode` | — | **제거됨 (#1054).** 위임 워커는 평소 세션이므로 사용자의 평소 기본값을 씁니다 |
 
 ## Process
@@ -231,15 +249,20 @@ Report results in Korean.
 
 ### Step 3.5: Distribute Mode (--distribute)
 
-`--distribute` 플래그가 지정된 경우, 프롬프트를 독립 항목별로 분할합니다.
+`--distribute` 플래그가 지정된 경우, 프롬프트를 **이슈 단위로** 분할합니다. 한 덩어리 작업을
+샤딩하는 기능이 아닙니다 — 이미 서로 독립인 이슈 N 건을 각자 보내는 기능입니다.
 
-**자동 분할 기준:**
-- 프롬프트에 `## P1`, `## P2`, `### 항목 1` 등 독립 섹션이 있으면 섹션별 분할
-- 번호 리스트(`1.`, `2.` 등)로 구분된 독립 작업이 있으면 항목별 분할
+**분할 기준:**
+- 항목 하나하나가 `When to Use` 의 판별을 통과해야 합니다 — 독립 이슈로 서지 못하는 항목이
+  섞여 있으면 그 항목은 분할에서 빼고 이 세션에 남깁니다
+- 이슈 번호(`#1130`)나 이슈 제목으로 항목이 구분되면 그 경계로 분할
+- `## P1`, `### 항목 1` 등 섹션 헤더는 경계 **후보**일 뿐입니다. 섹션이 있다는 이유만으로
+  쪼개지 마세요 — 한 작업을 소제목으로 나눈 문서가 가장 흔한 오분할 원인입니다
 - 분할 결과가 1개면 distribute 무시 (단일 세션)
 
 **분할 프로세스:**
-1. 프롬프트를 섹션별로 분리 → 각각 개별 .md 파일 생성
+1. 위 기준으로 확정한 **이슈 경계**로 분리 → 각각 개별 .md 파일 생성. 섹션 헤더가 곧 경계는
+   아닙니다 — 한 이슈가 여러 헤더로 쓰여 있으면 그 헤더들은 한 파일로 묶습니다
 2. Context 섹션은 모든 분할 파일에 공통 포함
 3. 각 파일에 대해 개별 래퍼 .sh 생성
 4. Routing: If `--model` is explicit, apply uniformly. Otherwise, auto-assign by task type (see project `ARCHITECTURE.md` Task-Type Routing):
@@ -481,7 +504,7 @@ cmux에서 {session_name} 탭을 확인하세요.
 ### 단일 세션 (기본)
 
 ```
-user: /cmux-delegate "full code review" --model claude:opus --account claude-2
+user: /cmux-delegate "#1140 auth 토큰 갱신 실패" --model claude:opus --account claude-2
   │
   ├── Step 1.6: Account Resolution
   │     └── CLAUDE_CONFIG_DIR=~/.claude-2
@@ -525,23 +548,24 @@ user: /cmux-delegate "full code review" --model claude:opus --account claude-2
 ### 병렬 분산 (distribute)
 
 ```
-사용자: /cmux-delegate "P1~P5 에러 조사" --account claude-2 --distribute
+사용자: /cmux-delegate "작업 중 나온 별건 3개: #1140 토큰 갱신 실패, #1141 로그 유실, #1142 문서 오타" --account claude-2 --distribute
   │
   ├── Step 2.5: 대화 합성 handoff (1회) → 공통 Context 블록에 포함
   │
-  ├── Step 3.5: Distribute — 프롬프트 분할 (Handoff 는 모든 분할에 공통 복사)
-  │     ├── /tmp/cmux-delegate-{ts}-1.md (P1)
-  │     ├── /tmp/cmux-delegate-{ts}-2.md (P2)
-  │     ├── /tmp/cmux-delegate-{ts}-3.md (P3)
-  │     └── /tmp/cmux-delegate-{ts}-4.md (P4+P5)
+  ├── Step 3.5: Distribute — 이슈 단위 분할 (Handoff 는 모든 분할에 공통 복사)
+  │     ├── /tmp/cmux-delegate-{ts}-1.md (#1140)
+  │     ├── /tmp/cmux-delegate-{ts}-2.md (#1141)
+  │     └── /tmp/cmux-delegate-{ts}-3.md (#1142)
   │
-  ├── Step 4: 래퍼 .sh 4개 생성 (각각 CLAUDE_CONFIG_DIR 적용)
+  ├── Step 4: 래퍼 .sh 3개 생성 (각각 CLAUDE_CONFIG_DIR 적용)
   │
-  └── Step 5a: cmux new-workspace × 4 (병렬)
-        ├── workspace:{N}   → [P1] (claude-2 계정)
-        ├── workspace:{N+1} → [P2] (claude-2 계정)
-        ├── workspace:{N+2} → [P3] (claude-2 계정)
-        └── workspace:{N+3} → [P4+P5] (claude-2 계정)
+  └── Step 5a: cmux new-workspace × 3 (병렬)
+        ├── workspace:{N}   → [#1140] (claude-2 계정)
+        ├── workspace:{N+1} → [#1141] (claude-2 계정)
+        └── workspace:{N+2} → [#1142] (claude-2 계정)
+
+각 워크스페이스는 자기 이슈 하나를 issue→worktree→PR 까지 완주합니다. 위임자에게
+돌아오는 것은 없습니다.
 ```
 
 ## Why Wrapper Script?
@@ -572,6 +596,7 @@ cost is $5 `whoami` ${HOME} {a,b} "quoted" 'single' \n      ← 원문 그대로
 - **결과 파일 자동 수집/보고 미지원** → 사용자가 cmux 에서 직접 확인. 위임은 fire-and-forget 이고, 위임자는 워커를 감시하지 않습니다
 - 그래서 완료 주장과 실제 완료는 구별되지 않습니다 — 워커가 PR 을 만들었다고 말하면 사용자가 `gh pr view` 로 직접 확인합니다
 - 작업 유형별 템플릿 미지원 → 사용자가 프롬프트에 직접 명시
-- distribute 모드의 자동 분할은 섹션 헤더 기반 — 비정형 프롬프트는 수동 분할 필요
+- distribute 분할은 이슈 경계를 사람이 읽어 판단합니다 — 비정형 프롬프트는 수동 분할 필요
+- 위임 단위 판별(이슈로 서는가)은 구조적으로 강제되지 않습니다 — 이 문서를 읽고 지키는 것 외에 막는 장치가 없습니다
 - **Handoff 합성 품질은 오케스트레이터 대화에 의존** (Step 2.5) — 대화 맥락이 빈약하면 raw git 맥락만 전달되고, fresh-eyes 위임에서는 편향 방지를 위해 의도적으로 최소화됨
 - **codex 쓰기 제약**: `codex exec`는 샌드박스 환경으로 인해 파일 쓰기가 실패해도 오류 없이 종료될 수 있음 — 완료 후 반드시 `git status`로 실제 변경 여부를 확인할 것. 빈 diff가 나오면 즉시 `claude` fallback으로 재위임.
