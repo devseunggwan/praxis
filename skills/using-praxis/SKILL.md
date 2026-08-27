@@ -44,7 +44,7 @@ Recover, save, and orchestrate Claude Code sessions.
 | `cmux-save-sessions`    | Save current session layout as a JSON snapshot              |
 | `cmux-resume-sessions`  | Restore a previously saved snapshot                         |
 | `cmux-session-manager`  | Daily status dashboard, cleanup, reorganize                 |
-| `cmux-delegate`         | Delegate a task to an independent session with full context |
+| `cmux-delegate`         | Give an independent issue its own session with full context |
 
 ### Discovery (this skill)
 

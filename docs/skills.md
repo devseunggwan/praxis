@@ -49,7 +49,7 @@ than a catalogue, run `/praxis:using-praxis`.
 | `cmux-save-sessions` | `save sessions`, `session save`, `session snapshot`, `cmux save`, `snapshot list` | To save the current cmux session list as JSON for later restore | `/praxis:cmux-save-sessions` |
 | `cmux-resume-sessions` | `resume sessions`, `restore from snapshot`, `rehydrate sessions`, `세션 복원`, `스냅샷 복원` | To restore workspaces from a saved snapshot (for crash recovery, use `cmux-recover-sessions`) | `/praxis:cmux-resume-sessions` |
 | `cmux-session-manager` | `cmux session`, `session management`, `session cleanup`, `cmux status`, `cmux tidy` | To run routine session cleanup or view a status dashboard | `/praxis:cmux-session-manager` |
-| `cmux-delegate` | `delegate`, `cmux delegate`, `new session` | To delegate to an independent session while preserving the current task's context (split review / debugging / implementation) | `/praxis:cmux-delegate` |
+| `cmux-delegate` | `cmux delegate`, `delegate issue`, `delegate to new session`, `별도 세션`, `세션에 위임`, `별건으로 빼서` | To hand an existing independent issue that surfaced mid-task to its own session, which runs issue→worktree→PR alone (not for splitting the current task) | `/praxis:cmux-delegate` |
 
 > **CLI tools (not skills):** praxis also ships `bypass-review`, a shell wrapper
 > with no `SKILL.md` — it is **not** invocable as `/praxis:*` and is absent from
