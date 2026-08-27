@@ -1,6 +1,6 @@
 ---
 name: cmux-delegate
-description: Delegate a task to an independent Claude Code session in a new cmux workspace with auto-collected context. Triggers on "cmux delegate", "delegate task", "delegate to new session", "별도 세션", "세션에 위임".
+description: Hand off an existing independent issue that surfaced mid-task to its own Claude Code session in a new cmux workspace, with auto-collected context; that session runs issue→worktree→PR alone. Not for splitting the current task. Triggers on "cmux delegate", "delegate issue", "delegate to new session", "별도 세션", "세션에 위임", "별건으로 빼서".
 verified-against-runtime: true
 runtime-verified-at: 2026-08-20
 runtime-verified-note: "cmux 0.64.22 — the wrapper passes the prompt as argv (`claude \"$(cat file)\"`) and keeps stdin on the terminal, so the worker runs as an ordinary interactive session and answers its own permission and folder-trust prompts; `--max-budget-usd` stays print-mode only."
