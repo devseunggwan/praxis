@@ -69,7 +69,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | `cmux-recover-sessions` | Bulk recover sessions after crash (cmux backend)                      |
 | `recover-sessions`      | Bulk recover sessions after power loss (tmux backend)                 |
 | `cmux-session-manager`  | Daily session lifecycle — status dashboard, cleanup, reorganize       |
-| `cmux-delegate`         | Hand an independent issue to its own session with auto-collected context |
+| `cmux-delegate`         | Give an independent issue its own session with auto-collected context |
 
 ## Hooks
 
