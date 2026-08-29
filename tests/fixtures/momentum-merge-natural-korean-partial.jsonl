@@ -1,0 +1,2 @@
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": "머지해줘"}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "content": [{"type": "text", "text": "무엇이 바뀌는 것부터 정리하면 keyword 그룹 확장입니다. 위험 범위는 이 훅 하나로 국한됩니다."}]}}

@@ -991,6 +991,17 @@ run_merge_escalation_case "merge_escalation_incomplete_briefing" \
 run_merge_escalation_case "merge_escalation_complete_briefing" \
   "no" "" "momentum-merge-complete.jsonl"
 
+# Natural Korean wording regression (issue #1118): a real 6-item briefing
+# blocked at 3/6 because group0/2/4 used "무엇이 바뀌는 것" / "검증 안 된" /
+# "열린 항목" instead of the hook's dictionary phrasing. Now 6/6 → no deny.
+run_merge_escalation_case "merge_escalation_natural_korean_wording_passes" \
+  "no" "" "momentum-merge-natural-korean-wording.jsonl"
+
+# Same natural wording but only 2 of 6 items present → still denied. Proves
+# the group0/2/4 vocab widening did not neuter the gate.
+run_merge_escalation_case "merge_escalation_natural_korean_partial_denies" \
+  "yes" "" "momentum-merge-natural-korean-partial.jsonl"
+
 # Substring-pollution regression (CodeRabbit): a changed+not-verified+risk
 # briefing is 3 real items. "미검증" ⊃ "검증" must NOT also satisfy the verified
 # group (which would inflate to 4 and wrongly pass). Expect deny.

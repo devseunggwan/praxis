@@ -390,20 +390,22 @@ MERGE_BRIEFING_MARKER_MIN_ITEMS = 1
 # item present. Bilingual (EN/KO) since briefings are authored in Korean.
 _BRIEFING_ITEM_GROUPS: tuple[tuple[str, ...], ...] = (
     # 1. What changed
-    ("what changed", "무엇이 변경", "변경 사항", "변경사항", "변경 내용",
-     "changed:", "changes:", "scope summary", "what was changed"),
+    ("what changed", "무엇이 변경", "무엇이 바뀌", "바뀌는 것", "변경 사항",
+     "변경사항", "변경 내용", "changed:", "changes:", "scope summary",
+     "what was changed"),
     # 2. What was verified
     ("verified", "검증", "verification", "tested", "test pass", "테스트 통과",
      "lint clean", "확인 완료", "확인함"),
     # 3. What was NOT verified
-    ("not verified", "not tested", "미검증", "미확인", "unverified",
-     "not exercised", "검증하지", "확인하지 못", "deferred", "ci pending", "skipped"),
+    ("not verified", "not tested", "미검증", "검증 안 된", "검증되지 않은",
+     "미확인", "unverified", "not exercised", "검증하지", "확인하지 못",
+     "deferred", "ci pending", "skipped"),
     # 4. Risk / blast radius
     ("risk", "blast radius", "리스크", "위험", "영향 범위", "영향범위",
      "blast", "downstream", "affects"),
     # 5. Open items
-    ("open item", "미해결", "남은 항목", "남은 작업", "follow-up", "follow up",
-     "후속", "caveat", "unresolved"),
+    ("open item", "열린 항목", "미해결", "남은 항목", "남은 작업", "남은 것",
+     "follow-up", "follow up", "후속", "caveat", "unresolved"),
     # 6. Explicit approve-ask
     ("approve", "승인", "머지할까요", "머지 할까요", "approve merge", "merge?",
      "진행할까요", "머지해도", "머지 진행", "proceed with the merge"),

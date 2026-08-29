@@ -1,0 +1,2 @@
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": "머지해줘"}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "content": [{"type": "text", "text": "무엇이 바뀌는 것부터 정리하면, 훅 3종의 keyword 그룹이 업데이트되고 회귀 테스트가 추가되었습니다. 검증은 로컬에서 ./scripts/run-tests.sh 전수 통과로 확인했습니다. 검증 안 된 부분도 있습니다 — 실제 프로덕션 세션에서의 재현은 아직 못 했습니다. 위험 범위는 이 훅 하나로 국한되며 다른 PreToolUse 훅에는 영향이 없습니다. 열린 항목으로는 spec.md 키워드 표 갱신이 남아 있습니다. 이대로 머지 진행할까요?"}]}}
