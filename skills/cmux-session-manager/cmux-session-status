@@ -38,8 +38,8 @@ done
 # --- Find orphans ---
 find_orphans
 
-safe_numeric_names=(); named_orphan_names=(); unsafe_orphan_names=()
-count_safe=0; count_named=0; count_unsafe=0
+safe_numeric_names=(); named_orphan_names=(); idle_orphan_names=(); unsafe_orphan_names=()
+count_safe=0; count_named=0; count_idle_orphan=0; count_unsafe=0
 
 j=0
 while [[ $j -lt $ORPHAN_COUNT ]]; do
@@ -47,16 +47,18 @@ while [[ $j -lt $ORPHAN_COUNT ]]; do
   oname=$(echo "$local_entry" | cut -d'|' -f1)
   otype=$(echo "$local_entry" | cut -d'|' -f2)
   ocmds=$(echo "$local_entry" | cut -d'|' -f3)
+  oevidence=$(echo "$local_entry" | cut -d'|' -f4)
 
   case "$otype" in
     safe_numeric)  safe_numeric_names+=("$oname"); count_safe=$((count_safe + 1)) ;;
     safe_named)    named_orphan_names+=("$oname"); count_named=$((count_named + 1)) ;;
+    idle_*)        idle_orphan_names+=("$oname ($ocmds) — $oevidence"); count_idle_orphan=$((count_idle_orphan + 1)) ;;
     unsafe_*)      unsafe_orphan_names+=("$oname ($ocmds)"); count_unsafe=$((count_unsafe + 1)) ;;
   esac
   j=$((j + 1))
 done
 
-total_orphan=$((count_safe + count_named + count_unsafe))
+total_orphan=$((count_safe + count_named + count_idle_orphan + count_unsafe))
 
 # --- Output: Summary ---
 echo ""
@@ -64,7 +66,8 @@ echo "=== cmux Session Status ==="
 printf "Active: %d | Waiting: %d | Idle: %d | Crashed: %d | Orphaned: %d" \
   "$count_active" "$count_waiting" "$count_idle" "$count_crashed" "$total_orphan"
 if [[ $total_orphan -gt 0 ]]; then
-  printf " (%d auto + %d named + %d unsafe)" "$count_safe" "$count_named" "$count_unsafe"
+  printf " (%d auto + %d named + %d idle + %d unsafe)" \
+    "$count_safe" "$count_named" "$count_idle_orphan" "$count_unsafe"
 fi
 echo ""
 echo ""
@@ -110,6 +113,9 @@ if [[ $total_orphan -gt 0 ]]; then
   fi
   for n in "${named_orphan_names[@]}"; do
     echo "  ⚠ named (requires confirm): $n"
+  done
+  for n in "${idle_orphan_names[@]}"; do
+    echo "  ○ idle (confirm before removing): $n"
   done
   for n in "${unsafe_orphan_names[@]}"; do
     echo "  ⚠ running processes: $n"

@@ -8,7 +8,7 @@
 # --- Globals ---
 WS_DATA=()        # Workspace data array (pipe-delimited)
 WS_COUNT=0
-ORPHAN_DATA=()    # Orphan data: session_name|type|pane_commands
+ORPHAN_DATA=()    # Orphan data: session_name|type|pane_commands|idle_evidence
 ORPHAN_COUNT=0
 CURRENT_WS="${CMUX_WORKSPACE_ID:-}"
 SCAN_DONE=false
@@ -272,26 +272,32 @@ find_orphans() {
       is_shell_cmd "$cmd" || is_shell_only=false
     done <<< "$pane_cmds"
 
+    # A non-shell session is only "running processes" if the oracle cannot show
+    # it is parked. The idle tier is report-only, same as unsafe — it exists to
+    # tell the two apart in the report, not to widen what Phase 1 kills.
+    local tier idle_evidence=""
+    if [[ "$is_shell_only" == "true" ]]; then
+      tier="safe"
+    elif idle_evidence=$(orphan_idle_evidence "$session_name"); then
+      tier="idle"
+    else
+      idle_evidence=""
+      tier="unsafe"
+    fi
+
     local orphan_type
     if echo "$session_name" | grep -qE '^[0-9]+$'; then
-      if [[ "$is_shell_only" == "true" ]]; then
-        orphan_type="safe_numeric"
-      else
-        orphan_type="unsafe_numeric"
-      fi
+      orphan_type="${tier}_numeric"
     else
-      if [[ "$is_shell_only" == "true" ]]; then
-        orphan_type="safe_named"
-      else
-        orphan_type="unsafe_named"
-      fi
+      orphan_type="${tier}_named"
     fi
 
     local cmds_flat
     cmds_flat=$(echo "$pane_cmds" | tr '\n' ',' | sed 's/,$//')
     cmds_flat=$(sanitize_pipe "$cmds_flat")
+    idle_evidence=$(sanitize_pipe "$idle_evidence")
     # shellcheck disable=SC2034  # populated here, consumed by the sourcing scripts (cmux-session-status / cmux-session-cleanup)
-    ORPHAN_DATA[$ORPHAN_COUNT]="${session_name}|${orphan_type}|${cmds_flat}"
+    ORPHAN_DATA[$ORPHAN_COUNT]="${session_name}|${orphan_type}|${cmds_flat}|${idle_evidence}"
     ORPHAN_COUNT=$((ORPHAN_COUNT + 1))
   done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null)
 }
