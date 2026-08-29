@@ -24,20 +24,24 @@ category that can absorb that reduction:
     `kubectl apply` all publish to state someone else can already be reading;
     a commit is recoverable with `git reset` / `git commit --amend` from the
     same shell.
-  • It is the only category already covered in depth. Six sibling
-    PreToolUse(Bash) hooks gate a `git commit` argv on their own — enumerated
-    from `hooks/manifest.json`, each verified to key on the `commit`
+  • It is the only category already covered in depth. Seven sibling
+    PreToolUse(Bash) hooks gate a `git commit` argv on their own — derived
+    from the `"gates": ["git-commit"]` field each carries in
+    `hooks/manifest.json`, each verified to key on the `commit`
     subcommand: block-commit-without-codex-review,
+    block-rename-sweep-survivors, commit-decomposition-advisory,
     commit-title-format-check, commit-title-length-check,
-    verify-commit-flag-override, commit-decomposition-advisory,
-    pre-commit-staged-file-enumeration. Four of the six are also the
-    checklist `verify-commit-flag-override` prints on its own deny (issue
-    #941). No sibling hook gates `kubectl apply` at all.
+    pre-commit-staged-file-enumeration, verify-commit-flag-override.
+    Four of the seven siblings are also the checklist
+    `verify-commit-flag-override` prints on its own deny (issue #941). No
+    sibling hook gates `kubectl apply` at all. This enumeration is a copy
+    of the manifest's, kept honest by scripts/check-sibling-commit-gates.py
+    (issue #1127) — edit the manifest field, never this list alone.
 
 The wrapper CLIs that used to share the `git-commit` label (`iceberg-schema
 migrate|promote`, `omc ralph`) do NOT follow it down; they now carry their own
 `wrapper-commit` category at ASK. Both halves of the rationale above fail for
-them: the six sibling gates match a literal `git commit` argv, so a commit
+them: the seven sibling gates match a literal `git commit` argv, so a commit
 made *inside* a wrapper process is invisible to every one of them, and
 `iceberg-schema promote` is a catalog operation, not a local one. Splitting
 the category is a deliberate narrowing of issue #874's "demote git-commit" —
@@ -76,7 +80,7 @@ CATEGORIES = {
         "reason": "local git state mutation — 현재 브랜치/HEAD 확인 필요",
     },
     # Split out of `git-commit` by issue #874: these commit from *inside*
-    # another process, so the six sibling `git commit` argv gates never see
+    # another process, so the seven sibling `git commit` argv gates never see
     # them and the coverage half of the demotion rationale does not hold.
     "wrapper-commit": {
         "tier": TIER_ASK,

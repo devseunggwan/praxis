@@ -30,28 +30,39 @@ stops functioning as a gate, so the volume itself is the defect.
    `kubectl apply` all publish to state another party can already be reading.
    A commit is recoverable with `git reset` / `git commit --amend` from the
    same shell, before anything leaves the machine.
-2. **It is the only category already covered in depth.** Six sibling
-   `PreToolUse(Bash)` hooks gate a `git commit` argv on their own — enumerated
-   from `hooks/manifest.json` and each verified to key on the `commit`
-   subcommand:
+2. **It is the only category already covered in depth.** Seven sibling
+   `PreToolUse(Bash)` hooks gate a `git commit` argv on their own — derived
+   from the `"gates": ["git-commit"]` field each carries in
+   `hooks/manifest.json`, and each verified by reading its detector to key on
+   the `commit` subcommand:
 
    | Sibling hook | What it gates |
    | -------------- | --------------- |
    | `block-commit-without-codex-review` | commit before the review step |
+   | `block-rename-sweep-survivors` | a rename sweep with surviving occurrences |
+   | `commit-decomposition-advisory` | oversized single commit |
    | `commit-title-format-check` | Conventional Commits title format |
    | `commit-title-length-check` | title length |
-   | `verify-commit-flag-override` | `-n` / `--no-verify` flag override |
-   | `commit-decomposition-advisory` | oversized single commit |
    | `pre-commit-staged-file-enumeration` | staging without enumerating files |
+   | `verify-commit-flag-override` | `-n` / `--no-verify` flag override |
 
-   Four of the six are the checklist `verify-commit-flag-override` already
-   prints on its own deny (issue #941). By contrast **no** sibling hook gates
-   `kubectl apply` at all.
+   Four of the seven siblings are the checklist `verify-commit-flag-override`
+   already prints on its own deny (issue #941). By contrast **no** sibling
+   hook gates `kubectl apply` at all.
+
+   The manifest field is the single source of truth for that list;
+   `scripts/check-sibling-commit-gates.py` re-derives it on every
+   `scripts/run-tests.sh` run and fails on a name or a count that drifted from
+   it in either direction (issue #1127). The list is hand-curated — membership
+   means "this hook's detector keys on the `commit` subcommand", which no
+   string scan can decide (`pipefail-advisory` names the subcommand but only
+   fires on a pipeline; `branch-name-check` mentions commits while gating
+   branch creation) — but once curated it is copied nowhere by hand again.
 
 **`wrapper-commit` is a deliberate narrowing.** `iceberg-schema
 migrate|promote` and `omc ralph` used to carry the `git-commit` label;
 issue #874's demotion does not follow them down, because both halves of the
-rationale fail for them. The six sibling gates match a literal `git commit`
+rationale fail for them. The seven sibling gates match a literal `git commit`
 argv, so a commit made *inside* a wrapper process is invisible to every one of
 them, and `iceberg-schema promote` is a catalog operation rather than a local
 one. They keep asking, under their own category name.
