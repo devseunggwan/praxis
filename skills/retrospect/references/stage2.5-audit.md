@@ -36,9 +36,11 @@ The script mechanizes, mirroring the Stop hook's parsing semantics
   `not <action>: <reason>` lines) or Schema B (1-2 `not-others: <dim-tags>`
   lines, no Schema A lines)
 - **backing_repo** — any row routing `upstream_feedback` or `issue` must
-  declare `backing_repo: <owner>/<repo>` in Rationale. An `upstream_feedback`
-  row may add `repo_visibility: public|private|internal` on its own Rationale
-  line; Gate-4 reads it, and its absence means public (issue #993)
+  declare `backing_repo: <owner>/<repo>` in Rationale. Either row type may add
+  `repo_visibility: public|private|internal` on its own Rationale line; Gate-4
+  reads it, and its absence means public (issue #993). Gate-4 audits `issue`
+  rows too since issue #1038, so an own-org *private* backing repo needs the
+  line on an `issue` row as well — without it the row escalates as public
 - **Gate-4** — cross-boundary write classification and the literal external
   warning prefix `⚠ EXTERNAL: per-action approval required at Stage 4` on
   every escalated row (Stage 4 scans that exact string; a paraphrase disables
