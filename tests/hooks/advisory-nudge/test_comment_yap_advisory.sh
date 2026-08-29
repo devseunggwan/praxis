@@ -176,6 +176,30 @@ run_case "delimiter inside a literal" silent "mod.py" \
 def f():
     return 1"
 
+# Past the run-length cap every counter freezes together, so an enormous
+# unanchored run still fires rather than suppressing itself on arithmetic.
+# The payload is built inside python: 5000 lines exceed ARG_MAX through
+# `run_case`'s argv, and the short line keeps it under the 256 KiB byte cap
+# that would otherwise return before the scan and mask what this pins.
+capped_run_payload=$(python3 -c '
+import json
+print(json.dumps({
+    "tool_name": "Write",
+    "tool_input": {
+        "file_path": "mod.py",
+        "content": "\n".join(["# and then we consider the thing"] * 5000) + "\nx = 1",
+    },
+}))')
+err_file=$(mktemp)
+printf '%s' "$capped_run_payload" | python3 "$HOOK" >/dev/null 2>"$err_file"
+if grep -q "4096 comment lines" "$err_file"; then
+  PASS=$((PASS + 1)); echo "  ok   run past the length cap freezes at 4096 and still fires"
+else
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("run length cap")
+  echo "  FAIL run past the length cap"
+fi
+rm -f "$err_file"
+
 # A triple quote after a line ending mid-expression is fixture data.
 run_case "triple quote as an operand" silent "mod.py" \
   'p.write_text(

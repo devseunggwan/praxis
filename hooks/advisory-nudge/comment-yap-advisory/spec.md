@@ -167,8 +167,11 @@ constraint:
   of `splitlines()`, so auxiliary memory is O(longest line), not O(file).
 - **O(1) run state** — counters (`lines`, `anchors`, `code_shaped`) plus one
   100-char snippet. The run's text is never accumulated.
-- **Bounded work** — run length saturates at 4096 lines and anchor counting
-  stops once no reachable run length could still fire D2.
+- **Bounded work** — a run stops accumulating at 4096 lines, and anchor
+  counting stops once no reachable run length could still fire D2. All of a
+  run's counters freeze together at the cap: advancing `code_shaped` past a
+  frozen `lines` would drive the code-shape share above 1.0 and suppress the
+  run on arithmetic rather than on what it contains.
 
 Not a member of the `(PreToolUse, Bash)` dispatch group (ADR-0002), which is
 Bash-only, so this is a **standalone** hook and applies `@fail_open` to
@@ -210,7 +213,7 @@ surface the next prune audit has to score.
 
 ## Tests
 
-`tests/hooks/advisory-nudge/test_comment_yap_advisory.sh` — 29 cases:
+`tests/hooks/advisory-nudge/test_comment_yap_advisory.sh` — 30 cases:
 
 - both detectors fire (line comments, C block comments, D1 attachment
   requirement)

@@ -264,8 +264,12 @@ class _Run:
         self.snippet = ""
 
     def add(self, content: str) -> None:
-        if self.lines < _RUN_LINE_CAP:
-            self.lines += 1
+        if self.lines >= _RUN_LINE_CAP:
+            # Every counter freezes together. Advancing `code_shaped` past a
+            # frozen `lines` would drive the share above 1.0 and suppress the
+            # run on arithmetic rather than on what it contains.
+            return
+        self.lines += 1
         if not content:
             # A bare `#` or ` *` separator: no content to anchor or shape.
             return
@@ -433,6 +437,10 @@ def _scan(text: str, syntax: _Syntax, preamble_lines: int, sprawl_lines: int) ->
         if open_string is not None:
             if open_string in stripped:
                 open_string = None
+            # The string's own body never leaves an expression open for the
+            # line after it; a stale flag here would read the next docstring
+            # as an operand.
+            prev_operand = False
             count_code_line()
             continue
 
