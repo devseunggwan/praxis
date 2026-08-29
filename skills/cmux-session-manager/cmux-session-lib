@@ -14,6 +14,24 @@ CURRENT_WS="${CMUX_WORKSPACE_ID:-}"
 SCAN_DONE=false
 EXCLUDE_SESSIONS="${CMUX_EXCLUDE_SESSIONS:-}"  # Space-separated tmux session names to never auto-kill
 
+# Idleness oracle tuning. A pane parked at a startup prompt is still in use for
+# the first stretch after launch — someone may be about to answer it — so the
+# quiet window has to be long enough that answering it is no longer plausible.
+IDLE_ACTIVITY_SECS="${CMUX_IDLE_ACTIVITY_SECS:-1800}"
+
+# Screens that mean the process never got past launch. Deliberately narrow: a
+# mid-run permission prompt is a session doing work and waiting on its owner,
+# and widening this pattern to cover it would demote real work to idle.
+#
+# Anchored to the start of a line, past any leading decoration ("> ", "1. "),
+# because the match is made against a whole screen of scrollback: an unanchored
+# fragment matches the same words inside ordinary output — a build log reading
+# "build complete: No, exit is disabled here" would otherwise read as a trust
+# prompt, and one such line is enough to demote a working session to idle.
+# The menu's decline choice is not in the pattern for the same reason: on its
+# own it carries no evidence that this is a startup prompt.
+IDLE_PROMPT_PATTERN='^[^A-Za-z0-9]*([0-9]+\.[[:space:]]*)?(Yes, I trust this folder|Do you trust the files in this folder)'
+
 # Field indices for WS_DATA
 _REF=1; _NAME=2; _WINDOW=3; _CC=4; _BRANCH=5; _PR=6; _STATE=7; _CAT=8
 
@@ -160,6 +178,58 @@ classify_category() {
   echo "[TMP]"
 }
 
+# --- Is a pane command a bare interactive shell? ---
+is_shell_cmd() {
+  case "$1" in
+    zsh|bash|fish|sh|login) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# --- Idleness oracle: is this orphan session parked, or working? ---
+# Prints a one-line evidence string and returns 0 when the session is idle;
+# returns non-zero otherwise. Every uncertain answer returns non-zero, so an
+# unreadable session keeps the stricter classification.
+#
+# Two signals, ANDed. Either one alone misreads a case the other catches:
+# a quiet window is also what a long silent build looks like, and a startup
+# prompt on screen is also what a session someone just opened looks like.
+#
+# tmux exposes its activity clock per WINDOW, not per pane (no #{pane_activity}
+# in tmux 3.x), so the quiet-window signal is read from #{window_activity}.
+orphan_idle_evidence() {
+  local session="$1"
+  local now newest="" age
+  now=$(date +%s)
+
+  while IFS= read -r act; do
+    [[ -z "$act" ]] && continue
+    if [[ -z "$newest" ]] || [[ "$act" -gt "$newest" ]]; then
+      newest="$act"
+    fi
+  done < <(tmux list-panes -s -t "$session" -F '#{window_activity}' 2>/dev/null)
+
+  # No activity clock at all — the oracle has no input, so it does not answer.
+  [[ -z "$newest" ]] && return 1
+  age=$((now - newest))
+  [[ $age -lt $IDLE_ACTIVITY_SECS ]] && return 1
+
+  # Every non-shell pane must be showing a startup prompt. One pane whose screen
+  # says something else is a session with work in it, whatever the others show.
+  local nonshell=0 pane_id cmd screen
+  while IFS=' ' read -r pane_id cmd; do
+    [[ -z "$pane_id" ]] && continue
+    is_shell_cmd "$cmd" && continue
+    nonshell=$((nonshell + 1))
+    screen=$(tmux capture-pane -p -t "$pane_id" 2>/dev/null) || return 1
+    printf '%s\n' "$screen" | grep -qE "$IDLE_PROMPT_PATTERN" || return 1
+  done < <(tmux list-panes -s -t "$session" -F '#{pane_id} #{pane_current_command}' 2>/dev/null)
+
+  [[ $nonshell -eq 0 ]] && return 1
+
+  printf 'startup prompt on screen in %d pane(s), no output for %ds' "$nonshell" "$age"
+}
+
 # --- Find Orphan tmux Sessions ---
 find_orphans() {
   ORPHAN_DATA=()
@@ -199,10 +269,7 @@ find_orphans() {
 
     local is_shell_only=true
     while IFS= read -r cmd; do
-      case "$cmd" in
-        zsh|bash|fish|sh|login) ;;
-        *) is_shell_only=false ;;
-      esac
+      is_shell_cmd "$cmd" || is_shell_only=false
     done <<< "$pane_cmds"
 
     local orphan_type
