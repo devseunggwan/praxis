@@ -5,7 +5,7 @@ Supported hosts: all
 Reference: [Autonomy vs Convention — ETHOS.md](../../../ETHOS.md#autonomy-vs-convention)
 
 `hooks/preflight-gate/cross-boundary-preflight/impl.py` intercepts every Bash tool call and
-fires on two cross-boundary patterns before the command executes.
+fires on three cross-boundary patterns before the command executes.
 
 ### Why this exists
 
@@ -16,12 +16,13 @@ same violations recurred on the next relevant session. This hook replaces
 the memo with a structural gate that fires at the command boundary (praxis
 issue #199).
 
-The two patterns covered:
+The three patterns covered:
 
-| Pattern            | Trigger                                                           | Action                                           |
-| ------------------ | ----------------------------------------------------------------- | ------------------------------------------------ |
-| `HEREDOC_BODY`     | `<<` token in same segment as `gh pr/issue create`                | **Hard block** (exit 2) — suggests `--body-file` |
-| `CROSS_REPO_WRITE` | `--repo/-R` flag in `gh pr/issue create/comment/edit` (any owner) | **Ask** — surfaces four-point checklist          |
+| Pattern                | Trigger                                                                       | Action                                                              |
+| ---------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `HEREDOC_BODY`         | `<<` token in same segment as `gh pr/issue create`                            | **Hard block** (exit 2) — suggests `--body-file`                    |
+| `CROSS_REPO_WRITE`     | `--repo/-R` flag in `gh pr/issue create/comment/edit` (any owner)             | **Ask** — surfaces four-point checklist                             |
+| `IMPLICIT_REPO_WRITE`  | same subcommands with **no** `--repo/-R`, target resolvable from the checkout | **Ask** — same checklist, naming the resolved repo; silent if unresolvable |
 
 ### What is blocked / asked
 
@@ -56,7 +57,6 @@ Correct pattern: `Write tool → /tmp/body.md` then `--body-file /tmp/body.md`.
 | `gh issue create --repo owner/repo --title "t"`                    | **ASK**                             |
 | `gh issue comment 42 --repo owner/repo --body "..."`               | **ASK**                             |
 | `gh -R owner/repo pr create --title "t" --body-file /tmp/b.md`     | **ASK**                             |
-| `gh pr create --title "t" --body "Caller chain verified: ok"`      | **PASS** — no `--repo`              |
 | `gh issue list --repo owner/repo`                                  | **PASS** — read-only subcommand     |
 | `gh pr list --repo owner/repo`                                     | **PASS** — read-only subcommand     |
 | `gh issue create --repo <own-org>/repo --title "t"`                | **ASK** — ownership is no exemption |
@@ -89,6 +89,88 @@ observe visibility from the command line, so it asks in every case; a repo
 confirmed own-org-and-private is what the `# cross-boundary:ack` marker is
 for.
 
+#### IMPLICIT_REPO_WRITE — ask (permissionDecision: "ask")
+
+Same subcommand set as `CROSS_REPO_WRITE`, no `--repo`/`-R` flag. The target
+repo is resolved from the checkout the command runs in and named in the
+checklist header, so the user can see what they are approving.
+
+| Command                                                       | Action                                              |
+| ------------------------------------------------------------- | --------------------------------------------------- |
+| `gh pr create --title "t" --body "Caller chain verified: ok"` | **ASK** — target resolved from the checkout         |
+| `gh issue create --title "t"`                                 | **ASK**                                             |
+| `gh issue comment 42 --body "..."`                            | **ASK**                                             |
+| `gh issue edit 7 --title "updated"`                           | **ASK**                                             |
+| `gh pr comment 5 --body "..."`                                | **ASK**                                             |
+| `gh pr edit 5 --title "updated"`                              | **ASK**                                             |
+| `cd <worktree> && gh issue create --title "t"`                | **ASK** — resolved in the `cd` target               |
+| `gh issue create --title "t"` in a non-checkout cwd           | **PASS** — target unresolvable, fail-open           |
+| `gh issue create --title "t"` with no `origin` remote         | **PASS** — target unresolvable, fail-open           |
+| `gh issue list --state open`                                  | **PASS** — read-only subcommand                     |
+| `gh issue create --title "t" # cross-boundary:ack`            | **PASS** — opt-out                                  |
+| `gh issue create --title "t" <<EOF`                           | **BLOCKED** — heredoc arm runs ahead of this one    |
+
+Target resolution is **local only**: `git -C <cwd> remote get-url origin`,
+2s timeout, parsed to `owner/repo` by the same URL shapes the sibling
+`pre-gh-pr-create-dedup-gate` accepts (widened to GitHub Enterprise hosts).
+No `gh api`, no `gh repo view`, no network call of any kind — the hook's
+manifest timeout is 5 seconds for the whole process.
+
+The working directory comes from the PreToolUse payload's `cwd` field, with
+an `os.getcwd()` fallback — the same read every sibling that needs a
+directory performs (`gh-label-verify`, `anchor-comment-gate`,
+`path-probe-gate`). A leading bare `cd <path>` segment updates it before the
+later segments are inspected, so `cd <worktree> && gh issue create ...`
+resolves `origin` in the worktree rather than in the session's cwd.
+
+#### Why the repo-less path is gated too (issue #1148)
+
+Before #1148 the ask keyed on the `--repo`/`-R` flag alone. In one and the
+same checkout, `gh issue create --repo devseunggwan/praxis --title "t"`
+asked and `gh issue create --title "t"` was silent — same write, same target
+repo, different treatment decided entirely by flag style. That asymmetry was
+spec'd, not accidental: this document previously listed
+`gh pr create --title "t" --body "Caller chain verified: ok"` as **PASS** —
+no `--repo`.
+
+The policy #993/#1024 settled leaves no room for it. Per-action approval is
+owed to a public-repo write *even inside your own org*; "did not pass the
+flag" is not one of the exemptions, because omitting `--repo` does not make
+the write local — `gh` simply infers the target from the checkout and writes
+to the same remote surface. The justification this document already gives for
+asking on **every** `--repo` write applies verbatim: the hook cannot observe
+visibility from the command line, so it asks in every case, and a repo
+confirmed own-org-and-private is what the `# cross-boundary:ack` marker is
+for. The repo-less arm therefore covers the whole of `GH_WRITE_SUBCOMMANDS`,
+exactly as the `--repo` arm does — narrowing it to `create` would have traded
+one arbitrary asymmetry for another.
+
+The fail-open condition is the one place the two arms differ, and it is
+forced by what each arm can know. The `--repo` arm reads its target out of
+the command; the repo-less arm has to resolve it. When resolution fails —
+cwd is not a git checkout, no `origin` remote, git binary missing,
+subprocess error, timeout, or an origin URL that yields no `owner/repo`
+slug — the hook exits 0 **silently**, per its standing fail-open contract.
+Silence beats naming the wrong repo in an approval prompt.
+
+##### Known limitations
+
+- **Subshell `cd` is not tracked.** `(cd <worktree> && gh issue create ...)`
+  tokenizes the command word as `(cd`, and a subshell's directory change does
+  not persist past `)`, so honouring it would need per-subshell cwd state the
+  segment machinery does not carry. The write is resolved against the
+  payload's `cwd` instead; if that is a checkout the ask still fires, but the
+  repo named may be the outer one. `cd <path> && ...` outside a subshell is
+  tracked, and `cd` targets that need shell expansion (`$VAR`, `~`, globs,
+  `cd -`) are ignored rather than guessed.
+- **Non-GitHub `origin` remotes are unresolvable** and therefore silent — a
+  local-path or non-GitHub remote yields no `owner/repo` slug.
+- **`GH_REPO` and `gh repo set-default` are not consulted.** Either can point
+  `gh` at a repo other than the one `origin` names; the hook reports what
+  `origin` says. The environment variable is not visible in the Bash payload,
+  and `set-default` state lives in git config the hook deliberately does not
+  reinterpret.
+
 ### Response format
 
 **HEREDOC_BODY:**
@@ -97,7 +179,7 @@ stderr: "❌ BLOCKED: heredoc (`<<`) in `gh pr/issue create` ..."
 exit 2
 ```
 
-**CROSS_REPO_WRITE:**
+**CROSS_REPO_WRITE / IMPLICIT_REPO_WRITE:**
 ```json
 {
   "hookSpecificOutput": {
@@ -111,7 +193,8 @@ exit 0
 
 ### Compound cascade advisory (issue #229)
 
-Both response paths (HEREDOC_BODY block, CROSS_REPO_WRITE ask) append the
+All three response paths (HEREDOC_BODY block, CROSS_REPO_WRITE ask,
+IMPLICIT_REPO_WRITE ask) append the
 shared `_hook_utils.compound_cascade_hint` suffix when the parent Bash command
 is compound AND contains a state-changing step (`> file`, `mkdir`, `tee`,
 `cp`/`mv`/`rm`, `curl -o`). The classic shape is
@@ -124,10 +207,12 @@ separate Bash call. Single-command rejections do not receive the suffix.
 ### Opt-out
 
 Known-intentional cross-repo writes can bypass the ASK gate by appending
-the opt-out marker to the command:
+the opt-out marker to the command. The marker silences both ask arms
+identically — the repo-less arm is not a separate escape hatch:
 
 ```bash
 gh pr create --repo owner/repo --title "t" --body-file /tmp/b.md  # cross-boundary:ack
+gh pr create --title "t" --body-file /tmp/b.md                    # cross-boundary:ack
 ```
 
 Use only after manually verifying all four checklist items. Place the marker
@@ -156,12 +241,22 @@ placement guidance.
 bash tests/hooks/preflight-gate/test_cross_boundary_preflight.sh
 ```
 
-Covers 48 cases: heredoc block paths (originals + F2 regression), cross-repo
+Covers 73 cases: heredoc block paths (originals + F2 regression), cross-repo
 ask paths (shorthand flags, chained commands, equals forms, F1 regression,
-own-org targets per #993), ask-detail checks (caller chain item present/absent
-by subcommand, ownership-is-no-exemption wording per #993), a block-msg
-content check (ack-placement bullet present in stderr), the F2 false-positive
-guard, pass paths (no-repo, read-only including an own-org read-only #993
-control that must stay silent, non-gh, opt-out, variable-heredoc), cascade-hint
-present/absent pair, and infrastructure (non-Bash passthrough, malformed JSON
-fail-open, `@fail_open` wrapping).
+own-org targets per #993), repo-less ask paths (all eight `GH_WRITE_SUBCOMMANDS`
+pairs, path-prefixed binary, chained command, `cd <checkout> && gh …` per
+#1148), ask-detail checks (caller chain item present/absent by subcommand,
+ownership-is-no-exemption wording per #993, resolved repo named and
+flag-style-is-no-exemption wording per #1148), a block-msg content check
+(ack-placement bullet present in stderr), the F2 false-positive guard, pass
+paths (read-only including an own-org read-only #993 control that must stay
+silent, non-gh, opt-out on both ask arms, variable-heredoc, and the #1148
+fail-open controls: non-checkout cwd, no-`origin` checkout, missing cwd,
+`cd` into a non-checkout, `gh` named inside echo/commit/grep bodies),
+cascade-hint present/absent pair, and infrastructure (non-Bash passthrough,
+malformed JSON fail-open, `@fail_open` wrapping).
+
+Every case carries an explicit payload `cwd` pointing at one of three
+throwaway checkout fixtures (`resolvable` with a github.com `origin`,
+`no-origin`, `not-a-repo`), so the repo-less arm's verdict never depends on
+where the suite is invoked from.

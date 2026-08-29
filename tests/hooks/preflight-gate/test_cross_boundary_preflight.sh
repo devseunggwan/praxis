@@ -23,18 +23,45 @@ fi
 
 PASS=0; FAIL=0; FAILED_NAMES=()
 
+# ---------------------------------------------------------------------------
+# Checkout fixtures (issue #1148)
+#
+# The repo-less arm resolves its target from `git remote get-url origin` in
+# the payload's cwd, so every case needs a deterministic checkout — otherwise
+# the verdict would depend on where the suite happens to be invoked from.
+# Three fixtures cover the whole resolution space:
+#   FIX_REPO     — checkout with an `origin` on github.com  → resolvable
+#   FIX_NOORIGIN — checkout with no remotes                 → unresolvable
+#   FIX_PLAIN    — not a checkout at all                    → unresolvable
+# ---------------------------------------------------------------------------
+FIXTURE_ROOT=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+trap 'rm -rf "$FIXTURE_ROOT"' EXIT
+FIX_REPO="$FIXTURE_ROOT/resolvable"
+FIX_NOORIGIN="$FIXTURE_ROOT/no-origin"
+FIX_PLAIN="$FIXTURE_ROOT/not-a-repo"
+mkdir -p "$FIX_REPO" "$FIX_NOORIGIN" "$FIX_PLAIN"
+( cd "$FIX_REPO" && git init -q && git remote add origin git@github.com:devseunggwan/praxis.git ) >/dev/null 2>&1
+( cd "$FIX_NOORIGIN" && git init -q ) >/dev/null 2>&1
+
+if ! ( cd "$FIX_REPO" && git remote get-url origin ) >/dev/null 2>&1; then
+  echo "FAIL: could not build the resolvable checkout fixture" >&2
+  exit 1
+fi
+
+# Default cwd for every case: the resolvable checkout. Cases that need a
+# different checkout pass one explicitly as the trailing argument.
 mk_payload() {
   python3 -c '
 import json, sys
-print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}))
-' "$1"
+print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}, "cwd": sys.argv[2]}))
+' "$1" "${2:-$FIX_REPO}"
 }
 
 run_case() {
-  local name="$1" expected="$2" command="$3"
+  local name="$1" expected="$2" command="$3" cwd="${4:-$FIX_REPO}"
   local out err_file err rc ok=1
   err_file=$(mktemp)
-  out=$(mk_payload "$command" | "$HOOK" 2>"$err_file")
+  out=$(mk_payload "$command" "$cwd" | "$HOOK" 2>"$err_file")
   rc=$?; err=$(cat "$err_file"); rm -f "$err_file"
 
   case "$expected" in
@@ -122,10 +149,10 @@ run_case "chained: safe cmd && gh pr create --repo" ask \
 # ---------------------------------------------------------------------------
 
 run_case_detail() {
-  local name="$1" command="$2" needle="$3"
+  local name="$1" command="$2" needle="$3" cwd="${4:-$FIX_REPO}"
   local out err_file rc ok=1
   err_file=$(mktemp)
-  out=$(mk_payload "$command" | "$HOOK" 2>"$err_file")
+  out=$(mk_payload "$command" "$cwd" | "$HOOK" 2>"$err_file")
   rc=$?; rm -f "$err_file"
   [ "$rc" -eq 0 ] || ok=0
   echo "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); r=d.get('hookSpecificOutput',{}).get('permissionDecisionReason',''); sys.exit(0 if '$needle' in r else 1)" 2>/dev/null || ok=0
@@ -215,19 +242,125 @@ run_case "heredoc attached with double quotes (F2 fix)" block \
 run_case "heredoc attached to --body-file path (F2 fix)" block \
   'gh issue create --body-file /tmp/body.md<<EOF'
 
-# literal << inside quoted body string — should pass
-run_case "literal << in quoted body (F2 false-positive guard)" pass \
+# literal << inside quoted body string — must not BLOCK. It is repo-less, so
+# in a resolvable checkout the #1148 arm asks; `ask` (not `block`) is what
+# proves the heredoc path stayed out of it.
+run_case "literal << in quoted body (F2 false-positive guard)" ask \
   'gh issue create --body "comparison: a << b is false"'
 
 # ---------------------------------------------------------------------------
-# PASS cases — no --repo, no heredoc in gh write segment
+# ASK cases — no --repo flag, target resolved from the checkout (issue #1148)
+#
+# Same write, same target repo: the flag style must not decide the verdict.
+# These four rows were `pass` before #1148 and are the asymmetry it removes.
 # ---------------------------------------------------------------------------
 
-run_case "gh pr create without --repo" pass \
+run_case "gh pr create without --repo (#1148)" ask \
   'gh pr create --title "fix" --body "Caller chain verified: ok"'
 
-run_case "gh issue create without --repo" pass \
+run_case "gh issue create without --repo (#1148)" ask \
   'gh issue create --title "bug" --body-file /tmp/b.md'
+
+# The --repo arm covers every pair in GH_WRITE_SUBCOMMANDS, so the repo-less
+# arm must too — narrowing to `create` would only invent a fresh asymmetry.
+run_case "gh issue new without --repo (#1148)" ask \
+  'gh issue new --title "bug"'
+
+run_case "gh pr new without --repo (#1148)" ask \
+  'gh pr new --title "t" --body-file /tmp/b.md'
+
+run_case "gh issue comment without --repo (#1148)" ask \
+  'gh issue comment 42 --body "hello"'
+
+run_case "gh issue edit without --repo (#1148)" ask \
+  'gh issue edit 7 --title "updated"'
+
+run_case "gh pr comment without --repo (#1148)" ask \
+  'gh pr comment 5 --body "hello"'
+
+run_case "gh pr edit without --repo (#1148)" ask \
+  'gh pr edit 5 --title "updated"'
+
+run_case "path-prefixed gh binary, repo-less (#1148)" ask \
+  '/usr/bin/gh issue create --title "t"'
+
+run_case "chained: safe cmd && repo-less gh issue create (#1148)" ask \
+  'git fetch origin && gh issue create --title "t"'
+
+# `cd <worktree> && gh ...` — the write runs in the cd target, so the target
+# repo is resolved there, not in the payload's cwd.
+run_case "cd into a resolvable checkout then repo-less gh (#1148)" ask \
+  "cd $FIX_REPO && gh issue create --title \"t\"" \
+  "$FIX_PLAIN"
+
+# The checklist must name the repo the user is about to write to.
+run_case_detail "repo-less checklist names the resolved target (#1148)" \
+  'gh issue create --title "t"' \
+  "devseunggwan/praxis"
+
+run_case_detail "repo-less checklist says flag style is no exemption (#1148)" \
+  'gh issue create --title "t"' \
+  "Flag style does NOT exempt"
+
+run_case_detail "repo-less pr create checklist keeps Caller chain item (#1148)" \
+  'gh pr create --title "t" --body-file /tmp/b.md' \
+  "Caller chain verified"
+
+# ---------------------------------------------------------------------------
+# SILENT controls for the repo-less arm — the fail-open contract (#1148)
+#
+# Anything that stops the local resolution from producing an `owner/repo`
+# must exit 0 with no output. Silence beats guessing at the target.
+# ---------------------------------------------------------------------------
+
+run_case "repo-less write, cwd is not a checkout (#1148 fail-open)" pass \
+  'gh issue create --title "t"' \
+  "$FIX_PLAIN"
+
+run_case "repo-less write, checkout has no origin remote (#1148 fail-open)" pass \
+  'gh issue create --title "t"' \
+  "$FIX_NOORIGIN"
+
+run_case "repo-less write, cwd does not exist (#1148 fail-open)" pass \
+  'gh issue create --title "t"' \
+  "$FIXTURE_ROOT/does-not-exist"
+
+run_case "cd into a non-checkout then repo-less gh (#1148 fail-open)" pass \
+  "cd $FIX_PLAIN && gh issue create --title \"t\"" \
+  "$FIX_REPO"
+
+run_case "repo-less read-only stays silent in a resolvable checkout (#1148)" pass \
+  'gh issue list --state open'
+
+run_case "repo-less gh pr view stays silent (#1148)" pass \
+  'gh pr view 12 --json title'
+
+run_case "gh mention inside an echo body stays silent (#1148)" pass \
+  'echo "run gh issue create --title t to file it"'
+
+run_case "gh mention inside a commit message stays silent (#1148)" pass \
+  'git commit -m "docs: describe gh pr create usage"'
+
+run_case "gh mention inside a grep pattern stays silent (#1148)" pass \
+  'grep -rn "gh issue create" docs/'
+
+run_case "opt-out marker silences the repo-less arm (#1148)" pass \
+  'gh issue create --title "t"  # cross-boundary:ack'
+
+# The heredoc hard-block sits ahead of BOTH ask arms and ignores the marker,
+# including on a repo-less command in a resolvable checkout.
+run_case "heredoc block precedes the repo-less arm (#1148)" block \
+  'gh issue create --title "t" <<EOF'
+
+run_case "heredoc block ignores marker on a repo-less write (#1148)" block \
+  'gh issue create --title "t" <<EOF
+body line
+EOF
+# cross-boundary:ack'
+
+# ---------------------------------------------------------------------------
+# PASS cases — read-only subcommands, non-gh commands, opt-out
+# ---------------------------------------------------------------------------
 
 run_case "gh issue list --repo (read-only subcommand)" pass \
   'gh issue list --repo owner/repo --state open'
@@ -290,22 +423,25 @@ EOF
 # Tracked as follow-up; for now we accept the narrow miss (heredoc attached
 # directly after a quoted argument value) to keep the hook usable.
 
-# Round 4 regression guard — var-heredoc on a different segment must pass.
-run_case "var-heredoc separate segment then gh body passes" pass \
+# Round 4 regression guard — var-heredoc on a different segment must not
+# block. These three writes are repo-less, so since #1148 the expected
+# non-block outcome is `ask`, not `pass`; `ask` still proves the heredoc
+# hard-block (exit 2) did not fire on the separate segment.
+run_case "var-heredoc separate segment then gh body does not block" ask \
   'BODY=$(cat <<EOF
 some body
 EOF
 )
 gh issue create --title "t" --body "$BODY"'
 
-run_case "file-prep heredoc then gh body-file passes" pass \
+run_case "file-prep heredoc then gh body-file does not block" ask \
   'cat <<EOF > /tmp/body.md
 some body
 EOF
 gh issue create --title "t" --body-file /tmp/body.md'
 
 # Variable-assigned heredoc followed by gh pr create — heredoc in different segment
-run_case "var-heredoc then gh pr create passes" pass \
+run_case "var-heredoc then gh pr create does not block" ask \
   'gh pr create --title "t" --body "$BODY"'
 
 # ---------------------------------------------------------------------------

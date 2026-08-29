@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PreToolUse(Bash) guard: cross-boundary pre-flight for gh write operations.
 
-Intercepts two patterns:
+Intercepts three patterns:
 
 1. CROSS_REPO_WRITE — `gh pr create / issue create/comment/edit --repo <X>`
    Emits permissionDecision "ask" with a four-point checklist before the
@@ -12,7 +12,18 @@ Intercepts two patterns:
    checklist says so explicitly — labelling the gate "external only" was
    what let own-org writes through without per-action approval.
 
-2. HEREDOC_BODY — `gh pr create / issue create` with a `<<` heredoc operator
+2. IMPLICIT_REPO_WRITE — the same write subcommands with NO `--repo`/`-R`.
+   The write still lands on a real remote repo — the one `gh` infers from
+   the checkout — so gating on flag style produced an asymmetry where
+   `gh issue create --repo devseunggwan/praxis --title t` asked and
+   `gh issue create --title t` was silent (issue #1148). The target repo is
+   resolved LOCALLY from `git remote get-url origin` (no network call; the
+   hook's manifest timeout is 5s) and named in the checklist so the user can
+   see what they are approving. If the repo cannot be resolved — cwd is not
+   a git checkout, no `origin` remote, git missing, subprocess error or
+   timeout — the hook stays silent per its fail-open contract.
+
+3. HEREDOC_BODY — `gh pr create / issue create` with a `<<` heredoc operator
    in the same command segment. Hard-blocks (exit 2) and suggests --body-file.
 
 Related hooks that cover adjacent scenarios:
@@ -37,7 +48,9 @@ with the marker in the command shell portion only.
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 import sys
 import sys as _sys
 from pathlib import Path as _Path
@@ -103,6 +116,24 @@ GH_WRITE_SUBCOMMANDS = frozenset({
 })
 
 OPT_OUT_MARKER = "# cross-boundary:ack"
+
+# Local-only resolution budget for the repo-less arm. The hook's manifest
+# timeout is 5s for the whole process, so the git probe must be cheap and
+# bounded — `git remote get-url origin` reads .git/config and never touches
+# the network. No `gh api` / `gh repo view` here for the same reason.
+GIT_TIMEOUT_SEC = 2
+
+# Owner/repo extracted from common origin URL forms (same shapes the sibling
+# `pre-gh-pr-create-dedup-gate` parses, widened to GitHub Enterprise hosts):
+#   git@github.com:owner/repo.git
+#   https://github.com/owner/repo.git
+#   ssh://git@github.example.com/owner/repo
+# A remote on a non-GitHub host does not match — `gh` could not write to it
+# anyway, and an unparseable remote must stay silent, not guess.
+_ORIGIN_URL_RE = re.compile(
+    r"(?:^|[@/])[A-Za-z0-9_.\-]*github[A-Za-z0-9_.\-]*[:/]"
+    r"([A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+?)(?:\.git)?/?$"
+)
 
 # Heredoc body matcher used to strip body content before opt-out detection.
 # Pattern: `<<` (optionally `-`), optional quote around tag, the tag, any
@@ -223,6 +254,62 @@ def _has_repo_flag(seg: list[Token]) -> tuple[bool, str]:
     return False, ""
 
 
+def _cd_target(seg: list[Token]) -> str | None:
+    """Return the literal path of a bare `cd <path>` segment, else None.
+
+    Compound commands routinely take the shape `cd <worktree> && gh issue
+    create ...`; without this the repo-less arm would resolve `origin` from
+    the payload's cwd, which is not where the write actually runs. Only the
+    unambiguous form is honoured — exactly one POSITIONAL, no shell
+    expansion, no `cd -`, and the COMMAND token must be the bare word `cd`
+    (a subshell-wrapped `(cd x && gh ...)` tokenizes as `(cd`, and its
+    directory change does not persist past `)`, so it is deliberately not
+    tracked; see spec.md "Known limitations").
+    """
+    argv = filter_argv(seg)
+    if not argv or argv[0].text != "cd":
+        return None
+    rest = [t for t in argv[1:] if t.role == TokenRole.POSITIONAL]
+    if len(rest) != 1 or len(argv) != 2:
+        return None
+    path = rest[0].text
+    if not path or path == "-" or path.startswith("~"):
+        return None
+    if any(ch in path for ch in "$`*?"):
+        return None
+    return path
+
+
+def _resolve_origin_repo(cwd: str) -> str | None:
+    """Return `owner/repo` for the checkout at `cwd`, or None.
+
+    Local only: `git -C <cwd> remote get-url origin` reads `.git/config`.
+    Returns None — and the caller then stays silent — for every failure the
+    fail-open contract covers: cwd is not a git checkout, no `origin` remote,
+    git binary missing, non-zero exit, timeout, or an origin URL this parser
+    cannot turn into an `owner/repo` slug.
+    """
+    if not cwd or not os.path.isdir(cwd):
+        return None
+    try:
+        proc = subprocess.run(
+            ["git", "-C", cwd, "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_SEC,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    url = (proc.stdout or "").strip()
+    if not url:
+        return None
+    m = _ORIGIN_URL_RE.search(url)
+    return m.group(1) if m else None
+
+
 def _has_heredoc(seg: list[Token]) -> bool:
     """Return True if seg contains a `<<` heredoc redirect operator.
 
@@ -267,11 +354,22 @@ def _has_heredoc(seg: list[Token]) -> bool:
 # Output helpers
 # ---------------------------------------------------------------------------
 
-def _build_checklist(subcommand: tuple[str, str], repo: str) -> str:
+def _build_checklist(
+    subcommand: tuple[str, str],
+    repo: str,
+    from_flag: bool = True,
+) -> str:
     obj, verb = subcommand
     is_pr = obj == "pr"
-    parts = [
-        f"⚠️  Cross-boundary pre-flight: `gh {obj} {verb} --repo {repo}`",
+    if from_flag:
+        header = [f"⚠️  Cross-boundary pre-flight: `gh {obj} {verb} --repo {repo}`"]
+    else:
+        header = [
+            f"⚠️  Cross-boundary pre-flight: `gh {obj} {verb}` (no --repo flag)",
+            f"    Target resolved from the checkout: {repo}",
+            "    (`git remote get-url origin` — local read, no network call)",
+        ]
+    parts = header + [
         "",
         "Confirm ALL contracts before proceeding:",
         "",
@@ -281,6 +379,8 @@ def _build_checklist(subcommand: tuple[str, str], repo: str) -> str:
         "     Ownership does NOT exempt: a public repo owned by you or your",
         "     own org is a cross-boundary write and needs the same per-action",
         "     prior approval as a third-party repo (praxis #993).",
+        "     Flag style does NOT exempt either: omitting --repo does not make",
+        "     the write local — it lands on the repo named above (praxis #1148).",
         "",
     ]
     if is_pr:
@@ -338,7 +438,20 @@ def main() -> int:
     if not segments:
         return 0
 
+    # Effective working directory for the repo-less arm. Claude Code's
+    # PreToolUse payload carries `cwd`; siblings (gh-label-verify,
+    # anchor-comment-gate, path-probe-gate) all read it with an os.getcwd()
+    # fallback, so this hook does the same rather than assuming os.getcwd().
+    effective_cwd = payload.get("cwd") or os.getcwd()
+
     for seg in segments:
+        # A leading `cd <path>` segment moves the checkout the *next*
+        # segments run in (`cd <worktree> && gh issue create ...`).
+        cd_to = _cd_target(seg)
+        if cd_to is not None:
+            effective_cwd = os.path.normpath(os.path.join(effective_cwd, cd_to))
+            continue
+
         subcommand = _gh_write_subcommand(seg)
         if subcommand is None:
             continue
@@ -355,6 +468,18 @@ def main() -> int:
         has_repo, repo_val = _has_repo_flag(seg)
         if has_repo:
             _emit_ask(_build_checklist(subcommand, repo_val) + compound_cascade_hint(command))
+            return 0
+
+        # Check 3: no --repo flag → the write still targets the repo `gh`
+        # infers from the checkout. Resolve it locally and ask with the same
+        # checklist (issue #1148). Unresolvable checkout → silent, per the
+        # hook's fail-open contract.
+        implicit_repo = _resolve_origin_repo(effective_cwd)
+        if implicit_repo:
+            _emit_ask(
+                _build_checklist(subcommand, implicit_repo, from_flag=False)
+                + compound_cascade_hint(command)
+            )
             return 0
 
     return 0
