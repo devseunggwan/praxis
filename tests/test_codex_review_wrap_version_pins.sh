@@ -97,6 +97,12 @@ assert_pred() {
 # still matching terms.
 assert_pred_rejects() {
   local name="$1" pred="$2" hay="$3"
+  # An empty fixture is rejected by every predicate, so without this guard a
+  # heredoc that failed to build (read-only TMPDIR) turns the whole inversion
+  # control green without any fixture having been read.
+  if [ -z "$hay" ]; then
+    echo "FAIL  [$name] fixture is empty — heredoc did not build"; FAIL=$((FAIL + 1)); return
+  fi
   if "$pred" "$hay"; then
     echo "FAIL  [$name] $pred accepted the inverted fixture"; FAIL=$((FAIL + 1))
   else
