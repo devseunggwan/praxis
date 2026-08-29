@@ -332,6 +332,30 @@ run_case "cd into a non-checkout then repo-less gh (#1148 fail-open)" pass \
 run_case "repo-less read-only stays silent in a resolvable checkout (#1148)" pass \
   'gh issue list --state open'
 
+# ---------------------------------------------------------------------------
+# `--help` / `-h` is a usage query, not a write. The exclusion lives in the
+# shared detector, so BOTH arms must stay silent — the --repo arm asked on
+# these before #1148 and that was already wrong.
+# ---------------------------------------------------------------------------
+
+run_case "repo-less gh pr create --help stays silent (#1148)" pass \
+  'gh pr create --help'
+
+run_case "repo-less gh issue create -h stays silent (#1148)" pass \
+  'gh issue create -h'
+
+run_case "--repo gh pr create --help stays silent (#1148)" pass \
+  'gh pr create --repo devseunggwan/praxis --help'
+
+run_case "--repo gh issue create -h stays silent (#1148)" pass \
+  'gh issue create --repo devseunggwan/praxis -h'
+
+# Control: the exclusion must key on the flag, not on the word "help"
+# appearing anywhere in the segment. A real write whose title says "help"
+# still asks.
+run_case "a write whose title contains 'help' still asks (#1148 control)" ask \
+  'gh issue create --title "help the parser"'
+
 run_case "repo-less gh pr view stays silent (#1148)" pass \
   'gh pr view 12 --json title'
 

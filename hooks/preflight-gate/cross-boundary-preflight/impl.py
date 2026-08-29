@@ -192,9 +192,24 @@ def _gh_write_subcommand(seg: list[Token]) -> tuple[str, str] | None:
     FLAG_VALUE tokens between the object and verb POSITIONALs. Handles
     `gh issue --repo X create` (flags between object and verb) and the
     common `gh --repo X issue create` (flags before object).
+
+    A `--help` / `-h` segment is not a write at all — `gh` prints usage and
+    exits without touching any remote — so it returns None here, at the one
+    point both ask arms share. Putting the exclusion in the shared detector
+    rather than in either arm is deliberate: the `--repo` arm has asked on
+    `gh pr create --repo o/r --help` since before issue #1148, and an
+    exclusion added to only the repo-less arm would invent exactly the
+    flag-style asymmetry #1148 exists to remove. The sibling
+    `pre-gh-pr-create-dedup-gate` carries the same exclusion (`impl.py:98`).
     """
     argv = filter_argv(seg)
     if not argv or not _is_gh_binary(argv[0].text):
+        return None
+
+    if any(
+        t.text in ("--help", "-h") or t.text.startswith(("--help=", "-h="))
+        for t in argv[1:]
+    ):
         return None
 
     n = len(argv)

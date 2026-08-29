@@ -153,6 +153,27 @@ subprocess error, timeout, or an origin URL that yields no `owner/repo`
 slug — the hook exits 0 **silently**, per its standing fail-open contract.
 Silence beats naming the wrong repo in an approval prompt.
 
+##### `--help` is not a write (both arms)
+
+A segment carrying `--help` / `-h` never reaches either ask arm:
+`_gh_write_subcommand` returns `None` for it. `gh` prints usage and exits
+without touching a remote, so gating it surfaces an approval prompt for a
+question.
+
+The exclusion sits in the shared detector rather than in either arm because
+the defect is older than the repo-less arm: `gh pr create --repo o/r --help`
+has asked since before #1148, and this hook is the one place where adding a
+narrower exclusion to only the new arm would rebuild the flag-style asymmetry
+#1148 exists to remove. The sibling `pre-gh-pr-create-dedup-gate` carries the
+same exclusion (`impl.py:98`).
+
+| Command | Action |
+| ------- | ------ |
+| `gh pr create --help` | **PASS** — usage query |
+| `gh issue create -h` | **PASS** — usage query |
+| `gh pr create --repo owner/repo --help` | **PASS** — usage query (was ASK before #1148) |
+| `gh issue create --title "help the parser"` | **ASK** — the exclusion keys on the flag, not the word |
+
 ##### Known limitations
 
 - **Subshell `cd` is not tracked.** `(cd <worktree> && gh issue create ...)`
