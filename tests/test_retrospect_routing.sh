@@ -74,6 +74,39 @@ run_placeholder_check() {
   fi
 }
 
+# Section-scoped anchor check: the pattern must appear inside the block that
+# starts at $start_re and ends at the line matching $end_re (exclusive). A
+# plain document-wide grep cannot tell "Action 2 routes through the gate" from
+# "the gate text exists somewhere else in the file" — issue #1138 was exactly
+# that shape (gate present, `issue` action not wired to it).
+run_section_check() {
+  local name="$1"
+  local path="$2"
+  local start_re="$3"
+  local end_re="$4"
+  local pattern="$5"
+  local section
+  if [ ! -f "$path" ]; then
+    echo "FAIL: $name — missing file $path"
+    FAIL=$((FAIL + 1))
+    FAILED_NAMES+=("$name")
+    return
+  fi
+  section=$(awk -v s="$start_re" -v e="$end_re" '
+    !inside && $0 ~ s { inside = 1; print; next }
+    inside && $0 ~ e { inside = 0 }
+    inside { print }
+  ' "$path")
+  if printf '%s\n' "$section" | grep -q -- "$pattern"; then
+    echo "PASS: $name"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: $name — pattern '$pattern' missing from the $start_re section of $path"
+    FAIL=$((FAIL + 1))
+    FAILED_NAMES+=("$name")
+  fi
+}
+
 run_anchor_check() {
   local name="$1"
   local path="$2"
@@ -169,6 +202,16 @@ run_anchor_check "stage4 reference exists with memory-hint contract" "$SKILL_DIR
 run_anchor_check "stage4 reference reuses repeat scan step 6" "$SKILL_DIR/references/stage4-execution.md" "Stage 2 step 6's repeat scan results"
 run_anchor_check "stage4 reference returns backing_repo misses to step 7" "$SKILL_DIR/references/stage4-execution.md" "re-run Stage 2 step 7"
 run_anchor_check "stage4 reference declares memory-lint CI split intended (issue #975)" "$SKILL_DIR/references/stage4-execution.md" "the intended design, not a residual gap"
+run_anchor_check "stage4 reference shares one cross-boundary write gate (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "## Cross-boundary write gate (shared by Action 2 and Action 4)"
+run_anchor_check "stage4 Step 0 covers issue rows (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "first procedure step for every \`issue\` row and every \`upstream_feedback\` row"
+run_anchor_check "stage4 Step 0a covers issue rows (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "This gate fires for every \`issue\` row and every \`upstream_feedback\` row"
+run_anchor_check "stage4 gate skip prompts name the gated action (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "{gated_action} 액션 제거"
+run_anchor_check "stage4 binds the gate to the issue action (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "{gated_action} = issue"
+run_anchor_check "stage4 binds the gate to the upstream_feedback action (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "{gated_action} = upstream_feedback"
+run_section_check "stage4 Action 2 routes through the shared gate (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "^2\\. \\*\\*GitHub issue" "^3\\. \\*\\*" "Cross-boundary write gate"
+run_section_check "stage4 Action 2 pins gh issue create to --repo (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "^2\\. \\*\\*GitHub issue" "^3\\. \\*\\*" "gh issue create --repo <verified_backing_repo>"
+run_forbidden_check "stage4 gate prompts no longer hardcode the upstream_feedback action (issue #1138)" "upstream_feedback 액션 제거"
+run_anchor_check "SKILL.md action map wires the issue action to the gate (issue #1138)" "$SKILL" "| 2 | GitHub issue | cross-boundary write gate"
 run_forbidden_check "stage4 no longer frames the memory-lint path as an open gap (issue #975)" "still incomplete"
 run_anchor_check "appendices reference exists with Red Flags" "$SKILL_DIR/references/appendices.md" "Red Flags"
 
