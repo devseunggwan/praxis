@@ -68,6 +68,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from collections import deque
 from pathlib import Path
 
@@ -80,6 +81,7 @@ from _paths import (  # type: ignore[import-not-found]  # noqa: E402
     praxis_state_dir,
     resolve_cache_file,
 )
+from _state_lock import state_lock  # type: ignore[import-not-found]  # noqa: E402
 
 DEFAULT_TAIL_LINES = 100
 BYPASS_ENV = "PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT"
@@ -128,12 +130,45 @@ def read_state(path: str) -> dict:
 
 
 def write_state(path: str, state: dict) -> None:
+    """Publish the state atomically, staging through a name of its own.
+
+    The comment above calls this family the session-intent canonical pattern,
+    but until #1034 this was the one member that wrote the final name in
+    place. That makes the state file its own staging file — the degenerate
+    case of DESIGN.md Q0's shared `<path>.tmp` — so two siblings sharing a
+    `session_id` truncate and write the same bytes at the same offset, and the
+    shorter write leaves the longer one's tail behind. Measured, unforced, on
+    the pre-fix code: 5 of 300 concurrent pairs published
+    `{..."short-uuid"}uuuu..."}` — bytes `read_state`'s `except ValueError`
+    answers with an empty dict.
+
+    `tempfile.mkstemp` is the fix its three unlocked siblings already had: the
+    name is unique per call, so no sibling can write into this one's file, and
+    `os.replace` publishes it whole. It is also the floor under `main()`'s
+    `state_lock`, which is fail-open by contract — an unacquired lock leaves
+    the pair racing, and the race has to land on a lost update rather than an
+    unreadable file (the same argument #970 recorded for `jq-config`).
+    """
     try:
         parent = os.path.dirname(path)
         if parent and not os.path.isdir(parent):
             os.makedirs(parent, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(state, fh)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=parent or ".", prefix=".postcompact-context-"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(state, fh)
+            os.replace(tmp_path, path)
+        except Exception:
+            # Broad on purpose, and mirrored from session-intent: json.dump
+            # raises TypeError, not OSError, and any failure before the
+            # replace must not leak the staging file.
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     except (OSError, ValueError):
         pass  # non-fatal: next run will simply re-inject
 
@@ -413,14 +448,23 @@ def main() -> int:
         return 0
 
     state_path = resolve_state_path(session_id)
-    state = read_state(state_path)
-    if state.get("last_compact_uuid_emitted") == compact_uuid:
-        return 0  # already injected for this compaction
+    # Serialized because the read-modify-write below shares a name with any
+    # sibling on this `session_id` — DESIGN.md Q0, re-graded against a live
+    # measurement in #1034. `build_context` shells out inside the section
+    # rather than ahead of it, for the reason `jq-config` records at its own
+    # call site: deciding "already injected" against state a sibling is still
+    # writing is the duplicate this closes, and a build that outruns the 2s
+    # lock deadline only makes the sibling proceed unlocked — which the
+    # per-process staging name in `write_state` already makes survivable.
+    with state_lock(state_path):
+        state = read_state(state_path)
+        if state.get("last_compact_uuid_emitted") == compact_uuid:
+            return 0  # already injected for this compaction
 
-    context = build_context(session_id, cwd, compact_uuid, compact_timestamp)
+        context = build_context(session_id, cwd, compact_uuid, compact_timestamp)
 
-    state["last_compact_uuid_emitted"] = compact_uuid
-    write_state(state_path, state)
+        state["last_compact_uuid_emitted"] = compact_uuid
+        write_state(state_path, state)
 
     json.dump(
         {
