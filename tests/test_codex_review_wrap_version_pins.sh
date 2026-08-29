@@ -6,11 +6,13 @@
 # cannot tell a still-true claim from a stale one. This test pins both
 # directions:
 #
-#   MUST FIRE   — Step 4b and Liveness each name codex@openai-codex 1.0.6 and
-#                 say what a version rise would require; Step 4b names
-#                 adversarial-review as sharing handleReviewCommand.
-#   MUST STAY SILENT — no section claims --background does anything for
-#                 review, and no stray version other than 1.0.6 is pinned.
+#   MUST FIRE   — Step 4b and Liveness each bind codex@openai-codex 1.0.6 to
+#                 its re-measure condition in one block; Step 4b names
+#                 adversarial-review as sharing handleReviewCommand, and states
+#                 --background as a no-op for review.
+#   MUST STAY SILENT — no stray version other than 1.0.6 is pinned.
+#   INVERSION   — fixtures that keep every keyword and say the opposite are
+#                 rejected, so the predicates read the policy, not the terms.
 #
 # Usage: bash tests/test_codex_review_wrap_version_pins.sh
 # Exit:  0 = all pass; 1 = at least one fail
@@ -49,16 +51,77 @@ assert_match() {
   fi
 }
 
-assert_no_match() {
-  local name="$1" hay="$2" pat="$3"
-  if printf '%s' "$hay" | grep -qE -- "$pat"; then
-    echo "FAIL  [$name] expected NO match, found: $pat"
-    printf '%s' "$hay" | grep -nE -- "$pat" | head -5
-    FAIL=$((FAIL + 1))
+# --- relationship predicates (pure: return 0 = the section states it) ---
+
+# A pinned version is only useful if the revisit condition travels with it.
+# Matching `re-measur` anywhere in the slice bought nothing: an edit that
+# scatters the pin and the condition into unrelated paragraphs keeps both
+# tokens present and the assertion green. Require instead that ONE
+# blank-line-separated block carries the pin, the re-measure directive, and
+# the trigger that fires it.
+pin_binds_revisit() {
+  printf '%s\n' "$1" | awk '
+    function check() {
+      if (block ~ /codex@openai-codex 1\.0\.6/ && block ~ /[Rr]e-measur/ \
+          && block ~ /version rises/) found = 1
+    }
+    /^[[:space:]]*$/ { check(); block = ""; next }
+    { block = block $0 "\n" }
+    END { check(); exit (found ? 0 : 1) }
+  '
+}
+
+# Assert what the doc MUST say, not the phrasings it must avoid. The set of
+# ways to claim `--background` works is open — `starts the review
+# asynchronously` and `launches a background task` both mean it and neither
+# was on the old reject list — so enumeration cannot buy this invariant. The
+# set of ways to state the no-op is ours to fix, so require the clause that
+# introduces `--background` (up to the next `.` or `;`) to state it.
+background_clause_states_noop() {
+  printf '%s' "$1" | tr '\n' ' ' \
+    | grep -qE -- '`--background`[^.;]*(never read|changes nothing|neither changes anything|no-op)'
+}
+
+assert_pred() {
+  local name="$1" pred="$2" hay="$3"
+  if "$pred" "$hay"; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] $pred rejected the section"; FAIL=$((FAIL + 1))
+  fi
+}
+
+# Inversion control. A deletion control only shows the predicate reacts to an
+# absent token; it never shows the predicate reads the policy. These fixtures
+# keep every keyword and say the opposite, so a predicate that passes them is
+# still matching terms.
+assert_pred_rejects() {
+  local name="$1" pred="$2" hay="$3"
+  if "$pred" "$hay"; then
+    echo "FAIL  [$name] $pred accepted the inverted fixture"; FAIL=$((FAIL + 1))
   else
     echo "PASS  [$name]"; PASS=$((PASS + 1))
   fi
 }
+
+# Pin and condition present, but in unrelated blocks — the scatter the old
+# `re-measur` match could not see.
+FIXTURE_SCATTERED_PIN="$(cat <<'EOF'
+Measured against `codex@openai-codex 1.0.6` (`scripts/codex-companion.mjs`):
+`options.background` is read at exactly one line, inside `handleTask`.
+
+Re-measure this claim whenever the plugin version rises.
+EOF
+)"
+
+# `--background` promoted to a working flag, in wording the old reject list
+# never enumerated.
+FIXTURE_PROMOTED_BACKGROUND="$(cat <<'EOF'
+It also *accepts* `--wait` and `--background` — both sit in its
+`booleanOptions`; `--background` starts the review asynchronously, and
+`options.background` is read by `handleReviewCommand`.
+EOF
+)"
 
 # --- harness positive control: the slicers actually captured the sections ---
 assert_match "control/step4b-slice-nonempty" "$step4b" 'handleReviewCommand'
@@ -66,15 +129,20 @@ assert_match "control/liveness-slice-nonempty" "$liveness" 'runTrackedJob'
 
 # --- MUST FIRE ---
 assert_match "step4b/version-pin" "$step4b" 'codex@openai-codex 1\.0\.6'
-assert_match "step4b/revisit-condition" "$step4b" '(re-measur|Re-measur)'
+assert_pred "step4b/pin-binds-revisit" pin_binds_revisit "$step4b"
 assert_match "step4b/adversarial-shares-path" "$step4b" 'adversarial-review'
 assert_match "liveness/version-pin" "$liveness" 'codex@openai-codex 1\.0\.6'
-assert_match "liveness/revisit-condition" "$liveness" '(re-measur|Re-measur)'
+assert_pred "liveness/pin-binds-revisit" pin_binds_revisit "$liveness"
 
-# --- MUST STAY SILENT ---
 # The whole point of Step 4b is that --background is a parser-only no-op for
 # review. A future edit must not quietly promote it to a working flag.
-assert_no_match "step4b/no-working-background-flag" "$step4b" '`--background`[^.]*(detach|backgrounds the review|works for review)'
+assert_pred "step4b/background-stated-no-op" background_clause_states_noop "$step4b"
+
+# --- INVERSION CONTROLS ---
+assert_pred_rejects "inversion/scattered-pin" pin_binds_revisit "$FIXTURE_SCATTERED_PIN"
+assert_pred_rejects "inversion/promoted-background" background_clause_states_noop "$FIXTURE_PROMOTED_BACKGROUND"
+
+# --- MUST STAY SILENT ---
 # One pinned version only — catches a half-applied bump that leaves two.
 #
 # Extract every version token and require the distinct set to be exactly
