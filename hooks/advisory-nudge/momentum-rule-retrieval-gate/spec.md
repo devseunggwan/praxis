@@ -98,7 +98,37 @@ is still emitted alongside the deny.
 
 The 6 items (a single keyword hit marks each present, EN/KO): What changed /
 What was verified / What was NOT verified / Risk-blast-radius / Open items /
-explicit approve-ask.
+explicit approve-ask. Keyword groups live in `_BRIEFING_ITEM_GROUPS`
+(`impl.py`); EN/KO variants are enumerated there, not duplicated in prose here.
+
+**Vocabulary coverage is EN/KO substring matching, not free-form Korean
+(issue #1118).** A real 6-item briefing was blocked at 3/6 because it phrased
+group0/2/4 as `무엇이 바뀌는 것` / `검증 안 된` / `열린 항목` — content the
+Pre-Merge Reporting rule fully satisfies, but strings the keyword groups did
+not yet contain (`_BRIEFING_ITEM_GROUPS` had only `무엇이 변경` / `미검증` /
+`미확인` / `남은 항목` / `남은 작업` for those groups). The author was forced to
+rewrite the briefing in the hook's dialect rather than fix content — it
+recurred 6 times in one session (3 PRs × 2 blocks each). Fixed by adding the
+observed variants (`무엇이 바뀌`, `바뀌는 것`, `검증 안 된`, `검증되지 않은`,
+`열린 항목`, `남은 것`) to the existing groups.
+
+**Regression fixture provenance.** `tests/fixtures/momentum-merge-natural-korean-wording.jsonl`
+is a reconstruction from the issue's per-group miss/HIT lists, not the
+original session transcript — the transcript that hit the actual 3/6 block
+belongs to a different session and is not available to the fix. The
+reconstruction reproduces the same group0/2/4 miss pattern that section
+described (verified: pre-fix scores 3/6, post-fix 6/6), but a wording not
+covered by the issue's reproduction could in principle still score below
+4/6 on the real transcript without this fixture catching it.
+
+**Known limitation — vocabulary chasing, not structural scoring.** This gate
+scores by keyword substring, so it stays open-ended: any Korean phrasing not
+yet in `_BRIEFING_ITEM_GROUPS` reads as absent even when the content is
+present. Scoring by briefing *structure* (numbered or bolded 6-part lists)
+was considered and rejected for this fix — it would let a content-free fake
+6-item list pass, defeating the gate's purpose — and is deliberately left
+unimplemented. Revisit only if vocabulary additions keep failing to prevent
+recurrence.
 
 **Window scoping (issue #826).** The mandated Pre-Merge Reporting flow is
 *briefing → user approval → merge*, which necessarily places the briefing in
