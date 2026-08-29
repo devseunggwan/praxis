@@ -11,8 +11,10 @@
 #                 adversarial-review as sharing handleReviewCommand, and states
 #                 --background as a no-op for review.
 #   MUST STAY SILENT — no stray version other than 1.0.6 is pinned.
-#   INVERSION   — fixtures that keep every keyword and say the opposite are
-#                 rejected, so the predicates read the policy, not the terms.
+#   INVERSION   — fixtures that keep every keyword and say the opposite —
+#                 scattered, reworded, and negated — are rejected, so the
+#                 predicates read the policy, not the terms. An unbuilt
+#                 fixture fails rather than counting as a rejection.
 #
 # Usage: bash tests/test_codex_review_wrap_version_pins.sh
 # Exit:  0 = all pass; 1 = at least one fail
@@ -57,13 +59,26 @@ assert_match() {
 # Matching `re-measur` anywhere in the slice bought nothing: an edit that
 # scatters the pin and the condition into unrelated paragraphs keeps both
 # tokens present and the assertion green. Require instead that ONE
-# blank-line-separated block carries the pin, the re-measure directive, and
-# the trigger that fires it.
+# blank-line-separated block carries the pin, and that ONE SENTENCE inside it
+# carries the re-measure directive together with the trigger that fires it.
+#
+# The negation guard is not the reject list this file just deleted. That list
+# had to enumerate ways of *claiming a flag works*, and English has unboundedly
+# many. Negators are a small closed class, and they invert a directive whose
+# positive form is already pinned above — `Do not re-measure if the plugin
+# version rises` keeps every token and means the opposite.
 pin_binds_revisit() {
   printf '%s\n' "$1" | awk '
-    function check() {
-      if (block ~ /codex@openai-codex 1\.0\.6/ && block ~ /[Rr]e-measur/ \
-          && block ~ /version rises/) found = 1
+    BEGIN {
+      NEG = "([Dd]o not|[Dd]oes not|[Dd]on.t|[Nn]ever|[Nn]o need|[Uu]nnecessary|[Nn]ot required|[Nn]o longer)"
+    }
+    function check(   n, i, parts) {
+      if (block !~ /codex@openai-codex 1\.0\.6/) return
+      gsub(/\n/, " ", block)
+      n = split(block, parts, /\. /)
+      for (i = 1; i <= n; i++)
+        if (parts[i] ~ /[Rr]e-measur/ && parts[i] ~ /version rises/ && parts[i] !~ NEG)
+          found = 1
     }
     /^[[:space:]]*$/ { check(); block = ""; next }
     { block = block $0 "\n" }
@@ -77,9 +92,16 @@ pin_binds_revisit() {
 # was on the old reject list — so enumeration cannot buy this invariant. The
 # set of ways to state the no-op is ours to fix, so require the clause that
 # introduces `--background` (up to the next `.` or `;`) to state it.
+#
+# `no-op` is deliberately NOT one of the accepted phrasings: it survives its own
+# negation (`--background` is not a no-op) while `never read` and `changes
+# nothing` do not. Negated clauses are dropped before the match for the same
+# reason the sibling predicate guards them.
 background_clause_states_noop() {
   printf '%s' "$1" | tr '\n' ' ' \
-    | grep -qE -- '`--background`[^.;]*(never read|changes nothing|neither changes anything|no-op)'
+    | grep -oE -- '`--background`[^.;]*' \
+    | grep -vE -- '([Nn]ot |[Nn]o longer|[Ii]sn.t|[Dd]oes not)' \
+    | grep -qE -- '(never read|changes nothing|neither changes anything)'
 }
 
 assert_pred() {
@@ -129,6 +151,22 @@ It also *accepts* `--wait` and `--background` — both sit in its
 EOF
 )"
 
+# Every keyword of the real pin block, with the directive negated.
+FIXTURE_NEGATED_REVISIT="$(cat <<'EOF'
+Measured against `codex@openai-codex 1.0.6` (`scripts/codex-companion.mjs`):
+`options.background` is read at exactly one line, inside `handleTask`.
+Do not re-measure if the plugin version rises.
+EOF
+)"
+
+# `no-op` present, asserted of the opposite policy.
+FIXTURE_NEGATED_NOOP="$(cat <<'EOF'
+It also *accepts* `--wait` and `--background`.
+`--background` is not a no-op — it starts the review asynchronously, and
+`options.background` is read by `handleReviewCommand`.
+EOF
+)"
+
 # --- harness positive control: the slicers actually captured the sections ---
 assert_match "control/step4b-slice-nonempty" "$step4b" 'handleReviewCommand'
 assert_match "control/liveness-slice-nonempty" "$liveness" 'runTrackedJob'
@@ -147,6 +185,8 @@ assert_pred "step4b/background-stated-no-op" background_clause_states_noop "$ste
 # --- INVERSION CONTROLS ---
 assert_pred_rejects "inversion/scattered-pin" pin_binds_revisit "$FIXTURE_SCATTERED_PIN"
 assert_pred_rejects "inversion/promoted-background" background_clause_states_noop "$FIXTURE_PROMOTED_BACKGROUND"
+assert_pred_rejects "inversion/negated-revisit" pin_binds_revisit "$FIXTURE_NEGATED_REVISIT"
+assert_pred_rejects "inversion/negated-noop" background_clause_states_noop "$FIXTURE_NEGATED_NOOP"
 
 # --- MUST STAY SILENT ---
 # One pinned version only — catches a half-applied bump that leaves two.
