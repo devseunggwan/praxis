@@ -565,6 +565,9 @@ def safe_tokenize(command: str) -> list[str]:
     return tokens
 
 
+_GROUP_PREFIX_CHARS = "(){}$`"
+
+
 def strip_prefix(argv: list[str]) -> list[str]:
     """Peel shell keywords, `KEY=VAL` assignments, and wrapper commands off
     the front so argv[0] becomes the real executable.
@@ -582,6 +585,18 @@ def strip_prefix(argv: list[str]) -> list[str]:
     n = len(argv)
     while i < n:
         tok = argv[i]
+        # A token made only of shell grouping characters is syntax, not a
+        # command. `( gh pr merge 1 )` — with a space after the paren — left
+        # `(` at argv[0], and every gate keying on argv[0] went silent:
+        # measured on origin/main, `pre-merge-approval-gate` from ask to
+        # silent, `block-pr-without-caller-evidence` and
+        # `block-pr-without-precommit-evidence` from exit-2 to silent
+        # (issue #1193). `(gh …` with no space already normalized because the
+        # binary helpers strip the prefix off a token that still carries the
+        # name; a lone `(` strips to nothing and matches nothing.
+        if tok and not tok.strip(_GROUP_PREFIX_CHARS):
+            i += 1
+            continue
         if tok in SHELL_KEYWORDS:
             i += 1
             continue
@@ -619,7 +634,6 @@ def strip_prefix(argv: list[str]) -> list[str]:
 # `` `gh …` ``). Stripped before the basename comparison so the binary-name
 # check is not fooled by the wrapper syntax. Mirrors the same constant in the
 # commit-gate hooks' `_is_git_binary`.
-_GROUP_PREFIX_CHARS = "(){}$`"
 
 
 def _is_gh_binary(token: str) -> bool:
@@ -1128,8 +1142,24 @@ def filter_argv(seg: list[Token]) -> list[Token]:
 
     If the segment has no COMMAND token (empty or all-env), returns an
     empty list.
+
+    A token made only of shell grouping characters is skipped, so the real
+    command word lands at `argv[0]`. `( gh pr merge 1 )` — with a space after
+    the paren — types `(` as COMMAND and leaves `gh` POSITIONAL, so every gate
+    keying on `argv[0]` silently missed it: measured on `origin/main`,
+    `pre-merge-approval-gate` went from ask to silent, and both
+    `block-pr-without-caller-evidence` and
+    `block-pr-without-precommit-evidence` from exit-2 to silent (issue #1193).
+    `(gh …` with no space already normalized, because `_is_gh_binary` strips
+    the prefix off a token that still carries the name; a lone `(` strips to
+    nothing and matches no binary at all. `{ …; }` was never affected — the
+    tokenizer does not make `{` a COMMAND.
     """
     for i, tok in enumerate(seg):
-        if tok.role == TokenRole.COMMAND:
-            return seg[i:]
+        if tok.role != TokenRole.COMMAND:
+            continue
+        j = i
+        while j < len(seg) and not seg[j].text.strip(_GROUP_PREFIX_CHARS):
+            j += 1
+        return seg[j:]
     return []
