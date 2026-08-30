@@ -293,7 +293,11 @@ Worked examples live in
 5. `Falsification: ...`
 6. `remedy_reach: ...` — does this remedy's surface fire where the finding was
    uttered? Name the axis it structurally cannot reach, and whether that axis is
-   the larger-damage one. See
+   the larger-damage one. `reach=none` with `worse_axis: yes` has a stated
+   destination rather than a workaround: keep the finding at `note`, and where
+   the unreached axis is prose the agent writes, cite
+   [`ETHOS.md` → Claims that terminate in prose](../../ETHOS.md#claims-that-terminate-in-prose)
+   instead of substituting the reachable half. See
    [`references/stage3-reporting.md`](references/stage3-reporting.md).
 
 #### Pre-Output Falsification Gate (AskUserQuestion)

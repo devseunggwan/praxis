@@ -43,3 +43,31 @@ implements these principles live in [`DESIGN.md`](DESIGN.md).
   intentionally has no marker; `completion-verify` and `retrospect-mix-check`
   same. Bypass marker (`# side-effect:ack`, `# title-length:ack`) exists only
   where the false-positive cost outweighs the silent-bypass risk.
+
+### Claims that terminate in prose
+
+Every hook fires on a tool call. An evidence claim whose only carrier is a
+sentence — "all three surfaces below confirm it", "the run printed the success
+string" — emits no tool call, so there is nothing for a `PreToolUse` or `Stop`
+hook to intercept: the block the sentence points at arrives through a tool the
+gate would have to trust, and the misreading happens in the line written above
+it. For this class **the discipline is the whole remedy, and no gate is
+coming.** Rules already cover the individual failures (`Own-greencheck and
+SUT-comment are not evidence`); they were in force, and the failures happened
+anyway, in prose. A further restatement that implies enforcement exists makes
+the gap harder to see rather than smaller, so the class is named here instead.
+A schema check on the evidence table is the same failure with an extra step —
+it would confirm the shape of a block whose sentence is the part that lied.
+
+The only surface left is compose time. Before pasting an evidence block, answer
+both; neither needs a tool.
+
+1. **Who authored — and who triggered — the thing that produced this output?**
+   A success string printed by the change under test is the system authoring
+   its own oracle: the predicate and the claim it supports share a hand. A run
+   the author started themselves is not organic traffic, and does not discharge
+   a verification anchor that asked for it.
+2. **Does the count in my sentence match the number of blocks below it?** A
+   genuine, unedited, faithfully transcribed block still misleads when the
+   sentence above it claims three surfaces and two are pasted — and the missing
+   one is reliably the surface that was hardest to verify.

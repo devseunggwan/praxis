@@ -336,6 +336,18 @@ row inside a single `retrospect:remedy_reach` fence:
 `reach=full` for a surface that demonstrably cannot fire on the finding's axis
 is the failure this receipt exists to make visible.
 
+`reach=none` with `worse_axis: yes` is the combination with nowhere to go
+unless a destination is stated, so it is stated here: the remedy is the
+discipline itself, and the finding stays `note`. Do not substitute the
+reachable half — a gate on the adjacent tool-call axis, or a schema check on
+the artifact that carried the claim — for the axis no surface reaches; that
+ships enforcement where the failure was not, and the report then reads as
+though the gap had closed. Where the unreached axis is prose the agent writes,
+the standing home is
+[`ETHOS.md` → Claims that terminate in prose](../../../ETHOS.md#claims-that-terminate-in-prose):
+cite it rather than opening a fourth restatement of a rule that was already in
+force.
+
 The `retrospect-mix-check` Stop hook (Gate-11) blocks a Stage 3 report that
 proposes a remedy-layer action without a well-formed fence carrying a complete
 row — `reach=` verdict, `surface:`, and a named `unreached:` axis — **for that
