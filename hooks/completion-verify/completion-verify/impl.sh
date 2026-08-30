@@ -285,6 +285,7 @@ if [ -n "$block_reason" ]; then
   _log="$(praxis_resolve_writable scope-confirm stop-triggered.log)"
   echo "$(date -Iseconds) session=$SESSION_ID blocked_completion_without_evidence" >> "$_log" || true
 
+  # shellcheck disable=SC2034  # read by the EXIT trap installed in sourced record_fire.sh
   PRAXIS_FIRE_DECISION=block
   REASON="Completion claim detected without same-turn verification evidence. ${block_reason} See AGENTS.md Verification section."
   jq -n --arg r "$REASON" '{decision: "block", reason: $r}'

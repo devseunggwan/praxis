@@ -51,14 +51,22 @@ jobs:
         with:
           persist-credentials: false
       # ubuntu-24.04 ships shellcheck, but install explicitly so the job
-      # doesn't silently depend on the runner image. Rules come from
-      # .shellcheckrc at the repo root.
+      # doesn't silently depend on the runner image.
       # The bound from #1046 lives in scripts/ci-apt.sh now, with a retry around
       # it (#1049): bounding alone only made this job fail faster, never pass.
       - run: bash scripts/ci-apt.sh shellcheck
+      # File discovery is delegated to scripts/shellcheck-files.sh (also covers
+      # the extensionless skills/ CLI scripts, #1175) and shared verbatim with
+      # scripts/run-tests.sh step 9 so the two file sets cannot drift. Two
+      # invocations: runtime code gets no rule exclusions; tests/ excludes
+      # SC2154/SC2034, the test-harness-only false positives that used to be
+      # disabled repo-wide via .shellcheckrc (see its comments).
       - run: |
-          find . -name '*.sh' -not -path './.git/*' -print0 \
+          set -o pipefail
+          bash scripts/shellcheck-files.sh runtime \
             | xargs -0 shellcheck --severity=warning
+          bash scripts/shellcheck-files.sh tests \
+            | xargs -0 shellcheck --severity=warning --exclude=SC2154,SC2034
 
   # Trigger moved from push:["**"] to push:[main]+PR, so pre-PR pushes to a
   # feature branch are intentionally unscanned. Coverage for anything that

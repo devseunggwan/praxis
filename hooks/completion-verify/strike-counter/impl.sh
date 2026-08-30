@@ -253,6 +253,7 @@ Before your next action, re-read the relevant sections of ~/.claude/CLAUDE.md an
 $REASONS
 
 $REQUIREMENT"
+      # shellcheck disable=SC2034  # read by the EXIT trap installed in sourced record_fire.sh
       PRAXIS_FIRE_DECISION=block
       jq -n --arg r "$REASON_MSG" '{decision: "block", reason: $r}'
     fi

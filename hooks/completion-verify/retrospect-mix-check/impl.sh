@@ -1021,7 +1021,9 @@ if [ -n "$SILENT_PASS_MATCHES" ]; then
     /<!--[[:space:]]*retrospect:dismissed_candidates end[[:space:]]*-->/ { capture=0 }
     capture { print }
   ')
-  while IFS=$'\t' read -r sp_id sp_sev sp_ev; do
+  # Scanner rows are `<class-id>\t<severity>\t<evidence-snippet>`; the evidence
+  # field is not consumed by this gate, so `_` absorbs it (and any remainder).
+  while IFS=$'\t' read -r sp_id sp_sev _; do
     [ -z "$sp_id" ] && continue
     [ "$sp_sev" = "hard" ] || continue
     sp_covered=false
@@ -1271,6 +1273,7 @@ if [ "$should_block" = "true" ]; then
   done
 
   full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670); Gate-8 → emit a '<!-- retrospect:suppression_ledger begin/end -->' fence carrying 'worst_agent_failure:', 'self_adversarial:', and 'critic_diff:' lines (the Stage 2 self-incrimination pass plus conditional externalized critic tier record, mandatory on every path incl. the clean one), and do not claim none-found/clean when live transcript signals exceed tolerance — surface or justify those signals before Stage 3; Gate-11 → emit a '<!-- retrospect:remedy_reach begin/end -->' fence with one row per remedy-layer finding ('- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na'), naming the axis the remedy's surface structurally cannot reach instead of describing the shortfall as legitimate; Gate-12 → run pre-scan lane 6 (denied_actions) and emit a '<!-- retrospect:denied_actions begin/end -->' fence with one disposed row per structurally-rejected tool call in the transcript ('- denied: \"<verbatim question>\" | tool: <name> | source: user_rejection | confessed: yes|no | disposition: promoted (finding #N)|noted|dismissed (<reason>)') — a refused action has no outcome, so nothing was written about it and the friction scan cannot reach it. See skills/retrospect/references/stage1-2-analysis.md self-incrimination pass and skills/retrospect/references/stage3-reporting.md."
+  # shellcheck disable=SC2034  # read by the EXIT trap installed in sourced record_fire.sh
   PRAXIS_FIRE_DECISION=block
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'
   exit 0

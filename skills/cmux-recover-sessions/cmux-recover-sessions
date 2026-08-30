@@ -263,7 +263,8 @@ elif [[ "$MODE" == "split" ]]; then
 
   while [[ $i -lt ${#SESSIONS[@]} ]]; do
     # First session in workspace: create workspace + send resume
-    IFS='|' read -r _ _ sid1 dir1 msg1 home1 <<< "${SESSIONS[$i]}"
+    # Field 5 (message) is not used on this path — `_` absorbs it.
+    IFS='|' read -r _ _ sid1 dir1 _ home1 <<< "${SESSIONS[$i]}"
     resume_cmd1=$(build_resume_cmd "$sid1" "$home1")
 
     # #1095: skip a single failed workspace instead of aborting the whole
@@ -286,7 +287,9 @@ elif [[ "$MODE" == "split" ]]; then
 
     # Create remaining panes via splits
     while [[ $pane_idx -lt $PANES_PER_WS && $i -lt ${#SESSIONS[@]} ]]; do
-      IFS='|' read -r _ _ sid dir _ home_lbl <<< "${SESSIONS[$i]}"
+      # Fields 4-5 (dir, message) are not used on the split path — splits stay
+      # in the workspace created above, so only sid + home label matter.
+      IFS='|' read -r _ _ sid _ _ home_lbl <<< "${SESSIONS[$i]}"
       resume_cmd=$(build_resume_cmd "$sid" "$home_lbl")
 
       col=$((pane_idx % COLS))

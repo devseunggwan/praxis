@@ -1,8 +1,17 @@
 # ShellCheck configuration for the praxis shell sources.
 #
-# Gate level is `warning` (see .github/workflows/lint.yml). Runtime code
-# (hooks/, scripts/) is clean at this level; the exclusions below silence
-# two classes of false positive that only arise in the test harness:
+# Gate level is `warning`, passed on the command line by the two call sites:
+# the ci.yml `shellcheck` job and scripts/run-tests.sh step 9. Both lint the
+# same file set via scripts/shellcheck-files.sh — *.sh plus the extensionless
+# bash-shebang CLI scripts under skills/ (issue #1175) — split into two
+# invocations:
+#
+#   runtime (everything outside tests/) — no rule exclusions.
+#   tests/                              — --exclude=SC2154,SC2034.
+#
+# No repo-wide disables live here any more. SC2154/SC2034 used to be disabled
+# in this file, but that silenced both checks for runtime code too, while the
+# rationale only ever applied to the test harness:
 #
 #   SC2154 — "var is referenced but not assigned": the hook tests source
 #            shared fixture/helper snippets that define vars indirectly, so
@@ -11,8 +20,11 @@
 #            capture vars (e.g. `out`) that are asserted on conditionally or
 #            kept for readability.
 #
-# These are scoped here rather than with inline directives because they recur
-# across many test files; genuine SC2069/SC2163/SC2164/etc. findings are fixed
-# in the code, not disabled.
-disable=SC2154
-disable=SC2034
+# They are therefore scoped to the tests/ invocation on its command line (a
+# .shellcheckrc only applies from the invocation directory — there is no
+# per-subdirectory inheritance to scope them with). Runtime code keeps both
+# checks; its few structural false positives (e.g. PRAXIS_FIRE_DECISION, read
+# only by the EXIT trap installed in sourced hooks/_lib/record_fire.sh) carry
+# targeted inline `# shellcheck disable=` directives with a reason comment.
+# Genuine SC2069/SC2163/SC2164/etc. findings are fixed in the code, never
+# disabled.
