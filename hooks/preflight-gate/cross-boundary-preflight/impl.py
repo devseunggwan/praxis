@@ -17,11 +17,31 @@ Intercepts three patterns:
    the checkout — so gating on flag style produced an asymmetry where
    `gh issue create --repo devseunggwan/praxis --title t` asked and
    `gh issue create --title t` was silent (issue #1148). The target repo is
-   resolved LOCALLY from `git remote get-url origin` (no network call; the
-   hook's manifest timeout is 5s) and named in the checklist so the user can
-   see what they are approving. If the repo cannot be resolved — cwd is not
-   a git checkout, no `origin` remote, git missing, subprocess error or
-   timeout — the hook stays silent per its fail-open contract.
+   resolved LOCALLY (no network call; the hook's manifest timeout is 5s) and
+   named in the checklist so the user can see what they are approving.
+
+   Resolution follows `gh`'s OWN precedence instead of assuming `origin`.
+   Assuming `origin` is an authorization defect, not a rough edge: the
+   checklist names one repo, the write lands in another, and the user has
+   approved a target they were never shown (CodeRabbit CWE-863 on PR #1149,
+   the same class as the two defects this arm already fixed). The order,
+   read out of `cli/cli` rather than guessed:
+     1. `GH_REPO` — cmdutil.OverrideBaseRepoFunc falls back to
+        `os.Getenv("GH_REPO")` when no `--repo` flag is given, so the env var
+        outranks every remote. Both the `GH_REPO=` assignment prefixed to
+        this very command and the hook process environment are consulted.
+     2. `remote.<name>.gh-resolved` in the checkout's git config — the key
+        `gh repo set-default` writes (git.Client.SetRemoteResolution) and
+        Remotes.ResolvedRemote() reads. Value `base` means that remote's own
+        slug; any other value is an explicit `OWNER/REPO`.
+     3. Otherwise the FIRST remote in gh's preference order — upstream,
+        github, origin, then the rest (context.remoteNameSortScore) — which
+        is not `origin` in a fork checkout that has an `upstream`.
+   A selector that is present but unparseable produces an `UNRESOLVED` ask,
+   so the checklist never names `origin` when `origin` is not the target.
+   If nothing resolves at all — cwd is not a git checkout, no remotes, git
+   missing, subprocess error or timeout — the hook stays silent per its
+   fail-open contract.
 
 3. HEREDOC_BODY — `gh pr create / issue create` with a `<<` heredoc operator
    in the same command segment. Hard-blocks (exit 2) and suggests --body-file.
@@ -119,11 +139,47 @@ OPT_OUT_MARKER = "# cross-boundary:ack"
 
 # Local-only resolution budget for the repo-less arm. The hook's manifest
 # timeout is 5s for the whole process, so the git probe must be cheap and
-# bounded — `git remote get-url origin` reads .git/config and never touches
-# the network. No `gh api` / `gh repo view` here for the same reason.
+# bounded — a single `git config --local --get-regexp` reads .git/config and
+# never touches the network. No `gh api` / `gh repo view` / `gh repo
+# set-default --view` here for the same reason: they are network calls, and
+# shelling out to `gh` from a hook that gates `gh` invites recursion.
 GIT_TIMEOUT_SEC = 2
 
-# Owner/repo extracted from common origin URL forms (same shapes the sibling
+# Name of the environment variable `gh` consults when no `--repo` flag is
+# given (cmdutil.OverrideBaseRepoFunc). It outranks every git remote.
+GH_REPO_ENV = "GH_REPO"
+
+# ONE git exec answers the whole repo-less question: every remote's URL and
+# every `gh repo set-default` marker in a single `--get-regexp`. Two probes
+# would double the per-command cost this hook pays on every Bash call, and
+# the memoization added for exactly that reason would then cache two spawns
+# instead of one. `--local` is deliberate: it is scoped to THIS checkout's
+# config (so a stray `remote.*` in ~/.gitconfig cannot name a repo for a
+# directory that is not a checkout) and it exits 128 outside a repository,
+# which is how the non-git case stays distinguishable from "repo with no
+# remotes". Both still resolve to silence; only one of them is a guess.
+_GIT_CONFIG_ARGS = ("config", "--local", "--get-regexp", r"^remote\..*\.(url|gh-resolved)$")
+
+# gh's remote preference when nothing is explicitly resolved
+# (context.remoteNameSortScore: upstream 3, github 2, origin 1, rest 0).
+# Ties break alphabetically, matching the order `git remote -v` emits.
+_REMOTE_SORT_SCORE = {"upstream": 3, "github": 2, "origin": 1}
+
+# The value `gh repo set-default` writes when the chosen repo IS the remote's
+# own repo; anything else is a literal `OWNER/REPO` (setdefault.go).
+_RESOLVED_BASE = "base"
+
+# Outcomes of repo resolution. `SILENT` is the fail-open contract (exit 0, no
+# output); `UNRESOLVED` still asks, because a selector that exists but cannot
+# be read means a target exists that this hook must not name wrongly.
+_RESOLVED = "resolved"
+_UNRESOLVED = "unresolved"
+_SILENT = "silent"
+
+# A single git-config-safe name segment (owner, repo, or host).
+_NAME_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
+
+# Owner/repo extracted from common remote URL forms (same shapes the sibling
 # `pre-gh-pr-create-dedup-gate` parses, widened to GitHub Enterprise hosts):
 #   git@github.com:owner/repo.git
 #   https://github.com/owner/repo.git
@@ -136,7 +192,7 @@ GIT_TIMEOUT_SEC = 2
 # directory literally named `github` resolved to a plausible-looking
 # `owner/repo` and the checklist then named a repo the write never touches.
 # Host = the part after `scheme://[user@]` or before the `:` in scp syntax.
-_ORIGIN_URL_RE = re.compile(
+_REMOTE_URL_RE = re.compile(
     r"^(?:[A-Za-z][A-Za-z0-9+.\-]*://)?(?:[^/@\s]+@)?"
     r"[A-Za-z0-9_.\-]*github[A-Za-z0-9_.\-]*(?::\d+)?[:/]"
     r"(?:.*/)??"
@@ -329,20 +385,72 @@ def _cd_intent(seg: list[Token], argv: list[Token] | None = None) -> tuple[str, 
     return ("literal", path)
 
 
-def _resolve_origin_repo(cwd: str) -> str | None:
-    """Return `owner/repo` for the checkout at `cwd`, or None.
+def _slug_from_url(url: str) -> str | None:
+    """Return `owner/repo` for a GitHub remote URL, else None."""
+    m = _REMOTE_URL_RE.search(url.strip()) if url else None
+    return m.group(1) if m else None
 
-    Local only: `git -C <cwd> remote get-url origin` reads `.git/config`.
-    Returns None — and the caller then stays silent — for every failure the
-    fail-open contract covers: cwd is not a git checkout, no `origin` remote,
-    git binary missing, non-zero exit, timeout, or an origin URL this parser
-    cannot turn into an `owner/repo` slug.
+
+def _parse_full_name(value: str) -> str | None:
+    """Return `owner/repo` from a gh repo *selector*, else None.
+
+    `gh` accepts `OWNER/REPO`, `HOST/OWNER/REPO` and a full URL wherever a
+    repo is named (ghrepo.FromFullName), and both `GH_REPO` and the
+    `gh-resolved` config value are read through it. Anything else is not a
+    parse failure this hook may paper over: the caller turns None into an
+    `UNRESOLVED` ask, never into a fallback to `origin`.
+    """
+    value = (value or "").strip().rstrip("/")
+    if not value:
+        return None
+    parts = value.split("/")
+    if len(parts) in (2, 3) and all(_NAME_SEGMENT_RE.match(p) for p in parts):
+        return "/".join(parts[-2:])
+    return _slug_from_url(value)
+
+
+def _inline_env_repo(seg: list[Token]) -> str | None:
+    """Return the `GH_REPO=` value assigned in this segment's prefix, or None.
+
+    `GH_REPO=owner/repo gh issue create ...` sets the variable for that one
+    command, so the process environment never sees it — reading only
+    `os.environ` would miss the most direct way to redirect a repo-less write.
+    The role API already models the prefix: env assignments and wrapper words
+    sit BEFORE the COMMAND token (that is what `filter_argv` drops), so
+    scanning up to COMMAND covers both the bare form and `env GH_REPO=x gh …`.
+
+    Returns "" — distinct from None — for an explicit `GH_REPO= gh …`, which
+    is how a caller clears an inherited value: gh's `os.Getenv` then yields
+    "" and falls through to the remotes, and so must this. Last assignment
+    wins, matching the shell.
+    """
+    value: str | None = None
+    prefix = GH_REPO_ENV + "="
+    for tok in seg:
+        if tok.role == TokenRole.COMMAND:
+            break
+        if tok.text.startswith(prefix):
+            value = tok.text[len(prefix):]
+    return value
+
+
+def _read_remote_config(cwd: str) -> dict[str, dict[str, str]] | None:
+    """Return {remote_name: {"url": …, "gh-resolved": …}} for the checkout.
+
+    ONE local `git` exec, no network. Returns None for every case the
+    fail-open contract covers: cwd is not a directory, not a git checkout
+    (git exits 128), git binary missing, subprocess error, or timeout.
+    An empty dict means "a checkout with no usable remotes".
+
+    Remotes with no `url` are dropped: `git remote -v`, which is how gh
+    enumerates remotes, does not list them either, so a `gh-resolved` hung on
+    one is not a default gh would honour.
     """
     if not cwd or not os.path.isdir(cwd):
         return None
     try:
         proc = subprocess.run(
-            ["git", "-C", cwd, "remote", "get-url", "origin"],
+            ["git", "-C", cwd, *_GIT_CONFIG_ARGS],
             capture_output=True,
             text=True,
             timeout=GIT_TIMEOUT_SEC,
@@ -350,13 +458,101 @@ def _resolve_origin_repo(cwd: str) -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    if proc.returncode != 0:
+    # 0 = matches, 1 = no matching key (a checkout with no remotes).
+    # 128 = not a repository. Anything else is an unexpected git failure.
+    if proc.returncode not in (0, 1):
         return None
-    url = (proc.stdout or "").strip()
-    if not url:
-        return None
-    m = _ORIGIN_URL_RE.search(url)
-    return m.group(1) if m else None
+
+    remotes: dict[str, dict[str, str]] = {}
+    for line in (proc.stdout or "").splitlines():
+        key, sep, value = line.partition(" ")
+        if not sep or not key.startswith("remote."):
+            continue
+        # A remote name may itself contain dots (`remote.my.fork.url`), so the
+        # attribute is peeled off the END, not by splitting on the first dot.
+        name, dot, attr = key[len("remote."):].rpartition(".")
+        if not dot or not name or attr not in ("url", "gh-resolved"):
+            continue
+        remotes.setdefault(name, {})[attr] = value.strip()
+    return {name: attrs for name, attrs in remotes.items() if attrs.get("url")}
+
+
+def _remote_order(remotes: dict[str, dict[str, str]]) -> list[str]:
+    """Remote names in gh's base-repo preference order."""
+    return sorted(remotes, key=lambda n: (-_REMOTE_SORT_SCORE.get(n.lower(), 0), n))
+
+
+def _resolve_effective_repo(
+    cwd: str,
+    env_repo: str | None,
+    cache: dict[str, dict[str, dict[str, str]] | None],
+) -> tuple[str, str, str]:
+    """Resolve the repo a repo-less `gh` write would actually target.
+
+    Returns (status, repo_or_reason, selector):
+      (_RESOLVED,   "owner/repo", "<how it was decided>")
+      (_UNRESOLVED, "<reason>",   "")   → ask, naming no repo
+      (_SILENT,     "",           "")   → exit 0 with no output
+
+    The precedence is gh's, not this hook's convenience. See the module
+    docstring for where each step is read out of `cli/cli`.
+    """
+    # 1. GH_REPO — outranks every remote.
+    if env_repo:
+        slug = _parse_full_name(env_repo)
+        if slug:
+            return (_RESOLVED, slug, f"{GH_REPO_ENV} — overrides the checkout's remotes")
+        return (
+            _UNRESOLVED,
+            f"UNRESOLVED — {GH_REPO_ENV} is set and outranks the checkout, "
+            "but its value is not a repository name this hook can parse",
+            "",
+        )
+
+    if cwd not in cache:
+        cache[cwd] = _read_remote_config(cwd)
+    remotes = cache[cwd]
+    if not remotes:
+        return (_SILENT, "", "")
+
+    order = _remote_order(remotes)
+
+    # 2. `gh repo set-default` — the first resolved remote in gh's order wins.
+    for name in order:
+        resolution = remotes[name].get("gh-resolved", "")
+        if not resolution:
+            continue
+        selector = (
+            f"git config remote.{name}.gh-resolved — set by `gh repo set-default`, "
+            "local read, no network call"
+        )
+        if resolution == _RESOLVED_BASE:
+            slug = _slug_from_url(remotes[name].get("url", ""))
+            # A non-GitHub remote yields no slug and gh could not write to it
+            # either — unchanged fail-open, not a guess withheld.
+            return (_RESOLVED, slug, selector) if slug else (_SILENT, "", "")
+        slug = _parse_full_name(resolution)
+        if slug:
+            return (_RESOLVED, slug, selector)
+        return (
+            _UNRESOLVED,
+            "UNRESOLVED — `gh repo set-default` names a repository this hook cannot parse",
+            "",
+        )
+
+    # 3. First remote in gh's order. NOT unconditionally `origin`: a fork
+    #    checkout with an `upstream` resolves there, and naming `origin` would
+    #    put the wrong repo in front of the approval.
+    name = order[0]
+    slug = _slug_from_url(remotes[name].get("url", ""))
+    if not slug:
+        return (_SILENT, "", "")
+    note = "" if name.lower() == "origin" else ", which gh prefers over `origin`"
+    return (
+        _RESOLVED,
+        slug,
+        f"git remote `{name}`{note} — local read, no network call",
+    )
 
 
 def _has_heredoc(seg: list[Token]) -> bool:
@@ -407,17 +603,23 @@ def _build_checklist(
     subcommand: tuple[str, str],
     repo: str,
     from_flag: bool = True,
+    selector: str = "",
 ) -> str:
     obj, verb = subcommand
     is_pr = obj == "pr"
     if from_flag:
         header = [f"⚠️  Cross-boundary pre-flight: `gh {obj} {verb} --repo {repo}`"]
     else:
+        # The selector is named, not just the repo. "Target: X" alone cannot be
+        # checked by the person approving it; "X, because GH_REPO says so" can,
+        # and this arm exists precisely because the wrong selector names the
+        # wrong repo.
         header = [
             f"⚠️  Cross-boundary pre-flight: `gh {obj} {verb}` (no --repo flag)",
-            f"    Target resolved from the checkout: {repo}",
-            "    (`git remote get-url origin` — local read, no network call)",
+            f"    Target repository: {repo}",
         ]
+        if selector:
+            header.append(f"    (resolved from {selector})")
     parts = header + [
         "",
         "Confirm ALL contracts before proceeding:",
@@ -493,10 +695,18 @@ def main() -> int:
     # fallback, so this hook does the same rather than assuming os.getcwd().
     effective_cwd = payload.get("cwd") or os.getcwd()
 
+    # `GH_REPO` exported into the hook's own process environment. The
+    # PreToolUse payload does NOT carry the command's environment — it has
+    # `tool_input.command`, `cwd`, `session_id`, `transcript_path` and nothing
+    # else — so this is the closest real source available: the hook is spawned by
+    # the same Claude Code process that spawns the Bash tool, so an exported
+    # `GH_REPO` reaches both. The gap this leaves is stated in spec.md.
+    ambient_env_repo = os.environ.get(GH_REPO_ENV)
+
     # False once a `cd` this hook cannot model has been seen: from that point
     # `effective_cwd` is a guess, and a guess must not authorize a write.
     cwd_is_known = True
-    resolved_repos: dict[str, str | None] = {}
+    resolved_repos: dict[str, dict[str, dict[str, str]] | None] = {}
 
     for seg in segments:
         # A leading `cd <path>` segment moves the checkout the *next*
@@ -547,27 +757,54 @@ def main() -> int:
         # infers from the checkout. Resolve it locally and ask with the same
         # checklist (issue #1148). Unresolvable checkout → silent, per the
         # hook's fail-open contract.
-        if not cwd_is_known:
+        # A `GH_REPO=` prefix belongs to THIS segment only, so it is read per
+        # segment; the ambient value is the fallback. An explicit empty
+        # assignment (`GH_REPO= gh …`) clears the ambient one, exactly as it
+        # does for gh, which is why the two are merged on `is not None` rather
+        # than on truthiness.
+        inline_env_repo = _inline_env_repo(seg)
+        env_repo = inline_env_repo if inline_env_repo is not None else ambient_env_repo
+
+        # An unmodeled `cd` only matters when the checkout is what decides the
+        # target. `GH_REPO` outranks every remote, so it outranks not knowing
+        # which checkout the command lands in too — asking `UNRESOLVED` there
+        # would hide a target this hook can name exactly.
+        if not cwd_is_known and not env_repo:
+            # `from_flag=False` is not cosmetic: the flag header renders the
+            # repo INSIDE the command line, so omitting it printed
+            # "`gh issue create --repo UNRESOLVED — …`" — an approval prompt
+            # quoting a `--repo` flag the command does not carry.
             _emit_ask(
-                _build_checklist(subcommand, "UNRESOLVED — a `cd` in this command could not be modeled")
+                _build_checklist(
+                    subcommand,
+                    "UNRESOLVED — a `cd` in this command could not be modeled",
+                    from_flag=False,
+                )
                 + compound_cascade_hint(command)
             )
             return 0
 
-        # Memoized per cwd. On the SUCCESS path the probe runs once because
-        # `_emit_ask` returns immediately, but a `None` keeps the loop going
-        # and the next repo-less write segment re-spawned git for the same
-        # directory — deterministic duplication. It matters only when git is
-        # slow: `_GIT_TIMEOUT_SEC` x N segments accumulates, and three such
-        # segments already exceed the manifest's 5s budget, at which point the
-        # hook is killed (fail-open) and the user has still waited the whole
-        # timeout.
-        if effective_cwd not in resolved_repos:
-            resolved_repos[effective_cwd] = _resolve_origin_repo(effective_cwd)
-        implicit_repo = resolved_repos[effective_cwd]
-        if implicit_repo:
+        # `resolved_repos` memoizes the git READ, not the verdict, because the
+        # verdict now also depends on a per-segment `GH_REPO=` prefix. The
+        # probe still runs at most once per directory for the whole command:
+        # on the SUCCESS path `_emit_ask` returns immediately, but a silent
+        # result keeps the loop going, and the next repo-less write segment
+        # would otherwise re-spawn git for the same directory — deterministic
+        # duplication. It matters when git is slow: GIT_TIMEOUT_SEC x N
+        # segments accumulates, and three such segments already exceed the
+        # manifest's 5s budget, at which point the hook is killed (fail-open)
+        # and the user has still waited the whole timeout.
+        status, implicit_repo, selector = _resolve_effective_repo(
+            effective_cwd, env_repo, resolved_repos
+        )
+        if status in (_RESOLVED, _UNRESOLVED):
             _emit_ask(
-                _build_checklist(subcommand, implicit_repo, from_flag=False)
+                _build_checklist(
+                    subcommand,
+                    implicit_repo,
+                    from_flag=False,
+                    selector=selector,
+                )
                 + compound_cascade_hint(command)
             )
             return 0

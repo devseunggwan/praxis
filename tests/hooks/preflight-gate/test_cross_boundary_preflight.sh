@@ -13,6 +13,12 @@
 
 set +e
 
+# `GH_REPO` now participates in target resolution (issue #1149), so an
+# exported value in the invoking shell would silently redirect every
+# repo-less case away from its fixture. Unset it once, up front; the cases
+# that need it set it per-invocation.
+unset GH_REPO
+
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 HOOK="$REPO_ROOT/hooks/preflight-gate/cross-boundary-preflight/impl.py"
 
@@ -49,6 +55,32 @@ FIX_GITLAB="$FIXTURE_ROOT/gitlab-github-path"
 mkdir -p "$FIX_GITLAB"
 ( cd "$FIX_GITLAB" && git init -q && git remote add origin https://gitlab.com/github/tools/repo.git ) >/dev/null 2>&1
 
+# Checkouts whose EFFECTIVE gh target is not `origin` (issue #1149).
+# `gh` resolves a repo-less write via GH_REPO, then `remote.<n>.gh-resolved`
+# (what `gh repo set-default` writes), then the first remote in its own
+# preference order — upstream, github, origin. Every one of these fixtures
+# has a perfectly good `origin`, and naming it would be the bug.
+FIX_SETDEFAULT="$FIXTURE_ROOT/set-default"        # gh-resolved → another repo
+FIX_SETDEFAULT_BASE="$FIXTURE_ROOT/set-default-base"  # gh-resolved = base
+FIX_SETDEFAULT_BAD="$FIXTURE_ROOT/set-default-bad"    # gh-resolved unparseable
+FIX_FORK="$FIXTURE_ROOT/fork-with-upstream"       # upstream outranks origin
+mkdir -p "$FIX_SETDEFAULT" "$FIX_SETDEFAULT_BASE" "$FIX_SETDEFAULT_BAD" "$FIX_FORK"
+( cd "$FIX_SETDEFAULT" && git init -q \
+    && git remote add origin git@github.com:devseunggwan/praxis.git \
+    && git config --add remote.origin.gh-resolved redirected/target ) >/dev/null 2>&1
+# `base` means "this remote's own repo", and it must also beat the upstream
+# preference below it — otherwise honouring the key would be cosmetic.
+( cd "$FIX_SETDEFAULT_BASE" && git init -q \
+    && git remote add origin git@github.com:devseunggwan/praxis.git \
+    && git remote add upstream https://github.com/upstreamowner/praxis.git \
+    && git config --add remote.origin.gh-resolved base ) >/dev/null 2>&1
+( cd "$FIX_SETDEFAULT_BAD" && git init -q \
+    && git remote add origin git@github.com:devseunggwan/praxis.git \
+    && git config --add remote.origin.gh-resolved "not a repo name" ) >/dev/null 2>&1
+( cd "$FIX_FORK" && git init -q \
+    && git remote add origin git@github.com:devseunggwan/praxis.git \
+    && git remote add upstream https://github.com/upstreamowner/praxis.git ) >/dev/null 2>&1
+
 # `git` walks parent directories looking for a checkout, so a TMPDIR that
 # happens to sit inside one would make the not-a-repo fixture resolve an
 # unrelated `origin` — the fail-open case would then pass for the wrong
@@ -78,6 +110,27 @@ if ( cd "$FIX_PLAIN" && git rev-parse --git-dir ) >/dev/null 2>&1; then
   echo "FAIL: fixture $FIX_PLAIN resolves a git checkout — GIT_CEILING_DIRECTORIES is not holding" >&2
   exit 1
 fi
+
+# The #1149 fixtures are the same trap in a sharper form: each one asserts
+# that the hook does NOT name `origin`, and a fixture whose `git config` or
+# second `git remote add` silently failed has nothing but `origin` left — the
+# deny-assertion would then pass while proving the opposite of its intent.
+for _pair in \
+  "$FIX_SETDEFAULT:remote.origin.gh-resolved" \
+  "$FIX_SETDEFAULT_BASE:remote.origin.gh-resolved" \
+  "$FIX_SETDEFAULT_BAD:remote.origin.gh-resolved" ; do
+  _dir="${_pair%%:*}"; _key="${_pair##*:}"
+  if ! ( cd "$_dir" && git config --local --get "$_key" ) >/dev/null 2>&1; then
+    echo "FAIL: fixture $_dir has no $_key — its redirect case would pass vacuously" >&2
+    exit 1
+  fi
+done
+for _dir in "$FIX_SETDEFAULT_BASE" "$FIX_FORK"; do
+  if ! ( cd "$_dir" && git remote get-url upstream ) >/dev/null 2>&1; then
+    echo "FAIL: fixture $_dir has no upstream remote — its case would pass vacuously" >&2
+    exit 1
+  fi
+done
 
 # Default cwd for every case: the resolvable checkout. Cases that need a
 # different checkout pass one explicitly as the trailing argument.
@@ -364,6 +417,175 @@ run_case "repo-less read-only stays silent in a resolvable checkout (#1148)" pas
   'gh issue list --state open'
 
 # ---------------------------------------------------------------------------
+# EFFECTIVE TARGET — the ask must name the repo gh will actually write to
+# (CodeRabbit CWE-863 / Incorrect Authorization on PR #1149)
+#
+# `origin` is not gh's answer to "which repo is this repo-less write for".
+# cmdutil.OverrideBaseRepoFunc falls back to `GH_REPO`; failing that,
+# Remotes.ResolvedRemote() honours `remote.<n>.gh-resolved` — the key
+# `gh repo set-default` writes; failing that, gh takes the first remote in
+# context.remoteNameSortScore order (upstream, github, origin, rest). Naming
+# `origin` under any of the first three means the checklist shows one repo
+# and the write lands in another, which is the whole failure this arm exists
+# to prevent — the user authorizes a target they were never shown.
+#
+# Every case below is a NEGATIVE control as much as a positive one: `deny`
+# pins the absence of the checkout's own `origin` slug. A positive assertion
+# alone would pass on an ask that named both.
+# ---------------------------------------------------------------------------
+
+ORIGIN_SLUG="devseunggwan/praxis"
+
+# assert_target <name> <GH_REPO|__unset__> <command> <want> <deny> [cwd]
+assert_target() {
+  local name="$1" gh_repo="$2" command="$3" want="$4" deny="$5" cwd="${6:-$FIX_REPO}"
+  local out rc ok=1
+  if [ "$gh_repo" = "__unset__" ]; then
+    out=$(mk_payload "$command" "$cwd" | "$HOOK" 2>/dev/null)
+  else
+    out=$(mk_payload "$command" "$cwd" | GH_REPO="$gh_repo" "$HOOK" 2>/dev/null)
+  fi
+  rc=$?
+  [ "$rc" -eq 0 ] || ok=0
+  # want/deny travel as env vars, not as interpolated python source: a needle
+  # containing a quote would otherwise rewrite the assertion it belongs to.
+  printf '%s' "$out" | WANT="$want" DENY="$deny" python3 -c '
+import json, os, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    sys.exit(1)
+try:
+    reason = json.loads(raw)["hookSpecificOutput"]["permissionDecisionReason"]
+except Exception:
+    sys.exit(1)
+want, deny = os.environ["WANT"], os.environ["DENY"]
+if want and want not in reason:
+    sys.exit(1)
+if deny and deny in reason:
+    sys.exit(1)
+sys.exit(0)
+' || ok=0
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [target] $name"; PASS=$((PASS+1))
+  else
+    echo "FAIL  [target: want '$want' / deny '$deny'] $name"; FAIL=$((FAIL+1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# --- selector 1: GH_REPO ----------------------------------------------------
+
+assert_target "GH_REPO redirects the ask away from the checkout's origin (#1149)" \
+  "other/repo" 'gh issue create --title "t"' "other/repo" "$ORIGIN_SLUG"
+
+# The env var need never reach the hook's own environment: an assignment
+# prefixed to the command sets it for that one invocation, which is the most
+# direct way there is to redirect a repo-less write.
+assert_target "an inline GH_REPO= prefix redirects the ask too (#1149)" \
+  "__unset__" 'GH_REPO=inline/target gh issue create --title "t"' \
+  "inline/target" "$ORIGIN_SLUG"
+
+assert_target "an env-wrapper GH_REPO= prefix redirects the ask too (#1149)" \
+  "__unset__" 'env GH_REPO=wrapper/target gh issue create --title "t"' \
+  "wrapper/target" "$ORIGIN_SLUG"
+
+# `GH_REPO= gh …` CLEARS an inherited value — gh's os.Getenv then returns ""
+# and falls through to the remotes, so the hook must fall through with it.
+assert_target "an explicit empty GH_REPO= falls back to the checkout (#1149)" \
+  "other/repo" 'GH_REPO= gh issue create --title "t"' \
+  "$ORIGIN_SLUG" "other/repo"
+
+# GH_REPO decides the target without consulting the checkout at all, so a cwd
+# that is not a checkout no longer justifies silence.
+assert_target "GH_REPO asks even when the cwd is not a checkout (#1149)" \
+  "other/repo" 'gh issue create --title "t"' "other/repo" "" "$FIX_PLAIN"
+
+# ...and for the same reason it outranks a `cd` this hook cannot model: the
+# destination is irrelevant when the env var already fixed the target.
+assert_target "GH_REPO outranks an unmodeled cd rather than asking UNRESOLVED (#1149)" \
+  "other/repo" 'cd "$WORKTREE" && gh issue create --title "t"' \
+  "other/repo" "UNRESOLVED" "$FIX_PLAIN"
+
+# --- selector 2: gh repo set-default ---------------------------------------
+
+assert_target "gh repo set-default redirects the ask away from origin (#1149)" \
+  "__unset__" 'gh issue create --title "t"' \
+  "redirected/target" "$ORIGIN_SLUG" "$FIX_SETDEFAULT"
+
+# `base` names that remote's OWN repo, and must still beat the upstream
+# preference that would otherwise apply in this fixture.
+assert_target "a gh-resolved of 'base' names that remote's own repo (#1149)" \
+  "__unset__" 'gh issue create --title "t"' \
+  "$ORIGIN_SLUG" "upstreamowner" "$FIX_SETDEFAULT_BASE"
+
+assert_target "GH_REPO outranks gh repo set-default, as it does for gh (#1149)" \
+  "other/repo" 'gh issue create --title "t"' \
+  "other/repo" "redirected/target" "$FIX_SETDEFAULT"
+
+# --- selector 3: gh's remote preference order -------------------------------
+
+# A fork checkout: gh scores upstream above origin, so origin is the wrong
+# answer even with no GH_REPO and no set-default anywhere.
+assert_target "an upstream remote outranks origin, as it does for gh (#1149)" \
+  "__unset__" 'gh issue create --title "t"' \
+  "upstreamowner/praxis" "$ORIGIN_SLUG" "$FIX_FORK"
+
+# --- unparseable selectors ask UNRESOLVED, never origin ---------------------
+
+assert_target "an unparseable GH_REPO asks UNRESOLVED, not origin (#1149)" \
+  "not a repo name" 'gh issue create --title "t"' "UNRESOLVED" "$ORIGIN_SLUG"
+
+assert_target "an unparseable gh-resolved asks UNRESOLVED, not origin (#1149)" \
+  "__unset__" 'gh issue create --title "t"' \
+  "UNRESOLVED" "$ORIGIN_SLUG" "$FIX_SETDEFAULT_BAD"
+
+# --- the plain case is unchanged from f5e455d -------------------------------
+
+assert_target "with neither selector set the ask still names origin (#1149 control)" \
+  "__unset__" 'gh issue create --title "t"' "$ORIGIN_SLUG" "UNRESOLVED"
+
+# The checklist must say WHICH selector chose the repo — "target: X" alone is
+# not something the approver can check.
+assert_target "the ask names the selector that chose the repo (#1149)" \
+  "__unset__" 'gh issue create --title "t"' "resolved from git remote \`origin\`" ""
+
+# --- GH_REPO must not widen or narrow any other arm -------------------------
+
+run_case_env_pass() {
+  local name="$1" expected="$2" command="$3" cwd="${4:-$FIX_REPO}"
+  local out err_file err rc ok=1
+  err_file=$(mktemp)
+  out=$(mk_payload "$command" "$cwd" | GH_REPO="other/repo" "$HOOK" 2>"$err_file")
+  rc=$?; err=$(cat "$err_file"); rm -f "$err_file"
+  case "$expected" in
+    pass)  { [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; } || ok=0 ;;
+    block) { [ "$rc" -eq 2 ] && [ -n "$err" ]; } || ok=0 ;;
+  esac
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$expected+GH_REPO] $name"; PASS=$((PASS+1))
+  else
+    echo "FAIL  [$expected+GH_REPO→rc=$rc] $name"; FAIL=$((FAIL+1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+run_case_env_pass "GH_REPO does not make a read-only subcommand ask (#1149)" pass \
+  'gh issue list --state open'
+
+run_case_env_pass "GH_REPO does not make a non-gh command ask (#1149)" pass \
+  'git status'
+
+run_case_env_pass "GH_REPO does not silence the --help exclusion (#1149)" pass \
+  'gh issue create --help'
+
+run_case_env_pass "GH_REPO does not bypass the heredoc hard block (#1149)" block \
+  'gh issue create --title "t" <<EOF'
+
+# The `--repo` flag is gh's highest-precedence selector, above GH_REPO, so the
+# flag arm must keep naming the flag's value.
+assert_target "the --repo flag still outranks GH_REPO (#1149)" \
+  "other/repo" 'gh issue create --repo flag/target --title "t"' \
+  "flag/target" "other/repo"
+
+# ---------------------------------------------------------------------------
 # `--help` / `-h` is a usage query, not a write. The exclusion lives in the
 # shared detector, so BOTH arms must stay silent — the --repo arm asked on
 # these before #1148 and that was already wrong.
@@ -461,6 +683,13 @@ run_case "a bare cd then gh asks with an unresolved target" ask \
 run_case_detail "the unresolved-target ask says so rather than naming a repo" \
   'cd "$WORKTREE" && gh issue create --title "t"' \
   "UNRESOLVED"
+
+# The unresolved ask must not render as a `--repo` flag the command does not
+# carry: `_build_checklist`'s flag header puts the repo INSIDE the quoted
+# command, so the header read "`gh issue create --repo UNRESOLVED — …`".
+assert_target "the unresolved ask does not invent a --repo flag (#1149)" \
+  "__unset__" 'cd "$WORKTREE" && gh issue create --title "t"' \
+  "(no --repo flag)" "--repo UNRESOLVED" "$FIX_PLAIN"
 
 # Controls: an unmodeled cd must not make everything ask.
 run_case "an unmodeled cd with no gh write stays silent" pass \
