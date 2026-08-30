@@ -39,6 +39,7 @@ production prose: every anchor string is asserted present before it is replaced.
 from __future__ import annotations
 
 import importlib.util
+import json
 import shutil
 from pathlib import Path
 
@@ -612,3 +613,28 @@ def test_unreadable_deny_checklist_is_drift_not_a_silent_pass(tmp_path):
     )
     drifts = gates.check(repo)
     assert any("assignment not found" in d for d in drifts), drifts
+
+
+def test_a_rewritten_manifest_is_re_read_not_served_stale(tmp_path):
+    """The parse cache must key on the file's bytes, not only on its path.
+
+    `_load_manifest` is cached because `derive()` runs once per
+    hook-installing host and re-parsed the same 101-entry manifest a dozen
+    times per run. That cache is only safe while a rewrite busts it — every
+    fixture in this file rewrites the manifest under one path and re-runs the
+    checker, so a path-only key would hand them the previous parse and the
+    fixtures would silently stop testing anything.
+    """
+    tree = _tree(tmp_path)
+    assert len(gates.derive(tree, "claude")[0]) == 7
+
+    manifest_path = tree / gates.MANIFEST
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for entry in data["hooks"]:
+        if entry["name"] == "commit-title-length-check":
+            entry.pop("gates", None)
+    manifest_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    names, _ = gates.derive(tree, "claude")
+    assert len(names) == 6, "the rewrite was served from a stale parse"
+    assert "commit-title-length-check" not in names

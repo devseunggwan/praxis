@@ -82,6 +82,7 @@ clean tree; exit 1 listing each drift on failure.
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 import re
 import sys
 from pathlib import Path
@@ -178,14 +179,48 @@ def _is_str_list(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def _load_manifest(repo: Path) -> tuple[Optional[dict], list[str]]:
+@lru_cache(maxsize=8)
+def _load_manifest_cached(
+    repo_key: str, stamp: tuple[int, int]
+) -> tuple[Optional[dict], tuple[str, ...]]:
+    """Parse `hooks/manifest.json` once per repo path.
+
+    `derive()` is called once per hook-installing host and `checklist_names()`
+    once more, so an uncached read re-parsed the same 101-entry manifest a
+    dozen times per run (measured: 12 `openat` calls on it). The parsed value
+    is treated as read-only by every caller in this module — nothing here
+    mutates the manifest or the entries inside it — so one shared object is
+    safe. Drifts are returned as a tuple because `lru_cache` values must not
+    be a mutable list a caller could append to. `stamp` is part of the key so
+    a rewritten manifest is re-read rather than served stale — see
+    `_load_manifest`.
+    """
+    repo = Path(repo_key)
     raw = _read(repo, MANIFEST)
     if raw is None:
-        return None, [f"manifest missing on disk: {MANIFEST}"]
+        return None, (f"manifest missing on disk: {MANIFEST}",)
     try:
-        return json.loads(raw), []
+        return json.loads(raw), ()
     except json.JSONDecodeError as exc:
-        return None, [f"manifest is not valid JSON: {exc}"]
+        return None, (f"manifest is not valid JSON: {exc}",)
+
+
+def _load_manifest(repo: Path) -> tuple[Optional[dict], list[str]]:
+    """Parse the manifest, reusing the parse when the file has not changed.
+
+    The cache key carries the file's mtime and size, not just its path. A
+    fixture that rewrites the manifest under one repo path and re-runs
+    `check()` — which this module's own test suite does throughout — must see
+    the new bytes, and a path-only key would hand it the previous parse.
+    A stat failure degrades to an uncacheable key so the read still happens.
+    """
+    try:
+        st = (repo / MANIFEST).stat()
+        stamp = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        stamp = (-1, -1)
+    manifest, drifts = _load_manifest_cached(str(repo.resolve()), stamp)
+    return manifest, list(drifts)
 
 
 def hook_hosts(repo: Path = REPO) -> tuple[list[str], list[str]]:
