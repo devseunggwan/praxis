@@ -90,6 +90,14 @@ main() is labeled with its number, and this list is the canonical roster
       doc-drift contract, applied to the hook surface. (Numbered 23 to stay
       clear of rules 21/22 added by a parallel PR.)
 
+  24. Canonical matcher token order (#1168): every plain pipe-joined tool-name
+      matcher (hooks and dispatch_groups alike) spells its tokens in sorted
+      order with no duplicates, so identical matcher SETS share one literal
+      spelling and can coalesce into one hooks.json group / dispatch group.
+      Regex-y matchers (any token with characters outside [A-Za-z0-9]) are
+      exempt. (Numbered 24 on rebase: this rule was authored as 21 before
+      rules 21-23 landed on main.)
+
 An unnumbered auxiliary check verifies the Codex adapter symlinks
 (plugins/praxis/{skills,hooks,scripts} → repo root).
 
@@ -1977,6 +1985,52 @@ def main() -> int:
                 f"derived {expected} — update the number(s) at "
                 f"{match.group(0)!r} (#1176)"
             )
+
+    # Rule 24 — canonical matcher token order (#1168)
+    #
+    # Dispatch (and hooks.json grouping) key on the LITERAL matcher string, so
+    # the same tool set spelled two ways (`Edit|Write` vs `Write|Edit`) can
+    # never coalesce into one group — each spelling cold-starts its own
+    # process chain. Canonical spelling: the pipe-joined tokens sorted
+    # lexicographically, no duplicates. Only plain tool-name matchers are
+    # normalized: a matcher with any token containing characters outside
+    # [A-Za-z0-9] (e.g. `mcp__.*`, `mcp__.*slack.*`) is regex-y and exempt —
+    # reordering regex alternations is not guaranteed meaning-preserving.
+    # Applies to hook entries AND dispatch_groups so a group declaration can
+    # never drift from the spelling its members use.
+    # ------------------------------------------------------------------
+    _PLAIN_TOKEN_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
+
+    def _canonical_matcher_drift(matcher: str | None, where: str) -> str | None:
+        if not matcher or "|" not in matcher:
+            return None
+        tokens = matcher.split("|")
+        if not all(_PLAIN_TOKEN_RE.fullmatch(t) for t in tokens):
+            return None  # regex-y matcher — exempt
+        canonical = "|".join(sorted(set(tokens)))
+        if matcher != canonical:
+            return (
+                f"MATCHER ORDER {where}: {matcher!r} is not in canonical "
+                f"(sorted, deduplicated) order — spell it {canonical!r} (#1168)"
+            )
+        return None
+
+    for entry in manifest["hooks"]:
+        entries = entry.get("entries") or [
+            {"event": entry.get("event"), "matcher": entry.get("matcher")}
+        ]
+        for e in entries:
+            drift = _canonical_matcher_drift(
+                e.get("matcher"), f"hook {entry['name']} ({e.get('event')})"
+            )
+            if drift:
+                drifts.append(drift)
+    for group in manifest.get("dispatch_groups", []):
+        drift = _canonical_matcher_drift(
+            group.get("matcher"), f"dispatch_groups ({group.get('event')})"
+        )
+        if drift:
+            drifts.append(drift)
 
     if drifts:
         print("plugin-manifest check FAILED:")

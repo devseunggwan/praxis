@@ -89,6 +89,101 @@ def test_group_members_host_filter():
 
 
 # --------------------------------------------------------------------------- #
+# Edit/Write dispatch groups (#1168)
+#
+# Two separate groups on purpose: the `Edit|Write` members must NOT be folded
+# into the `Edit|NotebookEdit|Write` group — they would start firing on
+# NotebookEdit calls their matcher never covered.
+# --------------------------------------------------------------------------- #
+
+EDIT_WRITE_MEMBERS = {
+    "comment-yap-advisory",
+    "worktree-edit-gate",
+    "write-decision-consistency-gate",
+    "advisory-wrapper-signature-verify",
+    "exclusion-probe-gate",
+}
+EDIT_NOTEBOOK_WRITE_MEMBERS = {
+    "protected-paths-guard",
+    "pre-edit-protected-branch-guard",
+    "path-probe-gate",
+    "bulk-write-memory-checkpoint",
+}
+
+EDIT_NOOP_PAYLOAD = json.dumps(
+    {
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": "/tmp/praxis-dispatch-test/note.md",
+            "old_string": "alpha",
+            "new_string": "beta",
+        },
+        "cwd": str(REPO_ROOT),
+        "session_id": "test-dispatch-edit",
+    }
+)
+
+
+def test_edit_write_group_members():
+    members = _dispatch.group_members("PreToolUse", "Edit|Write")
+    assert {n for _r, n, _i in members} == EDIT_WRITE_MEMBERS
+    for _role, name, impl in members:
+        assert impl.exists(), f"missing impl for {name}: {impl}"
+
+
+def test_edit_notebook_write_group_members():
+    members = _dispatch.group_members("PreToolUse", "Edit|NotebookEdit|Write")
+    assert {n for _r, n, _i in members} == EDIT_NOTEBOOK_WRITE_MEMBERS
+    for _role, name, impl in members:
+        assert impl.exists(), f"missing impl for {name}: {impl}"
+
+
+def test_edit_groups_host_filter():
+    # exclusion-probe-gate / path-probe-gate are hosts:["claude","codex"];
+    # a cursor install's dispatcher must not re-include them.
+    def names(ms):
+        return {n for _r, n, _i in ms}
+
+    assert "exclusion-probe-gate" not in names(
+        _dispatch.group_members("PreToolUse", "Edit|Write", host="cursor")
+    )
+    assert "path-probe-gate" not in names(
+        _dispatch.group_members("PreToolUse", "Edit|NotebookEdit|Write", host="cursor")
+    )
+
+
+@pytest.mark.parametrize(
+    "matcher", ["Edit|Write", "Edit|NotebookEdit|Write"], ids=["ew", "enw"]
+)
+def test_edit_group_noop_allows(matcher):
+    rc = _dispatch.run_group("PreToolUse", matcher, EDIT_NOOP_PAYLOAD)
+    assert rc == 0
+
+
+@pytest.mark.parametrize(
+    "member",
+    _dispatch.group_members("PreToolUse", "Edit|Write")
+    + _dispatch.group_members("PreToolUse", "Edit|NotebookEdit|Write"),
+    ids=lambda m: f"{m[0]}/{m[1]}",
+)
+def test_run_one_matches_subprocess_for_edit_noop(member):
+    role, name, impl = member
+    direct = subprocess.run(
+        [sys.executable, str(impl)],
+        input=EDIT_NOOP_PAYLOAD,
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+    )
+    rc, so, se = _dispatch.run_one(role, name, impl, EDIT_NOOP_PAYLOAD)
+    assert rc == direct.returncode, (
+        f"{role}/{name}: exit mismatch in-process={rc} subprocess={direct.returncode}"
+    )
+    assert so == direct.stdout, f"{role}/{name}: stdout mismatch"
+    assert se == direct.stderr, f"{role}/{name}: stderr mismatch"
+
+
+# --------------------------------------------------------------------------- #
 # per-hook equivalence: in-process run_one == subprocess impl.py
 # --------------------------------------------------------------------------- #
 

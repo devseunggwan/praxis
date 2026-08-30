@@ -5,6 +5,14 @@
     {
       "event": "PreToolUse",
       "matcher": "Bash"
+    },
+    {
+      "event": "PreToolUse",
+      "matcher": "Edit|Write"
+    },
+    {
+      "event": "PreToolUse",
+      "matcher": "Edit|NotebookEdit|Write"
     }
   ],
   "hooks": [
@@ -237,7 +245,7 @@
       "name": "fan-out-scope-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",
-      "matcher": "Bash|Agent",
+      "matcher": "Agent|Bash",
       "timeout": 5
     },
     {
@@ -392,14 +400,14 @@
       "name": "secret-print-redaction-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
-      "matcher": "Bash|Write|Edit",
+      "matcher": "Bash|Edit|Write",
       "timeout": 5
     },
     {
       "name": "comment-yap-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
-      "matcher": "Write|Edit",
+      "matcher": "Edit|Write",
       "timeout": 5
     },
     {
@@ -419,7 +427,7 @@
       "name": "protected-paths-guard",
       "role": "advisory-nudge",
       "event": "PreToolUse",
-      "matcher": "Edit|Write|NotebookEdit",
+      "matcher": "Edit|NotebookEdit|Write",
       "timeout": 5,
       "mode": {
         "strict_env": "PRAXIS_PROTECTED_PATHS_STRICT",
@@ -610,7 +618,7 @@
       "name": "block-personal-asset-leak",
       "role": "advisory-nudge",
       "event": "PreToolUse",
-      "matcher": "Write|Edit|Bash",
+      "matcher": "Bash|Edit|Write",
       "timeout": 5
     },
     {
@@ -723,7 +731,7 @@
       "name": "memory-hint",
       "role": "advisory-nudge",
       "event": "PreToolUse",
-      "matcher": "Bash|Edit|Write|NotebookEdit|AskUserQuestion",
+      "matcher": "AskUserQuestion|Bash|Edit|NotebookEdit|Write",
       "requires": [
         "hookable-memory-store"
       ],
@@ -738,14 +746,14 @@
       "name": "external-api-literal-trigger",
       "role": "advisory-nudge",
       "event": "PreToolUse",
-      "matcher": "Write|Edit|Bash",
+      "matcher": "Bash|Edit|Write",
       "timeout": 5
     },
     {
       "name": "pre-edit-protected-branch-guard",
       "role": "preflight-gate",
       "event": "PreToolUse",
-      "matcher": "Edit|Write|NotebookEdit",
+      "matcher": "Edit|NotebookEdit|Write",
       "timeout": 10,
       "mode": {
         "bypass_env": [
@@ -790,7 +798,7 @@
       "name": "path-probe-gate",
       "role": "advisory-nudge",
       "event": "PreToolUse",
-      "matcher": "Edit|Write|NotebookEdit",
+      "matcher": "Edit|NotebookEdit|Write",
       "hosts": [
         "claude",
         "codex"
@@ -843,14 +851,14 @@
       "name": "advisory-wrapper-signature-verify",
       "role": "advisory-nudge",
       "event": "PreToolUse",
-      "matcher": "Write|Edit",
+      "matcher": "Edit|Write",
       "timeout": 5
     },
     {
       "name": "bulk-write-memory-checkpoint",
       "role": "advisory-nudge",
       "event": "PreToolUse",
-      "matcher": "Edit|Write|NotebookEdit",
+      "matcher": "Edit|NotebookEdit|Write",
       "timeout": 5,
       "mode": {
         "bypass_env": [
@@ -975,7 +983,7 @@
       "name": "builtin-task-postuse",
       "role": "postuse-correction",
       "event": "PostToolUse",
-      "matcher": "TaskCreate|TaskUpdate|TaskGet|TaskList|TaskStop|TaskOutput",
+      "matcher": "TaskCreate|TaskGet|TaskList|TaskOutput|TaskStop|TaskUpdate",
       "hosts": [
         "claude"
       ],

@@ -55,7 +55,7 @@
         ]
       },
       {
-        "matcher": "Bash|Agent",
+        "matcher": "Agent|Bash",
         "hooks": [
           {
             "type": "command",
@@ -75,7 +75,7 @@
         ]
       },
       {
-        "matcher": "Bash|Write|Edit",
+        "matcher": "Bash|Edit|Write",
         "hooks": [
           {
             "type": "command",
@@ -85,27 +85,27 @@
         ]
       },
       {
-        "matcher": "Write|Edit",
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/comment-yap-advisory.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse Edit|Write cursor",
             "timeout": 5
           }
         ]
       },
       {
-        "matcher": "Edit|Write|NotebookEdit",
+        "matcher": "Edit|NotebookEdit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/protected-paths-guard.sh",
-            "timeout": 5
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse Edit|NotebookEdit|Write cursor",
+            "timeout": 10
           }
         ]
       },
       {
-        "matcher": "Write|Edit|Bash",
+        "matcher": "Bash|Edit|Write",
         "hooks": [
           {
             "type": "command",
@@ -115,7 +115,7 @@
         ]
       },
       {
-        "matcher": "Bash|Edit|Write|NotebookEdit|AskUserQuestion",
+        "matcher": "AskUserQuestion|Bash|Edit|NotebookEdit|Write",
         "hooks": [
           {
             "type": "command",
@@ -125,36 +125,11 @@
         ]
       },
       {
-        "matcher": "Write|Edit|Bash",
+        "matcher": "Bash|Edit|Write",
         "hooks": [
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/external-api-literal-trigger.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write|NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-protected-branch-guard.sh",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/worktree-edit-gate.sh",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/write-decision-consistency-gate.sh",
             "timeout": 5
           }
         ]
@@ -165,26 +140,6 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-md-escape-advisory-pre.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/advisory-wrapper-signature-verify.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write|NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/bulk-write-memory-checkpoint.sh",
             "timeout": 5
           }
         ]
