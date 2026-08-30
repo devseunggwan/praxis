@@ -53,6 +53,10 @@ print(json.dumps({
       [ "$rc" -eq 0 ] || ok=0
       [ -z "$out" ]   || ok=0
       echo "$err" | grep -q "\[fallback-negative-warn\]" || ok=0
+      # Bilingual body (#1160): the English lead line must be present on
+      # every advisory alongside the Korean detail.
+      echo "$err" | grep -q "cannot distinguish a failed command" || ok=0
+      echo "$err" | grep -q "구분하지 못합니다" || ok=0
       ;;
     silent)
       [ "$rc" -eq 0 ] || ok=0

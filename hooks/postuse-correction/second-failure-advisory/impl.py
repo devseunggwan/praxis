@@ -143,8 +143,10 @@ from _state_lock import state_lock  # type: ignore[import-not-found]  # noqa: E4
 # fixed "2회째" wording when the advisory stopped firing only on the 2nd failure.
 _ADVISORY_PREFIX_TMPL = (
     "[second-failure-advisory] "
-    "동일한 오류 패턴으로 세션 내 {n}회째 실패가 감지되었습니다. "
-    "원인 분석 없이 즉시 재시도하는 루프가 될 수 있습니다. "
+    "Failure #{n} of the same error pattern in this session — retrying "
+    "without a root-cause read risks a blind retry loop. "
+    "(동일한 오류 패턴으로 세션 내 {n}회째 실패가 감지되었습니다. "
+    "원인 분석 없이 즉시 재시도하는 루프가 될 수 있습니다.) "
 )
 
 # The advisory starts on the 2nd occurrence of a pair and repeats for every
@@ -399,15 +401,21 @@ def _emit_advisory(tool_name: str, signature: str, reference: str, occurrence: i
     thing this hook exists to do.
     """
     message = _ADVISORY_PREFIX_TMPL.format(n=occurrence)
-    message += f"{tool_name} 실패 패턴 {occurrence}회째 재현 중입니다. "
+    message += f"{tool_name} failure pattern recurring, occurrence #{occurrence}. "
     message += f"signature={signature[:12]}"
     if reference:
         message += (
             f" Reference: {reference}"
-            f" — 재시도 전에 {reference}를 read하고 차단 판정 술어를 한 줄로 재진술하세요."
+            f" — before retrying, Read {reference} and restate its blocking"
+            f" predicate in one line"
+            f" (재시도 전에 {reference}를 read하고 차단 판정 술어를 한 줄로"
+            f" 재진술하세요)."
         )
     else:
-        message += " 재시도 전에 차단 판정 술어를 한 줄로 재진술하세요."
+        message += (
+            " Before retrying, restate the blocking predicate in one line"
+            " (재시도 전에 차단 판정 술어를 한 줄로 재진술하세요)."
+        )
     json.dump(
         {
             "continue": True,

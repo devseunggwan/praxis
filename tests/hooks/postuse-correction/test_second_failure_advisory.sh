@@ -165,10 +165,11 @@ rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
 
-if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
-  assert_pass "2) second same failure emits advisory"
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out" \
+    && assert_match "Failure #2" "$out"; then
+  assert_pass "2) second same failure emits advisory (bilingual — #1160)"
 else
-  assert_fail "2) second same failure emits advisory" "rc=$rc out=[$out] err=[$err]"
+  assert_fail "2) second same failure emits advisory (bilingual — #1160)" "rc=$rc out=[$out] err=[$err]"
 fi
 
 # ---------------------------------------------------------------------------
