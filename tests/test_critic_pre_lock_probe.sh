@@ -18,7 +18,15 @@ set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-SKILL="$ROOT_DIR/skills/codex-review-wrap/SKILL.md"
+SKILL_DIR="$ROOT_DIR/skills/codex-review-wrap"
+
+# The #1181 references/ split spread the pinned prose across the SKILL.md
+# spine (execution order) and references/ (5g detail, error handling,
+# limitations, worked example). The assertions pin content, not layout, so
+# the target is the concatenation of the spine and every reference file.
+SKILL="$(mktemp)" || { echo "FATAL: mktemp failed" >&2; exit 1; }
+trap 'rm -f "$SKILL"' EXIT
+cat "$SKILL_DIR/SKILL.md" "$SKILL_DIR/references/"*.md >"$SKILL"
 
 # shellcheck source=./_assert_lib.sh
 source "$SCRIPT_DIR/_assert_lib.sh"

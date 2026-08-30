@@ -54,6 +54,10 @@ description: >
 **Rules:**
 - `name` must exactly match the directory name under `skills/`.
 - `description` should be concise — keep it short enough to scan at a glance.
+- **Hard budget: the folded `description` must stay ≤ 1,024 characters.** The
+  runtime truncates longer descriptions, and since the `Triggers on "..."`
+  clause sits at the end, the trigger keywords are exactly what gets cut.
+  Trim prose, never triggers, to fit the budget.
 - Always end `description` with a `Triggers on "..."` clause so the routing
   table in global `~/.claude/CLAUDE.md` can reference exact keywords.
 - The frontmatter `Triggers on "..."` clause is the **sole** source of trigger
@@ -118,6 +122,32 @@ Add the others when relevant:
 **Step granularity:** each step is one logical operation. Avoid "do A and also
 B" in one step — split. Every step should leave the system in a coherent,
 inspectable state.
+
+#### Progressive disclosure: split large bodies into `references/`
+
+When a skill's body grows past **~15KB**, stop growing the single file and
+split it:
+
+- **`SKILL.md` stays the spine** — frontmatter, Overview, When to Use, the
+  decision flow (step list, execution order, gates that route between steps),
+  and a one-paragraph summary per moved step.
+- **`references/*.md` hold the per-step detail** — procedures, tables, worked
+  examples, prompt templates. One file per coherent group of steps (2–6
+  files), not one per heading.
+- **Link at the point of use.** Every summary in the spine links the reference
+  file that holds its full procedure, and the Overview carries a reference
+  map, so the reader loads detail only when a step actually runs.
+- **Move text, don't rewrite it.** A split is a refactor: normative rules keep
+  their wording; fix only what the move breaks (heading levels, relative
+  links). Every rule in the old body must survive in the spine or a reference.
+
+Precedents: `retrospect` (#687) — an ~18KB spine over six stage references —
+and `codex-review-wrap` (#1181), whose Step 5 detail lives in three
+`references/step5-*.md` files. Note that
+`scripts/check-plugin-manifests.py`'s runtime-metadata gate scans
+`references/*.md` alongside `SKILL.md`, so moving an `AskUserQuestion` or
+external-CLI surface into a reference file does not exempt the skill from the
+verification-metadata requirement.
 
 ### Step 5: Understand Host Differences
 
@@ -199,29 +229,37 @@ Follow the standard praxis PR workflow:
 
 ### Minimal skill (no external CLI)
 
+Verbatim from [`skills/strikes/SKILL.md`](../strikes/SKILL.md) — the
+canonical short-inline-description instance. If the two drift, that file
+wins; update this excerpt.
+
 ```markdown
 ---
 name: strikes
-description: Show the current session's strike count (0-3) and the list of
-  recorded violation reasons. Use when the user types "/strikes", "strike status",
-  "몇 진", "check strikes".
+description: Show the current session's strike count (0-3) and the list of recorded violation reasons. Use when the user types "/strikes", "strike status", "몇 진", "check strikes".
 ---
 
-# Praxis Strikes
+# Praxis Strike Status
 ...
 ```
 
-### Skill with multi-line description and runtime verification
+### Skill with multi-line description and runtime verification (schematic)
+
+The shape below is **schematic** — every `<...>` is a placeholder, and the
+field values are not copied from any real skill. For a real instance of the
+folded description plus the three runtime-verification fields, read
+[`skills/cmux-recover-sessions/SKILL.md`](../cmux-recover-sessions/SKILL.md)
+directly rather than trusting a transcription that can drift.
 
 ```markdown
 ---
-name: cmux-recover-sessions
+name: <skill-name>
 description: >
-  Bulk recover Claude Code sessions after a crash, power loss, OOM kill, or reboot
-  by scanning the .jsonl files Claude Code persists automatically.
-  Triggers on "크래시 복구", "세션 살려야", "crash recovery".
+  <Multi-line description folded with `>` — what the skill does, priority
+  and exclusion notes if trigger collisions are plausible.>
+  Triggers on "<keyword1>", "<keyword2>", "<Korean-keyword>".
 verified-against-runtime: true
-runtime-verified-at: 2026-04-10
-runtime-verified-note: "cmux 1.2.3 — new-workspace accepted; list-workspaces format confirmed"
+runtime-verified-at: <YYYY-MM-DD>
+runtime-verified-note: "<cli-name> <version> — one-line observed behavior"
 ---
 ```
