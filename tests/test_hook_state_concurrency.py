@@ -40,7 +40,9 @@ Neither arm changes hook logic; both wrap the read at the same point.
 """
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -66,8 +68,8 @@ import time
 
 (
     impl_path, lock_mode, delay, read_fn, argv_mode, ready_file, go_file,
-    read_file, peer_read_file,
-) = sys.argv[1:10]
+    read_file, peer_read_file, stage_mode,
+) = sys.argv[1:11]
 
 spec = importlib.util.spec_from_file_location("impl_under_test", impl_path)
 mod = importlib.util.module_from_spec(spec)
@@ -78,6 +80,50 @@ if lock_mode == "nolock":
     def _no_lock(path, timeout=None):
         yield False
     mod.state_lock = _no_lock
+
+if stage_mode == "shared":
+    # Negative control for the Q0 re-grade (#1034). It removes exactly the
+    # property those rows claim as their exemption — a staging name no
+    # sibling can collide on — and nothing else: both children stage through
+    # ONE name, opened without O_TRUNC and pre-filled to a longer sibling's
+    # length, so the shorter write leaves that sibling's tail in place. The
+    # filler is non-UTF-8 so the published file is unambiguously unreadable
+    # rather than merely surprising. This is the #970 mechanism, and it is
+    # what tells a real 0 apart from a harness that never reached the state
+    # file at all (the trap hit during #1017 verification).
+    import tempfile
+
+    _FILLER = b"\\xff" * 4096
+
+    def _shared_fd(path):
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT, 0o600)
+        os.write(fd, _FILLER)
+        os.lseek(fd, 0, os.SEEK_SET)
+        return fd
+
+    def _shared_mkstemp(suffix=None, prefix=None, dir=None, text=False):
+        # Signature mirrors `tempfile.mkstemp` exactly, parameter order
+        # included, so a future row that calls it positionally or passes
+        # `text=` exercises the control instead of crashing the child on a
+        # TypeError. `text` is accepted and ignored because POSIX ignores it
+        # too: tempfile's text and binary open flags differ only by
+        # `os.O_BINARY`, which exists on Windows alone, and praxis hooks
+        # target POSIX hosts.
+        shared = os.path.join(dir or ".", "praxis-shared-stage.tmp")
+        return _shared_fd(shared), shared
+
+    tempfile.mkstemp = _shared_mkstemp
+
+    _real_open = open
+
+    def _shared_open(file, mode="r", *args, **kwargs):
+        # A hook that stages nothing writes the final name in place, so the
+        # shared name IS the state file and there is no mkstemp to replace.
+        if "w" not in mode:
+            return _real_open(file, mode, *args, **kwargs)
+        return os.fdopen(_shared_fd(file), "w", encoding=kwargs.get("encoding"))
+
+    mod.open = _shared_open
 
 _orig_read = getattr(mod, read_fn)
 
@@ -98,7 +144,7 @@ def _slow_read(*args, **kwargs):
     child waits the first out, not that the two overlap.
     """
     result = _orig_read(*args, **kwargs)
-    if lock_mode == "nolock":
+    if lock_mode != "lock":
         open(read_file, "w").close()
         _read_deadline = time.monotonic() + 30
         while not os.path.exists(peer_read_file):
@@ -138,7 +184,15 @@ def _release_barrier(ready_files, go_file: Path) -> None:
     go_file.write_text("go", encoding="utf-8")
 
 
-def _run_pair(driver: Path, impl: Path, lock_mode: str, payloads, read_fn, argv_mode=""):
+def _run_pair(
+    driver: Path,
+    impl: Path,
+    lock_mode: str,
+    payloads,
+    read_fn,
+    argv_mode="",
+    stage_mode="",
+):
     """Launch one child per payload at the same time; return their results.
 
     Each payload is staged as a file and handed over as the child's stdin.
@@ -177,6 +231,7 @@ def _run_pair(driver: Path, impl: Path, lock_mode: str, payloads, read_fn, argv_
                     str(go_file),
                     str(read_files[index]),
                     str(read_files[1 - index]),
+                    stage_mode,
                 ],
                 stdin=handle,
                 stdout=subprocess.PIPE,
@@ -496,3 +551,371 @@ def test_jq_config_staging_file_is_unlinked_on_failure(tmp_path, monkeypatch):
 
     assert not state.exists()
     assert list(tmp_path.iterdir()) == [], "staging file survived a failed replace"
+
+
+# ---------------------------------------------------------------------------
+# Q0 re-grade of the four unlocked `resolve_cache_file` consumers (issue #1034)
+# ---------------------------------------------------------------------------
+#
+# #970 re-graded only the `jq-config` row against Q0 (the corruption axis) and
+# left the rest as an author assertion: "Q0 was applied to the other six only
+# far enough to see that it moves no other row." Two of those six are the
+# already-locked rows above, whose shipped arms assert a state file that still
+# parses — that is their Q0 measurement. The remaining four are these.
+#
+# `lock_mode` is not, on its own, the negative control here. Three of the four
+# modules import no `state_lock` at all, so a `nolock` arm has nothing to
+# replace and would run byte-identical code in both arms; they pass `unlocked`
+# purely to arm the post-read barrier, which is what puts both children at the
+# write together. The control is `stage_mode="shared"`, which strips the one
+# property their exemption rests on — a staging name a sibling cannot collide
+# on — and nothing else. Without it a 0 could not be told apart from a harness
+# that never reached the state file, the exact trap hit during #1017.
+#
+# `postcompact-context` is the row this measurement moved. It staged through
+# no name at all: `write_state` truncated and wrote the FINAL name, so the
+# state file was its own staging file — the degenerate shared name — and 5 of
+# 300 unforced pairs published a short write over a longer sibling's tail. It
+# now takes `state_lock` and stages through `tempfile.mkstemp` like its
+# siblings; with the staging name fixed and the lock neutered, 200 provably
+# overlapping pairs corrupted 0 times and split their survivor 103/97, which
+# is the lost update Q3 already prices as acceptable here.
+
+_POSTCOMPACT_IMPL = HOOKS / "advisory-nudge" / "postcompact-context" / "impl.py"
+
+_Q0_ROWS = (
+    "worktree-prune-snapshot-gate",
+    "retrospect-active-marker",
+    "session-intent",
+    "postcompact-context",
+)
+
+_Q0_SESSION = "race-session"
+
+
+def _compact_transcript(path: Path, uuid: str) -> str:
+    path.write_text(
+        json.dumps(
+            {
+                "type": "user",
+                "isCompactSummary": True,
+                "uuid": uuid,
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return str(path)
+
+
+def _q0_spec(row: str, tmp_path: Path) -> dict:
+    """Impl, env override, payload pair, and barrier point for one row.
+
+    The two payloads are deliberately unequal in length wherever the hook lets
+    them be: a shared staging name only corrupts when the shorter write leaves
+    a longer sibling's tail behind, so equal-length payloads would make the
+    negative control itself unfalsifiable.
+    """
+    if row == "worktree-prune-snapshot-gate":
+        state = tmp_path / "worktree-prune-snapshot.json"
+        payload = {
+            "session_id": _Q0_SESSION,
+            "tool_name": "Bash",
+            "tool_input": {"command": "git worktree list --porcelain"},
+        }
+        return {
+            "impl": HOOKS / "preflight-gate" / row / "impl.py",
+            "env": {"PRAXIS_WORKTREE_PRUNE_SNAPSHOT_FILE": str(state)},
+            "state": state,
+            # The snapshot flag is the same literal for both siblings, so this
+            # row cannot corrupt on content grounds even with one staging name
+            # — the control arm's filler is what supplies the length difference
+            # the hook itself never produces.
+            "barrier_fn": "read_state",
+            "lock_modes": ("unlocked", "unlocked"),
+            "payloads": [payload, payload],
+        }
+    if row == "retrospect-active-marker":
+        state = tmp_path / "retrospect-active.json"
+        return {
+            "impl": HOOKS / "preflight-gate" / row / "impl.py",
+            "env": {"PRAXIS_RETROSPECT_ACTIVE_FILE": str(state)},
+            "state": state,
+            # No read to barrier on — the marker is a whole-file write — so
+            # the barrier sits on the path resolution immediately before it.
+            "barrier_fn": "resolve_state_path",
+            "lock_modes": ("unlocked", "unlocked"),
+            "payloads": [
+                {
+                    "session_id": _Q0_SESSION,
+                    "hookEventName": "PreToolUse",
+                    "tool_name": "Skill",
+                    "tool_input": {"skill": skill},
+                }
+                for skill in ("praxis:retrospect", "retrospect")
+            ],
+        }
+    if row == "session-intent":
+        state = tmp_path / "session-intent.json"
+        return {
+            "impl": HOOKS / "preflight-gate" / row / "impl.py",
+            "env": {"PRAXIS_SESSION_INTENT_FILE": str(state)},
+            "state": state,
+            "barrier_fn": "read_state",
+            "lock_modes": ("unlocked", "unlocked"),
+            "payloads": [
+                {
+                    "session_id": _Q0_SESSION,
+                    "hookEventName": "UserPromptSubmit",
+                    "prompt": prompt,
+                }
+                # `first_prompt_snippet` carries up to 200 prompt characters
+                # into the state, so unequal prompts write unequal files.
+                for prompt in ("read the diff", "review the diff " + "x" * 150)
+            ],
+        }
+    state = tmp_path / "postcompact-context.json"
+    return {
+        "impl": HOOKS / "advisory-nudge" / row / "impl.py",
+        "env": {"PRAXIS_POSTCOMPACT_CONTEXT_FILE": str(state)},
+        "state": state,
+        # The write trails a context build that shells out, so the barrier
+        # goes after that build rather than after the read — barrier on the
+        # read and the two children have drifted apart again by the time they
+        # write. The build sits ahead of the lock (the #1034 review moved it
+        # there, so a slow `gh` can no longer burn a sibling's 2s acquisition
+        # deadline), which puts this barrier one read and one write from the
+        # state file — closer to it than before, not further.
+        "barrier_fn": "build_context",
+        # The one row this measurement moved, and the only one whose arms
+        # neuter a lock it now has. Both arms run `nolock` on purpose, and
+        # not because a `lock` arm would deadlock — the barrier point is
+        # outside the critical section now. It is that a `lock` arm would
+        # serialize the two writes, so the arms would differ by the lock as
+        # well as by the staging name and neither could be attributed.
+        # Neutering the lock in BOTH arms leaves the staging name as the
+        # single variable, and measures the fail-open floor the lock degrades
+        # to rather than hiding behind it. What the lock itself buys is
+        # pinned separately, below.
+        "lock_modes": ("nolock", "nolock"),
+        "payloads": [
+            {
+                "session_id": _Q0_SESSION,
+                "cwd": str(tmp_path),
+                "transcript_path": _compact_transcript(
+                    tmp_path / f"transcript-{index}.jsonl", uuid
+                ),
+            }
+            for index, uuid in enumerate(("short-uuid", "u" * 64))
+        ],
+    }
+
+
+def _state_parses(path: Path) -> bool:
+    """Whether a reader gets the state back, rather than `except ValueError`."""
+    try:
+        json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return True
+
+
+@pytest.mark.parametrize("stage_mode", ["shipped", "shared"])
+@pytest.mark.parametrize("row", _Q0_ROWS)
+def test_q0_staging_collision(driver, tmp_path, monkeypatch, row, stage_mode):
+    spec = _q0_spec(row, tmp_path)
+    for key, value in spec["env"].items():
+        monkeypatch.setenv(key, value)
+
+    outputs = _run_pair(
+        driver,
+        spec["impl"],
+        spec["lock_modes"][0 if stage_mode == "shipped" else 1],
+        spec["payloads"],
+        read_fn=spec["barrier_fn"],
+        stage_mode="" if stage_mode == "shipped" else "shared",
+    )
+
+    for rc, _stdout, stderr in outputs:
+        assert rc == 0, stderr
+
+    assert spec["state"].exists(), "the pair never reached the state file"
+    if stage_mode == "shipped":
+        assert _state_parses(spec["state"]), (
+            "shipped staging published state no reader can parse — this row is "
+            "not Q0-exempt and needs `state_lock`"
+        )
+    else:
+        assert not _state_parses(spec["state"]), (
+            "the negative control produced no corruption: a 0 in the shipped "
+            "arm proves nothing until this arm can fail it"
+        )
+
+
+@pytest.mark.parametrize(
+    "lock_mode,expected_injections",
+    [
+        # Both children read the absent state, neither sees the other's uuid,
+        # and the compaction is injected into two prompts instead of one.
+        ("nolock", 2),
+        # Serialized: the second child waits the first out, and the re-check
+        # under the lock reads the uuid the first just published. It has
+        # already built its context by then — that is the cost of building
+        # ahead of the lock, and it is a discarded build rather than a
+        # duplicate injection.
+        ("lock", 1),
+    ],
+)
+def test_postcompact_double_injection_race(
+    driver, tmp_path, monkeypatch, lock_mode, expected_injections
+):
+    """What the lock added in #1034 buys, on the payload production produces.
+
+    The Q0 arms above hand the two children different transcripts so their
+    writes differ in length — a shared staging name only corrupts when the
+    shorter write leaves a longer one's tail. Two siblings on one `session_id`
+    actually read one transcript and therefore one uuid, and that is the shape
+    the dedup exists for: without the lock both read the absent state and both
+    inject, which is the whole point of recording the uuid at all.
+
+    The barrier sits on `claim_injection` — the decision inside the critical
+    section — rather than on `build_context`, which the #1034 review moved
+    ahead of the lock. It has to sit on a call that has decided and not yet
+    published: barrier on the build and the two children are released with a
+    read still between them and the write, so the first can publish before
+    the second reads and the unlocked arm serializes itself into a 1.
+    """
+    state = tmp_path / "postcompact-context.json"
+    monkeypatch.setenv("PRAXIS_POSTCOMPACT_CONTEXT_FILE", str(state))
+    transcript = _compact_transcript(tmp_path / "transcript.jsonl", "u" * 36)
+    payload = {
+        "session_id": _Q0_SESSION,
+        "cwd": str(tmp_path),
+        "transcript_path": transcript,
+    }
+
+    outputs = _run_pair(
+        driver,
+        _POSTCOMPACT_IMPL,
+        lock_mode,
+        [payload, payload],
+        read_fn="claim_injection",
+    )
+
+    for rc, _stdout, stderr in outputs:
+        assert rc == 0, stderr
+
+    assert _advisory_count(outputs) == expected_injections
+    assert _state_parses(state)
+
+
+def test_postcompact_staging_name_is_its_own(tmp_path, monkeypatch):
+    """The write must publish through a name of its own, pinned without a race.
+
+    The deterministic half of the pair above, for the same reason `jq-config`
+    needed one: the race arm catches this regression only on the scheduling
+    that happens to interleave — the in-place write it replaced corrupted 5 of
+    300 pairs, so a shipped arm alone would pass ~98 times out of 100 against
+    the very defect it exists to catch.
+    """
+    impl = _load_impl(_POSTCOMPACT_IMPL)
+    staged: list[tuple[str, str]] = []
+    real_replace = os.replace
+
+    def _recording_replace(src, dst):
+        staged.append((str(src), str(dst)))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", _recording_replace)
+    state = tmp_path / "postcompact-context-race-session.json"
+
+    impl.write_state(str(state), {"last_compact_uuid_emitted": "first"})
+    impl.write_state(str(state), {"last_compact_uuid_emitted": "second"})
+
+    assert len(staged) == 2, "the state file is written in place, not published"
+    assert staged[0][0] != staged[1][0], "both writes staged through one filename"
+    for src, dst in staged:
+        assert dst == str(state)
+        assert src != str(state), "the state file staged through itself"
+    assert json.loads(state.read_text(encoding="utf-8")) == {
+        "last_compact_uuid_emitted": "second"
+    }
+    assert list(tmp_path.iterdir()) == [state], "a staging file survived"
+
+
+def test_postcompact_build_precedes_the_lock_and_the_recheck_holds(
+    tmp_path, monkeypatch, capsys
+):
+    """Ordering and re-check, pinned deterministically (the #1034 review).
+
+    Two properties, and neither is visible to the race arms above. The first:
+    `build_context` runs OUTSIDE the critical section. It shells out to git
+    and gh under 1.5s and 3.0s timeouts, so a build inside the section can
+    hold the lock for ~4.5s against `state_lock`'s 2s acquisition deadline —
+    every sibling then times out, proceeds unlocked by the fail-open
+    contract, and injects against state the holder has not written yet. The
+    lock arm of the race above cannot see that: its barrier point is inside
+    the section either way, and its build is a `git` call on a tmp dir that
+    returns in milliseconds, so both orderings serialize and both give 1.
+
+    The second: moving the build out is only safe because the decision is
+    re-taken under the lock. This drives exactly the interleaving that makes
+    it load-bearing — a sibling publishes the uuid while this process is
+    inside `build_context`, which is the window the unlocked fast path opened
+    — and asserts this process goes silent. Narrowing the window is not the
+    fix; re-reading inside it is.
+    """
+    impl = _load_impl(_POSTCOMPACT_IMPL)
+    state = tmp_path / "postcompact-context.json"
+    monkeypatch.setenv("PRAXIS_POSTCOMPACT_CONTEXT_FILE", str(state))
+    uuid = "u" * 36
+    transcript = _compact_transcript(tmp_path / "transcript.jsonl", uuid)
+
+    held: list[str] = []
+    real_lock = impl.state_lock
+
+    @contextlib.contextmanager
+    def _tracking_lock(path, timeout=None):
+        held.append(path)
+        try:
+            with real_lock(path, timeout) as acquired:
+                yield acquired
+        finally:
+            held.pop()
+
+    monkeypatch.setattr(impl, "state_lock", _tracking_lock)
+
+    built_inside_lock: list[bool] = []
+    real_build = impl.build_context
+
+    def _sibling_publishes_mid_build(*args, **kwargs):
+        built_inside_lock.append(bool(held))
+        # Stand in for a sibling process that completed the whole
+        # read-modify-write while this one was still shelling out.
+        impl.write_state(str(state), {"last_compact_uuid_emitted": uuid})
+        return real_build(*args, **kwargs)
+
+    monkeypatch.setattr(impl, "build_context", _sibling_publishes_mid_build)
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "session_id": _Q0_SESSION,
+                    "cwd": str(tmp_path),
+                    "transcript_path": transcript,
+                }
+            )
+        ),
+    )
+
+    assert impl.main() == 0
+    assert built_inside_lock == [False], "build_context ran while the lock was held"
+    assert "additionalContext" not in capsys.readouterr().out, (
+        "the in-lock re-check missed a uuid published during the build"
+    )
+    assert json.loads(state.read_text(encoding="utf-8")) == {
+        "last_compact_uuid_emitted": uuid
+    }

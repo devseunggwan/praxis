@@ -94,6 +94,39 @@ CLI / test invocation without a payload; this hook does not, because
 `resolve_state_path`, making the fallback unreachable. Tests use the
 explicit env override instead.
 
+#### Concurrency (issue #1034)
+
+The dedup read-modify-write is serialized with `_lib/_state_lock.state_lock`
+and staged through a `tempfile.mkstemp` name of its own. Until #1034 it had
+neither: `write_state` truncated and wrote the final name, so the state file
+was its own staging file and two processes sharing a `session_id` wrote the
+same bytes at the same offset. 5 of 300 concurrent pairs published a short
+write over a longer sibling's tail — bytes `read_state` answers with an empty
+dict, which re-injects the compaction. The criterion and the per-hook verdicts
+across all seven state-file consumers live in
+[`DESIGN.md → Session-state concurrency`](../../../DESIGN.md#session-state-concurrency).
+
+Readers take no lock — `os.replace` now hands them a whole file. A lock that
+cannot be acquired degrades to the pre-lock behaviour rather than blocking the
+prompt (`@fail_open` contract); the staging name is the floor under that
+degraded path, so an unacquired lock costs one re-injection, never an
+unreadable state file.
+
+The critical section holds one `read_state` and one `write_state`, and
+nothing else. `build_context` shells out to `git` (1.5s) and `gh` (3.0s), so
+building inside the section could hold the lock for ~4.5s against its own 2s
+acquisition deadline — every sibling would then time out, proceed unlocked,
+read state the holder had not written yet, and inject too, which is the
+duplicate the lock exists to close. `main()` therefore builds the context
+before taking the lock, and re-reads inside it: an unlocked pre-check skips
+the build once the uuid is already recorded, but only the in-lock
+`claim_injection` decides whether this run injects, so a sibling that
+published during the build turns this one back. Worst case is the 5.0s build
+(0.5s startup + 1.5s git + 3.0s gh) plus at most the 2.0s acquisition
+deadline — a 7.0s ceiling under the manifest's `timeout: 8`, and the deadline
+is reachable only if a lock holder is descheduled through it, never because a
+holder is waiting on the network.
+
 ### Response format
 
 Success path:
