@@ -13,6 +13,10 @@
     {
       "event": "PreToolUse",
       "matcher": "Edit|NotebookEdit|Write"
+    },
+    {
+      "event": "PreToolUse",
+      "matcher": "Bash|Edit|Write"
     }
   ],
   "hooks": [

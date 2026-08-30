@@ -98,12 +98,13 @@ main() is labeled with its number, and this list is the canonical roster
       exempt, but an empty alternation token (`Edit|`) — which matches every
       tool — is drift. (Numbered 24 on rebase: this rule was authored as 21
       before rules 21-23 landed on main.)
-  25. Generated hook commands are shell-safe (#1198): every `command` string
-      in every platform hooks.json, token-split the way `sh -c` would, yields
-      no bare shell control-operator token — an unquoted pipe-carrying
-      dispatch matcher would otherwise run as a pipeline and silently disable
-      the whole group. (Numbered 25 on rebase: authored as 22 before rules
-      21-23 landed on main.)
+  25. Generated dispatcher commands are shell-safe (#1198): every hooks.json
+      `command` that invokes the dispatch wrapper, token-split the way `sh -c`
+      would, yields no bare shell control-operator token — an unquoted
+      pipe-carrying dispatch matcher would otherwise run as a pipeline and
+      silently disable the whole group. Non-dispatcher commands are out of
+      scope (a deliberate compound command is legitimate shell). (Numbered 25
+      on rebase: authored as 22 before rules 21-23 landed on main.)
 
 An unnumbered auxiliary check verifies the Codex adapter symlinks
 (plugins/praxis/{skills,hooks,scripts} → repo root).
@@ -2057,7 +2058,7 @@ def main() -> int:
             drifts.append(drift)
 
     # ------------------------------------------------------------------
-    # Rule 25 — generated hook commands must be shell-safe (#1198)
+    # Rule 25 — generated dispatcher commands must be shell-safe (#1198)
     #
     # The host executes every hooks.json `command` string via `sh -c`. An
     # UNQUOTED shell control operator in an interpolated value turns the
@@ -2069,7 +2070,14 @@ def main() -> int:
     # suite both invoke the dispatcher directly and bypassed the shell, which
     # is why neither caught it. This rule simulates the shell's token split
     # (shlex with punctuation_chars — quoted operators stay inside their
-    # token) and flags any command that yields a bare control-operator token.
+    # token) and flags a bare control-operator token.
+    #
+    # Scope: ONLY commands that invoke the dispatch wrapper. Those are the
+    # commands whose args the build interpolates from manifest data (matcher /
+    # host), which is the injection surface this rule guards. A per-hook
+    # wrapper command with a deliberate compound form (`... 2>&1`, `a && b`)
+    # is legitimate shell and must not fail CI with a quote-the-matcher
+    # message (round-2 review).
     # ------------------------------------------------------------------
     _SH_CONTROL_CHARS = set("|&;()<>")
 
@@ -2090,14 +2098,17 @@ def main() -> int:
             for group in event_groups:
                 for node in group.get("hooks", []):
                     cmd = node.get("command", "")
+                    if _build.DISPATCH_WRAPPER_NAME not in cmd:
+                        continue  # non-dispatcher command — out of scope
                     bad = _sh_control_tokens(cmd)
                     if bad:
                         rel = hooks_path.relative_to(REPO_ROOT)
                         drifts.append(
                             f"UNQUOTED SHELL OPERATOR {rel} [{event_name}/"
-                            f"{group.get('matcher')}]: command {cmd!r} parses "
-                            f"under `sh -c` with bare operator token(s) {bad!r} "
-                            "— shlex-quote the interpolated value (#1198)"
+                            f"{group.get('matcher')}]: dispatcher command "
+                            f"{cmd!r} parses under `sh -c` with bare operator "
+                            f"token(s) {bad!r} — the interpolated matcher/host "
+                            "must be shlex-quoted (#1198)"
                         )
 
     if drifts:

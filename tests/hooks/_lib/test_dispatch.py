@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import textwrap
 import time
 from pathlib import Path
@@ -52,10 +53,11 @@ NOOP_PAYLOAD = json.dumps(
 # --------------------------------------------------------------------------- #
 
 def test_group_members_count_and_roles():
-    # Exact-`Bash` matcher only. Three advisory hooks (memory-hint,
-    # external-api-literal-trigger, block-personal-asset-leak) carry multi-tool
-    # matchers (Bash|Edit|Write|…) and are intentionally excluded — see
-    # ADR-0002 §2 scope note.
+    # Exact-`Bash` matcher only. Multi-tool hooks (memory-hint,
+    # secret-print-redaction-advisory, external-api-literal-trigger,
+    # block-personal-asset-leak) are NOT in this group — since #1168 the
+    # `Bash|Edit|Write` trio forms its own dispatch group and memory-hint
+    # stays standalone (sole hook on its matcher).
     members = _dispatch.group_members("PreToolUse", "Bash")
     assert len(members) == 49, f"expected 49 exact-Bash members, got {len(members)}"
     # every impl path must exist on disk
@@ -253,12 +255,24 @@ def _generated_dispatcher_commands() -> list[tuple[str, str, str]]:
     return out
 
 
+# One throwaway state root for all sh -c runs in this module: PRAXIS_* is
+# scrubbed below for determinism, and these two puts the hooks' state/ledger
+# writes back into an isolated dir instead of the developer's real ~/.praxis
+# (the fire ledger does NOT fall under PRAXIS_HOME — see scripts/run-tests.sh).
+_SH_TEST_HOME = tempfile.mkdtemp(prefix="praxis-dispatch-sh-")
+
+
 def _sh_env(**extra: str) -> dict:
-    env = dict(os.environ)
+    # Scrub EVERY ambient PRAXIS_* var (strict/bypass/state alike) so the
+    # sh -c executions are deterministic regardless of the developer's shell.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PRAXIS_")}
     # The committed command interpolates ${CLAUDE_PLUGIN_ROOT}; for the claude
     # platform the plugin root is the repo root.
     env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
-    env.pop("PRAXIS_HOOK_BYPASS_PROTECTED_PATHS", None)
+    env["PRAXIS_HOME"] = _SH_TEST_HOME
+    env["PRAXIS_FIRE_TELEMETRY_FILE"] = os.path.join(
+        _SH_TEST_HOME, "fire-events-test.jsonl"
+    )
     env.update(extra)
     return env
 

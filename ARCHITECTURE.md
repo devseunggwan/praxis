@@ -251,21 +251,26 @@ interpreter startup, not hook logic. ADR-0002 collapses that group into **one**
 python3 process.
 
 - **Declaration.** `hooks/manifest.json` carries a `dispatch_groups` array of
-  `{event, matcher}` pairs. Three groups are collapsed today: `(PreToolUse,
+  `{event, matcher}` pairs. Four groups are collapsed today: `(PreToolUse,
   Bash)` — the hooks whose manifest `matcher` is exactly `Bash` (count asserted
   by `tests/hooks/_lib/test_dispatch.py::test_group_members_count_and_roles` —
   keep in sync when adding/removing an exact-`Bash` hook) — plus, since #1168,
-  `(PreToolUse, Edit|Write)` and `(PreToolUse, Edit|NotebookEdit|Write)`.
-  The two Edit groups are deliberately separate: folding an `Edit|Write` hook
-  into the `Edit|NotebookEdit|Write` group would make it fire on NotebookEdit
-  calls its matcher never covered. Matchers are spelled in canonical
-  (alphabetically sorted) token order so identical matcher sets share one
-  literal string and can coalesce — enforced by `check-plugin-manifests.py`
-  Rule 21. Multi-tool hooks whose matcher includes Bash — `memory-hint`
-  (`AskUserQuestion|Bash|Edit|NotebookEdit|Write`), `secret-print-redaction-advisory`,
-  `block-personal-asset-leak` and `external-api-literal-trigger` (`Bash|Edit|Write`)
-  — keep standalone wrappers, because folding them into a Bash-only runner
-  would drop their Edit/Write firing.
+  `(PreToolUse, Edit|Write)`, `(PreToolUse, Edit|NotebookEdit|Write)`, and
+  `(PreToolUse, Bash|Edit|Write)` (secret-print-redaction-advisory,
+  block-personal-asset-leak, external-api-literal-trigger). Groups are keyed
+  by the FULL matcher string, so a multi-tool group never merges into the
+  exact-`Bash` group — each matcher set runs exactly the members that declare
+  it, on exactly the tools it names. The `Edit|Write` and
+  `Edit|NotebookEdit|Write` groups are deliberately separate for the same
+  reason: folding an `Edit|Write` hook into the NotebookEdit group would make
+  it fire on NotebookEdit calls its matcher never covered. Matchers are
+  spelled in canonical (alphabetically sorted) token order so identical
+  matcher sets share one literal string and can coalesce — enforced by
+  `check-plugin-manifests.py` Rule 21. `memory-hint`
+  (`AskUserQuestion|Bash|Edit|NotebookEdit|Write`) keeps its standalone
+  wrapper only because it is the sole hook on that matcher — a one-member
+  group spawns the same single process a wrapper does, so grouping it buys
+  nothing until a second hook shares the matcher.
 - **Build path.** For each platform, `build-plugin-manifests.py`
   (`filter_hooks_for_host`) emits, after host filtering, exactly **one** dispatcher
   node per group — `${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh <event> <matcher>

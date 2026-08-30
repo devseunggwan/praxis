@@ -4,9 +4,10 @@ Supported hosts: all
 
 The hook implementation lives at
 `hooks/advisory-nudge/block-personal-asset-leak/impl.py`; its matcher is
-`Bash|Edit|Write`, so the build emits a standalone per-hook wrapper
-(`hooks/block-personal-asset-leak.sh`) rather than registering it under the
-`(PreToolUse, Bash)` dispatch group it belonged to before issue #658. It fires
+`Bash|Edit|Write`. Issue #658 widened it out of the `(PreToolUse, Bash)`
+dispatch group (a standalone wrapper era), and #1168 folded it into the
+`(PreToolUse, Bash|Edit|Write)` group — it now runs in-process via
+`hooks/_dispatch.sh` with no per-hook wrapper. It fires
 on PreToolUse(Bash|Edit|Write) and emits a stderr advisory on two
 personal-asset marker classes:
 
@@ -182,7 +183,7 @@ write lands.
 - `--body-file` pointing at an unreadable path → treated as empty body → exit 0
 - Body/content with no marker of either class → exit 0
 - Class-2 target unresolvable (no git repo, no origin remote, git error/timeout) → class 2 silent
-- Any uncaught exception → exit 0 via the `@fail_open` decorator (standalone-wrapper requirement, DESIGN.md #645)
+- Any uncaught exception → exit 0 via the `@fail_open` decorator (DESIGN.md #645; the dispatcher double-wraps it harmlessly)
 
 ### Tests
 

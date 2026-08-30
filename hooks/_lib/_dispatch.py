@@ -301,6 +301,14 @@ def run_group(
     except Exception:
         pass
 
+    # KNOWN EXPOSURE (issue #1167): decisions are BUFFERED until every member
+    # has run. If one member stalls long enough that the host kills the
+    # dispatcher at the group timeout, a deny another member already computed
+    # is lost with the process — under per-hook wrappers that deny would have
+    # landed independently. This matters most for the write-path gate groups
+    # (Edit|Write, Edit|NotebookEdit|Write). The per-member deadline and skip
+    # machinery below bounds a stalled member, which narrows the window but
+    # does not close it: the buffering itself is what remains exposed.
     # Per-member deadline (issue #1167): members run sequentially inside ONE
     # host timeout (the max member timeout — see load_group), so without a
     # group deadline one slow member starves every later member and the host

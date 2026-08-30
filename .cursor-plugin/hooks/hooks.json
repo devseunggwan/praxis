@@ -79,7 +79,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/secret-print-redaction-advisory.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse 'Bash|Edit|Write' cursor",
             "timeout": 5
           }
         ]
@@ -105,31 +105,11 @@
         ]
       },
       {
-        "matcher": "Bash|Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-personal-asset-leak.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
         "matcher": "AskUserQuestion|Bash|Edit|NotebookEdit|Write",
         "hooks": [
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/memory-hint.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash|Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/external-api-literal-trigger.sh",
             "timeout": 5
           }
         ]
