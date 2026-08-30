@@ -10,6 +10,10 @@ Background:
   issue #158). This hook enforces the rule at the last checkpoint before
   shared-state mutation.
 
+Tiering (issue #1186): deny only when PRAXIS_PR_EVIDENCE_STRICT is set
+truthy; on shipped defaults the message ships as a stderr advisory and
+the create proceeds (attested-convention principle, #1159).
+
 Allow conditions:
   1. --help / -h invocation (read-only introspection)
   2. --repo/-R targets a different project (cross-project PR)
@@ -43,6 +47,7 @@ Note: env/sudo/command prefix wrappers are transparent via strip_prefix().
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -238,6 +243,25 @@ def _uses_template_without_body(argv: list[str]) -> bool:
 # Main
 # ---------------------------------------------------------------------------
 
+def _strict() -> bool:
+    """Attested-convention tiering (issue #1186, principle from #1159).
+
+    The marker line this gate demands is a praxis-invented convention with
+    no other local attestation signal (no regex env, no detectable
+    dependency), so the only attestation is the explicit
+    PRAXIS_PR_EVIDENCE_STRICT env — shared by both PR-marker gates. Truthy
+    (anything but "0"/empty) -> deny as before; unset/empty/"0" -> the same
+    message ships as a stderr advisory and the create proceeds.
+    """
+    return os.environ.get("PRAXIS_PR_EVIDENCE_STRICT", "").strip() not in ("", "0")
+
+
+_ADVISORY_HEADER = (
+    "[advisory] marker convention not attested locally — gh pr create will "
+    "proceed. Set PRAXIS_PR_EVIDENCE_STRICT=1 to enforce this gate as a "
+    "deny (issue #1186).\n"
+)
+
 BLOCK_MSG = """\
 ❌ BLOCKED: `gh pr create` without caller-chain evidence.
 
@@ -289,10 +313,10 @@ def main() -> int:
         body = _get_effective_body(argv, hmap, command)
         if CALLER_CHAIN_RE.search(_strip_fenced_blocks(body)):
             continue  # evidence present
-        sys.stderr.write(
-            BLOCK_MSG + pr_body_evidence_checklist() + compound_cascade_hint(command)
-        )
-        return 2
+        strict = _strict()
+        msg = BLOCK_MSG + pr_body_evidence_checklist() + compound_cascade_hint(command)
+        sys.stderr.write(msg if strict else _ADVISORY_HEADER + msg)
+        return 2 if strict else 0
 
     return 0
 

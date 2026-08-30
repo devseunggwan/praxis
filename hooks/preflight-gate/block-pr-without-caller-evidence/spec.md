@@ -4,9 +4,21 @@ Supported hosts: claude, codex
 
 `hooks/block-pr-without-caller-evidence.py` fires on every PreToolUse(Bash)
 event and inspects the command for `gh pr create` / `gh pr new` invocations.
-The hook blocks the call unless the effective PR body contains a literal
+The hook blocks the call (when attested — see the tiering section below) unless the effective PR body contains a literal
 `Caller chain verified:` line. Goal: enforce the pre-PR caller-chain grep
 habit at the last checkpoint before shared-state mutation (praxis #158).
+
+### Attested-convention tiering (issue #1186, principle from #1159)
+
+The marker line is a praxis-invented convention with no other local
+attestation signal, so **the deny applies only when
+`PRAXIS_PR_EVIDENCE_STRICT` is set truthy** (anything but `0`/empty; the
+env is shared by both PR-marker gates). On shipped defaults the same
+message ships as a stderr **advisory** — prefixed with a line naming the
+env that escalates it — and the `gh pr create` proceeds: a fresh installer
+cannot be denied by a marker phrase they have never seen. `STRICT=0`
+explicitly forces advisory. All other allow conditions and bypasses are
+unchanged.
 
 ### Why this exists
 
