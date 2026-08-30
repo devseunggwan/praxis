@@ -54,14 +54,21 @@ covered uniformly.
 ### Caching
 
 Label sets are cached per repo at
-`${XDG_CACHE_HOME:-~/.cache}/claude-praxis/gh-label-cache.json`. Cache
-entries expire after `PRAXIS_GH_LABEL_CACHE_TTL_SEC` seconds (default
-300). Cache corruption, write failures, or read failures are all
+`${PRAXIS_HOME:-~/.praxis}/cache/gh-label-cache.json`, resolved through the
+shared `_paths.resolve_cache_file` (#1182) so `PRAXIS_HOME` relocates it and
+the opportunistic `prune_stale` TTL sweep covers it like every other cache
+entry. Cache entries expire after `PRAXIS_GH_LABEL_CACHE_TTL_SEC` seconds
+(default 300). Cache corruption, write failures, or read failures are all
 fail-open: enforcement still runs from a fresh fetch, just without
 persistence.
 
 Override the cache file location via `PRAXIS_GH_LABEL_CACHE_PATH` (used
 by tests; also useful for isolated sandboxes).
+
+Before #1182 the cache lived at
+`${XDG_CACHE_HOME:-~/.cache}/claude-praxis/gh-label-cache.json`, outside the
+documented praxis roots. Old files are not migrated — entries expire in
+minutes, so a stranded file costs at most one refetch and rots harmlessly.
 
 ### Fail-open paths
 

@@ -24,8 +24,10 @@ Pipeline:
        c. If both fail → fail-open (cannot validate without a key).
   5. Fetch label set via `gh label list --repo <r> --limit 300 --json
      name -q '.[].name'`, cached per-repo for PRAXIS_GH_LABEL_CACHE_TTL_SEC
-     (default 300) at <XDG_CACHE_HOME or ~/.cache>/claude-praxis/
-     gh-label-cache.json. Cache corrupt / unwritable → in-memory only.
+     (default 300) at ~/.praxis/cache/gh-label-cache.json (PRAXIS_HOME-
+     relocated via _paths.resolve_cache_file, TTL-swept with the rest of
+     the cache root; PRAXIS_GH_LABEL_CACHE_PATH overrides). Cache corrupt
+     / unwritable → in-memory only.
   6. Decide whether absence from that set is proof. The listing is row-
      limited, so when it comes back full the repo may hold labels we cannot
      see; each absent label is then re-checked via
@@ -65,6 +67,7 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
     fail_open,
     shared_probe_deadline,
 )
+from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     iter_command_starts,
@@ -271,12 +274,13 @@ def _cache_path() -> Path:
     override = os.environ.get("PRAXIS_GH_LABEL_CACHE_PATH")
     if override:
         return Path(override)
-    base = os.environ.get("XDG_CACHE_HOME")
-    if base:
-        root = Path(base)
-    else:
-        root = Path.home() / ".cache"
-    return root / "claude-praxis" / "gh-label-cache.json"
+    # Shared cache root (issue #1182): PRAXIS_HOME relocates the file and the
+    # opportunistic prune_stale sweep covers it, like the other cache entries.
+    # The pre-#1182 <XDG_CACHE_HOME|~/.cache>/claude-praxis/gh-label-cache.json
+    # is deliberately not migrated: entries expire after ~5 minutes
+    # (PRAXIS_GH_LABEL_CACHE_TTL_SEC), so a stranded file only costs one
+    # refetch and rots harmlessly.
+    return Path(resolve_cache_file("gh-label-cache.json"))
 
 
 def _cache_ttl_sec() -> int:

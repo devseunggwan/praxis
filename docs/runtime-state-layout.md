@@ -1,6 +1,6 @@
 # Praxis runtime state layout
 
-Praxis hooks and skills write runtime files under seven roots. Since praxis is
+Praxis hooks and skills write runtime files under five roots. Since praxis is
 multi-platform (Claude, Codex, Cursor, Gemini, OpenCode), these live under a
 **host-neutral** `~/.praxis` root rather than the Claude-nested legacy location.
 The resolver is [`hooks/_lib/_paths.py`](../hooks/_lib/_paths.py), mirrored for
@@ -16,7 +16,6 @@ on opposite sides of that split.
 | `~/.praxis/cache/`         | Regenerable, session-scoped caches / dedup markers | `praxis_cache_dir()`, `resolve_cache_file()` | `PRAXIS_HOME`, per-file env                 |
 | `~/.praxis/logs/`          | Diagnostics                                        | `resolve_writable("logs", …)`                | `PRAXIS_HOME`, per-file env                 |
 | `~/.praxis/telemetry/`     | fire / bypass event ledgers (daily rotation)       | `hooks/_lib/_fire_ledger.py`                 | `PRAXIS_FIRE_TELEMETRY_FILE`, `PRAXIS_HOME` |
-| `~/.praxis/scope-confirm/` | Stop-gate block logs                               | `praxis_resolve_writable scope-confirm …`    | `PRAXIS_HOME`                               |
 | `~/.praxis/docs/specs/`    | Feature specs ([`spec-store.md`](spec-store.md))   | `praxis_specs_dir()`                         | `PRAXIS_HOME`                               |
 
 The spec store is the one root praxis does not write: a person authors those
@@ -56,6 +55,12 @@ dir is not writable, and never raises.
   guard (`PRAXIS_HOOK_ERROR_LOG` overrides). See
   [`hooks/_lib/_hook_runtime.py`](../hooks/_lib/_hook_runtime.py).
 - bypass telemetry — see [`bypass-telemetry.md`](bypass-telemetry.md).
+- `stop-triggered.log` / `retrospect-mix-blocked.log` — Stop-gate block logs
+  from [`completion-verify`](../hooks/completion-verify/completion-verify/spec.md)
+  and [`retrospect-mix-check`](../hooks/completion-verify/retrospect-mix-check/spec.md).
+  Best-effort appends. Before #1182 these lived under an undocumented
+  `~/.praxis/scope-confirm/` root that no sweep covered; old files are not
+  migrated and a legacy `scope-confirm/` directory may linger harmlessly.
 
 ## Volatile caches (`~/.praxis/cache/`)
 
@@ -75,6 +80,7 @@ before #903, which meant `PRAXIS_HOME` did not move them:
 | `bash-worktree-advisory/`                                          | `advisory-nudge/bash-worktree-existence-advisory`                                            |
 | `gh-json-<sid>/`                                                   | `preflight-gate/gh-json-validator`                                                           |
 | `worktree-prune-snapshot-<sid>.json`                               | `preflight-gate/worktree-prune-snapshot-gate`                                                |
+| `gh-label-cache.json`                                              | `preflight-gate/gh-label-verify` (per-repo label sets, #1182 — pre-#1182 XDG location not migrated) |
 
 ### Sweeping
 
