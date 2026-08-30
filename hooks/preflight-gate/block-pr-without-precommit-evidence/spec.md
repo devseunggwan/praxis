@@ -186,7 +186,7 @@ primitive (shlex-based, posix=True). Specifically:
 
 ### Tests
 
-`hooks/test-block-pr-without-precommit-evidence.sh` covers 49 cases (55+ checks; tier boundary cases included) —
+`hooks/test-block-pr-without-precommit-evidence.sh` covers 49 cases (57 checks; tier boundary cases included) —
 positive blocks (no body, body without marker, value-empty marker, marker
 in fenced block, stdin body, missing file, TOCTOU overwrite, `--repo`
 without marker, lookalike-keyword variants), positive passes (each of the

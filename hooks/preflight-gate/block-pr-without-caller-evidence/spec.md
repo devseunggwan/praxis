@@ -42,8 +42,8 @@ line", which removes the failure mode.
 | `--body` / `-b` value contains the marker | allow |
 | `--body-file <path>` content contains the marker | allow |
 | `--body-file -` (stdin) | block\* — pipe content is uninspectable at PreToolUse time |
-| `--body-file <path>` with path missing on disk | block — treat as empty body so the marker check fires |
-| `--body-file <path>` where the same Bash command redirects to `path` (`> path`, `>> path`, `tee path`) | block — TOCTOU; the file on disk is about to be overwritten |
+| `--body-file <path>` with path missing on disk | block\* — treat as empty body so the marker check fires |
+| `--body-file <path>` where the same Bash command redirects to `path` (`> path`, `>> path`, `tee path`) | block\* — TOCTOU; the file on disk is about to be overwritten |
 | Marker present only inside a fenced code block | block\* — fenced blocks are stripped before matching |
 
 \* "block" rows describe the attested tier; on shipped defaults every
@@ -128,7 +128,7 @@ primitive (shlex-based, posix=True). Specifically:
 
 ### Tests
 
-`hooks/test-block-pr-without-caller-evidence.sh` covers 38 cases (41+ checks; tier boundary cases included) —
+`hooks/test-block-pr-without-caller-evidence.sh` covers 39 cases (43 checks; tier boundary cases included) —
 positive blocks (no body, body without marker, marker in fenced block,
 stdin body, missing file, TOCTOU overwrite, marker after newline-only
 gap), positive passes (inline marker, file with marker, heredoc-built
