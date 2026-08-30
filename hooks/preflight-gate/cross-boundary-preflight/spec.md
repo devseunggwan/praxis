@@ -18,11 +18,11 @@ issue #199).
 
 The three patterns covered:
 
-| Pattern                | Trigger                                                                       | Action                                                              |
-| ---------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `HEREDOC_BODY`         | `<<` token in same segment as `gh pr/issue create`                            | **Hard block** (exit 2) — suggests `--body-file`                    |
-| `CROSS_REPO_WRITE`     | `--repo/-R` flag in `gh pr/issue create/comment/edit` (any owner)             | **Ask** — surfaces four-point checklist                             |
-| `IMPLICIT_REPO_WRITE`  | same subcommands with **no** `--repo/-R`, target resolvable from the checkout | **Ask** — same checklist, naming the resolved repo; silent if unresolvable |
+| Pattern               | Trigger                                                                       | Action                                                                     |
+| --------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `HEREDOC_BODY`        | `<<` token in same segment as `gh pr/issue create`                            | **Hard block** (exit 2) — suggests `--body-file`                           |
+| `CROSS_REPO_WRITE`    | `--repo/-R` flag in `gh pr/issue create/comment/edit` (any owner)             | **Ask** — surfaces four-point checklist                                    |
+| `IMPLICIT_REPO_WRITE` | same subcommands with **no** `--repo/-R`, target resolvable from the checkout | **Ask** — same checklist, naming the resolved repo; silent if unresolvable |
 
 ### What is blocked / asked
 
@@ -164,7 +164,7 @@ The exclusion sits in the shared detector rather than in either arm because
 the defect is older than the repo-less arm: `gh pr create --repo o/r --help`
 has asked since before #1148, and this hook is the one place where adding a
 narrower exclusion to only the new arm would rebuild the flag-style asymmetry
-#1148 exists to remove. The sibling `pre-gh-pr-create-dedup-gate` carries the
+removed by #1148. The sibling `pre-gh-pr-create-dedup-gate` carries the
 same exclusion (`impl.py:98`).
 
 | Command | Action |
@@ -176,17 +176,23 @@ same exclusion (`impl.py:98`).
 
 ##### Known limitations
 
-- **Subshell `cd` is not tracked.** `(cd <worktree> && gh issue create ...)`
-  tokenizes the command word as `(cd`, and a subshell's directory change does
-  not persist past `)`, so honouring it would need per-subshell cwd state the
-  segment machinery does not carry. The write is resolved against the
-  payload's `cwd` instead; if that is a checkout the ask still fires, but the
-  repo named may be the outer one. `cd <path> && ...` outside a subshell is
-  tracked, and `cd` targets that need shell expansion (`$VAR`, `~`, globs,
-  `cd -`) are ignored rather than guessed. Ignoring means the payload `cwd`
-  is kept, so the ask still fires — but on a `cd "$WORKTREE" && gh …`, the
-  dominant idiom in this repo's own worktree skills, the repo it names is the
-  outer one. Treat the named target as the resolver's best guess, not proof.
+- **An unmodeled `cd` asks with an unresolved target rather than guessing.**
+  A `cd` needing shell expansion (`$VAR`, `~`, globs), a bare `cd`, and a
+  subshell `(cd x && gh …)` all leave the destination unknowable here. The
+  hook does not fall back to the outer `cwd` for them: the repo-less arm asks
+  with the target named `UNRESOLVED`, because resolving from a directory the
+  write may never run in authorizes it against the wrong repo — and when that
+  outer directory is not a checkout at all, the old fallback went silent
+  entirely, which is a fail-open on an authorization decision. The cost is a
+  prompt on `cd "$WORKTREE" && gh issue create …`, the dominant idiom in this
+  repo's own worktree skills; that is the intended trade.
+- **Why a subshell cannot be modeled.** `(cd <worktree> && gh issue create ...)`
+  tokenizes its command word as `(cd`, and a subshell's directory change does
+  not persist past `)` — but a `gh` call *inside* the same subshell does run
+  under it. Telling those apart needs per-subshell cwd state the segment
+  machinery does not carry, so the form is classified unmodelable and takes
+  the `UNRESOLVED` ask above. `cd <literal> && ...` outside a subshell is
+  still tracked normally.
 - **A `cd` whose target does not exist is not followed.** `cd /nope ; gh
   issue create …` leaves bash in the original checkout, so following the
   target blindly would resolve `origin` somewhere nonexistent and silence the
@@ -206,12 +212,14 @@ same exclusion (`impl.py:98`).
 ### Response format
 
 **HEREDOC_BODY:**
-```
+
+```text
 stderr: "❌ BLOCKED: heredoc (`<<`) in `gh pr/issue create` ..."
 exit 2
 ```
 
 **CROSS_REPO_WRITE / IMPLICIT_REPO_WRITE:**
+
 ```json
 {
   "hookSpecificOutput": {
@@ -277,7 +285,7 @@ Covers 85 cases: heredoc block paths (originals + F2 regression), cross-repo
 ask paths (shorthand flags, chained commands, equals forms, F1 regression,
 own-org targets per #993), repo-less ask paths (all eight `GH_WRITE_SUBCOMMANDS`
 pairs, path-prefixed binary, chained command, `cd <checkout> && gh …` per
-#1148), ask-detail checks (caller chain item present/absent by subcommand,
+issue #1148), ask-detail checks (caller chain item present/absent by subcommand,
 ownership-is-no-exemption wording per #993, resolved repo named and
 flag-style-is-no-exemption wording per #1148), a block-msg content check
 (ack-placement bullet present in stderr), the F2 false-positive guard, pass

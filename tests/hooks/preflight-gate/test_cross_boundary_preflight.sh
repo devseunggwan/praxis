@@ -404,6 +404,46 @@ run_case "a gitlab remote with 'github' in the path stays silent" pass \
   'gh issue create --title "t"' \
   "$FIX_GITLAB"
 
+# ---------------------------------------------------------------------------
+# A `cd` this hook cannot model must not fail open. Resolving from the OUTER
+# cwd authorizes a write against a repo it never touches, and when that outer
+# cwd is not a checkout the gate went silent entirely — a fail-open on an
+# authorization decision (CodeRabbit CWE-863 on PR #1149).
+# ---------------------------------------------------------------------------
+
+run_case "cd to a shell-expanded target then gh asks with an unresolved target" ask \
+  'cd "$WORKTREE" && gh issue create --title "t"' \
+  "$FIX_PLAIN"
+
+run_case "a subshell cd then gh asks with an unresolved target" ask \
+  '(cd /elsewhere && gh issue create --title "t")' \
+  "$FIX_PLAIN"
+
+run_case "cd to a tilde path then gh asks with an unresolved target" ask \
+  'cd ~/x && gh issue create --title "t"' \
+  "$FIX_PLAIN"
+
+run_case "a bare cd then gh asks with an unresolved target" ask \
+  'cd && gh issue create --title "t"' \
+  "$FIX_PLAIN"
+
+run_case_detail "the unresolved-target ask says so rather than naming a repo" \
+  'cd "$WORKTREE" && gh issue create --title "t"' \
+  "UNRESOLVED"
+
+# Controls: an unmodeled cd must not make everything ask.
+run_case "an unmodeled cd with no gh write stays silent" pass \
+  'cd "$WORKTREE" && ls -la' \
+  "$FIX_PLAIN"
+
+run_case "an unmodeled cd before a read-only gh stays silent" pass \
+  'cd "$WORKTREE" && gh issue list --state open' \
+  "$FIX_PLAIN"
+
+run_case "a literal cd is still followed, not treated as unresolved" pass \
+  "cd $FIXTURE_ROOT/not-a-repo && gh issue create --title \"t\"" \
+  "$FIX_PLAIN"
+
 run_case "repo-less gh pr view stays silent (#1148)" pass \
   'gh pr view 12 --json title'
 

@@ -286,30 +286,47 @@ def _has_repo_flag(seg: list[Token]) -> tuple[bool, str]:
     return False, ""
 
 
-def _cd_target(seg: list[Token]) -> str | None:
-    """Return the literal path of a bare `cd <path>` segment, else None.
+def _cd_intent(seg: list[Token]) -> tuple[str, str | None]:
+    """Classify a segment's effect on the working directory.
 
-    Compound commands routinely take the shape `cd <worktree> && gh issue
-    create ...`; without this the repo-less arm would resolve `origin` from
-    the payload's cwd, which is not where the write actually runs. Only the
-    unambiguous form is honoured — exactly one POSITIONAL, no shell
-    expansion, no `cd -`, and the COMMAND token must be the bare word `cd`
-    (a subshell-wrapped `(cd x && gh ...)` tokenizes as `(cd`, and its
-    directory change does not persist past `)`, so it is deliberately not
-    tracked; see spec.md "Known limitations").
+    Returns one of:
+      ("none",    None)  — not a `cd`; the cwd is unchanged
+      ("literal", path)  — a bare `cd <literal>`; the cwd moves, knowably
+      ("opaque",  None)  — a `cd` whose destination cannot be modeled
+
+    The third case is the point, and it used to be folded into the first.
+    `cd "$WORKTREE" && gh issue create ...` — the dominant idiom in this
+    repo's own worktree skills — needs shell expansion this hook does not
+    perform, and a subshell `(cd x && gh ...)` tokenizes its command word as
+    `(cd`. Treating either as "not a cd" left `effective_cwd` pointing at the
+    OUTER directory, so the write was authorized against a repo it never
+    touches, and when that outer directory was not a checkout at all the gate
+    went silent on a write that lands somewhere real. That is a fail-open on
+    an authorization decision (CodeRabbit CWE-863 on PR #1149), so the caller
+    now asks with an unresolved target instead of guessing.
     """
     argv = filter_argv(seg)
-    if not argv or argv[0].text != "cd":
-        return None
-    rest = [t for t in argv[1:] if t.role == TokenRole.POSITIONAL]
+    if not argv:
+        return ("none", None)
+
+    word = argv[0].text
+    if word.lstrip("(").strip() == "cd" and word != "cd":
+        # `(cd ...` — a subshell. Its chdir does not persist past `)`, but a
+        # `gh` call inside the same subshell runs under it, and the segment
+        # machinery carries no per-subshell state to tell the two apart.
+        return ("opaque", None)
+    if word != "cd":
+        return ("none", None)
+
+    rest = [tok for tok in argv[1:] if tok.role == TokenRole.POSITIONAL]
     if len(rest) != 1 or len(argv) != 2:
-        return None
+        return ("opaque", None)  # `cd` bare, or with flags/extra words
     path = rest[0].text
     if not path or path == "-" or path.startswith("~"):
-        return None
+        return ("opaque", None)
     if any(ch in path for ch in "$`*?"):
-        return None
-    return path
+        return ("opaque", None)  # needs expansion this hook does not perform
+    return ("literal", path)
 
 
 def _resolve_origin_repo(cwd: str) -> str | None:
@@ -476,11 +493,18 @@ def main() -> int:
     # fallback, so this hook does the same rather than assuming os.getcwd().
     effective_cwd = payload.get("cwd") or os.getcwd()
 
+    # False once a `cd` this hook cannot model has been seen: from that point
+    # `effective_cwd` is a guess, and a guess must not authorize a write.
+    cwd_is_known = True
+
     for seg in segments:
         # A leading `cd <path>` segment moves the checkout the *next*
         # segments run in (`cd <worktree> && gh issue create ...`).
-        cd_to = _cd_target(seg)
-        if cd_to is not None:
+        kind, cd_to = _cd_intent(seg)
+        if kind == "opaque":
+            cwd_is_known = False
+            continue
+        if kind == "literal":
             candidate = os.path.normpath(os.path.join(effective_cwd, cd_to))
             # Only follow a `cd` that could actually succeed. `cd /nope ; gh
             # issue create ...` leaves the shell in the ORIGINAL checkout, so
@@ -518,6 +542,13 @@ def main() -> int:
         # infers from the checkout. Resolve it locally and ask with the same
         # checklist (issue #1148). Unresolvable checkout → silent, per the
         # hook's fail-open contract.
+        if not cwd_is_known:
+            _emit_ask(
+                _build_checklist(subcommand, "UNRESOLVED — a `cd` in this command could not be modeled")
+                + compound_cascade_hint(command)
+            )
+            return 0
+
         implicit_repo = _resolve_origin_repo(effective_cwd)
         if implicit_repo:
             _emit_ask(
