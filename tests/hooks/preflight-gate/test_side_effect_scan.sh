@@ -190,15 +190,27 @@ run_case "514: gh -R workflow run"     ask  "gh -R owner/repo workflow run deplo
 run_case "kubectl apply"            ask  "kubectl apply -f pod.yaml"
 run_case "kubectl delete"           ask  "kubectl delete ns my-ns"
 
-# --- detection: known wrapper CLIs that commit internally ------------------
+# --- detection: configured wrapper CLIs that commit internally -------------
 # Issue #874 split these out of git-commit and left them at ASK: the seven
 # sibling gates match a literal `git commit` argv, so a commit made inside a
-# wrapper process is invisible to all of them.
-run_case_reason "iceberg-schema migrate" "[wrapper-commit]" "" \
+# wrapper process is invisible to all of them. Since #1157 the pattern list
+# comes from PRAXIS_WRAPPER_COMMIT_CMDS (shipped default empty).
+export PRAXIS_WRAPPER_COMMIT_CMDS="iceberg-schema migrate|promote, omc ralph"
+run_case_reason "iceberg-schema migrate (env-configured)" "[wrapper-commit]" "" \
   "iceberg-schema migrate --table users"
-run_case_reason "iceberg-schema promote" "[wrapper-commit]" "" \
+run_case_reason "iceberg-schema promote (env-configured)" "[wrapper-commit]" "" \
   "iceberg-schema promote --table users"
-run_case_reason "omc ralph"              "[wrapper-commit]" "" \
+run_case_reason "omc ralph (env-configured)"              "[wrapper-commit]" "" \
+  "omc ralph --task foo"
+run_case "wrapper cmd, sub not in configured set (pass)" pass \
+  "iceberg-schema describe --table users"
+unset PRAXIS_WRAPPER_COMMIT_CMDS
+
+# Negative control for #1157: with the env unset the shipped default is an
+# empty pattern list — the same commands must pass silently.
+run_case "iceberg-schema migrate, env unset (pass)" pass \
+  "iceberg-schema migrate --table users"
+run_case "omc ralph, env unset (pass)" pass \
   "omc ralph --task foo"
 
 # --- prod emphasis ----------------------------------------------------------

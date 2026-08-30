@@ -34,14 +34,22 @@ The advisory fires only when **both** signals are present; either alone is
 silent:
 
 1. **Fetch invocation** — the scanned text contains a secret/token fetch:
-   `hubctl token fetch`, `aws secretsmanager get-secret-value`,
+   `aws secretsmanager get-secret-value`,
    `aws ssm get-parameter ... --with-decryption` (decryption flag required —
    the default call returns the still-encrypted value), `infisical secrets
    get` / `infisical export`, `vault kv get` / `vault read`, `op read` /
    `op item get`, `gh auth token`, `kubectl get secret`, python
    `get_secret_value(`. Subprocess list-form calls
-   (`subprocess.check_output(["hubctl", "token", "fetch", ...])`) are
+   (`subprocess.check_output(["vault", "kv", "get", ...])`) are
    matched via a quote/comma/bracket-normalized copy of the line.
+
+   The builtin list carries **public tools only**. Org/author-internal fetch
+   CLIs extend it via `PRAXIS_SECRET_FETCH_CLIS` — comma-separated command
+   phrases (e.g. `hubctl token fetch`), each matched as its
+   whitespace-separated tokens in order, word-bounded, on both the raw and
+   normalized copies (issue #1157; `hubctl` used to be a shipped literal).
+   The `hubctl` examples through the rest of this spec assume that env is
+   set, as the test suite sets it for the incident-replica fixtures.
 2. **Unmasked output flow** — one of:
    - a variable captured from a fetch (`VAR=$(fetch)` / backtick / python
      assignment on a fetch line) later appears unmasked in an output sink

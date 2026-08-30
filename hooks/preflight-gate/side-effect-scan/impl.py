@@ -47,18 +47,25 @@ category that can absorb that reduction:
     rationale is materially weaker outside `claude`. Documented, not
     re-tiered: changing the tier per host is a separate issue.
 
-The wrapper CLIs that used to share the `git-commit` label (`iceberg-schema
-migrate|promote`, `omc ralph`) do NOT follow it down; they now carry their own
-`wrapper-commit` category at ASK. Both halves of the rationale above fail for
-them: the seven sibling gates match a literal `git commit` argv, so a commit
-made *inside* a wrapper process is invisible to every one of them, and
-`iceberg-schema promote` is a catalog operation, not a local one. Splitting
-the category is a deliberate narrowing of issue #874's "demote git-commit" —
-recorded here because the label a reason prints changes with it.
+The wrapper CLIs that used to share the `git-commit` label do NOT follow it
+down; they carry their own `wrapper-commit` category at ASK. Both halves of
+the rationale above fail for them: the seven sibling gates match a literal
+`git commit` argv, so a commit made *inside* a wrapper process is invisible
+to every one of them. Splitting the category is a deliberate narrowing of
+issue #874's "demote git-commit" — recorded here because the label a reason
+prints changes with it.
+
+Which wrapper CLIs exist is installer-specific, so the pattern list comes
+from PRAXIS_WRAPPER_COMMIT_CMDS (comma-separated `<cmd> <sub>[|<sub>...]`
+entries, e.g. "iceberg-schema migrate|promote, omc ralph") rather than a
+shipped table — the shipped default is empty and the category is silent
+until configured (issue #1157; the author-toolchain names that used to be
+hardcoded here live in the author's env now).
 """
 from __future__ import annotations
 
 import json
+import os
 import sys
 import sys as _sys
 from pathlib import Path as _Path
@@ -93,10 +100,7 @@ CATEGORIES = {
     # them and the coverage half of the demotion rationale does not hold.
     "wrapper-commit": {
         "tier": TIER_ASK,
-        "patterns": [
-            ("iceberg-schema", (1,), {"migrate", "promote"}),
-            ("omc", (1,), {"ralph"}),
-        ],
+        "patterns": [],  # populated from PRAXIS_WRAPPER_COMMIT_CMDS below
         "reason": "wrapper CLI commits internally — 대상 카탈로그/브랜치와 의도 재확인",
     },
     "git-push": {
@@ -122,6 +126,30 @@ CATEGORIES = {
         "reason": "shared resource write (kubectl) — cluster/namespace 재확인",
     },
 }
+
+def _wrapper_commit_patterns() -> list:
+    """Parse PRAXIS_WRAPPER_COMMIT_CMDS into (cmd, (1,), {subs}) patterns.
+
+    Format: comma-separated entries, each `<cmd> <sub>[|<sub>...]` —
+    e.g. "iceberg-schema migrate|promote, omc ralph". Entries that do not
+    have exactly a command word plus a subcommand group are dropped
+    silently (fail-open: a typo must not turn into a broad match). The
+    shipped default is empty — see the module docstring (issue #1157).
+    """
+    raw = os.environ.get("PRAXIS_WRAPPER_COMMIT_CMDS", "")
+    patterns = []
+    for entry in raw.split(","):
+        parts = entry.split()
+        if len(parts) != 2:
+            continue
+        cmd, subs = parts
+        sub_set = {s for s in subs.split("|") if s}
+        if cmd and sub_set:
+            patterns.append((cmd, (1,), sub_set))
+    return patterns
+
+
+CATEGORIES["wrapper-commit"]["patterns"] = _wrapper_commit_patterns()
 
 PROD_LITERAL_TOKENS = {"prod", "production"}
 OPT_OUT_MARKER = "# side-effect:ack"

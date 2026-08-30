@@ -87,6 +87,11 @@ write_input() {
   python3 -c 'import json, sys; print(json.dumps({"file_path": sys.argv[1], "content": sys.argv[2]}))' "$1" "$2"
 }
 
+# Since #1157 the builtin fetch-CLI list carries public tools only; the
+# hubctl fixtures below exercise the PRAXIS_SECRET_FETCH_CLIS extension
+# path (the incident replicas keep their original hubctl shape on purpose).
+export PRAXIS_SECRET_FETCH_CLIS="hubctl token fetch"
+
 # === ADVISORY ==============================================================
 
 # P1 — incident replica: Bash heredoc authoring a script that fetches a
@@ -199,6 +204,17 @@ run_case "heredoc body targeting .md is not scanned" \
 # aws ssm get-parameter WITHOUT --with-decryption is not a plaintext fetch.
 run_case "aws ssm get-parameter without --with-decryption" \
   silent Bash "$(bash_input 'P=$(aws ssm get-parameter --name fake); echo "$P"')"
+
+# === #1157 env-extension boundary ==========================================
+# Negative control: with the extension env unset, an internal-CLI fetch is
+# not recognized (the builtin list carries public tools only) — proves the
+# hubctl detections above came from the env, not a shipped literal.
+unset PRAXIS_SECRET_FETCH_CLIS
+run_case "hubctl capture+echo without env (silent — #1157)" \
+  silent Bash "$(bash_input 'TOKEN=$(hubctl token fetch fake-provider); echo "$TOKEN"')"
+# Builtin public CLI still fires without any env.
+run_case "vault kv get capture+echo without env (advisory)" \
+  advisory Bash "$(bash_input 'TOKEN=$(vault kv get -field=token secret/fake); echo "$TOKEN"')"
 
 # === Fail-open infrastructure (N8 trio) ====================================
 
