@@ -373,6 +373,13 @@
       "timeout": 5
     },
     {
+      "name": "comment-yap-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Write|Edit",
+      "timeout": 5
+    },
+    {
       "name": "destructive-bash-guard",
       "role": "advisory-nudge",
       "event": "PreToolUse",
