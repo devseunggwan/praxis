@@ -46,8 +46,15 @@ print(json.dumps({
   if [ "$expected" = "block" ]; then
     [ "$rc" -eq 2 ] && [ -n "$err_content" ] || ok=0
   elif [ "$expected" = "warn" ]; then
-    # #1186 advisory tier: proceeds (rc 0) but the guidance still ships.
+    # #1186 advisory tier: proceeds (rc 0), guidance ships, and the header
+    # promised by the spec is present - the [advisory] prefix, the
+    # escalation env by name, and a tier-neutral first line (no BLOCKED
+    # banner, no cascade-abort hint: nothing was blocked).
     [ "$rc" -eq 0 ] && [ -n "$err_content" ] || ok=0
+    echo "$err_content" | grep -q "\[advisory\]" || ok=0
+    echo "$err_content" | grep -q "PRAXIS_PR_EVIDENCE_STRICT" || ok=0
+    echo "$err_content" | grep -q "BLOCKED" && ok=0
+    echo "$err_content" | grep -q "aborts ALL parts" && ok=0
   else
     [ "$rc" -eq 0 ] && [ -z "$err_content" ] || ok=0
   fi
@@ -379,6 +386,8 @@ export PRAXIS_PR_EVIDENCE_STRICT=0
 run_case "1186: no marker, STRICT=0 → warn (explicit advisory)" warn Bash \
   'gh pr create --title "fix: x" --body "## Summary\nplain body"'
 export PRAXIS_PR_EVIDENCE_STRICT=1
+run_case "1186: marker present, STRICT=1 → pass (silent, both tiers)" pass Bash \
+  'gh pr create --title "fix: x" --body "Pre-commit verified: pre-commit run --all-files clean"'
 run_case "1186: no marker, STRICT=1 → block (attested)" block Bash \
   'gh pr create --title "fix: x" --body "## Summary\nplain body"'
 # Negative control: a non-pr-create command stays silent in BOTH tiers.

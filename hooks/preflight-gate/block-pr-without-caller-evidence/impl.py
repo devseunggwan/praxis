@@ -313,10 +313,22 @@ def main() -> int:
         body = _get_effective_body(argv, hmap, command)
         if CALLER_CHAIN_RE.search(_strip_fenced_blocks(body)):
             continue  # evidence present
-        strict = _strict()
-        msg = BLOCK_MSG + pr_body_evidence_checklist() + compound_cascade_hint(command)
-        sys.stderr.write(msg if strict else _ADVISORY_HEADER + msg)
-        return 2 if strict else 0
+        if _strict():
+            sys.stderr.write(
+                BLOCK_MSG + pr_body_evidence_checklist()
+                + compound_cascade_hint(command)
+            )
+            return 2
+        # Advisory tier (#1186): tier-neutral first line (nothing was
+        # blocked), NO cascade hint (it describes an abort that did not
+        # happen), and `continue` so later segments of a compound command
+        # are still scanned.
+        sys.stderr.write(
+            _ADVISORY_HEADER
+            + BLOCK_MSG.replace("\u274c BLOCKED:", "\u26a0 missing:", 1)
+            + pr_body_evidence_checklist()
+        )
+        continue
 
     return 0
 
