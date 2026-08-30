@@ -12,7 +12,7 @@ prod deploys, and stray auto-commits from CLIs that write to git internally.
 | Category | Tier | Trigger examples | Risk |
 | ---------- | ------ | ------------------ | ------ |
 | `git-commit` | **advise** | `git commit`, `git merge`, `git rebase`, `git cherry-pick`, `git revert` | Commits to the wrong branch or under the wrong author |
-| `wrapper-commit` | ask | `iceberg-schema migrate`, `iceberg-schema promote`, `omc ralph` | A commit (or catalog write) made inside another process, where no `git commit` gate can see it |
+| `wrapper-commit` | ask | commands from `PRAXIS_WRAPPER_COMMIT_CMDS` (e.g. `iceberg-schema migrate\|promote, omc ralph`); shipped default empty → category silent until configured (#1157) | A commit (or catalog write) made inside another process, where no `git commit` gate can see it |
 | `git-push` | ask | `git push` | Remote published without intent |
 | `gh-merge` | ask | `gh pr merge`, `gh pr create`, `gh workflow run` (including a leading global flag, e.g. `gh --repo o/r pr merge`, `gh -R o/r workflow run`) | Unintended PR state change or workflow dispatch |
 | `kubectl-apply` | ask | `kubectl apply`, `kubectl delete`, `kubectl replace`, `kubectl patch` | Shared cluster mutation |
@@ -48,13 +48,20 @@ stops functioning as a gate, so the volume itself is the defect.
    prints on its own deny (issue #941). By contrast **no** sibling hook gates
    `kubectl apply` at all.
 
-**`wrapper-commit` is a deliberate narrowing.** `iceberg-schema
-migrate|promote` and `omc ralph` used to carry the `git-commit` label;
-issue #874's demotion does not follow them down, because both halves of the
-rationale fail for them. The six sibling gates match a literal `git commit`
-argv, so a commit made *inside* a wrapper process is invisible to every one of
-them, and `iceberg-schema promote` is a catalog operation rather than a local
-one. They keep asking, under their own category name.
+**`wrapper-commit` is a deliberate narrowing.** The wrapper CLIs used to
+carry the `git-commit` label; issue #874's demotion does not follow them
+down, because both halves of the rationale fail for them. The six sibling
+gates match a literal `git commit` argv, so a commit made *inside* a wrapper
+process is invisible to every one of them. They keep asking, under their own
+category name.
+
+**Which wrapper CLIs exist is installer-specific**, so since #1157 the
+pattern list comes from `PRAXIS_WRAPPER_COMMIT_CMDS`: comma-separated
+`<cmd> <sub>[|<sub>...]` entries (e.g.
+`iceberg-schema migrate|promote, omc ralph` — the author-toolchain names
+that used to ship hardcoded here). Malformed entries are dropped silently —
+a typo must not widen into a broad match. The shipped default is empty, so
+the category is inert until configured.
 
 ### Response
 

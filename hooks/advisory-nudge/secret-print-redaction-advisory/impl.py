@@ -22,8 +22,9 @@ which is what this hook is.
 
 Detection design (2-signal AND gate):
 
-  1. a secret/token **fetch invocation** (`hubctl token fetch`,
-     `aws secretsmanager get-secret-value`, `vault kv get`, ...), AND
+  1. a secret/token **fetch invocation** (`aws secretsmanager
+     get-secret-value`, `vault kv get`, ... — public CLIs builtin, internal
+     ones via PRAXIS_SECRET_FETCH_CLIS, issue #1157), AND
   2. an **unmasked output flow** of the fetched value to stdout
      (`echo`/`printf`/`print`/`logger.*` of the captured variable, or the
      fetch substituted inline into an output command).
@@ -36,8 +37,8 @@ echo of a variable that was never fetch-assigned, never fires.
   • **Live Bash command** — var-flow rule only: a capture
     (`VAR=$(fetch)`) followed by an unmasked sink (`echo "$VAR"`) fires;
     an inline no-capture substitution inside an output command
-    (`echo "$(hubctl token fetch x)"`) fires. A bare interactive fetch
-    alone (`hubctl token fetch p --phase dev`) is SILENT — it is the
+    (`echo "$(vault kv get -field=t s/x)"`) fires. A bare interactive fetch
+    alone (`vault kv get secret/p`) is SILENT — it is the
     sanctioned read-only usage (global CLAUDE.md read-only prod calls).
   • **Authored content** (Write `content`, Edit `new_string`, heredoc
     bodies inside a Bash command, echo-appended strings) — var-flow rule
@@ -70,6 +71,7 @@ Advisory only — writes to stderr, exits 0. Never blocks.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -92,10 +94,11 @@ _SKIP_SUFFIXES = (".md", ".txt", ".rst")
 # the still-encrypted value. `get_secret_value(` covers python SDK reads
 # (boto3 secretsmanager). Matched against the raw line AND a normalized copy
 # (quotes/commas/brackets/parens → spaces) so subprocess list-form calls
-# (`subprocess.check_output(["hubctl", "token", "fetch", ...])`) are seen.
+# (`subprocess.check_output(["vault", "kv", "get", ...])`) are seen. The
+# builtin list carries public tools only; internal CLIs extend it via
+# PRAXIS_SECRET_FETCH_CLIS (see _extra_fetch_re, issue #1157).
 _FETCH_RE = re.compile(
-    r"\bhubctl\s+token\s+fetch\b"
-    r"|\baws\s+secretsmanager\s+get-secret-value\b"
+    r"\baws\s+secretsmanager\s+get-secret-value\b"
     r"|\baws\s+ssm\s+get-parameter\b(?=.*--with-decryption)"
     r"|\binfisical\s+(?:secrets\s+get|export)\b"
     r"|\bvault\s+(?:kv\s+get|read)\b"
@@ -107,6 +110,26 @@ _FETCH_RE = re.compile(
 
 # Chars stripped for the normalized fetch-match copy (see _FETCH_RE note).
 _NORM_STRIP_RE = re.compile(r"[\"'\[\](),]")
+
+
+def _extra_fetch_re() -> re.Pattern[str] | None:
+    """Compile PRAXIS_SECRET_FETCH_CLIS into extra fetch alternatives.
+
+    Org/author-internal fetch CLIs (e.g. `hubctl token fetch`) stay out of
+    the shipped regex — the builtin list carries public tools only. The env
+    var takes comma-separated command phrases; each phrase matches its
+    whitespace-separated tokens in order, word-bounded (issue #1157).
+    """
+    raw = os.environ.get("PRAXIS_SECRET_FETCH_CLIS", "")
+    alts = []
+    for entry in raw.split(","):
+        tokens = entry.split()
+        if tokens:
+            alts.append(r"\b" + r"\s+".join(re.escape(t) for t in tokens) + r"\b")
+    return re.compile("|".join(alts)) if alts else None
+
+
+_EXTRA_FETCH_RE = _extra_fetch_re()
 
 # Output sinks whose stdout lands in the transcript. bash sinks anchor at
 # statement start (statements are pre-split on ;/&&/||/newline); python/js
@@ -161,9 +184,14 @@ _ADVISORY_LIMIT = 3
 
 def _is_fetch(stmt: str) -> bool:
     """True if `stmt` invokes a secret fetch — raw or list-form normalized."""
-    if _FETCH_RE.search(stmt):
+    normalized = _NORM_STRIP_RE.sub(" ", stmt)
+    if _FETCH_RE.search(stmt) or _FETCH_RE.search(normalized):
         return True
-    return bool(_FETCH_RE.search(_NORM_STRIP_RE.sub(" ", stmt)))
+    if _EXTRA_FETCH_RE is None:
+        return False
+    return bool(
+        _EXTRA_FETCH_RE.search(stmt) or _EXTRA_FETCH_RE.search(normalized)
+    )
 
 
 def _has_unmasked_ref(stmt: str, var: str) -> bool:
