@@ -146,9 +146,29 @@ run_case "gh issue create + prior gh issue list with overlap (silent)" \
   "silent" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo --title 'feat(provider): add brands lookup'\"},\"transcript_path\":\"$TX_ISSUE_LIST\"}"
 
-run_case "gh issue create on personal repo (silent — devseunggwan)" \
+run_case "gh issue create on personal repo, owner in env (silent)" \
   "silent" \
-  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo devseunggwan/scratchs --title 'feat: experiment'\"},\"transcript_path\":\"$TX_EMPTY\"}"
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo testowner/scratchs --title 'feat: experiment'\"},\"transcript_path\":\"$TX_EMPTY\"}" \
+  "PRAXIS_PERSONAL_REPO_OWNERS=testowner"
+
+run_case "gh issue create on personal repo, env has other owner (BLOCKED)" \
+  "block:no-search" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo testowner/scratchs --title 'feat: experiment'\"},\"transcript_path\":\"$TX_EMPTY\"}" \
+  "PRAXIS_PERSONAL_REPO_OWNERS=someoneelse"
+
+# Negative control for issue #1156: with the env empty/unset the exemption
+# must not exist for ANY owner — the pre-#1156 hardcoded-namespace behavior
+# is gone. Injected as an explicit empty value so an ambient
+# PRAXIS_PERSONAL_REPO_OWNERS in the runner's environment cannot flip it.
+run_case "gh issue create on same repo, env empty (BLOCKED — no exemption)" \
+  "block:no-search" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo testowner/scratchs --title 'feat: experiment'\"},\"transcript_path\":\"$TX_EMPTY\"}" \
+  "PRAXIS_PERSONAL_REPO_OWNERS="
+
+run_case "owner match is case-insensitive via env (silent)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo TestOwner/scratchs --title 'feat: experiment'\"},\"transcript_path\":\"$TX_EMPTY\"}" \
+  "PRAXIS_PERSONAL_REPO_OWNERS=testowner"
 
 run_case "gh issue create + [dup-checked] token (silent)" \
   "silent" \
