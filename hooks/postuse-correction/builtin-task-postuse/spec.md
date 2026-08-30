@@ -1,6 +1,6 @@
 # PostToolUse Built-in Task Classification
 
-Supported hosts: all
+Supported hosts: claude (the omc `pre-tool-enforcer` false positive this hook corrects exists only in the Claude Code ecosystem — issue #1158)
 
 `hooks/builtin-task-postuse.py` fires after any built-in task **management**
 tool executes and emits a corrective context note so Claude is not misled by

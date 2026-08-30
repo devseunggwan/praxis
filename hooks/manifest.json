@@ -41,6 +41,9 @@
       "hosts": [
         "claude"
       ],
+      "requires": [
+        "codex-plugin"
+      ],
       "timeout": 5
     },
     {
@@ -106,6 +109,9 @@
       "matcher": "Bash",
       "hosts": [
         "claude"
+      ],
+      "requires": [
+        "zsh"
       ],
       "timeout": 5,
       "mode": {
@@ -492,6 +498,9 @@
       "hosts": [
         "claude"
       ],
+      "requires": [
+        "cmux"
+      ],
       "timeout": 10,
       "mode": {
         "bypass_env": [
@@ -682,6 +691,9 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash|Edit|Write|NotebookEdit|AskUserQuestion",
+      "requires": [
+        "hookable-memory-store"
+      ],
       "timeout": 5,
       "mode": {
         "state_paths": [
@@ -901,6 +913,9 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "mcp__.*slack.*|mcp__.*notion.*",
+      "requires": [
+        "slack-or-notion-mcp"
+      ],
       "timeout": 5
     },
     {
@@ -918,6 +933,9 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "mcp__.*slack.*|mcp__.*notion.*",
+      "requires": [
+        "slack-or-notion-mcp"
+      ],
       "timeout": 5
     },
     {
@@ -925,6 +943,9 @@
       "role": "postuse-correction",
       "event": "PostToolUse",
       "matcher": "TaskCreate|TaskUpdate|TaskGet|TaskList|TaskStop|TaskOutput",
+      "hosts": [
+        "claude"
+      ],
       "timeout": 3
     },
     {
