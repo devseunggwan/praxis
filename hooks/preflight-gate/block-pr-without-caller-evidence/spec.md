@@ -4,9 +4,21 @@ Supported hosts: claude, codex
 
 `hooks/block-pr-without-caller-evidence.py` fires on every PreToolUse(Bash)
 event and inspects the command for `gh pr create` / `gh pr new` invocations.
-The hook blocks the call unless the effective PR body contains a literal
+The hook blocks the call (when attested — see the tiering section below) unless the effective PR body contains a literal
 `Caller chain verified:` line. Goal: enforce the pre-PR caller-chain grep
 habit at the last checkpoint before shared-state mutation (praxis #158).
+
+### Attested-convention tiering (issue #1186, principle from #1159)
+
+The marker line is a praxis-invented convention with no other local
+attestation signal, so **the deny applies only when
+`PRAXIS_PR_EVIDENCE_STRICT` is set truthy** (anything but `0`/empty; the
+env is shared by both PR-marker gates). On shipped defaults the same
+message ships as a stderr **advisory** — prefixed with a line naming the
+env that escalates it — and the `gh pr create` proceeds: a fresh installer
+cannot be denied by a marker phrase they have never seen. `STRICT=0`
+explicitly forces advisory. All other allow conditions and bypasses are
+unchanged.
 
 ### Why this exists
 
@@ -29,10 +41,13 @@ line", which removes the failure mode.
 | `--template` / `-T` without `--body` / `-b` / `--body-file` | allow (interactive fill-in; the body is composed after the hook runs) |
 | `--body` / `-b` value contains the marker | allow |
 | `--body-file <path>` content contains the marker | allow |
-| `--body-file -` (stdin) | block — pipe content is uninspectable at PreToolUse time |
-| `--body-file <path>` with path missing on disk | block — treat as empty body so the marker check fires |
-| `--body-file <path>` where the same Bash command redirects to `path` (`> path`, `>> path`, `tee path`) | block — TOCTOU; the file on disk is about to be overwritten |
-| Marker present only inside a fenced code block | block — fenced blocks are stripped before matching |
+| `--body-file -` (stdin) | block\* — pipe content is uninspectable at PreToolUse time |
+| `--body-file <path>` with path missing on disk | block\* — treat as empty body so the marker check fires |
+| `--body-file <path>` where the same Bash command redirects to `path` (`> path`, `>> path`, `tee path`) | block\* — TOCTOU; the file on disk is about to be overwritten |
+| Marker present only inside a fenced code block | block\* — fenced blocks are stripped before matching |
+
+\* "block" rows describe the attested tier; on shipped defaults every
+"block" verdict ships as the advisory-tier warning instead (see Response).
 
 Accepted marker line forms (any of these in the body passes the gate):
 
@@ -45,14 +60,21 @@ Caller chain verified: N/A -- docs-only change
 
 ### Response
 
-The hook writes the deny message to stderr and exits with code `2`
-(PreToolUse blocking exit). Claude Code surfaces the stderr text as the
-block reason; no JSON envelope is emitted for this hook. The hard-block
-path uses stderr+exit-2 (Claude Code's PreToolUse blocking shortcut)
-rather than the JSON `permissionDecision: "deny"` envelope used by
-sibling hooks (`side-effect-scan`, `verify-commit-flag-override`) — both
-surface as block reasons, but exit-2 is simpler for unconditional gates
-that have no `ask` / fallback mode.
+**Attested tier** (`PRAXIS_PR_EVIDENCE_STRICT` truthy): the hook writes the
+deny message to stderr and exits with code `2` (PreToolUse blocking exit).
+Claude Code surfaces the stderr text as the block reason; no JSON envelope
+is emitted. The hard-block path uses stderr+exit-2 rather than the JSON
+`permissionDecision: "deny"` envelope — both surface as block reasons, and
+exit-2 predates the tiering (issue #1186) when this was an unconditional
+gate.
+
+**Advisory tier** (shipped default — env unset/empty/`0`): the same
+guidance ships to stderr prefixed with an `[advisory]` header naming the
+escalation env, the `❌ BLOCKED:` first line becomes `⚠ missing:`, the
+compound-cascade hint is omitted (it describes an abort that does not
+happen in this tier), and the hook exits `0` — the create proceeds. The
+scan `continue`s, so a second offending `gh pr create` in the same
+compound command gets its own advisory.
 
 ```
 ❌ BLOCKED: `gh pr create` without caller-chain evidence.
@@ -106,7 +128,7 @@ primitive (shlex-based, posix=True). Specifically:
 
 ### Tests
 
-`hooks/test-block-pr-without-caller-evidence.sh` covers 32 cases —
+`hooks/test-block-pr-without-caller-evidence.sh` covers 39 cases (43 checks; tier boundary cases included) —
 positive blocks (no body, body without marker, marker in fenced block,
 stdin body, missing file, TOCTOU overwrite, marker after newline-only
 gap), positive passes (inline marker, file with marker, heredoc-built

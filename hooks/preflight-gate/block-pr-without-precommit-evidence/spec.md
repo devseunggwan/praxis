@@ -4,10 +4,22 @@ Supported hosts: claude, codex
 
 `hooks/block-pr-without-precommit-evidence.py` fires on every PreToolUse(Bash)
 event and inspects the command for `gh pr create` / `gh pr new` invocations.
-The hook blocks the call unless the effective PR body declares the
+The hook blocks the call (when attested — see the tiering section below) unless the effective PR body declares the
 pre-commit verification state in one of three accepted marker lines. Goal:
 enforce the pre-PR verification habit at the last checkpoint before
 shared-state mutation (praxis #406).
+
+### Attested-convention tiering (issue #1186, principle from #1159)
+
+The marker line is a praxis-invented convention with no other local
+attestation signal, so **the deny applies only when
+`PRAXIS_PR_EVIDENCE_STRICT` is set truthy** (anything but `0`/empty; the
+env is shared by both PR-marker gates). On shipped defaults the same
+message ships as a stderr **advisory** — prefixed with a line naming the
+env that escalates it — and the `gh pr create` proceeds: a fresh installer
+cannot be denied by a marker phrase they have never seen. `STRICT=0`
+explicitly forces advisory. All other allow conditions and bypasses are
+unchanged.
 
 ### Why this exists
 
@@ -43,11 +55,14 @@ none of the three marker patterns below.
 | `--template` / `-T` without `--body` / `-b` / `--body-file` | allow (interactive fill-in; body composed after the hook runs) |
 | `--body` / `-b` value contains any marker | allow |
 | `--body-file <path>` content contains any marker | allow |
-| `--body-file -` (stdin) | block — pipe content is uninspectable at PreToolUse time |
-| `--body-file <path>` with path missing on disk | block — emits a **path-not-found diagnostic** (see below) instead of the generic token-missing message |
-| `--body-file <path>` where the same Bash command redirects to `path` (`> path`, `>> path`, `tee path`) | block — TOCTOU; the file on disk is about to be overwritten |
-| Marker present only inside a fenced code block | block — fenced blocks are stripped before matching |
+| `--body-file -` (stdin) | block\* — pipe content is uninspectable at PreToolUse time |
+| `--body-file <path>` with path missing on disk | block\* — emits a **path-not-found diagnostic** (see below) instead of the generic token-missing message |
+| `--body-file <path>` where the same Bash command redirects to `path` (`> path`, `>> path`, `tee path`) | block\* — TOCTOU; the file on disk is about to be overwritten |
+| Marker present only inside a fenced code block | block\* — fenced blocks are stripped before matching |
 | `--repo` / `-R` present | **does NOT bypass** (differs from sibling `block-pr-without-caller-evidence`) |
+
+\* "block" rows describe the attested tier; on shipped defaults every
+"block" verdict ships as the advisory-tier warning instead (see Response).
 
 #### Why `--repo` is not a bypass
 
@@ -72,12 +87,21 @@ Pre-commit: n/a (legacy repo, lint deferred to CI gate)
 
 ### Response
 
-The hook writes the deny message to stderr and exits with code `2`
-(PreToolUse blocking exit). Claude Code surfaces the stderr text as the
-block reason; no JSON envelope is emitted. The hard-block path uses
-stderr+exit-2 rather than the JSON `permissionDecision: "deny"` envelope
-— matches sibling `block-pr-without-caller-evidence` and is the simpler
-choice for unconditional gates with no `ask` / fallback mode.
+**Attested tier** (`PRAXIS_PR_EVIDENCE_STRICT` truthy): the hook writes the
+deny message to stderr and exits with code `2` (PreToolUse blocking exit).
+Claude Code surfaces the stderr text as the block reason; no JSON envelope
+is emitted. The hard-block path uses stderr+exit-2 rather than the JSON
+`permissionDecision: "deny"` envelope — both surface as block reasons, and
+exit-2 predates the tiering (issue #1186) when this was an unconditional
+gate.
+
+**Advisory tier** (shipped default — env unset/empty/`0`): the same
+guidance ships to stderr prefixed with an `[advisory]` header naming the
+escalation env, the `❌ BLOCKED:` first line becomes `⚠ missing:`, the
+compound-cascade hint is omitted (it describes an abort that does not
+happen in this tier), and the hook exits `0` — the create proceeds. The
+scan `continue`s, so a second offending `gh pr create` in the same
+compound command gets its own advisory.
 
 **Generic token-missing message** (body present but no evidence marker):
 
@@ -105,7 +129,9 @@ cause is a path resolution failure, not a missing token.
 path that does not exist on disk (and is not stdin or a TOCTOU overwrite).
 The real cause is that the hook resolves relative paths against its own process
 cwd, not the PR worktree, so a relative path like `.omc/pr-123-body.md` that
-exists in the worktree is invisible to the hook:
+exists in the worktree is invisible to the hook (the diagnostic follows
+the same tiering — advisory on shipped defaults, deny when attested,
+without the cascade hint in the advisory tier):
 
 ```
 ❌ BLOCKED: --body-file not found at <resolved-path>
@@ -160,7 +186,7 @@ primitive (shlex-based, posix=True). Specifically:
 
 ### Tests
 
-`hooks/test-block-pr-without-precommit-evidence.sh` covers 42 cases —
+`hooks/test-block-pr-without-precommit-evidence.sh` covers 49 cases (57 checks; tier boundary cases included) —
 positive blocks (no body, body without marker, value-empty marker, marker
 in fenced block, stdin body, missing file, TOCTOU overwrite, `--repo`
 without marker, lookalike-keyword variants), positive passes (each of the

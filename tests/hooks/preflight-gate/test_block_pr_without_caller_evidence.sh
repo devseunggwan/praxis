@@ -21,6 +21,12 @@ fi
 
 PASS=0; FAIL=0; FAILED_NAMES=()
 
+# Attested-convention tiering (#1186, per #1159): the detection matrix below
+# verifies marker parsing, not tier — attest via the strict env so every
+# block expectation stays meaningful. Dedicated tier cases at the end
+# override / unset this per case.
+export PRAXIS_PR_EVIDENCE_STRICT=1
+
 run_case() {
   local name="$1" expected="$2" tool_name="$3" command="$4"
   local payload err_file rc
@@ -39,6 +45,16 @@ print(json.dumps({
   local ok=1
   if [ "$expected" = "block" ]; then
     [ "$rc" -eq 2 ] && [ -n "$err_content" ] || ok=0
+  elif [ "$expected" = "warn" ]; then
+    # #1186 advisory tier: proceeds (rc 0), guidance ships, and the header
+    # promised by the spec is present - the [advisory] prefix, the
+    # escalation env by name, and a tier-neutral first line (no BLOCKED
+    # banner, no cascade-abort hint: nothing was blocked).
+    [ "$rc" -eq 0 ] && [ -n "$err_content" ] || ok=0
+    echo "$err_content" | grep -q "\[advisory\]" || ok=0
+    echo "$err_content" | grep -q "PRAXIS_PR_EVIDENCE_STRICT" || ok=0
+    echo "$err_content" | grep -q "BLOCKED" && ok=0
+    echo "$err_content" | grep -q "aborts ALL parts" && ok=0
   else
     [ "$rc" -eq 0 ] && [ -z "$err_content" ] || ok=0
   fi
@@ -281,6 +297,34 @@ fi
 
 
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# #1186 attested-convention tiering — deny only when attested
+# ---------------------------------------------------------------------------
+unset PRAXIS_PR_EVIDENCE_STRICT
+run_case "1186: no marker, env unset → warn (advisory default)" warn Bash \
+  'gh pr create --title "fix: x" --body "## Summary\nplain body"'
+run_case "1186: marker present, env unset → pass (silent)" pass Bash \
+  'gh pr create --title "fix: x" --body "Caller chain verified: grep found 2 callers"'
+export PRAXIS_PR_EVIDENCE_STRICT=0
+run_case "1186: no marker, STRICT=0 → warn (explicit advisory)" warn Bash \
+  'gh pr create --title "fix: x" --body "## Summary\nplain body"'
+export PRAXIS_PR_EVIDENCE_STRICT=1
+run_case "1186: marker present, STRICT=1 → pass (silent, both tiers)" pass Bash \
+  'gh pr create --title "fix: x" --body "Caller chain verified: grep found 2 callers"'
+run_case "1186: no marker, STRICT=1 → block (attested)" block Bash \
+  'gh pr create --title "fix: x" --body "## Summary\nplain body"'
+unset PRAXIS_PR_EVIDENCE_STRICT
+# Compound command in the advisory tier (pins F1): the warn arm's
+# cascade-text rejection confronts hint-producing input. The two-advisories
+# continue semantics (F7) is verified empirically in review, not asserted
+# here — the warn arm checks presence, not counts.
+run_case "1186: compound two creates, env unset → warn (no cascade text)" warn Bash \
+  'mkdir -p /tmp/x1186 && gh pr create --title "fix: a" --body "plain" ; gh pr create --title "fix: a" --body "plain"'
+# Negative control: a non-pr-create command stays silent in BOTH tiers.
+unset PRAXIS_PR_EVIDENCE_STRICT
+run_case "1186: gh pr list, env unset → pass (out of scope)" pass Bash \
+  'gh pr list --state open'
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
