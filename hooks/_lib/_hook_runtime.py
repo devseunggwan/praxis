@@ -66,6 +66,29 @@ def remaining_budget(default_sec: float) -> float:
     return max(0.0, _MEMBER_DEADLINE - time.monotonic())
 
 
+# Floor below which spawning a subprocess probe is pointless: the fork/exec is
+# guaranteed dead on arrival and only burns what little budget remains. Shared
+# by the dispatcher's skip floor (_dispatch._MEMBER_SKIP_FLOOR_SEC) and every
+# budget-aware hook's own probe guards (issue #1167).
+MIN_SUBPROC_BUDGET_SEC = 0.5
+
+
+def shared_probe_deadline(
+    manifest_timeout_sec: float, margin_sec: float = 2.0
+) -> float:
+    """Absolute `time.monotonic()` deadline for a hook's external probes.
+
+    One deadline shared by every subprocess probe a hook invocation spawns, so
+    their SUM is bounded by the hook's budget. Standalone that budget is the
+    hook's manifest timeout minus a margin (interpreter startup + process
+    spawn); under the dispatcher it clamps to the remaining member budget
+    published via `set_member_deadline` (issue #1167 — a member must not
+    starve the rest of the Bash group's shared node timeout).
+    """
+    self_budget = manifest_timeout_sec - margin_sec
+    return time.monotonic() + min(remaining_budget(self_budget), self_budget)
+
+
 class _JsonlFormatter(logging.Formatter):
     """One JSON object per line."""
 

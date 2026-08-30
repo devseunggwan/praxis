@@ -61,8 +61,9 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
     fail_open,
-    remaining_budget,
+    shared_probe_deadline,
 )
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
@@ -89,13 +90,10 @@ _GH_LABEL_LIMIT = 300
 # `remaining_budget` (issue #1167): the group shares ONE node timeout across
 # ~49 sequential members, so spending the full 13s here would starve every
 # later member.
+# Manifest-timeout parity is pinned by tests/hooks/preflight-gate/
+# test_gh_label_verify.sh against hooks/manifest.json — bump both together.
 _HOOK_TIMEOUT_SEC = 15
 _HOOK_TIMEOUT_MARGIN_SEC = 2
-
-# Never spawn gh with a near-zero timeout: the fork/exec is guaranteed dead
-# on arrival and only burns what little budget remains. Matches the
-# dispatcher's _MEMBER_SKIP_FLOOR_SEC rationale (issue #1167).
-_MIN_PROBE_BUDGET_SEC = 0.5
 
 _LABEL_FLAGS: frozenset[str] = frozenset({"--label", "-l", "--add-label"})
 _REPO_FLAGS: frozenset[str] = frozenset({"--repo", "-R"})
@@ -121,10 +119,9 @@ _REPO_URL_RE = re.compile(r"[:/]([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
 @fail_open
 def main() -> int:
     # Self-budget: the standalone 13s (manifest timeout minus margin), clamped
-    # to the remaining group budget when running inside the dispatcher — the
-    # accessor returns the default when no dispatcher deadline is published.
-    self_budget = _HOOK_TIMEOUT_SEC - _HOOK_TIMEOUT_MARGIN_SEC
-    deadline = time.monotonic() + min(remaining_budget(self_budget), self_budget)
+    # to the remaining group budget when running inside the dispatcher — see
+    # _hook_runtime.shared_probe_deadline.
+    deadline = shared_probe_deadline(_HOOK_TIMEOUT_SEC, _HOOK_TIMEOUT_MARGIN_SEC)
     try:
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
@@ -354,7 +351,7 @@ def _fetch_labels(repo: str, deadline: float) -> tuple[set[str], bool] | None:
     and with no budget left it fails open without spawning gh at all.
     """
     remaining = deadline - time.monotonic()
-    if remaining < _MIN_PROBE_BUDGET_SEC:
+    if remaining < MIN_SUBPROC_BUDGET_SEC:
         return None
     try:
         r = subprocess.run(
@@ -398,7 +395,7 @@ def _label_absent(repo: str, label: str, deadline: float) -> bool:
     rather than blocking on an absence it could not prove.
     """
     remaining = deadline - time.monotonic()
-    if remaining < _MIN_PROBE_BUDGET_SEC:
+    if remaining < MIN_SUBPROC_BUDGET_SEC:
         return False
 
     host, owner_repo = _split_host(repo)

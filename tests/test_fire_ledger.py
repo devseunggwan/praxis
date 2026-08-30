@@ -794,6 +794,25 @@ def test_aggregate_marks_mixed_granularity_stop_hook():
     assert "M=mixed" in report
 
 
+def test_fire_report_header_excludes_skip_only_hooks():
+    """issue #1167 / PR #1195 round-2 review: a hook whose only records in
+    the window are dispatcher budget-skips never RAN — counting it in 'Hooks
+    fired' (or bucketing it coarse/rich) overstates coverage. It is reported
+    on its own Skip-only line instead."""
+    events = [
+        {"hook": "ran", "role": "preflight-gate", "decision": "pass",
+         "granularity": "rich", "session_id": "s1", "timestamp": "2026-06-26T01:00:00+00:00"},
+        {"hook": "starved", "role": "advisory-nudge", "decision": "skip",
+         "granularity": "rich", "session_id": "s1", "timestamp": "2026-06-26T01:00:01+00:00"},
+    ]
+    agg = cli.aggregate_fires(events)
+    report = cli.render_fire_report(agg, 30, Path("/tmp"), None)
+    assert "Hooks fired : 1" in report
+    assert "Skip-only hooks : 1" in report
+    # the starved hook still appears in the table with its Skip count
+    assert "starved" in report
+
+
 # ---------------------------------------------------------------------------
 # issue #710 remaining scope: advise_ignored_rate
 # ---------------------------------------------------------------------------

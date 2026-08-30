@@ -1784,12 +1784,24 @@ def render_fire_report(
     today = datetime.now(tz=timezone.utc).date()
     since = today - timedelta(days=days - 1)
 
-    coarse_count = sum(1 for r in by_hook.values() if r.get("coarse") and not r.get("rich"))
-    mixed_count = sum(1 for r in by_hook.values() if r.get("coarse") and r.get("rich"))
+    # Skip-only hooks (issue #1167): every record in the window was a
+    # dispatcher budget-skip, i.e. the hook never actually RAN. Counting them
+    # as "fired" (or bucketing them coarse/rich) would overstate coverage, so
+    # the headline counts only hooks with fires > 0 and reports skip-only
+    # hooks on their own line.
+    fired = [r for r in by_hook.values() if r["fires"] > 0]
+    skip_only_count = len(by_hook) - len(fired)
+    coarse_count = sum(1 for r in fired if r.get("coarse") and not r.get("rich"))
+    mixed_count = sum(1 for r in fired if r.get("coarse") and r.get("rich"))
     lines.append(_render_header("bypass-review: Hook Fire-Rate Report (issue #710)"))
     lines.append(f"  Period : {since} → {today} (last {days} day{'s' if days != 1 else ''})")
     lines.append(f"  Source : {telemetry_dir}")
-    lines.append(f"  Hooks fired : {len(by_hook)}  ({coarse_count} coarse, {mixed_count} mixed)")
+    lines.append(f"  Hooks fired : {len(fired)}  ({coarse_count} coarse, {mixed_count} mixed)")
+    if skip_only_count:
+        lines.append(
+            f"  Skip-only hooks : {skip_only_count}  (only budget-skip records "
+            "— never ran in this window; see Skip column)"
+        )
     lines.append("  Scope  : Bash dispatch group = rich (block/ask/advise/pass/skip);")
     lines.append("           other @fail_open hooks = coarse (block/pass only);")
     lines.append("           single-event-rich Stop hooks = mixed (rich escalations")

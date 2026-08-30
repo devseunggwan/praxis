@@ -51,6 +51,7 @@ if str(_LIB_DIR) not in sys.path:
     sys.path.insert(0, str(_LIB_DIR))
 
 from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
     fail_open,
     set_member_deadline,
 )
@@ -63,16 +64,30 @@ _DENY_MARKER = '"permissionDecision": "deny"'
 _SKIP_MARKER = "[dispatch] budget-skip"
 
 # Group budget bookkeeping (issue #1167). The host kills the dispatcher node
-# at the group budget (= max member timeout, see group_budget_info), so the
+# at the group budget (= max member timeout, see load_group), so the
 # in-process deadline keeps a margin under it: enough to record skips, run
 # fire telemetry, and emit the aggregate decision before the host's own cut.
 _GROUP_BUDGET_MARGIN_SEC = 1.0
 # A member is skipped (fail-open, recorded) when less than this remains —
 # below the floor even a healthy member could push past the host's kill line.
-_MEMBER_SKIP_FLOOR_SEC = 0.5
+_MEMBER_SKIP_FLOOR_SEC = MIN_SUBPROC_BUDGET_SEC
 # Fallback when the manifest yields no member timeouts (unreadable manifest,
 # empty group under a patched roster): today's Bash-group node budget.
 _DEFAULT_GROUP_BUDGET_SEC = 15.0
+
+# Members that size their own subprocess timeouts from
+# `_hook_runtime.remaining_budget` (via `shared_probe_deadline`), so handing
+# them a cap SHORTER than their manifest timeout is safe: they degrade
+# gracefully inside it. Every OTHER member uses fixed subprocess timeouts
+# and would ignore a short cap — run one when `remaining < its manifest
+# timeout` and its fixed-timeout worst case can overshoot the node budget,
+# so the host kills the dispatcher and every record after it (round-2
+# review). Such members are skipped-with-record instead. Keep this list in
+# sync when teaching a member to consult remaining_budget.
+_BUDGET_AWARE_MEMBERS: frozenset[tuple[str, str]] = frozenset({
+    ("preflight-gate", "gh-label-verify"),
+    ("preflight-gate", "gh-json-validator"),
+})
 
 
 def _iter_group_entries(
@@ -155,17 +170,6 @@ def group_members(
     return load_group(event, matcher, host)[0]
 
 
-def group_budget_info(
-    event: str, matcher: str, host: Optional[str] = None
-) -> tuple[float, dict[tuple[str, str], float]]:
-    """Return `(group_budget_sec, {(role, name): member_timeout_sec})`.
-
-    Thin view over `load_group` — see its docstring for the budget derivation.
-    """
-    _members, budget, timeouts = load_group(event, matcher, host)
-    return budget, timeouts
-
-
 def _load_main(role: str, name: str, impl: Path) -> Optional[Callable[[], int]]:
     """Import impl.py under a unique module name and return its `main` callable.
 
@@ -188,7 +192,7 @@ def run_one(
     name: str,
     impl: Path,
     payload_raw: str,
-    budget_sec: Optional[float] = None,
+    deadline: Optional[float] = None,
 ) -> tuple[int, str, str]:
     """Run a single member's `main()` in-process. Returns `(exit, stdout, stderr)`.
 
@@ -197,42 +201,51 @@ def run_one(
     `fail_open`, so a raising hook is isolated and reported as a pass (exit 0)
     — double-wrapping an already-`@fail_open` main is harmless.
 
-    `budget_sec` (issue #1167) is the member's wall-clock cap: it is published
-    via `_hook_runtime.set_member_deadline` so budget-aware members size their
-    subprocess timeouts from `remaining_budget` instead of their standalone
-    per-process budget. Members run in-process (imported callables), so this is
-    cooperative, not preemptive — a member that ignores it is still bounded by
-    the host's node timeout, and later members are then skipped-with-record by
-    `run_group`. None (direct/test calls) publishes no deadline.
+    `deadline` (issue #1167) is the member's absolute wall-clock cap (a
+    `time.monotonic()` value, already clamped to the group deadline by
+    `run_group`). It is published via `_hook_runtime.set_member_deadline`
+    BEFORE the cold `_load_main` import, so import time erodes the member's
+    own budget rather than the group's post-loop margin (round-2 review).
+    Budget-aware members size their subprocess timeouts from
+    `remaining_budget`; the cap is cooperative, not preemptive — a member
+    that ignores it is still bounded by the host's node timeout. None
+    (direct/test calls) publishes no deadline.
     """
+    if deadline is not None:
+        set_member_deadline(deadline)
     try:
-        fn = _load_main(role, name, impl)
-    except Exception:
-        # Import-time failure (missing dep, syntax error): fail OPEN — a broken
-        # member must never block the tool — but NOT fail-silent. Forward the
-        # traceback to stderr exactly as the per-process `python3 impl.py` wrapper
-        # would (Python prints it unconditionally), so a disabled guard stays
-        # visible instead of silently allowing.
-        return 0, "", f"[dispatch] {role}/{name} import failed:\n{traceback.format_exc()}"
-    if fn is None:
-        return 0, "", ""
+        try:
+            fn = _load_main(role, name, impl)
+        except Exception:
+            # Import-time failure (missing dep, syntax error): fail OPEN — a
+            # broken member must never block the tool — but NOT fail-silent.
+            # Forward the traceback to stderr exactly as the per-process
+            # `python3 impl.py` wrapper would (Python prints it
+            # unconditionally), so a disabled guard stays visible instead of
+            # silently allowing.
+            return (
+                0,
+                "",
+                f"[dispatch] {role}/{name} import failed:\n{traceback.format_exc()}",
+            )
+        if fn is None:
+            return 0, "", ""
 
-    wrapped = fail_open(fn)
-    out, err = io.StringIO(), io.StringIO()
-    saved_stdin = sys.stdin
-    sys.stdin = io.StringIO(payload_raw)
-    if budget_sec is not None:
-        set_member_deadline(time.monotonic() + budget_sec)
-    try:
-        with redirect_stdout(out), redirect_stderr(err):
-            rc = wrapped() or 0
-    except SystemExit as exc:  # impl.py may `sys.exit(main())`-style internally
-        rc = exc.code if isinstance(exc.code, int) else 0
+        wrapped = fail_open(fn)
+        out, err = io.StringIO(), io.StringIO()
+        saved_stdin = sys.stdin
+        sys.stdin = io.StringIO(payload_raw)
+        try:
+            with redirect_stdout(out), redirect_stderr(err):
+                rc = wrapped() or 0
+        except SystemExit as exc:  # impl.py may `sys.exit(main())`-style internally
+            rc = exc.code if isinstance(exc.code, int) else 0
+        finally:
+            sys.stdin = saved_stdin
+        return rc, out.getvalue(), err.getvalue()
     finally:
-        sys.stdin = saved_stdin
-        if budget_sec is not None:
+        if deadline is not None:
             set_member_deadline(None)
-    return rc, out.getvalue(), err.getvalue()
 
 
 def _skip_result(
@@ -265,8 +278,10 @@ def _skip_result(
 def _record_fires(members, results, payload_raw: str) -> None:
     """Log each member's fire decision (issue #710). Fail-open, never raises.
 
-    Lazily imports `_fire_ledger` so a missing/broken module can never break the
-    dispatcher — fire telemetry is observe-only.
+    Called once per member from `run_group`'s loop (incremental — a host kill
+    mid-group must not erase the records of members already resolved), with
+    single-element lists. Lazily imports `_fire_ledger` so a missing/broken
+    module can never break the dispatcher — fire telemetry is observe-only.
     """
     try:
         import _fire_ledger  # type: ignore[import-not-found]
@@ -291,26 +306,43 @@ def run_group(
     # Per-member deadline (issue #1167): members run sequentially inside ONE
     # host timeout (the max member timeout — see load_group), so without a
     # group deadline one slow member starves every later member and the host
-    # kills the dispatcher silently. Track the deadline with a margin under the
-    # host's cut; give each member min(remaining, its own manifest timeout) as
-    # a cooperative cap; skip-with-record members the budget cannot cover.
+    # kills the dispatcher silently. Track the deadline with a margin under
+    # the host's cut. A budget-aware member gets min(remaining, its own
+    # manifest timeout) as a cooperative cap; any other member runs only
+    # while the FULL manifest timeout still fits (its fixed subprocess
+    # timeouts would ignore a shorter cap and overshoot the node budget).
+    # Members the budget cannot cover are skipped-with-record, and each
+    # member's fire is recorded INCREMENTALLY, right after it resolves —
+    # a batch write after the loop would be erased along with the aggregate
+    # decision if the host killed the dispatcher mid-group (round-2 review).
     members, budget, member_timeouts = load_group(event, matcher, host)
     deadline = time.monotonic() + max(
         budget - _GROUP_BUDGET_MARGIN_SEC, _MEMBER_SKIP_FLOOR_SEC
     )
     results = []
     for role, name, impl in members:
+        member = (role, name)
         remaining = deadline - time.monotonic()
-        if remaining < _MEMBER_SKIP_FLOOR_SEC:
-            results.append(_skip_result(role, name, remaining, budget, event))
-            continue
-        cap = min(remaining, member_timeouts.get((role, name), budget))
-        results.append(run_one(role, name, impl, payload_raw, budget_sec=cap))
-
-    # Fire telemetry (issue #710): record each member's decision before the
-    # aggregation below. Observe-only and fail-open — the dispatcher's decision
-    # is unaffected.
-    _record_fires(members, results, payload_raw)
+        member_timeout = member_timeouts.get(member)
+        if member_timeout is None:
+            # No declared timeout (patched roster, malformed manifest entry):
+            # nothing to compare the remaining budget against, so run while
+            # the floor holds, capped at the group deadline.
+            runnable = remaining >= _MEMBER_SKIP_FLOOR_SEC
+            member_deadline = deadline
+        else:
+            runnable = remaining >= _MEMBER_SKIP_FLOOR_SEC and (
+                remaining >= member_timeout or member in _BUDGET_AWARE_MEMBERS
+            )
+            member_deadline = min(time.monotonic() + member_timeout, deadline)
+        if runnable:
+            result = run_one(role, name, impl, payload_raw, deadline=member_deadline)
+        else:
+            result = _skip_result(role, name, remaining, budget, event)
+        results.append(result)
+        # Fire telemetry (issue #710): observe-only and fail-open — the
+        # dispatcher's decision is unaffected.
+        _record_fires([(role, name, impl)], [result], payload_raw)
 
     # Forward every hook's stderr (advisory nudges and deny reasons alike).
     for _rc, _so, se in results:

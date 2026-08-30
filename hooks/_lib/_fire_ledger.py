@@ -399,8 +399,12 @@ def record_group_fires(members, results, payload_raw: str) -> None:
     `results`   : list of `(rc, stdout, stderr)` from `run_one`, positionally aligned.
     `payload_raw`: the raw hook payload JSON (session_id / tool_name source).
 
-    Batched into ONE file open per dispatched tool call (the dispatcher is the
-    hot path — one open for ~N members, not N opens).
+    One file open per call. The dispatcher calls this INCREMENTALLY — one
+    member per call, right after that member resolves — so a host kill
+    mid-group cannot erase the records of members already run or skipped
+    (issue #1167 round-2 review; each append is O_APPEND-atomic per line).
+    Passing the whole group in one call still works and batches into a single
+    open.
     """
     if _disabled():
         return

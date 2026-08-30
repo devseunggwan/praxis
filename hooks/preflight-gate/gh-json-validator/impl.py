@@ -42,8 +42,9 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
     fail_open,
-    remaining_budget,
+    shared_probe_deadline,
 )
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _paths import praxis_cache_dir  # type: ignore[import-not-found]  # noqa: E402
@@ -71,14 +72,12 @@ _GH_HELP_TIMEOUT_SEC = 10
 # startup and process spawn — NOT the single-probe cap, which would shrink
 # the standalone budget from "10s per probe" to "10s total" (PR #1195
 # review). Under the dispatcher the deadline clamps to the remaining group
-# budget instead.
+# budget instead (see _hook_runtime.shared_probe_deadline). Manifest-timeout
+# parity is pinned by tests/hooks/preflight-gate/test_gh_json_validator.sh
+# against hooks/manifest.json — bump both together.
 _HOOK_TIMEOUT_SEC = 15
 _HOOK_TIMEOUT_MARGIN_SEC = 2
 
-# Never spawn gh with a near-zero timeout: the fork/exec is guaranteed dead
-# on arrival and only burns what little budget remains. Matches the
-# dispatcher's _MEMBER_SKIP_FLOOR_SEC rationale (issue #1167).
-_MIN_PROBE_BUDGET_SEC = 0.5
 _BYPASS_COMMENT_RE = re.compile(r"#\s*PRAXIS_GH_JSON_BYPASS\s*=\s*skip")
 
 # Fast prefilter: must contain `gh` and `--json` before doing full parse.
@@ -153,7 +152,7 @@ def _fetch_valid_fields(
     hook's member budget; an exhausted deadline fails open without spawning gh.
     """
     remaining = deadline - time.monotonic()
-    if remaining < _MIN_PROBE_BUDGET_SEC:
+    if remaining < MIN_SUBPROC_BUDGET_SEC:
         return None
     cmd = ["gh"] + list(subcommand_tokens) + ["--json", "help"]
     try:
@@ -171,7 +170,7 @@ def _fetch_valid_fields(
     # Retry with a dummy positional when the subcommand requires an argument.
     if "accepts" in output and "arg" in output and "received 0" in output:
         remaining = deadline - time.monotonic()
-        if remaining < _MIN_PROBE_BUDGET_SEC:
+        if remaining < MIN_SUBPROC_BUDGET_SEC:
             return None
         cmd_with_dummy = ["gh"] + list(subcommand_tokens) + ["0", "--json", "help"]
         try:
@@ -423,10 +422,10 @@ def main() -> int:
     # spawns (issue #1167), so their SUM is bounded by the hook's budget.
     # Standalone (no dispatcher deadline published) that budget is the 13s
     # manifest-derived self-budget; under the dispatcher it clamps to the
-    # remaining group budget. Each individual probe stays capped at
-    # _GH_HELP_TIMEOUT_SEC inside _fetch_valid_fields.
-    self_budget = _HOOK_TIMEOUT_SEC - _HOOK_TIMEOUT_MARGIN_SEC
-    deadline = time.monotonic() + min(remaining_budget(self_budget), self_budget)
+    # remaining group budget — see _hook_runtime.shared_probe_deadline. Each
+    # individual probe stays capped at _GH_HELP_TIMEOUT_SEC inside
+    # _fetch_valid_fields.
+    deadline = shared_probe_deadline(_HOOK_TIMEOUT_SEC, _HOOK_TIMEOUT_MARGIN_SEC)
 
     for raw_argv in iter_command_starts(tokens):
         is_invalid, reason = _check_segment(list(raw_argv), cache_dir, deadline)
