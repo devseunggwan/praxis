@@ -221,6 +221,45 @@ run_anchor_check "report template includes critic_diff ledger line" "$SKILL_DIR/
 run_anchor_check "stage4 reference exists with memory-hint contract" "$SKILL_DIR/references/stage4-execution.md" "Frontmatter contract"
 run_anchor_check "stage4 reference reuses repeat scan step 6" "$SKILL_DIR/references/stage4-execution.md" "Stage 2 step 6's repeat scan results"
 run_anchor_check "stage4 reference returns backing_repo misses to step 7" "$SKILL_DIR/references/stage4-execution.md" "re-run Stage 2 step 7"
+
+# ---------------------------------------------------------------------------
+# NOTE: run_anchor_check / run_forbidden_check grep with a BASIC regex, so the
+# patterns below deliberately avoid `[`, `]` and `*` — a literal `[a]` in the
+# document is a bracket expression to grep and would never match.
+#
+# Step 0's success branch must land in Step 0a. Routing it into the action's
+# own bullets is what let an `⚠ EXTERNAL`-marked issue row reach
+# `gh issue create` with no per-action approval (code review of PR #1144).
+# ---------------------------------------------------------------------------
+
+run_anchor_check "stage4 Step 0 success branch routes into Step 0a (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  ", never straight to the action's own procedure"
+
+run_forbidden_check "stage4 Step 0 no longer routes past the gate (#1144)" \
+  "proceed to the rest of the gated action's procedure"
+
+run_anchor_check "stage4 Step 0a logs the [a] approval (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "approved <backing_repo> for finding #N"
+
+run_anchor_check "stage4 upstream_feedback row also requires the approval log (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "from step 0 + if Step 0a fired"
+
+run_section_check "stage4 Action 2 drafts before running the gate (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "^2\. \*\*GitHub issue" "^3\. \*\*" \
+  "draft the title and body FIRST, then run the gate"
+
+run_section_check "stage4 Action 2 routes hub-mediated orgs to the hub skill (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "^2\. \*\*GitHub issue" "^3\. \*\*" \
+  "block-child-repo-issue-create"
+
+run_anchor_check "stage2 step 7 can resolve the working project repo (#1144)" \
+  "$SKILL_DIR/references/stage1-2-analysis.md" \
+  "The working project repo itself"
 run_anchor_check "stage4 reference declares memory-lint CI split intended (issue #975)" "$SKILL_DIR/references/stage4-execution.md" "the intended design, not a residual gap"
 run_anchor_check "stage4 reference shares one cross-boundary write gate (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "## Cross-boundary write gate (shared by Action 2 and Action 4)"
 run_anchor_check "stage4 Step 0 covers issue rows (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "first procedure step for every \`issue\` row and every \`upstream_feedback\` row"

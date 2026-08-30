@@ -36,7 +36,7 @@ This gate is the first procedure step for every `issue` row and every `upstream_
 
 2. **Re-resolve from source-of-truth.** Independently of the declaration, re-resolve the backing repo using the resolution table below. Do NOT use the declared value as the lookup input — use the tool/layer signal from Stage 2 step 4b to derive the repo from scratch. An `issue` row usually carries no tool/layer signal — its target is the working project repo — so re-resolve it from the checkout the finding came from instead: `git -C <project> remote get-url origin`, or `gh repo view --json nameWithOwner -q .nameWithOwner`. Capture the re-resolved value as `live_backing_repo`. If the resolution table's `Other / ambiguous` row matches the layer (no concrete repo derivable), treat `live_backing_repo = AMBIGUOUS` and skip to step 0.4 with a 2-way prompt instead of 3-way.
 
-3. **Compare.** If `live_backing_repo == declared backing_repo` → proceed to the rest of the gated action's procedure (Action 2 for `issue`, Action 4 for `upstream_feedback`). Normalization rules for equality (apply both sides):
+3. **Compare.** If `live_backing_repo == declared backing_repo` → proceed to **Step 0a below**, never straight to the action's own procedure. Step 0a is the second half of this gate, not part of Action 2 or Action 4: routing from here into the action's bullets is exactly how an `⚠ EXTERNAL`-marked row reaches `gh issue create` with no per-action approval. Normalization rules for equality (apply both sides):
    - Strip leading/trailing whitespace
    - Strip trailing `.git`
    - Treat all of these as equivalent forms of the same repo: `owner/repo`, `https://github.com/owner/repo`, `git@github.com:owner/repo`, `ssh://git@github.com/owner/repo`
@@ -116,9 +116,10 @@ are all invalid — only an explicit [a] pick here allows proceeding.
 [c] Issue draft를 먼저 검토한 뒤 결정 (draft를 보여준 뒤 재질문)
 ```
 
+- If `[a]` → log the approval in the Actions Executed report's verification trail (`Step 0a: [a] approved <backing_repo> for finding #N`), then proceed to `gh issue create`. The verification matrix requires that line; without it the approval leaves no record and the matrix row cannot be satisfied.
 - If `[b]` → remove `{gated_action}` from this finding's action set; log reason in Actions Executed report
 - If `[c]` → show the draft issue body (title, labels, full body text) and re-issue this AskUserQuestion
-- Only `[a]` → proceed to `gh issue create`
+- No other pick proceeds.
 
 ## Per-action procedures
 
@@ -265,11 +266,15 @@ For each approved action:
 
 2. **GitHub issue** → Use project's issue creation skill or `gh issue create`
 
-   **Gate (MUST run first):** run the [Cross-boundary write gate](#cross-boundary-write-gate-shared-by-action-2-and-action-4) with `{gated_action} = issue` — Step 0 (backing-repo verification), then Step 0a (external-repo authorization). Both steps apply to `issue` rows exactly as they do to `upstream_feedback` rows: an `issue` row whose verified backing repo is public carries the `⚠ EXTERNAL: per-action approval required at Stage 4` marker from Stage 2.5 Gate-4 even when the owner is your own org, and Stage 3's "✅ Execute now" does not satisfy it. No `issue` row may reach `gh issue create` with either step unrun.
+   **Gate:** run the [Cross-boundary write gate](#cross-boundary-write-gate-shared-by-action-2-and-action-4) with `{gated_action} = issue` — Step 0 (backing-repo verification), then Step 0a (external-repo authorization). Both steps apply to `issue` rows exactly as they do to `upstream_feedback` rows: an `issue` row whose verified backing repo is public carries the `⚠ EXTERNAL: per-action approval required at Stage 4` marker from Stage 2.5 Gate-4 even when the owner is your own org, and Stage 3's "✅ Execute now" does not satisfy it. No `issue` row may reach `gh issue create` with either step unrun.
+
+   **Order:** draft the title and body FIRST, then run the gate, then call `gh issue create`. The gate must precede the **mutation**, not the drafting — Step 0a's prompt renders `{proposed_issue_title}` and its `[c]` branch shows the full draft body, neither of which exists before the draft is written. Drafting touches no remote, so nothing is at risk in that order.
 
    - Title: Conventional Commits format (per project convention)
    - Body: per project convention, with background + task list
+   - **Now run the gate** (Step 0 → Step 0a) with the draft in hand.
    - Command: `gh issue create --repo <verified_backing_repo> --title "$TITLE" --body "$BODY"` — always pass `--repo` with the repo Step 0 verified. A bare `gh issue create` silently targets whichever checkout the shell happens to be in, discarding the Step 0 result and skipping the `cross-boundary-preflight` hook, which keys on `--repo`.
+   - **Hub-mediated orgs:** the mandatory `--repo` newly exposes this call to `block-child-repo-issue-create`, which hard-blocks (exit 2) when `PRAXIS_HUB_MEDIATED_ORGS` names the verified repo's org and the repo is not that org's hub. A bare `gh issue create` used to pass that hook by carrying no `--repo` at all. When the verified backing repo is a child repo of a hub-mediated org, route through the org's hub creation skill instead of `gh issue create` — do not drop `--repo` to get past the block, and do not set `PRAXIS_HOOK_BYPASS_HUB_ENFORCE`. Praxis itself configures no hub-mediated org, so this branch is inert by default.
    - **Verification (mandatory):** issue URL is returned, `gh issue view {url}` succeeds, AND the URL's repo matches the verified backing repo (catches misrouting)
 
 3. **Global `~/.claude/CLAUDE.md` draft** → Write proposed rule addition as a markdown block, routed by target
@@ -360,7 +365,7 @@ For each approved action:
    | MEMORY.md feedback (new) | File exists + MEMORY.md index updated + `hookable`/`hookKeywords` frontmatter decision recorded (true with keywords, OR false with rationale in Actions Executed report) + if the memory targets a non-Bash tool, confirm `hookEvents` lists that tool (a missing/mistyped `hookEvents` silently reverts to `[Bash]` and the hint never fires on the intended event) |
    | MEMORY.md feedback (merged) | Existing file updated (diff shown) + MEMORY.md index description updated if needed + if existing entry had `hookable: false` **or the field is missing entirely** and merged context now meets the retrieval-critical default, re-evaluate and add/update frontmatter (most pre-existing memories lack `hookable` — missing field is the dominant case, not false) |
    | GitHub issue | `gh issue view {url}` returns valid data + URL repo matches `verified_backing_repo` from Step 0 + if Step 0a fired, the `[a]` approval is logged in the Actions Executed report |
-   | Upstream feedback | `gh issue view {url}` returns valid data + URL repo matches `verified_backing_repo` from step 0 + label convention is correct for the verified repo (`tool-friction:{layer}` ONLY when verified repo is the praxis distribution; otherwise the repo's own convention label per Action 4's label rule) |
+   | Upstream feedback | `gh issue view {url}` returns valid data + URL repo matches `verified_backing_repo` from step 0 + if Step 0a fired, the `[a]` approval is logged in the Actions Executed report + label convention is correct for the verified repo (`tool-friction:{layer}` ONLY when verified repo is the praxis distribution; otherwise the repo's own convention label per Action 4's label rule) |
    | Hook code | Script file exists + settings.json registration confirmed (dry-run varies by hook type — no generic check). If Action 6 step (a) created a worktree, report the worktree path and confirm the file exists there. |
    | Global `~/.claude/CLAUDE.md` draft | **Project target (`AGENTS.md`)**: Diff shown + explicit approval received + Edit applied. **Global target (`~/.claude/CLAUDE.md`)**: Staging file created at `/tmp/claude-md-draft-{slug}.md` → AskUserQuestion 3-option presented → `apply`: Edit applied + diff shown; `보류`: staging file path logged in completion report. |
    | Skill idea note | File exists in `.omc/plans/` |
