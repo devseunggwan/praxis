@@ -139,7 +139,7 @@ exit 0인 PostToolUse 훅의 `stderr`는 디버그 로그로만 가고 모델에
 일어나지 않습니다.
 
 ```json
-{"continue": true, "hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "[second-failure-advisory] 동일한 오류 패턴으로 세션 내 <n>회째 실패가 감지되었습니다. … signature=<sig_prefix> Reference: <path?> — …"}}
+{"continue": true, "hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "[second-failure-advisory] Failure #<n> of the same error pattern in this session — … (동일한 오류 패턴으로 세션 내 <n>회째 실패가 감지되었습니다. …) … signature=<sig_prefix> Reference: <path?> — …"}}
 ```
 
 `<n>`은 해당 `(tool_name, signature)` 쌍의 세션 누적 회차(2, 3, 4, …)입니다.

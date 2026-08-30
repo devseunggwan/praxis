@@ -110,7 +110,7 @@ round 2, F3, accepted rather than fixed).
 ```text
 stderr: "[fallback-negative-warn] suppressed-stderr fallback yields a negative verdict
         Detected: <left-of-||> || <fallback>
-        <Korean advisory body>
+        <English advisory body, Korean detail in parentheses — #1160>
         Reference: issue #893"
 exit 0
 ```
