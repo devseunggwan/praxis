@@ -608,6 +608,11 @@ Resolve `backing_repo:` from these sources, in order:
 2. MCP server git remote
 3. Dotfiles backing repo via symlink chain
 4. Project `AGENTS.md` feature-to-repo mapping
+5. The working project repo itself — `git -C <project> remote get-url origin`, or
+   `gh repo view --json nameWithOwner -q .nameWithOwner`. This is the usual source
+   for an `issue` row, which carries no tool/layer signal. Without it a Stage 4
+   Step 0.1 abort returns the finding here to a step that has no rule able to
+   satisfy it, and the two loop.
 
 If the layer is unresolvable (`builtin`, or no upstream reachable per Stage 4
 Action 4's routing table), remove `upstream_feedback` from the action set and

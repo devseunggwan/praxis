@@ -181,6 +181,9 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
+      "gates": [
+        "git-commit"
+      ],
       "timeout": 5
     },
     {
@@ -188,6 +191,9 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
+      "gates": [
+        "git-commit"
+      ],
       "timeout": 5,
       "mode": {
         "strict_env": "PRAXIS_COMMIT_TITLE_FORMAT_STRICT"
@@ -459,6 +465,9 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
+      "gates": [
+        "git-commit"
+      ],
       "hosts": [
         "claude"
       ],
@@ -474,6 +483,9 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
+      "gates": [
+        "git-commit"
+      ],
       "hosts": [
         "claude"
       ],
@@ -530,6 +542,9 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
+      "gates": [
+        "git-commit"
+      ],
       "timeout": 5,
       "mode": {
         "bypass_env": [
@@ -621,6 +636,9 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
+      "gates": [
+        "git-commit"
+      ],
       "hosts": [
         "claude"
       ],
@@ -636,6 +654,9 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
+      "gates": [
+        "git-commit"
+      ],
       "hosts": [
         "claude"
       ],
