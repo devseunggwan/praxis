@@ -80,6 +80,7 @@ from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E4
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     Token,
     TokenRole,
+    _GROUP_PREFIX_CHARS,
     _is_gh_binary,
     compound_cascade_hint,
     filter_argv,
@@ -312,11 +313,28 @@ def _has_help_flag(seg: list[Token]) -> bool:
     *after* the heredoc hard block, never before it, so a usage query can
     never be used to smuggle a heredoc body past Check 1.
     """
-    return any(
-        tok.role == TokenRole.FLAG
-        and (tok.text in ("--help", "-h") or tok.text.startswith(("--help=", "-h=")))
-        for tok in seg
-    )
+    argv = filter_argv(seg)
+    for i, tok in enumerate(argv):
+        if tok.role != TokenRole.FLAG:
+            continue
+        if not (tok.text in ("--help", "-h") or tok.text.startswith(("--help=", "-h="))):
+            continue
+        # A role check alone is NOT enough, and believing it was is how this
+        # hook regressed once already. FLAG_VALUE is only assigned to flags
+        # listed in `_FLAG_VALUE_SPEC`; a value-taking flag missing from that
+        # list leaves its value typed FLAG. So in
+        # `gh issue create --repo victim/repo --add-label -h --title t`
+        # the `-h` is gh's VALUE for `--add-label`, types as FLAG here, and
+        # used to silence the whole segment including the `--repo` arm.
+        #
+        # This hook cannot hold gh's per-subcommand flag table, so it does not
+        # try: a help flag directly preceded by another flag might be that
+        # flag's value, and an unresolvable "might" on an authorization gate
+        # resolves toward asking.
+        if i > 0 and argv[i - 1].role == TokenRole.FLAG:
+            continue
+        return True
+    return False
 
 
 def _has_repo_flag(seg: list[Token]) -> tuple[bool, str]:
@@ -342,47 +360,57 @@ def _has_repo_flag(seg: list[Token]) -> tuple[bool, str]:
     return False, ""
 
 
+_CHDIR_WORDS = frozenset({"cd", "pushd", "popd"})
+
+
+def _segment_words(seg: list[Token]) -> list[str]:
+    """Every whitespace-separated word in a segment, group/subst chars stripped.
+
+    A coalesced `$(...)` substitution arrives as ONE token whose text holds a
+    whole command (`$(cd /b`), so per-token inspection alone misses what is
+    inside it.
+    """
+    words: list[str] = []
+    for tok in seg:
+        for raw in tok.text.split():
+            stripped = raw.lstrip(_GROUP_PREFIX_CHARS)
+            if stripped:
+                words.append(stripped)
+    return words
+
+
 def _cd_intent(seg: list[Token], argv: list[Token] | None = None) -> tuple[str, str | None]:
     """Classify a segment's effect on the working directory.
 
-    Returns one of:
-      ("none",    None)  — not a `cd`; the cwd is unchanged
-      ("literal", path)  — a bare `cd <literal>`; the cwd moves, knowably
-      ("opaque",  None)  — a `cd` whose destination cannot be modeled
+    Returns ("none", None) | ("literal", path) | ("opaque", None).
 
-    The third case is the point, and it used to be folded into the first.
-    `cd "$WORKTREE" && gh issue create ...` — the dominant idiom in this
-    repo's own worktree skills — needs shell expansion this hook does not
-    perform, and a subshell `(cd x && gh ...)` tokenizes its command word as
-    `(cd`. Treating either as "not a cd" left `effective_cwd` pointing at the
-    OUTER directory, so the write was authorized against a repo it never
-    touches, and when that outer directory was not a checkout at all the gate
-    went silent on a write that lands somewhere real. That is a fail-open on
-    an authorization decision (CodeRabbit CWE-863 on PR #1149), so the caller
-    now asks with an unresolved target instead of guessing.
+    The default is INVERTED relative to the first version of this function.
+    That one recognized a small set of unmodelable forms and treated
+    everything else as "not a cd", so each shape nobody had thought of —
+    `( cd B && …` with a space, `$(cd B && …)`, `pushd B` — silently kept the
+    outer directory and the approval then named a repository the write never
+    touches. Enumerating bypasses does not converge; the classifier now asks
+    the opposite question. Any segment carrying a chdir word AT ALL is opaque
+    unless it is exactly the one shape this hook can model.
     """
     argv = filter_argv(seg) if argv is None else argv
-    if not argv:
+    words = _segment_words(seg)
+    if not any(w in _CHDIR_WORDS for w in words):
         return ("none", None)
 
-    word = argv[0].text
-    if word.lstrip("(").strip() == "cd" and word != "cd":
-        # `(cd ...` — a subshell. Its chdir does not persist past `)`, but a
-        # `gh` call inside the same subshell runs under it, and the segment
-        # machinery carries no per-subshell state to tell the two apart.
-        return ("opaque", None)
-    if word != "cd":
-        return ("none", None)
-
-    rest = [tok for tok in argv[1:] if tok.role == TokenRole.POSITIONAL]
-    if len(rest) != 1 or len(argv) != 2:
-        return ("opaque", None)  # `cd` bare, or with flags/extra words
-    path = rest[0].text
-    if not path or path == "-" or path.startswith("~"):
-        return ("opaque", None)
-    if any(ch in path for ch in "$`*?"):
-        return ("opaque", None)  # needs expansion this hook does not perform
-    return ("literal", path)
+    # Exactly `cd <literal>` and nothing else — the one modelable shape.
+    if (
+        len(argv) == 2
+        and argv[0].text == "cd"
+        and argv[1].role == TokenRole.POSITIONAL
+        and len(words) == 2
+    ):
+        path = argv[1].text
+        if path and path != "-" and not path.startswith("~") and not any(
+            ch in path for ch in "$`*?"
+        ):
+            return ("literal", path)
+    return ("opaque", None)
 
 
 def _slug_from_url(url: str) -> str | None:
@@ -434,6 +462,50 @@ def _inline_env_repo(seg: list[Token]) -> str | None:
     return value
 
 
+def _env_repo_mutation(seg: list[Token]) -> tuple[str, str | None] | None:
+    """A segment that changes `GH_REPO` for the segments after it.
+
+    Returns ("set", slug) | ("unknown", None), or None when the segment does
+    not touch the variable.
+
+    `env GH_REPO=x gh …` and the inline `GH_REPO=x gh …` prefix are scoped to
+    that one command and are handled at the gh segment itself. `export
+    GH_REPO=x && gh …` is NOT: it persists, and leaving it untracked made the
+    approval name the checkout's own repository while the write went to the
+    exported one.
+    """
+    words = _segment_words(seg)
+    if not words or not any(w.startswith("GH_REPO=") or w == "GH_REPO" for w in words):
+        return None
+    # A segment that also invokes `gh` carries the variable as a prefix scoped
+    # to that one command (`GH_REPO=x gh …`, `env GH_REPO=x gh …`). Those are
+    # read per segment by `_inline_env_repo`; claiming them here would consume
+    # the segment and skip the write it wraps.
+    if any(_is_gh_binary(w) for w in words):
+        return None
+    head = words[0]
+    if head == "env":
+        return None
+    if head in ("unset", "export", "declare", "typeset", "set", "local", "readonly"):
+        if head == "unset":
+            return ("unknown", None)
+        assigns = [w for w in words[1:] if w.startswith("GH_REPO=")]
+        if len(assigns) != 1:
+            return ("unknown", None)
+        value = assigns[0].split("=", 1)[1]
+        if value == "":
+            return ("unknown", None)  # cleared — gh falls back, but to what is
+            # decided by the remotes at that later point; do not guess here
+        slug = _parse_full_name(value)
+        return ("set", slug) if slug else ("unknown", None)
+    # A bare `GH_REPO=x` segment with no command is also an assignment that
+    # persists; anything else mentioning the name is not modelable.
+    if len(words) == 1 and head.startswith("GH_REPO="):
+        slug = _parse_full_name(head.split("=", 1)[1])
+        return ("set", slug) if slug else ("unknown", None)
+    return ("unknown", None)
+
+
 def _read_remote_config(cwd: str) -> dict[str, dict[str, str]] | None:
     """Return {remote_name: {"url": …, "gh-resolved": …}} for the checkout.
 
@@ -479,7 +551,13 @@ def _read_remote_config(cwd: str) -> dict[str, dict[str, str]] | None:
 
 def _remote_order(remotes: dict[str, dict[str, str]]) -> list[str]:
     """Remote names in gh's base-repo preference order."""
-    return sorted(remotes, key=lambda n: (-_REMOTE_SORT_SCORE.get(n.lower(), 0), n))
+    # Only remotes gh could actually resolve a repository from. gh discards
+    # non-GitHub remotes before choosing a base repo, so a checkout whose
+    # top-ranked remote is a local path or a GitLab `origin` still writes to
+    # its GitHub remote — ranking the unusable one first made this hook go
+    # silent on exactly that write.
+    resolvable = [n for n in remotes if _slug_from_url(remotes[n].get("url", ""))]
+    return sorted(resolvable, key=lambda n: (-_REMOTE_SORT_SCORE.get(n.lower(), 0), n))
 
 
 def _resolve_effective_repo(
@@ -516,6 +594,8 @@ def _resolve_effective_repo(
         return (_SILENT, "", "")
 
     order = _remote_order(remotes)
+    if not order:
+        return (_SILENT, "", "")
 
     # 2. `gh repo set-default` — the first resolved remote in gh's order wins.
     for name in order:
@@ -706,6 +786,8 @@ def main() -> int:
     # False once a `cd` this hook cannot model has been seen: from that point
     # `effective_cwd` is a guess, and a guess must not authorize a write.
     cwd_is_known = True
+    # False once a `GH_REPO` mutation this hook cannot evaluate has been seen.
+    env_repo_is_known = True
     resolved_repos: dict[str, dict[str, dict[str, str]] | None] = {}
 
     for seg in segments:
@@ -715,6 +797,21 @@ def main() -> int:
         # runs on every Bash PreToolUse, so a duplicated walk is paid on every
         # command in the session.
         seg_argv = filter_argv(seg)
+
+        # `export GH_REPO=x && gh …` persists into the later segments, unlike
+        # the `GH_REPO=x gh …` prefix which is scoped to its own command. Left
+        # untracked, the checklist named the checkout's own repository while
+        # the write went to the exported one.
+        env_mutation = _env_repo_mutation(seg)
+        if env_mutation is not None:
+            state, slug = env_mutation
+            if state == "set":
+                ambient_env_repo = slug
+                env_repo_is_known = True
+            else:
+                env_repo_is_known = False
+            continue
+
         kind, cd_to = _cd_intent(seg, seg_argv)
         if kind == "opaque":
             cwd_is_known = False
@@ -769,6 +866,17 @@ def main() -> int:
         # target. `GH_REPO` outranks every remote, so it outranks not knowing
         # which checkout the command lands in too — asking `UNRESOLVED` there
         # would hide a target this hook can name exactly.
+        if not env_repo_is_known and inline_env_repo is None:
+            _emit_ask(
+                _build_checklist(
+                    subcommand,
+                    "UNRESOLVED — a `GH_REPO` change in this command could not be evaluated",
+                    from_flag=False,
+                )
+                + compound_cascade_hint(command)
+            )
+            return 0
+
         if not cwd_is_known and not env_repo:
             # `from_flag=False` is not cosmetic: the flag header renders the
             # repo INSIDE the command line, so omitting it printed

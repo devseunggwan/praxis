@@ -658,6 +658,61 @@ run_case "a relative cd into a resolvable checkout then repo-less gh asks" ask \
   "$FIXTURE_ROOT"
 
 # ---------------------------------------------------------------------------
+# Shapes that used to keep the target "known" while the write went elsewhere.
+# Each one names the WRONG repo or goes silent under the previous classifier,
+# which is worse than asking UNRESOLVED: the user approves repo A and the
+# write lands in B. The list is not the point — the inverted default is. Any
+# chdir word this hook cannot model now marks the cwd unknown.
+# ---------------------------------------------------------------------------
+
+run_case "a grouped cd with a space then repo-less gh asks unresolved" ask \
+  "( cd $FIX_NOORIGIN && gh issue create --title \"t\" )"
+
+run_case "a command-substitution cd then repo-less gh asks unresolved" ask \
+  "\$(cd $FIX_NOORIGIN && gh issue create --title \"t\")"
+
+run_case "pushd then repo-less gh asks unresolved" ask \
+  "pushd $FIX_NOORIGIN && gh issue create --title \"t\""
+
+run_case_detail "the grouped-cd ask does not name the outer checkout" \
+  "( cd $FIX_NOORIGIN && gh issue create --title \"t\" )" \
+  "UNRESOLVED"
+
+# The plain `ask` rows above pass under the old classifier too — it asked, but
+# named the OUTER checkout. Only these pin which repo the prompt claims.
+run_case_detail "the command-substitution cd ask does not name the outer checkout" \
+  "\$(cd $FIX_NOORIGIN && gh issue create --title \"t\")" \
+  "UNRESOLVED"
+
+run_case_detail "the pushd ask does not name the outer checkout" \
+  "pushd $FIX_NOORIGIN && gh issue create --title \"t\"" \
+  "UNRESOLVED"
+
+# `export` persists across segments; the `GH_REPO=` prefix does not. Leaving
+# the first untracked made the checklist name the checkout while the write
+# went to the exported repo.
+run_case_detail "an exported GH_REPO redirects the named target" \
+  'export GH_REPO=other/target && gh issue create --title "t"' \
+  "other/target"
+
+run_case_detail "an unset GH_REPO is not guessed" \
+  'unset GH_REPO && gh issue create --title "t"' \
+  "UNRESOLVED"
+
+# A help flag that a preceding flag could be consuming is gh's VALUE for that
+# flag, not a usage query. `--add-label` is not in _FLAG_VALUE_SPEC, so its
+# value types as FLAG — believing the role check alone was sufficient is how
+# the `--repo` arm was silenced.
+run_case "a help flag that is another flag's value does not silence --repo" ask \
+  'gh issue create --repo victim/repo --add-label -h --title "t"'
+
+run_case "a help flag that is another flag's value does not silence the repo-less arm" ask \
+  'gh issue create --add-label -h --title "t"'
+
+run_case "a real usage query is still silent after a value-taking flag" pass \
+  'gh issue create --repo victim/repo --title "t" --help'
+
+# ---------------------------------------------------------------------------
 # A `cd` this hook cannot model must not fail open. Resolving from the OUTER
 # cwd authorizes a write against a repo it never touches, and when that outer
 # cwd is not a checkout the gate went silent entirely — a fail-open on an
