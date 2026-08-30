@@ -68,6 +68,7 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
     fail_open,
     remaining_budget,
 )
+from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
     safe_tokenize,
@@ -284,15 +285,10 @@ def main() -> int:
     if os.environ.get("PRAXIS_SKIP_STAGED_FILE_ENUM") == "1":
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        return 0
-
-    if payload.get("tool_name") != "Bash":
-        return 0
-
-    command = (payload.get("tool_input") or {}).get("command", "") or ""
+    parsed = read_bash_payload()
+    if parsed is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
+    payload, command = parsed
     if not command.strip() or OPT_OUT_MARKER in command:
         return 0
     if not _has_live_git_commit(command):

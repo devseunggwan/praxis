@@ -48,6 +48,7 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _paths import praxis_cache_dir  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     iter_command_starts,
@@ -378,15 +379,10 @@ def _check_segment(
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        return 0  # fail-open on malformed stdin
-
-    if payload.get("tool_name") != "Bash":
-        return 0
-
-    command = payload.get("tool_input", {}).get("command", "") or ""
+    parsed = read_bash_payload()
+    if parsed is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
+    payload, command = parsed
     if not command.strip():
         return 0
 

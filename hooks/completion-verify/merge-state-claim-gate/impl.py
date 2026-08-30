@@ -22,7 +22,6 @@ JSON, replacing the old stderr form that only reached the debug log);
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -35,6 +34,7 @@ from _hook_io import (  # type: ignore[import-not-found]  # noqa: E402
     emit_stop_block,
 )
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
     get_current_turn,
@@ -401,9 +401,8 @@ def main() -> int:
     if os.environ.get(_BYPASS_ENV, "").strip():
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
     if not isinstance(payload, dict):
         return 0

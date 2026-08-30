@@ -82,7 +82,6 @@ Fail-open:
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -91,6 +90,7 @@ from pathlib import Path as _Path
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 TARGET_TOOLS = frozenset({"Write", "Edit"})
 
@@ -410,9 +410,8 @@ def _resolve_scan_text(tool_name: str, tool_input: dict, file_path: str) -> str:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed stdin
 
     tool_name = payload.get("tool_name", "") or ""

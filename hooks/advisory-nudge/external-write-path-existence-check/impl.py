@@ -29,7 +29,6 @@ prefix — extends extraction alongside Phase 1 markdown links.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import subprocess
@@ -49,6 +48,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     strip_prefix,
 )
 from _paths import praxis_state_dir  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 # Per-probe cap for the repo-root lookup. Clamped to the dispatcher's
 # remaining member budget at the call site (issue #1167).
@@ -287,13 +287,9 @@ def _mark_reported(key: str) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        return 0  # fail-open on malformed stdin
-
-    if payload.get("tool_name") != "Bash":
-        return 0
+    payload = read_payload(("Bash",))
+    if payload is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
 
     tool_input = payload.get("tool_input", {}) or {}
     command = tool_input.get("command", "") or ""

@@ -73,7 +73,6 @@ be many turns apart:
 from __future__ import annotations
 
 import os
-import json
 import re
 import sys
 from pathlib import Path as _Path
@@ -82,6 +81,7 @@ sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_stop_advisory  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import iter_transcript  # type: ignore[import-not-found]  # noqa: E402
 
 _HOOK_NAME = "pr-report-destination-gate"
@@ -261,9 +261,8 @@ def main() -> int:
     if os.environ.get(_BYPASS_ENV, "").strip():
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
     if not isinstance(payload, dict):
         return 0

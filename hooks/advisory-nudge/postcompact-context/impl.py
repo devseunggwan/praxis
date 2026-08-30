@@ -83,6 +83,7 @@ from _paths import (  # type: ignore[import-not-found]  # noqa: E402
     praxis_state_dir,
     resolve_cache_file,
 )
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _state_lock import state_lock  # type: ignore[import-not-found]  # noqa: E402
 
 DEFAULT_TAIL_LINES = 100
@@ -540,9 +541,8 @@ def main() -> int:
     if os.environ.get(BYPASS_ENV, "").strip() == "1":
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError, OSError):
+    payload = read_payload()
+    if payload is None:
         return 0
     if not isinstance(payload, dict):
         return 0

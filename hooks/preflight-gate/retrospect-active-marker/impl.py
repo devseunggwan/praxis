@@ -66,6 +66,7 @@ if _sys_path not in sys.path:
     sys.path.insert(0, _sys_path)
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 # Explicit retrospect slash-command invocation at the start of the prompt.
 # `/retrospect`, `/praxis:retrospect` (the plugin-namespaced form). A trailing
@@ -233,7 +234,7 @@ def handle_pre_tool_use(payload: dict) -> int:
 def handle_user_prompt_submit(payload: dict) -> int:
     prompt = payload.get("prompt")
     if not isinstance(prompt, str):
-        prompt = payload.get("tool_input", {}).get("prompt", "") if isinstance(
+        prompt = (payload.get("tool_input") or {}).get("prompt", "") if isinstance(
             payload.get("tool_input"), dict
         ) else ""
     path = resolve_state_path(_extract_session_id(payload))
@@ -264,9 +265,8 @@ def detect_event(payload: dict) -> str:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
     if not isinstance(payload, dict):
         return 0

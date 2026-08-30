@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import json
 import os
 import shlex
 import sys
@@ -16,11 +15,14 @@ sys.path.insert(0, str(_HOOK_DIR.parent.parent / "_lib"))
 def _load_hook_libs():
     from _hook_runtime import fail_open
     from _hook_utils import TokenRole, filter_argv, tokenize_with_roles
+    from _payload import read_bash_payload
 
-    return fail_open, TokenRole, filter_argv, tokenize_with_roles
+    return fail_open, TokenRole, filter_argv, tokenize_with_roles, read_bash_payload
 
 
-fail_open, TokenRole, filter_argv, tokenize_with_roles = _load_hook_libs()
+fail_open, TokenRole, filter_argv, tokenize_with_roles, read_bash_payload = (
+    _load_hook_libs()
+)
 
 _PYTHON_COMMANDS = frozenset({"python", "python3"})
 _VALUE_FLAGS = frozenset({"-W", "-X", "--check-hash-based-pycs"})
@@ -223,15 +225,11 @@ def _advisory(script: str) -> str:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        return 0
-
-    if not isinstance(payload, dict) or payload.get("tool_name") != "Bash":
-        return 0
-    command = (payload.get("tool_input") or {}).get("command", "")
-    if not isinstance(command, str) or not command.strip():
+    parsed = read_bash_payload()
+    if parsed is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
+    payload, command = parsed
+    if not command.strip():
         return 0
 
     cwd = payload.get("cwd")

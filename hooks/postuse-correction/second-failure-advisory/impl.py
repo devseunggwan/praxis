@@ -136,6 +136,7 @@ _ROOT = _Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _state_lock import state_lock  # type: ignore[import-not-found]  # noqa: E402
 
 
@@ -432,9 +433,8 @@ def _emit_advisory(tool_name: str, signature: str, reference: str, occurrence: i
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
 
     if not isinstance(payload, dict):

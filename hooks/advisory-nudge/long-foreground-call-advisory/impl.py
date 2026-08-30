@@ -57,7 +57,6 @@ Fail-open contract:
 """
 from __future__ import annotations
 
-import json
 import math
 import sys
 from pathlib import Path
@@ -65,6 +64,7 @@ from pathlib import Path
 _HOOK_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HOOK_DIR.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 # The briefing rule forbids 3-5 minutes of silence; 180000ms (3 min) is its
 # lower edge, so a declared ceiling above it is a declared intent to breach.
@@ -139,9 +139,8 @@ def _advisory(timeout: float) -> str:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
 
     if not isinstance(payload, dict) or payload.get("tool_name") != "Bash":

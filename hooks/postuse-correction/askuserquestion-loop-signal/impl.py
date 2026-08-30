@@ -66,13 +66,13 @@ dedup contract bypass-review's reader side applies.
 """
 from __future__ import annotations
 
-import json
 import sys
 
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 
 _HOOK_NAME = "askuserquestion-loop-signal"
@@ -81,9 +81,8 @@ _HOOK_ROLE = "postuse-correction"
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
 
     if not isinstance(payload, dict):

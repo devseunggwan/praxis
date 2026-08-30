@@ -33,7 +33,6 @@ Exits 0 otherwise (including all fail-open cases).
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -47,6 +46,7 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
     fail_open,
     remaining_budget,
 )
+from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     compound_cascade_hint,
@@ -251,15 +251,10 @@ def main() -> int:
     if os.environ.get("PRAXIS_SKIP_RENAME_SWEEP_CHECK") == "1":
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        return 0
-
-    if payload.get("tool_name") != "Bash":
-        return 0
-
-    command = payload.get("tool_input", {}).get("command", "") or ""
+    parsed = read_bash_payload()
+    if parsed is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
+    payload, command = parsed
     if not command.strip():
         return 0
 

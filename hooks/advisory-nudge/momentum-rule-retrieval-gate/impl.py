@@ -54,6 +54,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     strip_prefix,
 )
 from _memory_dir import resolve_memory_dir  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import TRANSCRIPT_SCAN_LINES  # type: ignore[import-not-found]  # noqa: E402
 from block_message import (  # type: ignore[import-not-found]  # noqa: E402
     format_block,
@@ -1053,15 +1054,10 @@ def main() -> int:
     if os.environ.get("PRAXIS_MOMENTUM_BYPASS") == "1":
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        return 0  # fail-open on malformed input
-
-    if payload.get("tool_name") != "Bash":
-        return 0
-
-    command = payload.get("tool_input", {}).get("command", "") or ""
+    parsed = read_bash_payload()
+    if parsed is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
+    payload, command = parsed
     if not command.strip():
         return 0
 

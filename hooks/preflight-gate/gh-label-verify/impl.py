@@ -68,6 +68,7 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
     shared_probe_deadline,
 )
 from _paths import resolve_writable  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     iter_command_starts,
@@ -132,19 +133,14 @@ def main() -> int:
     # to the remaining group budget when running inside the dispatcher — see
     # _hook_runtime.shared_probe_deadline.
     deadline = shared_probe_deadline(_HOOK_TIMEOUT_SEC, _HOOK_TIMEOUT_MARGIN_SEC)
-    try:
-        payload = json.loads(sys.stdin.read())
-    except (json.JSONDecodeError, ValueError):
-        return 0
-
-    if payload.get("tool_name") != "Bash":
-        return 0
+    parsed = read_bash_payload()
+    if parsed is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
+    payload, command = parsed
 
     global _session_id
     sid = payload.get("session_id")
     _session_id = sid if isinstance(sid, str) and sid else None
-
-    command = (payload.get("tool_input") or {}).get("command", "")
     if not _GH_LABELED_CMD_RE.search(command):
         return 0
     if not _LABEL_FLAG_RE.search(command):
