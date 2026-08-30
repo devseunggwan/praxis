@@ -1231,6 +1231,41 @@ def main() -> int:
             "table row — add them to the skill table"
         )
 
+    # Rule 13d — the using-praxis onboarding entry point routes every skill
+    # (#1177).  Every EXPECTED_SKILLS member must appear as a `backtick`
+    # token somewhere in skills/using-praxis/SKILL.md (category table or
+    # scenario table both count), and — the reverse direction — every skill
+    # named in the first column of one of its tables must be a real skill,
+    # so a rename or removal cannot leave a phantom row behind.
+    using_praxis_path = REPO_ROOT / "skills" / "using-praxis" / "SKILL.md"
+    if not using_praxis_path.exists():
+        drifts.append(
+            "DOC SKILL LIST skills/using-praxis/SKILL.md: file missing — it is "
+            "the onboarding entry point that must route every skill"
+        )
+    else:
+        using_praxis_text = using_praxis_path.read_text()
+        using_praxis_backticks = set(_re.findall(r"`([^`]+)`", using_praxis_text))
+        missing_in_using_praxis = EXPECTED_SKILLS - using_praxis_backticks
+        if missing_in_using_praxis:
+            drifts.append(
+                f"DOC SKILL LIST skills/using-praxis/SKILL.md: "
+                f"{sorted(missing_in_using_praxis)!r} declared in EXPECTED_SKILLS "
+                "but not found as `backtick` tokens — the onboarding entry point "
+                "must route every skill; add them to a category table"
+            )
+        using_praxis_first_col = set(
+            _re.findall(r"^\|\s*`([^`]+)`\s*\|", using_praxis_text, _re.MULTILINE)
+        )
+        phantom_in_using_praxis = using_praxis_first_col - EXPECTED_SKILLS
+        if phantom_in_using_praxis:
+            drifts.append(
+                f"DOC SKILL LIST skills/using-praxis/SKILL.md: "
+                f"{sorted(phantom_in_using_praxis)!r} listed as first-column "
+                "`backtick` table rows but not declared in EXPECTED_SKILLS — "
+                "remove or rename the stale row"
+            )
+
     # ------------------------------------------------------------------
     # Rule 14 — dispatch-group ↔ build/runtime consistency (ADR-0002, #617)
     #
