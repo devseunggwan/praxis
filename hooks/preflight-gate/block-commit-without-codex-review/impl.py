@@ -644,17 +644,22 @@ def _capability_tier() -> tuple[bool, bool]:
     and the strict env exists precisely to pin the deny.
     """
     raw = os.environ.get("PRAXIS_CODEX_REVIEW_STRICT", "").strip()
+    if raw and raw != "0":
+        # Explicit pin: skip the PATH probe entirely — the pinned setup's
+        # whole point is "deny regardless of detection", so it must not
+        # inherit the (documented) pathological-PATH hang exposure.
+        return True, True
     detected = shutil.which("codex") is not None
     if raw:
-        # Explicit override wins both ways, matching the sibling tiering
-        # contracts (branch-name-check, the PR-marker gates): any value but
-        # "0" pins the deny; "0" forces advisory even with codex detected.
-        return raw != "0", detected
+        # raw == "0": explicit demote wins even with codex detected — the
+        # sibling explicit-override-wins contract; detection still feeds
+        # the advisory wording.
+        return False, detected
     return detected, detected
 
 
 def _emit_advisory_message(codex_detected: bool) -> None:
-    """Demoted emission when the codex capability is absent (issue #1187):
+    """Demoted emission when the capability tier is advisory (issue #1187):
     a short advisory summarizing the gate and naming both escalation
     routes (the block message's resolution options assume a runnable
     review, so they are not repeated), exit 0. Two variants: undetected
