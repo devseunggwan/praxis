@@ -264,10 +264,18 @@ write surface is add-only for comments, while GitHub REST itself exposes the
 
 The same absence removes the PostToolUse re-check, for a second and independent
 reason. That step reads the published comment back and re-checks structure
-keyed on `<summary>`; the MCP read path strips `<details>` / `<summary>` while
-keeping their inner text, so a well-formed anchor read back over it reports as
-missing every toggle. Reading through `gh api`, as this hook does, is what
-keeps that check meaningful.
+keyed on `<summary>`; the MCP read path strips `<details>` / `<summary>` from a
+**comment or PR body** while keeping their inner text, so a well-formed anchor
+read back over it reports as missing every toggle. Reading through `gh api`, as
+this hook does, is what keeps that check meaningful.
+
+Worth stating precisely, because the obvious reading is wrong: this is not the
+server mangling markup. **File contents come back with both tags intact** —
+`get_file_contents` on this very spec returns its `<details>` and `<summary>`
+verbatim. The transform applies to the body text a commenter authors and not to
+the files a reader is meant to trust, which is the prompt-injection boundary,
+not a defect. Treat it as policy to work with rather than a bug to route
+around.
 
 **What this means for a gh-less session.** The anchor rule is unsatisfiable
 past rev 1, and the honest response is to say so on the PR rather than to fake
