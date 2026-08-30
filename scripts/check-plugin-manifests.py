@@ -93,6 +93,14 @@ main() is labeled with its number, and this list is the canonical roster
 An unnumbered auxiliary check verifies the Codex adapter symlinks
 (plugins/praxis/{skills,hooks,scripts} → repo root).
 
+  Schema gate (unnumbered — rule renumbering is owned by #1172): before any
+      numbered rule runs, hooks/manifest.json is validated against
+      hooks/manifest.schema.json via the stdlib walker below (#1173), so a
+      typo'd optional key, a wrong type, or an unknown enum value fails with
+      a file+entry+key diagnostic instead of a KeyError deeper in the
+      pipeline. Platform files (manifests/platforms/*.json) get the same
+      treatment through _build.load_platform's checked access.
+
 CI invokes this; developers can too, via `./scripts/check-plugin-manifests.py`.
 """
 from __future__ import annotations
@@ -319,6 +327,102 @@ def _spec_referenced_paths(text: str) -> set[str]:
             continue
         paths.add(tok)
     return paths
+
+
+def schema_validation_errors(instance, schema, path: str = "$") -> list[str]:
+    """Validate `instance` against the JSON-Schema subset the manifest schema uses.
+
+    `jsonschema` is not importable in this environment or in CI (scripts/ are
+    stdlib-only by repo precedent), so this walker is driven BY the schema file
+    — hooks/manifest.schema.json stays the single source of truth; nothing here
+    hardcodes the manifest's shape. Subset limitation: only the keywords that
+    schema actually uses are enforced — type (object/array/string/integer/
+    boolean), enum, required, properties, additionalProperties (False), items,
+    minimum, minItems, minLength. Documentation keywords ($schema, $id, title,
+    description) are ignored; any OTHER keyword introduced into the schema is
+    silently unenforced until this walker is extended in the same commit.
+    """
+    errs: list[str] = []
+    if "enum" in schema:
+        if instance not in schema["enum"]:
+            errs.append(f"{path}: {instance!r} is not one of {schema['enum']!r}")
+        return errs
+    schema_type = schema.get("type")
+    if schema_type is not None:
+        py_type = {
+            "object": dict,
+            "array": list,
+            "string": str,
+            "integer": int,
+            "boolean": bool,
+        }[schema_type]
+        # bool is a subclass of int in Python; JSON Schema keeps them distinct.
+        if not isinstance(instance, py_type) or (
+            py_type is int and isinstance(instance, bool)
+        ):
+            errs.append(
+                f"{path}: expected {schema_type}, got {type(instance).__name__}"
+            )
+            return errs
+    if isinstance(instance, dict):
+        props = schema.get("properties", {})
+        for key in schema.get("required", []):
+            if key not in instance:
+                errs.append(f"{path}: missing required key {key!r}")
+        if schema.get("additionalProperties") is False:
+            for key in sorted(set(instance) - set(props)):
+                errs.append(f"{path}: unknown key {key!r}")
+        for key, subschema in props.items():
+            if key in instance:
+                errs.extend(
+                    schema_validation_errors(instance[key], subschema, f"{path}.{key}")
+                )
+    elif isinstance(instance, list):
+        if "minItems" in schema and len(instance) < schema["minItems"]:
+            errs.append(
+                f"{path}: needs at least {schema['minItems']} item(s), "
+                f"got {len(instance)}"
+            )
+        items_schema = schema.get("items")
+        if items_schema is not None:
+            for i, element in enumerate(instance):
+                errs.extend(
+                    schema_validation_errors(element, items_schema, f"{path}[{i}]")
+                )
+    elif isinstance(instance, str):
+        if "minLength" in schema and len(instance) < schema["minLength"]:
+            errs.append(
+                f"{path}: string shorter than minLength {schema['minLength']}"
+            )
+    elif isinstance(instance, int) and not isinstance(instance, bool):
+        if "minimum" in schema and instance < schema["minimum"]:
+            errs.append(f"{path}: {instance} is below minimum {schema['minimum']}")
+    return errs
+
+
+def manifest_schema_drifts(manifest: dict) -> list[str]:
+    """Schema-gate drift strings for hooks/manifest.json (#1173).
+
+    Each error names the file, the JSON path (with the hook entry's `name`
+    appended when the path points into hooks[N]), and the offending key.
+    """
+    schema_path = _build.HOOKS_DIR / "manifest.schema.json"
+    schema = json.loads(schema_path.read_text())
+    hooks_list = manifest.get("hooks")
+    if not isinstance(hooks_list, list):
+        hooks_list = []
+    out: list[str] = []
+    for err in schema_validation_errors(manifest, schema):
+        label = ""
+        m = re.match(r"\$\.hooks\[(\d+)\]", err)
+        if m:
+            idx = int(m.group(1))
+            if idx < len(hooks_list) and isinstance(hooks_list[idx], dict):
+                name = hooks_list[idx].get("name")
+                if isinstance(name, str):
+                    label = f" (entry {name!r})"
+        out.append(f"SCHEMA hooks/manifest.json {err}{label}")
+    return out
 
 
 def dispatch_node_drifts(
@@ -727,6 +831,21 @@ def _hook_dirs() -> list[Path]:
 def main() -> int:
     base = _build.load_base()
     manifest = _build.load_manifest()
+
+    # ------------------------------------------------------------------
+    # Manifest schema gate (#1173) — deliberately unnumbered: rule
+    # renumbering is owned by the parallel #1172 change. Runs before every
+    # numbered rule (and before expand_to_hooks_json) because they all
+    # index into the manifest raw; a malformed manifest must fail here
+    # with a file+entry+key diagnostic, not a KeyError traceback.
+    # ------------------------------------------------------------------
+    schema_drifts = manifest_schema_drifts(manifest)
+    if schema_drifts:
+        print("plugin-manifest check FAILED:")
+        for d in schema_drifts:
+            print(f"  - {d}")
+        return 1
+
     hooks_source = _build.expand_to_hooks_json(manifest)
     # ADR-0002: must mirror build-plugin-manifests.main() so the expected
     # hooks.json collapses dispatch groups identically to the committed output.
@@ -739,7 +858,7 @@ def main() -> int:
     # Rule 5 — generated artifacts byte-identical (drift check)
     # ------------------------------------------------------------------
     for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
-        platform = json.loads(platform_file.read_text())
+        platform = _build.load_platform(platform_file)
         host_id = platform.get("host_id", platform["platform"])
         for output in platform["outputs"]:
             out_path = REPO_ROOT / output["path"]
@@ -1456,7 +1575,7 @@ def main() -> int:
 
     hooks_outputs: list[tuple[str, Path]] = []
     for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
-        platform = json.loads(platform_file.read_text())
+        platform = _build.load_platform(platform_file)
         host_id = platform.get("host_id", platform["platform"])
         for output in platform["outputs"]:
             if output["kind"] == "hooks":

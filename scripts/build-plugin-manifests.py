@@ -149,6 +149,49 @@ def load_manifest() -> dict:
     return json.loads(MANIFEST_PATH.read_text())
 
 
+def load_platform(platform_file: Path) -> dict:
+    """Parse one manifests/platforms/*.json declaration with checked access.
+
+    Raw `platform["outputs"]` / `output["path"]` indexing used to surface a
+    malformed platform file as a bare KeyError traceback; this loader raises
+    ValueError naming the file and the offending key instead (same diagnostic
+    precedent as render_output's unknown-kind ValueError). Callers (main()
+    and check-plugin-manifests.py) may then index the checked keys directly.
+    """
+    rel = platform_file.name
+    platform = json.loads(platform_file.read_text())
+    if not isinstance(platform, dict):
+        raise ValueError(f"manifests/platforms/{rel}: top level must be an object")
+    if not isinstance(platform.get("platform"), str):
+        raise ValueError(
+            f"manifests/platforms/{rel}: missing or non-string key 'platform'"
+        )
+    outputs = platform.get("outputs")
+    if not isinstance(outputs, list):
+        raise ValueError(
+            f"manifests/platforms/{rel}: missing or non-array key 'outputs'"
+        )
+    for i, output in enumerate(outputs):
+        if not isinstance(output, dict):
+            raise ValueError(
+                f"manifests/platforms/{rel}: outputs[{i}] must be an object"
+            )
+        for key in ("kind", "path"):
+            if not isinstance(output.get(key), str):
+                raise ValueError(
+                    f"manifests/platforms/{rel}: outputs[{i}] missing or "
+                    f"non-string key {key!r}"
+                )
+        if output["kind"] == "marketplace" and not isinstance(
+            output.get("plugin_source"), str
+        ):
+            raise ValueError(
+                f"manifests/platforms/{rel}: outputs[{i}] kind 'marketplace' "
+                "requires string key 'plugin_source'"
+            )
+    return platform
+
+
 # ---------------------------------------------------------------------------
 # hooks.json expansion
 # ---------------------------------------------------------------------------
@@ -887,7 +930,7 @@ def main() -> int:
     changed_paths: list[str] = []
 
     for platform_file in sorted(PLATFORMS_DIR.glob("*.json")):
-        platform = json.loads(platform_file.read_text())
+        platform = load_platform(platform_file)
         host_id = platform.get("host_id", platform["platform"])
         for output in platform["outputs"]:
             out_path = REPO_ROOT / output["path"]
