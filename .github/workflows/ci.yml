@@ -116,9 +116,10 @@ jobs:
       # zsh is not preinstalled on ubuntu-24.04. block-unmatched-glob delegates
       # its verdict to a real zsh, so without it that hook's suite has nothing to
       # assert against and silently degrades to fail-open coverage.
-      # jq is deliberately NOT installed: the ubuntu-24.04 runner image already
-      # ships it at the version noble's apt would resolve anyway (jq 1.7.1), so
-      # fetching it only widens the exposure to the mirror stall below.
+      # jq is installed explicitly (#1170): the runner image ships it today, but
+      # two sub-suites (test_no_live_keys_in_fixtures, test_catalog_monotonic)
+      # skip themselves without it, and depending on the image is exactly the
+      # silent-degradation path the PRAXIS_SUBSKIP protocol exists to catch.
       # markdownlint-cli2 still comes from npm for the same reason ruff is
       # pinned: under PRAXIS_TESTS_STRICT its absence would abort the run (#917).
       # The phase bound and the retry around it both live in scripts/ci-apt.sh,
@@ -126,7 +127,7 @@ jobs:
       # survivable). A stalled mirror was observed killing this step three times
       # before the bound, and again after it -- bounding made the failure fast,
       # the retry is what can make it pass.
-      - run: bash scripts/ci-apt.sh zsh
+      - run: bash scripts/ci-apt.sh zsh jq
       # shellcheck is no longer taken from the runner image (0.9.0): step 10 of
       # run-tests.sh must run the same pinned version as the `shellcheck` job,
       # so the local-parity step cannot disagree with the blocking one (the ruff
