@@ -43,8 +43,8 @@ variable assignments are transparent pass-throughs.
 
 Why heredoc is blocked: `shlex` tokenization does not read heredoc content,
 so the `block-pr-without-caller-evidence` hook and `external-write-falsify-check`
-hook both see an empty body. Caller-chain evidence and falsification checks
-are bypassed silently.
+hook (opt-in, off by default) both see an empty body. Caller-chain evidence
+and falsification checks are bypassed silently.
 
 Correct pattern: `Write tool → /tmp/body.md` then `--body-file /tmp/body.md`.
 

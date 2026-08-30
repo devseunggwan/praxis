@@ -266,7 +266,7 @@ def test_fp2_no_completion_phrase(tmp_path: Path) -> None:
 
 def test_fp3_read_tool_with_completion_phrase(tmp_path: Path) -> None:
     """Completion phrase + Read tool → suppressed. (FP3)"""
-    read_use = mk_read_use("fp3r", "/Users/nathan/projects/praxis/hooks/hooks.json")
+    read_use = mk_read_use("fp3r", "/Users/jane/projects/praxis/hooks/hooks.json")
     result = mk_tool_result("fp3r", '{"hooks": {...}}')
     events = [
         mk_user("hooks.json 확인해주세요"),

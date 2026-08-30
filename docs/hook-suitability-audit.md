@@ -31,18 +31,22 @@ already tracked by an open issue, the issue is cited instead of re-reported.
 > `docs/hook/INDEX.md:122` documents it as "PreToolUse (opt-in)". The
 > half-state is designed, not accidental.
 
-What survives of the finding is narrower: **sibling specs delegate coverage
-territory to an off-by-default hook without saying so.**
-`source-citation-probe-gate/spec.md` excludes fenced code blocks because
-they are "`external-write-falsify-check`'s author-exempt Check 2 territory",
-and `caller-probe-gate`, `exclusion-probe-gate`, `protected-paths-guard`,
-`cross-boundary-preflight`, and `merge-state-claim-gate` carry similar
-boundary references. A reader (or a future audit — this one included)
-concludes that surface is covered; in a default install it is not.
+What survives of the finding is narrower: **some sibling-spec lines delegate
+coverage territory to an off-by-default hook without qualifying it.** Two
+siblings already state the opt-in status in prose
+(`source-citation-probe-gate/spec.md:17`, `caller-probe-gate/spec.md:132`),
+but the load-bearing delegation and comparison lines did not:
+`source-citation-probe-gate`'s two "author-exempt Check 2 territory"
+exclusions, the related-hook table rows in `exclusion-probe-gate`,
+`protected-paths-guard`, and `block-personal-asset-leak`, and
+`cross-boundary-preflight`'s bypass rationale. A reader of those lines (or a
+future audit — this one included) concludes the surface is covered; in a
+default install it is not.
 
-**Verdict: doc-only fix.** Where a sibling spec hands a detection surface to
-`external-write-falsify-check`, qualify the reference with "(opt-in, not
-registered by default)" so documented coverage matches a default install.
+**Verdict: doc-only fix (applied with this audit).** The six delegation/
+comparison sites above now carry "(opt-in, off by default)"; code-copy
+mirror notes (`merge-state-claim-gate`, `version-bump-evidence-check`) were
+left alone — mirrored code exists regardless of registration.
 
 ## B. Hooks that cannot fire without components this repo does not declare
 
@@ -81,7 +85,7 @@ carry the author's private namespace as code, not config:
 | `completion-verify/completion-signal-gate/impl.py` | `laplace-dev-hub`, `laplace-wiki`, `oh-my-claudecode`, `_KNOWN_FOREIGN_SKILLS` | Rule 2 (foreign-plugin slash command) is gated on cwd == praxis, so contained — but the namespace list is still personal |
 | `advisory-nudge/model-routing-advisory/spec.md`, `merge-menu-review-options-advisory/impl.py` | `laplace-dev-hub:*`, `oh-my-claudecode:security-reviewer` named in emitted guidance | Advice text tells any installer to run plugins they do not have |
 | `preflight-gate/side-effect-scan` (`wrapper-commit` category) | `iceberg-schema migrate/promote`, `omc ralph` | Author-toolchain command names in a shipped trigger table |
-| `hooks/_lib/_memory_dir.py:49-50` | `/Users/nathan.song/.claude` in a docstring example | A real person's name in a public repo; cosmetic but should be a placeholder |
+| `hooks/_lib/_memory_dir.py:49-50` | a real personal `/Users/<name>/.claude` path in a docstring example | Fixed with this audit (R1) — replaced by a placeholder in code, spec, and test fixtures |
 | four hooks (`pr-report-destination-gate`, `protected-paths-guard` exclusion, `external-write-falsify-check`, `postcompact-context` docs) | `.omc/plans/` scratch path | omc-convention path assumed to be where planning artifacts live |
 
 `block-personal-asset-leak` is the counter-example done right: its class-2
@@ -185,14 +189,15 @@ Per-category prescription, ordered by (behavioral impact × cost). Each item
 is sized to the repo's one-issue-one-PR convention; verification plans
 follow the negative-control discipline the existing issues use.
 
-### R1 — `_lib/_memory_dir.py` docstring name (C, trivial)
+### R1 — `_lib/_memory_dir.py` docstring name (C, trivial — applied)
 
-Replace `/Users/nathan.song/.claude` at `hooks/_lib/_memory_dir.py:49-50`
-with a placeholder (`/Users/alice/.claude` → `-Users-alice--claude`
-preserves the double-dash point the example exists to make). Doc-only, no
-test movement. Can ride along with any other PR.
+Applied with this audit: the real name at `hooks/_lib/_memory_dir.py:49-50`
+and its echoes in `memory-hint/spec.md`, `test_memory_dir.py`,
+`test_memory_hint.sh`, and `test_completion_signal_gate.py` were replaced
+with a `jane.doe` placeholder — the dotted username is kept so the
+double-dash slug point the example exists to make survives.
 
-### R2 — personal-owner exemption becomes config (C, behavioral)
+### R2 — personal-owner exemption becomes config (C, behavioral) — issue #1156
 
 `block-gh-issue-create-without-dup-search/impl.py:121` replaces
 `_PERSONAL_REPO_RE = ^devseunggwan/` with the owner list from
@@ -204,7 +209,7 @@ set their env). Verification: existing fixtures flip from
 hardcoded-owner to env-injected owner; negative control — unset env must
 reproduce today's strict behavior for a non-author repo.
 
-### R3 — author-toolchain literals in trigger tables become extensible (C)
+### R3 — author-toolchain literals in trigger tables become extensible (C) — issue #1157
 
 Same shape, two sites, one PR:
 
@@ -223,7 +228,7 @@ list in `completion-signal-gate` Rule 2 (already contained by its
 text (those hooks are claude-host and cmux-dependent anyway — R4 declares
 that instead).
 
-### R4 — declare component dependencies in the manifest (B)
+### R4 — declare component dependencies in the manifest (B) — issue #1158
 
 Two mechanisms, matching what each dependency actually is:
 
@@ -244,7 +249,7 @@ Verification: checker fixture both directions (manifest-without-spec-line
 and spec-line-without-manifest-field both fail); negative control — a hook
 with no `requires` passes untouched.
 
-### R5 — convention gates: strict-only-when-configured (D, design decision)
+### R5 — convention gates: strict-only-when-configured (D, decided — issue #1159)
 
 The §D inconsistency needs one stated principle, and the candidate this
 audit recommends is: **a convention gate blocks only when the convention is
@@ -278,10 +283,11 @@ blocked; (b) converge everything to opt-in — regresses the author's own
 protection. The principle above is the middle that costs the author one-time
 env configuration and costs installers nothing.
 
-This is the one item that changes runtime behavior across several hooks —
-it should be an issue with the decision recorded before any PR.
+Decision recorded 2026-08-30 (maintainer): the strict-only-when-configured
+principle is adopted, with `pre-edit-protected-branch-guard` kept default-on
+as the documented two-tier exception — see issue #1159.
 
-### R6 — bilingual advisory bodies (F)
+### R6 — bilingual advisory bodies (F) — issue #1160
 
 `fallback-negative-warn` and `second-failure-advisory` emit Korean-only
 bodies. Prepend a one-line English summary above the Korean detail
@@ -306,5 +312,5 @@ default-block tier (§G).
 | 2 | R2 | Smallest behavioral fix, reuses an existing env var |
 | 3 | R4 | Pure metadata + checker; unblocks packaging decisions |
 | 4 | R3 | Trigger-table config extraction, same tested shape as R2 |
-| 5 | R5 | Needs a recorded design decision first — file the issue early, land last |
+| 5 | R5 | Decision recorded in #1159; per-hook PRs land last |
 | 6 | R6 | Cosmetic, no urgency |

@@ -128,7 +128,7 @@ exclusion is a semantic judgment a regex cannot make.
 | ---- | ------- |
 | `path-probe-gate` | None — that gate is about *where* a Write lands; this is about the *content* of the write. Shares the advisory-first + strict-escalation shape. |
 | `output-block-falsify-advisory` | Complementary — that fires on confidence-anchoring tokens in output blocks; this fires on the exclusion+verification conjunction in artifact content. |
-| `external-write-falsify-check` | Complementary — that scans `gh`/Slack/Notion write bodies for hypothesis markers; this scans file content for unprobed exclusions. |
+| `external-write-falsify-check` | Complementary (opt-in, off by default) — that scans `gh`/Slack/Notion write bodies for hypothesis markers; this scans file content for unprobed exclusions. |
 
 ### Fail-open
 

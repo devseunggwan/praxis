@@ -137,8 +137,9 @@ Returns exit 0 on every infrastructure error — malformed stdin, missing/
 unreadable transcript, empty transcript, no assistant text in the current
 turn, and any uncaught exception (via the shared `@fail_open` decorator in
 `hooks/_lib/_hook_runtime.py`). `stop_hook_active: true` short-circuits to
-exit 0 (re-entry loop guard). It never blocks a normal Stop in the default
-(advisory) mode.
+exit 0 (re-entry loop guard). It never blocks a normal Stop when demoted
+via `PRAXIS_PR_CLAIM_ADVISORY=1`; in the default mode a matched claim with
+no mutation evidence blocks, per the Escalation section above.
 
 ## Tests
 

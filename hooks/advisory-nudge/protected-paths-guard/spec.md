@@ -122,7 +122,7 @@ exit 0 (advisory) or 2 (strict)
 | ------ | ------- | --------- |
 | `pre-edit-protected-branch-guard` | edits on protected git branches | None — this hook is file-pattern based, not branch-state based |
 | `worktree-edit-gate` | edits to source files when HEAD is on a base branch | None — different defect class (workflow vs credential leak) |
-| `external-write-falsify-check` | external-surface write commands | None — different tool surfaces (Bash vs Edit/Write) |
+| `external-write-falsify-check` | external-surface write commands (opt-in, off by default) | None — different tool surfaces (Bash vs Edit/Write) |
 | `side-effect-scan` | gate on mutation CLI commands | None — Bash matcher, not Edit/Write |
 
 ### Known limitations
