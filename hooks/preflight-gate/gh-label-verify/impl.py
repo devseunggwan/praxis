@@ -92,6 +92,11 @@ _GH_LABEL_LIMIT = 300
 _HOOK_TIMEOUT_SEC = 15
 _HOOK_TIMEOUT_MARGIN_SEC = 2
 
+# Never spawn gh with a near-zero timeout: the fork/exec is guaranteed dead
+# on arrival and only burns what little budget remains. Matches the
+# dispatcher's _MEMBER_SKIP_FLOOR_SEC rationale (issue #1167).
+_MIN_PROBE_BUDGET_SEC = 0.5
+
 _LABEL_FLAGS: frozenset[str] = frozenset({"--label", "-l", "--add-label"})
 _REPO_FLAGS: frozenset[str] = frozenset({"--repo", "-R"})
 _HELP_FLAGS: frozenset[str] = frozenset({"--help", "-h"})
@@ -349,7 +354,7 @@ def _fetch_labels(repo: str, deadline: float) -> tuple[set[str], bool] | None:
     and with no budget left it fails open without spawning gh at all.
     """
     remaining = deadline - time.monotonic()
-    if remaining <= 0:
+    if remaining < _MIN_PROBE_BUDGET_SEC:
         return None
     try:
         r = subprocess.run(
@@ -393,7 +398,7 @@ def _label_absent(repo: str, label: str, deadline: float) -> bool:
     rather than blocking on an absence it could not prove.
     """
     remaining = deadline - time.monotonic()
-    if remaining <= 0:
+    if remaining < _MIN_PROBE_BUDGET_SEC:
         return False
 
     host, owner_repo = _split_host(repo)

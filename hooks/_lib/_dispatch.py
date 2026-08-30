@@ -103,28 +103,56 @@ def _iter_group_entries(
                 yield hook, entry
 
 
-def group_members(
+def load_group(
     event: str, matcher: str, host: Optional[str] = None
-) -> list[tuple[str, str, Path]]:
-    """Return `(role, name, impl_path)` for manifest entries matching (event, matcher).
+) -> tuple[list[tuple[str, str, Path]], float, dict[tuple[str, str], float]]:
+    """Read the manifest ONCE; return `(members, budget_sec, member_timeouts)`.
 
-    Order follows `manifest.json` array order, which is the declared run order.
-    A multi-event hook contributes the entry whose event/matcher matches.
-    Host filtering: see `_iter_group_entries`.
+    `members` is `(role, name, impl_path)` in `manifest.json` array order (the
+    declared run order; a multi-event hook contributes the entry whose
+    event/matcher matches). `budget_sec` is the MAX member timeout across the
+    group — the same derivation `build-plugin-manifests.py` uses for the
+    dispatcher node's host-side timeout (`filter_hooks_for_host`'s
+    `dispatch_timeout` pre-pass), so the in-process deadline tracks the budget
+    the host actually enforces; the manifest is the single source of truth for
+    both. `member_timeouts` maps `(role, name)` to that member's own timeout.
+
+    A single read (not one per derived view) also closes the window where the
+    manifest changes on disk between reading the roster and reading the
+    budget, which would pair members from one version with timeouts from
+    another. A group with no usable timeouts falls back to
+    `_DEFAULT_GROUP_BUDGET_SEC` (members then get `min(remaining, budget)` as
+    their cap).
     """
     members: list[tuple[str, str, Path]] = []
+    timeouts: dict[tuple[str, str], float] = {}
     for hook, entry in _iter_group_entries(event, matcher, host):
         role = hook.get("role")
         name = hook.get("name")
         body = hook.get("body") or "impl.py"
         impl = _HOOKS_DIR / role / name / (entry.get("file") or body)
         members.append((role, name, impl))
+        raw = hook.get("timeout")
+        if isinstance(raw, (int, float)) and raw > 0:
+            timeouts[(role, name)] = float(raw)
     # Members are invoked with stdin only (see run_one). A manifest hook that
     # declares "args" (the per-process runtime forwards those as sys.argv) is NOT
     # supported in a dispatch group — and the dispatcher's own main() consumes
     # sys.argv for (event, matcher). None of the current exact-Bash members
     # declare args; PR3 adds a fail-loud guard when it wires the manifest schema.
-    return members
+    budget = max(timeouts.values(), default=_DEFAULT_GROUP_BUDGET_SEC)
+    return members, budget, timeouts
+
+
+def group_members(
+    event: str, matcher: str, host: Optional[str] = None
+) -> list[tuple[str, str, Path]]:
+    """Return `(role, name, impl_path)` for manifest entries matching (event, matcher).
+
+    Thin view over `load_group` — see its docstring for ordering and host
+    filtering semantics.
+    """
+    return load_group(event, matcher, host)[0]
 
 
 def group_budget_info(
@@ -132,25 +160,9 @@ def group_budget_info(
 ) -> tuple[float, dict[tuple[str, str], float]]:
     """Return `(group_budget_sec, {(role, name): member_timeout_sec})`.
 
-    The group budget is the MAX member timeout across the group — the same
-    derivation `build-plugin-manifests.py` uses for the dispatcher node's
-    host-side timeout (`filter_hooks_for_host`'s `dispatch_timeout` pre-pass),
-    so the in-process deadline tracks the budget the host actually enforces.
-    The manifest is the single source of truth for both.
-
-    Fail-open: an unreadable manifest or a group with no usable timeouts falls
-    back to `_DEFAULT_GROUP_BUDGET_SEC` with an empty per-member map (members
-    then get `min(remaining, budget)` as their cap).
+    Thin view over `load_group` — see its docstring for the budget derivation.
     """
-    timeouts: dict[tuple[str, str], float] = {}
-    try:
-        for hook, _entry in _iter_group_entries(event, matcher, host):
-            raw = hook.get("timeout")
-            if isinstance(raw, (int, float)) and raw > 0:
-                timeouts[(hook.get("role"), hook.get("name"))] = float(raw)
-    except Exception:
-        return _DEFAULT_GROUP_BUDGET_SEC, {}
-    budget = max(timeouts.values(), default=_DEFAULT_GROUP_BUDGET_SEC)
+    _members, budget, timeouts = load_group(event, matcher, host)
     return budget, timeouts
 
 
@@ -223,20 +235,31 @@ def run_one(
     return rc, out.getvalue(), err.getvalue()
 
 
-def _skip_result(role: str, name: str, remaining: float, budget: float) -> tuple[int, str, str]:
+def _skip_result(
+    role: str, name: str, remaining: float, budget: float, event: str
+) -> tuple[int, str, str]:
     """Fail-open skip record for a member the group budget cannot cover.
 
-    The stderr line makes the starvation VISIBLE (the issue's core complaint is
-    members silently never running when an earlier member overruns): it is
-    forwarded by `run_group` and classified as decision "skip" by
-    `_fire_ledger.classify_decision`, so the skip lands in the fire ledger too.
+    The starvation must be VISIBLE (the issue's core complaint is members
+    silently never running when an earlier member overruns), on two channels:
+
+    - stdout carries the notice as an `additionalContext` hookSpecificOutput,
+      which `run_group`'s issue-#874 merge forwards — the ONE exit-0
+      PreToolUse channel that actually reaches the model (stderr does not; see
+      `_hook_io.py`). Only surfaced when no deny/ask wins stdout, which is
+      fine: a deny/ask already carries its own reason.
+    - stderr carries the same note for terminal/log visibility AND as the
+      marker `_fire_ledger.classify_decision` reads to record the skip as
+      decision "skip" in the fire ledger.
     """
-    return (
-        0,
-        "",
+    note = (
         f"{_SKIP_MARKER} {role}/{name}: {max(0.0, remaining):.1f}s left of the "
-        f"{budget:.0f}s group budget; member not run (fail-open)\n",
+        f"{budget:.0f}s group budget; member not run (fail-open)"
     )
+    stdout = json.dumps({
+        "hookSpecificOutput": {"hookEventName": event, "additionalContext": note}
+    })
+    return 0, stdout, note + "\n"
 
 
 def _record_fires(members, results, payload_raw: str) -> None:
@@ -265,15 +288,13 @@ def run_group(
     except Exception:
         pass
 
-    members = group_members(event, matcher, host)
-
     # Per-member deadline (issue #1167): members run sequentially inside ONE
-    # host timeout (the max member timeout — see group_budget_info), so without
-    # a group deadline one slow member starves every later member and the host
+    # host timeout (the max member timeout — see load_group), so without a
+    # group deadline one slow member starves every later member and the host
     # kills the dispatcher silently. Track the deadline with a margin under the
     # host's cut; give each member min(remaining, its own manifest timeout) as
     # a cooperative cap; skip-with-record members the budget cannot cover.
-    budget, member_timeouts = group_budget_info(event, matcher, host)
+    members, budget, member_timeouts = load_group(event, matcher, host)
     deadline = time.monotonic() + max(
         budget - _GROUP_BUDGET_MARGIN_SEC, _MEMBER_SKIP_FLOOR_SEC
     )
@@ -281,7 +302,7 @@ def run_group(
     for role, name, impl in members:
         remaining = deadline - time.monotonic()
         if remaining < _MEMBER_SKIP_FLOOR_SEC:
-            results.append(_skip_result(role, name, remaining, budget))
+            results.append(_skip_result(role, name, remaining, budget, event))
             continue
         cap = min(remaining, member_timeouts.get((role, name), budget))
         results.append(run_one(role, name, impl, payload_raw, budget_sec=cap))

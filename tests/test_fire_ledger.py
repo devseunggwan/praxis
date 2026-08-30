@@ -64,6 +64,12 @@ _ASK = '{"hookSpecificOutput": {"permissionDecision": "ask"}}'
     (0, "", "an advisory nudge", "advise"),  # stderr -> advise
     (0, "", "", "pass"),                  # silent allow -> pass
     (0, "", "   \n  ", "pass"),           # whitespace-only stderr -> pass
+    # issue #1167: dispatcher budget-skip records carry the marker on stderr
+    # (with the same note as an additionalContext object on stdout) and must
+    # classify as "skip", NOT be mistaken for an advise.
+    (0, "", "[dispatch] budget-skip r/n: 0.1s left of the 15s group budget; member not run (fail-open)\n", "skip"),
+    (0, '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "[dispatch] budget-skip r/n: ..."}}',
+     "[dispatch] budget-skip r/n: 0.1s left of the 15s group budget; member not run (fail-open)\n", "skip"),
 ])
 def test_classify_decision(rc, stdout, stderr, expected):
     assert fl.classify_decision(rc, stdout, stderr) == expected
@@ -145,6 +151,26 @@ def test_aggregate_fires_counts_by_decision():
     assert agg["a"]["sessions"] == {"s1", "s2"}
     assert agg["a"]["last_seen"] == "2026-06-26T02:00:00+00:00"
     assert agg["b"]["advise"] == 1
+
+
+def test_aggregate_fires_skip_is_tracked_separately_not_as_a_fire():
+    """issue #1167 / PR #1195 review: a dispatcher budget-skip record means
+    the member never RAN. Folding it into `fires` would inflate the fire-rate
+    ledger the hook-prune audits score from, and its session must not count
+    as an engaged session."""
+    events = [
+        {"hook": "a", "role": "preflight-gate", "decision": "pass", "session_id": "s1", "timestamp": "2026-06-26T01:00:00+00:00"},
+        {"hook": "a", "role": "preflight-gate", "decision": "skip", "session_id": "s2", "timestamp": "2026-06-26T02:00:00+00:00"},
+        {"hook": "b", "role": "advisory-nudge", "decision": "skip", "session_id": "s2", "timestamp": "2026-06-26T03:00:00+00:00"},
+    ]
+    agg = cli.aggregate_fires(events)
+    assert agg["a"]["fires"] == 1  # skip excluded
+    assert agg["a"]["skip"] == 1
+    assert agg["a"]["sessions"] == {"s1"}  # skip's session not "engaged"
+    assert agg["a"]["last_seen"] == "2026-06-26T02:00:00+00:00"  # still dated
+    # a hook whose only records are skips shows zero fires, not phantom ones
+    assert agg["b"]["fires"] == 0 and agg["b"]["skip"] == 1
+    assert agg["b"]["sessions"] == set()
 
 
 def test_bash_group_roster_filters_to_pretooluse_bash(tmp_path):
@@ -843,6 +869,27 @@ def test_advise_ignored_pass_after_advise_is_heeded_not_ignored():
     assert row["rate"] == 0.0
 
 
+def test_advise_ignored_skip_is_not_an_outcome():
+    """issue #1167 / PR #1195 review: a budget-skip after an advise means the
+    hook never EVALUATED the next call — it is not evidence the advisory was
+    heeded. Skips are dropped from the stream: advise → skip → advise still
+    scores as ignored (the condition recurred at the next real evaluation),
+    and advise → skip alone stays right-censored."""
+    events = [
+        {"hook": "h", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
+        {"hook": "h", "session_id": "s1", "decision": "skip", "timestamp": "2026-06-26T00:00:10+00:00"},
+        {"hook": "h", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:20+00:00"},
+        {"hook": "g", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
+        {"hook": "g", "session_id": "s1", "decision": "skip", "timestamp": "2026-06-26T00:00:10+00:00"},
+    ]
+    result = cli.compute_advise_ignored(events)
+    assert result["h"]["observed"] == 1
+    assert result["h"]["ignored"] == 1  # recurred at the next REAL evaluation
+    assert result["g"]["advise_fires"] == 1
+    assert result["g"]["observed"] == 0  # skip is not a follow-up: censored
+    assert result["g"]["rate"] is None
+
+
 def test_advise_ignored_excludes_partial_rich_stop_hook_when_scoped():
     """issue #847: a single-event-rich Stop hook records only escalations —
     its silent passes never reach the rich stream, so advise, advise (the
@@ -1076,6 +1123,19 @@ def test_compute_external_write_revert_counts_counts_non_pass_fires():
     ]
     counts = cli.compute_external_write_revert_counts(fire_events)
     assert counts == {"s1": 2}
+
+
+def test_compute_external_write_revert_counts_excludes_budget_skips():
+    """issue #1167 / PR #1195 review: a budget-skip means the guard never ran
+    — it is a non-pass decision but NOT a flagged destructive command, so it
+    must not count toward the revert proxy."""
+    fire_events = [
+        {"hook": "destructive-bash-guard", "session_id": "s1", "decision": "advise"},
+        {"hook": "destructive-bash-guard", "session_id": "s1", "decision": "skip"},
+        {"hook": "destructive-bash-guard", "session_id": "s2", "decision": "skip"},
+    ]
+    counts = cli.compute_external_write_revert_counts(fire_events)
+    assert counts == {"s1": 1}
 
 
 def test_compute_external_write_revert_counts_ignores_missing_session():

@@ -395,6 +395,45 @@ else
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("git-call budget fits the manifest timeout")
 fi
 
+# --- origin lookup is cached per directory (PR #1195 review) ---
+# The Bash path resolves the write target per marker-bearing gh segment;
+# uncached, N segments = N identical 2s git calls, which can exceed the 5s
+# manifest timeout. One git call per distinct directory bounds the worst case.
+_cache_out=$(python3 - << PYEOF 2>&1
+import importlib.util, sys, types
+spec = importlib.util.spec_from_file_location("impl", "$HOOK")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+calls = []
+def _counting_run(argv, **kw):
+    calls.append(list(argv))
+    return types.SimpleNamespace(returncode=0,
+                                 stdout="git@github.com:acme/team.git\n", stderr="")
+mod.subprocess.run = _counting_run
+
+for _ in range(3):
+    if mod._origin_owner("/tmp/same-dir") != "acme":
+        sys.stderr.write("owner not resolved from cached origin\n"); sys.exit(1)
+if len(calls) != 1:
+    sys.stderr.write("expected 1 git call for 3 lookups, got %d\n" % len(calls)); sys.exit(1)
+
+# --repo flag path must not touch git at all.
+if mod._bash_target_owner(["gh", "issue", "create", "--repo", "org/x"], "/tmp/other") != "org":
+    sys.stderr.write("--repo owner not parsed\n"); sys.exit(1)
+if len(calls) != 1:
+    sys.stderr.write("--repo path spawned git\n"); sys.exit(1)
+PYEOF
+)
+_cache_rc=$?
+if [ "$_cache_rc" -eq 0 ] && [ -z "$_cache_out" ]; then
+  echo "PASS: origin lookup cached per directory (one git call for N segments)"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: origin lookup not cached (rc=$_cache_rc, out=$(echo "$_cache_out" | head -c 200))"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("origin lookup cached per directory")
+fi
+
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

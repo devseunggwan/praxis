@@ -239,9 +239,16 @@ _FAKE_ADVISORY = "import sys\ndef main():\n    sys.stderr.write('nudge\\n')\n   
 _FAKE_CRASH = "def main():\n    raise RuntimeError('boom')\n"
 
 
-def _patch_members(monkeypatch, members):
-    # 3-arg signature: run_group calls group_members(event, matcher, host).
-    monkeypatch.setattr(_dispatch, "group_members", lambda _e, _m, _h=None: members)
+def _patch_members(monkeypatch, members, budget=15.0, timeouts=None):
+    # run_group resolves roster + budget through the single-read load_group
+    # (issue #1167 review round: one manifest parse per dispatch), so fakes
+    # are injected there. `budget`/`timeouts` default to today's real group
+    # budget with no per-member caps.
+    monkeypatch.setattr(
+        _dispatch,
+        "load_group",
+        lambda _e, _m, _h=None: (members, budget, dict(timeouts or {})),
+    )
 
 
 def test_deny_wins_over_ask_and_advisory(tmp_path, monkeypatch, capsys):
@@ -405,41 +412,47 @@ def test_group_budget_info_matches_manifest():
     # Budget derivation must mirror the build's dispatcher-node timeout: the
     # MAX member timeout across the group (scripts/build-plugin-manifests.py,
     # filter_hooks_for_host's dispatch_timeout pre-pass). The manifest is the
-    # shared source of truth, so both sides read the same numbers.
-    budget, timeouts = _dispatch.group_budget_info("PreToolUse", "Bash")
-    members = _dispatch.group_members("PreToolUse", "Bash")
+    # shared source of truth, so both sides read the same numbers — and both
+    # public views are thin projections of ONE load_group read.
+    members, budget, timeouts = _dispatch.load_group("PreToolUse", "Bash")
     assert set(timeouts) == {(r, n) for r, n, _i in members}
     assert budget == max(timeouts.values())
     assert budget == 15  # the two 15s gh gates set today's group budget
     assert timeouts[("preflight-gate", "gh-label-verify")] == 15
+    assert _dispatch.group_members("PreToolUse", "Bash") == members
+    assert _dispatch.group_budget_info("PreToolUse", "Bash") == (budget, timeouts)
 
 
 def test_budget_exhausting_member_starves_no_one_silently(
     tmp_path, monkeypatch, capsys
 ):
     # An early member that eats the whole group budget must not make later
-    # members vanish: they are skipped fail-open WITH a record — a forwarded
-    # stderr line and a decision="skip" fire-ledger row (the issue's core
-    # complaint is invisible starvation).
+    # members vanish: they are skipped fail-open WITH a record — a merged
+    # additionalContext notice on stdout (the one exit-0 PreToolUse channel
+    # that reaches the model), a stderr line, and a decision="skip"
+    # fire-ledger row (the issue's core complaint is invisible starvation).
     members = [
         ("preflight-gate", "slow", _write_fake(tmp_path, "slow", _FAKE_SLOW)),
         ("advisory-nudge", "late1", _write_fake(tmp_path, "late1", _FAKE_ADVISORY)),
         ("preflight-gate", "late2", _write_fake(tmp_path, "late2", _FAKE_PASS)),
     ]
-    _patch_members(monkeypatch, members)
     # Budget 2s − 1s margin ⇒ ~1s of runway; the slow member sleeps 1.2s.
-    monkeypatch.setattr(
-        _dispatch, "group_budget_info", lambda _e, _m, _h=None: (2.0, {})
-    )
+    _patch_members(monkeypatch, members, budget=2.0)
     ledger = tmp_path / "fire-events-test.jsonl"
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(ledger))
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
 
     rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
-    err = capsys.readouterr().err
+    captured = capsys.readouterr()
     assert rc == 0  # skips are fail-open, never a block
-    assert f"{_dispatch._SKIP_MARKER} advisory-nudge/late1" in err
-    assert f"{_dispatch._SKIP_MARKER} preflight-gate/late2" in err
+    assert f"{_dispatch._SKIP_MARKER} advisory-nudge/late1" in captured.err
+    assert f"{_dispatch._SKIP_MARKER} preflight-gate/late2" in captured.err
+    # The model-visible channel: skip notices ride the #874 additionalContext
+    # merge (stderr never reaches the model on an exit-0 PreToolUse).
+    hso = _sole_hso(captured.out)
+    assert hso["hookEventName"] == "PreToolUse"
+    assert f"{_dispatch._SKIP_MARKER} advisory-nudge/late1" in hso["additionalContext"]
+    assert f"{_dispatch._SKIP_MARKER} preflight-gate/late2" in hso["additionalContext"]
 
     records = {
         rec["hook"]: rec["decision"]
