@@ -59,7 +59,7 @@ trust.
 ### Step 1: Run the report
 
 ```bash
-"$CLAUDE_PLUGIN_ROOT/skills/spec-drift/spec-drift"
+"${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/skills/spec-drift/spec-drift"
 ```
 
 Two paths are resolved, and they come from different places. The **store** is
@@ -132,6 +132,12 @@ can check this".
 requirement's block, ending at the next line in column 0. A `- Verify:` under
 a later heading belongs to nothing and is not run, and a second one in one
 block prints as a `warning` line naming the command that did **not** run.
+
+## Error Handling
+
+| Situation | Handling |
+| --------- | -------- |
+| `CLAUDE_PLUGIN_ROOT` unset (skill run outside plugin context) — the `:?` guard aborts with `praxis plugin root not set` instead of silently trying `/skills/spec-drift/spec-drift` | Resolve the plugin root via the installed-plugins manifest: `jq -r '.plugins["praxis@praxis"][0].installPath // empty' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"`, export it as `CLAUDE_PLUGIN_ROOT`, and re-run; if still unresolved (manifest missing or no praxis entry), report the failure verbatim and stop — do not hand-classify requirements without the oracle |
 
 ## Limitations
 
