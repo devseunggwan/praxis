@@ -35,19 +35,19 @@ assert_lib_init "$SKILL"
 
 assert_present \
   "the call site says the prompt goes through argv" \
-  "프롬프트는 argv 로 넘기고 stdin 은 비워 둡니다"
+  "The prompt goes through argv and stdin stays empty"
 
 assert_present \
   "the mechanism is stated: cat exiting is what closes fd 0" \
-  "cat\` 이 끝나는 순간 워커의 fd 0 이 닫히고"
+  "the moment \`cat\` exits the worker's fd 0 closes"
 
 assert_present \
   "the measured consequence is cited, not just asserted" \
-  "exit 0 으로 종료했습니다"
+  '"Awaiting your confirmation" and exited 0'
 
 assert_present \
   "the stdout half names its own cost — the pane goes blank" \
-  "블록 버퍼링이 걸려 실행 중인 페인이"
+  "block buffering kicked in and the running"
 
 # ---------------------------------------------------------------------------
 # 2. The distinction that keeps the pipe from being "restored"
@@ -58,11 +58,11 @@ assert_present \
 # the argv form, or a future reader re-derives the pipe from the same story.
 assert_present \
   "the inline-literal exclusion is restated as still binding" \
-  "스크립트 본문이나 명령줄에 리터럴로 들어가면"
+  "as a literal in the script body or on the command line"
 
 assert_present \
   "the two are separated: a quoted substitution is not re-expanded" \
-  "셸이 치환 결과를 재해석하지 않으므로"
+  "the shell does not re-interpret the substitution result"
 
 assert_present \
   "the separation is backed by a transcribed run, not an argument" \
@@ -82,21 +82,21 @@ assert_present \
 
 assert_present \
   "why rc gating exists is stated, not left to be re-derived" \
-  "그게 #1054 의 원래 증상입니다"
+  "that is #1054's original symptom"
 
 # Measured after the switch: an argv+TTY worker stays interactive, so the rc
 # branch is never reached on task completion. Leaving that unsaid re-creates
 # #1054's false-completion expectation with a different mechanism.
 assert_present \
   "the notify is disclaimed as a completion signal on the claude branch" \
-  "작업 완료 시점에 실행되지 않습니다"
+  "these lines are not run at task completion"
 
 # There is no completion oracle to name any more (#1130): the skill is
 # fire-and-forget, so the disclaimer has to say where the result actually is
 # instead of pointing at a collection step.
 assert_present \
   "the notify's disclaimer routes the reader to the worker's own tab" \
-  "결과는 사용자가 cmux 에서 직접 확인합니다"
+  "user checks the result directly in cmux"
 
 # ---------------------------------------------------------------------------
 # 4. The argv size limit is guarded, and the guard refuses a fallback
@@ -108,7 +108,7 @@ assert_present \
 
 assert_present \
   "the guard fails loudly instead of falling back to the pipe" \
-  "폴백은 두지 않습니다"
+  "No fallback is provided"
 
 # ---------------------------------------------------------------------------
 # 5. Contracts this change must not displace
@@ -165,6 +165,6 @@ assert_present \
 # Command substitution strips trailing newlines; the pipe did not.
 assert_present \
   "the one behavioural difference from the pipe is stated" \
-  "후행 개행은 잘립니다"
+  "trailing newlines are stripped"
 
 assert_lib_summary

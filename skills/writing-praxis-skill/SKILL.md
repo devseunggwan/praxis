@@ -89,6 +89,17 @@ The global `~/.claude/CLAUDE.md` `Skill & Agent Routing` table maps them.
 - **3–6 keywords is the target range.** Fewer leaves gaps; more creates false
   positives.
 
+**Language policy — body vs literals.** Body prose (Overview, When to Use,
+Process steps, tables) is written in English across the praxis corpus. Korean
+belongs in exactly two places: trigger keywords in the frontmatter
+`description` (the "Cover the Korean variants" principle above), and literal
+strings the skill must match or emit verbatim — quoted user utterances, CLI/UI
+output, and `AskUserQuestion` option labels. `merge-briefing` quoting the
+progress signals `"계속"` / `"진행"` and `codex-review-wrap`'s `"취소"` option
+label are the pattern: the literal stays in its source language because
+translating it would change what the skill matches or displays. Do not write
+section prose in Korean, and do not translate a literal into English.
+
 ### Step 4: Choose Sections
 
 Every SKILL.md must include **Overview**, **When to Use**, and **Process**.
