@@ -92,11 +92,31 @@ run_section_check() {
     FAILED_NAMES+=("$name")
     return
   fi
-  section=$(awk -v s="$start_re" -v e="$end_re" '
-    !inside && $0 ~ s { inside = 1; print; next }
-    inside && $0 ~ e { inside = 0 }
-    inside { print }
-  ' "$path")
+  # The section bounds are passed through the environment, not `awk -v`.
+  # `-v` runs escape processing over the value, so gawk turns `^2\. \*\*GitHub`
+  # into `^2. **GitHub` (warning: "escape sequence `\*' treated as plain `*'")
+  # and the `**` is then a broken quantifier that matches nothing — the section
+  # comes back empty and every check against it fails. mawk keeps the
+  # backslashes, so this splits by awk implementation: mawk locally, gawk on the
+  # CI runner. ENVIRON values are not escape-processed, so both agree.
+  section=$(
+    PRAXIS_SECTION_START="$start_re" PRAXIS_SECTION_END="$end_re" awk '
+      BEGIN { s = ENVIRON["PRAXIS_SECTION_START"]; e = ENVIRON["PRAXIS_SECTION_END"] }
+      !inside && $0 ~ s { inside = 1; print; next }
+      inside && $0 ~ e { inside = 0 }
+      inside { print }
+    ' "$path"
+  )
+  # An empty section means the start bound never matched. Without this arm the
+  # helper reports "pattern missing", which reads as a defect in the document
+  # under test rather than in the extraction — the exact misdiagnosis this
+  # helper produced on its first CI run.
+  if [ -z "$section" ]; then
+    echo "FAIL: $name — section '$start_re' extracted nothing from $path (bounds did not match)"
+    FAIL=$((FAIL + 1))
+    FAILED_NAMES+=("$name")
+    return
+  fi
   if printf '%s\n' "$section" | grep -q -- "$pattern"; then
     echo "PASS: $name"
     PASS=$((PASS + 1))
