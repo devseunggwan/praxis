@@ -3,9 +3,33 @@
 Supported hosts: claude
 
 `hooks/preflight-gate/block-commit-without-codex-review/impl.py` intercepts every Bash tool call and
-hard-blocks a content `git commit` when `praxis:codex-review-wrap` has not been
+hard-blocks a content `git commit` (when the codex capability is attested —
+see the tiering section below) when `praxis:codex-review-wrap` has not been
 invoked anywhere in the current session — including inside any subagent that
 session dispatched (see [Subagent transcript scanning](#subagent-transcript-scanning-issue-730) below).
+
+### Capability tiering (issue #1187, principle from #1159)
+
+The review this gate demands runs through the openai-codex CLI, so the deny
+applies only when the capability is locally attested:
+
+- **`codex` binary on PATH** (`shutil.which`) → deny as before, no env
+  needed — the detectable dependency is the attestation.
+- **`PRAXIS_CODEX_REVIEW_STRICT=1`** → deny pinned regardless of detection
+  (for setups that route the review without a PATH-visible binary; the env
+  accepts the literal value `1` only).
+- **Neither** → the guidance ships as a stderr advisory naming both
+  escalation routes, and the commit proceeds: a commit cannot be denied for
+  skipping a review that is impossible to run here.
+
+Detection is deterministic — `shutil.which` has no ambiguous-failure state,
+so there is no path where a transient error silently demotes the gate. A
+PATH deliberately stripped of codex does demote it; that is accepted
+because the same actor already holds the
+`CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE` escape, and the strict env exists
+precisely to pin the deny. The advisory path skips the escalation banner —
+the escalation counter tracks repeated denies, and an advisory is not one.
+All other allow conditions and bypasses are unchanged.
 
 ### Why this exists
 

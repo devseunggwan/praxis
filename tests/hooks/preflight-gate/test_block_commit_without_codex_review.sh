@@ -88,6 +88,12 @@ printf '%s\n' '{"type":"user","isSidechain":true,"message":{"role":"user","conte
 
 PASS=0; FAIL=0; FAILED_NAMES=()
 
+# Capability tiering (#1187, per #1159): this runner has no codex CLI on
+# PATH, so without attestation every deny would demote to advisory. The
+# detection matrix below verifies transcript scanning, not tier — pin the
+# deny via the strict env; dedicated tier cases at the end override it.
+export PRAXIS_CODEX_REVIEW_STRICT=1
+
 # run_case <name> <block|pass> <tool_name> <command> [transcript_path|"NONE"] [env]
 run_case() {
   local name="$1" expected="$2" tool_name="$3" command="$4" tx="${5:-NONE}" env_kv="${6:-}"
@@ -110,6 +116,9 @@ print(json.dumps(p))' "$tool_name" "$command" "$tx")
   local ok=1
   if [ "$expected" = "block" ]; then
     [ "$rc" -eq 2 ] && [ -n "$err_content" ] || ok=0
+  elif [ "$expected" = "warn" ]; then
+    # #1187 capability-absent tier: proceeds (rc 0), guidance still ships.
+    [ "$rc" -eq 0 ] && [ -n "$err_content" ] || ok=0
   else
     [ "$rc" -eq 0 ] && [ -z "$err_content" ] || ok=0
   fi
@@ -432,6 +441,31 @@ run_escalation_case "different session is independent: no banner" "other-session
 
 rm -f "$ESC_LEDGER"
 
+# ---------------------------------------------------------------------------
+# #1187 capability tiering — deny only when the codex capability is present
+# ---------------------------------------------------------------------------
+unset PRAXIS_CODEX_REVIEW_STRICT
+
+# No codex on PATH (runner reality), no strict env → advisory, commit proceeds.
+run_case "1187: no capability, env unset → warn (advisory)" warn Bash \
+  'git commit -m "feat: x"' "$TX_WITHOUT"
+
+# Strict env pins the deny regardless of detection.
+run_case "1187: no capability, STRICT=1 → block" block Bash \
+  'git commit -m "feat: x"' "$TX_WITHOUT" "PRAXIS_CODEX_REVIEW_STRICT=1"
+
+# A codex binary on PATH attests the capability → deny without any env.
+FAKE_BIN_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+printf '#!/bin/sh\nexit 0\n' > "$FAKE_BIN_DIR/codex"; chmod +x "$FAKE_BIN_DIR/codex"
+run_case "1187: codex on PATH, env unset → block (detected)" block Bash \
+  'git commit -m "feat: x"' "$TX_WITHOUT" "PATH=$FAKE_BIN_DIR:$PATH"
+
+# Negative control: review present in transcript stays silent in BOTH tiers.
+run_case "1187: review ran, no capability → pass (silent)" pass Bash \
+  'git commit -m "feat: x"' "$TX_WITH_SKILL"
+rm -rf "$FAKE_BIN_DIR"
+
+# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Cleanup + summary
 # ---------------------------------------------------------------------------
