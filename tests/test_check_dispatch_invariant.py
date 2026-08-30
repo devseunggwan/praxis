@@ -113,6 +113,61 @@ def test_wrong_host_args_flagged():
     assert any("DISPATCH ARGS" in d for d in out), out
 
 
+def test_args_member_standalone_node_is_not_a_leak():
+    # An args-declaring member is kept STANDALONE by the build (the dispatcher
+    # cannot forward argv; the runtime excludes it too — issue #1199 review),
+    # so its node beside the dispatcher node is expected, not a member leak.
+    hj = _hooks_json([_disp_node("claude"), _member_node("strike-counter")])
+    out = check.dispatch_node_drifts(
+        hj, "PreToolUse", "Bash", "claude", {"x"}, WRAP,
+        args_members={"strike-counter"},
+    )
+    assert out == [], out
+    # ...but a node NOT in args_members is still flagged, and the message names
+    # args as the one legitimate standalone cause.
+    out = check.dispatch_node_drifts(
+        hj, "PreToolUse", "Bash", "claude", {"x"}, WRAP
+    )
+    assert any("DISPATCH MEMBER LEAK" in d and "args-declaring" in d for d in out), out
+
+
+def _matcherless_hooks_json(nodes: list[dict]) -> dict:
+    return {"hooks": {"Stop": [{"hooks": nodes}]}}
+
+
+def test_matcherless_group_expects_sentinel_args():
+    # A (Stop, None) dispatcher node must carry the no-matcher SENTINEL in the
+    # matcher argv slot; a literal "None" render resolves zero members at
+    # runtime and must be flagged.
+    sentinel = check._build.DISPATCH_NO_MATCHER_ARG
+    good = _matcherless_hooks_json([
+        {
+            "type": "command",
+            "command": f"${{CLAUDE_PLUGIN_ROOT}}/hooks/{WRAP} Stop {sentinel} claude",
+            "timeout": 10,
+        }
+    ])
+    out = check.dispatch_node_drifts(good, "Stop", None, "claude", {"x"}, WRAP)
+    assert out == [], out
+
+    bad = _matcherless_hooks_json([
+        {
+            "type": "command",
+            "command": f"${{CLAUDE_PLUGIN_ROOT}}/hooks/{WRAP} Stop None claude",
+            "timeout": 10,
+        }
+    ])
+    out = check.dispatch_node_drifts(bad, "Stop", None, "claude", {"x"}, WRAP)
+    assert any("DISPATCH ARGS" in d for d in out), out
+
+
+def test_no_matcher_sentinel_pinned_across_build_and_runtime():
+    # The build renders DISPATCH_NO_MATCHER_ARG; the runtime maps
+    # NO_MATCHER_ARG back to None. Divergence silently resolves empty groups —
+    # Rule 14 reports it, and this pins the pairing at unit level too.
+    assert check._build.DISPATCH_NO_MATCHER_ARG == check._dispatch.NO_MATCHER_ARG
+
+
 # ---------------------------------------------------------------------------
 # Runtime cross-check — full main() with a monkeypatched resolver
 # ---------------------------------------------------------------------------

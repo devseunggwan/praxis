@@ -357,14 +357,20 @@ def dispatch_node_drifts(
     host_id: str,
     expected_members: set[str],
     dispatch_wrapper_name: str,
+    args_members: set[str] = frozenset(),
 ) -> list[str]:
     """Drift strings for one (event, matcher) group's node shape in a hooks.json.
 
     Pure function (no I/O) so the node-shape half of Rule 14 is unit-testable in
     isolation from the runtime resolver. `expected_members` is the host-kept
-    member set: non-empty → the group must hold exactly ONE node and it must be
-    the dispatcher wrapper carrying `event matcher host_id` args; empty (the host
-    filtered every member) → the group must be absent (zero nodes).
+    COLLAPSIBLE member set: non-empty → the group must hold exactly ONE
+    dispatcher node carrying `event matcher host_id` args; empty (the host
+    filtered every member) → no dispatcher node. `args_members` are the group's
+    args-declaring members: the build keeps them as STANDALONE nodes (the
+    dispatcher cannot forward argv; the runtime resolver excludes them the same
+    way — issue #1199 review), so their per-member nodes are expected, not a
+    leak. A matcher-less group renders `_build.DISPATCH_NO_MATCHER_ARG` in the
+    matcher argv slot.
     """
     groups = [
         g
@@ -378,6 +384,11 @@ def dispatch_node_drifts(
     member_nodes = [
         n for n in nodes if dispatch_wrapper_name not in n.get("command", "")
     ]
+    leaked = [
+        n
+        for n in member_nodes
+        if not any(f"/{name}.sh" in n.get("command", "") for name in args_members)
+    ]
     out: list[str] = []
     want = 1 if expected_members else 0
     if len(dispatch_nodes) != want:
@@ -385,17 +396,22 @@ def dispatch_node_drifts(
             f"DISPATCH NODE COUNT {event}/{matcher} host={host_id}: expected "
             f"{want} dispatcher node(s), found {len(dispatch_nodes)}"
         )
-    if member_nodes:
+    if leaked:
         out.append(
             f"DISPATCH MEMBER LEAK {event}/{matcher} host={host_id}: "
-            f"{len(member_nodes)} non-dispatcher node(s) in a collapsed group: "
-            f"{[n.get('command', '') for n in member_nodes]}"
+            f"{len(leaked)} non-dispatcher node(s) in a collapsed group: "
+            f"{[n.get('command', '') for n in leaked]} "
+            f"(args-declaring members may stay standalone; declared here: "
+            f"{sorted(args_members)})"
         )
     # Args are shlex-quoted in the generated command (PR #1198: the host runs
     # it via `sh -c`, so a pipe-carrying matcher MUST be quoted or it parses
     # as a pipeline). Expect the quoted spelling — a no-op for plain tokens.
+    # A matcher-less group renders `_build.DISPATCH_NO_MATCHER_ARG` in the
+    # matcher slot (issue #1199 review) — see `_build._dispatcher_node`.
+    matcher_arg = _build.DISPATCH_NO_MATCHER_ARG if matcher is None else matcher
     expected_args = (
-        f"{shlex.quote(event)} {shlex.quote(matcher or '')} {shlex.quote(host_id)}"
+        f"{shlex.quote(event)} {shlex.quote(matcher_arg)} {shlex.quote(host_id)}"
     )
     for n in dispatch_nodes:
         cmd = n.get("command", "")
@@ -1514,21 +1530,40 @@ def main() -> int:
     #       member set for that host, with no duplicates, and every resolved
     #       impl.py exists on disk.
     # ------------------------------------------------------------------
-    def _manifest_members_for(event: str, matcher: str | None, host: str) -> set[str]:
+    def _manifest_members_for(
+        event: str, matcher: str | None, host: str
+    ) -> tuple[set[str], set[str]]:
+        """Return `(collapsible_names, args_names)` for one host's group.
+
+        args-declaring entries are excluded from the dispatch member set on
+        BOTH sides (the build keeps them standalone in `filter_hooks_for_host`;
+        the runtime excludes them in `group_members` — issue #1199 review), so
+        they are returned separately for the node-shape check. Multi-event
+        hooks are flat sibling entries (one object per event); the nested
+        "entries" form had zero manifest uses and was removed (issue #1169).
+        """
         names: set[str] = set()
+        args_names: set[str] = set()
         for hook in manifest["hooks"]:
             hosts = hook.get("hosts")
             if hosts is not None and host not in hosts:
                 continue
-            entries = hook.get("entries") or [
-                {"event": hook.get("event"), "matcher": hook.get("matcher")}
-            ]
-            if any(
-                e.get("event") == event and e.get("matcher") == matcher
-                for e in entries
-            ):
-                names.add(hook["name"])
-        return names
+            if hook.get("event") == event and hook.get("matcher") == matcher:
+                (args_names if hook.get("args") else names).add(hook["name"])
+        return names, args_names
+
+    # Sentinel canary: the build renders DISPATCH_NO_MATCHER_ARG into a
+    # matcher-less dispatcher node's command; the runtime maps NO_MATCHER_ARG
+    # back to None in main(). If the two constants ever diverge, a matcher-less
+    # group resolves ZERO members at runtime — errorlessly disabling every
+    # member — so the pairing is pinned here.
+    if _build.DISPATCH_NO_MATCHER_ARG != _dispatch.NO_MATCHER_ARG:
+        drifts.append(
+            "DISPATCH SENTINEL DRIFT: build DISPATCH_NO_MATCHER_ARG="
+            f"{_build.DISPATCH_NO_MATCHER_ARG!r} != runtime "
+            f"_dispatch.NO_MATCHER_ARG={_dispatch.NO_MATCHER_ARG!r} — a "
+            "matcher-less dispatcher node would resolve zero members at runtime"
+        )
 
     hooks_outputs: list[tuple[str, Path]] = []
     for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
@@ -1540,7 +1575,7 @@ def main() -> int:
 
     for event, matcher in sorted(dispatch_groups, key=lambda em: (em[0], em[1] or "")):
         for host_id, hooks_path in hooks_outputs:
-            expected = _manifest_members_for(event, matcher, host_id)
+            expected, args_excluded = _manifest_members_for(event, matcher, host_id)
 
             # (b) runtime resolution must match the manifest, with no dup, and
             #     every resolved impl on disk.
@@ -1556,7 +1591,9 @@ def main() -> int:
                 drifts.append(
                     f"DISPATCH MEMBER DRIFT {event}/{matcher} host={host_id}: "
                     f"group_members={sorted(set(resolved_names))} != "
-                    f"manifest={sorted(expected)}"
+                    f"manifest={sorted(expected)} (args-declaring members are "
+                    f"excluded on both sides — excluded here: "
+                    f"{sorted(args_excluded)})"
                 )
             for _role, name, impl in resolved:
                 if not impl.exists():
@@ -1582,6 +1619,7 @@ def main() -> int:
                     host_id,
                     expected,
                     _build.DISPATCH_WRAPPER_NAME,
+                    args_members=args_excluded,
                 )
             )
 

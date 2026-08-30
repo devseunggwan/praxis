@@ -49,6 +49,16 @@ cli = _load("bypass_review_cli", _REPO / "skills" / "bypass-review" / "bypass-re
 
 _DENY = '{"hookSpecificOutput": {"permissionDecision": "deny"}}'
 _ASK = '{"hookSpecificOutput": {"permissionDecision": "ask"}}'
+# Stop-lane block shape (issue #1169 / PR #1199): top-level decision at exit 0.
+_STOP_BLOCK = '{"decision": "block", "reason": "no evidence"}'
+# jq's pretty-printed form (shell Stop hooks) parses identically.
+_STOP_BLOCK_JQ = '{\n  "decision": "block",\n  "reason": "no evidence"\n}\n'
+# A context payload that merely QUOTES the block shape must NOT classify as a
+# block — recognition is parse-based, not substring.
+_STOP_QUOTING = (
+    '{"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": '
+    '"emit {\\"decision\\": \\"block\\"} JSON to block the stop"}}'
+)
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +80,10 @@ _ASK = '{"hookSpecificOutput": {"permissionDecision": "ask"}}'
     (0, "", "[dispatch] budget-skip r/n: 0.1s left of the 15s group budget; member not run (fail-open)\n", "skip"),
     (0, '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "[dispatch] budget-skip r/n: ..."}}',
      "[dispatch] budget-skip r/n: 0.1s left of the 15s group budget; member not run (fail-open)\n", "skip"),
+    (0, _STOP_BLOCK, "", "block"),        # Stop-lane block JSON at exit 0 -> block
+    (0, _STOP_BLOCK_JQ, "", "block"),     # jq pretty-printed form -> block
+    (0, _STOP_QUOTING, "", "pass"),       # QUOTED block shape -> parse says no block
+    (0, _STOP_QUOTING, "nudge", "advise"),  # quoted shape + stderr stays advise
 ])
 def test_classify_decision(rc, stdout, stderr, expected):
     assert fl.classify_decision(rc, stdout, stderr) == expected

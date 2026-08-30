@@ -114,15 +114,36 @@ _DENY_MARKER = '"permissionDecision": "deny"'
 _SKIP_MARKER = "[dispatch] budget-skip"
 
 
+def _is_stop_block(stdout: str) -> bool:
+    """True iff `stdout` is a Stop-lane block object (issue #1169 / PR #1199).
+
+    A Stop hook blocks via a top-level `{"decision": "block", "reason": ...}`
+    JSON at exit 0 — no exit-2, no permissionDecision marker — so without this
+    shape the ledger records a grouped Stop block as "pass"/"advise",
+    mis-scoring the completion gates in the fire-ledger prune audit. Shape
+    recognition PARSES the JSON (kept in sync with
+    `_dispatch._stop_block_reason`), never substring-matches, so prose that
+    merely mentions the shape cannot register as a block.
+    """
+    if not stdout or '"decision"' not in stdout:
+        return False
+    try:
+        obj = json.loads(stdout)
+    except ValueError:
+        return False
+    return isinstance(obj, dict) and obj.get("decision") == "block"
+
+
 def classify_decision(rc: int, stdout: str, stderr: str) -> str:
     """Map a member's `(exit, stdout, stderr)` to a fire decision.
 
     Mirrors `_dispatch.run_group`'s PER-MEMBER decision precedence (this is one
     member's own outcome, not the cross-member aggregate the dispatcher emits):
-    deny (exit 2 / deny marker) > ask (ask marker) > advise (any stderr) > pass.
+    block (exit 2 / deny marker / Stop-lane `{"decision": "block"}` JSON) >
+    ask (ask marker) > advise (any stderr) > pass.
     A dispatcher budget-skip record (never actually run) is decision "skip".
     """
-    if rc == 2 or _DENY_MARKER in stdout:
+    if rc == 2 or _DENY_MARKER in stdout or _is_stop_block(stdout):
         return DECISION_BLOCK
     if _ASK_MARKER in stdout:
         return DECISION_ASK

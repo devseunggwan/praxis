@@ -136,6 +136,15 @@ exec python3 "$IMPL" "$@"
 """
 DISPATCH_WRAPPER_NAME = "_dispatch.sh"
 
+# argv sentinel rendered into a dispatcher node's command when the group has no
+# matcher (Stop, SessionStart, UserPromptSubmit — their manifest entries carry
+# no matcher key, so the group identity is (event, None)). argv carries only
+# strings; an f-string render of None would pass the literal "None", which the
+# runtime's exact-match filter maps to zero members — silently disabling the
+# whole group. Kept in sync with hooks/_lib/_dispatch.py NO_MATCHER_ARG
+# (check-plugin-manifests.py Rule 14 pins the pairing).
+DISPATCH_NO_MATCHER_ARG = "-"
+
 
 # ---------------------------------------------------------------------------
 # Manifest loading
@@ -528,7 +537,15 @@ def _command_for(entry: dict) -> str:
 
 
 def _entry_to_hook_node(entry: dict) -> dict:
-    """Render a single manifest entry as a hooks.json `hook` node."""
+    """Render a single manifest entry as a hooks.json `hook` node.
+
+    `args_declared` is a TRANSIENT marker (like `hosts`): it never reaches a
+    written hooks.json — `filter_hooks_for_host` strips it. It flags entries
+    whose manifest declares `args`, which the dispatcher cannot forward
+    (members are invoked with stdin only; the runtime's `group_members`
+    excludes them the same way), so the collapse keeps them standalone instead
+    of silently disabling them (issue #1199 review).
+    """
     node: dict = {
         "type": "command",
         "command": _command_for(entry),
@@ -536,6 +553,8 @@ def _entry_to_hook_node(entry: dict) -> dict:
     }
     if "hosts" in entry:
         node["hosts"] = entry["hosts"]
+    if entry.get("args"):
+        node["args_declared"] = True
     return node
 
 
@@ -586,10 +605,15 @@ def _dispatcher_node(event: str, matcher: str | None, host_id: str, timeout: int
     (the deny JSON) would be swallowed by the pipe (PR #1198 review, critical).
     `shlex.quote` is a no-op for metacharacter-free tokens (`Bash`, host ids),
     so the pre-existing Bash group command is byte-identical.
+
+    A matcher-less group (matcher=None) renders `DISPATCH_NO_MATCHER_ARG` in
+    the matcher argv slot; `_dispatch.main()` maps it back to None. Rendering
+    None directly would pass the literal "None" and resolve zero members.
     """
+    matcher_arg = DISPATCH_NO_MATCHER_ARG if matcher is None else matcher
     cmd = (
         f"${{CLAUDE_PLUGIN_ROOT}}/hooks/{DISPATCH_WRAPPER_NAME} "
-        f"{shlex.quote(event)} {shlex.quote(matcher or '')} {shlex.quote(host_id)}"
+        f"{shlex.quote(event)} {shlex.quote(matcher_arg)} {shlex.quote(host_id)}"
     )
     return {"type": "command", "command": cmd, "timeout": timeout}
 
@@ -615,18 +639,29 @@ def filter_hooks_for_host(
     max timeout across all fragments, and the remaining fragments are dropped.
     Collapse happens here (not in expand_to_hooks_json) because the dispatcher
     command needs the per-platform host_id baked in.
+
+    args-declaring members (transient `args_declared` marker, see
+    `_entry_to_hook_node`) are NOT collapsed: the dispatcher invokes members
+    with stdin only, and the runtime resolver (`_dispatch.group_members`)
+    excludes them for the same reason — collapsing them here while the runtime
+    skips them would fully disable the hook. They keep their standalone node
+    (in their own fragment slot) and are excluded from the dispatcher budget.
     """
     filtered = copy.deepcopy(hooks_data)
     result_hooks: dict = {}
+    _TRANSIENT_KEYS = ("hosts", "args_declared")
     for event_name, event_groups in filtered.get("hooks", {}).items():
         # Pre-pass: max host-kept member timeout per dispatch matcher, across
-        # ALL fragments of that matcher in this event.
+        # ALL fragments of that matcher in this event. args-declaring members
+        # never run under the dispatcher, so they contribute no budget.
         dispatch_timeout: dict[str | None, int] = {}
         for group in event_groups:
             matcher = group.get("matcher")
             if (event_name, matcher) not in dispatch_groups:
                 continue
             for hook in group.get("hooks", []):
+                if hook.get("args_declared"):
+                    continue
                 hosts = hook.get("hosts")
                 if hosts is None or host_id in hosts:
                     dispatch_timeout[matcher] = max(
@@ -638,34 +673,45 @@ def filter_hooks_for_host(
         for group in event_groups:
             matcher = group.get("matcher")
             if (event_name, matcher) in dispatch_groups:
-                group_has_kept_member = any(
-                    hook.get("hosts") is None or host_id in hook.get("hosts", [])
+                kept_members = [
+                    hook
                     for hook in group.get("hooks", [])
-                )
+                    if hook.get("hosts") is None or host_id in hook.get("hosts", [])
+                ]
+                standalone = [h for h in kept_members if h.get("args_declared")]
+                collapsible = [h for h in kept_members if not h.get("args_declared")]
+                new_nodes: list[dict] = []
                 # Emit the single dispatcher node at the first fragment that has
-                # at least one host-kept member; drop every other fragment. The
-                # group_has_kept_member guard keeps the node in the right slot
-                # when an earlier fragment is entirely host-filtered out.
+                # at least one host-kept COLLAPSIBLE member; drop the collapsed
+                # members of every other fragment. The `collapsible` guard keeps
+                # the node in the right slot when an earlier fragment is
+                # entirely host-filtered out (or holds only args members).
                 if (
-                    matcher not in dispatch_timeout
-                    or matcher in emitted_dispatch
-                    or not group_has_kept_member
+                    collapsible
+                    and matcher in dispatch_timeout
+                    and matcher not in emitted_dispatch
                 ):
-                    continue
-                emitted_dispatch.add(matcher)
-                node = _dispatcher_node(
-                    event_name, matcher, host_id, dispatch_timeout[matcher]
+                    emitted_dispatch.add(matcher)
+                    new_nodes.append(
+                        _dispatcher_node(
+                            event_name, matcher, host_id, dispatch_timeout[matcher]
+                        )
+                    )
+                new_nodes.extend(
+                    {k: v for k, v in h.items() if k not in _TRANSIENT_KEYS}
+                    for h in standalone
                 )
-                new_group = {k: v for k, v in group.items() if k != "hooks"}
-                new_group["hooks"] = [node]
-                kept_groups.append(new_group)
+                if new_nodes:
+                    new_group = {k: v for k, v in group.items() if k != "hooks"}
+                    new_group["hooks"] = new_nodes
+                    kept_groups.append(new_group)
                 continue
 
             kept = []
             for hook in group.get("hooks", []):
                 hosts = hook.get("hosts")
                 if hosts is None or host_id in hosts:
-                    entry = {k: v for k, v in hook.items() if k != "hosts"}
+                    entry = {k: v for k, v in hook.items() if k not in _TRANSIENT_KEYS}
                     kept.append(entry)
             if kept:
                 new_group = {k: v for k, v in group.items() if k != "hooks"}
@@ -697,23 +743,26 @@ def _wrapper_body(entry: dict) -> str:
     return WRAPPER_PY_TEMPLATE.format(role=role, name=name, baked_args=baked_args)
 
 
-def _wrapper_registrations(manifest: dict) -> dict[str, list[tuple[str | None, str | None]]]:
-    """Map each wrapper filename to every (event, matcher) it serves.
+def _wrapper_registrations(
+    manifest: dict,
+) -> dict[str, list[tuple[str | None, str | None, bool]]]:
+    """Map each wrapper filename to every (event, matcher, has_args) it serves.
 
     A wrapper file is shared by all manifest entries with the same
     (name, wrapper_suffix), so the registrations must be aggregated ACROSS those
     entries. This is what makes the dispatch-only test correct for a multi-event
     hook: one registered for both Bash and AskUserQuestion still needs its wrapper
     for the (non-dispatched) AskUserQuestion leg, so it is NOT dispatch-only.
+    Multi-event hooks are flat sibling entries in the manifest (one object per
+    event); the hypothetical nested "entries" form had zero uses and was removed
+    (issue #1169).
     """
-    regs: dict[str, list[tuple[str | None, str | None]]] = {}
+    regs: dict[str, list[tuple[str | None, str | None, bool]]] = {}
     for entry in manifest["hooks"]:
         fname = _wrapper_filename(entry)
-        entries = entry.get("entries") or [
-            {"event": entry.get("event"), "matcher": entry.get("matcher")}
-        ]
-        for e in entries:
-            regs.setdefault(fname, []).append((e.get("event"), e.get("matcher")))
+        regs.setdefault(fname, []).append(
+            (entry.get("event"), entry.get("matcher"), bool(entry.get("args")))
+        )
     return regs
 
 
@@ -727,7 +776,10 @@ def dispatch_only_wrappers(manifest: dict) -> set[str]:
     and is dead weight. `emit_wrappers` skips them and
     `check-plugin-manifests.py` (Rule 6) asserts they are absent from disk. A
     hook with any non-dispatched registration keeps its wrapper (see
-    `_wrapper_registrations`).
+    `_wrapper_registrations`). An args-declaring registration is never
+    dispatch-only even inside a dispatch group: the collapse keeps its
+    standalone node (see `filter_hooks_for_host`), which still execs the
+    wrapper.
     """
     dispatch = frozenset(
         (g["event"], g.get("matcher")) for g in manifest.get("dispatch_groups", [])
@@ -735,7 +787,8 @@ def dispatch_only_wrappers(manifest: dict) -> set[str]:
     return {
         fname
         for fname, regs in _wrapper_registrations(manifest).items()
-        if regs and all(r in dispatch for r in regs)
+        if regs
+        and all((ev, ma) in dispatch and not has_args for ev, ma, has_args in regs)
     }
 
 

@@ -23,6 +23,9 @@ every hook event; exactly these lanes are aggregated:
   PreToolUse permission lane (ADR-0002 §2.2):
     - any hook -> deny  (exit 2, or `permissionDecision: "deny"` on stdout) -> deny
     - else any hook -> ask (`permissionDecision: "ask"` on stdout)          -> ask
+    (the substring marker probes run on PreToolUse groups only, so quoted
+    marker text in another event's context cannot fake a decision; exit-2
+    denies are event-agnostic)
   Stop decision lane (issue #1169):
     - any hook -> block (top-level `{"decision": "block", "reason": ...}` JSON
       at exit 0) -> ONE merged block: every blocking member's reason is kept,
@@ -75,6 +78,16 @@ _DENY_MARKER = '"permissionDecision": "deny"'
 # Skip-record marker — kept in sync with _fire_ledger._SKIP_MARKER so a
 # budget-skipped member is classified as decision "skip" (not "advise").
 _SKIP_MARKER = "[dispatch] budget-skip"
+
+# argv protocol sentinel for "this group has no matcher" (issue #1199 review).
+# Non-tool events (Stop, SessionStart, UserPromptSubmit) carry no matcher key in
+# the manifest, so their group identity is (event, None). argv can only carry
+# strings — the build renders this sentinel into the dispatcher node's command
+# (`build-plugin-manifests.py DISPATCH_NO_MATCHER_ARG`, kept in sync by
+# check-plugin-manifests.py Rule 14) and main() maps it back to None. Without
+# the mapping an f-string render would pass the literal "None", which matches
+# no manifest entry and silently resolves an empty group.
+NO_MATCHER_ARG = "-"
 
 # Group budget bookkeeping (issue #1167). The host kills the dispatcher node
 # at the group budget (= max member timeout, see load_group), so the
@@ -346,6 +359,14 @@ def run_group(
     # a batch write after the loop would be erased along with the aggregate
     # decision if the host killed the dispatcher mid-group (round-2 review).
     members, budget, member_timeouts = load_group(event, matcher, host)
+    # The SUBSTRING marker probe below (member_rc == 2 or _DENY_MARKER in
+    # member_so) is scoped to PreToolUse groups (issue #1199 review): on any
+    # other event a member's additionalContext that merely QUOTES a marker
+    # string would be surfaced as a fake deny and would shadow a real
+    # Stop-lane block further down — the exact swallow class that lane exists
+    # to prevent. Exit-2 stays event-agnostic: an exit code cannot be faked by
+    # quoted text.
+    is_pretooluse = event == "PreToolUse"
     deadline = time.monotonic() + max(
         budget - _GROUP_BUDGET_MARGIN_SEC, _MEMBER_SKIP_FLOOR_SEC
     )
@@ -384,7 +405,7 @@ def run_group(
         member_rc, member_so, member_se = result
         if member_se:
             sys.stderr.write(member_se)
-        if member_rc == 2 or _DENY_MARKER in member_so:
+        if member_rc == 2 or (is_pretooluse and _DENY_MARKER in member_so):
             if member_so:
                 sys.stdout.write(member_so)
             return 2
@@ -393,12 +414,13 @@ def run_group(
     # from the loop above, so only ask is left to outrank a plain allow. The
     # FIRST ask JSON on stdout is surfaced — concatenating two decision objects
     # would be invalid JSON, and Claude Code surfaces one decision anyway.
-    # Detection is role-agnostic, since some advisory-nudge hooks also emit
-    # ask — see ADR-0002 §2.2.
-    ask = next((so for _rc, so, _se in results if _ASK_MARKER in so), None)
-    if ask is not None:
-        sys.stdout.write(ask)
-        return 0
+    # Detection is role-agnostic within PreToolUse, since some advisory-nudge
+    # hooks also emit ask — see ADR-0002 §2.2.
+    if is_pretooluse:
+        ask = next((so for _rc, so, _se in results if _ASK_MARKER in so), None)
+        if ask is not None:
+            sys.stdout.write(ask)
+            return 0
 
     # Stop decision lane (issue #1169): a Stop hook blocks via a top-level
     # `{"decision": "block", "reason": ...}` JSON at exit 0 — no exit-2, no
@@ -425,12 +447,19 @@ def run_group(
         if reason is not None:
             blocks.append((name, reason))
     if blocks:
-        merged_reason = "\n\n".join(
-            reason if f"[praxis:{name}]" in reason else f"[praxis:{name}] {reason}"
-            for name, reason in blocks
-        )
+        chunks: list[str] = []
+        for name, reason in blocks:
+            tag = f"[praxis:{name}]"
+            if not reason:
+                # Malformed reason (missing / non-string) still blocks — the
+                # attribution tag alone is the reason, with no trailing space.
+                chunks.append(tag)
+            elif tag in reason:
+                chunks.append(reason)
+            else:
+                chunks.append(f"{tag} {reason}")
         sys.stdout.write(
-            json.dumps({"decision": "block", "reason": merged_reason}) + "\n"
+            json.dumps({"decision": "block", "reason": "\n\n".join(chunks)}) + "\n"
         )
         return 0
 
@@ -443,7 +472,12 @@ def run_group(
     contexts = [
         so
         for rc, so, _se in results
-        if so and rc != 2 and _DENY_MARKER not in so and _ASK_MARKER not in so
+        if so
+        and rc != 2
+        # Marker exclusion mirrors the substring lanes above: PreToolUse-only,
+        # so a non-PreToolUse context that quotes a marker still merges instead
+        # of being dropped as a mistaken decision payload.
+        and (not is_pretooluse or (_DENY_MARKER not in so and _ASK_MARKER not in so))
     ]
     if contexts:
         merged = _merge_additional_context(contexts, event)
@@ -522,13 +556,16 @@ def main() -> int:
 
     Defaults to PreToolUse / Bash / no host filter. The build passes the platform
     host as argv[3] so host-restricted hooks are not re-included (see group_members).
+    A matcher argv equal to `NO_MATCHER_ARG` maps to None — the group identity of
+    matcher-less events (Stop etc.), whose manifest entries carry no matcher key.
     Wrapped in a top-level guard so a dispatcher fault fails open (return 0),
     never blocking the tool call.
     """
     try:
         payload_raw = sys.stdin.read()
         event = sys.argv[1] if len(sys.argv) > 1 else "PreToolUse"
-        matcher = sys.argv[2] if len(sys.argv) > 2 else "Bash"
+        matcher_arg = sys.argv[2] if len(sys.argv) > 2 else "Bash"
+        matcher = None if matcher_arg == NO_MATCHER_ARG else matcher_arg
         host = sys.argv[3] if len(sys.argv) > 3 else None
         return run_group(event, matcher, payload_raw, host)
     except Exception:

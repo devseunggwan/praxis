@@ -14,6 +14,7 @@ Coverage:
 from __future__ import annotations
 
 import ast
+import io
 import json
 import os
 import subprocess
@@ -1088,6 +1089,100 @@ def test_stop_block_recognition_is_parse_based_not_substring(tmp_path, monkeypat
     obj = json.loads(out)
     assert "decision" not in obj  # forwarded as context, never as a block
     assert obj["hookSpecificOutput"]["additionalContext"] == prose
+
+
+def test_stop_quoted_marker_cannot_shadow_a_real_block(tmp_path, monkeypatch, capsys):
+    # Adversarial (issue #1199 review): a Stop member's additionalContext that
+    # QUOTES a permissionDecision marker must not be surfaced as a fake
+    # ask/deny that shadows (and drops) a later member's real block — the
+    # substring lanes are PreToolUse-only.
+    quoting = f"the PreToolUse hooks emit {_ASK} or {_DENY} on stdout"
+    members = [
+        ("completion-verify", "ctx", _write_fake(tmp_path, "ctx", _fake_context("Stop", quoting))),
+        ("completion-verify", "gate", _write_fake(tmp_path, "gate", _fake_stop_block("real block"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    obj = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert obj == {"decision": "block", "reason": "[praxis:gate] real block"}
+
+
+def test_stop_quoted_marker_context_still_merges_without_block(tmp_path, monkeypatch, capsys):
+    # Same quoting member with no blocker: the context must MERGE (not be
+    # dropped as a mistaken decision payload) — the marker exclusion in the
+    # context lane is PreToolUse-only too.
+    quoting = f"docs: {_ASK} is the PreToolUse ask marker"
+    members = [
+        ("completion-verify", "ctx", _write_fake(tmp_path, "ctx", _fake_context("Stop", quoting))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    hso = _sole_hso(capsys.readouterr().out)
+    assert rc == 0
+    assert hso["additionalContext"] == quoting
+
+
+def test_stop_block_with_malformed_reason_still_blocks(tmp_path, monkeypatch, capsys):
+    # A parsed block whose `reason` is missing/non-string still blocks (empty
+    # reason -> the attribution tag alone, no trailing space): dropping it for
+    # a malformed reason field would be the exact silent swallow this lane
+    # exists to prevent.
+    body = (
+        "import json, sys\n"
+        "def main():\n"
+        "    json.dump({'decision': 'block', 'reason': 123}, sys.stdout)\n"
+        "    sys.stdout.write('\\n')\n"
+        "    return 0\n"
+    )
+    members = [
+        ("completion-verify", "gate", _write_fake(tmp_path, "gate", body)),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    obj = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert obj == {"decision": "block", "reason": "[praxis:gate]"}
+
+
+# --------------------------------------------------------------------------- #
+# argv protocol: matcher-less groups (issue #1199 review)
+# --------------------------------------------------------------------------- #
+
+def test_main_maps_no_matcher_sentinel_to_none(monkeypatch):
+    # The build renders NO_MATCHER_ARG into the dispatcher command for
+    # matcher-less groups; main() must map it back to None. An f-string render
+    # of None would have passed the literal "None", which matches no manifest
+    # entry — errorlessly resolving an empty group.
+    captured: dict = {}
+
+    def fake_run_group(event, matcher, payload_raw, host=None):
+        captured.update(event=event, matcher=matcher, host=host)
+        return 0
+
+    monkeypatch.setattr(_dispatch, "run_group", fake_run_group)
+    monkeypatch.setattr(sys, "argv", ["_dispatch.py", "Stop", _dispatch.NO_MATCHER_ARG, "claude"])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(STOP_PAYLOAD))
+    assert _dispatch.main() == 0
+    assert captured == {"event": "Stop", "matcher": None, "host": "claude"}
+
+
+def test_main_argv_path_runs_matcherless_stop_group_end_to_end(tmp_path, monkeypatch, capsys):
+    # Full argv path: manifest Stop entries carry NO matcher key, so the argv
+    # sentinel must resolve them and the member's block must come out — the
+    # regression case where a literal "None" matcher silently disabled the
+    # whole group.
+    _write_fake(tmp_path / "completion-verify", "gate", _fake_stop_block("blocked"))
+    _patch_manifest(tmp_path, monkeypatch, [
+        {"name": "gate", "role": "completion-verify", "event": "Stop", "timeout": 10},
+    ])
+    monkeypatch.setattr(_dispatch, "_HOOKS_DIR", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["_dispatch.py", "Stop", _dispatch.NO_MATCHER_ARG])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(STOP_PAYLOAD))
+    rc = _dispatch.main()
+    obj = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert obj == {"decision": "block", "reason": "[praxis:gate] blocked"}
 
 
 # --------------------------------------------------------------------------- #
