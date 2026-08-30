@@ -33,12 +33,26 @@
 command -v jq >/dev/null 2>&1 || exit 0
 
 INPUT=$(cat)
-TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // ""')
-STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
-SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
+# One jq spawn for all four scalars (was four; ~11ms/fire on a ~69ms hook).
+# @tsv is safe here because every field is a scalar: jq escapes any embedded
+# tab/newline, so the row is guaranteed single-line and tab-free. Split with
+# parameter expansion, NOT `IFS=$'\t' read` — tab is IFS whitespace, so read
+# strips a leading empty field and collapses runs, silently shifting values.
+# On malformed JSON jq emits nothing and all four go empty — same fail-open
+# result as the four separate calls.
 # "unknown" is fine for the marker filename and the log lines below, but not
 # for the ledger — see the same guard in completion-verify/impl.sh.
-TELEMETRY_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""')
+_RMC_HDR=$(printf '%s' "$INPUT" | jq -r '[
+  .transcript_path // "",
+  (.stop_hook_active // false | tostring),
+  .session_id // "unknown",
+  .session_id // ""
+] | @tsv' 2>/dev/null)
+TRANSCRIPT_PATH=${_RMC_HDR%%$'\t'*}; _RMC_R=${_RMC_HDR#*$'\t'}
+STOP_HOOK_ACTIVE=${_RMC_R%%$'\t'*};  _RMC_R=${_RMC_R#*$'\t'}
+SESSION_ID=${_RMC_R%%$'\t'*}
+TELEMETRY_SESSION_ID=${_RMC_R#*$'\t'}
+unset _RMC_HDR _RMC_R
 
 # shellcheck source=../../_lib/record_fire.sh
 . "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true
