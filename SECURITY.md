@@ -64,6 +64,7 @@ drift.
 
 | Hook | Command | Purpose |
 | ------ | --------- | --------- |
+| `hooks/preflight-gate/cross-boundary-preflight/impl.py` | `git -C <cwd> config --local --get-regexp <remote url / gh-resolved>` | Resolve the repository a repo-less `gh` write would target — reads the checkout's own remotes and any `gh repo set-default` marker, so the approval prompt names the repo that receives the write rather than merely `origin`. Local config read only; no network and no `gh` invocation |
 | `hooks/preflight-gate/block-unmatched-glob/impl.py` | `zsh -lc setopt` | Confirm the executing shell actually aborts on an unmatched glob before the gate can block |
 | `hooks/preflight-gate/block-unmatched-glob/impl.py` | `zsh -f -c 'setopt nomatch; : <pattern>'` | Ask zsh whether a candidate pattern expands; `:` is a no-op builtin, so expansion is the only effect |
 
