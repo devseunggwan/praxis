@@ -31,16 +31,12 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
-    MIN_SUBPROC_BUDGET_SEC,
-    remaining_budget,
-)
+from _git import repo_root as git_repo_root  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     iter_command_starts,
@@ -154,26 +150,13 @@ def _parse_gh_body_file(argv: list[str]) -> str | None:
 # ---------------------------------------------------------------------------
 
 def _git_toplevel(start_dir: str) -> str | None:
-    """Run `git rev-parse --show-toplevel` from start_dir.  Returns None on failure."""
-    # Timeout sized from the budget the dispatcher published for this
-    # member, so a group already short on time is not overrun; run
-    # standalone and the constant wins unchanged (issue #1167).
-    budget = remaining_budget(_GIT_TIMEOUT_SEC)
-    if budget < MIN_SUBPROC_BUDGET_SEC:
-        return None
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=start_dir,
-            capture_output=True,
-            text=True,
-            timeout=min(_GIT_TIMEOUT_SEC, budget),
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    return None
+    """Run `git rev-parse --show-toplevel` from start_dir.  Returns None on failure.
+
+    Delegates to the shared resolver (hooks/_lib/_git.py, issue #1178), which
+    clamps the timeout to the member budget and refuses to spawn below the
+    floor — the behavior this hook used to carry inline (issue #1167).
+    """
+    return git_repo_root(cwd=start_dir, timeout=_GIT_TIMEOUT_SEC)
 
 
 def _resolve_repo_root(body_file_path: str, cwd: str) -> str:

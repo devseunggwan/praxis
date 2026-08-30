@@ -68,6 +68,7 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
     shared_probe_deadline,
 )
 from _paths import resolve_writable  # type: ignore[import-not-found]  # noqa: E402
+from _git import origin_slug  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
@@ -119,7 +120,6 @@ _session_id: str | None = None
 
 _GH_LABELED_CMD_RE = re.compile(r"\bgh\s+(?:issue|pr)\s+(?:create|edit)\b")
 _LABEL_FLAG_RE = re.compile(r"(?:--label|--add-label|(?<!\S)-l)\b")
-_REPO_URL_RE = re.compile(r"[:/]([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
 
 # ---------------------------------------------------------------------------
@@ -251,25 +251,22 @@ def _resolve_repo(args: list[str], cwd: str, deadline: float) -> str | None:
 
 
 def _resolve_repo_from_git(cwd: str, deadline: float) -> str | None:
-    # This runs BEFORE the label listing, so a fixed timeout here could push the
-    # member past the group deadline before the budgeted call even starts
-    #. It shares the same deadline instead.
-    remaining = deadline - time.monotonic()
-    if remaining < MIN_SUBPROC_BUDGET_SEC:
-        return None
-    try:
-        r = subprocess.run(
-            ["git", "-C", cwd, "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=min(_GIT_REMOTE_TIMEOUT_SEC, remaining),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if r.returncode != 0:
-        return None
-    m = _REPO_URL_RE.search(r.stdout.strip())
-    return f"{m.group(1)}/{m.group(2)}" if m else None
+    """owner/repo from the origin remote, or None.
+
+    Delegates to the shared resolver (hooks/_lib/_git.py, issue #1178) and
+    passes the deadline through: this probe runs BEFORE the label listing, so
+    taking its own full slice would push the member past the group deadline
+    before the budgeted call even starts (issue #1167).
+
+    The shared `origin_slug` regex is host-anchored to github.com, unlike the
+    looser pre-#1178 local copy that also matched gitlab/self-hosted origins.
+    A non-GitHub origin now fails open (None -> no validation) instead of
+    validating `gh` labels against a slug from the wrong host — a deliberate
+    tightening.
+    """
+    return origin_slug(
+        cwd=cwd, timeout=_GIT_REMOTE_TIMEOUT_SEC, deadline=deadline
+    )
 
 
 # ---------------------------------------------------------------------------
