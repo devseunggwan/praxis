@@ -193,7 +193,7 @@ Correct pattern:
 # Detection helpers
 # ---------------------------------------------------------------------------
 
-def _gh_write_subcommand(seg: list[Token]) -> tuple[str, str] | None:
+def _gh_write_subcommand(seg: list[Token], argv: list[Token] | None = None) -> tuple[str, str] | None:
     """Return (object, verb) if seg is a gh write subcommand, else None.
 
     Walks the typed Token list after the COMMAND token, skipping FLAG and
@@ -205,7 +205,7 @@ def _gh_write_subcommand(seg: list[Token]) -> tuple[str, str] | None:
     answers only "is this segment a gh write subcommand", and the heredoc hard
     block depends on it staying that broad.
     """
-    argv = filter_argv(seg)
+    argv = filter_argv(seg) if argv is None else argv
     if not argv or not _is_gh_binary(argv[0].text):
         return None
 
@@ -286,7 +286,7 @@ def _has_repo_flag(seg: list[Token]) -> tuple[bool, str]:
     return False, ""
 
 
-def _cd_intent(seg: list[Token]) -> tuple[str, str | None]:
+def _cd_intent(seg: list[Token], argv: list[Token] | None = None) -> tuple[str, str | None]:
     """Classify a segment's effect on the working directory.
 
     Returns one of:
@@ -305,7 +305,7 @@ def _cd_intent(seg: list[Token]) -> tuple[str, str | None]:
     an authorization decision (CodeRabbit CWE-863 on PR #1149), so the caller
     now asks with an unresolved target instead of guessing.
     """
-    argv = filter_argv(seg)
+    argv = filter_argv(seg) if argv is None else argv
     if not argv:
         return ("none", None)
 
@@ -496,11 +496,16 @@ def main() -> int:
     # False once a `cd` this hook cannot model has been seen: from that point
     # `effective_cwd` is a guess, and a guess must not authorize a write.
     cwd_is_known = True
+    resolved_repos: dict[str, str | None] = {}
 
     for seg in segments:
         # A leading `cd <path>` segment moves the checkout the *next*
         # segments run in (`cd <worktree> && gh issue create ...`).
-        kind, cd_to = _cd_intent(seg)
+        # One tokenization per segment, shared by both classifiers. This hook
+        # runs on every Bash PreToolUse, so a duplicated walk is paid on every
+        # command in the session.
+        seg_argv = filter_argv(seg)
+        kind, cd_to = _cd_intent(seg, seg_argv)
         if kind == "opaque":
             cwd_is_known = False
             continue
@@ -515,7 +520,7 @@ def main() -> int:
                 effective_cwd = candidate
             continue
 
-        subcommand = _gh_write_subcommand(seg)
+        subcommand = _gh_write_subcommand(seg, seg_argv)
         if subcommand is None:
             continue
 
@@ -549,7 +554,17 @@ def main() -> int:
             )
             return 0
 
-        implicit_repo = _resolve_origin_repo(effective_cwd)
+        # Memoized per cwd. On the SUCCESS path the probe runs once because
+        # `_emit_ask` returns immediately, but a `None` keeps the loop going
+        # and the next repo-less write segment re-spawned git for the same
+        # directory — deterministic duplication. It matters only when git is
+        # slow: `_GIT_TIMEOUT_SEC` x N segments accumulates, and three such
+        # segments already exceed the manifest's 5s budget, at which point the
+        # hook is killed (fail-open) and the user has still waited the whole
+        # timeout.
+        if effective_cwd not in resolved_repos:
+            resolved_repos[effective_cwd] = _resolve_origin_repo(effective_cwd)
+        implicit_repo = resolved_repos[effective_cwd]
         if implicit_repo:
             _emit_ask(
                 _build_checklist(subcommand, implicit_repo, from_flag=False)

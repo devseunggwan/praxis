@@ -49,8 +49,33 @@ FIX_GITLAB="$FIXTURE_ROOT/gitlab-github-path"
 mkdir -p "$FIX_GITLAB"
 ( cd "$FIX_GITLAB" && git init -q && git remote add origin https://gitlab.com/github/tools/repo.git ) >/dev/null 2>&1
 
-if ! ( cd "$FIX_REPO" && git remote get-url origin ) >/dev/null 2>&1; then
-  echo "FAIL: could not build the resolvable checkout fixture" >&2
+# `git` walks parent directories looking for a checkout, so a TMPDIR that
+# happens to sit inside one would make the not-a-repo fixture resolve an
+# unrelated `origin` — the fail-open case would then pass for the wrong
+# reason, or fail for a reason that has nothing to do with the hook.
+export GIT_CEILING_DIRECTORIES="$FIXTURE_ROOT"
+
+# Every fixture is verified, not just the resolvable one. The subshells above
+# discard their exit status, and FIX_NOORIGIN / FIX_GITLAB both back cases
+# that expect `pass`: if their `git init` or `git remote add` had failed, the
+# directory would not be a checkout, resolution would return nothing, and
+# those cases would still report PASS — proving nothing.
+for _fixture in "$FIX_REPO" "$FIX_GITLAB"; do
+  if ! ( cd "$_fixture" && git remote get-url origin ) >/dev/null 2>&1; then
+    echo "FAIL: fixture $_fixture has no origin remote — its cases would pass vacuously" >&2
+    exit 1
+  fi
+done
+if ! ( cd "$FIX_NOORIGIN" && git rev-parse --git-dir ) >/dev/null 2>&1; then
+  echo "FAIL: fixture $FIX_NOORIGIN is not a git checkout — its case would pass vacuously" >&2
+  exit 1
+fi
+if ( cd "$FIX_NOORIGIN" && git remote get-url origin ) >/dev/null 2>&1; then
+  echo "FAIL: fixture $FIX_NOORIGIN unexpectedly has an origin remote" >&2
+  exit 1
+fi
+if ( cd "$FIX_PLAIN" && git rev-parse --git-dir ) >/dev/null 2>&1; then
+  echo "FAIL: fixture $FIX_PLAIN resolves a git checkout — GIT_CEILING_DIRECTORIES is not holding" >&2
   exit 1
 fi
 
@@ -403,6 +428,12 @@ run_case "cd to a nonexistent dir with && still asks" ask \
 run_case "a gitlab remote with 'github' in the path stays silent" pass \
   'gh issue create --title "t"' \
   "$FIX_GITLAB"
+
+# A relative `cd`. The hook joins the target onto the effective cwd, so the
+# relative branch of that join was never exercised by the absolute-path cases.
+run_case "a relative cd into a resolvable checkout then repo-less gh asks" ask \
+  'cd resolvable && gh issue create --title "t"' \
+  "$FIXTURE_ROOT"
 
 # ---------------------------------------------------------------------------
 # A `cd` this hook cannot model must not fail open. Resolving from the OUTER
