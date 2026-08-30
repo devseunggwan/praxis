@@ -1,6 +1,7 @@
 # PreToolUse Source-Citation Probe Gate
 
 Supported hosts: all
+Requires: slack-or-notion-mcp (mcp matcher entry only — the Bash entry carries no requirement)
 
 `hooks/source-citation-probe-gate.sh` is a **default-on** PreToolUse advisory
 that fires when an external-write body (PR/issue bodies and comments, Slack
