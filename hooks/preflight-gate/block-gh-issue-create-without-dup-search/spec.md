@@ -39,7 +39,8 @@ literally in a prior search command.
 | `gh issue create --title "feat: add brands lookup"`, no prior search | **BLOCKED** (no search) |
 | prior `gh search issues "auth token"`, then create titled "chart filter" | **BLOCKED** (no overlap) |
 | prior `gh search issues "brands lookup"`, then create titled "feat: brands lookup CTE" | **PASS** (overlap) |
-| `gh issue create --repo devseunggwan/scratchs ...` | **PASS** (personal-repo carve-out) |
+| `gh issue create --repo <owner>/scratchs ...` with `<owner>` ∈ `PRAXIS_PERSONAL_REPO_OWNERS` | **PASS** (personal-repo carve-out) |
+| same command with `PRAXIS_PERSONAL_REPO_OWNERS` unset | **BLOCKED** — no exemption on shipped defaults (issue #1156) |
 | `gh issue create --title "feat: foo bar [dup-checked]"` | **PASS** (dup token) |
 | `gh issue create --title "fix: ci"` (no keyword ≥4 chars) | **PASS** (cannot enforce) |
 | `gh issue create --title="…"` / `-t "…"` / `-t="…"` / `gh -R o/r issue create --title …` | **BLOCKED** (title parsed from all flag forms; issue #514) |
@@ -49,8 +50,12 @@ literally in a prior search command.
 
 - Add `[dup-checked]` or `[no-search-needed]` to the `--title` when the
   duplicate check was verified outside the session.
-- Personal-repo carve-out: `--repo devseunggwan/...` writes are low
-  blast-radius and pass without a search.
+- Personal-repo carve-out: a `--repo` write whose target owner is listed in
+  `PRAXIS_PERSONAL_REPO_OWNERS` (comma-separated handles — the same env var
+  `block-personal-asset-leak` reads for the same "owners that are mine"
+  concept) is low blast-radius and passes without a search. Unset = no
+  exemption for anyone; the hardcoded author-namespace regex this replaces
+  changed enforcement per-installer (issue #1156).
 - Set `CLAUDE_HOOK_BYPASS_DUP_GATE=1` for a deliberate one-off bypass.
 - Title with no extractable keyword ≥4 chars → silent pass (cannot enforce).
 - Missing / unreadable / oversized (`>50MB`) transcript → silent pass.

@@ -293,7 +293,11 @@ Worked examples live in
 5. `Falsification: ...`
 6. `remedy_reach: ...` — does this remedy's surface fire where the finding was
    uttered? Name the axis it structurally cannot reach, and whether that axis is
-   the larger-damage one. See
+   the larger-damage one. `reach=none` with `worse_axis: yes` has a stated
+   destination rather than a workaround: keep the finding at `note`, and where
+   the unreached axis is prose the agent writes, cite
+   [`ETHOS.md` → Claims that terminate in prose](../../ETHOS.md#claims-that-terminate-in-prose)
+   instead of substituting the reachable half. See
    [`references/stage3-reporting.md`](references/stage3-reporting.md).
 
 #### Pre-Output Falsification Gate (AskUserQuestion)
@@ -352,16 +356,19 @@ Do not execute any action until the user approves it.
 Before executing any approved action, read
 [`references/stage4-execution.md`](references/stage4-execution.md). It holds
 the full procedures, prompt variants, repo-resolution rules, and artifact
-verification matrix.
+verification matrix. Actions 2 and 4 share one **cross-boundary write gate**
+there — Step 0 (backing-repo verification) then Step 0a (external-repo
+authorization); neither action may reach `gh issue create` with either step
+unrun.
 
 **Action map:**
 
 | # | Action | Reference-owned gate |
 | --- | -------- | ---------------------- |
 | 1 | MEMORY.md feedback | duplicate-check before create; `hookable` / `hookKeywords` decision |
-| 2 | GitHub issue | project issue workflow |
+| 2 | GitHub issue | cross-boundary write gate (Step 0 backing-repo verification + Step 0a external-repo approval, shared with Action 4) + project issue workflow |
 | 3 | global `~/.claude/CLAUDE.md` draft | target detection + staging + approval |
-| 4 | upstream feedback | backing-repo verification + external approval gate; Stage 3 rationale uses `backing_repo: <resolved_backing_repo>` and praxis-internal routing examples use `<resolved-praxis-repo>` placeholders until live resolution |
+| 4 | upstream feedback | cross-boundary write gate (same Step 0 / Step 0a as Action 2); Stage 3 rationale uses `backing_repo: <resolved_backing_repo>` and praxis-internal routing examples use `<resolved-praxis-repo>` placeholders until live resolution |
 | 5 | skill idea note | local artifact write |
 | 6 | hook code | branch/worktree guard + registration prompt |
 

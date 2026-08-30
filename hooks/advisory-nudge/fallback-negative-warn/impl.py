@@ -251,8 +251,11 @@ def _advisory_text(left: list[str], right: list[str]) -> str:
         "\n"
         f"  Detected: {left_summary} || {fallback}\n"
         "\n"
-        "  이 출력은 커맨드 실패와 0건을 구분하지 못합니다. 부정 판정 근거로\n"
-        "  쓸 거라면 exit code 를 분기하거나 stderr 를 살리세요.\n"
+        "  This output cannot distinguish a failed command from a genuine\n"
+        "  zero-result. Before using it as negative evidence, branch on the\n"
+        "  exit code or keep stderr visible.\n"
+        "  (이 출력은 커맨드 실패와 0건을 구분하지 못합니다. 부정 판정 근거로\n"
+        "  쓸 거라면 exit code 를 분기하거나 stderr 를 살리세요.)\n"
         "\n"
         "  Reference: issue #893"
     )

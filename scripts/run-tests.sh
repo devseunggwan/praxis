@@ -6,28 +6,29 @@
 #   2. shell    — shell tests at tests/hooks/*/test_*.sh and tests/test_*.sh
 #   3. manifest — scripts/check-plugin-manifests.py
 #   4. invariants — scripts/check-hook-token-invariants.py
-#   5. memory-frontmatter — scripts/check-memory-frontmatter.py
-#   6. omc-name-drift — scripts/check-omc-name-drift.py
-#   7. ruff     — static Python lint (mirrors the ci.yml `ruff` job)
-#   8. shellcheck — static shell lint (mirrors the ci.yml `shellcheck` job)
-#   9. markdownlint — advisory markdown lint (mirrors the ci.yml `markdownlint` job)
+#   5. sibling-gates — scripts/check-sibling-commit-gates.py
+#   6. memory-frontmatter — scripts/check-memory-frontmatter.py
+#   7. omc-name-drift — scripts/check-omc-name-drift.py
+#   8. ruff     — static Python lint (mirrors the ci.yml `ruff` job)
+#   9. shellcheck — static shell lint (mirrors the ci.yml `shellcheck` job)
+#  10. markdownlint — advisory markdown lint (mirrors the ci.yml `markdownlint` job)
 #
-# Steps 7-9 mirror CI jobs that used to have no local equivalent, so a change
+# Steps 8-10 mirror CI jobs that used to have no local equivalent, so a change
 # could pass here and still be flagged on the PR (issue #866). Each skips with
 # an explicit SKIPPED line when its tool is absent, so a contributor without
 # the toolchain is not blocked — CI remains authoritative either way.
 #
-# Step 5 is a different repo-internal script, same family as steps 3-4 (no
+# Step 6 is a different repo-internal script, same family as steps 3-5 (no
 # external toolchain — nothing to install), but its skip condition is not
-# like steps 7-9's: the memory directory it lints is a local, gitignored,
+# like steps 8-10's: the memory directory it lints is a local, gitignored,
 # per-user store that is structurally absent in CI or a fresh checkout,
 # always, forever (issue #942) — not a "toolchain not installed" gap a
 # contributor can close. It prints "N/A", never "SKIPPED", to keep that
 # distinction visible in the log (see its own docstring / #917 below), and
 # this call strips PRAXIS_TESTS_STRICT (`env -u`, not passed through like
-# steps 7-9) so that permanent N/A can never fail the job. Real drift
+# steps 8-10) so that permanent N/A can never fail the job. Real drift
 # (nonzero exit with violations listed) still counts as FAILED, same as
-# steps 3-4 — this is not routed through the SKIPPED_TOOLS/skip_step() path
+# steps 3-5 — this is not routed through the SKIPPED_TOOLS/skip_step() path
 # at all.
 #
 # A skip is not a pass (#917). The SKIPPED line used to scroll past and the run
@@ -73,7 +74,7 @@ export PRAXIS_FIRE_TELEMETRY_FILE="$PRAXIS_HOME/fire-events-test.jsonl"
 # real store instead. The fix cannot be a throwaway export the way PRAXIS_HOME
 # was: what wins is the variable being *set*, not its value, so an override
 # fails those tests identically to the ambient value. Unset is the only
-# isolation. Saved first, because step 5 wants the real root back.
+# isolation. Saved first, because step 6 wants the real root back.
 CLAUDE_CONFIG_DIR_AMBIENT="${CLAUDE_CONFIG_DIR-}"
 unset CLAUDE_CONFIG_DIR
 
@@ -149,12 +150,26 @@ if ! python3 ./scripts/check-hook-token-invariants.py; then
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Memory frontmatter lint (schema-drift guard, issue #942)
+# 5. Sibling commit-gate derivation (manifest-vs-prose drift guard, issue #1127)
+#
+# Same family as steps 3-4: a repo-internal script with no external toolchain,
+# so it never skips. It re-derives the `git commit` sibling-gate list from the
+# manifest's `gates` field and fails when a prose enumeration or a count word
+# drifted from it.
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== sibling commit-gate check ==="
+if ! python3 ./scripts/check-sibling-commit-gates.py; then
+  FAILED=1
+fi
+
+# ---------------------------------------------------------------------------
+# 6. Memory frontmatter lint (schema-drift guard, issue #942)
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== memory frontmatter lint ==="
 # PRAXIS_TESTS_STRICT is deliberately NOT propagated to this one call: unlike
-# steps 7-9 (a tool a contributor could install), the memory dir this checks
+# steps 8-10 (a tool a contributor could install), the memory dir this checks
 # is a local, gitignored, per-user store that structurally never exists in
 # CI or a fresh checkout — treating its absence as a strict-mode failure
 # would fail every CI run forever, not flag a fixable gap. The script prints
@@ -162,7 +177,7 @@ echo "=== memory frontmatter lint ==="
 # scrolling SKIPPED line lost its signal value once contributors stopped
 # reading it, and a condition that can never be fixed would sit there as
 # permanent unresolvable noise if it wore the same "SKIPPED" label as steps
-# 6-8's genuinely-fixable tool-absence skips. An N/A here is always benign;
+# 8-10's genuinely-fixable tool-absence skips. An N/A here is always benign;
 # only actual detected drift (exit 1 with violations listed) fails this step.
 # The script's own PRAXIS_TESTS_STRICT support still works for direct
 # standalone invocation (see its tests / docstring).
@@ -179,7 +194,7 @@ if ! "${MEMCHECK_ENV[@]}" python3 ./scripts/check-memory-frontmatter.py; then
 fi
 
 # ---------------------------------------------------------------------------
-# 6. omc name-drift guard (retired-workflow references, issue #1122)
+# 7. omc name-drift guard (retired-workflow references, issue #1122)
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== omc name-drift check ==="
@@ -188,7 +203,7 @@ if ! python3 ./scripts/check-omc-name-drift.py; then
 fi
 
 # ---------------------------------------------------------------------------
-# 7. Ruff (mirrors ci.yml `ruff` job — blocking there, blocking here)
+# 8. Ruff (mirrors ci.yml `ruff` job — blocking there, blocking here)
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== ruff ==="
@@ -207,7 +222,7 @@ elif ! "${RUFF[@]}" check .; then
 fi
 
 # ---------------------------------------------------------------------------
-# 8. Shellcheck (mirrors ci.yml `shellcheck` job — same find/severity)
+# 9. Shellcheck (mirrors ci.yml `shellcheck` job — same find/severity)
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== shellcheck ==="
@@ -222,7 +237,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 9. Markdownlint (mirrors ci.yml `markdownlint` job)
+# 10. Markdownlint (mirrors ci.yml `markdownlint` job)
 #
 # CI runs this with filter_mode:added and never fails the check, so the repo's
 # existing backlog stays untouched. The advisory half is mirrored exactly — a
@@ -286,7 +301,7 @@ if [[ $FAILED -ne 0 ]]; then
   exit 1
 fi
 
-# Scope note: this counts the three tool steps this script owns (6-8). Step 5
+# Scope note: this counts the three tool steps this script owns (8-10). Step 6
 # has its own N/A line (deliberately not "SKIPPED") and is excluded from this
 # tally on purpose — it is never a missing-toolchain skip. Gates
 # that a sub-suite skips internally — e.g. the Darwin-only gate in

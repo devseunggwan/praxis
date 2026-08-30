@@ -1,6 +1,7 @@
 # PreToolUse Caller Probe Gate
 
 Supported hosts: all
+Requires: slack-or-notion-mcp (mcp matcher entry only — the Bash entry carries no requirement)
 
 `hooks/caller-probe-gate.sh` is a **default-on** PreToolUse advisory that
 fires when an external-write body asserts that identified code is

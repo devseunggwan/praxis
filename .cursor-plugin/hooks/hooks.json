@@ -287,16 +287,6 @@
         ]
       },
       {
-        "matcher": "TaskCreate|TaskUpdate|TaskGet|TaskList|TaskStop|TaskOutput",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/builtin-task-postuse.sh",
-            "timeout": 3
-          }
-        ]
-      },
-      {
         "matcher": "Read",
         "hooks": [
           {

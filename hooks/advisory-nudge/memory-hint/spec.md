@@ -1,6 +1,7 @@
 # PreToolUse Memory Hint
 
 Supported hosts: all
+Requires: hookable-memory-store (a memory dir using `hookable:`/`hookKeywords:` frontmatter; absent = permanent no-op)
 
 `hooks/memory-hint.py` fires on PreToolUse for `Bash`, `Edit`, `Write`,
 `NotebookEdit`, and `AskUserQuestion` tool calls and emits stderr lines

@@ -25,8 +25,13 @@ Bare checkout/switch without -b/-c (NOT a creation) → always pass.
 git branch -d/-D/-m/-M/-r/-a/--list/--format/--sort/... → always pass.
 
 Config:
-  PRAXIS_BRANCH_NAME_REGEX    — pattern to match (default below)
-  PRAXIS_BRANCH_NAME_STRICT   — "1" (block, default) / "0" (advisory only)
+  PRAXIS_BRANCH_NAME_REGEX    — pattern to match (default below); setting it
+                                also attests the convention, turning the
+                                gate strict (deny) — issue #1159
+  PRAXIS_BRANCH_NAME_STRICT   — explicit tier override: "1" deny / "0"
+                                advisory. Unset/empty → strict only when
+                                PRAXIS_BRANCH_NAME_REGEX is set; on the
+                                shipped default regex the gate advises
   PRAXIS_BRANCH_NAME_WHITELIST — comma-separated always-allow names
                                  (default: main,master,dev,prod,staging)
 
@@ -126,7 +131,18 @@ def _get_regex() -> re.Pattern:
 
 
 def _get_strict() -> bool:
-    return os.environ.get("PRAXIS_BRANCH_NAME_STRICT", "1").strip() != "0"
+    """Strict (deny) only when the convention is locally attested (#1159).
+
+    PRAXIS_BRANCH_NAME_STRICT non-empty → explicit override wins ("0" =
+    advisory, anything else = deny). Otherwise the gate denies only when
+    PRAXIS_BRANCH_NAME_REGEX is set: a name regex is a per-repo convention,
+    and on the shipped default regex (nobody attested it locally) a
+    violation warns instead of blocking branch creation.
+    """
+    raw = os.environ.get("PRAXIS_BRANCH_NAME_STRICT", "").strip()
+    if raw:
+        return raw != "0"
+    return bool(os.environ.get("PRAXIS_BRANCH_NAME_REGEX", "").strip())
 
 
 def _extract_allowed_types(pattern: str) -> str | None:
@@ -570,7 +586,8 @@ def _emit_block(branch: str, regex_pattern: str, strict: bool) -> None:
         correct_path=(
             f"rename to hub-<N>-<type>-<desc> or issue-<N>-<type>-<desc> "
             f"(pattern: {regex_pattern}){types_clause}; "
-            f"set PRAXIS_BRANCH_NAME_STRICT=0 to switch to advisory-only mode"
+            f"PRAXIS_BRANCH_NAME_STRICT=0 forces advisory; deny applies when "
+            f"PRAXIS_BRANCH_NAME_REGEX is set or PRAXIS_BRANCH_NAME_STRICT=1"
         ),
         bypass_env=None,
         reference="CLAUDE.md → Git Commit & Title Rules; hooks/preflight-gate/branch-name-check/spec.md",
