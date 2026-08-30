@@ -71,7 +71,6 @@ specific to this gate; see spec.md "Honest limitation".
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -81,6 +80,7 @@ sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_io import emit_stop_advisory  # type: ignore[import-not-found]  # noqa: E402
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
     load_current_turn,
@@ -270,9 +270,8 @@ def main() -> int:
     if os.environ.get(_BYPASS_ENV, "").strip():
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
     if not isinstance(payload, dict):
         return 0

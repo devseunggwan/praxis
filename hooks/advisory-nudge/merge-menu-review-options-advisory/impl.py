@@ -29,7 +29,6 @@ Allow conditions (no nudge/block emitted):
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -38,6 +37,7 @@ from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Pattern definitions
@@ -426,9 +426,8 @@ def _block_msg(routed: tuple[str, str, str] | None) -> str:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
 
     if not isinstance(payload, dict):

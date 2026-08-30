@@ -64,6 +64,7 @@ from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import safe_tokenize  # type: ignore[import-not-found]  # noqa: E402
 
@@ -355,9 +356,8 @@ def _has_skill_tool_use(obj: dict, required_skill: str) -> bool:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.loads(sys.stdin.read())
-    except (json.JSONDecodeError, ValueError):
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed payload
 
     if os.environ.get("PRAXIS_HOOK_BYPASS_SKILL_GATE", ""):

@@ -42,7 +42,6 @@ see "Ordering constraint" in spec.md. The `git commit` path is unchanged
 from __future__ import annotations
 
 import re
-import json
 import os
 import subprocess
 import sys
@@ -57,6 +56,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
+from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from git_commit_titles import (  # type: ignore[import-not-found]  # noqa: E402
     extract_git_titles,
 )
@@ -356,15 +356,10 @@ def _emit_squash_advisory(reason: str) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        return 0  # fail-open on malformed stdin
-
-    if payload.get("tool_name") != "Bash":
-        return 0
-
-    command = payload.get("tool_input", {}).get("command", "") or ""
+    parsed = read_bash_payload()
+    if parsed is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
+    payload, command = parsed
     if not command.strip():
         return 0
 

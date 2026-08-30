@@ -108,6 +108,7 @@ from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E4
     GH_BODY_FLAGS_WITH_ARG,
     GH_GLOBAL_FLAGS_WITH_ARG,
 )
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 
 _GH_TIMEOUT_SEC = 8
@@ -968,12 +969,9 @@ def _pre_tool_use(payload: dict) -> int:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        return 0
-    if payload.get("tool_name") != "Bash":
-        return 0
+    payload = read_payload(("Bash",))
+    if payload is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
     event = payload.get("hookEventName") or payload.get("hook_event_name")
     if event == "PostToolUse":
         return _post_tool_use(payload)

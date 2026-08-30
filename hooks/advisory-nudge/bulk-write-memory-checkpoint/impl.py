@@ -54,13 +54,13 @@ Fail-open contract:
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _paths import praxis_cache_dir  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Advisory message
@@ -239,9 +239,8 @@ def main() -> int:
     if os.environ.get("PRAXIS_BULK_WRITE_BYPASS") == "1":
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed stdin
 
     tool = payload.get("tool_name", "") or ""

@@ -59,7 +59,6 @@ Fail-open on malformed stdin / unreadable body / unresolvable target.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -68,6 +67,7 @@ from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     iter_command_starts,
@@ -494,9 +494,8 @@ def _render_advisory(dot_markers: list[str], owner_markers: list[str]) -> str:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed stdin
 
     tool_name = payload.get("tool_name", "") or ""

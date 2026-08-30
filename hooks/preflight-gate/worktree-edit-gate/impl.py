@@ -47,7 +47,6 @@ file not inside a git repo, detached HEAD) → exit 0 (pass).
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -56,6 +55,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -264,9 +264,8 @@ def main() -> int:
     if os.environ.get("PRAXIS_HOOK_BYPASS_WORKTREE_GATE", "").strip():
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed input
 
     tool_name = payload.get("tool_name", "") or ""

@@ -111,6 +111,7 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib")
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _state_lock import state_lock  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -281,9 +282,8 @@ def run_pre() -> int:
     if os.environ.get("PRAXIS_MD_ESCAPE_SKIP", "").strip() == "1":
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed input
 
     tool_name = payload.get("tool_name", "") or ""
@@ -322,9 +322,8 @@ def run_pre() -> int:
 
 
 def run_post() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
 
     tool_name = payload.get("tool_name", "") or ""

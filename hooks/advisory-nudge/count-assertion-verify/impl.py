@@ -31,7 +31,6 @@ Fail-open contract (project hook design):
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -41,6 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (
     iter_command_starts,
     safe_tokenize,
@@ -275,9 +275,8 @@ def check_command(command: str) -> bool:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
 
     if not isinstance(payload, dict):

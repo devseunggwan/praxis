@@ -40,7 +40,6 @@ Any parse error within a memory skips that memory only — never the hook.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -54,6 +53,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     strip_prefix,
 )
 from _memory_dir import resolve_memory_dir  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 
 HIT_LIMIT = 3
@@ -319,9 +319,8 @@ def emit_hits(hits: list[tuple[str, dict, float]]) -> None:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed stdin
 
     event, text = extract_event_payload(payload)

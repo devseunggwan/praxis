@@ -27,7 +27,6 @@ let the agent self-bypass the gate it is meant to enforce — the same contract
 """
 from __future__ import annotations
 
-import json
 import re
 import sys
 from pathlib import Path as _Path
@@ -42,6 +41,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     strip_heredoc_bodies,
     strip_prefix,
 )
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     load_current_turn,
     read_last_user_message,
@@ -359,9 +359,8 @@ def build_reason(ground: str, utterance: str) -> str:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed input
 
     tool_name = payload.get("tool_name")
@@ -369,7 +368,7 @@ def main() -> int:
     if tool_name == AGENT_TOOL:
         pass
     elif tool_name == "Bash":
-        command = payload.get("tool_input", {}).get("command", "") or ""
+        command = (payload.get("tool_input") or {}).get("command", "") or ""
         if not _command_creates_target(command):
             return 0
         multi = command_is_multi_target(command)

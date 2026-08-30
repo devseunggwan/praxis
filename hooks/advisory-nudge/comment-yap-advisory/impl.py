@@ -58,7 +58,6 @@ Advisory only — writes to stderr, exits 0. Never blocks.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -69,6 +68,7 @@ _HOOK_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HOOK_DIR.parent.parent / "_lib"))
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 _HOOK_NAME = "comment-yap-advisory"
 _ROLE = "advisory-nudge"
@@ -535,9 +535,8 @@ def _advisory_text(file_path: str, findings: Sequence[_Finding]) -> str:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
 
     if not isinstance(payload, dict):

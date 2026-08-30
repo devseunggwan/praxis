@@ -86,6 +86,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     strip_prefix,
 )
 from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Lexical signal sets — module-level constants (Korean + English).
@@ -417,7 +418,7 @@ def bash_command_is_mutating(command: str) -> tuple[bool, str]:
 
 def handle_user_prompt_submit(payload: dict) -> int:
     """Update session state based on the user prompt."""
-    prompt = payload.get("prompt") or payload.get("tool_input", {}).get("prompt", "")
+    prompt = payload.get("prompt") or (payload.get("tool_input") or {}).get("prompt", "")
     if not isinstance(prompt, str) or not prompt.strip():
         return 0
 
@@ -451,7 +452,7 @@ def handle_pre_tool_use(payload: dict) -> int:
     """Inspect mutation-capable tool calls against session intent."""
     if payload.get("tool_name") != "Bash":
         return 0
-    command = payload.get("tool_input", {}).get("command", "") or ""
+    command = (payload.get("tool_input") or {}).get("command", "") or ""
     if not command.strip():
         return 0
 
@@ -508,9 +509,8 @@ def detect_event(payload: dict) -> str:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed input
     if not isinstance(payload, dict):
         return 0

@@ -68,7 +68,6 @@ mechanism; it is explicitly not a guarantee the typo-class error is caught
 from __future__ import annotations
 
 import os
-import json
 import re
 import sys
 from pathlib import Path as _Path
@@ -80,6 +79,7 @@ from _hook_io import (  # type: ignore[import-not-found]  # noqa: E402
 )
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
     load_current_turn,
@@ -186,9 +186,8 @@ def main() -> int:
     if os.environ.get(_BYPASS_ENV, "").strip():
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
     if not isinstance(payload, dict):
         return 0

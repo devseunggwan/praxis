@@ -39,13 +39,13 @@ Allow conditions (no block/advisory emitted):
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
 from pathlib import Path as _Path
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import read_last_user_message  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -332,9 +332,8 @@ Note: PRAXIS_ASK_END_STRICT=1 (deprecated) also forces strict when set.
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
 
     if not isinstance(payload, dict):

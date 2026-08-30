@@ -54,7 +54,6 @@ glob. Exits 0 otherwise (transparent pass-through).
 """
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys as _sys
@@ -63,6 +62,7 @@ from pathlib import Path as _Path
 
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 
 GLOB_CHARS = "*?["
@@ -449,15 +449,10 @@ def find_unmatched_globs(command: str, cwd: str) -> list[str]:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(_sys.stdin)
-    except Exception:
-        return 0
-
-    if payload.get("tool_name") != "Bash":
-        return 0
-
-    command = (payload.get("tool_input") or {}).get("command") or ""
+    parsed = read_bash_payload()
+    if parsed is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
+    payload, command = parsed
     if not command:
         return 0
 

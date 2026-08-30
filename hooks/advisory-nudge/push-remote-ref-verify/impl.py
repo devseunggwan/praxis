@@ -36,7 +36,6 @@ Skip conditions (return 0, no advisory):
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -48,6 +47,7 @@ from _git_push_target import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from _git_push_target import resolve_push_target  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 _BYPASS_ENV = "PRAXIS_PUSH_VERIFY_BYPASS"
 _STRICT_ENV = "PRAXIS_PUSH_VERIFY_STRICT"
@@ -111,13 +111,9 @@ def main() -> int:
     if os.environ.get(_BYPASS_ENV, "").strip():
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        return 0
-
-    if payload.get("tool_name") != "Bash":
-        return 0
+    payload = read_payload(("Bash",))
+    if payload is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
 
     tool_input = payload.get("tool_input") or {}
     command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""

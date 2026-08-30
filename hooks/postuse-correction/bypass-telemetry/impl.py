@@ -53,6 +53,7 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _fire_ledger import prune_telemetry, resolve_telemetry_dir  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -298,9 +299,8 @@ def main() -> int:
     if os.environ.get("PRAXIS_BYPASS_TELEMETRY_DISABLE", "").strip() == "1":
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # malformed stdin — fail-open
 
     if not isinstance(payload, dict):
