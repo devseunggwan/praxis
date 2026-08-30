@@ -137,7 +137,7 @@ degrades to at most a repeated advisory.
 ### Tests
 
 ```bash
-bash hooks/test-jq-config-empty-dict-advisory.sh
+bash tests/hooks/advisory-nudge/test_jq_config_empty_dict_advisory.sh
 ```
 
 10 cases: empty file, invalid JSON file, valid JSON file (original 3),

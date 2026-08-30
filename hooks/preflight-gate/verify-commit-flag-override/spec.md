@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/verify-commit-flag-override.py` fires on every PreToolUse(Bash)
+`hooks/preflight-gate/verify-commit-flag-override/impl.py` fires on every PreToolUse(Bash)
 event and inspects the command for `git commit` invocations that override
 the repo's commit-policy defaults (hooks, signing, hook path, template).
 When any such override is detected, the hook denies the call so the
@@ -124,7 +124,7 @@ Specifically:
 
 ### Tests
 
-`tests/test_verify_commit_flag_override.sh` covers 28 cases — every
+`tests/hooks/preflight-gate/test_verify_commit_flag_override.sh` covers 28 cases — every
 override token in short / long / `=`-joined form, the `-c` config family
 across both git-level positions, false-positive guards (`echo -n`,
 `head -n`, `sed -n`, heredoc bodies), wrapper-prefix peeling, value-bearing
@@ -132,5 +132,5 @@ git-level flag handling, the env-var bypass, and malformed-input
 fail-open. Run before editing the hook:
 
 ```bash
-./tests/test_verify_commit_flag_override.sh
+tests/hooks/preflight-gate/test_verify_commit_flag_override.sh
 ```

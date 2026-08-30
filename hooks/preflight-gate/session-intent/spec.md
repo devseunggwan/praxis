@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/session-intent.py` is a multi-event hook (`UserPromptSubmit` +
+`hooks/preflight-gate/session-intent/impl.py` is a multi-event hook (`UserPromptSubmit` +
 `PreToolUse`) that detects the session-scope drift pattern described in
 issue [#178](https://github.com/devseunggwan/praxis/issues/178): a user
 opens a session with read-intent (`compare`, `analyze`, `review`, `비교`,
@@ -176,7 +176,7 @@ The hook exits 0 silently when:
 ### Tests
 
 ```bash
-bash tests/test_session_intent.sh
+bash tests/hooks/preflight-gate/test_session_intent.sh
 ```
 
 26 cases: read-intent anchor write, mutation-verb flag write, mutation

@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/pre-edit-protected-branch-guard.py` fires on every PreToolUse event
+`hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` fires on every PreToolUse event
 for `Edit`, `Write`, and `NotebookEdit` tools. It has two independent deny
 paths on protected branches:
 
@@ -143,7 +143,7 @@ Default (if not set): a placeholder string instructing the user to configure.
 }
 ```
 
-The hook is also registered in the praxis plugin's own `hooks/hooks.json` and
+The hook is also registered in the praxis plugin's own `hooks/manifest.json` and
 fires automatically when the plugin is loaded.
 
 ### Response (deny)
@@ -183,7 +183,7 @@ fires automatically when the plugin is loaded.
 ### Tests
 
 ```bash
-bash hooks/test-pre-edit-protected-branch-guard.sh
+bash tests/hooks/preflight-gate/test_pre_edit_protected_branch_guard.sh
 ```
 
 Covers:

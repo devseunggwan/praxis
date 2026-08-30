@@ -72,6 +72,12 @@ main() is labeled with its number, and this list is the canonical roster
       summary is byte-identical to the manifest/env/security source render
       (#672). Numbered after 20 because its original label collided with
       Rule 16 (@fail_open); it took the next free number in #1172.
+  22. Spec referenced-path existence (#1179): every repo-path-looking token in
+      hooks/*/*/spec.md (backticked spans and fenced code blocks; contains a
+      `/`, ends in .sh/.py/.md/.json, first segment is a checked top-level
+      dir) must exist on disk, except deliberate phantom-path examples in
+      SPEC_PATH_EXEMPT. (Numbered 22 to stay clear of rules added by
+      parallel PRs.)
 
 An unnumbered auxiliary check verifies the Codex adapter symlinks
 (plugins/praxis/{skills,hooks,scripts} → repo root).
@@ -230,6 +236,78 @@ EXTERNAL_CLI_WRAPPER_SKILLS = {
     # visible to the static fenced-shell scan.
     "cmux-delegate",
 }
+
+# Rule 22 (#1179) — spec.md tokens that look like repo paths but are
+# DELIBERATELY nonexistent: phantom-path examples in the spec of a hook whose
+# whole job is detecting phantom paths, and generic illustration filenames in
+# example command lines. Keyed by spec path relative to REPO_ROOT.
+SPEC_PATH_EXEMPT: dict[str, set[str]] = {
+    "hooks/advisory-nudge/external-write-path-existence-check/spec.md": {
+        "hooks/pre-tool-use/external-write-path-existence-check.sh",
+        "hooks/pre-tool-use/fake.sh",
+        "hooks/foo.sh",
+        "docs/hook/nonexistent-spec.md",
+    },
+    "hooks/advisory-nudge/pytest-direct-exec-advisory/spec.md": {
+        "tests/test_api.py",
+    },
+    "hooks/advisory-nudge/count-assertion-verify/spec.md": {
+        "tests/file.sh",
+    },
+}
+
+# Rule 22 — first path segment must be one of these top-level repo dirs for a
+# token to be treated as a repo-relative path claim. Everything else
+# (`src/loader.py`, `vault/note.md`, `.claude/settings.json`, sibling-relative
+# `foo/spec.md` references, `$VAR/...` templates) is illustration or
+# out-of-repo config, not a checkable reference.
+SPEC_PATH_CHECKED_ROOTS = {"hooks", "tests", "scripts", "docs", "skills", "manifests"}
+
+# Rule 22 — strict path charset (letters/digits/_/./-, `/` separators) ending
+# in a checked extension. Tokens carrying globs (`*`), placeholders (`<name>`),
+# env expansions (`${...}`), or spaces never match, so command examples and
+# templates are not false-flagged.
+SPEC_PATH_TOKEN_RE = re.compile(r"^[A-Za-z0-9_./-]+\.(?:sh|py|md|json)$")
+
+SPEC_BACKTICK_RE = re.compile(r"`([^`\n]+)`")
+
+
+def _spec_referenced_paths(text: str) -> set[str]:
+    """Repo-path-looking tokens claimed by one spec.md (Rule 22, #1179).
+
+    Candidate words come from backticked inline spans and from every line
+    inside fenced code blocks (both split on whitespace, so `bash tests/...`
+    command examples contribute their path arguments). A candidate is kept iff,
+    after stripping surrounding punctuation and a leading `./`, it contains a
+    `/`, has no `..` segment (out-of-tree examples), matches
+    SPEC_PATH_TOKEN_RE, and its first segment is in SPEC_PATH_CHECKED_ROOTS.
+    """
+    words: list[str] = []
+    in_fence = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            words.extend(stripped.split())
+        else:
+            for m in SPEC_BACKTICK_RE.finditer(line):
+                words.extend(m.group(1).split())
+
+    paths: set[str] = set()
+    for word in words:
+        tok = word.strip("\"'()[]{},:;")
+        if tok.startswith("./"):
+            tok = tok[2:]
+        if "/" not in tok or ".." in tok:
+            continue
+        if not SPEC_PATH_TOKEN_RE.match(tok):
+            continue
+        if tok.split("/", 1)[0] not in SPEC_PATH_CHECKED_ROOTS:
+            continue
+        paths.add(tok)
+    return paths
 
 
 def dispatch_node_drifts(
@@ -1540,6 +1618,36 @@ def main() -> int:
             "MATRIX DRIFT docs/hook-operating-matrix.md: regenerate with "
             "./scripts/build-plugin-manifests.py"
         )
+
+    # ------------------------------------------------------------------
+    # Rule 22 — spec referenced-path existence (#1179)
+    #
+    # A spec.md that cites `hooks/<name>.py`, `hooks/test-<name>.sh`, or
+    # `tests/test_<name>.sh` after the layout moved to
+    # hooks/<role>/<name>/impl.py + tests/hooks/<role>/test_<name>.sh sends
+    # readers (and agents running the cited test command) to a dead path.
+    # Every repo-path-looking token extracted by _spec_referenced_paths()
+    # must exist on disk, except the deliberate phantom examples listed in
+    # SPEC_PATH_EXEMPT. The heuristic is documented on the helper and the
+    # constants above.
+    # ------------------------------------------------------------------
+    for hook_dir in _hook_dirs():
+        spec_file = hook_dir / "spec.md"
+        if not spec_file.exists():
+            continue
+        spec_rel = str(spec_file.relative_to(REPO_ROOT))
+        exempt = SPEC_PATH_EXEMPT.get(spec_rel, set())
+        spec_text = spec_file.read_text(encoding="utf-8", errors="replace")
+        for tok in sorted(_spec_referenced_paths(spec_text)):
+            if tok in exempt:
+                continue
+            if not (REPO_ROOT / tok).exists():
+                drifts.append(
+                    f"SPEC DANGLING PATH {spec_rel}: `{tok}` does not exist on "
+                    "disk — update the reference to the real path, or add it to "
+                    "SPEC_PATH_EXEMPT if it is a deliberate phantom example "
+                    "(#1179)"
+                )
 
     if drifts:
         print("plugin-manifest check FAILED:")

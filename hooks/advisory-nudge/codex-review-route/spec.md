@@ -84,7 +84,7 @@ denies).
 ### Tests
 
 ```bash
-bash tests/test_codex_review_route.sh
+bash tests/hooks/advisory-nudge/test_codex_review_route.sh
 ```
 
 Covers 21 cases: 4 warn paths (bare, with flag, with `--model`,

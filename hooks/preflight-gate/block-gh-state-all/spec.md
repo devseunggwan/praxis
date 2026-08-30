@@ -15,8 +15,8 @@ recurrences — structural enforcement replaced the memo.
 
 ### What is blocked
 
-The hook uses structural tokenization (`safe_tokenize` → `iter_command_starts` →
-`strip_prefix`) so that only live `gh search` invocations are matched. Pattern
+The hook uses role-aware structural tokenization (`_hook_utils.tokenize_with_roles`,
+issue #263) so that only live `gh search` invocations are matched. Pattern
 references inside quoted strings, commit messages, grep patterns, or echo
 arguments are transparent pass-throughs.
 
@@ -54,7 +54,7 @@ should not assume the partial side-effects landed.
 ### Tests
 
 ```bash
-bash hooks/test-block-gh-state-all.sh
+bash tests/hooks/preflight-gate/test_block_gh_state_all.sh
 ```
 
 Covers 29 cases: 10 block paths (including env-prefix, sudo wrapper, chained

@@ -18,8 +18,8 @@ subcommands. Flag compatibility table sourced from `gh <subcmd> --help` output
 
 ### What is blocked
 
-The hook uses the same structural tokenization pipeline (`safe_tokenize` →
-`iter_command_starts` → `strip_prefix`) as sibling hooks. Only subcommands
+The hook uses the same role-aware structural tokenization
+(`_hook_utils.tokenize_with_roles`, issue #263) as sibling hooks. Only subcommands
 explicitly listed in the compatibility table are validated; unknown subcommands
 pass through silently (fail-open). Inherited flags (`--help`, `-R/--repo`,
 `--hostname`, `--color`) are always allowed regardless of subcommand.
@@ -81,7 +81,7 @@ hook does not break the other.
 ### Tests
 
 ```bash
-bash tests/test_gh_flag_verify.sh
+bash tests/hooks/preflight-gate/test_gh_flag_verify.sh
 ```
 
 Covers 26 cases: known-good calls per subcommand (silent), known-bad

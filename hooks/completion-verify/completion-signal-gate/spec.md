@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/completion-signal-gate.py` fires on every `Stop` event and emits an
+`hooks/completion-verify/completion-signal-gate/impl.py` fires on every `Stop` event and emits an
 advisory (stdout `{"systemMessage": ...}` JSON) when the last assistant turn contains a completion-signal
 phrase without an evidence-block indicator in the same turn, or when a
 cross-plugin slash command is surfaced in the wrong repo context.
@@ -247,14 +247,14 @@ Once false-positive rates are measured over 1+ week of real sessions:
    response shape). Appropriate only after ask tier validates low false-positive
    rate.
 
-To promote, update `hooks/completion-signal-gate.py` to emit:
+To promote, update `hooks/completion-verify/completion-signal-gate/impl.py` to emit:
 
 ```json
 {"decision": "block", "reason": "..."}
 ```
 
 to stdout (not stderr) and re-run `scripts/build-plugin-manifests.py`.
-No change to `hooks/hooks.json` entry is required for tier promotion.
+No change to `hooks/manifest.json` entry is required for tier promotion.
 
 ### Parsing guarantees
 

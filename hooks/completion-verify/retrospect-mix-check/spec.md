@@ -420,7 +420,7 @@ the marker would re-enable.
 
 ### Stop hook ordering
 
-The Stop array in `hooks/hooks.json` runs in order:
+The Stop array in `hooks/manifest.json` runs in order:
 `completion-verify` → `retrospect-mix-check` → `strike-counter stop`.
 
 `completion-verify` checks evidence-of-completion claims; `retrospect-mix-
@@ -437,7 +437,7 @@ If a hook bug produces false blocks in production:
 # Option 1: revert the hooks.json registration entry
 git -C ~/.claude/plugins/.../praxis apply --reverse <patch>
 
-# Option 2: edit hooks/hooks.json, remove the retrospect-mix-check entry
+# Option 2: edit hooks/manifest.json, remove the retrospect-mix-check entry
 #          from the "Stop" array, save.
 
 # Option 3: temporary kill switch — edit ${CLAUDE_PLUGIN_ROOT}/hooks/
@@ -542,5 +542,5 @@ must_contain, must_not_contain}`). All pass fixtures include `gate_3_verdict`
 in `must_contain` to verify the key is present in the distribution card.
 
 ```bash
-./tests/test_retrospect_mix_check.sh
+tests/hooks/completion-verify/test_retrospect_mix_check.sh
 ```

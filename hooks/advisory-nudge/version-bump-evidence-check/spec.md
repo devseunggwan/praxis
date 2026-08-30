@@ -2,7 +2,7 @@
 
 Supported hosts: claude, codex
 
-`hooks/version-bump-evidence-check.py` is a PreToolUse advisory (opt-in strict)
+`hooks/advisory-nudge/version-bump-evidence-check/impl.py` is a PreToolUse advisory (opt-in strict)
 that warns — and optionally blocks — when a `gh issue create`, `gh issue edit`,
 `gh pr create`, or `gh pr edit` body describes an external version bump but
 contains no changelog / breaking-changes evidence.
@@ -82,7 +82,7 @@ wrapper commands (`sudo`, `env`), and multi-command Bash strings.
 ### Tests
 
 ```bash
-bash tests/test_version_bump_evidence_check.sh
+bash tests/hooks/advisory-nudge/test_version_bump_evidence_check.sh
 ```
 
 35 cases covering:

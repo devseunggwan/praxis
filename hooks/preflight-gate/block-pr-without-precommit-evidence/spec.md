@@ -2,7 +2,7 @@
 
 Supported hosts: claude, codex
 
-`hooks/block-pr-without-precommit-evidence.py` fires on every PreToolUse(Bash)
+`hooks/preflight-gate/block-pr-without-precommit-evidence/impl.py` fires on every PreToolUse(Bash)
 event and inspects the command for `gh pr create` / `gh pr new` invocations.
 The hook blocks the call (when attested — see the tiering section below) unless the effective PR body declares the
 pre-commit verification state in one of three accepted marker lines. Goal:
@@ -186,7 +186,7 @@ primitive (shlex-based, posix=True). Specifically:
 
 ### Tests
 
-`hooks/test-block-pr-without-precommit-evidence.sh` covers 49 cases (57 checks; tier boundary cases included) —
+`tests/hooks/preflight-gate/test_block_pr_without_precommit_evidence.sh` covers 49 cases (57 checks; tier boundary cases included) —
 positive blocks (no body, body without marker, value-empty marker, marker
 in fenced block, stdin body, missing file, TOCTOU overwrite, `--repo`
 without marker, lookalike-keyword variants), positive passes (each of the
@@ -196,5 +196,5 @@ env wrapper peeling), and compound-cascade advisory suffix presence /
 absence. Run before editing the hook:
 
 ```bash
-./hooks/test-block-pr-without-precommit-evidence.sh
+tests/hooks/preflight-gate/test_block_pr_without_precommit_evidence.sh
 ```

@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/count-assertion-verify.py` fires on every `PreToolUse(Bash)` event.
+`hooks/advisory-nudge/count-assertion-verify/impl.py` fires on every `PreToolUse(Bash)` event.
 It detects `grep -c` commands whose pattern contains an alternation operator
 and emits an advisory reminder to verify each arm separately before citing
 the count.
@@ -111,7 +111,7 @@ wrapper commands like `sudo`, `env`, shell keywords, and compound separators
 ### Tests
 
 ```bash
-bash tests/test_count_assertion_verify.sh
+bash tests/hooks/advisory-nudge/test_count_assertion_verify.sh
 ```
 
 Covers 25 cases:

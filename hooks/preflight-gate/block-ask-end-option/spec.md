@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/block-ask-end-option.py` fires on every PreToolUse(AskUserQuestion)
+`hooks/preflight-gate/block-ask-end-option/impl.py` fires on every PreToolUse(AskUserQuestion)
 event and inspects `options[].label` for end-option markers — both direct
 ("end here", "여기서 종료") and indirect ("take a break", "잠시 보류").
 When a marker is found, the most recent user message in the transcript is
@@ -214,7 +214,7 @@ Advisory response (exit 0 + stderr message only — no JSON output):
 ### Tests
 
 ```bash
-bash hooks/test-block-ask-end-option.sh
+bash tests/hooks/preflight-gate/test_block_ask_end_option.sh
 ```
 
 Covers: direct Korean/English end markers (block + advisory modes),

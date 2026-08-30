@@ -3,7 +3,7 @@
 Supported hosts: all
 Requires: hookable-memory-store (a memory dir using `hookable:`/`hookKeywords:` frontmatter; absent = permanent no-op)
 
-`hooks/memory-hint.py` fires on PreToolUse for `Bash`, `Edit`, `Write`,
+`hooks/advisory-nudge/memory-hint/impl.py` fires on PreToolUse for `Bash`, `Edit`, `Write`,
 `NotebookEdit`, and `AskUserQuestion` tool calls and emits stderr lines
 referencing user-scoped memory files whose YAML frontmatter declares
 `hookable: true` plus a matching `hookKeywords: [...]` token. Memories opt
@@ -121,7 +121,7 @@ NOT supported — any parse error skips that memory, never the hook.
 ### Tests
 
 ```bash
-bash tests/test_memory_hint.sh
+bash tests/hooks/advisory-nudge/test_memory_hint.sh
 ```
 
 Covers 36 cases: hit/silent core paths, frontmatter gates, noise cap, mtime

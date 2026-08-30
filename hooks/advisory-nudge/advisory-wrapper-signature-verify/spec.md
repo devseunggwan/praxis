@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/advisory-wrapper-signature-verify.py` fires on `PreToolUse` events for
+`hooks/advisory-nudge/advisory-wrapper-signature-verify/impl.py` fires on `PreToolUse` events for
 `Write` / `Edit` tool calls. It detects writes of wrapper/client code that
 delegate to another module's functions and emits an advisory reminder to
 verify the wrapped signatures by reading source before authoring the wrapper.
@@ -128,7 +128,7 @@ All parsing is done with the Python standard library only.
 ### Tests
 
 ```bash
-bash hooks/test-advisory-wrapper-signature-verify.sh
+bash tests/hooks/advisory-nudge/test_advisory_wrapper_signature_verify.sh
 ```
 
 Covers 22 cases:

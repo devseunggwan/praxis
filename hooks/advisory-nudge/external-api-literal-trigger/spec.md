@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/external-api-literal-trigger.py` fires on every `PreToolUse` event
+`hooks/advisory-nudge/external-api-literal-trigger/impl.py` fires on every `PreToolUse` event
 for `Write`, `Edit`, and `Bash` tool calls. It scans the content being
 written or the command being issued for external API enum / literal patterns
 and emits an advisory reminder to verify the value against an authoritative
@@ -124,7 +124,7 @@ constants:
 ### Tests
 
 ```bash
-bash hooks/test-external-api-literal-trigger.sh
+bash tests/hooks/advisory-nudge/test_external_api_literal_trigger.sh
 ```
 
 Covers (20 cases):

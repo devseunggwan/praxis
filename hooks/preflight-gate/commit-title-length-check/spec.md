@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/commit-title-length-check.py` intercepts every AI-authored `git commit`
+`hooks/preflight-gate/commit-title-length-check/impl.py` intercepts every AI-authored `git commit`
 Bash call and emits `permissionDecision: "ask"` when the first line of the
 commit message exceeds the configured maximum (default 50, matching the global
 global `~/.claude/CLAUDE.md` "Git Commit & Title Rules — Title: max 50 characters" rule).

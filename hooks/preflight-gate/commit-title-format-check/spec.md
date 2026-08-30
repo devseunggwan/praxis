@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/commit-title-format-check.py` intercepts every AI-authored `git commit`,
+`hooks/preflight-gate/commit-title-format-check/impl.py` intercepts every AI-authored `git commit`,
 `gh pr create`, and `gh issue create` Bash call and blocks (or warns in advisory
 mode) when the title does not match the Conventional Commits format required by
 the global `~/.claude/CLAUDE.md` "Git Commit & Title Rules" section.

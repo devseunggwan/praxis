@@ -388,7 +388,7 @@ prefix-matched form).
 
 ### Firing order (PreToolUse Bash chain)
 
-`hooks/hooks.json` registers the PreToolUse(Bash) hooks in this order. Claude
+`hooks/manifest.json` registers the PreToolUse(Bash) hooks in this order. Claude
 Code fires them sequentially; `momentum-rule-retrieval-gate` is registered
 LAST (19th), AFTER `pre-merge-approval-gate` (9th):
 
@@ -425,7 +425,7 @@ Future hooks added to the same matcher should preserve this invariant:
 blocks, the downstream advisory output is still produced and visible in the
 same surface.
 
-When updating this table, regenerate it from `hooks/hooks.json` directly so
+When updating this table, regenerate it from `hooks/manifest.json` directly so
 the doc cannot drift from the source-of-truth registration order.
 
 ### Fail-open contract
@@ -441,7 +441,7 @@ The hook returns exit 0 on every infrastructure error:
 ### Tests
 
 ```bash
-bash tests/test_momentum_rule_retrieval_gate.sh
+bash tests/hooks/advisory-nudge/test_momentum_rule_retrieval_gate.sh
 ```
 
 Cases: gh pr merge trigger, cmux new-workspace trigger, force-push triggers
