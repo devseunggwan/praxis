@@ -87,6 +87,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_VERSION_BUMP_STRICT` | `version-bump-evidence-check` | |
 | `PRAXIS_COMMIT_TITLE_FORMAT_STRICT` | `commit-title-format-check` | |
 | `PRAXIS_BRANCH_NAME_STRICT` | `branch-name-check` | |
+| `PRAXIS_CODEX_REVIEW_STRICT` | `block-commit-without-codex-review` | Pins the deny when codex is not on PATH; `0` forces advisory even when detected (#1187) |
 | `PRAXIS_ASK_END_STRICT` | `block-ask-end-option` | |
 | `PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT` | `block-manufactured-action-menu` | |
 | `PRAXIS_MENU_MUTATION_TIER_STRICT` | `menu-mutation-tier-advisory` | Exact value `1` only — `true` / `yes` / `no` / `0` stay advisory |

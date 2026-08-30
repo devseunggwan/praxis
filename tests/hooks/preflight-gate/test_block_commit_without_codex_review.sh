@@ -117,8 +117,12 @@ print(json.dumps(p))' "$tool_name" "$command" "$tx")
   if [ "$expected" = "block" ]; then
     [ "$rc" -eq 2 ] && [ -n "$err_content" ] || ok=0
   elif [ "$expected" = "warn" ]; then
-    # #1187 capability-absent tier: proceeds (rc 0), guidance still ships.
+    # #1187 capability-absent tier: proceeds (rc 0), the advisory names
+    # both escalation routes, and no BLOCKED banner ships.
     [ "$rc" -eq 0 ] && [ -n "$err_content" ] || ok=0
+    echo "$err_content" | grep -q "\[advisory\]" || ok=0
+    echo "$err_content" | grep -q "PRAXIS_CODEX_REVIEW_STRICT" || ok=0
+    echo "$err_content" | grep -q "BLOCKED" && ok=0
   else
     [ "$rc" -eq 0 ] && [ -z "$err_content" ] || ok=0
   fi
@@ -446,9 +450,14 @@ rm -f "$ESC_LEDGER"
 # ---------------------------------------------------------------------------
 unset PRAXIS_CODEX_REVIEW_STRICT
 
-# No codex on PATH (runner reality), no strict env → advisory, commit proceeds.
-run_case "1187: no capability, env unset → warn (advisory)" warn Bash \
-  'git commit -m "feat: x"' "$TX_WITHOUT"
+# Controlled no-codex PATH: a dir holding only a python3 symlink (the hook
+# shebang needs it) so these cases hold on machines that DO have a real
+# codex CLI installed — trusting the runner's PATH is env-dependent.
+SAFE_BIN_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+ln -s "$(command -v python3)" "$SAFE_BIN_DIR/python3"
+
+run_case "1187: no capability (sanitized PATH) → warn (advisory)" warn Bash \
+  'git commit -m "feat: x"' "$TX_WITHOUT" "PATH=$SAFE_BIN_DIR"
 
 # Strict env pins the deny regardless of detection.
 run_case "1187: no capability, STRICT=1 → block" block Bash \
@@ -462,10 +471,13 @@ run_case "1187: codex on PATH, env unset → block (detected)" block Bash \
 
 # Negative control: review present in transcript stays silent in BOTH tiers.
 run_case "1187: review ran, no capability → pass (silent)" pass Bash \
-  'git commit -m "feat: x"' "$TX_WITH_SKILL"
-rm -rf "$FAKE_BIN_DIR"
+  'git commit -m "feat: x"' "$TX_WITH_SKILL" "PATH=$SAFE_BIN_DIR"
+run_case "1187: review ran, STRICT=1 → pass (silent)" pass Bash \
+  'git commit -m "feat: x"' "$TX_WITH_SKILL" "PRAXIS_CODEX_REVIEW_STRICT=1"
+run_case "1187: no capability, STRICT=0 → warn (explicit demote)" warn Bash \
+  'git commit -m "feat: x"' "$TX_WITHOUT" "PRAXIS_CODEX_REVIEW_STRICT=0"
+rm -rf "$FAKE_BIN_DIR" "$SAFE_BIN_DIR"
 
-# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Cleanup + summary
 # ---------------------------------------------------------------------------

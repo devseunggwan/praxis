@@ -15,15 +15,20 @@ applies only when the capability is locally attested:
 
 - **`codex` binary on PATH** (`shutil.which`) → deny as before, no env
   needed — the detectable dependency is the attestation.
-- **`PRAXIS_CODEX_REVIEW_STRICT=1`** → deny pinned regardless of detection
-  (for setups that route the review without a PATH-visible binary; the env
-  accepts the literal value `1` only).
+- **`PRAXIS_CODEX_REVIEW_STRICT` non-empty** → explicit override wins both
+  ways, matching the sibling tiering contracts (`branch-name-check`, the
+  PR-marker gates): any value but `0` pins the deny regardless of
+  detection (for setups that route the review without a PATH-visible
+  binary); `0` forces advisory even when codex is detected.
 - **Neither** → the guidance ships as a stderr advisory naming both
   escalation routes, and the commit proceeds: a commit cannot be denied for
   skipping a review that is impossible to run here.
 
-Detection is deterministic — `shutil.which` has no ambiguous-failure state,
-so there is no path where a transient error silently demotes the gate. A
+Detection is deterministic in its return values — `shutil.which` has no
+ambiguous-failure state, so there is no path where a transient error
+silently demotes the gate. (A pathological PATH entry — a dead NFS mount —
+can hang the probe; the hook's 5s manifest timeout bounds that, failing
+open, the same envelope the transcript read already had.) A
 PATH deliberately stripped of codex does demote it; that is accepted
 because the same actor already holds the
 `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE` escape, and the strict env exists
@@ -44,6 +49,10 @@ This gate blocks on the **absence** of the required skill invocation, rather
 than on the presence of any marker in the transcript.
 
 ### What is blocked
+
+Verdicts below describe the attested tier; on shipped defaults with no
+codex on PATH every "BLOCKED" verdict ships as the advisory-tier warning
+instead (see Capability tiering above).
 
 Both conditions must hold for a block (exit 2):
 
@@ -179,7 +188,7 @@ does not execute it) — correctly ignored.
 bash tests/hooks/preflight-gate/test_block_commit_without_codex_review.sh
 ```
 
-Covers 54 cases: block paths (no invocation, wrong skill, `-F` body, prose-only
+Covers 56 cases (60 checks; capability-tier cases included): block paths (no invocation, wrong skill, `-F` body, prose-only
 slash mention, subagent dir present but no subagent invocation, slash-command
 line inside a subagent transcript not satisfying the gate), pass paths (Skill
 tool_use, slash command, garbage-line resilience, Skill tool_use inside a

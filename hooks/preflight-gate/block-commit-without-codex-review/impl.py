@@ -38,7 +38,8 @@ Block conditions (ALL must hold):
       its own transcript file and its own sibling subagents/ directory, so
       this scan never crosses session boundaries.
 
-Capability tiering (issue #1187): the deny applies only when the codex
+Capability tiering (issue #1187) — effectively block condition (c): the
+deny applies only when the codex
 capability is attested — `codex` on PATH, or PRAXIS_CODEX_REVIEW_STRICT=1
 pinning it. Otherwise the guidance ships as a stderr advisory and the
 commit proceeds (attested-convention principle, #1159).
@@ -626,21 +627,32 @@ def _codex_capability_present() -> bool:
     codex binary on PATH is the detectable local attestation of the
     convention. `PRAXIS_CODEX_REVIEW_STRICT=1` pins the deny regardless of
     detection (for setups that route the review without a PATH-visible
-    binary). Detection is deterministic (`shutil.which`), so there is no
-    ambiguous-failure state to mis-read as demotion: absent means absent.
+    binary), and "0" forces advisory even when codex is detected — the
+    explicit-override-wins contract shared by the sibling tiering slices.
+    Detection is deterministic (`shutil.which`) in its return values, so
+    there is no ambiguous-failure state to mis-read as demotion: absent
+    means absent. (A pathological PATH entry — dead NFS mount — can hang
+    the probe; the hook's 5s manifest timeout bounds that, failing open,
+    the same envelope the transcript read already had.)
     A PATH stripped of codex demotes the gate — accepted, because the same
     actor already holds the CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE escape,
     and the strict env exists precisely to pin the deny.
     """
-    if os.environ.get("PRAXIS_CODEX_REVIEW_STRICT", "").strip() == "1":
-        return True
+    raw = os.environ.get("PRAXIS_CODEX_REVIEW_STRICT", "").strip()
+    if raw:
+        # Explicit override wins both ways, matching the sibling tiering
+        # contracts (branch-name-check, the PR-marker gates): any value but
+        # "0" pins the deny; "0" forces advisory even with codex detected.
+        return raw != "0"
     return shutil.which("codex") is not None
 
 
 def _emit_advisory_message() -> None:
     """Demoted emission when the codex capability is absent (issue #1187):
-    same guidance, advisory framing, exit 0 — a commit cannot be denied for
-    skipping a review that is impossible to run here. No escalation banner:
+    a short advisory summarizing the gate and naming both escalation
+    routes (the block message's resolution options assume a runnable
+    review, so they are not repeated), exit 0 — a commit cannot be denied
+    for skipping a review that is impossible to run here. No escalation banner:
     the escalation counter tracks repeated *denies*, and an advisory is not
     one.
     """
