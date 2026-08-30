@@ -88,9 +88,15 @@ printf '%s\n' '{"type":"user","isSidechain":true,"message":{"role":"user","conte
 
 PASS=0; FAIL=0; FAILED_NAMES=()
 
+# Capability tiering (#1187, per #1159): this runner has no codex CLI on
+# PATH, so without attestation every deny would demote to advisory. The
+# detection matrix below verifies transcript scanning, not tier — pin the
+# deny via the strict env; dedicated tier cases at the end override it.
+export PRAXIS_CODEX_REVIEW_STRICT=1
+
 # run_case <name> <block|pass> <tool_name> <command> [transcript_path|"NONE"] [env]
 run_case() {
-  local name="$1" expected="$2" tool_name="$3" command="$4" tx="${5:-NONE}" env_kv="${6:-}"
+  local name="$1" expected="$2" tool_name="$3" command="$4" tx="${5:-NONE}" env_kv="${6:-}" env_kv2="${7:-}"
   local payload err_file rc err_content
   payload=$(python3 -c '
 import json, sys
@@ -99,7 +105,9 @@ if sys.argv[3] != "NONE":
     p["transcript_path"] = sys.argv[3]
 print(json.dumps(p))' "$tool_name" "$command" "$tx")
   err_file=$(mktemp)
-  if [ -n "$env_kv" ]; then
+  if [ -n "$env_kv2" ]; then
+    echo "$payload" | env "$env_kv" "$env_kv2" "$HOOK" >/dev/null 2>"$err_file"
+  elif [ -n "$env_kv" ]; then
     echo "$payload" | env "$env_kv" "$HOOK" >/dev/null 2>"$err_file"
   else
     echo "$payload" | "$HOOK" >/dev/null 2>"$err_file"
@@ -110,6 +118,13 @@ print(json.dumps(p))' "$tool_name" "$command" "$tx")
   local ok=1
   if [ "$expected" = "block" ]; then
     [ "$rc" -eq 2 ] && [ -n "$err_content" ] || ok=0
+  elif [ "$expected" = "warn" ]; then
+    # #1187 capability-absent tier: proceeds (rc 0), the advisory names
+    # both escalation routes, and no BLOCKED banner ships.
+    [ "$rc" -eq 0 ] && [ -n "$err_content" ] || ok=0
+    echo "$err_content" | grep -q "\[advisory\]" || ok=0
+    echo "$err_content" | grep -q "PRAXIS_CODEX_REVIEW_STRICT" || ok=0
+    echo "$err_content" | grep -q "BLOCKED" && ok=0
   else
     [ "$rc" -eq 0 ] && [ -z "$err_content" ] || ok=0
   fi
@@ -431,6 +446,53 @@ run_escalation_case "2nd same-session block: escalation banner present" "$ESC_SE
 run_escalation_case "different session is independent: no banner" "other-session-$$" no
 
 rm -f "$ESC_LEDGER"
+
+# ---------------------------------------------------------------------------
+# #1187 capability tiering — deny only when the codex capability is present
+# ---------------------------------------------------------------------------
+unset PRAXIS_CODEX_REVIEW_STRICT
+
+# Controlled no-codex PATH: a dir holding only a python3 symlink (the hook
+# shebang needs it) so these cases hold on machines that DO have a real
+# codex CLI installed — trusting the runner's PATH is env-dependent.
+SAFE_BIN_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+ln -s "$(command -v python3)" "$SAFE_BIN_DIR/python3"
+
+run_case "1187: no capability (sanitized PATH) → warn (advisory)" warn Bash \
+  'git commit -m "feat: x"' "$TX_WITHOUT" "PATH=$SAFE_BIN_DIR"
+
+# Strict env pins the deny regardless of detection.
+run_case "1187: no capability, STRICT=1 → block" block Bash \
+  'git commit -m "feat: x"' "$TX_WITHOUT" "PRAXIS_CODEX_REVIEW_STRICT=1"
+
+# A codex binary on PATH attests the capability → deny without any env.
+FAKE_BIN_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+printf '#!/bin/sh\nexit 0\n' > "$FAKE_BIN_DIR/codex"; chmod +x "$FAKE_BIN_DIR/codex"
+run_case "1187: codex on PATH, env unset → block (detected)" block Bash \
+  'git commit -m "feat: x"' "$TX_WITHOUT" "PATH=$FAKE_BIN_DIR:$PATH"
+
+# Negative control: review present in transcript stays silent in BOTH tiers.
+run_case "1187: review ran, no capability → pass (silent)" pass Bash \
+  'git commit -m "feat: x"' "$TX_WITH_SKILL" "PATH=$SAFE_BIN_DIR"
+run_case "1187: review ran, STRICT=1 → pass (silent)" pass Bash \
+  'git commit -m "feat: x"' "$TX_WITH_SKILL" "PRAXIS_CODEX_REVIEW_STRICT=1"
+run_case "1187: no capability, STRICT=0 → warn (explicit demote)" warn Bash \
+  'git commit -m "feat: x"' "$TX_WITHOUT" "PRAXIS_CODEX_REVIEW_STRICT=0"
+
+# Detected-but-demoted (STRICT=0 with codex ON PATH): the advisory must not
+# falsely claim the CLI is missing — it names the demoting env instead.
+run_case "1187: codex detected + STRICT=0 → warn (demoted variant)" warn Bash \
+  'git commit -m "feat: x"' "$TX_WITHOUT" "PATH=$FAKE_BIN_DIR:$PATH" "PRAXIS_CODEX_REVIEW_STRICT=0"
+demoted_err=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":"git commit -m \"feat: x\""},"transcript_path":sys.argv[1]}))' "$TX_WITHOUT" | \
+  env "PATH=$FAKE_BIN_DIR:$PATH" "PRAXIS_CODEX_REVIEW_STRICT=0" "$HOOK" 2>&1 >/dev/null)
+if echo "$demoted_err" | grep -q "IS on PATH" && ! echo "$demoted_err" | grep -q "not detected"; then
+  echo "PASS [wording] demoted variant names the env, not a missing CLI"; ((PASS++))
+else
+  echo "FAIL [wording] demoted variant: $demoted_err"; ((FAIL++)); FAILED_NAMES+=("demoted variant wording")
+fi
+rm -rf "$FAKE_BIN_DIR" "$SAFE_BIN_DIR"
 
 # ---------------------------------------------------------------------------
 # Cleanup + summary

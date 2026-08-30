@@ -87,6 +87,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_VERSION_BUMP_STRICT` | `version-bump-evidence-check` | |
 | `PRAXIS_COMMIT_TITLE_FORMAT_STRICT` | `commit-title-format-check` | |
 | `PRAXIS_BRANCH_NAME_STRICT` | `branch-name-check` | |
+| `PRAXIS_CODEX_REVIEW_STRICT` | `block-commit-without-codex-review` | Pins the deny when codex is not on PATH; `0` forces advisory even when detected (#1187) |
 | `PRAXIS_PR_EVIDENCE_STRICT` | `block-pr-without-caller-evidence`, `block-pr-without-precommit-evidence` | Shared by both PR-marker gates (#1186); truthy = deny, unset/empty/`0` = advisory |
 | `PRAXIS_ASK_END_STRICT` | `block-ask-end-option` | |
 | `PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT` | `block-manufactured-action-menu` | |

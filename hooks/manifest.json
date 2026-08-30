@@ -659,6 +659,7 @@
       ],
       "timeout": 5,
       "mode": {
+        "strict_env": "PRAXIS_CODEX_REVIEW_STRICT",
         "bypass_env": [
           "CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE"
         ]
