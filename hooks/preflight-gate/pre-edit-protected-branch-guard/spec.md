@@ -46,14 +46,14 @@ advisory on shipped defaults; this hook is the principle's one deliberate
 exception because its trigger is not a repo-local convention: editing
 directly on `main`/`master`/`dev`/`prod` is a hazard in most repositories,
 the deny fires only when an independent workflow signal corroborates it
-(dirty tree or `(#NNN)` PR-suffix history — a solo repo with no PR history
-and a clean tree passes silently), and `PRAXIS_PBGUARD_SKIP=1` /
+(dirty tree or recent `(#NNN)` PR-suffix commits, last 3 inspected — a
+solo repo with no PR history and a clean tree passes silently), and `PRAXIS_PBGUARD_SKIP=1` /
 `PRAXIS_PROTECTED_BRANCHES` remain the documented escapes. The two tiers:
 
-| Tier | Hook | Default | Scope |
-| --- | --- | --- | --- |
-| Generic safety net | `pre-edit-protected-branch-guard` | **on** | any repo, protected branches only, corroborated by a workflow signal |
-| Strict worktree workflow | `worktree-edit-gate` | **opt-in** | enrolled repos only, branch state alone, extension-filtered |
+| Tier                     | Hook                              | Default    | Scope                                                                |
+| ------------------------ | --------------------------------- | ---------- | -------------------------------------------------------------------- |
+| Generic safety net       | `pre-edit-protected-branch-guard` | **on**     | any repo, protected branches only, corroborated by a workflow signal |
+| Strict worktree workflow | `worktree-edit-gate`              | **opt-in** | enrolled repos only, branch state alone, extension-filtered          |
 
 ### What is blocked
 
