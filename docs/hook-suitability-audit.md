@@ -20,29 +20,29 @@ author's CLAUDE.md rules is praxis's stated mission, per `ETHOS.md`).
 Fire-rate verdicts are deliberately not re-litigated. Where a finding is
 already tracked by an open issue, the issue is cited instead of re-reported.
 
-## A. Orphaned artifact — retired hook whose files still ship
+## A. Opt-in hook whose siblings delegate coverage to it as if always-on
 
-`external-write-falsify-check` left `hooks/manifest.json` (last registered
-2026-08-01, per `hook-prune-audit.md`'s exclusion list), but three artifacts
-remain in the tree:
+> **Correction (2026-08-30).** The first revision of this audit called
+> `external-write-falsify-check` an *orphaned artifact* whose wrapper "the
+> build should have removed". That was wrong: the hook is a **deliberate
+> opt-in carve-out** — `scripts/constants.py:35` registers it in
+> `OPT_IN_HOOKS`, `build-plugin-manifests.py:412-417` generates its wrapper
+> on purpose, `check-plugin-manifests.py:9` names the carve-out, and
+> `docs/hook/INDEX.md:122` documents it as "PreToolUse (opt-in)". The
+> half-state is designed, not accidental.
 
-- `hooks/advisory-nudge/external-write-falsify-check/spec.md`
-- `hooks/advisory-nudge/external-write-falsify-check/impl.py`
-- `hooks/external-write-falsify-check.sh` — the *generated wrapper*, which
-  should only exist for registered hooks
+What survives of the finding is narrower: **sibling specs delegate coverage
+territory to an off-by-default hook without saying so.**
+`source-citation-probe-gate/spec.md` excludes fenced code blocks because
+they are "`external-write-falsify-check`'s author-exempt Check 2 territory",
+and `caller-probe-gate`, `exclusion-probe-gate`, `protected-paths-guard`,
+`cross-boundary-preflight`, and `merge-state-claim-gate` carry similar
+boundary references. A reader (or a future audit — this one included)
+concludes that surface is covered; in a default install it is not.
 
-`grep -c external-write-falsify-check hooks/manifest.json` → 0. The wrapper
-is dead code that the build should have removed; the spec is still
-cross-referenced by `source-citation-probe-gate/spec.md` as live territory
-("`external-write-falsify-check`'s author-exempt Check 2 territory"), so
-siblings' documented coverage boundaries now point at a hook that never runs.
-
-**Verdict: decide retire-fully or re-register.** If retired, delete the
-wrapper, archive the spec (or mark it retired), and update the two siblings
-whose specs delegate coverage to it. If the deregistration was accidental,
-re-register. Either way the current half-state is the worst option:
-`docs/hook/INDEX.md` and sibling specs describe enforcement that does not
-exist.
+**Verdict: doc-only fix.** Where a sibling spec hands a detection surface to
+`external-write-falsify-check`, qualify the reference with "(opt-in, not
+registered by default)" so documented coverage matches a default install.
 
 ## B. Hooks that cannot fire without components this repo does not declare
 
@@ -166,7 +166,7 @@ normal Stop in the default (advisory) mode". The impl blocks by default
 
 | Category | Hooks | Action |
 | --- | --- | --- |
-| A. Orphaned artifact | `external-write-falsify-check` | Retire fully (wrapper + spec + sibling cross-refs) or re-register |
+| A. Opt-in coverage delegation | `external-write-falsify-check` siblings ×6 | Qualify sibling-spec references with "(opt-in, off by default)" |
 | B. Dead without undeclared component | `codex-review-route`, `model-routing-advisory`, `momentum-rule-retrieval-gate` (cmux arm), MCP matchers ×2, `block-unmatched-glob`, `memory-hint`, `builtin-task-postuse` | Declare the dependency per hook; consider packaging-level exclusion |
 | C. Hardcoded personal/org assets | `block-gh-issue-create-without-dup-search`, `secret-print-redaction-advisory`, `completion-signal-gate`, `model-routing-advisory`, `merge-menu-review-options-advisory`, `side-effect-scan`, `_lib/_memory_dir.py` | Move literals to config; author's values become author's config |
 | D. Convention-premised default blocks | `block-commit-without-codex-review`, `pre-edit-protected-branch-guard`, `branch-name-check`, `block-pr-without-*-evidence` ×2, `commit-title-format-check` | Choose documented-defaults vs opt-in posture; resolve the §D guard/gate inconsistency |
@@ -175,7 +175,136 @@ normal Stop in the default (advisory) mode". The impl blocks by default
 | G. Spec self-contradiction | `pr-claim-mutation-gate` | One-line doc fix |
 
 Nothing here contradicts `hook-prune-audit.md`'s "no hook meets the bar for
-removal" — with one exception: `external-write-falsify-check` is already
-removed from the manifest and only its corpse ships. Every other finding is a
-suitability boundary (dependency, namespace, default posture, language), not
-a fire-rate argument.
+removal". Every finding is a suitability boundary (dependency, namespace,
+default posture, language, documentation accuracy), not a fire-rate
+argument.
+
+## Remediation plan
+
+Per-category prescription, ordered by (behavioral impact × cost). Each item
+is sized to the repo's one-issue-one-PR convention; verification plans
+follow the negative-control discipline the existing issues use.
+
+### R1 — `_lib/_memory_dir.py` docstring name (C, trivial)
+
+Replace `/Users/nathan.song/.claude` at `hooks/_lib/_memory_dir.py:49-50`
+with a placeholder (`/Users/alice/.claude` → `-Users-alice--claude`
+preserves the double-dash point the example exists to make). Doc-only, no
+test movement. Can ride along with any other PR.
+
+### R2 — personal-owner exemption becomes config (C, behavioral)
+
+`block-gh-issue-create-without-dup-search/impl.py:121` replaces
+`_PERSONAL_REPO_RE = ^devseunggwan/` with the owner list from
+**`PRAXIS_PERSONAL_REPO_OWNERS`** — the exact env var
+`block-personal-asset-leak` already reads for the same concept ("owners that
+are mine"), so no new configuration surface is invented. Unset → no
+exemption (everyone gets the strict path, the author included, until they
+set their env). Verification: existing fixtures flip from
+hardcoded-owner to env-injected owner; negative control — unset env must
+reproduce today's strict behavior for a non-author repo.
+
+### R3 — author-toolchain literals in trigger tables become extensible (C)
+
+Same shape, two sites, one PR:
+
+- `secret-print-redaction-advisory`: keep the public fetch-CLI alternatives
+  (aws/vault/op/infisical/kubectl/gh); move `hubctl` out of the builtin
+  regex into a comma-separated **`PRAXIS_SECRET_FETCH_CLIS`** extension env.
+- `side-effect-scan` `wrapper-commit` category: move `iceberg-schema
+  migrate/promote` and `omc ralph` into **`PRAXIS_WRAPPER_COMMIT_CMDS`**;
+  shipped default empty (the category goes silent unless configured, which
+  is correct — no one else has those wrappers).
+
+Lower priority, explicitly deferred from this pass: the plugin-namespace
+list in `completion-signal-gate` Rule 2 (already contained by its
+`cwd == praxis` gate) and the reviewer names in
+`model-routing-advisory` / `merge-menu-review-options-advisory` guidance
+text (those hooks are claude-host and cmux-dependent anyway — R4 declares
+that instead).
+
+### R4 — declare component dependencies in the manifest (B)
+
+Two mechanisms, matching what each dependency actually is:
+
+1. **Host-expressible** → use the existing `hosts` field:
+   `builtin-task-postuse` gets `hosts: ["claude"]` (its premise — omc's
+   `pre-tool-enforcer` misfiring — is Claude-ecosystem-only). Fold into the
+   #1153/#1154 remediation since it is the same "installed-sibling premise"
+   family.
+2. **Not host-expressible** (cmux, zsh, a `hookable:` memory store,
+   slack/notion MCP servers, the openai-codex plugin) → add an optional
+   **`requires`** array per manifest entry, mirrored by a `Requires:` line
+   in each spec, verified by `check-plugin-manifests.py` exactly the way
+   `Supported hosts:` already is. Runtime behavior does not change (these
+   hooks already fail open); the field makes the dead-matcher cost visible
+   and gives a future packaging step something to filter on.
+
+Verification: checker fixture both directions (manifest-without-spec-line
+and spec-line-without-manifest-field both fail); negative control — a hook
+with no `requires` passes untouched.
+
+### R5 — convention gates: strict-only-when-configured (D, design decision)
+
+The §D inconsistency needs one stated principle, and the candidate this
+audit recommends is: **a convention gate blocks only when the convention is
+locally attested — by explicit config or a detectable dependency; on
+shipped defaults it advises.** Applied:
+
+- `block-commit-without-codex-review` — detect whether
+  `praxis:codex-review-wrap` / the codex plugin is actually installed;
+  absent → advisory (or silent), present → block as today. Capability
+  detection, no new config.
+- `branch-name-check` — `PRAXIS_BRANCH_NAME_REGEX` set → deny as today;
+  unset (shipped author regex) → advisory. The author sets one env var and
+  loses nothing.
+- `block-pr-without-caller-evidence` / `-precommit-evidence` — gate behind
+  an explicit opt-in env (praxis-invented body markers are the least
+  discoverable convention in the set), or demote to advisory-by-default.
+- `pre-edit-protected-branch-guard` vs `worktree-edit-gate` — resolve the
+  opposite-defaults pair by **keeping the guard default-on** (protecting
+  `main` is defensible beyond this author; the escape hatch exists) and
+  documenting the two-tier design: guard = generic safety net, gate =
+  opt-in strict worktree workflow. Alternative if the principle is applied
+  uniformly: guard also demotes to advisory when `PRAXIS_PROTECTED_BRANCHES`
+  is unset — flag both options in the issue; this audit leans keep-on.
+- `commit-title-format-check` — Conventional Commits is common enough that
+  block-by-default is defensible; leave as-is, document
+  `_STRICT=0` in the README defaults table.
+
+Alternatives considered: (a) status quo + a documented "minimal profile"
+env preset — cheapest, but leaves every new installer's first commit
+blocked; (b) converge everything to opt-in — regresses the author's own
+protection. The principle above is the middle that costs the author one-time
+env configuration and costs installers nothing.
+
+This is the one item that changes runtime behavior across several hooks —
+it should be an issue with the decision recorded before any PR.
+
+### R6 — bilingual advisory bodies (F)
+
+`fallback-negative-warn` and `second-failure-advisory` emit Korean-only
+bodies. Prepend a one-line English summary above the Korean detail
+(pattern already used by the bilingual matcher hooks). Fixture updates are
+the whole cost. The `negative-existence-verdict-gate` framing asymmetry is
+recorded as known-and-accepted (near-inert in non-Korean sessions is
+harmless); widening its English framing set is optional follow-up, not
+remediation.
+
+### R7 — doc corrections (A + G)
+
+One docs PR: qualify the six sibling-spec references to
+`external-write-falsify-check` with "(opt-in, off by default)" (§A), and fix
+the `pr-claim-mutation-gate/spec.md` sentence that contradicts its own
+default-block tier (§G).
+
+### Sequencing
+
+| Order | Item | Why this order |
+| --- | --- | --- |
+| 1 | R7 + R1 | Doc/docstring only, zero risk, closes the audit's own false lead |
+| 2 | R2 | Smallest behavioral fix, reuses an existing env var |
+| 3 | R4 | Pure metadata + checker; unblocks packaging decisions |
+| 4 | R3 | Trigger-table config extraction, same tested shape as R2 |
+| 5 | R5 | Needs a recorded design decision first — file the issue early, land last |
+| 6 | R6 | Cosmetic, no urgency |
