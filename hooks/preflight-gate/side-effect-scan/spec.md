@@ -30,21 +30,21 @@ stops functioning as a gate, so the volume itself is the defect.
    `kubectl apply` all publish to state another party can already be reading.
    A commit is recoverable with `git reset` / `git commit --amend` from the
    same shell, before anything leaves the machine.
-2. **It is the only category already covered in depth.** Seven sibling
-   `PreToolUse(Bash)` hooks gate a `git commit` argv on their own — derived
-   from the `"gates": ["git-commit"]` field each carries in
+2. **It is the only category already covered in depth — on `claude`.**
+   Seven sibling `PreToolUse(Bash)` hooks gate a `git commit` argv on their
+   own — derived from the `"gates": ["git-commit"]` field each carries in
    `hooks/manifest.json`, and each verified by reading its detector to key on
    the `commit` subcommand:
 
-   | Sibling hook | What it gates |
-   | -------------- | --------------- |
-   | `block-commit-without-codex-review` | commit before the review step |
-   | `block-rename-sweep-survivors` | a rename sweep with surviving occurrences |
-   | `commit-decomposition-advisory` | oversized single commit |
-   | `commit-title-format-check` | Conventional Commits title format |
-   | `commit-title-length-check` | title length |
-   | `pre-commit-staged-file-enumeration` | staging without enumerating files |
-   | `verify-commit-flag-override` | `-n` / `--no-verify` flag override |
+   | Sibling hook | Hosts | What it gates |
+   | -------------- | ------- | --------------- |
+   | `block-commit-without-codex-review` | `claude` | commit before the review step |
+   | `block-rename-sweep-survivors` | `claude` | a rename sweep with surviving occurrences |
+   | `commit-decomposition-advisory` | `claude` | oversized single commit |
+   | `commit-title-format-check` | all | Conventional Commits title format |
+   | `commit-title-length-check` | all | title length |
+   | `pre-commit-staged-file-enumeration` | `claude` | staging without enumerating files |
+   | `verify-commit-flag-override` | all | `-n` / `--no-verify` flag override |
 
    Four of the seven siblings are the checklist `verify-commit-flag-override`
    already prints on its own deny (issue #941). By contrast **no** sibling
@@ -52,12 +52,58 @@ stops functioning as a gate, so the volume itself is the defect.
 
    The manifest field is the single source of truth for that list;
    `scripts/check-sibling-commit-gates.py` re-derives it on every
-   `scripts/run-tests.sh` run and fails on a name or a count that drifted from
-   it in either direction (issue #1127). The list is hand-curated — membership
-   means "this hook's detector keys on the `commit` subcommand", which no
-   string scan can decide (`pipefail-advisory` names the subcommand but only
-   fires on a pipeline; `branch-name-check` mentions commits while gating
-   branch creation) — but once curated it is copied nowhere by hand again.
+   `scripts/run-tests.sh` run and fails on a name, a `hosts` cell or a count
+   that drifted from it in either direction (issue #1127). The list is
+   hand-curated — membership means "this hook's detector keys on the `commit`
+   subcommand", which no string scan can decide (`pipefail-advisory` names the
+   subcommand but only fires on a pipeline; `branch-name-check` mentions
+   commits while gating branch creation) — but once curated it is copied
+   nowhere by hand again.
+
+#### That coverage is host-scoped, and the demotion is not equally supported
+
+`side-effect-scan` carries no `hosts` key, so it — and the ADVISE demotion —
+ships to every platform that installs hooks — not all of them do, `gemini`
+declares no `hooks` output in `manifests/platforms/gemini.json` and ships skills
+only. The `Hosts` column above is not decoration: `build-plugin-manifests.py`
+applies that whitelist when it writes each platform's `hooks.json`, and the
+generated entry point is `_dispatch.sh PreToolUse Bash <host>`, so
+`_dispatch.group_members("PreToolUse", "Bash", host)` re-applies it at runtime.
+The sibling set behind the premise is therefore a per-host set:
+
+| Host | Sibling commit gates | Also in the deny checklist |
+| ------ | ---------------------- | ---------------------------- |
+| `claude` | 7 | 4 |
+| `codex` | 3 | 2 |
+| `cursor` | 3 | 2 |
+| `opencode` | 3 | 2 |
+
+Both columns are re-derived per host by `scripts/check-sibling-commit-gates.py`
+— every hook-installing platform must have a row, and a row for a platform that
+installs no hooks is itself drift.
+
+Outside `claude` the survivors are `commit-title-format-check`,
+`commit-title-length-check` and `verify-commit-flag-override`. Two of those gate
+only the *shape* of the commit title; the third fires only when a `-n` /
+`--no-verify`-class override is present. None of them asks whether the commit
+was intended at all. The siblings that carry that weight — the codex-review
+gate, the rename-sweep survivor gate, the staged-file enumeration and the
+decomposition advisory — are `claude`-only, as the `Hosts` column records. The
+same whitelist also thins `verify-commit-flag-override`'s own printed deny
+checklist: some of its rows name hooks the host does not install, which is what
+the `Also in the deny checklist` column counts per host.
+
+So of issue #874's two-part rationale, part 1 (local-only and fully reversible)
+is host-independent and holds everywhere, while part 2 ("already covered in
+depth") holds on `claude` and is **materially weaker on `codex`, `cursor` and
+`opencode`**. The 62%-of-asks measurement the demotion was argued from was also
+taken on `claude`.
+
+This is recorded, not repaired. Re-tiering `git-commit` per host — or widening
+the `hosts` whitelist on the `claude`-only siblings — is a runtime behaviour
+change outside issue #1127's scope, and needs its own issue. What issue #1127
+buys is that the enumeration can no longer claim `claude`'s coverage on every
+platform without this checker failing.
 
 **`wrapper-commit` is a deliberate narrowing.** `iceberg-schema
 migrate|promote` and `omc ralph` used to carry the `git-commit` label;

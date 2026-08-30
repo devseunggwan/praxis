@@ -24,9 +24,9 @@ category that can absorb that reduction:
     `kubectl apply` all publish to state someone else can already be reading;
     a commit is recoverable with `git reset` / `git commit --amend` from the
     same shell.
-  • It is the only category already covered in depth. Seven sibling
-    PreToolUse(Bash) hooks gate a `git commit` argv on their own — derived
-    from the `"gates": ["git-commit"]` field each carries in
+  • It is the only category already covered in depth, on `claude`. Seven
+    sibling PreToolUse(Bash) hooks gate a `git commit` argv on their own —
+    derived from the `"gates": ["git-commit"]` field each carries in
     `hooks/manifest.json`, each verified to key on the `commit`
     subcommand: block-commit-without-codex-review,
     block-rename-sweep-survivors, commit-decomposition-advisory,
@@ -37,6 +37,15 @@ category that can absorb that reduction:
     sibling hook gates `kubectl apply` at all. This enumeration is a copy
     of the manifest's, kept honest by scripts/check-sibling-commit-gates.py
     (issue #1127) — edit the manifest field, never this list alone.
+
+    That list is host-scoped. This hook carries no `hosts` key, so the
+    demotion ships everywhere, but several of the names above carry
+    `hosts: ["claude"]` and are stripped from the other platforms'
+    `hooks.json` — `_dispatch.group_members` re-applies the same filter at
+    runtime. spec.md's host table (also re-derived by the checker) carries
+    the per-host counts, and records plainly that this half of the #874
+    rationale is materially weaker outside `claude`. Documented, not
+    re-tiered: changing the tier per host is a separate issue.
 
 The wrapper CLIs that used to share the `git-commit` label (`iceberg-schema
 migrate|promote`, `omc ralph`) do NOT follow it down; they now carry their own

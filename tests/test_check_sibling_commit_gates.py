@@ -15,10 +15,25 @@ These tests cover:
     the shape the checker reads must fail loudly rather than verify nothing,
   - main() exits 0 on a clean tree and 1 on drift.
 
-Fixtures are built by copying the four real surfaces into a temp tree and
-mutating one of them, so no case can pass because the fixture drifted away from
-the production prose: every anchor string is asserted present before it is
-replaced.
+Three further groups cover the PR #1142 review findings:
+
+  - **host scoping.** Four of the seven gated hooks carry `hosts: ["claude"]`,
+    so the sibling set the runtime actually installs is 7 on `claude` and 3 on
+    `codex` / `cursor` / `opencode`. A host-blind derivation pinned `claude`'s
+    number on every platform. The per-row `Hosts` cell and the per-host table
+    are both checked, in both directions, against every platform that emits a
+    `hooks` output.
+  - **field shape.** `"gates": "not-git-commit"` (a bare string) made
+    `GATE not in gates` a substring test, so `branch-name-check` derived as a
+    commit gate. A non-list `gates` — or `hosts` — is now a loud drift.
+  - **the second count.** "Four of the seven siblings are the checklist …" was
+    hand-copied on two surfaces and pinned by nothing; it is now derived from
+    the `← <hook>` rows of `verify-commit-flag-override`'s own
+    `GIT_COMMIT_GATE_CHECKLIST`.
+
+Fixtures are built by copying the real surfaces into a temp tree and mutating
+one of them, so no case can pass because the fixture drifted away from the
+production prose: every anchor string is asserted present before it is replaced.
 """
 
 from __future__ import annotations
@@ -53,7 +68,16 @@ EXPECTED = [
     "verify-commit-flag-override",
 ]
 
-_SURFACE_FILES = (gates.MANIFEST, gates.SPEC, gates.IMPL, gates.TEST)
+_SURFACE_FILES = (gates.MANIFEST, gates.SPEC, gates.IMPL, gates.TEST, gates.CHECKLIST)
+
+# Hosts that install hooks today, and the sibling count each one actually gets
+# once `hosts` whitelists are applied. Spelled out for the same reason EXPECTED
+# is: a whitelist edit has to come through this file too.
+EXPECTED_PER_HOST = {"claude": 7, "codex": 3, "cursor": 3, "opencode": 3}
+
+# `gemini` ships skills only — no `hooks` output in its platform manifest — so
+# it is not a host the ADVISE demotion has to hold on.
+NON_HOOK_PLATFORM = "gemini"
 
 # The manifest block the fixtures edit, quoted verbatim so a reformat of the
 # manifest breaks the fixture loudly instead of silently no-opping.
@@ -72,11 +96,15 @@ def _tree(tmp_path: Path, edits: dict[str, tuple[str, str]] | None = None) -> Pa
     `edits` maps a repo-relative path to an (old, new) pair; `old` must be
     present. Hook directories are created empty — the derivation only asserts
     the directory exists, it never reads it.
+
+    `manifests/platforms/` is copied whole: the host list the per-host table is
+    checked against is read from there, not hard-coded in the checker.
     """
     for rel in _SURFACE_FILES:
         dest = tmp_path / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(_REPO / rel, dest)
+    shutil.copytree(_REPO / gates.PLATFORMS, tmp_path / gates.PLATFORMS)
     for name in EXPECTED:
         for role in ("preflight-gate", "advisory-nudge"):
             if (_REPO / "hooks" / role / name).is_dir():
@@ -109,8 +137,8 @@ def test_name_missing_from_spec_table_is_drift(tmp_path):
         tmp_path,
         {
             gates.SPEC: (
-                "   | `block-rename-sweep-survivors` | a rename sweep with "
-                "surviving occurrences |\n",
+                "   | `block-rename-sweep-survivors` | `claude` | a rename sweep "
+                "with surviving occurrences |\n",
                 "",
             )
         },
@@ -279,3 +307,308 @@ def test_main_exit_codes(monkeypatch, tmp_path):
         gates, "REPO", _tree(tmp_path, {gates.SPEC: ("Seven sibling", "Six sibling")})
     )
     assert gates.main() == 1
+
+
+# ---------------------------------------------------------------------------
+# PR #1142 finding 1: the derivation, and every prose surface, must be host-aware
+# ---------------------------------------------------------------------------
+
+
+def test_hook_installing_hosts_are_read_from_the_platform_manifests():
+    hosts, drifts = gates.hook_hosts(_REPO)
+    assert drifts == []
+    assert hosts == sorted(EXPECTED_PER_HOST)
+    assert NON_HOOK_PLATFORM not in hosts, (
+        f"{NON_HOOK_PLATFORM} declares no 'hooks' output, so it never runs "
+        "side-effect-scan and must not be a host the demotion is checked on"
+    )
+
+
+def test_derivation_is_host_scoped():
+    """The finding: `hosts: ["claude"]` thins the sibling set on every other host."""
+    canonical, drifts = gates.derive(_REPO)
+    assert drifts == []
+    assert len(canonical) == len(EXPECTED)
+    for host, count in EXPECTED_PER_HOST.items():
+        derived, host_drifts = gates.derive(_REPO, host)
+        assert host_drifts == [], host
+        assert len(derived) == count, (host, derived)
+        assert set(derived) <= set(EXPECTED), (host, derived)
+    assert set(gates.derive(_REPO, "codex")[0]) < set(gates.derive(_REPO, "claude")[0])
+
+
+def test_host_table_stale_count_is_drift(tmp_path):
+    """A host row that still claims claude's coverage — the shipped defect."""
+    repo = _tree(tmp_path, {gates.SPEC: ("| `codex` | 3 | 2 |", "| `codex` | 7 | 4 |")})
+    drifts = gates.check(repo)
+    assert any(
+        "'codex' row says 7 sibling commit gates, manifest derives 3" in d
+        for d in drifts
+    ), drifts
+
+
+def test_host_table_stale_checklist_count_is_drift(tmp_path):
+    repo = _tree(
+        tmp_path, {gates.SPEC: ("| `cursor` | 3 | 2 |", "| `cursor` | 3 | 4 |")}
+    )
+    drifts = gates.check(repo)
+    assert any(
+        "'cursor' row says 4 of them are in the deny checklist" in d for d in drifts
+    ), drifts
+
+
+def test_missing_host_row_is_drift(tmp_path):
+    repo = _tree(tmp_path, {gates.SPEC: ("| `opencode` | 3 | 2 |\n", "")})
+    drifts = gates.check(repo)
+    assert any("'opencode' installs hooks but has no row" in d for d in drifts), drifts
+
+
+def test_host_row_for_a_platform_without_hooks_is_drift(tmp_path):
+    """`gemini` ships no hooks.json; a row for it would claim coverage it never gets."""
+    repo = _tree(
+        tmp_path,
+        {
+            gates.SPEC: (
+                "| `opencode` | 3 | 2 |\n",
+                f"| `opencode` | 3 | 2 |\n| `{NON_HOOK_PLATFORM}` | 3 | 2 |\n",
+            )
+        },
+    )
+    drifts = gates.check(repo)
+    assert any(
+        f"row for host '{NON_HOOK_PLATFORM}'" in d and "installs hooks" in d
+        for d in drifts
+    ), drifts
+
+
+def test_unreadable_host_table_is_drift_not_a_silent_pass(tmp_path):
+    repo = _tree(
+        tmp_path,
+        {gates.SPEC: ("| Host | Sibling commit gates |", "| Platform | Gates |")},
+    )
+    drifts = gates.check(repo)
+    assert any("table was not found" in d for d in drifts), drifts
+
+
+def test_wrong_hosts_cell_in_the_sibling_table_is_drift(tmp_path):
+    repo = _tree(
+        tmp_path,
+        {
+            gates.SPEC: (
+                "| `commit-title-length-check` | all |",
+                "| `commit-title-length-check` | `claude` |",
+            )
+        },
+    )
+    drifts = gates.check(repo)
+    assert any(
+        "commit-title-length-check Hosts cell says ['claude'], manifest declares "
+        "['all']" in d
+        for d in drifts
+    ), drifts
+
+
+def test_narrowing_a_hosts_whitelist_fails_both_host_surfaces(tmp_path):
+    """The other direction: the manifest narrows, the prose keeps claude's numbers."""
+    repo = _tree(
+        tmp_path,
+        {
+            gates.MANIFEST: (
+                '      "name": "verify-commit-flag-override",\n'
+                '      "role": "preflight-gate",\n',
+                '      "name": "verify-commit-flag-override",\n'
+                '      "hosts": [\n        "claude"\n      ],\n'
+                '      "role": "preflight-gate",\n',
+            )
+        },
+    )
+    drifts = gates.check(repo)
+    assert any(
+        "verify-commit-flag-override Hosts cell says ['all'], manifest declares "
+        "['claude']" in d
+        for d in drifts
+    ), drifts
+    assert any(
+        "'codex' row says 3 sibling commit gates, manifest derives 2" in d
+        for d in drifts
+    ), drifts
+
+
+# ---------------------------------------------------------------------------
+# PR #1142 finding 2: a non-list `gates` / `hosts` is a loud error, not a
+# silently-degraded substring test
+# ---------------------------------------------------------------------------
+
+_BRANCH_NAME_CHECK_ENTRY = (
+    '      "name": "branch-name-check",\n'
+    '      "role": "preflight-gate",\n'
+    '      "event": "PreToolUse",\n'
+    '      "matcher": "Bash",\n'
+)
+
+
+def test_string_gates_value_is_a_loud_drift_not_a_substring_match(tmp_path):
+    """`"git-commit" in "not-git-commit"` is True — the reported defect exactly."""
+    assert gates.GATE in "not-git-commit", "the substring hazard this test pins"
+    repo = _tree(
+        tmp_path,
+        {
+            gates.MANIFEST: (
+                _BRANCH_NAME_CHECK_ENTRY,
+                _BRANCH_NAME_CHECK_ENTRY + '      "gates": "not-git-commit",\n',
+            )
+        },
+    )
+    derived, drifts = gates.derive(repo)
+    assert "branch-name-check" not in derived, derived
+    assert derived == EXPECTED
+    assert any(
+        "branch-name-check: 'gates' must be a JSON array of strings" in d
+        and "substring test" in d
+        for d in drifts
+    ), drifts
+    # …and the misleading "add it to the commit sibling table" message is gone.
+    assert not any(
+        "branch-name-check" in d and "missing from the enumeration" in d
+        for d in gates.check(repo)
+    ), gates.check(repo)
+
+
+def test_string_hosts_value_is_a_loud_drift(tmp_path):
+    """Same hazard on the field the host filter reads."""
+    repo = _tree(
+        tmp_path,
+        {
+            gates.MANIFEST: (
+                '      "name": "commit-title-length-check",\n',
+                '      "name": "commit-title-length-check",\n'
+                '      "hosts": "claude",\n',
+            )
+        },
+    )
+    drifts = gates.check(repo)
+    assert any(
+        "commit-title-length-check: 'hosts' must be a JSON array of strings" in d
+        for d in drifts
+    ), drifts
+
+
+def test_a_well_formed_unrelated_gate_label_is_still_ignored(tmp_path):
+    """The bidirectional half: the correct list shape must NOT trip the guard."""
+    repo = _tree(
+        tmp_path,
+        {
+            gates.MANIFEST: (
+                _BRANCH_NAME_CHECK_ENTRY,
+                _BRANCH_NAME_CHECK_ENTRY
+                + '      "gates": [\n        "git-branch"\n      ],\n',
+            )
+        },
+    )
+    derived, drifts = gates.derive(repo)
+    assert derived == EXPECTED
+    assert drifts == []
+    assert gates.check(repo) == []
+
+
+# ---------------------------------------------------------------------------
+# PR #1142 finding 3: the "<n> of the <m> siblings … the checklist" count
+# ---------------------------------------------------------------------------
+
+
+def test_checklist_membership_is_derived_from_the_hook_that_prints_it():
+    names, drifts = gates.checklist_names(_REPO)
+    assert drifts == []
+    assert names == [
+        "block-commit-without-codex-review",
+        "commit-title-format-check",
+        "commit-title-length-check",
+        "pre-commit-staged-file-enumeration",
+    ]
+    assert set(names) <= set(EXPECTED)
+
+
+def test_stale_checklist_count_word_is_drift(tmp_path):
+    repo = _tree(tmp_path, {gates.SPEC: ("Four of the seven", "Eleven of the seven")})
+    drifts = gates.check(repo)
+    assert any(
+        "prose says 11 of the siblings are in the deny checklist" in d for d in drifts
+    ), drifts
+
+
+def test_a_row_added_to_the_deny_checklist_breaks_the_stale_four(tmp_path):
+    """The unpinned-count shape the review named.
+
+    Growing `verify-commit-flag-override`'s printed checklist — whether by an
+    eighth gate joining it or, as here, by an existing gate being added to it —
+    used to leave both prose surfaces saying "Four" with this canary green.
+    """
+    repo = _tree(
+        tmp_path,
+        {
+            gates.CHECKLIST: (
+                "    Advisory only — never blocks.\n",
+                "    Advisory only — never blocks.\n"
+                "  Oversized single commit                   ← "
+                "commit-decomposition-advisory\n"
+                "    Advisory only — never blocks.\n",
+            )
+        },
+    )
+    drifts = gates.check(repo)
+    for surface in ("spec.md", "impl.py"):
+        assert any(
+            surface in d
+            and "prose says 4 of the siblings are in the deny checklist" in d
+            for d in drifts
+        ), (surface, drifts)
+    # The per-host table's second column moves with it — but only where the
+    # newly-listed hook actually ships. `commit-decomposition-advisory` is
+    # claude-only, so `codex`'s "2" is still correct and must NOT be flagged.
+    assert any(
+        "'claude' row says 4 of them are in the deny checklist" in d for d in drifts
+    ), drifts
+    assert not any("'codex' row" in d for d in drifts), drifts
+
+
+def test_checklist_naming_a_hook_that_is_not_a_commit_gate_is_drift(tmp_path):
+    repo = _tree(
+        tmp_path,
+        {
+            gates.CHECKLIST: (
+                "    Advisory only — never blocks.\n",
+                "    Advisory only — never blocks.\n"
+                "  Not a commit gate                         ← pipefail-advisory\n",
+            )
+        },
+    )
+    drifts = gates.check(repo)
+    assert any(
+        "pipefail-advisory is listed as a gate that also fires on `git commit`" in d
+        for d in drifts
+    ), drifts
+
+
+def test_missing_checklist_claim_is_drift_not_a_silent_pass(tmp_path):
+    repo = _tree(
+        tmp_path,
+        {
+            gates.SPEC: (
+                "Four of the seven siblings are the checklist",
+                "Some of the siblings appear in the checklist",
+            )
+        },
+    )
+    drifts = gates.check(repo)
+    assert any(
+        "no '<n> of the <m> siblings … the checklist' claim found" in d for d in drifts
+    ), drifts
+
+
+def test_unreadable_deny_checklist_is_drift_not_a_silent_pass(tmp_path):
+    repo = _tree(
+        tmp_path,
+        {gates.CHECKLIST: ("GIT_COMMIT_GATE_CHECKLIST = ", "COMMIT_GATE_NOTE = ")},
+    )
+    drifts = gates.check(repo)
+    assert any("assignment not found" in d for d in drifts), drifts
