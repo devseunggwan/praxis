@@ -11,19 +11,32 @@ This module runs a whole `(event, matcher)` group inside one process:
      means importing does NOT run `main()`);
   3. for each member, re-point `sys.stdin` at a fresh `StringIO` of the payload
      and call its `fail_open`-wrapped `main()`, capturing stdout/stderr/exit;
-  4. aggregate the per-hook results into ONE decision (most-restrictive wins),
-     reproducing the semantics Claude Code applies across independent hook
-     processes.
+  4. aggregate the per-hook results into ONE decision (most-restrictive wins)
+     for the (event, lane) pairs listed below.
 
 Member `impl.py` files are NOT modified — they keep reading stdin and returning
 an int exactly as before. The dispatcher adapts around them.
 
-Decision aggregation (ADR-0002 §2.2):
-  - any hook -> deny  (exit 2, or `permissionDecision: "deny"` on stdout) -> deny
-  - else any hook -> ask (`permissionDecision: "ask"` on stdout)          -> ask
-  - else                                                                  -> allow
-  stderr from every hook (advisory nudges AND deny reasons) is always
-  preserved and forwarded.
+Implemented (event, lane) semantics — the dispatcher is NOT generic across
+every hook event; exactly these lanes are aggregated:
+
+  PreToolUse permission lane (ADR-0002 §2.2):
+    - any hook -> deny  (exit 2, or `permissionDecision: "deny"` on stdout) -> deny
+    - else any hook -> ask (`permissionDecision: "ask"` on stdout)          -> ask
+  Stop decision lane (issue #1169):
+    - any hook -> block (top-level `{"decision": "block", "reason": ...}` JSON
+      at exit 0) -> ONE merged block: every blocking member's reason is kept,
+      blank-line joined, each attributed to its hook name
+  additionalContext lane (issue #874, any event, event-name-checked):
+    - non-decision `hookSpecificOutput.additionalContext` objects merge into
+      ONE `hookSpecificOutput` object
+  - else -> allow (silent pass; no JSON written)
+
+  stderr from every hook (advisory nudges AND deny/block reasons) is always
+  preserved and forwarded. NOT implemented: Stop `{"systemMessage": ...}`
+  advisory merging — a grouped member's systemMessage is dropped by the
+  context-merge path, one reason Stop is not yet listed in the manifest's
+  dispatch groups.
 
 Fail-open invariant (ETHOS.md): every `main()` runs through `_hook_runtime.fail_open`,
 and the dispatcher's own `main()` swallows exceptions to 0 — a crash here must
@@ -98,22 +111,37 @@ def _iter_group_entries(
     is the canonical (unfiltered) view; the runtime passes its platform host so the
     dispatcher never re-includes a hook the build stripped for that platform (e.g.
     a Codex install must not run a `hosts: ["claude"]` guard). See main()/argv[3].
+
+    `entry` mirrors `hook` — multi-event hooks are flat sibling entries in the
+    manifest (one object per event); an earlier hypothetical nested "entries"
+    form had zero manifest uses and was removed (issue #1169). The pair shape
+    is kept so `load_group` does not need a separate single-entry code path.
     """
     manifest = json.loads(_MANIFEST.read_text())
     for hook in manifest.get("hooks", []):
         hosts = hook.get("hosts")
         if host is not None and hosts is not None and host not in hosts:
             continue
-        # `or` (not `.get(key, default)`): an explicit "body": null in a future
-        # manifest entry has the key present, so `.get` would return None and
-        # `Path / None` would raise. `or` treats both absent and null as default.
-        body = hook.get("body") or "impl.py"
-        entries = hook.get("entries") or [
-            {"event": hook.get("event"), "matcher": hook.get("matcher"), "file": body}
-        ]
-        for entry in entries:
-            if entry.get("event") == event and entry.get("matcher") == matcher:
-                yield hook, entry
+        if hook.get("event") != event or hook.get("matcher") != matcher:
+            continue
+        name = hook.get("name")
+        role = hook.get("role")
+        # Members are invoked with stdin only (see run_one). A manifest hook
+        # that declares "args" (the per-process runtime forwards those as
+        # sys.argv) is NOT supported in a dispatch group — the dispatcher's own
+        # main() consumes sys.argv for (event, matcher), so the member would
+        # silently run with its args dropped. Fail OPEN (exclude, never block)
+        # but NOT fail-silent: report loudly, mirroring how run_one forwards
+        # import-failure tracebacks (issue #1169).
+        if hook.get("args"):
+            sys.stderr.write(
+                f"[dispatch] {role}/{name}: manifest entry declares "
+                f"args={hook.get('args')!r}, which dispatch groups cannot "
+                "forward (members are invoked with stdin only) — member "
+                "excluded from the group (fail-open)\n"
+            )
+            continue
+        yield hook, hook
 
 
 def load_group(
@@ -122,8 +150,7 @@ def load_group(
     """Read the manifest ONCE; return `(members, budget_sec, member_timeouts)`.
 
     `members` is `(role, name, impl_path)` in `manifest.json` array order (the
-    declared run order; a multi-event hook contributes the entry whose
-    event/matcher matches). `budget_sec` is the MAX member timeout across the
+    declared run order). `budget_sec` is the MAX member timeout across the
     group — the same derivation `build-plugin-manifests.py` uses for the
     dispatcher node's host-side timeout (`filter_hooks_for_host`'s
     `dispatch_timeout` pre-pass), so the in-process deadline tracks the budget
@@ -142,17 +169,15 @@ def load_group(
     for hook, entry in _iter_group_entries(event, matcher, host):
         role = hook.get("role")
         name = hook.get("name")
+        # `or` (not `.get(key, default)`): an explicit "body": null in a future
+        # manifest entry has the key present, so `.get` would return None and
+        # `Path / None` would raise. `or` treats both absent and null as default.
         body = hook.get("body") or "impl.py"
         impl = _HOOKS_DIR / role / name / (entry.get("file") or body)
         members.append((role, name, impl))
         raw = hook.get("timeout")
         if isinstance(raw, (int, float)) and raw > 0:
             timeouts[(role, name)] = float(raw)
-    # Members are invoked with stdin only (see run_one). A manifest hook that
-    # declares "args" (the per-process runtime forwards those as sys.argv) is NOT
-    # supported in a dispatch group — and the dispatcher's own main() consumes
-    # sys.argv for (event, matcher). None of the current exact-Bash members
-    # declare args; PR3 adds a fail-loud guard when it wires the manifest schema.
     budget = max(timeouts.values(), default=_DEFAULT_GROUP_BUDGET_SEC)
     return members, budget, timeouts
 
@@ -375,6 +400,40 @@ def run_group(
         sys.stdout.write(ask)
         return 0
 
+    # Stop decision lane (issue #1169): a Stop hook blocks via a top-level
+    # `{"decision": "block", "reason": ...}` JSON at exit 0 — no exit-2, no
+    # permissionDecision marker — so without this branch a member's block would
+    # fall through to the context-merge below, `_merge_additional_context`
+    # would find no `hookSpecificOutput`, and the block would be silently
+    # swallowed (all 13 completion gates disabled errorlessly the day Stop is
+    # grouped). Recognition PARSES each member's stdout (`_stop_block_reason`)
+    # rather than substring-probing, so prose mentioning "decision" can never
+    # fake a block. The host reads ONE JSON object from stdout and feeds its
+    # `reason` back to the model, so every blocking member's reason is merged
+    # into a single block — blank-line joined, each attributed to its hook the
+    # way deny reasons carry their `[praxis:<hook>]` prefix (no attribution is
+    # added when the reason already carries it). Exit stays 0: the Stop lane
+    # carries blocking in the JSON `decision` field, not the exit code (see
+    # _hook_io.emit_stop_block). A blocking group drops non-blocking members'
+    # additionalContext for this firing — only one JSON object can be emitted,
+    # and the members re-run on the next stop attempt anyway.
+    blocks: list[tuple[str, str]] = []
+    for (_role, name, _impl), (rc, so, _se) in zip(members, results):
+        if rc != 0 or not so:
+            continue
+        reason = _stop_block_reason(so)
+        if reason is not None:
+            blocks.append((name, reason))
+    if blocks:
+        merged_reason = "\n\n".join(
+            reason if f"[praxis:{name}]" in reason else f"[praxis:{name}] {reason}"
+            for name, reason in blocks
+        )
+        sys.stdout.write(
+            json.dumps({"decision": "block", "reason": merged_reason}) + "\n"
+        )
+        return 0
+
     # Issue #874: a member may emit a NON-decision `hookSpecificOutput` at exit 0 —
     # today only `additionalContext`, which is the one PreToolUse channel that
     # reaches the model (stderr does not; see _hook_io.py). Without forwarding it
@@ -391,6 +450,33 @@ def run_group(
         if merged:
             sys.stdout.write(merged)
     return 0
+
+
+def _stop_block_reason(stdout: str) -> Optional[str]:
+    """Return the reason if `stdout` is a Stop-lane block object, else None.
+
+    A blocking Stop member writes exactly `{"decision": "block", "reason": ...}`
+    (see `_hook_io.format_stop_block` and the shell siblings' `jq -n` form).
+    The shape is recognized by PARSING the JSON — never by substring matching —
+    so a member whose output merely *mentions* `decision` (prose, a context
+    string) cannot fake a block. Both the python `json.dump` single-line form
+    and jq's pretty-printed multi-line form parse identically here.
+
+    A parsed block with a missing/non-string `reason` still blocks (empty
+    reason): dropping it because its reason field is malformed would be the
+    exact silent-swallow this lane exists to prevent. Fail-open only for
+    outputs that are not a block at all (unparseable, or a different shape).
+    """
+    if not stdout or '"decision"' not in stdout:
+        return None  # cheap pre-filter only; the decision below is parse-based
+    try:
+        obj = json.loads(stdout)
+    except ValueError:
+        return None
+    if not isinstance(obj, dict) or obj.get("decision") != "block":
+        return None
+    reason = obj.get("reason")
+    return reason if isinstance(reason, str) else ""
 
 
 def _merge_additional_context(payloads: list[str], event: str) -> str:
