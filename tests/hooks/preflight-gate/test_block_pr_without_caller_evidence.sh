@@ -315,9 +315,10 @@ run_case "1186: marker present, STRICT=1 → pass (silent, both tiers)" pass Bas
 run_case "1186: no marker, STRICT=1 → block (attested)" block Bash \
   'gh pr create --title "fix: x" --body "## Summary\nplain body"'
 unset PRAXIS_PR_EVIDENCE_STRICT
-# Compound command in the advisory tier (pins F1+F7): the warn arm's
-# cascade-text rejection confronts hint-producing input, and both offending
-# creates get their own advisory.
+# Compound command in the advisory tier (pins F1): the warn arm's
+# cascade-text rejection confronts hint-producing input. The two-advisories
+# continue semantics (F7) is verified empirically in review, not asserted
+# here — the warn arm checks presence, not counts.
 run_case "1186: compound two creates, env unset → warn (no cascade text)" warn Bash \
   'mkdir -p /tmp/x1186 && gh pr create --title "fix: a" --body "plain" ; gh pr create --title "fix: a" --body "plain"'
 # Negative control: a non-pr-create command stays silent in BOTH tiers.
