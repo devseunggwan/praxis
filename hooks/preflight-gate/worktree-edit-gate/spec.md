@@ -42,6 +42,17 @@ The key difference from `pre-edit-protected-branch-guard`:
 - This hook is **extension-aware** (only blocks source files, not markdown/JSON)
 - This hook fires on **branch state alone**, without requiring a dirty tree
 
+The opposite defaults are a deliberate **two-tier design** (issue #1159):
+the guard is the default-on generic safety net (protected branches only,
+deny corroborated by a workflow signal), and this gate is the opt-in strict
+tier for repos that explicitly enroll in the full worktree workflow. Firing
+on branch state alone is exactly why this gate must stay opt-in under
+the issue-#1159 attested-convention principle — without enrollment it
+would deny
+ordinary on-branch edits in repos that never adopted the convention. See
+the matching "Two-tier defaults" section in
+`pre-edit-protected-branch-guard/spec.md`.
+
 ## Default behavior (no-op)
 
 When `PRAXIS_WORKTREE_ENFORCED_REPOS` is unset or empty, the hook exits 0
