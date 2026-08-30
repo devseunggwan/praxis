@@ -50,23 +50,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # ubuntu-24.04 ships shellcheck, but install explicitly so the job
-      # doesn't silently depend on the runner image.
-      # The bound from #1046 lives in scripts/ci-apt.sh now, with a retry around
-      # it (#1049): bounding alone only made this job fail faster, never pass.
-      - run: bash scripts/ci-apt.sh shellcheck
-      # File discovery is delegated to scripts/shellcheck-files.sh (also covers
-      # the extensionless skills/ CLI scripts, #1175) and shared verbatim with
-      # scripts/run-tests.sh step 9 so the two file sets cannot drift. Two
-      # invocations: runtime code gets no rule exclusions; tests/ excludes
-      # SC2154/SC2034, the test-harness-only false positives that used to be
-      # disabled repo-wide via .shellcheckrc (see its comments).
+      # Pinned upstream binary (version + sha256), not apt: apt resolves an
+      # unpinned 0.9.0 while the zero-excludes runtime pass was verified on
+      # 0.11.0, and a silent version bump must not widen rules — same reasoning
+      # as the ruff pin. The script installs the same version for the `test`
+      # job, so the two blocking shellcheck runs cannot disagree.
+      - run: bash scripts/ci-shellcheck.sh
+      # File discovery is delegated to scripts/shellcheck-files.sh (tracked
+      # files only; also covers the extensionless skills/ CLI scripts, #1175)
+      # and shared verbatim with scripts/run-tests.sh step 9 so the two file
+      # sets cannot drift. Two invocations: runtime code gets no rule
+      # exclusions; tests/ excludes SC2154/SC2034, the test-harness-only false
+      # positives that used to be disabled repo-wide via .shellcheckrc (see its
+      # comments). Both invocations always run — a runtime failure must not
+      # short-circuit the tests pass, matching run-tests.sh step 9.
       - run: |
           set -o pipefail
+          rc=0
           bash scripts/shellcheck-files.sh runtime \
-            | xargs -0 shellcheck --severity=warning
+            | xargs -0 shellcheck --severity=warning || rc=1
           bash scripts/shellcheck-files.sh tests \
-            | xargs -0 shellcheck --severity=warning --exclude=SC2154,SC2034
+            | xargs -0 shellcheck --severity=warning --exclude=SC2154,SC2034 || rc=1
+          exit "$rc"
 
   # Trigger moved from push:["**"] to push:[main]+PR, so pre-PR pushes to a
   # feature branch are intentionally unscanned. Coverage for anything that
@@ -108,18 +113,22 @@ jobs:
       # zsh is not preinstalled on ubuntu-24.04. block-unmatched-glob delegates
       # its verdict to a real zsh, so without it that hook's suite has nothing to
       # assert against and silently degrades to fail-open coverage.
-      # jq and shellcheck are deliberately NOT installed: the ubuntu-24.04 runner
-      # image already ships both at the versions noble's apt would resolve anyway
-      # (jq 1.7.1, shellcheck 0.9.0), so fetching them only widens the exposure to
-      # the mirror stall below. markdownlint-cli2 still comes from npm for the
-      # same reason ruff is pinned: under PRAXIS_TESTS_STRICT its absence would
-      # abort the run (#917).
+      # jq is deliberately NOT installed: the ubuntu-24.04 runner image already
+      # ships it at the version noble's apt would resolve anyway (jq 1.7.1), so
+      # fetching it only widens the exposure to the mirror stall below.
+      # markdownlint-cli2 still comes from npm for the same reason ruff is
+      # pinned: under PRAXIS_TESTS_STRICT its absence would abort the run (#917).
       # The phase bound and the retry around it both live in scripts/ci-apt.sh,
       # which carries the reasoning (#1046 bounded the stall, #1049 made it
       # survivable). A stalled mirror was observed killing this step three times
       # before the bound, and again after it -- bounding made the failure fast,
       # the retry is what can make it pass.
       - run: bash scripts/ci-apt.sh zsh
+      # shellcheck is no longer taken from the runner image (0.9.0): step 9 of
+      # run-tests.sh must run the same pinned version as the `shellcheck` job,
+      # so the local-parity step cannot disagree with the blocking one (the ruff
+      # pin above exists for the same reason).
+      - run: bash scripts/ci-shellcheck.sh
       - run: npm install -g markdownlint-cli2
       # Strict: in CI the toolchain is installed, so a SKIPPED line means the
       # run silently stopped checking something rather than accommodating a

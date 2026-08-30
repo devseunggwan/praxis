@@ -2,9 +2,9 @@
 #
 # Gate level is `warning`, passed on the command line by the two call sites:
 # the ci.yml `shellcheck` job and scripts/run-tests.sh step 9. Both lint the
-# same file set via scripts/shellcheck-files.sh — *.sh plus the extensionless
-# bash-shebang CLI scripts under skills/ (issue #1175) — split into two
-# invocations:
+# same file set via scripts/shellcheck-files.sh — tracked *.sh plus the
+# tracked extensionless bash-shebang CLI scripts under skills/ (issue #1175)
+# — split into two invocations:
 #
 #   runtime (everything outside tests/) — no rule exclusions.
 #   tests/                              — --exclude=SC2154,SC2034.
