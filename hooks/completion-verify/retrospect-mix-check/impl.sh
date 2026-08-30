@@ -33,26 +33,34 @@
 command -v jq >/dev/null 2>&1 || exit 0
 
 INPUT=$(cat)
-# One jq spawn for all four scalars (was four; ~11ms/fire on a ~69ms hook).
-# @tsv is safe here because every field is a scalar: jq escapes any embedded
-# tab/newline, so the row is guaranteed single-line and tab-free. Split with
-# parameter expansion, NOT `IFS=$'\t' read` — tab is IFS whitespace, so read
-# strips a leading empty field and collapses runs, silently shifting values.
-# On malformed JSON jq emits nothing and all four go empty — same fail-open
-# result as the four separate calls.
+# One jq spawn for all four scalars (was four; ~10ms/fire on a ~68ms hook).
+# NUL-separated, because `@tsv` is NOT lossless here: it escapes a backslash,
+# tab, CR or newline inside a value, and nothing downstream decodes them. A
+# `transcript_path` holding a backslash then reaches `[ ! -f ]` in its encoded
+# form, the file is not found, and the gate exits 0 — silently disarmed on a
+# path the four separate `jq -r` calls handled correctly.
+# NUL is the one byte a filesystem path cannot contain, so `jq -j` can emit
+# the values raw with no escaping at all.
+# Read with `read -r -d ''`, not `mapfile -d ''` — mapfile's -d needs bash 4.4
+# and this repo still has to run under the bash 3.2 that ships on macOS. An
+# `IFS=$'\t' read` split would be wrong for a further reason: tab is IFS
+# whitespace, so it drops a leading empty field and collapses runs, shifting
+# every value one slot.
+# Pre-seeded empty so malformed JSON (jq prints nothing, every read fails)
+# leaves all four blank — the same fail-open result as the four separate calls.
 # "unknown" is fine for the marker filename and the log lines below, but not
 # for the ledger — see the same guard in completion-verify/impl.sh.
-_RMC_HDR=$(printf '%s' "$INPUT" | jq -r '[
-  .transcript_path // "",
-  (.stop_hook_active // false | tostring),
-  .session_id // "unknown",
-  .session_id // ""
-] | @tsv' 2>/dev/null)
-TRANSCRIPT_PATH=${_RMC_HDR%%$'\t'*}; _RMC_R=${_RMC_HDR#*$'\t'}
-STOP_HOOK_ACTIVE=${_RMC_R%%$'\t'*};  _RMC_R=${_RMC_R#*$'\t'}
-SESSION_ID=${_RMC_R%%$'\t'*}
-TELEMETRY_SESSION_ID=${_RMC_R#*$'\t'}
-unset _RMC_HDR _RMC_R
+TRANSCRIPT_PATH=""; STOP_HOOK_ACTIVE=""; SESSION_ID=""; TELEMETRY_SESSION_ID=""
+{
+  IFS= read -r -d "" TRANSCRIPT_PATH
+  IFS= read -r -d "" STOP_HOOK_ACTIVE
+  IFS= read -r -d "" SESSION_ID
+  IFS= read -r -d "" TELEMETRY_SESSION_ID
+} < <(printf '%s' "$INPUT" | jq -j '
+  (.transcript_path // ""), "\u0000",
+  (.stop_hook_active // false | tostring), "\u0000",
+  (.session_id // "unknown"), "\u0000",
+  (.session_id // ""), "\u0000"' 2>/dev/null)
 
 # shellcheck source=../../_lib/record_fire.sh
 . "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true

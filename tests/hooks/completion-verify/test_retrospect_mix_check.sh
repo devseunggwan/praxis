@@ -33,7 +33,9 @@ trap 'rm -rf "$TMPDIR"' EXIT
 #   $2 = expected: "block" | "pass"
 #   $3 = transcript JSONL content (each line is one event)
 #   $4 = (optional) override for stop_hook_active (default false)
-#   $5 = (optional) override for transcript_path ("missing" means non-existent path; "empty" means empty file)
+#   $5 = (optional) override for transcript_path ("missing" means non-existent
+#        path; "empty" means empty file; "backslash" means a real file whose
+#        path contains a backslash — the character `@tsv` would escape)
 run_case() {
   local name="$1" expected="$2" transcript="$3"
   local stop_active="${4:-false}"
@@ -45,6 +47,12 @@ run_case() {
   elif [ "$path_override" = "empty" ]; then
     tpath="$TMPDIR/empty_${PASS}_${FAIL}.jsonl"
     : > "$tpath"
+  elif [ "$path_override" = "backslash" ]; then
+    # A real, readable transcript whose path holds a backslash. jq's `@tsv`
+    # would emit it doubled, and the hook would then look for a file that does
+    # not exist and exit 0 — a silent pass where a block was owed.
+    tpath="$TMPDIR/tp_a\\b_${PASS}_${FAIL}.jsonl"
+    printf '%s\n' "$transcript" > "$tpath"
   else
     tpath="$TMPDIR/transcript_${PASS}_${FAIL}.jsonl"
     printf '%s\n' "$transcript" > "$tpath"
@@ -2786,6 +2794,15 @@ else
     '{"transcript_path":"/nonexistent/hp3.jsonl","stop_hook_active":false,"session_id":"hp-sentinel-3"}' \
     "hp-sentinel-3"
 fi
+
+# HP4 — lossless-transport case. The same transcript that blocks in T10 must
+# still block when its path contains a backslash. An encoding transport (`@tsv`)
+# hands `[ ! -f ]` the escaped path, the file is not found, and the hook exits 0
+# — the block silently becomes a pass. Nothing else in this suite puts a
+# metacharacter in transcript_path, so this is the only case that sees it.
+run_case "HP4_backslash_in_transcript_path_still_blocks" "block" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T10_CARD" "$T10_ROW")")" \
+  "false" "backslash"
 
 echo
 echo "================================"
