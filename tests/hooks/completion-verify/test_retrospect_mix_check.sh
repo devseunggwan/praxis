@@ -2737,6 +2737,56 @@ $(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
 - finding #1: memory entry written")"
 run_case "DA13_pass_stage4_carveout" "pass" "$DA13_TRANSCRIPT"
 
+# ── Header-parse positional coverage (#1151) ────────────────────────────────
+# The four stdin scalars are parsed out of ONE `@tsv` row. `@tsv` emits a
+# LEADING empty field whenever `.transcript_path` is absent, and tab is IFS
+# whitespace — so splitting that row with `IFS=$'\t' read` drops the empty and
+# shifts every value one slot, landing TRANSCRIPT_PATH="false" and disarming
+# the gate through the `[ ! -f ]` pass. Every other case in this file supplies
+# all three keys, so the shift never shows: a buggy split passes them all.
+# These cases are the ones that fail on it.
+#
+# TELEMETRY_SESSION_ID is the LAST of the four fields, so any shift empties it,
+# and the fire-ledger record carries it — that is the observation point.
+# PRAXIS_FIRE_TELEMETRY_FILE redirects the write to a temp file.
+run_header_parse_case() {
+  local name="$1" payload="$2" want_sid="$3"
+  local ledger="$TMPDIR/ledger_${PASS}_${FAIL}.jsonl"
+  : > "$ledger"
+
+  printf '%s' "$payload" | PRAXIS_FIRE_TELEMETRY_FILE="$ledger" "$HOOK" >/dev/null 2>&1
+
+  local got
+  got=$(jq -r 'select(.hook == "retrospect-mix-check") | .session_id' "$ledger" 2>/dev/null | head -1)
+
+  if [ "$got" != "$want_sid" ]; then
+    echo "FAIL  [$name] ledger session_id: want '$want_sid', got '${got:-<no record>}'"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  echo "PASS  [$name]"
+  PASS=$((PASS + 1))
+}
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "SKIP  [header_parse_*] python3 absent — the fire ledger cannot be written"
+else
+  # HP1 — the regression case. transcript_path absent => leading empty field.
+  # A shifted split records an empty session_id (or no record at all).
+  run_header_parse_case "HP1_absent_transcript_path_keeps_session_id" \
+    '{"session_id":"hp-sentinel-1"}' "hp-sentinel-1"
+
+  # HP2 — same, with stop_hook_active present between the two empties.
+  run_header_parse_case "HP2_absent_path_with_stop_flag_keeps_session_id" \
+    '{"stop_hook_active":false,"session_id":"hp-sentinel-2"}' "hp-sentinel-2"
+
+  # HP3 — positive control: all keys present, no empty field anywhere. Both a
+  # correct and a shifted split pass this one, which is what makes HP1/HP2 the
+  # discriminating pair rather than a pass that proves nothing.
+  run_header_parse_case "HP3_control_all_keys_present" \
+    '{"transcript_path":"/nonexistent/hp3.jsonl","stop_hook_active":false,"session_id":"hp-sentinel-3"}' \
+    "hp-sentinel-3"
+fi
+
 echo
 echo "================================"
 echo "Cases:    $PASS passed, $FAIL failed"
