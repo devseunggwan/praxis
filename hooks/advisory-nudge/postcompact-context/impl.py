@@ -25,7 +25,8 @@ On every `UserPromptSubmit`:
 3. If none found → silent (no compaction in recent history).
 4. Compare the compaction entry's `uuid` against the session state file's
    `last_compact_uuid_emitted`. If they match → already injected for this
-   compaction, silent.
+   compaction, silent. Unlocked: this only skips work, it does not decide
+   the injection (step 6 does).
 5. Gather context (read-only, fail-open per source):
      - `session_id`        — from payload
      - `cwd`               — from payload (worktree absolute path)
@@ -35,8 +36,10 @@ On every `UserPromptSubmit`:
                              fallback to `~/.claude/state/praxis/strikes/<sid>.json`
                              when no `PRAXIS_STATE_DIR` override is set and the
                              new location is absent (pre-#527 legacy support)
-6. Emit `hookSpecificOutput.additionalContext` JSON to stdout.
-7. Update state file with `last_compact_uuid_emitted = <uuid>`.
+6. Under `state_lock`, re-read the state and claim the uuid: on a match this
+   time a sibling published it while step 5 was shelling out, and this run
+   goes silent; otherwise record `last_compact_uuid_emitted = <uuid>`.
+7. Emit `hookSpecificOutput.additionalContext` JSON to stdout.
 
 State file
 ==========
@@ -173,6 +176,30 @@ def write_state(path: str, state: dict) -> None:
         pass  # non-fatal: next run will simply re-inject
 
 
+def claim_injection(path: str, compact_uuid: str) -> dict | None:
+    """Decide, under the caller's lock, whether THIS process injects.
+
+    Returns the state to publish when the claim is ours, and None when a
+    sibling already recorded `compact_uuid` — the caller then returns without
+    injecting. It reads and decides but deliberately does not write: the
+    publish is the caller's, one statement later, still inside the lock.
+
+    Split out from `main()` for two reasons. It is the whole of the critical
+    section's logic, so keeping it in one named place is what keeps the
+    section auditable against the budget note in `_active_pr` — the section
+    must stay shorter than the lock's own acquisition deadline. And it
+    is the decision the double-injection race turns on, so the race test can
+    hold both children between the decision and the publish — a barrier on a
+    function that had already written would let the first child publish before
+    the second decided, which is the interleaving the arm exists to produce.
+    """
+    state = read_state(path)
+    if state.get("last_compact_uuid_emitted") == compact_uuid:
+        return None
+    state["last_compact_uuid_emitted"] = compact_uuid
+    return state
+
+
 # ---------------------------------------------------------------------------
 # Transcript tail scan
 # ---------------------------------------------------------------------------
@@ -288,8 +315,15 @@ def _active_pr(cwd: str, branch: str) -> dict | None:
     """
     if not branch:
         return None
-    # 3.0s keeps the worst-case (gh call) + 1.5s git + ~0.5s python startup
-    # under the 8s manifest budget. Authenticated gh on a fast network
+    # 3.0s gh + 1.5s git + ~0.5s python startup is a 5.0s build ceiling. Since
+    # #1034 the run can also wait on `state_lock`, whose acquisition deadline
+    # is 2.0s, for an absolute ceiling of 7.0s under the manifest's `timeout:
+    # 8`. That 2.0s is a bound, not a cost: `main()` builds the context BEFORE
+    # taking the lock, so the section a sibling waits on is one `read_state`
+    # plus one `write_state` — the deadline is reachable only if a holder is
+    # descheduled through it, never because a holder is calling gh. (Build the
+    # context inside the section instead and the wait becomes the build, which
+    # exceeds the deadline outright.) Authenticated gh on a fast network
     # responds in <1s; the timeout exists to bound auth-prompt / network-hung
     # paths so the hook never trips Claude Code's hard timeout.
     out = _run(
@@ -448,22 +482,37 @@ def main() -> int:
         return 0
 
     state_path = resolve_state_path(session_id)
+
+    # Unlocked fast path. The compaction marker stays in the transcript tail
+    # for as many prompts as it takes to scroll out, so this hook re-reaches
+    # this point on every one of them; without the pre-check each would pay
+    # the git+gh build below only to discard it. A stale read here can cost
+    # at most one wasted build — it never decides the injection, which is
+    # re-taken under the lock.
+    if read_state(state_path).get("last_compact_uuid_emitted") == compact_uuid:
+        return 0  # already injected for this compaction
+
+    # Built BEFORE the lock, and that ordering is load-bearing (#1034 review).
+    # `build_context` shells out to git and gh, whose timeouts bound it at
+    # ~4.5s — more than double `state_lock`'s 2s acquisition deadline. Build
+    # it inside the section and a holder on the slow `gh` path guarantees the
+    # deadline expires for every sibling; each then proceeds unlocked, reads
+    # state the holder has not written yet, and injects too — the exact
+    # double injection the lock is here to close.
+    context = build_context(session_id, cwd, compact_uuid, compact_timestamp)
+
     # Serialized because the read-modify-write below shares a name with any
     # sibling on this `session_id` — DESIGN.md Q0, re-graded against a live
-    # measurement in #1034. `build_context` shells out inside the section
-    # rather than ahead of it, for the reason `jq-config` records at its own
-    # call site: deciding "already injected" against state a sibling is still
-    # writing is the duplicate this closes, and a build that outruns the 2s
-    # lock deadline only makes the sibling proceed unlocked — which the
-    # per-process staging name in `write_state` already makes survivable.
+    # measurement in #1034. The section now holds one `read_state` and one
+    # `write_state`, so a sibling waits on two file operations rather than on
+    # a network call. `claim_injection` re-reads inside it on purpose: the
+    # fast path above ran before the build, and a sibling that published
+    # during it must still turn this process back.
     with state_lock(state_path):
-        state = read_state(state_path)
-        if state.get("last_compact_uuid_emitted") == compact_uuid:
-            return 0  # already injected for this compaction
+        state = claim_injection(state_path, compact_uuid)
+        if state is None:
+            return 0  # a sibling injected while this process was building
 
-        context = build_context(session_id, cwd, compact_uuid, compact_timestamp)
-
-        state["last_compact_uuid_emitted"] = compact_uuid
         write_state(state_path, state)
 
     json.dump(

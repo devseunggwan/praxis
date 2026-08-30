@@ -112,6 +112,21 @@ prompt (`@fail_open` contract); the staging name is the floor under that
 degraded path, so an unacquired lock costs one re-injection, never an
 unreadable state file.
 
+The critical section holds one `read_state` and one `write_state`, and
+nothing else. `build_context` shells out to `git` (1.5s) and `gh` (3.0s), so
+building inside the section could hold the lock for ~4.5s against its own 2s
+acquisition deadline — every sibling would then time out, proceed unlocked,
+read state the holder had not written yet, and inject too, which is the
+duplicate the lock exists to close. `main()` therefore builds the context
+before taking the lock, and re-reads inside it: an unlocked pre-check skips
+the build once the uuid is already recorded, but only the in-lock
+`claim_injection` decides whether this run injects, so a sibling that
+published during the build turns this one back. Worst case is the 5.0s build
+(0.5s startup + 1.5s git + 3.0s gh) plus at most the 2.0s acquisition
+deadline — a 7.0s ceiling under the manifest's `timeout: 8`, and the deadline
+is reachable only if a lock holder is descheduled through it, never because a
+holder is waiting on the network.
+
 ### Response format
 
 Success path:

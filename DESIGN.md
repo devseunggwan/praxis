@@ -183,6 +183,17 @@ behaviour, never to a blocked tool call. The wait has a deadline
 (`PRAXIS_STATE_LOCK_TIMEOUT`, 2s) for the same reason — a lock left by a
 killed sibling must not stall the tool call the hook was only observing.
 
+That deadline sets a rule for what may go inside the section: only the
+read-modify-write. Anything slower than the deadline — a subprocess, a network
+call — held inside it does not merely add latency, it disables the lock. The
+holder outlasts every sibling's acquisition deadline, each sibling proceeds
+unlocked (that is the fail-open contract, not a bug), and they all read state
+the holder has not written yet. `postcompact-context` is the worked example:
+its `build_context` shells out to `git` and `gh` under 1.5s and 3.0s timeouts,
+so it is built *before* the lock and the decision is re-taken inside it. When
+building ahead of the lock needs an unlocked pre-check to stay cheap, the
+pre-check may only skip work; the in-lock re-read is what decides.
+
 `tests/test_hook_state_concurrency.py` runs every consumer above in two real
 processes against one state file. Each locked hook carries an unlocked arm
 alongside the shipped one, so the defect stays pinned and a regression that

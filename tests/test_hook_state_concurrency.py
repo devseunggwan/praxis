@@ -40,7 +40,9 @@ Neither arm changes hook logic; both wrap the read at the same point.
 """
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -99,7 +101,14 @@ if stage_mode == "shared":
         os.lseek(fd, 0, os.SEEK_SET)
         return fd
 
-    def _shared_mkstemp(dir=None, prefix="", suffix=""):
+    def _shared_mkstemp(suffix=None, prefix=None, dir=None, text=False):
+        # Signature mirrors `tempfile.mkstemp` exactly, parameter order
+        # included, so a future row that calls it positionally or passes
+        # `text=` exercises the control instead of crashing the child on a
+        # TypeError. `text` is accepted and ignored because POSIX ignores it
+        # too: tempfile's text and binary open flags differ only by
+        # `os.O_BINARY`, which exists on Windows alone, and praxis hooks
+        # target POSIX hosts.
         shared = os.path.join(dir or ".", "praxis-shared-stage.tmp")
         return _shared_fd(shared), shared
 
@@ -572,6 +581,8 @@ def test_jq_config_staging_file_is_unlinked_on_failure(tmp_path, monkeypatch):
 # overlapping pairs corrupted 0 times and split their survivor 103/97, which
 # is the lost update Q3 already prices as acceptable here.
 
+_POSTCOMPACT_IMPL = HOOKS / "advisory-nudge" / "postcompact-context" / "impl.py"
+
 _Q0_ROWS = (
     "worktree-prune-snapshot-gate",
     "retrospect-active-marker",
@@ -669,20 +680,24 @@ def _q0_spec(row: str, tmp_path: Path) -> dict:
         "impl": HOOKS / "advisory-nudge" / row / "impl.py",
         "env": {"PRAXIS_POSTCOMPACT_CONTEXT_FILE": str(state)},
         "state": state,
-        # The write trails a context build that shells out, so the barrier goes
-        # after that build rather than after the read — barrier on the read and
-        # the two children have drifted apart again by the time they write.
+        # The write trails a context build that shells out, so the barrier
+        # goes after that build rather than after the read — barrier on the
+        # read and the two children have drifted apart again by the time they
+        # write. The build sits ahead of the lock (the #1034 review moved it
+        # there, so a slow `gh` can no longer burn a sibling's 2s acquisition
+        # deadline), which puts this barrier one read and one write from the
+        # state file — closer to it than before, not further.
         "barrier_fn": "build_context",
         # The one row this measurement moved, and the only one whose arms
-        # neuter a lock it now has. Both arms run `nolock` on purpose: the
-        # barrier point sits inside the critical section as of #1034, so a
-        # `lock` arm could not use the barrier at all (a child waiting there
-        # for a sibling that cannot enter deadlocks the pair) and would have
-        # to fall back to the fixed delay — which proves serialization, not
-        # overlap. Neutering the lock in BOTH arms leaves the staging name as
-        # the single variable between them, and measures the fail-open floor
-        # the lock degrades to rather than hiding behind it. What the lock
-        # itself buys is pinned separately, below.
+        # neuter a lock it now has. Both arms run `nolock` on purpose, and
+        # not because a `lock` arm would deadlock — the barrier point is
+        # outside the critical section now. It is that a `lock` arm would
+        # serialize the two writes, so the arms would differ by the lock as
+        # well as by the staging name and neither could be attributed.
+        # Neutering the lock in BOTH arms leaves the staging name as the
+        # single variable, and measures the fail-open floor the lock degrades
+        # to rather than hiding behind it. What the lock itself buys is
+        # pinned separately, below.
         "lock_modes": ("nolock", "nolock"),
         "payloads": [
             {
@@ -744,8 +759,11 @@ def test_q0_staging_collision(driver, tmp_path, monkeypatch, row, stage_mode):
         # Both children read the absent state, neither sees the other's uuid,
         # and the compaction is injected into two prompts instead of one.
         ("nolock", 2),
-        # Serialized: the second child reads the first's uuid and returns
-        # before building any context.
+        # Serialized: the second child waits the first out, and the re-check
+        # under the lock reads the uuid the first just published. It has
+        # already built its context by then — that is the cost of building
+        # ahead of the lock, and it is a discarded build rather than a
+        # duplicate injection.
         ("lock", 1),
     ],
 )
@@ -760,6 +778,13 @@ def test_postcompact_double_injection_race(
     actually read one transcript and therefore one uuid, and that is the shape
     the dedup exists for: without the lock both read the absent state and both
     inject, which is the whole point of recording the uuid at all.
+
+    The barrier sits on `claim_injection` — the decision inside the critical
+    section — rather than on `build_context`, which the #1034 review moved
+    ahead of the lock. It has to sit on a call that has decided and not yet
+    published: barrier on the build and the two children are released with a
+    read still between them and the write, so the first can publish before
+    the second reads and the unlocked arm serializes itself into a 1.
     """
     state = tmp_path / "postcompact-context.json"
     monkeypatch.setenv("PRAXIS_POSTCOMPACT_CONTEXT_FILE", str(state))
@@ -772,10 +797,10 @@ def test_postcompact_double_injection_race(
 
     outputs = _run_pair(
         driver,
-        HOOKS / "advisory-nudge" / "postcompact-context" / "impl.py",
+        _POSTCOMPACT_IMPL,
         lock_mode,
         [payload, payload],
-        read_fn="build_context",
+        read_fn="claim_injection",
     )
 
     for rc, _stdout, stderr in outputs:
@@ -794,7 +819,7 @@ def test_postcompact_staging_name_is_its_own(tmp_path, monkeypatch):
     300 pairs, so a shipped arm alone would pass ~98 times out of 100 against
     the very defect it exists to catch.
     """
-    impl = _load_impl(HOOKS / "advisory-nudge" / "postcompact-context" / "impl.py")
+    impl = _load_impl(_POSTCOMPACT_IMPL)
     staged: list[tuple[str, str]] = []
     real_replace = os.replace
 
@@ -817,3 +842,80 @@ def test_postcompact_staging_name_is_its_own(tmp_path, monkeypatch):
         "last_compact_uuid_emitted": "second"
     }
     assert list(tmp_path.iterdir()) == [state], "a staging file survived"
+
+
+def test_postcompact_build_precedes_the_lock_and_the_recheck_holds(
+    tmp_path, monkeypatch, capsys
+):
+    """Ordering and re-check, pinned deterministically (the #1034 review).
+
+    Two properties, and neither is visible to the race arms above. The first:
+    `build_context` runs OUTSIDE the critical section. It shells out to git
+    and gh under 1.5s and 3.0s timeouts, so a build inside the section can
+    hold the lock for ~4.5s against `state_lock`'s 2s acquisition deadline —
+    every sibling then times out, proceeds unlocked by the fail-open
+    contract, and injects against state the holder has not written yet. The
+    lock arm of the race above cannot see that: its barrier point is inside
+    the section either way, and its build is a `git` call on a tmp dir that
+    returns in milliseconds, so both orderings serialize and both give 1.
+
+    The second: moving the build out is only safe because the decision is
+    re-taken under the lock. This drives exactly the interleaving that makes
+    it load-bearing — a sibling publishes the uuid while this process is
+    inside `build_context`, which is the window the unlocked fast path opened
+    — and asserts this process goes silent. Narrowing the window is not the
+    fix; re-reading inside it is.
+    """
+    impl = _load_impl(_POSTCOMPACT_IMPL)
+    state = tmp_path / "postcompact-context.json"
+    monkeypatch.setenv("PRAXIS_POSTCOMPACT_CONTEXT_FILE", str(state))
+    uuid = "u" * 36
+    transcript = _compact_transcript(tmp_path / "transcript.jsonl", uuid)
+
+    held: list[str] = []
+    real_lock = impl.state_lock
+
+    @contextlib.contextmanager
+    def _tracking_lock(path, timeout=None):
+        held.append(path)
+        try:
+            with real_lock(path, timeout) as acquired:
+                yield acquired
+        finally:
+            held.pop()
+
+    monkeypatch.setattr(impl, "state_lock", _tracking_lock)
+
+    built_inside_lock: list[bool] = []
+    real_build = impl.build_context
+
+    def _sibling_publishes_mid_build(*args, **kwargs):
+        built_inside_lock.append(bool(held))
+        # Stand in for a sibling process that completed the whole
+        # read-modify-write while this one was still shelling out.
+        impl.write_state(str(state), {"last_compact_uuid_emitted": uuid})
+        return real_build(*args, **kwargs)
+
+    monkeypatch.setattr(impl, "build_context", _sibling_publishes_mid_build)
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "session_id": _Q0_SESSION,
+                    "cwd": str(tmp_path),
+                    "transcript_path": transcript,
+                }
+            )
+        ),
+    )
+
+    assert impl.main() == 0
+    assert built_inside_lock == [False], "build_context ran while the lock was held"
+    assert "additionalContext" not in capsys.readouterr().out, (
+        "the in-lock re-check missed a uuid published during the build"
+    )
+    assert json.loads(state.read_text(encoding="utf-8")) == {
+        "last_compact_uuid_emitted": uuid
+    }
