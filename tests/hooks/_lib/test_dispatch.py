@@ -381,6 +381,111 @@ def test_all_events_mismatched_writes_nothing(tmp_path, monkeypatch, capsys):
 
 
 # --------------------------------------------------------------------------- #
+# per-member deadline / group budget (issue #1167)
+# --------------------------------------------------------------------------- #
+
+_FAKE_SLOW = (
+    "import time, sys\n"
+    "def main():\n"
+    "    time.sleep(1.2)\n"
+    "    return 0\n"
+)
+# Reports the budget the dispatcher published for this member (via the
+# _hook_runtime accessor) on stderr; 99.0 is the "no deadline" sentinel.
+_FAKE_BUDGET_PROBE = (
+    "import sys\n"
+    "import _hook_runtime\n"
+    "def main():\n"
+    "    sys.stderr.write('budget=%.3f' % _hook_runtime.remaining_budget(99.0))\n"
+    "    return 0\n"
+)
+
+
+def test_group_budget_info_matches_manifest():
+    # Budget derivation must mirror the build's dispatcher-node timeout: the
+    # MAX member timeout across the group (scripts/build-plugin-manifests.py,
+    # filter_hooks_for_host's dispatch_timeout pre-pass). The manifest is the
+    # shared source of truth, so both sides read the same numbers.
+    budget, timeouts = _dispatch.group_budget_info("PreToolUse", "Bash")
+    members = _dispatch.group_members("PreToolUse", "Bash")
+    assert set(timeouts) == {(r, n) for r, n, _i in members}
+    assert budget == max(timeouts.values())
+    assert budget == 15  # the two 15s gh gates set today's group budget
+    assert timeouts[("preflight-gate", "gh-label-verify")] == 15
+
+
+def test_budget_exhausting_member_starves_no_one_silently(
+    tmp_path, monkeypatch, capsys
+):
+    # An early member that eats the whole group budget must not make later
+    # members vanish: they are skipped fail-open WITH a record — a forwarded
+    # stderr line and a decision="skip" fire-ledger row (the issue's core
+    # complaint is invisible starvation).
+    members = [
+        ("preflight-gate", "slow", _write_fake(tmp_path, "slow", _FAKE_SLOW)),
+        ("advisory-nudge", "late1", _write_fake(tmp_path, "late1", _FAKE_ADVISORY)),
+        ("preflight-gate", "late2", _write_fake(tmp_path, "late2", _FAKE_PASS)),
+    ]
+    _patch_members(monkeypatch, members)
+    # Budget 2s − 1s margin ⇒ ~1s of runway; the slow member sleeps 1.2s.
+    monkeypatch.setattr(
+        _dispatch, "group_budget_info", lambda _e, _m, _h=None: (2.0, {})
+    )
+    ledger = tmp_path / "fire-events-test.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(ledger))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    err = capsys.readouterr().err
+    assert rc == 0  # skips are fail-open, never a block
+    assert f"{_dispatch._SKIP_MARKER} advisory-nudge/late1" in err
+    assert f"{_dispatch._SKIP_MARKER} preflight-gate/late2" in err
+
+    records = {
+        rec["hook"]: rec["decision"]
+        for rec in map(json.loads, ledger.read_text().splitlines())
+    }
+    assert records["slow"] == "pass"  # ran (its sleep is not a decision)
+    assert records["late1"] == "skip"
+    assert records["late2"] == "skip"
+
+
+def test_normal_budget_runs_every_member(tmp_path, monkeypatch, capsys):
+    # Normal path unchanged: with headroom, nothing is skipped and the
+    # aggregate decision is exactly what the pre-#1167 dispatcher produced.
+    members = [
+        ("advisory-nudge", "adv", _write_fake(tmp_path, "adv", _FAKE_ADVISORY)),
+        ("preflight-gate", "ask", _write_fake(tmp_path, "ask", _FAKE_ASK)),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert _ASK in captured.out
+    assert "nudge" in captured.err
+    assert _dispatch._SKIP_MARKER not in captured.err
+
+
+def test_run_one_publishes_member_budget_and_clears_it(tmp_path):
+    import _hook_runtime
+
+    probe = _write_fake(tmp_path, "probe", _FAKE_BUDGET_PROBE)
+    _rc, _so, se = _dispatch.run_one(
+        "advisory-nudge", "probe", probe, NOOP_PAYLOAD, budget_sec=5.0
+    )
+    published = float(se.partition("=")[2])
+    assert 0.0 < published <= 5.0  # the member sees (at most) its cap
+    # Deadline must not leak past the member: standalone reads get the default.
+    assert _hook_runtime.remaining_budget(42.0) == 42.0
+
+
+def test_run_one_without_budget_publishes_no_deadline(tmp_path):
+    probe = _write_fake(tmp_path, "probe2", _FAKE_BUDGET_PROBE)
+    _rc, _so, se = _dispatch.run_one("advisory-nudge", "probe2", probe, NOOP_PAYLOAD)
+    assert se == "budget=99.000"  # accessor returned the standalone default
+
+
+# --------------------------------------------------------------------------- #
 # latency (informational guard, not byte-exact)
 # --------------------------------------------------------------------------- #
 

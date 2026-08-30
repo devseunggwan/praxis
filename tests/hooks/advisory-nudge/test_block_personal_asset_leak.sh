@@ -367,6 +367,34 @@ run_case "strict + Write owner-ref into team repo (block)" \
 
 rm -rf "$TEAM_REPO" "$PERSONAL_REPO"
 
+# --- git-call budget fits the manifest timeout (issue #1167) ---
+# The file-write path can run TWO git calls (remote get-url + check-ignore);
+# at the old 3s each their 6s worst case exceeded this hook's 5s manifest
+# timeout and the host killed the hook mid-scan. The summed worst case must
+# stay strictly under the manifest budget.
+_budget_out=$(python3 - << PYEOF 2>&1
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("impl", "$HOOK")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+manifest = json.load(open("$ROOT_DIR/hooks/manifest.json"))
+timeout = next(h["timeout"] for h in manifest["hooks"]
+               if h["name"] == "block-personal-asset-leak")
+if 2 * mod._GIT_TIMEOUT_SEC >= timeout:
+    sys.stderr.write("two git calls (%ss each) do not fit the %ss manifest timeout\n"
+                     % (mod._GIT_TIMEOUT_SEC, timeout))
+    sys.exit(1)
+PYEOF
+)
+_budget_rc=$?
+if [ "$_budget_rc" -eq 0 ] && [ -z "$_budget_out" ]; then
+  echo "PASS: git-call budget fits the manifest timeout"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: git-call budget exceeds manifest timeout (rc=$_budget_rc, out=$(echo "$_budget_out" | head -c 200))"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("git-call budget fits the manifest timeout")
+fi
+
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

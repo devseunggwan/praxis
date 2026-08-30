@@ -60,7 +60,10 @@ from urllib.parse import quote
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    fail_open,
+    remaining_budget,
+)
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     iter_command_starts,
@@ -82,6 +85,10 @@ _GH_LABEL_LIMIT = 300
 # per-label re-checks share that one budget, so they need a common deadline —
 # left to their own 10s each they would overrun it and the host would kill the
 # hook mid-session. The margin covers interpreter startup and process spawn.
+# Under the Bash dispatch group the standalone budget is further clamped to
+# `remaining_budget` (issue #1167): the group shares ONE node timeout across
+# ~49 sequential members, so spending the full 13s here would starve every
+# later member.
 _HOOK_TIMEOUT_SEC = 15
 _HOOK_TIMEOUT_MARGIN_SEC = 2
 
@@ -108,7 +115,11 @@ _REPO_URL_RE = re.compile(r"[:/]([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
 @fail_open
 def main() -> int:
-    deadline = time.monotonic() + (_HOOK_TIMEOUT_SEC - _HOOK_TIMEOUT_MARGIN_SEC)
+    # Self-budget: the standalone 13s (manifest timeout minus margin), clamped
+    # to the remaining group budget when running inside the dispatcher — the
+    # accessor returns the default when no dispatcher deadline is published.
+    self_budget = _HOOK_TIMEOUT_SEC - _HOOK_TIMEOUT_MARGIN_SEC
+    deadline = time.monotonic() + min(remaining_budget(self_budget), self_budget)
     try:
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
@@ -156,7 +167,7 @@ def _process_segment(argv: list[str], cwd: str, deadline: float) -> int:
     if not repo:
         return 0
 
-    got = _get_labels(repo)
+    got = _get_labels(repo, deadline)
     if got is None:
         return 0
     valid, truncated = got
@@ -271,7 +282,7 @@ def _cache_ttl_sec() -> int:
         return _DEFAULT_CACHE_TTL_SEC
 
 
-def _get_labels(repo: str) -> tuple[frozenset[str], bool] | None:
+def _get_labels(repo: str, deadline: float) -> tuple[frozenset[str], bool] | None:
     """Return (label names defined in `repo`, truncated), with caching.
 
     Returns None when the label set cannot be determined (gh missing,
@@ -294,7 +305,7 @@ def _get_labels(repo: str) -> tuple[frozenset[str], bool] | None:
         ):
             return frozenset(labels), bool(entry.get("truncated", True))
 
-    fetched = _fetch_labels(repo)
+    fetched = _fetch_labels(repo, deadline)
     if fetched is None:
         return None
     names, truncated = fetched
@@ -327,12 +338,19 @@ def _save_cache(path: Path, cache: dict) -> None:
         pass
 
 
-def _fetch_labels(repo: str) -> tuple[set[str], bool] | None:
+def _fetch_labels(repo: str, deadline: float) -> tuple[set[str], bool] | None:
     """Return (labels, truncated) for `repo`, or None on any fetch failure.
 
     `truncated` is True when the listing filled the row limit — the repo may
     hold more labels than we can see, so absence from `labels` proves nothing.
+
+    The fetch shares the gate's deadline with the per-label re-checks: its
+    subprocess timeout is the remaining budget capped at the standalone 10s,
+    and with no budget left it fails open without spawning gh at all.
     """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return None
     try:
         r = subprocess.run(
             [
@@ -344,7 +362,7 @@ def _fetch_labels(repo: str) -> tuple[set[str], bool] | None:
             ],
             capture_output=True,
             text=True,
-            timeout=_GH_LABEL_FETCH_TIMEOUT_SEC,
+            timeout=min(remaining, _GH_LABEL_FETCH_TIMEOUT_SEC),
         )
     except (OSError, subprocess.SubprocessError):
         return None

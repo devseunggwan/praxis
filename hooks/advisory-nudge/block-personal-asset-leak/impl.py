@@ -153,6 +153,14 @@ def _find_owner_markers(body: str, owner_re: re.Pattern[str]) -> list[str]:
 # Write-target resolution (best effort, fail-open)
 # ---------------------------------------------------------------------------
 
+# One local git call's timeout. The file-write path can run two git calls
+# (remote get-url + check-ignore) inside this hook's 5s manifest timeout, so
+# at 3s each their sum (6s) would let the host kill the hook mid-scan
+# (issue #1167); 2s each keeps the worst case (4s) inside the budget while
+# staying generous for a local, non-network git query.
+_GIT_TIMEOUT_SEC = 2
+
+
 def _git_output(args: list[str], cwd: str) -> str | None:
     """Run a git command; return stripped stdout, or None on any failure."""
     try:
@@ -161,7 +169,7 @@ def _git_output(args: list[str], cwd: str) -> str | None:
             cwd=cwd,
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=_GIT_TIMEOUT_SEC,
         )
     except Exception:
         return None
@@ -245,7 +253,7 @@ def _file_write_is_team_surface(file_path: str, owners: frozenset[str]) -> bool:
         proc = subprocess.run(
             ["git", "-C", base, "check-ignore", "-q", "--", file_path],
             capture_output=True,
-            timeout=3,
+            timeout=_GIT_TIMEOUT_SEC,
         )
         if proc.returncode == 0:
             return False  # gitignored scratch path (.omc/plans/ etc.) → pass

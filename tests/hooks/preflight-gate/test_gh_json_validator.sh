@@ -307,6 +307,37 @@ else
   FAIL=$((FAIL+1)); FAILED_NAMES+=("fail-open guard wrapping")
 fi
 
+# ---------------------------------------------------------------------------
+# Shared probe deadline (issue #1167): both `gh --json help` probes (initial +
+# dummy-positional retry) draw from ONE deadline, so their sum can never exceed
+# the member budget inside the Bash dispatch group. An expired deadline must
+# fail open immediately WITHOUT spawning gh. Asserted directly — reproducing it
+# through a payload would burn real wall-clock.
+# ---------------------------------------------------------------------------
+_deadline_out=$(python3 - << PYEOF 2>&1
+import sys, importlib.util, time
+spec = importlib.util.spec_from_file_location("impl", "$HOOK_PY")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+# gh would answer here — make any spawn after expiry a hard failure instead.
+def _boom(*a, **k):
+    raise AssertionError("gh spawned after the deadline had passed")
+mod.subprocess.run = _boom
+
+if mod._fetch_valid_fields(("pr", "view"), time.monotonic() - 1) is not None:
+    sys.stderr.write("expired deadline did not fail open\n"); sys.exit(1)
+PYEOF
+)
+_deadline_rc=$?
+if [ "$_deadline_rc" -eq 0 ] && [ -z "$_deadline_out" ]; then
+  echo "PASS  [deadline] expired probe deadline fails open without spawning gh"
+  PASS=$((PASS+1))
+else
+  echo "FAIL  [deadline] deadline not honoured (rc=$_deadline_rc out=$(echo "$_deadline_out" | head -c 200))"
+  FAIL=$((FAIL+1)); FAILED_NAMES+=("shared probe deadline")
+fi
+
 
 # ---------------------------------------------------------------------------
 

@@ -21,10 +21,49 @@ import json
 import logging
 import os
 import sys
+import time
 import traceback
-from typing import Callable
+from typing import Callable, Optional
 
 _LOGGER_NAME = "praxis.hook"
+
+
+# ---------------------------------------------------------------------------
+# Per-member wall-clock budget (issue #1167)
+# ---------------------------------------------------------------------------
+# The Bash dispatch group runs ~49 members SEQUENTIALLY in one process under a
+# single host-side timeout (the max member timeout — see
+# scripts/build-plugin-manifests.py `_dispatcher_node`). A member that spends
+# its full standalone budget on network calls starves every later member: the
+# host kills the dispatcher and the rest silently never run. The dispatcher
+# therefore publishes each member's share of the remaining group budget here
+# (module-level state — members run in-process, imported, so no IPC is
+# needed), and budget-aware members size their subprocess timeouts from it.
+
+_MEMBER_DEADLINE: Optional[float] = None
+
+
+def set_member_deadline(deadline: Optional[float]) -> None:
+    """Publish the current member's wall-clock deadline (`time.monotonic()`
+    reference), or clear it with None. Called only by the dispatcher around
+    each member invocation — hooks themselves only read via
+    `remaining_budget`."""
+    global _MEMBER_DEADLINE
+    _MEMBER_DEADLINE = deadline
+
+
+def remaining_budget(default_sec: float) -> float:
+    """Seconds left in the calling hook's wall-clock budget.
+
+    Under the dispatcher this is the time left until the deadline it set for
+    the current member (never negative). Standalone — a per-process hook
+    invocation, or a direct test call — no deadline is published and
+    `default_sec` (the hook's own manifest-derived budget) is returned, so
+    standalone behavior is unchanged.
+    """
+    if _MEMBER_DEADLINE is None:
+        return default_sec
+    return max(0.0, _MEMBER_DEADLINE - time.monotonic())
 
 
 class _JsonlFormatter(logging.Formatter):
