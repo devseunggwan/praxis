@@ -36,6 +36,25 @@ The two gates are complementary, not redundant. This hook prevents the
 mistake from starting; the PR gate is a backstop for cases this hook doesn't
 cover (e.g. starting work on an unprotected branch then renaming it to main).
 
+### Two-tier defaults with `worktree-edit-gate` (deliberate — issue #1159)
+
+`worktree-edit-gate` enforces the same Issue-Driven Worktree rule but ships
+**opt-in** (inert without `PRAXIS_WORKTREE_ENFORCED_REPOS`), while this hook
+ships **default-on**. That asymmetry is a recorded design decision, not
+drift. The #1159 attested-convention principle demotes convention gates to
+advisory on shipped defaults; this hook is the principle's one deliberate
+exception because its trigger is not a repo-local convention: editing
+directly on `main`/`master`/`dev`/`prod` is a hazard in most repositories,
+the deny fires only when an independent workflow signal corroborates it
+(dirty tree or `(#NNN)` PR-suffix history — a solo repo with no PR history
+and a clean tree passes silently), and `PRAXIS_PBGUARD_SKIP=1` /
+`PRAXIS_PROTECTED_BRANCHES` remain the documented escapes. The two tiers:
+
+| Tier | Hook | Default | Scope |
+| --- | --- | --- | --- |
+| Generic safety net | `pre-edit-protected-branch-guard` | **on** | any repo, protected branches only, corroborated by a workflow signal |
+| Strict worktree workflow | `worktree-edit-gate` | **opt-in** | enrolled repos only, branch state alone, extension-filtered |
+
 ### What is blocked
 
 | Scenario                                                                         | Action                                                                  |
