@@ -160,7 +160,7 @@ print(json.dumps({
 
 # --- detection: git mutation ------------------------------------------------
 # git-commit is ADVISE since issue #874 (local-only, reversible, already gated
-# by six sibling commit hooks); git-push stays ASK (publishes shared state).
+# by seven sibling commit hooks); git-push stays ASK (publishes shared state).
 run_case "git-commit bare"          advise "git commit -m 'wip'"
 run_case "git-merge"                advise "git merge feature-x"
 run_case "git-rebase"               advise "git rebase -i HEAD~3"
@@ -191,7 +191,7 @@ run_case "kubectl apply"            ask  "kubectl apply -f pod.yaml"
 run_case "kubectl delete"           ask  "kubectl delete ns my-ns"
 
 # --- detection: known wrapper CLIs that commit internally ------------------
-# Issue #874 split these out of git-commit and left them at ASK: the six
+# Issue #874 split these out of git-commit and left them at ASK: the seven
 # sibling gates match a literal `git commit` argv, so a commit made inside a
 # wrapper process is invisible to all of them.
 run_case_reason "iceberg-schema migrate" "[wrapper-commit]" "" \
