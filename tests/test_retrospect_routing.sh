@@ -74,6 +74,76 @@ run_placeholder_check() {
   fi
 }
 
+# Section-scoped anchor check: the pattern must appear inside the block that
+# starts at $start_re and ends at the line matching $end_re (exclusive). A
+# plain document-wide grep cannot tell "Action 2 routes through the gate" from
+# "the gate text exists somewhere else in the file" — issue #1138 was exactly
+# that shape (gate present, `issue` action not wired to it).
+run_section_check() {
+  local name="$1"
+  local path="$2"
+  local start_re="$3"
+  local end_re="$4"
+  local pattern="$5"
+  local section
+  if [ ! -f "$path" ]; then
+    echo "FAIL: $name — missing file $path"
+    FAIL=$((FAIL + 1))
+    FAILED_NAMES+=("$name")
+    return
+  fi
+  # The section bounds are passed through the environment, not `awk -v`.
+  # `-v` runs escape processing over the value, so gawk turns `^2\. \*\*GitHub`
+  # into `^2. **GitHub` (warning: "escape sequence `\*' treated as plain `*'")
+  # and the `**` is then a broken quantifier that matches nothing — the section
+  # comes back empty and every check against it fails. mawk keeps the
+  # backslashes, so this splits by awk implementation: mawk locally, gawk on the
+  # CI runner. ENVIRON values are not escape-processed, so both agree.
+  # Both bounds are reported, not just the text between them. Without the end
+  # marker the helper scans to EOF when the end heading is renamed or removed,
+  # and a pattern living in a LATER section then satisfies a check scoped to
+  # this one — the same silent over-match the `awk -v` bug produced, arriving
+  # by a different route.
+  section=$(
+    PRAXIS_SECTION_START="$start_re" PRAXIS_SECTION_END="$end_re" awk '
+      BEGIN { s = ENVIRON["PRAXIS_SECTION_START"]; e = ENVIRON["PRAXIS_SECTION_END"] }
+      !inside && !seen_start && $0 ~ s { inside = 1; seen_start = 1; print; next }
+      inside && $0 ~ e { inside = 0; seen_end = 1 }
+      inside { print }
+      END { print "###BOUNDS### " (seen_start ? 1 : 0) " " (seen_end ? 1 : 0) }
+    ' "$path"
+  )
+  local bounds
+  bounds=$(printf '%s\n' "$section" | sed -n 's/^###BOUNDS### //p' | tail -1)
+  section=$(printf '%s\n' "$section" | grep -v '^###BOUNDS### ')
+  if [ "${bounds% *}" != "1" ]; then
+    echo "FAIL: $name — section start '$start_re' never matched in $path"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  if [ "${bounds#* }" != "1" ]; then
+    echo "FAIL: $name — section end '$end_re' never matched in $path; the scan ran to EOF, so a later section could satisfy this check"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  # An empty section means the start bound never matched. Without this arm the
+  # helper reports "pattern missing", which reads as a defect in the document
+  # under test rather than in the extraction — the exact misdiagnosis this
+  # helper produced on its first CI run.
+  if [ -z "$section" ]; then
+    echo "FAIL: $name — section '$start_re' extracted nothing from $path (bounds did not match)"
+    FAIL=$((FAIL + 1))
+    FAILED_NAMES+=("$name")
+    return
+  fi
+  if printf '%s\n' "$section" | grep -q -- "$pattern"; then
+    echo "PASS: $name"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: $name — pattern '$pattern' missing from the $start_re section of $path"
+    FAIL=$((FAIL + 1))
+    FAILED_NAMES+=("$name")
+  fi
+}
+
 run_anchor_check() {
   local name="$1"
   local path="$2"
@@ -168,7 +238,92 @@ run_anchor_check "report template includes critic_diff ledger line" "$SKILL_DIR/
 run_anchor_check "stage4 reference exists with memory-hint contract" "$SKILL_DIR/references/stage4-execution.md" "Frontmatter contract"
 run_anchor_check "stage4 reference reuses repeat scan step 6" "$SKILL_DIR/references/stage4-execution.md" "Stage 2 step 6's repeat scan results"
 run_anchor_check "stage4 reference returns backing_repo misses to step 7" "$SKILL_DIR/references/stage4-execution.md" "re-run Stage 2 step 7"
+
+# ---------------------------------------------------------------------------
+# NOTE: run_anchor_check / run_forbidden_check grep with a BASIC regex, so the
+# patterns below deliberately avoid `[`, `]` and `*` — a literal `[a]` in the
+# document is a bracket expression to grep and would never match.
+#
+# Step 0's success branch must land in Step 0a. Routing it into the action's
+# own bullets is what let an `⚠ EXTERNAL`-marked issue row reach
+# `gh issue create` with no per-action approval (code review of PR #1144).
+# ---------------------------------------------------------------------------
+
+run_anchor_check "stage4 Step 0 success branch routes into Step 0a (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  ", never straight to the action's own procedure"
+
+run_forbidden_check "stage4 Step 0 no longer routes past the gate (#1144)" \
+  "proceed to the rest of the gated action's procedure"
+
+run_anchor_check "stage4 Step 0a logs the [a] approval (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "approved <verified_backing_repo> for finding #N"
+
+run_anchor_check "stage4 upstream_feedback row also requires the approval log (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "from step 0 + if Step 0a fired"
+
+run_section_check "stage4 Action 2 drafts before running the gate (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "^2\. \*\*GitHub issue" "^3\. \*\*" \
+  "draft the title and body FIRST, then run the gate"
+
+# The global anchor for `{gated_action} = issue` is satisfied by the shared gate
+# section itself, so it cannot see Action 2 calling the gate with the WRONG
+# action. Scope each binding to the action that owns it.
+#
+# Action 4's start bound is `^4\. \*\*Upstream`, not `^4\. \*\*`: the shared
+# gate's own step 4 ("Divergence / ambiguity handling") also opens with
+# `4. **`, and the helper takes the first start match.
+run_section_check "stage4 Action 2 binds the gate to the issue action (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "^2\. \*\*GitHub issue" "^3\. \*\*" \
+  "{gated_action} = issue"
+
+run_section_check "stage4 Action 4 binds the gate to upstream_feedback (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "^4\. \*\*Upstream" "^5\. \*\*" \
+  "{gated_action} = upstream_feedback"
+
+# The verified value, not the declared one, is what `--repo` targets, so it is
+# what the approval prompt must name (CodeRabbit CWE-863 on this PR).
+run_anchor_check "stage4 Step 0a prompt names the verified repo (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "승인 — {verified_backing_repo}에 이슈 생성 진행"
+
+run_forbidden_check "stage4 Step 0a prompt no longer names the declared repo (#1144)" \
+  "승인 — {backing_repo}에 이슈 생성 진행"
+
+# The marker is computed from the DECLARED repo, so a Step 0 divergence leaves
+# it stale; the verified repo's visibility is an independent trigger.
+run_anchor_check "stage4 Step 0a rechecks visibility of the verified repo (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "gh repo view <verified_backing_repo> --json visibility"
+
+run_anchor_check "stage4 Step 0a fails closed on an unanswerable visibility query (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "an unanswerable question is not permission"
+
+run_section_check "stage4 Action 2 routes hub-mediated orgs to the hub skill (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "^2\. \*\*GitHub issue" "^3\. \*\*" \
+  "block-child-repo-issue-create"
+
+run_anchor_check "stage2 step 7 can resolve the working project repo (#1144)" \
+  "$SKILL_DIR/references/stage1-2-analysis.md" \
+  "The working project repo itself"
 run_anchor_check "stage4 reference declares memory-lint CI split intended (issue #975)" "$SKILL_DIR/references/stage4-execution.md" "the intended design, not a residual gap"
+run_anchor_check "stage4 reference shares one cross-boundary write gate (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "## Cross-boundary write gate (shared by Action 2 and Action 4)"
+run_anchor_check "stage4 Step 0 covers issue rows (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "first procedure step for every \`issue\` row and every \`upstream_feedback\` row"
+run_anchor_check "stage4 Step 0a covers issue rows (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "This gate fires for every \`issue\` row and every \`upstream_feedback\` row"
+run_anchor_check "stage4 gate skip prompts name the gated action (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "{gated_action} 액션 제거"
+run_anchor_check "stage4 binds the gate to the issue action (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "{gated_action} = issue"
+run_anchor_check "stage4 binds the gate to the upstream_feedback action (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "{gated_action} = upstream_feedback"
+run_section_check "stage4 Action 2 routes through the shared gate (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "^2\\. \\*\\*GitHub issue" "^3\\. \\*\\*" "Cross-boundary write gate"
+run_section_check "stage4 Action 2 pins gh issue create to --repo (issue #1138)" "$SKILL_DIR/references/stage4-execution.md" "^2\\. \\*\\*GitHub issue" "^3\\. \\*\\*" "gh issue create --repo <verified_backing_repo>"
+run_forbidden_check "stage4 gate prompts no longer hardcode the upstream_feedback action (issue #1138)" "upstream_feedback 액션 제거"
+run_anchor_check "SKILL.md action map wires the issue action to the gate (issue #1138)" "$SKILL" "| 2 | GitHub issue | cross-boundary write gate"
 run_forbidden_check "stage4 no longer frames the memory-lint path as an open gap (issue #975)" "still incomplete"
 run_anchor_check "appendices reference exists with Red Flags" "$SKILL_DIR/references/appendices.md" "Red Flags"
 
