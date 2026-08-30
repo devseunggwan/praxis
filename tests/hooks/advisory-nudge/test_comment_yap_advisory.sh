@@ -321,6 +321,105 @@ else
 fi
 rm -f "$err_file"
 
+echo "== fire-ledger instrumentation (issue #740 single-event RICH) =="
+
+# The hook signals on stderr while exiting 0, so @fail_open's coarse path
+# records every engagement as "pass". Without a RICH record no ledger query
+# could say whether it had ever advised — and an unmeasurable hook cannot be
+# scored by the prune audit. PRAXIS_FIRE_TELEMETRY_FILE isolates the probe so
+# it never touches the production ledger, and the opt-out is unset so an
+# inherited DISABLE=1 cannot make an empty ledger read as "never fired".
+ledger_out=$(python3 - "$HOOK" <<'PY'
+import json, os, subprocess, sys, tempfile
+
+hook = sys.argv[1]
+ledger = os.path.join(tempfile.mkdtemp(), "fire.jsonl")
+env = dict(os.environ)
+env["PRAXIS_FIRE_TELEMETRY_FILE"] = ledger
+env.pop("PRAXIS_FIRE_TELEMETRY_DISABLE", None)
+
+YAP = "\n".join(["# We now need to make sure the thing we do is the right thing"] * 30) + "\nx = 1"
+
+
+def run(content, tool="Write", session_id="sess-abc", disable=False):
+    payload = {"tool_name": tool, "tool_input": {"file_path": "mod.py"}}
+    payload["tool_input"]["content" if tool == "Write" else "new_string"] = content
+    if session_id is not None:
+        payload["session_id"] = session_id
+    run_env = dict(env)
+    if disable:
+        run_env["PRAXIS_FIRE_TELEMETRY_DISABLE"] = "1"
+    before = read()
+    result = subprocess.run(
+        [sys.executable, hook], input=json.dumps(payload),
+        capture_output=True, text=True, env=run_env,
+    )
+    return bool(result.stderr.strip()), read()[len(before):]
+
+
+def read():
+    if not os.path.exists(ledger):
+        return []
+    with open(ledger, encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+failures = []
+
+
+def check(name, condition):
+    if not condition:
+        failures.append(name)
+
+
+advised, rows = run(YAP)
+check("advise emits stderr", advised)
+# Exactly one row proves the coarse duplicate was suppressed: unsuppressed,
+# aggregate_fires() would sum this single engagement as fires=2, advise=1,
+# pass=1 and corrupt the very rate the ledger exists to report.
+check("advise writes exactly one record (coarse suppressed)", len(rows) == 1)
+if rows:
+    row = rows[0]
+    check("record is rich", row.get("granularity") == "rich")
+    check("decision is advise", row.get("decision") == "advise")
+    check("hook name recorded", row.get("hook") == "comment-yap-advisory")
+    check("role recorded", row.get("role") == "advisory-nudge")
+    check("session_id attributed", row.get("session_id") == "sess-abc")
+    check("tool attributed", row.get("tool") == "Write")
+
+advised, rows = run("x = 1\n")
+check("silent run emits no stderr", not advised)
+# A silent pass is exactly what the coarse record already says, so the hook
+# must not add a second one.
+check("silent run writes one coarse pass", len(rows) == 1
+      and rows[0].get("granularity") == "coarse"
+      and rows[0].get("decision") == "pass")
+
+advised, rows = run(YAP, tool="Edit")
+check("Edit tool attributed", len(rows) == 1 and rows[0].get("tool") == "Edit")
+
+# A missing session_id must cost per-session attribution only, never the
+# decision count itself (the lesson of the CodeRabbit finding on PR #796).
+advised, rows = run(YAP, session_id=None)
+check("missing session_id still records the decision",
+      len(rows) == 1 and rows[0].get("decision") == "advise"
+      and rows[0].get("session_id") == "")
+
+# Telemetry is opt-out, and the opt-out must not disturb the advisory itself.
+advised, rows = run(YAP, disable=True)
+check("DISABLE=1 still advises", advised)
+check("DISABLE=1 writes nothing", len(rows) == 0)
+
+print("FAILURES:" + ",".join(failures) if failures else "ALL_OK")
+PY
+)
+if [ "$ledger_out" = "ALL_OK" ]; then
+  PASS=$((PASS + 1)); echo "  ok   fire-ledger records one rich 'advise' and suppresses the coarse duplicate"
+else
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("fire ledger")
+  echo "  FAIL fire-ledger instrumentation — $ledger_out"
+fi
+
 echo "== repo-wide false-positive sweep =="
 
 # The hook runs on every Write and Edit, so a false positive is a tax on

@@ -27,7 +27,12 @@ from memo to hook.
 implied.** Praxis hooks are normally promoted after ≥5 measured recurrences in
 this repo's fire ledger. This one adopts an external convention instead, so it
 ships advisory-only and is scored on the same evidence basis as every other
-hook by [`docs/hook-prune-audit.md`](../../../docs/hook-prune-audit.md).
+hook by [`docs/hook-prune-audit.md`](../../../docs/hook-prune-audit.md). That
+last clause is load-bearing rather than decorative, which is why the hook
+carries its own RICH ledger record (see
+[Fire-ledger instrumentation](#fire-ledger-instrumentation-issue-740-single-event-rich)):
+without it the advisories would collapse to coarse `pass`, the audit could not
+see them, and a hook adopted on borrowed evidence would also be unfalsifiable.
 
 ## The design problem: length is not the signal
 
@@ -151,6 +156,31 @@ Stateless. No session file, no cache, no lock — the four questions in
 [`DESIGN.md` § Session-state concurrency](../../../DESIGN.md#session-state-concurrency)
 do not apply because there is no state to lose.
 
+## Fire-ledger instrumentation (issue #740 single-event RICH)
+
+The hook signals its verdict on stderr while exiting 0, so `@fail_open`'s
+coarse path — which reads only the exit code — records every engagement as
+`pass`. Left there, the hook would join the coarse-only set that the prune
+audit's advisory-never-escalated axis excludes, and no ledger query could
+answer whether it had ever advised at all. **A hook that cannot be measured
+cannot be scored, and scoring is what decides whether it stays** — which
+matters more here than for most hooks, because this one's provenance is an
+external convention rather than a measured recurrence.
+
+So the advising path calls `record_session_fire(..., DECISION_ADVISE, ...)`
+with the payload's real `session_id` and tool, then
+`suppress_coarse_duplicate()` — **gated on the rich append returning True**,
+because suppressing after a failed one would drop the engagement from both
+streams, which is worse than the coarse mislabel it removes. One engagement
+therefore produces exactly one record; unsuppressed, `aggregate_fires()` would
+sum it as `fires=2, advise=1, pass=1`.
+
+Only the advising path records. A silent pass is exactly what the coarse
+record already says, so a second write would inflate the fire count without
+adding a decision. A missing `session_id` costs per-session attribution and
+never the decision count itself (the lesson of the CodeRabbit finding on
+PR #796).
+
 ## Cost
 
 The hook runs on every `Write` and `Edit`, so the budget is a design
@@ -213,7 +243,7 @@ surface the next prune audit has to score.
 
 ## Tests
 
-`tests/hooks/advisory-nudge/test_comment_yap_advisory.sh` — 30 cases:
+`tests/hooks/advisory-nudge/test_comment_yap_advisory.sh` — 31 cases:
 
 - both detectors fire (line comments, C block comments, D1 attachment
   requirement)
@@ -222,5 +252,10 @@ surface the next prune audit has to score.
 - every exclusion above
 - the three parser regressions in *Parsing guarantees*
 - fail-open paths and env-override behaviour
+- the fire-ledger contract above: one rich `advise` per engagement with
+  session/tool attribution, the coarse duplicate suppressed, a silent run
+  leaving only the coarse `pass`, a missing `session_id` still counting the
+  decision, and `PRAXIS_FIRE_TELEMETRY_DISABLE=1` writing nothing while the
+  advisory itself still reaches stderr
 - a **repo-wide false-positive sweep**: 139 hand-written python files under
   `hooks/`, `scripts/`, and `tests/` must produce **0** advisories

@@ -67,7 +67,11 @@ from typing import Iterator, NamedTuple, Optional, Sequence
 
 _HOOK_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HOOK_DIR.parent.parent / "_lib"))
+import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+
+_HOOK_NAME = "comment-yap-advisory"
+_ROLE = "advisory-nudge"
 
 # ---------------------------------------------------------------------------
 # Thresholds
@@ -568,7 +572,36 @@ def main() -> int:
     )
     if findings:
         sys.stderr.write(_advisory_text(file_path, findings) + "\n")
+        _record_advise(payload.get("session_id"), tool_name)
     return 0
+
+
+def _record_advise(session_id: object, tool: str) -> None:
+    """Record the advisory as a RICH `advise` fire (issue #740 single-event).
+
+    This hook signals its verdict on stderr while exiting 0, so `@fail_open`'s
+    coarse path — which reads only the exit code — records every engagement as
+    `pass`. Left there, the hook joins the coarse-only set the prune audit's
+    advisory-never-escalated axis excludes, and no ledger query could answer
+    whether it had ever advised at all. A hook that cannot be measured cannot
+    be scored, and scoring is what decides whether it stays.
+
+    Only the advising path records: a silent pass is exactly what the coarse
+    record already says, so writing a second one would inflate the fire count
+    without adding a decision.
+
+    `record_session_fire` coerces a missing `session_id` to `""`, and
+    `aggregate_fires` only adds non-empty ids to its per-session set, so an
+    absent id costs per-session attribution and never the decision itself.
+    """
+    if _fire_ledger.record_session_fire(
+        _HOOK_NAME, _ROLE, _fire_ledger.DECISION_ADVISE,
+        session_id if isinstance(session_id, str) else "", tool,
+    ):
+        # Gated on the rich append actually landing: suppressing after a
+        # failed one would drop the engagement from both streams, which is
+        # worse than the coarse mislabel it exists to remove.
+        _fire_ledger.suppress_coarse_duplicate()
 
 
 if __name__ == "__main__":
