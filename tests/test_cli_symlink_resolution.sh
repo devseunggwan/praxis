@@ -9,9 +9,13 @@
 # executable), so no sibling exists next to the link and the scripts died at
 # the `source` line with "cmux-session-lib: No such file or directory"
 # (claude-recover only survived because claude-recover-scan happens to be
-# installed alongside it). The fix ports the readlink resolution loop from
-# cmux-recover-sessions; this suite runs each script through a symlink in a
-# temp "bin" dir and asserts it gets past sibling resolution.
+# installed alongside it), and cmux-save-sessions sources the lib from a
+# sibling skill directory — same death. The fix ports the readlink resolution
+# loop from cmux-recover-sessions (now with a 40-hop cycle cap, mirrored back
+# into that canonical copy); this suite runs each script through a symlink in
+# a temp "bin" dir and asserts it gets past sibling resolution, and drives
+# the loop against a symlink cycle. Block parity across all five carriers is
+# guarded separately in tests/test_cli_scripts_parity.sh.
 #
 # Determinism: a stub `cmux` (always exit 1) is prepended to PATH so the cmux
 # scripts always stop at preflight_check ("cmux is not running") — the first
@@ -64,6 +68,7 @@ chmod +x "$STUB/cmux"
 
 ln -s "$ROOT_DIR/skills/cmux-session-manager/cmux-session-status"  "$BIN/cmux-session-status"
 ln -s "$ROOT_DIR/skills/cmux-session-manager/cmux-session-cleanup" "$BIN/cmux-session-cleanup"
+ln -s "$ROOT_DIR/skills/cmux-save-sessions/cmux-save-sessions"     "$BIN/cmux-save-sessions"
 ln -s "$ROOT_DIR/skills/recover-sessions/claude-recover"           "$BIN/claude-recover"
 
 # ---------------------------------------------------------------------------
@@ -86,6 +91,18 @@ echo "$out" | grep -q 'cmux is not running'
 run_case "cleanup: reaches preflight_check (past source line)" "$?" "0"
 run_case "cleanup: preflight failure exits 1 (not source death)" "$rc" "1"
 
+# cmux-save-sessions sources the lib from a SIBLING SKILL DIRECTORY
+# (../cmux-session-manager/cmux-session-lib), so the installed symlink had
+# the same death at line 6 — the 4th member of the class (#1191 review).
+# Isolated HOME keeps its $HOME/.cmux/sessions save dir out of the real one
+# (preflight stops it before any write regardless).
+out=$(PATH="$STUB:$PATH" HOME="$FAKE_HOME" "$BIN/cmux-save-sessions" 2>&1); rc=$?
+echo "$out" | grep -q 'cmux-session-lib'
+run_case "save: no cmux-session-lib source error via symlink" "$?" "1"
+echo "$out" | grep -q 'cmux is not running'
+run_case "save: reaches preflight_check (past source line)" "$?" "0"
+run_case "save: preflight failure exits 1 (not source death)" "$rc" "1"
+
 # ---------------------------------------------------------------------------
 # Chained relative symlink (link -> relative link -> real script): the
 # resolution loop must follow multiple hops and relative targets.
@@ -100,6 +117,38 @@ echo "$out" | grep -q 'cmux-session-lib'
 run_case "status: no source error via chained relative symlink" "$?" "1"
 echo "$out" | grep -q 'cmux is not running'
 run_case "status: chained relative symlink reaches preflight_check" "$?" "0"
+run_case "status: chained relative symlink exits 1 at preflight" "$rc" "1"
+
+# ---------------------------------------------------------------------------
+# Symlink cycle: the resolution loop must bail with a clear error after its
+# hop cap instead of spinning forever (#1191 review). A cyclic link cannot be
+# exec'd (the kernel refuses with ELOOP before bash ever runs), so the loop
+# is exercised directly: extract the shipped block from cmux-session-status
+# and run it with $0 pointed at the cycle via `bash -c '...' <argv0>`.
+# `timeout` guards against a regression hanging the suite; rc 124/137 would
+# mean the loop span until killed.
+# ---------------------------------------------------------------------------
+
+ln -s "$BIN/cycle-b" "$BIN/cycle-a"
+ln -s "$BIN/cycle-a" "$BIN/cycle-b"
+
+BLOCK=$(awk '/^REAL_PATH="\$0"$/{f=1} f{print} f && /^SCRIPT_DIR=/{exit}' \
+  "$ROOT_DIR/skills/cmux-session-manager/cmux-session-status")
+run_case "cycle: resolution block extracted from shipped script" \
+  "$([ -n "$BLOCK" ] && echo yes || echo no)" "yes"
+
+if command -v timeout >/dev/null 2>&1; then
+  RUN_CYCLE=(timeout 5 bash)
+else
+  echo "NOTE: coreutils timeout unavailable — running cycle case unguarded"
+  RUN_CYCLE=(bash)
+fi
+out=$("${RUN_CYCLE[@]}" -c "set -euo pipefail
+$BLOCK
+echo \"RESOLVED \$SCRIPT_DIR\"" "$BIN/cycle-a" 2>&1); rc=$?
+run_case "cycle: hop cap bails with exit 1 (no hang, no resolve)" "$rc" "1"
+echo "$out" | grep -q 'symlink resolution exceeded'
+run_case "cycle: error message names the hop cap" "$?" "0"
 
 # ---------------------------------------------------------------------------
 # claude-recover through a symlink: must resolve sibling claude-recover-scan
