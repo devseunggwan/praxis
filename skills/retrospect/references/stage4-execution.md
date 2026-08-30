@@ -94,14 +94,28 @@ If the active project's `AGENTS.md` provides a feature-to-repo mapping, consult 
 
 This gate fires for every `issue` row and every `upstream_feedback` row where the finding's Rationale cell contains `⚠ EXTERNAL: per-action approval required at Stage 4` (set by Stage 2.5 Gate-4). It fires **even when** the user selected "✅ Execute now" in Stage 3 — Stage 3 approval authorizes the action category, not the specific external-org write.
 
-**Detection:** scan the Rationale cell (already verified in step 0) for the literal prefix `⚠ EXTERNAL: per-action approval required at Stage 4`. If present → this gate fires. If absent → skip to the gated action's issue-creation steps (Action 2's bullets, or Action 4's "Then create the issue").
+**Detection — two independent triggers. Either one fires this gate.**
+
+1. **The marker.** The Rationale cell carries the literal prefix `⚠ EXTERNAL: per-action approval required at Stage 4`.
+2. **The verified repo is public.** `verified_backing_repo` — Step 0's output, not the declared value — resolves public:
+
+   ```bash
+   gh repo view <verified_backing_repo> --json visibility -q .visibility
+   ```
+
+Trigger 2 exists because the marker is **stale by construction whenever Step 0 diverged.** Stage 2.5 Gate-4 computes the marker from the *declared* `backing_repo` and its declared `repo_visibility`. Step 0 re-resolves independently and its variant `[b]` path explicitly corrects the declared line, so a row declared private that resolves to a public repo carries no marker and would reach `gh issue create` with no per-action approval — the exact policy #993 / #1024 fixed, defeated by a divergence rather than by a missing gate.
+
+**Fail closed.** If the visibility query errors, times out, or returns anything other than `PRIVATE` / `INTERNAL`, treat the repo as public and fire the gate. This is an authorization gate: an unanswerable question is not permission. Record the failure in the approval log line.
+
+If neither trigger fires → skip to the gated action's issue-creation steps (Action 2's bullets, or Action 4's "Then create the issue").
 
 **Mandatory `AskUserQuestion` prompt (do NOT proceed without explicit `[a]` pick):**
 
 ```text
 ⚠ External-repo write authorization required — Finding #N
 
-Proposed: create GitHub issue in {backing_repo} (classified external by Stage 2.5 Gate-4)
+Proposed: create GitHub issue in {verified_backing_repo}  ← Step 0's verified value, the repo `--repo` will target
+Trigger: {marker | public-visibility recheck | visibility unknown → failed closed}
 Title: {proposed_issue_title}
 Evidence: {one-line friction event summary}
 
@@ -111,12 +125,12 @@ Auto-mode override, batch approval, and "prior selection ratifies this" inferenc
 are all invalid — only an explicit [a] pick here allows proceeding.
 
 어느 쪽으로 진행할까요?
-[a] 승인 — {backing_repo}에 이슈 생성 진행
+[a] 승인 — {verified_backing_repo}에 이슈 생성 진행
 [b] Skip — {gated_action} 액션 제거 (이 finding의 action set에서 제외)
 [c] Issue draft를 먼저 검토한 뒤 결정 (draft를 보여준 뒤 재질문)
 ```
 
-- If `[a]` → log the approval in the Actions Executed report's verification trail (`Step 0a: [a] approved <backing_repo> for finding #N`), then proceed to `gh issue create`. The verification matrix requires that line; without it the approval leaves no record and the matrix row cannot be satisfied.
+- If `[a]` → log the approval in the Actions Executed report's verification trail (`Step 0a: [a] approved <verified_backing_repo> for finding #N (trigger: <marker|visibility|failed-closed>)`), then proceed to `gh issue create`. The verification matrix requires that line; without it the approval leaves no record and the matrix row cannot be satisfied.
 - If `[b]` → remove `{gated_action}` from this finding's action set; log reason in Actions Executed report
 - If `[c]` → show the draft issue body (title, labels, full body text) and re-issue this AskUserQuestion
 - No other pick proceeds.

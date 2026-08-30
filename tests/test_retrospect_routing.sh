@@ -99,14 +99,31 @@ run_section_check() {
   # comes back empty and every check against it fails. mawk keeps the
   # backslashes, so this splits by awk implementation: mawk locally, gawk on the
   # CI runner. ENVIRON values are not escape-processed, so both agree.
+  # Both bounds are reported, not just the text between them. Without the end
+  # marker the helper scans to EOF when the end heading is renamed or removed,
+  # and a pattern living in a LATER section then satisfies a check scoped to
+  # this one — the same silent over-match the `awk -v` bug produced, arriving
+  # by a different route.
   section=$(
     PRAXIS_SECTION_START="$start_re" PRAXIS_SECTION_END="$end_re" awk '
       BEGIN { s = ENVIRON["PRAXIS_SECTION_START"]; e = ENVIRON["PRAXIS_SECTION_END"] }
-      !inside && $0 ~ s { inside = 1; print; next }
-      inside && $0 ~ e { inside = 0 }
+      !inside && !seen_start && $0 ~ s { inside = 1; seen_start = 1; print; next }
+      inside && $0 ~ e { inside = 0; seen_end = 1 }
       inside { print }
+      END { print "###BOUNDS### " (seen_start ? 1 : 0) " " (seen_end ? 1 : 0) }
     ' "$path"
   )
+  local bounds
+  bounds=$(printf '%s\n' "$section" | sed -n 's/^###BOUNDS### //p' | tail -1)
+  section=$(printf '%s\n' "$section" | grep -v '^###BOUNDS### ')
+  if [ "${bounds% *}" != "1" ]; then
+    echo "FAIL: $name — section start '$start_re' never matched in $path"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  if [ "${bounds#* }" != "1" ]; then
+    echo "FAIL: $name — section end '$end_re' never matched in $path; the scan ran to EOF, so a later section could satisfy this check"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
   # An empty section means the start bound never matched. Without this arm the
   # helper reports "pattern missing", which reads as a defect in the document
   # under test rather than in the extraction — the exact misdiagnosis this
@@ -241,7 +258,7 @@ run_forbidden_check "stage4 Step 0 no longer routes past the gate (#1144)" \
 
 run_anchor_check "stage4 Step 0a logs the [a] approval (#1144)" \
   "$SKILL_DIR/references/stage4-execution.md" \
-  "approved <backing_repo> for finding #N"
+  "approved <verified_backing_repo> for finding #N"
 
 run_anchor_check "stage4 upstream_feedback row also requires the approval log (#1144)" \
   "$SKILL_DIR/references/stage4-execution.md" \
@@ -251,6 +268,42 @@ run_section_check "stage4 Action 2 drafts before running the gate (#1144)" \
   "$SKILL_DIR/references/stage4-execution.md" \
   "^2\. \*\*GitHub issue" "^3\. \*\*" \
   "draft the title and body FIRST, then run the gate"
+
+# The global anchor for `{gated_action} = issue` is satisfied by the shared gate
+# section itself, so it cannot see Action 2 calling the gate with the WRONG
+# action. Scope each binding to the action that owns it.
+#
+# Action 4's start bound is `^4\. \*\*Upstream`, not `^4\. \*\*`: the shared
+# gate's own step 4 ("Divergence / ambiguity handling") also opens with
+# `4. **`, and the helper takes the first start match.
+run_section_check "stage4 Action 2 binds the gate to the issue action (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "^2\. \*\*GitHub issue" "^3\. \*\*" \
+  "{gated_action} = issue"
+
+run_section_check "stage4 Action 4 binds the gate to upstream_feedback (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "^4\. \*\*Upstream" "^5\. \*\*" \
+  "{gated_action} = upstream_feedback"
+
+# The verified value, not the declared one, is what `--repo` targets, so it is
+# what the approval prompt must name (CodeRabbit CWE-863 on this PR).
+run_anchor_check "stage4 Step 0a prompt names the verified repo (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "승인 — {verified_backing_repo}에 이슈 생성 진행"
+
+run_forbidden_check "stage4 Step 0a prompt no longer names the declared repo (#1144)" \
+  "승인 — {backing_repo}에 이슈 생성 진행"
+
+# The marker is computed from the DECLARED repo, so a Step 0 divergence leaves
+# it stale; the verified repo's visibility is an independent trigger.
+run_anchor_check "stage4 Step 0a rechecks visibility of the verified repo (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "gh repo view <verified_backing_repo> --json visibility"
+
+run_anchor_check "stage4 Step 0a fails closed on an unanswerable visibility query (#1144)" \
+  "$SKILL_DIR/references/stage4-execution.md" \
+  "an unanswerable question is not permission"
 
 run_section_check "stage4 Action 2 routes hub-mediated orgs to the hub skill (#1144)" \
   "$SKILL_DIR/references/stage4-execution.md" \
