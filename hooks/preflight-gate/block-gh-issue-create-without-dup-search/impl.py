@@ -20,7 +20,8 @@ Block conditions (either triggers a block):
 
 Allow conditions (escape hatches):
   - --title contains [dup-checked] or [no-search-needed] token
-  - Personal-repo write (--repo devseunggwan/...) — low blast-radius
+  - Personal-repo write — target owner listed in PRAXIS_PERSONAL_REPO_OWNERS
+    (comma-separated; unset = no exemption, everyone gets the strict path)
   - CLAUDE_HOOK_BYPASS_DUP_GATE=1 env var
   - Title has no extractable keywords ≥4 chars (cannot enforce)
 
@@ -76,10 +77,15 @@ def main() -> int:
     if create_argv is None:
         return 0
 
-    # Personal-repo escape hatch (parsed from the create argv only).
+    # Personal-repo escape hatch (parsed from the create argv only). The
+    # owner list comes from PRAXIS_PERSONAL_REPO_OWNERS — the same env var
+    # block-personal-asset-leak reads for the same concept; unset means no
+    # exemption for anyone (issue #1156).
     repo = _extract_repo(create_argv)
-    if repo and _PERSONAL_REPO_RE.match(repo):
-        return 0
+    if repo and "/" in repo:
+        owner = repo.split("/", 1)[0].strip().lower()
+        if owner and owner in _personal_owners():
+            return 0
 
     title = _extract_title_from_argv(create_argv)
     if _DUP_TOKEN_RE.search(title):
@@ -118,7 +124,10 @@ def main() -> int:
 # Constants
 # ---------------------------------------------------------------------------
 
-_PERSONAL_REPO_RE = re.compile(r"^devseunggwan/", re.IGNORECASE)
+def _personal_owners() -> frozenset[str]:
+    """Lowercased owner handles from PRAXIS_PERSONAL_REPO_OWNERS; empty = no exemption."""
+    raw = os.environ.get("PRAXIS_PERSONAL_REPO_OWNERS", "")
+    return frozenset(o.strip().lower() for o in raw.split(",") if o.strip())
 
 # gh global flags that consume the following token as their value, so the
 # `issue` / `create` subcommand walk skips both (e.g. `gh -R o/r issue create`).

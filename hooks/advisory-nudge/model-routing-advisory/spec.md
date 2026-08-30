@@ -1,6 +1,7 @@
 # PreToolUse Model-Routing Advisory
 
 Supported hosts: claude
+Requires: cmux (only cmux / cmux-delegate delegation argv is recognized)
 
 `hooks/advisory-nudge/model-routing-advisory/impl.py` intercepts `Bash` tool
 calls that delegate work with an explicit `--model <tier>` and emits a **stderr

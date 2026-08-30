@@ -3,9 +3,14 @@
 Supported hosts: all
 
 `hooks/preflight-gate/branch-name-check/impl.py` intercepts every AI-authored
-branch-creation Bash call and emits `permissionDecision: "deny"` (strict, default)
-or a stderr advisory (STRICT=0) when the new branch name does not match the
-configured naming convention regex.
+branch-creation Bash call and, when the new branch name does not match the
+configured naming convention regex, emits `permissionDecision: "deny"` or a
+stderr advisory. Which tier applies follows the attested-convention principle
+(issue #1159): **deny only when the convention is locally attested** —
+`PRAXIS_BRANCH_NAME_REGEX` is set (a name regex is a per-repo convention), or
+`PRAXIS_BRANCH_NAME_STRICT=1` explicitly. On the shipped default regex with
+no env, a violation warns instead of blocking branch creation — a fresh
+installer's first branch is not denied by another repo's convention.
 
 ### Intercepted commands
 
@@ -55,7 +60,7 @@ Examples:
 | Env var | Default | Effect |
 | --------- | --------- | -------- |
 | `PRAXIS_BRANCH_NAME_REGEX` | `^(hub\|issue)-[0-9]+-(feat\|fix\|docs\|style\|refactor\|chore\|test\|perf\|ci\|build\|hotfix)-[a-z0-9-]+$` | Override the naming pattern |
-| `PRAXIS_BRANCH_NAME_STRICT` | `1` | `1` = deny (block); `0` = advisory (stderr only) |
+| `PRAXIS_BRANCH_NAME_STRICT` | unset | Explicit tier override: `1` = deny (block); `0` = advisory (stderr only). Unset/empty → deny iff `PRAXIS_BRANCH_NAME_REGEX` is set (attested-convention tiering, #1159) |
 | `PRAXIS_BRANCH_NAME_WHITELIST` | `main,master,dev,prod,staging` | Comma-separated names always allowed |
 
 ### Response (strict mode, default)

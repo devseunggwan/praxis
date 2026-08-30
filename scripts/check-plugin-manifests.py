@@ -47,6 +47,10 @@ Phase 2 (ADR-0001) invariants:
       in docs/bypass-vars.md and SECURITY.md, cross-checked in both directions
       so neither can drift (#688). Opt-in hooks and shared/non-manifest rows are
       exempt (they own no manifest `mode` block).
+  18. Spec `Requires:` ↔ manifest `requires` cross-check (#1158): a hook whose
+      matcher is dead without an external component (cmux, zsh, codex plugin,
+      hookable memory store, slack/notion MCP) declares it in both places or
+      neither — the Rule 8 contract, applied to component dependencies.
 
 CI invokes this; developers can too, via `./scripts/check-plugin-manifests.py`.
 """
@@ -1301,6 +1305,53 @@ def main() -> int:
                     "missing temp dir fails once instead of re-anchoring every "
                     "derived path at / (#897)"
                 )
+
+    # ------------------------------------------------------------------
+    # Rule 20 — Spec `Requires:` ↔ manifest `requires` cross-check (#1158)
+    #
+    # A hook whose matcher can never fire without an external component
+    # (cmux, zsh, the openai-codex plugin, a hookable memory store, a
+    # slack/notion MCP server) declares that component in an optional
+    # per-entry `requires` array, mirrored by a `Requires:` line in the
+    # spec header — the same both-directions contract Rule 8 enforces for
+    # `Supported hosts:`. Runtime behavior is unaffected (these hooks
+    # already fail open); the field exists so dead-matcher cost is
+    # declared, not discovered.
+    # ------------------------------------------------------------------
+    manifest_requires: dict[str, set[str]] = {}
+    for entry in manifest["hooks"]:
+        if entry.get("requires"):
+            manifest_requires.setdefault(entry["name"], set()).update(
+                entry["requires"]
+            )
+
+    for hook_dir in _hook_dirs():
+        spec_file = hook_dir / "spec.md"
+        if not spec_file.exists():
+            continue
+        hook_name = hook_dir.name
+        requires_value: str | None = None
+        for line in spec_file.read_text().splitlines()[:10]:
+            if line.strip().lower().startswith("requires:"):
+                requires_value = line.split(":", 1)[1].strip()
+                break
+        spec_set = (
+            {
+                t.split("(")[0].strip()
+                for t in requires_value.split(",")
+                if t.split("(")[0].strip()
+            }
+            if requires_value is not None
+            else set()
+        )
+        json_set = manifest_requires.get(hook_name, set())
+        if spec_set != json_set:
+            drifts.append(
+                f"FAIL requires mismatch {hook_name}: spec={sorted(spec_set)!r} "
+                f"manifest={sorted(json_set)!r} (declare the dependency in both "
+                "hooks/manifest.json `requires` and the spec's `Requires:` "
+                "header line, or in neither — #1158)"
+            )
 
     if drifts:
         print("plugin-manifest check FAILED:")

@@ -46,15 +46,21 @@ run_case() {
   base_env+=("PRAXIS_BRANCH_NAME_STRICT=")
   base_env+=("PRAXIS_BRANCH_NAME_WHITELIST=")
 
+  # Since #1159 the gate denies only when the convention is locally
+  # attested. The detection matrix below is about branch-name extraction,
+  # not tier, so the base invocation attests via PRAXIS_BRANCH_NAME_STRICT=1
+  # to keep every block expectation meaningful; per-case env args come
+  # later, so they override it. The unattested default tier has its own
+  # dedicated cases (search "#1159" below).
   if [ "${#env_args[@]}" -gt 0 ]; then
     echo "$payload" | env -u PRAXIS_BRANCH_NAME_REGEX \
-                          -u PRAXIS_BRANCH_NAME_STRICT \
                           -u PRAXIS_BRANCH_NAME_WHITELIST \
+                          PRAXIS_BRANCH_NAME_STRICT=1 \
                           "${env_args[@]}" python3 "$HOOK" >"$out_file" 2>"$err_file"
   else
     echo "$payload" | env -u PRAXIS_BRANCH_NAME_REGEX \
-                          -u PRAXIS_BRANCH_NAME_STRICT \
                           -u PRAXIS_BRANCH_NAME_WHITELIST \
+                          PRAXIS_BRANCH_NAME_STRICT=1 \
                           python3 "$HOOK" >"$out_file" 2>"$err_file"
   fi
   local rc=$?
@@ -251,6 +257,36 @@ run_case "advisory mode: good branch → silent (not warned)" \
   "silent" \
   '{"tool_name":"Bash","tool_input":{"command":"git checkout -b hub-1-feat-good"}}' \
   "PRAXIS_BRANCH_NAME_STRICT=0"
+
+# ---------------------------------------------------------------------------
+# Attested-convention tiering (#1159): deny only when the convention is
+# locally attested (REGEX set, or explicit STRICT=1); the shipped default
+# regex with no env advises.
+# ---------------------------------------------------------------------------
+
+# Empty STRICT overrides the harness's base STRICT=1 and counts as unset;
+# with no REGEX either, the shipped default is unattested → warn, not block.
+run_case "#1159: bad branch, no env at all → warn (unattested default)" \
+  "warn" \
+  '{"tool_name":"Bash","tool_input":{"command":"git checkout -b feature/bad-name"}}' \
+  "PRAXIS_BRANCH_NAME_STRICT="
+
+# Setting the regex attests the convention → deny without STRICT.
+run_case "#1159: bad branch, REGEX set, STRICT unset → block (attested)" \
+  "block" \
+  '{"tool_name":"Bash","tool_input":{"command":"git checkout -b feature/bad-name"}}' \
+  "PRAXIS_BRANCH_NAME_STRICT=" "PRAXIS_BRANCH_NAME_REGEX=^custom-.*$"
+
+run_case "#1159: branch matching the attested regex → silent" \
+  "silent" \
+  '{"tool_name":"Bash","tool_input":{"command":"git checkout -b custom-good"}}' \
+  "PRAXIS_BRANCH_NAME_STRICT=" "PRAXIS_BRANCH_NAME_REGEX=^custom-.*$"
+
+# Explicit STRICT=0 beats the regex attestation.
+run_case "#1159: REGEX set + STRICT=0 → warn (explicit override wins)" \
+  "warn" \
+  '{"tool_name":"Bash","tool_input":{"command":"git checkout -b feature/bad-name"}}' \
+  "PRAXIS_BRANCH_NAME_STRICT=0" "PRAXIS_BRANCH_NAME_REGEX=^custom-.*$"
 
 # ---------------------------------------------------------------------------
 # Custom regex env
@@ -615,9 +651,10 @@ run_case "bypass message has no '=1 =0' artifact (P3 regression)" \
   '{"tool_name":"Bash","tool_input":{"command":"git checkout -b bad-name"}}'
 
 # Verify the denial reason does NOT contain the '=1 =0' artifact.
+# (STRICT=1 attests the tier so the reason arrives as stdout JSON — #1159.)
 raw_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"git checkout -b bad-name"}}' | \
-  env -u PRAXIS_BRANCH_NAME_REGEX -u PRAXIS_BRANCH_NAME_STRICT -u PRAXIS_BRANCH_NAME_WHITELIST \
-  python3 "$HOOK" 2>/dev/null)
+  env -u PRAXIS_BRANCH_NAME_REGEX -u PRAXIS_BRANCH_NAME_WHITELIST \
+  PRAXIS_BRANCH_NAME_STRICT=1 python3 "$HOOK" 2>/dev/null)
 if echo "$raw_out" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
@@ -637,9 +674,10 @@ fi
 
 # Positive: default regex → the deny message enumerates every allowed
 # <type> value verbatim, not just the raw regex.
+# (STRICT=1 attests the tier so the reason arrives as stdout JSON — #1159.)
 raw_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"git checkout -b bad-name"}}' | \
-  env -u PRAXIS_BRANCH_NAME_REGEX -u PRAXIS_BRANCH_NAME_STRICT -u PRAXIS_BRANCH_NAME_WHITELIST \
-  python3 "$HOOK" 2>/dev/null)
+  env -u PRAXIS_BRANCH_NAME_REGEX -u PRAXIS_BRANCH_NAME_WHITELIST \
+  PRAXIS_BRANCH_NAME_STRICT=1 python3 "$HOOK" 2>/dev/null)
 if echo "$raw_out" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
