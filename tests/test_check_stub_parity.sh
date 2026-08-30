@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test_check_stub_parity.sh — verify check-plugin-manifests.py Rule 14 (#606):
+# test_check_stub_parity.sh — verify check-plugin-manifests.py Rule 15 (#606):
 # docs/hook/<name>.md redirect-stub parity.
 #
 # Forward:  every hook dir owns a byte-identical 1-line "Moved to" stub.

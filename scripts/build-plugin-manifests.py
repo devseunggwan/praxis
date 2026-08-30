@@ -448,7 +448,7 @@ def hook_identities(manifest: dict) -> dict[str, str]:
     entries (deduped by name across multi-event registrations) plus the
     OPT_IN_HOOKS set (not in the manifest, but a real hook dir). The single
     source of truth for the per-hook docs/hook stubs (#606) and their
-    byte-identity check (check Rule 14).
+    byte-identity check (check Rule 15).
     """
     ids: dict[str, str] = {}
     for entry in manifest["hooks"]:

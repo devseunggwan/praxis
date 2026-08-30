@@ -39,7 +39,7 @@ Design mechanisms shared by all hooks:
     `hooks/<name>.sh` wrapper (non-Bash or multi-tool matchers,
     UserPromptSubmit/PostToolUse/Stop events, opt-in hooks) must apply
     `@fail_open` to `main()` in `impl.py` directly (argv-style mains wrap
-    a zero-arg `_entry()` instead). Rule 15 in
+    a zero-arg `_entry()` instead). Rule 16 in
     `scripts/check-plugin-manifests.py` enforces this invariant.
   - **Before either path — the launcher (issue #1053).** Both bullets above
     run *inside* Python, so neither covers an impl that never starts. A

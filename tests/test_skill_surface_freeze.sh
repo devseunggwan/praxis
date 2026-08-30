@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test_skill_surface_freeze.sh — verify check-plugin-manifests.py Rule 11 (#465)
+# test_skill_surface_freeze.sh — verify check-plugin-manifests.py Rule 12 (#465)
 #
 # Asserts:
 #   1. Current seed (14 skills) passes
