@@ -58,11 +58,11 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _git import run_git  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
@@ -148,16 +148,11 @@ def _has_live_git_commit(command: str) -> bool:
 
 
 def _git(args: list[str]) -> str | None:
-    """Run a read-only git command; return stdout or None on any failure."""
-    try:
-        result = subprocess.run(
-            ["git", *args], capture_output=True, text=True, timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if result.returncode != 0:
-        return None
-    return result.stdout
+    """Run a read-only git command; return stdout or None on any failure.
+
+    Delegates to the shared runner (hooks/_lib/_git.py, issue #1178).
+    """
+    return run_git(args)
 
 
 def _staged_addition_realpaths(repo_root: str) -> list[tuple[str, str]] | None:

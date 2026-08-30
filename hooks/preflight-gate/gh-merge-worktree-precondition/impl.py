@@ -67,6 +67,7 @@ import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _git import run_git  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
@@ -192,6 +193,7 @@ def _scan_tail(tail: list[str]) -> tuple[bool, str | None, str | None]:
 
 
 def _run(cmd: list[str], cwd: str | None, timeout: int) -> tuple[int, str]:
+    """Local runner for `gh` calls; git calls go through _lib/_git.run_git."""
     try:
         result = subprocess.run(
             cmd,
@@ -224,8 +226,10 @@ def _resolve_head_branch(
 
 def _worktree_branches(cwd: str | None) -> dict[str, str]:
     """Return {branch_name: worktree_path} parsed from `git worktree list --porcelain`."""
-    rc, out = _run(["git", "worktree", "list", "--porcelain"], cwd, _GIT_TIMEOUT_SEC)
-    if rc != 0:
+    out = run_git(
+        ["worktree", "list", "--porcelain"], timeout=_GIT_TIMEOUT_SEC, cwd=cwd or None
+    )
+    if out is None:
         return {}
     branches: dict[str, str] = {}
     current_path: str | None = None

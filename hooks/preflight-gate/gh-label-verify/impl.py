@@ -64,6 +64,7 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
     fail_open,
     remaining_budget,
 )
+from _git import origin_slug  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
@@ -106,7 +107,6 @@ _LABELED_SUBCMDS: frozenset[tuple[str, str]] = frozenset({
 
 _GH_LABELED_CMD_RE = re.compile(r"\bgh\s+(?:issue|pr)\s+(?:create|edit)\b")
 _LABEL_FLAG_RE = re.compile(r"(?:--label|--add-label|(?<!\S)-l)\b")
-_REPO_URL_RE = re.compile(r"[:/]([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
 
 # ---------------------------------------------------------------------------
@@ -235,19 +235,15 @@ def _resolve_repo(args: list[str], cwd: str) -> str | None:
 
 
 def _resolve_repo_from_git(cwd: str) -> str | None:
-    try:
-        r = subprocess.run(
-            ["git", "-C", cwd, "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=_GIT_REMOTE_TIMEOUT_SEC,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if r.returncode != 0:
-        return None
-    m = _REPO_URL_RE.search(r.stdout.strip())
-    return f"{m.group(1)}/{m.group(2)}" if m else None
+    """owner/repo from the origin remote, or None (shared resolver, #1178).
+
+    The shared `origin_slug` regex is host-anchored to github.com, unlike the
+    looser pre-#1178 local copy that also matched gitlab/self-hosted origins.
+    A non-GitHub origin now fails open (None → no validation) instead of
+    validating `gh` labels against a slug from the wrong host — a deliberate
+    tightening (issue #1178).
+    """
+    return origin_slug(cwd=cwd, timeout=_GIT_REMOTE_TIMEOUT_SEC)
 
 
 # ---------------------------------------------------------------------------

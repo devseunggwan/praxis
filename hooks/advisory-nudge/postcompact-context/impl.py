@@ -78,6 +78,7 @@ from pathlib import Path
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _git import run_git  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _paths import (  # type: ignore[import-not-found]  # noqa: E402
     legacy_state_dir,
@@ -318,12 +319,14 @@ def _env_timeout(var: str, default: float) -> float:
 def _git_branch(cwd: str) -> str:
     # 1.5s leaves headroom under the 8s manifest budget when paired with
     # _active_pr's 3s. Git branch-show is essentially instant; the timeout
-    # exists only to bound pathological FS conditions.
-    return _run(
-        ["git", "-C", cwd, "branch", "--show-current"],
-        cwd=cwd,
+    # exists only to bound pathological FS conditions. Shared runner:
+    # hooks/_lib/_git.py (issue #1178).
+    out = run_git(
+        ["-C", cwd, "branch", "--show-current"],
         timeout=_env_timeout("PRAXIS_POSTCOMPACT_GIT_TIMEOUT", 1.5),
+        cwd=cwd,
     )
+    return (out or "").strip()
 
 
 def _active_pr(cwd: str, branch: str) -> dict | None:

@@ -42,6 +42,7 @@ import sys
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _git import origin_slug  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]
@@ -78,14 +79,6 @@ STOPWORDS = frozenset({
 MAX_KEYWORDS = 6
 GH_TIMEOUT_SEC = 4
 GIT_TIMEOUT_SEC = 2
-
-# Owner/repo extracted from common origin URL forms:
-#   git@github.com:owner/repo.git
-#   https://github.com/owner/repo.git
-#   ssh://git@github.com/owner/repo
-_ORIGIN_URL_RE = re.compile(
-    r"(?:github\.com[:/])([A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+?)(?:\.git)?/?$"
-)
 
 # ---------------------------------------------------------------------------
 # Argv inspection
@@ -149,27 +142,13 @@ def _extract_title(argv: list[str]) -> str | None:
 # ---------------------------------------------------------------------------
 
 def _resolve_origin_repo() -> str | None:
-    """Run `git remote get-url origin` and parse owner/repo from URL.
+    """Parse owner/repo from `git remote get-url origin` in the process cwd.
 
     Returns None on any failure (no git, no origin, unparseable URL).
+    Delegates to the shared resolver (hooks/_lib/_git.py, issue #1178),
+    keeping this hook's 2s git timeout.
     """
-    try:
-        proc = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=GIT_TIMEOUT_SEC,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    if proc.returncode != 0:
-        return None
-    url = (proc.stdout or "").strip()
-    if not url:
-        return None
-    m = _ORIGIN_URL_RE.search(url)
-    return m.group(1) if m else None
+    return origin_slug(timeout=GIT_TIMEOUT_SEC)
 
 
 # ---------------------------------------------------------------------------

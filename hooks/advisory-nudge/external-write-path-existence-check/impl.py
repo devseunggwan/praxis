@@ -31,12 +31,12 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _git import repo_root as git_repo_root  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     iter_command_starts,
@@ -145,20 +145,11 @@ def _parse_gh_body_file(argv: list[str]) -> str | None:
 # ---------------------------------------------------------------------------
 
 def _git_toplevel(start_dir: str) -> str | None:
-    """Run `git rev-parse --show-toplevel` from start_dir.  Returns None on failure."""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=start_dir,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    return None
+    """Run `git rev-parse --show-toplevel` from start_dir.  Returns None on failure.
+
+    Delegates to the shared resolver (hooks/_lib/_git.py, issue #1178).
+    """
+    return git_repo_root(cwd=start_dir)
 
 
 def _resolve_repo_root(body_file_path: str, cwd: str) -> str:
