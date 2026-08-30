@@ -99,7 +99,7 @@ copy drifted from the #799/#800 per-character slugify fix. Resolution order:
 2. fallback `~/.claude/projects/{slugified-cwd}/memory/` — slugify rule:
    replace every non-alphanumeric character in the absolute cwd with `-`
    (per-character, not collapsed) — matches Claude Code's own project-slug
-   convention, e.g. `/Users/nathan.song/.claude` → `-Users-nathan-song--claude`
+   convention, e.g. `/Users/jane.doe/.claude` → `-Users-jane-doe--claude`
    (double dash from the adjacent `/` and `.`). The full #799 drift story
    lives in the `_memory_dir.py` module docstring.
 3. neither resolves → exit 0 silently (no fallback attempt, no error)

@@ -286,13 +286,13 @@ run_input_case "34 hit: ASCII keyword adjacent to Hangul splits as separate toke
 # was never exercised by this suite. That gap let a real bug ship silently:
 # the fallback slugified cwd via cwd.replace("/", "-") only, which does not
 # match Claude Code's actual per-character non-alphanumeric replacement
-# (e.g. "/Users/nathan.song/.claude" slugs to "-Users-nathan-song--claude",
-# not "-Users-nathan.song-.claude") — any home path containing a special
+# (e.g. "/Users/jane.doe/.claude" slugs to "-Users-jane-doe--claude",
+# not "-Users-jane.doe-.claude") — any home path containing a special
 # character other than "/" left the fallback path permanently unresolvable
 # for that user, silently disabling every hookable memory unconditionally.
 FALLBACK_HOME=$(cd "$(mktemp -d)" && pwd -P) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 # cwd containing a literal "." mirrors the real-world failure (a "." inside
-# a path segment, as in a username like "nathan.song"). Resolve via `pwd -P`
+# a path segment, as in a username like "jane.doe"). Resolve via `pwd -P`
 # (physical path) so this test is immune to macOS's /var -> /private/var
 # symlink, which would otherwise desync the expected slug from what
 # os.getcwd() actually reports.

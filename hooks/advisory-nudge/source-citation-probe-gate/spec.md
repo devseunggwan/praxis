@@ -26,7 +26,8 @@ cited file) keeps the false-positive cost low.
 Detection runs on the extracted write body after two preprocessing steps:
 URLs are stripped (`\w+://\S+`), then fenced code blocks (paired ` ``` `)
 are removed — code samples are `external-write-falsify-check`'s
-author-exempt Check 2 territory.
+author-exempt Check 2 territory (opt-in, not registered by default — that
+surface is uncovered in a default install).
 
 | Tier | Citation shape | Pattern |
 | --- | --- | --- |
@@ -104,7 +105,8 @@ block). Set `PRAXIS_SOURCE_CITATION_STRICT=1` to convert into a hard block
   `external-write-falsify-check`).
 - **Fenced code blocks are excluded** from all tiers — identifiers inside
   ` ``` ` blocks are `external-write-falsify-check`'s author-exempt Check 2
-  territory. Unclosed fences leave their content scanned (accepted).
+  territory (opt-in, off by default). Unclosed fences leave their content
+  scanned (accepted).
 - **Scheme-less `domain:port` outside the TLD denylist may false-positive.**
   `internal.corp:8080` has extension `corp` (not in the denylist) and a
   digit run after the colon — it matches T1. The denylist covers the common

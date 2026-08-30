@@ -46,8 +46,8 @@ def slugify_project_path(path: str) -> str:
     """Slugify an absolute path per Claude Code's project-slug rule.
 
     Claude Code replaces every non-alphanumeric character individually
-    (not collapsed runs) — e.g. /Users/nathan.song/.claude slugs to
-    -Users-nathan-song--claude (double dash, since "/." is two chars).
+    (not collapsed runs) — e.g. /Users/jane.doe/.claude slugs to
+    -Users-jane-doe--claude (double dash, since "/." is two chars).
     A prior cwd.replace("/", "-") only touched slashes, so any other
     special character (a literal "." in a username, for one) left the
     fallback path permanently unresolvable — this fallback ran, found

@@ -23,8 +23,8 @@ if str(LIB) not in sys.path:
 
 import _memory_dir  # noqa: E402
 
-FAKE_CWD = "/Users/nathan.song/projects/praxis"
-FAKE_SLUG = "-Users-nathan-song-projects-praxis"
+FAKE_CWD = "/Users/jane.doe/projects/praxis"
+FAKE_SLUG = "-Users-jane-doe-projects-praxis"
 
 
 def _load_impl(name: str, rel_path: str):
@@ -46,8 +46,8 @@ def test_slugify_per_character_substitution():
 def test_slugify_adjacent_specials_not_collapsed():
     # "/." is two characters → two dashes, never collapsed into one.
     assert (
-        _memory_dir.slugify_project_path("/Users/nathan.song/.claude")
-        == "-Users-nathan-song--claude"
+        _memory_dir.slugify_project_path("/Users/jane.doe/.claude")
+        == "-Users-jane-doe--claude"
     )
 
 
@@ -126,7 +126,7 @@ def test_claude_config_dir_unset_falls_back_to_home_claude(tmp_path, monkeypatch
 # linked-worktree fallback (#824)
 # --------------------------------------------------------------------------- #
 
-WORKTREE_CWD = "/Users/nathan.song/projects/praxis-issue-824"
+WORKTREE_CWD = "/Users/jane.doe/projects/praxis-issue-824"
 
 
 class _FakeGitProc:
