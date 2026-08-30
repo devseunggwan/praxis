@@ -14,3 +14,14 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+    # codeql-action pins init and analyze as two separate `uses:` lines, and
+    # the action refuses to run when the two halves disagree ("Loaded a
+    # configuration file for version 'X', but running version 'Y'"). Ungrouped,
+    # dependabot opens one PR per path, so each PR is red on arrival and
+    # merging either one alone turns main red — observed at 4.37.6 -> 4.37.7
+    # (#1080, #1081) and again at 4.37.7 -> 4.37.9 (#1139, #1140). Grouping
+    # keeps both lines in a single PR, which is the only shape that can pass.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"

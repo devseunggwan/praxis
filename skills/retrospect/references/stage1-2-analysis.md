@@ -596,6 +596,12 @@ hook treats both actions as routed actions, and Stage 4 re-reads this declaratio
 as the routing decision before creating either upstream feedback or project issue
 artifacts.
 
+Add a `repo_visibility: public|private|internal` line to the same `Rationale`
+cell whenever the backing repo is not public. Stage 2.5 Gate-4 reads it for
+both routed action types (issue #1038), and an absent line counts as public —
+which escalates the row to per-action prior approval even when the owner is
+your own handle or org (issue #993).
+
 Resolve `backing_repo:` from these sources, in order:
 
 1. Plugin manifest `repository` field
