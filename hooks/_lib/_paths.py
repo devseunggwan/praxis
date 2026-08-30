@@ -8,8 +8,9 @@ Layout (#527):
   ~/.praxis/state/  — durable, cross-session state (strike counter, phantom-path
                       markers). PRAXIS_STATE_DIR overrides the base (back-compat).
   ~/.praxis/cache/  — regenerable, session-scoped caches / dedup markers.
-  ~/.praxis/logs/   — diagnostics (hook-errors.jsonl, bypass telemetry,
-                      Stop-gate block logs).
+  ~/.praxis/logs/   — diagnostics (hook-errors.jsonl, Stop-gate block logs).
+                      Fire/bypass telemetry lives under ~/.praxis/telemetry/,
+                      not here.
 
 Durable state migrated off the Claude-nested ${PRAXIS_STATE_DIR:-~/.claude/state/
 praxis} default reads back from `legacy_state_dir()` when the new location is

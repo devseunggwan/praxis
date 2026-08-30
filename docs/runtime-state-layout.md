@@ -54,18 +54,25 @@ dir is not writable, and never raises.
 - `hook-errors.jsonl` — swallowed-exception log from the shared `@fail_open`
   guard (`PRAXIS_HOOK_ERROR_LOG` overrides). See
   [`hooks/_lib/_hook_runtime.py`](../hooks/_lib/_hook_runtime.py).
-- bypass telemetry — see [`bypass-telemetry.md`](bypass-telemetry.md).
 - `stop-triggered.log` / `retrospect-mix-blocked.log` — Stop-gate block logs
   from [`completion-verify`](../hooks/completion-verify/completion-verify/spec.md)
   and [`retrospect-mix-check`](../hooks/completion-verify/retrospect-mix-check/spec.md).
   Best-effort appends. Before #1182 these lived under an undocumented
-  `~/.praxis/scope-confirm/` root that no sweep covered; old files are not
-  migrated and a legacy `scope-confirm/` directory may linger harmlessly.
+  `~/.praxis/scope-confirm/` root; old files are not migrated and a legacy
+  `scope-confirm/` directory may linger harmlessly. Note that #1182 is a
+  relocation only: `logs/` has no sweep or rotation, so these append-only
+  files still grow without bound — bounding them is a follow-up, not
+  something the move solved.
+
+Fire/bypass telemetry is **not** under `logs/` — it lives at
+`~/.praxis/telemetry/` (see [`bypass-telemetry.md`](bypass-telemetry.md)).
 
 ## Volatile caches (`~/.praxis/cache/`)
 
-Session-scoped dedup and state files. All of these lived under `${TMPDIR}`
-before #903, which meant `PRAXIS_HOME` did not move them:
+Session-scoped dedup and state files, plus the per-repo gh-label cache.
+The session-scoped entries lived under `${TMPDIR}` before #903, and the
+gh-label cache in the XDG cache dir until #1182 — in both eras `PRAXIS_HOME`
+did not move them:
 
 | Entry                                                              | Producer                                                                                     |
 | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
