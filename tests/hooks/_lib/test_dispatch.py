@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -89,11 +90,16 @@ def test_group_members_host_filter():
 
 
 # --------------------------------------------------------------------------- #
-# Edit/Write dispatch groups (#1168)
+# Non-Bash dispatch groups (#1168)
 #
-# Two separate groups on purpose: the `Edit|Write` members must NOT be folded
-# into the `Edit|NotebookEdit|Write` group — they would start firing on
-# NotebookEdit calls their matcher never covered.
+# Membership pins are explicit; the noop / parity / sh-execution tests below
+# are parametrized over `dispatch_groups` from the manifest, so a future group
+# (e.g. a Stop lane) gets coverage for free the moment it is declared. The
+# exact-Bash group keeps its dedicated tests above (including firing payloads).
+#
+# Two Edit groups on purpose: the `Edit|Write` members must NOT be folded into
+# the `Edit|NotebookEdit|Write` group — they would start firing on NotebookEdit
+# calls their matcher never covered.
 # --------------------------------------------------------------------------- #
 
 EDIT_WRITE_MEMBERS = {
@@ -110,18 +116,51 @@ EDIT_NOTEBOOK_WRITE_MEMBERS = {
     "bulk-write-memory-checkpoint",
 }
 
-EDIT_NOOP_PAYLOAD = json.dumps(
-    {
-        "tool_name": "Edit",
-        "tool_input": {
-            "file_path": "/tmp/praxis-dispatch-test/note.md",
-            "old_string": "alpha",
-            "new_string": "beta",
-        },
-        "cwd": str(REPO_ROOT),
-        "session_id": "test-dispatch-edit",
-    }
-)
+
+def _manifest_dispatch_groups() -> list[tuple[str, str]]:
+    manifest = json.loads((REPO_ROOT / "hooks" / "manifest.json").read_text())
+    return [
+        (g["event"], g["matcher"]) for g in manifest.get("dispatch_groups", [])
+    ]
+
+
+# Every declared group except exact-Bash (which has its own suite above).
+NON_BASH_GROUPS = [
+    g for g in _manifest_dispatch_groups() if g != ("PreToolUse", "Bash")
+]
+
+# Representative no-op tool_input per tool name; a group's payload uses the
+# first token of its matcher. Extend this map when a new group's leading tool
+# appears — the KeyError from an unknown tool is deliberate (fail loud).
+_NOOP_TOOL_INPUTS = {
+    "Bash": {"command": "ls -la"},
+    "Edit": {
+        "file_path": "/tmp/praxis-dispatch-test/note.md",
+        "old_string": "alpha",
+        "new_string": "beta",
+    },
+    "Write": {
+        "file_path": "/tmp/praxis-dispatch-test/note.md",
+        "content": "alpha",
+    },
+    "NotebookEdit": {
+        "notebook_path": "/tmp/praxis-dispatch-test/nb.ipynb",
+        "new_source": "alpha",
+    },
+    "AskUserQuestion": {"questions": []},
+}
+
+
+def _noop_payload_for(matcher: str) -> str:
+    tool = matcher.split("|")[0]
+    return json.dumps(
+        {
+            "tool_name": tool,
+            "tool_input": _NOOP_TOOL_INPUTS[tool],
+            "cwd": str(REPO_ROOT),
+            "session_id": "test-dispatch-noop",
+        }
+    )
 
 
 def test_edit_write_group_members():
@@ -153,34 +192,137 @@ def test_edit_groups_host_filter():
 
 
 @pytest.mark.parametrize(
-    "matcher", ["Edit|Write", "Edit|NotebookEdit|Write"], ids=["ew", "enw"]
+    "event,matcher", NON_BASH_GROUPS, ids=[f"{e}:{m}" for e, m in NON_BASH_GROUPS]
 )
-def test_edit_group_noop_allows(matcher):
-    rc = _dispatch.run_group("PreToolUse", matcher, EDIT_NOOP_PAYLOAD)
+def test_group_noop_allows(event, matcher):
+    rc = _dispatch.run_group(event, matcher, _noop_payload_for(matcher))
     assert rc == 0
 
 
 @pytest.mark.parametrize(
-    "member",
-    _dispatch.group_members("PreToolUse", "Edit|Write")
-    + _dispatch.group_members("PreToolUse", "Edit|NotebookEdit|Write"),
-    ids=lambda m: f"{m[0]}/{m[1]}",
+    "matcher,member",
+    [
+        (m, member)
+        for _e, m in NON_BASH_GROUPS
+        for member in _dispatch.group_members(_e, m)
+    ],
+    ids=lambda v: v if isinstance(v, str) else f"{v[0]}/{v[1]}",
 )
-def test_run_one_matches_subprocess_for_edit_noop(member):
+def test_run_one_matches_subprocess_for_group_noop(matcher, member):
     role, name, impl = member
+    payload = _noop_payload_for(matcher)
     direct = subprocess.run(
         [sys.executable, str(impl)],
-        input=EDIT_NOOP_PAYLOAD,
+        input=payload,
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
     )
-    rc, so, se = _dispatch.run_one(role, name, impl, EDIT_NOOP_PAYLOAD)
+    rc, so, se = _dispatch.run_one(role, name, impl, payload)
     assert rc == direct.returncode, (
         f"{role}/{name}: exit mismatch in-process={rc} subprocess={direct.returncode}"
     )
     assert so == direct.stdout, f"{role}/{name}: stdout mismatch"
     assert se == direct.stderr, f"{role}/{name}: stderr mismatch"
+
+
+# --------------------------------------------------------------------------- #
+# generated-command execution through a REAL shell (#1198 review, critical)
+#
+# Rule 14 and every test above invoke the dispatcher in-process or via
+# `python3 impl.py`, bypassing the shell — which is exactly why an UNQUOTED
+# pipe in the generated command (`... PreToolUse Edit|NotebookEdit|Write
+# claude`) shipped: `sh -c` parsed it as a 3-command pipeline, the dispatcher
+# ran with matcher 'Edit' (the wrong group) and its decision was swallowed.
+# These tests run the command strings from the committed hooks.json through
+# `sh -c`, end to end.
+# --------------------------------------------------------------------------- #
+
+CLAUDE_HOOKS_JSON = REPO_ROOT / ".claude-plugin" / "hooks" / "hooks.json"
+
+
+def _generated_dispatcher_commands() -> list[tuple[str, str, str]]:
+    data = json.loads(CLAUDE_HOOKS_JSON.read_text())
+    out = []
+    for event, groups in data.get("hooks", {}).items():
+        for group in groups:
+            for node in group.get("hooks", []):
+                cmd = node.get("command", "")
+                if "_dispatch.sh" in cmd:
+                    out.append((event, group.get("matcher"), cmd))
+    return out
+
+
+def _sh_env(**extra: str) -> dict:
+    env = dict(os.environ)
+    # The committed command interpolates ${CLAUDE_PLUGIN_ROOT}; for the claude
+    # platform the plugin root is the repo root.
+    env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+    env.pop("PRAXIS_HOOK_BYPASS_PROTECTED_PATHS", None)
+    env.update(extra)
+    return env
+
+
+def test_generated_dispatcher_commands_cover_all_groups():
+    # every declared dispatch group must appear as a dispatcher command in the
+    # committed claude hooks.json (guards the fixture the sh -c tests run on)
+    generated = {(e, m) for e, m, _c in _generated_dispatcher_commands()}
+    assert generated == set(_manifest_dispatch_groups())
+
+
+@pytest.mark.parametrize(
+    "event,matcher,cmd",
+    _generated_dispatcher_commands(),
+    ids=[f"{e}:{m}" for e, m, _c in _generated_dispatcher_commands()],
+)
+def test_generated_command_executes_via_sh(event, matcher, cmd):
+    result = subprocess.run(
+        ["sh", "-c", cmd],
+        input=_noop_payload_for(matcher),
+        capture_output=True,
+        text=True,
+        env=_sh_env(),
+        cwd=str(REPO_ROOT),
+    )
+    assert result.returncode == 0, (
+        f"{cmd!r}: rc={result.returncode} stderr={result.stderr[:400]!r}"
+    )
+    # `sh: 1: NotebookEdit: not found` is the unquoted-pipe signature.
+    assert "not found" not in result.stderr, result.stderr[:400]
+
+
+def test_generated_command_deny_flows_through_sh():
+    # A strict-mode protected-paths deny must survive the real shell path:
+    # the generated command executed via `sh -c` returns the deny exit code.
+    _e, _m, cmd = next(
+        c
+        for c in _generated_dispatcher_commands()
+        if c[0] == "PreToolUse" and c[1] == "Edit|NotebookEdit|Write"
+    )
+    payload = json.dumps(
+        {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/home/user/praxis-e2e/.env",
+                "content": "SECRET=1",
+            },
+            "cwd": "/home/user",
+            "session_id": "test-dispatch-sh-deny",
+        }
+    )
+    result = subprocess.run(
+        ["sh", "-c", cmd],
+        input=payload,
+        capture_output=True,
+        text=True,
+        env=_sh_env(PRAXIS_PROTECTED_PATHS_STRICT="1"),
+        cwd=str(REPO_ROOT),
+    )
+    assert result.returncode == 2, (
+        f"expected deny exit 2 through sh -c, got {result.returncode}; "
+        f"stderr={result.stderr[:400]!r}"
+    )
+    assert "protected-paths-guard" in result.stderr
 
 
 # --------------------------------------------------------------------------- #

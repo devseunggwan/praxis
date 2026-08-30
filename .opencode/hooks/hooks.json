@@ -89,7 +89,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse Edit|Write opencode",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse 'Edit|Write' opencode",
             "timeout": 5
           }
         ]
@@ -99,7 +99,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse Edit|NotebookEdit|Write opencode",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse 'Edit|NotebookEdit|Write' opencode",
             "timeout": 10
           }
         ]

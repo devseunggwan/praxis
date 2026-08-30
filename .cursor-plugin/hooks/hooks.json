@@ -89,7 +89,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse Edit|Write cursor",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse 'Edit|Write' cursor",
             "timeout": 5
           }
         ]
@@ -99,7 +99,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse Edit|NotebookEdit|Write cursor",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse 'Edit|NotebookEdit|Write' cursor",
             "timeout": 10
           }
         ]

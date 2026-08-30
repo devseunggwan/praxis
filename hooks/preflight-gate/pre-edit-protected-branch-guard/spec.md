@@ -133,7 +133,7 @@ Default (if not set): a placeholder string instructing the user to configure.
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse Edit|NotebookEdit|Write claude",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse 'Edit|NotebookEdit|Write' claude",
             "timeout": 10
           }
         ]

@@ -95,8 +95,15 @@ main() is labeled with its number, and this list is the canonical roster
       order with no duplicates, so identical matcher SETS share one literal
       spelling and can coalesce into one hooks.json group / dispatch group.
       Regex-y matchers (any token with characters outside [A-Za-z0-9]) are
-      exempt. (Numbered 24 on rebase: this rule was authored as 21 before
-      rules 21-23 landed on main.)
+      exempt, but an empty alternation token (`Edit|`) — which matches every
+      tool — is drift. (Numbered 24 on rebase: this rule was authored as 21
+      before rules 21-23 landed on main.)
+  25. Generated hook commands are shell-safe (#1198): every `command` string
+      in every platform hooks.json, token-split the way `sh -c` would, yields
+      no bare shell control-operator token — an unquoted pipe-carrying
+      dispatch matcher would otherwise run as a pipeline and silently disable
+      the whole group. (Numbered 25 on rebase: authored as 22 before rules
+      21-23 landed on main.)
 
 An unnumbered auxiliary check verifies the Codex adapter symlinks
 (plugins/praxis/{skills,hooks,scripts} → repo root).
@@ -122,6 +129,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -382,12 +390,18 @@ def dispatch_node_drifts(
             f"{len(member_nodes)} non-dispatcher node(s) in a collapsed group: "
             f"{[n.get('command', '') for n in member_nodes]}"
         )
+    # Args are shlex-quoted in the generated command (PR #1198: the host runs
+    # it via `sh -c`, so a pipe-carrying matcher MUST be quoted or it parses
+    # as a pipeline). Expect the quoted spelling — a no-op for plain tokens.
+    expected_args = (
+        f"{shlex.quote(event)} {shlex.quote(matcher or '')} {shlex.quote(host_id)}"
+    )
     for n in dispatch_nodes:
         cmd = n.get("command", "")
-        if f"{event} {matcher} {host_id}" not in cmd:
+        if expected_args not in cmd:
             out.append(
                 f"DISPATCH ARGS {event}/{matcher} host={host_id}: dispatcher "
-                f"command {cmd!r} missing '{event} {matcher} {host_id}' args"
+                f"command {cmd!r} missing '{expected_args}' args"
             )
     return out
 
@@ -2005,6 +2019,16 @@ def main() -> int:
         if not matcher or "|" not in matcher:
             return None
         tokens = matcher.split("|")
+        # An EMPTY token is never a legitimate regex-y spelling: as a hook
+        # matcher regex, an empty alternation (`Edit|`, `Edit||Write`) matches
+        # EVERY tool name, silently widening the hook to all tools. Report it
+        # as drift instead of exempting it (PR #1198 review).
+        if any(t == "" for t in tokens):
+            return (
+                f"MATCHER ORDER {where}: {matcher!r} contains an empty "
+                "alternation token, which matches EVERY tool — remove the "
+                "stray '|' (#1168)"
+            )
         if not all(_PLAIN_TOKEN_RE.fullmatch(t) for t in tokens):
             return None  # regex-y matcher — exempt
         canonical = "|".join(sorted(set(tokens)))
@@ -2031,6 +2055,50 @@ def main() -> int:
         )
         if drift:
             drifts.append(drift)
+
+    # ------------------------------------------------------------------
+    # Rule 25 — generated hook commands must be shell-safe (#1198)
+    #
+    # The host executes every hooks.json `command` string via `sh -c`. An
+    # UNQUOTED shell control operator in an interpolated value turns the
+    # command into something else entirely: the first pipe-carrying dispatch
+    # matcher (`... _dispatch.sh PreToolUse Edit|NotebookEdit|Write claude`)
+    # was parsed as a 3-command PIPELINE — the dispatcher ran with matcher
+    # 'Edit' (the wrong group) and its deny JSON was swallowed by the pipe,
+    # so all nine grouped hooks never fired. Rule 14 and the pytest parity
+    # suite both invoke the dispatcher directly and bypassed the shell, which
+    # is why neither caught it. This rule simulates the shell's token split
+    # (shlex with punctuation_chars — quoted operators stay inside their
+    # token) and flags any command that yields a bare control-operator token.
+    # ------------------------------------------------------------------
+    _SH_CONTROL_CHARS = set("|&;()<>")
+
+    def _sh_control_tokens(cmd: str) -> list[str]:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        try:
+            tokens = list(lex)
+        except ValueError:
+            return ["<unparseable: unbalanced quoting>"]
+        return [t for t in tokens if t and set(t) <= _SH_CONTROL_CHARS]
+
+    for host_id, hooks_path in hooks_outputs:
+        if not hooks_path.exists():
+            continue  # the drift/Rule 14 checks already report the missing file
+        hooks_json = json.loads(hooks_path.read_text())
+        for event_name, event_groups in hooks_json.get("hooks", {}).items():
+            for group in event_groups:
+                for node in group.get("hooks", []):
+                    cmd = node.get("command", "")
+                    bad = _sh_control_tokens(cmd)
+                    if bad:
+                        rel = hooks_path.relative_to(REPO_ROOT)
+                        drifts.append(
+                            f"UNQUOTED SHELL OPERATOR {rel} [{event_name}/"
+                            f"{group.get('matcher')}]: command {cmd!r} parses "
+                            f"under `sh -c` with bare operator token(s) {bad!r} "
+                            "— shlex-quote the interpolated value (#1198)"
+                        )
 
     if drifts:
         print("plugin-manifest check FAILED:")

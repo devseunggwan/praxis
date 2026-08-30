@@ -4,10 +4,10 @@ Supported hosts: all
 
 The hook implementation lives at
 `hooks/advisory-nudge/block-personal-asset-leak/impl.py`; its matcher is
-`Write|Edit|Bash`, so the build emits a standalone per-hook wrapper
+`Bash|Edit|Write`, so the build emits a standalone per-hook wrapper
 (`hooks/block-personal-asset-leak.sh`) rather than registering it under the
 `(PreToolUse, Bash)` dispatch group it belonged to before issue #658. It fires
-on PreToolUse(Bash|Write|Edit) and emits a stderr advisory on two
+on PreToolUse(Bash|Edit|Write) and emits a stderr advisory on two
 personal-asset marker classes:
 
 1. **Absolute home-dotfiles path** (`/Users/<name>/.claude/...`,

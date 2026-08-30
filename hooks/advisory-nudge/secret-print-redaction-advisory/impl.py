@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse(Bash|Write|Edit) advisory: nudge masking when an agent-authored
+"""PreToolUse(Bash|Edit|Write) advisory: nudge masking when an agent-authored
 verification script (or a live command) fetches a secret and routes the
 fetched value to stdout unmasked.
 

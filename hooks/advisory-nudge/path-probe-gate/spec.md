@@ -135,7 +135,7 @@ For a manual `.claude/settings.json` installation:
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse Edit|NotebookEdit|Write claude",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse 'Edit|NotebookEdit|Write' claude",
             "timeout": 10
           }
         ]
