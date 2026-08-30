@@ -42,6 +42,12 @@ FIX_PLAIN="$FIXTURE_ROOT/not-a-repo"
 mkdir -p "$FIX_REPO" "$FIX_NOORIGIN" "$FIX_PLAIN"
 ( cd "$FIX_REPO" && git init -q && git remote add origin git@github.com:devseunggwan/praxis.git ) >/dev/null 2>&1
 ( cd "$FIX_NOORIGIN" && git init -q ) >/dev/null 2>&1
+# A non-GitHub host whose PATH contains "github". The marker must be matched
+# in the host, not anywhere in the URL, or this resolves to `tools/repo` and
+# the checklist names a repo the write never touches.
+FIX_GITLAB="$FIXTURE_ROOT/gitlab-github-path"
+mkdir -p "$FIX_GITLAB"
+( cd "$FIX_GITLAB" && git init -q && git remote add origin https://gitlab.com/github/tools/repo.git ) >/dev/null 2>&1
 
 if ! ( cd "$FIX_REPO" && git remote get-url origin ) >/dev/null 2>&1; then
   echo "FAIL: could not build the resolvable checkout fixture" >&2
@@ -355,6 +361,48 @@ run_case "--repo gh issue create -h stays silent (#1148)" pass \
 # still asks.
 run_case "a write whose title contains 'help' still asks (#1148 control)" ask \
   'gh issue create --title "help the parser"'
+
+# ---------------------------------------------------------------------------
+# The usage-query exclusion must key on the token ROLE, not its text. Matching
+# text alone let a flag VALUE of `-h` silence the whole segment — including
+# the heredoc hard block, which is a hard block precisely because a heredoc
+# body bypasses the caller-chain and falsification hooks.
+# ---------------------------------------------------------------------------
+
+run_case "a --title value of -h does not disable the --repo arm" ask \
+  'gh issue create --repo victim/repo --title "-h" --body-file /tmp/b.md'
+
+run_case "a --title value of -h does not disable the repo-less arm" ask \
+  'gh issue create --title "-h" --body-file /tmp/b.md'
+
+run_case "a --title value of -h does not defeat the heredoc block" block \
+  'gh issue create --repo o/r --title "-h" <<EOF
+body
+EOF'
+
+run_case "a real --help does not defeat the heredoc block either" block \
+  'gh issue create --help <<EOF
+body
+EOF'
+
+# ---------------------------------------------------------------------------
+# A `cd` that cannot succeed must not move the resolution target: bash leaves
+# the shell in the original checkout, so the write still lands here.
+# ---------------------------------------------------------------------------
+
+run_case "cd to a nonexistent dir then repo-less gh still asks" ask \
+  "cd $FIXTURE_ROOT/definitely-not-here ; gh issue create --title \"t\""
+
+run_case "cd to a nonexistent dir with && still asks" ask \
+  "cd $FIXTURE_ROOT/definitely-not-here && gh issue create --title \"t\""
+
+# ---------------------------------------------------------------------------
+# Origin-host matching
+# ---------------------------------------------------------------------------
+
+run_case "a gitlab remote with 'github' in the path stays silent" pass \
+  'gh issue create --title "t"' \
+  "$FIX_GITLAB"
 
 run_case "repo-less gh pr view stays silent (#1148)" pass \
   'gh pr view 12 --json title'

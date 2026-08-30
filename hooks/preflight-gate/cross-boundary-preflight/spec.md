@@ -183,9 +183,20 @@ same exclusion (`impl.py:98`).
   payload's `cwd` instead; if that is a checkout the ask still fires, but the
   repo named may be the outer one. `cd <path> && ...` outside a subshell is
   tracked, and `cd` targets that need shell expansion (`$VAR`, `~`, globs,
-  `cd -`) are ignored rather than guessed.
+  `cd -`) are ignored rather than guessed. Ignoring means the payload `cwd`
+  is kept, so the ask still fires — but on a `cd "$WORKTREE" && gh …`, the
+  dominant idiom in this repo's own worktree skills, the repo it names is the
+  outer one. Treat the named target as the resolver's best guess, not proof.
+- **A `cd` whose target does not exist is not followed.** `cd /nope ; gh
+  issue create …` leaves bash in the original checkout, so following the
+  target blindly would resolve `origin` somewhere nonexistent and silence the
+  gate on a write that really does land here. The directory is stat-checked
+  and the move is skipped when it is absent.
 - **Non-GitHub `origin` remotes are unresolvable** and therefore silent — a
-  local-path or non-GitHub remote yields no `owner/repo` slug.
+  local-path or non-GitHub remote yields no `owner/repo` slug. The `github`
+  marker is matched in the **host** only: `https://gitlab.com/github/tools/repo.git`,
+  a clone under a directory named `github`, and `file:///srv/git/github-mirror/o/r.git`
+  all resolve to nothing rather than to a plausible-looking slug.
 - **`GH_REPO` and `gh repo set-default` are not consulted.** Either can point
   `gh` at a repo other than the one `origin` names; the hook reports what
   `origin` says. The environment variable is not visible in the Bash payload,
@@ -262,7 +273,7 @@ placement guidance.
 bash tests/hooks/preflight-gate/test_cross_boundary_preflight.sh
 ```
 
-Covers 73 cases: heredoc block paths (originals + F2 regression), cross-repo
+Covers 85 cases: heredoc block paths (originals + F2 regression), cross-repo
 ask paths (shorthand flags, chained commands, equals forms, F1 regression,
 own-org targets per #993), repo-less ask paths (all eight `GH_WRITE_SUBCOMMANDS`
 pairs, path-prefixed binary, chained command, `cd <checkout> && gh …` per
@@ -277,7 +288,8 @@ fail-open controls: non-checkout cwd, no-`origin` checkout, missing cwd,
 cascade-hint present/absent pair, and infrastructure (non-Bash passthrough,
 malformed JSON fail-open, `@fail_open` wrapping).
 
-Every case carries an explicit payload `cwd` pointing at one of three
+Every case carries an explicit payload `cwd` pointing at one of four
 throwaway checkout fixtures (`resolvable` with a github.com `origin`,
-`no-origin`, `not-a-repo`), so the repo-less arm's verdict never depends on
-where the suite is invoked from.
+`no-origin`, `not-a-repo`, and `gitlab-github-path` whose remote host is not
+GitHub but whose path contains `github`), so the repo-less arm's verdict never
+depends on where the suite is invoked from.

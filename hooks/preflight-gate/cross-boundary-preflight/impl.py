@@ -130,8 +130,16 @@ GIT_TIMEOUT_SEC = 2
 #   ssh://git@github.example.com/owner/repo
 # A remote on a non-GitHub host does not match — `gh` could not write to it
 # anyway, and an unparseable remote must stay silent, not guess.
+# The `github` marker must sit in the HOST, not anywhere in the path. An
+# earlier form allowed any path component, so a GitLab mirror
+# (`https://gitlab.com/github/tools/repo.git`) or a local clone under a
+# directory literally named `github` resolved to a plausible-looking
+# `owner/repo` and the checklist then named a repo the write never touches.
+# Host = the part after `scheme://[user@]` or before the `:` in scp syntax.
 _ORIGIN_URL_RE = re.compile(
-    r"(?:^|[@/])[A-Za-z0-9_.\-]*github[A-Za-z0-9_.\-]*[:/]"
+    r"^(?:[A-Za-z][A-Za-z0-9+.\-]*://)?(?:[^/@\s]+@)?"
+    r"[A-Za-z0-9_.\-]*github[A-Za-z0-9_.\-]*(?::\d+)?[:/]"
+    r"(?:.*/)??"
     r"([A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+?)(?:\.git)?/?$"
 )
 
@@ -193,23 +201,12 @@ def _gh_write_subcommand(seg: list[Token]) -> tuple[str, str] | None:
     `gh issue --repo X create` (flags between object and verb) and the
     common `gh --repo X issue create` (flags before object).
 
-    A `--help` / `-h` segment is not a write at all — `gh` prints usage and
-    exits without touching any remote — so it returns None here, at the one
-    point both ask arms share. Putting the exclusion in the shared detector
-    rather than in either arm is deliberate: the `--repo` arm has asked on
-    `gh pr create --repo o/r --help` since before issue #1148, and an
-    exclusion added to only the repo-less arm would invent exactly the
-    flag-style asymmetry #1148 exists to remove. The sibling
-    `pre-gh-pr-create-dedup-gate` carries the same exclusion (`impl.py:98`).
+    Usage queries are NOT filtered here — see `_has_help_flag`. This detector
+    answers only "is this segment a gh write subcommand", and the heredoc hard
+    block depends on it staying that broad.
     """
     argv = filter_argv(seg)
     if not argv or not _is_gh_binary(argv[0].text):
-        return None
-
-    if any(
-        t.text in ("--help", "-h") or t.text.startswith(("--help=", "-h="))
-        for t in argv[1:]
-    ):
         return None
 
     n = len(argv)
@@ -244,6 +241,26 @@ def _gh_write_subcommand(seg: list[Token]) -> tuple[str, str] | None:
 
     pair = (obj, verb)
     return pair if pair in GH_WRITE_SUBCOMMANDS else None
+
+
+def _has_help_flag(seg: list[Token]) -> bool:
+    """True if the segment carries `--help` / `-h` as an actual FLAG token.
+
+    `gh` prints usage and exits without touching any remote, so a usage query
+    is not a write and neither ask arm should fire on it.
+
+    The role check is the whole point. Matching on token *text* alone lets a
+    flag VALUE disable the segment: `--title "-h"` is a FLAG_VALUE, and an
+    attacker-supplied or merely unlucky title of `-h` would otherwise silence
+    the gate on a `--repo victim/repo` write. This helper is also called
+    *after* the heredoc hard block, never before it, so a usage query can
+    never be used to smuggle a heredoc body past Check 1.
+    """
+    return any(
+        tok.role == TokenRole.FLAG
+        and (tok.text in ("--help", "-h") or tok.text.startswith(("--help=", "-h=")))
+        for tok in seg
+    )
 
 
 def _has_repo_flag(seg: list[Token]) -> tuple[bool, str]:
@@ -464,7 +481,14 @@ def main() -> int:
         # segments run in (`cd <worktree> && gh issue create ...`).
         cd_to = _cd_target(seg)
         if cd_to is not None:
-            effective_cwd = os.path.normpath(os.path.join(effective_cwd, cd_to))
+            candidate = os.path.normpath(os.path.join(effective_cwd, cd_to))
+            # Only follow a `cd` that could actually succeed. `cd /nope ; gh
+            # issue create ...` leaves the shell in the ORIGINAL checkout, so
+            # trusting the target blindly resolved `origin` somewhere that
+            # does not exist and silenced the gate on a write that really
+            # does land in this repo.
+            if os.path.isdir(candidate):
+                effective_cwd = candidate
             continue
 
         subcommand = _gh_write_subcommand(seg)
@@ -475,6 +499,11 @@ def main() -> int:
         if _has_heredoc(seg):
             sys.stderr.write(HEREDOC_BLOCK_MSG + compound_cascade_hint(command))
             return 2
+
+        # A usage query is not a write. Deliberately placed AFTER Check 1 so
+        # `--help` cannot be used to slip a heredoc body past the hard block.
+        if _has_help_flag(seg):
+            continue
 
         # Check 2: --repo flag present → surface pre-flight checklist
         # (opt-out marker, if any, skips the checklist here only)
