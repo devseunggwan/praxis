@@ -22,7 +22,10 @@ applies only when the capability is locally attested:
   binary); `0` forces advisory even when codex is detected.
 - **Neither** → the guidance ships as a stderr advisory naming both
   escalation routes, and the commit proceeds: a commit cannot be denied for
-  skipping a review that is impossible to run here.
+  skipping a review that is impossible to run here. The advisory has two
+  variants — undetected (install/pin guidance) and detected-but-demoted
+  via `STRICT=0` (unset guidance; it must not falsely claim the CLI is
+  missing).
 
 Detection is deterministic in its return values — `shutil.which` has no
 ambiguous-failure state, so there is no path where a transient error
@@ -188,7 +191,7 @@ does not execute it) — correctly ignored.
 bash tests/hooks/preflight-gate/test_block_commit_without_codex_review.sh
 ```
 
-Covers 56 cases (60 checks; capability-tier cases included): block paths (no invocation, wrong skill, `-F` body, prose-only
+Covers 57 cases (62 checks; capability-tier cases included): block paths (no invocation, wrong skill, `-F` body, prose-only
 slash mention, subagent dir present but no subagent invocation, slash-command
 line inside a subagent transcript not satisfying the gate), pass paths (Skill
 tool_use, slash command, garbage-line resilience, Skill tool_use inside a

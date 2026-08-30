@@ -146,8 +146,9 @@ def main() -> int:
     if invoked:
         return 0  # codex-review-wrap ran this session → allow
 
-    if not _codex_capability_present():
-        _emit_advisory_message()
+    strict, codex_detected = _capability_tier()
+    if not strict:
+        _emit_advisory_message(codex_detected)
         return 0
 
     _emit_block_message(_prior_block_count(payload.get("session_id")))
@@ -620,8 +621,12 @@ def _escalation_banner(prior_blocks: int) -> list[str]:
     ]
 
 
-def _codex_capability_present() -> bool:
-    """Attested-convention capability check (issue #1187, principle #1159).
+def _capability_tier() -> tuple[bool, bool]:
+    """Attested-convention capability tier (issue #1187, principle #1159).
+
+    Returns (strict, codex_detected) — codex_detected feeds the advisory
+    wording so an explicit STRICT=0 demote with codex present does not
+    falsely claim the CLI is missing.
 
     The review this gate demands runs through the openai-codex CLI, so the
     codex binary on PATH is the detectable local attestation of the
@@ -639,31 +644,41 @@ def _codex_capability_present() -> bool:
     and the strict env exists precisely to pin the deny.
     """
     raw = os.environ.get("PRAXIS_CODEX_REVIEW_STRICT", "").strip()
+    detected = shutil.which("codex") is not None
     if raw:
         # Explicit override wins both ways, matching the sibling tiering
         # contracts (branch-name-check, the PR-marker gates): any value but
         # "0" pins the deny; "0" forces advisory even with codex detected.
-        return raw != "0"
-    return shutil.which("codex") is not None
+        return raw != "0", detected
+    return detected, detected
 
 
-def _emit_advisory_message() -> None:
+def _emit_advisory_message(codex_detected: bool) -> None:
     """Demoted emission when the codex capability is absent (issue #1187):
     a short advisory summarizing the gate and naming both escalation
     routes (the block message's resolution options assume a runnable
-    review, so they are not repeated), exit 0 — a commit cannot be denied
-    for skipping a review that is impossible to run here. No escalation banner:
+    review, so they are not repeated), exit 0. Two variants: undetected
+    (install/pin guidance) and detected-but-demoted via STRICT=0 (unset
+    guidance) — the latter must not falsely claim the CLI is missing. No escalation banner:
     the escalation counter tracks repeated *denies*, and an advisory is not
     one.
     """
-    lines = [
-        "[advisory] codex capability not detected — `git commit` will proceed.",
-        "This gate denies commits made without a `praxis:codex-review-wrap`",
-        "pass, but the codex CLI is not on PATH, so the review cannot run",
-        "here. Install the openai-codex CLI to restore the deny, or set",
-        "PRAXIS_CODEX_REVIEW_STRICT=1 to pin the deny regardless of",
-        "detection (issue #1187).",
-    ]
+    if codex_detected:
+        lines = [
+            "[advisory] codex review gate demoted by PRAXIS_CODEX_REVIEW_STRICT=0",
+            "— `git commit` will proceed. codex IS on PATH; unset",
+            "PRAXIS_CODEX_REVIEW_STRICT (or set it to 1) to restore the deny",
+            "(issue #1187).",
+        ]
+    else:
+        lines = [
+            "[advisory] codex capability not detected — `git commit` will proceed.",
+            "This gate denies commits made without a `praxis:codex-review-wrap`",
+            "pass, but the codex CLI is not on PATH, so the review cannot run",
+            "here. Install the openai-codex CLI to restore the deny, or set",
+            "PRAXIS_CODEX_REVIEW_STRICT=1 to pin the deny regardless of",
+            "detection (issue #1187).",
+        ]
     sys.stderr.write("\n".join(lines) + "\n")
 
 

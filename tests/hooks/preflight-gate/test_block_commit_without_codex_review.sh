@@ -96,7 +96,7 @@ export PRAXIS_CODEX_REVIEW_STRICT=1
 
 # run_case <name> <block|pass> <tool_name> <command> [transcript_path|"NONE"] [env]
 run_case() {
-  local name="$1" expected="$2" tool_name="$3" command="$4" tx="${5:-NONE}" env_kv="${6:-}"
+  local name="$1" expected="$2" tool_name="$3" command="$4" tx="${5:-NONE}" env_kv="${6:-}" env_kv2="${7:-}"
   local payload err_file rc err_content
   payload=$(python3 -c '
 import json, sys
@@ -105,7 +105,9 @@ if sys.argv[3] != "NONE":
     p["transcript_path"] = sys.argv[3]
 print(json.dumps(p))' "$tool_name" "$command" "$tx")
   err_file=$(mktemp)
-  if [ -n "$env_kv" ]; then
+  if [ -n "$env_kv2" ]; then
+    echo "$payload" | env "$env_kv" "$env_kv2" "$HOOK" >/dev/null 2>"$err_file"
+  elif [ -n "$env_kv" ]; then
     echo "$payload" | env "$env_kv" "$HOOK" >/dev/null 2>"$err_file"
   else
     echo "$payload" | "$HOOK" >/dev/null 2>"$err_file"
@@ -476,6 +478,20 @@ run_case "1187: review ran, STRICT=1 → pass (silent)" pass Bash \
   'git commit -m "feat: x"' "$TX_WITH_SKILL" "PRAXIS_CODEX_REVIEW_STRICT=1"
 run_case "1187: no capability, STRICT=0 → warn (explicit demote)" warn Bash \
   'git commit -m "feat: x"' "$TX_WITHOUT" "PRAXIS_CODEX_REVIEW_STRICT=0"
+
+# Detected-but-demoted (STRICT=0 with codex ON PATH): the advisory must not
+# falsely claim the CLI is missing — it names the demoting env instead.
+run_case "1187: codex detected + STRICT=0 → warn (demoted variant)" warn Bash \
+  'git commit -m "feat: x"' "$TX_WITHOUT" "PATH=$FAKE_BIN_DIR:$PATH" "PRAXIS_CODEX_REVIEW_STRICT=0"
+demoted_err=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":"git commit -m \"feat: x\""},"transcript_path":sys.argv[1]}))' "$TX_WITHOUT" | \
+  env "PATH=$FAKE_BIN_DIR:$PATH" "PRAXIS_CODEX_REVIEW_STRICT=0" "$HOOK" 2>&1 >/dev/null)
+if echo "$demoted_err" | grep -q "IS on PATH" && ! echo "$demoted_err" | grep -q "not detected"; then
+  echo "PASS [wording] demoted variant names the env, not a missing CLI"; ((PASS++))
+else
+  echo "FAIL [wording] demoted variant: $demoted_err"; ((FAIL++)); FAILED_NAMES+=("demoted variant wording")
+fi
 rm -rf "$FAKE_BIN_DIR" "$SAFE_BIN_DIR"
 
 # ---------------------------------------------------------------------------
