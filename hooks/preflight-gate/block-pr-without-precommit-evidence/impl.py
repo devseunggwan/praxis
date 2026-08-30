@@ -19,6 +19,10 @@ Background:
   pre-commit verification state explicitly in the PR body. Free-form
   reason text — the audit trail is the persistence, not the format.
 
+Tiering (issue #1186): deny only when PRAXIS_PR_EVIDENCE_STRICT is set
+truthy; on shipped defaults the message ships as a stderr advisory and
+the create proceeds (attested-convention principle, #1159).
+
 Allow conditions:
   1. --help / -h invocation
   2. --template/-T without --body/-b (interactive fill-in)
@@ -37,6 +41,7 @@ Differs from sibling:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -212,6 +217,25 @@ def _uses_template_without_body(argv: list[str]) -> bool:
 # Main
 # ---------------------------------------------------------------------------
 
+def _strict() -> bool:
+    """Attested-convention tiering (issue #1186, principle from #1159).
+
+    The marker line this gate demands is a praxis-invented convention with
+    no other local attestation signal (no regex env, no detectable
+    dependency), so the only attestation is the explicit
+    PRAXIS_PR_EVIDENCE_STRICT env — shared by both PR-marker gates. Truthy
+    (anything but "0"/empty) -> deny as before; unset/empty/"0" -> the same
+    message ships as a stderr advisory and the create proceeds.
+    """
+    return os.environ.get("PRAXIS_PR_EVIDENCE_STRICT", "").strip() not in ("", "0")
+
+
+_ADVISORY_HEADER = (
+    "[advisory] marker convention not attested locally — gh pr create will "
+    "proceed. Set PRAXIS_PR_EVIDENCE_STRICT=1 to enforce this gate as a "
+    "deny (issue #1186).\n"
+)
+
 BLOCK_MSG = """\
 ❌ BLOCKED: `gh pr create` without pre-commit evidence.
 
@@ -285,13 +309,35 @@ def main() -> int:
         # PR worktree). This surfaces the real cause instead of letting the
         # author chase a missing token that was never reachable.
         if missing_files and not body.strip():
+            # Same tiering as the marker path: the diagnostic only exists
+            # because this gate intercepted the call, so on an unattested
+            # default it must not deny either (gh itself will surface the
+            # missing file). The diagnostic text still ships as advisory.
             msg = _BODY_FILE_NOT_FOUND_TMPL.format(path=missing_files[0].resolve())
-            sys.stderr.write(msg + compound_cascade_hint(command))
+            if _strict():
+                sys.stderr.write(msg + compound_cascade_hint(command))
+                return 2
+            sys.stderr.write(
+                _ADVISORY_HEADER
+                + msg.replace("\u274c BLOCKED:", "\u26a0 missing:", 1)
+            )
+            continue
+        if _strict():
+            sys.stderr.write(
+                BLOCK_MSG + pr_body_evidence_checklist()
+                + compound_cascade_hint(command)
+            )
             return 2
+        # Advisory tier (#1186): tier-neutral first line (nothing was
+        # blocked), NO cascade hint (it describes an abort that did not
+        # happen), and `continue` so later segments of a compound command
+        # are still scanned.
         sys.stderr.write(
-            BLOCK_MSG + pr_body_evidence_checklist() + compound_cascade_hint(command)
+            _ADVISORY_HEADER
+            + BLOCK_MSG.replace("\u274c BLOCKED:", "\u26a0 missing:", 1)
+            + pr_body_evidence_checklist()
         )
-        return 2
+        continue
 
     return 0
 
