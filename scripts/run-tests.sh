@@ -293,7 +293,7 @@ else
 fi
 
 if [[ ${#MDL[@]} -eq 0 ]]; then
-  skip_step markdownlint "npm i -g markdownlint-cli2"
+  skip_step markdownlint "npm i -g markdownlint-cli2@0.23.2"
 else
   # Diff base: the merge-base with origin/main when it is known, else the whole
   # tracked set. `git merge-base` failing (no origin/main in a fresh clone) must
