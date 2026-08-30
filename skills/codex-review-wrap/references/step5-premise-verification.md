@@ -274,6 +274,19 @@ prompt or review-invocation context **must** include the following
 requirement block so the gate is enforced at generation time, not only
 at post-processing time:
 
+> **Measured limitation — `codex@openai-codex 1.0.6`** (2026-08-15): on this
+> version, `review --help` answers that `/codex:review` maps to the built-in
+> reviewer and does **not** support custom focus text, so the template
+> **cannot be injected at generation time** — the gate has to be enforced by
+> the caller on the returned findings (halt any negative claim lacking a
+> `Probe:` citation, per the trigger forms above, before surfacing it). Do
+> **not** use `adversarial-review --help` as a cheap capability probe either:
+> on 1.0.6 that subcommand does not handle `--help` and **starts a real
+> review** that has to be stopped. Generation-time injection applies when the
+> reviewer accepts a context string — e.g. the `oh-my-claudecode:code-reviewer`
+> fallback — or a companion version that re-grows custom focus text. Full
+> measurement history: [`verification-log.md`](verification-log.md).
+
 ---
 
 ```
@@ -303,6 +316,9 @@ claim, retract the claim before surfacing the finding.
 ---
 
 The template block above must appear verbatim (or equivalent) in any
-context string passed to codex-companion's review invocation. When
-`oh-my-claudecode:code-reviewer` is used as the Step 4a fallback, surface
-this requirement block as the first item in the reviewer's context.
+context string passed to codex-companion's review invocation — when the
+version in use accepts one (see the measured limitation above; on
+`codex@openai-codex 1.0.6` there is no such context string, and the gate is
+enforced caller-side instead). When `oh-my-claudecode:code-reviewer` is used
+as the Step 4a fallback, surface this requirement block as the first item in
+the reviewer's context.

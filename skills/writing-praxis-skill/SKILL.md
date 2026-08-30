@@ -54,10 +54,11 @@ description: >
 **Rules:**
 - `name` must exactly match the directory name under `skills/`.
 - `description` should be concise — keep it short enough to scan at a glance.
-- **Hard budget: the folded `description` must stay ≤ 1,024 characters.** The
-  runtime truncates longer descriptions, and since the `Triggers on "..."`
-  clause sits at the end, the trigger keywords are exactly what gets cut.
-  Trim prose, never triggers, to fit the budget.
+- **Hard budget: the folded `description` must stay ≤ 1,024 characters** (see
+  [`RUNTIME_CONSTRAINTS.md` §5](../../RUNTIME_CONSTRAINTS.md)). The runtime
+  truncates longer descriptions, and since the `Triggers on "..."` clause sits
+  at the end, the trigger keywords are exactly what gets cut. Trim prose,
+  never triggers, to fit the budget.
 - Always end `description` with a `Triggers on "..."` clause so the routing
   table in global `~/.claude/CLAUDE.md` can reference exact keywords.
 - The frontmatter `Triggers on "..."` clause is the **sole** source of trigger
@@ -141,8 +142,9 @@ split it:
   their wording; fix only what the move breaks (heading levels, relative
   links). Every rule in the old body must survive in the spine or a reference.
 
-Precedents: `retrospect` (#687) — an ~18KB spine over six stage references —
-and `codex-review-wrap` (#1181), whose Step 5 detail lives in three
+Precedents: `retrospect` (#687) — an ~18KB spine over six reference files
+(four stage references plus appendices and a report template) — and
+`codex-review-wrap` (#1181), whose Step 5 detail lives in three
 `references/step5-*.md` files. Note that
 `scripts/check-plugin-manifests.py`'s runtime-metadata gate scans
 `references/*.md` alongside `SKILL.md`, so moving an `AskUserQuestion` or

@@ -137,6 +137,39 @@ cause of the class of bugs these rules address.
 
 ---
 
+## 5. Skill `description` frontmatter — truncated past ~1,024 characters
+
+**Constraint**: The runtime exposes each skill's `description` to the model in
+a bounded slot of 1,024 characters; text past the budget is not shown. The
+YAML file itself accepts any length — nothing fails at parse time, the tail is
+just silently absent from the routing surface.
+
+**Why it bites skills**: The praxis convention puts the `Triggers on "..."`
+clause at the **end** of the description, so an over-budget description loses
+exactly its trigger keywords — the part routing depends on. The skill then
+stops matching some (or all) of its documented triggers with no error
+anywhere: the spec looks complete, `check-plugin-manifests.py` passes, and
+the drift only surfaces as "the skill didn't fire".
+
+**Workaround**: Keep the folded description ≤ 1,024 characters. Trim prose,
+never triggers. When a body is too rich to summarize under the budget, move
+detail into the body or `references/` (see `writing-praxis-skill` →
+*Progressive disclosure*) — the description is a routing surface, not
+documentation.
+
+**Verified**: 2026-08-30 / Issue #1181 — status: **documented-behavior-based,
+not yet measured live in this repo**. The observed half: `codex-review-wrap`'s
+description had grown to 1,405 folded characters with the trigger clause in
+the truncated tail region, and #1181 compressed it to 917. The limit value
+itself (1,024) comes from the documented Claude Code skill-description budget,
+not from a live truncation observation here. What would verify it: publish a
+throwaway skill whose description carries a sentinel trigger keyword starting
+past character 1,024, then check whether the loaded skill listing shows the
+sentinel and whether the keyword still routes. Until then, treat 1,024 as the
+ceiling and leave headroom.
+
+---
+
 ## Adding a new entry
 
 1. Observe a constraint that is **fixed by the runtime** (not a project

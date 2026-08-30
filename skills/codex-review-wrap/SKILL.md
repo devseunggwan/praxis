@@ -203,8 +203,8 @@ clean while having verified nothing. Return the script's stdout verbatim.
 Judge liveness on `ps` + log mtime, never on `status` or `elapsed` (both
 report a dead job as a healthy one). A completed background round re-enters
 Step 5 from the top; findings are never applied from the completion
-notification alone. Full procedure, measured against
-`codex@openai-codex 1.0.6`:
+notification alone. Full procedure — measured against the companion version
+pinned there:
 [`references/step4-run-review.md`](references/step4-run-review.md).
 
 ### Step 5: Apply Findings — Premise Verification Gate
@@ -287,9 +287,10 @@ the lines below only say what each sub-step guarantees.
 - **5b. Verify the premise** — one independent falsifying check per
   fact-modifying finding before it may become an edit, with the
   verification-method table per finding type.
-- **5c. Flip detection** — the session ledger (nine record shapes), round
-  number derivation, and the halt rule for A→B→A flips and re-proposals of
-  rejected or user-declined findings.
+- **5c. Flip detection** — the session ledger's record shapes (enumerated
+  there, not here — 5c is the SoT), round number derivation, and the halt
+  rule for A→B→A flips and re-proposals of rejected or user-declined
+  findings.
 - **5g. Critic pre-lock probe check** — a negative claim ("X does not
   exist", "X is unused", …) needs a live `Probe:` citation at the assertion
   site before it may be surfaced; includes the critic prompt template block.
