@@ -132,7 +132,12 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "external_commands": [
+          "git -C <cwd> config --local --get-regexp <remote url / gh-resolved>"
+        ]
+      }
     },
     {
       "name": "rejected-mutation-reconsent-gate",
