@@ -1163,7 +1163,7 @@ if [ "$GATE_3" = "FAIL" ]; then
 fi
 # Gate-4 (External-Repo Authorization): FAIL or missing + ⚠ EXTERNAL: prefix in Rationale → block.
 # PASS or WARN → pass (WARN means external=true but per-action approval is procedural at Stage 4).
-# NA → pass (no upstream_feedback findings).
+# NA → pass (no upstream_feedback or issue findings).
 if [ "$GATE_4" = "FAIL" ]; then
   should_block=true
   reason_parts+=("Gate-4 verdict in distribution card = FAIL")

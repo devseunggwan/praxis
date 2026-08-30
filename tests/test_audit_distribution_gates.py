@@ -215,6 +215,50 @@ def test_gate4_external_with_warning_prefix_warns_but_passes(tmp_path: Path) -> 
     assert "- gate_4_verdict: WARN" in r.stdout
 
 
+def test_gate4_issue_only_public_own_org_is_escalated(tmp_path: Path) -> None:
+    # #1038: Gate-4 used to select only `upstream_feedback` rows, so an
+    # `issue`-only row to a public own-org repo fell through as NA. Same
+    # repo/visibility as test_gate4_own_org_public_is_escalated above, but
+    # with `issue` as the sole action.
+    r = run(tmp_path, draft_of(
+        row(1, "workflow", "—", "issue",
+            "backing_repo: devseunggwan/praxis<br>repo_visibility: public")))
+    assert r.returncode == 1
+    assert "own-org membership no longer exempts a public repo" in r.stdout
+    assert "literal warning prefix" in r.stdout
+    assert "- gate_4_verdict: WARN" in r.stdout
+
+
+def test_gate4_issue_only_public_with_warning_prefix_passes(tmp_path: Path) -> None:
+    r = run(tmp_path, draft_of(
+        row(1, "workflow", "—", "issue",
+            "backing_repo: devseunggwan/praxis<br>repo_visibility: public<br>"
+            "⚠ EXTERNAL: per-action approval required at Stage 4")))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "- gate_4_verdict: WARN" in r.stdout
+
+
+def test_gate4_issue_only_private_is_not_escalated(tmp_path: Path) -> None:
+    # Negative control: an `issue` row to an own-org private repo stays PASS,
+    # same as the equivalent upstream_feedback case.
+    r = run(tmp_path, draft_of(
+        row(1, "workflow", "—", "issue",
+            "backing_repo: devseunggwan/internal-notes<br>"
+            "repo_visibility: private")))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "- gate_4_verdict: PASS" in r.stdout
+    assert "gate-4:" not in r.stdout
+
+
+def test_gate4_na_only_when_no_routed_action_at_all(tmp_path: Path) -> None:
+    # #1038: NA must mean "no upstream_feedback or issue finding exists",
+    # not "only issue rows were present". A memory-only draft still gets NA.
+    r = run(tmp_path, draft_of(
+        row(1, "behavioral", "—", "memory", SCHEMA_A), extra=MS_BLOCK))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "- gate_4_verdict: NA" in r.stdout
+
+
 def test_gate5_missing_block_fails(tmp_path: Path) -> None:
     r = run(tmp_path, draft_of(row(1, "behavioral", "—", "memory", SCHEMA_A)))
     assert r.returncode == 1
@@ -241,9 +285,12 @@ def test_compound_without_gate3_flag_fails(tmp_path: Path) -> None:
 
 
 def test_compound_with_gate3_pass(tmp_path: Path) -> None:
+    # #1038: gate-4 now audits `issue` rows too, so this fixture must declare
+    # repo_visibility to stay isolated from gate-4 and test gate-3 alone.
     r = run(tmp_path, draft_of(
         row(1, "tool", "cli", "memory, issue",
-            SCHEMA_A + "<br>backing_repo: devseunggwan/praxis"),
+            SCHEMA_A + "<br>backing_repo: devseunggwan/praxis<br>"
+            "repo_visibility: private"),
         extra=MS_BLOCK), "--gate3", "PASS")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "- gate_3_verdict: PASS" in r.stdout
@@ -282,8 +329,12 @@ def test_invalid_action_token(tmp_path: Path) -> None:
 
 
 def test_reinforce_memory_added_to_count(tmp_path: Path) -> None:
+    # #1038: gate-4 now audits `issue` rows too, so this fixture must declare
+    # repo_visibility to stay isolated from gate-4 and test the reinforce
+    # count alone.
     r = run(tmp_path, draft_of(
-        row(1, "workflow", "—", "issue", "backing_repo: devseunggwan/praxis")),
+        row(1, "workflow", "—", "issue",
+            "backing_repo: devseunggwan/praxis<br>repo_visibility: private")),
         "--reinforce-memory", "2")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "- memory: 2" in r.stdout

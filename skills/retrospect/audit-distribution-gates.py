@@ -325,8 +325,16 @@ def audit(findings: list[Finding], ms_blocks: dict[str, dict[str, str]],
     # declaration. An undeclared repo counts as public, so a missing line can
     # never widen the gate, and a third-party repo stays escalated whatever it
     # declares.
-    upstream = [f for f in findings if "upstream_feedback" in f.actions]
-    if not upstream:
+    #
+    # Selection mirrors the backing_repo check above (issue #1038): `issue`
+    # rows write to the same backing repo as `upstream_feedback` rows, so
+    # both action types are in scope — checking only `upstream_feedback`
+    # left every `gh issue create` row unaudited. With both in scope, NA now
+    # means exactly one thing: no finding proposed either action, i.e. no
+    # routed external write exists in this draft at all.
+    routed = [f for f in findings
+              if {"upstream_feedback", "issue"} & set(f.actions)]
+    if not routed:
         gate4 = "NA"
     else:
         own_orgs, fallback = resolve_own_orgs()
@@ -337,7 +345,7 @@ def audit(findings: list[Finding], ms_blocks: dict[str, dict[str, str]],
                 "unavailable) — conservative fallback treats all owners as "
                 "external"
             )
-        for f in upstream:
+        for f in routed:
             repo = owner = visibility = None
             for ln in f.rationale_lines:
                 m = BACKING_REPO_RE.match(ln)
