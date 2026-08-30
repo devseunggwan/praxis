@@ -108,26 +108,65 @@ run_case "selftrigger_fixture_literal_excluded" "" "$TMP/self_fixture.jsonl"
 mk_assistant '  "grep_pattern": "aws secretsmanager get-secret-value",' > "$TMP/self_catalog.jsonl"
 run_case "selftrigger_catalog_field_excluded" "" "$TMP/self_catalog.jsonl"
 
-# --- bounded read (issue #1183) ----------------------------------------------
-# The scanner reads only the last 400 transcript lines (matching the repo's
-# other `tail -n 400` readers). A hit that sits near the tail of a long
-# transcript must still be detected through hundreds of filler lines.
+# --- session-scoped scan (issue #1183 review round 1) -------------------------
+# The scanner's contract is SESSION-scoped: a hard-class hit early in a long
+# session must still be detected at Stop, however many lines followed it. A
+# tail-bounded read (considered for perf in #1183, rejected in review) would
+# silently pass this exact fixture — keep it as the regression guard.
 {
-  for _ in $(seq 1 450); do mk_assistant "routine progress update, nothing sensitive"; done
   mk_assistant "ran aws secretsmanager get-secret-value --secret-id foo/bar"
-} > "$TMP/tail_hit.jsonl"
-run_case "bounded_read_hit_near_tail_detected" "sanctioned-path-bypass" "$TMP/tail_hit.jsonl"
+  for _ in $(seq 1 450); do mk_assistant "routine progress update, nothing sensitive"; done
+} > "$TMP/early_hit.jsonl"
+run_case "session_scope_early_hit_still_detected" "sanctioned-path-bypass" "$TMP/early_hit.jsonl"
 
-# A hit ONLY outside the tail bound (followed by 450 filler lines) is
-# INTENTIONALLY out of scope: the bound is the same trade the other transcript
-# readers make (hot-path cost stays flat as the session grows), so conduct
-# that scrolled past the last 400 lines is not detected. This case documents
-# that trade rather than guarding a detection.
+# And the same through leading filler: a hit at the very tail of a long
+# transcript (single linear pass covers both ends).
 {
-  mk_assistant "ran aws secretsmanager get-secret-value --secret-id foo/bar"
   for _ in $(seq 1 450); do mk_assistant "routine progress update, nothing sensitive"; done
-} > "$TMP/tail_miss.jsonl"
-run_case "bounded_read_hit_outside_tail_out_of_scope" "" "$TMP/tail_miss.jsonl"
+  mk_assistant "ran aws secretsmanager get-secret-value --secret-id foo/bar"
+} > "$TMP/late_hit.jsonl"
+run_case "session_scope_late_hit_detected" "sanctioned-path-bypass" "$TMP/late_hit.jsonl"
+
+# --- catalog projection: empty middle field must not shift fields -------------
+# `IFS=tab read` collapses runs of tabs (tab is IFS whitespace), so a class
+# with an EMPTY severity used to shift grep_pattern into severity and
+# cooccurs_with into grep_pattern — the scanner then greps the co-occurrence
+# regex as the primary pattern. With only the co-occurrence signature in the
+# transcript, that shift emits a hit the un-shifted class must NOT emit
+# (primary pattern absent). The US-delimiter projection preserves the empty
+# field; expect no output.
+cat > "$TMP/holey-catalog.json" <<'JSON'
+{
+  "version": 1,
+  "fabricated_fixture_allowlist": [],
+  "classes": [
+    {
+      "id": "holey-class",
+      "severity": null,
+      "grep_pattern": "PRIMARY_SIGNATURE_AAA",
+      "cooccurs_with": "COOCCUR_SIGNATURE_BBB"
+    }
+  ]
+}
+JSON
+mk_assistant "only the co-occurrence half: COOCCUR_SIGNATURE_BBB" > "$TMP/holey.jsonl"
+got_holey="$(bash "$SCAN" --transcript "$TMP/holey.jsonl" --catalog "$TMP/holey-catalog.json" 2>/dev/null | cut -f1 | paste -sd, -)"
+if [ "$got_holey" = "" ]; then
+  PASS=$((PASS + 1)); printf 'PASS  %s\n' "empty_middle_field_does_not_shift"
+else
+  FAIL=$((FAIL + 1)); printf 'FAIL  %s  expected=[] got=[%s]\n' "empty_middle_field_does_not_shift" "$got_holey"
+fi
+# Positive control on the same catalog: both signatures present → the class
+# fires with its fields in the right places (severity comes out empty, id
+# intact) — proving the empty field is preserved rather than the class lost.
+{ mk_assistant "PRIMARY_SIGNATURE_AAA seen"; mk_assistant "and later COOCCUR_SIGNATURE_BBB"; } > "$TMP/holey_both.jsonl"
+holey_line="$(bash "$SCAN" --transcript "$TMP/holey_both.jsonl" --catalog "$TMP/holey-catalog.json" 2>/dev/null | head -n 1)"
+if [ "$(printf '%s' "$holey_line" | cut -f1)" = "holey-class" ] \
+  && [ "$(printf '%s' "$holey_line" | cut -f2)" = "" ]; then
+  PASS=$((PASS + 1)); printf 'PASS  %s\n' "empty_middle_field_preserved_in_output"
+else
+  FAIL=$((FAIL + 1)); printf 'FAIL  %s  got=[%s]\n' "empty_middle_field_preserved_in_output" "$holey_line"
+fi
 
 # --- role-key whitespace tolerance -------------------------------------------
 # A record serialized with a space after the colon ("role": "assistant") must

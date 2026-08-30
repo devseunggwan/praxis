@@ -155,6 +155,52 @@ assert rec["hook"] == "esc-hook" and rec["granularity"] == "rich", rec
 PY
 then ok "unsafe field routes through escape fallback"; else ko "unsafe field routes through escape fallback" "$(cat "$ESC_LEDGER" 2>/dev/null)"; fi
 
+# Env parity with _fire_ledger (review round 1): Python reads both env values
+# stripped, so the shell writer must too.
+# Padded disable value must still disable (Python: _disabled() strips).
+rm -f "$LEDGER"
+PRAXIS_FIRE_TELEMETRY_DISABLE='1 ' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" \
+  sh "$PROBE_ROOT/role/name/impl.sh"
+if [ ! -f "$LEDGER" ]; then
+  ok "padded disable value still disables"
+else
+  ko "padded disable value still disables" "$(cat "$LEDGER")"
+fi
+
+# Padded override path must be trimmed (Python: resolve_path() strips) — a
+# verbatim use would split records across two files ('/x' vs ' /x ').
+PAD_LEDGER="$PROBE_ROOT/padded.jsonl"
+rm -f "$PAD_LEDGER"
+PRAXIS_FIRE_TELEMETRY_FILE="  $PAD_LEDGER  " sh "$PROBE_ROOT/role/name/impl.sh"
+assert_record "$PAD_LEDGER" "padded override path is trimmed" probe-hook pass sess-probe
+
+# Physical (symlink-resolving) dev-checkout probe: _fire_ledger resolves the
+# package root via Path.resolve() (physical), so the shell writer must too —
+# a logical cd/pwd would probe the SYMLINK-side root. Layout: R1 holds the
+# real _lib (no .git → not a checkout); R2 has a .git dir but only a symlink
+# to R1's _lib. Physical resolution lands in R1 → the real-ledger path under
+# HOME; logical resolution would land in R2 → R2/.praxis-dev-telemetry, a
+# ledger split from where Python writes.
+SYM_ROOT="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
+mkdir -p "$SYM_ROOT/r1/_lib" "$SYM_ROOT/r2/.git" "$SYM_ROOT/r2/role/name" "$SYM_ROOT/home"
+cp "$ROOT_DIR/hooks/_lib/record_fire.sh" "$SYM_ROOT/r1/_lib/"
+ln -s "$SYM_ROOT/r1/_lib" "$SYM_ROOT/r2/_lib"
+cp "$PROBE_ROOT/role/name/impl.sh" "$SYM_ROOT/r2/role/name/impl.sh"
+# Empty override: this case exercises DEFAULT path resolution, and
+# scripts/run-tests.sh exports PRAXIS_FIRE_TELEMETRY_FILE suite-wide — an
+# inherited override would swallow the record this assertion looks for.
+# Empty means unset to both writers (Python strips then falsy-checks).
+HOME="$SYM_ROOT/home" PRAXIS_FIRE_TELEMETRY_FILE='' sh "$SYM_ROOT/r2/role/name/impl.sh"
+SYM_TODAY=$(date -u +%Y-%m-%d)
+SYM_REAL="$SYM_ROOT/home/.praxis/telemetry/fire-events-$SYM_TODAY.jsonl"
+if [ -s "$SYM_REAL" ] && [ ! -e "$SYM_ROOT/r2/.praxis-dev-telemetry" ]; then
+  ok "symlinked _lib resolves physically (matches Python)"
+else
+  ko "symlinked _lib resolves physically (matches Python)" \
+    "real=$(ls "$SYM_REAL" 2>&1) dev=$(ls "$SYM_ROOT/r2/.praxis-dev-telemetry" 2>&1)"
+fi
+rm -rf "$SYM_ROOT"
+
 # Concurrency smoke: N parallel shell appends into one ledger must yield
 # exactly N intact lines — the single-printf-under-O_APPEND contract (each
 # line far below PIPE_BUF) means no torn/interleaved records. Bounded loop,

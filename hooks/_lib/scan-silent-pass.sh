@@ -49,19 +49,17 @@ command -v jq >/dev/null 2>&1 || exit 0
 # which live in assistant records). Coarse role filtering + a specific pattern
 # does the discrimination; this is a single linear grep pass, not a jq walk.
 #
-# Tail-bounded (issue #1183): a long session's transcript grows unbounded, and
-# grepping all of it on every Stop / PreToolUse front-load scales the hot path
-# with session length. 400 lines matches the repo's other transcript readers
-# (completion-verify and retrospect-mix-check both read `tail -n 400`), and it
-# is enough for what the catalog classes actually need: the hard classes
-# (credential-display, sanctioned-path-bypass) match a single recent assistant
-# line, and the churn co-occurrence pair (create then close) lands inside one
-# recent working window. Conduct that scrolled past the last 400 transcript
-# lines is intentionally out of scope — same trade the other readers make.
-# The role match tolerates whitespace after the colon so a pretty-printed or
-# re-serialized record is not silently skipped.
-ASSISTANT_LINES=$(tail -n 400 -- "$TRANSCRIPT" 2>/dev/null \
-  | grep -E '"role":[[:space:]]*"assistant"' 2>/dev/null || true)
+# DELIBERATELY UNBOUNDED (issue #1183 review round 1): this scanner's contract
+# is SESSION-scoped conduct detection — a severity=hard hit (credential
+# display, sanctioned-path bypass) must block at Stop no matter how early in
+# the session it happened, and the churn co-occurrence pair rarely lands
+# inside any small tail window. A `tail -n 400` bound like the repo's other
+# transcript readers use would silently pass a credential displayed 500 lines
+# ago, so the whole transcript is read: ONE linear grep pass (grep rejects
+# non-matching lines in C), which stays inside the front-load budget where a
+# per-line jq walk did not. The role match tolerates whitespace after the
+# colon so a pretty-printed or re-serialized record is not silently skipped.
+ASSISTANT_LINES=$(grep -E '"role":[[:space:]]*"assistant"' "$TRANSCRIPT" 2>/dev/null || true)
 [ -n "$ASSISTANT_LINES" ] || exit 0
 
 # Build the precise-exclusion fixed-string set: every fabricated positive_fixture
@@ -101,14 +99,24 @@ fi
 # Iterate classes from the catalog (jq on the small catalog only). ONE jq
 # spawn total (issue #1183) — the per-index loop used to spawn jq 5x per class
 # (count + 4 field reads = 16 spawns for 3 classes); a single @tsv projection
-# read with `while IFS=tab read` carries the same four fields per class.
+# carries the same four fields per class.
 # @tsv escapes \ tab \n \r inside a value (keeping one class per line);
 # printf %b reverses exactly that set, so a future grep_pattern containing a
 # regex backslash survives the round trip intact.
+# The tab delimiters are then swapped for the unit separator (US, 0x1f):
+# tab is IFS *whitespace*, and `IFS=tab read` collapses a run of tabs — an
+# EMPTY MIDDLE FIELD (e.g. a class with no severity) would shift every later
+# field left, so the grep would run with the co-occurrence regex as the
+# primary pattern. US is non-whitespace, so `read` preserves empty fields;
+# it cannot appear in a value (@tsv leaves it untouched, but it is illegal in
+# the JSON source text a catalog is written as, and no catalog field carries
+# one). Safe to translate AFTER @tsv because every literal tab inside a value
+# is already escaped to backslash-t, leaving delimiters as the only real tabs.
 jq -r '.classes[]?
        | [(.id // ""), (.severity // ""), (.grep_pattern // ""), (.cooccurs_with // "")]
        | @tsv' "$CATALOG" 2>/dev/null \
-| while IFS=$'\t' read -r id severity pat cooccur; do
+| tr '\t' '\037' \
+| while IFS=$'\037' read -r id severity pat cooccur; do
   pat=$(printf '%b' "$pat")
   cooccur=$(printf '%b' "$cooccur")
   [ -n "$id" ] && [ -n "$pat" ] || continue

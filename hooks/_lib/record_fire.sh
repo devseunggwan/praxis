@@ -86,14 +86,36 @@ except Exception:
   return 0
 }
 
+# _praxis_trim <value>
+#
+# Strips leading/trailing whitespace into _PRAXIS_TRIMMED (no subshell — a
+# $(...) capture would fork on every fire). Mirrors Python's str.strip() for
+# the env values _fire_ledger reads stripped (`_disabled()`, `resolve_path()`);
+# without this a padded value ('1 ', ' /path ') would diverge between the two
+# writers — the disable flag ignored, or records split across two files.
+_praxis_trim() {
+  _PRAXIS_TRIMMED="$1"
+  while case "$_PRAXIS_TRIMMED" in [[:space:]]*) true ;; *) false ;; esac; do
+    _PRAXIS_TRIMMED="${_PRAXIS_TRIMMED#?}"
+  done
+  while case "$_PRAXIS_TRIMMED" in *[[:space:]]) true ;; *) false ;; esac; do
+    _PRAXIS_TRIMMED="${_PRAXIS_TRIMMED%?}"
+  done
+}
+
 praxis_record_fire() {
-  # Mirrors _fire_ledger._disabled(). Exact-match "1" (the documented value);
-  # the escape fallback re-checks with Python's stripped comparison.
-  [ "${PRAXIS_FIRE_TELEMETRY_DISABLE:-}" = "1" ] && return 0
+  # Mirrors _fire_ledger._disabled(): stripped comparison against "1".
+  _praxis_trim "${PRAXIS_FIRE_TELEMETRY_DISABLE:-}"
+  [ "$_PRAXIS_TRIMMED" = "1" ] && return 0
 
   # CDPATH is unset inside the subshell, not prefixed on `cd` — a prefixed
   # `CDPATH= cd` reads to shellcheck as a stray empty assignment (SC1007).
-  _rf_lib_dir="${PRAXIS_LIB_DIR:-$(unset CDPATH; cd -- "$(dirname -- "$0")/../../_lib" 2>/dev/null && pwd)}"
+  # cd -P / pwd -P resolve PHYSICALLY, matching Path(__file__).resolve() in
+  # _fire_ledger._checkout_root(): under a symlinked hooks layout a logical
+  # resolution would probe a different root than Python and split the ledger
+  # across two directories — exactly the corruption resolve_telemetry_dir()'s
+  # docstring warns against.
+  _rf_lib_dir="${PRAXIS_LIB_DIR:-$(unset CDPATH; cd -P -- "$(dirname -- "$0")/../../_lib" 2>/dev/null && pwd -P)}"
 
   # Escape fallback: any field containing a character outside the JSON-safe
   # charset (needs \" / \\ / \uXXXX escaping json.dumps performs) goes through
@@ -111,15 +133,17 @@ praxis_record_fire() {
   esac
 
   # Path resolution mirrors _fire_ledger.resolve_path():
-  #   PRAXIS_FIRE_TELEMETRY_FILE → dev checkout ledger → real ledger.
+  #   PRAXIS_FIRE_TELEMETRY_FILE (stripped, like Python) → dev checkout
+  #   ledger → real ledger.
   # The dev-checkout probe mirrors _checkout_root(): the package root sits
   # exactly two levels above _lib, and `.git` there (dir in a clone, file in
   # a linked worktree) marks a development checkout.
-  _rf_path="${PRAXIS_FIRE_TELEMETRY_FILE:-}"
+  _praxis_trim "${PRAXIS_FIRE_TELEMETRY_FILE:-}"
+  _rf_path="$_PRAXIS_TRIMMED"
   if [ -z "$_rf_path" ]; then
     [ -n "$_rf_lib_dir" ] || return 0
     _rf_today=$(date -u +%Y-%m-%d) || return 0
-    _rf_root=$(unset CDPATH; cd -- "$_rf_lib_dir/../.." 2>/dev/null && pwd)
+    _rf_root=$(unset CDPATH; cd -P -- "$_rf_lib_dir/../.." 2>/dev/null && pwd -P)
     [ -n "$_rf_root" ] || return 0
     if [ -e "$_rf_root/.git" ]; then
       _rf_dir="$_rf_root/.praxis-dev-telemetry"
