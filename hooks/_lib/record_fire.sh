@@ -26,9 +26,20 @@
 # so unlike the Python callers there is nothing to suppress on success and
 # nothing to restore on failure.
 #
-# Fail-open, unconditionally: python3 missing, _lib unreadable, ledger
-# unwritable, malformed argument — every failure is swallowed and the caller
-# continues. A telemetry write must never change a hook's decision.
+# PER-FIRE COST (issue #1183): the record used to be written by spawning
+# `python3 -c 'import _fire_ledger; …'` — a full interpreter cold start on
+# EVERY fire, including plain passes, of every instrumented shell hook (two
+# of which run on each Stop). The append is now pure shell: the record's
+# fields are simple scalars, so the JSON line is assembled with printf and
+# appended via the shell's own `>>` (O_APPEND). python3 remains for exactly
+# two cold paths that cannot regress the per-fire cost:
+#   - a field value outside the JSON-safe charset (needs real JSON escaping);
+#   - the once-per-UTC-day retention sweep (`_fire_ledger.prune_telemetry`).
+#
+# Fail-open, unconditionally: ledger unwritable, unresolvable _lib, malformed
+# argument — every failure is swallowed and the caller continues. A telemetry
+# write must never change a hook's decision. python3 being missing no longer
+# suppresses the record (only the escape fallback and the sweep need it).
 
 # praxis_fire_arm <hook> <role> <session_id> [tool]
 #
@@ -51,13 +62,15 @@ praxis_fire_arm() {
   trap 'praxis_record_fire "$PRAXIS_FIRE_HOOK" "$PRAXIS_FIRE_ROLE" "$PRAXIS_FIRE_DECISION" "$PRAXIS_FIRE_SESSION" "$PRAXIS_FIRE_TOOL"' EXIT
 }
 
-praxis_record_fire() {
-  # CDPATH is unset inside the subshell, not prefixed on `cd` — a prefixed
-  # `CDPATH= cd` reads to shellcheck as a stray empty assignment (SC1007).
-  _rf_lib_dir="${PRAXIS_LIB_DIR:-$(unset CDPATH; cd -- "$(dirname -- "$0")/../../_lib" 2>/dev/null && pwd)}"
-  [ -n "$_rf_lib_dir" ] || return 0
+# _praxis_record_fire_py <lib_dir> <hook> <role> <decision> <session_id> <tool>
+#
+# Escape-fallback writer: delegates to `_fire_ledger.record_session_fire`,
+# whose json.dumps handles arbitrary field content. Reached only when a field
+# value falls outside the JSON-safe charset the fast path allows — in practice
+# never for the shipped hooks (session ids are UUID-shaped, the rest are
+# manifest literals), so the interpreter cold start stays off the hot path.
+_praxis_record_fire_py() {
   command -v python3 >/dev/null 2>&1 || return 0
-
   python3 -c '
 import sys
 sys.path.insert(0, sys.argv[1])
@@ -69,6 +82,102 @@ try:
     )
 except Exception:
     pass
-' "$_rf_lib_dir" "$1" "$2" "$3" "${4:-}" "${5:-}" >/dev/null 2>&1 || true
+' "$1" "$2" "$3" "$4" "$5" "$6" >/dev/null 2>&1 || true
+  return 0
+}
+
+praxis_record_fire() {
+  # Mirrors _fire_ledger._disabled(). Exact-match "1" (the documented value);
+  # the escape fallback re-checks with Python's stripped comparison.
+  [ "${PRAXIS_FIRE_TELEMETRY_DISABLE:-}" = "1" ] && return 0
+
+  # CDPATH is unset inside the subshell, not prefixed on `cd` — a prefixed
+  # `CDPATH= cd` reads to shellcheck as a stray empty assignment (SC1007).
+  _rf_lib_dir="${PRAXIS_LIB_DIR:-$(unset CDPATH; cd -- "$(dirname -- "$0")/../../_lib" 2>/dev/null && pwd)}"
+
+  # Escape fallback: any field containing a character outside the JSON-safe
+  # charset (needs \" / \\ / \uXXXX escaping json.dumps performs) goes through
+  # _fire_ledger. POSIX sh has no substring replacement, so the fast path
+  # allowlists instead of escaping. Free text can only enter via session_id
+  # and tool (payload-derived); hook/role/decision are caller literals, but
+  # all five are checked uniformly — a new caller must not be able to corrupt
+  # the ledger.
+  case "${1:-}${2:-}${3:-}${4:-}${5:-}" in
+    *[!A-Za-z0-9._:-]*)
+      [ -n "$_rf_lib_dir" ] || return 0
+      _praxis_record_fire_py "$_rf_lib_dir" "${1:-}" "${2:-}" "${3:-}" "${4:-}" "${5:-}"
+      return 0
+      ;;
+  esac
+
+  # Path resolution mirrors _fire_ledger.resolve_path():
+  #   PRAXIS_FIRE_TELEMETRY_FILE → dev checkout ledger → real ledger.
+  # The dev-checkout probe mirrors _checkout_root(): the package root sits
+  # exactly two levels above _lib, and `.git` there (dir in a clone, file in
+  # a linked worktree) marks a development checkout.
+  _rf_path="${PRAXIS_FIRE_TELEMETRY_FILE:-}"
+  if [ -z "$_rf_path" ]; then
+    [ -n "$_rf_lib_dir" ] || return 0
+    _rf_today=$(date -u +%Y-%m-%d) || return 0
+    _rf_root=$(unset CDPATH; cd -- "$_rf_lib_dir/../.." 2>/dev/null && pwd)
+    [ -n "$_rf_root" ] || return 0
+    if [ -e "$_rf_root/.git" ]; then
+      _rf_dir="$_rf_root/.praxis-dev-telemetry"
+    else
+      _rf_dir="${HOME:-}/.praxis/telemetry"
+    fi
+    _rf_path="$_rf_dir/fire-events-$_rf_today.jsonl"
+  fi
+
+  # Non-regular-file guard, mirroring _atomic_append's refusal to write to a
+  # FIFO / device / symlink at the target (planted, or via the env override).
+  # `>>` on a FIFO would BLOCK the hook, which is worse than a lost record.
+  # A pre-open [ -f ] check narrows but cannot close the lstat→open race the
+  # Python writer closes with O_NOFOLLOW|O_NONBLOCK; for this fail-open
+  # telemetry append the narrowed window is accepted.
+  _rf_first=1
+  if [ -e "$_rf_path" ] || [ -L "$_rf_path" ]; then
+    { [ -f "$_rf_path" ] && [ ! -L "$_rf_path" ]; } || return 0
+    _rf_first=0
+  fi
+
+  # Timestamp shape matches datetime.now(timezone.utc).isoformat() —
+  # microsecond precision where `date` supports GNU %N; readers parse it with
+  # datetime.fromisoformat, which also accepts the fraction-less fallback
+  # (Python itself omits the fraction when microsecond == 0).
+  _rf_ts=$(date -u +%Y-%m-%dT%H:%M:%S.%6N+00:00 2>/dev/null) || _rf_ts=""
+  case "$_rf_ts" in
+    ''|*N*) _rf_ts=$(date -u +%Y-%m-%dT%H:%M:%S+00:00) || return 0 ;;
+  esac
+
+  mkdir -p -- "$(dirname -- "$_rf_path")" 2>/dev/null || return 0
+
+  # Key order and ": " / ", " separators match json.dumps' defaults in
+  # _fire_ledger.record_session_fire, so shell- and Python-written records are
+  # byte-compatible (timestamp aside). Single printf of one short line
+  # (~200 B, far under PIPE_BUF's >=4096) under the shell's O_APPEND `>>`
+  # keeps the same no-torn-lines concurrency contract as _atomic_append's
+  # per-line os.write.
+  { printf '{"timestamp": "%s", "session_id": "%s", "tool": "%s", "hook": "%s", "role": "%s", "decision": "%s", "granularity": "rich"}\n' \
+      "$_rf_ts" "${4:-}" "${5:-}" "${1:-}" "${2:-}" "${3:-}" >> "$_rf_path"; } 2>/dev/null || return 0
+
+  # Retention sweep (#1078) on the first write of the UTC day, exactly the
+  # edge _atomic_append keys on ("today's file does not exist yet"). Reuses
+  # prune_telemetry rather than reimplementing name-dated cutoffs in shell;
+  # the interpreter cold start lands once per day per directory, never on the
+  # per-fire path. Best-effort: no python3 / no _fire_ledger → skipped.
+  if [ "$_rf_first" = "1" ] && [ -n "$_rf_lib_dir" ] \
+      && command -v python3 >/dev/null 2>&1; then
+    python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+try:
+    from pathlib import Path
+    import _fire_ledger
+    _fire_ledger.prune_telemetry(Path(sys.argv[2]).parent)
+except Exception:
+    pass
+' "$_rf_lib_dir" "$_rf_path" >/dev/null 2>&1 || true
+  fi
   return 0
 }

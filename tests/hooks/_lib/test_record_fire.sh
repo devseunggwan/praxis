@@ -72,17 +72,22 @@ else
   ko "disable env writes nothing, exit 0" "rc=$rc ledger=$(ls "$LEDGER" 2>&1)"
 fi
 
-# fail-open: _fire_ledger.py missing from the resolved _lib
+# _fire_ledger.py missing from the resolved _lib: the pure-shell append
+# (issue #1183) needs no Python at all on its fast path, so the record must
+# STILL land (before #1183 this case asserted a silent drop — the python3 -c
+# writer could not import the module). Fail-open here means exit 0, not
+# record loss.
 NOLIB_ROOT="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 mkdir -p "$NOLIB_ROOT/_lib" "$NOLIB_ROOT/role/name"
 cp "$ROOT_DIR/hooks/_lib/record_fire.sh" "$NOLIB_ROOT/_lib/"
 cp "$PROBE_ROOT/role/name/impl.sh" "$NOLIB_ROOT/role/name/impl.sh"
 PRAXIS_FIRE_TELEMETRY_FILE="$NOLIB_ROOT/led.jsonl" sh "$NOLIB_ROOT/role/name/impl.sh"
 rc=$?
-if [ "$rc" -eq 0 ] && [ ! -f "$NOLIB_ROOT/led.jsonl" ]; then
-  ok "missing _fire_ledger fails open"
+if [ "$rc" -eq 0 ]; then
+  assert_record "$NOLIB_ROOT/led.jsonl" "missing _fire_ledger still records (shell path)" \
+    probe-hook pass sess-probe
 else
-  ko "missing _fire_ledger fails open" "rc=$rc"
+  ko "missing _fire_ledger still records (shell path)" "rc=$rc"
 fi
 
 # fail-open: unwritable ledger path
@@ -90,6 +95,95 @@ PRAXIS_FIRE_TELEMETRY_FILE=/dev/null/nope sh "$PROBE_ROOT/role/name/impl.sh"
 rc=$?
 [ "$rc" -eq 0 ] && ok "unwritable ledger fails open" \
   || ko "unwritable ledger fails open" "rc=$rc"
+
+# --- shell/python record parity (issue #1183) ------------------------------
+# The pure-shell append must produce a record indistinguishable from what
+# _fire_ledger.record_session_fire writes: same keys, same key ORDER, same
+# values (timestamps differ by fire time only, and both must parse as
+# ISO-8601). Byte-level, only the timestamp value may differ.
+PARITY_LEDGER="$PROBE_ROOT/parity.jsonl"
+rm -f "$PARITY_LEDGER"
+PRAXIS_FIRE_TELEMETRY_FILE="$PARITY_LEDGER" python3 - "$ROOT_DIR" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1] + "/hooks/_lib")
+import _fire_ledger
+_fire_ledger.record_session_fire(
+    hook="parity-hook", role="parity-role", decision="advise",
+    session_id="sess-parity", tool="Bash")
+PY
+PRAXIS_LIB_DIR="$ROOT_DIR/hooks/_lib" PRAXIS_FIRE_TELEMETRY_FILE="$PARITY_LEDGER" sh -c '
+  . "$1/hooks/_lib/record_fire.sh"
+  praxis_record_fire parity-hook parity-role advise sess-parity Bash
+' parity "$ROOT_DIR"
+if python3 - "$PARITY_LEDGER" <<'PY'
+import json, re, sys
+from datetime import datetime
+lines = [l.rstrip("\n") for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+assert len(lines) == 2, f"expected 2 records, got {len(lines)}"
+py_line, sh_line = lines
+py_rec, sh_rec = json.loads(py_line), json.loads(sh_line)
+assert list(py_rec) == list(sh_rec), f"key order differs: {list(py_rec)} vs {list(sh_rec)}"
+for key in py_rec:
+    if key == "timestamp":
+        continue
+    assert py_rec[key] == sh_rec[key], f"{key}: {py_rec[key]!r} != {sh_rec[key]!r}"
+datetime.fromisoformat(sh_rec["timestamp"])  # must stay parseable by readers
+# Byte parity modulo the timestamp value: normalizing it must make the raw
+# JSONL lines identical (pins separators/spacing, not just parsed content).
+norm = lambda s: re.sub(r'("timestamp": ")[^"]*(")', r"\1T\2", s)
+assert norm(py_line) == norm(sh_line), f"byte mismatch:\n{norm(py_line)}\n{norm(sh_line)}"
+PY
+then ok "shell record byte-matches python record"; else ko "shell record byte-matches python record" "see stderr"; fi
+
+# Escape fallback: a field value outside the JSON-safe charset (here a
+# session_id carrying a double quote and a space) must route through the
+# Python writer and still land as ONE valid record with the exact value —
+# never a corrupt line, never a drop.
+ESC_LEDGER="$PROBE_ROOT/escape.jsonl"
+rm -f "$ESC_LEDGER"
+PRAXIS_LIB_DIR="$ROOT_DIR/hooks/_lib" PRAXIS_FIRE_TELEMETRY_FILE="$ESC_LEDGER" sh -c '
+  . "$1/hooks/_lib/record_fire.sh"
+  praxis_record_fire esc-hook esc-role pass "weird \"sess\" id" ""
+' escape "$ROOT_DIR"
+if python3 - "$ESC_LEDGER" <<'PY'
+import json, sys
+lines = [l for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+assert len(lines) == 1, f"expected 1 record, got {len(lines)}"
+rec = json.loads(lines[0])
+assert rec["session_id"] == 'weird "sess" id', rec
+assert rec["hook"] == "esc-hook" and rec["granularity"] == "rich", rec
+PY
+then ok "unsafe field routes through escape fallback"; else ko "unsafe field routes through escape fallback" "$(cat "$ESC_LEDGER" 2>/dev/null)"; fi
+
+# Concurrency smoke: N parallel shell appends into one ledger must yield
+# exactly N intact lines — the single-printf-under-O_APPEND contract (each
+# line far below PIPE_BUF) means no torn/interleaved records. Bounded loop,
+# no timing dependence: correctness is asserted on the surviving file.
+CONC_LEDGER="$PROBE_ROOT/conc.jsonl"
+rm -f "$CONC_LEDGER"
+CONC_N=20
+i=1
+while [ "$i" -le "$CONC_N" ]; do
+  PRAXIS_LIB_DIR="$ROOT_DIR/hooks/_lib" PRAXIS_FIRE_TELEMETRY_FILE="$CONC_LEDGER" sh -c '
+    . "$1/hooks/_lib/record_fire.sh"
+    praxis_record_fire conc-hook conc-role pass "sess-conc-$2" ""
+  ' conc "$ROOT_DIR" "$i" &
+  i=$((i + 1))
+done
+wait
+if python3 - "$CONC_LEDGER" "$CONC_N" <<'PY'
+import json, sys
+path, n = sys.argv[1], int(sys.argv[2])
+lines = [l for l in open(path, encoding="utf-8") if l.strip()]
+assert len(lines) == n, f"expected {n} lines, got {len(lines)}"
+sessions = set()
+for line in lines:
+    rec = json.loads(line)  # a torn/interleaved line fails to parse
+    assert rec["hook"] == "conc-hook" and rec["decision"] == "pass", rec
+    sessions.add(rec["session_id"])
+assert len(sessions) == n, f"expected {n} distinct sessions, got {len(sessions)}"
+PY
+then ok "parallel appends stay intact (no torn lines)"; else ko "parallel appends stay intact (no torn lines)" "$(wc -l < "$CONC_LEDGER" 2>/dev/null) lines"; fi
 
 # --- end-to-end: each instrumented impl.sh hook ----------------------------
 TMP="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }

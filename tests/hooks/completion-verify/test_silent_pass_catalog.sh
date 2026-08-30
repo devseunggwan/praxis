@@ -108,6 +108,34 @@ run_case "selftrigger_fixture_literal_excluded" "" "$TMP/self_fixture.jsonl"
 mk_assistant '  "grep_pattern": "aws secretsmanager get-secret-value",' > "$TMP/self_catalog.jsonl"
 run_case "selftrigger_catalog_field_excluded" "" "$TMP/self_catalog.jsonl"
 
+# --- bounded read (issue #1183) ----------------------------------------------
+# The scanner reads only the last 400 transcript lines (matching the repo's
+# other `tail -n 400` readers). A hit that sits near the tail of a long
+# transcript must still be detected through hundreds of filler lines.
+{
+  for _ in $(seq 1 450); do mk_assistant "routine progress update, nothing sensitive"; done
+  mk_assistant "ran aws secretsmanager get-secret-value --secret-id foo/bar"
+} > "$TMP/tail_hit.jsonl"
+run_case "bounded_read_hit_near_tail_detected" "sanctioned-path-bypass" "$TMP/tail_hit.jsonl"
+
+# A hit ONLY outside the tail bound (followed by 450 filler lines) is
+# INTENTIONALLY out of scope: the bound is the same trade the other transcript
+# readers make (hot-path cost stays flat as the session grows), so conduct
+# that scrolled past the last 400 lines is not detected. This case documents
+# that trade rather than guarding a detection.
+{
+  mk_assistant "ran aws secretsmanager get-secret-value --secret-id foo/bar"
+  for _ in $(seq 1 450); do mk_assistant "routine progress update, nothing sensitive"; done
+} > "$TMP/tail_miss.jsonl"
+run_case "bounded_read_hit_outside_tail_out_of_scope" "" "$TMP/tail_miss.jsonl"
+
+# --- role-key whitespace tolerance -------------------------------------------
+# A record serialized with a space after the colon ("role": "assistant") must
+# still be treated as assistant scope.
+printf '{"isSidechain":false,"message":{"role": "assistant","content":[{"type":"text","text":"ran aws secretsmanager get-secret-value --secret-id foo/bar"}]}}\n' \
+  > "$TMP/role_space.jsonl"
+run_case "role_key_space_after_colon_matches" "sanctioned-path-bypass" "$TMP/role_space.jsonl"
+
 # --- scope: a tool_result (user role) is out of assistant scope ---------------
 printf '{"isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","content":"aws_secret_access_key: %s"}]}}\n' \
   "$FAKE_SECRET" > "$TMP/user_scope.jsonl"

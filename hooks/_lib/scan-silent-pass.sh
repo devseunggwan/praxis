@@ -48,7 +48,20 @@ command -v jq >/dev/null 2>&1 || exit 0
 # scope to assistant output (displayed text OR tool_use command input, both of
 # which live in assistant records). Coarse role filtering + a specific pattern
 # does the discrimination; this is a single linear grep pass, not a jq walk.
-ASSISTANT_LINES=$(grep '"role":"assistant"' "$TRANSCRIPT" 2>/dev/null || true)
+#
+# Tail-bounded (issue #1183): a long session's transcript grows unbounded, and
+# grepping all of it on every Stop / PreToolUse front-load scales the hot path
+# with session length. 400 lines matches the repo's other transcript readers
+# (completion-verify and retrospect-mix-check both read `tail -n 400`), and it
+# is enough for what the catalog classes actually need: the hard classes
+# (credential-display, sanctioned-path-bypass) match a single recent assistant
+# line, and the churn co-occurrence pair (create then close) lands inside one
+# recent working window. Conduct that scrolled past the last 400 transcript
+# lines is intentionally out of scope — same trade the other readers make.
+# The role match tolerates whitespace after the colon so a pretty-printed or
+# re-serialized record is not silently skipped.
+ASSISTANT_LINES=$(tail -n 400 -- "$TRANSCRIPT" 2>/dev/null \
+  | grep -E '"role":[[:space:]]*"assistant"' 2>/dev/null || true)
 [ -n "$ASSISTANT_LINES" ] || exit 0
 
 # Build the precise-exclusion fixed-string set: every fabricated positive_fixture
@@ -85,15 +98,19 @@ else
 fi
 [ -n "$CLEANED" ] || exit 0
 
-# Iterate classes from the catalog (jq on the small catalog only).
-class_count=$(jq -r '.classes | length' "$CATALOG" 2>/dev/null || echo 0)
-i=0
-while [ "$i" -lt "$class_count" ]; do
-  id=$(jq -r ".classes[$i].id" "$CATALOG" 2>/dev/null)
-  severity=$(jq -r ".classes[$i].severity" "$CATALOG" 2>/dev/null)
-  pat=$(jq -r ".classes[$i].grep_pattern" "$CATALOG" 2>/dev/null)
-  cooccur=$(jq -r ".classes[$i].cooccurs_with // empty" "$CATALOG" 2>/dev/null)
-  i=$((i + 1))
+# Iterate classes from the catalog (jq on the small catalog only). ONE jq
+# spawn total (issue #1183) — the per-index loop used to spawn jq 5x per class
+# (count + 4 field reads = 16 spawns for 3 classes); a single @tsv projection
+# read with `while IFS=tab read` carries the same four fields per class.
+# @tsv escapes \ tab \n \r inside a value (keeping one class per line);
+# printf %b reverses exactly that set, so a future grep_pattern containing a
+# regex backslash survives the round trip intact.
+jq -r '.classes[]?
+       | [(.id // ""), (.severity // ""), (.grep_pattern // ""), (.cooccurs_with // "")]
+       | @tsv' "$CATALOG" 2>/dev/null \
+| while IFS=$'\t' read -r id severity pat cooccur; do
+  pat=$(printf '%b' "$pat")
+  cooccur=$(printf '%b' "$cooccur")
   [ -n "$id" ] && [ -n "$pat" ] || continue
 
   primary=$(printf '%s\n' "$CLEANED" | grep -E "$pat" 2>/dev/null | head -n 1)
