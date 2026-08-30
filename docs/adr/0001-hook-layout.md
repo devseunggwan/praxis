@@ -277,6 +277,13 @@ schema that the build expands into the existing platform-specific
 }
 ```
 
+> **Retired form (#1169, #1173):** the nested `entries` registration sketched
+> above never gained a single manifest use — multi-event hooks register as
+> flat sibling entries (one object per event) sharing the same `name`.
+> `hooks/manifest.schema.json` (#1173) models only the flat form, so an
+> `entries` key now fails schema validation; the remaining dead `entries`
+> fallbacks in manifest readers are removed under issue #1169.
+
 Build invariants verified by `scripts/check-plugin-manifests.py`:
 
 - Every `hooks/<role>/<name>/` directory has a matching `manifest.json`
