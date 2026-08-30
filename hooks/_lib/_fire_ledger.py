@@ -75,7 +75,9 @@ Record fields (JSONL, one line per hook fire):
   tool         tool_name from payload (rich only; "" for coarse)
   hook         hook name (manifest `name`)
   role         hook role (manifest `role`)
-  decision     "block" | "ask" | "advise" | "pass"
+  decision     "block" | "ask" | "advise" | "pass" | "skip"
+               ("skip" = dispatcher budget-skip, issue #1167: the member was
+               never run because the group budget could not cover it)
   granularity  "rich" | "coarse"
 
 Storage (precedence order — see `resolve_path`):
@@ -99,11 +101,17 @@ DECISION_BLOCK = "block"
 DECISION_ASK = "ask"
 DECISION_ADVISE = "advise"
 DECISION_PASS = "pass"
+DECISION_SKIP = "skip"
 
 # Decision markers — kept in sync with _dispatch.py run_group aggregation.
 # (The invariant canary planned in issue #712 will pin this pairing.)
 _ASK_MARKER = '"permissionDecision": "ask"'
 _DENY_MARKER = '"permissionDecision": "deny"'
+# Kept in sync with _dispatch._SKIP_MARKER: a member the dispatcher skipped
+# because the group budget could not cover it (issue #1167). The skip must be
+# recorded as its own decision — classifying its stderr note as "advise" would
+# hide the starvation this record exists to surface.
+_SKIP_MARKER = "[dispatch] budget-skip"
 
 
 def classify_decision(rc: int, stdout: str, stderr: str) -> str:
@@ -112,11 +120,14 @@ def classify_decision(rc: int, stdout: str, stderr: str) -> str:
     Mirrors `_dispatch.run_group`'s PER-MEMBER decision precedence (this is one
     member's own outcome, not the cross-member aggregate the dispatcher emits):
     deny (exit 2 / deny marker) > ask (ask marker) > advise (any stderr) > pass.
+    A dispatcher budget-skip record (never actually run) is decision "skip".
     """
     if rc == 2 or _DENY_MARKER in stdout:
         return DECISION_BLOCK
     if _ASK_MARKER in stdout:
         return DECISION_ASK
+    if stderr.startswith(_SKIP_MARKER):
+        return DECISION_SKIP
     if stderr.strip():
         return DECISION_ADVISE
     return DECISION_PASS
