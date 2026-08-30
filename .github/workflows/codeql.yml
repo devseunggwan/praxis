@@ -24,7 +24,7 @@ permissions:
 jobs:
   analyze:
     name: analyze (python)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     # Permissions CodeQL needs: read code, write analysis results to the
