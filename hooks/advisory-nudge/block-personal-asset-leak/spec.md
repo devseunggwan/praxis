@@ -167,10 +167,10 @@ write lands.
 
 ### Relationship to sibling hooks
 
-| Hook                           | Scope                                                                      | Overlap                                                                                                                                                                      |
-| ------------------------------ | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hook                           | Scope                                                                                               | Overlap                                                                                                                                                                      |
+| ------------------------------ | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `external-write-falsify-check` | hypothesis-marker / author-exempt-identifier scan on gh/MCP write surfaces (opt-in, off by default) | Complementary — same gh body-extraction logic (this hook copies the gh detection; 2nd occurrence, no shared-lib extraction yet per DRY-on-3rd), different marker class       |
-| `cross-boundary-preflight`     | `--repo` cross-repo write ASK + heredoc block                              | Complementary — that hook surfaces a "no internal identifiers" *reminder* on cross-repo writes; this hook deterministically scans the body for one concrete identifier class |
+| `cross-boundary-preflight`     | `--repo` cross-repo write ASK + heredoc block                                                       | Complementary — that hook surfaces a "no internal identifiers" *reminder* on cross-repo writes; this hook deterministically scans the body for one concrete identifier class |
 
 ### Parsing guarantees
 
