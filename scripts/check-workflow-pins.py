@@ -23,7 +23,13 @@ data, under a fixed ``runs-on``, is not a floating runner.
 Inline tool installs are held to the same discipline: an ``npm install`` of
 markdownlint-cli2 must carry ``@<exact version>`` and a ``pip install`` of ruff
 must carry ``==<exact version>``, wherever either appears in a workflow. The
-pin's *presence* is the invariant; the version itself is bumped freely.
+pin's *presence* is the invariant; the version itself is bumped freely. A
+``run:`` body is split into its individual commands and each command into
+words, and the pin is looked for only among the packages that command installs
+— matching the whole line instead let an option before the verb
+(``pip --no-cache-dir install ruff``) go unrecognised as an install, and let a
+pin-shaped token in a neighbouring command (``pip install ruff; echo
+ruff==0.15.8``) satisfy the check.
 
 Workflows are parsed with PyYAML rather than scanned line by line, because a
 line-oriented reader cannot see the shapes that matter: a block-scalar or
@@ -50,6 +56,7 @@ tests: ``tests/test_check_workflow_pins.py``.
 from __future__ import annotations
 
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -71,15 +78,18 @@ LONE_EXPR_RE = re.compile(r"^\s*\$\{\{(?P<expr>.*)\}\}\s*$", re.DOTALL)
 MATRIX_REF_RE = re.compile(r"^matrix\.(?P<dim>[A-Za-z_][\w-]*)$")
 QUOTED_LITERAL_RE = re.compile(r"^(?P<q>['\"])(?P<val>[^'\"]*)(?P=q)$")
 
-# Inline tool installs that must carry an exact pin wherever they appear.
-NPM_INSTALL_RE = re.compile(r"\bnpm\s+(?:install|i|add)\b")
+# Inline tool installs that must carry an exact pin wherever they appear. The
+# executables are matched as whole words after a path strip, so `/usr/bin/pip3`
+# counts and `mypip` does not.
+NPM_VERBS = ("install", "i", "add")
+NPM_EXE = "npm"
+PIP_EXE_RE = re.compile(r"^pip[0-9]*(?:\.[0-9]+)?$")
+PYTHON_EXE_RE = re.compile(r"^python[0-9]*(?:\.[0-9]+)?$")
 # An exact npm version is a complete semver: `@0` and `@0.23` are ranges, and a
 # range is exactly what the pin exists to forbid.
 NPM_PINNED_RE = re.compile(
     r"markdownlint-cli2@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?(?![\w.-])"
 )
-# `pip install`, `pip3 install`, and `python -m pip install` all install.
-PIP_INSTALL_RE = re.compile(r"\bpip[0-9]*\s+install\b")
 PIP_RUFF_RE = re.compile(r"\bruff\b")
 # Same rule as npm: `ruff==0` and `ruff==0.15` are ranges, not exact versions.
 PIP_PINNED_RE = re.compile(
@@ -148,6 +158,91 @@ def _logical_lines(script: str) -> list[str]:
     stripped = "\n".join(_strip_comment(line) for line in script.splitlines())
     joined = re.sub(r"\\\n[ \t]*", " ", stripped)
     return [line for line in joined.splitlines() if line.strip()]
+
+
+def _split_commands(line: str) -> list[str]:
+    """Split a logical line into its commands on ``; | & && ||``, honoring quotes.
+
+    Without this, a pin-shaped token anywhere on the line satisfies the check —
+    ``pip install ruff; echo ruff==0.15.8`` installs an unpinned ruff while the
+    pin the canary sees belongs to a different command entirely.
+    """
+    commands: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if quote is not None:
+            current.append(char)
+            if char == quote:
+                quote = None
+        elif char in "'\"":
+            quote = char
+            current.append(char)
+        elif char in ";|&":
+            commands.append("".join(current))
+            current = []
+            # `&&` and `||` are one separator, not two.
+            if index + 1 < len(line) and line[index + 1] == char:
+                index += 1
+        else:
+            current.append(char)
+        index += 1
+    commands.append("".join(current))
+    return [command for command in commands if command.strip()]
+
+
+def _words(command: str) -> list[str]:
+    """Split one command into words, dropping the quotes around each."""
+    try:
+        return shlex.split(command)
+    except ValueError:
+        # Unbalanced quotes: fall back rather than lose the command entirely.
+        return command.split()
+
+
+def _basename(word: str) -> str:
+    return word.rsplit("/", 1)[-1]
+
+
+def _npm_install_args(words: list[str]) -> list[str] | None:
+    """Package arguments of an npm install command, or None if not one."""
+    for index, word in enumerate(words):
+        if _basename(word) != NPM_EXE:
+            continue
+        rest = words[index + 1 :]
+        for verb in NPM_VERBS:
+            if verb in rest:
+                return rest[rest.index(verb) + 1 :]
+        return None
+    return None
+
+
+def _pip_install_args(words: list[str]) -> list[str] | None:
+    """Package arguments of a pip install command, or None if not one.
+
+    Scanning for the executable and the verb separately is what makes an option
+    between them (``pip --no-cache-dir install ruff``) still read as an install;
+    an adjacency regex misses it and lets an unpinned install through.
+    """
+    rest: list[str] | None = None
+    for index, word in enumerate(words):
+        base = _basename(word)
+        if PIP_EXE_RE.fullmatch(base):
+            rest = words[index + 1 :]
+            break
+        if PYTHON_EXE_RE.fullmatch(base):
+            tail = words[index + 1 :]
+            if "-m" not in tail:
+                continue
+            module_at = tail.index("-m") + 1
+            if module_at < len(tail) and PIP_EXE_RE.fullmatch(_basename(tail[module_at])):
+                rest = tail[module_at + 1 :]
+                break
+    if rest is None or "install" not in rest:
+        return None
+    return rest[rest.index("install") + 1 :]
 
 
 def check_uses(value: str, where: str) -> str | None:
@@ -278,22 +373,35 @@ def _check_runner_scalar(
 
 
 def check_tool_pins(script: str, where: str, out: Findings) -> None:
-    """Assert inline installs of the pinned tools carry an exact version."""
+    """Assert inline installs of the pinned tools carry an exact version.
+
+    Each logical line is split into its individual commands and each command
+    into words, and the pin is then looked for only among the packages that
+    command actually installs. Matching the whole line instead let two evasions
+    through: an option before the verb went unrecognised as an install, and a
+    pin-shaped token in a neighbouring command satisfied the check.
+    """
     for line in _logical_lines(script):
-        if NPM_INSTALL_RE.search(line) and "markdownlint-cli2" in line:
-            out.checked += 1
-            if not NPM_PINNED_RE.search(line):
-                out.add(
-                    f"{where}: npm install of markdownlint-cli2 is unpinned — "
-                    f"use markdownlint-cli2@<exact version>"
-                )
-        if PIP_INSTALL_RE.search(line) and PIP_RUFF_RE.search(line):
-            out.checked += 1
-            if not PIP_PINNED_RE.search(line):
-                out.add(
-                    f"{where}: pip install of ruff is unpinned — "
-                    f'use "ruff==<exact version>"'
-                )
+        for command in _split_commands(line):
+            words = _words(command)
+
+            npm_args = _npm_install_args(words)
+            if npm_args is not None and any("markdownlint-cli2" in a for a in npm_args):
+                out.checked += 1
+                if not any(NPM_PINNED_RE.search(a) for a in npm_args):
+                    out.add(
+                        f"{where}: npm install of markdownlint-cli2 is unpinned — "
+                        f"use markdownlint-cli2@<exact version>"
+                    )
+
+            pip_args = _pip_install_args(words)
+            if pip_args is not None and any(PIP_RUFF_RE.search(a) for a in pip_args):
+                out.checked += 1
+                if not any(PIP_PINNED_RE.search(a) for a in pip_args):
+                    out.add(
+                        f"{where}: pip install of ruff is unpinned — "
+                        f'use "ruff==<exact version>"'
+                    )
 
 
 def _check_step(step: yaml.Node, rel: str, out: Findings) -> None:

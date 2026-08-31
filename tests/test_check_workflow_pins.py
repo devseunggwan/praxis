@@ -31,6 +31,10 @@ fixture:
   - what cannot be resolved is drift, not a pass: an unverifiable runner
     expression, a matrix (or ``include:``) candidate that is itself an
     expression, and a workflow that does not parse,
+  - the two evasions a whole-line pin match allowed: an option before the
+    install verb (``pip --no-cache-dir install ruff``), and a pin-shaped token
+    that belongs to a neighbouring command (``pip install ruff; echo
+    ruff==0.15.8``),
   - zero scanned values is drift, not a silent pass,
   - main() exits 0 on a clean tree and 1 on drift.
 
@@ -393,3 +397,35 @@ def test_expression_valued_include_candidate_fails_closed(tmp_path):
     )
     drifts, _ = pins.check(_dir(tmp_path, content))
     assert any("matrix.os candidate" in d and "cannot be verified" in d for d in drifts), drifts
+
+
+def test_option_before_the_install_verb_is_still_an_install(tmp_path):
+    """`pip --no-cache-dir install ruff` installs; an adjacency match missed it."""
+    content = CLEAN.replace(
+        '      - run: python3 -m pip install pytest "ruff==0.15.8"\n',
+        "      - run: pip --no-cache-dir install ruff\n",
+        1,
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("pip install of ruff is unpinned" in d for d in drifts), drifts
+
+
+def test_pin_in_a_neighbouring_command_is_not_a_pin(tmp_path):
+    """The pin has to belong to the install, not to something else on the line."""
+    content = CLEAN.replace(
+        '      - run: python3 -m pip install pytest "ruff==0.15.8"\n',
+        "      - run: pip install ruff; echo ruff==0.15.8\n",
+        1,
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("pip install of ruff is unpinned" in d for d in drifts), drifts
+
+
+def test_npm_pin_in_a_neighbouring_command_is_not_a_pin(tmp_path):
+    content = CLEAN.replace(
+        "      - run: npm install -g markdownlint-cli2@0.23.2\n",
+        "      - run: npm install -g markdownlint-cli2 && echo markdownlint-cli2@0.23.2\n",
+        1,
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("markdownlint-cli2 is unpinned" in d for d in drifts), drifts
