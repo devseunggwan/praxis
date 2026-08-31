@@ -121,12 +121,14 @@ run_case "status: chained relative symlink exits 1 at preflight" "$rc" "1"
 
 # ---------------------------------------------------------------------------
 # Symlink cycle: the resolution loop must bail with a clear error after its
-# hop cap instead of spinning forever (#1191 review). A cyclic link cannot be
+# hop cap instead of spinning forever. A cyclic link cannot be
 # exec'd (the kernel refuses with ELOOP before bash ever runs), so the loop
 # is exercised directly: extract the shipped block from cmux-session-status
 # and run it with $0 pointed at the cycle via `bash -c '...' <argv0>`.
-# `timeout` guards against a regression hanging the suite; rc 124/137 would
-# mean the loop span until killed.
+# The watchdog is pure bash rather than `timeout`, which stock macOS does not
+# ship: a `command -v timeout` fallback would leave this case unguarded on
+# exactly the hosts where a hop-cap regression hangs the suite. rc 137 means
+# the loop spun until killed.
 # ---------------------------------------------------------------------------
 
 ln -s "$BIN/cycle-b" "$BIN/cycle-a"
@@ -137,15 +139,17 @@ BLOCK=$(awk '/^REAL_PATH="\$0"$/{f=1} f{print} f && /^SCRIPT_DIR=/{exit}' \
 run_case "cycle: resolution block extracted from shipped script" \
   "$([ -n "$BLOCK" ] && echo yes || echo no)" "yes"
 
-if command -v timeout >/dev/null 2>&1; then
-  RUN_CYCLE=(timeout 5 bash)
-else
-  echo "NOTE: coreutils timeout unavailable — running cycle case unguarded"
-  RUN_CYCLE=(bash)
-fi
-out=$("${RUN_CYCLE[@]}" -c "set -euo pipefail
+CYCLE_OUT="$TMP_ROOT/cycle.out"
+bash -c "set -euo pipefail
 $BLOCK
-echo \"RESOLVED \$SCRIPT_DIR\"" "$BIN/cycle-a" 2>&1); rc=$?
+echo \"RESOLVED \$SCRIPT_DIR\"" "$BIN/cycle-a" >"$CYCLE_OUT" 2>&1 &
+cycle_pid=$!
+( sleep 5; kill -9 "$cycle_pid" 2>/dev/null ) &
+watchdog_pid=$!
+wait "$cycle_pid"; rc=$?
+kill "$watchdog_pid" 2>/dev/null
+wait "$watchdog_pid" 2>/dev/null
+out=$(cat "$CYCLE_OUT")
 run_case "cycle: hop cap bails with exit 1 (no hang, no resolve)" "$rc" "1"
 echo "$out" | grep -q 'symlink resolution exceeded'
 run_case "cycle: error message names the hop cap" "$?" "0"
