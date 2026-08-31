@@ -37,7 +37,9 @@ is prose by construction and can never be mistaken for a workflow key.
 Anything the checker cannot resolve is drift, not a pass — an expression whose
 value cannot be established, a ``runs-on`` that is neither a scalar nor a
 sequence of scalars, a matrix dimension the runner names but that holds no
-literals, a file that does not parse. Failing closed is the point of a canary:
+literals, a matrix candidate that is itself an expression (resolving runs-on
+to ``matrix.os`` buys nothing if the dimension's own entries are expressions),
+a file that does not parse. Failing closed is the point of a canary:
 a silent skip is indistinguishable from a clean tree.
 
 Run standalone or via ``scripts/run-tests.sh``. Exit 0 + a verified count on
@@ -259,7 +261,18 @@ def _check_runner_scalar(
         return
     for item in literals:
         out.checked += 1
-        drift = _floating(item.value, f"{rel}:{_line(item)}", f"matrix.{dim} value")
+        candidate = item.value.strip()
+        item_where = f"{rel}:{_line(item)}"
+        if "${{" in candidate:
+            # The indirection only moved: resolving runs-on to matrix.<dim> is
+            # worth nothing if the dimension's own entries are expressions.
+            out.add(
+                f"{item_where}: matrix.{dim} candidate '{candidate}' is built "
+                f"from an expression — the runner it resolves to cannot be "
+                f"verified; write the label literally"
+            )
+            continue
+        drift = _floating(candidate, item_where, f"matrix.{dim} value")
         if drift:
             out.add(drift)
 

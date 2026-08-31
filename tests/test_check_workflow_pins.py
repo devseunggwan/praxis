@@ -29,6 +29,7 @@ fixture:
   - the false positive that came with them: a matrix dimension ``runs-on``
     never references is test data, not a runner,
   - what cannot be resolved is drift, not a pass: an unverifiable runner
+    expression, a matrix (or ``include:``) candidate that is itself an
     expression, and a workflow that does not parse,
   - zero scanned values is drift, not a silent pass,
   - main() exits 0 on a clean tree and 1 on drift.
@@ -371,3 +372,24 @@ def test_incomplete_pip_version_is_not_a_pin(tmp_path):
             spec,
             drifts,
         )
+
+
+def test_expression_valued_matrix_candidate_fails_closed(tmp_path):
+    """`os: ["${{ inputs.runner }}"]` only moves the indirection one hop."""
+    content = CLEAN.replace(
+        "        os: [ubuntu-24.04, macos-14]\n",
+        '        os: ["${{ inputs.runner }}"]\n',
+        1,
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("matrix.os candidate" in d and "cannot be verified" in d for d in drifts), drifts
+
+
+def test_expression_valued_include_candidate_fails_closed(tmp_path):
+    content = CLEAN.replace(
+        "          - os: windows-2022\n",
+        '          - os: "${{ inputs.runner }}"\n',
+        1,
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("matrix.os candidate" in d and "cannot be verified" in d for d in drifts), drifts
