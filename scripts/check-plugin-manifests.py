@@ -113,6 +113,11 @@ _disp_spec.loader.exec_module(_dispatch)
 from constants import EXPECTED_SKILLS, OPT_IN_HOOKS, VALID_ROLES  # noqa: E402
 
 
+# release-please rewrites only the version fields its jsonpath reaches, and the
+# marketplace outputs carry one at the top level and one inside plugins[0], so
+# the recursive form is the only one that leaves nothing stale (Rule 9, #1172).
+RELEASE_JSONPATH = "$..version"
+
 RUNTIME_METADATA_REQUIRED_FIELDS = (
     "verified-against-runtime",
     "runtime-verified-at",
@@ -995,8 +1000,12 @@ def main() -> int:
         extra_files = (
             rp_config.get("packages", {}).get(".", {}).get("extra-files", [])
         )
-        extra_paths = {
-            entry["path"] if isinstance(entry, dict) else entry
+        # Keyed by path but keeping the whole entry: a marketplace output carries
+        # `version` both at the top level and inside plugins[0], so a narrowed
+        # `$.version` updates one and leaves the other stale while the path is
+        # still listed. Checking presence alone cannot see that.
+        extra_specs = {
+            (entry["path"] if isinstance(entry, dict) else entry): entry
             for entry in extra_files
         }
         versioned_kinds = {"plugin", "marketplace", "gemini-extension"}
@@ -1005,13 +1014,38 @@ def main() -> int:
             for output in platform["outputs"]:
                 if output["kind"] not in versioned_kinds:
                     continue
-                if output["path"] not in extra_paths:
+                path = output["path"]
+                if path not in extra_specs:
                     drifts.append(
-                        f"RELEASE WIRING {output['path']}: versioned artifact "
+                        f"RELEASE WIRING {path}: versioned artifact "
                         f"(kind={output['kind']}) is not listed in "
                         "release-please-config.json extra-files — release-please "
                         "would leave its embedded version fields stale "
                         "(Rule 9, #1172)"
+                    )
+                    continue
+                entry = extra_specs[path]
+                if not isinstance(entry, dict):
+                    drifts.append(
+                        f"RELEASE WIRING {path}: extra-files entry is a bare "
+                        "string — release-please needs an object carrying "
+                        'type and jsonpath (Rule 9, #1172)'
+                    )
+                    continue
+                if entry.get("type") != "json":
+                    drifts.append(
+                        f"RELEASE WIRING {path}: extra-files type is "
+                        f"{entry.get('type')!r}, expected 'json' — every "
+                        "versioned artifact here is a JSON document "
+                        "(Rule 9, #1172)"
+                    )
+                if entry.get("jsonpath") != RELEASE_JSONPATH:
+                    drifts.append(
+                        f"RELEASE WIRING {path}: extra-files jsonpath is "
+                        f"{entry.get('jsonpath')!r}, expected "
+                        f"{RELEASE_JSONPATH!r} — a narrower path updates only "
+                        "the version fields it names and silently leaves its "
+                        "siblings stale (Rule 9, #1172)"
                     )
 
     # ------------------------------------------------------------------
