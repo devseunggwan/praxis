@@ -122,12 +122,16 @@ jobs:
       # silent-degradation path the PRAXIS_SUBSKIP protocol exists to catch.
       # markdownlint-cli2 still comes from npm for the same reason ruff is
       # pinned: under PRAXIS_TESTS_STRICT its absence would abort the run (#917).
+      # tmux is installed on the same ground as jq: this PR's own suite
+      # (test_cmux_session_orphan_windows) skips itself without it, and a
+      # prerequisite the runner image happens to ship is one the image can stop
+      # shipping without any signal here.
       # The phase bound and the retry around it both live in scripts/ci-apt.sh,
       # which carries the reasoning (#1046 bounded the stall, #1049 made it
       # survivable). A stalled mirror was observed killing this step three times
       # before the bound, and again after it -- bounding made the failure fast,
       # the retry is what can make it pass.
-      - run: bash scripts/ci-apt.sh zsh jq
+      - run: bash scripts/ci-apt.sh zsh jq tmux
       # shellcheck is no longer taken from the runner image (0.9.0): step 10 of
       # run-tests.sh must run the same pinned version as the `shellcheck` job,
       # so the local-parity step cannot disagree with the blocking one (the ruff
