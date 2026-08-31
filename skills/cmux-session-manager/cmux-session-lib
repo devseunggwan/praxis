@@ -223,6 +223,7 @@ find_orphans() {
     local cmds_flat
     cmds_flat=$(echo "$pane_cmds" | tr '\n' ',' | sed 's/,$//')
     cmds_flat=$(sanitize_pipe "$cmds_flat")
+    # shellcheck disable=SC2034  # populated here, consumed by the sourcing scripts (cmux-session-status / cmux-session-cleanup)
     ORPHAN_DATA[$ORPHAN_COUNT]="${session_name}|${orphan_type}|${cmds_flat}"
     ORPHAN_COUNT=$((ORPHAN_COUNT + 1))
   done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null)

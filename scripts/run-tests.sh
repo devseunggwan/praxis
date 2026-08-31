@@ -222,16 +222,25 @@ elif ! "${RUFF[@]}" check .; then
 fi
 
 # ---------------------------------------------------------------------------
-# 9. Shellcheck (mirrors ci.yml `shellcheck` job — same find/severity)
+# 9. Shellcheck (mirrors ci.yml `shellcheck` job — same discovery/severity)
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== shellcheck ==="
 if ! command -v shellcheck >/dev/null 2>&1; then
   skip_step shellcheck "brew install shellcheck"
 else
-  # Mirrors the CI invocation verbatim so severity and file set cannot drift.
-  if ! find . -name '*.sh' -not -path './.git/*' -print0 \
+  # Mirrors the CI invocation verbatim so severity, excludes, and file set
+  # cannot drift: discovery is delegated to scripts/shellcheck-files.sh (the
+  # single source shared with ci.yml, which also covers the extensionless
+  # skills/ CLI scripts — #1175). Runtime code gets no rule exclusions;
+  # tests/ excludes SC2154/SC2034, the test-harness-only false positives
+  # that used to be disabled repo-wide via .shellcheckrc (see its comments).
+  if ! bash scripts/shellcheck-files.sh runtime \
     | xargs -0 shellcheck --severity=warning; then
+    FAILED=1
+  fi
+  if ! bash scripts/shellcheck-files.sh tests \
+    | xargs -0 shellcheck --severity=warning --exclude=SC2154,SC2034; then
     FAILED=1
   fi
 fi

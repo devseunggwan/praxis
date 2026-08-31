@@ -120,6 +120,7 @@ ${PR_STATE_MSG}"
   fi
 fi
 
+# shellcheck disable=SC2034  # read by the EXIT trap installed in sourced record_fire.sh
 PRAXIS_FIRE_DECISION=advise
 jq -n --arg ctx "$COMBINED_MSG" \
   '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $ctx}}'
