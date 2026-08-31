@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install a pinned shellcheck binary for CI (PR #1192 review round 1).
+# Install a pinned shellcheck binary for CI.
 #
 # Why not `scripts/ci-apt.sh shellcheck`: apt on ubuntu-24.04 resolves 0.9.0
 # and is unpinned across image/archive updates, while the zero-excludes
