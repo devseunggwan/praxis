@@ -519,7 +519,8 @@ cmux send-key --workspace "$TARGET" Enter
 Report the skill execution result to the user:
 
 **Single-session mode:**
-```
+
+```text
 Delegated to {WS_REF}
   Task: {short_task}
   Provider: {provider}
@@ -535,7 +536,8 @@ cmux에서 {WS_REF} 탭을 확인하세요.
 ```
 
 **Distribute mode:**
-```
+
+```text
 Distributed to {N} workspaces:
   | Workspace | Task | Provider | Model | Account |
   |-----------|------|----------|-------|---------|
@@ -548,7 +550,8 @@ Distributed to {N} workspaces:
 ```
 
 **Existing-session mode:**
-```
+
+```text
 Sent to {TARGET} ({session_name})
   Task: {short_task}
   Prompt: /tmp/cmux-delegate-{timestamp}.md
