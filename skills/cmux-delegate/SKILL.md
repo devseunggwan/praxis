@@ -226,6 +226,13 @@ direct delegation with no prior context), skip the synthesis and omit the
 Synthesize the collected context and the user prompt, and save it to
 `/tmp/cmux-delegate-{timestamp}.md`.
 
+**Two names, defined here and used by every later step:** `{prompt_file}` is
+that `.md`, and `{script_file}` is the wrapper `.sh` Step 4 generates from it.
+In new-session and existing-session mode they are
+`/tmp/cmux-delegate-{timestamp}.md` and `.sh`. In distribute mode Step 3.5
+gives each item its own pair, so every later step substitutes the pair
+belonging to the worker it is launching — never the base names.
+
 **Any question answerable before delegating gets its answer baked into the
 prompt.** A worker asking mid-run costs one round-trip and a human's
 attention, no matter how good the channel is. While authoring, whenever "would
@@ -306,11 +313,16 @@ N issues that are already mutually independent, each on its own.
 **Split process:**
 
 1. Split on the **issue boundaries** confirmed by the criteria above →
-   generate an individual .md file for each. A section header is not itself a
-   boundary — if one issue is written under several headers, those headers
-   are bundled into one file
+   generate an individual .md file for each, named
+   `/tmp/cmux-delegate-{timestamp}-{n}.md` with `{n}` counting from 1. A
+   section header is not itself a boundary — if one issue is written under
+   several headers, those headers are bundled into one file
 2. The Context section is included in every split file
-3. Generate an individual wrapper .sh for each file
+3. Generate an individual wrapper .sh for each file, named
+   `/tmp/cmux-delegate-{timestamp}-{n}.sh` for the same `{n}`. Item `{n}`'s
+   pair is what `{prompt_file}` and `{script_file}` mean for that worker;
+   reusing the base names would have every worker read one prompt and every
+   trap delete one script
 4. Routing: If `--model` is explicit, apply uniformly. Otherwise, auto-assign by task type (see project `ARCHITECTURE.md` Task-Type Routing):
    - Code implementation/fix → `codex` (if CLI available) or `claude:sonnet`
    - Search/analysis/large context → `gemini` (if CLI available) or `claude:sonnet`
@@ -319,12 +331,12 @@ N issues that are already mutually independent, each on its own.
 
 ### Step 4: Generate Wrapper Script
 
-Generate `/tmp/cmux-delegate-{timestamp}.sh`:
+Generate `{script_file}`, substituting this worker's own pair:
 
 ```bash
 #!/bin/bash
-PROMPT_FILE="/tmp/cmux-delegate-{timestamp}.md"
-SCRIPT_FILE="/tmp/cmux-delegate-{timestamp}.sh"
+PROMPT_FILE="{prompt_file}"
+SCRIPT_FILE="{script_file}"
 
 # Cleanup: delete only the .sh. The .md is preserved (another workspace may
 # reference it)
@@ -480,19 +492,20 @@ When `--session` is not specified:
 WS_RAW=$(cmux new-workspace \
   --name "[delegate] {short_task}" \
   --cwd "{cwd}" \
-  --command "bash /tmp/cmux-delegate-{timestamp}.sh")
+  --command "bash {script_file}")
 
 # Validate workspace creation
 if [[ "$WS_RAW" != OK* ]]; then
   echo "Error: workspace 생성 실패 — $WS_RAW"
-  echo "수동 실행: bash /tmp/cmux-delegate-{timestamp}.sh"
+  echo "수동 실행: bash {script_file}"
   exit 1
 fi
 
 WS_REF=$(echo "$WS_RAW" | sed 's/^OK //')
 ```
 
-**In distribute mode, repeat this once per split item.**
+**In distribute mode, repeat this once per split item**, substituting that
+item's `{prompt_file}` / `{script_file}` pair each time.
 
 ### Step 5b: Send to Existing Session (existing session)
 
@@ -510,7 +523,7 @@ fi
 
 # 2. Deliver the prompt file path
 cmux send --workspace "$TARGET" \
-  "{prompt_file_path} 파일을 읽고 조사해주세요."
+  "{prompt_file} 파일을 읽고 조사해주세요."
 cmux send-key --workspace "$TARGET" Enter
 ```
 
@@ -575,7 +588,7 @@ cmux에서 {session_name} 탭을 확인하세요.
 
 ### Single session (default)
 
-```
+```text
 user: /cmux-delegate "#1140 auth 토큰 갱신 실패" --model claude:opus --account claude-2
   │
   ├── Step 1.6: Account Resolution
