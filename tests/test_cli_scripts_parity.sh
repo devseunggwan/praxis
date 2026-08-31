@@ -86,6 +86,44 @@ run_case "verify_covers_bypass_review" "$VERIFY_COVERS_BYPASS" "1"
 rm -rf "$TMP_BIN"
 
 # ---------------------------------------------------------------------------
+# 5. Symlink-resolution-loop parity.
+#    Five CLIs carry a copy of the readlink resolution block (REAL_PATH="$0"
+#    ... SCRIPT_DIR=...); cmux-recover-sessions is the canonical copy. The
+#    copies must stay byte-identical — a fix landing in one but not the
+#    others silently reintroduces the class this block exists to kill.
+# ---------------------------------------------------------------------------
+
+RESOLVER_CANONICAL="$ROOT_DIR/skills/cmux-recover-sessions/cmux-recover-sessions"
+RESOLVER_CARRIERS=(
+  "skills/cmux-session-manager/cmux-session-status"
+  "skills/cmux-session-manager/cmux-session-cleanup"
+  "skills/cmux-save-sessions/cmux-save-sessions"
+  "skills/recover-sessions/claude-recover"
+)
+
+extract_resolver_block() {
+  awk '/^REAL_PATH="\$0"$/{f=1} f{print} f && /^SCRIPT_DIR=/{exit}' "$1"
+}
+
+CANON_BLOCK="$(extract_resolver_block "$RESOLVER_CANONICAL")"
+run_case "resolver_canonical_block_present" \
+  "$([ -n "$CANON_BLOCK" ] && echo yes || echo no)" "yes"
+
+# The cap is what keeps a symlink cycle from spinning the loop forever —
+# assert it structurally so a future copy-edit cannot drop it.
+printf '%s\n' "$CANON_BLOCK" | grep -q 'HOPS.*-gt 40'
+run_case "resolver_canonical_has_hop_cap" "$?" "0"
+
+for rel in "${RESOLVER_CARRIERS[@]}"; do
+  name="$(basename "$rel")"
+  CARRIER_BLOCK="$(extract_resolver_block "$ROOT_DIR/$rel")"
+  run_case "resolver_block_present:$name" \
+    "$([ -n "$CARRIER_BLOCK" ] && echo yes || echo no)" "yes"
+  run_case "resolver_block_matches_canonical:$name" \
+    "$([ "$CARRIER_BLOCK" = "$CANON_BLOCK" ] && echo yes || echo no)" "yes"
+done
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""

@@ -84,7 +84,13 @@ fi
 # ── Phase 1: Scan sessions (shared module) ──
 
 REAL_PATH="$0"
+HOPS=0
 while [ -L "$REAL_PATH" ]; do
+  HOPS=$((HOPS + 1))
+  if [ "$HOPS" -gt 40 ]; then
+    echo "ERROR: symlink resolution exceeded 40 hops (cycle?): $0" >&2
+    exit 1
+  fi
   LINK_DIR="$(cd "$(dirname "$REAL_PATH")" && pwd)"
   REAL_PATH="$(readlink "$REAL_PATH")"
   [[ "$REAL_PATH" != /* ]] && REAL_PATH="$LINK_DIR/$REAL_PATH"
