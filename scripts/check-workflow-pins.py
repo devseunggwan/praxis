@@ -29,7 +29,9 @@ words, and the pin is looked for only among the packages that command installs
 — matching the whole line instead let an option before the verb
 (``pip --no-cache-dir install ruff``) go unrecognised as an install, and let a
 pin-shaped token in a neighbouring command (``pip install ruff; echo
-ruff==0.15.8``) satisfy the check.
+ruff==0.15.8``) satisfy the check. Redirection targets are dropped before the
+check and the pin has to sit on the package token itself, so
+``pip install ruff > ruff==0.15.8`` — where the pin is a filename — is drift.
 
 Workflows are parsed with PyYAML rather than scanned line by line, because a
 line-oriented reader cannot see the shapes that matter: a block-scalar or
@@ -204,6 +206,32 @@ def _words(command: str) -> list[str]:
 
 def _basename(word: str) -> str:
     return word.rsplit("/", 1)[-1]
+
+
+# `2>`, `>`, `>>`, `<`, `<<`, `&>` — with the target attached or in the next word.
+REDIRECT_RE = re.compile(r"^\d*(?:&?>>?|<<?)")
+
+
+def _strip_redirections(words: list[str]) -> list[str]:
+    """Drop redirection operators and their targets from a command's words.
+
+    A redirection target is not an argument to the program: in
+    ``pip install ruff > ruff==0.15.8`` the pin-shaped token is a filename and
+    pip receives an unpinned ``ruff``.
+    """
+    kept: list[str] = []
+    skip_next = False
+    for word in words:
+        if skip_next:
+            skip_next = False
+            continue
+        match = REDIRECT_RE.match(word)
+        if match:
+            # `> file` puts the target in the next word; `>file` attaches it.
+            skip_next = word == match.group(0)
+            continue
+        kept.append(word)
+    return kept
 
 
 def _npm_install_args(words: list[str]) -> list[str] | None:
@@ -389,25 +417,29 @@ def check_tool_pins(script: str, where: str, out: Findings) -> None:
     """
     for line in _logical_lines(script):
         for command in _split_commands(line):
-            words = _words(command)
+            words = _strip_redirections(_words(command))
 
             npm_args = _npm_install_args(words)
-            if npm_args is not None and any("markdownlint-cli2" in a for a in npm_args):
-                out.checked += 1
-                if not any(NPM_PINNED_RE.search(a) for a in npm_args):
-                    out.add(
-                        f"{where}: npm install of markdownlint-cli2 is unpinned — "
-                        f"use markdownlint-cli2@<exact version>"
-                    )
+            if npm_args is not None:
+                specs = [a for a in npm_args if "markdownlint-cli2" in a]
+                if specs:
+                    out.checked += 1
+                    if not all(NPM_PINNED_RE.search(a) for a in specs):
+                        out.add(
+                            f"{where}: npm install of markdownlint-cli2 is unpinned — "
+                            f"use markdownlint-cli2@<exact version>"
+                        )
 
             pip_args = _pip_install_args(words)
-            if pip_args is not None and any(PIP_RUFF_RE.search(a) for a in pip_args):
-                out.checked += 1
-                if not any(PIP_PINNED_RE.search(a) for a in pip_args):
-                    out.add(
-                        f"{where}: pip install of ruff is unpinned — "
-                        f'use "ruff==<exact version>"'
-                    )
+            if pip_args is not None:
+                specs = [a for a in pip_args if PIP_RUFF_RE.search(a)]
+                if specs:
+                    out.checked += 1
+                    if not all(PIP_PINNED_RE.search(a) for a in specs):
+                        out.add(
+                            f"{where}: pip install of ruff is unpinned — "
+                            f'use "ruff==<exact version>"'
+                        )
 
 
 def _check_step(step: yaml.Node, rel: str, out: Findings) -> None:

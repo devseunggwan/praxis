@@ -35,6 +35,7 @@ fixture:
   - the two evasions a whole-line pin match allowed: an option before the
     install verb (``pip --no-cache-dir install ruff``), and a pin-shaped token
     that belongs to a neighbouring command (``pip install ruff; echo
+    ruff==0.15.8``) or to a redirection target (``pip install ruff >
     ruff==0.15.8``),
   - zero scanned values is drift, not a silent pass,
   - main() exits 0 on a clean tree and 1 on drift.
@@ -444,3 +445,24 @@ def test_expression_valued_include_block_fails_closed(tmp_path):
     drifts, _ = pins.check(_dir(tmp_path, content))
     assert any("cannot be verified" in d for d in drifts), drifts
     assert not any("does not parse" in d for d in drifts), drifts
+
+
+def test_pin_as_a_redirection_target_is_not_a_pin(tmp_path):
+    """`pip install ruff > ruff==0.15.8` writes a file; pip still gets bare ruff."""
+    content = CLEAN.replace(
+        '      - run: python3 -m pip install pytest "ruff==0.15.8"\n',
+        "      - run: pip install ruff > ruff==0.15.8\n",
+        1,
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("pip install of ruff is unpinned" in d for d in drifts), drifts
+
+
+def test_npm_pin_as_a_redirection_target_is_not_a_pin(tmp_path):
+    content = CLEAN.replace(
+        "      - run: npm install -g markdownlint-cli2@0.23.2\n",
+        "      - run: npm install -g markdownlint-cli2 >markdownlint-cli2@0.23.2\n",
+        1,
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("markdownlint-cli2 is unpinned" in d for d in drifts), drifts
