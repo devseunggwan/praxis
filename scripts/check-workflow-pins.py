@@ -79,7 +79,10 @@ NPM_PINNED_RE = re.compile(
 # `pip install`, `pip3 install`, and `python -m pip install` all install.
 PIP_INSTALL_RE = re.compile(r"\bpip[0-9]*\s+install\b")
 PIP_RUFF_RE = re.compile(r"\bruff\b")
-PIP_PINNED_RE = re.compile(r"\bruff==\d[\w.-]*")
+# Same rule as npm: `ruff==0` and `ruff==0.15` are ranges, not exact versions.
+PIP_PINNED_RE = re.compile(
+    r"\bruff==\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.]+)?(?![\w.-])"
+)
 
 
 class Findings:

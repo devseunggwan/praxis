@@ -2,8 +2,8 @@
 
 The canary asserts the workflow pinning discipline (issue #1171): SHA-pinned
 ``uses:`` refs, no floating ``*-latest`` runner labels, and exact-version
-inline tool installs. These tests cover the PR #1194 review findings against
-it, each as its own fixture:
+inline tool installs. Each evasion the canary has to survive gets its own
+fixture:
 
   - the real tree agrees with the canary,
   - a tag ref and a ref-less ``uses:`` are drift,
@@ -21,7 +21,16 @@ it, each as its own fixture:
     ``npm install -g markdownlint-cli2`` or ``pip install ... ruff`` is
     drift — including inside a ``run: |`` body, the one place the
     block-scalar exemption must NOT cover,
-  - zero scanned lines is drift, not a silent pass,
+  - the shapes a line-oriented scan could not see, each of which read as clean
+    while selecting a floating runner or an unpinned tool: a block-scalar or
+    block-list ``runs-on``, a flow-mapping ``matrix``, an expression wrapping a
+    literal, a backslash-continued or ``pip3`` install, a pin that lives only
+    in a comment, and an incomplete version (``@0.23``, ``ruff==0.15``),
+  - the false positive that came with them: a matrix dimension ``runs-on``
+    never references is test data, not a runner,
+  - what cannot be resolved is drift, not a pass: an unverifiable runner
+    expression, and a workflow that does not parse,
+  - zero scanned values is drift, not a silent pass,
   - main() exits 0 on a clean tree and 1 on drift.
 
 Fixtures are standalone minimal workflows written to a temp tree — unlike the
@@ -344,3 +353,14 @@ def test_non_runner_matrix_dimension_is_not_flagged(tmp_path):
 def test_unparseable_workflow_is_drift(tmp_path):
     drifts, _ = pins.check(_dir(tmp_path, "jobs: [unclosed\n"))
     assert any("cannot verify" in d for d in drifts), drifts
+
+
+def test_incomplete_pip_version_is_not_a_pin(tmp_path):
+    """Same rule as npm: a two-part `ruff==0.15` is a range, not a pin."""
+    for spec in ("ruff==0", "ruff==0.15"):
+        content = CLEAN.replace("ruff==0.15.8", spec)
+        drifts, _ = pins.check(_dir(tmp_path / spec.replace("=", "_"), content))
+        assert any("pip install of ruff is unpinned" in d for d in drifts), (
+            spec,
+            drifts,
+        )
