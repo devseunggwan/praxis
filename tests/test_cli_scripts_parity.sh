@@ -86,7 +86,7 @@ run_case "verify_covers_bypass_review" "$VERIFY_COVERS_BYPASS" "1"
 rm -rf "$TMP_BIN"
 
 # ---------------------------------------------------------------------------
-# 5. Symlink-resolution-loop parity (issue #1174, PR #1191 review).
+# 5. Symlink-resolution-loop parity.
 #    Five CLIs carry a copy of the readlink resolution block (REAL_PATH="$0"
 #    ... SCRIPT_DIR=...); cmux-recover-sessions is the canonical copy. The
 #    copies must stay byte-identical — a fix landing in one but not the

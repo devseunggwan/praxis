@@ -93,7 +93,7 @@ run_case "cleanup: preflight failure exits 1 (not source death)" "$rc" "1"
 
 # cmux-save-sessions sources the lib from a SIBLING SKILL DIRECTORY
 # (../cmux-session-manager/cmux-session-lib), so the installed symlink had
-# the same death at line 6 — the 4th member of the class (#1191 review).
+# the same death at line 6 — the 4th member of the class.
 # Isolated HOME keeps its $HOME/.cmux/sessions save dir out of the real one
 # (preflight stops it before any write regardless).
 out=$(PATH="$STUB:$PATH" HOME="$FAKE_HOME" "$BIN/cmux-save-sessions" 2>&1); rc=$?
