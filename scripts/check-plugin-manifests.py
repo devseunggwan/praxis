@@ -3,10 +3,14 @@
 
 Runs the build logic in dry mode: re-render every output, compare to the
 committed file, and exit non-zero on any drift. Also validates the
-Phase 2 (ADR-0001) invariants:
+Phase 2 (ADR-0001) invariants. The rule numbers below are the load-bearing
+IDs used by drift messages, comments, tests, and docs — every rule block in
+main() is labeled with its number, and this list is the canonical roster
+(renumbered once, coherently, in #1172):
 
   1. Every hooks/<role>/<name>/ directory has ≥1 manifest entry
-     (opt-in carve-out: external-write-falsify-check).
+     (opt-in carve-out: external-write-falsify-check), and every manifest
+     entry has a backing directory.
   2. Every manifest entry's `role` field matches the parent directory name.
   3. The impl file (`impl.py` or the body-as-sh `impl.sh`) exists on disk.
   4. completion-verify Stop ordering matches manifest array order.
@@ -18,12 +22,20 @@ Phase 2 (ADR-0001) invariants:
      target parity check). Dispatch-only members carry NO wrapper and are
      asserted absent from disk (Rule 6b, ADR-0002 Phase 4 / #618). Opt-in
      wrappers (OPT_IN_HOOKS, not in the manifest) are byte-identity checked
-     too (Rule 6c, #605).
+     too (Rule 6c, #605). Every expected wrapper on disk carries the
+     executable bit and, when tracked, a 100755 git index mode (Rule 6d,
+     #1172); and no orphan hooks/*.sh outside the generated set survives
+     (Rule 6e, #1172 — the reverse sweep Rule 6 lacked).
   7. INDEX.md ↔ manifest entry cross-check.
   8. Spec `Supported hosts:` ↔ manifest `hosts` cross-check.
-  9. Version consistency across versioned artifacts.
+  9. Release version wiring (#1172): `VERSION` equals the "." version in
+     `.release-please-manifest.json`, and every versioned platform artifact
+     (plugin, marketplace, gemini-extension kinds — marketplace carries
+     version fields too) is listed in release-please-config.json
+     `extra-files` so release-please bumps its embedded versions.
   10. spec.md exists at hooks/<role>/<name>/spec.md for every registered
-      hook (Phase 3, ADR-0001 §5.3 — specs collocated with impl).
+      hook (Phase 3, ADR-0001 §5.3 — specs collocated with impl), and a
+      manifest `hosts` field, when present, is a non-empty list of strings.
   11. Runtime-sensitive skills carry runtime verification frontmatter
       (`verified-against-runtime`, `runtime-verified-at`,
       `runtime-verified-note`).
@@ -40,17 +52,29 @@ Phase 2 (ADR-0001) invariants:
   15. docs/hook/<name>.md redirect-stub parity (#606): every hook dir owns a
       byte-identical 1-line stub, and no orphan stub survives (INDEX.md and the
       hand-written NON_HOOK_DOCS allowlist excepted).
-  16. docs/hook-operating-matrix.md parity: generated hook operating surface
-      summary is byte-identical to the manifest/env/security source render.
+  16. Standalone hooks (any registration outside the dispatch-covered
+      PreToolUse/Bash shape, plus opt-in hooks) apply `@fail_open` in
+      impl.py — AST-checked, not substring (#645).
   17. Per-hook `mode` metadata in hooks/manifest.json (strict env, bypass env,
       state/path vars, read-only external commands) ↔ the human-readable views
       in docs/bypass-vars.md and SECURITY.md, cross-checked in both directions
       so neither can drift (#688). Opt-in hooks and shared/non-manifest rows are
       exempt (they own no manifest `mode` block).
-  18. Spec `Requires:` ↔ manifest `requires` cross-check (#1158): a hook whose
+  18. impl.sh hooks arm fire-ledger instrumentation with a line-anchored
+      `praxis_fire_arm <name>` call (#848).
+  19. Every `mktemp -d` assignment in tests/*.sh guards its own failure on
+      the same line (#897).
+  20. Spec `Requires:` ↔ manifest `requires` cross-check (#1158): a hook whose
       matcher is dead without an external component (cmux, zsh, codex plugin,
       hookable memory store, slack/notion MCP) declares it in both places or
       neither — the Rule 8 contract, applied to component dependencies.
+  21. docs/hook-operating-matrix.md parity: generated hook operating surface
+      summary is byte-identical to the manifest/env/security source render
+      (#672). Numbered after 20 because its original label collided with
+      Rule 16 (@fail_open); it took the next free number in #1172.
+
+An unnumbered auxiliary check verifies the Codex adapter symlinks
+(plugins/praxis/{skills,hooks,scripts} → repo root).
 
 CI invokes this; developers can too, via `./scripts/check-plugin-manifests.py`.
 """
@@ -61,6 +85,7 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -75,7 +100,7 @@ assert _spec and _spec.loader
 _build = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_build)
 
-# ADR-0002 (#617): the runtime dispatch resolver. Rule 13 cross-checks that the
+# ADR-0002 (#617): the runtime dispatch resolver. Rule 14 cross-checks that the
 # build collapse (filter_hooks_for_host → committed hooks.json) and the runtime
 # resolution (group_members) agree on each dispatch group's members.
 _disp_spec = importlib.util.spec_from_file_location(
@@ -87,6 +112,11 @@ _disp_spec.loader.exec_module(_dispatch)
 
 from constants import EXPECTED_SKILLS, OPT_IN_HOOKS, VALID_ROLES  # noqa: E402
 
+
+# release-please rewrites only the version fields its jsonpath reaches, and the
+# marketplace outputs carry one at the top level and one inside plugins[0], so
+# the recursive form is the only one that leaves nothing stale (Rule 9, #1172).
+RELEASE_JSONPATH = "$..version"
 
 RUNTIME_METADATA_REQUIRED_FIELDS = (
     "verified-against-runtime",
@@ -212,7 +242,7 @@ def dispatch_node_drifts(
 ) -> list[str]:
     """Drift strings for one (event, matcher) group's node shape in a hooks.json.
 
-    Pure function (no I/O) so the node-shape half of Rule 13 is unit-testable in
+    Pure function (no I/O) so the node-shape half of Rule 14 is unit-testable in
     isolation from the runtime resolver. `expected_members` is the host-kept
     member set: non-empty → the group must hold exactly ONE node and it must be
     the dispatcher wrapper carrying `event matcher host_id` args; empty (the host
@@ -534,7 +564,7 @@ def _skill_runtime_metadata_drifts(skill_dir: Path) -> list[str]:
 def _has_fail_open_decorator(impl_path: Path) -> bool:
     """True iff some function in impl.py carries an `@fail_open` decorator.
 
-    AST-based on purpose (Rule 15, #645): a substring scan would accept
+    AST-based on purpose (Rule 16, #645): a substring scan would accept
     `fail_open` mentioned in a comment/docstring or imported-but-unapplied,
     none of which actually wraps the entrypoint at runtime. A syntactically
     invalid impl.py returns False — the hook cannot run at all, and the
@@ -552,6 +582,40 @@ def _has_fail_open_decorator(impl_path: Path) -> bool:
                 if isinstance(dec, ast.Attribute) and dec.attr == "fail_open":
                     return True
     return False
+
+
+def _git_index_wrapper_modes() -> dict[str, str]:
+    """Map top-level hooks/<file>.sh names to their git index mode string.
+
+    Returns e.g. {"strike-counter.sh": "100755"}. Fails open to an empty dict
+    when git is unavailable, times out, or the tree is not a git checkout
+    (e.g. a marketplace install running the check by hand) — the filesystem
+    half of Rule 6d still runs; only the committed-mode half is skipped.
+    Untracked files simply do not appear (git's 755/644 dichotomy applies
+    only to tracked content).
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "-s", "--", "hooks"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    if proc.returncode != 0:
+        return {}
+    modes: dict[str, str] = {}
+    for line in proc.stdout.splitlines():
+        # Format: "<mode> <sha> <stage>\t<path>"
+        meta, _, path = line.partition("\t")
+        if not re.fullmatch(r"hooks/[^/]+\.sh", path):
+            continue
+        fields = meta.split()
+        if fields:
+            modes[path[len("hooks/"):]] = fields[0]
+    return modes
 
 
 def _hook_dirs() -> list[Path]:
@@ -583,7 +647,7 @@ def main() -> int:
     drifts: list[str] = []
 
     # ------------------------------------------------------------------
-    # Drift check (rule 5) — generated artifacts byte-identical
+    # Rule 5 — generated artifacts byte-identical (drift check)
     # ------------------------------------------------------------------
     for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
         platform = json.loads(platform_file.read_text())
@@ -713,6 +777,12 @@ def main() -> int:
             role=opt_in_role, name=opt_in_name, baked_args=""
         )
 
+    # Rule 6d (#1172): the build chmods every emitted wrapper to 0o755
+    # (emit_wrappers), but Rule 6 compared content only — a 644 wrapper was
+    # byte-identical and passed while being un-executable at runtime. Assert
+    # the executable bit on disk, and (when the tree is a git checkout) the
+    # committed index mode, respecting git's 100755/100644 dichotomy.
+    git_index_modes = _git_index_wrapper_modes()
     for fname, expected_body in expected_wrappers.items():
         wrapper_path = _build.HOOKS_DIR / fname
         if not wrapper_path.exists():
@@ -727,6 +797,19 @@ def main() -> int:
                 f"WRAPPER DRIFT hooks/{fname}: regenerate with "
                 "./scripts/build-plugin-manifests.py"
             )
+        if not os.access(wrapper_path, os.X_OK):
+            drifts.append(
+                f"WRAPPER MODE hooks/{fname}: missing executable bit on disk — "
+                f"`chmod 755 hooks/{fname}` or re-run "
+                "./scripts/build-plugin-manifests.py (Rule 6d, #1172)"
+            )
+        index_mode = git_index_modes.get(fname)
+        if index_mode is not None and index_mode != "100755":
+            drifts.append(
+                f"WRAPPER MODE hooks/{fname}: committed git index mode is "
+                f"{index_mode}, expected 100755 — "
+                f"`git update-index --chmod=+x hooks/{fname}` (Rule 6d, #1172)"
+            )
 
     # Rule 6b — dispatch-only members must NOT carry a wrapper on disk. The
     # dispatcher imports their impl.py directly; a lingering hooks/<name>.sh is
@@ -738,8 +821,25 @@ def main() -> int:
                 "carry a wrapper — remove it (invoked via _dispatch.sh)"
             )
 
+    # Rule 6e (#1172) — reverse sweep: every hooks/*.sh on disk must be in the
+    # generator's output set. Rule 6 walks the expected wrappers forward and
+    # Rule 6b pins the dispatch-only names, but a stray file matching neither
+    # set — a renamed hook's leftover, a hand-written wrapper — passed
+    # silently. Mirrors the ORPHAN STUB reverse direction of Rule 15.
+    for wrapper_path in sorted(_build.HOOKS_DIR.glob("*.sh")):
+        fname = wrapper_path.name
+        if fname in expected_wrappers:
+            continue
+        if fname in dispatch_only:
+            continue  # already flagged as ORPHAN WRAPPER by Rule 6b above
+        drifts.append(
+            f"ORPHAN WRAPPER hooks/{fname}: not a generated wrapper (manifest "
+            "entry, opt-in hook, or dispatch runner) — remove it (stale output "
+            "of a renamed or deleted hook?)"
+        )
+
     # ------------------------------------------------------------------
-    # Spec existence check + hosts shape validation
+    # Rule 10 — spec.md existence + manifest `hosts` shape validation
     # ------------------------------------------------------------------
     for entry in manifest["hooks"]:
         hosts = entry.get("hosts")
@@ -766,7 +866,7 @@ def main() -> int:
             )
 
     # ------------------------------------------------------------------
-    # Codex adapter symlinks
+    # Codex adapter symlinks (unnumbered auxiliary check)
     # ------------------------------------------------------------------
     for name in _build.FORWARDED_DIRS:
         link = _build.ADAPTER_SHELL / name
@@ -850,27 +950,113 @@ def main() -> int:
                 )
 
     # ------------------------------------------------------------------
-    # Rule 9 — Version consistency
+    # Rule 9 — Release version wiring (#1172)
+    #
+    # The previous incarnation cross-compared the version fields embedded in
+    # the committed versioned artifacts and flagged disagreement. That check
+    # was provably vacuous: Rule 5 renders every artifact from the single
+    # VERSION source and demands byte-identity (a missing file reads as ""
+    # and drifts too), so two artifacts can only disagree when Rule 5 has
+    # already failed — the compare could never fire on its own, and its
+    # marketplace fallback branch was dead code (marketplace was not even in
+    # its versioned-kinds set). Deleted; replaced with checks that CAN fire:
+    #
+    #   (a) VERSION (the authoritative build input, see load_base) equals the
+    #       "." version release-please tracks in .release-please-manifest.json
+    #       — a mismatch means the next release PR computes its bump from a
+    #       different version than the one the artifacts embed.
+    #   (b) every platform output of a versioned kind (plugin, marketplace,
+    #       gemini-extension — marketplace embeds version fields too) is
+    #       listed in release-please-config.json `extra-files`, so a release
+    #       bump rewrites its embedded versions. A new platform output added
+    #       without the extra-files entry would otherwise ship stale versions
+    #       on the first release after merge, with no gate noticing.
     # ------------------------------------------------------------------
-    versioned_kinds = {"plugin", "gemini-extension"}
-    seen: dict[str, str] = {}
-    for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
-        platform = json.loads(platform_file.read_text())
-        for output in platform["outputs"]:
-            if output["kind"] not in versioned_kinds:
-                continue
-            p = REPO_ROOT / output["path"]
-            if not p.exists():
-                continue
-            data = json.loads(p.read_text())
-            v = data.get("version") or (data.get("plugins") or [{}])[0].get("version")
-            if v:
-                seen[output["path"]] = v
-    if len(set(seen.values())) > 1:
+    version_file = (REPO_ROOT / "VERSION").read_text().strip()
+    rp_manifest_path = REPO_ROOT / ".release-please-manifest.json"
+    try:
+        rp_manifest = json.loads(rp_manifest_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
         drifts.append(
-            "VERSION DRIFT across artifacts: "
-            + ", ".join(f"{k}={v}" for k, v in seen.items())
+            f"RELEASE WIRING .release-please-manifest.json: unreadable ({exc})"
         )
+    else:
+        rp_version = rp_manifest.get(".")
+        if rp_version != version_file:
+            drifts.append(
+                f"VERSION MISMATCH: VERSION file says {version_file!r} but "
+                f".release-please-manifest.json \".\" says {rp_version!r} — "
+                "the two must agree (Rule 9, #1172)"
+            )
+
+    rp_config_path = REPO_ROOT / "release-please-config.json"
+    try:
+        rp_config = json.loads(rp_config_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        drifts.append(
+            f"RELEASE WIRING release-please-config.json: unreadable ({exc})"
+        )
+    else:
+        extra_files = (
+            rp_config.get("packages", {}).get(".", {}).get("extra-files", [])
+        )
+        # Keyed by path but keeping the whole entry: a marketplace output carries
+        # `version` both at the top level and inside plugins[0], so a narrowed
+        # `$.version` updates one and leaves the other stale while the path is
+        # still listed. Checking presence alone cannot see that.
+        extra_specs = {}
+        for entry in extra_files:
+            path = entry.get("path") if isinstance(entry, dict) else entry
+            if not isinstance(path, str):
+                # Reported rather than raised: a KeyError here aborts the whole
+                # checker, so the one diagnostic that would name the malformed
+                # entry never prints.
+                drifts.append(
+                    f"RELEASE WIRING release-please-config.json: extra-files "
+                    f"entry {entry!r} has no string 'path' — release-please "
+                    "cannot resolve it (Rule 9, #1172)"
+                )
+                continue
+            extra_specs[path] = entry
+        versioned_kinds = {"plugin", "marketplace", "gemini-extension"}
+        for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
+            platform = json.loads(platform_file.read_text())
+            for output in platform["outputs"]:
+                if output["kind"] not in versioned_kinds:
+                    continue
+                path = output["path"]
+                if path not in extra_specs:
+                    drifts.append(
+                        f"RELEASE WIRING {path}: versioned artifact "
+                        f"(kind={output['kind']}) is not listed in "
+                        "release-please-config.json extra-files — release-please "
+                        "would leave its embedded version fields stale "
+                        "(Rule 9, #1172)"
+                    )
+                    continue
+                entry = extra_specs[path]
+                if not isinstance(entry, dict):
+                    drifts.append(
+                        f"RELEASE WIRING {path}: extra-files entry is a bare "
+                        "string — release-please needs an object carrying "
+                        'type and jsonpath (Rule 9, #1172)'
+                    )
+                    continue
+                if entry.get("type") != "json":
+                    drifts.append(
+                        f"RELEASE WIRING {path}: extra-files type is "
+                        f"{entry.get('type')!r}, expected 'json' — every "
+                        "versioned artifact here is a JSON document "
+                        "(Rule 9, #1172)"
+                    )
+                if entry.get("jsonpath") != RELEASE_JSONPATH:
+                    drifts.append(
+                        f"RELEASE WIRING {path}: extra-files jsonpath is "
+                        f"{entry.get('jsonpath')!r}, expected "
+                        f"{RELEASE_JSONPATH!r} — a narrower path updates only "
+                        "the version fields it names and silently leaves its "
+                        "siblings stale (Rule 9, #1172)"
+                    )
 
     # ------------------------------------------------------------------
     # Rule 11 — runtime-sensitive skill metadata
@@ -1128,27 +1314,6 @@ def main() -> int:
             )
 
     # ------------------------------------------------------------------
-    # Rule 16 — hook operating matrix byte-identity (#672)
-    #
-    # The matrix is intentionally generated from structured sources only:
-    # manifest registration shape, bypass-vars registry, and SECURITY.md
-    # external-command declarations. This keeps Track 1 behavior-preserving
-    # while still giving users a drift-checked operating surface.
-    # ------------------------------------------------------------------
-    expected_matrix = _build.render_hook_operating_matrix(manifest)
-    matrix_path = _build.HOOK_OPERATING_MATRIX_PATH
-    if not matrix_path.exists():
-        drifts.append(
-            "MATRIX MISSING docs/hook-operating-matrix.md: run "
-            "./scripts/build-plugin-manifests.py"
-        )
-    elif matrix_path.read_text() != expected_matrix:
-        drifts.append(
-            "MATRIX DRIFT docs/hook-operating-matrix.md: regenerate with "
-            "./scripts/build-plugin-manifests.py"
-        )
-
-    # ------------------------------------------------------------------
     # Rule 17 — hook `mode` metadata ↔ doc cross-check (#688)
     #
     # hooks/manifest.json's per-hook `mode` block is the single source of truth
@@ -1352,6 +1517,29 @@ def main() -> int:
                 "hooks/manifest.json `requires` and the spec's `Requires:` "
                 "header line, or in neither — #1158)"
             )
+
+    # ------------------------------------------------------------------
+    # Rule 21 — hook operating matrix byte-identity (#672)
+    #
+    # The matrix is intentionally generated from structured sources only:
+    # manifest registration shape, bypass-vars registry, and SECURITY.md
+    # external-command declarations. This keeps Track 1 behavior-preserving
+    # while still giving users a drift-checked operating surface.
+    # (Renumbered from a duplicate "Rule 16" in #1172 — that label collided
+    # with the @fail_open rule above, so this one took the next free number.)
+    # ------------------------------------------------------------------
+    expected_matrix = _build.render_hook_operating_matrix(manifest)
+    matrix_path = _build.HOOK_OPERATING_MATRIX_PATH
+    if not matrix_path.exists():
+        drifts.append(
+            "MATRIX MISSING docs/hook-operating-matrix.md: run "
+            "./scripts/build-plugin-manifests.py"
+        )
+    elif matrix_path.read_text() != expected_matrix:
+        drifts.append(
+            "MATRIX DRIFT docs/hook-operating-matrix.md: regenerate with "
+            "./scripts/build-plugin-manifests.py"
+        )
 
     if drifts:
         print("plugin-manifest check FAILED:")

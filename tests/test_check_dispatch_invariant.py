@@ -1,4 +1,4 @@
-"""Rule 13 (ADR-0002, #617): dispatch-group ↔ build/runtime consistency.
+"""Rule 14 (ADR-0002, #617): dispatch-group ↔ build/runtime consistency.
 
 Two halves, tested independently:
 
@@ -11,7 +11,7 @@ Two halves, tested independently:
     tree is otherwise green.
 
 The node-shape half can be checked against a committed-file tamper too, but that
-also trips Rule 5 (drift); these unit tests isolate Rule 13's own signal so a
+also trips Rule 5 (drift); these unit tests isolate Rule 14's own signal so a
 regression in the new invariant is unambiguous.
 """
 from __future__ import annotations

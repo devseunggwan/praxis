@@ -286,7 +286,7 @@ python3 process.
   in one `impl.py` cannot block the tool call or abort the other members —
   restoring the isolation process separation gave for free. Import-time failures
   are forwarded to stderr (visible, not silent) before failing open.
-- **Guard.** `scripts/check-plugin-manifests.py` Rule 13 ties the build and
+- **Guard.** `scripts/check-plugin-manifests.py` Rule 14 ties the build and
   runtime paths together: for every `dispatch_groups` pair, per platform, the
   committed `hooks.json` must hold exactly one dispatcher node (no leaked member
   node, no second node, correct host args), and `_dispatch.group_members` must
