@@ -50,6 +50,17 @@ to ``matrix.os`` buys nothing if the dimension's own entries are expressions),
 a file that does not parse. Failing closed is the point of a canary:
 a silent skip is indistinguishable from a clean tree.
 
+What this canary is not: a shell interpreter. It reads a ``run:`` body as
+commands and words, which is enough to see the installs anyone actually writes,
+and it stops there. An install reached through shell indirection — ``bash -c
+'pip install ruff'``, ``echo "$(pip install ruff)"``, ``pkg=ruff; pip install
+"$pkg"`` — is invisible to it, and closing those needs variable tracking and
+nested-quoting rules whose corner cases have no end. The threat model is an
+accidentally dropped pin in an ordinary workflow, not an author deliberately
+hiding an install from the check; someone editing this file to defeat it can
+delete the check outright. If a workflow here ever needs one of those shapes,
+pin inside it and say so at the call site rather than widening the parser.
+
 Run standalone or via ``scripts/run-tests.sh``. Exit 0 + a verified count on
 a clean tree; exit 1 listing each offending ``file:line`` on drift. Unit
 tests: ``tests/test_check_workflow_pins.py``.
