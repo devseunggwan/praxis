@@ -43,6 +43,13 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
+# The checker imports PyYAML at module scope, and this module executes it at
+# import time — so without the guard a machine lacking PyYAML fails during
+# pytest *collection*, taking the whole suite down instead of skipping here.
+pytest.importorskip("yaml")
+
 _REPO = Path(__file__).resolve().parents[1]
 _SCRIPT = _REPO / "scripts" / "check-workflow-pins.py"
 
