@@ -104,12 +104,39 @@ echo ""
 echo "=== shell tests ==="
 SHELL_FAILED=0
 
+# Sub-suite skip protocol (#1170). A test file that must skip entirely because
+# a tool is absent prints, to stdout,
+#     PRAXIS_SUBSKIP: <tool> <file>
+# and exits 0. run_sh() tees stdout so the live stream is preserved, then scans
+# the capture and folds each announced tool into SKIPPED_TOOLS — the same
+# accounting as the top-level steps 9-11, so PRAXIS_TESTS_STRICT=1 fails the
+# run on them too. Before this, "SKIP jq unavailable; exit 0" inside a file
+# was indistinguishable from a pass and strict mode never saw it.
+SUBSKIP_MARKER="PRAXIS_SUBSKIP:"
+
 run_sh() {
   local f="$1"
-  if ! bash "$f"; then
+  local out="$PRAXIS_HOME/run-sh-capture.txt"
+  local rc=0
+  # pipefail (set at the top) carries the test's own exit status through tee.
+  # stderr is deliberately left out of the pipe: markers are stdout-only, and
+  # error output keeps streaming unbuffered.
+  bash "$f" | tee "$out" || rc=$?
+  if [[ $rc -ne 0 ]]; then
     echo "FAIL: $f" >&2
     SHELL_FAILED=1
+    return 0
   fi
+  local tool
+  while IFS= read -r tool; do
+    [[ -n "$tool" ]] || continue
+    # Dedupe: several files skip on the same absent tool (e.g. python3).
+    case " ${SKIPPED_TOOLS[*]-} " in
+      *" $tool "*) ;;
+      *) SKIPPED_TOOLS+=("$tool")
+         echo "SKIPPED: $tool (sub-suite $f skipped itself — tool not installed)" ;;
+    esac
+  done < <(sed -n "s/^${SUBSKIP_MARKER} \([^ ][^ ]*\) .*/\1/p" "$out" | sort -u)
 }
 
 # nullglob: an unmatched glob expands to nothing instead of the literal pattern,
@@ -336,13 +363,16 @@ if [[ $FAILED -ne 0 ]]; then
   exit 1
 fi
 
-# Scope note: this counts the three tool steps this script owns (9-11). Step 6
-# has its own N/A line (deliberately not "SKIPPED") and is excluded from this
-# tally on purpose — it is never a missing-toolchain skip. Gates
-# that a sub-suite skips internally — e.g. the Darwin-only gate in
-# tests/test_codex_broker_reaper.sh — announce themselves in their own summary
-# and are not aggregated here; conflating them would make a portable-by-design
-# skip look like a missing toolchain.
+# Scope note: this counts the three tool steps this script owns (9-11) plus
+# any tool a shell sub-suite announced via the PRAXIS_SUBSKIP marker before
+# exiting 0 (#1170) — a whole file that silently skipped on a missing tool is
+# a missing-toolchain gap exactly like steps 9-11. Step 6 has its own N/A line
+# (deliberately not "SKIPPED") and is excluded from this tally on purpose — it
+# is never a missing-toolchain skip. Per-gate platform skips inside a running
+# sub-suite — e.g. the Darwin-only gate in tests/test_codex_broker_reaper.sh —
+# still announce themselves only in their own summary and are not aggregated
+# here; conflating them would make a portable-by-design skip look like a
+# missing toolchain.
 if [[ ${#SKIPPED_TOOLS[@]} -eq 0 ]]; then
   echo "ALL TESTS PASSED"
   exit 0

@@ -27,6 +27,8 @@ fi
 # each blocking assertion below would silently become a fail-open assertion.
 # Skip loudly rather than report 14 unexplained failures (CI installs zsh).
 if ! command -v zsh >/dev/null 2>&1; then
+  # stdout marker so run-tests.sh folds this skip into strict mode (#1170).
+  echo "PRAXIS_SUBSKIP: zsh $0"
   echo "SKIPPED: zsh not available — block-unmatched-glob has nothing to delegate to"
   exit 0
 fi

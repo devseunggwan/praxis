@@ -27,7 +27,9 @@ CATALOG="$ROOT/hooks/_lib/silent-pass-catalog.json"
 PASS=0
 FAIL=0
 
-command -v jq >/dev/null 2>&1 || { echo "SKIP  jq unavailable"; exit 0; }
+# The marker line lets run-tests.sh fold this whole-file skip into its
+# strict-mode accounting (#1170) — without it the secret scan "passes" green.
+command -v jq >/dev/null 2>&1 || { echo "PRAXIS_SUBSKIP: jq $0"; echo "SKIP  jq unavailable"; exit 0; }
 
 # Allowlist of fabricated placeholders (from the catalog SoT).
 ALLOW=$(jq -r '.fabricated_fixture_allowlist[]?' "$CATALOG" 2>/dev/null)

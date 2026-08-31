@@ -20,7 +20,9 @@ CATALOG="$ROOT/$CATALOG_REL"
 PASS=0
 FAIL=0
 
-command -v jq >/dev/null 2>&1 || { echo "SKIP  jq unavailable"; exit 0; }
+# The marker line lets run-tests.sh fold this whole-file skip into its
+# strict-mode accounting (#1170).
+command -v jq >/dev/null 2>&1 || { echo "PRAXIS_SUBSKIP: jq $0"; echo "SKIP  jq unavailable"; exit 0; }
 [ -f "$CATALOG" ] || { echo "FAIL  catalog missing: $CATALOG"; exit 1; }
 
 cur=$(jq -r '.classes[]?.id' "$CATALOG" 2>/dev/null | sort -u)

@@ -38,6 +38,8 @@ if [ ! -f "$HOOK" ]; then
 fi
 
 if ! command -v python3 >/dev/null 2>&1; then
+  # stdout marker so run-tests.sh folds this skip into strict mode (#1170).
+  echo "PRAXIS_SUBSKIP: python3 $0"
   echo "SKIP: python3 not available" >&2
   exit 0
 fi

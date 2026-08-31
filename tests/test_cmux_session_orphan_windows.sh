@@ -74,6 +74,10 @@ cleanup() {
 trap cleanup EXIT
 
 if ! command -v tmux >/dev/null 2>&1; then
+  # The marker line lets run-tests.sh fold this whole-file skip into its
+  # strict-mode accounting (#1170). Without it the file exits 0 with no gate
+  # having run, which is indistinguishable from a pass.
+  echo "PRAXIS_SUBSKIP: tmux $0"
   skip "tmux absent — pane-enumeration gates cannot run"
   summary_and_exit
 fi
@@ -82,6 +86,9 @@ fi
 # server at all (no socket dir, sandbox restriction). Everything after this
 # point is fixture construction, and a failure there is a real failure.
 if ! "${TMUX_T[@]}" new-session -d -s "$SESSION" -n active-shell 2>/dev/null; then
+  # Second marked bail: an installed tmux that cannot serve is the same absent
+  # prerequisite as no tmux at all, and it leaves just as little behind.
+  echo "PRAXIS_SUBSKIP: tmux $0"
   skip "tmux server would not start on an isolated socket — gates cannot run"
   summary_and_exit
 fi
