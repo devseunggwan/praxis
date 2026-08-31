@@ -74,6 +74,10 @@ cleanup() {
 trap cleanup EXIT
 
 if ! command -v tmux >/dev/null 2>&1; then
+  # The marker line lets run-tests.sh fold this whole-file skip into its
+  # strict-mode accounting (#1170). Without it the file exits 0 with no gate
+  # having run, which is indistinguishable from a pass.
+  echo "PRAXIS_SUBSKIP: tmux $0"
   skip "tmux absent — pane-enumeration gates cannot run"
   summary_and_exit
 fi

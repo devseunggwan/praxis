@@ -131,6 +131,7 @@ GUARDED_FILES=(
   "tests/hooks/postuse-correction/test_askuserquestion_loop_signal.sh"
   "tests/hooks/postuse-correction/test_bypass_telemetry.sh"
   "tests/hooks/preflight-gate/test_block_unmatched_glob.sh"
+  "tests/test_cmux_session_orphan_windows.sh"
 )
 missing=()
 for gf in "${GUARDED_FILES[@]}"; do
