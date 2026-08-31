@@ -25,7 +25,10 @@ trap 'rm -rf "$tmp"' EXIT
 
 # Bounded, retried transfer — same spirit as ci-apt.sh's phase bound (#1046/
 # #1049): a stalled CDN must fail fast and get retried, not eat the job budget.
-curl -fsSL --retry 3 --retry-delay 5 --max-time 120 \
+# --max-time bounds ONE attempt and curl resets it on every retry, so without
+# --retry-max-time the four attempts plus their delays reach 8m15s — over half
+# the 15-minute test-job budget this step shares with the suite itself.
+curl -fsSL --retry 3 --retry-delay 5 --retry-max-time 180 --max-time 120 \
   -o "$tmp/shellcheck.tar.xz" "$SC_URL"
 echo "${SC_SHA256}  $tmp/shellcheck.tar.xz" | sha256sum -c -
 
