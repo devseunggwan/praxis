@@ -86,6 +86,9 @@ fi
 # server at all (no socket dir, sandbox restriction). Everything after this
 # point is fixture construction, and a failure there is a real failure.
 if ! "${TMUX_T[@]}" new-session -d -s "$SESSION" -n active-shell 2>/dev/null; then
+  # Second marked bail: an installed tmux that cannot serve is the same absent
+  # prerequisite as no tmux at all, and it leaves just as little behind.
+  echo "PRAXIS_SUBSKIP: tmux $0"
   skip "tmux server would not start on an isolated socket — gates cannot run"
   summary_and_exit
 fi
