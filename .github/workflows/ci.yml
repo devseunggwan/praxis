@@ -56,8 +56,9 @@ jobs:
       # as the ruff pin. The script installs the same version for the `test`
       # job, so the two blocking shellcheck runs cannot disagree.
       - run: bash scripts/ci-shellcheck.sh
-      # File discovery is delegated to scripts/shellcheck-files.sh (tracked
-      # files only; also covers the extensionless skills/ CLI scripts, #1175)
+      # File discovery is delegated to scripts/shellcheck-files.sh (see its
+      # header for the enumeration rules; it also covers the extensionless
+      # skills/ CLI scripts, #1175)
       # and shared verbatim with scripts/run-tests.sh step 9 so the two file
       # sets cannot drift. Two invocations: runtime code gets no rule
       # exclusions; tests/ excludes SC2154/SC2034, the test-harness-only false

@@ -14,13 +14,16 @@
 #             --exclude=SC2154,SC2034 (see .shellcheckrc for why those two
 #             are false positives only in the test harness).
 #
-# Enumeration walks `git ls-files -z` — tracked files only. A filesystem
-# `find` would also descend into gitignored trees: .claude/worktrees/agent-*/
-# (this repo's own lingering subagent worktrees) would contribute a second
-# copy of tests/ to the *runtime* scope — linted with zero excludes — plus
-# whatever scratch scripts sit around, and node_modules would need its own
-# special-case. Tracked-only makes local and CI see the same set by
-# construction. Two selection rules per file:
+# Enumeration walks `git ls-files -z --cached --others --exclude-standard` —
+# tracked files plus not-yet-added ones, minus everything .gitignore excludes.
+# A filesystem `find` would instead descend into gitignored trees:
+# .claude/worktrees/agent-*/ (this repo's own lingering subagent worktrees)
+# would contribute a second copy of tests/ to the *runtime* scope — linted
+# with zero excludes — plus whatever scratch scripts sit around, and
+# node_modules would need its own special-case. Dropping --others would go
+# the other way: a script written but not yet `git add`ed lints clean
+# locally and only fails once CI sees it tracked.
+# Two selection rules per file:
 #   1. *.sh by extension — what the old `find . -name '*.sh'` covered.
 #   2. non-.sh files whose first line is a bash/sh shebang — the skills/ CLI
 #      scripts (claude-recover, cmux-*, spec-drift) ship without a .sh
@@ -46,7 +49,7 @@ esac
 # cannot overmatch a `/bin/sh` prefix.
 shebang_re='^#![[:space:]]*([^[:space:]]*/)?(env[[:space:]]+)?(bash|sh)([[:space:]]|$)'
 
-git ls-files -z | while IFS= read -r -d '' f; do
+git ls-files -z --cached --others --exclude-standard | while IFS= read -r -d '' f; do
   case "$f" in
     tests/*) [ "$scope" = tests ] || continue ;;
     *)       [ "$scope" = runtime ] || continue ;;
