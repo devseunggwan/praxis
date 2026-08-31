@@ -30,7 +30,8 @@ fixture:
     never references is test data, not a runner,
   - what cannot be resolved is drift, not a pass: an unverifiable runner
     expression, a matrix (or ``include:``) candidate that is itself an
-    expression, and a workflow that does not parse,
+    expression, an ``include:`` that is an expression rather than a list, and a
+    workflow that does not parse,
   - the two evasions a whole-line pin match allowed: an option before the
     install verb (``pip --no-cache-dir install ruff``), and a pin-shaped token
     that belongs to a neighbouring command (``pip install ruff; echo
@@ -429,3 +430,17 @@ def test_npm_pin_in_a_neighbouring_command_is_not_a_pin(tmp_path):
     )
     drifts, _ = pins.check(_dir(tmp_path, content))
     assert any("markdownlint-cli2 is unpinned" in d for d in drifts), drifts
+
+
+def test_expression_valued_include_block_fails_closed(tmp_path):
+    """`include: ${{ fromJSON(...) }}` adds combinations the checker cannot see."""
+    content = CLEAN.replace(
+        '        include:\n          - os: windows-2022\n            python: "3.12"\n',
+        "        include: ${{ fromJSON(inputs.extra) }}\n",
+        1,
+    )
+    # The fixture must stay parseable, or the assert would pass on a YAML error.
+    assert "fromJSON" in content and "windows-2022" not in content
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("cannot be verified" in d for d in drifts), drifts
+    assert not any("does not parse" in d for d in drifts), drifts

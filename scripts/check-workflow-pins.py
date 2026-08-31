@@ -297,6 +297,11 @@ def _matrix_literals(job: yaml.Node, dim: str) -> list[yaml.ScalarNode] | None:
             return None
         found.extend(items)
     include = _map_get(matrix, "include")
+    if include is not None and not isinstance(include, yaml.SequenceNode):
+        # `include: ${{ fromJSON(...) }}` builds combinations the checker cannot
+        # see. Skipping it silently would let the expression contribute a
+        # floating runner behind an otherwise clean literal list.
+        return None
     if isinstance(include, yaml.SequenceNode):
         for entry in include.value:
             value = _map_get(entry, dim)
@@ -350,8 +355,9 @@ def _check_runner_scalar(
     literals = _matrix_literals(job, dim)
     if literals is None:
         out.add(
-            f"{where}: runs-on references matrix.{dim}, but that dimension holds "
-            f"no literal labels — its runner cannot be verified"
+            f"{where}: runs-on references matrix.{dim}, but that dimension's "
+            f"candidates do not resolve to literal labels (none present, or an "
+            f"expression-valued include:) — its runner cannot be verified"
         )
         return
     for item in literals:
