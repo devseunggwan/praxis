@@ -1004,10 +1004,20 @@ def main() -> int:
         # `version` both at the top level and inside plugins[0], so a narrowed
         # `$.version` updates one and leaves the other stale while the path is
         # still listed. Checking presence alone cannot see that.
-        extra_specs = {
-            (entry["path"] if isinstance(entry, dict) else entry): entry
-            for entry in extra_files
-        }
+        extra_specs = {}
+        for entry in extra_files:
+            path = entry.get("path") if isinstance(entry, dict) else entry
+            if not isinstance(path, str):
+                # Reported rather than raised: a KeyError here aborts the whole
+                # checker, so the one diagnostic that would name the malformed
+                # entry never prints.
+                drifts.append(
+                    f"RELEASE WIRING release-please-config.json: extra-files "
+                    f"entry {entry!r} has no string 'path' — release-please "
+                    "cannot resolve it (Rule 9, #1172)"
+                )
+                continue
+            extra_specs[path] = entry
         versioned_kinds = {"plugin", "marketplace", "gemini-extension"}
         for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
             platform = json.loads(platform_file.read_text())

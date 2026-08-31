@@ -87,7 +87,21 @@ python3 "$CHECK" 2>&1 | grep -q "extra-files type is"
 run_case "wrong_type_reported" "$?" "0"
 restore
 
-# 5. Dropping the entry entirely still reports the original presence drift.
+# 5. An entry with no `path` is reported, not raised. A KeyError here would
+#    abort the checker, so the diagnostic naming the bad entry never prints.
+python3 - "$TARGET" <<'PY'
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+cfg["packages"]["."]["extra-files"].append({"type": "json", "jsonpath": "$..version"})
+json.dump(cfg, open(sys.argv[1], "w"), indent=2)
+PY
+python3 "$CHECK" 2>&1 | grep -q "has no string .path."
+run_case "pathless_entry_reported_not_raised" "$?" "0"
+python3 "$CHECK" 2>&1 | grep -q "Traceback"
+run_case "pathless_entry_does_not_crash" "$?" "1"
+restore
+
+# 6. Dropping the entry entirely still reports the original presence drift.
 python3 - "$TARGET" <<'PY'
 import json, sys
 cfg = json.load(open(sys.argv[1]))
@@ -101,7 +115,7 @@ python3 "$CHECK" 2>&1 | grep -q "is not listed in"
 run_case "absent_entry_reported" "$?" "0"
 restore
 
-# 6. The restore path itself works, so a later suite does not inherit a tampered
+# 7. The restore path itself works, so a later suite does not inherit a tampered
 #    config from this file.
 python3 "$CHECK" >/dev/null 2>&1
 run_case "restore_leaves_tree_clean" "$?" "0"
