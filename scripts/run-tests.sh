@@ -109,7 +109,7 @@ SHELL_FAILED=0
 #     PRAXIS_SUBSKIP: <tool> <file>
 # and exits 0. run_sh() tees stdout so the live stream is preserved, then scans
 # the capture and folds each announced tool into SKIPPED_TOOLS — the same
-# accounting as the top-level steps 8-10, so PRAXIS_TESTS_STRICT=1 fails the
+# accounting as the top-level steps 9-11, so PRAXIS_TESTS_STRICT=1 fails the
 # run on them too. Before this, "SKIP jq unavailable; exit 0" inside a file
 # was indistinguishable from a pass and strict mode never saw it.
 SUBSKIP_MARKER="PRAXIS_SUBSKIP:"
