@@ -18,6 +18,7 @@ issue→worktree→PR to completion on its own. Reusing an existing session,
 separate account profiles, and parallel multi-issue distribution are supported.
 
 **Core principles:**
+
 - The prompt is always delivered via a file. Inline `-p` is strictly forbidden
   (avoids shell-escaping problems).
 - When the user names a session/account explicitly, follow it to the letter.
@@ -291,6 +292,7 @@ granularity**. This is not a feature for sharding one lump of work — it sends
 N issues that are already mutually independent, each on its own.
 
 **Split criteria:**
+
 - Every single item must pass the `When to Use` test — if an item that cannot
   stand as an independent issue is mixed in, drop it from the split and keep
   it in this session
@@ -302,6 +304,7 @@ N issues that are already mutually independent, each on its own.
 - If the split yields 1 item, ignore distribute (single session)
 
 **Split process:**
+
 1. Split on the **issue boundaries** confirmed by the criteria above →
    generate an individual .md file for each. A section header is not itself a
    boundary — if one issue is written under several headers, those headers
@@ -613,7 +616,7 @@ user: /cmux-delegate "에러 조사" --session claude-2
 
 ### Parallel distribution (distribute)
 
-```
+```text
 user: /cmux-delegate "작업 중 나온 별건 3개: #1140 토큰 갱신 실패, #1141 로그 유실, #1142 문서 오타" --account claude-2 --distribute
   │
   ├── Step 2.5: Conversation-synthesis handoff (once) → included in the shared Context block
