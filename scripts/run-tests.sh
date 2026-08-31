@@ -214,7 +214,12 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== workflow-pin check ==="
-if ! python3 ./scripts/check-workflow-pins.py; then
+# The canary parses workflows with PyYAML. Without it the check cannot run, and
+# a crash here would read as drift; route it through the skip path instead, so
+# CI (PRAXIS_TESTS_STRICT=1, PyYAML installed) still fails on a silent skip.
+if ! python3 -c 'import yaml' 2>/dev/null; then
+  skip_step "workflow-pin check" "pip install PyYAML"
+elif ! python3 ./scripts/check-workflow-pins.py; then
   FAILED=1
 fi
 

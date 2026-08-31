@@ -109,8 +109,10 @@ jobs:
           cache: pip
           cache-dependency-path: .github/workflows/ci.yml
       # ruff is pinned to the same version as the `ruff` job so the local-parity
-      # step cannot disagree with the blocking one.
-      - run: python3 -m pip install pytest "ruff==0.15.8"
+      # step cannot disagree with the blocking one. PyYAML is what
+      # scripts/check-workflow-pins.py parses workflows with; pinned for the
+      # same reason, since a parser change moves what the canary can see.
+      - run: python3 -m pip install pytest "ruff==0.15.8" "PyYAML==6.0.3"
       # zsh is not preinstalled on ubuntu-24.04. block-unmatched-glob delegates
       # its verdict to a real zsh, so without it that hook's suite has nothing to
       # assert against and silently degrades to fail-open coverage.

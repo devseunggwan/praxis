@@ -141,7 +141,7 @@ def test_matrix_flow_sequence_literal_is_drift(tmp_path):
         "os: [ubuntu-24.04, macos-14]", "os: [ubuntu-24.04, macos-latest]"
     )
     drifts, _ = pins.check(_dir(tmp_path, content))
-    assert any("matrix value 'macos-latest' floats" in d for d in drifts), drifts
+    assert any("matrix.os value 'macos-latest' floats" in d for d in drifts), drifts
 
 
 def test_matrix_block_list_item_is_drift(tmp_path):
@@ -150,13 +150,13 @@ def test_matrix_block_list_item_is_drift(tmp_path):
         "os:\n          - ubuntu-24.04\n          - ubuntu-latest",
     )
     drifts, _ = pins.check(_dir(tmp_path, content))
-    assert any("matrix value 'ubuntu-latest' floats" in d for d in drifts), drifts
+    assert any("matrix.os value 'ubuntu-latest' floats" in d for d in drifts), drifts
 
 
 def test_matrix_include_entry_is_drift(tmp_path):
     content = CLEAN.replace("- os: windows-2022", "- os: windows-latest")
     drifts, _ = pins.check(_dir(tmp_path, content))
-    assert any("matrix value 'windows-latest' floats" in d for d in drifts), drifts
+    assert any("matrix.os value 'windows-latest' floats" in d for d in drifts), drifts
 
 
 def test_matrix_expression_runs_on_alone_is_not_flagged(tmp_path):
@@ -228,7 +228,7 @@ def test_zero_scanned_lines_is_drift_not_a_silent_pass(tmp_path):
     empty = tmp_path / ".github" / "workflows"
     empty.mkdir(parents=True)
     drifts, _ = pins.check(empty)
-    assert any("no uses:/runs-on: lines found" in d for d in drifts), drifts
+    assert any("no uses:/runs-on: values found" in d for d in drifts), drifts
 
 
 def test_main_exit_codes(monkeypatch, tmp_path):
@@ -236,3 +236,111 @@ def test_main_exit_codes(monkeypatch, tmp_path):
     broken = CLEAN.replace("runs-on: ubuntu-24.04", "runs-on: ubuntu-latest", 1)
     monkeypatch.setattr(pins, "WORKFLOWS", _dir(tmp_path, broken))
     assert pins.main() == 1
+
+
+# --- Shapes a line-oriented scan could not see -----------------------------
+# Each of the next cases read as CLEAN under the regex scanner while selecting
+# a floating runner or an unpinned tool, which is why the checker parses YAML.
+
+
+def test_block_scalar_runs_on_is_drift(tmp_path):
+    content = CLEAN.replace(
+        "    runs-on: ubuntu-24.04\n    steps:\n      - uses: actions/checkout",
+        "    runs-on: >-\n      ubuntu-latest\n    steps:\n      - uses: actions/checkout",
+        1,
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("runs-on 'ubuntu-latest' floats" in d for d in drifts), drifts
+
+
+def test_block_list_runs_on_is_drift(tmp_path):
+    content = CLEAN.replace(
+        "    runs-on: ubuntu-24.04\n    steps:\n      - uses: actions/checkout",
+        "    runs-on:\n      - ubuntu-latest\n    steps:\n      - uses: actions/checkout",
+        1,
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("runs-on 'ubuntu-latest' floats" in d for d in drifts), drifts
+
+
+def test_flow_mapping_matrix_is_drift(tmp_path):
+    content = CLEAN.replace(
+        "      matrix:\n        os: [ubuntu-24.04, macos-14]\n"
+        "        include:\n          - os: windows-2022\n"
+        '            python: "3.12"\n',
+        "      matrix: {os: [ubuntu-latest]}\n",
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("matrix.os value 'ubuntu-latest' floats" in d for d in drifts), drifts
+
+
+def test_expression_wrapping_a_literal_is_resolved(tmp_path):
+    """`${{ 'ubuntu-latest' }}` selects a floating runner and used to pass."""
+    content = CLEAN.replace(
+        "    runs-on: ubuntu-24.04\n    steps:\n      - uses: actions/checkout",
+        "    runs-on: ${{ 'ubuntu-latest' }}\n    steps:\n      - uses: actions/checkout",
+        1,
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("runs-on 'ubuntu-latest' floats" in d for d in drifts), drifts
+
+
+def test_unverifiable_runner_expression_fails_closed(tmp_path):
+    content = CLEAN.replace(
+        "    runs-on: ubuntu-24.04\n    steps:\n      - uses: actions/checkout",
+        "    runs-on: ${{ inputs.runner }}\n    steps:\n      - uses: actions/checkout",
+        1,
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("cannot be verified" in d for d in drifts), drifts
+
+
+def test_backslash_continued_install_is_examined(tmp_path):
+    content = CLEAN.replace(
+        '      - run: python3 -m pip install pytest "ruff==0.15.8"\n',
+        "      - run: |\n          pip install \\\n            ruff\n",
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("pip install of ruff is unpinned" in d for d in drifts), drifts
+
+
+def test_pip3_install_is_examined(tmp_path):
+    content = CLEAN.replace(
+        '      - run: python3 -m pip install pytest "ruff==0.15.8"\n',
+        "      - run: pip3 install ruff\n",
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("pip install of ruff is unpinned" in d for d in drifts), drifts
+
+
+def test_pin_inside_a_comment_is_not_a_pin(tmp_path):
+    content = CLEAN.replace(
+        '      - run: python3 -m pip install pytest "ruff==0.15.8"\n',
+        "      - run: pip install ruff # ruff==0.15.8\n",
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert any("pip install of ruff is unpinned" in d for d in drifts), drifts
+
+
+def test_incomplete_npm_version_is_not_a_pin(tmp_path):
+    for spec in ("markdownlint-cli2@0", "markdownlint-cli2@0.23"):
+        content = CLEAN.replace("markdownlint-cli2@0.23.2", spec)
+        drifts, _ = pins.check(_dir(tmp_path / spec, content))
+        assert any(
+            "npm install of markdownlint-cli2 is unpinned" in d for d in drifts
+        ), (spec, drifts)
+
+
+def test_non_runner_matrix_dimension_is_not_flagged(tmp_path):
+    """A matrix dimension runs-on never references is test data, not a runner."""
+    content = CLEAN.replace(
+        "        os: [ubuntu-24.04, macos-14]\n",
+        "        os: [ubuntu-24.04, macos-14]\n        release: [ubuntu-latest]\n",
+    )
+    drifts, _ = pins.check(_dir(tmp_path, content))
+    assert not any("ubuntu-latest" in d for d in drifts), drifts
+
+
+def test_unparseable_workflow_is_drift(tmp_path):
+    drifts, _ = pins.check(_dir(tmp_path, "jobs: [unclosed\n"))
+    assert any("cannot verify" in d for d in drifts), drifts
