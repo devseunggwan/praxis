@@ -247,6 +247,25 @@ run_case_detail() {
   fi
 }
 
+# Same probe, inverted assertion: the reason must NOT carry the needle. Used
+# for controls where a gate firing is correct but firing with the WRONG reason
+# is the regression — an assertion `run_case_detail` cannot express, since a
+# missing needle and a missing ask look identical to it.
+run_case_detail_absent() {
+  local name="$1" command="$2" needle="$3" cwd="${4:-$FIX_REPO}"
+  local out err_file rc ok=1
+  err_file=$(mktemp)
+  out=$(mk_payload "$command" "$cwd" | "$HOOK" 2>"$err_file")
+  rc=$?; rm -f "$err_file"
+  [ "$rc" -eq 0 ] || ok=0
+  echo "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); r=d.get('hookSpecificOutput',{}).get('permissionDecisionReason',''); sys.exit(1 if not r or '$needle' in r else 0)" 2>/dev/null || ok=0
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [ask-detail-absent] $name"; PASS=$((PASS+1))
+  else
+    echo "FAIL  [ask-detail-absent: reason empty or carries '$needle'] $name"; FAIL=$((FAIL+1)); FAILED_NAMES+=("$name")
+  fi
+}
+
 run_case_detail "pr create checklist has Caller chain item" \
   'gh pr create --repo owner/repo --title "t" --body-file /tmp/b.md' \
   "Caller chain verified"
@@ -676,6 +695,17 @@ run_case "pushd then repo-less gh asks unresolved" ask \
 
 run_case_detail "the grouped-cd ask does not name the outer checkout" \
   "( cd $FIX_NOORIGIN && gh issue create --title \"t\" )" \
+  "UNRESOLVED"
+
+# Control for the row above. The grouping check reads the raw segment, so it
+# has to be shown NOT firing on a grouped write that changes no directory —
+# otherwise "it catches a subshell cd" and "it catches any parenthesis" are
+# the same measurement. This one resolves normally and names its repo.
+run_case "a grouped repo-less write with no cd still asks" ask \
+  "( gh issue create --title \"t\" )"
+
+run_case_detail_absent "the grouped no-cd ask names the repo, not UNRESOLVED" \
+  "( gh issue create --title \"t\" )" \
   "UNRESOLVED"
 
 # The plain `ask` rows above pass under the old classifier too — it asked, but

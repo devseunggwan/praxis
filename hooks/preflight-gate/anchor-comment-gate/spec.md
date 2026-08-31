@@ -245,6 +245,47 @@ every Bash call and this hook now spends no I/O there at all. The PostToolUse
 lookups share a hard 15s deadline, re-measured before every subprocess (8s cap
 per `gh` call, 3s per `git` call, each clamped to what is left).
 
+## Prerequisite — `gh`, for revision specifically
+
+The convention this gate protects is *one comment per PR, edited in place by
+comment id*. Creating an anchor needs only some way to post a comment; **every
+later revision needs `gh`**, because the update is a `PATCH` against the
+comment id:
+
+```text
+gh api --method PATCH /repos/{owner}/{repo}/issues/comments/<id> -F body=@anchor.md
+```
+
+A session whose only GitHub surface is the MCP server can create an anchor and
+then cannot revise it. Measured on the toolset exposed to such a session: issue
+bodies and PR bodies each have an update tool, comment bodies have none — the
+write surface is add-only for comments, while GitHub REST itself exposes the
+`PATCH`. So the limit is what the host surfaces, not the API.
+
+The same absence removes the PostToolUse re-check, for a second and independent
+reason. That step reads the published comment back and re-checks structure
+keyed on `<summary>`; the MCP read path strips `<details>` / `<summary>` from a
+**comment or PR body** while keeping their inner text, so a well-formed anchor
+read back over it reports as missing every toggle. Reading through `gh api`, as
+this hook does, is what keeps that check meaningful.
+
+Worth stating precisely, because the obvious reading is wrong: this is not the
+server mangling markup. **File contents come back with both tags intact** —
+`get_file_contents` on this very spec returns its `<details>` and `<summary>`
+verbatim. The transform applies to the body text a commenter authors and not to
+the files a reader is meant to trust, which is the prompt-injection boundary,
+not a defect. Treat it as policy to work with rather than a bug to route
+around.
+
+**What this means for a gh-less session.** The anchor rule is unsatisfiable
+past rev 1, and the honest response is to say so on the PR rather than to fake
+a revision by posting a second anchor — a second anchor-shaped comment makes
+the id-recovery lookup in [Coupled constant](#coupled-constant) ambiguous,
+which is the failure that stays invisible until someone needs it. Carrying the
+stale anchor's gaps into the PR body or the merge commit keeps them tracked
+without breaking the invariant. Issue #1211 holds the open question of whether
+to define a real fallback for that case.
+
 ## Bypass
 
 Two forms, both requiring an explicit act, and both honoured on either event:

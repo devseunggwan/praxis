@@ -26,6 +26,16 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 | **Full**           | + all cmux-* skills                                      | + cmux                                                      |
 | **Multi-provider** | + codex/gemini routing in cmux-*                         | + codex-cli, gemini-cli                                     |
 
+> **`gh` is also a prerequisite of the verification-anchor convention**, and
+> for revision specifically. Creating an anchor needs only a way to post a
+> comment; editing one in place is a `PATCH` against its comment id, which a
+> session whose only GitHub surface is the MCP server cannot issue — comment
+> bodies are add-only there, while issue and PR bodies are not. Past rev 1 the
+> anchor rule is unsatisfiable in such a session; say so on the PR and carry
+> the gaps in the PR body or merge commit rather than posting a second anchor.
+> See [`hooks/preflight-gate/anchor-comment-gate/spec.md`](hooks/preflight-gate/anchor-comment-gate/spec.md#prerequisite--gh-for-revision-specifically)
+> and issue #1211.
+
 ## Skills (18)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Always call them

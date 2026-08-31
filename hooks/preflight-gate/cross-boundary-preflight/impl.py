@@ -398,6 +398,17 @@ def _cd_intent(seg: list[Token], argv: list[Token] | None = None) -> tuple[str, 
     if not any(w in _CHDIR_WORDS for w in words):
         return ("none", None)
 
+    # A bare grouping token in the RAW segment means the chdir is scoped to a
+    # subshell or brace group whose end this machine does not track, so the
+    # directory change does not reach the write. This has to read `seg` rather
+    # than `argv`: the shared `filter_argv` normalizes a lone `(` out of argv
+    # (#1193), which leaves `( cd B && …` looking exactly like a plain `cd B`
+    # at the modelable-shape check below. Placed after the chdir-word test so
+    # it only speaks about segments that actually change directory — a grouped
+    # segment with no chdir word already returned "none" above.
+    if any(not tok.text.strip(_GROUP_PREFIX_CHARS) for tok in seg):
+        return ("opaque", None)
+
     # Exactly `cd <literal>` and nothing else — the one modelable shape.
     if (
         len(argv) == 2

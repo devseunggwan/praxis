@@ -272,13 +272,24 @@ hard block whose breadth the detector must preserve.
   header — the latter renders the target inside the quoted command and so
   printed `gh issue create --repo UNRESOLVED — …`, quoting a flag the command
   never carried.
-- **Why a subshell cannot be modeled.** `(cd <worktree> && gh issue create ...)`
-  tokenizes its command word as `(cd`, and a subshell's directory change does
-  not persist past `)` — but a `gh` call *inside* the same subshell does run
-  under it. Telling those apart needs per-subshell cwd state the segment
-  machinery does not carry, so the form is classified unmodelable and takes
-  the `UNRESOLVED` ask above. `cd <literal> && ...` outside a subshell is
-  still tracked normally.
+- **Why a subshell cannot be modeled.** A subshell's directory change does not
+  persist past `)` — but a `gh` call *inside* the same subshell does run under
+  it. Telling those apart needs per-subshell cwd state the segment machinery
+  does not carry, so the form is classified unmodelable and takes the
+  `UNRESOLVED` ask above. `cd <literal> && ...` outside a subshell is still
+  tracked normally.
+
+  **What keeps it unmodelable is the raw segment, not argv.** The attached
+  form `(cd <worktree> && …` tokenizes its command word as `(cd`, which no
+  chdir word matches. The spaced form `( cd <worktree> && …` does not: the
+  shared `filter_argv` normalizes a lone grouping token out of argv (#1193),
+  after which the segment reads exactly like a plain `cd <worktree>` and would
+  be *modeled* — resolving against a directory the write never runs in, which
+  is the wrong-repo authorization this arm exists to prevent. `_cd_intent`
+  therefore tests the **unfiltered** segment for a bare grouping token, and
+  does so only after a chdir word is already present, so a grouped segment
+  that changes no directory (`( gh issue create … )`) is unaffected and still
+  names its resolved repo.
 - **A `cd` whose target does not exist is not followed.** `cd /nope ; gh
   issue create …` leaves bash in the original checkout, so following the
   target blindly would resolve `origin` somewhere nonexistent and silence the
