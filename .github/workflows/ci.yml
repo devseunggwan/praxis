@@ -109,8 +109,10 @@ jobs:
           cache: pip
           cache-dependency-path: .github/workflows/ci.yml
       # ruff is pinned to the same version as the `ruff` job so the local-parity
-      # step cannot disagree with the blocking one.
-      - run: python3 -m pip install pytest "ruff==0.15.8"
+      # step cannot disagree with the blocking one. PyYAML is what
+      # scripts/check-workflow-pins.py parses workflows with; pinned for the
+      # same reason, since a parser change moves what the canary can see.
+      - run: python3 -m pip install pytest "ruff==0.15.8" "PyYAML==6.0.3"
       # zsh is not preinstalled on ubuntu-24.04. block-unmatched-glob delegates
       # its verdict to a real zsh, so without it that hook's suite has nothing to
       # assert against and silently degrades to fail-open coverage.
@@ -125,12 +127,17 @@ jobs:
       # before the bound, and again after it -- bounding made the failure fast,
       # the retry is what can make it pass.
       - run: bash scripts/ci-apt.sh zsh
-      # shellcheck is no longer taken from the runner image (0.9.0): step 9 of
+      # shellcheck is no longer taken from the runner image (0.9.0): step 10 of
       # run-tests.sh must run the same pinned version as the `shellcheck` job,
       # so the local-parity step cannot disagree with the blocking one (the ruff
       # pin above exists for the same reason).
       - run: bash scripts/ci-shellcheck.sh
-      - run: npm install -g markdownlint-cli2
+      # Pinned for the same reason ruff is: an unpinned install floats to the
+      # newest release, so a markdownlint-cli2 release could change lint
+      # behavior (or break install) without an explicit bump (issue #1171).
+      # scripts/run-tests.sh's markdownlint step documents the same version
+      # for local parity. Bump both together.
+      - run: npm install -g markdownlint-cli2@0.23.2
       # Strict: in CI the toolchain is installed, so a SKIPPED line means the
       # run silently stopped checking something rather than accommodating a
       # contributor's machine. markdownlint stays advisory — strict gates on a
