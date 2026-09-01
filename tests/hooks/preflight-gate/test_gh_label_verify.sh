@@ -569,22 +569,46 @@ else
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("default cache routing under PRAXIS_HOME/cache")
 fi
 
-# A future fetched_at must be rejected as stale, not immortal-fresh: with gh
-# absent the rejected entry cannot be refetched, so the gate fails open
-# (silent) instead of trusting the poisoned label set to pass `nope`.
+# A future fetched_at must be rejected as stale, not immortal-fresh. THIS case
+# is the discriminating one: `gh` is present and its label list for acme/repo
+# omits `nope`, so rejecting the poisoned entry forces a refetch and the gate
+# blocks. An implementation that reads a future timestamp as fresh takes
+# `nope` straight out of the cache and passes silently. The gh-absent variant
+# below cannot stand in for this — both implementations fail open there, so it
+# pins the fail-open contract rather than the staleness check.
+_FUTURE_CACHE="$TMPDIR/future-fetched-at-cache.json"
 printf '{"acme/repo":{"labels":["nope"],"fetched_at":99999999999,"truncated":false}}' \
-  > "$PH_FIXTURE/cache/gh-label-cache.json"
+  > "$_FUTURE_CACHE"
 _future_err=$(echo '{"tool_name":"Bash","tool_input":{"command":"gh pr create --label nope --repo acme/repo --title t --body b"},"session_id":"gh-label-default-route"}' \
-  | env -u PRAXIS_GH_LABEL_CACHE_PATH \
-        "PRAXIS_HOME=$PH_FIXTURE" "PATH=$GH_ABSENT_PATH" \
+  | env "PRAXIS_GH_LABEL_CACHE_PATH=$_FUTURE_CACHE" \
+        "PRAXIS_HOME=$PH_FIXTURE" "PATH=$MOCK_BIN:$PATH" \
         python3 "$HOOK" 2>&1 >/dev/null)
 _future_rc=$?
-if [ "$_future_rc" -eq 0 ] && [ -z "$_future_err" ]; then
-  echo "  PASS  future fetched_at rejected: poisoned entry is stale, gh gone, fail-open silent"
+if [ "$_future_rc" -eq 2 ] && echo "$_future_err" | grep -q "^BLOCKED:"; then
+  echo "  PASS  future fetched_at rejected: poisoned entry refetched, missing label blocks"
   PASS=$((PASS + 1))
 else
   echo "  FAIL  future fetched_at not rejected (rc=$_future_rc, err=$(echo "$_future_err" | head -c 200))"
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("future fetched_at rejected as stale")
+fi
+
+# Companion: once the entry is rejected and `gh` is gone it cannot be
+# refetched, so the gate fails open silently instead of trusting the poisoned
+# label set. Both implementations pass this by design — it is the fail-open
+# contract, kept here because the case above changed what it measures.
+printf '{"acme/repo":{"labels":["nope"],"fetched_at":99999999999,"truncated":false}}' \
+  > "$PH_FIXTURE/cache/gh-label-cache.json"
+_future_open_err=$(echo '{"tool_name":"Bash","tool_input":{"command":"gh pr create --label nope --repo acme/repo --title t --body b"},"session_id":"gh-label-default-route"}' \
+  | env -u PRAXIS_GH_LABEL_CACHE_PATH \
+        "PRAXIS_HOME=$PH_FIXTURE" "PATH=$GH_ABSENT_PATH" \
+        python3 "$HOOK" 2>&1 >/dev/null)
+_future_open_rc=$?
+if [ "$_future_open_rc" -eq 0 ] && [ -z "$_future_open_err" ]; then
+  echo "  PASS  rejected entry with gh gone: fail-open silent, poisoned labels untrusted"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  fail-open broke (rc=$_future_open_rc, err=$(echo "$_future_open_err" | head -c 200))"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("rejected entry fails open when gh is gone")
 fi
 
 # ---------------------------------------------------------------------------
