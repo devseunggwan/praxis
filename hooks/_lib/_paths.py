@@ -46,10 +46,17 @@ def praxis_state_dir() -> str:
     An explicit PRAXIS_STATE_DIR override always wins (back-compat with the
     pre-#527 convention); otherwise the host-neutral default ~/.praxis/state
     (PRAXIS_HOME-aware). Not created here.
+
+    The override is returned **without** tilde expansion, mirroring the shell
+    implementation in _paths.sh (issue #1215). The shell strips a trailing
+    slash (``${PRAXIS_STATE_DIR%/}``) but does NOT call ``eval`` or ``~``
+    expansion; a literal ``~/x`` stays ``~/x`` in the shell, so Python must
+    do the same to avoid shell<->Python divergence when a user sets
+    ``PRAXIS_STATE_DIR=~/x``.
     """
     override = os.environ.get("PRAXIS_STATE_DIR")
     if override:
-        return os.path.expanduser(override)
+        return override.rstrip("/") or override  # strip trailing slash; keep non-empty
     return os.path.join(praxis_home(), "state")
 
 
