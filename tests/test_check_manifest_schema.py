@@ -222,6 +222,22 @@ def test_load_platform_accepts_every_enum_host(tmp_path):
         assert build.load_platform(p)["host_id"] == host
 
 
+def test_load_platform_rejects_empty_output_path(tmp_path):
+    # Review round 2, Codex finding 4: "" is a str, so it used to pass the
+    # isinstance check; REPO_ROOT / "" resolves to the repo root and crashes
+    # a caller with IsADirectoryError instead of a named diagnostic.
+    p = _write_platform(
+        tmp_path,
+        {
+            "platform": "claude",
+            "host_id": "claude",
+            "outputs": [{"kind": "plugin", "path": ""}],
+        },
+    )
+    with pytest.raises(ValueError, match=r"outputs\[0\] key 'path' must not be empty"):
+        build.load_platform(p)
+
+
 def test_load_platform_missing_outputs_names_file_and_key(tmp_path):
     p = _write_platform(tmp_path, {"platform": "claude", "outpts": []})
     with pytest.raises(ValueError, match="missing or non-array key 'outputs'"):

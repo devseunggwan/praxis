@@ -461,6 +461,16 @@ def load_platform(platform_file: Path) -> dict:
                     f"manifests/platforms/{rel}: outputs[{i}] missing or "
                     f"non-string key {key!r}"
                 )
+        if output["path"] == "":
+            # An empty string is a str, so the isinstance check above lets it
+            # through; REPO_ROOT / "" then resolves to REPO_ROOT itself, and
+            # the render/check callers' read_text()/write_json() raise
+            # IsADirectoryError instead of a diagnostic naming the file
+            # (review round 2, Codex finding 4).
+            raise ValueError(
+                f"manifests/platforms/{rel}: outputs[{i}] key 'path' must "
+                "not be empty"
+            )
         if output["kind"] == "marketplace" and not isinstance(
             output.get("plugin_source"), str
         ):
