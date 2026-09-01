@@ -74,7 +74,7 @@ At least one of the following must be present in the body for the hook to stay s
 
 ### Body extraction
 
-Reuses the `_extract_gh_body` pattern from `external-write-falsify-check.py`:
+Reuses the `_extract_gh_body` pattern from `hooks/advisory-nudge/external-write-falsify-check/impl.py`:
 flags `-b`, `--body`, `-F`, `--body-file` (space-separated or `=` form).
 `_hook_utils.safe_tokenize` + `iter_command_starts` handle env prefixes,
 wrapper commands (`sudo`, `env`), and multi-command Bash strings.

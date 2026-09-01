@@ -352,8 +352,8 @@ tracking per PPID or `session_id`.
 ### Detection logic
 
 The hook uses the same `safe_tokenize` / `iter_command_starts` / `strip_prefix`
-pipeline as sibling hooks (`pre-merge-approval-gate.py`,
-`bash-worktree-existence-advisory.py`). Each segment in the tokenized command
+pipeline as sibling hooks (`hooks/preflight-gate/pre-merge-approval-gate/impl.py`,
+`hooks/advisory-nudge/bash-worktree-existence-advisory/impl.py`). Each segment in the tokenized command
 is inspected independently so that compound commands (`cmux new-workspace && gh
 pr merge ...`) trigger the appropriate surfaces for each matching segment.
 

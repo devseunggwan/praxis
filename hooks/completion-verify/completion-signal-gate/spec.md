@@ -38,7 +38,7 @@ praxis cwd output:
    unrelated nouns; only high-confidence foreign skill slugs are listed.
 
 See also: `completion-verify.sh` (hard-block Stop hook for narrower
-completion-claim patterns), `output-block-falsify-advisory.py` (PreToolUse
+completion-claim patterns), `hooks/advisory-nudge/output-block-falsify-advisory/impl.py` (PreToolUse
 advisory for `(Recommended)` proposals).
 
 References: issue [#392](https://github.com/devseunggwan/praxis/issues/392).
@@ -195,7 +195,7 @@ Fires in either of two forms when the cwd's active plugin is `praxis`
 2. **Bare form**: `/command` (no namespace) where the slug is in
    `_KNOWN_FOREIGN_SKILLS`. Conservative curated set scoped to slugs that
    are unambiguously foreign — `release`, `hub-bulk-release`, `hub-scan-issues`,
-   `dev-to-prod-pr`. Add to the set in `completion-signal-gate.py` when new
+   `dev-to-prod-pr`. Add to the set in `hooks/completion-verify/completion-signal-gate/impl.py` when new
    high-confidence foreign skill names emerge; do not include ambiguous words.
 
 ### Response

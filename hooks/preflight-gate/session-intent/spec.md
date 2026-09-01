@@ -116,7 +116,7 @@ the other PreToolUse(Bash) hooks.
 
 ### Read-intent + mutation-verb lexicon
 
-Module-level constants in `session-intent.py`. English markers are
+Module-level constants in `hooks/preflight-gate/session-intent/impl.py`. English markers are
 matched as whole words (regex `(?<![A-Za-z0-9])MARKER(?![A-Za-z0-9])`)
 to avoid `comment` matching `commentary`. Korean markers are matched as
 substrings since CJK has no whitespace tokenization.
