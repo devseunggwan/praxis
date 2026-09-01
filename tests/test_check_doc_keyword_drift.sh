@@ -84,7 +84,23 @@ echo "$OUT" | grep -q "zzz-not-a-real-trigger"
 run_case "invented_keyword_named" "$?" "0"
 restore
 
-# 4. Restored tree is clean again.
+# 4. The reverse direction: a trigger the description quotes but the row
+#    dropped. Nothing upstream fails when a row loses a keyword, so this is
+#    the direction that drifts unnoticed.
+python3 - "$DOC" <<'PYEOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+old = "| `strike` | `/strike`, `/praxis:strike`, `strike 1/2/3`, `삼진` |"
+p.write_text(s.replace(old, "| `strike` | `/strike`, `/praxis:strike`, `삼진` |", 1))
+PYEOF
+OUT="$(python3 "$CHECK" 2>&1)"
+run_case "missing_keyword_nonzero" "$?" "1"
+echo "$OUT" | grep -q "frontmatter quotes 'strike 1/2/3' but the row does not list it"
+run_case "missing_keyword_named" "$?" "0"
+restore
+
+# 5. Restored tree is clean again.
 trap - EXIT
 rm -f "$BACKUP"
 python3 "$CHECK" >/dev/null 2>&1

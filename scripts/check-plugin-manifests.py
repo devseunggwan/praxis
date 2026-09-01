@@ -1353,14 +1353,30 @@ def main() -> int:
             continue
         skill_name = first_col.group(1)
         description = _frontmatter_description(skill_name)
-        for keyword in _re.findall(r"`([^`]+)`", cells[1]):
-            if f'"{_norm_ws(keyword)}"' not in description:
-                drifts.append(
-                    f"DOC KEYWORD DRIFT docs/skills.md: `{skill_name}` row lists "
-                    f"{keyword!r} but the skill's frontmatter description does "
-                    "not quote it — keyword cells mirror the description "
-                    "verbatim; fix the row or the description"
-                )
+        # Both directions, because a mirror contract broken either way is still
+        # broken: a row listing a phrase the description never claims routes
+        # readers to a keyword that does not trigger, and a description quoting
+        # a phrase the row omits hides a live trigger from the roster. Only the
+        # first direction has a failing test upstream of it, so the second is
+        # the one that silently drifts.
+        documented = {_norm_ws(k) for k in _re.findall(r"`([^`]+)`", cells[1])}
+        # Every quoted phrase left in `description` is a trigger: the negative
+        # clause was already cut above, so no positive-clause parse is needed.
+        quoted = {_norm_ws(k) for k in _re.findall(r'"([^"]+)"', description)}
+        for keyword in sorted(documented - quoted):
+            drifts.append(
+                f"DOC KEYWORD DRIFT docs/skills.md: `{skill_name}` row lists "
+                f"{keyword!r} but the skill's frontmatter description does "
+                "not quote it — keyword cells mirror the description "
+                "verbatim; fix the row or the description"
+            )
+        for keyword in sorted(quoted - documented):
+            drifts.append(
+                f"DOC KEYWORD DRIFT docs/skills.md: `{skill_name}` frontmatter "
+                f"quotes {keyword!r} but the row does not list it — keyword "
+                "cells mirror the description verbatim; fix the row or the "
+                "description"
+            )
 
     # Rule 13f — the compatibility-tier table is maintained in three places
     # (README.md, AGENTS.md, skills/using-praxis/SKILL.md); their data rows
