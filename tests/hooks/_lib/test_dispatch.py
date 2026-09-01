@@ -1162,6 +1162,27 @@ def test_stop_raw_marker_fixture_discriminates(tmp_path, monkeypatch, capsys):
 
 
 
+def test_stop_block_lane_does_not_run_on_other_events(tmp_path, monkeypatch, capsys):
+    # `{"decision": "block"}` is Stop's vocabulary. Re-emitting it as the
+    # group's answer on another event answers a question that event never
+    # asked (CodeRabbit, issue #1199 review).
+    members = [
+        ("completion-verify", "gate", _write_fake(tmp_path, "gate", _fake_stop_block("blocked"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PostToolUse", None, STOP_PAYLOAD)
+    assert rc == 0
+    assert capsys.readouterr().out == "", "a Stop block was re-emitted on PostToolUse"
+    # Control: the identical member on Stop DOES block, so the assertion above
+    # is not passing because the fixture is inert.
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out)["decision"] == "block"
+
+
+
+
 def test_stop_block_with_malformed_reason_still_blocks(tmp_path, monkeypatch, capsys):
     # A parsed block whose `reason` is missing/non-string still blocks (empty
     # reason -> the attribution tag alone, no trailing space): dropping it for

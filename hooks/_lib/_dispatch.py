@@ -368,6 +368,7 @@ def run_group(
     # to prevent. Exit-2 stays event-agnostic: an exit code cannot be faked by
     # quoted text.
     is_pretooluse = event == "PreToolUse"
+    is_stop = event == "Stop"
     deadline = time.monotonic() + max(
         budget - _GROUP_BUDGET_MARGIN_SEC, _MEMBER_SKIP_FLOOR_SEC
     )
@@ -440,13 +441,18 @@ def run_group(
     # _hook_io.emit_stop_block). A blocking group drops non-blocking members'
     # additionalContext for this firing — only one JSON object can be emitted,
     # and the members re-run on the next stop attempt anyway.
+    # Scoped to Stop for the same reason the marker lanes are scoped to
+    # PreToolUse (issue #1199 review): `{"decision": "block"}` means Stop's
+    # block, and re-emitting it as this group's answer on another event
+    # answers a question that event never asked.
     blocks: list[tuple[str, str]] = []
-    for (_role, name, _impl), (rc, so, _se) in zip(members, results):
-        if rc != 0 or not so:
-            continue
-        reason = _stop_block_reason(so)
-        if reason is not None:
-            blocks.append((name, reason))
+    if is_stop:
+        for (_role, name, _impl), (rc, so, _se) in zip(members, results):
+            if rc != 0 or not so:
+                continue
+            reason = _stop_block_reason(so)
+            if reason is not None:
+                blocks.append((name, reason))
     if blocks:
         chunks: list[str] = []
         for name, reason in blocks:
