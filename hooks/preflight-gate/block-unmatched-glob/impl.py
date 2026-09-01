@@ -63,6 +63,7 @@ from pathlib import Path as _Path
 
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
     budgeted_deadline,
     fail_open,
 )
@@ -354,7 +355,7 @@ def executing_shell_is_zsh() -> bool:
     return bool(shell) and _Path(shell).name == "zsh"
 
 
-def executing_shell_glob_state() -> list[str] | None:
+def executing_shell_glob_state(timeout_sec: float) -> list[str] | None:
     """Glob options to replay in the probe, or None when the gate must not fire.
 
     The Bash tool invokes a login zsh, which sources the user's startup files.
@@ -369,7 +370,7 @@ def executing_shell_glob_state() -> list[str] | None:
             ["zsh", "-lc", "setopt"],
             capture_output=True,
             text=True,
-            timeout=_PROBE_TIMEOUT_SEC,
+            timeout=timeout_sec,
         )
     except (OSError, subprocess.SubprocessError):
         return None  # cannot confirm the premise → never block
@@ -431,14 +432,20 @@ def find_unmatched_globs(command: str, cwd: str) -> list[str]:
     if not spans:
         return []
 
+    # Clamped to the remaining group budget under the dispatcher. Created
+    # BEFORE the login-shell probe, because that probe is this hook's FIRST
+    # subprocess: a fixed timeout there spends budget the spans below were
+    # counting on, and no later clamp can give it back.
+    deadline = budgeted_deadline(_TOTAL_BUDGET_SEC)
+    probe_budget = deadline - time.monotonic()
+    if probe_budget < MIN_SUBPROC_BUDGET_SEC:
+        return []  # too little runway to confirm the premise → never block
+
     # Only now — the login-shell probe costs ~40ms, and this hook runs on every
     # Bash call, the overwhelming majority of which carry no glob at all.
-    options = executing_shell_glob_state()
+    options = executing_shell_glob_state(min(_PROBE_TIMEOUT_SEC, probe_budget))
     if options is None:
         return []
-
-    # Clamped to the remaining group budget under the dispatcher.
-    deadline = budgeted_deadline(_TOTAL_BUDGET_SEC)
     offenders: list[str] = []
     for span in spans:
         remaining = deadline - time.monotonic()
