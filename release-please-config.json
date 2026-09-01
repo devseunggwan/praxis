@@ -22,7 +22,6 @@
         { "type": "json", "path": ".agents/plugins/marketplace.json", "jsonpath": "$..version" },
         { "type": "json", "path": ".cursor-plugin/plugin.json", "jsonpath": "$..version" },
         { "type": "json", "path": ".opencode/plugin.json", "jsonpath": "$..version" },
-        { "type": "json", "path": "gemini-extension.json", "jsonpath": "$..version" },
         { "type": "json", "path": "plugins/praxis/.codex-plugin/plugin.json", "jsonpath": "$..version" }
       ]
     }

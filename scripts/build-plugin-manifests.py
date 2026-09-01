@@ -21,7 +21,6 @@ Writes (generated artifacts, committed to the repo):
   plugins/praxis/.codex-plugin/hooks/hooks.json
   .cursor-plugin/plugin.json
   .cursor-plugin/hooks/hooks.json
-  gemini-extension.json
   .opencode/plugin.json
   .opencode/hooks/hooks.json
   hooks/<name>{suffix}.sh        — runtime wrapper(s), one per unique
@@ -765,7 +764,7 @@ def emit_hook_operating_matrix(manifest: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Plugin / marketplace / gemini-extension renderers (unchanged)
+# Plugin / marketplace renderers (unchanged)
 # ---------------------------------------------------------------------------
 
 def render_plugin(base: dict, overrides: dict) -> dict:
@@ -806,22 +805,6 @@ def render_marketplace(base: dict, plugin_source: str, extras: dict | None) -> d
     return manifest
 
 
-def render_gemini_extension(base: dict) -> dict:
-    author_name = (
-        base["author"]["name"]
-        if isinstance(base["author"], dict)
-        else base["author"]
-    )
-    return {
-        "name": base["name"],
-        "description": base["description"],
-        "version": base["version"],
-        "author": author_name,
-        "repository": base["repository"],
-        "keywords": base["keywords"],
-    }
-
-
 def render_output(
     base: dict,
     output: dict,
@@ -840,8 +823,6 @@ def render_output(
         )
     if kind == "hooks":
         return filter_hooks_for_host(hooks_source, host_id, dispatch_groups)
-    if kind == "gemini-extension":
-        return render_gemini_extension(base)
     raise ValueError(f"unknown output kind: {kind}")
 
 
