@@ -517,6 +517,45 @@ def test_deny_wins_over_ask_and_advisory(tmp_path, monkeypatch, capsys):
     assert "nudge" in captured.err  # advisory preserved even under deny
 
 
+_FAKE_MARK = (
+    "import pathlib\n"
+    "def main():\n"
+    "    pathlib.Path(__file__).with_name('ran').write_text('1')\n"
+    "    return 0\n"
+)
+_FAKE_DENY_MARK = (
+    "import pathlib, sys\n"
+    "def main():\n"
+    "    pathlib.Path(__file__).with_name('ran').write_text('1')\n"
+    "    sys.stderr.write('blocked\\n')\n"
+    "    return 2\n"
+)
+
+
+def test_deny_returns_before_later_members_run(tmp_path, monkeypatch, capsys):
+    """A deny leaves the dispatcher immediately, taking nothing with it.
+
+    Buffering the decision to the end of the group meant every member after the
+    deny kept spending the group budget, and a host kill at the group timeout
+    then discarded the deny along with the process — a gate that had decided to
+    block an edit silently did not. A host kill cannot be staged from inside the
+    process, so the assertion is its observable equivalent: once a member denies,
+    nothing after it runs, which is what leaves no window to be killed in.
+    """
+    deny = _write_fake(tmp_path, "deny", _FAKE_DENY_MARK)
+    later = _write_fake(tmp_path, "later", _FAKE_MARK)
+    _patch_members(
+        monkeypatch,
+        [("preflight-gate", "deny", deny), ("advisory-nudge", "later", later)],
+    )
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert deny.with_name("ran").exists(), "denying member never ran"
+    assert not later.with_name("ran").exists(), "a member ran after the deny"
+    assert "blocked" in captured.err  # the deny reason still reached stderr
+
+
 def test_ask_when_no_deny(tmp_path, monkeypatch, capsys):
     members = [
         ("advisory-nudge", "adv", _write_fake(tmp_path, "adv", _FAKE_ADVISORY)),
