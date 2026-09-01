@@ -1,17 +1,21 @@
 """Tests for the Agent Plugins portable manifest output (#1219).
 
-Focus: the root `plugin.json` that Codex selects ahead of
-`.codex-plugin/plugin.json`. Two properties decide whether that manifest
-loads at all, and neither is visible to the byte-identity drift check —
-a wrong manifest renders reproducibly and diffs clean:
+The manifest goes to the repo root, which is the plugin root for Claude,
+Cursor, and the spec-only clients. Codex's plugin root is plugins/praxis/,
+so this output does not reach Codex — that is a known, tracked gap, pinned
+below by test_output_path_is_the_repo_root so a later edit cannot quietly
+claim Codex coverage.
 
-  * `$schema` pinned to 1.0.0. Codex's SUPPORTED_AGENT_PLUGIN_SCHEMA_URIS
-    holds that URI alone, and find_plugin_manifest_path() still selects any
-    `https://agent-plugins.org/schemas/` URI over the `.codex-plugin/`
-    fallback — so a newer pin makes the plugin vanish rather than degrade.
+Two properties decide whether the manifest loads at all, and neither is
+visible to the byte-identity drift check — a wrong manifest renders
+reproducibly and diffs clean:
+
+  * `$schema` pinned to 1.0.0, the only published spec version. Hosts select
+    the manifest on the `agent-plugins.org` URI prefix but accept only
+    versions they implement, so a newer pin still wins selection and then
+    loads as unsupported — the host's own manifest never gets its fallback.
   * no host-specific component keys. The spec's manifest schema is closed,
-    so one `skills` or `hooks` key invalidates the document; Codex takes
-    `paths.hooks` from the overlay file instead.
+    so one `skills` or `hooks` key invalidates the whole document.
 """
 
 from __future__ import annotations
@@ -108,3 +112,30 @@ def test_platform_declares_the_output():
     )
     kinds = {output["kind"]: output["path"] for output in platform["outputs"]}
     assert kinds == {"agent-plugin": "plugin.json"}
+
+
+def test_output_path_is_the_repo_root_and_codex_is_not_covered():
+    """Pins the known scope gap so it cannot be silently reinterpreted.
+
+    A host reads the manifest at `plugin.json` in ITS plugin root. Codex's is
+    `plugins/praxis/` (`.agents/plugins/marketplace.json` source), not the repo
+    root, so the single repo-root output reaches Claude, Cursor, and the
+    spec-only clients — never Codex. Covering Codex means a second output at
+    plugins/praxis/plugin.json; adding it should update this test deliberately,
+    not trip over it.
+    """
+    platform = json.loads(
+        (REPO_ROOT / "manifests" / "platforms" / "agent-plugins.json").read_text()
+    )
+    paths = [output["path"] for output in platform["outputs"]]
+    assert paths == ["plugin.json"], "repo-root output only"
+
+    codex_marketplace = json.loads(
+        (REPO_ROOT / ".agents" / "plugins" / "marketplace.json").read_text()
+    )
+    codex_root = codex_marketplace["plugins"][0]["source"].rstrip("/")
+    assert codex_root != ".", "Codex plugin root is nested, not the repo root"
+    assert not (REPO_ROOT / codex_root / "plugin.json").exists(), (
+        "a manifest appeared in the Codex plugin root — that is Codex coverage, "
+        "so update this test and ARCHITECTURE.md's scope note together"
+    )

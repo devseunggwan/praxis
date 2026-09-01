@@ -349,27 +349,49 @@ Generated (committed) outputs:
 
 ### Agent Plugins portable manifest
 
-Codex looks at the root `plugin.json` *before* the host-specific paths
-(`DISCOVERABLE_PLUGIN_MANIFEST_PATHS` = `.codex-plugin/`, `.claude-plugin/`,
-`.cursor-plugin/`, in that order), and takes it when its `$schema` names a
-supported Agent Plugins version. `.codex-plugin/plugin.json` is then applied
-as an overlay supplying `paths.hooks`, `paths.apps`, and `interface`, so
-adopting the portable manifest costs praxis no hook coverage.
+The spec locates a plugin's manifest at `plugin.json` in the **plugin root**,
+so which hosts this file reaches is decided entirely by where each host thinks
+praxis's plugin root is. praxis has two:
 
-Two constraints hold this together, both gated by check-plugin-manifests
-Rule 23 because neither is visible to the byte-identity drift check:
+| Plugin root | Hosts | Sees the root `plugin.json` |
+| ------------- | ------- | ----------------------------- |
+| repo root | Claude (`marketplace.json` source `./`), Cursor, spec-only clients | yes |
+| `plugins/praxis/` | Codex (`marketplace.json` source `./plugins/praxis`) | **no** |
 
-- **`$schema` is pinned to 1.0.0**, the only version Codex accepts. A newer
-  `agent-plugins.org` URI is worse than an unrelated one — it still wins
-  manifest selection, then loads as unsupported, so the `.codex-plugin/`
-  fallback never runs and the plugin disappears instead of degrading.
+**Codex is deliberately out of scope here.** Its plugin root is nested, so it
+never looks at the repo-root file; covering Codex needs a second output at
+`plugins/praxis/plugin.json` and is tracked separately. Do not describe this
+manifest as Codex support.
+
+What the covered hosts do with it differs, and only one of them acts on it
+today:
+
+- **Claude** ignores it — its docs never mention the standard and it reads
+  `.claude-plugin/plugin.json`.
+- **Cursor** supports the standard alongside its own format and picks between
+  them by inspecting the manifest. Which one wins when both are present is
+  undocumented and unverified; if the portable manifest wins, `.cursor-plugin/`
+  hooks would stop loading. Verify against a real Cursor install before
+  relying on either outcome.
+- **Spec-only clients** (ChatGPT, Copilot, VS Code, Kiro) read this file and
+  nothing else praxis ships.
+
+Two constraints hold the manifest together, both gated by
+check-plugin-manifests Rule 23 because neither is visible to the byte-identity
+drift check:
+
+- **`$schema` is pinned to 1.0.0** — the only published spec version (1.1.0 is
+  a working draft). Hosts select the manifest on the `agent-plugins.org` URI
+  prefix but accept only versions they implement, so a newer pin is worse than
+  an unrelated one: the file still wins selection, then loads as unsupported,
+  and the host's own manifest never gets its turn as a fallback.
 - **No host-specific keys** (`skills`, `hooks`, `mcpServers`, `apps`,
   `interface`). The spec's manifest schema is closed, so one such key
   invalidates the document. Component locations are fixed by the spec at
   `skills/` and `mcp.json`; host data belongs under `extensions.<namespace>`.
 
 The spec's portable component types are Agent Skills and MCP servers only —
-hooks are explicitly outside v1 and 1.1.0-draft. So this manifest carries
+hooks are explicitly outside v1 and the 1.1.0 draft. So this manifest carries
 praxis's skills, not its hooks, and it replaces none of the host manifests
 above.
 

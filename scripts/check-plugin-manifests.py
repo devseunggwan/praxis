@@ -1149,10 +1149,11 @@ def main() -> int:
     # reproducible: the build renders them, the checker re-renders the same
     # thing, and the diff is clean while the manifest is unloadable.
     #
-    #   (a) $schema drifts off 1.0.0. Codex pins that one URI; any other
-    #       agent-plugins.org URI still wins manifest selection over
-    #       .codex-plugin/plugin.json and then loads as Unsupported, so the
-    #       fallback never runs and the plugin disappears instead of degrading.
+    #   (a) $schema drifts off 1.0.0, the only published spec version. Hosts
+    #       select this manifest on the agent-plugins.org URI prefix but
+    #       accept only versions they implement, so a newer pin still wins
+    #       selection and then loads as unsupported — the host's own manifest
+    #       never gets its turn as a fallback.
     #   (b) a host-specific key (skills, hooks, mcpServers, apps, interface)
     #       reaches the portable manifest. The spec's manifest schema is
     #       closed, so one such key invalidates the whole document.

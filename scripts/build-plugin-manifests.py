@@ -25,9 +25,10 @@ Writes (generated artifacts, committed to the repo):
   .opencode/plugin.json
   .opencode/hooks/hooks.json
   plugin.json                    — Agent Plugins 1.0.0 portable manifest
-                                   (agent-plugins.org); read by Codex ahead
-                                   of .codex-plugin/plugin.json, which then
-                                   applies as a host overlay
+                                   (agent-plugins.org) for the hosts whose
+                                   plugin root IS the repo root. Codex's is
+                                   plugins/praxis/, so Codex does not see
+                                   this file and is out of scope here.
   hooks/<name>{suffix}.sh        — runtime wrapper(s), one per unique
                                    (name, wrapper_suffix) pair; tracked
                                    so marketplace installs (which do not
@@ -76,11 +77,12 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from constants import NON_HOOK_DOCS, OPT_IN_HOOKS  # noqa: E402
 MANIFEST_PATH = HOOKS_DIR / "manifest.json"
 
-# Agent Plugins portable manifest schema, pinned to the one version Codex
-# accepts (SUPPORTED_AGENT_PLUGIN_SCHEMA_URIS in codex-rs holds 1.0.0 alone).
-# A newer agent-plugins.org URI is worse than an unrelated one: it still wins
-# manifest selection over .codex-plugin/, then loads as Unsupported, so the
-# fallback never runs.
+# Agent Plugins portable manifest schema, pinned to the only published spec
+# version (1.1.0 is a working draft). Hosts select this manifest on the
+# agent-plugins.org URI prefix but accept only versions they implement, so a
+# newer pin is worse than an unrelated one: the file still wins selection,
+# then loads as unsupported, and the host's own manifest never gets its turn
+# as a fallback.
 AGENT_PLUGIN_SCHEMA_URI = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 
 # docs/hook/<name>.md is a 1-line redirect stub to the role-based spec
@@ -836,12 +838,15 @@ def render_gemini_extension(base: dict) -> dict:
 def render_agent_plugin(base: dict) -> dict:
     """Agent Plugins 1.0.0 portable manifest (https://agent-plugins.org/).
 
+    Written to the repo root, which is the plugin root for Claude, Cursor, and
+    the spec-only clients. Codex's plugin root is plugins/praxis/, so this file
+    is invisible to it — see ARCHITECTURE.md for why that is tracked separately
+    rather than solved by moving this output.
+
     Carries spec-defined metadata only. Component paths are NOT emitted: the
     spec fixes skills at `./skills` and MCP servers at `./mcp.json`, and its
     manifest schema is closed, so a host-specific `skills` or `hooks` key here
-    invalidates the whole manifest. Codex takes `paths.hooks` from the
-    `.codex-plugin/plugin.json` overlay instead (agent_plugin_manifest.rs →
-    apply_codex_agent_plugin_extension).
+    invalidates the whole manifest rather than being ignored.
     """
     return {
         "$schema": AGENT_PLUGIN_SCHEMA_URI,
