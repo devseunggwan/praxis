@@ -953,6 +953,36 @@ else
   assert_fail "parity: default (no overrides) resolves identically" "bypass-review='$bp_c' _paths='$paths_c'"
 fi
 
+# (d) trailing-slash overrides — the writer's `${PRAXIS_STATE_DIR%/}` strips
+# exactly ONE slash, so a reader using rstrip("/") turns "/" into a relative
+# "strikes" and reads a different directory per cwd. Table-driven because the
+# root case and the doubled-slash case fail for the same reason but produce
+# different wrong answers, and a single case would let one of them regress
+# unnoticed.
+# Compared as paths, not byte strings: a repeated slash INSIDE a path names the
+# same directory on POSIX, and pathlib collapses it, so `/tmp/x//strikes` and
+# `/tmp/x/strikes` are one location written two ways. `tr -s /` applies the same
+# collapse to both sides, which leaves the divergence that matters — a relative
+# `strikes` against an absolute `/strikes` — fully visible.
+for slash_case in / // /tmp/parity-x/ /tmp/parity-x// /tmp/parity-x; do
+  bp_d=$(resolve_bp_state_dir -u PRAXIS_HOME HOME="$PARITY_HOME" PRAXIS_STATE_DIR="$slash_case" | tr -s /)
+  paths_d=$(resolve_paths_state_dir -u PRAXIS_HOME HOME="$PARITY_HOME" PRAXIS_STATE_DIR="$slash_case" | tr -s /)
+
+  if [ -n "$bp_d" ] && [ "$bp_d" = "$paths_d" ]; then
+    assert_pass "parity: PRAXIS_STATE_DIR='$slash_case' resolves identically"
+  else
+    assert_fail "parity: PRAXIS_STATE_DIR='$slash_case' resolves identically" "bypass-review='$bp_d' _paths='$paths_d'"
+  fi
+done
+
+# The root case additionally pins the absolute-path property directly: equality
+# with the writer would still hold if BOTH sides went relative.
+bp_root=$(resolve_bp_state_dir -u PRAXIS_HOME HOME="$PARITY_HOME" PRAXIS_STATE_DIR=/)
+case "$bp_root" in
+  /*) assert_pass "parity: PRAXIS_STATE_DIR=/ stays absolute" ;;
+  *)  assert_fail "parity: PRAXIS_STATE_DIR=/ stays absolute" "got '$bp_root' (relative — resolves per cwd)" ;;
+esac
+
 # ---------------------------------------------------------------------------
 # legacy strike-state fallback read (#1180)
 #

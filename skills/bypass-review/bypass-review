@@ -1180,7 +1180,13 @@ def default_strike_state_dir() -> Path:
     if override:
         # No expanduser: _paths.sh does not expand this override either, and a
         # reader that diverged from the writer here would read an empty dir.
-        return Path(override.rstrip("/")) / "strikes"
+        # One trailing slash, not all of them: the writer's `${PRAXIS_STATE_DIR%/}`
+        # strips exactly one, so `rstrip("/")` turns "/" into "" and the reader
+        # falls back to a RELATIVE "strikes" — a different directory per cwd,
+        # which reads as "no strikes recorded". Joined as a string rather than
+        # with `/` for the same reason: Path("") / "strikes" is also relative.
+        base = override[:-1] if override.endswith("/") else override
+        return Path(f"{base}/strikes")
     home = os.path.expanduser(os.environ.get("PRAXIS_HOME") or "~/.praxis")
     state_dir = Path(home) / "state" / "strikes"
     legacy = Path(os.path.expanduser("~/.claude/state/praxis/strikes"))
