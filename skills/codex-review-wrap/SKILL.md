@@ -2,15 +2,12 @@
 name: codex-review-wrap
 description: >
   Worktree-aware wrapper for /codex:review. Forces explicit worktree selection
-  when multiple worktrees are active, preventing silent cwd mismatch, then
+  when several worktrees are active, preventing silent cwd mismatch, then
   gates every returned finding: premise verification before fact-modifying
-  edits, flip detection halting A→B→A oscillation across rounds, sibling
-  cross-checks when the PR is a port / parallel hotfix / A/B implementation,
-  a rounds-per-region diminishing-returns advisory
-  (PRAXIS_DIMINISHING_RETURNS_N, default 4), and a per-finding user approval
-  ask — no finding is edited on the agent's judgement alone. At phase end it
-  reaps leaked openai-codex app-server brokers via an idle-gated reaper (GC
-  by default; opt-in via PRAXIS_CODEX_REAP=1).
+  edits, flip detection halting A→B→A oscillation, sibling cross-checks for a
+  port or parallel hotfix, a diminishing-returns advisory
+  (PRAXIS_DIMINISHING_RETURNS_N), and a per-finding approval ask. It also
+  reaps leaked openai-codex brokers (PRAXIS_CODEX_REAP=1).
   Triggers on "codex review", "review codex", "safe review",
   "/codex-review-wrap", "premise verification", "flip detection",
   "sibling defect", "sibling cross-check", "diminishing returns",

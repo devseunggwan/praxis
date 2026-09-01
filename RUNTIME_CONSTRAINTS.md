@@ -151,7 +151,10 @@ stops matching some (or all) of its documented triggers with no error
 anywhere: the spec looks complete, `check-plugin-manifests.py` passes, and
 the drift only surfaces as "the skill didn't fire".
 
-**Workaround**: Keep the folded description ≤ 1,024 characters. Trim prose,
+**Workaround**: Keep the folded description ≤ 1,024 characters, and keep the
+`Triggers on "..."` clause inside the first **500** — 500 is the older,
+equally unmeasured figure `CONTRIBUTING.md` used to carry, so a description
+that clears it routes correctly whichever bound is real. Trim prose,
 never triggers. When a body is too rich to summarize under the budget, move
 detail into the body or `references/` (see `writing-praxis-skill` →
 *Progressive disclosure*) — the description is a routing surface, not
