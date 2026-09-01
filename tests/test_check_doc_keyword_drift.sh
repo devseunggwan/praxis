@@ -45,8 +45,18 @@ if [ "$?" -ne 0 ]; then
   exit 1
 fi
 
-BACKUP="$(mktemp)"
-cp "$DOC" "$BACKUP"
+# `set +e` is in force above, so an unguarded failure here would leave the
+# fixtures free to edit the real docs with no backup to restore from — and
+# `restore` would then copy an empty or missing file over it.
+if ! BACKUP="$(mktemp)"; then
+  echo "FATAL: mktemp failed — refusing to edit $DOC without a backup" >&2
+  exit 1
+fi
+if ! cp "$DOC" "$BACKUP"; then
+  echo "FATAL: backup failed — refusing to edit $DOC" >&2
+  rm -f "$BACKUP"
+  exit 1
+fi
 restore() { cp "$BACKUP" "$DOC"; }
 trap 'restore; rm -f "$BACKUP"' EXIT
 
