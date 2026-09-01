@@ -152,7 +152,15 @@ rm -f "$MODE_LEDGER"
     praxis_record_fire mode-hook mode-role pass sess-mode ""
   ' mode "$ROOT_DIR"
 )
-MODE_PERM=$(stat -f '%OLp' "$MODE_LEDGER" 2>/dev/null || stat -c '%a' "$MODE_LEDGER" 2>/dev/null)
+# GNU stat's `-f` means "filesystem status" and SUCCEEDS on a plain file, so a
+# BSD-first `||` chain never reaches the GNU form — it captures "  File: ..."
+# instead of a mode. Probe `-c` first: BSD stat rejects it outright, so the
+# fallback is the one that actually fires on the wrong platform.
+file_mode() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%OLp' "$1" 2>/dev/null
+}
+
+MODE_PERM=$(file_mode "$MODE_LEDGER")
 if [ "$MODE_PERM" = "644" ]; then
   ok "ledger created 0644 under umask 000 (matches python writer)"
 else
@@ -171,7 +179,7 @@ rm -f "$STRICT_LEDGER"
     praxis_record_fire mode-hook mode-role pass sess-mode-strict ""
   ' mode "$ROOT_DIR"
 )
-STRICT_PERM=$(stat -f '%OLp' "$STRICT_LEDGER" 2>/dev/null || stat -c '%a' "$STRICT_LEDGER" 2>/dev/null)
+STRICT_PERM=$(file_mode "$STRICT_LEDGER")
 if [ "$STRICT_PERM" = "600" ]; then
   ok "stricter ambient umask (077) is preserved, not loosened"
 else
