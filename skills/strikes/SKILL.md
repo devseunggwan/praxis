@@ -10,9 +10,11 @@ Report the current strike state for the active session.
 ## What to do
 
 1. Run the strike counter status via the Bash tool:
+
    ```bash
    "${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/hooks/strike-counter.sh" status
    ```
+
 2. Present the output verbatim. The header line `Strikes: N/3` and the `Reasons:` list (if any) together are the record — do not summarize or rephrase.
 
 ## Error Handling

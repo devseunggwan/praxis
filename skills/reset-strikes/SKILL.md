@@ -10,9 +10,11 @@ Clear the session strike counter so the discipline signals restart from 0.
 ## What to do
 
 1. Run the strike counter reset via the Bash tool:
+
    ```bash
    "${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/hooks/strike-counter.sh" reset
    ```
+
 2. Report the output verbatim. If the session was blocked at 3/3, acknowledge the reset and confirm that future responses will proceed normally until a new strike is declared.
 
 ## Reflection gate at 3/3
@@ -25,6 +27,7 @@ The strike/stop-hook output names an exact file path (`$STATE_DIR/${SID}.reflect
 2. **Persuasion turn** — before the user invokes this skill, Claude must present the reflection in-chat (quote or summarize, do not just point at the path), acknowledge each violation's harm, state concrete behavioral commitments, and explicitly ask the user to run `/praxis:reset-strikes`. This is a trust decision, not a mechanical unlock — the user may decline and require more.
 
 Additional behavior:
+
 - On a successful 3/3 reset, the reflection file is removed alongside the state so the next cycle starts clean and cannot reuse a stale document.
 - Below 3/3, reset is not gated — the reflection + persuasion requirement only applies at the block threshold.
 
