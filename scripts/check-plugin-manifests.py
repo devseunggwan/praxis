@@ -93,6 +93,18 @@ main() is labeled with its number, and this list is the canonical roster
 An unnumbered auxiliary check verifies the Codex adapter symlinks
 (plugins/praxis/{skills,hooks,scripts} → repo root).
 
+  Schema gate (unnumbered — rule renumbering is owned by #1172): before any
+      numbered rule runs, hooks/manifest.json is validated against
+      hooks/manifest.schema.json via the stdlib walker in
+      build-plugin-manifests.py (#1173, shared — the build runs the same gate
+      before rendering), so a typo'd optional key, a wrong type, or an
+      unknown enum value fails with a file+entry+key diagnostic instead of a
+      KeyError deeper in the pipeline. Platform files
+      (manifests/platforms/*.json) get the same treatment through
+      _build.load_platform's checked access, including host_id membership in
+      the schema's closed hosts enum; the reverse direction (stale enum value
+      with no platform file) is checked here.
+
 CI invokes this; developers can too, via `./scripts/check-plugin-manifests.py`.
 """
 from __future__ import annotations
@@ -727,6 +739,47 @@ def _hook_dirs() -> list[Path]:
 def main() -> int:
     base = _build.load_base()
     manifest = _build.load_manifest()
+
+    # ------------------------------------------------------------------
+    # Manifest schema gate (#1173) — deliberately unnumbered: rule
+    # renumbering is owned by the parallel #1172 change. Runs before every
+    # numbered rule (and before expand_to_hooks_json) because they all
+    # index into the manifest raw; a malformed manifest must fail here
+    # with a file+entry+key diagnostic, not a KeyError traceback. The
+    # validation itself lives in build-plugin-manifests.py (shared: the
+    # build refuses to render from a malformed manifest with the same
+    # gate). A malformed SCHEMA raises ValueError from
+    # _build.assert_schema_supported — developer error, fail loud.
+    # ------------------------------------------------------------------
+    schema_drifts = _build.manifest_schema_drifts(manifest)
+    if schema_drifts:
+        print("plugin-manifest check FAILED:")
+        for d in schema_drifts:
+            print(f"  - {d}")
+        return 1
+
+    # Reverse hosts cross-check: load_platform validates each platform's
+    # host_id against the schema's closed hosts enum; this direction catches
+    # a stale enum value with no backing platform file.
+    schema_hosts = set(_build.manifest_hosts_enum())
+    platform_hosts = {
+        p.get("host_id", p["platform"])
+        for p in (
+            _build.load_platform(f)
+            for f in sorted(_build.PLATFORMS_DIR.glob("*.json"))
+        )
+    }
+    stale_hosts = schema_hosts - platform_hosts
+    if stale_hosts:
+        drifts_early = ", ".join(sorted(stale_hosts))
+        print("plugin-manifest check FAILED:")
+        print(
+            f"  - SCHEMA HOSTS ENUM hooks/manifest.schema.json: value(s) "
+            f"{drifts_early} have no manifests/platforms/*.json with that "
+            "host_id — remove them or add the platform file"
+        )
+        return 1
+
     hooks_source = _build.expand_to_hooks_json(manifest)
     # ADR-0002: must mirror build-plugin-manifests.main() so the expected
     # hooks.json collapses dispatch groups identically to the committed output.
@@ -739,7 +792,7 @@ def main() -> int:
     # Rule 5 — generated artifacts byte-identical (drift check)
     # ------------------------------------------------------------------
     for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
-        platform = json.loads(platform_file.read_text())
+        platform = _build.load_platform(platform_file)
         host_id = platform.get("host_id", platform["platform"])
         for output in platform["outputs"]:
             out_path = REPO_ROOT / output["path"]
@@ -1456,7 +1509,7 @@ def main() -> int:
 
     hooks_outputs: list[tuple[str, Path]] = []
     for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
-        platform = json.loads(platform_file.read_text())
+        platform = _build.load_platform(platform_file)
         host_id = platform.get("host_id", platform["platform"])
         for output in platform["outputs"]:
             if output["kind"] == "hooks":
