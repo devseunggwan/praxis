@@ -181,6 +181,13 @@ _SUPPORTED_SCHEMA_TYPES = {
     "boolean": bool,
 }
 
+# dict.get(key) returns None for BOTH an absent key and an explicit JSON
+# `null` value — `schema.get("type") is not None` can't tell them apart, so
+# an explicit `"type": null` silently took the "no type constraint" branch
+# instead of failing (review round 2, Codex finding 2). This sentinel makes
+# "absent" and "present-but-null" distinguishable at the .get() call site.
+_ABSENT = object()
+
 
 def load_schema() -> dict:
     return json.loads(SCHEMA_PATH.read_text())
@@ -208,9 +215,9 @@ def assert_schema_supported(schema, spath: str = "#") -> None:
             f"{unknown} — extend schema_validation_errors() in the same commit "
             "before using them"
         )
-    schema_type = schema.get("type")
-    if schema_type is not None and (
-        not isinstance(schema_type, str)  # the list form is unsupported too
+    schema_type = schema.get("type", _ABSENT)
+    if schema_type is not _ABSENT and (
+        not isinstance(schema_type, str)  # covers explicit null and the list form
         or schema_type not in _SUPPORTED_SCHEMA_TYPES
     ):
         raise ValueError(
@@ -262,8 +269,12 @@ def schema_validation_errors(instance, schema, path: str = "$") -> list[str]:
         if instance not in schema["enum"]:
             errs.append(f"{path}: {instance!r} is not one of {schema['enum']!r}")
         return errs
-    schema_type = schema.get("type")
-    if schema_type is not None:
+    schema_type = schema.get("type", _ABSENT)
+    if schema_type is not _ABSENT:
+        # assert_schema_supported() already rejected a non-string/unknown
+        # type (null included) before this walker ever runs, so schema_type
+        # is guaranteed to be a valid key here — no separate null check
+        # needed on this side.
         py_type = _SUPPORTED_SCHEMA_TYPES[schema_type]
         # bool is a subclass of int in Python; JSON Schema keeps them distinct.
         if not isinstance(instance, py_type) or (

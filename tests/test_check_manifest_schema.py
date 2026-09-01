@@ -148,6 +148,23 @@ def test_list_form_type_raises():
         build.assert_schema_supported({"type": ["string", "integer"]})
 
 
+def test_explicit_null_type_raises():
+    # Review round 2, Codex finding 2: schema.get("type") returned None for
+    # BOTH an absent key and an explicit `"type": null`, so a schema node
+    # carrying a literal JSON null used to slip past as "no type
+    # constraint" instead of failing loud.
+    with pytest.raises(ValueError, match="unsupported type None"):
+        build.assert_schema_supported({"type": None})
+
+
+def test_explicit_null_type_is_not_skipped_by_the_instance_walker():
+    # Defense in depth on the instance-side walker too, even though
+    # assert_schema_supported() already rejects this schema before
+    # schema_validation_errors() ever sees it.
+    with pytest.raises(KeyError):
+        build.schema_validation_errors({"anything": 1}, {"type": None})
+
+
 def test_subschema_additional_properties_raises():
     with pytest.raises(ValueError, match="additionalProperties must be"):
         build.assert_schema_supported(
