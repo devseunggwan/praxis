@@ -921,12 +921,16 @@ else
   assert_fail "parity: tilde PRAXIS_STATE_DIR resolves identically" "bypass-review='$bp_a' _paths='$paths_a'"
 fi
 
-case "$bp_a" in
-  '~/tilde-state/strikes')
-    assert_pass "parity: PRAXIS_STATE_DIR tilde left literal, as the writer leaves it" ;;
-  *)
-    assert_fail "parity: PRAXIS_STATE_DIR tilde left literal, as the writer leaves it" "got '$bp_a' (expanded, so it diverges from _paths.sh)" ;;
-esac
+# The expected value is assembled rather than written as a literal: a
+# `'~/...'` word is exactly what SC2088 warns about, and here the unexpanded
+# tilde is the assertion, not a mistake.
+tilde_char='~'
+expected_a="$tilde_char/tilde-state/strikes"
+if [ "$bp_a" = "$expected_a" ]; then
+  assert_pass "parity: PRAXIS_STATE_DIR tilde left literal, as the writer leaves it"
+else
+  assert_fail "parity: PRAXIS_STATE_DIR tilde left literal, as the writer leaves it" "got '$bp_a' (expanded, so it diverges from _paths.sh)"
+fi
 
 # (b) tilde-containing PRAXIS_HOME — the other override, where _paths.sh DOES
 # expand (explicit `case` on `~` / `~/*`), so here the reader must expand too.
