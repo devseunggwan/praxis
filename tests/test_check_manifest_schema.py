@@ -193,3 +193,56 @@ def test_schema_hosts_enum_matches_platform_files():
         p = build.load_platform(f)
         platform_hosts.add(p.get("host_id", p["platform"]))
     assert set(build.manifest_hosts_enum()) == platform_hosts
+
+
+# ---------------------------------------------------------------------------
+# manifest_schema_drifts — dispatch-group member semantic gate (review
+# round 2, Codex finding #1). A dispatch-group member's (event, matcher)
+# match against `dispatch_groups` is structural, not a schema keyword, so
+# the JSON-Schema subset can never reject "args"/"body" on a member — this
+# is a second pass in manifest_schema_drifts(), tested directly here.
+# ---------------------------------------------------------------------------
+
+def _first_dispatch_member_name(manifest: dict) -> str:
+    pairs = {
+        (g["event"], g.get("matcher")) for g in manifest["dispatch_groups"]
+    }
+    for hook in manifest["hooks"]:
+        if (hook.get("event"), hook.get("matcher")) in pairs:
+            return hook["name"]
+    raise AssertionError("fixture manifest has no dispatch-group member")
+
+
+def test_dispatch_member_with_args_is_rejected(manifest):
+    name = _first_dispatch_member_name(manifest)
+    entry = next(h for h in manifest["hooks"] if h["name"] == name)
+    entry["args"] = ["--foo"]
+    drifts = build.manifest_schema_drifts(manifest)
+    assert any(
+        f"entry {name!r}" in d and "declares 'args'" in d for d in drifts
+    ), drifts
+
+
+def test_dispatch_member_with_body_is_rejected(manifest):
+    name = _first_dispatch_member_name(manifest)
+    entry = next(h for h in manifest["hooks"] if h["name"] == name)
+    entry["body"] = "impl.sh"
+    drifts = build.manifest_schema_drifts(manifest)
+    assert any(
+        f"entry {name!r}" in d and "declares 'body'" in d for d in drifts
+    ), drifts
+
+
+def test_non_dispatch_member_with_args_is_fine(manifest):
+    # Same field, but on a hook whose (event, matcher) is NOT a dispatch
+    # group — the gate is scoped to actual members, not a blanket ban.
+    pairs = {
+        (g["event"], g.get("matcher")) for g in manifest["dispatch_groups"]
+    }
+    entry = next(
+        h for h in manifest["hooks"]
+        if (h.get("event"), h.get("matcher")) not in pairs
+    )
+    entry["args"] = ["--foo"]
+    drifts = build.manifest_schema_drifts(manifest)
+    assert not any("declares 'args'" in d for d in drifts), drifts
