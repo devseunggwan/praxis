@@ -987,6 +987,21 @@ STOP_PAYLOAD = json.dumps(
 )
 
 
+def _fake_raw_stdout(text: str) -> str:
+    # Writes `text` to stdout UNCHANGED. _fake_context cannot be used to carry
+    # a permissionDecision marker: json.dump escapes the inner quotes, so the
+    # literal marker never survives into stdout and the substring lanes are
+    # never reached — a test built on it passes with the event scoping removed
+    # (issue #1199 review). This is also the real shape of the threat: an
+    # advisory hook printing help or example text verbatim.
+    return (
+        "import sys\n"
+        "def main():\n"
+        "    sys.stdout.write(%r + '\\n')\n"
+        "    return 0\n" % text
+    )
+
+
 def _fake_stop_block(reason: str) -> str:
     # Mirrors _hook_io.emit_stop_block / the shell siblings' jq form: blocking
     # is carried by the JSON `decision` field at exit 0, NOT the exit code.
@@ -1098,7 +1113,7 @@ def test_stop_quoted_marker_cannot_shadow_a_real_block(tmp_path, monkeypatch, ca
     # substring lanes are PreToolUse-only.
     quoting = f"the PreToolUse hooks emit {_ASK} or {_DENY} on stdout"
     members = [
-        ("completion-verify", "ctx", _write_fake(tmp_path, "ctx", _fake_context("Stop", quoting))),
+        ("completion-verify", "ctx", _write_fake(tmp_path, "ctx", _fake_raw_stdout(quoting))),
         ("completion-verify", "gate", _write_fake(tmp_path, "gate", _fake_stop_block("real block"))),
     ]
     _patch_members(monkeypatch, members)
@@ -1121,6 +1136,30 @@ def test_stop_quoted_marker_context_still_merges_without_block(tmp_path, monkeyp
     hso = _sole_hso(capsys.readouterr().out)
     assert rc == 0
     assert hso["additionalContext"] == quoting
+
+
+def test_stop_raw_marker_fixture_discriminates(tmp_path, monkeypatch, capsys):
+    """The fixture above must fail when the event scoping is removed.
+
+    Without this, `test_stop_quoted_marker_cannot_shadow_a_real_block` can pass
+    for the wrong reason — as it did while its member routed the marker through
+    json.dump. Here the marker reaches stdout unescaped, so the PreToolUse-only
+    substring lane is genuinely exercised: the assertion below is exactly the
+    one that flips when `is_pretooluse` stops gating it.
+    """
+    quoting = f"the PreToolUse hooks emit {_DENY} on stdout"
+    members = [
+        ("completion-verify", "ctx", _write_fake(tmp_path, "ctx", _fake_raw_stdout(quoting))),
+        ("completion-verify", "gate", _write_fake(tmp_path, "gate", _fake_stop_block("real block"))),
+    ]
+    _patch_members(monkeypatch, members)
+    assert _DENY in quoting, "fixture no longer carries the literal marker"
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    out = capsys.readouterr().out
+    assert rc == 0, "the quoting member's text was read as a deny"
+    assert json.loads(out) == {"decision": "block", "reason": "[praxis:gate] real block"}
+
+
 
 
 def test_stop_block_with_malformed_reason_still_blocks(tmp_path, monkeypatch, capsys):
