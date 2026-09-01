@@ -93,6 +93,30 @@ def test_bool_timeout_is_not_an_integer(manifest):
     assert "$.hooks[0].timeout: expected integer, got bool" in drifts[0]
 
 
+def test_integral_float_timeout_is_accepted(manifest):
+    # Review round 2, Codex finding 3: draft 2020-12 "integer" accepts any
+    # JSON number with zero fractional part; json.loads("30.0") decodes to
+    # a Python float, and the walker used to reject it as manifest drift.
+    manifest["hooks"][0]["timeout"] = 30.0
+    assert build.manifest_schema_drifts(manifest) == []
+
+
+def test_fractional_float_timeout_is_still_rejected(manifest):
+    manifest["hooks"][0]["timeout"] = 30.5
+    drifts = build.manifest_schema_drifts(manifest)
+    assert len(drifts) == 1
+    assert "$.hooks[0].timeout: expected integer, got float" in drifts[0]
+
+
+def test_integral_float_below_minimum_still_fails(manifest):
+    # The minimum check must still fire for a float that took the widened
+    # integer branch — widening acceptance must not widen away validation.
+    manifest["hooks"][0]["timeout"] = 0.0
+    drifts = build.manifest_schema_drifts(manifest)
+    assert len(drifts) == 1
+    assert "$.hooks[0].timeout: 0.0 is below minimum 1" in drifts[0]
+
+
 def test_missing_required_key_fails(manifest):
     del manifest["hooks"][0]["role"]
     drifts = build.manifest_schema_drifts(manifest)

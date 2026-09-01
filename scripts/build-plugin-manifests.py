@@ -275,15 +275,32 @@ def schema_validation_errors(instance, schema, path: str = "$") -> list[str]:
         # type (null included) before this walker ever runs, so schema_type
         # is guaranteed to be a valid key here — no separate null check
         # needed on this side.
-        py_type = _SUPPORTED_SCHEMA_TYPES[schema_type]
-        # bool is a subclass of int in Python; JSON Schema keeps them distinct.
-        if not isinstance(instance, py_type) or (
-            py_type is int and isinstance(instance, bool)
-        ):
-            errs.append(
-                f"{path}: expected {schema_type}, got {type(instance).__name__}"
-            )
-            return errs
+        if schema_type == "integer":
+            # Draft 2020-12: "integer" accepts any JSON number with zero
+            # fractional part (e.g. 1.0), not only a JSON-encoded integer
+            # literal — json.loads("1.0") is a Python float, so a bare
+            # isinstance(instance, int) rejected a spec-valid value (review
+            # round 2, Codex finding 3). bool is still excluded: it is a
+            # Python int subclass, but JSON Schema keeps boolean and
+            # integer distinct.
+            is_integer = (
+                isinstance(instance, int) and not isinstance(instance, bool)
+            ) or (isinstance(instance, float) and instance.is_integer())
+            if not is_integer:
+                errs.append(
+                    f"{path}: expected integer, got {type(instance).__name__}"
+                )
+                return errs
+        else:
+            py_type = _SUPPORTED_SCHEMA_TYPES[schema_type]
+            # bool is a subclass of int in Python; JSON Schema keeps them distinct.
+            if not isinstance(instance, py_type) or (
+                py_type is int and isinstance(instance, bool)
+            ):
+                errs.append(
+                    f"{path}: expected {schema_type}, got {type(instance).__name__}"
+                )
+                return errs
     if isinstance(instance, dict):
         props = schema.get("properties", {})
         for key in schema.get("required", []):
@@ -314,7 +331,11 @@ def schema_validation_errors(instance, schema, path: str = "$") -> list[str]:
             errs.append(
                 f"{path}: string shorter than minLength {schema['minLength']}"
             )
-    elif isinstance(instance, int) and not isinstance(instance, bool):
+    elif isinstance(instance, bool):
+        pass
+    elif isinstance(instance, (int, float)):
+        # Mirrors the integer-acceptance widening above: an integral float
+        # (e.g. timeout: 30.0) must still be checked against "minimum".
         if "minimum" in schema and instance < schema["minimum"]:
             errs.append(f"{path}: {instance} is below minimum {schema['minimum']}")
     return errs
