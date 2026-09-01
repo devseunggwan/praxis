@@ -1335,7 +1335,14 @@ def main() -> int:
         desc = _re.search(
             r"^description:(.*?)(?=^\S|\Z)", fm.group(1), _re.DOTALL | _re.MULTILINE
         )
-        return _norm_ws(desc.group(1)) if desc else ""
+        if not desc:
+            return ""
+        # Everything from `Do NOT activate on` onward lists phrases that must
+        # NOT route to the skill. Searching the whole description would accept
+        # one of those as a valid trigger keyword, so a roster row could list
+        # `strike a balance` and pass.
+        text = _norm_ws(desc.group(1))
+        return text.split("Do NOT activate on")[0].rstrip()
 
     for line in skills_doc_text.splitlines():
         cells = _table_cells(line)
