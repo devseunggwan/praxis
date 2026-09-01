@@ -1173,9 +1173,10 @@ def main() -> int:
             if schema != _build.AGENT_PLUGIN_SCHEMA_URI:
                 drifts.append(
                     f"AGENT PLUGIN {path}: $schema is {schema!r}, expected "
-                    f"{_build.AGENT_PLUGIN_SCHEMA_URI!r} — Codex supports that "
-                    "URI alone, and a newer one is selected and then rejected "
-                    "rather than falling back (Rule 23, #1219)"
+                    f"{_build.AGENT_PLUGIN_SCHEMA_URI!r} — 1.0.0 is the only "
+                    "published spec version, and a newer pin still wins "
+                    "manifest selection and then loads as unsupported instead "
+                    "of falling back (Rule 23, #1219)"
                 )
             for key in ("skills", "hooks", "mcpServers", "apps", "interface"):
                 if key in rendered:
