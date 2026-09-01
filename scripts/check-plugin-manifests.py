@@ -357,7 +357,7 @@ def dispatch_node_drifts(
     host_id: str,
     expected_members: set[str],
     dispatch_wrapper_name: str,
-    args_members: set[str] = frozenset(),
+    args_wrappers: set[str] = frozenset(),
 ) -> list[str]:
     """Drift strings for one (event, matcher) group's node shape in a hooks.json.
 
@@ -384,11 +384,19 @@ def dispatch_node_drifts(
     member_nodes = [
         n for n in nodes if dispatch_wrapper_name not in n.get("command", "")
     ]
-    leaked = [
-        n
-        for n in member_nodes
-        if not any(f"/{name}.sh" in n.get("command", "") for name in args_members)
-    ]
+    # Match the node's wrapper BASENAME against the exact set the manifest
+    # says should stay standalone. A substring probe answered two different
+    # questions wrong at once: a `wrapper_suffix` node never matched its own
+    # bare name (false leak), and a member whose node vanished entirely left
+    # nothing to test, so its silent disappearance read as clean.
+    def _basename(node) -> str:
+        cmd = node.get("command", "")
+        head = cmd.split()[0] if cmd.split() else cmd
+        return head.rsplit("/", 1)[-1]
+
+    leaked = [n for n in member_nodes if _basename(n) not in args_wrappers]
+    present = {_basename(n) for n in member_nodes}
+    missing = sorted(args_wrappers - present)
     out: list[str] = []
     want = 1 if expected_members else 0
     if len(dispatch_nodes) != want:
@@ -396,13 +404,20 @@ def dispatch_node_drifts(
             f"DISPATCH NODE COUNT {event}/{matcher} host={host_id}: expected "
             f"{want} dispatcher node(s), found {len(dispatch_nodes)}"
         )
+    if missing:
+        out.append(
+            f"DISPATCH ARGS NODE MISSING {event}/{matcher} host={host_id}: "
+            f"{missing} declared 'args' (so the build must keep each one as a "
+            "standalone node) but no such node exists — the hook is silently "
+            "disabled"
+        )
     if leaked:
         out.append(
             f"DISPATCH MEMBER LEAK {event}/{matcher} host={host_id}: "
             f"{len(leaked)} non-dispatcher node(s) in a collapsed group: "
             f"{[n.get('command', '') for n in leaked]} "
             f"(args-declaring members may stay standalone; declared here: "
-            f"{sorted(args_members)})"
+            f"{sorted(args_wrappers)})"
         )
     # Args are shlex-quoted in the generated command (PR #1198: the host runs
     # it via `sh -c`, so a pipe-carrying matcher MUST be quoted or it parses
@@ -1532,8 +1547,8 @@ def main() -> int:
     # ------------------------------------------------------------------
     def _manifest_members_for(
         event: str, matcher: str | None, host: str
-    ) -> tuple[set[str], set[str]]:
-        """Return `(collapsible_names, args_names)` for one host's group.
+    ) -> tuple[set[str], set[str], set[str]]:
+        """Return `(collapsible_names, args_names, args_wrappers)` for a group.
 
         args-declaring entries are excluded from the dispatch member set on
         BOTH sides (the build keeps them standalone in `filter_hooks_for_host`;
@@ -1544,13 +1559,21 @@ def main() -> int:
         """
         names: set[str] = set()
         args_names: set[str] = set()
+        args_wrappers: set[str] = set()
         for hook in manifest["hooks"]:
             hosts = hook.get("hosts")
             if hosts is not None and host not in hosts:
                 continue
             if hook.get("event") == event and hook.get("matcher") == matcher:
-                (args_names if hook.get("args") else names).add(hook["name"])
-        return names, args_names
+                if hook.get("args"):
+                    args_names.add(hook["name"])
+                    # The node carries the WRAPPER filename, which bakes in
+                    # `wrapper_suffix` — deriving it from the bare name made a
+                    # correct `<name>-pre.sh` node read as a leak.
+                    args_wrappers.add(_build._wrapper_filename(hook))
+                else:
+                    names.add(hook["name"])
+        return names, args_names, args_wrappers
 
     # Sentinel canary: the build renders DISPATCH_NO_MATCHER_ARG into a
     # matcher-less dispatcher node's command; the runtime maps NO_MATCHER_ARG
@@ -1575,7 +1598,9 @@ def main() -> int:
 
     for event, matcher in sorted(dispatch_groups, key=lambda em: (em[0], em[1] or "")):
         for host_id, hooks_path in hooks_outputs:
-            expected, args_excluded = _manifest_members_for(event, matcher, host_id)
+            expected, args_excluded, args_wrappers = _manifest_members_for(
+                event, matcher, host_id
+            )
 
             # (b) runtime resolution must match the manifest, with no dup, and
             #     every resolved impl on disk.
@@ -1619,7 +1644,7 @@ def main() -> int:
                     host_id,
                     expected,
                     _build.DISPATCH_WRAPPER_NAME,
-                    args_members=args_excluded,
+                    args_wrappers=args_wrappers,
                 )
             )
 

@@ -120,7 +120,7 @@ def test_args_member_standalone_node_is_not_a_leak():
     hj = _hooks_json([_disp_node("claude"), _member_node("strike-counter")])
     out = check.dispatch_node_drifts(
         hj, "PreToolUse", "Bash", "claude", {"x"}, WRAP,
-        args_members={"strike-counter"},
+        args_wrappers={"strike-counter.sh"},
     )
     assert out == [], out
     # ...but a node NOT in args_members is still flagged, and the message names
@@ -129,6 +129,37 @@ def test_args_member_standalone_node_is_not_a_leak():
         hj, "PreToolUse", "Bash", "claude", {"x"}, WRAP
     )
     assert any("DISPATCH MEMBER LEAK" in d and "args-declaring" in d for d in out), out
+
+
+def test_wrapper_suffix_node_is_not_a_leak():
+    # A `wrapper_suffix` member's node is `<name>-pre.sh`, which never contains
+    # `/<name>.sh` — the substring probe called a correct node a leak, and
+    # pre-edit-md-escape-advisory (args + "-pre"/"-post") is a live example.
+    hj = _hooks_json([_disp_node("claude"), _member_node("md-escape-pre")])
+    out = check.dispatch_node_drifts(
+        hj, "PreToolUse", "Bash", "claude", {"x"}, WRAP,
+        args_wrappers={"md-escape-pre.sh"},
+    )
+    assert out == [], out
+
+
+def test_missing_args_node_is_reported():
+    # The half a leak check structurally cannot see: the args member's node is
+    # GONE, so there is no node left to flag and the count of dispatcher nodes
+    # is still right. Silence here means the hook is disabled and nothing says so.
+    hj = _hooks_json([_disp_node("claude")])
+    out = check.dispatch_node_drifts(
+        hj, "PreToolUse", "Bash", "claude", {"x"}, WRAP,
+        args_wrappers={"strike-counter.sh"},
+    )
+    assert any("DISPATCH ARGS NODE MISSING" in d for d in out), out
+    assert any("strike-counter.sh" in d for d in out), out
+    # Control: the same call with the node present says nothing.
+    hj_ok = _hooks_json([_disp_node("claude"), _member_node("strike-counter")])
+    assert check.dispatch_node_drifts(
+        hj_ok, "PreToolUse", "Bash", "claude", {"x"}, WRAP,
+        args_wrappers={"strike-counter.sh"},
+    ) == []
 
 
 def _matcherless_hooks_json(nodes: list[dict]) -> dict:
