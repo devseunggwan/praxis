@@ -31,10 +31,14 @@ Record a single rule violation against the current session's strike counter.
      skill-body Bash block, so it would expand to empty and record a blank
      reason.
 
-   Example — a reason that itself contains backticks:
+   Example — a reason that itself contains backticks. Keep a real CLI name
+   out of the backticks: `check-plugin-manifests.py` reads an inline
+   backticked command in an instruction context as this skill *invoking*
+   that CLI, which would demand runtime-verification frontmatter the skill
+   has no way to earn.
 
    ```bash
-   "${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/hooks/strike-counter.sh" strike 'forgot to run `git fetch` first'
+   "${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/hooks/strike-counter.sh" strike 'claimed `PASS(live)` without running anything'
    ```
 
 3. Report the script's stdout verbatim to the user. Do not paraphrase the level-specific message — the exact wording is part of the discipline signal.
