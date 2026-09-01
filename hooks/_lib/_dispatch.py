@@ -340,7 +340,8 @@ def run_group(
         pass
 
     # A deny is flushed and returned the moment a member computes it, never
-    # buffered to the end of the group. Buffering meant a host kill at the group
+    # buffered to the end of the group (the residual exposure issue #1167's own
+    # comment recorded as still open). Buffering meant a host kill at the group
     # timeout took an already-computed deny down with the process, so a gate
     # that had decided to block an edit silently did not — the one outcome a
     # write-path group must never produce. Returning early cannot change which
