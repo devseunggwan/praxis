@@ -367,6 +367,69 @@ fi
 
 
 # ---------------------------------------------------------------------------
+# Budget exhaustion is fail-open, not a block
+# ---------------------------------------------------------------------------
+# A starved dispatcher is not a reason to reject the user's command. Both
+# lookups signal exhaustion distinctly so main() can pass instead of taking
+# the block path their ordinary failure values lead to.
+_budget_out=$(python3 - << PYEOF 2>&1
+import importlib.util, sys, time
+sys.path.insert(0, "$ROOT_DIR/hooks/_lib")
+spec = importlib.util.spec_from_file_location("impl", "$HOOK")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+import _hook_runtime
+
+def spawned(*a, **k):
+    raise AssertionError("a subprocess was spawned with no budget left")
+mod.subprocess.run = spawned
+
+_hook_runtime.set_member_deadline(time.monotonic() - 1.0)  # nothing left
+try:
+    for fn, args in ((mod._resolve_origin_repo, ()),
+                     (mod._run_gh_search, ("acme/repo", ["x"]))):
+        try:
+            fn(*args)
+        except mod.BudgetExhausted:
+            pass
+        else:
+            sys.stderr.write("%s did not signal budget exhaustion\n" % fn.__name__)
+            sys.exit(1)
+    # Positive control: with budget, the same calls DO reach the subprocess.
+    _hook_runtime.set_member_deadline(None)
+    try:
+        mod._run_gh_search("acme/repo", ["x"])
+    except AssertionError:
+        pass  # our stub fired, i.e. the guard is not blanket-refusing
+    except mod.BudgetExhausted:
+        sys.stderr.write("budget guard fired even with budget available\n")
+        sys.exit(1)
+finally:
+    _hook_runtime.set_member_deadline(None)
+
+import io, contextlib
+notice = io.StringIO()
+with contextlib.redirect_stderr(notice):
+    rc = mod._budget_skip(mod.BudgetExhausted("gh dedup search"))
+if "fail-open" not in notice.getvalue():
+    sys.stderr.write("budget skip was silent; it must say why it passed\\n")
+    sys.exit(1)
+if rc != 0:
+    sys.stderr.write("budget skip returned %r, expected 0 (fail-open)\n" % rc)
+    sys.exit(1)
+PYEOF
+)
+_budget_rc=$?
+if [ "$_budget_rc" -eq 0 ] && [ -z "$_budget_out" ]; then
+  echo "PASS  [budget] exhaustion is signalled distinctly and fails open"
+  PASS=$((PASS+1))
+else
+  echo "FAIL  [budget] exhaustion not fail-open (rc=$_budget_rc out=$(echo "$_budget_out" | head -c 300))"
+  FAIL=$((FAIL+1)); FAILED_NAMES+=("budget exhaustion fails open")
+fi
+
+
+# ---------------------------------------------------------------------------
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

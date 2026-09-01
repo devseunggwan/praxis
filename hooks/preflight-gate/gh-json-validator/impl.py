@@ -36,11 +36,16 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    fail_open,
+    shared_probe_deadline,
+)
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _paths import praxis_cache_dir  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
@@ -55,7 +60,24 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 # Configuration
 # ---------------------------------------------------------------------------
 
+# Cap for ONE `gh ... --json help` probe. All probes in a single invocation
+# (the probe + its dummy-positional retry, across every command segment) share
+# one deadline derived from the hook's budget — see main(). Two 10s probes
+# back to back would otherwise exceed the Bash dispatch group's shared node
+# budget and starve every later member (issue #1167).
 _GH_HELP_TIMEOUT_SEC = 10
+
+# hooks/manifest.json gives this gate a 15s timeout; standalone (per-process)
+# the shared probe deadline is that budget minus a margin for interpreter
+# startup and process spawn — NOT the single-probe cap, which would shrink
+# the standalone budget from "10s per probe" to "10s total" (PR #1195
+# review). Under the dispatcher the deadline clamps to the remaining group
+# budget instead (see _hook_runtime.shared_probe_deadline). Manifest-timeout
+# parity is pinned by tests/hooks/preflight-gate/test_gh_json_validator.sh
+# against hooks/manifest.json — bump both together.
+_HOOK_TIMEOUT_SEC = 15
+_HOOK_TIMEOUT_MARGIN_SEC = 2
+
 _BYPASS_COMMENT_RE = re.compile(r"#\s*PRAXIS_GH_JSON_BYPASS\s*=\s*skip")
 
 # Fast prefilter: must contain `gh` and `--json` before doing full parse.
@@ -106,7 +128,9 @@ def _save_cached_fields(
 # Field discovery via `gh <subcmd> --json help`
 # ---------------------------------------------------------------------------
 
-def _fetch_valid_fields(subcommand_tokens: tuple[str, ...]) -> frozenset[str] | None:
+def _fetch_valid_fields(
+    subcommand_tokens: tuple[str, ...], deadline: float
+) -> frozenset[str] | None:
     """Run `gh <subcmd> --json help` and parse the valid field list.
 
     Returns None on any failure (gh missing, network, parse error) — caller
@@ -122,14 +146,21 @@ def _fetch_valid_fields(subcommand_tokens: tuple[str, ...]) -> frozenset[str] | 
     Some subcommands (e.g. `gh pr view`, `gh issue view`, `gh release view`)
     require a positional argument. When an arg-count error appears in the
     output, a dummy positional "0" is injected and the call is retried.
+
+    Both calls share `deadline`: each subprocess timeout is the remaining
+    budget capped at `_GH_HELP_TIMEOUT_SEC`, so their SUM can never exceed the
+    hook's member budget; an exhausted deadline fails open without spawning gh.
     """
+    remaining = deadline - time.monotonic()
+    if remaining < MIN_SUBPROC_BUDGET_SEC:
+        return None
     cmd = ["gh"] + list(subcommand_tokens) + ["--json", "help"]
     try:
         r = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=_GH_HELP_TIMEOUT_SEC,
+            timeout=min(remaining, _GH_HELP_TIMEOUT_SEC),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -138,13 +169,16 @@ def _fetch_valid_fields(subcommand_tokens: tuple[str, ...]) -> frozenset[str] | 
 
     # Retry with a dummy positional when the subcommand requires an argument.
     if "accepts" in output and "arg" in output and "received 0" in output:
+        remaining = deadline - time.monotonic()
+        if remaining < MIN_SUBPROC_BUDGET_SEC:
+            return None
         cmd_with_dummy = ["gh"] + list(subcommand_tokens) + ["0", "--json", "help"]
         try:
             r2 = subprocess.run(
                 cmd_with_dummy,
                 capture_output=True,
                 text=True,
-                timeout=_GH_HELP_TIMEOUT_SEC,
+                timeout=min(remaining, _GH_HELP_TIMEOUT_SEC),
             )
             output = r2.stdout + r2.stderr
         except (OSError, subprocess.SubprocessError):
@@ -171,12 +205,13 @@ def _fetch_valid_fields(subcommand_tokens: tuple[str, ...]) -> frozenset[str] | 
 def _get_valid_fields(
     subcommand_tokens: tuple[str, ...],
     cache_dir: Path,
+    deadline: float,
 ) -> frozenset[str] | None:
     """Return valid JSON fields for a subcommand, with per-session caching."""
     cached = _load_cached_fields(cache_dir, subcommand_tokens)
     if cached is not None:
         return cached
-    fetched = _fetch_valid_fields(subcommand_tokens)
+    fetched = _fetch_valid_fields(subcommand_tokens, deadline)
     if fetched is not None:
         _save_cached_fields(cache_dir, subcommand_tokens, fetched)
     return fetched
@@ -281,6 +316,7 @@ def _emit_deny(reason: str) -> None:
 def _check_segment(
     raw_argv: list[str],
     cache_dir: Path,
+    deadline: float,
 ) -> tuple[bool, str]:
     """Check one command segment for gh --json field validity.
 
@@ -308,7 +344,7 @@ def _check_segment(
     if json_fields == ["help"]:
         return False, ""
 
-    valid_fields = _get_valid_fields(subcommand_tokens, cache_dir)
+    valid_fields = _get_valid_fields(subcommand_tokens, cache_dir, deadline)
     if valid_fields is None:
         return False, ""  # fail-open on gh/network errors
 
@@ -382,8 +418,17 @@ def main() -> int:
     if not tokens:
         return 0
 
+    # One shared deadline for EVERY `gh --json help` probe this invocation
+    # spawns (issue #1167), so their SUM is bounded by the hook's budget.
+    # Standalone (no dispatcher deadline published) that budget is the 13s
+    # manifest-derived self-budget; under the dispatcher it clamps to the
+    # remaining group budget — see _hook_runtime.shared_probe_deadline. Each
+    # individual probe stays capped at _GH_HELP_TIMEOUT_SEC inside
+    # _fetch_valid_fields.
+    deadline = shared_probe_deadline(_HOOK_TIMEOUT_SEC, _HOOK_TIMEOUT_MARGIN_SEC)
+
     for raw_argv in iter_command_starts(tokens):
-        is_invalid, reason = _check_segment(list(raw_argv), cache_dir)
+        is_invalid, reason = _check_segment(list(raw_argv), cache_dir, deadline)
         if is_invalid:
             _emit_deny(reason)
             return 2

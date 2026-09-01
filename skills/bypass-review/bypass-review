@@ -156,6 +156,13 @@ F_FIRE_GRANULARITY = "granularity"
 
 _FIRE_DECISIONS = ("block", "ask", "advise", "pass")
 
+# issue #1167: the dispatcher writes decision="skip" for a Bash-group member
+# it never RAN because the group budget could not cover it (cited verbatim
+# from hooks/_lib/_fire_ledger.py DECISION_SKIP). A skip is not a fire — the
+# hook never evaluated the call — so every consumer below must keep skips out
+# of fire counts, advise-outcome inference, and outcome-proxy counts.
+FIRE_DECISION_SKIP = "skip"
+
 # issue #737: hook name whose non-pass fires proxy the external-write-revert
 # outcome-proxy signal — cited verbatim from
 # hooks/advisory-nudge/destructive-bash-guard's manifest `name`.
@@ -870,8 +877,14 @@ def load_fire_events(
 def aggregate_fires(events: list[dict]) -> dict[str, dict]:
     """Per-hook fire aggregation: counts by decision, sessions, last seen.
 
-    Returns dict[hook_name] -> {role, fires, block, ask, advise, pass,
+    Returns dict[hook_name] -> {role, fires, block, ask, advise, pass, skip,
     sessions: set[str], last_seen: str}.
+
+    `skip` (issue #1167) counts dispatcher budget-skips SEPARATELY from
+    `fires`: a skipped member never ran, so folding skips into `fires` would
+    inflate the fire-rate ledger the prune audits (docs/hook-prune-audit.md)
+    score keep/merge/drop verdicts from. Skip records also stay out of
+    `sessions` — that set measures sessions the hook actually engaged.
     """
     by_hook: dict[str, dict] = {}
     for ev in events:
@@ -881,10 +894,17 @@ def aggregate_fires(events: list[dict]) -> dict[str, dict]:
         row = by_hook.setdefault(hook, {
             "role": ev.get(F_FIRE_ROLE) or UNKNOWN,
             "fires": 0, "block": 0, "ask": 0, "advise": 0, "pass": 0,
+            "skip": 0,
             "sessions": set(), "last_seen": "", "coarse": False, "rich": False,
         })
-        row["fires"] += 1
         decision = ev.get(F_FIRE_DECISION)
+        if decision == FIRE_DECISION_SKIP:
+            row["skip"] += 1
+            ts = ev.get(F_FIRE_TIMESTAMP)
+            if isinstance(ts, str) and ts > row["last_seen"]:
+                row["last_seen"] = ts
+            continue  # not a fire — the member never ran
+        row["fires"] += 1
         if decision in _FIRE_DECISIONS:
             row[decision] += 1
         gran = ev.get(F_FIRE_GRANULARITY)
@@ -943,6 +963,12 @@ def compute_advise_ignored(
         hook = ev.get(F_FIRE_HOOK)
         sid = ev.get(F_FIRE_SESSION)
         if not (isinstance(hook, str) and hook and isinstance(sid, str) and sid):
+            continue
+        if ev.get(F_FIRE_DECISION) == FIRE_DECISION_SKIP:
+            # issue #1167: a budget-skip means the hook never EVALUATED the
+            # call, so it is not an outcome. Left in the stream it would sit
+            # between an advise and its real next evaluation and be read as
+            # "did not recur ⇒ heeded" — mis-scoring the advisory.
             continue
         if full_rich_hooks is not None and hook not in full_rich_hooks:
             continue  # partial rich stream — pass is not observable, skip
@@ -1225,7 +1251,9 @@ def compute_external_write_revert_counts(fire_events: list[dict]) -> dict[str, i
     for ev in fire_events:
         if ev.get(F_FIRE_HOOK) != DESTRUCTIVE_BASH_GUARD_HOOK:
             continue
-        if ev.get(F_FIRE_DECISION) == "pass":
+        if ev.get(F_FIRE_DECISION) in ("pass", FIRE_DECISION_SKIP):
+            # skip (issue #1167): the guard never ran — a budget-skip is not
+            # a flagged destructive command.
             continue
         sid = ev.get(F_FIRE_SESSION)
         if not isinstance(sid, str) or not sid:
@@ -1756,13 +1784,25 @@ def render_fire_report(
     today = datetime.now(tz=timezone.utc).date()
     since = today - timedelta(days=days - 1)
 
-    coarse_count = sum(1 for r in by_hook.values() if r.get("coarse") and not r.get("rich"))
-    mixed_count = sum(1 for r in by_hook.values() if r.get("coarse") and r.get("rich"))
+    # Skip-only hooks (issue #1167): every record in the window was a
+    # dispatcher budget-skip, i.e. the hook never actually RAN. Counting them
+    # as "fired" (or bucketing them coarse/rich) would overstate coverage, so
+    # the headline counts only hooks with fires > 0 and reports skip-only
+    # hooks on their own line.
+    fired = [r for r in by_hook.values() if r["fires"] > 0]
+    skip_only_count = len(by_hook) - len(fired)
+    coarse_count = sum(1 for r in fired if r.get("coarse") and not r.get("rich"))
+    mixed_count = sum(1 for r in fired if r.get("coarse") and r.get("rich"))
     lines.append(_render_header("bypass-review: Hook Fire-Rate Report (issue #710)"))
     lines.append(f"  Period : {since} → {today} (last {days} day{'s' if days != 1 else ''})")
     lines.append(f"  Source : {telemetry_dir}")
-    lines.append(f"  Hooks fired : {len(by_hook)}  ({coarse_count} coarse, {mixed_count} mixed)")
-    lines.append("  Scope  : Bash dispatch group = rich (block/ask/advise/pass);")
+    lines.append(f"  Hooks fired : {len(fired)}  ({coarse_count} coarse, {mixed_count} mixed)")
+    if skip_only_count:
+        lines.append(
+            f"  Skip-only hooks : {skip_only_count}  (only budget-skip records "
+            "— never ran in this window; see Skip column)"
+        )
+    lines.append("  Scope  : Bash dispatch group = rich (block/ask/advise/pass/skip);")
     lines.append("           other @fail_open hooks = coarse (block/pass only);")
     lines.append("           single-event-rich Stop hooks = mixed (rich escalations")
     lines.append("           + coarse passes)")
@@ -1777,11 +1817,11 @@ def render_fire_report(
     col = 34
     lines.append(
         f"  {'Hook':<{col}}  {'G':>1}  {'Fires':>5}  {'Block':>5}  {'Ask':>4}  "
-        f"{'Advise':>6}  {'Pass':>5}  {'Sess':>4}  Last Seen"
+        f"{'Advise':>6}  {'Pass':>5}  {'Skip':>4}  {'Sess':>4}  Last Seen"
     )
     lines.append(
         f"  {'─' * col}  {'─' * 1}  {'─' * 5}  {'─' * 5}  {'─' * 4}  {'─' * 6}  "
-        f"{'─' * 5}  {'─' * 4}  {'─' * 10}"
+        f"{'─' * 5}  {'─' * 4}  {'─' * 4}  {'─' * 10}"
     )
     for hook in sorted(by_hook, key=lambda h: by_hook[h]["fires"], reverse=True):
         r = by_hook[hook]
@@ -1794,7 +1834,8 @@ def render_fire_report(
             g = "R"
         lines.append(
             f"  {hook:<{col}}  {g:>1}  {r['fires']:>5}  {r['block']:>5}  {r['ask']:>4}  "
-            f"{r['advise']:>6}  {r['pass']:>5}  {len(r['sessions']):>4}  {last_seen}"
+            f"{r['advise']:>6}  {r['pass']:>5}  {r.get('skip', 0):>4}  "
+            f"{len(r['sessions']):>4}  {last_seen}"
         )
     lines.append("")
     lines.append(
@@ -1808,7 +1849,10 @@ def render_fire_report(
         "     M=mixed (single-event-rich Stop hook, issue #847): escalations\n"
         "     (Block/Advise) are recorded rich with the real decision; silent\n"
         "     passes stay coarse. So Block/Advise here are exact, but Pass is the\n"
-        "     coarse matcher-match count, and 'Fires' sums both granularities."
+        "     coarse matcher-match count, and 'Fires' sums both granularities.\n"
+        "  Skip: dispatcher budget-skips (issue #1167) — the member was never\n"
+        "     run because the Bash group's shared budget could not cover it.\n"
+        "     Excluded from 'Fires' and every derived metric."
     )
 
     # ── issue #710 remaining scope: advise_ignored_rate / bypass_count / outcome-proxy ──
@@ -1822,7 +1866,13 @@ def render_fire_report(
         lines.append("  (manifest unavailable — pass --manifest PATH to compute this set)")
     else:
         instrumentable, uninstrumentable = roster
-        never = sorted(instrumentable - set(by_hook))
+        # Built from hooks that actually FIRED, not from every hook with a row.
+        # A dispatcher budget-skip creates a row with fires == 0, and a hook
+        # starved every time never ran — subtracting the whole key set made it
+        # vanish from this roster, so the section read "every instrumentable
+        # hook fired" while the starved one had not run once.
+        fired = {h for h, row in by_hook.items() if row["fires"] > 0}
+        never = sorted(instrumentable - fired)
         if not never:
             lines.append("  (none — every instrumentable hook fired in this window)")
         else:

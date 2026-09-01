@@ -61,7 +61,11 @@ import sys
 from pathlib import Path
 from typing import Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    fail_open,
+    remaining_budget,
+)
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
     safe_tokenize,
@@ -70,6 +74,11 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
 from _state_lock import state_lock  # type: ignore[import-not-found]  # noqa: E402
+
+# Per-probe cap for the jq validation call. Clamped to the dispatcher's
+# remaining member budget at the call site (issue #1167).
+_JQ_TIMEOUT_SEC = 5
+
 
 
 # ---------------------------------------------------------------------------
@@ -437,11 +446,17 @@ def _check_file(path: str) -> Optional[str]:
         )
     # Validate JSON by invoking jq. If jq is absent or times out, skip
     # (fail-open) — the hook's job is to warn, not to enforce.
+    # Timeout sized from the budget the dispatcher published for this
+    # member, so a group already short on time is not overrun; run
+    # standalone and the constant wins unchanged (issue #1167).
+    budget = remaining_budget(_JQ_TIMEOUT_SEC)
+    if budget < MIN_SUBPROC_BUDGET_SEC:
+        return None
     try:
         result = subprocess.run(
             ["jq", ".", expanded],
             capture_output=True,
-            timeout=5,
+            timeout=min(_JQ_TIMEOUT_SEC, budget),
         )
         if result.returncode != 0:
             return (

@@ -96,7 +96,11 @@ import time
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    budgeted_deadline,
+    fail_open,
+)
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     compound_cascade_hint,
@@ -593,7 +597,10 @@ def _structure_findings(body: str) -> list[tuple[str, str]]:
 def _gh(args: list[str], deadline: float) -> tuple[str | None, str | None]:
     """Run gh within the remaining budget; return (stdout, error). Never raises."""
     remaining = deadline - time.monotonic()
-    if remaining <= 0:
+    # The floor, not zero: a sub-floor slice cannot finish a `gh` round trip,
+    # so spawning one only spends budget the later group members were counting
+    # on and still answers "unknown".
+    if remaining < MIN_SUBPROC_BUDGET_SEC:
         return None, "조회 예산 초과"
     try:
         proc = subprocess.run(
@@ -775,7 +782,9 @@ def _post_tool_use(payload: dict) -> int:
     if not command or os.environ.get(_BYPASS_ENV, "").strip() or _bypassed_with_reason(command):
         return 0
 
-    deadline = time.monotonic() + _LOOKUP_BUDGET_SEC
+    # Under the dispatcher this clamps to what is left of the Bash group's
+    # shared node budget; standalone the hook's own budget wins unchanged.
+    deadline = budgeted_deadline(_LOOKUP_BUDGET_SEC)
     refs = _comment_refs(_tool_output(payload.get("tool_response")))
     if not refs:
         refs = [

@@ -50,6 +50,10 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    remaining_budget,
+)
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     compound_cascade_hint,
@@ -306,10 +310,16 @@ def _resolve_pr_title(identifier: str | None, cwd: str | None, repo: str | None)
     if repo:
         cmd += ["-R", repo]
     cmd += ["--json", "title", "-q", ".title"]
+    # Timeout sized from the budget the dispatcher published for this
+    # member, so a group already short on time is not overrun; run
+    # standalone and the constant wins unchanged (issue #1167).
+    budget = remaining_budget(_GH_TIMEOUT_SEC)
+    if budget < MIN_SUBPROC_BUDGET_SEC:
+        return None
     try:
         result = subprocess.run(
             cmd, cwd=cwd or None, capture_output=True, text=True,
-            timeout=_GH_TIMEOUT_SEC, check=False,
+            timeout=min(_GH_TIMEOUT_SEC, budget), check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None

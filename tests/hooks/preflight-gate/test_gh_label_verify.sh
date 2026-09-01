@@ -473,6 +473,63 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Listing fetch honours the shared deadline; self-budget clamps to the group's
+# ---------------------------------------------------------------------------
+
+# Issue #1167: the listing fetch shares the same deadline as the re-checks, so
+# an expired deadline must fail open without spawning gh. Inside the Bash
+# dispatch group the gate's self-budget must clamp to the REMAINING group
+# budget published by the dispatcher, not the standalone 13s — that clamp is
+# what stops this gate starving the ~later members of the shared node timeout.
+# And the _HOOK_TIMEOUT_SEC constant must stay in parity with the gate's
+# manifest timeout, or the derived budget silently drifts from what the host
+# actually enforces (round-2 review).
+_budget_out=$(python3 - << PYEOF 2>&1
+import json, sys, importlib.util, time
+spec = importlib.util.spec_from_file_location("impl", "$HOOK")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+def _boom(*a, **k):
+    raise AssertionError("gh spawned after the deadline had passed")
+mod.subprocess.run = _boom
+
+# Expired shared deadline -> listing fetch fails open, no gh spawn.
+if mod._fetch_labels("acme/repo", time.monotonic() - 1) is not None:
+    sys.stderr.write("expired deadline did not fail open the listing fetch\n"); sys.exit(1)
+
+# Constant parity with the manifest timeout (round-2 review).
+manifest = json.load(open("$ROOT_DIR/hooks/manifest.json"))
+timeout = next(h["timeout"] for h in manifest["hooks"] if h["name"] == "gh-label-verify")
+if mod._HOOK_TIMEOUT_SEC != timeout:
+    sys.stderr.write("_HOOK_TIMEOUT_SEC=%r drifted from manifest timeout %r\n"
+                     % (mod._HOOK_TIMEOUT_SEC, timeout))
+    sys.exit(1)
+
+# Dispatcher-published member budget (2s left) must clamp the self-budget.
+import _hook_runtime
+_hook_runtime.set_member_deadline(time.monotonic() + 2.0)
+try:
+    got = mod.shared_probe_deadline(
+        mod._HOOK_TIMEOUT_SEC, mod._HOOK_TIMEOUT_MARGIN_SEC
+    ) - time.monotonic()
+    if not (0.0 < got <= 2.0):
+        sys.stderr.write("self-budget not clamped to remaining group budget: %r\n" % got)
+        sys.exit(1)
+finally:
+    _hook_runtime.set_member_deadline(None)
+PYEOF
+)
+_budget_rc=$?
+if [ "$_budget_rc" -eq 0 ] && [ -z "$_budget_out" ]; then
+  echo "  PASS  listing fetch honours deadline; self-budget clamps to group budget"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  group-budget clamp broken (rc=$_budget_rc, out=$(echo "$_budget_out" | head -c 200))"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("listing fetch deadline + group-budget clamp")
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 

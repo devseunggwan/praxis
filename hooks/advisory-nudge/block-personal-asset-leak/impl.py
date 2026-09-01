@@ -153,6 +153,16 @@ def _find_owner_markers(body: str, owner_re: re.Pattern[str]) -> list[str]:
 # Write-target resolution (best effort, fail-open)
 # ---------------------------------------------------------------------------
 
+# One local git call's timeout. The worst case per invocation is two git
+# calls inside this hook's 5s manifest timeout — the file-write path's
+# remote get-url + check-ignore, or the Bash path's single cached origin
+# lookup (see _origin_owner) — so at 3s each their sum (6s) would let the
+# host kill the hook mid-scan (issue #1167); 2s each keeps the worst case
+# (4s) inside the budget while staying generous for a local, non-network
+# git query.
+_GIT_TIMEOUT_SEC = 2
+
+
 def _git_output(args: list[str], cwd: str) -> str | None:
     """Run a git command; return stripped stdout, or None on any failure."""
     try:
@@ -161,13 +171,33 @@ def _git_output(args: list[str], cwd: str) -> str | None:
             cwd=cwd,
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=_GIT_TIMEOUT_SEC,
         )
     except Exception:
         return None
     if proc.returncode != 0:
         return None
     return proc.stdout.strip()
+
+
+# Per-invocation cache: directory -> owner of its `origin` remote (None =
+# unresolvable, cached too). The Bash scan resolves the write target once per
+# marker-bearing gh segment; uncached, N segments without a --repo flag mean
+# N identical 2s git calls — 3 segments (6s) already exceed this hook's 5s
+# manifest timeout (PR #1195 review). One git call per distinct directory
+# bounds the worst case and drops the repeated identical I/O. The hook runs
+# in a fresh process per invocation, so the cache can never go stale.
+_ORIGIN_OWNER_CACHE: dict[str, str | None] = {}
+
+
+def _origin_owner(directory: str) -> str | None:
+    """Owner of `directory`'s origin remote, cached per directory."""
+    if directory in _ORIGIN_OWNER_CACHE:
+        return _ORIGIN_OWNER_CACHE[directory]
+    origin = _git_output(["remote", "get-url", "origin"], directory)
+    owner = _repo_owner(origin) if origin is not None else None
+    _ORIGIN_OWNER_CACHE[directory] = owner
+    return owner
 
 
 def _repo_owner(spec: str) -> str | None:
@@ -211,10 +241,7 @@ def _bash_target_owner(argv: list[str], cwd: str) -> str | None:
     spec = _gh_repo_flag(argv)
     if spec:
         return _repo_owner(spec)
-    origin = _git_output(["remote", "get-url", "origin"], cwd)
-    if origin is None:
-        return None
-    return _repo_owner(origin)
+    return _origin_owner(cwd)
 
 
 def _nearest_existing_dir(path: str) -> str | None:
@@ -235,17 +262,16 @@ def _file_write_is_team_surface(file_path: str, owners: frozenset[str]) -> bool:
     base = _nearest_existing_dir(file_path)
     if base is None:
         return False
-    origin = _git_output(["remote", "get-url", "origin"], base)
-    if origin is None:
-        return False  # not a git repo / no origin remote → fail-open
-    owner = _repo_owner(origin)
+    owner = _origin_owner(base)
     if owner is None or owner.lower() in owners:
-        return False  # personal repo target (or unparsable owner) → pass
+        # No git repo / no origin / unparsable owner → fail-open; personal
+        # repo target → pass. All four collapse to "not a team surface".
+        return False
     try:
         proc = subprocess.run(
             ["git", "-C", base, "check-ignore", "-q", "--", file_path],
             capture_output=True,
-            timeout=3,
+            timeout=_GIT_TIMEOUT_SEC,
         )
         if proc.returncode == 0:
             return False  # gitignored scratch path (.omc/plans/ etc.) → pass

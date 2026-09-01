@@ -13,9 +13,11 @@ Coverage:
 """
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -239,9 +241,16 @@ _FAKE_ADVISORY = "import sys\ndef main():\n    sys.stderr.write('nudge\\n')\n   
 _FAKE_CRASH = "def main():\n    raise RuntimeError('boom')\n"
 
 
-def _patch_members(monkeypatch, members):
-    # 3-arg signature: run_group calls group_members(event, matcher, host).
-    monkeypatch.setattr(_dispatch, "group_members", lambda _e, _m, _h=None: members)
+def _patch_members(monkeypatch, members, budget=15.0, timeouts=None):
+    # run_group resolves roster + budget through the single-read load_group
+    # (issue #1167 review round: one manifest parse per dispatch), so fakes
+    # are injected there. `budget`/`timeouts` default to today's real group
+    # budget with no per-member caps.
+    monkeypatch.setattr(
+        _dispatch,
+        "load_group",
+        lambda _e, _m, _h=None: (members, budget, dict(timeouts or {})),
+    )
 
 
 def test_deny_wins_over_ask_and_advisory(tmp_path, monkeypatch, capsys):
@@ -378,6 +387,298 @@ def test_all_events_mismatched_writes_nothing(tmp_path, monkeypatch, capsys):
     rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
     assert rc == 0
     assert capsys.readouterr().out == ""
+
+
+# --------------------------------------------------------------------------- #
+# per-member deadline / group budget (issue #1167)
+# --------------------------------------------------------------------------- #
+
+_FAKE_SLOW = (
+    "import time, sys\n"
+    "def main():\n"
+    "    time.sleep(1.2)\n"
+    "    return 0\n"
+)
+# Reports the budget the dispatcher published for this member (via the
+# _hook_runtime accessor) on stderr; 99.0 is the "no deadline" sentinel.
+_FAKE_BUDGET_PROBE = (
+    "import sys\n"
+    "import _hook_runtime\n"
+    "def main():\n"
+    "    sys.stderr.write('budget=%.3f' % _hook_runtime.remaining_budget(99.0))\n"
+    "    return 0\n"
+)
+
+
+def test_load_group_matches_manifest():
+    # Budget derivation must mirror the build's dispatcher-node timeout: the
+    # MAX member timeout across the group (scripts/build-plugin-manifests.py,
+    # filter_hooks_for_host's dispatch_timeout pre-pass). The manifest is the
+    # shared source of truth, read ONCE per dispatch; group_members is a thin
+    # projection of the same load_group read.
+    members, budget, timeouts = _dispatch.load_group("PreToolUse", "Bash")
+    assert set(timeouts) == {(r, n) for r, n, _i in members}
+    assert budget == max(timeouts.values())
+    assert budget == 15  # the two 15s gh gates set today's group budget
+    assert timeouts[("preflight-gate", "gh-label-verify")] == 15
+    assert _dispatch.group_members("PreToolUse", "Bash") == members
+
+
+def _fixed_timeout_spawns(source: str) -> list[str]:
+    """Every `subprocess.*` call in `source` whose timeout cannot shrink.
+
+    Call-site granularity, not file granularity. A file-wide grep for the
+    budget API passes as soon as ONE call reads the budget, so a hook that
+    budgets its later probes and leaves its FIRST subprocess on a module
+    constant looks clean — which is exactly the shape that reached review.
+
+    A timeout is "fixed" when its expression is built only from constants and
+    module-level ALL-CAPS names: nothing in it can shrink when the group is
+    already short on time. `min(_GH_TIMEOUT_SEC, budget)` mentions a local, so
+    it passes; a bare `_PROBE_TIMEOUT_SEC` does not.
+    """
+    tree = ast.parse(source)
+    module_consts = {
+        t.id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for t in node.targets
+        if isinstance(t, ast.Name) and t.id.lstrip("_").isupper()
+    }
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        if not (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name)
+                and f.value.id == "subprocess"
+                and f.attr in {"run", "Popen", "check_output", "call"}):
+            continue
+        kw = next((k for k in node.keywords if k.arg == "timeout"), None)
+        if kw is None:
+            offenders.append(f"line {node.lineno}: no timeout=")
+            continue
+        names = {n.id for n in ast.walk(kw.value) if isinstance(n, ast.Name)}
+        if names <= module_consts:
+            offenders.append(f"line {node.lineno}: timeout is fixed")
+    return offenders
+
+
+def test_every_subprocess_member_is_budget_aware():
+    # The dispatcher no longer decides per member whether a shortened cap is
+    # safe: it clamps every member's deadline to the group's and relies on
+    # each member sizing its own subprocess timeouts from the shared budget.
+    # That reliance is the invariant here. A member spawning a subprocess
+    # under a fixed timeout can outlive the group deadline and get the whole
+    # dispatcher killed by the host, and nothing at the call site shows it.
+    members, _budget, _timeouts = _dispatch.load_group("PreToolUse", "Bash")
+    offenders = {}
+    for role, name, impl in members:
+        bad = _fixed_timeout_spawns(
+            Path(impl).read_text(encoding="utf-8", errors="replace"))
+        if bad:
+            offenders[f"{role}/{name}"] = bad
+    assert offenders == {}
+
+
+def test_the_fixed_timeout_detector_can_fail():
+    # Positive control for the test above: an empty offender list has to mean
+    # "no fixed timeouts", not "the detector stopped matching". Both shapes it
+    # is meant to catch are checked, plus one it must NOT flag.
+    fixed = textwrap.dedent("""\
+        import subprocess
+        T = 5
+        def f():
+            subprocess.run(['x'], timeout=T)
+    """)
+    missing = textwrap.dedent("""\
+        import subprocess
+        def f():
+            subprocess.run(['x'])
+    """)
+    budgeted = textwrap.dedent("""\
+        import subprocess
+        T = 5
+        def f(budget):
+            subprocess.run(['x'], timeout=min(T, budget))
+    """)
+    assert _fixed_timeout_spawns(fixed) == ["line 4: timeout is fixed"]
+    assert _fixed_timeout_spawns(missing) == ["line 3: no timeout="]
+    assert _fixed_timeout_spawns(budgeted) == []
+
+
+def test_budget_exhausting_member_starves_no_one_silently(
+    tmp_path, monkeypatch, capsys
+):
+    # An early member that eats the whole group budget must not make later
+    # members vanish: they are skipped fail-open WITH a record — a merged
+    # additionalContext notice on stdout (the one exit-0 PreToolUse channel
+    # that reaches the model), a stderr line, and a decision="skip"
+    # fire-ledger row (the issue's core complaint is invisible starvation).
+    members = [
+        ("preflight-gate", "slow", _write_fake(tmp_path, "slow", _FAKE_SLOW)),
+        ("advisory-nudge", "late1", _write_fake(tmp_path, "late1", _FAKE_ADVISORY)),
+        ("preflight-gate", "late2", _write_fake(tmp_path, "late2", _FAKE_PASS)),
+    ]
+    # Budget 2s − 1s margin ⇒ ~1s of runway; the slow member sleeps 1.2s.
+    _patch_members(monkeypatch, members, budget=2.0)
+    ledger = tmp_path / "fire-events-test.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(ledger))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    captured = capsys.readouterr()
+    assert rc == 0  # skips are fail-open, never a block
+    assert f"{_dispatch._SKIP_MARKER} advisory-nudge/late1" in captured.err
+    assert f"{_dispatch._SKIP_MARKER} preflight-gate/late2" in captured.err
+    # The model-visible channel: skip notices ride the #874 additionalContext
+    # merge (stderr never reaches the model on an exit-0 PreToolUse).
+    hso = _sole_hso(captured.out)
+    assert hso["hookEventName"] == "PreToolUse"
+    assert f"{_dispatch._SKIP_MARKER} advisory-nudge/late1" in hso["additionalContext"]
+    assert f"{_dispatch._SKIP_MARKER} preflight-gate/late2" in hso["additionalContext"]
+
+    records = {
+        rec["hook"]: rec["decision"]
+        for rec in map(json.loads, ledger.read_text().splitlines())
+    }
+    assert records["slow"] == "pass"  # ran (its sleep is not a decision)
+    assert records["late1"] == "skip"
+    assert records["late2"] == "skip"
+
+
+def test_member_whose_timeout_no_longer_fits_still_runs_clamped(
+    tmp_path, monkeypatch, capsys
+):
+    # The floor is the ONLY skip condition. Gating on `remaining >=
+    # member_timeout` measured the budget against a worst case almost no
+    # member reaches, so one slow call early in the group silently skipped
+    # every deny-capable gate behind it. A member whose
+    # manifest timeout no longer fits must still RUN — under a deadline
+    # clamped to the group's, which is what it sizes its subprocesses from.
+    members = [("preflight-gate", "big", _write_fake(tmp_path, "big", _FAKE_BUDGET_PROBE))]
+    # budget 3 − 1 margin ⇒ ~2s remaining < the member's 5s manifest timeout.
+    _patch_members(
+        monkeypatch, members, budget=3.0,
+        timeouts={("preflight-gate", "big"): 5.0},
+    )
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    err = capsys.readouterr().err
+    assert rc == 0
+    assert _dispatch._SKIP_MARKER not in err
+    # It ran, and what it saw is the group's remaining time, not its own 5s.
+    seen = float(err.partition("budget=")[2].split()[0])
+    assert 0.0 < seen <= 2.0
+
+
+def test_member_is_skipped_only_once_below_the_floor(tmp_path, monkeypatch, capsys):
+    # The other side of the same condition: below the floor there is not
+    # enough runway for even a minimal subprocess, so the member is skipped
+    # with a record rather than started and killed mid-call.
+    members = [
+        ("preflight-gate", "slow", _write_fake(tmp_path, "slow", _FAKE_SLOW)),
+        ("preflight-gate", "late", _write_fake(tmp_path, "late", _FAKE_PASS)),
+    ]
+    # Budget 2s − 1s margin ⇒ ~1s of runway; the slow member sleeps 1.2s, so
+    # `late` sees remaining < _MEMBER_SKIP_FLOOR_SEC.
+    _patch_members(monkeypatch, members, budget=2.0)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    err = capsys.readouterr().err
+    assert rc == 0
+    assert f"{_dispatch._SKIP_MARKER} preflight-gate/late" in err
+
+
+def test_fires_are_recorded_incrementally_not_after_the_loop(
+    tmp_path, monkeypatch, capsys
+):
+    # Round-2 review: a batch write after the loop would be erased along with
+    # everything else if the host killed the dispatcher mid-group. Each
+    # member's record must land BEFORE the next member runs — proven by a
+    # second member that reads the ledger while it executes.
+    ledger = tmp_path / "fire-events-test.jsonl"
+    reader = (
+        "import os, sys\n"
+        "def main():\n"
+        "    text = ''\n"
+        "    try:\n"
+        "        with open(os.environ['PRAXIS_FIRE_TELEMETRY_FILE']) as fh:\n"
+        "            text = fh.read()\n"
+        "    except OSError:\n"
+        "        pass\n"
+        "    sys.stderr.write('first_recorded=%d' % ('\"first\"' in text))\n"
+        "    return 0\n"
+    )
+    members = [
+        ("preflight-gate", "first", _write_fake(tmp_path, "first", _FAKE_PASS)),
+        ("advisory-nudge", "reader", _write_fake(tmp_path, "reader", reader)),
+    ]
+    _patch_members(monkeypatch, members)
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(ledger))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    err = capsys.readouterr().err
+    assert rc == 0
+    assert "first_recorded=1" in err  # first member's fire visible mid-group
+    # and the reader's own fire is recorded too, after it ran
+    assert '"reader"' in ledger.read_text()
+
+
+def test_normal_budget_runs_every_member(tmp_path, monkeypatch, capsys):
+    # Normal path unchanged: with headroom, nothing is skipped and the
+    # aggregate decision is exactly what the pre-#1167 dispatcher produced.
+    members = [
+        ("advisory-nudge", "adv", _write_fake(tmp_path, "adv", _FAKE_ADVISORY)),
+        ("preflight-gate", "ask", _write_fake(tmp_path, "ask", _FAKE_ASK)),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert _ASK in captured.out
+    assert "nudge" in captured.err
+    assert _dispatch._SKIP_MARKER not in captured.err
+
+
+def test_run_one_publishes_member_budget_and_clears_it(tmp_path):
+    import _hook_runtime
+
+    probe = _write_fake(tmp_path, "probe", _FAKE_BUDGET_PROBE)
+    _rc, _so, se = _dispatch.run_one(
+        "advisory-nudge", "probe", probe, NOOP_PAYLOAD,
+        deadline=time.monotonic() + 5.0,
+    )
+    published = float(se.partition("=")[2])
+    assert 0.0 < published <= 5.0  # the member sees (at most) its cap
+    # Deadline must not leak past the member: standalone reads get the default.
+    assert _hook_runtime.remaining_budget(42.0) == 42.0
+
+
+def test_run_one_publishes_deadline_before_the_cold_import(tmp_path):
+    # Round-2 review: the deadline must be live during _load_main's import,
+    # so a slow cold import erodes the member's own budget instead of the
+    # group's post-loop margin. The probe samples remaining_budget at MODULE
+    # BODY (import) time and reports that sample from main().
+    body = (
+        "import sys\n"
+        "import _hook_runtime\n"
+        "_AT_IMPORT = _hook_runtime.remaining_budget(99.0)\n"
+        "def main():\n"
+        "    sys.stderr.write('at_import=%.3f' % _AT_IMPORT)\n"
+        "    return 0\n"
+    )
+    probe = _write_fake(tmp_path, "import-probe", body)
+    _rc, _so, se = _dispatch.run_one(
+        "advisory-nudge", "import-probe", probe, NOOP_PAYLOAD,
+        deadline=time.monotonic() + 5.0,
+    )
+    at_import = float(se.partition("=")[2])
+    assert 0.0 < at_import <= 5.0  # 99.0 would mean it was published too late
+
+
+def test_run_one_without_budget_publishes_no_deadline(tmp_path):
+    probe = _write_fake(tmp_path, "probe2", _FAKE_BUDGET_PROBE)
+    _rc, _so, se = _dispatch.run_one("advisory-nudge", "probe2", probe, NOOP_PAYLOAD)
+    assert se == "budget=99.000"  # accessor returned the standalone default
 
 
 # --------------------------------------------------------------------------- #

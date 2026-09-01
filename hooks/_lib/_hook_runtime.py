@@ -21,10 +21,87 @@ import json
 import logging
 import os
 import sys
+import time
 import traceback
-from typing import Callable
+from typing import Callable, Optional
 
 _LOGGER_NAME = "praxis.hook"
+
+
+# ---------------------------------------------------------------------------
+# Per-member wall-clock budget (issue #1167)
+# ---------------------------------------------------------------------------
+# The Bash dispatch group runs ~49 members SEQUENTIALLY in one process under a
+# single host-side timeout (the max member timeout — see
+# scripts/build-plugin-manifests.py `_dispatcher_node`). A member that spends
+# its full standalone budget on network calls starves every later member: the
+# host kills the dispatcher and the rest silently never run. The dispatcher
+# therefore publishes each member's share of the remaining group budget here
+# (module-level state — members run in-process, imported, so no IPC is
+# needed), and budget-aware members size their subprocess timeouts from it.
+
+_MEMBER_DEADLINE: Optional[float] = None
+
+
+def set_member_deadline(deadline: Optional[float]) -> None:
+    """Publish the current member's wall-clock deadline (`time.monotonic()`
+    reference), or clear it with None. Called only by the dispatcher around
+    each member invocation — hooks themselves only read via
+    `remaining_budget`."""
+    global _MEMBER_DEADLINE
+    _MEMBER_DEADLINE = deadline
+
+
+def remaining_budget(default_sec: float) -> float:
+    """Seconds left in the calling hook's wall-clock budget.
+
+    Under the dispatcher this is the time left until the deadline it set for
+    the current member (never negative). Standalone — a per-process hook
+    invocation, or a direct test call — no deadline is published and
+    `default_sec` (the hook's own manifest-derived budget) is returned, so
+    standalone behavior is unchanged.
+    """
+    if _MEMBER_DEADLINE is None:
+        return default_sec
+    return max(0.0, _MEMBER_DEADLINE - time.monotonic())
+
+
+# Floor below which spawning a subprocess probe is pointless: the fork/exec is
+# guaranteed dead on arrival and only burns what little budget remains. Shared
+# by the dispatcher's skip floor (_dispatch._MEMBER_SKIP_FLOOR_SEC) and every
+# budget-aware hook's own probe guards (issue #1167).
+MIN_SUBPROC_BUDGET_SEC = 0.5
+
+
+def budgeted_deadline(self_budget_sec: float) -> float:
+    """Absolute `time.monotonic()` deadline for a hook that already knows its
+    own budget.
+
+    The one expression every subprocess-spawning hook uses, so the dispatcher
+    can hand out a cap shorter than a manifest timeout and be sure nobody
+    overshoots it. Standalone the self-budget wins unchanged; under the
+    dispatcher the remaining member budget clamps it.
+
+    Prefer `shared_probe_deadline` when the budget is the hook's manifest
+    timeout minus a spawn margin; use this directly when the hook has picked a
+    smaller internal budget of its own.
+    """
+    return time.monotonic() + min(remaining_budget(self_budget_sec), self_budget_sec)
+
+
+def shared_probe_deadline(
+    manifest_timeout_sec: float, margin_sec: float = 2.0
+) -> float:
+    """Absolute `time.monotonic()` deadline for a hook's external probes.
+
+    One deadline shared by every subprocess probe a hook invocation spawns, so
+    their SUM is bounded by the hook's budget. Standalone that budget is the
+    hook's manifest timeout minus a margin (interpreter startup + process
+    spawn); under the dispatcher it clamps to the remaining member budget
+    published via `set_member_deadline` (issue #1167 — a member must not
+    starve the rest of the Bash group's shared node timeout).
+    """
+    return budgeted_deadline(manifest_timeout_sec - margin_sec)
 
 
 class _JsonlFormatter(logging.Formatter):
