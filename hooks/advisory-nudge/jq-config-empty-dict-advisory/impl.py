@@ -446,6 +446,9 @@ def _check_file(path: str) -> Optional[str]:
         )
     # Validate JSON by invoking jq. If jq is absent or times out, skip
     # (fail-open) — the hook's job is to warn, not to enforce.
+    # Timeout sized from the budget the dispatcher published for this
+    # member, so a group already short on time is not overrun; run
+    # standalone and the constant wins unchanged (issue #1167).
     budget = remaining_budget(_JQ_TIMEOUT_SEC)
     if budget < MIN_SUBPROC_BUDGET_SEC:
         return None
@@ -453,9 +456,6 @@ def _check_file(path: str) -> Optional[str]:
         result = subprocess.run(
             ["jq", ".", expanded],
             capture_output=True,
-        # Sized from the budget the dispatcher published for this member, so a
-        # group already short on time is not overrun (issue #1167, codex #1195
-        # round 1). Standalone the constant wins unchanged.
             timeout=min(_JQ_TIMEOUT_SEC, budget),
         )
         if result.returncode != 0:

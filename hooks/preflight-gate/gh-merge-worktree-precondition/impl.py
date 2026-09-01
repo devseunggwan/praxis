@@ -197,7 +197,7 @@ def _scan_tail(tail: list[str]) -> tuple[bool, str | None, str | None]:
 
 def _run(cmd: list[str], cwd: str | None, timeout: int) -> tuple[int, str]:
     # This hook's success path runs a gh lookup AND a git lookup back to back,
-    # so the manifest timeout is not its worst case (codex #1195 round 1).
+    # so the manifest timeout is not its worst case.
     # Each call takes what is left rather than its own full slice.
     budget = remaining_budget(timeout)
     if budget < MIN_SUBPROC_BUDGET_SEC:

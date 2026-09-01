@@ -333,9 +333,9 @@ def run_group(
             # `remaining >= member_timeout` compared the budget against a
             # worst case almost no member reaches — a pure-text gate declaring
             # 5s returns in ~50ms — so a single slow `gh` call early in the
-            # group silently skipped every deny-capable gate after it
-            # (codex #1195 round 1: 7 of them, including
-            # block-gh-issue-create-without-dup-search). A gate that does not
+            # group silently skipped every deny-capable gate after it — 7 of
+            # them, including block-gh-issue-create-without-dup-search. A gate
+            # that does not
             # run cannot block, and the skip is invisible at the call site.
             runnable = remaining >= _MEMBER_SKIP_FLOOR_SEC
             member_deadline = min(time.monotonic() + member_timeout, deadline)

@@ -155,6 +155,9 @@ def _parse_gh_body_file(argv: list[str]) -> str | None:
 
 def _git_toplevel(start_dir: str) -> str | None:
     """Run `git rev-parse --show-toplevel` from start_dir.  Returns None on failure."""
+    # Timeout sized from the budget the dispatcher published for this
+    # member, so a group already short on time is not overrun; run
+    # standalone and the constant wins unchanged (issue #1167).
     budget = remaining_budget(_GIT_TIMEOUT_SEC)
     if budget < MIN_SUBPROC_BUDGET_SEC:
         return None
@@ -164,9 +167,6 @@ def _git_toplevel(start_dir: str) -> str | None:
             cwd=start_dir,
             capture_output=True,
             text=True,
-        # Sized from the budget the dispatcher published for this member, so a
-        # group already short on time is not overrun (issue #1167, codex #1195
-        # round 1). Standalone the constant wins unchanged.
             timeout=min(_GIT_TIMEOUT_SEC, budget),
         )
         if result.returncode == 0:

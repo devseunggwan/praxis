@@ -310,15 +310,15 @@ def _resolve_pr_title(identifier: str | None, cwd: str | None, repo: str | None)
     if repo:
         cmd += ["-R", repo]
     cmd += ["--json", "title", "-q", ".title"]
+    # Timeout sized from the budget the dispatcher published for this
+    # member, so a group already short on time is not overrun; run
+    # standalone and the constant wins unchanged (issue #1167).
     budget = remaining_budget(_GH_TIMEOUT_SEC)
     if budget < MIN_SUBPROC_BUDGET_SEC:
         return None
     try:
         result = subprocess.run(
             cmd, cwd=cwd or None, capture_output=True, text=True,
-        # Sized from the budget the dispatcher published for this member,
-        # so a group already short on time is not overrun (issue #1167,
-        # codex #1195 round 1). Standalone the constant wins unchanged.
             timeout=min(_GH_TIMEOUT_SEC, budget), check=False,
         )
     except (OSError, subprocess.TimeoutExpired):

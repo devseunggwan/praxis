@@ -1870,7 +1870,7 @@ def render_fire_report(
         # A dispatcher budget-skip creates a row with fires == 0, and a hook
         # starved every time never ran — subtracting the whole key set made it
         # vanish from this roster, so the section read "every instrumentable
-        # hook fired" while the starved one had not run once (CodeRabbit #1195).
+        # hook fired" while the starved one had not run once.
         fired = {h for h, row in by_hook.items() if row["fires"] > 0}
         never = sorted(instrumentable - fired)
         if not never:

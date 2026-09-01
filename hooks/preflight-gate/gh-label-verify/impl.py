@@ -243,7 +243,7 @@ def _resolve_repo(args: list[str], cwd: str, deadline: float) -> str | None:
 def _resolve_repo_from_git(cwd: str, deadline: float) -> str | None:
     # This runs BEFORE the label listing, so a fixed timeout here could push the
     # member past the group deadline before the budgeted call even starts
-    # (codex #1195 round 1). It shares the same deadline instead.
+    #. It shares the same deadline instead.
     remaining = deadline - time.monotonic()
     if remaining < MIN_SUBPROC_BUDGET_SEC:
         return None

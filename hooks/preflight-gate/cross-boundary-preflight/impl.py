@@ -535,6 +535,9 @@ def _read_remote_config(cwd: str) -> dict[str, dict[str, str]] | None:
     """
     if not cwd or not os.path.isdir(cwd):
         return None
+    # Timeout sized from the budget the dispatcher published for this
+    # member, so a group already short on time is not overrun; run
+    # standalone and the constant wins unchanged (issue #1167).
     budget = remaining_budget(GIT_TIMEOUT_SEC)
     if budget < MIN_SUBPROC_BUDGET_SEC:
         return None
@@ -543,9 +546,6 @@ def _read_remote_config(cwd: str) -> dict[str, dict[str, str]] | None:
             ["git", "-C", cwd, *_GIT_CONFIG_ARGS],
             capture_output=True,
             text=True,
-        # Sized from the budget the dispatcher published for this member,
-        # so a group already short on time is not overrun (issue #1167,
-        # codex #1195 round 1). Standalone the constant wins unchanged.
             timeout=min(GIT_TIMEOUT_SEC, budget),
             check=False,
         )

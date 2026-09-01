@@ -146,6 +146,9 @@ def _worktree_count() -> int:
     Returns 0 on any failure (non-git cwd, timeout, missing binary) — the
     caller treats 0 as "cannot confirm ambiguity", i.e. stays silent.
     """
+    # Timeout sized from the budget the dispatcher published for this
+    # member, so a group already short on time is not overrun; run
+    # standalone and the constant wins unchanged (issue #1167).
     budget = remaining_budget(_GIT_TIMEOUT_SEC)
     if budget < MIN_SUBPROC_BUDGET_SEC:
         return 0
@@ -154,9 +157,6 @@ def _worktree_count() -> int:
             ["git", "worktree", "list", "--porcelain"],
             capture_output=True,
             text=True,
-        # Sized from the budget the dispatcher published for this member, so a
-        # group already short on time is not overrun (issue #1167, codex #1195
-        # round 1). Standalone the constant wins unchanged.
             timeout=min(_GIT_TIMEOUT_SEC, budget),
         )
     except Exception:
