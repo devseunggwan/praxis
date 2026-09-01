@@ -41,9 +41,14 @@ main() is labeled with its number, and this list is the canonical roster
       `runtime-verified-note`).
   12. skills/<skill-name>/ on disk matches the EXPECTED_SKILLS frozen set
      (issue #465 — surface freeze gate against silent skill proliferation).
-  13. AGENTS.md "## Skills (N)" count and per-skill backtick tokens, and
-     docs/skills.md per-skill backtick tokens, all match EXPECTED_SKILLS
-     (issue #498 — doc drift invariant).
+  13. Doc drift invariants (issues #498, #1177): AGENTS.md "## Skills (N)"
+     count and per-skill backtick tokens, docs/skills.md per-skill table
+     rows, and the skills/using-praxis/SKILL.md routing tables (every skill
+     routed by a table row, no phantom skill names in category rows or
+     scenario routing cells) all match EXPECTED_SKILLS; docs/skills.md
+     trigger-keyword cells quote keywords verbatim from each skill's
+     frontmatter description; and the compatibility-tier tables in
+     README.md, AGENTS.md, and using-praxis stay normalized-identical.
   14. Each manifest `dispatch_groups` (event, matcher) collapses to exactly
      one dispatcher node per platform hooks.json (no member silently left as
      its own node, no second dispatcher node), and the runtime resolver
@@ -1162,12 +1167,16 @@ def main() -> int:
         )
 
     # ------------------------------------------------------------------
-    # Rule 13 — Doc skill-count invariant (#498)
+    # Rule 13 — Doc skill-count invariant (#498, #1177)
     #
     # AGENTS.md carries an explicit "## Skills (N)" header whose count must
-    # equal len(EXPECTED_SKILLS).  Both AGENTS.md and docs/skills.md embed
-    # skill names inside table cells as `backtick` tokens; every
-    # EXPECTED_SKILLS member must appear at least once in each document.
+    # equal len(EXPECTED_SKILLS).  AGENTS.md, docs/skills.md, and the
+    # using-praxis onboarding skill embed skill names inside table cells as
+    # `backtick` tokens; every EXPECTED_SKILLS member must appear in each
+    # document (13b/13c/13d), using-praxis table rows must not name phantom
+    # skills (13d), docs/skills.md keyword cells must quote the frontmatter
+    # verbatim (13e), and the three tier-table copies must stay
+    # normalized-identical (13f).
     #
     # Parsing is intentionally coarse — we match the pattern
     # `skill-name` (backtick-delimited) so the check is robust to table
@@ -1194,15 +1203,49 @@ def main() -> int:
                 f"EXPECTED_SKILLS has {expected_count} — update the header"
             )
 
+    # Shared plumbing for Rules 13b-13f — each doc surface reduces to token
+    # sets, and the two drift directions (missing skill / phantom skill) are
+    # reported identically for every surface.
+    def _norm_ws(s: str) -> str:
+        return _re.sub(r"\s+", " ", s).strip()
+
+    def _table_cells(line: str) -> list[str]:
+        """`| a | b |` → ["a", "b"]; non-table lines → []."""
+        if not line.lstrip().startswith("|"):
+            return []
+        return [c.strip() for c in line.strip().strip("|").split("|")]
+
+    def _doc_roster_drifts(
+        doc_label: str,
+        present_tokens: set[str],
+        missing_hint: str,
+        listed_tokens: set[str] | None = None,
+        phantom_hint: str | None = None,
+    ) -> list[str]:
+        out: list[str] = []
+        missing = EXPECTED_SKILLS - present_tokens
+        if missing:
+            out.append(
+                f"DOC SKILL LIST {doc_label}: {sorted(missing)!r} declared in "
+                f"EXPECTED_SKILLS but {missing_hint}"
+            )
+        if listed_tokens is not None:
+            phantom = listed_tokens - EXPECTED_SKILLS
+            if phantom:
+                out.append(
+                    f"DOC SKILL LIST {doc_label}: {sorted(phantom)!r} {phantom_hint}"
+                )
+        return out
+
     # Rule 13b — every EXPECTED_SKILLS member appears in AGENTS.md
     agents_backtick_skills = set(_re.findall(r"`([^`]+)`", agents_text))
-    missing_in_agents = EXPECTED_SKILLS - agents_backtick_skills
-    if missing_in_agents:
-        drifts.append(
-            f"DOC SKILL LIST AGENTS.md: {sorted(missing_in_agents)!r} declared in "
-            "EXPECTED_SKILLS but not found as `backtick` tokens — add them to "
-            "the skill table"
+    drifts.extend(
+        _doc_roster_drifts(
+            "AGENTS.md",
+            agents_backtick_skills,
+            "not found as `backtick` tokens — add them to the skill table",
         )
+    )
 
     # Rule 13c — every EXPECTED_SKILLS member appears as the first column of
     # a docs/skills.md table row.  We match `| \`skill-name\` |` so that a
@@ -1216,20 +1259,159 @@ def main() -> int:
             "DOC SKILL LIST docs/skills.md: file missing — it is the skill "
             "roster README.md points at"
         )
-        skills_doc_table = set()
+        skills_doc_text = ""
     else:
-        skills_doc_table = set(
-            _re.findall(
-                r"^\|\s*`([^`]+)`\s*\|", skills_doc_path.read_text(), _re.MULTILINE
+        skills_doc_text = skills_doc_path.read_text()
+    skills_doc_table = set(
+        _re.findall(r"^\|\s*`([^`]+)`\s*\|", skills_doc_text, _re.MULTILINE)
+    )
+    drifts.extend(
+        _doc_roster_drifts(
+            "docs/skills.md",
+            skills_doc_table,
+            "not found as a first-column `backtick` token in a table row — "
+            "add them to the skill table",
+        )
+    )
+
+    # Rule 13d — the using-praxis onboarding entry point routes every skill
+    # (#1177).  A skill counts as routed only when a table row names it:
+    # either the first column of a category table, or a `backtick` token in
+    # a routing cell of the Common Scenarios table (rows whose first cell is
+    # a "quoted situation").  Prose mentions do not satisfy the check.  The
+    # reverse direction runs over the same token set, so a typo in either a
+    # category row or a scenario routing cell is caught as a phantom skill.
+    using_praxis_path = REPO_ROOT / "skills" / "using-praxis" / "SKILL.md"
+    if not using_praxis_path.exists():
+        drifts.append(
+            "DOC SKILL LIST skills/using-praxis/SKILL.md: file missing — it is "
+            "the onboarding entry point that must route every skill"
+        )
+        using_praxis_text = ""
+    else:
+        using_praxis_text = using_praxis_path.read_text()
+    using_praxis_routed: set[str] = set()
+    for line in using_praxis_text.splitlines():
+        cells = _table_cells(line)
+        if not cells:
+            continue
+        first_col = _re.fullmatch(r"`([^`]+)`", cells[0])
+        if first_col:
+            # category-table row — the first column is the skill name
+            using_praxis_routed.add(first_col.group(1))
+        elif cells[0].startswith('"'):
+            # scenario-table row — every token in the routing cells is a skill
+            for cell in cells[1:]:
+                using_praxis_routed.update(_re.findall(r"`([^`]+)`", cell))
+    if using_praxis_path.exists():
+        drifts.extend(
+            _doc_roster_drifts(
+                "skills/using-praxis/SKILL.md",
+                using_praxis_routed,
+                "not routed by any table row — the onboarding entry point must "
+                "route every skill (a prose mention does not count); add them "
+                "to a category table",
+                listed_tokens=using_praxis_routed,
+                phantom_hint="named in a category-table first column or a "
+                "scenario routing cell but not declared in EXPECTED_SKILLS — "
+                "fix the typo or remove the stale row",
             )
         )
-    missing_in_skills_doc = EXPECTED_SKILLS - skills_doc_table
-    if missing_in_skills_doc:
-        drifts.append(
-            f"DOC SKILL LIST docs/skills.md: {sorted(missing_in_skills_doc)!r} declared "
-            "in EXPECTED_SKILLS but not found as a first-column `backtick` token in a "
-            "table row — add them to the skill table"
+
+    # Rule 13e — docs/skills.md trigger-keyword cells mirror the skill's
+    # frontmatter description verbatim (#1177).  Every `backtick` keyword in
+    # a roster row's second column must appear double-quoted in that skill's
+    # frontmatter description (whitespace-normalized, so YAML `>` folding
+    # does not count as drift).  Quoted match, not substring — `skill spec`
+    # must not pass just because `praxis skill spec` is quoted.
+    def _frontmatter_description(skill: str) -> str:
+        try:
+            text = (REPO_ROOT / "skills" / skill / "SKILL.md").read_text()
+        except OSError:
+            return ""
+        fm = _re.match(r"---\n(.*?)\n---\n", text, _re.DOTALL)
+        if not fm:
+            return ""
+        desc = _re.search(
+            r"^description:(.*?)(?=^\S|\Z)", fm.group(1), _re.DOTALL | _re.MULTILINE
         )
+        if not desc:
+            return ""
+        # Everything from `Do NOT activate on` onward lists phrases that must
+        # NOT route to the skill. Searching the whole description would accept
+        # one of those as a valid trigger keyword, so a roster row could list
+        # `strike a balance` and pass.
+        text = _norm_ws(desc.group(1))
+        return text.split("Do NOT activate on")[0].rstrip()
+
+    for line in skills_doc_text.splitlines():
+        cells = _table_cells(line)
+        if len(cells) < 2:
+            continue
+        first_col = _re.fullmatch(r"`([^`]+)`", cells[0])
+        if not first_col or first_col.group(1) not in EXPECTED_SKILLS:
+            continue
+        skill_name = first_col.group(1)
+        description = _frontmatter_description(skill_name)
+        # Both directions, because a mirror contract broken either way is still
+        # broken: a row listing a phrase the description never claims routes
+        # readers to a keyword that does not trigger, and a description quoting
+        # a phrase the row omits hides a live trigger from the roster. Only the
+        # first direction has a failing test upstream of it, so the second is
+        # the one that silently drifts.
+        documented = {_norm_ws(k) for k in _re.findall(r"`([^`]+)`", cells[1])}
+        # Every quoted phrase left in `description` is a trigger: the negative
+        # clause was already cut above, so no positive-clause parse is needed.
+        quoted = {_norm_ws(k) for k in _re.findall(r'"([^"]+)"', description)}
+        for keyword in sorted(documented - quoted):
+            drifts.append(
+                f"DOC KEYWORD DRIFT docs/skills.md: `{skill_name}` row lists "
+                f"{keyword!r} but the skill's frontmatter description does "
+                "not quote it — keyword cells mirror the description "
+                "verbatim; fix the row or the description"
+            )
+        for keyword in sorted(quoted - documented):
+            drifts.append(
+                f"DOC KEYWORD DRIFT docs/skills.md: `{skill_name}` frontmatter "
+                f"quotes {keyword!r} but the row does not list it — keyword "
+                "cells mirror the description verbatim; fix the row or the "
+                "description"
+            )
+
+    # Rule 13f — the compatibility-tier table is maintained in three places
+    # (README.md, AGENTS.md, skills/using-praxis/SKILL.md); their data rows
+    # must stay identical after normalization (backticks stripped, whitespace
+    # collapsed) so tier membership cannot drift between copies (#1177).
+    # README.md is the reference copy (canonical per issue #1177).
+    def _tier_rows(text: str) -> list[tuple[str, ...]]:
+        rows = []
+        for line in text.splitlines():
+            cells = _table_cells(line)
+            if len(cells) >= 3 and _re.fullmatch(
+                r"\*\*(Standalone|Enhanced|Full|Multi-provider)\*\*", cells[0]
+            ):
+                rows.append(tuple(_norm_ws(c.replace("`", "")) for c in cells[:3]))
+        return rows
+
+    readme_text = (REPO_ROOT / "README.md").read_text()
+    reference_tiers = _tier_rows(readme_text)
+    if not reference_tiers:
+        drifts.append(
+            "TIER TABLE MISSING README.md: no compatibility-tier rows found — "
+            "it is the reference copy the other two are checked against"
+        )
+    else:
+        for label, text in (
+            ("AGENTS.md", agents_text),
+            ("skills/using-praxis/SKILL.md", using_praxis_text),
+        ):
+            rows = _tier_rows(text)
+            if rows != reference_tiers:
+                drifts.append(
+                    f"TIER TABLE DRIFT {label}: normalized tier rows differ "
+                    f"from README.md's — got {rows!r}, expected "
+                    f"{reference_tiers!r}"
+                )
 
     # ------------------------------------------------------------------
     # Rule 14 — dispatch-group ↔ build/runtime consistency (ADR-0002, #617)

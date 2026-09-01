@@ -18,10 +18,15 @@ resilient development workflow.
 
 Tools for code quality and review workflow.
 
-| Skill               | When to call                                                        |
-| ------------------- | ------------------------------------------------------------------- |
-| `retrospect`        | End of session — find friction root causes and create lasting fixes |
-| `codex-review-wrap` | Before running `/codex:review` in a multi-worktree repo             |
+| Skill                    | When to call                                                                             |
+| ------------------------ | ---------------------------------------------------------------------------------------- |
+| `retrospect`             | End of session — find friction root causes and create lasting fixes                      |
+| `codex-review-wrap`      | Before running `/codex:review` in a multi-worktree repo                                  |
+| `surface-enumeration`    | Before writing a parser/validator/sanitizer — every input variant becomes a test case    |
+| `spec-drift`             | Wondering what a spec still needs — runs each requirement's `Verify:` command, reports   |
+| `debt`                   | Audit deferred markers (commit trailers, `# [PR #N]`) before "later" becomes "never"     |
+| `merge-briefing`         | Before asking to merge a PR — probe all three finding surfaces, grade, brief, then ask   |
+| `worktree-merge-cleanup` | Merging from a worktree and cleaning up after — right call site, safe teardown           |
 
 ### Discipline
 
@@ -46,11 +51,12 @@ Recover, save, and orchestrate Claude Code sessions.
 | `cmux-session-manager`  | Daily status dashboard, cleanup, reorganize                 |
 | `cmux-delegate`         | Give an independent issue its own session with full context |
 
-### Discovery (this skill)
+### Discovery
 
-| Skill          | When to call                          |
-| -------------- | ------------------------------------- |
-| `using-praxis` | First-time orientation — you are here |
+| Skill                  | When to call                                                          |
+| ---------------------- | --------------------------------------------------------------------- |
+| `using-praxis`         | First-time orientation — you are here                                 |
+| `writing-praxis-skill` | Authoring a new praxis skill — template, SRP, trigger keyword design  |
 
 ## Common Scenarios
 
@@ -59,6 +65,12 @@ Recover, save, and orchestrate Claude Code sessions.
 | "Claude Code sessions died after a crash or power-off"                 | `cmux-recover-sessions` (cmux) or `recover-sessions` (tmux) |
 | "I want to record that a global `~/.claude/CLAUDE.md` rule was broken" | `strike`                                                    |
 | "There are too many Codex review comments — where to start?"           | `codex-review-wrap`                                         |
+| "Is this PR ready to merge? What's still open on it?"                  | `merge-briefing`                                            |
+| "The PR merged — remove the worktree and branch safely"                | `worktree-merge-cleanup`                                    |
+| "I'm about to write a parser / validator / input classifier"           | `surface-enumeration`                                       |
+| "Which requirements in the spec store are still unimplemented?"        | `spec-drift`                                                |
+| "What did we mark 'later' in commit trailers and never revisit?"       | `debt`                                                      |
+| "I want to add a new skill to praxis"                                  | `writing-praxis-skill`                                      |
 
 ## Hook System
 
@@ -72,8 +84,9 @@ to per-hook specs at `hooks/<role>/<name>/spec.md`.
 
 ## Prerequisites
 
-| Tier           | Skills available                                         | Dependencies       |
-| -------------- | -------------------------------------------------------- | ------------------ |
-| **Standalone** | `recover-sessions`, `strike`, `strikes`, `reset-strikes` | `gh` CLI, `jq`     |
-| **Enhanced**   | + `retrospect`, `codex-review-wrap`                      | + oh-my-claudecode |
-| **Full**       | + all `cmux-*` skills                                    | + cmux             |
+| Tier               | What works                                               | What you need                           |
+| ------------------ | -------------------------------------------------------- | --------------------------------------- |
+| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `debt` needs only `git` |
+| **Enhanced**       | + retrospect, codex-review-wrap                          | + oh-my-claudecode                      |
+| **Full**           | + all cmux-* skills                                      | + cmux                                  |
+| **Multi-provider** | + codex/gemini routing in cmux-delegate                  | + codex-cli, gemini-cli                 |
