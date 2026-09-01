@@ -62,7 +62,10 @@ import time
 from pathlib import Path as _Path
 
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    budgeted_deadline,
+    fail_open,
+)
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 
 GLOB_CHARS = "*?["
@@ -434,7 +437,8 @@ def find_unmatched_globs(command: str, cwd: str) -> list[str]:
     if options is None:
         return []
 
-    deadline = time.monotonic() + _TOTAL_BUDGET_SEC
+    # Clamped to the remaining group budget under the dispatcher.
+    deadline = budgeted_deadline(_TOTAL_BUDGET_SEC)
     offenders: list[str] = []
     for span in spans:
         remaining = deadline - time.monotonic()

@@ -38,6 +38,10 @@ from pathlib import Path
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    remaining_budget,
+)
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     iter_command_starts,
@@ -45,6 +49,11 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     strip_prefix,
 )
 from _paths import praxis_state_dir  # type: ignore[import-not-found]  # noqa: E402
+
+# Per-probe cap for the repo-root lookup. Clamped to the dispatcher's
+# remaining member budget at the call site (issue #1167).
+_GIT_TIMEOUT_SEC = 5
+
 
 
 # ---------------------------------------------------------------------------
@@ -146,13 +155,19 @@ def _parse_gh_body_file(argv: list[str]) -> str | None:
 
 def _git_toplevel(start_dir: str) -> str | None:
     """Run `git rev-parse --show-toplevel` from start_dir.  Returns None on failure."""
+    budget = remaining_budget(_GIT_TIMEOUT_SEC)
+    if budget < MIN_SUBPROC_BUDGET_SEC:
+        return None
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
             cwd=start_dir,
             capture_output=True,
             text=True,
-            timeout=5,
+        # Sized from the budget the dispatcher published for this member, so a
+        # group already short on time is not overrun (issue #1167, codex #1195
+        # round 1). Standalone the constant wins unchanged.
+            timeout=min(_GIT_TIMEOUT_SEC, budget),
         )
         if result.returncode == 0:
             return result.stdout.strip()

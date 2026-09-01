@@ -75,19 +75,17 @@ _MEMBER_SKIP_FLOOR_SEC = MIN_SUBPROC_BUDGET_SEC
 # empty group under a patched roster): today's Bash-group node budget.
 _DEFAULT_GROUP_BUDGET_SEC = 15.0
 
-# Members that size their own subprocess timeouts from
-# `_hook_runtime.remaining_budget` (via `shared_probe_deadline`), so handing
-# them a cap SHORTER than their manifest timeout is safe: they degrade
-# gracefully inside it. Every OTHER member uses fixed subprocess timeouts
-# and would ignore a short cap — run one when `remaining < its manifest
-# timeout` and its fixed-timeout worst case can overshoot the node budget,
-# so the host kills the dispatcher and every record after it (round-2
-# review). Such members are skipped-with-record instead. Keep this list in
-# sync when teaching a member to consult remaining_budget.
-_BUDGET_AWARE_MEMBERS: frozenset[tuple[str, str]] = frozenset({
-    ("preflight-gate", "gh-label-verify"),
-    ("preflight-gate", "gh-json-validator"),
-})
+# Every member that spawns a subprocess sizes its timeouts from
+# `_hook_runtime.remaining_budget` (usually via `shared_probe_deadline`), so a
+# cap SHORTER than the manifest timeout is safe for all of them: they degrade
+# inside it rather than overshooting the node budget. Members that spawn
+# nothing cost an import plus a text scan, which the same cap already bounds.
+# That is what lets the loop below run every member while the floor holds,
+# instead of skipping the ones whose manifest timeout no longer fits.
+#
+# The invariant is enforced, not maintained by hand:
+# `tests/hooks/_lib/test_dispatch.py::test_every_subprocess_member_is_budget_aware`
+# fails if a group member gains a subprocess call without a budget reference.
 
 
 def _iter_group_entries(
@@ -331,9 +329,15 @@ def run_group(
             runnable = remaining >= _MEMBER_SKIP_FLOOR_SEC
             member_deadline = deadline
         else:
-            runnable = remaining >= _MEMBER_SKIP_FLOOR_SEC and (
-                remaining >= member_timeout or member in _BUDGET_AWARE_MEMBERS
-            )
+            # The floor is the ONLY skip condition. Gating on
+            # `remaining >= member_timeout` compared the budget against a
+            # worst case almost no member reaches — a pure-text gate declaring
+            # 5s returns in ~50ms — so a single slow `gh` call early in the
+            # group silently skipped every deny-capable gate after it
+            # (codex #1195 round 1: 7 of them, including
+            # block-gh-issue-create-without-dup-search). A gate that does not
+            # run cannot block, and the skip is invisible at the call site.
+            runnable = remaining >= _MEMBER_SKIP_FLOOR_SEC
             member_deadline = min(time.monotonic() + member_timeout, deadline)
         if runnable:
             result = run_one(role, name, impl, payload_raw, deadline=member_deadline)

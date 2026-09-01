@@ -165,7 +165,7 @@ def _process_segment(argv: list[str], cwd: str, deadline: float) -> int:
     if not labels:
         return 0
 
-    repo = _resolve_repo(sub_args, cwd)
+    repo = _resolve_repo(sub_args, cwd, deadline)
     if not repo:
         return 0
 
@@ -228,7 +228,7 @@ def _split_csv(s: str) -> list[str]:
     return [v.strip() for v in s.split(",") if v.strip()]
 
 
-def _resolve_repo(args: list[str], cwd: str) -> str | None:
+def _resolve_repo(args: list[str], cwd: str, deadline: float) -> str | None:
     i, n = 0, len(args)
     while i < n:
         tok = args[i]
@@ -237,16 +237,22 @@ def _resolve_repo(args: list[str], cwd: str) -> str | None:
         if tok.startswith("--repo="):
             return tok[len("--repo="):]
         i += 1
-    return _resolve_repo_from_git(cwd)
+    return _resolve_repo_from_git(cwd, deadline)
 
 
-def _resolve_repo_from_git(cwd: str) -> str | None:
+def _resolve_repo_from_git(cwd: str, deadline: float) -> str | None:
+    # This runs BEFORE the label listing, so a fixed timeout here could push the
+    # member past the group deadline before the budgeted call even starts
+    # (codex #1195 round 1). It shares the same deadline instead.
+    remaining = deadline - time.monotonic()
+    if remaining < MIN_SUBPROC_BUDGET_SEC:
+        return None
     try:
         r = subprocess.run(
             ["git", "-C", cwd, "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
-            timeout=_GIT_REMOTE_TIMEOUT_SEC,
+            timeout=min(_GIT_REMOTE_TIMEOUT_SEC, remaining),
         )
     except (OSError, subprocess.SubprocessError):
         return None

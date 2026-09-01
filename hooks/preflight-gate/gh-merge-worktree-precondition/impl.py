@@ -68,7 +68,11 @@ import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    fail_open,
+    remaining_budget,
+)
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     iter_command_starts,
@@ -192,13 +196,19 @@ def _scan_tail(tail: list[str]) -> tuple[bool, str | None, str | None]:
 
 
 def _run(cmd: list[str], cwd: str | None, timeout: int) -> tuple[int, str]:
+    # This hook's success path runs a gh lookup AND a git lookup back to back,
+    # so the manifest timeout is not its worst case (codex #1195 round 1).
+    # Each call takes what is left rather than its own full slice.
+    budget = remaining_budget(timeout)
+    if budget < MIN_SUBPROC_BUDGET_SEC:
+        return -1, ""
     try:
         result = subprocess.run(
             cmd,
             cwd=cwd or None,
             capture_output=True,
             text=True,
-            timeout=timeout,
+            timeout=min(timeout, budget),
             check=False,
         )
         return result.returncode, result.stdout

@@ -14,6 +14,7 @@ Coverage:
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import time
@@ -422,15 +423,33 @@ def test_load_group_matches_manifest():
     assert _dispatch.group_members("PreToolUse", "Bash") == members
 
 
-def test_budget_aware_allowlist_covers_every_budget_sized_member():
-    # A member whose manifest timeout EQUALS the group budget can never see
-    # `remaining >= member_timeout` (the deadline starts a margin below the
-    # budget), so it runs at all only via the budget-aware allowlist. Any
-    # budget-sized member missing from the allowlist would be skipped on
-    # EVERY dispatch — a silently dead hook.
-    _members, budget, timeouts = _dispatch.load_group("PreToolUse", "Bash")
-    budget_sized = {m for m, t in timeouts.items() if t >= budget}
-    assert budget_sized <= _dispatch._BUDGET_AWARE_MEMBERS
+def test_every_subprocess_member_is_budget_aware():
+    # The dispatcher no longer decides per member whether a shortened cap is
+    # safe: it clamps every member's deadline to the group's and relies on
+    # each member sizing its own subprocess timeouts from the shared budget.
+    # That reliance is the invariant here. A member spawning a subprocess
+    # under a FIXED timeout can outlive the group deadline and get the whole
+    # dispatcher killed by the host, and nothing at the call site shows it —
+    # so a new subprocess call in a group member fails this test until it
+    # reads the budget.
+    members, _budget, _timeouts = _dispatch.load_group("PreToolUse", "Bash")
+    spawns = re.compile(r"subprocess\.(run|Popen|check_output|call)")
+    budgeted = re.compile(r"remaining_budget|shared_probe_deadline|budgeted_deadline")
+
+    offenders = []
+    for role, name, impl in members:
+        source = Path(impl).read_text(encoding="utf-8", errors="replace")
+        if spawns.search(source) and not budgeted.search(source):
+            offenders.append(f"{role}/{name}")
+    assert offenders == []
+
+    # Positive control: the predicate can find offenders at all. Without it an
+    # empty list also means "the regex stopped matching" — the two are
+    # indistinguishable, and this test would pass forever after a rename.
+    assert any(
+        spawns.search(Path(impl).read_text(encoding="utf-8", errors="replace"))
+        for _role, _name, impl in members
+    )
 
 
 def test_budget_exhausting_member_starves_no_one_silently(
@@ -473,16 +492,17 @@ def test_budget_exhausting_member_starves_no_one_silently(
     assert records["late2"] == "skip"
 
 
-def test_non_budget_aware_member_is_skipped_when_its_timeout_no_longer_fits(
+def test_member_whose_timeout_no_longer_fits_still_runs_clamped(
     tmp_path, monkeypatch, capsys
 ):
-    # Round-2 review: a member with FIXED subprocess timeouts ignores the
-    # cooperative cap, so running it with remaining < its manifest timeout
-    # can overshoot the node budget and get the whole dispatcher killed. It
-    # must be skipped-with-record instead — unless it is registered
-    # budget-aware, in which case the short cap is safe and it runs.
-    members = [("preflight-gate", "big", _write_fake(tmp_path, "big", _FAKE_PASS))]
-    # budget 3 − 1 margin ⇒ 2s remaining < the member's 5s manifest timeout.
+    # The floor is the ONLY skip condition. Gating on `remaining >=
+    # member_timeout` measured the budget against a worst case almost no
+    # member reaches, so one slow call early in the group silently skipped
+    # every deny-capable gate behind it (codex #1195 round 1). A member whose
+    # manifest timeout no longer fits must still RUN — under a deadline
+    # clamped to the group's, which is what it sizes its subprocesses from.
+    members = [("preflight-gate", "big", _write_fake(tmp_path, "big", _FAKE_BUDGET_PROBE))]
+    # budget 3 − 1 margin ⇒ ~2s remaining < the member's 5s manifest timeout.
     _patch_members(
         monkeypatch, members, budget=3.0,
         timeouts={("preflight-gate", "big"): 5.0},
@@ -490,16 +510,27 @@ def test_non_budget_aware_member_is_skipped_when_its_timeout_no_longer_fits(
     rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
     err = capsys.readouterr().err
     assert rc == 0
-    assert f"{_dispatch._SKIP_MARKER} preflight-gate/big" in err
+    assert _dispatch._SKIP_MARKER not in err
+    # It ran, and what it saw is the group's remaining time, not its own 5s.
+    seen = float(err.partition("budget=")[2].split()[0])
+    assert 0.0 < seen <= 2.0
 
-    # Registered budget-aware ⇒ the same member runs under the shorter cap.
-    monkeypatch.setattr(
-        _dispatch, "_BUDGET_AWARE_MEMBERS", frozenset({("preflight-gate", "big")})
-    )
+
+def test_member_is_skipped_only_once_below_the_floor(tmp_path, monkeypatch, capsys):
+    # The other side of the same condition: below the floor there is not
+    # enough runway for even a minimal subprocess, so the member is skipped
+    # with a record rather than started and killed mid-call.
+    members = [
+        ("preflight-gate", "slow", _write_fake(tmp_path, "slow", _FAKE_SLOW)),
+        ("preflight-gate", "late", _write_fake(tmp_path, "late", _FAKE_PASS)),
+    ]
+    # Budget 2s − 1s margin ⇒ ~1s of runway; the slow member sleeps 1.2s, so
+    # `late` sees remaining < _MEMBER_SKIP_FLOOR_SEC.
+    _patch_members(monkeypatch, members, budget=2.0)
     rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
     err = capsys.readouterr().err
     assert rc == 0
-    assert _dispatch._SKIP_MARKER not in err
+    assert f"{_dispatch._SKIP_MARKER} preflight-gate/late" in err
 
 
 def test_fires_are_recorded_incrementally_not_after_the_loop(

@@ -42,7 +42,11 @@ import sys
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    fail_open,
+    remaining_budget,
+)
 from _hook_utils import (  # type: ignore[import-not-found]
     _is_gh_binary,
     iter_command_starts,
@@ -152,12 +156,18 @@ def _resolve_origin_repo() -> str | None:
 
     Returns None on any failure (no git, no origin, unparseable URL).
     """
+    # This hook runs the git lookup and then the gh search, so neither may
+    # take its own full slice: remaining_budget shrinks between them and their
+    # SUM stays inside the member budget (issue #1167, codex #1195 round 1).
+    budget = remaining_budget(GIT_TIMEOUT_SEC)
+    if budget < MIN_SUBPROC_BUDGET_SEC:
+        return None
     try:
         proc = subprocess.run(
             ["git", "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
-            timeout=GIT_TIMEOUT_SEC,
+            timeout=min(GIT_TIMEOUT_SEC, budget),
             check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -218,12 +228,15 @@ def _run_gh_search(repo: str, keywords: list[str]) -> tuple[int, str, str]:
         "--limit", "20",
         "--json", "number,title,state,author,url,mergedAt",
     ]
+    budget = remaining_budget(GH_TIMEOUT_SEC)
+    if budget < MIN_SUBPROC_BUDGET_SEC:
+        return -1, "", "budget exhausted before the gh search could run"
     try:
         proc = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=GH_TIMEOUT_SEC,
+            timeout=min(GH_TIMEOUT_SEC, budget),
             check=False,
         )
     except FileNotFoundError:

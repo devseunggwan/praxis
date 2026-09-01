@@ -42,7 +42,11 @@ from collections import Counter
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    fail_open,
+    remaining_budget,
+)
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     compound_cascade_hint,
@@ -50,6 +54,11 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
+
+# Per-probe cap for each git call. Clamped to the dispatcher's remaining
+# member budget at every call site, so the SUM of the staged-diff read and
+# one grep per renamed token stays inside the member budget (issue #1167).
+_GIT_TIMEOUT_SEC = 5
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -180,11 +189,17 @@ def _detect_sweeps(diff: str) -> list[tuple[str, str, int]]:
 
 def _survivors(token: str) -> list[str]:
     """Return non-exempt lines in the tracked tree that still contain token."""
+    # One call per renamed token, so the budget must shrink across them
+    # (issue #1167). No budget left reads as 'no survivors found', which is
+    # this hook's fail-open direction.
+    budget = remaining_budget(_GIT_TIMEOUT_SEC)
+    if budget < MIN_SUBPROC_BUDGET_SEC:
+        return []
     result = subprocess.run(
         ["git", "grep", "-n", "--fixed-strings", token],
         capture_output=True,
         text=True,
-        timeout=5,
+        timeout=min(_GIT_TIMEOUT_SEC, budget),
     )
     if result.returncode != 0:
         return []
@@ -253,11 +268,14 @@ def main() -> int:
     if not _find_git_commits(command):
         return 0
 
+    diff_budget = remaining_budget(_GIT_TIMEOUT_SEC)
+    if diff_budget < MIN_SUBPROC_BUDGET_SEC:
+        return 0
     diff = subprocess.run(
         ["git", "diff", "--cached", "--unified=0"],
         capture_output=True,
         text=True,
-        timeout=5,
+        timeout=min(_GIT_TIMEOUT_SEC, diff_budget),
     ).stdout
 
     if not diff.strip():

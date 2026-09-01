@@ -73,6 +73,22 @@ def remaining_budget(default_sec: float) -> float:
 MIN_SUBPROC_BUDGET_SEC = 0.5
 
 
+def budgeted_deadline(self_budget_sec: float) -> float:
+    """Absolute `time.monotonic()` deadline for a hook that already knows its
+    own budget.
+
+    The one expression every subprocess-spawning hook uses, so the dispatcher
+    can hand out a cap shorter than a manifest timeout and be sure nobody
+    overshoots it. Standalone the self-budget wins unchanged; under the
+    dispatcher the remaining member budget clamps it.
+
+    Prefer `shared_probe_deadline` when the budget is the hook's manifest
+    timeout minus a spawn margin; use this directly when the hook has picked a
+    smaller internal budget of its own.
+    """
+    return time.monotonic() + min(remaining_budget(self_budget_sec), self_budget_sec)
+
+
 def shared_probe_deadline(
     manifest_timeout_sec: float, margin_sec: float = 2.0
 ) -> float:
@@ -85,8 +101,7 @@ def shared_probe_deadline(
     published via `set_member_deadline` (issue #1167 — a member must not
     starve the rest of the Bash group's shared node timeout).
     """
-    self_budget = manifest_timeout_sec - margin_sec
-    return time.monotonic() + min(remaining_budget(self_budget), self_budget)
+    return budgeted_deadline(manifest_timeout_sec - margin_sec)
 
 
 class _JsonlFormatter(logging.Formatter):

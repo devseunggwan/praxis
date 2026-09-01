@@ -96,7 +96,10 @@ import time
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    budgeted_deadline,
+    fail_open,
+)
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     compound_cascade_hint,
@@ -775,7 +778,9 @@ def _post_tool_use(payload: dict) -> int:
     if not command or os.environ.get(_BYPASS_ENV, "").strip() or _bypassed_with_reason(command):
         return 0
 
-    deadline = time.monotonic() + _LOOKUP_BUDGET_SEC
+    # Under the dispatcher this clamps to what is left of the Bash group's
+    # shared node budget; standalone the hook's own budget wins unchanged.
+    deadline = budgeted_deadline(_LOOKUP_BUDGET_SEC)
     refs = _comment_refs(_tool_output(payload.get("tool_response")))
     if not refs:
         refs = [

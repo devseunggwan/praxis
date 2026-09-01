@@ -51,13 +51,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    fail_open,
+    remaining_budget,
+)
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     Token,
     TokenRole,
     filter_argv,
     tokenize_with_roles,
 )
+
+# Per-probe cap for the worktree listing. Clamped to the dispatcher's
+# remaining member budget at the call site (issue #1167).
+_GIT_TIMEOUT_SEC = 3
+
 
 OPT_OUT_MARKER = "# cwd-advisory:ack"
 
@@ -137,12 +146,18 @@ def _worktree_count() -> int:
     Returns 0 on any failure (non-git cwd, timeout, missing binary) — the
     caller treats 0 as "cannot confirm ambiguity", i.e. stays silent.
     """
+    budget = remaining_budget(_GIT_TIMEOUT_SEC)
+    if budget < MIN_SUBPROC_BUDGET_SEC:
+        return 0
     try:
         result = subprocess.run(
             ["git", "worktree", "list", "--porcelain"],
             capture_output=True,
             text=True,
-            timeout=3,
+        # Sized from the budget the dispatcher published for this member, so a
+        # group already short on time is not overrun (issue #1167, codex #1195
+        # round 1). Standalone the constant wins unchanged.
+            timeout=min(_GIT_TIMEOUT_SEC, budget),
         )
     except Exception:
         return 0
