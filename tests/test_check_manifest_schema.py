@@ -310,6 +310,16 @@ def test_dispatch_group_may_omit_its_matcher(manifest):
     )
 
 
+def test_sentinel_is_rejected_as_a_matcher(manifest):
+    # The argv sentinel is a legal matcher string, and a group whose matcher IS
+    # the sentinel renders the argv of a matcher-less one — main() maps it to
+    # None and resolves zero members, disabling every hook in it silently.
+    sentinel = build.DISPATCH_NO_MATCHER_ARG
+    manifest["dispatch_groups"].append({"event": "Stop", "matcher": sentinel})
+    drifts = build.manifest_schema_drifts(manifest)
+    assert any("reserved as the matcher-less argv sentinel" in d for d in drifts), drifts
+
+
 def test_dispatch_member_with_body_is_rejected(manifest):
     name = _first_dispatch_member_name(manifest)
     entry = next(h for h in manifest["hooks"] if h["name"] == name)

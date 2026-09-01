@@ -417,6 +417,25 @@ def manifest_schema_drifts(manifest) -> list[str]:
                     "hooks/_lib/_dispatch.py imports every group member as "
                     "Python (impl.py); a shell body would fail to import"
                 )
+        # The argv sentinel doubles as a legal matcher value (the schema
+        # allows any non-empty string), and a group whose matcher IS the
+        # sentinel renders the same argv as a matcher-less one — main() then
+        # maps it to None and resolves zero members. JSON Schema cannot say
+        # "any string except this one" in the supported subset, so the
+        # exclusion lives here (issue #1199 review).
+        for label, entries in (
+            ("hooks", hooks_list),
+            ("dispatch_groups", manifest.get("dispatch_groups", [])),
+        ):
+            for idx, entry in enumerate(entries):
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("matcher") == DISPATCH_NO_MATCHER_ARG:
+                    out.append(
+                        f"SCHEMA hooks/manifest.json $.{label}[{idx}].matcher: "
+                        f"{DISPATCH_NO_MATCHER_ARG!r} is reserved as the "
+                        "matcher-less argv sentinel and cannot be a matcher"
+                    )
     return out
 
 
