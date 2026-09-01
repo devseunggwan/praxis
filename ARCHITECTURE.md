@@ -318,7 +318,7 @@ packaging is *generated* from canonical metadata, not hand-edited:
 - `manifests/plugin.base.json` — shared metadata (name, description, author,
   repository, homepage, category, keywords). `VERSION` is the authoritative
   version string.
-- `manifests/platforms/{claude,codex,cursor,gemini,opencode}.json` — per-platform output list.
+- `manifests/platforms/{claude,codex,cursor,gemini}.json` — per-platform output list.
 - `scripts/build-plugin-manifests.py` — regenerate every artifact. Idempotent.
 - `scripts/check-plugin-manifests.py` — CI drift gate. Verifies generated
   files match the source and that the Codex adapter shell's symlinks
@@ -341,8 +341,6 @@ Generated (committed) outputs:
 | `.cursor-plugin/plugin.json` | Cursor IDE plugin root |
 | `.cursor-plugin/hooks/hooks.json` | Cursor-compatible hooks (filtered) |
 | `gemini-extension.json` | Gemini CLI extension catalog |
-| `.opencode/plugin.json` | OpenCode plugin root |
-| `.opencode/hooks/hooks.json` | OpenCode-compatible hooks (filtered) |
 
 **Do not edit generated files directly.** Change `manifests/*.json` (or
 `VERSION`) and re-run the build script. Run `./scripts/check-plugin-manifests.py`

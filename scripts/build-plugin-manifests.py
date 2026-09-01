@@ -22,8 +22,6 @@ Writes (generated artifacts, committed to the repo):
   .cursor-plugin/plugin.json
   .cursor-plugin/hooks/hooks.json
   gemini-extension.json
-  .opencode/plugin.json
-  .opencode/hooks/hooks.json
   hooks/<name>{suffix}.sh        — runtime wrapper(s), one per unique
                                    (name, wrapper_suffix) pair; tracked
                                    so marketplace installs (which do not
