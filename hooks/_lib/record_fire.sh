@@ -182,8 +182,30 @@ praxis_record_fire() {
   # (~200 B, far under PIPE_BUF's >=4096) under the shell's O_APPEND `>>`
   # keeps the same no-torn-lines concurrency contract as _atomic_append's
   # per-line os.write.
-  { printf '{"timestamp": "%s", "session_id": "%s", "tool": "%s", "hook": "%s", "role": "%s", "decision": "%s", "granularity": "rich"}\n' \
-      "$_rf_ts" "${4:-}" "${5:-}" "${1:-}" "${2:-}" "${3:-}" >> "$_rf_path"; } 2>/dev/null || return 0
+  if [ "$_rf_first" = "1" ]; then
+    # `>>` alone requests mode 0666 at creation, narrowed only by the ambient
+    # umask; _atomic_append requests 0o644 explicitly (os.open(path, flags,
+    # 0o644), hooks/_lib/_fire_ledger.py:297). Under a permissive umask
+    # (000/002) that gap survives into the file: 0666/0664 for the shell
+    # writer vs 0644 for the Python one, so a group/other-writable audit
+    # ledger. OR-ing 022 into the umask for exactly this open() reproduces
+    # Python's request (0666 & ~(umask|022) == 0644 & ~umask) without ever
+    # widening a STRICTER ambient umask (e.g. 077 stays 077) — and because
+    # the mode is fixed by the umask in effect at open(), there is no
+    # create-then-chmod window where the file sits group/other-writable.
+    _rf_old_umask=$(umask) || _rf_old_umask=""
+    if [ -n "$_rf_old_umask" ]; then
+      umask "$(printf '%04o' $(( 0${_rf_old_umask} | 022 )) )" 2>/dev/null
+    fi
+    { printf '{"timestamp": "%s", "session_id": "%s", "tool": "%s", "hook": "%s", "role": "%s", "decision": "%s", "granularity": "rich"}\n' \
+        "$_rf_ts" "${4:-}" "${5:-}" "${1:-}" "${2:-}" "${3:-}" >> "$_rf_path"; } 2>/dev/null
+    _rf_write_rc=$?
+    [ -n "$_rf_old_umask" ] && umask "$_rf_old_umask" 2>/dev/null
+    [ "$_rf_write_rc" = "0" ] || return 0
+  else
+    { printf '{"timestamp": "%s", "session_id": "%s", "tool": "%s", "hook": "%s", "role": "%s", "decision": "%s", "granularity": "rich"}\n' \
+        "$_rf_ts" "${4:-}" "${5:-}" "${1:-}" "${2:-}" "${3:-}" >> "$_rf_path"; } 2>/dev/null || return 0
+  fi
 
   # Retention sweep (#1078) on the first write of the UTC day, exactly the
   # edge _atomic_append keys on ("today's file does not exist yet"). Reuses

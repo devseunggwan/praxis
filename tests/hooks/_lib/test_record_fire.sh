@@ -135,6 +135,49 @@ assert norm(py_line) == norm(sh_line), f"byte mismatch:\n{norm(py_line)}\n{norm(
 PY
 then ok "shell record byte-matches python record"; else ko "shell record byte-matches python record" "see stderr"; fi
 
+# Ledger creation mode (Codex review, PR #1207 round 2): under a permissive
+# umask, `>>` alone creates a NEW file at 0666-masked while
+# _fire_ledger._atomic_append explicitly requests 0o644
+# (hooks/_lib/_fire_ledger.py:297) — so a shell-created daily ledger could
+# land 0666/0664 (group/other-writable, i.e. tamperable by any other user on
+# the box) where the Python-created one is 0644. Force a maximally permissive
+# ambient umask so the divergence has nowhere to hide, then require BOTH
+# writers to land at 0644.
+MODE_LEDGER="$PROBE_ROOT/mode.jsonl"
+rm -f "$MODE_LEDGER"
+(
+  umask 000
+  PRAXIS_LIB_DIR="$ROOT_DIR/hooks/_lib" PRAXIS_FIRE_TELEMETRY_FILE="$MODE_LEDGER" sh -c '
+    . "$1/hooks/_lib/record_fire.sh"
+    praxis_record_fire mode-hook mode-role pass sess-mode ""
+  ' mode "$ROOT_DIR"
+)
+MODE_PERM=$(stat -f '%OLp' "$MODE_LEDGER" 2>/dev/null || stat -c '%a' "$MODE_LEDGER" 2>/dev/null)
+if [ "$MODE_PERM" = "644" ]; then
+  ok "ledger created 0644 under umask 000 (matches python writer)"
+else
+  ko "ledger created 0644 under umask 000 (matches python writer)" "mode=$MODE_PERM"
+fi
+
+# A STRICTER ambient umask must not be loosened by the fix above — 0077 must
+# still land 0600, same as _fire_ledger's os.open(path, flags, 0o644) would
+# under that same umask.
+STRICT_LEDGER="$PROBE_ROOT/strict-mode.jsonl"
+rm -f "$STRICT_LEDGER"
+(
+  umask 077
+  PRAXIS_LIB_DIR="$ROOT_DIR/hooks/_lib" PRAXIS_FIRE_TELEMETRY_FILE="$STRICT_LEDGER" sh -c '
+    . "$1/hooks/_lib/record_fire.sh"
+    praxis_record_fire mode-hook mode-role pass sess-mode-strict ""
+  ' mode "$ROOT_DIR"
+)
+STRICT_PERM=$(stat -f '%OLp' "$STRICT_LEDGER" 2>/dev/null || stat -c '%a' "$STRICT_LEDGER" 2>/dev/null)
+if [ "$STRICT_PERM" = "600" ]; then
+  ok "stricter ambient umask (077) is preserved, not loosened"
+else
+  ko "stricter ambient umask (077) is preserved, not loosened" "mode=$STRICT_PERM"
+fi
+
 # Escape fallback: a field value outside the JSON-safe charset (here a
 # session_id carrying a double quote and a space) must route through the
 # Python writer and still land as ONE valid record with the exact value —
