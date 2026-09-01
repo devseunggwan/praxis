@@ -18,7 +18,37 @@ set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-SKILL="$ROOT_DIR/skills/codex-review-wrap/SKILL.md"
+SKILL_DIR="$ROOT_DIR/skills/codex-review-wrap"
+
+# The #1181 references/ split spread the pinned prose across the SKILL.md
+# spine (execution order) and references/ (5g detail, error handling,
+# limitations, worked example). The assertions pin content, not layout, so
+# the target is the concatenation of the spine and every reference file.
+SKILL="$(mktemp)" || { echo "FATAL: mktemp failed" >&2; exit 1; }
+trap 'rm -f "$SKILL"' EXIT
+cat "$SKILL_DIR/SKILL.md" "$SKILL_DIR/references/"*.md >"$SKILL"
+
+# Reachability is a SEPARATE question from content. The buffer above is built
+# by globbing the directory, so it holds every reference file whether or not
+# the spine still links it — a deleted or misspelled link leaves each content
+# assertion below passing while a real reader can no longer reach the prose.
+# Check the links themselves: every reference file is linked from the spine,
+# and every link the spine makes resolves to a file that exists.
+_unreachable=""
+for _ref in "$SKILL_DIR/references/"*.md; do
+  _base="$(basename "$_ref")"
+  grep -q "references/$_base" "$SKILL_DIR/SKILL.md" || _unreachable="$_unreachable $_base"
+done
+_dangling=""
+for _target in $(grep -o "references/[A-Za-z0-9._-]*\.md" "$SKILL_DIR/SKILL.md" | sort -u); do
+  [ -f "$SKILL_DIR/$_target" ] || _dangling="$_dangling $_target"
+done
+if [ -n "$_unreachable" ] || [ -n "$_dangling" ]; then
+  echo "FAIL  references reachable from the SKILL.md spine"
+  [ -n "$_unreachable" ] && echo "        never linked:$_unreachable"
+  [ -n "$_dangling" ] && echo "        link with no file:$_dangling"
+  exit 1
+fi
 
 # shellcheck source=./_assert_lib.sh
 source "$SCRIPT_DIR/_assert_lib.sh"
