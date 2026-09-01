@@ -352,6 +352,32 @@ def test_escaped_decision_key_is_classified_as_block():
 
 
 
+def test_record_session_fire_skipped_in_dispatcher(tmp_path, monkeypatch):
+    """One fire, one rich record — not two (issue #1199 review).
+
+    A grouped member already gets its rich record from record_group_fires. A
+    member that also calls record_session_fire (every completion-verify hook
+    does) produced a SECOND rich record for the same fire, identical in hook /
+    decision / session_id, so nothing downstream could collapse them and every
+    per-session count read double. _DISPATCHER_PROCESS suppressed only the
+    COARSE path, which is why this survived.
+    """
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", True)
+    assert fl.record_session_fire("x", "completion-verify", "block", "s", "") is False
+    assert not out.exists()
+    # Control: the identical call outside the dispatcher DOES write, so the
+    # absence above is the suppression and not a broken invocation.
+    monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", False)
+    assert fl.record_session_fire("x", "completion-verify", "block", "s", "") is True
+    recs = [json.loads(x) for x in out.read_text().splitlines() if x.strip()]
+    assert len(recs) == 1 and recs[0]["granularity"] == "rich"
+
+
+
+
 def test_record_session_fire_opt_out(tmp_path, monkeypatch):
     out = tmp_path / "fire.jsonl"
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))

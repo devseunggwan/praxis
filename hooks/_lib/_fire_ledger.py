@@ -519,6 +519,14 @@ def record_session_fire(hook: str, role: str, decision: str, session_id: str, to
     """
     if _disabled():
         return False
+    if _DISPATCHER_PROCESS:
+        # A grouped member already gets its rich record from
+        # record_group_fires, so writing a second one here counts one fire
+        # twice in every per-session aggregate — and the two are identical,
+        # so nothing downstream can tell them apart (issue #1199 review).
+        # Returning False is safe: the coarse fallback this return gates is
+        # suppressed in the dispatcher process too, so no stream loses the fire.
+        return False
     try:
         record = {
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
