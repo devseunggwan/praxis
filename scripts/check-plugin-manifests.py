@@ -1049,7 +1049,8 @@ def main() -> int:
     #       — a mismatch means the next release PR computes its bump from a
     #       different version than the one the artifacts embed.
     #   (b) every platform output of a versioned kind (plugin, marketplace,
-    #       gemini-extension — marketplace embeds version fields too) is
+    #       gemini-extension, agent-plugin — marketplace embeds version
+    #       fields too) is
     #       listed in release-please-config.json `extra-files`, so a release
     #       bump rewrites its embedded versions. A new platform output added
     #       without the extra-files entry would otherwise ship stale versions
@@ -1101,7 +1102,7 @@ def main() -> int:
                 )
                 continue
             extra_specs[path] = entry
-        versioned_kinds = {"plugin", "marketplace", "gemini-extension"}
+        versioned_kinds = {"plugin", "marketplace", "gemini-extension", "agent-plugin"}
         for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
             platform = json.loads(platform_file.read_text())
             for output in platform["outputs"]:
@@ -1139,6 +1140,50 @@ def main() -> int:
                         f"{RELEASE_JSONPATH!r} — a narrower path updates only "
                         "the version fields it names and silently leaves its "
                         "siblings stale (Rule 9, #1172)"
+                    )
+
+    # ------------------------------------------------------------------
+    # Rule 23 — Agent Plugins portable manifest shape (#1219)
+    #
+    # Two failures Rule 5's byte-identity check cannot see, because both stay
+    # reproducible: the build renders them, the checker re-renders the same
+    # thing, and the diff is clean while the manifest is unloadable.
+    #
+    #   (a) $schema drifts off 1.0.0. Codex pins that one URI; any other
+    #       agent-plugins.org URI still wins manifest selection over
+    #       .codex-plugin/plugin.json and then loads as Unsupported, so the
+    #       fallback never runs and the plugin disappears instead of degrading.
+    #   (b) a host-specific key (skills, hooks, mcpServers, apps, interface)
+    #       reaches the portable manifest. The spec's manifest schema is
+    #       closed, so one such key invalidates the whole document.
+    # ------------------------------------------------------------------
+    for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
+        platform = json.loads(platform_file.read_text())
+        for output in platform["outputs"]:
+            if output["kind"] != "agent-plugin":
+                continue
+            path = output["path"]
+            try:
+                rendered = json.loads((REPO_ROOT / path).read_text())
+            except (OSError, json.JSONDecodeError) as exc:
+                drifts.append(f"AGENT PLUGIN {path}: unreadable ({exc})")
+                continue
+            schema = rendered.get("$schema")
+            if schema != _build.AGENT_PLUGIN_SCHEMA_URI:
+                drifts.append(
+                    f"AGENT PLUGIN {path}: $schema is {schema!r}, expected "
+                    f"{_build.AGENT_PLUGIN_SCHEMA_URI!r} — Codex supports that "
+                    "URI alone, and a newer one is selected and then rejected "
+                    "rather than falling back (Rule 23, #1219)"
+                )
+            for key in ("skills", "hooks", "mcpServers", "apps", "interface"):
+                if key in rendered:
+                    drifts.append(
+                        f"AGENT PLUGIN {path}: carries host-specific key "
+                        f"{key!r} — the Agent Plugins manifest schema is "
+                        "closed, so this invalidates the manifest; put it in "
+                        "the host's own manifest or under extensions "
+                        "(Rule 23, #1219)"
                     )
 
     # ------------------------------------------------------------------
