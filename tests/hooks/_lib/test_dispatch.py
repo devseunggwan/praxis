@@ -13,10 +13,11 @@ Coverage:
 """
 from __future__ import annotations
 
+import ast
 import json
-import re
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -423,33 +424,87 @@ def test_load_group_matches_manifest():
     assert _dispatch.group_members("PreToolUse", "Bash") == members
 
 
+def _fixed_timeout_spawns(source: str) -> list[str]:
+    """Every `subprocess.*` call in `source` whose timeout cannot shrink.
+
+    Call-site granularity, not file granularity. A file-wide grep for the
+    budget API passes as soon as ONE call reads the budget, so a hook that
+    budgets its later probes and leaves its FIRST subprocess on a module
+    constant looks clean — which is exactly the shape that reached review.
+
+    A timeout is "fixed" when its expression is built only from constants and
+    module-level ALL-CAPS names: nothing in it can shrink when the group is
+    already short on time. `min(_GH_TIMEOUT_SEC, budget)` mentions a local, so
+    it passes; a bare `_PROBE_TIMEOUT_SEC` does not.
+    """
+    tree = ast.parse(source)
+    module_consts = {
+        t.id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for t in node.targets
+        if isinstance(t, ast.Name) and t.id.lstrip("_").isupper()
+    }
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        if not (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name)
+                and f.value.id == "subprocess"
+                and f.attr in {"run", "Popen", "check_output", "call"}):
+            continue
+        kw = next((k for k in node.keywords if k.arg == "timeout"), None)
+        if kw is None:
+            offenders.append(f"line {node.lineno}: no timeout=")
+            continue
+        names = {n.id for n in ast.walk(kw.value) if isinstance(n, ast.Name)}
+        if names <= module_consts:
+            offenders.append(f"line {node.lineno}: timeout is fixed")
+    return offenders
+
+
 def test_every_subprocess_member_is_budget_aware():
     # The dispatcher no longer decides per member whether a shortened cap is
     # safe: it clamps every member's deadline to the group's and relies on
     # each member sizing its own subprocess timeouts from the shared budget.
     # That reliance is the invariant here. A member spawning a subprocess
-    # under a FIXED timeout can outlive the group deadline and get the whole
-    # dispatcher killed by the host, and nothing at the call site shows it —
-    # so a new subprocess call in a group member fails this test until it
-    # reads the budget.
+    # under a fixed timeout can outlive the group deadline and get the whole
+    # dispatcher killed by the host, and nothing at the call site shows it.
     members, _budget, _timeouts = _dispatch.load_group("PreToolUse", "Bash")
-    spawns = re.compile(r"subprocess\.(run|Popen|check_output|call)")
-    budgeted = re.compile(r"remaining_budget|shared_probe_deadline|budgeted_deadline")
-
-    offenders = []
+    offenders = {}
     for role, name, impl in members:
-        source = Path(impl).read_text(encoding="utf-8", errors="replace")
-        if spawns.search(source) and not budgeted.search(source):
-            offenders.append(f"{role}/{name}")
-    assert offenders == []
+        bad = _fixed_timeout_spawns(
+            Path(impl).read_text(encoding="utf-8", errors="replace"))
+        if bad:
+            offenders[f"{role}/{name}"] = bad
+    assert offenders == {}
 
-    # Positive control: the predicate can find offenders at all. Without it an
-    # empty list also means "the regex stopped matching" — the two are
-    # indistinguishable, and this test would pass forever after a rename.
-    assert any(
-        spawns.search(Path(impl).read_text(encoding="utf-8", errors="replace"))
-        for _role, _name, impl in members
-    )
+
+def test_the_fixed_timeout_detector_can_fail():
+    # Positive control for the test above: an empty offender list has to mean
+    # "no fixed timeouts", not "the detector stopped matching". Both shapes it
+    # is meant to catch are checked, plus one it must NOT flag.
+    fixed = textwrap.dedent("""\
+        import subprocess
+        T = 5
+        def f():
+            subprocess.run(['x'], timeout=T)
+    """)
+    missing = textwrap.dedent("""\
+        import subprocess
+        def f():
+            subprocess.run(['x'])
+    """)
+    budgeted = textwrap.dedent("""\
+        import subprocess
+        T = 5
+        def f(budget):
+            subprocess.run(['x'], timeout=min(T, budget))
+    """)
+    assert _fixed_timeout_spawns(fixed) == ["line 4: timeout is fixed"]
+    assert _fixed_timeout_spawns(missing) == ["line 3: no timeout="]
+    assert _fixed_timeout_spawns(budgeted) == []
 
 
 def test_budget_exhausting_member_starves_no_one_silently(
@@ -498,7 +553,7 @@ def test_member_whose_timeout_no_longer_fits_still_runs_clamped(
     # The floor is the ONLY skip condition. Gating on `remaining >=
     # member_timeout` measured the budget against a worst case almost no
     # member reaches, so one slow call early in the group silently skipped
-    # every deny-capable gate behind it (codex #1195 round 1). A member whose
+    # every deny-capable gate behind it. A member whose
     # manifest timeout no longer fits must still RUN — under a deadline
     # clamped to the group's, which is what it sizes its subprocesses from.
     members = [("preflight-gate", "big", _write_fake(tmp_path, "big", _FAKE_BUDGET_PROBE))]
