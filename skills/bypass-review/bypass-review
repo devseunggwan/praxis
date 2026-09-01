@@ -1152,33 +1152,38 @@ def join_bypass_to_hooks(
 def default_strike_state_dir() -> Path:
     """Mirror strike-counter's STATE_DIR resolution (read-only twin).
 
-    Source of truth: hooks/_lib/_paths.py `praxis_state_dir()` (issue #1180)
-    plus the legacy-migration condition in hooks/completion-verify/
-    strike-counter/impl.sh. This CLI is installed as a ~/.local/bin symlink and
-    runs outside the hook import context, so — per the #981 convention that the
-    skill layer never imports the Python resolver — the semantics are
-    REPLICATED here, and tests/test_bypass_review.sh asserts parity against
-    _paths.py so the two resolvers cannot drift silently.
+    Source of truth: hooks/_lib/_paths.sh, not its Python twin. What writes
+    strike state is strike-counter/impl.sh, and that sources the SHELL
+    resolver — so the shell one is what this reader has to agree with, whatever
+    _paths.py does. tests/test_bypass_review.sh asserts parity against
+    _paths.sh for exactly that reason. This CLI is installed as a ~/.local/bin
+    symlink and runs outside the hook import context, so per the #981
+    convention the skill layer replicates the semantics rather than importing
+    a resolver.
 
-    Two behaviors _paths.py mandates that a naive mirror misses:
-      - `os.path.expanduser` on both overrides: a quoted or exported-from-
-        config `PRAXIS_STATE_DIR=~/x` arrives as a literal tilde
-        (_paths.sh documents exactly this hazard for its shell twin), and
-        without expansion this reader and the shell writer resolve
-        different directories.
-      - The pre-#527 legacy location: strike-counter/impl.sh migrates
-        ~/.claude/state/praxis/strikes only when it WRITES; a report run
-        before any post-migration strike has been recorded must read the
-        legacy dir or report strike state as absent. impl.sh copies;
-        this report-only CLI merely reads (same condition: no
-        PRAXIS_STATE_DIR override, new dir absent, legacy dir present).
+    The two resolvers disagree on one input, and it decides the code below:
+    `praxis_home` expands a leading `~` in both (_paths.sh does it with an
+    explicit `case`, _paths.py with expanduser), but `praxis_state_dir` expands
+    the PRAXIS_STATE_DIR override only in Python — the shell keeps the literal
+    tilde and merely strips a trailing slash. A reader that expanduser'd that
+    override would resolve somewhere the writer never wrote. Hence: expand
+    PRAXIS_HOME, leave PRAXIS_STATE_DIR alone.
+
+    Also mirrored: the pre-#527 legacy location. strike-counter/impl.sh
+    migrates ~/.claude/state/praxis/strikes only when it WRITES, so a report
+    run before any post-migration strike has been recorded must read the legacy
+    dir or report strike state as absent. impl.sh copies; this report-only CLI
+    merely reads, under the same three-part condition (no PRAXIS_STATE_DIR
+    override, new dir absent, legacy dir present).
     """
     override = os.environ.get("PRAXIS_STATE_DIR")
     if override:
-        return Path(os.path.expanduser(override)) / "strikes"
+        # No expanduser: _paths.sh does not expand this override either, and a
+        # reader that diverged from the writer here would read an empty dir.
+        return Path(override.rstrip("/")) / "strikes"
     home = os.path.expanduser(os.environ.get("PRAXIS_HOME") or "~/.praxis")
     state_dir = Path(home) / "state" / "strikes"
-    legacy = Path(os.path.expanduser(os.path.join("~", ".claude", "state", "praxis", "strikes")))
+    legacy = Path(os.path.expanduser("~/.claude/state/praxis/strikes"))
     if not state_dir.is_dir() and legacy.is_dir():
         return legacy
     return state_dir

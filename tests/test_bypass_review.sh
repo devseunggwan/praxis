@@ -871,15 +871,19 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# strike-state dir resolution parity with hooks/_lib/_paths.py (#1180)
+# strike-state dir resolution parity with hooks/_lib/_paths.sh (#1180)
 #
-# default_strike_state_dir() REPLICATES _paths.py praxis_state_dir() semantics
-# (the CLI runs as a ~/.local/bin symlink outside the hook import context, so
-# per #981 it does not import the resolver). These cases pin the replica to the
-# source of truth so the two cannot drift silently.
+# The oracle is the SHELL resolver, not its Python twin: strike state is
+# written by strike-counter/impl.sh, which sources _paths.sh, so that is the
+# resolution this read-only CLI has to agree with. The two twins disagree on
+# one input — _paths.py expanduser()s the PRAXIS_STATE_DIR override and
+# _paths.sh does not — so pinning the replica to the Python side would make
+# this reader look correct while reading a directory the writer never wrote.
+# The CLI runs as a ~/.local/bin symlink outside the hook import context, so
+# per #981 it replicates rather than imports.
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== bypass-review: strike-state dir parity with _paths.py (#1180) ==="
+echo "=== bypass-review: strike-state dir parity with _paths.sh (#1180) ==="
 
 # resolve_bp_state_dir <env...> — default_strike_state_dir() under a given env
 resolve_bp_state_dir() {
@@ -893,21 +897,21 @@ print(mod.default_strike_state_dir())
 " "$CLI"
 }
 
-# resolve_paths_state_dir <env...> — _paths.py praxis_state_dir()/strikes
+# resolve_paths_state_dir <env...> — _paths.sh praxis_state_dir()/strikes.
+# Sourced in a subshell exactly as strike-counter/impl.sh does, so the oracle
+# is the writer's own code rather than a restatement of it.
 resolve_paths_state_dir() {
-  env "$@" python3 -c "
-import os, sys
-sys.path.insert(0, sys.argv[1])
-import _paths
-print(os.path.join(_paths.praxis_state_dir(), 'strikes'))
-" "$REPO_ROOT/hooks/_lib"
+  env "$@" sh -c '. "$1"/_paths.sh; printf "%s\n" "$(praxis_state_dir)/strikes"' \
+    sh "$REPO_ROOT/hooks/_lib"
 }
 
 PARITY_HOME="$TMP_DIR/parity-home"
 mkdir -p "$PARITY_HOME"
 
 # (a) tilde-containing PRAXIS_STATE_DIR — a quoted/exported-from-config
-# `PRAXIS_STATE_DIR=~/x` reaches both resolvers as a literal tilde.
+# `PRAXIS_STATE_DIR=~/x` reaches both resolvers as a literal tilde, and
+# _paths.sh keeps it literal. A reader that expanded it would read a directory
+# the writer never wrote, which is the whole failure this case pins.
 bp_a=$(resolve_bp_state_dir -u PRAXIS_HOME HOME="$PARITY_HOME" PRAXIS_STATE_DIR='~/tilde-state')
 paths_a=$(resolve_paths_state_dir -u PRAXIS_HOME HOME="$PARITY_HOME" PRAXIS_STATE_DIR='~/tilde-state')
 
@@ -918,13 +922,14 @@ else
 fi
 
 case "$bp_a" in
-  "$PARITY_HOME"/tilde-state/strikes)
-    assert_pass "parity: tilde expanded against fixture HOME" ;;
+  '~/tilde-state/strikes')
+    assert_pass "parity: PRAXIS_STATE_DIR tilde left literal, as the writer leaves it" ;;
   *)
-    assert_fail "parity: tilde expanded against fixture HOME" "got '$bp_a' (literal tilde not expanded?)" ;;
+    assert_fail "parity: PRAXIS_STATE_DIR tilde left literal, as the writer leaves it" "got '$bp_a' (expanded, so it diverges from _paths.sh)" ;;
 esac
 
-# (b) tilde-containing PRAXIS_HOME — same hazard on the other override.
+# (b) tilde-containing PRAXIS_HOME — the other override, where _paths.sh DOES
+# expand (explicit `case` on `~` / `~/*`), so here the reader must expand too.
 bp_b=$(resolve_bp_state_dir -u PRAXIS_STATE_DIR HOME="$PARITY_HOME" PRAXIS_HOME='~/praxis-tilde')
 paths_b=$(resolve_paths_state_dir -u PRAXIS_STATE_DIR HOME="$PARITY_HOME" PRAXIS_HOME='~/praxis-tilde')
 
