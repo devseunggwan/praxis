@@ -1183,6 +1183,25 @@ def test_stop_block_lane_does_not_run_on_other_events(tmp_path, monkeypatch, cap
 
 
 
+def test_escaped_decision_key_still_blocks(tmp_path, monkeypatch, capsys):
+    # `{"\u0064ecision": "block"}` is valid JSON for the same object. A literal
+    # substring pre-filter dropped it before the parse that is supposed to be
+    # the authority (CodeRabbit, issue #1199 review).
+    escaped = '{"\\u0064ecision": "block", "reason": "escaped"}'
+    assert '"decision"' not in escaped, "fixture is not actually escaped"
+    members = [
+        ("completion-verify", "gate", _write_fake(tmp_path, "gate", _fake_raw_stdout(escaped))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "decision": "block", "reason": "[praxis:gate] escaped"
+    }
+
+
+
+
 def test_stop_block_with_malformed_reason_still_blocks(tmp_path, monkeypatch, capsys):
     # A parsed block whose `reason` is missing/non-string still blocks (empty
     # reason -> the attribution tag alone, no trailing space): dropping it for

@@ -508,8 +508,11 @@ def _stop_block_reason(stdout: str) -> Optional[str]:
     exact silent-swallow this lane exists to prevent. Fail-open only for
     outputs that are not a block at all (unparseable, or a different shape).
     """
-    if not stdout or '"decision"' not in stdout:
-        return None  # cheap pre-filter only; the decision below is parse-based
+    # No substring pre-filter: `{"\\u0064ecision": "block"}` is valid JSON for
+    # the same object, and a literal probe drops it before the parse that is
+    # supposed to be the authority here (issue #1199 review).
+    if not stdout:
+        return None
     try:
         obj = json.loads(stdout)
     except ValueError:

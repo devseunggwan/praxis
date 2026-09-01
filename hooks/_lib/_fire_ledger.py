@@ -125,7 +125,10 @@ def _is_stop_block(stdout: str) -> bool:
     `_dispatch._stop_block_reason`), never substring-matches, so prose that
     merely mentions the shape cannot register as a block.
     """
-    if not stdout or '"decision"' not in stdout:
+    # No substring pre-filter — see `_dispatch._stop_block_reason`, which this
+    # is kept in sync with: an escaped `decision` key parses to the same object
+    # and a literal probe would drop it (issue #1199 review).
+    if not stdout:
         return False
     try:
         obj = json.loads(stdout)

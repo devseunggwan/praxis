@@ -337,6 +337,21 @@ def test_record_session_fire_writes_rich_with_real_session(tmp_path, monkeypatch
     }
 
 
+def test_escaped_decision_key_is_classified_as_block():
+    # `{"\u0064ecision": "block"}` parses to the same object; the literal
+    # substring pre-filter dropped it and classify_decision recorded a real
+    # block as "pass" (CodeRabbit, issue #1199 review).
+    escaped = r'{"\u0064ecision": "block", "reason": "r"}'
+    assert '"decision"' not in escaped, "fixture is not actually escaped"
+    assert json.loads(escaped) == {"decision": "block", "reason": "r"}
+    assert fl._is_stop_block(escaped) is True
+    assert fl.classify_decision(0, escaped, "") == "block"
+    # Control: a shape that is genuinely not a block still is not one.
+    assert fl._is_stop_block('{"decision": "approve"}') is False
+
+
+
+
 def test_record_session_fire_opt_out(tmp_path, monkeypatch):
     out = tmp_path / "fire.jsonl"
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
