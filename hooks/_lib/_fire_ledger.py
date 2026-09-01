@@ -166,6 +166,13 @@ def _disabled() -> bool:
 # Process-local: standalone hook processes never import/run the dispatcher.
 _DISPATCHER_PROCESS = False
 
+# Set True ONLY in the dispatcher process. `_DISPATCHER_PROCESS` above cannot
+# answer "am I the dispatcher": `suppress_coarse_duplicate` sets it too, from a
+# standalone hook, to mean something else entirely (a rich record for this
+# invocation already exists). Anything that must distinguish the two reads this
+# one (issue #1199 review).
+_IN_DISPATCHER = False
+
 
 def mark_dispatcher_process() -> None:
     """Mark the current process as the dispatcher (suppresses coarse recording).
@@ -175,8 +182,9 @@ def mark_dispatcher_process() -> None:
     so the flag never leaks across roles. The only place it must be reset is a
     single-process test harness running both roles (see test helper).
     """
-    global _DISPATCHER_PROCESS
+    global _DISPATCHER_PROCESS, _IN_DISPATCHER
     _DISPATCHER_PROCESS = True
+    _IN_DISPATCHER = True
 
 
 def suppress_coarse_duplicate() -> None:
@@ -192,14 +200,15 @@ def suppress_coarse_duplicate() -> None:
     one deny becomes `fires=2, block=1, pass=1` — corrupting the exact
     per-hook block-rate count this telemetry exists to provide.
 
-    Reuses the dispatcher-process flag: same process-local, one-shot,
-    never-leaks-across-invocations guarantee `mark_dispatcher_process`
-    documents, applied here for the same reason (a richer record for this
-    invocation already exists — skip the redundant coarse fallback). Call
+    Sets the coarse-suppression flag directly rather than going through
+    `mark_dispatcher_process`: this process is NOT the dispatcher, and
+    claiming so also suppressed its own rich write (issue #1199 review). Same
+    process-local, one-shot, never-leaks-across-invocations guarantee. Call
     only after the RICH record has actually been written, not on every
     invocation of the hook.
     """
-    mark_dispatcher_process()
+    global _DISPATCHER_PROCESS
+    _DISPATCHER_PROCESS = True
 
 
 # Days of daily telemetry files kept on disk. The ledger is append-only and had
@@ -519,13 +528,16 @@ def record_session_fire(hook: str, role: str, decision: str, session_id: str, to
     """
     if _disabled():
         return False
-    if _DISPATCHER_PROCESS:
+    if _IN_DISPATCHER:
         # A grouped member already gets its rich record from
         # record_group_fires, so writing a second one here counts one fire
         # twice in every per-session aggregate — and the two are identical,
         # so nothing downstream can tell them apart (issue #1199 review).
         # Returning False is safe: the coarse fallback this return gates is
         # suppressed in the dispatcher process too, so no stream loses the fire.
+        # Gated on _IN_DISPATCHER, never _DISPATCHER_PROCESS: a standalone hook
+        # that already called suppress_coarse_duplicate sets the latter, and
+        # reading it here silently dropped that hook's own rich record.
         return False
     try:
         record = {

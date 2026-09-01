@@ -283,6 +283,7 @@ def test_record_standalone_fire_writes_coarse(tmp_path, monkeypatch):
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
     monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", False)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", False)
     fl.record_standalone_fire("stop-gate", "completion-verify", 2)
     fl.record_standalone_fire("nudge", "advisory-nudge", 0)
     recs = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
@@ -298,6 +299,7 @@ def test_record_standalone_fire_skipped_in_dispatcher(tmp_path, monkeypatch):
     out = tmp_path / "fire.jsonl"
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
     monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", True)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", True)
     fl.record_standalone_fire("x", "y", 2)
     assert not out.exists()
 
@@ -307,6 +309,7 @@ def test_record_standalone_fire_opt_out(tmp_path, monkeypatch):
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_DISABLE", "1")
     monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", False)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", False)
     fl.record_standalone_fire("x", "y", 0)
     assert not out.exists()
 
@@ -363,13 +366,36 @@ def test_record_session_fire_skipped_in_dispatcher(tmp_path, monkeypatch):
     out = tmp_path / "fire.jsonl"
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
-    monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", True)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", True)
     assert fl.record_session_fire("x", "completion-verify", "block", "s", "") is False
     assert not out.exists()
     # Control: the identical call outside the dispatcher DOES write, so the
     # absence above is the suppression and not a broken invocation.
-    monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", False)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", False)
     assert fl.record_session_fire("x", "completion-verify", "block", "s", "") is True
+    recs = [json.loads(x) for x in out.read_text().splitlines() if x.strip()]
+    assert len(recs) == 1 and recs[0]["granularity"] == "rich"
+
+
+def test_standalone_suppression_does_not_kill_its_own_rich_record(tmp_path, monkeypatch):
+    """A standalone hook still gets its rich record after suppressing the coarse one.
+
+    `suppress_coarse_duplicate` used to set `_DISPATCHER_PROCESS`, and two hooks
+    (output-block-falsify-advisory, comment-yap-advisory) call it BEFORE their
+    record_session_fire. Gating the rich write on that same flag therefore
+    dropped those hooks' only telemetry — 8 assertions in
+    tests/hooks/advisory-nudge/test_output_block_falsify_advisory.sh went from
+    "1 rich record" to zero. The two meanings now live in separate flags.
+    """
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", False)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", False)
+    fl.suppress_coarse_duplicate()  # the real call order in those two hooks
+    assert fl._DISPATCHER_PROCESS is True, "coarse suppression must still arm"
+    assert fl._IN_DISPATCHER is False, "a standalone hook is not the dispatcher"
+    assert fl.record_session_fire("x", "advisory-nudge", "ask", "s", "T") is True
     recs = [json.loads(x) for x in out.read_text().splitlines() if x.strip()]
     assert len(recs) == 1 and recs[0]["granularity"] == "rich"
 
@@ -699,6 +725,7 @@ def _reset_real_dispatcher_flag(monkeypatch):
         sys.path.insert(0, lib)
     real_fl = importlib.import_module("_fire_ledger")
     monkeypatch.setattr(real_fl, "_DISPATCHER_PROCESS", False)
+    monkeypatch.setattr(real_fl, "_IN_DISPATCHER", False)
 
 
 def test_fail_open_records_coarse_fire_and_preserves_return(tmp_path, monkeypatch):
@@ -744,6 +771,7 @@ def test_dispatcher_process_writes_rich_not_coarse(tmp_path, monkeypatch):
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
     monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", False)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", False)
     fl.mark_dispatcher_process()  # run_group calls this at entry
     fl.record_group_fires([("preflight-gate", "h", Path("x"))], [(2, "", "")], _payload())
     fl.record_standalone_fire("h", "preflight-gate", 2)  # member fail_open — suppressed
@@ -763,6 +791,7 @@ def test_suppress_coarse_duplicate_skips_standalone_fire(tmp_path, monkeypatch):
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
     monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", False)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", False)
     fl.record_session_fire(
         "output-block-falsify-advisory", "advisory-nudge", "block",
         "sess-1", "AskUserQuestion",
