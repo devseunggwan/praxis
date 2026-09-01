@@ -83,6 +83,12 @@ main() is labeled with its number, and this list is the canonical roster
       dir) must exist on disk, except deliberate phantom-path examples in
       SPEC_PATH_EXEMPT. (Numbered 22 to stay clear of rules added by
       parallel PRs.)
+  23. README.md hook-aggregate counts (#1176): total hook dirs, manifest
+      registration count, per-role dir counts, and the number of distinct
+      hooks carrying a variable in docs/bypass-vars.md must all match the
+      hand-written numbers at their anchored README phrases — the Rule 13
+      doc-drift contract, applied to the hook surface. (Numbered 23 to stay
+      clear of rules 21/22 added by a parallel PR.)
 
 An unnumbered auxiliary check verifies the Codex adapter symlinks
 (plugins/praxis/{skills,hooks,scripts} → repo root).
@@ -1830,6 +1836,94 @@ def main() -> int:
                     "SPEC_PATH_EXEMPT if it is a deliberate phantom example "
                     "(#1179)"
                 )
+
+    # ------------------------------------------------------------------
+    # Rule 23 — README.md hook-aggregate counts (#1176)
+    #
+    # README.md's Hooks section carries hand-written aggregate numbers: the
+    # total hook count, the number of manifest registration points, the
+    # per-role counts in the role table, and how many hooks declare a
+    # variable in docs/bypass-vars.md. Each is derived here from the same
+    # sources the prose describes (hook dirs on disk, hooks/manifest.json,
+    # the bypass-vars registry) and asserted at an anchored phrase — regex
+    # on the surrounding fixed text, never a line number, so prose reflow
+    # does not break the gate but a stale number does.
+    # ------------------------------------------------------------------
+    role_dir_counts: dict[str, int] = {role: 0 for role in VALID_ROLES}
+    for hook_dir in _hook_dirs():
+        role_dir_counts[hook_dir.parent.name] += 1
+    total_hook_dirs = sum(role_dir_counts.values())
+    manifest_entry_count = len(manifest["hooks"])
+
+    # Distinct hooks declaring a variable in docs/bypass-vars.md: walk every
+    # `## <section>` table, take the hook column (`Hook(s)` is the third cell
+    # in the Path / test table, the second everywhere else — mirroring
+    # parse_doc_env_table / parse_doc_state_vars in build-plugin-manifests.py),
+    # and keep backtick-delimited tokens that name a real hook dir. Prose
+    # mentions outside backticks (e.g. shared-row parentheticals) are not a
+    # declaration and do not count.
+    hook_dir_names = {d.name for d in _hook_dirs()}
+    bypass_vars_text = (REPO_ROOT / "docs" / "bypass-vars.md").read_text()
+    bypass_var_hooks: set[str] = set()
+    current_section: str | None = None
+    for line in bypass_vars_text.splitlines():
+        header = re.match(r"^##\s+(.+)$", line)
+        if header:
+            current_section = header.group(1).strip()
+            continue
+        if current_section is None or not line.startswith("| `"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        hook_col = 2 if current_section.startswith("Path / test") else 1
+        if len(cells) <= hook_col:
+            continue
+        bypass_var_hooks.update(
+            token
+            for token in re.findall(r"`([^`]+)`", cells[hook_col])
+            if token in hook_dir_names
+        )
+
+    readme_text = (REPO_ROOT / "README.md").read_text()
+    readme_count_specs: list[tuple[str, str, tuple[int, ...]]] = [
+        # `\s+` between words: a prose reflow may move a line break inside the
+        # phrase, and the anchor must survive that (the numbers, not the
+        # wrapping, are what this rule pins down).
+        (
+            "total hooks / registration points",
+            r"\*\*(\d+) hooks\*\*,\s+registered\s+at\s+(\d+)\s+points",
+            (total_hook_dirs, manifest_entry_count),
+        ),
+        (
+            "opt-out/tuning variable coverage",
+            r"(\d+)\s+of\s+the\s+(\d+)\s+hooks\s+declare\s+an\s+opt-out\s+"
+            r"or\s+tuning\s+variable",
+            (len(bypass_var_hooks), total_hook_dirs),
+        ),
+    ]
+    for role in sorted(VALID_ROLES):
+        readme_count_specs.append(
+            (
+                f"role table row `{role}`",
+                rf"^\|\s*`{re.escape(role)}`\s*\|\s*(\d+)\s*\|",
+                (role_dir_counts[role],),
+            )
+        )
+    for label, pattern, expected in readme_count_specs:
+        match = re.search(pattern, readme_text, re.MULTILINE)
+        if match is None:
+            drifts.append(
+                f"README COUNT ANCHOR MISSING ({label}): no match for "
+                f"{pattern!r} in README.md — restore the anchored phrase or "
+                "update this rule alongside the prose (#1176)"
+            )
+            continue
+        found = tuple(int(g) for g in match.groups())
+        if found != expected:
+            drifts.append(
+                f"README COUNT DRIFT ({label}): README.md says {found}, "
+                f"derived {expected} — update the number(s) at "
+                f"{match.group(0)!r} (#1176)"
+            )
 
     if drifts:
         print("plugin-manifest check FAILED:")
