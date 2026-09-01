@@ -1,7 +1,7 @@
 #!/bin/bash
 # test_comment_yap_advisory.sh — coverage for the comment-yap advisory (issue #1141).
 #
-# Synthesizes Claude Code PreToolUse(Write|Edit) payloads and asserts:
+# Synthesizes Claude Code PreToolUse(Edit|Write) payloads and asserts:
 #   advise → exit 0 + stderr carries the advisory marker
 #   silent → exit 0 + stderr empty
 #

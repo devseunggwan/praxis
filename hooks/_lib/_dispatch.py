@@ -301,6 +301,13 @@ def run_group(
     except Exception:
         pass
 
+    # A deny is flushed and returned the moment a member computes it, never
+    # buffered to the end of the group. Buffering meant a host kill at the group
+    # timeout took an already-computed deny down with the process, so a gate
+    # that had decided to block an edit silently did not — the one outcome a
+    # write-path group must never produce. Returning early cannot change which
+    # deny wins (the first one already won) and costs only the advisory stderr
+    # of members after it, on a call that is blocked regardless.
     # Per-member deadline (issue #1167): members run sequentially inside ONE
     # host timeout (the max member timeout — see load_group), so without a
     # group deadline one slow member starves every later member and the host
@@ -347,26 +354,22 @@ def run_group(
         # Fire telemetry (issue #710): observe-only and fail-open — the
         # dispatcher's decision is unaffected.
         _record_fires([(role, name, impl)], [result], payload_raw)
+        # Forward this member's stderr (advisory nudges and deny reasons alike)
+        # as it resolves, so a host kill later in the group cannot erase it.
+        member_rc, member_so, member_se = result
+        if member_se:
+            sys.stderr.write(member_se)
+        if member_rc == 2 or _DENY_MARKER in member_so:
+            if member_so:
+                sys.stdout.write(member_so)
+            return 2
 
-    # Forward every hook's stderr (advisory nudges and deny reasons alike).
-    for _rc, _so, se in results:
-        if se:
-            sys.stderr.write(se)
-
-    # Most-restrictive decision wins: deny > ask > allow. The FIRST deny/ask JSON
-    # on stdout is surfaced — concatenating two decision objects would be invalid
-    # JSON, and Claude Code surfaces one decision anyway. Every member's stderr is
-    # forwarded above regardless, so advisory nudges and later reasons are never
-    # silently dropped. Detection is role-agnostic (exit 2 / marker), since some
-    # advisory-nudge hooks also emit ask/deny — see ADR-0002 §2.2.
-    deny = next(
-        (so for rc, so, _se in results if rc == 2 or _DENY_MARKER in so), None
-    )
-    if deny is not None:
-        if deny:
-            sys.stdout.write(deny)
-        return 2
-
+    # Most-restrictive decision wins: deny > ask > allow. Deny already returned
+    # from the loop above, so only ask is left to outrank a plain allow. The
+    # FIRST ask JSON on stdout is surfaced — concatenating two decision objects
+    # would be invalid JSON, and Claude Code surfaces one decision anyway.
+    # Detection is role-agnostic, since some advisory-nudge hooks also emit
+    # ask — see ADR-0002 §2.2.
     ask = next((so for _rc, so, _se in results if _ASK_MARKER in so), None)
     if ask is not None:
         sys.stdout.write(ask)

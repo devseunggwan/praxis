@@ -53,6 +53,7 @@ import copy
 import json
 import os
 import re
+import shlex
 import sys
 import unicodedata
 from pathlib import Path
@@ -520,7 +521,10 @@ def _command_for(entry: dict) -> str:
     args = entry.get("args") or []
     if not args:
         return base
-    return base + " " + " ".join(args)
+    # shlex.quote: the command string is executed via `sh -c`, so any arg
+    # carrying a shell metacharacter must be quoted (a no-op for the plain
+    # words used today — see the dispatcher-node quoting note, PR #1198).
+    return base + " " + " ".join(shlex.quote(a) for a in args)
 
 
 def _entry_to_hook_node(entry: dict) -> dict:
@@ -574,8 +578,19 @@ def _dispatcher_node(event: str, matcher: str | None, host_id: str, timeout: int
     slowest member had under the per-process model (the rest fail open) — using
     the sum would let one hang block the tool far longer than today's parallel
     worst case.
+
+    Every interpolated arg is shlex-quoted: the host executes this command
+    string via `sh -c`, so an unquoted pipe-carrying matcher such as
+    `Edit|NotebookEdit|Write` would be parsed as a 3-command PIPELINE — the
+    dispatcher would run with matcher `Edit` (the wrong group) and its stdout
+    (the deny JSON) would be swallowed by the pipe (PR #1198 review, critical).
+    `shlex.quote` is a no-op for metacharacter-free tokens (`Bash`, host ids),
+    so the pre-existing Bash group command is byte-identical.
     """
-    cmd = f"${{CLAUDE_PLUGIN_ROOT}}/hooks/{DISPATCH_WRAPPER_NAME} {event} {matcher} {host_id}"
+    cmd = (
+        f"${{CLAUDE_PLUGIN_ROOT}}/hooks/{DISPATCH_WRAPPER_NAME} "
+        f"{shlex.quote(event)} {shlex.quote(matcher or '')} {shlex.quote(host_id)}"
+    )
     return {"type": "command", "command": cmd, "timeout": timeout}
 
 

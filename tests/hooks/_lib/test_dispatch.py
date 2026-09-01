@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import textwrap
 import time
 from pathlib import Path
@@ -51,10 +53,11 @@ NOOP_PAYLOAD = json.dumps(
 # --------------------------------------------------------------------------- #
 
 def test_group_members_count_and_roles():
-    # Exact-`Bash` matcher only. Three advisory hooks (memory-hint,
-    # external-api-literal-trigger, block-personal-asset-leak) carry multi-tool
-    # matchers (Bash|Edit|Write|…) and are intentionally excluded — see
-    # ADR-0002 §2 scope note.
+    # Exact-`Bash` matcher only. Multi-tool hooks (memory-hint,
+    # secret-print-redaction-advisory, external-api-literal-trigger,
+    # block-personal-asset-leak) are NOT in this group — since #1168 the
+    # `Bash|Edit|Write` trio forms its own dispatch group and memory-hint
+    # stays standalone (sole hook on its matcher).
     members = _dispatch.group_members("PreToolUse", "Bash")
     assert len(members) == 49, f"expected 49 exact-Bash members, got {len(members)}"
     # every impl path must exist on disk
@@ -86,6 +89,254 @@ def test_group_members_host_filter():
     assert "model-routing-advisory" not in names(codex)
     assert "block-unmatched-glob" not in names(codex)
     assert len(codex) == 43
+
+
+# --------------------------------------------------------------------------- #
+# Non-Bash dispatch groups (#1168)
+#
+# Membership pins are explicit; the noop / parity / sh-execution tests below
+# are parametrized over `dispatch_groups` from the manifest, so a future group
+# (e.g. a Stop lane) gets coverage for free the moment it is declared. The
+# exact-Bash group keeps its dedicated tests above (including firing payloads).
+#
+# Two Edit groups on purpose: the `Edit|Write` members must NOT be folded into
+# the `Edit|NotebookEdit|Write` group — they would start firing on NotebookEdit
+# calls their matcher never covered.
+# --------------------------------------------------------------------------- #
+
+EDIT_WRITE_MEMBERS = {
+    "comment-yap-advisory",
+    "worktree-edit-gate",
+    "write-decision-consistency-gate",
+    "advisory-wrapper-signature-verify",
+    "exclusion-probe-gate",
+}
+EDIT_NOTEBOOK_WRITE_MEMBERS = {
+    "protected-paths-guard",
+    "pre-edit-protected-branch-guard",
+    "path-probe-gate",
+    "bulk-write-memory-checkpoint",
+}
+
+
+def _manifest_dispatch_groups() -> list[tuple[str, str]]:
+    manifest = json.loads((REPO_ROOT / "hooks" / "manifest.json").read_text())
+    return [
+        (g["event"], g["matcher"]) for g in manifest.get("dispatch_groups", [])
+    ]
+
+
+# Every declared group except exact-Bash (which has its own suite above).
+NON_BASH_GROUPS = [
+    g for g in _manifest_dispatch_groups() if g != ("PreToolUse", "Bash")
+]
+
+# Representative no-op tool_input per tool name; a group's payload uses the
+# first token of its matcher. Extend this map when a new group's leading tool
+# appears — the KeyError from an unknown tool is deliberate (fail loud).
+_NOOP_TOOL_INPUTS = {
+    "Bash": {"command": "ls -la"},
+    "Edit": {
+        "file_path": "/tmp/praxis-dispatch-test/note.md",
+        "old_string": "alpha",
+        "new_string": "beta",
+    },
+    "Write": {
+        "file_path": "/tmp/praxis-dispatch-test/note.md",
+        "content": "alpha",
+    },
+    "NotebookEdit": {
+        "notebook_path": "/tmp/praxis-dispatch-test/nb.ipynb",
+        "new_source": "alpha",
+    },
+    "AskUserQuestion": {"questions": []},
+}
+
+
+def _noop_payload_for(matcher: str) -> str:
+    tool = matcher.split("|")[0]
+    return json.dumps(
+        {
+            "tool_name": tool,
+            "tool_input": _NOOP_TOOL_INPUTS[tool],
+            "cwd": str(REPO_ROOT),
+            "session_id": "test-dispatch-noop",
+        }
+    )
+
+
+def test_edit_write_group_members():
+    members = _dispatch.group_members("PreToolUse", "Edit|Write")
+    assert {n for _r, n, _i in members} == EDIT_WRITE_MEMBERS
+    for _role, name, impl in members:
+        assert impl.exists(), f"missing impl for {name}: {impl}"
+
+
+def test_edit_notebook_write_group_members():
+    members = _dispatch.group_members("PreToolUse", "Edit|NotebookEdit|Write")
+    assert {n for _r, n, _i in members} == EDIT_NOTEBOOK_WRITE_MEMBERS
+    for _role, name, impl in members:
+        assert impl.exists(), f"missing impl for {name}: {impl}"
+
+
+def test_edit_groups_host_filter():
+    # exclusion-probe-gate / path-probe-gate are hosts:["claude","codex"];
+    # a cursor install's dispatcher must not re-include them.
+    def names(ms):
+        return {n for _r, n, _i in ms}
+
+    assert "exclusion-probe-gate" not in names(
+        _dispatch.group_members("PreToolUse", "Edit|Write", host="cursor")
+    )
+    assert "path-probe-gate" not in names(
+        _dispatch.group_members("PreToolUse", "Edit|NotebookEdit|Write", host="cursor")
+    )
+
+
+@pytest.mark.parametrize(
+    "event,matcher", NON_BASH_GROUPS, ids=[f"{e}:{m}" for e, m in NON_BASH_GROUPS]
+)
+def test_group_noop_allows(event, matcher):
+    rc = _dispatch.run_group(event, matcher, _noop_payload_for(matcher))
+    assert rc == 0
+
+
+@pytest.mark.parametrize(
+    "matcher,member",
+    [
+        (m, member)
+        for _e, m in NON_BASH_GROUPS
+        for member in _dispatch.group_members(_e, m)
+    ],
+    ids=lambda v: v if isinstance(v, str) else f"{v[0]}/{v[1]}",
+)
+def test_run_one_matches_subprocess_for_group_noop(matcher, member):
+    role, name, impl = member
+    payload = _noop_payload_for(matcher)
+    direct = subprocess.run(
+        [sys.executable, str(impl)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+    )
+    rc, so, se = _dispatch.run_one(role, name, impl, payload)
+    assert rc == direct.returncode, (
+        f"{role}/{name}: exit mismatch in-process={rc} subprocess={direct.returncode}"
+    )
+    assert so == direct.stdout, f"{role}/{name}: stdout mismatch"
+    assert se == direct.stderr, f"{role}/{name}: stderr mismatch"
+
+
+# --------------------------------------------------------------------------- #
+# generated-command execution through a REAL shell (#1198 review, critical)
+#
+# Rule 14 and every test above invoke the dispatcher in-process or via
+# `python3 impl.py`, bypassing the shell — which is exactly why an UNQUOTED
+# pipe in the generated command (`... PreToolUse Edit|NotebookEdit|Write
+# claude`) shipped: `sh -c` parsed it as a 3-command pipeline, the dispatcher
+# ran with matcher 'Edit' (the wrong group) and its decision was swallowed.
+# These tests run the command strings from the committed hooks.json through
+# `sh -c`, end to end.
+# --------------------------------------------------------------------------- #
+
+CLAUDE_HOOKS_JSON = REPO_ROOT / ".claude-plugin" / "hooks" / "hooks.json"
+
+
+def _generated_dispatcher_commands() -> list[tuple[str, str, str]]:
+    data = json.loads(CLAUDE_HOOKS_JSON.read_text())
+    out = []
+    for event, groups in data.get("hooks", {}).items():
+        for group in groups:
+            for node in group.get("hooks", []):
+                cmd = node.get("command", "")
+                if "_dispatch.sh" in cmd:
+                    out.append((event, group.get("matcher"), cmd))
+    return out
+
+
+# One throwaway state root for all sh -c runs in this module: PRAXIS_* is
+# scrubbed below for determinism, and these two puts the hooks' state/ledger
+# writes back into an isolated dir instead of the developer's real ~/.praxis
+# (the fire ledger does NOT fall under PRAXIS_HOME — see scripts/run-tests.sh).
+_SH_TEST_HOME = tempfile.mkdtemp(prefix="praxis-dispatch-sh-")
+
+
+def _sh_env(**extra: str) -> dict:
+    # Scrub EVERY ambient PRAXIS_* var (strict/bypass/state alike) so the
+    # sh -c executions are deterministic regardless of the developer's shell.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PRAXIS_")}
+    # The committed command interpolates ${CLAUDE_PLUGIN_ROOT}; for the claude
+    # platform the plugin root is the repo root.
+    env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+    env["PRAXIS_HOME"] = _SH_TEST_HOME
+    env["PRAXIS_FIRE_TELEMETRY_FILE"] = os.path.join(
+        _SH_TEST_HOME, "fire-events-test.jsonl"
+    )
+    env.update(extra)
+    return env
+
+
+def test_generated_dispatcher_commands_cover_all_groups():
+    # every declared dispatch group must appear as a dispatcher command in the
+    # committed claude hooks.json (guards the fixture the sh -c tests run on)
+    generated = {(e, m) for e, m, _c in _generated_dispatcher_commands()}
+    assert generated == set(_manifest_dispatch_groups())
+
+
+@pytest.mark.parametrize(
+    "event,matcher,cmd",
+    _generated_dispatcher_commands(),
+    ids=[f"{e}:{m}" for e, m, _c in _generated_dispatcher_commands()],
+)
+def test_generated_command_executes_via_sh(event, matcher, cmd):
+    result = subprocess.run(
+        ["sh", "-c", cmd],
+        input=_noop_payload_for(matcher),
+        capture_output=True,
+        text=True,
+        env=_sh_env(),
+        cwd=str(REPO_ROOT),
+    )
+    assert result.returncode == 0, (
+        f"{cmd!r}: rc={result.returncode} stderr={result.stderr[:400]!r}"
+    )
+    # `sh: 1: NotebookEdit: not found` is the unquoted-pipe signature.
+    assert "not found" not in result.stderr, result.stderr[:400]
+
+
+def test_generated_command_deny_flows_through_sh():
+    # A strict-mode protected-paths deny must survive the real shell path:
+    # the generated command executed via `sh -c` returns the deny exit code.
+    _e, _m, cmd = next(
+        c
+        for c in _generated_dispatcher_commands()
+        if c[0] == "PreToolUse" and c[1] == "Edit|NotebookEdit|Write"
+    )
+    payload = json.dumps(
+        {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/home/user/praxis-e2e/.env",
+                "content": "SECRET=1",
+            },
+            "cwd": "/home/user",
+            "session_id": "test-dispatch-sh-deny",
+        }
+    )
+    result = subprocess.run(
+        ["sh", "-c", cmd],
+        input=payload,
+        capture_output=True,
+        text=True,
+        env=_sh_env(PRAXIS_PROTECTED_PATHS_STRICT="1"),
+        cwd=str(REPO_ROOT),
+    )
+    assert result.returncode == 2, (
+        f"expected deny exit 2 through sh -c, got {result.returncode}; "
+        f"stderr={result.stderr[:400]!r}"
+    )
+    assert "protected-paths-guard" in result.stderr
 
 
 # --------------------------------------------------------------------------- #
@@ -264,6 +515,45 @@ def test_deny_wins_over_ask_and_advisory(tmp_path, monkeypatch, capsys):
     captured = capsys.readouterr()
     assert rc == 2
     assert "nudge" in captured.err  # advisory preserved even under deny
+
+
+_FAKE_MARK = (
+    "import pathlib\n"
+    "def main():\n"
+    "    pathlib.Path(__file__).with_name('ran').write_text('1')\n"
+    "    return 0\n"
+)
+_FAKE_DENY_MARK = (
+    "import pathlib, sys\n"
+    "def main():\n"
+    "    pathlib.Path(__file__).with_name('ran').write_text('1')\n"
+    "    sys.stderr.write('blocked\\n')\n"
+    "    return 2\n"
+)
+
+
+def test_deny_returns_before_later_members_run(tmp_path, monkeypatch, capsys):
+    """A deny leaves the dispatcher immediately, taking nothing with it.
+
+    Buffering the decision to the end of the group meant every member after the
+    deny kept spending the group budget, and a host kill at the group timeout
+    then discarded the deny along with the process — a gate that had decided to
+    block an edit silently did not. A host kill cannot be staged from inside the
+    process, so the assertion is its observable equivalent: once a member denies,
+    nothing after it runs, which is what leaves no window to be killed in.
+    """
+    deny = _write_fake(tmp_path, "deny", _FAKE_DENY_MARK)
+    later = _write_fake(tmp_path, "later", _FAKE_MARK)
+    _patch_members(
+        monkeypatch,
+        [("preflight-gate", "deny", deny), ("advisory-nudge", "later", later)],
+    )
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert deny.with_name("ran").exists(), "denying member never ran"
+    assert not later.with_name("ran").exists(), "a member ran after the deny"
+    assert "blocked" in captured.err  # the deny reason still reached stderr
 
 
 def test_ask_when_no_deny(tmp_path, monkeypatch, capsys):

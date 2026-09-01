@@ -3,7 +3,7 @@
 Supported hosts: all
 
 `hooks/preflight-gate/fan-out-scope-gate/impl.py` fires on every
-`PreToolUse(Bash|Agent)` event. It counts the delegation targets the current
+`PreToolUse(Agent|Bash)` event. It counts the delegation targets the current
 turn has already created and, from the second one onward, emits
 `permissionDecision: "ask"` so the user sees the fan-out growing and decides
 whether the new target belongs to what they asked for.

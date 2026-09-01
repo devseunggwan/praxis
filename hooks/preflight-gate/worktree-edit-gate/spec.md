@@ -2,7 +2,9 @@
 
 Supported hosts: all
 
-`hooks/worktree-edit-gate.sh` fires on every PreToolUse event for `Edit` and
+`hooks/preflight-gate/worktree-edit-gate/impl.py` (run in-process by the
+`Edit|Write` dispatch group's `hooks/_dispatch.sh`, #1168) fires on every
+PreToolUse event for `Edit` and
 `Write` tools. It blocks edits to source files when the target repo's HEAD is
 on a configured base branch, enforcing the Issue-Driven Worktree Workflow.
 

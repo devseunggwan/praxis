@@ -90,6 +90,22 @@ main() is labeled with its number, and this list is the canonical roster
       doc-drift contract, applied to the hook surface. (Numbered 23 to stay
       clear of rules 21/22 added by a parallel PR.)
 
+  24. Canonical matcher token order (#1168): every plain pipe-joined tool-name
+      matcher (hooks and dispatch_groups alike) spells its tokens in sorted
+      order with no duplicates, so identical matcher SETS share one literal
+      spelling and can coalesce into one hooks.json group / dispatch group.
+      Regex-y matchers (any token with characters outside [A-Za-z0-9]) are
+      exempt, but an empty alternation token (`Edit|`) — which matches every
+      tool — is drift. (Numbered 24 on rebase: this rule was authored as 21
+      before rules 21-23 landed on main.)
+  25. Generated dispatcher commands are shell-safe (#1198): every hooks.json
+      `command` that invokes the dispatch wrapper, token-split the way `sh -c`
+      would, yields no bare shell control-operator token — an unquoted
+      pipe-carrying dispatch matcher would otherwise run as a pipeline and
+      silently disable the whole group. Non-dispatcher commands are out of
+      scope (a deliberate compound command is legitimate shell). (Numbered 25
+      on rebase: authored as 22 before rules 21-23 landed on main.)
+
 An unnumbered auxiliary check verifies the Codex adapter symlinks
 (plugins/praxis/{skills,hooks,scripts} → repo root).
 
@@ -114,6 +130,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -374,12 +391,18 @@ def dispatch_node_drifts(
             f"{len(member_nodes)} non-dispatcher node(s) in a collapsed group: "
             f"{[n.get('command', '') for n in member_nodes]}"
         )
+    # Args are shlex-quoted in the generated command (PR #1198: the host runs
+    # it via `sh -c`, so a pipe-carrying matcher MUST be quoted or it parses
+    # as a pipeline). Expect the quoted spelling — a no-op for plain tokens.
+    expected_args = (
+        f"{shlex.quote(event)} {shlex.quote(matcher or '')} {shlex.quote(host_id)}"
+    )
     for n in dispatch_nodes:
         cmd = n.get("command", "")
-        if f"{event} {matcher} {host_id}" not in cmd:
+        if expected_args not in cmd:
             out.append(
                 f"DISPATCH ARGS {event}/{matcher} host={host_id}: dispatcher "
-                f"command {cmd!r} missing '{event} {matcher} {host_id}' args"
+                f"command {cmd!r} missing '{expected_args}' args"
             )
     return out
 
@@ -1977,6 +2000,116 @@ def main() -> int:
                 f"derived {expected} — update the number(s) at "
                 f"{match.group(0)!r} (#1176)"
             )
+
+    # Rule 24 — canonical matcher token order (#1168)
+    #
+    # Dispatch (and hooks.json grouping) key on the LITERAL matcher string, so
+    # the same tool set spelled two ways (`Edit|Write` vs `Write|Edit`) can
+    # never coalesce into one group — each spelling cold-starts its own
+    # process chain. Canonical spelling: the pipe-joined tokens sorted
+    # lexicographically, no duplicates. Only plain tool-name matchers are
+    # normalized: a matcher with any token containing characters outside
+    # [A-Za-z0-9] (e.g. `mcp__.*`, `mcp__.*slack.*`) is regex-y and exempt —
+    # reordering regex alternations is not guaranteed meaning-preserving.
+    # Applies to hook entries AND dispatch_groups so a group declaration can
+    # never drift from the spelling its members use.
+    # ------------------------------------------------------------------
+    _PLAIN_TOKEN_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
+
+    def _canonical_matcher_drift(matcher: str | None, where: str) -> str | None:
+        if not matcher or "|" not in matcher:
+            return None
+        tokens = matcher.split("|")
+        # An EMPTY token is never a legitimate regex-y spelling: as a hook
+        # matcher regex, an empty alternation (`Edit|`, `Edit||Write`) matches
+        # EVERY tool name, silently widening the hook to all tools. Report it
+        # as drift instead of exempting it (PR #1198 review).
+        if any(t == "" for t in tokens):
+            return (
+                f"MATCHER ORDER {where}: {matcher!r} contains an empty "
+                "alternation token, which matches EVERY tool — remove the "
+                "stray '|' (#1168)"
+            )
+        if not all(_PLAIN_TOKEN_RE.fullmatch(t) for t in tokens):
+            return None  # regex-y matcher — exempt
+        canonical = "|".join(sorted(set(tokens)))
+        if matcher != canonical:
+            return (
+                f"MATCHER ORDER {where}: {matcher!r} is not in canonical "
+                f"(sorted, deduplicated) order — spell it {canonical!r} (#1168)"
+            )
+        return None
+
+    for entry in manifest["hooks"]:
+        entries = entry.get("entries") or [
+            {"event": entry.get("event"), "matcher": entry.get("matcher")}
+        ]
+        for e in entries:
+            drift = _canonical_matcher_drift(
+                e.get("matcher"), f"hook {entry['name']} ({e.get('event')})"
+            )
+            if drift:
+                drifts.append(drift)
+    for group in manifest.get("dispatch_groups", []):
+        drift = _canonical_matcher_drift(
+            group.get("matcher"), f"dispatch_groups ({group.get('event')})"
+        )
+        if drift:
+            drifts.append(drift)
+
+    # ------------------------------------------------------------------
+    # Rule 25 — generated dispatcher commands must be shell-safe (#1198)
+    #
+    # The host executes every hooks.json `command` string via `sh -c`. An
+    # UNQUOTED shell control operator in an interpolated value turns the
+    # command into something else entirely: the first pipe-carrying dispatch
+    # matcher (`... _dispatch.sh PreToolUse Edit|NotebookEdit|Write claude`)
+    # was parsed as a 3-command PIPELINE — the dispatcher ran with matcher
+    # 'Edit' (the wrong group) and its deny JSON was swallowed by the pipe,
+    # so all nine grouped hooks never fired. Rule 14 and the pytest parity
+    # suite both invoke the dispatcher directly and bypassed the shell, which
+    # is why neither caught it. This rule simulates the shell's token split
+    # (shlex with punctuation_chars — quoted operators stay inside their
+    # token) and flags a bare control-operator token.
+    #
+    # Scope: ONLY commands that invoke the dispatch wrapper. Those are the
+    # commands whose args the build interpolates from manifest data (matcher /
+    # host), which is the injection surface this rule guards. A per-hook
+    # wrapper command with a deliberate compound form (`... 2>&1`, `a && b`)
+    # is legitimate shell and must not fail CI with a quote-the-matcher
+    # message (round-2 review).
+    # ------------------------------------------------------------------
+    _SH_CONTROL_CHARS = set("|&;()<>")
+
+    def _sh_control_tokens(cmd: str) -> list[str]:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        try:
+            tokens = list(lex)
+        except ValueError:
+            return ["<unparseable: unbalanced quoting>"]
+        return [t for t in tokens if t and set(t) <= _SH_CONTROL_CHARS]
+
+    for host_id, hooks_path in hooks_outputs:
+        if not hooks_path.exists():
+            continue  # the drift/Rule 14 checks already report the missing file
+        hooks_json = json.loads(hooks_path.read_text())
+        for event_name, event_groups in hooks_json.get("hooks", {}).items():
+            for group in event_groups:
+                for node in group.get("hooks", []):
+                    cmd = node.get("command", "")
+                    if _build.DISPATCH_WRAPPER_NAME not in cmd:
+                        continue  # non-dispatcher command — out of scope
+                    bad = _sh_control_tokens(cmd)
+                    if bad:
+                        rel = hooks_path.relative_to(REPO_ROOT)
+                        drifts.append(
+                            f"UNQUOTED SHELL OPERATOR {rel} [{event_name}/"
+                            f"{group.get('matcher')}]: dispatcher command "
+                            f"{cmd!r} parses under `sh -c` with bare operator "
+                            f"token(s) {bad!r} — the interpolated matcher/host "
+                            "must be shlex-quoted (#1198)"
+                        )
 
     if drifts:
         print("plugin-manifest check FAILED:")

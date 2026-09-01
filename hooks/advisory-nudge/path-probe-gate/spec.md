@@ -2,7 +2,9 @@
 
 Supported hosts: claude, codex
 
-`hooks/path-probe-gate.sh` intercepts `Write`, `Edit`, and `NotebookEdit` tool
+`hooks/advisory-nudge/path-probe-gate/impl.py` (run in-process by the
+`Edit|NotebookEdit|Write` dispatch group's `hooks/_dispatch.sh`, #1168)
+intercepts `Write`, `Edit`, and `NotebookEdit` tool
 calls and emits a **stderr advisory** (or a hard deny in strict mode) when the
 target path is inside a git worktree at a depth greater than one directory below
 the worktree root, and the intermediate parent directory has not been recorded
@@ -119,8 +121,8 @@ path is not inside any known worktree, the hook passes through silently.
 ### How to enable
 
 The hook is registered in `hooks/manifest.json` under `PreToolUse` with matcher
-`Edit|Write|NotebookEdit`.  When installed as a Claude Code plugin, it is
-active automatically.
+`Edit|NotebookEdit|Write`, via the shared dispatch-group node (#1168). When
+installed as a Claude Code plugin, it is active automatically.
 
 For a manual `.claude/settings.json` installation:
 
@@ -129,12 +131,12 @@ For a manual `.claude/settings.json` installation:
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|NotebookEdit",
+        "matcher": "Edit|NotebookEdit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/path-probe-gate.sh",
-            "timeout": 8
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse 'Edit|NotebookEdit|Write' claude",
+            "timeout": 10
           }
         ]
       }
