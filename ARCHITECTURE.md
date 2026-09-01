@@ -319,6 +319,8 @@ packaging is *generated* from canonical metadata, not hand-edited:
   repository, homepage, category, keywords). `VERSION` is the authoritative
   version string.
 - `manifests/platforms/{claude,codex,cursor,gemini,opencode}.json` — per-platform output list.
+- `manifests/platforms/agent-plugins.json` — not a host, a *format*: the
+  vendor-neutral [Agent Plugins](https://agent-plugins.org/) 1.0.0 manifest.
 - `scripts/build-plugin-manifests.py` — regenerate every artifact. Idempotent.
 - `scripts/check-plugin-manifests.py` — CI drift gate. Verifies generated
   files match the source and that the Codex adapter shell's symlinks
@@ -343,6 +345,33 @@ Generated (committed) outputs:
 | `gemini-extension.json` | Gemini CLI extension catalog |
 | `.opencode/plugin.json` | OpenCode plugin root |
 | `.opencode/hooks/hooks.json` | OpenCode-compatible hooks (filtered) |
+| `plugin.json` | Agent Plugins 1.0.0 portable manifest |
+
+### Agent Plugins portable manifest
+
+Codex looks at the root `plugin.json` *before* the host-specific paths
+(`DISCOVERABLE_PLUGIN_MANIFEST_PATHS` = `.codex-plugin/`, `.claude-plugin/`,
+`.cursor-plugin/`, in that order), and takes it when its `$schema` names a
+supported Agent Plugins version. `.codex-plugin/plugin.json` is then applied
+as an overlay supplying `paths.hooks`, `paths.apps`, and `interface`, so
+adopting the portable manifest costs praxis no hook coverage.
+
+Two constraints hold this together, both gated by check-plugin-manifests
+Rule 23 because neither is visible to the byte-identity drift check:
+
+- **`$schema` is pinned to 1.0.0**, the only version Codex accepts. A newer
+  `agent-plugins.org` URI is worse than an unrelated one — it still wins
+  manifest selection, then loads as unsupported, so the `.codex-plugin/`
+  fallback never runs and the plugin disappears instead of degrading.
+- **No host-specific keys** (`skills`, `hooks`, `mcpServers`, `apps`,
+  `interface`). The spec's manifest schema is closed, so one such key
+  invalidates the document. Component locations are fixed by the spec at
+  `skills/` and `mcp.json`; host data belongs under `extensions.<namespace>`.
+
+The spec's portable component types are Agent Skills and MCP servers only —
+hooks are explicitly outside v1 and 1.1.0-draft. So this manifest carries
+praxis's skills, not its hooks, and it replaces none of the host manifests
+above.
 
 **Do not edit generated files directly.** Change `manifests/*.json` (or
 `VERSION`) and re-run the build script. Run `./scripts/check-plugin-manifests.py`

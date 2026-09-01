@@ -24,6 +24,10 @@ Writes (generated artifacts, committed to the repo):
   gemini-extension.json
   .opencode/plugin.json
   .opencode/hooks/hooks.json
+  plugin.json                    — Agent Plugins 1.0.0 portable manifest
+                                   (agent-plugins.org); read by Codex ahead
+                                   of .codex-plugin/plugin.json, which then
+                                   applies as a host overlay
   hooks/<name>{suffix}.sh        — runtime wrapper(s), one per unique
                                    (name, wrapper_suffix) pair; tracked
                                    so marketplace installs (which do not
@@ -71,6 +75,13 @@ SECURITY_DOC = REPO_ROOT / "SECURITY.md"
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from constants import NON_HOOK_DOCS, OPT_IN_HOOKS  # noqa: E402
 MANIFEST_PATH = HOOKS_DIR / "manifest.json"
+
+# Agent Plugins portable manifest schema, pinned to the one version Codex
+# accepts (SUPPORTED_AGENT_PLUGIN_SCHEMA_URIS in codex-rs holds 1.0.0 alone).
+# A newer agent-plugins.org URI is worse than an unrelated one: it still wins
+# manifest selection over .codex-plugin/, then loads as Unsupported, so the
+# fallback never runs.
+AGENT_PLUGIN_SCHEMA_URI = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 
 # docs/hook/<name>.md is a 1-line redirect stub to the role-based spec
 # (ADR-0001 §337-338): the flat docs/hook/ URLs must keep resolving for one
@@ -822,6 +833,28 @@ def render_gemini_extension(base: dict) -> dict:
     }
 
 
+def render_agent_plugin(base: dict) -> dict:
+    """Agent Plugins 1.0.0 portable manifest (https://agent-plugins.org/).
+
+    Carries spec-defined metadata only. Component paths are NOT emitted: the
+    spec fixes skills at `./skills` and MCP servers at `./mcp.json`, and its
+    manifest schema is closed, so a host-specific `skills` or `hooks` key here
+    invalidates the whole manifest. Codex takes `paths.hooks` from the
+    `.codex-plugin/plugin.json` overlay instead (agent_plugin_manifest.rs →
+    apply_codex_agent_plugin_extension).
+    """
+    return {
+        "$schema": AGENT_PLUGIN_SCHEMA_URI,
+        "name": base["name"],
+        "description": base["description"],
+        "version": base["version"],
+        "author": base["author"],
+        "homepage": base["homepage"],
+        "repository": base["repository"],
+        "keywords": base["keywords"],
+    }
+
+
 def render_output(
     base: dict,
     output: dict,
@@ -832,6 +865,8 @@ def render_output(
     kind = output["kind"]
     if kind == "plugin":
         return render_plugin(base, output.get("plugin_overrides", {}))
+    if kind == "agent-plugin":
+        return render_agent_plugin(base)
     if kind == "marketplace":
         return render_marketplace(
             base,
