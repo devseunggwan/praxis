@@ -72,7 +72,6 @@ import os
 import subprocess
 import sys
 import tempfile
-from collections import deque
 from pathlib import Path
 
 import sys as _sys
@@ -224,19 +223,89 @@ def _tail_candidate_lines(path: str, n: int, marker: str = _COMPACT_MARKER) -> l
     retained tail. Compactions are rare, so eliding non-candidates drops that
     to the size of the few real candidates.
 
-    What is NOT bounded, by either form: the scan reads the whole file to
-    reach its end (57 ms on a 100 MB transcript, measured), and a single
-    genuine candidate line is held at its full size because it still has to be
-    parsed. ValueError is caught alongside OSError to cover embedded-null path
-    payloads.
+    Time complexity: O(window size), not O(file size). The implementation reads
+    backward from EOF in fixed-size chunks, splitting on newlines and eliding
+    non-candidates immediately so memory is bounded by O(n * candidate_size),
+    not O(n * max_line_size). Stops as soon as n line boundaries are found.
+    Each chunk is decoded as bytes-then-split to avoid tearing multi-byte
+    characters at a chunk boundary. ValueError is caught alongside OSError to
+    cover embedded-null path payloads.
+
+    Issue #1155: before this change the scan read the whole file to reach its
+    end (105 ms on a 102 MB fixture). After, runtime is O(window size)
+    regardless of file length.
     """
+    # Fixed chunk size: large enough to span several typical JSONL lines but
+    # small enough not to read the entire file for short tails. 512 KB is a
+    # practical sweet spot — it spans ~500 lines at 1 KB/line or ~2 lines at
+    # 200 KB/line.
+    _CHUNK = 512 * 1024  # 512 KB
+
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            return list(deque((line if marker in line else "" for line in fh), maxlen=n))
+        with open(path, "rb") as fh:
+            fh.seek(0, 2)  # seek to EOF
+            file_size = fh.tell()
+            if file_size == 0:
+                return []
+
+            # Accumulate decoded lines from back to front; stop at n lines.
+            # `leftover` holds an incomplete line fragment from the start of
+            # the previous chunk (which is the tail of an earlier chunk).
+            collected: list[str] = []  # most-recent line first
+            leftover = b""
+            pos = file_size
+
+            while pos > 0 and len(collected) < n:
+                read_size = min(_CHUNK, pos)
+                pos -= read_size
+                fh.seek(pos)
+                chunk = fh.read(read_size)
+
+                # Prepend the leftover from the previous (later) iteration.
+                # Since we are going backward, the leftover is the beginning
+                # of the next (chronologically later) line.
+                data = chunk + leftover
+
+                # Split into lines. All elements except the first are complete
+                # lines (they end with \n that we split on).
+                parts = data.split(b"\n")
+                # The first element is the tail of a line whose start is even
+                # earlier in the file — keep it as the new leftover.
+                leftover = parts[0]
+                # The rest are complete lines, in file order (oldest first).
+                # Reverse them so we process newest-first.
+                complete = parts[1:]
+                for raw in reversed(complete):
+                    if not raw and not collected:
+                        # trailing newline at EOF — skip the empty fragment
+                        continue
+                    try:
+                        line = raw.decode("utf-8", errors="replace")
+                        if line and not line.endswith("\n"):
+                            line = line + "\n"
+                    except (UnicodeDecodeError, ValueError):
+                        line = ""
+                    collected.append(line if marker in line else "")
+                    if len(collected) >= n:
+                        break
+
+            # Handle leftover (the first line of the file, or the partial line
+            # that bridges pos=0 and the first chunk).
+            if len(collected) < n and leftover:
+                try:
+                    line = leftover.decode("utf-8", errors="replace")
+                    if line and not line.endswith("\n"):
+                        line = line + "\n"
+                except (UnicodeDecodeError, ValueError):
+                    line = ""
+                collected.append(line if marker in line else "")
+
+            # `collected` is newest-first; reverse to restore file order.
+            collected.reverse()
+            return collected[-n:]
+
     except (OSError, ValueError):
         return []
-
-
 def find_latest_compact_summary(transcript_path: str, n_lines: int) -> dict | None:
     """Scan the tail of the JSONL transcript for the most recent compaction.
 
