@@ -151,17 +151,28 @@ def _extract_title(argv: list[str]) -> str | None:
 # Repo resolution
 # ---------------------------------------------------------------------------
 
+class BudgetExhausted(Exception):
+    """The dispatcher budget ran out before a lookup could start.
+
+    Not a lookup failure: the command itself is fine, so the gate must fail
+    open. The helpers' ordinary failure values (`None`, `-1`) both reach block
+    paths, which is how a slow dispatcher turns into a rejected `gh pr create`.
+    """
+
+
 def _resolve_origin_repo() -> str | None:
     """Run `git remote get-url origin` and parse owner/repo from URL.
 
-    Returns None on any failure (no git, no origin, unparseable URL).
+    Returns None on any failure (no git, no origin, unparseable URL), which the
+    caller blocks on. Raises BudgetExhausted when there is no runway to look,
+    which the caller passes on instead.
     """
     # This hook runs the git lookup and then the gh search, so neither may
     # take its own full slice: remaining_budget shrinks between them and their
-    # SUM stays inside the member budget (issue #1167, codex #1195 round 1).
+    # SUM stays inside the member budget (issue #1167).
     budget = remaining_budget(GIT_TIMEOUT_SEC)
     if budget < MIN_SUBPROC_BUDGET_SEC:
-        return None
+        raise BudgetExhausted("git remote lookup")
     try:
         proc = subprocess.run(
             ["git", "remote", "get-url", "origin"],
@@ -217,7 +228,8 @@ def _run_gh_search(repo: str, keywords: list[str]) -> tuple[int, str, str]:
 
     Returns (returncode, stdout, stderr). On infrastructure failure
     (binary missing, timeout) returns (-1, "", "<reason>") so callers can
-    distinguish from real gh errors.
+    distinguish from real gh errors. Raises BudgetExhausted when there is no
+    runway to search — that is not a failure of the search.
     """
     query = " ".join(keywords)
     cmd = [
@@ -230,7 +242,7 @@ def _run_gh_search(repo: str, keywords: list[str]) -> tuple[int, str, str]:
     ]
     budget = remaining_budget(GH_TIMEOUT_SEC)
     if budget < MIN_SUBPROC_BUDGET_SEC:
-        return -1, "", "budget exhausted before the gh search could run"
+        raise BudgetExhausted("gh dedup search")
     try:
         proc = subprocess.run(
             cmd,
@@ -319,6 +331,16 @@ def _block_gh_error(repo: str, rc: int, stderr_text: str) -> str:
     )
 
 
+def _budget_skip(exc: BudgetExhausted) -> int:
+    """Report the skip and pass. Silence here would be indistinguishable from
+    a dedup search that ran and found nothing."""
+    sys.stderr.write(
+        f"[pre-gh-pr-create-dedup-gate] {exc} 전에 그룹 예산이 소진되어 "
+        "중복 검사를 건너뜁니다 (fail-open — 차단하지 않음).\n"
+    )
+    return 0
+
+
 @fail_open
 def main() -> int:
     try:
@@ -350,7 +372,10 @@ def main() -> int:
         if shutil.which("gh") is None:
             return 0
 
-        repo = _extract_repo(argv) or _resolve_origin_repo()
+        try:
+            repo = _extract_repo(argv) or _resolve_origin_repo()
+        except BudgetExhausted as exc:
+            return _budget_skip(exc)
         if not repo:
             sys.stderr.write(BLOCK_REPO_MSG)
             return 2
@@ -368,7 +393,10 @@ def main() -> int:
             )
             return 0
 
-        rc, stdout, stderr_text = _run_gh_search(repo, keywords)
+        try:
+            rc, stdout, stderr_text = _run_gh_search(repo, keywords)
+        except BudgetExhausted as exc:
+            return _budget_skip(exc)
         if rc != 0:
             sys.stderr.write(_block_gh_error(repo, rc, stderr_text))
             return 2
