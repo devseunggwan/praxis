@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/external-write-path-existence-check.py` is a PreToolUse advisory
+`hooks/advisory-nudge/external-write-path-existence-check/impl.py` is a PreToolUse advisory
 that warns when a `gh issue` / `gh pr` body file references repository paths
 that do not exist on disk.
 
@@ -115,7 +115,7 @@ Restart Claude Code after adding the entry.
 ### Tests
 
 ```bash
-bash tests/test_external_write_path_existence_check.sh
+bash tests/hooks/advisory-nudge/test_external_write_path_existence_check.sh
 ```
 
 Covers 9 cases (Phase 1 scope + M1/M2/M3 regression + P1 refinements):

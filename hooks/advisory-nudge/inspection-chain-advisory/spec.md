@@ -125,7 +125,7 @@ cases.
 ### Tests
 
 ```bash
-bash tests/test_inspection_chain_advisory.sh
+bash tests/hooks/advisory-nudge/test_inspection_chain_advisory.sh
 ```
 
 Cases cover: advisory firing on pure-inspection chains (grep, gh view,

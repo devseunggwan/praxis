@@ -2,7 +2,7 @@
 
 Supported hosts: claude, codex
 
-`hooks/block-pr-without-caller-evidence.py` fires on every PreToolUse(Bash)
+`hooks/preflight-gate/block-pr-without-caller-evidence/impl.py` fires on every PreToolUse(Bash)
 event and inspects the command for `gh pr create` / `gh pr new` invocations.
 The hook blocks the call (when attested — see the tiering section below) unless the effective PR body contains a literal
 `Caller chain verified:` line. Goal: enforce the pre-PR caller-chain grep
@@ -128,7 +128,7 @@ primitive (shlex-based, posix=True). Specifically:
 
 ### Tests
 
-`hooks/test-block-pr-without-caller-evidence.sh` covers 39 cases (43 checks; tier boundary cases included) —
+`tests/hooks/preflight-gate/test_block_pr_without_caller_evidence.sh` covers 39 cases (43 checks; tier boundary cases included) —
 positive blocks (no body, body without marker, marker in fenced block,
 stdin body, missing file, TOCTOU overwrite, marker after newline-only
 gap), positive passes (inline marker, file with marker, heredoc-built
@@ -137,5 +137,5 @@ compound-cascade advisory suffix, env/sudo prefix peeling, and malformed
 input fail-open. Run before editing the hook:
 
 ```bash
-./hooks/test-block-pr-without-caller-evidence.sh
+tests/hooks/preflight-gate/test_block_pr_without_caller_evidence.sh
 ```

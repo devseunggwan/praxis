@@ -2,7 +2,7 @@
 
 Supported hosts: claude (the omc `pre-tool-enforcer` false positive this hook corrects exists only in the Claude Code ecosystem — issue #1158)
 
-`hooks/builtin-task-postuse.py` fires after any built-in task **management**
+`hooks/postuse-correction/builtin-task-postuse/impl.py` fires after any built-in task **management**
 tool executes and emits a corrective context note so Claude is not misled by
 upstream hook false positives.
 
@@ -33,11 +33,11 @@ correction note — "no subagent was spawned, prior signals were false positives
 
 ### Tests
 
-`tests/test_builtin_task_postuse.sh` covers 18 cases: corrective output for
+`tests/hooks/postuse-correction/test_builtin_task_postuse.sh` covers 18 cases: corrective output for
 all 6 management tools, silent pass-through for `Task` / `Agent` / `Bash` /
 `Edit` / `Write` / `Read` / `Skill`, and edge cases (empty stdin, malformed
 JSON, missing tool field). Run before editing the hook:
 
 ```bash
-./tests/test_builtin_task_postuse.sh
+tests/hooks/postuse-correction/test_builtin_task_postuse.sh
 ```

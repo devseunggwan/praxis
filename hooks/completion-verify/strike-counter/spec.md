@@ -4,7 +4,7 @@ Supported hosts: all
 
 `hooks/strike-counter.sh` implements praxis's session-scoped three-strike
 discipline. A single bash script dispatches across multiple modes — three
-of them are registered in `hooks/hooks.json`, the rest are exposed to the
+of them are registered in `hooks/manifest.json`, the rest are exposed to the
 user as slash commands.
 
 ```
@@ -119,7 +119,7 @@ session. The hook would rather report nothing than crash mid-prompt.
 
 ### Tests
 
-`hooks/test-strike-counter.sh` covers ~25 acceptance cases, named
+`tests/hooks/completion-verify/test_strike_counter.sh` covers ~25 acceptance cases, named
 `test_ac{N}_{description}` — first/second/third strike level messages,
 Stop hook block at 3 and silence under 3, `stop_hook_active`
 short-circuit, reset clears state, preprompt context contents,
@@ -130,5 +130,5 @@ detection, reflection-gate refuse / accept paths. Run before editing
 the hook:
 
 ```bash
-./hooks/test-strike-counter.sh
+tests/hooks/completion-verify/test_strike_counter.sh
 ```

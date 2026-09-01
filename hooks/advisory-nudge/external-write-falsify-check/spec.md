@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/external-write-falsify-check.py` is an **opt-in** PreToolUse advisory
+`hooks/advisory-nudge/external-write-falsify-check/impl.py` is an **opt-in** PreToolUse advisory
 that warns before posting hypothesis-stage text to external surfaces (PR
 comments, issue bodies, Slack messages, Notion pages). It enforces the
 global `~/.claude/CLAUDE.md` rule `External-Surface Write Requires Falsification`
@@ -20,7 +20,7 @@ evidence bar; shipping with the code unavailable would discard already-
 written infrastructure (245 LOC + 151 LOC tests, ported `_hook_utils`
 patterns).
 
-Compromise: the code lands in `main`, **but `hooks/hooks.json` does not
+Compromise: the code lands in `main`, **but `hooks/manifest.json` does not
 register it**. Users who want the advisory enable it explicitly. This
 preserves the option without changing default behavior, and gives
 evidence collection a defined opt-in cohort instead of forcing the

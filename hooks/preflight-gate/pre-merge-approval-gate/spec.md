@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/pre-merge-approval-gate.py` fires on every PreToolUse(Bash) event and
+`hooks/preflight-gate/pre-merge-approval-gate/impl.py` fires on every PreToolUse(Bash) event and
 intercepts `gh pr merge` invocations. The gate emits
 `permissionDecision: "ask"` so the user sees the merge attempt and must approve
 it in the Claude Code permission UI. This applies to every session — there is
@@ -87,7 +87,7 @@ chained side-effects abort with the merge. Single-command merges (just
 ### Tests
 
 ```bash
-bash tests/test_pre_merge_approval_gate.sh
+bash tests/hooks/preflight-gate/test_pre_merge_approval_gate.sh
 ```
 
 Covers ASK paths (bare, `--merge`, `--delete-branch`), ASK under

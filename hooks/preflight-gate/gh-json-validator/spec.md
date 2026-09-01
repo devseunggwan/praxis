@@ -128,5 +128,5 @@ the same command is harmless.
 ### Tests
 
 ```bash
-bash tests/test_gh_json_validator.sh
+bash tests/hooks/preflight-gate/test_gh_json_validator.sh
 ```

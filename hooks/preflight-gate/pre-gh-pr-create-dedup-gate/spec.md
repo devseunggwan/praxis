@@ -180,7 +180,7 @@ layer.
 ### Tests
 
 ```bash
-bash hooks/test-pre-gh-pr-create-dedup-gate.sh
+bash tests/hooks/preflight-gate/test_pre_gh_pr_create_dedup_gate.sh
 ```
 
 Covers 27 cases: repo resolution (flag form, short form, equals form,

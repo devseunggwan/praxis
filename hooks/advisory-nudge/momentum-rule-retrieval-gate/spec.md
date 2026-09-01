@@ -352,8 +352,8 @@ tracking per PPID or `session_id`.
 ### Detection logic
 
 The hook uses the same `safe_tokenize` / `iter_command_starts` / `strip_prefix`
-pipeline as sibling hooks (`pre-merge-approval-gate.py`,
-`bash-worktree-existence-advisory.py`). Each segment in the tokenized command
+pipeline as sibling hooks (`hooks/preflight-gate/pre-merge-approval-gate/impl.py`,
+`hooks/advisory-nudge/bash-worktree-existence-advisory/impl.py`). Each segment in the tokenized command
 is inspected independently so that compound commands (`cmux new-workspace && gh
 pr merge ...`) trigger the appropriate surfaces for each matching segment.
 
@@ -386,47 +386,22 @@ prefix-matched form).
 | `verify-commit-flag-override` | Fires on `git commit --no-verify`. Different trigger, no overlap. |
 | `memory-hint` | Surfaces `hookable: true` memory entries by keyword. The momentum gate specifically surfaces the entries most relevant to merge / dispatch / force-push momentum, as a targeted complement to the general memory-hint scan. |
 
-### Firing order (PreToolUse Bash chain)
+### Co-firing with the sibling gates (PreToolUse Bash)
 
-`hooks/hooks.json` registers the PreToolUse(Bash) hooks in this order. Claude
-Code fires them sequentially; `momentum-rule-retrieval-gate` is registered
-LAST (19th), AFTER `pre-merge-approval-gate` (9th):
+Per the [Anthropic hooks docs](https://code.claude.com/docs/en/hooks), all
+matching hooks run **in parallel**: array position in `hooks/manifest.json` is
+registration order, not firing order, and no hook runs before or after another.
 
-| # | Hook |
-| --- | ------ |
-| 1 | `side-effect-scan` |
-| 2 | `block-gh-state-all` |
-| 3 | `memory-hint` |
-| 4 | `cross-boundary-preflight` |
-| 5 | `block-pr-without-caller-evidence` |
-| 6 | `pre-gh-pr-create-dedup-gate` |
-| 7 | `commit-title-length-check` |
-| 8 | `pre-merge-approval-gate` (surfaces `permissionDecision: ask` on `gh pr merge`) |
-| 9 | `gh-flag-verify` |
-| 10 | `cli-flag-incompat-advisory` |
-| 11 | `jq-config-empty-dict-advisory` |
-| 12 | `bash-worktree-existence-advisory` |
-| 13 | `verify-commit-flag-override` |
-| 14 | `session-intent` |
-| 15 | `output-block-falsify-advisory` |
-| 16 | `count-assertion-verify` |
-| 17 | `external-write-path-existence-check` |
-| 18 | **`momentum-rule-retrieval-gate`** (this hook — stderr rule reminders) |
+What matters here is therefore co-firing, not sequence. On `gh pr merge` this
+hook and `pre-merge-approval-gate` both match. The sibling surfaces a
+`permissionDecision: ask` dialog; this hook writes stderr rule reminders. Both
+reach the user in the same surface — an `ask` from one hook does not suppress
+another hook's output, because there is no chain to short-circuit.
 
-When both `pre-merge-approval-gate` and this hook fire on `gh pr merge`, the
-user first sees the sibling's `permissionDecision: ask` dialog (hard-gate)
-and the stderr reminders from this hook accompany the prompt context. A
-`permissionDecision: ask` from an earlier sibling does not short-circuit
-subsequent advisory hooks — both the stderr payload and the ask dialog are
-surfaced together by Claude Code.
-
-Future hooks added to the same matcher should preserve this invariant:
-**hard-gates (deny / ask) before advisories**, so that when an upstream gate
-blocks, the downstream advisory output is still produced and visible in the
-same surface.
-
-When updating this table, regenerate it from `hooks/hooks.json` directly so
-the doc cannot drift from the source-of-truth registration order.
+A hook added to this matcher inherits that property automatically. There is no
+ordering invariant to preserve, and none can be expressed: a spec that asks
+future hooks to register "before" or "after" this one is asking for something
+the runtime does not offer.
 
 ### Fail-open contract
 
@@ -441,7 +416,7 @@ The hook returns exit 0 on every infrastructure error:
 ### Tests
 
 ```bash
-bash tests/test_momentum_rule_retrieval_gate.sh
+bash tests/hooks/advisory-nudge/test_momentum_rule_retrieval_gate.sh
 ```
 
 Cases: gh pr merge trigger, cmux new-workspace trigger, force-push triggers

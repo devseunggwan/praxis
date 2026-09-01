@@ -26,8 +26,8 @@ The three patterns covered:
 
 ### What is blocked / asked
 
-The hook uses `safe_tokenize → iter_command_starts → strip_prefix` (same
-pipeline as sibling hooks) so only live `gh` invocations match. Pattern
+The hook uses `_hook_utils.tokenize_with_roles` (the same role-aware
+tokenization as sibling hooks, issue #263) so only live `gh` invocations match. Pattern
 references inside quoted arguments, echo/grep/commit bodies, or preceding
 variable assignments are transparent pass-throughs.
 

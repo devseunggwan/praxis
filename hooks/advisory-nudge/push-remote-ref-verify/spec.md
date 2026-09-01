@@ -44,7 +44,8 @@ agent more forcefully.
 ### How the target is resolved
 
 1. The Bash command is structurally tokenized (`safe_tokenize` →
-   `iter_command_starts` → `strip_prefix`, same pipeline as sibling hooks) and
+   `iter_command_starts` → `strip_prefix`, in the shared
+   `hooks/_lib/_git_push_target.py` helper) and
    the first `git push` segment is located, honouring global `git -C <dir>`.
 2. The push argv is parsed into `{remote, refspec, force}`. Value-taking flags
    (`-o`/`--push-option`/`--exec`/`--receive-pack`/`--repo`) consume their

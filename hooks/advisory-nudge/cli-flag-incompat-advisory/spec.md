@@ -80,15 +80,19 @@ fix or proceed.
 The hook uses a plugin-style registry:
 
 ```python
-def _check_<cli>(argv: list[str]) -> Optional[str]:
-    argv = strip_prefix(argv)
-    if not argv or argv[0] != "<cli>":
+def _check_<cli>(seg: list[Token]) -> Optional[str]:
+    argv = filter_argv(seg)
+    if not argv or argv[0].text != "<cli>":
         return None
     # Return advisory text or None
     ...
 
 CHECKS = (_check_git, _check_kubectl, _check_<new_cli>)
 ```
+
+Command segments come from `_hook_utils.tokenize_with_roles` (role-aware
+tokenization, issue #263), so each check receives typed `Token` segments
+and `filter_argv` drops env-prefix/wrapper tokens before matching.
 
 Each check function returns `Optional[str]` (the advisory text). The hook
 walks every command segment, runs every check, and emits the first hit.
@@ -112,7 +116,7 @@ walks every command segment, runs every check, and emits the first hit.
 ### Tests
 
 ```bash
-bash hooks/test-cli-flag-incompat-advisory.sh
+bash tests/hooks/advisory-nudge/test_cli_flag_incompat_advisory.sh
 ```
 
 26 cases: 7 advisory (4 git merge-tree variants, 3 kubectl including

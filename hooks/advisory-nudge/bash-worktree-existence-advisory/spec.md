@@ -128,7 +128,7 @@ The hook returns exit 0 on every infrastructure error:
 ### Tests
 
 ```bash
-bash tests/test_bash_worktree_existence_advisory.sh
+bash tests/hooks/advisory-nudge/test_bash_worktree_existence_advisory.sh
 ```
 
 33 cases covering: missing path advisory (direct and compound command),

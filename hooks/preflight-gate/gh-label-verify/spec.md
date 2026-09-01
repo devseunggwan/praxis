@@ -94,5 +94,5 @@ matcher; deny precedence ensures the user sees the first denial reason.
 ### Tests
 
 ```bash
-bash tests/test_gh_label_verify.sh
+bash tests/hooks/preflight-gate/test_gh_label_verify.sh
 ```

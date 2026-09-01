@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/pre-edit-md-escape-advisory.py` is a paired PreToolUse(Edit) +
+`hooks/postuse-correction/pre-edit-md-escape-advisory/impl.py` is a paired PreToolUse(Edit) +
 PostToolUse(Read) hook that nudges the agent to Read a markdown file
 before constructing an `old_string` containing escape-sensitive tokens.
 
@@ -134,7 +134,7 @@ Read the exact line range first before constructing old_string.
 
 ### Registration in consuming project's `.claude/settings.json`
 
-The hook is registered in the praxis plugin's own `hooks/hooks.json` and
+The hook is registered in the praxis plugin's own `hooks/manifest.json` and
 fires automatically when the plugin is loaded. To re-register manually:
 
 ```json
@@ -199,7 +199,7 @@ fires automatically when the plugin is loaded. To re-register manually:
 ### Tests
 
 ```bash
-bash hooks/test-pre-edit-md-escape-advisory.sh
+bash tests/hooks/postuse-correction/test_pre_edit_md_escape_advisory.sh
 ```
 
 Covers 31 cases:

@@ -3,7 +3,7 @@
 Supported hosts: claude
 Requires: zsh (the verdict is delegated to a zsh nomatch replay; without zsh the check passes vacuously)
 
-`hooks/block-unmatched-glob.sh` intercepts `Bash` tool calls and **blocks**
+`hooks/preflight-gate/block-unmatched-glob/impl.py` intercepts `Bash` tool calls and **blocks**
 (exit 2) when the command contains an unquoted glob that matches nothing.
 
 ## Why this exists

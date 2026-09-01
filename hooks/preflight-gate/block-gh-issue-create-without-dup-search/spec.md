@@ -64,7 +64,7 @@ literally in a prior search command.
 ### Tests
 
 ```bash
-bash tests/test_block_gh_issue_create_without_dup_search.sh
+bash tests/hooks/preflight-gate/test_block_gh_issue_create_without_dup_search.sh
 ```
 
 Covers both block paths (no search, no overlap), silent paths (each escape

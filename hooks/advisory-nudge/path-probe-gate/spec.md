@@ -118,7 +118,7 @@ path is not inside any known worktree, the hook passes through silently.
 
 ### How to enable
 
-The hook is registered in `hooks/hooks.json` under `PreToolUse` with matcher
+The hook is registered in `hooks/manifest.json` under `PreToolUse` with matcher
 `Edit|Write|NotebookEdit`.  When installed as a Claude Code plugin, it is
 active automatically.
 
@@ -166,7 +166,7 @@ The hook returns exit 0 on every infrastructure error:
 ### Tests
 
 ```bash
-bash tests/test_path_probe_gate.sh
+bash tests/hooks/advisory-nudge/test_path_probe_gate.sh
 ```
 
 Covers: depth-0 (silent), depth-1 advisory on first write, depth-1 silent on

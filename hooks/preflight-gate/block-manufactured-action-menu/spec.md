@@ -2,7 +2,7 @@
 
 Supported hosts: all
 
-`hooks/block-manufactured-action-menu.py` fires on every PreToolUse(AskUserQuestion)
+`hooks/preflight-gate/block-manufactured-action-menu/impl.py` fires on every PreToolUse(AskUserQuestion)
 event and inspects `options[].label` for manufactured action-menu markers. Two
 marker forms are recognised:
 
@@ -211,7 +211,7 @@ Block response (exit 2):
 ### Tests
 
 ```bash
-bash hooks/test-block-manufactured-action-menu.sh
+bash tests/hooks/preflight-gate/test_block_manufactured_action_menu.sh
 ```
 
 Covers: Korean manufactured markers (advisory + strict block), English markers
