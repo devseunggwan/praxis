@@ -10,14 +10,33 @@ Record a single rule violation against the current session's strike counter.
 ## What to do
 
 1. Treat the user's full argument text as the violation reason (verbatim, do not sanitize or abbreviate).
-2. Run the strike counter via the Bash tool, passing the reason as the argument:
+2. Run the strike counter via the Bash tool, passing the reason as one
+   argument:
+
    ```bash
-   "${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/hooks/strike-counter.sh" strike "{{ARGUMENTS}}"
+   "${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/hooks/strike-counter.sh" strike '<reason>'
    ```
-   `{{ARGUMENTS}}` is substituted by the host before the command runs (see
-   `writing-praxis-skill` → Host Differences) — a shell-variable spelling of
-   the same name is unset in a skill-body Bash block, so it would expand to
-   empty and record a blank reason, defeating step 1's "verbatim".
+
+   `<reason>` is **not** a placeholder the host fills in. The host substitutes
+   `{{ARGUMENTS}}` in this file's text before you read it (see
+   `writing-praxis-skill` → Host Differences), and you then compose the Bash
+   call — so the quoting is yours to get right. Two rules:
+
+   - **Single-quote the reason, and write `'\''` for each `'` inside it.**
+     Reasons routinely carry backticks (this repo quotes `code` everywhere) and
+     may carry `$(...)` or `"`. Inside double quotes the shell would run those
+     as command substitution or break the command outright; inside single
+     quotes every byte is literal, which is what step 1's "verbatim" requires.
+   - **Do not spell the placeholder as a shell variable.** It is unset in a
+     skill-body Bash block, so it would expand to empty and record a blank
+     reason.
+
+   Example — a reason that itself contains backticks:
+
+   ```bash
+   "${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/hooks/strike-counter.sh" strike 'forgot to run `git fetch` first'
+   ```
+
 3. Report the script's stdout verbatim to the user. Do not paraphrase the level-specific message — the exact wording is part of the discipline signal.
 
 ## Reinforcement after the call
