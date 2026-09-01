@@ -438,7 +438,11 @@ If a hook bug produces false blocks in production:
 git -C ~/.claude/plugins/.../praxis apply --reverse <patch>
 
 # Option 2: edit hooks/manifest.json, remove the retrospect-mix-check entry
-#          from the "Stop" array, save.
+#          from the "Stop" array, then regenerate and reload. The manifest is
+#          the source; the runtime reads the generated per-platform
+#          hooks.json, so editing the manifest alone changes nothing.
+./scripts/build-plugin-manifests.py   # rewrites .claude-plugin/hooks/hooks.json et al.
+#          then reload the plugin (restart the session) to pick it up.
 
 # Option 3: temporary kill switch — edit ${CLAUDE_PLUGIN_ROOT}/hooks/
 #           retrospect-mix-check.sh and add `exit 0` at the top.
