@@ -54,14 +54,27 @@ covered uniformly.
 ### Caching
 
 Label sets are cached per repo at
-`${XDG_CACHE_HOME:-~/.cache}/claude-praxis/gh-label-cache.json`. Cache
-entries expire after `PRAXIS_GH_LABEL_CACHE_TTL_SEC` seconds (default
-300). Cache corruption, write failures, or read failures are all
-fail-open: enforcement still runs from a fresh fetch, just without
-persistence.
+`${PRAXIS_HOME:-~/.praxis}/cache/gh-label-cache.json`, resolved through the
+shared `_paths.resolve_writable("cache", …)` (#1182) so `PRAXIS_HOME`
+relocates it and the opportunistic `prune_stale` TTL sweep covers it like
+every other cache entry (the hook payload's `session_id` is threaded into the
+sweep so it never deletes the calling session's own live markers).
+Deliberately NOT `resolve_cache_file`: its legacy-`${TMPDIR}` adoption would
+let a pre-seeded world-writable `${TMPDIR}/praxis-gh-label-cache.json` be
+promoted into the trusted label cache, and this file never lived in TMPDIR.
+Cache entries expire after `PRAXIS_GH_LABEL_CACHE_TTL_SEC` seconds (default
+300); an entry whose `fetched_at` lies in the future is rejected as stale
+rather than read as forever-fresh. Cache corruption, write failures, or read
+failures are all fail-open: enforcement still runs from a fresh fetch, just
+without persistence.
 
 Override the cache file location via `PRAXIS_GH_LABEL_CACHE_PATH` (used
 by tests; also useful for isolated sandboxes).
+
+Before #1182 the cache lived at
+`${XDG_CACHE_HOME:-~/.cache}/claude-praxis/gh-label-cache.json`, outside the
+documented praxis roots. Old files are not migrated — entries expire in
+minutes, so a stranded file costs at most one refetch and rots harmlessly.
 
 ### Fail-open paths
 
