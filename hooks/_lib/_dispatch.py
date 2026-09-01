@@ -311,17 +311,21 @@ def _skip_result(
     return 0, stdout, note + "\n"
 
 
-def _record_fires(members, results, payload_raw: str) -> None:
+def _record_fires(members, results, payload_raw: str, event: str) -> None:
     """Log each member's fire decision (issue #710). Fail-open, never raises.
 
     Called once per member from `run_group`'s loop (incremental — a host kill
     mid-group must not erase the records of members already resolved), with
     single-element lists. Lazily imports `_fire_ledger` so a missing/broken
     module can never break the dispatcher — fire telemetry is observe-only.
+
+    `event` is forwarded so the ledger can gate its Stop-lane classification
+    the same way `run_group` gates the lane itself; without it the ledger
+    recorded blocks under events where the dispatcher never aggregates.
     """
     try:
         import _fire_ledger  # type: ignore[import-not-found]
-        _fire_ledger.record_group_fires(members, results, payload_raw)
+        _fire_ledger.record_group_fires(members, results, payload_raw, event)
     except Exception:
         pass
 
@@ -401,7 +405,7 @@ def run_group(
         results.append(result)
         # Fire telemetry (issue #710): observe-only and fail-open — the
         # dispatcher's decision is unaffected.
-        _record_fires([(role, name, impl)], [result], payload_raw)
+        _record_fires([(role, name, impl)], [result], payload_raw, event)
         # Forward this member's stderr (advisory nudges and deny reasons alike)
         # as it resolves, so a host kill later in the group cannot erase it.
         member_rc, member_so, member_se = result

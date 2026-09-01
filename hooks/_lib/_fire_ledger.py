@@ -137,7 +137,9 @@ def _is_stop_block(stdout: str) -> bool:
     return isinstance(obj, dict) and obj.get("decision") == "block"
 
 
-def classify_decision(rc: int, stdout: str, stderr: str) -> str:
+def classify_decision(
+    rc: int, stdout: str, stderr: str, event: str | None = None
+) -> str:
     """Map a member's `(exit, stdout, stderr)` to a fire decision.
 
     Mirrors `_dispatch.run_group`'s PER-MEMBER decision precedence (this is one
@@ -145,8 +147,20 @@ def classify_decision(rc: int, stdout: str, stderr: str) -> str:
     block (exit 2 / deny marker / Stop-lane `{"decision": "block"}` JSON) >
     ask (ask marker) > advise (any stderr) > pass.
     A dispatcher budget-skip record (never actually run) is decision "skip".
+
+    `event` is the dispatcher's own event, not a payload field: run_group has it
+    as a parameter, so passing it down cannot be defeated by a payload that
+    omits `hook_event_name`. It gates the Stop-lane branch because the
+    dispatcher accepts that shape only under `is_stop` and only at `rc == 0`
+    (`_dispatch.run_group`); without both gates the ledger recorded a block the
+    dispatcher never enforced — a member that printed the JSON and then died,
+    or one that printed it under another event. Exit 2 stays event-agnostic,
+    matching the dispatcher's own exit-2 lane. None means "event unknown", and
+    an unknown event is not Stop.
     """
-    if rc == 2 or _DENY_MARKER in stdout or _is_stop_block(stdout):
+    if rc == 2 or _DENY_MARKER in stdout:
+        return DECISION_BLOCK
+    if rc == 0 and event == "Stop" and _is_stop_block(stdout):
         return DECISION_BLOCK
     if _ASK_MARKER in stdout:
         return DECISION_ASK
@@ -425,12 +439,17 @@ def _extract_payload(payload_raw: str) -> tuple[str, str]:
     return (sid if isinstance(sid, str) else ""), (tool if isinstance(tool, str) else "")
 
 
-def record_group_fires(members, results, payload_raw: str) -> None:
+def record_group_fires(
+    members, results, payload_raw: str, event: str | None = None
+) -> None:
     """Append one fire record per `(member, result)` pair. Fail-open, batched.
 
     `members`   : list of `(role, name, impl)` from `group_members`.
     `results`   : list of `(rc, stdout, stderr)` from `run_one`, positionally aligned.
     `payload_raw`: the raw hook payload JSON (session_id / tool_name source).
+    `event`     : the dispatcher's event, forwarded to `classify_decision` so
+                  the Stop-lane branch is gated the same way the dispatcher
+                  gates it. Omitting it reads as "unknown", never as Stop.
 
     One file open per call. The dispatcher calls this INCREMENTALLY — one
     member per call, right after that member resolves — so a host kill
@@ -452,7 +471,7 @@ def record_group_fires(members, results, payload_raw: str) -> None:
                 "tool": tool,
                 "hook": name,
                 "role": role,
-                "decision": classify_decision(rc, stdout, stderr),
+                "decision": classify_decision(rc, stdout, stderr, event),
                 "granularity": "rich",
             }, ensure_ascii=False))
         _atomic_append(resolve_path(), lines)

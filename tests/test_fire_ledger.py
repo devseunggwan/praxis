@@ -86,7 +86,10 @@ _STOP_QUOTING = (
     (0, _STOP_QUOTING, "nudge", "advise"),  # quoted shape + stderr stays advise
 ])
 def test_classify_decision(rc, stdout, stderr, expected):
-    assert fl.classify_decision(rc, stdout, stderr) == expected
+    # Evaluated as Stop: only the Stop-lane rows read `event` at all, and the
+    # gate's other side (a non-Stop event, and rc != 0) has its own test —
+    # test_stop_block_classification_mirrors_the_dispatcher_gates.
+    assert fl.classify_decision(rc, stdout, stderr, "Stop") == expected
 
 
 def test_block_is_not_misread_as_pass():
@@ -348,7 +351,7 @@ def test_escaped_decision_key_is_classified_as_block():
     assert '"decision"' not in escaped, "fixture is not actually escaped"
     assert json.loads(escaped) == {"decision": "block", "reason": "r"}
     assert fl._is_stop_block(escaped) is True
-    assert fl.classify_decision(0, escaped, "") == "block"
+    assert fl.classify_decision(0, escaped, "", "Stop") == "block"
     # Control: a shape that is genuinely not a block still is not one.
     assert fl._is_stop_block('{"decision": "approve"}') is False
 
@@ -398,6 +401,30 @@ def test_standalone_suppression_does_not_kill_its_own_rich_record(tmp_path, monk
     assert fl.record_session_fire("x", "advisory-nudge", "ask", "s", "T") is True
     recs = [json.loads(x) for x in out.read_text().splitlines() if x.strip()]
     assert len(recs) == 1 and recs[0]["granularity"] == "rich"
+
+
+def test_stop_block_classification_mirrors_the_dispatcher_gates():
+    """The ledger records a Stop block only where the dispatcher enforces one.
+
+    `run_group` accepts the `{"decision": "block"}` shape under two gates —
+    `is_stop` and `rc == 0`. The ledger had neither, so a member that printed
+    the JSON and then died (rc=1), or printed it under another event, was
+    filed as a real block the dispatcher never propagated. The event gate is
+    the newer half: scoping the dispatcher lane to Stop is what left the
+    ledger behind.
+    """
+    block = '{"decision": "block", "reason": "r"}'
+    # Both gates satisfied — the case that must still be a block.
+    assert fl.classify_decision(0, block, "", "Stop") == "block"
+    # rc gate: printed, then died.
+    assert fl.classify_decision(1, block, "", "Stop") != "block"
+    # event gate: the dispatcher's lane does not run here.
+    assert fl.classify_decision(0, block, "", "PostToolUse") != "block"
+    # Unknown event is not Stop.
+    assert fl.classify_decision(0, block, "", None) != "block"
+    # Exit 2 stays event-agnostic, matching the dispatcher's own exit-2 lane.
+    assert fl.classify_decision(2, "", "", "PostToolUse") == "block"
+    assert fl.classify_decision(2, "", "", None) == "block"
 
 
 def test_record_session_fire_opt_out(tmp_path, monkeypatch):
