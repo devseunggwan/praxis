@@ -28,7 +28,9 @@ Options:
   --state-dir PATH       fire-rate mode only: override the strike-state
                          directory used for the outcome-proxy section
                          (default: $PRAXIS_STATE_DIR/strikes or
-                         ~/.praxis/state/strikes)
+                         ~/.praxis/state/strikes, tilde-expanded; reads the
+                         pre-#527 ~/.claude/state/praxis/strikes when the
+                         new location does not exist yet)
   --repo PATH            fire-rate mode only: git repo to correlate commits
                          against for the rework-commit outcome-proxy signal
                          (default: current working directory)
@@ -1148,13 +1150,49 @@ def join_bypass_to_hooks(
 # ---------------------------------------------------------------------------
 
 def default_strike_state_dir() -> Path:
-    """Mirror hooks/completion-verify/strike-counter/impl.sh's STATE_DIR resolution."""
-    override = os.environ.get("PRAXIS_STATE_DIR", "").strip()
+    """Mirror strike-counter's STATE_DIR resolution (read-only twin).
+
+    Source of truth: hooks/_lib/_paths.sh, not its Python twin. What writes
+    strike state is strike-counter/impl.sh, and that sources the SHELL
+    resolver — so the shell one is what this reader has to agree with, whatever
+    _paths.py does. tests/test_bypass_review.sh asserts parity against
+    _paths.sh for exactly that reason. This CLI is installed as a ~/.local/bin
+    symlink and runs outside the hook import context, so per the #981
+    convention the skill layer replicates the semantics rather than importing
+    a resolver.
+
+    The two resolvers disagree on one input, and it decides the code below:
+    `praxis_home` expands a leading `~` in both (_paths.sh does it with an
+    explicit `case`, _paths.py with expanduser), but `praxis_state_dir` expands
+    the PRAXIS_STATE_DIR override only in Python — the shell keeps the literal
+    tilde and merely strips a trailing slash. A reader that expanduser'd that
+    override would resolve somewhere the writer never wrote. Hence: expand
+    PRAXIS_HOME, leave PRAXIS_STATE_DIR alone.
+
+    Also mirrored: the pre-#527 legacy location. strike-counter/impl.sh
+    migrates ~/.claude/state/praxis/strikes only when it WRITES, so a report
+    run before any post-migration strike has been recorded must read the legacy
+    dir or report strike state as absent. impl.sh copies; this report-only CLI
+    merely reads, under the same three-part condition (no PRAXIS_STATE_DIR
+    override, new dir absent, legacy dir present).
+    """
+    override = os.environ.get("PRAXIS_STATE_DIR")
     if override:
-        return Path(override) / "strikes"
-    home_override = os.environ.get("PRAXIS_HOME", "").strip()
-    base = Path(home_override) if home_override else Path.home() / ".praxis"
-    return base / "state" / "strikes"
+        # No expanduser: _paths.sh does not expand this override either, and a
+        # reader that diverged from the writer here would read an empty dir.
+        # One trailing slash, not all of them: the writer's `${PRAXIS_STATE_DIR%/}`
+        # strips exactly one, so `rstrip("/")` turns "/" into "" and the reader
+        # falls back to a RELATIVE "strikes" — a different directory per cwd,
+        # which reads as "no strikes recorded". Joined as a string rather than
+        # with `/` for the same reason: Path("") / "strikes" is also relative.
+        base = override[:-1] if override.endswith("/") else override
+        return Path(f"{base}/strikes")
+    home = os.path.expanduser(os.environ.get("PRAXIS_HOME") or "~/.praxis")
+    state_dir = Path(home) / "state" / "strikes"
+    legacy = Path(os.path.expanduser("~/.claude/state/praxis/strikes"))
+    if not state_dir.is_dir() and legacy.is_dir():
+        return legacy
+    return state_dir
 
 
 def load_strike_state(state_dir: Path, session_id: str) -> dict | None:

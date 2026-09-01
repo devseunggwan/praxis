@@ -871,6 +871,172 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# strike-state dir resolution parity with hooks/_lib/_paths.sh (#1180)
+#
+# The oracle is the SHELL resolver, not its Python twin: strike state is
+# written by strike-counter/impl.sh, which sources _paths.sh, so that is the
+# resolution this read-only CLI has to agree with. The two twins disagree on
+# one input — _paths.py expanduser()s the PRAXIS_STATE_DIR override and
+# _paths.sh does not — so pinning the replica to the Python side would make
+# this reader look correct while reading a directory the writer never wrote.
+# The CLI runs as a ~/.local/bin symlink outside the hook import context, so
+# per #981 it replicates rather than imports.
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== bypass-review: strike-state dir parity with _paths.sh (#1180) ==="
+
+# resolve_bp_state_dir <env...> — default_strike_state_dir() under a given env
+resolve_bp_state_dir() {
+  env "$@" python3 -c "
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader('bypass_review_under_test', sys.argv[1])
+spec = importlib.util.spec_from_loader('bypass_review_under_test', loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+print(mod.default_strike_state_dir())
+" "$CLI"
+}
+
+# resolve_paths_state_dir <env...> — _paths.sh praxis_state_dir()/strikes.
+# Sourced in a subshell exactly as strike-counter/impl.sh does, so the oracle
+# is the writer's own code rather than a restatement of it.
+resolve_paths_state_dir() {
+  env "$@" sh -c '. "$1"/_paths.sh; printf "%s\n" "$(praxis_state_dir)/strikes"' \
+    sh "$REPO_ROOT/hooks/_lib"
+}
+
+PARITY_HOME="$TMP_DIR/parity-home"
+mkdir -p "$PARITY_HOME"
+
+# (a) tilde-containing PRAXIS_STATE_DIR — a quoted/exported-from-config
+# `PRAXIS_STATE_DIR=~/x` reaches both resolvers as a literal tilde, and
+# _paths.sh keeps it literal. A reader that expanded it would read a directory
+# the writer never wrote, which is the whole failure this case pins.
+bp_a=$(resolve_bp_state_dir -u PRAXIS_HOME HOME="$PARITY_HOME" PRAXIS_STATE_DIR='~/tilde-state')
+paths_a=$(resolve_paths_state_dir -u PRAXIS_HOME HOME="$PARITY_HOME" PRAXIS_STATE_DIR='~/tilde-state')
+
+if [ -n "$bp_a" ] && [ "$bp_a" = "$paths_a" ]; then
+  assert_pass "parity: tilde PRAXIS_STATE_DIR resolves identically"
+else
+  assert_fail "parity: tilde PRAXIS_STATE_DIR resolves identically" "bypass-review='$bp_a' _paths='$paths_a'"
+fi
+
+# The expected value is assembled rather than written as a literal: a
+# `'~/...'` word is exactly what SC2088 warns about, and here the unexpanded
+# tilde is the assertion, not a mistake.
+tilde_char='~'
+expected_a="$tilde_char/tilde-state/strikes"
+if [ "$bp_a" = "$expected_a" ]; then
+  assert_pass "parity: PRAXIS_STATE_DIR tilde left literal, as the writer leaves it"
+else
+  assert_fail "parity: PRAXIS_STATE_DIR tilde left literal, as the writer leaves it" "got '$bp_a' (expanded, so it diverges from _paths.sh)"
+fi
+
+# (b) tilde-containing PRAXIS_HOME — the other override, where _paths.sh DOES
+# expand (explicit `case` on `~` / `~/*`), so here the reader must expand too.
+bp_b=$(resolve_bp_state_dir -u PRAXIS_STATE_DIR HOME="$PARITY_HOME" PRAXIS_HOME='~/praxis-tilde')
+paths_b=$(resolve_paths_state_dir -u PRAXIS_STATE_DIR HOME="$PARITY_HOME" PRAXIS_HOME='~/praxis-tilde')
+
+if [ -n "$bp_b" ] && [ "$bp_b" = "$paths_b" ]; then
+  assert_pass "parity: tilde PRAXIS_HOME resolves identically"
+else
+  assert_fail "parity: tilde PRAXIS_HOME resolves identically" "bypass-review='$bp_b' _paths='$paths_b'"
+fi
+
+# (c) no overrides, both locations absent — the plain ~/.praxis default.
+bp_c=$(resolve_bp_state_dir -u PRAXIS_STATE_DIR -u PRAXIS_HOME HOME="$PARITY_HOME")
+paths_c=$(resolve_paths_state_dir -u PRAXIS_STATE_DIR -u PRAXIS_HOME HOME="$PARITY_HOME")
+
+if [ -n "$bp_c" ] && [ "$bp_c" = "$paths_c" ]; then
+  assert_pass "parity: default (no overrides) resolves identically"
+else
+  assert_fail "parity: default (no overrides) resolves identically" "bypass-review='$bp_c' _paths='$paths_c'"
+fi
+
+# (d) trailing-slash overrides — the writer's `${PRAXIS_STATE_DIR%/}` strips
+# exactly ONE slash, so a reader using rstrip("/") turns "/" into a relative
+# "strikes" and reads a different directory per cwd. Table-driven because the
+# root case and the doubled-slash case fail for the same reason but produce
+# different wrong answers, and a single case would let one of them regress
+# unnoticed.
+# Compared as paths, not byte strings: a repeated slash INSIDE a path names the
+# same directory on POSIX, and pathlib collapses it, so `/tmp/x//strikes` and
+# `/tmp/x/strikes` are one location written two ways. `tr -s /` applies the same
+# collapse to both sides, which leaves the divergence that matters — a relative
+# `strikes` against an absolute `/strikes` — fully visible.
+for slash_case in / // /tmp/parity-x/ /tmp/parity-x// /tmp/parity-x; do
+  bp_d=$(resolve_bp_state_dir -u PRAXIS_HOME HOME="$PARITY_HOME" PRAXIS_STATE_DIR="$slash_case" | tr -s /)
+  paths_d=$(resolve_paths_state_dir -u PRAXIS_HOME HOME="$PARITY_HOME" PRAXIS_STATE_DIR="$slash_case" | tr -s /)
+
+  if [ -n "$bp_d" ] && [ "$bp_d" = "$paths_d" ]; then
+    assert_pass "parity: PRAXIS_STATE_DIR='$slash_case' resolves identically"
+  else
+    assert_fail "parity: PRAXIS_STATE_DIR='$slash_case' resolves identically" "bypass-review='$bp_d' _paths='$paths_d'"
+  fi
+done
+
+# The root case additionally pins the absolute-path property directly: equality
+# with the writer would still hold if BOTH sides went relative.
+bp_root=$(resolve_bp_state_dir -u PRAXIS_HOME HOME="$PARITY_HOME" PRAXIS_STATE_DIR=/)
+case "$bp_root" in
+  /*) assert_pass "parity: PRAXIS_STATE_DIR=/ stays absolute" ;;
+  *)  assert_fail "parity: PRAXIS_STATE_DIR=/ stays absolute" "got '$bp_root' (relative — resolves per cwd)" ;;
+esac
+
+# ---------------------------------------------------------------------------
+# legacy strike-state fallback read (#1180)
+#
+# strike-counter/impl.sh migrates ~/.claude/state/praxis/strikes only when it
+# WRITES; a report run before that must READ the legacy dir. Fixture: strike
+# state exists ONLY at the legacy location — fire-rate must still see it.
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== bypass-review: legacy strike-state fallback read (#1180) ==="
+
+LEGACY_HOME="$TMP_DIR/legacy-home"
+LEGACY_SID="11111111-2222-3333-4444-555555555555"
+mkdir -p "$LEGACY_HOME/.claude/state/praxis/strikes"
+printf '{"count": 2, "reasons": ["r1", "r2"]}\n' \
+  > "$LEGACY_HOME/.claude/state/praxis/strikes/$LEGACY_SID.json"
+
+DIR20="$TMP_DIR/t20"
+mkdir -p "$DIR20"
+make_fire "$LEGACY_SID" "pass" > "$DIR20/fire-events-$TODAY.jsonl"
+
+out20=$(env -u PRAXIS_HOME -u PRAXIS_STATE_DIR HOME="$LEGACY_HOME" \
+  python3 "$CLI" fire-rate --dir "$DIR20" --days 1 2>&1)
+rc20=$?
+
+if [ "$rc20" -eq 0 ]; then
+  assert_pass "legacy fallback: exit 0"
+else
+  assert_fail "legacy fallback: exit 0" "exited $rc20; output: $out20"
+fi
+
+if echo "$out20" | grep -q "strike state available for 1" \
+  && echo "$out20" | grep -q "Sessions with strikes : 1"; then
+  assert_pass "legacy fallback: legacy-only strike state visible"
+else
+  assert_fail "legacy fallback: legacy-only strike state visible" "output: $out20"
+fi
+
+# Resolver-level check: legacy dir returned only while the new dir is absent.
+bp_legacy=$(resolve_bp_state_dir -u PRAXIS_HOME -u PRAXIS_STATE_DIR HOME="$LEGACY_HOME")
+if [ "$bp_legacy" = "$LEGACY_HOME/.claude/state/praxis/strikes" ]; then
+  assert_pass "legacy fallback: resolver returns legacy dir when new dir absent"
+else
+  assert_fail "legacy fallback: resolver returns legacy dir when new dir absent" "got '$bp_legacy'"
+fi
+
+mkdir -p "$LEGACY_HOME/.praxis/state/strikes"
+bp_new=$(resolve_bp_state_dir -u PRAXIS_HOME -u PRAXIS_STATE_DIR HOME="$LEGACY_HOME")
+if [ "$bp_new" = "$LEGACY_HOME/.praxis/state/strikes" ]; then
+  assert_pass "legacy fallback: new dir wins once it exists (mirrors impl.sh migration gate)"
+else
+  assert_fail "legacy fallback: new dir wins once it exists (mirrors impl.sh migration gate)" "got '$bp_new'"
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
