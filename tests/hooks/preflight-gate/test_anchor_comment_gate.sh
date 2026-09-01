@@ -728,6 +728,48 @@ else
 fi
 
 
+# --- gh lookup honours the subprocess floor ----------------------------------
+# A slice below the floor cannot finish a gh round trip. Spawning one anyway
+# spends budget the later group members were counting on and still answers
+# "unknown", so the lookup must decline rather than try.
+_floor_out=$(python3 - << PYEOF 2>&1
+import importlib.util, sys, time
+sys.path.insert(0, "$ROOT_DIR/hooks/_lib")
+spec = importlib.util.spec_from_file_location("impl", "$HOOK")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+from _hook_runtime import MIN_SUBPROC_BUDGET_SEC
+
+def spawned(*a, **k):
+    raise AssertionError("gh spawned below the subprocess floor")
+mod.subprocess.run = spawned
+
+out, err = mod._gh(["pr", "view"], time.monotonic() + MIN_SUBPROC_BUDGET_SEC / 2)
+if out is not None or not err:
+    sys.stderr.write("sub-floor lookup did not decline: %r %r\n" % (out, err))
+    sys.exit(1)
+
+# Positive control: above the floor the same call DOES reach the subprocess,
+# so the guard is declining on the budget rather than on everything.
+try:
+    mod._gh(["pr", "view"], time.monotonic() + MIN_SUBPROC_BUDGET_SEC * 10)
+except AssertionError:
+    pass
+else:
+    sys.stderr.write("above-floor lookup never reached the subprocess\n")
+    sys.exit(1)
+PYEOF
+)
+_floor_rc=$?
+if [ "$_floor_rc" -eq 0 ] && [ -z "$_floor_out" ]; then
+  echo "PASS  gh lookup declines below MIN_SUBPROC_BUDGET_SEC"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL  gh lookup ignores the subprocess floor (rc=$_floor_rc, out=$(echo "$_floor_out" | head -c 200))"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("gh lookup honours the subprocess floor")
+fi
+
+
 # --- summary -----------------------------------------------------------------
 echo ""
 echo "Passed: $PASS  Failed: $FAIL"

@@ -97,6 +97,7 @@ from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
     budgeted_deadline,
     fail_open,
 )
@@ -596,7 +597,10 @@ def _structure_findings(body: str) -> list[tuple[str, str]]:
 def _gh(args: list[str], deadline: float) -> tuple[str | None, str | None]:
     """Run gh within the remaining budget; return (stdout, error). Never raises."""
     remaining = deadline - time.monotonic()
-    if remaining <= 0:
+    # The floor, not zero: a sub-floor slice cannot finish a `gh` round trip,
+    # so spawning one only spends budget the later group members were counting
+    # on and still answers "unknown".
+    if remaining < MIN_SUBPROC_BUDGET_SEC:
         return None, "조회 예산 초과"
     try:
         proc = subprocess.run(
