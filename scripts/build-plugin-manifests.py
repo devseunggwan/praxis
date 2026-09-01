@@ -405,14 +405,10 @@ def manifest_schema_drifts(manifest) -> list[str]:
             if pair not in dispatch_pairs:
                 continue
             name = hook.get("name", "<unnamed>")
-            if "args" in hook:
-                out.append(
-                    f"SCHEMA hooks/manifest.json entry {name!r} is a "
-                    f"dispatch-group member (event={pair[0]!r} "
-                    f"matcher={pair[1]!r}) and declares 'args' — "
-                    "hooks/_lib/_dispatch.py does not forward args to "
-                    "group members, so they would be silently dropped"
-                )
+            # `args` is NOT rejected: the build keeps such a member as its own
+            # standalone node and the runtime excludes it from the group, so
+            # the hook still runs — rejecting here killed the build before
+            # either half could act (issue #1199 review).
             if "body" in hook:
                 out.append(
                     f"SCHEMA hooks/manifest.json entry {name!r} is a "

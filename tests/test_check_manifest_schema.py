@@ -270,14 +270,23 @@ def _first_dispatch_member_name(manifest: dict) -> str:
     raise AssertionError("fixture manifest has no dispatch-group member")
 
 
-def test_dispatch_member_with_args_is_rejected(manifest):
+def test_dispatch_member_with_args_is_allowed(manifest):
+    # Rejecting `args` here stopped the build (exit 1) before the two halves
+    # that actually handle such a member could act: the build keeps it as a
+    # standalone node, the runtime excludes it from the group. Both were
+    # unreachable while this gate fired (issue #1199 review).
     name = _first_dispatch_member_name(manifest)
     entry = next(h for h in manifest["hooks"] if h["name"] == name)
     entry["args"] = ["--foo"]
     drifts = build.manifest_schema_drifts(manifest)
+    assert not any("declares 'args'" in d for d in drifts), drifts
+    # Control: `body` on the same entry IS still rejected, so the gate as a
+    # whole is alive and this is not an empty assertion.
+    entry["body"] = "impl.sh"
     assert any(
-        f"entry {name!r}" in d and "declares 'args'" in d for d in drifts
-    ), drifts
+        f"entry {name!r}" in d and "declares 'body'" in d
+        for d in build.manifest_schema_drifts(manifest)
+    )
 
 
 def test_dispatch_member_with_body_is_rejected(manifest):
