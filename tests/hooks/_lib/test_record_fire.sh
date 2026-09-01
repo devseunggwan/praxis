@@ -72,17 +72,22 @@ else
   ko "disable env writes nothing, exit 0" "rc=$rc ledger=$(ls "$LEDGER" 2>&1)"
 fi
 
-# fail-open: _fire_ledger.py missing from the resolved _lib
+# _fire_ledger.py missing from the resolved _lib: the pure-shell append
+# (issue #1183) needs no Python at all on its fast path, so the record must
+# STILL land (before #1183 this case asserted a silent drop — the python3 -c
+# writer could not import the module). Fail-open here means exit 0, not
+# record loss.
 NOLIB_ROOT="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 mkdir -p "$NOLIB_ROOT/_lib" "$NOLIB_ROOT/role/name"
 cp "$ROOT_DIR/hooks/_lib/record_fire.sh" "$NOLIB_ROOT/_lib/"
 cp "$PROBE_ROOT/role/name/impl.sh" "$NOLIB_ROOT/role/name/impl.sh"
 PRAXIS_FIRE_TELEMETRY_FILE="$NOLIB_ROOT/led.jsonl" sh "$NOLIB_ROOT/role/name/impl.sh"
 rc=$?
-if [ "$rc" -eq 0 ] && [ ! -f "$NOLIB_ROOT/led.jsonl" ]; then
-  ok "missing _fire_ledger fails open"
+if [ "$rc" -eq 0 ]; then
+  assert_record "$NOLIB_ROOT/led.jsonl" "missing _fire_ledger still records (shell path)" \
+    probe-hook pass sess-probe
 else
-  ko "missing _fire_ledger fails open" "rc=$rc"
+  ko "missing _fire_ledger still records (shell path)" "rc=$rc"
 fi
 
 # fail-open: unwritable ledger path
@@ -90,6 +95,227 @@ PRAXIS_FIRE_TELEMETRY_FILE=/dev/null/nope sh "$PROBE_ROOT/role/name/impl.sh"
 rc=$?
 [ "$rc" -eq 0 ] && ok "unwritable ledger fails open" \
   || ko "unwritable ledger fails open" "rc=$rc"
+
+# --- shell/python record parity (issue #1183) ------------------------------
+# The pure-shell append must produce a record indistinguishable from what
+# _fire_ledger.record_session_fire writes: same keys, same key ORDER, same
+# values (timestamps differ by fire time only, and both must parse as
+# ISO-8601). Byte-level, only the timestamp value may differ.
+PARITY_LEDGER="$PROBE_ROOT/parity.jsonl"
+rm -f "$PARITY_LEDGER"
+PRAXIS_FIRE_TELEMETRY_FILE="$PARITY_LEDGER" python3 - "$ROOT_DIR" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1] + "/hooks/_lib")
+import _fire_ledger
+_fire_ledger.record_session_fire(
+    hook="parity-hook", role="parity-role", decision="advise",
+    session_id="sess-parity", tool="Bash")
+PY
+PRAXIS_LIB_DIR="$ROOT_DIR/hooks/_lib" PRAXIS_FIRE_TELEMETRY_FILE="$PARITY_LEDGER" sh -c '
+  . "$1/hooks/_lib/record_fire.sh"
+  praxis_record_fire parity-hook parity-role advise sess-parity Bash
+' parity "$ROOT_DIR"
+if python3 - "$PARITY_LEDGER" <<'PY'
+import json, re, sys
+from datetime import datetime
+lines = [l.rstrip("\n") for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+assert len(lines) == 2, f"expected 2 records, got {len(lines)}"
+py_line, sh_line = lines
+py_rec, sh_rec = json.loads(py_line), json.loads(sh_line)
+assert list(py_rec) == list(sh_rec), f"key order differs: {list(py_rec)} vs {list(sh_rec)}"
+for key in py_rec:
+    if key == "timestamp":
+        continue
+    assert py_rec[key] == sh_rec[key], f"{key}: {py_rec[key]!r} != {sh_rec[key]!r}"
+datetime.fromisoformat(sh_rec["timestamp"])  # must stay parseable by readers
+# Byte parity modulo the timestamp value: normalizing it must make the raw
+# JSONL lines identical (pins separators/spacing, not just parsed content).
+norm = lambda s: re.sub(r'("timestamp": ")[^"]*(")', r"\1T\2", s)
+assert norm(py_line) == norm(sh_line), f"byte mismatch:\n{norm(py_line)}\n{norm(sh_line)}"
+PY
+then ok "shell record byte-matches python record"; else ko "shell record byte-matches python record" "see stderr"; fi
+
+# Ledger creation mode (Codex review, PR #1207 round 2): under a permissive
+# umask, `>>` alone creates a NEW file at 0666-masked while
+# _fire_ledger._atomic_append explicitly requests 0o644
+# (hooks/_lib/_fire_ledger.py:297) — so a shell-created daily ledger could
+# land 0666/0664 (group/other-writable, i.e. tamperable by any other user on
+# the box) where the Python-created one is 0644. Force a maximally permissive
+# ambient umask so the divergence has nowhere to hide, then require BOTH
+# writers to land at 0644.
+MODE_LEDGER="$PROBE_ROOT/mode.jsonl"
+rm -f "$MODE_LEDGER"
+(
+  umask 000
+  PRAXIS_LIB_DIR="$ROOT_DIR/hooks/_lib" PRAXIS_FIRE_TELEMETRY_FILE="$MODE_LEDGER" sh -c '
+    . "$1/hooks/_lib/record_fire.sh"
+    praxis_record_fire mode-hook mode-role pass sess-mode ""
+  ' mode "$ROOT_DIR"
+)
+# GNU stat's `-f` means "filesystem status" and SUCCEEDS on a plain file, so a
+# BSD-first `||` chain never reaches the GNU form — it captures "  File: ..."
+# instead of a mode. Probe `-c` first: BSD stat rejects it outright, so the
+# fallback is the one that actually fires on the wrong platform.
+file_mode() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%OLp' "$1" 2>/dev/null
+}
+
+MODE_PERM=$(file_mode "$MODE_LEDGER")
+if [ "$MODE_PERM" = "644" ]; then
+  ok "ledger created 0644 under umask 000 (matches python writer)"
+else
+  ko "ledger created 0644 under umask 000 (matches python writer)" "mode=$MODE_PERM"
+fi
+
+# A STRICTER ambient umask must not be loosened by the fix above — 0077 must
+# still land 0600, same as _fire_ledger's os.open(path, flags, 0o644) would
+# under that same umask.
+STRICT_LEDGER="$PROBE_ROOT/strict-mode.jsonl"
+rm -f "$STRICT_LEDGER"
+(
+  umask 077
+  PRAXIS_LIB_DIR="$ROOT_DIR/hooks/_lib" PRAXIS_FIRE_TELEMETRY_FILE="$STRICT_LEDGER" sh -c '
+    . "$1/hooks/_lib/record_fire.sh"
+    praxis_record_fire mode-hook mode-role pass sess-mode-strict ""
+  ' mode "$ROOT_DIR"
+)
+STRICT_PERM=$(file_mode "$STRICT_LEDGER")
+if [ "$STRICT_PERM" = "600" ]; then
+  ok "stricter ambient umask (077) is preserved, not loosened"
+else
+  ko "stricter ambient umask (077) is preserved, not loosened" "mode=$STRICT_PERM"
+fi
+
+# Escape fallback: a field value outside the JSON-safe charset (here a
+# session_id carrying a double quote and a space) must route through the
+# Python writer and still land as ONE valid record with the exact value —
+# never a corrupt line, never a drop.
+ESC_LEDGER="$PROBE_ROOT/escape.jsonl"
+rm -f "$ESC_LEDGER"
+PRAXIS_LIB_DIR="$ROOT_DIR/hooks/_lib" PRAXIS_FIRE_TELEMETRY_FILE="$ESC_LEDGER" sh -c '
+  . "$1/hooks/_lib/record_fire.sh"
+  praxis_record_fire esc-hook esc-role pass "weird \"sess\" id" ""
+' escape "$ROOT_DIR"
+if python3 - "$ESC_LEDGER" <<'PY'
+import json, sys
+lines = [l for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+assert len(lines) == 1, f"expected 1 record, got {len(lines)}"
+rec = json.loads(lines[0])
+assert rec["session_id"] == 'weird "sess" id', rec
+assert rec["hook"] == "esc-hook" and rec["granularity"] == "rich", rec
+PY
+then ok "unsafe field routes through escape fallback"; else ko "unsafe field routes through escape fallback" "$(cat "$ESC_LEDGER" 2>/dev/null)"; fi
+
+# Env parity with _fire_ledger (review round 1): Python reads both env values
+# stripped, so the shell writer must too.
+# Padded disable value must still disable (Python: _disabled() strips).
+rm -f "$LEDGER"
+PRAXIS_FIRE_TELEMETRY_DISABLE='1 ' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" \
+  sh "$PROBE_ROOT/role/name/impl.sh"
+if [ ! -f "$LEDGER" ]; then
+  ok "padded disable value still disables"
+else
+  ko "padded disable value still disables" "$(cat "$LEDGER")"
+fi
+
+# Padded override path must be trimmed (Python: resolve_path() strips) — a
+# verbatim use would split records across two files ('/x' vs ' /x ').
+PAD_LEDGER="$PROBE_ROOT/padded.jsonl"
+rm -f "$PAD_LEDGER"
+PRAXIS_FIRE_TELEMETRY_FILE="  $PAD_LEDGER  " sh "$PROBE_ROOT/role/name/impl.sh"
+assert_record "$PAD_LEDGER" "padded override path is trimmed" probe-hook pass sess-probe
+
+# Physical (symlink-resolving) dev-checkout probe: _fire_ledger resolves the
+# package root via Path.resolve() (physical), so the shell writer must too —
+# a logical cd/pwd would probe the SYMLINK-side root. Layout: R1 holds the
+# real _lib (no .git → not a checkout); R2 has a .git dir but only a symlink
+# to R1's _lib. Physical resolution lands in R1 → the real-ledger path under
+# HOME; logical resolution would land in R2 → R2/.praxis-dev-telemetry, a
+# ledger split from where Python writes.
+SYM_ROOT="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
+mkdir -p "$SYM_ROOT/r1/_lib" "$SYM_ROOT/r2/.git" "$SYM_ROOT/r2/role/name" "$SYM_ROOT/home"
+cp "$ROOT_DIR/hooks/_lib/record_fire.sh" "$SYM_ROOT/r1/_lib/"
+ln -s "$SYM_ROOT/r1/_lib" "$SYM_ROOT/r2/_lib"
+cp "$PROBE_ROOT/role/name/impl.sh" "$SYM_ROOT/r2/role/name/impl.sh"
+# Empty override: this case exercises DEFAULT path resolution, and
+# scripts/run-tests.sh exports PRAXIS_FIRE_TELEMETRY_FILE suite-wide — an
+# inherited override would swallow the record this assertion looks for.
+# Empty means unset to both writers (Python strips then falsy-checks).
+HOME="$SYM_ROOT/home" PRAXIS_FIRE_TELEMETRY_FILE='' sh "$SYM_ROOT/r2/role/name/impl.sh"
+SYM_TODAY=$(date -u +%Y-%m-%d)
+SYM_REAL="$SYM_ROOT/home/.praxis/telemetry/fire-events-$SYM_TODAY.jsonl"
+if [ -s "$SYM_REAL" ] && [ ! -e "$SYM_ROOT/r2/.praxis-dev-telemetry" ]; then
+  ok "symlinked _lib resolves physically (matches Python)"
+else
+  ko "symlinked _lib resolves physically (matches Python)" \
+    "real=$(ls "$SYM_REAL" 2>&1) dev=$(ls "$SYM_ROOT/r2/.praxis-dev-telemetry" 2>&1)"
+fi
+rm -rf "$SYM_ROOT"
+
+# HOME-unset fallback (Codex review, PR #1207 round 2): with $HOME unset and
+# no `.git` marker at the checkout root, the pre-fix code built
+# "${HOME:-}/.praxis/telemetry" as "/.praxis/telemetry" — root-owned, so
+# `mkdir -p` fails for a normal user and every fire record is silently lost.
+# _fire_ledger.resolve_path() never hits this: Python's Path.home() falls
+# back to the passwd-database home. Stub `dscl`/`getent` ahead of PATH so
+# the shell writer's own passwd lookup is exercised against a controlled
+# fake home, without touching the real invoking user's actual $HOME.
+HOMEFB_ROOT="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
+mkdir -p "$HOMEFB_ROOT/pkgroot/hooks/_lib" "$HOMEFB_ROOT/bin" "$HOMEFB_ROOT/fakehome"
+cp "$ROOT_DIR/hooks/_lib/record_fire.sh" "$HOMEFB_ROOT/pkgroot/hooks/_lib/"
+cat > "$HOMEFB_ROOT/bin/dscl" <<EOF
+#!/bin/sh
+echo "NFSHomeDirectory: $HOMEFB_ROOT/fakehome"
+EOF
+cat > "$HOMEFB_ROOT/bin/getent" <<EOF
+#!/bin/sh
+echo "stubuser:x:1000:1000:Stub User:$HOMEFB_ROOT/fakehome:/bin/sh"
+EOF
+chmod +x "$HOMEFB_ROOT/bin/dscl" "$HOMEFB_ROOT/bin/getent"
+HOMEFB_TODAY=$(date -u +%Y-%m-%d)
+env -u HOME -u PRAXIS_FIRE_TELEMETRY_FILE PATH="$HOMEFB_ROOT/bin:$PATH" \
+  PRAXIS_LIB_DIR="$HOMEFB_ROOT/pkgroot/hooks/_lib" sh -c '
+    . "$1/pkgroot/hooks/_lib/record_fire.sh"
+    praxis_record_fire homefb-hook homefb-role pass sess-homefb ""
+  ' homefb "$HOMEFB_ROOT"
+HOMEFB_LEDGER="$HOMEFB_ROOT/fakehome/.praxis/telemetry/fire-events-$HOMEFB_TODAY.jsonl"
+if [ -s "$HOMEFB_LEDGER" ] && [ ! -e "/.praxis" ]; then
+  ok "HOME-unset falls back to passwd-db home (not /.praxis)"
+else
+  ko "HOME-unset falls back to passwd-db home (not /.praxis)" \
+    "fallback_ledger=$(ls "$HOMEFB_LEDGER" 2>&1)"
+fi
+rm -rf "$HOMEFB_ROOT"
+
+# Concurrency smoke: N parallel shell appends into one ledger must yield
+# exactly N intact lines — the single-printf-under-O_APPEND contract (each
+# line far below PIPE_BUF) means no torn/interleaved records. Bounded loop,
+# no timing dependence: correctness is asserted on the surviving file.
+CONC_LEDGER="$PROBE_ROOT/conc.jsonl"
+rm -f "$CONC_LEDGER"
+CONC_N=20
+i=1
+while [ "$i" -le "$CONC_N" ]; do
+  PRAXIS_LIB_DIR="$ROOT_DIR/hooks/_lib" PRAXIS_FIRE_TELEMETRY_FILE="$CONC_LEDGER" sh -c '
+    . "$1/hooks/_lib/record_fire.sh"
+    praxis_record_fire conc-hook conc-role pass "sess-conc-$2" ""
+  ' conc "$ROOT_DIR" "$i" &
+  i=$((i + 1))
+done
+wait
+if python3 - "$CONC_LEDGER" "$CONC_N" <<'PY'
+import json, sys
+path, n = sys.argv[1], int(sys.argv[2])
+lines = [l for l in open(path, encoding="utf-8") if l.strip()]
+assert len(lines) == n, f"expected {n} lines, got {len(lines)}"
+sessions = set()
+for line in lines:
+    rec = json.loads(line)  # a torn/interleaved line fails to parse
+    assert rec["hook"] == "conc-hook" and rec["decision"] == "pass", rec
+    sessions.add(rec["session_id"])
+assert len(sessions) == n, f"expected {n} distinct sessions, got {len(sessions)}"
+PY
+then ok "parallel appends stay intact (no torn lines)"; else ko "parallel appends stay intact (no torn lines)" "$(wc -l < "$CONC_LEDGER" 2>/dev/null) lines"; fi
 
 # --- end-to-end: each instrumented impl.sh hook ----------------------------
 TMP="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }

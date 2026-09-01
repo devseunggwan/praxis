@@ -57,6 +57,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import sys
 import unicodedata
 from pathlib import Path
@@ -160,6 +161,350 @@ def load_base() -> dict:
 
 def load_manifest() -> dict:
     return json.loads(MANIFEST_PATH.read_text())
+
+
+# ---------------------------------------------------------------------------
+# Manifest schema validation (#1173)
+#
+# hooks/manifest.schema.json is the structural contract for the canonical hook
+# registry. `jsonschema` is not importable here or in CI (scripts/ are
+# stdlib-only by repo precedent), so schema_validation_errors() below is a
+# stdlib walker driven BY the schema file — the schema stays the single source
+# of truth; nothing here hardcodes the manifest's shape. It lives in this
+# module (not the check script) so BOTH consumers run it: build refuses to
+# render from a malformed manifest, and check-plugin-manifests.py runs the
+# same gate before its numbered rules.
+# ---------------------------------------------------------------------------
+
+SCHEMA_PATH = HOOKS_DIR / "manifest.schema.json"
+
+# The exact JSON-Schema subset the walker enforces. Anything else appearing in
+# the schema file is rejected up front by assert_schema_supported() — an
+# unsupported keyword must fail loud, never be silently unenforced.
+_SUPPORTED_SCHEMA_KEYWORDS = frozenset({
+    "$schema", "$id", "title", "description",
+    "type", "enum", "required", "properties", "additionalProperties",
+    "items", "minimum", "minItems", "minLength",
+})
+_SUPPORTED_SCHEMA_TYPES = {
+    "object": dict,
+    "array": list,
+    "string": str,
+    "integer": int,
+    "boolean": bool,
+}
+
+# dict.get(key) returns None for BOTH an absent key and an explicit JSON
+# `null` value — `schema.get("type") is not None` can't tell them apart, so
+# an explicit `"type": null` silently took the "no type constraint" branch
+# instead of failing (review round 2, Codex finding 2). This sentinel makes
+# "absent" and "present-but-null" distinguishable at the .get() call site.
+_ABSENT = object()
+
+
+def load_schema() -> dict:
+    return json.loads(SCHEMA_PATH.read_text())
+
+
+def assert_schema_supported(schema, spath: str = "#") -> None:
+    """Fail loud (ValueError) when the schema steps outside the walker's subset.
+
+    Guards the guard: an unsupported `type` value ("number", or the list form)
+    would crash the walker mid-validation with a KeyError/TypeError, and an
+    unsupported constraint keyword (pattern, maxLength, uniqueItems, $ref, …)
+    would be SILENTLY unenforced — the exact failure mode the schema gate
+    exists to eliminate. Walks the whole schema (not just instance-reachable
+    nodes) so a bad keyword under an optional property is caught too.
+    """
+    if not isinstance(schema, dict):
+        raise ValueError(
+            f"hooks/manifest.schema.json {spath}: schema node must be an object, "
+            f"got {type(schema).__name__}"
+        )
+    unknown = sorted(set(schema) - _SUPPORTED_SCHEMA_KEYWORDS)
+    if unknown:
+        raise ValueError(
+            f"hooks/manifest.schema.json {spath}: unsupported schema keyword(s) "
+            f"{unknown} — extend schema_validation_errors() in the same commit "
+            "before using them"
+        )
+    schema_type = schema.get("type", _ABSENT)
+    if schema_type is not _ABSENT and (
+        not isinstance(schema_type, str)  # covers explicit null and the list form
+        or schema_type not in _SUPPORTED_SCHEMA_TYPES
+    ):
+        raise ValueError(
+            f"hooks/manifest.schema.json {spath}: unsupported type "
+            f"{schema_type!r} (supported: {sorted(_SUPPORTED_SCHEMA_TYPES)})"
+        )
+    if "enum" in schema and (
+        not isinstance(schema["enum"], list) or not schema["enum"]
+    ):
+        raise ValueError(
+            f"hooks/manifest.schema.json {spath}: enum must be a non-empty array"
+        )
+    if schema.get("additionalProperties") not in (None, False):
+        raise ValueError(
+            f"hooks/manifest.schema.json {spath}: additionalProperties must be "
+            "false or absent (subschema form is unsupported)"
+        )
+    if "required" in schema and not (
+        isinstance(schema["required"], list)
+        and all(isinstance(k, str) for k in schema["required"])
+    ):
+        raise ValueError(
+            f"hooks/manifest.schema.json {spath}: required must be an array "
+            "of strings"
+        )
+    props = schema.get("properties", {})
+    if not isinstance(props, dict):
+        raise ValueError(
+            f"hooks/manifest.schema.json {spath}: properties must be an object"
+        )
+    for key, subschema in props.items():
+        assert_schema_supported(subschema, f"{spath}/properties/{key}")
+    if "items" in schema:
+        assert_schema_supported(schema["items"], f"{spath}/items")
+
+
+def schema_validation_errors(instance, schema, path: str = "$") -> list[str]:
+    """Validate `instance` against the JSON-Schema subset the manifest schema uses.
+
+    Subset limitation: only the keywords in _SUPPORTED_SCHEMA_KEYWORDS are
+    enforced — type (object/array/string/integer/boolean), enum, required,
+    properties, additionalProperties (false), items, minimum, minItems,
+    minLength; $schema/$id/title/description are documentation and ignored.
+    assert_schema_supported() rejects anything else up front, so a keyword
+    can never be silently unenforced.
+    """
+    errs: list[str] = []
+    if "enum" in schema:
+        if instance not in schema["enum"]:
+            errs.append(f"{path}: {instance!r} is not one of {schema['enum']!r}")
+        return errs
+    schema_type = schema.get("type", _ABSENT)
+    if schema_type is not _ABSENT:
+        # assert_schema_supported() already rejected a non-string/unknown
+        # type (null included) before this walker ever runs, so schema_type
+        # is guaranteed to be a valid key here — no separate null check
+        # needed on this side.
+        if schema_type == "integer":
+            # Draft 2020-12: "integer" accepts any JSON number with zero
+            # fractional part (e.g. 1.0), not only a JSON-encoded integer
+            # literal — json.loads("1.0") is a Python float, so a bare
+            # isinstance(instance, int) rejected a spec-valid value (review
+            # round 2, Codex finding 3). bool is still excluded: it is a
+            # Python int subclass, but JSON Schema keeps boolean and
+            # integer distinct.
+            is_integer = (
+                isinstance(instance, int) and not isinstance(instance, bool)
+            ) or (isinstance(instance, float) and instance.is_integer())
+            if not is_integer:
+                errs.append(
+                    f"{path}: expected integer, got {type(instance).__name__}"
+                )
+                return errs
+        else:
+            py_type = _SUPPORTED_SCHEMA_TYPES[schema_type]
+            # bool is a subclass of int in Python; JSON Schema keeps them distinct.
+            if not isinstance(instance, py_type) or (
+                py_type is int and isinstance(instance, bool)
+            ):
+                errs.append(
+                    f"{path}: expected {schema_type}, got {type(instance).__name__}"
+                )
+                return errs
+    if isinstance(instance, dict):
+        props = schema.get("properties", {})
+        for key in schema.get("required", []):
+            if key not in instance:
+                errs.append(f"{path}: missing required key {key!r}")
+        if schema.get("additionalProperties") is False:
+            for key in sorted(set(instance) - set(props)):
+                errs.append(f"{path}: unknown key {key!r}")
+        for key, subschema in props.items():
+            if key in instance:
+                errs.extend(
+                    schema_validation_errors(instance[key], subschema, f"{path}.{key}")
+                )
+    elif isinstance(instance, list):
+        if "minItems" in schema and len(instance) < schema["minItems"]:
+            errs.append(
+                f"{path}: needs at least {schema['minItems']} item(s), "
+                f"got {len(instance)}"
+            )
+        items_schema = schema.get("items")
+        if items_schema is not None:
+            for i, element in enumerate(instance):
+                errs.extend(
+                    schema_validation_errors(element, items_schema, f"{path}[{i}]")
+                )
+    elif isinstance(instance, str):
+        if "minLength" in schema and len(instance) < schema["minLength"]:
+            errs.append(
+                f"{path}: string shorter than minLength {schema['minLength']}"
+            )
+    elif isinstance(instance, bool):
+        pass
+    elif isinstance(instance, (int, float)):
+        # Mirrors the integer-acceptance widening above: an integral float
+        # (e.g. timeout: 30.0) must still be checked against "minimum".
+        if "minimum" in schema and instance < schema["minimum"]:
+            errs.append(f"{path}: {instance} is below minimum {schema['minimum']}")
+    return errs
+
+
+def manifest_schema_drifts(manifest) -> list[str]:
+    """Schema-gate drift strings for hooks/manifest.json (#1173).
+
+    Each error names the file, the JSON path (with the hook entry's `name`
+    appended when the path points into hooks[N]), and the offending key.
+    Never raises on a malformed MANIFEST — a top-level array (or any other
+    wrong shape) must come back as a diagnostic string, not the AttributeError
+    the gate exists to eliminate; only a malformed SCHEMA raises (ValueError
+    from assert_schema_supported — developer error, fail loud).
+    """
+    schema = load_schema()
+    assert_schema_supported(schema)
+    # Entry-name labels only make sense when the manifest is shaped well
+    # enough to have a hooks array; validation itself never needs them.
+    hooks_list = manifest.get("hooks") if isinstance(manifest, dict) else None
+    if not isinstance(hooks_list, list):
+        hooks_list = []
+    out: list[str] = []
+    for err in schema_validation_errors(manifest, schema):
+        label = ""
+        m = re.match(r"\$\.hooks\[(\d+)\]", err)
+        if m:
+            idx = int(m.group(1))
+            if idx < len(hooks_list) and isinstance(hooks_list[idx], dict):
+                name = hooks_list[idx].get("name")
+                if isinstance(name, str):
+                    label = f" (entry {name!r})"
+        out.append(f"SCHEMA hooks/manifest.json {err}{label}")
+
+    # Semantic gate: dispatch-group membership is structural (a hook's own
+    # (event, matcher) matching a `dispatch_groups` entry — see
+    # filter_hooks_for_host), so the JSON-Schema subset above, which
+    # validates `hooks[]` and `dispatch_groups[]` independently, can never
+    # express "a member of THAT array must not carry THIS field" — it has
+    # to be a second pass here. hooks/_lib/_dispatch.py's load_group()
+    # documents exactly why a member may not carry either field: "A manifest
+    # hook that declares 'args' ... is NOT supported in a dispatch group —
+    # and the dispatcher's own main() consumes sys.argv for (event,
+    # matcher)"; a `body` member fares no better, because the dispatcher
+    # always imports a member's impl as Python (_load_main), so a `body:
+    # "impl.sh"` entry (Shell, not Python) would fail to import.
+    if isinstance(manifest, dict):
+        dispatch_pairs = {
+            (g.get("event"), g.get("matcher"))
+            for g in manifest.get("dispatch_groups", [])
+            if isinstance(g, dict)
+        }
+        for hook in hooks_list:
+            if not isinstance(hook, dict):
+                continue
+            pair = (hook.get("event"), hook.get("matcher"))
+            if pair not in dispatch_pairs:
+                continue
+            name = hook.get("name", "<unnamed>")
+            if "args" in hook:
+                out.append(
+                    f"SCHEMA hooks/manifest.json entry {name!r} is a "
+                    f"dispatch-group member (event={pair[0]!r} "
+                    f"matcher={pair[1]!r}) and declares 'args' — "
+                    "hooks/_lib/_dispatch.py does not forward args to "
+                    "group members, so they would be silently dropped"
+                )
+            if "body" in hook:
+                out.append(
+                    f"SCHEMA hooks/manifest.json entry {name!r} is a "
+                    f"dispatch-group member (event={pair[0]!r} "
+                    f"matcher={pair[1]!r}) and declares 'body' — "
+                    "hooks/_lib/_dispatch.py imports every group member as "
+                    "Python (impl.py); a shell body would fail to import"
+                )
+    return out
+
+
+def manifest_hosts_enum() -> list[str]:
+    """The closed `hosts` value set declared in hooks/manifest.schema.json.
+
+    Single source for valid host identifiers: platform files' host_id values
+    are validated against it (load_platform), and check-plugin-manifests.py
+    cross-checks the reverse direction (no stale enum value without a
+    platform file).
+    """
+    schema = load_schema()
+    return schema["properties"]["hooks"]["items"]["properties"]["hosts"][
+        "items"
+    ]["enum"]
+
+
+def load_platform(platform_file: Path) -> dict:
+    """Parse one manifests/platforms/*.json declaration with checked access.
+
+    Raw `platform["outputs"]` / `output["path"]` indexing used to surface a
+    malformed platform file as a bare KeyError traceback; this loader raises
+    ValueError naming the file and the offending key instead (same diagnostic
+    precedent as render_output's unknown-kind ValueError). Callers (main()
+    and check-plugin-manifests.py) may then index the checked keys directly.
+    """
+    rel = platform_file.name
+    platform = json.loads(platform_file.read_text())
+    if not isinstance(platform, dict):
+        raise ValueError(f"manifests/platforms/{rel}: top level must be an object")
+    if not isinstance(platform.get("platform"), str):
+        raise ValueError(
+            f"manifests/platforms/{rel}: missing or non-string key 'platform'"
+        )
+    outputs = platform.get("outputs")
+    if not isinstance(outputs, list):
+        raise ValueError(
+            f"manifests/platforms/{rel}: missing or non-array key 'outputs'"
+        )
+    for i, output in enumerate(outputs):
+        if not isinstance(output, dict):
+            raise ValueError(
+                f"manifests/platforms/{rel}: outputs[{i}] must be an object"
+            )
+        for key in ("kind", "path"):
+            if not isinstance(output.get(key), str):
+                raise ValueError(
+                    f"manifests/platforms/{rel}: outputs[{i}] missing or "
+                    f"non-string key {key!r}"
+                )
+        if output["path"] == "":
+            # An empty string is a str, so the isinstance check above lets it
+            # through; REPO_ROOT / "" then resolves to REPO_ROOT itself, and
+            # the render/check callers' read_text()/write_json() raise
+            # IsADirectoryError instead of a diagnostic naming the file
+            # (review round 2, Codex finding 4).
+            raise ValueError(
+                f"manifests/platforms/{rel}: outputs[{i}] key 'path' must "
+                "not be empty"
+            )
+        if output["kind"] == "marketplace" and not isinstance(
+            output.get("plugin_source"), str
+        ):
+            raise ValueError(
+                f"manifests/platforms/{rel}: outputs[{i}] kind 'marketplace' "
+                "requires string key 'plugin_source'"
+            )
+    # host_id (or its platform fallback) must be one of the closed hosts
+    # values in hooks/manifest.schema.json: a typo'd host_id ("Claude") would
+    # otherwise silently drop every hosts-restricted hook from this platform's
+    # hooks.json — and the byte-drift check's suggested remedy (re-run the
+    # build) would then commit the gutted output as the new expectation.
+    host_id = platform.get("host_id", platform["platform"])
+    hosts_enum = manifest_hosts_enum()
+    if not isinstance(host_id, str) or host_id not in hosts_enum:
+        raise ValueError(
+            f"manifests/platforms/{rel}: host_id {host_id!r} is not one of the "
+            f"closed hosts values {hosts_enum!r} declared in "
+            "hooks/manifest.schema.json"
+        )
+    return platform
 
 
 # ---------------------------------------------------------------------------
@@ -919,6 +1264,17 @@ def ensure_symlink(link: Path, target_relative: str) -> bool:
 def main() -> int:
     base = load_base()
     manifest = load_manifest()
+
+    # Schema gate (#1173): the build must refuse to render from a malformed
+    # manifest — otherwise a typo'd key is silently absorbed into every
+    # generated artifact (and a missing key becomes a KeyError) before
+    # check-plugin-manifests.py ever runs the same shared gate.
+    schema_drifts = manifest_schema_drifts(manifest)
+    if schema_drifts:
+        for d in schema_drifts:
+            print(f"ERROR {d}", file=sys.stderr)
+        return 1
+
     hooks_source = expand_to_hooks_json(manifest)
     dispatch_groups = frozenset(
         (g["event"], g.get("matcher")) for g in manifest.get("dispatch_groups", [])
@@ -927,7 +1283,7 @@ def main() -> int:
     changed_paths: list[str] = []
 
     for platform_file in sorted(PLATFORMS_DIR.glob("*.json")):
-        platform = json.loads(platform_file.read_text())
+        platform = load_platform(platform_file)
         host_id = platform.get("host_id", platform["platform"])
         for output in platform["outputs"]:
             out_path = REPO_ROOT / output["path"]
