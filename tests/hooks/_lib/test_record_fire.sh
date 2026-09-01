@@ -244,6 +244,41 @@ else
 fi
 rm -rf "$SYM_ROOT"
 
+# HOME-unset fallback (Codex review, PR #1207 round 2): with $HOME unset and
+# no `.git` marker at the checkout root, the pre-fix code built
+# "${HOME:-}/.praxis/telemetry" as "/.praxis/telemetry" — root-owned, so
+# `mkdir -p` fails for a normal user and every fire record is silently lost.
+# _fire_ledger.resolve_path() never hits this: Python's Path.home() falls
+# back to the passwd-database home. Stub `dscl`/`getent` ahead of PATH so
+# the shell writer's own passwd lookup is exercised against a controlled
+# fake home, without touching the real invoking user's actual $HOME.
+HOMEFB_ROOT="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
+mkdir -p "$HOMEFB_ROOT/pkgroot/hooks/_lib" "$HOMEFB_ROOT/bin" "$HOMEFB_ROOT/fakehome"
+cp "$ROOT_DIR/hooks/_lib/record_fire.sh" "$HOMEFB_ROOT/pkgroot/hooks/_lib/"
+cat > "$HOMEFB_ROOT/bin/dscl" <<EOF
+#!/bin/sh
+echo "NFSHomeDirectory: $HOMEFB_ROOT/fakehome"
+EOF
+cat > "$HOMEFB_ROOT/bin/getent" <<EOF
+#!/bin/sh
+echo "stubuser:x:1000:1000:Stub User:$HOMEFB_ROOT/fakehome:/bin/sh"
+EOF
+chmod +x "$HOMEFB_ROOT/bin/dscl" "$HOMEFB_ROOT/bin/getent"
+HOMEFB_TODAY=$(date -u +%Y-%m-%d)
+env -u HOME -u PRAXIS_FIRE_TELEMETRY_FILE PATH="$HOMEFB_ROOT/bin:$PATH" \
+  PRAXIS_LIB_DIR="$HOMEFB_ROOT/pkgroot/hooks/_lib" sh -c '
+    . "$1/pkgroot/hooks/_lib/record_fire.sh"
+    praxis_record_fire homefb-hook homefb-role pass sess-homefb ""
+  ' homefb "$HOMEFB_ROOT"
+HOMEFB_LEDGER="$HOMEFB_ROOT/fakehome/.praxis/telemetry/fire-events-$HOMEFB_TODAY.jsonl"
+if [ -s "$HOMEFB_LEDGER" ] && [ ! -e "/.praxis" ]; then
+  ok "HOME-unset falls back to passwd-db home (not /.praxis)"
+else
+  ko "HOME-unset falls back to passwd-db home (not /.praxis)" \
+    "fallback_ledger=$(ls "$HOMEFB_LEDGER" 2>&1)"
+fi
+rm -rf "$HOMEFB_ROOT"
+
 # Concurrency smoke: N parallel shell appends into one ledger must yield
 # exactly N intact lines — the single-printf-under-O_APPEND contract (each
 # line far below PIPE_BUF) means no torn/interleaved records. Bounded loop,

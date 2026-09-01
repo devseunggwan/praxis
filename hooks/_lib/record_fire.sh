@@ -86,6 +86,32 @@ except Exception:
   return 0
 }
 
+# _praxis_home_fallback
+#
+# Prints the caller's home directory from the passwd database, or nothing on
+# failure. Reached only when $HOME is unset — never on the per-fire hot path
+# — so a fork here (id, getent/dscl, awk) costs nothing that matters. Mirrors
+# Python's Path.home(), which falls back the same way (pwd.getpwuid) rather
+# than treating an unset HOME as empty: without this, resolve_path()'s
+# no-.git branch built "${HOME:-}/.praxis/telemetry" as "/.praxis/telemetry"
+# with HOME unset — root-owned and unwritable by a normal user, so mkdir
+# failed and every fire record was silently dropped.
+_praxis_home_fallback() {
+  _rf_user=$(id -un 2>/dev/null) || return 1
+  [ -n "$_rf_user" ] || return 1
+  if command -v getent >/dev/null 2>&1; then
+    # Linux/glibc: field 6 of the passwd entry.
+    _rf_pw_home=$(getent passwd "$_rf_user" 2>/dev/null | awk -F: '{ print $6 }')
+  elif command -v dscl >/dev/null 2>&1; then
+    # macOS has no getent; Directory Service holds the same record.
+    _rf_pw_home=$(dscl . -read "/Users/$_rf_user" NFSHomeDirectory 2>/dev/null | awk '{ print $2 }')
+  else
+    _rf_pw_home=""
+  fi
+  [ -n "$_rf_pw_home" ] || return 1
+  printf '%s\n' "$_rf_pw_home"
+}
+
 # _praxis_trim <value>
 #
 # Strips leading/trailing whitespace into _PRAXIS_TRIMMED (no subshell — a
@@ -148,7 +174,16 @@ praxis_record_fire() {
     if [ -e "$_rf_root/.git" ]; then
       _rf_dir="$_rf_root/.praxis-dev-telemetry"
     else
-      _rf_dir="${HOME:-}/.praxis/telemetry"
+      _rf_home="${HOME:-}"
+      if [ -z "$_rf_home" ]; then
+        _rf_home=$(_praxis_home_fallback) || _rf_home=""
+      fi
+      # No portable answer (no id/getent/dscl, or no matching passwd entry):
+      # refuse the write rather than fall through to "${HOME:-}/..." again,
+      # which would silently resolve to the unwritable root-level path this
+      # fix exists to avoid.
+      [ -n "$_rf_home" ] || return 0
+      _rf_dir="$_rf_home/.praxis/telemetry"
     fi
     _rf_path="$_rf_dir/fire-events-$_rf_today.jsonl"
   fi
