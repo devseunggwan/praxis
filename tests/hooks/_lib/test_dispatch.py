@@ -1160,8 +1160,6 @@ def test_stop_raw_marker_fixture_discriminates(tmp_path, monkeypatch, capsys):
     assert json.loads(out) == {"decision": "block", "reason": "[praxis:gate] real block"}
 
 
-
-
 def test_stop_block_lane_does_not_run_on_other_events(tmp_path, monkeypatch, capsys):
     # `{"decision": "block"}` is Stop's vocabulary. Re-emitting it as the
     # group's answer on another event answers a question that event never
@@ -1181,8 +1179,6 @@ def test_stop_block_lane_does_not_run_on_other_events(tmp_path, monkeypatch, cap
     assert json.loads(capsys.readouterr().out)["decision"] == "block"
 
 
-
-
 def test_escaped_decision_key_still_blocks(tmp_path, monkeypatch, capsys):
     # `{"\u0064ecision": "block"}` is valid JSON for the same object. A literal
     # substring pre-filter dropped it before the parse that is supposed to be
@@ -1198,8 +1194,6 @@ def test_escaped_decision_key_still_blocks(tmp_path, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == {
         "decision": "block", "reason": "[praxis:gate] escaped"
     }
-
-
 
 
 def test_stop_block_with_malformed_reason_still_blocks(tmp_path, monkeypatch, capsys):

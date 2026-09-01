@@ -350,8 +350,6 @@ def test_escaped_decision_key_is_classified_as_block():
     assert fl._is_stop_block('{"decision": "approve"}') is False
 
 
-
-
 def test_record_session_fire_skipped_in_dispatcher(tmp_path, monkeypatch):
     """One fire, one rich record — not two (issue #1199 review).
 
@@ -374,8 +372,6 @@ def test_record_session_fire_skipped_in_dispatcher(tmp_path, monkeypatch):
     assert fl.record_session_fire("x", "completion-verify", "block", "s", "") is True
     recs = [json.loads(x) for x in out.read_text().splitlines() if x.strip()]
     assert len(recs) == 1 and recs[0]["granularity"] == "rich"
-
-
 
 
 def test_record_session_fire_opt_out(tmp_path, monkeypatch):
