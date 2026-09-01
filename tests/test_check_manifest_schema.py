@@ -289,6 +289,27 @@ def test_dispatch_member_with_args_is_allowed(manifest):
     )
 
 
+def test_dispatch_group_may_omit_its_matcher(manifest):
+    # Stop / SessionStart / UserPromptSubmit carry no matcher. The key is
+    # OMITTED rather than null: the validator subset has no null type, and
+    # .get("matcher") answers None for an absent key either way.
+    manifest["dispatch_groups"].append({"event": "Stop"})
+    # Scoped to the matcher: adding a Stop group makes the real Stop hooks
+    # members, and their `body` declarations are rejected for their own
+    # (correct) reason — which is not what this test is about.
+    assert not any(
+        "dispatch_groups" in d and "matcher" in d
+        for d in build.manifest_schema_drifts(manifest)
+    )
+    # Control: an explicit null is still a type error, so "omit it" is a real
+    # instruction and not a distinction the schema fails to draw.
+    manifest["dispatch_groups"][-1] = {"event": "Stop", "matcher": None}
+    assert any(
+        "matcher" in d and "expected string" in d
+        for d in build.manifest_schema_drifts(manifest)
+    )
+
+
 def test_dispatch_member_with_body_is_rejected(manifest):
     name = _first_dispatch_member_name(manifest)
     entry = next(h for h in manifest["hooks"] if h["name"] == name)
