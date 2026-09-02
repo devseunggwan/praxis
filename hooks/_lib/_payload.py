@@ -78,11 +78,17 @@ def read_bash_payload(
       or non-str `tool_input.command` yields `""`), or None when the payload
       is unparseable or `tool_name` is not "Bash". Callers translate None to
       `return 0` and keep their own empty-command handling.
+
+    A non-dict `tool_input` yields `""` too. `or {}` alone covers only the
+    falsy shapes: a truthy string or list still reaches `.get` and raises,
+    which would push the caller into its fail-open path — the gate goes
+    silently quiet, which is the class of bug this helper exists to end.
     """
     payload = read_payload(("Bash",), stream)
     if payload is None:
         return None
-    command = (payload.get("tool_input") or {}).get("command")
+    tool_input = payload.get("tool_input")
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
     if not isinstance(command, str):
         command = ""
     return payload, command

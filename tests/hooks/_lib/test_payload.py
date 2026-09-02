@@ -13,6 +13,8 @@ import io
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LIB = REPO_ROOT / "hooks" / "_lib"
 if str(LIB) not in sys.path:
@@ -47,6 +49,22 @@ def test_bash_null_tool_input_is_safe():
     payload, command = res
     assert command == ""
     assert payload["tool_input"] is None
+
+
+@pytest.mark.parametrize(
+    "literal",
+    ['"a-string"', "[\"ls\"]", "0", "true", "1.5"],
+)
+def test_bash_non_dict_tool_input_yields_empty_str(literal):
+    # `or {}` covers only the FALSY non-dicts. A truthy string or list still
+    # reached `.get` and raised AttributeError, which pushed the caller into
+    # its fail-open path — the gate goes silently quiet, the exact failure this
+    # helper exists to end (CodeRabbit, PR #1232).
+    res = read_bash_payload(
+        _stream('{"tool_name": "Bash", "tool_input": %s}' % literal))
+    assert res is not None
+    _payload_obj, command = res
+    assert command == ""
 
 
 def test_bash_malformed_json_returns_none():
