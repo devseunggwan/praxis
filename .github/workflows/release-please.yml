@@ -64,14 +64,29 @@ jobs:
       # opened the log. This step re-derives from git which commits should have
       # produced a CHANGELOG entry and fails when the pending release PR is
       # missing one, so the skip surfaces as a red run on main instead.
-      # It runs after the action so the release branch reflects this push. The
-      # fetch is tolerant because "no release branch" is a state the guard
-      # judges itself: publishable commits with no release PR is a failure,
-      # nothing publishable is a pass.
+      # It runs after the action so the release branch reflects this push.
+      # An absent release branch is a verdict the guard makes itself
+      # (publishable commits with no release PR is a failure, nothing
+      # publishable is a pass), but a fetch that fails for transport or auth
+      # reasons is not — it looks identical from inside the guard, so the run
+      # would go red for a network blip. `ls-remote --exit-code` separates the
+      # two: exit 2 means the branch is genuinely absent, anything else means
+      # we could not look, and then the step fails open with a warning.
       - name: changelog coverage
         env:
           RELEASE_BRANCH: release-please--branches--main
         run: |
-          git fetch --no-tags origin \
-            "+refs/heads/${RELEASE_BRANCH}:refs/remotes/origin/${RELEASE_BRANCH}" || true
+          if git ls-remote --exit-code --heads origin "$RELEASE_BRANCH" >/dev/null; then
+            git fetch --no-tags origin \
+              "+refs/heads/${RELEASE_BRANCH}:refs/remotes/origin/${RELEASE_BRANCH}" || {
+              echo "warning: cannot fetch $RELEASE_BRANCH; skipping changelog coverage" >&2
+              exit 0
+            }
+          else
+            rc=$?
+            if [ "$rc" -ne 2 ]; then
+              echo "warning: cannot reach origin (git ls-remote exit $rc); skipping" >&2
+              exit 0
+            fi
+          fi
           python3 scripts/check-changelog-coverage.py
