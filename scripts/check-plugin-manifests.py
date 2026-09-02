@@ -1275,20 +1275,25 @@ def main() -> int:
                     )
 
     # ------------------------------------------------------------------
-    # Rule 23 — Agent Plugins portable manifest shape (#1219)
+    # Rule 26 — Agent Plugins portable manifest shape (#1219)
     #
     # Two failures Rule 5's byte-identity check cannot see, because both stay
     # reproducible: the build renders them, the checker re-renders the same
-    # thing, and the diff is clean while the manifest is unloadable.
+    # thing, and the diff is clean while the manifest is still wrong.
     #
-    #   (a) $schema drifts off 1.0.0, the only published spec version. Hosts
-    #       select this manifest on the agent-plugins.org URI prefix but
-    #       accept only versions they implement, so a newer pin still wins
-    #       selection and then loads as unsupported — the host's own manifest
-    #       never gets its turn as a fallback.
+    #   (a) $schema drifts off 1.0.0, the only published spec version. The
+    #       spec makes that fatal with no way back — "A missing or unsupported
+    #       `$schema` rejects the plugin" — and clients find this file by path
+    #       (plugin.json at the plugin root), so a newer pin does not route
+    #       around it; it just fails to load.
     #   (b) a host-specific key (skills, hooks, mcpServers, apps, interface)
-    #       reaches the portable manifest. The spec's manifest schema is
-    #       closed, so one such key invalidates the whole document.
+    #       reaches the portable manifest. This one is repo policy, NOT a spec
+    #       requirement: the spec says to "report and ignore each unknown
+    #       top-level field, then continue if the manifest is otherwise
+    #       valid". We reject it because a host path that silently does
+    #       nothing on every conformant client is worse than a failed check.
+    #
+    # Spec quotes: agent-plugins.org/client-implementers/loading-and-discovery
     # ------------------------------------------------------------------
     for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
         platform = json.loads(platform_file.read_text())
@@ -1308,7 +1313,7 @@ def main() -> int:
                 drifts.append(
                     f"AGENT PLUGIN {path}: top-level JSON is "
                     f"{type(rendered).__name__}, expected an object — the "
-                    "spec requires a JSON object manifest (Rule 23, #1219)"
+                    "spec requires a JSON object manifest (Rule 26, #1219)"
                 )
                 continue
             schema = rendered.get("$schema")
@@ -1316,18 +1321,17 @@ def main() -> int:
                 drifts.append(
                     f"AGENT PLUGIN {path}: $schema is {schema!r}, expected "
                     f"{_build.AGENT_PLUGIN_SCHEMA_URI!r} — 1.0.0 is the only "
-                    "published spec version, and a newer pin still wins "
-                    "manifest selection and then loads as unsupported instead "
-                    "of falling back (Rule 23, #1219)"
+                    "published spec version, and an unsupported $schema "
+                    "rejects the plugin outright (Rule 26, #1219)"
                 )
             for key in ("skills", "hooks", "mcpServers", "apps", "interface"):
                 if key in rendered:
                     drifts.append(
                         f"AGENT PLUGIN {path}: carries host-specific key "
-                        f"{key!r} — the Agent Plugins manifest schema is "
-                        "closed, so this invalidates the manifest; put it in "
-                        "the host's own manifest or under extensions "
-                        "(Rule 23, #1219)"
+                        f"{key!r} — conformant clients ignore unknown "
+                        "top-level fields, so this path would silently do "
+                        "nothing; put it in the host's own manifest or under "
+                        "extensions (Rule 26, #1219)"
                     )
 
     # ------------------------------------------------------------------

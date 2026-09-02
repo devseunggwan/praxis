@@ -385,22 +385,31 @@ today:
   undocumented and unverified; if the portable manifest wins, `.cursor-plugin/`
   hooks would stop loading. Verify against a real Cursor install before
   relying on either outcome.
-- **Spec-only clients** (ChatGPT, Copilot, VS Code, Kiro) read this file and
-  nothing else praxis ships.
+- **Spec-only clients** (ChatGPT, Copilot, VS Code, Kiro) are the intended
+  consumers — this file is the only thing praxis ships that they could read.
+  No install of any of them has been observed loading it, so treat the
+  coverage as designed-for, not demonstrated.
 
 Two constraints hold the manifest together, both gated by
-check-plugin-manifests Rule 23 because neither is visible to the byte-identity
+check-plugin-manifests Rule 26 because neither is visible to the byte-identity
 drift check:
 
 - **`$schema` is pinned to 1.0.0** — the only published spec version (1.1.0 is
-  a working draft). Hosts select the manifest on the `agent-plugins.org` URI
-  prefix but accept only versions they implement, so a newer pin is worse than
-  an unrelated one: the file still wins selection, then loads as unsupported,
-  and the host's own manifest never gets its turn as a fallback.
+  a working draft). Clients find this file by path and read `$schema` only to
+  pick which local validation rules to apply, so an unsupported version is
+  fatal on its own: "A missing or unsupported `$schema` rejects the plugin."
+  The spec defines no fallback, so a newer pin does not defer to the host's
+  own manifest — it just fails to load.
 - **No host-specific keys** (`skills`, `hooks`, `mcpServers`, `apps`,
-  `interface`). The spec's manifest schema is closed, so one such key
-  invalidates the document. Component locations are fixed by the spec at
-  `skills/` and `mcp.json`; host data belongs under `extensions.<namespace>`.
+  `interface`). This one is praxis policy, not a spec requirement: conformant
+  clients "report and ignore each unknown top-level field, then continue if
+  the manifest is otherwise valid", which is exactly the problem — such a key
+  would load clean and point at a location nothing reads. Component locations
+  are fixed by the spec at `skills/` and `mcp.json`; host data belongs under
+  `extensions.<namespace>`.
+
+Spec quotes above are from
+[loading and discovery](https://agent-plugins.org/client-implementers/loading-and-discovery).
 
 The spec's portable component types are Agent Skills and MCP servers only —
 hooks are explicitly outside v1 and the 1.1.0 draft. So this manifest carries

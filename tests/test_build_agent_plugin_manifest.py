@@ -10,12 +10,16 @@ Two properties decide whether the manifest loads at all, and neither is
 visible to the byte-identity drift check — a wrong manifest renders
 reproducibly and diffs clean:
 
-  * `$schema` pinned to 1.0.0, the only published spec version. Hosts select
-    the manifest on the `agent-plugins.org` URI prefix but accept only
-    versions they implement, so a newer pin still wins selection and then
-    loads as unsupported — the host's own manifest never gets its fallback.
-  * no host-specific component keys. The spec's manifest schema is closed,
-    so one `skills` or `hooks` key invalidates the whole document.
+  * `$schema` pinned to 1.0.0, the only published spec version. Clients find
+    this file by path and read `$schema` only to pick local validation rules,
+    so an unsupported version is fatal on its own — "A missing or unsupported
+    `$schema` rejects the plugin" — with no fallback defined.
+  * no host-specific component keys. This one is repo policy, not spec: the
+    spec says to "report and ignore each unknown top-level field, then
+    continue if the manifest is otherwise valid", which is why such a key is
+    worse than a hard error — it loads clean and does nothing.
+
+Spec quotes: agent-plugins.org/client-implementers/loading-and-discovery
 """
 
 from __future__ import annotations
@@ -35,8 +39,9 @@ assert _spec and _spec.loader
 _build = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_build)
 
-# Spec-defined manifest members (§5.3 required, §5.4 metadata). Anything
-# outside this set is rejected by the closed schema.
+# Spec-defined manifest members (§5.3 required, §5.4 metadata). A conformant
+# client reports and ignores anything outside this set, so an extra member
+# does not fail the load — it just never does anything.
 SPEC_MEMBERS = {
     "$schema", "name", "version", "description", "author",
     "homepage", "repository", "license", "keywords", "extensions",
@@ -48,7 +53,7 @@ def _rendered() -> dict:
     return _build.render_agent_plugin(_build.load_base())
 
 
-def test_schema_is_pinned_to_the_one_version_codex_supports():
+def test_schema_is_pinned_to_the_only_published_version():
     assert _rendered()["$schema"] == (
         "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
     )
@@ -74,14 +79,15 @@ def test_carries_no_host_specific_component_keys():
     manifest = _rendered()
     for key in HOST_SPECIFIC_KEYS:
         assert key not in manifest, (
-            f"{key!r} is not a spec member; the closed schema rejects the "
-            "whole manifest. Host paths belong in the host's own manifest."
+            f"{key!r} is not a spec member, so conformant clients ignore it "
+            "and the path it names is never read. Host paths belong in the "
+            "host's own manifest."
         )
 
 
 def test_every_member_is_spec_defined():
     unexpected = set(_rendered()) - SPEC_MEMBERS
-    assert not unexpected, f"non-spec members would invalidate it: {unexpected}"
+    assert not unexpected, f"non-spec members are ignored, not read: {unexpected}"
 
 
 def test_version_tracks_the_VERSION_file():

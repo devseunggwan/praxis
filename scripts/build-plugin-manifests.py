@@ -80,11 +80,13 @@ from constants import NON_HOOK_DOCS, OPT_IN_HOOKS  # noqa: E402
 MANIFEST_PATH = HOOKS_DIR / "manifest.json"
 
 # Agent Plugins portable manifest schema, pinned to the only published spec
-# version (1.1.0 is a working draft). Hosts select this manifest on the
-# agent-plugins.org URI prefix but accept only versions they implement, so a
-# newer pin is worse than an unrelated one: the file still wins selection,
-# then loads as unsupported, and the host's own manifest never gets its turn
-# as a fallback.
+# version (1.1.0 is a working draft). Clients find this file by path —
+# plugin.json at the plugin root — and read $schema only to pick which local
+# validation rules to apply, never to fetch anything. An unsupported version
+# is therefore fatal on its own: "A missing or unsupported `$schema` rejects
+# the plugin" (agent-plugins.org/client-implementers/loading-and-discovery).
+# The spec defines no fallback, so a newer pin does not defer to the host's
+# own manifest; it just fails to load.
 AGENT_PLUGIN_SCHEMA_URI = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 
 # docs/hook/<name>.md is a 1-line redirect stub to the role-based spec
@@ -1272,9 +1274,13 @@ def render_agent_plugin(base: dict) -> dict:
     rather than solved by moving this output.
 
     Carries spec-defined metadata only. Component paths are NOT emitted: the
-    spec fixes skills at `./skills` and MCP servers at `./mcp.json`, and its
-    manifest schema is closed, so a host-specific `skills` or `hooks` key here
-    invalidates the whole manifest rather than being ignored.
+    spec fixes skills at `./skills` and MCP servers at `./mcp.json`, so a
+    host-specific `skills` or `hooks` key here would name a location no
+    conformant client reads. Such a key does not invalidate the manifest —
+    clients "report and ignore each unknown top-level field, then continue if
+    the manifest is otherwise valid" — which is exactly why it must not ship:
+    it would load clean and do nothing. Rule 26 in check-plugin-manifests.py
+    enforces that as repo policy.
     """
     return {
         "$schema": AGENT_PLUGIN_SCHEMA_URI,
