@@ -76,9 +76,9 @@ _SURFACE_FILES = (gates.MANIFEST, gates.SPEC, gates.IMPL, gates.TEST, gates.CHEC
 # is: a whitelist edit has to come through this file too.
 EXPECTED_PER_HOST = {"claude": 7, "codex": 3, "cursor": 3}
 
-# `gemini` ships skills only — no `hooks` output in its platform manifest — so
-# it is not a host the ADVISE demotion has to hold on.
-NON_HOOK_PLATFORM = "gemini"
+# A host with no `hooks` output in `manifests/platforms/` — every shipped
+# platform installs hooks today, so this is a synthetic name.
+NON_HOOK_PLATFORM = "skills-only-host"
 
 # The manifest block the fixtures edit, quoted verbatim so a reformat of the
 # manifest breaks the fixture loudly instead of silently no-opping.
@@ -365,7 +365,7 @@ def test_missing_host_row_is_drift(tmp_path):
 
 
 def test_host_row_for_a_platform_without_hooks_is_drift(tmp_path):
-    """`gemini` ships no hooks.json; a row for it would claim coverage it never gets."""
+    """A host shipping no hooks.json: a row for it claims coverage it never gets."""
     repo = _tree(
         tmp_path,
         {

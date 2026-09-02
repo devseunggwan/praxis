@@ -1,0 +1,10 @@
+{
+  "platform": "agent-plugins",
+  "host_id": "agent-plugins",
+  "outputs": [
+    {
+      "kind": "agent-plugin",
+      "path": "plugin.json"
+    }
+  ]
+}

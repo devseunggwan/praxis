@@ -160,7 +160,7 @@ stderr, exit 0. The hook never blocks the prompt.
 
 `hosts: ["claude"]` in `hooks/manifest.json`. The compaction mechanic and
 the `transcript_path` payload field are Claude Code-specific; other hosts
-(Codex, Cursor, Gemini) have different session-shrinking
+(Codex, Cursor) have different session-shrinking
 semantics, so the hook is not emitted on their platforms.
 
 ### Relationship to sibling hooks

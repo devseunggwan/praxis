@@ -51,8 +51,8 @@ ships from would cost more than the literal leak it prevents.
 
 **MCP writes (slack/notion) are out of scope.** praxis has no wired
 MCP-matcher entry in `hooks/manifest.json`, and a `hosts: all` MCP matcher's
-behavior is unverified across the 5 target platforms (claude / codex / cursor /
-gemini / opencode). Rather than ship an unverified matcher or a dead MCP code
+behavior is unverified across the 4 target platforms (claude / codex / cursor /
+opencode). Rather than ship an unverified matcher or a dead MCP code
 path, MCP coverage is deferred to a follow-up that first establishes an
 MCP-matcher convention. The gh issue/PR body is the dominant external-write
 surface the agent uses, so the backstop's value holds without MCP.

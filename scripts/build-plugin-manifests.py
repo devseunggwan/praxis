@@ -21,7 +21,11 @@ Writes (generated artifacts, committed to the repo):
   plugins/praxis/.codex-plugin/hooks/hooks.json
   .cursor-plugin/plugin.json
   .cursor-plugin/hooks/hooks.json
-  gemini-extension.json
+  plugin.json                    — Agent Plugins 1.0.0 portable manifest
+                                   (agent-plugins.org) for the hosts whose
+                                   plugin root IS the repo root. Codex's is
+                                   plugins/praxis/, so Codex does not see
+                                   this file and is out of scope here.
   hooks/<name>{suffix}.sh        — runtime wrapper(s), one per unique
                                    (name, wrapper_suffix) pair; tracked
                                    so marketplace installs (which do not
@@ -71,6 +75,16 @@ SECURITY_DOC = REPO_ROOT / "SECURITY.md"
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from constants import NON_HOOK_DOCS, OPT_IN_HOOKS  # noqa: E402
 MANIFEST_PATH = HOOKS_DIR / "manifest.json"
+
+# Agent Plugins portable manifest schema, pinned to the only published spec
+# version (1.1.0 is a working draft). Clients find this file by path —
+# plugin.json at the plugin root — and read $schema only to pick which local
+# validation rules to apply, never to fetch anything. An unsupported version
+# is therefore fatal on its own: "A missing or unsupported `$schema` rejects
+# the plugin" (agent-plugins.org/client-implementers/loading-and-discovery).
+# The spec defines no fallback, so a newer pin does not defer to the host's
+# own manifest; it just fails to load.
+AGENT_PLUGIN_SCHEMA_URI = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 
 # docs/hook/<name>.md is a 1-line redirect stub to the role-based spec
 # (ADR-0001 §337-338): the flat docs/hook/ URLs must keep resolving for one
@@ -1191,7 +1205,7 @@ def emit_hook_operating_matrix(manifest: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Plugin / marketplace / gemini-extension renderers (unchanged)
+# Plugin / marketplace renderers (unchanged)
 # ---------------------------------------------------------------------------
 
 def render_plugin(base: dict, overrides: dict) -> dict:
@@ -1232,17 +1246,30 @@ def render_marketplace(base: dict, plugin_source: str, extras: dict | None) -> d
     return manifest
 
 
-def render_gemini_extension(base: dict) -> dict:
-    author_name = (
-        base["author"]["name"]
-        if isinstance(base["author"], dict)
-        else base["author"]
-    )
+def render_agent_plugin(base: dict) -> dict:
+    """Agent Plugins 1.0.0 portable manifest (https://agent-plugins.org/).
+
+    Written to the repo root, which is the plugin root for Claude, Cursor, and
+    the spec-only clients. Codex's plugin root is plugins/praxis/, so this file
+    is invisible to it — see ARCHITECTURE.md for why that is tracked separately
+    rather than solved by moving this output.
+
+    Carries spec-defined metadata only. Component paths are NOT emitted: the
+    spec fixes skills at `./skills` and MCP servers at `./mcp.json`, so a
+    host-specific `skills` or `hooks` key here would name a location no
+    conformant client reads. Such a key does not invalidate the manifest —
+    clients "report and ignore each unknown top-level field, then continue if
+    the manifest is otherwise valid" — which is exactly why it must not ship:
+    it would load clean and do nothing. Rule 26 in check-plugin-manifests.py
+    enforces that as repo policy.
+    """
     return {
+        "$schema": AGENT_PLUGIN_SCHEMA_URI,
         "name": base["name"],
         "description": base["description"],
         "version": base["version"],
-        "author": author_name,
+        "author": base["author"],
+        "homepage": base["homepage"],
         "repository": base["repository"],
         "keywords": base["keywords"],
     }
@@ -1258,6 +1285,8 @@ def render_output(
     kind = output["kind"]
     if kind == "plugin":
         return render_plugin(base, output.get("plugin_overrides", {}))
+    if kind == "agent-plugin":
+        return render_agent_plugin(base)
     if kind == "marketplace":
         return render_marketplace(
             base,
@@ -1266,8 +1295,6 @@ def render_output(
         )
     if kind == "hooks":
         return filter_hooks_for_host(hooks_source, host_id, dispatch_groups)
-    if kind == "gemini-extension":
-        return render_gemini_extension(base)
     raise ValueError(f"unknown output kind: {kind}")
 
 

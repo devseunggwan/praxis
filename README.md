@@ -5,7 +5,7 @@ that actually fire at the moment they are needed — a merge that stops while a 
 review finding is still open, a "done" that will not go out without evidence behind it,
 a worktree workflow that is not skipped because the change looked small. Skills you
 invoke by name, and hooks that fire whether or not anyone remembers them. One runtime,
-packaged for Claude Code, Codex, Cursor, and Gemini.
+packaged for Claude Code, Codex, and Cursor.
 
 > **Note:** Skills may be added, removed, or restructured at any time without prior notice. This is a personal toolbox — not a stable API.
 

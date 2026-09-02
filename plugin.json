@@ -1,8 +1,12 @@
 {
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "praxis",
   "description": "Workflow rules from CLAUDE.md turned into hooks and skills that actually fire",
   "version": "7.13.0",
-  "author": "devseunggwan",
+  "author": {
+    "name": "devseunggwan"
+  },
+  "homepage": "https://github.com/devseunggwan/praxis",
   "repository": "https://github.com/devseunggwan/praxis",
   "keywords": [
     "workflow",

@@ -83,7 +83,7 @@ tests/
   completion-signal-gate → strike-counter stop`) is load-bearing for the
   evidence-gate semantics; any restructure must preserve declared order.
 - `excluded_hooks` per platform (currently used to omit Claude-only hooks
-  from Cursor/OpenCode/Gemini manifests) must keep working.
+  from Cursor/OpenCode manifests) must keep working.
 
 ### 1.4 Forces
 
