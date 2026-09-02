@@ -331,6 +331,8 @@ packaging is *generated* from canonical metadata, not hand-edited:
   repository, homepage, category, keywords). `VERSION` is the authoritative
   version string.
 - `manifests/platforms/{claude,codex,cursor,opencode}.json` — per-platform output list.
+- `manifests/platforms/agent-plugins.json` — not a host, a *format*: the
+  vendor-neutral [Agent Plugins](https://agent-plugins.org/) 1.0.0 manifest.
 - `scripts/build-plugin-manifests.py` — regenerate every artifact. Idempotent.
 - `scripts/check-plugin-manifests.py` — CI drift gate. Verifies generated
   files match the source and that the Codex adapter shell's symlinks
@@ -354,6 +356,64 @@ Generated (committed) outputs:
 | `.cursor-plugin/hooks/hooks.json` | Cursor-compatible hooks (filtered) |
 | `.opencode/plugin.json` | OpenCode plugin root |
 | `.opencode/hooks/hooks.json` | OpenCode-compatible hooks (filtered) |
+| `plugin.json` | Agent Plugins 1.0.0 portable manifest |
+
+### Agent Plugins portable manifest
+
+The spec locates a plugin's manifest at `plugin.json` in the **plugin root**,
+so which hosts this file reaches is decided entirely by where each host thinks
+praxis's plugin root is. praxis has two:
+
+| Plugin root | Hosts | Sees the root `plugin.json` |
+| ------------- | ------- | ----------------------------- |
+| repo root | Claude (`marketplace.json` source `./`), Cursor, spec-only clients | yes |
+| `plugins/praxis/` | Codex (`marketplace.json` source `./plugins/praxis`) | **no** |
+
+**Codex is deliberately out of scope here.** Its plugin root is nested, so it
+never looks at the repo-root file; covering Codex needs a second output at
+`plugins/praxis/plugin.json` and is tracked separately. Do not describe this
+manifest as Codex support.
+
+What the covered hosts do with it differs, and only one of them acts on it
+today:
+
+- **Claude** ignores it — its docs never mention the standard and it reads
+  `.claude-plugin/plugin.json`.
+- **Cursor** supports the standard alongside its own format and picks between
+  them by inspecting the manifest. Which one wins when both are present is
+  undocumented and unverified; if the portable manifest wins, `.cursor-plugin/`
+  hooks would stop loading. Verify against a real Cursor install before
+  relying on either outcome.
+- **Spec-only clients** (ChatGPT, Copilot, VS Code, Kiro) are the intended
+  consumers — this file is the only thing praxis ships that they could read.
+  No install of any of them has been observed loading it, so treat the
+  coverage as designed-for, not demonstrated.
+
+Two constraints hold the manifest together, both gated by
+check-plugin-manifests Rule 26 because neither is visible to the byte-identity
+drift check:
+
+- **`$schema` is pinned to 1.0.0** — the only published spec version (1.1.0 is
+  a working draft). Clients find this file by path and read `$schema` only to
+  pick which local validation rules to apply, so an unsupported version is
+  fatal on its own: "A missing or unsupported `$schema` rejects the plugin."
+  The spec defines no fallback, so a newer pin does not defer to the host's
+  own manifest — it just fails to load.
+- **No host-specific keys** (`skills`, `hooks`, `mcpServers`, `apps`,
+  `interface`). This one is praxis policy, not a spec requirement: conformant
+  clients "report and ignore each unknown top-level field, then continue if
+  the manifest is otherwise valid", which is exactly the problem — such a key
+  would load clean and point at a location nothing reads. Component locations
+  are fixed by the spec at `skills/` and `mcp.json`; host data belongs under
+  `extensions.<namespace>`.
+
+Spec quotes above are from
+[loading and discovery](https://agent-plugins.org/client-implementers/loading-and-discovery).
+
+The spec's portable component types are Agent Skills and MCP servers only —
+hooks are explicitly outside v1 and the 1.1.0 draft. So this manifest carries
+praxis's skills, not its hooks, and it replaces none of the host manifests
+above.
 
 **Do not edit generated files directly.** Change `manifests/*.json` (or
 `VERSION`) and re-run the build script. Run `./scripts/check-plugin-manifests.py`
