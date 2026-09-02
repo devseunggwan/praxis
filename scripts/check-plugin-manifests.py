@@ -1301,6 +1301,16 @@ def main() -> int:
             except (OSError, json.JSONDecodeError) as exc:
                 drifts.append(f"AGENT PLUGIN {path}: unreadable ({exc})")
                 continue
+            # Reported rather than raised: a top-level array or scalar makes
+            # the .get() below an AttributeError, which aborts the checker and
+            # takes every other rule's diagnostics down with it.
+            if not isinstance(rendered, dict):
+                drifts.append(
+                    f"AGENT PLUGIN {path}: top-level JSON is "
+                    f"{type(rendered).__name__}, expected an object — the "
+                    "spec requires a JSON object manifest (Rule 23, #1219)"
+                )
+                continue
             schema = rendered.get("$schema")
             if schema != _build.AGENT_PLUGIN_SCHEMA_URI:
                 drifts.append(
