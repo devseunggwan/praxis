@@ -14,6 +14,7 @@ Coverage:
 from __future__ import annotations
 
 import ast
+import io
 import json
 import os
 import subprocess
@@ -969,6 +970,336 @@ def test_run_one_without_budget_publishes_no_deadline(tmp_path):
     probe = _write_fake(tmp_path, "probe2", _FAKE_BUDGET_PROBE)
     _rc, _so, se = _dispatch.run_one("advisory-nudge", "probe2", probe, NOOP_PAYLOAD)
     assert se == "budget=99.000"  # accessor returned the standalone default
+
+
+# --------------------------------------------------------------------------- #
+# Stop-lane decision:block aggregation (issue #1169)
+# --------------------------------------------------------------------------- #
+
+STOP_PAYLOAD = json.dumps(
+    {
+        "hook_event_name": "Stop",
+        "transcript_path": "/nonexistent/transcript.jsonl",
+        "stop_hook_active": False,
+        "cwd": str(REPO_ROOT),
+        "session_id": "test-dispatch-stop",
+    }
+)
+
+
+def _fake_raw_stdout(text: str) -> str:
+    # Writes `text` to stdout UNCHANGED. _fake_context cannot be used to carry
+    # a permissionDecision marker: json.dump escapes the inner quotes, so the
+    # literal marker never survives into stdout and the substring lanes are
+    # never reached — a test built on it passes with the event scoping removed
+    # (issue #1199 review). This is also the real shape of the threat: an
+    # advisory hook printing help or example text verbatim.
+    return (
+        "import sys\n"
+        "def main():\n"
+        "    sys.stdout.write(%r + '\\n')\n"
+        "    return 0\n" % text
+    )
+
+
+def _fake_stop_block(reason: str) -> str:
+    # Mirrors _hook_io.emit_stop_block / the shell siblings' jq form: blocking
+    # is carried by the JSON `decision` field at exit 0, NOT the exit code.
+    return (
+        "import json, sys\n"
+        "def main():\n"
+        "    json.dump({'decision': 'block', 'reason': %r}, sys.stdout)\n"
+        "    sys.stdout.write('\\n')\n"
+        "    return 0\n" % reason
+    )
+
+
+def test_stop_member_block_is_not_swallowed(tmp_path, monkeypatch, capsys):
+    # The issue-#1169 regression case: one Stop member blocks at exit 0; the
+    # group must emit the block instead of falling through to the context-merge
+    # path and swallowing it.
+    members = [
+        ("completion-verify", "pass", _write_fake(tmp_path, "pass", _FAKE_PASS)),
+        ("completion-verify", "gate", _write_fake(tmp_path, "gate", _fake_stop_block("no evidence"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    out = capsys.readouterr().out
+    obj = json.loads(out)  # exactly ONE JSON object on stdout
+    assert rc == 0  # Stop blocking is carried by the JSON, not the exit code
+    assert obj["decision"] == "block"
+    assert obj["reason"] == "[praxis:gate] no evidence"
+
+
+def test_stop_all_pass_stays_silent(tmp_path, monkeypatch, capsys):
+    members = [
+        ("completion-verify", "p1", _write_fake(tmp_path, "p1", _FAKE_PASS)),
+        ("completion-verify", "p2", _write_fake(tmp_path, "p2", _FAKE_PASS)),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    assert rc == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_stop_multiple_blocks_merge_into_one_object(tmp_path, monkeypatch, capsys):
+    # Concatenating two decision objects is invalid JSON; both reasons must
+    # survive in ONE block, blank-line joined, each attributed to its hook.
+    # A reason that already carries its own [praxis:<hook>] prefix (the
+    # convention the python emitters use) is not double-tagged.
+    members = [
+        ("completion-verify", "g1", _write_fake(tmp_path, "g1", _fake_stop_block("first reason"))),
+        ("completion-verify", "g2", _write_fake(
+            tmp_path, "g2", _fake_stop_block("[praxis:g2] second reason"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    obj = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert obj["decision"] == "block"
+    assert obj["reason"] == "[praxis:g1] first reason\n\n[praxis:g2] second reason"
+
+
+def test_stop_block_wins_over_context(tmp_path, monkeypatch, capsys):
+    # Mixed block + context: only one JSON object can reach the host, and the
+    # block is the restrictive outcome — the context member's output must not
+    # corrupt or displace it (members re-run on the next stop attempt).
+    members = [
+        ("completion-verify", "ctx", _write_fake(tmp_path, "ctx", _fake_context("Stop", "fyi"))),
+        ("completion-verify", "gate", _write_fake(tmp_path, "gate", _fake_stop_block("blocked"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    obj = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert obj == {"decision": "block", "reason": "[praxis:gate] blocked"}
+
+
+def test_stop_contexts_merge_when_no_block(tmp_path, monkeypatch, capsys):
+    # Without a blocking member the pre-existing additionalContext lane still
+    # applies to a Stop group (issue #874 path, event-name-checked).
+    members = [
+        ("completion-verify", "c1", _write_fake(tmp_path, "c1", _fake_context("Stop", "one"))),
+        ("completion-verify", "c2", _write_fake(tmp_path, "c2", _fake_context("Stop", "two"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    hso = _sole_hso(capsys.readouterr().out)
+    assert rc == 0
+    assert hso["hookEventName"] == "Stop"
+    assert hso["additionalContext"] == "one\n\ntwo"
+
+
+def test_stop_block_recognition_is_parse_based_not_substring(tmp_path, monkeypatch, capsys):
+    # A context string that merely MENTIONS the block shape must not be read as
+    # a block — recognition parses the whole stdout object (issue #1169).
+    prose = 'docs say emit {"decision": "block", "reason": ...} to block'
+    members = [
+        ("completion-verify", "ctx", _write_fake(tmp_path, "ctx", _fake_context("Stop", prose))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    out = capsys.readouterr().out
+    assert rc == 0
+    obj = json.loads(out)
+    assert "decision" not in obj  # forwarded as context, never as a block
+    assert obj["hookSpecificOutput"]["additionalContext"] == prose
+
+
+def test_stop_quoted_marker_cannot_shadow_a_real_block(tmp_path, monkeypatch, capsys):
+    # Adversarial (issue #1199 review): a Stop member's additionalContext that
+    # QUOTES a permissionDecision marker must not be surfaced as a fake
+    # ask/deny that shadows (and drops) a later member's real block — the
+    # substring lanes are PreToolUse-only.
+    quoting = f"the PreToolUse hooks emit {_ASK} or {_DENY} on stdout"
+    members = [
+        ("completion-verify", "ctx", _write_fake(tmp_path, "ctx", _fake_raw_stdout(quoting))),
+        ("completion-verify", "gate", _write_fake(tmp_path, "gate", _fake_stop_block("real block"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    obj = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert obj == {"decision": "block", "reason": "[praxis:gate] real block"}
+
+
+def test_stop_quoted_marker_context_still_merges_without_block(tmp_path, monkeypatch, capsys):
+    # Same quoting member with no blocker: the context must MERGE (not be
+    # dropped as a mistaken decision payload) — the marker exclusion in the
+    # context lane is PreToolUse-only too.
+    quoting = f"docs: {_ASK} is the PreToolUse ask marker"
+    members = [
+        ("completion-verify", "ctx", _write_fake(tmp_path, "ctx", _fake_context("Stop", quoting))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    hso = _sole_hso(capsys.readouterr().out)
+    assert rc == 0
+    assert hso["additionalContext"] == quoting
+
+
+def test_stop_raw_marker_fixture_discriminates(tmp_path, monkeypatch, capsys):
+    """The fixture above must fail when the event scoping is removed.
+
+    Without this, `test_stop_quoted_marker_cannot_shadow_a_real_block` can pass
+    for the wrong reason — as it did while its member routed the marker through
+    json.dump. Here the marker reaches stdout unescaped, so the PreToolUse-only
+    substring lane is genuinely exercised: the assertion below is exactly the
+    one that flips when `is_pretooluse` stops gating it.
+    """
+    quoting = f"the PreToolUse hooks emit {_DENY} on stdout"
+    members = [
+        ("completion-verify", "ctx", _write_fake(tmp_path, "ctx", _fake_raw_stdout(quoting))),
+        ("completion-verify", "gate", _write_fake(tmp_path, "gate", _fake_stop_block("real block"))),
+    ]
+    _patch_members(monkeypatch, members)
+    assert _DENY in quoting, "fixture no longer carries the literal marker"
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    out = capsys.readouterr().out
+    assert rc == 0, "the quoting member's text was read as a deny"
+    assert json.loads(out) == {"decision": "block", "reason": "[praxis:gate] real block"}
+
+
+def test_stop_block_lane_does_not_run_on_other_events(tmp_path, monkeypatch, capsys):
+    # `{"decision": "block"}` is Stop's vocabulary. Re-emitting it as the
+    # group's answer on another event answers a question that event never
+    # asked (CodeRabbit, issue #1199 review).
+    members = [
+        ("completion-verify", "gate", _write_fake(tmp_path, "gate", _fake_stop_block("blocked"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PostToolUse", None, STOP_PAYLOAD)
+    assert rc == 0
+    assert capsys.readouterr().out == "", "a Stop block was re-emitted on PostToolUse"
+    # Control: the identical member on Stop DOES block, so the assertion above
+    # is not passing because the fixture is inert.
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out)["decision"] == "block"
+
+
+def test_escaped_decision_key_still_blocks(tmp_path, monkeypatch, capsys):
+    # `{"\u0064ecision": "block"}` is valid JSON for the same object. A literal
+    # substring pre-filter dropped it before the parse that is supposed to be
+    # the authority (CodeRabbit, issue #1199 review).
+    escaped = '{"\\u0064ecision": "block", "reason": "escaped"}'
+    assert '"decision"' not in escaped, "fixture is not actually escaped"
+    members = [
+        ("completion-verify", "gate", _write_fake(tmp_path, "gate", _fake_raw_stdout(escaped))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "decision": "block", "reason": "[praxis:gate] escaped"
+    }
+
+
+def test_stop_block_with_malformed_reason_still_blocks(tmp_path, monkeypatch, capsys):
+    # A parsed block whose `reason` is missing/non-string still blocks (empty
+    # reason -> the attribution tag alone, no trailing space): dropping it for
+    # a malformed reason field would be the exact silent swallow this lane
+    # exists to prevent.
+    body = (
+        "import json, sys\n"
+        "def main():\n"
+        "    json.dump({'decision': 'block', 'reason': 123}, sys.stdout)\n"
+        "    sys.stdout.write('\\n')\n"
+        "    return 0\n"
+    )
+    members = [
+        ("completion-verify", "gate", _write_fake(tmp_path, "gate", body)),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    obj = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert obj == {"decision": "block", "reason": "[praxis:gate]"}
+
+
+# --------------------------------------------------------------------------- #
+# argv protocol: matcher-less groups (issue #1199 review)
+# --------------------------------------------------------------------------- #
+
+def test_main_maps_no_matcher_sentinel_to_none(monkeypatch):
+    # The build renders NO_MATCHER_ARG into the dispatcher command for
+    # matcher-less groups; main() must map it back to None. An f-string render
+    # of None would have passed the literal "None", which matches no manifest
+    # entry — errorlessly resolving an empty group.
+    captured: dict = {}
+
+    def fake_run_group(event, matcher, payload_raw, host=None):
+        captured.update(event=event, matcher=matcher, host=host)
+        return 0
+
+    monkeypatch.setattr(_dispatch, "run_group", fake_run_group)
+    monkeypatch.setattr(sys, "argv", ["_dispatch.py", "Stop", _dispatch.NO_MATCHER_ARG, "claude"])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(STOP_PAYLOAD))
+    assert _dispatch.main() == 0
+    assert captured == {"event": "Stop", "matcher": None, "host": "claude"}
+
+
+def test_main_argv_path_runs_matcherless_stop_group_end_to_end(tmp_path, monkeypatch, capsys):
+    # Full argv path: manifest Stop entries carry NO matcher key, so the argv
+    # sentinel must resolve them and the member's block must come out — the
+    # regression case where a literal "None" matcher silently disabled the
+    # whole group.
+    _write_fake(tmp_path / "completion-verify", "gate", _fake_stop_block("blocked"))
+    _patch_manifest(tmp_path, monkeypatch, [
+        {"name": "gate", "role": "completion-verify", "event": "Stop", "timeout": 10},
+    ])
+    monkeypatch.setattr(_dispatch, "_HOOKS_DIR", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["_dispatch.py", "Stop", _dispatch.NO_MATCHER_ARG])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(STOP_PAYLOAD))
+    rc = _dispatch.main()
+    obj = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert obj == {"decision": "block", "reason": "[praxis:gate] blocked"}
+
+
+# --------------------------------------------------------------------------- #
+# args-declaring member guard (issue #1169)
+# --------------------------------------------------------------------------- #
+
+def _patch_manifest(tmp_path: Path, monkeypatch, hooks: list[dict]) -> None:
+    mf = tmp_path / "manifest.json"
+    mf.write_text(json.dumps({"hooks": hooks}))
+    monkeypatch.setattr(_dispatch, "_MANIFEST", mf)
+
+
+def test_args_declaring_member_is_excluded_loudly(tmp_path, monkeypatch, capsys):
+    # Dispatch groups invoke members with stdin only; a member whose manifest
+    # entry declares "args" would silently run with its argv dropped. It must
+    # be excluded at group-resolution time — fail-open, but recorded loudly on
+    # stderr like run_one's import-failure forwarding.
+    _patch_manifest(tmp_path, monkeypatch, [
+        {"name": "argsy", "role": "completion-verify", "body": "impl.sh",
+         "event": "Stop", "args": ["stop"], "timeout": 5},
+        {"name": "plain", "role": "completion-verify", "event": "Stop",
+         "timeout": 5},
+    ])
+    members = _dispatch.group_members("Stop", None)
+    err = capsys.readouterr().err
+    assert [n for _r, n, _i in members] == ["plain"]
+    assert "completion-verify/argsy" in err
+    assert "args=['stop']" in err
+    assert "fail-open" in err
+
+
+def test_args_declaring_member_group_still_fails_open(tmp_path, monkeypatch, capsys):
+    # A group containing an args-declaring member still runs end to end and
+    # never blocks on its account: the member is excluded (loud stderr), the
+    # rest of the group aggregates as usual.
+    _patch_manifest(tmp_path, monkeypatch, [
+        {"name": "argsy", "role": "completion-verify", "body": "impl.sh",
+         "event": "Stop", "args": ["stop"], "timeout": 5},
+    ])
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert captured.out == ""  # no member left -> silent allow, never a block
+    assert "completion-verify/argsy" in captured.err
 
 
 # --------------------------------------------------------------------------- #

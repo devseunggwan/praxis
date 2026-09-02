@@ -114,17 +114,61 @@ _DENY_MARKER = '"permissionDecision": "deny"'
 _SKIP_MARKER = "[dispatch] budget-skip"
 
 
-def classify_decision(rc: int, stdout: str, stderr: str) -> str:
+def _is_stop_block(stdout: str) -> bool:
+    """True iff `stdout` is a Stop-lane block object (issue #1169 / PR #1199).
+
+    A Stop hook blocks via a top-level `{"decision": "block", "reason": ...}`
+    JSON at exit 0 — no exit-2, no permissionDecision marker — so without this
+    shape the ledger records a grouped Stop block as "pass"/"advise",
+    mis-scoring the completion gates in the fire-ledger prune audit. Shape
+    recognition PARSES the JSON (kept in sync with
+    `_dispatch._stop_block_reason`), never substring-matches, so prose that
+    merely mentions the shape cannot register as a block.
+    """
+    # No substring pre-filter — see `_dispatch._stop_block_reason`, which this
+    # is kept in sync with: an escaped `decision` key parses to the same object
+    # and a literal probe would drop it (issue #1199 review).
+    if not stdout:
+        return False
+    try:
+        obj = json.loads(stdout)
+    except ValueError:
+        return False
+    return isinstance(obj, dict) and obj.get("decision") == "block"
+
+
+def classify_decision(
+    rc: int, stdout: str, stderr: str, event: str | None = None
+) -> str:
     """Map a member's `(exit, stdout, stderr)` to a fire decision.
 
     Mirrors `_dispatch.run_group`'s PER-MEMBER decision precedence (this is one
     member's own outcome, not the cross-member aggregate the dispatcher emits):
-    deny (exit 2 / deny marker) > ask (ask marker) > advise (any stderr) > pass.
+    block (exit 2 / deny marker / Stop-lane `{"decision": "block"}` JSON) >
+    ask (ask marker) > advise (any stderr) > pass.
     A dispatcher budget-skip record (never actually run) is decision "skip".
+
+    `event` is the dispatcher's own event, not a payload field: run_group has it
+    as a parameter, so passing it down cannot be defeated by a payload that
+    omits `hook_event_name`. It gates the Stop-lane branch because the
+    dispatcher accepts that shape only under `is_stop` and only at `rc == 0`
+    (`_dispatch.run_group`); without both gates the ledger recorded a block the
+    dispatcher never enforced — a member that printed the JSON and then died,
+    or one that printed it under another event.
+    The two SUBSTRING marker lanes carry the same gate for the same reason, at
+    `PreToolUse`: the dispatcher probes them only under `is_pretooluse`
+    (`_dispatch.run_group`), so a Stop or PostToolUse member whose stdout merely
+    contains a marker was recorded as a block or an ask the dispatcher never
+    enforced. Exit 2 stays event-agnostic, matching the dispatcher's own exit-2
+    lane. None means "event unknown", and an unknown event is neither Stop nor
+    PreToolUse.
     """
-    if rc == 2 or _DENY_MARKER in stdout:
+    is_pretooluse = event == "PreToolUse"
+    if rc == 2 or (is_pretooluse and _DENY_MARKER in stdout):
         return DECISION_BLOCK
-    if _ASK_MARKER in stdout:
+    if rc == 0 and event == "Stop" and _is_stop_block(stdout):
+        return DECISION_BLOCK
+    if is_pretooluse and _ASK_MARKER in stdout:
         return DECISION_ASK
     if stderr.startswith(_SKIP_MARKER):
         return DECISION_SKIP
@@ -142,6 +186,13 @@ def _disabled() -> bool:
 # Process-local: standalone hook processes never import/run the dispatcher.
 _DISPATCHER_PROCESS = False
 
+# Set True ONLY in the dispatcher process. `_DISPATCHER_PROCESS` above cannot
+# answer "am I the dispatcher": `suppress_coarse_duplicate` sets it too, from a
+# standalone hook, to mean something else entirely (a rich record for this
+# invocation already exists). Anything that must distinguish the two reads this
+# one (issue #1199 review).
+_IN_DISPATCHER = False
+
 
 def mark_dispatcher_process() -> None:
     """Mark the current process as the dispatcher (suppresses coarse recording).
@@ -151,8 +202,9 @@ def mark_dispatcher_process() -> None:
     so the flag never leaks across roles. The only place it must be reset is a
     single-process test harness running both roles (see test helper).
     """
-    global _DISPATCHER_PROCESS
+    global _DISPATCHER_PROCESS, _IN_DISPATCHER
     _DISPATCHER_PROCESS = True
+    _IN_DISPATCHER = True
 
 
 def suppress_coarse_duplicate() -> None:
@@ -168,14 +220,15 @@ def suppress_coarse_duplicate() -> None:
     one deny becomes `fires=2, block=1, pass=1` — corrupting the exact
     per-hook block-rate count this telemetry exists to provide.
 
-    Reuses the dispatcher-process flag: same process-local, one-shot,
-    never-leaks-across-invocations guarantee `mark_dispatcher_process`
-    documents, applied here for the same reason (a richer record for this
-    invocation already exists — skip the redundant coarse fallback). Call
+    Sets the coarse-suppression flag directly rather than going through
+    `mark_dispatcher_process`: this process is NOT the dispatcher, and
+    claiming so also suppressed its own rich write (issue #1199 review). Same
+    process-local, one-shot, never-leaks-across-invocations guarantee. Call
     only after the RICH record has actually been written, not on every
     invocation of the hook.
     """
-    mark_dispatcher_process()
+    global _DISPATCHER_PROCESS
+    _DISPATCHER_PROCESS = True
 
 
 # Days of daily telemetry files kept on disk. The ledger is append-only and had
@@ -392,12 +445,17 @@ def _extract_payload(payload_raw: str) -> tuple[str, str]:
     return (sid if isinstance(sid, str) else ""), (tool if isinstance(tool, str) else "")
 
 
-def record_group_fires(members, results, payload_raw: str) -> None:
+def record_group_fires(
+    members, results, payload_raw: str, event: str | None = None
+) -> None:
     """Append one fire record per `(member, result)` pair. Fail-open, batched.
 
     `members`   : list of `(role, name, impl)` from `group_members`.
     `results`   : list of `(rc, stdout, stderr)` from `run_one`, positionally aligned.
     `payload_raw`: the raw hook payload JSON (session_id / tool_name source).
+    `event`     : the dispatcher's event, forwarded to `classify_decision` so
+                  the Stop-lane branch is gated the same way the dispatcher
+                  gates it. Omitting it reads as "unknown", never as Stop.
 
     One file open per call. The dispatcher calls this INCREMENTALLY — one
     member per call, right after that member resolves — so a host kill
@@ -419,7 +477,7 @@ def record_group_fires(members, results, payload_raw: str) -> None:
                 "tool": tool,
                 "hook": name,
                 "role": role,
-                "decision": classify_decision(rc, stdout, stderr),
+                "decision": classify_decision(rc, stdout, stderr, event),
                 "granularity": "rich",
             }, ensure_ascii=False))
         _atomic_append(resolve_path(), lines)
@@ -494,6 +552,17 @@ def record_session_fire(hook: str, role: str, decision: str, session_id: str, to
     writer here.
     """
     if _disabled():
+        return False
+    if _IN_DISPATCHER:
+        # A grouped member already gets its rich record from
+        # record_group_fires, so writing a second one here counts one fire
+        # twice in every per-session aggregate — and the two are identical,
+        # so nothing downstream can tell them apart (issue #1199 review).
+        # Returning False is safe: the coarse fallback this return gates is
+        # suppressed in the dispatcher process too, so no stream loses the fire.
+        # Gated on _IN_DISPATCHER, never _DISPATCHER_PROCESS: a standalone hook
+        # that already called suppress_coarse_duplicate sets the latter, and
+        # reading it here silently dropped that hook's own rich record.
         return False
     try:
         record = {

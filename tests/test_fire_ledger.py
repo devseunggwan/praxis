@@ -49,30 +49,49 @@ cli = _load("bypass_review_cli", _REPO / "skills" / "bypass-review" / "bypass-re
 
 _DENY = '{"hookSpecificOutput": {"permissionDecision": "deny"}}'
 _ASK = '{"hookSpecificOutput": {"permissionDecision": "ask"}}'
+# Stop-lane block shape (issue #1169 / PR #1199): top-level decision at exit 0.
+_STOP_BLOCK = '{"decision": "block", "reason": "no evidence"}'
+# jq's pretty-printed form (shell Stop hooks) parses identically.
+_STOP_BLOCK_JQ = '{\n  "decision": "block",\n  "reason": "no evidence"\n}\n'
+# A context payload that merely QUOTES the block shape must NOT classify as a
+# block — recognition is parse-based, not substring.
+_STOP_QUOTING = (
+    '{"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": '
+    '"emit {\\"decision\\": \\"block\\"} JSON to block the stop"}}'
+)
 
 
 # ---------------------------------------------------------------------------
 # Writer: classify_decision precedence (the load-bearing logic)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("rc,stdout,stderr,expected", [
-    (2, "", "", "block"),                 # exit 2 -> block
-    (0, _DENY, "", "block"),              # deny marker -> block
-    (2, "", "an advisory nudge", "block"),  # exit 2 wins over stderr
-    (0, _ASK, "", "ask"),                 # ask marker -> ask
-    (0, _ASK, "nudge", "ask"),            # ask wins over advise
-    (0, "", "an advisory nudge", "advise"),  # stderr -> advise
-    (0, "", "", "pass"),                  # silent allow -> pass
-    (0, "", "   \n  ", "pass"),           # whitespace-only stderr -> pass
+@pytest.mark.parametrize("rc,stdout,stderr,event,expected", [
+    (2, "", "", "Stop", "block"),         # exit 2 -> block
+    (0, _DENY, "", "PreToolUse", "block"),  # deny marker -> block
+    (2, "", "an advisory nudge", "Stop", "block"),  # exit 2 wins over stderr
+    (0, _ASK, "", "PreToolUse", "ask"),   # ask marker -> ask
+    (0, _ASK, "nudge", "PreToolUse", "ask"),  # ask wins over advise
+    (0, "", "an advisory nudge", "Stop", "advise"),  # stderr -> advise
+    (0, "", "", "Stop", "pass"),          # silent allow -> pass
+    (0, "", "   \n  ", "Stop", "pass"),   # whitespace-only stderr -> pass
     # issue #1167: dispatcher budget-skip records carry the marker on stderr
     # (with the same note as an additionalContext object on stdout) and must
     # classify as "skip", NOT be mistaken for an advise.
-    (0, "", "[dispatch] budget-skip r/n: 0.1s left of the 15s group budget; member not run (fail-open)\n", "skip"),
+    (0, "", "[dispatch] budget-skip r/n: 0.1s left of the 15s group budget; member not run (fail-open)\n", "Stop", "skip"),
     (0, '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "[dispatch] budget-skip r/n: ..."}}',
-     "[dispatch] budget-skip r/n: 0.1s left of the 15s group budget; member not run (fail-open)\n", "skip"),
+     "[dispatch] budget-skip r/n: 0.1s left of the 15s group budget; member not run (fail-open)\n", "Stop", "skip"),
+    (0, _STOP_BLOCK, "", "Stop", "block"),  # Stop-lane block JSON at exit 0 -> block
+    (0, _STOP_BLOCK_JQ, "", "Stop", "block"),  # jq pretty-printed form -> block
+    (0, _STOP_QUOTING, "", "Stop", "pass"),  # QUOTED block shape -> parse says no block
+    (0, _STOP_QUOTING, "nudge", "Stop", "advise"),  # quoted shape + stderr stays advise
 ])
-def test_classify_decision(rc, stdout, stderr, expected):
-    assert fl.classify_decision(rc, stdout, stderr) == expected
+def test_classify_decision(rc, stdout, stderr, event, expected):
+    # `event` is a column rather than a constant: every lane below the exit-2
+    # one is event-gated, so a table pinned to one event silently stops
+    # exercising the others. The gates' other sides have their own tests —
+    # test_stop_block_classification_mirrors_the_dispatcher_gates and
+    # test_marker_classification_mirrors_the_dispatcher_gate.
+    assert fl.classify_decision(rc, stdout, stderr, event) == expected
 
 
 def test_block_is_not_misread_as_pass():
@@ -269,6 +288,7 @@ def test_record_standalone_fire_writes_coarse(tmp_path, monkeypatch):
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
     monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", False)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", False)
     fl.record_standalone_fire("stop-gate", "completion-verify", 2)
     fl.record_standalone_fire("nudge", "advisory-nudge", 0)
     recs = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
@@ -284,6 +304,7 @@ def test_record_standalone_fire_skipped_in_dispatcher(tmp_path, monkeypatch):
     out = tmp_path / "fire.jsonl"
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
     monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", True)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", True)
     fl.record_standalone_fire("x", "y", 2)
     assert not out.exists()
 
@@ -293,6 +314,7 @@ def test_record_standalone_fire_opt_out(tmp_path, monkeypatch):
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_DISABLE", "1")
     monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", False)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", False)
     fl.record_standalone_fire("x", "y", 0)
     assert not out.exists()
 
@@ -321,6 +343,113 @@ def test_record_session_fire_writes_rich_with_real_session(tmp_path, monkeypatch
         "decision": "pass",
         "granularity": "rich",
     }
+
+
+def test_escaped_decision_key_is_classified_as_block():
+    # `{"\u0064ecision": "block"}` parses to the same object; the literal
+    # substring pre-filter dropped it and classify_decision recorded a real
+    # block as "pass" (CodeRabbit, issue #1199 review).
+    escaped = r'{"\u0064ecision": "block", "reason": "r"}'
+    assert '"decision"' not in escaped, "fixture is not actually escaped"
+    assert json.loads(escaped) == {"decision": "block", "reason": "r"}
+    assert fl._is_stop_block(escaped) is True
+    assert fl.classify_decision(0, escaped, "", "Stop") == "block"
+    # Control: a shape that is genuinely not a block still is not one.
+    assert fl._is_stop_block('{"decision": "approve"}') is False
+
+
+def test_record_session_fire_skipped_in_dispatcher(tmp_path, monkeypatch):
+    """One fire, one rich record — not two (issue #1199 review).
+
+    A grouped member already gets its rich record from record_group_fires. A
+    member that also calls record_session_fire (every completion-verify hook
+    does) produced a SECOND rich record for the same fire, identical in hook /
+    decision / session_id, so nothing downstream could collapse them and every
+    per-session count read double. _DISPATCHER_PROCESS suppressed only the
+    COARSE path, which is why this survived.
+    """
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", True)
+    assert fl.record_session_fire("x", "completion-verify", "block", "s", "") is False
+    assert not out.exists()
+    # Control: the identical call outside the dispatcher DOES write, so the
+    # absence above is the suppression and not a broken invocation.
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", False)
+    assert fl.record_session_fire("x", "completion-verify", "block", "s", "") is True
+    recs = [json.loads(x) for x in out.read_text().splitlines() if x.strip()]
+    assert len(recs) == 1 and recs[0]["granularity"] == "rich"
+
+
+def test_standalone_suppression_does_not_kill_its_own_rich_record(tmp_path, monkeypatch):
+    """A standalone hook still gets its rich record after suppressing the coarse one.
+
+    `suppress_coarse_duplicate` used to set `_DISPATCHER_PROCESS`, and two hooks
+    (output-block-falsify-advisory, comment-yap-advisory) call it BEFORE their
+    record_session_fire. Gating the rich write on that same flag therefore
+    dropped those hooks' only telemetry — 8 assertions in
+    tests/hooks/advisory-nudge/test_output_block_falsify_advisory.sh went from
+    "1 rich record" to zero. The two meanings now live in separate flags.
+    """
+    out = tmp_path / "fire.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", False)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", False)
+    fl.suppress_coarse_duplicate()  # the real call order in those two hooks
+    assert fl._DISPATCHER_PROCESS is True, "coarse suppression must still arm"
+    assert fl._IN_DISPATCHER is False, "a standalone hook is not the dispatcher"
+    assert fl.record_session_fire("x", "advisory-nudge", "ask", "s", "T") is True
+    recs = [json.loads(x) for x in out.read_text().splitlines() if x.strip()]
+    assert len(recs) == 1 and recs[0]["granularity"] == "rich"
+
+
+def test_stop_block_classification_mirrors_the_dispatcher_gates():
+    """The ledger records a Stop block only where the dispatcher enforces one.
+
+    `run_group` accepts the `{"decision": "block"}` shape under two gates —
+    `is_stop` and `rc == 0`. The ledger had neither, so a member that printed
+    the JSON and then died (rc=1), or printed it under another event, was
+    filed as a real block the dispatcher never propagated. The event gate is
+    the newer half: scoping the dispatcher lane to Stop is what left the
+    ledger behind.
+    """
+    block = '{"decision": "block", "reason": "r"}'
+    # Both gates satisfied — the case that must still be a block.
+    assert fl.classify_decision(0, block, "", "Stop") == "block"
+    # rc gate: printed, then died.
+    assert fl.classify_decision(1, block, "", "Stop") != "block"
+    # event gate: the dispatcher's lane does not run here.
+    assert fl.classify_decision(0, block, "", "PostToolUse") != "block"
+    # Unknown event is not Stop.
+    assert fl.classify_decision(0, block, "", None) != "block"
+    # Exit 2 stays event-agnostic, matching the dispatcher's own exit-2 lane.
+    assert fl.classify_decision(2, "", "", "PostToolUse") == "block"
+    assert fl.classify_decision(2, "", "", None) == "block"
+
+
+def test_marker_classification_mirrors_the_dispatcher_gate():
+    """The two SUBSTRING marker lanes are PreToolUse-only, as in run_group.
+
+    `run_group` probes `_DENY_MARKER` under `is_pretooluse` and `_ASK_MARKER`
+    inside an `if is_pretooluse:` block, so on any other event a member whose
+    stdout merely contains the marker text gets no decision from the
+    dispatcher at all. The ledger probed both event-agnostically and filed a
+    block or an ask nobody enforced — the same divergence the Stop lane above
+    had, one lane over (issue #1199 review).
+    """
+    # PreToolUse — the lanes the dispatcher actually runs.
+    assert fl.classify_decision(0, _DENY, "", "PreToolUse") == "block"
+    assert fl.classify_decision(0, _ASK, "", "PreToolUse") == "ask"
+    # Any other event: the dispatcher ignores the marker, so the ledger must.
+    for event in ("Stop", "PostToolUse", None):
+        assert fl.classify_decision(0, _DENY, "", event) != "block"
+        assert fl.classify_decision(0, _ASK, "", event) != "ask"
+    # The fall-through stays intact: stderr still classifies as advise.
+    assert fl.classify_decision(0, _DENY, "nudge", "Stop") == "advise"
+    # Exit 2 is unaffected — it never depended on the marker.
+    assert fl.classify_decision(2, _DENY, "", "Stop") == "block"
 
 
 def test_record_session_fire_opt_out(tmp_path, monkeypatch):
@@ -648,6 +777,7 @@ def _reset_real_dispatcher_flag(monkeypatch):
         sys.path.insert(0, lib)
     real_fl = importlib.import_module("_fire_ledger")
     monkeypatch.setattr(real_fl, "_DISPATCHER_PROCESS", False)
+    monkeypatch.setattr(real_fl, "_IN_DISPATCHER", False)
 
 
 def test_fail_open_records_coarse_fire_and_preserves_return(tmp_path, monkeypatch):
@@ -693,6 +823,7 @@ def test_dispatcher_process_writes_rich_not_coarse(tmp_path, monkeypatch):
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
     monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", False)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", False)
     fl.mark_dispatcher_process()  # run_group calls this at entry
     fl.record_group_fires([("preflight-gate", "h", Path("x"))], [(2, "", "")], _payload())
     fl.record_standalone_fire("h", "preflight-gate", 2)  # member fail_open — suppressed
@@ -712,6 +843,7 @@ def test_suppress_coarse_duplicate_skips_standalone_fire(tmp_path, monkeypatch):
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
     monkeypatch.setattr(fl, "_DISPATCHER_PROCESS", False)
+    monkeypatch.setattr(fl, "_IN_DISPATCHER", False)
     fl.record_session_fire(
         "output-block-falsify-advisory", "advisory-nudge", "block",
         "sess-1", "AskUserQuestion",

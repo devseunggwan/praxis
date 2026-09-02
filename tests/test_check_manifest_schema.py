@@ -270,14 +270,54 @@ def _first_dispatch_member_name(manifest: dict) -> str:
     raise AssertionError("fixture manifest has no dispatch-group member")
 
 
-def test_dispatch_member_with_args_is_rejected(manifest):
+def test_dispatch_member_with_args_is_allowed(manifest):
+    # Rejecting `args` here stopped the build (exit 1) before the two halves
+    # that actually handle such a member could act: the build keeps it as a
+    # standalone node, the runtime excludes it from the group. Both were
+    # unreachable while this gate fired (issue #1199 review).
     name = _first_dispatch_member_name(manifest)
     entry = next(h for h in manifest["hooks"] if h["name"] == name)
     entry["args"] = ["--foo"]
     drifts = build.manifest_schema_drifts(manifest)
+    assert not any("declares 'args'" in d for d in drifts), drifts
+    # Control: `body` on the same entry IS still rejected, so the gate as a
+    # whole is alive and this is not an empty assertion.
+    entry["body"] = "impl.sh"
     assert any(
-        f"entry {name!r}" in d and "declares 'args'" in d for d in drifts
-    ), drifts
+        f"entry {name!r}" in d and "declares 'body'" in d
+        for d in build.manifest_schema_drifts(manifest)
+    )
+
+
+def test_dispatch_group_may_omit_its_matcher(manifest):
+    # Stop / SessionStart / UserPromptSubmit carry no matcher. The key is
+    # OMITTED rather than null: the validator subset has no null type, and
+    # .get("matcher") answers None for an absent key either way.
+    manifest["dispatch_groups"].append({"event": "Stop"})
+    # Scoped to the matcher: adding a Stop group makes the real Stop hooks
+    # members, and their `body` declarations are rejected for their own
+    # (correct) reason — which is not what this test is about.
+    assert not any(
+        "dispatch_groups" in d and "matcher" in d
+        for d in build.manifest_schema_drifts(manifest)
+    )
+    # Control: an explicit null is still a type error, so "omit it" is a real
+    # instruction and not a distinction the schema fails to draw.
+    manifest["dispatch_groups"][-1] = {"event": "Stop", "matcher": None}
+    assert any(
+        "matcher" in d and "expected string" in d
+        for d in build.manifest_schema_drifts(manifest)
+    )
+
+
+def test_sentinel_is_rejected_as_a_matcher(manifest):
+    # The argv sentinel is a legal matcher string, and a group whose matcher IS
+    # the sentinel renders the argv of a matcher-less one — main() maps it to
+    # None and resolves zero members, disabling every hook in it silently.
+    sentinel = build.DISPATCH_NO_MATCHER_ARG
+    manifest["dispatch_groups"].append({"event": "Stop", "matcher": sentinel})
+    drifts = build.manifest_schema_drifts(manifest)
+    assert any("reserved as the matcher-less argv sentinel" in d for d in drifts), drifts
 
 
 def test_dispatch_member_with_body_is_rejected(manifest):
