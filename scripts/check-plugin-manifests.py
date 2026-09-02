@@ -30,7 +30,7 @@ main() is labeled with its number, and this list is the canonical roster
   8. Spec `Supported hosts:` ↔ manifest `hosts` cross-check.
   9. Release version wiring (#1172): `VERSION` equals the "." version in
      `.release-please-manifest.json`, and every versioned platform artifact
-     (plugin, marketplace, gemini-extension kinds — marketplace carries
+     (plugin, marketplace kinds — marketplace carries
      version fields too) is listed in release-please-config.json
      `extra-files` so release-please bumps its embedded versions.
   10. spec.md exists at hooks/<role>/<name>/spec.md for every registered
@@ -219,7 +219,6 @@ KNOWN_EXTERNAL_CLI_COMMANDS = {
     "codex",
     "curl",
     "docker",
-    "gemini",
     "gh",
     "git",
     "jq",
@@ -1181,9 +1180,8 @@ def main() -> int:
     #       — a mismatch means the next release PR computes its bump from a
     #       different version than the one the artifacts embed.
     #   (b) every platform output of a versioned kind (plugin, marketplace,
-    #       gemini-extension, agent-plugin — marketplace embeds version
-    #       fields too) is
-    #       listed in release-please-config.json `extra-files`, so a release
+    #       agent-plugin — marketplace embeds version fields too) is listed
+    #       in release-please-config.json `extra-files`, so a release
     #       bump rewrites its embedded versions. A new platform output added
     #       without the extra-files entry would otherwise ship stale versions
     #       on the first release after merge, with no gate noticing.
@@ -1234,7 +1232,7 @@ def main() -> int:
                 )
                 continue
             extra_specs[path] = entry
-        versioned_kinds = {"plugin", "marketplace", "gemini-extension", "agent-plugin"}
+        versioned_kinds = {"plugin", "marketplace", "agent-plugin"}
         for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
             platform = json.loads(platform_file.read_text())
             for output in platform["outputs"]:
