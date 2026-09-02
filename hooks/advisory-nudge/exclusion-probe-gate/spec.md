@@ -2,7 +2,9 @@
 
 Supported hosts: claude, codex
 
-`hooks/exclusion-probe-gate.sh` intercepts `Write` and `Edit` tool calls and
+`hooks/advisory-nudge/exclusion-probe-gate/impl.py` (run in-process by the
+`Edit|Write` dispatch group's `hooks/_dispatch.sh`, #1168) intercepts
+`Write` and `Edit` tool calls and
 emits a **stderr advisory** (or a hard deny in strict mode) when the artifact
 content embeds an **exclusion directive** whose asserted **verification is not
 backed by a cited probe**.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse(Write|Edit) advisory: unanchored comment sprawl ("yap").
+"""PreToolUse(Edit|Write) advisory: unanchored comment sprawl ("yap").
 
 Issue #1141. `yap` names a specific shape of AI slop — a comment that says a
 great deal and informs about nothing. A reasoning model fills context with

@@ -2,7 +2,7 @@
 # test_protected_paths_guard.sh — coverage for the protected-paths PreToolUse
 # advisory (issue #464).
 #
-# Synthesizes Claude Code PreToolUse(Edit|Write|NotebookEdit) payloads and
+# Synthesizes Claude Code PreToolUse(Edit|NotebookEdit|Write) payloads and
 # asserts:
 #   advisory → exit 0 + stderr contains the advisory header
 #   block    → exit 2 + stderr contains the BLOCKED marker

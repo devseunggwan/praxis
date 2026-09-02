@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# test-pre-edit-protected-branch-guard.sh — coverage for pre-edit-protected-branch-guard
+# test_pre_edit_protected_branch_guard.sh — coverage for
+# hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py
+# (dispatch-group member since #1168; no per-hook wrapper)
 #
 # Uses PRAXIS_PBGUARD_TEST_* env vars to mock git state without a real repo.
 # Hook outputs JSON with permissionDecision "deny" on stdout when blocking.
 # Fail-open paths emit nothing and exit 0.
 #
-# Usage: bash hooks/test-pre-edit-protected-branch-guard.sh
+# Usage: bash tests/hooks/preflight-gate/test_pre_edit_protected_branch_guard.sh
 # Exit:  0 = all pass; 1 = at least one fail
 
 set +e

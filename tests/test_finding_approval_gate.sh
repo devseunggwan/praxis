@@ -16,7 +16,16 @@ set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-SKILL="$ROOT_DIR/skills/codex-review-wrap/SKILL.md"
+SKILL_DIR="$ROOT_DIR/skills/codex-review-wrap"
+
+# The #1181 references/ split spread the pinned prose across the SKILL.md
+# spine (execution order) and references/ (5i detail, 5c ledger, error
+# handling, limitations, worked example). The assertions pin content, not
+# layout, so the target is the concatenation of the spine and every
+# reference file.
+SKILL="$(mktemp)" || { echo "FATAL: mktemp failed" >&2; exit 1; }
+trap 'rm -f "$SKILL"' EXIT
+cat "$SKILL_DIR/SKILL.md" "$SKILL_DIR/references/"*.md >"$SKILL"
 
 # shellcheck source=./_assert_lib.sh
 source "$SCRIPT_DIR/_assert_lib.sh"
@@ -26,9 +35,11 @@ assert_lib_init "$SKILL"
 # 1. Section exists and is reachable from the execution-order list
 # ---------------------------------------------------------------------------
 
+# Heading level demoted from #### to ## when 5i moved into
+# references/step5-approval-and-rounds.md (#1181).
 assert_present \
   "5i section heading present" \
-  "#### 5i. Per-finding user approval gate"
+  "## 5i. Per-finding user approval gate"
 
 assert_present \
   "execution-order lists 5i" \
