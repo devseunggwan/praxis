@@ -124,3 +124,101 @@ def test_no_node_when_all_fragments_filtered_out():
     result = _build.filter_hooks_for_host(_all_bash_claude_only(), "codex", DISPATCH)
     assert _dispatcher_nodes(result) == []
     assert _pretooluse_command_order(result) == ["edit-hook"]
+
+
+# --------------------------------------------------------------------------- #
+# args-declaring members stay standalone (issue #1199 review)
+#
+# The dispatcher invokes members with stdin only, and the runtime resolver
+# (_dispatch.group_members) excludes args-declaring entries; if the build
+# collapsed them anyway, the hook would be fully disabled — collapsed away
+# here, skipped there. The build must keep their standalone node and leave
+# them out of the dispatcher budget.
+# --------------------------------------------------------------------------- #
+
+STOP_DISPATCH = frozenset({("Stop", None)})
+
+
+def _stop_hooks_with_args_member() -> dict:
+    return {
+        "description": "fixture",
+        "hooks": {
+            "Stop": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "plain-stop-gate",
+                         "timeout": 10},
+                        {"type": "command", "command": "strike-counter stop",
+                         "timeout": 30, "args_declared": True},
+                    ],
+                },
+            ]
+        },
+    }
+
+
+def test_args_member_kept_standalone_next_to_dispatcher_node():
+    result = _build.filter_hooks_for_host(
+        _stop_hooks_with_args_member(), "claude", STOP_DISPATCH
+    )
+    nodes = result["hooks"]["Stop"][0]["hooks"]
+    dispatch = [n for n in nodes if _build.DISPATCH_WRAPPER_NAME in n["command"]]
+    standalone = [n for n in nodes if _build.DISPATCH_WRAPPER_NAME not in n["command"]]
+    assert len(dispatch) == 1
+    assert [n["command"] for n in standalone] == ["strike-counter stop"]
+    # transient marker never reaches a written hooks.json
+    assert all("args_declared" not in n for n in nodes)
+
+
+def test_args_member_excluded_from_dispatcher_budget():
+    # The args member's 30s must not inflate the dispatcher budget: the node
+    # timeout is the max across COLLAPSIBLE members only.
+    result = _build.filter_hooks_for_host(
+        _stop_hooks_with_args_member(), "claude", STOP_DISPATCH
+    )
+    nodes = _dispatcher_nodes_for(result, "Stop")
+    assert len(nodes) == 1
+    assert nodes[0]["timeout"] == 10
+
+
+def test_matcherless_dispatcher_node_renders_sentinel_not_none():
+    # (event, None) groups render DISPATCH_NO_MATCHER_ARG in the matcher argv
+    # slot; the literal "None" would resolve zero members at runtime.
+    result = _build.filter_hooks_for_host(
+        _stop_hooks_with_args_member(), "claude", STOP_DISPATCH
+    )
+    cmd = _dispatcher_nodes_for(result, "Stop")[0]["command"]
+    assert f"Stop {_build.DISPATCH_NO_MATCHER_ARG} claude" in cmd
+    assert "None" not in cmd
+
+
+def test_only_args_members_means_no_dispatcher_node():
+    # A group whose every host-kept member declares args has nothing to
+    # collapse: no dispatcher node, standalone nodes only.
+    data = _stop_hooks_with_args_member()
+    data["hooks"]["Stop"][0]["hooks"] = [
+        n for n in data["hooks"]["Stop"][0]["hooks"] if n.get("args_declared")
+    ]
+    result = _build.filter_hooks_for_host(data, "claude", STOP_DISPATCH)
+    nodes = result["hooks"]["Stop"][0]["hooks"]
+    assert _dispatcher_nodes_for(result, "Stop") == []
+    assert [n["command"] for n in nodes] == ["strike-counter stop"]
+
+
+def test_args_declared_marker_stripped_from_non_dispatch_groups():
+    # The transient marker must not leak into non-collapsed groups either
+    # (byte-identity of committed hooks.json for standalone args hooks).
+    data = _stop_hooks_with_args_member()
+    result = _build.filter_hooks_for_host(data, "claude", frozenset())
+    nodes = result["hooks"]["Stop"][0]["hooks"]
+    assert all("args_declared" not in n for n in nodes)
+    assert [n["command"] for n in nodes] == ["plain-stop-gate", "strike-counter stop"]
+
+
+def _dispatcher_nodes_for(result: dict, event: str) -> list[dict]:
+    out = []
+    for group in result["hooks"].get(event, []):
+        for hook in group["hooks"]:
+            if _build.DISPATCH_WRAPPER_NAME in hook.get("command", ""):
+                out.append(hook)
+    return out

@@ -2,7 +2,7 @@
 # test_block_personal_asset_leak.sh — coverage for
 # hooks/advisory-nudge/block-personal-asset-leak/impl.py
 #
-# Synthesizes Claude Code PreToolUse(Bash|Write|Edit) hook payloads and asserts:
+# Synthesizes Claude Code PreToolUse(Bash|Edit|Write) hook payloads and asserts:
 #   warn   → exit 0 + stderr contains "REMINDER"
 #   silent → exit 0 + stderr empty
 #   block  → exit 2 + stderr contains "REMINDER" (when PRAXIS_PERSONAL_LEAK_STRICT=1)

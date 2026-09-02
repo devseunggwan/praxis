@@ -39,8 +39,13 @@ skills/<skill-name>/
 ```
 
 The `name` and `description` fields in the SKILL.md frontmatter are surfaced by
-the Claude Code plugin runtime. Keep `description` under 500 characters; the
-runtime truncates beyond that.
+the Claude Code plugin runtime, which truncates the description past a bounded
+budget. [`RUNTIME_CONSTRAINTS.md` §5](RUNTIME_CONSTRAINTS.md) owns that budget
+and records what is and is not measured; do not restate a number here, because
+two numbers in two files is how a description ends up satisfying one contract
+and failing the other. The operative rule while the limit is unmeasured: keep
+the `Triggers on "..."` clause inside the first 500 characters, so routing
+survives whichever bound turns out to be real.
 
 ### Skill spec drift prevention
 

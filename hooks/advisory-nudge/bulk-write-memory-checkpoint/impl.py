@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse(Edit|Write|NotebookEdit) advisory: nudge to checkpoint memory
+"""PreToolUse(Edit|NotebookEdit|Write) advisory: nudge to checkpoint memory
 before bulk-writing to Source-of-Truth (SOT) directories.
 
 Background (praxis issue #443):

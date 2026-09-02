@@ -5,6 +5,60 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.13.0](https://github.com/devseunggwan/praxis/compare/v7.12.0...v7.13.0) (2026-09-01)
+
+
+### Added
+
+* **ci:** derive sibling-gate enumeration from manifest ([#1142](https://github.com/devseunggwan/praxis/issues/1142)) ([de6bdfc](https://github.com/devseunggwan/praxis/commit/de6bdfc42d9fda5ef2892c622980b5a1e392233e)), closes [#1127](https://github.com/devseunggwan/praxis/issues/1127)
+* **hooks:** add manifest.schema.json and validate the hook manifest ([#1202](https://github.com/devseunggwan/praxis/issues/1202)) ([7169e79](https://github.com/devseunggwan/praxis/commit/7169e793387a7d47cb6322d9c8ae9c119e1f5234))
+* **hooks:** advise on unanchored comment sprawl ([#1143](https://github.com/devseunggwan/praxis/issues/1143)) ([c684bb7](https://github.com/devseunggwan/praxis/commit/c684bb7c528d4e6182f39c62ab243a994bd15a2a)), closes [#1141](https://github.com/devseunggwan/praxis/issues/1141)
+* **hooks:** ask before a turn fans out past what was asked ([#1131](https://github.com/devseunggwan/praxis/issues/1131)) ([ae28d98](https://github.com/devseunggwan/praxis/commit/ae28d98956ca29929f3a04ef21f435cfd379d370))
+* **hooks:** branch-name-check denies only when attested ([#1165](https://github.com/devseunggwan/praxis/issues/1165)) ([2cf8696](https://github.com/devseunggwan/praxis/commit/2cf8696fe41f40cde5bec88697294580b812dd18)), closes [#1159](https://github.com/devseunggwan/praxis/issues/1159)
+* **hooks:** codex commit gate detects capability ([#1190](https://github.com/devseunggwan/praxis/issues/1190)) ([31bd3a5](https://github.com/devseunggwan/praxis/commit/31bd3a560a65d96800b02a98aaadf7172eb159de))
+* **hooks:** declare component deps via requires ([#1163](https://github.com/devseunggwan/praxis/issues/1163)) ([a2edd9b](https://github.com/devseunggwan/praxis/commit/a2edd9b26d4ca0ca03bf9f780fdafc92b908b829)), closes [#1158](https://github.com/devseunggwan/praxis/issues/1158)
+* **hooks:** PR-marker gates deny only when attested ([#1189](https://github.com/devseunggwan/praxis/issues/1189)) ([2b3104c](https://github.com/devseunggwan/praxis/commit/2b3104c59c884d1b7ad5d78734f9407b8f085ac6))
+
+
+### Fixed
+
+* close the Gate-4 doc gap and land the codeql bump as one commit ([#1147](https://github.com/devseunggwan/praxis/issues/1147)) ([d55dc54](https://github.com/devseunggwan/praxis/commit/d55dc54c8d81aa05d2ad4345f435a96037c14219))
+* **cmux:** enumerate all windows in find_orphans ([#1129](https://github.com/devseunggwan/praxis/issues/1129)) ([132c1dd](https://github.com/devseunggwan/praxis/commit/132c1dda9a6d11df58e1ea91c51d7a831c9392ac))
+* **hooks:** add korean wording variants to momentum gate ([#1136](https://github.com/devseunggwan/praxis/issues/1136)) ([e6f1e9a](https://github.com/devseunggwan/praxis/commit/e6f1e9af961ce64a533f1be4e0db1b8cec609410))
+* **hooks:** bilingual advisory bodies ([#1166](https://github.com/devseunggwan/praxis/issues/1166)) ([a2f6aa1](https://github.com/devseunggwan/praxis/commit/a2f6aa1cf4d034d4232d774f0300f9b69b8a6250)), closes [#1160](https://github.com/devseunggwan/praxis/issues/1160)
+* **hooks:** gate repo-less gh writes in cross-boundary-preflight ([#1149](https://github.com/devseunggwan/praxis/issues/1149)) ([66741e1](https://github.com/devseunggwan/praxis/commit/66741e1b1366b3b2d4cc081a61264f09a95e1e2d))
+* **hooks:** per-member deadline for the Bash dispatch group ([#1195](https://github.com/devseunggwan/praxis/issues/1195)) ([ab1477a](https://github.com/devseunggwan/praxis/commit/ab1477aa380ce3b65dea430d29b80048d43384b7))
+* **hooks:** personal-owner exemption reads env ([#1162](https://github.com/devseunggwan/praxis/issues/1162)) ([4d08faa](https://github.com/devseunggwan/praxis/commit/4d08faa168eb182980da277195848ee78b576402)), closes [#1156](https://github.com/devseunggwan/praxis/issues/1156)
+* **hooks:** route scope-confirm logs and gh-label cache into documented roots ([#1205](https://github.com/devseunggwan/praxis/issues/1205)) ([5fdff21](https://github.com/devseunggwan/praxis/commit/5fdff21b77337a424684317a3741a33ad7e345d6))
+* **hooks:** treat a lone grouping token as syntax, not as the command ([#1200](https://github.com/devseunggwan/praxis/issues/1200)) ([87aab96](https://github.com/devseunggwan/praxis/commit/87aab9691d57a866c00eb4a6aed0cfb53165e3c7))
+* **retrospect:** gate issue rows at the stage4 approval ([#1144](https://github.com/devseunggwan/praxis/issues/1144)) ([511faca](https://github.com/devseunggwan/praxis/commit/511faca7aaca1419fe03d0eeaed8959365a032d0)), closes [#1138](https://github.com/devseunggwan/praxis/issues/1138)
+* **retrospect:** gate-4 audits issue-routed public writes ([#1135](https://github.com/devseunggwan/praxis/issues/1135)) ([a7da22c](https://github.com/devseunggwan/praxis/commit/a7da22cf6e4da98538fbc7741380dac81d42d7fc)), closes [#1038](https://github.com/devseunggwan/praxis/issues/1038)
+* **scripts:** close latent gaps in the manifest check gate ([#1204](https://github.com/devseunggwan/praxis/issues/1204)) ([b7ced98](https://github.com/devseunggwan/praxis/commit/b7ced98d3de0e50cd18b27e1606308d47ddcfd7b))
+* **skills:** resolve symlinked $0 in CLI scripts ([c33ee6c](https://github.com/devseunggwan/praxis/commit/c33ee6c6cf706010039e8874b8fcbd3e812e2289))
+* **skills:** standalone-tier correctness — arguments, plugin-root, bypass-review paths ([#1196](https://github.com/devseunggwan/praxis/issues/1196)) ([7771d53](https://github.com/devseunggwan/praxis/commit/7771d5325ac919840492f20f9c9669ef2a556931))
+* **tests:** fold sub-suite skips into PRAXIS_TESTS_STRICT ([#1201](https://github.com/devseunggwan/praxis/issues/1201)) ([2268154](https://github.com/devseunggwan/praxis/commit/22681546e1cd2ce5e8580a2e4be9a1db20086d9d))
+* **using-praxis:** route all 18 skills through the onboarding entry point ([#1197](https://github.com/devseunggwan/praxis/issues/1197)) ([f861a91](https://github.com/devseunggwan/praxis/commit/f861a918a05ad3b70b09da19d5e0be8132e5aa90))
+
+
+### Changed
+
+* **cmux-delegate:** make the delegation unit an issue ([#1134](https://github.com/devseunggwan/praxis/issues/1134)) ([09ba417](https://github.com/devseunggwan/praxis/commit/09ba41743faa29f72acd5657d26a2c10e16f5af4)), closes [#1133](https://github.com/devseunggwan/praxis/issues/1133)
+* **cmux-delegate:** restore fire-and-forget ([#1132](https://github.com/devseunggwan/praxis/issues/1132)) ([2202f6e](https://github.com/devseunggwan/praxis/commit/2202f6e0bdba78735c84005187b62a533be79d3c))
+* **cmux-delegate:** translate body prose to match the corpus language convention ([#1208](https://github.com/devseunggwan/praxis/issues/1208)) ([11f61cc](https://github.com/devseunggwan/praxis/commit/11f61ccc5dc58e94eec3980be96889eaf6e2522c))
+* codeql.yml pins init and analyze as two separate `uses:` lines, and the ([d55dc54](https://github.com/devseunggwan/praxis/commit/d55dc54c8d81aa05d2ad4345f435a96037c14219))
+* guard the workflow pinning discipline ([6e47d66](https://github.com/devseunggwan/praxis/commit/6e47d660aa040bf2fb8d4fdc439e30df1bad3a41))
+* **hook:** record the settled-answer design menu as gap [#5](https://github.com/devseunggwan/praxis/issues/5) ([#1120](https://github.com/devseunggwan/praxis/issues/1120)) ([4e61f45](https://github.com/devseunggwan/praxis/commit/4e61f4574bd4b984fb091b44b2d21b23c7feebe9)), closes [#1119](https://github.com/devseunggwan/praxis/issues/1119)
+* **hooks:** hook suitability audit + R1/R7 fixes ([#1161](https://github.com/devseunggwan/praxis/issues/1161)) ([e3806e6](https://github.com/devseunggwan/praxis/commit/e3806e6614a04472ae0400f7adf8853df9f7f4f2))
+* **hooks:** normalize matcher spellings and add Edit/Write dispatch groups ([#1198](https://github.com/devseunggwan/praxis/issues/1198)) ([ed44c51](https://github.com/devseunggwan/praxis/commit/ed44c519e0cb8c9eb6e72ca6856163936db0d359))
+* **hooks:** one jq spawn for the mix-check header ([#1152](https://github.com/devseunggwan/praxis/issues/1152)) ([7356556](https://github.com/devseunggwan/praxis/commit/73565564f9d6fe8588a86b0c21f9b4a6b8208b59)), closes [#1151](https://github.com/devseunggwan/praxis/issues/1151)
+* **hooks:** record the guard/gate two-tier design ([#1188](https://github.com/devseunggwan/praxis/issues/1188)) ([2f6bc38](https://github.com/devseunggwan/praxis/commit/2f6bc380acfda92e62d8fdaee4ffc846c1a3cfe5))
+* **hooks:** shell-append fire records and bound the silent-pass scan ([#1207](https://github.com/devseunggwan/praxis/issues/1207)) ([3d6a72f](https://github.com/devseunggwan/praxis/commit/3d6a72fa52b4609bd07f753fb2d1e4a781d60467))
+* **hooks:** toolchain literals move to env ([#1164](https://github.com/devseunggwan/praxis/issues/1164)) ([20bd65a](https://github.com/devseunggwan/praxis/commit/20bd65a246690461411ab78016987653442f4774)), closes [#1157](https://github.com/devseunggwan/praxis/issues/1157)
+* regenerate README hook aggregates and gate the counts ([#1203](https://github.com/devseunggwan/praxis/issues/1203)) ([dd4c4fd](https://github.com/devseunggwan/praxis/commit/dd4c4fd96519d16895c3592f5260acb85f4ebbf7))
+* **retrospect:** [#1135](https://github.com/devseunggwan/praxis/issues/1135) widened Gate-4's selection to ([d55dc54](https://github.com/devseunggwan/praxis/commit/d55dc54c8d81aa05d2ad4345f435a96037c14219))
+* **rules:** name claims that terminate in prose ([#1145](https://github.com/devseunggwan/praxis/issues/1145)) ([1162dd2](https://github.com/devseunggwan/praxis/commit/1162dd2128e51c15bb56bac67b5daed7e2ddf1d1)), closes [#1044](https://github.com/devseunggwan/praxis/issues/1044)
+* shellcheck extensionless skill scripts ([3d457f4](https://github.com/devseunggwan/praxis/commit/3d457f4804b22066748f5badf775356c8833011e))
+
 ## [7.12.0](https://github.com/devseunggwan/praxis/compare/v7.11.0...v7.12.0) (2026-08-24)
 
 

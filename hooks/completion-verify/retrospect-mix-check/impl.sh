@@ -166,7 +166,7 @@ if [ "$RETRO_ACTIVE" = "true" ]; then
     # no Stage-4 marker, distribution fence absent. The mix-check gates cannot
     # evaluate the report. Block. (A retrospect-active stop WITHOUT a table is a
     # legitimate pre-Stage-3 prose clarification — not gated.)
-    _log="$(praxis_resolve_writable scope-confirm retrospect-mix-blocked.log)"
+    _log="$(praxis_resolve_writable logs retrospect-mix-blocked.log)"
     echo "$(date -Iseconds) session=$SESSION_ID blocked_retrospect_fence_omission" \
       >> "$_log" || true
     fence_reason="Retrospect Stage 3 distribution fence missing (issue #666). This is a retrospect-active session (the retrospect skill was invoked this turn) presenting a findings table, but the assistant message carries no '<!-- retrospect:distribution begin -->' fence and no '## Actions Executed' marker. A free-form or localized Stage 3 report bypasses every mix-check gate (Gate-1..7) because the gates key on the canonical output schema. Re-emit the Stage 3 output per the Output Schema Contract in skills/retrospect/references/stage3-reporting.md: '## Retrospect Report' header -> audit fences -> '<!-- retrospect:distribution begin/end -->' card -> unified findings table."
@@ -1259,7 +1259,7 @@ if [ -n "$GATE12_VIOLATION" ]; then
 fi
 
 if [ "$should_block" = "true" ]; then
-  _log="$(praxis_resolve_writable scope-confirm retrospect-mix-blocked.log)"
+  _log="$(praxis_resolve_writable logs retrospect-mix-blocked.log)"
   echo "$(date -Iseconds) session=$SESSION_ID blocked_retrospect_mix_check" >> "$_log" || true
 
   # Build reason string with ' | ' separator.
