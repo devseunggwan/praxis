@@ -320,7 +320,7 @@ including sidechain friction here carries no enforcement risk.
      `toolDenialKind` records), then emit the fence with whatever rows that
      recovered. If you cannot or do not re-scan, the fence still has to say so:
 
-     ```
+     ```markdown
      - scan: indeterminate | rescan: done|skipped (<reason>)
      ```
 
