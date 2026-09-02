@@ -63,9 +63,7 @@ stops functioning as a gate, so the volume itself is the defect.
 #### That coverage is host-scoped, and the demotion is not equally supported
 
 `side-effect-scan` carries no `hosts` key, so it — and the ADVISE demotion —
-ships to every platform that installs hooks — not all of them do, `gemini`
-declares no `hooks` output in `manifests/platforms/gemini.json` and ships skills
-only. The `Hosts` column above is not decoration: `build-plugin-manifests.py`
+ships to every platform that installs hooks. The `Hosts` column above is not decoration: `build-plugin-manifests.py`
 applies that whitelist when it writes each platform's `hooks.json`, and the
 generated entry point is `_dispatch.sh PreToolUse Bash <host>`, so
 `_dispatch.group_members("PreToolUse", "Bash", host)` re-applies it at runtime.
