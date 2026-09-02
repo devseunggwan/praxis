@@ -30,7 +30,7 @@ main() is labeled with its number, and this list is the canonical roster
   8. Spec `Supported hosts:` ↔ manifest `hosts` cross-check.
   9. Release version wiring (#1172): `VERSION` equals the "." version in
      `.release-please-manifest.json`, and every versioned platform artifact
-     (plugin, marketplace, gemini-extension kinds — marketplace carries
+     (plugin, marketplace kinds — marketplace carries
      version fields too) is listed in release-please-config.json
      `extra-files` so release-please bumps its embedded versions.
   10. spec.md exists at hooks/<role>/<name>/spec.md for every registered

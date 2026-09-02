@@ -330,7 +330,7 @@ packaging is *generated* from canonical metadata, not hand-edited:
 - `manifests/plugin.base.json` — shared metadata (name, description, author,
   repository, homepage, category, keywords). `VERSION` is the authoritative
   version string.
-- `manifests/platforms/{claude,codex,cursor,gemini,opencode}.json` — per-platform output list.
+- `manifests/platforms/{claude,codex,cursor,opencode}.json` — per-platform output list.
 - `scripts/build-plugin-manifests.py` — regenerate every artifact. Idempotent.
 - `scripts/check-plugin-manifests.py` — CI drift gate. Verifies generated
   files match the source and that the Codex adapter shell's symlinks
@@ -352,7 +352,6 @@ Generated (committed) outputs:
 | `plugins/praxis/{skills,hooks,scripts}` | Symlinks into repo-root runtime |
 | `.cursor-plugin/plugin.json` | Cursor IDE plugin root |
 | `.cursor-plugin/hooks/hooks.json` | Cursor-compatible hooks (filtered) |
-| `gemini-extension.json` | Gemini CLI extension catalog |
 | `.opencode/plugin.json` | OpenCode plugin root |
 | `.opencode/hooks/hooks.json` | OpenCode-compatible hooks (filtered) |
 
