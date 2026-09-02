@@ -105,7 +105,7 @@
             "type": "array",
             "minItems": 1,
             "items": {
-              "enum": ["claude", "codex", "cursor", "gemini", "opencode"]
+              "enum": ["claude", "codex", "cursor", "opencode"]
             }
           },
           "requires": {
