@@ -154,15 +154,21 @@ def classify_decision(
     dispatcher accepts that shape only under `is_stop` and only at `rc == 0`
     (`_dispatch.run_group`); without both gates the ledger recorded a block the
     dispatcher never enforced — a member that printed the JSON and then died,
-    or one that printed it under another event. Exit 2 stays event-agnostic,
-    matching the dispatcher's own exit-2 lane. None means "event unknown", and
-    an unknown event is not Stop.
+    or one that printed it under another event.
+    The two SUBSTRING marker lanes carry the same gate for the same reason, at
+    `PreToolUse`: the dispatcher probes them only under `is_pretooluse`
+    (`_dispatch.run_group`), so a Stop or PostToolUse member whose stdout merely
+    contains a marker was recorded as a block or an ask the dispatcher never
+    enforced. Exit 2 stays event-agnostic, matching the dispatcher's own exit-2
+    lane. None means "event unknown", and an unknown event is neither Stop nor
+    PreToolUse.
     """
-    if rc == 2 or _DENY_MARKER in stdout:
+    is_pretooluse = event == "PreToolUse"
+    if rc == 2 or (is_pretooluse and _DENY_MARKER in stdout):
         return DECISION_BLOCK
     if rc == 0 and event == "Stop" and _is_stop_block(stdout):
         return DECISION_BLOCK
-    if _ASK_MARKER in stdout:
+    if is_pretooluse and _ASK_MARKER in stdout:
         return DECISION_ASK
     if stderr.startswith(_SKIP_MARKER):
         return DECISION_SKIP

@@ -65,31 +65,33 @@ _STOP_QUOTING = (
 # Writer: classify_decision precedence (the load-bearing logic)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("rc,stdout,stderr,expected", [
-    (2, "", "", "block"),                 # exit 2 -> block
-    (0, _DENY, "", "block"),              # deny marker -> block
-    (2, "", "an advisory nudge", "block"),  # exit 2 wins over stderr
-    (0, _ASK, "", "ask"),                 # ask marker -> ask
-    (0, _ASK, "nudge", "ask"),            # ask wins over advise
-    (0, "", "an advisory nudge", "advise"),  # stderr -> advise
-    (0, "", "", "pass"),                  # silent allow -> pass
-    (0, "", "   \n  ", "pass"),           # whitespace-only stderr -> pass
+@pytest.mark.parametrize("rc,stdout,stderr,event,expected", [
+    (2, "", "", "Stop", "block"),         # exit 2 -> block
+    (0, _DENY, "", "PreToolUse", "block"),  # deny marker -> block
+    (2, "", "an advisory nudge", "Stop", "block"),  # exit 2 wins over stderr
+    (0, _ASK, "", "PreToolUse", "ask"),   # ask marker -> ask
+    (0, _ASK, "nudge", "PreToolUse", "ask"),  # ask wins over advise
+    (0, "", "an advisory nudge", "Stop", "advise"),  # stderr -> advise
+    (0, "", "", "Stop", "pass"),          # silent allow -> pass
+    (0, "", "   \n  ", "Stop", "pass"),   # whitespace-only stderr -> pass
     # issue #1167: dispatcher budget-skip records carry the marker on stderr
     # (with the same note as an additionalContext object on stdout) and must
     # classify as "skip", NOT be mistaken for an advise.
-    (0, "", "[dispatch] budget-skip r/n: 0.1s left of the 15s group budget; member not run (fail-open)\n", "skip"),
+    (0, "", "[dispatch] budget-skip r/n: 0.1s left of the 15s group budget; member not run (fail-open)\n", "Stop", "skip"),
     (0, '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "[dispatch] budget-skip r/n: ..."}}',
-     "[dispatch] budget-skip r/n: 0.1s left of the 15s group budget; member not run (fail-open)\n", "skip"),
-    (0, _STOP_BLOCK, "", "block"),        # Stop-lane block JSON at exit 0 -> block
-    (0, _STOP_BLOCK_JQ, "", "block"),     # jq pretty-printed form -> block
-    (0, _STOP_QUOTING, "", "pass"),       # QUOTED block shape -> parse says no block
-    (0, _STOP_QUOTING, "nudge", "advise"),  # quoted shape + stderr stays advise
+     "[dispatch] budget-skip r/n: 0.1s left of the 15s group budget; member not run (fail-open)\n", "Stop", "skip"),
+    (0, _STOP_BLOCK, "", "Stop", "block"),  # Stop-lane block JSON at exit 0 -> block
+    (0, _STOP_BLOCK_JQ, "", "Stop", "block"),  # jq pretty-printed form -> block
+    (0, _STOP_QUOTING, "", "Stop", "pass"),  # QUOTED block shape -> parse says no block
+    (0, _STOP_QUOTING, "nudge", "Stop", "advise"),  # quoted shape + stderr stays advise
 ])
-def test_classify_decision(rc, stdout, stderr, expected):
-    # Evaluated as Stop: only the Stop-lane rows read `event` at all, and the
-    # gate's other side (a non-Stop event, and rc != 0) has its own test —
-    # test_stop_block_classification_mirrors_the_dispatcher_gates.
-    assert fl.classify_decision(rc, stdout, stderr, "Stop") == expected
+def test_classify_decision(rc, stdout, stderr, event, expected):
+    # `event` is a column rather than a constant: every lane below the exit-2
+    # one is event-gated, so a table pinned to one event silently stops
+    # exercising the others. The gates' other sides have their own tests —
+    # test_stop_block_classification_mirrors_the_dispatcher_gates and
+    # test_marker_classification_mirrors_the_dispatcher_gate.
+    assert fl.classify_decision(rc, stdout, stderr, event) == expected
 
 
 def test_block_is_not_misread_as_pass():
@@ -425,6 +427,29 @@ def test_stop_block_classification_mirrors_the_dispatcher_gates():
     # Exit 2 stays event-agnostic, matching the dispatcher's own exit-2 lane.
     assert fl.classify_decision(2, "", "", "PostToolUse") == "block"
     assert fl.classify_decision(2, "", "", None) == "block"
+
+
+def test_marker_classification_mirrors_the_dispatcher_gate():
+    """The two SUBSTRING marker lanes are PreToolUse-only, as in run_group.
+
+    `run_group` probes `_DENY_MARKER` under `is_pretooluse` and `_ASK_MARKER`
+    inside an `if is_pretooluse:` block, so on any other event a member whose
+    stdout merely contains the marker text gets no decision from the
+    dispatcher at all. The ledger probed both event-agnostically and filed a
+    block or an ask nobody enforced — the same divergence the Stop lane above
+    had, one lane over (issue #1199 review).
+    """
+    # PreToolUse — the lanes the dispatcher actually runs.
+    assert fl.classify_decision(0, _DENY, "", "PreToolUse") == "block"
+    assert fl.classify_decision(0, _ASK, "", "PreToolUse") == "ask"
+    # Any other event: the dispatcher ignores the marker, so the ledger must.
+    for event in ("Stop", "PostToolUse", None):
+        assert fl.classify_decision(0, _DENY, "", event) != "block"
+        assert fl.classify_decision(0, _ASK, "", event) != "ask"
+    # The fall-through stays intact: stderr still classifies as advise.
+    assert fl.classify_decision(0, _DENY, "nudge", "Stop") == "advise"
+    # Exit 2 is unaffected — it never depended on the marker.
+    assert fl.classify_decision(2, _DENY, "", "Stop") == "block"
 
 
 def test_record_session_fire_opt_out(tmp_path, monkeypatch):
