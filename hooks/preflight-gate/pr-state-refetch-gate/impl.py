@@ -58,6 +58,7 @@ from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from ask_option_text import collect_option_texts  # type: ignore[import-not-found]  # noqa: E402
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 
@@ -271,9 +272,8 @@ def _block_msg(stale: list[tuple[str, str, object]]) -> str:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
 
     if not isinstance(payload, dict):

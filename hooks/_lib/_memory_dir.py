@@ -37,9 +37,15 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
+import sys
+from pathlib import Path as _Path
+
+sys.path.insert(0, str(_Path(__file__).resolve().parent))
+from _git import run_git  # type: ignore[import-not-found]  # noqa: E402
 
 SLUG_CHAR_RE = re.compile(r"[^a-zA-Z0-9]")
+
+_GIT_TIMEOUT_SEC = 5
 
 
 def slugify_project_path(path: str) -> str:
@@ -75,19 +81,16 @@ def _main_worktree_path() -> str | None:
     the main worktree it is the relative `.git`, which abspath()s back to
     the current cwd so the caller's `!= cwd` guard skips it. Fail-safe:
     any git error (git absent, not a repo, timeout) → None.
+
+    The spawn goes through the shared budget-aware runner (issue #1178): this
+    resolver is reached from inside the Bash dispatch group, where a fixed
+    timeout can outlive the group deadline and get the whole dispatcher killed
+    by the host (issue #1167).
     """
-    try:
-        proc = subprocess.run(
-            ["git", "rev-parse", "--git-common-dir"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except Exception:
+    out = run_git(["rev-parse", "--git-common-dir"], timeout=_GIT_TIMEOUT_SEC)
+    if out is None:
         return None
-    if proc.returncode != 0:
-        return None
-    common = proc.stdout.strip()
+    common = out.strip()
     if not common:
         return None
     return os.path.dirname(os.path.abspath(common))

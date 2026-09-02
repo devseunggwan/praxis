@@ -41,7 +41,6 @@ Silent cases (no output):
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -49,6 +48,7 @@ from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 
 OPT_OUT_MARKER = "# [model-routing-ack]"
 
@@ -154,15 +154,10 @@ def main() -> int:
     if os.environ.get("PRAXIS_SKIP_MODEL_ROUTING") == "1":
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        return 0
-
-    if payload.get("tool_name") != "Bash":
-        return 0
-
-    command = (payload.get("tool_input") or {}).get("command", "") or ""
+    parsed = read_bash_payload()
+    if parsed is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
+    payload, command = parsed
     if not command.strip() or OPT_OUT_MARKER in command:
         return 0
 

@@ -49,14 +49,16 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import sys
 
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _git import repo_root as git_repo_root  # type: ignore[import-not-found]  # noqa: E402
+from _git import run_git  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -133,23 +135,8 @@ PR_SUFFIX_RE = re.compile(r"\(#\d+\)\s*$")
 
 
 # ---------------------------------------------------------------------------
-# Git helpers
+# Git helpers (shared subprocess wrapper: hooks/_lib/_git.py, issue #1178)
 # ---------------------------------------------------------------------------
-
-
-def _run_git(args: list[str], cwd: str) -> tuple[int, str]:
-    """Run a git command in cwd. Returns (returncode, stdout). Fail-open on error."""
-    try:
-        result = subprocess.run(
-            ["git"] + args,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        return result.returncode, result.stdout
-    except (OSError, subprocess.TimeoutExpired, FileNotFoundError):
-        return -1, ""
 
 
 def get_repo_root(path: str) -> str | None:
@@ -173,11 +160,7 @@ def get_repo_root(path: str) -> str | None:
         cwd = parent
     if not cwd or not os.path.isdir(cwd):
         return None
-    rc, out = _run_git(["rev-parse", "--show-toplevel"], cwd)
-    if rc != 0:
-        return None
-    root = out.strip()
-    return root if root else None
+    return git_repo_root(cwd=cwd)
 
 
 def get_current_branch(repo_root: str) -> str | None:
@@ -190,8 +173,8 @@ def get_current_branch(repo_root: str) -> str | None:
     if override:
         return None if override == "HEAD" else override
 
-    rc, out = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], repo_root)
-    if rc != 0:
+    out = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root)
+    if out is None:
         return None
     branch = out.strip()
     return branch if branch and branch != "HEAD" else None
@@ -227,8 +210,8 @@ def get_dirty_files(repo_root: str) -> set[str]:
     if "PRAXIS_PBGUARD_TEST_STATUS" in os.environ:
         return _parse_status_porcelain(os.environ["PRAXIS_PBGUARD_TEST_STATUS"])
 
-    rc, out = _run_git(["status", "--porcelain"], repo_root)
-    if rc != 0:
+    out = run_git(["status", "--porcelain"], cwd=repo_root)
+    if out is None:
         return set()
     return _parse_status_porcelain(out)
 
@@ -242,8 +225,8 @@ def get_recent_log(repo_root: str) -> str:
     if "PRAXIS_PBGUARD_TEST_LOG" in os.environ:
         return os.environ["PRAXIS_PBGUARD_TEST_LOG"]
 
-    rc, out = _run_git(["log", "--oneline", "-3"], repo_root)
-    if rc != 0:
+    out = run_git(["log", "--oneline", "-3"], cwd=repo_root)
+    if out is None:
         return ""
     return out
 
@@ -384,10 +367,9 @@ def is_gitignored(file_path: str, repo_root: str) -> bool:
         return rel in ignored
 
     # `git check-ignore -q <path>`: rc 0 = ignored, 1 = not ignored,
-    # 128/-1 = error. Only rc 0 means ignored; everything else preserves the
-    # guard (_run_git returns -1 on exception).
-    rc, _ = _run_git(["check-ignore", "-q", file_path], repo_root)
-    return rc == 0
+    # 128/error/timeout = not ignored. run_git returns None for every
+    # non-zero/error outcome, so `is not None` is exactly the rc==0 test.
+    return run_git(["check-ignore", "-q", file_path], cwd=repo_root) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -433,9 +415,8 @@ def _is_inflight_edit(file_path: str, repo_root: str, dirty_files: set[str]) -> 
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed input
 
     tool_name = payload.get("tool_name", "") or ""

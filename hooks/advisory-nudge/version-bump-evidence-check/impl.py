@@ -38,13 +38,13 @@ Reuses body-extraction logic from external-write-falsify-check.py / sibling hook
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     iter_command_starts,
@@ -293,9 +293,8 @@ def main() -> int:
     if os.environ.get("PRAXIS_VERSION_BUMP_BYPASS") == "1":
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed stdin
 
     tool_name = payload.get("tool_name", "") or ""

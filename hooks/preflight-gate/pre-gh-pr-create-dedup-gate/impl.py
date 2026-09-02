@@ -42,11 +42,13 @@ import sys
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _git import origin_slug  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
     MIN_SUBPROC_BUDGET_SEC,
     fail_open,
     remaining_budget,
 )
+from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]
     _is_gh_binary,
     iter_command_starts,
@@ -81,14 +83,6 @@ STOPWORDS = frozenset({
 MAX_KEYWORDS = 6
 GH_TIMEOUT_SEC = 4
 GIT_TIMEOUT_SEC = 2
-
-# Owner/repo extracted from common origin URL forms:
-#   git@github.com:owner/repo.git
-#   https://github.com/owner/repo.git
-#   ssh://git@github.com/owner/repo
-_ORIGIN_URL_RE = re.compile(
-    r"(?:github\.com[:/])([A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+?)(?:\.git)?/?$"
-)
 
 # ---------------------------------------------------------------------------
 # Argv inspection
@@ -161,35 +155,21 @@ class BudgetExhausted(Exception):
 
 
 def _resolve_origin_repo() -> str | None:
-    """Run `git remote get-url origin` and parse owner/repo from URL.
+    """Parse owner/repo from `git remote get-url origin` in the process cwd.
 
-    Returns None on any failure (no git, no origin, unparseable URL), which the
-    caller blocks on. Raises BudgetExhausted when there is no runway to look,
-    which the caller passes on instead.
+    Returns None on any failure (no git, no origin, unparseable URL), which
+    the caller blocks on. Raises BudgetExhausted when there is no runway to
+    look, which the caller passes on instead.
+
+    Delegates the subprocess to the shared resolver (hooks/_lib/_git.py,
+    issue #1178), keeping this hook's 2s git timeout. The floor check stays
+    here because the shared runner answers a dry budget with None, and this
+    caller has to tell "no runway" apart from "no origin" — the two take
+    different paths in main() (issue #1167).
     """
-    # This hook runs the git lookup and then the gh search, so neither may
-    # take its own full slice: remaining_budget shrinks between them and their
-    # SUM stays inside the member budget (issue #1167).
-    budget = remaining_budget(GIT_TIMEOUT_SEC)
-    if budget < MIN_SUBPROC_BUDGET_SEC:
+    if remaining_budget(GIT_TIMEOUT_SEC) < MIN_SUBPROC_BUDGET_SEC:
         raise BudgetExhausted("git remote lookup")
-    try:
-        proc = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=min(GIT_TIMEOUT_SEC, budget),
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    if proc.returncode != 0:
-        return None
-    url = (proc.stdout or "").strip()
-    if not url:
-        return None
-    m = _ORIGIN_URL_RE.search(url)
-    return m.group(1) if m else None
+    return origin_slug(timeout=GIT_TIMEOUT_SEC)
 
 
 # ---------------------------------------------------------------------------
@@ -343,15 +323,10 @@ def _budget_skip(exc: BudgetExhausted) -> int:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        return 0  # fail-open on malformed stdin (infrastructure error)
-
-    if payload.get("tool_name") != "Bash":
-        return 0
-
-    command = payload.get("tool_input", {}).get("command", "") or ""
+    parsed = read_bash_payload()
+    if parsed is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
+    payload, command = parsed
     if not command.strip():
         return 0
 

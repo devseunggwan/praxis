@@ -61,13 +61,13 @@ an inability to determine one.
 """
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _git import run_git  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
     MIN_SUBPROC_BUDGET_SEC,
     fail_open,
@@ -79,6 +79,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
+from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 
 _GH_TIMEOUT_SEC = 5
@@ -196,9 +197,12 @@ def _scan_tail(tail: list[str]) -> tuple[bool, str | None, str | None]:
 
 
 def _run(cmd: list[str], cwd: str | None, timeout: int) -> tuple[int, str]:
-    # This hook's success path runs a gh lookup AND a git lookup back to back,
-    # so the manifest timeout is not its worst case.
-    # Each call takes what is left rather than its own full slice.
+    """Local runner for `gh` calls; git calls go through _lib/_git.run_git.
+
+    This hook's success path runs a gh lookup AND a git lookup back to back,
+    so the manifest timeout is not its worst case. Each call takes what is
+    left rather than its own full slice (issue #1167).
+    """
     budget = remaining_budget(timeout)
     if budget < MIN_SUBPROC_BUDGET_SEC:
         return -1, ""
@@ -234,8 +238,10 @@ def _resolve_head_branch(
 
 def _worktree_branches(cwd: str | None) -> dict[str, str]:
     """Return {branch_name: worktree_path} parsed from `git worktree list --porcelain`."""
-    rc, out = _run(["git", "worktree", "list", "--porcelain"], cwd, _GIT_TIMEOUT_SEC)
-    if rc != 0:
+    out = run_git(
+        ["worktree", "list", "--porcelain"], timeout=_GIT_TIMEOUT_SEC, cwd=cwd or None
+    )
+    if out is None:
         return {}
     branches: dict[str, str] = {}
     current_path: str | None = None
@@ -276,17 +282,10 @@ def main() -> int:
     if os.environ.get(_BYPASS_ENV, "").strip():
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        return 0
-
-    if not isinstance(payload, dict):
-        return 0
-    if payload.get("tool_name") != "Bash":
-        return 0
-
-    command = payload.get("tool_input", {}).get("command", "") or ""
+    parsed = read_bash_payload()
+    if parsed is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
+    payload, command = parsed
     if not command.strip():
         return 0
 

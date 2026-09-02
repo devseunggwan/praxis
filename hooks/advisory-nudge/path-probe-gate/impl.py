@@ -58,7 +58,6 @@ Opt-out:
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import subprocess
 import sys
@@ -67,6 +66,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _paths import praxis_cache_dir  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -263,9 +263,8 @@ def _emit_deny(
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed stdin
 
     tool_name = payload.get("tool_name", "") or ""

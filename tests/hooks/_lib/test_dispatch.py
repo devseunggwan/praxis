@@ -755,6 +755,47 @@ def _fixed_timeout_spawns(source: str) -> list[str]:
     return offenders
 
 
+def _lib_closure(impl: Path) -> list[Path]:
+    """`impl` plus every hooks/_lib module it reaches, transitively.
+
+    The member impl alone stopped being the whole spawn surface once the shared
+    helpers were extracted (issue #1178): `run_git` moved the subprocess out of
+    six hook files into `_lib/_git.py`, and a scan pinned to impl.py would have
+    reported a clean group while the spawn merely changed address. Following the
+    imports keeps the invariant measuring what the member actually executes.
+    """
+    modules = {p.stem: p for p in LIB.glob("*.py")}
+    seen, queue, out = set(), [impl], [impl]
+    while queue:
+        tree = ast.parse(queue.pop().read_text(encoding="utf-8", errors="replace"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                names = [node.module]
+            elif isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            else:
+                continue
+            for mod in names:
+                if mod in modules and mod not in seen:
+                    seen.add(mod)
+                    out.append(modules[mod])
+                    queue.append(modules[mod])
+    return out
+
+
+def test_the_lib_closure_reaches_the_extracted_spawn():
+    # Positive control for the scan range below: an empty offender list has to
+    # mean "no fixed timeouts", not "the closure stopped following imports".
+    # pre-gh-pr-create-dedup-gate spawns no subprocess of its own any more — its
+    # git probe lives in _lib/_git.py — so the closure MUST reach that file or
+    # the widened scan is measuring nothing.
+    members, _budget, _timeouts = _dispatch.load_group("PreToolUse", "Bash")
+    impl = next(Path(i) for r, n, i in members if n == "pre-gh-pr-create-dedup-gate")
+    reached = {p.name for p in _lib_closure(impl)}
+    assert "_git.py" in reached
+    assert "_payload.py" in reached  # transitive, not a direct import of impl.py
+
+
 def test_every_subprocess_member_is_budget_aware():
     # The dispatcher no longer decides per member whether a shortened cap is
     # safe: it clamps every member's deadline to the group's and relies on
@@ -762,13 +803,17 @@ def test_every_subprocess_member_is_budget_aware():
     # That reliance is the invariant here. A member spawning a subprocess
     # under a fixed timeout can outlive the group deadline and get the whole
     # dispatcher killed by the host, and nothing at the call site shows it.
+    #
+    # The scan follows each member into hooks/_lib: extraction moves a spawn
+    # without changing what runs inside the group deadline (issue #1178).
     members, _budget, _timeouts = _dispatch.load_group("PreToolUse", "Bash")
     offenders = {}
     for role, name, impl in members:
-        bad = _fixed_timeout_spawns(
-            Path(impl).read_text(encoding="utf-8", errors="replace"))
-        if bad:
-            offenders[f"{role}/{name}"] = bad
+        for src in _lib_closure(Path(impl)):
+            bad = _fixed_timeout_spawns(
+                src.read_text(encoding="utf-8", errors="replace"))
+            if bad:
+                offenders[f"{role}/{name} -> {src.name}"] = bad
     assert offenders == {}
 
 

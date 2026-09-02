@@ -59,7 +59,6 @@ Fail-open on malformed stdin / unreadable body / unresolvable target.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -67,7 +66,9 @@ import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _git import run_git  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     iter_command_starts,
@@ -164,20 +165,13 @@ _GIT_TIMEOUT_SEC = 2
 
 
 def _git_output(args: list[str], cwd: str) -> str | None:
-    """Run a git command; return stripped stdout, or None on any failure."""
-    try:
-        proc = subprocess.run(
-            ["git", *args],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT_SEC,
-        )
-    except Exception:
-        return None
-    if proc.returncode != 0:
-        return None
-    return proc.stdout.strip()
+    """Run a git command; return stripped stdout, or None on any failure.
+
+    Thin strip()-wrapper over the shared runner (hooks/_lib/_git.py, #1178),
+    keeping this hook's 2s timeout.
+    """
+    out = run_git(args, timeout=_GIT_TIMEOUT_SEC, cwd=cwd)
+    return None if out is None else out.strip()
 
 
 # Per-invocation cache: directory -> owner of its `origin` remote (None =
@@ -512,9 +506,8 @@ def _render_advisory(dot_markers: list[str], owner_markers: list[str]) -> str:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed stdin
 
     tool_name = payload.get("tool_name", "") or ""

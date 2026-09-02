@@ -91,6 +91,7 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from pathlib import Path
 
@@ -114,9 +115,8 @@ _ESCALATE_AFTER_PRIOR_BLOCKS = 1
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.loads(sys.stdin.read())
-    except (json.JSONDecodeError, ValueError):
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed payload
 
     if os.environ.get("CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE") == "1":

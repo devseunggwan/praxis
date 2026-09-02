@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_stop_advisory  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
     has_tool_in_turn,
@@ -448,9 +449,8 @@ ADVISORY_RULE2 = (
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
 
     if not isinstance(payload, dict):

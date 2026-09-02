@@ -44,7 +44,6 @@ none is needed.
 """
 from __future__ import annotations
 
-import json
 import re
 import sys
 from pathlib import Path
@@ -52,6 +51,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     compound_cascade_hint,
@@ -194,7 +194,7 @@ def _question_excerpt(rejection: dict) -> str:
     documented `questions[]` shape — a renamed field must degrade the quote,
     never the gate.
     """
-    questions = rejection.get("tool_input", {}).get("questions")
+    questions = (rejection.get("tool_input") or {}).get("questions")
     if isinstance(questions, list):
         for q in questions:
             if isinstance(q, dict) and isinstance(q.get("question"), str):
@@ -239,15 +239,10 @@ def build_reason(rejection: dict, shared: list[str]) -> str:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.loads(sys.stdin.read())
-    except (json.JSONDecodeError, ValueError):
-        return 0  # fail-open on malformed input
-
-    if payload.get("tool_name") != "Bash":
-        return 0
-
-    command = (payload.get("tool_input") or {}).get("command", "") or ""
+    parsed = read_bash_payload()
+    if parsed is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
+    payload, command = parsed
     if not command.strip():
         return 0
 

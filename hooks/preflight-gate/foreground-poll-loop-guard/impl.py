@@ -140,6 +140,7 @@ from _fire_ledger import count_session_fires  # type: ignore[import-not-found]  
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import safe_tokenize  # type: ignore[import-not-found]  # noqa: E402
 from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 
 _HOOK_NAME = "foreground-poll-loop-guard"  # manifest `name` — the fire-ledger key
@@ -801,13 +802,9 @@ def main() -> int:
     if os.environ.get(_BYPASS_ENV):
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        return 0  # fail-open on malformed stdin
-
-    if payload.get("tool_name") != "Bash":
-        return 0
+    payload = read_payload(("Bash",))
+    if payload is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
 
     tool_input = payload.get("tool_input", {}) or {}
     command = tool_input.get("command", "") or ""

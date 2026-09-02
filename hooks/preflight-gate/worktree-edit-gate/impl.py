@@ -47,15 +47,16 @@ file not inside a git repo, detached HEAD) → exit 0 (pass).
 """
 from __future__ import annotations
 
-import json
 import os
-import re
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _git import origin_slug  # type: ignore[import-not-found]  # noqa: E402
+from _git import repo_root as git_repo_root  # type: ignore[import-not-found]  # noqa: E402
+from _git import run_git  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -66,14 +67,6 @@ DEFAULT_BASE_BRANCHES = frozenset({"main", "dev", "prod"})
 DEFAULT_SOURCE_EXTENSIONS = frozenset({"py", "ts", "tsx", "go", "sql"})
 
 TARGET_TOOLS = frozenset({"Edit", "Write"})
-
-# Regex for parsing owner/repo from GitHub remote URLs:
-#   https://github.com/owner/repo.git
-#   git@github.com:owner/repo.git
-#   ssh://git@github.com/owner/repo
-_REMOTE_SLUG_RE = re.compile(
-    r"(?:github\.com[:/])([A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+?)(?:\.git)?/?$"
-)
 
 
 # ---------------------------------------------------------------------------
@@ -106,38 +99,8 @@ def get_source_extensions() -> frozenset[str]:
 
 
 # ---------------------------------------------------------------------------
-# Git helpers
+# Git helpers (shared subprocess wrapper: hooks/_lib/_git.py, issue #1178)
 # ---------------------------------------------------------------------------
-
-
-def _run_git(args: list[str], cwd: str) -> tuple[int, str]:
-    """Run a git command in cwd. Returns (returncode, stdout). Fail-open on error."""
-    try:
-        result = subprocess.run(
-            ["git"] + args,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        return result.returncode, result.stdout
-    except (OSError, subprocess.TimeoutExpired, FileNotFoundError):
-        return -1, ""
-
-
-def _get_remote_slug(repo_root: str) -> str | None:
-    """Return the 'owner/repo' slug from the origin remote URL, or None.
-
-    Parses both HTTPS and SSH remote URL forms. Fail-open on any error.
-    """
-    rc, out = _run_git(["remote", "get-url", "origin"], repo_root)
-    if rc != 0:
-        return None
-    url = out.strip()
-    if not url:
-        return None
-    m = _REMOTE_SLUG_RE.search(url)
-    return m.group(1) if m else None
 
 
 def get_repo_root(path: str) -> str | None:
@@ -155,17 +118,13 @@ def get_repo_root(path: str) -> str | None:
         cwd = parent
     if not cwd or not os.path.isdir(cwd):
         return None
-    rc, out = _run_git(["rev-parse", "--show-toplevel"], cwd)
-    if rc != 0:
-        return None
-    root = out.strip()
-    return root if root else None
+    return git_repo_root(cwd=cwd)
 
 
 def get_current_branch(repo_root: str) -> str | None:
     """Return the current branch name, or None for detached HEAD / failure."""
-    rc, out = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], repo_root)
-    if rc != 0:
+    out = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root)
+    if out is None:
         return None
     branch = out.strip()
     return branch if branch and branch != "HEAD" else None
@@ -189,7 +148,7 @@ def _repo_matches_identifier(repo_root: str, identifier: str) -> bool:
     """
     if "/" in identifier:
         # org/repo form: resolve via remote origin URL, not filesystem path
-        slug = _get_remote_slug(repo_root)
+        slug = origin_slug(cwd=repo_root)
         if slug is None:
             return False  # no origin / unparseable → fail-open (no match)
         return slug == identifier
@@ -264,9 +223,8 @@ def main() -> int:
     if os.environ.get("PRAXIS_HOOK_BYPASS_WORKTREE_GATE", "").strip():
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed input
 
     tool_name = payload.get("tool_name", "") or ""

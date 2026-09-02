@@ -52,7 +52,6 @@ Fail-open contract:
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -62,6 +61,7 @@ _HOOK_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HOOK_DIR.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import safe_tokenize, strip_prefix  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -263,15 +263,10 @@ def _advisory_text(left: list[str], right: list[str]) -> str:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        return 0
-
-    if payload.get("tool_name") != "Bash":
-        return 0
-
-    command = payload.get("tool_input", {}).get("command", "") or ""
+    parsed = read_bash_payload()
+    if parsed is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
+    payload, command = parsed
     if not command.strip():
         return 0
 

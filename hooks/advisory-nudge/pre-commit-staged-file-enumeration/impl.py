@@ -58,16 +58,13 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
-    MIN_SUBPROC_BUDGET_SEC,
-    fail_open,
-    remaining_budget,
-)
+from _git import run_git  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
     safe_tokenize,
@@ -157,22 +154,13 @@ def _has_live_git_commit(command: str) -> bool:
 
 
 def _git(args: list[str]) -> str | None:
-    """Run a read-only git command; return stdout or None on any failure."""
-    # Several of these run per invocation. remaining_budget shrinks with each
-    # one, so their SUM stays inside the member budget (issue #1167).
-    budget = remaining_budget(_GIT_TIMEOUT_SEC)
-    if budget < MIN_SUBPROC_BUDGET_SEC:
-        return None
-    try:
-        result = subprocess.run(
-            ["git", *args], capture_output=True, text=True,
-            timeout=min(_GIT_TIMEOUT_SEC, budget),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if result.returncode != 0:
-        return None
-    return result.stdout
+    """Run a read-only git command; return stdout or None on any failure.
+
+    Several of these run per invocation. The shared runner (hooks/_lib/_git.py,
+    issue #1178) reads the remaining member budget on each call, so their SUM
+    stays inside it (issue #1167).
+    """
+    return run_git(args, timeout=_GIT_TIMEOUT_SEC)
 
 
 def _staged_addition_realpaths(repo_root: str) -> list[tuple[str, str]] | None:
@@ -284,15 +272,10 @@ def main() -> int:
     if os.environ.get("PRAXIS_SKIP_STAGED_FILE_ENUM") == "1":
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        return 0
-
-    if payload.get("tool_name") != "Bash":
-        return 0
-
-    command = (payload.get("tool_input") or {}).get("command", "") or ""
+    parsed = read_bash_payload()
+    if parsed is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
+    payload, command = parsed
     if not command.strip() or OPT_OUT_MARKER in command:
         return 0
     if not _has_live_git_commit(command):

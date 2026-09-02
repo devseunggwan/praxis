@@ -96,6 +96,7 @@ import time
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _git import run_git  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
     MIN_SUBPROC_BUDGET_SEC,
     budgeted_deadline,
@@ -112,6 +113,7 @@ from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E4
     GH_BODY_FLAGS_WITH_ARG,
     GH_GLOBAL_FLAGS_WITH_ARG,
 )
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 
 _GH_TIMEOUT_SEC = 8
@@ -688,30 +690,24 @@ def _uncovered_files(
     if not base or not head:
         return []
 
-    def _git(args: list[str]) -> subprocess.CompletedProcess | None:
+    def _git(args: list[str]) -> str | None:
+        # Deadline-aware wrapper over the shared runner (hooks/_lib/_git.py):
+        # returns stdout on success, None on failure / spent budget.
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return None
-        try:
-            return subprocess.run(
-                ["git", *args], capture_output=True, text=True, cwd=cwd,
-                timeout=min(_GIT_TIMEOUT_SEC, remaining),
-            )
-        except (OSError, subprocess.SubprocessError):
-            return None
+        return run_git(args, timeout=min(_GIT_TIMEOUT_SEC, remaining), cwd=cwd)
 
     # The PR's head commit has to exist locally for any of this to mean
     # anything — after a fresh push it does, and when it does not (fork, stale
     # clone) there is no diff to take.
-    present = _git(["cat-file", "-e", f"{head}^{{commit}}"])
-    if present is None or present.returncode != 0:
+    if _git(["cat-file", "-e", f"{head}^{{commit}}"]) is None:
         return []
-    mb = _git(["merge-base", f"origin/{base}", head])
-    merge_base = (mb.stdout.strip() if mb else "")
+    merge_base = (_git(["merge-base", f"origin/{base}", head]) or "").strip()
     if not merge_base:
         return []
     out = _git(["diff", "--name-only", merge_base, head])
-    if out is None or out.returncode != 0:
+    if out is None:
         return []
 
     table = "\n".join(
@@ -719,7 +715,7 @@ def _uncovered_files(
     )
     return [
         path
-        for path in (p for p in out.stdout.splitlines() if p.strip())
+        for path in (p for p in out.splitlines() if p.strip())
         if path not in table and _Path(path).name not in table
     ]
 
@@ -977,12 +973,9 @@ def _pre_tool_use(payload: dict) -> int:
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        return 0
-    if payload.get("tool_name") != "Bash":
-        return 0
+    payload = read_payload(("Bash",))
+    if payload is None:
+        return 0  # non-Bash tool or malformed stdin — fail-open
     event = payload.get("hookEventName") or payload.get("hook_event_name")
     if event == "PostToolUse":
         return _post_tool_use(payload)

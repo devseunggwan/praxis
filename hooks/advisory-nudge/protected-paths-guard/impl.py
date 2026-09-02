@@ -48,12 +48,12 @@ Fail-open contract:
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 TARGET_TOOLS = frozenset({"Edit", "Write", "NotebookEdit"})
 
@@ -276,9 +276,8 @@ def main() -> int:
     if os.environ.get("PRAXIS_HOOK_BYPASS_PROTECTED_PATHS", "").strip():
         return 0
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0
 
     tool_name = payload.get("tool_name", "") or ""

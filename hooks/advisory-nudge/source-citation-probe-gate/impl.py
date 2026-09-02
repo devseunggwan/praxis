@@ -56,6 +56,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
     safe_tokenize,
 )
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import TRANSCRIPT_SCAN_LINES  # type: ignore[import-not-found]  # noqa: E402
 
 
@@ -257,9 +258,8 @@ ADVISORY_MESSAGE = (
 
 @fail_open
 def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
+    payload = read_payload()
+    if payload is None:
         return 0  # fail-open on malformed stdin
 
     if not isinstance(payload, dict):
