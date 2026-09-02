@@ -23,7 +23,9 @@ set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="${PRAXIS_TEST_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-SKILL="$ROOT_DIR/skills/codex-review-wrap/SKILL.md"
+# Step 4b and Liveness moved from SKILL.md into the Step 4 reference file in
+# the #1181 references/ split; the pinned sections live there now.
+SKILL="$ROOT_DIR/skills/codex-review-wrap/references/step4-run-review.md"
 
 PASS=0
 FAIL=0
@@ -33,16 +35,17 @@ if [ ! -f "$SKILL" ]; then
   exit 1
 fi
 
-# Section slicing. Liveness is a "##### " subsection nested inside 4b, so the
-# 4b slice must stop at it — otherwise 4b's pin assertion would be satisfied by
+# Section slicing. In the reference file the sub-steps sit at "## " and their
+# subsections at "### " (demoted from the old SKILL.md's ####/##### in the
+# #1181 split). Liveness is a "### " subsection nested inside 4b, so the 4b
+# slice must stop at it — otherwise 4b's pin assertion would be satisfied by
 # Liveness's pin and neither section would be independently required.
-step4b="$(awk '/^#### 4b\./{f=1} f&&/^##### Liveness/{exit} f&&/^#### /&&!/^#### 4b\./{exit} f' "$SKILL")"
-# Stops at the next heading of ITS OWN level too, not only at the next `####`.
-# Ending only at `####` ran the slice 146 lines to `#### 5a.`, swallowing the
-# sibling `##### When the review completes` and `##### Execution order` — so
-# deleting Liveness's own pin and putting the same words in either sibling kept
-# both liveness assertions green.
-liveness="$(awk '/^##### Liveness/{f=1;print;next} f&&/^#{4,5} /{exit} f' "$SKILL")"
+step4b="$(awk '/^## 4b\./{f=1} f&&/^### Liveness/{exit} f&&/^## /&&!/^## 4b\./{exit} f' "$SKILL")"
+# Stops at the next heading of ITS OWN level too, not only at the next `##`.
+# Ending only at `##` would swallow the sibling `### When the review completes`
+# — so deleting Liveness's own pin and putting the same words in the sibling
+# would keep both liveness assertions green.
+liveness="$(awk '/^### Liveness/{f=1;print;next} f&&/^#{2,3} /{exit} f' "$SKILL")"
 
 assert_match() {
   local name="$1" hay="$2" pat="$3"

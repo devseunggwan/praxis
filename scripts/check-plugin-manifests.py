@@ -41,9 +41,14 @@ main() is labeled with its number, and this list is the canonical roster
       `runtime-verified-note`).
   12. skills/<skill-name>/ on disk matches the EXPECTED_SKILLS frozen set
      (issue #465 — surface freeze gate against silent skill proliferation).
-  13. AGENTS.md "## Skills (N)" count and per-skill backtick tokens, and
-     docs/skills.md per-skill backtick tokens, all match EXPECTED_SKILLS
-     (issue #498 — doc drift invariant).
+  13. Doc drift invariants (issues #498, #1177): AGENTS.md "## Skills (N)"
+     count and per-skill backtick tokens, docs/skills.md per-skill table
+     rows, and the skills/using-praxis/SKILL.md routing tables (every skill
+     routed by a table row, no phantom skill names in category rows or
+     scenario routing cells) all match EXPECTED_SKILLS; docs/skills.md
+     trigger-keyword cells quote keywords verbatim from each skill's
+     frontmatter description; and the compatibility-tier tables in
+     README.md, AGENTS.md, and using-praxis stay normalized-identical.
   14. Each manifest `dispatch_groups` (event, matcher) collapses to exactly
      one dispatcher node per platform hooks.json (no member silently left as
      its own node, no second dispatcher node), and the runtime resolver
@@ -78,9 +83,43 @@ main() is labeled with its number, and this list is the canonical roster
       dir) must exist on disk, except deliberate phantom-path examples in
       SPEC_PATH_EXEMPT. (Numbered 22 to stay clear of rules added by
       parallel PRs.)
+  23. README.md hook-aggregate counts (#1176): total hook dirs, manifest
+      registration count, per-role dir counts, and the number of distinct
+      hooks carrying a variable in docs/bypass-vars.md must all match the
+      hand-written numbers at their anchored README phrases — the Rule 13
+      doc-drift contract, applied to the hook surface. (Numbered 23 to stay
+      clear of rules 21/22 added by a parallel PR.)
+
+  24. Canonical matcher token order (#1168): every plain pipe-joined tool-name
+      matcher (hooks and dispatch_groups alike) spells its tokens in sorted
+      order with no duplicates, so identical matcher SETS share one literal
+      spelling and can coalesce into one hooks.json group / dispatch group.
+      Regex-y matchers (any token with characters outside [A-Za-z0-9]) are
+      exempt, but an empty alternation token (`Edit|`) — which matches every
+      tool — is drift. (Numbered 24 on rebase: this rule was authored as 21
+      before rules 21-23 landed on main.)
+  25. Generated dispatcher commands are shell-safe (#1198): every hooks.json
+      `command` that invokes the dispatch wrapper, token-split the way `sh -c`
+      would, yields no bare shell control-operator token — an unquoted
+      pipe-carrying dispatch matcher would otherwise run as a pipeline and
+      silently disable the whole group. Non-dispatcher commands are out of
+      scope (a deliberate compound command is legitimate shell). (Numbered 25
+      on rebase: authored as 22 before rules 21-23 landed on main.)
 
 An unnumbered auxiliary check verifies the Codex adapter symlinks
 (plugins/praxis/{skills,hooks,scripts} → repo root).
+
+  Schema gate (unnumbered — rule renumbering is owned by #1172): before any
+      numbered rule runs, hooks/manifest.json is validated against
+      hooks/manifest.schema.json via the stdlib walker in
+      build-plugin-manifests.py (#1173, shared — the build runs the same gate
+      before rendering), so a typo'd optional key, a wrong type, or an
+      unknown enum value fails with a file+entry+key diagnostic instead of a
+      KeyError deeper in the pipeline. Platform files
+      (manifests/platforms/*.json) get the same treatment through
+      _build.load_platform's checked access, including host_id membership in
+      the schema's closed hosts enum; the reverse direction (stale enum value
+      with no platform file) is checked here.
 
 CI invokes this; developers can too, via `./scripts/check-plugin-manifests.py`.
 """
@@ -91,6 +130,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -317,14 +357,20 @@ def dispatch_node_drifts(
     host_id: str,
     expected_members: set[str],
     dispatch_wrapper_name: str,
+    args_wrappers: set[str] = frozenset(),
 ) -> list[str]:
     """Drift strings for one (event, matcher) group's node shape in a hooks.json.
 
     Pure function (no I/O) so the node-shape half of Rule 14 is unit-testable in
     isolation from the runtime resolver. `expected_members` is the host-kept
-    member set: non-empty → the group must hold exactly ONE node and it must be
-    the dispatcher wrapper carrying `event matcher host_id` args; empty (the host
-    filtered every member) → the group must be absent (zero nodes).
+    COLLAPSIBLE member set: non-empty → the group must hold exactly ONE
+    dispatcher node carrying `event matcher host_id` args; empty (the host
+    filtered every member) → no dispatcher node. `args_members` are the group's
+    args-declaring members: the build keeps them as STANDALONE nodes (the
+    dispatcher cannot forward argv; the runtime resolver excludes them the same
+    way — issue #1199 review), so their per-member nodes are expected, not a
+    leak. A matcher-less group renders `_build.DISPATCH_NO_MATCHER_ARG` in the
+    matcher argv slot.
     """
     groups = [
         g
@@ -338,6 +384,19 @@ def dispatch_node_drifts(
     member_nodes = [
         n for n in nodes if dispatch_wrapper_name not in n.get("command", "")
     ]
+    # Match the node's wrapper BASENAME against the exact set the manifest
+    # says should stay standalone. A substring probe answered two different
+    # questions wrong at once: a `wrapper_suffix` node never matched its own
+    # bare name (false leak), and a member whose node vanished entirely left
+    # nothing to test, so its silent disappearance read as clean.
+    def _basename(node) -> str:
+        cmd = node.get("command", "")
+        head = cmd.split()[0] if cmd.split() else cmd
+        return head.rsplit("/", 1)[-1]
+
+    leaked = [n for n in member_nodes if _basename(n) not in args_wrappers]
+    present = {_basename(n) for n in member_nodes}
+    missing = sorted(args_wrappers - present)
     out: list[str] = []
     want = 1 if expected_members else 0
     if len(dispatch_nodes) != want:
@@ -345,18 +404,36 @@ def dispatch_node_drifts(
             f"DISPATCH NODE COUNT {event}/{matcher} host={host_id}: expected "
             f"{want} dispatcher node(s), found {len(dispatch_nodes)}"
         )
-    if member_nodes:
+    if missing:
+        out.append(
+            f"DISPATCH ARGS NODE MISSING {event}/{matcher} host={host_id}: "
+            f"{missing} declared 'args' (so the build must keep each one as a "
+            "standalone node) but no such node exists — the hook is silently "
+            "disabled"
+        )
+    if leaked:
         out.append(
             f"DISPATCH MEMBER LEAK {event}/{matcher} host={host_id}: "
-            f"{len(member_nodes)} non-dispatcher node(s) in a collapsed group: "
-            f"{[n.get('command', '') for n in member_nodes]}"
+            f"{len(leaked)} non-dispatcher node(s) in a collapsed group: "
+            f"{[n.get('command', '') for n in leaked]} "
+            f"(args-declaring members may stay standalone; declared here: "
+            f"{sorted(args_wrappers)})"
         )
+    # Args are shlex-quoted in the generated command (PR #1198: the host runs
+    # it via `sh -c`, so a pipe-carrying matcher MUST be quoted or it parses
+    # as a pipeline). Expect the quoted spelling — a no-op for plain tokens.
+    # A matcher-less group renders `_build.DISPATCH_NO_MATCHER_ARG` in the
+    # matcher slot (issue #1199 review) — see `_build._dispatcher_node`.
+    matcher_arg = _build.DISPATCH_NO_MATCHER_ARG if matcher is None else matcher
+    expected_args = (
+        f"{shlex.quote(event)} {shlex.quote(matcher_arg)} {shlex.quote(host_id)}"
+    )
     for n in dispatch_nodes:
         cmd = n.get("command", "")
-        if f"{event} {matcher} {host_id}" not in cmd:
+        if expected_args not in cmd:
             out.append(
                 f"DISPATCH ARGS {event}/{matcher} host={host_id}: dispatcher "
-                f"command {cmd!r} missing '{event} {matcher} {host_id}' args"
+                f"command {cmd!r} missing '{expected_args}' args"
             )
     return out
 
@@ -639,6 +716,25 @@ def _skill_runtime_metadata_drifts(skill_dir: Path) -> list[str]:
     return drifts
 
 
+def runs_standalone(entries) -> bool:
+    """True if any of a hook's manifest entries runs it outside the dispatcher.
+
+    Two ways that happens, and the second is the one a plain (event, matcher)
+    test misses: an entry outside the collapsed (PreToolUse, Bash) group, and
+    an entry INSIDE it that declares `args` — `_dispatch.group_members`
+    excludes such a member from the group, so the build keeps it as its own
+    node and it runs on its own. Judged by (event, matcher) alone it looks
+    dispatch-wrapped, and the @fail_open requirement was skipped for a hook
+    that does need it (issue #1199 review).
+    """
+    for e in entries:
+        if e.get("args"):
+            return True
+        if not (e.get("event") == "PreToolUse" and e.get("matcher") == "Bash"):
+            return True
+    return False
+
+
 def _has_fail_open_decorator(impl_path: Path) -> bool:
     """True iff some function in impl.py carries an `@fail_open` decorator.
 
@@ -716,6 +812,47 @@ def _hook_dirs() -> list[Path]:
 def main() -> int:
     base = _build.load_base()
     manifest = _build.load_manifest()
+
+    # ------------------------------------------------------------------
+    # Manifest schema gate (#1173) — deliberately unnumbered: rule
+    # renumbering is owned by the parallel #1172 change. Runs before every
+    # numbered rule (and before expand_to_hooks_json) because they all
+    # index into the manifest raw; a malformed manifest must fail here
+    # with a file+entry+key diagnostic, not a KeyError traceback. The
+    # validation itself lives in build-plugin-manifests.py (shared: the
+    # build refuses to render from a malformed manifest with the same
+    # gate). A malformed SCHEMA raises ValueError from
+    # _build.assert_schema_supported — developer error, fail loud.
+    # ------------------------------------------------------------------
+    schema_drifts = _build.manifest_schema_drifts(manifest)
+    if schema_drifts:
+        print("plugin-manifest check FAILED:")
+        for d in schema_drifts:
+            print(f"  - {d}")
+        return 1
+
+    # Reverse hosts cross-check: load_platform validates each platform's
+    # host_id against the schema's closed hosts enum; this direction catches
+    # a stale enum value with no backing platform file.
+    schema_hosts = set(_build.manifest_hosts_enum())
+    platform_hosts = {
+        p.get("host_id", p["platform"])
+        for p in (
+            _build.load_platform(f)
+            for f in sorted(_build.PLATFORMS_DIR.glob("*.json"))
+        )
+    }
+    stale_hosts = schema_hosts - platform_hosts
+    if stale_hosts:
+        drifts_early = ", ".join(sorted(stale_hosts))
+        print("plugin-manifest check FAILED:")
+        print(
+            f"  - SCHEMA HOSTS ENUM hooks/manifest.schema.json: value(s) "
+            f"{drifts_early} have no manifests/platforms/*.json with that "
+            "host_id — remove them or add the platform file"
+        )
+        return 1
+
     hooks_source = _build.expand_to_hooks_json(manifest)
     # ADR-0002: must mirror build-plugin-manifests.main() so the expected
     # hooks.json collapses dispatch groups identically to the committed output.
@@ -728,7 +865,7 @@ def main() -> int:
     # Rule 5 — generated artifacts byte-identical (drift check)
     # ------------------------------------------------------------------
     for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
-        platform = json.loads(platform_file.read_text())
+        platform = _build.load_platform(platform_file)
         host_id = platform.get("host_id", platform["platform"])
         for output in platform["outputs"]:
             out_path = REPO_ROOT / output["path"]
@@ -1162,12 +1299,16 @@ def main() -> int:
         )
 
     # ------------------------------------------------------------------
-    # Rule 13 — Doc skill-count invariant (#498)
+    # Rule 13 — Doc skill-count invariant (#498, #1177)
     #
     # AGENTS.md carries an explicit "## Skills (N)" header whose count must
-    # equal len(EXPECTED_SKILLS).  Both AGENTS.md and docs/skills.md embed
-    # skill names inside table cells as `backtick` tokens; every
-    # EXPECTED_SKILLS member must appear at least once in each document.
+    # equal len(EXPECTED_SKILLS).  AGENTS.md, docs/skills.md, and the
+    # using-praxis onboarding skill embed skill names inside table cells as
+    # `backtick` tokens; every EXPECTED_SKILLS member must appear in each
+    # document (13b/13c/13d), using-praxis table rows must not name phantom
+    # skills (13d), docs/skills.md keyword cells must quote the frontmatter
+    # verbatim (13e), and the three tier-table copies must stay
+    # normalized-identical (13f).
     #
     # Parsing is intentionally coarse — we match the pattern
     # `skill-name` (backtick-delimited) so the check is robust to table
@@ -1194,15 +1335,49 @@ def main() -> int:
                 f"EXPECTED_SKILLS has {expected_count} — update the header"
             )
 
+    # Shared plumbing for Rules 13b-13f — each doc surface reduces to token
+    # sets, and the two drift directions (missing skill / phantom skill) are
+    # reported identically for every surface.
+    def _norm_ws(s: str) -> str:
+        return _re.sub(r"\s+", " ", s).strip()
+
+    def _table_cells(line: str) -> list[str]:
+        """`| a | b |` → ["a", "b"]; non-table lines → []."""
+        if not line.lstrip().startswith("|"):
+            return []
+        return [c.strip() for c in line.strip().strip("|").split("|")]
+
+    def _doc_roster_drifts(
+        doc_label: str,
+        present_tokens: set[str],
+        missing_hint: str,
+        listed_tokens: set[str] | None = None,
+        phantom_hint: str | None = None,
+    ) -> list[str]:
+        out: list[str] = []
+        missing = EXPECTED_SKILLS - present_tokens
+        if missing:
+            out.append(
+                f"DOC SKILL LIST {doc_label}: {sorted(missing)!r} declared in "
+                f"EXPECTED_SKILLS but {missing_hint}"
+            )
+        if listed_tokens is not None:
+            phantom = listed_tokens - EXPECTED_SKILLS
+            if phantom:
+                out.append(
+                    f"DOC SKILL LIST {doc_label}: {sorted(phantom)!r} {phantom_hint}"
+                )
+        return out
+
     # Rule 13b — every EXPECTED_SKILLS member appears in AGENTS.md
     agents_backtick_skills = set(_re.findall(r"`([^`]+)`", agents_text))
-    missing_in_agents = EXPECTED_SKILLS - agents_backtick_skills
-    if missing_in_agents:
-        drifts.append(
-            f"DOC SKILL LIST AGENTS.md: {sorted(missing_in_agents)!r} declared in "
-            "EXPECTED_SKILLS but not found as `backtick` tokens — add them to "
-            "the skill table"
+    drifts.extend(
+        _doc_roster_drifts(
+            "AGENTS.md",
+            agents_backtick_skills,
+            "not found as `backtick` tokens — add them to the skill table",
         )
+    )
 
     # Rule 13c — every EXPECTED_SKILLS member appears as the first column of
     # a docs/skills.md table row.  We match `| \`skill-name\` |` so that a
@@ -1216,20 +1391,159 @@ def main() -> int:
             "DOC SKILL LIST docs/skills.md: file missing — it is the skill "
             "roster README.md points at"
         )
-        skills_doc_table = set()
+        skills_doc_text = ""
     else:
-        skills_doc_table = set(
-            _re.findall(
-                r"^\|\s*`([^`]+)`\s*\|", skills_doc_path.read_text(), _re.MULTILINE
+        skills_doc_text = skills_doc_path.read_text()
+    skills_doc_table = set(
+        _re.findall(r"^\|\s*`([^`]+)`\s*\|", skills_doc_text, _re.MULTILINE)
+    )
+    drifts.extend(
+        _doc_roster_drifts(
+            "docs/skills.md",
+            skills_doc_table,
+            "not found as a first-column `backtick` token in a table row — "
+            "add them to the skill table",
+        )
+    )
+
+    # Rule 13d — the using-praxis onboarding entry point routes every skill
+    # (#1177).  A skill counts as routed only when a table row names it:
+    # either the first column of a category table, or a `backtick` token in
+    # a routing cell of the Common Scenarios table (rows whose first cell is
+    # a "quoted situation").  Prose mentions do not satisfy the check.  The
+    # reverse direction runs over the same token set, so a typo in either a
+    # category row or a scenario routing cell is caught as a phantom skill.
+    using_praxis_path = REPO_ROOT / "skills" / "using-praxis" / "SKILL.md"
+    if not using_praxis_path.exists():
+        drifts.append(
+            "DOC SKILL LIST skills/using-praxis/SKILL.md: file missing — it is "
+            "the onboarding entry point that must route every skill"
+        )
+        using_praxis_text = ""
+    else:
+        using_praxis_text = using_praxis_path.read_text()
+    using_praxis_routed: set[str] = set()
+    for line in using_praxis_text.splitlines():
+        cells = _table_cells(line)
+        if not cells:
+            continue
+        first_col = _re.fullmatch(r"`([^`]+)`", cells[0])
+        if first_col:
+            # category-table row — the first column is the skill name
+            using_praxis_routed.add(first_col.group(1))
+        elif cells[0].startswith('"'):
+            # scenario-table row — every token in the routing cells is a skill
+            for cell in cells[1:]:
+                using_praxis_routed.update(_re.findall(r"`([^`]+)`", cell))
+    if using_praxis_path.exists():
+        drifts.extend(
+            _doc_roster_drifts(
+                "skills/using-praxis/SKILL.md",
+                using_praxis_routed,
+                "not routed by any table row — the onboarding entry point must "
+                "route every skill (a prose mention does not count); add them "
+                "to a category table",
+                listed_tokens=using_praxis_routed,
+                phantom_hint="named in a category-table first column or a "
+                "scenario routing cell but not declared in EXPECTED_SKILLS — "
+                "fix the typo or remove the stale row",
             )
         )
-    missing_in_skills_doc = EXPECTED_SKILLS - skills_doc_table
-    if missing_in_skills_doc:
-        drifts.append(
-            f"DOC SKILL LIST docs/skills.md: {sorted(missing_in_skills_doc)!r} declared "
-            "in EXPECTED_SKILLS but not found as a first-column `backtick` token in a "
-            "table row — add them to the skill table"
+
+    # Rule 13e — docs/skills.md trigger-keyword cells mirror the skill's
+    # frontmatter description verbatim (#1177).  Every `backtick` keyword in
+    # a roster row's second column must appear double-quoted in that skill's
+    # frontmatter description (whitespace-normalized, so YAML `>` folding
+    # does not count as drift).  Quoted match, not substring — `skill spec`
+    # must not pass just because `praxis skill spec` is quoted.
+    def _frontmatter_description(skill: str) -> str:
+        try:
+            text = (REPO_ROOT / "skills" / skill / "SKILL.md").read_text()
+        except OSError:
+            return ""
+        fm = _re.match(r"---\n(.*?)\n---\n", text, _re.DOTALL)
+        if not fm:
+            return ""
+        desc = _re.search(
+            r"^description:(.*?)(?=^\S|\Z)", fm.group(1), _re.DOTALL | _re.MULTILINE
         )
+        if not desc:
+            return ""
+        # Everything from `Do NOT activate on` onward lists phrases that must
+        # NOT route to the skill. Searching the whole description would accept
+        # one of those as a valid trigger keyword, so a roster row could list
+        # `strike a balance` and pass.
+        text = _norm_ws(desc.group(1))
+        return text.split("Do NOT activate on")[0].rstrip()
+
+    for line in skills_doc_text.splitlines():
+        cells = _table_cells(line)
+        if len(cells) < 2:
+            continue
+        first_col = _re.fullmatch(r"`([^`]+)`", cells[0])
+        if not first_col or first_col.group(1) not in EXPECTED_SKILLS:
+            continue
+        skill_name = first_col.group(1)
+        description = _frontmatter_description(skill_name)
+        # Both directions, because a mirror contract broken either way is still
+        # broken: a row listing a phrase the description never claims routes
+        # readers to a keyword that does not trigger, and a description quoting
+        # a phrase the row omits hides a live trigger from the roster. Only the
+        # first direction has a failing test upstream of it, so the second is
+        # the one that silently drifts.
+        documented = {_norm_ws(k) for k in _re.findall(r"`([^`]+)`", cells[1])}
+        # Every quoted phrase left in `description` is a trigger: the negative
+        # clause was already cut above, so no positive-clause parse is needed.
+        quoted = {_norm_ws(k) for k in _re.findall(r'"([^"]+)"', description)}
+        for keyword in sorted(documented - quoted):
+            drifts.append(
+                f"DOC KEYWORD DRIFT docs/skills.md: `{skill_name}` row lists "
+                f"{keyword!r} but the skill's frontmatter description does "
+                "not quote it — keyword cells mirror the description "
+                "verbatim; fix the row or the description"
+            )
+        for keyword in sorted(quoted - documented):
+            drifts.append(
+                f"DOC KEYWORD DRIFT docs/skills.md: `{skill_name}` frontmatter "
+                f"quotes {keyword!r} but the row does not list it — keyword "
+                "cells mirror the description verbatim; fix the row or the "
+                "description"
+            )
+
+    # Rule 13f — the compatibility-tier table is maintained in three places
+    # (README.md, AGENTS.md, skills/using-praxis/SKILL.md); their data rows
+    # must stay identical after normalization (backticks stripped, whitespace
+    # collapsed) so tier membership cannot drift between copies (#1177).
+    # README.md is the reference copy (canonical per issue #1177).
+    def _tier_rows(text: str) -> list[tuple[str, ...]]:
+        rows = []
+        for line in text.splitlines():
+            cells = _table_cells(line)
+            if len(cells) >= 3 and _re.fullmatch(
+                r"\*\*(Standalone|Enhanced|Full|Multi-provider)\*\*", cells[0]
+            ):
+                rows.append(tuple(_norm_ws(c.replace("`", "")) for c in cells[:3]))
+        return rows
+
+    readme_text = (REPO_ROOT / "README.md").read_text()
+    reference_tiers = _tier_rows(readme_text)
+    if not reference_tiers:
+        drifts.append(
+            "TIER TABLE MISSING README.md: no compatibility-tier rows found — "
+            "it is the reference copy the other two are checked against"
+        )
+    else:
+        for label, text in (
+            ("AGENTS.md", agents_text),
+            ("skills/using-praxis/SKILL.md", using_praxis_text),
+        ):
+            rows = _tier_rows(text)
+            if rows != reference_tiers:
+                drifts.append(
+                    f"TIER TABLE DRIFT {label}: normalized tier rows differ "
+                    f"from README.md's — got {rows!r}, expected "
+                    f"{reference_tiers!r}"
+                )
 
     # ------------------------------------------------------------------
     # Rule 14 — dispatch-group ↔ build/runtime consistency (ADR-0002, #617)
@@ -1250,25 +1564,52 @@ def main() -> int:
     #       member set for that host, with no duplicates, and every resolved
     #       impl.py exists on disk.
     # ------------------------------------------------------------------
-    def _manifest_members_for(event: str, matcher: str | None, host: str) -> set[str]:
+    def _manifest_members_for(
+        event: str, matcher: str | None, host: str
+    ) -> tuple[set[str], set[str], set[str]]:
+        """Return `(collapsible_names, args_names, args_wrappers)` for a group.
+
+        args-declaring entries are excluded from the dispatch member set on
+        BOTH sides (the build keeps them standalone in `filter_hooks_for_host`;
+        the runtime excludes them in `group_members` — issue #1199 review), so
+        they are returned separately for the node-shape check. Multi-event
+        hooks are flat sibling entries (one object per event); the nested
+        "entries" form had zero manifest uses and was removed (issue #1169).
+        """
         names: set[str] = set()
+        args_names: set[str] = set()
+        args_wrappers: set[str] = set()
         for hook in manifest["hooks"]:
             hosts = hook.get("hosts")
             if hosts is not None and host not in hosts:
                 continue
-            entries = hook.get("entries") or [
-                {"event": hook.get("event"), "matcher": hook.get("matcher")}
-            ]
-            if any(
-                e.get("event") == event and e.get("matcher") == matcher
-                for e in entries
-            ):
-                names.add(hook["name"])
-        return names
+            if hook.get("event") == event and hook.get("matcher") == matcher:
+                if hook.get("args"):
+                    args_names.add(hook["name"])
+                    # The node carries the WRAPPER filename, which bakes in
+                    # `wrapper_suffix` — deriving it from the bare name made a
+                    # correct `<name>-pre.sh` node read as a leak.
+                    args_wrappers.add(_build._wrapper_filename(hook))
+                else:
+                    names.add(hook["name"])
+        return names, args_names, args_wrappers
+
+    # Sentinel canary: the build renders DISPATCH_NO_MATCHER_ARG into a
+    # matcher-less dispatcher node's command; the runtime maps NO_MATCHER_ARG
+    # back to None in main(). If the two constants ever diverge, a matcher-less
+    # group resolves ZERO members at runtime — errorlessly disabling every
+    # member — so the pairing is pinned here.
+    if _build.DISPATCH_NO_MATCHER_ARG != _dispatch.NO_MATCHER_ARG:
+        drifts.append(
+            "DISPATCH SENTINEL DRIFT: build DISPATCH_NO_MATCHER_ARG="
+            f"{_build.DISPATCH_NO_MATCHER_ARG!r} != runtime "
+            f"_dispatch.NO_MATCHER_ARG={_dispatch.NO_MATCHER_ARG!r} — a "
+            "matcher-less dispatcher node would resolve zero members at runtime"
+        )
 
     hooks_outputs: list[tuple[str, Path]] = []
     for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
-        platform = json.loads(platform_file.read_text())
+        platform = _build.load_platform(platform_file)
         host_id = platform.get("host_id", platform["platform"])
         for output in platform["outputs"]:
             if output["kind"] == "hooks":
@@ -1276,7 +1617,9 @@ def main() -> int:
 
     for event, matcher in sorted(dispatch_groups, key=lambda em: (em[0], em[1] or "")):
         for host_id, hooks_path in hooks_outputs:
-            expected = _manifest_members_for(event, matcher, host_id)
+            expected, args_excluded, args_wrappers = _manifest_members_for(
+                event, matcher, host_id
+            )
 
             # (b) runtime resolution must match the manifest, with no dup, and
             #     every resolved impl on disk.
@@ -1292,7 +1635,9 @@ def main() -> int:
                 drifts.append(
                     f"DISPATCH MEMBER DRIFT {event}/{matcher} host={host_id}: "
                     f"group_members={sorted(set(resolved_names))} != "
-                    f"manifest={sorted(expected)}"
+                    f"manifest={sorted(expected)} (args-declaring members are "
+                    f"excluded on both sides — excluded here: "
+                    f"{sorted(args_excluded)})"
                 )
             for _role, name, impl in resolved:
                 if not impl.exists():
@@ -1318,6 +1663,7 @@ def main() -> int:
                     host_id,
                     expected,
                     _build.DISPATCH_WRAPPER_NAME,
+                    args_wrappers=args_wrappers,
                 )
             )
 
@@ -1380,10 +1726,7 @@ def main() -> int:
         if name in OPT_IN_HOOKS:
             standalone = True
         else:
-            standalone = any(
-                not (e.get("event") == "PreToolUse" and e.get("matcher") == "Bash")
-                for e in manifest_by_name.get(name, [])
-            )
+            standalone = runs_standalone(manifest_by_name.get(name, []))
         if standalone and not _has_fail_open_decorator(impl_path):
             drifts.append(
                 f"FAIL-OPEN MISSING hooks/{role}/{name}/impl.py: hook runs "
@@ -1648,6 +1991,204 @@ def main() -> int:
                     "SPEC_PATH_EXEMPT if it is a deliberate phantom example "
                     "(#1179)"
                 )
+
+    # ------------------------------------------------------------------
+    # Rule 23 — README.md hook-aggregate counts (#1176)
+    #
+    # README.md's Hooks section carries hand-written aggregate numbers: the
+    # total hook count, the number of manifest registration points, the
+    # per-role counts in the role table, and how many hooks declare a
+    # variable in docs/bypass-vars.md. Each is derived here from the same
+    # sources the prose describes (hook dirs on disk, hooks/manifest.json,
+    # the bypass-vars registry) and asserted at an anchored phrase — regex
+    # on the surrounding fixed text, never a line number, so prose reflow
+    # does not break the gate but a stale number does.
+    # ------------------------------------------------------------------
+    role_dir_counts: dict[str, int] = {role: 0 for role in VALID_ROLES}
+    for hook_dir in _hook_dirs():
+        role_dir_counts[hook_dir.parent.name] += 1
+    total_hook_dirs = sum(role_dir_counts.values())
+    manifest_entry_count = len(manifest["hooks"])
+
+    # Distinct hooks declaring a variable in docs/bypass-vars.md: walk every
+    # `## <section>` table, take the hook column (`Hook(s)` is the third cell
+    # in the Path / test table, the second everywhere else — mirroring
+    # parse_doc_env_table / parse_doc_state_vars in build-plugin-manifests.py),
+    # and keep backtick-delimited tokens that name a real hook dir. Prose
+    # mentions outside backticks (e.g. shared-row parentheticals) are not a
+    # declaration and do not count.
+    hook_dir_names = {d.name for d in _hook_dirs()}
+    bypass_vars_text = (REPO_ROOT / "docs" / "bypass-vars.md").read_text()
+    bypass_var_hooks: set[str] = set()
+    current_section: str | None = None
+    for line in bypass_vars_text.splitlines():
+        header = re.match(r"^##\s+(.+)$", line)
+        if header:
+            current_section = header.group(1).strip()
+            continue
+        if current_section is None or not line.startswith("| `"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        hook_col = 2 if current_section.startswith("Path / test") else 1
+        if len(cells) <= hook_col:
+            continue
+        bypass_var_hooks.update(
+            token
+            for token in re.findall(r"`([^`]+)`", cells[hook_col])
+            if token in hook_dir_names
+        )
+
+    readme_text = (REPO_ROOT / "README.md").read_text()
+    readme_count_specs: list[tuple[str, str, tuple[int, ...]]] = [
+        # `\s+` between words: a prose reflow may move a line break inside the
+        # phrase, and the anchor must survive that (the numbers, not the
+        # wrapping, are what this rule pins down).
+        (
+            "total hooks / registration points",
+            r"\*\*(\d+) hooks\*\*,\s+registered\s+at\s+(\d+)\s+points",
+            (total_hook_dirs, manifest_entry_count),
+        ),
+        (
+            "opt-out/tuning variable coverage",
+            r"(\d+)\s+of\s+the\s+(\d+)\s+hooks\s+declare\s+an\s+opt-out\s+"
+            r"or\s+tuning\s+variable",
+            (len(bypass_var_hooks), total_hook_dirs),
+        ),
+    ]
+    for role in sorted(VALID_ROLES):
+        readme_count_specs.append(
+            (
+                f"role table row `{role}`",
+                rf"^\|\s*`{re.escape(role)}`\s*\|\s*(\d+)\s*\|",
+                (role_dir_counts[role],),
+            )
+        )
+    for label, pattern, expected in readme_count_specs:
+        match = re.search(pattern, readme_text, re.MULTILINE)
+        if match is None:
+            drifts.append(
+                f"README COUNT ANCHOR MISSING ({label}): no match for "
+                f"{pattern!r} in README.md — restore the anchored phrase or "
+                "update this rule alongside the prose (#1176)"
+            )
+            continue
+        found = tuple(int(g) for g in match.groups())
+        if found != expected:
+            drifts.append(
+                f"README COUNT DRIFT ({label}): README.md says {found}, "
+                f"derived {expected} — update the number(s) at "
+                f"{match.group(0)!r} (#1176)"
+            )
+
+    # Rule 24 — canonical matcher token order (#1168)
+    #
+    # Dispatch (and hooks.json grouping) key on the LITERAL matcher string, so
+    # the same tool set spelled two ways (`Edit|Write` vs `Write|Edit`) can
+    # never coalesce into one group — each spelling cold-starts its own
+    # process chain. Canonical spelling: the pipe-joined tokens sorted
+    # lexicographically, no duplicates. Only plain tool-name matchers are
+    # normalized: a matcher with any token containing characters outside
+    # [A-Za-z0-9] (e.g. `mcp__.*`, `mcp__.*slack.*`) is regex-y and exempt —
+    # reordering regex alternations is not guaranteed meaning-preserving.
+    # Applies to hook entries AND dispatch_groups so a group declaration can
+    # never drift from the spelling its members use.
+    # ------------------------------------------------------------------
+    _PLAIN_TOKEN_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
+
+    def _canonical_matcher_drift(matcher: str | None, where: str) -> str | None:
+        if not matcher or "|" not in matcher:
+            return None
+        tokens = matcher.split("|")
+        # An EMPTY token is never a legitimate regex-y spelling: as a hook
+        # matcher regex, an empty alternation (`Edit|`, `Edit||Write`) matches
+        # EVERY tool name, silently widening the hook to all tools. Report it
+        # as drift instead of exempting it (PR #1198 review).
+        if any(t == "" for t in tokens):
+            return (
+                f"MATCHER ORDER {where}: {matcher!r} contains an empty "
+                "alternation token, which matches EVERY tool — remove the "
+                "stray '|' (#1168)"
+            )
+        if not all(_PLAIN_TOKEN_RE.fullmatch(t) for t in tokens):
+            return None  # regex-y matcher — exempt
+        canonical = "|".join(sorted(set(tokens)))
+        if matcher != canonical:
+            return (
+                f"MATCHER ORDER {where}: {matcher!r} is not in canonical "
+                f"(sorted, deduplicated) order — spell it {canonical!r} (#1168)"
+            )
+        return None
+
+    for entry in manifest["hooks"]:
+        entries = entry.get("entries") or [
+            {"event": entry.get("event"), "matcher": entry.get("matcher")}
+        ]
+        for e in entries:
+            drift = _canonical_matcher_drift(
+                e.get("matcher"), f"hook {entry['name']} ({e.get('event')})"
+            )
+            if drift:
+                drifts.append(drift)
+    for group in manifest.get("dispatch_groups", []):
+        drift = _canonical_matcher_drift(
+            group.get("matcher"), f"dispatch_groups ({group.get('event')})"
+        )
+        if drift:
+            drifts.append(drift)
+
+    # ------------------------------------------------------------------
+    # Rule 25 — generated dispatcher commands must be shell-safe (#1198)
+    #
+    # The host executes every hooks.json `command` string via `sh -c`. An
+    # UNQUOTED shell control operator in an interpolated value turns the
+    # command into something else entirely: the first pipe-carrying dispatch
+    # matcher (`... _dispatch.sh PreToolUse Edit|NotebookEdit|Write claude`)
+    # was parsed as a 3-command PIPELINE — the dispatcher ran with matcher
+    # 'Edit' (the wrong group) and its deny JSON was swallowed by the pipe,
+    # so all nine grouped hooks never fired. Rule 14 and the pytest parity
+    # suite both invoke the dispatcher directly and bypassed the shell, which
+    # is why neither caught it. This rule simulates the shell's token split
+    # (shlex with punctuation_chars — quoted operators stay inside their
+    # token) and flags a bare control-operator token.
+    #
+    # Scope: ONLY commands that invoke the dispatch wrapper. Those are the
+    # commands whose args the build interpolates from manifest data (matcher /
+    # host), which is the injection surface this rule guards. A per-hook
+    # wrapper command with a deliberate compound form (`... 2>&1`, `a && b`)
+    # is legitimate shell and must not fail CI with a quote-the-matcher
+    # message (round-2 review).
+    # ------------------------------------------------------------------
+    _SH_CONTROL_CHARS = set("|&;()<>")
+
+    def _sh_control_tokens(cmd: str) -> list[str]:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        try:
+            tokens = list(lex)
+        except ValueError:
+            return ["<unparseable: unbalanced quoting>"]
+        return [t for t in tokens if t and set(t) <= _SH_CONTROL_CHARS]
+
+    for host_id, hooks_path in hooks_outputs:
+        if not hooks_path.exists():
+            continue  # the drift/Rule 14 checks already report the missing file
+        hooks_json = json.loads(hooks_path.read_text())
+        for event_name, event_groups in hooks_json.get("hooks", {}).items():
+            for group in event_groups:
+                for node in group.get("hooks", []):
+                    cmd = node.get("command", "")
+                    if _build.DISPATCH_WRAPPER_NAME not in cmd:
+                        continue  # non-dispatcher command — out of scope
+                    bad = _sh_control_tokens(cmd)
+                    if bad:
+                        rel = hooks_path.relative_to(REPO_ROOT)
+                        drifts.append(
+                            f"UNQUOTED SHELL OPERATOR {rel} [{event_name}/"
+                            f"{group.get('matcher')}]: dispatcher command "
+                            f"{cmd!r} parses under `sh -c` with bare operator "
+                            f"token(s) {bad!r} — the interpolated matcher/host "
+                            "must be shlex-quoted (#1198)"
+                        )
 
     if drifts:
         print("plugin-manifest check FAILED:")

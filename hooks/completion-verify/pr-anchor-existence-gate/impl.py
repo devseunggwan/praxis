@@ -365,11 +365,23 @@ def main() -> int:
         return 0
 
     unanchored = find_unanchored_prs(iter_transcript(transcript_path))
-    if not unanchored:
-        return 0
 
     session_id = payload.get("session_id")
     has_session = isinstance(session_id, str) and bool(session_id)
+
+    if not unanchored:
+        # Record a pass so the gate is visible in the fire ledger even on the
+        # no-op path (issue #1213). A gate that emits zero records over a
+        # whole session is indistinguishable from one that was never installed,
+        # and the ledger is the only signal that lets you distinguish "all PRs
+        # had anchors" from "the gate was inert the entire session".
+        if has_session:
+            if _fire_ledger.record_session_fire(
+                _HOOK_NAME, _ROLE, _fire_ledger.DECISION_PASS, session_id, "Stop"
+            ):
+                _fire_ledger.suppress_coarse_duplicate()
+        return 0
+
     force_advisory = bool(os.environ.get(_ADVISORY_ENV, "").strip())
 
     already_advised = (

@@ -7,7 +7,7 @@
 # in the Python module.
 #
 #   . "$(dirname "$0")/../../_lib/_paths.sh"
-#   log_dir="$(praxis_home)/scope-confirm"
+#   log="$(praxis_resolve_writable logs stop-triggered.log)"
 #   state="$(praxis_resolve_writable cache "retrospect-mix-$SESSION_ID")"
 #
 # Every function writes its result to stdout and never exits non-zero.

@@ -42,7 +42,10 @@ fi
 # cleanup/uninstall.
 # [#527] Durable state lives under the host-neutral ~/.praxis/state by default
 # (PRAXIS_HOME-aware); PRAXIS_STATE_DIR still overrides the base (back-compat).
-# [#903] Resolution moved into _paths.sh so shell and Python agree on one rule.
+# [#903] Resolution moved into _paths.sh so shell and Python share one impl.
+# [#1215] Shell and Python agree on one rule for the PRAXIS_STATE_DIR override
+# path: no tilde expansion, trailing slash stripped. Python's praxis_state_dir()
+# now matches this shell function exactly.
 # shellcheck source=../../_lib/_paths.sh
 # A POSIX shell aborts outright when `.` cannot find the file, so the guard
 # below is unreachable without this — the degraded path must stay reachable.

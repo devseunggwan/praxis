@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# test-advisory-wrapper-signature-verify.sh — coverage for the wrapper-signature advisory hook
+# test_advisory_wrapper_signature_verify.sh — coverage for
+# hooks/advisory-nudge/advisory-wrapper-signature-verify/impl.py
+# (dispatch-group member since #1168; no per-hook wrapper)
 #
 # Synthesizes Claude Code PreToolUse payloads and asserts:
 #   advisory → exit 0 + stderr non-empty
 #   pass     → exit 0 + stderr empty
 #
-# Usage: bash hooks/test-advisory-wrapper-signature-verify.sh
+# Usage: bash tests/hooks/advisory-nudge/test_advisory_wrapper_signature_verify.sh
 # Exit:  0 = all pass; 1 = at least one fail
 
 set +e

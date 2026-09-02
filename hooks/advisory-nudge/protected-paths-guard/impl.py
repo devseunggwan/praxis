@@ -4,7 +4,7 @@ files — `.env`, private keys, `~/.ssh/`, `credentials`, `.netrc`, `.npmrc`.
 
 Issue #464. Source pattern: `Yeachan-Heo/gajae-code`
 `examples/hooks/protected-paths.ts` (MIT) — adapted to the praxis
-PreToolUse(Edit|Write|NotebookEdit) shape with path-component-exact matching
+PreToolUse(Edit|NotebookEdit|Write) shape with path-component-exact matching
 (NOT substring — `node_modules_backup/` style false positives are explicitly
 disallowed).
 

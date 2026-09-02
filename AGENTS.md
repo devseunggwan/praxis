@@ -19,12 +19,12 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 
 ## Prerequisites
 
-| Tier               | What works                                               | Dependencies                                                |
-| ------------------ | -------------------------------------------------------- | ----------------------------------------------------------- |
-| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq` (for strike skills); `debt` needs only `git` |
-| **Enhanced**       | + retrospect, codex-review-wrap                          | + oh-my-claudecode                                          |
-| **Full**           | + all cmux-* skills                                      | + cmux                                                      |
-| **Multi-provider** | + codex/gemini routing in cmux-*                         | + codex-cli, gemini-cli                                     |
+| Tier               | What works                                               | Dependencies                            |
+| ------------------ | -------------------------------------------------------- | --------------------------------------- |
+| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `debt` needs only `git` |
+| **Enhanced**       | + retrospect, codex-review-wrap                          | + oh-my-claudecode                      |
+| **Full**           | + all cmux-* skills                                      | + cmux                                  |
+| **Multi-provider** | + codex/gemini routing in cmux-delegate                  | + codex-cli, gemini-cli                 |
 
 > **`gh` is also a prerequisite of the verification-anchor convention**, and
 > for revision specifically. Creating an anchor needs only a way to post a

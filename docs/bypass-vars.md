@@ -129,7 +129,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_HOOK_ERROR_STDERR` | unset | shared — also print swallowed-exception note to stderr |
 | `PRAXIS_BYPASS_TELEMETRY_FILE` | `~/.praxis/telemetry/bypass-events-<date>.jsonl` | `bypass-telemetry` |
 | `PRAXIS_MEMORY_DIR` | memory store dir | `memory-hint`, `momentum-rule-retrieval-gate` |
-| `PRAXIS_GH_LABEL_CACHE_PATH` | XDG cache | `gh-label-verify` |
+| `PRAXIS_GH_LABEL_CACHE_PATH` | `~/.praxis/cache/gh-label-cache.json` | `gh-label-verify` |
 | `PRAXIS_GH_LABEL_CACHE_TTL_SEC` | `300` | `gh-label-verify` |
 | `PRAXIS_POSTCOMPACT_CONTEXT_FILE` | `${TMPDIR}/praxis-postcompact-context-<sid>.json` | `postcompact-context` |
 | `PRAXIS_POSTCOMPACT_TAIL_LINES` | `100` | `postcompact-context` |

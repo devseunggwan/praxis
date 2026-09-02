@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./manifest.schema.json",
+  "title": "praxis hook manifest",
+  "description": "Structural schema for hooks/manifest.json, the canonical hook registry (ADR-0001 §2.5). Every object level is closed (additionalProperties: false) so a typo'd optional key fails validation instead of being silently absorbed. Validated by the stdlib walker in scripts/check-plugin-manifests.py — that walker supports only the keywords this file uses (type, enum, required, properties, additionalProperties, items, minimum, minItems, minLength); extend the walker before introducing a new keyword here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["description", "hooks"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dispatch_groups": {
+      "description": "(event, matcher) pairs collapsed into a single dispatcher node per platform hooks.json (ADR-0002). Non-tool events (Stop, SessionStart, UserPromptSubmit) carry no matcher: OMIT the key rather than setting it null — the validator subset has no null type, and .get('matcher') yields None for an absent key anyway (issue #1199 review).",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["event"],
+        "properties": {
+          "event": {
+            "enum": [
+              "SessionStart",
+              "UserPromptSubmit",
+              "PreToolUse",
+              "PostToolUse",
+              "Stop"
+            ]
+          },
+          "matcher": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "hooks": {
+      "description": "Flat, order-significant hook registrations. A multi-event hook appears once per (event, matcher) registration under the same name.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "role", "event", "timeout"],
+        "properties": {
+          "name": {
+            "description": "Hook directory name under hooks/<role>/<name>/.",
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "description": "One of the four ADR-0001 role directories (mirrors VALID_ROLES in scripts/constants.py).",
+            "enum": [
+              "preflight-gate",
+              "advisory-nudge",
+              "postuse-correction",
+              "completion-verify"
+            ]
+          },
+          "event": {
+            "enum": [
+              "SessionStart",
+              "UserPromptSubmit",
+              "PreToolUse",
+              "PostToolUse",
+              "Stop"
+            ]
+          },
+          "matcher": {
+            "description": "Tool-name regex for PreToolUse/PostToolUse registrations; omitted for non-tool events.",
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "description": "Present iff the shell file IS the hook body (not a generated wrapper). The build treats any other value as impl.py, so the value set is closed.",
+            "enum": ["impl.sh"]
+          },
+          "args": {
+            "description": "Extra argv for the hook command. With wrapper_suffix set, baked into the wrapper body; otherwise appended to the hooks.json command line.",
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "wrapper_suffix": {
+            "description": "Per-event wrapper filename suffix for multi-event Python hooks (hooks/<name><suffix>.sh), e.g. \"-pre\" / \"-post\".",
+            "type": "string",
+            "minLength": 1
+          },
+          "timeout": {
+            "description": "Hook timeout in seconds.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "hosts": {
+            "description": "Host whitelist; absent means all hosts. Values are host_id values from manifests/platforms/*.json — extend this enum when adding a platform.",
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "enum": ["claude", "codex", "cursor", "gemini", "opencode"]
+            }
+          },
+          "requires": {
+            "description": "External components without which the matcher is dead (#1158); mirrored by the spec's Requires: line.",
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "gates": {
+            "description": "Named command families this entry gates (e.g. git-commit); consumed by scripts/check-sibling-commit-gates.py.",
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "mode": {
+            "description": "Operating-surface metadata (#688): the single source of truth cross-checked against docs/bypass-vars.md and SECURITY.md.",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "strict_env": {
+                "description": "Env var that switches the hook from advisory to blocking. Deliberately a bare string (not an array like its siblings) — that is the shape every consumer reads today; widening it to an array is a semantic change tracked outside this schema.",
+                "type": "string",
+                "minLength": 1
+              },
+              "bypass_env": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "state_paths": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "external_commands": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

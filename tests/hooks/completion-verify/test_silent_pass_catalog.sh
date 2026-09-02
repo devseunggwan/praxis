@@ -108,6 +108,73 @@ run_case "selftrigger_fixture_literal_excluded" "" "$TMP/self_fixture.jsonl"
 mk_assistant '  "grep_pattern": "aws secretsmanager get-secret-value",' > "$TMP/self_catalog.jsonl"
 run_case "selftrigger_catalog_field_excluded" "" "$TMP/self_catalog.jsonl"
 
+# --- session-scoped scan (issue #1183 review round 1) -------------------------
+# The scanner's contract is SESSION-scoped: a hard-class hit early in a long
+# session must still be detected at Stop, however many lines followed it. A
+# tail-bounded read (considered for perf in #1183, rejected in review) would
+# silently pass this exact fixture — keep it as the regression guard.
+{
+  mk_assistant "ran aws secretsmanager get-secret-value --secret-id foo/bar"
+  for _ in $(seq 1 450); do mk_assistant "routine progress update, nothing sensitive"; done
+} > "$TMP/early_hit.jsonl"
+run_case "session_scope_early_hit_still_detected" "sanctioned-path-bypass" "$TMP/early_hit.jsonl"
+
+# And the same through leading filler: a hit at the very tail of a long
+# transcript (single linear pass covers both ends).
+{
+  for _ in $(seq 1 450); do mk_assistant "routine progress update, nothing sensitive"; done
+  mk_assistant "ran aws secretsmanager get-secret-value --secret-id foo/bar"
+} > "$TMP/late_hit.jsonl"
+run_case "session_scope_late_hit_detected" "sanctioned-path-bypass" "$TMP/late_hit.jsonl"
+
+# --- catalog projection: empty middle field must not shift fields -------------
+# `IFS=tab read` collapses runs of tabs (tab is IFS whitespace), so a class
+# with an EMPTY severity used to shift grep_pattern into severity and
+# cooccurs_with into grep_pattern — the scanner then greps the co-occurrence
+# regex as the primary pattern. With only the co-occurrence signature in the
+# transcript, that shift emits a hit the un-shifted class must NOT emit
+# (primary pattern absent). The US-delimiter projection preserves the empty
+# field; expect no output.
+cat > "$TMP/holey-catalog.json" <<'JSON'
+{
+  "version": 1,
+  "fabricated_fixture_allowlist": [],
+  "classes": [
+    {
+      "id": "holey-class",
+      "severity": null,
+      "grep_pattern": "PRIMARY_SIGNATURE_AAA",
+      "cooccurs_with": "COOCCUR_SIGNATURE_BBB"
+    }
+  ]
+}
+JSON
+mk_assistant "only the co-occurrence half: COOCCUR_SIGNATURE_BBB" > "$TMP/holey.jsonl"
+got_holey="$(bash "$SCAN" --transcript "$TMP/holey.jsonl" --catalog "$TMP/holey-catalog.json" 2>/dev/null | cut -f1 | paste -sd, -)"
+if [ "$got_holey" = "" ]; then
+  PASS=$((PASS + 1)); printf 'PASS  %s\n' "empty_middle_field_does_not_shift"
+else
+  FAIL=$((FAIL + 1)); printf 'FAIL  %s  expected=[] got=[%s]\n' "empty_middle_field_does_not_shift" "$got_holey"
+fi
+# Positive control on the same catalog: both signatures present → the class
+# fires with its fields in the right places (severity comes out empty, id
+# intact) — proving the empty field is preserved rather than the class lost.
+{ mk_assistant "PRIMARY_SIGNATURE_AAA seen"; mk_assistant "and later COOCCUR_SIGNATURE_BBB"; } > "$TMP/holey_both.jsonl"
+holey_line="$(bash "$SCAN" --transcript "$TMP/holey_both.jsonl" --catalog "$TMP/holey-catalog.json" 2>/dev/null | head -n 1)"
+if [ "$(printf '%s' "$holey_line" | cut -f1)" = "holey-class" ] \
+  && [ "$(printf '%s' "$holey_line" | cut -f2)" = "" ]; then
+  PASS=$((PASS + 1)); printf 'PASS  %s\n' "empty_middle_field_preserved_in_output"
+else
+  FAIL=$((FAIL + 1)); printf 'FAIL  %s  got=[%s]\n' "empty_middle_field_preserved_in_output" "$holey_line"
+fi
+
+# --- role-key whitespace tolerance -------------------------------------------
+# A record serialized with a space after the colon ("role": "assistant") must
+# still be treated as assistant scope.
+printf '{"isSidechain":false,"message":{"role": "assistant","content":[{"type":"text","text":"ran aws secretsmanager get-secret-value --secret-id foo/bar"}]}}\n' \
+  > "$TMP/role_space.jsonl"
+run_case "role_key_space_after_colon_matches" "sanctioned-path-bypass" "$TMP/role_space.jsonl"
+
 # --- scope: a tool_result (user role) is out of assistant scope ---------------
 printf '{"isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","content":"aws_secret_access_key: %s"}]}}\n' \
   "$FAKE_SECRET" > "$TMP/user_scope.jsonl"

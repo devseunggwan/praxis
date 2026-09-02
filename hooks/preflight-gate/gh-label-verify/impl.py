@@ -24,8 +24,10 @@ Pipeline:
        c. If both fail → fail-open (cannot validate without a key).
   5. Fetch label set via `gh label list --repo <r> --limit 300 --json
      name -q '.[].name'`, cached per-repo for PRAXIS_GH_LABEL_CACHE_TTL_SEC
-     (default 300) at <XDG_CACHE_HOME or ~/.cache>/claude-praxis/
-     gh-label-cache.json. Cache corrupt / unwritable → in-memory only.
+     (default 300) at ~/.praxis/cache/gh-label-cache.json (PRAXIS_HOME-
+     relocated via _paths.resolve_writable, TTL-swept with the rest of
+     the cache root; PRAXIS_GH_LABEL_CACHE_PATH overrides). Cache corrupt
+     / unwritable → in-memory only.
   6. Decide whether absence from that set is proof. The listing is row-
      limited, so when it comes back full the repo may hold labels we cannot
      see; each absent label is then re-checked via
@@ -65,6 +67,7 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
     fail_open,
     shared_probe_deadline,
 )
+from _paths import resolve_writable  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     iter_command_starts,
@@ -106,6 +109,13 @@ _LABELED_SUBCMDS: frozenset[tuple[str, str]] = frozenset({
     ("pr", "edit"),
 })
 
+# Session id from the hook payload. Cache resolution threads it into the
+# opportunistic prune_stale sweep so the sweep never deletes the calling
+# session's own live session-keyed markers (whose mtime stops advancing while
+# the session runs — the #920/#666 invariant every other resolver call site
+# already honours).
+_session_id: str | None = None
+
 _GH_LABELED_CMD_RE = re.compile(r"\bgh\s+(?:issue|pr)\s+(?:create|edit)\b")
 _LABEL_FLAG_RE = re.compile(r"(?:--label|--add-label|(?<!\S)-l)\b")
 _REPO_URL_RE = re.compile(r"[:/]([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
@@ -129,6 +139,10 @@ def main() -> int:
 
     if payload.get("tool_name") != "Bash":
         return 0
+
+    global _session_id
+    sid = payload.get("session_id")
+    _session_id = sid if isinstance(sid, str) and sid else None
 
     command = (payload.get("tool_input") or {}).get("command", "")
     if not _GH_LABELED_CMD_RE.search(command):
@@ -271,12 +285,16 @@ def _cache_path() -> Path:
     override = os.environ.get("PRAXIS_GH_LABEL_CACHE_PATH")
     if override:
         return Path(override)
-    base = os.environ.get("XDG_CACHE_HOME")
-    if base:
-        root = Path(base)
-    else:
-        root = Path.home() / ".cache"
-    return root / "claude-praxis" / "gh-label-cache.json"
+    # Shared cache root (issue #1182): PRAXIS_HOME relocates the file and the
+    # opportunistic prune_stale sweep covers it, like the other cache entries.
+    # resolve_writable, not resolve_cache_file: the latter's legacy-TMPDIR
+    # adoption would let a pre-seeded world-writable ${TMPDIR}/praxis-gh-label-
+    # cache.json be promoted into the trusted label cache. This file never
+    # lived in TMPDIR, and entries expire after ~5 minutes anyway, so there is
+    # nothing worth adopting. The pre-#1182 <XDG_CACHE_HOME|~/.cache>/
+    # claude-praxis/gh-label-cache.json is likewise not migrated: a stranded
+    # file only costs one refetch and rots harmlessly.
+    return Path(resolve_writable("cache", "gh-label-cache.json", session_id=_session_id))
 
 
 def _cache_ttl_sec() -> int:
@@ -306,10 +324,13 @@ def _get_labels(repo: str, deadline: float) -> tuple[frozenset[str], bool] | Non
     if isinstance(entry, dict):
         fetched_at = entry.get("fetched_at", 0)
         labels = entry.get("labels")
+        # A future fetched_at is rejected, not treated as fresh: a tampered or
+        # clock-skewed timestamp far in the future would otherwise make the
+        # entry immortal (`now - fetched_at` stays negative forever).
         if (
             isinstance(fetched_at, (int, float))
             and isinstance(labels, list)
-            and (now - fetched_at) < _cache_ttl_sec()
+            and 0 <= (now - fetched_at) < _cache_ttl_sec()
         ):
             return frozenset(labels), bool(entry.get("truncated", True))
 
