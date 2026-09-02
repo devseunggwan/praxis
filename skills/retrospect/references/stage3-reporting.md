@@ -278,6 +278,14 @@ sentence), so the agent's fence is not the oracle. It blocks when the transcript
 carries at least one rejection and **not one** of them is disposed of: no fence,
 an empty fence, or rows with no `disposition:` token all read as ignored.
 
+**When the scan could not run (issue #1231).** A transcript past
+`REJECTION_SCAN_MAX_BYTES` (20 MiB) makes the scanner answer *indeterminate*
+rather than zero, and Gate-12 blocks on that too — with a lighter demand, since
+it has no count to hold you to. Emit the fence carrying either the rows an
+unbounded re-scan recovered, or the line
+`- scan: indeterminate | rescan: done|skipped (<reason>)`. An empty fence is the
+one shape that does not clear it: that is what a silently-zero lane looks like.
+
 **What this gate is and is not.** It is a *supply* gate: it forces the
 unconfessed candidates onto the record, and one disposed row clears it. It
 cannot judge whether the right one was promoted, and a single

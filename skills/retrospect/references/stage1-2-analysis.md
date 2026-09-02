@@ -311,6 +311,21 @@ including sidechain friction here carries no enforcement risk.
    - emit the `retrospect:denied_actions` fence in Stage 3 whenever this lane
      produced at least one row (see [`stage3-reporting.md`](stage3-reporting.md));
      with zero rows, omit the fence
+   - **zero rows and an unread transcript are different results (issue #1231).**
+     `scan_user_rejections` returns `None`, not `[]`, when the transcript is past
+     `REJECTION_SCAN_MAX_BYTES` (20 MiB) — the scan never ran. Do NOT report
+     `denied_actions: 0` from it: that is the number a clean session produces,
+     and the bound is reached only by long sessions, which is where refusals
+     accumulate. Re-scan unbounded (read the file yourself and count
+     `toolDenialKind` records), then emit the fence with whatever rows that
+     recovered. If you cannot or do not re-scan, the fence still has to say so:
+
+     ```
+     - scan: indeterminate | rescan: done|skipped (<reason>)
+     ```
+
+     Gate-12 blocks a report that carries neither, so an empty fence does not
+     close this out
 
    **Limitation — this lane covers the user-rejection half ONLY (MUST read).**
    Issue #1013 names a second unconfessed source: mutations stopped by a
