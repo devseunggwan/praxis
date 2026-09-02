@@ -24,8 +24,8 @@ undercount is structurally impossible". #1228 is that premise failing. There is
 no longer a guard to widen; this file restores the role under the new pipeline,
 where the claim to check is per-commit presence rather than a declared count.
 
-Matching is by full commit sha OR by the ``(#N)`` reference in the subject —
-release-please emits both for each entry, and either alone is sufficient
+Matching is by full commit sha OR by the ``([#N](`` link release-please writes
+for the entry's own pull request — it emits both, and either alone is sufficient
 evidence the commit was not dropped. Two are accepted rather than one so that a
 config change to either link style cannot turn this guard into a false red.
 
@@ -87,7 +87,10 @@ class Commit:
     def is_covered_by(self, changelog: str) -> bool:
         if self.sha and self.sha in changelog:
             return True
-        return bool(self.pr) and re.search(rf"#{self.pr}\b", changelog) is not None
+        # `([#N](` is the entry's own reference. A bare `#N` is not enough: an
+        # unrelated entry's trailing `closes [#1213](...)` would then cover for
+        # a dropped #1213 — three such references sit in the pending release.
+        return bool(self.pr) and f"([#{self.pr}](" in changelog
 
     def __str__(self) -> str:
         return f"{self.sha[:8]} {self.subject}"

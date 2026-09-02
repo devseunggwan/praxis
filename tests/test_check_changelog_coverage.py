@@ -11,7 +11,7 @@ Its fixtures are therefore the real subjects from those runs, in both polarities
     side, "the guard caught it" and "the guard always fails" look identical.
 
 The rest covers the input surface: which types require an entry, which of the
-two match forms (sha, `#N`) count, and the shapes that must not be mistaken for
+two match forms (sha, the entry's own `([#N](` link) count, and the shapes that must not be mistaken for
 coverage.
 """
 
@@ -113,6 +113,19 @@ def test_full_sha_alone_covers_a_commit_with_no_pr_reference():
 def test_a_longer_number_does_not_cover_a_shorter_one():
     commits = cov.parse_commits("aaa1 fix(hooks): something (#123)")
     assert len(cov.find_missing(commits, _entry("1234"), TYPES)) == 1
+
+
+def test_a_closes_reference_in_another_entry_is_not_coverage():
+    """release-please appends `closes [#N](...)` to an unrelated entry — three
+    sit in the pending v7.14.0 release. Only the entry's own `([#N](` link
+    counts, or a dropped #1213 would read as covered by #1223's entry."""
+    commits = cov.parse_commits("aaa1 fix(hooks): something (#1213)")
+    changelog = (
+        "* **hooks:** pr-anchor-existence-gate records no fire events "
+        "([#1223](https://o/r/issues/1223)) ([a86f695](https://o/r/commit/a86f695)), "
+        "closes [#1213](https://o/r/issues/1213)"
+    )
+    assert len(cov.find_missing(commits, changelog, TYPES)) == 1
 
 
 def test_short_sha_alone_does_not_count_as_coverage():
