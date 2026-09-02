@@ -144,6 +144,25 @@ well-formed fence with at least one disposed row:
 - denied: "<verbatim question>" | tool: <name> | source: user_rejection | confessed: yes|no | disposition: promoted (finding #N)|noted|dismissed (<reason>)
 ```
 
+**Over the byte bound: acknowledgement, not a receipt (issue #1231).** A
+transcript larger than `REJECTION_SCAN_MAX_BYTES` (20 MiB) makes
+`scan_user_rejections` answer `None` — the oracle never read the session. That
+used to fold into `0`, which is also what a clean session returns, and the bound
+is reached only by long sessions, where refusals accumulate.
+
+The gate now blocks on it, but asks for less than it does for a known count:
+having no count, it cannot demand a row per rejection. One fence is still owed,
+carrying **either** the rows an unbounded re-scan recovered **or**:
+
+```markdown
+- scan: indeterminate | rescan: done|skipped (<reason>)
+```
+
+An empty fence does not clear it — that is precisely the shape a silently-zero
+lane produces. A missing, unreadable, or python3-less environment is unchanged:
+still `0`, still silent, since none of those is evidence that a session history
+exists.
+
 **Supply gate, deliberately weak — stated, not hidden.** One disposed row clears
 it. It forces the unconfessed candidates onto the record; it cannot judge which
 one deserved a finding slot, and a single schema-valid row carrying

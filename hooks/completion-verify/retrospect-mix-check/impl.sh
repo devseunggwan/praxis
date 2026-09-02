@@ -1114,8 +1114,16 @@ fi
 # Same Stage-4 carve-out and fence discipline as Gate-8/Gate-11 — a
 # positive-presence gate must not retroactively block a completed cycle.
 #
-# Fail-open at every step: no python3, an unreadable/oversize transcript, or any
-# scanner error yields 0 and the gate stays silent.
+# Fail-open when the scan cannot run at all: no python3, an unreadable
+# transcript, or any scanner error yields 0 and the gate stays silent.
+#
+# An OVERSIZE transcript is the one exception (issue #1231). It used to fold
+# into that same 0, which made "the report owes nothing" and "the oracle never
+# read the session" the same answer — and the bound is reached only by long
+# sessions, which is where refusals accumulate. The scan now says -1 for it, and
+# the gate asks for an acknowledgement rather than a receipt: it cannot name a
+# count, so it cannot demand a row per rejection, but it can refuse to let the
+# lane report zero from a scan that never ran.
 GATE12_VIOLATION=""
 if [ "$STAGE4_AFTER_REPORT" != "1" ] && command -v python3 >/dev/null 2>&1; then
   DENIED_COUNT=$(python3 - "$_SP_LIB" "$TRANSCRIPT_PATH" 2>/dev/null <<'PY'
@@ -1123,14 +1131,25 @@ import sys
 sys.path.insert(0, sys.argv[1])
 try:
     from _transcript import scan_user_rejections
-    print(len(scan_user_rejections(sys.argv[2])))
+    recs = scan_user_rejections(sys.argv[2])
+    # -1 is INDETERMINATE (transcript past the scan's byte bound), kept
+    # distinct from 0 so the gate can tell "none" from "never read".
+    print(-1 if recs is None else len(recs))
 except Exception:
     print(0)
 PY
 )
-  DENIED_COUNT=$(printf '%s' "$DENIED_COUNT" | tr -cd '0-9')
-  [ -z "$DENIED_COUNT" ] && DENIED_COUNT=0
-  if [ "$DENIED_COUNT" -gt 0 ]; then
+  DENIED_COUNT=$(printf '%s' "$DENIED_COUNT" | tr -cd '0-9-')
+  case "$DENIED_COUNT" in
+    -1) ;;                       # the only negative the scanner emits
+    ''|*[!0-9]*) DENIED_COUNT=0 ;;
+  esac
+  DENIED_INDETERMINATE=0
+  if [ "$DENIED_COUNT" = "-1" ]; then
+    DENIED_INDETERMINATE=1
+    DENIED_COUNT=0
+  fi
+  if [ "$DENIED_COUNT" -gt 0 ] || [ "$DENIED_INDETERMINATE" = "1" ]; then
     re_db='^[[:space:]]*<!--[[:space:]]*retrospect:denied_actions begin[[:space:]]*-->[[:space:]]*$'
     re_de='^[[:space:]]*<!--[[:space:]]*retrospect:denied_actions end[[:space:]]*-->[[:space:]]*$'
     da_begin=$(printf '%s\n' "$MOST_RECENT_BLOCK" | grep -cE "$re_db" || true)
@@ -1138,7 +1157,9 @@ PY
       $0 ~ sb { if (ins) nested=1; ins=1; next }
       $0 ~ se { ins=0; next }
       END { print (ins || nested) ? 1 : 0 }')
-    if [ "$da_begin" -lt 1 ]; then
+    if [ "$da_begin" -lt 1 ] && [ "$DENIED_INDETERMINATE" = "1" ]; then
+      GATE12_VIOLATION="the rejection scan could not read this session's transcript — it is past REJECTION_SCAN_MAX_BYTES (20 MiB), so 0 denied actions is what a scan that never ran returns, not a finding (issue #1231); the Stage 3 report must still carry one '<!-- retrospect:denied_actions begin/end -->' fence, holding either the rows recovered by an unbounded re-scan or the line '- scan: indeterminate | rescan: done|skipped (<reason>)'"
+    elif [ "$da_begin" -lt 1 ]; then
       GATE12_VIOLATION="the live transcript carries $DENIED_COUNT structurally-rejected tool call(s) but the Stage 3 report has no '<!-- retrospect:denied_actions begin/end -->' fence (issue #1013) — a refused action has no outcome and therefore no confession, which is precisely why the friction scan misses it; emit pre-scan lane 6 with one row per rejection: '- denied: \"<verbatim question>\" | tool: <name> | source: user_rejection | confessed: yes|no | disposition: promoted (finding #N)|noted|dismissed (<reason>)'"
     elif [ "$da_malformed" -gt 0 ]; then
       GATE12_VIOLATION="denied_actions fence is malformed (an unterminated or nested 'retrospect:denied_actions begin') — emit exactly one well-formed begin/end fence before Stage 3"
@@ -1162,7 +1183,18 @@ PY
       da_row_re="$da_row_re"'[[:space:]]*source:[[:space:]]*user_rejection[[:space:]]*\|'
       da_row_re="$da_row_re"'[[:space:]]*confessed:[[:space:]]*(yes|no)[[:space:]]*\|'
       da_row_re="$da_row_re"'[[:space:]]*disposition:[[:space:]]*(promoted|noted|dismissed)([^A-Za-z]|$)'
-      if ! printf '%s\n' "$DA_BLOCK" | grep -qE "$da_row_re"; then
+      # On an INDETERMINATE scan the gate cannot name a count, so it cannot
+      # demand a row per rejection. What it can demand is an affirmative
+      # sentence — either recovered rows, or a stated re-scan outcome. Both
+      # shapes are unreachable from an empty fence, which is the shape a
+      # silently-zero lane produces (issue #1231).
+      da_indet_re='^[[:space:]]*-[[:space:]]*scan:[[:space:]]*indeterminate[[:space:]]*\|'
+      da_indet_re="$da_indet_re"'[[:space:]]*rescan:[[:space:]]*(done|skipped)([^A-Za-z]|$)'
+      if [ "$DENIED_INDETERMINATE" = "1" ] \
+         && ! printf '%s\n' "$DA_BLOCK" | grep -qE "$da_row_re" \
+         && ! printf '%s\n' "$DA_BLOCK" | grep -qE "$da_indet_re"; then
+        GATE12_VIOLATION="denied_actions fence is present but says nothing about a scan that could not run (transcript past REJECTION_SCAN_MAX_BYTES, issue #1231) — carry either the rows an unbounded re-scan recovered, or the line '- scan: indeterminate | rescan: done|skipped (<reason>)'; an empty fence is what a silently-zero lane looks like"
+      elif [ "$DENIED_INDETERMINATE" != "1" ] && ! printf '%s\n' "$DA_BLOCK" | grep -qE "$da_row_re"; then
         GATE12_VIOLATION="denied_actions fence is present but carries no schema-valid disposed row for the $DENIED_COUNT transcript rejection(s) — a row must be '- denied: \"<verbatim question>\" | tool: <name> | source: user_rejection | confessed: yes|no | disposition: promoted (finding #N)|noted|dismissed (<reason>)'; a bare 'disposition:' line is not a row, and an enumerated-but-undisposed rejection is the same silent drop the lane exists to prevent"
       fi
     fi
