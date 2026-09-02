@@ -175,15 +175,26 @@ def test_cli_exits_0_when_every_entry_is_present(tmp_path):
 def test_cli_exits_2_when_a_fixture_file_is_unreadable(tmp_path):
     """A fixture path the operator named explicitly is a usage error, not a
     limit on what the guard can see — so it exits 2 rather than failing open
-    like the config and tag cases below."""
-    for flag in ("--commits-file", "--changelog-file"):
-        result = subprocess.run(
-            [sys.executable, str(_SCRIPT), flag, str(tmp_path / "nope.txt")],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert result.returncode == 2, flag
+    like the config and tag cases below.
+
+    Both cases pass --commits-file so neither reaches the git path: a shallow
+    CI checkout has no release tag, and the guard would then fail open with
+    exit 0 before ever reading --changelog-file.
+    """
+    commits_file = tmp_path / "commits.txt"
+    commits_file.write_text(OK_COMMITS[0] + "\n", encoding="utf-8")
+    missing = tmp_path / "nope.txt"
+    cases = [
+        ("--commits-file", [sys.executable, str(_SCRIPT), "--commits-file", str(missing)]),
+        (
+            "--changelog-file",
+            [sys.executable, str(_SCRIPT), "--commits-file", str(commits_file),
+             "--changelog-file", str(missing)],
+        ),
+    ]
+    for flag, argv in cases:
+        result = subprocess.run(argv, capture_output=True, text=True, check=False)
+        assert result.returncode == 2, f"{flag}: {result.stderr}"
         assert f"cannot read {flag}" in result.stderr
 
 
