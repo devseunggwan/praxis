@@ -172,6 +172,21 @@ def test_cli_exits_0_when_every_entry_is_present(tmp_path):
     assert "changelog-coverage OK" in result.stdout
 
 
+def test_cli_exits_2_when_a_fixture_file_is_unreadable(tmp_path):
+    """A fixture path the operator named explicitly is a usage error, not a
+    limit on what the guard can see — so it exits 2 rather than failing open
+    like the config and tag cases below."""
+    for flag in ("--commits-file", "--changelog-file"):
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), flag, str(tmp_path / "nope.txt")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 2, flag
+        assert f"cannot read {flag}" in result.stderr
+
+
 def test_cli_fails_open_on_an_unreadable_config(tmp_path):
     result = subprocess.run(
         [sys.executable, str(_SCRIPT), "--config", str(tmp_path / "nope.json")],

@@ -190,7 +190,11 @@ def main() -> int:
 
     # --- commits in the release range ---------------------------------------
     if args.commits_file:
-        commits = parse_commits(args.commits_file.read_text(encoding="utf-8"))
+        try:
+            commits = parse_commits(args.commits_file.read_text(encoding="utf-8"))
+        except OSError as exc:
+            print(f"error: cannot read --commits-file ({exc})", file=sys.stderr)
+            return 2
         scope = args.commits_file.name
     else:
         try:
@@ -217,7 +221,11 @@ def main() -> int:
 
     # --- changelog the entries must appear in --------------------------------
     if args.changelog_file:
-        changelog = args.changelog_file.read_text(encoding="utf-8")
+        try:
+            changelog = args.changelog_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"error: cannot read --changelog-file ({exc})", file=sys.stderr)
+            return 2
     else:
         release_ref = resolve_release_ref(args.release_branch, repo_root)
         if release_ref is None:
