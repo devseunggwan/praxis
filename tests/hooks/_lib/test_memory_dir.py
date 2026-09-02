@@ -129,10 +129,13 @@ def test_claude_config_dir_unset_falls_back_to_home_claude(tmp_path, monkeypatch
 WORKTREE_CWD = "/Users/jane.doe/projects/praxis-issue-824"
 
 
-class _FakeGitProc:
-    def __init__(self, stdout: str, returncode: int = 0):
-        self.stdout = stdout
-        self.returncode = returncode
+# The resolver spawns through the shared budget-aware runner (issue #1178), so
+# these stub `run_git` rather than `subprocess.run`. That runner already folds
+# every failure — missing binary, nonzero exit, timeout, no runway left in the
+# dispatch-group budget — into a single `None`, which is why the error cases
+# below stub a return value instead of raising.
+def _fake_git(stdout):
+    return lambda *a, **k: stdout
 
 
 def test_worktree_cwd_resolves_to_main_project_memory(tmp_path, monkeypatch):
@@ -143,9 +146,7 @@ def test_worktree_cwd_resolves_to_main_project_memory(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: WORKTREE_CWD)
     monkeypatch.setattr(
-        _memory_dir.subprocess,
-        "run",
-        lambda *a, **k: _FakeGitProc(f"{FAKE_CWD}/.git\n"),
+        _memory_dir, "run_git", _fake_git(f"{FAKE_CWD}/.git\n")
     )
     memory = tmp_path / ".claude" / "projects" / FAKE_SLUG / "memory"
     memory.mkdir(parents=True)
@@ -164,9 +165,7 @@ def test_worktree_cwd_honors_relocated_config_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: WORKTREE_CWD)
     monkeypatch.setattr(
-        _memory_dir.subprocess,
-        "run",
-        lambda *a, **k: _FakeGitProc(f"{FAKE_CWD}/.git\n"),
+        _memory_dir, "run_git", _fake_git(f"{FAKE_CWD}/.git\n")
     )
     memory = relocated / "projects" / FAKE_SLUG / "memory"
     memory.mkdir(parents=True)
@@ -180,10 +179,7 @@ def test_worktree_fallback_git_absent_returns_none(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: WORKTREE_CWD)
 
-    def _raise(*a, **k):
-        raise FileNotFoundError("git not found")
-
-    monkeypatch.setattr(_memory_dir.subprocess, "run", _raise)
+    monkeypatch.setattr(_memory_dir, "run_git", _fake_git(None))
     (tmp_path / ".claude" / "projects" / FAKE_SLUG / "memory").mkdir(parents=True)
     assert _memory_dir.resolve_memory_dir() is None
 
@@ -193,11 +189,7 @@ def test_worktree_fallback_git_error_returns_none(tmp_path, monkeypatch):
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: WORKTREE_CWD)
-    monkeypatch.setattr(
-        _memory_dir.subprocess,
-        "run",
-        lambda *a, **k: _FakeGitProc("", returncode=128),
-    )
+    monkeypatch.setattr(_memory_dir, "run_git", _fake_git(None))
     (tmp_path / ".claude" / "projects" / FAKE_SLUG / "memory").mkdir(parents=True)
     assert _memory_dir.resolve_memory_dir() is None
 
@@ -211,9 +203,7 @@ def test_main_worktree_same_as_cwd_skips_retry(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(_memory_dir.os, "getcwd", lambda: FAKE_CWD)
     monkeypatch.setattr(
-        _memory_dir.subprocess,
-        "run",
-        lambda *a, **k: _FakeGitProc(f"{FAKE_CWD}/.git\n"),
+        _memory_dir, "run_git", _fake_git(f"{FAKE_CWD}/.git\n")
     )
     assert _memory_dir.resolve_memory_dir() is None
 
