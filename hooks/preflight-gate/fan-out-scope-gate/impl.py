@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse(Bash|Agent) guard: surface an approval prompt from the 2nd
+"""PreToolUse(Agent|Bash) guard: surface an approval prompt from the 2nd
 delegation target created in one turn.
 
 A delegation request names its targets. When a turn starts creating more of

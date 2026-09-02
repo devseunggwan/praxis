@@ -1,10 +1,11 @@
 #!/bin/bash
-# test_path_probe_gate.sh — coverage for hooks/path-probe-gate.sh
+# test_path_probe_gate.sh — coverage for hooks/advisory-nudge/path-probe-gate/impl.py
+# (dispatch-group member since #1168; no per-hook wrapper)
 #
 # Reproduces the 5-step scenario from issue #386 and covers the full
 # advisory / silent / deny / skip / fail-open surface.
 #
-# Usage: bash tests/test_path_probe_gate.sh
+# Usage: bash tests/hooks/advisory-nudge/test_path_probe_gate.sh
 # Exit:  0 = all pass; 1 = at least one fail
 
 set +e

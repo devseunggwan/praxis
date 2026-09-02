@@ -2,7 +2,9 @@
 
 Supported hosts: all
 
-`hooks/bulk-write-memory-checkpoint.sh` fires on PreToolUse for `Edit`,
+`hooks/advisory-nudge/bulk-write-memory-checkpoint/impl.py` (run in-process by
+the `Edit|NotebookEdit|Write` dispatch group's `hooks/_dispatch.sh`, #1168)
+fires on PreToolUse for `Edit`,
 `Write`, and `NotebookEdit` tool calls that target a Source-of-Truth (SOT)
 directory, and emits a **stderr advisory** (never a block) reminding the
 agent to checkpoint memory before continuing a bulk-write loop.

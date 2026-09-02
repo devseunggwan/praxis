@@ -113,6 +113,111 @@ def test_wrong_host_args_flagged():
     assert any("DISPATCH ARGS" in d for d in out), out
 
 
+def test_args_member_standalone_node_is_not_a_leak():
+    # An args-declaring member is kept STANDALONE by the build (the dispatcher
+    # cannot forward argv; the runtime excludes it too — issue #1199 review),
+    # so its node beside the dispatcher node is expected, not a member leak.
+    hj = _hooks_json([_disp_node("claude"), _member_node("strike-counter")])
+    out = check.dispatch_node_drifts(
+        hj, "PreToolUse", "Bash", "claude", {"x"}, WRAP,
+        args_wrappers={"strike-counter.sh"},
+    )
+    assert out == [], out
+    # ...but a node NOT in args_members is still flagged, and the message names
+    # args as the one legitimate standalone cause.
+    out = check.dispatch_node_drifts(
+        hj, "PreToolUse", "Bash", "claude", {"x"}, WRAP
+    )
+    assert any("DISPATCH MEMBER LEAK" in d and "args-declaring" in d for d in out), out
+
+
+def test_wrapper_suffix_node_is_not_a_leak():
+    # A `wrapper_suffix` member's node is `<name>-pre.sh`, which never contains
+    # `/<name>.sh` — the substring probe called a correct node a leak, and
+    # pre-edit-md-escape-advisory (args + "-pre"/"-post") is a live example.
+    hj = _hooks_json([_disp_node("claude"), _member_node("md-escape-pre")])
+    out = check.dispatch_node_drifts(
+        hj, "PreToolUse", "Bash", "claude", {"x"}, WRAP,
+        args_wrappers={"md-escape-pre.sh"},
+    )
+    assert out == [], out
+
+
+def test_missing_args_node_is_reported():
+    # The half a leak check structurally cannot see: the args member's node is
+    # GONE, so there is no node left to flag and the count of dispatcher nodes
+    # is still right. Silence here means the hook is disabled and nothing says so.
+    hj = _hooks_json([_disp_node("claude")])
+    out = check.dispatch_node_drifts(
+        hj, "PreToolUse", "Bash", "claude", {"x"}, WRAP,
+        args_wrappers={"strike-counter.sh"},
+    )
+    assert any("DISPATCH ARGS NODE MISSING" in d for d in out), out
+    assert any("strike-counter.sh" in d for d in out), out
+    # Control: the same call with the node present says nothing.
+    hj_ok = _hooks_json([_disp_node("claude"), _member_node("strike-counter")])
+    assert check.dispatch_node_drifts(
+        hj_ok, "PreToolUse", "Bash", "claude", {"x"}, WRAP,
+        args_wrappers={"strike-counter.sh"},
+    ) == []
+
+
+def test_args_entry_in_the_group_still_counts_as_standalone():
+    # The runtime excludes an args-declaring member from the group, so the hook
+    # runs on its own and needs @fail_open. Judged by (event, matcher) alone it
+    # reads as dispatch-wrapped and the requirement was skipped.
+    dispatched = [{"event": "PreToolUse", "matcher": "Bash"}]
+    assert check.runs_standalone(dispatched) is False
+    assert check.runs_standalone(
+        [{"event": "PreToolUse", "matcher": "Bash", "args": ["--flag"]}]
+    ) is True
+    # An entry outside the group is standalone whether or not it has args.
+    assert check.runs_standalone([{"event": "Stop"}]) is True
+    # One dispatched entry does not launder a second, args-bearing one.
+    assert check.runs_standalone(
+        dispatched + [{"event": "PreToolUse", "matcher": "Bash", "args": ["-x"]}]
+    ) is True
+    # No entries at all: nothing runs standalone.
+    assert check.runs_standalone([]) is False
+
+
+def _matcherless_hooks_json(nodes: list[dict]) -> dict:
+    return {"hooks": {"Stop": [{"hooks": nodes}]}}
+
+
+def test_matcherless_group_expects_sentinel_args():
+    # A (Stop, None) dispatcher node must carry the no-matcher SENTINEL in the
+    # matcher argv slot; a literal "None" render resolves zero members at
+    # runtime and must be flagged.
+    sentinel = check._build.DISPATCH_NO_MATCHER_ARG
+    good = _matcherless_hooks_json([
+        {
+            "type": "command",
+            "command": f"${{CLAUDE_PLUGIN_ROOT}}/hooks/{WRAP} Stop {sentinel} claude",
+            "timeout": 10,
+        }
+    ])
+    out = check.dispatch_node_drifts(good, "Stop", None, "claude", {"x"}, WRAP)
+    assert out == [], out
+
+    bad = _matcherless_hooks_json([
+        {
+            "type": "command",
+            "command": f"${{CLAUDE_PLUGIN_ROOT}}/hooks/{WRAP} Stop None claude",
+            "timeout": 10,
+        }
+    ])
+    out = check.dispatch_node_drifts(bad, "Stop", None, "claude", {"x"}, WRAP)
+    assert any("DISPATCH ARGS" in d for d in out), out
+
+
+def test_no_matcher_sentinel_pinned_across_build_and_runtime():
+    # The build renders DISPATCH_NO_MATCHER_ARG; the runtime maps
+    # NO_MATCHER_ARG back to None. Divergence silently resolves empty groups —
+    # Rule 14 reports it, and this pins the pairing at unit level too.
+    assert check._build.DISPATCH_NO_MATCHER_ARG == check._dispatch.NO_MATCHER_ARG
+
+
 # ---------------------------------------------------------------------------
 # Runtime cross-check — full main() with a monkeypatched resolver
 # ---------------------------------------------------------------------------

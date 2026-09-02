@@ -411,6 +411,15 @@ The hook exits 0 (passes) when any of:
   cannot read the transcript / hits its 20 MB bound — the denied count is 0 and
   the gate stays silent
 
+### Block log
+
+Every block appends one line to
+`${PRAXIS_HOME:-$HOME/.praxis}/logs/retrospect-mix-blocked.log` (best-effort —
+a failed write never changes the hook's decision or exit status). Before
+#1182 this log lived at the undocumented
+`~/.praxis/scope-confirm/retrospect-mix-blocked.log`; old files are not
+migrated and a legacy `scope-confirm/` directory may linger harmlessly.
+
 ### No bypass marker
 
 Like `completion-verify.sh`, this hook intentionally has **no escape

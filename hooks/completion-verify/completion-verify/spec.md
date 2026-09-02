@@ -118,7 +118,11 @@ When blocked, the hook emits:
 }
 ```
 
-and appends an entry to `${PRAXIS_HOME:-$HOME/.praxis}/scope-confirm/stop-triggered.log`.
+and appends an entry to `${PRAXIS_HOME:-$HOME/.praxis}/logs/stop-triggered.log`
+(best-effort — a failed write never changes the hook's decision or exit
+status). Before #1182 this log lived at the undocumented
+`~/.praxis/scope-confirm/stop-triggered.log`; old files are not migrated and
+a legacy `scope-confirm/` directory may linger harmlessly.
 
 ### Fail-safe paths
 

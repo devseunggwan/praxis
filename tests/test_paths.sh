@@ -214,6 +214,25 @@ assert_eq "sh PRAXIS_STATE_DIR override wins" "/custom/state" \
 assert_eq "sh praxis_cache_dir" "/tmp/ph-903/cache" \
   "$(PRAXIS_HOME=/tmp/ph-903 sh_eval 'praxis_cache_dir')"
 
+# 12a. sh/py agree on PRAXIS_STATE_DIR with a literal tilde (issue #1215).
+# Before the fix Python called os.path.expanduser() on the override, so
+# PRAXIS_STATE_DIR=~/x produced $HOME/x in Python but ~/x in the shell —
+# shell and Python hooks could not share state.  The fix removes expanduser,
+# making both sides return the literal string with one trailing slash stripped.
+TILDE='~'   # must stay outside single-quotes to prevent shell expansion
+assert_eq "sh/py agree on PRAXIS_STATE_DIR=~/x (issue #1215)" \
+  "$(HOME=/tmp/fakehome-903 PRAXIS_STATE_DIR="${TILDE}/state-x" PRAXIS_HOME=/tmp/ph-903 sh_eval 'praxis_state_dir')" \
+  "$(HOME=/tmp/fakehome-903 PRAXIS_STATE_DIR="${TILDE}/state-x" PRAXIS_HOME=/tmp/ph-903 python3 -c "import sys; sys.path.insert(0, '$LIB'); import _paths; print(_paths.praxis_state_dir())")"
+assert_eq "sh/py agree on PRAXIS_STATE_DIR=~ (bare tilde, issue #1215)" \
+  "$(HOME=/tmp/fakehome-903 PRAXIS_STATE_DIR="${TILDE}" PRAXIS_HOME=/tmp/ph-903 sh_eval 'praxis_state_dir')" \
+  "$(HOME=/tmp/fakehome-903 PRAXIS_STATE_DIR="${TILDE}" PRAXIS_HOME=/tmp/ph-903 python3 -c "import sys; sys.path.insert(0, '$LIB'); import _paths; print(_paths.praxis_state_dir())")"
+assert_eq "sh/py agree on PRAXIS_STATE_DIR=/abs/path (literal path, issue #1215)" \
+  "$(PRAXIS_STATE_DIR=/abs/path PRAXIS_HOME=/tmp/ph-903 sh_eval 'praxis_state_dir')" \
+  "$(PRAXIS_STATE_DIR=/abs/path PRAXIS_HOME=/tmp/ph-903 python3 -c "import sys; sys.path.insert(0, '$LIB'); import _paths; print(_paths.praxis_state_dir())")"
+assert_eq "sh/py agree on PRAXIS_STATE_DIR with trailing slash stripped (issue #1215)" \
+  "$(PRAXIS_STATE_DIR=/custom/state/ PRAXIS_HOME=/tmp/ph-903 sh_eval 'praxis_state_dir')" \
+  "$(PRAXIS_STATE_DIR=/custom/state/ PRAXIS_HOME=/tmp/ph-903 python3 -c "import sys; sys.path.insert(0, '$LIB'); import _paths; print(_paths.praxis_state_dir())")"
+
 # 13. shell resolve_writable creates the subdir, and falls back like Python
 SH_HOME=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
 assert_eq "sh praxis_resolve_writable path" "$SH_HOME/cache/x.json" \

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# test_bulk-write-memory-checkpoint.sh — coverage for bulk-write-memory-checkpoint hook
+# test_bulk-write-memory-checkpoint.sh — coverage for
+# hooks/advisory-nudge/bulk-write-memory-checkpoint/impl.py
+# (dispatch-group member since #1168; no per-hook wrapper)
 #
 # Synthesizes Claude Code PreToolUse payloads and asserts advisory vs. silent
 # behavior.  Uses unique session_id per test group to isolate state.
