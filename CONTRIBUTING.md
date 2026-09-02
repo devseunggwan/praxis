@@ -438,11 +438,17 @@ has no entry on the pending release PR. When it goes red:
 
 1. Open the `release-please` step's log and search for
    `commit could not be parsed:` — it names the commit and the parse position.
-2. Reword the offending commit's message on a **new** commit (history on `main`
-   is not rewritten), or amend the release PR's CHANGELOG by hand before merging.
-   The dropped entry does not come back on its own: release-please computes the
-   next release from the last tag, so a commit missed by release *N* is not
-   picked up by *N+1*.
+2. **Add the missing entry to the pending release PR's `CHANGELOG.md` by hand**,
+   before merging it — the same hand-edit the hybrid flow already allows in step
+   3 above. This is the only remediation that works: `main` is never rewritten,
+   so the rejected commit stays in the release range, and a follow-up commit
+   with a corrected message carries a different sha and PR number rather than
+   replacing it. The guard turns green on the next push-to-`main` run, which
+   re-reads the edited release branch.
+3. Fix the message convention going forward so the next commit does not trip the
+   parser again. A dropped entry is never recovered later: release-please
+   computes each release from the last tag, so a commit missed by release *N*
+   is not picked up by *N+1*.
 
 The guard fails **open** — it exits 0 with a warning — when it cannot see
 enough to judge (missing release tag, shallow clone, unreadable config).
