@@ -59,6 +59,16 @@ def _set_origin(repo: Path, url: str) -> None:
         ("git@gitlab.com:owner/repo.git", None),
         ("https://gitlab.com/owner/repo.git", None),
         ("https://git.example.com/owner/repo.git", None),
+        # A host whose name merely ENDS in github.com is a different host.
+        # These are the shapes an un-anchored search() accepts, and the slug
+        # would then be handed to `gh --repo` (CodeRabbit, PR #1232).
+        ("https://notgithub.com/evil/repo", None),
+        ("https://github.company.com/owner/repo", None),
+        ("https://github.com.attacker.net/evil/repo", None),
+        # …and a github.com that is not the host at all.
+        ("https://evil.example/x?u=github.com/owner/repo", None),
+        # Userinfo before the host stays accepted.
+        ("https://user@github.com/owner/repo", "owner/repo"),
     ],
 )
 def test_origin_slug_matrix(temp_repo, url, expected):

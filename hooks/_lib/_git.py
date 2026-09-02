@@ -49,13 +49,18 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
     remaining_budget,
 )
 
-# Owner/repo extracted from common GitHub origin URL forms — host-anchored so
-# non-GitHub origins (gitlab, bitbucket, self-hosted) return None:
+# Owner/repo extracted from the recognised GitHub origin URL forms:
 #   git@github.com:owner/repo.git
-#   https://github.com/owner/repo.git
+#   https://github.com/owner/repo.git   (any userinfo@ prefix allowed)
 #   ssh://git@github.com/owner/repo
+#
+# The whole URL is anchored, not just the tail. Matching `github.com` anywhere
+# would accept `https://notgithub.com/evil/repo` — the host label ends there, so
+# a suffix match reads someone else's host as GitHub and hands the slug to
+# `gh --repo`. Non-GitHub origins (gitlab, bitbucket, self-hosted) return None.
 _ORIGIN_SLUG_RE = re.compile(
-    r"(?:github\.com[:/])([A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+?)(?:\.git)?/?$"
+    r"^(?:(?:https?|ssh|git)://)?(?:[^/@]+@)?github\.com[:/]"
+    r"([A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+?)(?:\.git)?/?$"
 )
 
 
