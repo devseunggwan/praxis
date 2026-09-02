@@ -42,9 +42,51 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      # Full history + tags: the coverage guard below enumerates
+      # `v<last release>..HEAD`, which needs both. Unlike the ci.yml checkouts
+      # this one keeps persist-credentials at its default — the guard fetches
+      # the release branch the action has just pushed, and this job already
+      # holds contents:write, so the persisted token buys no privilege the job
+      # lacked.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      # Issue #1228. release-please logs `commit could not be parsed:` for a
+      # message its parser rejects, then skips that commit — and the run still
+      # ends completed/success with "PR ... remained the same". Three commits
+      # were dropped from two releases that way, each found only when a human
+      # opened the log. This step re-derives from git which commits should have
+      # produced a CHANGELOG entry and fails when the pending release PR is
+      # missing one, so the skip surfaces as a red run on main instead.
+      # It runs after the action so the release branch reflects this push.
+      # An absent release branch is a verdict the guard makes itself
+      # (publishable commits with no release PR is a failure, nothing
+      # publishable is a pass), but a fetch that fails for transport or auth
+      # reasons is not — it looks identical from inside the guard, so the run
+      # would go red for a network blip. `ls-remote --exit-code` separates the
+      # two: exit 2 means the branch is genuinely absent, anything else means
+      # we could not look, and then the step fails open with a warning.
+      - name: changelog coverage
+        env:
+          RELEASE_BRANCH: release-please--branches--main
+        run: |
+          if git ls-remote --exit-code --heads origin "$RELEASE_BRANCH" >/dev/null; then
+            git fetch --no-tags origin \
+              "+refs/heads/${RELEASE_BRANCH}:refs/remotes/origin/${RELEASE_BRANCH}" || {
+              echo "warning: cannot fetch $RELEASE_BRANCH; skipping changelog coverage" >&2
+              exit 0
+            }
+          else
+            rc=$?
+            if [ "$rc" -ne 2 ]; then
+              echo "warning: cannot reach origin (git ls-remote exit $rc); skipping" >&2
+              exit 0
+            fi
+          fi
+          python3 scripts/check-changelog-coverage.py

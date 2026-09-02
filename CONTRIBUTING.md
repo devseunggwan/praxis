@@ -425,6 +425,34 @@ Releases are fully automated by `.github/workflows/release-please.yml`
 > specific version regardless of title, put `Release-As: X.Y.Z` in the merged
 > commit body (a one-time override — see the release-please README).
 
+### The changelog-coverage guard
+
+release-please **skips** a commit whose message its parser rejects: the step
+logs `commit could not be parsed:` and the run still ends green with
+`PR ... remained the same`, so the entry is simply missing from the release
+(issue #1228 — three commits lost across v7.13.0 and v7.14.0 that way).
+
+`scripts/check-changelog-coverage.py` runs as the workflow's last step and
+fails the run when a commit whose type is non-hidden in `release-please-config.json`
+has no entry on the pending release PR. When it goes red:
+
+1. Open the `release-please` step's log and search for
+   `commit could not be parsed:` — it names the commit and the parse position.
+2. **Add the missing entry to the pending release PR's `CHANGELOG.md` by hand**,
+   before merging it — the same hand-edit the hybrid flow already allows in step
+   3 above. This is the only remediation that works: `main` is never rewritten,
+   so the rejected commit stays in the release range, and a follow-up commit
+   with a corrected message carries a different sha and PR number rather than
+   replacing it. The guard turns green on the next push-to-`main` run, which
+   re-reads the edited release branch.
+3. Fix the message convention going forward so the next commit does not trip the
+   parser again. A dropped entry is never recovered later: release-please
+   computes each release from the last tag, so a commit missed by release *N*
+   is not picked up by *N+1*.
+
+The guard fails **open** — it exits 0 with a warning — when it cannot see
+enough to judge (missing release tag, shallow clone, unreadable config).
+
 ### One-time setup — the `RELEASE_PLEASE_TOKEN` secret
 
 release-please must act through a fine-grained PAT (or a GitHub App), **not**
