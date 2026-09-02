@@ -46,7 +46,7 @@ Public API:
   extract_last_assistant_text(turn)                      -> str
   has_tool_in_turn(turn, tool_name)                      -> bool
   read_last_user_message(transcript_path)                -> str | None
-  scan_user_rejections(path, max_bytes, max_records)     -> list[dict]
+  scan_user_rejections(path, max_bytes, max_records)     -> list[dict] | None
 """
 from __future__ import annotations
 
@@ -165,6 +165,21 @@ def _read_bounded_text(path: str, max_bytes: int) -> str | None:
     if len(data) > max_bytes:
         return None
     return data.decode("utf-8", errors="replace")
+
+
+def _is_over_byte_bound(path: str, max_bytes: int) -> bool:
+    """True when `path` exists and is larger than `max_bytes`.
+
+    Separates the two reasons `_read_bounded_text` answers None, so a caller
+    that must distinguish "scanned, found nothing" from "never scanned" can ask
+    which one it got. Any stat error answers False: an unreadable file is not
+    evidence of length, and the callers that branch on this treat False as the
+    ordinary path.
+    """
+    try:
+        return Path(path).stat().st_size > max_bytes
+    except OSError:
+        return False
 
 
 # Bytes scanned backwards from EOF before `load_current_turn` gives up looking
@@ -548,7 +563,7 @@ def scan_user_rejections(
     path: str,
     max_bytes: int = REJECTION_SCAN_MAX_BYTES,
     max_records: int = REJECTION_SCAN_MAX_RECORDS,
-) -> list[dict]:
+) -> list[dict] | None:
     """Return structurally-recorded user tool rejections, oldest → newest.
 
     Each entry:
@@ -560,15 +575,28 @@ def scan_user_rejections(
       source_uuid  — `sourceToolAssistantUUID` ("" when absent)
       timestamp    — record timestamp ("" when absent)
 
-    Fail-open: returns [] when the file is missing, unreadable, or larger than
-    `max_bytes`, and skips any record it cannot parse. An unresolvable
-    `tool_use_id` yields an entry with empty `tool_name`/`tool_input` rather
-    than being dropped — the rejection happened either way, and a consumer that
-    needs the tool identity filters on `tool_name` itself.
+    Returns None when the scan could not run because the file is past
+    `max_bytes` — INDETERMINATE, not "no rejections" (issue #1231). Folding
+    that into [] made the two indistinguishable at exactly the wrong place: the
+    bound is hit by long sessions, and a long session is where standing
+    refusals accumulate, so the answer went silent precisely where it carried
+    the most. Every consumer decides for itself which way to fail on None.
+
+    A missing or unreadable file still returns [] rather than None. The two are
+    different evidence: a file past the bound is proof that a session history
+    exists and is long, while an absent one says nothing about whether there is
+    any history to be blind to, and routing it through the indeterminate branch
+    would fire the consumers' fail-closed paths on every host that hands over a
+    path it never wrote.
+
+    Skips any record it cannot parse. An unresolvable `tool_use_id` yields an
+    entry with empty `tool_name`/`tool_input` rather than being dropped — the
+    rejection happened either way, and a consumer that needs the tool identity
+    filters on `tool_name` itself.
     """
     text = _read_bounded_text(path, max_bytes)
     if text is None:
-        return []
+        return None if _is_over_byte_bound(path, max_bytes) else []
     lines = text.splitlines()
 
     rejections: list[dict] = []

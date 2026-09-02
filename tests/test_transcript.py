@@ -399,13 +399,24 @@ class TestScanUserRejections:
         assert [r["tool_use_id"] for r in T.scan_user_rejections(path, max_records=2)] == [
             "toolu_2", "toolu_3"]
 
-    def test_missing_file_and_oversize_file_fail_open(self, tmp_path):
+    def test_missing_file_reads_as_no_rejections(self, tmp_path):
+        # An absent transcript is not evidence that a session history exists,
+        # so it stays [] — only the byte bound signals indeterminate (#1231).
         assert T.scan_user_rejections("/nonexistent/x.jsonl") == []
+
+    def test_oversize_file_is_indeterminate_not_empty(self, tmp_path):
+        # The negative reproduction for #1231: a transcript that REALLY holds a
+        # rejection, read past the bound. Before the fix this asserted [], which
+        # is the same answer a clean session gives.
         path = _write_jsonl(tmp_path, [
             _asst_tool_use("A1", "toolu_1", "AskUserQuestion", {"questions": []}),
             _rejection("toolu_1", "A1"),
         ])
-        assert T.scan_user_rejections(path, max_bytes=10) == []
+        assert T.scan_user_rejections(path, max_bytes=10) is None
+        # Positive control on the same fixture: under the bound the identical
+        # file enumerates the rejection, so the None above is the bound talking
+        # and not a scan that stopped finding things.
+        assert len(T.scan_user_rejections(path)) == 1
 
     def test_malformed_line_next_to_a_rejection_is_skipped(self, tmp_path):
         path = _write_jsonl(tmp_path, [

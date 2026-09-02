@@ -41,6 +41,11 @@ DELIBERATE NARROWNESS — three limits, each a decision rather than an oversight
 TIER: ask, not deny. The user is the escape hatch — approving the ask IS the
 fresh per-action approval the gate demands — so there is no bypass marker and
 none is needed.
+
+INDETERMINATE SCAN ASKS TOO (issue #1231). A transcript past the scan's byte
+bound answers None, and condition 2 becomes unanswerable rather than false. The
+gate asks on that, because the bound is reached only by long sessions and a long
+session is where a standing refusal has had time to be forgotten.
 """
 from __future__ import annotations
 
@@ -232,6 +237,33 @@ def build_reason(rejection: dict, shared: list[str]) -> str:
     )
 
 
+def build_unscanned_reason() -> str:
+    """Render the ask reason for a transcript the scan could not read.
+
+    Condition 2 is unanswerable, not answered `no`. The gate asks anyway
+    because the two conditions that DID hold are the expensive ones — a
+    destructive verb aimed at a literal identifier — and because the tier is
+    ask: the cost of being wrong is one keypress, against launching a mutation
+    the user may already have refused.
+    """
+    return format_block(
+        rule_name="rejected-mutation-reconsent-gate",
+        why=(
+            "this command names a literal destructive target, and the session "
+            "transcript is past the rejection scan's byte bound, so whether you "
+            "already refused this target could not be read either way"
+        ),
+        correct_path=(
+            "approve here only if you are approving THIS command on THIS target now. "
+            "The scan is blind, not clear: a refusal made earlier in this session "
+            "still stands, and a later 'proceed' or an unrelated parallel-work "
+            "instruction is not approval of it."
+        ),
+        bypass_env=None,
+        reference="issue #1231",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -256,7 +288,19 @@ def main() -> int:
     if not transcript_path:
         return 0
 
-    for rejection in reversed(scan_user_rejections(transcript_path)):
+    rejections = scan_user_rejections(transcript_path)
+    if rejections is None:
+        # FAIL-CLOSED on an indeterminate scan (issue #1231). This gate's
+        # blindness is not evenly distributed: the byte bound is reached by long
+        # sessions, and a long session is where a standing refusal has had time
+        # to accumulate and be forgotten. Failing open here would leave the gate
+        # silent in exactly the sessions it was written for. The reach is narrow
+        # — `pending` is already non-empty, so nothing without a literal
+        # destructive target ever gets here.
+        emit_decision("ask", build_unscanned_reason() + compound_cascade_hint(command))
+        return 0
+
+    for rejection in reversed(rejections):
         # Only a rejected APPROVAL QUESTION is a standing NO. A rejected Bash
         # or Edit call is the user declining one attempt, and the retry loop
         # for those is the agent's own problem, not a consent question.

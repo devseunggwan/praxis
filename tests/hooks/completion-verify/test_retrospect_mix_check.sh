@@ -47,6 +47,19 @@ run_case() {
   elif [ "$path_override" = "empty" ]; then
     tpath="$TMPDIR/empty_${PASS}_${FAIL}.jsonl"
     : > "$tpath"
+  elif [ "$path_override" = "oversize" ]; then
+    # A real transcript past REJECTION_SCAN_MAX_BYTES (20 MiB). The padding
+    # goes FIRST so `tail -n 400` still reaches the Stage 3 report, and the pad
+    # lines are valid JSON because that tail is slurped by `jq -s`. The bound is
+    # not injectable, so the fixture carries the real size rather than a
+    # shrunken constant that would prove a different number.
+    tpath="$TMPDIR/oversize_${PASS}_${FAIL}.jsonl"
+    python3 -c 'import json,sys
+pad = json.dumps({"type": "system", "pad": "x" * 4000})
+with open(sys.argv[1], "w") as f:
+    for _ in range(5300):
+        f.write(pad + "\n")' "$tpath"
+    printf '%s\n' "$transcript" >> "$tpath"
   elif [ "$path_override" = "backslash" ]; then
     # A real, readable transcript whose path holds a backslash. jq's `@tsv`
     # would emit it doubled, and the hook would then look for a file that does
@@ -2744,6 +2757,46 @@ $(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
 ## Actions Executed
 - finding #1: memory entry written")"
 run_case "DA13_pass_stage4_carveout" "pass" "$DA13_TRANSCRIPT"
+
+# DA14-DA18: indeterminate scan (issue #1231). Over the byte bound the scanner
+# answers -1, not 0 — "the oracle never read the session" instead of "the report
+# owes nothing". The gate cannot name a count there, so it demands an
+# acknowledgement rather than a receipt per rejection.
+#
+# Note none of these fixtures carry a rejection record at all: under the bound
+# every one of them is a PASS (that is DA18, the positive control). What blocks
+# in DA14/DA17 is the size, which is exactly the claim.
+
+DA_INDET_ROW='- scan: indeterminate | rescan: done (unbounded re-scan, 0 rejections found)'
+
+# DA14: block — oversize transcript, no denied_actions fence at all.
+DA14_TRANSCRIPT="$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")"
+run_case "DA14_block_oversize_transcript_without_fence" "block" "$DA14_TRANSCRIPT" false oversize
+
+# DA15: pass — fence carrying the indeterminate acknowledgement line.
+DA15_TRANSCRIPT="$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+<!-- retrospect:denied_actions begin -->
+$DA_INDET_ROW
+<!-- retrospect:denied_actions end -->")"
+run_case "DA15_pass_oversize_with_indeterminate_row" "pass" "$DA15_TRANSCRIPT" false oversize
+
+# DA16: pass — an unbounded re-scan that actually recovered rows clears it too;
+# the ordinary disposed row stays valid under the indeterminate branch.
+DA16_TRANSCRIPT="$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+$DA_FENCE")"
+run_case "DA16_pass_oversize_with_recovered_disposed_row" "pass" "$DA16_TRANSCRIPT" false oversize
+
+# DA17: block — empty fence. This is the shape a silently-zero lane produces,
+# so it must not be the shape that buys the gate off.
+DA17_TRANSCRIPT="$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")
+<!-- retrospect:denied_actions begin -->
+<!-- retrospect:denied_actions end -->")"
+run_case "DA17_block_oversize_with_empty_fence" "block" "$DA17_TRANSCRIPT" false oversize
+
+# DA18: pass — POSITIVE CONTROL. Byte-for-byte the DA14 report, under the
+# bound. It passes, so the DA14 block is the transcript size and not something
+# about the report itself.
+run_case "DA18_pass_same_report_under_the_bound" "pass" "$DA14_TRANSCRIPT"
 
 # ── Header-parse positional coverage (#1151) ────────────────────────────────
 # The four stdin scalars are parsed out of ONE `@tsv` row. `@tsv` emits a

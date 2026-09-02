@@ -99,6 +99,7 @@ construction. SQL identifiers carry their destructive verb inside the pattern.
 | `aws s3 rm s3://acme/raw/2024/ --recursive` | rejection joined to a **Bash** tool_use | PASS — only a rejected approval question is a standing NO |
 | `aws s3 rm s3://acme/raw/2024/ --recursive` | no rejection in the transcript | PASS |
 | `psql -c "DROP TABLE events_raw"` | names `DROP TABLE prod.events_raw` | PASS — qualified ≠ unqualified |
+| `aws s3 rm s3://acme/raw/2024/ --recursive` | transcript past `REJECTION_SCAN_MAX_BYTES` | **ASK** — indeterminate, see below |
 
 ### Response format
 
@@ -125,6 +126,25 @@ there is no bypass marker and none is needed — an agent-attachable bypass woul
 let the same "adjacent utterance = approval" reading that caused the incident
 re-enter one layer down (ETHOS → *No agent-attachable bypass for high-stakes
 gates*).
+
+### Over the byte bound: ask (issue #1231)
+
+`scan_user_rejections` answers `None` when the transcript is larger than
+`REJECTION_SCAN_MAX_BYTES` (20 MiB) — the scan did not run, which is not the
+same fact as "no rejection". Condition 2 becomes **unanswerable**, and this gate
+resolves that to **ask**.
+
+Fail-closed here rather than open, for one reason: the blindness is not evenly
+distributed. The bound is reached only by long sessions, and a long session is
+where a standing refusal has had time to accumulate and be forgotten — so
+failing open would silence the gate in exactly the sessions it was written for.
+The reach stays narrow because condition 1 is evaluated first: a command with no
+literal destructive identifier never reaches the transcript at all. And the tier
+is ask, so a wrong ask costs one keypress.
+
+A **missing or unreadable** transcript is not this case — it answers `[]` and the
+gate stays silent. An absent file is no evidence that a session history exists;
+a file past the bound is direct evidence that one does.
 
 ### Known limitations (accepted, not oversights)
 
