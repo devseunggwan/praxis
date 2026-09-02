@@ -127,15 +127,21 @@ def _patch_group(monkeypatch, members, budget, timeouts=None):
 
 @pytest.fixture(autouse=True)
 def _reset_dispatcher_flag():
-    """Ensure ``_DISPATCHER_PROCESS`` is False before and after each test.
+    """Ensure both dispatcher flags are False before and after each test.
 
-    ``run_group`` calls ``mark_dispatcher_process()`` which sets it to True
-    for the lifetime of the process.  In a shared test process this would
-    suppress fire-ledger recording for every subsequent test.
+    ``run_group`` calls ``mark_dispatcher_process()``, which sets
+    ``_DISPATCHER_PROCESS`` *and* ``_IN_DISPATCHER`` for the lifetime of the
+    process. Resetting only the first leaves exactly the leak this fixture
+    exists to stop: ``record_session_fire`` gates on ``_IN_DISPATCHER`` and
+    nothing else — "Gated on ``_IN_DISPATCHER``, never ``_DISPATCHER_PROCESS``"
+    (`hooks/_lib/_fire_ledger.py`) — so a stale True silently drops the
+    fire-ledger record of every later test sharing this process.
     """
     _fire_ledger._DISPATCHER_PROCESS = False
+    _fire_ledger._IN_DISPATCHER = False
     yield
     _fire_ledger._DISPATCHER_PROCESS = False
+    _fire_ledger._IN_DISPATCHER = False
 
 
 # ---------------------------------------------------------------------------
@@ -252,9 +258,14 @@ def test_full_budget_gate_is_not_skipped(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(ledger))
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
 
-    _dispatch.run_group("PreToolUse", "Bash", _GH_PR_CREATE_PAYLOAD)
+    rc = _dispatch.run_group("PreToolUse", "Bash", _GH_PR_CREATE_PAYLOAD)
 
     captured = capsys.readouterr()
+
+    # --- oracle 0: the exit-code contract this test's own header states ---
+    # Discarding rc would let any return value pass, including the codes the
+    # host reads as something other than allow/deny.
+    assert rc in (0, 2), f"group exit code must be 0 or 2, got {rc}"
 
     # --- oracle 1: no skip marker ---
     skip_needle = f"{_dispatch._SKIP_MARKER} preflight-gate/pre-gh-pr-create-dedup-gate"
