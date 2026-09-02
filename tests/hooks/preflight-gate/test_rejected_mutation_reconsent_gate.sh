@@ -228,6 +228,73 @@ run_case "rejection record without is_error is not structural" pass \
   'aws s3 rm s3://acme-archive/raw/2024/ --recursive' "$TMP/weak-rejection.jsonl"
 
 # ---------------------------------------------------------------------------
+# Over the byte bound — indeterminate scan asks (issue #1231)
+#
+# The fixture is padded past the real REJECTION_SCAN_MAX_BYTES (20 MiB) rather
+# than shrinking the bound, because the bound is not injectable and a test that
+# shrank it would prove a different constant. Both directions are pinned on the
+# SAME rejection record: over the bound the gate asks, and the identical record
+# under the bound still asks for the matching target and stays silent for a
+# different one — so the ask above is the bound talking, not a scan that started
+# firing on everything.
+# ---------------------------------------------------------------------------
+
+OVERSIZE="$TMP/oversize.jsonl"
+python3 - "$OVERSIZE" "$REJECT_SENTENCE" <<'PY'
+import json, sys
+out, sentence = sys.argv[1], sys.argv[2]
+assistant = {
+    "type": "assistant", "uuid": "asst-uuid-1", "isSidechain": False,
+    "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "toolu_REJECTED1", "name": "AskUserQuestion",
+         "input": {"questions": [{"question": "Delete s3://acme-archive/raw/2024/ ?"}]}}]},
+}
+rejection = {
+    "type": "user", "uuid": "rej-uuid-1", "toolUseResult": "User rejected tool use",
+    "toolDenialKind": "user-rejected", "sourceToolAssistantUUID": "asst-uuid-1",
+    "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "toolu_REJECTED1",
+         "is_error": True, "content": sentence}]},
+}
+pad = json.dumps({"type": "system", "pad": "x" * 4000})
+with open(out, "w", encoding="utf-8") as f:
+    f.write(json.dumps(assistant) + "\n")
+    f.write(json.dumps(rejection) + "\n")
+    for _ in range(5300):          # ~21 MiB, past the 20 MiB bound
+        f.write(pad + "\n")
+PY
+_oversize_bytes=$(wc -c < "$OVERSIZE" | tr -d ' ')
+if [ "$_oversize_bytes" -gt 20971520 ]; then
+  echo "PASS  [fixture is past the bound: $_oversize_bytes > 20971520]"; PASS=$((PASS+1))
+else
+  echo "FAIL  [fixture only $_oversize_bytes bytes, bound is 20971520]"; FAIL=$((FAIL+1)); FAILED_NAMES+=("oversize fixture size")
+fi
+
+run_case "over the byte bound: destructive target asks even though the scan is blind" ask \
+  'aws s3 rm s3://acme-archive/raw/2024/ --recursive' "$OVERSIZE"
+
+run_case "over the byte bound: a command with no destructive identifier still passes" pass \
+  'aws s3 ls s3://acme-archive/raw/2024/' "$OVERSIZE"
+
+# The ask must say the scan could not run — an operator who reads the #1007
+# wording would look for a rejected question that this gate never found.
+_blind=$(mk_payload 'aws s3 rm s3://acme-archive/raw/2024/ --recursive' "$OVERSIZE" | "$HOOK" 2>/dev/null)
+if printf '%s' "$_blind" | grep -q "byte bound"; then
+  echo "PASS  [blind-scan ask names the byte bound]"; PASS=$((PASS+1))
+else
+  echo "FAIL  [blind-scan ask does not name the byte bound]"; FAIL=$((FAIL+1)); FAILED_NAMES+=("blind-scan ask wording")
+fi
+
+# Positive control: the same rejection record UNDER the bound still resolves
+# normally — asks on the matching target, silent on a different one.
+UNDERSIZE="$TMP/undersize.jsonl"
+head -n 2 "$OVERSIZE" > "$UNDERSIZE"
+run_case "under the bound: same record still asks on the matching target" ask \
+  'aws s3 rm s3://acme-archive/raw/2024/ --recursive' "$UNDERSIZE"
+run_case "under the bound: same record stays silent on a different target" pass \
+  'aws s3 rm s3://acme-archive/raw/2025/ --recursive' "$UNDERSIZE"
+
+# ---------------------------------------------------------------------------
 # Cascade-hint suffix (issue #229) — present on a compound state-changing
 # command, absent on a single command.
 # ---------------------------------------------------------------------------
