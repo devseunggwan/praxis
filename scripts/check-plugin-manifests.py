@@ -1181,7 +1181,8 @@ def main() -> int:
     #       — a mismatch means the next release PR computes its bump from a
     #       different version than the one the artifacts embed.
     #   (b) every platform output of a versioned kind (plugin, marketplace,
-    #       gemini-extension — marketplace embeds version fields too) is
+    #       gemini-extension, agent-plugin — marketplace embeds version
+    #       fields too) is
     #       listed in release-please-config.json `extra-files`, so a release
     #       bump rewrites its embedded versions. A new platform output added
     #       without the extra-files entry would otherwise ship stale versions
@@ -1233,7 +1234,7 @@ def main() -> int:
                 )
                 continue
             extra_specs[path] = entry
-        versioned_kinds = {"plugin", "marketplace", "gemini-extension"}
+        versioned_kinds = {"plugin", "marketplace", "gemini-extension", "agent-plugin"}
         for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
             platform = json.loads(platform_file.read_text())
             for output in platform["outputs"]:
@@ -1271,6 +1272,66 @@ def main() -> int:
                         f"{RELEASE_JSONPATH!r} — a narrower path updates only "
                         "the version fields it names and silently leaves its "
                         "siblings stale (Rule 9, #1172)"
+                    )
+
+    # ------------------------------------------------------------------
+    # Rule 26 — Agent Plugins portable manifest shape (#1219)
+    #
+    # Two failures Rule 5's byte-identity check cannot see, because both stay
+    # reproducible: the build renders them, the checker re-renders the same
+    # thing, and the diff is clean while the manifest is still wrong.
+    #
+    #   (a) $schema drifts off 1.0.0, the only published spec version. The
+    #       spec makes that fatal with no way back — "A missing or unsupported
+    #       `$schema` rejects the plugin" — and clients find this file by path
+    #       (plugin.json at the plugin root), so a newer pin does not route
+    #       around it; it just fails to load.
+    #   (b) a host-specific key (skills, hooks, mcpServers, apps, interface)
+    #       reaches the portable manifest. This one is repo policy, NOT a spec
+    #       requirement: the spec says to "report and ignore each unknown
+    #       top-level field, then continue if the manifest is otherwise
+    #       valid". We reject it because a host path that silently does
+    #       nothing on every conformant client is worse than a failed check.
+    #
+    # Spec quotes: agent-plugins.org/client-implementers/loading-and-discovery
+    # ------------------------------------------------------------------
+    for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
+        platform = json.loads(platform_file.read_text())
+        for output in platform["outputs"]:
+            if output["kind"] != "agent-plugin":
+                continue
+            path = output["path"]
+            try:
+                rendered = json.loads((REPO_ROOT / path).read_text())
+            except (OSError, json.JSONDecodeError) as exc:
+                drifts.append(f"AGENT PLUGIN {path}: unreadable ({exc})")
+                continue
+            # Reported rather than raised: a top-level array or scalar makes
+            # the .get() below an AttributeError, which aborts the checker and
+            # takes every other rule's diagnostics down with it.
+            if not isinstance(rendered, dict):
+                drifts.append(
+                    f"AGENT PLUGIN {path}: top-level JSON is "
+                    f"{type(rendered).__name__}, expected an object — the "
+                    "spec requires a JSON object manifest (Rule 26, #1219)"
+                )
+                continue
+            schema = rendered.get("$schema")
+            if schema != _build.AGENT_PLUGIN_SCHEMA_URI:
+                drifts.append(
+                    f"AGENT PLUGIN {path}: $schema is {schema!r}, expected "
+                    f"{_build.AGENT_PLUGIN_SCHEMA_URI!r} — 1.0.0 is the only "
+                    "published spec version, and an unsupported $schema "
+                    "rejects the plugin outright (Rule 26, #1219)"
+                )
+            for key in ("skills", "hooks", "mcpServers", "apps", "interface"):
+                if key in rendered:
+                    drifts.append(
+                        f"AGENT PLUGIN {path}: carries host-specific key "
+                        f"{key!r} — conformant clients ignore unknown "
+                        "top-level fields, so this path would silently do "
+                        "nothing; put it in the host's own manifest or under "
+                        "extensions (Rule 26, #1219)"
                     )
 
     # ------------------------------------------------------------------
