@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import string
 import sys
 from pathlib import Path
 
@@ -67,12 +68,19 @@ def test_required_fields_present():
 
 def test_name_satisfies_the_spec_charset():
     """Mirrors codex-rs is_valid_agent_plugin_name: lowercase ascii, digits,
-    '.' and '-'; no '--' or '..'; first and last byte alphanumeric."""
+    '.' and '-'; no '--' or '..'; first and last byte alphanumeric.
+
+    Membership is spelled out rather than delegated to str.islower/isdigit/
+    isalnum, which are Unicode-wide: 'é'.islower(), '٣'.isdigit() and
+    'ｎ'.isalnum() are all True, so those predicates admit names the Rust
+    validator rejects.
+    """
+    alnum = set(string.ascii_lowercase) | set(string.digits)
     name = _rendered()["name"]
     assert 0 < len(name) <= 64
     assert "--" not in name and ".." not in name
-    assert all(c.islower() or c.isdigit() or c in ".-" for c in name)
-    assert name[0].isalnum() and name[-1].isalnum()
+    assert all(c in alnum or c in ".-" for c in name)
+    assert name[0] in alnum and name[-1] in alnum
 
 
 def test_carries_no_host_specific_component_keys():
