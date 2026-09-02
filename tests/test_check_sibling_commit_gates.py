@@ -19,7 +19,7 @@ Three further groups cover the PR #1142 review findings:
 
   - **host scoping.** Four of the seven gated hooks carry `hosts: ["claude"]`,
     so the sibling set the runtime actually installs is 7 on `claude` and 3 on
-    `codex` / `cursor` / `opencode`. A host-blind derivation pinned `claude`'s
+    `codex` / `cursor`. A host-blind derivation pinned `claude`'s
     number on every platform. The per-row `Hosts` cell and the per-host table
     are both checked, in both directions, against every platform that emits a
     `hooks` output.
@@ -74,7 +74,7 @@ _SURFACE_FILES = (gates.MANIFEST, gates.SPEC, gates.IMPL, gates.TEST, gates.CHEC
 # Hosts that install hooks today, and the sibling count each one actually gets
 # once `hosts` whitelists are applied. Spelled out for the same reason EXPECTED
 # is: a whitelist edit has to come through this file too.
-EXPECTED_PER_HOST = {"claude": 7, "codex": 3, "cursor": 3, "opencode": 3}
+EXPECTED_PER_HOST = {"claude": 7, "codex": 3, "cursor": 3}
 
 # A host with no `hooks` output in `manifests/platforms/` — every shipped
 # platform installs hooks today, so this is a synthetic name.
@@ -359,9 +359,9 @@ def test_host_table_stale_checklist_count_is_drift(tmp_path):
 
 
 def test_missing_host_row_is_drift(tmp_path):
-    repo = _tree(tmp_path, {gates.SPEC: ("| `opencode` | 3 | 2 |\n", "")})
+    repo = _tree(tmp_path, {gates.SPEC: ("| `cursor` | 3 | 2 |\n", "")})
     drifts = gates.check(repo)
-    assert any("'opencode' installs hooks but has no row" in d for d in drifts), drifts
+    assert any("'cursor' installs hooks but has no row" in d for d in drifts), drifts
 
 
 def test_host_row_for_a_platform_without_hooks_is_drift(tmp_path):
@@ -370,8 +370,8 @@ def test_host_row_for_a_platform_without_hooks_is_drift(tmp_path):
         tmp_path,
         {
             gates.SPEC: (
-                "| `opencode` | 3 | 2 |\n",
-                f"| `opencode` | 3 | 2 |\n| `{NON_HOOK_PLATFORM}` | 3 | 2 |\n",
+                "| `cursor` | 3 | 2 |\n",
+                f"| `cursor` | 3 | 2 |\n| `{NON_HOOK_PLATFORM}` | 3 | 2 |\n",
             )
         },
     )

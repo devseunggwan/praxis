@@ -21,8 +21,6 @@ Writes (generated artifacts, committed to the repo):
   plugins/praxis/.codex-plugin/hooks/hooks.json
   .cursor-plugin/plugin.json
   .cursor-plugin/hooks/hooks.json
-  .opencode/plugin.json
-  .opencode/hooks/hooks.json
   plugin.json                    — Agent Plugins 1.0.0 portable manifest
                                    (agent-plugins.org) for the hosts whose
                                    plugin root IS the repo root. Codex's is

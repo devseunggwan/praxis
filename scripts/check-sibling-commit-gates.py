@@ -32,9 +32,8 @@ Three things the canary verifies beyond that bare name diff:
    ``_dispatch.group_members("PreToolUse", "Bash", host)`` applies that
    whitelist at runtime (the generated plugin invokes
    ``_dispatch.sh PreToolUse Bash <host>``). A count derived without the host
-   filter is therefore right on `claude` and wrong on `codex` / `cursor` /
-   `opencode`, which is the same class of premise error this canary exists to
-   catch. `derive()` takes a `host`, the host list is read from
+   filter is therefore right on `claude` and wrong on `codex` / `cursor`,
+   which is the same class of premise error this canary exists to catch. `derive()` takes a `host`, the host list is read from
    ``manifests/platforms/*.json`` (only platforms that emit a ``hooks``
    output; every shipped platform does today), and the spec's host table is checked
    row by row, in both directions, against every one of them. A bare

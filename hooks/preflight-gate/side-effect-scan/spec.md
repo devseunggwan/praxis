@@ -74,7 +74,6 @@ The sibling set behind the premise is therefore a per-host set:
 | `claude` | 7 | 4 |
 | `codex` | 3 | 2 |
 | `cursor` | 3 | 2 |
-| `opencode` | 3 | 2 |
 
 Both columns are re-derived per host by `scripts/check-sibling-commit-gates.py`
 — every hook-installing platform must have a row, and a row for a platform that
@@ -93,8 +92,8 @@ the `Also in the deny checklist` column counts per host.
 
 So of issue #874's two-part rationale, part 1 (local-only and fully reversible)
 is host-independent and holds everywhere, while part 2 ("already covered in
-depth") holds on `claude` and is **materially weaker on `codex`, `cursor` and
-`opencode`**. The 62%-of-asks measurement the demotion was argued from was also
+depth") holds on `claude` and is **materially weaker on `codex` and
+`cursor`**. The 62%-of-asks measurement the demotion was argued from was also
 taken on `claude`.
 
 This is recorded, not repaired. Re-tiering `git-commit` per host — or widening

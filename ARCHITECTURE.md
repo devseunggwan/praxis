@@ -330,7 +330,7 @@ packaging is *generated* from canonical metadata, not hand-edited:
 - `manifests/plugin.base.json` — shared metadata (name, description, author,
   repository, homepage, category, keywords). `VERSION` is the authoritative
   version string.
-- `manifests/platforms/{claude,codex,cursor,opencode}.json` — per-platform output list.
+- `manifests/platforms/{claude,codex,cursor}.json` — per-platform output list.
 - `manifests/platforms/agent-plugins.json` — not a host, a *format*: the
   vendor-neutral [Agent Plugins](https://agent-plugins.org/) 1.0.0 manifest.
 - `scripts/build-plugin-manifests.py` — regenerate every artifact. Idempotent.
@@ -354,8 +354,6 @@ Generated (committed) outputs:
 | `plugins/praxis/{skills,hooks,scripts}` | Symlinks into repo-root runtime |
 | `.cursor-plugin/plugin.json` | Cursor IDE plugin root |
 | `.cursor-plugin/hooks/hooks.json` | Cursor-compatible hooks (filtered) |
-| `.opencode/plugin.json` | OpenCode plugin root |
-| `.opencode/hooks/hooks.json` | OpenCode-compatible hooks (filtered) |
 | `plugin.json` | Agent Plugins 1.0.0 portable manifest |
 
 ### Agent Plugins portable manifest

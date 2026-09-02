@@ -109,8 +109,7 @@
                 "agent-plugins",
                 "claude",
                 "codex",
-                "cursor",
-                "opencode"
+                "cursor"
               ]
             }
           },
