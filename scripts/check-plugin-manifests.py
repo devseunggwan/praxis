@@ -716,6 +716,25 @@ def _skill_runtime_metadata_drifts(skill_dir: Path) -> list[str]:
     return drifts
 
 
+def runs_standalone(entries) -> bool:
+    """True if any of a hook's manifest entries runs it outside the dispatcher.
+
+    Two ways that happens, and the second is the one a plain (event, matcher)
+    test misses: an entry outside the collapsed (PreToolUse, Bash) group, and
+    an entry INSIDE it that declares `args` — `_dispatch.group_members`
+    excludes such a member from the group, so the build keeps it as its own
+    node and it runs on its own. Judged by (event, matcher) alone it looks
+    dispatch-wrapped, and the @fail_open requirement was skipped for a hook
+    that does need it (issue #1199 review).
+    """
+    for e in entries:
+        if e.get("args"):
+            return True
+        if not (e.get("event") == "PreToolUse" and e.get("matcher") == "Bash"):
+            return True
+    return False
+
+
 def _has_fail_open_decorator(impl_path: Path) -> bool:
     """True iff some function in impl.py carries an `@fail_open` decorator.
 
@@ -1707,10 +1726,7 @@ def main() -> int:
         if name in OPT_IN_HOOKS:
             standalone = True
         else:
-            standalone = any(
-                not (e.get("event") == "PreToolUse" and e.get("matcher") == "Bash")
-                for e in manifest_by_name.get(name, [])
-            )
+            standalone = runs_standalone(manifest_by_name.get(name, []))
         if standalone and not _has_fail_open_decorator(impl_path):
             drifts.append(
                 f"FAIL-OPEN MISSING hooks/{role}/{name}/impl.py: hook runs "

@@ -162,6 +162,25 @@ def test_missing_args_node_is_reported():
     ) == []
 
 
+def test_args_entry_in_the_group_still_counts_as_standalone():
+    # The runtime excludes an args-declaring member from the group, so the hook
+    # runs on its own and needs @fail_open. Judged by (event, matcher) alone it
+    # reads as dispatch-wrapped and the requirement was skipped.
+    dispatched = [{"event": "PreToolUse", "matcher": "Bash"}]
+    assert check.runs_standalone(dispatched) is False
+    assert check.runs_standalone(
+        [{"event": "PreToolUse", "matcher": "Bash", "args": ["--flag"]}]
+    ) is True
+    # An entry outside the group is standalone whether or not it has args.
+    assert check.runs_standalone([{"event": "Stop"}]) is True
+    # One dispatched entry does not launder a second, args-bearing one.
+    assert check.runs_standalone(
+        dispatched + [{"event": "PreToolUse", "matcher": "Bash", "args": ["-x"]}]
+    ) is True
+    # No entries at all: nothing runs standalone.
+    assert check.runs_standalone([]) is False
+
+
 def _matcherless_hooks_json(nodes: list[dict]) -> dict:
     return {"hooks": {"Stop": [{"hooks": nodes}]}}
 
