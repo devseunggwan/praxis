@@ -481,6 +481,11 @@ _CONSUMERS = {
     HOOKS / "advisory-nudge" / "source-citation-probe-gate" / "impl.py": ["tail_lines"],
     HOOKS / "advisory-nudge" / "pre-output-falsification-gate" / "impl.py": ["tail_lines"],
     HOOKS / "advisory-nudge" / "external-write-falsify-check" / "impl.py": ["tail_lines"],
+    # Needs the whole session (a dispatch or enumeration anywhere in it clears
+    # the predicate), so it streams instead of reading a tail; the scan stops
+    # as soon as the matched trigger's facts are settled (#1064).
+    HOOKS / "advisory-nudge" / "unenforced-step-advisory" / "impl.py":
+        ["iter_transcript"],
 }
 
 _CONSTANT_CONSUMERS = [
