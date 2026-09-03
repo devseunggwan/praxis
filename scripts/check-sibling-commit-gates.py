@@ -39,10 +39,10 @@ Three things the canary verifies beyond that bare name diff:
    row by row, in both directions, against every one of them. A bare
    "<n> sibling" claim in the prose is the canonical, host-unfiltered count;
    the per-host numbers live only in that table.
-2. **`gates` / `hosts` field shape.** ``manifest.json``'s ``$schema`` is a
-   dangling pointer (``hooks/manifest.schema.json`` does not exist), so nothing
-   else validates these fields. Left unguarded, ``GATE not in gates`` degrades
-   to a *substring* test when the value is a bare string:
+2. **`gates` / `hosts` field shape.** ``hooks/manifest.schema.json`` types
+   both fields, but it is not enforced at read time here — nothing validates
+   the manifest before this module indexes it. Left unguarded, ``GATE not in
+   gates`` degrades to a *substring* test when the value is a bare string:
    ``"gates": "not-git-commit"`` on `branch-name-check` made `derive()` return
    it, and `check()` then told the maintainer to add a branch-creation gate to
    the commit sibling table. Same hazard on ``hosts``. Both are now required to
