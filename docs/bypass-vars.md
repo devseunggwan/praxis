@@ -74,6 +74,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | ---------- | ------ | ------ |
 | `PRAXIS_PROTECTED_PATHS_STRICT` | `protected-paths-guard` | |
 | `PRAXIS_DESTRUCTIVE_BASH_STRICT` | `destructive-bash-guard` | |
+| `PRAXIS_PERSONAL_LEAK_STRICT` | `block-personal-asset-leak` | Exact value `1` only, unstripped — surrounding whitespace keeps it advisory |
 | `PRAXIS_PATH_PROBE_STRICT` | `path-probe-gate` | |
 | `PRAXIS_ARTIFACT_VERDICT_STRICT` | `artifact-verdict-evidence-gate` | Promote the artifact-verdict gate from advisory to block. Any non-falsey value (`1` / `true` / `yes`); `0` / `false` / empty keep advisory |
 | `PRAXIS_EXCLUSION_PROBE_STRICT` | `exclusion-probe-gate` | |
@@ -92,6 +93,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_ASK_END_STRICT` | `block-ask-end-option` | |
 | `PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT` | `block-manufactured-action-menu` | |
 | `PRAXIS_MENU_MUTATION_TIER_STRICT` | `menu-mutation-tier-advisory` | Exact value `1` only — `true` / `yes` / `no` / `0` stay advisory |
+| `PRAXIS_MERGE_MENU_REVIEW_STRICT` | `merge-menu-review-options-advisory` | Exact value `1` after stripping — `true` / `yes` / `0` stay advisory |
 | `PRAXIS_PR_STATE_REFETCH_STRICT` | `pr-state-refetch-gate` | |
 | `PRAXIS_EXTERNAL_WRITE_STRICT` | `external-write-falsify-check` | |
 | `PRAXIS_AUTHOR_EXEMPT_STRICT` | `external-write-falsify-check` | |

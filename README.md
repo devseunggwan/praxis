@@ -125,7 +125,7 @@ the contracts every hook follows.
 
 A hook that blocks something you meant to do is not a wall. There are three levers.
 
-**One gate.** 53 of the 93 hooks declare an opt-out or tuning variable. Which variable
+**One gate.** 55 of the 93 hooks declare an opt-out or tuning variable. Which variable
 belongs to which hook, and what setting it actually does to that hook, is the table in
 [`docs/bypass-vars.md`](docs/bypass-vars.md); the generated
 [Hook Operating Matrix](docs/hook-operating-matrix.md) carries the same mapping with each
