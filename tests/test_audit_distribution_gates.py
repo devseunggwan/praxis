@@ -40,7 +40,20 @@ def run(tmp_path: Path, draft: str, *extra_args: str,
         env_extra: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     draft_file = tmp_path / "draft.md"
     draft_file.write_text(draft, encoding="utf-8")
-    env = dict(os.environ, PRAXIS_OWN_ORGS="devseunggwan")
+    # The script prefers the live API over PRAXIS_REPO_VISIBILITY, so an
+    # empty PATH is what keeps these cases off the network: `gh` cannot
+    # resolve and the env map supplies the answer the API would have. The
+    # values match how each fixture is used — `praxis` public (as the real
+    # repo is), `internal-notes` the synthetic private one. Cases exercising
+    # resolution itself override this via env_extra.
+    env = dict(
+        os.environ,
+        PATH=str(tmp_path),
+        PRAXIS_OWN_ORGS="devseunggwan",
+        PRAXIS_REPO_VISIBILITY=(
+            "devseunggwan/praxis=public,devseunggwan/internal-notes=private"
+        ),
+    )
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
@@ -289,7 +302,7 @@ def test_compound_with_gate3_pass(tmp_path: Path) -> None:
     # repo_visibility to stay isolated from gate-4 and test gate-3 alone.
     r = run(tmp_path, draft_of(
         row(1, "tool", "cli", "memory, issue",
-            SCHEMA_A + "<br>backing_repo: devseunggwan/praxis<br>"
+            SCHEMA_A + "<br>backing_repo: devseunggwan/internal-notes<br>"
             "repo_visibility: private"),
         extra=MS_BLOCK), "--gate3", "PASS")
     assert r.returncode == 0, r.stdout + r.stderr
@@ -334,7 +347,8 @@ def test_reinforce_memory_added_to_count(tmp_path: Path) -> None:
     # count alone.
     r = run(tmp_path, draft_of(
         row(1, "workflow", "—", "issue",
-            "backing_repo: devseunggwan/praxis<br>repo_visibility: private")),
+            "backing_repo: devseunggwan/internal-notes<br>"
+            "repo_visibility: private")),
         "--reinforce-memory", "2")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "- memory: 2" in r.stdout
@@ -505,3 +519,73 @@ def test_gate6_fail_is_violation(tmp_path: Path) -> None:
     assert r.returncode == 1
     assert "gate-6 verdict is FAIL" in r.stdout
     assert "- gate_6_verdict: FAIL" in r.stdout
+
+
+def test_gate4_false_private_declaration_is_escalated(tmp_path: Path) -> None:
+    # #1150: a public own-org repo declared `private` passed the gate before
+    # the API became the second oracle. Now the declaration alone cannot carry
+    # the exemption.
+    r = run(tmp_path, draft_of(
+        row(1, "workflow", "—", "issue",
+            "backing_repo: devseunggwan/praxis<br>repo_visibility: private")))
+    assert r.returncode == 1
+    assert "GitHub reports 'public'" in r.stdout
+    assert "literal warning prefix" in r.stdout
+    assert "- gate_4_verdict: WARN" in r.stdout
+
+
+def test_gate4_confirmed_private_stays_unescalated(tmp_path: Path) -> None:
+    # #1150 other direction: a declaration the API confirms keeps the
+    # exemption, so resolution only ever adds escalation.
+    r = run(tmp_path, draft_of(
+        row(1, "workflow", "—", "issue",
+            "backing_repo: devseunggwan/internal-notes<br>"
+            "repo_visibility: private")))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "- gate_4_verdict: PASS" in r.stdout
+    assert "gate-4:" not in r.stdout
+
+
+def test_gate4_declared_public_but_api_private_is_flagged(tmp_path: Path) -> None:
+    # #1150: the contradiction is reported in both directions, but the row
+    # still escalates — the API never relaxes what the declaration escalated.
+    r = run(tmp_path, draft_of(
+        row(1, "workflow", "—", "issue",
+            "backing_repo: devseunggwan/internal-notes<br>"
+            "repo_visibility: public")))
+    assert r.returncode == 1
+    assert "GitHub reports 'private'" in r.stdout
+    assert "- gate_4_verdict: WARN" in r.stdout
+
+
+def test_gate4_internal_declaration_matches_private_api(tmp_path: Path) -> None:
+    # #1150: private and internal are one escalation class, so declaring
+    # `internal` against a private repo is not a contradiction.
+    r = run(tmp_path, draft_of(
+        row(1, "workflow", "—", "issue",
+            "backing_repo: devseunggwan/internal-notes<br>"
+            "repo_visibility: internal")))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "- gate_4_verdict: PASS" in r.stdout
+
+
+def test_gate4_unresolved_visibility_fails_closed(tmp_path: Path) -> None:
+    # #1150: with the allowlist resolved but the visibility API unreachable,
+    # the row escalates rather than falling back to the declaration — failing
+    # open here would silently restore the hole this gate closes.
+    draft_file = tmp_path / "draft.md"
+    draft_file.write_text(draft_of(
+        row(1, "workflow", "—", "issue",
+            "backing_repo: devseunggwan/internal-notes<br>"
+            "repo_visibility: private")), encoding="utf-8")
+    env = dict(os.environ, PRAXIS_OWN_ORGS="devseunggwan")
+    env.pop("PRAXIS_REPO_VISIBILITY", None)
+    env["PATH"] = str(tmp_path)  # empty dir: gh resolution fails
+    r = subprocess.run(
+        [sys.executable, str(SCRIPT), "--draft", str(draft_file)],
+        capture_output=True, text=True, env=env,
+    )
+    assert r.returncode == 1
+    assert "visibility lookup returned no answer" in r.stdout
+    assert "GitHub reports unresolved" in r.stdout
+    assert "- gate_4_verdict: WARN" in r.stdout

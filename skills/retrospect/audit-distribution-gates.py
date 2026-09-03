@@ -71,6 +71,7 @@ REPO_VISIBILITY_RE = re.compile(
     r"^\s*repo_visibility: (public|private|internal)\s*$"
 )
 UNESCALATED_VISIBILITY = {"private", "internal"}
+VALID_VISIBILITY = {"public", "private", "internal"}
 
 # Gate-1 behavioral-only safeguard keyword set (stage2.5-audit.md Gate-1).
 SAFEGUARD_KEYWORDS = [
@@ -207,6 +208,48 @@ def resolve_own_orgs() -> tuple[set[str], bool]:
     except (OSError, subprocess.TimeoutExpired):
         pass
     return set(), True  # conservative fallback: all owners external
+
+
+_VISIBILITY_CACHE: dict[str, str | None] = {}
+
+
+def resolve_repo_visibility(repo: str) -> str | None:
+    """Resolve `<owner>/<repo>`'s real visibility, mirroring resolve_own_orgs().
+
+    The declared `repo_visibility:` line is written by the same agent Gate-4
+    constrains, so it cannot be the only oracle for the own-org exemption
+    (issue #1150). The live API therefore wins over `PRAXIS_REPO_VISIBILITY`
+    — the env var is another value the same author controls, and letting it
+    take precedence would rebuild the hole one layer down. It applies only
+    where the API produced no answer, which is the offline / CI case it
+    exists for. One `gh` call per repo per run.
+
+    Returns "public"/"private"/"internal", or None when unresolved — callers
+    treat None as public, the same fail-closed reading an absent declaration
+    already gets.
+    """
+    key = repo.lower()
+    if key in _VISIBILITY_CACHE:
+        return _VISIBILITY_CACHE[key]
+    resolved = None
+    try:
+        out = subprocess.run(
+            ["gh", "api", f"repos/{repo}", "--jq", ".visibility"],
+            capture_output=True, text=True, timeout=10,
+        )
+        value = out.stdout.strip()
+        if out.returncode == 0 and value in VALID_VISIBILITY:
+            resolved = value
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    if resolved is None:
+        for entry in os.environ.get("PRAXIS_REPO_VISIBILITY", "").split(","):
+            name, _, value = entry.strip().partition("=")
+            if name.strip().lower() == key and value.strip() in VALID_VISIBILITY:
+                resolved = value.strip()
+                break
+    _VISIBILITY_CACHE[key] = resolved
+    return resolved
 
 
 def audit(findings: list[Finding], ms_blocks: dict[str, dict[str, str]],
@@ -364,15 +407,47 @@ def audit(findings: list[Finding], ms_blocks: dict[str, dict[str, str]],
                     "'repo_visibility: public|private|internal' line — "
                     "conservative fallback treats the backing repo as public"
                 )
-            if own and visibility in UNESCALATED_VISIBILITY:
+            # The declaration alone cannot carry the exemption (issue #1150):
+            # only an own-org row that BOTH declares private/internal AND is
+            # confirmed so by the API stays unescalated. Either half missing
+            # escalates, so resolution can only ever add escalation.
+            actual = resolve_repo_visibility(repo) if own else None
+            if own and actual is None:
+                advisories.append(
+                    f"gate-4: finding #{f.num} backing_repo '{repo}' "
+                    "visibility lookup returned no answer (gh missing, "
+                    "unauthenticated, 404, rate-limited, or offline with no "
+                    "PRAXIS_REPO_VISIBILITY entry) — conservative fallback "
+                    "treats it as public"
+                )
+            # Only a mismatch that crosses the escalation boundary is a
+            # contradiction; private vs internal are the same class here.
+            if own and visibility is not None and actual is not None and (
+                (visibility in UNESCALATED_VISIBILITY)
+                != (actual in UNESCALATED_VISIBILITY)
+            ):
+                violations.append(
+                    f"finding #{f.num}: Rationale declares 'repo_visibility: "
+                    f"{visibility}' but GitHub reports '{actual}' for "
+                    f"'{repo}' — correct the declaration"
+                )
+            if own and visibility in UNESCALATED_VISIBILITY \
+                    and actual in UNESCALATED_VISIBILITY:
                 continue
             any_external = True
-            why = (
-                f"own-org owner '{owner}' but {visibility or 'public'} — "
-                "own-org membership no longer exempts a public repo"
-                if own else
-                f"owner '{owner}' is outside the own-org allowlist"
-            )
+            if own and visibility in UNESCALATED_VISIBILITY:
+                why = (
+                    f"own-org owner '{owner}' declares {visibility} but "
+                    f"GitHub reports {actual or 'unresolved'} — a declaration "
+                    "the API does not confirm cannot carry the exemption"
+                )
+            elif own:
+                why = (
+                    f"own-org owner '{owner}' but {visibility or 'public'} — "
+                    "own-org membership no longer exempts a public repo"
+                )
+            else:
+                why = f"owner '{owner}' is outside the own-org allowlist"
             if EXTERNAL_WARNING not in f.rationale:
                 violations.append(
                     f"finding #{f.num}: backing_repo '{repo}' needs "
