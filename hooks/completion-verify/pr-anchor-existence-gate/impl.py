@@ -34,9 +34,10 @@ assignment no longer hides the invocation behind it.
 
 Issue #1250, gap 2: an anchor REVISION (`gh api -X PATCH
 .../issues/comments/<id>`) clears the gate when exactly one created PR is
-still unanchored. That path carries a comment id and never a PR number, so
-the attribution is by elimination; two or more unanchored PRs is ambiguous
-and reports rather than guesses.
+still unanchored AND the revision came after that PR was created. That path
+carries a comment id and never a PR number, so the attribution is by
+elimination; two or more unanchored PRs is ambiguous and reports rather than
+guesses, and a revision that predates the create cannot be its anchor.
 
 ## Escalation (issue #1113's explicit design choice)
 
@@ -397,7 +398,9 @@ def _reduce_tool_use(
             interesting_tids.add(tid)
     edits = _api_anchor_edit_ids(segments)
     if edits:
-        pending_edits.append((tid, edits))
+        # The create count at this point orders the edit against the creates —
+        # an anchor revised BEFORE a PR existed cannot be that PR's anchor.
+        pending_edits.append((tid, edits, len(pending_creates)))
         if tid is not None:
             interesting_tids.add(tid)
 
@@ -429,8 +432,8 @@ class _ScanState:
         self.pending_creates: list[tuple[str | None, bool]] = []
         # (tool_use id, [PR numbers posted to])
         self.pending_posts: list[tuple[str | None, list[str]]] = []
-        # (tool_use id, [comment ids revised in place])
-        self.pending_edits: list[tuple[str | None, list[str]]] = []
+        # (tool_use id, [comment ids revised in place], creates seen so far)
+        self.pending_edits: list[tuple[str | None, list[str], int]] = []
         self.create_tids: set[str] = set()
         self.interesting_tids: set[str] = set()
         self.result_is_error: dict[str, bool] = {}
@@ -441,7 +444,7 @@ def _encode_state(state: _ScanState) -> dict:
     return {
         "pending_creates": [list(t) for t in state.pending_creates],
         "pending_posts": [[tid, list(nums)] for tid, nums in state.pending_posts],
-        "pending_edits": [[tid, list(ids)] for tid, ids in state.pending_edits],
+        "pending_edits": [[tid, list(ids), seen] for tid, ids, seen in state.pending_edits],
         "create_tids": sorted(state.create_tids),
         "interesting_tids": sorted(state.interesting_tids),
         "result_is_error": state.result_is_error,
@@ -453,7 +456,7 @@ def _decode_state(data: dict) -> _ScanState:
     state = _ScanState()
     state.pending_creates = [(tid, bool(d)) for tid, d in data["pending_creates"]]
     state.pending_posts = [(tid, list(nums)) for tid, nums in data["pending_posts"]]
-    state.pending_edits = [(tid, list(ids)) for tid, ids in data.get("pending_edits", [])]
+    state.pending_edits = [(tid, list(ids), seen) for tid, ids, seen in data.get("pending_edits", [])]
     state.create_tids = set(data["create_tids"])
     state.interesting_tids = set(data["interesting_tids"])
     state.result_is_error = dict(data["result_is_error"])
@@ -532,14 +535,17 @@ def _resolve(state: _ScanState) -> list[str]:
     create_urls = state.create_urls
 
     created: set[str] = set()
-    for tid, is_draft in pending_creates:
+    create_index: dict[str, int] = {}
+    for idx, (tid, is_draft) in enumerate(pending_creates):
         if is_draft:
             continue
         if tid is None or result_is_error.get(tid) is True:
             continue
         urls = create_urls.get(tid, frozenset())
         if len(urls) == 1:
-            created.add(next(iter(urls)))
+            num = next(iter(urls))
+            created.add(num)
+            create_index.setdefault(num, idx)
 
     posted: set[str] = set()
     for tid, nums in pending_posts:
@@ -553,7 +559,7 @@ def _resolve(state: _ScanState) -> list[str]:
         posted.update(nums)
 
     unanchored = sorted(created - posted, key=int)
-    if len(unanchored) == 1 and _has_confirmed_edit(state):
+    if len(unanchored) == 1 and _has_confirmed_edit(state, create_index[unanchored[0]]):
         # The comment id in an `issues/comments/<id>` PATCH names no PR, so an
         # anchor revision can only be attributed by elimination: exactly one
         # created PR is still missing an anchor, and this session revised an
@@ -565,13 +571,20 @@ def _resolve(state: _ScanState) -> list[str]:
     return unanchored
 
 
-def _has_confirmed_edit(state: _ScanState) -> bool:
+def _has_confirmed_edit(state: _ScanState, after_create: int) -> bool:
     """True when an anchor revision (`gh api ... issues/comments/<id>`) landed
-    successfully this session. Same confirmation bar as a post: an interrupted
-    call with no matching non-error tool_result does not count."""
+    successfully this session AFTER the create at index `after_create`.
+
+    The ordering is what keeps the elimination honest. A long session that
+    revises earlier PRs' anchors and then opens a new PR would otherwise have
+    that new PR cleared by a revision that predates it — measured live on this
+    gate's own session, where three anchor PATCHes preceded the create.
+    Same confirmation bar as a post: an interrupted call with no matching
+    non-error tool_result does not count.
+    """
     return any(
-        tid is not None and state.result_is_error.get(tid) is False and ids
-        for tid, ids in state.pending_edits
+        tid is not None and state.result_is_error.get(tid) is False and ids and seen > after_create
+        for tid, ids, seen in state.pending_edits
     )
 
 

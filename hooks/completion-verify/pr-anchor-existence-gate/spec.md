@@ -68,9 +68,13 @@ comment id and no PR number, so the PR it belongs to cannot be recovered from
 the command.
 
 A confirmed revision therefore clears the gate **only when exactly one created
-PR is still missing an anchor** — attribution by elimination. Two or more
-leaves it ambiguous and every one of them is reported, because guessing would
-clear a PR that genuinely has no anchor. `PATCH` and `PUT` join `POST` as
+PR is still missing an anchor and the revision came after that PR was
+created** — attribution by elimination. Two or more leaves it ambiguous and
+every one of them is reported, because guessing would clear a PR that
+genuinely has no anchor. The ordering rule is not theoretical: replayed over
+the local transcripts, the gate's own development session revised three
+earlier PRs' anchors and then opened this PR, and without it that create would
+have been cleared by a revision that predates it. `PATCH` and `PUT` join `POST` as
 write methods for this path; `DELETE` never carries an anchor.
 
 ### Invocation boundaries
@@ -190,7 +194,8 @@ synthetic transcripts:
 - the post on a second line of the same command → silent (newline boundary)
 - the post prefixed by a `VAR=value` assignment → silent
 - a `gh pr comment` line inside a heredoc body only → still fires
-- `gh api -X PATCH .../issues/comments/<id>` with one unanchored PR → silent
+- `gh api -X PATCH .../issues/comments/<id>` after the create, one unanchored PR → silent
+- the same PATCH *before* the create → still fires
 - the same PATCH with two unanchored PRs → still fires for both
 - no `gh pr create` in the session → silent
 - `gh pr create --draft` success, no post → silent

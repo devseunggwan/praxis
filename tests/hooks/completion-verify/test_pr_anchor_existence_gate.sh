@@ -226,6 +226,10 @@ run_case silent "post-after-heredoc-terminator-counts" '{}'
 build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh api -X PATCH repos/o/r/issues/comments/55123 -F body=@/tmp/a.md'),$(result t2 false ok)]"
 run_case silent "anchor-edit-clears-single-pr" '{}'
 
+# an anchor revision that PREDATES the create cannot be that PR's anchor -> advisory
+build_transcript "[$(bash_use t2 'gh api -X PATCH repos/o/r/issues/comments/55123 -F body=@/tmp/a.md'),$(result t2 false ok),$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178')]"
+run_case advisory "anchor-edit-before-create-does-not-clear" '{}'
+
 # ... but with TWO unanchored PRs the edit is ambiguous -> still fires for both
 build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t3 'gh pr create --title x2 --body y2'),$(result t3 false 'https://github.com/o/r/pull/179'),$(bash_use t2 'gh api -X PATCH repos/o/r/issues/comments/55123 -F body=@/tmp/a.md'),$(result t2 false ok)]"
 run_case advisory "anchor-edit-ambiguous-with-two-prs" '{}'
