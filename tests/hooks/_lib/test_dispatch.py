@@ -121,6 +121,12 @@ EDIT_NOTEBOOK_WRITE_MEMBERS = {
 
 
 def _manifest_dispatch_groups() -> list[tuple[str, str]]:
+    """Every (event, matcher) the manifest declares as a dispatch group.
+
+    Derived, never listed by hand: a scope that names its groups outright stops
+    following the manifest the moment one is added, which is how two
+    fixed-timeout spawns sat unscanned in the write-path groups (issue #1227).
+    """
     manifest = json.loads((REPO_ROOT / "hooks" / "manifest.json").read_text())
     return [
         (g["event"], g["matcher"]) for g in manifest.get("dispatch_groups", [])
@@ -796,6 +802,25 @@ def test_the_lib_closure_reaches_the_extracted_spawn():
     assert "_payload.py" in reached  # transitive, not a direct import of impl.py
 
 
+def test_the_dispatch_group_scan_reaches_the_write_path_groups():
+    # Positive control for the scope of the invariant below: an empty offender
+    # list has to mean "no fixed timeouts anywhere", not "the derivation
+    # returned one group" or "it returned none at all". A renamed manifest key
+    # yields [] and a hand-listed scope yields Bash only; both pass the scan
+    # while measuring nothing, which is the exact failure this test names.
+    #
+    # Naming the two hooks is what makes this a control rather than a shape
+    # check: "some non-Bash group exists" still passes while the groups that
+    # actually carried the fixed-timeout spawns are the ones left out, which
+    # is the same blind spot one level up.
+    groups = _manifest_dispatch_groups()
+    assert ("PreToolUse", "Bash") in groups
+    assert [g for g in groups if g != ("PreToolUse", "Bash")]
+    scanned = {n for e, m in groups for _r, n, _i in _dispatch.load_group(e, m)[0]}
+    assert {"block-personal-asset-leak", "path-probe-gate"} <= scanned
+    assert all(_dispatch.load_group(e, m)[0] for e, m in groups)
+
+
 def test_every_subprocess_member_is_budget_aware():
     # The dispatcher no longer decides per member whether a shortened cap is
     # safe: it clamps every member's deadline to the group's and relies on
@@ -803,17 +828,21 @@ def test_every_subprocess_member_is_budget_aware():
     # That reliance is the invariant here. A member spawning a subprocess
     # under a fixed timeout can outlive the group deadline and get the whole
     # dispatcher killed by the host, and nothing at the call site shows it.
+    # The timeout does not have to exceed the group budget to do that: the
+    # skip floor lets a member start with 0.5s of runway left, so any fixed
+    # timeout above the floor overruns the deadline from that position.
     #
     # The scan follows each member into hooks/_lib: extraction moves a spawn
     # without changing what runs inside the group deadline (issue #1178).
-    members, _budget, _timeouts = _dispatch.load_group("PreToolUse", "Bash")
     offenders = {}
-    for role, name, impl in members:
-        for src in _lib_closure(Path(impl)):
-            bad = _fixed_timeout_spawns(
-                src.read_text(encoding="utf-8", errors="replace"))
-            if bad:
-                offenders[f"{role}/{name} -> {src.name}"] = bad
+    for event, matcher in _manifest_dispatch_groups():
+        members, _budget, _timeouts = _dispatch.load_group(event, matcher)
+        for role, name, impl in members:
+            for src in _lib_closure(Path(impl)):
+                bad = _fixed_timeout_spawns(
+                    src.read_text(encoding="utf-8", errors="replace"))
+                if bad:
+                    offenders[f"{event}/{matcher} {role}/{name} -> {src.name}"] = bad
     assert offenders == {}
 
 

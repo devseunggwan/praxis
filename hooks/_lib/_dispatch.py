@@ -344,13 +344,16 @@ def run_group(
         pass
 
     # A deny is flushed and returned the moment a member computes it, never
-    # buffered to the end of the group (the residual exposure issue #1167's own
-    # comment recorded as still open). Buffering meant a host kill at the group
-    # timeout took an already-computed deny down with the process, so a gate
-    # that had decided to block an edit silently did not — the one outcome a
-    # write-path group must never produce. Returning early cannot change which
-    # deny wins (the first one already won) and costs only the advisory stderr
-    # of members after it, on a call that is blocked regardless.
+    # buffered to the end of the group. What this buys is a shorter exposure
+    # window, NOT survival of a host kill: Claude Code "cancels a `command`,
+    # `http`, or `mcp_tool` hook that reaches its `timeout`, discarding the
+    # hook's output" (https://code.claude.com/docs/en/hooks.md), so output
+    # already flushed is discarded too and a deny cut at the node timeout is
+    # lost either way. Returning at the first deny ends the group there
+    # instead of running the remaining members, so the dispatcher finishes far
+    # short of the timeout and the kill has no window to happen in. It cannot
+    # change which deny wins (the first one already won) and costs only the
+    # advisory stderr of members after it, on a call that is blocked anyway.
     # Per-member deadline (issue #1167): members run sequentially inside ONE
     # host timeout (the max member timeout — see load_group), so without a
     # group deadline one slow member starves every later member and the host
@@ -407,7 +410,9 @@ def run_group(
         # dispatcher's decision is unaffected.
         _record_fires([(role, name, impl)], [result], payload_raw, event)
         # Forward this member's stderr (advisory nudges and deny reasons alike)
-        # as it resolves, so a host kill later in the group cannot erase it.
+        # as it resolves rather than after the loop, for the same reason the
+        # deny return above is immediate: it shortens the window, and a kill at
+        # the node timeout discards the whole process's output regardless.
         member_rc, member_so, member_se = result
         if member_se:
             sys.stderr.write(member_se)

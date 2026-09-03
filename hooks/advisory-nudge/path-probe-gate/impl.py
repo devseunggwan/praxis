@@ -59,11 +59,11 @@ from __future__ import annotations
 
 import hashlib
 import os
-import subprocess
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _git import run_git  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _paths import praxis_cache_dir  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
@@ -146,23 +146,20 @@ def _git_worktree_list(cwd: str) -> list[str]:
 
     Returns empty list on any failure (fail-open).
     """
-    try:
-        result = subprocess.run(
-            ["git", "worktree", "list", "--porcelain"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            return []
-        roots: list[str] = []
-        for line in result.stdout.splitlines():
-            if line.startswith("worktree "):
-                roots.append(line[len("worktree "):].strip())
-        return roots
-    except (OSError, subprocess.TimeoutExpired):
+    # Through the shared runner, so the spawn is clamped to the member budget
+    # the dispatcher publishes. This hook sits in the
+    # `PreToolUse/Edit|NotebookEdit|Write` dispatch group, whose in-process
+    # deadline is 9s; the skip floor is 0.5s, so the member still runs with
+    # 0.5s of runway left and a fixed 5s spawn started there overruns the group
+    # deadline and gets the whole dispatcher killed by the host.
+    out = run_git(["worktree", "list", "--porcelain"], cwd=cwd)
+    if out is None:
         return []
+    return [
+        line[len("worktree "):].strip()
+        for line in out.splitlines()
+        if line.startswith("worktree ")
+    ]
 
 
 def _find_worktree_root(file_path: str, worktree_roots: list[str]) -> str | None:
