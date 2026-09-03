@@ -186,6 +186,10 @@ def test_dispatcher_run_with_the_shipped_argv_prints_that_hosts_rows(host, hooks
     `_dispatch.py` directly would leave the wrapper's own `exec python3 "$IMPL"
     "$@"` unpinned — drop or reorder those arguments there and every installed
     plugin loses host filtering with this file still green.
+
+    Rows are compared with their multiplicity intact: a dispatcher that ran a
+    member twice would emit each of its rows twice, and de-duplicating first
+    would read that as a match.
     """
     nodes = dispatch_commands(json.loads(hooks_path.read_text(encoding="utf-8")), "PreToolUse", "Bash")
     assert len(nodes) == 1, (
@@ -210,7 +214,7 @@ def test_dispatcher_run_with_the_shipped_argv_prints_that_hosts_rows(host, hooks
     decision = json.loads(run.stdout)["hookSpecificOutput"]
     reason = decision["permissionDecisionReason"]
     assert "BLOCKED: Commit-flag override" in reason, "another gate won the decision"
-    assert sorted(set(_ROW_RE.findall(reason))) == expected_rows(host), reason
+    assert sorted(_ROW_RE.findall(reason)) == expected_rows(host), reason
 
 
 def _regenerate_without_bash_dispatch(host: str) -> dict:
