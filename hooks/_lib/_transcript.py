@@ -47,6 +47,8 @@ Public API:
   has_tool_in_turn(turn, tool_name)                      -> bool
   read_last_user_message(transcript_path)                -> str | None
   scan_user_rejections(path, max_bytes, max_records)     -> list[dict] | None
+  stop_scan_cursor_path(hook, session_id)               -> str | None
+  reduce_transcript_resumable(path, cursor_path, new_state, reduce_event, encode, decode)
 """
 from __future__ import annotations
 
@@ -735,3 +737,149 @@ def _flatten_strings(value, limit: int = REJECTION_TEXT_MAX_CHARS) -> str:
             stack.extend(item)
     joined = "\n".join(parts)
     return joined[:limit]
+
+
+# ---------------------------------------------------------------------------
+# Resumable whole-transcript reduction (issue #1237)
+# ---------------------------------------------------------------------------
+
+# A gate that needs the whole session (a PR created anywhere in it, a verdict
+# stated in any earlier turn) used to re-parse the transcript from byte 0 on
+# every Stop, so its cost tracked session length: 214MB cost 2-5s per gate
+# against a 10s timeout, past which the gate renders no decision at all. The
+# reduction such a gate keeps is tiny, so it is persisted beside a byte
+# offset and only the bytes appended since the last Stop are parsed.
+_CURSOR_VERSION = 1
+
+
+def _cursor_matches(cursor: dict, st: os.stat_result, fh) -> bool:
+    """True when `cursor` still describes the open transcript `fh` (stat `st`).
+
+    The offset is trusted only when the file is the same inode, has not
+    shrunk, and the byte before the offset is a newline — a truncate-and-
+    rewrite to a longer file would otherwise resume mid-record. Identity comes
+    from the handle that is about to be scanned, never from a fresh stat of
+    the path: a transcript replaced in between would otherwise pair the new
+    inode with an offset and state derived from the old one.
+    """
+    if cursor.get("version") != _CURSOR_VERSION:
+        return False
+    offset = cursor.get("offset")
+    if not isinstance(offset, int) or offset < 0 or offset > st.st_size:
+        return False
+    if (cursor.get("ino"), cursor.get("dev")) != (st.st_ino, st.st_dev):
+        return False
+    if offset == 0:
+        return True
+    try:
+        fh.seek(offset - 1)
+        return fh.read(1) == b"\n"
+    except OSError:
+        return False
+
+
+def _load_cursor(cursor_path: str) -> dict | None:
+    try:
+        with open(cursor_path, encoding="utf-8") as fh:
+            cursor = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(cursor, dict) or not isinstance(cursor.get("state"), dict):
+        return None
+    return cursor
+
+
+def _save_cursor(cursor_path: str, st: os.stat_result, offset: int, state: dict) -> None:
+    """Atomic write; a failed save costs one full re-scan, never a wrong one."""
+    try:
+        payload = {
+            "version": _CURSOR_VERSION,
+            "offset": offset,
+            "ino": st.st_ino,
+            "dev": st.st_dev,
+            "state": state,
+        }
+        tmp = f"{cursor_path}.{os.getpid()}.tmp"
+        os.makedirs(os.path.dirname(cursor_path) or ".", exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+        os.replace(tmp, cursor_path)
+    except (OSError, TypeError, ValueError):
+        pass
+
+
+def stop_scan_cursor_path(hook: str, session_id) -> str | None:
+    """Cache path for `hook`'s scan cursor, or None when the payload carries no
+    session — then there is nothing to key the cursor on and the caller does a
+    full scan. Session-keyed (`<prefix>-<session_id>.json`) so the cache sweep
+    spares the live session's entry and ages the others out.
+    """
+    if not isinstance(session_id, str) or not session_id:
+        return None
+    from _paths import resolve_cache_file  # type: ignore[import-not-found]
+
+    return resolve_cache_file(f"stop-scan-{hook}-{session_id}.json", session_id)
+
+
+def reduce_transcript_resumable(
+    path: str,
+    cursor_path: str | None,
+    new_state,
+    reduce_event,
+    encode=None,
+    decode=None,
+):
+    """Fold every event of `path` into a reducer state, resuming from the
+    offset saved at `cursor_path` when it still describes the file.
+
+    `new_state()` builds the empty state; `reduce_event(state, ev)` folds one
+    event dict in place. The state is what the next Stop starts from, so it
+    crosses a JSON file: pass `encode(state) -> jsonable` and
+    `decode(jsonable) -> state` when it holds sets or tuples, else it must
+    already be JSON-native.
+
+    Only complete lines advance the offset: a record still being written when
+    the Stop fires is re-read next time instead of being skipped. `cursor_path`
+    None disables persistence (the full-scan path a session-less payload
+    takes). Fail-open: an unreadable transcript yields the resumed or empty
+    state, never an exception.
+    """
+    cursor = _load_cursor(cursor_path) if cursor_path else None
+
+    def resumed():
+        if cursor is None:
+            return None
+        try:
+            return decode(cursor["state"]) if decode else cursor["state"]
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return None  # a stale shape costs one full re-scan
+
+    try:
+        fh = open(path, "rb")
+    except OSError:
+        return resumed() or new_state()  # unreadable: what the last Stop knew
+    with fh:
+        try:
+            st = os.fstat(fh.fileno())
+        except OSError:
+            return resumed() or new_state()
+        state = resumed() if cursor is not None and _cursor_matches(cursor, st, fh) else None
+        if state is None:
+            offset = 0
+            state = new_state()
+        else:
+            offset = cursor["offset"]
+        fh.seek(offset)
+        while True:
+            raw = fh.readline()
+            if not raw:
+                break
+            if not raw.endswith(b"\n"):
+                break
+            offset += len(raw)
+            obj = _parse_line(raw)
+            if obj is not None:
+                reduce_event(state, obj)
+    if cursor_path:
+        _save_cursor(cursor_path, st, offset, encode(state) if encode else state)
+    return state

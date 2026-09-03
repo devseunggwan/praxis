@@ -31,6 +31,14 @@ Whole-transcript scan (mirrors `pr-report-destination-gate`, #832): the `gh pr
 create` and the anchor post are routinely many turns apart, so a bounded tail
 would miss the create.
 
+The scan is **resumable** (#1237): the reduction it keeps (pending creates and
+posts, their result status, the PR URLs a create returned) is persisted with a
+byte offset in the session-keyed cache entry
+`cache/stop-scan-pr-anchor-existence-gate-<session_id>.json`, and each Stop
+parses only the bytes appended since. The cursor is dropped — full re-scan —
+when the transcript is a different inode, has shrunk, or the offset no longer
+sits on a line boundary; a payload without `session_id` scans in full.
+
 ### Created PRs — non-draft `gh pr create` successes
 
 - `gh pr create` without `--draft`/`-d` **in that invocation's own segment** of

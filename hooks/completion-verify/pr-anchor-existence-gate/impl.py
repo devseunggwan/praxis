@@ -101,7 +101,10 @@ from _hook_io import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
-from _transcript import iter_transcript  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
+    reduce_transcript_resumable,
+    stop_scan_cursor_path,
+)
 
 _HOOK_NAME = "pr-anchor-existence-gate"
 _ROLE = "completion-verify"
@@ -256,56 +259,117 @@ def _reduce_tool_use(
             interesting_tids.add(tid)
 
 
+class _ScanState:
+    """Everything the resolver pass needs from the events seen so far.
+
+    Only a `gh pr create` result ever carries a PR URL this gate needs, and
+    the extracted set is a handful of short digit strings regardless of the
+    result's own size — never the raw text (a 60MB session transcript with
+    unrelated large tool outputs previously cost ~60MB of retained RSS per
+    Stop invocation for a value read from at most a few tids; user-reported
+    memory/perf concern, PR #1115). Small enough to persist between Stops as
+    the resumable-scan cursor (issue #1237).
+    """
+
+    __slots__ = ("pending_creates", "pending_posts", "create_tids", "interesting_tids", "result_is_error", "create_urls")
+
+    def __init__(self) -> None:
+        # (tool_use id, is_draft) — one entry per `gh pr create` invocation.
+        self.pending_creates: list[tuple[str | None, bool]] = []
+        # (tool_use id, [PR numbers posted to])
+        self.pending_posts: list[tuple[str | None, list[str]]] = []
+        self.create_tids: set[str] = set()
+        self.interesting_tids: set[str] = set()
+        self.result_is_error: dict[str, bool] = {}
+        self.create_urls: dict[str, frozenset[str]] = {}
+
+
+def _encode_state(state: _ScanState) -> dict:
+    return {
+        "pending_creates": [list(t) for t in state.pending_creates],
+        "pending_posts": [[tid, list(nums)] for tid, nums in state.pending_posts],
+        "create_tids": sorted(state.create_tids),
+        "interesting_tids": sorted(state.interesting_tids),
+        "result_is_error": state.result_is_error,
+        "create_urls": {tid: sorted(urls) for tid, urls in state.create_urls.items()},
+    }
+
+
+def _decode_state(data: dict) -> _ScanState:
+    state = _ScanState()
+    state.pending_creates = [(tid, bool(d)) for tid, d in data["pending_creates"]]
+    state.pending_posts = [(tid, list(nums)) for tid, nums in data["pending_posts"]]
+    state.create_tids = set(data["create_tids"])
+    state.interesting_tids = set(data["interesting_tids"])
+    state.result_is_error = dict(data["result_is_error"])
+    state.create_urls = {tid: frozenset(urls) for tid, urls in data["create_urls"].items()}
+    return state
+
+
+def _reduce_event(state: _ScanState, ev: dict) -> None:
+    msg = ev.get("message")
+    if not isinstance(msg, dict):
+        return
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        kind = block.get("type")
+        if kind == "tool_use":
+            _reduce_tool_use(
+                block, state.pending_creates, state.pending_posts, state.create_tids, state.interesting_tids
+            )
+        elif kind == "tool_result":
+            tid = block.get("tool_use_id")
+            if not isinstance(tid, str) or tid not in state.interesting_tids:
+                continue
+            state.result_is_error[tid] = block.get("is_error") is True
+            if tid not in state.create_tids:
+                continue
+            rc = block.get("content")
+            parts: list[str] = []
+            if isinstance(rc, str):
+                parts.append(rc)
+            elif isinstance(rc, list):
+                for c in rc:
+                    if isinstance(c, dict) and isinstance(c.get("text"), str):
+                        parts.append(c["text"])
+            if parts:
+                state.create_urls[tid] = frozenset(
+                    m.group(1) for m in _PR_URL_RE.finditer("\n".join(parts))
+                )
+
+
 def find_unanchored_prs(events) -> list[str]:
     """Return the sorted list of non-draft PR numbers created (successfully) this
     session that have not received a successful comment post."""
-    # (tool_use id, is_draft) — one entry per `gh pr create` invocation.
-    pending_creates: list[tuple[str | None, bool]] = []
-    # (tool_use id, [PR numbers posted to])
-    pending_posts: list[tuple[str | None, list[str]]] = []
-    create_tids: set[str] = set()
-    interesting_tids: set[str] = set()
-    result_is_error: dict[str, bool] = {}
-    # Only a `gh pr create` result ever carries a PR URL this gate needs, and
-    # the extracted set is a handful of short digit strings regardless of the
-    # result's own size — never the raw text (a 60MB session transcript with
-    # unrelated large tool outputs previously cost ~60MB of retained RSS per
-    # Stop invocation for a value read from at most a few tids; user-reported
-    # memory/perf concern, PR #1115).
-    create_urls: dict[str, frozenset[str]] = {}
-
+    state = _ScanState()
     for ev in events:
-        msg = ev.get("message")
-        if not isinstance(msg, dict):
-            continue
-        content = msg.get("content")
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            kind = block.get("type")
-            if kind == "tool_use":
-                _reduce_tool_use(block, pending_creates, pending_posts, create_tids, interesting_tids)
-            elif kind == "tool_result":
-                tid = block.get("tool_use_id")
-                if not isinstance(tid, str) or tid not in interesting_tids:
-                    continue
-                result_is_error[tid] = block.get("is_error") is True
-                if tid not in create_tids:
-                    continue
-                rc = block.get("content")
-                parts: list[str] = []
-                if isinstance(rc, str):
-                    parts.append(rc)
-                elif isinstance(rc, list):
-                    for c in rc:
-                        if isinstance(c, dict) and isinstance(c.get("text"), str):
-                            parts.append(c["text"])
-                if parts:
-                    create_urls[tid] = frozenset(
-                        m.group(1) for m in _PR_URL_RE.finditer("\n".join(parts))
-                    )
+        _reduce_event(state, ev)
+    return _resolve(state)
+
+
+def scan_unanchored_prs(transcript_path: str, session_id) -> list[str]:
+    """`find_unanchored_prs` over the whole file, resuming from the previous
+    Stop's cursor when the session has one (issue #1237)."""
+    state = reduce_transcript_resumable(
+        transcript_path,
+        stop_scan_cursor_path(_HOOK_NAME, session_id),
+        _ScanState,
+        _reduce_event,
+        encode=_encode_state,
+        decode=_decode_state,
+    )
+    return _resolve(state)
+
+
+def _resolve(state: _ScanState) -> list[str]:
+    pending_creates = state.pending_creates
+    pending_posts = state.pending_posts
+    result_is_error = state.result_is_error
+    create_urls = state.create_urls
 
     created: set[str] = set()
     for tid, is_draft in pending_creates:
@@ -363,10 +427,10 @@ def main() -> int:
     if not transcript_path or not os.path.isfile(transcript_path):
         return 0
 
-    unanchored = find_unanchored_prs(iter_transcript(transcript_path))
-
     session_id = payload.get("session_id")
     has_session = isinstance(session_id, str) and bool(session_id)
+
+    unanchored = scan_unanchored_prs(transcript_path, session_id)
 
     if not unanchored:
         # Record a pass so the gate is visible in the fire ledger even on the

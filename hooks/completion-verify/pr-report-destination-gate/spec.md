@@ -33,6 +33,13 @@ Detection is **per-PR**, not a global boolean, so it survives multi-PR
 sessions. The whole transcript is scanned (not just the current turn) because
 the report write and the PR context are often many turns apart.
 
+The scan is **resumable** (#1237): the reduction (context PRs, pending posts
+and report writes, their result status) is persisted with a byte offset in
+`cache/stop-scan-pr-report-destination-gate-<session_id>.json`, and each Stop
+parses only the bytes appended since. A different inode, a shrunken file, or
+an offset off a line boundary drops the cursor and re-scans; a payload without
+`session_id` scans in full.
+
 ### Context PRs — the work is bound to these
 
 - `gh pr view|create|diff|checks|checkout|edit|ready|merge <N>` (number or `…/pull/<N>` URL) — every occurrence in a compound command

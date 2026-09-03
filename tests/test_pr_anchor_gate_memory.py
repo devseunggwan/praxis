@@ -14,6 +14,7 @@ Run: python3 -m pytest tests/test_pr_anchor_gate_memory.py -q
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tracemalloc
 from pathlib import Path
@@ -153,3 +154,49 @@ def test_peak_memory_does_not_track_unrelated_tool_call_count() -> None:
     assert peak < 1 * 1024 * 1024, (
         f"peak {peak / 1024 / 1024:.2f} MiB — result_is_error is retaining unrelated tids"
     )
+
+
+def test_second_stop_resumes_from_the_cursor_and_sees_the_anchor(tmp_path, monkeypatch):
+    """Two Stops on one session: the first scans everything and finds the PR
+    unanchored; the second, after a successful comment was appended, must fold
+    in only the new events yet still clear the PR (issue #1237)."""
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
+    transcript = tmp_path / "t.jsonl"
+    events = [
+        {"message": {"content": [
+            {"type": "tool_use", "id": "create1", "name": "Bash", "input": {"command": "gh pr create --title x --body y"}},
+        ]}},
+        {"message": {"content": [
+            {"type": "tool_result", "tool_use_id": "create1", "is_error": False, "content": "https://github.com/o/r/pull/178"},
+        ]}},
+    ]
+    with open(transcript, "w", encoding="utf-8") as fh:
+        for ev in events:
+            fh.write(json.dumps(ev) + "\n")
+
+    assert gate.scan_unanchored_prs(str(transcript), "sid-1237") == ["178"]
+    cursor = tmp_path / "cache" / "stop-scan-pr-anchor-existence-gate-sid-1237.json"
+    assert cursor.is_file()
+    first_offset = json.loads(cursor.read_text(encoding="utf-8"))["offset"]
+    assert first_offset == transcript.stat().st_size
+
+    more = [
+        {"message": {"content": [
+            {"type": "tool_use", "id": "post1", "name": "Bash", "input": {"command": "gh pr comment 178 --body anchor"}},
+        ]}},
+        {"message": {"content": [{"type": "tool_result", "tool_use_id": "post1", "is_error": False, "content": "ok"}]}},
+    ]
+    with open(transcript, "a", encoding="utf-8") as fh:
+        for ev in more:
+            fh.write(json.dumps(ev) + "\n")
+
+    calls: list = []
+    real = gate._reduce_event
+
+    def counting(state, ev):
+        calls.append(ev)
+        real(state, ev)
+
+    monkeypatch.setattr(gate, "_reduce_event", counting)
+    assert gate.scan_unanchored_prs(str(transcript), "sid-1237") == []
+    assert len(calls) == len(more)
