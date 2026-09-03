@@ -96,7 +96,7 @@ promoted into blocking:
 | ------ | ------- | -------------- |
 | `preflight-gate` | 35 | Inspects a tool call before it runs and can deny it |
 | `completion-verify` | 13 | Fires at `Stop` — can block a response that claims completion without evidence |
-| `advisory-nudge` | 40 | Prints a warning to stderr and lets the call through — 12 read a `PRAXIS_*_STRICT` variable that makes them stop the call instead |
+| `advisory-nudge` | 40 | Prints a warning to stderr and lets the call through — 15 read a `PRAXIS_*_STRICT` variable that makes them stop the call instead |
 | `postuse-correction` | 5 | Reacts after a tool call — telemetry, follow-up signals |
 
 Concretely, what a gate stops looks like this — `gh issue create` without a duplicate
