@@ -107,10 +107,63 @@ run_case "prompt_other_clears"            clear "$(mk_prompt 'fix the failing te
 run_case "prompt_casual_mention_no_set"   clear "$(mk_prompt 'can you explain the retrospect 회고 flow?')"
 run_case "slash_substring_guard"          clear "$(mk_prompt '/retrospects-are-cool')"
 
-# --- Marker lifecycle: pre-existing marker cleared by unrelated prompt ---
-run_case "preexisting_cleared_by_other"   clear "$(mk_prompt 'do something else')" set
+# --- Marker lifecycle: an unrelated prompt DECAYS rather than clears (#1098) ---
+# The documented flow "skill invoked -> clarification -> user answers -> Stage 3
+# report" puts one ordinary prompt between SET and the report. Clearing on it
+# disarmed the #666 gate for the report that followed, so the marker now spends
+# a turn of MARKER_TURN_BUDGET instead. Full decay is covered below.
+run_case "preexisting_survives_one_other"  set   "$(mk_prompt 'do something else')" set
 # Pre-existing marker preserved (re-SET) by a slash invocation.
 run_case "preexisting_kept_by_slash"      set   "$(mk_prompt '/retrospect')" set
+
+# --- Budget decay (#1098): the armed window is bounded, not permanent ---
+# Feeds N ordinary prompts into one marker file and reports the state after each.
+# run_decay name budget expected_after_each("set set clear ...")
+run_decay() {
+  local name="$1" budget="$2"; shift 2
+  CASE_N=$((CASE_N + 1))
+  local sf="$WORK_DIR/decay_${CASE_N}.json"
+  if [ "$budget" = "legacy" ]; then
+    # A marker written before #1098 carries no turns_remaining; it must count as
+    # a full budget rather than decaying instantly or never.
+    printf '%s' '{"retrospect_active": true, "source": "skill"}' > "$sf"
+  else
+    printf '{"retrospect_active": true, "source": "skill", "turns_remaining": %s}' "$budget" > "$sf"
+  fi
+  local turn=0 expected ok=true
+  for expected in "$@"; do
+    turn=$((turn + 1))
+    printf '%s' "$(mk_prompt 'unrelated work')" \
+      | env PRAXIS_RETROSPECT_ACTIVE_FILE="$sf" python3 "$HOOK" >/dev/null 2>&1
+    local actual="clear"; [ -f "$sf" ] && actual="set"
+    if [ "$actual" != "$expected" ]; then
+      echo "FAIL  [$name] after turn $turn: expected $expected, got $actual"
+      ok=false; break
+    fi
+  done
+  if $ok; then echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); fi
+}
+
+run_decay "decay_full_budget_disarms_on_third" 3 set set clear clear
+run_decay "decay_legacy_body_counts_as_full"   legacy set set clear
+run_decay "decay_last_turn_clears"             1 clear
+run_decay "decay_corrupt_body_counts_as_full"  '"not-a-number"' set set clear
+
+# A slash invocation mid-decay re-arms the full budget.
+CASE_N=$((CASE_N + 1))
+DECAY_SF="$WORK_DIR/rearm_${CASE_N}.json"
+printf '%s' '{"retrospect_active": true, "source": "skill", "turns_remaining": 1}' > "$DECAY_SF"
+printf '%s' "$(mk_prompt '/retrospect')" \
+  | env PRAXIS_RETROSPECT_ACTIVE_FILE="$DECAY_SF" python3 "$HOOK" >/dev/null 2>&1
+printf '%s' "$(mk_prompt 'unrelated work')" \
+  | env PRAXIS_RETROSPECT_ACTIVE_FILE="$DECAY_SF" python3 "$HOOK" >/dev/null 2>&1
+if [ -f "$DECAY_SF" ]; then
+  echo "PASS  [slash_rearms_full_budget]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [slash_rearms_full_budget] marker cleared — budget was not re-armed"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("slash_rearms_full_budget")
+fi
 
 # --- Fail-open ---
 run_case "malformed_json_failopen"        clear '{not valid json{{'

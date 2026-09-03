@@ -377,10 +377,14 @@ only prose, because SKILL.md prescribes legitimate pre-Stage-3 STOP-to-user
 surfaces (self-conflict detection; ambiguous `backing_repo`) that are prose
 clarifications, not reports.
 
-The marker's lifecycle (set on skill-invoke, cleared on any non-invocation
-`UserPromptSubmit` and on Stage 4) bounds the armed window to the active,
-incomplete retrospect turn, so an abandoned retrospect / topic change does not
-cause a later unrelated Stop to be blocked.
+The marker's lifecycle (set on skill-invoke, decayed one turn per
+non-invocation `UserPromptSubmit` and cleared on Stage 4) bounds the armed
+window to the active, incomplete retrospect, so an abandoned retrospect / topic
+change does not cause a later unrelated Stop to be blocked. The decay replaced
+an unconditional clear that disarmed this gate on the clarification round-trip
+the retrospect skill documents
+([#1098](https://github.com/devseunggwan/praxis/issues/1098)); the marker hook's
+spec owns the budget.
 
 #### Known residual limitations
 

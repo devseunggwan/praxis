@@ -1487,6 +1487,75 @@ EOF
 run_marker_case "F666_7b_block_prose_with_localized_table_no_fence" "block" \
   "$(mk_assistant "$F666_PROSE_TABLE")" "kept"
 
+# Issue #1098 — marker lifecycle across a clarification round-trip -----------
+# The cases above hand the Stop hook a marker file written by the test. #1098
+# was in the OTHER hook: the UserPromptSubmit path cleared the marker on every
+# non-invocation prompt, so the documented "skill invoked -> clarification ->
+# user answers -> Stage 3 report" flow reached this gate disarmed. Only an
+# end-to-end run over BOTH hooks can see that, so these drive the real marker
+# hook for the lifecycle and then this hook for the verdict.
+MARKER_HOOK="$REPO_ROOT/hooks/preflight-gate/retrospect-active-marker/impl.py"
+
+run_lifecycle_case() {
+  # $1 name  $2 expected(block|pass)  $3 transcript  $4.. ordinary user prompts
+  local name="$1" expected="$2" transcript="$3"; shift 3
+  local tpath="$TMPDIR/lc_transcript_${PASS}_${FAIL}.jsonl"
+  printf '%s\n' "$transcript" > "$tpath"
+  local mfile="$TMPDIR/lc_marker_${PASS}_${FAIL}.json"
+  rm -f "$mfile"
+
+  # The agent invokes the retrospect skill (PreToolUse).
+  printf '%s' '{"tool_name":"Skill","tool_input":{"skill":"praxis:retrospect"},"session_id":"test-session"}' \
+    | env PRAXIS_RETROSPECT_ACTIVE_FILE="$mfile" python3 "$MARKER_HOOK" >/dev/null 2>&1
+  local ok=true
+  [ -f "$mfile" ] || { ok=false; echo "FAIL  [$name] marker was not armed by the skill invocation"; }
+
+  # Ordinary user turns in between (clarification answers, or a topic change).
+  local prompt
+  for prompt in "$@"; do
+    jq -nc --arg p "$prompt" '{prompt: $p, session_id: "test-session"}' \
+      | env PRAXIS_RETROSPECT_ACTIVE_FILE="$mfile" python3 "$MARKER_HOOK" >/dev/null 2>&1
+  done
+
+  local payload out rc
+  payload=$(jq -nc --arg path "$tpath" \
+    '{transcript_path: $path, stop_hook_active: false, session_id: "test-session"}')
+  out=$(printf '%s' "$payload" | env PRAXIS_RETROSPECT_ACTIVE_FILE="$mfile" "$HOOK" 2>/dev/null)
+  rc=$?
+  [ "$rc" -eq 0 ] || { ok=false; echo "FAIL  [$name] rc=$rc (expected 0)"; }
+  case "$expected" in
+    block) echo "$out" | grep -q '"decision": "block"' || { ok=false; echo "FAIL  [$name] expected block, got: ${out:-<empty>}"; } ;;
+    pass)  [ -z "$out" ] || { ok=false; echo "FAIL  [$name] expected pass (no output), got: $out"; } ;;
+  esac
+  if [ "$ok" = "true" ]; then echo "PASS  [$name]"; PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); fi
+}
+
+# L1: block — the #1098 defect. One clarification answer between the skill
+# invocation and the fence-less report. Pre-fix the marker was gone and this
+# passed silently.
+run_lifecycle_case "F1098_1_block_after_one_clarification_reply" "block" \
+  "$(mk_assistant "$F666_LOC_BYPASS")" "네, 워크플로 관점으로 정리해 주세요"
+
+# L2: block — two clarification answers still inside the budget.
+run_lifecycle_case "F1098_2_block_after_two_clarification_replies" "block" \
+  "$(mk_assistant "$F666_LOC_BYPASS")" "첫 번째 확인 답변" "두 번째 확인 답변"
+
+# L3: positive control for L1/L2 — no intervening reply at all. Distinguishes
+# "the gate fires" from "the harness blocks everything".
+run_lifecycle_case "F1098_3_block_with_no_intervening_reply" "block" \
+  "$(mk_assistant "$F666_LOC_BYPASS")"
+
+# L4: pass — the other direction. Three ordinary turns exhaust the budget, so an
+# abandoned retrospect does not leave later unrelated Stops gated. Without this
+# the fix would trade a silent bypass for a permanent false positive.
+run_lifecycle_case "F1098_4_pass_budget_exhausted_topic_change" "pass" \
+  "$(mk_assistant "$F666_LOC_BYPASS")" "다른 작업 1" "다른 작업 2" "다른 작업 3"
+
+# L5: pass — a well-formed Stage 3 report is still not blocked after the
+# clarification round-trip. The marker gates fence omission, not the reply.
+run_lifecycle_case "F1098_5_pass_valid_stage3_after_clarification" "pass" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")" "확인 답변"
+
 # Gate-7 VALUE check cases — issue #671 -------------------------------------
 # A receipt with counts transcribed from a stale compaction summary rather than
 # re-derived this turn passes every STRUCTURAL check but may have counts that

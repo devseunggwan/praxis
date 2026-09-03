@@ -25,14 +25,16 @@ UserPromptSubmit
       * SET when the prompt is an explicit retrospect slash-command invocation
         (`/retrospect` or `/praxis:retrospect`), so the marker is armed even
         before the Skill `tool_use` record exists.
-      * CLEAR otherwise. This bounds the marker to the active retrospect
-        turn(s) and removes the false positive where the user abandons
-        retrospect / changes topic and a later unrelated Stop would otherwise
-        be blocked.
+      * Otherwise DECAY it: spend one turn of `MARKER_TURN_BUDGET` and clear
+        at zero. An unconditional clear disarmed the #666 gate on the very
+        clarification round-trip the skill documents (issue #1098); the budget
+        keeps the gate armed across that reply while still bounding the window,
+        so a user who abandons retrospect / changes topic does not leave a
+        later unrelated Stop gated.
 
 The Stop hook additionally clears the marker on Stage 4 (`## Actions
-Executed`). Between SET and CLEAR the marker means "retrospect invoked this
-turn, not yet completed" — exactly when a Stage 3 distribution fence is owed.
+Executed`). While the marker exists it means "retrospect invoked, not yet
+completed" — exactly when a Stage 3 distribution fence is owed.
 
 Natural-language triggers ("retrospect"/"회고" in prose) deliberately do NOT
 SET the marker on UserPromptSubmit (a casual mention must not arm the gate);
@@ -79,6 +81,14 @@ _SLASH_INVOKE_RE = re.compile(r"^\s*/(?:praxis:)?retrospect(?![\w-])", re.IGNORE
 # sufficient and host-namespace agnostic.
 _SKILL_NAME_RE = re.compile(r"retrospect", re.IGNORECASE)
 
+# Budget spent one ordinary (non-invocation) user turn at a time: the marker
+# survives two such replies and disarms on the third. One covers the pre-Stage-3
+# clarification round-trip the skill documents, the second a follow-up
+# clarification. Past that a topic change is the likelier reading, so the marker
+# disarms on its own rather than gating unrelated Stops for the rest of the
+# session (issue #1098).
+MARKER_TURN_BUDGET = 3
+
 
 # ---------------------------------------------------------------------------
 # State file IO
@@ -101,7 +111,7 @@ def resolve_state_path(session_id: str | None = None) -> str:
     return resolve_cache_file(f"retrospect-active-{key}.json", session_id=key)
 
 
-def set_marker(path: str, source: str) -> None:
+def set_marker(path: str, source: str, turns: int = MARKER_TURN_BUDGET) -> None:
     """Atomically write the marker (existence is the signal; body is a hint)."""
     try:
         parent = os.path.dirname(path)
@@ -112,7 +122,14 @@ def set_marker(path: str, source: str) -> None:
         )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump({"retrospect_active": True, "source": source}, fh)
+                json.dump(
+                    {
+                        "retrospect_active": True,
+                        "source": source,
+                        "turns_remaining": turns,
+                    },
+                    fh,
+                )
             os.replace(tmp_path, path)
         except Exception:
             try:
@@ -131,6 +148,47 @@ def clear_marker(path: str) -> None:
     except OSError:
         # Already absent (the common case) or unwritable — both fine.
         pass
+
+
+def _read_marker(path: str) -> tuple[str, int]:
+    """(source, budget) of an existing marker; a pre-#1098 body counts as full."""
+    source, turns = "unknown", MARKER_TURN_BUDGET
+    try:
+        with open(path, encoding="utf-8") as fh:
+            body = json.load(fh)
+        if isinstance(body, dict):
+            if isinstance(body.get("source"), str):
+                source = body["source"]
+            raw = body.get("turns_remaining")
+            if isinstance(raw, int) and not isinstance(raw, bool):
+                turns = raw
+    except (OSError, ValueError):
+        pass
+    return source, turns
+
+
+def decay_marker(path: str) -> None:
+    """Spend one ordinary user turn of the marker's budget; clear at zero.
+
+    An unconditional clear here is what issue #1098 reported: the documented
+    "skill invoked -> clarification -> user answers -> Stage 3 report" flow puts
+    an ordinary prompt between SET and the report, so the #666 gate was disarmed
+    by one round-trip. A budget keeps the gate armed across the clarification
+    while still bounding the window, so a genuine topic change cannot leave it
+    armed for the rest of the session.
+    """
+    if not os.path.exists(path):
+        return
+    source, turns = _read_marker(path)
+    turns -= 1
+    if turns <= 0:
+        clear_marker(path)
+        return
+    set_marker(path, source, turns)
+    if _read_marker(path)[1] > turns:
+        # The rewrite did not land (unwritable dir). Falling back to the clear
+        # keeps the pre-#1098 behavior instead of a marker that never decays.
+        clear_marker(path)
 
 
 # ---------------------------------------------------------------------------
@@ -241,8 +299,10 @@ def handle_user_prompt_submit(payload: dict) -> int:
     if isinstance(prompt, str) and _SLASH_INVOKE_RE.search(prompt):
         set_marker(path, "slash")
     else:
-        # New user turn that is not a retrospect invocation resets the marker.
-        clear_marker(path)
+        # A new user turn that is not a retrospect invocation spends one turn of
+        # the budget. It used to clear outright, which disarmed the #666 gate on
+        # the very clarification round-trip the skill documents (issue #1098).
+        decay_marker(path)
     return 0
 
 
