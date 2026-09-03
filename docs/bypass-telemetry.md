@@ -13,6 +13,14 @@ Daily rotation (UTC date):
 
 Directories are created on first write.  The file is append-only.
 
+On the first write of a new UTC day, files older than
+`PRAXIS_TELEMETRY_RETENTION_DAYS` (default 30) are removed and a detached
+child gzips every earlier day's file to `bypass-events-YYYY-MM-DD.<token>.jsonl.gz`
+(the token keeps a late writer's re-created plain file from ever being appended
+into a finished archive). `bypass-review` reads the plain and the compressed
+forms of a day together. The same rollover covers the `fire-events-*` family
+(issues #1078, #1238).
+
 ## Log format
 
 One JSON object per line.  Example:

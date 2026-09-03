@@ -15,7 +15,7 @@ on opposite sides of that split.
 | `~/.praxis/state/`         | Durable, cross-session state                       | `praxis_state_dir()`                         | `PRAXIS_STATE_DIR` (base), `PRAXIS_HOME`    |
 | `~/.praxis/cache/`         | Regenerable, session-scoped caches / dedup markers | `praxis_cache_dir()`, `resolve_cache_file()` | `PRAXIS_HOME`, per-file env                 |
 | `~/.praxis/logs/`          | Diagnostics                                        | `resolve_writable("logs", …)`                | `PRAXIS_HOME`, per-file env                 |
-| `~/.praxis/telemetry/`     | fire / bypass event ledgers (daily rotation)       | `hooks/_lib/_fire_ledger.py`                 | `PRAXIS_FIRE_TELEMETRY_FILE`, `PRAXIS_HOME` |
+| `~/.praxis/telemetry/`     | fire / bypass ledgers (daily; gzip + 30d sweep)    | `hooks/_lib/_fire_ledger.py`                 | `PRAXIS_FIRE_TELEMETRY_FILE`, `PRAXIS_HOME` |
 | `~/.praxis/docs/specs/`    | Feature specs ([`spec-store.md`](spec-store.md))   | `praxis_specs_dir()`                         | `PRAXIS_HOME`                               |
 
 The spec store is the one root praxis does not write: a person authors those
