@@ -84,7 +84,7 @@ wrapper.
 
 ## Hooks
 
-Hooks are the larger half of praxis: **93 hooks**, registered at 105 points across
+Hooks are the larger half of praxis: **93 hooks**, registered at 106 points across
 `PreToolUse`, `PostToolUse`, `Stop`, `UserPromptSubmit`, and `SessionStart`. They run
 without being invoked, so this section is the one to read before installing — it is what
 changes about your session.

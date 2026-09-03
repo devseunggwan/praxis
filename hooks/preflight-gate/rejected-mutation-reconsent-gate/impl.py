@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse(Bash) guard: re-ask before a mutation the user already refused.
+"""PreToolUse guard: re-ask before a mutation the user already refused.
 
 Issue #1007. A user rejects an `AskUserQuestion` for an irreversible mutation.
 The next user message — a two-word instruction about running two workstreams in
@@ -10,9 +10,9 @@ A rejection is a standing NO for that mutation. Nothing re-reads it before the
 next utterance is consumed as consent, so this hook does, at the command
 boundary:
 
-  1. the pending Bash command carries a destructive marker AND a literal
-     identifier (`s3://…`, `gs://…`, or a table named after DROP / TRUNCATE /
-     DELETE FROM);
+  1. the pending tool call names a literal identifier (`s3://…`, `gs://…`, or a
+     table named after DROP / TRUNCATE / DELETE FROM) in a destructive position
+     — see SURFACES below for what "destructive position" means per surface;
   2. an earlier `AskUserQuestion` in this session was structurally rejected;
   3. the rejected question named the SAME normalized identifier.
 
@@ -34,9 +34,32 @@ DELIBERATE NARROWNESS — three limits, each a decision rather than an oversight
   `s3://b/raw`. A verb-class rule would fire on every unrelated `rm` after any
   rejection, and an ask that fires on everything is an ask nobody reads.
 
-  BASH ONLY. Stated plainly in spec.md: this matcher would NOT have intercepted
-  the originating incident, whose firing point was an agent/worker dispatch, not
-  a Bash command. The dispatch surface is deferred to a separate issue.
+  THE IDENTIFIER CLASSES ARE A CLOSED LIST. `s3://`, `gs://`, and a table after
+  DROP / TRUNCATE / DELETE FROM. A rejected Kubernetes namespace, BigQuery
+  dataset, or filesystem path is not matched; each new class needs a
+  normalization rule of its own, and guessing normalization is how a
+  literal-identifier gate turns into a fuzzy one.
+
+SURFACES (issue #1035). Two, and only condition 1 differs between them:
+
+  BASH — a URI counts only inside a command segment that also carries a
+  destructive marker token, so `aws s3 ls s3://b/raw/2024/` stays silent. SQL
+  tables carry their verb inside the pattern.
+
+  DISPATCH — an agent/worker dispatch, which is where the originating incident
+  actually fired: the deletion scope lived in a WORKER PROMPT, which the Bash
+  matcher never sees. Two shapes are read: the `Task` / `Agent` tool's
+  `prompt` + `description`, and a Bash segment whose argv[0] is a worker
+  launcher (`cmux`, `claude`, `codex`) — there the prompt is nested inside a
+  quoted argument, so the segment is scanned as prose.
+
+  On the dispatch surface there is NO destructive-marker requirement, for the
+  same reason the rejected-question side has none: a prompt is prose, so argv
+  position and marker tokens carry no reliable meaning in it, and the whole
+  point of the surface is that intent is hidden in prose. What keeps the ask
+  rare is condition 3, which is identical on both surfaces — the identifier has
+  to be one the user already refused. The predicate stops at literal substring
+  matching of the SAME closed list; no semantic reading of the prompt.
 
 TIER: ask, not deny. The user is the escape hatch — approving the ask IS the
 fresh per-action approval the gate demands — so there is no bypass marker and
@@ -56,12 +79,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
-from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
+from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    _command_spec_key,
     compound_cascade_hint,
     iter_command_starts,
+    iter_command_texts,
     safe_tokenize,
+    strip_prefix,
 )
 from _transcript import scan_user_rejections  # type: ignore[import-not-found]  # noqa: E402
 
@@ -186,6 +212,111 @@ def question_identifiers(text: str) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
+# Dispatch surface (issue #1035)
+# ---------------------------------------------------------------------------
+
+# Tools whose payload carries a worker prompt. `Task` is Claude Code's agent
+# dispatch tool; `Agent` is the same call under the name other hosts use.
+DISPATCH_TOOLS = frozenset({"Task", "Agent"})
+
+# Payload keys read from a dispatch tool_input. `prompt` is the worker's
+# instructions and is where the incident's deletion scope lived; `description`
+# is the short label, included because a scope named only there would otherwise
+# be invisible. Nothing else is read — `subagent_type` and `model` are routing
+# fields that can never carry a target.
+_DISPATCH_TEXT_KEYS = ("prompt", "description")
+
+# Binaries that launch a worker from a Bash command line. The prompt then sits
+# inside a quoted argument (`cmux … --command "claude -p '…'"`), so
+# `safe_tokenize` makes it one token and the destructive-marker path above never
+# sees into it. A closed list, matched on argv[0] only: a URI mentioned in an
+# argument of some unrelated command does not become a dispatch.
+#
+# The four are the providers `cmux-delegate` can actually route to (ARCHITECTURE
+# .md → Provider Routing: claude / codex / gemini, dispatched through `cmux`).
+# Leaving one out is a silent hole, not a narrower gate — `gemini -p "<prompt>"`
+# carries a worker prompt exactly as `claude -p` does.
+_DISPATCH_LAUNCHERS = frozenset({"cmux", "claude", "codex", "gemini"})
+
+
+def dispatch_identifiers(text: str) -> set[str]:
+    """Identifiers named anywhere in a worker prompt.
+
+    Same closed list and same normalization as every other surface; what
+    differs is that no destructive marker is required. A prompt is prose, so
+    argv position and marker tokens carry no reliable meaning in it — and the
+    surface exists precisely because the intent is hidden in prose. The
+    narrowing is condition 3: the identifier still has to be one the user
+    already refused.
+    """
+    return question_identifiers(text)
+
+
+def dispatch_text(tool_input: dict) -> str:
+    """Flatten a dispatch tool_input's prompt-bearing fields into one string.
+
+    Non-str values are dropped rather than coerced: a list-shaped `prompt` from
+    a future payload version must degrade this gate to silence, never crash it
+    into a fail-open that looks identical to a clean pass.
+    """
+    return "\n".join(
+        tool_input[key]
+        for key in _DISPATCH_TEXT_KEYS
+        if isinstance(tool_input.get(key), str)
+    )
+
+
+def _is_launcher(token: str) -> bool:
+    """True iff `token` names a worker-launcher binary, however it is written.
+
+    An exact `argv[0] == "cmux"` comparison is bypassed by three shapes that
+    all launch the same binary — `/usr/local/bin/cmux`, `(cmux …` inside a
+    subshell, and `CMUX_QUIET=1 cmux …` after `strip_prefix` has peeled the
+    assignment. `_command_spec_key` is the repo's existing normalization for
+    exactly this (see `_is_gh_binary`, issue #1099): strip the shell grouping
+    run, then take the path basename.
+    """
+    return _command_spec_key(token).lower() in _DISPATCH_LAUNCHERS
+
+
+def bash_dispatch_identifiers(command: str) -> set[str]:
+    """Identifiers inside a worker prompt nested in a Bash dispatch command.
+
+    Only segments whose argv[0] is a known launcher are scanned, and they are
+    scanned as prose — the segment's own quoting has already been consumed by
+    `safe_tokenize`, so what is left is the prompt text as the worker will read
+    it.
+
+    Three normalizations stand between a real dispatch and `argv[0]`, and
+    skipping any one of them is a silent bypass rather than a narrower gate:
+
+      `iter_command_texts` recurses into ACTIVE `$( … )` / backtick spans,
+      because `safe_tokenize` coalesces a substitution run into one token —
+      `WS=$(cmux new-workspace …)` otherwise presents `argv[0]` as `WS=$(cmux`
+      and the segment is never recognized at all.
+
+      `strip_prefix` peels env assignments and wrapper commands, so
+      `env CMUX_QUIET=1 cmux …` and `sudo claude …` do not present `env` /
+      `sudo` as the binary.
+
+      `_is_launcher` compares the path basename, so `/usr/local/bin/cmux`
+      matches `cmux`.
+    """
+    identifiers: set[str] = set()
+    for text in iter_command_texts(command):
+        if not text.strip():
+            continue
+        tokens = safe_tokenize(text)
+        if not tokens:
+            continue
+        for raw_argv in iter_command_starts(tokens):
+            argv = strip_prefix(list(raw_argv))
+            if argv and _is_launcher(argv[0]):
+                identifiers |= dispatch_identifiers(" ".join(argv))
+    return identifiers
+
+
+# ---------------------------------------------------------------------------
 # Message
 # ---------------------------------------------------------------------------
 
@@ -209,7 +340,15 @@ def _question_excerpt(rejection: dict) -> str:
     return " ".join(rejection.get("text", "").split())[:_QUESTION_EXCERPT_CHARS]
 
 
-def build_reason(rejection: dict, shared: list[str]) -> str:
+# What the ask calls the pending tool call, per surface. The word matters: an
+# operator reading "this command" while looking at a `Task` dispatch would go
+# hunting for a shell command that does not exist, and the whole point of the
+# dispatch surface is that the target is somewhere non-obvious.
+SUBJECT_COMMAND = "command"
+SUBJECT_DISPATCH = "worker dispatch"
+
+
+def build_reason(rejection: dict, shared: list[str], subject: str) -> str:
     """Render the ask reason through the shared five-field block format.
 
     Hand-rolling this text is what `tests/test_block_message.py` forbids for any
@@ -220,24 +359,24 @@ def build_reason(rejection: dict, shared: list[str]) -> str:
     return format_block(
         rule_name="rejected-mutation-reconsent-gate",
         why=(
-            "this command targets something you already refused — shared target(s): "
+            f"this {subject} targets something you already refused — shared target(s): "
             + ", ".join(shared)
             + '; you rejected this question earlier in this session: "'
             + _question_excerpt(rejection)
             + '"'
         ),
         correct_path=(
-            "approve here only if you are approving THIS command on THIS target now. "
-            "A rejection is a standing NO for that target: a later instruction that "
-            "does not name it is not approval — 'proceed', 'continue', or an unrelated "
-            "parallel-work instruction all leave the refusal standing."
+            f"approve here only if you are approving THIS {subject} on THIS target "
+            "now. A rejection is a standing NO for that target: a later instruction "
+            "that does not name it is not approval — 'proceed', 'continue', or an "
+            "unrelated parallel-work instruction all leave the refusal standing."
         ),
         bypass_env=None,
         reference="issue #1007",
     )
 
 
-def build_unscanned_reason() -> str:
+def build_unscanned_reason(subject: str) -> str:
     """Render the ask reason for a transcript the scan could not read.
 
     Condition 2 is unanswerable, not answered `no`. The gate asks anyway
@@ -249,15 +388,15 @@ def build_unscanned_reason() -> str:
     return format_block(
         rule_name="rejected-mutation-reconsent-gate",
         why=(
-            "this command names a literal destructive target, and the session "
+            f"this {subject} names a literal destructive target, and the session "
             "transcript is past the rejection scan's byte bound, so whether you "
             "already refused this target could not be read either way"
         ),
         correct_path=(
-            "approve here only if you are approving THIS command on THIS target now. "
-            "The scan is blind, not clear: a refusal made earlier in this session "
-            "still stands, and a later 'proceed' or an unrelated parallel-work "
-            "instruction is not approval of it."
+            f"approve here only if you are approving THIS {subject} on THIS target "
+            "now. The scan is blind, not clear: a refusal made earlier in this "
+            "session still stands, and a later 'proceed' or an unrelated "
+            "parallel-work instruction is not approval of it."
         ),
         bypass_env=None,
         reference="issue #1231",
@@ -269,18 +408,48 @@ def build_unscanned_reason() -> str:
 # ---------------------------------------------------------------------------
 
 
+def resolve_surface(payload: dict) -> tuple[set[str], str, str]:
+    """Return `(pending identifiers, subject label, bash command)` for a payload.
+
+    One entry point for both surfaces, because conditions 2 and 3 are identical
+    across them — only the extraction differs. The Bash surface contributes both
+    its destructive-segment identifiers AND its nested-worker-prompt ones, so a
+    `cmux … --command "claude -p '…'"` is read as the dispatch it is while an
+    `aws s3 rm` in the same compound command is still read as a command.
+
+    A non-dispatch, non-Bash tool yields no identifiers, which the caller
+    translates to silence.
+    """
+    tool_name = payload.get("tool_name")
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    if tool_name in DISPATCH_TOOLS:
+        return dispatch_identifiers(dispatch_text(tool_input)), SUBJECT_DISPATCH, ""
+    if tool_name != "Bash":
+        return set(), SUBJECT_COMMAND, ""
+    command = tool_input.get("command")
+    if not isinstance(command, str) or not command.strip():
+        return set(), SUBJECT_COMMAND, ""
+    from_command = command_identifiers(command)
+    from_prompt = bash_dispatch_identifiers(command)
+    # The subject names what the operator is looking at. When the only
+    # identifiers came from a nested worker prompt, calling it "command" would
+    # send them hunting through argv for a target that is inside a quoted
+    # prompt.
+    subject = SUBJECT_COMMAND if from_command else SUBJECT_DISPATCH
+    return from_command | from_prompt, subject, command
+
+
 @fail_open
 def main() -> int:
-    parsed = read_bash_payload()
-    if parsed is None:
-        return 0  # non-Bash tool or malformed stdin — fail-open
-    payload, command = parsed
-    if not command.strip():
-        return 0
+    payload = read_payload()
+    if payload is None:
+        return 0  # malformed stdin — fail-open
 
-    # Cheapest discriminator first: no destructive identifier in the command
+    # Cheapest discriminator first: no candidate identifier in the tool call
     # means no overlap is possible, and the transcript is never read.
-    pending = command_identifiers(command)
+    pending, subject, command = resolve_surface(payload)
     if not pending:
         return 0
 
@@ -297,7 +466,9 @@ def main() -> int:
         # silent in exactly the sessions it was written for. The reach is narrow
         # — `pending` is already non-empty, so nothing without a literal
         # destructive target ever gets here.
-        emit_decision("ask", build_unscanned_reason() + compound_cascade_hint(command))
+        emit_decision(
+            "ask", build_unscanned_reason(subject) + compound_cascade_hint(command)
+        )
         return 0
 
     for rejection in reversed(rejections):
@@ -311,7 +482,7 @@ def main() -> int:
             continue
         emit_decision(
             "ask",
-            build_reason(rejection, shared) + compound_cascade_hint(command),
+            build_reason(rejection, shared, subject) + compound_cascade_hint(command),
         )
         return 0
 
