@@ -161,16 +161,20 @@ _NOOP_TOOL_INPUTS = {
 }
 
 
-def _noop_payload_for(matcher: str) -> str:
+def _noop_payload_for(event: str, matcher: str) -> str:
     tool = matcher.split("|")[0]
-    return json.dumps(
-        {
-            "tool_name": tool,
-            "tool_input": _NOOP_TOOL_INPUTS[tool],
-            "cwd": str(REPO_ROOT),
-            "session_id": "test-dispatch-noop",
-        }
-    )
+    payload = {
+        "hook_event_name": event,
+        "tool_name": tool,
+        "tool_input": _NOOP_TOOL_INPUTS[tool],
+        "cwd": str(REPO_ROOT),
+        "session_id": "test-dispatch-noop",
+    }
+    if event == "PostToolUse":
+        # A PostToolUse member reads the tool's result; without it the payload
+        # would exercise the members' PreToolUse legs instead.
+        payload["tool_response"] = {"stdout": "", "stderr": "", "interrupted": False}
+    return json.dumps(payload)
 
 
 def test_edit_write_group_members():
@@ -185,6 +189,91 @@ def test_edit_notebook_write_group_members():
     assert {n for _r, n, _i in members} == EDIT_NOTEBOOK_WRITE_MEMBERS
     for _role, name, impl in members:
         assert impl.exists(), f"missing impl for {name}: {impl}"
+
+
+# Declared run order. bypass-telemetry comes first: it is the audit record
+# for an active bypass var, and as the last member it would be the one
+# skipped when the gh-calling members ahead of it drain the group deadline.
+POSTTOOLUSE_BASH_MEMBERS = (
+    "bypass-telemetry",
+    "anchor-comment-gate",
+    "push-remote-ref-verify",
+    "pr-thread-resolve-advisory",
+)
+
+
+def test_posttooluse_bash_group_members():
+    # #1239: the PostToolUse(Bash) hooks run as one process. The group's
+    # budget is the max member timeout (anchor-comment-gate's 25 s), so a
+    # slow gh call in one member is what the clamp tests below guard.
+    members = _dispatch.group_members("PostToolUse", "Bash")
+    assert tuple(n for _r, n, _i in members) == POSTTOOLUSE_BASH_MEMBERS
+    for _role, name, impl in members:
+        assert impl.exists(), f"missing impl for {name}: {impl}"
+    _members, budget, _timeouts = _dispatch.load_group("PostToolUse", "Bash")
+    assert budget == 25
+
+
+def test_bypass_telemetry_is_not_the_member_the_deadline_skips(tmp_path, monkeypatch, capsys):
+    # The recorder runs first so that a slow sibling cannot cost the audit
+    # line: with the deadline already spent, the group skips whatever is
+    # still ahead, and standalone the recorder had its own 5 s node.
+    members = _dispatch.group_members("PostToolUse", "Bash")
+    assert members[0][1] == "bypass-telemetry"
+
+
+def test_posttooluse_group_forwards_member_stderr_and_context(tmp_path, monkeypatch, capsys):
+    # A PostToolUse member speaks through stderr (advisory text) and through
+    # `hookSpecificOutput.additionalContext`; the group must forward both
+    # unchanged, and a member's exit 2 must end the group with exit 2.
+    def member(name: str, body: str) -> tuple[str, str, Path]:
+        impl = tmp_path / name / "impl.py"
+        impl.parent.mkdir()
+        impl.write_text(body)
+        return ("advisory-nudge", name, impl)
+
+    talkative = member("talkative", (
+        "import json, sys\n"
+        "def main():\n"
+        "    sys.stderr.write('[talkative] advisory line\\n')\n"
+        "    print(json.dumps({'continue': True, 'hookSpecificOutput': {"
+        "'hookEventName': 'PostToolUse', 'additionalContext': 'ctx-from-talkative'}}))\n"
+        "    return 0\n"
+    ))
+    quiet = member("quiet", "def main():\n    return 0\n")
+    roster = [talkative, quiet]
+    timeouts = {(r, n): 5.0 for r, n, _i in roster}
+    monkeypatch.setattr(_dispatch, "load_group", lambda e, m, h=None: (roster, 25.0, timeouts))
+    monkeypatch.setattr(_dispatch, "_record_fires", lambda *a, **k: None)
+
+    rc = _dispatch.run_group("PostToolUse", "Bash", NOOP_PAYLOAD)
+    out = capsys.readouterr()
+    assert rc == 0
+    assert "[talkative] advisory line" in out.err
+    merged = json.loads(out.out)
+    assert merged["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
+    assert "ctx-from-talkative" in merged["hookSpecificOutput"]["additionalContext"]
+
+    # An exit-2 member FIRST must not silence the members after it: after
+    # the tool has run every member still speaks (standalone they all ran),
+    # and the group returns 2 only once the roster is exhausted. A PreToolUse
+    # group returns at the first deny instead — the tool call is blocked, so
+    # nothing after it has anything left to gate.
+    strict = member("strict", "import sys\ndef main():\n    sys.stderr.write('blocked\\n')\n    return 2\n")
+    roster[:] = [strict, talkative, quiet]
+    timeouts[("advisory-nudge", "strict")] = 5.0
+    rc = _dispatch.run_group("PostToolUse", "Bash", NOOP_PAYLOAD)
+    out = capsys.readouterr()
+    assert rc == 2
+    assert "blocked" in out.err
+    assert "[talkative] advisory line" in out.err
+    assert out.out == ""  # the blocking member wrote nothing; no context merge on exit 2
+
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    out = capsys.readouterr()
+    assert rc == 2
+    assert "blocked" in out.err
+    assert "[talkative] advisory line" not in out.err
 
 
 def test_posttooluse_members_clamp_their_spawns_to_the_member_deadline(monkeypatch):
@@ -245,22 +334,22 @@ def test_edit_groups_host_filter():
     "event,matcher", NON_BASH_GROUPS, ids=[f"{e}:{m}" for e, m in NON_BASH_GROUPS]
 )
 def test_group_noop_allows(event, matcher):
-    rc = _dispatch.run_group(event, matcher, _noop_payload_for(matcher))
+    rc = _dispatch.run_group(event, matcher, _noop_payload_for(event, matcher))
     assert rc == 0
 
 
 @pytest.mark.parametrize(
-    "matcher,member",
+    "event,matcher,member",
     [
-        (m, member)
-        for _e, m in NON_BASH_GROUPS
-        for member in _dispatch.group_members(_e, m)
+        (e, m, member)
+        for e, m in NON_BASH_GROUPS
+        for member in _dispatch.group_members(e, m)
     ],
     ids=lambda v: v if isinstance(v, str) else f"{v[0]}/{v[1]}",
 )
-def test_run_one_matches_subprocess_for_group_noop(matcher, member):
+def test_run_one_matches_subprocess_for_group_noop(event, matcher, member):
     role, name, impl = member
-    payload = _noop_payload_for(matcher)
+    payload = _noop_payload_for(event, matcher)
     direct = subprocess.run(
         [sys.executable, str(impl)],
         input=payload,
@@ -340,7 +429,7 @@ def test_generated_dispatcher_commands_cover_all_groups():
 def test_generated_command_executes_via_sh(event, matcher, cmd):
     result = subprocess.run(
         ["sh", "-c", cmd],
-        input=_noop_payload_for(matcher),
+        input=_noop_payload_for(event, matcher),
         capture_output=True,
         text=True,
         env=_sh_env(),

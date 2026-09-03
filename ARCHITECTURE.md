@@ -251,13 +251,15 @@ interpreter startup, not hook logic. ADR-0002 collapses that group into **one**
 python3 process.
 
 - **Declaration.** `hooks/manifest.json` carries a `dispatch_groups` array of
-  `{event, matcher}` pairs. Four groups are collapsed today: `(PreToolUse,
+  `{event, matcher}` pairs. Five groups are collapsed today: `(PreToolUse,
   Bash)` — the hooks whose manifest `matcher` is exactly `Bash` (count asserted
   by `tests/hooks/_lib/test_dispatch.py::test_group_members_count_and_roles` —
   keep in sync when adding/removing an exact-`Bash` hook) — plus, since #1168,
   `(PreToolUse, Edit|Write)`, `(PreToolUse, Edit|NotebookEdit|Write)`, and
   `(PreToolUse, Bash|Edit|Write)` (secret-print-redaction-advisory,
-  block-personal-asset-leak, external-api-literal-trigger). Groups are keyed
+  block-personal-asset-leak, external-api-literal-trigger), and since #1239
+  `(PostToolUse, Bash)` (anchor-comment-gate, push-remote-ref-verify,
+  pr-thread-resolve-advisory, bypass-telemetry). Groups are keyed
   by the FULL matcher string, so a multi-tool group never merges into the
   exact-`Bash` group — each matcher set runs exactly the members that declare
   it, on exactly the tools it names. The `Edit|Write` and

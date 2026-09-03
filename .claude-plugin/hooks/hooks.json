@@ -55,6 +55,16 @@
         ]
       },
       {
+        "matcher": "AskUserQuestion|Bash|Edit|NotebookEdit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/memory-hint.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -111,16 +121,6 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse 'Edit|NotebookEdit|Write' claude",
             "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "AskUserQuestion|Bash|Edit|NotebookEdit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/memory-hint.sh",
-            "timeout": 5
           }
         ]
       },
@@ -216,18 +216,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/anchor-comment-gate.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PostToolUse Bash claude",
             "timeout": 25
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/push-remote-ref-verify.sh",
-            "timeout": 15
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pr-thread-resolve-advisory.sh",
-            "timeout": 20
           }
         ]
       },
@@ -247,16 +237,6 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-md-escape-advisory-post.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/bypass-telemetry.sh",
             "timeout": 5
           }
         ]
