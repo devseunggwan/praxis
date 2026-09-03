@@ -17,6 +17,10 @@
     {
       "event": "PreToolUse",
       "matcher": "Bash|Edit|Write"
+    },
+    {
+      "event": "PostToolUse",
+      "matcher": "Bash"
     }
   ],
   "hooks": [
@@ -97,6 +101,21 @@
         "state_paths": [
           "PRAXIS_POSTCOMPACT_CONTEXT_FILE",
           "PRAXIS_POSTCOMPACT_TAIL_LINES"
+        ]
+      }
+    },
+    {
+      "name": "memory-hint",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "requires": [
+        "hookable-memory-store"
+      ],
+      "timeout": 5,
+      "mode": {
+        "state_paths": [
+          "PRAXIS_MEMORY_DIR"
         ]
       }
     },
@@ -249,7 +268,14 @@
       "name": "fan-out-scope-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",
-      "matcher": "Agent|Bash",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "fan-out-scope-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Agent",
       "timeout": 5
     },
     {
@@ -277,6 +303,21 @@
       "mode": {
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_ANCHOR_GATE"
+        ]
+      }
+    },
+    {
+      "name": "bypass-telemetry",
+      "role": "postuse-correction",
+      "event": "PostToolUse",
+      "matcher": "Bash",
+      "timeout": 5,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_BYPASS_TELEMETRY_DISABLE"
+        ],
+        "state_paths": [
+          "PRAXIS_BYPASS_TELEMETRY_FILE"
         ]
       }
     },
@@ -735,7 +776,7 @@
       "name": "memory-hint",
       "role": "advisory-nudge",
       "event": "PreToolUse",
-      "matcher": "AskUserQuestion|Bash|Edit|NotebookEdit|Write",
+      "matcher": "AskUserQuestion|Edit|NotebookEdit|Write",
       "requires": [
         "hookable-memory-store"
       ],
@@ -933,7 +974,14 @@
       "name": "approval-premise-reread-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",
-      "matcher": "Bash|mcp__.*",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "approval-premise-reread-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "mcp__.*",
       "timeout": 5
     },
     {
@@ -1003,21 +1051,6 @@
       ],
       "wrapper_suffix": "-post",
       "timeout": 5
-    },
-    {
-      "name": "bypass-telemetry",
-      "role": "postuse-correction",
-      "event": "PostToolUse",
-      "matcher": "Bash",
-      "timeout": 5,
-      "mode": {
-        "bypass_env": [
-          "PRAXIS_BYPASS_TELEMETRY_DISABLE"
-        ],
-        "state_paths": [
-          "PRAXIS_BYPASS_TELEMETRY_FILE"
-        ]
-      }
     },
     {
       "name": "askuserquestion-loop-signal",

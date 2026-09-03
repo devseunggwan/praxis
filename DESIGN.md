@@ -214,7 +214,10 @@ that could have failed it.
   `completion-verify` → `retrospect-mix-check` → `strike-counter stop`.
   Each gate is independent; first `decision: block` wins, fix it and re-run.
 - PostToolUse hooks run **sequentially**; corrective `additionalContext`
-  emissions are additive, not exclusive.
+  emissions are additive, not exclusive. Inside the `PostToolUse(Bash)`
+  dispatch group the manifest array order is the run order, and
+  `bypass-telemetry` comes first so a slow sibling cannot cost the audit
+  line (ADR-0002 §2.5).
 
 ## Adding a new hook
 

@@ -15,6 +15,10 @@ challenged.
 
 This hook writes a single JSONL line each time a Bash tool call runs with
 an active bypass var — creating an auditable local log for future review.
+The target has to be a regular file: a FIFO, device or symlink is refused
+with the fire ledger's own guard (`_fire_ledger._atomic_append`), so a
+misconfigured `PRAXIS_BYPASS_TELEMETRY_FILE` cannot stall the
+`PostToolUse(Bash)` dispatch group this hook opens.
 
 ## Behavior
 

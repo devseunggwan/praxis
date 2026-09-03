@@ -609,6 +609,37 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test 18: FIFO telemetry target -> refused, hook returns promptly
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== bypass-telemetry: FIFO target does not stall the hook ==="
+
+# A plain open("a") on a FIFO with no reader blocks forever; inside the
+# PostToolUse(Bash) group that would stall every sibling until the host
+# timeout. The fire ledger's guard refuses non-regular targets instead.
+TEL_FIFO="$TMP_DIR/test-fifo.jsonl"
+mkfifo "$TEL_FIFO"
+payload_fifo="$(make_payload Bash 'CLAUDE_HOOK_BYPASS_SCIOMC_GATE=1 git commit')"
+PRAXIS_BYPASS_TELEMETRY_FILE="$TEL_FIFO" python3 "$HOOK" <<< "$payload_fifo" >/dev/null 2>&1 &
+fifo_pid=$!
+for _ in $(seq 1 50); do
+  kill -0 "$fifo_pid" 2>/dev/null || break
+  sleep 0.1
+done
+if kill -0 "$fifo_pid" 2>/dev/null; then
+  kill "$fifo_pid" 2>/dev/null
+  assert_fail "FIFO target: hook returns within 5 s" "still blocked on the FIFO after 5 s"
+else
+  wait "$fifo_pid"
+  fifo_rc=$?
+  if [ "$fifo_rc" -eq 0 ]; then
+    assert_pass "FIFO target: hook returns within 5 s with exit 0"
+  else
+    assert_fail "FIFO target: hook returns within 5 s with exit 0" "exit $fifo_rc"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""

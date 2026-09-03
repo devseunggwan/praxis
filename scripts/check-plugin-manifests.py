@@ -715,21 +715,23 @@ def _skill_runtime_metadata_drifts(skill_dir: Path) -> list[str]:
     return drifts
 
 
-def runs_standalone(entries) -> bool:
+def runs_standalone(entries, dispatch_groups) -> bool:
     """True if any of a hook's manifest entries runs it outside the dispatcher.
 
     Two ways that happens, and the second is the one a plain (event, matcher)
-    test misses: an entry outside the collapsed (PreToolUse, Bash) group, and
-    an entry INSIDE it that declares `args` — `_dispatch.group_members`
-    excludes such a member from the group, so the build keeps it as its own
-    node and it runs on its own. Judged by (event, matcher) alone it looks
+    test misses: an entry outside every collapsed dispatch group, and an entry
+    INSIDE one that declares `args` — `_dispatch.group_members` excludes such
+    a member from the group, so the build keeps it as its own node and it
+    runs on its own. Judged by (event, matcher) alone it looks
     dispatch-wrapped, and the @fail_open requirement was skipped for a hook
-    that does need it (issue #1199 review).
+    that does need it (issue #1199 review). The groups come from the
+    manifest, never from a literal here: a hardcoded (PreToolUse, Bash) kept
+    treating every later group's members as standalone.
     """
     for e in entries:
         if e.get("args"):
             return True
-        if not (e.get("event") == "PreToolUse" and e.get("matcher") == "Bash"):
+        if (e.get("event"), e.get("matcher")) not in dispatch_groups:
             return True
     return False
 
@@ -1770,7 +1772,7 @@ def main() -> int:
     # impl.py bare, so the impl itself must carry an `@fail_open`
     # decorator (on main(), or on a zero-arg `_entry()` for argv-style
     # mains). A hook is dispatch-covered iff ALL its manifest entries
-    # are exactly (PreToolUse, Bash); opt-in hooks are standalone by
+    # sit in a `dispatch_groups` pair; opt-in hooks are standalone by
     # definition. impl.sh bodies are exempt (no Python entrypoint).
     # The rule is one-directional: a redundant decorator in a dispatched
     # member is harmless (double-wrap is a no-op) and not flagged.
@@ -1785,7 +1787,7 @@ def main() -> int:
         if name in OPT_IN_HOOKS:
             standalone = True
         else:
-            standalone = runs_standalone(manifest_by_name.get(name, []))
+            standalone = runs_standalone(manifest_by_name.get(name, []), dispatch_groups)
         if standalone and not _has_fail_open_decorator(impl_path):
             drifts.append(
                 f"FAIL-OPEN MISSING hooks/{role}/{name}/impl.py: hook runs "

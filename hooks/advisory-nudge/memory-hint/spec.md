@@ -72,6 +72,13 @@ see a hint line *alongside* a block from `block-gh-state-all` (exit 2) or an
 `ask` from `side-effect-scan`. Co-firing is intentional: the hint can
 clarify *why* a block fired.
 
+Since #1239 the `Bash` leg is a member of the `PreToolUse(Bash)` dispatch
+group, where members run in manifest order and a deny ends the group at
+once. The leg is declared first in that roster so its stderr is forwarded
+before any deny can return — pinned by
+`tests/hooks/_lib/test_dispatch.py::test_memory_hint_runs_before_any_bash_deny`.
+The other matchers keep their own standalone node.
+
 ### Matching semantics
 
 - **Whole-token equality, case-sensitive.** `hookKeywords: [kubectl]` matches

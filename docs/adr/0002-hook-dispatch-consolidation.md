@@ -164,6 +164,19 @@ decision — eager import is already well under the per-process baseline.
 - Stop-hook sequential ordering and the `completion-verify` role.
 - `UserPromptSubmit`, `Edit`/`Write`/`NotebookEdit` matchers, and every event
   other than `PreToolUse(Bash)` (future groups are a follow-up, not this ADR).
+  Extended since: the `Edit|Write`, `Edit|NotebookEdit|Write` and
+  `Bash|Edit|Write` groups (#1168), the Stop decision lane (#1169), and the
+  `PostToolUse(Bash)` group (#1239) — see §7. A PostToolUse group reuses the
+  event-agnostic lanes (exit 2, `additionalContext` merge) with one
+  difference: an exit-2 member does not end the group. The tool has already
+  run and standalone every member ran regardless of its siblings, so the
+  group runs the whole roster and returns 2 afterwards (a PreToolUse deny
+  still returns at once — the blocked call has nothing left to gate).
+  `bypass-telemetry` is declared first in the manifest: members run in
+  array order, and the one still ahead when the deadline is spent is the
+  one skipped — the audit record must not be it. It does NOT recognise a top-level `{"decision": "block"}` on PostToolUse,
+  which no member emits today — a member that starts to would need its own
+  lane, the way Stop got one.
 - Each hook's `impl.py` source and its `spec.md`.
 - `_lib/_hook_utils.py` / `_lib/_hook_io.py` public API.
 
@@ -294,9 +307,10 @@ Decision record only. No code change.
 
 ## 7. Decision record
 
-| Date       | Decision                       | Decided by         |
-| ---------- | ------------------------------ | ------------------ |
-| 2026-06-05 | ADR drafted, Status = Proposed | praxis maintainers |
+| Date       | Decision                                                                                                              | Decided by         |
+| ---------- | --------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| 2026-06-05 | ADR drafted, Status = Proposed                                                                                        | praxis maintainers |
+| 2026-09-03 | Scope extended to `PostToolUse(Bash)` (#1239); multi-matcher hooks split their `Bash` leg into the exact-`Bash` group | praxis maintainers |
 
 ---
 

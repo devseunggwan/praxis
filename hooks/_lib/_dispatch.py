@@ -380,6 +380,14 @@ def run_group(
         budget - _GROUP_BUDGET_MARGIN_SEC, _MEMBER_SKIP_FLOOR_SEC
     )
     results = []
+    # A PreToolUse deny ends the group at once (below): the tool call is
+    # blocked, so the members after it have nothing left to gate. On any
+    # other event the tool has already run, and standalone every member ran
+    # regardless of its siblings' exit codes — so an exit-2 member must not
+    # silence the ones after it (a blocking anchor-comment-gate would drop
+    # bypass-telemetry's record). Remember the first blocking output and
+    # keep going; the group still returns 2 once every member has spoken.
+    blocking_stdout: Optional[str] = None
     for role, name, impl in members:
         member = (role, name)
         remaining = deadline - time.monotonic()
@@ -417,9 +425,16 @@ def run_group(
         if member_se:
             sys.stderr.write(member_se)
         if member_rc == 2 or (is_pretooluse and _DENY_MARKER in member_so):
-            if member_so:
-                sys.stdout.write(member_so)
-            return 2
+            if is_pretooluse:
+                if member_so:
+                    sys.stdout.write(member_so)
+                return 2
+            if blocking_stdout is None:
+                blocking_stdout = member_so
+    if blocking_stdout is not None:
+        if blocking_stdout:
+            sys.stdout.write(blocking_stdout)
+        return 2
 
     # Most-restrictive decision wins: deny > ask > allow. Deny already returned
     # from the loop above, so only ask is left to outrank a plain allow. The

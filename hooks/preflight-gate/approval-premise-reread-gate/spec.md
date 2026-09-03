@@ -110,9 +110,12 @@ for itself.
 
 ## Registration
 
+Two manifest entries (#1239): the `Bash` leg runs inside the `PreToolUse(Bash)`
+dispatch group, the `mcp__.*` leg stays a standalone node.
+
 ```json
 {
-  "matcher": "Bash|mcp__.*",
+  "matcher": "mcp__.*",
   "hooks": [
     {
       "type": "command",

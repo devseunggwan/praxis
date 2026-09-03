@@ -166,19 +166,28 @@ def test_args_entry_in_the_group_still_counts_as_standalone():
     # The runtime excludes an args-declaring member from the group, so the hook
     # runs on its own and needs @fail_open. Judged by (event, matcher) alone it
     # reads as dispatch-wrapped and the requirement was skipped.
+    groups = frozenset({("PreToolUse", "Bash"), ("PostToolUse", "Bash")})
     dispatched = [{"event": "PreToolUse", "matcher": "Bash"}]
-    assert check.runs_standalone(dispatched) is False
+    assert check.runs_standalone(dispatched, groups) is False
     assert check.runs_standalone(
-        [{"event": "PreToolUse", "matcher": "Bash", "args": ["--flag"]}]
+        [{"event": "PreToolUse", "matcher": "Bash", "args": ["--flag"]}], groups
     ) is True
-    # An entry outside the group is standalone whether or not it has args.
-    assert check.runs_standalone([{"event": "Stop"}]) is True
+    # An entry outside every group is standalone whether or not it has args.
+    assert check.runs_standalone([{"event": "Stop"}], groups) is True
     # One dispatched entry does not launder a second, args-bearing one.
     assert check.runs_standalone(
-        dispatched + [{"event": "PreToolUse", "matcher": "Bash", "args": ["-x"]}]
+        dispatched + [{"event": "PreToolUse", "matcher": "Bash", "args": ["-x"]}], groups
     ) is True
     # No entries at all: nothing runs standalone.
-    assert check.runs_standalone([]) is False
+    assert check.runs_standalone([], groups) is False
+
+
+def test_standalone_follows_the_manifest_groups_not_a_literal():
+    # A member of any declared group is dispatch-wrapped; the same entry is
+    # standalone once its group is not declared.
+    post = [{"event": "PostToolUse", "matcher": "Bash"}]
+    assert check.runs_standalone(post, frozenset({("PostToolUse", "Bash")})) is False
+    assert check.runs_standalone(post, frozenset({("PreToolUse", "Bash")})) is True
 
 
 def _matcherless_hooks_json(nodes: list[dict]) -> dict:
