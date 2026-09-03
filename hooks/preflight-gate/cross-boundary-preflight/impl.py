@@ -80,6 +80,10 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
     remaining_budget,
 )
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from _hosts import (  # type: ignore[import-not-found]  # noqa: E402
+    installed_hook_names,
+    runtime_host,
+)
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     Token,
@@ -700,14 +704,34 @@ def _has_heredoc(seg: list[Token]) -> bool:
 # Output helpers
 # ---------------------------------------------------------------------------
 
+# The item ② row names a sibling gate, and that gate carries a `hosts`
+# whitelist while this hook carries none — so the row shipped to platforms the
+# gate is stripped from (issue #1245, same shape as #1154). Membership is read
+# from the manifest rather than hardcoded, so a later whitelist change cannot
+# leave a stale row behind.
+_CALLER_EVIDENCE_GATE = "block-pr-without-caller-evidence"
+
+
 def _build_checklist(
     subcommand: tuple[str, str],
     repo: str,
     from_flag: bool = True,
     selector: str = "",
+    host: str | None = None,
 ) -> str:
+    """Render the pre-flight ask text for `subcommand` against `repo`.
+
+    `host` is the platform this run is executing on, used only to drop item ②
+    where its gate is not installed. None (an unresolvable or unknown host)
+    keeps every row: naming an absent gate wastes a reader's time, while
+    dropping a present one hides a hard block, so wrong-but-complete is the
+    cheaper failure.
+    """
     obj, verb = subcommand
-    is_pr = obj == "pr"
+    installed = installed_hook_names(host)
+    show_caller_evidence = obj == "pr" and (
+        installed is None or _CALLER_EVIDENCE_GATE in installed
+    )
     if from_flag:
         header = [f"⚠️  Cross-boundary pre-flight: `gh {obj} {verb} --repo {repo}`"]
     else:
@@ -735,9 +759,9 @@ def _build_checklist(
         "     the write local — it lands on the repo named above (praxis #1148).",
         "",
     ]
-    if is_pr:
+    if show_caller_evidence:
         parts += [
-            "  ② Caller chain verified (block-pr-without-caller-evidence hook)",
+            f"  ② Caller chain verified ({_CALLER_EVIDENCE_GATE} hook)",
             "     PR body must contain: `Caller chain verified: <source>`",
             "     Without this line the hook hard-blocks the command.",
             "",
@@ -863,7 +887,10 @@ def main() -> int:
             return 0
         has_repo, repo_val = _has_repo_flag(seg)
         if has_repo:
-            _emit_ask(_build_checklist(subcommand, repo_val) + compound_cascade_hint(command))
+            _emit_ask(
+                _build_checklist(subcommand, repo_val, host=runtime_host())
+                + compound_cascade_hint(command)
+            )
             return 0
 
         # Check 3: no --repo flag → the write still targets the repo `gh`
@@ -888,6 +915,7 @@ def main() -> int:
                     subcommand,
                     "UNRESOLVED — a `GH_REPO` change in this command could not be evaluated",
                     from_flag=False,
+                    host=runtime_host(),
                 )
                 + compound_cascade_hint(command)
             )
@@ -903,6 +931,7 @@ def main() -> int:
                     subcommand,
                     "UNRESOLVED — a `cd` in this command could not be modeled",
                     from_flag=False,
+                    host=runtime_host(),
                 )
                 + compound_cascade_hint(command)
             )
@@ -928,6 +957,7 @@ def main() -> int:
                     implicit_repo,
                     from_flag=False,
                     selector=selector,
+                    host=runtime_host(),
                 )
                 + compound_cascade_hint(command)
             )
