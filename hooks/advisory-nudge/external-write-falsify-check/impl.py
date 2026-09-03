@@ -58,7 +58,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
 )
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
-from _transcript import TRANSCRIPT_SCAN_LINES  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import TRANSCRIPT_SCAN_LINES, tail_lines  # type: ignore[import-not-found]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -250,14 +250,8 @@ def _recent_bash_commands(transcript_path: str) -> list[str]:
     """Return recent Bash command strings from the last N transcript JSONL lines."""
     if not transcript_path or not os.path.isfile(transcript_path):
         return []
-    try:
-        with open(transcript_path, "r", encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
-    except OSError:
-        return []
-
     cmds: list[str] = []
-    for line in lines[-TRANSCRIPT_SCAN_LINES:]:
+    for line in tail_lines(transcript_path, TRANSCRIPT_SCAN_LINES):
         line = line.strip()
         if not line:
             continue
@@ -476,14 +470,8 @@ def _recent_user_messages(transcript_path: str, count: int) -> list[str]:
     """
     if not transcript_path or not os.path.isfile(transcript_path):
         return []
-    try:
-        with open(transcript_path, "r", encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
-    except OSError:
-        return []
-
     msgs: list[str] = []
-    for line in reversed(lines[-TRANSCRIPT_SCAN_LINES:]):
+    for line in reversed(tail_lines(transcript_path, TRANSCRIPT_SCAN_LINES)):
         line = line.strip()
         if not line:
             continue
