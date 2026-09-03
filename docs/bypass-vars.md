@@ -52,6 +52,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_PUSH_VERIFY_BYPASS` | `push-remote-ref-verify` | Skip the post-push remote-ref verification |
 | `PRAXIS_PR_THREAD_ADVISORY_BYPASS` | `pr-thread-resolve-advisory` | Skip the post-push unresolved-review-thread advisory |
 | `PRAXIS_PATH_PROBE_SKIP` | `path-probe-gate` | Skip the deep-path write gate |
+| `PRAXIS_UNENFORCED_STEP_SKIP` | `unenforced-step-advisory` | Silence the unenforced-mandatory-step advisory |
 | `PRAXIS_EXCLUSION_PROBE_SKIP` | `exclusion-probe-gate` | Skip the unprobed-exclusion-directive content gate |
 | `PRAXIS_MD_ESCAPE_SKIP` | `pre-edit-md-escape-advisory` | Skip the markdown-escape advisory |
 | `PRAXIS_PBGUARD_SKIP` | `pre-edit-protected-branch-guard` | Skip the protected-branch edit guard |
@@ -100,6 +101,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_CLUSTER_APPROVAL_STRICT` | `external-write-falsify-check` | |
 | `PRAXIS_SOURCE_CITATION_STRICT` | `source-citation-probe-gate` | |
 | `PRAXIS_CALLER_PROBE_STRICT` | `caller-probe-gate` | |
+| `PRAXIS_UNENFORCED_STEP_STRICT` | `unenforced-step-advisory` | |
 
 ## Config (tune behaviour)
 
