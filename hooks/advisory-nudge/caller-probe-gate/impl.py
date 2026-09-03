@@ -64,6 +64,7 @@ from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E4
 )
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import tail_lines  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
     safe_tokenize,
@@ -259,14 +260,10 @@ def _recent_search_probes(transcript_path: str) -> list[str]:
     """
     if not transcript_path or not os.path.isfile(transcript_path):
         return []
-    try:
-        with open(transcript_path, "r", encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
-    except OSError:
-        return []
+    lines = tail_lines(transcript_path, CALLER_PROBE_SCAN_LINES)
 
     probes: list[str] = []
-    for line in lines[-CALLER_PROBE_SCAN_LINES:]:
+    for line in lines:
         line = line.strip()
         if not line:
             continue

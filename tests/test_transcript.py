@@ -475,6 +475,12 @@ _CONSUMERS = {
     # meant to serve, so it binds the turn reader and the user-message reader.
     HOOKS / "preflight-gate" / "fan-out-scope-gate" / "impl.py":
         ["load_current_turn", "read_last_user_message"],
+    # Match only against the last N lines, so they read the tail instead of
+    # `readlines()` over the whole transcript (#1240).
+    HOOKS / "advisory-nudge" / "caller-probe-gate" / "impl.py": ["tail_lines"],
+    HOOKS / "advisory-nudge" / "source-citation-probe-gate" / "impl.py": ["tail_lines"],
+    HOOKS / "advisory-nudge" / "pre-output-falsification-gate" / "impl.py": ["tail_lines"],
+    HOOKS / "advisory-nudge" / "external-write-falsify-check" / "impl.py": ["tail_lines"],
 }
 
 _CONSTANT_CONSUMERS = [
@@ -789,6 +795,69 @@ class TestReadFailurePropagates:
         self._explode_on_binary_open(monkeypatch, path)
         with pytest.raises(T.TranscriptReadError):
             list(T._iter_lines_backwards(path, 1024))
+
+
+class TestTailLines:
+    """`tail_lines` — the last-N-lines reader behind the advisory hooks (#1240)."""
+
+    @staticmethod
+    def _write(path, lines, trailing_newline=True):
+        text = "\n".join(lines) + ("\n" if trailing_newline else "")
+        path.write_text(text, encoding="utf-8")
+
+    def test_returns_the_last_n_lines_in_file_order(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        self._write(path, [f'{{"i": {i}}}' for i in range(10)])
+        assert T.tail_lines(str(path), 3) == ['{"i": 7}', '{"i": 8}', '{"i": 9}']
+
+    def test_file_shorter_than_n_returns_every_line(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        self._write(path, ['{"i": 1}', '{"i": 2}'])
+        assert T.tail_lines(str(path), 400) == ['{"i": 1}', '{"i": 2}']
+
+    def test_last_line_without_newline_is_included(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        self._write(path, ['{"i": 1}', '{"i": 2'], trailing_newline=False)
+        assert T.tail_lines(str(path), 2) == ['{"i": 1}', '{"i": 2']
+
+    def test_trailing_blank_lines_count_as_lines(self, tmp_path):
+        """Only the split artifact after the final newline is dropped."""
+        path = tmp_path / "t.jsonl"
+        path.write_bytes(b'{"i": 1}\n{"i": 2}\n\n\n')
+        assert T.tail_lines(str(path), 3) == ['{"i": 2}', "", ""]
+
+    def test_matches_readlines_semantics_on_a_multi_chunk_file(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        lines = [f'{{"i": {i}, "pad": "{"x" * 3000}"}}' for i in range(500)]
+        self._write(path, lines)
+        expected = [ln.rstrip("\n") for ln in path.open(encoding="utf-8").readlines()][-400:]
+        assert T.tail_lines(str(path), 400) == expected
+
+    def test_default_read_is_not_capped_by_bytes(self, tmp_path):
+        """The callers' contract is the last N lines, however wide they are:
+        a cap that stopped short would hand a gate a window that looks
+        complete but is missing the evidence just outside the suffix."""
+        path = tmp_path / "t.jsonl"
+        lines = [f'{{"i": {i}, "pad": "{"x" * 200_000}"}}' for i in range(60)]
+        self._write(path, lines)  # 60 lines, ~12 MB — past the 8 MB turn bound
+        got = T.tail_lines(str(path), 50)
+        assert len(got) == 50 and got[0].startswith('{"i": 10,')
+
+    def test_explicit_byte_cap_returns_the_most_recent_lines_it_reached(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        self._write(path, [f'{{"i": {i}}}' for i in range(100)])
+        got = T.tail_lines(str(path), 100, max_bytes=40)
+        assert got and got[-1] == '{"i": 99}' and len(got) < 100
+
+    def test_missing_or_unreadable_file_is_empty(self, tmp_path):
+        assert T.tail_lines(str(tmp_path / "nope.jsonl"), 5) == []
+        assert T.tail_lines(str(tmp_path), 5) == []
+
+    def test_undecodable_bytes_are_replaced_not_raised(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        path.write_bytes(b'{"ok": 1}\n\xff\xfe{"bad": 1}\n')
+        got = T.tail_lines(str(path), 2)
+        assert got[0] == '{"ok": 1}' and "\ufffd" in got[1]
 
 
 class TestReduceTranscriptResumable:
