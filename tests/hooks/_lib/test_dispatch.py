@@ -55,19 +55,22 @@ NOOP_PAYLOAD = json.dumps(
 # --------------------------------------------------------------------------- #
 
 def test_group_members_count_and_roles():
-    # Exact-`Bash` matcher only. Multi-tool hooks (memory-hint,
-    # secret-print-redaction-advisory, external-api-literal-trigger,
+    # Exact-`Bash` matcher only. Multi-tool hooks
+    # (secret-print-redaction-advisory, external-api-literal-trigger,
     # block-personal-asset-leak) are NOT in this group — since #1168 the
-    # `Bash|Edit|Write` trio forms its own dispatch group and memory-hint
-    # stays standalone (sole hook on its matcher).
+    # `Bash|Edit|Write` trio forms its own dispatch group. Hooks that ALSO
+    # fire on other tools (fan-out-scope-gate, memory-hint,
+    # approval-premise-reread-gate) register their Bash leg as its own
+    # exact-`Bash` entry (#1239), so they are members here and standalone on
+    # their remaining matcher.
     members = _dispatch.group_members("PreToolUse", "Bash")
-    assert len(members) == 49, f"expected 49 exact-Bash members, got {len(members)}"
+    assert len(members) == 52, f"expected 52 exact-Bash members, got {len(members)}"
     # every impl path must exist on disk
     for role, name, impl in members:
         assert impl.exists(), f"missing impl for {role}/{name}: {impl}"
     roles = [role for role, _name, _impl in members]
-    assert roles.count("preflight-gate") == 26
-    assert roles.count("advisory-nudge") == 23
+    assert roles.count("preflight-gate") == 28
+    assert roles.count("advisory-nudge") == 24
 
 
 def test_group_members_host_filter():
@@ -81,7 +84,7 @@ def test_group_members_host_filter():
     claude = _dispatch.group_members("PreToolUse", "Bash", host="claude")
     codex = _dispatch.group_members("PreToolUse", "Bash", host="codex")
 
-    assert len(unfiltered) == 49  # host=None -> canonical, unfiltered view
+    assert len(unfiltered) == 52  # host=None -> canonical, unfiltered view
     # the only host-restricted Bash members are the 6 claude-only guards
     assert names(claude) == names(unfiltered)
     assert "block-commit-without-codex-review" not in names(codex)
@@ -90,7 +93,7 @@ def test_group_members_host_filter():
     assert "commit-decomposition-advisory" not in names(codex)
     assert "model-routing-advisory" not in names(codex)
     assert "block-unmatched-glob" not in names(codex)
-    assert len(codex) == 43
+    assert len(codex) == 46
 
 
 # --------------------------------------------------------------------------- #
@@ -175,6 +178,14 @@ def _noop_payload_for(event: str, matcher: str) -> str:
         # would exercise the members' PreToolUse legs instead.
         payload["tool_response"] = {"stdout": "", "stderr": "", "interrupted": False}
     return json.dumps(payload)
+
+
+def test_memory_hint_runs_before_any_bash_deny():
+    # memory-hint speaks through stderr only and its spec promises the hint
+    # co-fires with a deny. In the group a deny returns at once and stderr is
+    # forwarded per member as it resolves, so the leg has to run first.
+    members = _dispatch.group_members("PreToolUse", "Bash")
+    assert members[0][1] == "memory-hint"
 
 
 def test_edit_write_group_members():

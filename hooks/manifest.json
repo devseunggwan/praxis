@@ -108,7 +108,7 @@
       "name": "memory-hint",
       "role": "advisory-nudge",
       "event": "PreToolUse",
-      "matcher": "AskUserQuestion|Bash|Edit|NotebookEdit|Write",
+      "matcher": "Bash",
       "requires": [
         "hookable-memory-store"
       ],
@@ -268,7 +268,14 @@
       "name": "fan-out-scope-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",
-      "matcher": "Agent|Bash",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "fan-out-scope-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Agent",
       "timeout": 5
     },
     {
@@ -766,6 +773,21 @@
       }
     },
     {
+      "name": "memory-hint",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "AskUserQuestion|Edit|NotebookEdit|Write",
+      "requires": [
+        "hookable-memory-store"
+      ],
+      "timeout": 5,
+      "mode": {
+        "state_paths": [
+          "PRAXIS_MEMORY_DIR"
+        ]
+      }
+    },
+    {
       "name": "external-api-literal-trigger",
       "role": "advisory-nudge",
       "event": "PreToolUse",
@@ -952,7 +974,14 @@
       "name": "approval-premise-reread-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",
-      "matcher": "Bash|mcp__.*",
+      "matcher": "Bash",
+      "timeout": 5
+    },
+    {
+      "name": "approval-premise-reread-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "mcp__.*",
       "timeout": 5
     },
     {

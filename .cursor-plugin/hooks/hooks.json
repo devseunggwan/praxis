@@ -45,16 +45,6 @@
         ]
       },
       {
-        "matcher": "AskUserQuestion|Bash|Edit|NotebookEdit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/memory-hint.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -65,7 +55,7 @@
         ]
       },
       {
-        "matcher": "Agent|Bash",
+        "matcher": "Agent",
         "hooks": [
           {
             "type": "command",
@@ -115,6 +105,16 @@
         ]
       },
       {
+        "matcher": "AskUserQuestion|Edit|NotebookEdit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/memory-hint.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "Edit",
         "hooks": [
           {
@@ -160,7 +160,7 @@
         ]
       },
       {
-        "matcher": "Bash|mcp__.*",
+        "matcher": "mcp__.*",
         "hooks": [
           {
             "type": "command",
