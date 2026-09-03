@@ -486,6 +486,9 @@ _CONSUMERS = {
     # as soon as the matched trigger's facts are settled (#1064).
     HOOKS / "advisory-nudge" / "unenforced-step-advisory" / "impl.py":
         ["iter_transcript"],
+    # Also correlates each Bash tool_use with its result, so it binds the
+    # refusal sentence the never-ran markers are keyed on (#1117).
+    HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py": ["tail_lines"],
 }
 
 _CONSTANT_CONSUMERS = [
