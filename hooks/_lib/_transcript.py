@@ -752,17 +752,16 @@ def _flatten_strings(value, limit: int = REJECTION_TEXT_MAX_CHARS) -> str:
 _CURSOR_VERSION = 1
 
 
-def _cursor_matches(cursor: dict, path: str) -> bool:
-    """True when `cursor` still describes the file at `path`.
+def _cursor_matches(cursor: dict, st: os.stat_result, fh) -> bool:
+    """True when `cursor` still describes the open transcript `fh` (stat `st`).
 
     The offset is trusted only when the file is the same inode, has not
     shrunk, and the byte before the offset is a newline — a truncate-and-
-    rewrite to a longer file would otherwise resume mid-record.
+    rewrite to a longer file would otherwise resume mid-record. Identity comes
+    from the handle that is about to be scanned, never from a fresh stat of
+    the path: a transcript replaced in between would otherwise pair the new
+    inode with an offset and state derived from the old one.
     """
-    try:
-        st = os.stat(path)
-    except OSError:
-        return False
     if cursor.get("version") != _CURSOR_VERSION:
         return False
     offset = cursor.get("offset")
@@ -773,14 +772,13 @@ def _cursor_matches(cursor: dict, path: str) -> bool:
     if offset == 0:
         return True
     try:
-        with open(path, "rb") as fh:
-            fh.seek(offset - 1)
-            return fh.read(1) == b"\n"
+        fh.seek(offset - 1)
+        return fh.read(1) == b"\n"
     except OSError:
         return False
 
 
-def _load_cursor(cursor_path: str, path: str) -> dict | None:
+def _load_cursor(cursor_path: str) -> dict | None:
     try:
         with open(cursor_path, encoding="utf-8") as fh:
             cursor = json.load(fh)
@@ -788,13 +786,12 @@ def _load_cursor(cursor_path: str, path: str) -> dict | None:
         return None
     if not isinstance(cursor, dict) or not isinstance(cursor.get("state"), dict):
         return None
-    return cursor if _cursor_matches(cursor, path) else None
+    return cursor
 
 
-def _save_cursor(cursor_path: str, path: str, offset: int, state: dict) -> None:
+def _save_cursor(cursor_path: str, st: os.stat_result, offset: int, state: dict) -> None:
     """Atomic write; a failed save costs one full re-scan, never a wrong one."""
     try:
-        st = os.stat(path)
         payload = {
             "version": _CURSOR_VERSION,
             "offset": offset,
@@ -847,23 +844,31 @@ def reduce_transcript_resumable(
     takes). Fail-open: an unreadable transcript yields the resumed or empty
     state, never an exception.
     """
-    cursor = _load_cursor(cursor_path, path) if cursor_path else None
-    state = None
-    if cursor is not None:
+    cursor = _load_cursor(cursor_path) if cursor_path else None
+
+    def resumed():
+        if cursor is None:
+            return None
         try:
-            state = decode(cursor["state"]) if decode else cursor["state"]
+            return decode(cursor["state"]) if decode else cursor["state"]
         except (KeyError, TypeError, ValueError, AttributeError):
-            state = None  # a stale shape costs one full re-scan
-    if state is None:
-        offset = 0
-        state = new_state()
-    else:
-        offset = cursor["offset"]
+            return None  # a stale shape costs one full re-scan
+
     try:
         fh = open(path, "rb")
     except OSError:
-        return state
+        return resumed() or new_state()  # unreadable: what the last Stop knew
     with fh:
+        try:
+            st = os.fstat(fh.fileno())
+        except OSError:
+            return resumed() or new_state()
+        state = resumed() if cursor is not None and _cursor_matches(cursor, st, fh) else None
+        if state is None:
+            offset = 0
+            state = new_state()
+        else:
+            offset = cursor["offset"]
         fh.seek(offset)
         while True:
             raw = fh.readline()
@@ -876,5 +881,5 @@ def reduce_transcript_resumable(
             if obj is not None:
                 reduce_event(state, obj)
     if cursor_path:
-        _save_cursor(cursor_path, path, offset, encode(state) if encode else state)
+        _save_cursor(cursor_path, st, offset, encode(state) if encode else state)
     return state

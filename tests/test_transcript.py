@@ -873,6 +873,41 @@ class TestReduceTranscriptResumable:
         assert self._run(path, cursor, seen) == {"n": 2}
         assert seen == [7, 8]
 
+    def test_file_replaced_mid_scan_binds_the_cursor_to_the_scanned_inode(self, tmp_path):
+        """The saved ino/dev must come from the handle that was read, not a
+        later stat of the path: a transcript swapped during the scan would
+        otherwise pair the new inode with the old file's offset and state,
+        and the next run would resume inside a file it never folded."""
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        self._append(path, [{"i": 1}, {"i": 2}])
+        other = tmp_path / "other.jsonl"
+        self._append(other, [{"i": 7}, {"i": 8}, {"i": 9}])
+
+        def swap_then_count(state, ev):
+            state["n"] += 1
+            if not state.get("swapped"):
+                state["swapped"] = True
+                os.replace(other, path)  # replaced while the old handle is scanned
+
+        state = T.reduce_transcript_resumable(
+            str(path), cursor, lambda: {"n": 0}, swap_then_count
+        )
+        assert state["n"] == 2
+        seen: list = []
+        assert self._run(path, cursor, seen) == {"n": 3}
+        assert seen == [7, 8, 9]
+
+    def test_unreadable_transcript_returns_the_resumed_state(self, tmp_path):
+        """Fail-open keeps what the last Stop knew rather than an empty state."""
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        self._append(path, [{"i": 1}, {"i": 2}])
+        assert self._run(path, cursor, []) == {"n": 2}
+        path.unlink()
+        assert self._run(path, cursor, []) == {"n": 2}
+        assert self._run(tmp_path / "never.jsonl", None, []) == {"n": 0}
+
     def test_undecodable_cursor_state_restarts_without_raising(self, tmp_path):
         path = tmp_path / "t.jsonl"
         cursor = tmp_path / "cursor.json"
