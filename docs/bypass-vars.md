@@ -100,6 +100,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_AUTHOR_EXEMPT_STRICT` | `external-write-falsify-check` | |
 | `PRAXIS_CLUSTER_APPROVAL_STRICT` | `external-write-falsify-check` | |
 | `PRAXIS_SOURCE_CITATION_STRICT` | `source-citation-probe-gate` | |
+| `PRAXIS_COMPOSED_COMMAND_STRICT` | `composed-command-gate` | |
 | `PRAXIS_CALLER_PROBE_STRICT` | `caller-probe-gate` | |
 | `PRAXIS_UNENFORCED_STEP_STRICT` | `unenforced-step-advisory` | |
 
