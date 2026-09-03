@@ -491,10 +491,21 @@ _CONSUMERS = {
     HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py": ["tail_lines"],
 }
 
-_CONSTANT_CONSUMERS = [
-    HOOKS / "advisory-nudge" / "external-write-falsify-check" / "impl.py",
-    HOOKS / "advisory-nudge" / "pre-output-falsification-gate" / "impl.py",
-]
+# Constants are values, not bindings, so the function map above cannot pin them:
+# a hook that redefines one locally keeps passing every binding test while its
+# scan window or refusal wording silently drifts from the shared source.
+_CONSTANT_CONSUMERS = {
+    HOOKS / "advisory-nudge" / "external-write-falsify-check" / "impl.py":
+        ["TRANSCRIPT_SCAN_LINES"],
+    HOOKS / "advisory-nudge" / "pre-output-falsification-gate" / "impl.py":
+        ["TRANSCRIPT_SCAN_LINES"],
+    HOOKS / "advisory-nudge" / "momentum-rule-retrieval-gate" / "impl.py":
+        ["TRANSCRIPT_SCAN_LINES"],
+    HOOKS / "advisory-nudge" / "source-citation-probe-gate" / "impl.py":
+        ["TRANSCRIPT_SCAN_LINES"],
+    HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py":
+        ["TRANSCRIPT_SCAN_LINES", "REJECTION_PHRASE"],
+}
 
 
 def _load_module(path: Path):
@@ -537,9 +548,37 @@ class TestSingleSource:
                 )
 
     def test_constant_consumers_bind_lib_value(self):
-        for path in _CONSTANT_CONSUMERS:
+        for path, names in _CONSTANT_CONSUMERS.items():
             mod = _load_module(path)
-            assert mod.TRANSCRIPT_SCAN_LINES == T.TRANSCRIPT_SCAN_LINES
+            for name in names:
+                assert getattr(mod, name) == getattr(T, name), (
+                    f"{path.parent.name} carries a different {name} value"
+                )
+
+    def test_constant_consumers_list_every_constant_imported(self):
+        """A constant the map omits is unpinned — same gap as an omitted
+        reader, but invisible to the binding tests because a constant is a
+        value rather than an object identity."""
+        import ast
+
+        constants = {
+            s
+            for s in dir(T)
+            if s.isupper() and not callable(getattr(T, s, None))
+        }
+        for impl in sorted(HOOKS.glob("*/*/impl.py")):
+            imported: set[str] = set()
+            for node in ast.walk(ast.parse(impl.read_text())):
+                if isinstance(node, ast.ImportFrom) and node.module == "_transcript":
+                    imported |= {a.name for a in node.names}
+            wanted = imported & constants
+            if not wanted:
+                continue
+            declared = set(_CONSTANT_CONSUMERS.get(impl, []))
+            assert wanted <= declared, (
+                f"{impl.parent.name} imports {sorted(wanted - declared)} "
+                f"but _CONSTANT_CONSUMERS does not list them"
+            )
 
     def test_no_local_redefinitions_remain(self):
         offenders = []
