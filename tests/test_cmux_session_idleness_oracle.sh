@@ -234,4 +234,31 @@ else
   fail "an unreadable session was called idle"
 fi
 
+# --- Gate 6: an unusable threshold does not answer ----------------------------
+# A negative threshold makes `[[ age -lt threshold ]]` false for every age, and
+# bash evaluates a non-numeric one to 0, so both would wave a fresh pane past
+# the quiet window and leave the screen match deciding alone. PARKED is the
+# fixture that DOES pass at a valid threshold, so a failure here is attributable
+# to the threshold and nothing else.
+for bad in -1 abc ""; do
+  out=$(ask_oracle "$PARKED" "$bad")
+  rc="${out%%|*}"
+  if [ "$rc" != "0" ]; then
+    pass "threshold [$bad] yields no idle verdict (unusable input keeps the stricter tier)"
+  else
+    fail "threshold [$bad] produced an idle verdict"
+  fi
+done
+
+# Positive control for gate 6: the same fixture, same driver, at a valid
+# threshold, still answers — so the three refusals above are the threshold
+# being rejected, not the oracle having gone silent.
+out=$(ask_oracle "$PARKED" 0)
+rc="${out%%|*}"
+if [ "$rc" = "0" ]; then
+  pass "positive control: the same fixture still answers at a valid threshold"
+else
+  fail "positive control failed — the oracle is silent regardless of threshold"
+fi
+
 summary_and_exit

@@ -211,6 +211,14 @@ orphan_idle_evidence() {
 
   # No activity clock at all — the oracle has no input, so it does not answer.
   [[ -z "$newest" ]] && return 1
+
+  # A threshold that is not a non-negative integer is an unusable input, not a
+  # permissive one: `[[ 0 -lt -1 ]]` is false, so a negative (or non-numeric,
+  # which bash evaluates to 0) CMUX_IDLE_ACTIVITY_SECS would wave every fresh
+  # pane past the quiet window and leave the screen match deciding alone — the
+  # exact single-signal reading this oracle exists to reject.
+  [[ "$IDLE_ACTIVITY_SECS" =~ ^[0-9]+$ ]] || return 1
+
   age=$((now - newest))
   [[ $age -lt $IDLE_ACTIVITY_SECS ]] && return 1
 
