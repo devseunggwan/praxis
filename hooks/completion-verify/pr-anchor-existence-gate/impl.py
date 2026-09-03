@@ -25,6 +25,20 @@ immediately (same rationale as #1076).
 
   Fires when createdPRs - postedPRs != {}.
 
+Issue #1250, gap 1: invocations are separated by an unquoted NEWLINE as well
+as by a control operator — `cd <worktree>` on one line and `gh pr create` on
+the next is two invocations, and treating them as one made the gate blind to
+the create entirely. A heredoc body is excluded, so a transcribed `gh` line
+inside an anchor body is never credited as a post, and a leading `VAR=value`
+assignment no longer hides the invocation behind it.
+
+Issue #1250, gap 2: an anchor REVISION (`gh api -X PATCH
+.../issues/comments/<id>`) clears the gate when exactly one created PR is
+still unanchored AND the revision came after that PR was created. That path
+carries a comment id and never a PR number, so the attribution is by
+elimination; two or more unanchored PRs is ambiguous and reports rather than
+guesses, and a revision that predates the create cannot be its anchor.
+
 ## Escalation (issue #1113's explicit design choice)
 
 No sibling gate does this — it is a deliberate deviation, not a missed
@@ -130,6 +144,18 @@ _API_METHOD_RE = re.compile(r"(?:--method|-X)\s+([A-Za-z]+)", re.IGNORECASE)
 _API_BODY_RE = re.compile(r"(^|\s)(-f|-F|--field|--raw-field|--input)\b", re.IGNORECASE)
 _API_TARGET_RE = re.compile(r"gh\s+api\s+[^\n]*?(?:issues|pulls)/(\d+)/comments\b", re.IGNORECASE)
 
+# The anchor *edit* path. The convention is one anchor per PR revised in place
+# by comment id, so from rev 2 on every update is a PATCH against
+# `issues/comments/<id>` — a comment id, not a PR number, which is why this is
+# a separate pattern from `_API_TARGET_RE` and why the PR it belongs to cannot
+# be recovered from the command (issue #1250).
+_API_ANCHOR_EDIT_RE = re.compile(r"(?:issues|pulls)/comments/(\d+)\b", re.IGNORECASE)
+_API_WRITE_METHODS = frozenset({"POST", "PATCH", "PUT"})
+
+# `VAR=value cmd` is one command, and shlex hands back the assignment as the
+# segment's first token — which defeats every `_starts_with` check below.
+_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
 # Control operators that separate independent invocations in a compound Bash
 # command. A prior regex-based segmenter (`gh\s+pr\s+create\b([^\n]*?)(?=&&|;
 # |\||$)`) matched these unquoted — `-b "verified && ready" 178` truncated the
@@ -142,26 +168,115 @@ _API_TARGET_RE = re.compile(r"gh\s+api\s+[^\n]*?(?:issues|pulls)/(\d+)/comments\
 _CONTROL_OPERATORS = frozenset({"&&", "||", ";", ";;", "|"})
 
 
+def _logical_lines(cmd: str) -> list[str]:
+    """Split `cmd` at the newlines that actually separate invocations.
+
+    A newline inside quotes, after a backslash continuation, or inside a
+    heredoc body separates nothing. The heredoc case is the one that costs
+    precision here rather than recall: an anchor body written through
+    `<<'EOF'` routinely carries transcribed `gh pr comment` / `gh api` lines
+    that never ran, and crediting one of those as a post would silence the
+    gate on a PR that has no anchor at all.
+    """
+    lines: list[str] = []
+    i, n = 0, len(cmd)
+    while i < n:
+        start = i
+        quote = ""
+        heredocs: list[str] = []
+        while i < n:
+            ch = cmd[i]
+            if quote:
+                if ch == "\\" and quote == '"':
+                    i += 2
+                    continue
+                if ch == quote:
+                    quote = ""
+                i += 1
+                continue
+            if ch in "'\"":
+                quote = ch
+                i += 1
+                continue
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == "\n":
+                break
+            if cmd.startswith("<<", i) and not cmd.startswith("<<<", i):
+                i = _read_heredoc_delimiter(cmd, i, heredocs)
+                continue
+            i += 1
+        lines.append(cmd[start:i])
+        i += 1  # step over the newline
+        for delim in heredocs:
+            i = _skip_heredoc_body(cmd, i, delim)
+    return lines
+
+
+def _read_heredoc_delimiter(cmd: str, i: int, heredocs: list[str]) -> int:
+    """Consume a `<<`/`<<-` redirection at `i`, recording its delimiter."""
+    j = i + 2
+    if j < len(cmd) and cmd[j] == "-":
+        j += 1
+    while j < len(cmd) and cmd[j] in " \t":
+        j += 1
+    if j < len(cmd) and cmd[j] in "'\"":
+        end = cmd.find(cmd[j], j + 1)
+        if end == -1:
+            return j + 1
+        heredocs.append(cmd[j + 1 : end])
+        return end + 1
+    m = re.match(r"[A-Za-z_][A-Za-z0-9_]*", cmd[j:])
+    if not m:
+        return j
+    heredocs.append(m.group(0))
+    return j + len(m.group(0))
+
+
+def _skip_heredoc_body(cmd: str, i: int, delim: str) -> int:
+    """Advance past a heredoc body ending at a line holding only `delim`."""
+    n = len(cmd)
+    while i < n:
+        end = cmd.find("\n", i)
+        line = cmd[i:] if end == -1 else cmd[i:end]
+        i = n if end == -1 else end + 1
+        if line.strip() == delim:
+            break
+    return i
+
+
+def _strip_assignments(seg: list[str]) -> list[str]:
+    """Drop leading `VAR=value` tokens so the invocation itself starts the segment."""
+    i = 0
+    while i < len(seg) and _ASSIGNMENT_RE.match(seg[i]):
+        i += 1
+    return seg[i:]
+
+
 def _split_invocations(cmd: str) -> list[list[str]]:
     """Tokenize `cmd` with shell-quoting semantics and split into one token
-    list per invocation, on unquoted control operators only. `[]` on
-    unbalanced/malformed quoting (fail open — nothing is guessed)."""
-    try:
-        lexer = shlex.shlex(cmd, posix=True, punctuation_chars=True)
-        lexer.whitespace_split = True
-        tokens = list(lexer)
-    except ValueError:
-        return []
+    list per invocation, on unquoted control operators and unquoted newlines
+    alike. `[]` on unbalanced/malformed quoting (fail open — nothing is
+    guessed)."""
     segments: list[list[str]] = []
-    current: list[str] = []
-    for tok in tokens:
-        if tok in _CONTROL_OPERATORS:
-            segments.append(current)
-            current = []
-        else:
-            current.append(tok)
-    segments.append(current)
-    return [seg for seg in segments if seg]
+    for line in _logical_lines(cmd):
+        try:
+            lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+        except ValueError:
+            return []
+        current: list[str] = []
+        for tok in tokens:
+            if tok in _CONTROL_OPERATORS:
+                segments.append(current)
+                current = []
+            else:
+                current.append(tok)
+        segments.append(current)
+    stripped = (_strip_assignments(seg) for seg in segments)
+    return [seg for seg in stripped if seg]
 
 
 def _starts_with(seg: list[str], words: tuple[str, ...]) -> bool:
@@ -191,6 +306,29 @@ def _api_post_targets(segments: list[list[str]]) -> list[str]:
             seg_text = " ".join(seg)
             targets.extend(m.group(1) for m in _API_TARGET_RE.finditer(seg_text))
     return targets
+
+
+def _is_api_write(tokens: list[str]) -> bool:
+    """True when a `gh api` call writes at all — POST, PATCH or PUT. Wider than
+    `_is_api_post` because an anchor revision is a PATCH, and narrower than
+    "not a GET" because DELETE never carries an anchor."""
+    seg = " ".join(tokens)
+    m = _API_METHOD_RE.search(seg)
+    if m:
+        return m.group(1).upper() in _API_WRITE_METHODS
+    return bool(_API_BODY_RE.search(seg))
+
+
+def _api_anchor_edit_ids(segments: list[list[str]]) -> list[str]:
+    """Comment ids revised by a write-method `gh api` call against
+    `issues/comments/<id>`. The PR is unrecoverable from this path — see
+    `_resolve` for the single case where an edit is allowed to clear."""
+    ids: list[str] = []
+    for seg in segments:
+        if not _starts_with(seg, ("gh", "api")) or not _is_api_write(seg):
+            continue
+        ids.extend(m.group(1) for m in _API_ANCHOR_EDIT_RE.finditer(" ".join(seg)))
+    return ids
 
 
 def _create_segments(segments: list[list[str]]) -> list[list[str]]:
@@ -229,6 +367,7 @@ def _reduce_tool_use(
     block: dict,
     pending_creates: list,
     pending_posts: list,
+    pending_edits: list,
     create_tids: set,
     interesting_tids: set,
 ) -> None:
@@ -257,6 +396,13 @@ def _reduce_tool_use(
         pending_posts.append((tid, posted))
         if tid is not None:
             interesting_tids.add(tid)
+    edits = _api_anchor_edit_ids(segments)
+    if edits:
+        # The create count at this point orders the edit against the creates —
+        # an anchor revised BEFORE a PR existed cannot be that PR's anchor.
+        pending_edits.append((tid, edits, len(pending_creates)))
+        if tid is not None:
+            interesting_tids.add(tid)
 
 
 class _ScanState:
@@ -271,13 +417,23 @@ class _ScanState:
     the resumable-scan cursor (issue #1237).
     """
 
-    __slots__ = ("pending_creates", "pending_posts", "create_tids", "interesting_tids", "result_is_error", "create_urls")
+    __slots__ = (
+        "pending_creates",
+        "pending_posts",
+        "pending_edits",
+        "create_tids",
+        "interesting_tids",
+        "result_is_error",
+        "create_urls",
+    )
 
     def __init__(self) -> None:
         # (tool_use id, is_draft) — one entry per `gh pr create` invocation.
         self.pending_creates: list[tuple[str | None, bool]] = []
         # (tool_use id, [PR numbers posted to])
         self.pending_posts: list[tuple[str | None, list[str]]] = []
+        # (tool_use id, [comment ids revised in place], creates seen so far)
+        self.pending_edits: list[tuple[str | None, list[str], int]] = []
         self.create_tids: set[str] = set()
         self.interesting_tids: set[str] = set()
         self.result_is_error: dict[str, bool] = {}
@@ -288,6 +444,7 @@ def _encode_state(state: _ScanState) -> dict:
     return {
         "pending_creates": [list(t) for t in state.pending_creates],
         "pending_posts": [[tid, list(nums)] for tid, nums in state.pending_posts],
+        "pending_edits": [[tid, list(ids), seen] for tid, ids, seen in state.pending_edits],
         "create_tids": sorted(state.create_tids),
         "interesting_tids": sorted(state.interesting_tids),
         "result_is_error": state.result_is_error,
@@ -299,6 +456,7 @@ def _decode_state(data: dict) -> _ScanState:
     state = _ScanState()
     state.pending_creates = [(tid, bool(d)) for tid, d in data["pending_creates"]]
     state.pending_posts = [(tid, list(nums)) for tid, nums in data["pending_posts"]]
+    state.pending_edits = [(tid, list(ids), seen) for tid, ids, seen in data.get("pending_edits", [])]
     state.create_tids = set(data["create_tids"])
     state.interesting_tids = set(data["interesting_tids"])
     state.result_is_error = dict(data["result_is_error"])
@@ -319,7 +477,12 @@ def _reduce_event(state: _ScanState, ev: dict) -> None:
         kind = block.get("type")
         if kind == "tool_use":
             _reduce_tool_use(
-                block, state.pending_creates, state.pending_posts, state.create_tids, state.interesting_tids
+                block,
+                state.pending_creates,
+                state.pending_posts,
+                state.pending_edits,
+                state.create_tids,
+                state.interesting_tids,
             )
         elif kind == "tool_result":
             tid = block.get("tool_use_id")
@@ -372,14 +535,17 @@ def _resolve(state: _ScanState) -> list[str]:
     create_urls = state.create_urls
 
     created: set[str] = set()
-    for tid, is_draft in pending_creates:
+    create_index: dict[str, int] = {}
+    for idx, (tid, is_draft) in enumerate(pending_creates):
         if is_draft:
             continue
         if tid is None or result_is_error.get(tid) is True:
             continue
         urls = create_urls.get(tid, frozenset())
         if len(urls) == 1:
-            created.add(next(iter(urls)))
+            num = next(iter(urls))
+            created.add(num)
+            create_index.setdefault(num, idx)
 
     posted: set[str] = set()
     for tid, nums in pending_posts:
@@ -392,7 +558,34 @@ def _resolve(state: _ScanState) -> list[str]:
             continue
         posted.update(nums)
 
-    return sorted(created - posted, key=int)
+    unanchored = sorted(created - posted, key=int)
+    if len(unanchored) == 1 and _has_confirmed_edit(state, create_index[unanchored[0]]):
+        # The comment id in an `issues/comments/<id>` PATCH names no PR, so an
+        # anchor revision can only be attributed by elimination: exactly one
+        # created PR is still missing an anchor, and this session revised an
+        # anchor in place. Two or more leaves it genuinely ambiguous and the
+        # gate reports all of them — guessing there would clear a PR that has
+        # no anchor. The cost of the one-PR case is a session that revises an
+        # unrelated PR's anchor and never anchors its own (issue #1250).
+        return []
+    return unanchored
+
+
+def _has_confirmed_edit(state: _ScanState, after_create: int) -> bool:
+    """True when an anchor revision (`gh api ... issues/comments/<id>`) landed
+    successfully this session AFTER the create at index `after_create`.
+
+    The ordering is what keeps the elimination honest. A long session that
+    revises earlier PRs' anchors and then opens a new PR would otherwise have
+    that new PR cleared by a revision that predates it — measured live on this
+    gate's own session, where three anchor PATCHes preceded the create.
+    Same confirmation bar as a post: an interrupted call with no matching
+    non-error tool_result does not count.
+    """
+    return any(
+        tid is not None and state.result_is_error.get(tid) is False and ids and seen > after_create
+        for tid, ids, seen in state.pending_edits
+    )
 
 
 def _build_message(unanchored: list[str], blocking: bool) -> str:
