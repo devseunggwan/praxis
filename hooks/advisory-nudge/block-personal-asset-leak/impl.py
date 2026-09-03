@@ -61,7 +61,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path as _Path
 
@@ -261,16 +260,18 @@ def _file_write_is_team_surface(file_path: str, owners: frozenset[str]) -> bool:
         # No git repo / no origin / unparsable owner → fail-open; personal
         # repo target → pass. All four collapse to "not a team surface".
         return False
-    try:
-        proc = subprocess.run(
-            ["git", "-C", base, "check-ignore", "-q", "--", file_path],
-            capture_output=True,
-            timeout=_GIT_TIMEOUT_SEC,
-        )
-        if proc.returncode == 0:
-            return False  # gitignored scratch path (.omc/plans/ etc.) → pass
-    except Exception:
-        pass  # check-ignore failure → keep team-surface verdict (markers real)
+    # `run_git` returns "" on exit 0 and None on every failure, so `is not
+    # None` is exactly the old `returncode == 0` test — a failed, timed-out, or
+    # unspawnable probe keeps the team-surface verdict, since the markers are
+    # real either way. Going through the shared runner clamps the spawn to the
+    # budget the dispatcher publishes: this hook sits in a 5s dispatch group,
+    # and a fixed 2s spawn started with 0.5s of runway left overruns the group
+    # deadline and gets the whole dispatcher killed by the host.
+    if run_git(
+        ["-C", base, "check-ignore", "-q", "--", file_path],
+        timeout=_GIT_TIMEOUT_SEC,
+    ) is not None:
+        return False  # gitignored scratch path (.omc/plans/ etc.) → pass
     return True
 
 

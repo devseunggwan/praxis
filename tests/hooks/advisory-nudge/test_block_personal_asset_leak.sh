@@ -400,17 +400,19 @@ fi
 # uncached, N segments = N identical 2s git calls, which can exceed the 5s
 # manifest timeout. One git call per distinct directory bounds the worst case.
 _cache_out=$(python3 - << PYEOF 2>&1
-import importlib.util, sys, types
+import importlib.util, sys
 spec = importlib.util.spec_from_file_location("impl", "$HOOK")
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 
+# Patch the shared runner the hook imported, not the subprocess module: every
+# git call in this hook now goes through run_git so the spawn is clamped to the
+# dispatch group's remaining budget.
 calls = []
-def _counting_run(argv, **kw):
-    calls.append(list(argv))
-    return types.SimpleNamespace(returncode=0,
-                                 stdout="git@github.com:acme/team.git\n", stderr="")
-mod.subprocess.run = _counting_run
+def _counting_run(args, **kw):
+    calls.append(list(args))
+    return "git@github.com:acme/team.git\n"
+mod.run_git = _counting_run
 
 for _ in range(3):
     if mod._origin_owner("/tmp/same-dir") != "acme":
