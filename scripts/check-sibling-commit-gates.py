@@ -55,6 +55,13 @@ Three things the canary verifies beyond that bare name diff:
    have left both saying "Four" with this canary green. It is now derived from
    the ``← <hook>`` rows of ``GIT_COMMIT_GATE_CHECKLIST`` itself.
 
+   The per-host half of that number is a claim about the *runtime*, not about
+   the literal: the checklist prints only the rows the running host installs
+   (``render_gate_checklist``, issue #1154). Before that filter existed this
+   canary was green while the runtime printed all four rows on `codex` and
+   `cursor` — the host table said two. The renderer's presence is therefore
+   checked here, so removing it fails loudly instead of re-opening that gap.
+
 What this canary does NOT do, deliberately: decide *membership*. Structurally
 parsing each hook's source for commit-subcommand detection was considered and
 rejected as brittle — the detectors differ (`argv[i] != "commit"`, a shared
@@ -137,6 +144,12 @@ _CHECKLIST_BLOCK_RE = re.compile(
     r'GIT_COMMIT_GATE_CHECKLIST\s*=\s*"""(.*?)"""', re.DOTALL
 )
 _CHECKLIST_ARROW_RE = re.compile(r"←\s*([a-z0-9][a-z0-9-]*)")
+
+# The renderer that drops rows the running host does not install (issue #1154).
+# Without it the checklist prints all four rows everywhere, which makes the
+# per-host "in the deny checklist" column below describe behaviour the runtime
+# does not have — the state this checker was green through once already.
+_CHECKLIST_FILTER_RE = re.compile(r"^def render_gate_checklist\(", re.MULTILINE)
 
 # spec.md carries the list as a markdown table; the header row is the anchor.
 # Column 2 is the hook's `hosts` whitelist (`all`, or the host names).
@@ -365,7 +378,14 @@ def checklist_names(repo: Path = REPO) -> tuple[Optional[list[str]], list[str]]:
             f"{CHECKLIST}: GIT_COMMIT_GATE_CHECKLIST carries no '← <hook>' rows — "
             "the checklist count cannot be derived, so nothing was verified"
         ]
-    return names, []
+    drifts: list[str] = []
+    if not _CHECKLIST_FILTER_RE.search(text):
+        drifts.append(
+            f"{CHECKLIST}: no `render_gate_checklist` — the deny checklist is "
+            "printed unfiltered, so the per-host 'in the deny checklist' column "
+            f"in {SPEC} describes coverage the runtime does not have"
+        )
+    return names, drifts
 
 
 def _spec_rows(text: str) -> Optional[list[tuple[str, str]]]:

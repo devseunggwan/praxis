@@ -615,6 +615,20 @@ def test_unreadable_deny_checklist_is_drift_not_a_silent_pass(tmp_path):
     assert any("assignment not found" in d for d in drifts), drifts
 
 
+def test_an_unfiltered_deny_checklist_is_drift(tmp_path):
+    """The per-host checklist column is a claim about what the runtime prints.
+
+    With the renderer gone the checklist prints all four rows on every host,
+    which is the state this canary was green through before issue #1154.
+    """
+    repo = _tree(
+        tmp_path,
+        {gates.CHECKLIST: ("def render_gate_checklist(", "def _render_all(")},
+    )
+    drifts = gates.check(repo)
+    assert any("printed unfiltered" in d for d in drifts), drifts
+
+
 def test_a_rewritten_manifest_is_re_read_not_served_stale(tmp_path):
     """The parse cache must key on the file's bytes, not only on its path.
 
