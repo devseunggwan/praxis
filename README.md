@@ -96,7 +96,7 @@ promoted into blocking:
 | ------ | ------- | -------------- |
 | `preflight-gate` | 35 | Inspects a tool call before it runs and can deny it |
 | `completion-verify` | 13 | Fires at `Stop` — can block a response that claims completion without evidence |
-| `advisory-nudge` | 40 | Prints a warning to stderr and lets the call through — 12 read a `PRAXIS_*_STRICT` variable that makes them stop the call instead |
+| `advisory-nudge` | 40 | Prints a warning to stderr and lets the call through — 15 read a `PRAXIS_*_STRICT` variable that makes them stop the call instead |
 | `postuse-correction` | 5 | Reacts after a tool call — telemetry, follow-up signals |
 
 Concretely, what a gate stops looks like this — `gh issue create` without a duplicate
@@ -125,7 +125,7 @@ the contracts every hook follows.
 
 A hook that blocks something you meant to do is not a wall. There are three levers.
 
-**One gate.** 53 of the 93 hooks declare an opt-out or tuning variable. Which variable
+**One gate.** 55 of the 93 hooks declare an opt-out or tuning variable. Which variable
 belongs to which hook, and what setting it actually does to that hook, is the table in
 [`docs/bypass-vars.md`](docs/bypass-vars.md); the generated
 [Hook Operating Matrix](docs/hook-operating-matrix.md) carries the same mapping with each
