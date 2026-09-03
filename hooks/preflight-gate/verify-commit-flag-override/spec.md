@@ -87,6 +87,15 @@ prints the full list unfiltered: naming a gate the host does not install
 wastes a reader's time, while dropping one it does install hides the next
 block entirely.
 
+The host resolution, the manifest lookup, and the `← <hook>` row filter moved
+to shared code once issue #1245 classified the rest of the hook suite and found
+two more surfaces printing sibling gate names
+(`hooks/_lib/_hosts.py → runtime_host` / `installed_hook_names`, and
+`hooks/_lib/block_message.py → filter_gate_rows`). `render_gate_checklist` and
+the `GIT_COMMIT_GATE_CHECKLIST` literal stay in this file: the literal is still
+the single place a row's text and its owning hook are paired, and
+`scripts/check-sibling-commit-gates.py` reads both from here.
+
 The deny message also lists "verification commands" (e.g.,
 `git config --get commit.gpgsign`, `gpg --list-secret-keys`). Running
 those does **not** unblock subsequent invocations — the hook does not

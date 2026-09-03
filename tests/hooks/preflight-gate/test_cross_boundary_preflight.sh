@@ -932,6 +932,85 @@ else
   echo "FAIL  [non-Bash passthrough] got: $non_bash_out"; FAIL=$((FAIL+1)); FAILED_NAMES+=("non-Bash passthrough")
 fi
 
+# ---------------------------------------------------------------------------
+# Host-scoped item ② (issue #1245)
+#
+# The ② row names `block-pr-without-caller-evidence`, which carries
+# `hosts: ["claude","codex"]` while this hook carries no `hosts` key — so the
+# row shipped to cursor, where that gate is not installed, telling the operator
+# a token is hard-blocking when nothing requires it.
+#
+# Both polarities are checked: the row is PRESENT on the hosts that install the
+# gate (so a filter that drops everything fails here) and ABSENT on the one that
+# does not (so an unwired filter fails there). The dispatcher arm is the live
+# path — the host reaches a group member only through the dispatcher's argv.
+# ---------------------------------------------------------------------------
+ITEM2='② Caller chain verified'
+
+render_for_host() {
+  python3 - "$HOOK" "$1" << 'PYEOF'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("cbp", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+host = sys.argv[2] or None
+print(mod._build_checklist(("pr", "create"), "acme/widget", host=host))
+PYEOF
+}
+
+run_item2_case() {
+  local name="$1" host="$2" want="$3" body
+  body=$(render_for_host "$host")
+  local got=absent
+  case "$body" in *"$ITEM2"*) got=present ;; esac
+  if [ "$got" = "$want" ]; then
+    echo "PASS  [#1245 $name] item ② $got"
+    PASS=$((PASS+1))
+  else
+    echo "FAIL  [#1245 $name] item ② $got, want $want"
+    FAIL=$((FAIL+1)); FAILED_NAMES+=("#1245 $name")
+  fi
+}
+
+run_item2_case "claude installs the gate" claude present
+run_item2_case "codex installs the gate" codex present
+run_item2_case "cursor does not install the gate" cursor absent
+# Negative controls: an unresolvable or unknown host must NOT shrink the text.
+# Dropping a row the host does install hides a hard block, which is the worse
+# of the two failures.
+run_item2_case "unresolvable host keeps every row" "" present
+run_item2_case "unknown host id keeps every row" not-a-host present
+
+# Live path through the dispatcher, which is the only carrier of the host: a
+# direct `"$HOOK"` run has no argv[3], so it can only ever exercise the
+# unfiltered branch.
+#
+# The verb is `pr edit`, not `pr create`, because the dispatcher runs the whole
+# PreToolUse(Bash) group and `pre-gh-pr-create-dedup-gate` hard-blocks a create
+# when `gh` is unauthenticated — which it is on CI. `# side-effect:ack` clears
+# the one remaining sibling that would otherwise own the decision. The
+# assertion checks the decision IS the cross-boundary ask before reading its
+# rows, so a future sibling taking the decision fails loudly instead of
+# reporting a spurious "absent".
+for _h in claude codex cursor; do
+  _want=present; [ "$_h" = cursor ] && _want=absent
+  _out=$(mk_payload 'gh pr edit 1 --repo acme/widget --title "fix: probe"  # side-effect:ack' "$FIX_REPO" |
+    python3 "$REPO_ROOT/hooks/_lib/_dispatch.py" PreToolUse Bash "$_h" 2>/dev/null)
+  _got=absent
+  case "$_out" in
+    *'Cross-boundary pre-flight'*) case "$_out" in *'Caller chain verified'*) _got=present ;; esac ;;
+    *) _got='another hook owned the decision' ;;
+  esac
+  if [ "$_got" = "$_want" ]; then
+    echo "PASS  [#1245 dispatcher/$_h] item ② $_got"
+    PASS=$((PASS+1))
+  else
+    echo "FAIL  [#1245 dispatcher/$_h] item ② $_got, want $_want"
+    FAIL=$((FAIL+1)); FAILED_NAMES+=("#1245 dispatcher/$_h")
+  fi
+done
+
+
 bad_out=$(echo 'not-json' | "$HOOK" 2>/dev/null)
 bad_rc=$?
 if [ "$bad_rc" -eq 0 ] && [ -z "$bad_out" ]; then

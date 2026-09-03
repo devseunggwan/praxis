@@ -31,15 +31,18 @@ without verification is detected. Exits 0 otherwise.
 """
 from __future__ import annotations
 
-import json
 import os
-import re
 import sys
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from _hosts import (  # type: ignore[import-not-found]  # noqa: E402
+    installed_hook_names,
+    runtime_host,
+)
+from block_message import filter_gate_rows  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     compound_cascade_hint,
@@ -257,85 +260,12 @@ GIT_COMMIT_GATE_CHECKLIST = """
     Advisory only — never blocks.
 """
 
-# Row anchor: every checklist item ends its first line in `← <hook-name>`, and
-# the following indented lines belong to that item. The same anchor is what
-# `scripts/check-sibling-commit-gates.py` reads, so the literal above stays the
-# single place a row's text and its owning hook are paired.
-_CHECKLIST_ROW_RE = re.compile(r"←\s*([a-z0-9][a-z0-9-]*)")
-
-_HOOKS_ROOT = _Path(__file__).resolve().parents[2]
-_MANIFEST_PATH = _HOOKS_ROOT / "manifest.json"
-_SCHEMA_PATH = _HOOKS_ROOT / "manifest.schema.json"
-
-
-def runtime_host() -> str | None:
-    """Platform host this hook is executing on, or None when it cannot be known.
-
-    Dispatch-group members run *in-process* inside `hooks/_lib/_dispatch.py`
-    (`run_one` imports impl.py instead of spawning it), so the dispatcher's own
-    argv is still `sys.argv` here — and the generated hooks.json bakes the
-    platform into it as `_dispatch.sh <event> <matcher> <host>`. Nothing else
-    carries the host down to a member, so argv is the only source available.
-    A standalone `python3 impl.py` run has no argv[3] and yields None.
-    """
-    if len(sys.argv) < 4 or _Path(sys.argv[0]).name != "_dispatch.py":
-        return None
-    return sys.argv[3]
-
-
-def _schema_hosts() -> frozenset[str]:
-    """Host ids `hooks/manifest.schema.json` declares, or empty when unreadable.
-
-    Empty degrades every host to "unknown", i.e. the unfiltered checklist.
-    """
-    try:
-        schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return frozenset()
-    return frozenset(_find_hosts_enum(schema))
-
-
-def _find_hosts_enum(node: object) -> list[str]:
-    """Depth-first search for the `hosts` property's item enum in the schema."""
-    if isinstance(node, dict):
-        hosts = node.get("hosts")
-        if isinstance(hosts, dict):
-            items = hosts.get("items")
-            if isinstance(items, dict) and isinstance(items.get("enum"), list):
-                return [h for h in items["enum"] if isinstance(h, str)]
-        for value in node.values():
-            found = _find_hosts_enum(value)
-            if found:
-                return found
-    elif isinstance(node, list):
-        for value in node:
-            found = _find_hosts_enum(value)
-            if found:
-                return found
-    return []
-
-
-def _installed_gate_names(host: str) -> set[str] | None:
-    """Hook names the manifest installs on `host`, or None when unreadable.
-
-    Mirrors the whitelist `_dispatch.group_members` and
-    `build-plugin-manifests.py` apply: an entry ships iff its `hosts` field is
-    absent or contains `host`.
-    """
-    try:
-        manifest = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    installed: set[str] = set()
-    for entry in manifest.get("hooks", []):
-        name = entry.get("name")
-        if not isinstance(name, str):
-            continue
-        hosts = entry.get("hosts")
-        if isinstance(hosts, list) and host not in hosts:
-            continue
-        installed.add(name)
-    return installed
+# The `← <hook-name>` row anchor, the host resolution, and the manifest lookup
+# all moved to shared code once #1245 found two more surfaces printing sibling
+# gate names (`hooks/_lib/_hosts.py`, `block_message.filter_gate_rows`). The
+# literal above stays here — it is still the single place a row's text and its
+# owning hook are paired, and `scripts/check-sibling-commit-gates.py` reads it
+# from this file.
 
 
 def render_gate_checklist(host: str | None) -> str:
@@ -354,27 +284,10 @@ def render_gate_checklist(host: str | None) -> str:
     while dropping one it does install hides the next block entirely, so
     wrong-but-complete is the cheaper of the two failures.
     """
-    if host is not None and host not in _schema_hosts():
-        host = None
-    installed = _installed_gate_names(host) if host is not None else None
+    installed = installed_hook_names(host)
     if installed is None:
         return GIT_COMMIT_GATE_CHECKLIST
-
-    preamble: list[str] = []
-    rows: list[tuple[str, list[str]]] = []
-    for line in GIT_COMMIT_GATE_CHECKLIST.splitlines(keepends=True):
-        match = _CHECKLIST_ROW_RE.search(line)
-        if match:
-            rows.append((match.group(1), [line]))
-        elif rows:
-            rows[-1][1].append(line)
-        else:
-            preamble.append(line)
-
-    kept = [lines for name, lines in rows if name in installed]
-    if not kept:
-        return ""
-    return "".join(preamble) + "".join("".join(lines) for lines in kept)
+    return filter_gate_rows(GIT_COMMIT_GATE_CHECKLIST, installed)
 
 
 DENY_TEMPLATE = """BLOCKED: Commit-flag override(s) detected.

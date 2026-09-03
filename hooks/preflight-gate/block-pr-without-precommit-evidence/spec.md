@@ -125,6 +125,12 @@ outside-fenced-blocks format rules, so one deny teaches the full
 enumeration. The path-not-found diagnostic below is NOT suffixed — its
 cause is a path resolution failure, not a missing token.
 
+The checklist rows are host-scoped (issue #1245): the call site passes
+`runtime_host()`, and rows naming a hook the manifest does not install on that
+host are dropped. The concrete case is the commit-review pointer, whose gate is
+`claude`-only while this hook ships to `claude` and `codex`. An unresolvable or
+unknown host keeps every row.
+
 **Path-not-found diagnostic** (praxis #608) — emitted when `--body-file` names a
 path that does not exist on disk (and is not stdin or a TOCTOU overwrite).
 The real cause is that the hook resolves relative paths against its own process

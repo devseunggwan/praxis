@@ -74,6 +74,29 @@ The checklist surfaced for `pr create` (four points):
 The checklist for `issue create / comment / edit` skips item ② (no caller-chain
 requirement on issues).
 
+#### Item ② is host-scoped (issue #1245)
+
+Item ② names `block-pr-without-caller-evidence` and asserts that gate hard-blocks
+without the token. That gate carries `hosts: ["claude", "codex"]` while this hook
+carries no `hosts` key, so on **cursor** the row asked for a token no installed
+gate requires. `_build_checklist` now takes the running host — resolved from the
+dispatcher's argv via `hooks/_lib/_hosts.py`, the only carrier — and drops item ②
+where the manifest does not install that gate. Membership is read from
+`hooks/manifest.json` rather than hardcoded, so a later whitelist change cannot
+leave a stale row behind.
+
+| Host   | Item ② |
+| ------ | ------ |
+| claude | shown  |
+| codex  | shown  |
+| cursor | hidden |
+
+An unresolvable host (a direct `python3 impl.py` run) or a host id outside
+`manifest.schema.json`'s enum prints the full checklist: naming an absent gate
+wastes a reader's time, while dropping a present one hides a hard block, so
+wrong-but-complete is the cheaper of the two failures. Same shape as
+`verify-commit-flag-override`'s deny checklist (issue #1154).
+
 #### Ownership is not an exemption (issue #993)
 
 The ASK has always fired on every `--repo` write, but item ① was labelled
