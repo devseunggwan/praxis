@@ -808,9 +808,16 @@ def test_the_dispatch_group_scan_reaches_the_write_path_groups():
     # returned one group" or "it returned none at all". A renamed manifest key
     # yields [] and a hand-listed scope yields Bash only; both pass the scan
     # while measuring nothing, which is the exact failure this test names.
+    #
+    # Naming the two hooks is what makes this a control rather than a shape
+    # check: "some non-Bash group exists" still passes while the groups that
+    # actually carried the fixed-timeout spawns are the ones left out, which
+    # is the same blind spot one level up.
     groups = _manifest_dispatch_groups()
     assert ("PreToolUse", "Bash") in groups
     assert [g for g in groups if g != ("PreToolUse", "Bash")]
+    scanned = {n for e, m in groups for _r, n, _i in _dispatch.load_group(e, m)[0]}
+    assert {"block-personal-asset-leak", "path-probe-gate"} <= scanned
     assert all(_dispatch.load_group(e, m)[0] for e, m in groups)
 
 
