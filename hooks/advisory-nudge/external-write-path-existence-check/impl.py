@@ -43,7 +43,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
-from _paths import praxis_state_dir  # type: ignore[import-not-found]  # noqa: E402
+from _paths import praxis_state_dir, sweep_stale  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 # Per-probe cap for the repo-root lookup. Clamped to the dispatcher's
@@ -263,6 +263,11 @@ def _mark_reported(key: str) -> None:
         (_STATE_DIR / key).touch()
     except OSError:
         pass  # fail-open — dedup is best-effort
+    # Markers are 0-byte and never cleared, so the directory only grows
+    # (2,475 of them by #1241). Past the cache TTL a marker only means the
+    # advisory fires once more for a body it already flagged, so the sweep
+    # is safe here.
+    sweep_stale(str(_STATE_DIR))
 
 
 # ---------------------------------------------------------------------------

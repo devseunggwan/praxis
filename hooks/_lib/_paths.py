@@ -186,6 +186,21 @@ def cache_prune_interval_hours() -> float:
         return 0.0
 
 
+def sweep_stale(directory: str, session_id: str | None = None) -> int:
+    """Run the daily `prune_stale` sweep on `directory` when it is due.
+
+    `resolve_writable` does this for `cache/` on its own; a consumer that keeps
+    TTL-safe markers elsewhere (the phantom-path dedup markers under
+    `state/`, #1241) calls this on its write path instead. Never raises.
+    """
+    try:
+        if _prune_due(directory):
+            return prune_stale(directory, session_id=session_id)
+    except Exception:
+        pass
+    return 0
+
+
 def _prune_due(directory: str) -> bool:
     """True when the cache sweep should run now (issue #1079).
 
