@@ -710,6 +710,48 @@ def _context_pr_from_window(entries: list[dict], lo: int, hi: int) -> str | None
     return found
 
 
+def _executed_merge_indices(entries: list[dict]) -> list[int]:
+    """Entry indices of `gh pr merge` calls that actually RAN, oldest first.
+
+    A merge whose tool_result is `is_error` never executed — the gate itself, a
+    sibling gate, or a declined approval stopped it — so counting it would make
+    a legitimate retry unmergeable. Only a result that came back clean marks the
+    briefing as spent.
+    """
+    pending: dict[str, int] = {}
+    executed: list[int] = []
+    for i, ev in enumerate(entries):
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or ev.get("isSidechain"):
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if (b.get("type") == "tool_use" and b.get("name") == "Bash"
+                    and msg.get("role") == "assistant"):
+                cmd = (b.get("input") or {}).get("command")
+                tid = b.get("id")
+                if isinstance(cmd, str) and isinstance(tid, str) and any(
+                        _is_gh_pr_merge(argv)
+                        for argv in iter_command_starts(safe_tokenize(cmd))):
+                    pending[tid] = i
+            elif b.get("type") == "tool_result":
+                tid = b.get("tool_use_id")
+                idx = pending.pop(tid, None) if isinstance(tid, str) else None
+                if idx is not None and not b.get("is_error"):
+                    executed.append(idx)
+    return sorted(executed)
+
+
+def _last_executed_merge(entries: list[dict]) -> int | None:
+    """Index of the most recent executed `gh pr merge`, or None."""
+    executed = _executed_merge_indices(entries)
+    return executed[-1] if executed else None
+
+
 def _has_repetition(command: object) -> bool:
     """True when the command wraps the merge in a shell loop / xargs — a single
     approval must not authorize a repeated merge (No Approval Transfer)."""
@@ -719,7 +761,7 @@ def _has_repetition(command: object) -> bool:
 
 
 def _correlated_prior_turn_text(entries: list[dict], idxs: list[int],
-                                command: object) -> str | None:
+                                command: object, floor: int = 0) -> str | None:
     """The prior-turn assistant text the gate may score, else None (issue #826).
 
     The mandated flow is briefing → user approval → merge, which places the
@@ -733,6 +775,10 @@ def _correlated_prior_turn_text(entries: list[dict], idxs: list[int],
     window may be scored": the caller decides which threshold applies to it,
     so the marker's lower floor sees the same window the full-briefing check
     does instead of scoring an empty current turn (issue #940 review).
+
+    `floor` is the serial-merge cut (issue #1214): text at or before an already
+    executed merge belongs to THAT merge, so the prior turn is read from `floor`
+    onward. A briefing authored after the earlier merge still counts.
     """
     segments = _merge_segments(command)
     # A single approval authorizes ONE merge. A compound `merge A && merge B` (≥2
@@ -743,14 +789,17 @@ def _correlated_prior_turn_text(entries: list[dict], idxs: list[int],
     if not _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
         return None
 
-    prev_text = _assistant_text(entries, idxs[-2] + 1, idxs[-1])
+    prev_lo = max(idxs[-2] + 1, floor)
+    if prev_lo >= idxs[-1]:
+        return None
+    prev_text = _assistant_text(entries, prev_lo, idxs[-1])
     pos = segments[0]
     if pos is None:
         # Truly numberless (`gh pr merge --squash`) → runs on the CURRENT branch.
         # Derive the real target from the window's mandated Pre-Merge probe
         # (`gh pr checks/view N`) and correlate against THAT. Fail closed when no
         # probe resolves a target (No Approval Transfer, P1#2).
-        ctx_pr = _context_pr_from_window(entries, idxs[-2] + 1, len(entries))
+        ctx_pr = _context_pr_from_window(entries, prev_lo, len(entries))
         correlated = ctx_pr is not None and _mentions_pr(prev_text, ctx_pr)
     else:
         m = _PULL_TOKEN_RE.match(pos)
@@ -830,9 +879,26 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     # turn and the current turn is empty, so scoring `items` alone would deny a
     # marked merge whose briefing the user did see — the failure the marker
     # exists to absorb.
+    # Serial-merge cut (issue #1214). The window the MARKER may stand on is cut
+    # at the last merge that actually ran: prose written before it is that
+    # merge's evidence, already spent. Without the cut one briefing releases
+    # every later merge in the same window — the cross-turn twin of the
+    # compound/loop guard, which only ever saw repetition inside ONE command.
+    # It is a window calculation, so no new persistent state; a merge that never
+    # ran (`is_error` — this gate, a sibling gate, or a declined approval) moves
+    # nothing, leaving the legitimate retry exactly where it was.
+    #
+    # Scoped to the marker floor deliberately. Applying the same cut to the
+    # 4-of-6 full-briefing path above changes 35 historical decisions, 32 of
+    # them merges that DID carry a complete briefing — that only raises the
+    # cost of the honest path, the ground on which #1214 discarded its own
+    # original proposal. Cut here, 3 change and all 3 are marker-only merges.
+    floor = _last_executed_merge(entries)
+    floor = 0 if floor is None else floor + 1
+    marker_prev = _correlated_prior_turn_text(entries, idxs, code, floor)
     marker_items = max(
-        items,
-        _briefing_item_count(prev_text) if prev_text is not None else 0,
+        _briefing_item_count(_assistant_text(entries, max(lo, floor), len(entries))),
+        _briefing_item_count(marker_prev) if marker_prev is not None else 0,
     )
     if marker_ok and marker_items >= MERGE_BRIEFING_MARKER_MIN_ITEMS:
         return None

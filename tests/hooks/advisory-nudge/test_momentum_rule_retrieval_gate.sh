@@ -741,6 +741,43 @@ run_merge_escalation_case "merge_escalation_prior_turn_briefing_passes" \
 run_merge_escalation_case "merge_escalation_prior_turn_wrong_pr_denies" \
   "yes" "" "momentum-merge-prior-turn-wrong-pr.jsonl" "gh pr merge 833 --squash"
 
+# --- serial-merge window cut (issue #1214) -----------------------------------
+#
+# All three fixtures share a PARTIAL prior-turn briefing (2 of 6 items), so the
+# bare merge denies in every one of them and only the marker can release it —
+# the load-bearing population #1214 targets. Against the shipped gate all three
+# release; the cut is what separates them, not the fixture text.
+#
+#   serial-second        first merge RAN      → window spent   → deny
+#   serial-blocked-retry first merge is_error → nothing spent  → allow
+#   serial-rebriefed     briefing item after  → re-armed       → allow
+#
+# Positive control that the fixtures are genuinely load-bearing: the same three
+# with the marker stripped.
+run_merge_escalation_case "merge_serial_second_bare_denies" \
+  "yes" "" "momentum-merge-serial-second.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_blocked_retry_bare_denies" \
+  "yes" "" "momentum-merge-serial-blocked-retry.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_rebriefed_bare_denies" \
+  "yes" "" "momentum-merge-serial-rebriefed.jsonl" "gh pr merge 999 --squash --delete-branch"
+
+# The marker attests to completeness, never to existence — a spent window has
+# nothing left for it to be about, so it does not release the second merge.
+run_merge_escalation_case "merge_serial_second_with_marker_denies" \
+  "yes" "" "momentum-merge-serial-second.jsonl" \
+  "gh pr merge 999 --squash --delete-branch # briefing-surfaced: prior turn"
+
+# A merge the gate itself blocked never executed, so the retry is not serial —
+# without this the gate would make its own block unrecoverable.
+run_merge_escalation_case "merge_serial_blocked_first_retry_passes" \
+  "no" "" "momentum-merge-serial-blocked-retry.jsonl" \
+  "gh pr merge 999 --squash --delete-branch # briefing-surfaced: prior turn"
+
+# A briefing item authored after the first merge re-arms the window on its own.
+run_merge_escalation_case "merge_serial_rebriefed_passes" \
+  "no" "" "momentum-merge-serial-rebriefed.jsonl" \
+  "gh pr merge 999 --squash --delete-branch # briefing-surfaced: prior turn"
+
 # A newline is a clause boundary too — the approval sits on its own line under
 # the briefing. Whitespace normalization used to collapse it before the split,
 # so the newline alternation in _CLAUSE_TAIL_RE was dead (CodeRabbit, PR #1089).

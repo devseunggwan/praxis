@@ -267,6 +267,51 @@ approve blindly.
   when it is correlated to this merge's PR, so an uncorrelated briefing cannot
   supply the item the floor needs (No Approval Transfer).
 
+  **The window is cut at the last merge that actually ran (issue #1214).** A
+  briefing is spent by the merge it releases, so in a serial run — merge, merge,
+  merge, one briefing at the top — every later merge was riding evidence that
+  already had an owner. The existing transfer guards only ever saw repetition
+  inside ONE command (`merge A && merge B`, a `for` loop); a merge per turn
+  looked like a fresh single merge each time. `_last_executed_merge` walks the
+  same already-loaded entries for `gh pr merge` tool_use blocks, and the marker
+  floor scores only what was written after the last one. No new persistent
+  state — this is the window calculation, moved.
+
+  A merge counts as *executed* only when its `tool_result` came back without
+  `is_error`. A merge this gate blocked, a sibling gate denied, or the user
+  declined never ran, so it moves nothing and the legitimate retry passes
+  exactly as before — the failure that made #1214 discard its own original
+  "one block buys one attachment" design, where the credit was spent by a
+  `PreToolUse` that is not an execution.
+
+  **Scoped to the marker floor, deliberately.** Replayed over 211 marker-carrying
+  merges from 68 local sessions (2026-08-09 onward, post-#940), the cut as
+  shipped changes **3** decisions and every one is a merge only the marker was
+  releasing; the 167 attachments that changed nothing are untouched. Extending
+  the same cut to the 4-of-6 full-briefing path instead changes **35**, of which
+  **32** carried a complete briefing — that only raises the cost of the honest
+  path, which is the ground this hook's spec already takes elsewhere: it is a
+  self-discipline nudge, not an adversarial boundary.
+
+  **Coverage ceiling — compound calls.** `is_error` is per Bash tool_use, not
+  per subcommand, so `gh pr merge 833; false` reports the whole call's status
+  and the merge is not counted, leaving the window uncut. The miss is
+  fail-open, and the opposite handling is not: crediting an `is_error` result
+  as executed would make a merge this gate itself blocked spend the window, so
+  the legitimate retry could never pass. The same granularity is recorded at
+  `hooks/completion-verify/pr-anchor-existence-gate/spec.md` as structural
+  rather than a local bug, and every gate correlating tool_use to tool_result
+  shares it. Left open on purpose, like the `xargs`/heredoc gaps above.
+
+  **Coverage ceiling — the 400-line tail.** `_load_turn_entries` reads
+  `TRANSCRIPT_SCAN_LINES` (400) lines, so a prior merge pushed past that tail is
+  invisible and the gate behaves as it did before (fail-open). Measured over the
+  local transcripts: of 632 consecutive `gh pr merge` pairs, **418 (66%) sit
+  within 400 lines** and 214 do not (median gap 63 lines). That is a ceiling on
+  visibility, not a firing rate — a user message between the two merges starts a
+  new window, in which case the defect never arose. Widening the constant is out
+  of scope: it is shared, so it would move every other hook's cost too.
+
 - **Injected user entries do not start a new window (issue #940).** A skill body
   loaded mid-turn and the expansion of a slash command both arrive as
   `role: user` with prose content; the harness stamps them `isMeta: true` while
