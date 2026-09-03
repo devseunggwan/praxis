@@ -615,7 +615,10 @@ Add a `repo_visibility: public|private|internal` line to the same `Rationale`
 cell whenever the backing repo is not public. Stage 2.5 Gate-4 reads it for
 both routed action types (issue #1038), and an absent line counts as public —
 which escalates the row to per-action prior approval even when the owner is
-your own handle or org (issue #993).
+your own handle or org (issue #993). Declare the repo's real visibility: for
+own-org rows Gate-4 resolves it against the GitHub API and reports a
+declaration the API contradicts as a violation, so a `private` line on a public
+repo escalates the row instead of exempting it (issue #1150).
 
 Resolve `backing_repo:` from these sources, in order:
 

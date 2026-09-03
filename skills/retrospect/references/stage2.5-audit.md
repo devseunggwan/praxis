@@ -56,6 +56,21 @@ The script mechanizes, mirroring the Stop hook's parsing semantics
   `WARN` means at least one external finding exists, or the conservative
   fallback was required — Stage 4 must then require per-action approval for
   those rows
+- **Gate-4 visibility resolution** — since issue #1150 the declaration is no
+  longer the only oracle for that second half. For own-org rows the script
+  also resolves the real visibility (`gh api repos/<owner>/<repo> --jq
+  .visibility`, one call per repo per run, falling back to
+  `PRAXIS_REPO_VISIBILITY` `<owner>/<repo>=public|private|internal` entries
+  **only when the API returned no answer** — the env var is another value the
+  author controls, so letting it outrank the API would rebuild the hole one
+  layer down) and the exemption holds only
+  when the declaration **and** the resolved value are both in the unescalated
+  class. A declaration the API contradicts across that boundary is its own
+  violation (`correct the declaration`), and an unresolved lookup escalates
+  the row — failing open there would silently restore the hole. Resolution can
+  therefore only ever add escalation, never remove one: `private` and
+  `internal` count as one class, so declaring either against a private repo is
+  not a contradiction
 - **Gate-5** — every memory-action finding needs a complete
   `<!-- memory_scan finding #N: ... -->` block (`scanned: true`,
   `candidates_reviewed`, `repeat`, `repeat_count`)
