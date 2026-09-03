@@ -30,7 +30,8 @@ UserPromptSubmit
         clarification round-trip the skill documents (issue #1098); the budget
         keeps the gate armed across that reply while still bounding the window,
         so a user who abandons retrospect / changes topic does not leave a
-        later unrelated Stop gated.
+        later unrelated Stop gated. The budget is deliberately the smallest
+        value that covers that round-trip — see MARKER_TURN_BUDGET.
 
 The Stop hook additionally clears the marker on Stage 4 (`## Actions
 Executed`). While the marker exists it means "retrospect invoked, not yet
@@ -82,12 +83,15 @@ _SLASH_INVOKE_RE = re.compile(r"^\s*/(?:praxis:)?retrospect(?![\w-])", re.IGNORE
 _SKILL_NAME_RE = re.compile(r"retrospect", re.IGNORECASE)
 
 # Budget spent one ordinary (non-invocation) user turn at a time: the marker
-# survives two such replies and disarms on the third. One covers the pre-Stage-3
-# clarification round-trip the skill documents, the second a follow-up
-# clarification. Past that a topic change is the likelier reading, so the marker
-# disarms on its own rather than gating unrelated Stops for the rest of the
-# session (issue #1098).
-MARKER_TURN_BUDGET = 3
+# survives one such reply — the pre-Stage-3 clarification round-trip the skill
+# documents — and disarms on the second. 2 is measured, not chosen: replaying
+# both hooks over the 24 real retrospect sessions in the local transcript corpus,
+# every value above 2 blocked strictly more table-bearing Stops that were not
+# Stage 3 reports (merge briefings, dispatch tables, Stage 4 output written under
+# a localized header) while catching no additional bypass. The corpus holds zero
+# organic instances of the #666 bypass, so headroom past the documented
+# round-trip buys false positives only (issue #1098).
+MARKER_TURN_BUDGET = 2
 
 
 # ---------------------------------------------------------------------------
@@ -186,8 +190,11 @@ def decay_marker(path: str) -> None:
         return
     set_marker(path, source, turns)
     if _read_marker(path)[1] > turns:
-        # The rewrite did not land (unwritable dir). Falling back to the clear
-        # keeps the pre-#1098 behavior instead of a marker that never decays.
+        # The rewrite did not land. Clearing is the recovery, but on the one
+        # cause that blocks the rewrite outright — an unwritable state dir —
+        # unlink is blocked too, so the marker freezes at its current budget and
+        # stays armed. Nothing this hook can do reaches that state; it is
+        # recorded in the spec rather than papered over here.
         clear_marker(path)
 
 

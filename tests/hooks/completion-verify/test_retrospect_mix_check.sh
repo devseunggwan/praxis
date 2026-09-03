@@ -1536,8 +1536,12 @@ run_lifecycle_case() {
 run_lifecycle_case "F1098_1_block_after_one_clarification_reply" "block" \
   "$(mk_assistant "$F666_LOC_BYPASS")" "네, 워크플로 관점으로 정리해 주세요"
 
-# L2: block — two clarification answers still inside the budget.
-run_lifecycle_case "F1098_2_block_after_two_clarification_replies" "block" \
+# L2: pass — two ordinary replies exhaust the default budget of 2. This is the
+# measured boundary, not a spare: replaying both hooks over 24 real retrospect
+# sessions, every budget above 2 blocked strictly more non-report tables (merge
+# briefings, dispatch tables, localized Stage 4 output) and caught no additional
+# bypass. Widening the budget must move this case, which is the point.
+run_lifecycle_case "F1098_2_pass_two_replies_exhaust_the_budget" "pass" \
   "$(mk_assistant "$F666_LOC_BYPASS")" "첫 번째 확인 답변" "두 번째 확인 답변"
 
 # L3: positive control for L1/L2 — no intervening reply at all. Distinguishes
@@ -1545,9 +1549,9 @@ run_lifecycle_case "F1098_2_block_after_two_clarification_replies" "block" \
 run_lifecycle_case "F1098_3_block_with_no_intervening_reply" "block" \
   "$(mk_assistant "$F666_LOC_BYPASS")"
 
-# L4: pass — the other direction. Three ordinary turns exhaust the budget, so an
-# abandoned retrospect does not leave later unrelated Stops gated. Without this
-# the fix would trade a silent bypass for a permanent false positive.
+# L4: pass — the other direction. An abandoned retrospect does not leave later
+# unrelated Stops gated. Without this the fix would trade a silent bypass for a
+# permanent false positive, which the corpus says is the costlier error here.
 run_lifecycle_case "F1098_4_pass_budget_exhausted_topic_change" "pass" \
   "$(mk_assistant "$F666_LOC_BYPASS")" "다른 작업 1" "다른 작업 2" "다른 작업 3"
 

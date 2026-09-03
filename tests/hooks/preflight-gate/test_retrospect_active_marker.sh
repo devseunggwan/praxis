@@ -111,7 +111,8 @@ run_case "slash_substring_guard"          clear "$(mk_prompt '/retrospects-are-c
 # The documented flow "skill invoked -> clarification -> user answers -> Stage 3
 # report" puts one ordinary prompt between SET and the report. Clearing on it
 # disarmed the #666 gate for the report that followed, so the marker now spends
-# a turn of MARKER_TURN_BUDGET instead. Full decay is covered below.
+# a turn of MARKER_TURN_BUDGET instead. This case is the whole point of the
+# budget: it is the round-trip #1098 reported. Full decay is covered below.
 run_case "preexisting_survives_one_other"  set   "$(mk_prompt 'do something else')" set
 # Pre-existing marker preserved (re-SET) by a slash invocation.
 run_case "preexisting_kept_by_slash"      set   "$(mk_prompt '/retrospect')" set
@@ -145,10 +146,13 @@ run_decay() {
   else FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); fi
 }
 
-run_decay "decay_full_budget_disarms_on_third" 3 set set clear clear
-run_decay "decay_legacy_body_counts_as_full"   legacy set set clear
-run_decay "decay_last_turn_clears"             1 clear
-run_decay "decay_corrupt_body_counts_as_full"  '"not-a-number"' set set clear
+run_decay "decay_default_budget_disarms_on_second" 2 set clear clear
+run_decay "decay_legacy_body_counts_as_full"       legacy set clear
+run_decay "decay_last_turn_clears"                 1 clear
+run_decay "decay_corrupt_body_counts_as_full"      '"not-a-number"' set clear
+# An explicit larger budget still decays one turn at a time — the constant sets
+# the default, it is not baked into the decay arithmetic.
+run_decay "decay_explicit_budget_steps_one_at_a_time" 3 set set clear
 
 # A slash invocation mid-decay re-arms the full budget.
 CASE_N=$((CASE_N + 1))

@@ -34,7 +34,7 @@ gate can key on it instead of on the avoidable output format.
 | ------- | -------- |
 | `PreToolUse(Skill)` with `tool_input.skill` matching `retrospect` | **SET** the marker (`source: skill`). Primary capture point — covers slash-command, natural-language, and auto-invocation, all of which route through the Skill tool. |
 | `UserPromptSubmit` whose prompt starts with `/retrospect` or `/praxis:retrospect` | **SET** the marker (`source: slash`). Arms the gate even before the Skill `tool_use` record exists. |
-| `UserPromptSubmit` for any other prompt | **DECAY** the marker: spend one turn of the budget (`MARKER_TURN_BUDGET`, 3) and CLEAR at zero. |
+| `UserPromptSubmit` for any other prompt | **DECAY** the marker: spend one turn of the budget (`MARKER_TURN_BUDGET`, 2) and CLEAR at zero. |
 
 Natural-language mentions ("retrospect" / "회고" in prose) deliberately do NOT
 SET on `UserPromptSubmit` — a casual mention must not arm the gate. The
@@ -44,8 +44,8 @@ still routes through the Skill tool.
 ## Marker lifecycle
 
 ```text
-UserPromptSubmit (/retrospect)  ─SET (budget 3)─┐
-PreToolUse(Skill: …retrospect)  ─SET (budget 3)─┤
+UserPromptSubmit (/retrospect)  ─SET (budget 2)─┐
+PreToolUse(Skill: …retrospect)  ─SET (budget 2)─┤
                                                 ├─► marker present ─► Stop gate armed
 UserPromptSubmit (other prompt) ─DECAY──► budget 0 ─CLEAR
 Stop hook sees '## Actions Executed' ─CLEAR   (Stage 4 complete)
@@ -67,13 +67,50 @@ One clarification round-trip was the whole bypass.
 Never clearing is not the fix either: a user who genuinely changes topic would
 leave the gate armed for the rest of the session, so any later Stop carrying a
 markdown table would be blocked. The budget keeps both ends bounded — the marker
-survives two ordinary replies and disarms on the third.
+survives one ordinary reply and disarms on the second.
+
+#### Where the number 2 comes from
+
+Replaying both hooks over the local transcript corpus — 24 sessions that invoked
+`/praxis:retrospect` and reached a findings table, 2105 Stop events — the gate's
+in-cycle blocks by budget were:
+
+| budget | in-cycle blocks | of those, actual #666 bypasses | blocks after a fenced Stage 3 |
+| ------ | --------------- | ------------------------------ | ----------------------------- |
+| 1 (pre-#1098) | 0 | 0 | 0 |
+| 2 | 2 | 0 | 0 |
+| 3 | 2 | 0 | 2 |
+| 4 | 3 | 0 | 6 |
+| 5 | 5 | 0 | 6 |
+| 7 | 7 | 0 | 10 |
+
+Every blocked message was read by hand. None was the #666 shape (a Stage 3
+findings report evading the distribution fence); they were merge briefings,
+worker-dispatch tables, an intermediate Stage-2 progress table, and Stage 4
+output written under a localized header instead of `## Actions Executed`. So the
+corpus holds **zero organic instances of the defect** — it is latent, reachable
+by code path, and every budget increment above the documented round-trip buys
+false positives with no measured catch. 2 is therefore the smallest value that
+still closes the flow #1098 reported, and the largest one that is free on this
+corpus.
+
+The scan covered 985 transcripts under `~/.claude/projects`; 25 genuine
+invocations were found (36 user records match the invocation string, 11 of them
+tool results quoting it), of which 24 reached a table report and 1 did not.
 
 A marker body written before #1098 carries no `turns_remaining`; it is read as a
 full budget, so an in-flight retrospect keeps its arm across the upgrade. A
-corrupt body reads the same way. If the decaying rewrite cannot land (unwritable
-state dir) the marker is cleared instead, which is the pre-#1098 behavior — the
-hook never leaves behind a marker that cannot decay.
+corrupt body reads the same way.
+
+If the decaying rewrite cannot land the hook falls back to clearing the marker —
+but on the one cause that blocks the rewrite outright, an **unwritable state
+directory**, `unlink` is blocked by the same permission, so the marker freezes at
+its current budget and stays armed. Measured: a marker at budget 3 in a `chmod
+500` directory sat unchanged through five ordinary turns. The realistic causes
+diverge here — a full disk (`ENOSPC`) blocks the write but not the unlink, so the
+clear succeeds; only an explicitly read-only cache directory reaches the frozen
+state, and nothing in this hook can recover from it. Recorded here rather than
+hidden behind a fallback that does not fire.
 
 ## State file
 
