@@ -52,7 +52,7 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
-from _fire_ledger import prune_telemetry, resolve_telemetry_dir  # type: ignore[import-not-found]  # noqa: E402
+from _fire_ledger import _atomic_append, resolve_telemetry_dir  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 
@@ -233,25 +233,19 @@ def resolve_telemetry_path() -> Path:
 
 def append_record(record: dict) -> None:
     """Append one JSON line to the telemetry file.  Fail-open: any I/O error
-    is silently swallowed — this hook must never block."""
-    path = resolve_telemetry_path()
+    is silently swallowed — this hook must never block.
+
+    `_atomic_append` refuses a FIFO / device / symlink at the target and opens
+    with O_NONBLOCK, so a planted or misconfigured path cannot stall the
+    PostToolUse group this hook runs in as its first member — standalone the
+    stall cost this hook's own node, in the group it would cost every sibling.
+    The helper also runs the day-rollover retention sweep (#1078); this is the
+    only writer of the `bypass-events-` prefix, so the sweep has to ride here.
+    """
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Same day-rollover trigger the fire ledger uses (#1078): today's file
-        # not existing yet is the first write of the day, and the only moment
-        # worth paying for a directory sweep. `bypass-events-` is one of the
-        # retention prefixes, and this is the only path that writes it — the
-        # fire ledger's own sweep never runs when fire telemetry is disabled.
-        first_write_of_the_day = not path.exists()
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _atomic_append(resolve_telemetry_path(), [json.dumps(record, ensure_ascii=False)])
     except Exception:  # noqa: BLE001
         return  # fail-open — never block the tool call
-    if first_write_of_the_day:
-        try:
-            prune_telemetry(path.parent)
-        except Exception:  # noqa: BLE001
-            pass  # housekeeping never breaks the write that triggered it
 
 
 # ---------------------------------------------------------------------------
