@@ -780,8 +780,7 @@ run_merge_escalation_case "merge_serial_rebriefed_passes" \
 
 # A merge on the right of `||` never ran, yet the call exits clean. Crediting it
 # would advance the cut past a briefing nothing consumed and deny THIS merge —
-# the over-block direction. `&&` needs no such guard: it skips the merge only
-# when its left side fails, which makes the whole tool_result `is_error`.
+# the over-block direction.
 run_merge_escalation_case "merge_serial_skipped_branch_not_credited" \
   "no" "" "momentum-merge-serial-skipped-branch.jsonl" \
   "gh pr merge 999 --squash --delete-branch # briefing-surfaced: prior turn"
@@ -790,6 +789,24 @@ run_merge_escalation_case "merge_serial_skipped_branch_not_credited" \
 run_merge_escalation_case "merge_serial_skipped_branch_bare_denies" \
   "yes" "" "momentum-merge-serial-skipped-branch.jsonl" \
   "gh pr merge 999 --squash --delete-branch"
+
+# `&&` splits on WHERE the merge sits. Non-terminal, a trailing command resets
+# the exit status, so a skipped merge still comes back clean — same phantom as
+# `||`, and not credited.
+run_merge_escalation_case "merge_serial_nonterminal_and_not_credited" \
+  "no" "" "momentum-merge-serial-nonterminal-and.jsonl" \
+  "gh pr merge 999 --squash --delete-branch # briefing-surfaced: prior turn"
+
+run_merge_escalation_case "merge_serial_nonterminal_and_bare_denies" \
+  "yes" "" "momentum-merge-serial-nonterminal-and.jsonl" \
+  "gh pr merge 999 --squash --delete-branch"
+
+# Terminal, the merge's own failure IS the call's exit status, so a clean result
+# proves it ran — `cd X && gh pr merge N`, the common shape, stays credited and
+# the window is spent.
+run_merge_escalation_case "merge_serial_terminal_and_credited" \
+  "yes" "" "momentum-merge-serial-terminal-and.jsonl" \
+  "gh pr merge 999 --squash --delete-branch # briefing-surfaced: prior turn"
 
 # A newline is a clause boundary too — the approval sits on its own line under
 # the briefing. Whitespace normalization used to collapse it before the split,

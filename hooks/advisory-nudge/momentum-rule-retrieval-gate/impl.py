@@ -712,11 +712,21 @@ def _context_pr_from_window(entries: list[dict], lo: int, hi: int) -> str | None
 
 # Shell constructs that can skip a textually present segment while the call as a
 # whole still exits clean, so a `gh pr merge` under one of them may never have
-# run. `&&` and `;` are deliberately absent: `A && gh pr merge N` skips the merge
-# only when A fails, and a failed A makes the whole tool_result `is_error`, which
-# the executed-merge walker already drops. Whole-token matched, like
-# `_LOOP_KEYWORDS`, so a branch named `if-else-fix` is never mistaken for one.
+# run. Whole-token matched, like `_LOOP_KEYWORDS`, so a branch named
+# `if-else-fix` is never mistaken for one.
 _SKIPPABLE_KEYWORDS = frozenset({"||", "if", "elif", "case"})
+
+# `&&` needs a positional test rather than a flat ban. `A && gh pr merge N`
+# skips the merge only when A fails — and when the merge is the LAST command,
+# that failure IS the call's exit status, so `is_error` already drops it. Put
+# anything after the merge and the status stops being the merge's:
+# `false && gh pr merge 833; true` exits 0 having merged nothing, which would
+# credit a phantom and over-block the next merge. Requiring the merge to be
+# terminal buys the invariant "a credited merge really ran" without a shell
+# parser. Measured over the local transcripts, 587 of 834 `gh pr merge` calls
+# stay creditable (70%), against 826 (99%) with `&&` unrestricted and 431 (52%)
+# with `&&` banned outright.
+_AND_TOKEN = "&&"
 
 
 def _executed_merge_indices(entries: list[dict]) -> list[int]:
@@ -727,11 +737,12 @@ def _executed_merge_indices(entries: list[dict]) -> list[int]:
     a legitimate retry unmergeable. Only a result that came back clean marks the
     briefing as spent.
 
-    A merge sitting under a skippable construct is dropped for the mirror-image
-    reason. `true || gh pr merge 833` exits clean with no merge, and crediting
-    it would advance the cut past a briefing nothing consumed — denying the next
-    marked merge whose briefing was real. Both directions therefore fail open:
-    the guard declines to fire rather than spend a window it cannot confirm.
+    A merge the shell could have jumped over is dropped for the mirror-image
+    reason. `true || gh pr merge 833` and `false && gh pr merge 833; true` both
+    exit clean having merged nothing, and crediting either would advance the cut
+    past a briefing nothing consumed — denying the next marked merge whose
+    briefing was real. Both directions therefore fail open: the guard declines to
+    fire rather than spend a window it cannot confirm.
     """
     pending: dict[str, int] = {}
     executed: list[int] = []
@@ -754,9 +765,12 @@ def _executed_merge_indices(entries: list[dict]) -> list[int]:
                 tokens = safe_tokenize(cmd)
                 if any(tok in _SKIPPABLE_KEYWORDS for tok in tokens):
                     continue
-                if any(_is_gh_pr_merge(argv)
-                       for argv in iter_command_starts(tokens)):
-                    pending[tid] = i
+                starts = list(iter_command_starts(tokens))
+                if not any(_is_gh_pr_merge(argv) for argv in starts):
+                    continue
+                if _AND_TOKEN in tokens and not _is_gh_pr_merge(starts[-1]):
+                    continue
+                pending[tid] = i
             elif b.get("type") == "tool_result":
                 tid = b.get("tool_use_id")
                 idx = pending.pop(tid, None) if isinstance(tid, str) else None

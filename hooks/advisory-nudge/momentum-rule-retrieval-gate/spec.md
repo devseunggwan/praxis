@@ -284,8 +284,8 @@ approve blindly.
   "one block buys one attachment" design, where the credit was spent by a
   `PreToolUse` that is not an execution.
 
-  **Scoped to the marker floor, deliberately.** Replayed over 211 marker-carrying
-  merges from 68 local sessions (2026-08-09 onward, post-#940), the cut as
+  **Scoped to the marker floor, deliberately.** Replayed over 207 marker-carrying
+  merges from 67 local sessions (2026-08-09 onward, post-#940), the cut as
   shipped changes **3** decisions and every one is a merge only the marker was
   releasing; the 167 attachments that changed nothing are untouched. Extending
   the same cut to the 4-of-6 full-briefing path instead changes **35**, of which
@@ -294,9 +294,9 @@ approve blindly.
   self-discipline nudge, not an adversarial boundary.
 
   **Both directions fail open.** A merge counts as executed only on a clean
-  `tool_result`, and only when no skippable construct could have jumped over it
-  (`_SKIPPABLE_KEYWORDS` — `||`, `if`, `elif`, `case`). Each guard closes one
-  direction:
+  `tool_result`, and only when the shell could not have jumped over it —
+  `_SKIPPABLE_KEYWORDS` (`||`, `if`, `elif`, `case`) plus a non-terminal `&&`.
+  Each guard closes one direction:
 
   - `gh pr merge 833; false` — the merge RAN but `is_error` is per Bash
     tool_use, not per subcommand, so the window stays uncut. Crediting an
@@ -308,19 +308,29 @@ approve blindly.
   - `true || gh pr merge 833` — the merge did NOT run yet the call exits clean.
     Crediting it would advance the cut past a briefing nothing consumed and deny
     the next marked merge whose briefing was real. Measured over the local
-    transcripts, 7 of 818 `gh pr merge` calls carry such a construct.
+    transcripts, 8 of 834 `gh pr merge` calls carry such a construct.
+  - `false && gh pr merge 833; true` — the same phantom through `&&`. The merge
+    is skipped, and because the exit status belongs to the LAST command, the
+    call still comes back clean, so `is_error` cannot drop it. `&&` therefore
+    gets a positional test rather than a flat ban: a `&&`-reached merge is
+    credited only when it is the final command, where its own failure IS the
+    call's exit status. That buys the invariant *a credited merge really ran*
+    without a shell parser, and keeps `cd X && gh pr merge N` — the common
+    shape — creditable. Measured over the local transcripts, 587 of 834
+    `gh pr merge` calls stay creditable (70%), against 826 (99%) with `&&`
+    unrestricted and 431 (52%) with `&&` banned outright.
 
-  `&&` and `;` are deliberately not skippable: `A && gh pr merge N` skips the
-  merge only when A fails, which makes the whole result `is_error` and the first
-  guard already drops it. Both misses leave the guard silent rather than
-  spending a window it cannot confirm — the same posture as the `xargs`/heredoc
-  gaps above.
+  `;` stays non-skippable, so a real merge after one is still credited. The
+  residual gap runs the other way: `if true; then :; fi; gh pr merge 833` really
+  merges and is dropped, because the whole-token `if` scan is command-wide. That
+  is the fail-open direction — the guard stays silent rather than spending a
+  window it cannot confirm, the same posture as the `xargs`/heredoc gaps above.
 
   **Coverage ceiling — the 400-line tail.** `_load_turn_entries` reads
   `TRANSCRIPT_SCAN_LINES` (400) lines, so a prior merge pushed past that tail is
   invisible and the gate behaves as it did before (fail-open). Measured over the
-  local transcripts: of 632 consecutive `gh pr merge` pairs, **418 (66%) sit
-  within 400 lines** and 214 do not (median gap 63 lines). That is a ceiling on
+  local transcripts: of 719 consecutive `gh pr merge` pairs, **491 (68%) sit
+  within 400 lines** and 228 do not (median gap 60 lines). That is a ceiling on
   visibility, not a firing rate — a user message between the two merges starts a
   new window, in which case the defect never arose. Widening the constant is out
   of scope: it is shared, so it would move every other hook's cost too.
