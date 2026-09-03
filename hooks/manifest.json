@@ -184,6 +184,13 @@
       "timeout": 5
     },
     {
+      "name": "rejected-mutation-reconsent-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Agent|Task",
+      "timeout": 5
+    },
+    {
       "name": "block-pr-without-caller-evidence",
       "role": "preflight-gate",
       "event": "PreToolUse",

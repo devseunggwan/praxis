@@ -314,6 +314,182 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Dispatch surface (issue #1035)
+#
+# The surface the ORIGINATING incident actually fired on: the deletion scope
+# lived in a worker prompt, which the Bash matcher never sees. Two shapes are
+# covered — the `Task` / `Agent` tool's own payload, and a worker prompt nested
+# inside a Bash launcher command (`cmux … --command "claude -p '…'"`).
+#
+# Both directions are pinned against the SAME transcript, because that is the
+# only way "it caught the incident" and "it catches everything" separate. A
+# firing case proves nothing on its own: a gate wired to ask on every dispatch
+# would pass every ask case below and fail every silent one.
+# ---------------------------------------------------------------------------
+
+# mk_dispatch_payload <tool_name> <prompt> <transcript> [description]
+mk_dispatch_payload() {
+  python3 -c '
+import json, sys
+tool_input = {"subagent_type": "general-purpose", "prompt": sys.argv[2]}
+if len(sys.argv) > 4 and sys.argv[4]:
+    tool_input["description"] = sys.argv[4]
+print(json.dumps({"session_id": "test-session", "tool_name": sys.argv[1],
+                  "transcript_path": sys.argv[3], "tool_input": tool_input}))' \
+    "$1" "$2" "$3" "${4:-}"
+}
+
+# run_dispatch_case <name> <ask|pass> <tool_name> <prompt> <transcript> [description]
+run_dispatch_case() {
+  local name="$1" expected="$2" tool="$3" prompt="$4" transcript="$5" desc="${6:-}"
+  local out err_file err rc ok=1
+  err_file=$(mktemp)
+  out=$(mk_dispatch_payload "$tool" "$prompt" "$transcript" "$desc" | "$HOOK" 2>"$err_file")
+  rc=$?; err=$(cat "$err_file"); rm -f "$err_file"
+
+  case "$expected" in
+    ask)
+      [ "$rc" -eq 0 ] || ok=0
+      echo "$out" | grep -q '"permissionDecision": "ask"' || ok=0
+      ;;
+    pass)
+      [ "$rc" -eq 0 ] || ok=0
+      [ -z "$out" ]   || ok=0
+      [ -z "$err" ]   || ok=0
+      ;;
+  esac
+
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$expected] $name"; PASS=$((PASS+1))
+  else
+    echo "FAIL  [$expected→rc=$rc,stdout=$([ -n "$out" ] && echo non-empty || echo empty),stderr=$([ -n "$err" ] && echo non-empty || echo empty)] $name"
+    FAIL=$((FAIL+1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# --- ASK: the worker prompt carries the rejected identifier -----------------
+
+run_dispatch_case "Task prompt names the rejected s3 prefix" ask \
+  Task 'Run the cleanup: remove every object under s3://acme-archive/raw/2024/ and report the count.' \
+  "$REJ_S3"
+
+run_dispatch_case "Agent is the same call under the other host's tool name" ask \
+  Agent 'Run the cleanup: remove every object under s3://acme-archive/raw/2024/ and report the count.' \
+  "$REJ_S3"
+
+# `description` is read as well as `prompt`: a scope named only in the short
+# label would otherwise be invisible.
+run_dispatch_case "rejected prefix named only in the description" ask \
+  Task 'Follow the plan in the issue body and report when done.' \
+  "$REJ_S3" 'purge s3://acme-archive/raw/2024/'
+
+run_dispatch_case "Task prompt re-issues the rejected table as a TRUNCATE" ask \
+  Task 'In the warehouse session, run TRUNCATE TABLE prod.events_raw before the reload.' \
+  "$REJ_SQL"
+
+run_case "cmux launcher: rejected prefix inside the nested worker prompt" ask \
+  'cmux create wk --command "claude -p '"'"'delete everything under s3://acme-archive/raw/2024/ then report'"'"'"' \
+  "$REJ_S3"
+
+# --- PASS: the negative controls -------------------------------------------
+#
+# Same transcript, same rejection, same surface. Only the target differs.
+
+run_dispatch_case "unrelated worker dispatch on a DIFFERENT prefix is silent" pass \
+  Task 'Run the cleanup: remove every object under s3://acme-archive/raw/2025/ and report the count.' \
+  "$REJ_S3"
+
+run_dispatch_case "ordinary worker dispatch naming no identifier at all is silent" pass \
+  Task 'Implement issue #1035 in a new worktree and open the PR when the suite passes.' \
+  "$REJ_S3"
+
+run_dispatch_case "worker dispatch naming a different table is silent" pass \
+  Task 'In the warehouse session, run TRUNCATE TABLE staging.events_raw before the reload.' \
+  "$REJ_SQL"
+
+run_dispatch_case "same prompt, no prior rejection in the transcript" pass \
+  Task 'Run the cleanup: remove every object under s3://acme-archive/raw/2024/ and report the count.' \
+  "$REJ_S3_NO_REJECTION"
+
+run_dispatch_case "same prompt, rejection joined to a non-AskUserQuestion tool" pass \
+  Task 'Run the cleanup: remove every object under s3://acme-archive/raw/2024/ and report the count.' \
+  "$REJ_S3_NON_ASK"
+
+run_case "cmux launcher: nested prompt names a different prefix" pass \
+  'cmux create wk --command "claude -p '"'"'delete everything under s3://acme-archive/raw/2025/ then report'"'"'"' \
+  "$REJ_S3"
+
+# A URI in an ordinary command argument must not be read as a worker prompt —
+# the launcher list is matched on argv[0] only.
+run_case "non-launcher command mentioning the prefix stays silent" pass \
+  'aws s3api head-object --bucket acme-archive --key raw/2024/ s3://acme-archive/raw/2024/' \
+  "$REJ_S3"
+
+# --- Launcher normalization (Codex round 1, three P1 bypasses) -------------
+#
+# `argv[0] == "cmux"` is not how a real dispatch is written. Each shape below
+# reached the launcher comparison as a DIFFERENT argv[0] and returned no
+# identifiers at all, so the gate skipped the transcript scan entirely and the
+# refused target went out unasked. Probed on the pre-fix tree:
+#   WS=$(cmux …)            -> argv[0] = 'WS=$(cmux'
+#   env CMUX_QUIET=1 cmux … -> argv[0] = 'env'
+#   /usr/local/bin/cmux …   -> argv[0] = '/usr/local/bin/cmux'
+#   sudo claude …           -> argv[0] = 'sudo'
+#   gemini -p …             -> not in the launcher set
+# Fixed by iter_command_texts (substitution recursion) + strip_prefix
+# (assignments and wrappers) + basename matching + adding `gemini`.
+
+_NESTED="claude -p 'delete everything under s3://acme-archive/raw/2024/'"
+
+run_case "command substitution: WS=\$(cmux …) is still a dispatch" ask \
+  "WS=\$(cmux new-workspace --command \"$_NESTED\")" "$REJ_S3"
+
+run_case "backtick substitution is still a dispatch" ask \
+  "WS=\`cmux new-workspace --command \"$_NESTED\"\`" "$REJ_S3"
+
+run_case "env wrapper: env VAR=1 cmux …" ask \
+  "env CMUX_QUIET=1 cmux create wk --command \"$_NESTED\"" "$REJ_S3"
+
+run_case "bare env assignment: VAR=1 cmux …" ask \
+  "CMUX_QUIET=1 cmux create wk --command \"$_NESTED\"" "$REJ_S3"
+
+run_case "absolute path: /usr/local/bin/cmux …" ask \
+  "/usr/local/bin/cmux create wk --command \"$_NESTED\"" "$REJ_S3"
+
+run_case "sudo wrapper in front of a direct claude dispatch" ask \
+  'sudo claude -p "delete everything under s3://acme-archive/raw/2024/"' "$REJ_S3"
+
+# `gemini` is a routable cmux-delegate provider (ARCHITECTURE.md → Provider
+# Routing); omitting it from the launcher set was a hole, not a narrower gate.
+run_case "gemini -p is a worker dispatch like claude -p" ask \
+  'gemini -p "delete everything under s3://acme-archive/raw/2024/" --approval-mode yolo' \
+  "$REJ_S3"
+
+# The recursion must follow only ACTIVE substitutions. Inside single quotes
+# `$(` starts no process, so this prints a string and dispatches nothing —
+# recursing into it would ask on a command that never runs.
+run_case "single-quoted \$( … ) is literal text, not a dispatch" pass \
+  "printf '%s' '\$(cmux new-workspace --command \"claude -p delete s3://acme-archive/raw/2024/\")'" \
+  "$REJ_S3"
+
+# --- The ask has to say WHICH surface --------------------------------------
+#
+# "this command targets…" in front of a `Task` call sends the operator hunting
+# through argv for a target that lives in a prompt.
+_dispatch_reason=$(mk_dispatch_payload Task \
+  'Run the cleanup: remove every object under s3://acme-archive/raw/2024/ and report the count.' \
+  "$REJ_S3" | "$HOOK" 2>/dev/null)
+if echo "$_dispatch_reason" | python3 -c '
+import json,sys
+r = json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"]
+sys.exit(0 if "worker dispatch" in r and "this command targets" not in r
+         and "Delete the remaining ~295M objects" in r else 1)' 2>/dev/null; then
+  echo "PASS  [ask-detail] dispatch ask names the dispatch surface and quotes the question"; PASS=$((PASS+1))
+else
+  echo "FAIL  [ask-detail] dispatch ask does not name the dispatch surface"; FAIL=$((FAIL+1)); FAILED_NAMES+=("dispatch ask subject")
+fi
+
+# ---------------------------------------------------------------------------
 # Infrastructure
 # ---------------------------------------------------------------------------
 
