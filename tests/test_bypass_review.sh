@@ -1037,6 +1037,63 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test 21: gzipped prior-day files are read alongside plain ones (#1238)
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== bypass-review: reads .jsonl.gz rolled-over days (#1238) ==="
+
+DIR21="$TMP_DIR/t21"
+mkdir -p "$DIR21"
+ev21_today=$(make_event '["CLAUDE_HOOK_BYPASS_SCIOMC_GATE"]' "ok")
+ev21_yesterday=$(make_event '["CLAUDE_HOOK_BYPASS_DUP_GATE"]' "ok")
+write_fixture "$DIR21/bypass-events-$TODAY.jsonl" "$ev21_today"
+write_fixture "$DIR21/bypass-events-$YESTERDAY.jsonl" "$ev21_yesterday"
+gzip "$DIR21/bypass-events-$YESTERDAY.jsonl"
+
+out21=$(python3 "$CLI" --dir "$DIR21" --days 7 2>&1)
+
+if echo "$out21" | grep -q "CLAUDE_HOOK_BYPASS_DUP_GATE"; then
+  assert_pass "gz: yesterday's compressed bypass event aggregated"
+else
+  assert_fail "gz: yesterday's compressed bypass event aggregated" "output: $out21"
+fi
+
+if echo "$out21" | grep -q "Total events.*2"; then
+  assert_pass "gz: plain today + gz yesterday = 2"
+else
+  assert_fail "gz: plain today + gz yesterday = 2" "output: $out21"
+fi
+
+# fire-rate: yesterday gz only (straggler plain file for the same day is merged).
+{
+  make_fire "11111111-2222-3333-4444-555555555555" "pass"
+} > "$DIR21/fire-events-$YESTERDAY.jsonl"
+gzip "$DIR21/fire-events-$YESTERDAY.jsonl"
+{
+  make_fire "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" "advise"
+} > "$DIR21/fire-events-$YESTERDAY.jsonl"
+
+out21f=$(python3 "$CLI" fire-rate --dir "$DIR21" --days 2 2>&1)
+rc21f=$?
+
+if [ "$rc21f" -eq 0 ] && echo "$out21f" | grep -q "2 read, 0 synthetic dropped"; then
+  assert_pass "gz: fire-rate merges .jsonl.gz and straggler .jsonl of one day"
+else
+  assert_fail "gz: fire-rate merges .jsonl.gz and straggler .jsonl of one day" "rc=$rc21f output: $out21f"
+fi
+
+# Negative control: without the gz file the compressed day contributes nothing.
+DIR21B="$TMP_DIR/t21b"
+mkdir -p "$DIR21B"
+write_fixture "$DIR21B/bypass-events-$TODAY.jsonl" "$ev21_today"
+out21b=$(python3 "$CLI" --dir "$DIR21B" --days 7 2>&1)
+if echo "$out21b" | grep -q "Total events.*1"; then
+  assert_pass "gz: control — plain-only dir counts 1"
+else
+  assert_fail "gz: control — plain-only dir counts 1" "output: $out21b"
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
