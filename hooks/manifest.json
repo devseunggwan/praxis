@@ -1022,6 +1022,22 @@
       }
     },
     {
+      "name": "unenforced-step-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": [
+        "claude"
+      ],
+      "timeout": 8,
+      "mode": {
+        "strict_env": "PRAXIS_UNENFORCED_STEP_STRICT",
+        "bypass_env": [
+          "PRAXIS_UNENFORCED_STEP_SKIP"
+        ]
+      }
+    },
+    {
       "name": "caller-probe-gate",
       "role": "advisory-nudge",
       "event": "PreToolUse",
