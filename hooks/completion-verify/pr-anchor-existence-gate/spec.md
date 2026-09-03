@@ -60,6 +60,19 @@ sits on a line boundary; a payload without `session_id` scans in full.
   `gh api --help`) against `issues/<N>/comments` or `pulls/<N>/comments`.
 - A failed post does not count.
 
+### Anchor revisions — `issues/comments/<id>` (issue #1250)
+
+The convention revises an anchor in place by comment id, so from rev 2 on
+every update is `gh api -X PATCH .../issues/comments/<id>`. That path carries a
+comment id and no PR number, so the PR it belongs to cannot be recovered from
+the command.
+
+A confirmed revision therefore clears the gate **only when exactly one created
+PR is still missing an anchor** — attribution by elimination. Two or more
+leaves it ambiguous and every one of them is reported, because guessing would
+clear a PR that genuinely has no anchor. `PATCH` and `PUT` join `POST` as
+write methods for this path; `DELETE` never carries an anchor.
+
 ### Invocation boundaries
 
 Invocations are separated by an unquoted control operator **or an unquoted
@@ -133,6 +146,10 @@ create just happened and the agent is still mid-turn on something else.
   number — same accepted miss as `pr-report-destination-gate`.
 - **PRs are keyed by number only** — two repos sharing a number in one
   session collide, same limitation as `pr-report-destination-gate`.
+- **An anchor revision is attributed by elimination, not by identity.** A
+  session that revises some *other* PR's anchor while leaving its own single
+  created PR unanchored reads as anchored. Closing this needs a comment-id →
+  PR resolution the command line does not carry.
 - **Escalation state is per-session, not per-PR.** A session with two
   unanchored PRs advises once for the pair, then blocks for the pair — it does
   not track "have I advised about #1084 specifically."
@@ -173,6 +190,8 @@ synthetic transcripts:
 - the post on a second line of the same command → silent (newline boundary)
 - the post prefixed by a `VAR=value` assignment → silent
 - a `gh pr comment` line inside a heredoc body only → still fires
+- `gh api -X PATCH .../issues/comments/<id>` with one unanchored PR → silent
+- the same PATCH with two unanchored PRs → still fires for both
 - no `gh pr create` in the session → silent
 - `gh pr create --draft` success, no post → silent
 - failed `gh pr create` (`is_error`) → silent

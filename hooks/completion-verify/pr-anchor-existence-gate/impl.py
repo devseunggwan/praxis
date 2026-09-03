@@ -32,6 +32,12 @@ the create entirely. A heredoc body is excluded, so a transcribed `gh` line
 inside an anchor body is never credited as a post, and a leading `VAR=value`
 assignment no longer hides the invocation behind it.
 
+Issue #1250, gap 2: an anchor REVISION (`gh api -X PATCH
+.../issues/comments/<id>`) clears the gate when exactly one created PR is
+still unanchored. That path carries a comment id and never a PR number, so
+the attribution is by elimination; two or more unanchored PRs is ambiguous
+and reports rather than guesses.
+
 ## Escalation (issue #1113's explicit design choice)
 
 No sibling gate does this — it is a deliberate deviation, not a missed
@@ -136,6 +142,14 @@ _PR_COMMENT_VALUE_FLAGS = frozenset({"-b", "--body", "-F", "--body-file", "-R", 
 _API_METHOD_RE = re.compile(r"(?:--method|-X)\s+([A-Za-z]+)", re.IGNORECASE)
 _API_BODY_RE = re.compile(r"(^|\s)(-f|-F|--field|--raw-field|--input)\b", re.IGNORECASE)
 _API_TARGET_RE = re.compile(r"gh\s+api\s+[^\n]*?(?:issues|pulls)/(\d+)/comments\b", re.IGNORECASE)
+
+# The anchor *edit* path. The convention is one anchor per PR revised in place
+# by comment id, so from rev 2 on every update is a PATCH against
+# `issues/comments/<id>` — a comment id, not a PR number, which is why this is
+# a separate pattern from `_API_TARGET_RE` and why the PR it belongs to cannot
+# be recovered from the command (issue #1250).
+_API_ANCHOR_EDIT_RE = re.compile(r"(?:issues|pulls)/comments/(\d+)\b", re.IGNORECASE)
+_API_WRITE_METHODS = frozenset({"POST", "PATCH", "PUT"})
 
 # `VAR=value cmd` is one command, and shlex hands back the assignment as the
 # segment's first token — which defeats every `_starts_with` check below.
@@ -293,6 +307,29 @@ def _api_post_targets(segments: list[list[str]]) -> list[str]:
     return targets
 
 
+def _is_api_write(tokens: list[str]) -> bool:
+    """True when a `gh api` call writes at all — POST, PATCH or PUT. Wider than
+    `_is_api_post` because an anchor revision is a PATCH, and narrower than
+    "not a GET" because DELETE never carries an anchor."""
+    seg = " ".join(tokens)
+    m = _API_METHOD_RE.search(seg)
+    if m:
+        return m.group(1).upper() in _API_WRITE_METHODS
+    return bool(_API_BODY_RE.search(seg))
+
+
+def _api_anchor_edit_ids(segments: list[list[str]]) -> list[str]:
+    """Comment ids revised by a write-method `gh api` call against
+    `issues/comments/<id>`. The PR is unrecoverable from this path — see
+    `_resolve` for the single case where an edit is allowed to clear."""
+    ids: list[str] = []
+    for seg in segments:
+        if not _starts_with(seg, ("gh", "api")) or not _is_api_write(seg):
+            continue
+        ids.extend(m.group(1) for m in _API_ANCHOR_EDIT_RE.finditer(" ".join(seg)))
+    return ids
+
+
 def _create_segments(segments: list[list[str]]) -> list[list[str]]:
     """Every `gh pr create` invocation's own token list."""
     return [seg for seg in segments if _starts_with(seg, ("gh", "pr", "create"))]
@@ -329,6 +366,7 @@ def _reduce_tool_use(
     block: dict,
     pending_creates: list,
     pending_posts: list,
+    pending_edits: list,
     create_tids: set,
     interesting_tids: set,
 ) -> None:
@@ -357,6 +395,11 @@ def _reduce_tool_use(
         pending_posts.append((tid, posted))
         if tid is not None:
             interesting_tids.add(tid)
+    edits = _api_anchor_edit_ids(segments)
+    if edits:
+        pending_edits.append((tid, edits))
+        if tid is not None:
+            interesting_tids.add(tid)
 
 
 class _ScanState:
@@ -374,6 +417,7 @@ class _ScanState:
     __slots__ = (
         "pending_creates",
         "pending_posts",
+        "pending_edits",
         "create_tids",
         "interesting_tids",
         "result_is_error",
@@ -385,6 +429,8 @@ class _ScanState:
         self.pending_creates: list[tuple[str | None, bool]] = []
         # (tool_use id, [PR numbers posted to])
         self.pending_posts: list[tuple[str | None, list[str]]] = []
+        # (tool_use id, [comment ids revised in place])
+        self.pending_edits: list[tuple[str | None, list[str]]] = []
         self.create_tids: set[str] = set()
         self.interesting_tids: set[str] = set()
         self.result_is_error: dict[str, bool] = {}
@@ -395,6 +441,7 @@ def _encode_state(state: _ScanState) -> dict:
     return {
         "pending_creates": [list(t) for t in state.pending_creates],
         "pending_posts": [[tid, list(nums)] for tid, nums in state.pending_posts],
+        "pending_edits": [[tid, list(ids)] for tid, ids in state.pending_edits],
         "create_tids": sorted(state.create_tids),
         "interesting_tids": sorted(state.interesting_tids),
         "result_is_error": state.result_is_error,
@@ -406,6 +453,7 @@ def _decode_state(data: dict) -> _ScanState:
     state = _ScanState()
     state.pending_creates = [(tid, bool(d)) for tid, d in data["pending_creates"]]
     state.pending_posts = [(tid, list(nums)) for tid, nums in data["pending_posts"]]
+    state.pending_edits = [(tid, list(ids)) for tid, ids in data.get("pending_edits", [])]
     state.create_tids = set(data["create_tids"])
     state.interesting_tids = set(data["interesting_tids"])
     state.result_is_error = dict(data["result_is_error"])
@@ -426,7 +474,12 @@ def _reduce_event(state: _ScanState, ev: dict) -> None:
         kind = block.get("type")
         if kind == "tool_use":
             _reduce_tool_use(
-                block, state.pending_creates, state.pending_posts, state.create_tids, state.interesting_tids
+                block,
+                state.pending_creates,
+                state.pending_posts,
+                state.pending_edits,
+                state.create_tids,
+                state.interesting_tids,
             )
         elif kind == "tool_result":
             tid = block.get("tool_use_id")
@@ -499,7 +552,27 @@ def _resolve(state: _ScanState) -> list[str]:
             continue
         posted.update(nums)
 
-    return sorted(created - posted, key=int)
+    unanchored = sorted(created - posted, key=int)
+    if len(unanchored) == 1 and _has_confirmed_edit(state):
+        # The comment id in an `issues/comments/<id>` PATCH names no PR, so an
+        # anchor revision can only be attributed by elimination: exactly one
+        # created PR is still missing an anchor, and this session revised an
+        # anchor in place. Two or more leaves it genuinely ambiguous and the
+        # gate reports all of them — guessing there would clear a PR that has
+        # no anchor. The cost of the one-PR case is a session that revises an
+        # unrelated PR's anchor and never anchors its own (issue #1250).
+        return []
+    return unanchored
+
+
+def _has_confirmed_edit(state: _ScanState) -> bool:
+    """True when an anchor revision (`gh api ... issues/comments/<id>`) landed
+    successfully this session. Same confirmation bar as a post: an interrupted
+    call with no matching non-error tool_result does not count."""
+    return any(
+        tid is not None and state.result_is_error.get(tid) is False and ids
+        for tid, ids in state.pending_edits
+    )
 
 
 def _build_message(unanchored: list[str], blocking: bool) -> str:

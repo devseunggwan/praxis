@@ -192,7 +192,7 @@ run_case silent "stop-hook-active" '{"stop_hook_active": true}'
 
 # =====================================================================
 # =====================================================================
-# Issue #1250 — newline boundaries and leading assignments
+# Issue #1250 — newline boundaries, leading assignments, anchor revisions
 # =====================================================================
 
 # the post on a SECOND LINE of the same command -> silent
@@ -221,6 +221,22 @@ body
 EOF
 gh pr comment 178 --body-file /tmp/a.md'),$(result t2 false ok)]"
 run_case silent "post-after-heredoc-terminator-counts" '{}'
+
+# an anchor REVISION with exactly one unanchored PR -> silent (attribution by elimination)
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh api -X PATCH repos/o/r/issues/comments/55123 -F body=@/tmp/a.md'),$(result t2 false ok)]"
+run_case silent "anchor-edit-clears-single-pr" '{}'
+
+# ... but with TWO unanchored PRs the edit is ambiguous -> still fires for both
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t3 'gh pr create --title x2 --body y2'),$(result t3 false 'https://github.com/o/r/pull/179'),$(bash_use t2 'gh api -X PATCH repos/o/r/issues/comments/55123 -F body=@/tmp/a.md'),$(result t2 false ok)]"
+run_case advisory "anchor-edit-ambiguous-with-two-prs" '{}'
+
+# a FAILED anchor revision does not clear -> advisory
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh api -X PATCH repos/o/r/issues/comments/55123 -F body=@/tmp/a.md'),$(result t2 true 'gh: Not Found')]"
+run_case advisory "failed-anchor-edit-does-not-clear" '{}'
+
+# a GET against the same edit path is not a write -> advisory
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh api repos/o/r/issues/comments/55123'),$(result t2 false ok)]"
+run_case advisory "anchor-edit-get-not-a-write" '{}'
 
 # Fail-open
 # =====================================================================
