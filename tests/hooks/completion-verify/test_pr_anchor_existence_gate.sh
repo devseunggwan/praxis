@@ -191,6 +191,37 @@ build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 
 run_case silent "stop-hook-active" '{"stop_hook_active": true}'
 
 # =====================================================================
+# =====================================================================
+# Issue #1250 — newline boundaries and leading assignments
+# =====================================================================
+
+# the post on a SECOND LINE of the same command -> silent
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'gh pr view 178
+gh pr comment 178 --body-file /tmp/anchor.md'),$(result t2 false ok)]"
+run_case silent "newline-separates-invocations" '{}'
+
+# a leading VAR=value assignment must not hide the invocation -> silent
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'SP=/tmp/s gh pr comment 178 --body-file /tmp/anchor.md'),$(result t2 false ok)]"
+run_case silent "leading-assignment-stripped" '{}'
+
+# a --draft on a later LINE must not leak into this create's own segment
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y
+echo --draft'),$(result t1 false 'https://github.com/o/r/pull/178')]"
+run_case advisory "draft-token-on-later-line-not-leaked" '{}'
+
+# a gh pr comment line that exists only inside a HEREDOC BODY never ran -> advisory
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'cat <<EOF > /tmp/a.md
+gh pr comment 178 --body x
+EOF'),$(result t2 false ok)]"
+run_case advisory "heredoc-body-command-not-credited" '{}'
+
+# ... and a real post after the heredoc terminator still counts -> silent
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/178'),$(bash_use t2 'cat <<EOF > /tmp/a.md
+body
+EOF
+gh pr comment 178 --body-file /tmp/a.md'),$(result t2 false ok)]"
+run_case silent "post-after-heredoc-terminator-counts" '{}'
+
 # Fail-open
 # =====================================================================
 TRANSCRIPT="/nonexistent/transcript.jsonl"

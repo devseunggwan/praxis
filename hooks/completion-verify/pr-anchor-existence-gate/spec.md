@@ -60,6 +60,19 @@ sits on a line boundary; a payload without `session_id` scans in full.
   `gh api --help`) against `issues/<N>/comments` or `pulls/<N>/comments`.
 - A failed post does not count.
 
+### Invocation boundaries
+
+Invocations are separated by an unquoted control operator **or an unquoted
+newline** — two commands on two lines are two invocations. A newline inside
+quotes, after a `\` continuation, or inside a heredoc body separates nothing.
+The heredoc exclusion costs recall to buy precision: an anchor body written
+through `<<'EOF'` routinely carries transcribed `gh pr comment` / `gh api`
+lines that never ran, and crediting one would silence the gate on a PR with no
+anchor at all.
+
+Leading `VAR=value` assignments are stripped from a segment before the
+`gh …` prefix check, so `SP=/tmp/x gh pr comment 81` is recognized.
+
 ## The trigger — a created PR with no post
 
 Fires when `createdPRs − postedPRs ≠ ∅`.
@@ -157,6 +170,9 @@ synthetic transcripts:
 
 - `gh pr create` (non-draft) success, no post → 1st Stop advises, 2nd Stop blocks
 - `gh pr create` success + `gh pr comment <N>` to the same PR → silent
+- the post on a second line of the same command → silent (newline boundary)
+- the post prefixed by a `VAR=value` assignment → silent
+- a `gh pr comment` line inside a heredoc body only → still fires
 - no `gh pr create` in the session → silent
 - `gh pr create --draft` success, no post → silent
 - failed `gh pr create` (`is_error`) → silent

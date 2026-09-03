@@ -25,6 +25,13 @@ immediately (same rationale as #1076).
 
   Fires when createdPRs - postedPRs != {}.
 
+Issue #1250, gap 1: invocations are separated by an unquoted NEWLINE as well
+as by a control operator — `cd <worktree>` on one line and `gh pr create` on
+the next is two invocations, and treating them as one made the gate blind to
+the create entirely. A heredoc body is excluded, so a transcribed `gh` line
+inside an anchor body is never credited as a post, and a leading `VAR=value`
+assignment no longer hides the invocation behind it.
+
 ## Escalation (issue #1113's explicit design choice)
 
 No sibling gate does this — it is a deliberate deviation, not a missed
@@ -130,6 +137,10 @@ _API_METHOD_RE = re.compile(r"(?:--method|-X)\s+([A-Za-z]+)", re.IGNORECASE)
 _API_BODY_RE = re.compile(r"(^|\s)(-f|-F|--field|--raw-field|--input)\b", re.IGNORECASE)
 _API_TARGET_RE = re.compile(r"gh\s+api\s+[^\n]*?(?:issues|pulls)/(\d+)/comments\b", re.IGNORECASE)
 
+# `VAR=value cmd` is one command, and shlex hands back the assignment as the
+# segment's first token — which defeats every `_starts_with` check below.
+_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
 # Control operators that separate independent invocations in a compound Bash
 # command. A prior regex-based segmenter (`gh\s+pr\s+create\b([^\n]*?)(?=&&|;
 # |\||$)`) matched these unquoted — `-b "verified && ready" 178` truncated the
@@ -142,26 +153,115 @@ _API_TARGET_RE = re.compile(r"gh\s+api\s+[^\n]*?(?:issues|pulls)/(\d+)/comments\
 _CONTROL_OPERATORS = frozenset({"&&", "||", ";", ";;", "|"})
 
 
+def _logical_lines(cmd: str) -> list[str]:
+    """Split `cmd` at the newlines that actually separate invocations.
+
+    A newline inside quotes, after a backslash continuation, or inside a
+    heredoc body separates nothing. The heredoc case is the one that costs
+    precision here rather than recall: an anchor body written through
+    `<<'EOF'` routinely carries transcribed `gh pr comment` / `gh api` lines
+    that never ran, and crediting one of those as a post would silence the
+    gate on a PR that has no anchor at all.
+    """
+    lines: list[str] = []
+    i, n = 0, len(cmd)
+    while i < n:
+        start = i
+        quote = ""
+        heredocs: list[str] = []
+        while i < n:
+            ch = cmd[i]
+            if quote:
+                if ch == "\\" and quote == '"':
+                    i += 2
+                    continue
+                if ch == quote:
+                    quote = ""
+                i += 1
+                continue
+            if ch in "'\"":
+                quote = ch
+                i += 1
+                continue
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == "\n":
+                break
+            if cmd.startswith("<<", i) and not cmd.startswith("<<<", i):
+                i = _read_heredoc_delimiter(cmd, i, heredocs)
+                continue
+            i += 1
+        lines.append(cmd[start:i])
+        i += 1  # step over the newline
+        for delim in heredocs:
+            i = _skip_heredoc_body(cmd, i, delim)
+    return lines
+
+
+def _read_heredoc_delimiter(cmd: str, i: int, heredocs: list[str]) -> int:
+    """Consume a `<<`/`<<-` redirection at `i`, recording its delimiter."""
+    j = i + 2
+    if j < len(cmd) and cmd[j] == "-":
+        j += 1
+    while j < len(cmd) and cmd[j] in " \t":
+        j += 1
+    if j < len(cmd) and cmd[j] in "'\"":
+        end = cmd.find(cmd[j], j + 1)
+        if end == -1:
+            return j + 1
+        heredocs.append(cmd[j + 1 : end])
+        return end + 1
+    m = re.match(r"[A-Za-z_][A-Za-z0-9_]*", cmd[j:])
+    if not m:
+        return j
+    heredocs.append(m.group(0))
+    return j + len(m.group(0))
+
+
+def _skip_heredoc_body(cmd: str, i: int, delim: str) -> int:
+    """Advance past a heredoc body ending at a line holding only `delim`."""
+    n = len(cmd)
+    while i < n:
+        end = cmd.find("\n", i)
+        line = cmd[i:] if end == -1 else cmd[i:end]
+        i = n if end == -1 else end + 1
+        if line.strip() == delim:
+            break
+    return i
+
+
+def _strip_assignments(seg: list[str]) -> list[str]:
+    """Drop leading `VAR=value` tokens so the invocation itself starts the segment."""
+    i = 0
+    while i < len(seg) and _ASSIGNMENT_RE.match(seg[i]):
+        i += 1
+    return seg[i:]
+
+
 def _split_invocations(cmd: str) -> list[list[str]]:
     """Tokenize `cmd` with shell-quoting semantics and split into one token
-    list per invocation, on unquoted control operators only. `[]` on
-    unbalanced/malformed quoting (fail open — nothing is guessed)."""
-    try:
-        lexer = shlex.shlex(cmd, posix=True, punctuation_chars=True)
-        lexer.whitespace_split = True
-        tokens = list(lexer)
-    except ValueError:
-        return []
+    list per invocation, on unquoted control operators and unquoted newlines
+    alike. `[]` on unbalanced/malformed quoting (fail open — nothing is
+    guessed)."""
     segments: list[list[str]] = []
-    current: list[str] = []
-    for tok in tokens:
-        if tok in _CONTROL_OPERATORS:
-            segments.append(current)
-            current = []
-        else:
-            current.append(tok)
-    segments.append(current)
-    return [seg for seg in segments if seg]
+    for line in _logical_lines(cmd):
+        try:
+            lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+        except ValueError:
+            return []
+        current: list[str] = []
+        for tok in tokens:
+            if tok in _CONTROL_OPERATORS:
+                segments.append(current)
+                current = []
+            else:
+                current.append(tok)
+        segments.append(current)
+    stripped = (_strip_assignments(seg) for seg in segments)
+    return [seg for seg in stripped if seg]
 
 
 def _starts_with(seg: list[str], words: tuple[str, ...]) -> bool:
@@ -271,7 +371,14 @@ class _ScanState:
     the resumable-scan cursor (issue #1237).
     """
 
-    __slots__ = ("pending_creates", "pending_posts", "create_tids", "interesting_tids", "result_is_error", "create_urls")
+    __slots__ = (
+        "pending_creates",
+        "pending_posts",
+        "create_tids",
+        "interesting_tids",
+        "result_is_error",
+        "create_urls",
+    )
 
     def __init__(self) -> None:
         # (tool_use id, is_draft) — one entry per `gh pr create` invocation.
