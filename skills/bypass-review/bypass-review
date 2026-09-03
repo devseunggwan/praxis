@@ -340,15 +340,15 @@ def _dated_files(telemetry_dir: Path, family: str, date_str: str) -> list[Path]:
 def _iter_jsonl_records(path: Path):
     """Yield the dict records of a plain or gzipped JSONL file, fail-open.
 
-    Malformed lines are skipped; a truncated or corrupt gzip stream ends the
-    file where the good data ends.
+    Malformed lines and undecodable bytes are skipped line by line; a
+    truncated or corrupt gzip stream ends the file where the good data ends.
     """
     opener = gzip.open if path.name.endswith(".gz") else open
     try:
-        with opener(path, "rt", encoding="utf-8") as fh:
+        with opener(path, "rb") as fh:
             try:
                 for raw_line in fh:
-                    line = raw_line.strip()
+                    line = raw_line.decode("utf-8", errors="replace").strip()
                     if not line:
                         continue
                     try:
