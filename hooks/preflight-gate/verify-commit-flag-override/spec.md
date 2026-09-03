@@ -71,6 +71,22 @@ the following retry. The checklist is local to this hook's `impl.py`
 verb-checklist registry: this hook is its only caller, and each token is
 transcribed from the owning sibling hook's own source.
 
+The printed rows are filtered to the gates the running host actually
+installs (`render_gate_checklist`). Two of the four name hooks carrying
+`hosts: ["claude"]` while this hook carries no `hosts` key, so on
+codex/cursor the unfiltered text named gates that are not installed and
+offered remedies (`praxis:codex-review-wrap`,
+`CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE`) that mean nothing there. The host
+comes from the dispatcher's own argv — dispatch-group members run
+in-process, and the generated hooks.json bakes the platform into
+`_dispatch.sh <event> <matcher> <host>` — and the row set is derived from
+`hooks/manifest.json`, so a gate added later with a `hosts` whitelist
+cannot drift back into the printed list. A host that cannot be resolved
+(standalone run, or a value outside `hooks/manifest.schema.json`'s enum)
+prints the full list unfiltered: naming a gate the host does not install
+wastes a reader's time, while dropping one it does install hides the next
+block entirely.
+
 The deny message also lists "verification commands" (e.g.,
 `git config --get commit.gpgsign`, `gpg --list-secret-keys`). Running
 those does **not** unblock subsequent invocations — the hook does not

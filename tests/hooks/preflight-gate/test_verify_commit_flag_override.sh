@@ -325,6 +325,101 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Host-aware checklist (issue #1154)
+#
+# Two of the four rows name hooks carrying hosts: ["claude"], so on any other
+# host the unfiltered text pointed at gates that are not installed. The rows
+# printed must therefore differ per host — a single-host assertion would pass
+# on the broken build too.
+# ---------------------------------------------------------------------------
+
+# rows_for_host <host|"">  → the `← <hook>` names the checklist would print.
+# An empty host argument means "not resolvable" (standalone run).
+rows_for_host() {
+  python3 - "$HOOK" "$1" << 'PYEOF'
+import importlib.util, sys, re
+spec = importlib.util.spec_from_file_location("impl_rows", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+host = sys.argv[2] or None
+print(" ".join(sorted(re.findall(r"\u2190\s*([a-z0-9][a-z0-9-]*)",
+                                 mod.render_gate_checklist(host)))))
+PYEOF
+}
+
+ALL_ROWS="block-commit-without-codex-review commit-title-format-check commit-title-length-check pre-commit-staged-file-enumeration"
+NON_CLAUDE_ROWS="commit-title-format-check commit-title-length-check"
+
+run_rows_case() {
+  local name="$1" host="$2" want="$3"
+  local got
+  got=$(rows_for_host "$host")
+  if [ "$got" = "$want" ]; then
+    echo "PASS: $name"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: $name (want='$want' got='$got')"
+    FAIL=$((FAIL + 1))
+    FAILED_NAMES+=("$name")
+  fi
+}
+
+run_rows_case "T03: claude keeps every row" claude "$ALL_ROWS"
+run_rows_case "T04: codex drops the claude-only rows" codex "$NON_CLAUDE_ROWS"
+run_rows_case "T05: cursor drops the claude-only rows" cursor "$NON_CLAUDE_ROWS"
+# Negative control: an unknown host must NOT shrink the list — losing a gate
+# the host does install is the worse failure of the two.
+run_rows_case "T06: unresolvable host prints every row" "" "$ALL_ROWS"
+run_rows_case "T07: unknown host id prints every row" not-a-host "$ALL_ROWS"
+
+# The remedy prose under a dropped row goes with it, not just its header line.
+codex_body=$(python3 - "$HOOK" << 'PYEOF'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("impl_body", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(mod.render_gate_checklist("codex"))
+PYEOF
+)
+if ! echo "$codex_body" | grep -q "CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE" &&
+   ! echo "$codex_body" | grep -q "codex-review-wrap" &&
+   echo "$codex_body" | grep -q "title-length:ack"; then
+  echo "PASS: T08: dropped rows take their remedy lines with them"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: T08: dropped rows take their remedy lines with them"
+  FAIL=$((FAIL + 1))
+  FAILED_NAMES+=("T08")
+fi
+
+# Live path: the host reaches the hook only through the dispatcher's argv, so
+# the branch above is only real if a dispatcher run reproduces it.
+dispatch_rows() {
+  local host="$1"
+  payload 'git commit -n -m "fix: probe title"  # side-effect:ack' |     python3 "$ROOT_DIR/hooks/_lib/_dispatch.py" PreToolUse Bash "$host" 2>/dev/null |     python3 -c "
+import json, re, sys
+d = json.load(sys.stdin)
+reason = d['hookSpecificOutput']['permissionDecisionReason']
+assert 'BLOCKED: Commit-flag override' in reason, 'another gate won the decision'
+print(' '.join(sorted(re.findall(r'\u2190\s*([a-z0-9][a-z0-9-]*)', reason))))
+"
+}
+
+for _h in claude codex; do
+  _want="$ALL_ROWS"
+  [ "$_h" = "claude" ] || _want="$NON_CLAUDE_ROWS"
+  _got=$(dispatch_rows "$_h")
+  if [ "$_got" = "$_want" ]; then
+    echo "PASS: T09[$_h]: dispatcher run prints the host's rows"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: T09[$_h]: dispatcher run prints the host's rows (want='$_want' got='$_got')"
+    FAIL=$((FAIL + 1))
+    FAILED_NAMES+=("T09[$_h]")
+  fi
+done
+
+# ---------------------------------------------------------------------------
 # Summary
 # Fail-open guard opt-in (issue #498): main() must be @fail_open-wrapped;
 # guard behavior is tested centrally in tests/test_hook_runtime.sh.

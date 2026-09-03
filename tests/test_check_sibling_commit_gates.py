@@ -615,6 +615,50 @@ def test_unreadable_deny_checklist_is_drift_not_a_silent_pass(tmp_path):
     assert any("assignment not found" in d for d in drifts), drifts
 
 
+def test_an_unfiltered_deny_checklist_is_drift(tmp_path):
+    """The per-host checklist column is a claim about what the runtime prints.
+
+    With the renderer gone the checklist prints all four rows on every host,
+    which is the state this canary was green through before issue #1154.
+    """
+    repo = _tree(
+        tmp_path,
+        {gates.CHECKLIST: ("def render_gate_checklist(", "def _render_all(")},
+    )
+    drifts = gates.check(repo)
+    assert any("printed unfiltered" in d for d in drifts), drifts
+
+
+def test_a_defined_but_unwired_renderer_is_drift(tmp_path):
+    """A renderer nothing calls satisfies a name search and prints every row.
+
+    This is the shape a substring check cannot see: the `def` line is intact,
+    so the surface reads as filtered while `main` emits the raw literal.
+    """
+    repo = _tree(
+        tmp_path,
+        {
+            gates.CHECKLIST: (
+                "+ render_gate_checklist(runtime_host())",
+                "+ GIT_COMMIT_GATE_CHECKLIST",
+            )
+        },
+    )
+    drifts = gates.check(repo)
+    assert any("never calls" in d for d in drifts), drifts
+    assert any("references `GIT_COMMIT_GATE_CHECKLIST` directly" in d for d in drifts), drifts
+
+
+def test_unparsable_checklist_source_is_drift_not_a_silent_pass(tmp_path):
+    """A file the AST cannot read verifies nothing, so it must say so."""
+    repo = _tree(
+        tmp_path,
+        {gates.CHECKLIST: ("def render_gate_checklist(", "def render_gate_checklist(((")},
+    )
+    drifts = gates.check(repo)
+    assert any("could not be parsed" in d for d in drifts), drifts
+
+
 def test_a_rewritten_manifest_is_re_read_not_served_stale(tmp_path):
     """The parse cache must key on the file's bytes, not only on its path.
 
