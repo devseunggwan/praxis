@@ -73,6 +73,9 @@ outside the repo tree.
 Advisory is emitted at most once per `(session_id, body content SHA-256)` pair.
 State marker written to `${PRAXIS_STATE_DIR:-~/.praxis/state}/phantom-path/<hash>`
 (host-neutral durable root, #527; `PRAXIS_STATE_DIR` still overrides the base).
+Markers older than the cache TTL (`PRAXIS_CACHE_TTL_DAYS`, default 7) are
+swept on the next marker write via `_paths.sweep_stale` (#1241); a swept marker
+only lets the advisory fire once more for a body it already flagged.
 
 ### Parsing guarantees
 

@@ -33,7 +33,7 @@ dir is not writable, and never raises.
 | File                                                | Producer                                                                                                     | Consumers                                                                                            |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
 | `strikes/<sid>.json`, `strikes/.current-session`, … | [`strike-counter`](../hooks/completion-verify/strike-counter/spec.md)                                        | strike-counter; read by [`postcompact-context`](../hooks/advisory-nudge/postcompact-context/spec.md) |
-| `phantom-path/<hash>`                               | [`external-write-path-existence-check`](../hooks/advisory-nudge/external-write-path-existence-check/spec.md) | itself (dedup)                                                                                       |
+| `phantom-path/<hash>`                               | [`external-write-path-existence-check`](../hooks/advisory-nudge/external-write-path-existence-check/spec.md) | itself (dedup; swept past the cache TTL, #1241)                                                      |
 
 ### Back-compat and migration (#527)
 
