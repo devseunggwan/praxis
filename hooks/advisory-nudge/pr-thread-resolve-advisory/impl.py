@@ -47,7 +47,11 @@ from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _git_push_target import resolve_push_target  # type: ignore[import-not-found]  # noqa: E402
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    fail_open,
+    remaining_budget,
+)
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 _BYPASS_ENV = "PRAXIS_PR_THREAD_ADVISORY_BYPASS"
@@ -105,14 +109,22 @@ def _gh_timeout() -> float:
 
 
 def _gh(args: list[str], cwd: str) -> str | None:
-    """Run `gh <args>` in cwd. Return stdout on success, None on any failure."""
+    """Run `gh <args>` in cwd. Return stdout on success, None on any failure.
+
+    Under the dispatcher the timeout clamps to the member's remaining budget
+    so a slow `gh` cannot outlive the PostToolUse group's node timeout.
+    """
+    timeout = _gh_timeout()
+    budget = min(timeout, remaining_budget(timeout))
+    if budget < MIN_SUBPROC_BUDGET_SEC:
+        return None  # a sub-floor slice cannot finish a gh round trip
     try:
         r = subprocess.run(
             ["gh", *args],
             capture_output=True,
             text=True,
             cwd=cwd,
-            timeout=_gh_timeout(),
+            timeout=budget,
         )
     except (OSError, subprocess.SubprocessError):
         return None  # gh absent, not executable, or hung

@@ -19,6 +19,10 @@ import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent))
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    remaining_budget,
+)
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
     safe_tokenize,
@@ -41,13 +45,22 @@ VALUE_FLAGS = frozenset({"-o", "--push-option", "--exec", "--receive-pack"})
 
 
 def git(cwd: str, args: list[str], timeout: int = GIT_TIMEOUT_SEC):
-    """Run `git -C <cwd> <args>`. Return (returncode|None, stdout). Never raises."""
+    """Run `git -C <cwd> <args>`. Return (returncode|None, stdout). Never raises.
+
+    Under the dispatcher the timeout clamps to what is left of the member's
+    budget; standalone the caller's timeout is used as is. A sub-floor slice
+    is not spawned at all: it cannot finish and only spends the budget the
+    later group members were counting on.
+    """
+    budget = min(timeout, remaining_budget(timeout))
+    if budget < MIN_SUBPROC_BUDGET_SEC:
+        return None, ""
     try:
         r = subprocess.run(
             ["git", "-C", cwd, *args],
             capture_output=True,
             text=True,
-            timeout=timeout,
+            timeout=budget,
         )
         return r.returncode, (r.stdout or "")
     except (OSError, subprocess.SubprocessError):

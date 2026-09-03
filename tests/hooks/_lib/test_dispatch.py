@@ -14,6 +14,7 @@ Coverage:
 from __future__ import annotations
 
 import ast
+import importlib.util
 import io
 import json
 import os
@@ -184,6 +185,46 @@ def test_edit_notebook_write_group_members():
     assert {n for _r, n, _i in members} == EDIT_NOTEBOOK_WRITE_MEMBERS
     for _role, name, impl in members:
         assert impl.exists(), f"missing impl for {name}: {impl}"
+
+
+def test_posttooluse_members_clamp_their_spawns_to_the_member_deadline(monkeypatch):
+    # push-remote-ref-verify and pr-thread-resolve-advisory spawn git / gh
+    # through fixed default timeouts (10 s / 5 s). Inside the group those must
+    # shrink to the member's remaining budget, and a sub-floor slice must not
+    # spawn at all — otherwise one slow call outlives the node timeout.
+    import _git_push_target
+    import _hook_runtime
+    spec = importlib.util.spec_from_file_location(
+        "_pr_thread_resolve_advisory_for_test",
+        REPO_ROOT / "hooks" / "advisory-nudge" / "pr-thread-resolve-advisory" / "impl.py",
+    )
+    pr_thread = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pr_thread)
+
+    seen: list[float] = []
+
+    def fake_run(*_a, **kw):
+        seen.append(kw["timeout"])
+        raise OSError("not spawned for real")
+
+    monkeypatch.setattr(_git_push_target.subprocess, "run", fake_run)
+    monkeypatch.setattr(pr_thread.subprocess, "run", fake_run)
+    try:
+        _hook_runtime.set_member_deadline(time.monotonic() + 2.0)
+        assert _git_push_target.git(".", ["status"]) == (None, "")
+        assert pr_thread._gh(["pr", "view"], ".") is None
+        assert seen and all(t <= 2.0 for t in seen), seen
+        seen.clear()
+        _hook_runtime.set_member_deadline(time.monotonic() + 0.1)
+        assert _git_push_target.git(".", ["status"]) == (None, "")
+        assert pr_thread._gh(["pr", "view"], ".") is None
+        assert seen == []  # sub-floor: nothing spawned
+    finally:
+        _hook_runtime.set_member_deadline(None)
+    # Standalone (no deadline) the defaults are used unchanged.
+    _git_push_target.git(".", ["status"])
+    pr_thread._gh(["pr", "view"], ".")
+    assert seen == [_git_push_target.GIT_TIMEOUT_SEC, pr_thread._DEFAULT_GH_TIMEOUT]
 
 
 def test_edit_groups_host_filter():
