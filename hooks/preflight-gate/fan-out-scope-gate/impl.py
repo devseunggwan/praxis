@@ -37,8 +37,8 @@ from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     is_help_invocation,
     iter_command_starts,
+    iter_command_texts,
     safe_tokenize,
-    strip_heredoc_bodies,
     strip_prefix,
 )
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
@@ -88,129 +88,9 @@ def is_workspace_creation(argv: list[str]) -> bool:
     return not any(tok in REHEARSAL_FLAGS for tok in rest)
 
 
-MAX_SUBST_DEPTH = 4
-
-
-def _iter_command_texts(command: str, depth: int = 0):
-    """Yield `command` and the inner text of every ACTIVE `$( ... )` / backtick.
-
-    A creation is routinely written as `WS=$(cmux workspace create ...)`, and
-    the tokenizer coalesces a substitution run into one token — so a scan of
-    the outer text alone sees no command start there at all. That is how the
-    motivating incident's own command read as zero targets.
-
-    Quoting decides whether a substitution is a substitution. Inside single
-    quotes, and after a backslash, `$(` and a backtick are literal text that
-    starts no process, so recursing into them would count a workspace that
-    never gets created — `printf '%s' '$(cmux workspace create ...)'` prints a
-    string. Double quotes do not disable either form, so those are followed.
-
-    A heredoc body is data for the same reason. A script written with
-    `python3 - <<'PY' ... PY` puts arbitrary text where the per-line scan
-    expects commands, so a fixture that merely spells out a creation is
-    counted as one — which is exactly how this gate first fired on a call
-    that edited its own test file.
-    """
-    command = strip_heredoc_bodies(command)
-    yield command
-    if depth >= MAX_SUBST_DEPTH:
-        return
-    for inner in _active_substitutions(command):
-        yield from _iter_command_texts(inner, depth + 1)
-
-
-def _active_substitutions(command: str) -> list[str]:
-    """Inner text of each `$( ... )` / backtick span that shell would expand."""
-    spans: list[str] = []
-    i, n = 0, len(command)
-    in_single = in_double = False
-    while i < n:
-        ch = command[i]
-        if in_single:
-            if ch == "'":
-                in_single = False
-            i += 1
-            continue
-        if ch == "\\":
-            i += 2
-            continue
-        if ch == "'" and not in_double:
-            in_single = True
-            i += 1
-            continue
-        if ch == '"':
-            in_double = not in_double
-            i += 1
-            continue
-        if command.startswith("$(", i):
-            end = _closing_paren(command, i + 2)
-            if end is not None:
-                spans.append(command[i + 2:end])
-                i = end + 1
-                continue
-        elif ch == "`":
-            end = _closing_backtick(command, i + 1)
-            if end is not None:
-                spans.append(command[i + 1:end])
-                i = end + 1
-                continue
-        i += 1
-    return spans
-
-
-def _closing_paren(command: str, start: int) -> int | None:
-    """Index of the `)` closing a `$(` opened before `start`, or None.
-
-    Quote state is tracked here too, so a parenthesis inside a quoted string
-    (`$(echo ")")`) does not close the span early.
-    """
-    level = 1
-    i, n = start, len(command)
-    in_single = in_double = False
-    while i < n:
-        ch = command[i]
-        if in_single:
-            if ch == "'":
-                in_single = False
-            i += 1
-            continue
-        if ch == "\\":
-            i += 2
-            continue
-        if ch == "'" and not in_double:
-            in_single = True
-        elif ch == '"':
-            in_double = not in_double
-        elif not in_double:
-            if command.startswith("$(", i):
-                level += 1
-                i += 2
-                continue
-            if ch == "(":
-                level += 1
-            elif ch == ")":
-                level -= 1
-                if not level:
-                    return i
-        i += 1
-    return None
-
-
-def _closing_backtick(command: str, start: int) -> int | None:
-    i, n = start, len(command)
-    while i < n:
-        if command[i] == "\\":
-            i += 2
-            continue
-        if command[i] == "`":
-            return i
-        i += 1
-    return None
-
-
 def _count_creation_segments(command: str) -> int:
     total = 0
-    for text in _iter_command_texts(command):
+    for text in iter_command_texts(command):
         if not text.strip():
             continue
         tokens = safe_tokenize(text)
