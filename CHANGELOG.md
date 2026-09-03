@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * fail the release run on a dropped commit ([#1233](https://github.com/devseunggwan/praxis/issues/1233)) ([2d55889](https://github.com/devseunggwan/praxis/commit/2d558892f25bfe7b8d0206e9bc5c9c188f15c913))
 * **hooks:** dispatch PostToolUse(Bash) as one process ([#1253](https://github.com/devseunggwan/praxis/issues/1253)) ([6a45153](https://github.com/devseunggwan/praxis/commit/6a4515383639b70fecfdd82ad823978fa74a0058))
+* **hooks:** extract shared _lib helpers ([#1232](https://github.com/devseunggwan/praxis/issues/1232)) ([2d86ff6](https://github.com/devseunggwan/praxis/commit/2d86ff6c7f389e4555f46907f50d10b09c3a607c))
 * **hooks:** read postcompact transcript tail by seeking, not scanning ([#1224](https://github.com/devseunggwan/praxis/issues/1224)) ([0a9d318](https://github.com/devseunggwan/praxis/commit/0a9d31833659b114c7123782aa67c0265c2d08c7)), closes [#1155](https://github.com/devseunggwan/praxis/issues/1155)
 * **hooks:** read the transcript tail in advisory scans ([#1251](https://github.com/devseunggwan/praxis/issues/1251)) ([cb0b888](https://github.com/devseunggwan/praxis/commit/cb0b888bb99c96d1bb67e5fd3682f050f6263978))
 * **hooks:** scan the transcript incrementally in Stop gates ([#1243](https://github.com/devseunggwan/praxis/issues/1243)) ([3c287e7](https://github.com/devseunggwan/praxis/commit/3c287e7b99e7278eeee6405fc3b5b22bb5690a6b))
