@@ -155,7 +155,13 @@ def clear_marker(path: str) -> None:
 
 
 def _read_marker(path: str) -> tuple[str, int]:
-    """(source, budget) of an existing marker; a pre-#1098 body counts as full."""
+    """(source, budget) of an existing marker; a pre-#1098 body counts as full.
+
+    A non-positive `turns_remaining` counts as full too. This hook never writes
+    one — `decay_marker` clears at zero rather than storing it — so reading one
+    back means the body was edited or truncated outside the hook, and the
+    corrupt-body rule applies rather than an immediate disarm.
+    """
     source, turns = "unknown", MARKER_TURN_BUDGET
     try:
         with open(path, encoding="utf-8") as fh:
@@ -164,7 +170,7 @@ def _read_marker(path: str) -> tuple[str, int]:
             if isinstance(body.get("source"), str):
                 source = body["source"]
             raw = body.get("turns_remaining")
-            if isinstance(raw, int) and not isinstance(raw, bool):
+            if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0:
                 turns = raw
     except (OSError, ValueError):
         pass

@@ -150,6 +150,9 @@ run_decay "decay_default_budget_disarms_on_second" 2 set clear clear
 run_decay "decay_legacy_body_counts_as_full"       legacy set clear
 run_decay "decay_last_turn_clears"                 1 clear
 run_decay "decay_corrupt_body_counts_as_full"      '"not-a-number"' set clear
+# 0 and negatives are outside-edit artefacts (the hook clears at zero instead
+# of storing one), so they take the corrupt-body rule, not an immediate disarm.
+run_decay "decay_nonpositive_body_counts_as_full"  0 set clear
 # An explicit larger budget still decays one turn at a time — the constant sets
 # the default, it is not baked into the decay arithmetic.
 run_decay "decay_explicit_budget_steps_one_at_a_time" 3 set set clear
