@@ -49,7 +49,7 @@ def _user(text: str = "다음 단계 진행해줘") -> dict:
 
 
 def test_no_unqualified_claim_leaves_the_transcript_unread(monkeypatch, tmp_path) -> None:
-    def tripwire(_path):
+    def tripwire(_path, _session_id=None):
         raise AssertionError("the transcript was scanned")
 
     monkeypatch.setattr(gate, "prior_verdict_mentions", tripwire)
@@ -61,7 +61,7 @@ def test_unqualified_claim_still_reads_the_transcript(monkeypatch, tmp_path) -> 
     """Mirror of the case above — without it, a gate that never scans passes."""
     calls = {"n": 0}
 
-    def counting(_path):
+    def counting(_path, _session_id=None):
         calls["n"] += 1
         return {}
 

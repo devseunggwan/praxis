@@ -136,7 +136,12 @@ number (`통과`) keys as `pass:bare`.
   restatements spanned several turns, each ending its own Stop event, so a
   turn-scoped or 80-event-scoped prior-mention check would miss the earlier
   turns entirely. A claim only fires when its key was already stated
-  earlier in the session, qualified or not.
+  earlier in the session, qualified or not. The scan is **resumable**
+  (#1237): the `{confirmed, pending}` mention maps are persisted with a byte
+  offset in `cache/stop-scan-runtime-state-claim-gate-<session_id>.json`, so
+  each Stop parses only the bytes appended since the last one; the cursor
+  is dropped (full re-scan) on a different inode, a shrunken file, or an
+  offset off a line boundary.
 - **Elapsed-time message**: the advisory names how many minutes ago the
   claim key was first stated (`ISO8601` transcript timestamps compared as
   strings for the minimum, parsed with `datetime` for the delta); "unknown"

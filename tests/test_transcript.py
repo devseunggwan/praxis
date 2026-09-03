@@ -453,16 +453,16 @@ _CONSUMERS = {
     # predicate so the backward and forward directions cannot disagree (#1076).
     HOOKS / "completion-verify" / "runtime-state-claim-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text",
-         "is_turn_boundary", "iter_transcript"],
+         "is_turn_boundary", "reduce_transcript_resumable", "stop_scan_cursor_path"],
     HOOKS / "completion-verify" / "artifact-verdict-evidence-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     # The one scan that genuinely needs the whole session; it streams instead
     # of materializing it (#1076).
     HOOKS / "completion-verify" / "pr-report-destination-gate" / "impl.py":
-        ["iter_transcript"],
+        ["reduce_transcript_resumable", "stop_scan_cursor_path"],
     # Same whole-session rationale as pr-report-destination-gate above (#1113).
     HOOKS / "completion-verify" / "pr-anchor-existence-gate" / "impl.py":
-        ["iter_transcript"],
+        ["reduce_transcript_resumable", "stop_scan_cursor_path"],
     HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
         ["read_transcript_tail"],
     HOOKS / "preflight-gate" / "block-ask-end-option" / "impl.py":

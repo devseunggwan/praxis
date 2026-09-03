@@ -59,8 +59,9 @@ from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E40
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
     is_turn_boundary,
-    iter_transcript,
     load_current_turn,
+    reduce_transcript_resumable,
+    stop_scan_cursor_path,
 )
 
 _PREFIX = "[runtime-state-claim-gate]"
@@ -374,7 +375,7 @@ def _elapsed_minutes(ts_from: str | None, ts_to: str | None) -> str:
     return f"{abs((b - a).total_seconds()) / 60:.1f}"
 
 
-def prior_verdict_mentions(path: str) -> dict[str, str | None]:
+def prior_verdict_mentions(path: str, session_id=None) -> dict[str, str | None]:
     """Verdict mentions from every turn BEFORE the current one, streaming (#1076).
 
     This gate asks whether a verdict number was already stated *earlier this
@@ -392,19 +393,31 @@ def prior_verdict_mentions(path: str) -> dict[str, str | None]:
     buffering the events themselves made peak memory track the largest turn,
     which on a long session is most of it (codex review #1083 P1). Peak now
     tracks the number of distinct verdict keys.
+
+    Resumable (issue #1237): the `{confirmed, pending}` pair is the whole
+    reduction, so it is persisted beside a byte offset and the next Stop folds
+    in only the events appended since. `pending` travels too — the turn that
+    was current at the last Stop is confirmed by the boundary the next scan
+    reads first.
     """
-    confirmed: dict[str, str | None] = {}
-    pending: dict[str, str | None] = {}
-    for ev in iter_transcript(path):
-        if is_turn_boundary(ev):
-            _merge_mentions(confirmed, pending)
-            pending = {}
-        _merge_mentions(pending, _event_verdict_mentions(ev))
-    return confirmed
+    state = reduce_transcript_resumable(
+        path,
+        stop_scan_cursor_path(_HOOK_NAME, session_id),
+        lambda: {"confirmed": {}, "pending": {}},
+        _reduce_verdict_event,
+    )
+    return state["confirmed"]
+
+
+def _reduce_verdict_event(state: dict, ev: dict) -> None:
+    if is_turn_boundary(ev):
+        _merge_mentions(state["confirmed"], state["pending"])
+        state["pending"] = {}
+    _merge_mentions(state["pending"], _event_verdict_mentions(ev))
 
 
 def detect_verdict_restatement(
-    last_text: str, transcript_path: str
+    last_text: str, transcript_path: str, session_id=None
 ) -> tuple[list[str], dict[str, str | None]]:
     """Return (restated claim keys, prior-mention timestamps) for verdict
     numbers in `last_text` that are (a) unqualified here and (b) were already
@@ -416,7 +429,7 @@ def detect_verdict_restatement(
     unqualified = [c for c in extract_verdict_claims(last_text) if not c["qualified"]]
     if not unqualified:
         return [], {}
-    mentions = prior_verdict_mentions(transcript_path)
+    mentions = prior_verdict_mentions(transcript_path, session_id)
     if not mentions:
         return [], mentions
     restated: list[str] = []
@@ -519,7 +532,9 @@ def main() -> int:
         return 0
 
     kinds = detect_claims(last_text)
-    restated, mentions = detect_verdict_restatement(last_text, transcript_path)
+    restated, mentions = detect_verdict_restatement(
+        last_text, transcript_path, payload.get("session_id")
+    )
     if not kinds and not restated:
         return 0
 

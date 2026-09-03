@@ -82,7 +82,10 @@ import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_stop_advisory  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
-from _transcript import iter_transcript  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
+    reduce_transcript_resumable,
+    stop_scan_cursor_path,
+)
 
 _HOOK_NAME = "pr-report-destination-gate"
 _ROLE = "completion-verify"
@@ -176,45 +179,105 @@ def find_unreported_prs(events) -> tuple[list[str], list[str]]:
     would keep whole Bash command strings alive for the length of the session,
     which is the cost this gate exists to avoid (issue #1076).
     """
-    # (tool_use id, PR numbers this call posted to, report file written)
-    pending: list[tuple[str | None, list[str], str | None]] = []
-    result_is_error: dict[str, bool] = {}
-    context_prs: set[str] = set()
-
+    state = _new_state()
     for ev in events:
-        msg = ev.get("message")
-        if not isinstance(msg, dict):
+        _reduce_event(state, ev)
+    return _resolve(state)
+
+
+def scan_unreported_prs(transcript_path: str, session_id) -> tuple[list[str], list[str]]:
+    """`find_unreported_prs` over the whole file, resuming from the previous
+    Stop's cursor when the session has one (issue #1237)."""
+    state = reduce_transcript_resumable(
+        transcript_path,
+        stop_scan_cursor_path(_HOOK_NAME, session_id),
+        _new_state,
+        _reduce_event,
+        encode=_encode_state,
+        decode=_decode_state,
+    )
+    return _resolve(state)
+
+
+def _new_state() -> dict:
+    return {
+        # (tool_use id, PR numbers this call posted to, report file written)
+        "pending": [],
+        "result_is_error": {},
+        "context_prs": set(),
+        "interesting_tids": set(),
+    }
+
+
+def _encode_state(state: dict) -> dict:
+    return {
+        "pending": [[tid, list(posted), report] for tid, posted, report in state["pending"]],
+        "result_is_error": state["result_is_error"],
+        "context_prs": sorted(state["context_prs"]),
+        "interesting_tids": sorted(state["interesting_tids"]),
+    }
+
+
+def _decode_state(data: dict) -> dict:
+    return {
+        "pending": [(tid, list(posted), report) for tid, posted, report in data["pending"]],
+        "result_is_error": dict(data["result_is_error"]),
+        "context_prs": set(data["context_prs"]),
+        "interesting_tids": set(data["interesting_tids"]),
+    }
+
+
+def _reduce_event(state: dict, ev: dict) -> None:
+    pending = state["pending"]
+    result_is_error = state["result_is_error"]
+    context_prs = state["context_prs"]
+    msg = ev.get("message")
+    if not isinstance(msg, dict):
+        return
+    content = msg.get("content")
+    if isinstance(content, str):
+        _add_narrative_prs(context_prs, content)
+        return
+    if not isinstance(content, list):
+        return
+    for block in content:
+        if not isinstance(block, dict):
             continue
-        content = msg.get("content")
-        if isinstance(content, str):
-            _add_narrative_prs(context_prs, content)
-            continue
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            kind = block.get("type")
-            if kind == "text":
-                text = block.get("text")
-                if isinstance(text, str):
-                    _add_narrative_prs(context_prs, text)
-            elif kind == "tool_use":
-                _reduce_tool_use(block, context_prs, pending)
-            elif kind == "tool_result":
-                tid = block.get("tool_use_id")
-                if isinstance(tid, str):
-                    result_is_error[tid] = block.get("is_error") is True
-                rc = block.get("content")
-                parts: list[str] = []
-                if isinstance(rc, str):
-                    parts.append(rc)
-                elif isinstance(rc, list):
-                    for c in rc:
-                        if isinstance(c, dict) and isinstance(c.get("text"), str):
-                            parts.append(c["text"])
-                if parts:
-                    _add_tool_result_prs(context_prs, "\n".join(parts))
+        kind = block.get("type")
+        if kind == "text":
+            text = block.get("text")
+            if isinstance(text, str):
+                _add_narrative_prs(context_prs, text)
+        elif kind == "tool_use":
+            before = len(pending)
+            _reduce_tool_use(block, context_prs, pending)
+            for tid, _posted, _report in pending[before:]:
+                if tid is not None:
+                    state["interesting_tids"].add(tid)
+        elif kind == "tool_result":
+            tid = block.get("tool_use_id")
+            # Only a pending post/report call is ever looked up, so only those
+            # tids are kept: the state crosses a JSON file between Stops
+            # (issue #1237), and one entry per tool_result would grow it with
+            # the session (583KB on a 143k-event transcript, 6KB with this).
+            if isinstance(tid, str) and tid in state["interesting_tids"]:
+                result_is_error[tid] = block.get("is_error") is True
+            rc = block.get("content")
+            parts: list[str] = []
+            if isinstance(rc, str):
+                parts.append(rc)
+            elif isinstance(rc, list):
+                for c in rc:
+                    if isinstance(c, dict) and isinstance(c.get("text"), str):
+                        parts.append(c["text"])
+            if parts:
+                _add_tool_result_prs(context_prs, "\n".join(parts))
+
+
+def _resolve(state: dict) -> tuple[list[str], list[str]]:
+    pending = state["pending"]
+    result_is_error = state["result_is_error"]
+    context_prs = state["context_prs"]
 
     posted_prs: set[str] = set()
     report_files: list[str] = []
@@ -274,17 +337,16 @@ def main() -> int:
     if not transcript_path or not os.path.isfile(transcript_path):
         return 0
 
-    unreported, report_files = find_unreported_prs(
-        iter_transcript(transcript_path)
-    )
+    session_id = payload.get("session_id")
+    has_session = isinstance(session_id, str) and bool(session_id)
+
+    unreported, report_files = scan_unreported_prs(transcript_path, session_id)
     if not unreported or not report_files:
         return 0
 
     # Fire once per session: the whole-transcript scan re-derives the same
     # condition on every Stop, so without this the advisory would repeat each
     # turn while an unreported context PR persists (sanctioned dedup, issue #805).
-    session_id = payload.get("session_id")
-    has_session = isinstance(session_id, str) and bool(session_id)
     if has_session and _fire_ledger.count_session_fires(_HOOK_NAME, session_id, _fire_ledger.DECISION_ADVISE) > 0:
         return 0
 
