@@ -43,6 +43,7 @@ while [[ $j -lt $ORPHAN_COUNT ]]; do
   oname=$(echo "$entry" | cut -d'|' -f1)
   otype=$(echo "$entry" | cut -d'|' -f2)
   ocmds=$(echo "$entry" | cut -d'|' -f3)
+  oevidence=$(echo "$entry" | cut -d'|' -f4)
 
   if [[ "$otype" == "safe_numeric" ]]; then
     executed=false
@@ -55,9 +56,11 @@ while [[ $j -lt $ORPHAN_COUNT ]]; do
       --arg s "$oname" --arg t "$otype" --argjson e "$executed" --argjson d "$DRY_RUN" \
       '. += [{"action":"kill_orphan","session":$s,"type":$t,"executed":$e,"dry_run":$d}]')
   else
+    # idle_* rides the same report path as unsafe_*: the oracle's verdict is
+    # evidence for the operator, never a licence to auto-delete.
     phase1_actions=$(echo "$phase1_actions" | jq \
-      --arg s "$oname" --arg t "$otype" --arg c "$ocmds" \
-      '. += [{"action":"report_orphan","session":$s,"type":$t,"commands":$c,"auto_delete":false}]')
+      --arg s "$oname" --arg t "$otype" --arg c "$ocmds" --arg e "$oevidence" \
+      '. += [{"action":"report_orphan","session":$s,"type":$t,"commands":$c,"idle_evidence":$e,"auto_delete":false}]')
   fi
   j=$((j + 1))
 done

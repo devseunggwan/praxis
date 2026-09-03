@@ -50,7 +50,7 @@ bash "$(dirname "$0")/cmux-session-status"
 **Output includes:**
 - Summary header: Active / Waiting / Idle / Crashed / Orphaned counts
 - Session table: status icon, category, name, branch
-- Orphan section: classified as auto-removable / named / unsafe
+- Orphan section: classified as auto-removable / named / idle / unsafe
 
 ### `cleanup [--dry-run]` — Tidy + Reorganize
 
@@ -75,11 +75,16 @@ Claude parses them and handles user interaction.
 {"phase":"auto_cleanup","actions":[
   {"action":"kill_orphan","session":"12","type":"safe_numeric","executed":true},
   {"action":"close_crashed","ref":"workspace:69","name":"...","executed":true},
-  {"action":"report_orphan","session":"psm_...","type":"safe_named","auto_delete":false}
+  {"action":"report_orphan","session":"psm_...","type":"safe_named","auto_delete":false},
+  {"action":"report_orphan","session":"41","type":"idle_numeric","commands":"2.1.241",
+   "idle_evidence":"startup prompt on screen in 1 pane(s), no output for 91380s","auto_delete":false}
 ]}
 ```
 - `executed: true` items are already done — report results to user
 - `auto_delete: false` items are informational — notify "this session was not auto-deleted"
+- `idle_evidence` is present on `idle_*` types — show it verbatim when asking the
+  user whether to remove that session; it is the whole reason the session is
+  separated from `unsafe_*`
 
 ### Phase 2: `idle_cleanup` (user confirmation required)
 ```json
@@ -134,6 +139,33 @@ Uses the `claude_code=` field from `cmux sidebar-state` as the primary signal:
 
 Idle workspaces are further checked via `read-screen` for crash signatures (`bun.report`, `segfault`, etc.).
 
+## Orphan Classification
+
+An orphan tmux session — one no cmux workspace owns — is typed by what its panes
+are running, and the type decides who removes it.
+
+| Type | Condition | Handling |
+| ------ | ----------- | ---------- |
+| `safe_*` | every pane runs a bare shell | `safe_numeric` is killed by Phase 1 without prompting; `safe_named` is reported |
+| `idle_*` | a non-shell pane, and the idleness oracle finds the process parked | reported with its evidence — never auto-killed |
+| `unsafe_*` | a non-shell pane the oracle cannot show is parked | reported as running processes, as before |
+
+The oracle answers "parked or working?" by requiring **both** signals:
+
+- the session's newest `#{window_activity}` is older than `CMUX_IDLE_ACTIVITY_SECS`
+  (default 1800), and
+- every non-shell pane's screen shows a startup prompt at the start of a line.
+
+Either signal alone misreads a case the other catches: a quiet window is also
+what a long silent build looks like, and a prompt on screen is also what a
+session someone just opened looks like. Any uncertain input — no activity clock,
+an unreadable pane, no non-shell pane at all — produces no verdict, so the
+session keeps the stricter type.
+
+`idle_*` is deliberately report-only. The oracle can be wrong, and the cost of a
+wrong `idle` that auto-kills is a working session lost without a prompt, while
+the cost of a wrong `idle` that only reports is one line the operator dismisses.
+
 ## Category Classification
 
 Priority (highest first):
@@ -184,6 +216,7 @@ The report includes status output + PR status from `sidebar-state`'s `pr=` field
 | "I'll approve the cleanup without looking, it's probably fine" | An IDLE session may be a long-running task paused on input. Read the category/branch first. |
 | "Skip the dry-run, just execute" | Dry-run takes 2 seconds and prevents closing a session you actually wanted to keep. |
 | "The session looks crashed, auto-close it" | Only `auto_cleanup` (Phase 1) kills sessions automatically. Anything in Phase 2 needs your eyes. |
+| "It is typed `idle`, so it is safe to kill" | `idle` means an oracle found no sign of work, not that there is none. It is evidence to show the user, never a licence to remove the session for them. |
 | "Reorganize everything into one window" | Category windows make parallel work scannable. One-window mode is a regression. |
 
 ## Integration
