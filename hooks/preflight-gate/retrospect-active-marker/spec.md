@@ -105,12 +105,24 @@ corrupt body reads the same way.
 If the decaying rewrite cannot land the hook falls back to clearing the marker —
 but on the one cause that blocks the rewrite outright, an **unwritable state
 directory**, `unlink` is blocked by the same permission, so the marker freezes at
-its current budget and stays armed. Measured: a marker at budget 3 in a `chmod
-500` directory sat unchanged through five ordinary turns. The realistic causes
-diverge here — a full disk (`ENOSPC`) blocks the write but not the unlink, so the
-clear succeeds; only an explicitly read-only cache directory reaches the frozen
-state, and nothing in this hook can recover from it. Recorded here rather than
-hidden behind a fallback that does not fire.
+its current budget. Measured: a marker at budget 3 in a `chmod 500` directory sat
+unchanged through five ordinary turns. A full disk (`ENOSPC`) blocks the write
+but not the unlink, so there the clear succeeds.
+
+A frozen marker only keeps the #666 gate armed while `retrospect-mix-check.sh`
+still resolves to that same file. An unwritable **cache** directory does not do
+that: `praxis_resolve_writable` and `resolve_cache_file` both fall back to
+`${TMPDIR}`, so the frozen file under `<PRAXIS_HOME>/cache` is orphaned and the
+gate reads as disarmed. The armed-and-frozen state needs the *resolved* directory
+to lose write permission after the marker landed in it — measured by arming with
+the cache dir already unwritable, so the marker lands in `${TMPDIR}`, then making
+`${TMPDIR}` unwritable: two ordinary turns later the Stop hook still blocks.
+
+Nothing in this hook can recover from that, but the user can, and any one of
+these clears it: start a new session (the marker is session-keyed), point
+`TMPDIR` at a writable directory, or delete the file directly —
+`chmod u+w "$TMPDIR" && rm "$TMPDIR/praxis-retrospect-active-<session_id>.json"`.
+Recorded here rather than hidden behind a fallback that does not fire.
 
 ## State file
 

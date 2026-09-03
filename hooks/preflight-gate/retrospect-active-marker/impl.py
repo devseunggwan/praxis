@@ -192,9 +192,11 @@ def decay_marker(path: str) -> None:
     if _read_marker(path)[1] > turns:
         # The rewrite did not land. Clearing is the recovery, but on the one
         # cause that blocks the rewrite outright — an unwritable state dir —
-        # unlink is blocked too, so the marker freezes at its current budget and
-        # stays armed. Nothing this hook can do reaches that state; it is
-        # recorded in the spec rather than papered over here.
+        # unlink is blocked too, so the marker freezes at its current budget.
+        # That only keeps the gate armed while the Stop hook resolves to this
+        # same path; an unwritable cache dir sends both hooks to TMPDIR instead
+        # and orphans the file. The spec carries the reachable case and the
+        # user-side recovery.
         clear_marker(path)
 
 
