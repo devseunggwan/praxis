@@ -97,6 +97,17 @@ A line never reaches T2 at all when any of these holds:
 
 ## Provenance excludes calls that never ran
 
+**Contract.** Silence from arm B means *the published line has a syntactic
+counterpart in the command string of a Bash call this session actually
+dispatched* — it does **not** mean the published line executed. Two gaps are
+deliberate and permanent under this contract: a segment to the right of `&&`
+is recorded whether or not the left side succeeded, and a command that ran and
+failed is still provenance. This gate detects lines that were **never typed
+into a tool call**, which is the defect it was built for; establishing that a
+recorded command *succeeded* needs an exit status the transcript schema does
+not carry. An author who wants the stronger claim states it themselves — the
+hook cannot.
+
 A transcript Bash `tool_use` is not proof of execution. A hook-blocked call, a
 harness-refused one, and a user-denied one all appear as ordinary `tool_use`
 blocks; only their `tool_result` says otherwise. Each `tool_use` is therefore
@@ -152,7 +163,9 @@ direction was to start under-firing and raise later on measured fire data.
   grep ...` and `git fetch && git rebase ...` — really do run both sides, and
   treating the right side as unexecuted would bring back the false positives
   the segmenting removed. `||` carries no such shape, which is why it is
-  dropped and `&&` is not.
+  dropped and `&&` is not. This is the residual false-clear the Contract
+  above scopes out: closing it needs a per-call exit status, which the
+  transcript schema does not record.
 - **Indented (4-space) code blocks are not scanned** — fenced blocks only.
 - **An unclosed fence contributes nothing.** A body still mid-composition is
   not evidence anyone can act on, and scanning it would fire on drafts.
