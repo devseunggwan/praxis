@@ -664,7 +664,10 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash|Edit|Write",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_PERSONAL_LEAK_STRICT"
+      }
     },
     {
       "name": "version-bump-evidence-check",
@@ -935,7 +938,10 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "AskUserQuestion",
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_MERGE_MENU_REVIEW_STRICT"
+      }
     },
     {
       "name": "menu-mutation-tier-advisory",

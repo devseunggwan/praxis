@@ -84,8 +84,9 @@ main() is labeled with its number, and this list is the canonical roster
       SPEC_PATH_EXEMPT. (Numbered 22 to stay clear of rules added by
       parallel PRs.)
   23. README.md hook-aggregate counts (#1176): total hook dirs, manifest
-      registration count, per-role dir counts, and the number of distinct
-      hooks carrying a variable in docs/bypass-vars.md must all match the
+      registration count, per-role dir counts, the number of distinct hooks
+      carrying a variable in docs/bypass-vars.md, and how many advisory hooks
+      a strict variable there can promote into blocking must all match the
       hand-written numbers at their anchored README phrases — the Rule 13
       doc-drift contract, applied to the hook surface. (Numbered 23 to stay
       clear of rules 21/22 added by a parallel PR.)
@@ -2081,6 +2082,7 @@ def main() -> int:
     hook_dir_names = {d.name for d in _hook_dirs()}
     bypass_vars_text = (REPO_ROOT / "docs" / "bypass-vars.md").read_text()
     bypass_var_hooks: set[str] = set()
+    strict_hooks: set[str] = set()
     current_section: str | None = None
     for line in bypass_vars_text.splitlines():
         header = re.match(r"^##\s+(.+)$", line)
@@ -2093,11 +2095,25 @@ def main() -> int:
         hook_col = 2 if current_section.startswith("Path / test") else 1
         if len(cells) <= hook_col:
             continue
-        bypass_var_hooks.update(
+        named = [
             token
             for token in re.findall(r"`([^`]+)`", cells[hook_col])
             if token in hook_dir_names
-        )
+        ]
+        bypass_var_hooks.update(named)
+        if current_section.startswith("Strict"):
+            strict_hooks.update(named)
+
+    # The role table's `advisory-nudge` row says how many of those hooks a
+    # `PRAXIS_*_STRICT` variable can promote into blocking. Derived from the
+    # same registry as the opt-out count above so the two cannot disagree,
+    # and restricted to advisory-nudge because that is the row it sits in —
+    # a strict var on a gate role does not promote anything.
+    strict_advisory_count = sum(
+        1
+        for name in strict_hooks
+        if (_build.HOOKS_DIR / "advisory-nudge" / name).is_dir()
+    )
 
     readme_text = (REPO_ROOT / "README.md").read_text()
     readme_count_specs: list[tuple[str, str, tuple[int, ...]]] = [
@@ -2114,6 +2130,11 @@ def main() -> int:
             r"(\d+)\s+of\s+the\s+(\d+)\s+hooks\s+declare\s+an\s+opt-out\s+"
             r"or\s+tuning\s+variable",
             (len(bypass_var_hooks), total_hook_dirs),
+        ),
+        (
+            "advisory strict-variable coverage",
+            r"(\d+)\s+read\s+a\s+`PRAXIS_\*_STRICT`\s+variable",
+            (strict_advisory_count,),
         ),
     ]
     for role in sorted(VALID_ROLES):
