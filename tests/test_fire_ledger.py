@@ -2170,9 +2170,20 @@ def test_rotate_starts_one_child_per_directory_per_day(tmp_path, monkeypatch):
     assert spawned == [tmp_path]
     stale = tmp_path / f"{fl._ROLLOVER_MARK}2000-01-01"
     stale.write_text("")
+    unrelated = tmp_path / f"{fl._ROLLOVER_MARK}notes"
+    unrelated.write_text("keep")
     fl.rotate_telemetry(tmp_path)
     assert not stale.exists()
-    assert len(list(tmp_path.glob(f"{fl._ROLLOVER_MARK}*"))) == 1
+    assert unrelated.exists()  # only date-shaped markers are the module's own
+    assert len(list(tmp_path.glob(f"{fl._ROLLOVER_MARK}????-??-??"))) == 1
+
+
+def test_rotate_releases_the_marker_when_the_child_cannot_start(tmp_path, monkeypatch):
+    monkeypatch.setattr(fl, "_compress_detached", lambda d: False)
+    assert fl.rotate_telemetry(tmp_path)[0] is False
+    assert list(tmp_path.glob(f"{fl._ROLLOVER_MARK}*")) == []
+    monkeypatch.setattr(fl, "_compress_detached", lambda d: True)
+    assert fl.rotate_telemetry(tmp_path)[0] is True  # a later writer retries
 
 
 def test_rotate_prunes_inline_and_compresses_in_a_detached_child(tmp_path):

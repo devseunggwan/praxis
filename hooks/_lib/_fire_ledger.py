@@ -453,6 +453,7 @@ def _compress_detached(directory: Path) -> bool:
 
 
 _ROLLOVER_MARK = ".rollover-"
+_ROLLOVER_NAME = re.compile(r"^\.rollover-\d{4}-\d{2}-\d{2}$")
 
 
 def _claim_rollover(directory: Path, today: str) -> bool:
@@ -467,7 +468,7 @@ def _claim_rollover(directory: Path, today: str) -> bool:
     """
     try:
         for entry in os.scandir(directory):
-            if entry.name.startswith(_ROLLOVER_MARK) and entry.name != f"{_ROLLOVER_MARK}{today}":
+            if _ROLLOVER_NAME.fullmatch(entry.name) and entry.name != f"{_ROLLOVER_MARK}{today}":
                 try:
                     os.unlink(entry.path)
                 except OSError:
@@ -494,7 +495,13 @@ def rotate_telemetry(directory: Path) -> tuple[bool, int]:
     today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
     if not _claim_rollover(directory, today):
         return False, removed
-    return _compress_detached(directory), removed
+    if _compress_detached(directory):
+        return True, removed
+    try:
+        os.unlink(directory / f"{_ROLLOVER_MARK}{today}")  # let a later writer retry
+    except OSError:
+        pass
+    return False, removed
 
 
 def prune_telemetry(directory: Path, days: float | None = None) -> int:
