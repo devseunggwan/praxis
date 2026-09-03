@@ -37,8 +37,16 @@ after the block text, exactly as before.
 """
 from __future__ import annotations
 
+import re
 import sys
+from pathlib import Path as _Path
 from typing import Optional, TextIO
+
+# Sibling `_lib` import: a hook reaches this module by putting `_lib` on
+# sys.path, but `tests/test_block_message.py` loads the file directly, so the
+# directory is added here too rather than relied on from the caller.
+sys.path.insert(0, str(_Path(__file__).resolve().parent))
+from _hosts import installed_hook_names  # type: ignore[import-not-found]  # noqa: E402
 
 
 def format_block(
@@ -188,12 +196,62 @@ Advisory only — never block, no action needed to proceed:
 }
 
 
-def verb_gate_checklist(verb: str) -> str:
+# Row anchor: every checklist row ends its first line in `← <hook-name>`, and
+# the indented lines under it are that row's remedy prose. The same anchor
+# `verify-commit-flag-override` uses for its own deny checklist (issue #1154),
+# so one filter shape serves both surfaces.
+_ROW_ANCHOR_RE = re.compile(r"←\s*([a-z0-9][a-z0-9-]*)")
+
+
+def filter_gate_rows(text: str, installed: set[str]) -> str:
+    """`text` with every row naming a hook outside `installed` removed.
+
+    A row runs from its `←` line until the next row or the next section break.
+    A section break is a non-indented line that follows a blank one — the
+    checklists use those for their headers ("Conditional — fire only in …") and
+    their closing prose, and those belong to the checklist rather than to the
+    row above them. Without that rule a dropped row would take the next
+    section's header with it.
+
+    Returns "" when the text had rows and none survived, so a caller never
+    emits a header introducing an empty list.
+    """
+    kept: list[str] = []
+    row: str | None = None
+    saw_row = False
+    kept_row = False
+    prev_blank = True
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\n")
+        match = _ROW_ANCHOR_RE.search(line)
+        if match:
+            row = match.group(1)
+            saw_row = True
+        elif row is not None and prev_blank and body.strip() and not body[0].isspace():
+            row = None
+        if row is None or row in installed:
+            kept.append(line)
+            kept_row = kept_row or row is not None
+        prev_blank = not body.strip()
+    if saw_row and not kept_row:
+        return ""
+    return "".join(kept)
+
+
+def verb_gate_checklist(verb: str, host: str | None = None) -> str:
     """Full gate-token enumeration for every gate that fires on `verb`.
 
     Args:
       verb: the action verb key — one of the `_VERB_CHECKLISTS` keys, e.g.
         "gh pr create", "gh pr merge", "AskUserQuestion".
+      host: the platform this run is executing on (`_hosts.runtime_host()`).
+        Rows naming a hook that host does not install are dropped, because
+        several of the gates enumerated here carry a `hosts` whitelist while
+        the hooks printing the checklist do not — so the unfiltered text asked
+        for tokens no installed gate requires and offered bypasses that do not
+        exist there (issue #1245, same shape as #1154). None — an unresolvable
+        or unknown host — keeps every row: naming an absent gate wastes a
+        reader's time, while dropping a present one hides the next hard block.
 
     Returns:
       The checklist WITH a leading blank line and a trailing newline — callers
@@ -201,12 +259,18 @@ def verb_gate_checklist(verb: str) -> str:
       before any cascade hint. An unregistered verb returns "" so a caller
       cannot inject a stray blank block into its deny message.
     """
-    return _VERB_CHECKLISTS.get(verb, "")
+    text = _VERB_CHECKLISTS.get(verb, "")
+    if not text:
+        return ""
+    installed = installed_hook_names(host)
+    if installed is None:
+        return text
+    return filter_gate_rows(text, installed)
 
 
-def pr_body_evidence_checklist() -> str:
+def pr_body_evidence_checklist(host: str | None = None) -> str:
     """Back-compat alias for `verb_gate_checklist("gh pr create")` (#824)."""
-    return verb_gate_checklist("gh pr create")
+    return verb_gate_checklist("gh pr create", host)
 
 
 def emit_block(
