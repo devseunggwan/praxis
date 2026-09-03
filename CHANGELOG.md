@@ -5,6 +5,37 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.14.0](https://github.com/devseunggwan/praxis/compare/v7.13.0...v7.14.0) (2026-09-03)
+
+
+### Added
+
+* **manifest:** emit an Agent Plugins manifest ([#1220](https://github.com/devseunggwan/praxis/issues/1220)) ([9eb6647](https://github.com/devseunggwan/praxis/commit/9eb66470ed997bbe9ce9948f7baa85d2eeb9220c))
+
+
+### Fixed
+
+* **hooks:** aggregate Stop-lane decision:block in run_group ([#1199](https://github.com/devseunggwan/praxis/issues/1199)) ([61dd495](https://github.com/devseunggwan/praxis/commit/61dd49545196e9cf3d39833e97a211859eb4ceff))
+* **hooks:** decay the retrospect marker per turn ([#1249](https://github.com/devseunggwan/praxis/issues/1249)) ([7e14550](https://github.com/devseunggwan/praxis/commit/7e14550df60018e1dc00273cef01948750789304))
+* **hooks:** distinguish an unscanned transcript from zero rejections ([#1234](https://github.com/devseunggwan/praxis/issues/1234)) ([ed8446a](https://github.com/devseunggwan/praxis/commit/ed8446ae619a38e07724966ad12923cd184141b1))
+* **hooks:** host-aware commit deny checklist ([#1236](https://github.com/devseunggwan/praxis/issues/1236)) ([ed3f804](https://github.com/devseunggwan/praxis/commit/ed3f804b1e54fd2fdc1b6afa0b215f3cdf94b515))
+* **hooks:** host-scope printed gate references ([#1248](https://github.com/devseunggwan/praxis/issues/1248)) ([eaa716d](https://github.com/devseunggwan/praxis/commit/eaa716da0859180c6b2dc206137573bc4f0218af)), closes [#1245](https://github.com/devseunggwan/praxis/issues/1245)
+* **hooks:** pr-anchor-existence-gate records no fire events ([#1223](https://github.com/devseunggwan/praxis/issues/1223)) ([a86f695](https://github.com/devseunggwan/praxis/commit/a86f695aba3033ac88b855d66c1cfe4f7ef22dc1)), closes [#1213](https://github.com/devseunggwan/praxis/issues/1213)
+* **hooks:** reconcile praxis_state_dir across _paths.sh and _paths.py ([#1222](https://github.com/devseunggwan/praxis/issues/1222)) ([cbdd22e](https://github.com/devseunggwan/praxis/commit/cbdd22e0c3569d9ce75afb00eda941906fe9bd54)), closes [#1215](https://github.com/devseunggwan/praxis/issues/1215)
+* **hooks:** scan every dispatch group for fixed timeouts ([#1235](https://github.com/devseunggwan/praxis/issues/1235)) ([259dd18](https://github.com/devseunggwan/praxis/commit/259dd1868a96fe85f6a46defbe2b0e1376d6fd52))
+* **hooks:** see posted anchors the gate was blind to ([#1254](https://github.com/devseunggwan/praxis/issues/1254)) ([a4d01ad](https://github.com/devseunggwan/praxis/commit/a4d01ad6a29e6aa68f96959e01205f87031deb2f))
+* **retrospect:** resolve gate-4 repo visibility via the API ([#1242](https://github.com/devseunggwan/praxis/issues/1242)) ([8ab92c4](https://github.com/devseunggwan/praxis/commit/8ab92c41a500375c7b78840f8dd5d8a2062cae25))
+
+
+### Changed
+
+* fail the release run on a dropped commit ([#1233](https://github.com/devseunggwan/praxis/issues/1233)) ([2d55889](https://github.com/devseunggwan/praxis/commit/2d558892f25bfe7b8d0206e9bc5c9c188f15c913))
+* **hooks:** dispatch PostToolUse(Bash) as one process ([#1253](https://github.com/devseunggwan/praxis/issues/1253)) ([6a45153](https://github.com/devseunggwan/praxis/commit/6a4515383639b70fecfdd82ad823978fa74a0058))
+* **hooks:** read postcompact transcript tail by seeking, not scanning ([#1224](https://github.com/devseunggwan/praxis/issues/1224)) ([0a9d318](https://github.com/devseunggwan/praxis/commit/0a9d31833659b114c7123782aa67c0265c2d08c7)), closes [#1155](https://github.com/devseunggwan/praxis/issues/1155)
+* **hooks:** read the transcript tail in advisory scans ([#1251](https://github.com/devseunggwan/praxis/issues/1251)) ([cb0b888](https://github.com/devseunggwan/praxis/commit/cb0b888bb99c96d1bb67e5fd3682f050f6263978))
+* **hooks:** scan the transcript incrementally in Stop gates ([#1243](https://github.com/devseunggwan/praxis/issues/1243)) ([3c287e7](https://github.com/devseunggwan/praxis/commit/3c287e7b99e7278eeee6405fc3b5b22bb5690a6b))
+* **telemetry:** gzip finished days on rollover ([#1247](https://github.com/devseunggwan/praxis/issues/1247)) ([f5ed4c9](https://github.com/devseunggwan/praxis/commit/f5ed4c98a0fee2f9c941099c78e95eb060af15e1))
+
 ## [7.13.0](https://github.com/devseunggwan/praxis/compare/v7.12.0...v7.13.0) (2026-09-01)
 
 
