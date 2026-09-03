@@ -52,7 +52,7 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
-from _fire_ledger import prune_telemetry, resolve_telemetry_dir  # type: ignore[import-not-found]  # noqa: E402
+from _fire_ledger import resolve_telemetry_dir, rotate_telemetry  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 
@@ -249,7 +249,7 @@ def append_record(record: dict) -> None:
         return  # fail-open — never block the tool call
     if first_write_of_the_day:
         try:
-            prune_telemetry(path.parent)
+            rotate_telemetry(path.parent)
         except Exception:  # noqa: BLE001
             pass  # housekeeping never breaks the write that triggered it
 

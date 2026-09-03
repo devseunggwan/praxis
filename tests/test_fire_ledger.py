@@ -1989,3 +1989,234 @@ def test_bypass_writer_sweeps_on_the_first_write_of_the_day(tmp_path, monkeypatc
     revived = _dated(tmp_path, "bypass-events-", 90)
     bt.append_record({"event": "second write, same day"})
     assert revived.exists()          # today's file existed — no second sweep
+
+
+# ---------------------------------------------------------------------------
+# #1238 — prior-day gzip rollover
+# ---------------------------------------------------------------------------
+
+def _read_gz_lines(path: Path) -> list[str]:
+    import gzip
+    with gzip.open(path, "rt", encoding="utf-8") as fh:
+        return [ln for ln in fh.read().splitlines() if ln]
+
+
+def _dated_cold(directory: Path, prefix: str, days_ago: int) -> Path:
+    """A finished day's file, old enough that the rollover will not defer it."""
+    p = _dated(directory, prefix, days_ago)
+    cold = datetime.now(tz=timezone.utc).timestamp() - fl._HOT_FILE_SEC - 1
+    os.utime(p, (cold, cold))
+    return p
+
+
+def _archives(directory: Path, prefix: str, days_ago: int) -> list[Path]:
+    stamp = (datetime.now(tz=timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+    return sorted(directory.glob(f"{prefix}{stamp}.*.jsonl.gz"))
+
+
+def test_compress_gzips_prior_days_and_leaves_today(tmp_path):
+    old = _dated_cold(tmp_path, "fire-events-", 1)
+    today = _dated_cold(tmp_path, "fire-events-", 0)
+    assert fl.compress_telemetry(tmp_path) == 1
+    assert not old.exists()
+    assert today.exists()
+    (gz,) = _archives(tmp_path, "fire-events-", 1)
+    assert _read_gz_lines(gz) == ['{"hook": "x"}']
+    assert fl._file_date(gz.name) == old.name[len("fire-events-"):-len(".jsonl")]
+
+
+def test_compress_covers_both_families(tmp_path):
+    fires = _dated_cold(tmp_path, "fire-events-", 2)
+    bypasses = _dated_cold(tmp_path, "bypass-events-", 2)
+    assert fl.compress_telemetry(tmp_path) == 2
+    assert not fires.exists() and not bypasses.exists()
+    assert len(_archives(tmp_path, "fire-events-", 2)) == 1
+    assert len(_archives(tmp_path, "bypass-events-", 2)) == 1
+
+
+def test_compress_gives_a_straggler_its_own_archive(tmp_path):
+    """A hook from yesterday recreating the plain file after the rollover must
+    keep its rows without touching the archive already written."""
+    old = _dated_cold(tmp_path, "fire-events-", 1)
+    assert fl.compress_telemetry(tmp_path) == 1
+    old.write_text('{"hook": "straggler"}\n')
+    cold = datetime.now(tz=timezone.utc).timestamp() - fl._HOT_FILE_SEC - 1
+    os.utime(old, (cold, cold))
+    assert fl.compress_telemetry(tmp_path) == 1
+    assert not old.exists()
+    first, second = _archives(tmp_path, "fire-events-", 1)
+    assert _read_gz_lines(first) + _read_gz_lines(second) == [
+        '{"hook": "x"}', '{"hook": "straggler"}'
+    ]
+
+
+def test_compress_is_idempotent_after_a_crash_before_the_unlink(tmp_path):
+    """Archive exposed by os.replace, then the process died: the plain
+    tokened file is dropped, never re-archived (no duplicate rows)."""
+    old = _dated_cold(tmp_path, "fire-events-", 1)
+    claimed = fl._claim_for_compression(old)
+    assert claimed is not None and claimed.exists() and not old.exists()
+    assert fl._compress_claimed(claimed)
+    (gz,) = _archives(tmp_path, "fire-events-", 1)
+    claimed.write_text('{"hook": "x"}\n')  # simulate: gz written, unlink lost
+    assert fl.compress_telemetry(tmp_path) == 1
+    assert not claimed.exists()
+    assert _archives(tmp_path, "fire-events-", 1) == [gz]
+    assert _read_gz_lines(gz) == ['{"hook": "x"}']
+
+
+def test_compress_resumes_a_claimed_file_with_no_archive(tmp_path):
+    """Died after the rename, before the archive: the next run finishes it."""
+    old = _dated_cold(tmp_path, "fire-events-", 1)
+    claimed = fl._claim_for_compression(old)
+    assert fl.compress_telemetry(tmp_path) == 1
+    assert not claimed.exists()
+    assert len(_archives(tmp_path, "fire-events-", 1)) == 1
+
+
+def test_compress_preserves_the_plain_files_mode(tmp_path):
+    old = _dated_cold(tmp_path, "fire-events-", 1)
+    old.chmod(0o600)
+    saved = os.umask(0)
+    try:
+        assert fl.compress_telemetry(tmp_path) == 1
+    finally:
+        os.umask(saved)
+    (gz,) = _archives(tmp_path, "fire-events-", 1)
+    assert stat.S_IMODE(gz.stat().st_mode) == 0o600
+
+
+def test_compress_leaves_symlinks_unrelated_and_undated_files_alone(tmp_path):
+    (tmp_path / "notes.md").write_text("keep")
+    (tmp_path / "fire-events-nope.jsonl").write_text("{}\n")
+    real = tmp_path / "elsewhere.jsonl"
+    real.write_text("{}\n")
+    stamp = (datetime.now(tz=timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
+    link = tmp_path / f"fire-events-{stamp}.jsonl"
+    link.symlink_to(real)
+    assert fl.compress_telemetry(tmp_path) == 0
+    assert link.is_symlink() and real.exists()
+    assert (tmp_path / "notes.md").exists()
+    assert (tmp_path / "fire-events-nope.jsonl").exists()
+
+
+def test_file_date_reads_every_rollover_shape():
+    assert fl._file_date("fire-events-2026-01-02.jsonl") == "2026-01-02"
+    assert fl._file_date("fire-events-2026-01-02.jsonl.gz") == "2026-01-02"
+    assert fl._file_date("fire-events-2026-01-02.1a2b3c.jsonl") == "2026-01-02"
+    assert fl._file_date("bypass-events-2026-01-02.1a2b3c.jsonl.gz") == "2026-01-02"
+    assert fl._file_date("fire-events-2026-01-02.1a2b3c.jsonl.gz.123.tmp") is None
+    assert fl._file_date("fire-events-2026-13-02.jsonl") is None
+
+
+def test_prune_sweeps_archives_past_the_window(tmp_path):
+    old = _dated_cold(tmp_path, "fire-events-", 40)
+    gz = tmp_path / (old.name[:-len(".jsonl")] + ".abc.jsonl.gz")
+    old.rename(gz)
+    kept = _dated_cold(tmp_path, "fire-events-", 5)
+    kept_gz = tmp_path / (kept.name + ".gz")
+    kept.rename(kept_gz)
+    assert fl.prune_telemetry(tmp_path, days=30) == 1
+    assert not gz.exists()
+    assert kept_gz.exists()
+
+
+def _wait_for(predicate, timeout=10.0):
+    import time
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return predicate()
+
+
+def test_compress_reclaims_a_dead_compressors_tmp_and_keeps_a_live_ones(tmp_path):
+    stamp = (datetime.now(tz=timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    dead = tmp_path / f"fire-events-{stamp}.abc.jsonl.gz.999999.tmp"
+    dead.write_bytes(b"partial")
+    live = tmp_path / f"fire-events-{stamp}.def.jsonl.gz.{os.getpid()}.tmp"
+    live.write_bytes(b"partial")
+    assert fl.compress_telemetry(tmp_path) == 0
+    assert not dead.exists()
+    assert live.exists()
+
+
+def test_compress_leaves_a_file_written_in_the_last_minute_alone(tmp_path):
+    """A writer that opened yesterday's file just before midnight may still be
+    mid-append; a fresh mtime defers that file to the next rollover."""
+    hot = _dated(tmp_path, "fire-events-", 1)  # mtime = now
+    assert fl.compress_telemetry(tmp_path) == 0
+    assert hot.exists()
+    cold = datetime.now(tz=timezone.utc).timestamp() - fl._HOT_FILE_SEC - 1
+    os.utime(hot, (cold, cold))
+    assert fl.compress_telemetry(tmp_path) == 1
+
+
+def test_compress_reclaims_only_its_own_tmp_names(tmp_path):
+    foreign = tmp_path / "other.jsonl.gz.999999.tmp"
+    foreign.write_bytes(b"user's file")
+    undated = tmp_path / "fire-events-notadate.abc.jsonl.gz.999999.tmp"
+    undated.write_bytes(b"x")
+    assert fl.compress_telemetry(tmp_path) == 0
+    assert foreign.exists() and undated.exists()
+
+
+def test_rotate_starts_one_child_per_directory_per_day(tmp_path, monkeypatch):
+    spawned = []
+    monkeypatch.setattr(fl, "_compress_detached", lambda d: spawned.append(d) or True)
+    assert fl.rotate_telemetry(tmp_path)[0] is True
+    assert fl.rotate_telemetry(tmp_path)[0] is False
+    assert spawned == [tmp_path]
+    stale = tmp_path / f"{fl._ROLLOVER_MARK}2000-01-01"
+    stale.write_text("")
+    unrelated = tmp_path / f"{fl._ROLLOVER_MARK}notes"
+    unrelated.write_text("keep")
+    fl.rotate_telemetry(tmp_path)
+    assert not stale.exists()
+    assert unrelated.exists()  # only date-shaped markers are the module's own
+    assert len(list(tmp_path.glob(f"{fl._ROLLOVER_MARK}????-??-??"))) == 1
+
+
+def test_rotate_releases_the_marker_when_the_child_cannot_start(tmp_path, monkeypatch):
+    monkeypatch.setattr(fl, "_compress_detached", lambda d: False)
+    assert fl.rotate_telemetry(tmp_path)[0] is False
+    assert list(tmp_path.glob(f"{fl._ROLLOVER_MARK}*")) == []
+    monkeypatch.setattr(fl, "_compress_detached", lambda d: True)
+    assert fl.rotate_telemetry(tmp_path)[0] is True  # a later writer retries
+
+
+def test_rotate_prunes_inline_and_compresses_in_a_detached_child(tmp_path):
+    ancient = _dated_cold(tmp_path, "fire-events-", 40)
+    recent = _dated_cold(tmp_path, "fire-events-", 1)
+    started, removed = fl.rotate_telemetry(tmp_path)
+    assert (started, removed) == (True, 1)
+    assert not ancient.exists()
+    assert _wait_for(lambda: not recent.exists())
+    assert len(_archives(tmp_path, "fire-events-", 1)) == 1
+
+
+def test_first_write_of_the_day_rolls_yesterday_over(tmp_path, monkeypatch):
+    """The rollover fires on the same edge as the #1078 sweep, from both writers."""
+    fire_yesterday = _dated_cold(tmp_path, "fire-events-", 1)
+    today_stamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    fire_today = tmp_path / f"fire-events-{today_stamp}.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(fire_today))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    fl._atomic_append(fire_today, ['{"hook": "first of the day"}'])
+    assert fire_today.exists()
+    assert _wait_for(lambda: not fire_yesterday.exists())
+    assert len(_archives(tmp_path, "fire-events-", 1)) == 1
+
+    bt = _load(
+        "bypass_telemetry_rollover",
+        _REPO / "hooks" / "postuse-correction" / "bypass-telemetry" / "impl.py",
+    )
+    bdir = tmp_path / "bypass"
+    bdir.mkdir()
+    bypass_yesterday = _dated_cold(bdir, "bypass-events-", 1)
+    bypass_today = bdir / f"bypass-events-{today_stamp}.jsonl"
+    monkeypatch.setenv("PRAXIS_BYPASS_TELEMETRY_FILE", str(bypass_today))
+    bt.append_record({"event": "first write of the day"})
+    assert _wait_for(lambda: not bypass_yesterday.exists())
+    assert len(_archives(bdir, "bypass-events-", 1)) == 1

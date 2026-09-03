@@ -117,12 +117,14 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
+import zlib
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -308,30 +310,65 @@ def date_range(days: int) -> list[str]:
     return [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days)]
 
 
-def load_events(telemetry_dir: Path, days: int) -> list[dict]:
-    """Load all valid JSONL records from the last N days of telemetry files."""
-    events: list[dict] = []
-    for date_str in date_range(days):
-        path = telemetry_dir / f"bypass-events-{date_str}.jsonl"
-        if not path.is_file():
+def _dated_files(telemetry_dir: Path, family: str, date_str: str) -> list[Path]:
+    """Every file holding one day's records: the plain file, the tokened
+    archives the rollover wrote (#1238), and a tokened plain file whose archive
+    does not exist yet (a compressor died mid-way). A tokened plain file whose
+    archive *does* exist is the same bytes twice and is skipped.
+    """
+    base = f"{family}-{date_str}"
+    found: list[Path] = []
+    for p in sorted(telemetry_dir.glob(f"{base}*.jsonl*")):
+        if not p.is_file():
             continue
-        try:
-            with path.open(encoding="utf-8") as fh:
-                for lineno, raw_line in enumerate(fh, 1):
-                    line = raw_line.strip()
+        tail = p.name[len(base):]
+        if not re.fullmatch(r"(\.[0-9a-f]+)?\.jsonl(\.gz)?", tail):
+            continue
+        if tail.endswith(".jsonl") and tail != ".jsonl":
+            archive = p.with_name(p.name + ".gz")
+            if archive.is_file():
+                # Tokened plain + its archive: the same bytes twice. The archive
+                # may have appeared after the glob ran, so it is added here.
+                if archive not in found:
+                    found.append(archive)
+                continue
+        if p not in found:
+            found.append(p)
+    return found
+
+
+def _iter_jsonl_records(path: Path):
+    """Yield the dict records of a plain or gzipped JSONL file, fail-open.
+
+    Malformed lines and undecodable bytes are skipped line by line; a
+    truncated or corrupt gzip stream ends the file where the good data ends.
+    """
+    opener = gzip.open if path.name.endswith(".gz") else open
+    try:
+        with opener(path, "rb") as fh:
+            try:
+                for raw_line in fh:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
                     if not line:
                         continue
                     try:
                         record = json.loads(line)
                     except json.JSONDecodeError:
-                        # Skip malformed lines — same fail-open philosophy as the hook
                         continue
-                    if not isinstance(record, dict):
-                        continue
-                    events.append(record)
-        except OSError:
-            # Unreadable file — skip silently (consistent with hook fail-open)
-            continue
+                    if isinstance(record, dict):
+                        yield record
+            except (EOFError, gzip.BadGzipFile, zlib.error, OSError):
+                return
+    except OSError:
+        return
+
+
+def load_events(telemetry_dir: Path, days: int) -> list[dict]:
+    """Load all valid JSONL records from the last N days of telemetry files."""
+    events: list[dict] = []
+    for date_str in date_range(days):
+        for path in _dated_files(telemetry_dir, "bypass-events", date_str):
+            events.extend(_iter_jsonl_records(path))
     return events
 
 
@@ -849,28 +886,13 @@ def load_fire_events(
     """
     events: list[dict] = []
     for date_str in date_range(days):
-        path = telemetry_dir / f"fire-events-{date_str}.jsonl"
-        if not path.is_file():
-            continue
-        try:
-            with path.open(encoding="utf-8") as fh:
-                for raw_line in fh:
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    try:
-                        record = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if not isinstance(record, dict):
-                        continue
-                    if not include_test_sessions and is_test_session(
-                        str(record.get(FIELD_SESSION_ID) or "")
-                    ):
-                        continue
-                    events.append(record)
-        except OSError:
-            continue
+        for path in _dated_files(telemetry_dir, "fire-events", date_str):
+            for record in _iter_jsonl_records(path):
+                if not include_test_sessions and is_test_session(
+                    str(record.get(FIELD_SESSION_ID) or "")
+                ):
+                    continue
+                events.append(record)
     return events
 
 

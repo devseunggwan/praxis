@@ -733,6 +733,13 @@ def _fixed_timeout_spawns(source: str) -> list[str]:
     module-level ALL-CAPS names: nothing in it can shrink when the group is
     already short on time. `min(_GH_TIMEOUT_SEC, budget)` mentions a local, so
     it passes; a bare `_PROBE_TIMEOUT_SEC` does not.
+
+    A `subprocess.Popen(..., start_new_session=True)` whose handle is
+    discarded (a bare expression statement) is exempt: it is a detached child
+    the member never waits on, so it has no timeout to size and cannot hold
+    the group past its deadline. A Popen whose handle is kept — assigned,
+    chained into `.wait()` / `.communicate()` — is a spawn the member may
+    join and is held to the same rule as `run`.
     """
     tree = ast.parse(source)
     module_consts = {
@@ -741,6 +748,10 @@ def _fixed_timeout_spawns(source: str) -> list[str]:
         if isinstance(node, ast.Assign)
         for t in node.targets
         if isinstance(t, ast.Name) and t.id.lstrip("_").isupper()
+    }
+    discarded = {
+        id(node.value) for node in ast.walk(tree)
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
     }
     offenders = []
     for node in ast.walk(tree):
@@ -751,6 +762,11 @@ def _fixed_timeout_spawns(source: str) -> list[str]:
                 and f.value.id == "subprocess"
                 and f.attr in {"run", "Popen", "check_output", "call"}):
             continue
+        if f.attr == "Popen" and id(node) in discarded and any(
+            k.arg == "start_new_session" and isinstance(k.value, ast.Constant)
+            and k.value.value is True for k in node.keywords
+        ):
+            continue  # detached child the member never joins (#1238 rollover)
         kw = next((k for k in node.keywords if k.arg == "timeout"), None)
         if kw is None:
             offenders.append(f"line {node.lineno}: no timeout=")
@@ -867,9 +883,34 @@ def test_the_fixed_timeout_detector_can_fail():
         def f(budget):
             subprocess.run(['x'], timeout=min(T, budget))
     """)
+    detached = textwrap.dedent("""\
+        import subprocess
+        def f():
+            subprocess.Popen(['x'], start_new_session=True)
+    """)
+    joined = textwrap.dedent("""\
+        import subprocess
+        def f():
+            subprocess.Popen(['x']).wait()
+    """)
+    joined_detached = textwrap.dedent("""\
+        import subprocess
+        def f():
+            subprocess.Popen(['x'], start_new_session=True).wait()
+    """)
+    kept_detached = textwrap.dedent("""\
+        import subprocess
+        def f():
+            p = subprocess.Popen(['x'], start_new_session=True)
+            return p
+    """)
     assert _fixed_timeout_spawns(fixed) == ["line 4: timeout is fixed"]
     assert _fixed_timeout_spawns(missing) == ["line 3: no timeout="]
     assert _fixed_timeout_spawns(budgeted) == []
+    assert _fixed_timeout_spawns(detached) == []
+    assert _fixed_timeout_spawns(joined) == ["line 3: no timeout="]
+    assert _fixed_timeout_spawns(joined_detached) == ["line 3: no timeout="]
+    assert _fixed_timeout_spawns(kept_detached) == ["line 3: no timeout="]
 
 
 def test_budget_exhausting_member_starves_no_one_silently(
