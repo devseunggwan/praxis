@@ -131,9 +131,10 @@ direction was to start under-firing and raise later on measured fire data.
   9999 --json headRefOid` clears against a transcript `gh pr view 1255 --json
   headRefOid` (3 of 4 operands match). Catching a single swapped identifier
   would need a threshold that fires on ordinary pipe-and-path drift.
-- **Only `$ ` is a prompt.** `❯ `, `% `, and `> ` prompt glyphs are not
-  detected — `> ` in particular is markdown quoting, and the other two are
-  rare enough that admitting them buys little against the parsing risk.
+- **Only a `$` followed by a space is a prompt.** The `❯`, `%`, and `>` prompt
+  glyphs are not detected — `>` in particular is markdown quoting, and the
+  other two are rare enough that admitting them buys little against the
+  parsing risk.
 - **Indented (4-space) code blocks are not scanned** — fenced blocks only.
 - **An unclosed fence contributes nothing.** A body still mid-composition is
   not evidence anyone can act on, and scanning it would fire on drafts.
