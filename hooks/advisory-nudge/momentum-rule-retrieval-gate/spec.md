@@ -293,15 +293,28 @@ approve blindly.
   path, which is the ground this hook's spec already takes elsewhere: it is a
   self-discipline nudge, not an adversarial boundary.
 
-  **Coverage ceiling — compound calls.** `is_error` is per Bash tool_use, not
-  per subcommand, so `gh pr merge 833; false` reports the whole call's status
-  and the merge is not counted, leaving the window uncut. The miss is
-  fail-open, and the opposite handling is not: crediting an `is_error` result
-  as executed would make a merge this gate itself blocked spend the window, so
-  the legitimate retry could never pass. The same granularity is recorded at
-  `hooks/completion-verify/pr-anchor-existence-gate/spec.md` as structural
-  rather than a local bug, and every gate correlating tool_use to tool_result
-  shares it. Left open on purpose, like the `xargs`/heredoc gaps above.
+  **Both directions fail open.** A merge counts as executed only on a clean
+  `tool_result`, and only when no skippable construct could have jumped over it
+  (`_SKIPPABLE_KEYWORDS` — `||`, `if`, `elif`, `case`). Each guard closes one
+  direction:
+
+  - `gh pr merge 833; false` — the merge RAN but `is_error` is per Bash
+    tool_use, not per subcommand, so the window stays uncut. Crediting an
+    `is_error` result instead would let a merge this gate itself blocked spend
+    the window, and the legitimate retry could never pass. The same granularity
+    is recorded at `hooks/completion-verify/pr-anchor-existence-gate/spec.md`
+    as structural rather than a local bug; every gate correlating tool_use to
+    tool_result shares it.
+  - `true || gh pr merge 833` — the merge did NOT run yet the call exits clean.
+    Crediting it would advance the cut past a briefing nothing consumed and deny
+    the next marked merge whose briefing was real. Measured over the local
+    transcripts, 7 of 818 `gh pr merge` calls carry such a construct.
+
+  `&&` and `;` are deliberately not skippable: `A && gh pr merge N` skips the
+  merge only when A fails, which makes the whole result `is_error` and the first
+  guard already drops it. Both misses leave the guard silent rather than
+  spending a window it cannot confirm — the same posture as the `xargs`/heredoc
+  gaps above.
 
   **Coverage ceiling — the 400-line tail.** `_load_turn_entries` reads
   `TRANSCRIPT_SCAN_LINES` (400) lines, so a prior merge pushed past that tail is

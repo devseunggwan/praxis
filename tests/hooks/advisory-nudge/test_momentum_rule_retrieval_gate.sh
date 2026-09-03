@@ -778,6 +778,19 @@ run_merge_escalation_case "merge_serial_rebriefed_passes" \
   "no" "" "momentum-merge-serial-rebriefed.jsonl" \
   "gh pr merge 999 --squash --delete-branch # briefing-surfaced: prior turn"
 
+# A merge on the right of `||` never ran, yet the call exits clean. Crediting it
+# would advance the cut past a briefing nothing consumed and deny THIS merge —
+# the over-block direction. `&&` needs no such guard: it skips the merge only
+# when its left side fails, which makes the whole tool_result `is_error`.
+run_merge_escalation_case "merge_serial_skipped_branch_not_credited" \
+  "no" "" "momentum-merge-serial-skipped-branch.jsonl" \
+  "gh pr merge 999 --squash --delete-branch # briefing-surfaced: prior turn"
+
+# Positive control: the same fixture is load-bearing — bare, it still denies.
+run_merge_escalation_case "merge_serial_skipped_branch_bare_denies" \
+  "yes" "" "momentum-merge-serial-skipped-branch.jsonl" \
+  "gh pr merge 999 --squash --delete-branch"
+
 # A newline is a clause boundary too — the approval sits on its own line under
 # the briefing. Whitespace normalization used to collapse it before the split,
 # so the newline alternation in _CLAUSE_TAIL_RE was dead (CodeRabbit, PR #1089).

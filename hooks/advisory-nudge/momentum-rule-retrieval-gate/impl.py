@@ -710,6 +710,15 @@ def _context_pr_from_window(entries: list[dict], lo: int, hi: int) -> str | None
     return found
 
 
+# Shell constructs that can skip a textually present segment while the call as a
+# whole still exits clean, so a `gh pr merge` under one of them may never have
+# run. `&&` and `;` are deliberately absent: `A && gh pr merge N` skips the merge
+# only when A fails, and a failed A makes the whole tool_result `is_error`, which
+# the executed-merge walker already drops. Whole-token matched, like
+# `_LOOP_KEYWORDS`, so a branch named `if-else-fix` is never mistaken for one.
+_SKIPPABLE_KEYWORDS = frozenset({"||", "if", "elif", "case"})
+
+
 def _executed_merge_indices(entries: list[dict]) -> list[int]:
     """Entry indices of `gh pr merge` calls that actually RAN, oldest first.
 
@@ -717,6 +726,12 @@ def _executed_merge_indices(entries: list[dict]) -> list[int]:
     sibling gate, or a declined approval stopped it — so counting it would make
     a legitimate retry unmergeable. Only a result that came back clean marks the
     briefing as spent.
+
+    A merge sitting under a skippable construct is dropped for the mirror-image
+    reason. `true || gh pr merge 833` exits clean with no merge, and crediting
+    it would advance the cut past a briefing nothing consumed — denying the next
+    marked merge whose briefing was real. Both directions therefore fail open:
+    the guard declines to fire rather than spend a window it cannot confirm.
     """
     pending: dict[str, int] = {}
     executed: list[int] = []
@@ -734,9 +749,13 @@ def _executed_merge_indices(entries: list[dict]) -> list[int]:
                     and msg.get("role") == "assistant"):
                 cmd = (b.get("input") or {}).get("command")
                 tid = b.get("id")
-                if isinstance(cmd, str) and isinstance(tid, str) and any(
-                        _is_gh_pr_merge(argv)
-                        for argv in iter_command_starts(safe_tokenize(cmd))):
+                if not (isinstance(cmd, str) and isinstance(tid, str)):
+                    continue
+                tokens = safe_tokenize(cmd)
+                if any(tok in _SKIPPABLE_KEYWORDS for tok in tokens):
+                    continue
+                if any(_is_gh_pr_merge(argv)
+                       for argv in iter_command_starts(tokens)):
                     pending[tid] = i
             elif b.get("type") == "tool_result":
                 tid = b.get("tool_use_id")
