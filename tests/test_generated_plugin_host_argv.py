@@ -56,7 +56,6 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PLATFORMS_DIR = REPO_ROOT / "manifests" / "platforms"
-DISPATCH_PY = REPO_ROOT / "hooks" / "_lib" / "_dispatch.py"
 
 # `← <hook>` is the structural anchor of a checklist row, the same one
 # scripts/check-sibling-commit-gates.py reads.
@@ -95,13 +94,15 @@ def hook_installing_platforms() -> list[tuple[str, Path]]:
 PLATFORMS = hook_installing_platforms()
 
 
-def dispatch_argv(hooks_data: dict, event: str, matcher: str) -> list[list[str]]:
-    """Argv tails of every dispatcher node in `hooks_data` under (event, matcher).
+def dispatch_commands(hooks_data: dict, event: str, matcher: str) -> list[list[str]]:
+    """Full argv of every dispatcher node in `hooks_data` under (event, matcher).
 
     Returns one list per node — a list, not an Optional, so "no node" and "two
     nodes" are both visible to the caller instead of collapsing into the same
     failure. The command is parsed with `shlex`, mirroring how a host shell
     reads it, so a quoted matcher (`'Edit|Write'`) tokenizes the same way.
+    Element 0 is the wrapper path the plugin ships (`${CLAUDE_PLUGIN_ROOT}/...`);
+    the rest is the argv tail.
     """
     found: list[list[str]] = []
     for group in hooks_data.get("hooks", {}).get(event, []):
@@ -111,8 +112,31 @@ def dispatch_argv(hooks_data: dict, event: str, matcher: str) -> list[list[str]]
             command = hook.get("command", "")
             if _build.DISPATCH_WRAPPER_NAME not in command:
                 continue
-            found.append(shlex.split(command)[1:])
+            found.append(shlex.split(command))
     return found
+
+
+# The one token in a shipped command that cannot resolve outside an installed
+# plugin. Everything after it is a real path, relative to the plugin root — and
+# this checkout IS that root, so only the prefix is rewritten.
+_PLUGIN_ROOT_VAR = "${CLAUDE_PLUGIN_ROOT}/"
+
+
+def local_wrapper(argv0: str) -> Path:
+    """This checkout's copy of the wrapper the shipped command names.
+
+    Every path component after the plugin-root variable is kept. Taking only
+    the basename would resolve a command pointing at `hooks/sub/_dispatch.sh`,
+    or at a same-named wrapper somewhere else, back onto `hooks/_dispatch.sh`
+    — so a build that moved the wrapper would ship a path nothing can execute
+    while this file stayed green. Reading the name from the command rather
+    than from a constant likewise means a rename is followed, not missed.
+    """
+    assert argv0.startswith(_PLUGIN_ROOT_VAR), (
+        f"shipped command {argv0!r} does not start with {_PLUGIN_ROOT_VAR!r} — "
+        "the path cannot be resolved against this checkout"
+    )
+    return REPO_ROOT / argv0[len(_PLUGIN_ROOT_VAR):]
 
 
 def test_platform_list_is_not_empty():
@@ -125,14 +149,14 @@ def test_generated_plugin_bakes_its_own_host_into_the_bash_dispatch_argv(host, h
     """The shipped command string carries the host — not just the test's literal."""
     assert hooks_path.exists(), f"{hooks_path} is not committed; run scripts/build-plugin-manifests.py"
     data = json.loads(hooks_path.read_text(encoding="utf-8"))
-    nodes = dispatch_argv(data, "PreToolUse", "Bash")
+    nodes = dispatch_commands(data, "PreToolUse", "Bash")
     assert len(nodes) == 1, (
         f"{hooks_path.relative_to(REPO_ROOT)}: expected exactly one PreToolUse/Bash "
         f"dispatcher node, got {len(nodes)} — no node means the group left "
         "`dispatch_groups` and the host argument is gone with it"
     )
-    assert nodes[0] == ["PreToolUse", "Bash", host], (
-        f"{hooks_path.relative_to(REPO_ROOT)}: dispatcher argv {nodes[0]} does not "
+    assert nodes[0][1:] == ["PreToolUse", "Bash", host], (
+        f"{hooks_path.relative_to(REPO_ROOT)}: dispatcher argv {nodes[0][1:]} does not "
         f"end in this platform's own host_id {host!r}"
     )
 
@@ -154,17 +178,22 @@ def expected_rows(host: str) -> list[str]:
 
 @pytest.mark.parametrize("host,hooks_path", PLATFORMS, ids=[h for h, _ in PLATFORMS])
 def test_dispatcher_run_with_the_shipped_argv_prints_that_hosts_rows(host, hooks_path):
-    """Run the dispatcher with the argv the plugin ships, not one typed here.
+    """Run the command the plugin ships — the wrapper too, not just its argv.
 
     This is the half the argv assertion above cannot reach: a correct command
-    string handed to a dispatcher that ignores it would still pass that test.
+    string handed to a runner that ignores it would still pass that test. So
+    the whole shipped invocation is executed, `_dispatch.sh` included. Calling
+    `_dispatch.py` directly would leave the wrapper's own `exec python3 "$IMPL"
+    "$@"` unpinned — drop or reorder those arguments there and every installed
+    plugin loses host filtering with this file still green.
     """
-    nodes = dispatch_argv(json.loads(hooks_path.read_text(encoding="utf-8")), "PreToolUse", "Bash")
+    nodes = dispatch_commands(json.loads(hooks_path.read_text(encoding="utf-8")), "PreToolUse", "Bash")
     assert len(nodes) == 1, (
         f"{hooks_path.relative_to(REPO_ROOT)}: no single PreToolUse/Bash dispatcher "
-        f"node to take the argv from (got {len(nodes)})"
+        f"node to take the command from (got {len(nodes)})"
     )
-    argv = nodes[0]
+    wrapper = local_wrapper(nodes[0][0])
+    assert wrapper.is_file(), f"{wrapper} — the shipped command names a wrapper this checkout lacks"
     payload = json.dumps(
         {
             "tool_name": "Bash",
@@ -172,10 +201,11 @@ def test_dispatcher_run_with_the_shipped_argv_prints_that_hosts_rows(host, hooks
         }
     )
     run = subprocess.run(
-        [sys.executable, str(DISPATCH_PY), *argv],
+        [str(wrapper), *nodes[0][1:]],
         input=payload,
         capture_output=True,
         text=True,
+        cwd=REPO_ROOT,
     )
     decision = json.loads(run.stdout)["hookSpecificOutput"]
     reason = decision["permissionDecisionReason"]
@@ -211,7 +241,7 @@ def test_positive_control_dropping_the_dispatch_group_loses_the_host_argument(ho
     dispatcher node, so no argv, so no host anywhere in the Bash group.
     """
     mutated = _regenerate_without_bash_dispatch(host)
-    assert dispatch_argv(mutated, "PreToolUse", "Bash") == [], (
+    assert dispatch_commands(mutated, "PreToolUse", "Bash") == [], (
         "dispatcher node survived the mutation — the control proves nothing"
     )
     commands = [
