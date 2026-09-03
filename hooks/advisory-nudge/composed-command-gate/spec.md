@@ -69,8 +69,12 @@ Only an **odd** run of backslashes continues a Bash line. `foo \\` followed by a
 newline is a literal backslash and then a *real* separator, so collapsing it
 welds two commands into one — enough to hide a following `gh pr comment` from
 the tokenizer's command-start walk, which means the body is never scanned at
-all. The join is therefore odd-run-aware on both the surface-detection path and
-the segmenting path (CodeRabbit round, #1261).
+all. The join is therefore odd-run-aware on **three** paths: the
+surface-detection walk, the segmenting of transcript commands, and the pulling
+of `$` lines out of a fenced block. The third matters for a different reason
+than the other two — a published `$ transcribed \\` followed by `$ composed`
+would weld into one line judged on the *first* command's head, so the composed
+line rides in behind the transcribed one and is never examined.
 
 On the transcript side a segment following `||` is **not** recorded as
 provenance: `A || B` runs `B` only when `A` failed, so `true || grep ...` would

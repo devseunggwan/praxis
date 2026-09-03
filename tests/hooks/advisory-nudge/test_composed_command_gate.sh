@@ -534,6 +534,28 @@ run_case "REGRESSION CR: even backslash run keeps the gh write visible (warn)" \
   "warn" "advisory" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi \\\\\\\\\\ngh pr comment 5 --body-file $B\"},\"transcript_path\":\"$TRANSCRIPT\"}"
 
+nextbody
+cat > "$B" <<'EOF'
+```
+$ grep -rn safe_tokenize hooks/ | head -5 \\
+$ never-ran-command --flag operand
+```
+EOF
+run_case "REGRESSION CR: even backslash in a prompt line does not swallow the next command (warn)" \
+  "warn" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body-file $B\"},\"transcript_path\":\"$TRANSCRIPT\"}"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ grep -rn safe_tokenize hooks/ \
+    | head -5
+```
+EOF
+run_case "SILENT FIXTURE: odd backslash still joins one transcribed command (silent)" \
+  "silent" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body-file $B\"},\"transcript_path\":\"$TRANSCRIPT\"}"
+
 # --- Summary -----------------------------------------------------------------
 
 rm -rf "$TRANSCRIPT" "$TEL_FILE" "$BODY_DIR"

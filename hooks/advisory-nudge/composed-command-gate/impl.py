@@ -111,14 +111,31 @@ def _fenced_lines(body: str) -> list[str]:
     return collected
 
 
+def _continues(text: str) -> tuple[bool, str]:
+    """Split a line into (is-continuation, body without the escaping backslash).
+
+    Only an odd run of trailing backslashes continues the line; an even run is
+    literal backslashes and the command ends there. Collapsing an even run
+    welds the next `$` line onto this one, and the welded line is then judged
+    on the first command's head — so a composed line hiding behind a preceding
+    transcribed one would never be examined.
+    """
+    stripped = text.rstrip()
+    run = len(stripped) - len(stripped.rstrip("\\"))
+    if run % 2 == 0:
+        return False, stripped
+    return True, stripped[:-1].strip()
+
+
 def _prompt_commands(lines: list[str]) -> list[str]:
     """Pull `$ `-prefixed commands out of block lines, joining continuations."""
     commands: list[str] = []
     buffer: str | None = None
     for line in lines:
         if buffer is not None:
-            buffer += " " + line.strip().rstrip("\\").strip()
-            if not line.rstrip().endswith("\\"):
+            more, body = _continues(line.strip())
+            buffer += " " + body
+            if not more:
                 commands.append(buffer)
                 buffer = None
             continue
@@ -128,10 +145,11 @@ def _prompt_commands(lines: list[str]) -> list[str]:
         text = m.group(1).strip()
         if _TRANSCRIBED_TOKEN in text:
             continue
-        if text.endswith("\\"):
-            buffer = text.rstrip("\\").strip()
+        more, body = _continues(text)
+        if more:
+            buffer = body
         else:
-            commands.append(text)
+            commands.append(body)
     if buffer is not None:
         commands.append(buffer)
     return commands
