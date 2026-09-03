@@ -118,9 +118,11 @@ _VERB_CHECKLISTS: dict[str, str] = {
 Format rules: each token starts at column 0 of its own line, content follows
 the colon on the same line, and the line must sit OUTSIDE fenced code blocks.
 
-Related gates nearby: `git commit` needs a codex review pass or a
-`[skip-codex-review]` marker; an AskUserQuestion `(Recommended)` label needs
-a `Falsified:` line.
+Related gate — `git commit`                 ← block-commit-without-codex-review
+  Needs a codex review pass this session, or a `[skip-codex-review]` token in
+  the commit message.
+Related gate — `AskUserQuestion`            ← output-block-falsify-advisory
+  A `(Recommended)` label needs a `Falsified:` line.
 """,
     "gh pr merge": """\
 

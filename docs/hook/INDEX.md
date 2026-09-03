@@ -20,9 +20,19 @@ single source, reached via `verb_gate_checklist(verb)`:
 
 | Verb | Gates enumerated on the first block | Emitted by |
 | ------ | ------------------------------------- | ------------ |
-| `gh pr create` | block-pr-without-caller-evidence, block-pr-without-precommit-evidence | both pr-body gates |
+| `gh pr create` | block-pr-without-caller-evidence, block-pr-without-precommit-evidence, + related-gate pointers (block-commit-without-codex-review, output-block-falsify-advisory) | both pr-body gates |
 | `gh pr merge` | momentum-rule-retrieval-gate, pre-merge-approval-gate, side-effect-scan, + conditional (gh-merge-worktree-precondition on `--delete-branch`, commit-title-length-check on `--squash`, pipefail-advisory when piped, session-intent on an undeclared mutation pivot, skill-gate-commands when opted in) | momentum-rule-retrieval-gate |
 | `AskUserQuestion` | output-block-falsify-advisory, block-ask-end-option, + conditional (block-manufactured-action-menu, pr-state-refetch-gate, merge-menu-review-options-advisory, menu-mutation-tier-advisory) and advisory-only (pre-output-falsification-gate, memory-hint) | output-block-falsify-advisory |
+
+Rows are **host-scoped** (issue #1245). Several enumerated gates carry a `hosts`
+whitelist while the hook printing the checklist does not, so the unfiltered text
+asked for tokens no installed gate requires and offered bypasses that do not
+exist on that platform — the `gh pr create` pointer to the `claude`-only
+`block-commit-without-codex-review` is the shipped instance. `verb_gate_checklist`
+takes the running host (`hooks/_lib/_hosts.py → runtime_host()`, read from the
+dispatcher's argv) and drops every `← <hook>` row the manifest does not install
+there. An unresolvable or unknown host keeps every row: naming an absent gate
+wastes a reader's time, while dropping a present one hides the next hard block.
 
 The emitting hook writes the checklist to **both** its decision reason and
 stderr, because neither channel alone reaches the model in every case

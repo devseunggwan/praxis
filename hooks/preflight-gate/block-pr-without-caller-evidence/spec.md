@@ -92,6 +92,16 @@ the related commit (`[skip-codex-review]`) and AskUserQuestion
 (`Falsified:`) gates, so one deny teaches the full enumeration instead of
 one token per deny round.
 
+The checklist rows are host-scoped (issue #1245). The commit pointer names
+`block-commit-without-codex-review`, which carries `hosts: ["claude"]`, while
+this gate ships to `claude` and `codex` — so on codex the row asked for a
+review pass no installed gate requires and offered a bypass
+(`CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE`) that does not exist there. The call
+site passes `runtime_host()`, and `verb_gate_checklist` drops every `←` row
+whose hook the manifest does not install on that host. An unresolvable or
+unknown host keeps every row, since hiding a gate the host DOES install is the
+worse failure.
+
 ### Compound cascade advisory (issue #229)
 
 When the block fires on a compound Bash command (`&&`, `||`, `;`, `|`,

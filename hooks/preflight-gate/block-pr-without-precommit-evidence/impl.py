@@ -57,6 +57,7 @@ from _hook_utils import (  # type: ignore[import-not-found]
 )
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import pr_body_evidence_checklist  # type: ignore[import-not-found]  # noqa: E402
+from _hosts import runtime_host  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -319,7 +320,7 @@ def main() -> int:
             continue
         if _strict():
             sys.stderr.write(
-                BLOCK_MSG + pr_body_evidence_checklist()
+                BLOCK_MSG + pr_body_evidence_checklist(runtime_host())
                 + compound_cascade_hint(command)
             )
             return 2
@@ -330,7 +331,7 @@ def main() -> int:
         sys.stderr.write(
             _ADVISORY_HEADER
             + BLOCK_MSG.replace("\u274c BLOCKED:", "\u26a0 missing:", 1)
-            + pr_body_evidence_checklist()
+            + pr_body_evidence_checklist(runtime_host())
         )
         continue
 

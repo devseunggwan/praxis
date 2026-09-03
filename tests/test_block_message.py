@@ -281,6 +281,103 @@ def test_verb_wired_hooks_append_their_checklist() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 1c. Host-scoped checklist rows (issue #1245)
+#
+# The `gh pr create` checklist points at `block-commit-without-codex-review`,
+# which carries `hosts: ["claude"]`. The two hooks that print the checklist
+# carry `hosts: ["claude","codex"]`, so on codex that row asked for a review
+# pass no installed gate requires and named a bypass that does not exist there
+# — the same defect #1154 fixed one surface over.
+# ---------------------------------------------------------------------------
+
+CLAUDE_ONLY_ROW = "block-commit-without-codex-review"
+
+
+def _rows(text: str) -> list[str]:
+    """The hook name of every `← <hook>` row in `text`, in order."""
+    return re.findall(r"←\s*([a-z0-9][a-z0-9-]*)", text)
+
+
+def test_create_checklist_keeps_every_row_on_claude() -> None:
+    """claude installs all four gates, so nothing is dropped."""
+    assert CLAUDE_ONLY_ROW in _rows(bm.pr_body_evidence_checklist("claude"))
+
+
+def test_create_checklist_drops_the_claude_only_row_on_codex() -> None:
+    """The defect: codex does not install the codex-review gate."""
+    out = bm.pr_body_evidence_checklist("codex")
+    assert CLAUDE_ONLY_ROW not in _rows(out)
+    # The rows codex DOES install must survive — a filter that drops
+    # everything would satisfy the assertion above on its own.
+    assert "block-pr-without-caller-evidence" in _rows(out)
+    assert "output-block-falsify-advisory" in _rows(out)
+
+
+def test_dropped_row_takes_its_remedy_lines_with_it() -> None:
+    """A row's indented prose is part of the row, not of the next one."""
+    out = bm.pr_body_evidence_checklist("codex")
+    assert "[skip-codex-review]" not in out
+    assert "Falsified:" in out
+
+
+def test_filter_keeps_section_headers_and_closing_prose() -> None:
+    """A non-indented line after a blank one ends the row above it.
+
+    Without that rule a dropped row swallows the next section's header, and
+    the merge checklist's `Conditional — …` heading would vanish with it.
+    """
+    out = bm.verb_gate_checklist("gh pr merge", "codex")
+    assert "Conditional — fire only in the stated situation:" in out
+    assert "Approving one PR approves only that PR" in out
+    assert "column 0" in bm.pr_body_evidence_checklist("codex")
+
+
+def test_unknown_and_absent_hosts_keep_every_row() -> None:
+    """Negative control. Dropping a row the host DOES install hides the next
+    hard block, which is the worse of the two failures — so anything that is
+    not a declared host id prints the full list."""
+    full = _rows(bm.pr_body_evidence_checklist())
+    assert CLAUDE_ONLY_ROW in full
+    for host in (None, "not-a-host", ""):
+        assert _rows(bm.pr_body_evidence_checklist(host)) == full
+
+
+def test_filter_gate_rows_returns_empty_when_no_row_survives() -> None:
+    """A header introducing an empty list is worse than no text at all."""
+    assert bm.filter_gate_rows(bm.pr_body_evidence_checklist(), set()) == ""
+
+
+def test_neutered_filter_would_reprint_the_claude_only_row() -> None:
+    """Regression-injection control for the two assertions above.
+
+    They only mean something if the filter is what removes the row. Replace
+    `filter_gate_rows` with the identity and the codex output must carry the
+    claude-only row again — so a future edit that unwires the filter fails the
+    tests above instead of passing them silently.
+    """
+    original = bm.filter_gate_rows
+    try:
+        bm.filter_gate_rows = lambda text, installed: text  # type: ignore[assignment]
+        assert CLAUDE_ONLY_ROW in _rows(bm.pr_body_evidence_checklist("codex"))
+    finally:
+        bm.filter_gate_rows = original
+    assert CLAUDE_ONLY_ROW not in _rows(bm.pr_body_evidence_checklist("codex"))
+
+
+def test_pr_body_gates_pass_the_runtime_host() -> None:
+    """Both printers must resolve the host — an unfiltered call site puts the
+    row back on every platform, and no output check can see that from here."""
+    for name in (
+        "block-pr-without-caller-evidence",
+        "block-pr-without-precommit-evidence",
+    ):
+        src = (PREFLIGHT_DIR / name / "impl.py").read_text(encoding="utf-8")
+        assert "pr_body_evidence_checklist(runtime_host())" in src, (
+            f"{name} must pass runtime_host() to the checklist (issue #1245)"
+        )
+
+
+# ---------------------------------------------------------------------------
 # 2. Adoption lint
 # ---------------------------------------------------------------------------
 
