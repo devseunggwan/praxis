@@ -57,7 +57,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
 )
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
-from _transcript import TRANSCRIPT_SCAN_LINES  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import TRANSCRIPT_SCAN_LINES, tail_lines  # type: ignore[import-not-found]  # noqa: E402
 
 
 # Shared surface detection + body extraction now lives in
@@ -183,15 +183,9 @@ def _recent_probes(transcript_path: str) -> tuple[list[str], list[str]]:
     """
     if not transcript_path or not os.path.isfile(transcript_path):
         return [], []
-    try:
-        with open(transcript_path, "r", encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
-    except OSError:
-        return [], []
-
     cmds: list[str] = []
     read_paths: list[str] = []
-    for line in lines[-TRANSCRIPT_SCAN_LINES:]:
+    for line in tail_lines(transcript_path, TRANSCRIPT_SCAN_LINES):
         line = line.strip()
         if not line:
             continue

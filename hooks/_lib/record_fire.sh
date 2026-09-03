@@ -34,7 +34,8 @@
 # appended via the shell's own `>>` (O_APPEND). python3 remains for exactly
 # two cold paths that cannot regress the per-fire cost:
 #   - a field value outside the JSON-safe charset (needs real JSON escaping);
-#   - the once-per-UTC-day retention sweep (`_fire_ledger.prune_telemetry`).
+#   - the once-per-UTC-day rollover (`_fire_ledger.rotate_telemetry`: gzip
+#     finished days, then the retention sweep).
 #
 # Fail-open, unconditionally: ledger unwritable, unresolvable _lib, malformed
 # argument — every failure is swallowed and the caller continues. A telemetry
@@ -242,9 +243,9 @@ praxis_record_fire() {
         "$_rf_ts" "${4:-}" "${5:-}" "${1:-}" "${2:-}" "${3:-}" >> "$_rf_path"; } 2>/dev/null || return 0
   fi
 
-  # Retention sweep (#1078) on the first write of the UTC day, exactly the
-  # edge _atomic_append keys on ("today's file does not exist yet"). Reuses
-  # prune_telemetry rather than reimplementing name-dated cutoffs in shell;
+  # Day rollover (#1078 sweep, #1238 gzip) on the first write of the UTC day,
+  # exactly the edge _atomic_append keys on ("today's file does not exist
+  # yet"). Reuses rotate_telemetry rather than reimplementing it in shell;
   # the interpreter cold start lands once per day per directory, never on the
   # per-fire path. Best-effort: no python3 / no _fire_ledger → skipped.
   if [ "$_rf_first" = "1" ] && [ -n "$_rf_lib_dir" ] \
@@ -255,7 +256,7 @@ sys.path.insert(0, sys.argv[1])
 try:
     from pathlib import Path
     import _fire_ledger
-    _fire_ledger.prune_telemetry(Path(sys.argv[2]).parent)
+    _fire_ledger.rotate_telemetry(Path(sys.argv[2]).parent)
 except Exception:
     pass
 ' "$_rf_lib_dir" "$_rf_path" >/dev/null 2>&1 || true

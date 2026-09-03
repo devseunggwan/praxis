@@ -84,16 +84,25 @@ Storage (precedence order — see `resolve_path`):
   Override: PRAXIS_FIRE_TELEMETRY_FILE (full path, used by tests)
   Dev:      <checkout>/.praxis-dev-telemetry/fire-events-YYYY-MM-DD.jsonl when
             this module lives inside a git checkout (issue #934)
-  Default:  ~/.praxis/telemetry/fire-events-YYYY-MM-DD.jsonl  (daily rotation)
+  Default:  ~/.praxis/telemetry/fire-events-YYYY-MM-DD.jsonl  (daily rotation;
+            a finished day is gzipped to <name>.<token>.jsonl.gz by a
+            detached child on the next day's first write, and swept after
+            PRAXIS_TELEMETRY_RETENTION_DAYS — #1078, #1238)
   Opt-out:  PRAXIS_FIRE_TELEMETRY_DISABLE=1 → no-op
 
 Fail-open: any error → silently no-op. Never raises into the dispatcher.
 """
 from __future__ import annotations
 
+import gzip
 import json
 import os
+import re
+import shutil
 import stat
+import subprocess
+import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -264,21 +273,235 @@ def retention_days() -> float:
         return 0.0
 
 
-def _file_date(name: str) -> str | None:
-    """The YYYY-MM-DD a daily telemetry filename carries, or None.
+# A day that has rolled over is compressed in place (issue #1238): the writers
+# only ever append to today's file, and a finished day read back by
+# `bypass-review` is 99.6% `pass` rows that gzip 20x. Archive names carry a
+# hex token (`fire-events-YYYY-MM-DD.<token>.jsonl.gz`) so that a straggler
+# hook recreating the plain file after the rollover gets its own archive
+# instead of an append into an existing one. Every shape below is one dated
+# family to the retention sweep.
+_COMPRESSED_SUFFIX = ".jsonl.gz"
+# Both writers open, append and close per record, so a writer that opened
+# yesterday's file before the rename and appends after the copy hit EOF is a
+# sub-millisecond window right at midnight. Leaving a file alone while its
+# mtime is this fresh closes it: the first write of the new day that triggers
+# the rollover lands within milliseconds of the last write to the old one.
+_HOT_FILE_SEC = 60
+_DATED_NAME = re.compile(
+    r"^(?P<prefix>" + "|".join(re.escape(p) for p in _SWEEPABLE_PREFIXES) + r")"
+    r"(?P<stamp>\d{4}-\d{2}-\d{2})(?P<token>\.[0-9a-f]+)?\.jsonl(?P<gz>\.gz)?$"
+)
 
-    Read from the NAME, not from mtime: these files are the record of what a
-    given day did, and an mtime is changed by anything that touches the file.
+
+def _file_date(name: str) -> str | None:
+    """The date a sweepable telemetry file is named after, else None."""
+    m = _DATED_NAME.match(name)
+    if m is None:
+        return None
+    try:
+        datetime.strptime(m.group("stamp"), "%Y-%m-%d")
+    except ValueError:
+        return None
+    return m.group("stamp")
+
+
+def _claim_for_compression(src: Path) -> Path | None:
+    """Move the plain day file out from under its writers by an atomic rename.
+
+    The tokened name is the whole synchronisation: two compressors racing on
+    one day both try the rename and exactly one succeeds; the loser sees
+    FileNotFoundError and skips. A hook from that day that opens the path
+    *after* the rename recreates the plain file, which the next rollover
+    archives under its own token — nothing is appended into a finished
+    archive, so a crash at any point leaves files that are either complete
+    or re-derivable.
     """
-    for prefix in _SWEEPABLE_PREFIXES:
-        if name.startswith(prefix) and name.endswith(_DATED_SUFFIX):
-            stamp = name[len(prefix):-len(_DATED_SUFFIX)]
+    m = _DATED_NAME.match(src.name)
+    if m is None or m.group("gz"):
+        return None
+    if m.group("token"):
+        return src  # already claimed by a compressor that did not finish
+    token = f"{time.time_ns():x}{os.getpid():x}"
+    claimed = src.with_name(f"{m.group('prefix')}{m.group('stamp')}.{token}.jsonl")
+    try:
+        st = os.lstat(src)
+        if not stat.S_ISREG(st.st_mode):
+            return None
+        if time.time() - st.st_mtime < _HOT_FILE_SEC:
+            return None  # a writer may still hold it open; tomorrow's rollover
+        os.rename(src, claimed)
+    except OSError:
+        return None
+    return claimed
+
+
+def _compress_claimed(claimed: Path) -> bool:
+    """`<claimed>` → `<claimed>.gz`, then remove the plain file; idempotent.
+
+    A `.gz` that already exists was completed by an earlier run that died
+    before the unlink (the archive is only ever exposed by `os.replace`), so
+    the plain file is simply dropped. The archive is created with the plain
+    file's mode, never the umask default.
+    """
+    dst = claimed.with_name(claimed.name + ".gz")
+    tmp = dst.with_name(dst.name + f".{os.getpid()}.tmp")
+    try:
+        if not dst.exists():
+            mode = stat.S_IMODE(os.lstat(claimed).st_mode) & 0o666
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
             try:
-                datetime.strptime(stamp, "%Y-%m-%d")
-            except ValueError:
-                return None
-            return stamp
-    return None
+                with open(claimed, "rb") as fin, os.fdopen(fd, "wb") as raw, \
+                        gzip.GzipFile(fileobj=raw, mode="wb") as fout:
+                    shutil.copyfileobj(fin, fout, 1024 * 1024)
+                os.replace(tmp, dst)
+            finally:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+        os.unlink(claimed)
+        return True
+    except OSError:
+        return False
+
+
+_TMP_NAME = re.compile(
+    r"^(?:" + "|".join(re.escape(p) for p in _SWEEPABLE_PREFIXES) + r")"
+    r"\d{4}-\d{2}-\d{2}\.[0-9a-f]+\.jsonl\.gz\.(?P<pid>\d+)\.tmp$"
+)
+
+
+def _reclaim_dead_tmp(entry: os.DirEntry) -> bool:
+    """Remove a compressor's partial archive when its writer is gone.
+
+    A child killed between creating the tmp and `os.replace` leaves a file no
+    other name pattern matches, so nothing else would ever sweep it. The pid
+    in the name says whether the owner is still writing.
+    """
+    m = _TMP_NAME.match(entry.name)
+    if m is None:
+        return False  # only this module's own tmp names, never a user's file
+    pid = int(m.group("pid"))
+    try:
+        os.kill(pid, 0)
+        return False  # still running; it will replace or unlink its own tmp
+    except ProcessLookupError:
+        pass
+    except OSError:
+        return False
+    try:
+        os.unlink(entry.path)
+    except OSError:
+        pass
+    return True
+
+
+def compress_telemetry(directory: Path, today: str | None = None) -> int:
+    """gzip every dated telemetry file from a day before `today`; return the count.
+
+    Today's file is left alone — it is the one every writer appends to and the
+    one `count_session_fires` reads. Never raises: housekeeping must not break
+    the hook that triggered it.
+    """
+    cutoff = today or datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    done = 0
+    try:
+        entries = sorted(os.scandir(directory), key=lambda e: e.name)
+    except OSError:
+        return 0
+    for entry in entries:
+        try:
+            if not entry.is_file(follow_symlinks=False):
+                continue
+            if _reclaim_dead_tmp(entry):
+                continue
+            stamp = _file_date(entry.name)
+            if stamp is None or stamp >= cutoff or entry.name.endswith(".gz"):
+                continue
+            claimed = _claim_for_compression(Path(entry.path))
+            if claimed is not None and _compress_claimed(claimed):
+                done += 1
+        except OSError:
+            continue
+    return done
+
+
+_COMPRESS_CHILD = (
+    "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); "
+    "import _fire_ledger; _fire_ledger.compress_telemetry(Path(sys.argv[2]))"
+)
+
+
+def _compress_detached(directory: Path) -> bool:
+    """Run `compress_telemetry` in a process the hook does not wait for.
+
+    The first rollover after this lands has a whole retention window of plain
+    files behind it (1.6 GB measured), and even a single 100 MB day costs
+    0.4 s; both are more than a hook's budget. The child owns no hook fd — its
+    stdio is /dev/null and it starts its own session — so the hook's exit is
+    not tied to it.
+    """
+    try:
+        subprocess.Popen(
+            [sys.executable, "-c", _COMPRESS_CHILD, str(Path(__file__).parent), str(directory)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            close_fds=True, start_new_session=True,
+        )
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+_ROLLOVER_MARK = ".rollover-"
+_ROLLOVER_NAME = re.compile(r"^\.rollover-\d{4}-\d{2}-\d{2}$")
+
+
+def _claim_rollover(directory: Path, today: str) -> bool:
+    """One compression child per directory per day.
+
+    Every hook process that sees "today's file does not exist yet" reaches
+    this edge at the same moment after midnight; without a marker each of
+    them would spawn a child scanning the same directory and gzipping the
+    same 100 MB files. `O_EXCL` on a dated marker makes the first one win.
+    Yesterday's markers are dropped here, so the directory never accumulates
+    them.
+    """
+    try:
+        for entry in os.scandir(directory):
+            if _ROLLOVER_NAME.fullmatch(entry.name) and entry.name != f"{_ROLLOVER_MARK}{today}":
+                try:
+                    os.unlink(entry.path)
+                except OSError:
+                    pass
+        fd = os.open(directory / f"{_ROLLOVER_MARK}{today}", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
+        return False
+    except OSError:
+        return False
+    os.close(fd)
+    return True
+
+
+def rotate_telemetry(directory: Path) -> tuple[bool, int]:
+    """Day-rollover housekeeping: sweep old days now, compress finished days aside.
+
+    Returns `(compression_started, removed)`. Every writer calls this at the
+    same edge — the first write of a new UTC day — so the two families roll
+    over together. The sweep is a handful of unlinks and stays inline; the
+    compression is detached (see `_compress_detached`) and started by the
+    first caller of the day only (see `_claim_rollover`).
+    """
+    removed = prune_telemetry(directory)
+    today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    if not _claim_rollover(directory, today):
+        return False, removed
+    if _compress_detached(directory):
+        return True, removed
+    try:
+        os.unlink(directory / f"{_ROLLOVER_MARK}{today}")  # let a later writer retry
+    except OSError:
+        pass
+    return False, removed
 
 
 def prune_telemetry(directory: Path, days: float | None = None) -> int:
@@ -357,7 +580,7 @@ def _atomic_append(path: Path, lines: list[str]) -> None:
         os.close(fd)
     if first_write_of_the_day:
         try:
-            _ = prune_telemetry(path.parent)
+            _ = rotate_telemetry(path.parent)
         except Exception:
             pass  # housekeeping never breaks the write that triggered it
 

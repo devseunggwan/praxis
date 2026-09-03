@@ -377,22 +377,29 @@ only prose, because SKILL.md prescribes legitimate pre-Stage-3 STOP-to-user
 surfaces (self-conflict detection; ambiguous `backing_repo`) that are prose
 clarifications, not reports.
 
-The marker's lifecycle (set on skill-invoke, cleared on any non-invocation
-`UserPromptSubmit` and on Stage 4) bounds the armed window to the active,
-incomplete retrospect turn, so an abandoned retrospect / topic change does not
-cause a later unrelated Stop to be blocked.
+The marker's lifecycle (set on skill-invoke, decayed one turn per
+non-invocation `UserPromptSubmit` and cleared on Stage 4) bounds the armed
+window to the active, incomplete retrospect, so an abandoned retrospect / topic
+change does not cause a later unrelated Stop to be blocked. The decay replaced
+an unconditional clear that disarmed this gate on the clarification round-trip
+the retrospect skill documents
+([#1098](https://github.com/devseunggwan/praxis/issues/1098)); the marker hook's
+spec owns the budget.
 
 #### Known residual limitations
 
-- **Multi-turn retrospect with a pre-Stage-3 user interaction.** If a retrospect
-  STOP-surfaces a pre-Stage-3 question and the user *answers it in a new prompt*,
-  that prompt clears the marker (it is indistinguishable from a topic change by
-  the `UserPromptSubmit` handler). A subsequent fence-omitting Stage 3 in the
-  next turn would then not be gated. This is the aggressive-clear ↔ false-positive
-  trade-off: aggressive clear was chosen because it gives zero false positives in
-  the **dominant single-turn flow** (invoke → Stage 3 in one turn, where the
-  marker is still set) and closes the common bypass; the multi-turn reopen
-  requires the *optional* pre-Stage-3 surfaces and is the accepted residual.
+- **Multi-turn retrospect with more than one pre-Stage-3 user interaction.** The
+  decay spends one turn of the budget per non-invocation prompt, so the marker
+  survives the *first* such prompt — the clarification round-trip the retrospect
+  skill documents — and is cleared by the **second**, which the
+  `UserPromptSubmit` handler cannot tell apart from a topic change. A
+  fence-omitting Stage 3 after that second prompt is not gated. The budget is
+  where the false-negative ↔ false-positive trade-off is set: a larger one would
+  close this residual, and a replay of both hooks over the local retrospect
+  corpus showed every value above 2 blocking strictly more table-bearing Stops
+  that were not Stage 3 reports while catching no additional bypass, so the
+  residual is cheaper than the headroom that would remove it. The marker hook's
+  spec owns that measurement.
 - **Localized Stage-4 header.** Stage-4 detection keys on the literal
   `## Actions Executed`. An agent that both localizes the Stage-4 header AND omits
   the fence on a findings-table-bearing message would be blocked post-execution

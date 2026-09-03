@@ -15,7 +15,7 @@ on opposite sides of that split.
 | `~/.praxis/state/`         | Durable, cross-session state                       | `praxis_state_dir()`                         | `PRAXIS_STATE_DIR` (base), `PRAXIS_HOME`    |
 | `~/.praxis/cache/`         | Regenerable, session-scoped caches / dedup markers | `praxis_cache_dir()`, `resolve_cache_file()` | `PRAXIS_HOME`, per-file env                 |
 | `~/.praxis/logs/`          | Diagnostics                                        | `resolve_writable("logs", …)`                | `PRAXIS_HOME`, per-file env                 |
-| `~/.praxis/telemetry/`     | fire / bypass event ledgers (daily rotation)       | `hooks/_lib/_fire_ledger.py`                 | `PRAXIS_FIRE_TELEMETRY_FILE`, `PRAXIS_HOME` |
+| `~/.praxis/telemetry/`     | fire / bypass ledgers (daily; gzip + 30d sweep)    | `hooks/_lib/_fire_ledger.py`                 | `PRAXIS_FIRE_TELEMETRY_FILE`, `PRAXIS_HOME` |
 | `~/.praxis/docs/specs/`    | Feature specs ([`spec-store.md`](spec-store.md))   | `praxis_specs_dir()`                         | `PRAXIS_HOME`                               |
 
 The spec store is the one root praxis does not write: a person authors those
@@ -33,7 +33,7 @@ dir is not writable, and never raises.
 | File                                                | Producer                                                                                                     | Consumers                                                                                            |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
 | `strikes/<sid>.json`, `strikes/.current-session`, … | [`strike-counter`](../hooks/completion-verify/strike-counter/spec.md)                                        | strike-counter; read by [`postcompact-context`](../hooks/advisory-nudge/postcompact-context/spec.md) |
-| `phantom-path/<hash>`                               | [`external-write-path-existence-check`](../hooks/advisory-nudge/external-write-path-existence-check/spec.md) | itself (dedup)                                                                                       |
+| `phantom-path/<hash>`                               | [`external-write-path-existence-check`](../hooks/advisory-nudge/external-write-path-existence-check/spec.md) | itself (dedup; swept past the cache TTL, #1241)                                                      |
 
 ### Back-compat and migration (#527)
 

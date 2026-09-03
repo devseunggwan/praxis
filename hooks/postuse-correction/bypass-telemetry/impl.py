@@ -239,8 +239,9 @@ def append_record(record: dict) -> None:
     with O_NONBLOCK, so a planted or misconfigured path cannot stall the
     PostToolUse group this hook runs in as its first member — standalone the
     stall cost this hook's own node, in the group it would cost every sibling.
-    The helper also runs the day-rollover retention sweep (#1078); this is the
-    only writer of the `bypass-events-` prefix, so the sweep has to ride here.
+    The helper also runs the day-rollover housekeeping (#1078 sweep, #1247
+    rotation); this is the only writer of the `bypass-events-` prefix, so it
+    has to ride here.
     """
     try:
         _atomic_append(resolve_telemetry_path(), [json.dumps(record, ensure_ascii=False)])

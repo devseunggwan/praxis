@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections import deque
 from pathlib import Path
 
@@ -249,6 +250,41 @@ def _iter_lines_backwards(path: str, max_bytes: int):
             for raw in reversed(lines):
                 yield raw
         return pos == 0
+
+
+def tail_lines(path: str, max_lines: int, max_bytes: int | None = None) -> list[str]:
+    """The last `max_lines` lines of `path`, in file order, decoded leniently.
+
+    Reads from the end (see `_iter_lines_backwards`) so a hook that only
+    matches against the recent tail never loads a 200 MB transcript into
+    memory (issue #1240). `[]` when the file is missing or unreadable — the
+    same fail-open value the former `readlines()` callers used.
+
+    Unbounded by default: the callers' contract is "the last N lines", and a
+    byte cap that stopped short would hand them a shorter window that looks
+    complete — a `grep` or a rejection just outside the suffix would go unseen
+    by a gate that then blocks or waves through on it. Memory is bounded by
+    the N lines themselves, which is what `readlines()` never bounded.
+    `max_bytes` exists for callers that prefer a partial answer to a long read.
+    """
+    out: list[str] = []
+    first = True
+    try:
+        for raw in _iter_lines_backwards(path, sys.maxsize if max_bytes is None else max_bytes):
+            # Only the very first piece can be the split artifact after a
+            # trailing newline; a later b"" is a real blank line, and dropping
+            # it would pull an older record into the window.
+            if first and raw == b"":
+                first = False
+                continue
+            first = False
+            out.append(raw.decode("utf-8", errors="replace"))
+            if len(out) >= max_lines:
+                break
+    except TranscriptReadError:
+        return []
+    out.reverse()
+    return out
 
 
 def load_recent_events(

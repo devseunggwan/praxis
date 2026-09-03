@@ -10,6 +10,14 @@
 
 set +e
 
+# Contain every state write this suite causes (#1241). The phantom cases write
+# a dedup marker and now run the TTL sweep on the marker directory — without
+# this the suite sweeps the developer's real ~/.praxis/state/phantom-path.
+TEST_HOME="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+export PRAXIS_HOME="$TEST_HOME"
+unset PRAXIS_STATE_DIR   # an explicit override would win over PRAXIS_HOME
+trap 'rm -rf "$TEST_HOME"' EXIT
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 HOOK="$ROOT_DIR/hooks/advisory-nudge/external-write-path-existence-check/impl.py"

@@ -38,3 +38,28 @@ def isolate_fire_telemetry(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "PRAXIS_FIRE_TELEMETRY_FILE", str(tmp_path / "fire-events-test.jsonl")
     )
+
+
+@pytest.fixture(autouse=True)
+def isolate_praxis_home(tmp_path_factory, monkeypatch):
+    """Every other runtime artifact goes to a per-test root too (#1241).
+
+    The fire ledger above was the first leak closed (#849); the error log and
+    the state/cache roots were still the real ones, so a test that makes a
+    hook fail on purpose — `TimeoutExpired` from a monkeypatched
+    `subprocess.run`, say — appended a real-looking crash to
+    `~/.praxis/logs/hook-errors.jsonl` (1,034 of its 3,383 lines came from one
+    such test). `os.environ` is what `monkeypatch.setenv` writes, so a hook
+    the test spawns as a subprocess inherits the same root.
+
+    The root is a sibling of `tmp_path`, not inside it: several tests assert
+    that `tmp_path` holds nothing but their own files. HOME moves too: the
+    pre-#527 strike-state fallback reads `~/.claude/state/praxis`, which no
+    praxis knob relocates.
+    """
+    home = tmp_path_factory.mktemp("praxis-home")
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))  # legacy ~/.claude/state/praxis reads
+    monkeypatch.delenv("PRAXIS_STATE_DIR", raising=False)  # an override beats PRAXIS_HOME
+    (home / "logs").mkdir(parents=True)  # the override path is used as-is, never created
+    monkeypatch.setenv("PRAXIS_HOME", str(home))
+    monkeypatch.setenv("PRAXIS_HOOK_ERROR_LOG", str(home / "logs" / "hook-errors.jsonl"))
