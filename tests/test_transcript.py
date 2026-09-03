@@ -789,3 +789,140 @@ class TestReadFailurePropagates:
         self._explode_on_binary_open(monkeypatch, path)
         with pytest.raises(T.TranscriptReadError):
             list(T._iter_lines_backwards(path, 1024))
+
+
+class TestReduceTranscriptResumable:
+    """`reduce_transcript_resumable` — the Stop gates' incremental scan (#1237)."""
+
+    @staticmethod
+    def _append(path, events):
+        with open(path, "a", encoding="utf-8") as fh:
+            for ev in events:
+                fh.write(json.dumps(ev) + "\n")
+
+    @staticmethod
+    def _run(path, cursor, seen):
+        def reduce_event(state, ev):
+            state["n"] += 1
+            seen.append(ev["i"])
+
+        return T.reduce_transcript_resumable(str(path), cursor, lambda: {"n": 0}, reduce_event)
+
+    def test_second_run_folds_only_the_appended_events(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        self._append(path, [{"i": 1}, {"i": 2}])
+        seen: list = []
+        assert self._run(path, cursor, seen) == {"n": 2}
+        self._append(path, [{"i": 3}])
+        seen.clear()
+        assert self._run(path, cursor, seen) == {"n": 3}
+        assert seen == [3]
+
+    def test_partial_trailing_line_is_read_once_it_completes(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        self._append(path, [{"i": 1}])
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write('{"i": 2')  # still being written when the Stop fires
+        seen: list = []
+        assert self._run(path, cursor, seen) == {"n": 1}
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("}\n")
+        seen.clear()
+        assert self._run(path, cursor, seen) == {"n": 2}
+        assert seen == [2]
+
+    def test_shrunken_file_restarts_from_the_top(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        self._append(path, [{"i": 1}, {"i": 2}, {"i": 3}])
+        self._run(path, cursor, [])
+        path.write_text(json.dumps({"i": 9}) + "\n", encoding="utf-8")
+        seen: list = []
+        assert self._run(path, cursor, seen) == {"n": 1}
+        assert seen == [9]
+
+    def test_offset_not_on_a_line_boundary_restarts_from_the_top(self, tmp_path):
+        """A same-size rewrite that moves the record boundaries must not resume
+        mid-record: the byte before the offset has to be a newline."""
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        self._append(path, [{"i": 1}])
+        self._run(path, cursor, [])
+        stored = json.loads(Path(cursor).read_text(encoding="utf-8"))
+        # Same inode, longer file, and the old offset now lands inside the
+        # one record the file holds.
+        with open(path, "r+b") as fh:
+            fh.seek(0)
+            fh.write(b'{"i": 12345678901}\n')
+        assert Path(path).stat().st_size > stored["offset"]
+        seen: list = []
+        assert self._run(path, cursor, seen) == {"n": 1}
+        assert seen == [12345678901]
+
+    def test_replaced_file_restarts_from_the_top(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        self._append(path, [{"i": 1}, {"i": 2}])
+        self._run(path, cursor, [])
+        other = tmp_path / "other.jsonl"
+        self._append(other, [{"i": 7}, {"i": 8}])
+        os.replace(other, path)  # new inode at the same path
+        seen: list = []
+        assert self._run(path, cursor, seen) == {"n": 2}
+        assert seen == [7, 8]
+
+    def test_undecodable_cursor_state_restarts_without_raising(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        cursor = tmp_path / "cursor.json"
+        self._append(path, [{"i": 1}])
+        self._run(path, str(cursor), [])
+        stored = json.loads(cursor.read_text(encoding="utf-8"))
+        stored["state"] = {"unexpected": True}
+        cursor.write_text(json.dumps(stored), encoding="utf-8")
+
+        def decode(data):
+            return {"n": data["n"]}
+
+        seen: list = []
+        state = T.reduce_transcript_resumable(
+            str(path), str(cursor), lambda: {"n": 0},
+            lambda st, ev: (st.__setitem__("n", st["n"] + 1), seen.append(ev["i"])),
+            decode=decode,
+        )
+        assert state == {"n": 1} and seen == [1]
+
+    def test_encode_and_decode_round_trip_a_set(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        self._append(path, [{"i": 1}])
+
+        def run():
+            return T.reduce_transcript_resumable(
+                str(path), cursor, lambda: {"ids": set()},
+                lambda st, ev: st["ids"].add(ev["i"]),
+                encode=lambda st: {"ids": sorted(st["ids"])},
+                decode=lambda d: {"ids": set(d["ids"])},
+            )
+
+        assert run() == {"ids": {1}}
+        self._append(path, [{"i": 2}])
+        assert run() == {"ids": {1, 2}}
+
+    def test_no_cursor_path_scans_fully_and_writes_nothing(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        self._append(path, [{"i": 1}, {"i": 2}])
+        assert self._run(path, None, []) == {"n": 2}
+        assert self._run(path, None, []) == {"n": 2}
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["t.jsonl"]
+
+    def test_missing_transcript_yields_the_empty_state(self, tmp_path):
+        assert self._run(tmp_path / "absent.jsonl", str(tmp_path / "c.json"), []) == {"n": 0}
+
+    def test_cursor_path_is_session_keyed_or_absent(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
+        assert T.stop_scan_cursor_path("some-gate", None) is None
+        assert T.stop_scan_cursor_path("some-gate", "") is None
+        p = T.stop_scan_cursor_path("some-gate", "sid-1")
+        assert p == str(tmp_path / "cache" / "stop-scan-some-gate-sid-1.json")
