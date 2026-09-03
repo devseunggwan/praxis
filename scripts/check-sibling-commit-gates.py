@@ -59,8 +59,14 @@ Three things the canary verifies beyond that bare name diff:
    the literal: the checklist prints only the rows the running host installs
    (``render_gate_checklist``, issue #1154). Before that filter existed this
    canary was green while the runtime printed all four rows on `codex` and
-   `cursor` — the host table said two. The renderer's presence is therefore
-   checked here, so removing it fails loudly instead of re-opening that gap.
+   `cursor` — the host table said two. The renderer's *wiring* is therefore
+   read structurally here (``_wiring_drifts``): it must be defined, ``main``
+   must call it, and ``main`` must not touch the raw literal. A substring
+   search for the ``def`` line would pass a renderer nothing calls, which
+   prints every row again. What no text-level check can see — a wired
+   renderer that returns every row anyway — is pinned behaviourally by
+   ``tests/hooks/preflight-gate/test_verify_commit_flag_override.sh``, which
+   runs the renderer and the dispatcher once per host.
 
 What this canary does NOT do, deliberately: decide *membership*. Structurally
 parsing each hook's source for commit-subcommand detection was considered and
@@ -87,6 +93,7 @@ clean tree; exit 1 listing each drift on failure.
 
 from __future__ import annotations
 
+import ast
 import json
 from functools import lru_cache
 import re
@@ -145,11 +152,13 @@ _CHECKLIST_BLOCK_RE = re.compile(
 )
 _CHECKLIST_ARROW_RE = re.compile(r"←\s*([a-z0-9][a-z0-9-]*)")
 
-# The renderer that drops rows the running host does not install (issue #1154).
-# Without it the checklist prints all four rows everywhere, which makes the
+# The renderer that drops rows the running host does not install (issue #1154),
+# and the name of the raw literal it wraps. Without the renderer wired into
+# `main`, the checklist prints all four rows everywhere, which makes the
 # per-host "in the deny checklist" column below describe behaviour the runtime
 # does not have — the state this checker was green through once already.
-_CHECKLIST_FILTER_RE = re.compile(r"^def render_gate_checklist\(", re.MULTILINE)
+_RENDERER = "render_gate_checklist"
+_CHECKLIST_CONST = "GIT_COMMIT_GATE_CHECKLIST"
 
 # spec.md carries the list as a markdown table; the header row is the anchor.
 # Column 2 is the hook's `hosts` whitelist (`all`, or the host names).
@@ -378,14 +387,71 @@ def checklist_names(repo: Path = REPO) -> tuple[Optional[list[str]], list[str]]:
             f"{CHECKLIST}: GIT_COMMIT_GATE_CHECKLIST carries no '← <hook>' rows — "
             "the checklist count cannot be derived, so nothing was verified"
         ]
+    return names, _wiring_drifts(text)
+
+
+def _wiring_drifts(text: str) -> list[str]:
+    """Check the deny checklist is emitted THROUGH the host filter, not raw.
+
+    Read structurally rather than by substring: a `def render_gate_checklist`
+    that nothing calls satisfies a name search while the runtime prints every
+    row again. The two failures this catches are the whole reason the filter
+    exists — `main` re-concatenating the literal, and the renderer being
+    defined but unwired.
+
+    What it does NOT catch is a renderer that is wired but returns every row
+    anyway; no text-level check can. That half is pinned behaviourally, by
+    `tests/hooks/preflight-gate/test_verify_commit_flag_override.sh` (T03-T09),
+    which runs the renderer and the dispatcher once per host.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        return [
+            f"{CHECKLIST}: could not be parsed ({exc}) — the deny-checklist "
+            "wiring was not verified"
+        ]
+
+    if not any(
+        isinstance(node, ast.FunctionDef) and node.name == _RENDERER
+        for node in ast.walk(tree)
+    ):
+        return [
+            f"{CHECKLIST}: no `{_RENDERER}` — the deny checklist is printed "
+            "unfiltered, so the per-host 'in the deny checklist' column in "
+            f"{SPEC} describes coverage the runtime does not have"
+        ]
+
+    main = next(
+        (
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "main"
+        ),
+        None,
+    )
+    if main is None:
+        return [
+            f"{CHECKLIST}: no `main` — the deny-checklist call site could not "
+            "be located, so nothing was verified"
+        ]
+
+    names_in_main = {
+        node.id for node in ast.walk(main) if isinstance(node, ast.Name)
+    }
     drifts: list[str] = []
-    if not _CHECKLIST_FILTER_RE.search(text):
+    if _RENDERER not in names_in_main:
         drifts.append(
-            f"{CHECKLIST}: no `render_gate_checklist` — the deny checklist is "
-            "printed unfiltered, so the per-host 'in the deny checklist' column "
-            f"in {SPEC} describes coverage the runtime does not have"
+            f"{CHECKLIST}: `main` never calls `{_RENDERER}` — the renderer is "
+            "defined but unwired, so the deny checklist is printed unfiltered"
         )
-    return names, drifts
+    if _CHECKLIST_CONST in names_in_main:
+        drifts.append(
+            f"{CHECKLIST}: `main` references `{_CHECKLIST_CONST}` directly — "
+            f"the raw literal bypasses `{_RENDERER}`, so every host gets every "
+            "row again"
+        )
+    return drifts
 
 
 def _spec_rows(text: str) -> Optional[list[tuple[str, str]]]:
