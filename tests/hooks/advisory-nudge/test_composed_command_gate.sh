@@ -108,6 +108,8 @@ cat > "$TRANSCRIPT" <<'EOF'
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_6","name":"Bash","input":{"command":"git push --force origin main"}}]}}
 {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_6","is_error":true,"content":"PreToolUse:Bash hook error: BLOCKED: never force-push"}]}}
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_7","name":"Read","input":{"file_path":"/repo/hooks/_lib/_transcript.py"}}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_8","name":"Bash","input":{"command":"true || jq -r .headRefOid /tmp/pr.json"}}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_9","name":"Bash","input":{"command":"false && wc -l docs/hook/INDEX.md"}}]}}
 EOF
 
 # Bodies land in a per-run directory under sequential names. mktemp inside a
@@ -488,6 +490,49 @@ else
     "silent" "advisory" "$(body_payload "$B" "$UNREADABLE")"
 fi
 chmod 644 "$UNREADABLE"
+
+# --- CodeRabbit round regressions (#1261) ------------------------------------
+# A short-circuited branch never ran, so it is not provenance. Both shapes
+# below sit in the transcript fixture above and must NOT clear a published line.
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ jq -r .headRefOid /tmp/pr.json
+8521075ac05806400733b0dff3d1d4b19f7b2006
+```
+EOF
+run_case "REGRESSION CR: 'true || cmd' right side is not provenance (warn)" \
+  "warn" "advisory" "$(body_payload "$B" "$TRANSCRIPT")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ wc -l docs/hook/INDEX.md
+     212 docs/hook/INDEX.md
+```
+EOF
+# `&&` deliberately stays provenance — this case pins the accepted limit.
+# `cd /repo && grep ...` and `git fetch && git rebase ...` are the shapes the
+# segmenting was added for, and both sides really do run in them. Treating the
+# right side as unexecuted would bring back the P2 false positives, which is
+# the failure mode that decides whether this hook survives.
+run_case "ACCEPTED LIMIT: 'false && cmd' right side still clears (silent)" \
+  "silent" "advisory" "$(body_payload "$B" "$TRANSCRIPT")"
+
+# Only an ODD backslash run continues a Bash line. `foo \\` + newline is a
+# literal backslash then a REAL separator; collapsing it welded the two
+# commands together and hid the `gh` write from the command-start walk, so the
+# body was never scanned at all.
+nextbody
+cat > "$B" <<'EOF'
+```
+$ grep -rn unrelated_symbol hooks/
+```
+EOF
+run_case "REGRESSION CR: even backslash run keeps the gh write visible (warn)" \
+  "warn" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi \\\\\\\\\\ngh pr comment 5 --body-file $B\"},\"transcript_path\":\"$TRANSCRIPT\"}"
 
 # --- Summary -----------------------------------------------------------------
 

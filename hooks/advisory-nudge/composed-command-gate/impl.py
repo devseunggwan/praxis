@@ -153,7 +153,21 @@ _NON_SHELL_HEAD_RE = re.compile(r"^[A-Za-z_][\w.]*\(")
 _SUBSTITUTION_RE = re.compile(r"\$\{?[A-Za-z_]\w*\}?|<[A-Za-z_][\w .-]*>")
 
 _ENV_PREFIX_RE = re.compile(r"^(?:env\s+)?(?:[A-Za-z_]\w*=\S*\s+)+|^env\s+")
-_SEGMENT_SPLIT_RE = re.compile(r"&&|\|\||[|;\n]")
+
+# Keep the separators so a segment knows what preceded it: only `||`'s right
+# side is skipped as provenance (see `_segments`).
+_SEGMENT_SPLIT_RE = re.compile(r"(&&|\|\||[|;\n])")
+
+# Only an ODD run of backslashes continues a Bash line. `foo \\` + newline is a
+# literal backslash followed by a real separator, and collapsing it welds two
+# commands into one — enough to hide a `gh pr comment` from the tokenizer's
+# command-start walk entirely. The lookbehind anchors the run's start; the
+# captured pairs survive, only the final `\`+newline becomes a space.
+_LINE_CONTINUATION_RE = re.compile(r"(?<!\\)((?:\\\\)*)\\\n")
+
+
+def _join_continuations(command: str) -> str:
+    return _LINE_CONTINUATION_RE.sub(r"\1 ", command)
 _QUOTE_CHARS = str.maketrans("", "", "'\"")
 
 # Clearing needs a head-binary match plus this much operand overlap. The value
@@ -163,7 +177,7 @@ _QUOTE_CHARS = str.maketrans("", "", "'\"")
 _OVERLAP_THRESHOLD = 0.6
 
 
-def _segments(command: str) -> list[tuple[str, frozenset[str]]]:
+def _segments(command: str, executed_only: bool = False) -> list[tuple[str, frozenset[str]]]:
     """Split a command into per-segment `(head, operands)` pairs.
 
     A transcript command is routinely a compound — `cd /repo && grep ...`, a
@@ -179,7 +193,20 @@ def _segments(command: str) -> list[tuple[str, frozenset[str]]]:
     from another is what it was pointed at.
     """
     out: list[tuple[str, frozenset[str]]] = []
-    for raw in _SEGMENT_SPLIT_RE.split(command.replace("\\\n", " ")):
+    parts = _SEGMENT_SPLIT_RE.split(_join_continuations(command))
+    # split() with a capturing group yields [seg, sep, seg, sep, ...].
+    preceding_sep = ""
+    for index, raw in enumerate(parts):
+        if index % 2:
+            preceding_sep = raw
+            continue
+        # `A || B` runs B only when A failed, so B is the one branch a
+        # transcript cannot vouch for — `true || grep ...` records a `grep`
+        # that never ran. `&&` stays in: `cd /repo && grep ...` is the shape
+        # the segmenting exists to match, and treating it as unexecuted would
+        # bring back the false positives it was added to remove.
+        if executed_only and preceding_sep == "||":
+            continue
         text = _ENV_PREFIX_RE.sub("", raw.strip())
         tokens = [t for t in text.translate(_QUOTE_CHARS).split() if t]
         if not tokens:
@@ -318,7 +345,7 @@ def _findings(body: str, transcript_path: str) -> list[tuple[str, str]]:
     if commands is None:
         return findings
 
-    ran = [seg for c in commands for seg in _segments(c)]
+    ran = [seg for c in commands for seg in _segments(c, executed_only=True)]
     for cmd in published:
         if cmd in non_shell or _SUBSTITUTION_RE.search(cmd):
             continue
@@ -366,7 +393,7 @@ def main() -> int:
         command = tool_input.get("command", "") or ""
         if not isinstance(command, str) or not command.strip():
             return 0
-        tokens = safe_tokenize(command.replace("\\\n", " "))
+        tokens = safe_tokenize(_join_continuations(command))
         if not tokens:
             return 0
         for argv in iter_command_starts(tokens):

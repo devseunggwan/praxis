@@ -63,7 +63,19 @@ output would be false positives (codex review round 1, P2).
 
 The published line is judged on its **primary segment** — the first whose head
 is not `cd`. It clears when some transcript segment shares that head **and**
-covers at least **60%** of its operands. Flags and the binary are excluded from the ratio
+covers at least **60%** of its operands.
+
+Only an **odd** run of backslashes continues a Bash line. `foo \\` followed by a
+newline is a literal backslash and then a *real* separator, so collapsing it
+welds two commands into one — enough to hide a following `gh pr comment` from
+the tokenizer's command-start walk, which means the body is never scanned at
+all. The join is therefore odd-run-aware on both the surface-detection path and
+the segmenting path (CodeRabbit round, #1261).
+
+On the transcript side a segment following `||` is **not** recorded as
+provenance: `A || B` runs `B` only when `A` failed, so `true || grep ...` would
+otherwise register a `grep` that never ran and clear the published line this
+gate exists to catch. Flags and the binary are excluded from the ratio
 deliberately: those are what two unrelated invocations of the same binary
 share, so counting them makes a swapped search term look like a match. What
 discriminates one `grep` run from another is what it was pointed at.
@@ -135,6 +147,12 @@ direction was to start under-firing and raise later on measured fire data.
   glyphs are not detected — `>` in particular is markdown quoting, and the
   other two are rare enough that admitting them buys little against the
   parsing risk.
+- **`&&` right-hand segments stay provenance.** `false && cmd` records `cmd`
+  even though it never ran. The two shapes segmenting exists for — `cd /repo &&
+  grep ...` and `git fetch && git rebase ...` — really do run both sides, and
+  treating the right side as unexecuted would bring back the false positives
+  the segmenting removed. `||` carries no such shape, which is why it is
+  dropped and `&&` is not.
 - **Indented (4-space) code blocks are not scanned** — fenced blocks only.
 - **An unclosed fence contributes nothing.** A body still mid-composition is
   not evidence anyone can act on, and scanning it would fire on drafts.
