@@ -297,10 +297,14 @@ stays invisible until someone needs it.
    the full five-field structure still applies — write it in full.
 2. **Grade the PostToolUse re-check `unknown`, never a pass.** It did not run;
    the tier table above already says that an unrun check is not a pass.
-3. **When rev 2 would be due, say so on the PR** in a plain comment: which
-   `<sha>` the anchor is stamped at, which one HEAD is now at, and that the
-   host has no comment-update surface. A reader who does not know this reads a
-   stale anchor as a current one.
+3. **When rev 2 would be due, say so in the PR body**: which `<sha>` the
+   anchor is stamped at, which one HEAD is now at, and that the host has no
+   comment-update surface. A reader who does not know this reads a stale
+   anchor as a current one. Not a comment of its own — this channel allows
+   exactly one top-level comment besides the anchor, the one-line
+   `Verification updated — <sha> rev N · …` notice that pairs with an edit,
+   and here there is no edit to pair one with. The body is also the only one
+   of the two surfaces this host can still correct afterwards.
 4. **Carry the delta where it survives** — into the PR body or the merge
    commit, both of which *do* have an update path on the MCP surface. The
    anchor's `Unverified` gaps go with it, so `merge-briefing` Step 3 still has

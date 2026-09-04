@@ -37,10 +37,10 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 > PostToolUse structure re-check with no substitute there at all.
 >
 > Past rev 1 the anchor rule is therefore unsatisfiable in such a session. The
-> procedure: post rev 1 in full, grade the re-check `unknown`, say on the PR
-> which SHA the anchor is stamped at and that the host cannot update it, and
-> carry the delta into the PR body or the merge commit — never a second anchor,
-> which makes id recovery ambiguous. Steps in
+> procedure: post rev 1 in full, grade the re-check `unknown`, say in the PR
+> body which SHA the anchor is stamped at and that the host cannot update it,
+> and carry the delta there or into the merge commit — never a comment of its
+> own, and never a second anchor, which makes id recovery ambiguous. Steps in
 > [`anchor-comment-gate/spec.md` → Procedure for a gh-less session](hooks/preflight-gate/anchor-comment-gate/spec.md#procedure-for-a-gh-less-session),
 > the precondition in
 > [the section holding it](hooks/preflight-gate/anchor-comment-gate/spec.md#prerequisite--gh-for-revision-specifically).
