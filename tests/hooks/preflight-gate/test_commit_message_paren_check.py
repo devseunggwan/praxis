@@ -154,6 +154,10 @@ GOOD_BODY = "fix: x\n\n `(a(b))` note"
         ("git log -1 --format=%B", 0),
         # Unresolvable message value — silent, not a guess.
         ("git commit -m \"$MSG\"", 0),
+        # The binary may be path-prefixed; a lookalike name is not git.
+        ("/usr/bin/git commit -m 'word(a(b))'", 2),
+        ("env FOO=1 /usr/bin/git commit -m 'word(a(b))'", 2),
+        ("gitk commit -m 'word(a(b))'", 0),
     ],
 )
 def test_message_sources(command, rc):

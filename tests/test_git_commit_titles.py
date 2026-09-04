@@ -407,3 +407,29 @@ def test_titles_and_texts_walk_the_same_argv():
     argv = ["git", "commit", "-m", "fix: x", "-m", "second"]
     assert extract_git_titles(argv) == ["fix: x"]
     assert extract_git_message_texts(argv) == ["fix: x\n\nsecond"]
+
+
+# ---------------------------------------------------------------------------
+# argv[0]: the git binary, bare or path-prefixed
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "binary,parses",
+    [
+        # Named, so the gates built on this walk see the commit.
+        ("git", True),
+        ("/usr/bin/git", True),
+        ("./git", True),
+        ("$(git", True),
+        # Not git — a name merely ending in the three letters is not the binary.
+        ("gitk", False),
+        ("mygit", False),
+        ("legit", False),
+        ("gh", False),
+    ],
+)
+def test_path_prefixed_git_is_still_git(binary, parses):
+    argv = [binary, "commit", "-m", "fix: x"]
+    expected = ["fix: x"] if parses else []
+    assert extract_git_titles(argv) == expected
+    assert extract_git_message_texts(argv) == expected

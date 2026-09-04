@@ -79,6 +79,21 @@ GIT_COMMIT_NO_VALUE_SHORT = frozenset("aesvnqzp")
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _is_git_binary(token: str) -> bool:
+    """True iff `token` names the git binary, bare or path-prefixed.
+
+    Mirrors the `_is_git_binary` every sibling commit gate carries
+    (`block-rename-sweep-survivors`, `commit-decomposition-advisory`,
+    `pre-commit-staged-file-enumeration`, …) and the `_is_gh_binary` in
+    `_hook_utils`. An exact `argv[0] == "git"` comparison is bypassed by
+    `/usr/bin/git commit -m …`, which is the same path-prefix hole #1099 closed
+    on the gh side. The leading strip covers a subshell-wrapped form
+    (`(git …)`, `$(git …)`), where the grouping char rides on the token.
+    """
+    stripped = token.lstrip("(){}$`")
+    return stripped == "git" or stripped.endswith("/git")
+
+
 def title_from_file(path: str, base_dir: str | None = None) -> str | None:
     """Read first line of a file; return None on any error or if stdin placeholder.
 
@@ -321,7 +336,7 @@ def _scan_commit_message_values(
       git -c key=val commit -m "title" (git global flags stripped)
     """
     argv = strip_prefix(argv)
-    if not argv or argv[0] != "git":
+    if not argv or not _is_git_binary(argv[0]):
         return None
 
     # Strip git global flags to find the actual subcommand.
