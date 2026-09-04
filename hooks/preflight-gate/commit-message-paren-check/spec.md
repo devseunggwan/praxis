@@ -105,17 +105,38 @@ matching the sibling's `PRAXIS_COMMIT_TITLE_FORMAT_STRICT` shape.
 
 | Command shape | Source |
 | --- | --- |
-| `git commit -m "…"` / `--message` / `-m="…"` / `-mvalue` / `-am "…"` | every `-m` value, joined with a blank line as git joins them |
-| `git commit -F <path>` / `--file` | the file's whole contents |
+| `git commit -m "…"` / `--message` / `-m="…"` / `-mvalue` / `-am "…"` / `-am"…"` | every `-m` value, joined with a blank line as git joins them |
+| `git commit -F <path>` / `--file` / `-F<path>` / `--file=<path>` | the file's whole contents |
 | `git commit -m "$(cat <<'EOF' … EOF)"` | the body of the heredoc that `-m` value opens |
 | `git commit -m 'subject' -m "$(cat <<'EOF' … EOF)"` | the subject **and** that body |
-| `git commit -F - <<'EOF' … EOF` | the body of the last heredoc this argv opens |
+| ``git commit -m "`cat <<'EOF' … EOF`"`` | the same — a backtick run is a substitution too |
+| `git commit -F - <<'EOF' … EOF`, `-F- <<'EOF'`, `<< 'EOF'` | the body of the last heredoc this argv opens |
 | `git commit -F -` (no heredoc) | silent pass (stdin unreadable) |
 | a heredoc belonging to another command in the chain | not the message — never graded |
 | two heredocs sharing one delimiter word | silent pass (the name identifies neither) |
 | `<<-` body | leading tabs stripped first, as bash strips them |
+| an UNQUOTED `<<EOF` body | spliced and expansion-blanked first, as bash delivers it |
+| a message line carrying `$(…)`, `` `…` ``, `${…}`, `$NAME` | that line is blanked — its delivered text is unknowable |
+| a `-m` value with an unclosed `$(` or backtick | silent pass (bash rejects the command; no commit happens) |
+| a whole `-m` value that is one single-quoted run | graded verbatim — the shell substitutes nothing in it |
+| anything after `--` | a pathspec, never a message flag |
 | `git commit -m "$(cat /tmp/x)"` | silent pass (unresolvable substitution) |
 | anything that is not `git commit` | silent pass |
+
+Short options are read as one grammar rather than as a list of spellings: a
+cluster is leading no-value flags followed by at most one value-taking flag
+(`m`, `F`), which consumes the rest of the cluster or, when the cluster ends
+with it, the next token. `-am"fix: x"`, `-am "fix: x"`, `-Fmsg.txt`, `-F-` and
+`-aF -` are therefore all the same shape. A cluster holding any other
+character is not read at all — `-Smike@example.com` takes an attached key id,
+so guessing at it would invent a message source that git never saw.
+
+Every entry above was measured before it was written: the command is run under
+bash with `git` replaced by a recorder that prints the argv and the message it
+was handed, and the expected verdict is the detector applied to *that* text.
+For a blocking gate the false positive is the expensive direction — it stops
+valid work — so a shape whose delivered text cannot be known is passed rather
+than graded.
 
 Title extraction is the shared `hooks/_lib/git_commit_titles.py` parser, which
 this hook extends with `extract_git_message_texts` — the same argv walk the two
@@ -124,7 +145,7 @@ first line of the first `-m`. Keeping one walk is the point of that module
 (issue #594): a second copy is how the pre-#594 parsers drifted.
 
 Each heredoc read is **bound to the message source that names it**, via
-`heredoc_bodies_by_delimiter` and `heredoc_delimiters` in
+`heredoc_sources` and `heredoc_delimiters` in
 `hooks/_lib/_hook_utils.py` (the delimiter-keeping counterpart of the existing
 `strip_heredoc_bodies`). An unresolvable `-m` value carries its own opener
 inside the token — `$(cat <<'EOF'` — and a `-F -` reads stdin from a
@@ -135,6 +156,10 @@ were shipped once:
 - **Scoping the read to an argv that produced NO readable message** let a
   malformed body ride in behind a well-formed subject: `-m 'fix: x' -m "$(cat
   <<'EOF' …)"` yields a readable first `-m`, so the heredoc was never read.
+- **Reading every heredoc a SOURCE opens** graded a body bash discards.
+  Redirections apply left to right, so `cat <<A <<B` reads `B` and `A` is
+  opened and thrown away — grading it blocked a commit whose message was
+  clean.
 - **Reading every heredoc in the command** graded prose belonging to some
   other command in the same `&&` chain, blocking a valid commit whose own
   message was clean.
