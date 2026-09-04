@@ -52,6 +52,46 @@ exit-0 성공이었습니다), 문자열 payload에는 모호해질 `stderr` 필
 없습니다. 두 길이 모두 막힌 결과가 **135,030회 발화 · `decision: pass` 100%**
 라는 침묵이었습니다.
 
+### 이 판정은 harness 출력 형식에 의존합니다 — 재측정 대상 (issue #1265)
+
+`Error:`+공백 접두사와 `User rejected tool use`는 **문서화된 계약이 아니라 Claude
+Code 가 실제로 뱉는 문자열**입니다. 이 문구가 바뀌면 화이트리스트가 전부
+빗나가 훅은 다시 **한 번도 발화하지 않는 상태**로 돌아갑니다 — 이 이슈가
+고치려던 바로 그 실패이고, 화이트리스트는 안전 방향(미발화)으로 깨지므로
+두 번째에도 똑같이 보이지 않습니다. 원장에는 발화 수만 늘고 advisory 는 0건인
+모양으로만 남습니다.
+
+그러므로 **문자열 payload 관련 테스트가 깨지거나, 발화 수 대비 advisory 0건이
+관측되면 형식부터 재측정**합니다. 아래는 위 수치를 만든 조사 그대로이며,
+출력 첫 열이 도구·`is_error`·첫 줄입니다.
+
+```bash
+python3 - <<'PY'
+import collections, glob, json, os
+seen, files = set(), sorted(glob.glob(os.path.expanduser("~/.claude*/projects/*/*.jsonl")), key=os.path.getmtime, reverse=True)[:120]
+names, shape = {}, collections.Counter()
+for f in files:
+    for ln in open(f, errors="replace"):
+        try: o = json.loads(ln)
+        except Exception: continue
+        for b in (o.get("message") or {}).get("content") or []:
+            if not isinstance(b, dict): continue
+            if b.get("type") == "tool_use": names[b["id"]] = b.get("name")
+            if b.get("type") == "tool_result" and (o.get("uuid"), b.get("tool_use_id")) not in seen:
+                seen.add((o.get("uuid"), b.get("tool_use_id")))
+                t = o.get("toolUseResult")
+                if isinstance(t, str):
+                    shape[(names.get(b.get("tool_use_id")), bool(b.get("is_error")), t.split("\n")[0][:34])] += 1
+for (tool, err, head), n in shape.most_common(15):
+    print(f"{n:5d}  is_error={str(err):5s} {tool}  {head!r}")
+PY
+```
+
+확인할 것: (1) `is_error=True` 인 문자열이 여전히 `Error:`+공백으로 시작하는가,
+(2) `is_error=False` 인 문자열이 oversized-output 안내 외에 새로 생겼는가,
+(3) 새 실패 문구가 있으면 `_STRING_FAILURE_PREFIX` / `_STRING_REJECTION_TEXT`
+/ `_STRING_OVERSIZED_OUTPUT_RE` 를 갱신하고 case 19 에 fixture 를 추가.
+
 ### dict payload
 
 - `isError is True`이면 실패
