@@ -433,3 +433,38 @@ def test_path_prefixed_git_is_still_git(binary, parses):
     expected = ["fix: x"] if parses else []
     assert extract_git_titles(argv) == expected
     assert extract_git_message_texts(argv) == expected
+
+
+# ---------------------------------------------------------------------------
+# A substitution that opens on a later line of a multi-line value
+# ---------------------------------------------------------------------------
+
+def test_a_later_line_substitution_is_blanked_not_graded():
+    """Only line 0 decides whether the VALUE is unknowable; a later line is
+    unknowable on its own, and passing it through hands a body gate raw shell
+    text. Blanking keeps the line count, so a reported line number still points
+    at the real message."""
+    argv = ["git", "commit", "-m", "fix: x\n\n$(git log --oneline"]
+    command = 'git commit -m "fix: x\n\n$(git log --oneline"'
+    assert extract_git_message_texts(argv, command) == ["fix: x\n\n"]
+
+
+def test_a_later_line_without_a_substitution_survives_whole():
+    argv = ["git", "commit", "-m", "fix: x\n\nword(a(b))"]
+    command = 'git commit -m "fix: x\n\nword(a(b))"'
+    assert extract_git_message_texts(argv, command) == ["fix: x\n\nword(a(b))"]
+
+
+def test_a_single_quoted_multiline_value_blanks_its_dollar_paren_line():
+    """The known cost of matching by value: `_title_is_single_quoted_literal`
+    compares a whole quoted run against the candidate, and a LINE of a
+    multi-line run never equals the run. So a literal `$(…)` line inside a
+    single-quoted message is treated as unknowable and blanked — a false
+    negative, which is the fail-open direction, rather than a false block."""
+    argv = ["git", "commit", "-m", "fix: x\n\n$(literal) note"]
+    command = "git commit -m 'fix: x\n\n$(literal) note'"
+    assert extract_git_message_texts(argv, command) == ["fix: x\n\n"]
+    # A single-LINE value of the same shape is still recognised as a literal.
+    argv = ["git", "commit", "-m", "$(literal) note"]
+    command = "git commit -m '$(literal) note'"
+    assert extract_git_message_texts(argv, command) == ["$(literal) note"]

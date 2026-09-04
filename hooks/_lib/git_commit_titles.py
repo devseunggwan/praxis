@@ -474,6 +474,20 @@ def extract_git_message_texts(
     An unresolvable substitution (`-m "$(cat …)"`) contributes nothing, exactly
     as it contributes no title; the caller recovers that case from the raw
     command's heredoc bodies instead.
+
+    A substitution can also open on a LATER line of a multi-line value, and
+    only the first line decides whether the value is a title candidate. Passing
+    the rest through verbatim hands a body gate raw shell text where the shell
+    would have put a command's output — `$(git log --oneline` reads as a line
+    whose leading word is glued to `(`, so a blocking gate rejects a message
+    nobody can predict. Such a line is blanked instead of dropped, keeping the
+    line numbers a gate reports pointed at the real message.
+
+    The single-quote exception does not reach a line: the match is by value
+    against a whole quoted run, and a line of a multi-line run never equals the
+    run. So a literal `$(…)` line inside a single-quoted message is blanked
+    too. That is a false negative — the fail-open direction, and the one this
+    repo takes for a gate — rather than a block on a message nobody can read.
     """
     scanned = _scan_commit_message_values(argv)
     if scanned is None:
@@ -484,9 +498,13 @@ def extract_git_message_texts(
     paragraphs: list[str] = []
     for kind, raw in values:
         if kind == "message":
-            if title_is_unresolved_substitution(raw.split("\n")[0], command):
+            lines = raw.split("\n")
+            if title_is_unresolved_substitution(lines[0], command):
                 continue
-            paragraphs.append(raw)
+            paragraphs.append("\n".join(
+                "" if title_is_unresolved_substitution(line, command) else line
+                for line in lines
+            ))
             continue
         body = text_from_file(raw, base_dir=c_dir)
         if body is not None:

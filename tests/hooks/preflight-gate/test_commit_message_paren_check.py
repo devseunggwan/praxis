@@ -260,3 +260,24 @@ def test_malformed_stdin_is_silent():
 
 def test_main_is_wrapped_by_fail_open():
     assert getattr(IMPL.main, "__wrapped__", None) is not None
+
+
+@pytest.mark.parametrize(
+    "command,rc",
+    [
+        # A substitution opening on a later line is text the shell replaces, so
+        # grading it would block on a message nobody can predict.
+        ('git commit -m "fix: x\n\n$(git log --oneline"', 0),
+        # The same line with no substitution is real message text.
+        ('git commit -m "fix: x\n\nword(a(b))"', 2),
+    ],
+)
+def test_a_later_line_substitution_does_not_reach_the_detector(command, rc):
+    assert _run(command)[0] == rc
+
+
+def test_the_reported_line_number_survives_a_blanked_line():
+    """Blanking rather than dropping is what keeps this number honest."""
+    rc, _out, err = _run('git commit -m "fix: x\n\n$(x\n\nword(a(b))"')
+    assert rc == 2
+    assert "line 5: [nested]" in err
