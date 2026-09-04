@@ -255,6 +255,19 @@
       }
     },
     {
+      "name": "commit-message-paren-check",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "gates": [
+        "git-commit"
+      ],
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_COMMIT_PAREN_STRICT"
+      }
+    },
+    {
       "name": "branch-name-check",
       "role": "preflight-gate",
       "event": "PreToolUse",

@@ -88,6 +88,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_MOMENTUM_ACK` | `momentum-rule-retrieval-gate` | Strict-mode unlock token — unblocks one invocation when `PRAXIS_MOMENTUM_STRICT=1`; no effect in advisory mode |
 | `PRAXIS_VERSION_BUMP_STRICT` | `version-bump-evidence-check` | |
 | `PRAXIS_COMMIT_TITLE_FORMAT_STRICT` | `commit-title-format-check` | |
+| `PRAXIS_COMMIT_PAREN_STRICT` | `commit-message-paren-check` | |
 | `PRAXIS_BRANCH_NAME_STRICT` | `branch-name-check` | |
 | `PRAXIS_CODEX_REVIEW_STRICT` | `block-commit-without-codex-review` | Pins the deny when codex is not on PATH; `0` forces advisory even when detected (#1187) |
 | `PRAXIS_PR_EVIDENCE_STRICT` | `block-pr-without-caller-evidence`, `block-pr-without-precommit-evidence` | Shared by both PR-marker gates (#1186); truthy = deny, unset/empty/`0` = advisory |
