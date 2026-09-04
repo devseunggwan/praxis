@@ -188,9 +188,10 @@ as "머지 후 실전송으로 확인" dies with the PR unless something outlive
 - Write the answer into the anchor's final rev as `Carried: #N` or
   `Carried: none — <사유>` **before** the merge.
 - Writing that final rev needs `gh` — a session whose only GitHub surface is
-  the MCP server cannot update a comment body. There, put the `Carried:` line
-  in the merge commit or the PR body instead, and never in a second anchor
-  comment. See
+  the MCP server cannot update a comment body when that server's active tool
+  list exposes no comment `update` (confirm before assuming). There, put the
+  `Carried:` line in the merge commit or the PR body instead, and never in a
+  second anchor comment. See
   [`anchor-comment-gate/spec.md` → Procedure for a gh-less session](../../hooks/preflight-gate/anchor-comment-gate/spec.md#procedure-for-a-gh-less-session).
 - Never auto-file the follow-up: a new issue still needs its own
   implementation-approach review first.

@@ -259,12 +259,31 @@ gh api --method PATCH /repos/{owner}/{repo}/issues/comments/<id> -F body=@anchor
 A session whose only GitHub surface is the MCP server can create an anchor and
 then cannot revise it. Issue bodies and PR bodies each have an update tool;
 comment bodies have none, while GitHub REST itself exposes the `PATCH`. So the
-limit is what the host surfaces, not the API — and the absence is **upstream,
-not a gap in one deployment**: enumerating `github/github-mcp-server`'s own
-tool list returns create and reply for issue and PR comments and no update,
-with Discussions' `discussion_comment_write` (which *does* carry an `update`
-mode) caught by the same enumeration as its positive control. Waiting for the
-tool to arrive is therefore not a plan (#1211).
+limit is what the host surfaces, not the API — and where it was measured the
+absence was **upstream, not a gap in one deployment**: enumerating
+`github/github-mcp-server`'s own tool list returned create and reply for issue
+and PR comments and no update, with Discussions' `discussion_comment_write`
+(which *does* carry an `update` mode) caught by the same enumeration as its
+positive control.
+
+**Scope of that measurement — `github/github-mcp-server`, version unknown,
+enumerated 2026-09-04.** No version was recorded when the enumeration ran, and
+none could be reconstructed afterwards from this repo or this machine: the only
+GitHub MCP entry configured locally is `@modelcontextprotocol/server-github`, a
+different server, pulled unpinned through `npx -y`, and no
+`github-mcp-server` binary is installed. So this is one reading of one server
+on one date, while the file header above says `Supported hosts: all`.
+
+Read the procedure below as **conditional, never as a standing assumption**: it
+applies to a session once a comment `update` has been confirmed absent from
+that session's **active** tool list. Confirm it the same way the claim above
+was made — enumerate the tools the session actually has, look for a
+comment-update mode, and use a write mode that does exist (issue or PR body
+update, or Discussions' comment write) as the positive control that the
+enumeration can return one at all. If a comment `update` **is** present, the
+anchor is revisable on that host: revise it in place and none of the procedure
+applies. Where it is absent, waiting for the tool to arrive is not a plan
+(#1211).
 
 The same absence removes the PostToolUse re-check, for a second and independent
 reason. That step reads the published comment back and re-checks structure

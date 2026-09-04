@@ -29,10 +29,13 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 > **`gh` is also a prerequisite of the verification-anchor convention**, and
 > for revision specifically. Creating an anchor needs only a way to post a
 > comment; editing one in place is a `PATCH` against its comment id, which a
-> session whose only GitHub surface is the MCP server cannot issue — comment
-> bodies are add-only there, while issue and PR bodies are not. That absence is
-> upstream in `github/github-mcp-server`, not a gap in one deployment, so it
-> does not resolve by waiting. The same surface strips `<details>` /
+> session whose only GitHub surface is the MCP server cannot issue when that
+> server exposes no comment `update` — comment bodies are add-only there, while
+> issue and PR bodies are not. Enumerating `github/github-mcp-server` (version
+> unknown, 2026-09-04) found that absence upstream rather than in one
+> deployment, so it does not resolve by waiting; it is one measurement of one
+> server, so confirm `update` is absent from the **active** session's tool list
+> before applying any of this. The same surface strips `<details>` /
 > `<summary>` on the comment **read** path as well, which leaves the gate's
 > PostToolUse structure re-check with no substitute there at all.
 >
