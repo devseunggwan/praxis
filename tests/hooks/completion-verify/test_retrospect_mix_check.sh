@@ -928,6 +928,30 @@ run_case "T36e_demote_own_org_allowlist_unresolved" "demote" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36D_ROW")")"
 RUN_CASE_ENV=()
 
+# T36f: block — `gate_4_verdict: NA` over a routed row. NA is emitted only when
+# `routed` is empty (audit-distribution-gates.py), so one routed row refutes it.
+# The row here is T36's, which resolves EXEMPT — nothing escalates, so the
+# escalation check cannot see this card and only the emptiness check can. The
+# negative polarity is T38: NA with no routed row at all still passes.
+T36F_CARD=$(cat <<EOF
+- memory: 0
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 1
+- gate_1_verdict: PASS
+- gate_2_verdict: NA
+- gate_3_verdict: NA
+- gate_4_verdict: NA
+EOF
+)
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture
+              PRAXIS_REPO_VISIBILITY=praxis-fixture/private-fixture=private)
+run_case "T36f_block_na_verdict_over_a_routed_row" "block" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T36F_CARD" "$T36_ROW")")"
+RUN_CASE_ENV=()
+
 # T37: block — external=true + gate_4_verdict absent but ⚠ EXTERNAL: prefix present.
 # Scenario: Stage 2.5 emitted the EXTERNAL marker in the Rationale cell but did
 # NOT emit gate_4_verdict in the distribution card (Stage 2.5 was partially skipped
@@ -3094,6 +3118,64 @@ if [ "$G4_DEDUPE" = "1" ]; then
 else
   echo "FAIL  [G4H5_repeated_repo_is_resolved_once] expected 1 record for r1, got $G4_DEDUPE"
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("G4H5_repeated_repo_is_resolved_once")
+fi
+RUN_CASE_ENV=()
+
+# Own-org filter (issue #1244 D1). The exemption needs own-org AND
+# private/internal, so a third-party repo's visibility can change nothing and
+# must cost no round trip. Both polarities in one run, against the same spy:
+# asserting only the skip cannot tell "filtered correctly" from "never called
+# gh at all". The spy exits 1, so both repos come back with no live answer —
+# the value, not just the spy, is what separates them.
+: > "$GH_SPY_FILE"
+STDIN=$'someone-else/their-repo\npraxis-fixture/mine\n'
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture "GH_SPY=$GH_SPY_FILE" "PATH=$G4_BIN:$PATH")
+assert_helper "G4H6_third_party_repo_is_not_looked_up" \
+  "vis	someone-else/their-repo	NOT_OWN_ORG" \
+  --deadline-epoch "$(python3 -c 'import time;print(time.time()+8)')"
+if grep -q 'someone-else/their-repo' "$GH_SPY_FILE"; then
+  echo "FAIL  [G4H6b_third_party_repo_spawned_no_call] gh was invoked: $(cat "$GH_SPY_FILE")"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("G4H6b_third_party_repo_spawned_no_call")
+else
+  echo "PASS  [G4H6b_third_party_repo_spawned_no_call]"; PASS=$((PASS + 1))
+fi
+if grep -q 'repos/praxis-fixture/mine' "$GH_SPY_FILE"; then
+  echo "PASS  [G4H7_own_org_repo_in_the_same_run_is_still_looked_up]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [G4H7_own_org_repo_in_the_same_run_is_still_looked_up] gh was never invoked for it"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("G4H7_own_org_repo_in_the_same_run_is_still_looked_up")
+fi
+RUN_CASE_ENV=()
+
+# The cap counts round trips spent, not rows seen. Eight third-party repos
+# ahead of one own-org repo must not push it past an 8-lookup cap — that is the
+# starvation the filter exists to prevent, and it is invisible to the value
+# check above because both a filtered row and a starved one are non-`private`.
+STDIN=""
+for i in 1 2 3 4 5 6 7 8; do STDIN="${STDIN}someone-else/r${i}"$'\n'; done
+STDIN="${STDIN}praxis-fixture/last"$'\n'
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture GH_HOST=nonexistent.invalid
+              "PRAXIS_REPO_VISIBILITY=praxis-fixture/last=private")
+assert_helper "G4H8_third_party_rows_do_not_consume_the_lookup_cap" \
+  "vis	praxis-fixture/last	private" \
+  --deadline-epoch "$(python3 -c 'import time;print(time.time()+8)')"
+RUN_CASE_ENV=()
+
+# Allowlist unresolved: ownness is unknown, not refuted, so the answer is
+# UNRESOLVED (which the hook demotes on) rather than NOT_OWN_ORG (which it
+# escalates on) — and no lookup is spent, because the own-org half can no
+# longer be established either way.
+: > "$GH_SPY_FILE"
+STDIN=$'praxis-fixture/mine\n'
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS= "GH_SPY=$GH_SPY_FILE" "PATH=$G4_BIN:$PATH")
+assert_helper "G4H9_allowlist_unresolved_yields_unresolved_not_not_own_org" \
+  "vis	praxis-fixture/mine	UNRESOLVED" \
+  --deadline-epoch "$(python3 -c 'import time;print(time.time()+8)')"
+if grep -q 'repos/' "$GH_SPY_FILE"; then
+  echo "FAIL  [G4H9b_allowlist_unresolved_spawned_no_repo_lookup] gh was invoked: $(cat "$GH_SPY_FILE")"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("G4H9b_allowlist_unresolved_spawned_no_repo_lookup")
+else
+  echo "PASS  [G4H9b_allowlist_unresolved_spawned_no_repo_lookup]"; PASS=$((PASS + 1))
 fi
 RUN_CASE_ENV=()
 unset STDIN
