@@ -117,7 +117,13 @@ def split_gh_short_flags(argv: list[str]) -> list[str]:
     out: list[str] = []
     for tok in argv:
         if len(tok) > 2 and tok[0] == "-" and tok[1] != "-" and f"-{tok[1]}" in GH_SHORT_FLAGS_WITH_ARG:
-            out += [tok[:2], tok[2:]]
+            value = tok[2:]
+            # pflag reads one leading `=` as the separator, so `-X=PATCH` is the
+            # method PATCH and `-f=body=hi` the field `body`. Keeping the `=`
+            # yields the method `=PATCH` and the key `=body` — neither matches.
+            if value.startswith("="):
+                value = value[1:]
+            out += [tok[:2], value] if value else [tok[:2]]
         else:
             out.append(tok)
     return out

@@ -33,6 +33,7 @@ from _external_write_body import (  # noqa: E402
     extract_gh_body,
     is_gh_external_write,
     parse_gh_api,
+    split_gh_short_flags,
 )
 
 WRITES = [
@@ -43,6 +44,9 @@ WRITES = [
     "gh api -X PATCH repos/o/r/issues/comments/1 -f body=hi",
     "gh api -XPATCH repos/o/r/issues/comments/1 -fbody=hi",
     "gh api --method=PATCH repos/o/r/issues/comments/1 --field body=@x",
+    # `=`-attached shorthand: pflag reads `-X=PATCH` as the method PATCH
+    "gh api -X=PATCH repos/o/r/issues/comments/1 -f body=hi",
+    "gh api repos/o/r/issues/comments/1 -X=PATCH -f=body=hi",
     "gh api --method patch repos/o/r/issues/comments/1 -f body=hi",
     # method after the endpoint
     "gh api repos/o/r/issues/comments/1 --method PATCH -f body=hi",
@@ -67,6 +71,7 @@ READS = [
     "gh api repos/o/r/issues/comments/123 --jq .body",
     "gh api repos/o/r/issues/12/comments --paginate",
     "gh api -X GET repos/o/r/pulls/9/comments",
+    "gh api -X=GET repos/o/r/pulls/9/comments -f a=b",
     "gh api --method get repos/o/r/issues/comments/1",
     "gh api repos/o/r/pulls/9/files",
     # a write, but not to a comment surface
@@ -169,3 +174,30 @@ def test_parse_records_the_field_flag_that_carried_the_body():
     call = parse_gh_api(shlex.split("gh api repos/o/r/issues/comments/1 -X PATCH --field body=@a.md"))
     assert (call.method, call.body_flag, call.body_raw) == ("PATCH", "--field", "@a.md")
     assert call.has_input is False
+
+
+# ---------------------------------------------------------------------------
+# Attached shorthand values (`-XPATCH` / `-X=PATCH`)
+# ---------------------------------------------------------------------------
+
+def test_split_keeps_bare_attached_value():
+    assert split_gh_short_flags(["-XPATCH"]) == ["-X", "PATCH"]
+    assert split_gh_short_flags(["-fbody=hi"]) == ["-f", "body=hi"]
+
+
+def test_split_drops_the_pflag_equals_separator():
+    """`gh api -X=PATCH` really sends PATCH (gh 2.98.0, verified live)."""
+    assert split_gh_short_flags(["-X=PATCH"]) == ["-X", "PATCH"]
+    assert split_gh_short_flags(["-f=body=hi"]) == ["-f", "body=hi"]
+
+
+def test_split_leaves_a_valueless_flag_alone():
+    """`-X=` has no value; emitting `''` would be read as the endpoint."""
+    assert split_gh_short_flags(["-X=", "repos/o/r"]) == ["-X", "repos/o/r"]
+    assert split_gh_short_flags(["-X", "PATCH"]) == ["-X", "PATCH"]
+    assert split_gh_short_flags(["--method=PATCH"]) == ["--method=PATCH"]
+
+
+def test_equals_attached_method_and_field_parse():
+    call = parse_gh_api(shlex.split("gh api -X=PATCH repos/o/r/issues/comments/1 -f=body=hi"))
+    assert (call.method, call.path, call.body_raw) == ("PATCH", "repos/o/r/issues/comments/1", "hi")
