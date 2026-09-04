@@ -55,6 +55,8 @@ def _load(mod_name: str, path: Path):
 # git_commit_titles import ...` resolves to this exact object.
 gct = _load("git_commit_titles", LIB_DIR / "git_commit_titles.py")
 extract_git_titles = gct.extract_git_titles
+title_from_file = gct.title_from_file
+text_from_file = gct.text_from_file
 
 
 # ---------------------------------------------------------------------------
@@ -468,3 +470,53 @@ def test_a_single_quoted_multiline_value_blanks_its_dollar_paren_line():
     argv = ["git", "commit", "-m", "$(literal) note"]
     command = "git commit -m '$(literal) note'"
     assert extract_git_message_texts(argv, command) == ["$(literal) note"]
+
+
+# ---------------------------------------------------------------------------
+# title_from_file reads one line; text_from_file reads the file
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "content,title",
+    [
+        ("fix: x\nbody\n", "fix: x"),
+        ("fix: x", "fix: x"),          # no trailing newline
+        ("fix: x\r\nbody\r\n", "fix: x"),  # CRLF, via universal newlines
+        ("", ""),                      # empty file
+        ("\nbody\n", ""),              # empty first line
+    ],
+)
+def test_title_from_file_reads_only_the_first_line(tmp_path, content, title):
+    """Same string the whole-file read produced, without the whole-file read.
+
+    The two title gates run on every `git commit`, and a `-F` path is
+    arbitrary — the previous `text_from_file(...).split("\\n")[0]` charged both
+    of them the full read to answer a question about the first line.
+    """
+    path = tmp_path / "msg.txt"
+    path.write_text(content, encoding="utf-8")
+    assert title_from_file(str(path)) == title
+    # The body reader is unchanged and still returns everything.
+    assert text_from_file(str(path)) == path.read_text(encoding="utf-8")
+
+
+def test_non_utf8_file_still_raises_on_both_readers(tmp_path):
+    """Pinned as UNCHANGED by the one-line read, not as desirable behaviour.
+
+    `readline()` decodes a whole buffered chunk, so invalid bytes past line 1
+    reach it exactly as the whole-file read did. `UnicodeDecodeError` is not an
+    `OSError`, so neither reader swallows it — the hook's `@fail_open` wrapper
+    is what turns it into a silent pass, and that was true before this change
+    too. A test asserting the opposite would have been a false pass.
+    """
+    path = tmp_path / "msg.txt"
+    path.write_bytes(b"fix: x\n" + b"\xff\xfe invalid utf-8\n")
+    with pytest.raises(UnicodeDecodeError):
+        title_from_file(str(path))
+    with pytest.raises(UnicodeDecodeError):
+        text_from_file(str(path))
+
+
+def test_stdin_placeholder_is_none_on_both_readers():
+    assert title_from_file("-") is None
+    assert text_from_file("-") is None
