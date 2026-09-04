@@ -44,7 +44,19 @@ line into one command.
 Surfaces scanned are the shared ones (`_lib/_external_write_body.py`): `gh
 issue|pr comment|create|edit`, `gh pr review` with `--body` / `-b` /
 `--body=` / `--body-file` / `-F`, plus the Slack/Notion MCP nested
-container/leaf shapes.
+container/leaf shapes, plus the `gh api` comment endpoints (issue #1265) — a
+`POST` / `PATCH` / `PUT` against `repos/{o}/{r}/issues/comments/<id>`,
+`issues/<n>/comments`, `pulls/comments/<id>`, `pulls/<n>/comments` or
+`pulls/<n>/reviews`, with the body from `-f body=` / `--raw-field`,
+`-F body=@<file>` / `--field` (`@` expanded as gh expands it), or `--input`
+(body unknown, so nothing is scanned). Every other method or endpoint stays
+outside: a read, `graphql`, a workflow dispatch.
+
+That gap was this hook's own motivating case. The session that built it
+produced five composed `$` lines and every one of them went out through
+`gh api`, because a rev ≥2 anchor is a `PATCH` by comment id and no
+`gh <noun> <verb>` form can issue one — so the hook watching for composed
+evidence could not see the channel the evidence actually used.
 
 ## Matching — how a line clears T2
 

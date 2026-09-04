@@ -35,12 +35,22 @@ question.
 | `gh pr review --comment --body <text>` (or `--approve` / `--request-changes`)      | body contains hypothesis marker                                              | Check 1            |
 | `gh issue create --body-file <path>`                                               | body contains hypothesis marker (file contents read)                         | Check 1            |
 | `gh pr edit -F <path>`                                                             | body contains hypothesis marker                                              | Check 1            |
+| `gh api -X PATCH .../issues/comments/<id> -F body=@<path>` (issue #1265)           | body contains hypothesis marker (file contents read)                         | Check 1            |
 | `mcp__*slack*__*send*` / `*post*message*`                                          | body field contains hypothesis marker                                        | Check 1            |
 | `mcp__*notion*__*create_page*` / `*update_page*`                                   | text fields contain hypothesis marker                                        | Check 1            |
 | `Write` to staging path (`/tmp/*-issue-*.md`, `/tmp/*-pr-*.md`, `.omc/plans/*.md`) | cluster-approval language in last 5 user messages                            | Check 3            |
 | any `gh` / MCP write body above                                                    | applied-on-branch claim line without reachability probe in recent transcript | Check 4            |
 | any `gh` / MCP write body above                                                    | first-person completion claim (over-claiming, e.g. "I've updated")           | Check 5            |
-| `gh issue list` / `gh search issues` / Read tool                                   | —                                                                            | passthrough silent |
+| `gh issue list` / `gh search issues` / `gh api` read / Read tool                   | —                                                                            | passthrough silent |
+
+The `gh api` row covers a `POST` / `PATCH` / `PUT` against
+`repos/{o}/{r}/issues/comments/<id>`, `issues/<n>/comments`,
+`pulls/comments/<id>`, `pulls/<n>/comments` or `pulls/<n>/reviews`, with the
+body from `-f body=` / `--raw-field`, `-F body=@<file>` / `--field` (`@`
+expanded as gh expands it), or `--input` (body unknown, nothing scanned).
+Every other method or endpoint is a passthrough — a read, `graphql`, a
+workflow dispatch. The surface exists because the verification-anchor
+convention makes `gh api` the only path a rev ≥2 anchor can take.
 
 Hypothesis markers (whole-segment substring match): English 16 —
 `might`, `could be`, `could fail`, `could break`, `potentially`,
