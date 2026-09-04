@@ -492,11 +492,15 @@ the full gate-parsing path costs 1.41s with no lookup and 2.45s with one on a
 small transcript, 2.16s / 3.08s on a 21 MB transcript — against a 10s manifest
 timeout and the 8s internal deadline the resolver is handed.
 
-The own-org filter is what keeps that budget reachable. On a fixture of 8 rows
-declaring `private` on repos outside the allowlist (3 runs, real `gh`), the
-whole hook took 4.12 / 4.46 / 4.68s before the filter and 0.75 / 0.75 / 0.75s
-after — every one of those eight round trips was spent on an answer the owner
-check had already made irrelevant.
+The own-org filter is what keeps that budget reachable. Measured on 8 repos
+outside the allowlist, real `gh`, the pre-filter and post-filter resolvers run
+alternately in one loop so both see the same machine load: 3.62 / 3.81 / 4.60s
+before, 0.65 / 0.87 / 0.84s after. Both figures include the one live `gh api
+user` call that resolves the allowlist, so the delta is exactly the eight repo
+lookups — every one of them spent on an answer the owner check had already made
+irrelevant. Run them at separate moments and the comparison is worthless: on a
+loaded host the same post-filter fixture measured 0.75s and 2.09s minutes
+apart.
 
 ### What is NOT blocked (pass-through)
 
