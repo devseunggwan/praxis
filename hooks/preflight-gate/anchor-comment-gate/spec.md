@@ -324,12 +324,23 @@ stays invisible until someone needs it.
    `Verification updated — <sha> rev N · …` notice that pairs with an edit,
    and here there is no edit to pair one with. The body is also the only one
    of the two surfaces this host can still correct afterwards.
-4. **Carry the delta where it survives** — into the PR body or the merge
-   commit, both of which *do* have an update path on the MCP surface. The
-   anchor's `Unverified` gaps go with it, so `merge-briefing` Step 3 still has
-   something to read.
-5. **Leave the stale anchor in place.** It stays the one comment the
-   id-recovery lookup resolves to; the pointer in step 3 is what makes it
+4. **Refresh that record on every later HEAD change that would have been a
+   revision — not only the first one.** One note naming one HEAD goes stale on
+   the next push, and then *both* surfaces are behind: the anchor, and the note
+   that exists to explain the anchor. A reader then cannot tell what is
+   unverified at the current HEAD, which is the whole point of the note. So
+   edit the PR body again each time, carrying the current HEAD `<sha>` and the
+   `Unverified` delta **accumulated since rev 1**, not only the delta since the
+   last push. The PR body has an update path on this surface — that is why the
+   record lives there, and why refreshing costs one body edit per push. If you
+   will not keep it refreshed, then stop pushing until the anchor can be
+   revised: a note that names an old HEAD is worse than no further commits.
+5. **Carry the delta where it survives** — the PR body kept current per step 4,
+   or the merge commit, both of which *do* have an update path on the MCP
+   surface. The anchor's `Unverified` gaps go with it, so `merge-briefing`
+   Step 3 still has something to read.
+6. **Leave the stale anchor in place.** It stays the one comment the
+   id-recovery lookup resolves to; the pointer in steps 3–4 is what makes it
    honest.
 
 Issue #1211 holds the open question of whether to define a richer fallback
