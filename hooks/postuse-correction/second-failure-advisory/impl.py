@@ -140,10 +140,16 @@ only failure evidence there is, which is what keeps two unrelated string
 failures on distinct signatures rather than collapsing them onto one pair
 (the issue #1042 defect-2 shape). One string shape carries nothing to tell two
 failures apart — a bare `Error: Exit code N` with no output under it (6 of 388
-observed), byte-identical whatever command died. For that shape only, the
-command from `tool_input` is appended as the distinguishing text
-(`_BARE_EXIT_CODE_RE`), so two unrelated commands no longer share a pair while
-the same command failing twice still does.
+observed), byte-identical whatever command died. For that shape only
+(`_BARE_EXIT_CODE_RE`), the command from `tool_input` joins the key as a
+**separate digest** (`_command_discriminator`), so two unrelated commands no
+longer share a pair while the same command failing twice still does.
+
+The digest is separate because normalization would otherwise eat the
+discriminator: appending the command to the signature *text* runs it through
+`_normalize_signature`, which turns `cat /tmp/a` and `cat /tmp/b` alike into
+`cat <path>` — the collision the discriminator exists to prevent. The normalizer
+is not weakened to fix this; the command is simply hashed outside it.
 
 For a dict payload the candidate text is drawn from
 `error`/`stderr`/`output`/`stdout` in that order (`_derive_failure_text`); `stderr` goes through the same harness-noise
@@ -444,26 +450,51 @@ def _normalize_signature(raw: str) -> str:
     return text.lower()
 
 
+def _command_discriminator(tool_input: dict[str, Any] | None) -> str:
+    """Digest of the command text, kept OUT of the normalized signature.
+
+    `_normalize_signature` absorbs paths, ids, hashes and timestamps so that two
+    genuinely-equivalent errors match — which is exactly what destroys a command
+    used as a discriminator: `cat /tmp/a` and `cat /tmp/b` both become
+    `cat <path>`. Weakening the normalizer to save the discriminator would break
+    the matching the normalizer exists for, so the command is hashed on its own
+    and mixed into the pair key beside the normalized signature instead.
+
+    Whitespace is collapsed so a re-typed command differing only in spacing
+    still matches; case is NOT folded, because `cat A` and `cat a` are different
+    files. Truncated to the same bound as a signature.
+    """
+    command = (tool_input or {}).get("command")
+    if not isinstance(command, str):
+        return ""
+    collapsed = _WS_RE.sub(" ", command).strip()
+    if not collapsed:
+        return ""
+    return hashlib.sha1(collapsed[:_MAX_SIGNATURE_LEN].encode("utf-8")).hexdigest()
+
+
 def _compute_signature(
     tool_name: str, tool_response: Any, tool_input: dict[str, Any] | None = None
 ) -> str:
     text = _derive_failure_text(tool_response, tool_name)
 
-    # The bare exit-code line carries nothing to tell two failures apart, so the
-    # command that produced it is appended as the distinguishing text. It comes
-    # from `tool_input` in the same hook payload — the signature still depends on
-    # nothing outside the call being judged. Narrow by design: any failure whose
-    # text has real content is already distinguishable and is left untouched.
-    if isinstance(tool_response, str) and _BARE_EXIT_CODE_RE.match(text):
-        command = (tool_input or {}).get("command")
-        if isinstance(command, str) and command.strip():
-            text = f"{text}\n{command.strip()}"
-
     normalized = _normalize_signature(text)
     if not normalized:
         normalized = "<empty>"
-    digest = hashlib.sha1(f"{tool_name}\0{normalized}".encode("utf-8")).hexdigest()
-    return digest
+
+    # The bare exit-code line carries nothing to tell two failures apart, so the
+    # command that produced it joins the key as a separate digest. It comes from
+    # `tool_input` in the same hook payload — the signature still depends on
+    # nothing outside the call being judged. Narrow by design: any failure whose
+    # text has real content is already distinguishable and is left untouched, and
+    # an absent/empty command leaves the key byte-identical to the old one.
+    material = f"{tool_name}\0{normalized}"
+    if isinstance(tool_response, str) and _BARE_EXIT_CODE_RE.match(text):
+        discriminator = _command_discriminator(tool_input)
+        if discriminator:
+            material = f"{material}\0{discriminator}"
+
+    return hashlib.sha1(material.encode("utf-8")).hexdigest()
 
 
 def _state_path(session_id: str) -> str:
