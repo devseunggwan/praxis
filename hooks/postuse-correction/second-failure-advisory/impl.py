@@ -34,7 +34,31 @@ vanishing exactly where the loop is worst.
 Failure detection
 ================
 
-The hook derives failure from `tool_response`:
+`tool_response` reaches this hook in two shapes, and the failing one is a
+**string** (issue #1265):
+
+- a plain string — the shape a FAILED call actually arrives in. Censused over
+  10,467 unique Bash `toolUseResult` entries in 120 live transcripts: 388 are
+  strings, every one with `tool_result.is_error == True`, and not one
+  successful Bash call is ever a string. Matched by whitelist, `_is_failed` ->
+  `_string_failure_text`: text opening with `Error: `, or the literal
+  `User rejected tool use` (a denial carries no prefix). The single
+  `Error: `-prefixed non-failure — the harness's oversized-output notice for a
+  *successful* call whose result was spilled to a file, emitted with
+  `is_error == False` — is excluded by name.
+
+  The `Error: ` prefix is NOT read as failure evidence for an MCP tool. Widening
+  the census to all 14,652 `toolUseResult` entries shows MCP is the only class
+  that ever delivers a *successful* result as a bare string (25 of 1,152; every
+  other tool's successes are dicts or content lists), so on that one channel the
+  leading text can be the tool's own rather than the harness's envelope — a tool
+  answering `Error: no rows found` on success would fire a false advisory on its
+  second return. For an MCP tool only harness-authored strings count: the
+  `Error: PreToolUse:`/`Error: PostToolUse:` hook-error envelope and the fixed
+  rejection sentence. Measured cost: MCP failures carrying the tool's own error
+  text (~50 of 573 observed string failures) no longer advise.
+- a dict — the shape a SUCCESSFUL call arrives in, plus synthetic/legacy
+  payloads. Failure markers, in order:
 
 - `isError`/`is_error is True`
 - `status == "error"`
@@ -64,6 +88,14 @@ back-compat `error`/`stderr` fallback runs for non-Bash tools only.
 
 `stderr` is read through the harness-noise filter below before the non-Bash
 back-compat check runs — see issue #1042.
+
+That Bash guard does NOT extend to the string path (issue #1265). It exists
+because a *dict* payload's `stderr` cannot separate an exit-0 Bash success from
+a failure, and both #1042 and #1096 were exactly that: exit-0 successes
+arriving as dicts with non-empty `stderr`. A string payload has no `stderr`
+field to be ambiguous about — the harness has already made the call and encoded
+it in the text. With both roads closed the hook fired 135,030 times and
+recorded `decision: pass` on every one.
 
 Harness noise in `stderr` (issue #1042)
 =======================================
@@ -114,8 +146,32 @@ retries that differ only by volatile values:
 This keeps retries that only changed `/tmp/run-<rand>.log`/timestamps/hash IDs from
 being treated as distinct failures.
 
-The candidate text is drawn from `error`/`stderr`/`output`/`stdout` in that
-order (`_derive_failure_text`); `stderr` goes through the same harness-noise
+For a string payload the string itself is the signature material — it is the
+only failure evidence there is, which is what keeps two unrelated string
+failures on distinct signatures rather than collapsing them onto one pair
+(the issue #1042 defect-2 shape). One string shape carries nothing to tell two
+failures apart — a bare `Error: Exit code N` with no output under it (6 of 388
+observed), byte-identical whatever command died. For that shape only
+(`_BARE_EXIT_CODE_RE`), the command from `tool_input` joins the key as a
+**separate digest** (`_command_discriminator`), so two unrelated commands no
+longer share a pair while the same command failing twice still does.
+
+The digest hashes the command as written, stripped of leading/trailing
+whitespace only. Internal whitespace is shell-significant — `false\nfalse` is
+two commands where `false false` is one, and `test 'a  b' = x` compares a
+different string than `test 'a b' = x` — so collapsing it digested distinct
+commands to one hash and re-created the very collision the discriminator
+prevents. A command re-typed with different inner spacing now gets its own key
+and stays silent on its second failure: a missed advisory, not a false one.
+
+The digest is separate because normalization would otherwise eat the
+discriminator: appending the command to the signature *text* runs it through
+`_normalize_signature`, which turns `cat /tmp/a` and `cat /tmp/b` alike into
+`cat <path>` — the collision the discriminator exists to prevent. The normalizer
+is not weakened to fix this; the command is simply hashed outside it.
+
+For a dict payload the candidate text is drawn from
+`error`/`stderr`/`output`/`stdout` in that order (`_derive_failure_text`); `stderr` goes through the same harness-noise
 filter as failure detection (issue #1042) before it is used, so a failure
 whose `stderr` carries only the harness's cwd-reset notice falls through to
 `output`/`stdout` for its distinguishing text instead of normalizing to the
@@ -156,6 +212,47 @@ _ADVISORY_FROM_OCCURRENCE = 2
 
 _STATE_SCHEMA_VERSION = 1
 _MAX_SIGNATURE_LEN = 4_096
+
+
+# String-shaped `tool_response` (issue #1265). A failed tool call reaches this
+# hook not as a dict but as a plain string; the two shapes below are the whole
+# observed failure surface, censused over 10,467 unique Bash `toolUseResult`
+# entries in 120 session transcripts: 388 of them are strings, every one
+# carrying `tool_result.is_error == True`, and no successful Bash call is ever a
+# string. Matching is a whitelist, not "any string is a failure", so a shape
+# that has not been observed as a failure cannot start firing the advisory.
+_STRING_FAILURE_PREFIX = "Error: "
+_STRING_REJECTION_TEXT = "user rejected tool use"
+
+# The one string that opens with `Error: ` and is NOT a failure: the harness's
+# oversized-output notice, emitted with `is_error == False` when a *successful*
+# call's result is spilled to a file (27 observations, all on MCP tools). It has
+# to be excluded by name, or every large successful result reads as a failure.
+_STRING_OVERSIZED_OUTPUT_RE = re.compile(
+    r"^Error: result \(.*?\) exceeds maximum allowed tokens", re.IGNORECASE
+)
+
+# A string failure that is ONLY the exit-code line, with no command output under
+# it — 6 of the 388 observed. Every command that dies this way produces the exact
+# same bytes, so unrelated failures would share one signature and the second one
+# would advise "the same error pattern twice" about two different commands. That
+# is the #1042 defect-2 shape, and this hook must not ship it.
+_BARE_EXIT_CODE_RE = re.compile(r"^Error: Exit code \d+$")
+
+# MCP tools are the ONE class whose *successful* results are ever delivered as a
+# bare string. Censused over 14,652 `toolUseResult` entries in 120 transcripts:
+# Bash successes are dicts (11,792/11,792) and every other built-in tool's are
+# too (1,135/1,135), while MCP successes are content lists (1,127) plus 25
+# strings — all of them the oversized-output notice. So on the MCP string
+# channel a leading `Error: ` can be the *tool's own* text rather than the
+# harness's failure envelope, and a tool that answers `Error: no rows found` on
+# success would accumulate state and fire a false advisory on its second return.
+# The classifier therefore stops trusting tool-authored text there: for an MCP
+# tool only strings the HARNESS writes count — the hook-error envelope below and
+# the fixed rejection sentence. Every other tool keeps the plain prefix, where no
+# successful call can reach this branch at all.
+_MCP_TOOL_PREFIX = "mcp__"
+_STRING_HOOK_ERROR_RE = re.compile(r"^Error: (?:Pre|Post)ToolUse:")
 
 
 # Reference candidates inside a blocking message, most explicit first.
@@ -242,7 +339,40 @@ def _extract_reference(tool_input: dict[str, Any], failure_text: str = "") -> st
     return ""
 
 
+def _string_failure_text(tool_response: str, tool_name: str) -> str:
+    """Failure text carried by a string-shaped `tool_response`, else `""`.
+
+    Returning the text rather than a bool is what keeps unrelated failures on
+    distinct signatures (issue #1042 defect 2): the string *is* the only failure
+    evidence the payload carries, so it is both the failure marker and the
+    signature material.
+
+    Nothing in the payload marks a string as an error — the harness's `is_error`
+    flag lives on the transcript's `tool_result` block, not here — so the
+    classifier reads the shape instead. A string reaches this hook from a
+    *successful* call in exactly one case per the census above (the
+    oversized-output notice, MCP only), and that case is what scopes the match:
+    an MCP tool's string may be its own text, so only harness-authored strings
+    count there.
+    """
+    text = tool_response.strip()
+    if not text:
+        return ""
+    # Fixed harness sentence, carrying no prefix — a denial, whatever the tool.
+    if text.lower() == _STRING_REJECTION_TEXT:
+        return text
+    if _STRING_OVERSIZED_OUTPUT_RE.match(text):
+        return ""
+    if tool_name.startswith(_MCP_TOOL_PREFIX):
+        return text if _STRING_HOOK_ERROR_RE.match(text) else ""
+    if text.startswith(_STRING_FAILURE_PREFIX):
+        return text
+    return ""
+
+
 def _derive_failure_text(tool_response: Any, tool_name: str) -> str:
+    if isinstance(tool_response, str):
+        return _string_failure_text(tool_response, tool_name)
     if not isinstance(tool_response, dict):
         return ""
     if isinstance(tool_response.get("error"), str):
@@ -286,6 +416,18 @@ def _derive_error_text(tool_response: Any, tool_name: str) -> str:
 
 
 def _is_failed(tool_response: Any, tool_name: str) -> bool:
+    # String-shaped payload (issue #1265) — decided before, and independently
+    # of, the `tool_name == "Bash"` guard at the bottom of this function. That
+    # guard exists because a *dict* payload's `stderr` cannot tell an exit-0
+    # Bash success from a failure (#1042, #1096), and both of those defects were
+    # exit-0 successes arriving as dicts with non-empty `stderr`. A string
+    # payload has no `stderr` field to be ambiguous about: the harness has
+    # already made the success/failure call and encoded it in the text itself.
+    # Extending the Bash guard here would re-close the only road left open —
+    # which is exactly the 135,030-fire, zero-advisory silence of #1265.
+    if isinstance(tool_response, str):
+        return bool(_string_failure_text(tool_response, tool_name))
+
     if not isinstance(tool_response, dict):
         return False
 
@@ -353,13 +495,63 @@ def _normalize_signature(raw: str) -> str:
     return text.lower()
 
 
-def _compute_signature(tool_name: str, tool_response: Any) -> str:
+def _command_discriminator(tool_input: dict[str, Any] | None) -> str:
+    """Digest of the command text, kept OUT of the normalized signature.
+
+    `_normalize_signature` absorbs paths, ids, hashes and timestamps so that two
+    genuinely-equivalent errors match — which is exactly what destroys a command
+    used as a discriminator: `cat /tmp/a` and `cat /tmp/b` both become
+    `cat <path>`. Weakening the normalizer to save the discriminator would break
+    the matching the normalizer exists for, so the command is hashed on its own
+    and mixed into the pair key beside the normalized signature instead.
+
+    The command text is hashed as written. Internal whitespace is NOT collapsed:
+    in shell it is significant, so `false\nfalse` and `false false` are two
+    programs, and `test 'a  b' = x` and `test 'a b' = x` compare different
+    strings. Collapsing them digested distinct commands to one hash, which is
+    the collision this function exists to prevent. Only leading/trailing
+    whitespace is stripped — that is insignificant outside quotes, and it is
+    what makes an all-whitespace command behave like an absent one.
+
+    The cost is the reverse direction: a command re-typed with different inner
+    spacing now gets its own key, so its second failure stays silent. That is a
+    missed advisory, not a false one, and matching those retypes was never worth
+    a discriminator that cannot discriminate.
+
+    Case is NOT folded, because `cat A` and `cat a` are different files.
+    Truncated to the same bound as a signature.
+    """
+    command = (tool_input or {}).get("command")
+    if not isinstance(command, str):
+        return ""
+    stripped = command.strip()
+    if not stripped:
+        return ""
+    return hashlib.sha1(stripped[:_MAX_SIGNATURE_LEN].encode("utf-8")).hexdigest()
+
+
+def _compute_signature(
+    tool_name: str, tool_response: Any, tool_input: dict[str, Any] | None = None
+) -> str:
     text = _derive_failure_text(tool_response, tool_name)
+
     normalized = _normalize_signature(text)
     if not normalized:
         normalized = "<empty>"
-    digest = hashlib.sha1(f"{tool_name}\0{normalized}".encode("utf-8")).hexdigest()
-    return digest
+
+    # The bare exit-code line carries nothing to tell two failures apart, so the
+    # command that produced it joins the key as a separate digest. It comes from
+    # `tool_input` in the same hook payload — the signature still depends on
+    # nothing outside the call being judged. Narrow by design: any failure whose
+    # text has real content is already distinguishable and is left untouched, and
+    # an absent/empty command leaves the key byte-identical to the old one.
+    material = f"{tool_name}\0{normalized}"
+    if isinstance(tool_response, str) and _BARE_EXIT_CODE_RE.match(text):
+        discriminator = _command_discriminator(tool_input)
+        if discriminator:
+            material = f"{material}\0{discriminator}"
+
+    return hashlib.sha1(material.encode("utf-8")).hexdigest()
 
 
 def _state_path(session_id: str) -> str:
@@ -452,9 +644,10 @@ def main() -> int:
     if not _is_failed(tool_response, tool_name):
         return 0
 
-    signature = _compute_signature(tool_name, tool_response)
+    tool_input = _extract_tool_input(payload)
+    signature = _compute_signature(tool_name, tool_response, tool_input)
     ref = _extract_reference(
-        _extract_tool_input(payload),
+        tool_input,
         _derive_failure_text(tool_response, tool_name),
     )
 

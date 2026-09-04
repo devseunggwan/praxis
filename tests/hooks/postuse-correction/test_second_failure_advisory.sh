@@ -23,6 +23,27 @@
 #  16) stderr가 noise뿐인 서로 다른 실패는 서로 다른 signature (issue #1042)
 #  17) tool_name이 Bash가 아니면 noise strip 자체를 건너뛰어 진짜 실패로 판정 (PR #1071 리뷰)
 #  18) 성공한 Bash 호출이 stderr에 진행 로그를 써도(git fetch 등, exit 0) 반복돼도 advisory 없음 (issue #1096)
+#  19) tool_response 가 dict 가 아니라 문자열로 오는 실패(실제 harness 형상) 처리 (issue #1265)
+#      a) 동일 문자열 실패 2회 -> advisory  b) 서로 다른 문자열 실패 -> 무음
+#      c) is_error:false 인 oversized-output 안내 -> 무음(must-fail)  d) User rejected tool use -> advisory
+#      e) 공백뿐인 문자열 -> 무음  f) hook block 문자열 반복 -> 회차 포함 advisory
+#      g) 출력 없는 `Error: Exit code 1` 이 서로 다른 명령에서 나오면 무음(signature 충돌 방지)
+#      h) 같은 명령이 같은 형태로 2회 실패하면 여전히 advisory (g의 대조군)
+#      i) 경로만 다른 두 명령(`cat /tmp/a` / `cat /tmp/b`) -> 무음
+#         (정규화가 구분자를 흡수하던 결함; 명령은 별도 digest 로 키에 들어간다)
+#      j) 같은 경로 명령 2회 -> advisory (i 의 대조군)
+#      k) 같은 명령 + 다른 exit code -> 무음
+#      l) tool_input 에 command 자체가 없으면 기존 키 그대로 -> 2회째 advisory
+#      m) 공백뿐인 command 는 command 부재와 같은 키
+#      n) 앞뒤 공백만 다른 같은 명령 -> 여전히 advisory / 내부 공백이 다르면 무음
+#      o) 4096 경계: 경계 안에서 다르면 무음 / 경계 밖에서만 다르면 같은 키
+#      p) 유니코드만 다른 명령 -> 무음
+#      q) bare 가 아닌 실패는 정규화가 그대로 동작 (normalizer 약화 안 됨 대조군)
+#      r) command 키가 없는 non-Bash·non-MCP 도구는 동작 불변
+#      s) 셸에서 유의미한 내부 공백 차이(개행 / 탭 / 따옴표 안 연속 공백 /
+#         NBSP)는 서로 다른 키 -> 무음, 같은 명령 2회는 여전히 advisory (대조군)
+#      t) MCP 도구의 문자열은 harness 가 쓴 것만 실패 — `Error: ` 접두사만 있는
+#         *성공* 텍스트는 무음, hook-error envelope·거부 문장은 여전히 advisory
 #
 # Run:
 #   bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
@@ -738,6 +759,512 @@ else
   assert_fail "18b) repeated deprecation-warning-on-stderr success stays silent" \
     "rc=$rc out=[$out] err=[$err] state=[$(cat "$STATE21" 2>/dev/null)]"
 fi
+
+# ---------------------------------------------------------------------------
+# Case 19: string-shaped `tool_response` (issue #1265).
+#
+# A FAILED tool call does not reach this hook as a dict at all — it arrives as a
+# plain string, so `_is_failed`'s `isinstance(tool_response, dict)` guard
+# rejected it before any failure marker was ever consulted. Both roads were
+# closed: the dict road by the `tool_name == "Bash"` guard (#1096), the string
+# road by the isinstance check. The hook fired 135,030 times and recorded
+# `decision: pass` on every one.
+#
+# Every fixture below is a VERBATIM string captured from a real session
+# transcript (`toolUseResult` for a `Bash`/MCP `tool_use`), not composed:
+# a census of 10,467 unique Bash results across 120 transcripts found 388
+# string payloads, all carrying `tool_result.is_error == True`, and zero
+# successful Bash call that arrives as a string.
+# ---------------------------------------------------------------------------
+echo "=== case 19: string-shaped failed tool_response (issue #1265) ==="
+string_payload() {
+  # string_payload <session_id> <tool_name> <tool_response-string> [command]
+  python3 - "$1" "$2" "$3" "${4:-true}" <<'PY'
+import json, sys
+session_id, tool_name, text, command = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+print(json.dumps({
+    "session_id": session_id,
+    "tool_name": tool_name,
+    "tool_input": {"command": command},
+    # The whole payload — a bare string, exactly as the harness delivers it.
+    "tool_response": text,
+}))
+PY
+}
+
+# Captured verbatim: a shell parse error, exit 1.
+STR_FAIL_A=$'Error: Exit code 1\n(eval):1: == not found'
+# Captured verbatim: a different failure — a 2-minute timeout, exit 143.
+STR_FAIL_B=$'Error: Exit code 143\nCommand timed out after 2m 0s'
+# Captured verbatim: a PreToolUse hook block (the family #1265 exists to catch).
+STR_BLOCKED='Error: Blocked: sleep 60 followed by: echo done. To wait for a condition, use Monitor with an until-loop (e.g. `until <check>; do sleep 2; done`).'
+# Captured verbatim: a user-denied call. No `Error: ` prefix at all, so a
+# prefix-only matcher would miss it.
+STR_REJECTED='User rejected tool use'
+# Captured verbatim from an MCP tool_result whose `is_error` was FALSE: the
+# harness's oversized-output notice for a SUCCESSFUL call whose result was
+# spilled to a file. It opens with `Error: ` and is not a failure — the one
+# must-fail case in the string surface. (Absolute path shortened; the notice
+# text itself is unmodified.)
+STR_OVERSIZED='Error: result (104,870 characters across 2,772 lines) exceeds maximum allowed tokens. Output has been saved to /tmp/x/out.txt'
+
+# 19a) positive: the same real string failure twice => advisory on the 2nd.
+STATE22="$TMP_DIR/c22.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-a Bash "$STR_FAIL_A")" "$STATE22" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-a Bash "$STR_FAIL_A")" "$STATE22" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "19a) repeated string-shaped failure advises on the 2nd occurrence"
+else
+  assert_fail "19a) repeated string-shaped failure advises on the 2nd occurrence" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+# 19b) negative control: two DIFFERENT string failures must not advise — this
+# hook is about repetition, not about failure. Without distinct signatures both
+# would collapse onto one pair and the 2nd would fire (issue #1042 defect 2).
+STATE23="$TMP_DIR/c23.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-b Bash "$STR_FAIL_A")" "$STATE23" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-b Bash "$STR_FAIL_B")" "$STATE23" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+  assert_pass "19b) two different string failures stay silent (distinct signatures)"
+else
+  assert_fail "19b) two different string failures stay silent (distinct signatures)" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+# 19c) must-fail case: the oversized-output notice is a SUCCESS (`is_error:
+# false`) that happens to open with `Error: `. Repeating it must stay silent and
+# must not even create state — otherwise every large successful result reads as
+# a failure.
+STATE24="$TMP_DIR/c24.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-c mcp__x__query "$STR_OVERSIZED")" "$STATE24" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-c mcp__x__query "$STR_OVERSIZED")" "$STATE24" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -s "$STATE24" ]; then
+  assert_pass "19c) repeated oversized-output notice (is_error:false) stays silent"
+else
+  assert_fail "19c) repeated oversized-output notice (is_error:false) stays silent" \
+    "rc=$rc out=[$out] err=[$err] state=[$(cat "$STATE24" 2>/dev/null)]"
+fi
+
+# 19d) `User rejected tool use` carries no `Error: ` prefix, so it is matched by
+# name. A repeated denial is exactly the blind-retry loop this hook exists for.
+STATE25="$TMP_DIR/c25.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-d Bash "$STR_REJECTED")" "$STATE25" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-d Bash "$STR_REJECTED")" "$STATE25" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "19d) repeated user-rejection string advises"
+else
+  assert_fail "19d) repeated user-rejection string advises" "rc=$rc out=[$out] err=[$err]"
+fi
+
+# 19e) an empty / whitespace-only string is not failure evidence -> fail-open.
+STATE26="$TMP_DIR/c26.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-e Bash "   ")" "$STATE26" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-e Bash "   ")" "$STATE26" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -s "$STATE26" ]; then
+  assert_pass "19e) whitespace-only string payload stays silent"
+else
+  assert_fail "19e) whitespace-only string payload stays silent" \
+    "rc=$rc out=[$out] err=[$err] state=[$(cat "$STATE26" 2>/dev/null)]"
+fi
+
+# 19f) a repeated PreToolUse hook block — the motivating family. The advisory
+# must carry the running count so the loop gets a stronger signal, not silence.
+STATE27="$TMP_DIR/c27.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-f Bash "$STR_BLOCKED")" "$STATE27" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-f Bash "$STR_BLOCKED")" "$STATE27" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-f Bash "$STR_BLOCKED")" "$STATE27" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "3회째" "$out"; then
+  assert_pass "19f) repeated hook-block string keeps advising with its count"
+else
+  assert_fail "19f) repeated hook-block string keeps advising with its count" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+# 19g/19h) the bare `Error: Exit code 1` — no output under it — is byte-identical
+# whatever command died (6 of the 388 observed). Two DIFFERENT commands failing
+# that way must stay silent; the control that makes that meaningful is 19h,
+# where the SAME command failing twice still advises. Without 19h, "collision
+# fixed" is indistinguishable from "this shape stopped firing entirely".
+STR_BARE_EXIT='Error: Exit code 1'
+
+STATE28="$TMP_DIR/c28.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-g Bash "$STR_BARE_EXIT" 'grep -q needle haystack.txt')" "$STATE28" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-g Bash "$STR_BARE_EXIT" 'git diff --quiet HEAD~1')" "$STATE28" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+  assert_pass "19g) two different commands with bare exit-code text stay silent"
+else
+  assert_fail "19g) two different commands with bare exit-code text stay silent" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+STATE29="$TMP_DIR/c29.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-h Bash "$STR_BARE_EXIT" 'grep -q needle haystack.txt')" "$STATE29" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-h Bash "$STR_BARE_EXIT" 'grep -q needle haystack.txt')" "$STATE29" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "19h) the same command repeating a bare exit-code failure advises"
+else
+  assert_fail "19h) the same command repeating a bare exit-code failure advises" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+# ---------------------------------------------------------------------------
+# Cases 19i..19q: the command discriminator must survive `_normalize_signature`.
+#
+# 19g/19h above pass with the command appended to the signature TEXT, because
+# `grep -q needle haystack.txt` and `git diff --quiet HEAD~1` differ in tokens
+# the normalizer leaves alone. Two commands that differ ONLY in a path do not:
+# `_PATH_RE` turns both into `cat <path>`, so they collapsed onto one pair and
+# the second, unrelated failure fired a false advisory. The command is therefore
+# hashed separately (`_command_discriminator`) and mixed into the key beside the
+# normalized signature, so normalization cannot reach it.
+# ---------------------------------------------------------------------------
+echo "=== case 19i: bare exit code, commands differing only by path => silent ==="
+STATE30="$TMP_DIR/c30.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-i Bash "$STR_BARE_EXIT" 'cat /tmp/a')" "$STATE30" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-i Bash "$STR_BARE_EXIT" 'cat /tmp/b')" "$STATE30" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+  assert_pass "19i) path-only-differing commands stay silent (normalizer cannot eat the discriminator)"
+else
+  assert_fail "19i) path-only-differing commands stay silent (normalizer cannot eat the discriminator)" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+echo "=== case 19j: same path-carrying command twice => advisory (control for 19i) ==="
+STATE31="$TMP_DIR/c31.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-j Bash "$STR_BARE_EXIT" 'cat /tmp/a')" "$STATE31" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-j Bash "$STR_BARE_EXIT" 'cat /tmp/a')" "$STATE31" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "19j) the same path-carrying command repeating still advises"
+else
+  assert_fail "19j) the same path-carrying command repeating still advises" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+echo "=== case 19k: same command, different exit codes => silent ==="
+STATE32="$TMP_DIR/c32.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-k Bash 'Error: Exit code 1' 'cat /tmp/a')" "$STATE32" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-k Bash 'Error: Exit code 2' 'cat /tmp/a')" "$STATE32" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+  assert_pass "19k) different exit codes on the same command stay silent"
+else
+  assert_fail "19k) different exit codes on the same command stay silent" "rc=$rc out=[$out] err=[$err]"
+fi
+
+echo "=== case 19l: bare exit code with NO command in tool_input => unchanged (merges) ==="
+# Nothing in the payload can tell the two apart, so the pre-existing behaviour
+# stands: they share a pair and the 2nd advises. Asserted so the fallback path is
+# pinned rather than left to chance.
+no_command_payload() {
+  python3 - "$1" <<'PY'
+import json, sys
+print(json.dumps({
+    "session_id": sys.argv[1],
+    "tool_name": "Bash",
+    "tool_input": {},
+    "tool_response": "Error: Exit code 1",
+}))
+PY
+}
+STATE33="$TMP_DIR/c33.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(no_command_payload sess-1265-l)" "$STATE33" >/dev/null 2>/dev/null
+pipe_hook "$(no_command_payload sess-1265-l)" "$STATE33" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "19l) absent command falls back to the undiscriminated key"
+else
+  assert_fail "19l) absent command falls back to the undiscriminated key" "rc=$rc out=[$out] err=[$err]"
+fi
+
+echo "=== case 19m: whitespace-only command behaves like an absent one ==="
+STATE34="$TMP_DIR/c34.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-m Bash "$STR_BARE_EXIT" '   ')" "$STATE34" >/dev/null 2>/dev/null
+pipe_hook "$(no_command_payload sess-1265-m)" "$STATE34" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "19m) whitespace-only command shares the absent-command key"
+else
+  assert_fail "19m) whitespace-only command shares the absent-command key" "rc=$rc out=[$out] err=[$err]"
+fi
+
+echo "=== case 19n: leading/trailing whitespace only => same key ==="
+# Whitespace outside the command is shell-insignificant, so stripping it keeps
+# the key. This is the half of the old "collapse all whitespace" behaviour that
+# survives; the internal half is what 19s removes.
+STATE35="$TMP_DIR/c35.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-n Bash "$STR_BARE_EXIT" 'cat /tmp/a')" "$STATE35" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-n Bash "$STR_BARE_EXIT" '  cat /tmp/a  ')" "$STATE35" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "19n) leading/trailing whitespace differences still match"
+else
+  assert_fail "19n) leading/trailing whitespace differences still match" "rc=$rc out=[$out] err=[$err]"
+fi
+
+echo "=== case 19o: commands past the 4096 bound ==="
+# Differing INSIDE the bound => distinct keys => silent.
+LONG_PAD="$(python3 -c "print('x' * 5000)")"
+STATE36="$TMP_DIR/c36.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-o1 Bash "$STR_BARE_EXIT" "cat /tmp/a $LONG_PAD")" "$STATE36" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-o1 Bash "$STR_BARE_EXIT" "cat /tmp/b $LONG_PAD")" "$STATE36" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+  assert_pass "19o-1) >4096-char commands differing inside the bound stay silent"
+else
+  assert_fail "19o-1) >4096-char commands differing inside the bound stay silent" "rc=$rc out=[$out] err=[$err]"
+fi
+
+# Differing only PAST the bound => same key => advises. Documents the truncation
+# rather than leaving it untested.
+STATE37="$TMP_DIR/c37.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-o2 Bash "$STR_BARE_EXIT" "cat ${LONG_PAD}A")" "$STATE37" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-o2 Bash "$STR_BARE_EXIT" "cat ${LONG_PAD}B")" "$STATE37" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "19o-2) commands differing only past the 4096 bound share a key"
+else
+  assert_fail "19o-2) commands differing only past the 4096 bound share a key" "rc=$rc out=[$out] err=[$err]"
+fi
+
+echo "=== case 19p: unicode commands are discriminated ==="
+STATE38="$TMP_DIR/c38.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-p Bash "$STR_BARE_EXIT" 'grep 실패 /tmp/log')" "$STATE38" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-p Bash "$STR_BARE_EXIT" 'grep 성공 /tmp/log')" "$STATE38" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+  assert_pass "19p) unicode-only-differing commands stay silent"
+else
+  assert_fail "19p) unicode-only-differing commands stay silent" "rc=$rc out=[$out] err=[$err]"
+fi
+
+echo "=== case 19q: non-bare failures still normalize (the normalizer is untouched) ==="
+# The discriminator must not have been bought by weakening `_normalize_signature`:
+# two failures whose text differs only by a path must STILL merge and advise.
+STATE39="$TMP_DIR/c39.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-q Bash $'Error: Exit code 1\ncannot open /tmp/a' 'cat /tmp/a')" "$STATE39" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-q Bash $'Error: Exit code 1\ncannot open /tmp/b' 'cat /tmp/b')" "$STATE39" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "19q) non-bare path-only-differing failures still normalize together"
+else
+  assert_fail "19q) non-bare path-only-differing failures still normalize together" "rc=$rc out=[$out] err=[$err]"
+fi
+
+echo "=== case 19r: a non-Bash tool with no command key is unaffected ==="
+# `Edit`, not an MCP tool: MCP strings are scoped separately by 19t, and Edit's
+# successful results are dicts (1,135/1,135 built-in-tool successes in the
+# census), so its string payload is failure evidence exactly as Bash's is. The
+# text is captured verbatim from a real failed Edit.
+non_bash_bare_payload() {
+  python3 - "$1" <<'PY'
+import json, sys
+print(json.dumps({
+    "session_id": sys.argv[1],
+    "tool_name": "Edit",
+    "tool_input": {"file_path": "/tmp/whatever"},
+    "tool_response": "Error: String to replace not found in file.",
+}))
+PY
+}
+STATE40="$TMP_DIR/c40.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(non_bash_bare_payload sess-1265-r)" "$STATE40" >/dev/null 2>/dev/null
+pipe_hook "$(non_bash_bare_payload sess-1265-r)" "$STATE40" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "19r) non-Bash tool with no command key keeps advising on repeat"
+else
+  assert_fail "19r) non-Bash tool with no command key keeps advising on repeat" "rc=$rc out=[$out] err=[$err]"
+fi
+
+# ---------------------------------------------------------------------------
+# Case 19s: shell-significant whitespace inside the command.
+#
+# The digest used to collapse every whitespace run to one space so a re-typed
+# command still matched. Whitespace is not decoration in shell: a newline
+# separates two commands, and a run inside quotes is part of an argument. Two
+# distinct commands therefore digested to one hash and the second one fired a
+# false advisory — the collision this discriminator exists to prevent. 19s-e is
+# the control: with the collapse gone, the same command still advises.
+# ---------------------------------------------------------------------------
+echo "=== case 19s: shell-significant internal whitespace => distinct keys ==="
+# U+00A0 written as an escape: a literal NBSP in this file is invisible to a
+# reader and to `git diff`, and the case turns on it being there.
+NBSP="$(python3 -c 'import sys; sys.stdout.write("\u00a0")')"
+ws_case() {
+  # ws_case <label> <session> <cmd-1> <cmd-2> <expect: silent|advisory>
+  local label="$1" sess="$2" cmd1="$3" cmd2="$4" expect="$5"
+  local state="$TMP_DIR/ws-$sess.json"
+  local o e r
+  o="$(mktemp)" e="$(mktemp)"
+  pipe_hook "$(string_payload "$sess" Bash "$STR_BARE_EXIT" "$cmd1")" "$state" >/dev/null 2>/dev/null
+  pipe_hook "$(string_payload "$sess" Bash "$STR_BARE_EXIT" "$cmd2")" "$state" >"$o" 2>"$e"
+  r=$?
+  local out err
+  out=$(cat "$o"); err=$(cat "$e")
+  rm -f "$o" "$e"
+  if [ "$expect" = "silent" ]; then
+    if [ "$r" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+      assert_pass "$label"
+    else
+      assert_fail "$label" "rc=$r out=[$out] err=[$err]"
+    fi
+  else
+    if [ "$r" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+      assert_pass "$label"
+    else
+      assert_fail "$label" "rc=$r out=[$out] err=[$err]"
+    fi
+  fi
+}
+
+ws_case "19s-a) newline vs space are different programs" \
+  sess-1265-sa $'false\nfalse' 'false false' silent
+ws_case "19s-b) tab vs space stay on distinct keys" \
+  sess-1265-sb $'cat\t/tmp/a' 'cat /tmp/a' silent
+ws_case "19s-c) a run inside quotes is part of the argument" \
+  sess-1265-sc "test 'a  b' = x" "test 'a b' = x" silent
+ws_case "19s-d) NBSP is not a shell separator" \
+  sess-1265-sd "cat${NBSP}/tmp/a" 'cat /tmp/a' silent
+ws_case "19s-e) control: the same command still advises" \
+  sess-1265-se 'cat /tmp/a' 'cat /tmp/a' advisory
+
+# ---------------------------------------------------------------------------
+# Case 19t: MCP strings are trusted only when the HARNESS wrote them.
+#
+# Nothing in the hook payload marks a string as an error — `is_error` lives on
+# the transcript's `tool_result` block — so the classifier reads the shape.
+# Censused over 14,652 `toolUseResult` entries: MCP is the only class whose
+# *successful* results ever arrive as a bare string (25 of 1,152; Bash and the
+# other built-ins are 12,927/12,927 dicts). On that channel a leading `Error: `
+# can be the tool's own text, so a tool answering `Error: no rows found` on
+# success accumulated state and advised on its second return. 19t-b/c/d are the
+# controls that keep "scoped" distinguishable from "MCP stopped firing".
+# ---------------------------------------------------------------------------
+echo "=== case 19t: MCP string payloads are scoped to harness-authored text ==="
+mcp_case() {
+  # mcp_case <label> <session> <tool_response> <expect: silent|advisory>
+  local label="$1" sess="$2" text="$3" expect="$4"
+  local state="$TMP_DIR/mcp-$sess.json"
+  local o e r out err
+  o="$(mktemp)" e="$(mktemp)"
+  pipe_hook "$(string_payload "$sess" mcp__db__query "$text")" "$state" >/dev/null 2>/dev/null
+  pipe_hook "$(string_payload "$sess" mcp__db__query "$text")" "$state" >"$o" 2>"$e"
+  r=$?
+  out=$(cat "$o"); err=$(cat "$e")
+  rm -f "$o" "$e"
+  if [ "$expect" = "silent" ]; then
+    if [ "$r" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+      assert_pass "$label"
+    else
+      assert_fail "$label" "rc=$r out=[$out] err=[$err]"
+    fi
+  else
+    if [ "$r" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+      assert_pass "$label"
+    else
+      assert_fail "$label" "rc=$r out=[$out] err=[$err]"
+    fi
+  fi
+}
+
+# The defect: a SUCCESSFUL MCP result whose own text opens with `Error: `.
+mcp_case "19t-a) an MCP success whose text opens with 'Error: ' stays silent" \
+  sess-1265-ta 'Error: no rows found' silent
+# Controls — the harness's own strings still advise on the same channel.
+mcp_case "19t-b) the PreToolUse hook-error envelope still advises" \
+  sess-1265-tb 'Error: PreToolUse:mcp__db__query hook error: blocked by gate' advisory
+mcp_case "19t-c) a repeated user rejection still advises" \
+  sess-1265-tc 'User rejected tool use' advisory
+# The pre-existing must-fail case, on the channel it was actually observed on.
+mcp_case "19t-d) the oversized-output notice still stays silent" \
+  sess-1265-td "$STR_OVERSIZED" silent
 
 echo
 if [ "$FAIL" -eq 0 ]; then

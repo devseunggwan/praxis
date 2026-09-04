@@ -25,7 +25,104 @@ Supported hosts: all
 
 ## Failure 판단
 
-`tool_response` 기준:
+`tool_response`는 두 형태로 도착하며, **실패는 문자열로 옵니다** (issue #1265).
+
+### 문자열 payload (issue #1265)
+
+실패한 도구 호출은 dict가 아니라 평범한 문자열로 전달됩니다. 실 세션
+transcript 120개에서 Bash `toolUseResult` 10,467건을 전수 조사한 결과 388건이
+문자열이었고 **전부** `tool_result.is_error == True`, 성공한 Bash 호출이
+문자열로 오는 사례는 0건이었습니다.
+
+판정은 화이트리스트입니다 (`_string_failure_text`).
+
+- `Error:` 와 공백으로 시작하면 실패 (`Error: Exit code N`, `Error: Blocked: …`,
+  `Error: Permission …`, `Error: PreToolUse:Bash hook error: …`)
+- 정확히 `User rejected tool use`이면 실패 (접두사가 없으므로 이름으로 매칭)
+- `Error: result (…) exceeds maximum allowed tokens …`는 **실패가 아닙니다**.
+  결과가 커서 파일로 내려간 *성공* 호출의 안내이며 `is_error == False`입니다
+  (관측 27건, 전부 MCP 도구). 이름으로 제외합니다.
+- 그 외 문자열(빈 문자열 포함)은 성공으로 처리 — 화이트리스트이므로 실패로
+  관측된 적 없는 형태가 새로 발화하는 일은 없습니다.
+
+#### MCP 도구는 harness 가 쓴 문자열만 실패 (PR #1270)
+
+hook payload 에는 실패 표지가 **없습니다**. `is_error` 는 transcript 의
+`tool_result` 블록에 있고 `tool_response` 에는 오지 않으므로, 판정은 텍스트가
+아니라 형태(shape)를 읽습니다. 조사를 `toolUseResult` 14,652건 전체로 넓히면
+*성공* 결과가 맨 문자열로 오는 도구 부류는 **MCP 하나뿐**입니다.
+
+| 부류 | is_error=False | is_error=True |
+| --- | --- | --- |
+| Bash | dict 11,792 / str 0 | str 446 |
+| 기타 내장 도구 | dict 1,135 / str 0 | str 37 |
+| MCP | list 1,127 / **str 25** (전부 oversized-output 안내) | str 90 |
+
+즉 MCP 채널에서는 앞머리의 `"Error: "` 가 harness 의 실패 봉투가 아니라 **도구
+자신의 텍스트**일 수 있습니다. 성공하면서 `Error: no rows found` 를 돌려주는
+도구는 상태를 쌓고 2회째에 거짓 advisory 를 냈습니다 (case 19t-a). 그래서 MCP
+도구에 대해서는 harness 가 직접 쓴 문자열만 실패로 셉니다.
+
+- `Error: PreToolUse:` / `Error: PostToolUse:` hook-error 봉투 (case 19t-b)
+- 고정 문장 `User rejected tool use` (case 19t-c)
+
+Bash 와 기타 내장 도구는 성공이 문자열로 오는 사례가 0건이므로 `"Error: "` 접두사
+판정을 그대로 유지합니다 (case 19r).
+
+**대가**: 도구 자신의 오류 텍스트를 담은 MCP 실패(`Error: Error: query: …`,
+`Error: The operation timed out.` 등, 관측된 문자열 실패 573건 중 약 50건)는
+더 이상 advisory 를 내지 않습니다. 제외 문구를 하나씩 늘리는 대신 범위를 좁힌
+쪽을 택했습니다 — 문구 목록은 도구 텍스트를 계속 신뢰하므로 같은 결함이
+다른 문구로 재발합니다.
+
+이 판정은 아래 `tool_name == "Bash"` 게이트보다 **앞에서, 그와 무관하게**
+내려집니다. 그 게이트는 *dict* payload의 `stderr`가 exit-0 성공과 실패를
+구분하지 못해 생긴 것이고(#1042, #1096 둘 다 dict + 비어있지 않은 `stderr`인
+exit-0 성공이었습니다), 문자열 payload에는 모호해질 `stderr` 필드 자체가
+없습니다. 두 길이 모두 막힌 결과가 **135,030회 발화 · `decision: pass` 100%**
+라는 침묵이었습니다.
+
+### 이 판정은 harness 출력 형식에 의존합니다 — 재측정 대상 (issue #1265)
+
+`Error:`+공백 접두사와 `User rejected tool use`는 **문서화된 계약이 아니라 Claude
+Code 가 실제로 뱉는 문자열**입니다. 이 문구가 바뀌면 화이트리스트가 전부
+빗나가 훅은 다시 **한 번도 발화하지 않는 상태**로 돌아갑니다 — 이 이슈가
+고치려던 바로 그 실패이고, 화이트리스트는 안전 방향(미발화)으로 깨지므로
+두 번째에도 똑같이 보이지 않습니다. 원장에는 발화 수만 늘고 advisory 는 0건인
+모양으로만 남습니다.
+
+그러므로 **문자열 payload 관련 테스트가 깨지거나, 발화 수 대비 advisory 0건이
+관측되면 형식부터 재측정**합니다. 아래는 위 수치를 만든 조사 그대로이며,
+출력 첫 열이 도구·`is_error`·첫 줄입니다.
+
+```bash
+python3 - <<'PY'
+import collections, glob, json, os
+seen, files = set(), sorted(glob.glob(os.path.expanduser("~/.claude*/projects/*/*.jsonl")), key=os.path.getmtime, reverse=True)[:120]
+names, shape = {}, collections.Counter()
+for f in files:
+    for ln in open(f, errors="replace"):
+        try: o = json.loads(ln)
+        except Exception: continue
+        for b in (o.get("message") or {}).get("content") or []:
+            if not isinstance(b, dict): continue
+            if b.get("type") == "tool_use": names[b["id"]] = b.get("name")
+            if b.get("type") == "tool_result" and (o.get("uuid"), b.get("tool_use_id")) not in seen:
+                seen.add((o.get("uuid"), b.get("tool_use_id")))
+                t = o.get("toolUseResult")
+                if isinstance(t, str):
+                    shape[(names.get(b.get("tool_use_id")), bool(b.get("is_error")), t.split("\n")[0][:34])] += 1
+for (tool, err, head), n in shape.most_common(15):
+    print(f"{n:5d}  is_error={str(err):5s} {tool}  {head!r}")
+PY
+```
+
+확인할 것: (1) `is_error=True` 인 문자열이 여전히 `Error:`+공백으로 시작하는가,
+(2) `is_error=False` 인 문자열이 oversized-output 안내 외에 새로 생겼는가,
+(3) 새 실패 문구가 있으면 `_STRING_FAILURE_PREFIX` / `_STRING_REJECTION_TEXT`
+/ `_STRING_OVERSIZED_OUTPUT_RE` 를 갱신하고 case 19 에 fixture 를 추가.
+
+### dict payload
 
 - `isError is True`이면 실패
 - `interrupted is True`이면 실패
@@ -58,7 +155,54 @@ noOutputExpected}`이며 `exit`도 `isError`도 없습니다. 그래서 모든 B
 
 ## Signature 산정
 
-`tool_response`에서 실패 텍스트 후보를 다음 순서로 추출합니다.
+문자열 payload는 그 문자열 자체가 signature 재료입니다. 유일한 실패 증거이기
+때문이며, 서로 다른 문자열 실패 2건이 한 쌍으로 합쳐지지 않게 하는 것도 이
+성질입니다(issue #1042 defect 2와 같은 형태).
+
+다만 문자열 하나는 구분 정보를 전혀 담지 않습니다 — 출력이 없는
+`Error: Exit code N`(관측 388건 중 6건)은 어떤 명령이 죽었든 바이트가 같습니다.
+이 형태(`_BARE_EXIT_CODE_RE`)에 한해서만 `tool_input`의 `command`를 **별도
+digest**(`_command_discriminator`)로 만들어 키에 함께 넣습니다. 판정 대상 호출과
+같은 payload 안의 필드이므로 signature 가 외부 상태에 의존하지는 않습니다.
+결과: 서로 다른 두 명령은 더 이상 한 쌍으로 합쳐지지 않고, 같은 명령이 같은
+형태로 2회 실패하면 여전히 advisory 가 나갑니다 (case 19g~19j). 실패 텍스트에
+실제 내용이 있는 경우는 이미 구분되므로 건드리지 않습니다.
+
+**digest 가 별도인 이유**: 명령을 signature *텍스트*에 덧붙이면 그 텍스트가
+`_normalize_signature`를 통과하면서 `cat /tmp/a` 와 `cat /tmp/b` 가 똑같이
+`cat <path>` 가 됩니다 — 구분자가 정규화에 흡수되어, 무관한 두 번째 실패가
+거짓 advisory 를 냅니다. 정규화는 *진짜로 동등한* 오류를 합치기 위해 존재하므로
+약화하지 않고, 명령만 정규화 밖에서 해싱합니다.
+
+digest 계산 규칙:
+
+- **앞뒤 공백만 자릅니다** (case 19n). 내부 공백은 접지 **않습니다** — 셸에서
+  공백은 장식이 아니라 문법이라, 개행은 명령 두 개를 가르고(`false\nfalse` ≠
+  `false false`) 따옴표 안 연속 공백은 인자의 일부입니다(`test 'a  b' = x` ≠
+  `test 'a b' = x`). 접었더니 서로 다른 명령이 한 해시로 뭉쳐, 이 digest 가
+  막으려던 충돌이 그대로 재현됐습니다 (PR #1270, case 19s). 대가는 반대
+  방향입니다 — 간격을 바꿔 다시 친 같은 명령은 이제 별도 키를 받아 2회째가
+  무음이 됩니다. **거짓 advisory 가 아니라 놓친 advisory** 이고, 그 매칭은
+  구분 못 하는 구분자를 살 만한 값어치가 아니었습니다.
+- 대소문자는 접지 **않습니다** — `cat A` 와 `cat a` 는 다른 파일입니다.
+- `_MAX_SIGNATURE_LEN`(4096자)로 자른 뒤 해싱합니다. 4096자를 넘어가는
+  부분에서만 다른 두 명령은 같은 키가 됩니다 (case 19o).
+- `command` 가 없거나 공백뿐이면 digest 를 붙이지 않아 키가 기존과
+  바이트 동일합니다 (case 19l/19m/19r).
+
+최종 키 재료는 `f"{tool_name}\0{normalized}"` 이며, 위 조건이 성립할 때만
+`\0{command_digest}` 가 뒤에 붙습니다.
+
+### Cardinality
+
+키에 digest 를 더하면 상태 파일의 키 수는 **늘어납니다** — 이전에는 bare
+exit-code 실패 전부가 키 1개를 공유했지만 이제 서로 다른 명령마다 1개입니다.
+실측: 서로 다른 명령 1,000건을 넣으면 키 1,000개, 상태 파일 61,045바이트
+(키당 61바이트). 상한이나 eviction 은 없고, 세션별 파일은
+`hooks/_lib/_paths.py` 의 공용 7일 TTL 로 청소되므로 한 세션 안에서만
+누적됩니다.
+
+dict payload는 실패 텍스트 후보를 다음 순서로 추출합니다.
 
 1. `error`
 2. `stderr` (harness noise 필터를 거친 뒤)
@@ -224,5 +368,22 @@ python3 -m pytest tests/test_hook_state_concurrency.py
   무력화하지 않았는지 확인)
 - `stderr`가 noise뿐이고 구분 정보가 `stdout`에만 있는 서로 다른 실패 2건은
   서로 다른 signature를 받아 카운터가 합쳐지지 않음 (issue #1042 defect 2)
+- 출력 없는 `Error: Exit code N`이 서로 다른 명령에서 나오면 무음(signature 충돌
+  방지), 같은 명령이 같은 형태로 2회 실패하면 여전히 advisory (issue #1265,
+  case 19g/19h — 뒤쪽이 앞쪽의 대조군)
+- 경로만 다른 두 명령(`cat /tmp/a` / `cat /tmp/b`)도 무음 — 정규화가 구분자를
+  흡수하지 못함, 대조군은 같은 명령 2회 advisory (case 19i/19j)
+- 명령 부재·공백뿐·4096 경계·유니코드·non-Bash 도구 각각의 키 동작
+  (case 19k~19r), 그리고 bare 가 아닌 실패는 정규화가 그대로 합쳐지는지
+  (case 19q — normalizer 를 약화시켜 산 수정이 아님을 보이는 대조군)
+- 셸에서 유의미한 내부 공백(개행·탭·따옴표 안 연속 공백·NBSP)이 다른 두 명령은
+  서로 다른 키 -> 무음, 같은 명령 2회는 여전히 advisory (case 19s, 양방향)
+- MCP 도구: `"Error: "` 로 시작하는 *성공* 텍스트는 무음, hook-error 봉투와 거부
+  문장은 여전히 advisory, oversized-output 안내는 무음 (case 19t, 양방향)
+- 문자열 payload 동일 실패 2회 -> advisory, 서로 다른 문자열 실패 2건 ->
+  무음(signature 분리), `User rejected tool use` 반복 -> advisory,
+  oversized-output 안내(`is_error:false`) 반복 -> 무음·상태 파일 없음,
+  공백뿐인 문자열 -> 무음 (issue #1265, case 19; fixture는 전부 실 transcript
+  에서 그대로 캡처)
 - 두 프로세스 동시 실행: 잠금 없이는 증분 유실, 잠금 하에서는 카운트 1→2→3
   과 advisory 2회(2회째·3회째) (`tests/test_hook_state_concurrency.py`)
