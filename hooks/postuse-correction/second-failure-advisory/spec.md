@@ -131,12 +131,40 @@ noOutputExpected}`이며 `exit`도 `isError`도 없습니다. 그래서 모든 B
 
 다만 문자열 하나는 구분 정보를 전혀 담지 않습니다 — 출력이 없는
 `Error: Exit code N`(관측 388건 중 6건)은 어떤 명령이 죽었든 바이트가 같습니다.
-이 형태에 한해서만 `tool_input`의 `command`를 구분 텍스트로 덧붙입니다
-(`_BARE_EXIT_CODE_RE`). 판정 대상 호출과 같은 payload 안의 필드이므로 signature
-가 외부 상태에 의존하지는 않습니다. 결과: 서로 다른 두 명령은 더 이상 한 쌍으로
-합쳐지지 않고, 같은 명령이 같은 형태로 2회 실패하면 여전히 advisory 가 나갑니다
-(case 19g/19h). 실패 텍스트에 실제 내용이 있는 경우는 이미 구분되므로 건드리지
-않습니다.
+이 형태(`_BARE_EXIT_CODE_RE`)에 한해서만 `tool_input`의 `command`를 **별도
+digest**(`_command_discriminator`)로 만들어 키에 함께 넣습니다. 판정 대상 호출과
+같은 payload 안의 필드이므로 signature 가 외부 상태에 의존하지는 않습니다.
+결과: 서로 다른 두 명령은 더 이상 한 쌍으로 합쳐지지 않고, 같은 명령이 같은
+형태로 2회 실패하면 여전히 advisory 가 나갑니다 (case 19g~19j). 실패 텍스트에
+실제 내용이 있는 경우는 이미 구분되므로 건드리지 않습니다.
+
+**digest 가 별도인 이유**: 명령을 signature *텍스트*에 덧붙이면 그 텍스트가
+`_normalize_signature`를 통과하면서 `cat /tmp/a` 와 `cat /tmp/b` 가 똑같이
+`cat <path>` 가 됩니다 — 구분자가 정규화에 흡수되어, 무관한 두 번째 실패가
+거짓 advisory 를 냅니다. 정규화는 *진짜로 동등한* 오류를 합치기 위해 존재하므로
+약화하지 않고, 명령만 정규화 밖에서 해싱합니다.
+
+digest 계산 규칙:
+
+- 공백은 하나로 접어 앞뒤를 자릅니다 — 간격만 다른 같은 명령은 같은 키
+  (case 19n).
+- 대소문자는 접지 **않습니다** — `cat A` 와 `cat a` 는 다른 파일입니다.
+- `_MAX_SIGNATURE_LEN`(4096자)로 자른 뒤 해싱합니다. 4096자를 넘어가는
+  부분에서만 다른 두 명령은 같은 키가 됩니다 (case 19o).
+- `command` 가 없거나 공백뿐이면 digest 를 붙이지 않아 키가 기존과
+  바이트 동일합니다 (case 19l/19m/19r).
+
+최종 키 재료는 `f"{tool_name}\0{normalized}"` 이며, 위 조건이 성립할 때만
+`\0{command_digest}` 가 뒤에 붙습니다.
+
+### Cardinality
+
+키에 digest 를 더하면 상태 파일의 키 수는 **늘어납니다** — 이전에는 bare
+exit-code 실패 전부가 키 1개를 공유했지만 이제 서로 다른 명령마다 1개입니다.
+실측: 서로 다른 명령 1,000건을 넣으면 키 1,000개, 상태 파일 61,045바이트
+(키당 61바이트). 상한이나 eviction 은 없고, 세션별 파일은
+`hooks/_lib/_paths.py` 의 공용 7일 TTL 로 청소되므로 한 세션 안에서만
+누적됩니다.
 
 dict payload는 실패 텍스트 후보를 다음 순서로 추출합니다.
 
@@ -307,6 +335,11 @@ python3 -m pytest tests/test_hook_state_concurrency.py
 - 출력 없는 `Error: Exit code N`이 서로 다른 명령에서 나오면 무음(signature 충돌
   방지), 같은 명령이 같은 형태로 2회 실패하면 여전히 advisory (issue #1265,
   case 19g/19h — 뒤쪽이 앞쪽의 대조군)
+- 경로만 다른 두 명령(`cat /tmp/a` / `cat /tmp/b`)도 무음 — 정규화가 구분자를
+  흡수하지 못함, 대조군은 같은 명령 2회 advisory (case 19i/19j)
+- 명령 부재·공백뿐·4096 경계·유니코드·non-Bash 도구 각각의 키 동작
+  (case 19k~19r), 그리고 bare 가 아닌 실패는 정규화가 그대로 합쳐지는지
+  (case 19q — normalizer 를 약화시켜 산 수정이 아님을 보이는 대조군)
 - 문자열 payload 동일 실패 2회 -> advisory, 서로 다른 문자열 실패 2건 ->
   무음(signature 분리), `User rejected tool use` 반복 -> advisory,
   oversized-output 안내(`is_error:false`) 반복 -> 무음·상태 파일 없음,
