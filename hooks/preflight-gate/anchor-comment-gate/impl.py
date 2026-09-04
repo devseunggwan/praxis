@@ -338,9 +338,12 @@ def _parse_api_patch(argv: list[str], cwd: str, command: str) -> dict | None:
     if call.has_input:
         # The whole request body comes from a JSON file (or stdin). Reading it
         # would mean re-implementing gh's request assembly; the posted comment
-        # is checked in PostToolUse instead.
+        # is checked in PostToolUse instead. A `body=` field alongside is NOT
+        # that body — gh puts it in the query string — so the body stays None
+        # rather than falling through to the field. Unknown, never `""`: an
+        # empty body reads downstream as "checked and clean".
         undecodable = "--input 으로 전달된 JSON 본문"
-    if call.body_raw is not None:
+    elif call.body_raw is not None:
         expand = call.body_flag in GH_API_EXPANDING_FIELD_FLAGS
         raw = call.body_raw
         if expand and raw.startswith("@") and _rewritten_in_command(raw[1:], command, cwd):
