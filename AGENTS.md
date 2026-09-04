@@ -30,11 +30,21 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 > for revision specifically. Creating an anchor needs only a way to post a
 > comment; editing one in place is a `PATCH` against its comment id, which a
 > session whose only GitHub surface is the MCP server cannot issue — comment
-> bodies are add-only there, while issue and PR bodies are not. Past rev 1 the
-> anchor rule is unsatisfiable in such a session; say so on the PR and carry
-> the gaps in the PR body or merge commit rather than posting a second anchor.
-> See [`hooks/preflight-gate/anchor-comment-gate/spec.md`](hooks/preflight-gate/anchor-comment-gate/spec.md#prerequisite--gh-for-revision-specifically)
-> and issue #1211.
+> bodies are add-only there, while issue and PR bodies are not. That absence is
+> upstream in `github/github-mcp-server`, not a gap in one deployment, so it
+> does not resolve by waiting. The same surface strips `<details>` /
+> `<summary>` on the comment **read** path as well, which leaves the gate's
+> PostToolUse structure re-check with no substitute there at all.
+>
+> Past rev 1 the anchor rule is therefore unsatisfiable in such a session. The
+> procedure: post rev 1 in full, grade the re-check `unknown`, say on the PR
+> which SHA the anchor is stamped at and that the host cannot update it, and
+> carry the delta into the PR body or the merge commit — never a second anchor,
+> which makes id recovery ambiguous. Steps in
+> [`anchor-comment-gate/spec.md` → Procedure for a gh-less session](hooks/preflight-gate/anchor-comment-gate/spec.md#procedure-for-a-gh-less-session),
+> the precondition in
+> [the section holding it](hooks/preflight-gate/anchor-comment-gate/spec.md#prerequisite--gh-for-revision-specifically).
+> Issue #1211.
 
 ## Skills (18)
 
