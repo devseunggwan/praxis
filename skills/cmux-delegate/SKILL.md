@@ -2,8 +2,8 @@
 name: cmux-delegate
 description: Hand off an existing independent issue that surfaced mid-task to its own Claude Code session in a new cmux workspace, with auto-collected context; that session runs issue→worktree→PR alone. Not for splitting the current task. Triggers on "cmux delegate", "delegate issue", "delegate to new session", "별도 세션", "세션에 위임", "별건으로 빼서".
 verified-against-runtime: true
-runtime-verified-at: 2026-08-20
-runtime-verified-note: "cmux 0.64.22 — the wrapper passes the prompt as argv (`claude \"$(cat file)\"`) and keeps stdin on the terminal, so the worker runs as an ordinary interactive session and answers its own permission and folder-trust prompts; `--max-budget-usd` stays print-mode only."
+runtime-verified-at: 2026-09-04
+runtime-verified-note: "cmux 0.64.22 — the selected workspace's `list-workspaces` row is prefixed `* `, so field 1 without the strip is `*` and `cmux send --workspace '*'` fails with `Invalid workspace handle`; stripped, `--session` resolves and `send` returns `OK`. The legacy-alias notice goes to stderr, so it cannot reach the grep."
 ---
 
 # cmux-delegate
