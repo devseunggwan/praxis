@@ -446,9 +446,31 @@ def test_a_later_line_substitution_is_blanked_not_graded():
     unknowable on its own, and passing it through hands a body gate raw shell
     text. Blanking keeps the line count, so a reported line number still points
     at the real message."""
+    argv = ["git", "commit", "-m", "fix: x\n\n$(git log --oneline)"]
+    command = 'git commit -m "fix: x\n\n$(git log --oneline)"'
+    assert extract_git_message_texts(argv, command) == ["fix: x\n\n"]
+
+
+def test_a_mid_line_substitution_is_blanked_too():
+    """Where the expansion sits on the line does not decide whether the line is
+    readable. `foo($(printf x))` reaches git as `foo(x)`, so grading the source
+    reads a nested paren into a message that has none (issue #1228 round 2)."""
+    argv = ["git", "commit", "-m", "fix: x\n\nfoo($(printf x))"]
+    command = 'git commit -m "fix: x\n\nfoo($(printf x))"'
+    assert extract_git_message_texts(argv, command) == ["fix: x\n\n"]
+
+
+def test_an_unclosed_substitution_drops_the_whole_value():
+    """An unterminated `$(` is a bash syntax error, so no commit happens and
+    the lines after the opener are the inside of an unfinished substitution
+    rather than message text. Measured:
+
+        $ bash -c 'git commit -m "fix: x\\n\\n$(git log --oneline"'
+        bash: -c: line 3: syntax error: unexpected end of file
+    """
     argv = ["git", "commit", "-m", "fix: x\n\n$(git log --oneline"]
     command = 'git commit -m "fix: x\n\n$(git log --oneline"'
-    assert extract_git_message_texts(argv, command) == ["fix: x\n\n"]
+    assert extract_git_message_texts(argv, command) == []
 
 
 def test_a_later_line_without_a_substitution_survives_whole():
@@ -457,15 +479,19 @@ def test_a_later_line_without_a_substitution_survives_whole():
     assert extract_git_message_texts(argv, command) == ["fix: x\n\nword(a(b))"]
 
 
-def test_a_single_quoted_multiline_value_blanks_its_dollar_paren_line():
-    """The known cost of matching by value: `_title_is_single_quoted_literal`
-    compares a whole quoted run against the candidate, and a LINE of a
-    multi-line run never equals the run. So a literal `$(…)` line inside a
-    single-quoted message is treated as unknowable and blanked — a false
-    negative, which is the fail-open direction, rather than a false block."""
+def test_a_single_quoted_multiline_value_is_graded_whole():
+    """A single-quoted run is the one place the shell substitutes nothing, so
+    every line of it is literal message text. Matching the WHOLE value against
+    the quoted runs settles that in one step; the older line-wise match could
+    not, because a line of a multi-line run never equals the run, and blanked a
+    literal `$(…)` line that git really does receive. Measured:
+
+        $ bash -c "git commit -m 'fix: x\\n\\n\\$(literal) note'"
+        {"argv": ["commit", "-m", "fix: x\\n\\n$(literal) note"]}
+    """
     argv = ["git", "commit", "-m", "fix: x\n\n$(literal) note"]
     command = "git commit -m 'fix: x\n\n$(literal) note'"
-    assert extract_git_message_texts(argv, command) == ["fix: x\n\n"]
+    assert extract_git_message_texts(argv, command) == ["fix: x\n\n$(literal) note"]
     # A single-LINE value of the same shape is still recognised as a literal.
     argv = ["git", "commit", "-m", "$(literal) note"]
     command = "git commit -m '$(literal) note'"

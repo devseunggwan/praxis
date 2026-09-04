@@ -34,6 +34,8 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _starts_unquoted_comment,
+    has_shell_expansion,
+    has_unclosed_expansion,
     strip_heredoc_bodies,
     strip_prefix,
 )
@@ -499,19 +501,26 @@ def extract_git_message_texts(
     as it contributes no title; the caller recovers that case from the raw
     command's heredoc bodies instead.
 
-    A substitution can also open on a LATER line of a multi-line value, and
-    only the first line decides whether the value is a title candidate. Passing
-    the rest through verbatim hands a body gate raw shell text where the shell
+    An expansion can also sit on a LATER line of a multi-line value, and only
+    the first line decides whether the value is a title candidate. Passing the
+    rest through verbatim hands a body gate raw shell text where the shell
     would have put a command's output — `$(git log --oneline` reads as a line
     whose leading word is glued to `(`, so a blocking gate rejects a message
     nobody can predict. Such a line is blanked instead of dropped, keeping the
     line numbers a gate reports pointed at the real message.
 
-    The single-quote exception does not reach a line: the match is by value
-    against a whole quoted run, and a line of a multi-line run never equals the
-    run. So a literal `$(…)` line inside a single-quoted message is blanked
-    too. That is a false negative — the fail-open direction, and the one this
-    repo takes for a gate — rather than a block on a message nobody can read.
+    Where the expansion sits on the line does not change that. An earlier
+    version blanked only a line that *opened* with one, so `foo($(printf x))`
+    — delivered as `foo(x)`, which parses — was graded as raw source and read
+    as a nested paren (issue #1228 round 2). The line is unreadable either way,
+    so `has_shell_expansion` decides it rather than the opening position.
+
+    A whole value that reached us as one single-quoted run is exempt: the shell
+    substitutes nothing inside it, so every line is literal and gradable. That
+    also settles the case the line-wise rule cannot — a literal `$(…)` line
+    inside a single-quoted message used to be blanked, because the by-value
+    match is against a whole quoted run and a line of a run never equals the
+    run.
     """
     scanned = _scan_commit_message_values(argv)
     if scanned is None:
@@ -522,12 +531,19 @@ def extract_git_message_texts(
     paragraphs: list[str] = []
     for kind, raw in values:
         if kind == "message":
+            if command is not None and _title_is_single_quoted_literal(command, raw):
+                paragraphs.append(raw)
+                continue
+            if has_unclosed_expansion(raw):
+                # bash never finishes parsing this command, so no commit
+                # happens and the text after the opener is the inside of an
+                # unfinished substitution rather than message lines.
+                continue
             lines = raw.split("\n")
             if title_is_unresolved_substitution(lines[0], command):
                 continue
             paragraphs.append("\n".join(
-                "" if title_is_unresolved_substitution(line, command) else line
-                for line in lines
+                "" if has_shell_expansion(line) else line for line in lines
             ))
             continue
         body = text_from_file(raw, base_dir=c_dir)

@@ -344,6 +344,68 @@ def heredoc_delimiters(text: str) -> list[str]:
     return out
 
 
+_EXPANSION_START = re.compile(r"\$[({A-Za-z_0-9@*?#!-]|`")
+
+
+def has_shell_expansion(text: str) -> bool:
+    """True when bash would substitute something into `text`.
+
+    Covers command substitution (`$(…)`, backticks) and parameter expansion
+    (`${…}`, `$NAME`, `$1`, `$@`), which is every construct that can put
+    characters into a string the hook cannot predict. A gate that grades text
+    for a *shape* — a paren that must close on its line — has to treat such a
+    line as unreadable rather than grade the pre-expansion source: `word($(printf
+    x))` reaches the reading command as `word(x)`, which is well-formed, while
+    the raw text reads as a nested paren and blocks a valid commit (issue #1228
+    round 2).
+
+    Deliberately over-broad in the fail-open direction. Quoting is already gone
+    by the time a tokenized value reaches here, so a literal `\\$` cannot be
+    told from a live `$`, and calling both an expansion loses detection on a
+    line rather than blocking a message nobody can read. A caller that knows
+    the text is literal — a single-quoted run, a quoted heredoc body — must not
+    consult this at all.
+    """
+    return bool(_EXPANSION_START.search(text))
+
+
+def has_unclosed_expansion(text: str) -> bool:
+    """True when a `$(…)` or backtick run in `text` never closes.
+
+    Such a command is not something bash runs at all — it is a syntax error, so
+    no commit happens and there is nothing for a gate to grade. The text after
+    the opener is also not what it appears to be: it is the inside of an
+    unfinished substitution, which is how `$(x` followed by prose came to be
+    read as message lines (CodeRabbit, issue #1228 round 2).
+
+    Parens are counted only once inside a substitution, so ordinary prose
+    parentheses in a message cannot make it look unbalanced.
+    """
+    depth = 0
+    backtick = False
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "`":
+            backtick = not backtick
+            i += 1
+            continue
+        if text.startswith("$(", i):
+            depth += 1
+            i += 2
+            continue
+        if depth:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+        i += 1
+    return depth > 0 or backtick
+
+
 HELP_FLAGS = frozenset({"-h", "--help"})
 
 # `gh pr merge` flags that consume a following value token. Shared so that a

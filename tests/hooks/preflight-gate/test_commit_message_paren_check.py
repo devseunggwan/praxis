@@ -270,6 +270,12 @@ def test_main_is_wrapped_by_fail_open():
         ('git commit -m "fix: x\n\n$(git log --oneline"', 0),
         # The same line with no substitution is real message text.
         ('git commit -m "fix: x\n\nword(a(b))"', 2),
+        # A substitution the shell resolves MID-line is the same case: bash
+        # delivers `foo(x)`, which the parser accepts. Grading the source read
+        # the inner `(` as a nested paren and blocked a valid commit.
+        ('git commit -m "fix: x" -m "body\nfoo($(printf x))"', 0),
+        # Blanking is per line, so a clean line beside it still gets graded.
+        ('git commit -m "fix: x" -m "foo($(printf x))\nword(a(b))"', 2),
     ],
 )
 def test_a_later_line_substitution_does_not_reach_the_detector(command, rc):
@@ -278,6 +284,30 @@ def test_a_later_line_substitution_does_not_reach_the_detector(command, rc):
 
 def test_the_reported_line_number_survives_a_blanked_line():
     """Blanking rather than dropping is what keeps this number honest."""
-    rc, _out, err = _run('git commit -m "fix: x\n\n$(x\n\nword(a(b))"')
+    rc, _out, err = _run('git commit -m "fix: x\n\n$(date)\n\nword(a(b))"')
     assert rc == 2
     assert "line 5: [nested]" in err
+
+
+def test_an_unclosed_substitution_is_not_a_commit_at_all():
+    """Bash never finishes parsing this command, so git is never invoked and
+    there is no message to grade. Measured:
+
+        $ bash -c 'git commit -m "fix: x
+
+        $(x
+
+        word(a(b))"'
+        bash: -c: line 4: unexpected EOF while looking for matching `"'
+        bash: -c: line 5: syntax error: unexpected end of file
+
+    The old reading blanked only the `$(x` line and kept `word(a(b))` as
+    message text, so the gate blocked a command that could never run
+    (CodeRabbit, issue #1228 round 2)."""
+    assert _run('git commit -m "fix: x\n\n$(x\n\nword(a(b))"') == (0, "", "")
+
+
+def test_a_literal_dollar_paren_in_a_double_quoted_message_is_not_a_block():
+    """FP guard. Escaped in the source, so the shell substitutes nothing and
+    git receives the text verbatim — and `$(foo)` closes, so it parses."""
+    assert _run('git commit -m "fix: x" -m "note about \\$(foo) here"') == (0, "", "")
