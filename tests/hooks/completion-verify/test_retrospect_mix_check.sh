@@ -27,6 +27,12 @@ FAILED_NAMES=()
 TMPDIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$TMPDIR"' EXIT
 
+# Extra environment for the next run_case invocation (NAME=VALUE entries).
+# Gate-4b resolves repo visibility itself, so its cases pin the own-org
+# allowlist and the offline visibility fallback rather than inheriting whatever
+# `gh` happens to be authenticated as on the machine running the suite.
+RUN_CASE_ENV=()
+
 # Build a JSONL transcript file from $3 and run the hook.
 # Args:
 #   $1 = case name
@@ -76,7 +82,7 @@ with open(sys.argv[1], "w") as f:
     '{transcript_path: $path, stop_hook_active: $sa, session_id: "test-session"}')
 
   local out
-  out=$(printf '%s' "$payload" | "$HOOK" 2>/dev/null)
+  out=$(printf '%s' "$payload" | env "${RUN_CASE_ENV[@]}" "$HOOK" 2>/dev/null)
   local rc=$?
 
   if [ "$rc" -ne 0 ]; then
@@ -94,6 +100,20 @@ with open(sys.argv[1], "w") as f:
     pass)
       if [ -n "$out" ]; then
         echo "FAIL  [$name] expected pass (no output), got: $out"
+        FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+      fi
+      ;;
+    demote)
+      # Gate-4b's third outcome: the Stop proceeds, but the row's ground is
+      # demoted to "visibility unresolved" on a surface the user reads. A pass
+      # and a demote are indistinguishable from the decision field alone, which
+      # is the whole point of asserting both polarities separately.
+      if echo "$out" | grep -q '"decision": "block"'; then
+        echo "FAIL  [$name] expected demote (no block), got: $out"
+        FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+      fi
+      if ! echo "$out" | grep -q 'Gate-4b demotion'; then
+        echo "FAIL  [$name] expected a Gate-4b demotion systemMessage, got: ${out:-<empty>}"
         FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
       fi
       ;;
@@ -223,7 +243,10 @@ T1_ROW="| 1 | behavioral | — | hasty conclusion | did not verify | rule absent
 run_case "T1_pass_behavior_only_with_5line_rationale" "pass" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")")"
 
-# T2: pass — tool finding escalated to upstream_feedback with backing_repo declared
+# T2: pass — tool finding escalated to upstream_feedback with backing_repo declared.
+# The row declares no repo_visibility, so since issue #993 it counts as public
+# and Gate-4b escalates it with no lookup; the honest card for that is WARN plus
+# the literal marker, which is what this fixture now carries.
 T2_CARD=$(cat <<EOF
 - memory: 0
 - issue: 0
@@ -233,9 +256,10 @@ T2_CARD=$(cat <<EOF
 - upstream_feedback: 1
 - gate_1_verdict: PASS
 - gate_2_verdict: NA
+- gate_4_verdict: WARN
 EOF
 )
-T2_ROW="| 1 | tool | cli | gh CLI flag missing | flag undocumented | gap | No | upstream_feedback | tool defect — upstream issue needed<br>backing_repo: devseunggwan/praxis | HIGH |"
+T2_ROW="| 1 | tool | cli | gh CLI flag missing | flag undocumented | gap | No | upstream_feedback | ⚠ EXTERNAL: per-action approval required at Stage 4<br>tool defect — upstream issue needed<br>backing_repo: devseunggwan/praxis | HIGH |"
 run_case "T2_pass_escalated_tool_finding" "pass" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T2_CARD" "$T2_ROW")")"
 
@@ -660,7 +684,9 @@ run_case "T26_pass_retrospect_inside_fenced_code" "pass" \
 
 # Gate-3 (backing_repo) cases ------------------------------------------------
 
-# T27: pass — upstream_feedback row with backing_repo declared
+# T27: pass — upstream_feedback row with backing_repo declared.
+# `owner/some-tool` is third-party, so Gate-4b escalates it on the owner alone
+# (no lookup); the card carries the WARN + marker pair that escalation owes.
 T27_CARD=$(cat <<EOF
 - memory: 0
 - issue: 0
@@ -670,9 +696,10 @@ T27_CARD=$(cat <<EOF
 - upstream_feedback: 1
 - gate_1_verdict: PASS
 - gate_2_verdict: NA
+- gate_4_verdict: WARN
 EOF
 )
-T27_ROW="| 1 | tool | mcp | slow MCP call | latency | gap | No | upstream_feedback | latency defect in tool<br>backing_repo: owner/some-tool | HIGH |"
+T27_ROW="| 1 | tool | mcp | slow MCP call | latency | gap | No | upstream_feedback | ⚠ EXTERNAL: per-action approval required at Stage 4<br>latency defect in tool<br>backing_repo: owner/some-tool | HIGH |"
 run_case "T27_pass_upstream_feedback_with_backing_repo" "pass" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T27_CARD" "$T27_ROW")")"
 
@@ -821,9 +848,11 @@ run_case "T35_block_schema_a_and_b_mixed" "block" \
 
 # Gate-4 (External-Repo Authorization) cases ----------------------------------
 
-# T36: pass — external=true + gate_4_verdict: PASS in card.
-# Scenario: all upstream_feedback rows are own-org; Gate-4 classified them as
-# internal and emitted PASS. Stop hook must pass.
+# T36: pass — honest card. The row is own-org AND declares private AND the
+# resolution agrees, which is the only shape that carries the exemption
+# (stage2.5-audit.md Gate-4, both halves). The fixture repo does not exist on
+# GitHub, so the live API returns nothing and PRAXIS_REPO_VISIBILITY answers —
+# deterministic online and offline alike, which a real repo would not be.
 T36_CARD=$(cat <<EOF
 - memory: 0
 - issue: 0
@@ -837,9 +866,67 @@ T36_CARD=$(cat <<EOF
 - gate_4_verdict: PASS
 EOF
 )
-T36_ROW="| 1 | tool | cli | gh flag missing | tool defect | gap | No | upstream_feedback | tool defect confirmed<br>backing_repo: devseunggwan/praxis | HIGH |"
+T36_ROW="| 1 | tool | cli | gh flag missing | tool defect | gap | No | upstream_feedback | tool defect confirmed<br>backing_repo: praxis-fixture/private-fixture<br>repo_visibility: private | HIGH |"
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture
+              PRAXIS_REPO_VISIBILITY=praxis-fixture/private-fixture=private)
 run_case "T36_pass_gate4_verdict_pass" "pass" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T36_CARD" "$T36_ROW")")"
+RUN_CASE_ENV=()
+
+# Gate-4b (independent visibility resolution, issue #1244) --------------------
+#
+# Both polarities, because a suite that only asserts the block cannot tell "the
+# hook caught the forgery" from "the hook always blocks" (issue #1244).
+
+# T36b: block — the forged card. `gate_4_verdict: PASS` and `repo_visibility:
+# private` are both written by the agent the gate constrains; the resolution
+# says public, so the exemption is void and the row owes the Stage 4 marker.
+T36B_CARD=$(cat <<EOF
+- memory: 0
+- issue: 0
+- claude_md_draft: 0
+- skill_idea: 0
+- hook_code: 0
+- upstream_feedback: 1
+- gate_1_verdict: PASS
+- gate_2_verdict: NA
+- gate_3_verdict: NA
+- gate_4_verdict: PASS
+EOF
+)
+T36B_ROW="| 1 | tool | cli | gh flag missing | tool defect | gap | No | upstream_feedback | tool defect confirmed<br>backing_repo: praxis-fixture/public-fixture<br>repo_visibility: private | HIGH |"
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture
+              PRAXIS_REPO_VISIBILITY=praxis-fixture/public-fixture=public)
+run_case "T36b_block_forged_private_declaration_over_public_repo" "block" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36B_ROW")")"
+RUN_CASE_ENV=()
+
+# T36c: block — the cheapest forgery: omit `repo_visibility` entirely and write
+# PASS. Undeclared counts as public (#993), so this needs no lookup at all.
+T36C_ROW="| 1 | tool | cli | gh flag missing | tool defect | gap | No | upstream_feedback | tool defect confirmed<br>backing_repo: praxis-fixture/undeclared-fixture | HIGH |"
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture)
+run_case "T36c_block_undeclared_visibility_with_pass_verdict" "block" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36C_ROW")")"
+RUN_CASE_ENV=()
+
+# T36d: demote — the offline contract. GH_HOST points at a domain that does not
+# resolve, and no PRAXIS_REPO_VISIBILITY entry covers the repo, so the lookup
+# returns no answer. Failing open here would reproduce the hole; failing closed
+# would block every offline retrospect. The Stop proceeds and the row's ground
+# is demoted to "visibility unresolved" instead.
+T36D_ROW="| 1 | tool | cli | gh flag missing | tool defect | gap | No | upstream_feedback | tool defect confirmed<br>backing_repo: praxis-fixture/unreachable-fixture<br>repo_visibility: private | HIGH |"
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture GH_HOST=nonexistent.invalid)
+run_case "T36d_demote_visibility_unresolved_offline" "demote" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36D_ROW")")"
+RUN_CASE_ENV=()
+
+# T36e: demote — the own-org allowlist itself is unresolvable (no
+# PRAXIS_OWN_ORGS, `gh api user` unreachable). Ownness unknown is not the same
+# fact as ownness refuted, so it demotes rather than escalating.
+RUN_CASE_ENV=(GH_HOST=nonexistent.invalid PRAXIS_OWN_ORGS=)
+run_case "T36e_demote_own_org_allowlist_unresolved" "demote" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36D_ROW")")"
+RUN_CASE_ENV=()
 
 # T37: block — external=true + gate_4_verdict absent but ⚠ EXTERNAL: prefix present.
 # Scenario: Stage 2.5 emitted the EXTERNAL marker in the Rationale cell but did
@@ -2929,6 +3016,87 @@ fi
 run_case "HP4_backslash_in_transcript_path_still_blocks" "block" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T10_CARD" "$T10_ROW")")" \
   "false" "backslash"
+
+# Gate-4b resolver — the two conditions the lookup carries (issue #1244).
+# Asserted against the helper directly: the cap and the budget floor are
+# properties of the resolver, and driving them through a transcript would prove
+# them only for whatever repo count that fixture happened to carry.
+G4_HELPER="$REPO_ROOT/hooks/completion-verify/retrospect-mix-check/gate4_visibility.py"
+
+assert_helper() { # name, expected-substring, args..., stdin via $STDIN
+  local name="$1" needle="$2"; shift 2
+  local out
+  out=$(printf '%s' "$STDIN" | env "${RUN_CASE_ENV[@]}" python3 "$G4_HELPER" "$@" 2>/dev/null)
+  if printf '%s' "$out" | grep -qF "$needle"; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] expected substring '$needle', got: ${out:-<empty>}"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# Budget floor: below MIN_SUBPROC_BUDGET_SEC no subprocess is spawned at all —
+# the fork/exec is dead on arrival and 12 more hooks queue behind this one in
+# the Stop group. The oracle has to be the spawn itself, not the returned
+# value: an unspawned lookup and a failed one both come back UNRESOLVED.
+G4_BIN="$TMPDIR/g4bin"; mkdir -p "$G4_BIN"
+cat > "$G4_BIN/gh" <<'SPY'
+#!/bin/sh
+echo "$@" >> "$GH_SPY"
+exit 1
+SPY
+chmod +x "$G4_BIN/gh"
+GH_SPY_FILE="$TMPDIR/gh_spy.log"; : > "$GH_SPY_FILE"
+STDIN=$'praxis-fixture/floor-fixture\n'
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture "GH_SPY=$GH_SPY_FILE" "PATH=$G4_BIN:$PATH")
+assert_helper "G4H1_budget_floor_returns_unresolved" \
+  "vis	praxis-fixture/floor-fixture	UNRESOLVED" --deadline-epoch 1
+if [ ! -s "$GH_SPY_FILE" ]; then
+  echo "PASS  [G4H1b_budget_floor_spawned_nothing]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [G4H1b_budget_floor_spawned_nothing] gh was invoked: $(cat "$GH_SPY_FILE")"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("G4H1b_budget_floor_spawned_nothing")
+fi
+# Positive control for the line above: the same command, same repo, same shim,
+# differing only in the deadline. Without it an empty spy file and a shim that
+# was never on PATH look identical.
+assert_helper "G4H2_control_same_call_with_budget_attempts_the_lookup" \
+  "vis	praxis-fixture/floor-fixture	UNRESOLVED" \
+  --deadline-epoch "$(python3 -c 'import time;print(time.time()+8)')"
+if [ -s "$GH_SPY_FILE" ]; then
+  echo "PASS  [G4H2b_control_spawned_the_lookup]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [G4H2b_control_spawned_the_lookup] gh was never invoked"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("G4H2b_control_spawned_the_lookup")
+fi
+RUN_CASE_ENV=()
+
+# Lookup cap: the 9th distinct repo is demoted rather than looked up. Repeats
+# cost nothing — the resolver dedupes, so one repo is one round trip per run.
+STDIN=""
+for i in 1 2 3 4 5 6 7 8 9; do STDIN="${STDIN}praxis-fixture/r${i}"$'\n'; done
+STDIN="${STDIN}praxis-fixture/r1"$'\n'
+G4_VIS_ENTRIES=""
+for i in 1 2 3 4 5 6 7 8 9; do G4_VIS_ENTRIES="${G4_VIS_ENTRIES}praxis-fixture/r${i}=private,"; done
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture GH_HOST=nonexistent.invalid
+              "PRAXIS_REPO_VISIBILITY=$G4_VIS_ENTRIES")
+assert_helper "G4H3_ninth_repo_past_the_cap_is_unresolved" \
+  "vis	praxis-fixture/r9	UNRESOLVED" \
+  --deadline-epoch "$(python3 -c 'import time;print(time.time()+8)')"
+assert_helper "G4H4_eighth_repo_inside_the_cap_resolves" \
+  "vis	praxis-fixture/r8	private" \
+  --deadline-epoch "$(python3 -c 'import time;print(time.time()+8)')"
+G4_DEDUPE=$(printf '%s' "$STDIN" | env "${RUN_CASE_ENV[@]}" python3 "$G4_HELPER" \
+  --deadline-epoch "$(python3 -c 'import time;print(time.time()+8)')" 2>/dev/null \
+  | grep -c '^vis	praxis-fixture/r1	')
+if [ "$G4_DEDUPE" = "1" ]; then
+  echo "PASS  [G4H5_repeated_repo_is_resolved_once]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [G4H5_repeated_repo_is_resolved_once] expected 1 record for r1, got $G4_DEDUPE"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("G4H5_repeated_repo_is_resolved_once")
+fi
+RUN_CASE_ENV=()
+unset STDIN
 
 echo
 echo "================================"
