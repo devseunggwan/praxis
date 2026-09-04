@@ -261,6 +261,22 @@ def strip_heredoc_bodies(command: str) -> str:
 def heredoc_bodies(command: str) -> list[str]:
     """Every heredoc body in `command`, in source order, terminator excluded.
 
+    The delimiter-dropping view of `heredoc_bodies_by_delimiter`, for a caller
+    that wants every body regardless of which heredoc produced it.
+    """
+    return [body for _delim, body in heredoc_bodies_by_delimiter(command)]
+
+
+def heredoc_bodies_by_delimiter(command: str) -> list[tuple[str, str]]:
+    """`(delimiter, body)` for every heredoc in `command`, in source order.
+
+    The delimiter is what lets a caller say *which* heredoc it means. A command
+    can hold several — an unrelated `cat > notes <<'NOTE'` beside the
+    `git commit -F - <<'EOF'` whose body is the message — and grading them all
+    reads someone else's prose as the commit message (issue #1228 follow-up).
+    Nothing here decides that binding; it only stops discarding the one field
+    the caller needs to make it.
+
     The counterpart of `strip_heredoc_bodies`: that one blanks a body because
     it is data rather than script, and this one returns it for exactly the
     same reason. `git commit -m "$(cat <<'EOF' … EOF)"` puts the commit
@@ -286,7 +302,7 @@ def heredoc_bodies(command: str) -> list[str]:
     """
     if "<<" not in command:
         return []
-    bodies: list[str] = []
+    bodies: list[tuple[str, str]] = []
     pending: list[tuple[str, bool]] = []
     current: list[str] = []
     quote = ""
@@ -296,7 +312,7 @@ def heredoc_bodies(command: str) -> list[str]:
             probe = line.lstrip("\t") if dash else line
             if probe == delim:
                 del pending[0]
-                bodies.append("\n".join(current))
+                bodies.append((delim, "\n".join(current)))
                 current = []
             else:
                 current.append(probe)
@@ -304,8 +320,28 @@ def heredoc_bodies(command: str) -> list[str]:
         openers, quote = _heredoc_starts_on_line(line, quote)
         pending.extend(openers)
     if pending:
-        bodies.append("\n".join(current))
+        bodies.append((pending[0][0], "\n".join(current)))
     return bodies
+
+
+def heredoc_delimiters(text: str) -> list[str]:
+    """Every heredoc delimiter word `text` opens, in source order.
+
+    Scans with the same opener reader `heredoc_bodies_by_delimiter` uses, so
+    the two agree on what counts as an opener — a here-string, an arithmetic
+    shift, and a quoted `<<` are none of them. `text` is a fragment rather than
+    a whole command: one shell token (`<<EOF`, or the `$(cat <<'EOF' …)` a
+    `-m` value arrives as) is the case this exists for, which is how a caller
+    names the heredoc a particular argv position reads from.
+    """
+    if "<<" not in text:
+        return []
+    out: list[str] = []
+    quote = ""
+    for line in text.split("\n"):
+        openers, quote = _heredoc_starts_on_line(line, quote)
+        out.extend(delim for delim, _dash in openers)
+    return out
 
 
 HELP_FLAGS = frozenset({"-h", "--help"})

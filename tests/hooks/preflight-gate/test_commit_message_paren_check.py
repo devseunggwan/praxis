@@ -160,6 +160,37 @@ def test_message_sources(command, rc):
     assert _run(command)[0] == rc
 
 
+# A heredoc that belongs to some other command in the same chain.
+NOTES = "cat > /tmp/notes <<'NOTE'\n" + BAD_BODY + "\nNOTE\n"
+
+
+@pytest.mark.parametrize(
+    "command,rc",
+    [
+        # A readable `-m` subject no longer ends the search: the body arrives
+        # from the heredoc the SECOND `-m` opens, and it is still the message.
+        ("git commit -m 'fix: x' -m \"$(cat <<'EOF'\n" + BAD_BODY + "\nEOF\n)\"", 2),
+        ("git commit -m 'fix: x' -m \"$(cat <<'EOF'\n" + GOOD_BODY + "\nEOF\n)\"", 0),
+        # …and the other direction: a heredoc belonging to another command is
+        # not the commit message, however malformed it is.
+        (NOTES + "git commit -F - <<'EOF'\nfix: ok\nEOF", 0),
+        (NOTES + "git commit -F - <<'EOF'\n" + BAD_BODY + "\nEOF", 2),
+        (NOTES + "git commit -m \"$(cat <<'EOF'\nfix: ok\nEOF\n)\"", 0),
+        # `-F -` with no heredoc at all: stdin comes from somewhere we cannot
+        # read, so the unrelated body must not stand in for it.
+        (NOTES + "git commit -F -", 0),
+        # One delimiter word naming two bodies identifies neither — silent.
+        (
+            "cat > /tmp/notes <<'EOF'\n" + BAD_BODY + "\nEOF\n"
+            "git commit -F - <<'EOF'\nfix: ok\nEOF",
+            0,
+        ),
+    ],
+)
+def test_heredoc_is_bound_to_the_source_that_names_it(command, rc):
+    assert _run(command)[0] == rc
+
+
 @pytest.mark.parametrize(
     "command,rc",
     [

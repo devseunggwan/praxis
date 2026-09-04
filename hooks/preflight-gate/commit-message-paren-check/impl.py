@@ -36,7 +36,8 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib")
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     compound_cascade_hint,
-    heredoc_bodies,
+    heredoc_bodies_by_delimiter,
+    heredoc_delimiters,
     iter_command_starts,
     safe_tokenize,
 )
@@ -45,6 +46,7 @@ from block_message import format_block  # type: ignore[import-not-found]  # noqa
 from git_commit_titles import (  # type: ignore[import-not-found]  # noqa: E402
     _scan_commit_message_values,
     extract_git_message_texts,
+    title_is_unresolved_substitution,
 )
 
 STRICT_ENV = "PRAXIS_COMMIT_PAREN_STRICT"
@@ -92,21 +94,67 @@ def offending_lines(message: str) -> list[tuple[int, str, str]]:
 # Message sources
 # ---------------------------------------------------------------------------
 
-def _message_texts(argv: list[str], command: str) -> list[str]:
-    """Every commit message text this argv contributes.
+def _heredoc_text_for(delimiters: list[str], command: str) -> list[str]:
+    """The bodies `delimiters` name, when each name identifies exactly one.
 
-    The heredoc fallback is scoped to a `git commit` argv that yielded no
-    readable message: that is precisely the `-m "$(cat <<'EOF' …)"` and
-    `-F -` shape, where the heredoc body IS the message and nothing else in
-    the command produced one. Reading heredocs unconditionally would grade
-    prose belonging to some other command in the same chain.
+    A delimiter word is how an unresolved message source says which heredoc it
+    reads from, and it is only an identifier while it is unique in the command.
+    `cat <<EOF … EOF; git commit -F - <<EOF … EOF` reuses the word, so nothing
+    in the token stream separates the notes body from the message body — the
+    ambiguous name yields no text and the gate stays silent, which is the
+    fail-open direction this repo takes for a gate.
     """
-    texts = extract_git_message_texts(argv, command)
-    if texts:
-        return texts
-    if _scan_commit_message_values(argv) is None:
+    pairs = heredoc_bodies_by_delimiter(command)
+    texts: list[str] = []
+    for name in delimiters:
+        matches = [body for delim, body in pairs if delim == name]
+        if len(matches) == 1:
+            texts.append(matches[0])
+    return texts
+
+
+def _unresolved_source_texts(argv: list[str], command: str) -> list[str]:
+    """Heredoc bodies belonging to the message sources this argv cannot resolve.
+
+    Two shapes reach the parser as an unreadable value, and each names its own
+    heredoc rather than the command's heredocs at large:
+
+      -m "$(cat <<'EOF' … EOF)"   the delimiter sits inside the `-m` value, so
+                                  the value itself says which body is its own
+      -F -                        the message arrives on stdin, fed by a
+                                  redirection on THIS argv — `<<EOF` survives
+                                  tokenization as a token of the segment
+
+    Binding by name is what keeps an unrelated `cat > notes <<'NOTE'` in the
+    same chain out of the grade: reading every heredoc blocked a valid commit
+    whenever some other command in the chain carried prose the parser would
+    reject, and returning early on the first readable `-m` let a malformed
+    body ride along behind a well-formed subject.
+    """
+    scanned = _scan_commit_message_values(argv)
+    if scanned is None:
         return []
-    return heredoc_bodies(command)
+    values, _c_dir = scanned
+
+    wanted: list[str] = []
+    for kind, raw in values:
+        if kind == "message":
+            if title_is_unresolved_substitution(raw.split("\n")[0], command):
+                wanted.extend(heredoc_delimiters(raw))
+        elif raw == "-":
+            # stdin: bash feeds it from the last heredoc redirection on the
+            # segment, so later openers win when a command carries several.
+            opened = [d for tok in argv for d in heredoc_delimiters(tok)]
+            if opened:
+                wanted.append(opened[-1])
+    return _heredoc_text_for(wanted, command)
+
+
+def _message_texts(argv: list[str], command: str) -> list[str]:
+    """Every commit message text this argv contributes."""
+    return extract_git_message_texts(argv, command) + _unresolved_source_texts(
+        argv, command
+    )
 
 
 # ---------------------------------------------------------------------------

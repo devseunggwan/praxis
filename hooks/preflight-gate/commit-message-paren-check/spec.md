@@ -107,9 +107,13 @@ matching the sibling's `PRAXIS_COMMIT_TITLE_FORMAT_STRICT` shape.
 | --- | --- |
 | `git commit -m "…"` / `--message` / `-m="…"` / `-mvalue` / `-am "…"` | every `-m` value, joined with a blank line as git joins them |
 | `git commit -F <path>` / `--file` | the file's whole contents |
-| `git commit -m "$(cat <<'EOF' … EOF)"` | the heredoc body |
-| `git commit -F - <<'EOF' … EOF` | the heredoc body |
+| `git commit -m "$(cat <<'EOF' … EOF)"` | the body of the heredoc that `-m` value opens |
+| `git commit -m 'subject' -m "$(cat <<'EOF' … EOF)"` | the subject **and** that body |
+| `git commit -F - <<'EOF' … EOF` | the body of the last heredoc this argv opens |
 | `git commit -F -` (no heredoc) | silent pass (stdin unreadable) |
+| a heredoc belonging to another command in the chain | not the message — never graded |
+| two heredocs sharing one delimiter word | silent pass (the name identifies neither) |
+| `<<-` body | leading tabs stripped first, as bash strips them |
 | `git commit -m "$(cat /tmp/x)"` | silent pass (unresolvable substitution) |
 | anything that is not `git commit` | silent pass |
 
@@ -119,12 +123,26 @@ title gates use, differing only in keeping the whole message instead of the
 first line of the first `-m`. Keeping one walk is the point of that module
 (issue #594): a second copy is how the pre-#594 parsers drifted.
 
-The heredoc fallback (`heredoc_bodies` in `hooks/_lib/_hook_utils.py`, the
-counterpart of the existing `strip_heredoc_bodies`) is **scoped to a `git
-commit` argv that produced no readable message**. That is exactly the
-`-m "$(cat <<'EOF' …)"` and `-F -` shape, where the heredoc body IS the message
-and nothing else in the command produced one. Reading heredocs unconditionally
-would grade prose belonging to some other command in the same `&&` chain.
+Each heredoc read is **bound to the message source that names it**, via
+`heredoc_bodies_by_delimiter` and `heredoc_delimiters` in
+`hooks/_lib/_hook_utils.py` (the delimiter-keeping counterpart of the existing
+`strip_heredoc_bodies`). An unresolvable `-m` value carries its own opener
+inside the token — `$(cat <<'EOF'` — and a `-F -` reads stdin from a
+redirection on its own argv, so in both shapes the source says which body is
+its own. Two failure modes follow from getting that binding wrong, and both
+were shipped once:
+
+- **Scoping the read to an argv that produced NO readable message** let a
+  malformed body ride in behind a well-formed subject: `-m 'fix: x' -m "$(cat
+  <<'EOF' …)"` yields a readable first `-m`, so the heredoc was never read.
+- **Reading every heredoc in the command** graded prose belonging to some
+  other command in the same `&&` chain, blocking a valid commit whose own
+  message was clean.
+
+A delimiter word identifies a body only while it is unique in the command.
+`cat <<EOF … EOF; git commit -F - <<EOF … EOF` reuses it, and nothing in the
+token stream separates the two — that source contributes no text and the gate
+stays silent, which is the fail-open direction this repo takes for a gate.
 
 ## What is NOT covered
 
