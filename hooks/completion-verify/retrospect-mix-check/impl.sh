@@ -594,16 +594,24 @@ if [ "${#GATE4_ROWS[@]}" -gt 0 ]; then
     esac
   done
 
-  # The card's own verdict, checked against what was just recomputed. PASS
-  # claims every routed row is unescalated; NA claims there were no routed rows
-  # at all. Either one standing over an escalated row is the forgery this gate
-  # exists for.
-  if [ "$GATE4B_ESCALATED" = "1" ]; then
-    case "$GATE_4" in
-      PASS|NA)
-        GATE4B_VIOLATIONS+=("distribution card declares gate_4_verdict: ${GATE_4} but an independent resolution escalates at least one routed row — the card's verdict is written by the agent this gate constrains, so it is not the oracle (issue #1244); re-run skills/retrospect/audit-distribution-gates.py and paste the card it renders")
-        ;;
-    esac
+  # The card's own verdict, checked against what was just recomputed.
+  #
+  # NA does not mean "nothing escalated" — audit-distribution-gates.py emits it
+  # only when `routed` is empty, i.e. no finding proposed upstream_feedback or
+  # issue at all. Every entry in GATE4_ROWS is such a finding, so a non-empty
+  # array refutes NA outright, whatever the per-row resolution came back as. It
+  # is checked ahead of the escalation test, not inside it: an NA card whose
+  # rows all resolve exempt or unresolved is still a false card, and that is the
+  # shape the escalation test could never see.
+  if [ "$GATE_4" = "NA" ]; then
+    g4_na_list=""
+    for g4_rec in "${GATE4_ROWS[@]}"; do
+      IFS=$'\t' read -r g4_num g4_repo _ _ <<< "$g4_rec"
+      g4_na_list="${g4_na_list}, #${g4_num} (${g4_repo})"
+    done
+    GATE4B_VIOLATIONS+=("distribution card declares gate_4_verdict: NA — the value reserved for a draft with no routed external write at all — but the findings table carries ${#GATE4_ROWS[@]} routed row(s) with a declared backing repo: ${g4_na_list#, }; re-run skills/retrospect/audit-distribution-gates.py and paste the card it renders")
+  elif [ "$GATE4B_ESCALATED" = "1" ] && [ "$GATE_4" = "PASS" ]; then
+    GATE4B_VIOLATIONS+=("distribution card declares gate_4_verdict: PASS but an independent resolution escalates at least one routed row — the card's verdict is written by the agent this gate constrains, so it is not the oracle (issue #1244); re-run skills/retrospect/audit-distribution-gates.py and paste the card it renders")
   fi
 fi
 
