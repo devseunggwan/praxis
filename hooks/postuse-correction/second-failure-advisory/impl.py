@@ -34,7 +34,20 @@ vanishing exactly where the loop is worst.
 Failure detection
 ================
 
-The hook derives failure from `tool_response`:
+`tool_response` reaches this hook in two shapes, and the failing one is a
+**string** (issue #1265):
+
+- a plain string — the shape a FAILED call actually arrives in. Censused over
+  10,467 unique Bash `toolUseResult` entries in 120 live transcripts: 388 are
+  strings, every one with `tool_result.is_error == True`, and not one
+  successful Bash call is ever a string. Matched by whitelist, `_is_failed` ->
+  `_string_failure_text`: text opening with `Error: `, or the literal
+  `User rejected tool use` (a denial carries no prefix). The single
+  `Error: `-prefixed non-failure — the harness's oversized-output notice for a
+  *successful* call whose result was spilled to a file, emitted with
+  `is_error == False` — is excluded by name.
+- a dict — the shape a SUCCESSFUL call arrives in, plus synthetic/legacy
+  payloads. Failure markers, in order:
 
 - `isError`/`is_error is True`
 - `status == "error"`
@@ -64,6 +77,14 @@ back-compat `error`/`stderr` fallback runs for non-Bash tools only.
 
 `stderr` is read through the harness-noise filter below before the non-Bash
 back-compat check runs — see issue #1042.
+
+That Bash guard does NOT extend to the string path (issue #1265). It exists
+because a *dict* payload's `stderr` cannot separate an exit-0 Bash success from
+a failure, and both #1042 and #1096 were exactly that: exit-0 successes
+arriving as dicts with non-empty `stderr`. A string payload has no `stderr`
+field to be ambiguous about — the harness has already made the call and encoded
+it in the text. With both roads closed the hook fired 135,030 times and
+recorded `decision: pass` on every one.
 
 Harness noise in `stderr` (issue #1042)
 =======================================
@@ -114,8 +135,15 @@ retries that differ only by volatile values:
 This keeps retries that only changed `/tmp/run-<rand>.log`/timestamps/hash IDs from
 being treated as distinct failures.
 
-The candidate text is drawn from `error`/`stderr`/`output`/`stdout` in that
-order (`_derive_failure_text`); `stderr` goes through the same harness-noise
+For a string payload the string itself is the signature material — it is the
+only failure evidence there is, which is what keeps two unrelated string
+failures on distinct signatures rather than collapsing them onto one pair
+(the issue #1042 defect-2 shape). Known residual: a bare `Error: Exit code 1`
+carrying no further output (6 of 388 observed) is identical across unrelated
+commands, so two such failures in one session share a signature.
+
+For a dict payload the candidate text is drawn from
+`error`/`stderr`/`output`/`stdout` in that order (`_derive_failure_text`); `stderr` goes through the same harness-noise
 filter as failure detection (issue #1042) before it is used, so a failure
 whose `stderr` carries only the harness's cwd-reset notice falls through to
 `output`/`stdout` for its distinguishing text instead of normalizing to the
@@ -156,6 +184,25 @@ _ADVISORY_FROM_OCCURRENCE = 2
 
 _STATE_SCHEMA_VERSION = 1
 _MAX_SIGNATURE_LEN = 4_096
+
+
+# String-shaped `tool_response` (issue #1265). A failed tool call reaches this
+# hook not as a dict but as a plain string; the two shapes below are the whole
+# observed failure surface, censused over 10,467 unique Bash `toolUseResult`
+# entries in 120 session transcripts: 388 of them are strings, every one
+# carrying `tool_result.is_error == True`, and no successful Bash call is ever a
+# string. Matching is a whitelist, not "any string is a failure", so a shape
+# that has not been observed as a failure cannot start firing the advisory.
+_STRING_FAILURE_PREFIX = "Error: "
+_STRING_REJECTION_TEXT = "user rejected tool use"
+
+# The one string that opens with `Error: ` and is NOT a failure: the harness's
+# oversized-output notice, emitted with `is_error == False` when a *successful*
+# call's result is spilled to a file (27 observations, all on MCP tools). It has
+# to be excluded by name, or every large successful result reads as a failure.
+_STRING_OVERSIZED_OUTPUT_RE = re.compile(
+    r"^Error: result \(.*?\) exceeds maximum allowed tokens", re.IGNORECASE
+)
 
 
 # Reference candidates inside a blocking message, most explicit first.
@@ -242,7 +289,29 @@ def _extract_reference(tool_input: dict[str, Any], failure_text: str = "") -> st
     return ""
 
 
+def _string_failure_text(tool_response: str) -> str:
+    """Failure text carried by a string-shaped `tool_response`, else `""`.
+
+    Returning the text rather than a bool is what keeps unrelated failures on
+    distinct signatures (issue #1042 defect 2): the string *is* the only failure
+    evidence the payload carries, so it is both the failure marker and the
+    signature material.
+    """
+    text = tool_response.strip()
+    if not text:
+        return ""
+    if _STRING_OVERSIZED_OUTPUT_RE.match(text):
+        return ""
+    if text.startswith(_STRING_FAILURE_PREFIX):
+        return text
+    if text.lower() == _STRING_REJECTION_TEXT:
+        return text
+    return ""
+
+
 def _derive_failure_text(tool_response: Any, tool_name: str) -> str:
+    if isinstance(tool_response, str):
+        return _string_failure_text(tool_response)
     if not isinstance(tool_response, dict):
         return ""
     if isinstance(tool_response.get("error"), str):
@@ -286,6 +355,18 @@ def _derive_error_text(tool_response: Any, tool_name: str) -> str:
 
 
 def _is_failed(tool_response: Any, tool_name: str) -> bool:
+    # String-shaped payload (issue #1265) — decided before, and independently
+    # of, the `tool_name == "Bash"` guard at the bottom of this function. That
+    # guard exists because a *dict* payload's `stderr` cannot tell an exit-0
+    # Bash success from a failure (#1042, #1096), and both of those defects were
+    # exit-0 successes arriving as dicts with non-empty `stderr`. A string
+    # payload has no `stderr` field to be ambiguous about: the harness has
+    # already made the success/failure call and encoded it in the text itself.
+    # Extending the Bash guard here would re-close the only road left open —
+    # which is exactly the 135,030-fire, zero-advisory silence of #1265.
+    if isinstance(tool_response, str):
+        return bool(_string_failure_text(tool_response))
+
     if not isinstance(tool_response, dict):
         return False
 

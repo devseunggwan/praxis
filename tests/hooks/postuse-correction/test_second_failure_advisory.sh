@@ -23,6 +23,10 @@
 #  16) stderr가 noise뿐인 서로 다른 실패는 서로 다른 signature (issue #1042)
 #  17) tool_name이 Bash가 아니면 noise strip 자체를 건너뛰어 진짜 실패로 판정 (PR #1071 리뷰)
 #  18) 성공한 Bash 호출이 stderr에 진행 로그를 써도(git fetch 등, exit 0) 반복돼도 advisory 없음 (issue #1096)
+#  19) tool_response 가 dict 가 아니라 문자열로 오는 실패(실제 harness 형상) 처리 (issue #1265)
+#      a) 동일 문자열 실패 2회 -> advisory  b) 서로 다른 문자열 실패 -> 무음
+#      c) is_error:false 인 oversized-output 안내 -> 무음(must-fail)  d) User rejected tool use -> advisory
+#      e) 공백뿐인 문자열 -> 무음  f) hook block 문자열 반복 -> 회차 포함 advisory
 #
 # Run:
 #   bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
@@ -737,6 +741,157 @@ if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -s "$STATE21" ]; the
 else
   assert_fail "18b) repeated deprecation-warning-on-stderr success stays silent" \
     "rc=$rc out=[$out] err=[$err] state=[$(cat "$STATE21" 2>/dev/null)]"
+fi
+
+# ---------------------------------------------------------------------------
+# Case 19: string-shaped `tool_response` (issue #1265).
+#
+# A FAILED tool call does not reach this hook as a dict at all — it arrives as a
+# plain string, so `_is_failed`'s `isinstance(tool_response, dict)` guard
+# rejected it before any failure marker was ever consulted. Both roads were
+# closed: the dict road by the `tool_name == "Bash"` guard (#1096), the string
+# road by the isinstance check. The hook fired 135,030 times and recorded
+# `decision: pass` on every one.
+#
+# Every fixture below is a VERBATIM string captured from a real session
+# transcript (`toolUseResult` for a `Bash`/MCP `tool_use`), not composed:
+# a census of 10,467 unique Bash results across 120 transcripts found 388
+# string payloads, all carrying `tool_result.is_error == True`, and zero
+# successful Bash call that arrives as a string.
+# ---------------------------------------------------------------------------
+echo "=== case 19: string-shaped failed tool_response (issue #1265) ==="
+string_payload() {
+  # string_payload <session_id> <tool_name> <tool_response-string>
+  python3 - "$1" "$2" "$3" <<'PY'
+import json, sys
+session_id, tool_name, text = sys.argv[1], sys.argv[2], sys.argv[3]
+print(json.dumps({
+    "session_id": session_id,
+    "tool_name": tool_name,
+    "tool_input": {"command": "true"},
+    # The whole payload — a bare string, exactly as the harness delivers it.
+    "tool_response": text,
+}))
+PY
+}
+
+# Captured verbatim: a shell parse error, exit 1.
+STR_FAIL_A=$'Error: Exit code 1\n(eval):1: == not found'
+# Captured verbatim: a different failure — a 2-minute timeout, exit 143.
+STR_FAIL_B=$'Error: Exit code 143\nCommand timed out after 2m 0s'
+# Captured verbatim: a PreToolUse hook block (the family #1265 exists to catch).
+STR_BLOCKED='Error: Blocked: sleep 60 followed by: echo done. To wait for a condition, use Monitor with an until-loop (e.g. `until <check>; do sleep 2; done`).'
+# Captured verbatim: a user-denied call. No `Error: ` prefix at all, so a
+# prefix-only matcher would miss it.
+STR_REJECTED='User rejected tool use'
+# Captured verbatim from an MCP tool_result whose `is_error` was FALSE: the
+# harness's oversized-output notice for a SUCCESSFUL call whose result was
+# spilled to a file. It opens with `Error: ` and is not a failure — the one
+# must-fail case in the string surface. (Absolute path shortened; the notice
+# text itself is unmodified.)
+STR_OVERSIZED='Error: result (104,870 characters across 2,772 lines) exceeds maximum allowed tokens. Output has been saved to /tmp/x/out.txt'
+
+# 19a) positive: the same real string failure twice => advisory on the 2nd.
+STATE22="$TMP_DIR/c22.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-a Bash "$STR_FAIL_A")" "$STATE22" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-a Bash "$STR_FAIL_A")" "$STATE22" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "19a) repeated string-shaped failure advises on the 2nd occurrence"
+else
+  assert_fail "19a) repeated string-shaped failure advises on the 2nd occurrence" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+# 19b) negative control: two DIFFERENT string failures must not advise — this
+# hook is about repetition, not about failure. Without distinct signatures both
+# would collapse onto one pair and the 2nd would fire (issue #1042 defect 2).
+STATE23="$TMP_DIR/c23.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-b Bash "$STR_FAIL_A")" "$STATE23" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-b Bash "$STR_FAIL_B")" "$STATE23" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+  assert_pass "19b) two different string failures stay silent (distinct signatures)"
+else
+  assert_fail "19b) two different string failures stay silent (distinct signatures)" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+# 19c) must-fail case: the oversized-output notice is a SUCCESS (`is_error:
+# false`) that happens to open with `Error: `. Repeating it must stay silent and
+# must not even create state — otherwise every large successful result reads as
+# a failure.
+STATE24="$TMP_DIR/c24.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-c mcp__x__query "$STR_OVERSIZED")" "$STATE24" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-c mcp__x__query "$STR_OVERSIZED")" "$STATE24" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -s "$STATE24" ]; then
+  assert_pass "19c) repeated oversized-output notice (is_error:false) stays silent"
+else
+  assert_fail "19c) repeated oversized-output notice (is_error:false) stays silent" \
+    "rc=$rc out=[$out] err=[$err] state=[$(cat "$STATE24" 2>/dev/null)]"
+fi
+
+# 19d) `User rejected tool use` carries no `Error: ` prefix, so it is matched by
+# name. A repeated denial is exactly the blind-retry loop this hook exists for.
+STATE25="$TMP_DIR/c25.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-d Bash "$STR_REJECTED")" "$STATE25" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-d Bash "$STR_REJECTED")" "$STATE25" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "19d) repeated user-rejection string advises"
+else
+  assert_fail "19d) repeated user-rejection string advises" "rc=$rc out=[$out] err=[$err]"
+fi
+
+# 19e) an empty / whitespace-only string is not failure evidence -> fail-open.
+STATE26="$TMP_DIR/c26.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-e Bash "   ")" "$STATE26" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-e Bash "   ")" "$STATE26" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -s "$STATE26" ]; then
+  assert_pass "19e) whitespace-only string payload stays silent"
+else
+  assert_fail "19e) whitespace-only string payload stays silent" \
+    "rc=$rc out=[$out] err=[$err] state=[$(cat "$STATE26" 2>/dev/null)]"
+fi
+
+# 19f) a repeated PreToolUse hook block — the motivating family. The advisory
+# must carry the running count so the loop gets a stronger signal, not silence.
+STATE27="$TMP_DIR/c27.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-f Bash "$STR_BLOCKED")" "$STATE27" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-f Bash "$STR_BLOCKED")" "$STATE27" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-f Bash "$STR_BLOCKED")" "$STATE27" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "3회째" "$out"; then
+  assert_pass "19f) repeated hook-block string keeps advising with its count"
+else
+  assert_fail "19f) repeated hook-block string keeps advising with its count" \
+    "rc=$rc out=[$out] err=[$err]"
 fi
 
 echo

@@ -25,7 +25,34 @@ Supported hosts: all
 
 ## Failure 판단
 
-`tool_response` 기준:
+`tool_response`는 두 형태로 도착하며, **실패는 문자열로 옵니다** (issue #1265).
+
+### 문자열 payload (issue #1265)
+
+실패한 도구 호출은 dict가 아니라 평범한 문자열로 전달됩니다. 실 세션
+transcript 120개에서 Bash `toolUseResult` 10,467건을 전수 조사한 결과 388건이
+문자열이었고 **전부** `tool_result.is_error == True`, 성공한 Bash 호출이
+문자열로 오는 사례는 0건이었습니다.
+
+판정은 화이트리스트입니다 (`_string_failure_text`).
+
+- `Error:` 와 공백으로 시작하면 실패 (`Error: Exit code N`, `Error: Blocked: …`,
+  `Error: Permission …`, `Error: PreToolUse:Bash hook error: …`)
+- 정확히 `User rejected tool use`이면 실패 (접두사가 없으므로 이름으로 매칭)
+- `Error: result (…) exceeds maximum allowed tokens …`는 **실패가 아닙니다**.
+  결과가 커서 파일로 내려간 *성공* 호출의 안내이며 `is_error == False`입니다
+  (관측 27건, 전부 MCP 도구). 이름으로 제외합니다.
+- 그 외 문자열(빈 문자열 포함)은 성공으로 처리 — 화이트리스트이므로 실패로
+  관측된 적 없는 형태가 새로 발화하는 일은 없습니다.
+
+이 판정은 아래 `tool_name == "Bash"` 게이트보다 **앞에서, 그와 무관하게**
+내려집니다. 그 게이트는 *dict* payload의 `stderr`가 exit-0 성공과 실패를
+구분하지 못해 생긴 것이고(#1042, #1096 둘 다 dict + 비어있지 않은 `stderr`인
+exit-0 성공이었습니다), 문자열 payload에는 모호해질 `stderr` 필드 자체가
+없습니다. 두 길이 모두 막힌 결과가 **135,030회 발화 · `decision: pass` 100%**
+라는 침묵이었습니다.
+
+### dict payload
 
 - `isError is True`이면 실패
 - `interrupted is True`이면 실패
@@ -58,7 +85,13 @@ noOutputExpected}`이며 `exit`도 `isError`도 없습니다. 그래서 모든 B
 
 ## Signature 산정
 
-`tool_response`에서 실패 텍스트 후보를 다음 순서로 추출합니다.
+문자열 payload는 그 문자열 자체가 signature 재료입니다. 유일한 실패 증거이기
+때문이며, 서로 다른 문자열 실패 2건이 한 쌍으로 합쳐지지 않게 하는 것도 이
+성질입니다(issue #1042 defect 2와 같은 형태). 알려진 잔여 위험: 출력이 전혀
+없는 `Error: Exit code 1`(관측 388건 중 6건)은 명령이 달라도 문자열이 같으므로
+한 세션 안의 서로 다른 두 실패가 같은 signature를 받습니다.
+
+dict payload는 실패 텍스트 후보를 다음 순서로 추출합니다.
 
 1. `error`
 2. `stderr` (harness noise 필터를 거친 뒤)
@@ -224,5 +257,10 @@ python3 -m pytest tests/test_hook_state_concurrency.py
   무력화하지 않았는지 확인)
 - `stderr`가 noise뿐이고 구분 정보가 `stdout`에만 있는 서로 다른 실패 2건은
   서로 다른 signature를 받아 카운터가 합쳐지지 않음 (issue #1042 defect 2)
+- 문자열 payload 동일 실패 2회 -> advisory, 서로 다른 문자열 실패 2건 ->
+  무음(signature 분리), `User rejected tool use` 반복 -> advisory,
+  oversized-output 안내(`is_error:false`) 반복 -> 무음·상태 파일 없음,
+  공백뿐인 문자열 -> 무음 (issue #1265, case 19; fixture는 전부 실 transcript
+  에서 그대로 캡처)
 - 두 프로세스 동시 실행: 잠금 없이는 증분 유실, 잠금 하에서는 카운트 1→2→3
   과 advisory 2회(2회째·3회째) (`tests/test_hook_state_concurrency.py`)
