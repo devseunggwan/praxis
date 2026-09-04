@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Invariant canary: no ``$<digit>`` in a SKILL.md body (issue #1259).
 
-Claude Code substitutes ``$1``..``$9`` in a SKILL.md with the skill
-invocation's arguments at load time. Disk keeps the literal; the body the model
-reads does not. So a shell snippet written as ``awk '{print $1}'`` arrives as
+Claude Code substitutes ``$<digit>`` in a SKILL.md with the skill invocation's
+arguments at load time. Disk keeps the literal; the body the model reads does
+not. So a shell snippet written as ``awk '{print $1}'`` arrives as
 ``awk '{print claude-2}'``, and awk reads that as *variable ``claude`` minus 2*
 — an undefined variable is 0, so the result is ``-2``. A non-empty wrong value
 is the worst outcome available: an ``if [ -z "$VAR" ]`` guard passes it
@@ -14,10 +14,26 @@ Scope is ``skills/*/SKILL.md`` only. Executable scripts under ``skills/`` —
 and never loaded as model context, so their positional parameters are correct
 and must not be flagged.
 
-``$0`` is left alone: the loader substitutes arguments, and there is no
-zeroth argument. ``$@`` and ``${...}`` do not match the pattern by
-construction, which is what lets ``"$(dirname "$0")/…" "$@"`` inside a fenced
-example survive the scan.
+``$0`` is a reference like any other. The loader's own expression, read out of
+the installed runtime, is::
+
+    e.replace(/\\$(\\d+)(?!\\w)/g, (N, F) => {
+      let U = parseInt(F, 10);
+      if (_[U] === void 0) return N;
+      return D = !0, f(_[U]);
+    })
+
+``\\d+`` matches a zero and ``_`` is an ordinary zero-indexed array, so ``$0``
+resolves to the *first* argument rather than to nothing — and the whole scale
+is shifted with it, ``$1`` being the second. Anything the loader leaves alone
+is a safe form here: ``${0}`` (the brace stops ``\\d+`` from matching), ``$@``,
+``$*``, ``$#``, and a trailing bare ``$``. Multi-digit ``$10`` is substituted
+once eleven arguments are present, and this scan sees it through its ``$1``
+prefix.
+
+Known gaps, both false positives rather than misses: ``$0x`` is flagged though
+the loader's ``(?!\\w)`` spares it, and ``\\$0`` is flagged though the escape
+survives (the loader consumes the backslash and restores a literal ``$``).
 
 Run standalone or via ``scripts/run-tests.sh``. Exit 0 plus a scanned-file
 count on a clean tree; exit 1 listing every ``file:line  text`` hit on drift.
@@ -32,8 +48,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
-# ``[1-9]`` rather than ``[0-9]``: see the module docstring on ``$0``.
-_HIT_RE = re.compile(r"\$[1-9]")
+_HIT_RE = re.compile(r"\$[0-9]")
 
 # What to write instead, quoted in the failure output so the fix does not need
 # a second lookup. Held here rather than in the message string because both the
