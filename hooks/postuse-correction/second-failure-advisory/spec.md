@@ -127,9 +127,16 @@ noOutputExpected}`이며 `exit`도 `isError`도 없습니다. 그래서 모든 B
 
 문자열 payload는 그 문자열 자체가 signature 재료입니다. 유일한 실패 증거이기
 때문이며, 서로 다른 문자열 실패 2건이 한 쌍으로 합쳐지지 않게 하는 것도 이
-성질입니다(issue #1042 defect 2와 같은 형태). 알려진 잔여 위험: 출력이 전혀
-없는 `Error: Exit code 1`(관측 388건 중 6건)은 명령이 달라도 문자열이 같으므로
-한 세션 안의 서로 다른 두 실패가 같은 signature를 받습니다.
+성질입니다(issue #1042 defect 2와 같은 형태).
+
+다만 문자열 하나는 구분 정보를 전혀 담지 않습니다 — 출력이 없는
+`Error: Exit code N`(관측 388건 중 6건)은 어떤 명령이 죽었든 바이트가 같습니다.
+이 형태에 한해서만 `tool_input`의 `command`를 구분 텍스트로 덧붙입니다
+(`_BARE_EXIT_CODE_RE`). 판정 대상 호출과 같은 payload 안의 필드이므로 signature
+가 외부 상태에 의존하지는 않습니다. 결과: 서로 다른 두 명령은 더 이상 한 쌍으로
+합쳐지지 않고, 같은 명령이 같은 형태로 2회 실패하면 여전히 advisory 가 나갑니다
+(case 19g/19h). 실패 텍스트에 실제 내용이 있는 경우는 이미 구분되므로 건드리지
+않습니다.
 
 dict payload는 실패 텍스트 후보를 다음 순서로 추출합니다.
 
@@ -297,6 +304,9 @@ python3 -m pytest tests/test_hook_state_concurrency.py
   무력화하지 않았는지 확인)
 - `stderr`가 noise뿐이고 구분 정보가 `stdout`에만 있는 서로 다른 실패 2건은
   서로 다른 signature를 받아 카운터가 합쳐지지 않음 (issue #1042 defect 2)
+- 출력 없는 `Error: Exit code N`이 서로 다른 명령에서 나오면 무음(signature 충돌
+  방지), 같은 명령이 같은 형태로 2회 실패하면 여전히 advisory (issue #1265,
+  case 19g/19h — 뒤쪽이 앞쪽의 대조군)
 - 문자열 payload 동일 실패 2회 -> advisory, 서로 다른 문자열 실패 2건 ->
   무음(signature 분리), `User rejected tool use` 반복 -> advisory,
   oversized-output 안내(`is_error:false`) 반복 -> 무음·상태 파일 없음,

@@ -138,9 +138,12 @@ being treated as distinct failures.
 For a string payload the string itself is the signature material — it is the
 only failure evidence there is, which is what keeps two unrelated string
 failures on distinct signatures rather than collapsing them onto one pair
-(the issue #1042 defect-2 shape). Known residual: a bare `Error: Exit code 1`
-carrying no further output (6 of 388 observed) is identical across unrelated
-commands, so two such failures in one session share a signature.
+(the issue #1042 defect-2 shape). One string shape carries nothing to tell two
+failures apart — a bare `Error: Exit code N` with no output under it (6 of 388
+observed), byte-identical whatever command died. For that shape only, the
+command from `tool_input` is appended as the distinguishing text
+(`_BARE_EXIT_CODE_RE`), so two unrelated commands no longer share a pair while
+the same command failing twice still does.
 
 For a dict payload the candidate text is drawn from
 `error`/`stderr`/`output`/`stdout` in that order (`_derive_failure_text`); `stderr` goes through the same harness-noise
@@ -203,6 +206,13 @@ _STRING_REJECTION_TEXT = "user rejected tool use"
 _STRING_OVERSIZED_OUTPUT_RE = re.compile(
     r"^Error: result \(.*?\) exceeds maximum allowed tokens", re.IGNORECASE
 )
+
+# A string failure that is ONLY the exit-code line, with no command output under
+# it — 6 of the 388 observed. Every command that dies this way produces the exact
+# same bytes, so unrelated failures would share one signature and the second one
+# would advise "the same error pattern twice" about two different commands. That
+# is the #1042 defect-2 shape, and this hook must not ship it.
+_BARE_EXIT_CODE_RE = re.compile(r"^Error: Exit code \d+$")
 
 
 # Reference candidates inside a blocking message, most explicit first.
@@ -434,8 +444,21 @@ def _normalize_signature(raw: str) -> str:
     return text.lower()
 
 
-def _compute_signature(tool_name: str, tool_response: Any) -> str:
+def _compute_signature(
+    tool_name: str, tool_response: Any, tool_input: dict[str, Any] | None = None
+) -> str:
     text = _derive_failure_text(tool_response, tool_name)
+
+    # The bare exit-code line carries nothing to tell two failures apart, so the
+    # command that produced it is appended as the distinguishing text. It comes
+    # from `tool_input` in the same hook payload — the signature still depends on
+    # nothing outside the call being judged. Narrow by design: any failure whose
+    # text has real content is already distinguishable and is left untouched.
+    if isinstance(tool_response, str) and _BARE_EXIT_CODE_RE.match(text):
+        command = (tool_input or {}).get("command")
+        if isinstance(command, str) and command.strip():
+            text = f"{text}\n{command.strip()}"
+
     normalized = _normalize_signature(text)
     if not normalized:
         normalized = "<empty>"
@@ -533,9 +556,10 @@ def main() -> int:
     if not _is_failed(tool_response, tool_name):
         return 0
 
-    signature = _compute_signature(tool_name, tool_response)
+    tool_input = _extract_tool_input(payload)
+    signature = _compute_signature(tool_name, tool_response, tool_input)
     ref = _extract_reference(
-        _extract_tool_input(payload),
+        tool_input,
         _derive_failure_text(tool_response, tool_name),
     )
 

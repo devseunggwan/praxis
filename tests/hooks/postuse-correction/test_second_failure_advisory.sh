@@ -27,6 +27,8 @@
 #      a) 동일 문자열 실패 2회 -> advisory  b) 서로 다른 문자열 실패 -> 무음
 #      c) is_error:false 인 oversized-output 안내 -> 무음(must-fail)  d) User rejected tool use -> advisory
 #      e) 공백뿐인 문자열 -> 무음  f) hook block 문자열 반복 -> 회차 포함 advisory
+#      g) 출력 없는 `Error: Exit code 1` 이 서로 다른 명령에서 나오면 무음(signature 충돌 방지)
+#      h) 같은 명령이 같은 형태로 2회 실패하면 여전히 advisory (g의 대조군)
 #
 # Run:
 #   bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
@@ -761,14 +763,14 @@ fi
 # ---------------------------------------------------------------------------
 echo "=== case 19: string-shaped failed tool_response (issue #1265) ==="
 string_payload() {
-  # string_payload <session_id> <tool_name> <tool_response-string>
-  python3 - "$1" "$2" "$3" <<'PY'
+  # string_payload <session_id> <tool_name> <tool_response-string> [command]
+  python3 - "$1" "$2" "$3" "${4:-true}" <<'PY'
 import json, sys
-session_id, tool_name, text = sys.argv[1], sys.argv[2], sys.argv[3]
+session_id, tool_name, text, command = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 print(json.dumps({
     "session_id": session_id,
     "tool_name": tool_name,
-    "tool_input": {"command": "true"},
+    "tool_input": {"command": command},
     # The whole payload — a bare string, exactly as the harness delivers it.
     "tool_response": text,
 }))
@@ -891,6 +893,43 @@ if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "3회째" "
   assert_pass "19f) repeated hook-block string keeps advising with its count"
 else
   assert_fail "19f) repeated hook-block string keeps advising with its count" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+# 19g/19h) the bare `Error: Exit code 1` — no output under it — is byte-identical
+# whatever command died (6 of the 388 observed). Two DIFFERENT commands failing
+# that way must stay silent; the control that makes that meaningful is 19h,
+# where the SAME command failing twice still advises. Without 19h, "collision
+# fixed" is indistinguishable from "this shape stopped firing entirely".
+STR_BARE_EXIT='Error: Exit code 1'
+
+STATE28="$TMP_DIR/c28.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-g Bash "$STR_BARE_EXIT" 'grep -q needle haystack.txt')" "$STATE28" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-g Bash "$STR_BARE_EXIT" 'git diff --quiet HEAD~1')" "$STATE28" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+  assert_pass "19g) two different commands with bare exit-code text stay silent"
+else
+  assert_fail "19g) two different commands with bare exit-code text stay silent" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+STATE29="$TMP_DIR/c29.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(string_payload sess-1265-h Bash "$STR_BARE_EXIT" 'grep -q needle haystack.txt')" "$STATE29" >/dev/null 2>/dev/null
+pipe_hook "$(string_payload sess-1265-h Bash "$STR_BARE_EXIT" 'grep -q needle haystack.txt')" "$STATE29" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "19h) the same command repeating a bare exit-code failure advises"
+else
+  assert_fail "19h) the same command repeating a bare exit-code failure advises" \
     "rc=$rc out=[$out] err=[$err]"
 fi
 
