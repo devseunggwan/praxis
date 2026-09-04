@@ -73,8 +73,10 @@ Surfaces scanned are the shared set from `_lib/_external_write_body.py`:
 `repos/{o}/{r}/issues/comments/<id>`, `issues/<n>/comments`,
 `pulls/comments/<id>`, `pulls/<n>/comments` or `pulls/<n>/reviews`, with the
 body read from `-f body=` / `--raw-field`, `-F body=@<file>` / `--field` (`@`
-expanded as gh expands it), or `--input` (body unknown, so nothing is
-scanned). Every other method or endpoint stays outside: a read, `graphql`, a
+expanded as gh expands it). `--input` makes the body unknown and nothing is
+scanned — including beside a `body=` field, which gh sends as a query
+parameter rather than merging it into the file's request body.
+Every other method or endpoint stays outside: a read, `graphql`, a
 workflow dispatch. The verification-anchor convention makes `gh api` the only
 path a rev ≥2 anchor can take, so before #1265 that write went unscanned.
 

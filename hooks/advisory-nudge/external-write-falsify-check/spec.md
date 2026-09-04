@@ -47,7 +47,9 @@ The `gh api` row covers a `POST` / `PATCH` / `PUT` against
 `repos/{o}/{r}/issues/comments/<id>`, `issues/<n>/comments`,
 `pulls/comments/<id>`, `pulls/<n>/comments` or `pulls/<n>/reviews`, with the
 body from `-f body=` / `--raw-field`, `-F body=@<file>` / `--field` (`@`
-expanded as gh expands it), or `--input` (body unknown, nothing scanned).
+expanded as gh expands it). `--input` makes the body unknown and nothing is
+scanned — including beside a `body=` field, which gh sends as a query
+parameter rather than merging it into the file's request body.
 Every other method or endpoint is a passthrough — a read, `graphql`, a
 workflow dispatch. The surface exists because the verification-anchor
 convention makes `gh api` the only path a rev ≥2 anchor can take.

@@ -245,3 +245,75 @@ def test_explicit_method_wins_over_the_implied_post():
 def test_implied_post_body_is_still_extracted():
     argv = shlex.split("gh api repos/o/r/issues/123/comments -f body=hello")
     assert extract_gh_body(argv) == "hello"
+
+
+# ---------------------------------------------------------------------------
+# `--input` beside a `body=` field
+# ---------------------------------------------------------------------------
+# gh does not merge the two: the file is the request body and the field goes
+# into the query string. Verified on gh 2.98.0 against an unreachable host —
+#   $ gh api --hostname invalid.invalid --verbose /repos/o/r/issues/1/comments \
+#       --input in.json -f body=FROM_FIELD
+#   > POST /api/v3/repos/o/r/issues/1/comments?body=FROM_FIELD HTTP/1.1
+#   {"body": "FROM_FILE"}
+# so returning the field would hand every consumer text that is never posted.
+# Both polarities are asserted throughout: the call stays an external write,
+# only its body becomes unknown.
+
+INPUT_BODY_UNKNOWN = [
+    # `--input` alone — the form that already returned None
+    "gh api repos/o/r/issues/comments/1 -X PATCH --input payload.json",
+    # beside a raw field
+    "gh api repos/o/r/issues/1/comments --input payload.json -f body=FROM_FIELD",
+    # beside an expanding field, whose `@` must not be followed to a real file
+    "gh api repos/o/r/issues/1/comments --input payload.json -F body=@anchor.md",
+    # stdin as the request body
+    "gh api repos/o/r/issues/comments/1 -X PATCH --input - -f body=FROM_FIELD",
+    # `--input=` attached form (gh 2.98.0 accepts it; verified live)
+    "gh api repos/o/r/issues/comments/1 -X PATCH --input=payload.json -f body=FROM_FIELD",
+    # explicit write method rather than the parameter-implied POST
+    "gh api repos/o/r/pulls/9/comments --method POST --input payload.json -F body=@anchor.md",
+]
+
+
+@pytest.mark.parametrize("command", INPUT_BODY_UNKNOWN)
+def test_input_makes_the_body_unknown(command):
+    assert extract_gh_body(shlex.split(command)) is None
+
+
+@pytest.mark.parametrize("command", INPUT_BODY_UNKNOWN)
+def test_input_still_detected_as_an_external_write(command):
+    assert is_gh_external_write(shlex.split(command))
+
+
+def test_input_does_not_read_an_existing_body_file(tmp_path):
+    """The `@` file exists here — the field is still query-string, not body."""
+    anchor = tmp_path / "anchor.md"
+    anchor.write_text("### Verification — `abc1234` (rev 2)\n", encoding="utf-8")
+    argv = shlex.split(
+        f"gh api repos/o/r/issues/comments/1 -X PATCH --input p.json -F body=@{anchor}"
+    )
+    assert extract_gh_body(argv) is None
+    assert is_gh_external_write(argv)
+
+
+def test_explicit_get_with_input_is_not_a_write():
+    """`--method GET` moves everything to the query string; nothing is posted."""
+    argv = shlex.split(
+        "gh api repos/o/r/issues/1/comments --method GET --input p.json -f body=FROM_FIELD"
+    )
+    assert not is_gh_external_write(argv)
+    assert extract_gh_body(argv) is None
+
+
+def test_field_only_body_is_unaffected_by_the_input_guard():
+    """No `--input`: the field really is the body, so it stays extractable."""
+    argv = shlex.split("gh api repos/o/r/issues/1/comments -f body=FROM_FIELD")
+    assert extract_gh_body(argv) == "FROM_FIELD"
+    assert is_gh_external_write(argv)
+
+
+def test_no_body_at_all_is_neither_write_nor_body():
+    argv = shlex.split("gh api repos/o/r/issues/1/comments")
+    assert extract_gh_body(argv) is None
+    assert not is_gh_external_write(argv)

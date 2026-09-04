@@ -201,7 +201,15 @@ def extract_gh_api_body(call: GhApiCall) -> str | None:
 
     `--input` hands gh a whole JSON request body, and `@-` reads stdin — the
     hook sees neither, so both are an *unknown* body rather than an empty one.
+
+    `--input` wins over any `body=` field, because gh does not merge the two:
+    `gh api --help` — "from file specified by `--input` ... When passing the
+    request body this way, any parameters specified via field flags are added
+    to the query" string. Returning the field value would hand every consumer
+    text that is never posted, so a gap inside the real body passes silently.
     """
+    if call.has_input:
+        return None
     if call.body_raw is None:
         return None
     if call.body_flag in GH_API_EXPANDING_FIELD_FLAGS and call.body_raw.startswith("@"):

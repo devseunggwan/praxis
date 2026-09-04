@@ -48,9 +48,11 @@ container/leaf shapes, plus the `gh api` comment endpoints (issue #1265) — a
 `POST` / `PATCH` / `PUT` against `repos/{o}/{r}/issues/comments/<id>`,
 `issues/<n>/comments`, `pulls/comments/<id>`, `pulls/<n>/comments` or
 `pulls/<n>/reviews`, with the body from `-f body=` / `--raw-field`,
-`-F body=@<file>` / `--field` (`@` expanded as gh expands it), or `--input`
-(body unknown, so nothing is scanned). Every other method or endpoint stays
-outside: a read, `graphql`, a workflow dispatch.
+`-F body=@<file>` / `--field` (`@` expanded as gh expands it). `--input` makes
+the body unknown and nothing is scanned — including beside a `body=` field,
+which gh sends as a query parameter rather than merging it into the file's
+request body. Every other method or endpoint stays outside: a read, `graphql`,
+a workflow dispatch.
 
 That gap was this hook's own motivating case. The session that built it
 produced five composed `$` lines and every one of them went out through

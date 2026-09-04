@@ -46,7 +46,9 @@ convention, issue #907):
   `repos/{o}/{r}/issues/comments/<id>`, `issues/<n>/comments`,
   `pulls/comments/<id>`, `pulls/<n>/comments` or `pulls/<n>/reviews`, body from
   `-f body=` / `--raw-field`, `-F body=@<file>` / `--field` (`@` expanded as gh
-  expands it), or `--input` (body unknown, nothing scanned) — issue #1265. Any
+  expands it) — issue #1265. `--input` makes the body unknown and nothing is
+  scanned, including beside a `body=` field, which gh sends as a query
+  parameter rather than merging it into the file's request body. Any
   other method or endpoint stays outside: a read, `graphql`, a workflow
   dispatch. The verification-anchor convention makes this the only path a
   rev ≥2 anchor can take.
