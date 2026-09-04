@@ -10,7 +10,8 @@ model corrupted. These tests cover:
   - scope: only ``skills/*/SKILL.md`` is scanned, never the shell scripts that
     sit beside it and legitimately take positional parameters,
   - main() exits 0 on a clean tree and 1 on drift,
-  - a regression pin on the line issue #1259 was opened for.
+  - a regression pin on the line issue #1259 was opened for, and on the
+    ``$0`` snippets that only became visible once the matcher was widened.
 """
 
 from __future__ import annotations
@@ -65,15 +66,45 @@ def test_input_surface_classification():
         "cut -f$2": True,
         "echo $9": True,
         "cost is $5 returned verbatim": True,
+        # ``$0`` resolves to the first argument: the loader's ``\d+`` matches a
+        # zero and its argument array is zero-indexed. Verified against the
+        # expression in the installed runtime, quoted in the checker docstring.
+        '"$(dirname "$0")/cmux-resume-sessions" "$@"': True,
+        "echo $0": True,
+        # multi-digit — substituted once that many arguments are passed, and
+        # caught here through the leading ``$1``
+        "echo $10": True,
         # not references
-        '"$(dirname "$0")/cmux-resume-sessions" "$@"': False,
+        '"$(dirname "${0}")/cmux-resume-sessions" "$@"': False,
         "${HOME} and ${1}": False,
         "a $ sign, then 1 on its own": False,
         "awk -v f=1 '{print $f}'": False,
         "$NF and $VAR": False,
+        "$@ and $* and $#": False,
+        "a line ending in a bare $": False,
     }
     for text, expected in cases.items():
         assert bool(sub._HIT_RE.search(text)) is expected, text
+
+
+def test_zero_reference_is_reported(tmp_path, monkeypatch):
+    """The widening this test pins: ``$0`` used to slip through.
+
+    Both polarities in one tree, so a matcher that fires on everything fails
+    here rather than passing the positive half by accident.
+    """
+    repo = _git_repo(
+        tmp_path,
+        {
+            "skills/zero/SKILL.md": 'run\n\nbash "$(dirname "$0")/inner"\n',
+            "skills/clean/SKILL.md": 'run\n\nbash "$(dirname "${0}")/inner" "$@"\n',
+        },
+    )
+    monkeypatch.setattr(sub, "REPO", repo)
+    hits = sub.check()
+    assert len(hits) == 1, hits
+    assert hits[0].startswith("skills/zero/SKILL.md:3")
+    assert "$0" in hits[0]
 
 
 def test_planted_reference_is_reported(tmp_path, monkeypatch):
@@ -134,3 +165,19 @@ def test_cmux_delegate_step_5b_regression():
     assert "awk '{print $1}'" not in body
     assert "sed 's/^\\* //'" in body
     assert '[ "${TARGET#workspace:}" = "$TARGET" ]' in body
+
+
+def test_cmux_wrapper_snippets_use_the_brace_form():
+    """The four ``dirname`` snippets the widening exposed.
+
+    Braced because the loader's ``\\$(\\d+)`` cannot match past a ``{`` — the
+    script name still reads as correct shell, and nothing is left to rewrite.
+    """
+    for rel in (
+        "skills/cmux-resume-sessions/SKILL.md",
+        "skills/cmux-save-sessions/SKILL.md",
+        "skills/cmux-session-manager/SKILL.md",
+    ):
+        body = (_REPO / rel).read_text(encoding="utf-8")
+        assert 'dirname "$0"' not in body, rel
+        assert 'dirname "${0}"' in body, rel
