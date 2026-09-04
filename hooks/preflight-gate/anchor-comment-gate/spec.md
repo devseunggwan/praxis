@@ -257,34 +257,99 @@ gh api --method PATCH /repos/{owner}/{repo}/issues/comments/<id> -F body=@anchor
 ```
 
 A session whose only GitHub surface is the MCP server can create an anchor and
-then cannot revise it. Measured on the toolset exposed to such a session: issue
-bodies and PR bodies each have an update tool, comment bodies have none — the
-write surface is add-only for comments, while GitHub REST itself exposes the
-`PATCH`. So the limit is what the host surfaces, not the API.
+then cannot revise it. Issue bodies and PR bodies each have an update tool;
+comment bodies have none, while GitHub REST itself exposes the `PATCH`. So the
+limit is what the host surfaces, not the API — and where it was measured the
+absence was **upstream, not a gap in one deployment**: enumerating
+`github/github-mcp-server`'s own tool list returned create and reply for issue
+and PR comments and no update, with Discussions' `discussion_comment_write`
+(which *does* carry an `update` mode) caught by the same enumeration as its
+positive control.
+
+**Scope of that measurement — `github/github-mcp-server`, version unknown,
+enumerated 2026-09-04.** No version was recorded when the enumeration ran, and
+none could be reconstructed afterwards from this repo or this machine: the only
+GitHub MCP entry configured locally is `@modelcontextprotocol/server-github`, a
+different server, pulled unpinned through `npx -y`, and no
+`github-mcp-server` binary is installed. So this is one reading of one server
+on one date, while the file header above says `Supported hosts: all`.
+
+Read the procedure below as **conditional, never as a standing assumption**: it
+applies to a session once a comment `update` has been confirmed absent from
+that session's **active** tool list. Confirm it the same way the claim above
+was made — enumerate the tools the session actually has, look for a
+comment-update mode, and use the **PR-body update** mode as the positive
+control that the enumeration can return a write mode at all. That control is
+not interchangeable with an issue-body update or a Discussions comment write:
+steps 3–4 record the gap *in the PR body*, so a session holding one of those
+but no PR-body update cannot run them, and a positive control drawn from one
+would certify a surface the procedure never uses. If a comment `update` **is**
+present, the anchor is revisable on that host: revise it in place and none of
+the procedure applies. If the PR-body update is absent too, steps 3–4 do not
+apply either — go straight to step 5 and carry the delta in the merge commit,
+which needs no host tool. Where both are absent, waiting for the tool to
+arrive is not a plan (#1211).
 
 The same absence removes the PostToolUse re-check, for a second and independent
 reason. That step reads the published comment back and re-checks structure
 keyed on `<summary>`; the MCP read path strips `<details>` / `<summary>` from a
 **comment or PR body** while keeping their inner text, so a well-formed anchor
-read back over it reports as missing every toggle. Reading through `gh api`, as
-this hook does, is what keeps that check meaningful.
+read back over it reports as missing every toggle. **On that path the re-check
+has no substitute** — not a weaker signal but no signal, because every anchor
+reads as missing every toggle whether or not it is well-formed. Reading through
+`gh api`, as this hook does, is what keeps the check meaningful.
 
 Worth stating precisely, because the obvious reading is wrong: this is not the
-server mangling markup. **File contents come back with both tags intact** —
-`get_file_contents` on this very spec returns its `<details>` and `<summary>`
-verbatim. The transform applies to the body text a commenter authors and not to
-the files a reader is meant to trust, which is the prompt-injection boundary,
-not a defect. Treat it as policy to work with rather than a bug to route
-around.
+server mangling markup, and nothing is lost at the write. A posted anchor read
+back through `gh api .../issues/comments/<id>` holds its `<details>` and
+`<summary>` pairs intact with zero entity escapes, and **file contents come
+back with both tags intact** over MCP too — `get_file_contents` on this very
+spec returns them verbatim. The transform applies to the body text a commenter
+authors and not to the files a reader is meant to trust, which is the
+prompt-injection boundary, not a defect. Treat it as policy to work with rather
+than a bug to route around.
 
-**What this means for a gh-less session.** The anchor rule is unsatisfiable
-past rev 1, and the honest response is to say so on the PR rather than to fake
-a revision by posting a second anchor — a second anchor-shaped comment makes
-the id-recovery lookup in [Coupled constant](#coupled-constant) ambiguous,
-which is the failure that stays invisible until someone needs it. Carrying the
-stale anchor's gaps into the PR body or the merge commit keeps them tracked
-without breaking the invariant. Issue #1211 holds the open question of whether
-to define a real fallback for that case.
+### Procedure for a gh-less session
+
+The rule is satisfiable at rev 1 and unsatisfiable past it, so the procedure
+splits there. Do not fake a revision by posting a second anchor: a second
+anchor-shaped comment makes the id-recovery lookup in
+[Coupled constant](#coupled-constant) ambiguous, which is the failure that
+stays invisible until someone needs it.
+
+1. **Post rev 1 normally.** Creation needs only a way to post a comment, so
+   the full five-field structure still applies — write it in full.
+2. **Grade the PostToolUse re-check `unknown`, never a pass.** It did not run;
+   the tier table above already says that an unrun check is not a pass.
+3. **When rev 2 would be due, say so in the PR body**: which `<sha>` the
+   anchor is stamped at, which one HEAD is now at, and that the host has no
+   comment-update surface. A reader who does not know this reads a stale
+   anchor as a current one. Not a comment of its own — this channel allows
+   exactly one top-level comment besides the anchor, the one-line
+   `Verification updated — <sha> rev N · …` notice that pairs with an edit,
+   and here there is no edit to pair one with. The body is also the only one
+   of the two surfaces this host can still correct afterwards.
+4. **Refresh that record on every later HEAD change that would have been a
+   revision — not only the first one.** One note naming one HEAD goes stale on
+   the next push, and then *both* surfaces are behind: the anchor, and the note
+   that exists to explain the anchor. A reader then cannot tell what is
+   unverified at the current HEAD, which is the whole point of the note. So
+   edit the PR body again each time, carrying the current HEAD `<sha>` and the
+   `Unverified` delta **accumulated since rev 1**, not only the delta since the
+   last push. The PR body has an update path on this surface — that is why the
+   record lives there, and why refreshing costs one body edit per push. If you
+   will not keep it refreshed, then stop pushing until the anchor can be
+   revised: a note that names an old HEAD is worse than no further commits.
+5. **Carry the delta where it survives** — the PR body kept current per step 4,
+   or the merge commit, both of which *do* have an update path on the MCP
+   surface. The anchor's `Unverified` gaps go with it, so `merge-briefing`
+   Step 3 still has something to read.
+6. **Leave the stale anchor in place.** It stays the one comment the
+   id-recovery lookup resolves to; the pointer in steps 3–4 is what makes it
+   honest.
+
+Issue #1211 holds the open question of whether to define a richer fallback
+than this.
 
 ## Bypass
 
