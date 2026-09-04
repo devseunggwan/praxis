@@ -93,20 +93,31 @@ def _starts_unquoted_comment(line: str, i: int) -> bool:
 
 def _heredoc_starts_on_line(
     line: str, quote: str = ""
-) -> tuple[list[tuple[str, bool]], str]:
+) -> tuple[list[tuple[str, bool, bool]], str]:
     """`(openers, quote_open_at_eol)` for one physical line.
 
-    `openers` is `(delimiter, dash_form)` for every heredoc opened on the line.
-    Scans character-wise rather than by regex because the three constructs that
-    must NOT be read as a heredoc all look like `<<` to a pattern match: a
-    here-string (`<<<`), an arithmetic left-shift (`$((1 << 3))`), and a literal
-    `<<` inside quotes. Order is preserved — bash reads the bodies of
-    `cat <<A <<B` in the order the operators appear.
+    `openers` is `(delimiter, dash_form, quoted)` for every heredoc opened on
+    the line. Scans character-wise rather than by regex because the three
+    constructs that must NOT be read as a heredoc all look like `<<` to a
+    pattern match: a here-string (`<<<`), an arithmetic left-shift
+    (`$((1 << 3))`), and a literal `<<` inside quotes. Order is preserved —
+    bash reads the bodies of `cat <<A <<B` in the order the operators appear.
+
+    `quoted` says whether the delimiter word carried quoting (`<<'EOF'`,
+    `<<"EOF"`, `<<\\EOF`). Bash expands the body of an UNQUOTED heredoc before
+    the reading command ever sees it, so a consumer that grades body text needs
+    to know which of the two it holds: the raw text of an unquoted body is not
+    the text bash delivers (issue #1228 round 2).
 
     A command substitution re-opens shell parsing even inside double quotes, so
     `-m "$(cat <<'EOF'`  — the exact shape of a commit-message payload — really
     does open a heredoc. `subst` stacks the suspended quote state so that one is
-    seen while a plain `"…<<EOF…"` string stays inert.
+    seen while a plain `"…<<EOF…"` string stays inert. Backticks are the older
+    spelling of the same construct and re-enter parsing identically, so
+    ``-m "`cat <<'EOF' … `"`` opens a heredoc too; reading the `<<` there as
+    string data let a malformed message through the gate unseen. Each stacked
+    entry carries the character that closes it, because `)` must not close a
+    backtick run and vice versa.
 
     `quote` is the quote character still open from the *previous* physical line;
     the returned second element is the quote still open at this line's end.
@@ -116,16 +127,21 @@ def _heredoc_starts_on_line(
     still open inside a `$(…)` is reported as its outermost suspended quote,
     exactly as `_quote_open_at_eol` does.
     """
-    out: list[tuple[str, bool]] = []
+    out: list[tuple[str, bool, bool]] = []
     i, n = 0, len(line)
     arith = 0
-    subst: list[str] = []
+    subst: list[tuple[str, str]] = []
     while i < n:
         ch = line[i]
         if quote == '"' and line.startswith("$(", i) and not line.startswith("$((", i):
-            subst.append(quote)
+            subst.append((quote, ")"))
             quote = ""
             i += 2
+            continue
+        if quote == '"' and ch == "`":
+            subst.append((quote, "`"))
+            quote = ""
+            i += 1
             continue
         if quote:
             if ch == "\\" and quote == '"':
@@ -152,8 +168,8 @@ def _heredoc_starts_on_line(
             arith -= 1
             i += 2
             continue
-        if ch == ")" and subst and not arith:
-            quote = subst.pop()
+        if subst and not arith and ch == subst[-1][1]:
+            quote = subst.pop()[0]
             i += 1
             continue
         if line.startswith("<<", i) and not arith:
@@ -166,9 +182,9 @@ def _heredoc_starts_on_line(
                 j += 1
             while j < n and line[j] in " \t":
                 j += 1
-            delim, j = _read_heredoc_delim(line, j)
+            delim, j, delim_quoted = _read_heredoc_delim(line, j)
             if delim:
-                out.append((delim, dash))
+                out.append((delim, dash, delim_quoted))
                 i = j
                 continue
             i += 2
@@ -177,36 +193,42 @@ def _heredoc_starts_on_line(
     # Report the outermost still-open quote so the caller can carry it into the
     # next physical line — a `$(…)` open at EOL keeps the command going, so its
     # suspended quote is what bash is still inside (issue #1091).
-    return out, quote or (subst[0] if subst else "")
+    return out, quote or (subst[0][0] if subst else "")
 
 
 _HEREDOC_WORD_CHARS = re.compile(r"[A-Za-z0-9_.~\-/]")
 
 
-def _read_heredoc_delim(line: str, j: int) -> tuple[str, int]:
-    """Delimiter word starting at `j`, plus the index just past it.
+def _read_heredoc_delim(line: str, j: int) -> tuple[str, int, bool]:
+    """`(delimiter, index just past it, quoted)` for the word starting at `j`.
 
-    `<<EOF`, `<<'EOF'`, `<<"EOF"`, and `<<\\EOF` all name the same delimiter —
-    the quoting only decides whether the body is expanded, which is irrelevant
-    here. Returns `("", j)` when no delimiter word is present, which is what
-    keeps `1 << 3` from being read as a heredoc named `3`.
+    `<<EOF`, `<<'EOF'`, `<<"EOF"`, and `<<\\EOF` all name the same delimiter,
+    so the word itself is returned with its quoting removed. The quoting is
+    reported separately rather than discarded because it decides whether bash
+    expands the body: any quoting at all — a quoted run or a single backslash
+    anywhere in the word — makes the body literal, and an unquoted word leaves
+    it subject to command, parameter, and arithmetic expansion. Returns
+    `("", j, False)` when no delimiter word is present, which is what keeps
+    `1 << 3` from being read as a heredoc named `3`.
     """
     n = len(line)
     if j < n and line[j] in "'\"":
         q = line[j]
         end = line.find(q, j + 1)
-        return (line[j + 1:end], end + 1) if end != -1 else ("", j)
+        return (line[j + 1:end], end + 1, True) if end != -1 else ("", j, False)
     out: list[str] = []
+    escaped = False
     while j < n:
         if line[j] == "\\" and j + 1 < n:
             out.append(line[j + 1])
+            escaped = True
             j += 2
             continue
         if not _HEREDOC_WORD_CHARS.match(line[j]):
             break
         out.append(line[j])
         j += 1
-    return "".join(out), j
+    return "".join(out), j, escaped
 
 
 def strip_heredoc_bodies(command: str) -> str:
@@ -240,11 +262,11 @@ def strip_heredoc_bodies(command: str) -> str:
     if "<<" not in command:
         return command
     out: list[str] = []
-    pending: list[tuple[str, bool]] = []
+    pending: list[tuple[str, bool, bool]] = []
     quote = ""  # #1091: open quote carried in from the previous physical line
     for line in command.split("\n"):
         if pending:
-            delim, dash = pending[0]
+            delim, dash, _quoted = pending[0]
             probe = line.lstrip("\t") if dash else line
             if probe == delim:  # exact — `EOF ` does not close a heredoc
                 del pending[0]
@@ -264,11 +286,11 @@ def heredoc_bodies(command: str) -> list[str]:
     The delimiter-dropping view of `heredoc_bodies_by_delimiter`, for a caller
     that wants every body regardless of which heredoc produced it.
     """
-    return [body for _delim, body in heredoc_bodies_by_delimiter(command)]
+    return [body for _delim, body, _quoted in heredoc_sources(command)]
 
 
-def heredoc_bodies_by_delimiter(command: str) -> list[tuple[str, str]]:
-    """`(delimiter, body)` for every heredoc in `command`, in source order.
+def heredoc_sources(command: str) -> list[tuple[str, str, bool]]:
+    """`(delimiter, body, quoted)` for every heredoc in `command`, source order.
 
     The delimiter is what lets a caller say *which* heredoc it means. A command
     can hold several — an unrelated `cat > notes <<'NOTE'` beside the
@@ -299,20 +321,24 @@ def heredoc_bodies_by_delimiter(command: str) -> list[tuple[str, str]]:
     whitespace, while the commit message release-please parses starts at
     `word(`. The stripper needs no such fold because it blanks the line either
     way.
+
+    `quoted` rides along from the opener: an unquoted `<<EOF` body reaches the
+    reading command only after bash has expanded it, so a caller that grades
+    body text has to know the raw lines here are not the delivered ones.
     """
     if "<<" not in command:
         return []
-    bodies: list[tuple[str, str]] = []
-    pending: list[tuple[str, bool]] = []
+    bodies: list[tuple[str, str, bool]] = []
+    pending: list[tuple[str, bool, bool]] = []
     current: list[str] = []
     quote = ""
     for line in command.split("\n"):
         if pending:
-            delim, dash = pending[0]
+            delim, dash, delim_quoted = pending[0]
             probe = line.lstrip("\t") if dash else line
             if probe == delim:
                 del pending[0]
-                bodies.append((delim, "\n".join(current)))
+                bodies.append((delim, "\n".join(current), delim_quoted))
                 current = []
             else:
                 current.append(probe)
@@ -320,14 +346,14 @@ def heredoc_bodies_by_delimiter(command: str) -> list[tuple[str, str]]:
         openers, quote = _heredoc_starts_on_line(line, quote)
         pending.extend(openers)
     if pending:
-        bodies.append((pending[0][0], "\n".join(current)))
+        bodies.append((pending[0][0], "\n".join(current), pending[0][2]))
     return bodies
 
 
 def heredoc_delimiters(text: str) -> list[str]:
     """Every heredoc delimiter word `text` opens, in source order.
 
-    Scans with the same opener reader `heredoc_bodies_by_delimiter` uses, so
+    Scans with the same opener reader `heredoc_sources` uses, so
     the two agree on what counts as an opener — a here-string, an arithmetic
     shift, and a quoted `<<` are none of them. `text` is a fragment rather than
     a whole command: one shell token (`<<EOF`, or the `$(cat <<'EOF' …)` a
@@ -340,7 +366,7 @@ def heredoc_delimiters(text: str) -> list[str]:
     quote = ""
     for line in text.split("\n"):
         openers, quote = _heredoc_starts_on_line(line, quote)
-        out.extend(delim for delim, _dash in openers)
+        out.extend(delim for delim, _dash, _quoted in openers)
     return out
 
 

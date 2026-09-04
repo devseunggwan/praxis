@@ -35,12 +35,15 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    _quote_open_at_eol,
     compound_cascade_hint,
-    heredoc_bodies_by_delimiter,
+    has_shell_expansion,
     heredoc_delimiters,
+    heredoc_sources,
     iter_command_starts,
     iter_command_texts,
     safe_tokenize,
+    strip_heredoc_bodies,
 )
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
@@ -95,6 +98,58 @@ def offending_lines(message: str) -> list[tuple[int, str, str]]:
 # Message sources
 # ---------------------------------------------------------------------------
 
+def _splice_continuations(command: str) -> str:
+    """Apply bash line continuation, and only where bash applies it.
+
+    A backslash-newline is REMOVED, not turned into a separator: bash reads
+    `-m "word\\<newline>(a(b))"` as the single word `word(a(b))`, so replacing
+    the pair with a space handed the tokenizer `word (a(b))` — a line whose
+    leading word is not glued to `(`, which is exactly the shape this gate
+    passes. A malformed message written that way was invisible to the gate
+    (issue #1228 round 2).
+
+    Two regions are left alone because bash does not splice them either:
+
+      inside a single-quoted run   nothing is an escape there, so the
+                                   backslash and the newline are both message
+                                   text — joining them fabricates a glued word
+                                   and blocks a commit whose real message has
+                                   the paren at column 1
+      inside a heredoc body        the body is read separately from the raw
+                                   command, and joining lines here would shift
+                                   every line number after it, putting the
+                                   body scan's terminator search on the wrong
+                                   line
+
+    An unquoted heredoc body IS spliced by bash; `_heredoc_text_for` does that
+    on the body it reads, where no line numbering depends on it.
+    """
+    if "\\\n" not in command:
+        return command
+    lines = command.split("\n")
+    blanked = strip_heredoc_bodies(command).split("\n")
+    out: list[str] = []
+    held = ""
+    quote = ""
+    for pos, line in enumerate(lines):
+        in_body = line != "" and pos < len(blanked) and blanked[pos] == ""
+        trailing = len(line) - len(line.rstrip("\\"))
+        # The state the trailing backslash sits in is the state at the END of
+        # the line, not the one carried in: the quote that makes the backslash
+        # literal is routinely the one this same line opened, as in
+        # `git commit -m 'word\`.
+        if not in_body:
+            quote = _quote_open_at_eol(line, quote)
+        splices = not in_body and quote != "'" and trailing % 2 == 1
+        if splices:
+            held += line[:-1]
+            continue
+        out.append(held + line)
+        held = ""
+    if held:
+        out.append(held)
+    return "\n".join(out)
+
 def _heredoc_text_for(delimiters: list[str], command: str) -> list[str]:
     """The bodies `delimiters` name, when each name identifies exactly one.
 
@@ -104,14 +159,50 @@ def _heredoc_text_for(delimiters: list[str], command: str) -> list[str]:
     in the token stream separates the notes body from the message body — the
     ambiguous name yields no text and the gate stays silent, which is the
     fail-open direction this repo takes for a gate.
+
+    An UNQUOTED delimiter (`<<EOF`, against `<<'EOF'`) leaves the body subject
+    to expansion, so the raw lines here are not the ones git receives. Bash
+    splices the body's line continuations and substitutes its expansions
+    first: `word($(printf x))` arrives as `word(x)`, which parses, while the
+    source reads as a nested paren. The splice is applied and any line still
+    carrying an expansion is blanked, so what is graded is the delivered text
+    and nothing else (issue #1228 round 2).
     """
-    pairs = heredoc_bodies_by_delimiter(command)
+    sources = heredoc_sources(command)
     texts: list[str] = []
     for name in delimiters:
-        matches = [body for delim, body in pairs if delim == name]
-        if len(matches) == 1:
-            texts.append(matches[0])
+        matches = [(body, quoted) for delim, body, quoted in sources if delim == name]
+        if len(matches) != 1:
+            continue
+        body, quoted = matches[0]
+        if not quoted:
+            body = "\n".join(
+                "" if has_shell_expansion(line) else line
+                for line in body.replace("\\\n", "").split("\n")
+            )
+        texts.append(body)
     return texts
+
+
+def _redirected_delimiters(argv: list[str]) -> list[str]:
+    """Every heredoc delimiter the redirections in one segment's argv open.
+
+    The operator and its delimiter are one token in `<<EOF` and two in the
+    equally valid `<< EOF`, because the tokenizer splits on the whitespace
+    bash allows there. Reading each token on its own therefore found nothing
+    in the spaced form, and a malformed message fed to `git commit -F -` went
+    through unseen (issue #1228 round 2). The delimiter is recovered from the
+    following token instead, and its quotes are already gone — the tokenizer
+    strips them, exactly as `_read_heredoc_delim` does for the attached form.
+    """
+    out: list[str] = []
+    for pos, tok in enumerate(argv):
+        if tok in ("<<", "<<-"):
+            if pos + 1 < len(argv):
+                out.append(argv[pos + 1])
+            continue
+        out.extend(heredoc_delimiters(tok))
+    return out
 
 
 def _unresolved_source_texts(argv: list[str], command: str) -> list[str]:
@@ -131,6 +222,13 @@ def _unresolved_source_texts(argv: list[str], command: str) -> list[str]:
     whenever some other command in the chain carried prose the parser would
     reject, and returning early on the first readable `-m` let a malformed
     body ride along behind a well-formed subject.
+
+    Each source names exactly ONE heredoc — the last it opened. Both shapes
+    read stdin, and redirections apply left to right, so in
+    `-m "$(cat <<A <<B …)"` the body `cat` receives is `B` and `A` is opened
+    and discarded. Taking every delimiter the source opened graded that
+    discarded body too, which blocked a commit whose real message was clean
+    (issue #1228 round 2).
     """
     scanned = _scan_commit_message_values(argv)
     if scanned is None:
@@ -141,11 +239,11 @@ def _unresolved_source_texts(argv: list[str], command: str) -> list[str]:
     for kind, raw in values:
         if kind == "message":
             if title_is_unresolved_substitution(raw.split("\n")[0], command):
-                wanted.extend(heredoc_delimiters(raw))
+                opened = heredoc_delimiters(raw)
+                if opened:
+                    wanted.append(opened[-1])
         elif raw == "-":
-            # stdin: bash feeds it from the last heredoc redirection on the
-            # segment, so later openers win when a command carries several.
-            opened = [d for tok in argv for d in heredoc_delimiters(tok)]
+            opened = _redirected_delimiters(argv)
             if opened:
                 wanted.append(opened[-1])
     return _heredoc_text_for(wanted, command)
@@ -202,10 +300,9 @@ def main() -> int:
     if not raw_command.strip():
         return 0
 
-    # Collapse backslash-newline continuations (mirrors sibling hooks). Only
-    # the tokenizer gets the collapsed form: a heredoc body is data, and a
-    # message line ending in `\` would be silently joined to the next one.
-    command = raw_command.replace("\\\n", " ")
+    # Only the tokenizer gets the spliced form; heredoc bodies are read from
+    # the raw command, where their line numbering is still intact.
+    command = _splice_continuations(raw_command)
 
     # `safe_tokenize` coalesces a `$( … )` run into ONE token, so a commit
     # written as `MSG=$(git commit -m '…')` has no command start at the top

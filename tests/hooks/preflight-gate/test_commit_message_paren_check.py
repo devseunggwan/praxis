@@ -207,15 +207,37 @@ def test_heredoc_is_bound_to_the_source_that_names_it(command, rc):
         # `<<-` strips leading tabs from every body line, so the message the
         # parser sees starts at ``(` — see tests/test_heredoc_bodies.py for the
         # bash probe behind this expectation.
-        ("git commit -m \"$(cat <<-EOF\n\tfix: x\n\n\t`(a(b))` note\n\tEOF\n)\"", 2),
+        ("git commit -m \"$(cat <<-'EOF'\n\tfix: x\n\n\t`(a(b))` note\n\tEOF\n)\"", 2),
         # Indentation that is NOT a stripped tab still exempts the line.
-        ("git commit -m \"$(cat <<-EOF\n\tfix: x\n\n\t  `(a(b))` note\n\tEOF\n)\"", 0),
+        ("git commit -m \"$(cat <<-'EOF'\n\tfix: x\n\n\t  `(a(b))` note\n\tEOF\n)\"", 0),
         # A plain `<<` keeps the tab, and the tab is real indentation.
-        ("git commit -m \"$(cat <<EOF\nfix: x\n\n\t`(a(b))` note\nEOF\n)\"", 0),
+        ("git commit -m \"$(cat <<'EOF'\nfix: x\n\n\t`(a(b))` note\nEOF\n)\"", 0),
     ],
 )
 def test_dash_heredoc_body_is_read_the_way_bash_writes_it(command, rc):
     assert _run(command)[0] == rc
+
+
+def test_an_unquoted_delimiter_makes_the_same_body_a_substitution():
+    """The delimiters above are quoted for a reason: unquote them and the body
+    is no longer the message. Measured, with `git` replaced by a recorder:
+
+        $ bash -c 'git commit -m "$(cat <<-EOF
+                \tfix: x
+
+                \t`(a(b))` note
+                \tEOF
+        )"'
+        bash: command substitution: line 0: syntax error near unexpected token `b'
+        {"argv": ["commit", "-m", "fix: x\\n\\n note"]}
+
+    Bash runs the backtick run as a command, it fails, and what git receives
+    carries neither the backticks nor the parens. Grading the source text
+    instead blocked that commit — a false positive on a message the parser
+    never sees (issue #1228 round 2)."""
+    assert _run(
+        "git commit -m \"$(cat <<-EOF\n\tfix: x\n\n\t`(a(b))` note\n\tEOF\n)\""
+    ) == (0, "", "")
 
 
 def test_file_path_relative_to_dash_C(tmp_path):
@@ -305,6 +327,71 @@ def test_an_unclosed_substitution_is_not_a_commit_at_all():
     message text, so the gate blocked a command that could never run
     (CodeRabbit, issue #1228 round 2)."""
     assert _run('git commit -m "fix: x\n\n$(x\n\nword(a(b))"') == (0, "", "")
+
+
+# ---------------------------------------------------------------------------
+# Round-2 surface (issue #1228)
+#
+# Every expectation below was measured before it was asserted: the command was
+# run under bash with `git` replaced by a recorder that prints the argv and the
+# message it was actually handed, and the expected verdict is
+# `offending_lines` applied to THAT text rather than to the source. Half of
+# these are false-positive guards — cases where the source text reads as
+# malformed but the message git receives does not, so the gate must stay
+# silent. They are marked `FP guard`, and they are the ones protecting valid
+# commits from a blocking gate.
+# ---------------------------------------------------------------------------
+
+BAD = "fix: x\n\nword(a(b))"
+OK = "fix: x\n\nplain body"
+
+
+@pytest.mark.parametrize(
+    "command,rc",
+    [
+        # --- heredoc delimiter spellings feeding `-F -` (stdin) -------------
+        # The operator and the delimiter are separate tokens when a space
+        # sits between them, which found no delimiter at all and let a
+        # malformed message through unseen.
+        (f"git commit -F - << EOF\n{BAD}\nEOF", 2),
+        (f"git commit -F - << EOF\n{OK}\nEOF", 0),
+        (f'git commit -F - <<"EOF"\n{BAD}\nEOF', 2),
+        ("git commit -F - <<- 'EOF'\n\tfix: x\n\n\tword(a(b))\n\tEOF", 2),
+        # --- which heredoc actually feeds the reader (FP guard) -------------
+        # Redirections apply left to right, so stdin comes from the LAST one
+        # and the body of `A` is opened and discarded. Grading it blocked a
+        # commit whose real message is clean.
+        ("git commit -m \"$(cat <<'A' <<'B'\nword(a(b))\nA\n" + OK + "\nB\n)\"", 0),
+        ("git commit -m \"$(cat <<'A' <<'B'\nclean\nA\n" + BAD + "\nB\n)\"", 2),
+        (f"git commit -F - <<A <<B\nclean\nA\n{BAD}\nB", 2),
+        (f"git commit -F - <<A <<B\nword(a(b))\nA\n{OK}\nB", 0),
+        # --- backticks re-enter shell parsing inside double quotes ----------
+        # `<<EOF` inside the backtick run really does open a heredoc; reading
+        # it as string data let a malformed message pass silently.
+        ("git commit -m \"`cat <<'EOF'\n" + BAD + "\nEOF\n`\"", 2),
+        ("git commit -m \"`cat <<'EOF'\n" + OK + "\nEOF\n`\"", 0),
+        # --- bash line continuation -----------------------------------------
+        # A backslash-newline is removed, not turned into a separator, so the
+        # message really is `word(a(b))`. Splicing to a space produced
+        # `word (a(b))` — the one shape this gate always passes.
+        ('git commit -m "fix: x" -m "word\\\n(a(b))"', 2),
+        ('git commit -m "fix: x" -m "word\\\nplain"', 0),
+        # FP guard: bash does NOT splice inside single quotes, so the paren
+        # really does start its own line and the message is well formed.
+        ("git commit -m 'fix: x' -m 'word\\\n(a(b))'", 0),
+        # The same distinction inside a heredoc body, which the reader
+        # splices only when the delimiter is unquoted.
+        ("git commit -F - <<EOF\nfix: x\n\nword\\\n(a(b))\nEOF", 2),
+        ("git commit -F - <<'EOF'\nfix: x\n\nword\\\n(a(b))\nEOF", 0),
+        # --- expansion inside an unquoted heredoc body (FP guard) -----------
+        # `word($(printf x))` is delivered as `word(x)`, which parses.
+        ("git commit -m \"$(cat <<EOF\nfix: x\n\nword($(printf x))\nEOF\n)\"", 0),
+        # Quote the delimiter and the same text is literal — and malformed.
+        ("git commit -m \"$(cat <<'EOF'\nfix: x\n\nword($(printf x))\nEOF\n)\"", 2),
+    ],
+)
+def test_round_two_heredoc_surface(command, rc):
+    assert _run(command)[0] == rc
 
 
 def test_a_literal_dollar_paren_in_a_double_quoted_message_is_not_a_block():
