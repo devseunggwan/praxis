@@ -43,7 +43,7 @@ Displays the status of all cmux sessions in a table.
 1. User requests `cmux-session status` or `cmux status`
 2. Execute the following script:
 ```bash
-bash "$(dirname "$0")/cmux-session-status"
+bash "$(dirname "${0}")/cmux-session-status"
 ```
 3. Show the output to the user as-is
 
@@ -60,7 +60,7 @@ Performs 3-phase cleanup. Use `--dry-run` flag to preview the plan without execu
 1. User requests `cmux-session cleanup` or `cmux cleanup`
 2. Check dry-run preference, then execute:
 ```bash
-bash "$(dirname "$0")/cmux-session-cleanup" [--dry-run]
+bash "$(dirname "${0}")/cmux-session-cleanup" [--dry-run]
 ```
 3. The script outputs 3 JSON blocks separated by `---PHASE_SEPARATOR---`
 4. Parse each phase's JSON and process according to the Data Handoff Protocol below

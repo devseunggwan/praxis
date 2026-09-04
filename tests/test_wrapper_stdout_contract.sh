@@ -66,7 +66,7 @@ assert_present \
 
 assert_present \
   "the separation is backed by a transcribed run, not an argument" \
-  'cost is $5 `whoami` ${HOME}'
+  'cost is $COST `whoami` ${HOME}'
 
 # ---------------------------------------------------------------------------
 # 3. The completion signal must follow the exit code

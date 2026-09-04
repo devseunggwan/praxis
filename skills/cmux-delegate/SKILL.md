@@ -2,8 +2,8 @@
 name: cmux-delegate
 description: Hand off an existing independent issue that surfaced mid-task to its own Claude Code session in a new cmux workspace, with auto-collected context; that session runs issue→worktree→PR alone. Not for splitting the current task. Triggers on "cmux delegate", "delegate issue", "delegate to new session", "별도 세션", "세션에 위임", "별건으로 빼서".
 verified-against-runtime: true
-runtime-verified-at: 2026-08-20
-runtime-verified-note: "cmux 0.64.22 — the wrapper passes the prompt as argv (`claude \"$(cat file)\"`) and keeps stdin on the terminal, so the worker runs as an ordinary interactive session and answers its own permission and folder-trust prompts; `--max-budget-usd` stays print-mode only."
+runtime-verified-at: 2026-09-04
+runtime-verified-note: "cmux 0.64.22 — the selected workspace's `list-workspaces` row is prefixed `* `, so field 1 without the strip is `*` and `cmux send --workspace '*'` fails with `Invalid workspace handle`; stripped, `--session` resolves and `send` returns `OK`. The legacy-alias notice goes to stderr, so it cannot reach the grep."
 ---
 
 # cmux-delegate
@@ -513,10 +513,17 @@ When `--session` is specified:
 
 ```bash
 # 1. Match the workspace
-TARGET=$(cmux list-workspaces | grep "{session}" | head -1 | awk '{print $1}')
+# `-v f=1` rather than a literal field number: the skill loader rewrites a
+# `$<digit>` in this body into the invocation's arguments, so the literal form
+# reaches the model already corrupted. The field split itself stays awk's: rows
+# are leading-space indented, so `cut -d' ' -f1` returns an empty first field.
+TARGET=$(cmux list-workspaces | grep "{session}" | sed 's/^\* //' | head -1 | awk -v f=1 '{print $f}')
 
-if [ -z "$TARGET" ]; then
-  echo "Error: 세션 '{session}'을 찾을 수 없습니다"
+# The selected workspace's row starts with `* `, so its first field is the
+# marker: strip it, or the ref is unreachable through `--session`. The prefix
+# test then rejects the non-empty garbage an emptiness guard waves through.
+if [ "${TARGET#workspace:}" = "$TARGET" ]; then
+  echo "Error: 세션 '{session}'의 workspace ref 를 얻지 못했습니다 (추출값: '$TARGET')"
   cmux list-workspaces
   exit 1
 fi
@@ -667,7 +674,7 @@ shell does not re-interpret the substitution result:
 
 ```text
 $ claude --model haiku "$(cat p4.md)"
-cost is $5 `whoami` ${HOME} {a,b} "quoted" 'single' \n      ← returned verbatim
+cost is $COST `whoami` ${HOME} {a,b} "quoted" 'single' \n   ← returned verbatim
 ```
 
 That is why Step 4 uses argv — it keeps the special-character safety and
