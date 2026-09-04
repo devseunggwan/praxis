@@ -42,6 +42,8 @@
 #      r) command 키가 없는 non-Bash·non-MCP 도구는 동작 불변
 #      s) 셸에서 유의미한 내부 공백 차이(개행 / 탭 / 따옴표 안 연속 공백 /
 #         NBSP)는 서로 다른 키 -> 무음, 같은 명령 2회는 여전히 advisory (대조군)
+#      t) MCP 도구의 문자열은 harness 가 쓴 것만 실패 — `Error: ` 접두사만 있는
+#         *성공* 텍스트는 무음, hook-error envelope·거부 문장은 여전히 advisory
 #
 # Run:
 #   bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
@@ -1131,15 +1133,19 @@ else
   assert_fail "19q) non-bare path-only-differing failures still normalize together" "rc=$rc out=[$out] err=[$err]"
 fi
 
-echo "=== case 19r: a non-Bash tool with a bare exit-code string is unaffected ==="
+echo "=== case 19r: a non-Bash tool with no command key is unaffected ==="
+# `Edit`, not an MCP tool: MCP strings are scoped separately by 19t, and Edit's
+# successful results are dicts (1,135/1,135 built-in-tool successes in the
+# census), so its string payload is failure evidence exactly as Bash's is. The
+# text is captured verbatim from a real failed Edit.
 non_bash_bare_payload() {
   python3 - "$1" <<'PY'
 import json, sys
 print(json.dumps({
     "session_id": sys.argv[1],
-    "tool_name": "mcp__x__run",
+    "tool_name": "Edit",
     "tool_input": {"file_path": "/tmp/whatever"},
-    "tool_response": "Error: Exit code 1",
+    "tool_response": "Error: String to replace not found in file.",
 }))
 PY
 }
@@ -1209,6 +1215,56 @@ ws_case "19s-d) NBSP is not a shell separator" \
 ws_case "19s-e) control: the same command still advises" \
   sess-1265-se 'cat /tmp/a' 'cat /tmp/a' advisory
 
+# ---------------------------------------------------------------------------
+# Case 19t: MCP strings are trusted only when the HARNESS wrote them.
+#
+# Nothing in the hook payload marks a string as an error — `is_error` lives on
+# the transcript's `tool_result` block — so the classifier reads the shape.
+# Censused over 14,652 `toolUseResult` entries: MCP is the only class whose
+# *successful* results ever arrive as a bare string (25 of 1,152; Bash and the
+# other built-ins are 12,927/12,927 dicts). On that channel a leading `Error: `
+# can be the tool's own text, so a tool answering `Error: no rows found` on
+# success accumulated state and advised on its second return. 19t-b/c/d are the
+# controls that keep "scoped" distinguishable from "MCP stopped firing".
+# ---------------------------------------------------------------------------
+echo "=== case 19t: MCP string payloads are scoped to harness-authored text ==="
+mcp_case() {
+  # mcp_case <label> <session> <tool_response> <expect: silent|advisory>
+  local label="$1" sess="$2" text="$3" expect="$4"
+  local state="$TMP_DIR/mcp-$sess.json"
+  local o e r out err
+  o="$(mktemp)" e="$(mktemp)"
+  pipe_hook "$(string_payload "$sess" mcp__db__query "$text")" "$state" >/dev/null 2>/dev/null
+  pipe_hook "$(string_payload "$sess" mcp__db__query "$text")" "$state" >"$o" 2>"$e"
+  r=$?
+  out=$(cat "$o"); err=$(cat "$e")
+  rm -f "$o" "$e"
+  if [ "$expect" = "silent" ]; then
+    if [ "$r" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+      assert_pass "$label"
+    else
+      assert_fail "$label" "rc=$r out=[$out] err=[$err]"
+    fi
+  else
+    if [ "$r" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+      assert_pass "$label"
+    else
+      assert_fail "$label" "rc=$r out=[$out] err=[$err]"
+    fi
+  fi
+}
+
+# The defect: a SUCCESSFUL MCP result whose own text opens with `Error: `.
+mcp_case "19t-a) an MCP success whose text opens with 'Error: ' stays silent" \
+  sess-1265-ta 'Error: no rows found' silent
+# Controls — the harness's own strings still advise on the same channel.
+mcp_case "19t-b) the PreToolUse hook-error envelope still advises" \
+  sess-1265-tb 'Error: PreToolUse:mcp__db__query hook error: blocked by gate' advisory
+mcp_case "19t-c) a repeated user rejection still advises" \
+  sess-1265-tc 'User rejected tool use' advisory
+# The pre-existing must-fail case, on the channel it was actually observed on.
+mcp_case "19t-d) the oversized-output notice still stays silent" \
+  sess-1265-td "$STR_OVERSIZED" silent
 
 echo
 if [ "$FAIL" -eq 0 ]; then

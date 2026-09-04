@@ -46,6 +46,17 @@ Failure detection
   `Error: `-prefixed non-failure — the harness's oversized-output notice for a
   *successful* call whose result was spilled to a file, emitted with
   `is_error == False` — is excluded by name.
+
+  The `Error: ` prefix is NOT read as failure evidence for an MCP tool. Widening
+  the census to all 14,652 `toolUseResult` entries shows MCP is the only class
+  that ever delivers a *successful* result as a bare string (25 of 1,152; every
+  other tool's successes are dicts or content lists), so on that one channel the
+  leading text can be the tool's own rather than the harness's envelope — a tool
+  answering `Error: no rows found` on success would fire a false advisory on its
+  second return. For an MCP tool only harness-authored strings count: the
+  `Error: PreToolUse:`/`Error: PostToolUse:` hook-error envelope and the fixed
+  rejection sentence. Measured cost: MCP failures carrying the tool's own error
+  text (~50 of 573 observed string failures) no longer advise.
 - a dict — the shape a SUCCESSFUL call arrives in, plus synthetic/legacy
   payloads. Failure markers, in order:
 
@@ -228,7 +239,7 @@ _STRING_OVERSIZED_OUTPUT_RE = re.compile(
 # is the #1042 defect-2 shape, and this hook must not ship it.
 _BARE_EXIT_CODE_RE = re.compile(r"^Error: Exit code \d+$")
 
-# XXMARKERXX MCP tools are the ONE class whose *successful* results are ever delivered as a
+# MCP tools are the ONE class whose *successful* results are ever delivered as a
 # bare string. Censused over 14,652 `toolUseResult` entries in 120 transcripts:
 # Bash successes are dicts (11,792/11,792) and every other built-in tool's are
 # too (1,135/1,135), while MCP successes are content lists (1,127) plus 25
@@ -328,29 +339,40 @@ def _extract_reference(tool_input: dict[str, Any], failure_text: str = "") -> st
     return ""
 
 
-def _string_failure_text(tool_response: str) -> str:
+def _string_failure_text(tool_response: str, tool_name: str) -> str:
     """Failure text carried by a string-shaped `tool_response`, else `""`.
 
     Returning the text rather than a bool is what keeps unrelated failures on
     distinct signatures (issue #1042 defect 2): the string *is* the only failure
     evidence the payload carries, so it is both the failure marker and the
     signature material.
+
+    Nothing in the payload marks a string as an error — the harness's `is_error`
+    flag lives on the transcript's `tool_result` block, not here — so the
+    classifier reads the shape instead. A string reaches this hook from a
+    *successful* call in exactly one case per the census above (the
+    oversized-output notice, MCP only), and that case is what scopes the match:
+    an MCP tool's string may be its own text, so only harness-authored strings
+    count there.
     """
     text = tool_response.strip()
     if not text:
         return ""
+    # Fixed harness sentence, carrying no prefix — a denial, whatever the tool.
+    if text.lower() == _STRING_REJECTION_TEXT:
+        return text
     if _STRING_OVERSIZED_OUTPUT_RE.match(text):
         return ""
+    if tool_name.startswith(_MCP_TOOL_PREFIX):
+        return text if _STRING_HOOK_ERROR_RE.match(text) else ""
     if text.startswith(_STRING_FAILURE_PREFIX):
-        return text
-    if text.lower() == _STRING_REJECTION_TEXT:
         return text
     return ""
 
 
 def _derive_failure_text(tool_response: Any, tool_name: str) -> str:
     if isinstance(tool_response, str):
-        return _string_failure_text(tool_response)
+        return _string_failure_text(tool_response, tool_name)
     if not isinstance(tool_response, dict):
         return ""
     if isinstance(tool_response.get("error"), str):
@@ -404,7 +426,7 @@ def _is_failed(tool_response: Any, tool_name: str) -> bool:
     # Extending the Bash guard here would re-close the only road left open —
     # which is exactly the 135,030-fire, zero-advisory silence of #1265.
     if isinstance(tool_response, str):
-        return bool(_string_failure_text(tool_response))
+        return bool(_string_failure_text(tool_response, tool_name))
 
     if not isinstance(tool_response, dict):
         return False
