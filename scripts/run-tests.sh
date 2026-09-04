@@ -10,24 +10,25 @@
 #   6. memory-frontmatter — scripts/check-memory-frontmatter.py
 #   7. omc-name-drift — scripts/check-omc-name-drift.py
 #   8. workflow-pins — scripts/check-workflow-pins.py
-#   9. ruff     — static Python lint (mirrors the ci.yml `ruff` job)
-#  10. shellcheck — static shell lint (mirrors the ci.yml `shellcheck` job)
-#  11. markdownlint — advisory markdown lint (mirrors the ci.yml `markdownlint` job)
+#   9. skill-arg-substitution — scripts/check-skill-arg-substitution.py
+#  10. ruff     — static Python lint (mirrors the ci.yml `ruff` job)
+#  11. shellcheck — static shell lint (mirrors the ci.yml `shellcheck` job)
+#  12. markdownlint — advisory markdown lint (mirrors the ci.yml `markdownlint` job)
 #
-# Steps 9-11 mirror CI jobs that used to have no local equivalent, so a change
+# Steps 10-12 mirror CI jobs that used to have no local equivalent, so a change
 # could pass here and still be flagged on the PR (issue #866). Each skips with
 # an explicit SKIPPED line when its tool is absent, so a contributor without
 # the toolchain is not blocked — CI remains authoritative either way.
 #
 # Step 6 is a different repo-internal script, same family as steps 3-5 (no
 # external toolchain — nothing to install), but its skip condition is not
-# like steps 9-11's: the memory directory it lints is a local, gitignored,
+# like steps 10-12's: the memory directory it lints is a local, gitignored,
 # per-user store that is structurally absent in CI or a fresh checkout,
 # always, forever (issue #942) — not a "toolchain not installed" gap a
 # contributor can close. It prints "N/A", never "SKIPPED", to keep that
 # distinction visible in the log (see its own docstring / #917 below), and
 # this call strips PRAXIS_TESTS_STRICT (`env -u`, not passed through like
-# steps 9-11) so that permanent N/A can never fail the job. Real drift
+# steps 10-12) so that permanent N/A can never fail the job. Real drift
 # (nonzero exit with violations listed) still counts as FAILED, same as
 # steps 3-5 — this is not routed through the SKIPPED_TOOLS/skip_step() path
 # at all.
@@ -109,7 +110,7 @@ SHELL_FAILED=0
 #     PRAXIS_SUBSKIP: <tool> <file>
 # and exits 0. run_sh() tees stdout so the live stream is preserved, then scans
 # the capture and folds each announced tool into SKIPPED_TOOLS — the same
-# accounting as the top-level steps 9-11, so PRAXIS_TESTS_STRICT=1 fails the
+# accounting as the top-level steps 10-12, so PRAXIS_TESTS_STRICT=1 fails the
 # run on them too. Before this, "SKIP jq unavailable; exit 0" inside a file
 # was indistinguishable from a pass and strict mode never saw it.
 SUBSKIP_MARKER="PRAXIS_SUBSKIP:"
@@ -197,7 +198,7 @@ fi
 echo ""
 echo "=== memory frontmatter lint ==="
 # PRAXIS_TESTS_STRICT is deliberately NOT propagated to this one call: unlike
-# steps 9-11 (a tool a contributor could install), the memory dir this checks
+# steps 10-12 (a tool a contributor could install), the memory dir this checks
 # is a local, gitignored, per-user store that structurally never exists in
 # CI or a fresh checkout — treating its absence as a strict-mode failure
 # would fail every CI run forever, not flag a fixable gap. The script prints
@@ -205,7 +206,7 @@ echo "=== memory frontmatter lint ==="
 # scrolling SKIPPED line lost its signal value once contributors stopped
 # reading it, and a condition that can never be fixed would sit there as
 # permanent unresolvable noise if it wore the same "SKIPPED" label as steps
-# 9-11's genuinely-fixable tool-absence skips. An N/A here is always benign;
+# 10-12's genuinely-fixable tool-absence skips. An N/A here is always benign;
 # only actual detected drift (exit 1 with violations listed) fails this step.
 # The script's own PRAXIS_TESTS_STRICT support still works for direct
 # standalone invocation (see its tests / docstring).
@@ -251,7 +252,22 @@ elif ! python3 ./scripts/check-workflow-pins.py; then
 fi
 
 # ---------------------------------------------------------------------------
-# 9. Ruff (mirrors ci.yml `ruff` job — blocking there, blocking here)
+# 9. SKILL.md argument-substitution guard (issue #1259)
+#
+# Same family as steps 3-8: a repo-internal script with no external toolchain,
+# so it never skips. Claude Code rewrites a SKILL.md body's positional-parameter
+# references with the invocation's arguments at load time, so a shell snippet in
+# a skill reads correctly on disk and reaches the model corrupted. This asserts
+# no SKILL.md carries such a reference.
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== skill-arg-substitution check ==="
+if ! python3 ./scripts/check-skill-arg-substitution.py; then
+  FAILED=1
+fi
+
+# ---------------------------------------------------------------------------
+# 10. Ruff (mirrors ci.yml `ruff` job — blocking there, blocking here)
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== ruff ==="
@@ -270,7 +286,7 @@ elif ! "${RUFF[@]}" check .; then
 fi
 
 # ---------------------------------------------------------------------------
-# 10. Shellcheck (mirrors ci.yml `shellcheck` job — same discovery/severity)
+# 11. Shellcheck (mirrors ci.yml `shellcheck` job — same discovery/severity)
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== shellcheck ==="
@@ -294,7 +310,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 11. Markdownlint (mirrors ci.yml `markdownlint` job)
+# 12. Markdownlint (mirrors ci.yml `markdownlint` job)
 #
 # Version parity: ci.yml's test job pins `markdownlint-cli2@0.23.2` (issue
 # #1171). Locally any installed markdownlint-cli2 is accepted — forcing a
@@ -363,10 +379,10 @@ if [[ $FAILED -ne 0 ]]; then
   exit 1
 fi
 
-# Scope note: this counts the three tool steps this script owns (9-11) plus
+# Scope note: this counts the three tool steps this script owns (10-12) plus
 # any tool a shell sub-suite announced via the PRAXIS_SUBSKIP marker before
 # exiting 0 (#1170) — a whole file that silently skipped on a missing tool is
-# a missing-toolchain gap exactly like steps 9-11. Step 6 has its own N/A line
+# a missing-toolchain gap exactly like steps 10-12. Step 6 has its own N/A line
 # (deliberately not "SKIPPED") and is excluded from this tally on purpose — it
 # is never a missing-toolchain skip. Per-gate platform skips inside a running
 # sub-suite — e.g. the Darwin-only gate in tests/test_codex_broker_reaper.sh —
