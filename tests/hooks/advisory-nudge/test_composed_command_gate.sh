@@ -556,6 +556,59 @@ run_case "SILENT FIXTURE: odd backslash still joins one transcribed command (sil
   "silent" "advisory" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body-file $B\"},\"transcript_path\":\"$TRANSCRIPT\"}"
 
+# --- gh api surface (#1265) --------------------------------------------------
+# An anchor revision cannot go out as `gh pr comment`: rev >=2 is a PATCH
+# against a comment id. So until _external_write_body learned `gh api`, the one
+# path this hook exists to watch was the one it could not see.
+
+api_patch_payload() {
+  printf '{"tool_name":"Bash","tool_input":{"command":"gh api --method PATCH /repos/o/r/issues/comments/999 -F body=@%s"},"transcript_path":"%s"}' "$1" "$TRANSCRIPT"
+}
+
+nextbody
+cat > "$B" <<'EOF'
+### Verification
+
+<details><summary>Evidence 1 — the tokenizer is reached</summary>
+<br>
+
+```
+$ grep -rn other_symbol hooks/
+hooks/_lib/_hook_utils.py:88:def safe_tokenize(command)
+```
+
+</details>
+EOF
+run_case "REGRESSION #1265: assembled \$ line posted via gh api PATCH (warn)" \
+  "warn" "advisory" "$(api_patch_payload "$B")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ grep -rn safe_tokenize hooks/ | head -5
+hooks/_lib/_hook_utils.py:88:def safe_tokenize(command)
+```
+EOF
+run_case "SILENT FIXTURE: transcribed \$ line posted via gh api PATCH (silent)" \
+  "silent" "advisory" "$(api_patch_payload "$B")"
+
+# Negative control for the method gate: identical body, identical endpoint,
+# identical `body=` field — only the method differs. A detector widened to
+# every `gh api` call would fire here, and the warn case above cannot tell
+# the two apart on its own. `--method GET` has to be stated: gh switches an
+# otherwise method-less call to POST as soon as a field is added, so dropping
+# the flag makes this a write rather than a read.
+nextbody
+cat > "$B" <<'EOF'
+```
+$ grep -rn other_symbol hooks/
+hooks/_lib/_hook_utils.py:88:def safe_tokenize(command)
+```
+EOF
+run_case "SILENT FIXTURE: same body on a gh api GET is not a write (silent)" \
+  "silent" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh api --method GET /repos/o/r/issues/comments/999 -F body=@$B\"},\"transcript_path\":\"$TRANSCRIPT\"}"
+
 # --- Summary -----------------------------------------------------------------
 
 rm -rf "$TRANSCRIPT" "$TEL_FILE" "$BODY_DIR"

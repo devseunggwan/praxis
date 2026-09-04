@@ -42,6 +42,16 @@ convention, issue #907):
 
 - `gh issue|pr comment|create|edit`, `gh pr review` with `--body` / `-b` /
   `--body=` / `--body-file` / `-F` (file contents read best-effort)
+- `gh api` with `POST` / `PATCH` / `PUT` against
+  `repos/{o}/{r}/issues/comments/<id>`, `issues/<n>/comments`,
+  `pulls/comments/<id>`, `pulls/<n>/comments` or `pulls/<n>/reviews`, body from
+  `-f body=` / `--raw-field`, `-F body=@<file>` / `--field` (`@` expanded as gh
+  expands it) — issue #1265. `--input` makes the body unknown and nothing is
+  scanned, including beside a `body=` field, which gh sends as a query
+  parameter rather than merging it into the file's request body. Any
+  other method or endpoint stays outside: a read, `graphql`, a workflow
+  dispatch. The verification-anchor convention makes this the only path a
+  rev ≥2 anchor can take.
 - `mcp__*slack*__*send|post|update*`, `mcp__*notion*__*create|update*page*` /
   `*append*block*` (nested `children[].paragraph.rich_text[].text.content` /
   `blocks[].text.text` shapes gated to recognized container/leaf entry points)

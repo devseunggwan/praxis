@@ -354,6 +354,14 @@ run_case "1e warn: --input JSON 본문 → 해독 불가 경고" \
   "warn:해독하지 못해" PreToolUse "" \
   "gh api --method PATCH /repos/owner/repo/issues/comments/999 --input payload.json"
 
+# gh puts a `body=` field beside `--input` into the query string, so the field
+# is not the posted body and the defective file it points at must not be graded
+# — the same warn as 1e, never a block. Contract asserted in
+# tests/hooks/preflight-gate/test_anchor_api_patch_input.py.
+run_case "1e2 warn: --input 과 body= 필드 동시 → 필드는 쿼리스트링, 여전히 경고" \
+  "warn:해독하지 못해" PreToolUse "" \
+  "gh api --method PATCH /repos/owner/repo/issues/comments/999 --input payload.json -F body=@$FIX/no-history.md"
+
 run_case "1f pass: 규약 방언(en) 앵커" \
   pass PreToolUse "" "gh pr comment 42 --body-file $FIX/en-ok.md"
 

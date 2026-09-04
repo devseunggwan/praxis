@@ -62,6 +62,15 @@ without knowing the target at all.
 | `gh api --method PATCH /repos/{o}/{r}/issues/comments/{id} -F body=@anchor.md` | yes |
 | body from stdin (`-F body=@-`) or `--input payload.json` | no — warns, PostToolUse decides |
 
+The `gh api` command shape — method, endpoint, which flag carried `body=` — is
+read by `_lib/_external_write_body.py`'s `parse_gh_api`, which issue #1265 made
+the single definition shared with the five external-write hooks. What stays in
+this gate is resolving that body against the command segment's own cwd and
+against a file the same command rewrites before posting; `_lib` is cwd-free by
+design. The gate's own scope is unchanged and stays narrower than the shared
+detector's: a `PATCH` against `issues/comments/<id>` only, since that is what an
+anchor revision is.
+
 **Anchor shape decides scope.** Only a body whose first non-empty line starts
 with `### Verification` or `### 검증` is an anchor. The one-line update notice
 that accompanies every anchor edit posts through the same `gh pr comment`;

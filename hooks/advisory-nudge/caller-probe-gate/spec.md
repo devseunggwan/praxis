@@ -68,7 +68,17 @@ from the token list — they match ordinary prose and would swamp the signal.
 
 Surfaces scanned are the shared set from `_lib/_external_write_body.py`:
 `gh issue|pr comment|create|edit` and `gh pr review` with `--body` / `-b` /
-`--body=` / `--body-file` / `-F`, plus Slack/Notion MCP writes.
+`--body=` / `--body-file` / `-F`, plus Slack/Notion MCP writes, plus the
+`gh api` comment endpoints (issue #1265) — a `POST` / `PATCH` / `PUT` against
+`repos/{o}/{r}/issues/comments/<id>`, `issues/<n>/comments`,
+`pulls/comments/<id>`, `pulls/<n>/comments` or `pulls/<n>/reviews`, with the
+body read from `-f body=` / `--raw-field`, `-F body=@<file>` / `--field` (`@`
+expanded as gh expands it). `--input` makes the body unknown and nothing is
+scanned — including beside a `body=` field, which gh sends as a query
+parameter rather than merging it into the file's request body.
+Every other method or endpoint stays outside: a read, `graphql`, a
+workflow dispatch. The verification-anchor convention makes `gh api` the only
+path a rev ≥2 anchor can take, so before #1265 that write went unscanned.
 
 ## Clearing
 
