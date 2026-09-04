@@ -7,6 +7,13 @@ message there and nothing else in the command carries it, which is where
 
 The two must agree on where a body begins and ends: a case the stripper blanks
 and this one does not return is a body one gate can see and the other cannot.
+
+The `<<-` expectations below are what bash itself produces, not what the code
+does. Probe, on bash 3.2.57(1)-release:
+
+    $ printf 'cat <<-EOF\n\tword(a(b))\n\t\tindented\n\tEOF\n' > d3.sh
+    $ bash d3.sh | od -c
+    0000000   w o r d ( a ( b ) ) \n i n d e n t e d \n
 """
 from __future__ import annotations
 
@@ -28,8 +35,15 @@ from _hook_utils import heredoc_bodies, strip_heredoc_bodies  # noqa: E402
         ("cat <<'EOF'\nline one\nline two\nEOF", ["line one\nline two"]),
         # The terminator must match exactly — `EOF ` does not close one.
         ("cat <<EOF\nbody\nEOF \nstill body\nEOF", ["body\nEOF \nstill body"]),
-        # `<<-` strips leading tabs on the terminator line only.
-        ("cat <<-EOF\n\tbody\n\tEOF", ["\tbody"]),
+        # `<<-` strips leading tabs from every body line, not only from the
+        # terminator — verified against bash 3.2.57 itself, see the module
+        # docstring. Deeper indentation goes too, and only TABS go: bash leaves
+        # leading spaces alone.
+        ("cat <<-EOF\n\tbody\n\tEOF", ["body"]),
+        ("cat <<-EOF\n\t\tdeep\n\tEOF", ["deep"]),
+        ("cat <<-EOF\n  spaced\n\tEOF", ["  spaced"]),
+        # A plain `<<` keeps the tabs: they are body text there.
+        ("cat <<EOF\n\tbody\nEOF", ["\tbody"]),
         # Two heredocs on one line: bodies come back in source order.
         ("cat <<A <<B\nfirst\nA\nsecond\nB", ["first", "second"]),
         # Unterminated — the body runs to the end, mirroring the stripper.
@@ -52,6 +66,8 @@ def test_bodies(command, expected):
         "cat <<EOF\nbody\nEOF",
         "cat <<'EOF'\nline one\nline two\nEOF",
         "cat <<-EOF\n\tbody\n\tEOF",
+        "cat <<-EOF\n\t\tdeep\n\tEOF",
+        "cat <<EOF\n\tbody\nEOF",
         "cat <<A <<B\nfirst\nA\nsecond\nB",
         "cat <<EOF\nbody\nmore",
         "echo $((1 << 3))",
@@ -63,13 +79,21 @@ def test_agrees_with_the_stripper_on_which_lines_are_body(command):
 
     Compared as multisets of lines: the stripper keeps terminators and line
     count, so the blanked positions are exactly the body lines.
+
+    Leading tabs are dropped from both sides before comparing. The claim under
+    test is WHICH lines are body, and `<<-` makes the two sides disagree on a
+    body line's text by design — bash strips those tabs, so `heredoc_bodies`
+    does too, while the stripper blanks the line and never has to care.
     """
     stripped = strip_heredoc_bodies(command).split("\n")
     original = command.split("\n")
     blanked = sorted(
-        o for o, s in zip(original, stripped) if s == "" and o != ""
+        o.lstrip("\t") for o, s in zip(original, stripped) if s == "" and o != ""
     )
     returned = sorted(
-        line for body in heredoc_bodies(command) for line in body.split("\n") if line
+        line.lstrip("\t")
+        for body in heredoc_bodies(command)
+        for line in body.split("\n")
+        if line
     )
     assert blanked == returned

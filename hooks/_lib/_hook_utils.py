@@ -273,6 +273,16 @@ def heredoc_bodies(command: str) -> list[str]:
     where a body begins or ends. An unterminated heredoc yields the body it
     opened, matching the stripper's decision to treat the rest of the command
     as that body.
+
+    `<<-` strips leading tabs from EVERY body line, not only from the
+    terminator — `bash(1)`, "Here Documents": *all leading tab characters are
+    stripped from input lines and the line containing the delimiter*. Returning
+    the raw line instead handed a consumer text the shell never produces: a
+    body line `\\tword(a(b))` reads as indented prose to
+    `commit-message-paren-check`, which skips any line whose leading run holds
+    whitespace, while the commit message release-please parses starts at
+    `word(`. The stripper needs no such fold because it blanks the line either
+    way.
     """
     if "<<" not in command:
         return []
@@ -289,7 +299,7 @@ def heredoc_bodies(command: str) -> list[str]:
                 bodies.append("\n".join(current))
                 current = []
             else:
-                current.append(line)
+                current.append(probe)
             continue
         openers, quote = _heredoc_starts_on_line(line, quote)
         pending.extend(openers)

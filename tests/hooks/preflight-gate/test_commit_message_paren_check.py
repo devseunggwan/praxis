@@ -160,6 +160,23 @@ def test_message_sources(command, rc):
     assert _run(command)[0] == rc
 
 
+@pytest.mark.parametrize(
+    "command,rc",
+    [
+        # `<<-` strips leading tabs from every body line, so the message the
+        # parser sees starts at ``(` — see tests/test_heredoc_bodies.py for the
+        # bash probe behind this expectation.
+        ("git commit -m \"$(cat <<-EOF\n\tfix: x\n\n\t`(a(b))` note\n\tEOF\n)\"", 2),
+        # Indentation that is NOT a stripped tab still exempts the line.
+        ("git commit -m \"$(cat <<-EOF\n\tfix: x\n\n\t  `(a(b))` note\n\tEOF\n)\"", 0),
+        # A plain `<<` keeps the tab, and the tab is real indentation.
+        ("git commit -m \"$(cat <<EOF\nfix: x\n\n\t`(a(b))` note\nEOF\n)\"", 0),
+    ],
+)
+def test_dash_heredoc_body_is_read_the_way_bash_writes_it(command, rc):
+    assert _run(command)[0] == rc
+
+
 def test_file_path_relative_to_dash_C(tmp_path):
     (tmp_path / "msg.txt").write_text(BAD_BODY, encoding="utf-8")
     assert _run(f"git -C {tmp_path} commit -F msg.txt")[0] == 2
