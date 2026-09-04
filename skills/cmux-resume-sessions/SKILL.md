@@ -85,7 +85,7 @@ current_host=$(hostname)
    - If user selects `"취소"`: abort with `"Resume 취소됨 — 호스트 불일치 (${saved_host} → ${current_host})."`
 4. Execute (only after the hostname gate passes). Pass through all original args (`"$@"`) so flags like `--no-claude` survive:
 ```bash
-bash "$(dirname "$0")/cmux-resume-sessions" "$@"
+bash "$(dirname "${0}")/cmux-resume-sessions" "$@"
 ```
 5. Show output to the user
 
