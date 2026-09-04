@@ -278,12 +278,17 @@ Read the procedure below as **conditional, never as a standing assumption**: it
 applies to a session once a comment `update` has been confirmed absent from
 that session's **active** tool list. Confirm it the same way the claim above
 was made — enumerate the tools the session actually has, look for a
-comment-update mode, and use a write mode that does exist (issue or PR body
-update, or Discussions' comment write) as the positive control that the
-enumeration can return one at all. If a comment `update` **is** present, the
-anchor is revisable on that host: revise it in place and none of the procedure
-applies. Where it is absent, waiting for the tool to arrive is not a plan
-(#1211).
+comment-update mode, and use the **PR-body update** mode as the positive
+control that the enumeration can return a write mode at all. That control is
+not interchangeable with an issue-body update or a Discussions comment write:
+steps 3–4 record the gap *in the PR body*, so a session holding one of those
+but no PR-body update cannot run them, and a positive control drawn from one
+would certify a surface the procedure never uses. If a comment `update` **is**
+present, the anchor is revisable on that host: revise it in place and none of
+the procedure applies. If the PR-body update is absent too, steps 3–4 do not
+apply either — go straight to step 5 and carry the delta in the merge commit,
+which needs no host tool. Where both are absent, waiting for the tool to
+arrive is not a plan (#1211).
 
 The same absence removes the PostToolUse re-check, for a second and independent
 reason. That step reads the published comment back and re-checks structure
