@@ -58,7 +58,7 @@ hook payload 에는 실패 표지가 **없습니다**. `is_error` 는 transcript
 | 기타 내장 도구 | dict 1,135 / str 0 | str 37 |
 | MCP | list 1,127 / **str 25** (전부 oversized-output 안내) | str 90 |
 
-즉 MCP 채널에서는 앞머리의 `Error: ` 가 harness 의 실패 봉투가 아니라 **도구
+즉 MCP 채널에서는 앞머리의 `"Error: "` 가 harness 의 실패 봉투가 아니라 **도구
 자신의 텍스트**일 수 있습니다. 성공하면서 `Error: no rows found` 를 돌려주는
 도구는 상태를 쌓고 2회째에 거짓 advisory 를 냈습니다 (case 19t-a). 그래서 MCP
 도구에 대해서는 harness 가 직접 쓴 문자열만 실패로 셉니다.
@@ -66,7 +66,7 @@ hook payload 에는 실패 표지가 **없습니다**. `is_error` 는 transcript
 - `Error: PreToolUse:` / `Error: PostToolUse:` hook-error 봉투 (case 19t-b)
 - 고정 문장 `User rejected tool use` (case 19t-c)
 
-Bash 와 기타 내장 도구는 성공이 문자열로 오는 사례가 0건이므로 `Error: ` 접두사
+Bash 와 기타 내장 도구는 성공이 문자열로 오는 사례가 0건이므로 `"Error: "` 접두사
 판정을 그대로 유지합니다 (case 19r).
 
 **대가**: 도구 자신의 오류 텍스트를 담은 MCP 실패(`Error: Error: query: …`,
@@ -378,7 +378,7 @@ python3 -m pytest tests/test_hook_state_concurrency.py
   (case 19q — normalizer 를 약화시켜 산 수정이 아님을 보이는 대조군)
 - 셸에서 유의미한 내부 공백(개행·탭·따옴표 안 연속 공백·NBSP)이 다른 두 명령은
   서로 다른 키 -> 무음, 같은 명령 2회는 여전히 advisory (case 19s, 양방향)
-- MCP 도구: `Error: ` 로 시작하는 *성공* 텍스트는 무음, hook-error 봉투와 거부
+- MCP 도구: `"Error: "` 로 시작하는 *성공* 텍스트는 무음, hook-error 봉투와 거부
   문장은 여전히 advisory, oversized-output 안내는 무음 (case 19t, 양방향)
 - 문자열 payload 동일 실패 2회 -> advisory, 서로 다른 문자열 실패 2건 ->
   무음(signature 분리), `User rejected tool use` 반복 -> advisory,
