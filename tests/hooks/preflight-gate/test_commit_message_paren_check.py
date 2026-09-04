@@ -349,6 +349,37 @@ OK = "fix: x\n\nplain body"
 @pytest.mark.parametrize(
     "command,rc",
     [
+        # --- attached and clustered value-taking short options --------------
+        # `-F-` and `-Ffile` are one token; the scanner read only the
+        # detached `-F <value>` form, so neither was a message source.
+        (f"git commit -F- <<EOF\n{BAD}\nEOF", 2),
+        (f"git commit -F- <<EOF\n{OK}\nEOF", 0),
+        (f"git commit -aF - <<EOF\n{BAD}\nEOF", 2),
+        (f"git commit -aF - <<EOF\n{OK}\nEOF", 0),
+        # `-am"…"`: the cluster ends at `m`, which takes the REST of the
+        # cluster as its value. The old rule required the token to end in
+        # `m`, so an attached value yielded no source at all.
+        (f'git commit -am"{BAD}"', 2),
+        (f'git commit -am"{OK}"', 0),
+        (f'git commit -vsm"{BAD}"', 2),
+        (f"git commit -am '{BAD}'", 2),
+        # A cluster whose leading chars are not no-value flags is still
+        # refused: `-S` takes an attached key id, so this is not a message.
+        ("git commit -Smword -m 'fix: x'", 0),
+        # --- `--` ends option scanning (FP guard) ---------------------------
+        # A pathspec literally named `-m` is a path, not a message flag.
+        ("git commit -m 'fix: x' -- '-m' 'word(a(b))'", 0),
+        # …while a real second `-m` before the `--` is still message text.
+        (f"git commit -m '{BAD}' -- src", 2),
+    ],
+)
+def test_round_two_option_surface(command, rc):
+    assert _run(command)[0] == rc
+
+
+@pytest.mark.parametrize(
+    "command,rc",
+    [
         # --- heredoc delimiter spellings feeding `-F -` (stdin) -------------
         # The operator and the delimiter are separate tokens when a space
         # sits between them, which found no delimiter at all and let a
@@ -392,6 +423,19 @@ OK = "fix: x\n\nplain body"
 )
 def test_round_two_heredoc_surface(command, rc):
     assert _run(command)[0] == rc
+
+
+def test_attached_file_flag_reads_the_file(tmp_path):
+    """`-Fmsg.txt` is one token; only the detached form was ever a source."""
+    (tmp_path / "bad.txt").write_text(BAD_BODY, encoding="utf-8")
+    (tmp_path / "ok.txt").write_text(GOOD_BODY, encoding="utf-8")
+    assert _run(f"git commit -F{tmp_path}/bad.txt")[0] == 2
+    assert _run(f"git commit -F{tmp_path}/ok.txt")[0] == 0
+    # …and the `-C` working directory still resolves its relative path.
+    assert _run(f"git -C {tmp_path} commit -Fbad.txt")[0] == 2
+    assert _run(f"git -C {tmp_path} commit -Fok.txt")[0] == 0
+    # …and a path-prefixed git binary is still git.
+    assert _run(f"/usr/bin/git commit -F{tmp_path}/bad.txt")[0] == 2
 
 
 def test_a_literal_dollar_paren_in_a_double_quoted_message_is_not_a_block():

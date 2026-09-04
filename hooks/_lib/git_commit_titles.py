@@ -76,6 +76,13 @@ GIT_GLOBAL_BARE_FLAGS = frozenset({
 # ref), -c (commit), -t (template), -u (untracked mode), -m (message).
 GIT_COMMIT_NO_VALUE_SHORT = frozenset("aesvnqzp")
 
+# The two `git commit` short options this module reads a message out of, and
+# the kind of value each carries. Both are value-taking, so each ends its
+# cluster: the rest of the cluster is the value when there is one, and the next
+# token when there is not (`-am"fix: x"` and `-am "fix: x"` are the same
+# invocation to git, and `-Fmsg.txt`/`-F-` likewise).
+GIT_COMMIT_VALUE_SHORT = {"m": "message", "F": "file"}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -334,6 +341,36 @@ def title_is_unresolved_substitution(title: str, command: str | None = None) -> 
     return False
 
 
+def _cluster_value(
+    tok: str, argv: list[str], i: int
+) -> tuple[tuple[str, str] | None, int] | None:
+    """`((kind, value) | None, tokens consumed)` for a short-option cluster.
+
+    Returns None when `tok` is not a cluster this module can read, so the
+    caller falls through to its long-form branches rather than guessing. A
+    cluster is readable while every character before the value-taking one is a
+    known no-value `git commit` short flag: that whitelist is what keeps
+    `-Smike@example.com` out (`-S` takes an attached key id, and `S`, `@`, `.`
+    are not no-value flags), and it is why an unknown character abandons the
+    whole cluster instead of scanning past it.
+
+    The value-taking flag ends the cluster either way — with the rest of the
+    cluster as its value, or with the next token when the cluster ends there.
+    """
+    for pos, ch in enumerate(tok[1:], start=1):
+        kind = GIT_COMMIT_VALUE_SHORT.get(ch)
+        if kind is not None:
+            rest = tok[pos + 1:]
+            if rest:
+                return (kind, rest), 1
+            if i + 1 < len(argv):
+                return (kind, argv[i + 1]), 2
+            return None, 1  # dangling flag — git errors, nothing to read
+        if ch not in GIT_COMMIT_NO_VALUE_SHORT:
+            return None
+    return None, 1  # all no-value flags (`-av`): consumed, contributes nothing
+
+
 def _scan_commit_message_values(
     argv: list[str],
 ) -> tuple[list[tuple[str, str]], str | None] | None:
@@ -392,35 +429,29 @@ def _scan_commit_message_values(
                 i += 1
                 continue
 
-        # Handle attached short-option form: -m<value> parsed as single token.
-        # shlex strips quotes, so `git commit -m"long title"` becomes ['-mlong title'].
-        # This must be checked BEFORE the combined-flag branch to avoid misrouting.
-        if (
-            tok.startswith("-m")
-            and not tok.startswith("--")
-            and len(tok) > 2
-        ):
-            values.append(("message", tok[2:]))
-            i += 1
-            continue
+        # Everything after `--` is a pathspec, never an option (git-commit(1),
+        # "OPTIONS": `--` separates paths from revisions/options). Scanning on
+        # read a path literally named `-m` as a message flag, so its neighbour
+        # became message text and could block a valid commit (CodeRabbit,
+        # issue #1228 round 2).
+        if tok == "--":
+            break
 
-        # Handle combined short flags like -am / -vsm (git allows clustered
-        # short options where -m terminates with the next token as value).
-        # Strict whitelist: every preceding char must be a known no-value short
-        # flag from git commit. This excludes `-Smike@example.com` (-S accepts
-        # attached key id; even though `com` ends in `m`, `S/@/.` etc. are not
-        # in the no-value set, so the cluster is rejected). Round-1 heuristic
-        # used "m anywhere in tok[1:]" and was unsafe; round-4 narrows it.
-        if (
-            tok.startswith("-")
-            and not tok.startswith("--")
-            and len(tok) > 2
-            and tok[-1] == "m"
-            and all(c in GIT_COMMIT_NO_VALUE_SHORT for c in tok[1:-1])
-        ):
-            if i + 1 < len(sub_argv):
-                values.append(("message", sub_argv[i + 1]))
-                i += 2
+        # Handle a short-option cluster — `-m<value>`, `-am <value>`,
+        # `-am<value>`, `-Fmsg.txt`, `-F-`, `-vsm`. One walk covers all of
+        # them because they are one grammar: leading no-value flags, then at
+        # most one value-taking flag that consumes the rest of the cluster or,
+        # when the cluster ends with it, the next token. Three separate
+        # branches used to cover a subset of that grammar, and the shapes
+        # between them (`-am"fix: x"`, `-Fmsg.txt`) yielded no message source
+        # at all.
+        if tok.startswith("-") and not tok.startswith("--") and len(tok) > 1:
+            consumed = _cluster_value(tok, sub_argv, i)
+            if consumed is not None:
+                value, step = consumed
+                if value is not None:
+                    values.append(value)
+                i += step
                 continue
 
         # Standard separate-token flags.

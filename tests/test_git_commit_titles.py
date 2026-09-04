@@ -546,3 +546,56 @@ def test_non_utf8_file_still_raises_on_both_readers(tmp_path):
 def test_stdin_placeholder_is_none_on_both_readers():
     assert title_from_file("-") is None
     assert text_from_file("-") is None
+
+
+# ---------------------------------------------------------------------------
+# Short-option cluster grammar and the `--` pathspec separator (issue #1228)
+#
+# The scanner feeds three gates, so a source it misses is a message no gate
+# reads and a source it invents is a message no gate should read. Both
+# directions are asserted here; the `--` cases are the false-positive guards.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "argv,titles",
+    [
+        # `m` takes the rest of its cluster, or the next token when it ends
+        # there. Both spellings are the same invocation to git.
+        (["git", "commit", "-amfix: x"], ["fix: x"]),
+        (["git", "commit", "-am", "fix: x"], ["fix: x"]),
+        (["git", "commit", "-vsmfix: x"], ["fix: x"]),
+        (["git", "commit", "-mfix: x"], ["fix: x"]),
+        # `F` is value-taking in exactly the same way.
+        (["git", "commit", "-F-"], []),          # stdin — unreadable, silent
+        (["git", "commit", "-aF", "-"], []),
+        # A cluster holding a char that is neither no-value nor value-taking
+        # is not read at all: `-S` takes an attached key id.
+        (["git", "commit", "-Smfix: x"], []),
+        (["git", "commit", "-Smike@example.com", "-m", "fix: x"], ["fix: x"]),
+        # A dangling value-taking flag has nothing to consume.
+        (["git", "commit", "-am"], []),
+        # All-no-value clusters contribute nothing and consume nothing else.
+        (["git", "commit", "-av", "-m", "fix: x"], ["fix: x"]),
+        # Everything after `--` is a pathspec. A path named `-m` is a path.
+        (["git", "commit", "-m", "fix: x", "--", "-m", "other"], ["fix: x"]),
+        (["git", "commit", "--", "-m", "fix: x"], []),
+        # …and a real `-m` before the separator still counts.
+        (["git", "commit", "-m", "fix: x", "-m", "body", "--", "src"], ["fix: x"]),
+    ],
+)
+def test_cluster_and_pathspec_grammar(argv, titles):
+    assert extract_git_titles(argv) == titles
+
+
+def test_attached_file_flag_is_a_message_source(tmp_path):
+    """`-Fmsg.txt` and `--file=msg.txt` name the same file; only the detached
+    `-F <path>` form used to be read."""
+    path = tmp_path / "msg.txt"
+    path.write_text("fix: x\nbody\n", encoding="utf-8")
+    assert extract_git_titles(["git", "commit", f"-F{path}"]) == ["fix: x"]
+    assert extract_git_titles(["git", "commit", "-aF", str(path)]) == ["fix: x"]
+    assert extract_git_message_texts(["git", "commit", f"-F{path}"]) == ["fix: x\nbody\n"]
+    # A relative attached path still resolves against `-C`.
+    assert extract_git_titles(
+        ["git", "-C", str(tmp_path), "commit", "-Fmsg.txt"]
+    ) == ["fix: x"]
