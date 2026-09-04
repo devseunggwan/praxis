@@ -649,10 +649,16 @@ plus 11 synthetic regression fixtures:
   because the fixture repo happens to be unregistered on the live API — that
   accident would flip the expectation on an authenticated host, or the day
   someone registers the name
-- 12 own-org classification without the resolver: the shadow's own premise
+- 15 own-org classification without the resolver: the shadow's own premise
   (`T36_nopy_shadow_hides_python3` plus its `jq`-still-resolvable positive
   control — an unreachable binary and a PATH that was never applied look
-  identical); T36g external owner + `python3` absent → block; T36h own-org
+  identical), and that premise asserted end to end
+  (`T36_nopy_shadow_pipeline_reaches_gate4b` — a python3-independent fixture
+  must still reach Gate-4b under the shim, with
+  `..._control_card_gate_still_reachable` proving a hook that printed nothing
+  could not satisfy it); T36g external owner + `python3` absent → block, and
+  T36g2 that the block names the own-org refutation, since T36g is the one case
+  an earlier gate can satisfy by coincidence; T36h own-org
   owner, same absence → still demote (the visibility half is what is missing);
   T36i and T36i2 no allowlist at all, set-empty and unset → demote survives;
   T36i3 the demotion names `python3 unavailable`, with T36i3b as the control
@@ -660,8 +666,13 @@ plus 11 synthetic regression fixtures:
   non-zero → block; T36k helper prints nothing → block; T36l the allowlist
   parse — several handles, stray spaces, an empty field, a case mismatch —
   still matches the owner → demote; T36m/T36m2 a bare handle is rejected by
-  Gate-3 and never reaches Gate-4b. `python3` is shadowed by a `PATH` holding
-  every other binary the hook uses, so nothing on the machine is touched
+  Gate-3 and never reaches Gate-4b. `python3` is shadowed by mirroring every
+  `PATH` entry and deleting that one link, so nothing on the machine is
+  touched. The shim is a mirror rather than a hand-listed set of binaries
+  because a list cannot be audited against a command no source line contains:
+  bare `xargs` (impl.sh:334-337) defaults to `echo`, GNU findutils execs
+  `/bin/echo` for it where BSD xargs resolves it internally, and the missing
+  link emptied `GATE_1`/`GATE_2` on Linux only
 - 11 Gate-4b resolver, asserted against `gate4_visibility.py` directly (issue
   #1244): G4H1/G4H1b below the budget floor nothing is spawned, G4H2/G4H2b the
   same call with budget does spawn it (positive control), G4H3 the 9th repo is

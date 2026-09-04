@@ -943,15 +943,32 @@ RUN_CASE_ENV=()
 # absent demoted a row whose owner the allowlist already refutes — a knowably
 # external repo passing the Stop, which is the exact hole Gate-4b closes.
 #
-# NOPY_BIN is a PATH holding every binary the hook uses EXCEPT python3, so
-# `command -v python3` genuinely fails inside the hook without touching the
-# system. FAILPY_BIN is the adjacent surface: python3 present but the helper
-# unusable (non-zero exit, or empty stdout), which lands on the same branch.
+# NOPY_BIN is the real PATH with python3 removed and nothing else changed, so
+# `command -v python3` fails inside the hook without touching the system.
+# FAILPY_BIN is the adjacent surface: python3 present but the helper unusable
+# (non-zero exit, or empty stdout), which lands on the same branch.
+#
+# It mirrors every PATH entry rather than a hand-listed set of binaries. The
+# list is what broke: it named the commands `impl.sh` spells out and missed the
+# one nothing spells — `xargs` with no utility argument defaults to `echo`, and
+# GNU findutils execs `/bin/echo` for it while BSD xargs resolves it internally.
+# So on Linux the four `| xargs` value trims at impl.sh:334-337 died, GATE_1 and
+# GATE_2 came back empty, and the card-missing gate fired ahead of Gate-4b —
+# invisible on macOS. A curated list cannot be audited against a command no
+# source line contains, so there is no list any more.
+#
+# One `ln` per directory, not per file: it is instant on both platforms
+# (2210 links / 0s macOS, 412 / 0s ubuntu), and a collision failing without -f
+# leaves the first PATH entry winning, which is how PATH resolves anyway.
 NOPY_BIN="$TMPDIR/nopy_bin"; mkdir -p "$NOPY_BIN"
-for _b in jq awk grep sed tr head tail wc dirname date rm find cat xargs sort uniq basename mktemp; do
-  _p=$(command -v "$_b") && ln -sf "$_p" "$NOPY_BIN/$_b"
+_oifs=$IFS; IFS=:
+for _d in $PATH; do
+  [ -d "$_d" ] || continue
+  ln -s "$_d"/* "$NOPY_BIN/" 2>/dev/null
 done
-unset _b _p
+IFS=$_oifs
+rm -f "$NOPY_BIN/python3"
+unset _oifs _d
 FAILPY_BIN="$TMPDIR/failpy_bin"; mkdir -p "$FAILPY_BIN"
 cat > "$FAILPY_BIN/python3" <<'FAILPY'
 #!/bin/sh
@@ -986,6 +1003,43 @@ else
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("T36_nopy_shadow_control_jq_still_resolvable")
 fi
 
+# `command -v jq` above proves one binary resolves; it cannot prove the hook
+# still WORKS under this PATH, and that is the gap the `xargs`/`echo` break went
+# through — every case below still blocked, so five expecting a demote failed
+# loudly while T36g, the one expecting a block, passed for the wrong reason.
+#
+# So the premise is asserted end to end instead: a fixture whose outcome does
+# not depend on python3 at all (T36c's undeclared visibility, which escalates
+# with no lookup) must reach the SAME Gate-4b verdict under the shim as under
+# the real PATH. Any binary the shim fails to carry diverts the run into an
+# earlier gate and this fires, whichever binary it turns out to be.
+T36NP_TP="$TMPDIR/t36_nopy_pipeline.jsonl"
+printf '%s\n' "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36C_ROW")")" > "$T36NP_TP"
+T36NP_OUT=$(jq -nc --arg path "$T36NP_TP" \
+  '{transcript_path:$path, stop_hook_active:false, session_id:"test-session"}' \
+  | env PRAXIS_OWN_ORGS=praxis-fixture "PATH=$NOPY_BIN" "$HOOK" 2>/dev/null)
+if printf '%s' "$T36NP_OUT" | grep -qF 'resolves as a cross-boundary write'; then
+  echo "PASS  [T36_nopy_shadow_pipeline_reaches_gate4b]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [T36_nopy_shadow_pipeline_reaches_gate4b] the shim PATH diverted the run before Gate-4b, got: ${T36NP_OUT:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("T36_nopy_shadow_pipeline_reaches_gate4b")
+fi
+# Its own control: the card-missing gate must still be REACHABLE under this
+# shim. Without it, a hook that emitted nothing at all would satisfy the line
+# above by never printing the phrase either.
+T36NP_BADCARD=$(printf -- '- memory: 0\n- upstream_feedback: 1\n- gate_3_verdict: NA\n')
+T36NP_BAD_TP="$TMPDIR/t36_nopy_badcard.jsonl"
+printf '%s\n' "$(mk_assistant "$(mk_retrospect_stage3 "$T36NP_BADCARD" "$T36C_ROW")")" > "$T36NP_BAD_TP"
+T36NP_BAD_OUT=$(jq -nc --arg path "$T36NP_BAD_TP" \
+  '{transcript_path:$path, stop_hook_active:false, session_id:"test-session"}' \
+  | env PRAXIS_OWN_ORGS=praxis-fixture "PATH=$NOPY_BIN" "$HOOK" 2>/dev/null)
+if printf '%s' "$T36NP_BAD_OUT" | grep -qF 'distribution card missing gate_1_verdict'; then
+  echo "PASS  [T36_nopy_shadow_control_card_gate_still_reachable]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [T36_nopy_shadow_control_card_gate_still_reachable] got: ${T36NP_BAD_OUT:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("T36_nopy_shadow_control_card_gate_still_reachable")
+fi
+
 # T36g: block — python3 absent, allowlist set, owner outside it. The allowlist
 # refutes ownness locally, so no subprocess is owed and the row escalates.
 T36G_ROW="| 1 | tool | cli | gh flag missing | tool defect | gap | No | upstream_feedback | tool defect confirmed<br>backing_repo: someone-else/their-repo<br>repo_visibility: private | HIGH |"
@@ -993,6 +1047,22 @@ RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture "PATH=$NOPY_BIN")
 run_case "T36g_block_external_owner_without_python3" "block" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36G_ROW")")"
 RUN_CASE_ENV=()
+# `block` alone does not say WHICH gate blocked, and this case is the one that
+# can pass by coincidence: any earlier gate firing also produces a block. When
+# the shim PATH broke card parsing on Linux, its five demote-expecting siblings
+# failed and this case kept passing on a verdict about `gate_1_verdict`. So the
+# reason is asserted separately.
+T36G_TP="$TMPDIR/t36g.jsonl"
+printf '%s\n' "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36G_ROW")")" > "$T36G_TP"
+T36G_OUT=$(jq -nc --arg path "$T36G_TP" \
+  '{transcript_path:$path, stop_hook_active:false, session_id:"test-session"}' \
+  | env PRAXIS_OWN_ORGS=praxis-fixture "PATH=$NOPY_BIN" "$HOOK" 2>/dev/null)
+if printf '%s' "$T36G_OUT" | grep -qF "owner 'someone-else' is outside the own-org allowlist"; then
+  echo "PASS  [T36g2_block_reason_is_the_own_org_refutation]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [T36g2_block_reason_is_the_own_org_refutation] blocked for another reason, got: ${T36G_OUT:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("T36g2_block_reason_is_the_own_org_refutation")
+fi
 
 # T36h: demote — the other polarity of T36g. Same missing python3, but the owner
 # IS in the allowlist, so only the visibility half is unresolvable. That half
