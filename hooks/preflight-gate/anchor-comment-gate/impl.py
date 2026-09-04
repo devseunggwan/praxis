@@ -110,8 +110,14 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     strip_prefix,
 )
 from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E402
+    GH_API_EXPANDING_FIELD_FLAGS,
+    GH_API_FLAGS_WITH_ARG,
     GH_BODY_FLAGS_WITH_ARG,
     GH_GLOBAL_FLAGS_WITH_ARG,
+    GH_SHORT_FLAGS_WITH_ARG,
+    parse_gh_api,
+    split_gh_flag as _split_flag,
+    split_gh_short_flags as _split_short_flags,
 )
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
@@ -144,12 +150,11 @@ _REFERENCE = "hooks/preflight-gate/anchor-comment-gate/spec.md"
 # jq matches on, so the two must move together — see spec.md.
 _ANCHOR_PREFIXES = ("### Verification", "### 검증")
 
-_SHORT_FLAGS_WITH_ARG = frozenset({"-b", "-F", "-R", "-f", "-X", "-q", "-H", "-t", "-p"})
-_API_FLAGS_WITH_ARG = frozenset({
-    "-X", "--method", "-f", "--raw-field", "-F", "--field", "-H", "--header",
-    "-q", "--jq", "-t", "--template", "--input", "--hostname", "-p",
-    "--preview", "--cache",
-})
+# Flag vocabulary and the `gh api` command shape come from `_lib` — issue #1265
+# made that module the SoT so the five hooks reading external writes and this
+# gate cannot drift apart on what a `gh api` write looks like.
+_SHORT_FLAGS_WITH_ARG = GH_SHORT_FLAGS_WITH_ARG
+_API_FLAGS_WITH_ARG = GH_API_FLAGS_WITH_ARG
 
 # Field names come in two dialects. `en` is what the rule prescribes; `ko` is
 # kept because anchors published before it are edited in place, never
@@ -202,29 +207,6 @@ _COMMENT_URL_RE = re.compile(
 # ---------------------------------------------------------------------------
 # Command decoding (PreToolUse)
 # ---------------------------------------------------------------------------
-
-def _split_flag(tok: str) -> tuple[str, str | None]:
-    """Split `--flag=value` into (`--flag`, `value`); else (tok, None)."""
-    if tok.startswith("-") and "=" in tok:
-        name, _, value = tok.partition("=")
-        return name, value
-    return tok, None
-
-
-def _split_short_flags(argv: list[str]) -> list[str]:
-    """Split gh's attached shorthand values (`-banchor`, `-Fanchor.md`) apart.
-
-    pflag accepts `-bVALUE` as well as `-b VALUE`, and a scan that only matches
-    the bare token misses the attached form entirely.
-    """
-    out: list[str] = []
-    for tok in argv:
-        if len(tok) > 2 and tok[0] == "-" and tok[1] != "-" and f"-{tok[1]}" in _SHORT_FLAGS_WITH_ARG:
-            out += [tok[:2], tok[2:]]
-        else:
-            out.append(tok)
-    return out
-
 
 def _subcommand(argv: list[str]) -> str | None:
     """First real subcommand, skipping global flags and the args they consume.
@@ -339,43 +321,35 @@ def _parse_pr_comment(argv: list[str], cwd: str, command: str) -> dict | None:
 
 
 def _parse_api_patch(argv: list[str], cwd: str, command: str) -> dict | None:
-    """Parse `gh api --method PATCH .../issues/comments/<id> ... body=`."""
-    argv = _split_short_flags(argv)
-    method: str | None = None
-    words: list[str] = []
+    """Parse `gh api --method PATCH .../issues/comments/<id> ... body=`.
+
+    The command *shape* — method, endpoint, which flag carried `body=` — comes
+    from `_lib`'s `parse_gh_api`, so this gate and the external-write hooks read
+    one definition. What stays local is resolving that body against the command
+    segment's own cwd and against a file the same command rewrites before
+    posting: `_lib` is cwd-free by design, and validating a pre-rewrite file
+    would certify content gh will never post.
+    """
+    call = parse_gh_api(argv)
+    if call is None:
+        return None
     body: str | None = None
     undecodable: str | None = None
-    i = 1
-    while i < len(argv):
-        tok, inline = _split_flag(argv[i])
-        if not tok.startswith("-"):
-            words.append(tok)
-            i += 1
-            continue
-        value = inline
-        if value is None and tok in _API_FLAGS_WITH_ARG:
-            i += 1
-            value = argv[i] if i < len(argv) else None
-        if tok in ("-X", "--method"):
-            method = (value or "").upper()
-        elif tok == "--input":
-            # The whole request body comes from a JSON file (or stdin). Reading
-            # it would mean re-implementing gh's request assembly; the posted
-            # comment is checked in PostToolUse instead.
-            undecodable = "--input 으로 전달된 JSON 본문"
-        elif tok in ("-f", "--raw-field", "-F", "--field") and value:
-            key, _, raw = value.partition("=")
-            if key == "body":
-                expand = tok in ("-F", "--field")
-                if expand and raw.startswith("@") and _rewritten_in_command(raw[1:], command, cwd):
-                    body = ""
-                    undecodable = "본문 파일이 같은 명령에서 재작성됨"
-                else:
-                    body = _read_body_value(raw, expand, cwd)
-        i += 1
+    if call.has_input:
+        # The whole request body comes from a JSON file (or stdin). Reading it
+        # would mean re-implementing gh's request assembly; the posted comment
+        # is checked in PostToolUse instead.
+        undecodable = "--input 으로 전달된 JSON 본문"
+    if call.body_raw is not None:
+        expand = call.body_flag in GH_API_EXPANDING_FIELD_FLAGS
+        raw = call.body_raw
+        if expand and raw.startswith("@") and _rewritten_in_command(raw[1:], command, cwd):
+            body = ""
+            undecodable = "본문 파일이 같은 명령에서 재작성됨"
+        else:
+            body = _read_body_value(raw, expand, cwd)
 
-    path = words[1] if len(words) > 1 else None
-    if method != "PATCH" or not path or not _COMMENTS_PATH_RE.search(path):
+    if call.method != "PATCH" or not call.path or not _COMMENTS_PATH_RE.search(call.path):
         return None
     if body is None:
         return {"undecodable": undecodable or "본문 필드를 찾지 못함"}
