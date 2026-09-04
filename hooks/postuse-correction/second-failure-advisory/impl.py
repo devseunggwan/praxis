@@ -145,6 +145,14 @@ observed), byte-identical whatever command died. For that shape only
 **separate digest** (`_command_discriminator`), so two unrelated commands no
 longer share a pair while the same command failing twice still does.
 
+The digest hashes the command as written, stripped of leading/trailing
+whitespace only. Internal whitespace is shell-significant — `false\nfalse` is
+two commands where `false false` is one, and `test 'a  b' = x` compares a
+different string than `test 'a b' = x` — so collapsing it digested distinct
+commands to one hash and re-created the very collision the discriminator
+prevents. A command re-typed with different inner spacing now gets its own key
+and stays silent on its second failure: a missed advisory, not a false one.
+
 The digest is separate because normalization would otherwise eat the
 discriminator: appending the command to the signature *text* runs it through
 `_normalize_signature`, which turns `cat /tmp/a` and `cat /tmp/b` alike into
@@ -219,6 +227,21 @@ _STRING_OVERSIZED_OUTPUT_RE = re.compile(
 # would advise "the same error pattern twice" about two different commands. That
 # is the #1042 defect-2 shape, and this hook must not ship it.
 _BARE_EXIT_CODE_RE = re.compile(r"^Error: Exit code \d+$")
+
+# XXMARKERXX MCP tools are the ONE class whose *successful* results are ever delivered as a
+# bare string. Censused over 14,652 `toolUseResult` entries in 120 transcripts:
+# Bash successes are dicts (11,792/11,792) and every other built-in tool's are
+# too (1,135/1,135), while MCP successes are content lists (1,127) plus 25
+# strings — all of them the oversized-output notice. So on the MCP string
+# channel a leading `Error: ` can be the *tool's own* text rather than the
+# harness's failure envelope, and a tool that answers `Error: no rows found` on
+# success would accumulate state and fire a false advisory on its second return.
+# The classifier therefore stops trusting tool-authored text there: for an MCP
+# tool only strings the HARNESS writes count — the hook-error envelope below and
+# the fixed rejection sentence. Every other tool keeps the plain prefix, where no
+# successful call can reach this branch at all.
+_MCP_TOOL_PREFIX = "mcp__"
+_STRING_HOOK_ERROR_RE = re.compile(r"^Error: (?:Pre|Post)ToolUse:")
 
 
 # Reference candidates inside a blocking message, most explicit first.
@@ -460,17 +483,29 @@ def _command_discriminator(tool_input: dict[str, Any] | None) -> str:
     the matching the normalizer exists for, so the command is hashed on its own
     and mixed into the pair key beside the normalized signature instead.
 
-    Whitespace is collapsed so a re-typed command differing only in spacing
-    still matches; case is NOT folded, because `cat A` and `cat a` are different
-    files. Truncated to the same bound as a signature.
+    The command text is hashed as written. Internal whitespace is NOT collapsed:
+    in shell it is significant, so `false\nfalse` and `false false` are two
+    programs, and `test 'a  b' = x` and `test 'a b' = x` compare different
+    strings. Collapsing them digested distinct commands to one hash, which is
+    the collision this function exists to prevent. Only leading/trailing
+    whitespace is stripped — that is insignificant outside quotes, and it is
+    what makes an all-whitespace command behave like an absent one.
+
+    The cost is the reverse direction: a command re-typed with different inner
+    spacing now gets its own key, so its second failure stays silent. That is a
+    missed advisory, not a false one, and matching those retypes was never worth
+    a discriminator that cannot discriminate.
+
+    Case is NOT folded, because `cat A` and `cat a` are different files.
+    Truncated to the same bound as a signature.
     """
     command = (tool_input or {}).get("command")
     if not isinstance(command, str):
         return ""
-    collapsed = _WS_RE.sub(" ", command).strip()
-    if not collapsed:
+    stripped = command.strip()
+    if not stripped:
         return ""
-    return hashlib.sha1(collapsed[:_MAX_SIGNATURE_LEN].encode("utf-8")).hexdigest()
+    return hashlib.sha1(stripped[:_MAX_SIGNATURE_LEN].encode("utf-8")).hexdigest()
 
 
 def _compute_signature(

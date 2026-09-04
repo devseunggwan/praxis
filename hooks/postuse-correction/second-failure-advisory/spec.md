@@ -146,8 +146,14 @@ digest**(`_command_discriminator`)로 만들어 키에 함께 넣습니다. 판�
 
 digest 계산 규칙:
 
-- 공백은 하나로 접어 앞뒤를 자릅니다 — 간격만 다른 같은 명령은 같은 키
-  (case 19n).
+- **앞뒤 공백만 자릅니다** (case 19n). 내부 공백은 접지 **않습니다** — 셸에서
+  공백은 장식이 아니라 문법이라, 개행은 명령 두 개를 가르고(`false\nfalse` ≠
+  `false false`) 따옴표 안 연속 공백은 인자의 일부입니다(`test 'a  b' = x` ≠
+  `test 'a b' = x`). 접었더니 서로 다른 명령이 한 해시로 뭉쳐, 이 digest 가
+  막으려던 충돌이 그대로 재현됐습니다 (PR #1270, case 19s). 대가는 반대
+  방향입니다 — 간격을 바꿔 다시 친 같은 명령은 이제 별도 키를 받아 2회째가
+  무음이 됩니다. **거짓 advisory 가 아니라 놓친 advisory** 이고, 그 매칭은
+  구분 못 하는 구분자를 살 만한 값어치가 아니었습니다.
 - 대소문자는 접지 **않습니다** — `cat A` 와 `cat a` 는 다른 파일입니다.
 - `_MAX_SIGNATURE_LEN`(4096자)로 자른 뒤 해싱합니다. 4096자를 넘어가는
   부분에서만 다른 두 명령은 같은 키가 됩니다 (case 19o).
@@ -340,6 +346,8 @@ python3 -m pytest tests/test_hook_state_concurrency.py
 - 명령 부재·공백뿐·4096 경계·유니코드·non-Bash 도구 각각의 키 동작
   (case 19k~19r), 그리고 bare 가 아닌 실패는 정규화가 그대로 합쳐지는지
   (case 19q — normalizer 를 약화시켜 산 수정이 아님을 보이는 대조군)
+- 셸에서 유의미한 내부 공백(개행·탭·따옴표 안 연속 공백·NBSP)이 다른 두 명령은
+  서로 다른 키 -> 무음, 같은 명령 2회는 여전히 advisory (case 19s, 양방향)
 - 문자열 payload 동일 실패 2회 -> advisory, 서로 다른 문자열 실패 2건 ->
   무음(signature 분리), `User rejected tool use` 반복 -> advisory,
   oversized-output 안내(`is_error:false`) 반복 -> 무음·상태 파일 없음,

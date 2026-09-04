@@ -35,11 +35,13 @@
 #      k) 같은 명령 + 다른 exit code -> 무음
 #      l) tool_input 에 command 자체가 없으면 기존 키 그대로 -> 2회째 advisory
 #      m) 공백뿐인 command 는 command 부재와 같은 키
-#      n) 공백 차이만 있는 같은 명령 -> 여전히 advisory
+#      n) 앞뒤 공백만 다른 같은 명령 -> 여전히 advisory / 내부 공백이 다르면 무음
 #      o) 4096 경계: 경계 안에서 다르면 무음 / 경계 밖에서만 다르면 같은 키
 #      p) 유니코드만 다른 명령 -> 무음
 #      q) bare 가 아닌 실패는 정규화가 그대로 동작 (normalizer 약화 안 됨 대조군)
-#      r) command 키가 없는 non-Bash 도구는 동작 불변
+#      r) command 키가 없는 non-Bash·non-MCP 도구는 동작 불변
+#      s) 셸에서 유의미한 내부 공백 차이(개행 / 탭 / 따옴표 안 연속 공백 /
+#         NBSP)는 서로 다른 키 -> 무음, 같은 명령 2회는 여전히 advisory (대조군)
 #
 # Run:
 #   bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
@@ -1046,19 +1048,22 @@ else
   assert_fail "19m) whitespace-only command shares the absent-command key" "rc=$rc out=[$out] err=[$err]"
 fi
 
-echo "=== case 19n: the same command differing only in spacing still advises ==="
+echo "=== case 19n: leading/trailing whitespace only => same key ==="
+# Whitespace outside the command is shell-insignificant, so stripping it keeps
+# the key. This is the half of the old "collapse all whitespace" behaviour that
+# survives; the internal half is what 19s removes.
 STATE35="$TMP_DIR/c35.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
 pipe_hook "$(string_payload sess-1265-n Bash "$STR_BARE_EXIT" 'cat /tmp/a')" "$STATE35" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-n Bash "$STR_BARE_EXIT" '  cat   /tmp/a  ')" "$STATE35" >"$out_file" 2>"$err_file"
+pipe_hook "$(string_payload sess-1265-n Bash "$STR_BARE_EXIT" '  cat /tmp/a  ')" "$STATE35" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
 
 if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
-  assert_pass "19n) whitespace-only spacing differences still match"
+  assert_pass "19n) leading/trailing whitespace differences still match"
 else
-  assert_fail "19n) whitespace-only spacing differences still match" "rc=$rc out=[$out] err=[$err]"
+  assert_fail "19n) leading/trailing whitespace differences still match" "rc=$rc out=[$out] err=[$err]"
 fi
 
 echo "=== case 19o: commands past the 4096 bound ==="
@@ -1151,6 +1156,59 @@ if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "
 else
   assert_fail "19r) non-Bash tool with no command key keeps advising on repeat" "rc=$rc out=[$out] err=[$err]"
 fi
+
+# ---------------------------------------------------------------------------
+# Case 19s: shell-significant whitespace inside the command.
+#
+# The digest used to collapse every whitespace run to one space so a re-typed
+# command still matched. Whitespace is not decoration in shell: a newline
+# separates two commands, and a run inside quotes is part of an argument. Two
+# distinct commands therefore digested to one hash and the second one fired a
+# false advisory — the collision this discriminator exists to prevent. 19s-e is
+# the control: with the collapse gone, the same command still advises.
+# ---------------------------------------------------------------------------
+echo "=== case 19s: shell-significant internal whitespace => distinct keys ==="
+# U+00A0 written as an escape: a literal NBSP in this file is invisible to a
+# reader and to `git diff`, and the case turns on it being there.
+NBSP="$(python3 -c 'import sys; sys.stdout.write("\u00a0")')"
+ws_case() {
+  # ws_case <label> <session> <cmd-1> <cmd-2> <expect: silent|advisory>
+  local label="$1" sess="$2" cmd1="$3" cmd2="$4" expect="$5"
+  local state="$TMP_DIR/ws-$sess.json"
+  local o e r
+  o="$(mktemp)" e="$(mktemp)"
+  pipe_hook "$(string_payload "$sess" Bash "$STR_BARE_EXIT" "$cmd1")" "$state" >/dev/null 2>/dev/null
+  pipe_hook "$(string_payload "$sess" Bash "$STR_BARE_EXIT" "$cmd2")" "$state" >"$o" 2>"$e"
+  r=$?
+  local out err
+  out=$(cat "$o"); err=$(cat "$e")
+  rm -f "$o" "$e"
+  if [ "$expect" = "silent" ]; then
+    if [ "$r" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+      assert_pass "$label"
+    else
+      assert_fail "$label" "rc=$r out=[$out] err=[$err]"
+    fi
+  else
+    if [ "$r" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+      assert_pass "$label"
+    else
+      assert_fail "$label" "rc=$r out=[$out] err=[$err]"
+    fi
+  fi
+}
+
+ws_case "19s-a) newline vs space are different programs" \
+  sess-1265-sa $'false\nfalse' 'false false' silent
+ws_case "19s-b) tab vs space stay on distinct keys" \
+  sess-1265-sb $'cat\t/tmp/a' 'cat /tmp/a' silent
+ws_case "19s-c) a run inside quotes is part of the argument" \
+  sess-1265-sc "test 'a  b' = x" "test 'a b' = x" silent
+ws_case "19s-d) NBSP is not a shell separator" \
+  sess-1265-sd "cat${NBSP}/tmp/a" 'cat /tmp/a' silent
+ws_case "19s-e) control: the same command still advises" \
+  sess-1265-se 'cat /tmp/a' 'cat /tmp/a' advisory
+
 
 echo
 if [ "$FAIL" -eq 0 ]; then
