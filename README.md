@@ -84,7 +84,7 @@ wrapper.
 
 ## Hooks
 
-Hooks are the larger half of praxis: **95 hooks**, registered at 109 points across
+Hooks are the larger half of praxis: **96 hooks**, registered at 110 points across
 `PreToolUse`, `PostToolUse`, `Stop`, `UserPromptSubmit`, and `SessionStart`. They run
 without being invoked, so this section is the one to read before installing — it is what
 changes about your session.
@@ -94,7 +94,7 @@ promoted into blocking:
 
 | Role | Count | What it does |
 | ------ | ------- | -------------- |
-| `preflight-gate` | 35 | Inspects a tool call before it runs and can deny it |
+| `preflight-gate` | 36 | Inspects a tool call before it runs and can deny it |
 | `completion-verify` | 13 | Fires at `Stop` — can block a response that claims completion without evidence |
 | `advisory-nudge` | 42 | Prints a warning to stderr and lets the call through — 17 read a `PRAXIS_*_STRICT` variable that makes them stop the call instead |
 | `postuse-correction` | 5 | Reacts after a tool call — telemetry, follow-up signals |
@@ -125,7 +125,7 @@ the contracts every hook follows.
 
 A hook that blocks something you meant to do is not a wall. There are three levers.
 
-**One gate.** 57 of the 95 hooks declare an opt-out or tuning variable. Which variable
+**One gate.** 58 of the 96 hooks declare an opt-out or tuning variable. Which variable
 belongs to which hook, and what setting it actually does to that hook, is the table in
 [`docs/bypass-vars.md`](docs/bypass-vars.md); the generated
 [Hook Operating Matrix](docs/hook-operating-matrix.md) carries the same mapping with each

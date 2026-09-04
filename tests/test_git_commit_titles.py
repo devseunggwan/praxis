@@ -55,6 +55,8 @@ def _load(mod_name: str, path: Path):
 # git_commit_titles import ...` resolves to this exact object.
 gct = _load("git_commit_titles", LIB_DIR / "git_commit_titles.py")
 extract_git_titles = gct.extract_git_titles
+title_from_file = gct.title_from_file
+text_from_file = gct.text_from_file
 
 
 # ---------------------------------------------------------------------------
@@ -349,3 +351,251 @@ def test_mirror_case_residual_is_unaffected_by_the_region_exclusion():
     not add."""
     command = """git commit -m '$(x)' && echo "$(x)\""""
     assert _titles_from_all_segments(command) == []
+
+
+# ---------------------------------------------------------------------------
+# extract_git_message_texts — the whole message, not just the title (#1228)
+# ---------------------------------------------------------------------------
+
+extract_git_message_texts = gct.extract_git_message_texts
+
+
+@pytest.mark.parametrize(
+    "argv,expected",
+    [
+        # Successive -m paragraphs join the way git joins them.
+        (["git", "commit", "-m", "fix: x", "-m", "body one", "-m", "body two"],
+         ["fix: x\n\nbody one\n\nbody two"]),
+        # A multi-line -m value keeps every line.
+        (["git", "commit", "-m", "fix: x\n\ndetail"], ["fix: x\n\ndetail"]),
+        # Attached and combined short forms contribute too.
+        (["git", "commit", "-mfix: x", "-m", "body"], ["fix: x\n\nbody"]),
+        (["git", "commit", "-am", "fix: x"], ["fix: x"]),
+        (["git", "commit", "--message=fix: x"], ["fix: x"]),
+        # Not a commit.
+        (["git", "log", "-1"], []),
+        (["echo", "-m", "x"], []),
+        # No message flag at all.
+        (["git", "commit", "--amend", "--no-edit"], []),
+    ],
+)
+def test_message_texts_contract(argv, expected):
+    assert extract_git_message_texts(argv) == expected
+
+
+def test_message_texts_reads_the_whole_file(tmp_path):
+    path = tmp_path / "msg.txt"
+    path.write_text("fix: x\n\nline two\nline three\n", encoding="utf-8")
+    argv = ["git", "commit", "-F", str(path)]
+    assert extract_git_message_texts(argv) == ["fix: x\n\nline two\nline three\n"]
+    # The title gate still sees only the first line of the same file.
+    assert extract_git_titles(argv) == ["fix: x"]
+
+
+def test_message_texts_drop_unresolvable_substitutions():
+    command = 'git commit -m "$(cat <<\'EOF\'\nfix: x\nEOF\n)"'
+    argv = ["git", "commit", "-m", "$(cat <<'EOF'"]
+    assert extract_git_message_texts(argv, command) == []
+
+
+def test_message_texts_keep_a_single_quoted_literal():
+    command = "git commit -m '$(x) and more'"
+    argv = ["git", "commit", "-m", "$(x) and more"]
+    assert extract_git_message_texts(argv, command) == ["$(x) and more"]
+
+
+def test_titles_and_texts_walk_the_same_argv():
+    """The first -m is the title; every -m is body. One walk, two readings."""
+    argv = ["git", "commit", "-m", "fix: x", "-m", "second"]
+    assert extract_git_titles(argv) == ["fix: x"]
+    assert extract_git_message_texts(argv) == ["fix: x\n\nsecond"]
+
+
+# ---------------------------------------------------------------------------
+# argv[0]: the git binary, bare or path-prefixed
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "binary,parses",
+    [
+        # Named, so the gates built on this walk see the commit.
+        ("git", True),
+        ("/usr/bin/git", True),
+        ("./git", True),
+        ("$(git", True),
+        # Not git — a name merely ending in the three letters is not the binary.
+        ("gitk", False),
+        ("mygit", False),
+        ("legit", False),
+        ("gh", False),
+    ],
+)
+def test_path_prefixed_git_is_still_git(binary, parses):
+    argv = [binary, "commit", "-m", "fix: x"]
+    expected = ["fix: x"] if parses else []
+    assert extract_git_titles(argv) == expected
+    assert extract_git_message_texts(argv) == expected
+
+
+# ---------------------------------------------------------------------------
+# A substitution that opens on a later line of a multi-line value
+# ---------------------------------------------------------------------------
+
+def test_a_later_line_substitution_is_blanked_not_graded():
+    """Only line 0 decides whether the VALUE is unknowable; a later line is
+    unknowable on its own, and passing it through hands a body gate raw shell
+    text. Blanking keeps the line count, so a reported line number still points
+    at the real message."""
+    argv = ["git", "commit", "-m", "fix: x\n\n$(git log --oneline)"]
+    command = 'git commit -m "fix: x\n\n$(git log --oneline)"'
+    assert extract_git_message_texts(argv, command) == ["fix: x\n\n"]
+
+
+def test_a_mid_line_substitution_is_blanked_too():
+    """Where the expansion sits on the line does not decide whether the line is
+    readable. `foo($(printf x))` reaches git as `foo(x)`, so grading the source
+    reads a nested paren into a message that has none (issue #1228 round 2)."""
+    argv = ["git", "commit", "-m", "fix: x\n\nfoo($(printf x))"]
+    command = 'git commit -m "fix: x\n\nfoo($(printf x))"'
+    assert extract_git_message_texts(argv, command) == ["fix: x\n\n"]
+
+
+def test_an_unclosed_substitution_drops_the_whole_value():
+    """An unterminated `$(` is a bash syntax error, so no commit happens and
+    the lines after the opener are the inside of an unfinished substitution
+    rather than message text. Measured:
+
+        $ bash -c 'git commit -m "fix: x\\n\\n$(git log --oneline"'
+        bash: -c: line 3: syntax error: unexpected end of file
+    """
+    argv = ["git", "commit", "-m", "fix: x\n\n$(git log --oneline"]
+    command = 'git commit -m "fix: x\n\n$(git log --oneline"'
+    assert extract_git_message_texts(argv, command) == []
+
+
+def test_a_later_line_without_a_substitution_survives_whole():
+    argv = ["git", "commit", "-m", "fix: x\n\nword(a(b))"]
+    command = 'git commit -m "fix: x\n\nword(a(b))"'
+    assert extract_git_message_texts(argv, command) == ["fix: x\n\nword(a(b))"]
+
+
+def test_a_single_quoted_multiline_value_is_graded_whole():
+    """A single-quoted run is the one place the shell substitutes nothing, so
+    every line of it is literal message text. Matching the WHOLE value against
+    the quoted runs settles that in one step; the older line-wise match could
+    not, because a line of a multi-line run never equals the run, and blanked a
+    literal `$(…)` line that git really does receive. Measured:
+
+        $ bash -c "git commit -m 'fix: x\\n\\n\\$(literal) note'"
+        {"argv": ["commit", "-m", "fix: x\\n\\n$(literal) note"]}
+    """
+    argv = ["git", "commit", "-m", "fix: x\n\n$(literal) note"]
+    command = "git commit -m 'fix: x\n\n$(literal) note'"
+    assert extract_git_message_texts(argv, command) == ["fix: x\n\n$(literal) note"]
+    # A single-LINE value of the same shape is still recognised as a literal.
+    argv = ["git", "commit", "-m", "$(literal) note"]
+    command = "git commit -m '$(literal) note'"
+    assert extract_git_message_texts(argv, command) == ["$(literal) note"]
+
+
+# ---------------------------------------------------------------------------
+# title_from_file reads one line; text_from_file reads the file
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "content,title",
+    [
+        ("fix: x\nbody\n", "fix: x"),
+        ("fix: x", "fix: x"),          # no trailing newline
+        ("fix: x\r\nbody\r\n", "fix: x"),  # CRLF, via universal newlines
+        ("", ""),                      # empty file
+        ("\nbody\n", ""),              # empty first line
+    ],
+)
+def test_title_from_file_reads_only_the_first_line(tmp_path, content, title):
+    """Same string the whole-file read produced, without the whole-file read.
+
+    The two title gates run on every `git commit`, and a `-F` path is
+    arbitrary — the previous `text_from_file(...).split("\\n")[0]` charged both
+    of them the full read to answer a question about the first line.
+    """
+    path = tmp_path / "msg.txt"
+    path.write_text(content, encoding="utf-8")
+    assert title_from_file(str(path)) == title
+    # The body reader is unchanged and still returns everything.
+    assert text_from_file(str(path)) == path.read_text(encoding="utf-8")
+
+
+def test_non_utf8_file_still_raises_on_both_readers(tmp_path):
+    """Pinned as UNCHANGED by the one-line read, not as desirable behaviour.
+
+    `readline()` decodes a whole buffered chunk, so invalid bytes past line 1
+    reach it exactly as the whole-file read did. `UnicodeDecodeError` is not an
+    `OSError`, so neither reader swallows it — the hook's `@fail_open` wrapper
+    is what turns it into a silent pass, and that was true before this change
+    too. A test asserting the opposite would have been a false pass.
+    """
+    path = tmp_path / "msg.txt"
+    path.write_bytes(b"fix: x\n" + b"\xff\xfe invalid utf-8\n")
+    with pytest.raises(UnicodeDecodeError):
+        title_from_file(str(path))
+    with pytest.raises(UnicodeDecodeError):
+        text_from_file(str(path))
+
+
+def test_stdin_placeholder_is_none_on_both_readers():
+    assert title_from_file("-") is None
+    assert text_from_file("-") is None
+
+
+# ---------------------------------------------------------------------------
+# Short-option cluster grammar and the `--` pathspec separator (issue #1228)
+#
+# The scanner feeds three gates, so a source it misses is a message no gate
+# reads and a source it invents is a message no gate should read. Both
+# directions are asserted here; the `--` cases are the false-positive guards.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "argv,titles",
+    [
+        # `m` takes the rest of its cluster, or the next token when it ends
+        # there. Both spellings are the same invocation to git.
+        (["git", "commit", "-amfix: x"], ["fix: x"]),
+        (["git", "commit", "-am", "fix: x"], ["fix: x"]),
+        (["git", "commit", "-vsmfix: x"], ["fix: x"]),
+        (["git", "commit", "-mfix: x"], ["fix: x"]),
+        # `F` is value-taking in exactly the same way.
+        (["git", "commit", "-F-"], []),          # stdin — unreadable, silent
+        (["git", "commit", "-aF", "-"], []),
+        # A cluster holding a char that is neither no-value nor value-taking
+        # is not read at all: `-S` takes an attached key id.
+        (["git", "commit", "-Smfix: x"], []),
+        (["git", "commit", "-Smike@example.com", "-m", "fix: x"], ["fix: x"]),
+        # A dangling value-taking flag has nothing to consume.
+        (["git", "commit", "-am"], []),
+        # All-no-value clusters contribute nothing and consume nothing else.
+        (["git", "commit", "-av", "-m", "fix: x"], ["fix: x"]),
+        # Everything after `--` is a pathspec. A path named `-m` is a path.
+        (["git", "commit", "-m", "fix: x", "--", "-m", "other"], ["fix: x"]),
+        (["git", "commit", "--", "-m", "fix: x"], []),
+        # …and a real `-m` before the separator still counts.
+        (["git", "commit", "-m", "fix: x", "-m", "body", "--", "src"], ["fix: x"]),
+    ],
+)
+def test_cluster_and_pathspec_grammar(argv, titles):
+    assert extract_git_titles(argv) == titles
+
+
+def test_attached_file_flag_is_a_message_source(tmp_path):
+    """`-Fmsg.txt` and `--file=msg.txt` name the same file; only the detached
+    `-F <path>` form used to be read."""
+    path = tmp_path / "msg.txt"
+    path.write_text("fix: x\nbody\n", encoding="utf-8")
+    assert extract_git_titles(["git", "commit", f"-F{path}"]) == ["fix: x"]
+    assert extract_git_titles(["git", "commit", "-aF", str(path)]) == ["fix: x"]
+    assert extract_git_message_texts(["git", "commit", f"-F{path}"]) == ["fix: x\nbody\n"]
+    # A relative attached path still resolves against `-C`.
+    assert extract_git_titles(
+        ["git", "-C", str(tmp_path), "commit", "-Fmsg.txt"]
+    ) == ["fix: x"]

@@ -93,20 +93,31 @@ def _starts_unquoted_comment(line: str, i: int) -> bool:
 
 def _heredoc_starts_on_line(
     line: str, quote: str = ""
-) -> tuple[list[tuple[str, bool]], str]:
+) -> tuple[list[tuple[str, bool, bool]], str]:
     """`(openers, quote_open_at_eol)` for one physical line.
 
-    `openers` is `(delimiter, dash_form)` for every heredoc opened on the line.
-    Scans character-wise rather than by regex because the three constructs that
-    must NOT be read as a heredoc all look like `<<` to a pattern match: a
-    here-string (`<<<`), an arithmetic left-shift (`$((1 << 3))`), and a literal
-    `<<` inside quotes. Order is preserved — bash reads the bodies of
-    `cat <<A <<B` in the order the operators appear.
+    `openers` is `(delimiter, dash_form, quoted)` for every heredoc opened on
+    the line. Scans character-wise rather than by regex because the three
+    constructs that must NOT be read as a heredoc all look like `<<` to a
+    pattern match: a here-string (`<<<`), an arithmetic left-shift
+    (`$((1 << 3))`), and a literal `<<` inside quotes. Order is preserved —
+    bash reads the bodies of `cat <<A <<B` in the order the operators appear.
+
+    `quoted` says whether the delimiter word carried quoting (`<<'EOF'`,
+    `<<"EOF"`, `<<\\EOF`). Bash expands the body of an UNQUOTED heredoc before
+    the reading command ever sees it, so a consumer that grades body text needs
+    to know which of the two it holds: the raw text of an unquoted body is not
+    the text bash delivers (issue #1228 round 2).
 
     A command substitution re-opens shell parsing even inside double quotes, so
     `-m "$(cat <<'EOF'`  — the exact shape of a commit-message payload — really
     does open a heredoc. `subst` stacks the suspended quote state so that one is
-    seen while a plain `"…<<EOF…"` string stays inert.
+    seen while a plain `"…<<EOF…"` string stays inert. Backticks are the older
+    spelling of the same construct and re-enter parsing identically, so
+    ``-m "`cat <<'EOF' … `"`` opens a heredoc too; reading the `<<` there as
+    string data let a malformed message through the gate unseen. Each stacked
+    entry carries the character that closes it, because `)` must not close a
+    backtick run and vice versa.
 
     `quote` is the quote character still open from the *previous* physical line;
     the returned second element is the quote still open at this line's end.
@@ -116,16 +127,21 @@ def _heredoc_starts_on_line(
     still open inside a `$(…)` is reported as its outermost suspended quote,
     exactly as `_quote_open_at_eol` does.
     """
-    out: list[tuple[str, bool]] = []
+    out: list[tuple[str, bool, bool]] = []
     i, n = 0, len(line)
     arith = 0
-    subst: list[str] = []
+    subst: list[tuple[str, str]] = []
     while i < n:
         ch = line[i]
         if quote == '"' and line.startswith("$(", i) and not line.startswith("$((", i):
-            subst.append(quote)
+            subst.append((quote, ")"))
             quote = ""
             i += 2
+            continue
+        if quote == '"' and ch == "`":
+            subst.append((quote, "`"))
+            quote = ""
+            i += 1
             continue
         if quote:
             if ch == "\\" and quote == '"':
@@ -152,8 +168,8 @@ def _heredoc_starts_on_line(
             arith -= 1
             i += 2
             continue
-        if ch == ")" and subst and not arith:
-            quote = subst.pop()
+        if subst and not arith and ch == subst[-1][1]:
+            quote = subst.pop()[0]
             i += 1
             continue
         if line.startswith("<<", i) and not arith:
@@ -166,9 +182,9 @@ def _heredoc_starts_on_line(
                 j += 1
             while j < n and line[j] in " \t":
                 j += 1
-            delim, j = _read_heredoc_delim(line, j)
+            delim, j, delim_quoted = _read_heredoc_delim(line, j)
             if delim:
-                out.append((delim, dash))
+                out.append((delim, dash, delim_quoted))
                 i = j
                 continue
             i += 2
@@ -177,36 +193,42 @@ def _heredoc_starts_on_line(
     # Report the outermost still-open quote so the caller can carry it into the
     # next physical line — a `$(…)` open at EOL keeps the command going, so its
     # suspended quote is what bash is still inside (issue #1091).
-    return out, quote or (subst[0] if subst else "")
+    return out, quote or (subst[0][0] if subst else "")
 
 
 _HEREDOC_WORD_CHARS = re.compile(r"[A-Za-z0-9_.~\-/]")
 
 
-def _read_heredoc_delim(line: str, j: int) -> tuple[str, int]:
-    """Delimiter word starting at `j`, plus the index just past it.
+def _read_heredoc_delim(line: str, j: int) -> tuple[str, int, bool]:
+    """`(delimiter, index just past it, quoted)` for the word starting at `j`.
 
-    `<<EOF`, `<<'EOF'`, `<<"EOF"`, and `<<\\EOF` all name the same delimiter —
-    the quoting only decides whether the body is expanded, which is irrelevant
-    here. Returns `("", j)` when no delimiter word is present, which is what
-    keeps `1 << 3` from being read as a heredoc named `3`.
+    `<<EOF`, `<<'EOF'`, `<<"EOF"`, and `<<\\EOF` all name the same delimiter,
+    so the word itself is returned with its quoting removed. The quoting is
+    reported separately rather than discarded because it decides whether bash
+    expands the body: any quoting at all — a quoted run or a single backslash
+    anywhere in the word — makes the body literal, and an unquoted word leaves
+    it subject to command, parameter, and arithmetic expansion. Returns
+    `("", j, False)` when no delimiter word is present, which is what keeps
+    `1 << 3` from being read as a heredoc named `3`.
     """
     n = len(line)
     if j < n and line[j] in "'\"":
         q = line[j]
         end = line.find(q, j + 1)
-        return (line[j + 1:end], end + 1) if end != -1 else ("", j)
+        return (line[j + 1:end], end + 1, True) if end != -1 else ("", j, False)
     out: list[str] = []
+    escaped = False
     while j < n:
         if line[j] == "\\" and j + 1 < n:
             out.append(line[j + 1])
+            escaped = True
             j += 2
             continue
         if not _HEREDOC_WORD_CHARS.match(line[j]):
             break
         out.append(line[j])
         j += 1
-    return "".join(out), j
+    return "".join(out), j, escaped
 
 
 def strip_heredoc_bodies(command: str) -> str:
@@ -240,11 +262,11 @@ def strip_heredoc_bodies(command: str) -> str:
     if "<<" not in command:
         return command
     out: list[str] = []
-    pending: list[tuple[str, bool]] = []
+    pending: list[tuple[str, bool, bool]] = []
     quote = ""  # #1091: open quote carried in from the previous physical line
     for line in command.split("\n"):
         if pending:
-            delim, dash = pending[0]
+            delim, dash, _quoted = pending[0]
             probe = line.lstrip("\t") if dash else line
             if probe == delim:  # exact — `EOF ` does not close a heredoc
                 del pending[0]
@@ -256,6 +278,158 @@ def strip_heredoc_bodies(command: str) -> str:
         openers, quote = _heredoc_starts_on_line(line, quote)
         pending.extend(openers)
     return "\n".join(out)
+
+
+def heredoc_bodies(command: str) -> list[str]:
+    """Every heredoc body in `command`, in source order, terminator excluded.
+
+    The delimiter-dropping view of `heredoc_bodies_by_delimiter`, for a caller
+    that wants every body regardless of which heredoc produced it.
+    """
+    return [body for _delim, body, _quoted in heredoc_sources(command)]
+
+
+def heredoc_sources(command: str) -> list[tuple[str, str, bool]]:
+    """`(delimiter, body, quoted)` for every heredoc in `command`, source order.
+
+    The delimiter is what lets a caller say *which* heredoc it means. A command
+    can hold several — an unrelated `cat > notes <<'NOTE'` beside the
+    `git commit -F - <<'EOF'` whose body is the message — and grading them all
+    reads someone else's prose as the commit message (issue #1228 follow-up).
+    Nothing here decides that binding; it only stops discarding the one field
+    the caller needs to make it.
+
+    The counterpart of `strip_heredoc_bodies`: that one blanks a body because
+    it is data rather than script, and this one returns it for exactly the
+    same reason. `git commit -m "$(cat <<'EOF' … EOF)"` puts the commit
+    message in a heredoc, so tokenizing the command yields `$(cat <<'EOF'` and
+    the message itself is reachable only from the raw string — a gate that
+    grades the message body has nowhere else to read it from.
+
+    The scan mirrors the stripper line for line, including the quote state
+    carried across physical lines (issue #1091), so the two cannot disagree on
+    where a body begins or ends. An unterminated heredoc yields the body it
+    opened, matching the stripper's decision to treat the rest of the command
+    as that body.
+
+    `<<-` strips leading tabs from EVERY body line, not only from the
+    terminator — `bash(1)`, "Here Documents": *all leading tab characters are
+    stripped from input lines and the line containing the delimiter*. Returning
+    the raw line instead handed a consumer text the shell never produces: a
+    body line `\\tword(a(b))` reads as indented prose to
+    `commit-message-paren-check`, which skips any line whose leading run holds
+    whitespace, while the commit message release-please parses starts at
+    `word(`. The stripper needs no such fold because it blanks the line either
+    way.
+
+    `quoted` rides along from the opener: an unquoted `<<EOF` body reaches the
+    reading command only after bash has expanded it, so a caller that grades
+    body text has to know the raw lines here are not the delivered ones.
+    """
+    if "<<" not in command:
+        return []
+    bodies: list[tuple[str, str, bool]] = []
+    pending: list[tuple[str, bool, bool]] = []
+    current: list[str] = []
+    quote = ""
+    for line in command.split("\n"):
+        if pending:
+            delim, dash, delim_quoted = pending[0]
+            probe = line.lstrip("\t") if dash else line
+            if probe == delim:
+                del pending[0]
+                bodies.append((delim, "\n".join(current), delim_quoted))
+                current = []
+            else:
+                current.append(probe)
+            continue
+        openers, quote = _heredoc_starts_on_line(line, quote)
+        pending.extend(openers)
+    if pending:
+        bodies.append((pending[0][0], "\n".join(current), pending[0][2]))
+    return bodies
+
+
+def heredoc_delimiters(text: str) -> list[str]:
+    """Every heredoc delimiter word `text` opens, in source order.
+
+    Scans with the same opener reader `heredoc_sources` uses, so
+    the two agree on what counts as an opener — a here-string, an arithmetic
+    shift, and a quoted `<<` are none of them. `text` is a fragment rather than
+    a whole command: one shell token (`<<EOF`, or the `$(cat <<'EOF' …)` a
+    `-m` value arrives as) is the case this exists for, which is how a caller
+    names the heredoc a particular argv position reads from.
+    """
+    if "<<" not in text:
+        return []
+    out: list[str] = []
+    quote = ""
+    for line in text.split("\n"):
+        openers, quote = _heredoc_starts_on_line(line, quote)
+        out.extend(delim for delim, _dash, _quoted in openers)
+    return out
+
+
+_EXPANSION_START = re.compile(r"\$[({A-Za-z_0-9@*?#!-]|`")
+
+
+def has_shell_expansion(text: str) -> bool:
+    """True when bash would substitute something into `text`.
+
+    Covers command substitution (`$(…)`, backticks) and parameter expansion
+    (`${…}`, `$NAME`, `$1`, `$@`), which is every construct that can put
+    characters into a string the hook cannot predict. A gate that grades text
+    for a *shape* — a paren that must close on its line — has to treat such a
+    line as unreadable rather than grade the pre-expansion source: `word($(printf
+    x))` reaches the reading command as `word(x)`, which is well-formed, while
+    the raw text reads as a nested paren and blocks a valid commit (issue #1228
+    round 2).
+
+    Deliberately over-broad in the fail-open direction. Quoting is already gone
+    by the time a tokenized value reaches here, so a literal `\\$` cannot be
+    told from a live `$`, and calling both an expansion loses detection on a
+    line rather than blocking a message nobody can read. A caller that knows
+    the text is literal — a single-quoted run, a quoted heredoc body — must not
+    consult this at all.
+    """
+    return bool(_EXPANSION_START.search(text))
+
+
+def has_unclosed_expansion(text: str) -> bool:
+    """True when a `$(…)` or backtick run in `text` never closes.
+
+    Such a command is not something bash runs at all — it is a syntax error, so
+    no commit happens and there is nothing for a gate to grade. The text after
+    the opener is also not what it appears to be: it is the inside of an
+    unfinished substitution, which is how `$(x` followed by prose came to be
+    read as message lines (CodeRabbit, issue #1228 round 2).
+
+    Parens are counted only once inside a substitution, so ordinary prose
+    parentheses in a message cannot make it look unbalanced.
+    """
+    depth = 0
+    backtick = False
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "`":
+            backtick = not backtick
+            i += 1
+            continue
+        if text.startswith("$(", i):
+            depth += 1
+            i += 2
+            continue
+        if depth:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+        i += 1
+    return depth > 0 or backtick
 
 
 HELP_FLAGS = frozenset({"-h", "--help"})

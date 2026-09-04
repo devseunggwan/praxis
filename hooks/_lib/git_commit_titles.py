@@ -13,8 +13,10 @@ Public API:
   GIT_GLOBAL_FLAGS_WITH_ARG, GIT_GLOBAL_BARE_FLAGS, GIT_COMMIT_NO_VALUE_SHORT,
   MESSAGE_FLAGS, FILE_FLAGS  — constant sets
   title_from_file(path, base_dir=None)        -> str | None
+  text_from_file(path, base_dir=None)         -> str | None
   strip_git_global_flags(argv)                -> tuple[list[str], str | None]
   extract_git_titles(argv, command=None)      -> list[str]
+  extract_git_message_texts(argv, command=None) -> list[str]
 
 The two gates differ only in WHAT they do with the extracted titles (length
 check vs format check); the extraction itself is identical and lives here.
@@ -32,6 +34,8 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _starts_unquoted_comment,
+    has_shell_expansion,
+    has_unclosed_expansion,
     strip_heredoc_bodies,
     strip_prefix,
 )
@@ -72,25 +76,83 @@ GIT_GLOBAL_BARE_FLAGS = frozenset({
 # ref), -c (commit), -t (template), -u (untracked mode), -m (message).
 GIT_COMMIT_NO_VALUE_SHORT = frozenset("aesvnqzp")
 
+# The two `git commit` short options this module reads a message out of, and
+# the kind of value each carries. Both are value-taking, so each ends its
+# cluster: the rest of the cluster is the value when there is one, and the next
+# token when there is not (`-am"fix: x"` and `-am "fix: x"` are the same
+# invocation to git, and `-Fmsg.txt`/`-F-` likewise).
+GIT_COMMIT_VALUE_SHORT = {"m": "message", "F": "file"}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def title_from_file(path: str, base_dir: str | None = None) -> str | None:
-    """Read first line of a file; return None on any error or if stdin placeholder.
+def _is_git_binary(token: str) -> bool:
+    """True iff `token` names the git binary, bare or path-prefixed.
+
+    Mirrors the `_is_git_binary` every sibling commit gate carries
+    (`block-rename-sweep-survivors`, `commit-decomposition-advisory`,
+    `pre-commit-staged-file-enumeration`, …) and the `_is_gh_binary` in
+    `_hook_utils`. An exact `argv[0] == "git"` comparison is bypassed by
+    `/usr/bin/git commit -m …`, which is the same path-prefix hole #1099 closed
+    on the gh side. The leading strip covers a subshell-wrapped form
+    (`(git …)`, `$(git …)`), where the grouping char rides on the token.
+    """
+    stripped = token.lstrip("(){}$`")
+    return stripped == "git" or stripped.endswith("/git")
+
+
+def _resolve_message_path(path: str, base_dir: str | None) -> str | None:
+    """The path to open for a `-F <path>` value, or None when there is none.
 
     `base_dir` is the working directory git treats as cwd for relative paths
-    (the `-C <dir>` global flag value). When absent, paths are opened
-    relative to the hook's own cwd.
+    (the `-C <dir>` global flag value). When absent, paths are opened relative
+    to the hook's own cwd. `-` is stdin, which a PreToolUse hook cannot read.
     """
     if path == "-":
         return None  # stdin — acknowledged limitation, silent pass
     if base_dir and not os.path.isabs(path):
-        path = os.path.join(base_dir, path)
+        return os.path.join(base_dir, path)
+    return path
+
+
+def title_from_file(path: str, base_dir: str | None = None) -> str | None:
+    """Read first line of a file; return None on any error or if stdin placeholder.
+
+    Reads ONE line rather than taking the first line off `text_from_file`. The
+    two title gates run on every `git commit` a session makes, and a `-F` file
+    is arbitrary — pointing one at a large file made each of them pay for the
+    whole read to answer a question about its first 50 characters. Measured on
+    a 50 MB file, mean of 20 calls: 47.0 ms per call for the whole-file read
+    against 0.023 ms for one line. The body gate still needs the rest and
+    calls `text_from_file`.
+    """
+    resolved = _resolve_message_path(path, base_dir)
+    if resolved is None:
+        return None
     try:
-        with open(path, encoding="utf-8") as fh:
+        with open(resolved, encoding="utf-8") as fh:
+            # `.split("\n")[0]` on the whole text drops the newline and keeps a
+            # trailing `\r`; `readline()` plus this strip is the same string.
             return fh.readline().rstrip("\n")
+    except OSError:
+        return None  # unreadable — silent pass
+
+
+def text_from_file(path: str, base_dir: str | None = None) -> str | None:
+    """Whole contents of a `-F <path>` message file; None on any error.
+
+    Same resolution rules as `title_from_file`. The gate that grades the
+    message body needs the whole thing; a title gate does not, and pays for
+    this read only when it genuinely wants every line.
+    """
+    resolved = _resolve_message_path(path, base_dir)
+    if resolved is None:
+        return None
+    try:
+        with open(resolved, encoding="utf-8") as fh:
+            return fh.read()
     except OSError:
         return None  # unreadable — silent pass
 
@@ -279,12 +341,50 @@ def title_is_unresolved_substitution(title: str, command: str | None = None) -> 
     return False
 
 
-def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]:
-    """Extract commit title candidates from a git-commit argv.
+def _cluster_value(
+    tok: str, argv: list[str], i: int
+) -> tuple[tuple[str, str] | None, int] | None:
+    """`((kind, value) | None, tokens consumed)` for a short-option cluster.
 
-    Only the FIRST -m / --message flag contributes the title; subsequent -m
-    flags are body paragraphs and are ignored (git treats them that way).
-    -F / --file reads the file and takes the first line.
+    Returns None when `tok` is not a cluster this module can read, so the
+    caller falls through to its long-form branches rather than guessing. A
+    cluster is readable while every character before the value-taking one is a
+    known no-value `git commit` short flag: that whitelist is what keeps
+    `-Smike@example.com` out (`-S` takes an attached key id, and `S`, `@`, `.`
+    are not no-value flags), and it is why an unknown character abandons the
+    whole cluster instead of scanning past it.
+
+    The value-taking flag ends the cluster either way — with the rest of the
+    cluster as its value, or with the next token when the cluster ends there.
+    """
+    for pos, ch in enumerate(tok[1:], start=1):
+        kind = GIT_COMMIT_VALUE_SHORT.get(ch)
+        if kind is not None:
+            rest = tok[pos + 1:]
+            if rest:
+                return (kind, rest), 1
+            if i + 1 < len(argv):
+                return (kind, argv[i + 1]), 2
+            return None, 1  # dangling flag — git errors, nothing to read
+        if ch not in GIT_COMMIT_NO_VALUE_SHORT:
+            return None
+    return None, 1  # all no-value flags (`-av`): consumed, contributes nothing
+
+
+def _scan_commit_message_values(
+    argv: list[str],
+) -> tuple[list[tuple[str, str]], str | None] | None:
+    """Ordered message sources in a `git commit` argv, or None if not one.
+
+    Returns `([(kind, value), …], c_dir)` where `kind` is `"message"` (the
+    value is the raw message text) or `"file"` (the value is a path). Order is
+    argv order, so a caller can apply git's "first -m is the title" rule
+    without re-walking the argv.
+
+    The walk is the single source of truth for git-commit message extraction —
+    `extract_git_titles` and `extract_git_message_texts` differ only in what
+    they do with the values, which is what keeps the two from drifting the way
+    the pre-#594 copies did.
 
     Handles:
       git commit -m "title"
@@ -297,35 +397,18 @@ def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]
       git commit --amend -m "title"
       git -C /path commit -m "title"   (git global flags stripped)
       git -c key=val commit -m "title" (git global flags stripped)
-
-    `command` is the raw shell command `argv` was tokenized from. It is optional
-    only so existing argv-only callers keep working; passing it is what lets a
-    single-quoted literal title be graded instead of mistaken for a substitution
-    (see `title_is_unresolved_substitution`).
     """
     argv = strip_prefix(argv)
-    if not argv or argv[0] != "git":
-        return []
+    if not argv or not _is_git_binary(argv[0]):
+        return None
 
     # Strip git global flags to find the actual subcommand.
     sub_argv, c_dir = strip_git_global_flags(argv)
     if not sub_argv or sub_argv[0] != "commit":
-        return []
+        return None
 
-    titles: list[str] = []
+    values: list[tuple[str, str]] = []
 
-    def add_title(raw: str) -> None:
-        """Record the first line of a message value as a title candidate.
-
-        A value we cannot statically resolve contributes no candidate, but the
-        caller still marks `message_seen` — git took it as the message, we just
-        cannot read it, so later -m flags remain body paragraphs.
-        """
-        first = raw.split("\n")[0]
-        if not title_is_unresolved_substitution(first, command):
-            titles.append(first)
-
-    message_seen = False
     i = 1  # sub_argv[0] is "commit"; start scanning from index 1
     while i < len(sub_argv):
         tok = sub_argv[i]
@@ -337,58 +420,44 @@ def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]
         # the `=` and mis-parse the title (#1097).
         if "=" in tok and tok.startswith("--"):
             key, _, val = tok.partition("=")
-            if key in MESSAGE_FLAGS and not message_seen:
-                add_title(val)
-                message_seen = True
+            if key in MESSAGE_FLAGS:
+                values.append(("message", val))
                 i += 1
                 continue
             if key in FILE_FLAGS:
-                t = title_from_file(val, base_dir=c_dir)
-                if t is not None:
-                    titles.append(t)
+                values.append(("file", val))
                 i += 1
                 continue
 
-        # Handle attached short-option form: -m<value> parsed as single token.
-        # shlex strips quotes, so `git commit -m"long title"` becomes ['-mlong title'].
-        # This must be checked BEFORE the combined-flag branch to avoid misrouting.
-        if (
-            tok.startswith("-m")
-            and not tok.startswith("--")
-            and len(tok) > 2
-            and not message_seen
-        ):
-            add_title(tok[2:])
-            message_seen = True
-            i += 1
-            continue
+        # Everything after `--` is a pathspec, never an option (git-commit(1),
+        # "OPTIONS": `--` separates paths from revisions/options). Scanning on
+        # read a path literally named `-m` as a message flag, so its neighbour
+        # became message text and could block a valid commit (CodeRabbit,
+        # issue #1228 round 2).
+        if tok == "--":
+            break
 
-        # Handle combined short flags like -am / -vsm (git allows clustered
-        # short options where -m terminates with the next token as value).
-        # Strict whitelist: every preceding char must be a known no-value short
-        # flag from git commit. This excludes `-Smike@example.com` (-S accepts
-        # attached key id; even though `com` ends in `m`, `S/@/.` etc. are not
-        # in the no-value set, so the cluster is rejected). Round-1 heuristic
-        # used "m anywhere in tok[1:]" and was unsafe; round-4 narrows it.
-        if (
-            tok.startswith("-")
-            and not tok.startswith("--")
-            and len(tok) > 2
-            and tok[-1] == "m"
-            and all(c in GIT_COMMIT_NO_VALUE_SHORT for c in tok[1:-1])
-            and not message_seen
-        ):
-            if i + 1 < len(sub_argv):
-                add_title(sub_argv[i + 1])
-                message_seen = True
-                i += 2
+        # Handle a short-option cluster — `-m<value>`, `-am <value>`,
+        # `-am<value>`, `-Fmsg.txt`, `-F-`, `-vsm`. One walk covers all of
+        # them because they are one grammar: leading no-value flags, then at
+        # most one value-taking flag that consumes the rest of the cluster or,
+        # when the cluster ends with it, the next token. Three separate
+        # branches used to cover a subset of that grammar, and the shapes
+        # between them (`-am"fix: x"`, `-Fmsg.txt`) yielded no message source
+        # at all.
+        if tok.startswith("-") and not tok.startswith("--") and len(tok) > 1:
+            consumed = _cluster_value(tok, sub_argv, i)
+            if consumed is not None:
+                value, step = consumed
+                if value is not None:
+                    values.append(value)
+                i += step
                 continue
 
         # Standard separate-token flags.
-        if tok in MESSAGE_FLAGS and not message_seen:
+        if tok in MESSAGE_FLAGS:
             if i + 1 < len(sub_argv):
-                add_title(sub_argv[i + 1])
-                message_seen = True
+                values.append(("message", sub_argv[i + 1]))
                 i += 2
                 continue
             i += 1
@@ -396,9 +465,7 @@ def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]
 
         if tok in FILE_FLAGS:
             if i + 1 < len(sub_argv):
-                t = title_from_file(sub_argv[i + 1], base_dir=c_dir)
-                if t is not None:
-                    titles.append(t)
+                values.append(("file", sub_argv[i + 1]))
                 i += 2
                 continue
             i += 1
@@ -406,4 +473,113 @@ def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]
 
         i += 1
 
+    return values, c_dir
+
+
+def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]:
+    """Extract commit title candidates from a git-commit argv.
+
+    Only the FIRST -m / --message flag contributes the title; subsequent -m
+    flags are body paragraphs and are ignored (git treats them that way).
+    -F / --file reads the file and takes the first line.
+
+    A message value we cannot statically resolve contributes no candidate, but
+    it still consumes the "first -m" slot — git took it as the message, we just
+    cannot read it, so later -m flags remain body paragraphs.
+
+    `command` is the raw shell command `argv` was tokenized from. It is optional
+    only so existing argv-only callers keep working; passing it is what lets a
+    single-quoted literal title be graded instead of mistaken for a substitution
+    (see `title_is_unresolved_substitution`).
+    """
+    scanned = _scan_commit_message_values(argv)
+    if scanned is None:
+        return []
+    values, c_dir = scanned
+
+    titles: list[str] = []
+    message_seen = False
+    for kind, raw in values:
+        if kind == "message":
+            if message_seen:
+                continue
+            message_seen = True
+            first = raw.split("\n")[0]
+            if not title_is_unresolved_substitution(first, command):
+                titles.append(first)
+            continue
+        t = title_from_file(raw, base_dir=c_dir)
+        if t is not None:
+            titles.append(t)
     return titles
+
+
+def extract_git_message_texts(
+    argv: list[str], command: str | None = None
+) -> list[str]:
+    """Full commit message text for every statically resolvable source.
+
+    Where `extract_git_titles` keeps only the first line of the first `-m`,
+    this keeps everything: git joins successive `-m` paragraphs with a blank
+    line, so they are joined that way here and returned as one text, and each
+    `-F` file contributes its whole contents as another.
+
+    A gate that reads the *body* needs this because the body is where a shape
+    invisible to a title check can live — see
+    `hooks/preflight-gate/commit-message-paren-check/spec.md`.
+
+    An unresolvable substitution (`-m "$(cat …)"`) contributes nothing, exactly
+    as it contributes no title; the caller recovers that case from the raw
+    command's heredoc bodies instead.
+
+    An expansion can also sit on a LATER line of a multi-line value, and only
+    the first line decides whether the value is a title candidate. Passing the
+    rest through verbatim hands a body gate raw shell text where the shell
+    would have put a command's output — `$(git log --oneline` reads as a line
+    whose leading word is glued to `(`, so a blocking gate rejects a message
+    nobody can predict. Such a line is blanked instead of dropped, keeping the
+    line numbers a gate reports pointed at the real message.
+
+    Where the expansion sits on the line does not change that. An earlier
+    version blanked only a line that *opened* with one, so `foo($(printf x))`
+    — delivered as `foo(x)`, which parses — was graded as raw source and read
+    as a nested paren (issue #1228 round 2). The line is unreadable either way,
+    so `has_shell_expansion` decides it rather than the opening position.
+
+    A whole value that reached us as one single-quoted run is exempt: the shell
+    substitutes nothing inside it, so every line is literal and gradable. That
+    also settles the case the line-wise rule cannot — a literal `$(…)` line
+    inside a single-quoted message used to be blanked, because the by-value
+    match is against a whole quoted run and a line of a run never equals the
+    run.
+    """
+    scanned = _scan_commit_message_values(argv)
+    if scanned is None:
+        return []
+    values, c_dir = scanned
+
+    texts: list[str] = []
+    paragraphs: list[str] = []
+    for kind, raw in values:
+        if kind == "message":
+            if command is not None and _title_is_single_quoted_literal(command, raw):
+                paragraphs.append(raw)
+                continue
+            if has_unclosed_expansion(raw):
+                # bash never finishes parsing this command, so no commit
+                # happens and the text after the opener is the inside of an
+                # unfinished substitution rather than message lines.
+                continue
+            lines = raw.split("\n")
+            if title_is_unresolved_substitution(lines[0], command):
+                continue
+            paragraphs.append("\n".join(
+                "" if has_shell_expansion(line) else line for line in lines
+            ))
+            continue
+        body = text_from_file(raw, base_dir=c_dir)
+        if body is not None:
+            texts.append(body)
+    if paragraphs:
+        texts.insert(0, "\n\n".join(paragraphs))
+    return texts

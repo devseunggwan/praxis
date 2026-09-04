@@ -31,7 +31,7 @@ stops functioning as a gate, so the volume itself is the defect.
    A commit is recoverable with `git reset` / `git commit --amend` from the
    same shell, before anything leaves the machine.
 2. **It is the only category already covered in depth — on `claude`.**
-   Seven sibling `PreToolUse(Bash)` hooks gate a `git commit` argv on their
+   Eight sibling `PreToolUse(Bash)` hooks gate a `git commit` argv on their
    own — derived from the `"gates": ["git-commit"]` field each carries in
    `hooks/manifest.json`, and each verified by reading its detector to key on
    the `commit` subcommand:
@@ -41,12 +41,13 @@ stops functioning as a gate, so the volume itself is the defect.
    | `block-commit-without-codex-review` | `claude` | commit before the review step |
    | `block-rename-sweep-survivors` | `claude` | a rename sweep with surviving occurrences |
    | `commit-decomposition-advisory` | `claude` | oversized single commit |
+   | `commit-message-paren-check` | all | a message line release-please's parser rejects |
    | `commit-title-format-check` | all | Conventional Commits title format |
    | `commit-title-length-check` | all | title length |
    | `pre-commit-staged-file-enumeration` | `claude` | staging without enumerating files |
    | `verify-commit-flag-override` | all | `-n` / `--no-verify` flag override |
 
-   Four of the seven siblings are the checklist `verify-commit-flag-override`
+   Four of the eight siblings are the checklist `verify-commit-flag-override`
    already prints on its own deny (issue #941). By contrast **no** sibling
    hook gates `kubectl apply` at all.
 
@@ -71,9 +72,9 @@ The sibling set behind the premise is therefore a per-host set:
 
 | Host | Sibling commit gates | Also in the deny checklist |
 | ------ | ---------------------- | ---------------------------- |
-| `claude` | 7 | 4 |
-| `codex` | 3 | 2 |
-| `cursor` | 3 | 2 |
+| `claude` | 8 | 4 |
+| `codex` | 4 | 2 |
+| `cursor` | 4 | 2 |
 
 Both columns are re-derived per host by `scripts/check-sibling-commit-gates.py`
 — every hook-installing platform must have a row, and a row for a platform that
@@ -104,7 +105,7 @@ platform without this checker failing.
 
 **`wrapper-commit` is a deliberate narrowing.** The wrapper CLIs used to
 carry the `git-commit` label; issue #874's demotion does not follow them
-down, because both halves of the rationale fail for them. The seven sibling
+down, because both halves of the rationale fail for them. The eight sibling
 gates match a literal `git commit` argv, so a commit made *inside* a wrapper
 process is invisible to every one of them. They keep asking, under their own
 category name.
