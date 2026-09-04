@@ -158,6 +158,12 @@ GOOD_BODY = "fix: x\n\n `(a(b))` note"
         ("/usr/bin/git commit -m 'word(a(b))'", 2),
         ("env FOO=1 /usr/bin/git commit -m 'word(a(b))'", 2),
         ("gitk commit -m 'word(a(b))'", 0),
+        # A commit inside an ACTIVE substitution is still a commit…
+        ("MSG=$(git commit -m 'fix: x' -m 'word(a(b))')", 2),
+        ("MSG=$(git commit -m 'fix: x' -m 'word (a(b))')", 0),
+        ("echo \"$(git commit -m 'word(a(b))')\"", 2),
+        # …and one the shell never expands is text, not a command.
+        ("echo '$(git commit -m \"word(a(b))\")'", 0),
     ],
 )
 def test_message_sources(command, rc):

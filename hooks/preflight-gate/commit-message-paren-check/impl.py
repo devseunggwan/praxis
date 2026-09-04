@@ -39,6 +39,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     heredoc_bodies_by_delimiter,
     heredoc_delimiters,
     iter_command_starts,
+    iter_command_texts,
     safe_tokenize,
 )
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
@@ -206,23 +207,25 @@ def main() -> int:
     # message line ending in `\` would be silently joined to the next one.
     command = raw_command.replace("\\\n", " ")
 
-    tokens = safe_tokenize(command)
-    if not tokens:
-        return 0
-
-    for argv in iter_command_starts(tokens):
-        for text in _message_texts(argv, raw_command):
-            hits = offending_lines(text)
-            if not hits:
-                continue
-            reason = _build_message(hits, command)
-            if os.environ.get(STRICT_ENV, "1") != "0":
-                sys.stderr.write(reason + "\n")
-                return 2
-            sys.stderr.write(
-                f"[commit-message-paren-check] ADVISORY (STRICT=0):\n{reason}\n"
-            )
-            return 0
+    # `safe_tokenize` coalesces a `$( … )` run into ONE token, so a commit
+    # written as `MSG=$(git commit -m '…')` has no command start at the top
+    # level at all. `iter_command_texts` yields the outer text and then the
+    # inner text of every ACTIVE substitution, which is where the sibling
+    # gates on this surface already look (issues #1032, #1035).
+    for segment in iter_command_texts(command):
+        for argv in iter_command_starts(safe_tokenize(segment)):
+            for text in _message_texts(argv, raw_command):
+                hits = offending_lines(text)
+                if not hits:
+                    continue
+                reason = _build_message(hits, command)
+                if os.environ.get(STRICT_ENV, "1") != "0":
+                    sys.stderr.write(reason + "\n")
+                    return 2
+                sys.stderr.write(
+                    f"[commit-message-paren-check] ADVISORY (STRICT=0):\n{reason}\n"
+                )
+                return 0
 
     return 0
 
