@@ -850,9 +850,15 @@ run_case "T35_block_schema_a_and_b_mixed" "block" \
 
 # T36: pass — honest card. The row is own-org AND declares private AND the
 # resolution agrees, which is the only shape that carries the exemption
-# (stage2.5-audit.md Gate-4, both halves). The fixture repo does not exist on
-# GitHub, so the live API returns nothing and PRAXIS_REPO_VISIBILITY answers —
-# deterministic online and offline alike, which a real repo would not be.
+# (stage2.5-audit.md Gate-4, both halves).
+#
+# GH_HOST pins an unresolvable domain, so PRAXIS_REPO_VISIBILITY is reached as
+# the documented fallback rather than as an accident. Without the pin the
+# resolver spawns a real `gh api repos/praxis-fixture/private-fixture` first and
+# the case passes only because that name happens not to be registered — an
+# authenticated machine, or anyone registering it, flips the expectation. API
+# precedence over the env map is a separate claim and gets its own case with its
+# own explicit stub (G4H10/G4H11 below), so pinning here deletes no coverage.
 T36_CARD=$(cat <<EOF
 - memory: 0
 - issue: 0
@@ -867,7 +873,7 @@ T36_CARD=$(cat <<EOF
 EOF
 )
 T36_ROW="| 1 | tool | cli | gh flag missing | tool defect | gap | No | upstream_feedback | tool defect confirmed<br>backing_repo: praxis-fixture/private-fixture<br>repo_visibility: private | HIGH |"
-RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture GH_HOST=nonexistent.invalid
               PRAXIS_REPO_VISIBILITY=praxis-fixture/private-fixture=private)
 run_case "T36_pass_gate4_verdict_pass" "pass" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T36_CARD" "$T36_ROW")")"
@@ -881,6 +887,8 @@ RUN_CASE_ENV=()
 # T36b: block — the forged card. `gate_4_verdict: PASS` and `repo_visibility:
 # private` are both written by the agent the gate constrains; the resolution
 # says public, so the exemption is void and the row owes the Stage 4 marker.
+# GH_HOST pinned for the same reason as T36: the env map is the fallback, and a
+# case exercising it must not race a live API call to get there.
 T36B_CARD=$(cat <<EOF
 - memory: 0
 - issue: 0
@@ -895,7 +903,7 @@ T36B_CARD=$(cat <<EOF
 EOF
 )
 T36B_ROW="| 1 | tool | cli | gh flag missing | tool defect | gap | No | upstream_feedback | tool defect confirmed<br>backing_repo: praxis-fixture/public-fixture<br>repo_visibility: private | HIGH |"
-RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture GH_HOST=nonexistent.invalid
               PRAXIS_REPO_VISIBILITY=praxis-fixture/public-fixture=public)
 run_case "T36b_block_forged_private_declaration_over_public_repo" "block" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36B_ROW")")"
@@ -1115,7 +1123,7 @@ T36F_CARD=$(cat <<EOF
 - gate_4_verdict: NA
 EOF
 )
-RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture GH_HOST=nonexistent.invalid
               PRAXIS_REPO_VISIBILITY=praxis-fixture/private-fixture=private)
 run_case "T36f_block_na_verdict_over_a_routed_row" "block" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T36F_CARD" "$T36_ROW")")"
@@ -3346,6 +3354,43 @@ if grep -q 'repos/' "$GH_SPY_FILE"; then
 else
   echo "PASS  [G4H9b_allowlist_unresolved_spawned_no_repo_lookup]"; PASS=$((PASS + 1))
 fi
+RUN_CASE_ENV=()
+
+# API precedence over PRAXIS_REPO_VISIBILITY. The env var is another value the
+# same author controls, so letting it win would rebuild the hole one layer down
+# (#1150, and the helper's own docstring). The Gate-4b transcript cases pin
+# GH_HOST to reach the env fallback deterministically, which means none of them
+# can assert this — it needs a `gh` that actually answers, so it gets an
+# explicit stub of its own rather than riding on whether the fixture repo
+# happens to be unregistered on the live API.
+G4_API_BIN="$TMPDIR/g4apibin"; mkdir -p "$G4_API_BIN"
+cat > "$G4_API_BIN/gh" <<'APISTUB'
+#!/bin/sh
+# Answers the visibility query only, so `gh api user` still falls through to
+# PRAXIS_OWN_ORGS and the case isolates the precedence claim.
+case "$*" in
+  *repos/*) echo public ;;
+  *) exit 1 ;;
+esac
+APISTUB
+chmod +x "$G4_API_BIN/gh"
+STDIN=$'praxis-fixture/contested\n'
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture
+              PRAXIS_REPO_VISIBILITY=praxis-fixture/contested=private
+              "PATH=$G4_API_BIN:$PATH")
+assert_helper "G4H10_live_api_outranks_the_env_visibility_map" \
+  "vis	praxis-fixture/contested	public" \
+  --deadline-epoch "$(python3 -c 'import time;print(time.time()+8)')"
+RUN_CASE_ENV=()
+# Positive control: the identical env map, identical repo, identical assertion —
+# only the API is taken away. It must now answer `private`, or G4H10 proved
+# nothing about precedence and only that the map is ignored outright.
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture
+              PRAXIS_REPO_VISIBILITY=praxis-fixture/contested=private
+              GH_HOST=nonexistent.invalid)
+assert_helper "G4H11_control_env_map_answers_when_the_api_cannot" \
+  "vis	praxis-fixture/contested	private" \
+  --deadline-epoch "$(python3 -c 'import time;print(time.time()+8)')"
 RUN_CASE_ENV=()
 unset STDIN
 

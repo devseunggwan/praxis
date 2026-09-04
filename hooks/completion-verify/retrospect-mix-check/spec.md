@@ -643,7 +643,12 @@ plus 11 synthetic regression fixtures:
 - 5 Gate-4b resolution (issue #1244): T36b forged `private` over a public repo
   → block; T36c undeclared visibility + PASS → block; T36d offline lookup →
   demote; T36e allowlist unresolved → demote; T36f `NA` over a routed row that
-  resolves exempt → block (negative polarity is T38)
+  resolves exempt → block (negative polarity is T38).
+  Every case that spawns a lookup pins `GH_HOST` at an unresolvable domain, so
+  `PRAXIS_REPO_VISIBILITY` is reached as the documented fallback rather than
+  because the fixture repo happens to be unregistered on the live API — that
+  accident would flip the expectation on an authenticated host, or the day
+  someone registers the name
 - 12 own-org classification without the resolver: the shadow's own premise
   (`T36_nopy_shadow_hides_python3` plus its `jq`-still-resolvable positive
   control — an unreachable binary and a PATH that was never applied look
@@ -657,14 +662,18 @@ plus 11 synthetic regression fixtures:
   still matches the owner → demote; T36m/T36m2 a bare handle is rejected by
   Gate-3 and never reaches Gate-4b. `python3` is shadowed by a `PATH` holding
   every other binary the hook uses, so nothing on the machine is touched
-- 9 Gate-4b resolver, asserted against `gate4_visibility.py` directly (issue
+- 11 Gate-4b resolver, asserted against `gate4_visibility.py` directly (issue
   #1244): G4H1/G4H1b below the budget floor nothing is spawned, G4H2/G4H2b the
   same call with budget does spawn it (positive control), G4H3 the 9th repo is
   past the cap, G4H4 the 8th is inside it, G4H5 a repeated repo costs one call,
   G4H6/G4H6b a third-party repo answers `NOT_OWN_ORG` with no call,
   G4H7 an own-org repo in the SAME run is still looked up, G4H8 eight
   third-party rows do not starve a following own-org row of the cap,
-  G4H9/G4H9b an unresolved allowlist answers `UNRESOLVED` and spends no lookup
+  G4H9/G4H9b an unresolved allowlist answers `UNRESOLVED` and spends no lookup,
+  G4H10 the live API outranks `PRAXIS_REPO_VISIBILITY` (#1150) against an
+  explicit `gh` stub that answers `public` where the env map says `private`,
+  with G4H11 as its control — same map, same repo, API taken away, now
+  `private`
 - 3 Category-count carve-out (T-NEW1 memory_hygiene category count in card →
   pass — parser ignores; T-NEW2 audit_skipped trail line outside fence → pass
   — trail does not interfere with parsing; T-NEW3 output_quality category
