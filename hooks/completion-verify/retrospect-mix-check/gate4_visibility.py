@@ -28,7 +28,20 @@ Usage:
 
 Output (tab-separated, one record per line):
     own_orgs\\t<comma-joined handles>      or  own_orgs\\tUNRESOLVED
-    vis\\t<owner/repo>\\t<public|private|internal|UNRESOLVED>
+    vis\\t<owner/repo>\\t<public|private|internal|NOT_OWN_ORG|UNRESOLVED>
+
+Only an own-org repo is looked up. The exemption needs BOTH halves — own-org
+AND private/internal — so no visibility answer can change the verdict for a
+repo whose owner already fails the first half. Those resolve to NOT_OWN_ORG
+without a round trip, and they do not consume the lookup cap: a batch of
+third-party rows must not spend the budget that a genuine own-org row needs.
+This mirrors `audit-distribution-gates.py` (`actual = resolve_repo_visibility(
+repo) if own else None`), the SoT for Gate-4 semantics.
+
+NOT_OWN_ORG is a settled fact, not a missing answer — a caller must escalate on
+it, never demote. When the allowlist itself is UNRESOLVED ownness is unknown
+rather than refuted, so every repo comes back UNRESOLVED and none is looked up:
+the own-org half can no longer be established either way.
 
 Exit status is always 0: an unusable answer is expressed as UNRESOLVED, never
 as a crash the caller would have to interpret.
@@ -49,6 +62,7 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
 
 VALID_VISIBILITY = {"public", "private", "internal"}
 UNRESOLVED = "UNRESOLVED"
+NOT_OWN_ORG = "NOT_OWN_ORG"
 # Past ~15 repos the 10s manifest budget breaks even at the measured 0.45s
 # median round trip. A retrospect routing more repos than this gets the
 # remainder demoted, not a hook that overruns the Stop group's shared budget.
@@ -135,11 +149,29 @@ def main(argv: list[str]) -> int:
             continue
         seen.setdefault(repo.lower(), repo)
 
-    out = [f"own_orgs\t{resolve_own_orgs(deadline) if seen else UNRESOLVED}"]
-    for n, (key, repo) in enumerate(seen.items()):
-        if n >= max_lookups:
+    own_orgs = resolve_own_orgs(deadline) if seen else UNRESOLVED
+    own_known = own_orgs != UNRESOLVED
+    allowlist = set(own_orgs.split(",")) if own_known else set()
+
+    out = [f"own_orgs\t{own_orgs}"]
+    # Counts round trips actually spent, so a third-party repo cannot push a
+    # genuine own-org one past the cap.
+    lookups = 0
+    for key, repo in seen.items():
+        if not own_known:
             out.append(f"vis\t{key}\t{UNRESOLVED}")
             continue
+        owner, slash, _ = key.partition("/")
+        # No slash means no owner to match, so the own-org half cannot hold —
+        # the caller only ever emits `owner/repo`, but a bare handle must not
+        # collide with an allowlist entry of the same name and buy a lookup.
+        if not slash or owner not in allowlist:
+            out.append(f"vis\t{key}\t{NOT_OWN_ORG}")
+            continue
+        if lookups >= max_lookups:
+            out.append(f"vis\t{key}\t{UNRESOLVED}")
+            continue
+        lookups += 1
         out.append(f"vis\t{key}\t{resolve_repo_visibility(repo, deadline)}")
     sys.stdout.write("\n".join(out) + "\n")
     return 0
