@@ -139,7 +139,7 @@ def test_name_missing_from_spec_table_is_drift(tmp_path):
         tmp_path,
         {
             gates.SPEC: (
-                "   | `block-rename-sweep-survivors` | `claude` | a rename sweep "
+                "| `block-rename-sweep-survivors` | `claude` | a rename sweep "
                 "with surviving occurrences |\n",
                 "",
             )
@@ -157,9 +157,9 @@ def test_spurious_name_in_spec_table_is_drift(tmp_path):
         tmp_path,
         {
             gates.SPEC: (
-                "   | `verify-commit-flag-override` |",
-                "   | `pipefail-advisory` | not a commit gate |\n"
-                "   | `verify-commit-flag-override` |",
+                "| `verify-commit-flag-override` |",
+                "| `pipefail-advisory` | not a commit gate |\n"
+                "| `verify-commit-flag-override` |",
             )
         },
     )
