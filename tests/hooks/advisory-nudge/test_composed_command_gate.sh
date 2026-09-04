@@ -595,7 +595,9 @@ run_case "SILENT FIXTURE: transcribed \$ line posted via gh api PATCH (silent)" 
 # Negative control for the method gate: identical body, identical endpoint,
 # identical `body=` field — only the method differs. A detector widened to
 # every `gh api` call would fire here, and the warn case above cannot tell
-# the two apart on its own.
+# the two apart on its own. `--method GET` has to be stated: gh switches an
+# otherwise method-less call to POST as soon as a field is added, so dropping
+# the flag makes this a write rather than a read.
 nextbody
 cat > "$B" <<'EOF'
 ```
@@ -605,7 +607,7 @@ hooks/_lib/_hook_utils.py:88:def safe_tokenize(command)
 EOF
 run_case "SILENT FIXTURE: same body on a gh api GET is not a write (silent)" \
   "silent" "advisory" \
-  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh api /repos/o/r/issues/comments/999 -F body=@$B\"},\"transcript_path\":\"$TRANSCRIPT\"}"
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh api --method GET /repos/o/r/issues/comments/999 -F body=@$B\"},\"transcript_path\":\"$TRANSCRIPT\"}"
 
 # --- Summary -----------------------------------------------------------------
 

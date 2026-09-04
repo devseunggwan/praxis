@@ -7,7 +7,8 @@ convention makes a rev ≥2 anchor a `PATCH` against a comment id, which no
 noun/verb form can issue.
 
 The case list is the input-surface enumeration for `gh api`: method spelling
-(`-X` / `--method` / `--method=` / attached `-XPOST` / lowercase), method before
+(`-X` / `--method` / `--method=` / attached `-XPOST` / `-X=POST` / lowercase),
+no method at all — gh sends POST as soon as a parameter is added — method before
 or after the endpoint, endpoint with or without a leading slash, a full URL,
 gh's `{owner}/{repo}` templating, each endpoint family, and the field dialects
 (`-f` / `--raw-field` / `-F` / `--field` / `--input`).
@@ -40,6 +41,14 @@ WRITES = [
     # the issue's own probe lines
     "gh api --method PATCH /repos/o/r/issues/comments/1 -F body=@x",
     "gh api /repos/o/r/pulls/9/comments --method POST -f body=x",
+    # no --method at all: gh switches to POST as soon as a parameter is added,
+    # which is the form `gh api --help` prints for posting an issue comment
+    "gh api repos/o/r/issues/123/comments -f body=hi",
+    "gh api repos/o/r/pulls/9/comments -F body=@f.md",
+    "gh api repos/o/r/pulls/12/reviews --raw-field event=COMMENT -f body=hi",
+    "gh api repos/{owner}/{repo}/issues/123/comments -f body='Hi from CLI'",
+    # --input switches the method the same way
+    "gh api repos/o/r/issues/comments/1 --input payload.json",
     # method spelling
     "gh api -X PATCH repos/o/r/issues/comments/1 -f body=hi",
     "gh api -XPATCH repos/o/r/issues/comments/1 -fbody=hi",
@@ -74,8 +83,14 @@ READS = [
     "gh api -X=GET repos/o/r/pulls/9/comments -f a=b",
     "gh api --method get repos/o/r/issues/comments/1",
     "gh api repos/o/r/pulls/9/files",
+    # an explicit GET still wins over the parameter-implied POST — gh moves the
+    # parameters into the query string instead
+    "gh api repos/o/r/issues/12/comments --method GET -f per_page=1",
+    "gh api repos/o/r/issues/comments/1 -X GET --input payload.json",
     # a write, but not to a comment surface
     "gh api graphql -f query=xyz",
+    "gh api repos/o/r/issues/12 -f body=hi",
+    "gh api repos/o/r/actions/workflows/x.yml/dispatches -f ref=main",
     "gh api --method POST graphql -f query=xyz",
     "gh api -X PATCH repos/o/r/issues/12 -f body=hi",
     "gh api -X POST repos/o/r/actions/workflows/x.yml/dispatches -f ref=main",
@@ -201,3 +216,32 @@ def test_split_leaves_a_valueless_flag_alone():
 def test_equals_attached_method_and_field_parse():
     call = parse_gh_api(shlex.split("gh api -X=PATCH repos/o/r/issues/comments/1 -f=body=hi"))
     assert (call.method, call.path, call.body_raw) == ("PATCH", "repos/o/r/issues/comments/1", "hi")
+
+
+# ---------------------------------------------------------------------------
+# Parameter-implied POST
+# ---------------------------------------------------------------------------
+
+def test_parse_implies_post_from_a_field():
+    call = parse_gh_api(shlex.split("gh api repos/o/r/issues/123/comments -f body=hi"))
+    assert call.method == "POST"
+
+
+def test_parse_implies_post_from_input():
+    call = parse_gh_api(shlex.split("gh api repos/o/r/issues/comments/1 --input payload.json"))
+    assert (call.method, call.has_input) == ("POST", True)
+
+
+def test_parse_keeps_get_without_parameters():
+    call = parse_gh_api(shlex.split("gh api repos/o/r/issues/123/comments --paginate --jq .[].body"))
+    assert call.method == "GET"
+
+
+def test_explicit_method_wins_over_the_implied_post():
+    call = parse_gh_api(shlex.split("gh api repos/o/r/issues/123/comments --method GET -f per_page=1"))
+    assert call.method == "GET"
+
+
+def test_implied_post_body_is_still_extracted():
+    argv = shlex.split("gh api repos/o/r/issues/123/comments -f body=hello")
+    assert extract_gh_body(argv) == "hello"

@@ -76,8 +76,14 @@ GH_API_FIELD_FLAGS = frozenset({"-f", "--raw-field", "-F", "--field"})
 # `-f/--raw-field` never does.
 GH_API_EXPANDING_FIELD_FLAGS = frozenset({"-F", "--field"})
 
-# Absent `--method`, gh sends GET (POST when fields are present, but a GET
-# endpoint outside the families below is not a write either way).
+# Absent `--method`, gh sends GET — but POST as soon as any parameter is added,
+# which is the vendor's own canonical comment-post form:
+#   $ gh api repos/{owner}/{repo}/issues/123/comments -f body='Hi from CLI'
+# `gh api --help`: "The default HTTP request method is `GET` normally and `POST`
+# if any parameters were added. Override the method with `--method`." `--input`
+# switches it the same way (verified on gh 2.98.0 with `--verbose`, which prints
+# `POST /api/v3/...`). An explicit `--method GET` still wins — gh then moves the
+# parameters into the query string — so inference never overrides a stated method.
 GH_API_WRITE_METHODS = frozenset({"POST", "PATCH", "PUT"})
 
 # The comment and review endpoint families a public body actually goes out on.
@@ -147,6 +153,7 @@ def parse_gh_api(argv: list[str]) -> GhApiCall | None:
     body_flag: str | None = None
     body_raw: str | None = None
     has_input = False
+    has_field = False
     seen_api = False
     i = 1
     while i < len(argv):
@@ -169,6 +176,7 @@ def parse_gh_api(argv: list[str]) -> GhApiCall | None:
         elif tok == "--input":
             has_input = True
         elif tok in GH_API_FIELD_FLAGS and value:
+            has_field = True
             key, _, raw = value.partition("=")
             if key == "body":
                 body_flag, body_raw = tok, raw
@@ -176,7 +184,8 @@ def parse_gh_api(argv: list[str]) -> GhApiCall | None:
 
     if not seen_api:
         return None
-    return GhApiCall(method or "GET", path, body_flag, body_raw, has_input)
+    implied = "POST" if has_field or has_input else "GET"
+    return GhApiCall(method or implied, path, body_flag, body_raw, has_input)
 
 
 def is_gh_api_external_write(argv: list[str]) -> bool:
