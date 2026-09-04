@@ -13,8 +13,10 @@ Public API:
   GIT_GLOBAL_FLAGS_WITH_ARG, GIT_GLOBAL_BARE_FLAGS, GIT_COMMIT_NO_VALUE_SHORT,
   MESSAGE_FLAGS, FILE_FLAGS  — constant sets
   title_from_file(path, base_dir=None)        -> str | None
+  text_from_file(path, base_dir=None)         -> str | None
   strip_git_global_flags(argv)                -> tuple[list[str], str | None]
   extract_git_titles(argv, command=None)      -> list[str]
+  extract_git_message_texts(argv, command=None) -> list[str]
 
 The two gates differ only in WHAT they do with the extracted titles (length
 check vs format check); the extraction itself is identical and lives here.
@@ -84,13 +86,25 @@ def title_from_file(path: str, base_dir: str | None = None) -> str | None:
     (the `-C <dir>` global flag value). When absent, paths are opened
     relative to the hook's own cwd.
     """
+    text = text_from_file(path, base_dir=base_dir)
+    if text is None:
+        return None
+    return text.split("\n")[0]
+
+
+def text_from_file(path: str, base_dir: str | None = None) -> str | None:
+    """Whole contents of a `-F <path>` message file; None on any error.
+
+    Same resolution rules as `title_from_file`, which reads its first line off
+    this. The gate that grades the message body needs the rest of it.
+    """
     if path == "-":
         return None  # stdin — acknowledged limitation, silent pass
     if base_dir and not os.path.isabs(path):
         path = os.path.join(base_dir, path)
     try:
         with open(path, encoding="utf-8") as fh:
-            return fh.readline().rstrip("\n")
+            return fh.read()
     except OSError:
         return None  # unreadable — silent pass
 
@@ -279,12 +293,20 @@ def title_is_unresolved_substitution(title: str, command: str | None = None) -> 
     return False
 
 
-def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]:
-    """Extract commit title candidates from a git-commit argv.
+def _scan_commit_message_values(
+    argv: list[str],
+) -> tuple[list[tuple[str, str]], str | None] | None:
+    """Ordered message sources in a `git commit` argv, or None if not one.
 
-    Only the FIRST -m / --message flag contributes the title; subsequent -m
-    flags are body paragraphs and are ignored (git treats them that way).
-    -F / --file reads the file and takes the first line.
+    Returns `([(kind, value), …], c_dir)` where `kind` is `"message"` (the
+    value is the raw message text) or `"file"` (the value is a path). Order is
+    argv order, so a caller can apply git's "first -m is the title" rule
+    without re-walking the argv.
+
+    The walk is the single source of truth for git-commit message extraction —
+    `extract_git_titles` and `extract_git_message_texts` differ only in what
+    they do with the values, which is what keeps the two from drifting the way
+    the pre-#594 copies did.
 
     Handles:
       git commit -m "title"
@@ -297,35 +319,18 @@ def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]
       git commit --amend -m "title"
       git -C /path commit -m "title"   (git global flags stripped)
       git -c key=val commit -m "title" (git global flags stripped)
-
-    `command` is the raw shell command `argv` was tokenized from. It is optional
-    only so existing argv-only callers keep working; passing it is what lets a
-    single-quoted literal title be graded instead of mistaken for a substitution
-    (see `title_is_unresolved_substitution`).
     """
     argv = strip_prefix(argv)
     if not argv or argv[0] != "git":
-        return []
+        return None
 
     # Strip git global flags to find the actual subcommand.
     sub_argv, c_dir = strip_git_global_flags(argv)
     if not sub_argv or sub_argv[0] != "commit":
-        return []
+        return None
 
-    titles: list[str] = []
+    values: list[tuple[str, str]] = []
 
-    def add_title(raw: str) -> None:
-        """Record the first line of a message value as a title candidate.
-
-        A value we cannot statically resolve contributes no candidate, but the
-        caller still marks `message_seen` — git took it as the message, we just
-        cannot read it, so later -m flags remain body paragraphs.
-        """
-        first = raw.split("\n")[0]
-        if not title_is_unresolved_substitution(first, command):
-            titles.append(first)
-
-    message_seen = False
     i = 1  # sub_argv[0] is "commit"; start scanning from index 1
     while i < len(sub_argv):
         tok = sub_argv[i]
@@ -337,15 +342,12 @@ def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]
         # the `=` and mis-parse the title (#1097).
         if "=" in tok and tok.startswith("--"):
             key, _, val = tok.partition("=")
-            if key in MESSAGE_FLAGS and not message_seen:
-                add_title(val)
-                message_seen = True
+            if key in MESSAGE_FLAGS:
+                values.append(("message", val))
                 i += 1
                 continue
             if key in FILE_FLAGS:
-                t = title_from_file(val, base_dir=c_dir)
-                if t is not None:
-                    titles.append(t)
+                values.append(("file", val))
                 i += 1
                 continue
 
@@ -356,10 +358,8 @@ def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]
             tok.startswith("-m")
             and not tok.startswith("--")
             and len(tok) > 2
-            and not message_seen
         ):
-            add_title(tok[2:])
-            message_seen = True
+            values.append(("message", tok[2:]))
             i += 1
             continue
 
@@ -376,19 +376,16 @@ def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]
             and len(tok) > 2
             and tok[-1] == "m"
             and all(c in GIT_COMMIT_NO_VALUE_SHORT for c in tok[1:-1])
-            and not message_seen
         ):
             if i + 1 < len(sub_argv):
-                add_title(sub_argv[i + 1])
-                message_seen = True
+                values.append(("message", sub_argv[i + 1]))
                 i += 2
                 continue
 
         # Standard separate-token flags.
-        if tok in MESSAGE_FLAGS and not message_seen:
+        if tok in MESSAGE_FLAGS:
             if i + 1 < len(sub_argv):
-                add_title(sub_argv[i + 1])
-                message_seen = True
+                values.append(("message", sub_argv[i + 1]))
                 i += 2
                 continue
             i += 1
@@ -396,9 +393,7 @@ def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]
 
         if tok in FILE_FLAGS:
             if i + 1 < len(sub_argv):
-                t = title_from_file(sub_argv[i + 1], base_dir=c_dir)
-                if t is not None:
-                    titles.append(t)
+                values.append(("file", sub_argv[i + 1]))
                 i += 2
                 continue
             i += 1
@@ -406,4 +401,81 @@ def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]
 
         i += 1
 
+    return values, c_dir
+
+
+def extract_git_titles(argv: list[str], command: str | None = None) -> list[str]:
+    """Extract commit title candidates from a git-commit argv.
+
+    Only the FIRST -m / --message flag contributes the title; subsequent -m
+    flags are body paragraphs and are ignored (git treats them that way).
+    -F / --file reads the file and takes the first line.
+
+    A message value we cannot statically resolve contributes no candidate, but
+    it still consumes the "first -m" slot — git took it as the message, we just
+    cannot read it, so later -m flags remain body paragraphs.
+
+    `command` is the raw shell command `argv` was tokenized from. It is optional
+    only so existing argv-only callers keep working; passing it is what lets a
+    single-quoted literal title be graded instead of mistaken for a substitution
+    (see `title_is_unresolved_substitution`).
+    """
+    scanned = _scan_commit_message_values(argv)
+    if scanned is None:
+        return []
+    values, c_dir = scanned
+
+    titles: list[str] = []
+    message_seen = False
+    for kind, raw in values:
+        if kind == "message":
+            if message_seen:
+                continue
+            message_seen = True
+            first = raw.split("\n")[0]
+            if not title_is_unresolved_substitution(first, command):
+                titles.append(first)
+            continue
+        t = title_from_file(raw, base_dir=c_dir)
+        if t is not None:
+            titles.append(t)
     return titles
+
+
+def extract_git_message_texts(
+    argv: list[str], command: str | None = None
+) -> list[str]:
+    """Full commit message text for every statically resolvable source.
+
+    Where `extract_git_titles` keeps only the first line of the first `-m`,
+    this keeps everything: git joins successive `-m` paragraphs with a blank
+    line, so they are joined that way here and returned as one text, and each
+    `-F` file contributes its whole contents as another.
+
+    A gate that reads the *body* needs this because the body is where a shape
+    invisible to a title check can live — see
+    `hooks/preflight-gate/commit-message-paren-check/spec.md`.
+
+    An unresolvable substitution (`-m "$(cat …)"`) contributes nothing, exactly
+    as it contributes no title; the caller recovers that case from the raw
+    command's heredoc bodies instead.
+    """
+    scanned = _scan_commit_message_values(argv)
+    if scanned is None:
+        return []
+    values, c_dir = scanned
+
+    texts: list[str] = []
+    paragraphs: list[str] = []
+    for kind, raw in values:
+        if kind == "message":
+            if title_is_unresolved_substitution(raw.split("\n")[0], command):
+                continue
+            paragraphs.append(raw)
+            continue
+        body = text_from_file(raw, base_dir=c_dir)
+        if body is not None:
+            texts.append(body)
+    if paragraphs:
+        texts.insert(0, "\n\n".join(paragraphs))
+    return texts

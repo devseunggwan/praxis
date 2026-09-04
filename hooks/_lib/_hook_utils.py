@@ -258,6 +258,46 @@ def strip_heredoc_bodies(command: str) -> str:
     return "\n".join(out)
 
 
+def heredoc_bodies(command: str) -> list[str]:
+    """Every heredoc body in `command`, in source order, terminator excluded.
+
+    The counterpart of `strip_heredoc_bodies`: that one blanks a body because
+    it is data rather than script, and this one returns it for exactly the
+    same reason. `git commit -m "$(cat <<'EOF' … EOF)"` puts the commit
+    message in a heredoc, so tokenizing the command yields `$(cat <<'EOF'` and
+    the message itself is reachable only from the raw string — a gate that
+    grades the message body has nowhere else to read it from.
+
+    The scan mirrors the stripper line for line, including the quote state
+    carried across physical lines (issue #1091), so the two cannot disagree on
+    where a body begins or ends. An unterminated heredoc yields the body it
+    opened, matching the stripper's decision to treat the rest of the command
+    as that body.
+    """
+    if "<<" not in command:
+        return []
+    bodies: list[str] = []
+    pending: list[tuple[str, bool]] = []
+    current: list[str] = []
+    quote = ""
+    for line in command.split("\n"):
+        if pending:
+            delim, dash = pending[0]
+            probe = line.lstrip("\t") if dash else line
+            if probe == delim:
+                del pending[0]
+                bodies.append("\n".join(current))
+                current = []
+            else:
+                current.append(line)
+            continue
+        openers, quote = _heredoc_starts_on_line(line, quote)
+        pending.extend(openers)
+    if pending:
+        bodies.append("\n".join(current))
+    return bodies
+
+
 HELP_FLAGS = frozenset({"-h", "--help"})
 
 # `gh pr merge` flags that consume a following value token. Shared so that a

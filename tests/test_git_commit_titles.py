@@ -349,3 +349,61 @@ def test_mirror_case_residual_is_unaffected_by_the_region_exclusion():
     not add."""
     command = """git commit -m '$(x)' && echo "$(x)\""""
     assert _titles_from_all_segments(command) == []
+
+
+# ---------------------------------------------------------------------------
+# extract_git_message_texts — the whole message, not just the title (#1228)
+# ---------------------------------------------------------------------------
+
+extract_git_message_texts = gct.extract_git_message_texts
+
+
+@pytest.mark.parametrize(
+    "argv,expected",
+    [
+        # Successive -m paragraphs join the way git joins them.
+        (["git", "commit", "-m", "fix: x", "-m", "body one", "-m", "body two"],
+         ["fix: x\n\nbody one\n\nbody two"]),
+        # A multi-line -m value keeps every line.
+        (["git", "commit", "-m", "fix: x\n\ndetail"], ["fix: x\n\ndetail"]),
+        # Attached and combined short forms contribute too.
+        (["git", "commit", "-mfix: x", "-m", "body"], ["fix: x\n\nbody"]),
+        (["git", "commit", "-am", "fix: x"], ["fix: x"]),
+        (["git", "commit", "--message=fix: x"], ["fix: x"]),
+        # Not a commit.
+        (["git", "log", "-1"], []),
+        (["echo", "-m", "x"], []),
+        # No message flag at all.
+        (["git", "commit", "--amend", "--no-edit"], []),
+    ],
+)
+def test_message_texts_contract(argv, expected):
+    assert extract_git_message_texts(argv) == expected
+
+
+def test_message_texts_reads_the_whole_file(tmp_path):
+    path = tmp_path / "msg.txt"
+    path.write_text("fix: x\n\nline two\nline three\n", encoding="utf-8")
+    argv = ["git", "commit", "-F", str(path)]
+    assert extract_git_message_texts(argv) == ["fix: x\n\nline two\nline three\n"]
+    # The title gate still sees only the first line of the same file.
+    assert extract_git_titles(argv) == ["fix: x"]
+
+
+def test_message_texts_drop_unresolvable_substitutions():
+    command = 'git commit -m "$(cat <<\'EOF\'\nfix: x\nEOF\n)"'
+    argv = ["git", "commit", "-m", "$(cat <<'EOF'"]
+    assert extract_git_message_texts(argv, command) == []
+
+
+def test_message_texts_keep_a_single_quoted_literal():
+    command = "git commit -m '$(x) and more'"
+    argv = ["git", "commit", "-m", "$(x) and more"]
+    assert extract_git_message_texts(argv, command) == ["$(x) and more"]
+
+
+def test_titles_and_texts_walk_the_same_argv():
+    """The first -m is the title; every -m is body. One walk, two readings."""
+    argv = ["git", "commit", "-m", "fix: x", "-m", "second"]
+    assert extract_git_titles(argv) == ["fix: x"]
+    assert extract_git_message_texts(argv) == ["fix: x\n\nsecond"]
