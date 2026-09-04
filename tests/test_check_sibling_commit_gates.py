@@ -17,8 +17,8 @@ These tests cover:
 
 Three further groups cover the PR #1142 review findings:
 
-  - **host scoping.** Four of the seven gated hooks carry `hosts: ["claude"]`,
-    so the sibling set the runtime actually installs is 7 on `claude` and 3 on
+  - **host scoping.** Four of the eight gated hooks carry `hosts: ["claude"]`,
+    so the sibling set the runtime actually installs is 8 on `claude` and 4 on
     `codex` / `cursor`. A host-blind derivation pinned `claude`'s
     number on every platform. The per-row `Hosts` cell and the per-host table
     are both checked, in both directions, against every platform that emits a
@@ -63,6 +63,7 @@ EXPECTED = [
     "block-commit-without-codex-review",
     "block-rename-sweep-survivors",
     "commit-decomposition-advisory",
+    "commit-message-paren-check",
     "commit-title-format-check",
     "commit-title-length-check",
     "pre-commit-staged-file-enumeration",
@@ -74,7 +75,7 @@ _SURFACE_FILES = (gates.MANIFEST, gates.SPEC, gates.IMPL, gates.TEST, gates.CHEC
 # Hosts that install hooks today, and the sibling count each one actually gets
 # once `hosts` whitelists are applied. Spelled out for the same reason EXPECTED
 # is: a whitelist edit has to come through this file too.
-EXPECTED_PER_HOST = {"claude": 7, "codex": 3, "cursor": 3}
+EXPECTED_PER_HOST = {"claude": 8, "codex": 4, "cursor": 4}
 
 # A host with no `hooks` output in `manifests/platforms/` — every shipped
 # platform installs hooks today, so this is a synthetic name.
@@ -208,14 +209,14 @@ def test_retired_hook_left_on_the_surfaces_is_drift(tmp_path):
         for d in drifts
     ), drifts
     # …and every count word now disagrees, on all three surfaces.
-    assert sum("prose says 7 siblings, manifest derives 6" in d for d in drifts) >= 3
+    assert sum("prose says 8 siblings, manifest derives 7" in d for d in drifts) >= 3
 
 
 def test_stale_count_word_alone_is_drift(tmp_path):
     """The exact #1123 failure mode: names edited, a count word left behind."""
-    repo = _tree(tmp_path, {gates.SPEC: ("Seven sibling", "Six sibling")})
+    repo = _tree(tmp_path, {gates.SPEC: ("Eight sibling", "Six sibling")})
     drifts = gates.check(repo)
-    assert any("prose says 6 siblings, manifest derives 7" in d for d in drifts), drifts
+    assert any("prose says 6 siblings, manifest derives 8" in d for d in drifts), drifts
 
 
 def test_count_word_in_the_shell_test_comment_is_checked(tmp_path):
@@ -225,13 +226,13 @@ def test_count_word_in_the_shell_test_comment_is_checked(tmp_path):
         tmp_path,
         {
             gates.TEST: (
-                "at ASK: the seven\n# sibling gates",
+                "at ASK: the eight\n# sibling gates",
                 "at ASK: the five\n# sibling gates",
             )
         },
     )
     drifts = gates.check(repo)
-    assert any("prose says 5 siblings, manifest derives 7" in d for d in drifts), drifts
+    assert any("prose says 5 siblings, manifest derives 8" in d for d in drifts), drifts
 
 
 def test_unreadable_table_is_drift_not_a_silent_pass(tmp_path):
@@ -245,7 +246,7 @@ def test_missing_count_claim_is_drift_not_a_silent_pass(tmp_path):
         tmp_path,
         {
             gates.TEST: (
-                "# by seven sibling commit hooks); git-push stays ASK",
+                "# by eight sibling commit hooks); git-push stays ASK",
                 "# by the commit gates); git-push stays ASK",
             )
         },
@@ -254,9 +255,9 @@ def test_missing_count_claim_is_drift_not_a_silent_pass(tmp_path):
     # once both are gone, so the second is removed here too.
     path = repo / gates.TEST
     text = path.read_text(encoding="utf-8")
-    assert "at ASK: the seven\n# sibling gates" in text
+    assert "at ASK: the eight\n# sibling gates" in text
     path.write_text(
-        text.replace("at ASK: the seven\n# sibling gates", "at ASK: the\n# gates"),
+        text.replace("at ASK: the eight\n# sibling gates", "at ASK: the\n# gates"),
         encoding="utf-8",
     )
     drifts = gates.check(repo)
@@ -305,7 +306,7 @@ def test_malformed_manifest_is_drift(tmp_path):
 def test_main_exit_codes(monkeypatch, tmp_path):
     assert gates.main() == 0
     monkeypatch.setattr(
-        gates, "REPO", _tree(tmp_path, {gates.SPEC: ("Seven sibling", "Six sibling")})
+        gates, "REPO", _tree(tmp_path, {gates.SPEC: ("Eight sibling", "Six sibling")})
     )
     assert gates.main() == 1
 
@@ -340,17 +341,17 @@ def test_derivation_is_host_scoped():
 
 def test_host_table_stale_count_is_drift(tmp_path):
     """A host row that still claims claude's coverage — the shipped defect."""
-    repo = _tree(tmp_path, {gates.SPEC: ("| `codex` | 3 | 2 |", "| `codex` | 7 | 4 |")})
+    repo = _tree(tmp_path, {gates.SPEC: ("| `codex` | 4 | 2 |", "| `codex` | 8 | 4 |")})
     drifts = gates.check(repo)
     assert any(
-        "'codex' row says 7 sibling commit gates, manifest derives 3" in d
+        "'codex' row says 8 sibling commit gates, manifest derives 4" in d
         for d in drifts
     ), drifts
 
 
 def test_host_table_stale_checklist_count_is_drift(tmp_path):
     repo = _tree(
-        tmp_path, {gates.SPEC: ("| `cursor` | 3 | 2 |", "| `cursor` | 3 | 4 |")}
+        tmp_path, {gates.SPEC: ("| `cursor` | 4 | 2 |", "| `cursor` | 4 | 4 |")}
     )
     drifts = gates.check(repo)
     assert any(
@@ -359,7 +360,7 @@ def test_host_table_stale_checklist_count_is_drift(tmp_path):
 
 
 def test_missing_host_row_is_drift(tmp_path):
-    repo = _tree(tmp_path, {gates.SPEC: ("| `cursor` | 3 | 2 |\n", "")})
+    repo = _tree(tmp_path, {gates.SPEC: ("| `cursor` | 4 | 2 |\n", "")})
     drifts = gates.check(repo)
     assert any("'cursor' installs hooks but has no row" in d for d in drifts), drifts
 
@@ -370,8 +371,8 @@ def test_host_row_for_a_platform_without_hooks_is_drift(tmp_path):
         tmp_path,
         {
             gates.SPEC: (
-                "| `cursor` | 3 | 2 |\n",
-                f"| `cursor` | 3 | 2 |\n| `{NON_HOOK_PLATFORM}` | 3 | 2 |\n",
+                "| `cursor` | 4 | 2 |\n",
+                f"| `cursor` | 4 | 2 |\n| `{NON_HOOK_PLATFORM}` | 4 | 2 |\n",
             )
         },
     )
@@ -430,7 +431,7 @@ def test_narrowing_a_hosts_whitelist_fails_both_host_surfaces(tmp_path):
         for d in drifts
     ), drifts
     assert any(
-        "'codex' row says 3 sibling commit gates, manifest derives 2" in d
+        "'codex' row says 4 sibling commit gates, manifest derives 3" in d
         for d in drifts
     ), drifts
 
@@ -530,7 +531,7 @@ def test_checklist_membership_is_derived_from_the_hook_that_prints_it():
 
 
 def test_stale_checklist_count_word_is_drift(tmp_path):
-    repo = _tree(tmp_path, {gates.SPEC: ("Four of the seven", "Eleven of the seven")})
+    repo = _tree(tmp_path, {gates.SPEC: ("Four of the eight", "Eleven of the eight")})
     drifts = gates.check(repo)
     assert any(
         "prose says 11 of the siblings are in the deny checklist" in d for d in drifts
@@ -595,7 +596,7 @@ def test_missing_checklist_claim_is_drift_not_a_silent_pass(tmp_path):
         tmp_path,
         {
             gates.SPEC: (
-                "Four of the seven siblings are the checklist",
+                "Four of the eight siblings are the checklist",
                 "Some of the siblings appear in the checklist",
             )
         },
@@ -670,7 +671,7 @@ def test_a_rewritten_manifest_is_re_read_not_served_stale(tmp_path):
     fixtures would silently stop testing anything.
     """
     tree = _tree(tmp_path)
-    assert len(gates.derive(tree, "claude")[0]) == 7
+    assert len(gates.derive(tree, "claude")[0]) == 8
 
     manifest_path = tree / gates.MANIFEST
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -680,5 +681,5 @@ def test_a_rewritten_manifest_is_re_read_not_served_stale(tmp_path):
     manifest_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     names, _ = gates.derive(tree, "claude")
-    assert len(names) == 6, "the rewrite was served from a stale parse"
+    assert len(names) == 7, "the rewrite was served from a stale parse"
     assert "commit-title-length-check" not in names
