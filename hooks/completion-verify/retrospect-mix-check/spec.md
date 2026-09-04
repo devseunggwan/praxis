@@ -445,6 +445,30 @@ third-party rows cannot starve a genuine own-org row of the budget it needs.
 either; the hook never reads that value for such a row, so the outcome is
 unchanged.
 
+**The own-org half does not depend on `python3`.** The resolver owns the
+visibility half, but the allowlist has a purely local answer whenever
+`PRAXIS_OWN_ORGS` is set, so the hook reads that variable itself — splitting on
+comma, trimming, dropping empties and lowercasing, exactly as
+`gate4_visibility.resolve_own_orgs()`'s env leg does. Without this the whole
+resolver sat behind `command -v python3`, and an interpreter-less environment
+demoted a row whose owner the allowlist already **refutes** — a knowably
+external repo passing the Stop, which is the hole Gate-4b exists to close. The
+same shell leg covers the adjacent failures: the helper exiting non-zero, or
+printing nothing.
+
+Only the env leg is local. `gh api user` genuinely needs a subprocess, so an
+allowlist that exists nowhere on the machine still resolves `UNRESOLVED` and
+still demotes — the offline tradeoff above is deliberate and unchanged. The
+demotion message names the input that was actually missing (`python3
+unavailable` when the interpreter is gone, `gh unavailable` when it is present
+and the lookup failed) rather than always blaming the env var.
+
+`backing_repo` values reaching Gate-4b are always `<owner>/<repo>`: Gate-3's
+parse admits nothing else, so a bare handle is rejected one gate earlier and
+never enters the Gate-4b array. That is why the hook's owner comparison carries
+no `not slash` guard while the resolver, which reads an unfiltered stdin list,
+does.
+
 **Blocks** when a row resolves `escalate` and its Rationale carries no literal
 `⚠ EXTERNAL: per-action approval required at Stage 4` marker (Stage 4 Step 0a
 trigger 1 is disarmed for that row), when the card declares
@@ -485,7 +509,10 @@ the manifest's 10s budget breaks), and adopts the
 it nothing is spawned, because 12 more hooks queue behind this one in the Stop
 group. Every failure cause — `gh` missing, unauthenticated, 404, rate-limited,
 offline, timed out, over the cap, below the floor, `python3` unavailable —
-collapses to the single value `UNRESOLVED`, which demotes.
+collapses to the single value `UNRESOLVED`, which demotes. That covers the
+**visibility** half only: the own-org half is resolved in the hook from
+`PRAXIS_OWN_ORGS` when it is set, so a refuted owner still escalates with the
+resolver entirely out of reach.
 
 Measured on this repo (5 runs each, `gate4_visibility.py` on the real API):
 the full gate-parsing path costs 1.41s with no lookup and 2.45s with one on a
@@ -536,8 +563,11 @@ The hook exits 0 (passes) when any of:
   the gate stays silent
 - (Gate-4b only) `python3` or `gh` is unavailable, or the lookup otherwise
   returns no answer — rows that needed it are demoted rather than blocked. Rows
-  that needed no lookup (declared public/undeclared, or a third-party owner)
-  still escalate: that path never touches the network
+  that needed no lookup still escalate: that path never touches the network.
+  A third-party owner is one of them **only while the allowlist is readable** —
+  with `PRAXIS_OWN_ORGS` set the hook classifies the owner itself, so a missing
+  `python3` no longer excuses a knowably external repo; with no allowlist
+  reachable at all, ownness is unknown rather than refuted and the row demotes
 
 ### Block log
 
@@ -614,6 +644,19 @@ plus 11 synthetic regression fixtures:
   → block; T36c undeclared visibility + PASS → block; T36d offline lookup →
   demote; T36e allowlist unresolved → demote; T36f `NA` over a routed row that
   resolves exempt → block (negative polarity is T38)
+- 12 own-org classification without the resolver: the shadow's own premise
+  (`T36_nopy_shadow_hides_python3` plus its `jq`-still-resolvable positive
+  control — an unreachable binary and a PATH that was never applied look
+  identical); T36g external owner + `python3` absent → block; T36h own-org
+  owner, same absence → still demote (the visibility half is what is missing);
+  T36i and T36i2 no allowlist at all, set-empty and unset → demote survives;
+  T36i3 the demotion names `python3 unavailable`, with T36i3b as the control
+  naming `gh unavailable` in the opposite condition; T36j helper exits
+  non-zero → block; T36k helper prints nothing → block; T36l the allowlist
+  parse — several handles, stray spaces, an empty field, a case mismatch —
+  still matches the owner → demote; T36m/T36m2 a bare handle is rejected by
+  Gate-3 and never reaches Gate-4b. `python3` is shadowed by a `PATH` holding
+  every other binary the hook uses, so nothing on the machine is touched
 - 9 Gate-4b resolver, asserted against `gate4_visibility.py` directly (issue
   #1244): G4H1/G4H1b below the budget floor nothing is spawned, G4H2/G4H2b the
   same call with budget does spawn it (positive control), G4H3 the 9th repo is

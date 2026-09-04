@@ -540,14 +540,41 @@ if [ "${#GATE4_ROWS[@]}" -gt 0 ]; then
 
   G4_OWN_ORGS="UNRESOLVED"
   G4_VIS_MAP=""
-  if [ -n "$g4_lookup_repos" ] && command -v python3 >/dev/null 2>&1; then
-    g4_out=$(printf '%s' "$g4_lookup_repos" | python3 \
-      "$(dirname "$0")/gate4_visibility.py" \
-      --deadline-epoch "$((HOOK_START_EPOCH + GATE4_BUDGET_SEC))" \
-      --max-lookups "$GATE4_MAX_LOOKUPS" 2>/dev/null) || g4_out=""
-    G4_OWN_ORGS=$(printf '%s\n' "$g4_out" | awk -F'\t' '$1=="own_orgs"{print $2}' | head -1)
-    [ -z "$G4_OWN_ORGS" ] && G4_OWN_ORGS="UNRESOLVED"
-    G4_VIS_MAP=$(printf '%s\n' "$g4_out" | awk -F'\t' '$1=="vis"{print $2"\t"$3}')
+  # Which input was actually missing. The demotion message names this, so it
+  # cannot blame an env var that is in fact set.
+  G4_OWN_ORGS_GAP="no PRAXIS_OWN_ORGS, gh unavailable"
+  if [ -n "$g4_lookup_repos" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+      g4_out=$(printf '%s' "$g4_lookup_repos" | python3 \
+        "$(dirname "$0")/gate4_visibility.py" \
+        --deadline-epoch "$((HOOK_START_EPOCH + GATE4_BUDGET_SEC))" \
+        --max-lookups "$GATE4_MAX_LOOKUPS" 2>/dev/null) || g4_out=""
+      G4_OWN_ORGS=$(printf '%s\n' "$g4_out" | awk -F'\t' '$1=="own_orgs"{print $2}' | head -1)
+      [ -z "$G4_OWN_ORGS" ] && G4_OWN_ORGS="UNRESOLVED"
+      G4_VIS_MAP=$(printf '%s\n' "$g4_out" | awk -F'\t' '$1=="vis"{print $2"\t"$3}')
+    else
+      G4_OWN_ORGS_GAP="no PRAXIS_OWN_ORGS, python3 unavailable"
+    fi
+    # The visibility half needs the helper, but the own-org half has a purely
+    # local answer whenever PRAXIS_OWN_ORGS is set. Without this leg, python3
+    # being absent — or the helper failing, or printing nothing — demotes an
+    # owner the allowlist already refutes, and a knowably-external repo passes
+    # the Stop. Mirrors gate4_visibility.resolve_own_orgs()'s env leg exactly:
+    # split on comma, trim, drop empties, lowercase. Only the env leg — the
+    # `gh api user` leg genuinely needs a subprocess, so an allowlist that
+    # exists nowhere locally still demotes, which is the deliberate offline
+    # tradeoff documented above.
+    if [ "$G4_OWN_ORGS" = "UNRESOLVED" ]; then
+      g4_env_orgs=$(printf '%s' "${PRAXIS_OWN_ORGS:-}" | awk '{
+        n = split($0, a, ",")
+        for (i = 1; i <= n; i++) {
+          gsub(/^[ \t]+|[ \t]+$/, "", a[i])
+          if (a[i] != "") out = (out == "" ? a[i] : out "," a[i])
+        }
+        print tolower(out)
+      }')
+      [ -n "$g4_env_orgs" ] && G4_OWN_ORGS="$g4_env_orgs"
+    fi
   fi
 
   for g4_rec in "${GATE4_ROWS[@]}"; do
@@ -557,12 +584,17 @@ if [ "${#GATE4_ROWS[@]}" -gt 0 ]; then
     case "$g4_decl" in
       private|internal)
         g4_key=$(printf '%s' "$g4_repo" | tr '[:upper:]' '[:lower:]')
+        # Always `owner/repo`: the Gate-3 parse above only admits a value
+        # matching `<owner>/<repo>`, so a bare handle never reaches GATE4_ROWS —
+        # it is rejected one gate earlier (T36m asserts that boundary). The
+        # resolver keeps its own `not slash` guard because it reads a stdin list
+        # rather than this already-filtered array.
         g4_owner="${g4_key%%/*}"
         if [ "$G4_OWN_ORGS" = "UNRESOLVED" ]; then
           # Ownness itself unknown: conservative here would mean escalate, but
           # escalate blocks, and this is the offline case. Demote instead.
           g4_verdict="unresolved"
-          g4_why="own-org allowlist unresolved (no PRAXIS_OWN_ORGS, gh unavailable)"
+          g4_why="own-org allowlist unresolved (${G4_OWN_ORGS_GAP})"
         elif ! printf ',%s,' "$G4_OWN_ORGS" | grep -qF ",${g4_owner},"; then
           g4_why="owner '${g4_owner}' is outside the own-org allowlist, so the declaration cannot exempt it"
         else

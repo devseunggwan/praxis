@@ -928,6 +928,175 @@ run_case "T36e_demote_own_org_allowlist_unresolved" "demote" \
   "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36D_ROW")")"
 RUN_CASE_ENV=()
 
+# Own-org classification without python3 (issue #1244 follow-up) --------------
+#
+# The visibility half needs the helper; the own-org half does not, whenever
+# PRAXIS_OWN_ORGS is set. Before the shell learned to read it, python3 being
+# absent demoted a row whose owner the allowlist already refutes — a knowably
+# external repo passing the Stop, which is the exact hole Gate-4b closes.
+#
+# NOPY_BIN is a PATH holding every binary the hook uses EXCEPT python3, so
+# `command -v python3` genuinely fails inside the hook without touching the
+# system. FAILPY_BIN is the adjacent surface: python3 present but the helper
+# unusable (non-zero exit, or empty stdout), which lands on the same branch.
+NOPY_BIN="$TMPDIR/nopy_bin"; mkdir -p "$NOPY_BIN"
+for _b in jq awk grep sed tr head tail wc dirname date rm find cat xargs sort uniq basename mktemp; do
+  _p=$(command -v "$_b") && ln -sf "$_p" "$NOPY_BIN/$_b"
+done
+unset _b _p
+FAILPY_BIN="$TMPDIR/failpy_bin"; mkdir -p "$FAILPY_BIN"
+cat > "$FAILPY_BIN/python3" <<'FAILPY'
+#!/bin/sh
+exit 1
+FAILPY
+chmod +x "$FAILPY_BIN/python3"
+EMPTYPY_BIN="$TMPDIR/emptypy_bin"; mkdir -p "$EMPTYPY_BIN"
+cat > "$EMPTYPY_BIN/python3" <<'EMPTYPY'
+#!/bin/sh
+exit 0
+EMPTYPY
+chmod +x "$EMPTYPY_BIN/python3"
+
+# The shadow itself is the premise of every case below: if python3 stayed
+# reachable, they would all pass through the helper and prove nothing about the
+# shell leg. Asserted directly, with the positive control beside it — an
+# unreachable binary and a PATH that was never applied look identical.
+# The lookup runs in a subshell rather than under `env`: `command` is a shell
+# builtin, so `env PATH=... command -v` execs nothing and fails for a reason
+# that has nothing to do with the shim, which reads as a pass on the negative
+# line and a failure on the control.
+if (PATH="$NOPY_BIN"; command -v python3 >/dev/null 2>&1); then
+  echo "FAIL  [T36_nopy_shadow_hides_python3] python3 still resolvable under the shim PATH"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("T36_nopy_shadow_hides_python3")
+else
+  echo "PASS  [T36_nopy_shadow_hides_python3]"; PASS=$((PASS + 1))
+fi
+if (PATH="$NOPY_BIN"; command -v jq >/dev/null 2>&1); then
+  echo "PASS  [T36_nopy_shadow_control_jq_still_resolvable]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [T36_nopy_shadow_control_jq_still_resolvable] the shim PATH resolves nothing at all"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("T36_nopy_shadow_control_jq_still_resolvable")
+fi
+
+# T36g: block — python3 absent, allowlist set, owner outside it. The allowlist
+# refutes ownness locally, so no subprocess is owed and the row escalates.
+T36G_ROW="| 1 | tool | cli | gh flag missing | tool defect | gap | No | upstream_feedback | tool defect confirmed<br>backing_repo: someone-else/their-repo<br>repo_visibility: private | HIGH |"
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture "PATH=$NOPY_BIN")
+run_case "T36g_block_external_owner_without_python3" "block" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36G_ROW")")"
+RUN_CASE_ENV=()
+
+# T36h: demote — the other polarity of T36g. Same missing python3, but the owner
+# IS in the allowlist, so only the visibility half is unresolvable. That half
+# still owes a demotion, not an escalation: the fix must not turn every
+# own-org row into a block just because the helper is gone.
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture "PATH=$NOPY_BIN")
+run_case "T36h_demote_own_org_owner_without_python3" "demote" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36D_ROW")")"
+RUN_CASE_ENV=()
+
+# T36i: demote — no allowlist available at all (PRAXIS_OWN_ORGS empty AND no
+# python3 to reach `gh api user`). Ownness is unknown rather than refuted, so
+# the deliberate offline demotion survives the fix.
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS= "PATH=$NOPY_BIN")
+run_case "T36i_demote_no_allowlist_at_all_without_python3" "demote" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36G_ROW")")"
+RUN_CASE_ENV=()
+
+# T36i2: same, with PRAXIS_OWN_ORGS unset rather than set-but-empty. `env -u` is
+# not portable enough to rely on here, so the variable is simply never added to
+# the case env — run_case's `env` call adds only what the array holds, and the
+# suite's own environment does not export it.
+RUN_CASE_ENV=("PATH=$NOPY_BIN")
+run_case "T36i2_demote_allowlist_variable_unset_without_python3" "demote" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36G_ROW")")"
+RUN_CASE_ENV=()
+
+# T36i3: the demotion names the input that is actually missing. Before the fix
+# the message read "no PRAXIS_OWN_ORGS, gh unavailable" whether or not the
+# variable was set and whatever the real gap was — a true-sounding sentence
+# pointing at the wrong knob. Asserted on the message text, because a demote
+# verdict alone cannot see it.
+T36I3_TP="$TMPDIR/t36i3.jsonl"
+printf '%s\n' "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36G_ROW")")" > "$T36I3_TP"
+T36I3_OUT=$(jq -nc --arg path "$T36I3_TP" \
+  '{transcript_path:$path, stop_hook_active:false, session_id:"test-session"}' \
+  | env PRAXIS_OWN_ORGS= "PATH=$NOPY_BIN" "$HOOK" 2>/dev/null)
+if printf '%s' "$T36I3_OUT" | grep -qF 'no PRAXIS_OWN_ORGS, python3 unavailable'; then
+  echo "PASS  [T36i3_demotion_names_the_missing_input]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [T36i3_demotion_names_the_missing_input] expected the python3 gap, got: ${T36I3_OUT:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("T36i3_demotion_names_the_missing_input")
+fi
+# Positive control: the same probe with python3 reachable and gh unreachable
+# must name the OTHER gap. Without it, a message that always said "python3"
+# would pass the line above.
+T36I3_CTL=$(jq -nc --arg path "$T36I3_TP" \
+  '{transcript_path:$path, stop_hook_active:false, session_id:"test-session"}' \
+  | env PRAXIS_OWN_ORGS= GH_HOST=nonexistent.invalid "$HOOK" 2>/dev/null)
+if printf '%s' "$T36I3_CTL" | grep -qF 'no PRAXIS_OWN_ORGS, gh unavailable'; then
+  echo "PASS  [T36i3b_control_gh_gap_named_when_python3_present]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [T36i3b_control_gh_gap_named_when_python3_present] got: ${T36I3_CTL:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("T36i3b_control_gh_gap_named_when_python3_present")
+fi
+
+# T36j: block — python3 present but the helper exits non-zero. Same branch as a
+# missing interpreter, and the shell leg must classify the external owner there
+# too, not only when the binary is gone.
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture "PATH=$FAILPY_BIN:$PATH")
+run_case "T36j_block_external_owner_when_helper_exits_nonzero" "block" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36G_ROW")")"
+RUN_CASE_ENV=()
+
+# T36k: block — python3 present, exits 0, prints nothing. Distinct from T36j:
+# there the `||` fallback empties g4_out, here the helper "succeeded" and the
+# awk extraction is what comes back empty.
+RUN_CASE_ENV=(PRAXIS_OWN_ORGS=praxis-fixture "PATH=$EMPTYPY_BIN:$PATH")
+run_case "T36k_block_external_owner_when_helper_prints_nothing" "block" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36G_ROW")")"
+RUN_CASE_ENV=()
+
+# T36l: demote — the allowlist's own parse surface: several comma-separated
+# handles, stray spaces around them, a trailing empty field, and a case
+# mismatch against the row's owner. All four must still recognise the owner as
+# own-org (a demote), not drop it into the escalation branch. The row's repo is
+# `praxis-fixture/unreachable-fixture`; the allowlist spells it `Praxis-Fixture`.
+RUN_CASE_ENV=(
+  "PRAXIS_OWN_ORGS=  other-org , Praxis-Fixture ,,third-org  "
+  "PATH=$NOPY_BIN"
+)
+run_case "T36l_demote_owner_matched_across_spacing_and_case" "demote" \
+  "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36D_ROW")")"
+RUN_CASE_ENV=()
+
+# T36m: block — a backing_repo with no slash. `praxis-fixture` alone is a bare
+# handle that would match the identically named allowlist entry if it ever
+# reached the own-org comparison. It does not: Gate-3's parse admits only
+# `<owner>/<repo>`, so the row is rejected one gate earlier and never enters
+# GATE4_ROWS. That is why the Gate-4b comparison carries no `not slash` guard
+# while the resolver, which reads an unfiltered stdin list, does. Asserted on
+# the reason text — a bare `block` here would look identical whichever gate
+# fired, and the whole point is which one owns the shape.
+T36M_ROW="| 1 | tool | cli | gh flag missing | tool defect | gap | No | upstream_feedback | tool defect confirmed<br>backing_repo: praxis-fixture<br>repo_visibility: private | HIGH |"
+T36M_TP="$TMPDIR/t36m.jsonl"
+printf '%s\n' "$(mk_assistant "$(mk_retrospect_stage3 "$T36B_CARD" "$T36M_ROW")")" > "$T36M_TP"
+T36M_OUT=$(jq -nc --arg path "$T36M_TP" \
+  '{transcript_path:$path, stop_hook_active:false, session_id:"test-session"}' \
+  | env PRAXIS_OWN_ORGS=praxis-fixture "PATH=$NOPY_BIN" "$HOOK" 2>/dev/null)
+if printf '%s' "$T36M_OUT" | grep -qF 'missing backing_repo: <owner/repo>'; then
+  echo "PASS  [T36m_bare_handle_rejected_by_gate3_not_gate4b]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [T36m_bare_handle_rejected_by_gate3_not_gate4b] expected the Gate-3 rejection, got: ${T36M_OUT:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("T36m_bare_handle_rejected_by_gate3_not_gate4b")
+fi
+if printf '%s' "$T36M_OUT" | grep -qF 'Gate-4b'; then
+  echo "FAIL  [T36m2_bare_handle_never_reaches_gate4b] Gate-4b saw the row: $T36M_OUT"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("T36m2_bare_handle_never_reaches_gate4b")
+else
+  echo "PASS  [T36m2_bare_handle_never_reaches_gate4b]"; PASS=$((PASS + 1))
+fi
+
 # T36f: block — `gate_4_verdict: NA` over a routed row. NA is emitted only when
 # `routed` is empty (audit-distribution-gates.py), so one routed row refutes it.
 # The row here is T36's, which resolves EXEMPT — nothing escalates, so the
