@@ -406,10 +406,16 @@ _FACT_NEEDLES = {
 
 
 def _needles_for(facts: _SessionFacts) -> tuple[str, ...]:
+    """Quoted tool-name tokens for the facts this trigger still wants.
+
+    Sorted by fact so the tuple is deterministic; a line carrying none of
+    them cannot settle any wanted fact and is rejected before `json.loads`.
+    """
     return tuple(n for fact in sorted(facts._wanted) for n in _FACT_NEEDLES[fact])
 
 
 def _absorb(facts: _SessionFacts, path: str) -> None:
+    """Fold one transcript's tool_use blocks into `facts`, stopping once settled."""
     for event in iter_transcript(path, needle=_needles_for(facts)):
         message = event.get("message")
         if not isinstance(message, dict):
