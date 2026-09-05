@@ -478,7 +478,9 @@ def _transcript_invokes_skill(path: str, *, check_slash: bool) -> bool | None:
     `git commit` on a 36 MB session, inside the Bash dispatch group's shared
     deadline (#1167); the same scan with the prefilter is 41 ms at constant
     memory. The byte bound is enforced on the bytes actually read, not on a
-    stat() taken before the walk: a live session appends between the two.
+    stat() taken before the walk: a live session appends between the two —
+    and each read is capped at the budget left, so a single oversized line
+    is refused before it is allocated rather than after.
 
     `check_slash` scopes the `/praxis:codex-review-wrap` slash-command check
     to the root transcript only (subagent scans pass `check_slash=False`): a
@@ -494,7 +496,13 @@ def _transcript_invokes_skill(path: str, *, check_slash: bool) -> bool | None:
     consumed = 0
     with fh:
         try:
-            for raw in fh:
+            while True:
+                # readline(limit) never allocates more than the bytes left in
+                # the budget (+1 to detect the overrun), so one oversized line
+                # cannot pull megabytes into memory before the bound applies.
+                raw = fh.readline(_MAX_BYTES - consumed + 1)
+                if not raw:
+                    break
                 consumed += len(raw)
                 if consumed > _MAX_BYTES:
                     return None

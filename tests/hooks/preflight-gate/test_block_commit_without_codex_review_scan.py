@@ -102,3 +102,18 @@ def test_scan_memory_does_not_track_file_size(tmp_path):
     # a line at a time, so the two peaks stay within a small constant of each
     # other regardless of the 100x size gap.
     assert peak(big) < 4 * peak(small) + 1 * 1024 * 1024
+
+
+def test_one_oversized_line_is_refused_before_allocation(tmp_path, monkeypatch):
+    # A single line past the bound must not be pulled into memory whole and
+    # only then measured: the read itself is capped at the budget left.
+    path = tmp_path / "t.jsonl"
+    path.write_bytes(b'{"type": "assistant", "pad": "' + b"x" * (4 * 1024 * 1024) + b'"}\n')
+    monkeypatch.setattr(gate, "_MAX_BYTES", 64 * 1024)
+    tracemalloc.start()
+    try:
+        assert gate._transcript_invokes_skill(str(path), check_slash=True) is None
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 1024 * 1024
