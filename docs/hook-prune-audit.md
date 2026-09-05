@@ -1,5 +1,10 @@
 # Hook Prune Audit (issue #713)
 
+> **Snapshot.** Scored against the August 2026 roster (81 hooks, 63 exactly
+> scoreable). Every count below is historical by construction; the current
+> roster is `hooks/manifest.json` and the ledger it scores is described in
+> `docs/bypass-telemetry.md`.
+
 Evidence-based `keep` / `merge` / `drop` verdict for every hook in
 `hooks/manifest.json`, scored against the fire-rate ledger `bypass-review
 fire-rate` produces (issue #710). This applies ponytail's deletion-over-addition

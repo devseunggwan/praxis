@@ -1,10 +1,15 @@
 # Hook Suitability Audit
 
+> **Snapshot.** Written against the August 2026 roster (81 hooks, five
+> platform manifests). Counts and hook lists below are historical; the
+> platform references were corrected on 2026-09-05 after the Gemini (#1221)
+> and OpenCode (#1226) removals. The current roster is `hooks/manifest.json`.
+
 A complement to [`hook-prune-audit.md`](hook-prune-audit.md). That audit asks
 "does this hook fire?" against the fire-rate ledger and found nothing to drop.
 This audit asks a different question: **is each hook appropriate for the
 context it ships into?** — where "context" means (a) this repository as a
-publicly distributed, multi-platform plugin (Claude, Codex, Cursor, OpenCode),
+publicly distributed, multi-platform plugin (Claude, Codex, Cursor),
 and (b) an installing environment that may lack the author's toolchain
 (codex CLI, cmux, oh-my-claudecode, a `hookable:` memory store, zsh,
 slack/notion MCP servers).
@@ -75,7 +80,7 @@ plugin's bug.
 
 ## C. Personal/org assets hardcoded into a publicly distributed plugin
 
-The repository is public and packaged for five platforms, but several hooks
+The repository is public and packaged for three hook-installing platforms, but several hooks
 carry the author's private namespace as code, not config:
 
 | Location | Asset | Note |
