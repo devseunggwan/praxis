@@ -26,21 +26,25 @@ _spec.loader.exec_module(gate)
 
 
 def _skill_use(skill: str) -> str:
+    """Skill use."""
     return json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
         {"type": "tool_use", "id": "toolu_1", "name": "Skill", "input": {"skill": skill}},
     ]}})
 
 
 def _slash(text: str, role: str = "user") -> str:
+    """Slash."""
     return json.dumps({"type": role, "message": {"role": role, "content": text}})
 
 
 def _filler(n: int) -> list[str]:
+    """Filler."""
     return [json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
         {"type": "text", "text": f"step {i} " + "x" * 200}]}}) for i in range(n)]
 
 
 def _write(tmp_path: Path, lines: list[str], name: str = "t.jsonl") -> str:
+    """Write."""
     p = tmp_path / name
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return str(p)
@@ -48,17 +52,20 @@ def _write(tmp_path: Path, lines: list[str], name: str = "t.jsonl") -> str:
 
 def test_needle_matches_the_encoded_skill_name():
     # The prefilter is only sound if JSON encoding leaves the literal intact.
+    """Needle matches the encoded skill name."""
     for value in ("praxis:codex-review-wrap", "/praxis:codex-review-wrap", "/codex-review-wrap"):
         assert gate._SKILL_NEEDLE.decode() in json.dumps(value)
 
 
 def test_skill_tool_use_is_found_among_filler(tmp_path):
+    """Skill tool use is found among filler."""
     path = _write(tmp_path, _filler(500) + [_skill_use("praxis:codex-review-wrap")] + _filler(500))
     assert gate._transcript_invokes_skill(path, check_slash=True) is True
     assert gate._transcript_invokes_skill(path, check_slash=False) is True
 
 
 def test_user_slash_command_is_found_on_root_only(tmp_path):
+    """User slash command is found on root only."""
     path = _write(tmp_path, _filler(50) + [_slash("/praxis:codex-review-wrap")])
     assert gate._transcript_invokes_skill(path, check_slash=True) is True
     assert gate._transcript_invokes_skill(path, check_slash=False) is False
@@ -67,16 +74,19 @@ def test_user_slash_command_is_found_on_root_only(tmp_path):
 def test_assistant_mention_is_not_an_invocation(tmp_path):
     # The needle appears (prose suggestion) but the record is not a genuine
     # invocation: the prefilter admits it, the structural check rejects it.
+    """Assistant mention is not an invocation."""
     path = _write(tmp_path, [_slash("run /praxis:codex-review-wrap first?", role="assistant")])
     assert gate._transcript_invokes_skill(path, check_slash=True) is False
 
 
 def test_other_skill_is_not_an_invocation(tmp_path):
+    """Other skill is not an invocation."""
     path = _write(tmp_path, [_skill_use("praxis:retrospect")])
     assert gate._transcript_invokes_skill(path, check_slash=True) is False
 
 
 def test_missing_and_oversized_answer_none(tmp_path, monkeypatch):
+    """Missing and oversized answer none."""
     assert gate._transcript_invokes_skill(str(tmp_path / "absent.jsonl"), check_slash=True) is None
     path = _write(tmp_path, _filler(20) + [_skill_use("praxis:codex-review-wrap")])
     monkeypatch.setattr(gate, "_MAX_BYTES", 100)
@@ -86,11 +96,13 @@ def test_missing_and_oversized_answer_none(tmp_path, monkeypatch):
 
 
 def test_scan_memory_does_not_track_file_size(tmp_path):
+    """Scan memory does not track file size."""
     small = _write(tmp_path, _filler(200), name="small.jsonl")
     big = _write(tmp_path, _filler(20000), name="big.jsonl")
     assert Path(big).stat().st_size > 20 * Path(small).stat().st_size
 
     def peak(path: str) -> int:
+        """Peak."""
         tracemalloc.start()
         try:
             assert gate._transcript_invokes_skill(path, check_slash=True) is False
@@ -107,6 +119,7 @@ def test_scan_memory_does_not_track_file_size(tmp_path):
 def test_one_oversized_line_is_refused_before_allocation(tmp_path, monkeypatch):
     # A single line past the bound must not be pulled into memory whole and
     # only then measured: the read itself is capped at the budget left.
+    """One oversized line is refused before allocation."""
     path = tmp_path / "t.jsonl"
     path.write_bytes(b'{"type": "assistant", "pad": "' + b"x" * (4 * 1024 * 1024) + b'"}\n')
     monkeypatch.setattr(gate, "_MAX_BYTES", 64 * 1024)
@@ -122,6 +135,7 @@ def test_one_oversized_line_is_refused_before_allocation(tmp_path, monkeypatch):
 def test_non_regular_path_answers_none_without_blocking(tmp_path):
     # A FIFO at the path must not be opened: open() would block for the whole
     # shared dispatch deadline. The is_file() guard answers None at once.
+    """Non regular path answers none without blocking."""
     import os
     fifo = tmp_path / "t.fifo"
     os.mkfifo(fifo)
