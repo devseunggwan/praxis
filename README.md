@@ -101,8 +101,8 @@ on day one:
 
 Praxis also ships `bypass-review`, a shell wrapper with no `SKILL.md`. It is **not**
 invocable as `/praxis:*`; it reads the review bypass-telemetry event logs. See
-[AGENTS.md → Local Development](AGENTS.md#local-development) for every shipped CLI
-wrapper.
+[CONTRIBUTING.md → Local development](CONTRIBUTING.md#local-development) for every
+shipped CLI wrapper.
 
 ## Hooks
 
@@ -247,8 +247,8 @@ land in the version that actually runs at the shell.
 ./scripts/verify-symlinks.sh
 ```
 
-See [AGENTS.md → Local Development](AGENTS.md#local-development) for the full
-list of shipped CLI wrappers and drift-recovery rationale.
+See [CONTRIBUTING.md → Local development](CONTRIBUTING.md#local-development) for
+the full list of shipped CLI wrappers and drift-recovery rationale.
 
 ## Security & Privacy
 

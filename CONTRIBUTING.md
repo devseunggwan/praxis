@@ -4,6 +4,48 @@ Praxis is a personal toolbox — contributions are primarily self-directed, but
 the conventions below keep the repo coherent across sessions and prevent the
 class of drift bugs that have cost the most debugging time.
 
+## Local development
+
+### Canonical clone path
+
+This repository should live at **`~/projects/praxis`**. The CLI tools shipped
+by skills (e.g. `cmux-recover-sessions`, `claude-recover`, `cmux-save-sessions`)
+are symlinked from `~/.local/bin` into this clone, so patches you commit here
+land in the version that actually runs at the shell. Keeping a
+second clone under a legacy name risks `~/.local/bin` symlinks pointing at stale
+code — a real failure mode previously hit during recover-sessions debugging.
+
+After every `git pull` or worktree operation, run `./scripts/verify-symlinks.sh`
+to confirm all `~/.local/bin` entries still resolve to this clone.
+
+### CLI tools (not skills)
+
+These are shell wrappers installed via `scripts/install.sh` into `~/.local/bin`.
+They are not AI skills — they have no `SKILL.md` and cannot be invoked as `/praxis:*`.
+
+| Binary          | Source                               | Purpose                                                                                                                                                     |
+| --------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bypass-review` | `skills/bypass-review/bypass-review` | Review bypass-telemetry event logs written by the bypass-telemetry hook — aggregate and inspect JSONL records (no `SKILL.md`; not invocable as `/praxis:*`) |
+
+### Install / refresh CLI symlinks
+
+```bash
+# From inside this clone:
+./scripts/install.sh
+```
+
+Idempotent. Existing valid links are left alone; missing or drifted ones
+are corrected. Re-run after pulls or after adding a new CLI script.
+
+### Verify symlinks point at this clone
+
+```bash
+./scripts/verify-symlinks.sh
+```
+
+Exits non-zero on drift, so it can be wired into CI or a SessionStart hook
+to catch "patch landed in the wrong clone" before it bites a future session.
+
 ## Writing a spec
 
 A *feature spec* states what a change must satisfy, before the change exists.
@@ -181,6 +223,19 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
    [Verifying a hook change at runtime](#verifying-a-hook-change-at-runtime-canary)
    below. A green test suite does not tell you what the runtime is executing.
 
+### Host-aware filtering
+
+Hooks support host-aware filtering via an optional `hosts` field on each hook
+entry in `hooks/manifest.json`. When `hosts` is absent the hook is included for
+all platforms (default). When present it must be an array of host identifiers
+(`"claude"`, `"codex"`, etc.) — the hook is written only to the platform whose
+`host_id` in `manifests/platforms/<name>.json` appears in that list. The build
+script (`scripts/build-plugin-manifests.py`) reads this field and writes a
+platform-specific `hooks.json` for each platform under its plugin directory.
+Each per-hook `spec.md` carries a `Supported hosts:` line that documents the
+classification; `scripts/check-plugin-manifests.py` verifies that every hook
+entry has a corresponding spec file.
+
 ### Verifying a hook change at runtime (canary)
 
 Hooks do not execute from this repository. They execute from a versioned copy
@@ -356,6 +411,33 @@ Confirm the checked-out ref **before** drawing any conclusion, especially right
 after a `reset` or `checkout`. If you must audit from the tree itself, fetch and
 check out the PR branch first (`git fetch origin <branch> && git checkout
 <branch>`) instead of assuming the current tree reflects it.
+
+### Anchor revision without `gh`
+
+`gh` is also a prerequisite of the verification-anchor convention, and for
+revision specifically. Creating an anchor needs only a way to post a comment;
+editing one in place is a `PATCH` against its comment id, which a session whose
+only GitHub surface is the MCP server cannot issue when that server exposes no
+comment `update` — comment bodies are add-only there, while issue and PR bodies
+are not. Enumerating `github/github-mcp-server` (version unknown, 2026-09-04)
+found that absence upstream rather than in one deployment, so it does not
+resolve by waiting; it is one measurement of one server, so confirm `update` is
+absent from the **active** session's tool list before applying any of this. The
+same surface strips `<details>` / `<summary>` on the comment **read** path as
+well, which leaves the gate's PostToolUse structure re-check with no substitute
+there at all.
+
+Past rev 1 the anchor rule is therefore unsatisfiable in such a session. The
+procedure: post rev 1 in full, grade the re-check `unknown`, say in the PR body
+which SHA the anchor is stamped at and that the host cannot update it, refresh
+that body on every later push that would have been a revision (or stop pushing
+until the anchor can be revised), and carry the delta there or into the merge
+commit — never a comment of its own, and never a second anchor, which makes id
+recovery ambiguous. Steps in
+[`anchor-comment-gate/spec.md` → Procedure for a gh-less session](hooks/preflight-gate/anchor-comment-gate/spec.md#procedure-for-a-gh-less-session),
+the precondition in
+[the section holding it](hooks/preflight-gate/anchor-comment-gate/spec.md#prerequisite--gh-for-revision-specifically).
+Issue #1211.
 
 ## Packaging
 
