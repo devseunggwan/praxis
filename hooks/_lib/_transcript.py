@@ -37,7 +37,7 @@ last-user-message extraction both skip them.
 Public API:
   TRANSCRIPT_SCAN_LINES                                  — default tail window
   load_transcript(path)                                  -> list[dict]
-  iter_transcript(path, needle=None)                     -> Iterator[dict]
+  iter_transcript(path, needle=None)                     -> Iterator[dict]  (needle: str | tuple, any-of)
   iter_transcript_bounded(path, max_bytes, needle=None)  -> Iterator[dict]
   json_needle(value)                                     -> bytes | None
   load_transcript_objs(path, max_bytes)                  -> list | None
@@ -91,7 +91,7 @@ def load_transcript(path: str) -> list[dict]:
     return events
 
 
-def iter_transcript(path: str, needle: str | None = None):
+def iter_transcript(path: str, needle: str | tuple[str, ...] | None = None):
     """Yield each event dict in `path`, one line at a time. Fail-open.
 
     Same parse contract as `load_transcript` (non-JSON and non-dict lines are
@@ -100,23 +100,30 @@ def iter_transcript(path: str, needle: str | None = None):
     whole session but can reduce as it goes — a 224MB session materialized as
     a list cost 741MB of RSS per Stop hook (issue #1076).
 
-    `needle` is a literal every record the caller can use must contain — a
-    tool name, a block type — so a line without it is rejected before
+    `needle` is a literal every record the caller can use must contain, or a
+    tuple of them (any-of), so a line without one is rejected before
     `json.loads` (issue #1278). The substring test runs in C; the parse is
     what a whole-session walk actually pays for (42,000 parses cost 440 ms on
     a 36 MB session). It is a necessary condition only: the caller still
     checks the parsed record, so a needle that appears in unrelated text costs
-    a parse, never a wrong answer. Pick a needle JSON encoding cannot rewrite
-    (plain ASCII, no quotes or backslashes), or it will miss records that do
-    match.
+    a parse, never a wrong answer.
+
+    Write the needle as the exact JSON token, delimiting quotes included —
+    `'"tool_use"'`, not `'tool_use'`: the bare form also matches
+    `"tool_use_id"` on every tool_result line, the largest lines in a
+    session, and the filter stops filtering. Keep it to characters the
+    encoder leaves alone inside a string value (no backslash, inner quote,
+    control character, or non-ASCII under `ensure_ascii`), or it will miss
+    records that do match.
     """
+    needles = (needle,) if isinstance(needle, str) else needle
     try:
         f = open(path, encoding="utf-8", errors="replace")
     except OSError:
         return
     with f:
         for line in f:
-            if needle is not None and needle not in line:
+            if needles is not None and not any(n in line for n in needles):
                 continue
             line = line.strip()
             if not line:

@@ -798,6 +798,15 @@ class TestTailReaders:
         assert len(got) == 1 and got[0]["uuid"] == "A1"
         assert len(calls) == 2  # the tool_use record and the non-JSON line only
 
+    def test_iter_transcript_any_of_needle(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "t1", "Bash", {"command": "ls"}),
+            _asst_tool_use("A2", "t2", "Agent", {"prompt": "review"}),
+            _asst_tool_use("A3", "t3", "Skill", {"skill": "x"}),
+        ])
+        got = [e["uuid"] for e in T.iter_transcript(path, needle=('"Agent"', '"Skill"'))]
+        assert got == ["A2", "A3"]
+
     def test_iter_transcript_without_needle_is_unchanged(self, tmp_path):
         path = _write_jsonl(tmp_path, [_user(text="a"), _user(text="b")])
         assert list(T.iter_transcript(path)) == list(T.iter_transcript(path, needle=None))

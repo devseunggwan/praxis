@@ -389,16 +389,28 @@ def _note_tool_use(facts: _SessionFacts, block: dict) -> None:
             facts.codex_review = True
 
 
-# Every fact `_note_tool_use` can settle lives in a `tool_use` content block,
-# so a record without the literal cannot contribute. Rejecting on it before
-# the parse is what keeps a `review` scan of a session with no review in it —
-# the case the advisory exists for, where nothing ever settles — from
-# parsing every line to EOF on every commit (issue #1278).
-_TOOL_USE_NEEDLE = '"tool_use"'
+# Every fact `_note_tool_use` can settle lives in a `tool_use` block whose
+# `name` is one of these, so a record without the quoted tool name cannot
+# contribute. Rejecting on it before the parse is what keeps a `review` scan
+# of a session with no review in it — the case the advisory exists for, where
+# nothing ever settles — from parsing every line to EOF on every commit
+# (issue #1278). Keyed per fact rather than on a blanket `"tool_use"`: the
+# large assistant lines are Bash heredocs and Edit/Write bodies, and a
+# `review` walk that parsed every one of those would still pay a parse per
+# tool call instead of per Agent/Task/Skill call.
+_FACT_NEEDLES = {
+    "review_agent": ('"Agent"', '"Task"'),
+    "codex_review": ('"Skill"',),
+    "open_pr_scan": ('"Bash"',),
+}
+
+
+def _needles_for(facts: _SessionFacts) -> tuple[str, ...]:
+    return tuple(n for fact in sorted(facts._wanted) for n in _FACT_NEEDLES[fact])
 
 
 def _absorb(facts: _SessionFacts, path: str) -> None:
-    for event in iter_transcript(path, needle=_TOOL_USE_NEEDLE):
+    for event in iter_transcript(path, needle=_needles_for(facts)):
         message = event.get("message")
         if not isinstance(message, dict):
             continue
