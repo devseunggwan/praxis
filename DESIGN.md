@@ -81,6 +81,20 @@ Design mechanisms shared by all hooks:
   would have created do NOT exist on disk — so the agent should not retry
   the second half expecting the first half to have landed. Single-command
   rejections receive no suffix (no cascade to warn about).
+- **English-first emitted bodies (issues #1160, #1298).** Every body a hook
+  hands to the user — stderr advisory text, a `permissionDecisionReason`, a
+  Stop `reason`, a `systemMessage`, an `additionalContext` — starts with an
+  English line; Korean detail may follow on the next line. Issue #1160 set
+  the rule for two advisories and left the rest of the suite alone, so a
+  reader who does not read Korean saw a block with no visible cause; #1298
+  extends it to every hook. The gate is `tests/test_emit_english_lead.py`:
+  it parses every `hooks/**/impl.py` and fails on any string literal longer
+  than eight characters whose first character — after an optional
+  `[hook-name]` tag — is Hangul, skipping docstrings, regex and
+  match-vocabulary literals, and text glued to the right of `+`. Its
+  `ALLOWLIST` must stay empty; an entry needs an issue link.
+
+  Rule: *English lead line first; Korean after a newline, never before.*
 
 ## Session-state concurrency
 
