@@ -56,7 +56,6 @@ granularity as the other skill-gate hooks.
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -64,6 +63,7 @@ from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import TranscriptReadError, iter_transcript_bounded, json_needle  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import safe_tokenize  # type: ignore[import-not-found]  # noqa: E402
@@ -307,51 +307,24 @@ def _scan_transcript(path: str, required_skill: str) -> bool | None:
     False if not, None if the transcript cannot be read or is past
     ``_MAX_BYTES`` (caller treats None as fail-open).
 
-    Streams the file and parses only the lines that contain the skill name
-    (issue #1312): a record that satisfies the gate carries it in the
-    tool_use's ``skill`` value, so a line without it is rejected before
-    ``json.loads``. The previous shape — ``read_text().splitlines()`` and a
-    parse per line — materialized the whole session on every ``git commit``
-    inside the shared Bash dispatch deadline (#1167). The prefilter is only
-    sound when JSON encoding leaves the name intact; a name ``json.dumps``
-    would escape falls back to parsing every line. The byte bound is counted
-    on the bytes actually read, not a stat() taken before the walk.
+    Streams through ``_transcript.iter_transcript_bounded`` and parses only
+    the lines that carry the skill name as a JSON string value (issue #1312):
+    a satisfying record holds it in the tool_use's ``skill`` field, so a line
+    without the quoted token is rejected before ``json.loads``. The previous
+    shape — ``read_text().splitlines()`` and a parse per line — materialized
+    the whole session on every ``git commit`` inside the shared Bash dispatch
+    deadline (#1167). ``json_needle`` answers None for a name the default
+    encoder would escape (a non-ASCII skill name written as ``\\uXXXX`` by
+    the host), and the scan then parses every line rather than miss the
+    record and wrongly block. The reader owns the byte bound, the per-read cap
+    and the fail-open classes.
     """
-    needle: bytes | None = None
-    if json.dumps(required_skill, ensure_ascii=False) == f'"{required_skill}"':
-        needle = required_skill.encode("utf-8")
     try:
-        fh = open(path, "rb")
-    except OSError:
+        for obj in iter_transcript_bounded(path, _MAX_BYTES, json_needle(required_skill)):
+            if _has_skill_tool_use(obj, required_skill):
+                return True
+    except TranscriptReadError:  # missing, unreadable, or past _MAX_BYTES
         return None
-    consumed = 0
-    with fh:
-        try:
-            while True:
-                # readline(limit) never allocates more than the bytes left in
-                # the budget (+1 to detect the overrun), so one oversized line
-                # cannot pull megabytes into memory before the bound applies.
-                raw = fh.readline(_MAX_BYTES - consumed + 1)
-                if not raw:
-                    break
-                consumed += len(raw)
-                if consumed > _MAX_BYTES:
-                    return None
-                if needle is not None and needle not in raw:
-                    continue
-                line = raw.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line.decode("utf-8", errors="replace"))
-                except (json.JSONDecodeError, ValueError):
-                    continue
-                if not isinstance(obj, dict):
-                    continue
-                if _has_skill_tool_use(obj, required_skill):
-                    return True
-        except OSError:
-            return None
     return False
 
 

@@ -509,8 +509,12 @@ _CONSUMERS = {
     # end instead of loading up to 50 MB to keep 400 lines (#1279).
     HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
         ["tail_lines", "TranscriptReadError"],
-    # Whole-session scan under a byte cap, needle-prefiltered (#1277).
+    # Whole-session scans under a byte cap, needle-prefiltered (#1277, #1312).
     HOOKS / "preflight-gate" / "block-commit-without-codex-review" / "impl.py":
+        ["iter_transcript_bounded", "TranscriptReadError"],
+    HOOKS / "preflight-gate" / "skill-gate-commands" / "impl.py":
+        ["iter_transcript_bounded", "TranscriptReadError", "json_needle"],
+    HOOKS / "advisory-nudge" / "pre-commit-staged-file-enumeration" / "impl.py":
         ["iter_transcript_bounded", "TranscriptReadError"],
     HOOKS / "preflight-gate" / "block-ask-end-option" / "impl.py":
         ["read_last_user_message"],

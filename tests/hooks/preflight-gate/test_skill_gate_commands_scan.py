@@ -65,3 +65,16 @@ def test_one_oversized_line_is_refused_before_allocation(tmp_path, monkeypatch):
     finally:
         tracemalloc.stop()
     assert peak < 1024 * 1024
+
+
+def test_non_ascii_name_written_escaped_is_still_found(tmp_path):
+    # A host that escapes non-ASCII (json.dumps default) writes the skill as
+    # "praxis:\\ud68c\\uace0"; a raw-UTF-8 needle would never match it and
+    # the gate would wrongly block. json_needle answers None for such a name,
+    # so the scan parses every line instead.
+    name = "praxis:회고"
+    line = json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "t1", "name": "Skill", "input": {"skill": name}}]}}, ensure_ascii=True)
+    assert "\\u" in line
+    path = _write(tmp_path / "t.jsonl", _filler(5) + [line])
+    assert gate._scan_transcript(path, name) is True

@@ -56,7 +56,6 @@ Limitations:
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path as _Path
@@ -64,6 +63,7 @@ from pathlib import Path as _Path
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _git import run_git  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import TranscriptReadError, iter_transcript_bounded  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
@@ -188,43 +188,19 @@ def _seen_realpaths(transcript_path: str) -> set[str] | None:
 
     Returns None when the transcript is missing/unreadable/oversized — the
     caller treats None as fail-open (cannot compute the seen-set)."""
-    try:
-        fh = open(transcript_path, "rb")
-    except OSError:
-        return None
-
     pending: dict[str, str] = {}   # tool_use_id -> canonical path
     idless: set[str] = set()       # file-tool targets that carry no id
     failed: set[str] = set()       # tool_use_ids whose result is_error
-    consumed = 0
-    with fh:
-        while True:
-            # readline(limit) never allocates more than the bytes left in the
-            # budget (+1 to detect the overrun), so one oversized line cannot
-            # pull megabytes into memory before the bound applies.
-            raw = fh.readline(_MAX_TRANSCRIPT_BYTES - consumed + 1)
-            if not raw:
-                break
-            consumed += len(raw)
-            if consumed > _MAX_TRANSCRIPT_BYTES:
-                return None  # past the bound — cannot compute the seen-set
-            # Only two record kinds feed the sets below: a `tool_use` block
-            # (a file-tool target) and an errored `tool_result`. A line with
-            # neither literal is rejected before the parse (issue #1312) —
-            # the walk is streamed and byte-counted instead of the former
-            # read_text() + splitlines(), which held the whole session twice
-            # on every `git commit` inside the shared Bash dispatch deadline.
-            if _TOOL_USE_NEEDLE not in raw and _IS_ERROR_NEEDLE not in raw:
-                continue
-            line = raw.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line.decode("utf-8", errors="replace"))
-            except (json.JSONDecodeError, ValueError):
-                continue
-            if not isinstance(obj, dict):
-                continue
+    # Only two record kinds feed the sets: a `tool_use` block (a file-tool
+    # target) and an errored `tool_result`. A line with neither literal is
+    # rejected before the parse (issue #1312); the reader streams the file
+    # under the byte bound instead of the former read_text() + splitlines(),
+    # which held the whole session twice on every `git commit` inside the
+    # shared Bash dispatch deadline.
+    try:
+        for obj in iter_transcript_bounded(
+            transcript_path, _MAX_TRANSCRIPT_BYTES, (_TOOL_USE_NEEDLE, _IS_ERROR_NEEDLE)
+        ):
             message = obj.get("message")
             if not isinstance(message, dict):
                 continue
@@ -259,6 +235,9 @@ def _seen_realpaths(transcript_path: str) -> set[str] | None:
                     pending[use_id] = canon
                 else:
                     idless.add(canon)
+
+    except TranscriptReadError:  # missing, unreadable, or past the bound
+        return None
 
     seen = {c for uid, c in pending.items() if uid not in failed}
     seen |= idless
