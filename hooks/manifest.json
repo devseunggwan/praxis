@@ -52,7 +52,6 @@
     {
       "name": "codex-review-route",
       "role": "advisory-nudge",
-      "body": "impl.sh",
       "event": "UserPromptSubmit",
       "hosts": [
         "claude"
@@ -60,7 +59,14 @@
       "requires": [
         "codex-plugin"
       ],
-      "timeout": 5
+      "timeout": 5,
+      "mode": {
+        "external_commands": [
+          "git worktree list --porcelain",
+          "git rev-parse --abbrev-ref HEAD",
+          "gh pr view <branch> --json state --jq .state"
+        ]
+      }
     },
     {
       "name": "session-intent",

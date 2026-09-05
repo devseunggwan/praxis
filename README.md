@@ -60,6 +60,28 @@ git clone https://github.com/devseunggwan/praxis.git ~/projects/praxis
 claude skill add ~/projects/praxis/skills/<skill-name>
 ```
 
+## Where to start
+
+Three reading paths, each 3–4 steps. Time estimates are for a first read.
+
+**Fix or add a hook** (~25 min)
+
+1. [`ETHOS.md` → Hook Ethos](ETHOS.md#hook-ethos) — why a hook exists at all and what it may never do (5 min)
+2. [`DESIGN.md` → Adding a new hook](DESIGN.md#adding-a-new-hook) — the shared contracts and the per-hook checklist (10 min)
+3. The hook's own `hooks/<role>/<name>/spec.md`, found via [`docs/hook/INDEX.md`](docs/hook/INDEX.md) — what it blocks, passes, and how it fails open (5 min)
+4. [`CONTRIBUTING.md` → Adding or modifying a hook](CONTRIBUTING.md#adding-or-modifying-a-hook) — registration, tests, and the runtime canary (5 min)
+
+**Change a skill** (~15 min)
+
+1. [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md) — the fixed Claude Code limits a skill must fit inside (5 min)
+2. [`skills/SKILL.md.tmpl`](skills/SKILL.md.tmpl) — the frontmatter and section skeleton to copy (2 min)
+3. [`CONTRIBUTING.md` → Adding or modifying a skill](CONTRIBUTING.md#adding-or-modifying-a-skill) — the live-runtime verification gate (8 min)
+
+**Change packaging or manifests** (~10 min)
+
+1. [`ARCHITECTURE.md` → Multi-Platform Packaging](ARCHITECTURE.md#multi-platform-packaging) — canonical source, generated outputs, add-a-platform flow (6 min)
+2. [`CONTRIBUTING.md` → Packaging](CONTRIBUTING.md#packaging) — which files are generated and how to regenerate them (4 min)
+
 ## Skills
 
 Eighteen skills, grouped as Discovery, Development, Discipline, and Session Management.
@@ -79,8 +101,8 @@ on day one:
 
 Praxis also ships `bypass-review`, a shell wrapper with no `SKILL.md`. It is **not**
 invocable as `/praxis:*`; it reads the review bypass-telemetry event logs. See
-[AGENTS.md → Local Development](AGENTS.md#local-development) for every shipped CLI
-wrapper.
+[CONTRIBUTING.md → Local development](CONTRIBUTING.md#local-development) for every
+shipped CLI wrapper.
 
 ## Hooks
 
@@ -116,10 +138,9 @@ variable in the message, so you rarely have to go looking for it.
 The complete list, with each hook's events, hosts, strict/bypass knobs, and the external
 commands it may run, is the generated
 [Hook Operating Matrix](docs/hook-operating-matrix.md). Per-hook specs live at
-`hooks/<role>/<name>/spec.md`, indexed by [`docs/hook/INDEX.md`](docs/hook/INDEX.md);
-[ARCHITECTURE.md → Hook index](ARCHITECTURE.md#hook-index) maps them to the component
-graph, and [DESIGN.md → Hook Design Contracts](DESIGN.md#hook-design-contracts) covers
-the contracts every hook follows.
+`hooks/<role>/<name>/spec.md`, indexed by [`docs/hook/INDEX.md`](docs/hook/INDEX.md),
+and [DESIGN.md → Hook Design Contracts](DESIGN.md#hook-design-contracts) covers the
+contracts every hook follows.
 
 ## Turning it off
 
@@ -225,8 +246,8 @@ land in the version that actually runs at the shell.
 ./scripts/verify-symlinks.sh
 ```
 
-See [AGENTS.md → Local Development](AGENTS.md#local-development) for the full
-list of shipped CLI wrappers and drift-recovery rationale.
+See [CONTRIBUTING.md → Local development](CONTRIBUTING.md#local-development) for
+the full list of shipped CLI wrappers and drift-recovery rationale.
 
 ## Security & Privacy
 

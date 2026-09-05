@@ -13,15 +13,22 @@ in [`ARCHITECTURE.md`](ARCHITECTURE.md); per-hook specs live at
 Every hook ships with full spec at `hooks/<role>/<name>/spec.md` — design
 rationale, matrix of blocked vs. passed commands, response JSON, parsing
 guarantees, fail-safe paths, and test summary. The hook index lives in
-[`ARCHITECTURE.md → Hook index`](ARCHITECTURE.md#hook-index); consult the
-per-hook spec before editing.
+[`docs/hook/INDEX.md`](docs/hook/INDEX.md); consult the per-hook spec before
+editing.
 
 Design mechanisms shared by all hooks:
 
-- **Structural tokenization, not regex.** `hooks/_lib/_hook_utils.py`
+- **Structural tokenization, not regex.** `hooks/_lib/_shell_tokenize.py`
   (`safe_tokenize` → `iter_command_starts` → `strip_prefix`) is the shared
-  primitive. Per-hook `impl.py` files add it to `sys.path` via the three-
-  line preamble documented in [`CONTRIBUTING.md → Adding or modifying a hook`](CONTRIBUTING.md#adding-or-modifying-a-hook).
+  primitive; `_subst.py` walks active `$(…)` / backtick spans
+  (`iter_command_texts`), `_compound.py` classifies compound and
+  state-changing commands and owns the cascade hint, and `_roles.py` is
+  the typed `Token` API (`tokenize_with_roles`, `filter_argv`).
+  `_hook_utils.py` is a re-export shim over all four, kept so the
+  pre-#1305 `from _hook_utils import …` preamble still resolves — new code
+  imports from the defining sub-module. Per-hook `impl.py` files add
+  `hooks/_lib` to `sys.path` via the three-line preamble documented in
+  [`CONTRIBUTING.md → Adding or modifying a hook`](CONTRIBUTING.md#adding-or-modifying-a-hook).
   Quoted strings, comments, env prefixes, wrapper commands, and shell
   control-flow keywords are handled consistently across all Bash hooks.
 - **Session state via `session_id`.** Per-session memory (intent flags,
@@ -61,7 +68,8 @@ Design mechanisms shared by all hooks:
   rather than "no work".
 - **Fire-ledger instrumentation for shell hooks (issue #848).** A hook's
   engagements land in the fire ledger via `@fail_open` (standalone) or the
-  dispatcher (Bash group) — both Python-only, so the four `impl.sh` hooks
+  dispatcher (Bash group) — both Python-only, so the then-four `impl.sh`
+  hooks (three since issue #1304 ported `codex-review-route` to Python)
   recorded nothing at all while an audit reading that ledger scored the
   silence as "never fires". A shell hook sources `_lib/record_fire.sh` and
   calls `praxis_fire_arm <hook> <role> "$SESSION_ID" ""` right after it
@@ -75,12 +83,26 @@ Design mechanisms shared by all hooks:
   hook rejects (block) or asks-and-may-deny a compound command (`&&`, `||`,
   `;`, `|`, newline) containing a state-changing step (`> file`, `<<EOF >`,
   `mkdir`, `tee`, `cp`/`mv`/`rm`/`touch`, `curl -o`, `wget -O`), every hook
-  appends the shared `_hook_utils.compound_cascade_hint(command)` text to
-  its block/ask message. The advisory clarifies that bash never executed
+  appends the shared `_compound.compound_cascade_hint(command)` text
+  (re-exported by `_hook_utils`) to its block/ask message. The advisory clarifies that bash never executed
   ANY part of the rejected command — files the redirect/mkdir/download
   would have created do NOT exist on disk — so the agent should not retry
   the second half expecting the first half to have landed. Single-command
   rejections receive no suffix (no cascade to warn about).
+- **English-first emitted bodies (issues #1160, #1298).** Every body a hook
+  hands to the user — stderr advisory text, a `permissionDecisionReason`, a
+  Stop `reason`, a `systemMessage`, an `additionalContext` — starts with an
+  English line; Korean detail may follow on the next line. Issue #1160 set
+  the rule for two advisories and left the rest of the suite alone, so a
+  reader who does not read Korean saw a block with no visible cause; #1298
+  extends it to every hook. The gate is `tests/test_emit_english_lead.py`:
+  it parses every `hooks/**/impl.py` and fails on any string literal longer
+  than eight characters whose first character — after an optional
+  `[hook-name]` tag — is Hangul, skipping docstrings, regex and
+  match-vocabulary literals, and text glued to the right of `+`. Its
+  `ALLOWLIST` must stay empty; an entry needs an issue link.
+
+  Rule: *English lead line first; Korean after a newline, never before.*
 
 ## Session-state concurrency
 
@@ -226,7 +248,9 @@ that could have failed it.
    semantics). See the `Convention Survey Before Design` rule in global
    `~/.claude/CLAUDE.md`.
 2. Author `hooks/<role>/<name>/impl.py` (or `impl.sh` for body-as-sh),
-   make it executable, add the `sys.path` preamble for `_hook_utils`.
+   make it executable, add the `sys.path` preamble for `hooks/_lib` and
+   import from `_shell_tokenize` / `_subst` / `_compound` / `_roles` (the
+   `_hook_utils` shim re-exports them for hooks written before #1305).
 3. Register the hook in [`hooks/manifest.json`](hooks/manifest.json) per
    ADR-0001 §2.5 schema (`name`, `role`, `event`, `matcher`, `hosts`,
    `timeout`, `args`, `body`, `wrapper_suffix` as applicable).
@@ -236,7 +260,7 @@ that could have failed it.
    do not run this build) and all platform `hooks.json` files.
 5. Add the test at `tests/hooks/<role>/test_<name>.{sh,py}`.
 6. Create `hooks/<role>/<name>/spec.md` (template: any existing spec).
-7. Add a row to the index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
+7. Add the hook under its role in [`docs/hook/INDEX.md`](docs/hook/INDEX.md).
 8. Run `./scripts/check-plugin-manifests.py` — confirms the
    directory↔manifest cross-check, role agreement, byte-identical
    generated artifacts, plus 5+ other invariants.

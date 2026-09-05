@@ -26,10 +26,11 @@ itself (mark_dispatcher_process) so its Bash-group members are not
 double-counted by the coarse path.
 
 SHELL HOOKS (issue #848): `impl.sh` hooks run no Python `main()`, so
-@fail_open never wraps them — all four (strike-counter across its three
-events, completion-verify, retrospect-mix-check, codex-review-route) held
-zero records while an audit reading this ledger scored their absence as
-"never fires". They now source `_lib/record_fire.sh` and arm an EXIT trap
+@fail_open never wraps them — all four at the time (strike-counter across
+its three events, completion-verify, retrospect-mix-check, and
+codex-review-route, since ported to Python in issue #1304) held zero records
+while an audit reading this ledger scored their absence as "never fires".
+They now source `_lib/record_fire.sh` and arm an EXIT trap
 (`praxis_fire_arm`) that writes exactly one RICH record per invocation via
 `record_session_fire`. Rich, not coarse: a shell hook has already parsed its
 own stdin payload and holds a real session_id. Because there is no coarse

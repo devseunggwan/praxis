@@ -2,7 +2,8 @@
 # Single entry point for the full test suite.
 #
 # Runs:
-#   1. pytest   — Python unit tests under tests/
+#   1. pytest   — Python unit tests under tests/, under coverage.py when the
+#                 module is importable (floor in .coveragerc, issue #1303)
 #   2. shell    — shell tests at tests/hooks/*/test_*.sh and tests/test_*.sh
 #   3. manifest — scripts/check-plugin-manifests.py
 #   4. invariants — scripts/check-hook-token-invariants.py
@@ -19,7 +20,10 @@
 # Steps 10-13 mirror CI jobs that used to have no local equivalent, so a change
 # could pass here and still be flagged on the PR (issue #866). Each skips with
 # an explicit SKIPPED line when its tool is absent, so a contributor without
-# the toolchain is not blocked — CI remains authoritative either way.
+# the toolchain is not blocked — CI remains authoritative either way. Step 1's
+# coverage half follows the same protocol: without the `coverage` module the
+# tests still run, plain, and the missing floor is announced as a SKIPPED line
+# rather than passed over (issue #1303).
 #
 # Step 6 is a different repo-internal script, same family as steps 3-5 (no
 # external toolchain — nothing to install), but its skip condition is not
@@ -95,8 +99,33 @@ skip_step() {
 # 1. pytest
 # ---------------------------------------------------------------------------
 echo "=== pytest ==="
-if ! python3 -m pytest tests/ -q; then
-  FAILED=1
+# Coverage floor (issue #1303). When coverage.py is importable, pytest runs
+# under `coverage run` and `coverage report` enforces the `fail_under` set in
+# .coveragerc (exit 2 below the floor — counted as a step failure). Only the
+# Python that pytest imports in-process is measured; impl.py executions driven
+# from the shell suites in step 2 are subprocesses and stay uncounted until
+# the follow-up half of #1303. Without the module the tests still run, plain,
+# and the absent floor goes through skip_step() like steps 10-13 so strict
+# mode (CI) fails on it instead of quietly measuring nothing.
+#
+# The data file lands under the throwaway PRAXIS_HOME unless the caller has
+# already chosen a COVERAGE_FILE — ci.yml does, so the report can be re-read
+# into the job summary after this script's EXIT trap has swept the temp dir.
+if python3 -c 'import coverage' 2>/dev/null; then
+  export COVERAGE_FILE="${COVERAGE_FILE:-$PRAXIS_HOME/.coverage}"
+  if ! python3 -m coverage run -m pytest tests/ -q; then
+    FAILED=1
+  fi
+  echo ""
+  echo "=== coverage report (floor: .coveragerc fail_under) ==="
+  if ! python3 -m coverage report; then
+    FAILED=1
+  fi
+else
+  if ! python3 -m pytest tests/ -q; then
+    FAILED=1
+  fi
+  skip_step coverage "pip install 'coverage==7.16.0'"
 fi
 
 # ---------------------------------------------------------------------------
@@ -416,7 +445,8 @@ if [[ $FAILED -ne 0 ]]; then
   exit 1
 fi
 
-# Scope note: this counts the four tool steps this script owns (10-13) plus
+# Scope note: this counts the four tool steps this script owns (10-13), the
+# coverage half of step 1 (same missing-module shape, #1303), plus
 # any tool a shell sub-suite announced via the PRAXIS_SUBSKIP marker before
 # exiting 0 (#1170) — a whole file that silently skipped on a missing tool is
 # a missing-toolchain gap exactly like steps 10-13. Step 6 has its own N/A line

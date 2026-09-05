@@ -26,7 +26,10 @@ main() is labeled with its number, and this list is the canonical roster
      executable bit and, when tracked, a 100755 git index mode (Rule 6d,
      #1172); and no orphan hooks/*.sh outside the generated set survives
      (Rule 6e, #1172 — the reverse sweep Rule 6 lacked).
-  7. INDEX.md ↔ manifest entry cross-check.
+  7. INDEX.md ↔ manifest entry cross-check (#1306: ARCHITECTURE.md no
+     longer carries a per-hook table, so only docs/hook/INDEX.md is
+     checked; the operating matrix is generated and drift-checked
+     separately).
   8. Spec `Supported hosts:` ↔ manifest `hosts` cross-check.
   9. Release version wiring (#1172): `VERSION` equals the "." version in
      `.release-please-manifest.json`, and every versioned platform artifact
@@ -1101,10 +1104,14 @@ def main() -> int:
             )
 
     # ------------------------------------------------------------------
-    # Rule 7 — INDEX.md + ARCHITECTURE.md cross-check
+    # Rule 7 — INDEX.md cross-check
+    #
+    # docs/hook/INDEX.md is the only hand-maintained per-hook list left
+    # (#1306). ARCHITECTURE.md → Hook index is a pointer to it and to the
+    # generated operating matrix, so it is no longer required to name every
+    # hook — the matrix is drift-checked as a generated artifact instead.
     # ------------------------------------------------------------------
     index_md = (REPO_ROOT / "docs" / "hook" / "INDEX.md").read_text()
-    arch_md = (REPO_ROOT / "ARCHITECTURE.md").read_text()
     seen_names: set[str] = set()
     for entry in manifest["hooks"]:
         name = entry["name"]
@@ -1115,11 +1122,6 @@ def main() -> int:
             drifts.append(
                 f"MISSING INDEX docs/hook/INDEX.md: {name} "
                 "(registered in manifest.json but not in INDEX.md)"
-            )
-        if name not in arch_md:
-            drifts.append(
-                f"MISSING INDEX ARCHITECTURE.md: {name} "
-                "(registered in manifest.json but not in ARCHITECTURE.md)"
             )
 
     # ------------------------------------------------------------------

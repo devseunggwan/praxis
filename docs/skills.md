@@ -54,5 +54,5 @@ than a catalogue, run `/praxis:using-praxis`.
 > **CLI tools (not skills):** praxis also ships `bypass-review`, a shell wrapper
 > with no `SKILL.md` — it is **not** invocable as `/praxis:*` and is absent from
 > the skills above. It inspects the review bypass-telemetry event logs.
-> See [AGENTS.md → Local Development](../AGENTS.md#local-development) for the full
+> See [CONTRIBUTING.md → Local development](../CONTRIBUTING.md#local-development) for the full
 > list of shipped CLI wrappers.

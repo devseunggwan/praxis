@@ -113,6 +113,14 @@ real source line, so a substring test would keep calling a body instrumented
 after the executable line was deleted. With that fix the *uninstrumented*
 roster is empty: every registered hook can produce fire events.
 
+> **2026-09-05 note (issue #1304).** `codex-review-route` was ported from
+> `impl.sh` to `impl.py`, so the shell roster above is now three
+> (`completion-verify`, `retrospect-mix-check`, `strike-counter`). Its
+> ledger shape is unchanged — one RICH `advise` per emitted advisory via
+> `record_session_fire`, coarse `pass` otherwise — so the row and counts
+> above stand as measured; only the recording path moved. The three
+> remaining ports are tracked in the same issue.
+
 ## Axis 2 — advise-ignored-rate high
 
 `Observed` counts advise fires with a later same-hook fire in the same session
