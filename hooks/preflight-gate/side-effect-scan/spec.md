@@ -128,8 +128,8 @@ same whitelist also thins `verify-commit-flag-override`'s own printed deny
 checklist: some of its rows name hooks the host does not install, which is what
 the `Also in the deny checklist` column counts per host.
 
-That gap is what disqualified the coverage half as a justification (issue
-#1153). The measurement it was argued alongside — 62% of one session's asks —
+That gap is what disqualified the coverage half as a justification
+(issue #1153). The measurement it was argued alongside — 62% of one session's asks —
 was taken on `claude` too, so both parts of the retired half describe the
 author's own host. Nothing above changes the grade: `git-commit` stays at
 ADVISE on every host, because the reversibility ground it now rests on is a
