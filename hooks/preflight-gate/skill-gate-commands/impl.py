@@ -327,7 +327,13 @@ def _scan_transcript(path: str, required_skill: str) -> bool | None:
     consumed = 0
     with fh:
         try:
-            for raw in fh:
+            while True:
+                # readline(limit) never allocates more than the bytes left in
+                # the budget (+1 to detect the overrun), so one oversized line
+                # cannot pull megabytes into memory before the bound applies.
+                raw = fh.readline(_MAX_BYTES - consumed + 1)
+                if not raw:
+                    break
                 consumed += len(raw)
                 if consumed > _MAX_BYTES:
                     return None
