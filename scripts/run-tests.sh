@@ -43,12 +43,136 @@
 #
 # Exit code is non-zero if any step fails, or if anything was skipped under
 # PRAXIS_TESTS_STRICT=1.
+#
+# `--doctor` runs nothing: it prints one table of every external tool the
+# steps and sub-suites above need — found/missing, version, and the install
+# hint the matching SKIPPED line would print — and exits 0 (issue #1302). Use
+# it to see which SKIPPED lines a full run will emit before paying for the
+# run. Without the flag the runner behaves exactly as before.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$REPO_ROOT"
+
+# ---------------------------------------------------------------------------
+# --doctor: toolchain report (issue #1302)
+#
+# One table, every external tool the runner or one of its sub-suites needs,
+# with found/missing, the version when found, and the same install hint the
+# corresponding SKIPPED line prints. Informational only — always exits 0 — so
+# a contributor can see at a glance which SKIPPED lines a full run WILL emit
+# before spending the minutes on it. It touches nothing else in this file: the
+# dispatch below runs before the isolation preamble, so a flag-less run is
+# unchanged.
+#
+# Bash 3.2 compatible on purpose (no mapfile, no associative arrays): macOS is
+# one of the hosts this table is for.
+# ---------------------------------------------------------------------------
+
+# First line of a command's combined output, empty when it cannot run. `sed`
+# reads to EOF so the producer never sees SIGPIPE under pipefail.
+doctor_version() {
+  "$@" 2>&1 | sed -n '1p' || true
+}
+
+doctor_row() {
+  if [[ -n "$5" ]]; then
+    printf '%-18s %-8s %-26s %-46s %s\n' "$1" "$2" "$3" "$4" "$5"
+  else
+    # No trailing pad when the last cell is empty.
+    printf '%-18s %-8s %-26s %s\n' "$1" "$2" "$3" "$4"
+  fi
+}
+
+# doctor_probe <tool> <needed-by> <install-hint> <version-command...>
+# Column 5 carries the install hint only on a MISSING row, so a healthy table
+# stays narrow.
+doctor_probe() {
+  local tool="$1" needed="$2" hint="$3" ver
+  shift 3
+  if command -v "$tool" >/dev/null 2>&1; then
+    ver="$(doctor_version "$@")"
+    doctor_row "$tool" found "${ver:-?}" "$needed" ""
+  else
+    doctor_row "$tool" MISSING "-" "$needed" "$hint"
+  fi
+}
+
+# doctor_probe_pymod <label> <module> <needed-by> <install-hint> <version-expr>
+doctor_probe_pymod() {
+  local label="$1" mod="$2" needed="$3" hint="$4" expr="$5" ver
+  if python3 -c "import $mod" >/dev/null 2>&1; then
+    ver="$(doctor_version python3 -c "import $mod; print($expr)")"
+    doctor_row "$label" found "${ver:-?}" "$needed" ""
+  else
+    doctor_row "$label" MISSING "-" "$needed" "$hint"
+  fi
+}
+
+doctor() {
+  local ver
+  echo "praxis test toolchain (scripts/run-tests.sh --doctor)"
+  echo ""
+  doctor_row TOOL STATUS VERSION "NEEDED BY" "INSTALL"
+  doctor_row ------------------ -------- -------------------------- \
+    ---------------------------------------------- ----------------------------------
+  doctor_probe python3 "steps 1,3-10; most shell sub-suites" \
+    "apt install python3 / brew install python" python3 --version
+  doctor_probe_pymod pytest pytest "step 1" "pip install pytest" \
+    "'pytest ' + pytest.__version__"
+  doctor_probe_pymod PyYAML yaml "step 8 workflow-pin check" "pip install PyYAML" \
+    "'PyYAML ' + yaml.__version__"
+  doctor_probe git "step 12 diff base; sub-suite fixture repos" \
+    "apt install git / brew install git" git --version
+  doctor_probe jq "catalog, fixture-key, reaper, retrospect suites" \
+    "apt install jq / brew install jq" jq --version
+  doctor_probe zsh "test_block_unmatched_glob.sh" \
+    "apt install zsh / brew install zsh" zsh --version
+  doctor_probe tmux "test_cmux_session_*.sh sub-suites" \
+    "apt install tmux / brew install tmux" tmux -V
+  doctor_probe lsof "test_codex_broker_reaper.sh lsof sub-cases" \
+    "apt install lsof" sh -c 'lsof -v 2>&1 | sed -n "s/^ *revision: */lsof /p"'
+
+  # Steps 10-12 mirror the runner's own discovery exactly, module form and
+  # node_modules probe included, so this report and the SKIPPED lines agree.
+  if command -v ruff >/dev/null 2>&1; then
+    ver="$(doctor_version ruff --version)"
+    doctor_row ruff found "${ver:-?}" "step 10" ""
+  elif python3 -m ruff --version >/dev/null 2>&1; then
+    ver="$(doctor_version python3 -m ruff --version)"
+    doctor_row ruff found "${ver:-?} (python3 -m ruff)" "step 10" ""
+  else
+    doctor_row ruff MISSING "-" "step 10" "pip install 'ruff==0.15.8'"
+  fi
+
+  doctor_probe shellcheck "step 11" "brew install shellcheck" \
+    sh -c 'shellcheck --version 2>&1 | sed -n "s/^version: /shellcheck /p"'
+
+  if command -v markdownlint-cli2 >/dev/null 2>&1; then
+    ver="$(doctor_version markdownlint-cli2 --help)"
+    doctor_row markdownlint-cli2 found "${ver:-?}" "step 12 (advisory)" ""
+  elif command -v markdownlint >/dev/null 2>&1; then
+    ver="$(doctor_version markdownlint --version)"
+    doctor_row markdownlint-cli2 found "markdownlint ${ver:-?}" "step 12 (advisory)" ""
+  elif [[ -x node_modules/.bin/markdownlint-cli2 ]]; then
+    ver="$(doctor_version node_modules/.bin/markdownlint-cli2 --help)"
+    doctor_row markdownlint-cli2 found "${ver:-?} (node_modules)" "step 12 (advisory)" ""
+  else
+    doctor_row markdownlint-cli2 MISSING "-" "step 12 (advisory)" \
+      "npm i -g markdownlint-cli2@0.23.2"
+  fi
+
+  echo ""
+  echo "MISSING rows become SKIPPED lines in a full run (a failure under PRAXIS_TESTS_STRICT=1)."
+  echo "This report is informational and always exits 0."
+}
+
+if [[ "${1-}" == "--doctor" ]]; then
+  doctor || true
+  exit 0
+fi
 
 # Run against a throwaway PRAXIS_HOME (#903). Hooks now resolve their runtime
 # files through it, so without this the suite would write into — and let
