@@ -589,8 +589,9 @@ After one full release cycle following Phase 3, delete the 39
 ## 8. References
 
 - [`docs/hook/INDEX.md`](../hook/INDEX.md) — current four-role taxonomy
-- [`ARCHITECTURE.md → Hook index`](../../ARCHITECTURE.md#hook-index) — flat
-  hook table
+- [`ARCHITECTURE.md → Hook index`](../../ARCHITECTURE.md#hook-index) — pointer
+  to the per-hook index and the generated operating matrix (the flat hook
+  table it once held was retired in #1306)
 - [`DESIGN.md`](../../DESIGN.md) — hook design contracts (structural
   tokenization, session_id keying, compound-bash cascade)
 - [`ETHOS.md`](../../ETHOS.md) — why hooks exist; fail-open invariant

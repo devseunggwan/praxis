@@ -13,8 +13,8 @@ in [`ARCHITECTURE.md`](ARCHITECTURE.md); per-hook specs live at
 Every hook ships with full spec at `hooks/<role>/<name>/spec.md` — design
 rationale, matrix of blocked vs. passed commands, response JSON, parsing
 guarantees, fail-safe paths, and test summary. The hook index lives in
-[`ARCHITECTURE.md → Hook index`](ARCHITECTURE.md#hook-index); consult the
-per-hook spec before editing.
+[`docs/hook/INDEX.md`](docs/hook/INDEX.md); consult the per-hook spec before
+editing.
 
 Design mechanisms shared by all hooks:
 
@@ -236,7 +236,7 @@ that could have failed it.
    do not run this build) and all platform `hooks.json` files.
 5. Add the test at `tests/hooks/<role>/test_<name>.{sh,py}`.
 6. Create `hooks/<role>/<name>/spec.md` (template: any existing spec).
-7. Add a row to the index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
+7. Add the hook under its role in [`docs/hook/INDEX.md`](docs/hook/INDEX.md).
 8. Run `./scripts/check-plugin-manifests.py` — confirms the
    directory↔manifest cross-check, role agreement, byte-identical
    generated artifacts, plus 5+ other invariants.

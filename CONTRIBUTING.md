@@ -214,7 +214,10 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
      the wrapper IS the impl invocation surface).
 6. Create `hooks/<role>/<name>/spec.md` (template: any existing spec). Include a
    `Supported hosts:` line matching the `hosts` array in `manifest.json`.
-7. Add a row to the hook index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
+7. Add the hook under its role in [`docs/hook/INDEX.md`](docs/hook/INDEX.md).
+   The generated [Hook Operating Matrix](docs/hook-operating-matrix.md)
+   picks it up from the manifest on the next build; nothing is added to
+   `ARCHITECTURE.md`.
 8. Run `./scripts/check-plugin-manifests.py` — it verifies the
    directory↔manifest cross-check, role↔dirname agreement, impl existence,
    Stop ordering, byte-equivalent generated artifacts, and 5+ more
@@ -456,9 +459,8 @@ To regenerate after changing `manifests/*.json` or `VERSION`:
 ```
 
 `check-plugin-manifests.py` also verifies (a) every hook in
-`hooks/manifest.json` appears in both `docs/hook/INDEX.md` and the
-`ARCHITECTURE.md` hook index table, and (b) each hook spec's
-`Supported hosts:` line agrees with the `hosts` array in
+`hooks/manifest.json` appears in `docs/hook/INDEX.md`, and (b) each hook
+spec's `Supported hosts:` line agrees with the `hosts` array in
 `hooks/manifest.json` (`all` = no `hosts` field; explicit list = exact set
 match).
 

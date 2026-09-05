@@ -138,10 +138,9 @@ variable in the message, so you rarely have to go looking for it.
 The complete list, with each hook's events, hosts, strict/bypass knobs, and the external
 commands it may run, is the generated
 [Hook Operating Matrix](docs/hook-operating-matrix.md). Per-hook specs live at
-`hooks/<role>/<name>/spec.md`, indexed by [`docs/hook/INDEX.md`](docs/hook/INDEX.md);
-[ARCHITECTURE.md → Hook index](ARCHITECTURE.md#hook-index) maps them to the component
-graph, and [DESIGN.md → Hook Design Contracts](DESIGN.md#hook-design-contracts) covers
-the contracts every hook follows.
+`hooks/<role>/<name>/spec.md`, indexed by [`docs/hook/INDEX.md`](docs/hook/INDEX.md),
+and [DESIGN.md → Hook Design Contracts](DESIGN.md#hook-design-contracts) covers the
+contracts every hook follows.
 
 ## Turning it off
 
