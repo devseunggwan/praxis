@@ -1,5 +1,7 @@
 #!/bin/bash
-# test_codex_review_route.sh — coverage for hooks/codex-review-route.sh
+# test_codex_review_route.sh — coverage for
+# hooks/advisory-nudge/codex-review-route/impl.py (launched at runtime by the
+# generated hooks/codex-review-route.sh)
 #
 # Synthesizes Claude Code UserPromptSubmit hook payloads and asserts:
 #   warn          → exit 0 + stdout contains JSON additionalContext with codex-review-wrap
@@ -19,7 +21,7 @@ set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-HOOK="$ROOT_DIR/hooks/advisory-nudge/codex-review-route/impl.sh"
+HOOK="$ROOT_DIR/hooks/advisory-nudge/codex-review-route/impl.py"
 
 if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook not executable: $HOOK" >&2
@@ -211,6 +213,9 @@ run_case "11 silent: prompt mentions /codex:review mid-sentence"   silent "$MULT
 run_case "11b silent: bare repo + 1 linked worktree counts as 1"   silent "$BARE_LINKED/linked" "/codex:review"
 
 # --- malformed input fail-safe ----------------------------------------------
+# The Python body reads stdin through _payload.read_payload, which answers
+# unparseable input with None → exit 0, empty stdout (the shell version had
+# the same outcome via `jq -r ... 2>/dev/null` yielding an empty prompt).
 malformed_json_test() {
   local name="12 silent: malformed JSON stdin"
   local out_file

@@ -501,17 +501,20 @@ def _worktree_count(cwd: str | None, deadline: float) -> int | None:
 def _advise(trigger: str, detail: str) -> int:
     strict = os.environ.get(STRICT_ENV) == "1"
     closing = (
+        f"    STRICT mode ({STRICT_ENV}=1) — this call was blocked.\n"
         f"    STRICT 모드({STRICT_ENV}=1) — 이 호출을 차단했습니다.\n"
         if strict
-        else "    의도적으로 건너뛰는 것이면 그대로 진행하십시오 — 차단하지 않습니다.\n"
+        else "    Skipping on purpose? Carry on — this is not a block.\n"
+        "    의도적으로 건너뛰는 것이면 그대로 진행하십시오 — 차단하지 않습니다.\n"
     )
     sys.stderr.write(
         "\n⚠️  UNENFORCED MANDATORY STEP — no gate owns this one\n"
         f"    trigger: {trigger}\n"
         f"    {detail}\n"
+        "    No hook owns this step, so skipping it leaves no is_error behind (praxis #1064).\n"
         "    이 단계는 훅이 없어 건너뛰어도 is_error 가 남지 않습니다 (praxis #1064).\n"
         + closing
-        + f"    상시 해제: {SKIP_ENV}=1\n"
+        + f"    Permanent opt-out / 상시 해제: {SKIP_ENV}=1\n"
     )
     return 2 if strict else 0
 
@@ -541,8 +544,9 @@ def _advise_rebase(trigger: str, cwd: str | None, deadline: float) -> int:
     )
     return _advise(
         label,
-        f"HEAD 가 {base} 보다 {count} 커밋 뒤에 있습니다: "
-        f"`git fetch origin && git rebase {base}`",
+        f"HEAD is {count} commit(s) behind {base}: "
+        f"`git fetch origin && git rebase {base}`\n"
+        f"    HEAD 가 {base} 보다 {count} 커밋 뒤에 있습니다.",
     )
 
 
@@ -583,19 +587,24 @@ def main() -> int:
             return 0
         return _advise(
             "content commit → oh-my-claudecode:code-reviewer (MANDATORY)",
-            "이 세션에서 code-reviewer 에이전트 호출 0건 "
+            "no code-reviewer agent call in this session "
+            "(model-routing-advisory/spec.md 'Deliver' table).\n"
+            "    이 세션에서 code-reviewer 에이전트 호출 0건 "
             "(model-routing-advisory/spec.md 'Deliver' 표).",
         )
 
     if facts.open_pr_scan:
         return 0
     count = _worktree_count(cwd, deadline)
-    worktrees = (
-        f"활성 워크트리 {count}개" if count is not None else "활성 워크트리 수 미확인"
+    worktrees_en = (
+        f"{count} active worktree(s)" if count is not None else "active worktree count unknown"
     )
+    worktrees_ko = f"{count}개" if count is not None else "수 미확인"
     return _advise(
         "worktree/dispatch → in-flight PR 검사 (MANDATORY)",
-        f"이 세션에서 open PR 열거 0건, {worktrees}: "
+        f"no open-PR enumeration in this session, {worktrees_en}: "
+        "run `gh pr list --state open` on every related repo first.\n"
+        f"    이 세션에서 open PR 열거 0건, 활성 워크트리 {worktrees_ko}: "
         "`gh pr list --state open` 를 관련 repo 전부에 대해 먼저 확인하십시오.",
     )
 

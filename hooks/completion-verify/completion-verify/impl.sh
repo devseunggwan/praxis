@@ -285,6 +285,7 @@ if [ -n "$block_reason" ]; then
   # Diagnostics live under the documented logs root (issue #1182); the
   # pre-#1182 ~/.praxis/scope-confirm/ dir was an undocumented 4th root.
   _log="$(praxis_resolve_writable logs stop-triggered.log)"
+  command -v praxis_rotate_log >/dev/null 2>&1 && praxis_rotate_log "$_log"
   echo "$(date -Iseconds) session=$SESSION_ID blocked_completion_without_evidence" >> "$_log" || true
 
   # shellcheck disable=SC2034  # read by the EXIT trap installed in sourced record_fire.sh

@@ -219,6 +219,10 @@ def has_unevidenced_verdict(text: str) -> bool:
 
 
 _MESSAGE = (
+    f"{_PREFIX} the last assistant message surfaces a positive verdict on local "
+    "artifacts (delete candidate / duplicate / merge target / superseded ...) as a "
+    "candidate list or table, but no first-column 'Verdict-evidence:' line sits "
+    "next to that verdict block.\n"
     f"{_PREFIX} 마지막 assistant 메시지가 로컬 아티팩트에 대한 긍정 판정 "
     "(삭제 후보 / 중복 / 통합 대상 / superseded ...) 을 후보 목록·표 형태로 "
     "surface 했으나, 그 판정 블록에 인접한 첫 칼럼 'Verdict-evidence:' 줄이 "
