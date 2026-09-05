@@ -629,6 +629,11 @@ def _masked_gating_advisory(tokens: list[str]) -> str | None:
 
     Only `&&` runs are walked. `;` sequences do not gate the command that
     follows them, so a masked exit code there changes nothing.
+
+    Every segment of a gated unit is inspected, not just its first: `&&` gates
+    the whole pipeline that follows it, so `… | tail -1 && echo x |
+    gh pr merge` puts the irreversible command downstream of a pipe while
+    leaving the gating relation exactly as it was.
     """
     units = _command_units(tokens)
     run: list[list[list[str]]] = []
@@ -637,9 +642,10 @@ def _masked_gating_advisory(tokens: list[str]) -> str | None:
         masked: list[list[str]] | None = None
         for unit in group:
             if masked is not None:
-                desc = _irreversible_description(unit[0])
-                if desc:
-                    return _masked_gating_text(masked, desc)
+                for segment in unit:
+                    desc = _irreversible_description(segment)
+                    if desc:
+                        return _masked_gating_text(masked, desc)
             if masked is None and len(unit) >= 2 and _is_truncating_sink(unit[-1]):
                 masked = unit
         return None

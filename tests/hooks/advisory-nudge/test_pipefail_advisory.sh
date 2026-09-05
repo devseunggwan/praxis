@@ -458,6 +458,16 @@ run_case "grep sink gating a mutating gh api call" \
   gating \
   "gh pr view 1 --json state | grep OPEN && gh api -X PATCH /repos/o/r/issues/comments/1 -F body=@b.md"
 
+# `&&` gates the whole pipeline on its right, so the irreversible command need
+# not be that pipeline's first segment. Scanning only unit[0] missed these.
+run_case "irreversible command is the second segment of the gated pipeline" \
+  gating \
+  "git switch main 2>&1 | tail -1 && echo x | gh pr merge 1264"
+
+run_case "irreversible command is the last of three gated segments" \
+  gating \
+  "git status --porcelain | tail -1 && cat f | tee log | git push origin main"
+
 # --- SILENT counterparts: each removes exactly one element of the predicate
 
 run_case "a semicolon does not gate, so a masked exit changes nothing" \
