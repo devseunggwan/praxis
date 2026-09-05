@@ -385,10 +385,11 @@ fi
 # a missing-toolchain gap exactly like steps 10-12. Step 6 has its own N/A line
 # (deliberately not "SKIPPED") and is excluded from this tally on purpose — it
 # is never a missing-toolchain skip. Per-gate platform skips inside a running
-# sub-suite — e.g. the Darwin-only gate in tests/test_codex_broker_reaper.sh —
-# still announce themselves only in their own summary and are not aggregated
-# here; conflating them would make a portable-by-design skip look like a
-# missing toolchain.
+# sub-suite — e.g. the Darwin-only "no cwd source" sub-case in
+# tests/test_codex_broker_reaper.sh, unreachable where /proc exists — still
+# announce themselves only in their own summary and are not aggregated here;
+# conflating them would make a portable-by-design skip look like a missing
+# toolchain.
 if [[ ${#SKIPPED_TOOLS[@]} -eq 0 ]]; then
   echo "ALL TESTS PASSED"
   exit 0
