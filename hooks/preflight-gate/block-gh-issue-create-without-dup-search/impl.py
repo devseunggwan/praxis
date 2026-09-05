@@ -56,6 +56,11 @@ from _transcript import TRANSCRIPT_SCAN_LINES, TranscriptReadError, tail_lines  
 
 @fail_open
 def main() -> int:
+    """Block `gh issue create` unless a duplicate search appears in the tail.
+
+    Reads the last TRANSCRIPT_SCAN_LINES lines by seeking from the end;
+    an unreadable transcript fails open, an empty one blocks.
+    """
     payload = read_payload()
     if payload is None:
         return 0

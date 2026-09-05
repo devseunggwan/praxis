@@ -958,12 +958,14 @@ class TestTailLines:
 
 class TestTailLinesStrict:
     def test_strict_raises_where_default_answers_empty(self, tmp_path):
+        """`strict=True` raises on an unreadable path instead of folding it to `[]`."""
         absent = str(tmp_path / "absent.jsonl")
         assert T.tail_lines(absent, 3) == []
         with pytest.raises(T.TranscriptReadError):
             T.tail_lines(absent, 3, strict=True)
 
     def test_strict_keeps_the_empty_file_answer(self, tmp_path):
+        """An empty but readable file is still `[]` under `strict=True`."""
         path = tmp_path / "empty.jsonl"
         path.write_bytes(b"")
         assert T.tail_lines(str(path), 3, strict=True) == []
