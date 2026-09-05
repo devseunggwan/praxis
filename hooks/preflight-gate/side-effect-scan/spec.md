@@ -32,16 +32,37 @@ below.
 
 **What makes a `git-commit`-category command reversible, concretely.** The
 category covers `git commit`, `git merge`, `git rebase`, `git cherry-pick` and
-`git revert`. Every one of them writes only to this checkout's `.git`: no
-network call is made, no remote ref moves, and nothing outside this machine can
-observe the result. Git records the pre-command HEAD before each of them —
-`ORIG_HEAD` for merge / rebase / cherry-pick / revert, `HEAD@{1}` in the reflog
-for a plain commit — and `gc.reflogExpire` keeps reflog entries for 90 days by
-default (`man git-config`, verified on git 2.50.1). So `git reset --hard
-ORIG_HEAD`, `git reset --hard HEAD@{1}` or `git commit --amend` puts the
-previous state back from the same shell, with no second party to notify. The
-claim is checkable in one command: `git reflog -n 2` after any of these prints
-the state to return to.
+`git revert`. None of them moves a remote ref: no network call is made, and
+nothing outside this machine can observe the result. Git records the
+pre-command HEAD before each of them — `ORIG_HEAD` for merge / rebase /
+cherry-pick / revert, `HEAD@{1}` in the reflog for a plain commit — and
+`gc.reflogExpire` keeps reflog entries for 90 days by default (`man
+git-config`, verified on git 2.50.1). So `git reset --hard ORIG_HEAD`, `git
+reset --hard HEAD@{1}` or `git commit --amend` puts the previous state back
+from the same shell, with no second party to notify. The claim is checkable in
+one command: `git reflog -n 2` after any of these prints the state to return
+to.
+
+**What the recovery does and does not restore.** It is a *ref* recovery, and
+three conditions bound it — state them rather than let "reversible" be read as
+unconditional:
+
+- **The tracked working tree and index move too.** Merge / rebase /
+  cherry-pick / revert update them, not only `.git` — `git-merge(1)`: "your
+  HEAD, index, and working tree are updated to it."
+- **The undo itself can destroy work.** `git-reset(1)` on `--hard`: "Resets
+  the index and working tree. Any changes to tracked files in the working tree
+  since <commit> are discarded." Uncommitted work is not in the reflog, so the
+  recipe above restores the ref while losing it.
+- **A repository can attach arbitrary side effects.** `pre-commit`,
+  `post-commit` and `post-merge` (`githooks(5)`) run whatever that checkout
+  installs, including a network call — so "no network call is made" is a
+  property of plain git, not a guarantee about every repository.
+
+None of the three reaches publication, which is why the tier holds: the ADVISE
+ground is *no remote ref moved and no second party has seen it*, never *nothing
+outside `.git` changed*. A reader who needs the stronger property will not find
+it here.
 
 **Where reversibility stops is publication, and that boundary carries its own
 ask.** Once the commit leaves the machine another party can already be reading
