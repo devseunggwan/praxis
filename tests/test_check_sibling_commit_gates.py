@@ -170,7 +170,7 @@ def test_spurious_name_in_spec_table_is_drift(tmp_path):
 
 
 def test_name_missing_from_impl_docstring_is_drift(tmp_path):
-    repo = _tree(tmp_path, {gates.IMPL: ("block-rename-sweep-survivors, ", "")})
+    repo = _tree(tmp_path, {gates.IMPL: ("block-rename-sweep-survivors,", "")})
     drifts = gates.check(repo)
     assert any(
         "impl.py" in d
@@ -246,8 +246,8 @@ def test_missing_count_claim_is_drift_not_a_silent_pass(tmp_path):
         tmp_path,
         {
             gates.TEST: (
-                "# by eight sibling commit hooks); git-push stays ASK",
-                "# by the commit gates); git-push stays ASK",
+                "# eight sibling commit hooks that gate this argv",
+                "# the commit hooks that gate this argv",
             )
         },
     )
