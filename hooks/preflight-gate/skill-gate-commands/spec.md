@@ -68,8 +68,8 @@ all subsequent matching commands. The mechanism is identical to
 
 The scan streams the transcript and parses only the lines that contain the
 required skill's name — a satisfying record carries it in the tool_use's
-`skill` value — instead of loading the file and parsing every line (issue
-#1312). The 50 MB bound is counted on the bytes actually read.
+`skill` value — instead of loading the file and parsing every line
+(issue #1312). The 50 MB bound is counted on the bytes actually read.
 
 ## Escape hatches
 
