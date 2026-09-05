@@ -37,7 +37,7 @@ last-user-message extraction both skip them.
 Public API:
   TRANSCRIPT_SCAN_LINES                                  — default tail window
   load_transcript(path)                                  -> list[dict]
-  iter_transcript(path)                                  -> Iterator[dict]
+  iter_transcript(path, needle=None)                     -> Iterator[dict]
   iter_transcript_bounded(path, max_bytes, needle=None)  -> Iterator[dict]
   json_needle(value)                                     -> bytes | None
   load_transcript_objs(path, max_bytes)                  -> list | None
@@ -91,7 +91,7 @@ def load_transcript(path: str) -> list[dict]:
     return events
 
 
-def iter_transcript(path: str):
+def iter_transcript(path: str, needle: str | None = None):
     """Yield each event dict in `path`, one line at a time. Fail-open.
 
     Same parse contract as `load_transcript` (non-JSON and non-dict lines are
@@ -99,6 +99,16 @@ def iter_transcript(path: str):
     whole transcript in memory. For a consumer that genuinely must see the
     whole session but can reduce as it goes — a 224MB session materialized as
     a list cost 741MB of RSS per Stop hook (issue #1076).
+
+    `needle` is a literal every record the caller can use must contain — a
+    tool name, a block type — so a line without it is rejected before
+    `json.loads` (issue #1278). The substring test runs in C; the parse is
+    what a whole-session walk actually pays for (42,000 parses cost 440 ms on
+    a 36 MB session). It is a necessary condition only: the caller still
+    checks the parsed record, so a needle that appears in unrelated text costs
+    a parse, never a wrong answer. Pick a needle JSON encoding cannot rewrite
+    (plain ASCII, no quotes or backslashes), or it will miss records that do
+    match.
     """
     try:
         f = open(path, encoding="utf-8", errors="replace")
@@ -106,6 +116,8 @@ def iter_transcript(path: str):
         return
     with f:
         for line in f:
+            if needle is not None and needle not in line:
+                continue
             line = line.strip()
             if not line:
                 continue

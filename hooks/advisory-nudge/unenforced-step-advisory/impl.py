@@ -389,8 +389,16 @@ def _note_tool_use(facts: _SessionFacts, block: dict) -> None:
             facts.codex_review = True
 
 
+# Every fact `_note_tool_use` can settle lives in a `tool_use` content block,
+# so a record without the literal cannot contribute. Rejecting on it before
+# the parse is what keeps a `review` scan of a session with no review in it —
+# the case the advisory exists for, where nothing ever settles — from
+# parsing every line to EOF on every commit (issue #1278).
+_TOOL_USE_NEEDLE = '"tool_use"'
+
+
 def _absorb(facts: _SessionFacts, path: str) -> None:
-    for event in iter_transcript(path):
+    for event in iter_transcript(path, needle=_TOOL_USE_NEEDLE):
         message = event.get("message")
         if not isinstance(message, dict):
             continue
