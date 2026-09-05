@@ -620,11 +620,11 @@ bash scripts/run-tests.sh
 This is the single entry point. It runs pytest, all shell-based hook tests,
 `scripts/check-plugin-manifests.py`, `scripts/check-hook-token-invariants.py`,
 `scripts/check-sibling-commit-gates.py`, `scripts/check-omc-name-drift.py`,
-`ruff check`, and `shellcheck` under one
+`ruff check`, `mypy`, and `shellcheck` under one
 exit code gate, plus an advisory
 markdownlint pass over the markdown files your branch changed.
 
-All three static checks — `ruff`, `shellcheck`, and `markdownlint` — skip with
+All four static checks — `ruff`, `mypy`, `shellcheck`, and `markdownlint` — skip with
 an explicit `SKIPPED:` line when the tool is not installed, so a missing
 toolchain does not block you. The corresponding CI job still runs either way,
 so install them if you want local parity.
@@ -652,11 +652,11 @@ markdown file, which surfaces the repo's existing backlog. It stays advisory in
 both modes and never fails the run.
 
 CI invokes this runner from the `test` job in `.github/workflows/ci.yml`. It is
-not the whole of CI: `ci.yml` additionally runs `ruff`, `shellcheck`,
+not the whole of CI: `ci.yml` additionally runs `ruff`, `mypy`, `shellcheck`,
 `markdownlint`, `actionlint`, `gitleaks`, and `link-check` as separate jobs,
 and CodeQL's `analyze` job runs from its own `.github/workflows/codeql.yml`.
-Those jobs are authoritative. The runner mirrors `ruff`, `shellcheck`, and
-`markdownlint` so they surface before you open a PR; the rest stay CI-only
+Those jobs are authoritative. The runner mirrors `ruff`, `mypy`, `shellcheck`,
+and `markdownlint` so they surface before you open a PR; the rest stay CI-only
 because they depend on network access, tokens, or a full-history scan.
 
 New hooks must ship with a test under `tests/hooks/<role>/`:

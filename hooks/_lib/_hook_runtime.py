@@ -31,7 +31,7 @@ import os
 import sys
 import time
 import traceback
-from typing import Callable, Optional
+from typing import Callable, ContextManager, Optional
 
 _LOGGER_NAME = "praxis.hook"
 
@@ -215,13 +215,17 @@ def _make_error_log_handler(path: str, max_bytes: int) -> logging.Handler:
 
     class _Handler(logging.handlers.RotatingFileHandler):
         def doRollover(self) -> None:  # noqa: N802 - logging API name
+            # Annotated up front so both arms assign one declared type: the real
+            # lock is a generator-based context manager, the fallback a
+            # nullcontext, and mypy needs the common supertype spelled out.
+            lock: Callable[..., ContextManager[bool]]
             try:
-                from _state_lock import state_lock  # type: ignore[import-not-found]
+                from _state_lock import state_lock as lock  # type: ignore[import-not-found]
             except Exception:  # pragma: no cover - lock unavailable: rotate unserialized
                 import contextlib
 
-                state_lock = lambda _p: contextlib.nullcontext(False)  # noqa: E731
-            with state_lock(self.baseFilename):
+                lock = lambda _p, _t=None: contextlib.nullcontext(False)  # noqa: E731
+            with lock(self.baseFilename):
                 try:
                     if os.path.getsize(self.baseFilename) < self.maxBytes:
                         # Another process rotated while we waited; our stream

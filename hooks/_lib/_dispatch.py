@@ -115,7 +115,7 @@ _DEFAULT_GROUP_BUDGET_SEC = 15.0
 
 
 def _iter_group_entries(
-    event: str, matcher: str, host: Optional[str]
+    event: str, matcher: Optional[str], host: Optional[str]
 ) -> Iterator[tuple[dict, dict]]:
     """Yield `(hook, entry)` manifest pairs matching (event, matcher, host).
 
@@ -158,7 +158,7 @@ def _iter_group_entries(
 
 
 def load_group(
-    event: str, matcher: str, host: Optional[str] = None
+    event: str, matcher: Optional[str], host: Optional[str] = None
 ) -> tuple[list[tuple[str, str, Path]], float, dict[tuple[str, str], float]]:
     """Read the manifest ONCE; return `(members, budget_sec, member_timeouts)`.
 
@@ -182,6 +182,18 @@ def load_group(
     for hook, entry in _iter_group_entries(event, matcher, host):
         role = hook.get("role")
         name = hook.get("name")
+        # A member's impl path is `<role>/<name>/...`, so both must be strings.
+        # The manifest checker rejects an entry without them, but this is the
+        # runtime side: one malformed entry must not take the whole group down
+        # (a raise here fails main() open with nothing on stderr, hiding every
+        # other member). Exclude it loudly instead, mirroring the args case.
+        if not isinstance(role, str) or not isinstance(name, str):
+            sys.stderr.write(
+                f"[dispatch] manifest entry {hook.get('role')!r}/"
+                f"{hook.get('name')!r} lacks a string role/name — member "
+                "excluded from the group (fail-open)\n"
+            )
+            continue
         # `or` (not `.get(key, default)`): an explicit "body": null in a future
         # manifest entry has the key present, so `.get` would return None and
         # `Path / None` would raise. `or` treats both absent and null as default.
@@ -196,7 +208,7 @@ def load_group(
 
 
 def group_members(
-    event: str, matcher: str, host: Optional[str] = None
+    event: str, matcher: Optional[str], host: Optional[str] = None
 ) -> list[tuple[str, str, Path]]:
     """Return `(role, name, impl_path)` for manifest entries matching (event, matcher).
 
@@ -331,7 +343,7 @@ def _record_fires(members, results, payload_raw: str, event: str) -> None:
 
 
 def run_group(
-    event: str, matcher: str, payload_raw: str, host: Optional[str] = None
+    event: str, matcher: Optional[str], payload_raw: str, host: Optional[str] = None
 ) -> int:
     """Run the whole (event, matcher) group; emit one decision; return its exit code."""
     # Mark this process as the dispatcher so the fail_open-level coarse recorder

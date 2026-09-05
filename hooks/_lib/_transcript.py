@@ -901,19 +901,22 @@ def _resolve_rejected_tool_uses(lines: Iterable[str], rejections: list[dict]) ->
         for block in content:
             if not isinstance(block, dict) or block.get("type") != "tool_use":
                 continue
-            rec = by_id.get(block.get("id"))
-            if rec is None or rec["tool_name"]:
+            block_id = block.get("id")
+            if not isinstance(block_id, str):
+                continue
+            hit = by_id.get(block_id)
+            if hit is None or hit["tool_name"]:
                 continue
             # uuid cross-check when the rejection named its source record: a
             # replayed / resumed transcript can repeat a tool_use id, and the
             # wrong record would attribute the refusal to the wrong tool.
-            if rec["source_uuid"] and ev.get("uuid") != rec["source_uuid"]:
+            if hit["source_uuid"] and ev.get("uuid") != hit["source_uuid"]:
                 continue
             name = block.get("name")
             tool_input = block.get("input")
-            rec["tool_name"] = name if isinstance(name, str) else ""
-            rec["tool_input"] = tool_input if isinstance(tool_input, dict) else {}
-            rec["text"] = _flatten_strings(rec["tool_input"])
+            hit["tool_name"] = name if isinstance(name, str) else ""
+            hit["tool_input"] = tool_input if isinstance(tool_input, dict) else {}
+            hit["text"] = _flatten_strings(hit["tool_input"])
 
 
 def _flatten_strings(value, limit: int = REJECTION_TEXT_MAX_CHARS) -> str:
@@ -1066,12 +1069,17 @@ def reduce_transcript_resumable(
             st = os.fstat(fh.fileno())
         except OSError:
             return resumed() or new_state()
-        state = resumed() if cursor is not None and _cursor_matches(cursor, st, fh) else None
+        # The offset is only ever read off a cursor that produced a state, so
+        # both are bound in one branch: a resumed state without its cursor
+        # cannot exist, and the shape says so rather than relying on it.
+        offset = 0
+        state = None
+        if cursor is not None and _cursor_matches(cursor, st, fh):
+            state = resumed()
+            if state is not None:
+                offset = cursor["offset"]
         if state is None:
-            offset = 0
             state = new_state()
-        else:
-            offset = cursor["offset"]
         fh.seek(offset)
         while True:
             raw = fh.readline()

@@ -147,6 +147,7 @@ import re
 import shlex
 import subprocess
 import sys
+from collections.abc import Set as AbstractSet
 from datetime import date
 from pathlib import Path
 
@@ -432,7 +433,7 @@ def dispatch_node_drifts(
     host_id: str,
     expected_members: set[str],
     dispatch_wrapper_name: str,
-    args_wrappers: set[str] = frozenset(),
+    args_wrappers: AbstractSet[str] = frozenset(),
 ) -> list[str]:
     """Drift strings for one (event, matcher) group's node shape in a hooks.json.
 
@@ -946,7 +947,7 @@ def main() -> int:
         host_id = platform.get("host_id", platform["platform"])
         for output in platform["outputs"]:
             out_path = REPO_ROOT / output["path"]
-            expected = (
+            expected_text = (
                 json.dumps(
                     _build.render_output(
                         base, output, hooks_source, host_id, dispatch_groups
@@ -957,7 +958,7 @@ def main() -> int:
                 + "\n"
             )
             actual = out_path.read_text() if out_path.exists() else ""
-            if expected != actual:
+            if expected_text != actual:
                 drifts.append(
                     f"DRIFT {output['path']}: regenerate with "
                     "./scripts/build-plugin-manifests.py"
@@ -1753,7 +1754,7 @@ def main() -> int:
 
     for event, matcher in sorted(dispatch_groups, key=lambda em: (em[0], em[1] or "")):
         for host_id, hooks_path in hooks_outputs:
-            expected, args_excluded, args_wrappers = _manifest_members_for(
+            expected_members, args_excluded, args_wrappers = _manifest_members_for(
                 event, matcher, host_id
             )
 
@@ -1767,11 +1768,11 @@ def main() -> int:
                     f"group_members resolves a hook more than once "
                     f"({sorted(resolved_names)})"
                 )
-            if set(resolved_names) != expected:
+            if set(resolved_names) != expected_members:
                 drifts.append(
                     f"DISPATCH MEMBER DRIFT {event}/{matcher} host={host_id}: "
                     f"group_members={sorted(set(resolved_names))} != "
-                    f"manifest={sorted(expected)} (args-declaring members are "
+                    f"manifest={sorted(expected_members)} (args-declaring members are "
                     f"excluded on both sides — excluded here: "
                     f"{sorted(args_excluded)})"
                 )
@@ -1797,7 +1798,7 @@ def main() -> int:
                     event,
                     matcher,
                     host_id,
-                    expected,
+                    expected_members,
                     _build.DISPATCH_WRAPPER_NAME,
                     args_wrappers=args_wrappers,
                 )
@@ -2219,7 +2220,7 @@ def main() -> int:
                 (role_dir_counts[role],),
             )
         )
-    for label, pattern, expected in readme_count_specs:
+    for label, pattern, expected_counts in readme_count_specs:
         match = re.search(pattern, readme_text, re.MULTILINE)
         if match is None:
             drifts.append(
@@ -2229,10 +2230,10 @@ def main() -> int:
             )
             continue
         found = tuple(int(g) for g in match.groups())
-        if found != expected:
+        if found != expected_counts:
             drifts.append(
                 f"README COUNT DRIFT ({label}): README.md says {found}, "
-                f"derived {expected} — update the number(s) at "
+                f"derived {expected_counts} — update the number(s) at "
                 f"{match.group(0)!r} (#1176)"
             )
 
