@@ -82,35 +82,6 @@ class TestLoadTranscript:
 
 
 # ---------------------------------------------------------------------------
-# load_transcript_objs / read_transcript_tail (bounded readers)
-# ---------------------------------------------------------------------------
-
-class TestBoundedReaders:
-    def test_objs_keeps_non_dicts_and_skips_bad_lines(self, tmp_path):
-        path = _write_jsonl(tmp_path, [_user(text="hi"), json.dumps([1]), "broken"])
-        objs = T.load_transcript_objs(path, max_bytes=1 << 20)
-        assert len(objs) == 2  # dict + list survive, broken line skipped
-        assert isinstance(objs[1], list)
-
-    def test_objs_over_max_bytes_returns_none(self, tmp_path):
-        path = _write_jsonl(tmp_path, [_user(text="x" * 100)])
-        assert T.load_transcript_objs(path, max_bytes=10) is None
-
-    def test_objs_missing_file_returns_none(self):
-        assert T.load_transcript_objs("/nonexistent/x.jsonl", max_bytes=100) is None
-
-    def test_tail_returns_last_n_lines(self, tmp_path):
-        path = _write_jsonl(tmp_path, [f'{{"i": {i}}}' for i in range(10)])
-        tail = T.read_transcript_tail(path, max_lines=3, max_bytes=1 << 20)
-        assert tail is not None
-        assert tail.splitlines() == ['{"i": 7}', '{"i": 8}', '{"i": 9}']
-
-    def test_tail_over_max_bytes_returns_none(self, tmp_path):
-        path = _write_jsonl(tmp_path, ['{"k": "v"}'] * 5)
-        assert T.read_transcript_tail(path, max_lines=2, max_bytes=3) is None
-
-
-# ---------------------------------------------------------------------------
 # get_current_turn
 # ---------------------------------------------------------------------------
 
@@ -534,8 +505,10 @@ _CONSUMERS = {
     # Same whole-session rationale as pr-report-destination-gate above (#1113).
     HOOKS / "completion-verify" / "pr-anchor-existence-gate" / "impl.py":
         ["reduce_transcript_resumable", "stop_scan_cursor_path"],
+    # Matches search commands in the last N lines only; reads the tail from the
+    # end instead of loading up to 50 MB to keep 400 lines (#1279).
     HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
-        ["read_transcript_tail"],
+        ["tail_lines"],
     # Whole-session scan under a byte cap, needle-prefiltered (#1277).
     HOOKS / "preflight-gate" / "block-commit-without-codex-review" / "impl.py":
         ["iter_transcript_bounded", "TranscriptReadError"],
@@ -579,6 +552,8 @@ _CONSTANT_CONSUMERS = {
         ["TRANSCRIPT_SCAN_LINES"],
     HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES", "REJECTION_PHRASE"],
+    HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
+        ["TRANSCRIPT_SCAN_LINES"],
 }
 
 

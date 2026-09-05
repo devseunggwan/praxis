@@ -8,8 +8,9 @@ Previously these JSONL transcript readers were re-implemented per hook:
     merge-state-claim-gate (Stop hooks)
   - _read_last_user_message duplicated across block-ask-end-option,
     block-manufactured-action-menu (PreToolUse AskUserQuestion gates)
-  - bounded readers (_read_transcript_tail, _load_transcript_objs) in
-    block-gh-issue-create-without-dup-search, block-sciomc-finding-commit
+  - bounded whole-file readers (_read_transcript_tail, _load_transcript_objs)
+    in block-gh-issue-create-without-dup-search, block-sciomc-finding-commit —
+    both since retired for the backward `tail_lines` reader (#1240, #1279)
   - _TRANSCRIPT_SCAN_LINES = 400 re-declared in external-write-falsify-check,
     pre-output-falsification-gate
 
@@ -40,8 +41,6 @@ Public API:
   iter_transcript(path)                                  -> Iterator[dict]
   iter_transcript_bounded(path, max_bytes, needle=None)  -> Iterator[dict]
   json_needle(value)                                     -> bytes | None
-  load_transcript_objs(path, max_bytes)                  -> list | None
-  read_transcript_tail(path, max_lines, max_bytes)       -> str | None
   load_recent_events(path, min_events, max_bytes)        -> list[dict]
   load_current_turn(path, max_bytes)                     -> list[dict]
   get_current_turn(events)                               -> list[dict]
@@ -117,49 +116,13 @@ def iter_transcript(path: str):
                 yield obj
 
 
-def load_transcript_objs(path: str, max_bytes: int) -> list | None:
-    """Bounded loader returning raw parsed objects (dicts and non-dicts).
-
-    Returns None when the file is missing, unreadable, or larger than
-    `max_bytes` — callers treat None as "cannot scan, fail open".
-    Non-JSON lines are skipped, scanning continues.
-
-    The bound is enforced on the bytes actually read (not a stat()
-    pre-check): a live session can append to the transcript between a
-    stat and the read, which would defeat the contract.
-    """
-    text = _read_bounded_text(path, max_bytes)
-    if text is None:
-        return None
-    objs: list = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            objs.append(json.loads(line))
-        except (json.JSONDecodeError, ValueError):
-            continue  # skip non-JSON lines, keep scanning
-    return objs
-
-
-def read_transcript_tail(path: str, max_lines: int, max_bytes: int) -> str | None:
-    """Return the last `max_lines` lines of the transcript as raw text.
-
-    Returns None when the file is missing, unreadable, or larger than
-    `max_bytes` — callers treat None as "cannot scan, fail open".
-    The bound is enforced on the bytes actually read (see
-    `load_transcript_objs`).
-    """
-    text = _read_bounded_text(path, max_bytes)
-    if text is None:
-        return None
-    lines = text.strip().split("\n")
-    return "\n".join(lines[-max_lines:])
-
-
 def _read_bounded_text(path: str, max_bytes: int) -> str | None:
-    """Read at most `max_bytes` bytes; None when missing or over the bound."""
+    """Read at most `max_bytes` bytes; None when missing or over the bound.
+
+    The bound is enforced on the bytes actually read (not a stat() pre-check):
+    a live session can append to the transcript between a stat and the read,
+    which would defeat the contract.
+    """
     try:
         p = Path(path)
         if not p.is_file():
