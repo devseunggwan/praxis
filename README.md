@@ -60,6 +60,28 @@ git clone https://github.com/devseunggwan/praxis.git ~/projects/praxis
 claude skill add ~/projects/praxis/skills/<skill-name>
 ```
 
+## Where to start
+
+Three reading paths, each 3–4 steps. Time estimates are for a first read.
+
+**Fix or add a hook** (~25 min)
+
+1. [`ETHOS.md` → Hook Ethos](ETHOS.md#hook-ethos) — why a hook exists at all and what it may never do (5 min)
+2. [`DESIGN.md` → Adding a new hook](DESIGN.md#adding-a-new-hook) — the shared contracts and the per-hook checklist (10 min)
+3. The hook's own `hooks/<role>/<name>/spec.md`, found via [`docs/hook/INDEX.md`](docs/hook/INDEX.md) — what it blocks, passes, and how it fails open (5 min)
+4. [`CONTRIBUTING.md` → Adding or modifying a hook](CONTRIBUTING.md#adding-or-modifying-a-hook) — registration, tests, and the runtime canary (5 min)
+
+**Change a skill** (~15 min)
+
+1. [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md) — the fixed Claude Code limits a skill must fit inside (5 min)
+2. [`skills/SKILL.md.tmpl`](skills/SKILL.md.tmpl) — the frontmatter and section skeleton to copy (2 min)
+3. [`CONTRIBUTING.md` → Adding or modifying a skill](CONTRIBUTING.md#adding-or-modifying-a-skill) — the live-runtime verification gate (8 min)
+
+**Change packaging or manifests** (~10 min)
+
+1. [`ARCHITECTURE.md` → Multi-Platform Packaging](ARCHITECTURE.md#multi-platform-packaging) — canonical source, generated outputs, add-a-platform flow (6 min)
+2. [`CONTRIBUTING.md` → Packaging](CONTRIBUTING.md#packaging) — which files are generated and how to regenerate them (4 min)
+
 ## Skills
 
 Eighteen skills, grouped as Discovery, Development, Discipline, and Session Management.
