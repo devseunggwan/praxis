@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **hook:** extend rejected-mutation-reconsent to the dispatch surface ([#1262](https://github.com/devseunggwan/praxis/issues/1262)) ([30e95f0](https://github.com/devseunggwan/praxis/commit/30e95f0cb4b1218fdd60669b910849c7c406617e))
 * **hooks:** advise on unenforced mandatory steps ([#1263](https://github.com/devseunggwan/praxis/issues/1263)) ([d1e3e33](https://github.com/devseunggwan/praxis/commit/d1e3e333654cf066fed2082ada5594a002e7504c))
 * **hooks:** gate composed $ command lines ([96c0f98](https://github.com/devseunggwan/praxis/commit/96c0f98b59243c7c5c11e165723628c2800273a0))
+* **hooks:** gate parens release-please rejects ([#1268](https://github.com/devseunggwan/praxis/issues/1268)) ([9ea4785](https://github.com/devseunggwan/praxis/commit/9ea4785ab3ca9ef0bb1f42fac3782e2b9c381730))
 
 
 ### Fixed
