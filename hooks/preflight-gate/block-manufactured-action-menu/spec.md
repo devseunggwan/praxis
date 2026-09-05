@@ -20,14 +20,15 @@ friction.
 ### Why this exists
 
 2026-05-13 retrospect Strike 1: agent completed an action then automatically emitted
-an AskUserQuestion 4-option menu ("다음 액션 진행할까요?") even when the user's
-immediately prior message was a direct command ("진행", "go ahead", "실행"). This
+an AskUserQuestion 4-option menu ("다음 액션 진행할까요?" — "proceed with the
+next action?") even when the user's immediately prior message was a direct
+command ("진행" / "실행" — "proceed" / "run it" — or "go ahead"). This
 pattern fragments decisions, ignores established user intent, and adds an unnecessary
 confirmation roundtrip.
 
 2026-05-21 retrospect Gen 3: after an explicit scoped directive the agent surfaced
 clarification menus whose first option was an affirmative restatement of the
-directive (`그대로 진행`). The question-form marker set did not match those labels,
+directive (`그대로 진행` — "proceed as is"). The question-form marker set did not match those labels,
 so the hook passed silently. The affirmative-form marker set closes that gap — the
 same anti-pattern, detected from the option-label side.
 

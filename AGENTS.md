@@ -60,9 +60,9 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 
 | Skill           | Purpose                                                                                                               |
 | --------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `strike`        | Declare a rule violation — session-scoped counter, escalating signal (1진 warning → 2진 review → 3진 Stop-hook block) |
+| `strike`        | Declare a rule violation — session-scoped counter, escalating signal (strike 1 warning → strike 2 review → strike 3 Stop-hook block) |
 | `strikes`       | Show current strike count + recorded violation reasons for the active session                                         |
-| `reset-strikes` | Reset the session strike counter to 0 after a 3진 block (required to unblock responses)                               |
+| `reset-strikes` | Reset the session strike counter to 0 after a strike-3 block (required to unblock responses)                         |
 
 ### Session Management
 
