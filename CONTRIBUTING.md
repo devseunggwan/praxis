@@ -158,8 +158,10 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
      ```
 3. Register the hook in [`hooks/manifest.json`](hooks/manifest.json) (one
    entry per `(event, matcher)` group). The entry must include `name`, `role`,
-   `event`, and `timeout`; add `matcher`, `hosts`, `args`, `body`, and
-   `wrapper_suffix` as needed. See ADR-0001 §2.5 for the schema.
+   `event`, and `timeout`, and the first registration of the name must carry
+   `review_by` (see [Evidence and sunset review](#evidence-and-sunset-review));
+   add `matcher`, `hosts`, `args`, `body`, and `wrapper_suffix` as needed. See
+   ADR-0001 §2.5 for the schema.
 4. Run `./scripts/build-plugin-manifests.py` — this generates the runtime
    wrapper at `hooks/<name>{suffix}.sh` (tracked; the build re-emits it
    on every run, and commits must include the new wrapper because
@@ -180,6 +182,30 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
 9. Canary the change — see
    [Verifying a hook change at runtime](#verifying-a-hook-change-at-runtime-canary)
    below. A green test suite does not tell you what the runtime is executing.
+
+### Evidence and sunset review
+
+The roster only grows: [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md)
+found zero drops on a 30-day ledger and says it cannot rank hooks by value.
+Three rules keep that growth honest (issue #1300):
+
+1. **Recurrence evidence as numbers.** An issue proposing a new hook states
+   what it fires on as counts, not adjectives: the transcript grep count, the
+   number of sessions, and the window scanned. Copy the format of issue
+   #1271's `빈도` section — the scope (`~/.claude*/projects/*/*.jsonl`), the
+   count at each narrowing step with its percentage, verbatim samples — and
+   say plainly when the real-world failure count is zero, as #1271 does.
+2. **`review_by` = merge date + 90 days.** Every hook name carries a
+   `review_by` date in `hooks/manifest.json` (first registration, step 3
+   above). Rule 26 of `check-plugin-manifests.py` fails CI once that date
+   passes. Re-audit the hook against the fire ledger, then either bump the
+   date or record the verdict in `docs/hook-prune-audit.md` — never bump
+   without the audit.
+3. **Zero escalations means Investigate.** At review, a hook that records
+   rich fire-ledger rows but has zero `advise` / `ask` / `deny` fires goes
+   onto the audit's Investigate list — unless its manifest `mode` sets
+   `observe_only: true`, which marks a hook whose zero escalations are its
+   specification (`askuserquestion-loop-signal`), not a signal about it.
 
 ### Verifying a hook change at runtime (canary)
 
