@@ -425,15 +425,23 @@ def _heredoc_open_marker(argv: list[str]) -> str | None:
     return None
 
 
-def _pipe_chains(tokens: list[str]) -> list[list[list[str]]]:
-    """Split `tokens` into pipe chains, skipping heredoc body segments.
+def _command_units(tokens: list[str]) -> list[tuple[list[list[str]], str | None]]:
+    """Split `tokens` into pipeline units, each paired with the shell
+    separator that terminated it (`None` for the last unit).
 
-    A chain is a list of argv segments connected consecutively by `|`.
-    Chains of length < 2 are dropped. Any segment that is a heredoc body
-    line (between an opener like `cat <<EOF` and its matching `EOF`
-    marker segment) is excluded from chain-building entirely — it never
-    starts, extends, or ends a chain — so example text inside a heredoc
-    body cannot be mistaken for a live pipeline.
+    A unit is the list of argv segments connected consecutively by `|` —
+    a single-segment unit is a command with no pipe. Any segment that is a
+    heredoc body line (between an opener like `cat <<EOF` and its matching
+    `EOF` marker segment) is excluded from unit-building entirely — it
+    never starts, extends, or ends a unit — so example text inside a
+    heredoc body cannot be mistaken for a live pipeline.
+
+    Two detectors consume this: `_pipe_chains` keeps only the multi-segment
+    units (a mutating command piped into a truncating sink, issue #788),
+    and `_masked_gating_advisory` needs the separators as well, because
+    what it looks for is a masked unit sitting on the LEFT of `&&` from an
+    irreversible one (issue #1271). Splitting once here is what keeps the
+    heredoc rule from being written twice.
     """
     # Re-split on shell separators ourselves (rather than reusing
     # iter_command_starts) because we need to know WHICH separator
@@ -453,13 +461,21 @@ def _pipe_chains(tokens: list[str]) -> list[list[list[str]]]:
             current.append(tok)
     raw_segments.append((current, None))
 
-    chains: list[list[list[str]]] = []
+    units: list[tuple[list[list[str]], str | None]] = []
     current_chain: list[list[str]] = []
 
-    def flush_chain() -> None:
+    def flush_chain(terminator: str | None) -> None:
+        """Close the unit being built, recording the separator that ended it.
+
+        `terminator` is the separator sitting between this unit's last
+        segment and whatever follows — `None` at end of input. It is the
+        field `_masked_gating_advisory` reads, so it must be the separator
+        BEFORE the segment that broke the pipe run, not that segment's own
+        trailing one.
+        """
         nonlocal current_chain
-        if len(current_chain) >= 2:
-            chains.append(current_chain)
+        if current_chain:
+            units.append((current_chain, terminator))
         current_chain = []
 
     heredoc_end: str | None = None
@@ -495,19 +511,24 @@ def _pipe_chains(tokens: list[str]) -> list[list[list[str]]]:
         opens = _heredoc_open_marker(argv)
         if opens is not None:
             heredoc_end = opens
-            flush_chain()
+            flush_chain(sep_before)
             sep_before = sep_after
             continue
 
         if sep_before in ("|", "|&") and current_chain:
             current_chain.append(argv)
         else:
-            flush_chain()
+            flush_chain(sep_before)
             current_chain = [argv]
         sep_before = sep_after
 
-    flush_chain()
-    return chains
+    flush_chain(None)
+    return units
+
+
+def _pipe_chains(tokens: list[str]) -> list[list[list[str]]]:
+    """Return only the multi-segment units — the pipe chains of issue #788."""
+    return [unit for unit, _ in _command_units(tokens) if len(unit) >= 2]
 
 
 def _advisory_text(chain: list[list[str]], mutating_desc: str) -> str:
