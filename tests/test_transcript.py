@@ -418,6 +418,42 @@ class TestScanUserRejections:
         # and not a scan that stopped finding things.
         assert len(T.scan_user_rejections(path)) == 1
 
+    def test_file_exactly_at_the_bound_is_scanned(self, tmp_path):
+        # The bound is "past", not "at": a file whose size equals max_bytes is
+        # inside it (#1280 kept the streamed reader on the same edge).
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "AskUserQuestion", {"questions": []}),
+            _rejection("toolu_1", "A1"),
+        ])
+        size = os.path.getsize(path)
+        assert len(T.scan_user_rejections(path, max_bytes=size)) == 1
+        assert T.scan_user_rejections(path, max_bytes=size - 1) is None
+
+    def test_scan_memory_does_not_track_file_size(self, tmp_path):
+        # Both passes stream (#1280): the earlier reader held the bound's worth
+        # of text twice (string + splitlines list). The peak must not grow with
+        # the file, so a 100x larger session costs about the same to scan.
+        import tracemalloc
+
+        def build(n, name):
+            filler = [_user(text="x" * 200) for _ in range(n)]
+            return _write_jsonl(tmp_path / name if (tmp_path / name).mkdir() is None else tmp_path, filler + [
+                _asst_tool_use("A1", "toolu_1", "AskUserQuestion", {"questions": []}),
+                _rejection("toolu_1", "A1"),
+            ])
+
+        small, big = build(100, "s"), build(10000, "b")
+
+        def peak(path):
+            tracemalloc.start()
+            try:
+                assert len(T.scan_user_rejections(path, max_bytes=1 << 30)) == 1
+                return tracemalloc.get_traced_memory()[1]
+            finally:
+                tracemalloc.stop()
+
+        assert peak(big) < 4 * peak(small) + 1 * 1024 * 1024
+
     def test_malformed_line_next_to_a_rejection_is_skipped(self, tmp_path):
         path = _write_jsonl(tmp_path, [
             _asst_tool_use("A1", "toolu_1", "AskUserQuestion",
