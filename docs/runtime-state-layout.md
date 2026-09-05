@@ -53,16 +53,20 @@ dir is not writable, and never raises.
 
 - `hook-errors.jsonl` — swallowed-exception log from the shared `@fail_open`
   guard (`PRAXIS_HOOK_ERROR_LOG` overrides). See
-  [`hooks/_lib/_hook_runtime.py`](../hooks/_lib/_hook_runtime.py).
+  [`hooks/_lib/_hook_runtime.py`](../hooks/_lib/_hook_runtime.py). Rotated by
+  size (issue #1282): past 5 MiB (`PRAXIS_HOOK_ERROR_LOG_MAX_BYTES` overrides,
+  `0` disables) the file becomes `hook-errors.jsonl.1` and a fresh one starts;
+  one predecessor is kept.
 - `stop-triggered.log` / `retrospect-mix-blocked.log` — Stop-gate block logs
   from [`completion-verify`](../hooks/completion-verify/completion-verify/spec.md)
   and [`retrospect-mix-check`](../hooks/completion-verify/retrospect-mix-check/spec.md).
-  Best-effort appends. Before #1182 these lived under an undocumented
+  Best-effort appends, rotated to `<name>.1` past 1 MiB by
+  `praxis_rotate_log` in [`hooks/_lib/_paths.sh`](../hooks/_lib/_paths.sh)
+  (issue #1282) — this directory has no TTL sweep, unlike `cache/` and
+  `telemetry/`, so each writer bounds its own file. Before #1182 these lived under an undocumented
   `~/.praxis/scope-confirm/` root; old files are not migrated and a legacy
-  `scope-confirm/` directory may linger harmlessly. Note that #1182 is a
-  relocation only: `logs/` has no sweep or rotation, so these append-only
-  files still grow without bound — bounding them is a follow-up, not
-  something the move solved.
+  `scope-confirm/` directory may linger harmlessly. #1182 was a relocation
+  only; until #1282 these append-only files grew without bound.
 
 Fire/bypass telemetry is **not** under `logs/` — it lives at
 `~/.praxis/telemetry/` (see [`bypass-telemetry.md`](bypass-telemetry.md)).
