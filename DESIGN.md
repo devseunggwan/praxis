@@ -18,10 +18,17 @@ editing.
 
 Design mechanisms shared by all hooks:
 
-- **Structural tokenization, not regex.** `hooks/_lib/_hook_utils.py`
+- **Structural tokenization, not regex.** `hooks/_lib/_shell_tokenize.py`
   (`safe_tokenize` → `iter_command_starts` → `strip_prefix`) is the shared
-  primitive. Per-hook `impl.py` files add it to `sys.path` via the three-
-  line preamble documented in [`CONTRIBUTING.md → Adding or modifying a hook`](CONTRIBUTING.md#adding-or-modifying-a-hook).
+  primitive; `_subst.py` walks active `$(…)` / backtick spans
+  (`iter_command_texts`), `_compound.py` classifies compound and
+  state-changing commands and owns the cascade hint, and `_roles.py` is
+  the typed `Token` API (`tokenize_with_roles`, `filter_argv`).
+  `_hook_utils.py` is a re-export shim over all four, kept so the
+  pre-#1305 `from _hook_utils import …` preamble still resolves — new code
+  imports from the defining sub-module. Per-hook `impl.py` files add
+  `hooks/_lib` to `sys.path` via the three-line preamble documented in
+  [`CONTRIBUTING.md → Adding or modifying a hook`](CONTRIBUTING.md#adding-or-modifying-a-hook).
   Quoted strings, comments, env prefixes, wrapper commands, and shell
   control-flow keywords are handled consistently across all Bash hooks.
 - **Session state via `session_id`.** Per-session memory (intent flags,
@@ -76,8 +83,8 @@ Design mechanisms shared by all hooks:
   hook rejects (block) or asks-and-may-deny a compound command (`&&`, `||`,
   `;`, `|`, newline) containing a state-changing step (`> file`, `<<EOF >`,
   `mkdir`, `tee`, `cp`/`mv`/`rm`/`touch`, `curl -o`, `wget -O`), every hook
-  appends the shared `_hook_utils.compound_cascade_hint(command)` text to
-  its block/ask message. The advisory clarifies that bash never executed
+  appends the shared `_compound.compound_cascade_hint(command)` text
+  (re-exported by `_hook_utils`) to its block/ask message. The advisory clarifies that bash never executed
   ANY part of the rejected command — files the redirect/mkdir/download
   would have created do NOT exist on disk — so the agent should not retry
   the second half expecting the first half to have landed. Single-command
@@ -241,7 +248,9 @@ that could have failed it.
    semantics). See the `Convention Survey Before Design` rule in global
    `~/.claude/CLAUDE.md`.
 2. Author `hooks/<role>/<name>/impl.py` (or `impl.sh` for body-as-sh),
-   make it executable, add the `sys.path` preamble for `_hook_utils`.
+   make it executable, add the `sys.path` preamble for `hooks/_lib` and
+   import from `_shell_tokenize` / `_subst` / `_compound` / `_roles` (the
+   `_hook_utils` shim re-exports them for hooks written before #1305).
 3. Register the hook in [`hooks/manifest.json`](hooks/manifest.json) per
    ADR-0001 §2.5 schema (`name`, `role`, `event`, `matcher`, `hosts`,
    `timeout`, `args`, `body`, `wrapper_suffix` as applicable).
