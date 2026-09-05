@@ -40,8 +40,8 @@ def _filler(n: int) -> list[str]:
         {"type": "text", "text": f"step {i} " + "x" * 200}]}}) for i in range(n)]
 
 
-def _write(tmp_path: Path, lines: list[str]) -> str:
-    p = tmp_path / "t.jsonl"
+def _write(tmp_path: Path, lines: list[str], name: str = "t.jsonl") -> str:
+    p = tmp_path / name
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return str(p)
 
@@ -86,8 +86,8 @@ def test_missing_and_oversized_answer_none(tmp_path, monkeypatch):
 
 
 def test_scan_memory_does_not_track_file_size(tmp_path):
-    small = _write(tmp_path / "s" if (tmp_path / "s").mkdir() is None else tmp_path, _filler(200))
-    big = _write(tmp_path, _filler(20000))
+    small = _write(tmp_path, _filler(200), name="small.jsonl")
+    big = _write(tmp_path, _filler(20000), name="big.jsonl")
     assert Path(big).stat().st_size > 20 * Path(small).stat().st_size
 
     def peak(path: str) -> int:
@@ -117,3 +117,13 @@ def test_one_oversized_line_is_refused_before_allocation(tmp_path, monkeypatch):
     finally:
         tracemalloc.stop()
     assert peak < 1024 * 1024
+
+
+def test_non_regular_path_answers_none_without_blocking(tmp_path):
+    # A FIFO at the path must not be opened: open() would block for the whole
+    # shared dispatch deadline. The is_file() guard answers None at once.
+    import os
+    fifo = tmp_path / "t.fifo"
+    os.mkfifo(fifo)
+    assert gate._transcript_invokes_skill(str(fifo), check_slash=True) is None
+    assert gate._transcript_invokes_skill("bad\x00path", check_slash=True) is None

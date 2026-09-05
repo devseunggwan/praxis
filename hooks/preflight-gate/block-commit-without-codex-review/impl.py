@@ -81,7 +81,6 @@ Classification is token-level (shlex punctuation_chars), not raw-string, so:
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import shlex
@@ -93,6 +92,7 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib")
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import TranscriptReadError, iter_transcript_bounded  # type: ignore[import-not-found]  # noqa: E402
 from pathlib import Path
 
 _TARGET_SKILL = "praxis:codex-review-wrap"
@@ -461,9 +461,11 @@ _CMDNAME_RE = re.compile(r"^\s*<command-name>/?(?:praxis:)?codex-review-wrap(?:\
 
 # Every record that can satisfy the gate carries this literal: the Skill
 # tool_use's `skill` value (`praxis:codex-review-wrap`) and both slash-command
-# spellings the regexes above accept. JSON escaping cannot hide it — the name
-# is plain ASCII with no character `json.dumps` rewrites — so a line without
-# it is rejected before any parse, in C, at memchr speed.
+# spellings the regexes above accept. A bare literal rather than
+# `json_needle` because the slash forms are text inside a message, not a JSON
+# string value on their own. JSON escaping cannot hide it — plain ASCII with
+# no character `json.dumps` rewrites — so a line without it is rejected before
+# any parse, in C, at memchr speed.
 _SKILL_NEEDLE = b"codex-review-wrap"
 
 
@@ -472,15 +474,14 @@ def _transcript_invokes_skill(path: str, *, check_slash: bool) -> bool | None:
     not, None when the file is missing, unreadable, or larger than `_MAX_BYTES`
     (the caller decides how to treat None per call site).
 
-    Streams the file and parses only the lines that contain `_SKILL_NEEDLE`
-    (issue #1277). The previous shape — `read_text().splitlines()` into a
-    list, then `json.loads` on every line — cost 490 ms and ~70 MB of RSS per
-    `git commit` on a 36 MB session, inside the Bash dispatch group's shared
-    deadline (#1167); the same scan with the prefilter is 41 ms at constant
-    memory. The byte bound is enforced on the bytes actually read, not on a
-    stat() taken before the walk: a live session appends between the two —
-    and each read is capped at the budget left, so a single oversized line
-    is refused before it is allocated rather than after.
+    Streams through `_transcript.iter_transcript_bounded` and parses only the
+    lines that contain `_SKILL_NEEDLE` (issue #1277). The previous shape —
+    `read_text().splitlines()` into a list, then `json.loads` on every line —
+    cost 490 ms and ~70 MB of RSS per `git commit` on a 36 MB session, inside
+    the Bash dispatch group's shared deadline (#1167); the same scan with the
+    prefilter is 41 ms at constant memory. The reader owns the byte bound
+    (counted on bytes actually read, capped per read) and the fail-open
+    classes; this function owns only what a satisfying record looks like.
 
     `check_slash` scopes the `/praxis:codex-review-wrap` slash-command check
     to the root transcript only (subagent scans pass `check_slash=False`): a
@@ -490,48 +491,21 @@ def _transcript_invokes_skill(path: str, *, check_slash: bool) -> bool | None:
     would only be a phantom code path a fabricated transcript could abuse.
     """
     try:
-        fh = open(path, "rb")
-    except OSError:
+        for obj in iter_transcript_bounded(path, _MAX_BYTES, _SKILL_NEEDLE):
+            # A `Skill` tool_use is a genuine invocation wherever it appears —
+            # only the assistant can emit one, and emitting it *is* running
+            # the skill. A slash command, by contrast, is user-initiated: an
+            # assistant message that merely prints "/praxis:codex-review-wrap"
+            # on a line is a suggestion, not an invocation. Scope slash
+            # detection to user entries (the real invocation is recorded as a
+            # user message with a <command-name> marker) so an assistant
+            # suggestion cannot satisfy it.
+            if _has_skill_tool_use(obj):
+                return True
+            if check_slash and obj.get("type") == "user" and _has_slash_command(obj):
+                return True
+    except TranscriptReadError:  # missing, unreadable, or past _MAX_BYTES
         return None
-    consumed = 0
-    with fh:
-        try:
-            while True:
-                # readline(limit) never allocates more than the bytes left in
-                # the budget (+1 to detect the overrun), so one oversized line
-                # cannot pull megabytes into memory before the bound applies.
-                raw = fh.readline(_MAX_BYTES - consumed + 1)
-                if not raw:
-                    break
-                consumed += len(raw)
-                if consumed > _MAX_BYTES:
-                    return None
-                if _SKILL_NEEDLE not in raw:
-                    continue
-                line = raw.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line.decode("utf-8", errors="replace"))
-                except (json.JSONDecodeError, ValueError):
-                    continue
-                if not isinstance(obj, dict):
-                    continue
-                # A `Skill` tool_use is a genuine invocation wherever it
-                # appears — only the assistant can emit one, and emitting it
-                # *is* running the skill. A slash command, by contrast, is
-                # user-initiated: an assistant message that merely prints
-                # "/praxis:codex-review-wrap" on a line is a suggestion, not
-                # an invocation. Scope slash detection to user entries (the
-                # real invocation is recorded as a user message with a
-                # <command-name> marker) so an assistant suggestion cannot
-                # satisfy it.
-                if _has_skill_tool_use(obj):
-                    return True
-                if check_slash and obj.get("type") == "user" and _has_slash_command(obj):
-                    return True
-        except OSError:
-            return None
     return False
 
 

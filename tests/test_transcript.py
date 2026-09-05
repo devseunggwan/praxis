@@ -465,6 +465,9 @@ _CONSUMERS = {
         ["reduce_transcript_resumable", "stop_scan_cursor_path"],
     HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
         ["read_transcript_tail"],
+    # Whole-session scan under a byte cap, needle-prefiltered (#1277).
+    HOOKS / "preflight-gate" / "block-commit-without-codex-review" / "impl.py":
+        ["iter_transcript_bounded", "TranscriptReadError"],
     HOOKS / "preflight-gate" / "block-ask-end-option" / "impl.py":
         ["read_last_user_message"],
     HOOKS / "preflight-gate" / "block-manufactured-action-menu" / "impl.py":
@@ -1077,3 +1080,90 @@ class TestReduceTranscriptResumable:
         assert T.stop_scan_cursor_path("some-gate", "") is None
         p = T.stop_scan_cursor_path("some-gate", "sid-1")
         assert p == str(tmp_path / "cache" / "stop-scan-some-gate-sid-1.json")
+
+
+class TestIterTranscriptBounded:
+    """The shared bounded reader (#1277, #1312): one loop for every gate that
+    scans a whole session under a size cap."""
+
+    def test_yields_only_needle_lines_and_parses_them(self, tmp_path, monkeypatch):
+        path = _write_jsonl(tmp_path, [
+            _user(text="plain"),
+            _asst_tool_use("A1", "toolu_1", "Skill", {"skill": "praxis:x"}),
+            'not json but has "Skill"',
+        ])
+        calls = []
+        real = T.json.loads
+
+        def counting(s, *a, **k):
+            calls.append(s)
+            return real(s, *a, **k)
+
+        monkeypatch.setattr(T.json, "loads", counting)
+        got = list(T.iter_transcript_bounded(path, 1 << 20, b'"Skill"'))
+        assert [g["uuid"] for g in got] == ["A1"]
+        assert len(calls) == 2  # the record and the non-JSON line; the plain line never parsed
+
+    def test_any_of_needle_and_no_needle(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "t1", "Bash", {"command": "ls"}),
+            _asst_tool_use("A2", "t2", "Skill", {"skill": "x"}),
+            _user(text="hello"),
+        ])
+        assert [g["uuid"] for g in T.iter_transcript_bounded(path, 1 << 20, (b'"Bash"', b'"Skill"'))] == ["A1", "A2"]
+        assert len(list(T.iter_transcript_bounded(path, 1 << 20))) == 3
+
+    def test_missing_and_non_regular_paths_raise(self, tmp_path):
+        import os
+
+        with pytest.raises(T.TranscriptReadError):
+            list(T.iter_transcript_bounded(str(tmp_path / "absent.jsonl"), 1 << 20))
+        fifo = tmp_path / "t.fifo"
+        os.mkfifo(fifo)
+        with pytest.raises(T.TranscriptReadError):
+            list(T.iter_transcript_bounded(str(fifo), 1 << 20))  # must not block on open()
+        with pytest.raises(T.TranscriptReadError):
+            list(T.iter_transcript_bounded("bad\x00path", 1 << 20))
+
+    def test_over_the_bound_raises_too_large_before_reading(self, tmp_path, monkeypatch):
+        path = _write_jsonl(tmp_path, [_user(text="x" * 100)] * 10)
+        size = os.path.getsize(path)
+        reads = []
+        real = T._parse_line
+        monkeypatch.setattr(T, "_parse_line", lambda raw: reads.append(raw) or real(raw))
+        with pytest.raises(T.TranscriptTooLarge):
+            list(T.iter_transcript_bounded(path, size - 1))
+        assert reads == []  # fstat early-out: nothing was parsed
+        assert len(list(T.iter_transcript_bounded(path, size))) == 10  # at the bound is inside
+
+    def test_too_large_is_a_read_error(self):
+        assert issubclass(T.TranscriptTooLarge, T.TranscriptReadError)
+
+    def test_one_oversized_line_is_refused_before_allocation(self, tmp_path, monkeypatch):
+        # The fstat early-out is what normally catches a file this size, so it
+        # is stubbed to report a small file: the line itself must then be
+        # stopped by the per-read cap, before it is allocated in full.
+        import tracemalloc
+
+        path = tmp_path / "t.jsonl"
+        path.write_bytes(b'{"type": "user", "pad": "' + b"x" * (4 * 1024 * 1024) + b'"}\n')
+        small = type("St", (), {"st_size": 0})()
+        monkeypatch.setattr(T.os, "fstat", lambda fd: small)
+        tracemalloc.start()
+        try:
+            with pytest.raises(T.TranscriptTooLarge):
+                list(T.iter_transcript_bounded(str(path), 64 * 1024))
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        assert peak < 1024 * 1024
+
+
+class TestJsonNeedle:
+    def test_plain_ascii_value_is_quoted(self):
+        assert T.json_needle("praxis:codex-review-wrap") == b'"praxis:codex-review-wrap"'
+
+    def test_values_the_encoder_rewrites_answer_none(self):
+        assert T.json_needle('say "hi"') is None
+        assert T.json_needle("a\\b") is None
+        assert T.json_needle("praxis:회고") is None  # escaped by the default encoder
