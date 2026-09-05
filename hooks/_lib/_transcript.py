@@ -612,15 +612,21 @@ def _iter_bounded_lines(fh, max_bytes: int):
     Returns True when the file ended inside the bound and False when the
     bound cut the walk short (read via `StopIteration.value`). Counted on the
     bytes actually read rather than a stat() beforehand: a live session
-    appends between the two.
+    appends between the two. Each read is capped at the budget left, so a
+    single oversized line is refused before it is allocated.
     """
     consumed = 0
-    for raw in fh:
+    while True:
+        # readline(limit) never allocates more than the bytes left in the
+        # budget (+1 to detect the overrun), so one oversized line cannot pull
+        # megabytes into memory before the bound applies.
+        raw = fh.readline(max_bytes - consumed + 1)
+        if not raw:
+            return True
         consumed += len(raw)
         if consumed > max_bytes:
             return False
         yield raw
-    return True
 
 
 def scan_user_rejections(

@@ -454,6 +454,21 @@ class TestScanUserRejections:
 
         assert peak(big) < 4 * peak(small) + 1 * 1024 * 1024
 
+    def test_one_oversized_line_is_refused_before_allocation(self, tmp_path):
+        # A single line past the bound must not be read whole and only then
+        # measured: each read is capped at the budget left (#1280 review).
+        import tracemalloc
+
+        path = tmp_path / "t.jsonl"
+        path.write_bytes(b'{"type": "user", "pad": "' + b"x" * (4 * 1024 * 1024) + b'"}\n')
+        tracemalloc.start()
+        try:
+            assert T.scan_user_rejections(str(path), max_bytes=64 * 1024) is None
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        assert peak < 1024 * 1024
+
     def test_malformed_line_next_to_a_rejection_is_skipped(self, tmp_path):
         path = _write_jsonl(tmp_path, [
             _asst_tool_use("A1", "toolu_1", "AskUserQuestion",
