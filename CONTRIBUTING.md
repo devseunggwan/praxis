@@ -46,6 +46,19 @@ are corrected. Re-run after pulls or after adding a new CLI script.
 Exits non-zero on drift, so it can be wired into CI or a SessionStart hook
 to catch "patch landed in the wrong clone" before it bites a future session.
 
+### Keeping `AGENTS.md` small
+
+`AGENTS.md` (`CLAUDE.md` is a symlink to it) is loaded into every session, so
+every word there costs context on every turn.
+[`tests/test_agents_md_budget.py`](tests/test_agents_md_budget.py) caps it at
+1,000 whitespace-split words (Python `str.split()` — `wc -w` in the C locale
+skips tokens made only of non-ASCII characters such as `—` and `→`, so it
+reads low). Content only a contributor needs — setup, tooling,
+procedures that are never executed in-session — belongs in this file; leave a
+one-line pointer in `AGENTS.md`, and keep its Skills tables, compatibility-tier
+table, and Issue & PR conventions intact, since `check-plugin-manifests.py`
+Rule 13 normalizes those against `README.md` and `using-praxis` (issue #1306).
+
 ## Writing a spec
 
 A *feature spec* states what a change must satisfy, before the change exists.

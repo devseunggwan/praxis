@@ -2,20 +2,20 @@
 
 Workflow rules from CLAUDE.md turned into hooks and skills that actually fire.
 
-Each skill is an orchestrator with pluggable steps. External integrations (issue tracker, PR tool, code review) are routed via the project's CLAUDE.md — no hardcoded dependencies.
+Skills are orchestrators with pluggable steps; external integrations (issue tracker, PR tool, code review) route via the project's CLAUDE.md, never hardcoded.
 
 ## Documentation map
 
-| File                                                               | Purpose                                                                                                                                                                |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`ETHOS.md`](ETHOS.md)                                             | Why praxis exists — values and principles that gate every skill, hook, and manifest; includes [Autonomy vs Convention](ETHOS.md#autonomy-vs-convention) boundary table |
-| [`DESIGN.md`](DESIGN.md)                                           | How hooks are built — structural-tokenization, session_id keying, compound-bash-cascade, ordering, and add-a-new-hook flow                                             |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md)                               | Skill ↔ hook ↔ manifest dependency graph — provider routing, hook index, multi-platform packaging                                                                      |
-| [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md)                 | Fixed Claude Code runtime limits every skill must respect                                                                                                              |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md)                               | Skill and hook contribution conventions, live-runtime verification gate, local development setup                                                                       |
-| [`docs/spec-store.md`](docs/spec-store.md)                         | Feature-spec convention — design docs at `~/.praxis/docs/specs/NNNN-slug.md` (outside any checkout, `PRAXIS_HOME`-relocated), when one is required and when skipped    |
-| [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md)             | Evidence-based keep/merge/drop verdict per hook, scored from the fire-rate ledger (issue #713)                                                                         |
-| [`docs/retrospect-prune-audit.md`](docs/retrospect-prune-audit.md) | Same lens on the retrospect skill's gates/fences/stages, scored from retrospective transcript mining (issue #776)                                                      |
+| File                                                               | Purpose                                                                                                                                                 |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`ETHOS.md`](ETHOS.md)                                             | Why praxis exists — the values that gate every skill, hook, and manifest; [Autonomy vs Convention](ETHOS.md#autonomy-vs-convention) boundary table      |
+| [`DESIGN.md`](DESIGN.md)                                           | How hooks are built — structural-tokenization, session_id keying, compound-bash-cascade, ordering, and add-a-new-hook flow                              |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md)                               | Skill/hook/manifest dependency graph — provider routing, hook index, multi-platform packaging                                                           |
+| [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md)                 | Fixed Claude Code runtime limits every skill must respect                                                                                               |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md)                               | Skill/hook contribution conventions, live-runtime verification gate, local development setup                                                            |
+| [`docs/spec-store.md`](docs/spec-store.md)                         | Feature-spec convention — specs at `~/.praxis/docs/specs/NNNN-slug.md` (`PRAXIS_HOME`-relocated, outside any checkout); when one is required or skipped |
+| [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md)             | Keep/merge/drop verdict per hook, scored from the fire-rate ledger (issue #713)                                                                         |
+| [`docs/retrospect-prune-audit.md`](docs/retrospect-prune-audit.md) | Same lens on retrospect's gates/fences/stages, scored from retrospective transcript mining (issue #776)                                                 |
 
 ## Prerequisites
 
@@ -33,7 +33,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 
 ## Skills (18)
 
-> **Invocation**: praxis entries are *skills*, not subagents. Always call them
+> **Invocation**: praxis entries are *skills*, not subagents. Call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
 > returns `Agent type not found` (rationale: [RUNTIME_CONSTRAINTS.md §3](RUNTIME_CONSTRAINTS.md)).
 
@@ -77,7 +77,7 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 
 ## Hooks
 
-Praxis ships a PreToolUse / PostToolUse / Stop / UserPromptSubmit hook suite
+Praxis ships a PreToolUse/PostToolUse/Stop/UserPromptSubmit hook suite
 that structurally enforces the rules in [`ETHOS.md`](ETHOS.md);
 [`DESIGN.md`](DESIGN.md) holds the shared contracts. Per-hook specs live at
 [`hooks/<role>/<name>/spec.md`](hooks/), indexed by
@@ -101,8 +101,8 @@ Details:
 
 ## Local Development
 
-Clone path (`~/projects/praxis`), `~/.local/bin` symlink install / verify, and
-the CLI-tools table (`bypass-review`):
+Clone path, `~/.local/bin` symlink install/verify, CLI-tools table
+(`bypass-review`):
 [`CONTRIBUTING.md` → Local development](CONTRIBUTING.md#local-development).
 
 ## Issue & PR Conventions
