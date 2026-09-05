@@ -41,8 +41,8 @@ All other allow conditions and bypasses are unchanged.
 
 ### Why this exists
 
-The global workflow (`AGENTS.md` `Deliver` table, devseunggwan/ai-dotfiles#93)
-lists `praxis:codex-review-wrap` as a second mandatory independent review pass
+The workflow this hook was written for (a `Deliver` table in the author's
+dotfiles `AGENTS.md`, devseunggwan/ai-dotfiles#93 — outside this repo) lists `praxis:codex-review-wrap` as a second mandatory independent review pass
 before commit — an independent Codex pass after `omc:code-reviewer` that catches
 defects a single reviewer misses. Prose alone is unreliable (prompt-layer
 retrieval failure); per the established escalation pattern, structural

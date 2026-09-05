@@ -252,8 +252,8 @@ that could have failed it.
 
 1. Survey ≥2 sibling implementations under `hooks/<role>/` for the
    convention (state-key naming, payload field access, exit-code
-   semantics). See the `Convention Survey Before Design` rule in global
-   `~/.claude/CLAUDE.md`.
+   semantics) — the *Convention Survey Before Design* rule
+   ([`ETHOS.md` → Rules praxis carries](ETHOS.md#rules-praxis-carries)).
 2. Author `hooks/<role>/<name>/impl.py` (or `impl.sh` for body-as-sh),
    make it executable, add the `sys.path` preamble for `hooks/_lib` and
    import from `_shell_tokenize` / `_subst` / `_compound` / `_roles` (the

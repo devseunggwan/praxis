@@ -210,8 +210,8 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
 
 1. Survey ≥ 2 sibling implementations under `hooks/<role>/` for established
    conventions (state-key naming, payload field access, exit-code semantics)
-   before writing your spec. See **Convention Survey Before Design** in
-   global `~/.claude/CLAUDE.md`.
+   before writing your spec — the *Convention Survey Before Design* rule
+   ([`ETHOS.md` → Rules praxis carries](ETHOS.md#rules-praxis-carries)).
 2. Author the hook in its own per-hook directory:
    - Impl: `hooks/<role>/<name>/impl.py` (or `impl.sh` for body-as-sh hooks).
    - Make it executable: `chmod +x hooks/<role>/<name>/impl.py`.
