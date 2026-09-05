@@ -71,6 +71,15 @@ The script mechanizes, mirroring the Stop hook's parsing semantics
   therefore only ever add escalation, never remove one: `private` and
   `internal` count as one class, so declaring either against a private repo is
   not a contradiction
+- **Gate-4b — the Stop hook resolves it again** (issue #1244). Do not
+  hand-write `gate_4_verdict`, and do not hand-edit an escalated row's marker:
+  `hooks/completion-verify/retrospect-mix-check/impl.sh` recomputes this same
+  classification from each routed row's `backing_repo` / `repo_visibility` plus
+  the same API, and blocks the Stage 3 output when the card's verdict, or a
+  missing `⚠ EXTERNAL:` marker, contradicts what it resolves. Where its lookup
+  returns no answer it demotes that row to "visibility unresolved" rather than
+  blocking, and the row stays in the Stage 4 per-action approval set through
+  Step 0a's second trigger
 - **Gate-5** — every memory-action finding needs a complete
   `<!-- memory_scan finding #N: ... -->` block (`scanned: true`,
   `candidates_reviewed`, `repeat`, `repeat_count`)

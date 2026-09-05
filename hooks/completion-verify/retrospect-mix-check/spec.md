@@ -41,6 +41,7 @@ of the following hold:
 | `gate_2_verdict: FAIL` in the distribution card                                                                                                                                                                                                     | Stage 2.5 Gate-2 (procedural rationale) was violated                                                                                                                                                                                                                                                                                              |
 | `gate_3_verdict: FAIL` in the distribution card                                                                                                                                                                                                     | Stage 2.5 Gate-3 (evidence robustness) was violated — a 2-action compound finding lacked independent evidence per action, or had decision-coupled actions                                                                                                                                                                                         |
 | `gate_4_verdict: FAIL` in the distribution card                                                                                                                                                                                                     | Stage 2.5 Gate-4 (external-repo authorization) emitted FAIL                                                                                                                                                                                                                                                                                       |
+| Gate-4b (#1244): a routed row is a cross-boundary write but its Rationale carries no `⚠ EXTERNAL: per-action approval required at Stage 4` marker, or the card declares `gate_4_verdict: PASS` while such a row exists, or `NA` while one does      | The card's verdict is written by the agent this gate constrains, so Gate-4b recomputes it from the row's declarations plus `gh api repos/<owner>/<repo>` (own-org only — the exemption needs both halves). `NA` means "no routed row at all", so one such row refutes it. An unresolved lookup demotes instead of blocking — see below            |
 | `gate_4_verdict` absent AND Rationale contains `⚠ EXTERNAL:` prefix                                                                                                                                                                                 | Gate-4 ran and marked findings external, but `gate_4_verdict` was not written to the distribution card — Stage 2.5 was partially skipped                                                                                                                                                                                                          |
 | `gate_1_verdict` or `gate_2_verdict` key missing                                                                                                                                                                                                    | Distribution card is malformed or Stage 2.5 was skipped                                                                                                                                                                                                                                                                                           |
 | Any row with `Category` ∈ {tool, workflow, spec-gap} AND `Proposed Actions = memory` (single)                                                                                                                                                       | Gate-1 violation detected via independent table parse                                                                                                                                                                                                                                                                                             |
@@ -406,15 +407,139 @@ spec owns the budget.
   with a re-emit nudge. This is a narrow compound deviation; the consequence is a
   recoverable nudge (actions already ran; no data effect), not a wrong write.
 
+### Gate-4b independent visibility resolution (issue #1244)
+
+Every Gate-4 check above reads `gate_4_verdict` out of the distribution card,
+and that card is written by the agent the gate constrains: the enforcement
+layer's input is authored by its own target, so `gate_4_verdict: PASS` passes
+the gate. PR #1242 closed the same hole one layer up (the audit script no
+longer trusts the self-declared `repo_visibility` when it resolves the own-org
+exemption, issue #1150) and left this one open.
+
+Gate-4b recomputes the classification instead of reading the verdict. Its
+criterion is the SoT's, `skills/retrospect/references/stage2.5-audit.md`
+Gate-4: a routed row is unescalated only when **both** halves hold — the owner
+is own-org **and** the repo is `private`/`internal` by declaration **and** by
+API. Since issue #993 the criterion is visibility, not ownership.
+
+| Row (routed, `backing_repo` declared) | Resolution | Outcome |
+| --- | --- | --- |
+| declares `repo_visibility: public`, or declares nothing | none needed — public (#993) | `escalate` |
+| declares `private`/`internal`, owner outside the own-org allowlist | none needed — `NOT_OWN_ORG` | `escalate` |
+| declares `private`/`internal`, own-org, API says `public` | one `gh api repos/<r>` | `escalate` |
+| declares `private`/`internal`, own-org, API says `private`/`internal` | one `gh api repos/<r>` | `exempt` |
+| declares `private`/`internal`, lookup returned no answer | attempted, unresolved | `unresolved` |
+| declares `private`/`internal`, own-org allowlist itself unresolved | none needed — `UNRESOLVED` | `unresolved` |
+
+Two thirds of that table needs no network at all, which is what keeps the
+common offline retrospect deterministic.
+
+The two rows marked *none needed* are the own-org filter: the exemption needs
+own-org **and** private/internal, so once the first half fails no visibility
+answer can change the verdict, and the resolver spends nothing on it. It
+answers `NOT_OWN_ORG` for a refuted owner and `UNRESOLVED` when the allowlist
+itself could not be read — ownness unknown is not ownness refuted, and the two
+route to different outcomes. Neither consumes the lookup cap, so a batch of
+third-party rows cannot starve a genuine own-org row of the budget it needs.
+`PRAXIS_REPO_VISIBILITY` is therefore not consulted for a non-own-org repo
+either; the hook never reads that value for such a row, so the outcome is
+unchanged.
+
+**The own-org half does not depend on `python3`.** The resolver owns the
+visibility half, but the allowlist has a purely local answer whenever
+`PRAXIS_OWN_ORGS` is set, so the hook reads that variable itself — splitting on
+comma, trimming, dropping empties and lowercasing, exactly as
+`gate4_visibility.resolve_own_orgs()`'s env leg does. Without this the whole
+resolver sat behind `command -v python3`, and an interpreter-less environment
+demoted a row whose owner the allowlist already **refutes** — a knowably
+external repo passing the Stop, which is the hole Gate-4b exists to close. The
+same shell leg covers the adjacent failures: the helper exiting non-zero, or
+printing nothing.
+
+Only the env leg is local. `gh api user` genuinely needs a subprocess, so an
+allowlist that exists nowhere on the machine still resolves `UNRESOLVED` and
+still demotes — the offline tradeoff above is deliberate and unchanged. The
+demotion message names the input that was actually missing (`python3
+unavailable` when the interpreter is gone, `gh unavailable` when it is present
+and the lookup failed) rather than always blaming the env var.
+
+`backing_repo` values reaching Gate-4b are always `<owner>/<repo>`: Gate-3's
+parse admits nothing else, so a bare handle is rejected one gate earlier and
+never enters the Gate-4b array. That is why the hook's owner comparison carries
+no `not slash` guard while the resolver, which reads an unfiltered stdin list,
+does.
+
+**Blocks** when a row resolves `escalate` and its Rationale carries no literal
+`⚠ EXTERNAL: per-action approval required at Stage 4` marker (Stage 4 Step 0a
+trigger 1 is disarmed for that row), when the card declares
+`gate_4_verdict: PASS` while at least one row resolves `escalate`, or when it
+declares `gate_4_verdict: NA` while **any** routed row with a declared backing
+repo exists. `NA` is emitted by `audit-distribution-gates.py` only when no
+finding proposed `upstream_feedback` or `issue` at all, so one such row refutes
+it whatever the per-row resolution came back as — including rows that resolve
+`exempt`, which the escalation check above cannot see.
+
+**Demotes, never blocks, on `unresolved`.** Fail-open would reproduce the
+behaviour this gate replaces; fail-closed would block every offline retrospect,
+and no other Stop hook in this repo makes a network call. So the Stop proceeds
+and the row's ground is demoted from "exempt" to "visibility unresolved",
+emitted as a `{"systemMessage": ...}` on stdout (and folded into the reason
+string when some other gate blocks anyway, so it is not lost).
+
+That demotion reaches Stage 4 without anything being written into the report,
+which the hook could not do in any case:
+`skills/retrospect/references/stage4-execution.md` Step 0a fires on **either**
+of two independent triggers, and trigger 2 (public-visibility recheck) is
+itself fail-closed — *"If the visibility query errors, times out, or returns
+anything other than `PRIVATE` / `INTERNAL`, treat the repo as public and fire
+the gate."* A row the hook could not resolve is exactly a row Step 0a
+re-resolves and fails closed on, so it stays in the per-action approval set.
+The literal marker is trigger 1 only.
+
+**Lookup budget.** The resolver
+(`hooks/completion-verify/retrospect-mix-check/gate4_visibility.py`) mirrors
+`resolve_own_orgs` / `resolve_repo_visibility` in
+`skills/retrospect/audit-distribution-gates.py` (`PRAXIS_OWN_ORGS` → `gh api
+user`; live API → `PRAXIS_REPO_VISIBILITY`, the API deliberately outranking the
+env var per #1150), looks up own-org repos only (`actual =
+resolve_repo_visibility(repo) if own else None` in the SoT), dedupes to one call
+per repo per run, caps the run at **8 lookups actually spent** (past ~15 repos
+the manifest's 10s budget breaks), and adopts the
+`MIN_SUBPROC_BUDGET_SEC = 0.5` floor from `hooks/_lib/_hook_runtime.py` — below
+it nothing is spawned, because 12 more hooks queue behind this one in the Stop
+group. Every failure cause — `gh` missing, unauthenticated, 404, rate-limited,
+offline, timed out, over the cap, below the floor, `python3` unavailable —
+collapses to the single value `UNRESOLVED`, which demotes. That covers the
+**visibility** half only: the own-org half is resolved in the hook from
+`PRAXIS_OWN_ORGS` when it is set, so a refuted owner still escalates with the
+resolver entirely out of reach.
+
+Measured on this repo (5 runs each, `gate4_visibility.py` on the real API):
+the full gate-parsing path costs 1.41s with no lookup and 2.45s with one on a
+small transcript, 2.16s / 3.08s on a 21 MB transcript — against a 10s manifest
+timeout and the 8s internal deadline the resolver is handed.
+
+The own-org filter is what keeps that budget reachable. Measured on 8 repos
+outside the allowlist, real `gh`, the pre-filter and post-filter resolvers run
+alternately in one loop so both see the same machine load: 3.62 / 3.81 / 4.60s
+before, 0.65 / 0.87 / 0.84s after. Both figures include the one live `gh api
+user` call that resolves the allowlist, so the delta is exactly the eight repo
+lookups — every one of them spent on an answer the owner check had already made
+irrelevant. Run them at separate moments and the comparison is worthless: on a
+loaded host the same post-filter fixture measured 0.75s and 2.09s minutes
+apart.
+
 ### What is NOT blocked (pass-through)
 
 - Non-retrospect Stop events (most assistant messages)
 - Retrospect outputs at Stage 4 (`## Actions Executed` present in most-recent block)
 - `behavioral`-only findings with valid 5-line rationales — legitimately memory-only
 - Compound actions like `memory, skill_idea` — Gate-2 only checks single `memory`
-- Rows whose `Proposed Actions` contain neither `upstream_feedback` nor `issue` — Gate-3 does not apply
-- `gate_4_verdict: PASS` or `gate_4_verdict: WARN` in the distribution card — WARN means external findings exist but per-action approval is the enforcement at Stage 4 (not here)
-- `gate_4_verdict: NA` — no `upstream_feedback` findings exist; Gate-4 did not apply
+- Rows whose `Proposed Actions` contain neither `upstream_feedback` nor `issue` — Gate-3 and Gate-4b do not apply
+- `gate_4_verdict: WARN` in the distribution card — WARN means external findings exist but per-action approval is the enforcement at Stage 4 (not here)
+- `gate_4_verdict: PASS` — passes only when Gate-4b's own resolution escalates no row; the card's verdict is no longer sufficient on its own (#1244)
+- `gate_4_verdict: NA` — passes only when no routed row declared a backing repo at all; with any such row present it blocks, whatever the resolution said (#1244)
+- Rows Gate-4b could not resolve — demoted, not blocked (see above)
 
 ### Trigger condition summary
 
@@ -436,6 +561,13 @@ The hook exits 0 (passes) when any of:
 - (Gate-12 only) `python3` is unavailable, or the shared rejection scanner
   cannot read the transcript / hits its 20 MB bound — the denied count is 0 and
   the gate stays silent
+- (Gate-4b only) `python3` or `gh` is unavailable, or the lookup otherwise
+  returns no answer — rows that needed it are demoted rather than blocked. Rows
+  that needed no lookup still escalate: that path never touches the network.
+  A third-party owner is one of them **only while the allowlist is readable** —
+  with `PRAXIS_OWN_ORGS` set the hook classifies the owner itself, so a missing
+  `python3` no longer excuses a knowably external repo; with no allowlist
+  reachable at all, ownness is unknown rather than refuted and the row demotes
 
 ### Block log
 
@@ -508,6 +640,51 @@ plus 11 synthetic regression fixtures:
 - 3 Gate-4 verdict (T36 gate_4_verdict: PASS → pass, T37 external marker +
   absent gate_4_verdict → block, T38 gate_4_verdict: NA + no upstream_feedback
   → pass)
+- 5 Gate-4b resolution (issue #1244): T36b forged `private` over a public repo
+  → block; T36c undeclared visibility + PASS → block; T36d offline lookup →
+  demote; T36e allowlist unresolved → demote; T36f `NA` over a routed row that
+  resolves exempt → block (negative polarity is T38).
+  Every case that spawns a lookup pins `GH_HOST` at an unresolvable domain, so
+  `PRAXIS_REPO_VISIBILITY` is reached as the documented fallback rather than
+  because the fixture repo happens to be unregistered on the live API — that
+  accident would flip the expectation on an authenticated host, or the day
+  someone registers the name
+- 15 own-org classification without the resolver: the shadow's own premise
+  (`T36_nopy_shadow_hides_python3` plus its `jq`-still-resolvable positive
+  control — an unreachable binary and a PATH that was never applied look
+  identical), and that premise asserted end to end
+  (`T36_nopy_shadow_pipeline_reaches_gate4b` — a python3-independent fixture
+  must still reach Gate-4b under the shim, with
+  `..._control_card_gate_still_reachable` proving a hook that printed nothing
+  could not satisfy it); T36g external owner + `python3` absent → block, and
+  T36g2 that the block names the own-org refutation, since T36g is the one case
+  an earlier gate can satisfy by coincidence; T36h own-org
+  owner, same absence → still demote (the visibility half is what is missing);
+  T36i and T36i2 no allowlist at all, set-empty and unset → demote survives;
+  T36i3 the demotion names `python3 unavailable`, with T36i3b as the control
+  naming `gh unavailable` in the opposite condition; T36j helper exits
+  non-zero → block; T36k helper prints nothing → block; T36l the allowlist
+  parse — several handles, stray spaces, an empty field, a case mismatch —
+  still matches the owner → demote; T36m/T36m2 a bare handle is rejected by
+  Gate-3 and never reaches Gate-4b. `python3` is shadowed by mirroring every
+  `PATH` entry and deleting that one link, so nothing on the machine is
+  touched. The shim is a mirror rather than a hand-listed set of binaries
+  because a list cannot be audited against a command no source line contains:
+  bare `xargs` (impl.sh:334-337) defaults to `echo`, GNU findutils execs
+  `/bin/echo` for it where BSD xargs resolves it internally, and the missing
+  link emptied `GATE_1`/`GATE_2` on Linux only
+- 11 Gate-4b resolver, asserted against `gate4_visibility.py` directly (issue
+  #1244): G4H1/G4H1b below the budget floor nothing is spawned, G4H2/G4H2b the
+  same call with budget does spawn it (positive control), G4H3 the 9th repo is
+  past the cap, G4H4 the 8th is inside it, G4H5 a repeated repo costs one call,
+  G4H6/G4H6b a third-party repo answers `NOT_OWN_ORG` with no call,
+  G4H7 an own-org repo in the SAME run is still looked up, G4H8 eight
+  third-party rows do not starve a following own-org row of the cap,
+  G4H9/G4H9b an unresolved allowlist answers `UNRESOLVED` and spends no lookup,
+  G4H10 the live API outranks `PRAXIS_REPO_VISIBILITY` (#1150) against an
+  explicit `gh` stub that answers `public` where the env map says `private`,
+  with G4H11 as its control — same map, same repo, API taken away, now
+  `private`
 - 3 Category-count carve-out (T-NEW1 memory_hygiene category count in card →
   pass — parser ignores; T-NEW2 audit_skipped trail line outside fence → pass
   — trail does not interfere with parsing; T-NEW3 output_quality category

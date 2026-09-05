@@ -32,6 +32,12 @@
 
 command -v jq >/dev/null 2>&1 || exit 0
 
+# Wall-clock origin for Gate-4b's network budget. Taken before any work so the
+# deadline covers this hook's whole run, not just the lookups (bash 3.2 on
+# macOS has no $EPOCHREALTIME, so the resolution is 1s — coarse against the
+# 0.5s subprocess floor, and deliberately so: it can only end up conservative).
+HOOK_START_EPOCH=$(date +%s)
+
 INPUT=$(cat)
 # One jq spawn for all four scalars (was four; ~10ms/fire on a ~68ms hook).
 # NUL-separated, because `@tsv` is NOT lossless here: it escapes a backslash,
@@ -353,6 +359,9 @@ declare -a GATE1_VIOLATIONS=()
 declare -a GATE2_VIOLATIONS=()
 declare -a GATE3_VIOLATIONS=()
 declare -a SHORT_ROW_VIOLATIONS=()
+# Gate-4b input: one TAB-separated record per routed row that declared a
+# backing repo — finding / repo / declared visibility / EXTERNAL-marker flag.
+declare -a GATE4_ROWS=()
 # Finding IDs proposing a remedy-layer action — Gate-11's coverage list. Built
 # here rather than re-parsed later: the table is already being split cell-wise,
 # and the card's per-action counts cannot say WHICH findings owe a receipt.
@@ -467,9 +476,176 @@ while IFS= read -r row; do
     normalized_r3=$(printf '%s' "$rationale" | sed 's/<br *\/*>/\n/g')
     if ! printf '%s\n' "$normalized_r3" | grep -qE '^[[:space:]]*backing_repo: [A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*'; then
       GATE3_VIOLATIONS+=("finding #${finding_num}: Proposed Actions contains upstream_feedback or issue but Rationale missing backing_repo: <owner/repo> — return to Stage 2 step 7")
+    else
+      # Gate-4b input row: the DECLARED facts, captured verbatim. Whether they
+      # hold is settled after the loop against GitHub, never against the card.
+      g4_repo=$(printf '%s\n' "$normalized_r3" \
+        | sed -n 's|^[[:space:]]*backing_repo:[[:space:]]*\([A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*\).*|\1|p' | head -1)
+      g4_vis=$(printf '%s\n' "$normalized_r3" \
+        | sed -n -E 's/^[[:space:]]*repo_visibility:[[:space:]]*(public|private|internal)[[:space:]]*$/\1/p' | head -1)
+      [ -z "$g4_vis" ] && g4_vis="absent"
+      g4_marker=no
+      case "$rationale" in
+        *"⚠ EXTERNAL: per-action approval required at Stage 4"*) g4_marker=yes ;;
+      esac
+      GATE4_ROWS+=("${finding_num}"$'\t'"${g4_repo}"$'\t'"${g4_vis}"$'\t'"${g4_marker}")
     fi
   fi
 done <<< "$TABLE_LINES"
+
+# Gate-4b (Independent visibility resolution, issue #1244).
+#
+# Gate-4 above reads `gate_4_verdict` out of a card the agent wrote, so the
+# enforcement layer's input is authored by the thing it constrains: writing
+# `gate_4_verdict: PASS` passes the gate. Gate-4b recomputes the classification
+# from the row's own declarations plus GitHub, and blocks when the recomputed
+# answer contradicts what the card claims.
+#
+# Escalation criterion mirrors skills/retrospect/references/stage2.5-audit.md
+# Gate-4 (the SoT): a row is unescalated only when BOTH halves hold — the owner
+# is own-org AND the repo is private/internal by declaration AND by API. Since
+# #993 the criterion is visibility, not ownership, so a declared-public or
+# undeclared row escalates with no lookup at all — that path stays fully
+# offline-deterministic.
+#
+# THE FAILURE PATH IS A DEMOTION, NOT A BLOCK. Failing open would reproduce
+# today's behaviour exactly (the hole this closes); failing closed would block
+# every offline retrospect, since no Stop hook in this repo has ever needed the
+# network. So an unresolved lookup lets the Stop proceed and demotes that row's
+# ground to "visibility unresolved", surfaced as a systemMessage. That demotion
+# reaches Stage 4 without needing anything written into the Rationale cell:
+# stage4-execution.md Step 0a fires on either of two independent triggers, and
+# trigger 2 (public-visibility recheck) is itself fail-closed — "if the
+# visibility query errors, times out, or returns anything other than PRIVATE /
+# INTERNAL, treat the repo as public and fire the gate". A row the hook could
+# not resolve is exactly a row Step 0a re-resolves and fails closed on, so it
+# stays in the per-action approval set. The literal `⚠ EXTERNAL:` marker is
+# trigger 1 only, and the hook cannot edit the report to add it.
+GATE4_BUDGET_SEC=8      # manifest timeout 10 - 2s spawn/margin
+GATE4_MAX_LOOKUPS=8     # past ~15 repos the budget breaks (issue #1244 condition)
+declare -a GATE4B_VIOLATIONS=()
+declare -a GATE4B_DEMOTIONS=()
+GATE4B_ESCALATED=0
+
+if [ "${#GATE4_ROWS[@]}" -gt 0 ]; then
+  # Only a row that DECLARES private/internal can carry the exemption, so only
+  # those cost a round trip. Deduping is the helper's job (one call per repo).
+  g4_lookup_repos=""
+  for g4_rec in "${GATE4_ROWS[@]}"; do
+    IFS=$'\t' read -r _ g4_r g4_v _ <<< "$g4_rec"
+    case "$g4_v" in
+      private|internal) g4_lookup_repos="${g4_lookup_repos}${g4_r}"$'\n' ;;
+    esac
+  done
+
+  G4_OWN_ORGS="UNRESOLVED"
+  G4_VIS_MAP=""
+  # Which input was actually missing. The demotion message names this, so it
+  # cannot blame an env var that is in fact set.
+  G4_OWN_ORGS_GAP="no PRAXIS_OWN_ORGS, gh unavailable"
+  if [ -n "$g4_lookup_repos" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+      g4_out=$(printf '%s' "$g4_lookup_repos" | python3 \
+        "$(dirname "$0")/gate4_visibility.py" \
+        --deadline-epoch "$((HOOK_START_EPOCH + GATE4_BUDGET_SEC))" \
+        --max-lookups "$GATE4_MAX_LOOKUPS" 2>/dev/null) || g4_out=""
+      G4_OWN_ORGS=$(printf '%s\n' "$g4_out" | awk -F'\t' '$1=="own_orgs"{print $2}' | head -1)
+      [ -z "$G4_OWN_ORGS" ] && G4_OWN_ORGS="UNRESOLVED"
+      G4_VIS_MAP=$(printf '%s\n' "$g4_out" | awk -F'\t' '$1=="vis"{print $2"\t"$3}')
+    else
+      G4_OWN_ORGS_GAP="no PRAXIS_OWN_ORGS, python3 unavailable"
+    fi
+    # The visibility half needs the helper, but the own-org half has a purely
+    # local answer whenever PRAXIS_OWN_ORGS is set. Without this leg, python3
+    # being absent — or the helper failing, or printing nothing — demotes an
+    # owner the allowlist already refutes, and a knowably-external repo passes
+    # the Stop. Mirrors gate4_visibility.resolve_own_orgs()'s env leg exactly:
+    # split on comma, trim, drop empties, lowercase. Only the env leg — the
+    # `gh api user` leg genuinely needs a subprocess, so an allowlist that
+    # exists nowhere locally still demotes, which is the deliberate offline
+    # tradeoff documented above.
+    if [ "$G4_OWN_ORGS" = "UNRESOLVED" ]; then
+      g4_env_orgs=$(printf '%s' "${PRAXIS_OWN_ORGS:-}" | awk '{
+        n = split($0, a, ",")
+        for (i = 1; i <= n; i++) {
+          gsub(/^[ \t]+|[ \t]+$/, "", a[i])
+          if (a[i] != "") out = (out == "" ? a[i] : out "," a[i])
+        }
+        print tolower(out)
+      }')
+      [ -n "$g4_env_orgs" ] && G4_OWN_ORGS="$g4_env_orgs"
+    fi
+  fi
+
+  for g4_rec in "${GATE4_ROWS[@]}"; do
+    IFS=$'\t' read -r g4_num g4_repo g4_decl g4_mark <<< "$g4_rec"
+    g4_verdict="escalate"
+    g4_why="declared ${g4_decl} — a public or undeclared backing repo is a cross-boundary write whoever owns it (issue #993)"
+    case "$g4_decl" in
+      private|internal)
+        g4_key=$(printf '%s' "$g4_repo" | tr '[:upper:]' '[:lower:]')
+        # Always `owner/repo`: the Gate-3 parse above only admits a value
+        # matching `<owner>/<repo>`, so a bare handle never reaches GATE4_ROWS —
+        # it is rejected one gate earlier (T36m asserts that boundary). The
+        # resolver keeps its own `not slash` guard because it reads a stdin list
+        # rather than this already-filtered array.
+        g4_owner="${g4_key%%/*}"
+        if [ "$G4_OWN_ORGS" = "UNRESOLVED" ]; then
+          # Ownness itself unknown: conservative here would mean escalate, but
+          # escalate blocks, and this is the offline case. Demote instead.
+          g4_verdict="unresolved"
+          g4_why="own-org allowlist unresolved (${G4_OWN_ORGS_GAP})"
+        elif ! printf ',%s,' "$G4_OWN_ORGS" | grep -qF ",${g4_owner},"; then
+          g4_why="owner '${g4_owner}' is outside the own-org allowlist, so the declaration cannot exempt it"
+        else
+          g4_actual=$(printf '%s\n' "$G4_VIS_MAP" | awk -F'\t' -v k="$g4_key" '$1==k{print $2}' | head -1)
+          case "${g4_actual:-UNRESOLVED}" in
+            private|internal) g4_verdict="exempt" ;;
+            public)
+              g4_why="declares repo_visibility: ${g4_decl} but GitHub reports public for '${g4_repo}'"
+              ;;
+            *)
+              g4_verdict="unresolved"
+              g4_why="visibility lookup for '${g4_repo}' returned no answer (gh missing, unauthenticated, 404, rate-limited, over the ${GATE4_MAX_LOOKUPS}-repo cap, below the subprocess budget floor, or offline with no PRAXIS_REPO_VISIBILITY entry)"
+              ;;
+          esac
+        fi
+        ;;
+    esac
+
+    case "$g4_verdict" in
+      escalate)
+        GATE4B_ESCALATED=1
+        if [ "$g4_mark" != "yes" ]; then
+          GATE4B_VIOLATIONS+=("finding #${g4_num}: backing_repo '${g4_repo}' resolves as a cross-boundary write (${g4_why}) but the Rationale carries no '⚠ EXTERNAL: per-action approval required at Stage 4' marker — Stage 4 Step 0a trigger 1 is disarmed for this row")
+        fi
+        ;;
+      unresolved)
+        GATE4B_DEMOTIONS+=("finding #${g4_num}: backing_repo '${g4_repo}' — ${g4_why}; its ground is 'visibility unresolved', not 'exempt', so it stays in the Stage 4 per-action approval set (stage4-execution.md Step 0a trigger 2 fails closed on exactly this)")
+        ;;
+    esac
+  done
+
+  # The card's own verdict, checked against what was just recomputed.
+  #
+  # NA does not mean "nothing escalated" — audit-distribution-gates.py emits it
+  # only when `routed` is empty, i.e. no finding proposed upstream_feedback or
+  # issue at all. Every entry in GATE4_ROWS is such a finding, so a non-empty
+  # array refutes NA outright, whatever the per-row resolution came back as. It
+  # is checked ahead of the escalation test, not inside it: an NA card whose
+  # rows all resolve exempt or unresolved is still a false card, and that is the
+  # shape the escalation test could never see.
+  if [ "$GATE_4" = "NA" ]; then
+    g4_na_list=""
+    for g4_rec in "${GATE4_ROWS[@]}"; do
+      IFS=$'\t' read -r g4_num g4_repo _ _ <<< "$g4_rec"
+      g4_na_list="${g4_na_list}, #${g4_num} (${g4_repo})"
+    done
+    GATE4B_VIOLATIONS+=("distribution card declares gate_4_verdict: NA — the value reserved for a draft with no routed external write at all — but the findings table carries ${#GATE4_ROWS[@]} routed row(s) with a declared backing repo: ${g4_na_list#, }; re-run skills/retrospect/audit-distribution-gates.py and paste the card it renders")
+  elif [ "$GATE4B_ESCALATED" = "1" ] && [ "$GATE_4" = "PASS" ]; then
+    GATE4B_VIOLATIONS+=("distribution card declares gate_4_verdict: PASS but an independent resolution escalates at least one routed row — the card's verdict is written by the agent this gate constrains, so it is not the oracle (issue #1244); re-run skills/retrospect/audit-distribution-gates.py and paste the card it renders")
+  fi
+fi
 
 # Gate-7 (Transcript-Enumeration Receipt). Session-level structural check (not a
 # per-finding Stage 2.5 gate like Gate-1..6). When the session transcript
@@ -1237,6 +1413,12 @@ if [ "$GATE_1" = "MISSING" ] || [ "$GATE_2" = "MISSING" ]; then
   should_block=true
   reason_parts+=("distribution card missing gate_1_verdict or gate_2_verdict key")
 fi
+if [ "${#GATE4B_VIOLATIONS[@]}" -gt 0 ]; then
+  should_block=true
+  for v in "${GATE4B_VIOLATIONS[@]}"; do
+    reason_parts+=("Gate-4b: $v")
+  done
+fi
 if [ "${#GATE1_VIOLATIONS[@]}" -gt 0 ]; then
   should_block=true
   for v in "${GATE1_VIOLATIONS[@]}"; do
@@ -1290,6 +1472,21 @@ if [ -n "$GATE12_VIOLATION" ]; then
   reason_parts+=("Gate-12: $GATE12_VIOLATION")
 fi
 
+# Gate-4b demotions ride along with a block reason when one exists (they are a
+# separate finding about separate rows, and dropping them because some other
+# gate fired would lose them) and go out as a systemMessage otherwise.
+GATE4B_DEMOTION_TEXT=""
+if [ "${#GATE4B_DEMOTIONS[@]}" -gt 0 ]; then
+  for v in "${GATE4B_DEMOTIONS[@]}"; do
+    GATE4B_DEMOTION_TEXT="${GATE4B_DEMOTION_TEXT}
+- ${v}"
+  done
+  GATE4B_DEMOTION_TEXT="[retrospect-mix-check] Gate-4b demotion — visibility unresolved, Stop not blocked:${GATE4B_DEMOTION_TEXT}"
+  if [ "$should_block" = "true" ]; then
+    reason_parts+=("Gate-4b (advisory, not the block cause): $GATE4B_DEMOTION_TEXT")
+  fi
+fi
+
 if [ "$should_block" = "true" ]; then
   _log="$(praxis_resolve_writable logs retrospect-mix-blocked.log)"
   echo "$(date -Iseconds) session=$SESSION_ID blocked_retrospect_mix_check" >> "$_log" || true
@@ -1309,6 +1506,10 @@ if [ "$should_block" = "true" ]; then
   PRAXIS_FIRE_DECISION=block
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'
   exit 0
+fi
+
+if [ -n "$GATE4B_DEMOTION_TEXT" ]; then
+  jq -n --arg m "$GATE4B_DEMOTION_TEXT" '{systemMessage: $m}'
 fi
 
 exit 0
