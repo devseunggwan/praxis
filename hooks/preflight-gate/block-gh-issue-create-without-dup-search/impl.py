@@ -51,7 +51,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
-from _transcript import TRANSCRIPT_SCAN_LINES, tail_lines  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import TRANSCRIPT_SCAN_LINES, TranscriptReadError, tail_lines  # type: ignore[import-not-found]  # noqa: E402
 
 
 @fail_open
@@ -98,22 +98,17 @@ def main() -> int:
     if not transcript_path:
         return 0
 
-    # Missing or unreadable transcript → cannot enforce, fail open. Probed
-    # explicitly because `tail_lines` answers `[]` for both "unreadable" and
-    # "empty", and an empty transcript is a real "no search ran" answer that
-    # the block below must still act on.
-    try:
-        with open(transcript_path, "rb"):
-            pass
-    except OSError:
-        return 0
-
     # Read the tail from the end (issue #1279): the former bounded reader
     # loaded up to 50 MB into memory to keep 400 lines — 131 ms and 116 MB RSS
     # on a 36 MB session, inside the shared Bash dispatch budget — and failed
     # open past its bound. `tail_lines` seeks backwards, so the cost is the
-    # window itself and there is no bound to fall off.
-    tail = "\n".join(tail_lines(transcript_path, TRANSCRIPT_SCAN_LINES))
+    # window itself and there is no bound to fall off. `strict` so a missing
+    # or unreadable transcript fails open here, while an empty one — a real
+    # "no search ran" — still reaches the block below.
+    try:
+        tail = "\n".join(tail_lines(transcript_path, TRANSCRIPT_SCAN_LINES, strict=True))
+    except TranscriptReadError:
+        return 0
 
     search_cmds = _SEARCH_CMD_RE.findall(tail.lower())
 

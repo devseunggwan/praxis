@@ -508,7 +508,7 @@ _CONSUMERS = {
     # Matches search commands in the last N lines only; reads the tail from the
     # end instead of loading up to 50 MB to keep 400 lines (#1279).
     HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
-        ["tail_lines"],
+        ["tail_lines", "TranscriptReadError"],
     # Whole-session scan under a byte cap, needle-prefiltered (#1277).
     HOOKS / "preflight-gate" / "block-commit-without-codex-review" / "impl.py":
         ["iter_transcript_bounded", "TranscriptReadError"],
@@ -954,6 +954,19 @@ class TestTailLines:
         path.write_bytes(b'{"ok": 1}\n\xff\xfe{"bad": 1}\n')
         got = T.tail_lines(str(path), 2)
         assert got[0] == '{"ok": 1}' and "\ufffd" in got[1]
+
+
+class TestTailLinesStrict:
+    def test_strict_raises_where_default_answers_empty(self, tmp_path):
+        absent = str(tmp_path / "absent.jsonl")
+        assert T.tail_lines(absent, 3) == []
+        with pytest.raises(T.TranscriptReadError):
+            T.tail_lines(absent, 3, strict=True)
+
+    def test_strict_keeps_the_empty_file_answer(self, tmp_path):
+        path = tmp_path / "empty.jsonl"
+        path.write_bytes(b"")
+        assert T.tail_lines(str(path), 3, strict=True) == []
 
 
 class TestReduceTranscriptResumable:

@@ -58,7 +58,9 @@ literally in a prior search command.
   changed enforcement per-installer (issue #1156).
 - Set `CLAUDE_HOOK_BYPASS_DUP_GATE=1` for a deliberate one-off bypass.
 - Title with no extractable keyword ≥4 chars → silent pass (cannot enforce).
-- Missing / unreadable / oversized (`>50MB`) transcript → silent pass.
+- Missing / unreadable transcript → silent pass. There is no size bound any
+  more (issue #1279): the tail is read from the end, so an oversized
+  transcript is scanned like any other and can block.
   Malformed stdin → silent fail-open.
 
 ### Tests

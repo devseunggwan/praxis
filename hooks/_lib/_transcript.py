@@ -218,13 +218,22 @@ def _iter_lines_backwards(path: str, max_bytes: int):
         return pos == 0
 
 
-def tail_lines(path: str, max_lines: int, max_bytes: int | None = None) -> list[str]:
+def tail_lines(
+    path: str, max_lines: int, max_bytes: int | None = None, *, strict: bool = False
+) -> list[str]:
     """The last `max_lines` lines of `path`, in file order, decoded leniently.
 
     Reads from the end (see `_iter_lines_backwards`) so a hook that only
     matches against the recent tail never loads a 200 MB transcript into
     memory (issue #1240). `[]` when the file is missing or unreadable — the
     same fail-open value the former `readlines()` callers used.
+
+    `strict=True` raises `TranscriptReadError` instead of returning `[]` for
+    a missing or unreadable file, for the caller that must act on "read it
+    all, found nothing" and fail open on "could not read" — the two answers
+    `[]` folds together (issue #1279). It is one open: a probe-then-read
+    leaves a window in which a file that passed the probe is gone by the
+    read, and the gate then blocks on an emptiness it never saw.
 
     Unbounded by default: the callers' contract is "the last N lines", and a
     byte cap that stopped short would hand them a shorter window that looks
@@ -248,6 +257,8 @@ def tail_lines(path: str, max_lines: int, max_bytes: int | None = None) -> list[
             if len(out) >= max_lines:
                 break
     except TranscriptReadError:
+        if strict:
+            raise
         return []
     out.reverse()
     return out
