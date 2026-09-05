@@ -778,7 +778,15 @@ def main() -> int:
                 inner_tokens = safe_tokenize(body)
                 if not inner_tokens:
                     continue
+                # Same three steps the outer command gets. A substitution body
+                # is a command list of its own, so an `&&` chain written inside
+                # one gates exactly as it would outside — what does not carry
+                # across the boundary is the substitution's own exit code, and
+                # that is a different case (see Known limitations in spec.md).
+                inner_tokens = _merge_fd_dup_redirects(inner_tokens)
                 advisory = _scan_tokens_for_advisory(inner_tokens)
+                if advisory is None:
+                    advisory = _masked_gating_advisory(inner_tokens)
                 if advisory:
                     break
             if advisory:

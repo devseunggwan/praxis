@@ -468,6 +468,17 @@ run_case "irreversible command is the last of three gated segments" \
   gating \
   "git status --porcelain | tail -1 && cat f | tee log | git push origin main"
 
+# A substitution body is its own command list, so an `&&` chain written inside
+# one gates the same way. What does not cross the boundary is the
+# substitution's own exit code — that case stays out of scope (spec.md).
+run_case "gating chain written inside a command substitution" \
+  gating \
+  'OUT="$(git switch main 2>&1 | tail -1 && gh pr merge 1264)"'
+
+run_case "substitution body needs the fd-dup merge to see the sink" \
+  gating \
+  'OUT="$(git switch main 2>&1 | tail -1 && gh workflow run ci.yml)"'
+
 # --- SILENT counterparts: each removes exactly one element of the predicate
 
 run_case "a semicolon does not gate, so a masked exit changes nothing" \
