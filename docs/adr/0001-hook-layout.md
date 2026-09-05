@@ -163,6 +163,13 @@ tests/
     fixtures/
 ```
 
+> **Amendment (issue #1305, 2026-09-05).** `_lib/_hook_utils.py` was split
+> into `_shell_tokenize.py`, `_subst.py`, `_compound.py`, and `_roles.py`.
+> It stays in place as a re-export shim, so the "unchanged API" promise in
+> the tree above, and in the list of what this ADR leaves unchanged, still
+> holds for every `from _hook_utils import …` consumer; new code imports
+> from the defining sub-module.
+
 Four structural changes combine into a single coherent end state:
 
 ### 2.1 A — Role-based subdirectories under `hooks/`

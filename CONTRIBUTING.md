@@ -154,8 +154,14 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
      import sys as _sys
      from pathlib import Path as _Path
      _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-     from _hook_utils import ...
+     from _shell_tokenize import ...
      ```
+     Import from the module that defines the name — `_shell_tokenize`
+     (`safe_tokenize`, `iter_command_starts`, `strip_prefix`), `_subst`
+     (`iter_command_texts`), `_compound` (`compound_cascade_hint`), or
+     `_roles` (`tokenize_with_roles`). `_hook_utils` re-exports all four
+     for the hooks written before issue #1305 split it; do not route new
+     imports through it.
 3. Register the hook in [`hooks/manifest.json`](hooks/manifest.json) (one
    entry per `(event, matcher)` group). The entry must include `name`, `role`,
    `event`, and `timeout`; add `matcher`, `hosts`, `args`, `body`, and
