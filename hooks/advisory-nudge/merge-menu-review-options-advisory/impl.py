@@ -113,14 +113,14 @@ REVIEW_TOKENS_EN = (
 _REVIEWER_FAMILIES: tuple[tuple[str, str, str, tuple[str, ...], tuple[str, ...]], ...] = (
     (
         "security",
-        "보안 리뷰 (예: security-reviewer / oh-my-claudecode:security-reviewer)",
+        "security review / 보안 리뷰 (예: security-reviewer / oh-my-claudecode:security-reviewer)",
         "auth / token / secret / credential",
         ("auth", "token", "secret", "credential", "permission", "oauth"),
         (".pem", ".key"),
     ),
     (
         "data",
-        "데이터/SQL 리뷰 (예: review-data)",
+        "data/SQL review / 데이터/SQL 리뷰 (예: review-data)",
         "SQL / 적재 경로",
         # Substrings kept tight to avoid mis-routing non-data paths: bare `etl`
         # matched `getlist.py`, `/load` matched `src/loader.py`, and `template`
@@ -132,14 +132,14 @@ _REVIEWER_FAMILIES: tuple[tuple[str, str, str, tuple[str, ...], tuple[str, ...]]
     ),
     (
         "design",
-        "설계 리뷰 (예: review-service-design)",
-        "신규 모델 / 테이블 / 스키마",
+        "design review / 설계 리뷰 (예: review-service-design)",
+        "a new model / table / schema (신규 모델 / 테이블 / 스키마)",
         ("schema", "/models/", "/model/", "entity", "entities"),
         (".prisma", ".proto"),
     ),
     (
         "ux",
-        "디자인/UX 리뷰 (예: designer)",
+        "design/UX review / 디자인/UX 리뷰 (예: designer)",
         "FE / 컴포넌트",
         ("component", "/ui/", "/views/", "/pages/"),
         (".tsx", ".jsx", ".vue", ".css", ".scss"),
