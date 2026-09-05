@@ -302,8 +302,9 @@ under `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/praxis/praxis/<version>
 given — and a merged change is not live until
 `release → plugin update → session reload` completes.
 
-Both hops were measured on 2026-07-28 (issue #841). They are not comparable in
-size, so quote the window along with the number — an unqualified median invites
+Both hops were measured once, on 2026-07-28 (issue #841); the figures below
+are that snapshot, not a live metric. They are not comparable in size, so
+quote the window along with the number — an unqualified median invites
 the reader to apply a 14-day figure to a 7-week history:
 
 | Hop | Window | Result |
@@ -385,7 +386,7 @@ verification of the change.
 #### Canary probes
 
 Use these to confirm a hook is wired and discriminating, without performing any
-mutation. Each is a real probe used during the 2026-07-22 release-lag incident.
+mutation. Each has been used on a real release-lag investigation.
 
 1. **Fire-ledger probe** — confirm the hook fired at all, and with which
    decision. `@fail_open` hooks append JSONL records to

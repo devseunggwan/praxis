@@ -15,13 +15,14 @@ still holds is a block.
 
 ## Why this exists
 
-A session created 4 PRs back-to-back (#1083-#1086) and left every one without
-a Post-PR Empirical Verification anchor comment; nothing fired, and the user
-had to ask for it 25-28 minutes later. `anchor-comment-gate` (#947, fixed by #996)
-already checks an anchor's shape, SHA freshness, and per-row evidence — but
-only once an anchor is ABOUT to be posted. Of the 16 hooks that touch `gh
-pr create` at all, zero require that an anchor exist in the first place. This
-gate closes exactly that gap: **existence**, not quality — see
+The PR-creation gates check an anchor's *quality*: `anchor-comment-gate`
+(#947, fixed by #996) checks shape, SHA freshness, and per-row evidence — but
+only once an anchor is ABOUT to be posted. No other hook that touches
+`gh pr create` requires that an anchor exist in the first place, so a session
+can open PR after PR and leave every one without a Post-PR Empirical
+Verification anchor comment while nothing fires; the user finds out when they
+ask. (The motivating session did exactly that across four PRs, #1083-#1086.)
+This gate closes exactly that gap: **existence**, not quality — see
 [`anchor-comment-gate/spec.md`](../../preflight-gate/anchor-comment-gate/spec.md)
 for the shape/freshness checks this gate deliberately does not duplicate.
 

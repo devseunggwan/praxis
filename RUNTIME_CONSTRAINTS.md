@@ -38,9 +38,9 @@ For a dynamic list longer than 3 items, surface the top 3 most likely candidates
 the 4th slot for "Other / cancel". Never silently drop items without telling the
 user that the list was truncated.
 
-**Verified**: 2026-05-13 / Claude Code (Sonnet 4.6) / Issue #208 — observed
-failure: `codex-review-wrap` Step 2 attempted to surface all 8 active worktrees
-as options, which is impossible per the `maxItems: 4` JSON schema constraint.
+**Verified**: 2026-05-13 / Claude Code (Sonnet 4.6) / Issue #208 — a skill
+step that passed 8 enumerated worktrees as options was rejected by the
+`maxItems: 4` schema.
 
 ### 1a. `AskUserQuestion.questions` — same hard cap of 4 items
 
