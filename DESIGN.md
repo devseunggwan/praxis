@@ -61,7 +61,8 @@ Design mechanisms shared by all hooks:
   rather than "no work".
 - **Fire-ledger instrumentation for shell hooks (issue #848).** A hook's
   engagements land in the fire ledger via `@fail_open` (standalone) or the
-  dispatcher (Bash group) — both Python-only, so the four `impl.sh` hooks
+  dispatcher (Bash group) — both Python-only, so the then-four `impl.sh`
+  hooks (three since issue #1304 ported `codex-review-route` to Python)
   recorded nothing at all while an audit reading that ledger scored the
   silence as "never fires". A shell hook sources `_lib/record_fire.sh` and
   calls `praxis_fire_arm <hook> <role> "$SESSION_ID" ""` right after it
