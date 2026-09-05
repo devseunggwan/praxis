@@ -11,6 +11,14 @@ PRAXIS_HOOK_ERROR_LOG (default ~/.praxis/logs/hook-errors.jsonl, TMPDIR
 fallback); PRAXIS_HOOK_ERROR_STDERR=1 also prints a one-line note. The
 recorder never raises and never writes to stderr on its own errors.
 
+The log rotates by size (issue #1282): past `_ERROR_LOG_MAX_BYTES` the file is
+renamed to `<name>.1` and a fresh one started, keeping one predecessor. A hook
+that crashes on every tool call writes a traceback per call and, because the
+whole point of the guard is that the crash is silent, nobody notices the file
+growing — the same shape that let the telemetry ledger reach 1.7 GB before it
+got a sweep (#1078). `PRAXIS_HOOK_ERROR_LOG_MAX_BYTES` overrides the cap; 0
+disables rotation.
+
     @fail_open
     def main() -> int: ...
 """
@@ -19,6 +27,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import logging.handlers
 import os
 import sys
 import time
@@ -138,7 +147,16 @@ def _get_logger() -> logging.Logger:
     logger.propagate = False
     logger.addHandler(logging.NullHandler())  # never handler-less -> no lastResort->stderr
     try:
-        fh = logging.FileHandler(_error_log_path(), encoding="utf-8", delay=True)
+        # RotatingFileHandler with maxBytes=0 never rotates, so the disable
+        # value needs no second code path. backupCount=1: the previous file is
+        # kept for the record that explains the current one, nothing older.
+        fh = logging.handlers.RotatingFileHandler(
+            _error_log_path(),
+            maxBytes=_error_log_max_bytes(),
+            backupCount=1,
+            encoding="utf-8",
+            delay=True,
+        )
         fh.setFormatter(_JsonlFormatter())
         logger.addHandler(fh)
     except Exception:
@@ -149,6 +167,31 @@ def _get_logger() -> logging.Logger:
         logger.addHandler(sh)
     logger._praxis_configured = True  # type: ignore[attr-defined]
     return logger
+
+
+# Bytes past which the error log is rotated. Sized for the record it holds:
+# a traceback record is 1-3 KB, so the cap keeps a couple of thousand of the
+# most recent crashes — more than any diagnosis reads — while bounding a
+# crash-per-call hook at a few MB instead of a few GB.
+_ERROR_LOG_MAX_BYTES = 5 * 1024 * 1024
+_ERROR_LOG_MAX_BYTES_ENV = "PRAXIS_HOOK_ERROR_LOG_MAX_BYTES"
+
+
+def _error_log_max_bytes() -> int:
+    """Rotation cap for the error log; the env override wins, 0 disables.
+
+    A malformed or negative override falls back to the default rather than
+    disabling rotation — a typo must not silently reintroduce the unbounded
+    growth the cap exists to stop.
+    """
+    raw = os.environ.get(_ERROR_LOG_MAX_BYTES_ENV)
+    if raw is None:
+        return _ERROR_LOG_MAX_BYTES
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return _ERROR_LOG_MAX_BYTES
+    return value if value >= 0 else _ERROR_LOG_MAX_BYTES
 
 
 def _error_log_path() -> str:

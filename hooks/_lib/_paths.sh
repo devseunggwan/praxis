@@ -65,6 +65,30 @@ praxis_specs_dir() {
 # Path under <praxis_home>/$1/$2, creating the directory. Falls back to
 # ${TMPDIR}/praxis-$2 when the home dir cannot be written, so a hook on a
 # read-only or unwritable HOME degrades instead of failing.
+# praxis_rotate_log <path> [max_bytes]
+#
+# Size-bounded retention for an append-only log (issue #1282). When <path> is
+# larger than max_bytes (default 1 MiB) it is renamed to <path>.1, replacing
+# the previous predecessor, so a writer that fires on every Stop cannot grow
+# the file without bound — ~/.praxis/logs has no TTL sweep, unlike cache/ and
+# telemetry/. Call it right before the `>>`. Never exits non-zero and prints
+# nothing: a failed rotation costs one oversized log, never a hook decision.
+praxis_rotate_log() {
+    _prl_path="$1"
+    _prl_max="${2:-1048576}"
+    if [ -f "$_prl_path" ]; then
+        _prl_size=$(wc -c < "$_prl_path" 2>/dev/null | tr -d '[:space:]')
+        case "$_prl_size" in
+            ''|*[!0-9]*) _prl_size=0 ;;
+        esac
+        if [ "$_prl_size" -gt "$_prl_max" ]; then
+            mv -f -- "$_prl_path" "$_prl_path.1" 2>/dev/null || true
+        fi
+    fi
+    unset _prl_path _prl_max _prl_size
+    return 0
+}
+
 praxis_resolve_writable() {
     _prw_subdir="$1"
     _prw_name="$2"
