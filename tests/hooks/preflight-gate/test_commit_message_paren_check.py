@@ -27,6 +27,12 @@ REJECTED = [
     ("e399693e", 18, "unclosed"),
     ("4d83c916", 189, "nested"),
     ("54128d0c", 17, "unclosed"),
+    # 9ea4785a is this gate's OWN merge commit. GitHub composed its squash
+    # body from the PR's commit messages, so a line-initial pseudo-scope
+    # written before the gate shipped reached main by a path no hook sees —
+    # the case spec.md used to call impossible. The parser reported
+    # `unexpected token '(' at 75:10`.
+    ("9ea4785a", 75, "nested"),
 ]
 
 # Commits the same parser accepted, over the same range.
