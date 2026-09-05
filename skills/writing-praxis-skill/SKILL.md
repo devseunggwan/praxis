@@ -18,7 +18,7 @@ runtime-verified-note: "claude 1.x --help + current praxis verified-skill survey
 A new praxis skill needs a SKILL.md that the Claude Code plugin runtime can
 parse and route correctly. Without a consistent structure, the runtime silently
 misroutes or truncates the description, and contributors have to reverse-engineer
-the pattern from 13+ existing specs.
+the pattern from the existing specs.
 
 **Core principle:** one skill = one responsibility. If a skill needs a second
 trigger phrase to describe a second job, split it into two skills.
@@ -153,8 +153,10 @@ verification-metadata requirement.
 
 ### Step 5: Understand Host Differences
 
-The same SKILL.md runs on both the Claude Code plugin (Claude host) and the
-Codex plugin (Codex host). The two hosts differ in how they expose the skill:
+The same SKILL.md ships to every platform under `manifests/platforms/` that
+lists `skills/` — Claude Code, Codex, and Cursor today. The table covers the
+two hosts whose behaviour has been probed; Cursor has not been, so treat it as
+unverified rather than identical to either column:
 
 | Aspect | Claude host | Codex host |
 | -------- | ------------- | ------------ |

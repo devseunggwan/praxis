@@ -181,5 +181,7 @@ ceiling and leave headroom.
 3. Add an entry using the four-field structure above.
 4. Open a PR referencing the issue where you observed it.
 
-Pre-commit hook validation for this file: planned for a future PR (tracked in
-Issue #208).
+The skill-side half of this convention — `verified-against-runtime` and its
+two companion fields on every runtime-sensitive `SKILL.md` — is enforced by
+`scripts/check-plugin-manifests.py` Rule 11. Entries in this file are added
+by hand.

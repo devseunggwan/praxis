@@ -91,7 +91,13 @@ follow the step-by-step guide at
 ```
 skills/<skill-name>/
   SKILL.md          # spec — frontmatter + prose steps
+  references/       # optional — long procedure text split out of SKILL.md
+  <helper>          # optional — a shell/python helper the steps invoke
 ```
+
+`references/*.md` count as part of the spec for every check below: a step
+moved there still needs the runtime verification metadata, and the
+`description` budget is measured on `SKILL.md` alone.
 
 The `name` and `description` fields in the SKILL.md frontmatter are surfaced by
 the Claude Code plugin runtime, which truncates the description past a bounded
@@ -160,18 +166,23 @@ refactors and is visible to `git blame`.
 Read [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md) before writing a new
 spec. It lists fixed Claude Code limits that every skill must work within:
 
-| Constraint | Short form |
-| ------------ | ------------ |
-| `AskUserQuestion.options` max 4 items | Truncate dynamic lists to 3 + cancel |
-| `Skill(...)` cannot invoke `disable-model-invocation: true` skills | Use the underlying binary directly |
-| `Bash` cwd resets between calls | Chain with `&&` or use absolute paths |
+| § | Constraint | Short form |
+| --- | ------------ | ------------ |
+| 1 | `AskUserQuestion.options` max 4 items | Truncate dynamic lists to 3 + cancel |
+| 1a | `AskUserQuestion.questions` max 4 items | Batch into consecutive calls of ≤ 4 |
+| 2 | `Skill(...)` cannot invoke `disable-model-invocation: true` skills | Use the underlying binary directly |
+| 3 | `Agent(subagent_type=...)` cannot invoke a skill | Always `Skill(skill="praxis:<name>")` |
+| 4 | `Bash` cwd resets between calls | Chain with `&&` or use absolute paths |
+| 5 | Skill `description` truncated past ~1,024 chars | Keep `Triggers on` inside the first 500 |
 
-#### Pre-commit hook (planned)
+#### Enforcement
 
-A pre-commit hook that validates `verified-against-runtime: true` + commit body
-note for `skills/*/SKILL.md` changes is planned as a follow-up to Issue #208.
-It is not yet enforced — the frontmatter + commit body convention above is the
-current gate.
+The frontmatter half is enforced: `scripts/check-plugin-manifests.py` Rule 11
+detects a runtime-sensitive skill (external CLI, `AskUserQuestion`,
+`Skill(...)`, or a helper executable) and fails when any of the three fields
+is missing, a template placeholder, or malformed. It runs locally through
+`scripts/run-tests.sh` and in CI. The commit-body `verified:` line is a
+convention only — nothing checks it.
 
 ### Skill surface freeze (`EXPECTED_SKILLS`)
 

@@ -4,7 +4,7 @@ description: >
   Deferred-decision ledger — harvests commit trailers (`Not-tested:`,
   `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) and tree
   compounding comments (`# [PR #N]`) into a single report-only ledger so a
-  "나중에" marker doesn't silently become "영원히 안 함". Triggers on
+  '나중에' marker doesn't silently become '영원히 안 함'. Triggers on
   "praxis:debt", "debt ledger", "지연 결정", "deferred decision", "기술 부채
   원장", "commit trailer audit".
 verified-against-runtime: true

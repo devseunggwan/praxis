@@ -28,7 +28,8 @@ below.
   `scripts/`) knows nothing about platforms; per-platform artifacts are
   build-time adapters generated from `manifests/`
   ([§Multi-Platform Packaging](#multi-platform-packaging)). Adding a platform
-  is one manifest file plus one build run.
+  is one manifest file, one entry in the schema's `hosts` enum, and one
+  build run.
 - **Declared state + drift gate.** Generated artifacts are committed, and
   `scripts/check-plugin-manifests.py` invariants enforce manifest ↔ output
   parity in CI — the same reconciliation model infrastructure-as-code uses.
@@ -342,5 +343,9 @@ above.
 `VERSION`) and re-run the build script. Run `./scripts/check-plugin-manifests.py`
 before committing if you touched any packaging surface.
 
-Adding a new platform = one file at `manifests/platforms/<name>.json` + one
-build run. No skill, hook, or existing-platform changes required.
+Adding a new platform = one file at `manifests/platforms/<name>.json`, its
+`host_id` added to the `hosts` enum in `hooks/manifest.schema.json`
+(`tests/test_check_manifest_schema.py` asserts the enum equals the platform
+set, so a missing entry fails CI), and one build run. No skill, hook, or
+existing-platform changes required; a hook that should ship on the new host
+additionally lists it in its `hosts` array and `Supported hosts:` line.

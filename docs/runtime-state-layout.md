@@ -91,6 +91,8 @@ did not move them:
 | `bash-worktree-advisory/`                                          | `advisory-nudge/bash-worktree-existence-advisory`                                            |
 | `gh-json-<sid>/`                                                   | `preflight-gate/gh-json-validator`                                                           |
 | `worktree-prune-snapshot-<sid>.json`                               | `preflight-gate/worktree-prune-snapshot-gate`                                                |
+| `poll-loop-waiters-<sid>.json`                                     | `preflight-gate/foreground-poll-loop-guard`                                                  |
+| `approval-premise-ack-<sid>.json`                                  | `preflight-gate/approval-premise-reread-gate` (consumed on read)                              |
 | `gh-label-cache.json`                                              | `preflight-gate/gh-label-verify` (per-repo label sets, #1182 — pre-#1182 XDG location not migrated) |
 
 ### Sweeping

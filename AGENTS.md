@@ -21,7 +21,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 
 | Tier               | What works                                               | Dependencies                            |
 | ------------------ | -------------------------------------------------------- | --------------------------------------- |
-| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `debt` needs only `git` |
+| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `recover-sessions` also needs `tmux`; `debt` needs only `git` |
 | **Enhanced**       | + retrospect, codex-review-wrap                          | + oh-my-claudecode                      |
 | **Full**           | + all cmux-* skills                                      | + cmux                                  |
 | **Multi-provider** | + codex/gemini routing in cmux-delegate                  | + codex-cli, gemini-cli                 |
@@ -77,7 +77,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 
 ## Hooks
 
-Praxis ships a PreToolUse/PostToolUse/Stop/UserPromptSubmit hook suite
+Praxis ships a PreToolUse/PostToolUse/Stop/UserPromptSubmit/SessionStart hook suite
 that structurally enforces the rules in [`ETHOS.md`](ETHOS.md);
 [`DESIGN.md`](DESIGN.md) holds the shared contracts. Per-hook specs live at
 [`hooks/<role>/<name>/spec.md`](hooks/), indexed by
