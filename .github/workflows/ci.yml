@@ -116,7 +116,13 @@ jobs:
       # step cannot disagree with the blocking one. PyYAML is what
       # scripts/check-workflow-pins.py parses workflows with; pinned for the
       # same reason, since a parser change moves what the canary can see.
-      - run: python3 -m pip install pytest "ruff==0.15.8" "PyYAML==6.0.3"
+      # coverage is pinned on the same ground as ruff (issue #1303): the pytest
+      # step of run-tests.sh gates on the `fail_under` floor in .coveragerc, and
+      # a coverage.py release can move what counts as a statement — the
+      # measured total shifting under a fixed floor is exactly the silent
+      # red-without-a-bump the ruff pin exists to prevent. run-tests.sh's skip
+      # hint names the same version; bump both together.
+      - run: python3 -m pip install pytest "ruff==0.15.8" "PyYAML==6.0.3" "coverage==7.16.0"
       # zsh is not preinstalled on ubuntu-24.04. block-unmatched-glob delegates
       # its verdict to a real zsh, so without it that hook's suite has nothing to
       # assert against and silently degrades to fail-open coverage.
@@ -151,9 +157,21 @@ jobs:
       # run silently stopped checking something rather than accommodating a
       # contributor's machine. markdownlint stays advisory — strict gates on a
       # step being skipped, not on its findings.
+      # COVERAGE_FILE is pinned to the workspace so the data file outlives the
+      # runner's throwaway PRAXIS_HOME (its default location, swept by an EXIT
+      # trap) and the summary step below can re-read it. .coverage is
+      # gitignored; the runner never pushes, so nothing here can commit it.
       - run: bash scripts/run-tests.sh
         env:
           PRAXIS_TESTS_STRICT: "1"
+          COVERAGE_FILE: ${{ github.workspace }}/.coverage
+      # Per-file coverage table on the job summary (issue #1303). The floor
+      # already gated inside run-tests.sh; this step only renders the same
+      # data, so it inherits the pass. coverage 7.16.0 supports
+      # --format=markdown (verified against `coverage report --help`).
+      - run: python3 -m coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+        env:
+          COVERAGE_FILE: ${{ github.workspace }}/.coverage
 
   link-check:
     runs-on: ubuntu-24.04
