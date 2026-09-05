@@ -418,6 +418,77 @@ class TestScanUserRejections:
         # and not a scan that stopped finding things.
         assert len(T.scan_user_rejections(path)) == 1
 
+    def test_file_exactly_at_the_bound_is_scanned(self, tmp_path):
+        # The bound is "past", not "at": a file whose size equals max_bytes is
+        # inside it (#1280 kept the streamed reader on the same edge).
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "AskUserQuestion", {"questions": []}),
+            _rejection("toolu_1", "A1"),
+        ])
+        size = os.path.getsize(path)
+        assert len(T.scan_user_rejections(path, max_bytes=size)) == 1
+        assert T.scan_user_rejections(path, max_bytes=size - 1) is None
+
+    def test_scan_memory_does_not_track_file_size(self, tmp_path):
+        # Both passes stream (#1280): the earlier reader held the bound's worth
+        # of text twice (string + splitlines list). The peak must not grow with
+        # the file, so a 100x larger session costs about the same to scan.
+        import tracemalloc
+
+        def build(n, name):
+            d = tmp_path / name
+            d.mkdir()
+            filler = [_user(text="x" * 200) for _ in range(n)]
+            return _write_jsonl(d, filler + [
+                _asst_tool_use("A1", "toolu_1", "AskUserQuestion", {"questions": []}),
+                _rejection("toolu_1", "A1"),
+            ])
+
+        small, big = build(100, "s"), build(10000, "b")
+
+        def peak(path):
+            tracemalloc.start()
+            try:
+                assert len(T.scan_user_rejections(path, max_bytes=1 << 30)) == 1
+                return tracemalloc.get_traced_memory()[1]
+            finally:
+                tracemalloc.stop()
+
+        assert peak(big) < 4 * peak(small) + 1 * 1024 * 1024
+
+    def test_one_oversized_line_is_refused_before_allocation(self, tmp_path):
+        # A single line past the bound must not be read whole and only then
+        # measured: each read is capped at the budget left (#1280 review).
+        import tracemalloc
+
+        path = tmp_path / "t.jsonl"
+        path.write_bytes(b'{"type": "user", "pad": "' + b"x" * (4 * 1024 * 1024) + b'"}\n')
+        tracemalloc.start()
+        try:
+            assert T.scan_user_rejections(str(path), max_bytes=64 * 1024) is None
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        assert peak < 1024 * 1024
+
+    def test_unreadable_but_oversized_stays_indeterminate(self, tmp_path, monkeypatch):
+        # EACCES cannot be provoked as root, so the open is stubbed: the
+        # answer must follow the size, not collapse to "no rejections".
+        import builtins
+
+        path = _write_jsonl(tmp_path, [_user(text="x" * 100)])
+        size = os.path.getsize(path)
+        real_open = builtins.open
+
+        def denied(p, *a, **k):
+            if str(p) == path:
+                raise PermissionError(p)
+            return real_open(p, *a, **k)
+
+        monkeypatch.setattr(builtins, "open", denied)
+        assert T.scan_user_rejections(path, max_bytes=size - 1) is None
+        assert T.scan_user_rejections(path, max_bytes=size) == []
+
     def test_malformed_line_next_to_a_rejection_is_skipped(self, tmp_path):
         path = _write_jsonl(tmp_path, [
             _asst_tool_use("A1", "toolu_1", "AskUserQuestion",

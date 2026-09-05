@@ -59,6 +59,7 @@ import os
 import sys
 from collections import deque
 from pathlib import Path
+from typing import Iterable
 
 # Default tail window (in JSONL lines) for substring scans over the recent
 # transcript. Shared by external-write-falsify-check and
@@ -676,12 +677,20 @@ REJECTION_DENIAL_KIND = "user-rejected"
 REJECTION_PHRASE = "doesn't want to proceed"
 _DENIAL_KIND_MARKER = '"toolDenialKind"'
 _TOOL_USE_MARKER = '"tool_use"'
+# The same literals as bytes, for the pre-parse probes over raw lines.
+_DENIAL_KIND_MARKER_B = _DENIAL_KIND_MARKER.encode("ascii")
+REJECTION_PHRASE_B = REJECTION_PHRASE.encode("ascii")
+_TOOL_USE_MARKER_B = _TOOL_USE_MARKER.encode("ascii")
 
 # Bounds. The rejection scan reads the WHOLE file (not a tail): a rejection is a
 # standing NO for the rest of the session, so a tail window would expire it
 # after N lines of unrelated work. The byte bound is what keeps that affordable,
 # and both passes pre-filter on a cheap substring before any json.loads, so the
-# common line is never parsed.
+# common line is never parsed. Both passes STREAM the file (issue #1280): the
+# earlier shape read the bound's worth into one string and then split it into
+# a list — two copies of up to 20 MB, plus the parsed records — on every
+# destructive command that reached the gate. Streaming keeps the peak at one
+# line plus the handful of records that matched.
 REJECTION_SCAN_MAX_BYTES = 20 * 1024 * 1024
 # Most recent N rejections. A gate only needs the standing refusals, and the
 # resolution pass costs one substring probe per needle per candidate line.
@@ -689,6 +698,29 @@ REJECTION_SCAN_MAX_RECORDS = 20
 # Flattened-input text bound, per rejection (an AskUserQuestion payload with
 # many options is the large case).
 REJECTION_TEXT_MAX_CHARS = 20000
+
+
+def _iter_bounded_lines(fh, max_bytes: int):
+    """Yield raw lines of `fh` until `max_bytes` have been read.
+
+    Returns True when the file ended inside the bound and False when the
+    bound cut the walk short (read via `StopIteration.value`). Counted on the
+    bytes actually read rather than a stat() beforehand: a live session
+    appends between the two. Each read is capped at the budget left, so a
+    single oversized line is refused before it is allocated.
+    """
+    consumed = 0
+    while True:
+        # readline(limit) never allocates more than the bytes left in the
+        # budget (+1 to detect the overrun), so one oversized line cannot pull
+        # megabytes into memory before the bound applies.
+        raw = fh.readline(max_bytes - consumed + 1)
+        if not raw:
+            return True
+        consumed += len(raw)
+        if consumed > max_bytes:
+            return False
+        yield raw
 
 
 def scan_user_rejections(
@@ -726,48 +758,84 @@ def scan_user_rejections(
     rejection happened either way, and a consumer that needs the tool identity
     filters on `tool_name` itself.
     """
-    text = _read_bounded_text(path, max_bytes)
-    if text is None:
+    try:
+        fh = open(path, "rb")
+    except OSError:
+        # Unreadable: still [] — unless the file is provably past the bound,
+        # where the honest answer stays the indeterminate one a readable
+        # oversized file gives (#1231): a long session the hook cannot open
+        # is exactly where standing refusals have had time to accumulate.
         return None if _is_over_byte_bound(path, max_bytes) else []
-    lines = text.splitlines()
-
     rejections: list[dict] = []
-    for line in lines:
-        # Cheap structural pre-filter: both markers are literal, so a line
-        # missing either cannot be a rejection record.
-        if _DENIAL_KIND_MARKER not in line or REJECTION_PHRASE not in line:
-            continue
-        try:
-            ev = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(ev, dict):
-            continue
-        if ev.get("toolDenialKind") != REJECTION_DENIAL_KIND:
-            continue
-        block = _rejected_tool_result(ev)
-        if block is None:
-            continue
-        tool_use_id = block.get("tool_use_id")
-        if not isinstance(tool_use_id, str) or not tool_use_id:
-            continue
-        source_uuid = ev.get("sourceToolAssistantUUID")
-        timestamp = ev.get("timestamp")
-        rejections.append({
-            "tool_use_id": tool_use_id,
-            "tool_name": "",
-            "tool_input": {},
-            "text": "",
-            "source_uuid": source_uuid if isinstance(source_uuid, str) else "",
-            "timestamp": timestamp if isinstance(timestamp, str) else "",
-        })
+    with fh:
+        # Pass 1: the rejection records. Cheap structural pre-filter: both
+        # markers are literal, so a line missing either cannot be one.
+        lines = _iter_bounded_lines(fh, max_bytes)
+        while True:
+            try:
+                raw = next(lines)
+            except StopIteration as done:
+                if not done.value:
+                    return None  # past the bound — indeterminate (#1231)
+                break
+            except OSError:
+                return []
+            if _DENIAL_KIND_MARKER_B not in raw or REJECTION_PHRASE_B not in raw:
+                continue
+            ev = _parse_line(raw)
+            if ev is None or ev.get("toolDenialKind") != REJECTION_DENIAL_KIND:
+                continue
+            block = _rejected_tool_result(ev)
+            if block is None:
+                continue
+            tool_use_id = block.get("tool_use_id")
+            if not isinstance(tool_use_id, str) or not tool_use_id:
+                continue
+            source_uuid = ev.get("sourceToolAssistantUUID")
+            timestamp = ev.get("timestamp")
+            rejections.append({
+                "tool_use_id": tool_use_id,
+                "tool_name": "",
+                "tool_input": {},
+                "text": "",
+                "source_uuid": source_uuid if isinstance(source_uuid, str) else "",
+                "timestamp": timestamp if isinstance(timestamp, str) else "",
+            })
 
-    if not rejections:
-        return []
-    if max_records > 0:
-        rejections = rejections[-max_records:]
-    _resolve_rejected_tool_uses(lines, rejections)
+        if not rejections:
+            return []
+        if max_records > 0:
+            rejections = rejections[-max_records:]
+
+        # Pass 2: the originating tool_use records, from the start again. The
+        # file was inside the bound a moment ago; anything appended since is
+        # newer than every rejection kept above, so the walk simply stops at
+        # the bound instead of turning a finished pass 1 into None.
+        needles = {r["tool_use_id"] for r in rejections}
+        needles.update(r["source_uuid"] for r in rejections if r["source_uuid"])
+        try:
+            fh.seek(0)
+            _resolve_rejected_tool_uses(
+                _decoded_candidate_lines(_iter_bounded_lines(fh, max_bytes), needles),
+                rejections,
+            )
+        except OSError:
+            pass
     return rejections
+
+
+def _decoded_candidate_lines(raw_lines, needles: set[str]):
+    """Decode only the lines that can resolve a rejection: a `tool_use` block
+    carrying one of the ids the rejections name. Both probes run on the raw
+    bytes so the common line is rejected before it is decoded — the same
+    "cheap filter before the allocation" order pass 1 keeps."""
+    needles_b = [n.encode("utf-8") for n in needles]
+    for raw in raw_lines:
+        if _TOOL_USE_MARKER_B not in raw:
+            continue
+        if not any(n in raw for n in needles_b):
+            continue
+        yield raw.decode("utf-8", errors="replace")
 
 
 def _rejected_tool_result(ev: dict) -> dict | None:
@@ -794,8 +862,13 @@ def _rejected_tool_result(ev: dict) -> dict | None:
     return None
 
 
-def _resolve_rejected_tool_uses(lines: list[str], rejections: list[dict]) -> None:
+def _resolve_rejected_tool_uses(lines: Iterable[str], rejections: list[dict]) -> None:
     """Fill `tool_name` / `tool_input` / `text` in place from the uuid index.
+
+    `lines` is any iterable of decoded JSONL lines; `scan_user_rejections`
+    streams one that is already narrowed to candidate lines, and the probes
+    below are re-run only so the function stays correct for a caller that
+    hands it an unfiltered list.
 
     The originating assistant record is located by `sourceToolAssistantUUID`
     against the record's own `uuid`; the `tool_use` block inside it is then
@@ -853,11 +926,11 @@ def _flatten_strings(value, limit: int = REJECTION_TEXT_MAX_CHARS) -> str:
     """
     parts: list[str] = []
     total = 0
-    stack = [value]
+    stack: deque = deque([value])
     while stack:
         if total >= limit:
             break
-        item = stack.pop(0)
+        item = stack.popleft()
         if isinstance(item, str):
             parts.append(item)
             total += len(item)
