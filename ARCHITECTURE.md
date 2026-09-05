@@ -347,5 +347,6 @@ Adding a new platform = one file at `manifests/platforms/<name>.json`, its
 `host_id` added to the `hosts` enum in `hooks/manifest.schema.json`
 (`tests/test_check_manifest_schema.py` asserts the enum equals the platform
 set, so a missing entry fails CI), and one build run. No skill, hook, or
-existing-platform changes required; a hook that should ship on the new host
-additionally lists it in its `hosts` array and `Supported hosts:` line.
+existing-platform changes required. Hooks without a `hosts` field ship to
+every platform automatically; a hook with an explicit `hosts` list stays off
+the new host until that list (and its `Supported hosts:` line) names it.

@@ -155,8 +155,9 @@ verification-metadata requirement.
 
 The same SKILL.md ships to every platform under `manifests/platforms/` that
 lists `skills/` — Claude Code, Codex, and Cursor today. The table covers the
-two hosts whose behaviour has been probed; Cursor has not been, so treat it as
-unverified rather than identical to either column:
+two hosts the `runtime-verified-note` entries in this repo were recorded on;
+no skill carries a Cursor verification, so treat Cursor as unverified rather
+than identical to either column:
 
 | Aspect | Claude host | Codex host |
 | -------- | ------------- | ------------ |
