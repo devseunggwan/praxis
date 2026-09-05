@@ -43,9 +43,14 @@ Displays the status of all cmux sessions in a table.
 1. User requests `cmux-session status` or `cmux status`
 2. Execute the following script:
 ```bash
-bash "$(dirname "${0}")/cmux-session-status"
+bash "${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/skills/cmux-session-manager/cmux-session-status"
 ```
 3. Show the output to the user as-is
+
+If `CLAUDE_PLUGIN_ROOT` is unset the `:?` guard aborts with `praxis plugin root
+not set`; resolve it from the installed-plugins manifest
+(`jq -r '.plugins["praxis@praxis"][0].installPath // empty' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"`),
+export it, and re-run — do not fall back to a relative path.
 
 **Output includes:**
 - Summary header: Active / Waiting / Idle / Crashed / Orphaned counts
@@ -60,7 +65,7 @@ Performs 3-phase cleanup. Use `--dry-run` flag to preview the plan without execu
 1. User requests `cmux-session cleanup` or `cmux cleanup`
 2. Check dry-run preference, then execute:
 ```bash
-bash "$(dirname "${0}")/cmux-session-cleanup" [--dry-run]
+bash "${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/skills/cmux-session-manager/cmux-session-cleanup" [--dry-run]
 ```
 3. The script outputs 3 JSON blocks separated by `---PHASE_SEPARATOR---`
 4. Parse each phase's JSON and process according to the Data Handoff Protocol below
@@ -192,11 +197,9 @@ to call `cmux-session-lib`'s `classify_category` for auto rename + set-status.
 
 ## Report Schedule (Automation)
 
-To receive a daily end-of-day report, use the `/schedule` skill:
-
-```
-/schedule "Run cmux-session status daily at 18:00 and send results to Slack"
-```
+Praxis ships no scheduler. For a daily end-of-day report, run
+`cmux-session-status` from an external scheduler (cron, launchd) and route its
+output wherever you read reports.
 
 The report includes status output + PR status from `sidebar-state`'s `pr=` field + cleanup recommendations.
 
@@ -234,4 +237,4 @@ The report includes status output + PR status from `sidebar-state`'s `pr=` field
 
 **Automation:**
 - Init hook: auto-classify on `session-start` (see "Init Hook" section)
-- Report schedule: daily status via `/schedule` (see "Report Schedule" section)
+- Report schedule: daily status via an external scheduler (see "Report Schedule" section)

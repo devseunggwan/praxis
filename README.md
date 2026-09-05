@@ -41,7 +41,7 @@ directly from the repo root.
 ### Codex — marketplace + plugin
 
 ```bash
-# Register the local marketplace (points at this repo's .agents/plugins/marketplace.json)
+# Register this repo as a marketplace (its root is .agents/plugins/marketplace.json)
 codex marketplace add https://github.com/devseunggwan/praxis
 codex plugin install praxis
 ```
@@ -53,12 +53,21 @@ into the repo-root runtime — there is no source duplication.
 
 ### Direct skill install (fallback)
 
-When the plugin surface isn't available:
+When the plugin surface isn't available, Claude Code still loads personal
+skills from `~/.claude/skills/<skill-name>/SKILL.md` (project skills from
+`.claude/skills/`). Clone the repo and link the skill directories you want:
 
 ```bash
 git clone https://github.com/devseunggwan/praxis.git ~/projects/praxis
-claude skill add ~/projects/praxis/skills/<skill-name>
+mkdir -p ~/.claude/skills
+ln -s ~/projects/praxis/skills/<skill-name> ~/.claude/skills/<skill-name>
 ```
+
+Skills installed this way are invoked as `/<skill-name>` rather than
+`/praxis:<skill-name>`, and the hooks are not installed — this path ships
+skills only. Skills that call a bundled helper through `CLAUDE_PLUGIN_ROOT`
+(`strike`, `spec-drift`, the `cmux-*` skills) need that variable exported to
+the clone path, e.g. `export CLAUDE_PLUGIN_ROOT=~/projects/praxis`.
 
 ## Where to start
 
