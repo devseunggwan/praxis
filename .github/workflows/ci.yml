@@ -43,6 +43,29 @@ jobs:
       - run: python3 -m pip install "ruff==0.15.8"
       - run: ruff check .
 
+  mypy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: .github/workflows/ci.yml
+      # Pinned so a future mypy release can't tighten inference and turn CI
+      # red without an explicit bump — the ruff pin's reasoning. types-PyYAML
+      # is the stub package for scripts/check-workflow-pins.py's PyYAML import
+      # (the one third-party import in scope); it is pinned on the same ground,
+      # and stubs alone are enough — mypy never imports the runtime package.
+      # Scope and flags live in mypy.ini, so the invocation carries no
+      # arguments and scripts/run-tests.sh step 13 cannot drift from it.
+      # Bump the two pins here and in run-tests.sh together.
+      - run: python3 -m pip install "mypy==1.20.0" "types-PyYAML==6.0.12.20260815"
+      - run: python3 -m mypy
+
   shellcheck:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -123,7 +146,19 @@ jobs:
       # step cannot disagree with the blocking one. PyYAML is what
       # scripts/check-workflow-pins.py parses workflows with; pinned for the
       # same reason, since a parser change moves what the canary can see.
-      - run: python3 -m pip install pytest "ruff==0.15.8" "PyYAML==6.0.3"
+      # coverage is pinned on the same ground as ruff (issue #1303): the pytest
+      # step of run-tests.sh gates on the `fail_under` floor in .coveragerc, and
+      # a coverage.py release can move what counts as a statement — the
+      # measured total shifting under a fixed floor is exactly the silent
+      # red-without-a-bump the ruff pin exists to prevent. run-tests.sh's skip
+      # hint names the same version; bump both together.
+      # mypy and its types-PyYAML stub are pinned to the `mypy` job's versions
+      # on the ruff ground: run-tests.sh step 13 is the local-parity mirror,
+      # and under PRAXIS_TESTS_STRICT an absent mypy would fail this job as a
+      # skip rather than run the check.
+      - run: |
+          python3 -m pip install pytest "ruff==0.15.8" "PyYAML==6.0.3" \
+            "coverage==7.16.0" "mypy==1.20.0" "types-PyYAML==6.0.12.20260815"
       # zsh is not preinstalled on ubuntu-24.04. block-unmatched-glob delegates
       # its verdict to a real zsh, so without it that hook's suite has nothing to
       # assert against and silently degrades to fail-open coverage.
@@ -158,9 +193,21 @@ jobs:
       # run silently stopped checking something rather than accommodating a
       # contributor's machine. markdownlint stays advisory — strict gates on a
       # step being skipped, not on its findings.
+      # COVERAGE_FILE is pinned to the workspace so the data file outlives the
+      # runner's throwaway PRAXIS_HOME (its default location, swept by an EXIT
+      # trap) and the summary step below can re-read it. .coverage is
+      # gitignored; the runner never pushes, so nothing here can commit it.
       - run: bash scripts/run-tests.sh
         env:
           PRAXIS_TESTS_STRICT: "1"
+          COVERAGE_FILE: ${{ github.workspace }}/.coverage
+      # Per-file coverage table on the job summary (issue #1303). The floor
+      # already gated inside run-tests.sh; this step only renders the same
+      # data, so it inherits the pass. coverage 7.16.0 supports
+      # --format=markdown (verified against `coverage report --help`).
+      - run: python3 -m coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+        env:
+          COVERAGE_FILE: ${{ github.workspace }}/.coverage
 
   link-check:
     runs-on: ubuntu-24.04

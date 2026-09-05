@@ -358,6 +358,12 @@ assert_record "$LEDGER" "retrospect-mix-check records pass" retrospect-mix-check
 
 # codex-review-route — /codex:review advises.
 #
+# Ported from impl.sh to impl.py in #1304, so it no longer goes through
+# record_fire.sh: the advising path calls `_fire_ledger.record_session_fire`
+# directly and suppresses the coarse duplicate. The assertion is unchanged —
+# exactly one RICH advise record keyed to the payload's session — which is
+# what pins the port to the ledger shape the shell version wrote.
+#
 # The advisory fires on >= 2 non-bare worktrees, so it must run against a
 # repository this test builds rather than whichever checkout happens to host
 # the run: a developer machine mid-session has many worktrees and a CI runner
@@ -372,7 +378,7 @@ git -C "$CR_REPO" worktree add -q -b second "$TMP/cr-wt2"
 LEDGER="$TMP/cr-led.jsonl"
 printf '{"prompt":"/codex:review","session_id":"sess-cr"}' \
   | (cd "$CR_REPO" && PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" \
-      bash "$ROOT_DIR/hooks/advisory-nudge/codex-review-route/impl.sh") >/dev/null
+      python3 "$ROOT_DIR/hooks/advisory-nudge/codex-review-route/impl.py") >/dev/null
 assert_record "$LEDGER" "codex-review-route records advise" codex-review-route advise sess-cr
 
 # An absent session_id must reach the ledger as "", never as the "unknown"

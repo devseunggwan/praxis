@@ -306,6 +306,9 @@ def _build_message(unreported: list[str], report_files: list[str]) -> str:
             break
     sample = "\n".join("  - " + f for f in seen)
     return (
+        f"{_PREFIX} this PR-bound session (PR {', '.join(unreported)}) wrote a local "
+        "review/verification report file, but no successful `gh pr comment` / "
+        "`gh pr review` was posted on that PR:\n"
         f"{_PREFIX} PR-bound 세션(PR {', '.join(unreported)})이 review/verification "
         "로컬 리포트 파일을 작성했으나, 그 PR 에 성공적인 `gh pr comment` / `gh pr review` "
         "게시가 없습니다:\n"

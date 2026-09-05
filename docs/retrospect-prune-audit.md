@@ -160,7 +160,9 @@ original motivating incident (#501 for Gate-6, #366 for Stage 2.7).
 ## Appendix — instrumentation follow-up (pre-req for the next audit)
 
 Issue #713 already recommends porting the 4 uninstrumented shell hooks
-to fire-event emission. For this corpus specifically:
+to fire-event emission (2026-09-05: issue #892 has since instrumented all
+four in place, and issue #1304 ported `codex-review-route` to Python, so
+three shell hooks remain). For this corpus specifically:
 
 1. Port `retrospect-mix-check` to emit fire-events under the existing
    `hooks/_lib/_fire_ledger.py` contract (`decision: block | ask |

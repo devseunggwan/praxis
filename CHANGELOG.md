@@ -5,6 +5,32 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.15.0](https://github.com/devseunggwan/praxis/compare/v7.14.0...v7.15.0) (2026-09-05)
+
+
+### Added
+
+* **cmux:** idleness oracle for orphan pane triage ([#1255](https://github.com/devseunggwan/praxis/issues/1255)) ([e825d2f](https://github.com/devseunggwan/praxis/commit/e825d2f6b5ca77c685d382eae09cd3a7a63cea24))
+* **hook:** extend rejected-mutation-reconsent to the dispatch surface ([#1262](https://github.com/devseunggwan/praxis/issues/1262)) ([30e95f0](https://github.com/devseunggwan/praxis/commit/30e95f0cb4b1218fdd60669b910849c7c406617e))
+* **hooks:** advise on unenforced mandatory steps ([#1263](https://github.com/devseunggwan/praxis/issues/1263)) ([d1e3e33](https://github.com/devseunggwan/praxis/commit/d1e3e333654cf066fed2082ada5594a002e7504c))
+* **hooks:** gate composed $ command lines ([96c0f98](https://github.com/devseunggwan/praxis/commit/96c0f98b59243c7c5c11e165723628c2800273a0))
+* **hooks:** gate parens release-please rejects ([#1268](https://github.com/devseunggwan/praxis/issues/1268)) ([9ea4785](https://github.com/devseunggwan/praxis/commit/9ea4785ab3ca9ef0bb1f42fac3782e2b9c381730))
+
+
+### Fixed
+
+* **cmux-delegate:** drop $&lt;digit&gt; from the skill body ([#1269](https://github.com/devseunggwan/praxis/issues/1269)) ([a825eae](https://github.com/devseunggwan/praxis/commit/a825eae8417069c266ec1e16f6b20f3cce0686b6))
+* **hooks:** classify string-shaped failed payload ([#1270](https://github.com/devseunggwan/praxis/issues/1270)) ([1cb7ca6](https://github.com/devseunggwan/praxis/commit/1cb7ca6e1a2cb2944b972d36312a5fcc8fef9b7e))
+* **hooks:** cut the marker window at the last merge that ran ([#1264](https://github.com/devseunggwan/praxis/issues/1264)) ([b8785bb](https://github.com/devseunggwan/praxis/commit/b8785bbd757ec0aae62f9f33fbc57a11fa94ab99))
+* **hooks:** declare the two undeclared advisory strict knobs ([#1260](https://github.com/devseunggwan/praxis/issues/1260)) ([b291ffd](https://github.com/devseunggwan/praxis/commit/b291ffdbd8ce032db47a12edf0cf16acd72b28fe))
+* **hooks:** detect gh api comment writes ([#1267](https://github.com/devseunggwan/praxis/issues/1267)) ([e923b7d](https://github.com/devseunggwan/praxis/commit/e923b7de3f0b98822243c1bed053036612d3129b))
+* **hooks:** resolve gate-4 visibility in the hook ([#1272](https://github.com/devseunggwan/praxis/issues/1272)) ([9a75c74](https://github.com/devseunggwan/praxis/commit/9a75c748fdea91829c8f3f108c7284e18ac64667))
+
+
+### Changed
+
+* **hooks:** state the anchor gh prerequisite ([#1266](https://github.com/devseunggwan/praxis/issues/1266)) ([36e8580](https://github.com/devseunggwan/praxis/commit/36e8580497d25bda32b763025f490c21f0b9706d))
+
 ## [7.14.0](https://github.com/devseunggwan/praxis/compare/v7.13.0...v7.14.0) (2026-09-03)
 
 

@@ -43,6 +43,9 @@ implements these principles live in [`DESIGN.md`](DESIGN.md).
   intentionally has no marker; `completion-verify` and `retrospect-mix-check`
   same. Bypass marker (`# side-effect:ack`, `# title-length:ack`) exists only
   where the false-positive cost outweighs the silent-bypass risk.
+- **Every hook has a sunset date.** `review_by` in the manifest fails CI once
+  it passes; a hook survives by re-audit, not by default — rules in
+  [`CONTRIBUTING.md → Evidence and sunset review`](CONTRIBUTING.md#evidence-and-sunset-review).
 
 ### Claims that terminate in prose
 

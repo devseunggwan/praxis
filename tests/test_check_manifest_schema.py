@@ -22,7 +22,10 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import io
 import json
+from contextlib import redirect_stdout
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -35,6 +38,13 @@ _spec = importlib.util.spec_from_file_location(
 assert _spec and _spec.loader
 build = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(build)
+
+_check_spec = importlib.util.spec_from_file_location(
+    "check_plugin_manifests", REPO_ROOT / "scripts" / "check-plugin-manifests.py"
+)
+assert _check_spec and _check_spec.loader
+check = importlib.util.module_from_spec(_check_spec)
+_check_spec.loader.exec_module(check)
 
 
 @pytest.fixture()
@@ -343,3 +353,156 @@ def test_non_dispatch_member_with_args_is_fine(manifest):
     entry["args"] = ["--foo"]
     drifts = build.manifest_schema_drifts(manifest)
     assert not any("declares 'args'" in d for d in drifts), drifts
+
+
+# ---------------------------------------------------------------------------
+# Rule 26 (#1300) — review_by sunset review: schema shape + checker rule
+# ---------------------------------------------------------------------------
+
+# Pinned so the committed manifest's dates are judged against a fixed day,
+# not the wall clock — the OVERDUE branch is exercised by mutation below.
+TODAY = date(2026, 9, 5)
+
+
+def _registrations(manifest: dict, name: str) -> list[dict]:
+    return [e for e in manifest["hooks"] if e["name"] == name]
+
+
+def _multi_event_name(manifest: dict) -> str:
+    counts: dict[str, int] = {}
+    for e in manifest["hooks"]:
+        counts[e["name"]] = counts.get(e["name"], 0) + 1
+    return next(name for name, n in counts.items() if n > 1)
+
+
+def _set_review_by(manifest: dict, name: str, value) -> None:
+    for e in _registrations(manifest, name):
+        e.pop("review_by", None)
+    _registrations(manifest, name)[0]["review_by"] = value
+
+
+def test_review_by_wrong_type_is_a_schema_drift(manifest):
+    entry = manifest["hooks"][0]
+    entry["review_by"] = 20261204
+    drifts = build.manifest_schema_drifts(manifest)
+    assert len(drifts) == 1
+    assert "review_by" in drifts[0]
+    assert "expected string" in drifts[0]
+
+
+def test_observe_only_must_be_boolean(manifest):
+    entry = manifest["hooks"][0]
+    entry.setdefault("mode", {})["observe_only"] = "yes"
+    drifts = build.manifest_schema_drifts(manifest)
+    assert len(drifts) == 1
+    assert "observe_only" in drifts[0]
+
+
+def test_observe_only_true_is_accepted(manifest):
+    entry = manifest["hooks"][0]
+    entry.setdefault("mode", {})["observe_only"] = True
+    assert build.manifest_schema_drifts(manifest) == []
+
+
+def test_committed_manifest_passes_rule_26_on_the_pinned_day(manifest):
+    assert check.review_by_drifts(manifest, TODAY) == []
+
+
+def test_every_hook_name_carries_a_review_by(manifest):
+    names = {e["name"] for e in manifest["hooks"]}
+    missing = [
+        n for n in names
+        if not any("review_by" in e for e in _registrations(manifest, n))
+    ]
+    assert missing == []
+
+
+def test_missing_review_by_fails(manifest):
+    name = manifest["hooks"][0]["name"]
+    for e in _registrations(manifest, name):
+        e.pop("review_by", None)
+    drifts = check.review_by_drifts(manifest, TODAY)
+    assert len(drifts) == 1
+    assert drifts[0].startswith(f"REVIEW_BY MISSING {name}:")
+    assert "90 days" in drifts[0]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["soon", "2026-13-45", "2026-02-30", "2026/12/04", "20261204", "2026-12-4", ""],
+)
+def test_malformed_review_by_fails(manifest, bad):
+    name = manifest["hooks"][0]["name"]
+    _set_review_by(manifest, name, bad)
+    drifts = check.review_by_drifts(manifest, TODAY)
+    assert len(drifts) == 1
+    assert drifts[0].startswith(f"REVIEW_BY MALFORMED {name}: {bad!r}")
+    assert "YYYY-MM-DD" in drifts[0]
+
+
+def test_overdue_review_by_fails_and_names_the_remedy(manifest):
+    name = manifest["hooks"][0]["name"]
+    _set_review_by(manifest, name, "2026-09-04")  # the day before TODAY
+    drifts = check.review_by_drifts(manifest, TODAY)
+    assert len(drifts) == 1
+    assert drifts[0].startswith(f"REVIEW_BY OVERDUE {name}: 2026-09-04")
+    # The message must tell the author what to do, not just that it failed.
+    assert "re-audit" in drifts[0]
+    assert "bump review_by" in drifts[0]
+    assert "docs/hook-prune-audit.md" in drifts[0]
+
+
+def test_review_by_due_today_is_not_overdue(manifest):
+    name = manifest["hooks"][0]["name"]
+    _set_review_by(manifest, name, TODAY.isoformat())
+    assert check.review_by_drifts(manifest, TODAY) == []
+
+
+def test_valid_future_review_by_passes(manifest):
+    name = manifest["hooks"][0]["name"]
+    _set_review_by(manifest, name, "2027-01-15")
+    assert check.review_by_drifts(manifest, TODAY) == []
+
+
+def test_multi_event_sibling_may_omit_review_by(manifest):
+    # First-registration-wins, like `hosts`: moving the field to the second
+    # registration still counts as declared — the NAME carries it.
+    name = _multi_event_name(manifest)
+    regs = _registrations(manifest, name)
+    value = regs[0].pop("review_by")
+    regs[1]["review_by"] = value
+    assert check.review_by_drifts(manifest, TODAY) == []
+
+
+def test_conflicting_review_by_across_registrations_fails(manifest):
+    name = _multi_event_name(manifest)
+    regs = _registrations(manifest, name)
+    regs[1]["review_by"] = "2030-01-01"
+    drifts = check.review_by_drifts(manifest, TODAY)
+    assert len(drifts) == 1
+    assert drifts[0].startswith(f"REVIEW_BY CONFLICT {name}:")
+
+
+def test_main_reports_overdue_once_the_clock_passes_review_by(monkeypatch):
+    # End-to-end wiring: the committed tree is green today, and the only thing
+    # that changes here is the checker's notion of "today". A far-future clock
+    # must turn every backfilled 2026-12-04 into a REVIEW_BY OVERDUE line.
+    class FarFuture(date):
+        @classmethod
+        def today(cls):
+            return date(2099, 1, 1)
+
+    monkeypatch.setattr(check, "date", FarFuture)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = check.main()
+    out = buf.getvalue()
+    assert rc == 1
+    assert "REVIEW_BY OVERDUE" in out
+    assert "docs/hook-prune-audit.md" in out
+
+
+def test_review_by_and_observe_only_never_reach_hooks_json(manifest):
+    rendered = json.dumps(build.expand_to_hooks_json(manifest))
+    assert "review_by" not in rendered
+    assert "observe_only" not in rendered

@@ -133,6 +133,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_STATE_DIR` | `~/.praxis/state` | shared — durable state base (strike-counter, external-write-path-existence-check, postcompact read) |
 | `PRAXIS_HOOK_ERROR_LOG` | `~/.praxis/logs/hook-errors.jsonl` | shared (`@fail_open`) |
 | `PRAXIS_HOOK_ERROR_STDERR` | unset | shared — also print swallowed-exception note to stderr |
+| `PRAXIS_HOOK_ERROR_LOG_MAX_BYTES` | `5242880` | shared (`@fail_open`) — error-log rotation cap in bytes, `0` disables (#1282) |
 | `PRAXIS_BYPASS_TELEMETRY_FILE` | `~/.praxis/telemetry/bypass-events-<date>.jsonl` | `bypass-telemetry` |
 | `PRAXIS_MEMORY_DIR` | memory store dir | `memory-hint`, `momentum-rule-retrieval-gate` |
 | `PRAXIS_GH_LABEL_CACHE_PATH` | `~/.praxis/cache/gh-label-cache.json` | `gh-label-verify` |

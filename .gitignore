@@ -19,6 +19,9 @@ tmp/
 # Python
 __pycache__/
 *.pyc
+# mypy's incremental cache — scripts/run-tests.sh step 13 writes it at
+# the repo root; a local run artifact, never a source of truth.
+.mypy_cache/
 
 # OMC (oh-my-claudecode local state)
 .omc/
