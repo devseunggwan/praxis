@@ -500,6 +500,21 @@ an explicit `SKIPPED:` line when the tool is not installed, so a missing
 toolchain does not block you. The corresponding CI job still runs either way,
 so install them if you want local parity.
 
+The pytest step also measures statement coverage (issue #1303). When the
+`coverage` module is importable (`pip install 'coverage==7.16.0'`, the version
+CI pins), pytest runs under `coverage run` with the configuration in
+`.coveragerc`: sources are `hooks/` and `scripts/`, and `coverage report`
+fails the step when the TOTAL drops below `fail_under` — 50%, one point under
+the 51% measured when the floor was introduced, so the check catches a real
+regression rather than rounding noise. To raise it, run the pytest step, read
+the new TOTAL, and set `fail_under` to that minus one in the same PR as the
+tests that earned it. Only the Python that pytest imports in-process is
+counted: `impl.py` executions driven from the shell suites are subprocesses
+and are not yet measured, which is the deferred half of #1303. Without the
+module the tests still run, plain, and the step prints `SKIPPED: coverage`
+under the same strict-mode protocol as the static checks. CI appends the
+per-file table to the job summary.
+
 The markdownlint pass normally covers only the markdown your branch changed,
 measured against `origin/main`. When `origin/main` is not available — a shallow
 clone, or a fork that has not fetched upstream — it prints
