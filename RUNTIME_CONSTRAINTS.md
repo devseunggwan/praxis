@@ -111,10 +111,14 @@ the `Skill(...)` tool.
 
 ---
 
-## 4. `Bash` tool — cwd resets between invocations
+## 4. `Bash` tool — cwd resets between invocations (host-dependent)
 
 **Constraint**: Each `Bash` tool call starts with the session's original cwd.
 A `cd /some/path` in one `Bash` call does **not** persist to the next call.
+This holds on the remote (web) harness, which resets the shell explicitly;
+the local CLI's own tool description says the working directory persists
+between calls, so the behaviour is host-dependent and a skill must not rely
+on either — write every step so it is correct under both.
 
 **Why it bites skills**: Skills that split a multi-step operation across two
 `Bash` calls (cd in the first, use the new cwd in the second) will silently
@@ -130,10 +134,19 @@ error message, because the wrong directory is still a valid path.
 Never split a cwd-sensitive operation across multiple `Bash` calls. If the
 operation is too long for one call, restructure it to use absolute paths.
 
-**Verified**: 2026-05-13 / Claude Code (Sonnet 4.6) / Issue #208 / global
-`CLAUDE.md` rule "Bash Redirect on Existing Path Requires Read-First" and
-"worktree-context-pre-git-op" memory — the per-call cwd reset is the root
-cause of the class of bugs these rules address.
+**Verified**: 2026-05-13 / Claude Code (Sonnet 4.6) / Issue #208 — the per-call
+cwd reset was the root cause of a class of wrong-directory git operations the
+author had previously papered over with prompt-layer rules.
+
+**Re-verified**: 2026-09-05 / Claude Code remote (web) session / Issue #1286 —
+`cd /tmp && pwd` printed `/tmp` and the harness appended `Shell cwd was reset
+to /home/user/praxis` to the result; the next call's `pwd` printed
+`/home/user/praxis`. That appended line is the same harness note
+`second-failure-advisory` strips as noise (issue #1042), so the reset is a
+documented property of this host. The local CLI's Bash tool description
+states the opposite ("Working directory persists between calls"); no local
+measurement has been recorded here, so treat persistence as unverified and
+keep the workaround.
 
 ---
 
