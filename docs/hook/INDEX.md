@@ -1,10 +1,11 @@
 # Hook Index (categorized)
 
 Praxis hooks grouped by enforcement role. For the full per-hook spec, follow
-each link. For the flat tabular listing (with event column), see the
-[Hook index in ARCHITECTURE.md](../../ARCHITECTURE.md#hook-index). For the
-generated role/event/host/env-var summary, see the
-[Hook Operating Matrix](../hook-operating-matrix.md). For the rules that govern a
+each link. For the flat tabular listing (with event column) and the generated
+role/event/host/env-var summary, see the
+[Hook Operating Matrix](../hook-operating-matrix.md);
+[ARCHITECTURE.md → Hook index](../../ARCHITECTURE.md#hook-index) points at both
+documents rather than repeating them. For the rules that govern a
 user-facing surface but are **not** (yet) hooked, ranked by user-facing cost, see
 [Rule backstop gaps](RULE-BACKSTOP-GAPS.md).
 

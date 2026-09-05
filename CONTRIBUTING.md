@@ -4,6 +4,61 @@ Praxis is a personal toolbox — contributions are primarily self-directed, but
 the conventions below keep the repo coherent across sessions and prevent the
 class of drift bugs that have cost the most debugging time.
 
+## Local development
+
+### Canonical clone path
+
+This repository should live at **`~/projects/praxis`**. The CLI tools shipped
+by skills (e.g. `cmux-recover-sessions`, `claude-recover`, `cmux-save-sessions`)
+are symlinked from `~/.local/bin` into this clone, so patches you commit here
+land in the version that actually runs at the shell. Keeping a
+second clone under a legacy name risks `~/.local/bin` symlinks pointing at stale
+code — a real failure mode previously hit during recover-sessions debugging.
+
+After every `git pull` or worktree operation, run `./scripts/verify-symlinks.sh`
+to confirm all `~/.local/bin` entries still resolve to this clone.
+
+### CLI tools (not skills)
+
+These are shell wrappers installed via `scripts/install.sh` into `~/.local/bin`.
+They are not AI skills — they have no `SKILL.md` and cannot be invoked as `/praxis:*`.
+
+| Binary          | Source                               | Purpose                                                                                                                                                     |
+| --------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bypass-review` | `skills/bypass-review/bypass-review` | Review bypass-telemetry event logs written by the bypass-telemetry hook — aggregate and inspect JSONL records (no `SKILL.md`; not invocable as `/praxis:*`) |
+
+### Install / refresh CLI symlinks
+
+```bash
+# From inside this clone:
+./scripts/install.sh
+```
+
+Idempotent. Existing valid links are left alone; missing or drifted ones
+are corrected. Re-run after pulls or after adding a new CLI script.
+
+### Verify symlinks point at this clone
+
+```bash
+./scripts/verify-symlinks.sh
+```
+
+Exits non-zero on drift, so it can be wired into CI or a SessionStart hook
+to catch "patch landed in the wrong clone" before it bites a future session.
+
+### Keeping `AGENTS.md` small
+
+`AGENTS.md` (`CLAUDE.md` is a symlink to it) is loaded into every session, so
+every word there costs context on every turn.
+[`tests/test_agents_md_budget.py`](tests/test_agents_md_budget.py) caps it at
+1,000 whitespace-split words (Python `str.split()` — `wc -w` in the C locale
+skips tokens made only of non-ASCII characters such as `—` and `→`, so it
+reads low). Content only a contributor needs — setup, tooling,
+procedures that are never executed in-session — belongs in this file; leave a
+one-line pointer in `AGENTS.md`, and keep its Skills tables, compatibility-tier
+table, and Issue & PR conventions intact, since `check-plugin-manifests.py`
+Rule 13 normalizes those against `README.md` and `using-praxis` (issue #1306).
+
 ## Writing a spec
 
 A *feature spec* states what a change must satisfy, before the change exists.
@@ -172,7 +227,10 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
      the wrapper IS the impl invocation surface).
 6. Create `hooks/<role>/<name>/spec.md` (template: any existing spec). Include a
    `Supported hosts:` line matching the `hosts` array in `manifest.json`.
-7. Add a row to the hook index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
+7. Add the hook under its role in [`docs/hook/INDEX.md`](docs/hook/INDEX.md).
+   The generated [Hook Operating Matrix](docs/hook-operating-matrix.md)
+   picks it up from the manifest on the next build; nothing is added to
+   `ARCHITECTURE.md`.
 8. Run `./scripts/check-plugin-manifests.py` — it verifies the
    directory↔manifest cross-check, role↔dirname agreement, impl existence,
    Stop ordering, byte-equivalent generated artifacts, and 5+ more
@@ -180,6 +238,19 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
 9. Canary the change — see
    [Verifying a hook change at runtime](#verifying-a-hook-change-at-runtime-canary)
    below. A green test suite does not tell you what the runtime is executing.
+
+### Host-aware filtering
+
+Hooks support host-aware filtering via an optional `hosts` field on each hook
+entry in `hooks/manifest.json`. When `hosts` is absent the hook is included for
+all platforms (default). When present it must be an array of host identifiers
+(`"claude"`, `"codex"`, etc.) — the hook is written only to the platform whose
+`host_id` in `manifests/platforms/<name>.json` appears in that list. The build
+script (`scripts/build-plugin-manifests.py`) reads this field and writes a
+platform-specific `hooks.json` for each platform under its plugin directory.
+Each per-hook `spec.md` carries a `Supported hosts:` line that documents the
+classification; `scripts/check-plugin-manifests.py` verifies that every hook
+entry has a corresponding spec file.
 
 ### Verifying a hook change at runtime (canary)
 
@@ -357,6 +428,33 @@ after a `reset` or `checkout`. If you must audit from the tree itself, fetch and
 check out the PR branch first (`git fetch origin <branch> && git checkout
 <branch>`) instead of assuming the current tree reflects it.
 
+### Anchor revision without `gh`
+
+`gh` is also a prerequisite of the verification-anchor convention, and for
+revision specifically. Creating an anchor needs only a way to post a comment;
+editing one in place is a `PATCH` against its comment id, which a session whose
+only GitHub surface is the MCP server cannot issue when that server exposes no
+comment `update` — comment bodies are add-only there, while issue and PR bodies
+are not. Enumerating `github/github-mcp-server` (version unknown, 2026-09-04)
+found that absence upstream rather than in one deployment, so it does not
+resolve by waiting; it is one measurement of one server, so confirm `update` is
+absent from the **active** session's tool list before applying any of this. The
+same surface strips `<details>` / `<summary>` on the comment **read** path as
+well, which leaves the gate's PostToolUse structure re-check with no substitute
+there at all.
+
+Past rev 1 the anchor rule is therefore unsatisfiable in such a session. The
+procedure: post rev 1 in full, grade the re-check `unknown`, say in the PR body
+which SHA the anchor is stamped at and that the host cannot update it, refresh
+that body on every later push that would have been a revision (or stop pushing
+until the anchor can be revised), and carry the delta there or into the merge
+commit — never a comment of its own, and never a second anchor, which makes id
+recovery ambiguous. Steps in
+[`anchor-comment-gate/spec.md` → Procedure for a gh-less session](hooks/preflight-gate/anchor-comment-gate/spec.md#procedure-for-a-gh-less-session),
+the precondition in
+[the section holding it](hooks/preflight-gate/anchor-comment-gate/spec.md#prerequisite--gh-for-revision-specifically).
+Issue #1211.
+
 ## Packaging
 
 **Do not edit generated files directly.** The following are generated outputs:
@@ -374,9 +472,8 @@ To regenerate after changing `manifests/*.json` or `VERSION`:
 ```
 
 `check-plugin-manifests.py` also verifies (a) every hook in
-`hooks/manifest.json` appears in both `docs/hook/INDEX.md` and the
-`ARCHITECTURE.md` hook index table, and (b) each hook spec's
-`Supported hosts:` line agrees with the `hosts` array in
+`hooks/manifest.json` appears in `docs/hook/INDEX.md`, and (b) each hook
+spec's `Supported hosts:` line agrees with the `hosts` array in
 `hooks/manifest.json` (`all` = no `hosts` field; explicit list = exact set
 match).
 
