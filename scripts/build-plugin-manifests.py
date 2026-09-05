@@ -1119,6 +1119,25 @@ def hook_mode(entries: list[dict]) -> dict:
     return merged
 
 
+def hook_review_by(entries: list[dict]) -> str | None:
+    """The sunset-review date for one hook name, or None when none is declared.
+
+    `review_by` is attached to the first registration of each hook name
+    (multi-event siblings may omit it, mirroring `hosts`); the first
+    registration that carries one wins. Well-formedness and overdue-ness
+    are check-plugin-manifests.py rule 26's job — this is a plain lookup.
+    """
+    for entry in entries:
+        value = entry.get("review_by")
+        if value is not None:
+            return value
+    return None
+
+
+def _hook_review_by(entries: list[dict]) -> str:
+    return hook_review_by(entries) or ""
+
+
 def render_hook_operating_matrix(manifest: dict) -> str:
     """Render a generated hook operating-surface matrix.
 
@@ -1149,7 +1168,7 @@ def render_hook_operating_matrix(manifest: dict) -> str:
             external_commands[name] = mode["external_commands"]
 
     header = [
-        "Hook", "Role", "Events", "Hosts", "Default",
+        "Hook", "Role", "Events", "Hosts", "Default", "Review by",
         "Strict env", "Bypass env", "State/path vars", "External commands",
     ]
     table_rows = []
@@ -1163,6 +1182,7 @@ def render_hook_operating_matrix(manifest: dict) -> str:
             _md_cell(_hook_events(entries)),
             _md_cell(_hook_hosts(entries)),
             _md_cell(_default_signal(role)),
+            _md_cell(_hook_review_by(entries)),
             _md_cell(_compact_join(strict_vars.get(name, []))),
             _md_cell(_compact_join(bypass_vars.get(name, []))),
             _md_cell(_compact_join(state_vars.get(name, []))),
@@ -1180,9 +1200,9 @@ def render_hook_operating_matrix(manifest: dict) -> str:
         "",
         "Source:",
         "",
-        "- `hooks/manifest.json` -> role, event, matcher, hosts, and the per-hook",
-        "  `mode` block (strict env, bypass env, state/path vars, read-only",
-        "  external commands).",
+        "- `hooks/manifest.json` -> role, event, matcher, hosts, the sunset-review",
+        "  date `review_by` (#1300), and the per-hook `mode` block (strict env,",
+        "  bypass env, state/path vars, read-only external commands).",
         "",
         "`docs/bypass-vars.md` and `SECURITY.md` are human-readable views of the",
         "same `mode` metadata; the check script validates them against the manifest",

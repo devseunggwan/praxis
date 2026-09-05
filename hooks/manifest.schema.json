@@ -100,6 +100,11 @@
             "type": "integer",
             "minimum": 1
           },
+          "review_by": {
+            "description": "Sunset-review date, YYYY-MM-DD (#1300). Optional per ENTRY, required per hook NAME by check-plugin-manifests.py rule 26: the first registration carries it and multi-event siblings may omit it, mirroring `hosts`. Defaults to merge date + 90 days; a past date fails the check until the hook is re-audited (bump the date or record the verdict in docs/hook-prune-audit.md). Never copied into a platform hooks.json.",
+            "type": "string",
+            "minLength": 10
+          },
           "hosts": {
             "description": "Host whitelist; absent means all hosts. Values are host_id values from manifests/platforms/*.json — extend this enum when adding a platform.",
             "type": "array",
@@ -164,6 +169,10 @@
                   "type": "string",
                   "minLength": 1
                 }
+              },
+              "observe_only": {
+                "description": "True for a hook that by design never escalates — it records and exits 0, with no advise/ask/deny path. Exempts the hook from the zero-escalation Investigate rule at sunset review (#1300; CONTRIBUTING.md → Evidence and sunset review).",
+                "type": "boolean"
               }
             }
           }
