@@ -109,6 +109,16 @@ main() is labeled with its number, and this list is the canonical roster
       silently disable the whole group. Non-dispatcher commands are out of
       scope (a deliberate compound command is legitimate shell). (Numbered 25
       on rebase: authored as 22 before rules 21-23 landed on main.)
+  26. Sunset review (#1300): every hook NAME carries a well-formed
+      `review_by` date (YYYY-MM-DD; the first registration carries it and
+      multi-event siblings may omit it, exactly like `hosts`) — REVIEW_BY
+      MISSING / MALFORMED / CONFLICT — and that date is not in the past
+      (REVIEW_BY OVERDUE). An overdue hook is re-audited, then either the
+      date is bumped or the verdict is recorded in docs/hook-prune-audit.md;
+      the rule exists because the audit found zero drops and cannot rank
+      hooks by value, so without a deadline the roster only grows. The
+      field never reaches a platform hooks.json (the node builder copies
+      only command/timeout/hosts).
 
 An unnumbered auxiliary check verifies the Codex adapter symlinks
 (plugins/praxis/{skills,hooks,scripts} → repo root).
@@ -138,6 +148,7 @@ import shlex
 import subprocess
 import sys
 from collections.abc import Set as AbstractSet
+from datetime import date
 from pathlib import Path
 
 
@@ -182,6 +193,67 @@ RUNTIME_METADATA_PLACEHOLDERS = {
     },
 }
 RUNTIME_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+REVIEW_BY_OVERDUE_REMEDY = (
+    "re-audit the hook, then either bump review_by or record the verdict "
+    "in docs/hook-prune-audit.md"
+)
+
+
+def review_by_drifts(manifest: dict, today: date) -> list[str]:
+    """Rule 26 (#1300): every hook NAME carries a well-formed, unexpired `review_by`.
+
+    `review_by` is required per hook name, not per registration: the first
+    registration carries it and multi-event siblings may omit it, mirroring
+    how `hosts` is read ("first registration wins"). Two registrations that
+    disagree are a CONFLICT — silently preferring one would let the other
+    rot. A date strictly before `today` is OVERDUE: the sunset review is due,
+    and the way out is a re-audit, not a bare date bump. `today` is a
+    parameter so tests can pin it.
+    """
+    declared: dict[str, list] = {}
+    for entry in manifest["hooks"]:
+        values = declared.setdefault(entry["name"], [])
+        if "review_by" in entry:
+            values.append(entry["review_by"])
+
+    drifts: list[str] = []
+    for name, values in declared.items():
+        if not values:
+            drifts.append(
+                f"REVIEW_BY MISSING {name}: add review_by YYYY-MM-DD to its "
+                "first manifest registration — merge date + 90 days for a new "
+                "hook (#1300)"
+            )
+            continue
+        distinct = list(dict.fromkeys(values))
+        if len(distinct) > 1:
+            drifts.append(
+                f"REVIEW_BY CONFLICT {name}: registrations disagree "
+                f"{distinct!r} — keep one value on the first registration and "
+                "drop the rest (#1300)"
+            )
+            continue
+        value = distinct[0]
+        parsed: date | None = None
+        if isinstance(value, str) and RUNTIME_DATE_RE.fullmatch(value):
+            try:
+                parsed = date.fromisoformat(value)
+            except ValueError:
+                parsed = None
+        if parsed is None:
+            drifts.append(
+                f"REVIEW_BY MALFORMED {name}: {value!r} — expected a real "
+                "calendar date as YYYY-MM-DD (#1300)"
+            )
+            continue
+        if parsed < today:
+            drifts.append(
+                f"REVIEW_BY OVERDUE {name}: {value} is past — "
+                f"{REVIEW_BY_OVERDUE_REMEDY} (#1300)"
+            )
+    return drifts
+
+
 SKILL_CALL_RE = re.compile(r"\bSkill\(\s*(?:(?:\"|')|skill\s*=)")
 ASK_USER_QUESTION_CALL_RE = re.compile(
     r"\bAskUserQuestion\s*\("
@@ -2274,6 +2346,19 @@ def main() -> int:
                             f"token(s) {bad!r} — the interpolated matcher/host "
                             "must be shlex-quoted (#1198)"
                         )
+
+    # ------------------------------------------------------------------
+    # Rule 26 — sunset review: review_by present, well-formed, not overdue
+    # (#1300)
+    #
+    # docs/hook-prune-audit.md found zero drops on a 30-day ledger and says
+    # it cannot rank hooks by value, so left alone the roster only grows. A
+    # per-hook review_by date is the structural counterweight: CI fails once
+    # the date passes, and the only ways out are a re-audit that bumps the
+    # date or a verdict recorded in the audit. The logic lives in
+    # review_by_drifts() so tests can drive it with a pinned `today`.
+    # ------------------------------------------------------------------
+    drifts.extend(review_by_drifts(manifest, date.today()))
 
     if drifts:
         print("plugin-manifest check FAILED:")

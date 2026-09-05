@@ -33,6 +33,7 @@
         "session-start"
       ],
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "state_paths": [
           "PRAXIS_STATE_DIR"
@@ -60,6 +61,7 @@
         "codex-plugin"
       ],
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "external_commands": [
           "git worktree list --porcelain",
@@ -73,6 +75,7 @@
       "role": "preflight-gate",
       "event": "UserPromptSubmit",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "state_paths": [
           "PRAXIS_SESSION_INTENT_FILE"
@@ -83,7 +86,8 @@
       "name": "retrospect-active-marker",
       "role": "preflight-gate",
       "event": "UserPromptSubmit",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "retrospect-active-marker",
@@ -100,6 +104,7 @@
         "claude"
       ],
       "timeout": 8,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT"
@@ -119,6 +124,7 @@
         "hookable-memory-store"
       ],
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "state_paths": [
           "PRAXIS_MEMORY_DIR"
@@ -130,14 +136,16 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "block-gh-state-all",
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "block-unmatched-glob",
@@ -151,6 +159,7 @@
         "zsh"
       ],
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "external_commands": [
           "zsh -lc setopt",
@@ -164,6 +173,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_POLL_LOOP_GUARD"
@@ -176,6 +186,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "external_commands": [
           "git -C <cwd> config --local --get-regexp <remote url / gh-resolved>"
@@ -187,7 +198,8 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "rejected-mutation-reconsent-gate",
@@ -206,6 +218,7 @@
         "codex"
       ],
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_PR_EVIDENCE_STRICT"
       }
@@ -220,6 +233,7 @@
         "codex"
       ],
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_PR_EVIDENCE_STRICT"
       }
@@ -230,6 +244,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 8,
+      "review_by": "2026-12-04",
       "mode": {
         "external_commands": [
           "git remote get-url origin",
@@ -245,7 +260,8 @@
       "gates": [
         "git-commit"
       ],
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "commit-title-format-check",
@@ -256,6 +272,7 @@
         "git-commit"
       ],
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_COMMIT_TITLE_FORMAT_STRICT"
       }
@@ -269,6 +286,7 @@
         "git-commit"
       ],
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_COMMIT_PAREN_STRICT"
       }
@@ -279,6 +297,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_BRANCH_NAME_STRICT"
       }
@@ -288,14 +307,16 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "fan-out-scope-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "fan-out-scope-gate",
@@ -310,6 +331,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 8,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_MERGE_WORKTREE_GATE"
@@ -326,6 +348,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_ANCHOR_GATE"
@@ -338,6 +361,7 @@
       "event": "PostToolUse",
       "matcher": "Bash",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_BYPASS_TELEMETRY_DISABLE"
@@ -373,6 +397,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_WORKTREE_PRUNE_SNAPSHOT"
@@ -388,6 +413,7 @@
       "event": "PreToolUse",
       "matcher": "AskUserQuestion",
       "timeout": 8,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_PR_STATE_REFETCH_STRICT",
         "external_commands": [
@@ -404,7 +430,8 @@
         "claude",
         "codex"
       ],
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "gh-label-verify",
@@ -416,6 +443,7 @@
         "codex"
       ],
       "timeout": 15,
+      "review_by": "2026-12-04",
       "mode": {
         "state_paths": [
           "PRAXIS_GH_LABEL_CACHE_PATH",
@@ -433,6 +461,7 @@
         "codex"
       ],
       "timeout": 15,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_GH_JSON_BYPASS"
@@ -444,42 +473,48 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "inspection-chain-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "pipefail-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "fallback-negative-warn",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "secret-print-redaction-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash|Edit|Write",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "comment-yap-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Edit|Write",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "destructive-bash-guard",
@@ -487,6 +522,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_DESTRUCTIVE_BASH_STRICT",
         "bypass_env": [
@@ -500,6 +536,7 @@
       "event": "PreToolUse",
       "matcher": "Edit|NotebookEdit|Write",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_PROTECTED_PATHS_STRICT",
         "bypass_env": [
@@ -512,49 +549,56 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "bash-worktree-existence-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "cwd-relative-exec-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "pytest-direct-exec-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "long-foreground-call-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "perf-multiplier-evidence-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "n1-quantitative-claim-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "pre-commit-staged-file-enumeration",
@@ -568,6 +612,7 @@
         "claude"
       ],
       "timeout": 10,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_SKIP_STAGED_FILE_ENUM"
@@ -586,6 +631,7 @@
         "claude"
       ],
       "timeout": 10,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_SKIP_COMMIT_DECOMPOSITION_ADVISORY"
@@ -604,6 +650,7 @@
         "cmux"
       ],
       "timeout": 10,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_SKIP_MODEL_ROUTING"
@@ -616,6 +663,7 @@
       "event": "PostToolUse",
       "matcher": "Bash",
       "timeout": 15,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_PUSH_VERIFY_STRICT",
         "bypass_env": [
@@ -629,6 +677,7 @@
       "event": "PostToolUse",
       "matcher": "Bash",
       "timeout": 20,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_PR_THREAD_ADVISORY_STRICT",
         "bypass_env": [
@@ -645,6 +694,7 @@
         "git-commit"
       ],
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_SKIP_COMMIT_FLAG_CHECK"
@@ -663,14 +713,16 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "count-assertion-verify",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "external-write-path-existence-check",
@@ -678,6 +730,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_PHANTOM_PATH_STRICT",
         "state_paths": [
@@ -691,6 +744,7 @@
       "event": "PreToolUse",
       "matcher": "Bash|Edit|Write",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_PERSONAL_LEAK_STRICT"
       }
@@ -705,6 +759,7 @@
         "codex"
       ],
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_VERSION_BUMP_STRICT",
         "bypass_env": [
@@ -722,6 +777,7 @@
         "codex"
       ],
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_MOMENTUM_STRICT",
         "bypass_env": [
@@ -745,6 +801,7 @@
         "claude"
       ],
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_CODEX_REVIEW_STRICT",
         "bypass_env": [
@@ -763,7 +820,8 @@
       "hosts": [
         "claude"
       ],
-      "timeout": 10
+      "timeout": 10,
+      "review_by": "2026-12-04"
     },
     {
       "name": "block-gh-issue-create-without-dup-search",
@@ -771,6 +829,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "CLAUDE_HOOK_BYPASS_DUP_GATE"
@@ -783,6 +842,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_HUB_ENFORCE"
@@ -795,6 +855,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_SKILL_GATE"
@@ -821,7 +882,8 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash|Edit|Write",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "pre-edit-protected-branch-guard",
@@ -829,6 +891,7 @@
       "event": "PreToolUse",
       "matcher": "Edit|NotebookEdit|Write",
       "timeout": 10,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_PBGUARD_SKIP"
@@ -850,6 +913,7 @@
       "event": "PreToolUse",
       "matcher": "Edit|Write",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_WORKTREE_GATE"
@@ -862,6 +926,7 @@
       "event": "PreToolUse",
       "matcher": "Edit|Write",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_DECISION_CONSISTENCY_GATE"
@@ -878,6 +943,7 @@
         "codex"
       ],
       "timeout": 8,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_PATH_PROBE_STRICT",
         "bypass_env": [
@@ -895,6 +961,7 @@
         "codex"
       ],
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_EXCLUSION_PROBE_STRICT",
         "bypass_env": [
@@ -912,6 +979,7 @@
       ],
       "wrapper_suffix": "-pre",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_MD_ESCAPE_SKIP"
@@ -926,7 +994,8 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Edit|Write",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "bulk-write-memory-checkpoint",
@@ -934,6 +1003,7 @@
       "event": "PreToolUse",
       "matcher": "Edit|NotebookEdit|Write",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_BULK_WRITE_BYPASS"
@@ -946,6 +1016,7 @@
       "event": "PreToolUse",
       "matcher": "AskUserQuestion",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_FALSIFY_GATE_BYPASS"
@@ -965,6 +1036,7 @@
       "event": "PreToolUse",
       "matcher": "AskUserQuestion",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_MERGE_MENU_REVIEW_STRICT"
       }
@@ -975,6 +1047,7 @@
       "event": "PreToolUse",
       "matcher": "AskUserQuestion",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_MENU_MUTATION_TIER_STRICT"
       }
@@ -985,6 +1058,7 @@
       "event": "PreToolUse",
       "matcher": "AskUserQuestion",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_ASK_END_STRICT",
         "bypass_env": [
@@ -998,6 +1072,7 @@
       "event": "PreToolUse",
       "matcher": "AskUserQuestion",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT"
       }
@@ -1007,7 +1082,8 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "approval-premise-reread-gate",
@@ -1029,6 +1105,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_SOURCE_CITATION_STRICT"
       }
@@ -1049,6 +1126,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_COMPOSED_COMMAND_STRICT"
       }
@@ -1069,6 +1147,7 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_CALLER_PROBE_STRICT"
       }
@@ -1082,6 +1161,7 @@
         "claude"
       ],
       "timeout": 8,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_UNENFORCED_STEP_STRICT",
         "bypass_env": [
@@ -1107,7 +1187,8 @@
       "hosts": [
         "claude"
       ],
-      "timeout": 3
+      "timeout": 3,
+      "review_by": "2026-12-04"
     },
     {
       "name": "pre-edit-md-escape-advisory",
@@ -1125,45 +1206,55 @@
       "role": "postuse-correction",
       "event": "PostToolUse",
       "matcher": "AskUserQuestion",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04",
+      "mode": {
+        "observe_only": true
+      }
     },
     {
       "name": "second-failure-advisory",
       "role": "postuse-correction",
       "event": "PostToolUse",
-      "timeout": 5
+      "timeout": 5,
+      "review_by": "2026-12-04"
     },
     {
       "name": "completion-verify",
       "role": "completion-verify",
       "body": "impl.sh",
       "event": "Stop",
-      "timeout": 10
+      "timeout": 10,
+      "review_by": "2026-12-04"
     },
     {
       "name": "retrospect-mix-check",
       "role": "completion-verify",
       "body": "impl.sh",
       "event": "Stop",
-      "timeout": 10
+      "timeout": 10,
+      "review_by": "2026-12-04"
     },
     {
       "name": "completion-signal-gate",
       "role": "completion-verify",
       "event": "Stop",
-      "timeout": 10
+      "timeout": 10,
+      "review_by": "2026-12-04"
     },
     {
       "name": "readonly-verify-deferral-gate",
       "role": "completion-verify",
       "event": "Stop",
-      "timeout": 10
+      "timeout": 10,
+      "review_by": "2026-12-04"
     },
     {
       "name": "merge-state-claim-gate",
       "role": "completion-verify",
       "event": "Stop",
       "timeout": 10,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_MERGE_CLAIM_STRICT",
         "bypass_env": [
@@ -1176,6 +1267,7 @@
       "role": "completion-verify",
       "event": "Stop",
       "timeout": 10,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_RUNTIME_CLAIM_STRICT",
         "bypass_env": [
@@ -1188,6 +1280,7 @@
       "role": "completion-verify",
       "event": "Stop",
       "timeout": 10,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_NEGATIVE_EXISTENCE_GATE",
@@ -1200,6 +1293,7 @@
       "role": "completion-verify",
       "event": "Stop",
       "timeout": 10,
+      "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_ARTIFACT_VERDICT_STRICT",
         "bypass_env": [
@@ -1212,6 +1306,7 @@
       "role": "completion-verify",
       "event": "Stop",
       "timeout": 10,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_PR_REPORT_DESTINATION_GATE"
@@ -1223,6 +1318,7 @@
       "role": "completion-verify",
       "event": "Stop",
       "timeout": 10,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_PR_CLAIM_BYPASS",
@@ -1235,6 +1331,7 @@
       "role": "completion-verify",
       "event": "Stop",
       "timeout": 10,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_PR_ANCHOR_BYPASS",
@@ -1247,6 +1344,7 @@
       "role": "completion-verify",
       "event": "Stop",
       "timeout": 10,
+      "review_by": "2026-12-04",
       "mode": {
         "bypass_env": [
           "PRAXIS_PROPOSAL_PREMISE_BYPASS"
