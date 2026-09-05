@@ -275,9 +275,22 @@ nudge, and firing there is what would make this predicate noise.
 | `gh pr merge 1 && git log \| tail -1` | the masked pipeline is AFTER the mutation, so it gates nothing |
 | heredoc body holding the pattern as example text | same heredoc skip as predicate 1 |
 
-`$(...)`-internal pipes are out of scope: a substitution's exit code does
-not propagate to the `&&` the way the enclosing command's does, so the
-gating relation this predicate looks for is not present.
+A substitution body is scanned with this predicate too, because it is a
+command list of its own: in `OUT="$(git switch main 2>&1 | tail -1 && gh
+pr merge 1264)"` the `&&` gates the merge exactly as it would outside the
+substitution, so the inner tokens get the same three steps the outer
+command does — fd-dup merge, predicate 1, predicate 2.
+
+What stays out of scope is the substitution's **own** exit code: it does
+not propagate to an enclosing `&&` the way a plain command's does, so
+`$(... | tail -1) && gh pr merge 1` carries no gating relation for this
+predicate to find. The two cases were conflated until a codex review round
+on issue #1271 separated them, and the earlier wording excluded both —
+which read as a decision about the first rather than an omission.
+
+`&&` gates the whole pipeline on its right, so the irreversible command is
+looked for in every segment of the gated unit, not only the first:
+`... | tail -1 && echo x | gh pr merge 1264` advises.
 
 ## Response format
 
