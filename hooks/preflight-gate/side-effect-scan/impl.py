@@ -296,8 +296,12 @@ def build_reason(categories: list[str], prod: bool, command: str) -> str:
     parts = [f"[{c}] {CATEGORIES[c]['reason']}." for c in categories]
     msg = " ".join(parts)
     if prod:
-        msg = "⚠️  PROD scope 감지 — " + msg + " 배포/운영 영향 재확인 필수."
+        msg = (
+            "⚠️  PROD scope detected / PROD scope 감지 — " + msg
+            + " Re-confirm the deploy/ops impact. 배포/운영 영향 재확인 필수."
+        )
     msg += (
+        " If this run is intended, re-invoke with a '# side-effect:ack' comment in the command."
         " 의도한 실행이면 command 에 '# side-effect:ack' 주석을 포함해 재호출하세요."
     )
     msg += compound_cascade_hint(command)
@@ -325,8 +329,9 @@ def build_advisory(categories: list[str], prod: bool) -> str:
     parts = [f"[{c}] {CATEGORIES[c]['reason']}." for c in categories]
     msg = "[side-effect-scan] " + " ".join(parts)
     if prod:
-        msg = "[side-effect-scan] ⚠️  PROD scope 감지 — " + " ".join(parts)
+        msg = "[side-effect-scan] ⚠️  PROD scope detected / PROD scope 감지 — " + " ".join(parts)
     msg += (
+        " If this run is intended, re-invoke with a '# side-effect:ack' comment in the command."
         " 의도한 실행이면 command 에 '# side-effect:ack' 주석을 포함해 재호출하세요."
     )
     return msg
