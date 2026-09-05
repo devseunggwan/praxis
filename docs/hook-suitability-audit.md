@@ -1,7 +1,7 @@
 # Hook Suitability Audit
 
-> **Snapshot.** Written against the August 2026 roster (81 hooks, five
-> platform manifests). Counts and hook lists below are historical; the
+> **Snapshot.** Written in August 2026 against the roster and the five
+> platform manifests of that time. Hook lists below are historical; the
 > platform references were corrected on 2026-09-05 after the Gemini (#1221)
 > and OpenCode (#1226) removals. The current roster is `hooks/manifest.json`.
 
