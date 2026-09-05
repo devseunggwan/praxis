@@ -339,6 +339,42 @@ def _mutating_description(argv: list[str]) -> str | None:
     return None
 
 
+# Irreversible-mutation enum for the `&&`-gating predicate (issue #1271).
+# Mirrors `side-effect-scan`'s ASK tier rather than reusing
+# `_GIT_MUTATING_SUB` / `_GH_MUTATING_VERBS` above, and the difference is
+# the whole point: those cover every mutation, while this predicate's
+# ground is that the gated command cannot be taken back. `git commit` /
+# `merge` / `rebase` / `cherry-pick` / `revert` write only to this
+# checkout's `.git` and are recoverable from the same shell, so a masked
+# `git status | tail -1 && git commit ...` is noise, not a finding.
+# `kubectl` sits in that ASK tier too but has no detector in this hook —
+# see spec.md "Known limitations".
+_IRREVERSIBLE_GIT_SUB = frozenset({"push"})
+
+_IRREVERSIBLE_GH_VERBS: dict[str, frozenset[str]] = {
+    "pr": frozenset({"merge", "create"}),
+    "workflow": frozenset({"run"}),
+}
+
+
+def _irreversible_description(argv: list[str]) -> str | None:
+    """Return a short description if argv publishes state another party can
+    already be reading, else None."""
+    argv = _recover_command_argv(argv)
+    sub = _git_subcommand(argv)
+    if sub is not None and sub in _IRREVERSIBLE_GIT_SUB:
+        return f"git {sub}"
+    method = _gh_api_mutating_method(argv)
+    if method is not None:
+        return f"gh api --method {method}"
+    gh = _gh_object_verb(argv)
+    if gh is not None:
+        obj, verb = gh
+        if obj in _IRREVERSIBLE_GH_VERBS and verb in _IRREVERSIBLE_GH_VERBS[obj]:
+            return f"gh {obj} {verb}"
+    return None
+
+
 def _is_truncating_sink(argv: list[str]) -> bool:
     stripped = strip_prefix(argv)
     if not stripped:
@@ -555,6 +591,70 @@ def _advisory_text(chain: list[list[str]], mutating_desc: str) -> str:
     )
 
 
+def _masked_gating_text(masked: list[list[str]], gated_desc: str) -> str:
+    binaries = []
+    for seg in masked:
+        stripped = strip_prefix(seg)
+        binaries.append(os.path.basename(stripped[0]) if stripped else "?")
+    masked_summary = " | ".join(binaries)
+    return (
+        "[pipefail-advisory] masked exit code gates an irreversible command\n"
+        "\n"
+        f"  Masked segment: {masked_summary}\n"
+        f"  Gated by `&&`: {gated_desc}\n"
+        "\n"
+        "  The left side of `&&` is a pipeline, so its exit status is the\n"
+        "  LAST command's — `tail`/`head`/`grep` return 0 even when the\n"
+        "  command upstream of them failed. The `&&` therefore fires on a\n"
+        "  precondition that was never actually checked.\n"
+        "\n"
+        "  Fix: run the left side as its own Bash call and read its result,\n"
+        "  or prepend `set -o pipefail;` so the pipeline reports the real\n"
+        "  exit code.\n"
+        "\n"
+        "  Reference: issue #1271 (`git switch main 2>&1 | tail -1 &&\n"
+        "  gh pr merge ...` merged even when the branch switch failed)"
+    )
+
+
+def _masked_gating_advisory(tokens: list[str]) -> str | None:
+    """Return advisory text when a pipeline whose exit code is masked sits on
+    the LEFT of `&&` from an irreversible command, else None.
+
+    The gap this closes (issue #1271): `pipefail-advisory`'s original
+    predicate needs the MUTATING command to be the piped one, and
+    `inspection-chain-advisory` is silent by spec on any `&&` chain that
+    mixes inspection with state change. A chain whose non-mutating segment
+    is piped and whose mutating segment is not therefore reaches neither.
+
+    Only `&&` runs are walked. `;` sequences do not gate the command that
+    follows them, so a masked exit code there changes nothing.
+    """
+    units = _command_units(tokens)
+    run: list[list[list[str]]] = []
+
+    def scan(group: list[list[list[str]]]) -> str | None:
+        masked: list[list[str]] | None = None
+        for unit in group:
+            if masked is not None:
+                desc = _irreversible_description(unit[0])
+                if desc:
+                    return _masked_gating_text(masked, desc)
+            if masked is None and len(unit) >= 2 and _is_truncating_sink(unit[-1]):
+                masked = unit
+        return None
+
+    for unit, sep in units:
+        run.append(unit)
+        if sep == "&&":
+            continue
+        found = scan(run)
+        if found:
+            return found
+        run = []
+    return scan(run) if run else None
+
+
 def _scan_tokens_for_advisory(tokens: list[str]) -> str | None:
     """Return the advisory text for the first mutating-piped-to-sink chain
     found in `tokens`, else None."""
@@ -662,7 +762,10 @@ def main() -> int:
     if not tokens:
         return 0
 
+    tokens = _merge_fd_dup_redirects(tokens)
     advisory = _scan_tokens_for_advisory(tokens)
+    if advisory is None:
+        advisory = _masked_gating_advisory(tokens)
     if advisory is None:
         for tok in tokens:
             for body in _extract_substitution_bodies(tok):
