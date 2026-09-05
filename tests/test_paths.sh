@@ -312,8 +312,8 @@ ROT_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
 printf 'old\n' > "$ROT_DIR/a.log.1"
 head -c 2048 /dev/zero | tr '\0' 'x' > "$ROT_DIR/a.log"
 printf 'small\n' > "$ROT_DIR/b.log"
-rot_out=$(sh -c '. "$1/_paths.sh"; praxis_rotate_log "$2/a.log" 1024; praxis_rotate_log "$2/b.log" 1024; praxis_rotate_log "$2/absent.log" 1024; echo "rc=$?"' _ "$LIB" "$ROT_DIR")
-assert_eq "praxis_rotate_log never fails" "rc=0" "$rot_out"
+rot_out=$(sh -c '. "$1/_paths.sh"; praxis_rotate_log "$2/a.log" 1024; r1=$?; praxis_rotate_log "$2/b.log" 1024; r2=$?; praxis_rotate_log "$2/absent.log" 1024; r3=$?; praxis_rotate_log "$2/b.log" abc; r4=$?; echo "rc=$r1$r2$r3$r4"' _ "$LIB" "$ROT_DIR" 2>&1)
+assert_eq "praxis_rotate_log never fails and prints nothing (incl. a bad cap)" "rc=0000" "$rot_out"
 assert_eq "praxis_rotate_log moves an oversized log to .1" "yes" \
   "$([ ! -e "$ROT_DIR/a.log" ] && [ "$(wc -c < "$ROT_DIR/a.log.1" | tr -d ' ')" = "2048" ] && echo yes || echo no)"
 assert_eq "praxis_rotate_log leaves a log under the cap alone" "small" "$(cat "$ROT_DIR/b.log")"

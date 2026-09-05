@@ -160,6 +160,30 @@ else
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("error log rotation")
 fi
 rm -f "$ROT_LOG" "$ROT_LOG.1"
+
+# Two processes past the cap at once: the second rollover must find the file
+# already rotated and only reopen, never delete the `.1` the first one saved.
+# Simulated in one process: a handler whose stream is on the old (now `.1`)
+# file while the base file is small again.
+race_out=$(PRAXIS_HOOK_ERROR_LOG_MAX_BYTES=1024 python3 - "$LIB" << 'PYEOF'
+import os, sys, tempfile
+sys.path.insert(0, sys.argv[1])
+import _hook_runtime as R
+d = tempfile.mkdtemp()
+base = os.path.join(d, "hook-errors.jsonl")
+h = R._make_error_log_handler(base, 1024)
+with open(base, "w") as f:
+    f.write("x" * 4096)
+h.acquire(); h.stream = h._open(); h.release()   # stream on the big file
+os.rename(base, base + ".1")                      # another process rotated
+with open(base, "w") as f:
+    f.write("fresh")                              # ...and started a small one
+h.doRollover()
+print("backup_kept=%d base=%r" % (os.path.getsize(base + ".1"), open(base).read()))
+PYEOF
+)
+assert_eq "second rollover keeps the sibling's backup" "backup_kept=4096 base='fresh'" "$race_out"
+
 ROT_LOG="$(mktemp -u "${TMPDIR:-/tmp}/praxis-hook-rot0-test-XXXXXX").jsonl"
 head -c 4096 /dev/zero | tr '\0' 'x' > "$ROT_LOG"
 PRAXIS_HOOK_ERROR_LOG="$ROT_LOG" PRAXIS_HOOK_ERROR_LOG_MAX_BYTES=0 python3 - "$LIB" << 'PYEOF' >/dev/null
