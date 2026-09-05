@@ -436,8 +436,10 @@ class TestScanUserRejections:
         import tracemalloc
 
         def build(n, name):
+            d = tmp_path / name
+            d.mkdir()
             filler = [_user(text="x" * 200) for _ in range(n)]
-            return _write_jsonl(tmp_path / name if (tmp_path / name).mkdir() is None else tmp_path, filler + [
+            return _write_jsonl(d, filler + [
                 _asst_tool_use("A1", "toolu_1", "AskUserQuestion", {"questions": []}),
                 _rejection("toolu_1", "A1"),
             ])
@@ -468,6 +470,24 @@ class TestScanUserRejections:
         finally:
             tracemalloc.stop()
         assert peak < 1024 * 1024
+
+    def test_unreadable_but_oversized_stays_indeterminate(self, tmp_path, monkeypatch):
+        # EACCES cannot be provoked as root, so the open is stubbed: the
+        # answer must follow the size, not collapse to "no rejections".
+        import builtins
+
+        path = _write_jsonl(tmp_path, [_user(text="x" * 100)])
+        size = os.path.getsize(path)
+        real_open = builtins.open
+
+        def denied(p, *a, **k):
+            if str(p) == path:
+                raise PermissionError(p)
+            return real_open(p, *a, **k)
+
+        monkeypatch.setattr(builtins, "open", denied)
+        assert T.scan_user_rejections(path, max_bytes=size - 1) is None
+        assert T.scan_user_rejections(path, max_bytes=size) == []
 
     def test_malformed_line_next_to_a_rejection_is_skipped(self, tmp_path):
         path = _write_jsonl(tmp_path, [

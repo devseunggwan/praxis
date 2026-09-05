@@ -667,7 +667,11 @@ def scan_user_rejections(
     try:
         fh = open(path, "rb")
     except OSError:
-        return []
+        # Unreadable: still [] — unless the file is provably past the bound,
+        # where the honest answer stays the indeterminate one a readable
+        # oversized file gives (#1231): a long session the hook cannot open
+        # is exactly where standing refusals have had time to accumulate.
+        return None if _is_over_byte_bound(path, max_bytes) else []
     rejections: list[dict] = []
     with fh:
         # Pass 1: the rejection records. Cheap structural pre-filter: both
@@ -713,10 +717,12 @@ def scan_user_rejections(
         # file was inside the bound a moment ago; anything appended since is
         # newer than every rejection kept above, so the walk simply stops at
         # the bound instead of turning a finished pass 1 into None.
+        needles = {r["tool_use_id"] for r in rejections}
+        needles.update(r["source_uuid"] for r in rejections if r["source_uuid"])
         try:
             fh.seek(0)
             _resolve_rejected_tool_uses(
-                _decoded_tool_use_lines(_iter_bounded_lines(fh, max_bytes)),
+                _decoded_candidate_lines(_iter_bounded_lines(fh, max_bytes), needles),
                 rejections,
             )
         except OSError:
@@ -724,11 +730,18 @@ def scan_user_rejections(
     return rejections
 
 
-def _decoded_tool_use_lines(raw_lines):
-    """Decode only the lines that can hold a `tool_use` block."""
+def _decoded_candidate_lines(raw_lines, needles: set[str]):
+    """Decode only the lines that can resolve a rejection: a `tool_use` block
+    carrying one of the ids the rejections name. Both probes run on the raw
+    bytes so the common line is rejected before it is decoded — the same
+    "cheap filter before the allocation" order pass 1 keeps."""
+    needles_b = [n.encode("utf-8") for n in needles]
     for raw in raw_lines:
-        if _TOOL_USE_MARKER_B in raw:
-            yield raw.decode("utf-8", errors="replace")
+        if _TOOL_USE_MARKER_B not in raw:
+            continue
+        if not any(n in raw for n in needles_b):
+            continue
+        yield raw.decode("utf-8", errors="replace")
 
 
 def _rejected_tool_result(ev: dict) -> dict | None:
@@ -758,8 +771,10 @@ def _rejected_tool_result(ev: dict) -> dict | None:
 def _resolve_rejected_tool_uses(lines: Iterable[str], rejections: list[dict]) -> None:
     """Fill `tool_name` / `tool_input` / `text` in place from the uuid index.
 
-    `lines` is any iterable of decoded JSONL lines — a streamed one from
-    `scan_user_rejections`, never a materialized list.
+    `lines` is any iterable of decoded JSONL lines; `scan_user_rejections`
+    streams one that is already narrowed to candidate lines, and the probes
+    below are re-run only so the function stays correct for a caller that
+    hands it an unfiltered list.
 
     The originating assistant record is located by `sourceToolAssistantUUID`
     against the record's own `uuid`; the `tool_use` block inside it is then
