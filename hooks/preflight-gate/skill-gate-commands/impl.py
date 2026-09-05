@@ -304,29 +304,48 @@ def _command_matches_pattern(tokens: list[str], pattern: str) -> bool:
 
 def _scan_transcript(path: str, required_skill: str) -> bool | None:
     """Return True if ``required_skill`` Skill tool_use appears in transcript,
-    False if not, None if the transcript cannot be read (caller treats None as
-    fail-open).
-    """
-    try:
-        p = Path(path)
-        if not p.is_file() or p.stat().st_size > _MAX_BYTES:
-            return None
-        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-    except (OSError, ValueError):
-        return None
+    False if not, None if the transcript cannot be read or is past
+    ``_MAX_BYTES`` (caller treats None as fail-open).
 
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
+    Streams the file and parses only the lines that contain the skill name
+    (issue #1312): a record that satisfies the gate carries it in the
+    tool_use's ``skill`` value, so a line without it is rejected before
+    ``json.loads``. The previous shape — ``read_text().splitlines()`` and a
+    parse per line — materialized the whole session on every ``git commit``
+    inside the shared Bash dispatch deadline (#1167). The prefilter is only
+    sound when JSON encoding leaves the name intact; a name ``json.dumps``
+    would escape falls back to parsing every line. The byte bound is counted
+    on the bytes actually read, not a stat() taken before the walk.
+    """
+    needle: bytes | None = None
+    if json.dumps(required_skill, ensure_ascii=False) == f'"{required_skill}"':
+        needle = required_skill.encode("utf-8")
+    try:
+        fh = open(path, "rb")
+    except OSError:
+        return None
+    consumed = 0
+    with fh:
         try:
-            obj = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(obj, dict):
-            continue
-        if _has_skill_tool_use(obj, required_skill):
-            return True
+            for raw in fh:
+                consumed += len(raw)
+                if consumed > _MAX_BYTES:
+                    return None
+                if needle is not None and needle not in raw:
+                    continue
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line.decode("utf-8", errors="replace"))
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                if _has_skill_tool_use(obj, required_skill):
+                    return True
+        except OSError:
+            return None
     return False
 
 

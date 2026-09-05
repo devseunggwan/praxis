@@ -79,6 +79,9 @@ _GIT_TIMEOUT_SEC = 5
 
 OPT_OUT_MARKER = "# [staged-enum-ack]"
 _MAX_TRANSCRIPT_BYTES = 50 * 1024 * 1024
+# Pre-parse rejects for `_seen_realpaths` — see the loop there.
+_TOOL_USE_NEEDLE = b'"tool_use"'
+_IS_ERROR_NEEDLE = b'"is_error"'
 
 # git global flags that consume the next token as a value — skipped when
 # scanning for the subcommand position.
@@ -186,60 +189,70 @@ def _seen_realpaths(transcript_path: str) -> set[str] | None:
     Returns None when the transcript is missing/unreadable/oversized — the
     caller treats None as fail-open (cannot compute the seen-set)."""
     try:
-        p = _Path(transcript_path)
-        if not p.is_file() or p.stat().st_size > _MAX_TRANSCRIPT_BYTES:
-            return None
-        raw = p.read_text(encoding="utf-8", errors="replace")
-    except (OSError, ValueError):
+        fh = open(transcript_path, "rb")
+    except OSError:
         return None
 
     pending: dict[str, str] = {}   # tool_use_id -> canonical path
     idless: set[str] = set()       # file-tool targets that carry no id
     failed: set[str] = set()       # tool_use_ids whose result is_error
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(obj, dict):
-            continue
-        message = obj.get("message")
-        if not isinstance(message, dict):
-            continue
-        content = message.get("content")
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if not isinstance(block, dict):
+    consumed = 0
+    with fh:
+        for raw in fh:
+            consumed += len(raw)
+            if consumed > _MAX_TRANSCRIPT_BYTES:
+                return None  # past the bound — cannot compute the seen-set
+            # Only two record kinds feed the sets below: a `tool_use` block
+            # (a file-tool target) and an errored `tool_result`. A line with
+            # neither literal is rejected before the parse (issue #1312) —
+            # the walk is streamed and byte-counted instead of the former
+            # read_text() + splitlines(), which held the whole session twice
+            # on every `git commit` inside the shared Bash dispatch deadline.
+            if _TOOL_USE_NEEDLE not in raw and _IS_ERROR_NEEDLE not in raw:
                 continue
-            btype = block.get("type")
-            if btype == "tool_result":
-                if block.get("is_error"):
-                    tid = block.get("tool_use_id")
-                    if isinstance(tid, str):
-                        failed.add(tid)
+            line = raw.strip()
+            if not line:
                 continue
-            if btype != "tool_use":
+            try:
+                obj = json.loads(line.decode("utf-8", errors="replace"))
+            except (json.JSONDecodeError, ValueError):
                 continue
-            name = block.get("name")
-            key = _FILE_TOOL_KEYS.get(name) if isinstance(name, str) else None
-            if key is None:
+            if not isinstance(obj, dict):
                 continue
-            tool_input = block.get("input")
-            if not isinstance(tool_input, dict):
+            message = obj.get("message")
+            if not isinstance(message, dict):
                 continue
-            path = tool_input.get(key)
-            if not (isinstance(path, str) and path):
+            content = message.get("content")
+            if not isinstance(content, list):
                 continue
-            canon = _canonical(path)
-            use_id = block.get("id")
-            if isinstance(use_id, str) and use_id:
-                pending[use_id] = canon
-            else:
-                idless.add(canon)
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                btype = block.get("type")
+                if btype == "tool_result":
+                    if block.get("is_error"):
+                        tid = block.get("tool_use_id")
+                        if isinstance(tid, str):
+                            failed.add(tid)
+                    continue
+                if btype != "tool_use":
+                    continue
+                name = block.get("name")
+                key = _FILE_TOOL_KEYS.get(name) if isinstance(name, str) else None
+                if key is None:
+                    continue
+                tool_input = block.get("input")
+                if not isinstance(tool_input, dict):
+                    continue
+                path = tool_input.get(key)
+                if not (isinstance(path, str) and path):
+                    continue
+                canon = _canonical(path)
+                use_id = block.get("id")
+                if isinstance(use_id, str) and use_id:
+                    pending[use_id] = canon
+                else:
+                    idless.add(canon)
 
     seen = {c for uid, c in pending.items() if uid not in failed}
     seen |= idless
