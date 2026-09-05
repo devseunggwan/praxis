@@ -17,40 +17,46 @@ Tiers (issue #874). `git-commit` is ADVISE; every other category is ASK. The
 observation behind the demotion: one 2026-07-27 session (`5d46110f`) spent 23
 of its 37 total ask prompts on this single hook — 62% — and an approval gate
 that becomes habitual stops functioning as a gate. `git-commit` is the one
-category that can absorb that reduction:
+category that can absorb that reduction, and the ground is reversibility
+alone (issue #1153):
 
-  • It is the only category whose action is local-only and fully reversible.
-    `git push`, `gh pr merge` / `gh pr create` / `gh workflow run` and
-    `kubectl apply` all publish to state someone else can already be reading;
-    a commit is recoverable with `git reset` / `git commit --amend` from the
-    same shell.
-  • It is the only category already covered in depth, on `claude`. Eight
-    sibling PreToolUse(Bash) hooks gate a `git commit` argv on their own —
-    derived from the `"gates": ["git-commit"]` field each carries in
-    `hooks/manifest.json`, each verified to key on the `commit`
-    subcommand: block-commit-without-codex-review,
-    block-rename-sweep-survivors, commit-decomposition-advisory,
-    commit-message-paren-check, commit-title-format-check,
-    commit-title-length-check, pre-commit-staged-file-enumeration,
-    verify-commit-flag-override.
-    Four of the eight siblings are also the checklist
-    `verify-commit-flag-override` prints on its own deny (issue #941). No
-    sibling hook gates `kubectl apply` at all. This enumeration is a copy
-    of the manifest's, kept honest by scripts/check-sibling-commit-gates.py
-    (issue #1127) — edit the manifest field, never this list alone.
+  • Its action is local-only and recoverable from the same shell. `git push`,
+    `gh pr merge` / `gh pr create` / `gh workflow run` and `kubectl apply` all
+    publish to state someone else can already be reading; a commit is
+    recoverable with `git reset` / `git commit --amend` with no second party
+    to notify. What is recovered is the ref: merge / rebase / cherry-pick /
+    revert also update the index and the tracked working tree, `git reset
+    --hard` discards uncommitted changes to tracked files (`git-reset(1)`),
+    and a repository carrying its own `pre-commit` / `post-commit` /
+    `post-merge` hook can run anything at all. So the guarantee is "no remote
+    ref moves, nobody else has seen it", never "nothing outside `.git`
+    changes".
 
-    That list is host-scoped. This hook carries no `hosts` key, so the
-    demotion ships everywhere, but several of the names above carry
-    `hosts: ["claude"]` and are stripped from the other platforms'
-    `hooks.json` — `_dispatch.group_members` re-applies the same filter at
-    runtime. spec.md's host table (also re-derived by the checker) carries
-    the per-host counts, and records plainly that this half of the #874
-    rationale is materially weaker outside `claude`. Documented, not
-    re-tiered: changing the tier per host is a separate issue.
+The sibling commit gates are context, not ground (issue #1153): coverage is a
+property of the installation rather than of the command. Eight sibling
+PreToolUse(Bash) hooks gate a `git commit` argv on their own — derived from
+the `"gates": ["git-commit"]` field each carries in `hooks/manifest.json`,
+each verified to key on the `commit` subcommand:
+block-commit-without-codex-review, block-rename-sweep-survivors,
+commit-decomposition-advisory, commit-message-paren-check,
+commit-title-format-check, commit-title-length-check,
+pre-commit-staged-file-enumeration, verify-commit-flag-override.
+Four of the eight siblings are also the checklist
+`verify-commit-flag-override` prints on its own deny (issue #941). No
+sibling hook gates `kubectl apply` at all. This enumeration is a copy
+of the manifest's, kept honest by scripts/check-sibling-commit-gates.py
+(issue #1127) — edit the manifest field, never this list alone.
+
+That list is host-scoped. This hook carries no `hosts` key, so the tier ships
+everywhere, but several of the names above carry `hosts: ["claude"]` and are
+stripped from the other platforms' `hooks.json` — `_dispatch.group_members`
+re-applies the same filter at runtime. spec.md's host table (also re-derived
+by the checker) carries the per-host counts.
 
 The wrapper CLIs that used to share the `git-commit` label do NOT follow it
-down; they carry their own `wrapper-commit` category at ASK. Both halves of
-the rationale above fail for them: the eight sibling gates match a literal
+down; they carry their own `wrapper-commit` category at ASK. The reversibility
+ground fails for them, and the sibling context does too: the eight sibling
+gates match a literal
 `git commit` argv, so a commit made *inside* a wrapper process is invisible
 to every one of them. Splitting the category is a deliberate narrowing of
 issue #874's "demote git-commit" — recorded here because the label a reason
