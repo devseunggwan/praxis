@@ -84,6 +84,18 @@ Granularity is session-level: one codex-review-wrap invocation satisfies all
 subsequent commits in the same session (whole-transcript scan, root +
 subagents), matching the other commit / PR review gates.
 
+### Scan cost (issue #1277)
+
+The scan streams each transcript and parses only the lines that contain the
+literal `codex-review-wrap` — every record that can satisfy the gate carries
+it, so a line without it is rejected before `json.loads`. The earlier shape
+loaded the whole file into a list and parsed every line: 490 ms and ~70 MB of
+RSS per `git commit` on a 36 MB session, paid inside the Bash dispatch group's
+shared deadline (#1167). With the prefilter the same file scans in 41 ms at
+constant memory. The 50 MB bound is unchanged and is enforced on the bytes
+actually read, so a session that grows past it mid-scan still answers "cannot
+enforce" rather than a partial verdict.
+
 ### Subagent transcript scanning (issue #730)
 
 A `Skill(praxis:codex-review-wrap)` call made *inside* a Task/Agent-dispatched

@@ -38,6 +38,8 @@ Public API:
   TRANSCRIPT_SCAN_LINES                                  — default tail window
   load_transcript(path)                                  -> list[dict]
   iter_transcript(path)                                  -> Iterator[dict]
+  iter_transcript_bounded(path, max_bytes, needle=None)  -> Iterator[dict]
+  json_needle(value)                                     -> bytes | None
   load_transcript_objs(path, max_bytes)                  -> list | None
   read_transcript_tail(path, max_lines, max_bytes)       -> str | None
   load_recent_events(path, min_events, max_bytes)        -> list[dict]
@@ -361,6 +363,98 @@ def _parse_line(raw: bytes) -> dict | None:
     except (json.JSONDecodeError, ValueError):
         return None
     return obj if isinstance(obj, dict) else None
+
+
+class TranscriptTooLarge(TranscriptReadError):
+    """`iter_transcript_bounded` stopped because `path` is past its byte bound.
+
+    A subclass of `TranscriptReadError` so a caller that only wants "could not
+    scan" catches one class; a caller that must tell the two apart catches
+    this one first.
+    """
+
+
+def json_needle(value: str) -> bytes | None:
+    """`value` exactly as JSON encodes it as a string value — quotes included —
+    or None when the encoding would rewrite it.
+
+    The needle a bounded scan rejects lines on must be a *necessary*
+    condition: every record that can satisfy the caller carries it. Two
+    things break that. Dropping the quotes makes `praxis:x` match prose that
+    merely mentions the skill, costing a parse per mention. Encoding with
+    `ensure_ascii=False` makes a non-ASCII name match only a writer that
+    emits raw UTF-8, while a writer that escapes it (`json.dumps` default)
+    would slip every real record past the filter — a fail-closed miss. So
+    the probe is built with the default encoder, and a value it escapes at
+    all answers None: the caller then parses every line.
+    """
+    encoded = json.dumps(value)
+    if encoded != f'"{value}"':
+        return None
+    return encoded.encode("ascii")
+
+
+def _line_has(raw: bytes, needle) -> bool:
+    if needle is None:
+        return True
+    if isinstance(needle, (bytes, bytearray)):
+        return needle in raw
+    return any(n in raw for n in needle)
+
+
+def iter_transcript_bounded(path: str, max_bytes: int, needle=None):
+    """Yield each event dict of `path` whose raw line carries `needle`, reading
+    at most `max_bytes` (issues #1277, #1312).
+
+    One reader for every gate that scans a whole session under a size cap —
+    three hooks carried byte-identical copies of this loop and the copies had
+    already diverged (one lost its read-error guard, one its NUL-path guard)
+    by the time the bounded-`readline` fix had to be applied to each by hand.
+
+    `needle` is bytes, a tuple of bytes (any-of), or None. A line without it
+    is rejected before `json.loads`; the test runs in C and is what a
+    whole-session walk otherwise pays for. Build it with `json_needle` when it
+    is a JSON string value, or use a bare literal when it must also match
+    non-JSON text (a slash command inside a message).
+
+    Raises `TranscriptReadError` when the file is missing, not a regular
+    file, or fails to read — a FIFO at the path would otherwise block
+    `open()` for the caller's whole budget — and `TranscriptTooLarge` when the
+    file is past `max_bytes` at open (`fstat`, an O(1) early-out: a session
+    only grows) or grows past it while being read. Each read is capped at
+    the budget left, so one oversized line is refused before it is
+    allocated. Callers map both to their fail-open value; nothing here
+    decides for them.
+    """
+    try:
+        if not Path(path).is_file():
+            raise TranscriptReadError(path)
+        fh = open(path, "rb")
+    except TranscriptReadError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise TranscriptReadError(path) from exc
+    with fh:
+        try:
+            if os.fstat(fh.fileno()).st_size > max_bytes:
+                raise TranscriptTooLarge(path)
+            consumed = 0
+            while True:
+                raw = fh.readline(max_bytes - consumed + 1)
+                if not raw:
+                    return
+                consumed += len(raw)
+                if consumed > max_bytes:
+                    raise TranscriptTooLarge(path)
+                if not _line_has(raw, needle):
+                    continue
+                obj = _parse_line(raw)
+                if obj is not None:
+                    yield obj
+        except TranscriptReadError:
+            raise
+        except OSError as exc:
+            raise TranscriptReadError(path) from exc
 
 
 def is_turn_boundary(ev: dict) -> bool:
