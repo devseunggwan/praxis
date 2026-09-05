@@ -66,8 +66,9 @@ writable, files fall back to `${TMPDIR}/praxis-<file>` (pre-#903 sessions kept
 session state there permanently, and a one-time move adopts such files).
 
 State files hold session-scoped metadata — flags, counters, path sets,
-hashes, and short agent-written labels such as a strike reason or an approval
-premise. The one place transcript text lands on disk is the retrospect
+hashes, short agent-written labels such as a strike reason or an approval
+premise, and, in the poll-loop waiter registry, a display form of each
+backgrounded command. The one place transcript text lands on disk is the retrospect
 candidate hint (`retrospect-candidates-<sid>.json`): for each matched pattern
 class it keeps the matched fragment of one assistant line, cut to 60
 characters with any long high-entropy run replaced by `<REDACTED>` before it
