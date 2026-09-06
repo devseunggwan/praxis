@@ -539,7 +539,8 @@ _CONSUMERS = {
         ["iter_transcript"],
     # Also correlates each Bash tool_use with its result, so it binds the
     # refusal sentence the never-ran markers are keyed on (#1117).
-    HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py": ["tail_lines"],
+    HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py":
+        ["tail_lines", "TranscriptReadError"],
 }
 
 # Constants are values, not bindings, so the function map above cannot pin them:
