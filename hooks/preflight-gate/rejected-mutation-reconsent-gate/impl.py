@@ -89,7 +89,9 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
-from _transcript import scan_user_rejections  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import scan_cursor_path, scan_user_rejections  # type: ignore[import-not-found]  # noqa: E402
+
+_HOOK_NAME = "rejected-mutation-reconsent-gate"
 
 # ---------------------------------------------------------------------------
 # Identifier extraction
@@ -443,6 +445,7 @@ def resolve_surface(payload: dict) -> tuple[set[str], str, str]:
 
 @fail_open
 def main() -> int:
+    """Hook entry point: read the payload, match rejections, emit the verdict."""
     payload = read_payload()
     if payload is None:
         return 0  # malformed stdin — fail-open
@@ -457,7 +460,14 @@ def main() -> int:
     if not transcript_path:
         return 0
 
-    rejections = scan_user_rejections(transcript_path)
+    # Resumable: the cursor (keyed on this hook and the session) lets each
+    # call read only the bytes appended since the last one, so the byte
+    # bound is a budget per call — a long session is indeterminate for the
+    # few calls it takes to catch up, not for the rest of its life.
+    rejections = scan_user_rejections(
+        transcript_path,
+        cursor_path=scan_cursor_path(_HOOK_NAME, payload.get("session_id")),
+    )
     if rejections is None:
         # FAIL-CLOSED on an indeterminate scan (issue #1231). This gate's
         # blindness is not evenly distributed: the byte bound is reached by long

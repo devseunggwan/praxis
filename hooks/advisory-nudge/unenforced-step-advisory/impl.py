@@ -60,7 +60,11 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     strip_prefix,
 )
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
-from _transcript import iter_transcript  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
+    TranscriptReadError,
+    scan_cursor_path,
+    scan_transcript_resumable,
+)
 
 STRICT_ENV = "PRAXIS_UNENFORCED_STEP_STRICT"
 SKIP_ENV = "PRAXIS_UNENFORCED_STEP_SKIP"
@@ -72,6 +76,7 @@ _MANIFEST_TIMEOUT_SEC = 8
 # Bound the transcript scan the same way the sibling gates do: a session large
 # enough to exceed this is one where the scan cost outweighs the nudge.
 _MAX_TRANSCRIPT_BYTES = 50 * 1024 * 1024
+_HOOK_NAME = "unenforced-step-advisory"
 
 _REVIEW_AGENT = "code-reviewer"
 _CODEX_SKILL = "praxis:codex-review-wrap"
@@ -414,20 +419,62 @@ def _needles_for(facts: _SessionFacts) -> tuple[str, ...]:
     return tuple(n for fact in sorted(facts._wanted) for n in _FACT_NEEDLES[fact])
 
 
-def _absorb(facts: _SessionFacts, path: str) -> None:
-    """Fold one transcript's tool_use blocks into `facts`, stopping once settled."""
-    for event in iter_transcript(path, needle=_needles_for(facts)):
+_FACT_NAMES = ("review_agent", "codex_review", "open_pr_scan")
+
+
+def _encode_facts(facts: _SessionFacts) -> dict:
+    """Cursor form of the facts: one bool per fact name."""
+    return {name: bool(getattr(facts, name)) for name in _FACT_NAMES}
+
+
+def _absorb(facts: _SessionFacts, path: str, cursor_path: str | None = None) -> bool:
+    """Fold one transcript's tool_use blocks into `facts`, stopping once settled.
+
+    Returns True when the walk finished (EOF, or every wanted fact settled)
+    and False when the per-call byte budget cut it short. With `cursor_path`
+    the walk resumes where the previous call for this file and trigger
+    stopped, so a commit reads only the bytes appended since the last one
+    and a settled fact is never re-derived. Raises `TranscriptReadError` for
+    a missing or unreadable file.
+    """
+    wanted = facts._wanted
+
+    def decode(saved: dict) -> _SessionFacts:
+        """Rebuild the facts object a previous call saved in the cursor."""
+        resumed = _SessionFacts(wanted)
+        for name in _FACT_NAMES:
+            if saved.get(name) is True:
+                setattr(resumed, name, True)
+        return resumed
+
+    def fold(state: _SessionFacts, event: dict) -> None:
+        """Note every tool_use block of one assistant record."""
         message = event.get("message")
         if not isinstance(message, dict):
-            continue
+            return
         content = message.get("content")
         if not isinstance(content, list):
-            continue
+            return
         for block in content:
             if isinstance(block, dict) and block.get("type") == "tool_use":
-                _note_tool_use(facts, block)
-        if facts.settled():
-            return
+                _note_tool_use(state, block)
+
+    state, complete = scan_transcript_resumable(
+        path,
+        cursor_path,
+        lambda: facts,
+        fold,
+        needle=tuple(n.encode("utf-8") for n in _needles_for(facts)),
+        max_bytes=_MAX_TRANSCRIPT_BYTES,
+        stop_when=lambda f: f.settled(),
+        encode=_encode_facts,
+        decode=decode,
+    )
+    if state is not facts:  # resumed from the cursor: carry it into the caller's object
+        for name in _FACT_NAMES:
+            if getattr(state, name):
+                setattr(facts, name, True)
+    return complete
 
 
 def _subagents_dir(transcript_path: str):
@@ -447,38 +494,52 @@ def _subagents_dir(transcript_path: str):
     return candidate if candidate.is_dir() else None
 
 
-def _scan_session(transcript_path: str, trigger: str) -> _SessionFacts | None:
-    """Collect the facts `trigger` needs, or None if the root is unreadable.
+def _scan_session(transcript_path: str, trigger: str, session_id=None) -> _SessionFacts | None:
+    """Collect the facts `trigger` needs, or None if the root is unreadable or
+    its scan has not caught up yet.
 
     Subagent transcripts are scanned alongside the root one: an Agent dispatch
     made inside a Task-dispatched subagent is recorded only in that subagent's
     own JSONL, so a root-only scan under-reports work that actually happened
     (the blindness `block-commit-without-codex-review` documents for #730).
+
+    Cursors are keyed per trigger and per file (`<trigger>-root`,
+    `<trigger>-<subagent stem>`): the two triggers read different tool
+    names, and a `review` walk that skipped Bash lines must never move the
+    `in-flight` cursor past them. Without a `session_id` the scan runs
+    without persistence, under the same per-call budget.
     """
     facts = _SessionFacts(_TRIGGER_FACTS[trigger])
     if facts.settled():
         return facts  # this trigger reads nothing from the transcript
 
-    root = _Path(transcript_path)
     try:
-        if not root.is_file() or root.stat().st_size > _MAX_TRANSCRIPT_BYTES:
-            return None
-    except OSError:
+        complete = _absorb(
+            facts, transcript_path, scan_cursor_path(_HOOK_NAME, session_id, f"{trigger}-root")
+        )
+    except TranscriptReadError:
         return None
+    if not complete and not facts.settled():
+        return None  # not caught up this call: nothing to measure against yet
 
-    _absorb(facts, str(root))
-
+    pending = False
     subagents = _subagents_dir(transcript_path)
     if subagents is not None and not facts.settled():
         for agent_file in sorted(subagents.glob("agent-*.jsonl")):
             try:
-                if agent_file.stat().st_size > _MAX_TRANSCRIPT_BYTES:
-                    continue
-            except OSError:
-                continue
-            _absorb(facts, str(agent_file))
+                complete = _absorb(
+                    facts,
+                    str(agent_file),
+                    scan_cursor_path(_HOOK_NAME, session_id, f"{trigger}-{agent_file.stem}"),
+                )
+            except TranscriptReadError:
+                continue  # one subagent's history just cannot contribute
             if facts.settled():
                 break
+            if not complete:
+                pending = True  # its unread tail may still settle a fact
+    if pending and not facts.settled():
+        return None  # a subagent is not caught up: an absence is not yet a fact
     return facts
 
 
@@ -578,6 +639,7 @@ def _advise_rebase(trigger: str, cwd: str | None, deadline: float) -> int:
 
 @fail_open
 def main() -> int:
+    """Hook entry point: classify the command, scan the session, advise."""
     if os.environ.get(SKIP_ENV) == "1":
         return 0
 
@@ -604,7 +666,7 @@ def main() -> int:
     transcript_path = payload.get("transcript_path")
     if not isinstance(transcript_path, str) or not transcript_path:
         return 0  # nothing to measure against → stay silent
-    facts = _scan_session(transcript_path, trigger)
+    facts = _scan_session(transcript_path, trigger, payload.get("session_id"))
     if facts is None:
         return 0
 

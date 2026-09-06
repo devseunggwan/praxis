@@ -146,11 +146,14 @@ well-formed fence with at least one disposed row:
 - denied: "<verbatim question>" | tool: <name> | source: user_rejection | confessed: yes|no | disposition: promoted (finding #N)|noted|dismissed (<reason>)
 ```
 
-**Over the byte bound: acknowledgement, not a receipt (issue #1231).** A
-transcript larger than `REJECTION_SCAN_MAX_BYTES` (20 MiB) makes
-`scan_user_rejections` answer `None` — the oracle never read the session. That
-used to fold into `0`, which is also what a clean session returns, and the bound
-is reached only by long sessions, where refusals accumulate.
+**Over the byte bound: acknowledgement, not a receipt (issue #1231).** The
+scan is resumable — it continues from the offset a per-session cursor recorded
+at the previous Stop — but each call reads at most `REJECTION_SCAN_MAX_BYTES`
+(20 MiB) of new bytes. When more than that was appended since the cursor,
+`scan_user_rejections` answers `None` — the oracle has not caught up with the
+session. That used to fold into `0`, which is also what a clean session
+returns, and the budget is exceeded only by long sessions, where refusals
+accumulate.
 
 The gate now blocks on it, but asks for less than it does for a known count:
 having no count, it cannot demand a row per rejection. One fence is still owed,

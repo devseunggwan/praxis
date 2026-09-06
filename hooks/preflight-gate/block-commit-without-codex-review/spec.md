@@ -92,9 +92,22 @@ it, so a line without it is rejected before `json.loads`. The earlier shape
 loaded the whole file into a list and parsed every line: 490 ms and ~70 MB of
 RSS per `git commit` on a 36 MB session, paid inside the Bash dispatch group's
 shared deadline (#1167). With the prefilter the same file scans in 41 ms at
-constant memory. The 50 MB bound is unchanged and is enforced on the bytes
-actually read, so a session that grows past it mid-scan still answers "cannot
-enforce" rather than a partial verdict.
+constant memory.
+
+The scan is resumable: each transcript file (root and every subagent's) has a
+cursor under `~/.praxis/cache/` keyed on the session id
+(`scan-block-commit-without-codex-review-<file>-<session_id>.json`, swept
+with the cache TTL and spared for the live session), holding the byte offset
+of the last complete record read and whether the invocation was found. A
+`git commit` therefore reads only the bytes appended since the previous one,
+and once the invocation is on record the file body is not read at all. The
+50 MB bound is a budget per call rather than a ceiling on the session: a
+transcript past it answers "cannot enforce" for the few commits it takes to
+catch up — the cursor advances by one budget each time — then costs its
+delta for the rest of the session. The offset is trusted only while the
+cursor's inode, size and a sample of the bytes before the offset still
+match the file; anything else restarts from byte 0. A payload without a
+`session_id` scans without persistence, under the same budget.
 
 ### Subagent transcript scanning (issue #730)
 
@@ -115,10 +128,14 @@ therefore each worktree/ultrawork branch, since each runs as its own session
 — has its own transcript and its own sibling `subagents/` directory, so this
 scan never crosses session boundaries: a review run in one worktree's session
 does not satisfy the gate for a commit in a different worktree's session. A
-subagent transcript that is individually unreadable/oversized is skipped
-(that one subagent's history just can't contribute a PASS); it does not
-turn the whole scan into a fail-open, since the root transcript already
-answered the question for everything outside that one subagent run.
+subagent transcript that is individually unreadable is skipped (that one
+subagent's history just can't contribute a PASS); it does not turn the whole
+scan into a fail-open, since the root transcript already answered the
+question for everything outside that one subagent run. A subagent transcript
+the resumable scan has not caught up with yet is different: its unread tail
+may hold the invocation, so unless a later subagent confirms one the verdict
+is indeterminate (fail-open, like a root that has not caught up), never a
+block, for the few commits the catch-up takes.
 
 ### Escalation on repeated same-session block (issue #805)
 
@@ -168,9 +185,10 @@ already blocked N times this session") is true regardless of episode structure.
   empirically during issue #720 work; the identical inline-prefix bypass is
   documented (and equally non-functional as written) on the retired
   sciomc-finding gate.
-- Missing / unreadable / oversized (`>50MB`) transcript → silent pass (cannot
-  enforce). Malformed stdin or an unparseable command (unbalanced quotes) →
-  silent fail-open.
+- Missing / unreadable transcript, or one whose scan has not yet caught up
+  (more than 50 MB of unread bytes this call) → silent pass (cannot enforce).
+  Malformed stdin or an unparseable command (unbalanced quotes) → silent
+  fail-open.
 
 ### Implementation note — token-level classification
 

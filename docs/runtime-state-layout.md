@@ -93,6 +93,8 @@ did not move them:
 | `poll-loop-waiters-<sid>.json`                                     | `preflight-gate/foreground-poll-loop-guard`                                                  |
 | `approval-premise-ack-<sid>.json`                                  | `preflight-gate/approval-premise-reread-gate` (consumed on read)                              |
 | `gh-label-cache.json`                                              | `preflight-gate/gh-label-verify` (per-repo label sets, #1182 — pre-#1182 XDG location not migrated) |
+| `stop-scan-<hook>-<sid>.json`                                      | Stop gates' resumable reduction cursors (`reduce_transcript_resumable`, #1237)               |
+| `scan-<hook>-<part>-<sid>.json`                                    | Resumable scan cursors of the three commit-path scanners and `retrospect-mix-check` (#1280)  |
 
 ### Sweeping
 
