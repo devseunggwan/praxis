@@ -324,7 +324,7 @@ Decision record only. No code change.
 | 2026-06-05 | ADR drafted, Status = Proposed                                                                                        | praxis maintainers |
 | 2026-09-03 | Scope extended to `PostToolUse(Bash)` (#1239); multi-matcher hooks split their `Bash` leg into the exact-`Bash` group | praxis maintainers |
 | 2026-09-05 | Status → Accepted. The design has been the live runtime path since `_dispatch.py` and the Rule 14 guard landed (#617); five groups are collapsed today and `ARCHITECTURE.md` documents it as current architecture | praxis maintainers |
-| 2026-09-06 | Scope extended to `Stop` (#1281), the sixth group: systemMessage advisory lane, subprocess path for `impl.sh` members, shared turn parse | praxis maintainers |
+| 2026-09-06 | Scope extended to `Stop` (#1281): systemMessage lane, subprocess path for `impl.sh` members, shared turn parse        | praxis maintainers |
 
 ---
 
