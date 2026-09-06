@@ -34,7 +34,8 @@ Skip rules:
 
   • Test fixtures — a `fixtures`, `__fixtures__`, `test-data`, `testdata`
     or `test_data` path component (shared with `protected-paths-guard`).
-  • Scratch — `/tmp/` and `/private/tmp/` prefixes.
+  • Scratch — an absolute path under `/tmp/` or `/private/tmp/` after
+    lexical normalization; relative paths and `/tmp/../x` are not scratch.
   • Self-edit — a path inside `CLAUDE_PLUGIN_ROOT` (praxis' own checkout may
     carry a `.claude/settings.json` for its contributors).
 
@@ -56,6 +57,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import re
 import sys
 from pathlib import Path, PurePosixPath
@@ -138,7 +140,14 @@ def _is_self_edit(path: str) -> bool:
 
 
 def _is_scratch(path: str) -> bool:
-    norm = "/" + path.replace("\\", "/").lstrip("/")
+    """True for an absolute path under `/tmp/` or `/private/tmp/` after lexical
+    normalization. A relative `tmp/.claude/settings.json` is a project path
+    and is never scratch; `/tmp/../repo/.claude/settings.json` resolves
+    outside `/tmp/` and is not scratch either (CodeRabbit on #1356)."""
+    norm = path.replace("\\", "/")
+    if not norm.startswith("/"):
+        return False
+    norm = posixpath.normpath(norm)
     return any(norm.startswith(p) for p in _SCRATCH_PREFIXES)
 
 

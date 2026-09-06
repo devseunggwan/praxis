@@ -162,6 +162,10 @@ run_case "fixture: __fixtures__" silent Write "src/__fixtures__/.claude/settings
 run_case "fixture: testdata managed" silent Write "testdata/managed-settings.json" "$PERMS"
 run_case "scratch: /tmp" silent Write "/tmp/x/.claude/settings.json" "$PERMS"
 run_case "scratch: /private/tmp (macOS realpath)" silent Write "/private/tmp/x/.claude/settings.json" "$PERMS"
+run_case "scratch: dot-segments staying under /tmp" silent Write "/tmp/x/../y/.claude/settings.json" "$PERMS"
+run_case "not scratch: relative tmp/ is a project path" advisory Write "tmp/.claude/settings.json" "$PERMS"
+run_case "not scratch: /tmp/.. escapes the prefix" advisory Write "/tmp/../repo/.claude/settings.json" "$PERMS"
+run_case "not scratch: /tmpfs is not /tmp/" advisory Write "/tmpfs/.claude/settings.json" "$PERMS"
 run_case "self-edit under CLAUDE_PLUGIN_ROOT" silent Write "/nonexistent-plugin-root-for-tests/.claude/settings.json" "$PERMS"
 run_case "self-edit: relative path never exempted" advisory Write ".claude/settings.json" "$PERMS" "CLAUDE_PLUGIN_ROOT=$PWD"
 
