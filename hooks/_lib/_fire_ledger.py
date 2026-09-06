@@ -85,10 +85,12 @@ Storage (precedence order — see `resolve_path`):
   Override: PRAXIS_FIRE_TELEMETRY_FILE (full path, used by tests)
   Dev:      <checkout>/.praxis-dev-telemetry/fire-events-YYYY-MM-DD.jsonl when
             this module lives inside a git checkout (issue #934)
-  Default:  ~/.praxis/telemetry/fire-events-YYYY-MM-DD.jsonl  (daily rotation;
-            a finished day is gzipped to <name>.<token>.jsonl.gz by a
-            detached child on the next day's first write, and swept after
-            PRAXIS_TELEMETRY_RETENTION_DAYS — #1078, #1238)
+  Default:  ~/.praxis/telemetry/fire-events-YYYY-MM-DD.jsonl — under
+            $PRAXIS_HOME/telemetry when PRAXIS_HOME relocates the tree
+            (issue #1340, via `_paths.praxis_home`). Daily rotation; a
+            finished day is gzipped to <name>.<token>.jsonl.gz by a detached
+            child on the next day's first write, and swept after
+            PRAXIS_TELEMETRY_RETENTION_DAYS — #1078, #1238.
   Opt-out:  PRAXIS_FIRE_TELEMETRY_DISABLE=1 → no-op
 
 Fail-open: any error → silently no-op. Never raises into the dispatcher.
@@ -628,6 +630,27 @@ def _checkout_root() -> Path | None:
     return root if (root / ".git").exists() else None
 
 
+def _praxis_home() -> Path:
+    """The `~/.praxis` root, `PRAXIS_HOME`-relocated (issue #1340).
+
+    Resolved through `_paths.praxis_home()` so the ledger follows the same
+    root every other runtime file does — `PRIVACY.md` promises `PRAXIS_HOME`
+    relocates the whole tree, and until #1340 this module was the one writer
+    that ignored it. The import is lazy and fail-open, like the `_paths`
+    import in `_hook_runtime._error_log_path`: `_paths` pulls in
+    `_state_lock`, which is absent when only this file has been copied
+    somewhere (the `record_fire.sh` escape-fallback probe does exactly that),
+    and a telemetry write must never take a hook down. The fallback restates
+    the same one-line rule rather than reverting to `~/.praxis`, so an import
+    failure cannot quietly reintroduce the defect this function fixes.
+    """
+    try:
+        from _paths import praxis_home  # type: ignore[import-not-found]
+        return Path(praxis_home())
+    except Exception:
+        return Path(os.path.expanduser(os.environ.get("PRAXIS_HOME") or "~/.praxis"))
+
+
 def resolve_telemetry_dir() -> Path:
     """Directory every praxis telemetry writer appends to.
 
@@ -637,17 +660,22 @@ def resolve_telemetry_dir() -> Path:
     `telemetry_dir`, so a split would corrupt both sides of that report at
     once: the default view would mix production fires with development
     bypasses, and `--dir <dev>` would show fires with no bypasses at all.
+
+    Precedence: dev checkout → `$PRAXIS_HOME/telemetry` → `~/.praxis/telemetry`.
+    The checkout probe stays first: a development run is development wherever
+    `PRAXIS_HOME` points, and `scripts/run-tests.sh` relies on that ordering.
     """
     checkout = _checkout_root()
     if checkout is not None:
         return checkout / DEV_LEDGER_DIRNAME
-    return Path.home() / ".praxis" / "telemetry"
+    return _praxis_home() / "telemetry"
 
 
 def resolve_path() -> Path:
     """Resolve today's fire-events JSONL path.
 
-    Precedence: `PRAXIS_FIRE_TELEMETRY_FILE` → dev checkout → real ledger.
+    Precedence: `PRAXIS_FIRE_TELEMETRY_FILE` → dev checkout → real ledger
+    (`$PRAXIS_HOME/telemetry`, else `~/.praxis/telemetry`).
     """
     override = os.environ.get("PRAXIS_FIRE_TELEMETRY_FILE", "").strip()
     if override:

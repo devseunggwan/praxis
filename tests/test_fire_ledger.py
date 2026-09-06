@@ -1718,8 +1718,14 @@ def test_dev_checkout_diverts_off_the_real_ledger(monkeypatch):
 
 
 def test_installed_plugin_still_uses_the_real_ledger(monkeypatch):
-    """No checkout above the module → unchanged production behaviour."""
+    """No checkout above the module → unchanged production behaviour.
+
+    `tests/conftest.py` roots PRAXIS_HOME per test, so the real ledger is only
+    reached with the variable removed; the #1340 section below covers the
+    relocated case.
+    """
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_FILE", raising=False)
+    monkeypatch.delenv("PRAXIS_HOME", raising=False)
     monkeypatch.setattr(fl, "_checkout_root", lambda: None)
     resolved = fl.resolve_path()
     assert resolved.parent == Path.home() / ".praxis" / "telemetry"
@@ -1808,7 +1814,10 @@ def test_install_layout_under_a_git_ancestor_is_not_a_checkout(tmp_path, monkeyp
     assert mod._checkout_root() is None, "install layout misread as a checkout"
 
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_FILE", raising=False)
-    assert mod.resolve_telemetry_dir() == Path.home() / ".praxis" / "telemetry"
+    # The production root — conftest relocates it per test via PRAXIS_HOME
+    # (#1340); the point here is that it is not a dev ledger.
+    assert mod.resolve_telemetry_dir() == Path(os.environ["PRAXIS_HOME"]) / "telemetry"
+    assert mod.resolve_telemetry_dir().parent.name != fl.DEV_LEDGER_DIRNAME
 
 
 def test_bypass_and_fire_writers_share_one_directory():
@@ -1818,6 +1827,106 @@ def test_bypass_and_fire_writers_share_one_directory():
         _REPO / "hooks" / "postuse-correction" / "bypass-telemetry" / "impl.py",
     )
     assert bypass.resolve_telemetry_path().parent == fl.resolve_telemetry_dir()
+
+
+# ---------------------------------------------------------------------------
+# PRAXIS_HOME relocation (issue #1340)
+#
+# PRIVACY.md lists PRAXIS_HOME as the override for ~/.praxis/telemetry, and
+# every other runtime root followed it; the ledger alone kept defaulting to
+# Path.home()/.praxis/telemetry, which scripts/run-tests.sh papered over with
+# a suite-wide PRAXIS_FIRE_TELEMETRY_FILE (#849). The resolution now goes
+# through _paths.praxis_home(), with the override and the dev-checkout branch
+# still ahead of it.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_telemetry_dir_honours_praxis_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(fl, "_checkout_root", lambda: None)
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "relocated"))
+    assert fl.resolve_telemetry_dir() == tmp_path / "relocated" / "telemetry"
+
+
+def test_resolve_telemetry_dir_expands_a_tilde_praxis_home(tmp_path, monkeypatch):
+    """A quoted PRAXIS_HOME=~/x reaches the process literally; _paths expands it."""
+    monkeypatch.setattr(fl, "_checkout_root", lambda: None)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PRAXIS_HOME", "~/relocated")
+    assert fl.resolve_telemetry_dir() == tmp_path / "relocated" / "telemetry"
+
+
+def test_resolve_telemetry_dir_default_when_praxis_home_is_unset_or_empty(monkeypatch):
+    """Unset and empty both mean ~/.praxis, exactly as before #1340."""
+    monkeypatch.setattr(fl, "_checkout_root", lambda: None)
+    monkeypatch.delenv("PRAXIS_HOME", raising=False)
+    assert fl.resolve_telemetry_dir() == Path.home() / ".praxis" / "telemetry"
+    monkeypatch.setenv("PRAXIS_HOME", "")
+    assert fl.resolve_telemetry_dir() == Path.home() / ".praxis" / "telemetry"
+
+
+def test_resolve_path_precedence_is_override_then_checkout_then_praxis_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "relocated"))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_FILE", raising=False)
+    checkout = tmp_path / "checkout"
+    monkeypatch.setattr(fl, "_checkout_root", lambda: checkout)
+    assert fl.resolve_path().parent == checkout / fl.DEV_LEDGER_DIRNAME
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(tmp_path / "explicit.jsonl"))
+    assert fl.resolve_path() == tmp_path / "explicit.jsonl"
+
+
+def test_praxis_home_rule_survives_a_missing_paths_module(tmp_path, monkeypatch):
+    """The fail-open fallback restates the rule; it must not revert to ~/.praxis.
+
+    record_fire.sh's escape fallback imports _fire_ledger out of a probe _lib
+    holding nothing else, so `_paths` (and the `_state_lock` it imports) can
+    be absent. A None entry in sys.modules makes the import raise the way an
+    absent file would.
+    """
+    monkeypatch.setitem(sys.modules, "_paths", None)
+    monkeypatch.setattr(fl, "_checkout_root", lambda: None)
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "relocated"))
+    assert fl.resolve_telemetry_dir() == tmp_path / "relocated" / "telemetry"
+    monkeypatch.delenv("PRAXIS_HOME")
+    assert fl.resolve_telemetry_dir() == Path.home() / ".praxis" / "telemetry"
+
+
+def test_record_lands_under_praxis_home_outside_a_checkout(tmp_path):
+    """End to end in a subprocess: a copy of _lib with no .git two levels up,
+    no file override, PRAXIS_HOME set → today's file under $PRAXIS_HOME/telemetry
+    and nothing under HOME/.praxis."""
+    lib = tmp_path / "pkg" / "hooks" / "_lib"
+    lib.mkdir(parents=True)
+    for name in ("_fire_ledger.py", "_paths.py", "_state_lock.py"):
+        (lib / name).write_bytes((_REPO / "hooks" / "_lib" / name).read_bytes())
+    home = tmp_path / "relocated"
+    env = {k: v for k, v in os.environ.items() if k != "PRAXIS_FIRE_TELEMETRY_FILE"}
+    env["PRAXIS_HOME"] = str(home)
+    env["HOME"] = str(tmp_path / "home")
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]); import _fire_ledger as f; "
+        "assert f._checkout_root() is None; "
+        "print(f.record_session_fire('h1340', 'r', 'pass', 'sess-1340', 'Bash'))"
+    )
+    proc = subprocess.run([sys.executable, "-c", code, str(lib)], env=env,
+                          capture_output=True, text=True, check=False)
+    assert proc.returncode == 0 and proc.stdout.strip() == "True", proc.stderr
+    today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    ledger = home / "telemetry" / f"fire-events-{today}.jsonl"
+    recs = [json.loads(line) for line in ledger.read_text().splitlines() if line.strip()]
+    assert [r["session_id"] for r in recs] == ["sess-1340"]
+    assert not (tmp_path / "home" / ".praxis").exists()
+
+
+def test_bypass_review_default_dir_follows_praxis_home(tmp_path, monkeypatch):
+    """The reader resolves the same root as the writers, through _paths."""
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "relocated"))
+    assert cli.default_telemetry_dir() == tmp_path / "relocated" / "telemetry"
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PRAXIS_HOME", "~/relocated")
+    assert cli.default_telemetry_dir() == tmp_path / "relocated" / "telemetry"
+    monkeypatch.delenv("PRAXIS_HOME")
+    assert cli.default_telemetry_dir() == Path.home() / ".praxis" / "telemetry"
+    assert cli._praxis_paths() is not None, "resolver did not load from the checkout"
 
 
 # ---------------------------------------------------------------------------

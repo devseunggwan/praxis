@@ -161,7 +161,7 @@ praxis_record_fire() {
 
   # Path resolution mirrors _fire_ledger.resolve_path():
   #   PRAXIS_FIRE_TELEMETRY_FILE (stripped, like Python) → dev checkout
-  #   ledger → real ledger.
+  #   ledger → real ledger ($PRAXIS_HOME/telemetry, else ~/.praxis/telemetry).
   # The dev-checkout probe mirrors _checkout_root(): the package root sits
   # exactly two levels above _lib, and `.git` there (dir in a clone, file in
   # a linked worktree) marks a development checkout.
@@ -175,16 +175,46 @@ praxis_record_fire() {
     if [ -e "$_rf_root/.git" ]; then
       _rf_dir="$_rf_root/.praxis-dev-telemetry"
     else
-      _rf_home="${HOME:-}"
-      if [ -z "$_rf_home" ]; then
-        _rf_home=$(_praxis_home_fallback) || _rf_home=""
-      fi
-      # No portable answer (no id/getent/dscl, or no matching passwd entry):
-      # refuse the write rather than fall through to "${HOME:-}/..." again,
-      # which would silently resolve to the unwritable root-level path this
-      # fix exists to avoid.
-      [ -n "$_rf_home" ] || return 0
-      _rf_dir="$_rf_home/.praxis/telemetry"
+      # PRAXIS_HOME relocates the whole ~/.praxis tree (issue #1340). The
+      # rule is _paths.sh praxis_home() — one trailing slash stripped, a
+      # leading `~` or `~/` expanded against the home directory, empty means
+      # unset — restated inline rather than sourced. This file is
+      # deliberately self-contained: it is copied on its own into probe
+      # trees (tests/hooks/_lib/test_record_fire.sh) and into installs that
+      # resolve _lib through PRAXIS_LIB_DIR, where a `.` of a sibling that
+      # is not there would abort the hook under `set -e`; and the per-fire
+      # path (#1183) has no room for another file read. Keep the two in
+      # agreement; tests/test_paths.sh pins shell/Python parity on this.
+      _rf_praxis_home="${PRAXIS_HOME:-}"
+      _rf_praxis_home="${_rf_praxis_home%/}"
+      # Held in a variable so the tilde stays a literal to match against
+      # rather than something the shell might try to expand here.
+      _rf_tilde='~'
+      _rf_home=""
+      case "$_rf_praxis_home" in
+        ''|"$_rf_tilde"|"$_rf_tilde"/*)
+          # The home directory is needed: for the default root, or to expand
+          # a tilde the way _paths.sh does against $HOME. _paths.py runs
+          # expanduser, which consults the passwd database when HOME is
+          # unset, so the same fallback applies here (PR #1207 round 2).
+          _rf_home="${HOME:-}"
+          if [ -z "$_rf_home" ]; then
+            _rf_home=$(_praxis_home_fallback) || _rf_home=""
+          fi
+          # No portable answer (no id/getent/dscl, or no matching passwd
+          # entry): refuse the write rather than fall through to
+          # "${HOME:-}/..." again, which would silently resolve to the
+          # unwritable root-level path this fix exists to avoid.
+          [ -n "$_rf_home" ] || return 0
+          ;;
+      esac
+      case "$_rf_praxis_home" in
+        '') _rf_dir="$_rf_home/.praxis/telemetry" ;;
+        "$_rf_tilde") _rf_dir="$_rf_home/telemetry" ;;
+        "$_rf_tilde"/*) _rf_dir="$_rf_home/${_rf_praxis_home#"$_rf_tilde"/}/telemetry" ;;
+        *) _rf_dir="$_rf_praxis_home/telemetry" ;;
+      esac
+      unset _rf_praxis_home _rf_tilde
     fi
     _rf_path="$_rf_dir/fire-events-$_rf_today.jsonl"
   fi
