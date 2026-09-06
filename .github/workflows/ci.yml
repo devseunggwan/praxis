@@ -123,9 +123,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      # fetch-depth:0 — the paren gate's fixtures are the real commits
-      # release-please rejected, read back with `git log -1 <sha>`. A shallow
-      # checkout has none of them and the suite errors with exit 128.
+      # fetch-depth:0 — what needs it is run-tests.sh's markdownlint step: it
+      # diffs against `git merge-base HEAD origin/main` to lint only the
+      # markdown the PR changed. A depth-1 PR checkout has no origin/main, so
+      # the step falls back to linting every tracked markdown file and buries
+      # the log in the repo's known backlog; still advisory, but no longer a
+      # useful signal. Nothing else in this job reads history: the paren gate's
+      # corpus used to be read back with `git log -1 <sha>` (exit 128 on a
+      # shallow clone) and now ships as text fixtures under
+      # tests/fixtures/commit-message-paren-check/, whose live-compare case
+      # skips itself when the commits are absent (issue #1302).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0

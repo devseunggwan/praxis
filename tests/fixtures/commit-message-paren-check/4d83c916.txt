@@ -1,0 +1,303 @@
+feat(hooks): pipefail advisory for mutating pipes (#795)
+
+* feat(hooks): pipefail advisory for mutating pipes
+
+Add PreToolUse(Bash) advisory hook that nudges toward
+`set -o pipefail` when a mutating git/gh command (commit/push/
+merge/rebase/cherry-pick/revert, gh pr/issue/release/label/
+workflow mutating verbs) is piped into tail/head/grep. Without
+pipefail, the pipeline's exit code is the sink's exit code, which
+masked two observed failures: gen-1 (2026-05-23, git commit | tail
+swallowed a pre-commit hook failure) and gen-2 (2026-07-15, gh pr
+merge ... 2>&1 | tail -3 masked a network error).
+
+Covers heredoc-body-line and quoted-string false-positive surfaces
+per issue #788's explicit requirement, plus 2>&1/|& fd-dup and
+subshell/command-substitution prefix normalization surfaced by a
+codex-review-wrap round (assignment-with-subst and compact-subshell
+forms were initially blind to the mutating-command enum; the |&
+operator was not recognized as a pipe-continuation separator; the
+heredoc close-marker check now requires the delimiter be alone on
+its line per POSIX heredoc semantics).
+
+Bumps tests/hooks/_lib/test_dispatch.py's exact-Bash PreToolUse
+member count (35->36, advisory-nudge role 13->14) — origin/main
+had already gained a sibling hook (model-routing-advisory, issue
+#786) by pre-PR rebase time, so the base moved 34->35 independent
+of this change; this commit's own contribution is the final +1
+(35->36). The new hook joins the existing ADR-0002 dispatch group
+automatically via hooks/manifest.json; no wrapper or platform
+hooks.json changes needed.
+
+Caller chain verified: new hook, no existing caller expected —
+registers into the PreToolUse(Bash) dispatch group consumed by
+hooks/_lib/_dispatch.py; verified via updated exact-member-count
+assertions in tests/hooks/_lib/test_dispatch.py (35->36) and a
+direct _dispatch.group_members() probe post-rebase.
+Pre-commit verified: ruff check hooks/advisory-nudge/pipefail-advisory/impl.py
+tests/hooks/_lib/test_dispatch.py -> All checks passed; scripts/run-tests.sh
+full suite post-rebase (pytest + all shell tests + manifest check +
+hook-token invariant check) -> ALL TESTS PASSED.
+Premise-Verified: codex-review-wrap round 1 findings (P2 subshell/
+assignment prefix, P2 |& operator, P3 heredoc line-anchoring)
+reproduced via direct safe_tokenize() probes before fixing; P3
+quoted-literal-separator and line-continuation-replace findings
+verified as shared sibling-hook conventions (inspection-chain-advisory,
+bash-worktree-existence-advisory, cli-flag-incompat-advisory) via probe,
+documented as known limitations rather than fixed locally. Post-rebase
+dispatch-group counts (36 total / 14 advisory-nudge / 4 claude-only /
+32 codex) independently verified via pytest tests/hooks/_lib/test_dispatch.py
+against the merged hooks/manifest.json, not computed by conflict-marker
+arithmetic.
+Confidence: high
+Scope-risk: narrow
+
+Session-Id: 16f647dc-9e98-4430-a4ea-e5e5cc02f454
+
+* fix(hooks): close 3 pipefail-advisory false negatives
+
+codex-review-wrap round 2 (2026-07-16) surfaced 4 findings against
+PR #795. All 4 verified true via independent probe before applying;
+3 fixed here, 1 rejected with documented rationale:
+
+- here-string `<<<` was matched by `_heredoc_open_marker`'s generic
+  `tok.startswith("<<")` check, causing the following mutating
+  pipeline to be swallowed as fake heredoc body. `<<<` is now excluded
+  before that check.
+- `_gh_object_verb` only skipped global gh flags (`-R`, `--repo`, ...)
+  before the object token, not between the object and verb — a valid
+  `gh` invocation form (`gh issue -R owner/repo create`). Extracted
+  `_skip_gh_global_flags` and call it at both positions.
+- `_recover_command_argv` only inspected argv[0] for a `VAR=$(` command-
+  substitution prefix, missing the case where a plain env assignment
+  precedes the capture assignment (`LANG=C RESULT=$(gh ...)`). The
+  $( search now walks past any number of leading plain assignments.
+- NOT fixed: shell-comment text analyzed as a live command (e.g.
+  `echo ok # example; gh pr merge 1 | tail`). The premise is true, but
+  the root cause is `_hook_utils.safe_tokenize`'s deliberate
+  `lex.commenters = ""` (a shared design choice protecting other
+  safe_tokenize consumers, e.g. block-pr-without-caller-evidence's
+  --body marker scan, from a `#` inside a legitimate value truncating
+  the token stream). A local fix cannot distinguish a real comment
+  token from a quoted literal that merely starts with `#` post-dequote
+  — the same quote-provenance loss already documented for the
+  quoted-literal-separator known limitation. Advisory-only (never
+  blocks), so severity is low; documented in spec.md instead.
+
+Caller chain verified: N/A — internal parsing-logic fix to an
+existing new hook, no external caller.
+Pre-commit verified: ruff check hooks/advisory-nudge/pipefail-advisory/impl.py
+-> All checks passed; bash tests/hooks/advisory-nudge/test_pipefail_advisory.sh
+-> 44 passed, 0 failed; scripts/run-tests.sh full suite -> ALL TESTS PASSED.
+Premise-Verified: all 4 codex round-2 findings reproduced via direct
+python3 probes against impl.py functions and payload-level subprocess
+invocations before applying (here-string heredoc-marker false positive,
+gh flag-skip position, multi-assignment $( recovery, and the comment
+false-positive whose fix was rejected after tracing lex.commenters=""
+to hooks/_lib/_hook_utils.py:124 and confirming quote-provenance loss
+via a live safe_tokenize() probe) — not applied on codex's say-so alone.
+Confidence: high
+Scope-risk: narrow
+
+Session-Id: 16f647dc-9e98-4430-a4ea-e5e5cc02f454
+
+* fix(hooks): close 2 more pipefail-advisory false negatives
+
+codex-review-wrap round 3 (2026-07-16) surfaced 3 findings against
+PR #795. All 3 verified true via independent probe; 2 fixed, 1 rejected
+with documented rationale:
+
+- `_recover_command_argv`'s grouping-char lstrip left an empty-string
+  argv[0] for a standalone group token with a trailing space
+  (`( git commit -m x | tail )`), which fails every downstream
+  basename check. The empty-token case is now dropped and the function
+  recurses on the remainder so the real command becomes argv[0].
+- The same function treated any `$(` inside an assignment token as an
+  unresolved-extraction target, corrupting a *balanced*, self-contained
+  substitution (`FOO=$(date) git commit ...`) into `date)` and hiding
+  the real command that follows. The $( is now only treated as
+  unresolved when unbalanced within its own token
+  (`tok.count("(") > tok.count(")")`) — the balanced case is left
+  alone so `strip_prefix`'s existing plain-assignment peel handles it.
+- NOT fixed: a quoted heredoc-lookalike string (`echo "<<EOF"; git
+  commit -m x | tail`) dequotes to the bare token `<<EOF`, which
+  `_heredoc_open_marker` cannot distinguish from a real unquoted
+  heredoc opener — the real mutating pipeline that follows gets
+  swallowed as fake heredoc body. Root cause is the same quote-
+  provenance loss in the shared `safe_tokenize` tokenizer already
+  documented for the quoted-literal-separator and shell-comment known
+  limitations (rounds 1-2); a local fix cannot safely distinguish this
+  case without the same shared-tokenizer change already ruled out for
+  those. Documented in spec.md instead.
+
+Caller chain verified: N/A — internal parsing-logic fix to an
+existing new hook, no external caller.
+Pre-commit verified: ruff check hooks/advisory-nudge/pipefail-advisory/impl.py
+-> All checks passed; bash tests/hooks/advisory-nudge/test_pipefail_advisory.sh
+-> 46 passed, 0 failed; scripts/run-tests.sh full suite -> ALL TESTS PASSED.
+Premise-Verified: all 3 codex round-3 findings reproduced via direct
+python3 subprocess probes against the live hook before applying
+(standalone group-token blank argv[0], balanced-substitution
+corruption, and the quoted-heredoc-lookalike false negative whose fix
+was rejected after confirming — via a live safe_tokenize() probe on
+both the real opener and quoted-literal forms — that both dequote to
+an indistinguishable bare token, the same quote-provenance-loss root
+cause already documented for two prior known limitations). Regression-
+checked all round-1/round-2 recovered forms (OUT=$(gh ...), LANG=C
+RESULT=$(gh ...), bare (git commit ... | tail)) still advise correctly
+after the balanced-paren guard.
+Confidence: high
+Scope-risk: narrow
+
+Session-Id: 16f647dc-9e98-4430-a4ea-e5e5cc02f454
+
+* fix(hooks): track multi-token substitution balance
+
+codex-review-wrap round 4 (2026-07-16) surfaced 2 findings against
+PR #795. Both verified true via independent probe and fixed:
+
+- `STAMP=$(date +%s) git commit -m x | tail`: round 3's single-token
+  paren-balance check only inspected the FIRST token of a substitution
+  that safe_tokenize splits on an internal space (`'STAMP=$(date'` +
+  `'+%s)'`), saw it as unbalanced in isolation, and mis-extracted
+  `date` as the recovered command — hiding the real `git commit` that
+  follows. `_recover_command_argv` now walks forward accumulating
+  paren-balance across subsequent tokens until the substitution
+  actually closes (or the argv slice runs out) before deciding whether
+  it is self-contained (skip past it) or genuinely split by a pipe
+  (extract from inside it).
+- `if (git commit -m x | tail); then ...`: the grouping-char check only
+  ever inspected argv[0], so a shell keyword ahead of a parenthesized
+  pipeline left it looking at the wrong token. Shell keywords are now
+  skipped the same way as plain env assignments before that check runs.
+
+Refactored the leading-prefix walk into a single index-tracked loop
+(shared by the env-assignment, substitution, and keyword cases) rather
+than three separate special-cased branches, since round 4's two
+findings both stemmed from that fragmentation missing each other's
+skip step.
+
+Caller chain verified: N/A — internal parsing-logic fix to an
+existing new hook, no external caller.
+Pre-commit verified: ruff check hooks/advisory-nudge/pipefail-advisory/impl.py
+-> All checks passed; bash tests/hooks/advisory-nudge/test_pipefail_advisory.sh
+-> 48 passed, 0 failed; scripts/run-tests.sh full suite -> ALL TESTS PASSED.
+Premise-Verified: both codex round-4 findings reproduced via direct
+python3 tokenize + subprocess probes against the live hook before
+applying. Regression-checked all previously-recovered forms (OUT=$(gh
+...), LANG=C RESULT=$(gh ...), bare (git commit ... | tail), standalone
+'(' token, FOO=$(date) balanced single-token, here-string, gh flag
+position) still advise correctly after the multi-token/keyword rewrite.
+Confidence: high
+Scope-risk: narrow
+
+Session-Id: 16f647dc-9e98-4430-a4ea-e5e5cc02f454
+
+* fix(hooks): recover pipe-newline and quoted-subst chains
+
+Round 5 codex review on issue #788's pipefail-advisory hook fixes two
+false-negative surfaces in the mutating-pipe-to-truncating-sink detector:
+
+- F10: a pipe operator followed by a bare newline (valid multi-line
+  bash, no trailing backslash needed after `|`) broke the chain in
+  two. _pipe_chains's empty-argv branch unconditionally overwrote
+  sep_before with the synthetic `;` safe_tokenize inserts between
+  physical lines, discarding that the real preceding separator was
+  `|`/`|&`. Since `cmd | ;` can never be valid bash syntax, a `;`
+  observed right after `|`/`|&` is always that synthetic artifact —
+  sep_before is now only overwritten when it wasn't already `|`/`|&`.
+
+- F11: a mutating pipeline embedded inside a *quoted* command
+  substitution (`OUT="$(gh pr merge 1 | tail -3)"`) dequotes to one
+  opaque shlex token with no `|` token to split on. main() now falls
+  back to a second pass when the top-level scan finds nothing: the
+  balanced $(...) body is extracted from each top-level token
+  (paren-depth tracked) and re-scanned independently, one level deep
+  only, mirroring round 3's balanced-substitution recursive-premise
+  convention.
+
+Caller chain verified: main() -> _scan_tokens_for_advisory() ->
+_pipe_chains() / _extract_substitution_body() -> _is_truncating_sink() /
+_mutating_description(); traced against impl.py, no orphaned call sites.
+Pre-commit verified: ruff check clean; targeted hook test 50/50 passed;
+full scripts/run-tests.sh suite ALL TESTS PASSED.
+Premise-Verified: both fixes verified via direct probe against the live
+hook (14 cases: F10/F11 advisory firing + 12 prior-round regression
+forms all still correct) before applying, per codex-review-wrap Step 5b.
+
+Confidence: high
+Scope-risk: narrow
+Session-Id: 16f647dc-9e98-4430-a4ea-e5e5cc02f454
+
+* fix(hooks): detect sibling substitutions and gh api mutations
+
+Round 6 codex review on issue #788's pipefail-advisory hook fixes two
+more false-negative surfaces, and documents one false-positive limitation
+rather than working around it locally:
+
+- F12: a token with two sibling command substitutions
+  ("$(date) $(gh pr merge 1 | tail -3)") only had its FIRST $(...) run
+  extracted by round 5's _extract_substitution_body, hiding a mutating
+  substitution that wasn't first. Renamed to _extract_substitution_bodies
+  (plural) and changed to collect every balanced top-level $(...) run in
+  the token; main()'s fallback pass now scans each independently.
+
+- F13: gh api ... -X POST/PATCH/PUT/DELETE piped to tail was invisible —
+  gh api is a passthrough verb with no fixed object/verb pair, so
+  _gh_object_verb's enum never recognized it as mutating. New
+  _gh_api_mutating_method() mirrors session-intent.is_gh_mutating()'s
+  gh-api branch (hooks/preflight-gate/session-intent/impl.py:367-387).
+
+- F14 (rejected, documented not fixed): single-quoted $(...)-lookalike
+  text (echo '$(gh pr merge 1 | tail -3)') is inert in bash — single
+  quotes suppress all expansion — but safe_tokenize's posix dequoting
+  strips the wrapping quote character before this hook ever sees the
+  token, so single- vs double-quoted forms are indistinguishable at this
+  layer. Same quote-provenance loss as the three pre-existing 'Known
+  limitations' rows; recovering the distinction needs re-parsing the
+  original command string's quote spans independently of safe_tokenize,
+  out of scope for an advisory-only hook. Documented as a 4th Known
+  limitations row instead of a local workaround.
+
+Caller chain verified: main() -> _scan_tokens_for_advisory() /
+_extract_substitution_bodies() -> _mutating_description() ->
+_gh_api_mutating_method() / _git_subcommand() / _gh_object_verb(); traced
+against impl.py, no orphaned call sites.
+Pre-commit verified: ruff check clean; targeted hook test 54/54 passed;
+full scripts/run-tests.sh suite ALL TESTS PASSED.
+Premise-Verified: F12/F13 confirmed as real false negatives and F14 as a
+quote-provenance-loss false positive via direct probe against the live
+hook before applying/rejecting; F13's fix additionally verified against
+session-intent.is_gh_mutating()'s existing gh-api branch as the sibling
+convention to mirror, per codex-review-wrap Step 5b/5d.
+
+Confidence: high
+Scope-risk: narrow
+Session-Id: 16f647dc-9e98-4430-a4ea-e5e5cc02f454
+
+* docs(hooks): fix pipefail-advisory spec.md markdownlint findings
+
+Addresses 3 inline PR review comments from github-actions/reviewdog on
+PR #795 (all still valid against current spec.md content):
+
+- MD001 heading-increment: every section under the H1 title used H3
+  (### ) with no intervening H2, so the H1 -> H3 jump violated
+  heading-increment. Bumped all H3 section headings to H2 (no H4+
+  headings exist anywhere in the file, so this is a uniform, safe bump).
+- MD038 no-space-in-code: the code span `2>&1 | ` in the `|&` pipe
+  operator section carried a trailing space before the closing
+  backtick. Removed it per reviewdog's own suggested fix.
+- MD040 fenced-code-language: the "Response format" fenced block (an
+  illustrative stderr text dump, not real shell syntax) had no language
+  tag. Tagged it `text`.
+
+Pre-commit verified: npx markdownlint-cli2 spec.md -> 0 error(s) (was 3);
+targeted hook test 54/54 passed (doc-only change, impl.py untouched).
+Premise-Verified: all 3 findings re-confirmed present in current spec.md
+before fixing (line numbers shifted since round 1's original flags, due
+to rounds 2-6 insertions) — checked via grep against current content,
+not the original comment's stale line numbers.
+
+Confidence: high
+Scope-risk: narrow
+Session-Id: 16f647dc-9e98-4430-a4ea-e5e5cc02f454

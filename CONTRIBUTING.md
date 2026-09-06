@@ -629,6 +629,14 @@ an explicit `SKIPPED:` line when the tool is not installed, so a missing
 toolchain does not block you. The corresponding CI job still runs either way,
 so install them if you want local parity.
 
+`bash scripts/run-tests.sh --doctor` tells you up front which of those
+`SKIPPED:` lines a run on your machine will produce. It prints one table of
+every external tool the runner or a sub-suite needs (`python3`, `pytest`,
+`coverage`, `mypy`, `PyYAML`, `git`, `jq`, `zsh`, `tmux`, `lsof`, `ruff`,
+`shellcheck`, `markdownlint-cli2`) with found/missing, the version when found, and the same
+install hint the `SKIPPED:` line would carry. It runs no tests and always
+exits 0.
+
 The pytest step also measures statement coverage (issue #1303). When the
 `coverage` module is importable (`pip install 'coverage==7.16.0'`, the version
 CI pins), pytest runs under `coverage run` with the configuration in
