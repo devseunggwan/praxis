@@ -60,9 +60,9 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 
 | Skill           | Purpose                                                                                                               |
 | --------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `strike`        | Declare a rule violation — session-scoped counter, escalating signal (strike 1 warning → strike 2 review → strike 3 Stop-hook block) |
+| `strike`        | Declare a rule violation — session-scoped counter, escalating signal (warning → review → Stop-hook block at strike 3) |
 | `strikes`       | Show current strike count + recorded violation reasons for the active session                                         |
-| `reset-strikes` | Reset the session strike counter to 0 after a strike-3 block (required to unblock responses)                         |
+| `reset-strikes` | Reset the strike counter after a strike-3 block (required to unblock responses)                         |
 
 ### Session Management
 
@@ -124,7 +124,7 @@ Clone path, `~/.local/bin` symlink install/verify, CLI-tools table
   **instead of** `Closes #N`. GitHub's `Closes` keyword auto-closes the issue
   on merge regardless of deferred items inside the issue body, orphaning their
   tracking thread.
-- **Full-scope PR**: `Closes #N` per global CLAUDE.md (Issue & PR Rules).
+- **Full-scope PR**: `Closes #N` — GitHub auto-closes the issue on merge.
 - **Agent prompts that delegate PR authorship**: do not hardcode `Closes #N` —
   instruct the agent to choose `Closes` vs `Refs` based on whether the PR
   addresses the issue's full scope.

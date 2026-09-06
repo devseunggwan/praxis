@@ -9,8 +9,8 @@ messages, Notion pages) cites **source facts** — `file:line` references,
 exact call syntax, or test-semantics claims — with **no read-probe** found in
 the recent transcript or in the body itself.
 
-It enforces the global `~/.claude/CLAUDE.md` Information Accuracy rule's
-"checkmark = citation" clause at the external-write surface: a source-fact
+It enforces the *Information Accuracy* rule's "checkmark = citation" clause
+([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) at the external-write surface: a source-fact
 citation written from recall (not from a Read / `grep -n` executed this
 session) is a fabrication-shaped claim, and publishing it trains downstream
 readers (review bots, teammates) on potentially wrong specifics (issue #830).

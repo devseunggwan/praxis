@@ -134,8 +134,8 @@ export it, and re-run — do not fall back to a relative path.
 Resuming from: sessions-20260407-143000.json
   Saved at: 2026-04-07T14:30:00+0900 | Host: macbook-pro.local | Sessions: 7
 
-  ✓ Review PR comments → workspace:150 (/Users/nathan.song/projects/hub)
-  ✓ Fix auth bug → workspace:151 (/Users/nathan.song/projects/backend)
+  ✓ Review PR comments → workspace:150 (/Users/dev/projects/my-repo)
+  ✓ Fix auth bug → workspace:151 (/Users/dev/projects/backend)
   ⚠ SKIP: Old worktree task (cwd not found: /tmp/wt-deleted)
   ✗ FAIL: Broken session
 

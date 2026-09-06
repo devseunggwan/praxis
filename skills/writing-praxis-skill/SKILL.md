@@ -59,8 +59,9 @@ description: >
   truncates longer descriptions, and since the `Triggers on "..."` clause sits
   at the end, the trigger keywords are exactly what gets cut. Trim prose,
   never triggers, to fit the budget.
-- Always end `description` with a `Triggers on "..."` clause so the routing
-  table in global `~/.claude/CLAUDE.md` can reference exact keywords.
+- Always end `description` with a `Triggers on "..."` clause so routing —
+  the runtime's own description matching, and any routing table a user keeps
+  in their `CLAUDE.md` — can match exact keywords.
 - The frontmatter `Triggers on "..."` clause is the **sole** source of trigger
   keywords. Do NOT duplicate them in an in-body `- Triggers:` bullet — that
   bullet was retired (#591) because the two copies drifted; frontmatter is the
@@ -81,7 +82,9 @@ runtime-verified-note: "<cli-name> <version> — one-line observed behavior"
 ### Step 3: Design Trigger Keywords
 
 Trigger keywords are the phrases users type (or say) that route to this skill.
-The global `~/.claude/CLAUDE.md` `Skill & Agent Routing` table maps them.
+The runtime matches them against the `description` (see
+[`RUNTIME_CONSTRAINTS.md` §5](../../RUNTIME_CONSTRAINTS.md)); a user may
+additionally keep a routing table in their own `CLAUDE.md`.
 
 **Principles:**
 - **Specific over generic.** "recover cmux" beats "recover" — the generic form
@@ -207,8 +210,8 @@ have a reviewer read-through.
 
 ### Step 8: Register the Skill
 
-1. Add the skill's trigger keywords to the routing table in the project's
-   `AGENTS.md` (or global `~/.claude/CLAUDE.md` for global skills).
+1. Add the skill to the tables in `AGENTS.md` and `docs/skills.md`
+   (`check-plugin-manifests.py` Rule 13 fails until both list it).
 2. Run `./scripts/check-plugin-manifests.py` — new skill directories are
    picked up automatically by the build script, but the check confirms no
    packaging drift.
@@ -224,7 +227,7 @@ Follow the standard praxis PR workflow:
 
 | Failure | Cause | Fix |
 | --------- | ------- | ----- |
-| Skill not invoked by routing | Trigger keywords missing from global `~/.claude/CLAUDE.md` routing table | Add keywords to the routing table |
+| Skill not invoked by routing | Trigger keywords absent from the `description`'s `Triggers on` clause, or past the description budget | Put them in the clause, inside the first 500 characters |
 | `Skill(...)` call fails silently | Target skill uses `disable-model-invocation: true` (both hosts) | Call the underlying binary directly |
 | `AskUserQuestion` call rejected before tool runs | Options array > 4 items — JSON schema rejects the call | Truncate to 3 + "취소" |
 | Codex worker produces empty `git diff` | Sandbox write restriction | Add `git status` check + claude fallback re-dispatch |

@@ -145,7 +145,7 @@ recurrence trail at adoption time; `source-citation-probe-gate` shipped
 default-on because its pattern had one and its clearing arm kept the
 false-positive cost low. This gate follows the second precedent:
 
-- The rule it enforces (global `~/.claude/CLAUDE.md` → *Falsification Gates*,
+- The rule it enforces (*Falsification Gates*, [`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries):
   "if this is wrong, what observation should be MISSING?") is an existing
   documented rule that failed prompt-layer retrieval — the motivating session
   had already retracted one analysis built on an unverified premise before

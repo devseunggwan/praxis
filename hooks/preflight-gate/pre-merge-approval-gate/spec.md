@@ -23,8 +23,8 @@ variable, and the delegated worker now runs with a live stdin (#1054 item A /
 PR #1057), so a prompt surfaced inside a delegated pane is answered by the same
 human — the premise "the delegation intent is the approval" no longer holds.
 
-The per-PR approval rule is already codified in the global `~/.claude/CLAUDE.md` (`No
-Approval Transfer Across Companion PRs` and `Pre-Merge Reporting`). This hook
+The per-PR approval rule is already codified as *No Approval Transfer Across
+Companion PRs* and *Pre-Merge Reporting* ([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)). This hook
 adds structural enforcement so the rule fires even when memory-based feedback
 is not retrieved.
 

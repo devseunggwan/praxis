@@ -12,7 +12,7 @@ and the blast-radius two-factor `ask` added by issue
 
 ### Why this exists
 
-The global `~/.claude/CLAUDE.md` rule **"Output-Block-Level Falsification Gate"** instructs:
+The *Output-Block-Level Falsification Gate* rule ([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) instructs:
 
 > Before surfacing a self-authored proposal as a complete output block, run
 > an explicit falsification test on its premise. If a concrete invalidating
@@ -40,7 +40,7 @@ References: issue [#221](https://github.com/devseunggwan/praxis/issues/221) (adv
 
 ### Source rule detail (always-loaded SoT reference)
 
-The always-loaded `~/.claude/CLAUDE.md` keeps only the 1-line headline + STOP
+The author's always-loaded `CLAUDE.md` keeps only the 1-line headline + STOP
 imperative for this gate; the full detail lives here as the reference SoT
 (issue [#793](https://github.com/devseunggwan/praxis/issues/793) partial-slim —
 the headline stays always-loaded to shape pre-tool-call reasoning, the detail
@@ -947,7 +947,7 @@ Covers 100 cases (97 pre-#910 + 3 new message-contract assertions):
 
 **T2 ask-escalation (AskUserQuestion, issue #369):**
 
-- KO `가장 안전한` in `options[].description` + no `Falsified:` → `ask` (ANCHORING_ASK_MSG) — in-vivo regression for the ai-dotfiles PR #84 session
+- KO `가장 안전한` in `options[].description` + no `Falsified:` → `ask` (ANCHORING_ASK_MSG) — in-vivo regression from the session that motivated issue #369
 - EN `safer` / `safest` / `prefer this` / `obvious choice` in label or description → `ask`
 - KO `자연스러운` / `안전한` / `당연히` in description → `ask`
 - Mixed Hangul/ASCII (`prefer this 옵션`) → `ask` — word-boundary regression

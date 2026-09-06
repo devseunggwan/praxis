@@ -20,8 +20,9 @@ below.
 The 2026-05-18 retrospect identified 3 friction events that all converged on
 the root cause "Loaded ≠ Retrieved at execution time": rules and memory entries
 are in context but fail retrieval at the exact moment a high-stakes action
-(multi-PR merge, agent dispatch, force-push) is executed. CLAUDE.md's
-"Pre-Merge Reporting", "No Approval Transfer Across Companion PRs", and the
+(multi-PR merge, agent dispatch, force-push) is executed. The *Pre-Merge
+Reporting* and *No Approval Transfer Across Companion PRs* rules
+([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) and the
 `feedback_force_history_rewrite_mutation` memory entry have each been violated
 in sessions where they were already loaded. This hook fires at exactly those
 trigger points so the retrieval gap is filled by the hook infrastructure
@@ -245,7 +246,7 @@ approve blindly.
   on **11 of 11** merges and **8 of those had no preceding block at all** — two
   at 322 and 627 events from the last briefing. Once a marker is a command's
   default suffix, the gate it relaxes can never fire, and a per-merge
-  re-confirmation never happens; global CLAUDE.md permits a bypass token only
+  re-confirmation never happens; the bypass convention permits a token only
   after the spec is read and the case matched, and one reading does not cover
   the next N merges.
 
@@ -345,7 +346,8 @@ approve blindly.
   not a content heuristic.
 - Trivial-PR markers (`typo`, `comment-only`, `single-line`, `오타`, `주석만`,
   `trivial pr`, `2-line report`, …) in the briefing text → no escalation,
-  matching CLAUDE.md's "Trivial PRs: a 2-line report is fine" carve-out.
+  matching the *Pre-Merge Reporting* rule's "Trivial PRs: a 2-line report is
+  fine" carve-out.
 - Prior-turn briefing correlated to the merged PR (approval reply + PR-number
   match, or numberless merge whose window-derived target matches) → no
   escalation (issue #826, above).
