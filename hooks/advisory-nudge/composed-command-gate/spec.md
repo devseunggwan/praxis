@@ -109,10 +109,11 @@ A line never reaches T2 at all when any of these holds:
   (` ``` [transcribed] `), which clears the whole block.
 - **no readable transcript** is available. Arm B then has no oracle, and an
   advisory would carry no information. T1 still fires — it needs none.
-  `tail_lines` returns `[]` for a missing file, an unreadable one, and a
-  genuinely empty one alike; only the last means "this session ran nothing",
-  so readability is probed separately rather than inferred from the empty
-  list (codex review round 1, P3).
+  A missing or unreadable file and a genuinely empty one are different
+  answers — only the last means "this session ran nothing" — so the read is
+  `tail_lines(strict=True)`, which raises for the first and returns `[]` for
+  the last in one open, instead of the earlier probe-then-read whose window
+  let a file vanish between the two (codex review round 1, P3; issue #1279).
 
 ## Provenance excludes calls that never ran
 

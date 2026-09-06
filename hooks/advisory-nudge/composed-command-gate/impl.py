@@ -56,6 +56,7 @@ from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E40
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     REJECTION_PHRASE,
     TRANSCRIPT_SCAN_LINES,
+    TranscriptReadError,
     tail_lines,
 )
 from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E402
@@ -260,29 +261,30 @@ _NEVER_RAN_MARKERS = (
 def _transcript_commands(transcript_path: str) -> list[str] | None:
     """Executed Bash commands from the last N JSONL lines; None when unreadable.
 
-    `tail_lines` returns `[]` for a missing file, an unreadable one, and a
-    genuinely empty one alike. Only the last is "this session ran nothing";
-    the other two are "no oracle", and treating them as an empty provenance
-    set turns every published line into an advisory. So readability is probed
-    separately here.
+    A missing or unreadable transcript and a genuinely empty one are
+    different answers: only the last is "this session ran nothing"; the
+    others are "no oracle", and treating them as an empty provenance set
+    turns every published line into an advisory. `tail_lines(strict=True)`
+    keeps them apart in one open — it raises for the first and returns `[]`
+    for the last — where the former probe-then-read left a window in which
+    a file that passed the probe was gone by the read (issue #1279).
 
     Calls whose `tool_result` says they never ran — hook-blocked, denied,
     user-rejected — are dropped. Admitting them would let a command the
     author *attempted* and never executed clear the very line this gate
     exists to catch.
     """
-    if not transcript_path or not os.path.isfile(transcript_path):
+    if not transcript_path:
         return None
     try:
-        with open(transcript_path, "rb"):
-            pass
-    except OSError:
+        lines = tail_lines(transcript_path, TRANSCRIPT_SCAN_LINES, strict=True)
+    except TranscriptReadError:
         return None
 
     by_id: dict[str, str] = {}
     order: list[str] = []
     blocked: set[str] = set()
-    for line in tail_lines(transcript_path, TRANSCRIPT_SCAN_LINES):
+    for line in lines:
         line = line.strip()
         if not line:
             continue
