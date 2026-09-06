@@ -147,6 +147,28 @@ def _is_stop_block(stdout: str) -> bool:
     return isinstance(obj, dict) and obj.get("decision") == "block"
 
 
+def _is_stop_advisory(stdout: str) -> bool:
+    """True iff `stdout` is a Stop-lane advisory object (issue #1281).
+
+    A Stop hook advises via a top-level `{"systemMessage": ...}` at exit 0
+    (`_hook_io.emit_stop_advisory`) — on stdout, not stderr, so the
+    stderr-based advise classification below never saw it and a grouped Stop
+    advisory was recorded as "pass". Same parse-only recognition as
+    `_is_stop_block`; a block object that also carries a systemMessage is a
+    block, which `classify_decision` checks first.
+    """
+    if not stdout:
+        return False
+    try:
+        obj = json.loads(stdout)
+    except ValueError:
+        return False
+    if not isinstance(obj, dict):
+        return False
+    message = obj.get("systemMessage")
+    return isinstance(message, str) and bool(message)
+
+
 def classify_decision(
     rc: int, stdout: str, stderr: str, event: str | None = None
 ) -> str:
@@ -155,7 +177,8 @@ def classify_decision(
     Mirrors `_dispatch.run_group`'s PER-MEMBER decision precedence (this is one
     member's own outcome, not the cross-member aggregate the dispatcher emits):
     block (exit 2 / deny marker / Stop-lane `{"decision": "block"}` JSON) >
-    ask (ask marker) > advise (any stderr) > pass.
+    ask (ask marker) > advise (any stderr, or a Stop-lane `{"systemMessage":
+    ...}` at exit 0) > pass.
     A dispatcher budget-skip record (never actually run) is decision "skip".
 
     `event` is the dispatcher's own event, not a payload field: run_group has it
@@ -183,6 +206,8 @@ def classify_decision(
     if stderr.startswith(_SKIP_MARKER):
         return DECISION_SKIP
     if stderr.strip():
+        return DECISION_ADVISE
+    if rc == 0 and event == "Stop" and _is_stop_advisory(stdout):
         return DECISION_ADVISE
     return DECISION_PASS
 
