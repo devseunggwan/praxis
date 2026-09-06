@@ -4,12 +4,12 @@
   "owner": {
     "name": "devseunggwan"
   },
-  "version": "7.15.0",
+  "version": "7.16.0",
   "plugins": [
     {
       "name": "praxis",
       "description": "Workflow rules from CLAUDE.md turned into hooks and skills that actually fire",
-      "version": "7.15.0",
+      "version": "7.16.0",
       "author": {
         "name": "devseunggwan"
       },
