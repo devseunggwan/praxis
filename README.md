@@ -192,6 +192,30 @@ Most skills delegate to external agents or session managers. Install the depende
 | **cmux** | Session management skills (cmux-*) | Mac app installer |
 | **codex-cli, gemini-cli** | Multi-provider routing in `cmux-delegate` | per upstream docs |
 
+### Hook dependencies
+
+Hooks fail open, so a missing component never breaks a session — the hooks that
+key on it simply never fire, and nothing says so. `hooks/manifest.json` declares
+those components per hook in its `requires` field (#1158); this table is the
+reader's view of that field, and `scripts/check-plugin-manifests.py` Rule 27
+checks the two against each other in both directions (#1332).
+
+| Component | Hooks inert without it | Install |
+| ----------- | ------------------------ | --------- |
+| `cmux` | `model-routing-advisory` | Mac app installer (the Full tier below) |
+| `codex-plugin` | `codex-review-route` | `/plugin marketplace add openai/codex-plugin-cc`, then `/plugin install codex@openai-codex` |
+| `hookable-memory-store` | `memory-hint` | a memory directory whose entries carry `hookable:` frontmatter, located per `hooks/_lib/_memory_dir.py` (`PRAXIS_MEMORY_DIR` overrides) |
+| `slack-or-notion-mcp` | `caller-probe-gate`, `composed-command-gate`, `source-citation-probe-gate` | a Slack or Notion MCP server (`claude mcp add …`); each hook's Bash matcher still fires without one |
+| `zsh` | `block-unmatched-glob` | `brew install zsh`, or the distro package |
+
+`builtin-task-postuse` is the one hook whose premise is another plugin rather
+than a component: it corrects an oh-my-claudecode `pre-tool-enforcer` false
+positive and is registered for the Claude host only (`hosts`), so it carries no
+`requires` row. None of these components is declared as a `plugin.json`
+`dependencies` entry — the harness has no optional-dependency concept, so a
+declaration would turn every tier below into a hard requirement; see
+[ARCHITECTURE.md → Why `plugin.json` declares no `dependencies`](ARCHITECTURE.md#why-pluginjson-declares-no-dependencies).
+
 ### Compatibility Tiers
 
 | Tier | What works | What you need |

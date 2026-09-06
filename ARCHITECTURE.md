@@ -282,6 +282,30 @@ Platform manifests support two optional top-level fields:
   `filtered-hooks` outputs. Also serves as compatibility documentation.
 - `excluded_skills` — reserved for future per-platform skill filtering.
 
+### Why `plugin.json` declares no `dependencies`
+
+Claude Code plugins can list other plugins in a `plugin.json` `dependencies`
+array (`name@marketplace`, with `~` / `^` / `>=` / `=` version ranges). praxis
+does not, by decision (#1332, plugin-dependencies reference read 2026-09-06):
+
+- A declared dependency is installed with the plugin and, when it is missing
+  or disabled, the dependent plugin is switched off with
+  `dependency-unsatisfied`. There is no optional-dependency form — nothing
+  that says "more features when present, still works when absent".
+- Removing a plugin that another enabled plugin depends on fails outright, so
+  declaring oh-my-claudecode would block a user from uninstalling it.
+- Cross-marketplace dependencies need the root marketplace's
+  `allowCrossMarketplaceDependenciesOn`, which praxis does not control on the
+  user's side.
+
+The Standalone tier (`recover-sessions`, the strike skills, `debt`) must work
+with none of oh-my-claudecode, cmux, or the codex plugin installed, so a hard
+dependency would break the tier model. What praxis carries instead is
+declarative: the per-hook `requires` field in `hooks/manifest.json` (#1158),
+mirrored by each spec's `Requires:` line (check Rule 20) and by the README's
+[Hook dependencies](README.md#hook-dependencies) table (check Rule 27). Runtime
+behaviour is unchanged either way — the affected hooks already fail open.
+
 Generated (committed) outputs:
 
 | Path | Consumer |
