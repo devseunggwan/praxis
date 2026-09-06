@@ -33,9 +33,9 @@ compaction just happen?" from the outside: it seek-read the transcript tail
 for the `{"type": "user", "isCompactSummary": true, "uuid": …}` record
 (#472, bounded in #1155), kept a per-session state file with the last injected
 uuid so the marker still sitting in the tail on later prompts would not
-re-inject, and serialized that read-modify-write with `state_lock` after issue
-#1034 had measured the unlocked write tearing 5 of 300 concurrent pairs. All of
-that was scaffolding for a trigger the runtime now raises directly:
+re-inject, and serialized that read-modify-write with `state_lock` after
+issue #1034 had measured the unlocked write tearing 5 of 300 concurrent
+pairs. All of that was scaffolding for a trigger the runtime now raises directly:
 `SessionStart(compact)` fires once per compaction, so the event is the
 trigger and the scan, the uuid state, the lock, and
 `PRAXIS_POSTCOMPACT_TAIL_LINES` are removed with it.
