@@ -622,8 +622,8 @@ git -C ~/.claude/plugins/.../praxis apply --reverse <patch>
 # Option 3: temporary kill switch — edit
 #           ${CLAUDE_PLUGIN_ROOT}/hooks/completion-verify/retrospect-mix-check/impl.sh
 #           and add `exit 0` at the top (the dispatcher execs the impl
-#           directly; the per-hook hooks/retrospect-mix-check.sh wrapper was
-#           removed in #1281).
+#           directly; the per-hook wrapper that used to sit beside
+#           _dispatch.sh was removed in #1281).
 ```
 
 ### Tests
