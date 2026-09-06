@@ -131,7 +131,7 @@ doctor() {
     "pip install 'coverage==7.16.0'" "'coverage ' + coverage.__version__"
   doctor_probe_pymod mypy mypy "step 13" \
     "pip install 'mypy==1.20.0' 'types-PyYAML==6.0.12.20260815'" \
-    "'mypy ' + mypy.version.__version__"
+    "'mypy ' + __import__('mypy.version').version.__version__"
   doctor_probe_pymod PyYAML yaml "step 8 workflow-pin check" "pip install PyYAML" \
     "'PyYAML ' + yaml.__version__"
   doctor_probe git "step 12 diff base; sub-suite fixture repos" \
