@@ -251,6 +251,55 @@ for a `postcompact-context` record plus the injected block in the next turn.
 
 ---
 
+## 7. `SubagentStop` carries two transcripts — `transcript_path` is the parent's, not the subagent's
+
+**Constraint**: `SubagentStop` fires when a subagent finishes and "use[s] the
+same decision control format as Stop hooks". Its payload carries `agent_id`,
+`agent_type`, `agent_transcript_path`, `last_assistant_message` — and
+`transcript_path`. The last one is **the main session's transcript**, not the
+subagent's: "The `transcript_path` is the main session's transcript, while
+`agent_transcript_path` is the subagent's own transcript stored in a nested
+`subagents/` folder."
+
+**Why it bites hooks**: a Stop gate registered on `SubagentStop` without
+changing anything reads `transcript_path` — as every Stop gate does — and so
+grades the **parent session's** last turn against the **subagent's**
+completion claim. It does not error; it silently answers about the wrong
+conversation. The `last_assistant_message` field has the same shape of trap in
+reverse: it is the reliable source for the final text on both events, because
+the transcript "is written asynchronously and may lag the in-memory
+conversation", so a gate that only reads the transcript can miss a claim that
+was already made.
+
+**Workaround**: on a subagent payload read `agent_transcript_path` **or
+nothing** — never `transcript_path`. A fallback looks harmless and is not: the
+turn then comes from the parent while the claim comes from the subagent's
+`last_assistant_message`, so a subagent that ran nothing and repeated a number
+from the parent's output clears an evidence check against evidence it never
+produced. A plain `Stop` payload carries neither `hook_event_name:
+SubagentStop` nor the key, and reads `transcript_path` as before. Prefer
+`last_assistant_message` for the final text, keeping the transcript read as
+the gate on whether any evidence was seen at all. Reference implementation:
+`hooks/_lib/_transcript.py` `resolve_stop_transcript` / `load_stop_turn` /
+`stop_last_assistant_text` (#1337).
+
+**Sidechain markers**: the shared readers drop an event whose `isSidechain` is
+true, which is how a subagent's events are kept out of the MAIN transcript's
+turn. Every event in a per-agent transcript belongs to that agent, so that
+filter must not be applied to it — left on, it would empty the turn and every
+gate would pass each subagent silently. `load_recent_events(drop_sidechain=…)`
+removes the marker as the agent transcript is parsed; whether the field is
+even written there is **not measured** (see below), and dropping it is a
+no-op if it is absent.
+
+**Documented**: 2026-09-06 / <https://code.claude.com/docs/en/hooks> /
+Issue #1337 — status: **documented-behavior-based, not yet measured live
+in this repo**. What would verify it: run a subagent to completion on a release
+carrying the `SubagentStop` registrations and check the fire ledger for a
+`completion-verify` record plus which transcript the gate read.
+
+---
+
 ## Adding a new entry
 
 1. Observe a constraint that is **fixed by the runtime** (not a project

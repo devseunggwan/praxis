@@ -44,6 +44,9 @@ Public API:
   load_recent_events(path, min_events, max_bytes)        -> list[dict]
   load_current_turn(path, max_bytes)                     -> list[dict]
   get_current_turn(events)                               -> list[dict]
+  resolve_stop_transcript(payload)                       -> (path, is_agent)
+  load_stop_turn(payload, max_bytes)                     -> list[dict]
+  stop_last_assistant_text(payload, turn)                -> str
   extract_last_assistant_text(turn)                      -> str
   has_tool_in_turn(turn, tool_name)                      -> bool
   read_last_user_message(transcript_path)                -> str | None
@@ -58,6 +61,7 @@ import os
 import re
 import sys
 from collections import deque
+from typing import cast
 from pathlib import Path
 
 # Default tail window (in JSONL lines) for substring scans over the recent
@@ -287,6 +291,8 @@ def load_recent_events(
     path: str,
     min_events: int = 0,
     max_bytes: int = CURRENT_TURN_SCAN_MAX_BYTES,
+    *,
+    drop_sidechain: bool = False,
 ) -> list[dict]:
     """Tail of the transcript, read backwards, containing the current turn.
 
@@ -311,6 +317,15 @@ def load_recent_events(
     not a superset. A gate handed that would miss evidence that is present and
     block on it, so the honest answer is the same empty fail-open this returns
     for an unreadable file.
+
+    `drop_sidechain` removes each event's `isSidechain` marker as it is
+    parsed. It is for a SubagentStop `agent_transcript_path` and nothing else
+    (`load_stop_turn` is the only caller that sets it): every event in a
+    per-agent transcript belongs to that agent, so the marker — which exists
+    to keep a subagent's events out of the MAIN transcript's turn — would make
+    `is_turn_boundary` and every downstream helper that filters on it answer
+    "nothing here" for a file that is entirely the subagent's. Default False
+    leaves the main-transcript reading of every existing caller untouched.
     """
     tail: deque[dict] = deque()
     try:
@@ -318,6 +333,8 @@ def load_recent_events(
             obj = _parse_line(raw)
             if obj is None:
                 continue
+            if drop_sidechain:
+                obj.pop("isSidechain", None)
             tail.appendleft(obj)
             if is_turn_boundary(obj) and len(tail) >= min_events:
                 return list(tail)
@@ -566,6 +583,102 @@ def has_tool_in_turn(turn: list[dict], tool_name: str) -> bool:
                         and block.get("name") == tool_name:
                     return True
     return False
+
+
+# --------------------------------------------------------------------------- #
+# Stop / SubagentStop payload readers (issue #1337 item 2)
+# --------------------------------------------------------------------------- #
+#
+# SubagentStop fires when a subagent finishes and uses the same decision
+# format as Stop, so the completion gates can grade a subagent's final turn
+# the way they grade the main one. Its payload carries TWO transcripts:
+# `transcript_path` is the main session's, `agent_transcript_path` is the
+# subagent's own, "stored in a nested subagents/ folder" (hooks reference,
+# read 2026-09-06). A gate that keeps reading `transcript_path` on
+# SubagentStop grades the parent's turn against the subagent's claim — the
+# defect these two helpers exist to prevent.
+
+
+def resolve_stop_transcript(payload: dict) -> tuple[str, bool]:
+    """Return `(path, is_agent)` for a Stop / SubagentStop payload.
+
+    A payload that is about a subagent — `hook_event_name` says SubagentStop,
+    or it carries an `agent_transcript_path` — resolves to that agent
+    transcript **or to nothing**. It never falls back to `transcript_path`.
+
+    The fallback is what the earlier draft of this function did, and it
+    reintroduced the exact defect the SubagentStop registration exists to
+    remove (CodeRabbit on #1358). With an unflushed agent transcript the gates
+    read the PARENT's turn while `stop_last_assistant_text` takes the
+    SUBAGENT's `last_assistant_message`: a subagent that ran nothing and
+    merely repeated a number from the parent's output ("9 tests passed. All
+    done.") satisfied `completion-verify`'s evidence and paste checks against
+    evidence it never produced. Grading one conversation's claim with another
+    conversation's evidence is worse than not grading it, so the unreadable
+    case returns "" and every caller's "no path → pass" check fires.
+
+    A plain Stop payload carries neither signal and resolves to
+    `transcript_path` as before.
+    """
+    if not isinstance(payload, dict):
+        return "", False
+    agent_path = payload.get("agent_transcript_path")
+    has_agent_path = isinstance(agent_path, str) and bool(agent_path)
+    is_subagent = (
+        payload.get("hook_event_name") == "SubagentStop" or has_agent_path
+    )
+    if is_subagent:
+        if has_agent_path and os.path.isfile(cast(str, agent_path)):
+            return cast(str, agent_path), True
+        return "", True
+    main_path = payload.get("transcript_path")
+    return (main_path if isinstance(main_path, str) else ""), False
+
+
+def load_stop_turn(
+    payload: dict, max_bytes: int = CURRENT_TURN_SCAN_MAX_BYTES
+) -> list[dict]:
+    """Current turn for a Stop / SubagentStop payload — `[]` when unreadable.
+
+    On a main-session transcript this is exactly `load_current_turn`, memo and
+    all. On a subagent's own transcript the sidechain markers are dropped as
+    the tail is parsed (`load_recent_events(drop_sidechain=True)`); see that
+    function for why the marker cannot survive into a per-agent file's turn.
+    The memo is deliberately not used on the agent path: it keys on
+    `(path, max_bytes)` alone, and the two readings of one path must never
+    answer each other.
+    """
+    path, is_agent = resolve_stop_transcript(payload)
+    if not path or not os.path.isfile(path):
+        return []
+    if not is_agent:
+        return load_current_turn(path, max_bytes)
+    return get_current_turn(
+        load_recent_events(path, max_bytes=max_bytes, drop_sidechain=True)
+    )
+
+
+def stop_last_assistant_text(payload: dict, turn: list[dict]) -> str:
+    """Final assistant text for a Stop / SubagentStop payload.
+
+    Prefers the payload's `last_assistant_message`. The transcript "is written
+    asynchronously and may lag the in-memory conversation, so it may not yet
+    include the current turn's most recent messages when a hook fires. Hooks
+    that need the final assistant text of the current turn should use
+    `last_assistant_message` on Stop and SubagentStop instead of reading the
+    transcript" (hooks reference, read 2026-09-06). Falls back to the turn's
+    own last assistant message when the field is absent or not a string —
+    every payload from a host that predates the field.
+
+    `turn` is still the caller's gate: a caller passes the turn it already
+    loaded and returns early on an empty one, so a payload-supplied claim can
+    never be graded against evidence that was never read.
+    """
+    if isinstance(payload, dict):
+        text = payload.get("last_assistant_message")
+        if isinstance(text, str) and text.strip():
+            return text
+    return extract_last_assistant_text(turn)
 
 
 def read_last_user_message(transcript_path: str) -> str | None:

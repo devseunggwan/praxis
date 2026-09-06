@@ -479,12 +479,18 @@ HOOKS = REPO_ROOT / "hooks"
 _CONSUMERS = {
     HOOKS / "completion-verify" / "readonly-verify-deferral-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
+    # Registered on SubagentStop as well (#1337), so it takes the turn through
+    # the payload reader that chooses between the session transcript and the
+    # subagent's own rather than reading `transcript_path` itself.
     HOOKS / "completion-verify" / "completion-signal-gate" / "impl.py":
-        ["load_current_turn", "extract_last_assistant_text", "has_tool_in_turn"],
+        ["load_stop_turn", "stop_last_assistant_text", "has_tool_in_turn"],
     # Reads a fixed window past the turn (`events[-_EVIDENCE_WINDOW:]`), so it
-    # binds the min_events reader and slices the turn out itself (#1076).
+    # binds the min_events reader and slices the turn out itself (#1076); the
+    # SubagentStop registration (#1337) makes it resolve the path first and
+    # pass that reader the matching `drop_sidechain`.
     HOOKS / "completion-verify" / "merge-state-claim-gate" / "impl.py":
-        ["load_recent_events", "get_current_turn", "extract_last_assistant_text"],
+        ["load_recent_events", "get_current_turn", "resolve_stop_transcript",
+         "stop_last_assistant_text"],
     HOOKS / "completion-verify" / "negative-existence-verdict-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     HOOKS / "completion-verify" / "proposal-premise-gate" / "impl.py":
@@ -1570,3 +1576,160 @@ def test_disable_turn_memo_drops_the_entries(tmp_path, _memo_off):
     assert T._TURN_MEMO
     T.disable_turn_memo()
     assert T._TURN_MEMO is None
+
+
+# ---------------------------------------------------------------------------
+# Stop / SubagentStop payload readers (issue #1337)
+# ---------------------------------------------------------------------------
+#
+# The defect these three helpers exist to prevent is silent: a Stop gate
+# registered on SubagentStop keeps reading `transcript_path`, which on that
+# event is the PARENT session's transcript, and so grades the wrong
+# conversation without erroring. Every case below is written from that
+# failure — which file was read, and whether the sidechain markers a
+# per-agent transcript may carry can empty its turn.
+
+
+def _write_named(tmp_path: Path, name: str, lines: list) -> str:
+    p = tmp_path / name
+    p.write_text("\n".join(json.dumps(x) for x in lines), encoding="utf-8")
+    return str(p)
+
+
+class TestResolveStopTranscript:
+    def test_plain_stop_payload_uses_the_session_transcript(self, tmp_path):
+        main = _write_named(tmp_path, "main.jsonl", [_user(text="q")])
+        assert T.resolve_stop_transcript({"transcript_path": main}) == (main, False)
+
+    def test_agent_transcript_wins_when_it_exists(self, tmp_path):
+        main = _write_named(tmp_path, "main.jsonl", [_user(text="q")])
+        agent = _write_named(tmp_path, "agent.jsonl", [_user(text="task")])
+        got = T.resolve_stop_transcript(
+            {"transcript_path": main, "agent_transcript_path": agent}
+        )
+        assert got == (agent, True)
+
+    def test_unflushed_agent_transcript_resolves_to_nothing(self, tmp_path):
+        """Never the parent's. Falling back would grade the subagent's claim
+        (carried by `last_assistant_message`) against the parent's evidence —
+        the defect the registration exists to remove."""
+        main = _write_named(tmp_path, "main.jsonl", [_user(text="q")])
+        missing = str(tmp_path / "subagents" / "agent-def456.jsonl")
+        got = T.resolve_stop_transcript(
+            {"transcript_path": main, "agent_transcript_path": missing}
+        )
+        assert got == ("", True)
+
+    def test_subagent_stop_without_the_key_still_refuses_the_parent(self, tmp_path):
+        """`hook_event_name` alone is enough: a SubagentStop payload that
+        carries no `agent_transcript_path` at all must not read the parent's
+        transcript either."""
+        main = _write_named(tmp_path, "main.jsonl", [_user(text="q")])
+        got = T.resolve_stop_transcript(
+            {"hook_event_name": "SubagentStop", "transcript_path": main}
+        )
+        assert got == ("", True)
+
+    def test_load_stop_turn_is_empty_for_an_unreadable_agent_transcript(self, tmp_path):
+        main = _write_named(
+            tmp_path, "main.jsonl",
+            [_user(text="q"), _assistant(text="parent answer")],
+        )
+        missing = str(tmp_path / "subagents" / "agent-def456.jsonl")
+        assert T.load_stop_turn(
+            {"transcript_path": main, "agent_transcript_path": missing}
+        ) == []
+
+    @pytest.mark.parametrize("payload", [
+        {},
+        {"transcript_path": None},
+        {"transcript_path": 42},
+        "not a dict",
+    ])
+    def test_unusable_payloads_yield_no_path(self, payload):
+        assert T.resolve_stop_transcript(payload) == ("", False)
+
+
+class TestLoadStopTurn:
+    def _agent_events(self, sidechain: bool) -> list:
+        return [
+            _user(text="run the suite", sidechain=sidechain),
+            _assistant(
+                blocks=[{"type": "tool_use", "name": "Bash", "id": "t1"}],
+                sidechain=sidechain,
+            ),
+            _user(blocks=[{"type": "tool_result", "tool_use_id": "t1"}],
+                  sidechain=sidechain),
+            _assistant(text="12 passed", sidechain=sidechain),
+        ]
+
+    def test_reads_the_agent_transcript_not_the_parent(self, tmp_path):
+        main = _write_named(tmp_path, "main.jsonl",
+                            [_user(text="q"), _assistant(text="parent answer")])
+        agent = _write_named(tmp_path, "agent.jsonl", self._agent_events(False))
+        turn = T.load_stop_turn(
+            {"transcript_path": main, "agent_transcript_path": agent}
+        )
+        assert T.extract_last_assistant_text(turn) == "12 passed"
+        assert T.has_tool_in_turn(turn, "Bash")
+
+    def test_sidechain_marked_agent_transcript_is_not_empty(self, tmp_path):
+        """The regression this normalization exists for: were the markers kept,
+        every helper that filters on them would answer "nothing here" for a
+        file that is entirely the subagent's, and every gate would pass."""
+        main = _write_named(tmp_path, "main.jsonl", [_user(text="q")])
+        agent = _write_named(tmp_path, "agent.jsonl", self._agent_events(True))
+        turn = T.load_stop_turn(
+            {"transcript_path": main, "agent_transcript_path": agent}
+        )
+        assert T.extract_last_assistant_text(turn) == "12 passed"
+        assert T.has_tool_in_turn(turn, "Bash")
+
+    def test_sidechain_events_still_filtered_on_the_main_transcript(self, tmp_path):
+        """Control: the marker keeps its meaning where it has one. A subagent's
+        reply in the PARENT transcript is not the parent's last message."""
+        main = _write_named(tmp_path, "main.jsonl", [
+            _user(text="q"),
+            _assistant(text="parent answer"),
+            _assistant(text="subagent reply", sidechain=True),
+        ])
+        turn = T.load_stop_turn({"transcript_path": main})
+        assert T.extract_last_assistant_text(turn) == "parent answer"
+
+    def test_missing_files_pass(self, tmp_path):
+        assert T.load_stop_turn({"transcript_path": str(tmp_path / "gone")}) == []
+        assert T.load_stop_turn({}) == []
+
+
+class TestStopLastAssistantText:
+    def test_payload_field_wins_over_the_lagging_transcript(self):
+        turn = [_assistant(text="stale")]
+        payload = {"last_assistant_message": "the real final text"}
+        assert T.stop_last_assistant_text(payload, turn) == "the real final text"
+
+    @pytest.mark.parametrize("value", [None, "", "   ", 42, {"text": "x"}])
+    def test_absent_or_unusable_field_falls_back_to_the_turn(self, value):
+        turn = [_assistant(text="from the transcript")]
+        payload = {} if value is None else {"last_assistant_message": value}
+        assert T.stop_last_assistant_text(payload, turn) == "from the transcript"
+
+    def test_empty_turn_with_no_field_is_empty(self):
+        assert T.stop_last_assistant_text({}, []) == ""
+
+
+class TestDropSidechain:
+    def test_marker_removed_only_when_asked(self, tmp_path):
+        path = _write_named(tmp_path, "t.jsonl", [
+            _user(text="task", sidechain=True),
+            _assistant(text="done", sidechain=True),
+        ])
+        kept = T.load_recent_events(path)
+        assert all(e.get("isSidechain") for e in kept)
+        dropped = T.load_recent_events(path, drop_sidechain=True)
+        assert all("isSidechain" not in e for e in dropped)
+
+    def test_dropping_is_a_no_op_when_the_field_is_absent(self, tmp_path):
+        path = _write_named(tmp_path, "t.jsonl",
+                            [_user(text="task"), _assistant(text="done")])
+        assert T.load_recent_events(path, drop_sidechain=True) == \
+            T.load_recent_events(path)

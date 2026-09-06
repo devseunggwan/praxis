@@ -44,8 +44,8 @@ Design mechanisms shared by all hooks:
     redundant but harmless (double-wrap is a no-op).
   - **Standalone hooks** — everything invoked through its own
     `hooks/<name>.sh` wrapper (non-Bash or multi-tool matchers,
-    UserPromptSubmit/PostToolUse/PostToolUseFailure/Stop events, opt-in
-    hooks) must apply
+    UserPromptSubmit/PostToolUse/PostToolUseFailure/Stop/SubagentStop
+    events, opt-in hooks) must apply
     `@fail_open` to `main()` in `impl.py` directly (argv-style mains wrap
     a zero-arg `_entry()` instead). Rule 16 in
     `scripts/check-plugin-manifests.py` enforces this invariant.
