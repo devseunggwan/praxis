@@ -545,6 +545,20 @@
       }
     },
     {
+      "name": "settings-path-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Edit|Write",
+      "timeout": 5,
+      "review_by": "2026-12-05",
+      "mode": {
+        "strict_env": "PRAXIS_SETTINGS_PATH_STRICT",
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_SETTINGS_PATH"
+        ]
+      }
+    },
+    {
       "name": "jq-config-empty-dict-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",

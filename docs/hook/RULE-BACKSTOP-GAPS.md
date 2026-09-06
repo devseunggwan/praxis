@@ -89,7 +89,17 @@ carries the ranking: #4 is a HIGH-cost row sitting after the LOW-MED #3.
   recursive-retrospect anti-pattern it is meant to catch). This is a
   skill-internal enumeration weakness, not a hook-backstop gap, but is tracked
   here because the same session surfaced it.
-- **Gap #4 → prose containment, deliberately no hook** ([#1009](https://github.com/devseunggwan/praxis/issues/1009)):
+- **Gap #4, follow-up-write lane → `settings-path-advisory`** ([#1337](https://github.com/devseunggwan/praxis/issues/1337) item 3):
+  the one lane of #4 that is a tool call, not prose. An `Edit`/`Write` to
+  `.claude/settings.json`, `.claude/settings.local.json` or a
+  `managed-settings.json` now gets a PreToolUse advisory (stderr +
+  `additionalContext`) naming the permission/hook keys the write carries and
+  asking the agent to state, in the response, who asked for the change. The
+  hook cannot decide authorship from the payload — the row above stays
+  measured as written for the prose and menu lanes, which this does not
+  touch. `ConfigChange` was not used: a blocked change there surfaces no
+  message to the user or to Claude (hooks reference, read 2026-09-06).
+- **Gap #4, prose and menu lanes → prose containment, deliberately no hook** ([#1009](https://github.com/devseunggwan/praxis/issues/1009)):
   the decided fix is [`ETHOS.md`](../../ETHOS.md#key-principles) principle 5,
   not a new hook. A structural detector would have to separate a relayed
   `Bypass (if truly needed): …` line — which principle 5 explicitly permits,

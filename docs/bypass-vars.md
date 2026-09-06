@@ -25,6 +25,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | Variable | Hook | Effect when set |
 | ---------- | ------ | ----------------- |
 | `PRAXIS_HOOK_BYPASS_PROTECTED_PATHS` | `protected-paths-guard` | Skip the sensitive-file write guard |
+| `PRAXIS_HOOK_BYPASS_SETTINGS_PATH` | `settings-path-advisory` | Skip the Claude Code settings-file write advisory |
 | `PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH` | `destructive-bash-guard` | Skip the destructive-command guard |
 | `PRAXIS_HOOK_BYPASS_SKILL_GATE` | `skill-gate-commands` | Skip the skill-gated-command preflight |
 | `PRAXIS_HOOK_BYPASS_WORKTREE_GATE` | `worktree-edit-gate` | Skip the worktree-edit preflight |
@@ -74,6 +75,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | Variable | Hook | Note |
 | ---------- | ------ | ------ |
 | `PRAXIS_PROTECTED_PATHS_STRICT` | `protected-paths-guard` | |
+| `PRAXIS_SETTINGS_PATH_STRICT` | `settings-path-advisory` | Exact value `1` only |
 | `PRAXIS_DESTRUCTIVE_BASH_STRICT` | `destructive-bash-guard` | |
 | `PRAXIS_PERSONAL_LEAK_STRICT` | `block-personal-asset-leak` | Exact value `1` only, unstripped — surrounding whitespace keeps it advisory |
 | `PRAXIS_PATH_PROBE_STRICT` | `path-probe-gate` | |
