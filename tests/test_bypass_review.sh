@@ -879,8 +879,10 @@ fi
 # one input — _paths.py expanduser()s the PRAXIS_STATE_DIR override and
 # _paths.sh does not — so pinning the replica to the Python side would make
 # this reader look correct while reading a directory the writer never wrote.
-# The CLI runs as a ~/.local/bin symlink outside the hook import context, so
-# per #981 it replicates rather than imports.
+# The PRAXIS_STATE_DIR rule stays replicated in the CLI (#981); the praxis
+# home under it is _paths.praxis_home() loaded from the checkout the
+# ~/.local/bin symlink resolves into, with the same rule inline as the
+# fallback (#1340) — this parity block is what pins both to the shell.
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== bypass-review: strike-state dir parity with _paths.sh (#1180) ==="
@@ -1091,6 +1093,66 @@ if echo "$out21b" | grep -q "Total events.*1"; then
   assert_pass "gz: control — plain-only dir counts 1"
 else
   assert_fail "gz: control — plain-only dir counts 1" "output: $out21b"
+fi
+
+# ---------------------------------------------------------------------------
+# Default telemetry dir follows PRAXIS_HOME (#1340)
+#
+# PRIVACY.md lists PRAXIS_HOME as the override for ~/.praxis/telemetry and the
+# writers resolve through it; a reader that kept Path.home()/.praxis/telemetry
+# would report "no events" against a relocated tree. No --dir on purpose: the
+# default resolution is the surface under test. PRAXIS_STATE_DIR is removed so
+# the outcome-proxy section cannot pick up an ambient override.
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== bypass-review: default dir follows PRAXIS_HOME (#1340) ==="
+
+PH22="$TMP_DIR/t22-praxis-home"
+HOME22="$TMP_DIR/t22-home"
+mkdir -p "$PH22/telemetry" "$HOME22"
+{
+  make_fire "22222222-2222-3333-4444-555555555555" "pass"
+  make_fire "22222222-2222-3333-4444-555555555555" "advise"
+} > "$PH22/telemetry/fire-events-$TODAY.jsonl"
+ev22=$(make_event '["CLAUDE_HOOK_BYPASS_HOME_GATE"]' "ok")
+write_fixture "$PH22/telemetry/bypass-events-$TODAY.jsonl" "$ev22"
+
+out22=$(env -u PRAXIS_STATE_DIR HOME="$HOME22" PRAXIS_HOME="$PH22" python3 "$CLI" fire-rate --days 1 2>&1)
+rc22=$?
+if [ "$rc22" -eq 0 ] && echo "$out22" | grep -q "2 read, 0 synthetic dropped" \
+    && echo "$out22" | grep -qF "Source : $PH22/telemetry"; then
+  assert_pass "PRAXIS_HOME: fire-rate reads \$PRAXIS_HOME/telemetry without --dir"
+else
+  assert_fail "PRAXIS_HOME: fire-rate reads \$PRAXIS_HOME/telemetry without --dir" "rc=$rc22 output: $out22"
+fi
+
+out22b=$(env -u PRAXIS_STATE_DIR HOME="$HOME22" PRAXIS_HOME="$PH22" python3 "$CLI" --days 1 2>&1)
+if echo "$out22b" | grep -q "Total events.*1" && echo "$out22b" | grep -qF "Source : $PH22/telemetry"; then
+  assert_pass "PRAXIS_HOME: bypass report reads \$PRAXIS_HOME/telemetry without --dir"
+else
+  assert_fail "PRAXIS_HOME: bypass report reads \$PRAXIS_HOME/telemetry without --dir" "output: $out22b"
+fi
+
+# A quoted PRAXIS_HOME=~/x reaches the CLI literally; _paths.praxis_home()
+# expands it against HOME, the same way the writers resolve it.
+out22c=$(env -u PRAXIS_STATE_DIR HOME="$TMP_DIR" PRAXIS_HOME='~/t22-praxis-home' python3 "$CLI" fire-rate --days 1 2>&1)
+if echo "$out22c" | grep -q "2 read, 0 synthetic dropped" && echo "$out22c" | grep -qF "Source : $PH22/telemetry"; then
+  assert_pass "PRAXIS_HOME: tilde form expands against HOME"
+else
+  assert_fail "PRAXIS_HOME: tilde form expands against HOME" "output: $out22c"
+fi
+
+# Control: with PRAXIS_HOME unset the default is HOME/.praxis/telemetry, as it
+# always was — a relocated tree must not be read when nothing relocates it.
+HOME22D="$TMP_DIR/t22-default-home"
+mkdir -p "$HOME22D/.praxis/telemetry"
+make_fire "dddddddd-2222-3333-4444-555555555555" "pass" > "$HOME22D/.praxis/telemetry/fire-events-$TODAY.jsonl"
+out22d=$(env -u PRAXIS_STATE_DIR -u PRAXIS_HOME HOME="$HOME22D" python3 "$CLI" fire-rate --days 1 2>&1)
+if echo "$out22d" | grep -q "1 read, 0 synthetic dropped" \
+    && echo "$out22d" | grep -qF "Source : $HOME22D/.praxis/telemetry"; then
+  assert_pass "PRAXIS_HOME unset: default stays HOME/.praxis/telemetry"
+else
+  assert_fail "PRAXIS_HOME unset: default stays HOME/.praxis/telemetry" "output: $out22d"
 fi
 
 # ---------------------------------------------------------------------------

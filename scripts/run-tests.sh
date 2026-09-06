@@ -192,16 +192,18 @@ PRAXIS_HOME="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
 export PRAXIS_HOME
 trap 'rm -rf "$PRAXIS_HOME"' EXIT
 
-# Same isolation, for the fire-ledger (#849). resolve_path() in
-# hooks/_lib/_fire_ledger.py does NOT fall under PRAXIS_HOME — it defaults to
-# Path.home()/.praxis/telemetry regardless, so PRAXIS_HOME alone leaves it
-# writing into the developer's real ledger. Most tests/hooks/*/test_*.sh files
-# invoke an instrumented impl.sh/impl.py directly and never set
-# PRAXIS_FIRE_TELEMETRY_FILE themselves (only a handful do, e.g.
-# tests/hooks/_lib/test_record_fire.sh) — mirrors the pytest-side fix in
-# tests/conftest.py: an inline `PRAXIS_FIRE_TELEMETRY_FILE=... command`
-# prefix on a specific call still wins over this exported default.
-export PRAXIS_FIRE_TELEMETRY_FILE="$PRAXIS_HOME/fire-events-test.jsonl"
+# The fire ledger needs no export of its own any more. #849 added a suite-wide
+# PRAXIS_FIRE_TELEMETRY_FILE here because resolve_path() in
+# hooks/_lib/_fire_ledger.py ignored PRAXIS_HOME and defaulted to
+# ~/.praxis/telemetry regardless; since #1340 the ledger honours PRAXIS_HOME
+# (its default is $PRAXIS_HOME/telemetry), and since #934 a hook run out of a
+# development checkout writes to <checkout>/.praxis-dev-telemetry before
+# either. The throwaway PRAXIS_HOME above therefore covers the ledger too, for
+# the instrumented impl.sh/impl.py files most tests/hooks/*/test_*.sh invoke
+# directly (mirrors tests/conftest.py, whose per-test override remains for
+# tests that assert on ledger CONTENT). A test that exercises the default
+# resolution itself must still take PRAXIS_HOME out of its own environment —
+# see tests/hooks/_lib/test_record_fire.sh.
 
 # Third isolation, and the one that breaks the pattern of the two above (#1003).
 # CLAUDE_CONFIG_DIR relocates Claude Code's config root, and resolve_memory_dir()

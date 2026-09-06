@@ -2,7 +2,8 @@
 """bypass-review — Review CLI for praxis bypass-telemetry events.
 
 Reads the local JSONL logs written by the bypass-telemetry PostToolUse hook
-(~/.praxis/telemetry/bypass-events-YYYY-MM-DD.jsonl) and aggregates them for
+(~/.praxis/telemetry/bypass-events-YYYY-MM-DD.jsonl, under $PRAXIS_HOME/telemetry
+when PRAXIS_HOME relocates the tree — issue #1340) and aggregates them for
 human review.
 
 Phase 2 of issue #456 (Phase 1 = hook that writes the log; Phase 3 = HTTP
@@ -19,7 +20,8 @@ Usage:
 Options:
   -d, --days N           Query the last N days (default: 7)
   --dir PATH             Override the telemetry directory
-                         (default: ~/.praxis/telemetry)
+                         (default: $PRAXIS_HOME/telemetry, or
+                         ~/.praxis/telemetry when PRAXIS_HOME is unset)
   --errors-only          Show only events where tool_result_status = "error"
   --per-hook FAMILY      Show detailed breakdown for one hook/rule family only
                          (e.g. --per-hook SCIOMC_GATE).  Family names are
@@ -128,6 +130,97 @@ import zlib
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# Runtime roots — hooks/_lib/_paths when it can be loaded, else its rule
+# ---------------------------------------------------------------------------
+
+_PATHS_UNLOADED = object()
+_PATHS_MODULE: object = _PATHS_UNLOADED
+
+
+def _load_praxis_paths():
+    """`hooks/_lib/_paths` from the checkout this CLI lives in, or None.
+
+    `__file__` is a ~/.local/bin symlink; `os.path.realpath` follows it to
+    `skills/bypass-review/bypass-review`, whose `parents[2]` is the repo root
+    (the same anchor `default_manifest_path` uses). `_paths` imports its
+    sibling `_state_lock` by bare name, so `_lib` is on `sys.path` for the
+    duration of the import and off again after. The module is loaded under a
+    private name rather than `import _paths`, so a `_paths` a test harness
+    already holds in `sys.modules` is neither reused nor displaced. Every
+    failure returns None: the callers fall back to the inline rule, so the CLI
+    never fails to start over a resolver it could not load.
+    """
+    try:
+        lib = Path(os.path.realpath(__file__)).parents[2] / "hooks" / "_lib"
+        src = lib / "_paths.py"
+        if not src.is_file():
+            return None
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("_bypass_review_paths", str(src))
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, str(lib))
+        try:
+            spec.loader.exec_module(mod)
+        finally:
+            try:
+                sys.path.remove(str(lib))
+            except ValueError:
+                pass
+        return mod
+    except Exception:
+        return None
+
+
+def _praxis_paths():
+    """Memoised `_load_praxis_paths()` — one import attempt per process."""
+    global _PATHS_MODULE
+    if _PATHS_MODULE is _PATHS_UNLOADED:
+        _PATHS_MODULE = _load_praxis_paths()
+    return _PATHS_MODULE
+
+
+def default_praxis_home() -> Path:
+    """`PRAXIS_HOME` (tilde-expanded), else `~/.praxis` (issue #1340).
+
+    `_paths.praxis_home()` when the resolver loads; otherwise the same
+    one-line rule restated, so an import failure changes nothing a user can
+    observe. With PRAXIS_HOME unset both branches give `Path.home()/.praxis`.
+    """
+    paths = _praxis_paths()
+    if paths is not None:
+        try:
+            return Path(paths.praxis_home())
+        except Exception:
+            pass
+    return Path(os.path.expanduser(os.environ.get("PRAXIS_HOME") or "~/.praxis"))
+
+
+def default_telemetry_dir() -> Path:
+    """Where the writers put the ledgers when nothing overrides them.
+
+    `<praxis home>/telemetry` — `_fire_ledger.resolve_telemetry_dir()` minus
+    its development-checkout branch, which is a writer-side diversion for a
+    hook running out of a checkout and not where a reader looks by default
+    (`--dir <checkout>/.praxis-dev-telemetry` reads such a ledger).
+    """
+    return default_praxis_home() / "telemetry"
+
+
+def default_legacy_strike_state_dir() -> Path:
+    """The pre-#527 `~/.claude/state/praxis/strikes` — `_paths.legacy_state_dir()`
+    when the resolver loads, else the literal it returns."""
+    paths = _praxis_paths()
+    if paths is not None:
+        try:
+            return Path(paths.legacy_state_dir()) / "strikes"
+        except Exception:
+            pass
+    return Path(os.path.expanduser("~/.claude/state/praxis/strikes"))
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +350,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         dest="telemetry_dir",
         default=None,
         metavar="PATH",
-        help="Override telemetry directory (default: ~/.praxis/telemetry)",
+        help="Override telemetry directory (default: $PRAXIS_HOME/telemetry, "
+             "or ~/.praxis/telemetry when PRAXIS_HOME is unset)",
     )
     parser.add_argument(
         "--errors-only",
@@ -1204,18 +1298,16 @@ def default_strike_state_dir() -> Path:
     strike state is strike-counter/impl.sh, and that sources the SHELL
     resolver — so the shell one is what this reader has to agree with, whatever
     _paths.py does. tests/test_bypass_review.sh asserts parity against
-    _paths.sh for exactly that reason. This CLI is installed as a ~/.local/bin
-    symlink and runs outside the hook import context, so per the #981
-    convention the skill layer replicates the semantics rather than importing
-    a resolver.
+    _paths.sh for exactly that reason.
 
-    The two resolvers disagree on one input, and it decides the code below:
-    `praxis_home` expands a leading `~` in both (_paths.sh does it with an
-    explicit `case`, _paths.py with expanduser), but `praxis_state_dir` expands
-    the PRAXIS_STATE_DIR override only in Python — the shell keeps the literal
-    tilde and merely strips a trailing slash. A reader that expanduser'd that
-    override would resolve somewhere the writer never wrote. Hence: expand
-    PRAXIS_HOME, leave PRAXIS_STATE_DIR alone.
+    The PRAXIS_STATE_DIR override is the input that decides the code below,
+    and it stays inline: the shell keeps a literal tilde and merely strips one
+    trailing slash, and a reader that expanduser'd it would resolve somewhere
+    the writer never wrote (#1215 later made _paths.py agree, but the shell
+    remains the oracle). The praxis home under it comes from
+    `default_praxis_home()` — `_paths.praxis_home()` when that resolver loads
+    from the checkout this CLI is symlinked into, else the same rule inline
+    (#1340) — which expands a leading `~` exactly as _paths.sh does.
 
     Also mirrored: the pre-#527 legacy location. strike-counter/impl.sh
     migrates ~/.claude/state/praxis/strikes only when it WRITES, so a report
@@ -1235,9 +1327,8 @@ def default_strike_state_dir() -> Path:
         # with `/` for the same reason: Path("") / "strikes" is also relative.
         base = override[:-1] if override.endswith("/") else override
         return Path(f"{base}/strikes")
-    home = os.path.expanduser(os.environ.get("PRAXIS_HOME") or "~/.praxis")
-    state_dir = Path(home) / "state" / "strikes"
-    legacy = Path(os.path.expanduser("~/.claude/state/praxis/strikes"))
+    state_dir = default_praxis_home() / "state" / "strikes"
+    legacy = default_legacy_strike_state_dir()
     if not state_dir.is_dir() and legacy.is_dir():
         return legacy
     return state_dir
@@ -2031,7 +2122,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.telemetry_dir is not None:
         telemetry_dir = Path(args.telemetry_dir)
     else:
-        telemetry_dir = Path.home() / ".praxis" / "telemetry"
+        telemetry_dir = default_telemetry_dir()
 
     if args.mode == "fire-rate":
         return run_fire_rate(args, telemetry_dir)

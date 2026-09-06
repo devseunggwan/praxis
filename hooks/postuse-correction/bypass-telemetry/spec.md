@@ -117,7 +117,10 @@ Default path (daily rotation):
 ~/.praxis/telemetry/bypass-events-YYYY-MM-DD.jsonl
 ```
 
-Directories are created on first write (`exist_ok=True`).
+`~/.praxis` is `PRAXIS_HOME`-relocated (issue #1340), and a development
+checkout diverts to `<checkout>/.praxis-dev-telemetry/` (issue #934) — both
+via `_fire_ledger.resolve_telemetry_dir()`, which this hook shares with the
+fire ledger. Directories are created on first write (`exist_ok=True`).
 
 ## Configuration
 
