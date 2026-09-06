@@ -44,6 +44,16 @@
 #         NBSP)는 서로 다른 키 -> 무음, 같은 명령 2회는 여전히 advisory (대조군)
 #      t) MCP 도구의 문자열은 harness 가 쓴 것만 실패 — `Error: ` 접두사만 있는
 #         *성공* 텍스트는 무음, hook-error envelope·거부 문장은 여전히 advisory
+#  20) PostToolUseFailure 이벤트 (issue #1337)
+#      a) Bash `Exit code 1\nnpm ERR! ...` 2회 -> advisory, hookEventName 은 수신 이벤트
+#      b) is_interrupt:true -> 무음, state 파일 없음
+#      c) 같은 tool_use_id 가 PostToolUse 후 PostToolUseFailure 로 오면 1회만 계수 (역순도)
+#      d) non-Bash MCP 도구의 error 문자열 2회 -> advisory (allowlist 없음)
+#      e) PostToolUse 성공 payload 는 hook_event_name 이 있어도 여전히 무음 (대조군)
+#      f) PostToolUse 문자열 실패 + PostToolUseFailure 가 같은 실패를 서로 다른 id 로
+#         전달하면 하나의 pair 키 -> 2회째 advisory (`Error: ` envelope 정규화)
+#      g) error 가 문자열이 아니면 fail-open 무음
+#      h) 출력 없는 `Exit code 1` 은 명령이 다르면 무음 / 같으면 advisory (command digest)
 #
 # Run:
 #   bash tests/hooks/postuse-correction/test_second_failure_advisory.sh
@@ -1265,6 +1275,262 @@ mcp_case "19t-c) a repeated user rejection still advises" \
 # The pre-existing must-fail case, on the channel it was actually observed on.
 mcp_case "19t-d) the oversized-output notice still stays silent" \
   sess-1265-td "$STR_OVERSIZED" silent
+
+# ---------------------------------------------------------------------------
+# Case 20: the PostToolUseFailure event (issue #1337).
+#
+# A real Bash `tool_response` carries no exit status (#1096), so the
+# PostToolUse path can only see a failed Bash command when the harness happens
+# to deliver it as an `Error: `-prefixed string (#1265). The harness's
+# PostToolUseFailure event is the documented signal: top-level `error` whose
+# first line, for Bash, is `Exit code N`; `is_interrupt: true` when the run
+# reached Claude Code as an abort. The payloads below follow that contract.
+# ---------------------------------------------------------------------------
+echo "=== case 20: PostToolUseFailure event ==="
+failure_event_payload() {
+  # failure_event_payload <session> <tool_name> <tool_use_id> <error|__nonstr__> [command] [is_interrupt]
+  python3 - "$1" "$2" "$3" "$4" "${5:-}" "${6:-}" <<'PY'
+import json, sys
+session_id, tool_name, tool_use_id, error, command, interrupt = sys.argv[1:7]
+payload = {
+    "session_id": session_id,
+    "hook_event_name": "PostToolUseFailure",
+    "tool_name": tool_name,
+    "tool_use_id": tool_use_id,
+    "tool_input": {"command": command} if command else {"query": "select 1"},
+    # A non-string `error` is a shape the hook has never seen: fail-open.
+    "error": {"code": 1} if error == "__nonstr__" else error,
+    "duration_ms": 1234,
+}
+if interrupt == "interrupt":
+    payload["is_interrupt"] = True
+print(json.dumps(payload))
+PY
+}
+posttooluse_event_payload() {
+  # posttooluse_event_payload <session> <tool_use_id> <tool_response-string> [command]
+  python3 - "$1" "$2" "$3" "${4:-true}" <<'PY'
+import json, sys
+session_id, tool_use_id, text, command = sys.argv[1:5]
+print(json.dumps({
+    "session_id": session_id,
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Bash",
+    "tool_use_id": tool_use_id,
+    "tool_input": {"command": command},
+    "tool_response": text,
+}))
+PY
+}
+
+# Doc contract: first line `Exit code N`, then the command's interleaved output.
+ERR_NPM=$'Exit code 1\nnpm ERR! missing script: test\nnpm ERR! A complete log of this run can be found in: /root/.npm/_logs/2026-09-06T10_00_00_000Z-debug-0.log'
+
+# 20a) the same Bash failure twice -> advisory on the 2nd, under the event's own name.
+STATE50="$TMP_DIR/c50.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(failure_event_payload sess-1337-a Bash toolu_a1 "$ERR_NPM" 'npm test')" "$STATE50" >/dev/null 2>/dev/null
+pipe_hook "$(failure_event_payload sess-1337-a Bash toolu_a2 "$ERR_NPM" 'npm test')" "$STATE50" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out" \
+    && assert_match '"hookEventName": "PostToolUseFailure"' "$out"; then
+  assert_pass "20a) repeated Bash PostToolUseFailure advises on the 2nd, named after the event"
+else
+  assert_fail "20a) repeated Bash PostToolUseFailure advises on the 2nd, named after the event" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+# 20a-1) the first occurrence is still silent (two-way control).
+STATE51="$TMP_DIR/c51.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(failure_event_payload sess-1337-a1 Bash toolu_a3 "$ERR_NPM" 'npm test')" "$STATE51" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ -f "$STATE51" ]; then
+  assert_pass "20a-1) first PostToolUseFailure is silent but counted"
+else
+  assert_fail "20a-1) first PostToolUseFailure is silent but counted" \
+    "rc=$rc out=[$out] err=[$err] state_exists=$([ -f "$STATE51" ] && echo yes || echo no)"
+fi
+
+# 20b) is_interrupt:true is not a failure of the command: silent, and no state
+# is written — twice, so a counted interrupt could not hide as a "first".
+STATE52="$TMP_DIR/c52.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(failure_event_payload sess-1337-b Bash toolu_b1 $'Exit code 130\n^C' 'sleep 99' interrupt)" "$STATE52" >/dev/null 2>/dev/null
+pipe_hook "$(failure_event_payload sess-1337-b Bash toolu_b2 $'Exit code 130\n^C' 'sleep 99' interrupt)" "$STATE52" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -f "$STATE52" ]; then
+  assert_pass "20b) is_interrupt:true is silent and writes no state"
+else
+  assert_fail "20b) is_interrupt:true is silent and writes no state" \
+    "rc=$rc out=[$out] err=[$err] state_exists=$([ -f "$STATE52" ] && echo yes || echo no)"
+fi
+
+# 20c) one tool call, both events: PostToolUse string first, then the failure
+# event with the SAME tool_use_id. Counted once, so the second event is silent
+# and the pair's count stays at 1.
+STATE53="$TMP_DIR/c53.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(posttooluse_event_payload sess-1337-c toolu_c1 $'Error: Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE53" >/dev/null 2>/dev/null
+pipe_hook "$(failure_event_payload sess-1337-c Bash toolu_c1 $'Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE53" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+count_c="$(python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print(sum(s["failures"].values()))' "$STATE53" 2>/dev/null)"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ "$count_c" = "1" ]; then
+  assert_pass "20c) same tool_use_id via PostToolUse then PostToolUseFailure counts once"
+else
+  assert_fail "20c) same tool_use_id via PostToolUse then PostToolUseFailure counts once" \
+    "rc=$rc out=[$out] err=[$err] total_count=[$count_c]"
+fi
+
+# 20c-1) the reverse arrival order dedupes too, and a THIRD event with a new id
+# for the same failure is the real 2nd occurrence -> advisory. This is the
+# control that separates "deduped" from "the failure path stopped counting".
+STATE54="$TMP_DIR/c54.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(failure_event_payload sess-1337-c1 Bash toolu_c2 $'Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE54" >/dev/null 2>/dev/null
+pipe_hook "$(posttooluse_event_payload sess-1337-c1 toolu_c2 $'Error: Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE54" >/dev/null 2>/dev/null
+count_c1_mid="$(python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print(sum(s["failures"].values()))' "$STATE54" 2>/dev/null)"
+pipe_hook "$(failure_event_payload sess-1337-c1 Bash toolu_c3 $'Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE54" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ "$count_c1_mid" = "1" ] && [ -n "$out" ] \
+    && assert_match "Failure #2" "$out"; then
+  assert_pass "20c-1) reverse order dedupes; a new id for the same failure is occurrence #2"
+else
+  assert_fail "20c-1) reverse order dedupes; a new id for the same failure is occurrence #2" \
+    "rc=$rc out=[$out] err=[$err] count_after_pair=[$count_c1_mid]"
+fi
+
+# 20d) a non-Bash MCP tool: the event is the verdict, so the tool's own error
+# text counts without the `Error: ` allowlist the string path needs (19t).
+STATE55="$TMP_DIR/c55.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(failure_event_payload sess-1337-d mcp__db__query toolu_d1 'The operation timed out.')" "$STATE55" >/dev/null 2>/dev/null
+pipe_hook "$(failure_event_payload sess-1337-d mcp__db__query toolu_d2 'The operation timed out.')" "$STATE55" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out" \
+    && assert_match "mcp__db__query failure pattern recurring" "$out"; then
+  assert_pass "20d) a repeated MCP tool error string advises via PostToolUseFailure"
+else
+  assert_fail "20d) a repeated MCP tool error string advises via PostToolUseFailure" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+# 20e) negative control: a PostToolUse SUCCESS payload that now carries
+# `hook_event_name` and a `tool_use_id` still passes — the field routes, it
+# does not classify.
+STATE56="$TMP_DIR/c56.json"
+success_event_payload="$(python3 - <<'PY'
+import json
+print(json.dumps({
+    "session_id": "sess-1337-e",
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Bash",
+    "tool_use_id": "toolu_e1",
+    "tool_input": {"command": "git fetch origin"},
+    "tool_response": {"stdout": "", "stderr": "From origin\n * branch main -> FETCH_HEAD\nShell cwd was reset to /tmp/x", "interrupted": False, "isImage": False, "noOutputExpected": False},
+}))
+PY
+)"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$success_event_payload" "$STATE56" >/dev/null 2>/dev/null
+pipe_hook "$success_event_payload" "$STATE56" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -f "$STATE56" ]; then
+  assert_pass "20e) a PostToolUse success with hook_event_name present stays silent"
+else
+  assert_fail "20e) a PostToolUse success with hook_event_name present stays silent" \
+    "rc=$rc out=[$out] err=[$err] state_exists=$([ -f "$STATE56" ] && echo yes || echo no)"
+fi
+
+# 20f) one pair key across the two events: the same failure reaching the hook
+# once as a PostToolUse string (`Error: ` envelope) and once as a failure event
+# (no envelope), under DIFFERENT ids, must be occurrence #2 — otherwise a
+# session alternating between the events never advises.
+STATE57="$TMP_DIR/c57.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(posttooluse_event_payload sess-1337-f toolu_f1 $'Error: Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE57" >/dev/null 2>/dev/null
+pipe_hook "$(failure_event_payload sess-1337-f Bash toolu_f2 $'Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE57" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "Failure #2" "$out"; then
+  assert_pass "20f) PostToolUse string and PostToolUseFailure error share one pair key"
+else
+  assert_fail "20f) PostToolUse string and PostToolUseFailure error share one pair key" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+# 20g) a non-string `error` is an unseen shape: fail-open, silent, no state.
+STATE58="$TMP_DIR/c58.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(failure_event_payload sess-1337-g Bash toolu_g1 __nonstr__ 'false')" "$STATE58" >/dev/null 2>/dev/null
+pipe_hook "$(failure_event_payload sess-1337-g Bash toolu_g2 __nonstr__ 'false')" "$STATE58" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -f "$STATE58" ]; then
+  assert_pass "20g) a non-string error field fails open with no state"
+else
+  assert_fail "20g) a non-string error field fails open with no state" \
+    "rc=$rc out=[$out] err=[$err] state_exists=$([ -f "$STATE58" ] && echo yes || echo no)"
+fi
+
+# 20h) a bare `Exit code 1` with no output carries nothing to tell two commands
+# apart, so the command digest joins the key here exactly as it does for the
+# string path (19g/19h): different commands stay silent, the same command
+# advises.
+STATE59="$TMP_DIR/c59.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(failure_event_payload sess-1337-h Bash toolu_h1 'Exit code 1' 'grep -q needle haystack.txt')" "$STATE59" >/dev/null 2>/dev/null
+pipe_hook "$(failure_event_payload sess-1337-h Bash toolu_h2 'Exit code 1' 'git diff --quiet HEAD~1')" "$STATE59" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+  assert_pass "20h-1) bare Exit code from two different commands stays silent"
+else
+  assert_fail "20h-1) bare Exit code from two different commands stays silent" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
+
+STATE60="$TMP_DIR/c60.json"
+out_file="$(mktemp)" err_file="$(mktemp)"
+pipe_hook "$(failure_event_payload sess-1337-h1 Bash toolu_h3 'Exit code 1' 'grep -q needle haystack.txt')" "$STATE60" >/dev/null 2>/dev/null
+pipe_hook "$(failure_event_payload sess-1337-h1 Bash toolu_h4 'Exit code 1' 'grep -q needle haystack.txt')" "$STATE60" >"$out_file" 2>"$err_file"
+rc=$?
+out=$(cat "$out_file"); err=$(cat "$err_file")
+rm -f "$out_file" "$err_file"
+
+if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
+  assert_pass "20h-2) bare Exit code from the same command twice still advises"
+else
+  assert_fail "20h-2) bare Exit code from the same command twice still advises" \
+    "rc=$rc out=[$out] err=[$err]"
+fi
 
 echo
 if [ "$FAIL" -eq 0 ]; then

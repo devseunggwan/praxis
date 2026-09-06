@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PostToolUse hook: advisory on repeated identical failures.
+"""PostToolUse / PostToolUseFailure hook: advisory on repeated identical failures.
 
 Issue #944 — when a tool keeps failing with the same `(tool_name,
 error_signature)` pattern, the second retry should surface an advisory instead of
@@ -17,6 +17,38 @@ Only the repeated *failure* path is handled:
 - Second failure for the same pair in one session -> advisory
 - Third+ failure for the same pair -> the advisory REPEATS, carrying the running
   occurrence number (issue #1012)
+
+PostToolUseFailure (issue #1337)
+================================
+
+The hook is registered on two events. `PostToolUse` delivers `tool_response`,
+and the #1096 section below records why that payload cannot say whether a Bash
+command failed: a real Bash `tool_response` carries no exit status. The
+harness's `PostToolUseFailure` event exists for exactly that case — it fires
+"when a tool that started executing fails" and carries a top-level `error`
+string whose first line, for Bash, is `Exit code N` (interleaved output
+follows). The event is itself the failure evidence, so no allowlist is applied
+to the text: every non-interrupted `PostToolUseFailure` counts, MCP tools
+included. Three rules, in order:
+
+- `is_interrupt: true` is NOT a failure of the command — the run was aborted
+  before it could fail on its own — so the event is dropped without touching
+  state.
+- `error` that is not a string is an unknown shape -> fail-open, silent.
+- Otherwise `error` is the failure text: it seeds the signature exactly as a
+  string `tool_response` does, and the same bare-`Exit code N` rule folds the
+  command in as a separate digest.
+
+Both events can fire for one tool call, so each counted failure records its
+`tool_use_id` in the state file and a second event carrying an already-recorded
+id is dropped before the count moves — the pair is counted once whichever
+event arrives first. The id list is bounded (`_RECENT_TOOL_USE_IDS_MAX`) and
+ordered, so interleaved parallel calls still dedupe. `PostToolUse` stays
+registered for one release of parallel running; its removal is a follow-up.
+
+The emitted `hookEventName` mirrors the incoming event: the harness matches it
+against the event it is delivering, so a `PostToolUse` name on a
+`PostToolUseFailure` reply would be discarded.
 
 Why 3..N also advise (issue #1012)
 ==================================
@@ -156,6 +188,15 @@ observed), byte-identical whatever command died. For that shape only
 **separate digest** (`_command_discriminator`), so two unrelated commands no
 longer share a pair while the same command failing twice still does.
 
+Signature material is the failure text with one leading `Error: ` removed
+(`_signature_material`, issue #1337). The `PostToolUse` string carries the
+harness envelope (`Error: Exit code 1\\n...`) and the `PostToolUseFailure`
+`error` field carries the same lines without it (`Exit code 1\\n...`); the two
+events describe one failure and must land on one pair key, or a session whose
+failures alternate between the events never reaches the second occurrence.
+The prefix is dropped from the *material* only — the failure decision above
+still reads it.
+
 The digest hashes the command as written, stripped of leading/trailing
 whitespace only. Internal whitespace is shell-significant — `false\nfalse` is
 two commands where `false false` is one, and `test 'a  b' = x` compares a
@@ -213,6 +254,20 @@ _ADVISORY_FROM_OCCURRENCE = 2
 _STATE_SCHEMA_VERSION = 1
 _MAX_SIGNATURE_LEN = 4_096
 
+# The two events this hook is registered on (issue #1337). `hook_event_name`
+# is read from the payload; anything other than the failure event — including
+# an absent field, the shape every pre-#1337 test payload has — takes the
+# `tool_response` path.
+_EVENT_POSTTOOLUSE = "PostToolUse"
+_EVENT_POSTTOOLUSE_FAILURE = "PostToolUseFailure"
+
+# Bound on the per-session list of counted `tool_use_id`s (issue #1337). A
+# PostToolUse and a PostToolUseFailure event for the SAME call must count once;
+# keeping only the last id would miss the pair when parallel calls interleave
+# (A-post, B-post, A-fail), so a short ordered window is kept instead. Sixteen
+# covers far more concurrent calls than the harness runs, at 16 ids of state.
+_RECENT_TOOL_USE_IDS_MAX = 16
+
 
 # String-shaped `tool_response` (issue #1265). A failed tool call reaches this
 # hook not as a dict but as a plain string; the two shapes below are the whole
@@ -237,7 +292,12 @@ _STRING_OVERSIZED_OUTPUT_RE = re.compile(
 # same bytes, so unrelated failures would share one signature and the second one
 # would advise "the same error pattern twice" about two different commands. That
 # is the #1042 defect-2 shape, and this hook must not ship it.
-_BARE_EXIT_CODE_RE = re.compile(r"^Error: Exit code \d+$")
+#
+# Matched against the signature MATERIAL (`_signature_material`), i.e. after the
+# `Error: ` envelope is dropped — so it covers both the PostToolUse string
+# (`Error: Exit code 1`) and the PostToolUseFailure `error` field (`Exit code
+# 1`, the doc's first-line contract for Bash) with one pattern (issue #1337).
+_BARE_EXIT_CODE_RE = re.compile(r"^Exit code \d+$")
 
 # MCP tools are the ONE class whose *successful* results are ever delivered as a
 # bare string. Censused over 14,652 `toolUseResult` entries in 120 transcripts:
@@ -318,6 +378,48 @@ def _extract_tool_input(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(tool_input, dict):
         return tool_input
     return {}
+
+
+def _extract_event_name(payload: dict[str, Any]) -> str:
+    """`hook_event_name`, defaulting to PostToolUse when absent or malformed.
+
+    Every payload this hook received before issue #1337 carried no event field
+    and was a PostToolUse delivery, so the default keeps that path unchanged.
+    """
+    name = payload.get("hook_event_name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return _EVENT_POSTTOOLUSE
+
+
+def _extract_tool_use_id(payload: dict[str, Any]) -> str:
+    tool_use_id = payload.get("tool_use_id")
+    if isinstance(tool_use_id, str):
+        return tool_use_id.strip()
+    return ""
+
+
+def _failure_event_text(payload: dict[str, Any]) -> str | None:
+    """Failure text of a PostToolUseFailure payload, or None when not counted.
+
+    The event fires only for a tool that started executing and failed, so
+    arrival is the failure evidence and the text needs no allowlist — the
+    MCP scoping of `_string_failure_text` exists because a PostToolUse string
+    may be a *successful* tool's own text, which cannot happen here.
+
+    None for two shapes: `is_interrupt: true`, where the harness says the run
+    reached it as an abort rather than as the command's own failure (counting
+    it would advise on the user's interruptions), and a non-string `error`,
+    which is a shape this hook has not seen and fails open on. An empty
+    string is a failure with no text and normalizes to `<empty>`, exactly as
+    the dict path does.
+    """
+    if payload.get("is_interrupt") is True:
+        return None
+    error = payload.get("error")
+    if not isinstance(error, str):
+        return None
+    return error.strip()
 
 
 def _extract_reference(tool_input: dict[str, Any], failure_text: str = "") -> str:
@@ -530,12 +632,36 @@ def _command_discriminator(tool_input: dict[str, Any] | None) -> str:
     return hashlib.sha1(stripped[:_MAX_SIGNATURE_LEN].encode("utf-8")).hexdigest()
 
 
-def _compute_signature(
-    tool_name: str, tool_response: Any, tool_input: dict[str, Any] | None = None
-) -> str:
-    text = _derive_failure_text(tool_response, tool_name)
+def _signature_material(text: str) -> str:
+    """Failure text with one leading `Error: ` envelope removed (issue #1337).
 
-    normalized = _normalize_signature(text)
+    The PostToolUse string and the PostToolUseFailure `error` field describe
+    the same failure with and without the harness prefix; stripping it here
+    lands both on one pair key. Applied to signature material only — the
+    failure decision keeps reading the prefix.
+    """
+    text = text.strip()
+    if text.startswith(_STRING_FAILURE_PREFIX):
+        text = text[len(_STRING_FAILURE_PREFIX):].strip()
+    return text
+
+
+def _signature_from_text(
+    tool_name: str,
+    text: str,
+    tool_input: dict[str, Any] | None,
+    discriminate_bare: bool,
+) -> str:
+    """Pair signature for `text`, the failure evidence already extracted.
+
+    `discriminate_bare` is True when the text is string-shaped evidence (a
+    PostToolUse string, or a PostToolUseFailure `error`): only there can a
+    bare `Exit code N` line be the whole text, and only there does the command
+    join the key. A dict payload's `error`/`stderr` never took the digest and
+    still does not.
+    """
+    material_text = _signature_material(text)
+    normalized = _normalize_signature(material_text)
     if not normalized:
         normalized = "<empty>"
 
@@ -546,12 +672,22 @@ def _compute_signature(
     # text has real content is already distinguishable and is left untouched, and
     # an absent/empty command leaves the key byte-identical to the old one.
     material = f"{tool_name}\0{normalized}"
-    if isinstance(tool_response, str) and _BARE_EXIT_CODE_RE.match(text):
+    if discriminate_bare and _BARE_EXIT_CODE_RE.match(material_text):
         discriminator = _command_discriminator(tool_input)
         if discriminator:
             material = f"{material}\0{discriminator}"
 
     return hashlib.sha1(material.encode("utf-8")).hexdigest()
+
+
+def _compute_signature(
+    tool_name: str, tool_response: Any, tool_input: dict[str, Any] | None = None
+) -> str:
+    """Pair signature for a PostToolUse `tool_response` (string or dict)."""
+    text = _derive_failure_text(tool_response, tool_name)
+    return _signature_from_text(
+        tool_name, text, tool_input, discriminate_bare=isinstance(tool_response, str)
+    )
 
 
 def _state_path(session_id: str) -> str:
@@ -584,7 +720,13 @@ def _save_state(path: str, state: dict[str, Any]) -> bool:
         return False
 
 
-def _emit_advisory(tool_name: str, signature: str, reference: str, occurrence: int) -> None:
+def _emit_advisory(
+    tool_name: str,
+    signature: str,
+    reference: str,
+    occurrence: int,
+    event_name: str = _EVENT_POSTTOOLUSE,
+) -> None:
     """Emit the advisory for the `occurrence`-th failure of this pair (>= 2).
 
     Written as `hookSpecificOutput.additionalContext` (DESIGN.md, PostToolUse
@@ -592,6 +734,9 @@ def _emit_advisory(tool_name: str, signature: str, reference: str, occurrence: i
     that exits 0 has its stderr routed to the debug log, never to the model — so
     the stderr form would leave the retry loop uncorrected, which is the one
     thing this hook exists to do.
+
+    `event_name` is echoed as `hookEventName`: the harness accepts the reply
+    only under the event it delivered (issue #1337).
     """
     message = _ADVISORY_PREFIX_TMPL.format(n=occurrence)
     message += f"{tool_name} failure pattern recurring, occurrence #{occurrence}. "
@@ -613,7 +758,7 @@ def _emit_advisory(tool_name: str, signature: str, reference: str, occurrence: i
         {
             "continue": True,
             "hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
+                "hookEventName": event_name,
                 "additionalContext": message,
             },
         },
@@ -640,16 +785,26 @@ def main() -> int:
     if not tool_name:
         return 0
 
-    tool_response = payload.get("tool_response")
-    if not _is_failed(tool_response, tool_name):
-        return 0
-
     tool_input = _extract_tool_input(payload)
-    signature = _compute_signature(tool_name, tool_response, tool_input)
-    ref = _extract_reference(
-        tool_input,
-        _derive_failure_text(tool_response, tool_name),
-    )
+    event_name = _extract_event_name(payload)
+
+    if event_name == _EVENT_POSTTOOLUSE_FAILURE:
+        # Issue #1337: the event is the failure evidence; `error` is the text.
+        failure_text = _failure_event_text(payload)
+        if failure_text is None:
+            return 0
+        signature = _signature_from_text(
+            tool_name, failure_text, tool_input, discriminate_bare=True
+        )
+    else:
+        tool_response = payload.get("tool_response")
+        if not _is_failed(tool_response, tool_name):
+            return 0
+        failure_text = _derive_failure_text(tool_response, tool_name)
+        signature = _compute_signature(tool_name, tool_response, tool_input)
+
+    ref = _extract_reference(tool_input, failure_text)
+    tool_use_id = _extract_tool_use_id(payload)
 
     path = _state_path(session_id)
     pair_key = f"{tool_name}\0{signature}"
@@ -669,12 +824,27 @@ def main() -> int:
             failures = {}
             state["failures"] = failures
 
+        # Issue #1337: PostToolUse and PostToolUseFailure can both describe
+        # this one call. The first event to arrive counts it and records the
+        # id; the second finds the id and leaves the count — and the model's
+        # context — untouched. Decided inside the lock so two events for one
+        # call cannot both read "unseen".
+        recent_ids = state.get("recent_tool_use_ids")
+        if not isinstance(recent_ids, list):
+            recent_ids = []
+        if tool_use_id and tool_use_id in recent_ids:
+            return 0
+
         prior_count = 0
         count = failures.get(pair_key)
         if isinstance(count, int) and count > 0:
             prior_count = count
 
         failures[pair_key] = prior_count + 1
+
+        if tool_use_id:
+            recent_ids.append(tool_use_id)
+            state["recent_tool_use_ids"] = recent_ids[-_RECENT_TOOL_USE_IDS_MAX:]
 
         # Persist before advising: a lost write would let the same advisory
         # fire again on the next failure of this pair.
@@ -685,7 +855,7 @@ def main() -> int:
 
     occurrence = prior_count + 1
     if occurrence >= _ADVISORY_FROM_OCCURRENCE:
-        _emit_advisory(tool_name, signature, ref, occurrence)
+        _emit_advisory(tool_name, signature, ref, occurrence, event_name)
     return 0
 
 
