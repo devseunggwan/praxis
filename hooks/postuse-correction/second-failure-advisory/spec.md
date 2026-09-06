@@ -1,17 +1,18 @@
-# PostToolUse / PostToolUseFailure Same-Failure-Pattern Advisory
+# PostToolUseFailure Same-Failure-Pattern Advisory
 
-Supported hosts: all
-Per-event: the `PostToolUse` registration ships to every host; the
-`PostToolUseFailure` registration (issue #1337) carries `hosts: ["claude"]`
-and ships to Claude Code only — see
-[PostToolUseFailure](#posttoolusefailure-issue-1337) below.
+Supported hosts: claude
+
+`PostToolUseFailure` is raised by Claude Code only, so the single registration
+carries `hosts: ["claude"]`. The `PostToolUse` registration this hook also
+carried was removed once the parallel run ended (issue #1337) — history in
+[Registration history](#registration-history-issue-1337) below.
 
 `hooks/second-failure-advisory` is an advisory hook registered on
-`PostToolUse` and, since issue #1337, on `PostToolUseFailure`. When the same
-`tool_name + error_signature` pair fails repeatedly within one session, it
-emits an advisory through `hookSpecificOutput.additionalContext` on stdout
-from the second failure onward, to cut the pattern of retrying an identical
-failure indefinitely without analysing the cause.
+`PostToolUseFailure`. When the same `tool_name + error_signature` pair fails
+repeatedly within one session, it emits an advisory through
+`hookSpecificOutput.additionalContext` on stdout from the second failure
+onward, to cut the pattern of retrying an identical failure indefinitely
+without analysing the cause.
 
 ## Why this exists
 
@@ -26,10 +27,10 @@ announces the repeat.
 
 ## Covered surface
 
-- Events: `PostToolUse` (all hosts) and `PostToolUseFailure` (`claude` only,
-  issue #1337). Two manifest entries under one name; the same wrapper
-  serves both, and `impl.py` branches on the payload's `hook_event_name`.
-- Matcher: `all tools` — neither `hooks/manifest.json` entry carries a
+- Event: `PostToolUseFailure` (`claude` only, issue #1337). One manifest
+  entry. `impl.py` still branches on the payload's `hook_event_name`, so a
+  `PostToolUse` payload delivered by anything else is still read correctly.
+- Matcher: `all tools` — the `hooks/manifest.json` entry carries no
   `matcher` key. An explicit list would drop, at the matcher stage, every
   repeated failure of a tool whose name is not enumerated (MCP tools,
   `WebFetch`, `NotebookEdit`).
@@ -124,12 +125,35 @@ The advisory echoes the incoming event as `hookEventName`. The harness
 accepts a hook reply only under the event it delivered, so a `PostToolUse`
 name on a `PostToolUseFailure` reply would be discarded.
 
-### The PostToolUse registration is retained for one release
+### Registration history (issue #1337)
 
-Both paths run in parallel for one release so the failure event's real
-delivery can be measured against the ledger before the string allowlist is
-retired. Removing the `PostToolUse` registration is a follow-up; until then
-the dedupe above is what keeps the parallel run from double-counting.
+The hook was registered on `PostToolUse` first, and gained the
+`PostToolUseFailure` entry alongside it so the failure event could run in
+parallel for one release. The `PostToolUse` entry was removed at the end of
+that run. What the removal rests on, and what it does not:
+
+- **`PostToolUseFailure` is the event for a failed call.** The hooks
+  reference's lifecycle table gives `PostToolUse` as "after a tool call
+  succeeds" and `PostToolUseFailure` as "after a tool call fails". The
+  `PostToolUse` sections below were written around a payload that, per #1096,
+  cannot say whether a Bash command failed — the gap #1337 opened this hook's
+  second registration to close.
+- **The dedupe made the parallel run cost-free and its end lossless.** Both
+  events counted one call once, keyed on `tool_use_id`, so removing one entry
+  cannot change the count of any failure the remaining event sees.
+- **Permission denials were never this hook's lane.** `User rejected tool use`
+  reaches praxis through the *transcript* — `toolUseResult` on a user entry,
+  which `rejected-mutation-reconsent-gate` reads — not through a `PostToolUse`
+  payload. Removing the entry does not narrow denial handling.
+- **Not measured.** No ledger from a host that raises `PostToolUseFailure` was
+  available when the entry was removed, so the parallel run's stated purpose —
+  comparing real delivery of the two events — was not carried out. The removal
+  rests on the reference and on the dedupe argument above, not on observation.
+  Live verification is tracked separately.
+
+`impl.py`'s `tool_response` detection path is now unreachable through any
+registration. It is retained, not yet deleted: it is the larger half of this
+hook and its own tests, and removing it is a separate change.
 
 ## Deciding what counts as a failure (`PostToolUse`)
 
