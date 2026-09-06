@@ -8,7 +8,7 @@ after a context compaction — and injects a `hookSpecificOutput.additionalConte
 block summarising the surviving session state (session_id, cwd, branch,
 active PR, strike state) so the post-compaction turn starts with it.
 
-### Why this exists (issues #466, #472, #1339)
+## Why this exists (issues #466, #472, #1339)
 
 Three events touch a compaction, and only one of them carries context back
 to the model. Quotes are from <https://code.claude.com/docs/en/hooks> and
@@ -33,8 +33,8 @@ compaction just happen?" from the outside: it seek-read the transcript tail
 for the `{"type": "user", "isCompactSummary": true, "uuid": …}` record
 (#472, bounded in #1155), kept a per-session state file with the last injected
 uuid so the marker still sitting in the tail on later prompts would not
-re-inject, and serialized that read-modify-write with `state_lock` after
-#1034 measured the unlocked write tearing 5 of 300 concurrent pairs. All of
+re-inject, and serialized that read-modify-write with `state_lock` after issue
+#1034 had measured the unlocked write tearing 5 of 300 concurrent pairs. All of
 that was scaffolding for a trigger the runtime now raises directly:
 `SessionStart(compact)` fires once per compaction, so the event is the
 trigger and the scan, the uuid state, the lock, and
@@ -46,7 +46,7 @@ covers both `/compact` and the automatic compaction that fires when the
 context window fills. That is documented behaviour, not a live measurement:
 the firing has not been observed in a session from this repo yet.
 
-### Trigger criteria
+## Trigger criteria
 
 The hook emits when **all** are true:
 
@@ -60,7 +60,7 @@ The hook emits when **all** are true:
 
 There is no dedup state: one event, one injection.
 
-### Context payload
+## Context payload
 
 ```
 📎 Praxis post-compaction context
@@ -83,7 +83,7 @@ When a source is unavailable (no PR, no strikes, detached HEAD) the field
 degrades gracefully — `(none for current branch)` / `0/3` /
 `(detached/unknown)` — instead of being dropped.
 
-### Configuration
+## Configuration
 
 | Env var | Default | Scope | Effect |
 | --------- | --------- | ------- | -------- |
@@ -100,13 +100,13 @@ on record in
 [`docs/hook-state-concurrency-measurements.md`](../../../docs/hook-state-concurrency-measurements.md)
 as history.
 
-### Time budget
+## Time budget
 
 `git` (1.5s) + `gh` (3.0s) + ~0.5s interpreter startup is a 5.0s ceiling
 under the manifest's `timeout: 8`. The previous design added up to 2.0s of
 `state_lock` acquisition on top; that term is gone.
 
-### Response format
+## Response format
 
 Success path:
 
@@ -123,7 +123,7 @@ exit 0. Every other path (bypass, non-compact `source`, missing payload
 field, infrastructure error) is **silent** — no stdout, no stderr, exit 0.
 The hook never blocks the session.
 
-### Fail-open contract
+## Fail-open contract
 
 - bypass env set → silent
 - malformed JSON stdin → silent
@@ -132,14 +132,14 @@ The hook never blocks the session.
 - `git` / `gh` absent or non-zero → field degrades, hook continues
 - uncaught exception in inner logic → swallowed, exit 0
 
-### Host filtering
+## Host filtering
 
 `hosts: ["claude"]` in `hooks/manifest.json`. The `SessionStart` `compact`
 matcher and its `source` field are Claude Code-specific; other hosts
 (Codex, Cursor) have different session-shrinking semantics, so the hook is
 not emitted on their platforms.
 
-### Relationship to sibling hooks
+## Relationship to sibling hooks
 
 | Hook | Scope | Overlap |
 | ------ | ------- | --------- |
@@ -147,7 +147,7 @@ not emitted on their platforms.
 | `session-intent` (UserPromptSubmit) | classifies first-prompt read-intent | None — different event |
 | `path-probe-gate` | guard Edit/Write nested path | Complementary — that hook addresses the consequence (post-compaction path-guessing); this hook addresses the upstream signal |
 
-### Known limitations
+## Known limitations
 
 | Case | Behaviour |
 | ------ | ----------- |
@@ -157,7 +157,7 @@ not emitted on their platforms.
 | `gh` not installed / not authenticated | PR field reads `(none for current branch)` — fail-open |
 | Worktree with detached HEAD | `branch : (detached/unknown)`; PR lookup skipped |
 
-### Tests
+## Tests
 
 ```bash
 bash tests/hooks/advisory-nudge/test_postcompact_context.sh
