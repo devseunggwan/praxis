@@ -15,7 +15,8 @@ local and capped: the shared readers in
 [`hooks/_lib/_transcript.py`](hooks/_lib/_transcript.py) take a tail window
 (400 lines by default), a byte ceiling, or an incremental cursor from the
 last-seen offset. Some readers still pull a large prefix of a long transcript
-under that ceiling — tightening them is tracked in #1277 and #1279. Each hook uses what it reads to answer one
+under that ceiling — tightening them is tracked in #1277 (#1279 is done).
+Each hook uses what it reads to answer one
 question about the session inside its own process — did a verification
 command run in the turn that claims completion, did the user send a stop
 signal, does a claimed PR state match a fresh fetch, did the last user message
