@@ -1274,3 +1274,106 @@ class TestJsonNeedle:
         assert T.json_needle('say "hi"') is None
         assert T.json_needle("a\\b") is None
         assert T.json_needle("praxis:회고") is None  # escaped by the default encoder
+
+
+# ---------------------------------------------------------------------------
+# load_current_turn memo (issue #1281): one parse per dispatch group run
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def _memo_off():
+    # Every test in this module runs standalone (memo disabled); make sure a
+    # test that enables it cannot leak the state into its neighbours.
+    yield
+    T.disable_turn_memo()
+
+
+def _count_reads(monkeypatch) -> list[int]:
+    calls = [0]
+    real = T.load_recent_events
+
+    def counting(path, min_events=0, max_bytes=T.CURRENT_TURN_SCAN_MAX_BYTES):
+        calls[0] += 1
+        return real(path, min_events=min_events, max_bytes=max_bytes)
+
+    monkeypatch.setattr(T, "load_recent_events", counting)
+    return calls
+
+
+def test_turn_memo_is_off_standalone(tmp_path, monkeypatch, _memo_off):
+    # The standalone process (one hook, one call) must be untouched: every
+    # call parses, exactly as before the memo existed.
+    path = _write_jsonl(tmp_path, [_user("q"), _assistant("a")])
+    calls = _count_reads(monkeypatch)
+    assert T._TURN_MEMO is None
+    T.load_current_turn(path)
+    T.load_current_turn(path)
+    assert calls[0] == 2
+
+
+def test_turn_memo_shares_one_parse_across_members(tmp_path, monkeypatch, _memo_off):
+    path = _write_jsonl(tmp_path, [_user("q"), _assistant("a")])
+    calls = _count_reads(monkeypatch)
+    T.enable_turn_memo()
+    first = T.load_current_turn(path)
+    second = T.load_current_turn(path)
+    assert calls[0] == 1
+    assert first == second == [_assistant("a")]  # the turn starts after the user boundary
+
+
+def test_turn_memo_hands_each_member_its_own_list(tmp_path, _memo_off):
+    # A member's in-place edit must not leak into a sibling's view of the turn.
+    path = _write_jsonl(tmp_path, [_user("q"), _assistant("a")])
+    T.enable_turn_memo()
+    first = T.load_current_turn(path)
+    first.pop()
+    first.append({"type": "assistant", "message": {"role": "assistant", "content": "tampered"}})
+    assert T.load_current_turn(path) == [_assistant("a")]
+
+
+def test_turn_memo_rereads_a_changed_transcript(tmp_path, monkeypatch, _memo_off):
+    # The key carries size and mtime: a transcript appended between two
+    # members is parsed again rather than answered from the stale tail.
+    path = _write_jsonl(tmp_path, [_user("q"), _assistant("a")])
+    calls = _count_reads(monkeypatch)
+    T.enable_turn_memo()
+    T.load_current_turn(path)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("\n" + json.dumps(_assistant("more")))
+    st = os.stat(path)
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+    turn = T.load_current_turn(path)
+    assert calls[0] == 2
+    assert turn[-1] == _assistant("more")
+
+
+def test_turn_memo_keys_on_max_bytes(tmp_path, monkeypatch, _memo_off):
+    # Two members with different scan bounds do not share an answer: the
+    # capped termination differs per bound (see load_recent_events).
+    path = _write_jsonl(tmp_path, [_user("q"), _assistant("a")])
+    calls = _count_reads(monkeypatch)
+    T.enable_turn_memo()
+    T.load_current_turn(path)
+    T.load_current_turn(path, max_bytes=10)
+    assert calls[0] == 2
+
+
+def test_turn_memo_missing_file_is_not_cached(tmp_path, monkeypatch, _memo_off):
+    # A stat failure yields no key: the fail-open [] is recomputed each time,
+    # so a transcript that appears mid-group is seen by the next member.
+    path = str(tmp_path / "absent.jsonl")
+    calls = _count_reads(monkeypatch)
+    T.enable_turn_memo()
+    assert T.load_current_turn(path) == []
+    assert T.load_current_turn(path) == []
+    assert calls[0] == 2
+    assert T._TURN_MEMO == {}
+
+
+def test_disable_turn_memo_drops_the_entries(tmp_path, _memo_off):
+    path = _write_jsonl(tmp_path, [_user("q"), _assistant("a")])
+    T.enable_turn_memo()
+    T.load_current_turn(path)
+    assert T._TURN_MEMO
+    T.disable_turn_memo()
+    assert T._TURN_MEMO is None

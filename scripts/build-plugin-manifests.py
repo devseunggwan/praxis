@@ -396,39 +396,18 @@ def manifest_schema_drifts(manifest) -> list[str]:
     # (event, matcher) matching a `dispatch_groups` entry — see
     # filter_hooks_for_host), so the JSON-Schema subset above, which
     # validates `hooks[]` and `dispatch_groups[]` independently, can never
-    # express "a member of THAT array must not carry THIS field" — it has
-    # to be a second pass here. hooks/_lib/_dispatch.py's load_group()
-    # documents exactly why a member may not carry either field: "A manifest
-    # hook that declares 'args' ... is NOT supported in a dispatch group —
-    # and the dispatcher's own main() consumes sys.argv for (event,
-    # matcher)"; a `body` member fares no better, because the dispatcher
-    # always imports a member's impl as Python (_load_main), so a `body:
-    # "impl.sh"` entry (Shell, not Python) would fail to import.
+    # express a cross-array rule — it has to be a second pass here.
+    #
+    # No per-member field is rejected any more. `args` was never rejected:
+    # the build keeps such a member as its own standalone node and the
+    # runtime excludes it from the group, so the hook still runs — rejecting
+    # here killed the build before either half could act (issue #1199
+    # review). `body: impl.sh` was rejected until issue #1281 because the
+    # dispatcher imported every member as Python; `_dispatch.run_one` now
+    # runs a shell member as a subprocess under the member deadline, so a
+    # shell body collapses into the group like any other member (the Stop
+    # group's completion-verify and retrospect-mix-check are the live cases).
     if isinstance(manifest, dict):
-        dispatch_pairs = {
-            (g.get("event"), g.get("matcher"))
-            for g in manifest.get("dispatch_groups", [])
-            if isinstance(g, dict)
-        }
-        for hook in hooks_list:
-            if not isinstance(hook, dict):
-                continue
-            pair = (hook.get("event"), hook.get("matcher"))
-            if pair not in dispatch_pairs:
-                continue
-            name = hook.get("name", "<unnamed>")
-            # `args` is NOT rejected: the build keeps such a member as its own
-            # standalone node and the runtime excludes it from the group, so
-            # the hook still runs — rejecting here killed the build before
-            # either half could act (issue #1199 review).
-            if "body" in hook:
-                out.append(
-                    f"SCHEMA hooks/manifest.json entry {name!r} is a "
-                    f"dispatch-group member (event={pair[0]!r} "
-                    f"matcher={pair[1]!r}) and declares 'body' — "
-                    "hooks/_lib/_dispatch.py imports every group member as "
-                    "Python (impl.py); a shell body would fail to import"
-                )
         # The argv sentinel doubles as a legal matcher value (the schema
         # allows any non-empty string), and a group whose matcher IS the
         # sentinel renders the same argv as a matcher-less one — main() then
@@ -798,9 +777,10 @@ def dispatch_only_wrappers(manifest: dict) -> set[str]:
     group (ADR-0002 Phase 4 / #618).
 
     These members are invoked only through the single dispatcher
-    (`_dispatch.sh`), which imports each member's `impl.py` in-process — so the
-    per-member `hooks/<name>.sh` wrapper has no `hooks.json` node referencing it
-    and is dead weight. `emit_wrappers` skips them and
+    (`_dispatch.sh`), which imports each member's `impl.py` in-process (or, for
+    a `body: impl.sh` member, execs the impl as a subprocess — issue #1281) — so
+    the per-member `hooks/<name>.sh` wrapper has no `hooks.json` node
+    referencing it and is dead weight. `emit_wrappers` skips them and
     `check-plugin-manifests.py` (Rule 6) asserts they are absent from disk. A
     hook with any non-dispatched registration keeps its wrapper (see
     `_wrapper_registrations`). An args-declaring registration is never

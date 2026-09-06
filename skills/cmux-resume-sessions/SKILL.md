@@ -6,6 +6,7 @@ description: >
   Crash routing override: if the request mentions a crash, power loss, OOM, or 살려야,
   route to cmux-recover-sessions instead — even when the user also mentions a snapshot,
   because the snapshot may be stale and .jsonl scanning reflects the real latest state.
+when_to_use: >
   Triggers on "resume sessions", "session resume", "session restore", "cmux resume", "restore from snapshot", "rehydrate sessions", "세션 복원", "스냅샷 복구", "스냅샷 복원".
 verified-against-runtime: true
 runtime-verified-at: 2026-05-28

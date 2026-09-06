@@ -98,14 +98,17 @@ skills/<skill-name>/
 moved there still needs the runtime verification metadata, and the
 `description` budget is measured on `SKILL.md` alone.
 
-The `name` and `description` fields in the SKILL.md frontmatter are surfaced by
-the Claude Code plugin runtime, which truncates the description past a bounded
-budget. [`RUNTIME_CONSTRAINTS.md` §5](RUNTIME_CONSTRAINTS.md) owns that budget
-and records what is and is not measured; do not restate a number here, because
-two numbers in two files is how a description ends up satisfying one contract
-and failing the other. The operative rule while the limit is unmeasured: keep
-the `Triggers on "..."` clause inside the first 500 characters, so routing
-survives whichever bound turns out to be real.
+The `name`, `description`, and `when_to_use` fields in the SKILL.md frontmatter
+are surfaced by the Claude Code plugin runtime, which truncates the listing past
+a bounded budget. [`RUNTIME_CONSTRAINTS.md` §5](RUNTIME_CONSTRAINTS.md) owns
+that budget and records what is and is not measured; do not restate a number
+here, because two numbers in two files is how a description ends up satisfying
+one contract and failing the other. The operative rule while the limit is
+unmeasured: `description` says only what the skill does, and the
+`Triggers on "..."` clause lives in `when_to_use` (issue #1331), so trimming
+description prose never touches a trigger phrase. `docs/skills.md` mirrors the
+phrases from `when_to_use` — `check-plugin-manifests.py` Rule 13e fails on any
+drift between the two.
 
 ### Skill spec drift prevention
 
@@ -172,7 +175,7 @@ spec. It lists fixed Claude Code limits that every skill must work within:
 | 2 | `Skill(...)` cannot invoke `disable-model-invocation: true` skills | Use the underlying binary directly |
 | 3 | `Agent(subagent_type=...)` cannot invoke a skill | Always `Skill(skill="praxis:<name>")` |
 | 4 | `Bash` cwd resets between calls | Chain with `&&` or use absolute paths |
-| 5 | Skill `description` truncated past ~1,024 chars | Keep `Triggers on` inside the first 500 |
+| 5 | Skill `description` truncated past ~1,024 chars | Triggers live in `when_to_use`, not the description tail |
 
 #### Enforcement
 

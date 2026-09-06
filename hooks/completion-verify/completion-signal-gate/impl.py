@@ -47,7 +47,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_stop_advisory  # type: ignore[import-not-found]  # noqa: E402
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    fail_open,
+    remaining_budget,
+)
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
@@ -62,6 +66,9 @@ from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
 PREFIX = "[praxis:completion-signal-gate]"
 
 _HOOK_NAME = "completion-signal-gate"
+# Upper bound on the origin-URL probe; the effective timeout is this clamped
+# to the remaining member budget (see _get_cwd_git_slug).
+_GIT_TIMEOUT_SEC = 3
 _ROLE = "completion-verify"
 
 # ---------------------------------------------------------------------------
@@ -372,11 +379,17 @@ def _get_cwd_plugin_name() -> str | None:
 def _get_cwd_git_slug() -> str | None:
     """Return repo name slug from git remote origin."""
     try:
+        # Clamped to the member budget the dispatcher publishes (issue
+        # #1167): under the Stop group a fixed 3s here could outlive the
+        # group deadline and get the whole dispatcher killed by the host.
+        budget = remaining_budget(_GIT_TIMEOUT_SEC)
+        if budget < MIN_SUBPROC_BUDGET_SEC:
+            return None
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=min(_GIT_TIMEOUT_SEC, budget),
         )
         if result.returncode == 0:
             url = result.stdout.strip()

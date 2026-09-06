@@ -1,6 +1,8 @@
 ---
 name: strike
-description: Declare a rule violation in the current Claude Code session. Use ONLY when the user says "/strike", "/praxis:strike", "strike 1/2/3", "삼진", or explicitly asks to record a rule violation. Do NOT activate on colloquial uses like "strike a balance" or "strike that". Escalates — strike 1 warning, strike 2 forced review, strike 3 response block.
+description: Declare a rule violation in the current Claude Code session. Escalates — strike 1 warning, strike 2 forced review, strike 3 response block.
+when_to_use: Use ONLY when the user says "/strike", "/praxis:strike", "strike 1/2/3", "삼진", or explicitly asks to record a rule violation. Do NOT activate on colloquial uses like "strike a balance" or "strike that".
+disable-model-invocation: true
 ---
 
 # Praxis Strike

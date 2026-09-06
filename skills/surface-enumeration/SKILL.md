@@ -4,6 +4,7 @@ description: >
   Pre-implementation input-surface enumeration — before writing a
   parser/validator/sanitizer/classifier, enumerate every input variant so each
   becomes a required test case.
+when_to_use: >
   Triggers on "surface enumerate", "input surface enumeration", "input parser",
   "input validation", "intent classifier", "정규식 경계", "입력 표면 열거",
   "multi-PR shared state", "convention guide reflection", "apply lesson".

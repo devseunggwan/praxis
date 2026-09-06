@@ -9,8 +9,10 @@ than a catalogue, run `/praxis:using-praxis`.
 > returns `Agent type not found` — Agent and Skill resolve disjoint namespaces.
 > See [RUNTIME_CONSTRAINTS.md §3](../RUNTIME_CONSTRAINTS.md) for the mapping table.
 >
-> **Trigger keywords** mirror each skill's `SKILL.md` `description` field verbatim
-> and are intentionally kept in their source language (some are Korean) so this page
+> **Trigger keywords** mirror each skill's `SKILL.md` `when_to_use` field verbatim
+> (`scripts/check-plugin-manifests.py` Rule 13e enforces the mirror, and still reads
+> `description` so a clause that has not moved is checked rather than exempt) and are
+> intentionally kept in their source language (some are Korean) so this page
 > stays in sync with what actually triggers the skill — do not translate them.
 
 ## Discovery
