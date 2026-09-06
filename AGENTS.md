@@ -124,8 +124,7 @@ Clone path, `~/.local/bin` symlink install/verify, CLI-tools table
   **instead of** `Closes #N`. GitHub's `Closes` keyword auto-closes the issue
   on merge regardless of deferred items inside the issue body, orphaning their
   tracking thread.
-- **Full-scope PR**: `Closes #N` — GitHub closes the issue on merge, which is
-  what a PR covering the issue's whole body wants.
+- **Full-scope PR**: `Closes #N` — GitHub auto-closes the issue on merge.
 - **Agent prompts that delegate PR authorship**: do not hardcode `Closes #N` —
   instruct the agent to choose `Closes` vs `Refs` based on whether the PR
   addresses the issue's full scope.
