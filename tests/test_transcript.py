@@ -775,6 +775,47 @@ class TestTailReaders:
     def test_iter_transcript_missing_file_yields_nothing(self, tmp_path):
         assert list(T.iter_transcript(str(tmp_path / "absent.jsonl"))) == []
 
+    def test_iter_transcript_needle_skips_lines_without_it(self, tmp_path, monkeypatch):
+        """A line without the needle never reaches `json.loads`."""
+        # The needle is a pre-parse reject (#1278): a line without it is never
+        # handed to json.loads, one with it still goes through the full parse
+        # and dict check. Counted through the parser so the test cannot pass
+        # on a filter that merely drops the yielded dicts afterwards.
+        path = _write_jsonl(tmp_path, [
+            _user(text="plain"),
+            _asst_tool_use("A1", "toolu_1", "Bash", {"command": "ls"}),
+            'not json but has "tool_use"',
+            _user(text="another"),
+        ])
+        calls = []
+        real = T.json.loads
+
+        def counting(s, *a, **k):
+            """Record every string handed to the parser, then parse it."""
+            calls.append(s)
+            return real(s, *a, **k)
+
+        monkeypatch.setattr(T.json, "loads", counting)
+        got = list(T.iter_transcript(path, needle='"tool_use"'))
+        assert len(got) == 1 and got[0]["uuid"] == "A1"
+        assert len(calls) == 2  # the tool_use record and the non-JSON line only
+
+    def test_iter_transcript_any_of_needle(self, tmp_path):
+        """A tuple needle keeps a line carrying any one of its tokens."""
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "t1", "Bash", {"command": "ls"}),
+            _asst_tool_use("A2", "t2", "Agent", {"prompt": "review"}),
+            _asst_tool_use("A3", "t3", "Skill", {"skill": "x"}),
+        ])
+        got = [e["uuid"] for e in T.iter_transcript(path, needle=('"Agent"', '"Skill"'))]
+        assert got == ["A2", "A3"]
+
+    def test_iter_transcript_without_needle_is_unchanged(self, tmp_path):
+        """No needle (or `needle=None`) yields every record as before."""
+        path = _write_jsonl(tmp_path, [_user(text="a"), _user(text="b")])
+        assert list(T.iter_transcript(path)) == list(T.iter_transcript(path, needle=None))
+        assert len(list(T.iter_transcript(path))) == 2
+
 
 class TestCappedScanFailsOpen:
     """A capped backward scan is a subset of the turn, never a superset.
