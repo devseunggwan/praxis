@@ -246,7 +246,7 @@ jobs:
           persist-credentials: false
       # Pinned to the latest release; existing workflows pass actionlint
       # cleanly, so error-level gating starts from green.
-      - uses: reviewdog/action-actionlint@dbe5299849118fd6f099ba563d263d770955a64a # v1.73.2
+      - uses: reviewdog/action-actionlint@d290e336d5a743810aef4404f757dc862276d2ae # v1.73.4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           reporter: github-pr-review
