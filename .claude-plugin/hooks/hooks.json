@@ -10,6 +10,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/postcompact-context.sh",
+            "timeout": 8
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -34,11 +44,6 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/retrospect-active-marker.sh",
             "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/postcompact-context.sh",
-            "timeout": 8
           }
         ]
       }

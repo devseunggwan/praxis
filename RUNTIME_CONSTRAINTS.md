@@ -205,6 +205,52 @@ ceiling and leave headroom.
 
 ---
 
+## 6. `PreCompact` and `PostCompact` carry no context-injection channel — use `SessionStart` with matcher `compact`
+
+**Constraint**: Neither compaction event can hand text back to the model.
+`PreCompact` accepts only the top-level `decision` / `reason` / `continue` /
+`stopReason` / `suppressOutput` / `systemMessage` fields and no
+`hookSpecificOutput.additionalContext`. `PostCompact` "hooks have no decision
+control … Claude Code discards a PostCompact hook's `systemMessage` and
+`continue` fields", and it has no `additionalContext` channel either. The
+context channel around a compaction is `SessionStart`: its matcher values are
+`startup`, `resume`, `clear`, `compact`, `fork`, its input carries `source`,
+its decision control supports `hookSpecificOutput.additionalContext`
+(`hookEventName: "SessionStart"`), and plain stdout is added to context as
+well. The hooks guide's own recipe for this is titled "Re-inject context after
+compaction" and registers `SessionStart` with `"matcher": "compact"`.
+
+**Why it bites skills**: A hook that wants the post-compaction turn to know
+something (worktree, branch, open PR, strike count) and registers it on
+`PreCompact` or `PostCompact` runs, exits 0, and delivers nothing — there is
+no error, the output is simply not a channel. The praxis `postcompact-context`
+hook spent three designs on this: `PreCompact` (#466, no channel), then
+`UserPromptSubmit` with a transcript-tail scan for the `isCompactSummary`
+record plus a per-session dedup file and a lock so the marker still in the
+tail on later prompts would not re-inject (#472, #1034, #1155). All of it was
+infrastructure for detecting an event the runtime raises directly.
+
+**Workaround**: Register on `SessionStart` with `"matcher": "compact"`, guard
+on `source == "compact"` in the body, and emit
+`{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": …}}`.
+The event fires once per compaction, so no dedup state is needed. Reference
+implementation: `hooks/advisory-nudge/postcompact-context/impl.py` (#1339).
+
+**Coverage**: the `SessionStart` matcher table lists `compact` as "Auto or
+manual compaction" (read 2026-09-06), so the registration covers both. No
+minimum Claude Code version is stated for the matcher; none is assumed here.
+
+**Documented**: 2026-09-06 / <https://code.claude.com/docs/en/hooks> and
+<https://code.claude.com/docs/en/hooks-guide> / Issue #1339 — status:
+**documented-behavior-based, not yet measured live in this repo**. The
+`PreCompact` half was measured in #472 (Wave 0 probe); the `PostCompact`
+quote and the `SessionStart` matcher list are read from the docs on that
+date. What would verify it: run `/compact` in a session on a release that
+carries the `SessionStart(compact)` registration and check the fire ledger
+for a `postcompact-context` record plus the injected block in the next turn.
+
+---
+
 ## Adding a new entry
 
 1. Observe a constraint that is **fixed by the runtime** (not a project
