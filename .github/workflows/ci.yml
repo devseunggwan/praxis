@@ -257,6 +257,16 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # Advisory end to end. `fail_level: none` below only governs lint
+    # findings; the action is a Docker container action built from its
+    # Dockerfile at job time, and that build step runs before any input is
+    # read. On 2026-09-06 a Debian bullseye-security mirror 404 in that
+    # build failed the job on every open PR, including release-please's,
+    # and turned each commit status red for a check that gates nothing.
+    # The same rules also run inside the `test` job through
+    # scripts/run-tests.sh step 12, so lint coverage does not depend on
+    # this job; only the inline PR annotations do.
+    continue-on-error: true
     permissions:
       contents: read
       pull-requests: write
