@@ -44,6 +44,22 @@
       }
     },
     {
+      "name": "postcompact-context",
+      "role": "advisory-nudge",
+      "event": "SessionStart",
+      "matcher": "compact",
+      "hosts": [
+        "claude"
+      ],
+      "timeout": 8,
+      "review_by": "2026-12-04",
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT"
+        ]
+      }
+    },
+    {
       "name": "strike-counter",
       "role": "completion-verify",
       "body": "impl.sh",
@@ -98,25 +114,6 @@
       "event": "PreToolUse",
       "matcher": "Skill",
       "timeout": 5
-    },
-    {
-      "name": "postcompact-context",
-      "role": "advisory-nudge",
-      "event": "UserPromptSubmit",
-      "hosts": [
-        "claude"
-      ],
-      "timeout": 8,
-      "review_by": "2026-12-04",
-      "mode": {
-        "bypass_env": [
-          "PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT"
-        ],
-        "state_paths": [
-          "PRAXIS_POSTCOMPACT_CONTEXT_FILE",
-          "PRAXIS_POSTCOMPACT_TAIL_LINES"
-        ]
-      }
     },
     {
       "name": "memory-hint",

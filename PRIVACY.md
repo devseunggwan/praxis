@@ -26,8 +26,8 @@ Three classes of hook read the transcript:
 
 - **Stop-lane gates** (`hooks/completion-verify/*`) — inspect the turn that is
   about to end for an evidence claim without evidence behind it.
-- **Advisory scans** (`hooks/advisory-nudge/*`, e.g. `postcompact-context`,
-  `caller-probe-gate`, `unenforced-step-advisory`) — look for a recent
+- **Advisory scans** (`hooks/advisory-nudge/*`, e.g. `caller-probe-gate`,
+  `unenforced-step-advisory`) — look for a recent
   command or rule the current call should have honoured.
 - **Preflight gates** (`hooks/preflight-gate/*`, e.g. `block-ask-end-option`,
   `rejected-mutation-reconsent-gate`) — read recent user messages (the last
@@ -57,7 +57,7 @@ summarises what each root holds so a reader can judge its sensitivity.
 | Root                    | Holds                                                                                                | Override                                 |
 | ----------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------- |
 | `~/.praxis/state/`      | Durable state: strike counts and the reasons the agent declared for them; phantom-path dedup markers | `PRAXIS_STATE_DIR`, `PRAXIS_HOME`        |
-| `~/.praxis/cache/`      | Session-scoped flags, counters and dedup sets: detected intent, retrospect marker and candidate hints, Read-file path sets, last compact id, approval-premise acks, poll-loop waiter registry, command-repetition stamps, `gh` field-name and label caches | `PRAXIS_HOME`; swept after `PRAXIS_CACHE_TTL_DAYS` (7) |
+| `~/.praxis/cache/`      | Session-scoped flags, counters and dedup sets: detected intent, retrospect marker and candidate hints, Read-file path sets, approval-premise acks, poll-loop waiter registry, command-repetition stamps, `gh` field-name and label caches | `PRAXIS_HOME`; swept after `PRAXIS_CACHE_TTL_DAYS` (7) |
 | `~/.praxis/logs/`       | `hook-errors.jsonl` (hook name and Python traceback of a hook that failed open) and Stop-gate block logs (timestamp, session id, reason code) | `PRAXIS_HOOK_ERROR_LOG`, `PRAXIS_HOME`   |
 | `~/.praxis/telemetry/`  | The two local ledgers described under [Telemetry](#telemetry)                                        | `PRAXIS_*_TELEMETRY_FILE`, `PRAXIS_HOME` |
 | `~/.praxis/docs/specs/` | Feature specs a person writes; praxis only reads them                                                | `PRAXIS_HOME`                            |

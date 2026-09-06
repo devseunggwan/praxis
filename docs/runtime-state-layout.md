@@ -83,7 +83,6 @@ did not move them:
 | `session-intent-<sid>.json`                                        | `preflight-gate/session-intent`                                                              |
 | `retrospect-active-<sid>.json`, `retrospect-candidates-<sid>.json` | `preflight-gate/retrospect-active-marker` (read by `completion-verify/retrospect-mix-check`) |
 | `md-read-history-<sid>.json`                                       | `postuse-correction/pre-edit-md-escape-advisory`                                             |
-| `postcompact-context-<sid>.json`                                   | `advisory-nudge/postcompact-context`                                                         |
 | `jq-config-advisory-<sid>.json`                                    | `advisory-nudge/jq-config-empty-dict-advisory`                                               |
 | `path-probe-gate/`                                                 | `advisory-nudge/path-probe-gate`                                                             |
 | `pre-output-falsification-gate/`                                   | `advisory-nudge/pre-output-falsification-gate`                                               |

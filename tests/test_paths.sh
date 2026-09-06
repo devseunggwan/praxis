@@ -7,6 +7,7 @@
 #   - resolve_writable creates <home>/<subdir> and returns the file path
 #   - resolve_writable falls back to ${TMPDIR}/praxis-<file> when home is
 #     not writable, and never raises
+#   - the fire ledger follows PRAXIS_HOME in both its writers (issue #1340)
 
 set +e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -319,6 +320,54 @@ assert_eq "praxis_rotate_log moves an oversized log to .1" "yes" \
 assert_eq "praxis_rotate_log leaves a log under the cap alone" "small" "$(cat "$ROT_DIR/b.log")"
 assert_eq "praxis_rotate_log ignores a missing log" "yes" "$([ ! -e "$ROT_DIR/absent.log.1" ] && echo yes || echo no)"
 rm -rf "$ROT_DIR"
+
+# 18. The fire ledger follows PRAXIS_HOME in both writers (issue #1340).
+# PRIVACY.md lists PRAXIS_HOME as the override for ~/.praxis/telemetry:
+# _fire_ledger.resolve_telemetry_dir() resolves through _paths.praxis_home()
+# and record_fire.sh restates the shell rule inline (it is copied on its own
+# into probe trees and cannot source a sibling). Probed out of a copied _lib
+# with no .git two levels up — the dev-checkout branch (#934) is what sends
+# in-repo runs to <checkout>/.praxis-dev-telemetry, and would mask a
+# regression here. No PRAXIS_FIRE_TELEMETRY_FILE either: that override wins
+# over everything and is exactly what #849 used to hide this defect.
+LEDGER_ROOT=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+LEDGER_LIB="$LEDGER_ROOT/pkg/hooks/_lib"
+mkdir -p "$LEDGER_LIB" "$LEDGER_ROOT/home"
+cp "$LIB/_fire_ledger.py" "$LIB/_paths.py" "$LIB/_state_lock.py" "$LIB/record_fire.sh" "$LEDGER_LIB/"
+LEDGER_TODAY=$(date -u +%Y-%m-%d)
+LEDGER_FILE="$LEDGER_ROOT/relocated/telemetry/fire-events-$LEDGER_TODAY.jsonl"
+env -u PRAXIS_FIRE_TELEMETRY_FILE HOME="$LEDGER_ROOT/home" PRAXIS_HOME="$LEDGER_ROOT/relocated" \
+  python3 - "$LEDGER_LIB" << 'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+import _fire_ledger
+assert _fire_ledger._checkout_root() is None, "probe tree must not read as a checkout"
+_fire_ledger.record_session_fire("py-hook", "role", "pass", "sess-1340", "")
+PYEOF
+env -u PRAXIS_FIRE_TELEMETRY_FILE HOME="$LEDGER_ROOT/home" PRAXIS_HOME="$LEDGER_ROOT/relocated" \
+  PRAXIS_LIB_DIR="$LEDGER_LIB" \
+  sh -c '. "$1/record_fire.sh"; praxis_record_fire sh-hook role pass sess-1340 ""' _ "$LEDGER_LIB"
+assert_eq "fire ledger: both writers land in \$PRAXIS_HOME/telemetry outside a checkout" \
+  "py-hook sh-hook" \
+  "$(python3 -c 'import json, sys; print(" ".join(json.loads(l)["hook"] for l in open(sys.argv[1]) if l.strip()))' "$LEDGER_FILE" 2>/dev/null)"
+assert_eq "fire ledger: nothing written under HOME/.praxis" "" \
+  "$(find "$LEDGER_ROOT/home" -type f 2>/dev/null)"
+# The shell writer's inline rule is a restatement of _paths.sh praxis_home(),
+# so pin the two to each other on the input they most easily diverge on: a
+# literal tilde, which the shell must expand against HOME as Python does.
+# The tilde is assembled from a variable: a quoted '~/...' word is what
+# SC2088 flags, and here the unexpanded tilde is the input under test.
+ledger_tilde='~'
+sh_tilde_dir=$(env -u PRAXIS_FIRE_TELEMETRY_FILE HOME="$LEDGER_ROOT/home" PRAXIS_HOME='~/ph-1340' \
+  PRAXIS_LIB_DIR="$LEDGER_LIB" \
+  sh -c '. "$1/record_fire.sh"; praxis_record_fire sh-hook role pass sess-1340 ""; find "$2/home" -name "fire-events-*.jsonl"' _ "$LEDGER_LIB" "$LEDGER_ROOT")
+assert_eq "record_fire.sh tilde PRAXIS_HOME matches _paths.sh praxis_home()/telemetry" \
+  "$(HOME="$LEDGER_ROOT/home" PRAXIS_HOME="$ledger_tilde/ph-1340" sh_eval 'praxis_home')/telemetry" \
+  "$(dirname "$sh_tilde_dir")"
+assert_eq "_fire_ledger tilde PRAXIS_HOME matches _paths.sh praxis_home()/telemetry" \
+  "$(HOME="$LEDGER_ROOT/home" PRAXIS_HOME="$ledger_tilde/ph-1340" sh_eval 'praxis_home')/telemetry" \
+  "$(env -u PRAXIS_FIRE_TELEMETRY_FILE HOME="$LEDGER_ROOT/home" PRAXIS_HOME='~/ph-1340' python3 -c "import sys; sys.path.insert(0, '$LEDGER_LIB'); import _fire_ledger; print(_fire_ledger.resolve_telemetry_dir())")"
+rm -rf "$LEDGER_ROOT"
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"

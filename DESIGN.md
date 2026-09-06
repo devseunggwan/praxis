@@ -148,16 +148,21 @@ the remaining three ask what losing it costs:
    every tool call and nothing else.
 
 Every consumer of `resolve_cache_file` gets a row here — a new consumer is
-classified, not reflexively locked. The first seven rows were measured live
-(`jq-config` in #970, the other six in #1034); the last two were classified
-from their implementation and carry no measurement yet:
+classified, not reflexively locked. The first six rows were measured live
+(`jq-config` in #970, the other five in #1034); the last two were classified
+from their implementation and carry no measurement yet. A seventh measured
+row, `advisory-nudge/postcompact-context`, left the table in #1339: the hook
+moved from `UserPromptSubmit` to `SessionStart(compact)`, where the event
+fires once per compaction, so its last-injected-uuid state and the lock
+around it were deleted — the #1034 measurement of the old write
+(5/300 torn unforced, 0/300 after the fix) stays on record in
+[`docs/hook-state-concurrency-measurements.md`](docs/hook-state-concurrency-measurements.md):
 
 | Hook | State | Loss consequence | Locked |
 | --- | --- | --- | --- |
 | `postuse-correction/second-failure-advisory` | per-`(tool, signature)` counter | fires on `prior_count == 1` exactly — Q1 | yes — Q0 PASS(live), 0/100 (#1034) |
 | `postuse-correction/pre-edit-md-escape-advisory` | accumulating set of Read paths | the Edit gate warns, or denies under `PRAXIS_MD_ESCAPE_MODE=block`, for a file that was Read — Q2 | yes — Q0 PASS(live), 0/100 vs 4/100 unlocked (#1034) |
 | `advisory-nudge/jq-config-empty-dict-advisory` | dedup set of advised paths | one advisory repeats — but the pair shared one `.tmp` staging name, so the surviving file could also be unparseable, which `_load_seen` reads as empty and the session's whole dedup set restarts — Q0 | yes |
-| `advisory-nudge/postcompact-context` | last-injected compact uuid | context re-injected once — but `write_state` truncated and wrote the FINAL name, staging through nothing, so the state file was its own staging file and a sibling's shorter write published a torn one — Q0 | yes, since #1034 — 5/300 unforced before, 0/300 after |
 | `preflight-gate/worktree-prune-snapshot-gate` | single `snapshot_taken` flag, only ever set true | concurrent writers write the identical value | no — Q0 PASS(live), 0/100 (#1034) |
 | `preflight-gate/session-intent` | set-once intent flags | written only from `UserPromptSubmit`, which is serialized per session; the `PreToolUse` gate path is read-only | no — Q0 PASS(live), 0/100 (#1034) |
 | `preflight-gate/retrospect-active-marker` | marker existence | whole-file write and `unlink`, no read-modify-write to lose | no — Q0 PASS(live), 0/100 (#1034) |
@@ -191,11 +196,12 @@ read-modify-write. Anything slower than the deadline — a subprocess, a network
 call — held inside it does not merely add latency, it disables the lock. The
 holder outlasts every sibling's acquisition deadline, each sibling proceeds
 unlocked (that is the fail-open contract, not a bug), and they all read state
-the holder has not written yet. `postcompact-context` is the worked example:
-its `build_context` shells out to `git` and `gh` under 1.5s and 3.0s timeouts,
-so it is built *before* the lock and the decision is re-taken inside it. When
-building ahead of the lock needs an unlocked pre-check to stay cheap, the
-pre-check may only skip work; the in-lock re-read is what decides.
+the holder has not written yet. `postcompact-context` was the worked example
+until #1339 removed its state: its `build_context` shelled out to `git` and
+`gh` under 1.5s and 3.0s timeouts, so it was built *before* the lock and the
+decision was re-taken inside it. The rule outlives the example: when building
+ahead of the lock needs an unlocked pre-check to stay cheap, the pre-check may
+only skip work; the in-lock re-read is what decides.
 
 `tests/test_hook_state_concurrency.py` runs every consumer above in two real
 processes against one state file. Each locked hook carries an unlocked arm

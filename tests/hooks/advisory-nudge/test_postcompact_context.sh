@@ -1,14 +1,16 @@
 #!/bin/bash
 # test_postcompact_context.sh — coverage for the post-compaction context hook
-# (issue #472).
+# (issues #472, #1339).
 #
-# Synthesizes Claude Code UserPromptSubmit hook payloads with fixture
-# transcript JSONLs and asserts:
-#   emit   → exit 0 + stdout JSON with hookSpecificOutput.additionalContext
+# Synthesizes Claude Code SessionStart hook payloads and asserts:
+#   emit   → exit 0 + stdout JSON with hookSpecificOutput.hookEventName
+#            "SessionStart" and additionalContext
 #   silent → exit 0 + stdout empty
 #
-# Per-test isolation: every case uses its own TMPDIR (state file) and its
-# own transcript fixture so dedup state does not leak across cases.
+# Since #1339 the hook is registered on SessionStart with matcher `compact`,
+# so the payload's `source` field is the trigger: "compact" (or absent)
+# injects, anything else is silent. There is no transcript fixture and no
+# dedup state any more — the event fires once per compaction.
 #
 # Usage: bash tests/hooks/advisory-nudge/test_postcompact_context.sh
 # Exit:  0 = all pass; 1 = at least one fail
@@ -27,55 +29,6 @@ fi
 PASS=0
 FAIL=0
 FAILED_NAMES=()
-
-# --- fixture builders -------------------------------------------------------
-
-# write_transcript <path> <uuid> [<extra_marker>]
-#   Creates a minimal JSONL with one user prompt + one compact summary
-#   entry whose uuid is <uuid>. When <extra_marker> is provided, appends a
-#   second compact summary with that uuid AFTER the first.
-write_transcript() {
-  local path="$1" uuid="$2" extra="${3:-}"
-  python3 - "$path" "$uuid" "$extra" <<'PY'
-import json, sys
-path, uuid1, extra = sys.argv[1], sys.argv[2], sys.argv[3]
-records = [
-    {"type": "user", "uuid": "u-prompt-1", "timestamp": "2026-05-28T01:00:00.000Z",
-     "message": {"role": "user", "content": "hello"}},
-    {"type": "assistant", "uuid": "u-asst-1", "timestamp": "2026-05-28T01:00:01.000Z",
-     "message": {"role": "assistant", "content": "hi"}},
-    {"type": "user", "isCompactSummary": True, "uuid": uuid1,
-     "timestamp": "2026-05-28T02:00:00.000Z",
-     "message": {"role": "user", "content": "(compact summary)"}},
-]
-if extra:
-    records.append({"type": "user", "isCompactSummary": True, "uuid": extra,
-                    "timestamp": "2026-05-28T03:00:00.000Z",
-                    "message": {"role": "user", "content": "(later compact)"}})
-with open(path, "w", encoding="utf-8") as fh:
-    for r in records:
-        fh.write(json.dumps(r))
-        fh.write("\n")
-PY
-}
-
-write_transcript_no_compact() {
-  local path="$1"
-  python3 - "$path" <<'PY'
-import json, sys
-path = sys.argv[1]
-records = [
-    {"type": "user", "uuid": "u1", "timestamp": "2026-05-28T01:00:00.000Z",
-     "message": {"role": "user", "content": "hello"}},
-    {"type": "assistant", "uuid": "u2", "timestamp": "2026-05-28T01:00:01.000Z",
-     "message": {"role": "assistant", "content": "hi"}},
-]
-with open(path, "w", encoding="utf-8") as fh:
-    for r in records:
-        fh.write(json.dumps(r))
-        fh.write("\n")
-PY
-}
 
 # --- mocks ------------------------------------------------------------------
 
@@ -118,16 +71,16 @@ EOF
 # --- runner -----------------------------------------------------------------
 
 # run_hook <env_setup_command> <payload_json>
-#   Executes the hook with PATH prefixed by a per-case mock dir. The caller
-#   sets PRAXIS_POSTCOMPACT_CONTEXT_FILE and any other env via $env_setup.
+#   Executes the hook with whatever env the caller sets up (typically a PATH
+#   prefix so mock git/gh shadow the real binaries). Records rc, stdout,
+#   stderr and wall time in LAST_RC / LAST_OUT / LAST_ERR / LAST_SECS.
 run_hook() {
   local env_setup="$1" payload="$2"
   local out_file err_file
   out_file=$(mktemp)
   err_file=$(mktemp)
   # Normalize empty env_setup to `true` so the bash -c body stays syntactically
-  # valid (otherwise the leading `;` is a parse error, and `: ; ; echo ...`
-  # produces `;;` which bash mis-parses as a case-arm terminator).
+  # valid (a leading `;` is a parse error).
   local prefix="${env_setup:-true}"
   # Generous subprocess timeouts so full-suite CPU contention cannot trip the
   # hook's production-tuned 1.5s/3.0s defaults and produce a false timeout
@@ -135,8 +88,12 @@ run_hook() {
   # measure rendering logic, not host scheduling; the override keeps them
   # deterministic under load while production keeps the tight defaults.
   local timeouts="export PRAXIS_POSTCOMPACT_GIT_TIMEOUT=30 PRAXIS_POSTCOMPACT_GH_TIMEOUT=30"
+  # Wall time in whole seconds via the bash builtin — portable to bash 3.2
+  # (macOS) where `date +%N` is not, and coarse enough for an 8s budget.
+  SECONDS=0
   bash -c "$timeouts ; $prefix ; echo '$payload' | python3 '$HOOK'" >"$out_file" 2>"$err_file"
   local rc=$?
+  LAST_SECS=$SECONDS
   LAST_OUT=$(cat "$out_file")
   LAST_ERR=$(cat "$err_file")
   LAST_RC=$rc
@@ -147,7 +104,7 @@ assert_emit() {
   local name="$1"
   local ok=1
   [ "$LAST_RC" -eq 0 ] || ok=0
-  echo "$LAST_OUT" | grep -q '"hookEventName": "UserPromptSubmit"' || ok=0
+  echo "$LAST_OUT" | grep -q '"hookEventName": "SessionStart"' || ok=0
   echo "$LAST_OUT" | grep -q '"additionalContext"' || ok=0
   echo "$LAST_OUT" | grep -q 'Praxis post-compaction context' || ok=0
   if [ "$ok" -eq 1 ]; then
@@ -175,126 +132,168 @@ assert_silent() {
   fi
 }
 
-# Compose a minimal valid payload as a JSON literal that can be inlined into
-# the bash -c command body. We use python3 -c so quoting stays robust.
-payload_for() {
-  # cwd defaults to "$T" (per-case TMPDIR) so the impl's subprocess.run
-  # with cwd=<path> can resolve git/gh — passing a non-existent cwd makes
-  # subprocess raise FileNotFoundError before the mock binaries are reached.
-  local transcript="$1" sid="${2:-sess-1}" cwd="${3:-$T}"
-  python3 -c '
-import json, sys
-print(json.dumps({
-    "session_id": sys.argv[1],
-    "cwd": sys.argv[2],
-    "transcript_path": sys.argv[3],
-    "prompt": "what next?"
-}))' "$sid" "$cwd" "$transcript"
+assert_body() {
+  local name="$1" needle="$2"
+  if echo "$LAST_OUT" | grep -q -- "$needle"; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] missing: $needle"
+    [ -n "$LAST_OUT" ] && echo "        stdout: $LAST_OUT"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
 }
 
-# --- per-case scaffolding ---------------------------------------------------
-#
-# Each case body uses $T (per-case TMPDIR) and $TRANSCRIPT (transcript path).
-# A common preamble sets PATH so the mock git/gh shadow the real binaries,
-# and PRAXIS_* env vars are inlined per-case.
+# payload_for <source> [<sid>] [<cwd>]
+#   A SessionStart payload. `source` "" omits the field entirely (an older
+#   host shape); any other value is passed through. cwd defaults to "$T" so
+#   the impl's subprocess.run with cwd=<path> can resolve the mock binaries.
+payload_for() {
+  local source="$1" sid="${2:-sess-1}" cwd="${3:-$T}"
+  python3 -c '
+import json, sys
+source, sid, cwd = sys.argv[1], sys.argv[2], sys.argv[3]
+payload = {
+    "session_id": sid,
+    "cwd": cwd,
+    "hook_event_name": "SessionStart",
+    "transcript_path": cwd + "/transcript.jsonl",
+}
+if source:
+    payload["source"] = source
+print(json.dumps(payload))' "$source" "$sid" "$cwd"
+}
 
 new_case_dir() {
   T=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
-  TRANSCRIPT="$T/transcript.jsonl"
-  STATE_FILE="$T/state.json"
   MOCK_BIN="$T/bin"
   mkdir -p "$MOCK_BIN"
 }
 
 # =============================================================================
-# EMIT cases — compaction marker present, dedup state empty
+# EMIT — source: "compact"
 # =============================================================================
 
 new_case_dir
-write_transcript "$TRANSCRIPT" "compact-uuid-1"
 make_mock_git_clean "$MOCK_BIN" "feat-branch"
 make_mock_gh_one_pr "$MOCK_BIN" 472 "https://github.com/o/r/pull/472" "feat: postcompact"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'" "$PAYLOAD"
-assert_emit "emit on fresh compaction marker"
+PAYLOAD=$(payload_for "compact")
+run_hook "export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
+assert_emit "emit on source=compact"
+assert_body "emit body: session_id rendered" "sess-1"
+assert_body "emit body: cwd rendered" "$T"
+assert_body "emit body: branch rendered" "feat-branch"
+assert_body "emit body: PR number rendered" "#472"
+assert_body "emit body: PR URL rendered" "github.com/o/r/pull/472"
 
 new_case_dir
-write_transcript "$TRANSCRIPT" "compact-uuid-2"
 make_mock_git_clean "$MOCK_BIN" "main"
 make_mock_gh_no_pr "$MOCK_BIN"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'" "$PAYLOAD"
+PAYLOAD=$(payload_for "compact")
+run_hook "export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
 assert_emit "emit with no active PR (degrades gracefully)"
-echo "$LAST_OUT" | grep -q "none for current branch" \
-  && { echo "PASS  [emit body: no-PR placeholder rendered]"; PASS=$((PASS + 1)); } \
-  || { echo "FAIL  [emit body: no-PR placeholder rendered]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("emit body: no-PR placeholder rendered"); }
+assert_body "emit body: no-PR placeholder rendered" "none for current branch"
+
+# The output must be one JSON document whose hookSpecificOutput carries
+# exactly the SessionStart event name — the host keys the channel on it.
+new_case_dir
+make_mock_git_clean "$MOCK_BIN" "main"
+make_mock_gh_no_pr "$MOCK_BIN"
+PAYLOAD=$(payload_for "compact")
+run_hook "export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
+if echo "$LAST_OUT" | python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+hso = doc["hookSpecificOutput"]
+assert hso["hookEventName"] == "SessionStart", hso
+assert isinstance(hso["additionalContext"], str) and hso["additionalContext"]
+assert set(doc) == {"hookSpecificOutput"}, doc
+' 2>/dev/null; then
+  echo "PASS  [stdout is a single SessionStart hookSpecificOutput document]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [stdout is a single SessionStart hookSpecificOutput document]"
+  echo "        stdout: $LAST_OUT"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("stdout is a single SessionStart hookSpecificOutput document")
+fi
+
+# Same event, second delivery: no dedup state exists, so it emits again. The
+# host fires SessionStart(compact) once per compaction; the hook does not
+# second-guess that.
+new_case_dir
+make_mock_git_clean "$MOCK_BIN" "main"
+make_mock_gh_no_pr "$MOCK_BIN"
+PAYLOAD=$(payload_for "compact")
+# The removed dedup state lived at $PRAXIS_HOME/cache/postcompact-context-<sid>.json,
+# so the leak check scans a PRAXIS_HOME dedicated to these two runs, not cwd.
+HOME_DIR="$T/praxis-home"
+run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_HOME='$HOME_DIR'" "$PAYLOAD"
+assert_emit "first compact delivery emits"
+run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_HOME='$HOME_DIR'" "$PAYLOAD"
+assert_emit "second compact delivery emits again (event is the trigger, no dedup state)"
+STATE_LEAK=0
+if [ -d "$HOME_DIR" ]; then
+  while IFS= read -r _f; do
+    [ -n "$_f" ] && STATE_LEAK=1
+  done < <(find "$HOME_DIR" -name '*postcompact*' 2>/dev/null)
+fi
+[ "$STATE_LEAK" -eq 1 ] \
+  && { echo "FAIL  [no state file is written under PRAXIS_HOME]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("no state file is written under PRAXIS_HOME"); } \
+  || { echo "PASS  [no state file is written under PRAXIS_HOME]"; PASS=$((PASS + 1)); }
+
+# =============================================================================
+# EMIT — source absent (older host shape; the manifest matcher already filtered)
+# =============================================================================
 
 new_case_dir
-write_transcript "$TRANSCRIPT" "compact-uuid-3" "compact-uuid-4"
-make_mock_git_clean "$MOCK_BIN" "feat-branch"
+make_mock_git_clean "$MOCK_BIN" "main"
 make_mock_gh_no_pr "$MOCK_BIN"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'" "$PAYLOAD"
-assert_emit "emit picks most-recent compaction (multi-compact tail)"
-echo "$LAST_OUT" | grep -q "compact-uuid-4" \
-  && { echo "PASS  [emit body: latest uuid in context]"; PASS=$((PASS + 1)); } \
-  || { echo "FAIL  [emit body: latest uuid in context]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("emit body: latest uuid in context"); }
+PAYLOAD=$(payload_for "")
+run_hook "export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
+assert_emit "emit when source is absent"
 
 # =============================================================================
-# DEDUP — second invocation with same uuid is silent
+# SILENT — every non-compact source
 # =============================================================================
+
+for src in startup resume clear fork; do
+  new_case_dir
+  make_mock_git_clean "$MOCK_BIN" "main"
+  make_mock_gh_no_pr "$MOCK_BIN"
+  PAYLOAD=$(payload_for "$src")
+  run_hook "export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
+  assert_silent "silent on source=$src"
+done
 
 new_case_dir
-write_transcript "$TRANSCRIPT" "compact-uuid-dedup"
-make_mock_git_clean "$MOCK_BIN" "feat-branch"
+make_mock_git_clean "$MOCK_BIN" "main"
 make_mock_gh_no_pr "$MOCK_BIN"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-ENV_SETUP="export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'"
-run_hook "$ENV_SETUP" "$PAYLOAD"
-assert_emit "first call emits on compaction"
-run_hook "$ENV_SETUP" "$PAYLOAD"
-assert_silent "second call on same uuid is silent (dedup)"
-
-# =============================================================================
-# RE-EMIT on new uuid (overwrite earlier marker in transcript)
-# =============================================================================
+PAYLOAD=$(python3 -c 'import json,sys; print(json.dumps({"session_id":"s","cwd":sys.argv[1],"source":42}))' "$T")
+run_hook "export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
+assert_silent "silent on non-string source"
 
 new_case_dir
-write_transcript "$TRANSCRIPT" "compact-uuid-A"
-make_mock_git_clean "$MOCK_BIN" "feat-branch"
+make_mock_git_clean "$MOCK_BIN" "main"
 make_mock_gh_no_pr "$MOCK_BIN"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-ENV_SETUP="export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'"
-run_hook "$ENV_SETUP" "$PAYLOAD"
-assert_emit "emit on first uuid"
-# Append a NEW compaction with a different uuid
-write_transcript "$TRANSCRIPT" "compact-uuid-A" "compact-uuid-B"
-run_hook "$ENV_SETUP" "$PAYLOAD"
-assert_emit "re-emit when a newer compaction uuid appears"
-
-# =============================================================================
-# SILENT — no compaction marker in tail
-# =============================================================================
-
-new_case_dir
-write_transcript_no_compact "$TRANSCRIPT"
-make_mock_git_clean "$MOCK_BIN" "feat-branch"
-make_mock_gh_no_pr "$MOCK_BIN"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'" "$PAYLOAD"
-assert_silent "silent when transcript has no compaction"
+PAYLOAD=$(payload_for "Compact")
+run_hook "export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
+assert_silent "silent on source=Compact (exact match, case-sensitive)"
 
 # =============================================================================
 # BYPASS — env var short-circuits before any read
 # =============================================================================
 
 new_case_dir
-write_transcript "$TRANSCRIPT" "compact-uuid-bypass"
 make_mock_git_clean "$MOCK_BIN" "feat-branch"
 make_mock_gh_no_pr "$MOCK_BIN"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'; export PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT=1" "$PAYLOAD"
+PAYLOAD=$(payload_for "compact")
+run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT=1" "$PAYLOAD"
 assert_silent "bypass env var skips everything"
+
+new_case_dir
+make_mock_git_clean "$MOCK_BIN" "feat-branch"
+make_mock_gh_no_pr "$MOCK_BIN"
+PAYLOAD=$(payload_for "compact")
+run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT=0" "$PAYLOAD"
+assert_emit "bypass env var set to 0 does not bypass"
 
 # =============================================================================
 # FAIL-OPEN — payload shape variants
@@ -305,160 +304,101 @@ run_hook "" "not-json"
 assert_silent "fail-open on malformed JSON stdin"
 
 new_case_dir
-run_hook "" '{"session_id": "sid-1"}'
-assert_silent "fail-open on missing transcript_path"
+run_hook "" '[1, 2, 3]'
+assert_silent "fail-open on non-object JSON stdin"
 
 new_case_dir
-write_transcript "$TRANSCRIPT" "compact-uuid-missing-sid"
-PAYLOAD=$(python3 -c 'import json; print(json.dumps({"transcript_path": "'$TRANSCRIPT'", "cwd": "/tmp"}))')
+PAYLOAD=$(python3 -c 'import json,sys; print(json.dumps({"source":"compact","cwd":sys.argv[1]}))' "$T")
 run_hook "" "$PAYLOAD"
 assert_silent "fail-open on missing session_id"
 
 new_case_dir
-write_transcript "$TRANSCRIPT" "compact-uuid-missing-cwd"
-PAYLOAD=$(python3 -c 'import json; print(json.dumps({"transcript_path": "'$TRANSCRIPT'", "session_id": "s"}))')
+PAYLOAD=$(python3 -c 'import json; print(json.dumps({"source":"compact","session_id":"   "}))')
+run_hook "" "$PAYLOAD"
+assert_silent "fail-open on blank session_id"
+
+new_case_dir
+PAYLOAD=$(python3 -c 'import json; print(json.dumps({"source":"compact","session_id":"s"}))')
 run_hook "" "$PAYLOAD"
 assert_silent "fail-open on missing cwd"
 
-new_case_dir
-# transcript_path that does not exist
-PAYLOAD=$(payload_for "$T/does-not-exist.jsonl")
-run_hook "export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'" "$PAYLOAD"
-assert_silent "fail-open when transcript file does not exist"
-
-new_case_dir
-# transcript is empty (zero lines)
-: > "$TRANSCRIPT"
-make_mock_git_clean "$MOCK_BIN" "main"
-make_mock_gh_no_pr "$MOCK_BIN"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'" "$PAYLOAD"
-assert_silent "silent on empty transcript file"
-
-new_case_dir
-# transcript with a malformed JSONL line containing the lexical marker
-echo '{"type": "user", "isCompactSummary": true, broken json' > "$TRANSCRIPT"
-make_mock_git_clean "$MOCK_BIN" "main"
-make_mock_gh_no_pr "$MOCK_BIN"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'" "$PAYLOAD"
-assert_silent "silent on transcript with malformed line"
-
-new_case_dir
-# transcript with isCompactSummary: false (must NOT trigger)
-python3 - "$TRANSCRIPT" <<'PY'
-import json, sys
-path = sys.argv[1]
-with open(path, "w") as fh:
-    fh.write(json.dumps({"type": "user", "isCompactSummary": False, "uuid": "x",
-                         "timestamp": "2026-05-28T01:00:00.000Z"}) + "\n")
-PY
-make_mock_git_clean "$MOCK_BIN" "main"
-make_mock_gh_no_pr "$MOCK_BIN"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'" "$PAYLOAD"
-assert_silent "silent when isCompactSummary is false"
-
-new_case_dir
-# transcript with type=assistant but isCompactSummary=true (wrong type)
-python3 - "$TRANSCRIPT" <<'PY'
-import json, sys
-path = sys.argv[1]
-with open(path, "w") as fh:
-    fh.write(json.dumps({"type": "assistant", "isCompactSummary": True, "uuid": "x",
-                         "timestamp": "2026-05-28T01:00:00.000Z"}) + "\n")
-PY
-make_mock_git_clean "$MOCK_BIN" "main"
-make_mock_gh_no_pr "$MOCK_BIN"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'" "$PAYLOAD"
-assert_silent "silent when isCompactSummary type is not user"
-
-new_case_dir
-# transcript with valid compaction but missing uuid
-python3 - "$TRANSCRIPT" <<'PY'
-import json, sys
-path = sys.argv[1]
-with open(path, "w") as fh:
-    fh.write(json.dumps({"type": "user", "isCompactSummary": True,
-                         "timestamp": "2026-05-28T01:00:00.000Z"}) + "\n")
-PY
-make_mock_git_clean "$MOCK_BIN" "main"
-make_mock_gh_no_pr "$MOCK_BIN"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'" "$PAYLOAD"
-assert_silent "silent when compaction record has no uuid"
-
 # =============================================================================
-# TAIL-LINES env var
+# BUDGET — missing git / gh must still exit 0 quickly
 # =============================================================================
 
 new_case_dir
-# Write a transcript with a compaction at line 1 + 200 trailing benign lines.
-write_transcript "$TRANSCRIPT" "compact-uuid-far"
-python3 - "$TRANSCRIPT" <<'PY'
-import json, sys
-path = sys.argv[1]
-with open(path, "a") as fh:
-    for i in range(200):
-        fh.write(json.dumps({"type": "user", "uuid": f"filler-{i}",
-                             "timestamp": "2026-05-28T01:00:00.000Z"}) + "\n")
-PY
-make_mock_git_clean "$MOCK_BIN" "main"
-make_mock_gh_no_pr "$MOCK_BIN"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-# Default tail (100) should miss the compaction
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'" "$PAYLOAD"
-assert_silent "silent when compaction is outside default tail window"
-# Increased tail should find it
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'; export PRAXIS_POSTCOMPACT_TAIL_LINES=500" "$PAYLOAD"
-assert_emit "emit when tail window enlarged via env var"
+# Run with PATH pointing ONLY at a dir that has python3 but no git/gh, so
+# both lookups fail with ENOENT rather than reaching a real binary.
+mkdir -p "$T/onlypy"
+ln -s "$(command -v python3)" "$T/onlypy/python3"
+PAYLOAD=$(payload_for "compact")
+run_hook "export PATH='$T/onlypy'" "$PAYLOAD"
+assert_emit "emit with git and gh absent from PATH (fields degrade, still exits 0)"
+assert_body "emit body: detached/unknown when git is absent" "detached/unknown"
+assert_body "emit body: no-PR placeholder when gh is absent" "none for current branch"
+if [ "$LAST_SECS" -lt 8 ]; then
+  echo "PASS  [missing git/gh path completes inside the 8s manifest budget (${LAST_SECS}s)]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [missing git/gh path completes inside the 8s manifest budget (${LAST_SECS}s)]"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("missing git/gh path completes inside the 8s manifest budget")
+fi
+
+new_case_dir
+# git present but failing (non-zero), gh hangs past its (shortened) timeout:
+# the hook must still exit 0 with degraded fields, inside the budget.
+cat > "$MOCK_BIN/git" <<'EOF'
+#!/bin/bash
+exit 128
+EOF
+cat > "$MOCK_BIN/gh" <<'EOF'
+#!/bin/bash
+sleep 30
+EOF
+chmod +x "$MOCK_BIN/git" "$MOCK_BIN/gh"
+PAYLOAD=$(payload_for "compact")
+run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_GIT_TIMEOUT=1 PRAXIS_POSTCOMPACT_GH_TIMEOUT=1" "$PAYLOAD"
+assert_emit "emit when git fails and gh would hang (timeouts bound it)"
+if [ "$LAST_SECS" -lt 8 ]; then
+  echo "PASS  [failing git + hanging gh completes inside the 8s manifest budget (${LAST_SECS}s)]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [failing git + hanging gh completes inside the 8s manifest budget (${LAST_SECS}s)]"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("failing git + hanging gh completes inside the 8s manifest budget")
+fi
 
 # =============================================================================
 # STRIKE state integration
 # =============================================================================
 
 new_case_dir
-write_transcript "$TRANSCRIPT" "compact-uuid-strikes"
 make_mock_git_clean "$MOCK_BIN" "main"
 make_mock_gh_no_pr "$MOCK_BIN"
-# Build a fake strike state for session_id "sess-strike"
 STATE_DIR="$T/state"
 mkdir -p "$STATE_DIR/strikes"
 cat > "$STATE_DIR/strikes/sess-strike.json" <<'EOF'
 {"count": 2, "reasons": ["violation A", "violation B"]}
 EOF
-PAYLOAD=$(payload_for "$TRANSCRIPT" "sess-strike")
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'; export PRAXIS_STATE_DIR='$STATE_DIR'" "$PAYLOAD"
+PAYLOAD=$(payload_for "compact" "sess-strike")
+run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_STATE_DIR='$STATE_DIR'" "$PAYLOAD"
 assert_emit "emit includes strike state when state file present"
-echo "$LAST_OUT" | grep -q "2/3" \
-  && { echo "PASS  [emit body: strike count rendered]"; PASS=$((PASS + 1)); } \
-  || { echo "FAIL  [emit body: strike count rendered]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("emit body: strike count rendered"); }
-echo "$LAST_OUT" | grep -q "violation A" \
-  && { echo "PASS  [emit body: strike reason 1 rendered]"; PASS=$((PASS + 1)); } \
-  || { echo "FAIL  [emit body: strike reason 1 rendered]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("emit body: strike reason 1 rendered"); }
+assert_body "emit body: strike count rendered" "2/3"
+assert_body "emit body: strike reason 1 rendered" "violation A"
+assert_body "emit body: strike reason 2 rendered" "violation B"
 
 new_case_dir
-write_transcript "$TRANSCRIPT" "compact-uuid-nostrike"
 make_mock_git_clean "$MOCK_BIN" "main"
 make_mock_gh_no_pr "$MOCK_BIN"
 STATE_DIR="$T/state"
 mkdir -p "$STATE_DIR/strikes"
-# No strikes for this session
-PAYLOAD=$(payload_for "$TRANSCRIPT" "sess-no-strike")
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'; export PRAXIS_STATE_DIR='$STATE_DIR'" "$PAYLOAD"
+PAYLOAD=$(payload_for "compact" "sess-no-strike")
+run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_STATE_DIR='$STATE_DIR'" "$PAYLOAD"
 assert_emit "emit with absent strike state shows 0/3"
-echo "$LAST_OUT" | grep -q "0/3" \
-  && { echo "PASS  [emit body: 0/3 fallback rendered]"; PASS=$((PASS + 1)); } \
-  || { echo "FAIL  [emit body: 0/3 fallback rendered]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("emit body: 0/3 fallback rendered"); }
+assert_body "emit body: 0/3 fallback rendered" "0/3"
 
 # =============================================================================
 # Detached HEAD (git branch returns empty)
 # =============================================================================
 
 new_case_dir
-write_transcript "$TRANSCRIPT" "compact-uuid-detached"
-mkdir -p "$MOCK_BIN"
 cat > "$MOCK_BIN/git" <<'EOF'
 #!/bin/bash
 # Empty branch name → simulates detached HEAD
@@ -466,30 +406,23 @@ exit 0
 EOF
 chmod +x "$MOCK_BIN/git"
 make_mock_gh_no_pr "$MOCK_BIN"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'" "$PAYLOAD"
+PAYLOAD=$(payload_for "compact")
+run_hook "export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
 assert_emit "emit on detached HEAD (branch empty)"
-echo "$LAST_OUT" | grep -q "detached/unknown" \
-  && { echo "PASS  [emit body: detached HEAD placeholder]"; PASS=$((PASS + 1)); } \
-  || { echo "FAIL  [emit body: detached HEAD placeholder]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("emit body: detached HEAD placeholder"); }
+assert_body "emit body: detached HEAD placeholder" "detached/unknown"
 
 # =============================================================================
 # Active PR rendering
 # =============================================================================
 
 new_case_dir
-write_transcript "$TRANSCRIPT" "compact-uuid-withpr"
 make_mock_git_clean "$MOCK_BIN" "feat-x"
 make_mock_gh_one_pr "$MOCK_BIN" 999 "https://github.com/o/r/pull/999" "feat: example"
-PAYLOAD=$(payload_for "$TRANSCRIPT")
-run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_POSTCOMPACT_CONTEXT_FILE='$STATE_FILE'" "$PAYLOAD"
+PAYLOAD=$(payload_for "compact")
+run_hook "export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
 assert_emit "emit with active PR rendered"
-echo "$LAST_OUT" | grep -q "#999" \
-  && { echo "PASS  [emit body: PR number rendered]"; PASS=$((PASS + 1)); } \
-  || { echo "FAIL  [emit body: PR number rendered]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("emit body: PR number rendered"); }
-echo "$LAST_OUT" | grep -q "github.com/o/r/pull/999" \
-  && { echo "PASS  [emit body: PR URL rendered]"; PASS=$((PASS + 1)); } \
-  || { echo "FAIL  [emit body: PR URL rendered]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("emit body: PR URL rendered"); }
+assert_body "emit body: PR number rendered" "#999"
+assert_body "emit body: PR URL rendered" "github.com/o/r/pull/999"
 
 # =============================================================================
 # Summary
