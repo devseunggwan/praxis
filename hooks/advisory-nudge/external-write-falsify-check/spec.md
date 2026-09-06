@@ -10,8 +10,9 @@ global `~/.claude/CLAUDE.md` rule `External-Surface Write Requires Falsification
 
 ### Why this exists — and why opt-in
 
-The four production praxis hooks (`block-gh-state-all`, `side-effect-scan`,
-`memory-hint`, `codex-review-route`) each followed the canonical adoption
+When this hook was written (issue #173) praxis shipped four production hooks
+(`block-gh-state-all`, `side-effect-scan`, `memory-hint`,
+`codex-review-route`), and each had followed the canonical adoption
 path: feedback-memo → ≥5 recurrences → structural hook. The
 `External-Surface Write Requires Falsification` rule does not yet have
 that recurrence trail (zero memory entries, zero issues at adoption time

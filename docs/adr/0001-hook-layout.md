@@ -465,7 +465,7 @@ costs in §1.2 will compound as the hook count grows past 50.
 Each phase ships as a separate PR. No phase merges until the previous one
 has soaked in `dev` for at least one session without regressions.
 
-### 5.1 Phase 1 — Low-risk cleanup (issue #TBD-1)
+### 5.1 Phase 1 — Low-risk cleanup (issue #421, PR #424)
 
 **Scope** ([D] + a slice of [C]):
 
@@ -486,7 +486,7 @@ has soaked in `dev` for at least one session without regressions.
 **Rollback**: revert the PR. Source wrappers are untouched, so the runtime
 is identical.
 
-### 5.2 Phase 2 — Wrapper elimination + role-based directories (issue #TBD-2)
+### 5.2 Phase 2 — Wrapper elimination + role-based directories (issue #422)
 
 **Scope** ([A] + remainder of [C]):
 
@@ -521,7 +521,7 @@ is identical.
 
 **Rollback**: revert the PR. Phase 1 state continues to work.
 
-### 5.3 Phase 3 — Per-hook spec collocation + docs cleanup (issue #TBD-3)
+### 5.3 Phase 3 — Per-hook spec collocation + docs cleanup (issue #423, PR #435)
 
 **Scope** ([B]):
 
@@ -589,7 +589,7 @@ After one full release cycle following Phase 3, delete the 39
 | 2026-05-26 | Phase 1 merged (#421 / PR #424) | praxis maintainers |
 | 2026-05-26 | Phase 2 merged (#422) — role dirs + per-hook folders + `manifest.json` + wrapper drop | praxis maintainers |
 | 2026-05-27 | Phase 3 merged (#423 / PR #435) — spec collocation + redirect stubs + check-manifest invariant #10 | praxis maintainers |
-| TBD | Status → Accepted (post-Phase-3 soak) | — |
+| 2026-09-05 | Post-Phase-3 soak row closed: the layout has been unchanged since Phase 3 and Status stays Accepted | praxis maintainers |
 
 ---
 

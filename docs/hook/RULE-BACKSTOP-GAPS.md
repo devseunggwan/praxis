@@ -13,7 +13,8 @@ results and found ~12 prompt-layer rule/convention retrievals that failed within
 that single session. Every rule that **had** a hook backstop was caught by the
 hook (e.g. `block-commit-without-codex-review` stopped an unreviewed commit; the
 falsification gate fired twice on a `(Recommended)` option missing a
-`Falsified:` line; `branch-name-check` and `mcp-describe-gate` each fired). The
+`Falsified:` line; `branch-name-check` and `mcp-describe-gate` — the latter since removed — each
+fired). The
 one rule **without** a backstop — a next-step `AskUserQuestion` surfaced on a
 **stale PR-state premise** (the PR had already been merged) — reached the user,
 who had to reject it. The enforcement layer is doing the heavy lifting for
@@ -25,9 +26,9 @@ this gap list ranks where to extend it next (issue #709).
 Cross-reference of two inventories:
 
 - **What is hooked** — `hooks/manifest.json` + each hook's `spec.md` (58 hooks
-  at the time of this cross-reference; the manifest registers 81 as of
-  2026-08-03 — the gap list below has not been re-derived against the newer
-  roster, so treat it as scoped to the 58).
+  at the time of this cross-reference; the manifest registered 81 as of
+  2026-08-03 and 95 as of 2026-09-05 — the gap list below has not been
+  re-derived against either newer roster, so treat it as scoped to the 58).
 - **What the ruleset requires** — the prompt-layer MUST / MANDATORY / "no
   exceptions" rules in the global agent ruleset and [`ETHOS.md`](../../ETHOS.md).
 

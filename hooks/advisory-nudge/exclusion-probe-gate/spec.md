@@ -34,8 +34,8 @@ running (`feedback_prompt_layer_retrieval_failure_threshold`).
 
 Per issue #807's central constraint, coverage is derived by **deductive
 enumeration of the error class**, not induced from the single observed
-`DELIBERATELY EXCLUDED` instance (the sister hook `mcp-describe-gate` went blind
-to a whole error-class arm by inducting from one retrospect instance):
+`DELIBERATELY EXCLUDED` instance (the sister hook `mcp-describe-gate`, since removed, went
+blind to a whole error-class arm by inducting from one retrospect instance):
 
 > **Self-authored content that excludes a target from an artifact while
 > asserting a verification it did not actually perform (no cited probe).**
