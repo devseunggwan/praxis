@@ -1609,13 +1609,36 @@ class TestResolveStopTranscript:
         )
         assert got == (agent, True)
 
-    def test_unflushed_agent_transcript_falls_back_to_the_session_one(self, tmp_path):
+    def test_unflushed_agent_transcript_resolves_to_nothing(self, tmp_path):
+        """Never the parent's. Falling back would grade the subagent's claim
+        (carried by `last_assistant_message`) against the parent's evidence —
+        the defect the registration exists to remove."""
         main = _write_named(tmp_path, "main.jsonl", [_user(text="q")])
         missing = str(tmp_path / "subagents" / "agent-def456.jsonl")
         got = T.resolve_stop_transcript(
             {"transcript_path": main, "agent_transcript_path": missing}
         )
-        assert got == (main, False)
+        assert got == ("", True)
+
+    def test_subagent_stop_without_the_key_still_refuses_the_parent(self, tmp_path):
+        """`hook_event_name` alone is enough: a SubagentStop payload that
+        carries no `agent_transcript_path` at all must not read the parent's
+        transcript either."""
+        main = _write_named(tmp_path, "main.jsonl", [_user(text="q")])
+        got = T.resolve_stop_transcript(
+            {"hook_event_name": "SubagentStop", "transcript_path": main}
+        )
+        assert got == ("", True)
+
+    def test_load_stop_turn_is_empty_for_an_unreadable_agent_transcript(self, tmp_path):
+        main = _write_named(
+            tmp_path, "main.jsonl",
+            [_user(text="q"), _assistant(text="parent answer")],
+        )
+        missing = str(tmp_path / "subagents" / "agent-def456.jsonl")
+        assert T.load_stop_turn(
+            {"transcript_path": main, "agent_transcript_path": missing}
+        ) == []
 
     @pytest.mark.parametrize("payload", [
         {},

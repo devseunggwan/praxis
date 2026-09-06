@@ -632,21 +632,58 @@ $(mk_assistant "Reviewed the config.")"
 run_subagent_case "payload last_assistant_message carries the claim" \
   block "$SS_PARENT" "$SS_AGENT_NOCLAIM" "Looks correct. All done."
 
-# An agent transcript that has not been flushed yet falls back to the parent's
-# — the only reading available, and the same one a plain Stop payload gets.
+# An agent transcript that has not been flushed resolves to NOTHING, never to
+# the parent's. Two cases, because the fallback failed in both directions:
+# the parent's turn would BLOCK here, so falling back emits a verdict about
+# the wrong conversation...
+SS_PARENT_WOULD_BLOCK="$SS_USER
+$(mk_assistant "Looks correct. All done.")"
+printf '%s\n' "$SS_PARENT_WOULD_BLOCK" > "$TMPDIR/ss_fallback.jsonl"
 SS_MISSING_PAYLOAD=$(jq -nc --arg m "$TMPDIR/ss_fallback.jsonl" \
   --arg a "$TMPDIR/subagents/never-written.jsonl" '
   {hook_event_name: "SubagentStop", transcript_path: $m,
    agent_transcript_path: $a, stop_hook_active: false,
    session_id: "test-subagent-fallback"}')
-printf '%s\n' "$SS_PARENT" > "$TMPDIR/ss_fallback.jsonl"
 ss_out=$(printf '%s' "$SS_MISSING_PAYLOAD" | "$HOOK" 2>/dev/null)
 if [ -z "$ss_out" ]; then
-  echo "PASS  [unflushed agent transcript falls back to the parent]"
+  echo "PASS  [unflushed agent transcript does not grade the parent's turn]"
   PASS=$((PASS + 1))
 else
-  echo "FAIL  [unflushed agent transcript falls back to the parent] out=$ss_out"
-  FAIL=$((FAIL + 1)); FAILED_NAMES+=("unflushed agent transcript falls back to the parent")
+  echo "FAIL  [unflushed agent transcript does not grade the parent's turn] out=$ss_out"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("unflushed agent transcript does not grade the parent's turn")
+fi
+
+# ...and here it CLEARS: the subagent ran nothing and merely repeated a number
+# from the parent's output, which satisfied the evidence and paste checks
+# against evidence it never produced (CodeRabbit on #1358).
+printf '%s\n' "$SS_PARENT" > "$TMPDIR/ss_fallback2.jsonl"
+SS_FALSE_CLEAR=$(jq -nc --arg m "$TMPDIR/ss_fallback2.jsonl" \
+  --arg a "$TMPDIR/subagents/never-written.jsonl" '
+  {hook_event_name: "SubagentStop", transcript_path: $m,
+   agent_transcript_path: $a, stop_hook_active: false,
+   last_assistant_message: "9 tests passed in 0.20 seconds. All done.",
+   session_id: "test-subagent-false-clear"}')
+ss_out2=$(printf '%s' "$SS_FALSE_CLEAR" | "$HOOK" 2>/dev/null)
+if [ -z "$ss_out2" ]; then
+  echo "PASS  [unflushed agent transcript cannot borrow the parent's evidence]"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL  [unflushed agent transcript cannot borrow the parent's evidence] out=$ss_out2"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("unflushed agent transcript cannot borrow the parent's evidence")
+fi
+
+# A SubagentStop that carries no agent_transcript_path at all is the same
+# case: the event name alone must keep the parent's transcript out.
+SS_NO_KEY=$(jq -nc --arg m "$TMPDIR/ss_fallback.jsonl" '
+  {hook_event_name: "SubagentStop", transcript_path: $m,
+   stop_hook_active: false, session_id: "test-subagent-no-key"}')
+ss_out3=$(printf '%s' "$SS_NO_KEY" | "$HOOK" 2>/dev/null)
+if [ -z "$ss_out3" ]; then
+  echo "PASS  [SubagentStop without the key still refuses the parent]"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL  [SubagentStop without the key still refuses the parent] out=$ss_out3"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("SubagentStop without the key still refuses the parent")
 fi
 
 # Control: a plain Stop payload is unchanged by any of the above.

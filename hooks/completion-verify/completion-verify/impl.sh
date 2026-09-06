@@ -35,11 +35,24 @@ STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 # apply to it. Left on, they would empty the turn and the gate would pass
 # every subagent silently. Mirrors `_transcript.load_recent_events`'s
 # `drop_sidechain` for the two Python siblings.
+# A payload that is about a subagent resolves to that agent transcript or to
+# NOTHING — never to the parent's. The fallback an earlier draft had
+# reintroduced the very defect this registration removes (CodeRabbit on
+# #1358): with an unflushed agent transcript the turn came from the PARENT
+# while LAST_TEXT came from the subagent's `last_assistant_message`, so a
+# subagent that ran nothing and merely repeated a number from the parent's
+# output ("9 tests passed. All done.") cleared the evidence and paste checks
+# against evidence it never produced.
+HOOK_EVENT_NAME=$(echo "$INPUT" | jq -r '.hook_event_name // ""')
 AGENT_TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.agent_transcript_path // ""')
 ALLOW_SIDECHAIN=false
-if [ -n "$AGENT_TRANSCRIPT_PATH" ] && [ -f "$AGENT_TRANSCRIPT_PATH" ]; then
-  TRANSCRIPT_PATH="$AGENT_TRANSCRIPT_PATH"
-  ALLOW_SIDECHAIN=true
+if [ "$HOOK_EVENT_NAME" = "SubagentStop" ] || [ -n "$AGENT_TRANSCRIPT_PATH" ]; then
+  if [ -n "$AGENT_TRANSCRIPT_PATH" ] && [ -f "$AGENT_TRANSCRIPT_PATH" ]; then
+    TRANSCRIPT_PATH="$AGENT_TRANSCRIPT_PATH"
+    ALLOW_SIDECHAIN=true
+  else
+    TRANSCRIPT_PATH=""
+  fi
 fi
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
 # The log line below has always written the "unknown" placeholder, but the

@@ -61,6 +61,7 @@ import os
 import re
 import sys
 from collections import deque
+from typing import cast
 from pathlib import Path
 
 # Default tail window (in JSONL lines) for substring scans over the recent
@@ -601,19 +602,35 @@ def has_tool_in_turn(turn: list[dict], tool_name: str) -> bool:
 def resolve_stop_transcript(payload: dict) -> tuple[str, bool]:
     """Return `(path, is_agent)` for a Stop / SubagentStop payload.
 
-    `is_agent` is True only when the payload's `agent_transcript_path` names
-    an existing file, which is what makes it safe to call unconditionally: a
-    plain Stop payload has no such key and falls through to
-    `transcript_path`, and a SubagentStop whose agent transcript has not been
-    flushed yet degrades to the same fallback rather than to an unreadable
-    path. The caller still owns the "missing file → pass" check on the result;
-    this only chooses between the two.
+    A payload that is about a subagent — `hook_event_name` says SubagentStop,
+    or it carries an `agent_transcript_path` — resolves to that agent
+    transcript **or to nothing**. It never falls back to `transcript_path`.
+
+    The fallback is what the earlier draft of this function did, and it
+    reintroduced the exact defect the SubagentStop registration exists to
+    remove (CodeRabbit on #1358). With an unflushed agent transcript the gates
+    read the PARENT's turn while `stop_last_assistant_text` takes the
+    SUBAGENT's `last_assistant_message`: a subagent that ran nothing and
+    merely repeated a number from the parent's output ("9 tests passed. All
+    done.") satisfied `completion-verify`'s evidence and paste checks against
+    evidence it never produced. Grading one conversation's claim with another
+    conversation's evidence is worse than not grading it, so the unreadable
+    case returns "" and every caller's "no path → pass" check fires.
+
+    A plain Stop payload carries neither signal and resolves to
+    `transcript_path` as before.
     """
     if not isinstance(payload, dict):
         return "", False
     agent_path = payload.get("agent_transcript_path")
-    if isinstance(agent_path, str) and agent_path and os.path.isfile(agent_path):
-        return agent_path, True
+    has_agent_path = isinstance(agent_path, str) and bool(agent_path)
+    is_subagent = (
+        payload.get("hook_event_name") == "SubagentStop" or has_agent_path
+    )
+    if is_subagent:
+        if has_agent_path and os.path.isfile(cast(str, agent_path)):
+            return cast(str, agent_path), True
+        return "", True
     main_path = payload.get("transcript_path")
     return (main_path if isinstance(main_path, str) else ""), False
 

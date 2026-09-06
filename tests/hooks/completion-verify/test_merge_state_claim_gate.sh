@@ -507,10 +507,22 @@ TRANSCRIPT="$SS_PARENT"
 run_case advisory "subagent-stop-payload-last-assistant-message" \
   "{\"agent_transcript_path\": \"$SS_AGENT\", \"last_assistant_message\": \"PR #543 머지 완료.\"}"
 
-# An agent transcript that has not been flushed falls back to the parent's.
+# An agent transcript that has not been flushed resolves to NOTHING. The
+# parent's turn here would advise, so a fallback emits a verdict about the
+# wrong conversation; with a fresh parent query it would instead CLEAR a
+# subagent claim on evidence the subagent never produced (CodeRabbit on #1358).
 build_transcript "PR #543 머지 완료." none
-run_case advisory "subagent-stop-unflushed-agent-transcript-falls-back" \
+run_case silent "subagent-stop-unflushed-agent-transcript-is-not-the-parent" \
   '{"agent_transcript_path": "/nonexistent/subagents/never-written.jsonl"}'
+
+build_transcript "PR #543 머지 완료." gh
+run_case silent "subagent-stop-unflushed-cannot-borrow-parent-evidence" \
+  '{"agent_transcript_path": "/nonexistent/subagents/never-written.jsonl", "last_assistant_message": "PR #543 머지 완료."}'
+
+# The event name alone keeps the parent's transcript out.
+build_transcript "PR #543 머지 완료." none
+run_case silent "subagent-stop-without-the-key-still-refuses-the-parent" \
+  '{"hook_event_name": "SubagentStop"}'
 
 echo "----"
 echo "PASS: $PASS / FAIL: $FAIL"

@@ -1284,11 +1284,51 @@ def test_payload_last_assistant_message_is_preferred(tmp_path: Path) -> None:
     assert "completion-signal-gate" in _msg(stdout)
 
 
-def test_unflushed_agent_transcript_falls_back_to_the_parent(tmp_path: Path) -> None:
+def test_unflushed_agent_transcript_does_not_grade_the_parent(tmp_path: Path) -> None:
+    """Never the parent's turn. The parent here would trip the advisory, so a
+    fallback emits a verdict about the wrong conversation."""
     main = _write_named(
         [mk_user("delegate"), mk_assistant("All set.")], tmp_path, "main.jsonl"
     )
     missing = str(tmp_path / "subagents" / "never-written.jsonl")
     stdout, _stderr, rc = run_subagent_hook(main, missing)
     assert rc == 0
-    assert "completion-signal-gate" in _msg(stdout)
+    assert stdout.strip() == ""
+
+
+def test_unflushed_agent_transcript_cannot_borrow_parent_evidence(
+    tmp_path: Path,
+) -> None:
+    """The other direction the fallback failed in: the parent's Bash call and
+    cited line would CLEAR a subagent claim carried by the payload, against
+    evidence the subagent never produced (CodeRabbit on #1358)."""
+    main = _parent_with_evidence(tmp_path)
+    missing = str(tmp_path / "subagents" / "never-written.jsonl")
+    stdout, _stderr, rc = run_subagent_hook(main, missing, last_message="All set.")
+    assert rc == 0
+    assert stdout.strip() == ""
+
+
+def test_subagent_stop_without_the_key_still_refuses_the_parent(
+    tmp_path: Path,
+) -> None:
+    main = _write_named(
+        [mk_user("delegate"), mk_assistant("All set.")], tmp_path, "main.jsonl"
+    )
+    payload = json.dumps(
+        {
+            "hook_event_name": "SubagentStop",
+            "transcript_path": main,
+            "stop_hook_active": False,
+            "session_id": "test-subagent-no-key",
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(HOOK_PATH)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == ""

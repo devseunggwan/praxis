@@ -271,12 +271,17 @@ the transcript "is written asynchronously and may lag the in-memory
 conversation", so a gate that only reads the transcript can miss a claim that
 was already made.
 
-**Workaround**: prefer `agent_transcript_path` when it names an existing file
-and fall back to `transcript_path` (a plain `Stop` payload has no such key);
-prefer `last_assistant_message` for the final text, keeping the transcript
-read as the gate on whether any evidence was seen at all. Reference
-implementation: `hooks/_lib/_transcript.py` `resolve_stop_transcript` /
-`load_stop_turn` / `stop_last_assistant_text` (#1337).
+**Workaround**: on a subagent payload read `agent_transcript_path` **or
+nothing** — never `transcript_path`. A fallback looks harmless and is not: the
+turn then comes from the parent while the claim comes from the subagent's
+`last_assistant_message`, so a subagent that ran nothing and repeated a number
+from the parent's output clears an evidence check against evidence it never
+produced. A plain `Stop` payload carries neither `hook_event_name:
+SubagentStop` nor the key, and reads `transcript_path` as before. Prefer
+`last_assistant_message` for the final text, keeping the transcript read as
+the gate on whether any evidence was seen at all. Reference implementation:
+`hooks/_lib/_transcript.py` `resolve_stop_transcript` / `load_stop_turn` /
+`stop_last_assistant_text` (#1337).
 
 **Sidechain markers**: the shared readers drop an event whose `isSidechain` is
 true, which is how a subagent's events are kept out of the MAIN transcript's

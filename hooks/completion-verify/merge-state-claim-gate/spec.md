@@ -191,13 +191,23 @@ Two payload differences decide what the hook reads, both handled by
 | Field | On `Stop` | On `SubagentStop` |
 | ------- | ----------- | ------------------- |
 | `transcript_path` | the session's | the **parent** session's — reading it here grades the wrong conversation |
-| `agent_transcript_path` | absent | the subagent's own, in a nested `subagents/` folder — preferred whenever it names an existing file |
+| `agent_transcript_path` | absent | the subagent's own, in a nested `subagents/` folder — the **only** transcript this hook will read on the event |
 | `last_assistant_message` | final text, ahead of the lagging transcript | same, for the subagent |
 
 `isSidechain` markers are dropped while the agent transcript is parsed: every
 event in a per-agent file belongs to that agent, and the filter that keeps a
 subagent's events out of the MAIN transcript would otherwise empty the turn
 and pass every subagent silently.
+
+**No fallback to the parent.** When the agent transcript is missing or
+unreadable — not yet flushed, or a payload that carries no such key — the hook
+reads *nothing* and passes. Falling back to `transcript_path` was the first
+draft and it reinstated the defect this registration removes: the turn came
+from the parent while the claim came from the subagent's
+`last_assistant_message`, so a subagent that ran nothing and merely repeated a
+number from the parent's output cleared the evidence check against evidence it
+never produced. Grading one conversation's claim with another's evidence is
+worse than not grading it.
 
 Unchanged by the registration: `stop_hook_active` still ends the re-entrant
 loop, and an unreadable transcript or an empty turn still passes. A claim is
