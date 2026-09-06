@@ -40,11 +40,11 @@ that was scaffolding for a trigger the runtime now raises directly:
 trigger and the scan, the uuid state, the lock, and
 `PRAXIS_POSTCOMPACT_TAIL_LINES` are removed with it.
 
-**Unverified**: the docs do not say whether `SessionStart(compact)` fires for
-automatic compaction as well as for `/compact`. The hook's correctness does
-not depend on the answer — it injects whenever the event arrives — but the
-coverage claim "every compaction re-injects context" is only as wide as the
-event's actual firing set, which has not been measured live here.
+**Coverage**: the hooks reference's `SessionStart` matcher table reads
+`compact` — "Auto or manual compaction" (read 2026-09-06), so one registration
+covers both `/compact` and the automatic compaction that fires when the
+context window fills. That is documented behaviour, not a live measurement:
+the firing has not been observed in a session from this repo yet.
 
 ### Trigger criteria
 
@@ -151,7 +151,7 @@ not emitted on their platforms.
 
 | Case | Behaviour |
 | ------ | ----------- |
-| Automatic compaction vs `/compact` | Whether the `compact` matcher fires for both is not stated in the docs and not measured here — see *Unverified* above |
+| Automatic compaction vs `/compact` | Both documented under the one `compact` matcher — "Auto or manual compaction"; not yet observed live from this repo — see *Coverage* above |
 | Host delivers a non-`compact` `source` to this matcher | Silent; the matcher contract is the host's, the guard only refuses to inject on the wrong start |
 | Branch with no open PR | `active PR : (none for current branch)` — explicit absence rather than dropped field |
 | `gh` not installed / not authenticated | PR field reads `(none for current branch)` — fail-open |

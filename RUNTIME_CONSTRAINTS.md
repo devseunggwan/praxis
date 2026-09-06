@@ -236,9 +236,9 @@ on `source == "compact"` in the body, and emit
 The event fires once per compaction, so no dedup state is needed. Reference
 implementation: `hooks/advisory-nudge/postcompact-context/impl.py` (#1339).
 
-**Unverified**: whether `SessionStart(compact)` fires for automatic
-compaction as well as for `/compact` is not stated in the docs and has not
-been measured here.
+**Coverage**: the `SessionStart` matcher table lists `compact` as "Auto or
+manual compaction" (read 2026-09-06), so the registration covers both. No
+minimum Claude Code version is stated for the matcher; none is assumed here.
 
 **Documented**: 2026-09-06 / <https://code.claude.com/docs/en/hooks> and
 <https://code.claude.com/docs/en/hooks-guide> / Issue #1339 — status:

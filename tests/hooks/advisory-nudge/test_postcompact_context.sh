@@ -222,17 +222,22 @@ new_case_dir
 make_mock_git_clean "$MOCK_BIN" "main"
 make_mock_gh_no_pr "$MOCK_BIN"
 PAYLOAD=$(payload_for "compact")
-run_hook "export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
+# The removed dedup state lived at $PRAXIS_HOME/cache/postcompact-context-<sid>.json,
+# so the leak check scans a PRAXIS_HOME dedicated to these two runs, not cwd.
+HOME_DIR="$T/praxis-home"
+run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_HOME='$HOME_DIR'" "$PAYLOAD"
 assert_emit "first compact delivery emits"
-run_hook "export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
+run_hook "export PATH='$MOCK_BIN:'\$PATH; export PRAXIS_HOME='$HOME_DIR'" "$PAYLOAD"
 assert_emit "second compact delivery emits again (event is the trigger, no dedup state)"
 STATE_LEAK=0
-for _f in "$T"/.postcompact* "$T"/postcompact* "$T"/.*postcompact*; do
-  [ -e "$_f" ] && STATE_LEAK=1
-done
+if [ -d "$HOME_DIR" ]; then
+  while IFS= read -r _f; do
+    [ -n "$_f" ] && STATE_LEAK=1
+  done < <(find "$HOME_DIR" -name '*postcompact*' 2>/dev/null)
+fi
 [ "$STATE_LEAK" -eq 1 ] \
-  && { echo "FAIL  [no state file is written next to cwd]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("no state file is written next to cwd"); } \
-  || { echo "PASS  [no state file is written next to cwd]"; PASS=$((PASS + 1)); }
+  && { echo "FAIL  [no state file is written under PRAXIS_HOME]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("no state file is written under PRAXIS_HOME"); } \
+  || { echo "PASS  [no state file is written under PRAXIS_HOME]"; PASS=$((PASS + 1)); }
 
 # =============================================================================
 # EMIT — source absent (older host shape; the manifest matcher already filtered)

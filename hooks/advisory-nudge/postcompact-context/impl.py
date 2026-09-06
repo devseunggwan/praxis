@@ -61,12 +61,13 @@ Env vars
 `PRAXIS_POSTCOMPACT_GIT_TIMEOUT` / `PRAXIS_POSTCOMPACT_GH_TIMEOUT` — test
 overrides for the subprocess timeouts (seconds); production keeps the defaults.
 
-Unverified
-==========
+Coverage
+========
 
-The docs do not say whether `SessionStart(compact)` fires for automatic
-compaction as well as for `/compact`. Nothing here depends on the answer, but
-the spec records it as an open question rather than a claim.
+The hooks reference lists the `compact` matcher as "Auto or manual
+compaction" (read 2026-09-06), so this one registration covers `/compact`
+and the automatic compaction alike. Documented, not yet observed live from
+this repo; nothing here depends on the distinction.
 
 Fail-open
 =========
