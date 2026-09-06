@@ -26,8 +26,8 @@ Three classes of hook read the transcript:
 
 - **Stop-lane gates** (`hooks/completion-verify/*`) — inspect the turn that is
   about to end for an evidence claim without evidence behind it.
-- **Advisory scans** (`hooks/advisory-nudge/*`, e.g. `postcompact-context`,
-  `caller-probe-gate`, `unenforced-step-advisory`) — look for a recent
+- **Advisory scans** (`hooks/advisory-nudge/*`, e.g. `caller-probe-gate`,
+  `unenforced-step-advisory`) — look for a recent
   command or rule the current call should have honoured.
 - **Preflight gates** (`hooks/preflight-gate/*`, e.g. `block-ask-end-option`,
   `rejected-mutation-reconsent-gate`) — read recent user messages (the last

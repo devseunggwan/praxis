@@ -29,7 +29,10 @@ with `mkstemp` forced to one shared name. Every one of those pairs was
 provably overlapped — both children reported through the post-read barrier —
 so the 0s are measurements, not misses.
 
-`postcompact-context` did not hold. Its exemption priced the *consequence*
+`postcompact-context` did not hold. (Historical since #1339: the hook now
+runs on `SessionStart(compact)`, which fires once per compaction, and keeps
+no state file at all — the paragraph below records what the #1034 measurement
+found in the `UserPromptSubmit`-era write, not a live row.) Its exemption priced the *consequence*
 (one uuid, so a corrupted read costs what a lost one does) and never checked
 the *mechanism*: `write_state` truncated and wrote the final name, staging
 through nothing at all, which makes the state file its own staging file — the

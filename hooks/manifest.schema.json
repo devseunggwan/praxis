@@ -73,7 +73,7 @@
             ]
           },
           "matcher": {
-            "description": "Tool-name regex for PreToolUse/PostToolUse registrations; omitted for non-tool events.",
+            "description": "Tool-name regex for PreToolUse/PostToolUse registrations, or a SessionStart source (startup|resume|clear|compact|fork — postcompact-context uses `compact`, #1339); omitted for the other non-tool events.",
             "type": "string",
             "minLength": 1
           },
