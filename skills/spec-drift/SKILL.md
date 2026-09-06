@@ -5,6 +5,7 @@ description: >
   tree does not yet satisfy — runs each requirement's `Verify:` command and
   classifies it `implemented` / `missing` / `UNKNOWN`. Report-only: no writes,
   no commits, no issues.
+when_to_use: >
   Triggers on "spec drift", "spec-drift", "스펙 드리프트", "미구현 요구",
   "unmet requirement", "what does this spec still need", "requirement status".
   Do NOT activate on SKILL.md frontmatter drift (that is `codex-review-wrap`'s

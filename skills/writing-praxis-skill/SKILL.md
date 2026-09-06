@@ -3,6 +3,7 @@ name: writing-praxis-skill
 description: >
   Guide for authoring a new praxis SKILL.md — template usage, SRP, trigger
   keyword design, frontmatter conventions, and Claude/Codex host differences.
+when_to_use: >
   Triggers on "new praxis skill", "write praxis skill", "add praxis skill",
   "skill template", "praxis skill spec", "스킬 작성", "새 스킬".
   Do NOT activate on "add skill section", "skill up", "skill set".

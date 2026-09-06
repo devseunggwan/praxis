@@ -3,7 +3,9 @@ name: using-praxis
 description: >
   Onboarding entry point for new praxis users — introduces the 4 skill
   categories, maps common scenarios to the right skill, and explains the
-  hook system. Triggers on "praxis 처음", "praxis 사용법", "어떤 skill 부터",
+  hook system.
+when_to_use: >
+  Triggers on "praxis 처음", "praxis 사용법", "어떤 skill 부터",
   "praxis intro", "praxis getting started".
 ---
 

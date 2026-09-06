@@ -1,6 +1,8 @@
 ---
 name: strikes
-description: Show the current session's strike count (0-3) and the list of recorded violation reasons. Use when the user types "/strikes", "strike status", "몇 진", "check strikes".
+description: Show the current session's strike count (0-3) and the list of recorded violation reasons.
+when_to_use: Use when the user types "/strikes", "strike status", "몇 진", "check strikes".
+disable-model-invocation: true
 ---
 
 # Praxis Strike Status

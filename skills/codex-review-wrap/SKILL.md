@@ -8,10 +8,19 @@ description: >
   port or parallel hotfix, a diminishing-returns advisory
   (PRAXIS_DIMINISHING_RETURNS_N), and a per-finding approval ask. It also
   reaps leaked openai-codex brokers (PRAXIS_CODEX_REAP=1).
+when_to_use: >
   Triggers on "codex review", "review codex", "safe review",
   "/codex-review-wrap", "premise verification", "flip detection",
   "sibling defect", "sibling cross-check", "diminishing returns",
   "broker reap", "finding approval", "적용 승인".
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+  - Bash(git worktree list *)
+  - Bash(git diff *)
+  - Bash(gh pr view *)
+  - Bash(ps *)
 verified-against-runtime: true
 runtime-verified-at: 2026-08-15
 runtime-verified-note: "Measured against codex@openai-codex 1.0.6 and the live AskUserQuestion runtime; latest measurement 2026-08-15 (Step 4b/liveness source pins plus live review round-trips from two worktrees). The full dated log lives in references/verification-log.md."

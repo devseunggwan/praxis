@@ -1,6 +1,8 @@
 ---
 name: reset-strikes
-description: Reset the current session's strike counter to 0 and clear the recorded violation list. Required after a 3rd strike block before Claude can respond again. Use when the user types "/reset-strikes", "strike 초기화", "clear strikes".
+description: Reset the current session's strike counter to 0 and clear the recorded violation list. Required after a 3rd strike block before Claude can respond again.
+when_to_use: Use when the user types "/reset-strikes", "strike 초기화", "clear strikes".
+disable-model-invocation: true
 ---
 
 # Praxis Strike Reset

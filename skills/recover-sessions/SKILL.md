@@ -1,6 +1,7 @@
 ---
 name: recover-sessions
-description: Bulk recover Claude Code sessions after power loss or tmux crash. Interactive interview to determine recovery scope, layout, and execution mode. Triggers on "recover", "session recovery", "restore sessions", "power recovery".
+description: Bulk recover Claude Code sessions after power loss or tmux crash. Interactive interview to determine recovery scope, layout, and execution mode.
+when_to_use: Triggers on "recover", "session recovery", "restore sessions", "power recovery".
 verified-against-runtime: true
 runtime-verified-at: 2026-06-16
 runtime-verified-note: "claude-recover --list (fixture HOME) + tests/test_recover_scan_display_name.sh — list mode prints HOME/PROJECT/FIRST MESSAGE without tmux creation, and the shared scanner prefers compact-summary display names."

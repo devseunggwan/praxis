@@ -5,10 +5,16 @@ description: >
   pre-ask probe, grading every open finding by its blocking decoration, carrying
   the anchor's `Unverified` gaps into a follow-up, and the six-part briefing that
   ends in an explicit approve-ask.
+when_to_use: >
   Triggers on "merge briefing", "pre-merge briefing", "머지 브리핑",
   "머지해도 되나", "approve merge", "pre-ask probe", "merge approval".
   Do NOT activate on post-merge cleanup (use `worktree-merge-cleanup`) or on
   "merge conflict resolution".
+allowed-tools:
+  - Grep
+  - Bash(gh pr checks *)
+  - Bash(gh pr view *)
+  - Bash(gh api graphql *)
 verified-against-runtime: true
 runtime-verified-at: 2026-08-13
 runtime-verified-note: "gh 2.97.0 — `gh pr view --json mergeable,mergeStateStatus,headRefOid,reviews,comments` and the paginated `reviewThreads` GraphQL both returned live rows (thread query positive-controlled on a PR with 3 known threads); `GH_DEBUG=api` showed that same `pr view` sends `comments(first: 100)` / `reviews(first: 100)` with no cursor variable."
