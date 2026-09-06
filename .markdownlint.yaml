@@ -16,7 +16,9 @@
 # symlink mirror of the repo root) is excluded from the scan.
 #
 # markdownlint-cli auto-discovers this file at the repo root, so the
-# reviewdog action needs no explicit --config flag.
+# markdownlint steps in ci.yml need no explicit --config flag (the job runs
+# markdownlint-cli 0.49.1 directly since #1354; that pin is the version the
+# counts above are described against).
 
 default: true
 
