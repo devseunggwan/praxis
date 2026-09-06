@@ -114,6 +114,7 @@ def test_group_members_host_filter():
 
 EDIT_WRITE_MEMBERS = {
     "comment-yap-advisory",
+    "settings-path-advisory",
     "worktree-edit-gate",
     "write-decision-consistency-gate",
     "advisory-wrapper-signature-verify",
