@@ -86,7 +86,7 @@ harness has already ruled.
 
 ### Why the two events share one pair key
 
-Signature material is the failure text with one leading `Error: ` removed
+Signature material is the failure text with one leading `Error:` removed
 (`_signature_material`). The `PostToolUse` string carries the harness
 envelope — `Error: Exit code 1\n(eval):1: == not found` — and the
 `PostToolUseFailure` `error` field carries the same lines without it. They
@@ -547,7 +547,7 @@ Required coverage:
   under the lock the count goes 1→2→3 and two advisories are emitted (2nd
   and 3rd) (`tests/test_hook_state_concurrency.py`)
 - `PostToolUseFailure` (issue #1337, case 20): the same Bash `Exit code 1`
-  + `npm ERR!` error twice → advisory on the second, with
+  plus `npm ERR!` error twice → advisory on the second, with
   `hookEventName: "PostToolUseFailure"` (20a); `is_interrupt: true` → silent
   and no state file (20b); one `tool_use_id` arriving via `PostToolUse` then
   `PostToolUseFailure` → counted once, and the reverse order too (20c); a
