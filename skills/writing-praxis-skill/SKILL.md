@@ -54,6 +54,7 @@ when_to_use: >
 ```
 
 **Rules:**
+
 - `name` must exactly match the directory name under `skills/`.
 - `description` says what the skill does — concise, scannable, and with no
   trigger phrases in it.
