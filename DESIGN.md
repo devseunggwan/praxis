@@ -222,8 +222,16 @@ that could have failed it.
   `scripts/check-plugin-manifests.py` Rule 4 (`expected_stop`):
   `completion-verify` and `retrospect-mix-check` first, then the
   completion-verify evidence gates, and `strike-counter stop` last —
-  thirteen entries at the time of writing; the manifest is the list. Each
-  gate is independent; first `decision: block` wins, fix it and re-run.
+  thirteen entries at the time of writing; the manifest is the list. Since
+  issue #1281 the twelve stdin-only entries form one `(Stop)` dispatch
+  group — a single `_dispatch.sh Stop -` node runs them in that order
+  inside one process (the two `impl.sh` members as subprocesses under the
+  member deadline) — and `strike-counter stop` follows as its own node,
+  because it reads its mode from argv, which a group cannot forward. Each
+  gate is independent. Inside the group every blocking member's reason is
+  kept and merged into one `decision: block` (issue #1169), and every
+  advisory member's `systemMessage` merges the same way, riding on the block
+  object when a sibling blocks; fix what the merged reason lists and re-run.
 - PostToolUse hooks run **sequentially**; corrective `additionalContext`
   emissions are additive, not exclusive. Inside the `PostToolUse(Bash)`
   dispatch group the manifest array order is the run order, and

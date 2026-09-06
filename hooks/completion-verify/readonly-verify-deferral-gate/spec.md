@@ -2,7 +2,8 @@
 
 Supported hosts: all
 
-`hooks/readonly-verify-deferral-gate.sh` fires on every `Stop` event and emits
+`hooks/completion-verify/readonly-verify-deferral-gate/impl.py` (run by the `Stop`
+dispatch group, `hooks/_dispatch.sh Stop -`, since issue #1281) fires on every `Stop` event and emits
 a stdout `{"systemMessage": ...}` JSON advisory when the last assistant turn **offers** to run a
 read-only verification ("should I check ...?", "진행할까요?") instead of just
 running it and pasting the result.
