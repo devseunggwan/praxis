@@ -6,14 +6,13 @@ class of drift bugs that have cost the most debugging time.
 
 ## Local development
 
-### Canonical clone path
+### Clone and CLI symlinks
 
-This repository should live at **`~/projects/praxis`**. The CLI tools shipped
-by skills (e.g. `cmux-recover-sessions`, `claude-recover`, `cmux-save-sessions`)
-are symlinked from `~/.local/bin` into this clone, so patches you commit here
-land in the version that actually runs at the shell. Keeping a
-second clone under a legacy name risks `~/.local/bin` symlinks pointing at stale
-code — a real failure mode previously hit during recover-sessions debugging.
+The CLI tools shipped by skills (e.g. `cmux-recover-sessions`,
+`claude-recover`, `cmux-save-sessions`) are symlinked from `~/.local/bin` into
+whichever clone ran `scripts/install.sh`, so a patch reaches the version that
+runs at the shell only if it lands in that clone. Keep one development clone
+per machine; a second clone silently leaves the links pointing at stale code.
 
 After every `git pull` or worktree operation, run `./scripts/verify-symlinks.sh`
 to confirm all `~/.local/bin` entries still resolve to this clone.
