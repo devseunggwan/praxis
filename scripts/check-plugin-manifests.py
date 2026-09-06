@@ -120,6 +120,18 @@ main() is labeled with its number, and this list is the canonical roster
       hooks by value, so without a deadline the roster only grows. The
       field never reaches a platform hooks.json (the node builder copies
       only command/timeout/hosts).
+  27. README hook-dependency table (#1332): the `### Hook dependencies`
+      table in README.md is the reader's view of the manifest `requires`
+      field (Rule 20). Every component some hook declares has exactly one
+      row, every row names a declared component, each row's hook cell is the
+      exact set of hooks declaring it, and the install cell is non-empty —
+      HOOK DEPS MISSING / ORPHAN / DRIFT / NO INSTALL. The audit that added
+      `requires` (docs/hook-suitability-audit.md §B) found the README's tier
+      table covered skills only, so a user without oh-my-claudecode or the
+      codex plugin had nowhere to read which hooks were inert; `plugin.json`
+      `dependencies` was rejected for this (no optional form — see
+      ARCHITECTURE.md), so the declaration is documentary and this rule keeps
+      it true.
 
 An unnumbered auxiliary check verifies the Codex adapter symlinks
 (plugins/praxis/{skills,hooks,scripts} → repo root).
@@ -2372,6 +2384,78 @@ def main() -> int:
     # review_by_drifts() so tests can drive it with a pinned `today`.
     # ------------------------------------------------------------------
     drifts.extend(review_by_drifts(manifest, date.today()))
+
+    # ------------------------------------------------------------------
+    # Rule 27 — README hook-dependency table ↔ manifest `requires` (#1332)
+    #
+    # docs/hook-suitability-audit.md §B: the README's tier table covers
+    # skills, so a user without oh-my-claudecode or the codex plugin has
+    # nowhere to read which hooks are inert. The `requires` field (Rule 20)
+    # is the declaration; README.md's `### Hook dependencies` table is the
+    # reader's view of it. Tie them in both directions, the way Rule 17 ties
+    # `mode` to docs/bypass-vars.md: every declared component has one row
+    # (MISSING), every row names a declared component (ORPHAN), each row's
+    # hook cell equals the declaring set (DRIFT), and the install cell is
+    # non-empty (NO INSTALL) — an install column with a blank cell says
+    # nothing to the reader the table exists for.
+    # ------------------------------------------------------------------
+    readme_lines = (REPO_ROOT / "README.md").read_text().splitlines()
+    doc_deps: dict[str, tuple[set[str], str]] = {}
+    in_section = False
+    for line in readme_lines:
+        if line.startswith("#"):
+            in_section = line.strip() == "### Hook dependencies"
+            continue
+        if not in_section:
+            continue
+        cells = _table_cells(line)
+        if len(cells) < 3 or not cells[0].startswith("`"):
+            continue
+        component_tokens = re.findall(r"`([^`]+)`", cells[0])
+        if not component_tokens:
+            continue
+        component = component_tokens[0]
+        if component in doc_deps:
+            drifts.append(
+                f"HOOK DEPS DUPLICATE README.md: {component!r} has two rows "
+                "in the Hook dependencies table (#1332)"
+            )
+            continue
+        doc_deps[component] = (set(re.findall(r"`([^`]+)`", cells[1])), cells[2])
+    if not doc_deps:
+        drifts.append(
+            "HOOK DEPS MISSING README.md: no `### Hook dependencies` table "
+            "rows found — it is the reader's view of the manifest `requires` "
+            "field (#1332)"
+        )
+    manifest_deps: dict[str, set[str]] = {}
+    for name, comps in manifest_requires.items():
+        for comp in comps:
+            manifest_deps.setdefault(comp, set()).add(name)
+    for comp in sorted(set(manifest_deps) - set(doc_deps)):
+        drifts.append(
+            f"HOOK DEPS MISSING README.md: {comp!r} is declared in `requires` "
+            f"by {sorted(manifest_deps[comp])!r} but has no row in the Hook "
+            "dependencies table (#1332)"
+        )
+    for comp in sorted(set(doc_deps) - set(manifest_deps)):
+        drifts.append(
+            f"HOOK DEPS ORPHAN README.md: {comp!r} has a Hook dependencies "
+            "row but no manifest hook declares it in `requires` (#1332)"
+        )
+    for comp in sorted(set(doc_deps) & set(manifest_deps)):
+        doc_hooks, install = doc_deps[comp]
+        if doc_hooks != manifest_deps[comp]:
+            drifts.append(
+                f"HOOK DEPS DRIFT README.md: {comp!r} row lists "
+                f"{sorted(doc_hooks)!r} but the manifest declares it for "
+                f"{sorted(manifest_deps[comp])!r} (#1332)"
+            )
+        if not install.strip():
+            drifts.append(
+                f"HOOK DEPS NO INSTALL README.md: {comp!r} row has an empty "
+                "install cell (#1332)"
+            )
 
     if drifts:
         print("plugin-manifest check FAILED:")
