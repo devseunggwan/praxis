@@ -226,7 +226,11 @@ run_hook "export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
 assert_emit "first compact delivery emits"
 run_hook "export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
 assert_emit "second compact delivery emits again (event is the trigger, no dedup state)"
-ls -a "$T" | grep -q 'postcompact' \
+STATE_LEAK=0
+for _f in "$T"/.postcompact* "$T"/postcompact* "$T"/.*postcompact*; do
+  [ -e "$_f" ] && STATE_LEAK=1
+done
+[ "$STATE_LEAK" -eq 1 ] \
   && { echo "FAIL  [no state file is written next to cwd]"; FAIL=$((FAIL + 1)); FAILED_NAMES+=("no state file is written next to cwd"); } \
   || { echo "PASS  [no state file is written next to cwd]"; PASS=$((PASS + 1)); }
 
