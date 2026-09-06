@@ -86,7 +86,7 @@ to per-hook specs at `hooks/<role>/<name>/spec.md`.
 
 | Tier               | What works                                               | What you need                           |
 | ------------------ | -------------------------------------------------------- | --------------------------------------- |
-| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `debt` needs only `git` |
+| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `recover-sessions` also needs `tmux`; `debt` needs only `git` |
 | **Enhanced**       | + retrospect, codex-review-wrap                          | + oh-my-claudecode                      |
 | **Full**           | + all cmux-* skills                                      | + cmux                                  |
 | **Multi-provider** | + codex/gemini routing in cmux-delegate                  | + codex-cli, gemini-cli                 |

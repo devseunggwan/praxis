@@ -3,7 +3,7 @@ name: cmux-resume-sessions
 description: >
   Restore cmux workspaces from a JSON snapshot saved by cmux-save-sessions.
   Use this when you want to rehydrate an intentionally saved layout with NO crash context.
-  Crash routing override: if the request mentions a crash, power loss, OOM, or "살려야",
+  Crash routing override: if the request mentions a crash, power loss, OOM, or 살려야,
   route to cmux-recover-sessions instead — even when the user also mentions a snapshot,
   because the snapshot may be stale and .jsonl scanning reflects the real latest state.
   Triggers on "resume sessions", "session resume", "session restore", "cmux resume", "restore from snapshot", "rehydrate sessions", "세션 복원", "스냅샷 복구", "스냅샷 복원".

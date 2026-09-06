@@ -146,8 +146,10 @@ the remaining three ask what losing it costs:
    contention is real, its consequence is not; a lock here buys latency on
    every tool call and nothing else.
 
-The seven consumers as of #951. Every row's Q0 verdict below is a live
-measurement, not an inference — `jq-config` in #970, the other six in #1034:
+Every consumer of `resolve_cache_file` gets a row here — a new consumer is
+classified, not reflexively locked. The first seven rows were measured live
+(`jq-config` in #970, the other six in #1034); the last two were classified
+from their implementation and carry no measurement yet:
 
 | Hook | State | Loss consequence | Locked |
 | --- | --- | --- | --- |
@@ -158,6 +160,8 @@ measurement, not an inference — `jq-config` in #970, the other six in #1034:
 | `preflight-gate/worktree-prune-snapshot-gate` | single `snapshot_taken` flag, only ever set true | concurrent writers write the identical value | no — Q0 PASS(live), 0/100 (#1034) |
 | `preflight-gate/session-intent` | set-once intent flags | written only from `UserPromptSubmit`, which is serialized per session; the `PreToolUse` gate path is read-only | no — Q0 PASS(live), 0/100 (#1034) |
 | `preflight-gate/retrospect-active-marker` | marker existence | whole-file write and `unlink`, no read-modify-write to lose | no — Q0 PASS(live), 0/100 (#1034) |
+| `preflight-gate/foreground-poll-loop-guard` | per-session registry of background waiters (start time, armed flag, command display string) | one advisory does not fire — Q3; stages through a per-pid name, so Q0 does not apply | no — classified from the impl, not measured |
+| `preflight-gate/approval-premise-reread-gate` | single-use premise ack file | consumed by an atomic `os.rename` claim; no read-modify-write to lose | no — classified from the impl, not measured |
 
 ### Q0, measured (issue #1034)
 
@@ -232,9 +236,12 @@ that could have failed it.
 - PreToolUse hooks run **in parallel**. Decision precedence is
   `deny > defer > ask > allow`. Order in `hooks/manifest.json` (and the
   generated platform `hooks.json`) is presentational.
-- Stop hooks run **sequentially in array order**:
-  `completion-verify` → `retrospect-mix-check` → `strike-counter stop`.
-  Each gate is independent; first `decision: block` wins, fix it and re-run.
+- Stop hooks run **sequentially in array order**. The order is fixed by
+  `scripts/check-plugin-manifests.py` Rule 4 (`expected_stop`):
+  `completion-verify` and `retrospect-mix-check` first, then the
+  completion-verify evidence gates, and `strike-counter stop` last —
+  thirteen entries at the time of writing; the manifest is the list. Each
+  gate is independent; first `decision: block` wins, fix it and re-run.
 - PostToolUse hooks run **sequentially**; corrective `additionalContext`
   emissions are additive, not exclusive. Inside the `PostToolUse(Bash)`
   dispatch group the manifest array order is the run order, and

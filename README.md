@@ -186,7 +186,7 @@ Most skills delegate to external agents or session managers. Install the depende
 
 | Tier | What works | What you need |
 | ------ | ----------- | --------------- |
-| **Standalone** | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `debt` needs only `git` |
+| **Standalone** | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `recover-sessions` also needs `tmux`; `debt` needs only `git` |
 | **Enhanced** | + retrospect, codex-review-wrap | + oh-my-claudecode |
 | **Full** | + all cmux-* skills | + cmux |
 | **Multi-provider** | + codex/gemini routing in cmux-delegate | + codex-cli, gemini-cli |
@@ -227,8 +227,10 @@ Generated artifacts are committed:
 - `plugins/praxis/.codex-plugin/plugin.json`
 - `plugins/praxis/{skills,hooks,scripts}` (symlinks into repo root)
 
-To add a new platform, drop a `manifests/platforms/<name>.json` file listing
-its outputs and run the build script — no changes to skills, hooks, or
+To add a new platform, add a `manifests/platforms/<name>.json` file listing
+its outputs, add its `host_id` to the `hosts` enum in
+`hooks/manifest.schema.json` (a test asserts the enum and the platform set
+are equal), and run the build script — no changes to skills, hooks, or
 existing platforms required.
 
 ## Local Development
