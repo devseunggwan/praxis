@@ -177,6 +177,21 @@ detail into the body or `references/` (see `writing-praxis-skill` →
 *Progressive disclosure*) — the description is a routing surface, not
 documentation.
 
+**Workaround (2026-09-06, issue #1331)**: the trigger phrases now live in the
+`when_to_use:` frontmatter field, outside `description`. The runtime documents
+`when_to_use` as "appended to `description` in the skill listing" under a
+combined cap of 1,536 characters
+(<https://code.claude.com/docs/en/skills.md>, read 2026-09-06) — so the
+phrases are no longer inside the prose the rule above measures, but they still
+sit at the tail of the listing budget. The practical effect: `description`
+holds only what the skill does (largest in this repo ≈ 650 folded characters),
+the combined text stays well inside both figures (largest ≈ 800), and each
+field's length is measurable on its own instead of by counting back from the
+end of one string. The constraint text above is kept as written — neither
+figure has been measured live here. `scripts/check-plugin-manifests.py` Rule
+13e mirrors `docs/skills.md` against `when_to_use`, and still reads
+`description` so an unmigrated clause is checked rather than exempt.
+
 **Verified**: 2026-08-30 / Issue #1181 — status: **documented-behavior-based,
 not yet measured live in this repo**. The observed half: `codex-review-wrap`'s
 description had grown to 1,405 folded characters with the trigger clause in

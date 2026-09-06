@@ -1,6 +1,7 @@
 ---
 name: cmux-session-manager
-description: Automate daily cmux session management. Manual commands for status (dashboard) and cleanup (tidy + reorganize), plus init (hook) and report (schedule) automation. Triggers on "cmux session", "session management", "session cleanup", "cmux status", "cmux cleanup", "cmux tidy".
+description: Automate daily cmux session management. Manual commands for status (dashboard) and cleanup (tidy + reorganize), plus init (hook) and report (schedule) automation.
+when_to_use: Triggers on "cmux session", "session management", "session cleanup", "cmux status", "cmux cleanup", "cmux tidy".
 verified-against-runtime: true
 runtime-verified-at: 2026-06-16
 runtime-verified-note: "mock cmux/tmux probe of cmux-session-cleanup --dry-run — it emits three JSON phases split by ---PHASE_SEPARATOR---, keeps safe_named orphans report-only, and routes idle workspaces into idle_cleanup/reorganize."

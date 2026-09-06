@@ -50,7 +50,8 @@ main() is labeled with its number, and this list is the canonical roster
      routed by a table row, no phantom skill names in category rows or
      scenario routing cells) all match EXPECTED_SKILLS; docs/skills.md
      trigger-keyword cells quote keywords verbatim from each skill's
-     frontmatter description; and the compatibility-tier tables in
+     frontmatter `when_to_use` (or `description`, #1331); and the
+     compatibility-tier tables in
      README.md, AGENTS.md, and using-praxis stay normalized-identical.
   14. Each manifest `dispatch_groups` (event, matcher) collapses to exactly
      one dispatcher node per platform hooks.json (no member silently left as
@@ -1588,12 +1589,19 @@ def main() -> int:
         )
 
     # Rule 13e — docs/skills.md trigger-keyword cells mirror the skill's
-    # frontmatter description verbatim (#1177).  Every `backtick` keyword in
-    # a roster row's second column must appear double-quoted in that skill's
-    # frontmatter description (whitespace-normalized, so YAML `>` folding
-    # does not count as drift).  Quoted match, not substring — `skill spec`
-    # must not pass just because `praxis skill spec` is quoted.
-    def _frontmatter_description(skill: str) -> str:
+    # frontmatter trigger fields verbatim (#1177).  Every `backtick` keyword
+    # in a roster row's second column must appear double-quoted in that
+    # skill's frontmatter `when_to_use` or `description` (whitespace-
+    # normalized, so YAML `>` folding does not count as drift).  Quoted
+    # match, not substring — `skill spec` must not pass just because
+    # `praxis skill spec` is quoted.
+    #
+    # Since #1331 the trigger phrases live in `when_to_use` (the documented
+    # field the runtime appends to `description` in the skill listing) and
+    # `description` says only what the skill does.  Both fields are read so
+    # a phrase quoted in either counts, and so a skill that has not moved its
+    # clause yet is still mirrored rather than silently exempt.
+    def _frontmatter_triggers(skill: str) -> str:
         try:
             text = (REPO_ROOT / "skills" / skill / "SKILL.md").read_text()
         except OSError:
@@ -1601,17 +1609,21 @@ def main() -> int:
         fm = _re.match(r"---\n(.*?)\n---\n", text, _re.DOTALL)
         if not fm:
             return ""
-        desc = _re.search(
-            r"^description:(.*?)(?=^\S|\Z)", fm.group(1), _re.DOTALL | _re.MULTILINE
-        )
-        if not desc:
-            return ""
-        # Everything from `Do NOT activate on` onward lists phrases that must
-        # NOT route to the skill. Searching the whole description would accept
-        # one of those as a valid trigger keyword, so a roster row could list
-        # `strike a balance` and pass.
-        text = _norm_ws(desc.group(1))
-        return text.split("Do NOT activate on")[0].rstrip()
+        parts: list[str] = []
+        for key in ("description", "when_to_use"):
+            field = _re.search(
+                rf"^{key}:(.*?)(?=^\S|\Z)", fm.group(1), _re.DOTALL | _re.MULTILINE
+            )
+            if not field:
+                continue
+            # Everything from `Do NOT activate on` onward lists phrases that
+            # must NOT route to the skill. Searching the whole field would
+            # accept one of those as a valid trigger keyword, so a roster row
+            # could list `strike a balance` and pass. The cut is per field:
+            # a negative clause in `description` must not swallow the
+            # positive triggers that follow in `when_to_use`.
+            parts.append(_norm_ws(field.group(1)).split("Do NOT activate on")[0].rstrip())
+        return " ".join(parts)
 
     for line in skills_doc_text.splitlines():
         cells = _table_cells(line)
@@ -1621,30 +1633,31 @@ def main() -> int:
         if not first_col or first_col.group(1) not in EXPECTED_SKILLS:
             continue
         skill_name = first_col.group(1)
-        description = _frontmatter_description(skill_name)
+        triggers = _frontmatter_triggers(skill_name)
         # Both directions, because a mirror contract broken either way is still
-        # broken: a row listing a phrase the description never claims routes
-        # readers to a keyword that does not trigger, and a description quoting
+        # broken: a row listing a phrase the frontmatter never claims routes
+        # readers to a keyword that does not trigger, and a frontmatter quoting
         # a phrase the row omits hides a live trigger from the roster. Only the
         # first direction has a failing test upstream of it, so the second is
         # the one that silently drifts.
         documented = {_norm_ws(k) for k in _re.findall(r"`([^`]+)`", cells[1])}
-        # Every quoted phrase left in `description` is a trigger: the negative
-        # clause was already cut above, so no positive-clause parse is needed.
-        quoted = {_norm_ws(k) for k in _re.findall(r'"([^"]+)"', description)}
+        # Every quoted phrase left in the trigger fields is a trigger: the
+        # negative clause was already cut above, so no positive-clause parse
+        # is needed.
+        quoted = {_norm_ws(k) for k in _re.findall(r'"([^"]+)"', triggers)}
         for keyword in sorted(documented - quoted):
             drifts.append(
                 f"DOC KEYWORD DRIFT docs/skills.md: `{skill_name}` row lists "
-                f"{keyword!r} but the skill's frontmatter description does "
-                "not quote it — keyword cells mirror the description "
-                "verbatim; fix the row or the description"
+                f"{keyword!r} but the skill's frontmatter (when_to_use / "
+                "description) does not quote it — keyword cells mirror the "
+                "frontmatter verbatim; fix the row or the frontmatter"
             )
         for keyword in sorted(quoted - documented):
             drifts.append(
                 f"DOC KEYWORD DRIFT docs/skills.md: `{skill_name}` frontmatter "
                 f"quotes {keyword!r} but the row does not list it — keyword "
-                "cells mirror the description verbatim; fix the row or the "
-                "description"
+                "cells mirror the frontmatter (when_to_use / description) "
+                "verbatim; fix the row or the frontmatter"
             )
 
     # Rule 13f — the compatibility-tier table is maintained in three places

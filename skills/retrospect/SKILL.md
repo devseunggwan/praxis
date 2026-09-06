@@ -4,8 +4,18 @@ description: >
   Session retrospect — analyze the current Claude Code session against the rules it ran under (project and global `CLAUDE.md`),
   identify friction patterns and root causes, propose context-appropriate improvement
   actions, then execute after user approval.
+when_to_use: >
   Triggers on "retrospect", "what went wrong", "session review",
   "session improvement", "what was the issue", "improve".
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+  - Bash(git remote *)
+  - Bash(git rev-parse *)
+  - Bash(gh repo view *)
+  - Bash(gh issue view *)
+  - Bash(gh pr view *)
 verified-against-runtime: true
 runtime-verified-at: 2026-07-13
 runtime-verified-note: "tests/test_retrospect_falsify_recommended.sh + test_retrospect_routing.sh + retrospect hook suites, plus audit-distribution-gates.py differential verification (issue #774): 6/6 script-vs-Stop-hook verdict agreement on mirrored gate classes, and a live violation→fix→clean loop on real session-friction drafts."

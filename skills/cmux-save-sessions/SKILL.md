@@ -3,6 +3,7 @@ name: cmux-save-sessions
 description: >
   Save cmux session list as a JSON snapshot. Current session excluded by default.
   Supports save and list commands.
+when_to_use: >
   Triggers on "save sessions", "session save", "session snapshot", "cmux save", "list snapshots", "snapshot list".
 verified-against-runtime: true
 runtime-verified-at: 2026-06-16

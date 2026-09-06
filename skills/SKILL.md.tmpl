@@ -1,8 +1,24 @@
 ---
 name: <skill-name>
 description: >
-  <One-line description of what this skill does.>
+  <One-line description of what this skill does — no trigger phrases here.>
+when_to_use: >
   Triggers on "<keyword1>", "<keyword2>", "<Korean-keyword>".
+# Optional runtime fields — each is documented at
+# https://code.claude.com/docs/en/skills.md; add only when the condition holds:
+#
+# disable-model-invocation: true
+#   The skill runs only when the user types /praxis:<skill-name>; the model
+#   never auto-loads it and Skill(...) cannot reach it (RUNTIME_CONSTRAINTS.md
+#   §2). Never on a skill another skill chains into via Skill(...).
+#
+# allowed-tools:
+#   - Read
+#   - Bash(gh pr view *)
+#   Tools the steps run without a permission prompt for that turn. List only
+#   what the steps actually run, as specific Bash(cmd *) prefixes rather than
+#   bare Bash, and never a mutation command (gh pr merge, git push).
+#
 # Uncomment after live round-trip verification (required when wrapping an
 # external CLI, calling AskUserQuestion, or delegating via Skill(...)):
 # verified-against-runtime: true

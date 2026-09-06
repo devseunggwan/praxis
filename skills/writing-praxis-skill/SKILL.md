@@ -3,6 +3,7 @@ name: writing-praxis-skill
 description: >
   Guide for authoring a new praxis SKILL.md — template usage, SRP, trigger
   keyword design, frontmatter conventions, and Claude/Codex host differences.
+when_to_use: >
   Triggers on "new praxis skill", "write praxis skill", "add praxis skill",
   "skill template", "praxis skill spec", "스킬 작성", "새 스킬".
   Do NOT activate on "add skill section", "skill up", "skill set".
@@ -46,28 +47,56 @@ committed file.
 ---
 name: <skill-name>         # kebab-case; must match the directory name
 description: >
-  <One-line description.>
+  <One-line description of what the skill does.>
+when_to_use: >
   Triggers on "<keyword1>", "<keyword2>", "<Korean-keyword>".
 ---
 ```
 
 **Rules:**
+
 - `name` must exactly match the directory name under `skills/`.
-- `description` should be concise — keep it short enough to scan at a glance.
+- `description` says what the skill does — concise, scannable, and with no
+  trigger phrases in it.
+- `when_to_use` holds the `Triggers on "..."` clause, plus any
+  `Do NOT activate on "..."` exclusion. The runtime appends it to
+  `description` in the skill listing
+  (<https://code.claude.com/docs/en/skills.md>), so routing — the runtime's
+  own listing match, any routing table a user keeps in their `CLAUDE.md`, and
+  the roster in `docs/skills.md` — matches exact keywords from here;
+  `check-plugin-manifests.py` Rule 13e fails on any drift between
+  `when_to_use` and the roster row.
 - **Hard budget: the folded `description` must stay ≤ 1,024 characters** (see
   [`RUNTIME_CONSTRAINTS.md` §5](../../RUNTIME_CONSTRAINTS.md)). The runtime
-  truncates longer descriptions, and since the `Triggers on "..."` clause sits
-  at the end, the trigger keywords are exactly what gets cut. Trim prose,
-  never triggers, to fit the budget.
-- Always end `description` with a `Triggers on "..."` clause so routing —
-  the runtime's own description matching, and any routing table a user keeps
-  in their `CLAUDE.md` — can match exact keywords.
+  truncates longer descriptions; `when_to_use` shares the listing budget as
+  its tail, so trimming description prose is still what protects the
+  triggers. Trim prose, never triggers.
 - The frontmatter `Triggers on "..."` clause is the **sole** source of trigger
   keywords. Do NOT duplicate them in an in-body `- Triggers:` bullet — that
   bullet was retired (#591) because the two copies drifted; frontmatter is the
   single source of truth.
-- Use multi-line `>` block for descriptions that include trigger keywords; use
-  inline text for short single-line descriptions (see `strike/SKILL.md`).
+- Use a multi-line `>` block for a description or clause longer than one
+  line; use inline text for a short one (see `strikes/SKILL.md`).
+
+**Optional runtime fields** (each documented at
+<https://code.claude.com/docs/en/skills.md>; add one only when its condition
+holds):
+
+- `disable-model-invocation: true` — the skill runs only when the user types
+  `/praxis:<name>`: the model never auto-loads it from `when_to_use`, and
+  `Skill(...)` cannot reach it
+  ([`RUNTIME_CONSTRAINTS.md` §2](../../RUNTIME_CONSTRAINTS.md)). Use it for
+  user-only commands — `strike`, `strikes`, and `reset-strikes` declare it.
+  Never add it to a skill another skill chains into via `Skill(...)`
+  (`worktree-merge-cleanup`, `codex-review-wrap`; issue #163).
+- `allowed-tools` — tools the skill's steps may run without a permission
+  prompt during the invoking turn. List only what the steps actually run, as
+  specific `Bash(cmd *)` prefixes rather than bare `Bash`, and never a
+  mutation (`gh pr merge`, `git push`, `gh issue create`) — those must keep
+  prompting. `retrospect`, `codex-review-wrap`, and `merge-briefing` are the
+  instances.
+- `user-invocable: false` and `disallowed-tools` exist as well; no praxis
+  skill uses them.
 
 **If the skill wraps an external CLI, calls `AskUserQuestion`, or delegates to
 another skill via `Skill(...)`,** add the runtime-verification fields after the
@@ -82,7 +111,8 @@ runtime-verified-note: "<cli-name> <version> — one-line observed behavior"
 ### Step 3: Design Trigger Keywords
 
 Trigger keywords are the phrases users type (or say) that route to this skill.
-The runtime matches them against the `description` (see
+The runtime matches them against the skill listing — `description` with
+`when_to_use` appended (see
 [`RUNTIME_CONSTRAINTS.md` §5](../../RUNTIME_CONSTRAINTS.md)); a user may
 additionally keep a routing table in their own `CLAUDE.md`.
 
@@ -93,14 +123,14 @@ additionally keep a routing table in their own `CLAUDE.md`.
   add the Korean form. Example: "크래시 복구", "세션 살려야".
 - **Cover the negation gap.** Phrases that look like a trigger but shouldn't be:
   "strike a balance", "strike that" → these must NOT match `strike`.
-  Add exclusion notes to the description when collisions are plausible.
+  Add exclusion notes to `when_to_use` when collisions are plausible.
 - **3–6 keywords is the target range.** Fewer leaves gaps; more creates false
   positives.
 
 **Language policy — body vs literals.** Body prose (Overview, When to Use,
 Process steps, tables) is written in English across the praxis corpus. Korean
 belongs in exactly two places: trigger keywords in the frontmatter
-`description` (the "Cover the Korean variants" principle above), and literal
+`when_to_use` (the "Cover the Korean variants" principle above), and literal
 strings the skill must match or emit verbatim — quoted user utterances, CLI/UI
 output, and `AskUserQuestion` option labels. `merge-briefing` quoting the
 progress signals `"계속"` / `"진행"` and `codex-review-wrap`'s `"취소"` option
@@ -227,7 +257,7 @@ Follow the standard praxis PR workflow:
 
 | Failure | Cause | Fix |
 | --------- | ------- | ----- |
-| Skill not invoked by routing | Trigger keywords absent from the `description`'s `Triggers on` clause, or past the description budget | Put them in the clause, inside the first 500 characters |
+| Skill not invoked by routing | Trigger keywords absent from the `when_to_use` `Triggers on` clause, or pushed past the listing budget by a long `description` | Put them in `when_to_use` and keep `description` to what the skill does |
 | `Skill(...)` call fails silently | Target skill uses `disable-model-invocation: true` (both hosts) | Call the underlying binary directly |
 | `AskUserQuestion` call rejected before tool runs | Options array > 4 items — JSON schema rejects the call | Truncate to 3 + "취소" |
 | Codex worker produces empty `git diff` | Sandbox write restriction | Add `git status` check + claude fallback re-dispatch |
@@ -244,7 +274,9 @@ wins; update this excerpt.
 ```markdown
 ---
 name: strikes
-description: Show the current session's strike count (0-3) and the list of recorded violation reasons. Use when the user types "/strikes", "strike status", "몇 진", "check strikes".
+description: Show the current session's strike count (0-3) and the list of recorded violation reasons.
+when_to_use: Use when the user types "/strikes", "strike status", "몇 진", "check strikes".
+disable-model-invocation: true
 ---
 
 # Praxis Strike Status
@@ -263,9 +295,11 @@ directly rather than trusting a transcription that can drift.
 ---
 name: <skill-name>
 description: >
-  <Multi-line description folded with `>` — what the skill does, priority
-  and exclusion notes if trigger collisions are plausible.>
+  <Multi-line description folded with `>` — what the skill does and any
+  priority notes.>
+when_to_use: >
   Triggers on "<keyword1>", "<keyword2>", "<Korean-keyword>".
+  Do NOT activate on "<colliding-phrase>".
 verified-against-runtime: true
 runtime-verified-at: <YYYY-MM-DD>
 runtime-verified-note: "<cli-name> <version> — one-line observed behavior"
