@@ -124,7 +124,10 @@ sibling worktrees that were on screen and unread become a number.
    alongside the root one. An Agent dispatch made *inside* a Task-dispatched
    subagent is recorded only in that subagent's own JSONL, so a root-only scan
    under-reports work that actually happened — the same blindness
-   `block-commit-without-codex-review` documents for issue #730.
+   `block-commit-without-codex-review` documents for issue #730. A subagent
+   file the resumable scan has not caught up with yet keeps the advisory
+   silent (its unread tail may still settle the fact); an unreadable one is
+   skipped.
 
 The predicates key on an **absence** in the transcript rather than on the
 presence of a marker, so the advisory cannot be cleared by adopting whatever

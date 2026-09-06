@@ -707,6 +707,7 @@ _REJECTION_INPUT_MAX_CHARS = REJECTION_TEXT_MAX_CHARS
 
 
 def _rejection_state() -> dict:
+    """The empty reducer state: rejections found so far and the tool_use ring."""
     return {"rejections": [], "recent": []}
 
 
@@ -786,7 +787,12 @@ def _note_rejection(state: dict, ev: dict, max_records: int) -> None:
 
 
 def _reduce_rejection_event(state: dict, ev: dict, max_records: int) -> None:
-    if ev.get("type") == "assistant" or (ev.get("message") or {}).get("role") == "assistant":
+    """Route one record: assistant records feed the tool_use ring, the rest
+    are tested as rejections. `message` is guarded like every other reader
+    here — a record whose `message` is a string must not abort the scan."""
+    msg = ev.get("message")
+    role = msg.get("role") if isinstance(msg, dict) else None
+    if ev.get("type") == "assistant" or role == "assistant":
         _note_tool_uses(state, ev)
         return
     _note_rejection(state, ev, max_records)
@@ -969,6 +975,7 @@ def _cursor_matches(cursor: dict, st: os.stat_result, fh) -> bool:
 
 
 def _load_cursor(cursor_path: str) -> dict | None:
+    """The saved cursor as a dict, or None when absent, unreadable or not a dict."""
     try:
         with open(cursor_path, encoding="utf-8") as fh:
             cursor = json.load(fh)
@@ -1100,6 +1107,7 @@ def scan_transcript_resumable(
     cursor = _load_cursor(cursor_path) if cursor_path else None
 
     def resumed():
+        """The state the cursor carried, decoded; None when there is none."""
         if cursor is None:
             return None
         try:

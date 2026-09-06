@@ -125,3 +125,19 @@ def test_missing_transcript_answers_none(tmp_path, monkeypatch):
     """No file: nothing to measure against, the caller stays silent."""
     _cursors(tmp_path, monkeypatch)
     assert adv._scan_session(str(tmp_path / "absent.jsonl"), "review", "sess-1") is None
+
+
+def test_subagent_not_caught_up_keeps_the_advisory_silent(tmp_path, monkeypatch):
+    """The root has no PR scan; a subagent's unread tail may. Until that
+    subagent is caught up the answer is None (silent), then the fact."""
+    _cursors(tmp_path, monkeypatch)
+    root = _write(tmp_path / "sess.jsonl", [_bash("git status")])
+    sub = tmp_path / "sess" / "subagents"
+    sub.mkdir(parents=True)
+    agent = sub / "agent-a.jsonl"
+    _write(agent, [_bash("git status")] * 20 + [_bash("gh pr list")])
+    monkeypatch.setattr(adv, "_MAX_TRANSCRIPT_BYTES", agent.stat().st_size // 2)
+    assert adv._scan_session(root, "in-flight", "sess-1") is None
+    assert adv._scan_session(root, "in-flight", "sess-1") is None
+    facts = adv._scan_session(root, "in-flight", "sess-1")
+    assert facts is not None and facts.open_pr_scan

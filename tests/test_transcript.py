@@ -1295,6 +1295,7 @@ class TestScanTranscriptResumable:
     def _run(path, cursor, seen, **kw):
         """Fold `path` into a counting state, recording each event's `i`."""
         def reduce_event(state, ev):
+            """Count the event and record its `i`."""
             state["n"] += 1
             seen.append(ev["i"])
 
@@ -1432,6 +1433,19 @@ class TestScanUserRejectionsResumable:
         assert "s3://b/raw/2024/" in recs[0]["text"]
         # Nothing appended: the answer stands without re-reading the file.
         assert T.scan_user_rejections(path, max_bytes=100, cursor_path=cursor) == recs
+
+    def test_a_string_message_record_does_not_abort_the_scan(self, tmp_path):
+        """`message` guarded like every other reader: a record whose message
+        is a string is skipped, and the rejection after it still resolves."""
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "AskUserQuestion",
+                           {"questions": [{"question": "Delete s3://b/raw/2024/ ?"}]}),
+            {"type": "user", "message": "not a dict", "toolDenialKind": "user-rejected"},
+            _rejection("toolu_1", "A1"),
+        ])
+        recs = T.scan_user_rejections(path)
+        assert recs is not None and len(recs) == 1
+        assert recs[0]["tool_name"] == "AskUserQuestion"
 
     def test_without_a_cursor_the_bound_still_means_indeterminate(self, tmp_path):
         """No cursor path: the pre-cursor contract, call after call."""

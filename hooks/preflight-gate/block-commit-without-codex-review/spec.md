@@ -128,10 +128,14 @@ therefore each worktree/ultrawork branch, since each runs as its own session
 — has its own transcript and its own sibling `subagents/` directory, so this
 scan never crosses session boundaries: a review run in one worktree's session
 does not satisfy the gate for a commit in a different worktree's session. A
-subagent transcript that is individually unreadable/oversized is skipped
-(that one subagent's history just can't contribute a PASS); it does not
-turn the whole scan into a fail-open, since the root transcript already
-answered the question for everything outside that one subagent run.
+subagent transcript that is individually unreadable is skipped (that one
+subagent's history just can't contribute a PASS); it does not turn the whole
+scan into a fail-open, since the root transcript already answered the
+question for everything outside that one subagent run. A subagent transcript
+the resumable scan has not caught up with yet is different: its unread tail
+may hold the invocation, so unless a later subagent confirms one the verdict
+is indeterminate (fail-open, like a root that has not caught up), never a
+block, for the few commits the catch-up takes.
 
 ### Escalation on repeated same-session block (issue #805)
 

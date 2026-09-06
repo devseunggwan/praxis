@@ -119,6 +119,7 @@ _ESCALATE_AFTER_PRIOR_BLOCKS = 1
 
 @fail_open
 def main() -> int:
+    """Hook entry point: read the payload, run the gate, emit the verdict."""
     payload = read_payload()
     if payload is None:
         return 0  # fail-open on malformed payload
@@ -504,7 +505,28 @@ def _transcript_invokes_skill(
     would only be a phantom code path a fabricated transcript could abuse.
     """
 
+    try:
+        found, complete = _scan_for_invocation(
+            path, check_slash=check_slash, cursor_path=cursor_path
+        )
+    except TranscriptReadError:  # missing, not a file, or unreadable
+        return None
+    if found:
+        return True
+    return False if complete else None  # None: budget spent before EOF
+
+
+def _scan_for_invocation(
+    path: str, *, check_slash: bool, cursor_path: str | None = None
+) -> tuple[bool, bool]:
+    """`(found, complete)` for one transcript file: whether an invocation is
+    on record (from this call or the cursor) and whether the file was read
+    to EOF within this call's budget. Raises `TranscriptReadError` for a
+    missing or unreadable file so the caller can tell that apart from a scan
+    that merely has not caught up yet."""
+
     def fold(state: dict, obj: dict) -> None:
+        """Mark the state found when `obj` is a genuine invocation record."""
         # A `Skill` tool_use is a genuine invocation wherever it appears —
         # only the assistant can emit one, and emitting it *is* running
         # the skill. A slash command, by contrast, is user-initiated: an
@@ -518,21 +540,16 @@ def _transcript_invokes_skill(
         elif check_slash and obj.get("type") == "user" and _has_slash_command(obj):
             state["found"] = True
 
-    try:
-        state, complete = scan_transcript_resumable(
-            path,
-            cursor_path,
-            lambda: {"found": False},
-            fold,
-            needle=_SKILL_NEEDLE,
-            max_bytes=_MAX_BYTES,
-            stop_when=lambda s: s.get("found") is True,
-        )
-    except TranscriptReadError:  # missing, not a file, or unreadable
-        return None
-    if state.get("found") is True:
-        return True
-    return False if complete else None  # None: budget spent before EOF
+    state, complete = scan_transcript_resumable(
+        path,
+        cursor_path,
+        lambda: {"found": False},
+        fold,
+        needle=_SKILL_NEEDLE,
+        max_bytes=_MAX_BYTES,
+        stop_when=lambda s: s.get("found") is True,
+    )
+    return state.get("found") is True, complete
 
 
 def _subagents_dir(transcript_path: str) -> Path | None:
@@ -568,12 +585,14 @@ def _scan_transcript(path: str, session_id=None) -> bool | None:
     Each file gets its own cursor, keyed on `session_id` and the file
     (`root`, or the subagent file's stem) through `scan_cursor_path`; with no
     session id the scan runs without persistence, under the same per-call
-    budget. A subagent transcript that is individually unreadable or not
-    yet caught up is skipped (that one subagent's history just cannot
-    contribute a PASS) — it does not turn the overall result into a
-    fail-open None, since the root transcript (the thing we can actually
-    read) already answered the question definitively for everything outside
-    that one subagent run.
+    budget. A subagent transcript that is individually unreadable is skipped
+    (that one subagent's history just cannot contribute a PASS) — it does
+    not turn the overall result into a fail-open None, since the root
+    transcript already answered the question for everything outside that
+    one subagent run. A subagent transcript the scan has *not caught up
+    with* is different: its unread tail may hold the invocation, so unless
+    a later subagent confirms one the answer is None, not False — the same
+    treatment the root gets, for the few commits the catch-up takes.
     """
     root = _transcript_invokes_skill(
         path, check_slash=True, cursor_path=scan_cursor_path(_HOOK_NAME, session_id, "root")
@@ -583,19 +602,26 @@ def _scan_transcript(path: str, session_id=None) -> bool | None:
     if root:
         return True
 
+    pending = False
     subagents_dir = _subagents_dir(path)
     if subagents_dir is not None:
         # check_slash=False: a subagent transcript's "user" turns are
         # Task-dispatch prompts / tool_results, never human keystrokes, so
         # slash-command detection is root-only (see _transcript_invokes_skill).
         for agent_file in sorted(subagents_dir.glob("agent-*.jsonl")):
-            if _transcript_invokes_skill(
-                str(agent_file),
-                check_slash=False,
-                cursor_path=scan_cursor_path(_HOOK_NAME, session_id, agent_file.stem),
-            ):
+            try:
+                found, complete = _scan_for_invocation(
+                    str(agent_file),
+                    check_slash=False,
+                    cursor_path=scan_cursor_path(_HOOK_NAME, session_id, agent_file.stem),
+                )
+            except TranscriptReadError:
+                continue  # unreadable: this one subagent cannot contribute
+            if found:
                 return True
-    return False
+            if not complete:
+                pending = True  # its unread tail may still hold the invocation
+    return None if pending else False
 
 
 def _has_skill_tool_use(obj: dict) -> bool:

@@ -423,6 +423,7 @@ _FACT_NAMES = ("review_agent", "codex_review", "open_pr_scan")
 
 
 def _encode_facts(facts: _SessionFacts) -> dict:
+    """Cursor form of the facts: one bool per fact name."""
     return {name: bool(getattr(facts, name)) for name in _FACT_NAMES}
 
 
@@ -439,6 +440,7 @@ def _absorb(facts: _SessionFacts, path: str, cursor_path: str | None = None) -> 
     wanted = facts._wanted
 
     def decode(saved: dict) -> _SessionFacts:
+        """Rebuild the facts object a previous call saved in the cursor."""
         resumed = _SessionFacts(wanted)
         for name in _FACT_NAMES:
             if saved.get(name) is True:
@@ -446,6 +448,7 @@ def _absorb(facts: _SessionFacts, path: str, cursor_path: str | None = None) -> 
         return resumed
 
     def fold(state: _SessionFacts, event: dict) -> None:
+        """Note every tool_use block of one assistant record."""
         message = event.get("message")
         if not isinstance(message, dict):
             return
@@ -519,11 +522,12 @@ def _scan_session(transcript_path: str, trigger: str, session_id=None) -> _Sessi
     if not complete and not facts.settled():
         return None  # not caught up this call: nothing to measure against yet
 
+    pending = False
     subagents = _subagents_dir(transcript_path)
     if subagents is not None and not facts.settled():
         for agent_file in sorted(subagents.glob("agent-*.jsonl")):
             try:
-                _absorb(
+                complete = _absorb(
                     facts,
                     str(agent_file),
                     scan_cursor_path(_HOOK_NAME, session_id, f"{trigger}-{agent_file.stem}"),
@@ -532,6 +536,10 @@ def _scan_session(transcript_path: str, trigger: str, session_id=None) -> _Sessi
                 continue  # one subagent's history just cannot contribute
             if facts.settled():
                 break
+            if not complete:
+                pending = True  # its unread tail may still settle a fact
+    if pending and not facts.settled():
+        return None  # a subagent is not caught up: an absence is not yet a fact
     return facts
 
 
@@ -631,6 +639,7 @@ def _advise_rebase(trigger: str, cwd: str | None, deadline: float) -> int:
 
 @fail_open
 def main() -> int:
+    """Hook entry point: classify the command, scan the session, advise."""
     if os.environ.get(SKIP_ENV) == "1":
         return 0
 

@@ -188,3 +188,33 @@ def test_scan_keys_one_cursor_per_transcript_file(tmp_path, monkeypatch):
     monkeypatch.setattr(_reader, "_parse_line", lambda raw: calls.append(raw))
     assert gate._scan_transcript(root, "sess-1") is True
     assert calls == []
+
+
+def test_subagent_not_caught_up_is_indeterminate_not_false(tmp_path, monkeypatch):
+    """The root reads to EOF and says no; a subagent's unread tail may still
+    hold the invocation, so the gate answers None until it has caught up,
+    then True — never a False that strict mode would block on."""
+    root = _write(tmp_path, _filler(2), name="sess.jsonl")
+    sub = tmp_path / "sess" / "subagents"
+    sub.mkdir(parents=True)
+    agent = sub / "agent-a.jsonl"
+    agent.write_text("\n".join(_filler(20) + [_skill_use("praxis:codex-review-wrap")]) + "\n",
+                     encoding="utf-8")
+    monkeypatch.setattr(gate, "scan_cursor_path",
+                        lambda hook, sid, part="root": str(tmp_path / f"cursor-{part}.json"))
+    monkeypatch.setattr(gate, "_MAX_BYTES", agent.stat().st_size // 2)
+    assert gate._scan_transcript(root, "sess-1") is None
+    assert gate._scan_transcript(root, "sess-1") is None
+    assert gate._scan_transcript(root, "sess-1") is True
+
+
+def test_unreadable_subagent_is_skipped_not_indeterminate(tmp_path, monkeypatch):
+    """A subagent file that cannot be read contributes nothing: the root's
+    definitive answer stands (spec: 'skipped, not a fail-open')."""
+    root = _write(tmp_path, _filler(2), name="sess.jsonl")
+    sub = tmp_path / "sess" / "subagents"
+    sub.mkdir(parents=True)
+    (sub / "agent-a.jsonl").mkdir()  # a directory where a file is expected
+    monkeypatch.setattr(gate, "scan_cursor_path",
+                        lambda hook, sid, part="root": str(tmp_path / f"cursor-{part}.json"))
+    assert gate._scan_transcript(root, "sess-1") is False

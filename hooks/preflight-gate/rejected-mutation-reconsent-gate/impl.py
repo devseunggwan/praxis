@@ -445,6 +445,7 @@ def resolve_surface(payload: dict) -> tuple[set[str], str, str]:
 
 @fail_open
 def main() -> int:
+    """Hook entry point: read the payload, match rejections, emit the verdict."""
     payload = read_payload()
     if payload is None:
         return 0  # malformed stdin — fail-open
