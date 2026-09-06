@@ -264,15 +264,46 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Rule config lives in .markdownlint.yaml (counts derived under the
-      # version this action bundles — see that file's header).
-      - uses: reviewdog/action-markdownlint@6f0e0e8703a9e840ffefa37a2775832c51c1c640 # v0.28.0
+      # reviewdog/action-markdownlint is a Docker container action built from
+      # its Dockerfile at job time (node:24-bullseye-slim plus apt-get). On
+      # 2026-09-06 a Debian bullseye-security mirror 404 inside that build
+      # failed the job on every open PR, release-please's included, before
+      # any input was read, so its `fail_level: none` never applied and each
+      # commit status went red for a check that gates nothing. The steps
+      # below run the same two-phase pipeline the action's entrypoint runs,
+      # with the markdownlint-cli and reviewdog versions its v0.28.0 image
+      # bundles, and no image build. Rule config still lives in
+      # .markdownlint.yaml (counts derived under this markdownlint-cli
+      # version — see that file's header).
+      - uses: reviewdog/action-setup@d8a7baabd7f3e8544ee4dbde3ee41d0011c3a93f # v1.5.0
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-review
-          # Only flag lines the PR changed; the repo's large existing backlog
-          # stays untouched.
-          filter_mode: added
-          # Advisory rollout: warnings only, never fails the check.
-          level: warning
-          fail_level: none
+          reviewdog_version: v0.21.0
+      - run: npm install -g markdownlint-cli@0.49.1
+      - name: markdownlint findings and fix suggestions
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Phase 1: findings on lines the PR changed only; the repo's large
+          # existing backlog stays untouched. Advisory rollout: warnings only,
+          # never fails the check.
+          markdownlint . 2>&1 | reviewdog \
+            -efm="%f:%l:%c %m" \
+            -efm="%f:%l %m" \
+            -name="markdownlint" \
+            -reporter=github-pr-review \
+            -filter-mode=added \
+            -level=warning \
+            -fail-level=none
+          # Phase 2: the same suggestion comments the action posts under
+          # github-pr-review, from markdownlint --fix as a diff.
+          markdownlint --fix . 2>&1 || true
+          fix_diff="$(mktemp)"
+          git diff > "$fix_diff"
+          git checkout -- .
+          reviewdog \
+            -f=diff \
+            -f.diff.strip=1 \
+            -name="markdownlint-fix" \
+            -reporter=github-pr-review \
+            -filter-mode=diff_context \
+            -level=warning < "$fix_diff"
