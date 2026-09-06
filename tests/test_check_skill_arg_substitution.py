@@ -185,3 +185,27 @@ def test_cmux_wrapper_snippets_resolve_via_plugin_root():
         assert 'dirname "$0"' not in body, rel
         assert 'dirname "${0}"' not in body, rel
         assert "${CLAUDE_PLUGIN_ROOT:?" in body, rel
+
+
+def test_recover_skill_snippets_resolve_via_skill_dir():
+    """The two recover skills address their bundled tool via ``CLAUDE_SKILL_DIR``.
+
+    They never had the ``$0`` form — they told the model to ``ln -sf`` the tool
+    into ``~/.local/bin`` and call it by bare name, which a plugin install never
+    sets up (#1333). Each tool lives inside its own skill directory, so the
+    documented ``${CLAUDE_SKILL_DIR}`` placeholder (substituted inline in skill
+    content, cwd-independent) is the exact fit. The bash ``${VAR:?...}`` guard
+    the cmux skills use is deliberately absent here: skill-content placeholders
+    are not promised as environment variables, so ``:?`` could fire on a
+    substituted-away name with nothing to fall back on.
+    """
+    for rel, tool in (
+        ("skills/recover-sessions/SKILL.md", "claude-recover"),
+        ("skills/cmux-recover-sessions/SKILL.md", "cmux-recover-sessions"),
+    ):
+        body = (_REPO / rel).read_text(encoding="utf-8")
+        assert "${CLAUDE_SKILL_DIR}/" + tool in body, rel
+        assert 'dirname "$0"' not in body, rel
+        assert "ln -sf" not in body, rel
+        assert "symlinked to `~/.local/bin/`" not in body, rel
+        assert "${CLAUDE_PLUGIN_ROOT:?" not in body, rel

@@ -3,8 +3,8 @@ name: recover-sessions
 description: Bulk recover Claude Code sessions after power loss or tmux crash. Interactive interview to determine recovery scope, layout, and execution mode.
 when_to_use: Triggers on "recover", "session recovery", "restore sessions", "power recovery".
 verified-against-runtime: true
-runtime-verified-at: 2026-06-16
-runtime-verified-note: "claude-recover --list (fixture HOME) + tests/test_recover_scan_display_name.sh — list mode prints HOME/PROJECT/FIRST MESSAGE without tmux creation, and the shared scanner prefers compact-summary display names."
+runtime-verified-at: 2026-09-06
+runtime-verified-note: "claude-recover --help and --list --from --to run via the resolved skill-dir path skills/recover-sessions/claude-recover with a fixture HOME and cwd outside the checkout — both exit 0; list mode prints HOME/PROJECT/FIRST MESSAGE without tmux creation (tests/test_recover_scan_display_name.sh). Inline substitution of ${CLAUDE_SKILL_DIR} by a live plugin install was NOT exercised."
 ---
 
 # Recover Sessions
@@ -34,24 +34,18 @@ Recovery reads `.jsonl` files and re-opens them in new tmux panes. It must never
 
 ## Prerequisites
 
-- `claude-recover` script in `skills/recover-sessions/claude-recover` (symlinked to `~/.local/bin/`)
+- `claude-recover` script bundled at `${CLAUDE_SKILL_DIR}/claude-recover`; no install step (`scripts/install.sh` can additionally symlink it into `~/.local/bin` for running the tool from a terminal — optional, not part of this skill's flow)
 - tmux installed (`brew install tmux`)
 - Any terminal app (Ghostty, iTerm2, Terminal.app — auto-detected)
 
 ## Process
 
-### Step 1: Verify Script Installation
+### Step 1: Locate the Script
+
+`${CLAUDE_SKILL_DIR}` is the directory holding this SKILL.md, regardless of the current working directory, so every step below addresses the bundled script by that path. Confirm it resolves:
 
 ```bash
-which claude-recover || echo "NOT INSTALLED"
-```
-
-If missing, create symlink:
-
-```bash
-# Replace PRAXIS_REPO with your local praxis clone path (e.g., ~/projects/praxis)
-PRAXIS_REPO=~/projects/praxis
-ln -sf "$PRAXIS_REPO/skills/recover-sessions/claude-recover" ~/.local/bin/claude-recover
+"${CLAUDE_SKILL_DIR}/claude-recover" --help
 ```
 
 ### Step 2: Interview — Recovery Scope
@@ -78,7 +72,7 @@ When did the power loss / crash occur?
 Run the scan with determined date range:
 
 ```bash
-claude-recover --list --from <start> --to <end>
+"${CLAUDE_SKILL_DIR}/claude-recover" --list --from <start> --to <end>
 ```
 
 Present the results to the user. If 0 sessions found, suggest widening the range.
@@ -168,7 +162,7 @@ Proceed with recovery?
 Run the approved command:
 
 ```bash
-claude-recover --from <start> --to <end> --layout <CxR> [--attach|--windows]
+"${CLAUDE_SKILL_DIR}/claude-recover" --from <start> --to <end> --layout <CxR> [--attach|--windows]
 ```
 
 ### Step 9: Verify and Guide
