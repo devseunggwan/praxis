@@ -1,8 +1,13 @@
-# PostToolUse Same-Failure-Pattern Advisory
+# PostToolUse / PostToolUseFailure Same-Failure-Pattern Advisory
 
 Supported hosts: all
+Per-event: the `PostToolUse` registration ships to every host; the
+`PostToolUseFailure` registration (issue #1337) carries `hosts: ["claude"]`
+and ships to Claude Code only — see
+[PostToolUseFailure](#posttoolusefailure-issue-1337) below.
 
-`hooks/second-failure-advisory` is a PostToolUse advisory hook. When the same
+`hooks/second-failure-advisory` is an advisory hook registered on
+`PostToolUse` and, since issue #1337, on `PostToolUseFailure`. When the same
 `tool_name + error_signature` pair fails repeatedly within one session, it
 emits an advisory through `hookSpecificOutput.additionalContext` on stdout
 from the second failure onward, to cut the pattern of retrying an identical
@@ -21,13 +26,116 @@ announces the repeat.
 
 ## Covered surface
 
-- Event: `PostToolUse`
-- Matcher: `all tools` — the `hooks/manifest.json` entry carries no `matcher`
-  key. An explicit list would drop, at the matcher stage, every repeated
-  failure of a tool whose name is not enumerated (MCP tools, `WebFetch`,
-  `NotebookEdit`).
+- Events: `PostToolUse` (all hosts) and `PostToolUseFailure` (`claude` only,
+  issue #1337). Two manifest entries under one name; the same wrapper
+  serves both, and `impl.py` branches on the payload's `hook_event_name`.
+- Matcher: `all tools` — neither `hooks/manifest.json` entry carries a
+  `matcher` key. An explicit list would drop, at the matcher stage, every
+  repeated failure of a tool whose name is not enumerated (MCP tools,
+  `WebFetch`, `NotebookEdit`).
 
-## Deciding what counts as a failure
+## PostToolUseFailure (issue #1337)
+
+### Why
+
+The `PostToolUse` sections below describe a payload that cannot say whether
+a Bash command failed. Quoting the #1096 finding they rest on:
+
+> Real Bash `tool_response` payloads carry no exit status and no error field
+> — verified as `{stdout, stderr, interrupted, isImage, noOutputExpected}`
+> against live session transcripts — so the only failure signals actually
+> available for a Bash call are `interrupted` (a killed/timed-out run) and,
+> if one is ever present, an explicit `isError`/`is_error`/`status ==
+> "error"`/`error` marker.
+
+Issue #1265 then found the failed calls arriving as strings rather than
+dicts and opened that road, but the road is an allowlist over undocumented
+harness text (`Error:` plus a space), which its own section says will fail
+silent the day the text changes.
+
+The harness ships an event for exactly this case. Per the Claude Code hooks
+reference (verified 2026-09-06), `PostToolUseFailure` "runs when a tool that
+started executing fails" and delivers, on top of the usual
+`tool_name`/`tool_input`/`tool_use_id`, a top-level `error` string — "for
+Bash, the first line is `Exit code N`, then interleaved output" — plus an
+optional `is_interrupt` (true when the failure reached Claude Code as an
+abort) and an optional `duration_ms`. It cannot block, it can return
+`hookSpecificOutput.additionalContext` under `hookEventName:
+"PostToolUseFailure"`, it matches on tool name like `PreToolUse`, and it
+does **not** fire for permission denials or schema-validation rejections
+(those never started executing). The event's arrival is the failure verdict,
+so this path applies no allowlist to the text: every non-interrupted
+`PostToolUseFailure` counts, MCP tools included. Where the string path had
+to stop trusting an MCP tool's own `Error:` text (PR #1270), here the
+harness has already ruled.
+
+### Decision, in order
+
+1. `hook_event_name != "PostToolUseFailure"` → the `PostToolUse` path below,
+   unchanged. An absent field is the pre-#1337 shape and takes that path.
+2. `is_interrupt: true` → **not a failure of the command**. The run was
+   aborted before it could fail on its own; counting it would advise on the
+   user's interruptions. Silent, no state written.
+3. `error` not a string → unknown shape, fail-open, silent.
+4. Otherwise `error` (stripped) is the failure text. For Bash that is the
+   `Exit code N` line with the command's output under it; for any other tool
+   it is whatever the harness reported. The text seeds the signature exactly
+   as a string `tool_response` does, and a bare `Exit code N` with nothing
+   under it takes the command digest (`_command_discriminator`) so two
+   commands dying the same way stay on separate pairs.
+
+### Why the two events share one pair key
+
+Signature material is the failure text with one leading `Error:` removed
+(`_signature_material`). The `PostToolUse` string carries the harness
+envelope — `Error: Exit code 1\n(eval):1: == not found` — and the
+`PostToolUseFailure` `error` field carries the same lines without it. They
+describe one failure, and a session whose failures reached this hook by
+alternating events would otherwise hold two counters at 1 and never advise.
+The prefix is dropped from the *material* only; the `PostToolUse` failure
+decision still reads it. `_BARE_EXIT_CODE_RE` therefore matches the
+unwrapped form (`^Exit code \d+$`) and covers both shapes with one pattern.
+
+### Dedupe — one call, two events, one count
+
+While both registrations are live, one tool call can reach the hook twice.
+Each counted failure appends its `tool_use_id` to `recent_tool_use_ids` in
+the state file (bounded to the last 16, ordered), and an event whose id is
+already there returns before the count moves. The check sits inside the
+state lock, so two events for one call cannot both read "unseen". The first
+event to arrive counts and — from the second occurrence — advises; the
+second is silent, so the model's context receives one advisory per failure,
+not two. A bounded *window* rather than the single last id: parallel calls
+interleave (`A-post, B-post, A-fail`), and a last-id-only check would count
+`A` twice. Payloads without a `tool_use_id` (synthetic, pre-#1337 tests)
+skip the dedupe and count as before.
+
+### Host filter
+
+The event is documented for Claude Code only, so the manifest entry carries
+`hosts: ["claude"]`; Codex and Cursor keep the `PostToolUse` registration
+alone. Rule 8 reads a hook's hosts from its **first** registration, which is
+the all-hosts `PostToolUse` one — hence `Supported hosts: all` in the header
+with the per-event note beneath it.
+
+### Emitted event name
+
+The advisory echoes the incoming event as `hookEventName`. The harness
+accepts a hook reply only under the event it delivered, so a `PostToolUse`
+name on a `PostToolUseFailure` reply would be discarded.
+
+### The PostToolUse registration is retained for one release
+
+Both paths run in parallel for one release so the failure event's real
+delivery can be measured against the ledger before the string allowlist is
+retired. Removing the `PostToolUse` registration is a follow-up; until then
+the dedupe above is what keeps the parallel run from double-counting.
+
+## Deciding what counts as a failure (`PostToolUse`)
+
+Everything in this section and the ones that follow — string allowlist,
+harness-noise filter, dict markers — applies to the `PostToolUse` path. The
+`PostToolUseFailure` path above needs none of it: the event is the verdict.
 
 `tool_response` arrives in two shapes, and **failures arrive as strings**
 (issue #1265).
@@ -315,7 +423,8 @@ defeat the retry-loop correction this hook exists for.
 ```
 
 `<n>` is the session-cumulative occurrence (2, 3, 4, …) for that
-`(tool_name, signature)` pair.
+`(tool_name, signature)` pair. `hookEventName` is `PostToolUseFailure` when
+the advisory answers that event (issue #1337).
 
 `reference` is extracted first from a `Reference:` label, a `hooks/...` path,
 or a `*spec.md` path in the failure text, and otherwise from
@@ -331,6 +440,9 @@ The following cases are silent (fail-open) and exit 0:
 - a successful response
 - the first failure
 - a state write failure (state-file I/O error)
+- a `PostToolUseFailure` with `is_interrupt: true`, or with a non-string
+  `error` (issue #1337)
+- an event whose `tool_use_id` this session already counted (issue #1337)
 
 ## State
 
@@ -348,9 +460,15 @@ Example format:
   "schema_version": 1,
   "failures": {
     "Bash|deadbeef": 2
-  }
+  },
+  "recent_tool_use_ids": ["toolu_01A", "toolu_01B"]
 }
 ```
+
+`recent_tool_use_ids` (issue #1337) holds the ids of the last 16 counted
+failures, oldest first; it is what keeps a call that reaches both events
+from counting twice. Absent in state written before #1337, and read as
+empty.
 
 ## Concurrency (issue #951)
 
@@ -428,3 +546,14 @@ Required coverage:
 - two processes running concurrently: without the lock an increment is lost;
   under the lock the count goes 1→2→3 and two advisories are emitted (2nd
   and 3rd) (`tests/test_hook_state_concurrency.py`)
+- `PostToolUseFailure` (issue #1337, case 20): the same Bash `Exit code 1`
+  plus `npm ERR!` error twice → advisory on the second, with
+  `hookEventName: "PostToolUseFailure"` (20a); `is_interrupt: true` → silent
+  and no state file (20b); one `tool_use_id` arriving via `PostToolUse` then
+  `PostToolUseFailure` → counted once, and the reverse order too (20c); a
+  non-Bash MCP tool's error string twice → advisory (20d); a `PostToolUse`
+  success payload with the field present → silent (20e, negative control);
+  a `PostToolUse` string failure and a `PostToolUseFailure` for the same
+  failure text, different ids → one pair, advisory on the second (20f);
+  non-string `error` → silent (20g); a bare `Exit code 1` from two different
+  commands → silent, same command → advisory (20h, both directions)

@@ -64,16 +64,18 @@
             ]
           },
           "event": {
+            "description": "Host lifecycle event. PostToolUseFailure (#1337) is documented for Claude Code only — a registration on it carries hosts: [\"claude\"]; it is a per-hook event, not a dispatch group, so the dispatch_groups enum above does not list it.",
             "enum": [
               "SessionStart",
               "UserPromptSubmit",
               "PreToolUse",
               "PostToolUse",
+              "PostToolUseFailure",
               "Stop"
             ]
           },
           "matcher": {
-            "description": "Tool-name regex for PreToolUse/PostToolUse registrations, or a SessionStart source (startup|resume|clear|compact|fork — postcompact-context uses `compact`, #1339); omitted for the other non-tool events.",
+            "description": "Tool-name regex for PreToolUse/PostToolUse/PostToolUseFailure registrations, or a SessionStart source (startup|resume|clear|compact|fork — postcompact-context uses `compact`, #1339); omitted for the other non-tool events.",
             "type": "string",
             "minLength": 1
           },

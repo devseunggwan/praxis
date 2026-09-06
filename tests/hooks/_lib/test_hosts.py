@@ -46,23 +46,64 @@ def test_schema_enum_covers_every_hook_installing_platform() -> None:
     assert _declared_hosts() <= set(hosts.schema_hosts())
 
 
+def _entry_ships_on(entry: dict, host: str) -> bool:
+    """The manifest's own rule: absent `hosts` means every host."""
+    whitelist = entry.get("hosts")
+    return whitelist is None or host in whitelist
+
+
+def _registrations_by_name() -> dict[str, list[dict]]:
+    by_name: dict[str, list[dict]] = {}
+    for entry in MANIFEST["hooks"]:
+        by_name.setdefault(entry["name"], []).append(entry)
+    return by_name
+
+
 def test_installed_names_apply_the_manifest_whitelist() -> None:
+    """A NAME is installed on a host iff at least one of its registrations
+    ships there. `hosts` is per registration, and since #1337 a name can mix
+    them — `second-failure-advisory` ships `PostToolUse` everywhere and
+    `PostToolUseFailure` to claude only, so the name IS installed on codex.
+    A per-entry reading would call that a leak; the name-level one is what
+    the checklist consumers need (the gate's text is present on that host)."""
     for host in sorted(_declared_hosts()):
         installed = hosts.installed_hook_names(host)
         assert installed is not None
-        for entry in MANIFEST["hooks"]:
-            whitelist = entry.get("hosts")
-            expected = whitelist is None or host in whitelist
-            assert (entry["name"] in installed) is expected, (
-                f"{entry['name']} on {host}: hosts={whitelist}"
+        for name, entries in _registrations_by_name().items():
+            expected = any(_entry_ships_on(e, host) for e in entries)
+            assert (name in installed) is expected, (
+                f"{name} on {host}: hosts={[e.get('hosts') for e in entries]}"
             )
+
+
+def test_a_mixed_host_name_is_installed_wherever_any_leg_ships() -> None:
+    """Pin the mixed case the aggregation above exists for: a name with one
+    all-hosts registration and one claude-only registration is installed on
+    every declared host, not just claude. Without such a name in the manifest
+    the aggregation is untested, so its absence fails here too."""
+    mixed = [
+        name
+        for name, entries in _registrations_by_name().items()
+        if any(e.get("hosts") is None for e in entries)
+        and any(e.get("hosts") == ["claude"] for e in entries)
+    ]
+    assert mixed, "no mixed-host hook left — this control measures nothing (#1337)"
+    for host in sorted(_declared_hosts()):
+        installed = hosts.installed_hook_names(host)
+        assert installed is not None
+        assert set(mixed) <= installed, f"{host}: mixed-host names missing"
 
 
 def test_a_whitelisted_hook_is_absent_from_a_host_outside_its_list() -> None:
     """Positive control for the assertion above: the whitelist has to actually
-    exclude something, or an `installed` set holding every name would pass."""
+    exclude something, or an `installed` set holding every name would pass.
+    Only names whose EVERY registration is claude-only qualify — a name with
+    an all-hosts leg is installed elsewhere by that leg (see the mixed-host
+    test)."""
     claude_only = [
-        e["name"] for e in MANIFEST["hooks"] if e.get("hosts") == ["claude"]
+        name
+        for name, entries in _registrations_by_name().items()
+        if all(e.get("hosts") == ["claude"] for e in entries)
     ]
     assert claude_only, "no claude-only hook left — this control measures nothing"
     for other in sorted(_declared_hosts() - {"claude"}):
