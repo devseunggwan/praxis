@@ -168,15 +168,19 @@ interpreter startup, not hook logic. ADR-0002 collapses that group into **one**
 python3 process.
 
 - **Declaration.** `hooks/manifest.json` carries a `dispatch_groups` array of
-  `{event, matcher}` pairs. Five groups are collapsed today: `(PreToolUse,
+  `{event, matcher}` pairs. Six groups are collapsed today: `(PreToolUse,
   Bash)` — the hooks whose manifest `matcher` is exactly `Bash` (count asserted
   by `tests/hooks/_lib/test_dispatch.py::test_group_members_count_and_roles` —
   keep in sync when adding/removing an exact-`Bash` hook) — plus, since #1168,
   `(PreToolUse, Edit|Write)`, `(PreToolUse, Edit|NotebookEdit|Write)`, and
   `(PreToolUse, Bash|Edit|Write)` (secret-print-redaction-advisory,
-  block-personal-asset-leak, external-api-literal-trigger), and since #1239
+  block-personal-asset-leak, external-api-literal-trigger), since #1239
   `(PostToolUse, Bash)` (anchor-comment-gate, push-remote-ref-verify,
-  pr-thread-resolve-advisory, bypass-telemetry). A hook that fires on `Bash`
+  pr-thread-resolve-advisory, bypass-telemetry), and since #1281 `(Stop)` —
+  the matcher-less group of the twelve stdin-only Stop gates, declared as
+  `{"event": "Stop"}` and rendered with the `-` matcher sentinel;
+  `strike-counter stop` stays a standalone node beside it because it reads
+  its mode from argv (the #1199 `args` rule). A hook that fires on `Bash`
   and on other tools registers its `Bash` leg as a separate exact-`Bash`
   entry so it joins the group, and keeps its other matcher as its own
   standalone node (fan-out-scope-gate `Agent`, memory-hint
@@ -210,14 +214,23 @@ python3 process.
   run `main()` — re-points `sys.stdin` at a fresh copy of the payload per member,
   and runs each member's `main()` through the existing `_hook_runtime.fail_open`
   decorator. Member `impl.py` files are unmodified; the dispatcher adapts around
-  them.
+  them. A `body: impl.sh` member (the Stop group's completion-verify and
+  retrospect-mix-check) has no `main()` to import: `run_one` execs it as a
+  subprocess with the payload on stdin and the member deadline as its timeout,
+  with the child's own `record_fire.sh` arming switched off so the group's
+  ledger record is the only one (#1281). Members that read the current turn
+  share one transcript parse per group run (`_transcript.enable_turn_memo`).
 - **Aggregation (most-restrictive wins).** Decisions are classified
   role-agnostically by exit code / `permissionDecision` marker: any member
   `deny` (exit 2 or `"permissionDecision": "deny"`) → propagate `deny`; else any
   `ask` → propagate `ask`; else allow. Every member's stderr (advisory nudges and
   deny reasons alike) is always forwarded. Role-agnostic detection is deliberate —
   some `advisory-nudge` hooks emit `ask`/`deny` under strict modes, so a role-gated
-  split would silently drop their gate decisions.
+  split would silently drop their gate decisions. On `Stop`, blocking is carried
+  by a top-level `{"decision": "block"}` JSON instead of the exit code: every
+  blocking member's reason is merged into one block (#1169), and every advisory
+  member's top-level `systemMessage` is merged the same way and rides on the
+  block object when a sibling blocks (#1281).
 - **Fail-open** ([`ETHOS.md`](ETHOS.md)). Each member runs under `fail_open`, and
   the dispatcher's own `main()` swallows exceptions to a `0` (allow), so a crash
   in one `impl.py` cannot block the tool call or abort the other members —

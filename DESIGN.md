@@ -232,9 +232,16 @@ that could have failed it.
 - PreToolUse hooks run **in parallel**. Decision precedence is
   `deny > defer > ask > allow`. Order in `hooks/manifest.json` (and the
   generated platform `hooks.json`) is presentational.
-- Stop hooks run **sequentially in array order**:
-  `completion-verify` → `retrospect-mix-check` → `strike-counter stop`.
-  Each gate is independent; first `decision: block` wins, fix it and re-run.
+- Stop hooks run **sequentially in array order**. Since issue #1281 the
+  twelve stdin-only members form one `(Stop)` dispatch group — a single
+  `_dispatch.sh Stop -` node runs them in manifest order inside one
+  process (the two `impl.sh` members as subprocesses under the member
+  deadline) — and `strike-counter stop` follows as its own node, because it
+  reads its mode from argv, which a group cannot forward. Each gate is
+  independent. Inside the group every blocking member's reason is kept and
+  merged into one `decision: block` (issue #1169), and every advisory
+  member's `systemMessage` merges the same way, riding on the block object
+  when a sibling blocks; fix what the merged reason lists and re-run.
 - PostToolUse hooks run **sequentially**; corrective `additionalContext`
   emissions are additive, not exclusive. Inside the `PostToolUse(Bash)`
   dispatch group the manifest array order is the run order, and

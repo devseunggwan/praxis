@@ -16,8 +16,8 @@ user message or recent Bash commands.
 
 | Hook                                                          | What it reads                 | Purpose                                                                                |
 | ------------------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------- |
-| `completion-verify.sh`                                        | Last ~400 lines of transcript | Verify that a Bash verification command was run in the same turn as a completion claim |
-| `retrospect-mix-check.sh`                                     | Last ~400 lines of transcript | Confirm that retrospect Stage 3 outputs include non-memory action types                |
+| `hooks/completion-verify/completion-verify/impl.sh`           | Last ~400 lines of transcript | Verify that a Bash verification command was run in the same turn as a completion claim |
+| `hooks/completion-verify/retrospect-mix-check/impl.sh`        | Last ~400 lines of transcript | Confirm that retrospect Stage 3 outputs include non-memory action types                |
 | `hooks/preflight-gate/block-ask-end-option/impl.py`           | Most recent user message      | Detect whether the user sent a stop signal before blocking an end-option menu item     |
 | `hooks/preflight-gate/block-manufactured-action-menu/impl.py` | Most recent user message      | Detect command-intent signals to suppress unnecessary confirmation menus               |
 | `hooks/advisory-nudge/external-write-falsify-check/impl.py`   | Recent Bash commands          | Confirm a verification call precedes an external write                                 |

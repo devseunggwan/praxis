@@ -2,7 +2,8 @@
 
 Supported hosts: all
 
-`hooks/retrospect-mix-check.sh` fires on every `Stop` event and blocks the
+`hooks/completion-verify/retrospect-mix-check/impl.sh` (run by the `Stop` dispatch
+group, `hooks/_dispatch.sh Stop -`, since issue #1281) fires on every `Stop` event and blocks the
 retrospect skill's Stage 3 output from defaulting to memory-only when
 findings are tagged `tool` / `workflow` / `spec-gap`, or when memory-only
 findings ship without a structured 5-line rationale.

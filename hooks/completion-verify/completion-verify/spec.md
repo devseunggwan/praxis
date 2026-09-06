@@ -2,7 +2,8 @@
 
 Supported hosts: all
 
-`hooks/completion-verify.sh` fires on every `Stop` event and blocks assistant
+`hooks/completion-verify/completion-verify/impl.sh` (run by the `Stop` dispatch
+group, `hooks/_dispatch.sh Stop -`, since issue #1281) fires on every `Stop` event and blocks assistant
 turns that declare completion without same-turn verification evidence.
 
 ### Why this exists
