@@ -7,8 +7,9 @@ Requires: slack-or-notion-mcp (mcp matcher entry only — the Bash entry carries
 fires when an external-write body's fenced blocks carry `$` command lines with
 no counterpart among this session's Bash calls.
 
-It enforces the global `~/.claude/CLAUDE.md` clause *"Every `$` block is a
-transcription, never a composition"* at the publication surface (issue #1117).
+It enforces the clause *"Every `$` block is a transcription, never a
+composition"* ([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) at the
+publication surface (issue #1117).
 The failure it targets is specific: the **output is genuine and only the
 command line above it was composed** — a probe run three or four times, with
 the version the author *meant* to run written above the output of a different

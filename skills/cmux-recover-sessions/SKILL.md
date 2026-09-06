@@ -85,13 +85,13 @@ Ask the user via `AskUserQuestion`:
 When did the crash occur?
 1. Today (recover sessions from yesterday)
 2. Yesterday
-3. Last Friday (weekend crash)
+3. Earlier this week
 4. Custom date range
 ```
 
 - Option 1 → `--from <yesterday> --to <yesterday>`
 - Option 2 → `--from <2 days ago> --to <yesterday>`
-- Option 3 → `--from <last Monday> --to <last Friday>`
+- Option 3 → `--from <this Monday> --to <yesterday>`
 - Option 4 → Ask follow-up for start/end dates (MM-DD or YYYY-MM-DD)
 
 ### Step 3: Scan and Present Results

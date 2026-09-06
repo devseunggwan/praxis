@@ -12,11 +12,13 @@ runs, instead of letting it fail and requiring manual recovery.
 
 ## Why this exists
 
-Issue #798. The praxis `worktree-merge-cleanup` skill is the on-demand home for
-the required manual sequence (remove the head-branch worktree, then merge)
-after this exact failure mode recurred across PRs #147, #170-173, #175, and
-#796 in this project — six documented occurrences of the same deterministic
-git constraint being rediscovered at merge time instead of checked before it.
+`gh pr merge --delete-branch` fails deterministically when the head branch is
+still checked out in a worktree, and the check is cheap to run first — yet the
+constraint kept being rediscovered at merge time instead of checked before it.
+The praxis `worktree-merge-cleanup` skill is the on-demand home for the
+required manual sequence (remove the head-branch worktree, then merge) after
+this exact failure mode recurred across PRs #147, #170-173, #175, and #796 in
+this project — six documented occurrences (issue #798).
 
 A retrospect session on the PR #796 merge (2026-07-16) root-caused why the
 existing `feedback_worktree_context_pre_git_op.md` memory never prevented the

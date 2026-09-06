@@ -82,35 +82,6 @@ class TestLoadTranscript:
 
 
 # ---------------------------------------------------------------------------
-# load_transcript_objs / read_transcript_tail (bounded readers)
-# ---------------------------------------------------------------------------
-
-class TestBoundedReaders:
-    def test_objs_keeps_non_dicts_and_skips_bad_lines(self, tmp_path):
-        path = _write_jsonl(tmp_path, [_user(text="hi"), json.dumps([1]), "broken"])
-        objs = T.load_transcript_objs(path, max_bytes=1 << 20)
-        assert len(objs) == 2  # dict + list survive, broken line skipped
-        assert isinstance(objs[1], list)
-
-    def test_objs_over_max_bytes_returns_none(self, tmp_path):
-        path = _write_jsonl(tmp_path, [_user(text="x" * 100)])
-        assert T.load_transcript_objs(path, max_bytes=10) is None
-
-    def test_objs_missing_file_returns_none(self):
-        assert T.load_transcript_objs("/nonexistent/x.jsonl", max_bytes=100) is None
-
-    def test_tail_returns_last_n_lines(self, tmp_path):
-        path = _write_jsonl(tmp_path, [f'{{"i": {i}}}' for i in range(10)])
-        tail = T.read_transcript_tail(path, max_lines=3, max_bytes=1 << 20)
-        assert tail is not None
-        assert tail.splitlines() == ['{"i": 7}', '{"i": 8}', '{"i": 9}']
-
-    def test_tail_over_max_bytes_returns_none(self, tmp_path):
-        path = _write_jsonl(tmp_path, ['{"k": "v"}'] * 5)
-        assert T.read_transcript_tail(path, max_lines=2, max_bytes=3) is None
-
-
-# ---------------------------------------------------------------------------
 # get_current_turn
 # ---------------------------------------------------------------------------
 
@@ -534,10 +505,16 @@ _CONSUMERS = {
     # Same whole-session rationale as pr-report-destination-gate above (#1113).
     HOOKS / "completion-verify" / "pr-anchor-existence-gate" / "impl.py":
         ["reduce_transcript_resumable", "stop_scan_cursor_path"],
+    # Matches search commands in the last N lines only; reads the tail from the
+    # end instead of loading up to 50 MB to keep 400 lines (#1279).
     HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
-        ["read_transcript_tail"],
-    # Whole-session scan under a byte cap, needle-prefiltered (#1277).
+        ["tail_lines", "TranscriptReadError"],
+    # Whole-session scans under a byte cap, needle-prefiltered (#1277, #1312).
     HOOKS / "preflight-gate" / "block-commit-without-codex-review" / "impl.py":
+        ["iter_transcript_bounded", "TranscriptReadError"],
+    HOOKS / "preflight-gate" / "skill-gate-commands" / "impl.py":
+        ["iter_transcript_bounded", "TranscriptReadError", "json_needle"],
+    HOOKS / "advisory-nudge" / "pre-commit-staged-file-enumeration" / "impl.py":
         ["iter_transcript_bounded", "TranscriptReadError"],
     HOOKS / "preflight-gate" / "block-ask-end-option" / "impl.py":
         ["read_last_user_message"],
@@ -579,6 +556,8 @@ _CONSTANT_CONSUMERS = {
         ["TRANSCRIPT_SCAN_LINES"],
     HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES", "REJECTION_PHRASE"],
+    HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
+        ["TRANSCRIPT_SCAN_LINES"],
 }
 
 
@@ -774,6 +753,47 @@ class TestTailReaders:
 
     def test_iter_transcript_missing_file_yields_nothing(self, tmp_path):
         assert list(T.iter_transcript(str(tmp_path / "absent.jsonl"))) == []
+
+    def test_iter_transcript_needle_skips_lines_without_it(self, tmp_path, monkeypatch):
+        """A line without the needle never reaches `json.loads`."""
+        # The needle is a pre-parse reject (#1278): a line without it is never
+        # handed to json.loads, one with it still goes through the full parse
+        # and dict check. Counted through the parser so the test cannot pass
+        # on a filter that merely drops the yielded dicts afterwards.
+        path = _write_jsonl(tmp_path, [
+            _user(text="plain"),
+            _asst_tool_use("A1", "toolu_1", "Bash", {"command": "ls"}),
+            'not json but has "tool_use"',
+            _user(text="another"),
+        ])
+        calls = []
+        real = T.json.loads
+
+        def counting(s, *a, **k):
+            """Record every string handed to the parser, then parse it."""
+            calls.append(s)
+            return real(s, *a, **k)
+
+        monkeypatch.setattr(T.json, "loads", counting)
+        got = list(T.iter_transcript(path, needle='"tool_use"'))
+        assert len(got) == 1 and got[0]["uuid"] == "A1"
+        assert len(calls) == 2  # the tool_use record and the non-JSON line only
+
+    def test_iter_transcript_any_of_needle(self, tmp_path):
+        """A tuple needle keeps a line carrying any one of its tokens."""
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "t1", "Bash", {"command": "ls"}),
+            _asst_tool_use("A2", "t2", "Agent", {"prompt": "review"}),
+            _asst_tool_use("A3", "t3", "Skill", {"skill": "x"}),
+        ])
+        got = [e["uuid"] for e in T.iter_transcript(path, needle=('"Agent"', '"Skill"'))]
+        assert got == ["A2", "A3"]
+
+    def test_iter_transcript_without_needle_is_unchanged(self, tmp_path):
+        """No needle (or `needle=None`) yields every record as before."""
+        path = _write_jsonl(tmp_path, [_user(text="a"), _user(text="b")])
+        assert list(T.iter_transcript(path)) == list(T.iter_transcript(path, needle=None))
+        assert len(list(T.iter_transcript(path))) == 2
 
 
 class TestCappedScanFailsOpen:
@@ -979,6 +999,21 @@ class TestTailLines:
         path.write_bytes(b'{"ok": 1}\n\xff\xfe{"bad": 1}\n')
         got = T.tail_lines(str(path), 2)
         assert got[0] == '{"ok": 1}' and "\ufffd" in got[1]
+
+
+class TestTailLinesStrict:
+    def test_strict_raises_where_default_answers_empty(self, tmp_path):
+        """`strict=True` raises on an unreadable path instead of folding it to `[]`."""
+        absent = str(tmp_path / "absent.jsonl")
+        assert T.tail_lines(absent, 3) == []
+        with pytest.raises(T.TranscriptReadError):
+            T.tail_lines(absent, 3, strict=True)
+
+    def test_strict_keeps_the_empty_file_answer(self, tmp_path):
+        """An empty but readable file is still `[]` under `strict=True`."""
+        path = tmp_path / "empty.jsonl"
+        path.write_bytes(b"")
+        assert T.tail_lines(str(path), 3, strict=True) == []
 
 
 class TestReduceTranscriptResumable:

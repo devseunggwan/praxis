@@ -8,8 +8,9 @@ Previously these JSONL transcript readers were re-implemented per hook:
     merge-state-claim-gate (Stop hooks)
   - _read_last_user_message duplicated across block-ask-end-option,
     block-manufactured-action-menu (PreToolUse AskUserQuestion gates)
-  - bounded readers (_read_transcript_tail, _load_transcript_objs) in
-    block-gh-issue-create-without-dup-search, block-sciomc-finding-commit
+  - bounded whole-file readers (_read_transcript_tail, _load_transcript_objs)
+    in block-gh-issue-create-without-dup-search, block-sciomc-finding-commit —
+    both since retired for the backward `tail_lines` reader (#1240, #1279)
   - _TRANSCRIPT_SCAN_LINES = 400 re-declared in external-write-falsify-check,
     pre-output-falsification-gate
 
@@ -37,11 +38,9 @@ last-user-message extraction both skip them.
 Public API:
   TRANSCRIPT_SCAN_LINES                                  — default tail window
   load_transcript(path)                                  -> list[dict]
-  iter_transcript(path)                                  -> Iterator[dict]
+  iter_transcript(path, needle=None)                     -> Iterator[dict]  (needle: str | tuple, any-of)
   iter_transcript_bounded(path, max_bytes, needle=None)  -> Iterator[dict]
   json_needle(value)                                     -> bytes | None
-  load_transcript_objs(path, max_bytes)                  -> list | None
-  read_transcript_tail(path, max_lines, max_bytes)       -> str | None
   load_recent_events(path, min_events, max_bytes)        -> list[dict]
   load_current_turn(path, max_bytes)                     -> list[dict]
   get_current_turn(events)                               -> list[dict]
@@ -91,7 +90,7 @@ def load_transcript(path: str) -> list[dict]:
     return events
 
 
-def iter_transcript(path: str):
+def iter_transcript(path: str, needle: str | tuple[str, ...] | None = None):
     """Yield each event dict in `path`, one line at a time. Fail-open.
 
     Same parse contract as `load_transcript` (non-JSON and non-dict lines are
@@ -99,13 +98,32 @@ def iter_transcript(path: str):
     whole transcript in memory. For a consumer that genuinely must see the
     whole session but can reduce as it goes — a 224MB session materialized as
     a list cost 741MB of RSS per Stop hook (issue #1076).
+
+    `needle` is a literal every record the caller can use must contain, or a
+    tuple of them (any-of), so a line without one is rejected before
+    `json.loads` (issue #1278). The substring test runs in C; the parse is
+    what a whole-session walk actually pays for (42,000 parses cost 440 ms on
+    a 36 MB session). It is a necessary condition only: the caller still
+    checks the parsed record, so a needle that appears in unrelated text costs
+    a parse, never a wrong answer.
+
+    Write the needle as the exact JSON token, delimiting quotes included —
+    `'"tool_use"'`, not `'tool_use'`: the bare form also matches
+    `"tool_use_id"` on every tool_result line, the largest lines in a
+    session, and the filter stops filtering. Keep it to characters the
+    encoder leaves alone inside a string value (no backslash, inner quote,
+    control character, or non-ASCII under `ensure_ascii`), or it will miss
+    records that do match.
     """
+    needles = (needle,) if isinstance(needle, str) else needle
     try:
         f = open(path, encoding="utf-8", errors="replace")
     except OSError:
         return
     with f:
         for line in f:
+            if needles is not None and not any(n in line for n in needles):
+                continue
             line = line.strip()
             if not line:
                 continue
@@ -117,49 +135,13 @@ def iter_transcript(path: str):
                 yield obj
 
 
-def load_transcript_objs(path: str, max_bytes: int) -> list | None:
-    """Bounded loader returning raw parsed objects (dicts and non-dicts).
-
-    Returns None when the file is missing, unreadable, or larger than
-    `max_bytes` — callers treat None as "cannot scan, fail open".
-    Non-JSON lines are skipped, scanning continues.
-
-    The bound is enforced on the bytes actually read (not a stat()
-    pre-check): a live session can append to the transcript between a
-    stat and the read, which would defeat the contract.
-    """
-    text = _read_bounded_text(path, max_bytes)
-    if text is None:
-        return None
-    objs: list = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            objs.append(json.loads(line))
-        except (json.JSONDecodeError, ValueError):
-            continue  # skip non-JSON lines, keep scanning
-    return objs
-
-
-def read_transcript_tail(path: str, max_lines: int, max_bytes: int) -> str | None:
-    """Return the last `max_lines` lines of the transcript as raw text.
-
-    Returns None when the file is missing, unreadable, or larger than
-    `max_bytes` — callers treat None as "cannot scan, fail open".
-    The bound is enforced on the bytes actually read (see
-    `load_transcript_objs`).
-    """
-    text = _read_bounded_text(path, max_bytes)
-    if text is None:
-        return None
-    lines = text.strip().split("\n")
-    return "\n".join(lines[-max_lines:])
-
-
 def _read_bounded_text(path: str, max_bytes: int) -> str | None:
-    """Read at most `max_bytes` bytes; None when missing or over the bound."""
+    """Read at most `max_bytes` bytes; None when missing or over the bound.
+
+    The bound is enforced on the bytes actually read (not a stat() pre-check):
+    a live session can append to the transcript between a stat and the read,
+    which would defeat the contract.
+    """
     try:
         p = Path(path)
         if not p.is_file():
@@ -255,13 +237,22 @@ def _iter_lines_backwards(path: str, max_bytes: int):
         return pos == 0
 
 
-def tail_lines(path: str, max_lines: int, max_bytes: int | None = None) -> list[str]:
+def tail_lines(
+    path: str, max_lines: int, max_bytes: int | None = None, *, strict: bool = False
+) -> list[str]:
     """The last `max_lines` lines of `path`, in file order, decoded leniently.
 
     Reads from the end (see `_iter_lines_backwards`) so a hook that only
     matches against the recent tail never loads a 200 MB transcript into
     memory (issue #1240). `[]` when the file is missing or unreadable — the
     same fail-open value the former `readlines()` callers used.
+
+    `strict=True` raises `TranscriptReadError` instead of returning `[]` for
+    a missing or unreadable file, for the caller that must act on "read it
+    all, found nothing" and fail open on "could not read" — the two answers
+    `[]` folds together (issue #1279). It is one open: a probe-then-read
+    leaves a window in which a file that passed the probe is gone by the
+    read, and the gate then blocks on an emptiness it never saw.
 
     Unbounded by default: the callers' contract is "the last N lines", and a
     byte cap that stopped short would hand them a shorter window that looks
@@ -285,6 +276,8 @@ def tail_lines(path: str, max_lines: int, max_bytes: int | None = None) -> list[
             if len(out) >= max_lines:
                 break
     except TranscriptReadError:
+        if strict:
+            raise
         return []
     out.reverse()
     return out

@@ -41,7 +41,7 @@ directly from the repo root.
 ### Codex — marketplace + plugin
 
 ```bash
-# Register the local marketplace (points at this repo's .agents/plugins/marketplace.json)
+# Register this repo as a marketplace (its root is .agents/plugins/marketplace.json)
 codex marketplace add https://github.com/devseunggwan/praxis
 codex plugin install praxis
 ```
@@ -53,12 +53,21 @@ into the repo-root runtime — there is no source duplication.
 
 ### Direct skill install (fallback)
 
-When the plugin surface isn't available:
+When the plugin surface isn't available, Claude Code still loads personal
+skills from `~/.claude/skills/<skill-name>/SKILL.md` (project skills from
+`.claude/skills/`). Clone the repo and link the skill directories you want:
 
 ```bash
 git clone https://github.com/devseunggwan/praxis.git ~/projects/praxis
-claude skill add ~/projects/praxis/skills/<skill-name>
+mkdir -p ~/.claude/skills
+ln -s ~/projects/praxis/skills/<skill-name> ~/.claude/skills/<skill-name>
 ```
+
+Skills installed this way are invoked as `/<skill-name>` rather than
+`/praxis:<skill-name>`, and the hooks are not installed — this path ships
+skills only. Skills that call a bundled helper through `CLAUDE_PLUGIN_ROOT`
+(`strike`, `spec-drift`, the `cmux-*` skills) need that variable exported to
+the clone path, e.g. `export CLAUDE_PLUGIN_ROOT=~/projects/praxis`.
 
 ## Where to start
 
@@ -186,7 +195,7 @@ Most skills delegate to external agents or session managers. Install the depende
 
 | Tier | What works | What you need |
 | ------ | ----------- | --------------- |
-| **Standalone** | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `debt` needs only `git` |
+| **Standalone** | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `recover-sessions` also needs `tmux`; `debt` needs only `git` |
 | **Enhanced** | + retrospect, codex-review-wrap | + oh-my-claudecode |
 | **Full** | + all cmux-* skills | + cmux |
 | **Multi-provider** | + codex/gemini routing in cmux-delegate | + codex-cli, gemini-cli |
@@ -227,16 +236,20 @@ Generated artifacts are committed:
 - `plugins/praxis/.codex-plugin/plugin.json`
 - `plugins/praxis/{skills,hooks,scripts}` (symlinks into repo root)
 
-To add a new platform, drop a `manifests/platforms/<name>.json` file listing
-its outputs and run the build script — no changes to skills, hooks, or
+To add a new platform, add a `manifests/platforms/<name>.json` file listing
+its outputs, add its `host_id` to the `hosts` enum in
+`hooks/manifest.schema.json` (a test asserts the enum and the platform set
+are equal), and run the build script — no changes to skills, hooks, or
 existing platforms required.
 
 ## Local Development
 
-This repository should live at **`~/projects/praxis`**. CLI tools shipped by
-skills (e.g. `cmux-recover-sessions`, `claude-recover`, `cmux-save-sessions`)
-are symlinked from `~/.local/bin` into this clone, so patches you commit here
-land in the version that actually runs at the shell.
+When you work from a clone rather than the plugin cache, the CLI wrappers
+shipped by skills (`cmux-recover-sessions`, `claude-recover`,
+`cmux-save-sessions`, …) are installed as `~/.local/bin` symlinks into
+whichever clone ran `scripts/install.sh` — so a patch reaches the version that
+runs at the shell only if it lands in that clone. One clone per machine keeps
+the links honest; `verify-symlinks.sh` tells you when they are not.
 
 ```bash
 # Install / refresh CLI symlinks (idempotent)

@@ -6,14 +6,13 @@ class of drift bugs that have cost the most debugging time.
 
 ## Local development
 
-### Canonical clone path
+### Clone and CLI symlinks
 
-This repository should live at **`~/projects/praxis`**. The CLI tools shipped
-by skills (e.g. `cmux-recover-sessions`, `claude-recover`, `cmux-save-sessions`)
-are symlinked from `~/.local/bin` into this clone, so patches you commit here
-land in the version that actually runs at the shell. Keeping a
-second clone under a legacy name risks `~/.local/bin` symlinks pointing at stale
-code — a real failure mode previously hit during recover-sessions debugging.
+The CLI tools shipped by skills (e.g. `cmux-recover-sessions`,
+`claude-recover`, `cmux-save-sessions`) are symlinked from `~/.local/bin` into
+whichever clone ran `scripts/install.sh`, so a patch reaches the version that
+runs at the shell only if it lands in that clone. Keep one development clone
+per machine; a second clone silently leaves the links pointing at stale code.
 
 After every `git pull` or worktree operation, run `./scripts/verify-symlinks.sh`
 to confirm all `~/.local/bin` entries still resolve to this clone.
@@ -91,7 +90,13 @@ follow the step-by-step guide at
 ```
 skills/<skill-name>/
   SKILL.md          # spec — frontmatter + prose steps
+  references/       # optional — long procedure text split out of SKILL.md
+  <helper>          # optional — a shell/python helper the steps invoke
 ```
+
+`references/*.md` count as part of the spec for every check below: a step
+moved there still needs the runtime verification metadata, and the
+`description` budget is measured on `SKILL.md` alone.
 
 The `name` and `description` fields in the SKILL.md frontmatter are surfaced by
 the Claude Code plugin runtime, which truncates the description past a bounded
@@ -160,18 +165,23 @@ refactors and is visible to `git blame`.
 Read [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md) before writing a new
 spec. It lists fixed Claude Code limits that every skill must work within:
 
-| Constraint | Short form |
-| ------------ | ------------ |
-| `AskUserQuestion.options` max 4 items | Truncate dynamic lists to 3 + cancel |
-| `Skill(...)` cannot invoke `disable-model-invocation: true` skills | Use the underlying binary directly |
-| `Bash` cwd resets between calls | Chain with `&&` or use absolute paths |
+| § | Constraint | Short form |
+| --- | ------------ | ------------ |
+| 1 | `AskUserQuestion.options` max 4 items | Truncate dynamic lists to 3 + cancel |
+| 1a | `AskUserQuestion.questions` max 4 items | Batch into consecutive calls of ≤ 4 |
+| 2 | `Skill(...)` cannot invoke `disable-model-invocation: true` skills | Use the underlying binary directly |
+| 3 | `Agent(subagent_type=...)` cannot invoke a skill | Always `Skill(skill="praxis:<name>")` |
+| 4 | `Bash` cwd resets between calls | Chain with `&&` or use absolute paths |
+| 5 | Skill `description` truncated past ~1,024 chars | Keep `Triggers on` inside the first 500 |
 
-#### Pre-commit hook (planned)
+#### Enforcement
 
-A pre-commit hook that validates `verified-against-runtime: true` + commit body
-note for `skills/*/SKILL.md` changes is planned as a follow-up to Issue #208.
-It is not yet enforced — the frontmatter + commit body convention above is the
-current gate.
+The frontmatter half is enforced: `scripts/check-plugin-manifests.py` Rule 11
+detects a runtime-sensitive skill (external CLI, `AskUserQuestion`,
+`Skill(...)`, or a helper executable) and fails when any of the three fields
+is missing, a template placeholder, or malformed. It runs locally through
+`scripts/run-tests.sh` and in CI. The commit-body `verified:` line is a
+convention only — nothing checks it.
 
 ### Skill surface freeze (`EXPECTED_SKILLS`)
 
@@ -199,8 +209,8 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
 
 1. Survey ≥ 2 sibling implementations under `hooks/<role>/` for established
    conventions (state-key naming, payload field access, exit-code semantics)
-   before writing your spec. See **Convention Survey Before Design** in
-   global `~/.claude/CLAUDE.md`.
+   before writing your spec — the *Convention Survey Before Design* rule
+   ([`ETHOS.md` → Rules praxis carries](ETHOS.md#rules-praxis-carries)).
 2. Author the hook in its own per-hook directory:
    - Impl: `hooks/<role>/<name>/impl.py` (or `impl.sh` for body-as-sh hooks).
    - Make it executable: `chmod +x hooks/<role>/<name>/impl.py`.
@@ -292,8 +302,9 @@ under `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/praxis/praxis/<version>
 given — and a merged change is not live until
 `release → plugin update → session reload` completes.
 
-Both hops were measured on 2026-07-28 (issue #841). They are not comparable in
-size, so quote the window along with the number — an unqualified median invites
+Both hops were measured once, on 2026-07-28 (issue #841); the figures below
+are that snapshot, not a live metric. They are not comparable in size, so
+quote the window along with the number — an unqualified median invites
 the reader to apply a 14-day figure to a 7-week history:
 
 | Hop | Window | Result |
@@ -375,7 +386,7 @@ verification of the change.
 #### Canary probes
 
 Use these to confirm a hook is wired and discriminating, without performing any
-mutation. Each is a real probe used during the 2026-07-22 release-lag incident.
+mutation. Each has been used on a real release-lag investigation.
 
 1. **Fire-ledger probe** — confirm the hook fired at all, and with which
    decision. `@fail_open` hooks append JSONL records to
@@ -628,6 +639,14 @@ All four static checks — `ruff`, `mypy`, `shellcheck`, and `markdownlint` — 
 an explicit `SKIPPED:` line when the tool is not installed, so a missing
 toolchain does not block you. The corresponding CI job still runs either way,
 so install them if you want local parity.
+
+`bash scripts/run-tests.sh --doctor` tells you up front which of those
+`SKIPPED:` lines a run on your machine will produce. It prints one table of
+every external tool the runner or a sub-suite needs (`python3`, `pytest`,
+`coverage`, `mypy`, `PyYAML`, `git`, `jq`, `zsh`, `tmux`, `lsof`, `ruff`,
+`shellcheck`, `markdownlint-cli2`) with found/missing, the version when found, and the same
+install hint the `SKIPPED:` line would carry. It runs no tests and always
+exits 0.
 
 The pytest step also measures statement coverage (issue #1303). When the
 `coverage` module is importable (`pip install 'coverage==7.16.0'`, the version

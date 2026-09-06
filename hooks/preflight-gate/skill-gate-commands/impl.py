@@ -56,7 +56,6 @@ granularity as the other skill-gate hooks.
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -64,6 +63,7 @@ from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import TranscriptReadError, iter_transcript_bounded, json_needle  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import safe_tokenize  # type: ignore[import-not-found]  # noqa: E402
@@ -304,29 +304,27 @@ def _command_matches_pattern(tokens: list[str], pattern: str) -> bool:
 
 def _scan_transcript(path: str, required_skill: str) -> bool | None:
     """Return True if ``required_skill`` Skill tool_use appears in transcript,
-    False if not, None if the transcript cannot be read (caller treats None as
-    fail-open).
+    False if not, None if the transcript cannot be read or is past
+    ``_MAX_BYTES`` (caller treats None as fail-open).
+
+    Streams through ``_transcript.iter_transcript_bounded`` and parses only
+    the lines that carry the skill name as a JSON string value (issue #1312):
+    a satisfying record holds it in the tool_use's ``skill`` field, so a line
+    without the quoted token is rejected before ``json.loads``. The previous
+    shape — ``read_text().splitlines()`` and a parse per line — materialized
+    the whole session on every ``git commit`` inside the shared Bash dispatch
+    deadline (#1167). ``json_needle`` answers None for a name the default
+    encoder would escape (a non-ASCII skill name written as ``\\uXXXX`` by
+    the host), and the scan then parses every line rather than miss the
+    record and wrongly block. The reader owns the byte bound, the per-read cap
+    and the fail-open classes.
     """
     try:
-        p = Path(path)
-        if not p.is_file() or p.stat().st_size > _MAX_BYTES:
-            return None
-        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-    except (OSError, ValueError):
+        for obj in iter_transcript_bounded(path, _MAX_BYTES, json_needle(required_skill)):
+            if _has_skill_tool_use(obj, required_skill):
+                return True
+    except TranscriptReadError:  # missing, unreadable, or past _MAX_BYTES
         return None
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(obj, dict):
-            continue
-        if _has_skill_tool_use(obj, required_skill):
-            return True
     return False
 
 

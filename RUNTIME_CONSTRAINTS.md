@@ -26,17 +26,21 @@ realistic session with more than 3 enumerated items.
 
 **Workaround**: Truncate to at most 3 meaningful options, then add a 4th option
 that is either:
-- `"취소"` — abort the flow; or
-- `"Other (직접 입력)"` — fall through to a free-form follow-up question.
+- a cancel option — abort the flow; or
+- an "other / type it in" option — fall through to a free-form follow-up
+  question.
+
+The praxis skills spell these as `"취소"` and `"Other (직접 입력)"`; any
+label works, as long as the fourth slot is the escape hatch.
 
 For a dynamic list longer than 3 items, surface the top 3 most likely candidates
 (e.g., most-recently modified worktrees, most-recently touched issues) and use
 the 4th slot for "Other / cancel". Never silently drop items without telling the
 user that the list was truncated.
 
-**Verified**: 2026-05-13 / Claude Code (Sonnet 4.6) / Issue #208 — observed
-failure: `codex-review-wrap` Step 2 attempted to surface all 8 active worktrees
-as options, which is impossible per the `maxItems: 4` JSON schema constraint.
+**Verified**: 2026-05-13 / Claude Code (Sonnet 4.6) / Issue #208 — a skill
+step that passed 8 enumerated worktrees as options was rejected by the
+`maxItems: 4` schema.
 
 ### 1a. `AskUserQuestion.questions` — same hard cap of 4 items
 
@@ -111,10 +115,14 @@ the `Skill(...)` tool.
 
 ---
 
-## 4. `Bash` tool — cwd resets between invocations
+## 4. `Bash` tool — cwd resets between invocations (host-dependent)
 
 **Constraint**: Each `Bash` tool call starts with the session's original cwd.
 A `cd /some/path` in one `Bash` call does **not** persist to the next call.
+This holds on the remote (web) harness, which resets the shell explicitly;
+the local CLI's own tool description says the working directory persists
+between calls, so the behaviour is host-dependent and a skill must not rely
+on either — write every step so it is correct under both.
 
 **Why it bites skills**: Skills that split a multi-step operation across two
 `Bash` calls (cd in the first, use the new cwd in the second) will silently
@@ -130,10 +138,19 @@ error message, because the wrong directory is still a valid path.
 Never split a cwd-sensitive operation across multiple `Bash` calls. If the
 operation is too long for one call, restructure it to use absolute paths.
 
-**Verified**: 2026-05-13 / Claude Code (Sonnet 4.6) / Issue #208 / global
-`CLAUDE.md` rule "Bash Redirect on Existing Path Requires Read-First" and
-"worktree-context-pre-git-op" memory — the per-call cwd reset is the root
-cause of the class of bugs these rules address.
+**Verified**: 2026-05-13 / Claude Code (Sonnet 4.6) / Issue #208 — the per-call
+cwd reset was the root cause of a class of wrong-directory git operations the
+author had previously papered over with prompt-layer rules.
+
+**Re-verified**: 2026-09-05 / Claude Code remote (web) session / Issue #1286 —
+`cd /tmp && pwd` printed `/tmp` and the harness appended `Shell cwd was reset
+to /home/user/praxis` to the result; the next call's `pwd` printed
+`/home/user/praxis`. That appended line is the same harness note
+`second-failure-advisory` strips as noise (issue #1042), so the reset is a
+documented property of this host. The local CLI's Bash tool description
+states the opposite ("Working directory persists between calls"); no local
+measurement has been recorded here, so treat persistence as unverified and
+keep the workaround.
 
 ---
 
@@ -181,5 +198,7 @@ ceiling and leave headroom.
 3. Add an entry using the four-field structure above.
 4. Open a PR referencing the issue where you observed it.
 
-Pre-commit hook validation for this file: planned for a future PR (tracked in
-Issue #208).
+The skill-side half of this convention — `verified-against-runtime` and its
+two companion fields on every runtime-sensitive `SKILL.md` — is enforced by
+`scripts/check-plugin-manifests.py` Rule 11. Entries in this file are added
+by hand.

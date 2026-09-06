@@ -21,7 +21,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 
 | Tier               | What works                                               | Dependencies                            |
 | ------------------ | -------------------------------------------------------- | --------------------------------------- |
-| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `debt` needs only `git` |
+| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `recover-sessions` also needs `tmux`; `debt` needs only `git` |
 | **Enhanced**       | + retrospect, codex-review-wrap                          | + oh-my-claudecode                      |
 | **Full**           | + all cmux-* skills                                      | + cmux                                  |
 | **Multi-provider** | + codex/gemini routing in cmux-delegate                  | + codex-cli, gemini-cli                 |
@@ -60,9 +60,9 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 
 | Skill           | Purpose                                                                                                               |
 | --------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `strike`        | Declare a rule violation — session-scoped counter, escalating signal (1진 warning → 2진 review → 3진 Stop-hook block) |
+| `strike`        | Declare a rule violation — session-scoped counter, escalating signal (warning → review → Stop-hook block at strike 3) |
 | `strikes`       | Show current strike count + recorded violation reasons for the active session                                         |
-| `reset-strikes` | Reset the session strike counter to 0 after a 3진 block (required to unblock responses)                               |
+| `reset-strikes` | Reset the strike counter after a strike-3 block (required to unblock responses)                         |
 
 ### Session Management
 
@@ -77,7 +77,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 
 ## Hooks
 
-Praxis ships a PreToolUse/PostToolUse/Stop/UserPromptSubmit hook suite
+Praxis ships a PreToolUse/PostToolUse/Stop/UserPromptSubmit/SessionStart hook suite
 that structurally enforces the rules in [`ETHOS.md`](ETHOS.md);
 [`DESIGN.md`](DESIGN.md) holds the shared contracts. Per-hook specs live at
 [`hooks/<role>/<name>/spec.md`](hooks/), indexed by
@@ -124,7 +124,7 @@ Clone path, `~/.local/bin` symlink install/verify, CLI-tools table
   **instead of** `Closes #N`. GitHub's `Closes` keyword auto-closes the issue
   on merge regardless of deferred items inside the issue body, orphaning their
   tracking thread.
-- **Full-scope PR**: `Closes #N` per global CLAUDE.md (Issue & PR Rules).
+- **Full-scope PR**: `Closes #N` — GitHub auto-closes the issue on merge.
 - **Agent prompts that delegate PR authorship**: do not hardcode `Closes #N` —
   instruct the agent to choose `Closes` vs `Refs` based on whether the PR
   addresses the issue's full scope.

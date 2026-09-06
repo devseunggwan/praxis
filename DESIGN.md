@@ -146,8 +146,10 @@ the remaining three ask what losing it costs:
    contention is real, its consequence is not; a lock here buys latency on
    every tool call and nothing else.
 
-The seven consumers as of #951. Every row's Q0 verdict below is a live
-measurement, not an inference — `jq-config` in #970, the other six in #1034:
+Every consumer of `resolve_cache_file` gets a row here — a new consumer is
+classified, not reflexively locked. The first seven rows were measured live
+(`jq-config` in #970, the other six in #1034); the last two were classified
+from their implementation and carry no measurement yet:
 
 | Hook | State | Loss consequence | Locked |
 | --- | --- | --- | --- |
@@ -158,41 +160,19 @@ measurement, not an inference — `jq-config` in #970, the other six in #1034:
 | `preflight-gate/worktree-prune-snapshot-gate` | single `snapshot_taken` flag, only ever set true | concurrent writers write the identical value | no — Q0 PASS(live), 0/100 (#1034) |
 | `preflight-gate/session-intent` | set-once intent flags | written only from `UserPromptSubmit`, which is serialized per session; the `PreToolUse` gate path is read-only | no — Q0 PASS(live), 0/100 (#1034) |
 | `preflight-gate/retrospect-active-marker` | marker existence | whole-file write and `unlink`, no read-modify-write to lose | no — Q0 PASS(live), 0/100 (#1034) |
+| `preflight-gate/foreground-poll-loop-guard` | per-session registry of background waiters (start time, armed flag, command display string) | one advisory does not fire — Q3; stages through a per-pid name, so Q0 does not apply | no — classified from the impl, not measured |
+| `preflight-gate/approval-premise-reread-gate` | single-use premise ack file | consumed by an atomic `os.rename` claim; no read-modify-write to lose | no — classified from the impl, not measured |
 
 ### Q0, measured (issue #1034)
 
-Issue #970 graded the other six against Q0 only far enough to see that it
-moved no other row, and recorded that as follow-up. It was an author
-assertion, so #1034 measured it: 100 concurrent pairs of the real impl per
-row against one state file, each row paired with a negative control that
-removes only the property its exemption rests on. The control is not optional. A 0 with no arm
-that can fail it does not distinguish "exempt" from "the harness never reached
-the state file" — the trap hit during #1017 verification, where a wrong state
-path made both arms read 100/100.
-
-`second-failure-advisory` and `pre-edit-md-escape-advisory` do share a staging
-name, and the exemption claimed the lock covers the staging window. It does:
-0/100 corrupt under the lock, against 4/100 for `pre-edit-md-escape-advisory`
-with the lock neutered. (`second-failure-advisory`'s neutered arm loses an
-increment rather than corrupting on this scheduling, which its own case
-asserts.) `worktree-prune-snapshot-gate`, `retrospect-active-marker` and
-`session-intent` stage through `tempfile.mkstemp`: 0/100 each, against 100/100
-with `mkstemp` forced to one shared name. Every one of those pairs was
-provably overlapped — both children reported through the post-read barrier —
-so the 0s are measurements, not misses.
-
-`postcompact-context` did not hold. Its exemption priced the *consequence*
-(one uuid, so a corrupted read costs what a lost one does) and never checked
-the *mechanism*: `write_state` truncated and wrote the final name, staging
-through nothing at all, which makes the state file its own staging file — the
-degenerate case of the shared `<path>.tmp` above. 5 of 300 unforced pairs
-published `{"last_compact_uuid_emitted": "short-uuid"}uuuu…"}`, a short write
-over a longer sibling's tail, which `read_state` answers with an empty dict.
-Q0's remedy now applies in full: `state_lock` around the read-modify-write,
-and `tempfile.mkstemp` staging under it. Re-measured after the fix, 0/300. The
-staging name is what carries that — with it in place and the lock neutered,
-200 provably overlapping pairs corrupted 0 times and split their surviving
-uuid 103/97, the lost update Q3 already prices at one re-injection.
+Every Q0 verdict in the table above is a measurement, not an inference. The
+measurement record — 100 concurrent pairs of the real impl per row, each
+paired with a negative control that removes only the property its exemption
+rests on, and the `postcompact-context` corruption it caught — lives in
+[`docs/hook-state-concurrency-measurements.md`](docs/hook-state-concurrency-measurements.md).
+The rule it established, which applies to every future row: **a 0 with no
+control arm that can fail it is not a measurement** — it cannot distinguish
+"exempt" from "the harness never reached the state file".
 
 `hooks/_lib/_state_lock.py` is the primitive: `with state_lock(path):` around
 the read *and* the write, `fcntl.flock` on a `<path>.lock` sibling. Readers
@@ -232,16 +212,20 @@ that could have failed it.
 - PreToolUse hooks run **in parallel**. Decision precedence is
   `deny > defer > ask > allow`. Order in `hooks/manifest.json` (and the
   generated platform `hooks.json`) is presentational.
-- Stop hooks run **sequentially in array order**. Since issue #1281 the
-  twelve stdin-only members form one `(Stop)` dispatch group — a single
-  `_dispatch.sh Stop -` node runs them in manifest order inside one
-  process (the two `impl.sh` members as subprocesses under the member
-  deadline) — and `strike-counter stop` follows as its own node, because it
-  reads its mode from argv, which a group cannot forward. Each gate is
-  independent. Inside the group every blocking member's reason is kept and
-  merged into one `decision: block` (issue #1169), and every advisory
-  member's `systemMessage` merges the same way, riding on the block object
-  when a sibling blocks; fix what the merged reason lists and re-run.
+- Stop hooks run **sequentially in array order**. The order is fixed by
+  `scripts/check-plugin-manifests.py` Rule 4 (`expected_stop`):
+  `completion-verify` and `retrospect-mix-check` first, then the
+  completion-verify evidence gates, and `strike-counter stop` last —
+  thirteen entries at the time of writing; the manifest is the list. Since
+  issue #1281 the twelve stdin-only entries form one `(Stop)` dispatch
+  group — a single `_dispatch.sh Stop -` node runs them in that order
+  inside one process (the two `impl.sh` members as subprocesses under the
+  member deadline) — and `strike-counter stop` follows as its own node,
+  because it reads its mode from argv, which a group cannot forward. Each
+  gate is independent. Inside the group every blocking member's reason is
+  kept and merged into one `decision: block` (issue #1169), and every
+  advisory member's `systemMessage` merges the same way, riding on the block
+  object when a sibling blocks; fix what the merged reason lists and re-run.
 - PostToolUse hooks run **sequentially**; corrective `additionalContext`
   emissions are additive, not exclusive. Inside the `PostToolUse(Bash)`
   dispatch group the manifest array order is the run order, and
@@ -252,8 +236,8 @@ that could have failed it.
 
 1. Survey ≥2 sibling implementations under `hooks/<role>/` for the
    convention (state-key naming, payload field access, exit-code
-   semantics). See the `Convention Survey Before Design` rule in global
-   `~/.claude/CLAUDE.md`.
+   semantics) — the *Convention Survey Before Design* rule
+   ([`ETHOS.md` → Rules praxis carries](ETHOS.md#rules-praxis-carries)).
 2. Author `hooks/<role>/<name>/impl.py` (or `impl.sh` for body-as-sh),
    make it executable, add the `sys.path` preamble for `hooks/_lib` and
    import from `_shell_tokenize` / `_subst` / `_compound` / `_roles` (the

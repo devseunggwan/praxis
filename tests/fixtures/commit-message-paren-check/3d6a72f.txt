@@ -1,0 +1,140 @@
+perf(hooks): shell-append fire records and bound the silent-pass scan (#1207)
+
+* perf(hooks): shell-append fire records and bound the silent-pass scan
+
+record_fire.sh는 매 fire마다(단순 pass 포함) python3 -c 인터프리터를
+콜드 스타트했고, scan-silent-pass.sh는 트랜스크립트 전체를 grep하며
+클래스당 jq를 5회씩 스폰했다. 두 핫 패스를 다음과 같이 줄인다.
+
+- record_fire.sh: JSONL append를 순수 셸로 전환. _fire_ledger가 쓰는
+  레코드와 키 순서·구분자까지 바이트 호환(printf 한 줄, O_APPEND `>>`,
+  라인 ~200B << PIPE_BUF라 동시 append에도 라인이 찢기지 않음).
+  PRAXIS_FIRE_TELEMETRY_FILE 오버라이드 → dev checkout → 실 원장
+  경로 해석, 비정규 파일 거부, 디렉터리 생성 의미를 그대로 유지.
+  python3는 두 콜드 패스에만 남김: (1) JSON-safe 문자셋을 벗어난
+  필드 값(실제 이스케이프 필요 — 배포된 훅에서는 발생하지 않음),
+  (2) UTC 하루 첫 기록 시의 보존 스윕(prune_telemetry 재사용).
+  20회 연속 기록 기준 0.80s → 0.16s.
+
+- scan-silent-pass.sh: 트랜스크립트 읽기를 tail -n 400으로 바운드
+  (completion-verify·retrospect-mix-check와 동일한 정밀도 트레이드),
+  role 매치는 콜론 뒤 공백을 허용. 카탈로그 클래스 반복은 jq 1회의
+  @tsv 프로젝션으로 통합(스폰 14 → 2), printf %b로 @tsv 이스케이프를
+  복원해 향후 백슬래시 포함 패턴도 왕복 보존.
+
+- 테스트: 셸/파이썬 레코드 바이트 패리티, 이스케이프 폴백 경로,
+  병렬 append 무결성 스모크, tail 바운드 내 탐지 + 바운드 밖은
+  의도적 스코프 제외 문서화, role 공백 허용 케이스 추가.
+  _fire_ledger.py 부재 시 이제 셸 패스가 기록을 남기므로 해당
+  케이스의 기대를 드롭이 아닌 기록으로 갱신.
+
+검증: bypass-review fire-rate가 파이썬/셸 기록 원장에서 동일 리포트,
+전체 스위트 green, shellcheck --severity=warning 통과.
+
+Refs #1151 (stdin payload jq 스폰 통합은 별도 스코프)
+Closes #1183
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PBTDLnV7eaAqz7GGuSD5X7
+
+* fix(hooks): review round 1 — tsv field integrity, session-scoped scan, resolver parity
+
+PR #1207 리뷰에서 나온 5개 지적(필드 시프트는 재현 확인) 반영.
+
+- scan-silent-pass.sh: 탭은 IFS 공백 문자라 `IFS=탭 read`가 연속 탭을
+  하나로 접어, 빈 중간 필드(severity 없음)가 뒤 필드를 왼쪽으로
+  시프트시켰다 — grep_pattern이 severity 자리로, cooccurs_with가
+  primary 패턴으로 실행되는 오검출 재현됨. @tsv 산출 후 구분자만
+  `tr '\t' '\037'`로 unit separator로 치환해 읽는다(비공백 IFS는 빈
+  필드를 보존; 값 내부의 리터럴 탭은 @tsv가 이미 \t로 이스케이프해
+  실제 탭은 구분자뿐). 빈 중간 필드 시프트 방지 + 출력 보존 테스트 추가.
+
+- scan-silent-pass.sh: tail -n 400 바운드 철회. 이 스캐너의 계약은
+  세션 스코프 탐지다 — severity=hard 히트(자격증명 표시 등)는 세션
+  초반에 있었어도 Stop에서 차단해야 하고, churn co-occurrence 쌍은
+  작은 tail 윈도우 안에 거의 같이 안 잡힌다. 전체를 한 번의 선형
+  grep으로 읽는 구조는 유지(실 성능 이득은 jq 통합이 담당). 세션 초반
+  히트 탐지 회귀 가드 테스트로 교체.
+
+- record_fire.sh: dev-checkout 프로브를 `cd -P`/`pwd -P` 물리 해석으로
+  전환 — _fire_ledger는 Path.resolve()(물리)를 쓰므로, 심링크된 hooks
+  레이아웃에서 논리 해석은 파이썬과 다른 루트를 프로브해 원장이 두
+  디렉터리로 갈라진다. r1(_lib 실체)/r2(.git + _lib 심링크) 픽스처로
+  파이썬과 동일 대상에 기록됨을 검증.
+
+- record_fire.sh: PRAXIS_FIRE_TELEMETRY_DISABLE 비교와
+  PRAXIS_FIRE_TELEMETRY_FILE 사용 전에 파이썬 str.strip()과 동일하게
+  공백을 트리밍(_praxis_trim, 서브셸 없는 순수 셸) — 패딩된 '1 '이
+  기록을 계속하거나 패딩된 경로가 레코드를 두 파일로 가르는 괴리 제거.
+  패딩 disable/패딩 오버라이드 테스트 추가.
+
+검증: 두 테스트 파일 18/18·19/19, bypass-review fire-rate 패리티 재확인,
+20회 연속 기록 0.131s(회귀 없음), 전체 스위트 green, shellcheck 통과.
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PBTDLnV7eaAqz7GGuSD5X7
+
+* fix(hooks): match ledger creation mode to Python writer
+
+Codex review (PR #1207 round 2): the shell fast path's `>>` requests mode
+0666 at creation, narrowed only by the ambient umask. The Python writer
+(_fire_ledger._atomic_append) requests 0o644 explicitly via
+os.open(path, flags, 0o644). Under a permissive umask (000/002) that gap
+survives into the file — a shell-created daily ledger lands 0666/0664
+(group/other-writable) where the Python-created one is 0644.
+
+Chose "set the umask around create" over "create then chmod": chmod-after
+leaves a window where the freshly created file is group/other-writable
+before the chmod lands, and an attacker (or another process) racing the
+open could read/write it in that window. Wrapping the create in a
+temporarily widened umask (OR 022 onto whatever the caller's umask already
+masks) closes that window entirely, since the mode is fixed atomically by
+the umask in effect at open(). OR rather than replace preserves a STRICTER
+ambient umask (e.g. 077 stays 077, matching what os.open(path, flags,
+0o644) would also produce under that umask) instead of loosening it to
+plain 022.
+
+Scoped to the _rf_first=1 branch only (the file's creation), so the
+per-fire hot path this PR optimizes is untouched — verified via a 200-fire
+benchmark showing no regression.
+
+Confidence: high
+
+* fix(hooks): fall back to passwd-db home when HOME unset
+
+Codex review (PR #1207 round 2): with $HOME unset and no `.git` marker at
+the checkout root, the shell writer built "${HOME:-}/.praxis/telemetry" as
+"/.praxis/telemetry" — root-owned, so `mkdir -p` fails for a normal user
+and every fire record was silently dropped. _fire_ledger.resolve_path()
+never hits this: Python's Path.home() falls back to the passwd database
+(pwd.getpwuid) rather than treating an unset HOME as empty.
+
+Added _praxis_home_fallback(), portable across the two hosts this repo
+targets: `getent passwd "$(id -un)"` on Linux, `dscl . -read
+"/Users/$(id -un)" NFSHomeDirectory` on macOS (no getent there). When
+neither is available, or the lookup returns no match, the write is
+refused outright rather than falling through to the unwritable
+"${HOME:-}/..." path again — silent data loss was the defect; the fix
+does not trade it for a different silent path, it fails the write
+explicitly and stays fail-open for the caller (same contract as every
+other guard clause in this file).
+
+Only reached when $HOME is unset, so this never touches the per-fire hot
+path this PR optimizes.
+
+Confidence: high
+
+* test(hooks): probe file mode portably
+
+The mode assertions used a BSD-first `stat -f %OLp || stat -c %a`
+chain. GNU stat reads -f as "filesystem status", which SUCCEEDS on a
+plain file, so the || never reached the GNU form and the test captured
+"  File: ..." instead of a mode — green on macOS, red on CI.
+
+Confidence: high
+Not-tested: the GNU branch cannot run on this host; CI covers it
+Session-Id: c044205b-803f-48b1-acc9-aab9aa5e25e1
+
+---------
+
+Co-authored-by: Claude <noreply@anthropic.com>

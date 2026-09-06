@@ -23,7 +23,7 @@ Indirect phrasing ("take a break / prioritize other work", "pause for now",
 the option-label level. This hook detects both pattern classes so that the
 spirit of the rule survives phrasing variation.
 
-Text rules in global `~/.claude/CLAUDE.md` or skill bodies alone cannot enforce this — the
+Text rules in a `CLAUDE.md` or a skill body alone cannot enforce this — the
 `loaded != retrieved` limit. This hook enforces the rule at the tool
 boundary, where the check runs mechanically regardless of retrieval state.
 
@@ -32,8 +32,8 @@ boundary, where the check runs mechanically regardless of retrieval state.
 The hook below enforces the rule mechanically at the tool boundary. This
 section is the human-facing decision logic it backs — the reference an
 agent consults when deciding whether an `AskUserQuestion` call should carry
-an end option at all. Formerly this table lived in always-loaded
-`~/.claude/CLAUDE.md`; it moved here so the always-loaded surface can shrink
+an end option at all. Formerly this table lived in the author's always-loaded
+`CLAUDE.md`; it moved here so the always-loaded surface can shrink
 to a one-line pointer while the enforcement stays at the tool boundary.
 
 Do **not** mechanically transcribe "end here" / "session end" / "여기서 종료"
@@ -64,8 +64,8 @@ recognizes, or the call is blocked at the tool boundary.
 | Natural next actionable step clearly exists in immediate context | Surface that step, or wait for explicit user direction |
 
 **Skill-guide boilerplate handling:** even when a skill's "Step N — chaining"
-section lists an "end here" option, this rule takes precedence (global
-CLAUDE.md → `Rule Conflict Precedence — CLAUDE.md over Skills`). Apply the
+section lists an "end here" option, this rule takes precedence (*Rule
+Conflict Precedence — CLAUDE.md over Skills*, [`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)). Apply the
 context table; omit or include based on signal.
 
 **Exceptions (skills where ending IS the intent):** in issue-closing skills

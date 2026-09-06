@@ -279,12 +279,32 @@ max_age_sec=$(( MAX_AGE_MIN * 60 ))
 
 scanned=0; reaped=0; gc_dirs=0; skipped=0
 
-# mtime in epoch seconds (BSD/macOS stat). Returns empty on failure (including a
-# file that vanished in a race) WITHOUT propagating a non-zero exit — otherwise
-# the `m="$(mtime ...)"` assignment would trip `set -e` and abort the whole run
+# mtime in epoch seconds. Returns empty on failure (including a file that
+# vanished in a race) WITHOUT propagating a non-zero exit — otherwise the
+# `m="$(mtime ...)"` assignment would trip `set -e` and abort the whole run
 # before the caller's safe-default branch executes. Callers treat empty as
 # "unknown" and KEEP.
-mtime() { stat -f %m "$1" 2>/dev/null || true; }
+#
+# Portable across the stat dialects (issue #1302): BSD/macOS `stat -f %m` first
+# (the platform this script targets), then GNU coreutils `stat -c %Y`, then
+# python3, else empty. Each result is captured and accepted only when it is a
+# bare integer, never echoed through raw: on GNU `-f` means *filesystem*
+# status, and `stat -f %m` there exits 1 yet still writes a multi-line block
+# to stdout, so a plain `a || b` chain would be fine on exit code and wrong
+# on output.
+mtime() {
+  local m
+  m="$(stat -f %m "$1" 2>/dev/null)" || m=""
+  case "$m" in ''|*[!0-9]*)
+    m="$(stat -c %Y "$1" 2>/dev/null)" || m="" ;;
+  esac
+  case "$m" in ''|*[!0-9]*)
+    m="$(python3 -c 'import os, sys; print(int(os.stat(sys.argv[1]).st_mtime))' "$1" 2>/dev/null)" || m="" ;;
+  esac
+  case "$m" in ''|*[!0-9]*) m="" ;; esac
+  [[ -z "$m" ]] || echo "$m"
+  return 0
+}
 
 # Collect a pid and all its descendants (children-first) into a space list.
 # Captured ONCE before signalling so the SIGKILL pass cannot miss a child that

@@ -113,7 +113,13 @@ sibling worktrees that were on screen and unread become a number.
    tokenizing every Bash command of a 46MB session costs 1.8s, and all
    PreToolUse(Bash) members share one dispatch deadline, where one slow member
    starves every later one. Reading is streamed via
-   `_transcript.iter_transcript`, never materialized.
+   `_transcript.iter_transcript`, never materialized, and only lines carrying
+   the quoted name of a tool the trigger's facts read (`"Agent"` / `"Task"` /
+   `"Skill"` for `review`, `"Bash"` for `in-flight`) are parsed at all (issue
+   #1278): every fact lives in a `tool_use` block with one of those names, so
+   a line without it is rejected before `json.loads`. That matters most in
+   the session the advisory is for — one where no review ran, so nothing
+   ever settles and the scan reaches EOF on every commit.
 4. Subagent transcripts (`<session-dir>/subagents/agent-*.jsonl`) are scanned
    alongside the root one. An Agent dispatch made *inside* a Task-dispatched
    subagent is recorded only in that subagent's own JSONL, so a root-only scan
@@ -184,6 +190,11 @@ once they are settled. On a 47.9MB transcript: `review` 0.200s, `pre-pr`
 0.000s (reads nothing), `in-flight` 0.005s. Collecting all four facts
 unconditionally cost 1.77s on the same file — every PreToolUse(Bash) member
 shares one dispatch deadline, so one slow member starves every later one.
+
+Those numbers are the settling case. When nothing settles the scan reads to
+EOF, and there the parse is the cost: 42,000 `json.loads` on a 36 MB session
+was 0.44s per commit. Parsing only the lines that name a tool the trigger's
+facts read (#1278) keeps the unsettled walk at the substring-scan floor.
 
 ### Known limitation — delegated sessions
 

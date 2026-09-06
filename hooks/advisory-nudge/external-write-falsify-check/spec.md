@@ -5,13 +5,14 @@ Supported hosts: all
 `hooks/advisory-nudge/external-write-falsify-check/impl.py` is an **opt-in** PreToolUse advisory
 that warns before posting hypothesis-stage text to external surfaces (PR
 comments, issue bodies, Slack messages, Notion pages). It enforces the
-global `~/.claude/CLAUDE.md` rule `External-Surface Write Requires Falsification`
-(retraction-cost / downstream-reader-training framing).
+*External-Surface Write Requires Falsification* rule ([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries);
+retraction-cost / downstream-reader-training framing).
 
 ### Why this exists — and why opt-in
 
-The four production praxis hooks (`block-gh-state-all`, `side-effect-scan`,
-`memory-hint`, `codex-review-route`) each followed the canonical adoption
+When this hook was written (issue #173) praxis shipped four production hooks
+(`block-gh-state-all`, `side-effect-scan`, `memory-hint`,
+`codex-review-route`), and each had followed the canonical adoption
 path: feedback-memo → ≥5 recurrences → structural hook. The
 `External-Surface Write Requires Falsification` rule does not yet have
 that recurrence trail (zero memory entries, zero issues at adoption time
@@ -115,7 +116,7 @@ Restart Claude Code after adding the entry.
 The marker check is purely lexical. It cannot tell internal-team-DM
 Slack from a customer-facing channel, nor can it tell a verified-fact
 "could break" (an evidenced consequence) from a hypothesis "could break"
-(an unverified guess). The global `~/.claude/CLAUDE.md` rule's `Applies to` / `Does NOT
+(an unverified guess). The rule's `Applies to` / `Does NOT
 apply to` carveouts are NOT replicable in marker detection — the user
 remains responsible for interpreting the reminder in context.
 
@@ -216,8 +217,8 @@ A third advisory fires when:
 2. **Transcript signal**: cluster-approval language appears in any of the
    last 5 user messages in the transcript.
 
-This catches the global `~/.claude/CLAUDE.md` `No Approval Transfer Across Companion PRs`
-violation pattern: a user approves multiple tasks in bulk ("all 4 together",
+This catches the *No Approval Transfer Across Companion PRs* violation
+pattern: a user approves multiple tasks in bulk ("all 4 together",
 "1+3 같이"), and the agent begins writing per-child staging files without
 per-action AskUserQuestion surfacing.
 

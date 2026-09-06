@@ -53,6 +53,11 @@ blocked.
 | `PRAXIS_SKIP_STAGED_FILE_ENUM=1` in the environment | silent |
 | Non-Bash tool / malformed JSON stdin / empty command | silent (fail-open) |
 
+The seen-set scan streams the transcript and parses only the lines that carry
+a `tool_use` block or an `is_error` result — the two record kinds it reads —
+instead of loading the file and parsing every line (issue #1312). The 50 MiB
+bound is counted on the bytes actually read.
+
 ## `git commit` detection
 
 Command tokenization uses the shared `_hook_utils` pipeline (`safe_tokenize`,
