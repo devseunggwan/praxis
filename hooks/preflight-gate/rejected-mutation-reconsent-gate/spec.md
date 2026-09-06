@@ -230,8 +230,9 @@ a file past the bound is direct evidence that one does.
    `AskUserQuestion` records were found (so the scanner is alive), and **0 of
    them name any closed-list identifier**, so no rejection→dispatch pair from
    the incident — or resembling it — is reachable. Issue #1007's closing comment
-   had already recorded the same fact ("현재 근거는 일화 1건이고 그 전사도
-   없다"). The suite therefore pins the behaviour on **synthetic fixtures built
+   had already recorded the same fact ("the only evidence is one anecdote,
+   and there is no transcript of it" — original: "현재 근거는 일화 1건이고 그
+   전사도 없다"). The suite therefore pins the behaviour on **synthetic fixtures built
    from the incident's reported shape**, both directions against the same
    transcript. That is mechanism reproduction, not verification against the
    real artifact, and it is stated here rather than implied.

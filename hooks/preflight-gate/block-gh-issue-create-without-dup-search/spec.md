@@ -17,7 +17,7 @@ Retrospect pattern (praxis issue #374): the agent spawned a new follow-up
 issue from a fresh analysis finding without running a duplicate search;
 an existing open issue already covered the same root-cause scope (often
 surfaced earlier in the same session by a sibling sciomc Stage or a PR
-body "후속 검토" item). User redirect → `/cancel` cycle.
+body "follow-up review" ("후속 검토") item). User redirect → `/cancel` cycle.
 
 ### What is blocked
 

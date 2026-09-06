@@ -26,8 +26,12 @@ realistic session with more than 3 enumerated items.
 
 **Workaround**: Truncate to at most 3 meaningful options, then add a 4th option
 that is either:
-- `"취소"` — abort the flow; or
-- `"Other (직접 입력)"` — fall through to a free-form follow-up question.
+- a cancel option — abort the flow; or
+- an "other / type it in" option — fall through to a free-form follow-up
+  question.
+
+The praxis skills spell these as `"취소"` and `"Other (직접 입력)"`; any
+label works, as long as the fourth slot is the escape hatch.
 
 For a dynamic list longer than 3 items, surface the top 3 most likely candidates
 (e.g., most-recently modified worktrees, most-recently touched issues) and use
