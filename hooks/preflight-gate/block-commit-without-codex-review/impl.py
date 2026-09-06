@@ -92,7 +92,11 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib")
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
-from _transcript import TranscriptReadError, iter_transcript_bounded  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
+    TranscriptReadError,
+    scan_cursor_path,
+    scan_transcript_resumable,
+)
 from pathlib import Path
 
 _TARGET_SKILL = "praxis:codex-review-wrap"
@@ -140,7 +144,7 @@ def main() -> int:
     if not transcript_path:
         return 0  # no transcript → cannot enforce
 
-    invoked = _scan_transcript(transcript_path)
+    invoked = _scan_transcript(transcript_path, payload.get("session_id"))
     if invoked is None:
         return 0  # unreadable/oversized → fail-open
     if invoked:
@@ -469,19 +473,28 @@ _CMDNAME_RE = re.compile(r"^\s*<command-name>/?(?:praxis:)?codex-review-wrap(?:\
 _SKILL_NEEDLE = b"codex-review-wrap"
 
 
-def _transcript_invokes_skill(path: str, *, check_slash: bool) -> bool | None:
+def _transcript_invokes_skill(
+    path: str, *, check_slash: bool, cursor_path: str | None = None
+) -> bool | None:
     """True if `path` carries a genuine codex-review-wrap invocation, False if
-    not, None when the file is missing, unreadable, or larger than `_MAX_BYTES`
-    (the caller decides how to treat None per call site).
+    it was read to the end and does not, None when the file is missing or
+    unreadable or the scan has not caught up with it yet (the caller decides
+    how to treat None per call site).
 
-    Streams through `_transcript.iter_transcript_bounded` and parses only the
+    Folds through `_transcript.scan_transcript_resumable`, parsing only the
     lines that contain `_SKILL_NEEDLE` (issue #1277). The previous shape —
     `read_text().splitlines()` into a list, then `json.loads` on every line —
     cost 490 ms and ~70 MB of RSS per `git commit` on a 36 MB session, inside
     the Bash dispatch group's shared deadline (#1167); the same scan with the
-    prefilter is 41 ms at constant memory. The reader owns the byte bound
-    (counted on bytes actually read, capped per read) and the fail-open
-    classes; this function owns only what a satisfying record looks like.
+    prefilter is 41 ms at constant memory. With `cursor_path` (one per
+    transcript file and session, see `_scan_transcript`) each call reads only
+    the bytes appended since the last one, and `_MAX_BYTES` is a budget per
+    call rather than a ceiling on the session: a transcript past it answers
+    None for the few commits it takes to catch up, then costs its delta, and
+    once the invocation is on record the file body is not read at all. The
+    reader owns the budget (counted on bytes actually read, capped per read),
+    the cursor and the fail-open classes; this function owns only what a
+    satisfying record looks like.
 
     `check_slash` scopes the `/praxis:codex-review-wrap` slash-command check
     to the root transcript only (subagent scans pass `check_slash=False`): a
@@ -490,23 +503,36 @@ def _transcript_invokes_skill(path: str, *, check_slash: bool) -> bool | None:
     slash channel cannot fire there in genuine operation, so checking it
     would only be a phantom code path a fabricated transcript could abuse.
     """
+
+    def fold(state: dict, obj: dict) -> None:
+        # A `Skill` tool_use is a genuine invocation wherever it appears —
+        # only the assistant can emit one, and emitting it *is* running
+        # the skill. A slash command, by contrast, is user-initiated: an
+        # assistant message that merely prints "/praxis:codex-review-wrap"
+        # on a line is a suggestion, not an invocation. Scope slash
+        # detection to user entries (the real invocation is recorded as a
+        # user message with a <command-name> marker) so an assistant
+        # suggestion cannot satisfy it.
+        if _has_skill_tool_use(obj):
+            state["found"] = True
+        elif check_slash and obj.get("type") == "user" and _has_slash_command(obj):
+            state["found"] = True
+
     try:
-        for obj in iter_transcript_bounded(path, _MAX_BYTES, _SKILL_NEEDLE):
-            # A `Skill` tool_use is a genuine invocation wherever it appears —
-            # only the assistant can emit one, and emitting it *is* running
-            # the skill. A slash command, by contrast, is user-initiated: an
-            # assistant message that merely prints "/praxis:codex-review-wrap"
-            # on a line is a suggestion, not an invocation. Scope slash
-            # detection to user entries (the real invocation is recorded as a
-            # user message with a <command-name> marker) so an assistant
-            # suggestion cannot satisfy it.
-            if _has_skill_tool_use(obj):
-                return True
-            if check_slash and obj.get("type") == "user" and _has_slash_command(obj):
-                return True
-    except TranscriptReadError:  # missing, unreadable, or past _MAX_BYTES
+        state, complete = scan_transcript_resumable(
+            path,
+            cursor_path,
+            lambda: {"found": False},
+            fold,
+            needle=_SKILL_NEEDLE,
+            max_bytes=_MAX_BYTES,
+            stop_when=lambda s: s.get("found") is True,
+        )
+    except TranscriptReadError:  # missing, not a file, or unreadable
         return None
-    return False
+    if state.get("found") is True:
+        return True
+    return False if complete else None  # None: budget spent before EOF
 
 
 def _subagents_dir(transcript_path: str) -> Path | None:
@@ -533,21 +559,27 @@ def _subagents_dir(transcript_path: str) -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
-def _scan_transcript(path: str) -> bool | None:
+def _scan_transcript(path: str, session_id=None) -> bool | None:
     """Return True if codex-review-wrap was invoked in the session's own
     transcript OR any of its subagent transcripts, False if not invoked
-    anywhere, None if the root transcript cannot be read (caller treats
-    None as fail-open).
+    anywhere, None if the root transcript cannot be read or its scan has
+    not caught up yet (caller treats None as fail-open).
 
-    A subagent transcript that is individually unreadable/oversized is
-    skipped (that one subagent's history just cannot contribute a PASS) —
-    it does not turn the overall result into a fail-open None, since the
-    root transcript (the thing we can actually read) already answered the
-    question definitively for everything outside that one subagent run.
+    Each file gets its own cursor, keyed on `session_id` and the file
+    (`root`, or the subagent file's stem) through `scan_cursor_path`; with no
+    session id the scan runs without persistence, under the same per-call
+    budget. A subagent transcript that is individually unreadable or not
+    yet caught up is skipped (that one subagent's history just cannot
+    contribute a PASS) — it does not turn the overall result into a
+    fail-open None, since the root transcript (the thing we can actually
+    read) already answered the question definitively for everything outside
+    that one subagent run.
     """
-    root = _transcript_invokes_skill(path, check_slash=True)
+    root = _transcript_invokes_skill(
+        path, check_slash=True, cursor_path=scan_cursor_path(_HOOK_NAME, session_id, "root")
+    )
     if root is None:
-        return None  # missing/unreadable/oversized root → cannot enforce
+        return None  # missing/unreadable/not-caught-up root → cannot enforce
     if root:
         return True
 
@@ -556,8 +588,12 @@ def _scan_transcript(path: str) -> bool | None:
         # check_slash=False: a subagent transcript's "user" turns are
         # Task-dispatch prompts / tool_results, never human keystrokes, so
         # slash-command detection is root-only (see _transcript_invokes_skill).
-        for agent_file in subagents_dir.glob("agent-*.jsonl"):
-            if _transcript_invokes_skill(str(agent_file), check_slash=False):
+        for agent_file in sorted(subagents_dir.glob("agent-*.jsonl")):
+            if _transcript_invokes_skill(
+                str(agent_file),
+                check_slash=False,
+                cursor_path=scan_cursor_path(_HOOK_NAME, session_id, agent_file.stem),
+            ):
                 return True
     return False
 

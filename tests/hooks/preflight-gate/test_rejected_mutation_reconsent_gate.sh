@@ -277,12 +277,25 @@ run_case "over the byte bound: a command with no destructive identifier still pa
   'aws s3 ls s3://acme-archive/raw/2024/' "$OVERSIZE"
 
 # The ask must say the scan could not run — an operator who reads the #1007
-# wording would look for a rejected question that this gate never found.
-_blind=$(mk_payload 'aws s3 rm s3://acme-archive/raw/2024/ --recursive' "$OVERSIZE" | "$HOOK" 2>/dev/null)
+# wording would look for a rejected question that this gate never found. A
+# fresh PRAXIS_HOME makes this the session's first call: no cursor yet.
+_blind_home=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+_blind=$(mk_payload 'aws s3 rm s3://acme-archive/raw/2024/ --recursive' "$OVERSIZE" | PRAXIS_HOME="$_blind_home" "$HOOK" 2>/dev/null)
 if printf '%s' "$_blind" | grep -q "byte bound"; then
   echo "PASS  [blind-scan ask names the byte bound]"; PASS=$((PASS+1))
 else
   echo "FAIL  [blind-scan ask does not name the byte bound]"; FAIL=$((FAIL+1)); FAILED_NAMES+=("blind-scan ask wording")
+fi
+
+# Resumable (#1280 follow-up): the blind call above saved a cursor at the byte
+# budget for "test-session" under that home, so the next call for the same
+# session continues from there, catches up with the ~1 MiB left, and asks for
+# the real reason — the rejected question naming the target — not the bound.
+_caught=$(mk_payload 'aws s3 rm s3://acme-archive/raw/2024/ --recursive' "$OVERSIZE" | PRAXIS_HOME="$_blind_home" "$HOOK" 2>/dev/null)
+if printf '%s' "$_caught" | grep -q '"ask"' && ! printf '%s' "$_caught" | grep -q "byte bound"; then
+  echo "PASS  [next call for the session catches up and asks on the rejection itself]"; PASS=$((PASS+1))
+else
+  echo "FAIL  [next call for the session did not catch up: $(printf '%s' "$_caught" | head -c 200)]"; FAIL=$((FAIL+1)); FAILED_NAMES+=("resumable catch-up")
 fi
 
 # Positive control: the same rejection record UNDER the bound still resolves

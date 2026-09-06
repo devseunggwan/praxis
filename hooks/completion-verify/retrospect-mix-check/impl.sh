@@ -1303,14 +1303,18 @@ fi
 # lane report zero from a scan that never ran.
 GATE12_VIOLATION=""
 if [ "$STAGE4_AFTER_REPORT" != "1" ] && command -v python3 >/dev/null 2>&1; then
-  DENIED_COUNT=$(python3 - "$_SP_LIB" "$TRANSCRIPT_PATH" 2>/dev/null <<'PY'
+  DENIED_COUNT=$(python3 - "$_SP_LIB" "$TRANSCRIPT_PATH" "$TELEMETRY_SESSION_ID" 2>/dev/null <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 try:
-    from _transcript import scan_user_rejections
-    recs = scan_user_rejections(sys.argv[2])
-    # -1 is INDETERMINATE (transcript past the scan's byte bound), kept
-    # distinct from 0 so the gate can tell "none" from "never read".
+    from _transcript import scan_cursor_path, scan_user_rejections
+    # Resumable, keyed on this hook and the session: each Stop reads only the
+    # bytes appended since the previous one (an empty session id disables
+    # persistence and the scan runs under the per-call budget alone).
+    cursor = scan_cursor_path("retrospect-mix-check", sys.argv[3] if len(sys.argv) > 3 else "")
+    recs = scan_user_rejections(sys.argv[2], cursor_path=cursor)
+    # -1 is INDETERMINATE (more unread bytes than this call's budget), kept
+    # distinct from 0 so the gate can tell "none" from "not caught up".
     print(-1 if recs is None else len(recs))
 except Exception:
     print(0)
@@ -1335,7 +1339,7 @@ PY
       $0 ~ se { ins=0; next }
       END { print (ins || nested) ? 1 : 0 }')
     if [ "$da_begin" -lt 1 ] && [ "$DENIED_INDETERMINATE" = "1" ]; then
-      GATE12_VIOLATION="the rejection scan could not read this session's transcript — it is past REJECTION_SCAN_MAX_BYTES (20 MiB), so 0 denied actions is what a scan that never ran returns, not a finding (issue #1231); the Stage 3 report must still carry one '<!-- retrospect:denied_actions begin/end -->' fence, holding either the rows recovered by an unbounded re-scan or the line '- scan: indeterminate | rescan: done|skipped (<reason>)'"
+      GATE12_VIOLATION="the rejection scan has not caught up with this session's transcript — more than REJECTION_SCAN_MAX_BYTES (20 MiB) of it was still unread at this Stop, so 0 denied actions is what a scan that never ran returns, not a finding (issue #1231); the Stage 3 report must still carry one '<!-- retrospect:denied_actions begin/end -->' fence, holding either the rows recovered by an unbounded re-scan or the line '- scan: indeterminate | rescan: done|skipped (<reason>)'"
     elif [ "$da_begin" -lt 1 ]; then
       GATE12_VIOLATION="the live transcript carries $DENIED_COUNT structurally-rejected tool call(s) but the Stage 3 report has no '<!-- retrospect:denied_actions begin/end -->' fence (issue #1013) — a refused action has no outcome and therefore no confession, which is precisely why the friction scan misses it; emit pre-scan lane 6 with one row per rejection: '- denied: \"<verbatim question>\" | tool: <name> | source: user_rejection | confessed: yes|no | disposition: promoted (finding #N)|noted|dismissed (<reason>)'"
     elif [ "$da_malformed" -gt 0 ]; then
@@ -1370,7 +1374,7 @@ PY
       if [ "$DENIED_INDETERMINATE" = "1" ] \
          && ! printf '%s\n' "$DA_BLOCK" | grep -qE "$da_row_re" \
          && ! printf '%s\n' "$DA_BLOCK" | grep -qE "$da_indet_re"; then
-        GATE12_VIOLATION="denied_actions fence is present but says nothing about a scan that could not run (transcript past REJECTION_SCAN_MAX_BYTES, issue #1231) — carry either the rows an unbounded re-scan recovered, or the line '- scan: indeterminate | rescan: done|skipped (<reason>)'; an empty fence is what a silently-zero lane looks like"
+        GATE12_VIOLATION="denied_actions fence is present but says nothing about a scan that could not run (more than REJECTION_SCAN_MAX_BYTES unread at this Stop, issue #1231) — carry either the rows an unbounded re-scan recovered, or the line '- scan: indeterminate | rescan: done|skipped (<reason>)'; an empty fence is what a silently-zero lane looks like"
       elif [ "$DENIED_INDETERMINATE" != "1" ] && ! printf '%s\n' "$DA_BLOCK" | grep -qE "$da_row_re"; then
         GATE12_VIOLATION="denied_actions fence is present but carries no schema-valid disposed row for the $DENIED_COUNT transcript rejection(s) — a row must be '- denied: \"<verbatim question>\" | tool: <name> | source: user_rejection | confessed: yes|no | disposition: promoted (finding #N)|noted|dismissed (<reason>)'; a bare 'disposition:' line is not a row, and an enumerated-but-undisposed rejection is the same silent drop the lane exists to prevent"
       fi

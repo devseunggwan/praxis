@@ -509,9 +509,11 @@ _CONSUMERS = {
     # end instead of loading up to 50 MB to keep 400 lines (#1279).
     HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
         ["tail_lines", "TranscriptReadError"],
-    # Whole-session scans under a byte cap, needle-prefiltered (#1277, #1312).
+    # Whole-session scan, needle-prefiltered and resumable: one cursor per
+    # transcript file and session, a byte budget per call (#1277).
     HOOKS / "preflight-gate" / "block-commit-without-codex-review" / "impl.py":
-        ["iter_transcript_bounded", "TranscriptReadError"],
+        ["scan_transcript_resumable", "scan_cursor_path", "TranscriptReadError"],
+    # Whole-session scans under a byte cap, needle-prefiltered (#1312).
     HOOKS / "preflight-gate" / "skill-gate-commands" / "impl.py":
         ["iter_transcript_bounded", "TranscriptReadError", "json_needle"],
     HOOKS / "advisory-nudge" / "pre-commit-staged-file-enumeration" / "impl.py":
@@ -520,8 +522,10 @@ _CONSUMERS = {
         ["read_last_user_message"],
     HOOKS / "preflight-gate" / "block-manufactured-action-menu" / "impl.py":
         ["read_last_user_message"],
+    # Resumable through a session-keyed cursor so the byte bound is a budget
+    # per call, not a ceiling on the session (#1280).
     HOOKS / "preflight-gate" / "rejected-mutation-reconsent-gate" / "impl.py":
-        ["scan_user_rejections"],
+        ["scan_user_rejections", "scan_cursor_path"],
     # Counts this turn's delegation targets and quotes the request they were
     # meant to serve, so it binds the turn reader and the user-message reader.
     HOOKS / "preflight-gate" / "fan-out-scope-gate" / "impl.py":
@@ -534,9 +538,10 @@ _CONSUMERS = {
     HOOKS / "advisory-nudge" / "external-write-falsify-check" / "impl.py": ["tail_lines"],
     # Needs the whole session (a dispatch or enumeration anywhere in it clears
     # the predicate), so it streams instead of reading a tail; the scan stops
-    # as soon as the matched trigger's facts are settled (#1064).
+    # as soon as the matched trigger's facts are settled (#1064) and resumes
+    # from a per-trigger cursor on the next commit (#1278).
     HOOKS / "advisory-nudge" / "unenforced-step-advisory" / "impl.py":
-        ["iter_transcript"],
+        ["scan_transcript_resumable", "scan_cursor_path", "TranscriptReadError"],
     # Also correlates each Bash tool_use with its result, so it binds the
     # refusal sentence the never-ran markers are keyed on (#1117).
     HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py": ["tail_lines"],
@@ -1273,3 +1278,177 @@ class TestJsonNeedle:
         assert T.json_needle('say "hi"') is None
         assert T.json_needle("a\\b") is None
         assert T.json_needle("praxis:회고") is None  # escaped by the default encoder
+
+
+class TestScanTranscriptResumable:
+    """`scan_transcript_resumable` — the budgeted, needle-prefiltered cursor
+    scan behind the three whole-session gates (#1277 / #1278 / #1280)."""
+
+    @staticmethod
+    def _append(path, events):
+        """Append `events` as JSONL, one complete line each."""
+        with open(path, "a", encoding="utf-8") as fh:
+            for ev in events:
+                fh.write(json.dumps(ev) + "\n")
+
+    @staticmethod
+    def _run(path, cursor, seen, **kw):
+        """Fold `path` into a counting state, recording each event's `i`."""
+        def reduce_event(state, ev):
+            state["n"] += 1
+            seen.append(ev["i"])
+
+        return T.scan_transcript_resumable(str(path), cursor, lambda: {"n": 0}, reduce_event, **kw)
+
+    def test_budget_cut_reports_incomplete_and_the_next_call_continues(self, tmp_path):
+        """The budget is per call: the second call starts where the first stopped."""
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        events = [{"i": i, "pad": "x" * 90} for i in range(5)]
+        self._append(path, events)
+        line = len(json.dumps(events[0])) + 1
+        seen: list = []
+        state, complete = self._run(path, cursor, seen, max_bytes=2 * line + 5)
+        assert (state, complete) == ({"n": 2}, False)
+        assert seen == [0, 1]
+        seen.clear()
+        state, complete = self._run(path, cursor, seen, max_bytes=10 * line)
+        assert (state, complete) == ({"n": 5}, True)
+        assert seen == [2, 3, 4]
+
+    def test_budget_spent_exactly_at_eof_is_complete(self, tmp_path):
+        """A budget that ends on the last newline is not reported as a cut."""
+        path = tmp_path / "t.jsonl"
+        self._append(path, [{"i": 1}, {"i": 2}])
+        size = path.stat().st_size
+        assert self._run(path, None, [], max_bytes=size)[1] is True
+        assert self._run(path, None, [], max_bytes=size - 1)[1] is False
+
+    def test_needle_rejects_lines_before_the_parser(self, tmp_path, monkeypatch):
+        """A line without the needle never reaches `json.loads`."""
+        path = tmp_path / "t.jsonl"
+        self._append(path, [{"i": 1, "k": "keep"}, {"i": 2}, {"i": 3, "k": "keep"}])
+        calls: list = []
+        real = T.json.loads
+
+        def counting(s, *a, **k):
+            """Record every string handed to the parser, then parse it."""
+            calls.append(s)
+            return real(s, *a, **k)
+
+        monkeypatch.setattr(T.json, "loads", counting)
+        seen: list = []
+        self._run(path, None, seen, needle=b'"keep"')
+        assert seen == [1, 3]
+        assert len(calls) == 2
+
+    def test_stop_when_ends_the_walk_and_a_settled_cursor_reads_nothing(self, tmp_path, monkeypatch):
+        """Once the state has nothing left to learn, later calls do not parse."""
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        self._append(path, [{"i": 1}, {"i": 2}, {"i": 3}])
+        seen: list = []
+        state, complete = self._run(path, cursor, seen, stop_when=lambda s: s["n"] >= 2)
+        assert (state, complete) == ({"n": 2}, True)
+        assert seen == [1, 2]
+        self._append(path, [{"i": 4}])
+        calls: list = []
+        monkeypatch.setattr(T, "_parse_line", lambda raw: calls.append(raw))
+        seen.clear()
+        state, complete = self._run(path, cursor, seen, stop_when=lambda s: s["n"] >= 2)
+        assert (state, complete) == ({"n": 2}, True)
+        assert calls == [] and seen == []
+
+    def test_rewritten_file_with_a_boundary_at_the_old_offset_restarts(self, tmp_path):
+        """Same inode, longer file, old offset on a newline — only the byte
+        sample before the offset tells the cursor the content changed."""
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        self._append(path, [{"i": 1, "pad": "aaaa"}, {"i": 2, "pad": "aaaa"}])
+        self._run(path, cursor, [])
+        path.write_text(
+            "".join(json.dumps(ev) + "\n" for ev in
+                    [{"i": 7, "pad": "bbbb"}, {"i": 8, "pad": "bbbb"}, {"i": 9, "pad": "bbbb"}]),
+            encoding="utf-8",
+        )
+        seen: list = []
+        assert self._run(path, cursor, seen) == ({"n": 3}, True)
+        assert seen == [7, 8, 9]
+
+    def test_unterminated_last_record_is_folded_once_and_stepped_over(self, tmp_path):
+        """A complete record missing only its newline counts now, and is not
+        counted again when the newline and the next record arrive."""
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        path.write_text(json.dumps({"i": 1}) + "\n" + json.dumps({"i": 2}), encoding="utf-8")
+        seen: list = []
+        assert self._run(path, cursor, seen) == ({"n": 2}, True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("\n" + json.dumps({"i": 3}) + "\n")
+        seen.clear()
+        assert self._run(path, cursor, seen) == ({"n": 3}, True)
+        assert seen == [3]
+
+    def test_unreadable_paths_raise(self, tmp_path):
+        """Missing file and a directory both raise the read error."""
+        with pytest.raises(T.TranscriptReadError):
+            self._run(tmp_path / "absent.jsonl", None, [])
+        with pytest.raises(T.TranscriptReadError):
+            self._run(tmp_path, None, [])
+
+    def test_cursor_path_is_session_keyed(self, tmp_path, monkeypatch):
+        """`scan_cursor_path` keeps the session token last so the sweep spares it."""
+        monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
+        import _paths as P  # type: ignore[import-not-found]
+
+        path = T.scan_cursor_path("codex", "sess-1", "agent-0a/b")
+        assert path is not None
+        name = Path(path).name
+        assert name == "scan-codex-agent-0a_b-sess-1.json"
+        assert P._belongs_to_session(name, "sess-1")
+        assert T.scan_cursor_path("codex", "", "root") is None
+        assert T.scan_cursor_path("codex", None) is None
+
+
+class TestScanUserRejectionsResumable:
+    """The rejection scan through a cursor (#1280): indeterminate only until
+    the scan catches up, and a rejection resolves against a `tool_use` read
+    in an earlier call."""
+
+    def test_catches_up_over_calls_and_resolves_across_them(self, tmp_path):
+        """Call 1 is cut by the budget (None); call 2 finishes and resolves."""
+        pad = json.dumps({"type": "system", "pad": "x" * 200})
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "AskUserQuestion",
+                           {"questions": [{"question": "Delete s3://b/raw/2024/ ?"}]}),
+            *([pad] * 40),
+            _rejection("toolu_1", "A1"),
+        ])
+        cursor = str(tmp_path / "cursor.json")
+        assert T.scan_user_rejections(path, max_bytes=2000, cursor_path=cursor) is None
+        recs = T.scan_user_rejections(path, max_bytes=20_000, cursor_path=cursor)
+        assert recs is not None and len(recs) == 1
+        assert recs[0]["tool_name"] == "AskUserQuestion"
+        assert "s3://b/raw/2024/" in recs[0]["text"]
+        # Nothing appended: the answer stands without re-reading the file.
+        assert T.scan_user_rejections(path, max_bytes=100, cursor_path=cursor) == recs
+
+    def test_without_a_cursor_the_bound_still_means_indeterminate(self, tmp_path):
+        """No cursor path: the pre-cursor contract, call after call."""
+        pad = json.dumps({"type": "system", "pad": "x" * 200})
+        path = _write_jsonl(tmp_path, [_rejection("toolu_1", "A1"), *([pad] * 40)])
+        assert T.scan_user_rejections(path, max_bytes=2000) is None
+        assert T.scan_user_rejections(path, max_bytes=2000) is None
+
+    def test_oversized_input_keeps_its_text_but_not_the_dict(self, tmp_path):
+        """A tool_input past the text bound is carried as text only, so the
+        cursor file never stores a Write body on every call."""
+        big = {"content": "y" * (T._REJECTION_INPUT_MAX_CHARS + 10)}
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "Write", big),
+            _rejection("toolu_1", "A1"),
+        ])
+        recs = T.scan_user_rejections(path)
+        assert recs[0]["tool_name"] == "Write"
+        assert recs[0]["tool_input"] == {}
+        assert recs[0]["text"].startswith("yyyy")
