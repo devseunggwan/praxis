@@ -85,9 +85,14 @@ current_host=$(hostname)
    - If user selects `"취소"`: abort with `"Resume 취소됨 — 호스트 불일치 (${saved_host} → ${current_host})."`
 4. Execute (only after the hostname gate passes). Pass through all original args (`"$@"`) so flags like `--no-claude` survive:
 ```bash
-bash "$(dirname "${0}")/cmux-resume-sessions" "$@"
+bash "${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/skills/cmux-resume-sessions/cmux-resume-sessions" "$@"
 ```
 5. Show output to the user
+
+If `CLAUDE_PLUGIN_ROOT` is unset the `:?` guard aborts with `praxis plugin root
+not set`; resolve it from the installed-plugins manifest
+(`jq -r '.plugins["praxis@praxis"][0].installPath // empty' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"`),
+export it, and re-run — do not fall back to a relative path.
 
 **What gets restored:**
 - Creates a cmux workspace per session (with `--cwd` for working directory)
