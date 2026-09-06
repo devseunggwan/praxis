@@ -41,7 +41,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 
 | Skill                  | Purpose                                                                                             |
 | ---------------------- | --------------------------------------------------------------------------------------------------- |
-| `using-praxis`         | Onboarding entry point — maps scenarios to the right skill for new praxis users                     |
+| `using-praxis`         | Onboarding entry point — maps scenarios to the right skill                     |
 | `writing-praxis-skill` | Guide for authoring a new SKILL.md — template, SRP, trigger keyword design, frontmatter conventions |
 
 ### Development
@@ -60,8 +60,8 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 
 | Skill           | Purpose                                                                                                               |
 | --------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `strike`        | Declare a rule violation — session-scoped counter, escalating signal (strike 1 warning → strike 2 review → strike 3 Stop-hook block) |
-| `strikes`       | Show current strike count + recorded violation reasons for the active session                                         |
+| `strike`        | Declare a rule violation — session-scoped counter, escalating signal (1st warning → 2nd review → 3rd Stop-hook block) |
+| `strikes`       | Show the active session's strike count and recorded violation reasons                                         |
 | `reset-strikes` | Reset the session strike counter to 0 after a strike-3 block (required to unblock responses)                         |
 
 ### Session Management
@@ -78,7 +78,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 ## Hooks
 
 Praxis ships a PreToolUse/PostToolUse/Stop/UserPromptSubmit/SessionStart hook suite
-that structurally enforces the rules in [`ETHOS.md`](ETHOS.md);
+that enforces the rules in [`ETHOS.md`](ETHOS.md);
 [`DESIGN.md`](DESIGN.md) holds the shared contracts. Per-hook specs live at
 [`hooks/<role>/<name>/spec.md`](hooks/), indexed by
 [`docs/hook/INDEX.md`](docs/hook/INDEX.md); the generated
