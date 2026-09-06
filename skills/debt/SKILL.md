@@ -22,16 +22,14 @@ trailers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`,
 `Scope-risk:` — see `CLAUDE.md` → Commit Trailers) and compounding comments
 (`# [PR #N]` — see `CLAUDE.md` → Compounding). Neither has a harvesting
 skill, so a marker written today has no mechanism forcing a future look —
-"나중에" quietly becomes "영원히 안 함". `praxis:debt` closes that gap the way
-ponytail's `/ponytail-debt` harvests `ponytail:` comments, adapted to
-praxis's two-source split.
+"나중에" quietly becomes "영원히 안 함". `praxis:debt` closes that gap by
+harvesting both marker sources into one ledger on demand.
 
 **Core principle:** this skill is report-only. It reads git history and the
 tree; it never writes, edits, commits, or creates issues/PRs.
 
-**The two markers live in different places** — a naive tree-only grep (like
-ponytail's, which works because its markers are code comments) misses every
-commit trailer, because trailers live in commit *messages*, not in tracked
+**The two markers live in different places** — a naive tree-only grep (enough
+for a tool whose markers are all code comments) misses every commit trailer, because trailers live in commit *messages*, not in tracked
 files. This skill unions `git log --grep` (source 1) with a tree `grep`
 (source 2) so neither source is silently dropped.
 

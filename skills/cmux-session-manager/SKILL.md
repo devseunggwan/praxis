@@ -175,7 +175,7 @@ the cost of a wrong `idle` that only reports is one line the operator dismisses.
 ## Category Classification
 
 Priority (highest first):
-1. **[DEV]**: Branch matches `issue-N-<type>-*` or legacy `hub-N-<type>-*` (feat, refactor, docs, test, chore, fix, perf, ci, build)
+1. **[DEV]**: Branch matches `issue-N-<type>-*` (feat, refactor, docs, test, chore, fix, perf, ci, build)
 2. **[OPS]**: Name contains `failure`, `debug`, `error`, `fix`, `incident`, etc.
 3. **[RES]**: Name contains `analyze`, `investigate`, `compare`, `check`, `research`, etc.
 4. **[TMP]**: None of the above

@@ -25,7 +25,7 @@ Documented occurrences:
    return types).
 
 Root cause: no enforcement gate fires before writing wrapper code to prompt
-reading the wrapped function signatures first. Memory entries and global `~/.claude/CLAUDE.md`
+reading the wrapped function signatures first. Memory entries and prompt-layer
 rules exist for this pattern but are not retrieved at execution time.
 
 Reference: issue [#235](https://github.com/devseunggwan/praxis/issues/235).

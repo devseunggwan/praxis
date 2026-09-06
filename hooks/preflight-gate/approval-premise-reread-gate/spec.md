@@ -83,8 +83,8 @@ marker means a command follows.
 The gate checks that an approval record **exists, names a justification, and
 names this target**. It cannot check that the justification is **true**. Routing
 an unverified value through a schema check converts it into something that reads
-like independent confirmation — the same circle `Own-greencheck and SUT-comment
-are not evidence` describes. Reach is partial by construction, and this section
+like independent confirmation — the same circle the *Own green check and SUT comment are not evidence* rule
+([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) describes. Reach is partial by construction, and this section
 exists so a future reader does not mistake a passing gate for a verified premise.
 
 ## The message is the shared five-field block

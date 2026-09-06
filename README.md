@@ -244,10 +244,12 @@ existing platforms required.
 
 ## Local Development
 
-This repository should live at **`~/projects/praxis`**. CLI tools shipped by
-skills (e.g. `cmux-recover-sessions`, `claude-recover`, `cmux-save-sessions`)
-are symlinked from `~/.local/bin` into this clone, so patches you commit here
-land in the version that actually runs at the shell.
+When you work from a clone rather than the plugin cache, the CLI wrappers
+shipped by skills (`cmux-recover-sessions`, `claude-recover`,
+`cmux-save-sessions`, …) are installed as `~/.local/bin` symlinks into
+whichever clone ran `scripts/install.sh` — so a patch reaches the version that
+runs at the shell only if it lands in that clone. One clone per machine keeps
+the links honest; `verify-symlinks.sh` tells you when they are not.
 
 ```bash
 # Install / refresh CLI symlinks (idempotent)

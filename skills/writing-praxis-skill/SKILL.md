@@ -60,10 +60,11 @@ when_to_use: >
 - `when_to_use` holds the `Triggers on "..."` clause, plus any
   `Do NOT activate on "..."` exclusion. The runtime appends it to
   `description` in the skill listing
-  (<https://code.claude.com/docs/en/skills.md>), so the routing table in
-  global `~/.claude/CLAUDE.md` and the roster in `docs/skills.md` reference
-  exact keywords from here — `check-plugin-manifests.py` Rule 13e fails on
-  any drift between `when_to_use` and the roster row.
+  (<https://code.claude.com/docs/en/skills.md>), so routing — the runtime's
+  own listing match, any routing table a user keeps in their `CLAUDE.md`, and
+  the roster in `docs/skills.md` — matches exact keywords from here;
+  `check-plugin-manifests.py` Rule 13e fails on any drift between
+  `when_to_use` and the roster row.
 - **Hard budget: the folded `description` must stay ≤ 1,024 characters** (see
   [`RUNTIME_CONSTRAINTS.md` §5](../../RUNTIME_CONSTRAINTS.md)). The runtime
   truncates longer descriptions; `when_to_use` shares the listing budget as
@@ -109,7 +110,10 @@ runtime-verified-note: "<cli-name> <version> — one-line observed behavior"
 ### Step 3: Design Trigger Keywords
 
 Trigger keywords are the phrases users type (or say) that route to this skill.
-The global `~/.claude/CLAUDE.md` `Skill & Agent Routing` table maps them.
+The runtime matches them against the skill listing — `description` with
+`when_to_use` appended (see
+[`RUNTIME_CONSTRAINTS.md` §5](../../RUNTIME_CONSTRAINTS.md)); a user may
+additionally keep a routing table in their own `CLAUDE.md`.
 
 **Principles:**
 - **Specific over generic.** "recover cmux" beats "recover" — the generic form
@@ -235,8 +239,8 @@ have a reviewer read-through.
 
 ### Step 8: Register the Skill
 
-1. Add the skill's trigger keywords to the routing table in the project's
-   `AGENTS.md` (or global `~/.claude/CLAUDE.md` for global skills).
+1. Add the skill to the tables in `AGENTS.md` and `docs/skills.md`
+   (`check-plugin-manifests.py` Rule 13 fails until both list it).
 2. Run `./scripts/check-plugin-manifests.py` — new skill directories are
    picked up automatically by the build script, but the check confirms no
    packaging drift.
@@ -252,7 +256,7 @@ Follow the standard praxis PR workflow:
 
 | Failure | Cause | Fix |
 | --------- | ------- | ----- |
-| Skill not invoked by routing | Trigger keywords missing from global `~/.claude/CLAUDE.md` routing table | Add keywords to the routing table |
+| Skill not invoked by routing | Trigger keywords absent from the `when_to_use` `Triggers on` clause, or pushed past the listing budget by a long `description` | Put them in `when_to_use` and keep `description` to what the skill does |
 | `Skill(...)` call fails silently | Target skill uses `disable-model-invocation: true` (both hosts) | Call the underlying binary directly |
 | `AskUserQuestion` call rejected before tool runs | Options array > 4 items — JSON schema rejects the call | Truncate to 3 + "취소" |
 | Codex worker produces empty `git diff` | Sandbox write restriction | Add `git status` check + claude fallback re-dispatch |

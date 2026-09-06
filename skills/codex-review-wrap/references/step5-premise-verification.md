@@ -50,8 +50,9 @@ prerequisite first — but cap recursion at **one level**. Example: a
 verification SQL `SELECT col_a FROM t WHERE join_key = ?` assumes
 `join_key` exists; run `DESCRIBE t` once before running the SELECT.
 Do not recurse further (don't verify that DESCRIBE itself works) —
-once is enough. Premise-falsification before public claim — see
-global `~/.claude/CLAUDE.md` "External-Surface Write Requires Falsification".
+once is enough. Premise-falsification before public claim — the
+*External-Surface Write Requires Falsification* rule
+([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)).
 
 ## 5c. Flip detection — halt A→B→A oscillation
 

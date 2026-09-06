@@ -665,8 +665,8 @@ Nothing comes back to the delegator.
 
 The wrapper exists to keep the prompt **in a file**. If the prompt text lands
 as a literal in the script body or on the command line, `$`, `{}`, and `` ` ``
-get interpreted by the shell and break (actually experienced in the Hub #1001
-Crema inspection).
+get interpreted by the shell and break (observed when a prompt containing
+backticks and `${…}` was passed as a shell literal).
 
 **Keeping it in a file and passing it via stdin are separate things.** The two
 were bundled together for a long time, but what broke was `-p "…literal…"`,

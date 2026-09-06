@@ -1,7 +1,7 @@
 ---
 name: retrospect
 description: >
-  Session retrospect — analyze current Claude Code session against global `~/.claude/CLAUDE.md` rules,
+  Session retrospect — analyze the current Claude Code session against the rules it ran under (project and global `CLAUDE.md`),
   identify friction patterns and root causes, propose context-appropriate improvement
   actions, then execute after user approval.
 when_to_use: >

@@ -7,11 +7,10 @@
 
 Evidence-based `keep` / `merge` / `drop` verdict for every hook in
 `hooks/manifest.json`, scored against the fire-rate ledger `bypass-review
-fire-rate` produces (issue #710). This applies ponytail's deletion-over-addition
-lens to praxis's own hook accretion — see the P4 work item in
-`.omc/specs/deep-dive-ponytail-vs-praxis-improvements.md` (local planning
-artifact — `.omc/` is gitignored, so this is a plain-text pointer rather than
-a repo-relative link).
+fire-rate` produces (issue #710). This applies a deletion-over-addition
+lens to praxis's own hook accretion: a hook that never fires is weight the
+suite carries on every tool call, not safety, and the ledger is the evidence
+that decides which is which.
 
 ## Data source
 
