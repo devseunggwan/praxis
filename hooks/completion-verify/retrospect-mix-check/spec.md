@@ -2,7 +2,8 @@
 
 Supported hosts: all
 
-`hooks/retrospect-mix-check.sh` fires on every `Stop` event and blocks the
+`hooks/completion-verify/retrospect-mix-check/impl.sh` (run by the `Stop` dispatch
+group, `hooks/_dispatch.sh Stop -`, since issue #1281) fires on every `Stop` event and blocks the
 retrospect skill's Stage 3 output from defaulting to memory-only when
 findings are tagged `tool` / `workflow` / `spec-gap`, or when memory-only
 findings ship without a structured 5-line rationale.
@@ -591,13 +592,20 @@ the marker would re-enable.
 ### Stop hook ordering
 
 The Stop array in `hooks/manifest.json` runs in order:
-`completion-verify` → `retrospect-mix-check` → `strike-counter stop`.
+`completion-verify` → `retrospect-mix-check` → the other completion-verify
+gates → `strike-counter stop`. Since issue #1281 every entry except
+`strike-counter` runs inside the `Stop` dispatch group (one
+`hooks/_dispatch.sh Stop -` node), in that same order; `strike-counter`
+follows as its own node.
 
 `completion-verify` checks evidence-of-completion claims; `retrospect-mix-
 check` checks retrospect Stage 3 mix. The two gates are independent — they
-match on different signals — and both must pass. If both block, only the
-first one's reason reaches the user (Claude Code Stop hooks short-circuit
-on the first `decision: block`); fix the upstream issue and re-run.
+match on different signals — and both must pass. If both block, the
+dispatcher merges every blocking member's reason into one `decision: block`,
+each reason prefixed with its `[praxis:<hook>]` tag, so both reasons reach
+the user in a single object (before #1281 the standalone nodes
+short-circuited on the first `decision: block` and only the first reason
+was shown); fix every listed issue and re-run.
 
 ### Rollback
 
@@ -614,8 +622,11 @@ git -C ~/.claude/plugins/.../praxis apply --reverse <patch>
 ./scripts/build-plugin-manifests.py   # rewrites .claude-plugin/hooks/hooks.json et al.
 #          then reload the plugin (restart the session) to pick it up.
 
-# Option 3: temporary kill switch — edit ${CLAUDE_PLUGIN_ROOT}/hooks/
-#           retrospect-mix-check.sh and add `exit 0` at the top.
+# Option 3: temporary kill switch — edit
+#           ${CLAUDE_PLUGIN_ROOT}/hooks/completion-verify/retrospect-mix-check/impl.sh
+#           and add `exit 0` at the top (the dispatcher execs the impl
+#           directly; the per-hook wrapper that used to sit beside
+#           _dispatch.sh was removed in #1281).
 ```
 
 ### Tests

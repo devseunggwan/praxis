@@ -10,6 +10,9 @@ Coverage:
   - crash isolation: a raising member is contained (fail_open) and does not abort
     the group
   - latency: the whole group runs well under the 37-process baseline
+  - Stop group (issue #1281): shell members (body: impl.sh) run as a
+    deadline-clamped subprocess, the systemMessage advisory lane merges into
+    the one emitted object, and the transcript turn memo spans one group run
 """
 from __future__ import annotations
 
@@ -132,8 +135,10 @@ def _manifest_dispatch_groups() -> list[tuple[str, str]]:
     fixed-timeout spawns sat unscanned in the write-path groups (issue #1227).
     """
     manifest = json.loads((REPO_ROOT / "hooks" / "manifest.json").read_text())
+    # A matcher-less group (Stop, issue #1281) OMITS the key; None is its
+    # runtime identity (see _dispatch.NO_MATCHER_ARG).
     return [
-        (g["event"], g["matcher"]) for g in manifest.get("dispatch_groups", [])
+        (g["event"], g.get("matcher")) for g in manifest.get("dispatch_groups", [])
     ]
 
 
@@ -164,7 +169,17 @@ _NOOP_TOOL_INPUTS = {
 }
 
 
-def _noop_payload_for(event: str, matcher: str) -> str:
+def _noop_payload_for(event: str, matcher: str | None) -> str:
+    if matcher is None:
+        # A matcher-less (non-tool) event carries no tool fields. A missing
+        # transcript is the no-op for every Stop gate: nothing to read, pass.
+        return json.dumps({
+            "hook_event_name": event,
+            "transcript_path": "/nonexistent/praxis-dispatch-noop.jsonl",
+            "stop_hook_active": False,
+            "cwd": str(REPO_ROOT),
+            "session_id": "test-dispatch-noop",
+        })
     tool = matcher.split("|")[0]
     payload = {
         "hook_event_name": event,
@@ -356,17 +371,21 @@ def test_group_noop_allows(event, matcher):
         for e, m in NON_BASH_GROUPS
         for member in _dispatch.group_members(e, m)
     ],
-    ids=lambda v: v if isinstance(v, str) else f"{v[0]}/{v[1]}",
+    ids=lambda v: f"{v[0]}/{v[1]}" if isinstance(v, tuple) else str(v),
 )
 def test_run_one_matches_subprocess_for_group_noop(event, matcher, member):
     role, name, impl = member
     payload = _noop_payload_for(event, matcher)
+    # A shell member (body: impl.sh) is what its wrapper exec'd: the impl
+    # itself, under its own shebang — the same thing run_one now execs.
+    argv = [str(impl)] if _dispatch.is_shell_member(Path(impl)) else [sys.executable, str(impl)]
     direct = subprocess.run(
-        [sys.executable, str(impl)],
+        argv,
         input=payload,
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
+        env={**os.environ, "PRAXIS_FIRE_TELEMETRY_DISABLE": "1"},
     )
     rc, so, se = _dispatch.run_one(role, name, impl, payload)
     assert rc == direct.returncode, (
@@ -995,6 +1014,13 @@ def test_every_subprocess_member_is_budget_aware():
     for event, matcher in _manifest_dispatch_groups():
         members, _budget, _timeouts = _dispatch.load_group(event, matcher)
         for role, name, impl in members:
+            if _dispatch.is_shell_member(Path(impl)):
+                # A shell member has no spawn to size: the dispatcher runs
+                # the whole impl as ONE subprocess whose timeout IS the
+                # member deadline (run_shell_member), so it is clamped by
+                # construction — covered by
+                # test_shell_member_past_its_deadline_fails_open below.
+                continue
             for src in _lib_closure(Path(impl)):
                 bad = _fixed_timeout_spawns(
                     src.read_text(encoding="utf-8", errors="replace"))
@@ -1524,11 +1550,14 @@ def _patch_manifest(tmp_path: Path, monkeypatch, hooks: list[dict]) -> None:
     monkeypatch.setattr(_dispatch, "_MANIFEST", mf)
 
 
-def test_args_declaring_member_is_excluded_loudly(tmp_path, monkeypatch, capsys):
+def test_args_declaring_member_is_excluded_silently(tmp_path, monkeypatch, capsys):
     # Dispatch groups invoke members with stdin only; a member whose manifest
-    # entry declares "args" would silently run with its argv dropped. It must
-    # be excluded at group-resolution time — fail-open, but recorded loudly on
-    # stderr like run_one's import-failure forwarding.
+    # entry declares "args" would silently run with its argv dropped. It is
+    # excluded at group-resolution time. Silently (issue #1281): the build
+    # keeps such a member as its own standalone node beside the dispatcher
+    # node (#1199) and Rule 14 fails the build if that node is missing, so
+    # the exclusion is the designed arrangement — and under the Stop group
+    # the former stderr line would have reached the user on every turn.
     _patch_manifest(tmp_path, monkeypatch, [
         {"name": "argsy", "role": "completion-verify", "body": "impl.sh",
          "event": "Stop", "args": ["stop"], "timeout": 5},
@@ -1538,15 +1567,13 @@ def test_args_declaring_member_is_excluded_loudly(tmp_path, monkeypatch, capsys)
     members = _dispatch.group_members("Stop", None)
     err = capsys.readouterr().err
     assert [n for _r, n, _i in members] == ["plain"]
-    assert "completion-verify/argsy" in err
-    assert "args=['stop']" in err
-    assert "fail-open" in err
+    assert err == ""
 
 
 def test_args_declaring_member_group_still_fails_open(tmp_path, monkeypatch, capsys):
-    # A group containing an args-declaring member still runs end to end and
-    # never blocks on its account: the member is excluded (loud stderr), the
-    # rest of the group aggregates as usual.
+    # A group containing only an args-declaring member still runs end to end
+    # and never blocks on its account: the member is excluded, nothing is
+    # left, and the group is a silent allow on both streams.
     _patch_manifest(tmp_path, monkeypatch, [
         {"name": "argsy", "role": "completion-verify", "body": "impl.sh",
          "event": "Stop", "args": ["stop"], "timeout": 5},
@@ -1555,7 +1582,229 @@ def test_args_declaring_member_group_still_fails_open(tmp_path, monkeypatch, cap
     captured = capsys.readouterr()
     assert rc == 0
     assert captured.out == ""  # no member left -> silent allow, never a block
-    assert "completion-verify/argsy" in captured.err
+    assert captured.err == ""
+
+
+def test_real_stop_group_keeps_strike_counter_standalone():
+    # The live arrangement the two fakes above model: strike-counter (args)
+    # is outside the group and holds its own node in every platform hooks.json
+    # next to the one Stop dispatcher node (Rule 14 asserts the node shape;
+    # this pins the runtime half).
+    names = [n for _r, n, _i in _dispatch.group_members("Stop", None, host="claude")]
+    assert "strike-counter" not in names
+    assert names[:2] == ["completion-verify", "retrospect-mix-check"]  # shell members
+    assert len(names) == 12
+
+
+# --------------------------------------------------------------------------- #
+# shell members (body: impl.sh) run as a subprocess (issue #1281)
+# --------------------------------------------------------------------------- #
+
+def _write_fake_sh(tmp_path: Path, name: str, body: str) -> Path:
+    d = tmp_path / name
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / "impl.sh"
+    p.write_text("#!/bin/sh\n" + body)
+    p.chmod(0o755)
+    return p
+
+
+def test_shell_member_block_reaches_the_stop_lane(tmp_path, monkeypatch, capsys):
+    # The jq-shaped block the two shell Stop gates emit, produced by a shell
+    # member run through run_one, is recognized and attributed like a Python
+    # member's. The child sees the payload on stdin (it echoes the session id
+    # back into the reason to prove it).
+    members = [
+        ("completion-verify", "shelly", _write_fake_sh(
+            tmp_path, "shelly",
+            'payload=$(cat)\n'
+            'case "$payload" in *test-dispatch-stop*) sid=test-dispatch-stop;; *) sid=none;; esac\n'
+            'printf \'{"decision": "block", "reason": "seen %s"}\\n\' "$sid"\n'
+        )),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert json.loads(out) == {
+        "decision": "block",
+        "reason": "[praxis:shelly] seen test-dispatch-stop",
+    }
+
+
+def test_shell_member_child_has_its_own_ledger_arming_disabled(tmp_path, monkeypatch):
+    # The group records a shell member's fire from the returned triple; the
+    # child's own record_fire.sh arming must be off or the audit that reads
+    # the ledger counts every shell fire twice (issue #848 shape).
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    impl = _write_fake_sh(tmp_path, "envy", 'printf "%s" "${PRAXIS_FIRE_TELEMETRY_DISABLE:-unset}" >&2\n')
+    rc, so, se = _dispatch.run_one("completion-verify", "envy", impl, STOP_PAYLOAD)
+    assert (rc, so, se) == (0, "", "1")
+
+
+def test_shell_member_past_its_deadline_fails_open(tmp_path, monkeypatch):
+    # The member deadline IS the subprocess timeout: a shell member that
+    # outlives it is killed and reported as a pass with a stderr note — never
+    # a block nobody decided, never a silent disappearance. The deadline here
+    # is short enough to be sure the kill is what ends the child, and the
+    # elapsed bound is what proves it (the sleep alone would take 30s).
+    impl = _write_fake_sh(tmp_path, "sleepy", "sleep 30\nexit 2\n")
+    t0 = time.monotonic()
+    rc, so, se = _dispatch.run_one(
+        "completion-verify", "sleepy", impl, STOP_PAYLOAD,
+        deadline=time.monotonic() + 0.6,
+    )
+    assert time.monotonic() - t0 < 5
+    assert rc == 0 and so == ""
+    assert "[dispatch] completion-verify/sleepy" in se and "fail-open" in se
+
+
+def test_shell_member_missing_impl_passes_silently(tmp_path):
+    # The launcher's `[ -f "$IMPL" ] || exit 0` contract (issue #1053), kept
+    # under the dispatcher: a partial install is a pass, not exit 2.
+    impl = tmp_path / "ghost" / "impl.sh"
+    assert _dispatch.run_one("completion-verify", "ghost", impl, STOP_PAYLOAD) == (0, "", "")
+
+
+def test_shell_member_exit_2_is_a_block_like_any_member(tmp_path, monkeypatch, capsys):
+    # Exit 2 stays event-agnostic for a shell member too (exit codes cannot be
+    # faked by quoted text), and on Stop it does not silence later members.
+    members = [
+        ("completion-verify", "two", _write_fake_sh(tmp_path, "two", "cat >/dev/null\nexit 2\n")),
+        ("completion-verify", "later", _write_fake(tmp_path, "later", _FAKE_ADVISORY)),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "nudge" in captured.err  # the member after the exit-2 one still ran
+
+
+# --------------------------------------------------------------------------- #
+# Stop advisory lane: systemMessage merge (issue #1281)
+# --------------------------------------------------------------------------- #
+
+def _fake_stop_advisory(message: str) -> str:
+    # Mirrors _hook_io.emit_stop_advisory: a top-level systemMessage at exit 0.
+    return (
+        "import json, sys\n"
+        "def main():\n"
+        "    json.dump({'systemMessage': %r}, sys.stdout)\n"
+        "    sys.stdout.write('\\n')\n"
+        "    return 0\n" % message
+    )
+
+
+def test_stop_advisory_alone_is_forwarded_and_attributed(tmp_path, monkeypatch, capsys):
+    # The regression the Stop group waited on: a grouped member's
+    # systemMessage used to fall through to the context merge and vanish.
+    members = [
+        ("completion-verify", "adv", _write_fake(tmp_path, "adv", _fake_stop_advisory("mind the gap"))),
+        ("completion-verify", "quiet", _write_fake(tmp_path, "quiet", _FAKE_PASS)),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert json.loads(out) == {"systemMessage": "[praxis:adv] mind the gap"}
+
+
+def test_stop_advisories_merge_into_one_message(tmp_path, monkeypatch, capsys):
+    members = [
+        ("completion-verify", "a1", _write_fake(tmp_path, "a1", _fake_stop_advisory("one"))),
+        ("completion-verify", "a2", _write_fake(tmp_path, "a2", _fake_stop_advisory("[praxis:a2] two"))),
+    ]
+    _patch_members(monkeypatch, members)
+    _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    out = json.loads(capsys.readouterr().out)
+    # Already-attributed text is not tagged twice; the join is a blank line,
+    # the same shape as the merged block reason.
+    assert out == {"systemMessage": "[praxis:a1] one\n\n[praxis:a2] two"}
+
+
+def test_stop_advisory_rides_on_a_sibling_block(tmp_path, monkeypatch, capsys):
+    # `systemMessage` is a field common to every hook event, so the host
+    # reads it and the block from the ONE object it accepts; the advisory is
+    # neither dropped by the block nor emitted as a second JSON object.
+    members = [
+        ("completion-verify", "adv", _write_fake(tmp_path, "adv", _fake_stop_advisory("fyi"))),
+        ("completion-verify", "blk", _write_fake(tmp_path, "blk", _fake_stop_block("no evidence"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert json.loads(out) == {
+        "decision": "block",
+        "reason": "[praxis:blk] no evidence",
+        "systemMessage": "[praxis:adv] fyi",
+    }
+    assert list(json.loads(out)) == ["decision", "reason", "systemMessage"]
+
+
+def test_stop_advisory_is_parsed_not_probed(tmp_path, monkeypatch, capsys):
+    # Prose that mentions the key, an empty message, and a non-string message
+    # are not advisories; only a parsed non-empty string is forwarded.
+    members = [
+        ("completion-verify", "prose", _write_fake(tmp_path, "prose", _fake_raw_stdout('systemMessage: "x"'))),
+        ("completion-verify", "empty", _write_fake(tmp_path, "empty", _fake_stop_advisory(""))),
+        ("completion-verify", "num", _write_fake(tmp_path, "num", _fake_raw_stdout('{"systemMessage": 7}'))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+    assert rc == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_stop_advisory_is_scoped_to_stop(tmp_path, monkeypatch, capsys):
+    # On another event a top-level systemMessage is not this dispatcher's
+    # answer (the lane is scoped like the block lane, issue #1199 review).
+    members = [
+        ("advisory-nudge", "adv", _write_fake(tmp_path, "adv", _fake_stop_advisory("fyi"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PostToolUse", "Bash", NOOP_PAYLOAD)
+    assert rc == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_stop_advisory_is_recorded_as_advise_in_the_ledger():
+    # A Stop advisory lives on stdout, not stderr, so the stderr-based
+    # classification recorded it as "pass" — invisible to the prune audit.
+    import _fire_ledger
+    advisory = json.dumps({"systemMessage": "fyi"}) + "\n"
+    assert _fire_ledger.classify_decision(0, advisory, "", "Stop") == "advise"
+    assert _fire_ledger.classify_decision(0, advisory, "", "PostToolUse") == "pass"
+    block = json.dumps({"decision": "block", "reason": "r", "systemMessage": "fyi"})
+    assert _fire_ledger.classify_decision(0, block, "", "Stop") == "block"
+
+
+# --------------------------------------------------------------------------- #
+# shared transcript parse across Stop members (issue #1281)
+# --------------------------------------------------------------------------- #
+
+def test_run_group_enables_the_turn_memo_only_for_its_span(tmp_path, monkeypatch):
+    import _transcript
+    seen: list[object] = []
+    probe = _write_fake(tmp_path, "probe", (
+        "import sys\n"
+        "sys.path.insert(0, %r)\n"
+        "import _transcript\n"
+        "def main():\n"
+        "    sys.stderr.write('memo=%%s\\n' %% (_transcript._TURN_MEMO is not None))\n"
+        "    return 0\n" % str(LIB)
+    ))
+    _patch_members(monkeypatch, [("completion-verify", "probe", probe)])
+    assert _transcript._TURN_MEMO is None
+    saved = sys.stderr
+    sys.stderr = io.StringIO()
+    try:
+        _dispatch.run_group("Stop", None, STOP_PAYLOAD)
+        seen.append(sys.stderr.getvalue())
+    finally:
+        sys.stderr = saved
+    assert "memo=True" in seen[0]
+    assert _transcript._TURN_MEMO is None  # dropped on the way out
 
 
 # --------------------------------------------------------------------------- #

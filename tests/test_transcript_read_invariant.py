@@ -60,15 +60,11 @@ _CONTENT_READERS = {
 # order, and a stale entry is harmless where a false failure is not. It is
 # asserted to NAME A REAL HOOK, so a rename or removal has to touch this list
 # instead of leaving an exemption nothing can ever hit.
-_ALLOWLIST = {
-    # `_read_lines` materializes the root and every subagent transcript;
-    # replaced by a streaming prefiltered scan in #1307 (issue #1277).
-    "preflight-gate/block-commit-without-codex-review",
-    # Found by this guard's first run (issue #1312): the same read_text() +
-    # parse-every-line shape, on every `git commit`. Fixed in #1312's PR.
-    "preflight-gate/skill-gate-commands",
-    "advisory-nudge/pre-commit-staged-file-enumeration",
-}
+# Hooks the invariant skips, as "<role>/<name>" with the PR that removes the
+# entry. Empty since #1307 and #1314 landed: the three offenders this guard
+# was born with (issues #1277, #1312) now go through the bounded readers. An
+# entry here is a debt with a named payer, never a permanent exemption.
+_ALLOWLIST: set[str] = set()
 
 
 def _names_in(node: ast.AST) -> set[str]:

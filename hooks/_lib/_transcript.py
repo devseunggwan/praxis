@@ -332,6 +332,31 @@ def load_recent_events(
     return list(tail) if size <= max_bytes else []
 
 
+# Process-local memo for `load_current_turn` (issue #1281). None = disabled,
+# which is the standalone state: one hook process makes one call, so there is
+# nothing to share and no staleness to reason about. The dispatcher enables it
+# for the span of one group run — eight Stop members read the same transcript
+# tail, and under one process the second through eighth parse would only
+# repeat the first — and disables it again on the way out, so a test that
+# drives several groups through one interpreter never sees a previous run's
+# entry. The key carries the file's size and mtime so a transcript appended
+# between two members (the host writes it only between turns, but a memo must
+# not rely on that) re-reads instead of answering from the stale tail.
+_TURN_MEMO: dict[tuple, list[dict]] | None = None
+
+
+def enable_turn_memo() -> None:
+    """Start memoizing `load_current_turn` results in this process (dispatcher)."""
+    global _TURN_MEMO
+    _TURN_MEMO = {}
+
+
+def disable_turn_memo() -> None:
+    """Drop the memo and return `load_current_turn` to its standalone behavior."""
+    global _TURN_MEMO
+    _TURN_MEMO = None
+
+
 def load_current_turn(
     path: str, max_bytes: int = CURRENT_TURN_SCAN_MAX_BYTES
 ) -> list[dict]:
@@ -340,8 +365,26 @@ def load_current_turn(
     Same result as `get_current_turn(load_transcript(path))` without parsing
     the whole transcript — see `load_recent_events` for the bound and for what
     the two capped terminations return.
+
+    Under the dispatcher's memo (`enable_turn_memo`) a repeat call for the same
+    `(path, max_bytes)` on an unchanged file answers from the first parse. The
+    list handed back is a fresh copy each time, so one member's `.pop()` or
+    `.append()` cannot leak into a sibling's view of the turn.
     """
-    return get_current_turn(load_recent_events(path, max_bytes=max_bytes))
+    memo = _TURN_MEMO
+    if memo is None:
+        return get_current_turn(load_recent_events(path, max_bytes=max_bytes))
+    try:
+        st = os.stat(path)
+        key: tuple | None = (path, max_bytes, st.st_size, st.st_mtime_ns)
+    except OSError:
+        key = None
+    if key is not None and key in memo:
+        return list(memo[key])
+    turn = get_current_turn(load_recent_events(path, max_bytes=max_bytes))
+    if key is not None:
+        memo[key] = turn
+    return list(turn)
 
 
 def _parse_line(raw: bytes) -> dict | None:

@@ -266,8 +266,9 @@ def test_schema_hosts_enum_matches_platform_files():
 # manifest_schema_drifts — dispatch-group member semantic gate (review
 # round 2, Codex finding #1). A dispatch-group member's (event, matcher)
 # match against `dispatch_groups` is structural, not a schema keyword, so
-# the JSON-Schema subset can never reject "args"/"body" on a member — this
-# is a second pass in manifest_schema_drifts(), tested directly here.
+# the JSON-Schema subset can never express a cross-array rule on a member —
+# the second pass in manifest_schema_drifts() is tested directly here. Since
+# issue #1281 neither "args" nor "body" is rejected there (see the tests).
 # ---------------------------------------------------------------------------
 
 def _first_dispatch_member_name(manifest: dict) -> str:
@@ -290,11 +291,15 @@ def test_dispatch_member_with_args_is_allowed(manifest):
     entry["args"] = ["--foo"]
     drifts = build.manifest_schema_drifts(manifest)
     assert not any("declares 'args'" in d for d in drifts), drifts
-    # Control: `body` on the same entry IS still rejected, so the gate as a
-    # whole is alive and this is not an empty assertion.
-    entry["body"] = "impl.sh"
+    # Control: the sentinel-matcher rejection on the same manifest still
+    # fires, so the semantic pass as a whole is alive and this is not an
+    # empty assertion (the `body` rejection that used to serve as the control
+    # was removed in issue #1281 — see test_dispatch_member_with_body_is_allowed).
+    manifest["dispatch_groups"].append(
+        {"event": "Stop", "matcher": build.DISPATCH_NO_MATCHER_ARG}
+    )
     assert any(
-        f"entry {name!r}" in d and "declares 'body'" in d
+        "reserved as the matcher-less argv sentinel" in d
         for d in build.manifest_schema_drifts(manifest)
     )
 
@@ -303,10 +308,9 @@ def test_dispatch_group_may_omit_its_matcher(manifest):
     # Stop / SessionStart / UserPromptSubmit carry no matcher. The key is
     # OMITTED rather than null: the validator subset has no null type, and
     # .get("matcher") answers None for an absent key either way.
+    # The real manifest already declares the Stop group (issue #1281); a
+    # second identical entry is still a schema-legal, matcher-less group.
     manifest["dispatch_groups"].append({"event": "Stop"})
-    # Scoped to the matcher: adding a Stop group makes the real Stop hooks
-    # members, and their `body` declarations are rejected for their own
-    # (correct) reason — which is not what this test is about.
     assert not any(
         "dispatch_groups" in d and "matcher" in d
         for d in build.manifest_schema_drifts(manifest)
@@ -330,14 +334,17 @@ def test_sentinel_is_rejected_as_a_matcher(manifest):
     assert any("reserved as the matcher-less argv sentinel" in d for d in drifts), drifts
 
 
-def test_dispatch_member_with_body_is_rejected(manifest):
+def test_dispatch_member_with_body_is_allowed(manifest):
+    # Rejected until issue #1281: the dispatcher imported every member as
+    # Python. `_dispatch.run_one` now runs a shell body as a subprocess under
+    # the member deadline, so a `body: impl.sh` member collapses into its
+    # group like any other (the Stop group's completion-verify and
+    # retrospect-mix-check are the live cases).
     name = _first_dispatch_member_name(manifest)
     entry = next(h for h in manifest["hooks"] if h["name"] == name)
     entry["body"] = "impl.sh"
     drifts = build.manifest_schema_drifts(manifest)
-    assert any(
-        f"entry {name!r}" in d and "declares 'body'" in d for d in drifts
-    ), drifts
+    assert not any("declares 'body'" in d for d in drifts), drifts
 
 
 def test_non_dispatch_member_with_args_is_fine(manifest):
