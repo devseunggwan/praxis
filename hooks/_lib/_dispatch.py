@@ -89,6 +89,15 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
 _ASK_MARKER = '"permissionDecision": "ask"'
 _DENY_MARKER = '"permissionDecision": "deny"'
 
+# Events whose members carry a decision as a top-level `{"decision": "block"}`
+# / `{"systemMessage": ...}` JSON at exit 0 rather than in a
+# `hookSpecificOutput` (`_hook_io.emit_stop_block` / `emit_stop_advisory`).
+# SubagentStop "use[s] the same decision control format as Stop hooks"
+# (hooks reference, read 2026-09-06), so the Stop aggregation lane below
+# covers it verbatim — issue #1337. Kept in sync with
+# `_fire_ledger.STOP_LANE_EVENTS`, which gates the matching ledger branch.
+STOP_LANE_EVENTS = ("Stop", "SubagentStop")
+
 # Skip-record marker — kept in sync with _fire_ledger._SKIP_MARKER so a
 # budget-skipped member is classified as decision "skip" (not "advise").
 _SKIP_MARKER = "[dispatch] budget-skip"
@@ -498,7 +507,7 @@ def _run_group(
     # to prevent. Exit-2 stays event-agnostic: an exit code cannot be faked by
     # quoted text.
     is_pretooluse = event == "PreToolUse"
-    is_stop = event == "Stop"
+    is_stop = event in STOP_LANE_EVENTS
     deadline = time.monotonic() + max(
         budget - _GROUP_BUDGET_MARGIN_SEC, _MEMBER_SKIP_FLOOR_SEC
     )

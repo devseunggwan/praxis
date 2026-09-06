@@ -24,6 +24,9 @@
     },
     {
       "event": "Stop"
+    },
+    {
+      "event": "SubagentStop"
     }
   ],
   "hooks": [
@@ -1236,6 +1239,14 @@
       "review_by": "2026-12-04"
     },
     {
+      "name": "completion-verify",
+      "role": "completion-verify",
+      "body": "impl.sh",
+      "event": "SubagentStop",
+      "hosts": ["claude"],
+      "timeout": 10
+    },
+    {
       "name": "retrospect-mix-check",
       "role": "completion-verify",
       "body": "impl.sh",
@@ -1249,6 +1260,13 @@
       "event": "Stop",
       "timeout": 10,
       "review_by": "2026-12-04"
+    },
+    {
+      "name": "completion-signal-gate",
+      "role": "completion-verify",
+      "event": "SubagentStop",
+      "hosts": ["claude"],
+      "timeout": 10
     },
     {
       "name": "readonly-verify-deferral-gate",
@@ -1265,6 +1283,18 @@
       "review_by": "2026-12-04",
       "mode": {
         "strict_env": "PRAXIS_MERGE_CLAIM_STRICT",
+        "bypass_env": [
+          "PRAXIS_MERGE_CLAIM_BYPASS"
+        ]
+      }
+    },
+    {
+      "name": "merge-state-claim-gate",
+      "role": "completion-verify",
+      "event": "SubagentStop",
+      "hosts": ["claude"],
+      "timeout": 10,
+      "mode": {
         "bypass_env": [
           "PRAXIS_MERGE_CLAIM_BYPASS"
         ]

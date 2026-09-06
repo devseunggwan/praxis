@@ -119,6 +119,14 @@ EDIT_WRITE_MEMBERS = {
     "advisory-wrapper-signature-verify",
     "exclusion-probe-gate",
 }
+# The three completion gates that also grade a subagent's final turn (#1337).
+# Claude-only, so the pin is the canonical (unfiltered) view; the per-host
+# filter is `test_hosts.py`'s.
+SUBAGENT_STOP_MEMBERS = (
+    "completion-verify",
+    "completion-signal-gate",
+    "merge-state-claim-gate",
+)
 EDIT_NOTEBOOK_WRITE_MEMBERS = {
     "protected-paths-guard",
     "pre-edit-protected-branch-guard",
@@ -1817,3 +1825,76 @@ def test_group_latency_under_threshold():
     _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
     elapsed = time.time() - t0
     assert elapsed < 1.0, f"group pass took {elapsed*1000:.0f}ms, expected < 1000ms"
+
+
+# --------------------------------------------------------------------------- #
+# SubagentStop shares Stop's decision lane (issue #1337)
+# --------------------------------------------------------------------------- #
+
+SUBAGENT_STOP_PAYLOAD = json.dumps(
+    {
+        "hook_event_name": "SubagentStop",
+        "transcript_path": "/nonexistent/main.jsonl",
+        "agent_transcript_path": "/nonexistent/subagents/agent-def456.jsonl",
+        "stop_hook_active": False,
+        "agent_id": "def456",
+        "agent_type": "Explore",
+        "last_assistant_message": "Analysis complete.",
+        "cwd": str(REPO_ROOT),
+        "session_id": "test-dispatch-subagent-stop",
+    }
+)
+
+
+def test_subagent_stop_group_members_and_run_order():
+    members = _dispatch.group_members("SubagentStop", None)
+    assert tuple(n for _r, n, _i in members) == SUBAGENT_STOP_MEMBERS
+    for _role, name, impl in members:
+        assert impl.exists(), f"missing impl for {name}: {impl}"
+
+
+def test_subagent_stop_member_block_is_not_swallowed(tmp_path, monkeypatch, capsys):
+    # SubagentStop "use[s] the same decision control format as Stop hooks", so
+    # a member's {"decision": "block"} at exit 0 must reach stdout here exactly
+    # as it does on Stop. Gated on the event name: before #1337 `is_stop` was
+    # `event == "Stop"`, and this object fell through to the context merge —
+    # which forwards only hookSpecificOutput — and vanished, disabling every
+    # gate on the event it was just registered for, errorlessly.
+    members = [
+        ("completion-verify", "pass", _write_fake(tmp_path, "pass", _FAKE_PASS)),
+        ("completion-verify", "gate",
+         _write_fake(tmp_path, "gate", _fake_stop_block("no evidence"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("SubagentStop", None, SUBAGENT_STOP_PAYLOAD)
+    obj = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert obj == {"decision": "block", "reason": "[praxis:gate] no evidence"}
+
+
+def test_subagent_stop_advisory_merges_like_stop(tmp_path, monkeypatch, capsys):
+    members = [
+        ("completion-verify", "adv",
+         _write_fake(tmp_path, "adv", _fake_stop_advisory("mind the gap"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("SubagentStop", None, SUBAGENT_STOP_PAYLOAD)
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "systemMessage": "[praxis:adv] mind the gap"
+    }
+
+
+def test_stop_lane_stays_scoped_to_its_two_events(tmp_path, monkeypatch, capsys):
+    # Negative control for the widening: the same block object under an event
+    # that has no Stop lane must NOT be re-emitted as this group's answer —
+    # `{"decision": "block"}` means Stop's block, and answering with it under
+    # PostToolUse answers a question that event never asked.
+    members = [
+        ("postuse-correction", "gate",
+         _write_fake(tmp_path, "gate", _fake_stop_block("no evidence"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PostToolUse", "Bash", STOP_PAYLOAD)
+    assert rc == 0
+    assert "decision" not in capsys.readouterr().out

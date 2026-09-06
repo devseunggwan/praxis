@@ -77,7 +77,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 
 ## Hooks
 
-Praxis ships a PreToolUse/PostToolUse/PostToolUseFailure/Stop/UserPromptSubmit/SessionStart hook suite
+Praxis ships a PreToolUse/PostToolUse/PostToolUseFailure/Stop/SubagentStop/UserPromptSubmit/SessionStart hook suite
 that structurally enforces the rules in [`ETHOS.md`](ETHOS.md);
 [`DESIGN.md`](DESIGN.md) holds the shared contracts. Per-hook specs live at
 [`hooks/<role>/<name>/spec.md`](hooks/), indexed by

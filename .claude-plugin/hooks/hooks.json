@@ -312,6 +312,17 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh SubagentStop - claude",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

@@ -528,6 +528,130 @@ else
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("fail-safe malformed JSONL")
 fi
 
+# === SubagentStop (issue #1337) ============================================
+#
+# On SubagentStop `transcript_path` is the PARENT session's and
+# `agent_transcript_path` is the subagent's own. Every case below is written
+# so the two transcripts DISAGREE: reading the wrong one flips the verdict,
+# which is what makes these tests able to fail.
+
+# $1 name, $2 expected, $3 main-transcript JSONL, $4 agent-transcript JSONL,
+# $5 optional last_assistant_message
+run_subagent_case() {
+  local name="$1" expected="$2" main="$3" agent="$4" last_msg="${5:-}"
+
+  local mpath apath
+  mpath="$TMPDIR/sub_main_${PASS}_${FAIL}.jsonl"
+  apath="$TMPDIR/sub_agent_${PASS}_${FAIL}.jsonl"
+  printf '%s\n' "$main" > "$mpath"
+  printf '%s\n' "$agent" > "$apath"
+
+  local payload
+  payload=$(jq -nc --arg m "$mpath" --arg a "$apath" --arg l "$last_msg" '
+    {hook_event_name: "SubagentStop", transcript_path: $m,
+     agent_transcript_path: $a, stop_hook_active: false,
+     agent_id: "def456", agent_type: "Explore",
+     session_id: "test-subagent"}
+    + (if $l == "" then {} else {last_assistant_message: $l} end)')
+
+  local out rc
+  out=$(printf '%s' "$payload" | "$HOOK" 2>/dev/null)
+  rc=$?
+
+  if [ "$rc" -ne 0 ]; then
+    echo "FAIL  [$name] hook exited $rc (expected 0)"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  case "$expected" in
+    block)
+      if ! echo "$out" | grep -q '"decision": "block"'; then
+        echo "FAIL  [$name] expected block, got: ${out:-<empty>}"
+        FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+      fi ;;
+    pass)
+      if [ -n "$out" ]; then
+        echo "FAIL  [$name] expected pass (no output), got: $out"
+        FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+      fi ;;
+  esac
+  echo "PASS  [$name]"
+  PASS=$((PASS + 1))
+}
+
+# A parent turn that WOULD pass: real Bash evidence, pasted. The subagent's
+# own turn claims completion with nothing behind it. Reading the parent's
+# transcript passes; reading the subagent's blocks.
+SS_USER=$(mk_user_text "delegate the check")
+SS_BASH=$(mk_bash_use "p1" "pytest tests/")
+SS_PARENT_A=$(mk_assistant "running..." "[$SS_BASH]")
+SS_PARENT_R=$(mk_tool_result "p1" "9 tests passed in 0.20 seconds")
+SS_PARENT_B=$(mk_assistant "Parent evidence: 9 tests passed in 0.20 seconds. All done.")
+SS_PARENT="$SS_USER
+$SS_PARENT_A
+$SS_PARENT_R
+$SS_PARENT_B"
+
+SS_AGENT_USER=$(mk_user_text "check the config")
+SS_AGENT_A=$(mk_assistant "Looks correct. All done.")
+SS_AGENT_NOEVIDENCE="$SS_AGENT_USER
+$SS_AGENT_A"
+
+run_subagent_case "SubagentStop grades the subagent, not the parent" \
+  block "$SS_PARENT" "$SS_AGENT_NOEVIDENCE"
+
+# The mirror image: the subagent DID verify and pasted the span, while the
+# parent's turn is a bare claim. Reading the parent would block a clean run.
+SS_AGENT_BASH=$(mk_bash_use "a1" "pytest tests/unit")
+SS_AGENT_B1=$(mk_assistant "running..." "[$SS_AGENT_BASH]")
+SS_AGENT_R=$(mk_tool_result "a1" "3 tests passed in 0.05 seconds")
+SS_AGENT_B2=$(mk_assistant "Subagent evidence: 3 tests passed in 0.05 seconds. All done.")
+SS_AGENT_OK="$SS_AGENT_USER
+$SS_AGENT_B1
+$SS_AGENT_R
+$SS_AGENT_B2"
+SS_PARENT_BARE="$SS_USER
+$(mk_assistant "Looks correct. All done.")"
+
+run_subagent_case "SubagentStop passes on the subagent's own evidence" \
+  pass "$SS_PARENT_BARE" "$SS_AGENT_OK"
+
+# The agent transcript may carry isSidechain markers. Keeping the filter would
+# empty its turn and pass every subagent silently — the failure this asserts
+# against is a false PASS, so the case is built to block.
+SS_AGENT_SIDECHAIN=$(printf '%s\n%s' \
+  "$(echo "$SS_AGENT_USER" | jq -c '.isSidechain = true')" \
+  "$(echo "$SS_AGENT_A" | jq -c '.isSidechain = true')")
+run_subagent_case "sidechain-marked agent transcript is still graded" \
+  block "$SS_PARENT" "$SS_AGENT_SIDECHAIN"
+
+# last_assistant_message is the documented source for the final text; the
+# transcript "may lag". Here the agent transcript's last message carries no
+# claim and the payload's does, so only the payload-preferring read blocks.
+SS_AGENT_NOCLAIM="$SS_AGENT_USER
+$(mk_assistant "Reviewed the config.")"
+run_subagent_case "payload last_assistant_message carries the claim" \
+  block "$SS_PARENT" "$SS_AGENT_NOCLAIM" "Looks correct. All done."
+
+# An agent transcript that has not been flushed yet falls back to the parent's
+# — the only reading available, and the same one a plain Stop payload gets.
+SS_MISSING_PAYLOAD=$(jq -nc --arg m "$TMPDIR/ss_fallback.jsonl" \
+  --arg a "$TMPDIR/subagents/never-written.jsonl" '
+  {hook_event_name: "SubagentStop", transcript_path: $m,
+   agent_transcript_path: $a, stop_hook_active: false,
+   session_id: "test-subagent-fallback"}')
+printf '%s\n' "$SS_PARENT" > "$TMPDIR/ss_fallback.jsonl"
+ss_out=$(printf '%s' "$SS_MISSING_PAYLOAD" | "$HOOK" 2>/dev/null)
+if [ -z "$ss_out" ]; then
+  echo "PASS  [unflushed agent transcript falls back to the parent]"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL  [unflushed agent transcript falls back to the parent] out=$ss_out"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("unflushed agent transcript falls back to the parent")
+fi
+
+# Control: a plain Stop payload is unchanged by any of the above.
+run_case "Stop payload unchanged by the SubagentStop path" pass "$SS_PARENT"
+
 echo
 echo "=========================================="
 echo "  PASS: $PASS  FAIL: $FAIL"

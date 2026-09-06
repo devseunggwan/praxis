@@ -54,9 +54,9 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
-    extract_last_assistant_text,
     has_tool_in_turn,
-    load_current_turn,
+    load_stop_turn,
+    stop_last_assistant_text,
 )
 
 # ---------------------------------------------------------------------------
@@ -473,15 +473,15 @@ def main() -> int:
     if stop_hook_active:
         return 0
 
-    transcript_path = payload.get("transcript_path") or ""
-    if not transcript_path or not os.path.isfile(transcript_path):
-        return 0
-
-    turn = load_current_turn(transcript_path)
+    # Stop reads the session transcript; SubagentStop reads the subagent's own
+    # (`agent_transcript_path`) — see `_transcript.resolve_stop_transcript`.
+    # An unreadable or empty turn still passes: a claim graded against
+    # evidence that was never read is the one failure mode worth avoiding.
+    turn = load_stop_turn(payload)
     if not turn:
         return 0
 
-    last_text = extract_last_assistant_text(turn)
+    last_text = stop_last_assistant_text(payload, turn)
     if not last_text:
         return 0
 

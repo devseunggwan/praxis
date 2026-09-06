@@ -19,8 +19,9 @@ below.
   [`README.md` → Hooks](README.md#hooks) and the generated
   [Hook Operating Matrix](docs/hook-operating-matrix.md), not here.
 - **Interceptor chain, most-restrictive-wins.** Hooks intercept the host's
-  lifecycle (PreToolUse → PostToolUse / PostToolUseFailure → Stop, plus
-  UserPromptSubmit and SessionStart). Unlike a classic chain-of-responsibility, every member runs
+  lifecycle (PreToolUse → PostToolUse / PostToolUseFailure → Stop /
+  SubagentStop, plus UserPromptSubmit and SessionStart). Unlike a classic
+  chain-of-responsibility, every member runs
   and decisions aggregate `deny > ask > allow`
   ([§Single-process dispatch](#single-process-dispatch-adr-0002)), with each
   member fail-open isolated.

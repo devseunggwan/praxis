@@ -53,6 +53,8 @@ _ASK = '{"hookSpecificOutput": {"permissionDecision": "ask"}}'
 _STOP_BLOCK = '{"decision": "block", "reason": "no evidence"}'
 # jq's pretty-printed form (shell Stop hooks) parses identically.
 _STOP_BLOCK_JQ = '{\n  "decision": "block",\n  "reason": "no evidence"\n}\n'
+# The non-blocking half of the same lane (`_hook_io.emit_stop_advisory`).
+_STOP_ADVISORY = '{"systemMessage": "mind the gap"}'
 # A context payload that merely QUOTES the block shape must NOT classify as a
 # block — recognition is parse-based, not substring.
 _STOP_QUOTING = (
@@ -84,6 +86,14 @@ _STOP_QUOTING = (
     (0, _STOP_BLOCK_JQ, "", "Stop", "block"),  # jq pretty-printed form -> block
     (0, _STOP_QUOTING, "", "Stop", "pass"),  # QUOTED block shape -> parse says no block
     (0, _STOP_QUOTING, "nudge", "Stop", "advise"),  # quoted shape + stderr stays advise
+    # issue #1337: SubagentStop carries a decision in the same top-level shape
+    # (the dispatcher accepts it under both events), so the ledger must record
+    # it under both too. Gated the same way the dispatcher gates it — under an
+    # event with no Stop lane the object is not a decision and stays a pass.
+    (0, _STOP_BLOCK, "", "SubagentStop", "block"),
+    (0, _STOP_ADVISORY, "", "SubagentStop", "advise"),
+    (0, _STOP_BLOCK, "", "PostToolUse", "pass"),
+    (0, _STOP_ADVISORY, "", "PostToolUse", "pass"),
 ])
 def test_classify_decision(rc, stdout, stderr, event, expected):
     # `event` is a column rather than a constant: every lane below the exit-2

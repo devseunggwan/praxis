@@ -201,11 +201,11 @@ channel.
 
 | Hook | Trigger | Purpose |
 | ------ | --------- | --------- |
-| [completion-verify](../../hooks/completion-verify/completion-verify/spec.md) | Stop | Block "done / 완료" claims without same-turn Bash verification evidence |
+| [completion-verify](../../hooks/completion-verify/completion-verify/spec.md) | Stop + SubagentStop (claude only, issue #1337) | Block "done / 완료" claims without same-turn Bash verification evidence |
 | [retrospect-mix-check](../../hooks/completion-verify/retrospect-mix-check/spec.md) | Stop | Block retrospect Stage 3 outputs that default findings to memory-only |
-| [completion-signal-gate](../../hooks/completion-verify/completion-signal-gate/spec.md) | Stop | Advisory nudge when completion-signal phrase appears without evidence-block; also flags cross-plugin slash commands (Event 2) |
+| [completion-signal-gate](../../hooks/completion-verify/completion-signal-gate/spec.md) | Stop + SubagentStop (claude only, issue #1337) | Advisory nudge when completion-signal phrase appears without evidence-block; also flags cross-plugin slash commands (Event 2) |
 | [readonly-verify-deferral-gate](../../hooks/completion-verify/readonly-verify-deferral-gate/spec.md) | Stop | Advisory when the last turn offers to run a read-only verification (SELECT/kubectl get/git status/--dry-run) instead of running it; mutation carve-out + read-already-run suppressor |
-| [merge-state-claim-gate](../../hooks/completion-verify/merge-state-claim-gate/spec.md) | Stop | Advisory when the final message asserts a merge/PR/issue/worktree state change without a fresh `gh`/GitHub-MCP state query — applied-on-branch claims additionally require reachability evidence (#656) |
+| [merge-state-claim-gate](../../hooks/completion-verify/merge-state-claim-gate/spec.md) | Stop + SubagentStop (claude only, issue #1337) | Advisory when the final message asserts a merge/PR/issue/worktree state change without a fresh `gh`/GitHub-MCP state query — applied-on-branch claims additionally require reachability evidence (#656) |
 | [runtime-state-claim-gate](../../hooks/completion-verify/runtime-state-claim-gate/spec.md) | Stop | Advisory when the final message asserts a runtime/execution state ("X is running in Y" / "로컬은 건드리지 않습니다") with no probe tool_use in the current turn — launch success does not reveal where something runs (#809) |
 | [artifact-verdict-evidence-gate](../../hooks/completion-verify/artifact-verdict-evidence-gate/spec.md) | Stop | Advise when the final message surfaces a positive artifact verdict (삭제 후보/중복/통합 대상/superseded) as a candidate list without an adjacent `Verdict-evidence:` line (#862) |
 | [negative-existence-verdict-gate](../../hooks/completion-verify/negative-existence-verdict-gate/spec.md) | Stop | Block when the final message surfaces a negative-existence verdict (없습니다/does not exist) under a registered decision framing (게이트 결과/게이트 판정/AC #) without an `Enumerated:` line in the same paragraph (#804) |

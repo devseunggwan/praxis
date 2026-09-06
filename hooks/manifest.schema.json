@@ -16,7 +16,7 @@
       "minLength": 1
     },
     "dispatch_groups": {
-      "description": "(event, matcher) pairs collapsed into a single dispatcher node per platform hooks.json (ADR-0002). Non-tool events (Stop, SessionStart, UserPromptSubmit) carry no matcher: OMIT the key rather than setting it null — the validator subset has no null type, and .get('matcher') yields None for an absent key anyway (issue #1199 review).",
+      "description": "(event, matcher) pairs collapsed into a single dispatcher node per platform hooks.json (ADR-0002). Non-tool events (Stop, SubagentStop, SessionStart, UserPromptSubmit) carry no matcher: OMIT the key rather than setting it null — the validator subset has no null type, and .get('matcher') yields None for an absent key anyway (issue #1199 review).",
       "type": "array",
       "minItems": 1,
       "items": {
@@ -30,7 +30,8 @@
               "UserPromptSubmit",
               "PreToolUse",
               "PostToolUse",
-              "Stop"
+              "Stop",
+              "SubagentStop"
             ]
           },
           "matcher": {
@@ -64,14 +65,15 @@
             ]
           },
           "event": {
-            "description": "Host lifecycle event. PostToolUseFailure (#1337) is documented for Claude Code only — a registration on it carries hosts: [\"claude\"]; it is a per-hook event, not a dispatch group, so the dispatch_groups enum above does not list it.",
+            "description": "Host lifecycle event. PostToolUseFailure and SubagentStop (#1337) are documented for Claude Code only — a registration on either carries hosts: [\"claude\"]. PostToolUseFailure is a per-hook event, so the dispatch_groups enum above does not list it; SubagentStop shares Stop's decision format and does have a group.",
             "enum": [
               "SessionStart",
               "UserPromptSubmit",
               "PreToolUse",
               "PostToolUse",
               "PostToolUseFailure",
-              "Stop"
+              "Stop",
+              "SubagentStop"
             ]
           },
           "matcher": {

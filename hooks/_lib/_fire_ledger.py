@@ -125,6 +125,12 @@ _DENY_MARKER = '"permissionDecision": "deny"'
 # hide the starvation this record exists to surface.
 _SKIP_MARKER = "[dispatch] budget-skip"
 
+# Kept in sync with `_dispatch.STOP_LANE_EVENTS`: the events under which the
+# dispatcher accepts a top-level `{"decision": "block"}` / `{"systemMessage":
+# ...}` object as this member's decision. Classifying that shape under any
+# other event would record a block the dispatcher never enforced (#1337).
+STOP_LANE_EVENTS = ("Stop", "SubagentStop")
+
 
 def _is_stop_block(stdout: str) -> bool:
     """True iff `stdout` is a Stop-lane block object (issue #1169 / PR #1199).
@@ -201,7 +207,7 @@ def classify_decision(
     is_pretooluse = event == "PreToolUse"
     if rc == 2 or (is_pretooluse and _DENY_MARKER in stdout):
         return DECISION_BLOCK
-    if rc == 0 and event == "Stop" and _is_stop_block(stdout):
+    if rc == 0 and event in STOP_LANE_EVENTS and _is_stop_block(stdout):
         return DECISION_BLOCK
     if is_pretooluse and _ASK_MARKER in stdout:
         return DECISION_ASK
@@ -209,7 +215,7 @@ def classify_decision(
         return DECISION_SKIP
     if stderr.strip():
         return DECISION_ADVISE
-    if rc == 0 and event == "Stop" and _is_stop_advisory(stdout):
+    if rc == 0 and event in STOP_LANE_EVENTS and _is_stop_advisory(stdout):
         return DECISION_ADVISE
     return DECISION_PASS
 
