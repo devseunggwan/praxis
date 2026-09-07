@@ -371,6 +371,36 @@ run_case "dirty+protected+root-relative-.omc/plans/ → pass (issue #513 결함1
   "PRAXIS_PBGUARD_TEST_BRANCH=main" \
   "PRAXIS_PBGUARD_TEST_STATUS=$DIRTY_STATUS"
 
+# issue #1375: the planning skip compared the pattern before `..` collapsed, so
+# a path that merely STARTS inside a planning directory and walks back out to
+# real source kept the exemption — and this hook denies, so the exemption was a
+# way past the block. Normalization now runs first.
+run_case "dirty+protected+.omc/plans/.. escapes to source → deny (issue #1375)" deny \
+  Edit "$FAKE_ROOT/.omc/plans/../../src/app.py" \
+  "PRAXIS_PBGUARD_TEST_REPO_ROOT=$FAKE_ROOT" \
+  "PRAXIS_PBGUARD_TEST_BRANCH=main" \
+  "PRAXIS_PBGUARD_TEST_STATUS=$DIRTY_STATUS"
+
+run_case "dirty+protected+.claude/projects/.. escapes to source → deny (issue #1375)" deny \
+  Write "$FAKE_ROOT/.claude/projects/X/../../../src/app.py" \
+  "PRAXIS_PBGUARD_TEST_REPO_ROOT=$FAKE_ROOT" \
+  "PRAXIS_PBGUARD_TEST_BRANCH=main" \
+  "PRAXIS_PBGUARD_TEST_STATUS=$DIRTY_STATUS"
+
+# Control: `.` and a `..` that stays INSIDE the planning directory keep the
+# exemption, so #1375 narrowed the skip without collapsing it.
+run_case "dirty+protected+.omc/plans/./draft.md → pass (issue #1375 control)" pass \
+  Write "$FAKE_ROOT/.omc/plans/./draft.md" \
+  "PRAXIS_PBGUARD_TEST_REPO_ROOT=$FAKE_ROOT" \
+  "PRAXIS_PBGUARD_TEST_BRANCH=main" \
+  "PRAXIS_PBGUARD_TEST_STATUS=$DIRTY_STATUS"
+
+run_case "dirty+protected+.omc/plans/a/../draft.md → pass (issue #1375 control)" pass \
+  Write "$FAKE_ROOT/.omc/plans/a/../draft.md" \
+  "PRAXIS_PBGUARD_TEST_REPO_ROOT=$FAKE_ROOT" \
+  "PRAXIS_PBGUARD_TEST_BRANCH=main" \
+  "PRAXIS_PBGUARD_TEST_STATUS=$DIRTY_STATUS"
+
 # ---------------------------------------------------------------------------
 # PASS / DENY: gitignored paths (issue #493)
 # Gitignored files can never be committed/PR'd → worktree workflow N/A → skip.

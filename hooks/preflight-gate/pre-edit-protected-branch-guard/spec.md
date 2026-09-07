@@ -66,7 +66,7 @@ solo repo with no PR history and a clean tree passes silently), and `PRAXIS_PBGU
 | Non-protected branch (`feature/…`, `issue-N-…`) + dirty tree                     | silent pass-through                                                     |
 | Non-protected branch + PR-suffix in log                                          | silent pass-through (guard limited to protected branches)               |
 | Edit target in `/tmp/` (no repo root found)                                      | silent pass-through (fail-open)                                         |
-| Edit target in `.omc/plans/` or `.claude/projects/`                              | silent pass-through (planning artifact)                                 |
+| Edit target in `.omc/plans/` or `.claude/projects/` **after lexical normalization** | silent pass-through (planning artifact). A repo-root-relative `.omc/plans/x` matches; `username.omc/plans/x` does not (no component boundary, #513); `.omc/plans/../../src/app.py` does not, because it resolves to the source file (#1375). Shared with `protected-paths-guard` via [`hooks/_lib/_path_scope.py`](../../_lib/_path_scope.py) |
 | Edit target is gitignored (`git check-ignore` matches)                           | silent pass-through (uncommittable → worktree workflow N/A, issue #493) |
 | Edit target is README/CHANGELOG/docs file (unless `PRAXIS_PBGUARD_BLOCK_DOCS=1`) | silent pass-through (docs skip)                                         |
 | Edit target inside `CLAUDE_PLUGIN_ROOT` (praxis plugin self-edit)                | silent pass-through                                                     |
