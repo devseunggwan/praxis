@@ -26,6 +26,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | ---------- | ------ | ----------------- |
 | `PRAXIS_HOOK_BYPASS_PROTECTED_PATHS` | `protected-paths-guard` | Skip the sensitive-file write guard |
 | `PRAXIS_HOOK_BYPASS_SETTINGS_PATH` | `settings-path-advisory` | Skip the Claude Code settings-file write advisory |
+| `PRAXIS_HOOK_BYPASS_PARALLEL_MUTATION` | `parallel-gated-mutation-gate` | Skip the repeated-mutation check on a resolved parallel batch. Exact value `1` after stripping — `true` / `yes` / `0` leave the gate active |
 | `PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH` | `destructive-bash-guard` | Skip the destructive-command guard |
 | `PRAXIS_HOOK_BYPASS_SKILL_GATE` | `skill-gate-commands` | Skip the skill-gated-command preflight |
 | `PRAXIS_HOOK_BYPASS_WORKTREE_GATE` | `worktree-edit-gate` | Skip the worktree-edit preflight |

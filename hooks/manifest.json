@@ -1215,6 +1215,17 @@
       "review_by": "2026-12-04"
     },
     {
+      "name": "parallel-gated-mutation-gate",
+      "role": "preflight-gate",
+      "event": "PostToolBatch",
+      "hosts": ["claude"],
+      "timeout": 5,
+      "review_by": "2026-12-04",
+      "mode": {
+        "bypass_env": ["PRAXIS_HOOK_BYPASS_PARALLEL_MUTATION"]
+      }
+    },
+    {
       "name": "completion-verify",
       "role": "completion-verify",
       "body": "impl.sh",
