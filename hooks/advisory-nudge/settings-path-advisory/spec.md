@@ -75,7 +75,7 @@ permission/hook key in the written text; the path alone is the surface".
 | Skip rule | Trigger |
 | ----------- | --------- |
 | Test fixtures | a `fixtures`, `__fixtures__`, `test-data`, `testdata` or `test_data` path component |
-| Scratch | absolute path under `/tmp/` or `/private/tmp/` after lexical normalization — a relative `tmp/…` is a project path, and `/tmp/../repo/…` resolves outside the prefix; neither is scratch |
+| Scratch | absolute path under `/tmp/` or `/private/tmp/` after lexical normalization — a relative `tmp/…` is a project path, and `/tmp/../repo/…` resolves outside the prefix; neither is scratch. The test lives in [`hooks/_lib/_path_scope.py`](../../_lib/_path_scope.py), shared with `protected-paths-guard`, which had the same defect (#1362) |
 | Self-edit | absolute path inside `CLAUDE_PLUGIN_ROOT` (fallback: the checkout that owns this file); relative paths are never exempted |
 
 ## Examples

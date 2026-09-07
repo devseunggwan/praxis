@@ -57,7 +57,7 @@ rule still fires because the directory itself is the trust anchor.
 | Skip rule | Trigger |
 | ----------- | --------- |
 | Test fixtures | path contains `/fixtures/`, `/__fixtures__/`, `/test-data/`, `/testdata/`, or `/test_data/` directory component |
-| Planning artifacts | path starts with `/tmp/` or `/private/tmp/` (macOS realpath form), contains `/.omc/plans/`, or contains `/.claude/projects/` |
+| Planning artifacts | an **absolute** path under `/tmp/` or `/private/tmp/` (macOS realpath form) after lexical normalization, or a path containing `/.omc/plans/` or `/.claude/projects/` after the same normalization. A relative `tmp/.env` is a project path, not scratch, and `/tmp/../proj/.env` resolves outside `/tmp/` — both get the advisory (#1362). The two tests live in [`hooks/_lib/_path_scope.py`](../../_lib/_path_scope.py), shared with `settings-path-advisory` |
 | Self-edit | path is inside `CLAUDE_PLUGIN_ROOT` (so this very hook can be edited) |
 
 ### Examples
@@ -88,7 +88,9 @@ rule still fires because the directory itself is the trust anchor.
 | `tests/fixtures/.env.local` | **SILENT** | test fixture skip |
 | `src/__fixtures__/sample.pem` | **SILENT** | test fixture skip |
 | `/tmp/scratch.env.production` | **SILENT** | planning artifact skip |
-| `.omc/plans/sketch.env` | **SILENT** | planning artifact skip |
+| `.omc/plans/sketch.env` | **SILENT** | planning artifact skip — a fragment matches a relative path too |
+| `tmp/.env` | **ADVISORY** | relative, so not scratch (#1362) |
+| `/tmp/../proj/.env` | **ADVISORY** | resolves outside `/tmp/` (#1362) |
 
 ### Modes
 

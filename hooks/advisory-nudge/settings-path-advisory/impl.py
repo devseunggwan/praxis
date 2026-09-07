@@ -57,12 +57,14 @@ from __future__ import annotations
 
 import json
 import os
-import posixpath
 import re
 import sys
 from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _path_scope import (  # type: ignore[import-not-found]  # noqa: E402
+    under_absolute_prefix,
+)
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 TARGET_TOOLS = frozenset({"Edit", "Write"})
@@ -143,12 +145,10 @@ def _is_scratch(path: str) -> bool:
     """True for an absolute path under `/tmp/` or `/private/tmp/` after lexical
     normalization. A relative `tmp/.claude/settings.json` is a project path
     and is never scratch; `/tmp/../repo/.claude/settings.json` resolves
-    outside `/tmp/` and is not scratch either (CodeRabbit on #1356)."""
-    norm = path.replace("\\", "/")
-    if not norm.startswith("/"):
-        return False
-    norm = posixpath.normpath(norm)
-    return any(norm.startswith(p) for p in _SCRATCH_PREFIXES)
+    outside `/tmp/` and is not scratch either (CodeRabbit on #1356). The rule
+    lives in `_lib/_path_scope.py` since `protected-paths-guard` needed the
+    same one (#1362)."""
+    return under_absolute_prefix(path, _SCRATCH_PREFIXES)
 
 
 def _is_test_fixture(components: tuple[str, ...]) -> bool:
