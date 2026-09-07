@@ -643,6 +643,22 @@ an explicit `SKIPPED:` line when the tool is not installed, so a missing
 toolchain does not block you. The corresponding CI job still runs either way,
 so install them if you want local parity.
 
+**One run at a time per checkout.** Eleven suites verify
+`check-plugin-manifests.py` by editing a real file in the working tree, running
+the checker, and restoring from a backup on `EXIT`. Two such runs in one
+checkout corrupt each other — the second snapshots the first's mutation as its
+baseline — and the failures that follow name the assertion, never the cause.
+`tests/_tree_mutation_lock.sh` now serializes them: a second run waits, and
+says so, instead of interleaving (issue #1377). Set `PRAXIS_TREE_LOCK_WAIT` to
+change the timeout. Where `flock(1)` is unavailable the lock is skipped with a
+note, so keep the runs serial yourself there.
+
+A related trap when writing a suite: assert on what your test *changed*, not on
+global state it does not own. Two cases in this repo graded a path outside
+their sandbox and a file whose existence depends on `gh` being installed; both
+reported failures that had nothing to do with the code, and one of them could
+have gone vacuous instead — passing because the thing under test never ran.
+
 `bash scripts/run-tests.sh --doctor` tells you up front which of those
 `SKIPPED:` lines a run on your machine will produce. It prints one table of
 every external tool the runner or a sub-suite needs (`python3`, `pytest`,

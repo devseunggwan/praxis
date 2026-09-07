@@ -15,6 +15,10 @@ set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# This suite edits the working tree and restores it on EXIT; the lock keeps
+# a concurrent run from snapshotting a mutated file as its baseline (#1377).
+. "$(dirname "$0")/_tree_mutation_lock.sh"
 CHECK="$ROOT_DIR/scripts/check-plugin-manifests.py"
 DOC="$ROOT_DIR/docs/skills.md"
 # The `strike` row is the fixture: its description carries a negative clause

@@ -286,11 +286,20 @@ def test_full_budget_gate_is_not_skipped(tmp_path, monkeypatch, capsys):
     )
 
     # --- oracle 2: fire-ledger decision is not "skip" ---
-    assert ledger.exists(), "Fire-ledger file was not created."
+    # NOT `assert ledger.exists()`: since #1238 a `pass` is counted into a
+    # fire-counts-* sibling rather than written as a row, so a gate that ran
+    # and passed leaves the events file uncreated. Asserting it exists made
+    # this case fail wherever the gate passes — notably with no `gh` on PATH,
+    # where it returns 0 at impl.py's `shutil.which` guard (#1377). The oracle
+    # is the decision itself, and _ledger_decisions reads both sources.
     decisions = _ledger_decisions(ledger)
 
+    # This is the positive control the module header promises: it fails both
+    # when the gate was skipped and when the gate never ran at all, which is
+    # what oracle 1 (absence of a skip marker) cannot distinguish on its own.
     assert "pre-gh-pr-create-dedup-gate" in decisions, (
-        f"Gate has no fire-ledger record. Recorded hooks: {list(decisions)}"
+        "Gate has no fire-ledger record in either the events file or the "
+        f"`pass` counters — it did not run. Recorded hooks: {list(decisions)}"
     )
     assert decisions["pre-gh-pr-create-dedup-gate"] != "skip", (
         f"Gate must not be 'skip' under full budget, "
