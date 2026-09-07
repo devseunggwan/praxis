@@ -177,9 +177,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Events only Claude Code raises. A registration on one of these must declare
-# `hosts: ["claude"]` — Rule 28 (#1337, #1368). Kept beside the schema's
+# `hosts: ["claude"]` — Rule 28 (#1337, #1368, #1369). Kept beside the schema's
 # `event` enum description, which states the same contract in prose.
-CLAUDE_ONLY_EVENTS = ("PostToolUseFailure", "SubagentStop", "PostToolBatch")
+CLAUDE_ONLY_EVENTS = (
+    "PostToolUseFailure",
+    "SubagentStop",
+    "PostToolBatch",
+    "SubagentStart",
+)
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 _spec = importlib.util.spec_from_file_location(

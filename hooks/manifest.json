@@ -1226,6 +1226,17 @@
       }
     },
     {
+      "name": "delegation-context-inject",
+      "role": "advisory-nudge",
+      "event": "SubagentStart",
+      "hosts": ["claude"],
+      "timeout": 5,
+      "review_by": "2026-12-04",
+      "mode": {
+        "bypass_env": ["PRAXIS_HOOK_BYPASS_DELEGATION_CONTEXT"]
+      }
+    },
+    {
       "name": "completion-verify",
       "role": "completion-verify",
       "body": "impl.sh",
