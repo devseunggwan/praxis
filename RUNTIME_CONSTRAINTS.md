@@ -300,6 +300,63 @@ carrying the `SubagentStop` registrations and check the fire ledger for a
 
 ---
 
+## 8. Hook payload field names diverge from the published reference
+
+**Constraint**: For three events the field names in
+<https://code.claude.com/docs/en/hooks> do not match what the runtime sends.
+Measured 2026-09-07 on Claude Code 2.1.263 by dumping the raw payload from a
+canary hook.
+
+| Event | Reference says | Runtime sends |
+| ------- | ---------------- | --------------- |
+| `PostToolBatch` | array `tools`; entries carry `tool_output` / `error` | array **`tool_calls`**; entries carry `tool_input` / `tool_name` / **`tool_response`** / `tool_use_id` |
+| `ConfigChange` | `config_source`, `changes` | **`source`** (observed value `project_settings`), `file_path`; no `changes` key |
+| `SubagentStart` | includes `task` | **no `task`** — `agent_id`, `agent_type`, `cwd`, `hook_event_name`, `prompt_id`, `session_id`, `transcript_path` |
+
+**Why it bites hooks**: the failure is silent in the worst direction. A hook
+that reads the documented `tools` gets an empty list, finds nothing to object
+to, and exits 0 — indistinguishable from a clean batch. Nothing errors, no
+schema check fires, and the gate looks installed and healthy while enforcing
+nothing. The `SubagentStart` case removes a capability rather than a field: no
+`task` means the delegation prompt is **not** inspectable, so any design of the
+form "read the prompt and warn when it lacks X" cannot be built on this event —
+only unconditional `additionalContext` injection can.
+
+**Workaround**: before adopting an event, dump its real payload and write the
+hook against that. The dump needs no change to user settings — an isolated
+headless session takes its own settings file:
+
+```bash
+claude -p "<something that triggers the event>" --settings /path/to/canary.json
+```
+
+where `canary.json` registers a hook whose command writes stdin to a file.
+Pin the observed field name in the hook with the divergence recorded beside
+it, and add a test case that feeds the *documented* name and asserts the gate
+does **not** fire on it — paired with a control case under the real name that
+does. Without that pair, a later "fix" that switches to the documented name
+looks green.
+
+**Documented**: 2026-09-07 / <https://code.claude.com/docs/en/hooks> vs.
+measured runtime / Issue #1370 — status: **measured live**, canary dumps for
+`PostToolBatch`, `ConfigChange`, `SubagentStart`, plus the negative result
+below.
+
+**Adjacent measurement**: `PreCompact` firing is not evidence that a compaction
+happened. In the canary session it fired once and `PostCompact` — registered in
+the same settings file — fired zero times; the session ended three seconds
+later. A hook that treats `PreCompact` as "a compaction is underway" will act
+on compactions that never occur.
+
+**Adjacent measurement**: `WorktreeCreate` fires for the built-in worktree tool
+and **not** for a Bash `git worktree add`. Positive control: in the same
+session `SessionStart`, `PreToolUse` and `SessionEnd` all fired, and the
+worktree directory the command created exists on disk — so the absence is the
+event's scope, not a dead canary. A gate meant to guard this repo's
+worktree workflow, which uses the Bash form, cannot be built on it.
+
+---
+
 ## Adding a new entry
 
 1. Observe a constraint that is **fixed by the runtime** (not a project
