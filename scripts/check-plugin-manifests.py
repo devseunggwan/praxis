@@ -185,6 +185,57 @@ CLAUDE_ONLY_EVENTS = (
     "PostToolBatch",
     "SubagentStart",
 )
+
+# Every event name the manifest schema allows, longest first. Rule 29 scans
+# INDEX.md's free-form Trigger cell for these, and `PostToolUse` is a prefix of
+# `PostToolUseFailure` — matching the longer name first is what keeps a
+# `PostToolUseFailure` cell from also reporting a bare `PostToolUse`.
+_KNOWN_EVENTS = (
+    "PostToolUseFailure",
+    "PostToolBatch",
+    "SubagentStart",
+    "SubagentStop",
+    "UserPromptSubmit",
+    "SessionStart",
+    "PreToolUse",
+    "PostToolUse",
+    "Stop",
+)
+_INDEX_ROW_RE = re.compile(
+    r"^\|\s*\[[^\]]*\]\(\.\./\.\./hooks/[^/]+/(?P<name>[^/)]+)/spec\.md\)\s*"
+    r"\|(?P<trigger>[^|]*)\|"
+)
+
+
+def _index_trigger_cells(index_md: str) -> dict[str, tuple[str, int]]:
+    """Map hook name -> (Trigger cell text, 1-based line number) for INDEX.md.
+
+    The name is taken from the row's link TARGET, not its label: a row may
+    label itself differently from the directory, and the path is unambiguous.
+    Rows that are not hook links (section headers, the legend) do not match.
+    """
+    rows: dict[str, tuple[str, int]] = {}
+    for line_no, line in enumerate(index_md.splitlines(), start=1):
+        m = _INDEX_ROW_RE.match(line.strip())
+        if m:
+            rows[m.group("name")] = (m.group("trigger"), line_no)
+    return rows
+
+
+def _event_tokens(cell: str) -> set[str]:
+    """Event names named in a Trigger cell.
+
+    Longest-first with the matched text blanked out, so `PostToolUseFailure`
+    is not also read as `PostToolUse`. Everything else in the cell — matchers,
+    wrapper names, issue refs, prose — is ignored by construction.
+    """
+    remaining = cell
+    found: set[str] = set()
+    for event in _KNOWN_EVENTS:
+        if event in remaining:
+            found.add(event)
+            remaining = remaining.replace(event, " " * len(event))
+    return found
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 _spec = importlib.util.spec_from_file_location(
@@ -2500,6 +2551,56 @@ def main() -> int:
                 "absent or wider value writes the hook into the Codex and "
                 "Cursor hooks.json for an event they never raise (#1337)"
             )
+
+    # ------------------------------------------------------------------
+    # Rule 29 — INDEX.md's Trigger cell names the registered events (#1376)
+    #
+    # Rule 7 above asserts only that each hook NAME appears somewhere in
+    # docs/hook/INDEX.md. Every other column is unchecked prose, and the
+    # Trigger cell is not prose: it restates a fact hooks/manifest.json
+    # already holds. #1365 removed a registration and the row went on naming
+    # the removed event; the checker passed and a human grep found it.
+    # docs/hook-operating-matrix.md carries the same fact and cannot drift
+    # because it is generated — INDEX is hand-written, so it needs the rule.
+    #
+    # The cell stays free-form (`PostToolUse(AskUserQuestion)`,
+    # `PreToolUse(Edit) ... + PostToolUse(Read)`, `Stop, SubagentStop`, plus
+    # trailing notes). Only the set of event TOKENS in it is compared, so the
+    # matchers, wrapper names and issue references around them are untouched.
+    #
+    # The hook name comes from the row's link target, not its label: the
+    # label and the name can differ, and the path is unambiguous.
+    # ------------------------------------------------------------------
+    index_path = REPO_ROOT / "docs" / "hook" / "INDEX.md"
+    index_rows = _index_trigger_cells(index_path.read_text())
+    manifest_events: dict[str, set[str]] = {}
+    for entry in manifest["hooks"]:
+        manifest_events.setdefault(entry["name"], set()).add(entry["event"])
+
+    for name, (trigger_cell, line_no) in sorted(index_rows.items()):
+        expected = manifest_events.get(name)
+        if expected is None:
+            # An opt-in hook or a row for something not registered. Rule 15's
+            # stub sweep owns that direction; this rule only grades rows whose
+            # hook the manifest registers.
+            continue
+        cell_events = _event_tokens(trigger_cell)
+        if cell_events == expected:
+            continue
+        absent_events = sorted(expected - cell_events)
+        stray_events = sorted(cell_events - expected)
+        cell_problems: list[str] = []
+        if absent_events:
+            cell_problems.append(f"missing {', '.join(absent_events)}")
+        if stray_events:
+            cell_problems.append(
+                f"names {', '.join(stray_events)} which is not registered"
+            )
+        drifts.append(
+            f"INDEX EVENTS docs/hook/INDEX.md:{line_no} {name!r}: "
+            f"its Trigger cell {'; '.join(cell_problems)} — "
+            f"manifest registers {', '.join(sorted(expected))} (#1376)"
+        )
 
     if drifts:
         print("plugin-manifest check FAILED:")

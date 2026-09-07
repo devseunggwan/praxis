@@ -249,9 +249,11 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
 6. Create `hooks/<role>/<name>/spec.md` (template: any existing spec). Include a
    `Supported hosts:` line matching the `hosts` array in `manifest.json`.
 7. Add the hook under its role in [`docs/hook/INDEX.md`](docs/hook/INDEX.md).
-   The generated [Hook Operating Matrix](docs/hook-operating-matrix.md)
-   picks it up from the manifest on the next build; nothing is added to
-   `ARCHITECTURE.md`.
+   The **Trigger** cell must name the same events the manifest registers —
+   Rule 29 checks it in both directions, so a later registration change has
+   to update this row too. The generated
+   [Hook Operating Matrix](docs/hook-operating-matrix.md) picks it up from
+   the manifest on the next build; nothing is added to `ARCHITECTURE.md`.
 8. Run `./scripts/check-plugin-manifests.py` — it verifies the
    directory↔manifest cross-check, role↔dirname agreement, impl existence,
    Stop ordering, byte-equivalent generated artifacts, and 5+ more
@@ -518,10 +520,12 @@ To regenerate after changing `manifests/*.json` or `VERSION`:
 ```
 
 `check-plugin-manifests.py` also verifies (a) every hook in
-`hooks/manifest.json` appears in `docs/hook/INDEX.md`, and (b) each hook
-spec's `Supported hosts:` line agrees with the `hosts` array in
-`hooks/manifest.json` (`all` = no `hosts` field; explicit list = exact set
-match).
+`hooks/manifest.json` appears in `docs/hook/INDEX.md`, (b) that row's
+**Trigger** cell names exactly the events the manifest registers for it —
+matchers, wrapper names and prose around the event names are not graded
+(Rule 29, issue #1376) — and (c) each hook spec's `Supported hosts:` line
+agrees with the `hosts` array in `hooks/manifest.json` (`all` = no `hosts`
+field; explicit list = exact set match).
 
 ## Commit conventions
 
