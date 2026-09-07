@@ -65,13 +65,14 @@
             ]
           },
           "event": {
-            "description": "Host lifecycle event. PostToolUseFailure and SubagentStop (#1337) and SubagentStart (#1369) are documented for Claude Code only — a registration on any of them carries hosts: [\"claude\"]. SubagentStart carries no matcher in this repo (the contract it injects is agent-type independent). PostToolUseFailure is a per-hook event, so the dispatch_groups enum above does not list it; SubagentStop shares Stop's decision format and does have a group.",
+            "description": "Host lifecycle event. PostToolUseFailure and SubagentStop (#1337), PostToolBatch (#1368) and SubagentStart (#1369) are documented for Claude Code only — a registration on any of them carries hosts: [\"claude\"]. PostToolUseFailure, PostToolBatch and SubagentStart are per-hook events, so the dispatch_groups enum above does not list them; SubagentStop shares Stop's decision format and does have a group. PostToolBatch fires once per resolved parallel batch rather than per tool, and SubagentStart injects an agent-type independent contract, so neither carries a matcher.",
             "enum": [
               "SessionStart",
               "UserPromptSubmit",
               "PreToolUse",
               "PostToolUse",
               "PostToolUseFailure",
+              "PostToolBatch",
               "SubagentStart",
               "Stop",
               "SubagentStop"
